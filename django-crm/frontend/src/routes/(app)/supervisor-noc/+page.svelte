@@ -274,741 +274,757 @@
 </svelte:head>
 
 <div class="snoc">
-  <div class="snoc-lienzo">
-    {#if !data.puedeVer}
-      <section class="snoc-panel">
-        <div class="snoc-fila">
-          <span class="snoc-icono snoc-error-txt" style="font-size:28px;">lock</span>
-          <div class="snoc-pila-xs">
-            <h1 class="snoc-h2">Supervisor NOC IA</h1>
-            <p class="snoc-body snoc-secundario">
-              Solo el Jefe de Operaciones (o un ADMIN/SUPERVISOR) puede ver y revisar las propuestas. Tu rol es
-              <strong class="snoc-mono">{data.rol ?? 'sin rol'}</strong>.
-            </p>
-          </div>
-        </div>
-      </section>
-    {:else}
-      <!-- ============ CABECERA ============ -->
-      <header class="snoc-fila-sep" style="flex-wrap:wrap; padding-bottom:var(--snoc-sm);">
-        <div class="snoc-fila">
-          <div class="snoc-marca-grande">
-            <span class="snoc-icono" style="font-size:28px;">psychology</span>
-          </div>
-          <div class="snoc-pila-xs">
-            <div class="snoc-fila">
-              <h1 class="snoc-h1">Supervisor NOC IA</h1>
-              <span class="snoc-insignia snoc-insignia-neutra snoc-primario">Shadow Mode</span>
-            </div>
-            <p class="snoc-body snoc-secundario">
-              Observa la operación, la analiza y propone. La decisión es humana.
-            </p>
-          </div>
-        </div>
+  <!--
+    v2-scroll NO ES DECORACION: es el unico contenedor que hace scroll.
 
-        <div class="snoc-fila" style="gap:var(--snoc-sm);">
-          <span
-            class="snoc-mono-sm snoc-tenue"
-            title="Derivado de la propuesta más reciente: el backend no registra cuándo corrió el ciclo."
-          >
-            Última propuesta: {ultimaPropuesta ? fecha(ultimaPropuesta) : 'ninguna todavía'}
-          </span>
-          <button
-            class="snoc-btn snoc-btn-primario"
-            type="button"
-            onclick={() => (modalCiclo = true)}
-            disabled={corriendo}
-          >
-            <span class="snoc-icono" style="font-size:14px;">refresh</span>
-            <span>{corriendo ? 'Analizando…' : 'Ejecutar ciclo'}</span>
-          </button>
-        </div>
+    El shell de (app) es `height:100vh; overflow:hidden` y `.v2-main`
+    tambien recorta (lib/v2/styles/v2.css). Sin esta envoltura la pantalla
+    se ve entera solo si cabe: todo lo que pasa del alto de la ventana
+    queda recortado y no hay forma de llegar a lo de abajo.
 
-        <div class="snoc-envuelve snoc-pestanas" style="width:100%; order:3;">
-          <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc">Hallazgos y propuestas</a>
-          <a class="snoc-pildora" href="/supervisor-noc/programacion">Programación</a>
-        </div>
-      </header>
-
-      <!--
-        ============ ESTADO DEL MOTOR ============
-        Una sola línea. Antes esto eran cuatro tarjetas, un banner y una barra
-        de controles diciendo lo mismo: «la IA no ejecuta» aparecía cuatro
-        veces antes del primer dato. La garantía nunca fue el mensaje repetido
-        -- es que en este archivo no existe ninguna acción que ejecute algo.
-      -->
-      <section class="snoc-tarjeta" style="padding:var(--snoc-sm) var(--snoc-md);">
-        <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
-          <div class="snoc-fila" style="gap:var(--snoc-xs);">
-            <span class="snoc-icono snoc-primario" style="font-size:18px;">visibility</span>
-            <span class="snoc-body-sm">Modo observación · <strong>analiza y propone, no ejecuta</strong></span>
-          </div>
-          <div class="snoc-envuelve">
-            <span class="snoc-insignia snoc-insignia-neutra" title="Interruptor del motor, en solo lectura">
-              Autonomía:
-              {#if data.autonomia.estado == null}
-                <span class="snoc-tenue">no se pudo leer</span>
-              {:else}
-                <span
-                  class="snoc-punto {data.autonomia.permitido ? 'snoc-punto-secundario' : 'snoc-punto-error'}"
-                ></span>
-                {data.autonomia.estado}
-              {/if}
-            </span>
-            <span class="snoc-insignia snoc-insignia-neutra">Acciones ejecutadas: 0</span>
-            {#if fueraDeAlcance > 0}
-              <span class="snoc-insignia snoc-insignia-error" title="Por encima del alcance de esta etapa">
-                {fueraDeAlcance} fuera de alcance
-              </span>
-            {/if}
-          </div>
-        </div>
-      </section>
-
-      <!-- ============ LOS SEIS KPI ============ -->
-      {#if data.errorIndicadores}
-        <div class="snoc-aviso">
-          <span class="snoc-icono snoc-error-txt" style="font-size:20px;">error</span>
-          <p class="snoc-body" style="margin:0;">{data.errorIndicadores.mensaje}</p>
-        </div>
-      {/if}
-
-      <section class="snoc-rejilla snoc-rejilla-2 snoc-rejilla-6">
-        {#each kpis as k (k.clave)}
-          <div class="snoc-kpi snoc-tono-{k.tono}">
-            <div class="snoc-kpi-icono">
-              <span class="snoc-icono" style="font-size:15px;">{ICONO_KPI[k.clave]}</span>
-            </div>
-            {#if k.n == null}
-              <!--
-                Un hueco, no un cero: el backend no entregó el indicador, y
-                escribir «0» aquí afirmaría que no hay ninguno.
-              -->
-              <span class="snoc-kpi-n snoc-sin-dato" style="font-size:1rem;">Sin dato</span>
-            {:else}
-              <span class="snoc-kpi-n">{k.n}</span>
-            {/if}
-            <span class="snoc-kpi-titulo">{k.titulo}</span>
-            <span class="snoc-kpi-sub">{k.sub}</span>
-          </div>
-        {/each}
-      </section>
-
-      <!-- ============ LOS CUATRO GRÁFICOS ============ -->
-      <section class="snoc-rejilla snoc-rejilla-2 snoc-rejilla-4">
-        <!-- 1 · Hallazgos por tipo -->
-        <div class="snoc-grafico">
-          <h2 class="snoc-grafico-titulo">
-            <span class="snoc-icono snoc-primario" style="font-size:15px;">donut_small</span>
-            Hallazgos por tipo
-          </h2>
-          {#if donut.disponible}
-            <div class="snoc-grafico-cuerpo">
-              <div class="snoc-donut-centro">
-                <svg
-                  class="snoc-donut"
-                  viewBox="0 0 40 40"
-                  width="110"
-                  height="110"
-                  role="img"
-                  aria-label="Reparto de las {donut.total} propuestas por tipo de señal"
-                >
-                  {#each donut.tramos as t (t.clave)}
-                    <circle
-                      cx="20"
-                      cy="20"
-                      r="15.9155"
-                      fill="none"
-                      stroke={t.color}
-                      stroke-width="5"
-                      stroke-dasharray={t.dash}
-                      stroke-dashoffset={t.offset}
-                    ></circle>
-                  {/each}
-                </svg>
-                <span class="snoc-donut-cifra">{donut.total}</span>
-              </div>
-              <div class="snoc-leyenda">
-                {#each donut.tramos as t (t.clave)}
-                  <div class="snoc-leyenda-fila" title="{t.etiqueta}: {t.n}">
-                    <span class="snoc-leyenda-punto" style="background:{t.color};"></span>
-                    <span class="snoc-leyenda-txt">{t.etiqueta}</span>
-                    <span class="snoc-leyenda-n">{t.n}</span>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {:else}
-            <div class="snoc-hueco">
-              {#if data.hallazgos.error}
-                <span class="snoc-hueco-rotulo">Sin dato</span>
-                <p class="snoc-hueco-motivo">{data.hallazgos.error.mensaje}</p>
-              {:else}
-                <span class="snoc-hueco-rotulo">Sin propuestas</span>
-                <p class="snoc-hueco-motivo">
-                  Corré un ciclo de análisis para que el Supervisor revise la operación.
-                </p>
-              {/if}
-            </div>
-          {/if}
-        </div>
-
-        <!-- 2 · Estado de casos técnicos -->
-        <div class="snoc-grafico">
-          <h2 class="snoc-grafico-titulo">
-            <span class="snoc-icono snoc-primario" style="font-size:15px;">bar_chart</span>
-            Estado de casos técnicos
-          </h2>
-          {#if barras.disponible}
-            <div class="snoc-barras">
-              {#each barras.barras as b (b.estado)}
-                <div class="snoc-barra-col" title="{b.estado}: {b.n}">
-                  <span class="snoc-barra-n">{b.n}</span>
-                  <div class="snoc-barra" style="height:{b.alto}%;"></div>
-                  <span class="snoc-barra-txt">{b.estado}</span>
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <div class="snoc-hueco">
-              <span class="snoc-hueco-rotulo">Sin dato</span>
-              <p class="snoc-hueco-motivo">El reparto de casos por estado no llegó en esta consulta.</p>
-            </div>
-          {/if}
-        </div>
-
-        <!--
-          3 · Tickets por origen
-          Sale de `casos.por_origen`, que agrupa por `Case.external_provider`:
-          'wisphub' cuando el caso espeja un ticket del proveedor, 'dexter'
-          cuando nació en el CRM. Son las dos categorías que el campo
-          distingue; no se derivan otras.
-        -->
-        <div class="snoc-grafico">
-          <h2 class="snoc-grafico-titulo">
-            <span class="snoc-icono snoc-primario" style="font-size:15px;">hub</span>
-            Tickets por origen
-          </h2>
-          {#if origen.disponible}
-            <div class="snoc-grafico-cuerpo">
-              <div class="snoc-donut-centro">
-                <svg
-                  class="snoc-donut"
-                  viewBox="0 0 40 40"
-                  width="110"
-                  height="110"
-                  role="img"
-                  aria-label="Reparto de los {origen.total} casos por sistema de origen"
-                >
-                  {#each origen.tramos as t (t.clave)}
-                    <circle
-                      cx="20"
-                      cy="20"
-                      r="15.9155"
-                      fill="none"
-                      stroke={t.color}
-                      stroke-width="5"
-                      stroke-dasharray={t.dash}
-                      stroke-dashoffset={t.offset}
-                    ></circle>
-                  {/each}
-                </svg>
-                <span class="snoc-donut-cifra">{origen.total}</span>
-              </div>
-              <div class="snoc-leyenda">
-                {#each origen.tramos as t (t.clave)}
-                  <div class="snoc-leyenda-fila" title="{t.etiqueta}: {t.n}">
-                    <span class="snoc-leyenda-punto" style="background:{t.color};"></span>
-                    <span class="snoc-leyenda-txt">{t.etiqueta}</span>
-                    <span class="snoc-leyenda-n">{t.n}</span>
-                    <span class="snoc-tenue">{t.pct}%</span>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {:else}
-            <div class="snoc-hueco">
-              <span class="snoc-hueco-rotulo">Sin dato</span>
-              <p class="snoc-hueco-motivo">
-                Ningún caso trae sistema de origen en esta consulta.
+    Es el mismo fallo que settings/guias-tv dejo escrito el 10/09/2026, y
+    volvio a pasar por la misma razon: la pantalla trae su propio CSS y se
+    ve completa sin el mientras el contenido quepa. Los dos modales quedan
+    FUERA -- son position:fixed y cubren la ventana, no el contenido
+    desplazado.
+  -->
+  <div class="v2-scroll">
+    <div class="snoc-lienzo">
+      {#if !data.puedeVer}
+        <section class="snoc-panel">
+          <div class="snoc-fila">
+            <span class="snoc-icono snoc-error-txt" style="font-size:28px;">lock</span>
+            <div class="snoc-pila-xs">
+              <h1 class="snoc-h2">Supervisor NOC IA</h1>
+              <p class="snoc-body snoc-secundario">
+                Solo el Jefe de Operaciones (o un ADMIN/SUPERVISOR) puede ver y revisar las propuestas. Tu rol es
+                <strong class="snoc-mono">{data.rol ?? 'sin rol'}</strong>.
               </p>
             </div>
-          {/if}
-        </div>
-
-        <!-- 4 · Mapa de operación · LAS COORDENADAS ESTAN EN LA ORDEN, NO EN LA PROPUESTA -->
-        <div class="snoc-grafico">
-          <h2 class="snoc-grafico-titulo">
-            <span class="snoc-icono snoc-tenue" style="font-size:15px;">map</span>
-            {SIN_DATO.mapa.titulo}
-          </h2>
-          <div class="snoc-hueco">
-            <span class="snoc-hueco-rotulo">Falta en el backend</span>
-            <p class="snoc-hueco-motivo">{SIN_DATO.mapa.motivo}</p>
           </div>
-        </div>
-      </section>
-
-      <!-- ============ HALLAZGOS RECIENTES ============ -->
-      <section class="snoc-panel" id="hallazgos">
-        <div class="snoc-fila-sep" style="flex-wrap:wrap;">
-          <div class="snoc-fila" style="gap:var(--snoc-xs);">
-            <span class="snoc-icono snoc-primario" style="font-size:20px;">format_list_bulleted</span>
-            <h2 class="snoc-h3">Hallazgos recientes</h2>
-            {#if data.hallazgos.error}
-              <span class="snoc-insignia snoc-insignia-error">sin datos</span>
-            {:else}
-              <span class="snoc-insignia snoc-insignia-neutra">{data.hallazgos.count} registrados</span>
-            {/if}
+        </section>
+      {:else}
+        <!-- ============ CABECERA ============ -->
+        <header class="snoc-fila-sep" style="flex-wrap:wrap; padding-bottom:var(--snoc-sm);">
+          <div class="snoc-fila">
+            <div class="snoc-marca-grande">
+              <span class="snoc-icono" style="font-size:28px;">psychology</span>
+            </div>
+            <div class="snoc-pila-xs">
+              <div class="snoc-fila">
+                <h1 class="snoc-h1">Supervisor NOC IA</h1>
+                <span class="snoc-insignia snoc-insignia-neutra snoc-primario">Shadow Mode</span>
+              </div>
+              <p class="snoc-body snoc-secundario">
+                Observa la operación, la analiza y propone. La decisión es humana.
+              </p>
+            </div>
           </div>
-          <span class="snoc-mono-sm snoc-tenue">Cada fila es una propuesta con su evidencia</span>
-        </div>
 
-        {#if !data.hallazgos.error && propuestas.length > 0}
-          <div class="snoc-envuelve" style="padding-bottom:var(--snoc-xs);">
-            <button
-              class="snoc-pildora {filtro ? '' : 'snoc-pildora-activa'}"
-              type="button"
-              onclick={() => (filtro = null)}
+          <div class="snoc-fila" style="gap:var(--snoc-sm);">
+            <span
+              class="snoc-mono-sm snoc-tenue"
+              title="Derivado de la propuesta más reciente: el backend no registra cuándo corrió el ciclo."
             >
-              Todos ({propuestas.length})
+              Última propuesta: {ultimaPropuesta ? fecha(ultimaPropuesta) : 'ninguna todavía'}
+            </span>
+            <button
+              class="snoc-btn snoc-btn-primario"
+              type="button"
+              onclick={() => (modalCiclo = true)}
+              disabled={corriendo}
+            >
+              <span class="snoc-icono" style="font-size:14px;">refresh</span>
+              <span>{corriendo ? 'Analizando…' : 'Ejecutar ciclo'}</span>
             </button>
-            {#each porSenal as [clave, info] (clave)}
-              <button
-                class="snoc-pildora {filtro === clave ? 'snoc-pildora-activa' : ''}"
-                type="button"
-                onclick={() => (filtro = clave)}
-                title={clave}
-              >
-                {info.etiqueta} ({info.n})
-              </button>
-            {/each}
           </div>
-        {/if}
 
-        {#if data.hallazgos.error}
-          <div class="snoc-aviso">
-            <span class="snoc-icono snoc-error-txt" style="font-size:18px;">error</span>
-            <span class="snoc-body">{data.hallazgos.error.mensaje}</span>
+          <div class="snoc-envuelve snoc-pestanas" style="width:100%; order:3;">
+            <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc">Hallazgos y propuestas</a>
+            <a class="snoc-pildora" href="/supervisor-noc/programacion">Programación</a>
           </div>
-        {:else if propuestas.length === 0}
-          <p class="snoc-body snoc-secundario">
-            No hay propuestas registradas. Corré un ciclo de análisis para que el Supervisor revise la operación.
-          </p>
-        {:else if visibles.length === 0}
-          <p class="snoc-body snoc-secundario">
-            Ninguna propuesta de ese tipo.
-            <button class="snoc-enlace" type="button" onclick={() => (filtro = null)}>Ver todas</button>
-          </p>
-        {:else}
-          <div class="snoc-tabla-caja">
-            <table class="snoc-tabla">
-              <thead>
-                <tr>
-                  <th>Prioridad</th>
-                  <th>Hallazgo</th>
-                  <th>Caso / Ticket</th>
-                  <th>Origen</th>
-                  <!--
-                    Técnico y zona llegan resueltos por el backend desde
-                    `campo.AsignacionTrabajo` y `ProgramacionOrden`.
-
-                    EL TECNICO ES LA ASIGNACION PRINCIPAL, no
-                    `responsable_sugerido`. Ese campo es a quien la IA propone;
-                    ponerlo en esta columna diría que alguien ya tiene la orden
-                    cuando puede no tenerla.
-                  -->
-                  <th>Técnico</th>
-                  <th>Zona</th>
-                  <th>Estado</th>
-                  <th>SLA</th>
-                  <th>Detectado</th>
-                  <th class="snoc-derecha">Acción</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each visibles as p (p.id)}
-                  {@const sla = celdaDeSla(p.sla_estado, p.sla_minutos)}
-                  <tr class={abierta === p.id ? 'snoc-fila-activa' : ''}>
-                    <td><span class="snoc-insignia {tonoPrioridad(p.prioridad)}">{p.prioridad}</span></td>
-                    <td class="snoc-label">{p.tipo_senal_display}</td>
-                    <td>
-                      <!--
-                        El número que sirve para buscar en el otro sistema. La
-                        orden trae consecutivo interno; el caso, el ticket del
-                        proveedor. Sin ninguno de los dos queda el id corto, que
-                        es lo que hay -- no un número fabricado.
-                      -->
-                      {#if p.orden_numero != null}
-                        <span class="snoc-id">OT-{p.orden_numero}</span>
-                      {:else if p.ticket_externo}
-                        <span class="snoc-id">{p.ticket_externo}</span>
-                        {#if p.proveedor_externo}
-                          <div class="snoc-mono-sm snoc-tenue">{p.proveedor_externo}</div>
-                        {/if}
-                      {:else}
-                        <span class="snoc-mono-sm snoc-tenue" title={p.origen_id}>
-                          {String(p.origen_id).slice(0, 8)}
-                        </span>
-                      {/if}
-                      <div class="snoc-body-sm snoc-recorte" title={p.accion_propuesta}>
-                        {p.accion_propuesta}
-                      </div>
-                    </td>
-                    <td><span class="snoc-id">{p.origen_tipo}</span></td>
-                    <td class={p.tecnico ? 'snoc-body-sm' : 'snoc-celda-ausente'}>
-                      {p.tecnico || 'Sin asignar'}
-                    </td>
-                    <td class={p.zona ? 'snoc-body-sm' : 'snoc-celda-ausente'}>{p.zona || '—'}</td>
-                    <td>
-                      <span class="snoc-insignia {estadoDe(p.estado).clase}">{estadoDe(p.estado).texto}</span>
-                      {#if p.dentro_del_alcance === false}
-                        <span
-                          class="snoc-insignia snoc-insignia-error"
-                          title="Nivel {p.nivel_autonomia_requerido}: por encima del alcance de la etapa"
-                        >
-                          fuera
-                        </span>
-                      {/if}
-                    </td>
-                    <td>
-                      <span class="snoc-insignia snoc-sla-{sla.tono}" title={sla.detalle}>{sla.texto}</span>
-                    </td>
-                    <td class="snoc-mono-sm snoc-tenue" title="Expira el {fechaCorta(p.expira_en)}">
-                      {fechaCorta(p.created_at)}
-                    </td>
-                    <td class="snoc-derecha">
-                      <button
-                        class="snoc-pildora {abierta === p.id ? 'snoc-pildora-activa' : ''}"
-                        type="button"
-                        onclick={() => abrirDetalle(p.id)}
-                      >
-                        Ver detalle
-                      </button>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-          <span class="snoc-mono-sm snoc-tenue">
-            «Sin asignar» significa que la orden no tiene responsable principal marcado, no que falte el dato.
-          </span>
-        {/if}
-      </section>
-
-      <!-- ============ LOS TRES BLOQUES DE ABAJO ============ -->
-      <section class="snoc-rejilla snoc-rejilla-2 snoc-rejilla-3">
-        <!-- Técnicos · carga operativa -->
-        <div class="snoc-grafico" id="tecnicos">
-          <div class="snoc-fila-sep">
-            <h2 class="snoc-grafico-titulo">
-              <span class="snoc-icono snoc-primario" style="font-size:15px;">engineering</span>
-              Técnicos · carga operativa
-            </h2>
-            <a class="snoc-pildora" href="/supervisor-noc/programacion">Ver todos</a>
-          </div>
-          {#if data.capacidad.error}
-            <div class="snoc-hueco">
-              <span class="snoc-hueco-rotulo">Sin dato</span>
-              <p class="snoc-hueco-motivo">{data.capacidad.error.mensaje}</p>
-            </div>
-          {:else if !tecnicos.disponible}
-            <div class="snoc-hueco">
-              <span class="snoc-hueco-rotulo">Nadie con jornada</span>
-              <p class="snoc-hueco-motivo">
-                Ninguna persona tiene jornada registrada para el {fechaCorta(data.dia)}.
-              </p>
-            </div>
-          {:else}
-            <div class="snoc-desplazable">
-              {#each tecnicos.filas as t (t.id)}
-                <div class="snoc-tecnico">
-                  <div class="snoc-tecnico-cabeza">
-                    <span class="snoc-tecnico-nombre">{t.nombre}</span>
-                    <span class="snoc-mono-sm {t.tono === 'critico' ? 'snoc-error-txt' : 'snoc-tenue'}">
-                      {t.pct == null ? t.estado : `${t.pct}% · ${t.estado}`}
-                    </span>
-                  </div>
-                  <div class="snoc-riel">
-                    <div class="snoc-riel-relleno snoc-riel-{t.tono}" style="width:{t.ancho}%;"></div>
-                  </div>
-                  {#if t.faltantes > 0}
-                    <span class="snoc-mono-sm snoc-tenue">
-                      {t.faltantes} orden{t.faltantes === 1 ? '' : 'es'} sin duración: la carga real puede ser mayor
-                    </span>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
-
-        <!-- Órdenes de trabajo -->
-        <div class="snoc-grafico" id="programacion">
-          <div class="snoc-fila-sep">
-            <h2 class="snoc-grafico-titulo">
-              <span class="snoc-icono snoc-primario" style="font-size:15px;">assignment</span>
-              Órdenes de trabajo
-            </h2>
-            <a class="snoc-pildora" href="/supervisor-noc/programacion">Ver programación</a>
-          </div>
-          {#if ordenes.disponible}
-            <div class="snoc-desplazable">
-              {#each ordenes.filas as f (f.clave)}
-                <div class="snoc-fila-orden">
-                  <span>{f.texto}</span>
-                  <span class="snoc-fila-orden-n {f.tono === 'alerta' ? 'snoc-error-txt' : ''}">{f.n}</span>
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <div class="snoc-hueco">
-              <span class="snoc-hueco-rotulo">Sin dato</span>
-              <p class="snoc-hueco-motivo">Los indicadores de programación no llegaron en esta consulta.</p>
-            </div>
-          {/if}
-        </div>
+        </header>
 
         <!--
-          Actividad reciente del Supervisor
-          De `common.Activity`, acotada a las entidades de este módulo. Un
-          renglón sin usuario lo escribió la IA, y el backend lo marca con
-          `es_ia`: no se deduce del texto.
+          ============ ESTADO DEL MOTOR ============
+          Una sola línea. Antes esto eran cuatro tarjetas, un banner y una barra
+          de controles diciendo lo mismo: «la IA no ejecuta» aparecía cuatro
+          veces antes del primer dato. La garantía nunca fue el mensaje repetido
+          -- es que en este archivo no existe ninguna acción que ejecute algo.
         -->
-        <div class="snoc-grafico">
-          <h2 class="snoc-grafico-titulo">
-            <span class="snoc-icono snoc-primario" style="font-size:15px;">history</span>
-            Actividad reciente del Supervisor
-          </h2>
-          {#if data.actividad.error}
-            <div class="snoc-hueco">
-              <span class="snoc-hueco-rotulo">Sin dato</span>
-              <p class="snoc-hueco-motivo">{data.actividad.error.mensaje}</p>
+        <section class="snoc-tarjeta" style="padding:var(--snoc-sm) var(--snoc-md);">
+          <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+            <div class="snoc-fila" style="gap:var(--snoc-xs);">
+              <span class="snoc-icono snoc-primario" style="font-size:18px;">visibility</span>
+              <span class="snoc-body-sm">Modo observación · <strong>analiza y propone, no ejecuta</strong></span>
             </div>
-          {:else if !actividad.disponible}
-            <div class="snoc-hueco">
-              <span class="snoc-hueco-rotulo">Sin actividad</span>
-              <p class="snoc-hueco-motivo">
-                Todavía no hay hechos registrados en este módulo.
-              </p>
+            <div class="snoc-envuelve">
+              <span class="snoc-insignia snoc-insignia-neutra" title="Interruptor del motor, en solo lectura">
+                Autonomía:
+                {#if data.autonomia.estado == null}
+                  <span class="snoc-tenue">no se pudo leer</span>
+                {:else}
+                  <span
+                    class="snoc-punto {data.autonomia.permitido ? 'snoc-punto-secundario' : 'snoc-punto-error'}"
+                  ></span>
+                  {data.autonomia.estado}
+                {/if}
+              </span>
+              <span class="snoc-insignia snoc-insignia-neutra">Acciones ejecutadas: 0</span>
+              {#if fueraDeAlcance > 0}
+                <span class="snoc-insignia snoc-insignia-error" title="Por encima del alcance de esta etapa">
+                  {fueraDeAlcance} fuera de alcance
+                </span>
+              {/if}
             </div>
+          </div>
+        </section>
+
+        <!-- ============ LOS SEIS KPI ============ -->
+        {#if data.errorIndicadores}
+          <div class="snoc-aviso">
+            <span class="snoc-icono snoc-error-txt" style="font-size:20px;">error</span>
+            <p class="snoc-body" style="margin:0;">{data.errorIndicadores.mensaje}</p>
+          </div>
+        {/if}
+
+        <section class="snoc-rejilla snoc-rejilla-2 snoc-rejilla-6">
+          {#each kpis as k (k.clave)}
+            <div class="snoc-kpi snoc-tono-{k.tono}">
+              <div class="snoc-kpi-icono">
+                <span class="snoc-icono" style="font-size:15px;">{ICONO_KPI[k.clave]}</span>
+              </div>
+              {#if k.n == null}
+                <!--
+                  Un hueco, no un cero: el backend no entregó el indicador, y
+                  escribir «0» aquí afirmaría que no hay ninguno.
+                -->
+                <span class="snoc-kpi-n snoc-sin-dato" style="font-size:1rem;">Sin dato</span>
+              {:else}
+                <span class="snoc-kpi-n">{k.n}</span>
+              {/if}
+              <span class="snoc-kpi-titulo">{k.titulo}</span>
+              <span class="snoc-kpi-sub">{k.sub}</span>
+            </div>
+          {/each}
+        </section>
+
+        <!-- ============ LOS CUATRO GRÁFICOS ============ -->
+        <section class="snoc-rejilla snoc-rejilla-2 snoc-rejilla-4">
+          <!-- 1 · Hallazgos por tipo -->
+          <div class="snoc-grafico">
+            <h2 class="snoc-grafico-titulo">
+              <span class="snoc-icono snoc-primario" style="font-size:15px;">donut_small</span>
+              Hallazgos por tipo
+            </h2>
+            {#if donut.disponible}
+              <div class="snoc-grafico-cuerpo">
+                <div class="snoc-donut-centro">
+                  <svg
+                    class="snoc-donut"
+                    viewBox="0 0 40 40"
+                    width="110"
+                    height="110"
+                    role="img"
+                    aria-label="Reparto de las {donut.total} propuestas por tipo de señal"
+                  >
+                    {#each donut.tramos as t (t.clave)}
+                      <circle
+                        cx="20"
+                        cy="20"
+                        r="15.9155"
+                        fill="none"
+                        stroke={t.color}
+                        stroke-width="5"
+                        stroke-dasharray={t.dash}
+                        stroke-dashoffset={t.offset}
+                      ></circle>
+                    {/each}
+                  </svg>
+                  <span class="snoc-donut-cifra">{donut.total}</span>
+                </div>
+                <div class="snoc-leyenda">
+                  {#each donut.tramos as t (t.clave)}
+                    <div class="snoc-leyenda-fila" title="{t.etiqueta}: {t.n}">
+                      <span class="snoc-leyenda-punto" style="background:{t.color};"></span>
+                      <span class="snoc-leyenda-txt">{t.etiqueta}</span>
+                      <span class="snoc-leyenda-n">{t.n}</span>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {:else}
+              <div class="snoc-hueco">
+                {#if data.hallazgos.error}
+                  <span class="snoc-hueco-rotulo">Sin dato</span>
+                  <p class="snoc-hueco-motivo">{data.hallazgos.error.mensaje}</p>
+                {:else}
+                  <span class="snoc-hueco-rotulo">Sin propuestas</span>
+                  <p class="snoc-hueco-motivo">
+                    Corré un ciclo de análisis para que el Supervisor revise la operación.
+                  </p>
+                {/if}
+              </div>
+            {/if}
+          </div>
+
+          <!-- 2 · Estado de casos técnicos -->
+          <div class="snoc-grafico">
+            <h2 class="snoc-grafico-titulo">
+              <span class="snoc-icono snoc-primario" style="font-size:15px;">bar_chart</span>
+              Estado de casos técnicos
+            </h2>
+            {#if barras.disponible}
+              <div class="snoc-barras">
+                {#each barras.barras as b (b.estado)}
+                  <div class="snoc-barra-col" title="{b.estado}: {b.n}">
+                    <span class="snoc-barra-n">{b.n}</span>
+                    <div class="snoc-barra" style="height:{b.alto}%;"></div>
+                    <span class="snoc-barra-txt">{b.estado}</span>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <div class="snoc-hueco">
+                <span class="snoc-hueco-rotulo">Sin dato</span>
+                <p class="snoc-hueco-motivo">El reparto de casos por estado no llegó en esta consulta.</p>
+              </div>
+            {/if}
+          </div>
+
+          <!--
+            3 · Tickets por origen
+            Sale de `casos.por_origen`, que agrupa por `Case.external_provider`:
+            'wisphub' cuando el caso espeja un ticket del proveedor, 'dexter'
+            cuando nació en el CRM. Son las dos categorías que el campo
+            distingue; no se derivan otras.
+          -->
+          <div class="snoc-grafico">
+            <h2 class="snoc-grafico-titulo">
+              <span class="snoc-icono snoc-primario" style="font-size:15px;">hub</span>
+              Tickets por origen
+            </h2>
+            {#if origen.disponible}
+              <div class="snoc-grafico-cuerpo">
+                <div class="snoc-donut-centro">
+                  <svg
+                    class="snoc-donut"
+                    viewBox="0 0 40 40"
+                    width="110"
+                    height="110"
+                    role="img"
+                    aria-label="Reparto de los {origen.total} casos por sistema de origen"
+                  >
+                    {#each origen.tramos as t (t.clave)}
+                      <circle
+                        cx="20"
+                        cy="20"
+                        r="15.9155"
+                        fill="none"
+                        stroke={t.color}
+                        stroke-width="5"
+                        stroke-dasharray={t.dash}
+                        stroke-dashoffset={t.offset}
+                      ></circle>
+                    {/each}
+                  </svg>
+                  <span class="snoc-donut-cifra">{origen.total}</span>
+                </div>
+                <div class="snoc-leyenda">
+                  {#each origen.tramos as t (t.clave)}
+                    <div class="snoc-leyenda-fila" title="{t.etiqueta}: {t.n}">
+                      <span class="snoc-leyenda-punto" style="background:{t.color};"></span>
+                      <span class="snoc-leyenda-txt">{t.etiqueta}</span>
+                      <span class="snoc-leyenda-n">{t.n}</span>
+                      <span class="snoc-tenue">{t.pct}%</span>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {:else}
+              <div class="snoc-hueco">
+                <span class="snoc-hueco-rotulo">Sin dato</span>
+                <p class="snoc-hueco-motivo">
+                  Ningún caso trae sistema de origen en esta consulta.
+                </p>
+              </div>
+            {/if}
+          </div>
+
+          <!-- 4 · Mapa de operación · LAS COORDENADAS ESTAN EN LA ORDEN, NO EN LA PROPUESTA -->
+          <div class="snoc-grafico">
+            <h2 class="snoc-grafico-titulo">
+              <span class="snoc-icono snoc-tenue" style="font-size:15px;">map</span>
+              {SIN_DATO.mapa.titulo}
+            </h2>
+            <div class="snoc-hueco">
+              <span class="snoc-hueco-rotulo">Falta en el backend</span>
+              <p class="snoc-hueco-motivo">{SIN_DATO.mapa.motivo}</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ HALLAZGOS RECIENTES ============ -->
+        <section class="snoc-panel" id="hallazgos">
+          <div class="snoc-fila-sep" style="flex-wrap:wrap;">
+            <div class="snoc-fila" style="gap:var(--snoc-xs);">
+              <span class="snoc-icono snoc-primario" style="font-size:20px;">format_list_bulleted</span>
+              <h2 class="snoc-h3">Hallazgos recientes</h2>
+              {#if data.hallazgos.error}
+                <span class="snoc-insignia snoc-insignia-error">sin datos</span>
+              {:else}
+                <span class="snoc-insignia snoc-insignia-neutra">{data.hallazgos.count} registrados</span>
+              {/if}
+            </div>
+            <span class="snoc-mono-sm snoc-tenue">Cada fila es una propuesta con su evidencia</span>
+          </div>
+
+          {#if !data.hallazgos.error && propuestas.length > 0}
+            <div class="snoc-envuelve" style="padding-bottom:var(--snoc-xs);">
+              <button
+                class="snoc-pildora {filtro ? '' : 'snoc-pildora-activa'}"
+                type="button"
+                onclick={() => (filtro = null)}
+              >
+                Todos ({propuestas.length})
+              </button>
+              {#each porSenal as [clave, info] (clave)}
+                <button
+                  class="snoc-pildora {filtro === clave ? 'snoc-pildora-activa' : ''}"
+                  type="button"
+                  onclick={() => (filtro = clave)}
+                  title={clave}
+                >
+                  {info.etiqueta} ({info.n})
+                </button>
+              {/each}
+            </div>
+          {/if}
+
+          {#if data.hallazgos.error}
+            <div class="snoc-aviso">
+              <span class="snoc-icono snoc-error-txt" style="font-size:18px;">error</span>
+              <span class="snoc-body">{data.hallazgos.error.mensaje}</span>
+            </div>
+          {:else if propuestas.length === 0}
+            <p class="snoc-body snoc-secundario">
+              No hay propuestas registradas. Corré un ciclo de análisis para que el Supervisor revise la operación.
+            </p>
+          {:else if visibles.length === 0}
+            <p class="snoc-body snoc-secundario">
+              Ninguna propuesta de ese tipo.
+              <button class="snoc-enlace" type="button" onclick={() => (filtro = null)}>Ver todas</button>
+            </p>
           {:else}
-            <div class="snoc-tabla-caja snoc-desplazable">
+            <div class="snoc-tabla-caja">
               <table class="snoc-tabla">
                 <thead>
-                  <tr><th>Hora</th><th>Evento</th><th>Detalle</th></tr>
+                  <tr>
+                    <th>Prioridad</th>
+                    <th>Hallazgo</th>
+                    <th>Caso / Ticket</th>
+                    <th>Origen</th>
+                    <!--
+                      Técnico y zona llegan resueltos por el backend desde
+                      `campo.AsignacionTrabajo` y `ProgramacionOrden`.
+
+                      EL TECNICO ES LA ASIGNACION PRINCIPAL, no
+                      `responsable_sugerido`. Ese campo es a quien la IA propone;
+                      ponerlo en esta columna diría que alguien ya tiene la orden
+                      cuando puede no tenerla.
+                    -->
+                    <th>Técnico</th>
+                    <th>Zona</th>
+                    <th>Estado</th>
+                    <th>SLA</th>
+                    <th>Detectado</th>
+                    <th class="snoc-derecha">Acción</th>
+                  </tr>
                 </thead>
                 <tbody>
-                  {#each actividad.filas as f (f.id)}
-                    <tr>
-                      <td class="snoc-mono-sm snoc-tenue" title={fecha(f.cuando)}>{hora(f.cuando)}</td>
-                      <td class="snoc-body-sm">
-                        {f.evento}
-                        {#if f.esIa}
-                          <span class="snoc-insignia snoc-insignia-neutra" title="Lo escribió el Supervisor, no una persona">IA</span>
+                  {#each visibles as p (p.id)}
+                    {@const sla = celdaDeSla(p.sla_estado, p.sla_minutos)}
+                    <tr class={abierta === p.id ? 'snoc-fila-activa' : ''}>
+                      <td><span class="snoc-insignia {tonoPrioridad(p.prioridad)}">{p.prioridad}</span></td>
+                      <td class="snoc-label">{p.tipo_senal_display}</td>
+                      <td>
+                        <!--
+                          El número que sirve para buscar en el otro sistema. La
+                          orden trae consecutivo interno; el caso, el ticket del
+                          proveedor. Sin ninguno de los dos queda el id corto, que
+                          es lo que hay -- no un número fabricado.
+                        -->
+                        {#if p.orden_numero != null}
+                          <span class="snoc-id">OT-{p.orden_numero}</span>
+                        {:else if p.ticket_externo}
+                          <span class="snoc-id">{p.ticket_externo}</span>
+                          {#if p.proveedor_externo}
+                            <div class="snoc-mono-sm snoc-tenue">{p.proveedor_externo}</div>
+                          {/if}
+                        {:else}
+                          <span class="snoc-mono-sm snoc-tenue" title={p.origen_id}>
+                            {String(p.origen_id).slice(0, 8)}
+                          </span>
+                        {/if}
+                        <div class="snoc-body-sm snoc-recorte" title={p.accion_propuesta}>
+                          {p.accion_propuesta}
+                        </div>
+                      </td>
+                      <td><span class="snoc-id">{p.origen_tipo}</span></td>
+                      <td class={p.tecnico ? 'snoc-body-sm' : 'snoc-celda-ausente'}>
+                        {p.tecnico || 'Sin asignar'}
+                      </td>
+                      <td class={p.zona ? 'snoc-body-sm' : 'snoc-celda-ausente'}>{p.zona || '—'}</td>
+                      <td>
+                        <span class="snoc-insignia {estadoDe(p.estado).clase}">{estadoDe(p.estado).texto}</span>
+                        {#if p.dentro_del_alcance === false}
+                          <span
+                            class="snoc-insignia snoc-insignia-error"
+                            title="Nivel {p.nivel_autonomia_requerido}: por encima del alcance de la etapa"
+                          >
+                            fuera
+                          </span>
                         {/if}
                       </td>
-                      <td class="snoc-body-sm snoc-recorte" title="{f.detalle} · {f.quien}">{f.detalle}</td>
+                      <td>
+                        <span class="snoc-insignia snoc-sla-{sla.tono}" title={sla.detalle}>{sla.texto}</span>
+                      </td>
+                      <td class="snoc-mono-sm snoc-tenue" title="Expira el {fechaCorta(p.expira_en)}">
+                        {fechaCorta(p.created_at)}
+                      </td>
+                      <td class="snoc-derecha">
+                        <button
+                          class="snoc-pildora {abierta === p.id ? 'snoc-pildora-activa' : ''}"
+                          type="button"
+                          onclick={() => abrirDetalle(p.id)}
+                        >
+                          Ver detalle
+                        </button>
+                      </td>
                     </tr>
                   {/each}
                 </tbody>
               </table>
             </div>
+            <span class="snoc-mono-sm snoc-tenue">
+              «Sin asignar» significa que la orden no tiene responsable principal marcado, no que falte el dato.
+            </span>
           {/if}
-        </div>
-      </section>
+        </section>
 
-      <!-- ============ TALLER ============ -->
-      <div class="snoc-taller">
-        <div class="snoc-col-8">
-          <!-- --- PENDIENTES DE REVISIÓN --- -->
-          <section class="snoc-panel">
-            <div class="snoc-pila-xs">
-              <div class="snoc-fila-sep">
-                <div class="snoc-fila" style="gap:var(--snoc-xs);">
-                  <span class="snoc-icono snoc-primario" style="font-size:22px;">assignment_turned_in</span>
-                  <h3 class="snoc-h3">Pendientes de revisión</h3>
-                </div>
-                <span class="snoc-insignia snoc-insignia-neutra">{pendientes.length} pendientes</span>
-              </div>
-              <div class="snoc-nota">
-                <span class="snoc-icono snoc-tenue" style="font-size:16px;">verified</span>
-                <span class="snoc-body-sm snoc-secundario">
-                  Una propuesta <strong>NO</strong> significa que la acción se haya ejecutado. Aceptar registra que estás
-                  de acuerdo, nada más: en esta etapa no hay camino de ejecución.
-                </span>
-              </div>
+        <!-- ============ LOS TRES BLOQUES DE ABAJO ============ -->
+        <section class="snoc-rejilla snoc-rejilla-2 snoc-rejilla-3">
+          <!-- Técnicos · carga operativa -->
+          <div class="snoc-grafico" id="tecnicos">
+            <div class="snoc-fila-sep">
+              <h2 class="snoc-grafico-titulo">
+                <span class="snoc-icono snoc-primario" style="font-size:15px;">engineering</span>
+                Técnicos · carga operativa
+              </h2>
+              <a class="snoc-pildora" href="/supervisor-noc/programacion">Ver todos</a>
             </div>
-
-            {#if form?.error}
-              <div class="snoc-aviso">
-                <span class="snoc-icono snoc-error-txt" style="font-size:18px;">error</span>
-                <span class="snoc-body">{form.error}</span>
+            {#if data.capacidad.error}
+              <div class="snoc-hueco">
+                <span class="snoc-hueco-rotulo">Sin dato</span>
+                <p class="snoc-hueco-motivo">{data.capacidad.error.mensaje}</p>
               </div>
-            {:else if form?.ok && form.tipo === 'revision'}
-              <div class="snoc-aviso">
-                <span class="snoc-icono snoc-primario" style="font-size:18px;">check_circle</span>
-                <span class="snoc-body">
-                  Revisión registrada: <strong>{form.decision}</strong>.
-                  {form.aviso ?? 'Ninguna acción se ejecutó.'}
-                </span>
+            {:else if !tecnicos.disponible}
+              <div class="snoc-hueco">
+                <span class="snoc-hueco-rotulo">Nadie con jornada</span>
+                <p class="snoc-hueco-motivo">
+                  Ninguna persona tiene jornada registrada para el {fechaCorta(data.dia)}.
+                </p>
               </div>
-            {:else if form?.ok && form.tipo === 'cancelacion'}
-              <div class="snoc-aviso">
-                <span class="snoc-icono snoc-primario" style="font-size:18px;">check_circle</span>
-                <span class="snoc-body">Propuesta cancelada. Ninguna acción se ejecutó.</span>
+            {:else}
+              <div class="snoc-desplazable">
+                {#each tecnicos.filas as t (t.id)}
+                  <div class="snoc-tecnico">
+                    <div class="snoc-tecnico-cabeza">
+                      <span class="snoc-tecnico-nombre">{t.nombre}</span>
+                      <span class="snoc-mono-sm {t.tono === 'critico' ? 'snoc-error-txt' : 'snoc-tenue'}">
+                        {t.pct == null ? t.estado : `${t.pct}% · ${t.estado}`}
+                      </span>
+                    </div>
+                    <div class="snoc-riel">
+                      <div class="snoc-riel-relleno snoc-riel-{t.tono}" style="width:{t.ancho}%;"></div>
+                    </div>
+                    {#if t.faltantes > 0}
+                      <span class="snoc-mono-sm snoc-tenue">
+                        {t.faltantes} orden{t.faltantes === 1 ? '' : 'es'} sin duración: la carga real puede ser mayor
+                      </span>
+                    {/if}
+                  </div>
+                {/each}
               </div>
             {/if}
+          </div>
 
-            {#if pendientes.length === 0}
-              <p class="snoc-body snoc-secundario">No hay propuestas esperando revisión.</p>
+          <!-- Órdenes de trabajo -->
+          <div class="snoc-grafico" id="programacion">
+            <div class="snoc-fila-sep">
+              <h2 class="snoc-grafico-titulo">
+                <span class="snoc-icono snoc-primario" style="font-size:15px;">assignment</span>
+                Órdenes de trabajo
+              </h2>
+              <a class="snoc-pildora" href="/supervisor-noc/programacion">Ver programación</a>
+            </div>
+            {#if ordenes.disponible}
+              <div class="snoc-desplazable">
+                {#each ordenes.filas as f (f.clave)}
+                  <div class="snoc-fila-orden">
+                    <span>{f.texto}</span>
+                    <span class="snoc-fila-orden-n {f.tono === 'alerta' ? 'snoc-error-txt' : ''}">{f.n}</span>
+                  </div>
+                {/each}
+              </div>
             {:else}
-              <div class="snoc-tabla-caja">
+              <div class="snoc-hueco">
+                <span class="snoc-hueco-rotulo">Sin dato</span>
+                <p class="snoc-hueco-motivo">Los indicadores de programación no llegaron en esta consulta.</p>
+              </div>
+            {/if}
+          </div>
+
+          <!--
+            Actividad reciente del Supervisor
+            De `common.Activity`, acotada a las entidades de este módulo. Un
+            renglón sin usuario lo escribió la IA, y el backend lo marca con
+            `es_ia`: no se deduce del texto.
+          -->
+          <div class="snoc-grafico">
+            <h2 class="snoc-grafico-titulo">
+              <span class="snoc-icono snoc-primario" style="font-size:15px;">history</span>
+              Actividad reciente del Supervisor
+            </h2>
+            {#if data.actividad.error}
+              <div class="snoc-hueco">
+                <span class="snoc-hueco-rotulo">Sin dato</span>
+                <p class="snoc-hueco-motivo">{data.actividad.error.mensaje}</p>
+              </div>
+            {:else if !actividad.disponible}
+              <div class="snoc-hueco">
+                <span class="snoc-hueco-rotulo">Sin actividad</span>
+                <p class="snoc-hueco-motivo">
+                  Todavía no hay hechos registrados en este módulo.
+                </p>
+              </div>
+            {:else}
+              <div class="snoc-tabla-caja snoc-desplazable">
                 <table class="snoc-tabla">
                   <thead>
-                    <tr>
-                      <th>Origen</th><th>Tipo</th><th>Acción propuesta</th><th>Prioridad</th><th>Creada</th>
-                      <th class="snoc-derecha">Decisión</th>
-                    </tr>
+                    <tr><th>Hora</th><th>Evento</th><th>Detalle</th></tr>
                   </thead>
                   <tbody>
-                    {#each pendientes as p (p.id)}
+                    {#each actividad.filas as f (f.id)}
                       <tr>
-                        <td><span class="snoc-id">{p.origen_tipo}</span></td>
-                        <td class="snoc-label">{p.tipo_senal_display}</td>
-                        <td class="snoc-body-sm" style="max-width:260px;">{p.accion_propuesta}</td>
-                        <td><span class="snoc-insignia {tonoPrioridad(p.prioridad)}">{p.prioridad}</span></td>
-                        <td class="snoc-mono-sm snoc-secundario">{fechaCorta(p.created_at)}</td>
-                        <td class="snoc-derecha">
-                          {#if revisando === p.id}
-                            <div class="snoc-pila-xs" style="align-items:stretch; min-width:300px;">
-                              <input
-                                class="snoc-campo"
-                                bind:value={comentario}
-                                placeholder="Motivo (obligatorio para rechazar o cancelar)"
-                              />
-                              <div class="snoc-envuelve" style="justify-content:flex-end;">
-                                <form method="POST" action="?/revisar" use:enhance={alDecidir} style="display:contents;">
-                                  <input type="hidden" name="id" value={p.id} />
-                                  <input type="hidden" name="comentario" value={comentario} />
-                                  <button class="snoc-btn snoc-btn-primario" name="decision" value="aceptada" type="submit">
-                                    Aceptar
-                                  </button>
-                                  <button class="snoc-btn snoc-btn-error" name="decision" value="rechazada" type="submit">
-                                    Rechazar
-                                  </button>
-                                </form>
-                                <form method="POST" action="?/cancelar" use:enhance={alDecidir} style="display:contents;">
-                                  <input type="hidden" name="id" value={p.id} />
-                                  <input type="hidden" name="motivo" value={comentario} />
-                                  <button
-                                    class="snoc-btn"
-                                    type="submit"
-                                    title="La condición ya no aplica: nadie opinó sobre el fondo"
-                                  >
-                                    Cancelar propuesta
-                                  </button>
-                                </form>
-                                <button class="snoc-btn" type="button" onclick={() => (revisando = null)}>Cerrar</button>
-                              </div>
-                            </div>
-                          {:else}
-                            <div class="snoc-envuelve" style="justify-content:flex-end;">
-                              <button class="snoc-pildora" type="button" onclick={() => abrirDetalle(p.id)}>
-                                Ver contexto
-                              </button>
-                              <button
-                                class="snoc-btn snoc-btn-primario"
-                                type="button"
-                                onclick={() => {
-                                  revisando = p.id;
-                                  comentario = '';
-                                }}
-                              >
-                                Revisar propuesta
-                              </button>
-                            </div>
+                        <td class="snoc-mono-sm snoc-tenue" title={fecha(f.cuando)}>{hora(f.cuando)}</td>
+                        <td class="snoc-body-sm">
+                          {f.evento}
+                          {#if f.esIa}
+                            <span class="snoc-insignia snoc-insignia-neutra" title="Lo escribió el Supervisor, no una persona">IA</span>
                           {/if}
                         </td>
+                        <td class="snoc-body-sm snoc-recorte" title="{f.detalle} · {f.quien}">{f.detalle}</td>
                       </tr>
                     {/each}
                   </tbody>
                 </table>
               </div>
             {/if}
-          </section>
-        </div>
+          </div>
+        </section>
 
-        <!-- ============ PANEL DERECHO ============ -->
-        <div class="snoc-col-4">
-          <div class="snoc-panel" style="gap:var(--snoc-sm);">
-            <div class="snoc-fila-sep">
-              <div class="snoc-fila">
-                <div class="snoc-chip-icono snoc-chip-icono-solido">
-                  <span class="snoc-icono" style="font-size:18px;">smart_toy</span>
+        <!-- ============ TALLER ============ -->
+        <div class="snoc-taller">
+          <div class="snoc-col-8">
+            <!-- --- PENDIENTES DE REVISIÓN --- -->
+            <section class="snoc-panel">
+              <div class="snoc-pila-xs">
+                <div class="snoc-fila-sep">
+                  <div class="snoc-fila" style="gap:var(--snoc-xs);">
+                    <span class="snoc-icono snoc-primario" style="font-size:22px;">assignment_turned_in</span>
+                    <h3 class="snoc-h3">Pendientes de revisión</h3>
+                  </div>
+                  <span class="snoc-insignia snoc-insignia-neutra">{pendientes.length} pendientes</span>
                 </div>
-                <div class="snoc-pila-xs">
-                  <h3 class="snoc-h4">Asistentes operativos</h3>
-                  <span class="snoc-body-sm snoc-secundario">Analizan su dominio y proponen</span>
+                <div class="snoc-nota">
+                  <span class="snoc-icono snoc-tenue" style="font-size:16px;">verified</span>
+                  <span class="snoc-body-sm snoc-secundario">
+                    Una propuesta <strong>NO</strong> significa que la acción se haya ejecutado. Aceptar registra que estás
+                    de acuerdo, nada más: en esta etapa no hay camino de ejecución.
+                  </span>
                 </div>
               </div>
-            </div>
 
-            <div class="snoc-pila-xs">
-              {#each [{ id: 'programacion', rotulo: 'Programación', desc: 'Órdenes sin programar, planes sin publicar, riesgo de plazo' }, { id: 'compromiso', rotulo: 'Compromisos', desc: 'Compromisos por vencer y dependencias pendientes' }] as a (a.id)}
-                <form method="POST" action="?/asistente" use:enhance={alCorrerAsistente(a.id)}>
-                  <input type="hidden" name="dominio" value={a.id} />
-                  <div class="snoc-caja-asistente">
-                    <div class="snoc-fila-sep">
-                      <span class="snoc-label">{a.rotulo}</span>
-                      <button class="snoc-btn snoc-btn-primario" type="submit" disabled={asistenteCorriendo !== null}>
-                        <span class="snoc-icono" style="font-size:14px;">play_arrow</span>
-                        {asistenteCorriendo === a.id ? 'Analizando…' : 'Analizar'}
-                      </button>
+              {#if form?.error}
+                <div class="snoc-aviso">
+                  <span class="snoc-icono snoc-error-txt" style="font-size:18px;">error</span>
+                  <span class="snoc-body">{form.error}</span>
+                </div>
+              {:else if form?.ok && form.tipo === 'revision'}
+                <div class="snoc-aviso">
+                  <span class="snoc-icono snoc-primario" style="font-size:18px;">check_circle</span>
+                  <span class="snoc-body">
+                    Revisión registrada: <strong>{form.decision}</strong>.
+                    {form.aviso ?? 'Ninguna acción se ejecutó.'}
+                  </span>
+                </div>
+              {:else if form?.ok && form.tipo === 'cancelacion'}
+                <div class="snoc-aviso">
+                  <span class="snoc-icono snoc-primario" style="font-size:18px;">check_circle</span>
+                  <span class="snoc-body">Propuesta cancelada. Ninguna acción se ejecutó.</span>
+                </div>
+              {/if}
+
+              {#if pendientes.length === 0}
+                <p class="snoc-body snoc-secundario">No hay propuestas esperando revisión.</p>
+              {:else}
+                <div class="snoc-tabla-caja">
+                  <table class="snoc-tabla">
+                    <thead>
+                      <tr>
+                        <th>Origen</th><th>Tipo</th><th>Acción propuesta</th><th>Prioridad</th><th>Creada</th>
+                        <th class="snoc-derecha">Decisión</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each pendientes as p (p.id)}
+                        <tr>
+                          <td><span class="snoc-id">{p.origen_tipo}</span></td>
+                          <td class="snoc-label">{p.tipo_senal_display}</td>
+                          <td class="snoc-body-sm" style="max-width:260px;">{p.accion_propuesta}</td>
+                          <td><span class="snoc-insignia {tonoPrioridad(p.prioridad)}">{p.prioridad}</span></td>
+                          <td class="snoc-mono-sm snoc-secundario">{fechaCorta(p.created_at)}</td>
+                          <td class="snoc-derecha">
+                            {#if revisando === p.id}
+                              <div class="snoc-pila-xs" style="align-items:stretch; min-width:300px;">
+                                <input
+                                  class="snoc-campo"
+                                  bind:value={comentario}
+                                  placeholder="Motivo (obligatorio para rechazar o cancelar)"
+                                />
+                                <div class="snoc-envuelve" style="justify-content:flex-end;">
+                                  <form method="POST" action="?/revisar" use:enhance={alDecidir} style="display:contents;">
+                                    <input type="hidden" name="id" value={p.id} />
+                                    <input type="hidden" name="comentario" value={comentario} />
+                                    <button class="snoc-btn snoc-btn-primario" name="decision" value="aceptada" type="submit">
+                                      Aceptar
+                                    </button>
+                                    <button class="snoc-btn snoc-btn-error" name="decision" value="rechazada" type="submit">
+                                      Rechazar
+                                    </button>
+                                  </form>
+                                  <form method="POST" action="?/cancelar" use:enhance={alDecidir} style="display:contents;">
+                                    <input type="hidden" name="id" value={p.id} />
+                                    <input type="hidden" name="motivo" value={comentario} />
+                                    <button
+                                      class="snoc-btn"
+                                      type="submit"
+                                      title="La condición ya no aplica: nadie opinó sobre el fondo"
+                                    >
+                                      Cancelar propuesta
+                                    </button>
+                                  </form>
+                                  <button class="snoc-btn" type="button" onclick={() => (revisando = null)}>Cerrar</button>
+                                </div>
+                              </div>
+                            {:else}
+                              <div class="snoc-envuelve" style="justify-content:flex-end;">
+                                <button class="snoc-pildora" type="button" onclick={() => abrirDetalle(p.id)}>
+                                  Ver contexto
+                                </button>
+                                <button
+                                  class="snoc-btn snoc-btn-primario"
+                                  type="button"
+                                  onclick={() => {
+                                    revisando = p.id;
+                                    comentario = '';
+                                  }}
+                                >
+                                  Revisar propuesta
+                                </button>
+                              </div>
+                            {/if}
+                          </td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              {/if}
+            </section>
+          </div>
+
+          <!-- ============ PANEL DERECHO ============ -->
+          <div class="snoc-col-4">
+            <div class="snoc-panel" style="gap:var(--snoc-sm);">
+              <div class="snoc-fila-sep">
+                <div class="snoc-fila">
+                  <div class="snoc-chip-icono snoc-chip-icono-solido">
+                    <span class="snoc-icono" style="font-size:18px;">smart_toy</span>
+                  </div>
+                  <div class="snoc-pila-xs">
+                    <h3 class="snoc-h4">Asistentes operativos</h3>
+                    <span class="snoc-body-sm snoc-secundario">Analizan su dominio y proponen</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="snoc-pila-xs">
+                {#each [{ id: 'programacion', rotulo: 'Programación', desc: 'Órdenes sin programar, planes sin publicar, riesgo de plazo' }, { id: 'compromiso', rotulo: 'Compromisos', desc: 'Compromisos por vencer y dependencias pendientes' }] as a (a.id)}
+                  <form method="POST" action="?/asistente" use:enhance={alCorrerAsistente(a.id)}>
+                    <input type="hidden" name="dominio" value={a.id} />
+                    <div class="snoc-caja-asistente">
+                      <div class="snoc-fila-sep">
+                        <span class="snoc-label">{a.rotulo}</span>
+                        <button class="snoc-btn snoc-btn-primario" type="submit" disabled={asistenteCorriendo !== null}>
+                          <span class="snoc-icono" style="font-size:14px;">play_arrow</span>
+                          {asistenteCorriendo === a.id ? 'Analizando…' : 'Analizar'}
+                        </button>
+                      </div>
+                      <p class="snoc-body-sm snoc-secundario" style="margin:var(--snoc-xs) 0 0;">{a.desc}</p>
                     </div>
-                    <p class="snoc-body-sm snoc-secundario" style="margin:var(--snoc-xs) 0 0;">{a.desc}</p>
-                  </div>
-                </form>
-              {/each}
-            </div>
-
-            {#if form?.ok && form.tipo === 'asistente'}
-              <div class="snoc-resultado">
-                <span class="snoc-label-sm" style="text-transform:uppercase;">Resultado · {form.dominio}</span>
-                {#each form.asistente?.recomendaciones ?? [] as r, i (i)}
-                  <div class="snoc-resultado-fila">
-                    <span class="snoc-body-sm">{r.recomendacion ?? r.accion_propuesta ?? r.tipo_senal}</span>
-                    <span class="snoc-mono-sm snoc-tenue">{r.resultado ?? ''}</span>
-                  </div>
-                {:else}
-                  <span class="snoc-body-sm snoc-secundario">El asistente no encontró señales de su dominio.</span>
+                  </form>
                 {/each}
               </div>
-            {:else if form?.ok && form.tipo === 'ciclo'}
-              <div class="snoc-resultado">
-                <span class="snoc-label-sm" style="text-transform:uppercase;">Último ciclo</span>
-                <div class="snoc-mono-sm snoc-pila-xs">
-                  <span>Señales detectadas: <strong>{form.resumen?.senales ?? 0}</strong></span>
-                  <span>Propuestas nuevas: <strong>{form.resumen?.propuestas ?? 0}</strong></span>
-                  <span>Repetidas: <strong>{form.resumen?.repetidas ?? 0}</strong></span>
-                  <span>Datos insuficientes: <strong>{form.resumen?.datos_insuficientes ?? 0}</strong></span>
-                  <span>Expiradas: <strong>{form.resumen?.expiradas ?? 0}</strong></span>
-                </div>
-                <span class="snoc-mono-sm snoc-tenue">Acciones ejecutadas: {form.acciones_ejecutadas ?? 0}</span>
-              </div>
-            {/if}
 
-            <div class="snoc-fila" style="gap:var(--snoc-xs); padding-top:var(--snoc-xs);">
-              <span class="snoc-icono snoc-primario" style="font-size:13px;">gavel</span>
-              <span class="snoc-mono-sm snoc-tenue">
-                Los asistentes solo leen y proponen. No programan, no asignan y no llaman a ningún sistema externo.
-              </span>
+              {#if form?.ok && form.tipo === 'asistente'}
+                <div class="snoc-resultado">
+                  <span class="snoc-label-sm" style="text-transform:uppercase;">Resultado · {form.dominio}</span>
+                  {#each form.asistente?.recomendaciones ?? [] as r, i (i)}
+                    <div class="snoc-resultado-fila">
+                      <span class="snoc-body-sm">{r.recomendacion ?? r.accion_propuesta ?? r.tipo_senal}</span>
+                      <span class="snoc-mono-sm snoc-tenue">{r.resultado ?? ''}</span>
+                    </div>
+                  {:else}
+                    <span class="snoc-body-sm snoc-secundario">El asistente no encontró señales de su dominio.</span>
+                  {/each}
+                </div>
+              {:else if form?.ok && form.tipo === 'ciclo'}
+                <div class="snoc-resultado">
+                  <span class="snoc-label-sm" style="text-transform:uppercase;">Último ciclo</span>
+                  <div class="snoc-mono-sm snoc-pila-xs">
+                    <span>Señales detectadas: <strong>{form.resumen?.senales ?? 0}</strong></span>
+                    <span>Propuestas nuevas: <strong>{form.resumen?.propuestas ?? 0}</strong></span>
+                    <span>Repetidas: <strong>{form.resumen?.repetidas ?? 0}</strong></span>
+                    <span>Datos insuficientes: <strong>{form.resumen?.datos_insuficientes ?? 0}</strong></span>
+                    <span>Expiradas: <strong>{form.resumen?.expiradas ?? 0}</strong></span>
+                  </div>
+                  <span class="snoc-mono-sm snoc-tenue">Acciones ejecutadas: {form.acciones_ejecutadas ?? 0}</span>
+                </div>
+              {/if}
+
+              <div class="snoc-fila" style="gap:var(--snoc-xs); padding-top:var(--snoc-xs);">
+                <span class="snoc-icono snoc-primario" style="font-size:13px;">gavel</span>
+                <span class="snoc-mono-sm snoc-tenue">
+                  Los asistentes solo leen y proponen. No programan, no asignan y no llaman a ningún sistema externo.
+                </span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    {/if}
+      {/if}
+    </div>
   </div>
 
   <!-- ============ MODAL DE DETALLE DEL HALLAZGO ============ -->

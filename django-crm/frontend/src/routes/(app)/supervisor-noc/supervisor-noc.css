@@ -81,9 +81,22 @@
   line-height: 18px;
   -webkit-font-smoothing: antialiased;
   /* Sin min-height ni fondo de documento: el layout de (app) ya los define y
-     esta pantalla es una seccion dentro de el, no una app aparte. */
-  padding: var(--snoc-lg) 0;
+     esta pantalla es una seccion dentro de el, no una app aparte.
+
+     SI hace falta ser una columna flex que no crezca de mas: '.v2-main' es
+     'display:flex; flex-direction:column; overflow:hidden', y el hijo que
+     scrollea ('.v2-scroll') solo puede hacerlo si su padre le da un alto
+     acotado. Sin 'min-height:0' el contenido empuja la caja y el overflow
+     nunca se activa -- la pantalla se recorta en silencio. */
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
+
+/* El respiro va DENTRO del contenedor que se desplaza: en '.snoc' se comeria
+   parte del alto disponible y dejaria el ultimo panel pegado al borde. */
+.snoc .v2-scroll { padding: var(--snoc-lg) 0 var(--snoc-xl); }
 
 /* ---------------------------------------------------------------------------
    TIPOGRAFIA -- las tres familias con sus roles, del config de Stitch.
