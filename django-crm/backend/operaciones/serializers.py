@@ -188,6 +188,46 @@ class DisponibilidadSerializer(serializers.ModelSerializer):
         return not obj.disponible
 
 
+class CrearProgramacionSerializer(serializers.Serializer):
+    """
+    Lo que entra al crear un plan semanal. Un solo campo, y una sola regla.
+
+    NO declara 'org' ni 'estado'. La organizacion sale de la sesion --mismo
+    criterio que ProgramarSerializer, que directamente no lo declara-- y el
+    estado no se elige: un plan nace SIEMPRE en borrador, porque publicar es
+    una decision posterior y tiene su propia ruta, su actor y su sello.
+
+    POR QUE SE EXIGE UN LUNES
+    -------------------------
+    El modelo define 'semana_inicio' como "Lunes de la semana que planifica", y
+    'programar_orden' cuenta SIETE DIAS desde ahi para decidir si una fecha cae
+    dentro del plan. Con un miercoles, "la semana" seria miercoles->martes: dos
+    planes solapados podrian convivir sin violar unique(org, semana_inicio), y
+    una orden del lunes no cabria en ninguno de los dos.
+
+    No se corrige en silencio al lunes de esa semana: se rechaza diciendo cual
+    es. Normalizar por dentro haria que el plan guardado no fuera el que la
+    persona pidio, y eso se descubre tarde.
+    """
+
+    semana_inicio = serializers.DateField()
+    notas = serializers.CharField(required=False, allow_blank=True, default="",
+                                  max_length=2000)
+
+    def validate_semana_inicio(self, valor):
+        if valor.weekday() != 0:
+            lunes = valor - timedelta(days=valor.weekday())
+            raise serializers.ValidationError(
+                f"Un plan empieza en lunes: '{valor}' es {DIAS_ES[valor.weekday()]}. "
+                f"El lunes de esa semana es {lunes}."
+            )
+        return valor
+
+
+#  Para el mensaje de arriba. En español y en minuscula, como se lee en la frase.
+DIAS_ES = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+
+
 class ProgramacionSemanalSerializer(serializers.ModelSerializer):
     """
     Un plan semanal, tal como la pantalla lo necesita para poder elegirlo.

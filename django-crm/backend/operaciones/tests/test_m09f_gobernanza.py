@@ -785,6 +785,14 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
     habilidades ni eleva autonomía: toda propuesta sale con
     'nivel_autonomia_requerido <= 1' y estado 'propuesta'.
 
+    'programacion-cerrar' (POST /programacion/<id>/cerrar/) cierra el ciclo del
+    plan: 'cerrada' estaba declarada en ESTADOS desde M03 y ninguna función la
+    asignaba nunca. Pasa 'publicada -> cerrada' por una transición explícita del
+    servicio, con su bloqueo de fila; NO toca las líneas del plan, ni
+    'programada_para', ni el estado de ninguna orden. Un plan cerrado deja de
+    admitir órdenes nuevas por la MISMA constante que ya usaba 'programar_orden'.
+    Su suite lo afirma sobre el EFECTO (tests/test_m03h_plan_crear_cerrar.py).
+
     'programaciones' (GET /programacion/) entró con la pantalla de programación.
     Es la más fácil de todas: lista los planes semanales de la organización y
     nada más. No crea planes, no los publica, no los cierra, no agrega líneas y
@@ -822,7 +830,7 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
     nombres = {p.name for p in rutas_operaciones.urlpatterns}
     assert nombres == {"propuestas", "propuesta-detalle", "propuesta-revisar",
                        "propuesta-cancelar", "ciclo", "disponibilidad",
-                       "programacion-publicar", "programacion-jornada",
+                       "programacion-publicar", "programacion-cerrar", "programacion-jornada",
                        "linea-secuencia", "jornada-secuenciar",
                        "capacidad-jornada", "actividades",
                        "actividad-detalle", "actividad-transicion",

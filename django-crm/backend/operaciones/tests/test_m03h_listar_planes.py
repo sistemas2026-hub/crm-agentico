@@ -331,11 +331,16 @@ def test_el_get_no_llama_a_nadie(org_a, cliente_a, espia_requests):
     assert espia_requests == []
 
 
-def test_la_ruta_no_acepta_escritura(org_a, cliente_a):
+def test_la_ruta_solo_acepta_leer_y_crear(org_a, cliente_a):
+    """
+    El POST dejó de ser 405 cuando la ruta ganó la creación de planes. Los
+    otros tres siguen fuera: editar o borrar un plan por la API no existe --
+    lo que cambia su estado son las transiciones (publicar, cerrar), cada una
+    con su regla y su actor.
+    """
     plan = _plan(org_a)
 
     for metodo, llamada in (
-            ("POST", cliente_a.post(RUTA, {}, format="json")),
             ("PUT", cliente_a.put(RUTA, {}, format="json")),
             ("PATCH", cliente_a.patch(RUTA, {}, format="json")),
             ("DELETE", cliente_a.delete(RUTA))):

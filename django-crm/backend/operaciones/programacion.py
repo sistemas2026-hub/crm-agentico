@@ -565,6 +565,73 @@ def publicar_programacion(*, org, programacion, actor, ahora=None):
     return fresco
 
 
+class PlanNoCerrable(ErrorProgramacion):
+    """El plan no esta en un estado desde el que se pueda cerrar."""
+
+
+def cerrar_programacion(*, org, programacion, actor, ahora=None):
+    """
+    Pasa un plan de 'publicada' a 'cerrada'. El ultimo paso del ciclo.
+
+    POR QUE ESTA FUNCION NO EXISTIA
+    -------------------------------
+    'cerrada' estaba declarada en ESTADOS desde M03 y ninguna funcion la
+    asignaba nunca. Un estado que no puede ocurrir es una promesa que el modelo
+    no cumple: la semana pasada seguia figurando como 'publicada' para siempre,
+    y la señal 'programacion_sin_publicar' no podia distinguir un plan vivo de
+    uno que ya paso.
+
+    SOLO DESDE 'publicada', Y NO DESDE 'borrador'
+    ---------------------------------------------
+    Cerrar un borrador seria archivar un plan que nadie llego a ver: si no
+    sirvio, lo que corresponde es dejarlo como esta o no haberlo creado, no
+    darle el sello de "esta semana termino". El ciclo declarado es
+    borrador -> publicada -> cerrada, y esta funcion respeta las dos flechas.
+
+    CERRAR NO TOCA NINGUNA ORDEN
+    ----------------------------
+    Ni las lineas del plan, ni 'programada_para', ni el estado operativo de
+    nada. Igual que publicar: lo unico que cambia es que el plan deja de estar
+    vigente. Una orden que quedo a medias sigue a medias y su propio cierre es
+    otra operacion (campo/trabajos/<pk>/cerrar/).
+
+    IDEMPOTENCIA SEMANTICA, LA MISMA QUE PUBLICAR
+    ---------------------------------------------
+    La segunda llamada no repite la transicion ni pisa 'cerrada_en': levanta
+    'PlanNoCerrable' diciendo cuando se cerro. No hace falta un mecanismo
+    nuevo -- el estado ES el registro de que la operacion ya ocurrio.
+    """
+    if actor is None:
+        raise ErrorProgramacion(
+            "Cerrar es una decision de una persona: tiene que quedar quien "
+            "la tomo.")
+    if programacion.org_id != org.id:
+        raise ErrorProgramacion("Ese plan semanal es de otra empresa.")
+
+    #  El lock antes de leer el estado, por el mismo motivo que en publicar:
+    #  sin el, dos peticiones simultaneas leen 'publicada' a la vez y las dos
+    #  cierran.
+    fresco = (ProgramacionSemanal.objects
+              .select_for_update()
+              .get(pk=programacion.pk, org=org))
+
+    if fresco.estado == ProgramacionSemanal.CERRADA:
+        raise PlanNoCerrable(
+            f"El plan de la semana del {fresco.semana_inicio} ya estaba "
+            f"cerrado.")
+    if fresco.estado != ProgramacionSemanal.PUBLICADA:
+        raise PlanNoCerrable(
+            f"El plan de la semana del {fresco.semana_inicio} esta "
+            f"'{fresco.get_estado_display()}'. Solo se cierra un plan "
+            f"publicado: cerrar un borrador archivaria algo que nadie vio.")
+
+    fresco.estado = ProgramacionSemanal.CERRADA
+    #  'updated_by' va nombrado a proposito, igual que en publicar: BaseModel
+    #  lo escribe desde crum y sin listarlo el update_fields lo dejaria fuera.
+    fresco.save(update_fields=["estado", "updated_by", "updated_at"])
+    return fresco
+
+
 # =============================================================================
 #  REPROGRAMAR  --  paso M03-D3
 # =============================================================================

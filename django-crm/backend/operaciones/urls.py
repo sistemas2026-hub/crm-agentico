@@ -64,4 +64,8 @@ urlpatterns = [
          name="capacidad-jornada"),
     path("programacion/<uuid:programacion_id>/publicar/",
          views.PublicarProgramacionView.as_view(), name="programacion-publicar"),
+    #  El ultimo paso del ciclo del plan: publicada -> cerrada. 'cerrada' estaba
+    #  declarada desde M03 y ninguna funcion la asignaba.
+    path("programacion/<uuid:programacion_id>/cerrar/",
+         views.CerrarProgramacionView.as_view(), name="programacion-cerrar"),
 ]

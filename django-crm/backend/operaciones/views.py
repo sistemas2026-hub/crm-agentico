@@ -37,6 +37,7 @@ nivel habria requerido, que hizo el humano y con que resultado.
 
 from __future__ import annotations
 
+from django.db import transaction
 from django.db.utils import IntegrityError
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
@@ -55,7 +56,8 @@ from campo.services.idempotencia import manejar_idempotencia
 from operaciones.models import (ActividadOperativa, DisponibilidadTecnico, ProgramacionOrden,
                                 ProgramacionSemanal, PropuestaSupervisor)
 from operaciones.programacion import (ErrorProgramacion, PlanIncoherente,
-                                      PlanNoPublicable, _lineas_vigentes,
+                                      PlanNoCerrable, PlanNoPublicable,
+                                      cerrar_programacion, _lineas_vigentes,
                                       JornadaCambio, JornadaIncompleta,
                                       actualizar_secuencia,
                                       secuenciar_jornada,
@@ -74,6 +76,7 @@ from operaciones.serializers import (ActividadOperativaSerializer,
     LineaJornadaSerializer,
     SecuenciaSerializer,
     SecuenciarJornadaSerializer,
+    CrearProgramacionSerializer,
     ProgramacionSemanalSerializer,
     PropuestaDetalleSerializer,
     PropuestaListaSerializer,
@@ -436,10 +439,11 @@ class DisponibilidadView(APIView):
 class ProgramacionesView(APIView):
     """
     ================================================================================
-     LOS PLANES SEMANALES DE LA ORGANIZACION  --  solo lectura
+     LOS PLANES SEMANALES DE LA ORGANIZACION
     ================================================================================
 
-        GET /api/operaciones/programacion/
+        GET  /api/operaciones/programacion/     los planes que existen
+        POST /api/operaciones/programacion/     crear el de una semana
 
     QUE BRECHA CIERRA
     -----------------
@@ -499,6 +503,72 @@ class ProgramacionesView(APIView):
             "count": qs.count(),
             "resultados": ProgramacionSemanalSerializer(qs[:500], many=True).data,
         })
+
+    @manejar_idempotencia
+    def post(self, request):
+        """
+        Crea el plan de una semana. Nace en BORRADOR, siempre.
+
+        POR QUE ESTA RUTA EXISTE
+        ------------------------
+        Hasta hoy un plan semanal solo se podia crear desde el admin de Django.
+        El efecto medible: CERO planes en produccion, y con eso todo M03
+        bloqueado -- 'programar_orden' exige un 'programacion_semanal_id' que no
+        existia, asi que ninguna orden podia programarse desde la aplicacion.
+
+        EL ESTADO NO SE ELIGE
+        ---------------------
+        Nace borrador y punto. Publicar es una decision posterior, con su
+        propia ruta, su actor y su sello ('publicada_por', 'publicada_en'), y
+        con la comprobacion de coherencia delante. Aceptar 'estado' en el
+        cuerpo permitiria crear un plan ya publicado sin que nadie lo revisara.
+
+        SI YA EXISTE, SE DICE CUAL  --  y no se crea otro
+        -------------------------------------------------
+        La base lo impide con unique(org, semana_inicio), pero un 500 de
+        IntegrityError no le sirve a nadie: se contesta 409 CON EL PLAN QUE YA
+        ESTA, para que quien llamo pueda usarlo en vez de reintentar a ciegas.
+        Es el mismo criterio que 'YaProgramada' en campo.
+
+        LA CARRERA, CERRADA DONDE DE VERDAD OCURRE
+        ------------------------------------------
+        Entre comprobar "no existe" y crear cabe otra peticion identica. No se
+        resuelve con un 'select' previo --ahi es justo donde vive la carrera--
+        sino dejando que la restriccion de la base decida: se intenta crear y,
+        si la base lo rechaza, se lee el que gano. Mismo patron que
+        'asistente.operaciones_externas' en el motor.
+        """
+        entrada = CrearProgramacionSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        datos = entrada.validated_data
+
+        try:
+            with transaction.atomic():
+                plan = ProgramacionSemanal.objects.create(
+                    org=request.org,
+                    semana_inicio=datos["semana_inicio"],
+                    #  El estado NO viene del cuerpo: es el default del modelo.
+                    estado=ProgramacionSemanal.BORRADOR,
+                    notas=datos.get("notas", ""),
+                )
+        except IntegrityError:
+            existente = ProgramacionSemanal.objects.filter(
+                org=request.org, semana_inicio=datos["semana_inicio"]).first()
+            return Response(
+                {"error": "YA_EXISTE",
+                 "detalle": (f"Ya hay un plan para la semana del "
+                             f"{datos['semana_inicio']}."),
+                 "programacion": (ProgramacionSemanalSerializer(existente).data
+                                  if existente else None)},
+                status=status.HTTP_409_CONFLICT)
+
+        return Response(
+            {"programacion": ProgramacionSemanalSerializer(plan).data,
+             "aviso": ("Creado en borrador. No programa ninguna orden y no "
+                       "compromete a nadie hasta que se publique."),
+             "server_time": timezone.now().isoformat()},
+            status=status.HTTP_201_CREATED)
+
 
 
 class PublicarProgramacionView(APIView):
@@ -576,6 +646,72 @@ class PublicarProgramacionView(APIView):
             "lineas": _lineas_vigentes(publicado).count(),
             "aviso": ("Publicado. Esto NO asigna técnicos ni modifica ninguna "
                       "orden: solo deja de ser un borrador."),
+        })
+
+
+class CerrarProgramacionView(APIView):
+    """
+    ================================================================================
+     CERRAR UN PLAN SEMANAL  --  el ultimo paso del ciclo
+    ================================================================================
+
+        POST /api/operaciones/programacion/<uuid:programacion_id>/cerrar/
+
+    POR QUE EXISTE
+    --------------
+    'cerrada' estaba declarada en ESTADOS desde M03 y ninguna funcion la
+    asignaba nunca. Un estado inalcanzable es una promesa que el modelo no
+    cumple: la semana pasada seguia figurando como 'publicada' para siempre.
+    Es el mismo hueco que tenia el cierre de una ORDEN, y se cierra igual --
+    con una transicion explicita sobre el servicio, no con un UPDATE suelto.
+
+    NO EJECUTA NADA
+    ---------------
+    No toca las lineas del plan, ni 'programada_para', ni el estado de ninguna
+    orden. Igual que publicar: lo unico que cambia es que el plan deja de estar
+    vigente. Una orden a medias sigue a medias, y su cierre es otra operacion.
+
+    DOS CIERRES NO PRODUCEN DOS EFECTOS
+    -----------------------------------
+    El segundo contesta 409 y no vuelve a escribir: el propio estado es el
+    registro de que la operacion ya ocurrio (misma idempotencia semantica que
+    publicar). Y sobre el reintento de red actua ademas 'manejar_idempotencia'.
+    ================================================================================
+    """
+
+    permission_classes = [EsJefeDeOperaciones]
+
+    @manejar_idempotencia
+    def post(self, request, programacion_id):
+        #  Acotado a request.org: un id de otra organizacion no da 403 --eso
+        #  confirmaria que existe-- sino que no aparece.
+        plan = ProgramacionSemanal.objects.filter(
+            id=programacion_id, org=request.org).first()
+        if plan is None:
+            return Response(
+                {"error": "NO_EXISTE",
+                 "detalle": "No existe ese plan semanal en esta organización."},
+                status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            cerrado = cerrar_programacion(
+                org=request.org, programacion=plan, actor=request.profile)
+        except PlanNoCerrable as e:
+            #  409 y no 400: la peticion es correcta, el conflicto es con el
+            #  estado actual del plan.
+            return Response({"error": "NO_SE_PUEDE_CERRAR", "detalle": str(e),
+                             "estado_actual": plan.estado},
+                            status=status.HTTP_409_CONFLICT)
+        except ErrorProgramacion as e:
+            return Response({"error": "NO_SE_PUDO_CERRAR", "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            "programacion": ProgramacionSemanalSerializer(cerrado).data,
+            "lineas": _lineas_vigentes(cerrado).count(),
+            "aviso": ("Cerrado. Las órdenes que quedaron a medias siguen como "
+                      "estaban: cerrar el plan no cierra ningún trabajo."),
+            "server_time": timezone.now().isoformat(),
         })
 
 

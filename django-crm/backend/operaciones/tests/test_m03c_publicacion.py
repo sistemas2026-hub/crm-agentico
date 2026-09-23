@@ -310,7 +310,18 @@ def test_c5_un_plan_cerrado_no_se_publica(cliente_a, org_a):
 
 @pytest.mark.django_db
 def test_c5b_no_existe_reapertura(cliente_a, org_a):
-    """M03-C no crea ninguna vía de vuelta: ni cerrada->publicada ni ->borrador."""
+    """
+    No hay ninguna vía de VUELTA: ni cerrada->publicada ni ->borrador.
+
+    'cerrar_programacion' estaba en esta lista cuando se escribió M03-C, y ahí
+    congelaba el alcance de aquel paso, no una regla de negocio: cerrar AVANZA
+    el ciclo declarado (borrador -> publicada -> cerrada), no lo revierte. Sale
+    de la lista el día que se implementa, y lo que esta prueba sigue guardando
+    --que de 'cerrada' no se sale-- es la primera mitad, que no cambió.
+
+    'reabrir' y 'despublicar' siguen sin existir, y esa es la puerta que aquí
+    importa: un plan cerrado es historia.
+    """
     cerrado = _plan(org_a, estado=ProgramacionSemanal.CERRADA)
     cliente_a.post(_url(cerrado), {}, format="json")
     cerrado.refresh_from_db()
@@ -318,7 +329,7 @@ def test_c5b_no_existe_reapertura(cliente_a, org_a):
 
     from operaciones import programacion as modulo
     publicos = {n for n in dir(modulo) if not n.startswith("_")}
-    for prohibido in ("reabrir", "cerrar_programacion", "despublicar"):
+    for prohibido in ("reabrir", "despublicar"):
         assert prohibido not in publicos
 
 
