@@ -1,13 +1,34 @@
 # Objetivo · Endurecer la validación de producción
 
-> Abierto el 23/09/2026. Estado: **abierto**, 9 criterios y medio de 10.
+> Abierto el 23/09/2026. **Cerrado el 24/09/2026 con una salvedad medida**,
+> por decisión explícita: 9 criterios completos y el décimo cumplido salvo por
+> el entorno.
 >
-> El criterio 1 **no se cumple como está escrito**: pide `docker exec` en el
-> contenedor del motor de producción y se corrió en un contenedor de un solo
-> uso sobre una red de desarrollo. Dio 21/21 con `[entorno: CONTENEDOR]`, pero
-> el `backend` de esa red es el de otro worktree y devolvió 403: **el camino
-> escalada→ticket sigue sin verificarse**. Lo que falta para cerrarlo está en
-> «Bloqueos», y es una decisión, no código.
+> El criterio 1 pedía `docker exec` en el contenedor del motor de producción.
+> Se corrió en un contenedor de un solo uso sobre una red de desarrollo: 21/21
+> con `[entorno: CONTENEDOR]`, pero el `backend` de esa red es el de otro
+> worktree y devolvió 403, así que **la creación del ticket del CRM sigue sin
+> verificarse por este arnés**.
+>
+> **Por qué se cierra igual.** Ese camino no está sin probar: tiene 23
+> escalamientos confirmados con `caso_id` en producción entre el 02 y el
+> 19/09/2026. Lo que falta es probarlo *desde acá*. La única vía que quedaba
+> —un proxy hacia `agent-api.rapilinksas.co`— crea **dos tickets reales en la
+> cola de operadores de Rapilink**, que una persona abre, lee y tiene que
+> borrar. Esa evidencia marginal no paga ese costo, y menos decidido por quien
+> corre la prueba.
+>
+> **Cómo se completa cuando haya una ventana natural** (un despliegue, o
+> alguien con acceso al VPS):
+>
+> ```
+> docker exec <contenedor-motor> python cli/bateria_flujos.py rapilink --todos
+> ```
+>
+> Esperado: 21/21 con `[entorno: CONTENEDOR]` **y** `caso_id` distinto de
+> `None` en las escaladas. Ese segundo dato es el que falta hoy. Ojo: el
+> contenedor de producción monta `C:\wisphub\dexter`, así que primero hay que
+> desplegar `cli/bateria_flujos.py`.
 
 ## Qué significa terminado
 

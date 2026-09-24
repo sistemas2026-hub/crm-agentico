@@ -69,10 +69,10 @@ documental. Un directorio entero es el mismo gesto que un `add .`: basta con que
 alguien deje un archivo ajeno adentro. Verificar siempre con
 `git diff --cached --name-only` antes de commitear.
 
-## VALIDACIÓN DE PRODUCCIÓN — 9 de 10, bloqueado por acceso al VPS
+## VALIDACIÓN DE PRODUCCIÓN — cerrada el 24/09 con una salvedad medida
 
-Objetivo `SPEC/objetivos/endurecer-validacion-de-produccion.md`, abierto y
-avanzado el 23-24/09/2026. **No está cerrado**: falta el criterio 1.
+Objetivo `SPEC/objetivos/endurecer-validacion-de-produccion.md`. **Cerrado**,
+con una cosa que quedó sin verificar y está dicha abajo.
 
 Lo que quedó funcionando:
 
@@ -92,10 +92,18 @@ cli/evaluar.py           afirmaciones nuevas 'bloquea_con'/'no_bloquea_con':
                          y se descartaban.
 ```
 
-**Lo que falta, y no es código:** `docker exec <contenedor-motor> python
-cli/bateria_flujos.py rapilink --todos`. Sin acceso al VPS el objetivo no
-cierra, aunque todo lo demás esté verde. Esa corrida además deja casos reales
-en BottleCRM que hay que borrar.
+**Lo único que quedó sin verificar:** que la escalada cree el ticket del CRM.
+La batería corrió en contenedor (21/21) pero contra un `backend` de otro
+worktree, que devolvió 403. Ese camino **no está sin probar** —23 escalamientos
+confirmados con `caso_id` entre el 02 y el 19/09— sino sin probar por este
+arnés. Se completa en la próxima ventana con acceso al motor de producción:
+
+```
+docker exec <contenedor-motor> python cli/bateria_flujos.py rapilink --todos
+```
+
+Esperado: 21/21 y `caso_id` distinto de `None`. Antes hay que desplegar
+`cli/bateria_flujos.py`: el contenedor de producción monta `C:\wisphub\dexter`.
 
 **Lo que la auditoría adversarial dejó abierto** (nueve hallazgos anotados en
 `SPEC/auditorias/2026-09-23-bateria-de-flujos.md`). Dos que conviene mirar
