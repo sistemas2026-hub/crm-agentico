@@ -231,6 +231,22 @@ def contexto_del_caso(case_id: str) -> dict:
     import requests
     from django.utils import timezone
 
+    # Un caso sin servicio asociado no se puede resolver ni con el motor
+    # arriba: no hay contra que identificador preguntar. Se responde aca y no
+    # se llama a nadie.
+    #
+    # Importa que sea su PROPIO motivo y no 'sin_identidad_resoluble'. Los dos
+    # terminan sin ficha, pero para quien mira la orden son cosas distintas:
+    # 'no se pudo consultar' se reintenta, 'no se pudo identificar' se resuelve
+    # preguntandole a la persona, y este NO SE ARREGLA SOLO -- ese caso nacio
+    # de una conversacion, no de un ticket, y nunca va a tener servicio.
+    # Decirle al tecnico que reintente seria mandarlo a esperar algo que no va
+    # a pasar. Medido: 4 de 100 casos reales estan asi (24/09/2026).
+    from cases.models import Case
+    caso = Case.objects.filter(pk=case_id).only("external_service_id").first()
+    if caso is not None and not (caso.external_service_id or "").strip():
+        return sin_contexto("caso_sin_servicio", motor_alcanzado=True)
+
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
     tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
     cabeceras = {}

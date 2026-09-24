@@ -368,6 +368,21 @@ class TrabajoVista {
   /// otra se resuelve preguntándole a la persona.
   bool get motorAlcanzado => contexto['motor_alcanzado'] != false;
 
+  /// Por qué no hay ficha del cliente. Son **tres** casos, no dos, y el
+  /// tercero se descubrió mirando datos reales: 4 de 100 casos nacieron de una
+  /// conversación y **nunca van a tener servicio asociado**.
+  ///
+  /// Decirle «se reintenta al sincronizar» a ese tercero es mandar al técnico
+  /// a esperar algo que no va a pasar. El backend ya los distingue con su
+  /// `motivo` normalizado; acá solo se lee, no se deduce.
+  SinFicha get sinFicha {
+    if (contextoDisponible) return SinFicha.hayFicha;
+    final String motivo = contexto['motivo']?.toString() ?? '';
+    if (motivo == 'caso_sin_servicio') return SinFicha.casoSinServicio;
+    if (!motorAlcanzado) return SinFicha.noSePudoConsultar;
+    return SinFicha.clienteNoIdentificado;
+  }
+
   static double? _decimal(Object? valor) {
     if (valor == null) return null;
     if (valor is num) return valor.toDouble();
@@ -389,6 +404,34 @@ class TrabajoVista {
 /// `tipo_codigo`, que cada empresa define a su manera (la semilla del backend
 /// trae `ftth_instalacion`), así que se reconoce por lo que el texto contiene y,
 /// si no se reconoce, se muestra el nombre del tipo tal cual vino.
+/// Por que una orden no trae la ficha del cliente.
+///
+/// Tres casos, no dos. El tercero aparecio mirando datos REALES: de 100 casos
+/// de produccion, 4 nacieron de una conversacion y no tienen servicio
+/// asociado -- no van a tenerlo nunca. Con datos inventados no se habria visto,
+/// porque todos habrian tenido servicio.
+///
+/// La diferencia no es cosmetica: cada uno se arregla distinto, y dos de los
+/// tres no se arreglan solos.
+enum SinFicha {
+  /// Hay ficha. El caso normal cuando el motor resolvio.
+  hayFicha,
+
+  /// El motor no respondio. **Se reintenta**: al sincronizar puede resolverse.
+  noSePudoConsultar,
+
+  /// El motor respondio y no pudo identificar al cliente. No se reintenta: se
+  /// resuelve preguntandole a la persona. Medido por el motor sobre 85
+  /// conversaciones reales, 45 con cliente identificado -- o sea que este es
+  /// el caso NORMAL, no la excepcion.
+  clienteNoIdentificado,
+
+  /// El caso no tiene servicio asociado. **No se arregla**: nacio de una
+  /// conversacion, no de un ticket. Decir "se reintenta" aca manda al tecnico
+  /// a esperar algo que no va a pasar.
+  casoSinServicio,
+}
+
 enum FamiliaTrabajo {
   instalacion,
   incidencia,

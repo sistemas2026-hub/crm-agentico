@@ -588,6 +588,35 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
     );
   }
 
+  /// Por que no hay ficha, y que puede hacer el tecnico con eso.
+  ///
+  /// El texto cambia el consejo, no solo la redaccion: solo uno de los tres
+  /// mejora reintentando. Prometer un reintento donde no lo hay es peor que no
+  /// decir nada -- lo deja esperando.
+  Widget _avisoSinFicha(SinFicha caso) {
+    final (IconData icono, String texto) = switch (caso) {
+      SinFicha.noSePudoConsultar => (
+          Icons.cloud_off,
+          'Sin ficha: no se pudo consultar. Se reintenta al sincronizar'
+        ),
+      SinFicha.clienteNoIdentificado => (
+          Icons.person_off,
+          'Sin ficha: no se pudo identificar al cliente. Preguntale en sitio'
+        ),
+      SinFicha.casoSinServicio => (
+          Icons.link_off,
+          'Sin ficha: este caso no tiene servicio asociado. No va a llegar'
+        ),
+      SinFicha.hayFicha => (Icons.info_outline, ''),
+    };
+    return _aviso(
+      icono: icono,
+      texto: texto,
+      color: AppColors.onSurfaceVariant,
+      fondo: AppColors.surfaceContainer,
+    );
+  }
+
   Widget _masDatos() {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.sm),
@@ -598,18 +627,12 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          // Cuando no hay ficha, decir POR QUE. 'No se pudo preguntar' y 'se
-          // pregunto y no se pudo identificar al cliente' se arreglan distinto:
-          // una se reintenta, la otra se resuelve hablando con la persona.
-          if (!trabajo.contextoDisponible) ...<Widget>[
-            _aviso(
-              icono: trabajo.motorAlcanzado ? Icons.person_off : Icons.cloud_off,
-              texto: trabajo.motorAlcanzado
-                  ? 'Sin ficha: no se pudo identificar al cliente'
-                  : 'Sin ficha: no se pudo consultar. Se reintenta al sincronizar',
-              color: AppColors.onSurfaceVariant,
-              fondo: AppColors.surfaceContainer,
-            ),
+          // Cuando no hay ficha, decir POR QUE. Son TRES casos y cada uno se
+          // arregla distinto -- dos de ellos no se arreglan solos, asi que
+          // prometer un reintento en el que no corresponde manda al tecnico a
+          // esperar algo que no va a pasar.
+          if (trabajo.sinFicha != SinFicha.hayFicha) ...<Widget>[
+            _avisoSinFicha(trabajo.sinFicha),
             const SizedBox(height: AppSpacing.sm),
           ],
           _dato(icono: Icons.router, valor: trabajo.ipCliente, vacio: 'IP no disponible'),
