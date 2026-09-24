@@ -80,21 +80,3 @@ export async function destinoDelAsistente(locals, fetch) {
   if (!tenant) return null;
   return { baseUrl, tenant };
 }
-
-/**
- * La variable de entorno, y por qué sigue existiendo.
- *
- * Mientras la migración de los 70 archivos no termine, un despliegue de una
- * sola empresa tiene que seguir funcionando. Esta función es el puente y **se
- * borra cuando el último archivo use `tenantDeLaSesion`** — no es un default
- * permanente.
- *
- * Deliberadamente NO la usa `tenantDeLaSesion`: si la sesión no dice de qué
- * empresa es, caer a la variable sería reintroducir exactamente el problema
- * que este módulo resuelve. Quien la use, la usa a la vista.
- *
- * @returns {string|null}
- */
-export function tenantDeLaInstalacion() {
-  return env.PRIVATE_ASISTENTE_TENANT || null;
-}

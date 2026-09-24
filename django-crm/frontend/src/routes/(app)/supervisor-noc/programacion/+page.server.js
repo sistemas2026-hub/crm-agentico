@@ -60,7 +60,7 @@ function hoy() {
 }
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ cookies, locals, url }) {
+export async function load({ cookies, locals, url, fetch }) {
   const rol = /** @type {any} */ (locals).profile?.role ?? null;
   if (!ROLES_GESTION.has(rol)) {
     return { puedeVer: false, rol, org: locals.org?.name ?? null, dia: hoy() };
@@ -75,7 +75,7 @@ export async function load({ cookies, locals, url }) {
     leerJornada({ cookies }, dia),
     leerCapacidad({ cookies }, dia),
     listarPropuestas({ cookies }),
-    leerAutonomia()
+    leerAutonomia(locals, fetch)
   ]);
 
   // Las recomendaciones de esta pantalla son las propuestas del dominio de

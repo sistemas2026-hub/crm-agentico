@@ -35,7 +35,7 @@ import { leerCapacidad } from '$lib/server/v2/programacion-noc.js';
 const ROLES_GESTION = new Set(['ADMIN', 'SUPERVISOR', 'OPERACIONES']);
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ cookies, locals, url }) {
+export async function load({ cookies, locals, url, fetch }) {
   const rol = /** @type {any} */ (locals).profile?.role ?? null;
   const puedeVer = ROLES_GESTION.has(rol);
 
@@ -65,7 +65,7 @@ export async function load({ cookies, locals, url }) {
   const [indicadores, todas, autonomia, capacidad, actividad] = await Promise.all([
     leerIndicadores({ cookies }, dias ?? undefined),
     listarPropuestas({ cookies }),
-    leerAutonomia(),
+    leerAutonomia(locals, fetch),
     leerCapacidad({ cookies }, hoy),
     leerActividad({ cookies })
   ]);

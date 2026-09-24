@@ -176,7 +176,11 @@ describe('no se llama a ningun sistema externo', () => {
   });
 
   it('leerAutonomia es de LECTURA: sin motor configurado no inventa un estado', async () => {
-    const r = await leerAutonomia();
+    // Se le pasa una sesion completa a proposito: lo que falta es el MOTOR
+    // (el env esta mockeado vacio), no la empresa. Si el sujeto fuera una
+    // sesion sin organizacion, la prueba pasaria por el motivo equivocado.
+    const sesion = /** @type {any} */ ({ org: { id: 'org-1' } });
+    const r = await leerAutonomia(sesion, /** @type {any} */ (globalThis.fetch));
 
     // Lo que NO puede pasar: decir "DETENIDA" sin haberlo leido. Esa es la
     // falla ABIERTA que el interruptor existe para evitar.

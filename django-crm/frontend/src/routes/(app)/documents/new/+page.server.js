@@ -3,6 +3,7 @@ import { env } from '$env/dynamic/private';
 import { getUploadOptions, uploadDocument, STATUS_CHOICES } from '$lib/server/v2/documents.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * Uploading a document.
@@ -26,7 +27,10 @@ export async function load(event) {
   // la parte del asistente.
   let rolesAsistente = [];
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  // De que empresa son los roles que se van a ofrecer. Sale de la sesion, no
+  // del entorno: en una instalacion con dos ISPs, el entorno le habria
+  // ofrecido a uno los roles del otro.
+  const tenant = baseUrl ? await tenantDeLaSesion(event.locals, event.fetch) : null;
   if (baseUrl && tenant) {
     try {
       const r = await event.fetch(`${baseUrl}/agentes?tenant=${encodeURIComponent(tenant)}`,

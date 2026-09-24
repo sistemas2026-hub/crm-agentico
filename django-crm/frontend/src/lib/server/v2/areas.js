@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * Las áreas de la empresa y de qué área es cada persona.
@@ -13,12 +14,13 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  * Devuelve `{ areas: [], areaPorPersona: {} }` si el asistente no responde:
  * ver los tickets no puede depender de que el motor esté arriba.
  *
+ * @param {App.Locals} locals
  * @param {typeof globalThis.fetch} fetch
  * @returns {Promise<{ areas: any[], areaPorPersona: Record<string, string> }>}
  */
-export async function leerAreas(fetch) {
+export async function leerAreas(locals, fetch) {
   const base = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!base || !tenant) return { areas: [], areaPorPersona: {} };
 
   const t = encodeURIComponent(tenant);

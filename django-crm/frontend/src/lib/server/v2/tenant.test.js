@@ -15,7 +15,7 @@ const { envMock } = vi.hoisted(() => ({
 vi.mock('$env/dynamic/private', () => ({ env: envMock }));
 vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({}) }));
 
-const { tenantDeLaSesion, tenantDeLaInstalacion, destinoDelAsistente } =
+const { tenantDeLaSesion, destinoDelAsistente } =
   await import('./tenant.js');
 
 const CONFIGURADO = {
@@ -91,15 +91,57 @@ describe('de qué empresa son los datos de quien inició sesión', () => {
   });
 });
 
-describe('el puente que se borra cuando termine la migración', () => {
-  it('devuelve la variable de entorno, a la vista de quien la use', () => {
-    expect(tenantDeLaInstalacion()).toBe('rapilink');
-  });
+describe('la empresa no vuelve a salir del entorno', () => {
+  /**
+   * Guarda de arquitectura, hermana de `tests/test_nucleo_sin_tenants.py`.
+   *
+   * Hasta el 24/09/2026 `PRIVATE_ASISTENTE_TENANT` se leía en 70 archivos: la
+   * instalación entera servía a una sola empresa, y con dos cada una de esas
+   * lecturas le habría servido a un ISP los datos del otro (PRD §8.13).
+   *
+   * Afirma sobre el EFECTO —que nadie lee esa variable— y no sobre que exista
+   * `tenantDeLaSesion`. Una prueba de que el mecanismo existe no prueba que se
+   * use, y acá lo que importa es que NO se use el otro. Antes hubo un puente
+   * (`tenantDeLaInstalacion`) que devolvía la variable a la vista; se borró
+   * cuando el último archivo dejó de necesitarlo, y esto impide que vuelva.
+   *
+   * Si esta prueba falla: la empresa se resuelve con `tenantDeLaSesion(locals,
+   * fetch)`. Si `locals` no llega hasta ahí, hay que pasarlo — no leer el
+   * entorno.
+   */
+  it('ningún archivo de src/ lee PRIVATE_ASISTENTE_TENANT', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const { join, sep: SEP } = await import('node:path');
 
-  it('y nada si no está definida', () => {
-    delete envMock.PRIVATE_ASISTENTE_TENANT;
-    expect(tenantDeLaInstalacion()).toBeNull();
-  });
+    const raiz = join(process.cwd(), 'src');
+    /** @type {string[]} */
+    const culpables = [];
+
+    /** @param {string} dir */
+    function recorrer(dir) {
+      for (const entrada of readdirSync(dir, { withFileTypes: true })) {
+        const ruta = join(dir, entrada.name);
+        if (entrada.isDirectory()) {
+          recorrer(ruta);
+          continue;
+        }
+        // Los .test.js quedan fuera: ahí la variable aparece dentro de los
+        // mocks del entorno, que es legítimo — es justo lo que simulan.
+        if (!entrada.name.endsWith('.js') && !entrada.name.endsWith('.svelte')) continue;
+        if (entrada.name.endsWith('.test.js')) continue;
+        if (readFileSync(ruta, 'utf8').includes('env.PRIVATE_ASISTENTE_TENANT')) {
+          culpables.push(ruta.slice(raiz.length + 1).split(SEP).join('/'));
+        }
+      }
+    }
+    recorrer(raiz);
+
+    expect(culpables).toEqual([]);
+    // 30 s y no los 5 por defecto: recorrer src/ entero cuesta ~8 s cuando el
+    // proyecto esta montado desde Windows dentro del contenedor. Es el precio
+    // de una guarda que mira el arbol de verdad en vez de confiar en un
+    // import, y se paga una vez por corrida.
+  }, 30_000);
 });
 
 describe('el destino, que reemplaza ocho copias idénticas', () => {

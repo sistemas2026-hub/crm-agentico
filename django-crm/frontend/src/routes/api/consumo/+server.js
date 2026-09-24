@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { destinoDelAsistente } from '$lib/server/v2/tenant.js';
 
 /**
  * Proxy hacia el motor para el consumo: cuánto gasta la empresa y en qué punto
@@ -14,19 +14,12 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  * El tenant sale del entorno del servidor, nunca del cliente.
  */
 
-function cfg() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
-
-function guardia(locals) {
+async function guardia(locals, fetch) {
   if (!locals.user) return json({ error: 'No autenticado' }, { status: 401 });
   if (locals.profile?.role !== 'ADMIN') {
     return json({ error: 'Solo un administrador puede ver el consumo.' }, { status: 403 });
   }
-  if (!cfg()) {
+  if (!(await destinoDelAsistente(locals, fetch))) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });
   }
@@ -35,9 +28,9 @@ function guardia(locals) {
 
 /** @type {import('./$types').RequestHandler} */
 export async function GET({ locals, fetch, url }) {
-  const negado = guardia(locals);
+  const negado = await guardia(locals, fetch);
   if (negado) return negado;
-  const { baseUrl, tenant } = /** @type {any} */ (cfg());
+  const { baseUrl, tenant } = /** @type {any} */ (await destinoDelAsistente(locals, fetch));
   const dias = url.searchParams.get('dias') || '30';
 
   try {
@@ -59,9 +52,9 @@ export async function GET({ locals, fetch, url }) {
  * archivos con el mismo encabezado.
  */
 export async function PUT({ locals, request, fetch }) {
-  const negado = guardia(locals);
+  const negado = await guardia(locals, fetch);
   if (negado) return negado;
-  const { baseUrl, tenant } = /** @type {any} */ (cfg());
+  const { baseUrl, tenant } = /** @type {any} */ (await destinoDelAsistente(locals, fetch));
 
   const cuerpo = await request.json().catch(() => ({}));
   const { accion, ...resto } = cuerpo ?? {};

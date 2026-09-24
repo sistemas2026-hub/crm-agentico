@@ -5,7 +5,7 @@ import { listTeam, inviteUser, setRole, setStatus, setPassword, updateUser, ROLE
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
-import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
+import { tenantDeLaSesion, destinoDelAsistente } from '$lib/server/v2/tenant.js';
 
 /**
  * Team and access.
@@ -60,7 +60,7 @@ export async function load({ locals, cookies, fetch }) {
       areas = [];
     }
   } else {
-    console.warn('[equipo] falta PRIVATE_ASISTENTE_URL o PRIVATE_ASISTENTE_TENANT');
+    console.warn('[equipo] no hay motor configurado, o la sesion no dice de que empresa es');
   }
   return { ...equipo, areas, areasTrabajo, externos, etiquetaExterna,
            asignaciones, areasPorPersona, identidades };
@@ -264,15 +264,20 @@ export const actions = {
     return { editado: name || email, avisoEdicion: aviso, claveCambiada: !!clave };
   },
 
-  invite: async ({ cookies, request, fetch }) => {
+  invite: async ({ cookies, request, fetch, locals }) => {
     // Las areas se releen aca: el action no comparte estado con el load, y
     // hace falta saber que agentes precarga la elegida.
+    //
+    // `locals` se recibe a proposito aunque el action no lo usaba antes: de
+    // ahi sale de que empresa son las areas. Leerlo del entorno significaba
+    // que una instalacion con dos ISPs le ofrecia a uno las areas del otro.
     let areasDeclaradas = [];
-    if (env.PRIVATE_ASISTENTE_URL && env.PRIVATE_ASISTENTE_TENANT) {
+    const destino = await destinoDelAsistente(locals, fetch);
+    if (destino) {
       try {
         const r = await fetch(
-          `${env.PRIVATE_ASISTENTE_URL}/agentes/asignaciones?tenant=` +
-            encodeURIComponent(env.PRIVATE_ASISTENTE_TENANT),
+          `${destino.baseUrl}/agentes/asignaciones?tenant=` +
+            encodeURIComponent(destino.tenant),
           { headers: headersMotor() }
         );
         if (r.ok) areasDeclaradas = (await r.json()).areas ?? [];

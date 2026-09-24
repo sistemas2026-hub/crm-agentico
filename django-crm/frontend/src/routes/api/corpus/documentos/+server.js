@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { destinoDelAsistente } from '$lib/server/v2/tenant.js';
 
 /**
  * Documentos del corpus: listar (GET, cualquier miembro logueado) y subir
@@ -12,20 +12,13 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  * /corpus/documentos.
  */
 
-function baseUrlYTenant() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
-
 /** @type {import('./$types').RequestHandler} */
 export async function GET({ locals, fetch }) {
   if (!locals.user) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const cfg = baseUrlYTenant();
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });
@@ -53,7 +46,7 @@ export async function POST({ request, locals, fetch }) {
     return json({ error: 'Solo un administrador puede subir documentos.' }, { status: 403 });
   }
 
-  const cfg = baseUrlYTenant();
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });

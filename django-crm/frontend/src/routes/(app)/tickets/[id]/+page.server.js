@@ -20,7 +20,7 @@ export async function load({ locals, cookies, params, fetch }) {
   let area = null;
   const responsable = datos.ticket?.assignee_id;
   if (responsable) {
-    const { areas, areaPorPersona } = await leerAreas(fetch);
+    const { areas, areaPorPersona } = await leerAreas(locals, fetch);
     const nombre = areaPorPersona[responsable];
     area = areas.find((/** @type {any} */ a) => a.nombre === nombre) ?? null;
   }

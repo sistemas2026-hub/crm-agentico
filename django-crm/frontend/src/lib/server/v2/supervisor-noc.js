@@ -25,6 +25,7 @@
 import { env } from '$env/dynamic/private';
 import { apiRequest } from '$lib/api-helpers.js';
 import { headersMotor } from './motor-headers.js';
+import { tenantDeLaSesion } from './tenant.js';
 
 /**
  * Un fallo, traducido a algo que una persona pueda leer.
@@ -238,10 +239,15 @@ export async function leerActividad({ cookies }, limite = 12) {
  *
  * Es de LECTURA y punto: esta pantalla no expone ninguna forma de mover el
  * interruptor ni el techo. Eso es gobierno, y vive en `cli/autonomia.py`.
+ *
+ * @param {App.Locals} locals
+ * @param {typeof globalThis.fetch} fetch
  */
-export async function leerAutonomia() {
+export async function leerAutonomia(locals, fetch) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  // Se comprueba la URL ANTES de resolver la empresa: sin motor al que
+  // preguntarle, preguntar de qué empresa son los datos es una llamada de más.
+  const tenant = baseUrl ? await tenantDeLaSesion(locals, fetch) : null;
   if (!baseUrl || !tenant) {
     return {
       estado: null,
