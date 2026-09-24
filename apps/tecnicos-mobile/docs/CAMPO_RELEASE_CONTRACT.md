@@ -12,11 +12,11 @@ Medido el 23/09/2026 contra `feat/campo-diseno-stitch`.
 | | |
 |---|---|
 | Versión de la aplicación | `1.0.0+1` |
-| Versión de la base local | 12 |
+| Versión de la base local | 13 |
 | Esquema de formulario soportado | 1 (una orden que pida más se bloquea) |
 | Migraciones de `campo` en el backend | 6 |
-| Pruebas | 536, verdes con la bandera de demostración apagada y encendida |
-| Archivos de prueba | 43 |
+| Pruebas | 540, verdes con la bandera de demostración apagada y encendida |
+| Archivos de prueba | 45 |
 
 ---
 
@@ -169,6 +169,23 @@ rechaza en vez de recortarse, porque recortarla en silencio produce un
 dominio que parece bueno y no resuelve.
 
 → `test/servidor_configurable_test.dart`
+
+### Una evidencia dice cuándo se capturó
+
+No sólo cuándo llegó. El backend espera `capturada_en_cliente` desde el
+principio y la aplicación no la mandaba nunca: la columna existía del otro
+lado y quedaba vacía en todas las filas.
+
+Una foto sin hora prueba que *alguien subió una foto*. Con hora prueba que se
+tomó antes de subirla — que es lo que se discute cuando alguien la revisa
+meses después. El caso que le da sentido es el día sin señal: la foto se toma
+en un sótano y sube al día siguiente; si la hora se calculara al subir, la
+evidencia diría que el técnico estuvo ahí un día después.
+
+La guarda no afirma que el campo exista: afirma que el valor que llega a la
+fila es el que se pidió, y que encolar y capturar son dos hechos distintos.
+
+→ `test/hora_de_captura_test.dart`
 
 ### Nada cruza entre personas ni entre empresas
 

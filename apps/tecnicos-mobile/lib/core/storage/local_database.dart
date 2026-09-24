@@ -103,7 +103,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 12,
+      version: 13,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -156,6 +156,35 @@ class LocalDatabase {
       }
       if (!cols.contains('cierre_clave')) {
         await db.execute('ALTER TABLE local_jornada ADD COLUMN cierre_clave TEXT;');
+      }
+    }
+
+    // v13: cuando se tomo la foto, no cuando llego al servidor.
+    //
+    // El backend esperaba `capturada_en_cliente` desde siempre y la aplicacion
+    // no la mandaba nunca: la columna existia del otro lado y quedaba vacia en
+    // todas las filas. Una foto sin hora prueba que alguien subio una foto;
+    // con hora prueba que se tomo ANTES de subirla, que es lo que se discute
+    // cuando alguien la revisa meses despues.
+    //
+    // Nula en lo ya encolado, a proposito: de esas fotos no se sabe cuando se
+    // tomaron, y escribirles la hora de la migracion seria inventar el dato
+    // que esto viene a registrar.
+    if (oldVersion < 13) {
+      // `infoEv` vacio significa que la tabla NO EXISTE, no que no tenga
+      // columnas. Sin esa distincion, una base vieja sin `cola_evidencias`
+      // entraba al ALTER y la actualizacion moria al abrir -- o sea, el
+      // camino por el que actualizar la aplicacion le borra la jornada a un
+      // tecnico. Lo cazo `migracion_v7_test`, que simula justo esa base.
+      //
+      // Cuando la tabla se cree mas adelante, nace con la columna: esta en el
+      // CREATE TABLE.
+      final infoEv = await db.rawQuery('PRAGMA table_info(cola_evidencias);');
+      final colsEv = infoEv.map((c) => c['name'] as String).toSet();
+      if (infoEv.isNotEmpty && !colsEv.contains('capturada_en')) {
+        await db.execute(
+          'ALTER TABLE cola_evidencias ADD COLUMN capturada_en INTEGER;',
+        );
       }
     }
 
@@ -541,6 +570,7 @@ class LocalDatabase {
         error_mensaje TEXT,
         registro_idempotency_key TEXT,
         confirmacion_idempotency_key TEXT,
+        capturada_en INTEGER,
         created_at INTEGER NOT NULL
       )
     ''');
@@ -990,6 +1020,7 @@ class LocalDatabase {
     required String mimeType,
     String? registroIdempotencyKey,
     String? confirmacionIdempotencyKey,
+    DateTime? capturadaEn,
   }) async {
     final db = await database;
     final regKey = registroIdempotencyKey ?? const Uuid().v4();
@@ -1009,6 +1040,12 @@ class LocalDatabase {
         'subida_estado': 'pendiente_registro',
         'registro_idempotency_key': regKey,
         'confirmacion_idempotency_key': confKey,
+        // Sin valor explicito se usa el momento de encolar. No es un relleno:
+        // entre apretar el obturador y encolar hay una copia de archivo y un
+        // sha256 -- decimas de segundo. Quien conoce el instante exacto lo
+        // pasa igual, porque decimas gratis son decimas.
+        'capturada_en':
+            (capturadaEn ?? DateTime.now()).millisecondsSinceEpoch,
         'created_at': DateTime.now().millisecondsSinceEpoch,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,

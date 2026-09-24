@@ -854,6 +854,20 @@ class SyncQueueService {
               'bytes': tamanoBytes,
               'mime_type': mimeType,
               'sha256': sha256,
+              // La hora del reloj del telefono al capturar. El servidor guarda
+              // por su cuenta `recibida_en_servidor`, y la distancia entre las
+              // dos es informacion: una foto que dice haberse tomado despues
+              // de recibida es una senal, no un dato.
+              //
+              // Va en UTC con `toIso8601String()`: Django lo interpreta como
+              // tal por la Z final, y en horario local habria guardado la hora
+              // equivocada sin avisar.
+              if (ev['capturada_en'] != null)
+                'capturada_en_cliente':
+                    DateTime.fromMillisecondsSinceEpoch(
+                            ev['capturada_en'] as int)
+                        .toUtc()
+                        .toIso8601String(),
               'client_mutation_id': registroKey,
             },
             options: Options(

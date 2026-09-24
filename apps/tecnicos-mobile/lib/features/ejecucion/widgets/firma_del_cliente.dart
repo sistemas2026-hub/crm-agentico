@@ -120,6 +120,9 @@ class _FirmaDelClienteState extends State<FirmaDelCliente> {
     });
 
     try {
+      // El momento en que el cliente levanto el dedo, no el de encolar: entre
+      // medio se escribe un PNG, se persiste y se calcula su sha256.
+      final DateTime firmadaEn = DateTime.now();
       final bytes = await _trazo.aPng(const Size(600, 300));
       final evidenciaId = const Uuid().v4();
 
@@ -152,6 +155,7 @@ class _FirmaDelClienteState extends State<FirmaDelCliente> {
         mimeType: 'image/png',
         registroIdempotencyKey: const Uuid().v4(),
         confirmacionIdempotencyKey: const Uuid().v4(),
+        capturadaEn: firmadaEn,
       );
 
       // Quién firmó y qué observó viaja con la orden, no con la imagen: son

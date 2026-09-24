@@ -205,6 +205,7 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
     required String mimeType,
     required String registroIdempotencyKey,
     required String confirmacionIdempotencyKey,
+    required DateTime capturadaEn,
   }) async {
     evidencias.add(<String, dynamic>{
       'id': id,
@@ -212,6 +213,10 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
       'archivo_path': archivoPath,
       'subida_estado': 'pendiente',
       'mime_type': mimeType,
+      // Se guarda para que una prueba pueda afirmar sobre ella. Sin esto, el
+      // doble aceptaria la hora y la tiraria, que es como una prueba pasa sin
+      // haber mirado nada.
+      'capturada_en': capturadaEn.millisecondsSinceEpoch,
     });
   }
 

@@ -193,6 +193,10 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
 
       if (foto == null) return;
 
+      // El instante en que la persona apreto el obturador -- no el de encolar,
+      // que llega despues de copiar el archivo y calcular su sha256.
+      final DateTime capturadaEn = DateTime.now();
+
       final tempFile = File(foto.path);
       // El id se genera ANTES de copiar el archivo porque el archivo se llama
       // como él: si la fila se perdiera, la foto sigue diciendo cual es su
@@ -224,6 +228,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         mimeType: 'image/jpeg',
         registroIdempotencyKey: registroKey,
         confirmacionIdempotencyKey: confirmacionKey,
+        capturadaEn: capturadaEn,
       );
 
       _evidenciasCapturadas = await _fuente.evidenciasDe(
