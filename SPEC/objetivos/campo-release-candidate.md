@@ -47,11 +47,28 @@ Del contrato §5. Cada una necesita un teléfono, una cuenta real, o tiempo.
       tenía. Ninguna volvió a aparecer.)*
       **Lo que esto NO dice todavía:** que la aplicación abra. Instalar y
       arrancar son dos cosas distintas.
-- [ ] Entrar con una cuenta real y bajar una jornada de verdad.
+- [x] **Entrar con una cuenta real y bajar una jornada de verdad.** ✅ 23/09/2026,
+      reportado por el usuario. Es la casilla que cubre `cf4684e` (*el servidor se
+      podía elegir y no cambiaba a dónde iban los pedidos*): sin ese arreglo,
+      elegir el servidor correcto no servía de nada.
 - [ ] Recorrer el día completo en el teléfono, sin red parte del tiempo.
-- [ ] Reinstalar sobre una versión anterior, para ejercitar las migraciones de
-      la base local con datos ya guardados.
+- [x] **Reinstalar sobre una versión anterior.** ✅ 23/09/2026, reportado por el
+      usuario. Ejercita las migraciones de la base local v12 con datos ya
+      guardados — el camino por el que una actualización le borra la jornada a
+      un técnico.
 - [ ] Medir arranque y scroll con una jornada de veinte órdenes.
+      **Herramienta lista, sin ejecutar:** `manage.py seed_campo_carga
+      --tecnico <correo> --ordenes 20`. Siembra órdenes asignadas a un técnico
+      y sabe deshacerlas (`--borrar`). **No crea tipos de trabajo ni esquemas**:
+      exige que `seed_campo_demo` ya los haya creado, porque un esquema de
+      formulario declarado en dos lugares es el defecto que en esta aplicación
+      apareció **cinco veces**.
+      Obliga a confirmar el entorno (`--si-la-base-es <nombre>`): imprime base,
+      host y usuario, y sin coincidencia exacta no escribe nada. El técnico
+      pedido es `mario.vasquez.moreno@rapilinksas.co`, un correo del dominio
+      real de la empresa — si esa base es producción, veinte órdenes de prueba
+      caen donde trabajan los operadores, y el repositorio lo prohíbe
+      (*no crear mocks productivos*). **Decisión del usuario, no de una sesión.**
 
 ## Restricciones
 
@@ -117,6 +134,7 @@ quién y cuándo antes de dar la candidata por lista.
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 23/09/2026 | Ficha abierta. Medido dónde vive Campo (B1) y qué falta del contrato §5 | Resolver B1 | — |
+| 23/09/2026 | Casillas 2 y 4 de la Parte B: cuenta real con jornada bajada, y reinstalación sobre versión anterior (reportadas) | Solo el rendimiento con 20 órdenes | — |
 | 23/09/2026 | Primera casilla de la Parte B: el APK instala limpio en un teléfono real (reportado) | Que abra, cuenta real, día sin red, reinstalación, rendimiento | — |
 | 23/09/2026 | **Parte A cerrada entera** en el worktree `C:/wisphub/_wt_campo`. A1–A6 verdes, medidos. B2 resuelto: los sueltos son copias | Solo la Parte B, que necesita un teléfono | ffa1761 |
 
