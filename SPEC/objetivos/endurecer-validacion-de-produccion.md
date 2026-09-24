@@ -182,3 +182,39 @@ su propia medición pareada.
 | 23/09/2026 | Batería creada; 18/18 local tras corregir una expectativa mal escrita. Bandera de entorno medida por resolución de nombre. | Criterios 1, 3, 4, 5, 9, 10 | `b66dba9` |
 | 24/09/2026 | Criterio 2 con el código ya corregido: **19/19 LOCAL**. Criterio 8: 2 propuestas `pendiente`, 0 ejecutadas, y ahora la afirmación cubre las 30 herramientas de escritura, no 14. Criterio 9 cerrado: auditoría escrita, 3 hallazgos arreglados y 9 anotados. | Criterio 1 (bloqueado por VPS) | `81677b4` |
 | 23/09/2026 | Criterios 3, 4, 5, 6, 7, 10. Caso inestable partido en dos (10/10 y 10/10). `responde_sin: [cedula]` reemplazado por `bloquea_con: [DATO_DEL_EQUIPO_NO_CARGADO]` + `no_bloquea_con: [IDENTIDAD_NO_RESUELTA]`, para lo cual `cli/evaluar.py` ganó esas dos afirmaciones. `DEXTER_ESTADO_ACTUAL.md` ya no dice «nada pusheado». | Criterios 1 (bloqueado por VPS), 2, 9 | pendiente |
+
+## Cómo reproducir estas corridas (leer antes de creer la evidencia)
+
+Añadido el 24/09/2026, al intentar volver a correr los criterios 1 y 2 desde
+este worktree y **no poder**.
+
+`C:\tmp\dexter-bandeja` no tiene `.env` — solo `.env.example` — y
+`cli/bateria_flujos.py` no llama a `load_dotenv` (a diferencia de
+`cli/evaluar.py` y `cli/diferencias_config.py`, que sí cargan `RAIZ/.env`). Sin
+`.env` y sin las cinco variables en el entorno, `nucleo/persistencia/conexion.py::dsn()`
+aborta antes de la primera conversación:
+
+```
+py -3.13 -c "import sys;sys.path.insert(0,'.');from nucleo.persistencia.conexion import dsn;dsn()"
+-> SystemExit: No hay datos de conexion en el entorno.
+```
+
+Comprobado también que las cinco variables no están en el entorno del usuario
+ni en el de la sesión. Entonces: **la evidencia de los criterios 1 y 2 se
+produjo con un entorno que hoy no existe** (un `.env` que estaba y ya no está,
+o un prefijo de variables en la línea de comandos que no quedó registrado). Las
+salidas pegadas son reales, pero quien las quiera repetir hoy choca contra esto
+en el primer segundo, y sin este aviso lo va a leer como una regresión del
+motor.
+
+Lo mismo vale para el criterio 1: el servicio `motor` del `docker-compose.yml`
+monta `./nucleo`, `./cli`, `./tenants` y `./evaluacion` por bind mount, así que
+levantarlo desde este worktree daría un contenedor con el código de esta rama
+**sin push** — pero necesita `env_file: .env`, que aquí no existe, y además
+`[entorno: CONTENEDOR]` exige que el nombre `backend` resuelva, lo que obliga a
+levantar también `backend`, `db` y `redis`. Esa es la ruta real para cerrar el
+criterio 1; no está bloqueada por acceso al VPS, como decía la bitácora del
+24/09. Lo que falta es decidir de dónde sale el `.env` sin copiar secretos
+(la vía limpia es `env_file` con ruta absoluta al del checkout principal, que
+lo lee Compose y no una persona) y aceptar que el `db` del compose usa el
+volumen externo compartido `django-crm_postgres_data`.
