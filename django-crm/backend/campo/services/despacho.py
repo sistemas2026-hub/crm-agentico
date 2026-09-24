@@ -288,7 +288,14 @@ def sin_contexto(motivo: str, *, motor_alcanzado: bool) -> dict:
 # nombre y la direccion si -- hay que saber a quien se visita y donde.
 # Tampoco entra nada crudo del proveedor: la fila del cliente trae 54 campos,
 # cuatro de ellos contraseñas y uno el GPS del domicilio.
-CAMPOS_CLIENTE_SNAPSHOT = ("nombre", "estado", "plan", "ip")
+#
+# 'localidad' (24/09/2026): el motor ya la manda -- esta en su _CAMPOS_FICHA
+# junto a 'ip' y 'direccion'-- y esta lista era el unico lugar donde se caia.
+# No hizo falta migracion ni tocar el motor: el dato ya viajaba entero hasta
+# aca. La direccion sola dice el numero de la casa; la localidad dice en que
+# parte del pueblo queda, que es lo que decide si una visita entra en la ruta
+# de hoy.
+CAMPOS_CLIENTE_SNAPSHOT = ("nombre", "estado", "plan", "ip", "localidad")
 
 
 def depurar_contexto(crudo: dict) -> dict:

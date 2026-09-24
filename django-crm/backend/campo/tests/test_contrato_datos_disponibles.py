@@ -214,3 +214,65 @@ def test_8_el_contrato_anterior_sigue_intacto(user_client, orden):
         assert campo in detalle, f"desapareció del contrato: {campo}"
 
     assert detalle["cliente"]["direccion"] == "Calle 45 #12-88"
+
+
+# --- 24/09/2026 · la localidad se caía en el último filtro -------------------
+
+def test_9_la_localidad_del_cliente_sobrevive_al_snapshot():
+    """
+    El motor ya mandaba la localidad y se perdía acá.
+
+    Está en su `_CAMPOS_FICHA` junto a `ip` y `direccion`, viaja entera hasta
+    `depurar_contexto()`, y esta lista blanca era el único lugar donde se
+    caía. No hizo falta migración ni tocar el motor: el dato ya llegaba.
+
+    La dirección sola dice el número de la casa; la localidad dice en qué
+    parte del pueblo queda, que es lo que decide si una visita entra en la
+    ruta de hoy.
+    """
+    from campo.services.despacho import depurar_contexto
+
+    crudo = {
+        "cliente": {
+            "nombre": "Quien Sea",
+            "estado": "Activo",
+            "plan": "Fibra 300",
+            "ip": "10.0.0.9",
+            "localidad": "SAN JOSE",
+            "cedula": "1044601347",
+            "direccion": "Cl. 45 #12-88",
+        },
+        "identidad": {"servicio": "7127", "origen": "wisphub"},
+    }
+
+    cliente = depurar_contexto(crudo)["cliente"]
+
+    assert cliente["localidad"] == "SAN JOSE", "la localidad tiene que pasar"
+    assert cliente["ip"] == "10.0.0.9", "y la ip seguir pasando"
+
+
+def test_10_el_snapshot_sigue_dejando_afuera_el_dato_personal():
+    """
+    Abrir la lista blanca para la localidad no puede abrirla para todo.
+
+    Afirma el EFECTO —qué claves quedan— y no la presencia de la constante:
+    una prueba que solo mirara `CAMPOS_CLIENTE_SNAPSHOT` seguiría en verde si
+    alguien cambiara la comprensión de lista que filtra de verdad.
+    """
+    from campo.services.despacho import depurar_contexto
+
+    crudo = {
+        "cliente": {
+            "nombre": "Quien Sea",
+            "localidad": "SAN JOSE",
+            "cedula": "1044601347",
+            "password_servicio": "no-deberia-estar",
+            "gps": "6.24,-75.58",
+            "direccion": "Cl. 45 #12-88",
+        },
+    }
+
+    cliente = depurar_contexto(crudo)["cliente"]
+
+    for prohibido in ("cedula", "password_servicio", "gps"):
+        assert prohibido not in cliente, f"se coló al snapshot: {prohibido}"
