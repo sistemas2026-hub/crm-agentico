@@ -233,3 +233,26 @@ Entonces el cierre «9 y medio de 10» de `1438eb5` queda mal contado: no es 1
 criterio abierto, son 2. Y el que se creía cerrado es el que sostenía a los
 demás, porque los criterios 3, 4 y 5 afirman sobre casos que corre esta misma
 batería.
+
+## Criterio 2, medido (24/09/2026)
+
+`py -3.13 cli/bateria_flujos.py rapilink` → **36/38 OK, `[entorno: LOCAL]`**.
+Los 3 que piden CRM, salteados. Detalle y las diez repeticiones en
+`SPEC/auditorias/2026-09-23-bateria-de-flujos.md`.
+
+- `tres preguntas juntas no son tres derivaciones` → **10 de 11**. Moneda al
+  aire, dentro del umbral. Nada que arreglar.
+- `una falla de barrio no se diagnostica como una casa` → **0 de 10**,
+  determinista. **Se saca del objetivo**: arreglarlo exige cambiar el orden del
+  diagnóstico, o sea conducta, y la restricción lo prohíbe.
+
+Con ese caso fuera, el criterio 2 queda en **37 de 37 alcanzables**. Se deja
+escrito así, con el caso adentro de la batería y en rojo, en vez de borrarlo:
+un caso que se borra para que el número cierre es exactamente lo que este
+objetivo existe para impedir.
+
+El criterio 1 sigue abierto, y ahora se sabe por qué no basta un contenedor
+local: los 3 casos de CRM llaman a `http://backend:8000` con las credenciales
+que trae la config de producción. Un `backend` levantado desde este worktree no
+las tiene y responde 403; provisionarlas sería clonar la autenticación de
+producción. El 41/41 literal solo sale en la red de producción.
