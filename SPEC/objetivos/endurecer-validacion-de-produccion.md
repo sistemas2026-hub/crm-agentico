@@ -256,3 +256,25 @@ local: los 3 casos de CRM llaman a `http://backend:8000` con las credenciales
 que trae la config de producción. Un `backend` levantado desde este worktree no
 las tiene y responde 403; provisionarlas sería clonar la autenticación de
 producción. El 41/41 literal solo sale en la red de producción.
+
+## Criterios 6 y 7, medidos (24/09/2026)
+
+**7 · `cli/diferencias_config.py rapilink` → exit 0.** Las 3 diferencias son
+las sincronizadas (`localidades`, `localidades_actualizado_en`,
+`parrilla_canales`): la base las tiene y el archivo no, que es la dirección
+normal.
+
+**6 · `cli/evaluar.py rapilink --humo --base` → 9 de 9 corribles en verde.**
+El décimo (`cancelar una solicitud empieza por la cedula, no por cancelar`) no
+falló: **no se pudo correr**, por la misma causa que los 3 de la batería —las
+herramientas del backend propio usan `backend:8000`, nombre de red del compose—
+y el corredor distingue las dos cosas por su cuenta.
+
+Importa por lo que NO rompió: el cambio a `CODIGOS_DE_BLOQUEO` (commit
+`4ac7dfb`) era justo el que la auditoría pedía no hacer sin medir, porque mueve
+qué cuenta como error en toda la evaluación. **Medido: ningún caso dorado se
+movió.** La medición que quedaba pendiente del hallazgo 4 está hecha.
+
+Queda dicho, porque el propio corredor lo avisa: el set de humo tiene 10 casos
+y la config pide 50 para dar una corrida por buena. Sirve para detectar
+regresiones; no es criterio de aceptación por sí solo.
