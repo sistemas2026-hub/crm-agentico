@@ -244,7 +244,8 @@ def contexto_del_caso(case_id: str) -> dict:
     # a pasar. Medido: 4 de 100 casos reales estan asi (24/09/2026).
     from cases.models import Case
     caso = Case.objects.filter(pk=case_id).only("external_service_id").first()
-    if caso is not None and not (caso.external_service_id or "").strip():
+    servicio = (caso.external_service_id or "").strip() if caso else ""
+    if caso is not None and not servicio:
         return sin_contexto("caso_sin_servicio", motor_alcanzado=True)
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
@@ -255,8 +256,22 @@ def contexto_del_caso(case_id: str) -> dict:
         cabeceras["X-Servicio-Token"] = token
 
     try:
+        # 'servicio' es el identificador que el proveedor le puso al ticket, y
+        # va SIEMPRE que el caso lo traiga. Sin el, un caso importado del ISP
+        # --que no tiene conversacion detras-- nunca conseguia ficha: el motor
+        # resolvia la identidad solo desde el chat, y ahi no hay ninguno.
+        #
+        # El motor ya lo contemplaba y nadie se lo mandaba. Su propio
+        # 'identidad_del_contexto' lo dice: "un caso importado del sistema del
+        # ISP trae su propio identificador de servicio y no tiene conversacion
+        # detras; uno nacido de un chat tiene la conversacion y no el
+        # identificador". Cuando estan los dos gana el del caso, y si no
+        # coinciden lo informa como discrepancia en vez de elegir en silencio.
+        parametros = {"tenant": tenant}
+        if servicio:
+            parametros["servicio"] = servicio
         r = requests.get(f"{base}/conversaciones/por-caso/{case_id}",
-                         params={"tenant": tenant}, headers=cabeceras, timeout=30)
+                         params=parametros, headers=cabeceras, timeout=30)
         r.raise_for_status()
         crudo = (r.json() or {}).get("contexto") or {}
     except Exception as e:                                   # noqa: BLE001
