@@ -83,6 +83,19 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
+from dotenv import load_dotenv                                           # noqa: E402
+
+# Igual que cli/evaluar.py y cli/diferencias_config.py, y por el mismo motivo:
+# sin esto la bateria depende de que las cinco variables de conexion ya esten
+# en el entorno, y cuando no estan no falla en el caso 1 -- falla en dsn(),
+# antes de la primera conversacion, con un mensaje que no menciona la
+# bateria. Se vio el 24/09/2026 al intentar repetir una corrida en un
+# worktree sin .env: la salida se lee como una regresion del motor.
+# override=False por la razon que documenta evaluar.py: dentro de un
+# contenedor, un .env horneado en la imagen no puede pisar lo que declara
+# el despliegue.
+load_dotenv(RAIZ / ".env", override=False)
+
 from nucleo.canales import api                                           # noqa: E402
 from nucleo.config import fuente                                         # noqa: E402
 from nucleo.persistencia.db import sesion                                # noqa: E402
@@ -437,14 +450,18 @@ CASOS = [
          {"usa": ["verificar_identidad_por_cedula"],
           "no_usa": ["registrar_pago"]}),
     # ⚠ HALLAZGO DE LA PRIMERA TANDA -- el desenlace de este mensaje NO es
-    # estable. Cuatro corridas seguidas, mismo texto, sin tocar nada entre
+    # estable. CINCO corridas seguidas, mismo texto, sin tocar nada entre
     # ellas (24/09/2026, base dexter_local, entorno LOCAL):
     #
     #   1 y 3   derivo a facturacion y llamo 'reportar_comprobante_pago'  <- lo correcto
-    #   2       RE-DERIVO a soporte_tecnico_cliente y propuso 'reiniciar_ont'
+    #   2 y 5   RE-DERIVO a soporte_tecnico_cliente y propuso 'reiniciar_ont'
     #   4       ni lo uno ni lo otro: verifico identidad y se quedo ahi
     #
-    # O sea 2 de 4. Un cliente que escribe "ya pague, les mando el comprobante"
+    # O sea 2 de 5, y la 5 fue DESPUES de arreglar el simulador: la varianza no
+    # venia del arnes. Ojo con leer el verde de este caso como "hizo lo mejor":
+    # la corrida 5 quedo [ok] --cumple lo que el caso afirma-- y sin embargo
+    # termino proponiendo un reinicio en vez de pasar el comprobante a cartera.
+    # Un cliente que escribe "ya pague, les mando el comprobante"
     # recibe tres tratos distintos segun la corrida, y uno de ellos le propone
     # reiniciar el equipo --que corta el servicio seis minutos-- en vez de
     # pasarle el comprobante a cartera.
