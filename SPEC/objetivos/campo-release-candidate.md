@@ -1,7 +1,11 @@
-# Objetivo · Dexter Campo — versión candidata
+# Objetivo · Dexter Campo — candidata y pulido
 
-> Abierto el 23/09/2026. Estado: **abierto** — Parte A ✅ · Parte B 4 de 5.
-> Falta solo recorrer un día completo sin red en un teléfono.
+> Abierto el 23/09/2026. Estado: **abierto**, en **Fase 2 · pulido** (24/09/2026).
+>
+> **Fase 1 · candidata:** Parte A ✅ medida · Parte B 4 de 5. Sus números quedan
+> como **línea base**, no como trabajo terminado.
+> **Fase 2 · pulido:** decidida el 24/09/2026. Se permiten cambios de
+> funcionalidad y de arquitectura — lo que la Fase 1 prohíbía.
 > Primera ficha del sistema. Lo que encontró al estrenarse está en "Qué reveló
 > esta ficha", al final — no se borra: es lo que hay que arreglar del sistema.
 
@@ -113,25 +117,119 @@ Las tres permanentes del repositorio:
 - **NO escribir `tenant_config`** — parte la medición de razonamiento ON/OFF.
 - **NO correr los 56 casos dorados** — son del motor, no de Campo.
 
-Las propias de este objetivo:
+Las propias de este objetivo, **relajadas el 24/09/2026** al entrar en pulido:
 
-- **NO agregar funcionalidad.** Una candidata se estabiliza, no se amplía.
-- **NO cambiar arquitectura.** Los seis invariantes del contrato §3 se respetan;
-  el más caro ya apareció **cinco veces**: el esquema del formulario se lee en
-  un solo lugar (`campo_del_formulario.dart`).
-- **NO tocar `nucleo/`, `django-crm/` ni `tenants/`.** Este objetivo es la app.
+- ~~NO agregar funcionalidad~~ · ~~NO cambiar arquitectura~~ — **levantadas.**
+  La Fase 2 existe para eso. Queda escrito que se levantaron a propósito y
+  cuándo, no que nunca estuvieron.
 - **NO integrar `feat/campo-diseno-stitch` a otra rama** sin decisión explícita:
-  es una decisión de entrega, no un paso del objetivo.
+  sigue siendo una decisión de entrega (ver B1).
+- **NO tocar `nucleo/` ni `tenants/`** — ese es el motor, no la app. `django-crm/`
+  sí se puede, porque varios módulos de la Fase 2 necesitan backend.
+
+### Lo que NO se relaja, y por qué
+
+Relajar no es quedarse sin límites. **Los seis invariantes del contrato §3
+siguen en pie**, cada uno con su prueba, y romperlos no es "pulir":
+
+| Invariante | Su prueba |
+|---|---|
+| El esquema del formulario se lee en **un solo lugar** (`campo_del_formulario.dart`) | `test/arquitectura_esquema_test.dart` |
+| `lib/core/` no alcanza `lib/demo/`, ni directo ni por terceros | `test/arquitectura_demo_test.dart` |
+| Fuera del modo demostración no se dibuja un valor de ejemplo (medido en **las dos** compilaciones) | `test/guarda_demo_test.dart` |
+| Dos estados distintos no se dibujan igual | `test/matriz_de_estados_test.dart` |
+| Tomar el cierre ≠ tener la jornada cerrada | `test/cierre_jornada_app_test.dart` |
+| Nada cruza entre personas ni entre empresas: la identidad va en el `WHERE` | `test/isolation_cross_tenant_test.dart` |
+
+El primero apareció **cinco veces** con síntomas distintos —el asterisco rojo
+sin validación, el desplegable sin opciones, el botón que cerraba órdenes con
+obligatorios vacíos— y ninguna lectura estaba mal escrita: *el problema era que
+existieran varias*. Si el pulido necesita cambiar uno de estos seis, eso es una
+decisión explícita con su motivo, no un efecto colateral.
 
 ## Qué NO hacer
 
-- **No construir lo que el contrato §2 declara ausente** — telemetría óptica,
-  vehículo, academia, turno y cuadrilla, escáner, mapa. Son **51** datos
-  pendientes, inventariados, y su ausencia es deliberada: *un destino que lleva
-  a "en construcción" es una promesa que no se cumple.*
-- **No normalizar el esquema de evidencias.** Es deuda anotada del contrato §6,
-  real, y no es de esta entrega.
-- **No prometer la Parte B como hecha** porque la A esté verde.
+- **No prometer la Parte B como hecha** porque la A esté verde. Sigue en pie:
+  instalar, entrar, reinstalar y medir no dicen nada sobre un día sin señal.
+- **No dejar un destino que lleve a "en construcción".** Dos secciones —Academia
+  y Más— se quitaron de la barra de navegación por esto, y la regla sobrevive al
+  pulido: un módulo entra a la navegación **cuando funciona**, no cuando empieza.
+  *Un destino que lleva a "en construcción" es una promesa que no se cumple.*
+- **No romper un invariante del contrato §3 de pasada.** Si el pulido necesita
+  cambiar uno de los seis, se decide y se escribe el motivo. Ver arriba.
+
+*Corregido el 24/09/2026:* esta sección decía «no construir lo que el contrato
+§2 declara ausente» y «no normalizar el esquema de evidencias». Las dos eran
+restricciones de la Fase 1 y **son exactamente el trabajo de la Fase 2** (2.B y
+2.C). Dejarlas habría hecho que la ficha se contradijera a sí misma.
+
+## Fase 2 · Pulido (24/09/2026)
+
+Cuatro frentes, elegidos los cuatro. **Cada uno cierra por separado**: una ficha
+con cuatro alcances y sin cierres propios deja de ser un contrato.
+
+### 2.A · Datos y contenido reales
+
+Que la app muestre lo que la empresa usa, no los ejemplos. Catálogos, textos,
+tipos de trabajo, protocolos de atención, campos del formulario.
+
+*Criterio de aceptación: **pendiente de definir contigo** — hace falta saber qué
+datos son. Sin eso no hay comando ni salida esperada, y un criterio que no se
+puede escribir así es un deseo.*
+
+### 2.B · Lo que el contrato §2 declara ausente
+
+Telemetría óptica (RX, CTO, puerto PON) · vehículo y preoperacional · academia ·
+turno y cuadrilla · estado de jornada marcable sin señal · hora del último envío
+bueno · escáner de códigos y medidor Bluetooth · mapa y ruta.
+
+Son **51** datos inventariados en `campo_datos_pendientes.md`, y **ninguno es
+solo interfaz**: cada uno arrastra su integración (el puente con SmartOLT,
+`jornada.turno` en el backend, una cola propia de cambios, hardware). Se eligen
+de a uno, no en bloque.
+
+*Criterio por módulo: la pantalla lo muestra con dato real, su prueba existe, y
+el dato viaja por la cola sin duplicarse.*
+
+### 2.C · Deuda de arquitectura del contrato §6
+
+- **El esquema de evidencias no tiene modelo normalizado.** Se lee en cuatro
+  archivos, declarados a mano en la guarda. Tiene **el mismo riesgo que tuvo el
+  de campos** — el que apareció cinco veces — y va a terminar igual si crece.
+  Es el trabajo de mayor rendimiento de los cuatro frentes.
+- `TrabajoScreen` y `MaterialesScreen` no reciben el estado de la cola: la señal
+  se ve solo en la franja del armazón. Hoy es una decisión, no un hueco; si el
+  pulido la cambia, que sea por un motivo escrito.
+
+*Criterio: el esquema de evidencias se lee en un solo lugar, con su prueba de
+arquitectura — la misma forma que ya resolvió el de campos.*
+
+### 2.D · Diseño e interacción
+
+Jerarquía visual, espaciado, estados vacíos, transiciones, legibilidad bajo el
+sol. El proyecto de diseño vigente es **`Dexter Campo App`** (Field Operations
+Precision Engine, Inter) — hay **otro con nombre casi igual que NO es el
+implementado**, y confundirlos es rehacer la pantalla equivocada.
+
+*Criterio: `test/matriz_de_estados_test.dart` sigue verde —dos estados distintos
+no se dibujan igual— y las capturas por pantalla se comparan contra las de hoy.*
+
+### Cierre de la Fase 2
+
+Cualquiera sea el frente, al cerrar se **vuelve a correr la Parte A completa**
+contra la línea base de la Fase 1:
+
+| | Línea base (23/09/2026) |
+|---|---|
+| `flutter test`, las dos compilaciones | 536 + |
+| APK de release | 53.2 MB |
+| Arranque en régimen | 1327–1666 ms (media ~1,5 s) |
+| Scroll, p95 | 34 ms · 0 cuadros descartados |
+
+Sin esa comparación no se sabe qué costó el pulido, y ese es el único motivo por
+el que la Fase 1 no se cerró como abandonada.
+
+---
 
 ## Agentes involucrados
 

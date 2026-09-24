@@ -40,7 +40,12 @@ empieza decidiendo dónde se ejecuta.
 Centro de Mando        🟡 desplegado (ee4563f). Quedan dos entradas de menú que
                           se pisan, y E2E-001 fuera por el choque en el
                           serializer de campo
-Dexter Campo RC        🟡 Parte A ✅ medida en feat/campo-diseno-stitch:
+Dexter Campo           🟡 FASE 2 · PULIDO desde el 24/09/2026: datos reales,
+                          los modulos ausentes del contrato §2, la deuda del §6
+                          y diseno. Se permiten cambios de funcionalidad y
+                          arquitectura; los seis invariantes del §3 NO se
+                          relajan. Fase 1 (candidata) queda como linea base:
+                          Parte A ✅ medida en feat/campo-diseno-stitch:
                           536 pruebas verdes en las dos compilaciones y APK de
                           release de 53.2 MB. Parte B 4 de 5 (falta recorrer un
                           día sin red). BLOQUEA LA ENTREGA: produccion tiene 2
