@@ -257,6 +257,10 @@ El `pre-commit` no verifica que un auditor haya corrido, y es a propósito: no h
 - Decir qué quedó fuera y por qué. Reducir el alcance es decisión del usuario, no del agente.
 - Si el trabajo cerró un gate o cambió el estado, actualizar [SPEC/DEXTER_ESTADO_ACTUAL.md](SPEC/DEXTER_ESTADO_ACTUAL.md): **un gate no está cerrado hasta que ese archivo lo refleje**, y se poda al actualizar — una sección vieja no es inocua, la siguiente sesión la lee como verdad.
 
+- **Ese archivo tiene un solo escritor: la sesión de `integrar-centro-mando`.** Las demás **no lo editan**; entregan el hash y una línea de qué cerraron, y la sesión dueña lo escribe. Regla del 24/09/2026, con su evidencia al final del propio archivo (`UN SOLO DUEÑO DEL ESTADO`): ese día tres sesiones se cruzaron tres veces —dos arreglaron el **mismo defecto** sin saberlo, dos editaron el archivo y sus copias divergieron 252 líneas, y una rebaseó commits ajenos sin avisar—. Un documento de autoridad con dos escritores no es autoridad: son dos borradores con el mismo nombre.
+
+- **Para afirmar que algo está desplegado se compara el contenido, no el hash.** `git patch-id --stable` contra la rama de despliegue; `merge-base --is-ancestor` **no ve un commit rebaseado por otra sesión** y lo cuenta como ausente estando presente. Así se midió mal el 24/09 y el propio archivo de estado terminó afirmando lo contrario de la realidad, dos veces el mismo día, una en cada dirección.
+
 ### §11.1 Los agentes de este repositorio
 
 Viven en [.claude/agents/](.claude/agents/). **No están partidos por cargo** (arquitecto / desarrollador / QA) sino por **superficie de falla**: cada uno tiene su procedimiento, sus archivos y su comando. El rol de "arquitecto" es este archivo más la sesión principal; el de "desarrollador" es la sesión principal, que es la única que puede repreguntarle al usuario.

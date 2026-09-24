@@ -64,6 +64,34 @@ Además hay **2 commits en producción que no están acá** (`790e185`, `b7cfa90
 | `feat/campo-diseno-stitch` | **Dexter Campo.** 101 archivos de prueba, 551 pruebas | 🟡 activa en `C:/wisphub/_wt_campo`. Una tercera sesión implementa ahí «refrescar ficha» (`test_refrescar_ficha.py`, sin commitear) |
 | `fix/integracion-wisphub` | **Producción.** Push ahí ES deploy | Centro de Mando desde `ee4563f` (23/09 12:29) + los dos tableros de hoy |
 
+### Qué hay en producción, con fecha
+
+Importado de la copia de `feature/bandeja-relevo`, que lo tenía y esta no.
+Es la evidencia de los despliegues del 23/09 — no se pierde en la fusión.
+
+```
+23/09/2026, push a fix/integracion-wisphub (= deploy):
+  00407ac  el aviso del reencauzamiento no llegaba al modelo
+  0b27263  el embudo de identidad se puede medir  (+ migracion 202609231445)
+  969e7b9  privacidad de la observabilidad del frontend
+  49d9318  la pestaña abierta antes del deploy se recupera sola
+  055d1a2  franja horaria en el prompt, y motivo de escalada obligatorio
+  ee4563f  Centro de Mando (12:29)
+
+y en la base de producción ese mismo día:
+  config v150 -> v154   descripcion de derivar_a_area, por el editor versionado
+                        (nucleo/config/editor.py), UN CAMPO POR VEZ. Nunca con
+                        --forzar: ese sube el documento completo.
+  migracion             202609231445_identidad_eventos.sql aplicada. Ledger en
+                        0 pendientes, 0 checksums distintos.
+
+24/09/2026:
+  b7cfa90  el tablero se mira de lejos y se lee de un vistazo   (11:55)
+  790e185  el tablero no cabia donde de verdad se mira          (15:35)
+                        ^ los dos son commits de `integrar-centro-mando`
+                          rebaseados y pusheados por otra sesion.
+```
+
 ⚠️ **Tres frentes activos a la vez, y hoy se cruzaron tres veces:**
 
 1. Dos sesiones arreglaron **el mismo defecto** sin saberlo —
