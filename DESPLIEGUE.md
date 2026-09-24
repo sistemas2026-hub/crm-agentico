@@ -68,6 +68,44 @@ docker compose restart frontend
 
 Para verificar tipos o compilar sin romper el entorno, hacerlo **dentro** del contenedor: `docker exec <contenedor-frontend> pnpm check`.
 
+## Un entorno local de verdad, sin tocar produccion
+
+Armado el 24/09/2026. Hasta ese dia "local" significaba *codigo local contra la
+base de produccion*: el `.env` de la raiz tiene `DBHOST=crm.rapilinksas.co` y es
+lo unico que decide a que base se conecta todo el stack, motor incluido. Eso no
+es aislamiento -- el motor **escribe** su auditoria (`tool_calls`, conversaciones,
+consumo) ahi.
+
+La receta, verificada de punta a punta:
+
+```
+# 1. La base del motor, desde cero y por el ledger
+DBPASSWORD=<la del postgres local>  IMAGEN_DJANGO=<imagen del backend>    py -3.13 cli/base_desde_cero.py --base dexter_local       --host localhost --puerto 5432 --usuario postgres
+
+# 2. La organizacion la crea django-crm, no el asistente
+manage.py shell -c "from common.models import Org; Org.objects.get_or_create(name='...')"
+
+# 3. La config del tenant
+DBNAME=dexter_local ... py -3.13 cli/cargar_config.py tenants/rapilink.config.yaml --forzar
+```
+
+**Tres cosas que no son evidentes:**
+
+- `cargar_config.py` toma la **ruta del YAML**, no el slug. Con el slug falla con
+  un `FileNotFoundError` que no explica nada.
+- El paso 2 no se puede saltear: *"el asistente no inventa organizaciones, esa
+  tabla la mantiene django-crm"*. Sin una fila ahi, el paso 3 se niega.
+- El `--forzar` del paso 3 **no es a ciegas**, y conviene saber por que. La
+  guarda de alineacion git bloquea cuando la copia local difiere de origin, para
+  evitar cargar a produccion desde un repo desincronizado. Pero **no distingue
+  una base local recien creada de la real**: aca la base tenia diez minutos y
+  salio de esa misma copia de trabajo. La guarda no tiene forma de saberlo, asi
+  que el escape es legitimo con el motivo escrito. Si algun dia se afina, esa es
+  la distincion que le falta.
+
+La config nace con la **autonomia DETENIDA** hasta que alguien la habilite: falla
+cerrado, tambien en local.
+
 ## Procedimiento
 
 ### 1. Antes de nada: swap
