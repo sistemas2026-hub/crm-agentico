@@ -93,9 +93,30 @@ pantalla y no en una prueba.
 ventana en que el frontend levantara antes que el motor y las pantallas
 salieran vacías (falla cerrada, sin fuga). No pasó.
 
-**Lo que NO prueba esta verificación:** las 14 rutas que todavía usan
-`tenantDeLaInstalacion()` (el puente a la variable de entorno). Siguen
-pendientes — ver la deuda de abajo.
+**CERRADO el 24/09/2026 por la noche: ya no queda ninguna.** Los últimos 9
+archivos que leían `env.PRIVATE_ASISTENTE_TENANT` resuelven la empresa con
+`tenantDeLaSesion`, y el puente `tenantDeLaInstalacion()` se borró — existía
+con fecha de vencimiento escrita en su propio docstring.
+
+```
+ningun archivo de src/ lee env.PRIVATE_ASISTENTE_TENANT
+    guarda: src/lib/server/v2/tenant.test.js, hermana de
+            tests/test_nucleo_sin_tenants.py. Recorre src/ y FALLA NOMBRANDO
+            el archivo culpable. Comprobada al reves antes de darla por
+            buena: se metio una violacion a proposito y la cazo por su ruta.
+pnpm vitest run   936 pasan. Los 63 rojos son los MISMOS 17 archivos que ya
+                  fallaban en produccion --medido contra un worktree en
+                  790e185--: cero regresiones.
+pnpm check        40 errores en 29 archivos. La linea base eran 43 en 30.
+```
+
+Lo caro no fue reemplazar la lectura: fue que `locals` llegue a donde hace
+falta. La acción `invite` de `team` no lo recibía, y `guardia()` de los tres
+proxies era síncrono llamando a `cfg()`, así que los dos cambiaron de firma.
+Por eso se hizo a mano archivo por archivo: una sustitución por regex ya
+rompió ocho archivos antes, exactamente por esto.
+
+**Esta versión NO está desplegada.** Producción sigue en `1a83886`.
 
 ⚠️ Ruido esperado y ya explicado, para que la próxima sesión no lo investigue
 de nuevo: al reiniciar el frontend aparecen `Token refresh failed ... 401` en
