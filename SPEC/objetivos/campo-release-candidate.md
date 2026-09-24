@@ -304,15 +304,22 @@ solos**.
 Cualquiera sea el frente, al cerrar se **vuelve a correr la Parte A completa**
 contra la línea base de la Fase 1:
 
-| | Línea base (23/09/2026) |
+| | Línea base |
 |---|---|
-| `flutter test`, las dos compilaciones | 536 + |
+| `flutter test`, las dos compilaciones | **546 +** (24/09/2026) · eran 536 el 23/09 |
 | APK de release | 53.2 MB |
 | Arranque en régimen | 1327–1666 ms (media ~1,5 s) |
 | Scroll, p95 | 34 ms · 0 cuadros descartados |
 
 Sin esa comparación no se sabe qué costó el pulido, y ese es el único motivo por
 el que la Fase 1 no se cerró como abandonada.
+
+**La línea base se mueve, y hay que medirla, no recordarla.** El 23/09 eran 536
+pruebas; el 24/09 son 546 — las diez las agregaron dos commits de otro
+colaborador (`45c272c` y `84fac1a`, hora y ubicación de las fotos de
+evidencia), no el pulido. Antes de atribuirle un delta a un cambio propio,
+medir la suite **justo antes** de tocarla: acá esa medición convirtió una
+conclusión equivocada —"mi cambio agregó diez pruebas"— en el dato real.
 
 ---
 
