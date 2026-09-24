@@ -135,6 +135,7 @@
     IDENTIDAD_NO_RESUELTA: 'no se pudo establecer de qué cliente se trata',
     DATO_DEL_EQUIPO_NO_CARGADO: 'la cuenta no tiene cargado el dato del equipo que esa consulta necesita',
     PRECONDICION_NO_CUMPLIDA: 'quiso ejecutar algo sin el paso previo que exige el procedimiento',
+    DECLARACION_NO_ALCANZA: 'lo que el cliente reportó no corresponde a esa acción',
     FALTA_HABLAR_CON_EL_CLIENTE: 'la acción interrumpe el servicio y el cliente todavía no dijo qué le pasa',
     HERRAMIENTA_DESCONOCIDA: 'intentó usar algo que este rol no tiene permitido',
     LIMITE_DE_CONVERSACION: 'se alcanzó el tope de pasos de la conversación',

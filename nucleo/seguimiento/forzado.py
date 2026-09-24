@@ -541,6 +541,12 @@ def decidir_pedido_humano_de(config, historial: list[dict]):
 
 CODIGOS_MOTOR_GUARD = frozenset({
     "PRECONDICION_NO_CUMPLIDA",
+    # Hermano del anterior, agregado el 24/09/2026. El gate existia desde el
+    # 22/09 sin clasificar en ninguna de las tres listas: el sintoma que el
+    # cliente reporto no corresponde a esa accion. Sin estar aca, el bloqueo
+    # se cuenta como fallo de la herramienta y fuerza una escalada con un
+    # motivo -- y un mensaje al cliente -- que no es cierto.
+    "DECLARACION_NO_ALCANZA",
     "LIMITE_DE_CONVERSACION",
     "FALTA_HABLAR_CON_EL_CLIENTE",
     "IDENTIDAD_NO_RESUELTA",

@@ -103,6 +103,13 @@ CODIGOS_DE_BLOQUEO = frozenset({
     "IDENTIDAD_NO_RESUELTA",
     "DATO_DEL_EQUIPO_NO_CARGADO",
     "PRECONDICION_NO_CUMPLIDA",
+    # Agregado el 24/09/2026, al estrenar el corredor de pruebas. El gate
+    # existia desde el 22/09 (7eee595, 'una queja de lentitud ya no puede
+    # reiniciarle el equipo a un cliente') y no estaba clasificado: viajaba a
+    # la traza como ERROR, inflando la tasa de fallas con el codigo
+    # funcionando. Es fail-closed en codigo, hermano de PRECONDICION_NO_CUMPLIDA.
+    # La guarda lo venia diciendo en rojo y nadie la corria.
+    "DECLARACION_NO_ALCANZA",
     "FALTA_HABLAR_CON_EL_CLIENTE",
     "HERRAMIENTA_DESCONOCIDA",
     "LIMITE_DE_CONVERSACION",

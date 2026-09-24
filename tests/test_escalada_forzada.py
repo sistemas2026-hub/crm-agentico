@@ -196,7 +196,16 @@ for codigo in sorted(CODIGOS_MOTOR_GUARD):
 # falta_un_dato_de_la_sesion). Tiene que estar aca por lo mismo que los otros
 # seis -- el motor IMPIDIO la llamada, la herramienta no fallo-- y el bucle de
 # arriba ya comprobo que no escala.
-GATES = {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
+GATES = {"PRECONDICION_NO_CUMPLIDA",
+         # Agregado el 24/09/2026. El gate existia desde el 22/09 (7eee595) y
+         # no estaba en ninguna de las tres listas: el sintoma que el cliente
+         # reporto no corresponde a esa accion -- una queja de lentitud no
+         # habilita reiniciarle el equipo. Entra por el mismo criterio que los
+         # de abajo: el motor IMPIDIO la llamada, ninguna herramienta fallo, y
+         # por eso no puede disparar 'escalar_si_falla' con un mensaje de
+         # averia que no ocurrio.
+         "DECLARACION_NO_ALCANZA",
+         "LIMITE_DE_CONVERSACION",
          "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
          "DATO_DEL_EQUIPO_NO_CARGADO",
          "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA",
