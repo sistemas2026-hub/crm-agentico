@@ -27,6 +27,43 @@
 export const INTERVALO_POR_DEFECTO_MS = 12_000;
 
 /**
+ * Lee la respuesta sin dar por hecho que es JSON.
+ *
+ * Nace de lo que se vio en produccion el 24/09/2026: la pantalla mostro
+ * «Unexpected token '<', "<!doctype "... is not valid JSON». Ese mensaje no le
+ * dice nada a nadie, y lo que estaba pasando era normal: durante un
+ * redespliegue el proxy contesta una pagina de error, y con la sesion caducada
+ * contesta el HTML del login. `r.json()` a ciegas convierte las dos cosas en un
+ * error de sintaxis.
+ *
+ * @param {Response} r
+ * @returns {Promise<{ ok: boolean, datos?: any, texto?: string }>}
+ */
+async function leerJson(r) {
+  const texto = await r.text();
+  try {
+    return { ok: true, datos: JSON.parse(texto) };
+  } catch {
+    return { ok: false, texto };
+  }
+}
+
+/**
+ * Que decirle a quien mira la pantalla. El estado importa mas que el cuerpo:
+ * un 401 no es "el servidor devolvio HTML", es "hay que volver a entrar".
+ *
+ * @param {Response} r
+ * @param {{ ok: boolean, datos?: any, texto?: string }} leido
+ */
+function mensajeDeFallo(r, leido) {
+  if (r.status === 401 || r.status === 403) return 'La sesión caducó. Vuelve a entrar para seguir viendo la operación.';
+  if (leido.ok) return leido.datos?.error || `No se pudo actualizar (${r.status}).`;
+  if (r.status >= 500 || r.status === 0) return `El servidor no respondió bien (${r.status}). Suele ser un despliegue en curso; se reintenta solo.`;
+  return 'El servidor respondió algo que no se pudo leer. Si acaba de haber un despliegue, se reintenta solo; si sigue, vuelve a entrar.';
+}
+
+
+/**
  * Transporte por sondeo. Es el único que existe hoy.
  *
  * @param {{ url?: string, intervalo?: number, fetch?: typeof globalThis.fetch,
@@ -55,10 +92,10 @@ export function transporteSondeo(opciones = {}) {
         enVuelo = true;
         try {
           const r = await traer(url);
-          const d = await r.json();
+          const d = await leerJson(r);
           if (!vivo) return;
-          if (r.ok) alRecibir(d);
-          else alFallar(d?.error || 'No se pudo actualizar');
+          if (r.ok && d.ok) alRecibir(d.datos);
+          else alFallar(mensajeDeFallo(r, d));
         } catch (/** @type {any} */ e) {
           if (vivo) alFallar(e?.message || 'No se pudo contactar al asistente');
         } finally {
