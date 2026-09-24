@@ -286,17 +286,87 @@ class TrabajoVista {
   static String _hora(DateTime f) =>
       '${f.hour.toString().padLeft(2, '0')}:${f.minute.toString().padLeft(2, '0')}';
 
-  /// El plan que tiene contratado el cliente, si el despacho lo capturó.
-  String get planContratado {
+  /// Un dato de la ficha del cliente que el despacho congeló, si lo capturó.
+  ///
+  /// Se lee en UN solo lugar a propósito. El esquema del formulario ya enseñó
+  /// lo que pasa cuando el mismo dato se interpreta en varios archivos: cinco
+  /// defectos distintos, y ninguna lectura estaba mal escrita —el problema era
+  /// que existieran varias— (contrato de versión candidata §3).
+  String _delCliente(String clave) {
     final dynamic cliente = contexto['cliente'];
-    if (cliente is Map && cliente['plan'] != null) {
-      return cliente['plan'].toString();
+    if (cliente is Map && cliente[clave] != null) {
+      return cliente[clave].toString();
     }
     return '';
   }
 
+  /// El plan que tiene contratado el cliente, si el despacho lo capturó.
+  String get planContratado => _delCliente('plan');
+
+  /// La IP del router del cliente. La ve el técnico, no el modelo.
+  String get ipCliente => _delCliente('ip');
+
+  /// En qué parte del pueblo queda. La dirección dice el número de la casa;
+  /// esto dice si la visita entra en la ruta de hoy.
+  String get localidadCliente => _delCliente('localidad');
+
+  /// Cómo está la cuenta en el sistema del ISP (activo, suspendido...). No es
+  /// el estado de la ORDEN: una orden recién asignada de un cliente suspendido
+  /// por mora no se resuelve cambiando una ONU.
+  String get estadoCuenta => _delCliente('estado');
+
   /// El serial de la ONU del cliente, si el despacho lo capturó.
   String get serialOnu => contexto['sn_onu']?.toString() ?? '';
+
+  /// La prioridad que le puso el operador en el sistema del ISP.
+  ///
+  /// **No es un juicio de Dexter.** Viaja aparte y se muestra aparte: mezclarla
+  /// con la de Dexter haría que la pantalla afirme un análisis que no ocurrió.
+  /// WispHub maneja cuatro niveles (1 Baja · 2 Normal · 3 Alta · 4 Muy Alta).
+  String get prioridadProveedor {
+    final dynamic p = contexto['prioridad_proveedor'];
+    if (p is Map && p['etiqueta'] != null) return p['etiqueta'].toString();
+    return '';
+  }
+
+  /// Si la prioridad de la orden la **calculó** Dexter, o solo la heredó.
+  ///
+  /// Hoy devuelve `false` siempre, y eso es correcto: Dexter todavía no
+  /// prioriza. El campo `prioridad` lo pone quien despacha, con default
+  /// `media`. Mostrar eso como juicio sería presentar una copia disfrazada de
+  /// análisis.
+  ///
+  /// Está escrito para encenderse solo: el día que el motor devuelva
+  /// `prioridad_dexter` en el contexto —con su nivel, sus motivos y su hora—
+  /// esto pasa a `true` sin tocar la tarjeta.
+  bool get prioridadEvaluadaPorDexter {
+    final dynamic p = contexto['prioridad_dexter'];
+    return p is Map && p['nivel'] != null;
+  }
+
+  /// Por qué Dexter le puso esa prioridad.
+  ///
+  /// Un técnico que lee «Alta» no aprende nada; uno que lee «Alta — tercera
+  /// visita por lo mismo · cliente suspendido» sabe qué va a encontrar. Sin
+  /// motivos, la etiqueta es un adorno.
+  List<String> get motivosPrioridad {
+    final dynamic p = contexto['prioridad_dexter'];
+    if (p is Map && p['motivos'] is List) {
+      return (p['motivos'] as List).map((dynamic m) => m.toString()).toList();
+    }
+    return const <String>[];
+  }
+
+  /// Si hay ficha del cliente. Que falte NO es un error: se despacha una orden
+  /// justamente cuando algo no se pudo resolver solo, y muchas veces eso
+  /// incluye no haber identificado al cliente.
+  bool get contextoDisponible => contexto['contexto_disponible'] == true;
+
+  /// La diferencia que le importa a quien mira la orden: **no se pudo
+  /// preguntar** (el motor no respondió) no es lo mismo que **se preguntó y no
+  /// se pudo identificar al cliente**. Para el técnico, una se reintenta y la
+  /// otra se resuelve preguntándole a la persona.
+  bool get motorAlcanzado => contexto['motor_alcanzado'] != false;
 
   static double? _decimal(Object? valor) {
     if (valor == null) return null;

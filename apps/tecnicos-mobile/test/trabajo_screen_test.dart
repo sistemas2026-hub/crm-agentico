@@ -372,10 +372,27 @@ void main() {
       expect(find.textContaining('Ticket = reporte del cliente'), findsOneWidget);
 
       // Y el pie cierra la lista sin prometer que hay más.
-      expect(
-        find.text('No hay más órdenes asignadas en este ciclo de despacho'),
-        findsOneWidget,
+      //
+      // Desde el 24/09/2026 hay que desplazarse para llegar: la tarjeta creció
+      // —razón de falla, las dos prioridades, cliente y el desplegable— y el
+      // pie dejó de caber en la primera pantalla. Lo que se afirma es lo mismo;
+      // lo que cambió es que ahora está más abajo. Un `find.text` sin
+      // desplazamiento no lo encuentra porque la lista no lo construyó todavía,
+      // y eso se lee como "el pie desapareció" cuando en realidad está.
+      // Se nombra la lista explícitamente: la pantalla tiene más de un
+      // `Scrollable` (las pastillas de filtro son uno horizontal) y dejarlo
+      // implícito falla con «Too many elements», que no dice nada del pie.
+      final pie =
+          find.text('No hay más órdenes asignadas en este ciclo de despacho');
+      await tester.scrollUntilVisible(
+        pie,
+        300,
+        scrollable: find.descendant(
+          of: find.byType(ListView),
+          matching: find.byType(Scrollable),
+        ).first,
       );
+      expect(pie, findsOneWidget);
       await banco.cerrar();
     });
 

@@ -17,7 +17,7 @@ import '../trabajo_vista.dart';
 /// Los datos reales van siempre. Los que el backend todavía no entrega —SLA,
 /// zona, distancia, telemetría, plan contratado— solo aparecen con el modo
 /// demostración encendido, y cada uno lleva su `CAMPO-DATA-XXX`.
-class TarjetaTrabajo extends StatelessWidget {
+class TarjetaTrabajo extends StatefulWidget {
   const TarjetaTrabajo({
     super.key,
     required this.trabajo,
@@ -28,6 +28,20 @@ class TarjetaTrabajo extends StatelessWidget {
   final TrabajoVista trabajo;
   final VoidCallback? onTap;
   final bool mostrarDatosFuturos;
+
+  @override
+  State<TarjetaTrabajo> createState() => _TarjetaTrabajoState();
+}
+
+class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
+  /// Los datos de abajo empiezan plegados a propósito: la lista es para
+  /// decidir a cuál orden ir, no para leerla entera. Lo que hace falta para
+  /// esa decisión va arriba; el resto se pide.
+  bool _desplegado = false;
+
+  TrabajoVista get trabajo => widget.trabajo;
+  VoidCallback? get onTap => widget.onTap;
+  bool get mostrarDatosFuturos => widget.mostrarDatosFuturos;
 
   bool get _enCurso => trabajo.estado.enMarcha;
   bool get _terminado => trabajo.estado.terminada;
@@ -360,24 +374,53 @@ class TarjetaTrabajo extends StatelessWidget {
   List<Widget> _cuerpoIncidencia() {
     return <Widget>[
       const SizedBox(height: AppSpacing.sm),
+
+      // 1 · RAZON DE FALLA. Es el asunto del ticket (`resumen`), no el tipo de
+      //     trabajo: "No Tiene Internet" dice por que lo llamaron; "Reparacion
+      //     de Senal (FTTH)" dice que plantilla se usa. Si el asunto no llego,
+      //     el tipo es lo mejor que hay.
       Text(
-        trabajo.tipoNombre,
+        trabajo.resumen.isNotEmpty ? trabajo.resumen : trabajo.tipoNombre,
         style: AppTypography.tituloChico.copyWith(fontWeight: FontWeight.w700),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
       ),
-      const SizedBox(height: AppSpacing.xs),
-      Row(
-        children: <Widget>[
-          const Icon(Icons.hub, size: 16, color: AppColors.onSurfaceVariant),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              trabajo.direccion,
-              style: AppTypography.cuerpo,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+
+      // 2 · PRIORIDAD. Dos, y no una: la que calcula Dexter va con peso, la
+      //     del proveedor al lado y en chico. Mezclarlas haria que la pantalla
+      //     afirme un analisis que hoy no ocurre.
+      const SizedBox(height: AppSpacing.sm),
+      _prioridades(),
+
+      // 2b · POR QUE esa prioridad. Sin motivos la etiqueta es un adorno, asi
+      //      que cuando los haya van pegados a ella y no escondidos abajo.
+      if (trabajo.motivosPrioridad.isNotEmpty) ...<Widget>[
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          trabajo.motivosPrioridad.join(' · '),
+          style: AppTypography.etiquetaChica.copyWith(
+            color: AppColors.onSurfaceVariant,
           ),
-        ],
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+
+      // 3 · CLIENTE.
+      const SizedBox(height: AppSpacing.sm),
+      _dato(
+        icono: Icons.person_outline,
+        valor: trabajo.clienteNombre,
+        vacio: 'Cliente no identificado',
+        fuerte: true,
+      ),
+
+      // 4 · DIRECCION.
+      const SizedBox(height: AppSpacing.xs),
+      _dato(
+        icono: Icons.pin_drop,
+        valor: trabajo.direccion,
+        vacio: 'Sin direccion',
       ),
       // El diagnóstico sí es real: lo manda el backend.
       if (trabajo.diagnosticoPrevio.isNotEmpty) ...<Widget>[
@@ -410,7 +453,183 @@ class TarjetaTrabajo extends StatelessWidget {
           ),
         ),
       ],
+
+      // 5 · El resto, plegado.
+      const SizedBox(height: AppSpacing.sm),
+      _botonDesplegar(),
+      if (_desplegado) ...<Widget>[
+        const SizedBox(height: AppSpacing.sm),
+        _masDatos(),
+      ],
     ];
+  }
+
+  // --- Las dos prioridades -------------------------------------------------
+
+  /// La de Dexter con peso, la del proveedor en chico.
+  ///
+  /// Hoy Dexter **no calcula** prioridad: el campo lo pone quien despacha y su
+  /// default es 'media'. Mostrar eso como juicio seria presentar una copia
+  /// disfrazada de analisis, que es contra lo que advierte el importador del
+  /// motor. Hasta que calcule, dice 'sin evaluar'.
+  Widget _prioridades() {
+    final bool evaluada = trabajo.prioridadEvaluadaPorDexter;
+    final (Color fondo, Color color, String texto) = evaluada
+        ? _pintaPrioridad(trabajo.prioridad)
+        : (AppColors.surfaceContainer, AppColors.onSurfaceVariant, 'Sin evaluar');
+
+    return Row(
+      children: <Widget>[
+        Container(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm, vertical: 6),
+          decoration: BoxDecoration(color: fondo, borderRadius: AppRadius.brCampo),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(evaluada ? Icons.priority_high : Icons.help_outline,
+                  size: 15, color: color),
+              const SizedBox(width: 6),
+              Text(
+                texto.toUpperCase(),
+                style: AppTypography.etiqueta.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (trabajo.prioridadProveedor.isNotEmpty) ...<Widget>[
+          const SizedBox(width: AppSpacing.sm),
+          Flexible(
+            child: Text(
+              'WispHub: ${trabajo.prioridadProveedor}',
+              style: AppTypography.etiquetaChica.copyWith(
+                color: AppColors.onSurfaceVariant,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  (Color, Color, String) _pintaPrioridad(String p) => switch (p) {
+        'muy_alta' => (AppColors.errorContainer, AppColors.error, 'Muy alta'),
+        'alta' => (AppColors.errorContainer, AppColors.onErrorContainer, 'Alta'),
+        'baja' => (AppColors.surfaceContainer, AppColors.onSurfaceVariant, 'Baja'),
+        _ => (AppColors.surfaceContainerHigh, AppColors.onSurface, 'Media'),
+      };
+
+  // --- Un dato, o por que no esta ------------------------------------------
+
+  /// Un dato que puede no venir. El vacio se dibuja distinto del valor, no se
+  /// esconde: que falte es el caso NORMAL —medido por el motor: 45 de 85
+  /// conversaciones con cliente identificado— y una tarjeta que solo se ve
+  /// bien llena esta a medio hacer.
+  Widget _dato({
+    required IconData icono,
+    required String valor,
+    required String vacio,
+    bool fuerte = false,
+  }) {
+    final bool hay = valor.trim().isNotEmpty;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Icon(icono,
+            size: 16,
+            color: hay ? AppColors.onSurfaceVariant : AppColors.outline),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            hay ? valor : vacio,
+            style: (fuerte ? AppTypography.cuerpo : AppTypography.cuerpoChico)
+                .copyWith(
+              color: hay ? AppColors.onSurface : AppColors.outline,
+              fontWeight: hay && fuerte ? FontWeight.w600 : FontWeight.w400,
+              fontStyle: hay ? FontStyle.normal : FontStyle.italic,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- El desplegable ------------------------------------------------------
+
+  Widget _botonDesplegar() {
+    return InkWell(
+      onTap: () => setState(() => _desplegado = !_desplegado),
+      borderRadius: AppRadius.brCampo,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Text(
+              _desplegado ? 'Menos datos' : 'Mas datos',
+              style: AppTypography.etiqueta.copyWith(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(_desplegado ? Icons.expand_less : Icons.expand_more,
+                size: 18, color: AppColors.primary),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _masDatos() {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: AppRadius.brCampo,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          // Cuando no hay ficha, decir POR QUE. 'No se pudo preguntar' y 'se
+          // pregunto y no se pudo identificar al cliente' se arreglan distinto:
+          // una se reintenta, la otra se resuelve hablando con la persona.
+          if (!trabajo.contextoDisponible) ...<Widget>[
+            _aviso(
+              icono: trabajo.motorAlcanzado ? Icons.person_off : Icons.cloud_off,
+              texto: trabajo.motorAlcanzado
+                  ? 'Sin ficha: no se pudo identificar al cliente'
+                  : 'Sin ficha: no se pudo consultar. Se reintenta al sincronizar',
+              color: AppColors.onSurfaceVariant,
+              fondo: AppColors.surfaceContainer,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+          _dato(icono: Icons.router, valor: trabajo.ipCliente, vacio: 'IP no disponible'),
+          const SizedBox(height: AppSpacing.xs),
+          _dato(
+            icono: Icons.account_circle_outlined,
+            valor: trabajo.estadoCuenta,
+            vacio: 'Estado de cuenta no disponible',
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          _dato(icono: Icons.call, valor: trabajo.telefono, vacio: 'Sin telefono'),
+          const SizedBox(height: AppSpacing.xs),
+          _dato(
+            icono: Icons.map_outlined,
+            valor: trabajo.localidadCliente,
+            vacio: 'Localidad no disponible',
+          ),
+        ],
+      ),
+    );
   }
 
   // --- Piezas --------------------------------------------------------------
