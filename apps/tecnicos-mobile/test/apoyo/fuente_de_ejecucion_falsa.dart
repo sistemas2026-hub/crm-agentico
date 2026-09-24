@@ -206,6 +206,7 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
     required String registroIdempotencyKey,
     required String confirmacionIdempotencyKey,
     required DateTime capturadaEn,
+    required Map<String, dynamic> metadatosCaptura,
   }) async {
     evidencias.add(<String, dynamic>{
       'id': id,
@@ -217,6 +218,7 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
       // doble aceptaria la hora y la tiraria, que es como una prueba pasa sin
       // haber mirado nada.
       'capturada_en': capturadaEn.millisecondsSinceEpoch,
+      'metadatos_captura': metadatosCaptura,
     });
   }
 

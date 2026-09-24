@@ -868,6 +868,11 @@ class SyncQueueService {
                             ev['capturada_en'] as int)
                         .toUtc()
                         .toIso8601String(),
+              // Donde y con que se tomo. El backend lo espera como objeto
+              // (`DictField`), asi que se manda decodificado, no como texto.
+              if (ev['metadatos_captura_json'] != null)
+                'metadatos_captura': jsonDecode(
+                    ev['metadatos_captura_json'] as String),
               'client_mutation_id': registroKey,
             },
             options: Options(

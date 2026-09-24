@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../../demo/field_mock_data.dart';
 import '../../core/storage/evidencia_storage_service.dart';
 import '../../core/storage/local_database.dart';
+import '../../core/storage/ubicacion_de_captura.dart';
 import '../detalle_orden/pasos_orden.dart';
 import '../trabajo/estado_trabajo.dart';
 import 'campo_del_formulario.dart';
@@ -197,6 +198,14 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       // que llega despues de copiar el archivo y calcular su sha256.
       final DateTime capturadaEn = DateTime.now();
 
+      // Donde se tomo. Va aca y no antes de abrir la camara porque recien
+      // ahora se sabe que hubo foto: pedirle posicion al sistema para una
+      // camara que la persona cancela es gastarle bateria por nada.
+      //
+      // Nunca lanza y nunca tarda mas de su plazo: una evidencia no se pierde
+      // ni se demora porque el GPS no fije. Ver `UbicacionDeCaptura`.
+      final Map<String, dynamic> metadatos = await UbicacionDeCaptura.tomar();
+
       final tempFile = File(foto.path);
       // El id se genera ANTES de copiar el archivo porque el archivo se llama
       // como él: si la fila se perdiera, la foto sigue diciendo cual es su
@@ -229,6 +238,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         registroIdempotencyKey: registroKey,
         confirmacionIdempotencyKey: confirmacionKey,
         capturadaEn: capturadaEn,
+        metadatosCaptura: metadatos,
       );
 
       _evidenciasCapturadas = await _fuente.evidenciasDe(

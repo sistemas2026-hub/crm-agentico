@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/storage/evidencia_storage_service.dart';
 import '../../../core/storage/local_database.dart';
+import '../../../core/storage/ubicacion_de_captura.dart';
 import '../../../core/sync/sync_queue_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_radius.dart';
@@ -123,6 +124,7 @@ class _FirmaDelClienteState extends State<FirmaDelCliente> {
       // El momento en que el cliente levanto el dedo, no el de encolar: entre
       // medio se escribe un PNG, se persiste y se calcula su sha256.
       final DateTime firmadaEn = DateTime.now();
+      final Map<String, dynamic> metadatos = await UbicacionDeCaptura.tomar();
       final bytes = await _trazo.aPng(const Size(600, 300));
       final evidenciaId = const Uuid().v4();
 
@@ -156,6 +158,7 @@ class _FirmaDelClienteState extends State<FirmaDelCliente> {
         registroIdempotencyKey: const Uuid().v4(),
         confirmacionIdempotencyKey: const Uuid().v4(),
         capturadaEn: firmadaEn,
+        metadatosCaptura: metadatos,
       );
 
       // Quién firmó y qué observó viaja con la orden, no con la imagen: son

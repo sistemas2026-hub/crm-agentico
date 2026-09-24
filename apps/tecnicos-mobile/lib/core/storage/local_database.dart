@@ -103,7 +103,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 13,
+      version: 14,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -184,6 +184,23 @@ class LocalDatabase {
       if (infoEv.isNotEmpty && !colsEv.contains('capturada_en')) {
         await db.execute(
           'ALTER TABLE cola_evidencias ADD COLUMN capturada_en INTEGER;',
+        );
+      }
+    }
+
+    // v14: donde se tomo, con que equipo, y -- cuando no se pudo saber -- por
+    // que no. Un `metadatos_captura` vacio es ambiguo: no distingue un sotano
+    // sin senal de un permiso negado ni de una version que ni lo intentaba.
+    //
+    // Misma guarda que v13, por la misma razon: `table_info` vacio significa
+    // que la tabla no existe.
+    if (oldVersion < 14) {
+      final infoEv = await db.rawQuery('PRAGMA table_info(cola_evidencias);');
+      final colsEv = infoEv.map((c) => c['name'] as String).toSet();
+      if (infoEv.isNotEmpty && !colsEv.contains('metadatos_captura_json')) {
+        await db.execute(
+          'ALTER TABLE cola_evidencias '
+          'ADD COLUMN metadatos_captura_json TEXT;',
         );
       }
     }
@@ -571,6 +588,7 @@ class LocalDatabase {
         registro_idempotency_key TEXT,
         confirmacion_idempotency_key TEXT,
         capturada_en INTEGER,
+        metadatos_captura_json TEXT,
         created_at INTEGER NOT NULL
       )
     ''');
@@ -1021,6 +1039,7 @@ class LocalDatabase {
     String? registroIdempotencyKey,
     String? confirmacionIdempotencyKey,
     DateTime? capturadaEn,
+    Map<String, dynamic>? metadatosCaptura,
   }) async {
     final db = await database;
     final regKey = registroIdempotencyKey ?? const Uuid().v4();
@@ -1046,6 +1065,10 @@ class LocalDatabase {
         // pasa igual, porque decimas gratis son decimas.
         'capturada_en':
             (capturadaEn ?? DateTime.now()).millisecondsSinceEpoch,
+        // Nulo cuando no se intento; un objeto con `ubicacion_motivo` cuando
+        // se intento y no se pudo. No son lo mismo y la fila los distingue.
+        'metadatos_captura_json':
+            metadatosCaptura == null ? null : jsonEncode(metadatosCaptura),
         'created_at': DateTime.now().millisecondsSinceEpoch,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,

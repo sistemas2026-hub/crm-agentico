@@ -2,6 +2,15 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Donde se tomo cada evidencia. El backend espera `metadatos_captura`
+         desde el principio y hasta ahora llegaba vacio: una foto sin lugar
+         prueba que alguien subio una foto, no que estuvo ahi.
+
+         COARSE ademas de FINE a proposito: si la persona concede solo la
+         aproximada, se registra esa. Una ubicacion de cien metros ubica la
+         manzana, y la manzana ya distingue una casa de otra ciudad. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
     <application
         android:label="Dexter IA"

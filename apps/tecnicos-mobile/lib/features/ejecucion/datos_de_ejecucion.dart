@@ -181,6 +181,7 @@ abstract class FuenteDeEjecucion {
     required String registroIdempotencyKey,
     required String confirmacionIdempotencyKey,
     required DateTime capturadaEn,
+    required Map<String, dynamic> metadatosCaptura,
   });
 
   Future<List<Map<String, dynamic>>> evidenciasDe({
@@ -310,6 +311,7 @@ class FuenteLocalDeEjecucion implements FuenteDeEjecucion {
     required String registroIdempotencyKey,
     required String confirmacionIdempotencyKey,
     required DateTime capturadaEn,
+    required Map<String, dynamic> metadatosCaptura,
   }) =>
       _db.encolarEvidencia(
         id: id,
@@ -324,6 +326,7 @@ class FuenteLocalDeEjecucion implements FuenteDeEjecucion {
         registroIdempotencyKey: registroIdempotencyKey,
         confirmacionIdempotencyKey: confirmacionIdempotencyKey,
         capturadaEn: capturadaEn,
+        metadatosCaptura: metadatosCaptura,
       );
 
   @override

@@ -126,7 +126,10 @@ Esto **no es cancelar** (eso lo decide la oficina, con razón) ni completar (no
 se hizo el trabajo). Es un tercer desenlace que el sistema no tiene, y es el
 caso más frecuente que existe después del trabajo normal.
 
-Se llama **C** porque antes del código hay que decidir:
+**D-1 se decidió en concepto el 24/09/2026**: *"no se pudo ejecutar el
+ticket por X o Y motivo"*. Es un desenlace del trabajo, no una cancelación.
+
+Lo que sigue abierto es **cómo**, y son preguntas que cambian la migración:
 
 - ¿Es un estado nuevo del backend, o un `completada_campo` con un resultado
   "no realizado"?
@@ -174,15 +177,39 @@ subió una foto*. Con hora y lugar prueba que **esa** persona estuvo **ahí** a
 **esa** hora — que es lo que una evidencia de campo tiene que probar cuando
 alguien la discute meses después.
 
-Se parte en dos mitades que no cuestan lo mismo:
+**RESUELTO el 24/09/2026.** Las dos mitades están implementadas.
 
-| | Qué | Costo |
+| | Qué | Dónde |
 |---|---|---|
-| **la hora** | `capturada_en_cliente`, del reloj del teléfono | Una columna en la cola local y un campo en el envío. Sin dependencias, sin permisos |
-| **el lugar** | `metadatos_captura.gps` | Dependencia nueva, permiso de ubicación, y **una decisión de privacidad**: registrar el GPS del técnico en cada foto es geolocalizar a un empleado. No se hace en silencio |
+| **la hora** | `capturada_en_cliente`, del reloj del teléfono | base local v13 · `test/hora_de_captura_test.dart` |
+| **el lugar** | `metadatos_captura` con coordenadas, precisión y equipo | base local v14 · `core/storage/ubicacion_de_captura.dart` · `test/ubicacion_de_captura_test.dart` |
 
-La hora se puede hacer hoy. El lugar es **C** hasta que alguien decida, y la
-decisión no es técnica.
+**D-2 se decidió a favor, y sin fricción para el técnico** (24/09/2026): no se
+le pregunta nada en cada captura, no hay diálogo, no hay aviso. Se toma y
+sigue.
+
+Dos cosas que hay que saber igual, porque cambian lo que se puede prometer:
+
+1. **Android pide el permiso de ubicación la primera vez, y eso no se puede
+   evitar.** No es una decisión de esta aplicación: el sistema operativo lo
+   impone y no hay forma de obtener una coordenada sin que ese diálogo
+   aparezca una vez. De la segunda captura en adelante ya no vuelve a salir.
+   Si la intención es que nadie se lleve una sorpresa, el lugar donde eso se
+   resuelve es la política interna o el contrato, no la aplicación.
+2. **La persona puede negarlo**, y entonces las fotos llegan sin coordenadas
+   con `ubicacion_motivo: permiso_denegado`. Vale lo mismo que negarlo en
+   cualquier otra aplicación: el sistema manda.
+
+**La regla que gobierna la implementación**: la ubicación *nunca* cuesta una
+evidencia. Plazo de 5 segundos, todo dentro de un `try`, y si falla se guarda
+la foto igual con el motivo escrito. El trabajo de campo ocurre en sótanos y
+cajas de distribución —justo donde el GPS no fija— así que "no se pudo ubicar"
+no es el borde raro: es la mitad de los días. Una foto sin coordenadas vale
+muchísimo más que ninguna foto.
+
+Y por eso `metadatos_captura` distingue tres cosas que un campo vacío
+confundía: **nulo** = no se intentó · **`ubicacion_motivo`** = se intentó y no
+se pudo (con cuál de los cuatro motivos) · **coordenadas** = se supo.
 
 *(Un matiz honesto sobre la hora: es el reloj del teléfono, que la persona
 puede cambiar. No es un sello de tiempo confiable — es el dato que el campo
@@ -209,15 +236,36 @@ porque cada cosa que se agregue a las evidencias lo empeora.
 
 ---
 
-## 4 · Lo que bloquea antes que todo esto
+## 4 · Materiales no tiene contraparte en la oficina
 
 **Producción tiene 2 migraciones de `campo`; esta rama tiene 6.** Las cuatro de
-materiales —catálogo, kit, movimientos, actas e incidencias— **no están
-aplicadas**.
+materiales —catálogo, kit, movimientos, actas e incidencias— no están
+aplicadas.
 
-O sea que el módulo entero de materiales, que en la aplicación está terminado y
-probado, hoy no tiene tablas del otro lado. Eso bloquea la entrega antes de que
-cualquier cosa de este documento importe.
+Y al medir *por qué* no conviene aplicarlas, apareció algo más grande.
+Medido el 24/09/2026:
+
+| Qué se buscó | Resultado |
+|---|---|
+| App Django de inventario / almacén / bodega | **No existe** |
+| Ruta del frontend para materiales o inventario | **No existe** |
+| Pantallas que consuman `api/campo/kit`, `/movimientos`, `/incidencias` | **Ninguna** |
+| Pantallas que consuman **cualquier** `api/campo/` | **Ninguna** |
+| Modelos de materiales registrados en el admin de Django | **Ninguno** (el admin registra 4 modelos de campo: orden, tipo, versión y evidencia) |
+
+O sea: no es que falte "el inventario". **Falta toda la contraparte de oficina
+del módulo de materiales.** Si las cuatro migraciones se aplicaran hoy, nadie
+podría cargar el catálogo, entregar un kit a un técnico, ver los movimientos
+que registra, confirmar un acta de devolución ni resolver un descuadre. El
+técnico descontaría material de un kit que nadie tuvo forma de entregarle.
+
+**La decisión del 24/09/2026 es correcta y se registra acá**: materiales va de
+la mano con el inventario de la plataforma, y ese inventario no está
+construido. Las cuatro migraciones **esperan**.
+
+Consecuencia para la entrega, que conviene decir sin adornos: el módulo de
+materiales de la aplicación —terminado, probado, con cuatro escenarios
+dorados— **no se puede entregar todavía**, y no por algo que le falte a él.
 
 ---
 
@@ -225,15 +273,15 @@ cualquier cosa de este documento importe.
 
 Por valor sobre costo, no por gravedad:
 
-1. **3.1, la hora** — la mitad barata. Los campos ya existen del otro lado;
-   falta adjuntarlos. Sin dependencias ni permisos.
-2. **1.1 a 1.4** — un solo arreglo, dentro de un invariante que ya protege ese
-   archivo. Alinear el vocabulario y darle a cada tipo su control.
-3. **3.2** — `documento` necesita un selector de archivo, no una cámara.
-4. **2.1** — primero la decisión, después el código. Es el que más valor tiene
-   para quien usa la aplicación y el único que no se puede empezar escribiendo.
+1. ~~**3.1, la hora**~~ ✅ 24/09/2026 · base v13
+2. ~~**3.1, el lugar**~~ ✅ 24/09/2026 · base v14 (D-2 decidido)
+3. **1.1 a 1.4** — un solo arreglo, dentro de un invariante que ya protege ese
+   archivo. Alinear el vocabulario y darle a cada tipo su control. **← sigue**
+4. **3.2** — `documento` necesita un selector de archivo, no una cámara.
+5. **2.1** — el diseño primero, después el código. Es el que más valor tiene
+   para quien usa la aplicación (D-1 ya decidido en concepto).
 
-Fuera de esta lista, y antes de entregar: **§4**.
+Fuera de esta lista: **§4** no se resuelve en esta aplicación.
 
 ---
 
@@ -241,9 +289,9 @@ Fuera de esta lista, y antes de entregar: **§4**.
 
 Ninguna de estas la puede tomar una sesión:
 
-| | Qué decidir |
-|---|---|
-| **D-1** | Qué significa "no se pudo hacer": estado propio, o resultado de completar. Y si cuenta como jornada hecha |
-| **D-2** | Si se registra el GPS del técnico en cada evidencia. Es geolocalización de un empleado |
-| **D-3** | Qué tipos de trabajo existen además de instalación y correctivo — y que son configuración por tenant, no código |
-| **D-4** | Si las cuatro migraciones de materiales se aplican a producción, y cuándo |
+| | Qué decidir | Estado |
+|---|---|---|
+| **D-1** | Qué significa "no se pudo hacer" | 🟡 **decidido en concepto** el 24/09/2026: es un desenlace del trabajo con motivo, no una cancelación. Falta la forma (§2.1) |
+| **D-2** | Si se registra el GPS del técnico en cada evidencia | ✅ **sí**, y sin fricción, 24/09/2026. Implementado (§3.1) |
+| **D-3** | Qué tipos de trabajo existen además de instalación y correctivo | 🔴 abierto. Son configuración por tenant, no código |
+| **D-4** | Si las cuatro migraciones de materiales se aplican | ✅ **no todavía**, 24/09/2026: esperan al inventario de la plataforma, que no está construido (§4) |

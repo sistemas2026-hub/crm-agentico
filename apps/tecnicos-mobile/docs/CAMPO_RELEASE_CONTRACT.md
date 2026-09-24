@@ -12,11 +12,11 @@ Medido el 23/09/2026 contra `feat/campo-diseno-stitch`.
 | | |
 |---|---|
 | Versión de la aplicación | `1.0.0+1` |
-| Versión de la base local | 13 |
+| Versión de la base local | 14 |
 | Esquema de formulario soportado | 1 (una orden que pida más se bloquea) |
 | Migraciones de `campo` en el backend | 6 |
-| Pruebas | 540, verdes con la bandera de demostración apagada y encendida |
-| Archivos de prueba | 45 |
+| Pruebas | 546, verdes con la bandera de demostración apagada y encendida |
+| Archivos de prueba | 46 |
 
 ---
 
@@ -186,6 +186,23 @@ La guarda no afirma que el campo exista: afirma que el valor que llega a la
 fila es el que se pidió, y que encolar y capturar son dos hechos distintos.
 
 → `test/hora_de_captura_test.dart`
+
+### Y dónde — pero la ubicación nunca cuesta una evidencia
+
+Las fotos llevan coordenadas, precisión y equipo (`metadatos_captura`). Lo que
+esta guarda protege no es que el GPS funcione —eso lo prueba el teléfono— sino
+que **una evidencia nunca se pierda ni se demore porque el GPS no fije**.
+
+El trabajo de campo ocurre en sótanos y cajas de distribución, que es justo
+donde no hay señal: "no se pudo ubicar" no es el borde raro, es la mitad de los
+días. Plazo de 5 segundos, todo dentro de un `try`, y si falla se guarda la
+foto igual con el motivo escrito.
+
+Por eso se distinguen tres cosas que un campo vacío confundía: **nulo** = no se
+intentó · **`ubicacion_motivo`** = se intentó y no se pudo · **coordenadas** =
+se supo.
+
+→ `test/ubicacion_de_captura_test.dart`
 
 ### Nada cruza entre personas ni entre empresas
 
