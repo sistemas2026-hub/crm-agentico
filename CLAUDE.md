@@ -367,7 +367,7 @@ Escritos para que no se redescubran cada sesión. Ninguno es un descuido: son de
 
 | # | Qué | Por qué importa |
 |---|---|---|
-| D1 | **No hay CI automática en este repositorio.** [.github/](.github/) solo tiene `CODEOWNERS`; los workflows de [django-crm/.github/workflows/](django-crm/.github/workflows/) no los lee GitHub Actions (solo mira la raíz). Los 145 archivos de `tests/` son scripts sueltos, sin runner agregado | Las guardas de §6 dependen de que alguien se acuerde de correrlas |
+| D1 | **CI — cerrado el 24/09/2026.** `cli/correr_pruebas.py` corre las 145 como subprocesos y `.github/workflows/pruebas.yml` las dispara en cada push. Distingue FALLO de NO SE PUDO CORRER. **Sigue abierto**: las 52 que piden Postgres no corren en CI todavía (falta un servicio de base en el workflow), y quedan 2 en rojo de antes | Su primera corrida encontró un gate sin clasificar que tres guardas venían señalando en rojo sin que nadie las corriera |
 | D2 | **El deploy no tiene puerta** — *parcialmente cerrado (23/09/2026)*. El `pre-commit` de §9 ya bloquea un secreto o artefacto en el stage y la guarda de arquitectura en rojo, y recuerda el resto. Lo que **sigue abierto**: corre solo en la máquina que hizo el `git config` de §9, y un push a la rama de despliegue publica sin que nada haya corrido antes | Junto con D1: nada del lado del servidor impide desplegar con una guarda en rojo |
 | D3 | **Monolitos de archivo** (§2) | Superficie de conflicto alta entre sesiones y revisiones difíciles |
 | D4 | **El motor corre con `--workers 1`** y el historial caliente vive en RAM del proceso | Techo real de escala; se levanta el día que ese historial viva en `asistente.conversations` |
@@ -376,4 +376,4 @@ Escritos para que no se redescubran cada sesión. Ninguno es un descuido: son de
 | D7 | **`editor._editar` reescribe defaults ausentes**: una mutación de una clave produjo 68 hojas distintas | El diff de una edición mínima deja de ser auditable |
 | D8 | **`test_rutas_sql` cuenta bases globales** — falla si otra suite crea bases en paralelo | No bloqueante; correrla sola hasta arreglarla |
 | D9 | **Sentry apagado a propósito**, y no se enciende hasta resolver si un proveedor externo de monitoreo entra en la autorización de tratamiento | [OBSERVABILIDAD_Y_PRIVACIDAD.md](OBSERVABILIDAD_Y_PRIVACIDAD.md) |
-| D10 | **`ARQUITECTURA.md` desactualizado** (lista 9 submódulos de `nucleo/`; hay **15**, medido el 23/09/2026 — `SPEC/CONTEXTO_PROYECTO.md` decía 11, también viejo) y `PRD.md` con numeración duplicada (dos §8.9 y dos §8.10) | Corregir al pasar por ahí, no como tarea aparte |
+| D10 | **`PRD.md` con numeración duplicada** (dos §8.9 y dos §8.10). El mapa de `ARQUITECTURA.md` **ya se corrigió** el 24/09/2026: listaba 9 submódulos y son 15 | Corregir al pasar por ahí, no como tarea aparte |
