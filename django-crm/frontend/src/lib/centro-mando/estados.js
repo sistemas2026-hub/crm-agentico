@@ -7,6 +7,13 @@
  * es justo lo que hace falta -- un estado mal derivado no se ve: muestra
  * tranquilo a un agente que esta con errores.
  *
+ * LOS COLORES SON LOS DEL TEMA CLARO
+ * El tablero se pinta sobre blanco, como el resto del CRM. Los tonos neon
+ * del primer diseno (#06B6D4, #22C55E) sobre blanco quedaban por debajo del
+ * minimo legible -- medido el 24/09/2026: la tarea del agente daba 3.68 de
+ * contraste y la leyenda 2.56, contra el 4.5 que pide WCAG AA. Estos tonos
+ * dicen lo mismo y se leen: ninguno baja de 4.7 sobre blanco.
+ *
  * OCHO ESTADOS, SEIS QUE EL MOTOR EMITE HOY
  * La interfaz sabe pintar los ocho. El motor (nucleo/canales/api.py) solo
  * emite los que puede medir; `waiting_tool` y `completed` estan definidos
@@ -27,7 +34,7 @@
 export const ESTADOS = {
   error: {
     rotulo: 'CON ERRORES',
-    color: '#EF4444',
+    color: '#B91C1C',
     pulso: true,
     orden: 0,
     emitido: true,
@@ -35,7 +42,7 @@ export const ESTADOS = {
   },
   waiting_approval: {
     rotulo: 'ESPERA APROBACIÓN',
-    color: '#8B5CF6',
+    color: '#6D28D9',
     pulso: true,
     orden: 1,
     emitido: true,
@@ -43,7 +50,7 @@ export const ESTADOS = {
   },
   working: {
     rotulo: 'TRABAJANDO',
-    color: '#06B6D4',
+    color: '#0E7490',
     pulso: true,
     orden: 2,
     emitido: true,
@@ -51,7 +58,7 @@ export const ESTADOS = {
   },
   waiting_tool: {
     rotulo: 'ESPERA HERRAMIENTA',
-    color: '#0EA5E9',
+    color: '#0369A1',
     pulso: true,
     orden: 3,
     emitido: false,
@@ -59,7 +66,7 @@ export const ESTADOS = {
   },
   waiting_user: {
     rotulo: 'ESPERA RESPUESTA',
-    color: '#F59E0B',
+    color: '#A15C07',
     pulso: false,
     orden: 4,
     emitido: true,
@@ -67,7 +74,7 @@ export const ESTADOS = {
   },
   completed: {
     rotulo: 'COMPLETADO',
-    color: '#22C55E',
+    color: '#15803D',
     pulso: false,
     orden: 5,
     emitido: false,
@@ -75,7 +82,7 @@ export const ESTADOS = {
   },
   idle: {
     rotulo: 'DISPONIBLE',
-    color: '#22C55E',
+    color: '#15803D',
     pulso: false,
     orden: 6,
     emitido: true,
@@ -83,7 +90,7 @@ export const ESTADOS = {
   },
   offline: {
     rotulo: 'FUERA DE LÍNEA',
-    color: '#47607F',
+    color: '#64748B',
     pulso: false,
     orden: 7,
     // No se emite: nada en la base dice que un agente esté apagado. Derivarlo

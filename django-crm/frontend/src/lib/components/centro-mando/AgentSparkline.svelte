@@ -34,6 +34,6 @@
   .area { fill: var(--c); opacity: .14; }
   /* Sin actividad se dibuja la linea base, no un hueco: un espacio vacio
      parece un fallo de carga; una raya plana dice "no paso nada". */
-  .plano { height: 26px; border-bottom: 1px dashed rgba(255,255,255,.12); }
-  .pie { font-family: ui-monospace, monospace; font-size: 8px; letter-spacing: .08em; color: #47607f; text-transform: uppercase; }
+  .plano { height: 26px; border-bottom: 1px dashed #cbd5e1; }
+  .pie { font-family: ui-monospace, monospace; font-size: 8px; letter-spacing: .08em; color: #64748b; text-transform: uppercase; }
 </style>

@@ -1,56 +1,44 @@
 <script>
   /**
    * El orquestador: quien recibe lo que entra y lo reparte. No es un agente
-   * mas -- no tiene conversaciones propias -- asi que se muestra aparte, como
-   * cabecera de la sala, con lo que esta moviendo ahora mismo.
+   * mas -- no tiene conversaciones propias -- y por eso ocupa el centro del
+   * mapa en vez de una posicion del anillo.
    *
-   * En la Fase 2 este mismo componente es el nodo central del mapa y de el
-   * salen las FlowLine hacia cada estacion. Por eso recibe ya el reparto por
-   * estado: es lo que decidira el color y el grosor de cada flujo.
+   * El rotulo va DENTRO del disco: colgado debajo, el nodo de abajo del
+   * anillo lo tapaba (visto el 24/09/2026).
+   *
+   * El reparto por estado sigue llegando aunque hoy no se pinte aqui: de el
+   * salen el color y el grosor de cada via, que dibuja el CommandCenter.
    */
-  import { ESTADOS, normalizar } from '$lib/centro-mando/estados.js';
-
-  /** @type {{ totales: any, reparto: Record<string, number> }} */
-  let { totales, reparto } = $props();
-
-  // Solo los estados presentes, en el orden de urgencia de la tabla.
-  const presentes = $derived(
-    Object.entries(reparto)
-      .map(([estado, n]) => ({ estado: normalizar(estado), n }))
-      .sort((a, b) => ESTADOS[a.estado].orden - ESTADOS[b.estado].orden)
-  );
+  /** @type {{ totales: any }} */
+  let { totales } = $props();
 </script>
 
-<div class="orquestador">
-  <div class="nucleo">
-    <span class="rot">Orquestador</span>
-    <span class="n">{totales.conversaciones_activas ?? 0}</span>
-    <span class="sub">en curso</span>
-  </div>
-  <div class="reparto">
-    {#each presentes as p}
-      <span class="tramo" style="--c:{ESTADOS[p.estado].color}">
-        <i></i>{p.n} {ESTADOS[p.estado].rotulo.toLowerCase()}
-      </span>
-    {/each}
-  </div>
-  {#if totales.esperando_humano}
-    <span class="humano">{totales.esperando_humano} esperan a una persona</span>
-  {/if}
+<div class="nucleo">
+  <span class="rot">Orquestador</span>
+  <span class="n">{totales.conversaciones_activas ?? 0}</span>
+  <span class="sub">en curso</span>
 </div>
 
 <style>
-  .orquestador {
-    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-    padding: 10px 14px; border: 1px solid rgba(0,229,255,.22); border-radius: 12px;
-    background: linear-gradient(90deg, rgba(0,229,255,.08), transparent 60%);
+  .nucleo {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 124px;
+    height: 124px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 30%, #ffffff, #f1f5f9 72%);
+    border: 2px solid #0e7490;
+    box-shadow: 0 2px 16px rgba(14, 116, 144, .18);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
   }
-  .nucleo { display: flex; align-items: baseline; gap: 8px; }
-  .rot { font-family: ui-monospace, monospace; font-size: 9.5px; letter-spacing: .18em; text-transform: uppercase; color: #00e5ff; }
-  .n { font-family: ui-monospace, monospace; font-size: 24px; font-weight: 700; color: #e6f1ff; line-height: 1; }
-  .sub { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #8aa2c0; }
-  .reparto { display: flex; gap: 12px; flex-wrap: wrap; }
-  .tramo { font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--c); display: inline-flex; align-items: center; gap: 6px; }
-  .tramo i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); box-shadow: 0 0 7px var(--c); }
-  .humano { margin-left: auto; font-family: ui-monospace, monospace; font-size: 10.5px; color: #f59e0b; }
+  .rot { font-family: ui-monospace, monospace; font-size: 8px; letter-spacing: .2em; text-transform: uppercase; color: #0e7490; margin-bottom: 5px; }
+  .n { font-family: ui-monospace, monospace; font-size: 26px; font-weight: 700; line-height: 1.05; color: #0f172a; }
+  .sub { font-size: 8px; letter-spacing: .14em; color: #475569; text-transform: uppercase; }
 </style>
