@@ -7,7 +7,7 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: 23/09/2026, tras desplegar identidad y observabilidad.
+Última actualización: 24/09/2026, tras endurecer la validación de producción.
 
 ---
 
@@ -68,6 +68,52 @@ Ese último se coló en el cierre de 1.8 y metió el arrastre en el commit
 documental. Un directorio entero es el mismo gesto que un `add .`: basta con que
 alguien deje un archivo ajeno adentro. Verificar siempre con
 `git diff --cached --name-only` antes de commitear.
+
+## VALIDACIÓN DE PRODUCCIÓN — 9 de 10, bloqueado por acceso al VPS
+
+Objetivo `SPEC/objetivos/endurecer-validacion-de-produccion.md`, abierto y
+avanzado el 23-24/09/2026. **No está cerrado**: falta el criterio 1.
+
+Lo que quedó funcionando:
+
+```
+cli/bateria_flujos.py    21 conversaciones que entran por atender_turno y se
+                         juzgan solas contra la traza. 19/19 en LOCAL; 2
+                         necesitan el CRM (backend:8000, red del compose).
+                         Cierra el hueco de que cli/evaluar.py llama a
+                         motor.responder() directo: ninguna guarda construida
+                         el 23/09 tenía prueba de punta a punta.
+casos dorados            el inestable (3/4, 0/3, 1/11, 5/6, 1/5, 4/8, 2/4
+                         según la corrida) partido en dos: 10/10 y 10/10.
+                         'sin el serial cargado' dejó de afirmar sobre la
+                         redacción: 10/10.
+cli/evaluar.py           afirmaciones nuevas 'bloquea_con'/'no_bloquea_con':
+                         los códigos de los gates ya viajaban en el registro
+                         y se descartaban.
+```
+
+**Lo que falta, y no es código:** `docker exec <contenedor-motor> python
+cli/bateria_flujos.py rapilink --todos`. Sin acceso al VPS el objetivo no
+cierra, aunque todo lo demás esté verde. Esa corrida además deja casos reales
+en BottleCRM que hay que borrar.
+
+**Lo que la auditoría adversarial dejó abierto** (nueve hallazgos anotados en
+`SPEC/auditorias/2026-09-23-bateria-de-flujos.md`). Dos que conviene mirar
+antes de confiar en las mediciones:
+
+```
+gates sin clasificar   a CODIGOS_DE_BLOQUEO le faltan DECLARACION_NO_ALCANZA y
+                       AUTONOMIA_2_NO_ACTIVA. Mientras tanto una llamada que un
+                       gate frenó viaja como ERROR, y un caso con
+                       'sin_errores: true' sale rojo con la protección
+                       funcionando. tests/test_bloqueos_en_traza.py está ROJO
+                       en la rama por esto, desde antes de este trabajo.
+franja horaria         si la imagen no trae tzdata, ZoneInfo falla siempre y el
+                       respaldo es la hora del servidor: a las 20:00 de Bogotá
+                       el prompt diría "mañana, de madrugada". NO MEDIDO.
+                       docker exec <motor> python -c "from zoneinfo import
+                       ZoneInfo; print(ZoneInfo('America/Bogota'))"
+```
 
 ## CERRADO
 
