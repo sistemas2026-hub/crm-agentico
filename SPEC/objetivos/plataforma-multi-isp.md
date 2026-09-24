@@ -60,7 +60,26 @@ con UNIQUE. Es una biyección, así que la inversa es una función.
 empresa no tiene asistente. Del lado del frontend, `lib/server/v2/tenant.js`
 es el único lugar que decide de qué empresa son los datos.
 
-**B2 · La sustitución de los 73 lugares no se puede verificar hoy.** Su
+**B2 · RESUELTO el 24/09/2026.** Se levantó el contenedor del frontend y se
+verificó con `docker exec ... pnpm check`. Dos mediciones que hacían falta y
+que no son obvias:
+
+- **La línea base de `svelte-check` ya estaba en rojo**: 71 diagnósticos (47
+  errores, 27 advertencias) antes de tocar nada. El criterio no podía ser «que
+  pase» sino **que no empeore**, y eso solo se sabe midiendo antes.
+- **La línea base de `pnpm test` también**: 17 archivos y 63 pruebas en rojo,
+  idénticas antes y después. Medirla se me pasó primero, que es el mismo error
+  que cometí ese día con las 536 pruebas de Campo.
+
+La sustitución se hizo con un script que exige tres condiciones por archivo, y
+aun así **8 archivos quedaron rotos**: la heurística «el archivo contiene la
+palabra locals» no prueba que la *función* que tiene esa línea la reciba, y no
+comprobaba `async` en absoluto. Se revirtieron esos 8 y quedaron 44. Sin la
+medición contra la línea base, esos 15 errores nuevos se habrían commiteado.
+
+*(El bloqueo original, por si hay que revisar la decisión:)*
+
+**La sustitución de los lugares no se podía verificar.** Su
 comprobación es `pnpm check`, y en Windows con Docker arriba eso reescribe
 `.svelte-kit/generated/` con rutas truncadas que después el contenedor no
 resuelve — la aplicación entera pasa a devolver 500 con un síntoma que no
@@ -85,4 +104,5 @@ tercera es la que encaja con la arquitectura:
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 24/09/2026 | Decisión de producto registrada (PRD §8.13), forma medida, supuesto comprobado | Ejecutar | a416063 |
+| 24/09/2026 | **44 de 70 archivos migrados.** Acoplamiento: 70→28 archivos, 80→37 apariciones. `svelte-check` sin un solo diagnóstico nuevo (71 antes, 71 después) | Los 26 restantes: 11 de `lib/server` sin `locals`, 8 con `async`/alcance, 6 `+page.server.js` | — |
 | 24/09/2026 | **B1 resuelto.** El motor expone la inversa (`/tenant-de-organizacion/<id>`), con su guarda. El frontend tiene su ayudante único (`tenantDeLaSesion`), 8 pruebas verdes | La sustitución de los 73 lugares | 5f5b88f |

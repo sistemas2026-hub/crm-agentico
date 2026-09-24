@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * Cómo está el equipo del cliente ahora: enlace y potencia óptica.
@@ -32,7 +33,7 @@ export async function GET({ locals, fetch, params, url }) {
   if (!locals.user) return json({ error: 'No autenticado' }, { status: 401 });
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     return json({ error: 'Asistente no configurado.' }, { status: 500 });
   }

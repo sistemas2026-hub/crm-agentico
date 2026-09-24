@@ -1,6 +1,7 @@
 import { error } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * Sirve un adjunto que mando el cliente por el canal (una foto del router, un
@@ -23,7 +24,7 @@ export async function GET({ params, locals, fetch, setHeaders }) {
   }
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     error(500, 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)');
   }

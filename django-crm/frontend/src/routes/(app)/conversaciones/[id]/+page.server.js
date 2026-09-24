@@ -3,6 +3,7 @@ import { env } from '$env/dynamic/private';
 import { getTicket, getTicketFormOptions, updateTicket } from '$lib/server/v2/tickets.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 import { operadoresDeLaOrg, rolDeSesion } from '$lib/server/v2/operadores.js';
 
 /**
@@ -24,7 +25,7 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   depends('app:relevo');
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     error(500, 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)');
   }

@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
 
 /**
@@ -21,7 +22,7 @@ export async function POST({ params, locals, fetch, request }) {
   }
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     return json(
       { error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
