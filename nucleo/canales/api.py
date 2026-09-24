@@ -3304,7 +3304,8 @@ def _flujo_de(config) -> dict:
     for nombre, rol in config.roles.items():
         if rol.orientado_a != "cliente_final":
             continue          # el flujo de derivacion es del lado del cliente
-        estado = _estado(carga, act)
+        aprobaciones = datos["aprobaciones"].get(nombre, 0)
+        estado = _estado(carga, act, aprobaciones)
         agentes.append({
             "nombre": nombre,
             "haciendo": _haciendo(estado, carga, act),
@@ -3528,29 +3529,61 @@ def centro_mando():
             fallos = act.get("fallos") or 0
             return f"{fallos} llamada{'s' if fallos != 1 else ''} a {herr} fallaron" if herr \
                 else f"{fallos} herramienta{'s' if fallos != 1 else ''} fallaron"
-        if estado == "procesando":
+        if estado == "working":
             return f"Ejecutando {herr}" if herr else f"Atendiendo {n} conversacion(es)"
-        if estado == "atendiendo":
-            if esperan:
-                return f"{esperan} esperando a una persona, {n} en curso"
-            return f"{n} conversacion{'es' if n != 1 else ''} en curso"
-        return "Sin conversaciones en curso"
+        if n == 0:
+            return "Sin conversaciones en curso"
+        if esperan:
+            return f"{esperan} esperando a una persona, {n} en curso"
+        return f"{n} conversacion{'es' if n != 1 else ''} en curso"
 
-    def _estado(carga: dict, act: dict) -> str:
+    def _estado(carga: dict, act: dict, aprobaciones: int) -> str:
+        """
+        El estado que se muestra, derivado de lo que se pudo contar.
+
+        El orden importa: lo que exige a una persona gana sobre lo que el
+        agente esta haciendo solo, y el trabajo en curso gana sobre la espera.
+
+        De los ocho estados que la interfaz sabe pintar, aqui solo se emiten
+        seis. Los otros dos no se emiten porque HOY NO HAY CON QUE MEDIRLOS,
+        y un estado que se adivina es peor que uno que falta:
+
+          waiting_tool  'tool_calls' se escribe cuando la llamada TERMINA, con
+                        su duracion. No existe la fila "en vuelo", asi que una
+                        herramienta lenta y una recien terminada se ven igual.
+                        Exigiria registrar al invocar, no al responder.
+          completed     no es un estado de un agente sino de una tarea. Un
+                        agente que termino algo vuelve a 'idle' o sigue con lo
+                        siguiente; pintarlo como 'completed' seria inventar una
+                        pausa que no existe.
+          offline       no hay nada que diga que un agente esta apagado. Se
+                        intento derivarlo de "no tiene ninguna fila", y es
+                        falso: un agente configurado que hoy no atendio a
+                        nadie tampoco las tiene, y esta perfectamente vivo.
+                        Confundir "sin datos" con "caido" hace que la pantalla
+                        avise de una averia que no existe.
+        """
         if (act.get("fallos") or 0) > 0:
             return "error"
+        if aprobaciones > 0:
+            return "waiting_approval"
         if (act.get("llamadas") or 0) > 0:
-            return "procesando"
+            return "working"
+        if (carga.get("esperando_humano") or 0) > 0:
+            return "waiting_user"
+        if (carga.get("esperando_cliente") or 0) > 0:
+            return "waiting_user"
         if (carga.get("conversaciones") or 0) > 0:
-            return "atendiendo"
-        return "disponible"
+            return "working"
+        return "idle"
 
     agentes = []
     for nombre, rol in config.roles.items():
         carga = datos["carga"].get(nombre, {})
         act = datos["actividad"].get(nombre, {})
         ultima = carga.get("ultima_actividad") or act.get("ultima_llamada")
-        estado = _estado(carga, act)
+        aprobaciones = datos["aprobaciones"].get(nombre, 0)
+        estado = _estado(carga, act, aprobaciones)
         agentes.append({
             "nombre": nombre,
             "haciendo": _haciendo(estado, carga, act),
@@ -3562,6 +3595,8 @@ def centro_mando():
             "conversaciones": carga.get("conversaciones") or 0,
             "abiertas_total": carga.get("abiertas_total") or 0,
             "esperando_humano": carga.get("esperando_humano") or 0,
+            "esperando_cliente": carga.get("esperando_cliente") or 0,
+            "esperando_aprobacion": aprobaciones,
             "recibidas_hoy": carga.get("recibidas_hoy") or 0,
             "llamadas_ventana": act.get("llamadas") or 0,
             "fallos_ventana": act.get("fallos") or 0,

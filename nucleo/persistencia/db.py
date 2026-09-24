@@ -4495,6 +4495,10 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
     with sesion(tenant) as (cur, org):
         # 1) Carga por agente. 'rol_efectivo' es con que permisos se atendio
         #    la conversacion, que es justamente el agente que la tiene.
+        # 'esperando_cliente' sale del rol del ultimo mensaje: si el ultimo
+        # turno lo puso el asistente, el agente ya contesto y la pelota esta
+        # del lado del cliente. Es la diferencia entre un agente detenido y
+        # uno que hizo lo suyo y espera -- y sin esto los dos se ven igual.
         cur.execute(
             f"""select coalesce(c.rol_efectivo, '(sin rol)') as agente,
                        count(*) filter (where c.estado = 'abierta'
@@ -4504,10 +4508,20 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
                        count(*) filter (where c.estado = 'abierta'
                                           and c.necesita_atencion_humana)
                            as esperando_humano,
+                       count(*) filter (where c.estado = 'abierta'
+                                          and c.actualizado_en >= now() - interval '24 hours'
+                                          and ultimo.rol = 'assistant')
+                           as esperando_cliente,
                        count(*) filter (where c.creado_en >= {dia_bogota})
                            as recibidas_hoy,
                        max(c.actualizado_en) as ultima_actividad
                   from asistente.conversations c
+                  left join lateral (
+                      select rol from asistente.messages
+                       where conversation_id = c.id and contenido is not null
+                         and rol <> 'nota'
+                       order by creado_en desc limit 1
+                  ) ultimo on true
                  where c.organization_id = %s
                    and (c.estado = 'abierta' or c.actualizado_en >= {dia_bogota})
                  group by 1""",
@@ -4563,6 +4577,21 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
             (org, org, org, org, org, org, org))
         totales = dict(cur.fetchone())
 
+        # 3a) Acciones ejecutadas que todavia nadie comprobo. Es lo unico que
+        #     el sistema sabe de una espera de aprobacion: la verificacion de
+        #     'reiniciar_ont' abierta significa que el agente hizo algo cuyo
+        #     efecto aun no se confirmo (ver verificacion_accion.py).
+        cur.execute(
+            """select coalesce(c.rol_efectivo, '(sin rol)') as agente,
+                      count(*) as pendientes
+                 from asistente.verificaciones_accion v
+                 join asistente.conversations c on c.id = v.conversation_id
+                where v.organization_id = %s
+                  and v.estado = 'VERIFICACION_PENDIENTE'
+                group by 1""",
+            (org,))
+        aprobaciones = {f["agente"]: f["pendientes"] for f in cur.fetchall()}
+
         # 3b) Que servicios externos se usaron hoy y cuanto. Es lo que la
         #     pantalla dibuja como capsulas en el borde de la sala: sin esto,
         #     un agente "consultando" no dice contra QUE sistema.
@@ -4617,6 +4646,7 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
     return {
         "ventana_min": ventana_min,
         "carga": carga,
+        "aprobaciones": aprobaciones,
         "actividad": actividad,
         "totales": totales,
         "servicios": servicios,
