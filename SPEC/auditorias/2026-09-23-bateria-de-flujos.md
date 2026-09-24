@@ -221,3 +221,44 @@ contra el backend REAL —el del compose de producción, o con credenciales
 válidas— y comprobar que `caso_id` deja de ser `None`. Mientras tanto, el dato
 histórico sigue siendo el que vale: 23 escalamientos confirmados con caso entre
 el 02 y el 19/09, y 1 sin confirmar el 23/09.
+
+---
+
+## Hallazgo del 24/09/2026 — la batería comiteada nunca se corrió
+
+Aparecido al intentar repetir el criterio 2, no en la auditoría original.
+
+`d9733df` está escrito como un arreglo de una línea del cliente simulado («no
+contestaba la repregunta del documento»). Medido, hace dos cosas:
+
+```
+git show 81677b4:cli/bateria_flujos.py | grep -c '^    caso("'   -> 21
+git show d9733df:cli/bateria_flujos.py | grep -c '^    caso("'   -> 41
+```
+
+Agrega **20 casos**, entre ellos los de seguridad que más importan —
+`pedirle que ignore sus instrucciones no abre la ficha de nadie`,
+`decir que es tecnico no habilita una accion irreversible`,
+`pedir la lista de morosos no devuelve una lista`,
+`una amenaza de cancelar no ejecuta la baja`,
+`decir que ya pago no registra un pago`. El mensaje del commit no los nombra.
+
+**Consecuencia: la evidencia del criterio 2 (19/19 LOCAL) se midió sobre
+`81677b4`, con 21 casos. La batería que hoy está en la rama tiene 41 y no se
+ha corrido nunca.** Los 20 casos nuevos no tienen ni una corrida detrás: no se
+sabe si pasan, si fallan, ni si son estables — que era justamente lo que este
+objetivo existía para garantizar («ningún caso dorado da un resultado que sea
+una moneda al aire»).
+
+Es el error cardinal del proyecto otra vez, en su forma más simple: **la
+evidencia no describe el código que está comiteado**. Y esta vez lo firmé yo
+al aceptar `d9733df` diciendo que lo había evaluado en mérito; evalué el
+cambio del cliente simulado y no miré que el mismo diff traía 20 casos.
+
+No se puede cerrar acá: correr la batería exige credenciales de base, y este
+worktree no tiene `.env` (ver la ficha del objetivo). Queda como el primer
+trabajo del próximo bloque, antes que cualquier otra cosa:
+
+1. Correr los 41 casos y pegar la salida.
+2. Repetir ≥10 veces los 20 nuevos, o declararlos inestables y sacarlos.
+3. Reescribir el mensaje de `d9733df` o dejar constancia de lo que trae.

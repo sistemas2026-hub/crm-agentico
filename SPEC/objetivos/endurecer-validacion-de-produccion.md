@@ -218,3 +218,18 @@ criterio 1; no está bloqueada por acceso al VPS, como decía la bitácora del
 (la vía limpia es `env_file` con ruta absoluta al del checkout principal, que
 lo lee Compose y no una persona) y aceptar que el `db` del compose usa el
 volumen externo compartido `django-crm_postgres_data`.
+
+## El criterio 2 tampoco está cumplido (24/09/2026)
+
+El 19/19 LOCAL se midió sobre `81677b4`, cuando la batería tenía 21 casos.
+`d9733df` la dejó en 41 — agrega 20, entre ellos los de seguridad — y el
+mensaje del commit no lo dice. **La batería que está en la rama no se ha
+corrido nunca.**
+
+Detalle y lo que hay que hacer, en
+`SPEC/auditorias/2026-09-23-bateria-de-flujos.md`.
+
+Entonces el cierre «9 y medio de 10» de `1438eb5` queda mal contado: no es 1
+criterio abierto, son 2. Y el que se creía cerrado es el que sostenía a los
+demás, porque los criterios 3, 4 y 5 afirman sobre casos que corre esta misma
+batería.
