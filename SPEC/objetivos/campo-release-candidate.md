@@ -195,6 +195,20 @@ le hablaba al nativo, que apunta a otra base, y las credenciales sembradas acá
 eran invisibles para él. La prueba que lo cerró fue crear un usuario marcador
 en una base y pedirlo por la otra.
 
+⚠️ **A qué base apunta ese proceso nativo está SIN VERIFICAR, y conviene
+saberlo.** Arrancó el 22/09/2026 a las 09:17 desde
+`C:\wisphub\dexter\django-crmackend\.venv`, o sea el worktree principal,
+y en esta máquina **el `.env` de la raíz es el que decide la base**:
+DESPLIEGUE.md documenta que con `DBHOST=crm.rapilinksas.co` el CRM se conecta
+al Supabase **real** — *"esto no es una copia, es la base de producción"*. No
+se comprobó (no se lee el `.env` ni se consulta producción desde una sesión).
+
+Si lo fuera, dos consecuencias: el teléfono estuvo hablando con producción
+durante las primeras pruebas de la Parte B, y ese proceso lleva días con
+`migrate --noinput` corriendo en cada arranque contra esa base. Verificarlo es
+mirar qué `DBHOST` tiene cargado ese entorno — trabajo de una persona, un
+minuto.
+
 **Los datos sobreviven a `docker compose down`.** El volumen es
 `django-crm_postgres_data`, declarado `external: true`: Compose no lo crea ni
 lo borra, tampoco con `down -v`. Es el **mismo** volumen que usa el compose de
