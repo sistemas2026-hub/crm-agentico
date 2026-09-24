@@ -64,6 +64,48 @@ Además hay **2 commits en producción que no están acá** (`790e185`, `b7cfa90
 | `feat/campo-diseno-stitch` | **Dexter Campo.** 101 archivos de prueba, 551 pruebas | 🟡 activa en `C:/wisphub/_wt_campo`. Una tercera sesión implementa ahí «refrescar ficha» (`test_refrescar_ficha.py`, sin commitear) |
 | `fix/integracion-wisphub` | **Producción.** Push ahí ES deploy | Centro de Mando desde `ee4563f` (23/09 12:29) + los dos tableros de hoy |
 
+### DESPLEGADO el 24/09/2026 17:0x Bogotá — y verificado en la pantalla
+
+`790e185 .. 1a83886`. Salieron los 28 commits del día: la plataforma multi-ISP,
+el sistema de trabajo con IA (CLAUDE.md, 9 agentes, 4 comandos, `pre-commit`,
+CI), el entorno local aislado, `DECLARACION_NO_ALCANZA` clasificado en los tres
+guardas, la medición de TR-069 y el extracto en la ficha del agente.
+
+**La verificación que cierra la plataforma multi-ISP, y por qué vale:**
+
+```
+Centro de Mando en produccion, tras iniciar sesion:
+  insignia            RAPILINK
+  panorama            126 activas, 8 agentes, 110 conversaciones hoy,
+                      528 herramientas, grafo completo
+```
+
+No es «se ve lindo». `(app)/centro-mando/+page.server.js` tiene **una sola
+fuente** para el tenant —`tenantDeLaSesion(locals, fetch)`— y si devuelve
+`null` la pantalla no pinta el panorama: devuelve `panorama: null` y el texto
+«Asistente no configurado». No hay default y no hay camino alternativo. Que se
+vea el grafo prueba que el motor contestó `/tenant-de-organizacion/<org>` con
+`rapilink`, o sea que **la empresa ya no sale de una variable de entorno: sale
+de quién inició sesión**. Es la propiedad entera de PRD §8.13, medida en la
+pantalla y no en una prueba.
+
+**El riesgo de orden de contenedores no se materializó.** Se esperaba una
+ventana en que el frontend levantara antes que el motor y las pantallas
+salieran vacías (falla cerrada, sin fuga). No pasó.
+
+**Lo que NO prueba esta verificación:** las 14 rutas que todavía usan
+`tenantDeLaInstalacion()` (el puente a la variable de entorno). Siguen
+pendientes — ver la deuda de abajo.
+
+⚠️ Ruido esperado y ya explicado, para que la próxima sesión no lo investigue
+de nuevo: al reiniciar el frontend aparecen `Token refresh failed ... 401` en
+su log. Es una cookie `jwt_refresh` ya gastada —`ROTATE_REFRESH_TOKENS` +
+`BLACKLIST_AFTER_ROTATION`, o sea un solo uso por token— de una pestaña
+abierta desde antes del despliegue. Ninguno de los 28 commits toca
+autenticación, JWT ni `settings.py`; `hooks.server.js` no cambió una línea.
+Solo preocupa si es continuo y para todos JUSTO DESPUÉS de iniciar sesión:
+eso sería `SECRET_KEY` cambiada, que invalida todo lo emitido.
+
 ### Qué hay en producción, con fecha
 
 Importado de la copia de `feature/bandeja-relevo`, que lo tenía y esta no.
