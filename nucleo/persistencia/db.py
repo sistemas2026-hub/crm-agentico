@@ -4577,6 +4577,27 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
             (org, org, org, org, org, org, org))
         totales = dict(cur.fetchone())
 
+        # 2b) La misma actividad, pero repartida en cubos de tiempo. Son los
+        #     ultimos 30 minutos en 15 cubos de 2: suficiente para ver una
+        #     rafaga o una caida, y barato -- una fila por agente y cubo con
+        #     actividad, no una por llamada.
+        cur.execute(
+            """select coalesce(rol_solicitante, '(sin rol)') as agente,
+                      floor(extract(epoch from (now() - creado_en)) / 120)::int as cubo,
+                      count(*) as n
+                 from asistente.tool_calls
+                where organization_id = %s
+                  and creado_en >= now() - interval '30 minutes'
+                group by 1, 2""",
+            (org,))
+        serie = {}
+        for f in cur.fetchall():
+            # El cubo 0 es el minuto que corre; se guarda al final de la serie
+            # para que el tiempo avance de izquierda a derecha, como se lee.
+            fila = serie.setdefault(f["agente"], [0] * 15)
+            if 0 <= f["cubo"] < 15:
+                fila[14 - f["cubo"]] = f["n"]
+
         # 3a) Acciones ejecutadas que todavia nadie comprobo. Es lo unico que
         #     el sistema sabe de una espera de aprobacion: la verificacion de
         #     'reiniciar_ont' abierta significa que el agente hizo algo cuyo
@@ -4648,6 +4669,7 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
         "carga": carga,
         "aprobaciones": aprobaciones,
         "actividad": actividad,
+        "serie": serie,
         "totales": totales,
         "servicios": servicios,
         "eventos_herramienta": eventos_herramienta,

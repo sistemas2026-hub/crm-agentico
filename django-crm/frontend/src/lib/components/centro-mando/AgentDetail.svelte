@@ -5,12 +5,27 @@
    */
   import { Button } from '$lib/components/ui/button/index.js';
   import { Users } from '@lucide/svelte';
-  import AgentAvatar from './AgentAvatar.svelte';
   import AgentStatus from './AgentStatus.svelte';
   import { colorDe, ESTADOS, normalizar } from '$lib/centro-mando/estados.js';
 
   /** @type {{ agente: any, ventana: number, hora: (v: any) => string, ms: (v: any) => string, alCerrar: () => void }} */
   let { agente, ventana, hora, ms, alCerrar } = $props();
+
+  const PISTAS_CARA = [
+    [/vent|comercial/, 'ventas'],
+    [/factur|cartera|pago|cobr/, 'facturacion'],
+    [/fibra|ftth|red|olt|tecnic/, 'soporte'],
+    [/campo|instal|visita/, 'campo'],
+    [/supervis|administra|analista/, 'supervisor'],
+    [/identidad|verific/, 'identidad'],
+    [/dato|analit|informe/, 'datos'],
+    [/cliente|recepcion|router|chat|guiad|config/, 'router']
+  ];
+  function caraDe(/** @type {any} */ a) {
+    const texto = `${a.nombre} ${a.area || ''} ${a.cargo || ''}`.toLowerCase();
+    const hallada = PISTAS_CARA.find(([patron]) => patron.test(texto));
+    return `/centro-mando/avatares/${hallada ? hallada[1] : 'router'}.webp`;
+  }
 
   const cifras = $derived([
     [agente.conversaciones, 'Activas (24 h)', false],
@@ -25,7 +40,7 @@
 <button class="telon" onclick={alCerrar} aria-label="Cerrar detalle"></button>
 <aside class="detalle" style="--c:{colorDe(agente.estado)}">
   <header>
-    <div class="retrato"><AgentAvatar {agente} alto={96} cara={64} /></div>
+    <img class="retrato" src={caraDe(agente)} alt="" />
     <div>
       <h2>{agente.nombre.replaceAll('_', ' ')}</h2>
       <p>{agente.cargo || ''}{agente.area ? ` · ${agente.area}` : ''}</p>
@@ -79,7 +94,7 @@
     box-shadow: -24px 0 56px rgba(0,0,0,.8); display: flex; flex-direction: column; overflow-y: auto;
   }
   header { display: flex; gap: 14px; align-items: center; padding: 18px 16px; border-bottom: 1px solid rgba(0,229,255,.14); position: relative; }
-  .retrato { width: 120px; border-radius: 12px; overflow: hidden; border: 1px solid var(--c); flex-shrink: 0; }
+  .retrato { width: 76px; height: 76px; border-radius: 14px; object-fit: cover; border: 2px solid var(--c); flex-shrink: 0; }
   h2 { font-size: 18px; margin: 0 0 3px; text-transform: capitalize; }
   header p { font-size: 11.5px; color: #8aa2c0; margin: 0 0 8px; }
   .cerrar { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgba(0,229,255,.14); background: #16233a; color: #8aa2c0; cursor: pointer; }

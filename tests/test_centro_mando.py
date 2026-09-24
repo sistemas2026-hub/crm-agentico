@@ -113,6 +113,8 @@ PANORAMA = {
     "totales": {"conversaciones_activas": 9, "esperando_humano": 2, "atendidas_hoy": 12,
                 "herramientas_hoy": 40, "duracion_media_ms": 320, "fallos_hoy": 1},
     "servicios": [],
+    # 15 cubos de 2 minutos; el ultimo es el minuto que corre
+    "serie": {"ocupado": [0] * 13 + [2, 3]},
     "eventos_herramienta": [],
     "eventos_escalada": [],
 }
@@ -211,6 +213,20 @@ revisar(totales.get("agentes_activos") == len(con_trabajo),
 # en produccion y leer '0 agentes con trabajo' sobre tres tarjetas activas.
 revisar(totales.get("agentes_activos") > 0,
         "con agentes trabajando, el contador no es cero")
+
+print("\n7. la serie de actividad de cada agente")
+ocupado = por_nombre.get("ocupado", {})
+revisar(len(ocupado.get("serie") or []) == 15,
+        "cada agente trae los 15 cubos, aunque no haya movido nada",
+        f"trajo {len(ocupado.get('serie') or [])}")
+revisar(por_nombre.get("libre", {}).get("serie") == [0] * 15,
+        "el agente sin actividad trae la serie en cero, no vacia ni nula")
+# Con el total solo, un agente que hizo diez llamadas hace media hora y otro
+# que lleva diez en el ultimo minuto se ven igual. La serie es lo que los
+# distingue, asi que tiene que llegar completa y en orden.
+revisar((ocupado.get("serie") or [0])[-1] == 3,
+        "el ultimo cubo es el minuto que corre",
+        f"llego {(ocupado.get('serie') or [0])[-1]}")
 
 print("\n4. el ticker no lleva contenido de conversaciones")
 panorama_con_eventos = dict(PANORAMA)

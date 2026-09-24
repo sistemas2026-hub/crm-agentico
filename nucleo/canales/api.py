@@ -3605,6 +3605,8 @@ def centro_mando():
             "esperando_aprobacion": aprobaciones,
             "recibidas_hoy": carga.get("recibidas_hoy") or 0,
             "llamadas_ventana": act.get("llamadas") or 0,
+            # 15 cubos de 2 minutos, el ultimo es ahora
+            "serie": datos["serie"].get(nombre, [0] * 15),
             "fallos_ventana": act.get("fallos") or 0,
             "duracion_media_ms": act.get("duracion_media_ms"),
             "ultima_herramienta": act.get("ultima_herramienta"),

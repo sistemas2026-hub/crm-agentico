@@ -18,6 +18,7 @@
   import ExternalToolNode from './ExternalToolNode.svelte';
   import OrchestratorNode from './OrchestratorNode.svelte';
   import { ordenar, repartoPorEstado } from '$lib/centro-mando/estados.js';
+  import { cargaMaxima } from '$lib/centro-mando/telemetria.js';
 
   /** @type {{ panorama: any, sello?: string|null }} */
   let { panorama, sello = null } = $props();
@@ -29,6 +30,9 @@
   const eventos = $derived(panorama?.eventos || []);
   const agentes = $derived(ordenar(panorama?.agentes || []));
   const reparto = $derived(repartoPorEstado(panorama?.agentes || []));
+  // El anillo de cada tarjeta se llena contra el agente mas cargado: una
+  // cifra suelta no dice nada, comparada con el maximo lo dice todo.
+  const referencia = $derived(cargaMaxima(panorama?.agentes || []));
 
   const hora = (/** @type {string|null} */ iso) =>
     iso
@@ -94,7 +98,7 @@
 
       <div class="rejilla">
         {#each agentes as a (a.nombre)}
-          <AgentStation agente={a} {ms} alSeleccionar={(x) => (seleccionado = x)} />
+          <AgentStation agente={a} {referencia} {ms} alSeleccionar={(x) => (seleccionado = x)} />
         {/each}
       </div>
     </div>
@@ -143,5 +147,5 @@
 
   /* auto-fill: cuantos agentes hay lo decide cada empresa y el ancho cambia
      con el menu lateral. Con columnas fijas, la novena tarjeta rompe la fila. */
-  .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 14px; align-content: start; }
+  .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 14px; align-content: start; }
 </style>
