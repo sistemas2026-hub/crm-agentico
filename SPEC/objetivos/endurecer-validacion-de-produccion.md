@@ -1,8 +1,13 @@
 # Objetivo · Endurecer la validación de producción
 
-> Abierto el 23/09/2026. Estado: **cerrado** el 24/09/2026, con una salvedad
-> medida que queda escrita abajo (el camino escalada→ticket del CRM sigue sin
-> verificarse de punta a punta).
+> Abierto el 23/09/2026. Estado: **abierto**, 9 criterios y medio de 10.
+>
+> El criterio 1 **no se cumple como está escrito**: pide `docker exec` en el
+> contenedor del motor de producción y se corrió en un contenedor de un solo
+> uso sobre una red de desarrollo. Dio 21/21 con `[entorno: CONTENEDOR]`, pero
+> el `backend` de esa red es el de otro worktree y devolvió 403: **el camino
+> escalada→ticket sigue sin verificarse**. Lo que falta para cerrarlo está en
+> «Bloqueos», y es una decisión, no código.
 
 ## Qué significa terminado
 
@@ -112,9 +117,20 @@ es lo que juzga todo lo demás.
    uso con la imagen `dexter-motor:latest` (ya construida) sobre una red donde
    `backend` resuelve. Yo había reportado esto como bloqueo de acceso durante
    toda la sesión, y era una vía que no había buscado.
-2. ~~Los casos del criterio 1 dejan casos reales en BottleCRM.~~ **No dejaron
-   ninguno**: las 6 escaladas fallaron con 403 y `caso_id` quedó en `None`. No
-   hay nada que borrar — y eso es justamente la salvedad de abajo.
+2. **Lo que falta para cerrar el criterio 1, y es una decisión.** El CRM de
+   producción SÍ es alcanzable por red (`https://agent-api.rapilinksas.co`,
+   el `PUBLIC_DJANGO_API_URL` del frontend). Se podría levantar un proxy que
+   se llame `backend` en la red del contenedor y apunte ahí, y entonces el
+   camino escalada→ticket se verificaría de verdad.
+
+   **No se hizo, y el motivo es el que estaba anotado desde el principio:** eso
+   crea **tickets reales en la cola de BottleCRM** que una persona va a ver y
+   tener que borrar. Es un efecto hacia afuera, sobre el trabajo de otro, y no
+   lo decide quien corre la prueba. Hay que acordar antes quién limpia y cómo
+   se reconocen — los números de laboratorio los hacen fáciles de encontrar.
+
+   Mientras tanto la tanda no dejó nada que borrar: las 6 escaladas fallaron
+   con 403 y `caso_id` quedó en `None`.
 
 ## Hallazgos de la medición
 
