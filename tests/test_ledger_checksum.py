@@ -143,7 +143,24 @@ for nombre, esperado in GOLDEN.items():
     revisar(mig.huella(blob, nombre) == esperado and hashlib.sha256(blob).hexdigest() == esperado,
             f"{nombre}: el blob de git da el golden, y es su sha256 crudo")
 
-if shutil.which("docker"):
+# La pregunta correcta NO es "esta docker instalado" sino "esta la imagen".
+# Los dos son distintos y el 24/09/2026 costo una falsa alarma: el runner de
+# GitHub Actions SI trae docker, asi que este bloque entraba y `docker run`
+# fallaba por una imagen que en CI nunca se construye. El resultado era esta
+# prueba en ROJO afirmando algo que no habia medido -- exactamente lo que
+# "NO_VERIFICABLE != FALLO" existe para impedir, cometido por una guarda.
+IMAGEN = "dexter-backend:latest"
+
+
+def _hay_imagen():
+    """Docker instalado Y la imagen presente. Sin las dos, no se puede medir."""
+    if not shutil.which("docker"):
+        return False
+    return subprocess.run(["docker", "image", "inspect", IMAGEN],
+                          capture_output=True).returncode == 0
+
+
+if _hay_imagen():
     montaje = RAIZ.as_posix()
     programa = ("import sys; sys.path.insert(0, '/repo'); "
                 "from cli import migrar_asistente as m; "
@@ -151,7 +168,7 @@ if shutil.which("docker"):
                 + "; ".join(f"print(m.huella(open('/repo/supabase/{n}','rb').read()))"
                             for n in GOLDEN))
     r = subprocess.run(["docker", "run", "--rm", "-v", f"{montaje}:/repo",
-                        "dexter-backend:latest", "python3", "-c", programa],
+                        IMAGEN, "python3", "-c", programa],
                        capture_output=True, text=True)
     lineas = (r.stdout or "").split()
     revisar(r.returncode == 0 and lineas[:1] == ["Linux"],
@@ -161,7 +178,8 @@ if shutil.which("docker"):
             "y calcula los mismos golden sobre los mismos archivos",
             f"{lineas}")
 else:
-    print("  [saltado] sin Docker no se puede medir desde Linux")
+    falta = "sin Docker" if not shutil.which("docker") else f"sin la imagen {IMAGEN}"
+    print(f"  [saltado] {falta}: NO SE PUDO MEDIR desde Linux, que no es lo mismo que pasar")
 
 # =============================================================================
 titulo("los 40 historicos: arbol == blob")

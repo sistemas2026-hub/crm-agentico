@@ -93,6 +93,24 @@ _FALTA_ENTORNO = re.compile(
 )
 
 
+def _primer_motivo_legible(lineas: list[str]) -> str:
+    """La linea que de verdad explica el fallo, recorriendo desde el final.
+
+    Se descarta lo que no dice nada por si solo: las barras de separacion que
+    estas pruebas imprimen al cerrar, y los encabezados de traceback. Si no
+    queda ninguna, se devuelve vacio y quien llama pone el codigo de salida --
+    antes que una linea de iguales, que parece un motivo y no lo es.
+    """
+    for linea in reversed(lineas):
+        limpia = linea.strip()
+        if not limpia.strip("=-_ "):          # solo barras: no explica nada
+            continue
+        if limpia.startswith("Traceback ("):   # el encabezado, no la causa
+            continue
+        return limpia[:160]
+    return ""
+
+
 def correr(archivo: Path, segundos: int) -> tuple[bool, str, float]:
     arranque = time.monotonic()
     try:
@@ -110,9 +128,16 @@ def correr(archivo: Path, segundos: int) -> tuple[bool, str, float]:
     if r.returncode == 0:
         return True, "", tardo
     # La ultima linea util del error dice mas que el traceback entero.
+    #
+    # "util" hay que definirlo: la primera version tomaba la ultima linea no
+    # vacia y el 24/09/2026 la primera corrida en CI reporto un fallo cuyo
+    # motivo era "=========". Estas pruebas cierran con una barra de
+    # separacion, asi que la ultima linea casi nunca es la que explica nada.
+    # Un motivo ilegible no es cosmetico: manda a abrir el log entero, que es
+    # justo el trabajo que este corredor existe para ahorrar.
     salida = (r.stdout or "") + (r.stderr or "")
     lineas = [l for l in salida.strip().splitlines() if l.strip()]
-    motivo = (lineas[-1] if lineas else f"codigo {r.returncode}")[:160]
+    motivo = _primer_motivo_legible(lineas) or f"codigo {r.returncode}"
     if _FALTA_ENTORNO.search(salida):
         # No fallo: no se pudo medir. Se devuelve como salteada.
         return None, "pide Postgres (lo dijo al correr, no se leia en el codigo)", tardo
