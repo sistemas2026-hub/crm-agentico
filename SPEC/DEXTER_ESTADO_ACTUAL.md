@@ -127,6 +127,53 @@ autenticación, JWT ni `settings.py`; `hooks.server.js` no cambió una línea.
 Solo preocupa si es continuo y para todos JUSTO DESPUÉS de iniciar sesión:
 eso sería `SECRET_KEY` cambiada, que invalida todo lo emitido.
 
+### El CI encontró tres defectos en su primer día, y los tres eran suyos
+
+24/09/2026, primeras corridas reales de `.github/workflows/pruebas.yml`.
+Ninguno era un bug del producto: los tres eran del andamiaje de pruebas, que
+es exactamente lo que un CI nuevo tiene que sacar a la luz primero.
+
+```
+1  test_ledger_checksum preguntaba `shutil.which("docker")` -- "esta docker
+   instalado" -- cuando lo que necesita es la IMAGEN. El runner de GitHub SI
+   trae docker, asi que entraba al bloque y corria `docker run
+   dexter-backend:latest`, que en CI nunca se construye. ROJO afirmando algo
+   que no habia medido.
+
+2  La misma prueba compara contra el blob de un commit FIJADO (f60beda) como
+   referencia dorada. `actions/checkout` clona con profundidad 1, asi que ese
+   commit no existia: `git show` devolvia vacio y decia "el hash no cuadra"
+   cuando la verdad era "no hay con que compararlo".
+   Arreglado por los DOS lados: `fetch-depth: 0` en el workflow, y la prueba
+   salta ESA comprobacion --siguiendo con la del arbol, que si puede medir--.
+
+3  cli/correr_pruebas.py tomaba la ultima linea no vacia como motivo del
+   fallo. Estas pruebas cierran con una barra de separacion, asi que el CI
+   reporto un fallo cuyo motivo era "=========". Ahora busca hacia atras la
+   primera linea que explique algo.
+```
+
+**Los tres son la misma falta: «no se pudo medir» presentado como «fallo».**
+Es un contrato congelado de este proyecto, incumplido dos veces en una tarde
+por las propias guardas. Que lo encontrara el CI y no una persona es el
+argumento entero a favor de haberlo construido.
+
+Los tres se comprobaron **en los dos sentidos**: con la imagen y la historia
+presentes siguen verdes; sin ellas saltan nombrando lo que falta. Una guarda
+que solo se ve pasar no prueba que detecte nada.
+
+**Estado del CI, igual en las dos ramas y en local:**
+
+```
+90 en verde · 2 en rojo · 54 sin correr
+  test_asignacion_escritores.py    lista de transiciones vieja   (18/09)
+  test_guarda_alineacion_git.py    le falta RAMA_DESPLIEGUE      (22/09)
+```
+
+Los 2 rojos son deuda real y preexistente —el resto de D1—, no ruido. El CI
+dice la verdad; lo que falta es arreglarlos. Las 54 que no corren siguen
+pidiendo Postgres: falta un servicio de base en el workflow, tambien D1.
+
 ### Qué hay en producción, con fecha
 
 Importado de la copia de `feature/bandeja-relevo`, que lo tenía y esta no.
