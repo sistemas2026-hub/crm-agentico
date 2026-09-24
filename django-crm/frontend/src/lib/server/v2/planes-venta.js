@@ -10,15 +10,8 @@
  * Mismo puente que smartolt.js hacia crm-agentico -- ver
  * GET/PUT /configuracion/planes-venta en nucleo/canales/api.py.
  */
-import { env } from '$env/dynamic/private';
 import { headersMotor } from './motor-headers.js';
-
-function destino() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
+import { destinoDelAsistente } from './tenant.js';
 
 /**
  * @typedef {{ nombre_wisphub: string, zonas: number[] }} PlanVenta
@@ -35,8 +28,8 @@ function destino() {
  * contarPlanesVenta() para eso).
  * @returns {Promise<{ catalogo: PlanCatalogo[], error_catalogo: string | null, planes_venta: PlanVenta[], localidades: LocalidadZona[], localidades_actualizado_en: string | null } | null>}
  */
-export async function leerPlanesVenta() {
-  const cfg = destino();
+export async function leerPlanesVenta(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return null;
   try {
     const resp = await fetch(
@@ -56,8 +49,8 @@ export async function leerPlanesVenta() {
  * completo, solo saber "cuantos hay" para el resumen de la fila.
  * @returns {Promise<{ cantidad: number } | null>}
  */
-export async function contarPlanesVenta() {
-  const cfg = destino();
+export async function contarPlanesVenta(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return null;
   try {
     const resp = await fetch(
@@ -77,8 +70,8 @@ export async function contarPlanesVenta() {
  * pantalla (todo lo que quedo tildado, con sus localidades), no un delta.
  * @param {PlanVenta[]} planes
  */
-export async function guardarPlanesVenta(planes) {
-  const cfg = destino();
+export async function guardarPlanesVenta(locals, fetch, planes) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/planes-venta`, {
@@ -100,8 +93,8 @@ export async function guardarPlanesVenta(planes) {
  * del motor, solo deja a quien mira la pantalla sin saber si termino.
  * @returns {Promise<{ localidades: LocalidadZona[], localidades_actualizado_en: string | null }>}
  */
-export async function sincronizarLocalidades() {
-  const cfg = destino();
+export async function sincronizarLocalidades(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/localidades/sincronizar`, {

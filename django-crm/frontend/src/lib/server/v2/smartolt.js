@@ -12,17 +12,10 @@
  * nada. Ver TenantConfig.variables_tenant / Herramienta.base_url_ref en
  * nucleo/config/schema.py.
  */
-import { env } from '$env/dynamic/private';
 import { headersMotor } from './motor-headers.js';
+import { destinoDelAsistente } from './tenant.js';
 
 const REF_API_KEY = 'SMARTOLT_API_KEY';
-
-function destino() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
 
 /**
  * Estado de la integracion: si el catalogo del tenant tiene las herramientas
@@ -33,8 +26,8 @@ function destino() {
  * ajustes no tenga que saber de la segunda.
  * @returns {Promise<{ instalado: boolean, subdominio: string | null, subdominio_ref: string | null, ref_clave: string, tiene_clave: boolean } | null>}
  */
-export async function leerSmartOlt() {
-  const cfg = destino();
+export async function leerSmartOlt(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return null;
   try {
     const [respCanal, respSecretos] = await Promise.all([
@@ -65,8 +58,8 @@ export async function leerSmartOlt() {
  * @param {string} nombre
  * @param {string} valor
  */
-export async function guardarVariable(nombre, valor) {
-  const cfg = destino();
+export async function guardarVariable(locals, fetch, nombre, valor) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/variables/${encodeURIComponent(nombre)}`, {
@@ -88,8 +81,8 @@ export async function guardarVariable(nombre, valor) {
  * @param {string} apiKey
  * @returns {Promise<{ ok: boolean, detalle: string }>}
  */
-export async function probarConexion(subdominio, apiKey) {
-  const cfg = destino();
+export async function probarConexion(locals, fetch, subdominio, apiKey) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
 
   const resp = await fetch(`${cfg.baseUrl}/diagnostico/smartolt`, {

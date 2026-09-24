@@ -15,7 +15,8 @@ const { envMock } = vi.hoisted(() => ({
 vi.mock('$env/dynamic/private', () => ({ env: envMock }));
 vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({}) }));
 
-const { tenantDeLaSesion, tenantDeLaInstalacion } = await import('./tenant.js');
+const { tenantDeLaSesion, tenantDeLaInstalacion, destinoDelAsistente } =
+  await import('./tenant.js');
 
 const CONFIGURADO = {
   PRIVATE_ASISTENTE_URL: 'http://motor:5000',
@@ -98,5 +99,25 @@ describe('el puente que se borra cuando termine la migración', () => {
   it('y nada si no está definida', () => {
     delete envMock.PRIVATE_ASISTENTE_TENANT;
     expect(tenantDeLaInstalacion()).toBeNull();
+  });
+});
+
+describe('el destino, que reemplaza ocho copias idénticas', () => {
+  it('devuelve base y tenant cuando los dos existen', async () => {
+    const fetch = fetchQueDevuelve({ ok: true, json: async () => ({ tenant: 'rapilink' }) });
+    const d = await destinoDelAsistente({ org: { id: 'org-1' } }, fetch);
+    expect(d).toEqual({ baseUrl: 'http://motor:5000', tenant: 'rapilink' });
+  });
+
+  it('sin sesión no hay destino, aunque la variable de entorno exista', async () => {
+    const fetch = fetchQueDevuelve({ ok: true, json: async () => ({ tenant: 'x' }) });
+    expect(await destinoDelAsistente({}, fetch)).toBeNull();
+  });
+
+  it('sin URL del motor tampoco, y ni siquiera pregunta por el tenant', async () => {
+    delete envMock.PRIVATE_ASISTENTE_URL;
+    const fetch = fetchQueDevuelve({ ok: true, json: async () => ({ tenant: 'x' }) });
+    expect(await destinoDelAsistente({ org: { id: 'org-1' } }, fetch)).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

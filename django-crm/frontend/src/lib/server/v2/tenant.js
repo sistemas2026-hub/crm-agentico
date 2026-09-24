@@ -55,6 +55,33 @@ export async function tenantDeLaSesion(locals, fetch) {
 }
 
 /**
+ * A qué motor hablarle y de qué empresa son los datos, en una sola llamada.
+ *
+ * Reemplaza a **ocho copias byte a byte** de una función `destino()` que vivía
+ * repetida en `asistente-config`, `bandeja-config`, `canal-whatsapp`,
+ * `credenciales`, `guias-tv`, `oferta`, `planes-venta` y `smartolt`. Ocho
+ * lecturas del mismo dato: exactamente la forma de defecto que el esquema del
+ * formulario de Campo ya enseñó a reconocer —cinco síntomas distintos, ninguna
+ * lectura mal escrita, el problema era que existieran varias—.
+ *
+ * Devuelve `null` si falta cualquiera de las dos cosas, y quien llama ya sabe
+ * qué hacer con eso: todas las copias que reemplaza terminaban en
+ * `if (!d) return ...`, así que el camino de la ausencia ya estaba escrito.
+ * **No hay default**: sin saber de qué empresa es, no se pide nada.
+ *
+ * @param {App.Locals} locals
+ * @param {typeof globalThis.fetch} fetch
+ * @returns {Promise<{ baseUrl: string, tenant: string } | null>}
+ */
+export async function destinoDelAsistente(locals, fetch) {
+  const baseUrl = env.PRIVATE_ASISTENTE_URL;
+  if (!baseUrl) return null;
+  const tenant = await tenantDeLaSesion(locals, fetch);
+  if (!tenant) return null;
+  return { baseUrl, tenant };
+}
+
+/**
  * La variable de entorno, y por qué sigue existiendo.
  *
  * Mientras la migración de los 70 archivos no termine, un despliegue de una

@@ -8,8 +8,8 @@ import {
 const SOLO_ADMIN = 'Solo un administrador puede cambiar esto.';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ locals }) {
-  const datos = await leerPlanesVenta();
+export async function load({ fetch, locals }) {
+  const datos = await leerPlanesVenta(locals, fetch);
   return {
     catalogo: datos?.catalogo ?? [],
     errorCatalogo: datos?.error_catalogo ?? null,
@@ -40,7 +40,7 @@ export const actions = {
     }
 
     try {
-      await guardarPlanesVenta(planes);
+      await guardarPlanesVenta(locals, fetch, planes);
     } catch (/** @type {any} */ err) {
       return fail(400, {
         error: err?.message || 'No se pudo guardar la lista de planes.',
@@ -55,7 +55,7 @@ export const actions = {
       return fail(403, { error: SOLO_ADMIN, action: 'sincronizar' });
 
     try {
-      await sincronizarLocalidades();
+      await sincronizarLocalidades(locals, fetch);
     } catch (/** @type {any} */ err) {
       return fail(400, {
         error: err?.message || 'No se pudo sincronizar las localidades.',
