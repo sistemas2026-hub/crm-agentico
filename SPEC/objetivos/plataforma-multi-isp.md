@@ -55,7 +55,22 @@ con UNIQUE. Es una biyección, así que la inversa es una función.
 
 ## Bloqueos
 
-**B1 · De dónde sale la inversa `organización → tenant`.** El motor resuelve
+**B1 · RESUELTO el 24/09/2026.** El motor expone
+`GET /tenant-de-organizacion/<organization_id>`: 404 sin default cuando esa
+empresa no tiene asistente. Del lado del frontend, `lib/server/v2/tenant.js`
+es el único lugar que decide de qué empresa son los datos.
+
+**B2 · La sustitución de los 73 lugares no se puede verificar hoy.** Su
+comprobación es `pnpm check`, y en Windows con Docker arriba eso reescribe
+`.svelte-kit/generated/` con rutas truncadas que después el contenedor no
+resuelve — la aplicación entera pasa a devolver 500 con un síntoma que no
+apunta a la causa. La salida es `docker exec <frontend> pnpm check`, y **no hay
+contenedor de frontend levantado**. Hacer 73 ediciones sin poder comprobarlas
+es exactamente cómo se rompe una pantalla sin enterarse.
+
+*(Detalle del bloqueo original, que queda por si hay que revisar la decisión:)*
+
+**De dónde salía la inversa `organización → tenant`.** El motor resuelve
 `slug → organization_id`; falta el camino contrario. Tres opciones, y la
 tercera es la que encaja con la arquitectura:
 
@@ -70,3 +85,4 @@ tercera es la que encaja con la arquitectura:
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 24/09/2026 | Decisión de producto registrada (PRD §8.13), forma medida, supuesto comprobado | Ejecutar | a416063 |
+| 24/09/2026 | **B1 resuelto.** El motor expone la inversa (`/tenant-de-organizacion/<id>`), con su guarda. El frontend tiene su ayudante único (`tenantDeLaSesion`), 8 pruebas verdes | La sustitución de los 73 lugares | 5f5b88f |
