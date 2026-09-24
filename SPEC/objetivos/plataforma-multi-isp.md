@@ -60,6 +60,13 @@ con UNIQUE. Es una biyección, así que la inversa es una función.
 empresa no tiene asistente. Del lado del frontend, `lib/server/v2/tenant.js`
 es el único lugar que decide de qué empresa son los datos.
 
+**B3 · La comparación por texto exacto del `svelte-check` es ruidosa.** Algunos
+diagnósticos traen tipos generados larguísimos (*"227 more..."*) que varían
+entre corridas, así que `comm` marca como nuevos errores que ya estaban. El
+criterio fiable es otro y es más directo: **que ninguno de los archivos
+tocados aparezca en la salida**. Descubierto persiguiendo tres errores de
+`hooks.client.js` que ni siquiera estaba modificado.
+
 **B2 · RESUELTO el 24/09/2026.** Se levantó el contenedor del frontend y se
 verificó con `docker exec ... pnpm check`. Dos mediciones que hacían falta y
 que no son obvias:
@@ -104,6 +111,7 @@ tercera es la que encaja con la arquitectura:
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 24/09/2026 | Decisión de producto registrada (PRD §8.13), forma medida, supuesto comprobado | Ejecutar | a416063 |
+| 24/09/2026 | **Las 8 copias de `destino()` colapsadas en una.** Acoplamiento 22→14 archivos, 0 copias. `svelte-check` 44 errores igual que la base, pruebas idénticas +8 nuevas | 14 archivos: `routes/api` con helpers propios y `documents/new` | — |
 | 24/09/2026 | **52 de 70 migrados.** 6 páginas + 2 rutas de agentes. Acoplamiento 28→22 archivos. `svelte-check` 71/71, pruebas idénticas a su base | 18: los 8 helpers sincrónicos con el patrón `destino`, 5 de `routes/api`, y `documents/new` con otra forma de `load` | — |
 | 24/09/2026 | **44 de 70 archivos migrados.** Acoplamiento: 70→28 archivos, 80→37 apariciones. `svelte-check` sin un solo diagnóstico nuevo (71 antes, 71 después) | Los 26 restantes: 11 de `lib/server` sin `locals`, 8 con `async`/alcance, 6 `+page.server.js` | — |
 | 24/09/2026 | **B1 resuelto.** El motor expone la inversa (`/tenant-de-organizacion/<id>`), con su guarda. El frontend tiene su ayudante único (`tenantDeLaSesion`), 8 pruebas verdes | La sustitución de los 73 lugares | 5f5b88f |

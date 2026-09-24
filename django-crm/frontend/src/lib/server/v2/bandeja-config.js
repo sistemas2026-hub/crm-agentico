@@ -27,22 +27,15 @@
  * puedo entrar a configuración" en vez de "el asistente no responde".
  * `guardar` sí lanza: ahí alguien apretó un botón y tiene que enterarse.
  */
-import { env } from '$env/dynamic/private';
 import { headersMotor } from './motor-headers.js';
-
-function destino() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
+import { destinoDelAsistente } from './tenant.js';
 
 /**
  * Los ajustes de la Bandeja, o `null` si no hay asistente o no contesta.
  * @returns {Promise<{ sla_toma_minutos: number, umbral_rx_dbm: number | null } | null>}
  */
-export async function leerAjustesBandeja() {
-  const cfg = destino();
+export async function leerAjustesBandeja(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return null;
   try {
     const resp = await fetch(
@@ -69,8 +62,8 @@ export async function leerAjustesBandeja() {
  *
  * @param {{ sla_toma_minutos: string | number, umbral_rx_dbm: string | number | null }} valores
  */
-export async function guardarAjustesBandeja(valores) {
-  const cfg = destino();
+export async function guardarAjustesBandeja(locals, fetch, valores) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) {
     throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
   }

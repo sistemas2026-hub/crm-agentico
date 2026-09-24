@@ -10,8 +10,8 @@ import {
 const SOLO_ADMIN = 'Solo un administrador puede cambiar esto.';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ locals }) {
-  const [canal, secretos] = await Promise.all([leerCanalWhatsapp(), listarSecretos()]);
+export async function load({ fetch, locals }) {
+  const [canal, secretos] = await Promise.all([leerCanalWhatsapp(locals, fetch), listarSecretos(locals, fetch)]);
   return {
     canal,
     secretos,
@@ -30,7 +30,7 @@ export const actions = {
    * que arma la pantalla a partir de canal.refs, para que este archivo no
    * tenga que conocer los cinco nombres de memoria.
    */
-  async guardarCredencial({ request, locals }) {
+  async guardarCredencial({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN') return fail(403, { error: SOLO_ADMIN });
 
     const form = await request.formData();
@@ -43,7 +43,7 @@ export const actions = {
     }
 
     try {
-      await guardarSecreto(nombre, valor.trim(), descripcion);
+      await guardarSecreto(locals, fetch, nombre, valor.trim(), descripcion);
     } catch (/** @type {any} */ err) {
       return fail(400, {
         error: err?.message || 'No se pudo guardar la credencial.',
@@ -53,7 +53,7 @@ export const actions = {
     return { guardado: nombre };
   },
 
-  async borrarCredencial({ request, locals }) {
+  async borrarCredencial({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN') return fail(403, { error: SOLO_ADMIN });
 
     const form = await request.formData();
@@ -61,7 +61,7 @@ export const actions = {
     if (!nombre) return fail(400, { error: 'Falta el nombre.' });
 
     try {
-      await borrarSecreto(nombre);
+      await borrarSecreto(locals, fetch, nombre);
     } catch (/** @type {any} */ err) {
       return fail(400, { error: err?.message || 'No se pudo borrar.', campo: nombre });
     }
@@ -76,19 +76,19 @@ export const actions = {
    * unico especial es que ESTA respuesta trae el valor en claro, porque es
    * el unico momento en que hace falta mostrarlo: para copiarlo en Meta.
    */
-  async generarVerifyToken({ locals }) {
+  async generarVerifyToken({ fetch, locals }) {
     if (locals.profile?.role !== 'ADMIN') return fail(403, { error: SOLO_ADMIN });
 
     const token = crypto.randomUUID().replaceAll('-', '');
     try {
-      await guardarSecreto('WHATSAPP_VERIFY_TOKEN', token, 'Generado desde ajustes');
+      await guardarSecreto(locals, fetch, 'WHATSAPP_VERIFY_TOKEN', token, 'Generado desde ajustes');
     } catch (/** @type {any} */ err) {
       return fail(400, { error: err?.message || 'No se pudo generar el token.' });
     }
     return { generado: { nombre: 'WHATSAPP_VERIFY_TOKEN', valor: token } };
   },
 
-  async guardarCanal({ request, locals }) {
+  async guardarCanal({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN') return fail(403, { canalError: SOLO_ADMIN });
 
     const form = await request.formData();
@@ -96,7 +96,7 @@ export const actions = {
     const numeroVisible = form.get('numero_visible')?.toString().trim() || null;
 
     try {
-      await guardarCanalWhatsapp({ activo, numero_visible: numeroVisible });
+      await guardarCanalWhatsapp(locals, fetch, { activo, numero_visible: numeroVisible });
     } catch (/** @type {any} */ err) {
       return fail(400, { canalError: err?.message || 'No se pudo guardar.' });
     }

@@ -13,12 +13,12 @@ import {
   leerCredenciales
 } from '$lib/server/v2/credenciales.js';
 
-export async function load() {
-  return await leerCredenciales();
+export async function load({ locals, fetch }) {
+  return await leerCredenciales(locals, fetch);
 }
 
 export const actions = {
-  guardar: async ({ request }) => {
+  guardar: async ({ request, locals, fetch }) => {
     const form = await request.formData();
     const nombre = (form.get('nombre') ?? '').toString().trim();
     const valor = (form.get('valor') ?? '').toString().trim();
@@ -26,16 +26,16 @@ export const actions = {
     if (!nombre) return fail(400, { error: 'Falta el nombre de la credencial.' });
     if (!valor) return fail(400, { error: 'Pegá el valor de la credencial.' });
 
-    const r = await guardarCredencial(nombre, valor, descripcion);
+    const r = await guardarCredencial(locals, fetch, nombre, valor, descripcion);
     if (!r.ok) return fail(400, { error: r.error });
     return { guardado: nombre };
   },
 
-  borrar: async ({ request }) => {
+  borrar: async ({ request, locals, fetch }) => {
     const form = await request.formData();
     const nombre = (form.get('nombre') ?? '').toString().trim();
     if (!nombre) return fail(400, { error: 'Falta el nombre.' });
-    const r = await borrarCredencial(nombre);
+    const r = await borrarCredencial(locals, fetch, nombre);
     if (!r.ok) return fail(400, { error: r.error });
     return { borrado: nombre };
   }

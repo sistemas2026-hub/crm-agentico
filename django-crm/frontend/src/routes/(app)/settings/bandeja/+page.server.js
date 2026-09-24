@@ -2,8 +2,8 @@ import { fail } from '@sveltejs/kit';
 import { guardarAjustesBandeja, leerAjustesBandeja } from '$lib/server/v2/bandeja-config.js';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ locals }) {
-  const ajustes = await leerAjustesBandeja();
+export async function load({ fetch, locals }) {
+  const ajustes = await leerAjustesBandeja(locals, fetch);
   return {
     ajustes,
     // El motor no tiene identidad propia: quien decide si esto se puede
@@ -27,7 +27,7 @@ const UMBRAL_MAXIMO = 0;
 
 /** @type {import('./$types').Actions} */
 export const actions = {
-  async update({ request, locals }) {
+  async update({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN') {
       return fail(403, {
         update: { error: 'Solo un administrador puede cambiar los ajustes de la Bandeja.' }
@@ -62,7 +62,7 @@ export const actions = {
     }
 
     try {
-      await guardarAjustesBandeja({ sla_toma_minutos: sla, umbral_rx_dbm: umbral });
+      await guardarAjustesBandeja(locals, fetch, { sla_toma_minutos: sla, umbral_rx_dbm: umbral });
     } catch (/** @type {any} */ err) {
       // El texto viene del validador del motor y nombra el campo y el motivo.
       // Se pasa tal cual: es la diferencia entre "no se pudo guardar" y

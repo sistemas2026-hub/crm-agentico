@@ -9,8 +9,8 @@
  * Nunca viaja un valor: el motor devuelve nombre, para qué sirve, cuándo se
  * cargó y una pista de los últimos caracteres. Guardar va en un solo sentido.
  */
-import { env } from '$env/dynamic/private';
 import { headersMotor } from './motor-headers.js';
+import { destinoDelAsistente } from './tenant.js';
 
 
 /**
@@ -43,16 +43,9 @@ const PANTALLA_PROPIA = {
   WHATSAPP_WABA_ID: { integracion: 'WhatsApp', href: '/settings/canales/whatsapp' }
 };
 
-function destino() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
-
 /** @returns {Promise<{ credenciales: any[], disponible: boolean }>} */
-export async function leerCredenciales() {
-  const cfg = destino();
+export async function leerCredenciales(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return { credenciales: [], disponible: false };
   try {
     const r = await fetch(
@@ -74,8 +67,8 @@ export async function leerCredenciales() {
 }
 
 /** @returns {Promise<{ ok: boolean, error?: string }>} */
-export async function guardarCredencial(nombre, valor, descripcion) {
-  const cfg = destino();
+export async function guardarCredencial(locals, fetch, nombre, valor, descripcion) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return { ok: false, error: 'El asistente no está configurado.' };
   // Un secreto tiene un solo lugar de edicion, y eso se hace cumplir ACA y no
   // solo escondiendo el formulario: una pantalla que oculta un boton sigue
@@ -102,8 +95,8 @@ export async function guardarCredencial(nombre, valor, descripcion) {
 }
 
 /** @returns {Promise<{ ok: boolean, error?: string }>} */
-export async function borrarCredencial(nombre) {
-  const cfg = destino();
+export async function borrarCredencial(locals, fetch, nombre) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return { ok: false, error: 'El asistente no está configurado.' };
   const propia = PANTALLA_PROPIA[nombre];
   if (propia) {

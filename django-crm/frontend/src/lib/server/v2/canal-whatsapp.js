@@ -11,23 +11,16 @@
  * "no se pudo leer", no reventar. `guardar*`/`borrar*` SI lanzan: ahi alguien
  * apreto un boton y tiene que enterarse de que no se guardo.
  */
-import { env } from '$env/dynamic/private';
 import { headersMotor } from './motor-headers.js';
-
-function destino() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
+import { destinoDelAsistente } from './tenant.js';
 
 /**
  * Estado del canal: activo, version, numero visible, plantillas y los
  * NOMBRES de los cinco secretos que declara (nunca sus valores).
  * @returns {Promise<any | null>}
  */
-export async function leerCanalWhatsapp() {
-  const cfg = destino();
+export async function leerCanalWhatsapp(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return null;
   try {
     const resp = await fetch(
@@ -48,8 +41,8 @@ export async function leerCanalWhatsapp() {
  * el valor.
  * @returns {Promise<any[]>}
  */
-export async function listarSecretos() {
-  const cfg = destino();
+export async function listarSecretos(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return [];
   try {
     const resp = await fetch(`${cfg.baseUrl}/secretos?tenant=${encodeURIComponent(cfg.tenant)}`,
@@ -66,8 +59,8 @@ export async function listarSecretos() {
  * Prende/apaga el canal y fija el numero visible.
  * @param {{ activo: boolean, numero_visible?: string | null }} valores
  */
-export async function guardarCanalWhatsapp(valores) {
-  const cfg = destino();
+export async function guardarCanalWhatsapp(locals, fetch, valores) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/canales/whatsapp`, {
@@ -87,8 +80,8 @@ export async function guardarCanalWhatsapp(valores) {
  * @param {string} valor
  * @param {string} [descripcion]
  */
-export async function guardarSecreto(nombre, valor, descripcion) {
-  const cfg = destino();
+export async function guardarSecreto(locals, fetch, nombre, valor, descripcion) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
 
   const resp = await fetch(`${cfg.baseUrl}/secretos`, {
@@ -101,8 +94,8 @@ export async function guardarSecreto(nombre, valor, descripcion) {
 }
 
 /** @param {string} nombre */
-export async function borrarSecreto(nombre) {
-  const cfg = destino();
+export async function borrarSecreto(locals, fetch, nombre) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
 
   const resp = await fetch(

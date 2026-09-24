@@ -30,6 +30,12 @@ const CONFIGURADO = {
    afirmarlo desde ahí ensucia svelte-check con errores que no son bugs. */
 let fetchMock = vi.fn();
 
+/* La sesion, con el tenant YA resuelto: `tenantDeLaSesion` corta ahi mismo y
+   no sale a preguntarle al motor. Asi esta prueba sigue midiendo lo suyo --
+   que se manden los dos valores-- y no la resolucion del tenant, que tiene su
+   propia prueba en tenant.test.js. */
+const LOCALS = /** @type {any} */ ({ tenant: 'rapilink' });
+
 /** El cuerpo JSON que se mandó en la última llamada a fetch. */
 function cuerpoEnviado() {
   return JSON.parse(fetchMock.mock.calls[0][1].body);
@@ -52,28 +58,28 @@ describe('leerAjustesBandeja', () => {
       ok: true,
       json: async () => ({ sla_toma_minutos: 15, umbral_rx_dbm: -27 })
     });
-    expect(await leerAjustesBandeja()).toEqual({ sla_toma_minutos: 15, umbral_rx_dbm: -27 });
+    expect(await leerAjustesBandeja(LOCALS, fetchMock)).toEqual({ sla_toma_minutos: 15, umbral_rx_dbm: -27 });
   });
 
   it('manda el tenant del servidor, no uno elegido por quien pide', async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) });
-    await leerAjustesBandeja();
+    await leerAjustesBandeja(LOCALS, fetchMock);
     expect(fetchMock.mock.calls[0][0]).toContain('tenant=rapilink');
   });
 
   it('devuelve null --sin tirar-- si el motor responde con error', async () => {
     fetchMock.mockResolvedValue({ ok: false, json: async () => ({}) });
-    await expect(leerAjustesBandeja()).resolves.toBeNull();
+    await expect(leerAjustesBandeja(LOCALS, fetchMock)).resolves.toBeNull();
   });
 
   it('devuelve null --sin tirar-- si el motor no contesta', async () => {
     fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
-    await expect(leerAjustesBandeja()).resolves.toBeNull();
+    await expect(leerAjustesBandeja(LOCALS, fetchMock)).resolves.toBeNull();
   });
 
   it('devuelve null sin salir a la red cuando no hay asistente configurado', async () => {
     delete envMock.PRIVATE_ASISTENTE_URL;
-    await expect(leerAjustesBandeja()).resolves.toBeNull();
+    await expect(leerAjustesBandeja(LOCALS, fetchMock)).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -87,24 +93,24 @@ describe('guardarAjustesBandeja', () => {
   });
 
   it('manda los DOS valores aunque solo cambie uno', async () => {
-    await guardarAjustesBandeja({ sla_toma_minutos: 15, umbral_rx_dbm: -27 });
+    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: -27 });
     const cuerpo = cuerpoEnviado();
     expect(cuerpo).toHaveProperty('sla_toma_minutos', 15);
     expect(cuerpo).toHaveProperty('umbral_rx_dbm', -27);
   });
 
   it('el tenant lo pone el servidor, no el llamador', async () => {
-    await guardarAjustesBandeja({ sla_toma_minutos: 0, umbral_rx_dbm: null });
+    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 0, umbral_rx_dbm: null });
     expect(cuerpoEnviado().tenant).toBe('rapilink');
   });
 
   it('vacío en el plazo viaja como 0, que es el "sin definir" del motor', async () => {
-    await guardarAjustesBandeja({ sla_toma_minutos: '', umbral_rx_dbm: -27 });
+    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: '', umbral_rx_dbm: -27 });
     expect(cuerpoEnviado().sla_toma_minutos).toBe(0);
   });
 
   it('vacío en el umbral viaja como null, no como 0 ni como ausencia', async () => {
-    await guardarAjustesBandeja({ sla_toma_minutos: 15, umbral_rx_dbm: '' });
+    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: '' });
     const cuerpo = cuerpoEnviado();
     expect(cuerpo.umbral_rx_dbm).toBeNull();
     // 0 dBm es una potencia válida y distinta de "sin definir": si el vacío
@@ -115,7 +121,7 @@ describe('guardarAjustesBandeja', () => {
   });
 
   it('un umbral de 0 dBm se manda como 0, no se confunde con vacío', async () => {
-    await guardarAjustesBandeja({ sla_toma_minutos: 15, umbral_rx_dbm: 0 });
+    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: 0 });
     expect(cuerpoEnviado().umbral_rx_dbm).toBe(0);
   });
 
@@ -125,14 +131,19 @@ describe('guardarAjustesBandeja', () => {
       json: async () => ({ error: 'El umbral tiene que estar entre -40 y 0.' })
     });
     await expect(
-      guardarAjustesBandeja({ sla_toma_minutos: 15, umbral_rx_dbm: -99 })
+      guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: -99 })
     ).rejects.toThrow(/entre -40 y 0/);
   });
 
   it('tira si no hay asistente configurado, en vez de fallar en silencio', async () => {
-    delete envMock.PRIVATE_ASISTENTE_TENANT;
+    // Desde el 24/09/2026 el tenant sale de la SESION, no del entorno, asi que
+    // borrar la variable ya no simula 'sin configurar'. Lo que se afirma es lo
+    // mismo de siempre --tirar en vez de fallar callado-- y ahora la falta es
+    // no saber de que empresa son los datos, que es el caso real: una sesion
+    // sin organizacion, o una empresa sin asistente.
+    const sinSesion = /** @type {any} */ ({});
     await expect(
-      guardarAjustesBandeja({ sla_toma_minutos: 15, umbral_rx_dbm: -27 })
+      guardarAjustesBandeja(sinSesion, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: -27 })
     ).rejects.toThrow(/no configurado/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
