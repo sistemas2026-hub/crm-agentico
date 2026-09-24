@@ -106,6 +106,45 @@ y en la base de producción ese mismo día:
 Ninguno de los tres es un error de código. Los tres son el mismo error de
 coordinación, y la regla del final existe para eso.
 
+### Cómo se resuelve el cruce de `DECLARACION_NO_ALCANZA` al fusionar
+
+Medido el 24/09 comparando las dos ramas archivo por archivo: **los dos
+arreglos son semánticamente idénticos.** No hay que elegir cuál está bien;
+hay que deshacer un conflicto de texto. Va escrito acá para que quien
+fusione no lo decida a ojo:
+
+```
+nucleo/modelo/motor.py          ambos agregan "DECLARACION_NO_ALCANZA" al
+                                MISMO frozenset (CODIGOS_DE_BLOQUEO), en la
+                                misma posicion. Conflicta el COMENTARIO, no el
+                                codigo. -> quedarse con uno, da igual cual.
+nucleo/seguimiento/forzado.py   ambos lo agregan al MISMO set
+                                (CODIGOS_MOTOR_GUARD). Verificado leyendo a
+                                que set pertenece cada linea, no por cercania
+                                visual. -> idem.
++page.svelte  (linea 138)       aca SI hay una decision: el texto que ve el
+                                usuario es distinto.
+                                  integrar-centro-mando:
+                                    "lo que el cliente reporto no corresponde
+                                     a esa accion"
+                                  bandeja-relevo:
+                                    "la accion no corresponde a lo que el
+                                     cliente dijo que le pasaba"
+                                Dicen lo mismo. -> elegir uno y borrar el otro;
+                                dejar los dos duplica la clave del objeto.
+tests/test_escalada_forzada.py  SOLO integrar-centro-mando. Agrega el codigo
+                                al set GATES de la prueba. No conflicta, y es
+                                el lado que hay que conservar: es la guarda.
+```
+
+La prueba de que el lado de esta rama queda verde:
+
+```
+py -3.13 tests/test_escalada_forzada.py     -> exit 0
+   "Todo en orden: lo que obliga a escalar no depende del modelo."
+```
+
+
 ## TRABAJO ACTIVO
 
 **Tres frentes avanzaron el 24/09**, cada uno en su propio árbol. Ninguno está
