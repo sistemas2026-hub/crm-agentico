@@ -326,7 +326,19 @@ def sin_contexto(motivo: str, *, motor_alcanzado: bool) -> dict:
 # aca. La direccion sola dice el numero de la casa; la localidad dice en que
 # parte del pueblo queda, que es lo que decide si una visita entra en la ruta
 # de hoy.
-CAMPOS_CLIENTE_SNAPSHOT = ("nombre", "estado", "plan", "ip", "localidad")
+#
+# 'direccion' y 'telefono' (24/09/2026): el comentario de arriba decia desde
+# siempre que la direccion entra --"hay que saber a quien se visita y donde"--
+# y NO estaba en la tupla. El codigo contradecia a su propio comentario, y se
+# noto recien al mirar una orden real: el tecnico veia "Sin direccion" y "Sin
+# telefono" con los dos datos cargados del otro lado.
+#
+# No alcanzaba con que vivan en la orden (cliente_direccion, cliente_telefono):
+# esos los llena quien despacha desde el formulario, y un caso IMPORTADO del
+# ISP no pasa por ningun formulario. Para esas ordenes, la ficha es la unica
+# fuente -- y sin direccion el tecnico no sabe a donde ir.
+CAMPOS_CLIENTE_SNAPSHOT = ("nombre", "estado", "plan", "ip", "localidad",
+                           "direccion", "telefono")
 
 
 def depurar_contexto(crudo: dict) -> dict:

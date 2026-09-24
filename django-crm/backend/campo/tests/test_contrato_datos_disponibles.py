@@ -241,6 +241,7 @@ def test_9_la_localidad_del_cliente_sobrevive_al_snapshot():
             "localidad": "SAN JOSE",
             "cedula": "1044601347",
             "direccion": "Cl. 45 #12-88",
+            "telefono": "3113683499",
         },
         "identidad": {"servicio": "7127", "origen": "wisphub"},
     }
@@ -249,6 +250,17 @@ def test_9_la_localidad_del_cliente_sobrevive_al_snapshot():
 
     assert cliente["localidad"] == "SAN JOSE", "la localidad tiene que pasar"
     assert cliente["ip"] == "10.0.0.9", "y la ip seguir pasando"
+
+    # 24/09/2026: el comentario de la lista decia desde siempre que la
+    # direccion entra --"hay que saber a quien se visita y donde"-- y no
+    # estaba. El codigo contradecia a su propio comentario, y se noto al mirar
+    # una orden real: el tecnico veia "Sin direccion" con el dato cargado.
+    #
+    # No alcanza con que vivan en la orden: esos campos los llena quien
+    # despacha desde el formulario, y un caso IMPORTADO del ISP no pasa por
+    # ninguno. Para esas ordenes la ficha es la unica fuente.
+    assert cliente["direccion"] == "Cl. 45 #12-88", "sin direccion no se llega"
+    assert cliente["telefono"] == "3113683499", "sin telefono no se avisa"
 
 
 def test_10_el_snapshot_sigue_dejando_afuera_el_dato_personal():
