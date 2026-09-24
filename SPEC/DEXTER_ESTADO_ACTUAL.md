@@ -69,58 +69,77 @@ documental. Un directorio entero es el mismo gesto que un `add .`: basta con que
 alguien deje un archivo ajeno adentro. Verificar siempre con
 `git diff --cached --name-only` antes de commitear.
 
-## VALIDACIÓN DE PRODUCCIÓN — cerrada el 24/09 con una salvedad medida
+## VALIDACIÓN DE PRODUCCIÓN — abierta, y ahora se sabe en qué
 
-Objetivo `SPEC/objetivos/endurecer-validacion-de-produccion.md`. **Cerrado**,
-con una cosa que quedó sin verificar y está dicha abajo.
+Objetivo `SPEC/objetivos/endurecer-validacion-de-produccion.md`. **NO está
+cerrado.** La versión anterior de esta sección decía «cerrado con una
+salvedad»; estaba mal contada y se corrige acá.
 
-Lo que quedó funcionando:
+Lo que quedó funcionando y medido el 24/09:
 
 ```
-cli/bateria_flujos.py    21 conversaciones que entran por atender_turno y se
-                         juzgan solas contra la traza. 19/19 en LOCAL; 2
+cli/bateria_flujos.py    41 conversaciones que entran por atender_turno y se
+                         juzgan solas contra la traza. 36/38 en LOCAL; 3
                          necesitan el CRM (backend:8000, red del compose).
                          Cierra el hueco de que cli/evaluar.py llama a
-                         motor.responder() directo: ninguna guarda construida
-                         el 23/09 tenía prueba de punta a punta.
-casos dorados            el inestable (3/4, 0/3, 1/11, 5/6, 1/5, 4/8, 2/4
-                         según la corrida) partido en dos: 10/10 y 10/10.
+                         motor.responder() directo.
+casos dorados            el inestable partido en dos: 10/10 y 10/10.
                          'sin el serial cargado' dejó de afirmar sobre la
                          redacción: 10/10.
-cli/evaluar.py           afirmaciones nuevas 'bloquea_con'/'no_bloquea_con':
-                         los códigos de los gates ya viajaban en el registro
-                         y se descartaban.
+cli/evaluar.py           afirmaciones 'bloquea_con' / 'no_bloquea_con'.
+diferencias_config       exit 0. Las 3 diferencias son las sincronizadas
+                         (localidades, localidades_actualizado_en,
+                         parrilla_canales).
+test_bloqueos_en_traza   VERDE (7/7). Estaba rojo en la rama.
 ```
 
-**Lo único que quedó sin verificar:** que la escalada cree el ticket del CRM.
-La batería corrió en contenedor (21/21) pero contra un `backend` de otro
-worktree, que devolvió 403. Ese camino **no está sin probar** —23 escalamientos
-confirmados con `caso_id` entre el 02 y el 19/09— sino sin probar por este
-arnés. Se completa en la próxima ventana con acceso al motor de producción:
+**Lo que se descubrió al medir, y es lo importante de esta sección:** la
+batería comiteada **nunca se había corrido**. El commit `d9733df` está escrito
+como un arreglo de una línea del cliente simulado y además agrega 20 casos —de
+21 a 41—, entre ellos los de seguridad. El 19/19 que esta sección declaraba se
+midió sobre `81677b4`, con 21 casos. O sea: la evidencia no describía el código
+comiteado, que es el error cardinal de este proyecto.
+
+Corrida ya la batería completa, los cinco casos de seguridad que nunca se
+habían medido **pasan**: inyección de instrucciones, técnico falso, lista de
+morosos, cédula de un tercero, amenaza de cancelar.
+
+**Un hallazgo de conducta, determinista, fuera del objetivo:**
+
+```
+una falla de barrio     0/10. El agente dice "puede ser algo de la zona" y acto
+no se diagnostica       seguido diagnostica una sola casa: consulta el incidente
+como una casa           de red en el paso 9, DESPUÉS de haber propuesto el
+                        reinicio en el 8. Arreglarlo es cambiar el orden del
+                        diagnóstico, o sea conducta: se anota, no se toca.
+                        El caso queda ADENTRO de la batería y en rojo.
+```
+
+**Lo que falta para cerrar el objetivo:**
 
 ```
 docker exec <contenedor-motor> python cli/bateria_flujos.py rapilink --todos
 ```
 
-Esperado: 21/21 y `caso_id` distinto de `None`. Antes hay que desplegar
-`cli/bateria_flujos.py`: el contenedor de producción monta `C:\wisphub\dexter`.
+Y no basta un contenedor local: los 3 casos de CRM llaman a
+`http://backend:8000` con las credenciales de la config de producción. Un
+`backend` levantado desde un worktree no las tiene y responde 403; en el
+intento del 24/09 eso fue exactamente lo que pasó. El 41/41 literal solo sale
+en la red de producción, y antes hay que desplegar `cli/bateria_flujos.py`.
 
-**Lo que la auditoría adversarial dejó abierto** (nueve hallazgos anotados en
-`SPEC/auditorias/2026-09-23-bateria-de-flujos.md`). Dos que conviene mirar
-antes de confiar en las mediciones:
+**Lo que la auditoría dejó abierto** (`SPEC/auditorias/2026-09-23-bateria-de-flujos.md`):
 
 ```
-gates sin clasificar   a CODIGOS_DE_BLOQUEO le faltan DECLARACION_NO_ALCANZA y
-                       AUTONOMIA_2_NO_ACTIVA. Mientras tanto una llamada que un
-                       gate frenó viaja como ERROR, y un caso con
-                       'sin_errores: true' sale rojo con la protección
-                       funcionando. tests/test_bloqueos_en_traza.py está ROJO
-                       en la rama por esto, desde antes de este trabajo.
-franja horaria         si la imagen no trae tzdata, ZoneInfo falla siempre y el
-                       respaldo es la hora del servidor: a las 20:00 de Bogotá
-                       el prompt diría "mañana, de madrugada". NO MEDIDO.
-                       docker exec <motor> python -c "from zoneinfo import
-                       ZoneInfo; print(ZoneInfo('America/Bogota'))"
+AUTONOMIA_2_NO_ACTIVA  sigue sin clasificar como bloqueo. No se arregla con un
+                       renglón en una lista: llega por el except genérico, así
+                       que hay que hacer que ese camino preserve e.codigo.
+                       (DECLARACION_NO_ALCANZA SÍ se arregló: commit 4ac7dfb.)
+traza incompleta       la batería juzga contra la traza de la base y hubo dos
+                       ConnectionTimeout al escribirla. Hoy nada distingue "la
+                       herramienta no se llamó" de "la llamada no se pudo
+                       escribir": un caso puede salir verde por el error.
+franja horaria         REFUTADO el 23/09: medido dentro de la imagen,
+                       ZoneInfo('America/Bogota') funciona.
 ```
 
 ## CERRADO
