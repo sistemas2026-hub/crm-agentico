@@ -7,65 +7,76 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **24/09/2026 ~10:40 Bogotá**, por `/inicio-sesion`, que
-midió git con `fetch` y encontró que este archivo afirmaba lo contrario de lo
-desplegado. La anterior era del 23/09, al cerrar Campo RC parte A+B4/5 y el
-sistema de trabajo con IA.
+Última actualización: **24/09/2026 ~16:30 Bogotá**. Esta versión es la
+**FUSIÓN A MANO** de las dos copias que existían de este archivo — una en
+`integrar-centro-mando` y otra en `feature/bandeja-relevo`, editadas las dos
+el mismo día, divergidas 252 lineas. No se borró nada de ninguna: se importó
+entera la sección `VALIDACIÓN DE PRODUCCION` que solo tenía bandeja-relevo, y
+se remidió el mapa de ramas, que estaba mal en las dos.
 
-**Lo que se corrigió, y por qué importa:** decía *"ninguna rama está pusheada a
-la rama de despliegue"* cuando el Centro de Mando **está en producción desde hoy
-09:31**, y declaraba `feature/bandeja-relevo` congelada cuando recibió 5 commits
-entre ayer y hoy. Las dos afirmaciones llevaban a decisiones equivocadas: la
-primera invita a pushear algo "por primera vez" que ya está afuera; la segunda,
-a ignorar trabajo vivo. **No se borró nada de lo cerrado** — se corrigió dónde
-vive cada cosa y se agregó lo que faltaba.
+**Desde hoy este archivo tiene un solo escritor.** La regla y su motivo están
+al final, en `UN SOLO DUEÑO DEL ESTADO`. En una línea: dos sesiones arreglaron
+el MISMO defecto el mismo día sin saberlo —`DECLARACION_NO_ALCANZA`, en
+`6207b9a` y en `4ac7dfb`— y cada una lo anotó en su copia. Un documento de
+autoridad con dos escritores no es autoridad: son dos borradores homónimos.
 
 ---
 
 ## DÓNDE VIVE CADA COSA
 
-Medido el 24/09/2026 con `git fetch` + `merge-base --is-ancestor` contra
-`origin/fix/integracion-wisphub`. **Producción está en `468f575`** (24/09 09:31
-Bogotá).
+**REMEDIDO el 24/09/2026 ~16:30 Bogotá, por contenido y no por hash.**
+Esta sección se equivocó dos veces hoy, en direcciones opuestas, y las dos
+veces por medir mal. La primera versión decía que nada estaba desplegado
+cuando el Centro de Mando ya estaba afuera. La corrección de la mañana dijo
+que el upstream era la rama de despliegue y que el trabajo «ya estaba
+afuera», y tampoco: el upstream es `origin/integrar-centro-mando`.
 
-| Rama | Qué tiene | Respecto de PRODUCCIÓN |
+Lo que hay que medir es el **contenido**, no la ancestría. Otra sesión tomó
+dos commits de esta rama y los puso en producción con otro hash, así que
+`merge-base --is-ancestor` los contaba como ausentes estando presentes:
+
+```
+git log --format=%H origin/fix/integracion-wisphub..HEAD   -> 19 commits
+   comparados por `git patch-id --stable` contra producción:
+   2 YA ESTÁN afuera con otro hash   65c8f57 -> 790e185
+                                     eb8f503 -> b7cfa90
+   17 realmente fuera
+git rev-list --left-right --count origin/fix/integracion-wisphub...HEAD -> 2  19
+git rev-list --left-right --count origin/integrar-centro-mando...HEAD   -> 2  46
+```
+
+`origin/integrar-centro-mando` quedó **detrás** de la rama de despliegue: su
+último push es del 23/09 (`5cd47e6`). Por eso los 46 «sin pushear» y los 19
+«fuera de producción» no se contradicen — miden contra bases distintas.
+
+**Lo que está REALMENTE fuera de producción son 17 commits**, y son el trabajo
+de hoy: el sistema de trabajo con IA (CLAUDE.md, 9 agentes, 4 comandos,
+`pre-commit`, CI), la plataforma multi-ISP entera (70 -> 14 archivos), el
+entorno local aislado, y el arreglo de `DECLARACION_NO_ALCANZA` (`6207b9a`).
+
+Además hay **2 commits en producción que no están acá** (`790e185`, `b7cfa90`)
+— los mismos dos de arriba, rebasados por la otra sesión.
+
+| Rama | Qué tiene | Estado medido |
 |---|---|---|
-| `integrar-centro-mando` | **Activa acá.** Centro de Mando, sistema de trabajo con IA (CLAUDE.md, 9 agentes, 4 comandos, `pre-commit`), plan semanal | 🟢 **desplegada.** Solo 2 commits por delante, y los dos tocan **un único archivo de documentación** (`SPEC/objetivos/campo-release-candidate.md`). Todo su código está afuera |
-| `feature/bandeja-relevo` | Bandeja Fase 1 + batería de evaluación + auditoría del bloque | 🟡 **5 commits fuera** (23–24/09). Su remota `origin/feature/bandeja-relevo` sí está contenida en producción; el trabajo nuevo vive en el worktree `C:/tmp/dexter-bandeja` |
-| `feat/campo-diseno-stitch` | **Dexter Campo.** 101 archivos bajo `test/` | 🔴 **46 commits fuera, 246 detrás.** Muy divergente. La copia viva es el worktree `C:/wisphub/_wt_campo`, 4 commits por delante de su propia remota |
+| `integrar-centro-mando` | **Activa, es esta.** Centro de Mando, sistema de trabajo con IA, plataforma multi-ISP | 🔴 **17 commits fuera de producción**, 46 sin pushear a su propio remoto, 2 detrás |
+| `feature/bandeja-relevo` | Bandeja Fase 1, batería de 41 flujos, validación de producción | 🟡 activa en `C:/tmp/dexter-bandeja`. **NO está congelada** pese a lo que dice la memoria: 3 commits hoy 16:12-16:14 |
+| `feat/campo-diseno-stitch` | **Dexter Campo.** 101 archivos de prueba, 551 pruebas | 🟡 activa en `C:/wisphub/_wt_campo`. Una tercera sesión implementa ahí «refrescar ficha» (`test_refrescar_ficha.py`, sin commitear) |
+| `fix/integracion-wisphub` | **Producción.** Push ahí ES deploy | Centro de Mando desde `ee4563f` (23/09 12:29) + los dos tableros de hoy |
 
-⚠️ **El upstream de `integrar-centro-mando` es la rama de DESPLIEGUE**, no su
-propia remota:
+⚠️ **Tres frentes activos a la vez, y hoy se cruzaron tres veces:**
 
-```
-git rev-parse --abbrev-ref @{u}   →   origin/fix/integracion-wisphub
-```
+1. Dos sesiones arreglaron **el mismo defecto** sin saberlo —
+   `DECLARACION_NO_ALCANZA`, en `6207b9a` (esta rama) y en `4ac7dfb`
+   (bandeja-relevo). Dos arreglos del mismo bug, en dos ramas.
+2. Dos sesiones editaron **este archivo** el mismo día, y las dos copias
+   divergieron 252 líneas. Esta versión es la fusión a mano de las dos.
+3. Una sesión **rebaseó y pusheó** dos commits de esta rama sin avisar. El
+   trabajo salió bien, pero el hash local ya no existe afuera, y eso es
+   exactamente lo que hizo fallar la medición por ancestría.
 
-Con `push.default` sin fijar (= `simple`) un `git push` pelado se rechaza porque
-los nombres difieren — pero **`git push origin HEAD` despliega a producción**, y
-`git pull` trae desde ahí. `origin/integrar-centro-mando` quedó 27 commits atrás
-y ya no representa el trabajo.
-
-⚠️ **Campo no está en `integrar-centro-mando`.** Remedido el 24/09: **6**
-archivos de prueba acá contra **101** allá. Los E2E 002/003/004, `test/apoyo/` y
-`docs/CAMPO_RELEASE_CONTRACT.md` sueltos en este árbol son copias byte a byte de
-la otra rama (B2, resuelto el 23/09), **no** la suite.
-
-⚠️ **Choque de migraciones de Django, hallazgo nuevo del 24/09.** Las dos ramas
-tienen **un `0003` distinto cada una**:
-
-```
-producción (repo)          feat/campo-diseno-stitch (repo)
-0001_initial               0001_initial
-0002_remove_ordentrabajo…  0002_remove_ordentrabajo…
-0003_alter_asignaciontra…  0003_campos_de_despacho        ← divergen acá
-                           0004_entregadekit_materialcat…
-                           0005_movimientodematerial_mot…
-                           0006_actadedevolucion_inciden…
-```
-
-Integrar Campo no es solo traer cuatro migraciones: exige resolver dos `0003`
-con el mismo número. Eso no estaba escrito y es parte de B1.
+Ninguno de los tres es un error de código. Los tres son el mismo error de
+coordinación, y la regla del final existe para eso.
 
 ## TRABAJO ACTIVO
 
@@ -139,6 +150,79 @@ alguien deje un archivo ajeno adentro. Verificar siempre con
 ⚠️ **Hay 21 worktrees registrados** (`git worktree list`), la mayoría de bloques
 ya cerrados (`dexter-d17`, `dexter-d19d23`, `dexter-hotfix`, `dexter-ledger`…).
 No se podan acá: es decisión de una persona, no de una sesión.
+
+## VALIDACIÓN DE PRODUCCIÓN — abierta, y ahora se sabe en qué
+
+Objetivo `SPEC/objetivos/endurecer-validacion-de-produccion.md`. **NO está
+cerrado.** La versión anterior de esta sección decía «cerrado con una
+salvedad»; estaba mal contada y se corrige acá.
+
+Lo que quedó funcionando y medido el 24/09:
+
+```
+cli/bateria_flujos.py    41 conversaciones que entran por atender_turno y se
+                         juzgan solas contra la traza. 36/38 en LOCAL; 3
+                         necesitan el CRM (backend:8000, red del compose).
+                         Cierra el hueco de que cli/evaluar.py llama a
+                         motor.responder() directo.
+casos dorados            el inestable partido en dos: 10/10 y 10/10.
+                         'sin el serial cargado' dejó de afirmar sobre la
+                         redacción: 10/10.
+cli/evaluar.py           afirmaciones 'bloquea_con' / 'no_bloquea_con'.
+diferencias_config       exit 0. Las 3 diferencias son las sincronizadas
+                         (localidades, localidades_actualizado_en,
+                         parrilla_canales).
+test_bloqueos_en_traza   VERDE (7/7). Estaba rojo en la rama.
+```
+
+**Lo que se descubrió al medir, y es lo importante de esta sección:** la
+batería comiteada **nunca se había corrido**. El commit `d9733df` está escrito
+como un arreglo de una línea del cliente simulado y además agrega 20 casos —de
+21 a 41—, entre ellos los de seguridad. El 19/19 que esta sección declaraba se
+midió sobre `81677b4`, con 21 casos. O sea: la evidencia no describía el código
+comiteado, que es el error cardinal de este proyecto.
+
+Corrida ya la batería completa, los cinco casos de seguridad que nunca se
+habían medido **pasan**: inyección de instrucciones, técnico falso, lista de
+morosos, cédula de un tercero, amenaza de cancelar.
+
+**Un hallazgo de conducta, determinista, fuera del objetivo:**
+
+```
+una falla de barrio     0/10. El agente dice "puede ser algo de la zona" y acto
+no se diagnostica       seguido diagnostica una sola casa: consulta el incidente
+como una casa           de red en el paso 9, DESPUÉS de haber propuesto el
+                        reinicio en el 8. Arreglarlo es cambiar el orden del
+                        diagnóstico, o sea conducta: se anota, no se toca.
+                        El caso queda ADENTRO de la batería y en rojo.
+```
+
+**Lo que falta para cerrar el objetivo:**
+
+```
+docker exec <contenedor-motor> python cli/bateria_flujos.py rapilink --todos
+```
+
+Y no basta un contenedor local: los 3 casos de CRM llaman a
+`http://backend:8000` con las credenciales de la config de producción. Un
+`backend` levantado desde un worktree no las tiene y responde 403; en el
+intento del 24/09 eso fue exactamente lo que pasó. El 41/41 literal solo sale
+en la red de producción, y antes hay que desplegar `cli/bateria_flujos.py`.
+
+**Lo que la auditoría dejó abierto** (`SPEC/auditorias/2026-09-23-bateria-de-flujos.md`):
+
+```
+AUTONOMIA_2_NO_ACTIVA  sigue sin clasificar como bloqueo. No se arregla con un
+                       renglón en una lista: llega por el except genérico, así
+                       que hay que hacer que ese camino preserve e.codigo.
+                       (DECLARACION_NO_ALCANZA SÍ se arregló: commit 4ac7dfb.)
+traza incompleta       la batería juzga contra la traza de la base y hubo dos
+                       ConnectionTimeout al escribirla. Hoy nada distingue "la
+                       herramienta no se llamó" de "la llamada no se pudo
+                       escribir": un caso puede salir verde por el error.
+franja horaria         REFUTADO el 23/09: medido dentro de la imagen,
+                       ZoneInfo('America/Bogota') funciona.
+```
 
 ## CERRADO
 
@@ -391,3 +475,61 @@ el ping               no es veredicto: medido, un equipo sano da 1/3, 2/3 y 3/3
 bloqueo               ≠ error: el código frenando la acción es la protección
                       funcionando, y no ensucia la tasa de error
 ```
+
+
+---
+
+## UN SOLO DUEÑO DEL ESTADO
+
+*Regla nueva del 24/09/2026. No nace de una preferencia: nace de que hoy tres
+sesiones se cruzaron tres veces en un día.*
+
+### La regla
+
+**Este archivo lo escribe la sesión que trabaja en `integrar-centro-mando`.**
+Las demás sesiones **no lo editan**. Si tienen algo que anotar, lo entregan en
+su respuesta —hash del commit y una línea de qué cerró— y la sesión dueña lo
+escribe acá.
+
+Es la misma forma que ya funciona para producción (ver la memoria «Un solo
+dueño de producción»: solo la IA de Plataforma pushea, las demás entregan
+hashes). Se extiende al estado por el mismo motivo y con la misma evidencia.
+
+### Por qué, y lo que costó
+
+Un documento de autoridad con dos escritores **deja de ser autoridad**: pasa a
+ser dos borradores con el mismo nombre. Lo que pasó hoy, medido:
+
+- Las dos copias divergieron **252 líneas** en un solo día. Ninguna era «la
+  buena»: cada una tenía secciones que la otra no.
+- El mismo defecto se arregló **dos veces** (`DECLARACION_NO_ALCANZA` en
+  `6207b9a` y en `4ac7dfb`) porque cada sesión leía su propia copia del estado,
+  y en ninguna de las dos figuraba que la otra ya lo estaba mirando.
+- La sección del mapa de ramas afirmó **lo contrario de la realidad dos veces
+  el mismo día** —una en cada dirección— y la segunda corrección también estaba
+  mal, porque medir por ancestría no ve un commit rebaseado.
+
+El costo no es el desorden. Es que este archivo existe para que una sesión nueva
+no tenga que reconstruir el estado, y un archivo que miente cuesta **más** que
+no tenerlo: la sesión que lo lee no sospecha.
+
+### Las tres cosas que se hacen distinto desde hoy
+
+1. **Se mide por contenido, no por hash.** Para saber si algo está en
+   producción: `git patch-id --stable`, no `merge-base --is-ancestor`. Un
+   commit rebaseado por otra sesión es invisible para el segundo.
+
+2. **Antes de arreglar un defecto, se mira si otra rama ya lo está
+   arreglando.** `git log --all --oneline --since=<ayer> -- <archivo>` cuesta
+   dos segundos y hoy habría ahorrado un arreglo duplicado.
+
+3. **Nadie rebasea ni pushea commits de una rama ajena sin decirlo.** Si pasa,
+   se anota acá cuál fue el hash viejo y cuál el nuevo — como quedó anotado
+   arriba con `65c8f57 -> 790e185` y `eb8f503 -> b7cfa90`.
+
+### Lo que esta regla NO dice
+
+No dice que las otras sesiones trabajen menos ni que pidan permiso para
+codificar. Cada rama sigue siendo dueña de su trabajo y de sus commits. Lo
+único centralizado es **el relato de qué está hecho** — porque de eso hay uno
+solo por definición, y hoy había tres.
