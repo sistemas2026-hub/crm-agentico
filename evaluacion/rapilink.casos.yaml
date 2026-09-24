@@ -1053,18 +1053,69 @@ casos:
   # se le seguia mandando al router, y el caso fallaba con
   # HERRAMIENTA_DESCONOCIDA sin que tuviera nada que ver con lo que
   # afirmaba probar.
-  - nombre: cliente actual pidiendo otro servicio si se verifica
+  # ---------------------------------------------------------------------------
+  #  UN CASO POR DECISION -- lo que antes era uno solo y era una moneda al aire
+  # ---------------------------------------------------------------------------
+  #  'cliente actual pidiendo otro servicio si se verifica' encadenaba TRES
+  #  decisiones y culpaba a una sola. Medido el 23/09/2026, el mismo caso sin
+  #  tocar nada: 3/4, 0/3, 1/11, 5/6, 1/5, 4/8 y 2/4 segun la corrida.
+  #
+  #  Las tres, y las tres son ramas que el contrato PERMITE:
+  #    1. el router deriva a ventas, o hace su unica pregunta aclaratoria
+  #       ("¿internet o television?") -- el parametro 'servicio' de
+  #       derivar_a_area es obligatorio y su descripcion esta escrita para
+  #       fallas, no para altas;
+  #    2. ventas verifica, o pregunta "¿ya sos cliente?" -- su instruccion dice
+  #       "preguntaselo cuanto antes";
+  #    3. ventas llama a verificar con la cedula, o junta primero el nombre,
+  #       que es lo que confirmar_identidad necesita despues.
+  #
+  #  Con cada una alrededor del 70-80%, la cadena da ~40%. Una prueba que falla
+  #  la mitad de las veces no es una prueba: ensena a ignorar el rojo, y el
+  #  23/09 costo horas distinguirla de una regresion real.
+  #
+  #  Son dos, cada uno con UNA afirmacion. El segundo entra por el rol de
+  #  destino a proposito: asi no arrastra la decision del router.
+  - nombre: el router pregunta UNA vez y despues deriva a ventas
     rol: cliente_final
     sesion:
       verificado: false
       nivel: 0
       identificador_canal: "573009992222"
-    mensajes: ["quiero agregar otro servicio a mi cuenta", "1142434445"]
+    # DOS MENSAJES, Y EL SEGUNDO CONTESTA LA PREGUNTA. No es una concesion
+    # para que el caso pase: es la unica forma de afirmar la regla que el
+    # contrato del router declara -- "si de verdad no entendes que necesita,
+    # preguntale a que se refiere, UNA SOLA VEZ, breve".
+    #
+    # Con un solo mensaje ("quiero agregar otro servicio a mi cuenta") el
+    # router NO deriva: medido 0 de 10 el 23/09/2026, determinista, no
+    # inestable. Pregunta "¿internet o television?" y se queda esperando. Es
+    # defendible --el parametro 'servicio' de derivar_a_area es obligatorio y
+    # su descripcion esta escrita para fallas, no para altas-- pero significa
+    # que este caso NO puede afirmar la derivacion en el primer mensaje sin
+    # cambiar conducta, y cambiar conducta no es de este caso.
+    #
+    # Lo que SI se guarda aca, y es lo que importa: que la pregunta sea UNA y
+    # que despues derive. Si el router vuelve a preguntar en vez de derivar,
+    # se pone rojo.
+    mensajes: ["quiero agregar otro servicio a mi cuenta", "television"]
     espera:
+      usa: [derivar_a_area]
       deriva_a: ventas
-      usa: [derivar_a_area, verificar_identidad_por_cedula]
-      sin_errores: true
 
+  - nombre: ventas verifica al cliente que YA dijo serlo y dio la cedula
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009992223"
+    mensajes: ["ya soy cliente de ustedes y quiero agregar television, mi cedula es 1142434445"]
+    espera:
+      # El mensaje contesta de antemano la pregunta que ventas tiene orden de
+      # hacer, asi que la unica decision que queda es la que se quiere guardar:
+      # con la cedula a mano, verifica.
+      usa: [verificar_identidad_por_cedula]
+      sin_errores: true
   # 'planes_venta' (nucleo/config/schema.py) nace de un caso real: un
   # prospecto pregunto por "300 megas" y consultar_planes (el catalogo
   # TECNICO de WispHub) trajo tres resultados distintos -- variantes
@@ -1941,13 +1992,25 @@ casos:
       id_cliente: "6555"
       nombre: PRUEBA TEMPORAL
       sn_onu: ""
-      identificador_canal: '573111110010'
-    mensajes:
-      - "no tengo internet"
-      - "en todos los aparatos, no anda en ninguno"
+      identificador_canal: "573111110010"
+    mensajes: ["no tengo internet", "en todos los aparatos, no anda en ninguno"]
     espera:
+      # AFIRMA SOBRE LA TRAZA, NO SOBRE LA REDACCION -- y la version anterior
+      # hacia lo segundo. Decia 'responde_sin: [cedula]', y eso marca rojo una
+      # respuesta CORRECTA que diga "no necesito tu cedula". Medido el
+      # 23/09/2026: 4 de 5 corridas, y la que fallaba no habia hecho nada mal.
+      #
+      # Lo que el caso guarda de verdad es una distincion que el motor hace en
+      # codigo (nucleo/modelo/motor.py::falta_un_dato_de_la_sesion): cuando una
+      # herramienta no puede correr, NO es lo mismo "no se quien sos" que "el
+      # ISP nunca cargo el equipo de esta cuenta". Al primero se le pide la
+      # cedula; al segundo, pedirsela es mandarlo a escribir un dato que no
+      # arregla nada -- y eso fue lo que paso el 15/09/2026 con un cliente ya
+      # verificado sin 'sn_onu'. No es un borde: 1.299 de 4.163 clientes
+      # activos no tienen ese identificador cargado.
+      bloquea_con: [DATO_DEL_EQUIPO_NO_CARGADO]
+      no_bloquea_con: [IDENTIDAD_NO_RESUELTA]
       no_intenta: [verificar_identidad_por_cedula]
-      responde_sin: ["cedula"]
 
   # ============================================================================
   #  LOS CINCO CON TRAFICO REAL DETRAS (15/09/2026)
@@ -1956,7 +2019,6 @@ casos:
   #  produccion, no de una lista imaginada. El resto de los candidatos son
   #  buenos casos, pero son hipotesis; estos ya pasaron.
   # ============================================================================
-
   # EL IDENTIFICADOR DEL EQUIPO SE RECUPERA SOLO.
   #
   # Cuando la sesion pierde 'sn_onu' -- se cierra la conversacion, se reinicia

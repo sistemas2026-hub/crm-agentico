@@ -7,7 +7,7 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: 19/09/2026, al cerrar la Fase 1.
+Última actualización: 23/09/2026, tras desplegar identidad y observabilidad.
 
 ---
 
@@ -18,31 +18,47 @@ rama       feature/bandeja-relevo
 worktree   C:\tmp\dexter-bandeja
 ```
 
-Nada pusheado. Sobre `d0d6be9`:
+**Ya no vale «nada pusheado»** — decía eso hasta el 23/09/2026 y para entonces
+había seis commits corriendo en producción. Lo de abajo se mide con `fetch`,
+nunca de memoria.
+
+Desplegado el 23/09/2026 (push a `fix/integracion-wisphub` = deploy):
 
 ```
-04d835e  backend T6, medido contra PostgreSQL 16.14
-df7eb7c  checkpoint + esta memoria operativa
-d033e58  UI de T6
-fa6b91a  cierre de 1.4C + corrección de la lista de warnings
-5f30f74  1.5 Case + Tools
-178d749  cierre de 1.5
-4d73ea8  1.6 Activity
-139f8ca  cierre de 1.6
-f61fd4d  1.7 Customer
-929b86e  cierre de 1.7
-4541423  1.8 Network
-d5cc765  cierre de 1.8
-b7bc9ea  1.9 cierre visual
+00407ac  el aviso del reencauzamiento no llegaba al modelo
+0b27263  el embudo de identidad se puede medir  (+ migración 202609231445)
+969e7b9  privacidad de la observabilidad del frontend
+49d9318  la pestaña abierta antes del deploy se recupera sola
+055d1a2  franja horaria en el prompt, y motivo de escalada obligatorio
+```
+
+Y en la base de producción, ese mismo día:
+
+```
+config v150 -> v154   descripción de derivar_a_area, por el editor versionado
+                      (nucleo/config/editor.py), un campo por vez. NUNCA con
+                      --forzar: ese sube el documento completo.
+migración             202609231445_identidad_eventos.sql aplicada. Ledger en
+                      0 pendientes, 0 checksums distintos.
+```
+
+Sin desplegar, sobre lo anterior:
+
+```
+b66dba9  cli/bateria_flujos.py -- 20 conversaciones que se juzgan solas
 ```
 
 ## WORKTREE
 
-Queda **un solo** archivo modificado sin commitear:
-
 ```
 SPEC/CONTRATO_RELEVO_IA_HUMANO.md   arrastre ajeno sobre G9, sin destino propio
 ```
+
+Ese sigue sin destino y **queda fuera de todo commit**: se respalda y se hace
+`git checkout --` antes de cada rebase, y se restaura después. El 23/09 se
+rebasó seis veces (el otro colaborador empujó nueve commits en la misma tarde,
+dos de ellos sobre `nucleo/canales/api.py` y `nucleo/persistencia/db.py`) y el
+archivo llegó intacto: md5 `016b34fdfbb42884d5716c60cc917f8d`.
 
 No restaurarlo ni borrarlo. Y mientras siga ahí, **stage por rutas explícitas
 siempre, también para documentación**: prohibidos `git add .`, `git add -A`,

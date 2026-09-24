@@ -149,6 +149,14 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
     # contarlo como ejecutado afirmaria un reinicio que no ocurrio.
     propuestas: list[str] = []
     errores: list[str] = []
+    # Los codigos de los gates que frenaron una llamada. NO son errores --son
+    # la proteccion funcionando-- pero si son afirmables, y en traza: poder
+    # distinguir 'no se quien sos' (IDENTIDAD_NO_RESUELTA) de 'el ISP nunca
+    # cargo el equipo' (DATO_DEL_EQUIPO_NO_CARGADO) es la unica forma de
+    # guardar ese caso sin exigirle al modelo una frase exacta. Antes se
+    # afirmaba con 'responde_sin: cedula', y eso marcaba rojo una respuesta
+    # correcta que dijera 'no necesito tu cedula'.
+    bloqueos: list[str] = []
     respuesta = ""
     # Sigue el mismo patron que nucleo/canales/api.py::atender_turno(): si un
     # mensaje deriva a otro rol (sesion.rol_siguiente), los mensajes
@@ -205,6 +213,8 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
             # repetir aca la lista de codigos: son la misma verdad y ya se
             # separaron una vez, el 08/09/2026.
             if r.get("es_bloqueo"):
+                if r.get("codigo_error"):
+                    bloqueos.append(r["codigo_error"])
                 continue
             if r.get("codigo_error"):
                 errores.append(f"{r['herramienta']}: {r['codigo_error']}")
@@ -287,6 +297,14 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
     # Lo peor es que el falso verde dependia del ENTORNO: dentro del contenedor
     # la herramienta responde, entra en 'ejecutadas' y el caso si falla. Una
     # prueba que dice cosas distintas segun donde corre no sirve para decidir.
+    for codigo in espera.get("bloquea_con") or []:
+        if codigo not in bloqueos:
+            fallas.append(f"bloquea_con: ningun gate devolvio '{codigo}' "
+                         f"(bloqueos: {bloqueos or 'ninguno'})")
+    for codigo in espera.get("no_bloquea_con") or []:
+        if codigo in bloqueos:
+            fallas.append(f"no_bloquea_con: un gate devolvio '{codigo}' y no debia")
+
     for herr in espera.get("no_intenta") or []:
         if herr in usadas:
             fallas.append(f"no_intenta: intento llamar a '{herr}' y no debia")
