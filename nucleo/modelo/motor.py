@@ -103,6 +103,15 @@ CODIGOS_DE_BLOQUEO = frozenset({
     "IDENTIDAD_NO_RESUELTA",
     "DATO_DEL_EQUIPO_NO_CARGADO",
     "PRECONDICION_NO_CUMPLIDA",
+    # Hermana de la de arriba, y faltaba: el gate de Declaracion
+    # (schema.py) frena la llamada cuando lo que el modelo declaro no
+    # corresponde a esa accion. Es el codigo fallando cerrado, no un
+    # tercero. Sin este renglon viajaba a la traza como ERROR, asi que
+    # disparaba 'escalar_si_falla' --la proteccion funcionando causaba
+    # una escalada-- y ademas cualquier caso dorado con
+    # 'sin_errores: true' se ponia rojo por culpa de la guarda.
+    # Mismo razonamiento que IDENTIDAD_NO_VERIFICADA el 08/09/2026.
+    "DECLARACION_NO_ALCANZA",
     "FALTA_HABLAR_CON_EL_CLIENTE",
     "HERRAMIENTA_DESCONOCIDA",
     "LIMITE_DE_CONVERSACION",

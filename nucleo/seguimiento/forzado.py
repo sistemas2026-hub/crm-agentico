@@ -550,6 +550,7 @@ CODIGOS_MOTOR_GUARD = frozenset({
     # como fallo de la herramienta y fuerza una escalada con un motivo -- y un
     # mensaje al cliente -- que no es cierto.
     "DATO_DEL_EQUIPO_NO_CARGADO",
+    "DECLARACION_NO_ALCANZA",
     "IDENTIDAD_NO_VERIFICADA",
     "HERRAMIENTA_DESCONOCIDA",
     # D25: una persona tomo la conversacion y el motor no inicio la accion. No
