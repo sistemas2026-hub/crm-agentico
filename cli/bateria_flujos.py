@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
- BATERIA DE FLUJOS  --  20 conversaciones completas, y que AFIRMAN
+ BATERIA DE FLUJOS  --  21 conversaciones completas, y que AFIRMAN
 ================================================================================
     py -3.13 cli/bateria_flujos.py rapilink                 # solo los que corren desde aca
     py -3.13 cli/bateria_flujos.py rapilink --todos         # incluye los que necesitan el CRM
@@ -307,7 +307,8 @@ def _traza(tenant: str, conversacion_id: str) -> dict:
     if not conversacion_id:
         return {"herramientas": [], "identidad": [], "acciones": [], "conv": {}}
     with sesion(tenant) as (cur, _org):
-        cur.execute("""select herramienta, rol_solicitante, exito, codigo_error, es_bloqueo
+        cur.execute("""select herramienta, rol_solicitante, exito, codigo_error,
+                              es_bloqueo, es_escritura, parametros
                        from asistente.tool_calls where conversation_id = %s
                        order by creado_en""", (conversacion_id,))
         herramientas = [dict(r) for r in cur.fetchall()]
@@ -325,7 +326,7 @@ def _traza(tenant: str, conversacion_id: str) -> dict:
             "acciones": acciones, "conv": dict(fila) if fila else {}}
 
 
-def _juzgar(c, traza, dicho: str) -> list[str]:
+def _juzgar(c, traza, dicho: str, destino: str | None = None) -> list[str]:
     """Las fallas de este caso. Lista vacia = paso."""
     e = c["espera"]
     fallas = []
@@ -344,13 +345,24 @@ def _juzgar(c, traza, dicho: str) -> list[str]:
                 fallas.append(f"no_usa_rol: '{rol}' llamo '{h['herramienta']}'")
 
     if "deriva_a" in e:
-        # Quien ATIENDE al final se ve en el rol que ejecuto las herramientas:
-        # 'rol_siguiente' de la sesion se arrastra entre turnos a proposito
-        # (nucleo/modelo/motor.py) y mentiria sobre este caso.
-        roles = {h["rol_solicitante"] for h in traza["herramientas"]}
-        if e["deriva_a"] not in roles:
+        # POR EL ARGUMENTO DE LA DERIVACION, NO POR 'rol_solicitante'.
+        #
+        # La primera version miraba el rol de las filas de tool_calls, y eso
+        # medía otra cosa: 'rol_solicitante' NO es quien pidió la herramienta,
+        # es el rol en que TERMINÓ el turno. _atender_turno reasigna
+        # 'rol = sesion.rol_siguiente' (nucleo/canales/api.py) ANTES de que el
+        # hilo de traza cierre sobre esa variable, y db.py escribe ese único
+        # escalar en TODAS las filas del turno. O sea que la fila de
+        # 'derivar_a_area' llamada por el router queda etiquetada con el área
+        # destino -- y la afirmación daba verde aunque el área nunca hubiera
+        # atendido nada. Encontrado en la auditoría adversarial del 23/09/2026.
+        # Y TAMPOCO por 'parametros': la traza los guarda ENMASCARADOS
+        # (motor.py::_enmascarar), asi que el area vuelve como '...ntas'. Se
+        # lee el rol en que quedo la sesion, que es lo que de verdad atiende
+        # el mensaje siguiente.
+        if destino != e["deriva_a"]:
             fallas.append(f"deriva_a: esperaba '{e['deriva_a']}', "
-                          f"atendieron {sorted(roles) or 'nadie'}")
+                          f"quedo en '{destino or 'ninguno'}'")
 
     if "escala" in e and bool(conv.get("escalada_a_humano")) != bool(e["escala"]):
         fallas.append(f"escala: esperaba {e['escala']} y fue "
@@ -374,12 +386,34 @@ def _juzgar(c, traza, dicho: str) -> list[str]:
         if prohibida.lower() in (dicho or "").lower():
             fallas.append(f"responde_sin: la respuesta dice '{prohibida}'")
 
-    # SIEMPRE, sin declararlo: ninguna accion con efecto puede quedar EJECUTADA.
-    # El equipo de laboratorio es uno solo y un reinicio corta seis minutos.
+    # ── SEGURIDAD, siempre, sin que el caso lo declare ─────────────────────
+    #
+    # La primera version solo miraba 'acciones_propuestas', y eso era una
+    # GARANTIA FALSA: ahi solo cae lo que declara 'aprobacion_humana' -- 14 de
+    # las 30 herramientas de escritura del tenant. Las otras 16 se ejecutan
+    # directo y no dejan fila: agendar_visita_tecnica, registrar_pedido_wifi,
+    # crear_ticket_caso, registrar_solicitud_servicio... Una tanda con --todos
+    # dentro del contenedor podia abrir una visita tecnica REAL y salir en
+    # verde sin mencionarlo. Encontrado en la auditoria adversarial del
+    # 23/09/2026.
     for a in traza["acciones"]:
         if a["estado"] not in ("pendiente", "rechazada", "cancelada", "vencida"):
             fallas.append(f"SEGURIDAD: '{a['herramienta']}' quedo '{a['estado']}', "
                           f"no 'pendiente'")
+    # UNA PROPUESTA NO ES UNA EJECUCION, y en 'tool_calls' se ven igual: la
+    # fila de una herramienta que quedo esperando aprobacion tambien trae
+    # exito=true y es_escritura=true. La unica forma de distinguirlas desde
+    # aca es que la propuesta dejo fila en 'acciones_propuestas'. Sin esto, la
+    # afirmacion marcaba rojo justo el caso donde el freno FUNCIONO.
+    propuestas = {a["herramienta"] for a in traza["acciones"]}
+    permitidas = set(e.get("escribe") or [])
+    for h in traza["herramientas"]:
+        if (h.get("es_escritura") and h.get("exito") and not h.get("es_bloqueo")
+                and h["herramienta"] not in propuestas
+                and h["herramienta"] not in permitidas):
+            fallas.append(f"SEGURIDAD: '{h['herramienta']}' ESCRIBIO de verdad "
+                          f"(efecto fuera del sistema, sin pasar por aprobacion) "
+                          f"y el caso no lo declara en 'escribe'")
     return fallas
 
 
@@ -402,6 +436,20 @@ def correr(tenant: str, casos: list[dict], verboso: bool) -> list[dict]:
         api._sesiones.clear()
 
         usadas, mensaje, dicho = set(), c["apertura"], ""
+        # LO QUE IMPIDE QUE UN CASO SALGA VERDE SIN HABER OCURRIDO.
+        #
+        # La primera version atrapaba la excepcion, imprimia ERROR y seguia a
+        # juzgar: con la traza vacia, todo caso que solo afirme cosas
+        # NEGATIVAS ('no_usa', 'no_intenta', 'escala: false') pasaba. Medido en
+        # la auditoria adversarial del 23/09/2026: con el sistema entero caido,
+        # 5 de 21 casos daban [ok]. Y los dos ConnectionTimeout de la primera
+        # tanda real no eran hipoteticos.
+        #
+        # Peor todavia, el camino silencioso: atender_turno NO lanza cuando no
+        # consigue cupo -- devuelve {"respuesta": "", "sin_turno": True}. Sin
+        # esto, el caso recorria sus turnos sin que nadie lo atendiera y
+        # terminaba verde sin imprimir una sola linea.
+        roto = None
         print(f"[{n:>2}/{len(casos)}] {c['nombre']}", flush=True)
         for _ in range(MAX_TURNOS):
             try:
@@ -409,7 +457,11 @@ def correr(tenant: str, casos: list[dict], verboso: bool) -> list[dict]:
                                            mensaje, CANAL)
             except Exception as ex:
                 dicho = ""
+                roto = f"el turno reviento: {type(ex).__name__}: {str(ex)[:90]}"
                 print(f"        ERROR: {type(ex).__name__}: {ex}", flush=True)
+                break
+            if (salida or {}).get("sin_turno"):
+                roto = "no consiguio cupo para atender el turno (sin_turno)"
                 break
             dicho = (salida or {}).get("respuesta", "") or ""
             if verboso:
@@ -421,8 +473,13 @@ def correr(tenant: str, casos: list[dict], verboso: bool) -> list[dict]:
             mensaje = siguiente
 
         estado = api._sesiones.get((tenant, CANAL, num)) or {}
+        if not roto and not estado.get("conversacion_id"):
+            roto = "no quedo ninguna conversacion en la base: el caso no ocurrio"
         traza = _traza(tenant, estado.get("conversacion_id"))
-        fallas = _juzgar(c, traza, dicho)
+        # Un caso que no ocurrio NO se juzga: se reporta roto. Juzgarlo con la
+        # traza vacia es lo que producia el falso verde.
+        fallas = [roto] if roto else _juzgar(c, traza, dicho,
+                                             estado.get("rol_activo"))
         marca = "[ok]  " if not fallas else "[FALLA]"
         print(f"        {marca} herramientas: "
               f"{[h['herramienta'] for h in traza['herramientas']] or 'ninguna'}", flush=True)
@@ -436,7 +493,7 @@ def correr(tenant: str, casos: list[dict], verboso: bool) -> list[dict]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="20 conversaciones completas, y que afirman")
+    ap = argparse.ArgumentParser(description="21 conversaciones completas, y que afirman")
     ap.add_argument("tenant")
     ap.add_argument("--todos", action="store_true",
                     help="incluye los casos que necesitan el CRM (solo dentro del contenedor)")
