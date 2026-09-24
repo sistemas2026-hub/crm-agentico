@@ -7,7 +7,7 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: 23/09/2026. La anterior era del 19/09, al cerrar la Fase 1,
+Última actualización: 23/09/2026, al cerrar el bloque de Campo RC parte A+B4/5 y el sistema de trabajo con IA. La anterior era del 19/09, al cerrar la Fase 1,
 y había quedado describiendo otra rama: decía que la base canónica era
 `feature/bandeja-relevo` y que lo siguiente era Branding, mientras el trabajo
 vivo estaba en el Centro de Mando. Lo encontró `/inicio-sesion` al estrenarse.
@@ -25,7 +25,7 @@ sobre un trabajo que no está bajo tus pies.
 | Rama | Qué tiene | Estado |
 |---|---|---|
 | `integrar-centro-mando` | **Activa hoy.** Centro de Mando, el sistema de trabajo con IA (CLAUDE.md, agentes, comandos, puerta `pre-commit`), plan semanal | 🟡 desarrollo |
-| `feat/campo-diseno-stitch` | **Dexter Campo.** 101 archivos bajo `test/`, 529 pruebas, y el contrato de versión candidata | 🟡 candidata, sin integrar |
+| `feat/campo-diseno-stitch` | **Dexter Campo.** 101 archivos bajo `test/`, **536** pruebas (medidas el 23/09), y el contrato de versión candidata | 🟡 candidata, sin integrar |
 | `feature/bandeja-relevo` | Bandeja, Fase 1 completa | 🔒 **congelada** el 21/09/2026. No se toca hasta que vuelva Q3, G8 o WispHub |
 
 ⚠️ **Campo no está en `integrar-centro-mando`.** Medido el 23/09/2026:
@@ -40,11 +40,18 @@ empieza decidiendo dónde se ejecuta.
 Centro de Mando        🟡 desplegado (ee4563f). Quedan dos entradas de menú que
                           se pisan, y E2E-001 fuera por el choque en el
                           serializer de campo
-Dexter Campo RC        🟡 el contrato está escrito (apps/tecnicos-mobile/docs/
-                          CAMPO_RELEASE_CONTRACT.md, sin commitear). Faltan sus
-                          cinco verificaciones, ninguna de ellas código
+Dexter Campo RC        🟡 Parte A ✅ medida en feat/campo-diseno-stitch:
+                          536 pruebas verdes en las dos compilaciones y APK de
+                          release de 53.2 MB. Parte B 4 de 5 (falta recorrer un
+                          día sin red). BLOQUEA LA ENTREGA: produccion tiene 2
+                          migraciones de campo y esa rama tiene 6 -- las cuatro
+                          de materiales no estan aplicadas. Ficha:
+                          objetivos/campo-release-candidate.md
 Sistema de trabajo IA  ✅ CLAUDE.md como enrutador, 9 agentes, 4 comandos,
-                          pre-commit activo. Falta CI del lado del servidor (D1)
+                          pre-commit activo y corregido (3 hallazgos). Falta CI
+                          del lado del servidor (D1). ⚠ los agentes NO se
+                          cargan en la sesion en curso: solo 1 de 9 quedo
+                          invocable, medido dos veces
 ```
 
 ## WORKTREE DE LA RAMA CONGELADA

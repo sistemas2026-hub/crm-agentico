@@ -169,6 +169,7 @@ quién y cuándo antes de dar la candidata por lista.
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 23/09/2026 | Ficha abierta. Medido dónde vive Campo (B1) y qué falta del contrato §5 | Resolver B1 | — |
+| 23/09/2026 | Bloque cerrado. Pasada adversarial sobre el hook: 3 hallazgos, los 3 corregidos y reverificados (10/10) | B1 y el día sin red | — |
 | 23/09/2026 | Casilla 5: arranque ~1,5 s y scroll p95 34 ms, medidos en emulador con 20 órdenes | Solo el día sin red | — |
 | 23/09/2026 | Casillas 2 y 4 de la Parte B: cuenta real con jornada bajada, y reinstalación sobre versión anterior (reportadas) | Solo el rendimiento con 20 órdenes | — |
 | 23/09/2026 | Primera casilla de la Parte B: el APK instala limpio en un teléfono real (reportado) | Que abra, cuenta real, día sin red, reinstalación, rendimiento | — |

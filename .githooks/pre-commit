@@ -21,7 +21,20 @@ RAYA="================================================================"
 # .env es el caso grave. El resto son artefactos de sesion: no rompen nada,
 # pero ensucian la historia. Paso de verdad en d97ea22, donde las definiciones
 # de los agentes entraron mezcladas con ~200 archivos de Playwright.
-COLADOS=$(echo "$ARCHIVOS" | grep -E '^\.env$|^\.env\.|^\.playwright-mcp/|^\.tmp/|__pycache__/|\.pyc$|^\.claude/settings\.local\.json$|\.lock$')
+# Un .env en CUALQUIER directorio, no solo en la raiz: 'django-crm/.env' es
+# tan secreto como './.env' y el ancla '^' no lo veia. Se dejan pasar los dos
+# que SI van al repositorio y estan versionados: '.env.example' (plantilla sin
+# valores) y 'django-crm/.env.docker' (defaults locales del compose).
+SECRETOS=$(echo "$ARCHIVOS" | grep -E '(^|/)\.env($|\.)' | grep -vE '\.example$|(^|/)\.env\.docker$')
+
+# Artefactos de sesion. NO se filtra por '.lock$': tres lock files legitimos
+# estan versionados (pubspec.lock x2, uv.lock) y frenarlos convertiria cada
+# actualizacion de dependencias en un --no-verify, que mata la puerta entera.
+BASURA=$(echo "$ARCHIVOS" | grep -E '^\.playwright-mcp/|^\.tmp/|__pycache__/|\.pyc$|^\.claude/settings\.local\.json$|^\.claude/scheduled_tasks\.lock$')
+
+COLADOS=$(printf '%s
+%s
+' "$SECRETOS" "$BASURA" | grep -v '^$')
 
 if [ -n "$COLADOS" ]; then
     echo ""
@@ -47,7 +60,16 @@ fi
 TOCA_NUCLEO=$(echo "$ARCHIVOS" | grep -E '^nucleo/')
 
 if [ -n "$TOCA_NUCLEO" ]; then
-    if command -v py >/dev/null 2>&1; then
+    # 'no se pudo medir' NO es 'se midio y el efecto no esta' (contrato
+    # congelado, NO_VERIFICABLE). Sin Python 3.13 el script sale con un codigo
+    # distinto de cero que no dice nada sobre el nucleo: tratarlo como falla
+    # acusaria de filtrar un cliente a quien solo le falta el interprete.
+    if ! py -3.13 --version >/dev/null 2>&1; then
+        echo "[pre-commit] NO SE PUDO MEDIR: falta Python 3.13, asi que la"
+        echo "             guarda de arquitectura no corrio. Esto NO dice que"
+        echo "             el cambio este bien. Correla donde puedas:"
+        echo "             py -3.13 tests/test_nucleo_sin_tenants.py"
+    else
         echo ""
         echo "[pre-commit] El cambio toca nucleo/. Corriendo la guarda de arquitectura..."
         if ! py -3.13 tests/test_nucleo_sin_tenants.py; then
@@ -61,10 +83,6 @@ if [ -n "$TOCA_NUCLEO" ]; then
             echo ""
             exit 1
         fi
-    else
-        echo "[pre-commit] AVISO: 'py' no esta disponible; la guarda de"
-        echo "             arquitectura NO se corrio. Correla a mano:"
-        echo "             py -3.13 tests/test_nucleo_sin_tenants.py"
     fi
 fi
 
