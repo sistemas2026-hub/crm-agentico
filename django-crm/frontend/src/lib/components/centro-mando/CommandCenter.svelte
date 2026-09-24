@@ -24,9 +24,11 @@
    *    lienzo va sobrado y con once los vecinos se montan, asi que se
    *    comprueban los solapes antes de pintar.
    * Las piezas se MIDEN despues de pintarlas: cuanto ocupa un nodo depende de
-   * los nombres que cada empresa le ponga a sus agentes. Cuando no caben en
-   * anillo -- por lienzo chico o por ser muchos -- caen a una rejilla y el
-   * mapa desaparece: mejor sin mapa que con un mapa ilegible.
+   * los nombres que cada empresa le ponga a sus agentes. Si no caben, el nodo
+   * se encoge y suelta la linea de tarea antes de rendirse; solo si tampoco
+   * asi, el mapa cede a una rejilla. Se probo al reves -- rejilla directa -- y
+   * en produccion, con 514 px de alto, el tablero perdia el mapa teniendo
+   * sitio de sobra a los lados.
    */
   import { untrack } from 'svelte';
   import AgentStation from './AgentStation.svelte';
@@ -66,6 +68,7 @@
      con las piezas ya medidas. Arranca en true para que la primera pasada
      pinte los nodos y haya algo que medir. */
   let cabeElAnillo = $state(true);
+  let compacto = $state(false);
   /* Lo ultimo que se coloco. Variable normal, no $state: es una guarda contra
      recolocar dos veces por lo mismo -- recolocar reescribe los nodos, eso
      vuelve a disparar al observador, y sin esta comparacion el ciclo no para. */
@@ -202,27 +205,59 @@
     const nodos = /** @type {HTMLElement[]} */ ([...lienzo.querySelectorAll('.nodo-agente')]);
     if (nodos.length !== n) return;
 
-    const anchoPieza = Math.max(...nodos.map((e) => e.offsetWidth));
-    const altoPieza = Math.max(...nodos.map((e) => e.offsetHeight));
-    const aro0 = nodos[0].querySelector('.aro');
-    const radioPieza = (aro0 ? aro0.getBoundingClientRect().width : 88) / 2;
-    // Cuanto se corre el centro del disco respecto al centro de la caja: el
-    // nombre y la tarea cuelgan de un lado.
-    const desfase = altoPieza / 2 - radioPieza;
+    /**
+     * Mide las piezas tal como estan ahora y dice si el anillo sale.
+     * Que quepa el anillo no es que quepan las piezas: con ocho agentes este
+     * mismo lienzo va sobrado y con once los vecinos se montan.
+     */
+    const intentar = () => {
+      const anchoPieza = Math.max(...nodos.map((e) => e.offsetWidth));
+      const altoPieza = Math.max(...nodos.map((e) => e.offsetHeight));
+      const aro0 = nodos[0].querySelector('.aro');
+      const radioPieza = (aro0 ? aro0.getBoundingClientRect().width : 88) / 2;
+      // Cuanto se corre el centro del disco respecto al centro de la caja: el
+      // nombre y la tarea cuelgan de un lado.
+      const desfase = altoPieza / 2 - radioPieza;
+      // Margenes anchos a proposito. Con los de antes, a 514 px de alto el
+      // anillo "cabia" por 3 px: los nodos de arriba y abajo quedaban rozando
+      // el borde y dos se salian. Que quepa raspando no es que quepa -- si no
+      // hay sitio holgado, es mejor el nodo compacto.
+      const { rx, ry, cabe } = radiosDelAnillo({
+        ancho, alto, anchoPieza, altoPieza, desfase, radioPieza,
+        radioCentro: R_NUCLEO, margen: 20, holguraCentro: 24
+      });
+      const angulos = angulosPorArco(n, rx, ry);
+      const sale = cabe && !seSolapanEnElAnillo({ angulos, rx, ry, anchoPieza, altoPieza });
+      return { sale, rx, ry, angulos, radioPieza };
+    };
 
-    const { rx, ry, cabe } = radiosDelAnillo({
-      ancho, alto, anchoPieza, altoPieza, desfase, radioPieza, radioCentro: R_NUCLEO
-    });
-    const angulos = angulosPorArco(n, rx, ry);
-    // Que quepa el anillo no es que quepan las piezas: con ocho agentes este
-    // mismo lienzo va sobrado y con once los vecinos se montan. Cuantos hay lo
-    // decide cada empresa, asi que se comprueba, no se supone.
-    cabeElAnillo = cabe && !seSolapanEnElAnillo({ angulos, rx, ry, anchoPieza, altoPieza });
+    // Primero el nodo entero; si no da el alto, el compacto -- que suelta la
+    // linea de tarea y encoge el disco. Perder esa linea es mejor que perder
+    // el mapa: en produccion quedaban 514 px de alto y el tablero caia a
+    // rejilla teniendo sitio de sobra a los lados.
+    // La clase se pone en el DOM ANTES de medir, no despues: cada intento tiene
+    // que medir el nodo tal como quedaria, y el prop de Svelte llega un
+    // re-render tarde.
+    const vestir = (/** @type {boolean} */ c) => nodos.forEach((e) => e.classList.toggle('compacto', c));
+
+    vestir(false);
+    let intento = intentar();
+    let vaCompacto = false;
+    if (!intento.sale) {
+      vestir(true);
+      intento = intentar();
+      vaCompacto = intento.sale;
+      if (!intento.sale) vestir(false);
+    }
+    compacto = vaCompacto;
+
+    cabeElAnillo = intento.sale;
     if (!cabeElAnillo) {
       puestos = [];
       vias = [];
       return;
     }
+    const { rx, ry, angulos, radioPieza } = intento;
     const cx = ancho / 2;
     const cy = alto / 2;
 
@@ -238,6 +273,24 @@
       discos.push({ x: p.x, y: p.y + corrimiento });
       return { ...p, haciaArriba };
     });
+
+    // Ultima comprobacion, sobre lo ya colocado: si alguna pieza quedo fuera
+    // del lienzo, el anillo no servia y es mejor la rejilla. Sin esto, un
+    // error de calculo se ve como un nodo cortado por el borde y nadie sabe
+    // por que -- paso el 24/09/2026 con dos nodos a -5 y -1 px.
+    const seSale = puestos.some((p, i) => {
+      const w = nodos[i].offsetWidth;
+      const h = nodos[i].offsetHeight;
+      return p.x - w / 2 < -1 || p.y - h / 2 < -1 || p.x + w / 2 > ancho + 1 || p.y + h / 2 > alto + 1;
+    });
+    if (seSale) {
+      cabeElAnillo = false;
+      compacto = false;
+      vestir(false);
+      puestos = [];
+      vias = [];
+      return;
+    }
 
     // Las vias salen de la geometria, no del DOM: el centro del disco es el
     // punto que acabamos de calcular. Releerlo con getBoundingClientRect
@@ -312,6 +365,7 @@
           x={puestos[i]?.x ?? null}
           y={puestos[i]?.y ?? null}
           haciaArriba={puestos[i]?.haciaArriba ?? false}
+          {compacto}
           alSeleccionar={(x) => (seleccionado = x)}
         />
       {/each}

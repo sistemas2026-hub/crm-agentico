@@ -22,8 +22,15 @@
   import { colorDe, rotuloDe } from '$lib/centro-mando/estados.js';
 
   /** @type {{ agente: any, x?: number|null, y?: number|null, haciaArriba?: boolean,
-   *           alSeleccionar?: (a: any) => void }} */
-  let { agente, x = null, y = null, haciaArriba = false, alSeleccionar = () => {} } = $props();
+   *           compacto?: boolean, alSeleccionar?: (a: any) => void }} */
+  let {
+    agente,
+    x = null,
+    y = null,
+    haciaArriba = false,
+    compacto = false,
+    alSeleccionar = () => {}
+  } = $props();
 
   const PISTAS_CARA = [
     [/vent|comercial/, 'ventas'],
@@ -49,9 +56,12 @@
 <button
   class="nodo-agente"
   class:hacia-arriba={haciaArriba}
+  class:compacto
   class:suelto
   style="--c:{colorDe(agente.estado)}{suelto ? '' : `;left:${x}px;top:${y}px`}"
-  title="{agente.nombre.replaceAll('_', ' ')} — {rotuloDe(agente.estado)}"
+  title="{agente.nombre.replaceAll('_', ' ')} — {rotuloDe(agente.estado)}{agente.haciendo
+    ? ` · ${agente.haciendo}`
+    : ''}"
   onclick={() => alSeleccionar(agente)}
 >
   <span class="aro" class:quieto={!carga}>
@@ -113,6 +123,22 @@
     max-width: 100%; margin-top: 3px; overflow: hidden;
     font-family: ui-monospace, monospace; font-size: 9px; line-height: 1.35; color: var(--c);
   }
+
+  /* Version compacta: cuando el alto no da para el anillo completo, el nodo
+     se encoge y suelta la linea de tarea -- que sigue en el title y en la
+     ficha. Es preferible a perder el mapa entero: en produccion, con la
+     cabecera de la pagina descontada, quedaban 514 px de alto y el tablero
+     caia a rejilla con sitio de sobra a los lados (24/09/2026). */
+  .compacto .aro { width: 74px; height: 74px; }
+  .compacto .aro img { width: 24px; height: 24px; }
+  .compacto .carga { font-size: 16px; }
+  .compacto .unidad { font-size: 7px; }
+  .compacto .nombre { font-size: 9px; margin-top: 6px; }
+  /* La tarea se va por CSS y no con un {#if}: el trazado prueba el nodo entero
+     y luego el compacto, midiendo el DOM entre uno y otro. Con un {#if}, esa
+     medida dependia de si Svelte ya habia re-renderizado, y el resultado
+     oscilaba -- 153, 125, 94 y vuelta a empezar, cada medio segundo. */
+  .compacto .tarea { display: none; }
 
   /* El texto va SIEMPRE hacia afuera del centro. Colgando siempre abajo, el
      de los nodos de arriba queda entre el disco y el nucleo, y la via lo

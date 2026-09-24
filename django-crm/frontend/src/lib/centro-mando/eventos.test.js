@@ -9,7 +9,11 @@ import { crearServicioEventos, transporteSondeo } from './eventos.js';
  * pantalla sigue pintando lo ultimo que recibio.
  */
 
-const respuesta = (datos, ok = true) => ({ ok, json: async () => datos });
+const respuesta = (datos, ok = true) => ({
+  ok,
+  status: ok ? 200 : 500,
+  text: async () => JSON.stringify(datos)
+});
 
 describe('transporte por sondeo', () => {
   beforeEach(() => vi.useFakeTimers());
@@ -160,5 +164,58 @@ describe('el servicio', () => {
     cancelar();
     empujar({ agentes: [] });
     expect(vistos).toHaveLength(1);
+  });
+});
+
+/**
+ * Lo que sigue es del 24/09/2026: en produccion, durante un redespliegue, la
+ * pantalla mostro «Unexpected token '<', "<!doctype "... is not valid JSON».
+ * El sondeo hacia r.json() a ciegas.
+ */
+describe('cuando la respuesta no es JSON', () => {
+  const respuesta = (cuerpo, status = 200) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    text: async () => cuerpo
+  });
+
+  const sondearUnaVez = async (resp) => {
+    const fallos = [];
+    const recibidos = [];
+    const t = transporteSondeo({ fetch: async () => resp, intervalo: 999_999 });
+    const vivo = t.arrancar((p) => recibidos.push(p), (e) => fallos.push(e));
+    await vivo.ahora();
+    vivo.detener();
+    return { fallos, recibidos };
+  };
+
+  it('el HTML del login no sale como error de sintaxis', async () => {
+    const { fallos, recibidos } = await sondearUnaVez(respuesta('<!doctype html><html>...', 401));
+    expect(recibidos).toHaveLength(0);
+    expect(fallos[0]).not.toMatch(/JSON|token/i);
+    expect(fallos[0]).toMatch(/sesi[oó]n/i);
+  });
+
+  it('una pagina de error del proxy dice que se reintenta solo', async () => {
+    const { fallos } = await sondearUnaVez(respuesta('<html>502 Bad Gateway</html>', 502));
+    expect(fallos[0]).not.toMatch(/JSON|token/i);
+    expect(fallos[0]).toMatch(/despliegue|reintenta/i);
+  });
+
+  it('un 200 con HTML tampoco se toma por un panorama', async () => {
+    const { fallos, recibidos } = await sondearUnaVez(respuesta('<!doctype html>'));
+    expect(recibidos).toHaveLength(0);
+    expect(fallos[0]).not.toMatch(/JSON|token/i);
+  });
+
+  it('con JSON valido sigue entregando el panorama', async () => {
+    const { fallos, recibidos } = await sondearUnaVez(respuesta('{"tenant":"rapilink","agentes":[]}'));
+    expect(fallos).toHaveLength(0);
+    expect(recibidos[0].tenant).toBe('rapilink');
+  });
+
+  it('y un error del motor conserva SU mensaje, que dice mas que el status', async () => {
+    const { fallos } = await sondearUnaVez(respuesta('{"error":"Asistente no configurado"}', 500));
+    expect(fallos[0]).toBe('Asistente no configurado');
   });
 });
