@@ -9,11 +9,29 @@
   import AgentGauge from './AgentGauge.svelte';
   import AgentSparkline from './AgentSparkline.svelte';
   import { colorDe, ESTADOS, normalizar } from '$lib/centro-mando/estados.js';
+  import { resumir } from '$lib/centro-mando/resumen.js';
 
   /** @type {{ agente: any, ventana: number, referencia?: number, hora: (v: any) => string,
    *           ms: (v: any) => string, alCerrar: () => void }} */
   let { agente, ventana, referencia = 0, hora, ms, alCerrar } = $props();
 
+  // La descripcion de un agente es su PROMPT: en Rapilink pasa de 2.000
+  // caracteres y trae el protocolo entero --cuando verificar identidad, que no
+  // prometer, como derivar--. Volcarlo aqui tapaba los numeros, que es lo unico
+  // que esta ficha mide y que no se ve en ningun otro lado.
+  //
+  // Se muestra un extracto y se dice que lo es. La definicion completa se edita
+  // en /agentes, adonde ya sale el boton "Ver configuracion" de abajo: repetirla
+  // aqui es una segunda copia del mismo texto que envejece por separado.
+  //
+  // El calculo vive en lib/centro-mando/resumen.js, con sus bordes probados:
+  // dentro de un .svelte no se puede correr una prueba.
+  const descripcion = $derived(resumir(agente.descripcion));
+
+  // El tipo va escrito porque sin el TypeScript infiere `string | RegExp` para
+  // el par y `patron.test` deja de existir. No es ceremonia: es lo que hacia
+  // que svelte-check marcara este archivo.
+  /** @type {[RegExp, string][]} */
   const PISTAS_CARA = [
     [/vent|comercial/, 'ventas'],
     [/factur|cartera|pago|cobr/, 'facturacion'],
@@ -75,7 +93,10 @@
 
   <div class="bloque">
     <h3>Descripción</h3>
-    <p>{agente.descripcion || 'Sin descripción configurada.'}</p>
+    <p>{descripcion.texto || 'Sin descripción configurada.'}</p>
+    {#if descripcion.recortado}
+      <p class="extracto">Extracto. La definición completa se edita en Agentes.</p>
+    {/if}
   </div>
 
   <div class="bloque">
@@ -121,6 +142,7 @@
   .bloque .pista { font-size: 11px; color: #475569; margin-top: 6px; }
   .bloque code { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--c); }
   .tz { color: #64748b; }
+  .extracto { color: #64748b; font-size: 0.8125rem; margin-top: 0.375rem; }
   .instrumentos { display: flex; align-items: center; gap: 14px; }
   .instrumentos :global(.spark) { flex: 1; min-width: 0; }
   footer { margin-top: auto; padding: 14px 16px; display: flex; gap: 10px; }
