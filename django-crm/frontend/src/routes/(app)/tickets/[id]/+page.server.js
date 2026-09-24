@@ -6,9 +6,10 @@ import { leerAreas } from '$lib/server/v2/areas.js';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ cookies, params, fetch }) {
+export async function load({ locals, cookies, params, fetch }) {
   const datos = await getTicket({ cookies }, params.id);
 
   // El area del caso, para el panel lateral. Misma derivacion que la cola: el
@@ -47,7 +48,7 @@ export async function load({ cookies, params, fetch }) {
   const delMotor = (async () => {
     try {
       const base = env.PRIVATE_ASISTENTE_URL;
-      const tenant = env.PRIVATE_ASISTENTE_TENANT;
+      const tenant = await tenantDeLaSesion(locals, fetch);
       if (!base || !tenant) return null;
       const params_ = new URLSearchParams({ tenant });
       // El identificador de servicio del caso importado. El motor no puede
@@ -127,7 +128,7 @@ export const actions = {
     if (!internal) {
       try {
         const base = env.PRIVATE_ASISTENTE_URL;
-        const tenant = env.PRIVATE_ASISTENTE_TENANT;
+        const tenant = await tenantDeLaSesion(locals, fetch);
         if (base && tenant) {
           const r = await fetch(`${base}/casos/${params.id}/mensajes`, {
             method: 'POST',

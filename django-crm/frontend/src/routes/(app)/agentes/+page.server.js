@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * Server load: lista los agentes configurados en el motor (crm-agentico), sus
@@ -11,9 +12,9 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  *
  * @type {import('./$types').PageServerLoad}
  */
-export async function load({ fetch }) {
+export async function load({ locals, fetch }) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     return { agentes: [], catalogo: [], error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' };
   }

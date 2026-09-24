@@ -5,6 +5,7 @@ import { listTeam, inviteUser, setRole, setStatus, setPassword, updateUser, ROLE
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * Team and access.
@@ -16,7 +17,7 @@ import { readableError } from '$lib/server/v2/form-errors.js';
  *
  * @type {import('./$types').PageServerLoad}
  */
-export async function load({ cookies, fetch }) {
+export async function load({ locals, cookies, fetch }) {
   const equipo = await listTeam({ cookies });
 
   // Las areas de trabajo salen del asistente, no de una lista fija aca: son
@@ -34,7 +35,7 @@ export async function load({ cookies, fetch }) {
   let externos = [];
   let etiquetaExterna = '';
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (baseUrl && tenant) {
     try {
       const resp = await fetch(
@@ -79,12 +80,12 @@ export async function load({ cookies, fetch }) {
  * Devuelve un aviso si algo no se pudo, o null. Nunca lanza: que falle el
  * traspaso no puede impedir desactivar a alguien -- si se va, se va.
  *
- * @param {{ cookies: import('@sveltejs/kit').Cookies, fetch: typeof globalThis.fetch }} event
+ * @param {{ cookies: import('@sveltejs/kit').Cookies, fetch: typeof globalThis.fetch, locals: App.Locals }} event
  * @param {string} userId
  */
-async function traspasarTrabajo({ cookies, fetch }, userId) {
+async function traspasarTrabajo({ cookies, fetch, locals }, userId) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) return null;
 
   try {
@@ -419,7 +420,7 @@ export const actions = {
    * pasan a quien queda en esa area. Los cerrados no se tocan: son historia,
    * y moverlos falsearia quien atendio que.
    */
-  setStatus: async ({ cookies, request, fetch }) => {
+  setStatus: async ({ cookies, request, fetch, locals }) => {
     const form = await request.formData();
     const userId = form.get('userId')?.toString();
     const status = form.get('status')?.toString();
@@ -441,7 +442,7 @@ export const actions = {
     // desactivacion fallara, la persona se quedaria activa y sin trabajo.
     let avisoTraspaso = null;
     if (status === 'Inactive') {
-      avisoTraspaso = await traspasarTrabajo({ cookies, fetch }, userId);
+      avisoTraspaso = await traspasarTrabajo({ cookies, fetch, locals }, userId);
     }
     return { statusChanged: userId, avisoTraspaso };
   }

@@ -104,5 +104,6 @@ tercera es la que encaja con la arquitectura:
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 24/09/2026 | Decisión de producto registrada (PRD §8.13), forma medida, supuesto comprobado | Ejecutar | a416063 |
+| 24/09/2026 | **52 de 70 migrados.** 6 páginas + 2 rutas de agentes. Acoplamiento 28→22 archivos. `svelte-check` 71/71, pruebas idénticas a su base | 18: los 8 helpers sincrónicos con el patrón `destino`, 5 de `routes/api`, y `documents/new` con otra forma de `load` | — |
 | 24/09/2026 | **44 de 70 archivos migrados.** Acoplamiento: 70→28 archivos, 80→37 apariciones. `svelte-check` sin un solo diagnóstico nuevo (71 antes, 71 después) | Los 26 restantes: 11 de `lib/server` sin `locals`, 8 con `async`/alcance, 6 `+page.server.js` | — |
 | 24/09/2026 | **B1 resuelto.** El motor expone la inversa (`/tenant-de-organizacion/<id>`), con su guarda. El frontend tiene su ayudante único (`tenantDeLaSesion`), 8 pruebas verdes | La sustitución de los 73 lugares | 5f5b88f |

@@ -1,15 +1,16 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * Editar/borrar un agente puntual. Mismo gate de ADMIN que POST /api/agentes
  * -- ver ese archivo para el porque.
  */
 
-function baseUrlYTenant() {
+async function baseUrlYTenant(locals, fetch) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) return null;
   return { baseUrl, tenant };
 }
@@ -23,7 +24,7 @@ export async function PUT({ params, request, locals, fetch }) {
     return json({ error: 'Solo un administrador puede editar agentes.' }, { status: 403 });
   }
 
-  const cfg = baseUrlYTenant();
+  const cfg = await baseUrlYTenant(locals, fetch);
   if (!cfg) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });
@@ -56,7 +57,7 @@ export async function DELETE({ params, locals, fetch }) {
     return json({ error: 'Solo un administrador puede borrar agentes.' }, { status: 403 });
   }
 
-  const cfg = baseUrlYTenant();
+  const cfg = await baseUrlYTenant(locals, fetch);
   if (!cfg) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });
