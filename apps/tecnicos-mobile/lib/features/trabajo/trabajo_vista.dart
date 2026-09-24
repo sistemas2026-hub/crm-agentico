@@ -318,6 +318,81 @@ class TrabajoVista {
   /// El serial de la ONU del cliente, si el despacho lo capturó.
   String get serialOnu => contexto['sn_onu']?.toString() ?? '';
 
+  /// Una lectura del equipo tal como la devolvió SmartOLT al congelar la ficha.
+  ///
+  /// Mismo criterio que `_delCliente`: se lee en UN solo lugar. El motor ya
+  /// consulta `consultar_estado_ont` y `consultar_senal_ont` al armar la ficha
+  /// (`_estado_equipo`), y el backend las congela en `contexto.equipo`. Hasta
+  /// el 24/09/2026 el dato llegaba entero hasta acá y nadie lo leía — el mismo
+  /// descuido que ya se había corregido con `localidad`, `direccion` y
+  /// `telefono`, cada uno encontrado al mirar una orden real.
+  String _delEquipo(String clave) {
+    final dynamic equipo = contexto['equipo'];
+    if (equipo is Map && equipo[clave] != null) {
+      return equipo[clave].toString();
+    }
+    return '';
+  }
+
+  /// Si el equipo está en línea según la OLT (`Online` / `Offline`).
+  ///
+  /// **No dice que el cliente tenga internet.** Dice que la OLT ve la ONU. Es
+  /// la misma distinción que el PRD dejó escrita para `ACCION_CONFIRMADA`: lo
+  /// que el sistema puede medir no es lo que le pasa a la casa.
+  String get estadoOnu => _delEquipo('onu_status');
+
+  /// La potencia óptica que **recibe** la ONT del cliente, en dBm.
+  ///
+  /// Es la de bajada (1490nm): la que el estándar GPON usa OLT→ONU y la única
+  /// que habla de lo que llega a la casa. La de 1310 es la de subida y se
+  /// muestra aparte, nunca en su lugar.
+  String get potenciaOptica => _delEquipo('onu_signal_1490');
+
+  /// La potencia de subida (1310nm), ONU→OLT.
+  String get potenciaOpticaSubida => _delEquipo('onu_signal_1310');
+
+  /// El veredicto de la señal, **ya calculado en código** contra los umbrales
+  /// de G-GO-04 (`aceptable` entre -8 y -25 dBm).
+  ///
+  /// Viene resuelto del motor a propósito: el proyecto no le pide a nadie —ni
+  /// al modelo ni a la pantalla— que recalcule un umbral que ya está decidido.
+  /// La pantalla lo muestra; no lo evalúa.
+  String get veredictoSenal => _delEquipo('onu_signal_1490_veredicto');
+
+  /// Cómo clasifica SmartOLT la señal en palabras (`Very good`, …).
+  String get calidadSenal => _delEquipo('onu_signal');
+
+  /// Cuándo cambió de estado la ONU por última vez, según la OLT.
+  ///
+  /// Ojo al compararla con cualquier otra hora: SmartOLT la manda en hora
+  /// LOCAL de su instancia (-05:00), no en UTC. Esa confusión ya costó una
+  /// conclusión equivocada el 15/08/2026.
+  String get ultimoCambioEquipo => _delEquipo('last_status_change');
+
+  /// Si hay alguna lectura del equipo que mostrar.
+  bool get hayLecturaDeEquipo => potenciaOptica.isNotEmpty || estadoOnu.isNotEmpty;
+
+  /// Por qué NO hay lectura del equipo, cuando el motor lo dijo.
+  ///
+  /// Dos motivos, y se arreglan distinto: `onu_no_vinculada` es que nadie
+  /// cargó el serial en el sistema del ISP —le pasa a 1.299 de 4.163 clientes
+  /// activos, medido— y `serial_desactualizado` es que el serial que hay no
+  /// existe en la OLT, casi siempre porque le cambiaron el equipo al cliente y
+  /// actualizaron un sistema y no el otro.
+  SinEquipo get sinEquipo {
+    if (hayLecturaDeEquipo) return SinEquipo.hayLectura;
+    final String motivo = contexto['equipo_no_disponible']?.toString() ?? '';
+    if (motivo == 'onu_no_vinculada') return SinEquipo.serialNoCargado;
+    if (motivo == 'serial_desactualizado') return SinEquipo.serialDesactualizado;
+    return SinEquipo.noSeConsulto;
+  }
+
+  /// Cuándo se congeló la ficha. **Va siempre junto a la lectura**, porque al
+  /// congelarse una medición deja de ser una medición: pasa a ser un registro
+  /// de lo que se veía en un momento. Sin la hora al lado, un técnico parado
+  /// en la casa la leería como la señal de ahora.
+  DateTime? get fichaCapturadaEn => _fecha(contexto['capturado_en']);
+
   /// La prioridad que le puso el operador en el sistema del ISP.
   ///
   /// **No es un juicio de Dexter.** Viaja aparte y se muestra aparte: mezclarla
@@ -430,6 +505,28 @@ enum SinFicha {
   /// conversacion, no de un ticket. Decir "se reintenta" aca manda al tecnico
   /// a esperar algo que no va a pasar.
   casoSinServicio,
+}
+
+/// Por que una orden no trae la lectura del equipo.
+///
+/// Mismo criterio que `SinFicha`: cada motivo se arregla distinto, asi que la
+/// pantalla no puede resumirlos en un guion. Una tarjeta vacia manda a buscar
+/// una falla de red donde lo unico que pasa es que falta cargar un serial.
+enum SinEquipo {
+  /// Hay lectura.
+  hayLectura,
+
+  /// El sistema del ISP no tiene el serial del equipo. **No es falla de red**:
+  /// casi siempre nadie lo cargo todavia. Le pasa a 1.299 de 4.163 clientes
+  /// activos, medido en agosto de 2026 -- no es un caso raro.
+  serialNoCargado,
+
+  /// El serial que hay no existe en la OLT. Casi siempre le cambiaron el
+  /// equipo al cliente y se actualizo un sistema y no el otro.
+  serialDesactualizado,
+
+  /// No se llego a consultar. Se reintenta al refrescar la ficha.
+  noSeConsulto,
 }
 
 enum FamiliaTrabajo {

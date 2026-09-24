@@ -232,7 +232,20 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 _datosDeLaOrden(trabajo),
                 const SizedBox(height: AppSpacing.md),
                 _datosTecnicos(trabajo),
-                if (widget.mostrarDatosFuturos) ...<Widget>[
+                // La telemetría se ve cuando la orden trae una lectura del
+                // equipo, aunque no haya modo demostración: la señal óptica es
+                // un dato REAL desde que el motor la consulta al armar la
+                // ficha. Estaba entera detrás de la bandera, así que en
+                // producción no la veía nadie — el mismo descuido que este
+                // módulo ya pagó con el ticket de origen, la franja prometida
+                // y los requisitos de seguridad.
+                //
+                // Cuando no hay lectura la tarjeta también se muestra, porque
+                // decir POR QUÉ no la hay (falta el serial, el serial no está
+                // en la OLT) es información, y callarla manda a buscar una
+                // falla de red donde no la hay.
+                if (trabajo.contextoDisponible ||
+                    widget.mostrarDatosFuturos) ...<Widget>[
                   const SizedBox(height: AppSpacing.md),
                   _telemetria(trabajo),
                 ],
@@ -1278,6 +1291,265 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
 
   /// CAMPO-DATA-001, 011 y 012: telemetría de red. Ningún sistema la entrega
   /// para campo todavía; se ve solo en modo demostración.
+  static String _hhmm(DateTime f) =>
+      '${f.hour.toString().padLeft(2, '0')}:${f.minute.toString().padLeft(2, '0')}';
+
+  /// La potencia óptica que recibe la ONT, tal como la leyó SmartOLT.
+  ///
+  /// **Dato real desde el 24/09/2026.** Antes acá se dibujaba
+  /// `FieldMockData.potenciaRxPrevia` (-28.9 dBm) con la etiqueta roja
+  /// «ATENUACIÓN ALTA» **siempre**, sin mirar la bandera de demostración. Con
+  /// la orden 1849 en la mano, la lectura real era -21.19 dBm y el veredicto
+  /// `aceptable`: la pantalla le decía al técnico que la señal estaba mal
+  /// cuando estaba bien. Es el mismo defecto que Materiales corrigió el
+  /// 22/09 —«el acta de ejemplo tapaba la real»— y acá mandaba a buscar una
+  /// falla que no existía.
+  ///
+  /// El veredicto **no se calcula acá**: llega resuelto del motor contra los
+  /// umbrales de G-GO-04 (`onu_signal_1490_veredicto`). La pantalla lo muestra.
+  Widget _potenciaOptica(TrabajoVista trabajo) {
+    if (!trabajo.hayLecturaDeEquipo) {
+      // El ejemplo solo aparece donde NO hay lectura real, y solo con la
+      // demostración encendida. Esa es toda la diferencia con lo que había
+      // antes: el valor de ejemplo ya no puede taparle la señal a nadie.
+      return widget.mostrarDatosFuturos
+          ? _potenciaDeEjemplo()
+          : _sinLecturaDeEquipo(trabajo);
+    }
+
+    final bool aceptable = trabajo.veredictoSenal == 'aceptable';
+    final Color fondo =
+        aceptable ? AppColors.exitoFondo : AppColors.errorContainer;
+    final Color tinta =
+        aceptable ? AppColors.exitoTexto : AppColors.onErrorContainer;
+    final Color acento = aceptable ? AppColors.exito : AppColors.error;
+
+    // 'onu_signal_1490' llega como '-21.19 dBm': la unidad se separa para que
+    // el numero pueda ir en el tamaño de medicion y no se repita 'dBm'.
+    final String crudo = trabajo.potenciaOptica;
+    final String numero = crudo.replaceAll(RegExp(r'\s*dBm\s*$'), '').trim();
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: fondo,
+        borderRadius: AppRadius.brTarjeta,
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            aceptable ? Icons.check_circle : Icons.warning,
+            size: 18,
+            color: tinta,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Flexible(
+                      child: Text(
+                        'Potencia RX ONT',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.etiquetaChica.copyWith(
+                          color: tinta,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    if (trabajo.veredictoSenal.isNotEmpty) ...<Widget>[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: acento,
+                          borderRadius: AppRadius.brChico,
+                        ),
+                        child: Text(
+                          trabajo.veredictoSenal.toUpperCase(),
+                          style: AppTypography.etiquetaChica.copyWith(
+                            fontSize: 9,
+                            color: AppColors.onError,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                Text(
+                  // El rango sale del motor junto al veredicto (G-GO-04). Si
+                  // algun dia cada empresa define el suyo (CAMPO-DATA-031),
+                  // este texto lo lee de ahi y no de una constante.
+                  'Aceptable entre -8 y -25 dBm'
+                  '${trabajo.potenciaOpticaSubida.isEmpty ? '' : ' · subida ${trabajo.potenciaOpticaSubida}'}',
+                  style: AppTypography.etiquetaChica.copyWith(color: tinta),
+                ),
+              ],
+            ),
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: <Widget>[
+              Text(
+                numero,
+                style: AppTypography.medicion.copyWith(color: acento),
+              ),
+              const SizedBox(width: 2),
+              Text(
+                'dBm',
+                style: AppTypography.etiquetaChica.copyWith(color: tinta),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// CAMPO-DATA-001 · La potencia de ejemplo, para ver el producto completo
+  /// cuando la orden todavía no trae lectura. Es el bloque que estaba acá
+  /// antes, intacto: lo único que cambió es **cuándo** se dibuja.
+  Widget _potenciaDeEjemplo() {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: const BoxDecoration(
+        color: AppColors.errorContainer,
+        borderRadius: AppRadius.brTarjeta,
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(
+            Icons.warning,
+            size: 18,
+            color: AppColors.onErrorContainer,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Flexible(
+                      child: Text(
+                        'Potencia RX ONT Actual',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.etiquetaChica.copyWith(
+                          color: AppColors.onErrorContainer,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1,
+                      ),
+                      decoration: const BoxDecoration(
+                        color: AppColors.error,
+                        borderRadius: AppRadius.brChico,
+                      ),
+                      child: Text(
+                        'ATENUACIÓN ALTA',
+                        style: AppTypography.etiquetaChica.copyWith(
+                          fontSize: 9,
+                          color: AppColors.onError,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Text(
+                  FieldMockData.rangoOptimoTexto,
+                  style: AppTypography.etiquetaChica.copyWith(
+                    color: AppColors.onErrorContainer,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: <Widget>[
+              Text(
+                FieldMockData.potenciaRxPrevia.toStringAsFixed(1),
+                style: AppTypography.medicion.copyWith(color: AppColors.error),
+              ),
+              const SizedBox(width: 2),
+              Text(
+                'dBm',
+                style: AppTypography.etiquetaChica.copyWith(
+                  color: AppColors.onErrorContainer,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Por qué no hay lectura, que no es lo mismo que una tarjeta vacía.
+  ///
+  /// Una tarjeta en blanco manda a buscar una falla de red donde lo único que
+  /// pasa es que falta cargar un serial — y eso le ocurre a 1.299 de 4.163
+  /// clientes activos, medido. Cada motivo se arregla distinto, así que cada
+  /// uno dice lo suyo.
+  Widget _sinLecturaDeEquipo(TrabajoVista trabajo) {
+    final (IconData icono, String texto) = switch (trabajo.sinEquipo) {
+      SinEquipo.serialNoCargado => (
+          Icons.link_off,
+          'Este cliente no tiene el equipo cargado en el sistema, así que no '
+              'hay señal que consultar. No es una falla de red.',
+        ),
+      SinEquipo.serialDesactualizado => (
+          Icons.sync_problem,
+          'El serial que figura no existe en la OLT. Suele pasar cuando se le '
+              'cambió el equipo al cliente y se actualizó un solo sistema.',
+        ),
+      _ => (
+          Icons.cloud_off,
+          'La señal del equipo no se alcanzó a leer. Se vuelve a intentar al '
+              'refrescar la ficha.',
+        ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: AppRadius.brTarjeta,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(icono, size: 18, color: AppColors.outline),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              texto,
+              style: AppTypography.etiquetaChica.copyWith(
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _telemetria(TrabajoVista trabajo) {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -1317,135 +1589,75 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: const BoxDecoration(
-                  color: AppColors.surfaceContainerHigh,
-                  borderRadius: AppRadius.brChico,
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: const BoxDecoration(
-                        color: AppColors.exitoFuerte,
-                        shape: BoxShape.circle,
+              // La lectura está CONGELADA, no en vivo. Acá decía "Live" con un
+              // punto verde sobre datos capturados horas antes. El backend ya
+              // dejó escrito por qué importa: "al congelarse, una medición deja
+              // de ser una medición -- pasa a ser un registro de lo que se veía
+              // en un momento". Un técnico parado en la casa que lee "Live" no
+              // tiene forma de saber que está viendo el pasado.
+              if (trabajo.fichaCapturadaEn != null)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: const BoxDecoration(
+                    color: AppColors.surfaceContainerHigh,
+                    borderRadius: AppRadius.brChico,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      const Icon(
+                        Icons.history,
+                        size: 11,
+                        color: AppColors.outline,
                       ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text('Live', style: AppTypography.etiquetaChica),
-                  ],
+                      const SizedBox(width: 4),
+                      Text(
+                        'Medido ${_hhmm(trabajo.fichaCapturadaEn!)}',
+                        style: AppTypography.etiquetaChica,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
           Row(
             children: <Widget>[
+              // El serial es REAL desde que la ficha lo congela: es la única
+              // llave con la que se llega a SmartOLT.
               Expanded(
                 child: _CajaDato(
                   titulo: 'ONT SERIAL',
-                  valor: FieldMockData.serialOnt,
-                  detalle: 'Huawei HG8145V5',
+                  valor: trabajo.serialOnu.isNotEmpty
+                      ? trabajo.serialOnu
+                      : (widget.mostrarDatosFuturos ? FieldMockData.serialOnt : '—'),
+                  detalle: trabajo.estadoOnu.isNotEmpty
+                      ? 'Equipo ${trabajo.estadoOnu}'
+                      : 'Sin lectura',
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
+              // El puerto PON y la CTO siguen sin llegar (CAMPO-DATA-011).
               Expanded(
                 child: _CajaDato(
                   titulo: 'PUERTO PON / CTO',
-                  valor: FieldMockData.puertoPon,
-                  detalle: FieldMockData.terminal,
+                  valor: widget.mostrarDatosFuturos ? FieldMockData.puertoPon : '—',
+                  detalle: widget.mostrarDatosFuturos
+                      ? FieldMockData.terminal
+                      : 'Dato no disponible',
                 ),
               ),
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
-          Container(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: const BoxDecoration(
-              color: AppColors.errorContainer,
-              borderRadius: AppRadius.brTarjeta,
-            ),
-            child: Row(
-              children: <Widget>[
-                const Icon(
-                  Icons.warning,
-                  size: 18,
-                  color: AppColors.onErrorContainer,
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Row(
-                        children: <Widget>[
-                          Flexible(
-                            child: Text(
-                              'Potencia RX ONT Actual',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppTypography.etiquetaChica.copyWith(
-                                color: AppColors.onErrorContainer,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 5,
-                              vertical: 1,
-                            ),
-                            decoration: const BoxDecoration(
-                              color: AppColors.error,
-                              borderRadius: AppRadius.brChico,
-                            ),
-                            child: Text(
-                              'ATENUACIÓN ALTA',
-                              style: AppTypography.etiquetaChica.copyWith(
-                                fontSize: 9,
-                                color: AppColors.onError,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        FieldMockData.rangoOptimoTexto,
-                        style: AppTypography.etiquetaChica.copyWith(
-                          color: AppColors.onErrorContainer,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: <Widget>[
-                    Text(
-                      FieldMockData.potenciaRxPrevia.toStringAsFixed(1),
-                      style: AppTypography.medicion.copyWith(
-                        color: AppColors.error,
-                      ),
-                    ),
-                    const SizedBox(width: 2),
-                    Text(
-                      'dBm',
-                      style: AppTypography.etiquetaChica.copyWith(
-                        color: AppColors.onErrorContainer,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+          _potenciaOptica(trabajo),
           const SizedBox(height: AppSpacing.sm),
+          // CAMPO-DATA-012 y -030 · El historico de 48 horas no llega de
+          // ningun lado: la ficha congela UNA lectura, no una serie. Dibujar
+          // una curva de ejemplo al lado de una potencia REAL la haria pasar
+          // por el historico de este cliente.
+          if (widget.mostrarDatosFuturos) ...<Widget>[
           // CAMPO-DATA-012
           Container(
             padding: const EdgeInsets.symmetric(
@@ -1512,9 +1724,13 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 ],
               ),
             ),
+          ],
           const SizedBox(height: AppSpacing.xs),
           Text(
-            FieldMockData.fuenteTelemetria,
+            trabajo.fichaCapturadaEn == null
+                ? 'Fuente: SmartOLT vía Dexter API'
+                : 'Fuente: SmartOLT vía Dexter API · lectura congelada al '
+                    'despachar, no es la señal de este momento',
             style: AppTypography.etiquetaChica.copyWith(
               color: AppColors.outline,
               fontSize: 10,
