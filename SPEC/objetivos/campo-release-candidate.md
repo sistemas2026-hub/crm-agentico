@@ -301,11 +301,20 @@ DESPLIEGUE.md documenta que con `DBHOST=crm.rapilinksas.co` el CRM se conecta
 al Supabase **real** — *"esto no es una copia, es la base de producción"*. No
 se comprobó (no se lee el `.env` ni se consulta producción desde una sesión).
 
-Si lo fuera, dos consecuencias: el teléfono estuvo hablando con producción
-durante las primeras pruebas de la Parte B, y ese proceso lleva días con
-`migrate --noinput` corriendo en cada arranque contra esa base. Verificarlo es
-mirar qué `DBHOST` tiene cargado ese entorno — trabajo de una persona, un
-minuto.
+**CONFIRMADO el 24/09/2026 por el usuario: `DBHOST=crm.rapilinksas.co`.** Ese
+proceso sirve la base de producción.
+
+Consecuencia buena: el teléfono habló con **producción** durante las primeras
+casillas de la Parte B, así que «entrar con una cuenta real y bajar una jornada
+de verdad» y «reinstalar sobre una versión anterior» valen **más** de lo que
+decía su anotación: fueron contra datos reales, no contra un entorno de prueba.
+
+*Corregido el 24/09/2026:* esta nota decía que ese proceso venía corriendo
+`migrate --noinput` en cada arranque contra producción. **Es falso.** Ese
+`migrate` vive en `docker/backend/entrypoint.sh`, o sea en el arranque del
+contenedor; un `manage.py runserver` nativo **no migra** — solo avisa que hay
+migraciones sin aplicar. Producción no recibió ningún cambio de esquema por ese
+camino, y de hecho sigue con 2 de las 6 migraciones de `campo`.
 
 **Los datos sobreviven a `docker compose down`.** El volumen es
 `django-crm_postgres_data`, declarado `external: true`: Compose no lo crea ni
