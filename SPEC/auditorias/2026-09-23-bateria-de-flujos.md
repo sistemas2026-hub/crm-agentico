@@ -138,7 +138,12 @@ que es latente. Lo hace más probable que el contrato de la batería documente
 `propone` y **ningún caso la use**. Además `{"escala": "no"}` da verde contra
 `escalada_a_humano=True`, porque `bool("no")` es `True`.
 
-**11 · La franja horaria puede estar dando UTC.** Si la imagen no trae `tzdata`,
+**11 · La franja horaria puede estar dando UTC.** — **REFUTADO el 24/09/2026.**
+Medido dentro de la imagen: `ZoneInfo('America/Bogota')` resuelve y devuelve la
+hora correcta. La imagen **sí trae** `tzdata`. El respaldo por zona inválida
+sigue existiendo, pero no se dispara.
+
+*El texto original de la sospecha, que sigue valiendo como razonamiento:* Si la imagen no trae `tzdata`,
 `ZoneInfo('America/Bogota')` falla siempre y el respaldo es la hora del
 servidor. A las 20:00 de Bogotá el prompt diría *"mañana, de madrugada"* — el
 bug del 14/08 al revés, y adelantado, que es el lado que hace hablar de un corte
@@ -173,3 +178,46 @@ quedó con el desvío anotado.
 - La carrera entre el hilo de traza y la lectura de la batería: necesita
   medirse contra la base real.
 - `tzdata` en la imagen (hallazgo 11): exige levantar el contenedor.
+
+---
+
+## Hallazgo 13, del 24/09: la escalada no crea el caso del CRM
+
+Encontrado al correr por fin la batería **dentro de un contenedor**, que es lo
+que el criterio 1 del objetivo pedía. De las **6 escaladas** de esa tanda,
+**6 quedaron `ESCALAMIENTO_NO_CONFIRMADO` con `caso_id = None`**:
+
+```
+consulta_saldo      duda_de_identidad             caso_id=None
+validacion_de_pago  tres_fallos_seguidos          caso_id=None
+otro                solicitud_explicita           caso_id=None
+internet_lento      sin_datos_para_diagnosticar   caso_id=None
+otro                frustracion_detectada         caso_id=None
+otro                frustracion_detectada         caso_id=None
+```
+
+Y el log dice por qué:
+
+```
+[escalamiento] no se pudo leer la carga de casos  error=HTTPError http_status=403
+```
+
+**Qué prueba y qué NO prueba.** El contenedor alcanzó `backend:8000` —que es lo
+que localmente ni siquiera resolvía— pero ese backend es el de **otro
+worktree** (`wt_campo_default`), no el CRM de producción, y rechazó las
+credenciales con 403. Así que el camino escalada→ticket **se ejercitó un paso
+más que nunca y sigue sin verificarse de punta a punta**.
+
+Los dos casos del criterio 1 pasan igual porque afirman `escala: true` y
+`escala_motivo`, y eso lo satisface la **reserva del relevo** —la conversación
+sí queda en la cola humana de la bandeja— no el ticket del CRM. La afirmación
+es correcta para lo que dice; lo que falta es una que mire `caso_id`.
+
+**Lo bueno, y no es menor:** por eso mismo la tanda **no dejó ni un caso que
+borrar** en BottleCRM. El bloqueo 2 del objetivo se disolvió solo.
+
+**Lo que hay que medir antes de confiar en esto:** correr la misma batería
+contra el backend REAL —el del compose de producción, o con credenciales
+válidas— y comprobar que `caso_id` deja de ser `None`. Mientras tanto, el dato
+histórico sigue siendo el que vale: 23 escalamientos confirmados con caso entre
+el 02 y el 19/09, y 1 sin confirmar el 23/09.

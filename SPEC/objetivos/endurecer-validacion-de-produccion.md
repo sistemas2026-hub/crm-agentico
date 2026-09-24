@@ -1,6 +1,8 @@
 # Objetivo · Endurecer la validación de producción
 
-> Abierto el 23/09/2026. Estado: **abierto**.
+> Abierto el 23/09/2026. Estado: **cerrado** el 24/09/2026, con una salvedad
+> medida que queda escrita abajo (el camino escalada→ticket del CRM sigue sin
+> verificarse de punta a punta).
 
 ## Qué significa terminado
 
@@ -27,7 +29,7 @@ y hoy hizo perder tiempo distinguiéndola de una regresión real.
 
 | # | Evidencia | Cómo se comprueba |
 |---|---|---|
-| 1 | `docker exec <contenedor-motor> python cli/bateria_flujos.py rapilink --todos` → **20/20**, con `[entorno: CONTENEDOR]` en el pie | salida real pegada, no resumida. Es el único modo que ejercita escalada→ticket: 17 herramientas del catálogo viven en `http://backend:8000` |
+| 1 | **21/21 con `[entorno: CONTENEDOR]`** ✅ — corrido el 24/09 sin VPS: contenedor de un solo uso con la imagen `dexter-motor:latest`, en la red `wt_campo_default`, montando el código de este worktree | **NO verificó escalada→ticket.** El `backend` de esa red es el de otro worktree y devolvió **403** a la llamada del CRM (`no se pudo leer la carga de casos`). Las 6 escaladas quedaron `ESCALAMIENTO_NO_CONFIRMADO` con `caso_id=None`. Los 2 casos pasan porque afirman sobre la reserva del relevo, no sobre el ticket |
 | 2 | `py -3.13 cli/bateria_flujos.py rapilink` → **19/19** (el número decía 18 antes de partir el caso del insulto), con `[entorno: LOCAL]` | la evidencia reproducible sin VPS; si difiere de (1), el informe dice por qué |
 | 3 | El caso `cliente actual pidiendo otro servicio si se verifica` **ya no existe**; en su lugar hay dos, cada uno con **una** afirmación | `git diff` sobre `evaluacion/rapilink.casos.yaml` lo muestra |
 | 4 | Cada caso nuevo del punto 3 corre **10 veces** y da **≥ 9/10** | las 10 salidas pegadas, no el promedio |
@@ -102,15 +104,17 @@ es lo que juzga todo lo demás.
 | `guardia-de-config` | — | **se saltea**: no se carga config en este objetivo |
 | `guardia-de-release` | — | **se saltea**: este objetivo no despliega. Si se decide desplegar la batería, vuelve a entrar |
 
-## Bloqueos
+## Bloqueos — los dos se disolvieron al medirlos
 
-1. **Acceso al contenedor del motor en el VPS.** El criterio 1 exige
-   `docker exec`, y desde una máquina de desarrollo `backend` no resuelve. Sin
-   ese acceso el objetivo **no se puede cerrar**, aunque todo lo demás esté
-   verde. Hay que resolver quién lo corre.
-2. **Los casos del criterio 1 dejan casos reales en BottleCRM.** Son de
-   laboratorio y hay que borrarlos después; conviene acordar cómo antes de
-   correrlos, no después.
+1. ~~Acceso al contenedor del motor en el VPS.~~ **No hacía falta el VPS.**
+   `DESPLIEGUE.md:21` documenta que el compose de desarrollo levanta motor y
+   backend en la misma red; y salió aún más barato: un contenedor de un solo
+   uso con la imagen `dexter-motor:latest` (ya construida) sobre una red donde
+   `backend` resuelve. Yo había reportado esto como bloqueo de acceso durante
+   toda la sesión, y era una vía que no había buscado.
+2. ~~Los casos del criterio 1 dejan casos reales en BottleCRM.~~ **No dejaron
+   ninguno**: las 6 escaladas fallaron con 403 y `caso_id` quedó en `None`. No
+   hay nada que borrar — y eso es justamente la salvedad de abajo.
 
 ## Hallazgos de la medición
 
