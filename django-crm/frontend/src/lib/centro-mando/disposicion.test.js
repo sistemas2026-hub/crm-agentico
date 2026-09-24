@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   anillo,
+  angulosPorArco,
+  radiosDelAnillo,
+  dentroDelLienzo,
   radioVerticalMaximo,
   anchoDeEstacion,
   rutaFlujo,
-  seSolapan
+  seSolapan,
+  seSolapanEnElAnillo
 } from './disposicion.js';
 
 /**
@@ -111,5 +115,157 @@ describe('la comprobacion de solapes', () => {
     // que se vea nada. Medir sin margen daba catorce falsos positivos.
     expect(seSolapan(caja(0, 0), caja(95, 45), 10)).toBe(false);
     expect(seSolapan(caja(0, 0), caja(50, 20), 10)).toBe(true);
+  });
+});
+
+/**
+ * Lo que sigue nace del 24/09/2026, al pasar de tarjetas rectangulares a
+ * discos en anillo: el reparto por angulos iguales, que parecia obvio, ponia
+ * cuatro pares de vecinos uno encima del otro.
+ */
+
+describe('el reparto por arco', () => {
+  /** distancia entre vecinos consecutivos sobre la elipse */
+  const separaciones = (angulos, rx, ry) =>
+    angulos.map((a, i) => {
+      const b = angulos[(i + 1) % angulos.length];
+      return Math.hypot(rx * Math.cos(b) - rx * Math.cos(a), ry * Math.sin(b) - ry * Math.sin(a));
+    });
+
+  it('deja a todos los vecinos a la misma distancia real', () => {
+    const rx = 430;
+    const ry = 165;
+    const seps = separaciones(angulosPorArco(8, rx, ry), rx, ry);
+    const menor = Math.min(...seps);
+    const mayor = Math.max(...seps);
+    // el reparto por angulo, sobre esta misma elipse, da una diferencia > 2x
+    expect(mayor / menor).toBeLessThan(1.1);
+  });
+
+  it('quita los solapes que el reparto por angulo producia', () => {
+    // La medida que importa no es la distancia entre centros sino si las
+    // CAJAS se pisan: dos piezas a 171 px en diagonal se solapan igual, con
+    // 120 de ese salto en x y 122 en y. Medirlo por distancia fue mi primer
+    // error al escribir esta prueba.
+    const rx = 430;
+    const ry = 165;
+    const W = 156;
+    const H = 152; // disco + nombre + tarea, medidos en el navegador
+    const cajas = (/** @type {number[]} */ angulos) =>
+      angulos.map((a) => ({ x: rx * Math.cos(a) - W / 2, y: ry * Math.sin(a) - H / 2, ancho: W, alto: H }));
+    const solapes = (/** @type {any[]} */ c) => {
+      let n = 0;
+      for (let i = 0; i < c.length; i++) for (let j = i + 1; j < c.length; j++) if (seSolapan(c[i], c[j])) n++;
+      return n;
+    };
+    const porAngulo = Array.from({ length: 8 }, (_, i) => -Math.PI / 2 + (2 * Math.PI * i) / 8);
+    expect(solapes(cajas(porAngulo))).toBe(4); // los cuatro que se vieron en pantalla
+    expect(solapes(cajas(angulosPorArco(8, rx, ry)))).toBe(0);
+  });
+
+  it('empieza arriba y da tantos angulos como piezas', () => {
+    for (const n of [1, 3, 8, 14]) {
+      const a = angulosPorArco(n, 300, 200);
+      expect(a).toHaveLength(n);
+      expect(Math.sin(a[0])).toBeCloseTo(-1, 2);
+    }
+    expect(angulosPorArco(0, 10, 10)).toEqual([]);
+  });
+
+  it('en un circulo coincide con el reparto por angulo', () => {
+    const a = angulosPorArco(6, 200, 200);
+    a.forEach((v, i) => expect(v).toBeCloseTo(-Math.PI / 2 + (2 * Math.PI * i) / 6, 2));
+  });
+});
+
+describe('los radios del anillo', () => {
+  it('usan el espacio que hay, no un porcentaje', () => {
+    const { rx, ry, cabe } = radiosDelAnillo({ ancho: 1029, alto: 515, anchoPieza: 156, altoPieza: 152 });
+    expect(rx + 156 / 2 + 16).toBeCloseTo(1029 / 2, 0);
+    expect(ry + 152 / 2 + 16).toBeCloseTo(515 / 2, 0);
+    expect(cabe).toBe(true);
+  });
+
+  it('descuentan el desfase: lo que se coloca es el disco, no la caja', () => {
+    const sin = radiosDelAnillo({ ancho: 1000, alto: 500, anchoPieza: 156, altoPieza: 138 });
+    const con = radiosDelAnillo({ ancho: 1000, alto: 500, anchoPieza: 156, altoPieza: 138, desfase: 17 });
+    expect(sin.ry - con.ry).toBe(17);
+    expect(con.rx).toBe(sin.rx); // el desfase es vertical: el ancho no cambia
+  });
+
+  it('avisan cuando no cabe, en vez de pintar el disco sobre el centro', () => {
+    // el caso real medido a 1366x768 antes de achicar el disco: hacen falta
+    // 51,5 + 71,5 + 12 = 135 de radio y el alto solo daba 119
+    const r = radiosDelAnillo({
+      ancho: 1010, alto: 442, anchoPieza: 156, altoPieza: 138,
+      desfase: 17, radioPieza: 51.5, radioCentro: 71.5
+    });
+    expect(r.cabe).toBe(false);
+
+    // con el disco y el nucleo mas chicos, y algo mas de alto, si cabe
+    const ok = radiosDelAnillo({
+      ancho: 1010, alto: 484, anchoPieza: 156, altoPieza: 123,
+      desfase: 17, radioPieza: 44, radioCentro: 62
+    });
+    expect(ok.cabe).toBe(true);
+    expect(ok.ry).toBeGreaterThanOrEqual(44 + 62 + 12);
+  });
+
+  it('el minimo deja la PIEZA ENTERA fuera del nodo central, no solo el disco', () => {
+    const { rx, ry } = radiosDelAnillo({
+      ancho: 300, alto: 200, anchoPieza: 260, altoPieza: 180, radioPieza: 44, radioCentro: 62
+    });
+    expect(rx).toBeGreaterThanOrEqual(260 / 2 + 62 + 12);
+    expect(ry).toBeGreaterThanOrEqual(180 / 2 + 62 + 12);
+  });
+
+  it('no dice que cabe cuando el texto terminaria encima del centro', () => {
+    // el caso medido: 439x500 daba cabe con el disco como referencia, y en
+    // pantalla quedaban dos discos dentro del nucleo y cinco piezas fuera
+    const r = radiosDelAnillo({
+      ancho: 439, alto: 500, anchoPieza: 156, altoPieza: 140,
+      desfase: 24.4, radioPieza: 45.6, radioCentro: 62
+    });
+    expect(r.cabe).toBe(false);
+  });
+});
+
+describe('acotar al lienzo', () => {
+  it('mete la pieza que se sale, y no mueve la que ya cabe', () => {
+    const lienzo = { ancho: 1000, alto: 600 };
+    const pieza = { ancho: 200, alto: 100 };
+    expect(dentroDelLienzo({ x: 500, y: 300 }, pieza, lienzo)).toEqual({ x: 500, y: 300 });
+    expect(dentroDelLienzo({ x: 10, y: 5 }, pieza, lienzo)).toEqual({ x: 116, y: 66 });
+    expect(dentroDelLienzo({ x: 990, y: 595 }, pieza, lienzo)).toEqual({ x: 884, y: 534 });
+  });
+
+  it('no invierte los limites cuando la pieza es mas grande que el lienzo', () => {
+    const p = dentroDelLienzo({ x: 50, y: 50 }, { ancho: 400, alto: 400 }, { ancho: 300, alto: 300 });
+    expect(Number.isFinite(p.x)).toBe(true);
+    expect(Number.isFinite(p.y)).toBe(true);
+  });
+});
+
+describe('si las piezas caben en el anillo', () => {
+  const pieza = { anchoPieza: 156, altoPieza: 140 };
+  const anillo = (n, rx, ry) => ({ angulos: angulosPorArco(n, rx, ry), rx, ry, ...pieza });
+
+  it('con los ocho agentes de Rapilink, en el lienzo real, no se pisan', () => {
+    expect(seSolapanEnElAnillo(anillo(8, 428, 189))).toBe(false);
+  });
+
+  it('con once en el MISMO anillo, si: el radio alcanza y las piezas no', () => {
+    // medido en el navegador el 24/09/2026: mismo lienzo, mismo radio, y los
+    // vecinos empiezan a montarse a partir de once
+    expect(seSolapanEnElAnillo(anillo(11, 428, 189))).toBe(true);
+    expect(seSolapanEnElAnillo(anillo(14, 428, 189))).toBe(true);
+  });
+
+  it('los mismos once caben si el anillo es mas grande', () => {
+    expect(seSolapanEnElAnillo(anillo(11, 700, 420))).toBe(false);
+  });
+
+  it('uno solo nunca se pisa consigo mismo', () => {
+    expect(seSolapanEnElAnillo(anillo(1, 300, 200))).toBe(false);
   });
 });

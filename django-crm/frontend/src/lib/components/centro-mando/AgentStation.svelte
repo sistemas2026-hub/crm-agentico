@@ -1,25 +1,29 @@
 <script>
   /**
-   * La estacion de un agente, como panel de instrumentos.
+   * El agente, como nodo de un diagrama radial: un disco con su cara, la
+   * carga que lleva dentro, y el nombre y la tarea colgando hacia afuera.
    *
-   * POR QUE YA NO HAY UN RENDER DE PUESTO DETRAS
-   * Hasta el 24/09/2026 cada tarjeta llevaba una imagen generada del pod de
-   * trabajo. Se veia bien y no decia nada: ocupaba media tarjeta, pesaba 1,6
-   * MB entre todas, y cada agente nuevo de cualquier empresa exigia producir
-   * su render antes de poder mostrarlo. Ahora ese espacio lo ocupan dos
-   * instrumentos que si responden preguntas -- cuanta carga lleva y como
-   * viene -- y se dibujan en codigo, asi que un agente nuevo aparece solo.
+   * POR QUE UN DISCO Y NO UNA TARJETA (24/09/2026)
+   * La tarjeta rectangular decia mas por agente, y justamente por eso el
+   * tablero dejaba de leerse: ocho bloques de texto compiten entre si y
+   * ninguno gana. El disco dice tres cosas y las dice de lejos -- quien es
+   * (la cara), cuanto lleva (la cifra), en que estado esta (el color del
+   * aro) -- y lo demas vive en la ficha, a un clic.
    *
-   * La cara del agente se queda: es la identidad de Dexter, no decorado, y
-   * pesa 20 KB.
+   * Lo que se mide aqui: NADA. La cifra, el estado y la frase vienen del
+   * motor; este componente solo decide como se ven.
+   *
+   * QUIEN LO COLOCA
+   * El componente no sabe donde esta: recibe `x` e `y` del CommandCenter, que
+   * los saca de lib/centro-mando/disposicion.js. Sin `x`/`y` se pinta en el
+   * flujo normal, que es lo que pasa cuando el lienzo es demasiado angosto
+   * para un anillo.
    */
-  import AgentStatus from './AgentStatus.svelte';
-  import AgentGauge from './AgentGauge.svelte';
-  import AgentSparkline from './AgentSparkline.svelte';
-  import { colorDe } from '$lib/centro-mando/estados.js';
+  import { colorDe, rotuloDe } from '$lib/centro-mando/estados.js';
 
-  /** @type {{ agente: any, referencia?: number, alSeleccionar?: (a: any) => void, ms?: (v: any) => string }} */
-  let { agente, referencia = 0, alSeleccionar = () => {}, ms = (v) => String(v ?? '—') } = $props();
+  /** @type {{ agente: any, x?: number|null, y?: number|null, haciaArriba?: boolean,
+   *           alSeleccionar?: (a: any) => void }} */
+  let { agente, x = null, y = null, haciaArriba = false, alSeleccionar = () => {} } = $props();
 
   const PISTAS_CARA = [
     [/vent|comercial/, 'ventas'],
@@ -37,63 +41,83 @@
     const encontrada = PISTAS_CARA.find(([patron]) => patron.test(texto));
     return `/centro-mando/avatares/${encontrada ? encontrada[1] : 'router'}.webp`;
   });
+
+  const carga = $derived(agente.conversaciones || 0);
+  const suelto = $derived(x == null || y == null);
 </script>
 
-<button class="estacion" style="--c:{colorDe(agente.estado)}" onclick={() => alSeleccionar(agente)}>
-  <div class="cabecera">
-    <img class="cara" src={cara} alt="" />
-    <div class="quien">
-      <span class="nombre">{agente.nombre.replaceAll('_', ' ')}</span>
-      <span class="cargo">{agente.cargo || agente.area || ''}</span>
-    </div>
-    <AgentStatus estado={agente.estado} />
-  </div>
-
-  <div class="instrumentos">
-    <AgentGauge {agente} {referencia} />
-    <AgentSparkline {agente} />
-  </div>
-
-  <div class="haciendo">{agente.haciendo || ''}</div>
-
-  <div class="datos">
-    {#if agente.esperando_humano}<span class="ambar">Humano <b>{agente.esperando_humano}</b></span>{/if}
-    {#if agente.esperando_aprobacion}<span class="violeta">Sin comprobar <b>{agente.esperando_aprobacion}</b></span>{/if}
-    {#if agente.duracion_media_ms}<span>{ms(agente.duracion_media_ms)}</span>{/if}
-    {#if agente.fallos_ventana}<span class="rojo">{agente.fallos_ventana} fallos</span>{/if}
-    {#if agente.abiertas_total}<span class="tenue">{agente.abiertas_total} sin cerrar</span>{/if}
-  </div>
+<button
+  class="nodo-agente"
+  class:hacia-arriba={haciaArriba}
+  class:suelto
+  style="--c:{colorDe(agente.estado)}{suelto ? '' : `;left:${x}px;top:${y}px`}"
+  title="{agente.nombre.replaceAll('_', ' ')} — {rotuloDe(agente.estado)}"
+  onclick={() => alSeleccionar(agente)}
+>
+  <span class="aro" class:quieto={!carga}>
+    <img src={cara} alt="" />
+    <span class="carga">{carga || '—'}</span>
+    <span class="unidad">{carga ? 'conv' : 'sin carga'}</span>
+  </span>
+  <span class="nombre">{agente.nombre.replaceAll('_', ' ')}</span>
+  <span class="tarea">{agente.haciendo || agente.area || ''}</span>
 </button>
 
 <style>
-  .estacion {
-    text-align: left; cursor: pointer; padding: 12px;
-    background: #0f172a; border: 1px solid var(--c); border-radius: 12px;
-    transition: transform .15s, box-shadow .15s;
-    display: flex; flex-direction: column; gap: 10px;
+  .nodo-agente {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    width: 156px;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
   }
-  .estacion:hover { transform: translateY(-2px); box-shadow: 0 0 22px color-mix(in srgb, var(--c) 35%, transparent); }
+  /* Si no hay anillo (lienzo angosto), el nodo vuelve al flujo normal. */
+  .nodo-agente.suelto { position: static; transform: none; }
 
-  .cabecera { display: flex; align-items: center; gap: 10px; }
-  .cara {
-    width: 34px; height: 34px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
-    border: 1.5px solid var(--c); box-shadow: 0 0 10px color-mix(in srgb, var(--c) 55%, transparent);
+  .aro {
+    position: relative;
+    width: 88px;
+    height: 88px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--c);
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--c) 20%, transparent);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    transition: box-shadow .15s;
   }
-  .quien { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .nombre { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: #e6f1ff; line-height: 1.2; }
-  .cargo { font-size: 10px; color: #8aa2c0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nodo-agente:hover .aro { box-shadow: 0 2px 18px color-mix(in srgb, var(--c) 45%, transparent); }
 
-  .instrumentos { display: flex; align-items: center; gap: 12px; }
-  .instrumentos :global(.spark) { flex: 1; min-width: 0; }
+  .aro img { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--c); }
+  .carga { font-family: ui-monospace, monospace; font-size: 19px; font-weight: 700; line-height: 1; color: var(--c); }
+  .quieto .carga { color: #64748b; }
+  .unidad { font-size: 7.5px; letter-spacing: .14em; color: #475569; text-transform: uppercase; }
 
-  /* Alto minimo: sin el, una tarjeta con frase corta queda mas baja que su
-     vecina y la rejilla se ve desalineada. */
-  .haciendo { font-size: 11px; color: var(--c); line-height: 1.35; min-height: 30px; overflow-wrap: anywhere; }
+  .nombre {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    line-height: 1.25; margin-top: 9px; color: #0f172a;
+  }
+  /* Dos lineas y no una: la frase la arma el motor y "20 esperan a una
+     persona, 5 en curso" no entra en una sola -- se cortaba a la mitad. */
+  .tarea {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    max-width: 100%; margin-top: 3px; overflow: hidden;
+    font-family: ui-monospace, monospace; font-size: 9px; line-height: 1.35; color: var(--c);
+  }
 
-  .datos { display: flex; gap: 10px; flex-wrap: wrap; font-family: ui-monospace, monospace; font-size: 10px; color: #8aa2c0; }
-  .datos b { color: #e6f1ff; }
-  .datos .ambar { color: #f59e0b; }
-  .datos .violeta { color: #8b5cf6; }
-  .datos .rojo { color: #ef4444; }
-  .datos .tenue { color: #47607f; }
+  /* El texto va SIEMPRE hacia afuera del centro. Colgando siempre abajo, el
+     de los nodos de arriba queda entre el disco y el nucleo, y la via lo
+     atraviesa -- se veia en la primera version del anillo. */
+  .hacia-arriba .aro { order: 3; }
+  .hacia-arriba .nombre { order: 1; margin-top: 0; margin-bottom: 3px; }
+  .hacia-arriba .tarea { order: 2; margin-top: 0; margin-bottom: 9px; }
 </style>

@@ -35,17 +35,17 @@
 </aside>
 
 <style>
-  .eventos { flex: 0 0 318px; background: #0f172a; border-left: 1px solid rgba(0,229,255,.14); display: flex; flex-direction: column; min-height: 0; }
-  header { padding: 12px 16px; border-bottom: 1px solid rgba(0,229,255,.14); display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: #e6f1ff; }
-  .sello { font-family: ui-monospace, monospace; font-size: 10px; color: #47607f; letter-spacing: 0; }
+  .eventos { flex: 0 0 318px; background: #f8fafc; border-left: 1px solid #e2e8f0; display: flex; flex-direction: column; min-height: 0; }
+  header { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: #0f172a; }
+  .sello { font-family: ui-monospace, monospace; font-size: 10px; color: #64748b; letter-spacing: 0; }
   .lista { flex: 1; overflow-y: auto; padding: 10px 14px; }
-  .evento { padding: 8px 0 8px 14px; border-left: 1px solid rgba(0,229,255,.14); position: relative; }
-  .evento::before { content: ''; position: absolute; left: -4px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: #06b6d4; }
-  .evento.escalada::before { background: #8b5cf6; }
-  .evento.accion::before { background: #f59e0b; }
-  .evento.herramienta_fallida::before { background: #ef4444; }
-  .h { font-family: ui-monospace, monospace; font-size: 10px; color: #8aa2c0; }
-  .q { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; margin-top: 1px; color: #e6f1ff; }
-  .d { font-size: 11px; color: #8aa2c0; margin-top: 2px; overflow-wrap: anywhere; }
-  .vacio { font-size: 11.5px; color: #47607f; padding: 8px 0; }
+  .evento { padding: 8px 0 8px 14px; border-left: 1px solid #e2e8f0; position: relative; }
+  .evento::before { content: ''; position: absolute; left: -4px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: #0e7490; }
+  .evento.escalada::before { background: #6d28d9; }
+  .evento.accion::before { background: #a15c07; }
+  .evento.herramienta_fallida::before { background: #b91c1c; }
+  .h { font-family: ui-monospace, monospace; font-size: 10px; color: #475569; }
+  .q { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; margin-top: 1px; color: #0f172a; }
+  .d { font-size: 11px; color: #475569; margin-top: 2px; overflow-wrap: anywhere; }
+  .vacio { font-size: 11.5px; color: #64748b; padding: 8px 0; }
 </style>

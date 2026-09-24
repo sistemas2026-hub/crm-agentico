@@ -6,10 +6,13 @@
   import { Button } from '$lib/components/ui/button/index.js';
   import { Users } from '@lucide/svelte';
   import AgentStatus from './AgentStatus.svelte';
+  import AgentGauge from './AgentGauge.svelte';
+  import AgentSparkline from './AgentSparkline.svelte';
   import { colorDe, ESTADOS, normalizar } from '$lib/centro-mando/estados.js';
 
-  /** @type {{ agente: any, ventana: number, hora: (v: any) => string, ms: (v: any) => string, alCerrar: () => void }} */
-  let { agente, ventana, hora, ms, alCerrar } = $props();
+  /** @type {{ agente: any, ventana: number, referencia?: number, hora: (v: any) => string,
+   *           ms: (v: any) => string, alCerrar: () => void }} */
+  let { agente, ventana, referencia = 0, hora, ms, alCerrar } = $props();
 
   const PISTAS_CARA = [
     [/vent|comercial/, 'ventas'],
@@ -61,6 +64,15 @@
     <p class="pista">{ESTADOS[normalizar(agente.estado)].descripcion}</p>
   </div>
 
+  <!-- Los dos instrumentos viven aqui y no en el disco del mapa: en el anillo
+       compiten con los otros siete nodos y no se leen; en la ficha, que se
+       abre para UN agente, responden lo que el total no responde -- cuanto
+       lleva respecto al mas cargado, y si viene subiendo o cayo en seco. -->
+  <div class="bloque instrumentos">
+    <AgentGauge {agente} {referencia} />
+    <AgentSparkline {agente} />
+  </div>
+
   <div class="bloque">
     <h3>Descripción</h3>
     <p>{agente.descripcion || 'Sin descripción configurada.'}</p>
@@ -87,27 +99,29 @@
 </aside>
 
 <style>
-  .telon { position: fixed; inset: 0; background: rgba(2,6,18,.6); backdrop-filter: blur(3px); border: 0; z-index: 40; }
+  .telon { position: fixed; inset: 0; background: rgba(15,23,42,.45); backdrop-filter: blur(3px); border: 0; z-index: 40; }
   .detalle {
     position: fixed; top: 0; right: 0; height: 100%; width: 440px; z-index: 41;
-    background: #0f172a; color: #e6f1ff; border-left: 1px solid var(--c);
-    box-shadow: -24px 0 56px rgba(0,0,0,.8); display: flex; flex-direction: column; overflow-y: auto;
+    background: #ffffff; color: #0f172a; border-left: 1px solid var(--c);
+    box-shadow: -18px 0 46px rgba(15,23,42,.18); display: flex; flex-direction: column; overflow-y: auto;
   }
-  header { display: flex; gap: 14px; align-items: center; padding: 18px 16px; border-bottom: 1px solid rgba(0,229,255,.14); position: relative; }
+  header { display: flex; gap: 14px; align-items: center; padding: 18px 16px; border-bottom: 1px solid #e2e8f0; position: relative; }
   .retrato { width: 76px; height: 76px; border-radius: 14px; object-fit: cover; border: 2px solid var(--c); flex-shrink: 0; }
   h2 { font-size: 18px; margin: 0 0 3px; text-transform: capitalize; }
-  header p { font-size: 11.5px; color: #8aa2c0; margin: 0 0 8px; }
-  .cerrar { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgba(0,229,255,.14); background: #16233a; color: #8aa2c0; cursor: pointer; }
+  header p { font-size: 11.5px; color: #475569; margin: 0 0 8px; }
+  .cerrar { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid #e2e8f0; background: #f1f5f9; color: #475569; cursor: pointer; }
   .rejilla-cifras { display: grid; grid-template-columns: repeat(3, 1fr); }
-  .rejilla-cifras div { padding: 12px 8px; text-align: center; border-right: 1px solid rgba(0,229,255,.1); border-bottom: 1px solid rgba(0,229,255,.1); }
+  .rejilla-cifras div { padding: 12px 8px; text-align: center; border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; }
   .rejilla-cifras b { display: block; font-family: ui-monospace, monospace; font-size: 17px; }
-  .rejilla-cifras span { font-size: 8.5px; letter-spacing: .08em; color: #8aa2c0; text-transform: uppercase; }
-  .rejilla-cifras .rojo b { color: #ef4444; }
-  .bloque { padding: 14px 16px; border-bottom: 1px solid rgba(0,229,255,.1); }
-  .bloque h3 { font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: .14em; color: #8aa2c0; text-transform: uppercase; margin: 0 0 8px; }
-  .bloque p { font-size: 12.5px; line-height: 1.55; margin: 0; color: #cfe0f5; }
-  .bloque .pista { font-size: 11px; color: #8aa2c0; margin-top: 6px; }
+  .rejilla-cifras span { font-size: 8.5px; letter-spacing: .08em; color: #475569; text-transform: uppercase; }
+  .rejilla-cifras .rojo b { color: #b91c1c; }
+  .bloque { padding: 14px 16px; border-bottom: 1px solid #e2e8f0; }
+  .bloque h3 { font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: .14em; color: #475569; text-transform: uppercase; margin: 0 0 8px; }
+  .bloque p { font-size: 12.5px; line-height: 1.55; margin: 0; color: #334155; }
+  .bloque .pista { font-size: 11px; color: #475569; margin-top: 6px; }
   .bloque code { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--c); }
-  .tz { color: #47607f; }
+  .tz { color: #64748b; }
+  .instrumentos { display: flex; align-items: center; gap: 14px; }
+  .instrumentos :global(.spark) { flex: 1; min-width: 0; }
   footer { margin-top: auto; padding: 14px 16px; display: flex; gap: 10px; }
 </style>

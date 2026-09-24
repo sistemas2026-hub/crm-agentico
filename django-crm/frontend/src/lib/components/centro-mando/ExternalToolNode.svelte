@@ -17,11 +17,11 @@
 
 <style>
   .nodo {
-    font-family: ui-monospace, monospace; font-size: 10px; color: #8aa2c0;
-    border: 1px solid rgba(0,229,255,.28); border-radius: 8px; padding: 4px 9px;
-    background: rgba(4,21,37,.6); white-space: nowrap;
+    font-family: ui-monospace, monospace; font-size: 10px; color: #475569;
+    border: 1px solid #cbd5e1; border-radius: 8px; padding: 4px 9px;
+    background: #f8fafc; white-space: nowrap;
   }
-  b { color: #00e5ff; font-weight: 700; margin-right: 6px; }
+  b { color: #0e7490; font-weight: 700; margin-right: 6px; }
   .fallando { border-color: rgba(239,68,68,.5); }
-  .fallando b { color: #ef4444; }
+  .fallando b { color: #b91c1c; }
 </style>
