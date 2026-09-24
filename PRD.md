@@ -656,6 +656,76 @@ Meta solo acepta texto libre dentro de las 24 h desde el **último mensaje del c
 
 ---
 
+### 8.13 DECISIÓN — una plataforma para varios ISPs, no una instalación por cliente
+
+**Decidido el 24/09/2026.** Ante la pregunta de cómo se vende Dexter cuando
+aparezca el segundo ISP, se elige **una sola plataforma donde entran varias
+empresas**, y se descarta el despliegue por cliente.
+
+Lo que se descarta y por qué: un stack completo por ISP no cuesta código —hoy
+funcionaría tal cual— pero se paga en mantenimiento para siempre. Cada
+actualización se repite N veces, cada cliente puede quedar en una versión
+distinta, y el día que una migración falle en uno solo hay que diagnosticar un
+entorno que ya no es igual a los demás.
+
+**El motor ya está listo para esto.** La URL del webhook lleva el tenant
+(`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en
+`asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin
+fijar empresa ve **0 filas**, no todas. BottleCRM ya es multi-organización.
+
+**Lo que falta es el frontend.** Saca el tenant de una variable de entorno y
+nunca de la organización de quien inició sesión. Medido el 24/09/2026:
+
+| | |
+|---|---|
+| Archivos | 70 |
+| Apariciones | 80 |
+| De ellas, **la misma línea exacta** (`const tenant = env.PRIVATE_ASISTENTE_TENANT;`) | **73** |
+| Que deriven el tenant de la sesión | **0** |
+| Repartidas en | `routes/api` 46 · `routes/(app)` 13 · `lib/server` 11 |
+
+Que 73 de 80 sean idénticas cambia el tamaño del problema: **no son 80
+ediciones a medida, es un ayudante y una sustitución mecánica**, más cuatro
+casos particulares. Y el ayudante tiene que ser uno solo — el esquema del
+formulario de Campo ya enseñó qué pasa cuando el mismo dato se interpreta en
+varios lugares.
+
+**El problema de diseño que queda abierto, y no es menor.** El motor resuelve
+`slug → organization_id` (`asistente.tenant_config`). La plataforma necesita la
+**inversa**, y el frontend no puede consultarla: se conecta a través de Django,
+que entra como `crm_user` y **no tiene privilegios sobre el esquema
+`asistente`**. Es el mismo principio que ya gobierna el contexto técnico —
+*"Django no habla con WispHub ni con SmartOLT; el motor sí"*— así que la
+resolución debería pedírsela al motor, no abrir un segundo camino.
+
+**El supuesto del que depende todo esto está comprobado** (24/09/2026, contra
+el esquema): `asistente.tenant_config` tiene `organization_id` como **clave
+primaria** y `slug` con **restricción UNIQUE**. Es una biyección, así que la
+inversa es una función y el diseño se sostiene. Si no lo hubiera sido —una
+organización con varios tenants— habría que haber replanteado todo antes de
+tocar una línea.
+
+La tabla además tiene RLS por organización (`organization_id =
+asistente.org_actual()`), así que el endpoint que resuelva la inversa tiene que
+fijar el contexto como cualquier otra lectura.
+
+**Dos decisiones que van junto con esta:**
+
+- **El dominio del webhook.** `motor.rapilinksas.co` lleva la marca del primer
+  cliente. Con esta decisión tomada, conviene mudarlo a un dominio neutro
+  **antes** del segundo ISP: después obliga a que *cada* cliente reconfigure su
+  webhook en Meta a mano.
+- **`--workers 1`.** El historial caliente de las conversaciones vive en la RAM
+  del proceso. Aguanta con hilos, pero es un techo real con varias empresas, y
+  se levanta el día que ese historial viva en `asistente.conversations`.
+
+**Y una advertencia medida:** esta deuda **crece sola**. Cuando se anotó por
+primera vez eran 23 lugares; hoy son 80. Cada pantalla nueva del asistente suma
+otra aparición, así que posponer la ejecución encarece la decisión que ya se
+tomó.
+
+---
+
 ## 9. Despliegue
 
 - **Desarrollo:** laptop actual (RTX 3050, 4 GB VRAM, 32 GB RAM). Suficiente para desarrollar y probar con modelos de 3–4B.
