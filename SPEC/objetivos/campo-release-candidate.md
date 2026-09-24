@@ -177,6 +177,47 @@ quién y cuándo antes de dar la candidata por lista.
 
 ---
 
+## Entorno de prueba local
+
+Montado el 23/09/2026 para medir la Parte B. **No toca producción.**
+
+```
+worktree   C:/wisphub/_wt_campo   (feat/campo-diseno-stitch)
+levantar   OPENAI_API_KEY=no-se-usa docker compose              -f docker-compose.yml -f compose.puerto-8001.yml up -d db redis backend
+puente     adb reverse tcp:8000 tcp:8001
+app        servidor http://127.0.0.1:8000
+           mario.vasquez.moreno@rapilinksas.co / campo12345
+```
+
+**El 8001 es el contenedor; el 8000 es el `runserver` nativo de Windows.** Los
+dos escuchan en el host y eso ya costó media hora de diagnóstico: el teléfono
+le hablaba al nativo, que apunta a otra base, y las credenciales sembradas acá
+eran invisibles para él. La prueba que lo cerró fue crear un usuario marcador
+en una base y pedirlo por la otra.
+
+**Los datos sobreviven a `docker compose down`.** El volumen es
+`django-crm_postgres_data`, declarado `external: true`: Compose no lo crea ni
+lo borra, tampoco con `down -v`. Es el **mismo** volumen que usa el compose de
+`django-crm`, así que las 20 órdenes sembradas aparecen también al levantar el
+stack desde la carpeta principal. No es contaminación —base local, datos de
+desarrollo— pero conviene no sorprenderse.
+
+Sembrar y deshacer:
+
+```
+docker exec wt_campo-backend-1 python manage.py seed_campo_carga     --tecnico mario.vasquez.moreno@rapilinksas.co --ordenes 20 --si-la-base-es crm_db
+docker exec wt_campo-backend-1 python manage.py seed_campo_carga     --tecnico mario.vasquez.moreno@rapilinksas.co --si-la-base-es crm_db --borrar
+```
+
+**El `adb reverse` no sobrevive** a reiniciar el emulador ni al `adb kill-server`:
+si vuelve el *Connection refused*, es eso. Se rearma con una línea.
+
+**Automatizar toques sobre la interfaz ejecuta acciones de verdad.** Unos
+barridos con `input swipe` abrieron la OT #1845 y le marcaron *en camino* y
+*llegada*. Para medir, scrollear a mano.
+
+---
+
 ## Qué reveló esta ficha sobre el propio sistema
 
 Se estrenó y encontró tres cosas. Se dejan escritas acá porque son trabajo
