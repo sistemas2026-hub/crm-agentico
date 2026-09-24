@@ -214,6 +214,91 @@ implementado**, y confundirlos es rehacer la pantalla equivocada.
 *Criterio: `test/matriz_de_estados_test.dart` sigue verde —dos estados distintos
 no se dibujan igual— y las capturas por pantalla se comparan contra las de hoy.*
 
+### 2.E · Prioridad: dos escalas, dos pesos visuales
+
+Decidido con el usuario el 24/09/2026. La tarjeta muestra **dos prioridades
+distintas**, no una:
+
+| | Quién la pone | Peso en la tarjeta |
+|---|---|---|
+| **Prioridad WispHub** | El operador que abrió el ticket, en el sistema del ISP | **Discreto** |
+| **Prioridad Dexter** | Calculada por análisis, con sus motivos | **Prominente** |
+
+**La trampa que hay que evitar, y que casi cometo.** Al despachar los cuatro
+casos de prueba mapeé la prioridad de WispHub a la de la orden. Si la ranura
+prominente mostrara eso, estaría presentando **una copia disfrazada de juicio**:
+las dos ranuras dirían lo mismo y la grande afirmaría un análisis que no
+ocurrió. Es exactamente contra lo que advierte el comentario del importador en
+`nucleo/seguimiento/importacion_io.py`:
+
+> *"La prioridad que le puso el proveedor va COMO TEXTO, no como prioridad del
+> caso... Ponerlo a la vista evita que alguien lea ese 'Normal' como un juicio
+> de Dexter — hoy no lo es. Cuando Dexter calcule prioridad de verdad, esta
+> línea servirá además para comparar los dos criterios."*
+
+Mientras Dexter no calcule, la ranura prominente dice **«sin evaluar»**. En las
+cuatro órdenes de hoy.
+
+#### Las escalas
+
+WispHub usa cuatro niveles y los manda como entero:
+
+```
+1 Baja   ·   2 Normal   ·   3 Alta   ·   4 Muy Alta
+```
+
+La orden tiene tres (`alta`/`media`/`baja`). **Para que el contraste se lea, las
+dos escalas tienen que coincidir**, así que falta un cuarto nivel: `muy_alta`.
+Es barato — `choices` es validación, no esquema: la columna es
+`CharField(max_length=10)` y `"muy_alta"` entra, así que la migración que Django
+genera no toca la base.
+
+#### Dónde se calcula
+
+**En el motor, devuelto dentro del `contexto`.** Dos motivos, no uno:
+
+1. Dos de los cuatro criterios viven ahí y en ningún otro lado — el estado de
+   cuenta y la incidencia de red compartida los sabe el motor, no Django.
+2. El `contexto` ya es *la ficha técnica congelada, con su hora*, que es
+   exactamente lo que una prioridad calculada tiene que ser. Sin la hora al
+   lado es una afirmación sobre el presente que nadie puede verificar.
+
+**El código calcula, el modelo compone** (PRD §12.5). Esta prioridad la resuelve
+Python leyendo señales. **Nunca se le pide al LLM.**
+
+#### Los criterios, y cuáles se pueden hoy
+
+| Criterio | ¿Hoy? | De dónde sale |
+|---|---|---|
+| **Visita reiterativa** | ✅ | `Case.name` == "Vista Reiterativa Post Soporte". Ya está en los datos reales: 10 de 100 |
+| **Antigüedad y reaperturas** | ✅ | `Case.created_at`, `external_status_at` |
+| Estado de la cuenta (mora) | ❌ | `contexto.cliente.estado` — necesita el motor corriendo |
+| Incidencia de red compartida | ❌ | SmartOLT, vía el motor |
+
+Dos de cuatro se calculan sin levantar nada. Más criterios entran después, o
+cuando esté el agente supervisor.
+
+#### Dos reglas que no se negocian
+
+- **La prioridad de Dexter viaja con sus motivos.** Un técnico que lee «Alta» no
+  aprende nada; uno que lee *«Alta — tercera visita por lo mismo · cliente
+  suspendido»* sabe qué va a encontrar. Sin motivos, la ranura grande es un
+  adorno.
+- **Los umbrales van a `tenant_config`**, no al código: cuántos días es «viejo»,
+  cuánto pesa una reapertura. La próxima empresa va a querer otros números, y
+  esa es la regla de §3.3.
+
+#### Deuda que esto destapa
+
+`Case` no guarda la prioridad del proveedor en un campo: vive como texto dentro
+de `description` (*"Prioridad en wisphub: Alta."*). Hoy se lee parseando esa
+frase, que es **frágil** — depende del formato de un texto que escribe el propio
+importador, y si cambia se rompe en silencio. El arreglo correcto es un campo en
+el importador (`nucleo/`), y **los 100 casos ya importados no se arreglan
+solos**.
+
+---
+
 ### Cierre de la Fase 2
 
 Cualquiera sea el frente, al cerrar se **vuelve a correr la Parte A completa**
