@@ -28,7 +28,7 @@ y hoy hizo perder tiempo distinguiéndola de una regresión real.
 | # | Evidencia | Cómo se comprueba |
 |---|---|---|
 | 1 | `docker exec <contenedor-motor> python cli/bateria_flujos.py rapilink --todos` → **20/20**, con `[entorno: CONTENEDOR]` en el pie | salida real pegada, no resumida. Es el único modo que ejercita escalada→ticket: 17 herramientas del catálogo viven en `http://backend:8000` |
-| 2 | `py -3.13 cli/bateria_flujos.py rapilink` → **18/18**, con `[entorno: LOCAL]` | la evidencia reproducible sin VPS; si difiere de (1), el informe dice por qué |
+| 2 | `py -3.13 cli/bateria_flujos.py rapilink` → **19/19** (el número decía 18 antes de partir el caso del insulto), con `[entorno: LOCAL]` | la evidencia reproducible sin VPS; si difiere de (1), el informe dice por qué |
 | 3 | El caso `cliente actual pidiendo otro servicio si se verifica` **ya no existe**; en su lugar hay dos, cada uno con **una** afirmación | `git diff` sobre `evaluacion/rapilink.casos.yaml` lo muestra |
 | 4 | Cada caso nuevo del punto 3 corre **10 veces** y da **≥ 9/10** | las 10 salidas pegadas, no el promedio |
 | 4b | Los números del criterio 2 y 6 se leen del set real, no de este documento | el set de humo creció a 10 casos y la batería a 21 el 23/09; los topes de abajo quedaron viejos el mismo día en que se escribieron |
@@ -93,9 +93,9 @@ es lo que juzga todo lo demás.
 
 | Agente | Para qué | Estado |
 |---|---|---|
-| `corredor-de-evaluacion` | Partir el caso inestable y medir 10 corridas por caso nuevo | pendiente |
+| `corredor-de-evaluacion` | Partir el caso inestable y medir 10 corridas por caso nuevo | **corrió** (a mano): 10/10, 10/10 y 10/10 |
 | `auditor-de-frontera` | Comprobar que "ninguna acción fuera de `pendiente`" cubre los caminos con efecto, no sólo `reiniciar_ont` | pendiente |
-| `auditor-independiente` | Cierre del bloque antes de integrarlo | pendiente |
+| `auditor-independiente` | Cierre del bloque antes de integrarlo | **corrió** (a mano: el agente no se pudo cargar). 12 hallazgos → `SPEC/auditorias/2026-09-23-bateria-de-flujos.md`. Tres arreglados (`81677b4`), nueve anotados con motivo |
 | `arquitecto-dexter` | — | **se saltea**: no se agrega capacidad nueva; `bateria_flujos.py` ya existe y esto la endurece |
 | `verificador-de-api` | — | **se saltea**: no toca ninguna API externa ni un filtro/endpoint nuevo |
 | `revisor-de-pii` | — | **se saltea**: no cambia qué dato llega al modelo, a un log ni a un tercero |
@@ -139,4 +139,5 @@ su propia medición pareada.
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 23/09/2026 | Batería creada; 18/18 local tras corregir una expectativa mal escrita. Bandera de entorno medida por resolución de nombre. | Criterios 1, 3, 4, 5, 9, 10 | `b66dba9` |
+| 24/09/2026 | Criterio 2 con el código ya corregido: **19/19 LOCAL**. Criterio 8: 2 propuestas `pendiente`, 0 ejecutadas, y ahora la afirmación cubre las 30 herramientas de escritura, no 14. Criterio 9 cerrado: auditoría escrita, 3 hallazgos arreglados y 9 anotados. | Criterio 1 (bloqueado por VPS) | `81677b4` |
 | 23/09/2026 | Criterios 3, 4, 5, 6, 7, 10. Caso inestable partido en dos (10/10 y 10/10). `responde_sin: [cedula]` reemplazado por `bloquea_con: [DATO_DEL_EQUIPO_NO_CARGADO]` + `no_bloquea_con: [IDENTIDAD_NO_RESUELTA]`, para lo cual `cli/evaluar.py` ganó esas dos afirmaciones. `DEXTER_ESTADO_ACTUAL.md` ya no dice «nada pusheado». | Criterios 1 (bloqueado por VPS), 2, 9 | pendiente |
