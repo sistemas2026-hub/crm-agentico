@@ -1,6 +1,7 @@
 # Objetivo · Dexter Campo — versión candidata
 
-> Abierto el 23/09/2026. Estado: **abierto** — Parte A ✅ cerrada y medida, Parte B pendiente (necesita un teléfono).
+> Abierto el 23/09/2026. Estado: **abierto** — Parte A ✅ · Parte B 4 de 5.
+> Falta solo recorrer un día completo sin red en un teléfono.
 > Primera ficha del sistema. Lo que encontró al estrenarse está en "Qué reveló
 > esta ficha", al final — no se borra: es lo que hay que arreglar del sistema.
 
@@ -56,7 +57,41 @@ Del contrato §5. Cada una necesita un teléfono, una cuenta real, o tiempo.
       usuario. Ejercita las migraciones de la base local v12 con datos ya
       guardados — el camino por el que una actualización le borra la jornada a
       un técnico.
-- [ ] Medir arranque y scroll con una jornada de veinte órdenes.
+- [x] **Medir arranque y scroll con una jornada de veinte órdenes.** ✅
+      23/09/2026, **medido en emulador** (`sdk_gphone64_x86_64`, Android 15,
+      60 Hz), APK de **profile** contra el backend local del compose.
+
+      **Arranque en frío**, nueve corridas con `am force-stop` entre cada una:
+      la primera **6.024 ms**, el resto **1327–1666 ms** (media ~1.5 s). Las
+      tres primeras dieron 6024, 2324 y 1408: **4× de diferencia**. Una sola
+      corrida habría dado cualquiera de las tres como "el dato" — mismo error
+      que el ping, que ya está en los contratos congelados.
+
+      **Scroll**, 925 cuadros de ~18 s de scroll manual, vía
+      `dumpsys SurfaceFlinger --timestats` (histograma `present2present`):
+
+      | | |
+      |---|---|
+      | p50 / p90 / p95 / p99 | 17 / 30 / 34 / **48 ms** |
+      | ≤ 16 ms (fluido a 60 Hz) | 44,3 % |
+      | 17–33 ms (un cuadro perdido) | 48,5 % |
+      | `droppedFrames` · `jankyFrames` · `appBufferStuffing` | **0 · 0 · 0** |
+      | `averageFPS` | 37,9 |
+
+      **Lo que esto sí prueba:** no hay patología. Cero cuadros descartados,
+      cero acumulación de búfer, peor caso 48 ms (~3 refrescos) y ningún
+      congelamiento. La lista con 20 órdenes no degrada ni crece con el
+      recorrido.
+
+      **Lo que NO prueba:** que en el teléfono de un técnico se vea así. Un
+      emulador x86_64 sobre un portátil no alcanza 60 Hz ni con contenido
+      trivial, y **no se midió una línea base en el mismo emulador**, así que
+      el 44 % fluido no se puede repartir entre techo del emulador y trabajo de
+      la app. Para eso hace falta repetirlo en un equipo real.
+
+      Sirve como **referencia contra la cual comparar**: si un cambio futuro
+      mueve el p95 de 34 ms hacia arriba en este mismo emulador, eso sí es la
+      app.
       **Herramienta lista, sin ejecutar:** `manage.py seed_campo_carga
       --tecnico <correo> --ordenes 20`. Siembra órdenes asignadas a un técnico
       y sabe deshacerlas (`--borrar`). **No crea tipos de trabajo ni esquemas**:
@@ -134,6 +169,7 @@ quién y cuándo antes de dar la candidata por lista.
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 23/09/2026 | Ficha abierta. Medido dónde vive Campo (B1) y qué falta del contrato §5 | Resolver B1 | — |
+| 23/09/2026 | Casilla 5: arranque ~1,5 s y scroll p95 34 ms, medidos en emulador con 20 órdenes | Solo el día sin red | — |
 | 23/09/2026 | Casillas 2 y 4 de la Parte B: cuenta real con jornada bajada, y reinstalación sobre versión anterior (reportadas) | Solo el rendimiento con 20 órdenes | — |
 | 23/09/2026 | Primera casilla de la Parte B: el APK instala limpio en un teléfono real (reportado) | Que abra, cuenta real, día sin red, reinstalación, rendimiento | — |
 | 23/09/2026 | **Parte A cerrada entera** en el worktree `C:/wisphub/_wt_campo`. A1–A6 verdes, medidos. B2 resuelto: los sueltos son copias | Solo la Parte B, que necesita un teléfono | ffa1761 |
