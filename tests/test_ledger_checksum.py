@@ -133,13 +133,27 @@ revisar(t1 == t2 and "\r" not in t2,
 # =============================================================================
 titulo("GOLDEN: arbol de Windows, blob de git, Python en Linux")
 # =============================================================================
+# El commit FIJADO contra el que se compara: es la referencia dorada, y por
+# eso es un sha y no HEAD. La consecuencia es que hace falta historia: en un
+# clon superficial (`actions/checkout` sin fetch-depth) ese commit no esta,
+# y entonces NO SE PUDO MEDIR -- que no es lo mismo que el hash no cuadre.
+# Costo la primera corrida del CI en la rama de despliegue, el 24/09/2026.
+COMMIT_GOLDEN = "f60beda"
+_hay_historia = subprocess.run(["git", "cat-file", "-e", COMMIT_GOLDEN + "^{commit}"],
+                               capture_output=True, cwd=str(RAIZ)).returncode == 0
+if not _hay_historia:
+    print("  [saltado] el commit " + COMMIT_GOLDEN + " no esta en este clon "
+          "(superficial?): NO SE PUDO comparar contra el blob dorado")
+
 for nombre, esperado in GOLDEN.items():
     arbol = (RAIZ / "supabase" / nombre).read_bytes()
-    blob = subprocess.run(["git", "show", f"f60beda:supabase/{nombre}"],
-                          capture_output=True, cwd=str(RAIZ)).stdout
-    print(f"    {nombre}: CR en el arbol={arbol.count(b'\r')}  CR en el blob={blob.count(b'\r')}")
     revisar(mig.huella(arbol, nombre) == esperado,
             f"{nombre}: el arbol de trabajo da el golden")
+    if not _hay_historia:
+        continue
+    blob = subprocess.run(["git", "show", f"{COMMIT_GOLDEN}:supabase/{nombre}"],
+                          capture_output=True, cwd=str(RAIZ)).stdout
+    print(f"    {nombre}: CR en el arbol={arbol.count(b'\r')}  CR en el blob={blob.count(b'\r')}")
     revisar(mig.huella(blob, nombre) == esperado and hashlib.sha256(blob).hexdigest() == esperado,
             f"{nombre}: el blob de git da el golden, y es su sha256 crudo")
 
