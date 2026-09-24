@@ -38,10 +38,15 @@ este repositorio llama *afirmar sobre el mecanismo en vez del efecto*.
 
 Del contrato §5. Cada una necesita un teléfono, una cuenta real, o tiempo.
 
-- [ ] Instalar el APK limpio en un teléfono. *(Ya hubo dos fallas que solo
-      aparecen en el artefacto final: un comentario XML con `--` que rompía
+- [x] **Instalar el APK limpio en un teléfono.** ✅ 23/09/2026, reportado por
+      el usuario: instaló bien. Artefacto: `app-arm64-v8a-release.apk` (19.2 MB,
+      22:46), cuyo `libapp.so` es byte a byte el mismo que el fat verificado
+      (`4efb4a1d…`), o sea `cf4684e`. *(Las dos fallas anteriores solo aparecían
+      en el artefacto final: un comentario XML con `--` que rompía
       `mergeReleaseResources`, y config declarada en el repo que producción no
-      tenía.)*
+      tenía. Ninguna volvió a aparecer.)*
+      **Lo que esto NO dice todavía:** que la aplicación abra. Instalar y
+      arrancar son dos cosas distintas.
 - [ ] Entrar con una cuenta real y bajar una jornada de verdad.
 - [ ] Recorrer el día completo en el teléfono, sin red parte del tiempo.
 - [ ] Reinstalar sobre una versión anterior, para ejercitar las migraciones de
@@ -112,6 +117,7 @@ quién y cuándo antes de dar la candidata por lista.
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 23/09/2026 | Ficha abierta. Medido dónde vive Campo (B1) y qué falta del contrato §5 | Resolver B1 | — |
+| 23/09/2026 | Primera casilla de la Parte B: el APK instala limpio en un teléfono real (reportado) | Que abra, cuenta real, día sin red, reinstalación, rendimiento | — |
 | 23/09/2026 | **Parte A cerrada entera** en el worktree `C:/wisphub/_wt_campo`. A1–A6 verdes, medidos. B2 resuelto: los sueltos son copias | Solo la Parte B, que necesita un teléfono | ffa1761 |
 
 ---
