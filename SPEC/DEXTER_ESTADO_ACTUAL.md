@@ -162,17 +162,44 @@ Los tres se comprobaron **en los dos sentidos**: con la imagen y la historia
 presentes siguen verdes; sin ellas saltan nombrando lo que falta. Una guarda
 que solo se ve pasar no prueba que detecte nada.
 
-**Estado del CI, igual en las dos ramas y en local:**
+**CI EN VERDE, en las dos ramas.** `92 en verde · 0 en rojo · 54 sin correr`
+(local: 94 y 0 — la diferencia son dos que en el runner no se pueden medir).
+
+Los 2 rojos que quedaban tampoco eran bugs del producto: eran pruebas
+atrasadas respecto de mejoras reales.
 
 ```
-90 en verde · 2 en rojo · 54 sin correr
-  test_asignacion_escritores.py    lista de transiciones vieja   (18/09)
-  test_guarda_alineacion_git.py    le falta RAMA_DESPLIEGUE      (22/09)
+test_asignacion_escritores   exigia que 'resolver' escribiera la asignacion.
+                             Existe, pero desde 4251dfd es un envoltorio de
+                             una linea sobre cerrar(): ya no escribe. Exigirlo
+                             era exigir lo contrario de lo que la prueba
+                             defiende. Y marcaba un print de revision_g8 como
+                             escritura: falso positivo anotado ANCLADO AL
+                             TEXTO de la linea, no perdonado por ruta.
+
+test_guarda_alineacion_git   los 17 casos fallaban por UNA causa: la guarda
+                             gano una tercera condicion (avisar si falta
+                             RAMA_DESPLIEGUE) despues de que la prueba se
+                             escribiera con dos. Hasta "0 adelante y 0 atras
+                             -> sin problemas" salia rojo.
+                             Se aislo la logica Y se escribio el escenario que
+                             faltaba: arreglar los 17 sin cubrir esa condicion
+                             habria cambiado 17 falsos rojos por un verde que
+                             tampoco significaba nada.
+                             Siete casos mas exigian frases literales que
+                             habian cambiado; ahora afirman sobre el DATO
+                             --cuantos commits--, que es la regla de §6 que
+                             estaban incumpliendo.
 ```
 
-Los 2 rojos son deuda real y preexistente —el resto de D1—, no ruido. El CI
-dice la verdad; lo que falta es arreglarlos. Las 54 que no corren siguen
-pidiendo Postgres: falta un servicio de base en el workflow, tambien D1.
+**El patron del dia: cinco defectos encontrados, los cinco del andamiaje y
+ninguno del producto.** Tres eran «no se pudo medir» presentado como «fallo»;
+dos eran pruebas afirmando sobre la redaccion o sobre expectativas vencidas.
+Es lo que saca a la luz un CI recien encendido sobre un proyecto que corria
+sus guardas a mano: primero, el estado de las guardas.
+
+**Lo que sigue abierto de D1:** las 54 que piden Postgres no corren en CI.
+Falta un servicio de base en el workflow.
 
 ### Qué hay en producción, con fecha
 
