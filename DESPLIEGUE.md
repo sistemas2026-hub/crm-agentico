@@ -772,7 +772,9 @@ Qué evaluar cuando se retome: `model_dump(exclude_unset=True)` en el camino de 
 
 **Dar de alta un segundo ISP: el motor está listo, el pegamento no.** El motor ya es multi-empresa de verdad —la URL del webhook lleva el tenant (`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en `asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin fijar empresa ve **0 filas**, no todas—. BottleCRM, por su lado, ya es multi-organización.
 
-Lo que no acompaña es lo que los une: **`PRIVATE_ASISTENTE_TENANT` es una variable de entorno usada en 23 lugares del frontend, y nunca se deriva de la organización del usuario logueado**. Con una sola empresa no se nota; con dos, hay que elegir:
+Lo que no acompaña es lo que los une: **`PRIVATE_ASISTENTE_TENANT` es una variable de entorno usada en el frontend, y nunca se deriva de la organización del usuario logueado**.
+
+⚠️ **Y la deuda crece.** Cuando esto se escribió eran **23 lugares**; medido el 24/09/2026 son **70 archivos y 80 apariciones**, y **ninguna** deriva el tenant de `locals.org`. Se triplicó mientras el camino seguía sin decidirse. Cada pantalla nueva del asistente suma una más, así que el costo de la opción «una plataforma» sube solo con el tiempo — que es justamente el argumento para decidir antes y no después. Con una sola empresa no se nota; con dos, hay que elegir:
 
 | Camino | Qué implica | Costo |
 |---|---|---|
