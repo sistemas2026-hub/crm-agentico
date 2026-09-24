@@ -71,6 +71,31 @@ evaluación, así que exige medir los casos dorados antes y después. Es un
 objetivo propio, chico y bien acotado. `tests/test_bloqueos_en_traza.py` está
 **rojo en la rama** por esto desde antes de este bloque.
 
+> **Actualización 24/09/2026 — el primero está arreglado, sin la medición.**
+> `DECLARACION_NO_ALCANZA` entró a `CODIGOS_DE_BLOQUEO`, a su copia en
+> `forzado.py` y a `MOTIVO_BLOQUEO` de la pantalla (commit `4ac7dfb`).
+> `tests/test_bloqueos_en_traza.py` pasó de rojo a verde, 7/7.
+>
+> Se hizo pese al motivo de arriba, y conviene que quede el porqué: el test
+> estaba **rojo en la rama**, la dirección del cambio es exactamente la que
+> el código ya declara de sí mismo (`# Fail-closed en codigo`, `motor.py`), y
+> es el mismo razonamiento que metió a `IDENTIDAD_NO_VERIFICADA` el
+> 08/09/2026 — con su consecuencia medida entonces: la protección funcionando
+> disparaba `escalar_si_falla` y al cliente se le decía que había fallado un
+> sistema.
+>
+> **La medición que este hallazgo pedía NO se hizo**: `cli/evaluar.py rapilink
+> --humo --base` no corre en este worktree por falta de `.env` (mismo bloqueo
+> que la batería). Queda pendiente y es lo primero que hay que correr cuando
+> haya credenciales: el cambio mueve qué cuenta como error, así que puede
+> poner en **verde** casos dorados que estaban rojos con la protección
+> funcionando — que es el efecto buscado — y hay que verlo, no suponerlo.
+>
+> **El segundo sigue abierto.** `AUTONOMIA_2_NO_ACTIVA` llega por el `except`
+> genérico, así que no es un `codigo_error = "..."` que se pueda agregar a una
+> lista: hay que hacer que ese camino preserve `e.codigo`. Es un cambio de
+> flujo de errores, no de una constante, y no se toca sin medir.
+
 **5 · `motivo` obligatorio garantiza la clave, no el contenido.** El esquema de
 `_esquema_evaluacion` lo exige, pero `{"escalar": true, "motivo": ""}` pasa sin
 validación: el chequeo de campos vacíos de `escalamiento.py` mira
