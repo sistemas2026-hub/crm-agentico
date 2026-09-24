@@ -3513,6 +3513,12 @@ def centro_mando():
         registrar("centro_mando", "fallo al calcular el panorama", error=e)
         return jsonify({"error": "No se pudo calcular el panorama."}), 500
 
+    # Los estados que cuentan como "este agente tiene algo entre manos". Se
+    # declara aqui, al lado de la derivacion, y no suelto en el agregado: al
+    # renombrar los estados el contador se quedo con los viejos y la franja
+    # mostraba 0 agentes con trabajo mientras tres tarjetas decian TRABAJANDO.
+    CON_TRABAJO = {"error", "waiting_approval", "working", "waiting_tool", "waiting_user"}
+
     def _haciendo(estado: str, carga: dict, act: dict) -> str:
         """
         Una frase de que trae entre manos el agente, compuesta con lo medido.
@@ -3641,8 +3647,7 @@ def centro_mando():
             "herramientas_hoy": t.get("herramientas_hoy") or 0,
             "duracion_media_ms": t.get("duracion_media_ms"),
             "fallos_hoy": t.get("fallos_hoy") or 0,
-            "agentes_activos": sum(
-                1 for a in agentes if a["estado"] in ("procesando", "atendiendo")),
+            "agentes_activos": sum(1 for a in agentes if a["estado"] in CON_TRABAJO),
         },
         "agentes": agentes,
         "servicios": [

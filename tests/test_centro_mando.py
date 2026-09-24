@@ -199,6 +199,19 @@ revisar("Sin conversaciones" in (frases.get("libre") or ""),
 revisar(all("@" not in f and "+57" not in f for f in frases.values()),
         "ninguna frase trae algo con forma de dato de cliente")
 
+print("\n6. la franja de arriba no puede contradecir a las tarjetas")
+totales = (r.get_json() or {}).get("totales", {})
+con_trabajo = [n for n, a in por_nombre.items()
+               if a["estado"] not in ("idle", "offline", "completed")]
+revisar(totales.get("agentes_activos") == len(con_trabajo),
+        "'agentes con trabajo' cuenta los mismos que muestran las tarjetas",
+        f"la franja dice {totales.get('agentes_activos')} y hay {len(con_trabajo)}: {sorted(con_trabajo)}")
+# Nace de un error real: al renombrar los estados, este conteo se quedo
+# buscando 'procesando' y 'atendiendo'. Nadie lo vio hasta abrir la pantalla
+# en produccion y leer '0 agentes con trabajo' sobre tres tarjetas activas.
+revisar(totales.get("agentes_activos") > 0,
+        "con agentes trabajando, el contador no es cero")
+
 print("\n4. el ticker no lleva contenido de conversaciones")
 panorama_con_eventos = dict(PANORAMA)
 panorama_con_eventos["eventos_herramienta"] = [{
