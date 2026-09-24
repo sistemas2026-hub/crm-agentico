@@ -4619,6 +4619,43 @@ def conversaciones():
                     "canal_whatsapp": canal_whatsapp})
 
 
+@app.get("/tenant-de-organizacion/<organization_id>")
+def tenant_de_organizacion(organization_id):
+    """
+    De que empresa son los datos que puede pedir quien inicio sesion.
+
+    Existe para la plataforma multi-ISP (PRD 8.13). Hasta ahora el frontend
+    sacaba el tenant de una variable de entorno, o sea que la instalacion
+    entera servia a una sola empresa: con dos, cada lectura le habria servido a
+    un ISP los datos del otro.
+
+    Por que lo resuelve el MOTOR y no Django: el frontend entra por Django como
+    'crm_user', que no tiene privilegios sobre el esquema 'asistente', y esa
+    tabla ademas tiene RLS por organizacion. Es el mismo principio que ya
+    gobierna el contexto tecnico -- Django no habla con WispHub ni con
+    SmartOLT, el motor si -- aplicado a la configuracion: abrir un segundo
+    camino a esa tabla seria mantener dos formas de contestar lo mismo.
+
+    404 cuando esa organizacion no tiene asistente configurado. **No hay
+    default**, y eso es la mitad del valor de este endpoint: servir 'el tenant
+    de siempre' cuando no se sabe cual corresponde es exactamente la fuga que
+    el aislamiento por organizacion existe para impedir. Falla cerrado, como
+    'app_backend' sin tenant fijado, que ve 0 filas en vez de todas.
+    """
+    try:
+        slug = persistencia.tenant_de_organizacion(organization_id)
+    except Exception as e:
+        registrar("tenant", "fallo al resolver la organizacion", error=e)
+        return jsonify({"error": "No se pudo resolver el tenant."}), 500
+
+    if not slug:
+        return jsonify({
+            "error": "SIN_TENANT",
+            "detalle": "Esa organizacion no tiene un asistente configurado.",
+        }), 404
+    return jsonify({"tenant": slug})
+
+
 @app.get("/conversaciones/por-caso/<caso_id>")
 def conversacion_por_caso(caso_id):
     """

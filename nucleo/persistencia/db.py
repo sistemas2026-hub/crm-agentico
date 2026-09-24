@@ -116,6 +116,72 @@ def _organizacion(cur, tenant: str) -> str:
     return _ORGS[tenant]
 
 
+#: Cache de la INVERSA: organization_id -> slug.
+#:
+#: Aparte de `_ORGS` y no derivado de el: `_ORGS` se llena con los tenants que
+#: alguien pidio, asi que invertirlo solo conoceria a los ya preguntados.
+_SLUGS: dict[str, str] = {}
+
+
+def slug_de_organizacion(cur, organization_id: str) -> str | None:
+    """
+    organization_id -> slug. La inversa de `_organizacion`.
+
+    La necesita la plataforma para varios ISPs (PRD 8.13): el frontend sabe
+    QUIEN inicio sesion --su organizacion viene en el JWT-- y no de que empresa
+    son los datos que va a pedir. Hasta hoy eso salia de una variable de
+    entorno, o sea que la instalacion entera servia a una sola empresa.
+
+    Que la inversa EXISTA no es casualidad ni suerte: `asistente.tenant_config`
+    tiene `organization_id` como clave primaria y `slug` con UNIQUE, asi que la
+    relacion es una biyeccion (comprobado contra el esquema el 24/09/2026). Si
+    una organizacion pudiera tener dos tenants, esta funcion no podria existir.
+
+    Devuelve None si esa organizacion no tiene tenant configurado. **None no es
+    un error y no se convierte en un default**: significa que esa empresa
+    todavia no tiene asistente, y servirle el de otra seria exactamente la
+    fuga que el aislamiento por organizacion existe para impedir.
+
+    Como `_organizacion`, corre con el usuario que conecta: es la consulta que
+    AVERIGUA que tenant fijar, asi que no puede depender de que ya este fijado.
+    """
+    clave = str(organization_id or "").strip()
+    if not clave:
+        return None
+    if clave in _SLUGS:
+        return _SLUGS[clave]
+    cur.execute("select slug from asistente.tenant_config where organization_id = %s",
+                (clave,))
+    fila = cur.fetchone()
+    if not fila:
+        return None
+    slug = fila[0] if not isinstance(fila, dict) else fila["slug"]
+    _SLUGS[clave] = str(slug)
+    return _SLUGS[clave]
+
+
+def tenant_de_organizacion(organization_id: str) -> str | None:
+    """
+    `slug_de_organizacion` con su propia conexion, para quien no tiene una.
+
+    No puede usar `sesion()`: esa exige un tenant fijado, y esta es justamente
+    la consulta que AVERIGUA cual es. Mismo patron y mismo timeout corto que la
+    lectura del interruptor, por el mismo motivo -- la atiende el frontend en
+    cada peticion, y una que se cuelga deja la pantalla esperando.
+    """
+    if not str(organization_id or "").strip():
+        return None
+    con = psycopg.connect(dsn(), connect_timeout=SEGUNDOS_CONEXION_GATE,
+                          row_factory=dict_row)
+    try:
+        with con.cursor() as cur:
+            cur.execute("select set_config('statement_timeout', %s, false)",
+                        (str(SEGUNDOS_CONEXION_GATE * 1000),))
+            return slug_de_organizacion(cur, organization_id)
+    finally:
+        con.close()
+
+
 # El timeout de conexion de casi todo: una consulta de conversacion, una
 # escritura de traza, un barrido del reloj. No se toca.
 SEGUNDOS_CONEXION = 30
