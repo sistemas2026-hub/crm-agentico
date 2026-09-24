@@ -73,6 +73,23 @@ for carpeta in carpetas:
             if ESCRITURA.search(sin_comentario) and not sin_comentario.lstrip().startswith(("#", "//", "*")):
                 hallados.append(f"{archivo.relative_to(RAIZ)}:{n}: {linea.strip()[:90]}")
 comprobar(revisados > 300, f"se revisaron los archivos del proyecto ({revisados})")
+# Falsos positivos YA REVISADOS, anclados al texto exacto de la linea.
+#
+# La regex es deliberadamente amplia --su comentario lo dice: mejor revisar de
+# mas que dejar escapar un escritor-- asi que lo correcto no es aflojarla sino
+# dejar por escrito que se miro y por que no es una escritura. Se ancla al
+# CONTENIDO y no al numero de linea: si el archivo se reordena sigue valiendo,
+# pero si esa linea cambia, el perdon deja de aplicar y la guarda vuelve a
+# sonar. Un perdon por ruta entera si seria una puerta abierta.
+FALSOS_POSITIVOS = {
+    # Una linea de print: muestra quien la tiene, no se la asigna a nadie.
+    ("cli/revision_g8.py",
+     "f\"   tomada_por={c['tomada_por'] or '(nadie)'}\""),
+}
+hallados = [h for h in hallados
+            if (h.split(":", 1)[0].replace("\\", "/"),
+                h.split(": ", 1)[1] if ": " in h else "") not in FALSOS_POSITIVOS]
+
 comprobar(not hallados, "ningun escritor de la asignacion fuera de transiciones.py"
           + ("".join(f"\n          {h}" for h in hallados) if hallados else ""))
 
@@ -95,7 +112,15 @@ for nombre, nodo in funciones.items():
                         and ESCRITURA.search(ast.get_source_segment(fuente, n) or "")]
     comprobar(bool(anidadas) and bool(retorno) and not fuera_del_cuerpo,
               f"{nombre}: escribe solo dentro de cuerpo(), que corre por _ejecutar()")
-comprobar({"intervenir", "tomar", "soltar", "reasignar", "resolver", "devolver_a_ia"} <= set(escritoras),
+# 'resolver' ESTABA en esta lista y se saco el 24/09/2026 -- no porque haya
+# dejado de existir, sino porque dejo de escribir: hoy es un envoltorio de una
+# linea sobre cerrar() (T17), desde el commit 4251dfd. Seguir exigiendola aqui
+# es exigir que una funcion escriba la asignacion por su cuenta, que es lo
+# contrario de lo que esta prueba defiende. Entraron en su lugar las dos que
+# SI escriben: cerrar y adoptar_de_legado.
+ESCRITORAS_ESPERADAS = {"intervenir", "tomar", "soltar", "reasignar",
+                        "cerrar", "adoptar_de_legado", "devolver_a_ia"}
+comprobar(ESCRITORAS_ESPERADAS <= set(escritoras),
           f"se reconocen las transiciones que escriben la asignacion ({sorted(escritoras)})")
 
 if fallos:
