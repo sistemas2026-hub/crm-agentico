@@ -7,9 +7,15 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **24/09/2026 ~22:05 Bogotá** — deploy de la planta de
-oficina (`0925a7e`), su ajuste tras verla (`0c98fa5`) y la remedición del
-mapa de ramas. Esta versión es la
+Última actualización: **25/09/2026 13:44 Bogotá** — se abren dos fichas en
+`TRABAJO ACTIVO`: la custodia de materiales, con su diseño congelado, y la
+integración de Campo, que es su prerrequisito y está **bloqueada hasta cumplir su
+contrato**. Ninguna arrancada; nada de código tocado. El detalle de por qué la
+integración es el riesgo y no el diseño está en esa sección.
+
+La actualización anterior fue el **24/09/2026 ~22:05 Bogotá** — deploy de la planta
+de oficina (`0925a7e`), su ajuste tras verla (`0c98fa5`) y la remedición del
+mapa de ramas. Esa versión es la
 **FUSIÓN A MANO** de las dos copias que existían de este archivo — una en
 `integrar-centro-mando` y otra en `feature/bandeja-relevo`, editadas las dos
 el mismo día, divergidas 252 lineas. No se borró nada de ninguna: se importó
@@ -85,6 +91,27 @@ decidiera habría sido un deploy de tres cosas disfrazado de uno.
 f946d84  Un servicio puede decir de quien habla, y la sesion sigue mandando
 afd721a  D1 cierra su parte: el CI queda en verde en las dos ramas
 ```
+
+**REMEDIDO el 25/09/2026 13:44 Bogotá, por contenido (`git patch-id --stable`)
+contra `origin/fix/integracion-wisphub`. Siguen siendo 3, pero NO son estos:**
+
+```
+YA ESTÁN AFUERA, con otro hash --otra sesión los publicó por la rama
+`deploy/arreglo-servicio` (worktree C:/tmp/deploy-arreglo):
+   78d20b8 → e1080a1        f946d84 → 6b096af        c3ec175 → a60cb85
+
+LO QUE SIGUE FUERA:
+   c017bdb  Ver la pantalla encontro lo que las guardas no podian
+   e957e06  El estado dice que la planta salio, y corrige lo que ya no era cierto
+   afd721a  D1 cierra su parte: el CI queda en verde en las dos ramas
+```
+
+Dos de los tres que quedan son **documentación de este archivo**; el tercero sigue
+siendo el CI. Y producción se movió otra vez el 25/09: `a60cb85 → 61a7f74`.
+
+Es la **cuarta** vez que esta sección envejece en dos días, y por cuarta vez el
+método aguantó y el número no. Lo que hay que conservar es la primera línea de este
+bloque, no la lista.
 
 ### DESPLEGADO el 24/09/2026 21:2x Bogotá — la planta de oficina
 
@@ -412,6 +439,54 @@ py -3.13 tests/test_escalada_forzada.py     -> exit 0
 
 
 ## TRABAJO ACTIVO
+
+### Abierto el 25/09/2026 — custodia de materiales, y su prerrequisito
+
+Dos fichas nuevas, ninguna arrancada. El diseño está cerrado; lo que falta es una
+integración que no es suya.
+
+```
+Custodia de materiales   🟡 DISEÑO CONGELADO, ejecución EN ESPERA.
+                            Ficha: objetivos/custodia-de-materiales.md
+                            Brief del diseño (v3): briefs/inventario-de-bodega.md
+                            Lo medido que lo motivó: el módulo de materiales de
+                            Campo tiene 8 entidades y 5 endpoints, y NO tiene
+                            bodega -- 0 entidades de existencia, 0 endpoints para
+                            crear una EntregaDeKit, 0 pantallas, 0 rol de
+                            bodeguero. Nadie puede despachar material hoy.
+                            Y NADA de materiales esta en produccion: las
+                            migraciones 0004/0005/0006 de campo no existen en la
+                            rama de despliegue. Eso liberó el diseño --no hay
+                            contrato desplegado que proteger-- y por eso es un
+                            libro unico de movimientos con origen y destino, no
+                            una capa paralela.
+                            NO ARRANCA hasta que la integración de Campo esté
+                            hecha. Esperar no cuesta: nada del diseño depende de
+                            la rama.
+
+Integración de Campo     🔴 BLOQUEADA HASTA CONTRATO CUMPLIDO.
+                            Ficha: objetivos/integracion-campo.md
+                            feat/campo-diseno-stitch está 59 commits adelante del
+                            destino y 297 ATRÁS. 948 archivos difieren:
+                            548 faltan en Campo · 210 son solo de Campo ·
+                            190 difieren en los dos lados.
+                            El riesgo NO son los 548: son los 190, que es donde
+                            git pide decisiones. Entre ellos los CUATRO monolitos
+                            de §2, los cuatro documentos de autoridad,
+                            tenants/rapilink.config.yaml y cli/cargar_config.py
+                            --o sea la guarda que protege de esta misma rama--.
+                            Antecedente real: `452e6bb` frenó que la config de
+                            esta copia dejara al motor desplegado ejecutando
+                            acciones irreversibles sin la frontera. Ese commit
+                            declara el resto pendiente: "12 archivos en
+                            conflicto". Este objetivo es ese trabajo.
+                            NO INICIAR MERGE hasta: ficha leída · línea base de
+                            las guardas medida y pegada · los rojos clasificados.
+                            Y J1: otra sesión está editando esa rama ahora
+                            (12 archivos sin commitear, 3 en el camino).
+```
+
+---
 
 **Tres frentes avanzaron el 24/09**, cada uno en su propio árbol. Ninguno está
 bajo los pies de los otros.
