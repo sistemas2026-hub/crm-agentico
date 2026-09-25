@@ -455,6 +455,73 @@ sus guardas a mano: primero, el estado de las guardas.
 **Lo que sigue abierto de D1:** las 54 que piden Postgres no corren en CI.
 Falta un servicio de base en el workflow.
 
+### 25/09/2026 — el CI gana una tercera categoría: ROJO DECLARADO
+
+```
+antes   92 en verde · 0 en rojo · 54 sin correr
+ahora   92 en verde · 0 en rojo · 1 en ROJO DECLARADO · 54 sin correr
+        NO es una regresión del CI: el exit sigue siendo 0.
+```
+
+Commit `29ddcf4`. `cli/correr_pruebas.py` distinguía **FALLO** de **NO SE PUDO
+CORRER**; sin esta tercera, una guarda que caza un defecto **abierto** entraba al
+resumen como rojo puro, indistinguible de una prueba que alguien olvidó
+actualizar — y un CI donde no se sabe cuál rojo es el conocido deja de ser una
+señal: la sesión siguiente aprende a ignorarlo entero.
+
+La regla de entrada es estrecha a propósito, para que no se vuelva un cajón:
+**solo entra un rojo que señala un defecto real con su ficha.** Una prueba
+atrasada respecto del código no entra — esa se arregla. Comprobada en las tres
+direcciones, y la tercera es la que importa: cuando un rojo declarado **pasa**, el
+corredor avisa que hay que sacarlo de la lista. Sin eso, la anotación envejece —
+que es exactamente el defecto que la prueba de abajo persigue, un nivel arriba.
+
+**El rojo declarado de hoy:** `tests/test_system_identidad_no_queda_obsoleto.py`.
+
+Los cuatro mensajes `system` que el motor arma dentro de `if not historial`
+(`nucleo/modelo/motor.py:3144`) se escriben **una vez, en el primer turno**, y
+nada los invalida cuando el estado que describen cambia. Medido: una conversación
+que arranca sin verificar y se verifica después arrastra para siempre *"Este
+cliente TODAVIA NO esta verificado: no sabes quien es, no tienes su cuenta
+ubicada y no conoces su servicio"* — con `sesion.verificado` ya en `True`. Dos
+conversaciones que desde afuera están las dos verificadas reciben instrucciones
+**opuestas**. Corre sin base y sin red.
+
+**Un `system` no es memoria: es una instrucción vigente.** Si afirma un estado
+que puede cambiar, en algún momento miente, y el modelo no tiene con qué saber
+cuál de los dos mundos es el de hoy.
+
+Lo que está **medido** y lo que está **reportado**, que no es lo mismo:
+
+```
+MEDIDO acá    la contradicción existe (exit 1, sin base ni red)
+              el patrón de invalidación YA existe en el código: api.py:1754
+              hace `pop` de INSTRUCCION_REENCAUZAR, y el comentario de al lado
+              describe el defecto general sin saberlo
+              inventario de los 14 puntos que inyectan un system, congelado en
+              la prueba: uno nuevo la hace fallar y obliga a declarar si
+              envejece
+REPORTADO     que este tipo de señal degrade el RUTEO. Viene de otra sesión de
+              la investigación y NO se midió acá. La contradicción de estado y
+              la degradación del router son dos fenómenos distintos
+```
+
+**Falta una sola medición para la ficha:** A/B/C contra el modelo con N≥5
+(`C:\tmp\abc_router_con_modelo.py`), sobre la traza y no la redacción. Hoy está
+probado que la contradicción **existe**; falta **cuánto mueve la decisión**.
+`B 3/5` sería efecto con muestra corta, no refutación.
+
+El diseño ya acordado y su restricción económica están en
+[briefs/restriccion-estado-vs-prefijo-cacheado.md](briefs/restriccion-estado-vs-prefijo-cacheado.md)
+(`493444e`, `ef26b32`, `cac3bdc`): instrucciones estables arriba y cacheables,
+estado operativo abajo y recalculado. **Regenerar el `system` en cada turno
+invalida el caché de prefijo**, y eso cuesta entre 4 y 8 veces la factura —
+ninguna guarda del proyecto mira el costo, así que ese cambio pasaría el CI
+entero en verde. Ese brief lleva también las **cuatro regresiones de producción**
+que el bloque de identidad evita (R1–R4, agosto y septiembre 2026), como
+criterios que la ficha hereda: el objetivo **no** es «eliminar los mensajes
+system de identidad» sino que dejen de afirmar un estado vencido.
+
 ### Qué hay en producción, con fecha
 
 Importado de la copia de `feature/bandeja-relevo`, que lo tenía y esta no.
