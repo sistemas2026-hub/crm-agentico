@@ -218,6 +218,44 @@ declara como tal: un falso negativo es posible si el modelo lo pide con otras
 palabras, así que las respuestas de los casos en `0/N` se leen antes de darlos
 por limpios.
 
+## El contrato que la ficha hereda
+
+Acordado el 25/09/2026, antes de la corrida. Lo que está marcado **(otra sesión)**
+viene del hilo paralelo de la investigación y no se midió acá.
+
+### No hacer
+
+```
+✗ modificar el historial FUENTE
+✗ quitar la identidad estructurada
+✗ eliminar las herramientas del historial de los ejecutores
+✗ usar un resumen generado por IA como reemplazo del historial
+✗ mover todo el estado al prefijo cacheable
+```
+
+La cuarta merece su fundamento, porque es la que más tentadora se vuelve cuando
+el contexto crece: un resumen generado por el modelo es **el modelo calculando**,
+y este proyecto ya tiene eso congelado al revés — *el modelo compone, el código
+calcula* (PRD §12.5). Además está medido que la redacción sin catálogo no aporta
+información nueva: pedirle tres veces que reescriba devuelve tres veces la misma
+frase, byte a byte (09/09/2026). Un resumen no puede crear el dato que nadie fue
+a buscar; sí puede perder el que estaba.
+
+### Sí hacer
+
+```
+✓ construir una vista DERIVADA
+✓ mantener la auditoría completa
+✓ decidir la vista según la capacidad del rol (`puede_consultar`)   (otra sesión)
+✓ preservar el caché de prefijo
+✓ mantener una guarda anti-limbo independiente                      (otra sesión)
+```
+
+⚠️ **`anti-limbo` no está definido en este brief.** Viene del hilo paralelo y acá
+no hay evidencia de qué cubre ni contra qué falla. Quien escriba la ficha tiene
+que traer su enunciado de esa sesión: una restricción que nadie puede verificar
+no es una restricción, es una palabra.
+
 ## Fuera de alcance, con su motivo
 
 **La auditoría de integridad de herramientas queda como deuda aparte.** Son tres
