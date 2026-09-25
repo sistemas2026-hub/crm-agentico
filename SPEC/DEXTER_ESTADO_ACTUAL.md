@@ -458,10 +458,35 @@ Falta un servicio de base en el workflow.
 ### 25/09/2026 — el CI gana una tercera categoría: ROJO DECLARADO
 
 ```
-antes   92 en verde · 0 en rojo · 54 sin correr
-ahora   92 en verde · 0 en rojo · 1 en ROJO DECLARADO · 54 sin correr
-        NO es una regresión del CI: el exit sigue siendo 0.
+MEDIDO el 25/09/2026 15:30 Bogotá, local, `--sin-base --sin-red`, 127s:
+   92 en verde · 2 en rojo · 1 en ROJO DECLARADO · 54 sin correr · exit 1
 ```
+
+⚠️ **Los 2 en rojo NO son el declarado y no son de este trabajo.** Esta sección
+decía «CI EN VERDE, 0 en rojo» y con esta medición deja de ser cierto:
+
+```
+test_centro_mando.py         TypeError: '>' not supported between instances of
+                             'NoneType' and 'int'
+test_m06e_consolidacion.py   FaltaIdentidadEnSesion: 'ping_cliente' necesita
+                             ['id_servicio'] de la sesion verificada
+```
+
+**Al menos el primero está MAL CLASIFICADO**, y eso cambia qué significa su
+rojo: `test_centro_mando.py` importa `nucleo.persistencia.db` y **no contiene
+ninguno de los patrones que `clasificar()` busca** (`psycopg|DATABASE_URL|DBHOST|
+dsn(|conexion.dsn`), así que el corredor lo trata como aislado y lo corre sin
+base. Su rojo es probablemente **NO SE PUDO MEDIR presentado como FALLO** — el
+mismo defecto del contrato que el CI encontró tres veces el 24/09, ahora en el
+clasificador y no en las pruebas. El segundo no importa `db` y queda sin
+diagnosticar.
+
+No se arreglaron acá a propósito: son de otra familia y confundirlos con el rojo
+declarado es lo que esta sección existe para evitar. **Lo que sí hay que corregir
+es `clasificar()`**: mirar los imports y no solo el texto.
+
+El exit 1 de la corrida viene de esos dos, **no** del rojo declarado: el
+declarado da exit 0 por sí solo, medido.
 
 Commit `29ddcf4`. `cli/correr_pruebas.py` distinguía **FALLO** de **NO SE PUDO
 CORRER**; sin esta tercera, una guarda que caza un defecto **abierto** entraba al
