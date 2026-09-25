@@ -129,6 +129,50 @@ A 5/5 · B 5/5 · C 5/5    la contradicción existe y NO explica este caso
 otra sesión de la investigación — *reportado, no medido acá*: si hace falta
 reabrirlo, la evidencia está en esa sesión, no en este brief.
 
+## Cómo se formula el objetivo de la ficha, y cómo NO
+
+Esto decide si el arreglo conserva o destruye una mejora de producto, así que va
+escrito antes de que la ficha exista.
+
+```
+MAL   "eliminar los mensajes system de identidad"
+BIEN  "evitar que un estado temporal o una señal operativa se presenten como
+       contexto permanente cuando ya no representan el estado actual"
+```
+
+La primera formulación parece la misma y borra la mejora de agosto de 2026. Los
+~45 renglones de comentario en `motor.py:3154-3210` no son decoración: son la
+memoria de por qué esos mensajes existen, qué bug evitaron y qué conducta no se
+quiere recuperar.
+
+### Las cuatro regresiones que el arreglo no puede reintroducir
+
+Medidas en producción, con fecha, y hoy solo vivas como comentario. **La ficha
+las hereda como criterios de aceptación** — es la única forma de que mover el
+bloque no pierda lo que el bloque protege:
+
+```
+R1  15/08/2026 · ante "¿vos sabes quien soy?" el modelo FABRICA la explicación:
+      "tu chat esta asociado a tu cuenta porque escribis desde el WhatsApp que
+       tenes registrado"  y  "el sistema me confirma que sos el titular"
+      Las dos frases inventadas. Por eso el aviso lleva el nombre real.
+
+R2  15/08/2026 · ante "¿sabes quien te habla?" contesta sobre el TRÁMITE
+      ("tu identidad quedo verificada antes") a alguien que pregunta por su
+      NOMBRE, teniéndolo a mano. Son dos preguntas y se contestan distinto.
+
+R3  12/09/2026 · sin verificar, el cliente escribe su cédula y recibe "no
+      necesito ese numero, ya tengo tu cuenta ubicada". Las dos mitades falsas:
+      ni la tenía ubicada ni podía. Es el agujero simétrico de R1.
+
+R4  agosto 2026 · en un rol SIN herramientas de datos --el router-- el modelo no
+      podía deducir la verificación de ninguna señal, y volvía a pedir la cédula
+      de alguien ya verificado en CADA conversación.
+```
+
+R4 importa doble: explica por qué el aviso existe justamente en el rol donde se
+está investigando el defecto. El mensaje no está ahí por descuido.
+
 ## Fuera de alcance, con su motivo
 
 **La auditoría de integridad de herramientas queda como deuda aparte.** Son tres
