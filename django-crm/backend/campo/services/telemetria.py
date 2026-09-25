@@ -66,7 +66,23 @@ def servicio_de(orden) -> str:
     return str(contexto.get("servicio") or "").strip()
 
 
-def probar_conexion(orden, *, timeout: int = 60) -> dict:
+#  EL MINIMO QUE WISPHUB ACEPTA ES 3, MEDIDO -- no documentado.
+#
+#  Verificado en vivo el 25/09/2026 contra id_servicio 5832: 'pings' 1 y 2
+#  devuelven HTTP 400; 3, 4, 5 y 10 responden. Por eso la app no puede pedir
+#  los paquetes de a uno para irlos mostrando: la tanda mas chica es de tres.
+#
+#  TANDAS, Y NO UNA SOLA LLAMADA DE DIEZ. Una de diez tarda ~18 s y el tecnico
+#  mira una rueda girar sin saber si el primero volvio. En tandas los primeros
+#  aparecen a los ~5 s. Se pagan tres llamadas en vez de una; a cambio, quien
+#  esta parado en la casa ve caer los paquetes.
+MINIMO_POR_TANDA = 3
+TANDAS = (3, 3, 4)
+PAQUETES = sum(TANDAS)
+
+
+def probar_conexion(orden, *, paquetes: int = PAQUETES,
+                    timeout: int = 120) -> dict:
     """
     Le pide al motor un ping en vivo al equipo del cliente de 'orden'.
 
@@ -93,7 +109,8 @@ def probar_conexion(orden, *, timeout: int = 60) -> dict:
             # ruta interna la sesion es None a proposito. La herramienta lo
             # acepta porque el tenant lo declaro en
             # 'argumentos_sobrescribibles', que es lista blanca.
-            json={"id_servicio": servicio},
+            json={"id_servicio": servicio,
+                  "pings": max(MINIMO_POR_TANDA, int(paquetes or PAQUETES))},
             headers=cabeceras,
             timeout=timeout,
         )
@@ -128,11 +145,11 @@ def probar_conexion(orden, *, timeout: int = 60) -> dict:
 
     return {
         "ok": True,
-        # Texto tal como lo manda WispHub ('3 de 3', '0 de 3'), no un numero:
-        # esta medido que convertirlo invita a compararlo, y un ping no es un
-        # veredicto. Ver el encabezado de este modulo.
+        # Texto tal como lo manda WispHub ('10 de 10', '0 de 10'), no un
+        # numero: esta medido que convertirlo invita a compararlo, y un ping no
+        # es un veredicto. Ver el encabezado de este modulo.
         "respondieron": str(respondieron),
-        "latencias": _latencias(resultado),
+        "paquetes": _paquetes(resultado),
     }
 
 
@@ -168,18 +185,31 @@ def _buscar(dato, campo: str):
     return None
 
 
-def _latencias(resultado) -> list:
+def _paquetes(resultado) -> list:
     """
-    El tiempo de ida y vuelta de cada intento, si vino.
+    Cada intento por separado: numero, si volvio, y cuanto tardo.
 
-    Se devuelven los TRES por separado y no un promedio: promediar tres
-    muestras de las que una puede no haber respondido esconde justamente lo
-    que le interesa a quien esta parado en la casa -- si el enlace es
-    intermitente o esta caido parejo.
+    Uno por uno y no un promedio, y con DIEZ en vez de tres. Un promedio
+    esconde justamente lo que le interesa a quien esta parado en la casa: si
+    el enlace es intermitente o esta caido parejo. Y con tres muestras esa
+    diferencia no se dibuja -- esta medido que el mismo equipo sano devuelve
+    1, 2 y 3 de 3 en corridas seguidas, asi que una racha corta no se
+    distingue de un patron. Con diez, si.
+
+    Se arma aca y no se reenvia el crudo: 'ping-N' trae 'host', que es la IP
+    del cliente, y ya se filtro una vez por mandar el objeto entero.
     """
-    valores = []
-    for n in (1, 2, 3):
-        rtt = _buscar(resultado, f"ping-{n}")
-        if isinstance(rtt, dict) and rtt.get("avg-rtt"):
-            valores.append(str(rtt["avg-rtt"]))
-    return valores
+    salida = []
+    for n in range(1, PAQUETES + 1):
+        crudo = _buscar(resultado, f"ping-{n}")
+        if not isinstance(crudo, dict):
+            continue
+        recibidos = str(crudo.get("received") or "0").strip()
+        salida.append({
+            "n": n,
+            # 'respondio' es el dato duro; la pantalla decide como lo pinta.
+            "respondio": recibidos not in ("", "0"),
+            "rtt": str(crudo.get("avg-rtt") or ""),
+            "perdida": str(crudo.get("packet-loss") or ""),
+        })
+    return salida

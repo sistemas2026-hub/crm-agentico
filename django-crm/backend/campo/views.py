@@ -28,7 +28,11 @@ from campo.serializers import (
     RegistroEvidenciaSerializer,
 )
 from campo.services.idempotencia import manejar_idempotencia
-from campo.services.telemetria import SinServicioParaPing, probar_conexion
+from campo.services.telemetria import (
+    TANDAS,
+    SinServicioParaPing,
+    probar_conexion,
+)
 from campo.services.storage import CampoStorage
 from campo.services.transiciones import TransicionInvalidaError, completar_campo, ejecutar_accion_operativa
 from campo.services.validador import validar_campos_tecnicos, verificar_checklist_completo
@@ -708,8 +712,17 @@ class ProbarConexionView(APIView):
     def post(self, request, pk):
         orden = _obtener_orden_o_404(request, pk)
 
+        # Cuantos paquetes pide ESTA llamada. La app manda tandas para ir
+        # mostrandolas; el minimo que WispHub acepta es 3, medido (1 y 2 dan
+        # 400), asi que se acota en vez de confiar en lo que llegue.
         try:
-            resultado = probar_conexion(orden)
+            pedidos = int(request.data.get("paquetes") or max(TANDAS))
+        except (TypeError, ValueError):
+            pedidos = max(TANDAS)
+        pedidos = max(3, min(pedidos, 10))
+
+        try:
+            resultado = probar_conexion(orden, paquetes=pedidos)
         except SinServicioParaPing as e:
             return Response(
                 {"error": "SIN_SERVICIO", "detalle": str(e)},
@@ -730,6 +743,8 @@ class ProbarConexionView(APIView):
         return Response({
             "medido": True,
             "respondieron": resultado["respondieron"],
-            "latencias": resultado["latencias"],
+            # Uno por uno, no un promedio: la pantalla los lista y quien mira
+            # ve DONDE se cayo, no solo cuantos volvieron.
+            "paquetes": resultado["paquetes"],
             "server_time": timezone.now().isoformat(),
         })

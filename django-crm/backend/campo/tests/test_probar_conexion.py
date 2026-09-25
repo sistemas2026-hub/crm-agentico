@@ -42,13 +42,12 @@ class _Orden:
 # documentado en motor.py::_buscar_campo -- buscar en el primer nivel no lo
 # encuentra, y eso ya costo un bug.
 PING_REAL = {
-    "total": 4,
-    "resultados": [
-        {"ping-1": {"avg-rtt": "1ms401us", "packet-loss": "0"}},
-        {"ping-2": {"avg-rtt": "1ms388us", "packet-loss": "0"}},
-        {"ping-3": {"avg-rtt": "1ms502us", "packet-loss": "0"}},
-        {"ping-exitoso": "3 de 3"},
-    ],
+    "total": 11,
+    "resultados": (
+        [{f"ping-{n}": {"avg-rtt": f"1ms{400 + n}us", "packet-loss": "0",
+                        "received": "1"}} for n in range(1, 11)]
+        + [{"ping-exitoso": "10 de 10"}]
+    ),
 }
 
 
@@ -66,7 +65,18 @@ class ProbarConexionTest(SimpleTestCase):
                           return_value=_Respuesta(200, {"resultado": PING_REAL})) as post:
             telemetria.probar_conexion(self._orden("7001"))
 
-        self.assertEqual(post.call_args.kwargs["json"], {"id_servicio": "7001"})
+        self.assertEqual(post.call_args.kwargs["json"]["id_servicio"], "7001")
+
+    def test_se_piden_diez_paquetes_y_no_los_tres_del_catalogo(self):
+        """El catalogo fija 3 para el asistente --bastan en una conversacion y
+        cuestan menos-- y la app pide 10, porque parado en la casa lo que
+        importa es ver la intermitencia. El override solo entra porque el
+        tenant declaro 'pings' en 'argumentos_sobrescribibles'."""
+        with patch.object(telemetria.requests, "post",
+                          return_value=_Respuesta(200, {"resultado": PING_REAL})) as post:
+            telemetria.probar_conexion(self._orden())
+
+        self.assertEqual(post.call_args.kwargs["json"]["pings"], 10)
 
     def test_sin_servicio_no_se_llama_a_nadie(self):
         """Sin identificador no hay a que equipo pingear. Se levanta antes de
@@ -87,29 +97,47 @@ class ProbarConexionTest(SimpleTestCase):
             r = telemetria.probar_conexion(self._orden())
 
         self.assertTrue(r["ok"])
-        self.assertEqual(r["respondieron"], "3 de 3")
+        self.assertEqual(r["respondieron"], "10 de 10")
         self.assertNotIn("veredicto", r)
         self.assertNotIn("exitoso", r)
 
-    def test_las_tres_latencias_van_por_separado(self):
-        """Promediarlas esconde lo que le importa a quien esta en la casa: si
-        el enlace es intermitente o esta caido parejo."""
+    def test_los_diez_paquetes_van_uno_por_uno(self):
+        """Promediarlos esconde lo que le importa a quien esta en la casa: si
+        el enlace es intermitente o esta caido parejo. Y con tres muestras esa
+        diferencia no se dibuja."""
         with patch.object(telemetria.requests, "post",
                           return_value=_Respuesta(200, {"resultado": PING_REAL})):
             r = telemetria.probar_conexion(self._orden())
 
-        self.assertEqual(r["latencias"], ["1ms401us", "1ms388us", "1ms502us"])
+        self.assertEqual(len(r["paquetes"]), 10)
+        self.assertEqual([p["n"] for p in r["paquetes"]], list(range(1, 11)))
+        self.assertTrue(all(p["respondio"] for p in r["paquetes"]))
+        self.assertEqual(r["paquetes"][0]["rtt"], "1ms401us")
+
+    def test_un_paquete_que_no_volvio_se_marca_como_tal(self):
+        """El caso que da sentido a listarlos: ver DONDE se cayo. Un 'received'
+        en cero no es un hueco en la lista, es un paquete que no volvio."""
+        mezcla = {"resultados": [
+            {"ping-1": {"avg-rtt": "1ms", "received": "1"}},
+            {"ping-2": {"avg-rtt": "", "received": "0"}},
+            {"ping-exitoso": "1 de 2"},
+        ]}
+        with patch.object(telemetria.requests, "post",
+                          return_value=_Respuesta(200, {"resultado": mezcla})):
+            r = telemetria.probar_conexion(self._orden())
+
+        self.assertEqual([p["respondio"] for p in r["paquetes"]], [True, False])
 
     def test_un_cero_de_tres_es_una_medicion_valida(self):
         """El caso que mas importa distinguir: el equipo NO respondio. Eso es
         un dato, no un fallo -- 'ok' sigue siendo True."""
-        sin_respuesta = {"total": 1, "resultados": [{"ping-exitoso": "0 de 3"}]}
+        sin_respuesta = {"total": 1, "resultados": [{"ping-exitoso": "0 de 10"}]}
         with patch.object(telemetria.requests, "post",
                           return_value=_Respuesta(200, {"resultado": sin_respuesta})):
             r = telemetria.probar_conexion(self._orden())
 
         self.assertTrue(r["ok"])
-        self.assertEqual(r["respondieron"], "0 de 3")
+        self.assertEqual(r["respondieron"], "0 de 10")
 
     def test_no_traslada_la_ip_ni_el_resto_del_crudo(self):
         """'ping-1' trae 'host', que es la IP del cliente. Ya se filtro una vez
@@ -117,8 +145,9 @@ class ProbarConexionTest(SimpleTestCase):
         con_host = {
             "total": 2,
             "resultados": [
-                {"ping-1": {"avg-rtt": "1ms", "host": "172.16.40.70"}},
-                {"ping-exitoso": "1 de 3"},
+                {"ping-1": {"avg-rtt": "1ms", "host": "172.16.40.70",
+                            "received": "1"}},
+                {"ping-exitoso": "1 de 10"},
             ],
         }
         with patch.object(telemetria.requests, "post",
@@ -150,7 +179,7 @@ class ProbarConexionTest(SimpleTestCase):
         self.assertEqual(r["motivo"], "ping_no_habilitado")
 
     def test_una_respuesta_sin_conteo_no_se_inventa(self):
-        """La llamada salio y no trajo el numero. No se rellena con '0 de 3':
+        """La llamada salio y no trajo el numero. No se rellena con '0 de 10':
         eso seria afirmar que el equipo no respondio cuando lo que pasa es que
         no se sabe."""
         with patch.object(telemetria.requests, "post",

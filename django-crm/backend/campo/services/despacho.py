@@ -20,6 +20,7 @@ hacerlo.
 from __future__ import annotations
 
 import os
+import re
 
 from django.db import IntegrityError, transaction
 from django.db.models import Max
@@ -243,10 +244,29 @@ def contexto_del_caso(case_id: str) -> dict:
     # Decirle al tecnico que reintente seria mandarlo a esperar algo que no va
     # a pasar. Medido: 4 de 100 casos reales estan asi (24/09/2026).
     from cases.models import Case
-    caso = Case.objects.filter(pk=case_id).only("external_service_id").first()
+    caso = Case.objects.filter(pk=case_id).only(
+        "external_service_id", "external_ticket_id", "provider",
+        "external_status", "external_created_by").first()
     servicio = (caso.external_service_id or "").strip() if caso else ""
     if caso is not None and not servicio:
-        return sin_contexto("caso_sin_servicio", motor_alcanzado=True)
+        # SIN SERVICIO NO HAY CONTEXTO TECNICO, PERO SI HAY EVALUACION.
+        #
+        # Un caso nacido de una conversacion no tiene servicio asociado y
+        # nunca va a tenerlo. Hasta el 25/09/2026 eso cortaba aca y la orden
+        # quedaba sin NADA -- y es justo el caso que SI tiene lo que el
+        # asistente averiguo: son los dos lados de la misma moneda. Un caso
+        # importado del ISP trae ticket y no trae conversacion; uno nacido de
+        # un chat trae conversacion y no trae ticket.
+        #
+        # Se perdia lo mas util exactamente cuando existia.
+        vacio = sin_contexto("caso_sin_servicio", motor_alcanzado=True)
+        dexter = _lo_que_el_asistente_averiguo(_conversacion_del_caso(case_id))
+        if dexter:
+            vacio["dexter"] = dexter
+        ticket = _ticket_del_proveedor(caso)
+        if ticket:
+            vacio["ticket"] = ticket
+        return vacio
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
     tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
@@ -273,7 +293,11 @@ def contexto_del_caso(case_id: str) -> dict:
         r = requests.get(f"{base}/conversaciones/por-caso/{case_id}",
                          params=parametros, headers=cabeceras, timeout=30)
         r.raise_for_status()
-        crudo = (r.json() or {}).get("contexto") or {}
+        cuerpo = r.json() or {}
+        crudo = cuerpo.get("contexto") or {}
+        # La conversacion viene en la MISMA respuesta y hasta el 25/09/2026 se
+        # tiraba. Ahi esta lo que el asistente ya averiguo.
+        conversacion = cuerpo.get("conversacion") or {}
     except Exception as e:                                   # noqa: BLE001
         return sin_contexto(f"{type(e).__name__}", motor_alcanzado=False)
 
@@ -283,7 +307,38 @@ def contexto_del_caso(case_id: str) -> dict:
         # la diferencia le importa a quien mire la orden despues.
         return sin_contexto("sin_identidad_resoluble", motor_alcanzado=True)
 
-    return depurar_contexto(crudo)
+    return depurar_contexto(crudo, conversacion=conversacion, caso=caso)
+
+
+def _conversacion_del_caso(case_id: str) -> dict:
+    """
+    Solo la conversacion que origino el caso, sin pedir contexto tecnico.
+
+    Se usa cuando el caso NO tiene servicio: ahi no hay ficha del cliente que
+    traer --el motor no sabe de quien hablar-- pero la conversacion existe y
+    con ella lo que el asistente averiguo. Un fallo aca no es un error: se
+    devuelve vacio y la orden queda como estaba.
+    """
+    # Importado ACA y no arriba, como el resto del modulo: asi se mantiene
+    # importable sin la dependencia. Que el import faltara costo un rato --
+    # el NameError caia en el 'except' de abajo y la funcion devolvia vacio
+    # como si el motor no hubiera contestado.
+    import requests
+
+    base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
+    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    cabeceras = {}
+    token = os.environ.get("MOTOR_SERVICE_TOKEN")
+    if token:
+        cabeceras["X-Servicio-Token"] = token
+    try:
+        r = requests.get(f"{base}/conversaciones/por-caso/{case_id}",
+                         params={"tenant": tenant}, headers=cabeceras,
+                         timeout=30)
+        r.raise_for_status()
+        return (r.json() or {}).get("conversacion") or {}
+    except Exception:                                        # noqa: BLE001
+        return {}
 
 
 def sin_contexto(motivo: str, *, motor_alcanzado: bool) -> dict:
@@ -341,7 +396,8 @@ CAMPOS_CLIENTE_SNAPSHOT = ("nombre", "estado", "plan", "ip", "localidad",
                            "direccion", "telefono")
 
 
-def depurar_contexto(crudo: dict) -> dict:
+def depurar_contexto(crudo: dict, *, conversacion: dict | None = None,
+                     caso=None) -> dict:
     """
     Deja solo lo que se puede congelar, y le pone la hora.
 
@@ -376,4 +432,231 @@ def depurar_contexto(crudo: dict) -> dict:
         snapshot["equipo_no_disponible"] = crudo["equipo_no_disponible"]
     if crudo.get("identidad_en_conflicto"):
         snapshot["identidad_en_conflicto"] = crudo["identidad_en_conflicto"]
+
+    dexter = _lo_que_el_asistente_averiguo(conversacion or {})
+    if dexter:
+        snapshot["dexter"] = dexter
+    ticket = _ticket_del_proveedor(caso)
+    if ticket:
+        snapshot["ticket"] = ticket
     return snapshot
+
+
+#  Numeros que parecen un documento. No se baja la cedula a la orden de
+#  trabajo: el tecnico necesita saber A QUIEN visita --y el nombre ya viaja en
+#  la orden-- pero no su documento, y la ficha se congela y queda guardada.
+#  Cuatro a doce digitos seguidos, que es la forma de una cedula colombiana y
+#  tambien la de un NIT. Un numero precedido de '#' NO se toca: es un
+#  ticket ('ticket #93426'), y recortarlo escondia el unico dato con
+#  el que la oficina y el tecnico se refieren al caso.
+_PARECE_DOCUMENTO = re.compile(r"(?<![#\d])\b\d{4,12}\b")
+
+
+def _sin_documentos(texto: str) -> str:
+    """El texto libre del asistente, sin numeros que parezcan un documento."""
+    return _PARECE_DOCUMENTO.sub("(documento)", texto or "").strip()
+
+
+def _lo_que_el_asistente_averiguo(conversacion: dict) -> dict:
+    """
+    Lo que Dexter ya hizo con este caso, para que no se vuelva a hacer.
+
+    POR QUE IMPORTA. El asistente habla con el cliente antes de que exista la
+    orden: verifica identidad, mide el equipo, descarta causas y deja escrito
+    QUE FALTA AVERIGUAR. Todo eso vivia en asistente.conversations y no salia
+    de ahi: el tecnico llegaba a la casa a preguntar lo mismo que el cliente ya
+    habia contestado por WhatsApp.
+
+    'siguiente_paso' es el mas util de los tres y es literal, no una etiqueta:
+    "Confirmar con el cliente si el coaxial lo instalo la empresa o lo
+    modifico el, y con eso cerrar el diagnostico de TV".
+
+    SE LE QUITAN LOS DOCUMENTOS. 'resumen' es texto que redacta el modelo y
+    trae la cedula cuando la verifico ("Mario Sabanagrande, cedula 000021",
+    visto en produccion). El nombre si puede ir --ya esta en la orden--; el
+    documento no: esto se congela en la orden de trabajo y viaja al telefono.
+    """
+    if not conversacion:
+        return {}
+    salida = {}
+    for clave, origen in (("caso", "caso_manual"),
+                          ("motivo_escalada", "motivo_escalamiento"),
+                          ("etiqueta", "etiqueta")):
+        valor = (conversacion.get(origen) or "").strip()
+        if valor:
+            salida[clave] = valor
+    for clave, origen in (("resumen", "resumen"),
+                          ("siguiente_paso", "escalada_siguiente_paso")):
+        valor = _sin_documentos(conversacion.get(origen) or "")
+        if valor:
+            salida[clave] = valor
+    return salida
+
+
+def _ticket_del_proveedor(caso) -> dict:
+    """
+    El ticket del sistema del ISP, con su numero y su estado ALLA.
+
+    Un UUID de caso no le sirve a nadie: el tecnico y la oficina hablan de
+    "el 93426". Y 'external_status' es el estado EN WISPHUB, que no tiene por
+    que coincidir con el del CRM -- alguien pudo cerrarlo del otro lado.
+    """
+    if caso is None:
+        return {}
+    numero = str(getattr(caso, "external_ticket_id", "") or "").strip()
+    if not numero:
+        return {}
+    ticket = {"numero": numero}
+    for clave, atributo in (("proveedor", "provider"),
+                            ("estado", "external_status"),
+                            ("abierto_por", "external_created_by")):
+        valor = str(getattr(caso, atributo, "") or "").strip()
+        if valor:
+            ticket[clave] = valor
+    return ticket
+
+
+# ============================================================================
+#  REFRESCAR LA FICHA  --  volver a capturar lo que se congelo al despachar
+# ============================================================================
+#
+# POR QUE HACE FALTA
+# ------------------
+# Al crear la orden, la ficha del cliente se congela. Eso es deliberado y no se
+# discute: "al congelarse, una medicion deja de ser una medicion -- pasa a ser
+# un registro de lo que se veia en un momento". Por eso lleva 'capturado_en'.
+#
+# El problema es que hasta hoy NO habia forma de volver a capturarla. Un ticket
+# se importa apenas se abre y los datos del cliente se completan mas tarde: la
+# orden quedaba con esa foto para siempre y el tecnico veia "Sin direccion"
+# aunque alguien hubiera cargado la direccion despues. La unica salida era un
+# script contra la base.
+#
+# LAS TRES DECISIONES, Y SU MOTIVO
+# --------------------------------
+# 1. NO TOCA LAS COLUMNAS de la orden (cliente_nombre, cliente_telefono,
+#    cliente_direccion). Esas las escribe quien despacha, a mano, y dicen cosas
+#    que el ISP no tiene y no puede tener: "Casa porton verde, timbre roto,
+#    llamar al llegar". El ISP responde "Cl. 45 #12-88", que para llegar es
+#    PEOR. Un refresco que las sobrescribiera destruiria trabajo humano en cada
+#    llamada. La ficha rellena el hueco cuando la columna esta vacia, y eso ya
+#    lo resuelve _cliente() en serializers.py, en un solo sentido.
+#
+# 2. SOLO LA ULTIMA FICHA vive en 'contexto'; la anterior COMPLETA queda dentro
+#    del EventoTrabajo del refresco. La bitacora es append-only y ya existe:
+#    responde "que se veia cuando el tecnico fue" sin inventar una tabla ni
+#    engordar la orden con un historial que casi nadie lee.
+#
+# 3. MANUAL, nunca automatico al abrir. Cada refresco le pega al sistema del
+#    ISP, que tiene limite de tasa (SmartOLT: 1.000 llamadas/hora, confirmado
+#    por cabecera). Un refresco por apertura de orden lo gastaria en visitas
+#    que no lo necesitan.
+#
+# LA PROPIEDAD QUE MAS IMPORTA
+# ----------------------------
+# Un refresco que falla NO destruye la ficha que habia. Por eso se captura
+# PRIMERO, se comprueba que la ficha nueva exista de verdad, y recien entonces
+# se escribe. 'contexto_del_caso' nunca lanza: devuelve el dict de
+# 'sin_contexto' cuando no pudo. Si se guardara ese dict, un motor caido
+# borraria los datos del cliente de una orden en curso -- que es exactamente lo
+# que no puede pasar.
+def refrescar_contexto(orden: OrdenTrabajo, *, profile) -> dict:
+    """
+    Vuelve a capturar la ficha del cliente de una orden ya despachada.
+
+    Devuelve (ok, motivo, motor_alcanzado, capturado_en). No lanza cuando el
+    motor falla -- eso no es un error del refresco, es una respuesta.
+
+    Lanza ErrorDespacho solo cuando la orden no admite el refresco: esta
+    cerrada o cancelada, o no nacio de un caso.
+    """
+    from django.utils import timezone
+
+    # Una orden cerrada o cancelada no se refresca: su ficha es parte del acta.
+    # Cambiarla despues seria reescribir lo que se veia cuando se trabajo.
+    if orden.estado_operativo in (OrdenTrabajo.CERRADA, OrdenTrabajo.CANCELADA):
+        raise ErrorDespacho(
+            "Una orden cerrada o cancelada no se refresca: su ficha es parte "
+            "del acta de lo que se vio cuando se trabajo.")
+
+    # Sin caso detras no hay a quien preguntarle. Una orden manual no tiene
+    # ficha que refrescar, y decir "no se pudo" seria confundir dos cosas.
+    case_id = (orden.origen_ref or "").strip()
+    if orden.origen_sistema != "crm" or not case_id:
+        raise ErrorDespacho(
+            "Esta orden no nacio de un caso del CRM: no hay contra que "
+            "identificador preguntar.")
+
+    # PRIMERO se captura. Nada se escribe hasta tener la ficha nueva en mano.
+    fresco = contexto_del_caso(case_id)
+    if fresco.get("contexto_disponible") is not True:
+        # No se pudo, y la ficha tecnica anterior queda EXACTAMENTE como
+        # estaba. Se devuelven los tres motivos distinguibles que la app ya
+        # sabe leer.
+        #
+        # LO QUE SI SE GUARDA, Y NO ES UNA EXCEPCION A LA REGLA DE ARRIBA.
+        # 'caso_sin_servicio' es el caso de un ticket nacido de una
+        # conversacion: no hay cliente que resolver --y nunca lo va a haber--
+        # pero SI esta lo que el asistente averiguo y el ticket del ISP. Son
+        # los dos lados de la misma moneda: un caso importado trae ticket y no
+        # trae conversacion; uno nacido de un chat trae conversacion y no trae
+        # ticket. Hasta el 25/09/2026 se perdia lo mas util exactamente cuando
+        # existia.
+        #
+        # Se AGREGAN al contexto que ya habia, no lo reemplazan: la ficha
+        # tecnica sigue intacta, que es lo que esta funcion promete.
+        extra = {k: fresco[k] for k in ("dexter", "ticket") if fresco.get(k)}
+        if extra:
+            with transaction.atomic():
+                fila = OrdenTrabajo.objects.select_for_update().get(pk=orden.pk)
+                contexto = dict(fila.contexto or {})
+                contexto.update(extra)
+                fila.contexto = contexto
+                fila.save(update_fields=["contexto"])
+            orden.refresh_from_db(fields=["contexto"])
+        return {
+            "ok": False,
+            "motivo": fresco.get("motivo") or "",
+            "motor_alcanzado": fresco.get("motor_alcanzado", False),
+        }
+
+    anterior = dict(orden.contexto or {})
+
+    with transaction.atomic():
+        fresca = OrdenTrabajo.objects.select_for_update().get(pk=orden.pk)
+        # Se revalida el estado DENTRO de la transaccion: entre la captura y la
+        # escritura pasaron los segundos que tarda el motor, y en ese rato
+        # alguien pudo cerrar la orden.
+        if fresca.estado_operativo in (OrdenTrabajo.CERRADA,
+                                       OrdenTrabajo.CANCELADA):
+            raise ErrorDespacho(
+                "La orden se cerro mientras se consultaba la ficha: no se "
+                "escribio nada.")
+
+        fresca.contexto = fresco
+        fresca.revision += 1
+        fresca.save(update_fields=["contexto", "revision", "updated_at"])
+
+        EventoTrabajo.objects.create(
+            org=fresca.org,
+            orden=fresca,
+            tipo="contexto_refrescado",
+            profile=profile,
+            datos={
+                # La ficha ANTERIOR entera. Es lo que responde "que se veia
+                # cuando el tecnico fue" una vez que 'contexto' ya cambio.
+                "anterior": anterior,
+                "capturado_en": fresco.get("capturado_en") or "",
+                "fuente": fresco.get("fuente") or "",
+                "revision": fresca.revision,
+                "refrescado_en": timezone.now().isoformat(),
+            },
+        )
+
+    orden.contexto = fresco
+    orden.revision = fresca.revision
+    return {
+        "ok": True,
+        "capturado_en": fresco.get("capturado_en") or "",
+        "revision": fresca.revision,
+    }
