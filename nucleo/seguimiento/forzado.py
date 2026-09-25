@@ -421,6 +421,50 @@ def con_las_manos_vacias(historial: list[dict]) -> bool:
                   for m in (historial or []))
 
 
+def puede_intentar_algo(config, cfg_rol) -> bool:
+    """
+    El rol declara al menos una herramienta que NO es de derivacion?
+
+    Es la pieza que les faltaba a las dos posposiciones de la escalada en
+    nucleo/canales/api.py. Las dos difieren la escalada un turno para que el
+    asistente "intente lo suyo" primero -- y eso solo tiene sentido si habia
+    algo que intentar.
+
+    DE DONDE SALE. El 25/09/2026 se midio sobre los ocho roles de rapilink: el
+    rol de entrada declara UNA herramienta en 'puede_consultar', y es la de
+    derivar. Entonces, si no deriva no hay ningun mensaje 'tool' y
+    con_las_manos_vacias() da True; si deriva, ya salio del rol. Para ese rol
+    "manos vacias" no significa "no intento lo que sabe hacer": significa "no
+    tiene manos". La escalada se posponia SIEMPRE, a un mensaje siguiente que
+    muchas veces no llega, y la conversacion quedaba sin dueño. Se vio en los
+    logs del laboratorio decenas de veces ese mismo dia, leido como ruido:
+    "se pospone: el asistente todavia no habia hecho nada".
+
+    Y la nota que se le inyectaba le pedia identificar al cliente y avanzar
+    con el procedimiento -- dos cosas que un rol sin herramientas no puede
+    hacer. El mismo error que el reencauzamiento corrigio en agosto, en otra
+    guarda.
+
+    Sale de 'puede_consultar' y no del nombre del rol: un tenant con otro rol
+    de entrada queda cubierto sin tocar codigo (CLAUDE.md 3.3). Es el unico de
+    los ocho roles de rapilink sin herramientas ejecutables, y es el que recibe
+    todos los mensajes iniciales.
+
+    Sin config legible devuelve True, que deja la posposicion como estaba: el
+    cambio se limita al caso demostrado, no a lo que no se puede leer.
+
+    Prueba: tests/test_escalada_del_rol_de_entrada.py.
+    """
+    if cfg_rol is None:
+        return True
+    catalogo = {h.nombre: h for h in (getattr(config, "herramientas", None) or [])}
+    suyas = [catalogo[n] for n in (getattr(cfg_rol, "puede_consultar", None) or [])
+             if n in catalogo]
+    if not suyas:
+        return True
+    return any(not getattr(h, "deriva_rol", False) for h in suyas)
+
+
 def motivos_por_hecho(config) -> set[str]:
     """
     Los motivos que NO puede elegir el modelo: los que declara una herramienta

@@ -72,7 +72,7 @@ from nucleo.seguimiento import agendamiento
 from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
 from nucleo.seguimiento import verificacion_accion
-from nucleo.seguimiento.forzado import (con_las_manos_vacias,
+from nucleo.seguimiento.forzado import (con_las_manos_vacias, puede_intentar_algo,
                                         decidir_pedido_humano_de,
                                         pidio_hablar_con_humano,
                                         decidir_pedido_humano,
@@ -2248,7 +2248,14 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
             #
             # Una escalada forzada por una herramienta NO pasa por aca: esa ya
             # tiene un hecho detras, que es justo lo que aca falta.
+            # Y SOLO SI HABIA ALGO QUE INTENTAR. El rol de entrada declara una
+            # sola herramienta, la de derivar: si no derivo no hay ningun
+            # mensaje 'tool', y si derivo ya no esta aca. Para el, las manos
+            # vacias eran su estado permanente y esta rama posponia SIEMPRE
+            # su escalada a un mensaje siguiente que muchas veces no llega.
+            # Medido el 25/09/2026; ver forzado.puede_intentar_algo.
             if (not forzado and not estado["intento_antes_de_escalar"]
+                    and puede_intentar_algo(config, rol_cfg)
                     and con_las_manos_vacias(estado["historial"])):
                 estado["intento_antes_de_escalar"] = True
                 estado["nota_pendiente"] = (
@@ -2262,9 +2269,13 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 registrar("escalamiento", "se pospone: el asistente todavia no habia hecho nada",
                           conversation_id=id_interno(estado.get("conversacion_id")),
                           motivo=evaluacion.get("motivo"))
-            elif escalamiento.merece_un_intento(
-                    config, evaluacion.get("motivo", ""),
-                    estado["intento_antes_de_escalar"]):
+            # Misma condicion que arriba, por el mismo motivo: la nota de esta
+            # rama tambien le pide "usa tus herramientas ahora", y un rol que
+            # no tiene ninguna no puede hacerle caso.
+            elif (puede_intentar_algo(config, rol_cfg)
+                  and escalamiento.merece_un_intento(
+                      config, evaluacion.get("motivo", ""),
+                      estado["intento_antes_de_escalar"])):
                 estado["intento_antes_de_escalar"] = True
                 estado["nota_pendiente"] = (
                     "(Nota del sistema, no del cliente) El cliente esta "

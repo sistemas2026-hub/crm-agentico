@@ -99,38 +99,19 @@ class _Cfg:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  LA CONDICION, COMO FUNCION DE REFERENCIA
+#  LA CONDICION VIVE EN EL NUCLEO, y esta prueba la importa de ahi
 #
-#  Vive aca y NO en nucleo/ a proposito: no hay decision de implementarla
-#  todavia, y este repositorio ya conoce el costo del codigo sin llamador.
-#  Cuando se decida, va en api.py:2252 al lado de con_las_manos_vacias.
+#  Se escribio primero aca, como funcion de referencia sin llamador, el
+#  25/09/2026. Ese mismo dia se decidio implementarla: esta en
+#  nucleo/seguimiento/forzado.py al lado de con_las_manos_vacias, y la usan
+#  las dos ramas de posposicion de nucleo/canales/api.py. Importarla y no
+#  copiarla es lo que hace que esta prueba afirme sobre el codigo que corre.
 # ══════════════════════════════════════════════════════════════════════════
-def tenia_algo_que_intentar(config, cfg_rol) -> bool:
-    """
-    El rol declara al menos una herramienta que NO es de derivacion?
+from nucleo.seguimiento.forzado import puede_intentar_algo
 
-    Es la pieza que le falta a la condicion de api.py:2252. Posponer una
-    escalada solo tiene sentido si habia algo que intentar primero; para un rol
-    que solo deriva, esperar un turno mas no produce ninguna informacion nueva
-    -- y esa es exactamente la leccion del 09/09/2026 que ya esta escrita en el
-    bloque de reencauzamiento.
-
-    Sale de `puede_consultar`, igual que el resto de las decisiones de este
-    bloque (ver SPEC/objetivos/contexto-por-capacidad-del-turno.md, B1). NO de
-    `roles_permitidos` y NO del nombre del rol: un tenant nuevo con otro rol de
-    entrada queda cubierto sin tocar codigo (CLAUDE.md 3.3).
-
-    FALLA CERRADO: sin config legible devuelve True, que deja el
-    comportamiento actual intacto.
-    """
-    if cfg_rol is None:
-        return True
-    catalogo = {h.nombre: h for h in (getattr(config, "herramientas", None) or [])}
-    suyas = [catalogo[n] for n in (getattr(cfg_rol, "puede_consultar", None) or [])
-             if n in catalogo]
-    if not suyas:
-        return True
-    return any(not getattr(h, "deriva_rol", False) for h in suyas)
+# Nombre con el que se escribieron las afirmaciones de abajo, para que digan
+# lo mismo que decian cuando la condicion todavia era una propuesta.
+tenia_algo_que_intentar = puede_intentar_algo
 
 
 def _pospone_hoy(historial) -> bool:
@@ -216,9 +197,11 @@ def prueba_4_no_depende_de_ningun_nombre_de_rol():
 
 def prueba_5_falla_cerrado():
     """
-    Ante la duda, el comportamiento de hoy. Los dos errores no son
-    comparables: no posponer de mas manda un caso flaco a la bandeja; posponer
-    de mas deja a alguien sin dueño.
+    Sin config legible, el comportamiento de antes. No porque posponer sea el
+    lado seguro --posponer de mas es justamente lo que dejaba a alguien sin
+    dueño-- sino porque el cambio se limita al caso demostrado: un rol cuya
+    config se puede leer y no declara nada ejecutable. Lo que no se puede leer
+    no se toca.
     """
     afirmar(tenia_algo_que_intentar(_Cfg({}, []), None) is True,
             "sin cfg_rol -> se comporta como hoy (FALLA CERRADO)")
