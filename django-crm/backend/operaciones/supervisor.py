@@ -143,6 +143,14 @@ def detectar(org, ahora=None) -> list[Senal]:
     señales: list[Senal] = []
     for detector in (
         _casos_abiertos_antiguos,
+        #  M09-R. Detector PROPIO, y no un camino de '_casos_abiertos_antiguos'
+        #  como hasta el 25/09/2026. El motivo esta medido: ahi dentro heredaba
+        #  el filtro de DIAS_CASO_ANTIGUO, y de 112 casos cerrados en el
+        #  proveedor y sin resolver en el CRM se detectaban 109 -- los 3 que
+        #  faltaban eran los que cerraron alla hace menos de una semana. Un caso
+        #  cerrado afuera ayer esta tan desincronizado como uno de hace dos
+        #  meses: el CRM esta igual de equivocado en los dos.
+        _casos_cerrados_en_el_proveedor,
         _actividades_vencidas,
         _actividades_sin_responsable,
         _actividades_bloqueadas,
@@ -197,6 +205,23 @@ def detectar(org, ahora=None) -> list[Senal]:
 CERRADO_EN_PROVEEDOR = ("cerrado",)
 EN_CURSO_EN_PROVEEDOR = ("nuevo", "en progreso")
 
+#  CUANTO PUEDE TENER LA LECTURA PARA SOSTENER UNA PROPUESTA DE CIERRE
+#
+#  No es prudencia abstracta: proponer cerrar un caso es proponer un cambio de
+#  estado, y el unico dato que lo justifica es lo que el proveedor dijo. Si esa
+#  lectura tiene semanas, lo que se propone es sincronizar contra una foto que
+#  nadie sabe cuan vieja es -- y el ticket pudo reabrirse alla mientras tanto.
+#
+#  El numero sale de la cadencia real del importador, no de una intuicion: el
+#  reloj barre cada hora ('cada_horas: 1' en la config desplegada), asi que una
+#  lectura de mas de 3 dias significa que la sincronizacion lleva ~72 pasadas
+#  sin escribir. Medido el 25/09/2026, es exactamente lo que pasa: la ultima
+#  'external_fetched_at' era de 77,5 horas antes, porque las escrituras del
+#  reloj estan bloqueadas por Autonomia 2. Con este corte, esos casos NO
+#  generan propuesta de cierre -- que es la conducta correcta: primero se
+#  arregla la sincronizacion, despues se decide sobre sus datos.
+HORAS_LECTURA_FRESCA = 72
+
 #  Como se clasifica cada señal, para que quien la lee sepa que peso tiene.
 OBSERVADO = "OBSERVADO"
 DATOS_FALTANTES = "DATOS_FALTANTES"
@@ -227,24 +252,13 @@ def _casos_abiertos_antiguos(org, ahora) -> list[Senal]:
                  "respuestas_externas": respuestas}
 
         if externo in CERRADO_EN_PROVEEDOR:
-            leido = getattr(c, "external_fetched_at", None)
-            salida.append(Senal(
-                tipo=PropuestaSupervisor.CASO_DESINCRONIZADO,
-                origen_tipo="case",
-                origen_id=str(c.id),
-                evidencia=base + [
-                    _observacion("caso", c.id,
-                                 f"estado en el proveedor: {c.external_status}", ahora),
-                    _observacion("caso", c.id,
-                                 f"estado externo leido el "
-                                 f"{leido:%Y-%m-%d %H:%M} UTC" if leido else
-                                 "el estado externo no dice cuando se leyo", ahora),
-                ],
-                datos={**datos, "clasificacion": OBSERVADO},
-                #  La condicion es "los dos sistemas no coinciden". No lleva la
-                #  magnitud (los dias) por el mismo motivo que la de abajo.
-                huella="cerrado_en_proveedor_abierto_en_crm",
-            ))
+            #  Cerrado afuera: NO es un caso abandonado, y desde M09-R tampoco
+            #  se emite desde aqui. Lo atiende '_casos_cerrados_en_el_proveedor',
+            #  que es su detector propio y no hereda este filtro de antiguedad.
+            #  Este 'continue' es lo que impide que el mismo caso salga dos
+            #  veces: si se quita, cada desincronizacion vieja genera tambien
+            #  una señal de caso antiguo, que es justo la afirmacion falsa que
+            #  M09-N vino a corregir.
             continue
 
         if externo in EN_CURSO_EN_PROVEEDOR:
@@ -287,6 +301,130 @@ def _casos_abiertos_antiguos(org, ahora) -> list[Senal]:
             #  "sigue abierto" es el hecho; los dias son la magnitud. Si la
             #  huella llevara los dias, mañana seria otra condicion.
             huella="abierto_sin_resolucion",
+        ))
+    return salida
+
+
+#  CERRADO EN EL PROVEEDOR, ABIERTO EN EL CRM  --  M09-R (25/09/2026)
+#  =================================================================
+#  ESTADOS QUE CUENTAN COMO ABIERTO EN DEXTER
+#
+#  Se compara contra 'Closed', que es el unico que 'cases/signals.py' trata
+#  como resuelto (RESOLVED_STATUSES). Y se mira ADEMAS 'resolved_at': los dos,
+#  porque son dos cosas distintas y la pantalla las usa distinto -- un caso con
+#  'status=Closed' y 'resolved_at' nulo existia como bug de sello y hoy no hay
+#  ninguno (medido: 0 de 237), pero volver a mirarlo cuesta nada.
+#
+#  Los estados reales de produccion son tres: New (156), Closed (69) y Assigned
+#  (12). 'Pending', 'Rejected' y 'Duplicate' estan declarados y no se usan; se
+#  tratan como abiertos porque no son 'Closed', que es lo unico afirmable.
+CERRADO_EN_DEXTER = "Closed"
+
+
+def _casos_cerrados_en_el_proveedor(org, ahora) -> list[Senal]:
+    """
+    El proveedor cerro el ticket y el CRM sigue con el caso abierto.
+
+    SIN FILTRO DE ANTIGUEDAD, y es el motivo de que este detector exista
+    aparte. Hasta el 25/09/2026 esta señal salia de '_casos_abiertos_antiguos'
+    y heredaba su corte de 7 dias: de 112 casos que cumplian la condicion se
+    detectaban 109, y los 3 que faltaban eran los mas recientes -- los unicos
+    donde actuar todavia sirve de algo.
+
+    LO QUE EXIGE, Y POR QUE CADA COSA
+    ---------------------------------
+    Proponer un cierre es proponer un cambio de estado, asi que el dato que lo
+    sostiene tiene que ser utilizable:
+
+      external_status = cerrado   la condicion misma
+      status != Closed            si ya esta cerrado no hay nada que sincronizar
+      external_status_at presente cuando cerro ALLA. Sin esto no se puede decir
+                                  desde cuando estan desalineados
+      external_fetched_at fresca  cuando se LEYO. Una lectura vieja describe un
+                                  ticket que pudo reabrirse despues
+      external_fetch_error vacio  una lectura que fallo no es una lectura
+
+    Cualquiera que falte deja al caso FUERA: no se emite una señal degradada ni
+    se supone el dato ausente. Un caso que no cumple no es un caso sano -- es
+    un caso sobre el que no se puede afirmar nada, y decirlo es distinto de
+    callarlo.
+
+    NO CIERRA NADA. Devuelve señales; el cierre es otra fase y otra puerta.
+    """
+    corte_lectura = ahora - timedelta(hours=HORAS_LECTURA_FRESCA)
+
+    casos = Case.objects.filter(
+        org=org, resolved_at__isnull=True,
+    ).exclude(
+        status=CERRADO_EN_DEXTER
+    ).exclude(
+        external_status_at__isnull=True
+    ).exclude(
+        external_fetched_at__isnull=True
+    ).filter(
+        external_fetched_at__gte=corte_lectura
+    ).only(
+        "id", "name", "status", "priority", "created_at",
+        "external_status", "external_status_at", "external_fetched_at",
+        "external_fetch_error", "external_ticket_id", "provider",
+    )
+
+    salida = []
+    for c in casos:
+        if _estado_externo(c) not in CERRADO_EN_PROVEEDOR:
+            continue
+        #  Una lectura que dejo error anotado no sostiene nada, aunque haya
+        #  traido un estado: el estado puede ser el de la lectura anterior.
+        if (getattr(c, "external_fetch_error", "") or "").strip():
+            continue
+
+        dias_desalineado = (ahora - c.external_status_at).days
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.CASO_DESINCRONIZADO,
+            origen_tipo="case",
+            origen_id=str(c.id),
+            #  Los siete datos que una persona necesita para decidir, cada uno
+            #  nombrando su fuente. No se resume: quien acepta esto cambia el
+            #  estado de un caso, y tiene que poder ver contra que.
+            evidencia=[
+                _observacion("caso", c.id,
+                             f"ticket en el proveedor: {c.external_ticket_id or 'sin numero'}",
+                             ahora),
+                _observacion("caso", c.id, f"caso en el CRM: CS-{str(c.id)[:8]}", ahora),
+                _observacion("caso", c.id,
+                             f"estado en el proveedor: {c.external_status}", ahora),
+                _observacion("caso", c.id, f"estado en el CRM: {c.status}", ahora),
+                _observacion("caso", c.id,
+                             f"el proveedor lo cerro el "
+                             f"{c.external_status_at:%Y-%m-%d %H:%M} UTC "
+                             f"({dias_desalineado} dias desalineados)", ahora),
+                _observacion("caso", c.id,
+                             f"estado externo leido el "
+                             f"{c.external_fetched_at:%Y-%m-%d %H:%M} UTC", ahora),
+                _observacion("caso", c.id,
+                             f"condicion: cerrado en el proveedor y abierto en "
+                             f"el CRM, con lectura de menos de "
+                             f"{HORAS_LECTURA_FRESCA} horas", ahora),
+            ],
+            datos={
+                "estado_externo": c.external_status,
+                "estado_crm": c.status,
+                "ticket_externo": c.external_ticket_id or "",
+                "proveedor": c.provider or "",
+                "cerrado_en_proveedor_el": c.external_status_at.isoformat(),
+                "leido_el": c.external_fetched_at.isoformat(),
+                "dias_desalineado": dias_desalineado,
+                "nombre": c.name,
+                "prioridad_caso": c.priority,
+                "clasificacion": OBSERVADO,
+            },
+            #  La condicion, no su magnitud: si la huella llevara los dias, cada
+            #  dia seria una condicion nueva y la deduplicacion no serviria de
+            #  nada. Se conserva el mismo texto que usaba el camino anterior a
+            #  proposito: las propuestas ya emitidas siguen deduplicando contra
+            #  esta, y cambiar la huella habria generado 109 duplicados el
+            #  primer ciclo.
+            huella="cerrado_en_proveedor_abierto_en_crm",
         ))
     return salida
 
@@ -1029,21 +1167,34 @@ def analizar(senal: Senal) -> dict:
     if senal.tipo == PropuestaSupervisor.CASO_DESINCRONIZADO:
         #  Base mas baja que la de un caso antiguo: el cliente ya fue atendido
         #  del lado del proveedor, asi que esto es deuda de registro, no riesgo
-        #  operativo. Y NIVEL_OBSERVAR, no recomendar una accion sobre el caso:
-        #  lo que hay que revisar es la sincronizacion, que es otro asunto.
+        #  operativo.
+        #
+        #  NIVEL_RECOMENDAR y no OBSERVAR desde M09-R, y el cambio no es
+        #  cosmetico: hasta el 25/09/2026 la propuesta pedia "revisar la
+        #  sincronizacion", que no es una accion sobre nada -- nadie puede
+        #  aceptar "revisar". Ahora propone la accion concreta que corresponde,
+        #  que es cerrar el caso en el CRM.
+        #
+        #  LO QUE 'RECOMENDAR' NO SIGNIFICA: que se ejecute al aceptar. El
+        #  cierre necesita atravesar la frontera, y hoy la frontera dice NO por
+        #  tres cerrojos medidos -- ver 'ejecutar_propuesta' y el informe de
+        #  M09-R. Subir el nivel declara QUE se propone, no habilita nada.
         prioridad, comp = _prioridad(30, {})
         return {
-            "accion_propuesta": ("Revisar la sincronización con el proveedor: el caso "
-                                 "figura cerrado allá y abierto en el CRM"),
-            "motivo": (f"El proveedor lo reporta como '{d.get('estado_externo')}' y en el "
-                       f"CRM sigue sin fecha de resolución, {d.get('dias')} días después "
-                       f"de creado. Es una inconsistencia entre los dos sistemas: no se "
-                       f"afirma incumplimiento de nadie, ni atraso, ni que el problema "
-                       f"del cliente esté resuelto."),
+            "accion_propuesta": ("Cerrar el caso en Dexter para sincronizar su "
+                                 "estado con WispHub"),
+            "motivo": (f"WispHub reporta el ticket como cerrado, pero Dexter mantiene "
+                       f"el caso abierto. El proveedor lo cerró el "
+                       f"{(d.get('cerrado_en_proveedor_el') or '')[:16].replace('T', ' ')} "
+                       f"y en el CRM sigue en '{d.get('estado_crm')}' "
+                       f"({d.get('dias_desalineado')} días desalineados). Es una "
+                       f"inconsistencia entre los dos sistemas: no se afirma "
+                       f"incumplimiento de nadie, ni atraso, ni que el problema del "
+                       f"cliente esté resuelto -- eso lo sabe el cliente."),
             "prioridad": prioridad,
             "impacto": ("Un caso cerrado afuera y abierto acá infla la cola del CRM y "
                         "hace que los conteos de casos abiertos no describan la operación"),
-            "nivel": PropuestaSupervisor.NIVEL_OBSERVAR,
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
             "componentes_prioridad": comp,
         }
 
@@ -1781,6 +1932,33 @@ def ejecutar_propuesta(propuesta: PropuestaSupervisor, *args, **kwargs):
     motor, donde Fase 1 ya dejó el interruptor de autonomía y el registro de
     operaciones idempotentes. Este módulo no le habla a WispHub ni a SmartOLT,
     y no debería empezar a hacerlo.
+
+    QUE FALTA PARA CERRAR UN CASO AL ACEPTAR  --  M09-R (25/09/2026)
+    ---------------------------------------------------------------
+    La pregunta se hizo explícita al pedir que aceptar una propuesta de
+    `caso_desincronizado` cierre el caso. La herramienta existe
+    (`cerrar_caso_crm`: PATCH /api/cases/{id}/ con status=Closed y closed_on
+    automático) y la puerta existe (`nucleo/seguridad/frontera.py`). Lo que
+    falta son TRES autorizaciones, todas medidas contra producción, y ninguna
+    se puede dar desde este archivo:
+
+      1. `AUTONOMIA_2_ACTIVA` está apagada. 18.630 filas en
+         `asistente.ejecucion_autonoma`, todas 'bloqueada'.
+      2. El prerequisito B-7 sigue abierto: el GUC `app.settings.jwt_secret`
+         está PRESENTE en la base, así que `autonomia2.veredicto_b7()` responde
+         B7_REQUERIDO. Encender (1) sin cerrar esto solo cambia el código del
+         bloqueo, no lo levanta.
+      3. `asistente.autorizacion_herramienta` está vacía (0 filas), así que
+         cada herramienta responde HERRAMIENTA_SIN_AUTORIZACION incluso con las
+         dos anteriores resueltas.
+
+    Hay una cuarta vía que NO está bloqueada y que por eso hay que nombrar:
+    `frontera.humana()` no consulta el kill switch ni Autonomía 2 -- exige
+    `actor` + `evidencia`, y el id de una propuesta aprobada es exactamente la
+    evidencia que pide. Es la puerta conceptualmente correcta para una decisión
+    humana. NO se usa todavía, y no por olvido: abrirla desde aquí sería el
+    bypass que este módulo existe para no tener. Cuando se decida, el cambio va
+    en el motor y con su propio bloque.
     """
     raise EjecucionNoPermitida(
         f"Shadow Mode: la propuesta {propuesta.id} no se ejecuta. "

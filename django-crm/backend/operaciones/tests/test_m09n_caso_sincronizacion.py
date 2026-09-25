@@ -78,8 +78,15 @@ def _caso(org, *, dias=9, externo="", respuestas=0, status="New"):
                                priority="Normal", external_status=externo,
                                external_ticket_id=externo_id,
                                provider="wisphub" if externo else "")
+    #  'external_status_at' se pobla junto con el estado, que es como llega de
+    #  la importacion real: en produccion los 115 casos cerrados en el proveedor
+    #  la tienen (0 sin ella, medido el 25/09/2026). El detector propio de
+    #  M09-R la EXIGE -- sin ella no se puede decir desde cuando estan
+    #  desalineados-- y sin esta linea los casos de este archivo quedaban fuera
+    #  de la deteccion por una precondicion que los datos reales si cumplen.
     Case.objects.filter(pk=caso.pk).update(
         created_at=timezone.now() - timedelta(days=dias),
+        external_status_at=timezone.now() - timedelta(days=1) if externo else None,
         external_fetched_at=timezone.now() if externo else None)
     for i in range(respuestas):
         RespuestaExterna.objects.create(
@@ -126,9 +133,16 @@ def test_f_la_propuesta_habla_de_sincronizacion_y_no_de_incumplimiento(org_a):
     motivo = analisis["motivo"].lower()
     assert "no se afirma incumplimiento de nadie" in motivo
     assert "inconsistencia entre los dos sistemas" in motivo
-    #  No recomienda actuar sobre el caso: lo que hay que mirar es la
-    #  sincronizacion, y eso no es una accion operativa sobre el cliente.
-    assert analisis["nivel"] == PropuestaSupervisor.NIVEL_OBSERVAR
+    #  M09-R cambio el nivel de OBSERVAR a RECOMENDAR, y lo que esta prueba
+    #  protege NO cambio: sigue sin afirmar incumplimiento, sigue hablando de
+    #  sincronizacion y sigue sin insinuar abandono (las tres de arriba).
+    #
+    #  El nivel subio porque la accion propuesta dejo de ser "revisar la
+    #  sincronizacion" -- que no es una accion sobre nada, y nadie puede
+    #  aceptar-- y paso a ser cerrar el caso, que si lo es. RECOMENDAR declara
+    #  QUE se propone; no habilita ninguna ejecucion: el cierre sigue sin
+    #  ocurrir al aceptar, y eso lo guarda test_m09r_cierre_controlado.py.
+    assert analisis["nivel"] == PropuestaSupervisor.NIVEL_RECOMENDAR
 
 
 def test_f_cerrado_afuera_tambien_se_reconoce_con_otra_capitalizacion(org_a):
