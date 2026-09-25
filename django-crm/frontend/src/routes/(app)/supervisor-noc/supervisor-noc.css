@@ -1084,3 +1084,57 @@
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 0.6875rem; margin-left: auto;
 }
+
+/* ==========================================================================
+   AJUSTE CONTRA LA REFERENCIA DE STITCH
+   «Centro del Supervisor NOC IA - Pendientes por Revisión», leída del
+   proyecto por su API. Lo de aquí sale de medir ese HTML, no de recordarlo.
+   ========================================================================== */
+
+/* La barra de filtros es UNA fila. Los rótulos de grupo ocupaban tres líneas
+   para decir lo que las propias pastillas ya dicen. */
+.snoc-filtros-bandeja {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--snoc-xs);
+}
+.snoc-separador-filtro {
+  color: var(--snoc-outline-variant);
+  margin: 0 var(--snoc-xs);
+  user-select: none;
+}
+
+/* La referencia usa esquina de 8px en las pastillas, no la cápsula completa
+   que traía esta pantalla. */
+.snoc-filtros-bandeja .snoc-pildora,
+.snoc-paginacion-botones .snoc-pildora {
+  border-radius: var(--snoc-r-xl);
+}
+
+/* Prioridad y SLA comparten formato en la referencia: cápsula con fondo
+   suave, texto fuerte y un punto del mismo color delante. Antes la prioridad
+   era texto suelto y el SLA una insignia, y se leían como dos cosas
+   distintas cuando son dos lecturas del mismo caso. */
+.snoc-pildora-nivel {
+  display: inline-flex; align-items: center; gap: 5px;
+  border-radius: var(--snoc-r-full);
+  font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; white-space: nowrap;
+}
+.snoc-pildora-nivel.snoc-nivel-alta {
+  background: #fff1f2; color: #dc2626; border-color: #ffe4e6;
+}
+.snoc-pildora-nivel.snoc-nivel-media {
+  background: #fff7ed; color: #c2410c; border-color: #ffedd5;
+}
+.snoc-pildora-nivel.snoc-nivel-baja {
+  background: #f0fdf4; color: #15803d; border-color: #dcfce7;
+}
+.snoc-pildora-nivel.snoc-nivel-sin {
+  background: var(--snoc-surface-container-high); color: var(--snoc-on-surface-variant);
+}
+
+/* El mismo punto, también en las pastillas del filtro. */
+.snoc-pildora .snoc-punto-nivel { margin-right: 1px; }
+.snoc-pildora-activa .snoc-punto-nivel { background: currentColor; }

@@ -793,93 +793,86 @@
             <!-- Los filtros se aplican en el navegador: el GET ya trajo el
                  conjunto entero, así que una vuelta al servidor por pastilla
                  sería reordenar datos que ya están en pantalla. -->
+            <!--
+              Una sola fila, como la referencia: los dos grupos separados por
+              una barra, sin rótulos a la izquierda. Los rótulos
+              «REVISIÓN»/«PRIORIDAD» ocupaban tres líneas para decir algo que
+              las propias pastillas ya dicen.
+            -->
             <div class="snoc-filtros-bandeja">
-              <div class="snoc-grupo-filtro">
-                <span class="snoc-label-sm snoc-secundario snoc-rotulo-filtro">Revisión</span>
-                {#each [{ v: 'pendientes', t: 'Pendientes' }, { v: 'decididas', t: 'Ya decididas' }, { v: '', t: 'Todas' }] as o (o.v)}
-                  <button
-                    class="snoc-pildora {filtroEstado === o.v ? 'snoc-pildora-activa' : ''}"
-                    type="button"
-                    onclick={() => (filtroEstado = o.v)}
-                  >
-                    {o.t} ({conteoPorEstado[o.v] ?? 0})
-                  </button>
-                {/each}
-              </div>
+              {#each [{ v: 'pendientes', t: 'Pendientes' }, { v: 'decididas', t: 'Ya decididas' }, { v: '', t: 'Todas' }] as o (o.v)}
+                <button
+                  class="snoc-pildora {filtroEstado === o.v ? 'snoc-pildora-activa' : ''}"
+                  type="button"
+                  onclick={() => (filtroEstado = o.v)}
+                >
+                  {o.t} ({conteoPorEstado[o.v] ?? 0})
+                </button>
+              {/each}
 
-              <div class="snoc-grupo-filtro">
-                <span class="snoc-label-sm snoc-secundario snoc-rotulo-filtro">Prioridad</span>
-                <button
-                  class="snoc-pildora {filtroNivel ? '' : 'snoc-pildora-activa'}"
-                  type="button"
-                  onclick={() => (filtroNivel = null)}
-                >
-                  Todas
-                </button>
-                {#each NIVELES_VISIBLES as nv (nv)}
-                  <button
-                    class="snoc-pildora {filtroNivel === nv ? 'snoc-pildora-activa' : ''}"
-                    type="button"
-                    onclick={() => (filtroNivel = nv)}
-                    disabled={(conteoPorNivel[nv] ?? 0) === 0}
-                    title="Prioridad {nv}"
-                  >
-                    <span class="snoc-punto-nivel snoc-nivel-{nv.toLowerCase()}"></span>
-                    {nv} ({conteoPorNivel[nv] ?? 0})
-                  </button>
-                {/each}
-                <button
-                  class="snoc-pildora {filtroPropuesta === 'si' ? 'snoc-pildora-activa' : ''}"
-                  type="button"
-                  onclick={() => (filtroPropuesta = filtroPropuesta === 'si' ? '' : 'si')}
-                  title="Las que traen una acción recomendada escrita"
-                >
-                  Con propuesta
-                </button>
-                <button
-                  class="snoc-pildora {filtroPropuesta === 'no' ? 'snoc-pildora-activa' : ''}"
-                  type="button"
-                  onclick={() => (filtroPropuesta = filtroPropuesta === 'no' ? '' : 'no')}
-                  title="Detectadas, sin acción recomendada"
-                >
-                  Sin propuesta
-                </button>
+              <span class="snoc-separador-filtro" aria-hidden="true">|</span>
 
-                <!--
-                  Solo aparece cuando hay algo que limpiar. Un boton siempre
-                  presente que la mitad de las veces no hace nada enseña a
-                  ignorarlo.
-                -->
-                {#if hayFiltros}
-                  <button class="snoc-enlace snoc-limpiar" type="button" onclick={limpiarFiltros}>
-                    <span class="snoc-icono" style="font-size:14px;" aria-hidden="true">filter_alt_off</span>
-                    Limpiar filtros
-                  </button>
-                {/if}
-              </div>
+              <button
+                class="snoc-pildora {filtroNivel ? '' : 'snoc-pildora-activa'}"
+                type="button"
+                onclick={() => (filtroNivel = null)}
+              >
+                Todas
+              </button>
+              {#each NIVELES_VISIBLES as nv (nv)}
+                <button
+                  class="snoc-pildora {filtroNivel === nv ? 'snoc-pildora-activa' : ''}"
+                  type="button"
+                  onclick={() => (filtroNivel = nv)}
+                  disabled={(conteoPorNivel[nv] ?? 0) === 0}
+                  title="Prioridad {nv}"
+                >
+                  <span class="snoc-punto-nivel snoc-nivel-{nv.toLowerCase()}"></span>
+                  {nv} ({conteoPorNivel[nv] ?? 0})
+                </button>
+              {/each}
+
+              <button
+                class="snoc-pildora {filtroPropuesta === 'si' ? 'snoc-pildora-activa' : ''}"
+                type="button"
+                onclick={() => (filtroPropuesta = filtroPropuesta === 'si' ? '' : 'si')}
+                title="Las que traen una acción recomendada escrita"
+              >
+                Con propuesta
+              </button>
+              <button
+                class="snoc-pildora {filtroPropuesta === 'no' ? 'snoc-pildora-activa' : ''}"
+                type="button"
+                onclick={() => (filtroPropuesta = filtroPropuesta === 'no' ? '' : 'no')}
+                title="Detectadas, sin acción recomendada"
+              >
+                Sin propuesta
+              </button>
 
               <!--
-                El tipo de hallazgo pasa a desplegable y sale de la tabla: son
-                quince señales, y quince pastillas más dejaban la cabecera
-                ilegible. El filtro sigue siendo el mismo y sobre los mismos
-                datos; lo que cambia es cuánto sitio ocupa.
+                El tipo NO está en la referencia, y sí es un filtro que
+                funciona. Se queda, como desplegable y al final de la fila:
+                quitarlo replicaría la imagen perdiendo una función que ya
+                existía.
               -->
-              <div class="snoc-grupo-filtro">
-                <label class="snoc-label-sm snoc-secundario snoc-rotulo-filtro" for="snoc-filtro-tipo">
-                  Tipo
-                </label>
-                <select
-                  id="snoc-filtro-tipo"
-                  class="snoc-select"
-                  value={filtro ?? ''}
-                  onchange={(e) => (filtro = e.currentTarget.value || null)}
-                >
-                  <option value="">Todos los tipos ({propuestas.length})</option>
-                  {#each porSenal as [clave, info] (clave)}
-                    <option value={clave}>{rotuloDeHallazgo(clave, info.etiqueta)} ({info.n})</option>
-                  {/each}
-                </select>
-              </div>
+              <select
+                class="snoc-select"
+                aria-label="Filtrar por tipo de hallazgo"
+                value={filtro ?? ''}
+                onchange={(e) => (filtro = e.currentTarget.value || null)}
+              >
+                <option value="">Todos los tipos ({propuestas.length})</option>
+                {#each porSenal as [clave, info] (clave)}
+                  <option value={clave}>{rotuloDeHallazgo(clave, info.etiqueta)} ({info.n})</option>
+                {/each}
+              </select>
+
+              {#if hayFiltros}
+                <button class="snoc-enlace snoc-limpiar" type="button" onclick={limpiarFiltros}>
+                  <span class="snoc-icono" style="font-size:14px;" aria-hidden="true">restart_alt</span>
+                  Limpiar filtros
+                </button>
+              {/if}
             </div>
           {/if}
 
@@ -945,7 +938,7 @@
                       <td class="snoc-mono-sm snoc-tenue">{p.n}</td>
                       <td>
                         <span
-                          class="snoc-nivel snoc-nivel-{p.nivel.texto.toLowerCase()}"
+                          class="snoc-insignia snoc-pildora-nivel snoc-nivel-{p.nivel.texto.toLowerCase()}"
                           title="Prioridad {p.prioridad} en la escala del Supervisor (0-99, menor es más urgente)"
                         >
                           <span class="snoc-punto-nivel snoc-nivel-{p.nivel.texto.toLowerCase()}"></span>
