@@ -385,6 +385,13 @@
   const comun = $derived(comunDeEvidencia(detalle?.evidencia));
   //  --- la lectura humana del hallazgo ---
   const titulo = $derived(nombreHumano(detalle));
+  //  'contraste' va ANTES de 'resumen' y 'aceptar', que lo reciben como
+  //  argumento. Estaba declarado despues: Svelte compila cada $derived a un
+  //  getter perezoso, asi que en ejecucion funcionaba -- por eso no se veia
+  //  nada raro en pantalla -- pero svelte-check lo marcaba como uso antes de
+  //  la declaracion, y bastaria que alguien convirtiera uno de los dos en una
+  //  llamada directa para que reventara en la zona muerta temporal.
+  const contraste = $derived(contrasteDeEstados(detalle?.evidencia));
   const resumen = $derived(quePasa(detalle, contraste));
   const prioridad = $derived(prioridadHumana(detalle));
   const identidad = $derived(identificacion(detalle, contextoFila));
@@ -393,7 +400,6 @@
   const aceptar = $derived(siAcepto(detalle, contraste));
   const fuentes = $derived(fuentesDeEvidencia(detalle?.evidencia));
   const basePrioridad = $derived(baseDePrioridad(detalle?.evidencia));
-  const contraste = $derived(contrasteDeEstados(detalle?.evidencia));
   const antiguedad = $derived(antiguedadDelCaso(detalle?.evidencia));
   const lectura = $derived(lecturaExterna(detalle?.evidencia));
 
