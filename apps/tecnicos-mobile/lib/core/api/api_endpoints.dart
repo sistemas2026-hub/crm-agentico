@@ -32,6 +32,8 @@ class ApiEndpoints {
   static String trabajoDetalle(String id) => '$baseUrl/api/campo/trabajos/$id/';
   static String trabajoAcciones(String id) => '$baseUrl/api/campo/trabajos/$id/acciones/';
   static String trabajoDatos(String id) => '$baseUrl/api/campo/trabajos/$id/datos/';
+  static String trabajoProbarConexion(String id) =>
+      '$baseUrl/api/campo/trabajos/$id/probar-conexion/';
   static String trabajoEvidencias(String id) => '$baseUrl/api/campo/trabajos/$id/evidencias/';
   static String trabajoCompletar(String id) => '$baseUrl/api/campo/trabajos/$id/completar/';
   static String confirmarEvidencia(String trabajoId, String evidenciaId) =>

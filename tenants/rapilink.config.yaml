@@ -3145,6 +3145,22 @@ herramientas:
     inyectar_sesion:
       id_servicio: id_cliente
     inyectados_obligatorios: [id_servicio]
+    # La app del tecnico necesita probar la conexion parado en la casa del
+    # cliente, y la credencial de WispHub vive solo en el motor. Entra por
+    # POST /interno/herramienta/ping_cliente, con las tres capas que esa ruta
+    # ya exige: token de servicio, esta bandera, y sin sesion.
+    #
+    # 'id_servicio' tiene que ir en 'argumentos_sobrescribibles' o la llamada
+    # no sale: por la ruta interna la sesion es None a proposito, asi que
+    # 'inyectar_sesion' no lo completa y 'inyectados_obligatorios' la frena
+    # --que es lo correcto, sin ese campo el ping preguntaria por nadie--.
+    # El backend de campo lo manda desde la ficha congelada de la orden, que
+    # es el unico lugar donde ese numero esta atado a ESTE trabajo.
+    #
+    # Es de solo lectura y no cambia nada del cliente: no le aplica la
+    # frontera de acciones externas ni pide aprobacion.
+    invocable_por_servicio: true
+    argumentos_sobrescribibles: [id_servicio]
     # Si la llamada MISMA falla (WispHub caido, la tarea asincrona no
     # termina) el caso pasa a una persona por este motivo, sin que dependa de
     # como lo lea el modelo. Un '0 de 3' NO es esto -- la llamada funciono y

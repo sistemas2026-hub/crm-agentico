@@ -74,7 +74,11 @@ void main() {
         }),
       };
 
-  Widget app(OrdenesJornada ordenes) => MaterialApp(
+  Widget app(
+    OrdenesJornada ordenes, {
+    Future<ResultadoPing> Function(String)? probarConexion,
+  }) =>
+      MaterialApp(
         theme: AppTheme.lightTheme,
         home: DetalleOrdenScreen(
           ordenId: 'ot-1',
@@ -87,6 +91,7 @@ void main() {
               required int revisionBase,
             }) async {},
             sincronizar: () async {},
+            probarConexion: probarConexion,
           ),
         ),
       );
@@ -98,7 +103,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  Future<void> montar(WidgetTester tester, Map<String, dynamic> fila) async {
+  Future<void> montar(
+    WidgetTester tester,
+    Map<String, dynamic> fila, {
+    Future<ResultadoPing> Function(String)? probarConexion,
+  }) async {
     final StreamController<SyncStatus> avisos =
         StreamController<SyncStatus>.broadcast();
     final OrdenesJornada ordenes = OrdenesJornada(
@@ -110,7 +119,7 @@ void main() {
       await avisos.close();
       ordenes.dispose();
     });
-    await tester.pumpWidget(app(ordenes));
+    await tester.pumpWidget(app(ordenes, probarConexion: probarConexion));
     await tester.pumpAndSettle();
   }
 
@@ -204,4 +213,94 @@ void main() {
       expect(find.textContaining('refrescar la ficha'), findsOneWidget);
     });
   });
+  group('4. El ping contesta otra pregunta, y no dictamina', () {
+    testWidgets('Antes de tocar no hay ningún resultado inventado',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      await montar(t, orden(), probarConexion: (String _) async =>
+          const ResultadoPing(medido: true, respondieron: '3 de 3'));
+
+      expect(find.text('Probar'), findsOneWidget);
+      expect(find.textContaining('Respondieron'), findsNothing,
+          reason: 'una medición que nadie pidió no se muestra');
+    });
+
+    testWidgets('Al tocar, muestra el conteo crudo y las tres latencias',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      await montar(t, orden(), probarConexion: (String _) async =>
+          const ResultadoPing(
+            medido: true,
+            respondieron: '3 de 3',
+            latencias: <String>['1ms401us', '1ms388us', '1ms502us'],
+          ));
+
+      await t.tap(find.text('Probar'));
+      await t.pumpAndSettle();
+
+      expect(find.textContaining('Respondieron 3 de 3'), findsOneWidget);
+      expect(find.textContaining('1ms401us'), findsOneWidget);
+      expect(find.textContaining('1ms502us'), findsOneWidget,
+          reason: 'las tres por separado: un promedio esconde la '
+              'intermitencia, que es lo que decide qué hace el técnico');
+    });
+
+    testWidgets('Un cero de tres se muestra, no se traduce a un juicio',
+        (WidgetTester t) async {
+      // Está medido dos veces que el mismo equipo sano da 1, 2 y 3 de 3 en
+      // corridas seguidas. La pantalla no puede decir «el servicio está
+      // caído»: dice lo que pasó.
+      pantallaAlta(t);
+      await montar(t, orden(), probarConexion: (String _) async =>
+          const ResultadoPing(medido: true, respondieron: '0 de 3'));
+
+      await t.tap(find.text('Probar'));
+      await t.pumpAndSettle();
+
+      expect(find.textContaining('Respondieron 0 de 3'), findsOneWidget);
+      expect(find.textContaining('caído'), findsNothing);
+      expect(find.textContaining('sin servicio'), findsNothing);
+    });
+
+    testWidgets('Sin conexión lo dice, y dice que no se encola',
+        (WidgetTester t) async {
+      // La distinción entera de este bloque: «no se pudo medir» nunca puede
+      // leerse como «no respondió». Una manda a esperar señal; la otra manda a
+      // revisar el equipo.
+      pantallaAlta(t);
+      await montar(t, orden(), probarConexion: (String _) async =>
+          ResultadoPing.noSePudo('sin_conexion'));
+
+      await t.tap(find.text('Probar'));
+      await t.pumpAndSettle();
+
+      expect(find.textContaining('Sin conexión'), findsOneWidget);
+      expect(find.textContaining('no se encola'), findsOneWidget);
+      expect(find.textContaining('Respondieron'), findsNothing);
+    });
+
+    testWidgets('Que el motor no conteste no dice nada del equipo',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      await montar(t, orden(), probarConexion: (String _) async =>
+          ResultadoPing.noSePudo('motor_no_responde'));
+
+      await t.tap(find.text('Probar'));
+      await t.pumpAndSettle();
+
+      expect(find.textContaining('No dice nada del equipo'), findsOneWidget);
+    });
+
+    testWidgets('Sin acción inyectada el botón queda inactivo, no miente',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      await montar(t, orden());
+
+      final TextButton boton = t.widget<TextButton>(
+        find.ancestor(of: find.text('Probar'), matching: find.byType(TextButton)),
+      );
+      expect(boton.onPressed, isNull);
+    });
+  });
+
 }

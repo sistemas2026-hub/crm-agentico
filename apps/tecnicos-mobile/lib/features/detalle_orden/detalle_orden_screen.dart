@@ -72,6 +72,8 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   StreamSubscription<SyncSummary>? _suscripcionResumen;
   SyncSummary? _resumen;
   bool _trabajando = false;
+  bool _pingEnCurso = false;
+  ResultadoPing? _ping;
 
   @override
   void initState() {
@@ -1414,6 +1416,103 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     );
   }
 
+  /// Probar la conexión AHORA, que es lo único que la ficha congelada no
+  /// puede contestar.
+  ///
+  /// La potencia de arriba se midió al despachar y sirve para llegar sabiendo
+  /// qué esperar. Esto es otra pregunta: el técnico movió un conector y
+  /// necesita saber si el equipo contesta en este momento.
+  ///
+  /// **Lo que muestra no es un veredicto.** Está medido dos veces en este
+  /// proyecto que el mismo equipo sano devuelve `1 de 3`, `2 de 3` y `3 de 3`
+  /// en corridas seguidas, y que un reinicio real y confirmado dejó el ping
+  /// igual antes y después. Por eso se enseña el conteo crudo y las tres
+  /// latencias por separado: quien decide qué significa es la persona que está
+  /// parada ahí, no la pantalla.
+  Widget _probarConexion() {
+    final bool disponible = widget.acciones.probarConexion != null;
+    final ResultadoPing? r = _ping;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: AppRadius.brTarjeta,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.network_ping, size: 18,
+                  color: AppColors.secondary),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text('Probar la conexión ahora',
+                    style: AppTypography.cuerpoChico),
+              ),
+              if (_pingEnCurso)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                TextButton(
+                  onPressed: disponible ? _lanzarPing : null,
+                  child: Text(r == null ? 'Probar' : 'Repetir'),
+                ),
+            ],
+          ),
+          if (r != null) ...<Widget>[
+            const SizedBox(height: AppSpacing.xs),
+            if (r.medido)
+              Text(
+                'Respondieron ${r.respondieron}'
+                '${r.latencias.isEmpty ? '' : ' · ${r.latencias.join(" · ")}'}',
+                style: AppTypography.datoChico.copyWith(
+                  color: AppColors.onSurface,
+                ),
+              )
+            else
+              Text(
+                // Cada motivo se arregla distinto, así que cada uno dice lo
+                // suyo. "No se pudo medir" jamás se dibuja como "no respondió":
+                // esa confusión manda a revisar una roseta sana.
+                switch (r.motivo) {
+                  'sin_conexion' =>
+                    'Sin conexión: esta prueba necesita señal y no se encola. '
+                        'Se puede repetir cuando haya.',
+                  'ping_no_habilitado' =>
+                    'La prueba no está habilitada para esta empresa todavía.',
+                  'motor_no_responde' =>
+                    'No se pudo preguntar. No dice nada del equipo del cliente.',
+                  _ => 'No se pudo medir.',
+                },
+                style: AppTypography.etiquetaChica.copyWith(
+                  color: AppColors.onSurfaceVariant,
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _lanzarPing() async {
+    final Future<ResultadoPing> Function(String)? probar =
+        widget.acciones.probarConexion;
+    if (probar == null || _pingEnCurso) return;
+
+    setState(() => _pingEnCurso = true);
+    final ResultadoPing r = await probar(widget.ordenId);
+    if (!mounted) return;
+    setState(() {
+      _pingEnCurso = false;
+      _ping = r;
+    });
+  }
+
   /// CAMPO-DATA-001 · La potencia de ejemplo, para ver el producto completo
   /// cuando la orden todavía no trae lectura. Es el bloque que estaba acá
   /// antes, intacto: lo único que cambió es **cuándo** se dibuja.
@@ -1652,6 +1751,8 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
           ),
           const SizedBox(height: AppSpacing.sm),
           _potenciaOptica(trabajo),
+          const SizedBox(height: AppSpacing.sm),
+          _probarConexion(),
           const SizedBox(height: AppSpacing.sm),
           // CAMPO-DATA-012 y -030 · El historico de 48 horas no llega de
           // ningun lado: la ficha congela UNA lectura, no una serie. Dibujar
