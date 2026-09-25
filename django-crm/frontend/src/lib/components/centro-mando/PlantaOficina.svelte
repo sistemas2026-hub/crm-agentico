@@ -114,30 +114,137 @@
   const zonasPresentes = $derived(
     [...new Set(agentes.map((a) => zonaDe(a, entrada)))].sort((a, b) => ZONAS[a].orden - ZONAS[b].orden)
   );
+
+  /* ------------------------------------------------------------ LA CAMARA
+     Rueda para acercar, arrastrar para mover, "Ajustar" para volver.
+
+     Vive APARTE del encuadre automatico, y esa separacion es lo que hace que
+     funcione: el encaje se recalcula solo con cada foto --cuantas columnas,
+     que escala, donde centrar-- y la camara se aplica ENCIMA. Asi la planta
+     se repinta cada 12 segundos con datos nuevos sin devolverle la vista a su
+     sitio: quien se acerco a un puesto sigue mirando ese puesto. */
+  let vista = $state({ k: 1, x: 0, y: 0 });
+  const MIN_K = 0.6, MAX_K = 5;
+  const enSuSitio = $derived(vista.k === 1 && vista.x === 0 && vista.y === 0);
+
+  function acercar(factor, cx, cy) {
+    const k = Math.max(MIN_K, Math.min(MAX_K, vista.k * factor));
+    if (k === vista.k) return;
+    /* El punto bajo el cursor se queda quieto: es lo que hace que acercar se
+       sienta como acercarse a un sitio y no como que la escena se escape. */
+    const r = k / vista.k;
+    vista = { k, x: cx - (cx - vista.x) * r, y: cy - (cy - vista.y) * r };
+  }
+
+  function alaRueda(ev) {
+    ev.preventDefault();
+    const c = envoltura.getBoundingClientRect();
+    acercar(ev.deltaY < 0 ? 1.12 : 1 / 1.12, ev.clientX - c.x, ev.clientY - c.y);
+  }
+
+  let arrastre = $state(/** @type {any} */ (null));
+  function alBajar(ev) {
+    if (ev.button !== 0) return;
+    arrastre = { x: ev.clientX, y: ev.clientY, vx: vista.x, vy: vista.y, movido: 0 };
+    try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch { /* sin captura */ }
+  }
+  function alMover(ev) {
+    if (!arrastre) return;
+    const dx = ev.clientX - arrastre.x, dy = ev.clientY - arrastre.y;
+    arrastre.movido = Math.max(arrastre.movido, Math.abs(dx) + Math.abs(dy));
+    vista = { ...vista, x: arrastre.vx + dx, y: arrastre.vy + dy };
+  }
+  function alSoltar() { arrastre = null; }
+  /* Un arrastre de menos de 4 px cuenta como clic. Sin este umbral, abrir la
+     ficha de un puesto se vuelve imposible: el dedo siempre mueve algo. */
+  const arrastroDeVerdad = () => !!arrastre && arrastre.movido >= 4;
+
+  function seleccionar(a) {
+    if (arrastroDeVerdad()) return;
+    alSeleccionar(a);
+  }
+
+  function ajustar() { vista = { k: 1, x: 0, y: 0 }; }
+  function botonZoom(f) {
+    const c = envoltura?.getBoundingClientRect();
+    if (c) acercar(f, c.width / 2, c.height / 2);
+  }
+
+  /* ----------------------------------------------------------- LOS FILTROS
+     Lo primero que se pide en una operacion real: "mostrame solo los que
+     tienen errores". Atenua en vez de esconder -- la planta no cambia de
+     forma al filtrar, asi que no hay que volver a ubicarse cada vez. */
+  let filtro = $state('todos');
+  const FILTROS = {
+    todos: { rotulo: 'Todos', test: () => true },
+    llaman: {
+      rotulo: 'Esperan a alguien',
+      test: (a) => (a.esperando_humano || 0) + (a.esperando_aprobacion || 0) > 0
+    },
+    error: { rotulo: 'Con errores', test: (a) => normalizar(a.estado) === 'error' },
+    trabajan: { rotulo: 'Trabajando', test: (a) => normalizar(a.estado) === 'working' },
+    libres: { rotulo: 'Disponibles', test: (a) => normalizar(a.estado) === 'idle' }
+  };
+  const cuentas = $derived(
+    Object.fromEntries(Object.entries(FILTROS).map(([k, f]) => [k, agentes.filter(f.test).length]))
+  );
+  const pasa = (a) => (FILTROS[filtro] || FILTROS.todos).test(a);
 </script>
 
-<div class="planta" bind:this={envoltura}>
-  <svg role="img" aria-label="Planta de la oficina: un puesto por cada agente"
-    viewBox="0 0 {Math.max(1, caja.ancho)} {Math.max(1, caja.alto)}">
-    <g transform="translate({encuadre.dx}, {encuadre.dy}) scale({encuadre.esc})">
-      {#each pintado as i (agentes[i]?.nombre ?? i)}
-        {#if agentes[i] && rej.celdas[i]}
-          <g transform="translate({rej.celdas[i].x}, {rej.celdas[i].y})">
-            <PuestoAgente
-              agente={agentes[i]}
-              numero={i + 1}
-              lado={LADO}
-              {entrada}
-              ejes={rej.ejes}
-              cambio={delta[agentes[i].nombre]}
-              {ahora}
-              {alSeleccionar}
-            />
-          </g>
-        {/if}
-      {/each}
-    </g>
-  </svg>
+<div class="planta">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="lienzo"
+    class:arrastrando={!!arrastre}
+    bind:this={envoltura}
+    onwheel={alaRueda}
+    onpointerdown={alBajar}
+    onpointermove={alMover}
+    onpointerup={alSoltar}
+    onpointercancel={alSoltar}
+    ondblclick={ajustar}
+  >
+    <svg role="img" aria-label="Planta de la oficina: un puesto por cada agente"
+      viewBox="0 0 {Math.max(1, caja.ancho)} {Math.max(1, caja.alto)}">
+      <!-- Dos transformaciones compuestas: primero la de la camara, despues
+           la del encaje automatico. El orden importa -- al reves, mover la
+           vista escalaria tambien el desplazamiento. -->
+      <g transform="translate({vista.x}, {vista.y}) scale({vista.k}) translate({encuadre.dx}, {encuadre.dy}) scale({encuadre.esc})">
+        {#each pintado as i (agentes[i]?.nombre ?? i)}
+          {#if agentes[i] && rej.celdas[i]}
+            <g class="celda" class:apagado={!pasa(agentes[i])}
+               transform="translate({rej.celdas[i].x}, {rej.celdas[i].y})">
+              <PuestoAgente
+                agente={agentes[i]}
+                numero={i + 1}
+                lado={LADO}
+                {entrada}
+                ejes={rej.ejes}
+                cambio={delta[agentes[i].nombre]}
+                {ahora}
+                alSeleccionar={seleccionar}
+              />
+            </g>
+          {/if}
+        {/each}
+      </g>
+    </svg>
+
+    <div class="camara">
+      <button onclick={() => botonZoom(1 / 1.3)} title="Alejar" aria-label="Alejar">−</button>
+      <button onclick={() => botonZoom(1.3)} title="Acercar" aria-label="Acercar">+</button>
+      <button onclick={ajustar} disabled={enSuSitio} title="Volver al encuadre automático">Ajustar</button>
+    </div>
+  </div>
+
+  <div class="filtros">
+    {#each Object.entries(FILTROS) as [k, f] (k)}
+      <button class:activo={filtro === k} disabled={cuentas[k] === 0 && k !== 'todos'}
+        onclick={() => (filtro = k)}>
+        {f.rotulo}<span class="n">{cuentas[k]}</span>
+      </button>
+    {/each}
+  </div>
 
   <div class="pieplanta">
     {#if !entrada}
@@ -162,7 +269,39 @@
 
 <style>
   .planta { position: relative; width: 100%; height: 100%; min-height: 320px; display: flex; flex-direction: column; }
-  svg { display: block; width: 100%; flex: 1; min-height: 0; }
+  /* El lienzo se arrastra: el cursor lo anuncia antes de que nadie lo
+     intente. `touch-action:none` es lo que deja que el gesto lo maneje la
+     pantalla en vez del navegador. */
+  .lienzo { position: relative; flex: 1; min-height: 0; cursor: grab; touch-action: none; overflow: hidden; }
+  .lienzo.arrastrando { cursor: grabbing; }
+  svg { display: block; width: 100%; height: 100%; }
+
+  /* El filtro ATENUA en vez de esconder: la planta no cambia de forma, asi
+     que no hay que volver a ubicarse en cada filtro. */
+  .celda { transition: opacity .2s ease; }
+  .celda.apagado { opacity: .14; pointer-events: none; }
+
+  .camara { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 4px; }
+  .camara button {
+    font: inherit; font-size: 11px; font-weight: 700; line-height: 1;
+    padding: 5px 9px; border: 1px solid #c9d1dc; border-radius: 5px;
+    background: rgb(255 255 255 / 92%); color: #475569; cursor: pointer;
+  }
+  .camara button:hover:not(:disabled) { background: #f1f5f9; color: #0f172a; }
+  .camara button:disabled { opacity: .4; cursor: default; }
+
+  .filtros { flex: 0 0 auto; display: flex; gap: 5px; flex-wrap: wrap; padding: 6px 0 0; }
+  .filtros button {
+    font: inherit; font-size: 10.5px; font-weight: 700; letter-spacing: .03em;
+    padding: 4px 10px; border: 1px solid #c9d1dc; border-radius: 5px;
+    background: #fff; color: #475569; cursor: pointer;
+  }
+  .filtros button:hover:not(:disabled) { background: #f1f5f9; }
+  .filtros button.activo { background: #0f172a; border-color: #0f172a; color: #fff; }
+  .filtros button:disabled { opacity: .4; cursor: default; }
+  .filtros .n { font-family: ui-monospace, monospace; opacity: .75; margin-left: 5px; }
+
+  @media (prefers-reduced-motion: reduce) { .celda { transition: none; } }
 
   .pieplanta {
     flex: 0 0 auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
