@@ -76,7 +76,55 @@ function clasesUsadas(fuente) {
       }
     }
   }
+
+  //  `class:snoc-x={condicion}` -- la directiva de Svelte, que NO es un
+  //  atributo `class` y por eso se escapaba entera. Siete usos del detalle del
+  //  hallazgo entraron asi, sin que la guarda mirara ninguno.
+  for (const [, nombre] of limpia.matchAll(/class:(snoc-[a-z0-9-]+)/g)) usadas.add(nombre);
+
   return usadas;
+}
+
+/**
+ * Las clases que se prenden cuando un dato NO llego, con el nombre tal cual.
+ *
+ * Se leen del `class:x={algo === AUSENTE}` del detalle: son las que marcan una
+ * celda como dato ausente.
+ */
+function clasesDeDatoAusente(fuente) {
+  const marcas = new Set();
+  for (const [, nombre] of sinComentarios(fuente).matchAll(
+    /class:(snoc-[a-z0-9-]+)=\{[^}]*AUSENTE/g
+  ))
+    marcas.add(nombre);
+  return marcas;
+}
+
+/**
+ * Lo que la hoja declara para `.clase` cuando es el selector completo.
+ *
+ * Los comentarios se van primero: el que va encima de una regla termina en un
+ * cierre de comentario, y sin quitarlo el selector deja de estar al principio
+ * de una declaracion -- la regla no se encuentra y la clase parece no tener
+ * ningun estilo.
+ *
+ * Se parte por bloques en vez de armar una expresion regular con el nombre de
+ * la clase interpolado: ese camino ya se escribio y se rompio dos veces con
+ * los escapes.
+ */
+function reglasBaseDe(css, clase) {
+  const limpia = css.replace(/\/\*[\s\S]*?\*\//g, ' ');
+  const reglas = [];
+
+  for (const bloque of limpia.split('}')) {
+    const corte = bloque.indexOf('{');
+    if (corte === -1) continue;
+    const selector = bloque.slice(0, corte).trim();
+    //  Solo el selector COMPLETO: `.x:hover` o `.x .y` son otra regla, y una
+    //  media query llega aqui como el selector de dentro, que es lo que importa.
+    if (selector === `.${clase}`) reglas.push(bloque.slice(corte + 1));
+  }
+  return reglas.join(';');
 }
 
 /** Las clases que la hoja define. */
@@ -114,6 +162,42 @@ describe('las clases propias de supervisor-noc', () => {
     expect(clasesUsadas("<tr class={x ? 'snoc-fila-activa' : ''}>").has('snoc-fila-activa')).toBe(
       true
     );
+
+    // Y la directiva de Svelte tambien: es la forma que la guarda no leia.
+    expect(clasesUsadas('<dd class:snoc-sin-fuente={v === AUSENTE}>').has('snoc-sin-fuente')).toBe(
+      true
+    );
+  });
+
+  /**
+   * LA MARCA DE «FALTA EL DATO» PINTA TEXTO, NO UNA CAJA.
+   *
+   * No es una regla de gusto: `.snoc-ausente` ya existia en la hoja como una
+   * caja con fondo y padding, y el detalle del hallazgo volvio a declararla
+   * mas abajo como texto gris en cursiva. Las dos reglas se aplicaban a los
+   * dos usos -- la celda de tabla se llevaba el fondo de caja y la caja se
+   * llevaba la cursiva. La guarda de arriba lo dejo pasar entero, porque la
+   * clase SI estaba definida: comprobaba su existencia, no que fuera una sola
+   * cosa.
+   *
+   * Afirma sobre el efecto (que la clase no traiga caja), no sobre el nombre
+   * que hoy tiene: renombrarla otra vez no rompe esta prueba, reusar una clase
+   * de caja si.
+   */
+  it('la clase que marca un dato ausente no es una clase-caja', () => {
+    const fuente = readFileSync(`${RUTA}/+page.svelte`, 'utf8');
+    const marcas = [...clasesDeDatoAusente(fuente)];
+
+    //  Si esto diera cero, lo de abajo pasaria sin mirar nada.
+    expect(marcas.length).toBeGreaterThan(0);
+
+    for (const clase of marcas) {
+      const reglas = reglasBaseDe(css, clase);
+      expect(reglas, `.${clase} no tiene reglas propias en la hoja`).not.toBe('');
+      expect(reglas, `.${clase} trae fondo de caja`).not.toMatch(/background/);
+      expect(reglas, `.${clase} trae padding de caja`).not.toMatch(/padding/);
+      expect(reglas, `.${clase} es un contenedor, no texto`).not.toMatch(/display:\s*flex/);
+    }
   });
 
   for (const archivo of ['+page.svelte', 'programacion/+page.svelte']) {

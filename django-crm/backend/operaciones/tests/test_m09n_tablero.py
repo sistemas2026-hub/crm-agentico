@@ -210,9 +210,13 @@ def test_el_contexto_no_devuelve_coordenadas_aunque_la_orden_las_tenga(org_a):
     plano = " ".join(str(v) for v in fila.values())
     for prohibido in ("10.98", "-74.78", "lat", "lng", "gps"):
         assert prohibido not in plano, f"se filtro {prohibido}"
+    # El conjunto es EXACTO y no una lista de prohibidos: asi, cada campo que
+    # se agregue al contexto rompe esta prueba y obliga a mirarlo. Ya cazo los
+    # tres de la bandeja -- cliente, asunto y origen_creado_en -- que se
+    # declaran aqui despues de comprobar que ninguno trae coordenadas.
     assert set(fila) == {
         "zona", "tecnico", "ticket_externo", "proveedor_externo", "orden_numero",
-        "sla_estado", "sla_minutos"}
+        "sla_estado", "sla_minutos", "cliente", "asunto", "origen_creado_en"}
 
 
 # =============================================================================
@@ -522,3 +526,146 @@ def test_la_lista_no_expone_responsable_sugerido_como_tecnico(org_a, admin_clien
     fila = admin_client.get("/api/operaciones/propuestas/").json()["resultados"][0]
     assert fila["tecnico"] == ""
     assert "ana2@prueba.co" not in str(fila)
+
+
+# =============================================================================
+#  §7  CLIENTE, ASUNTO Y ANTIGUEDAD  --  para la bandeja de revision
+# =============================================================================
+
+def test_un_caso_trae_el_nombre_de_la_cuenta_y_su_asunto(org_a):
+    """
+    La bandeja muestra de quien es el problema y de que se trata. Los dos
+    salen del caso: la cuenta y su 'name', que es el asunto.
+    """
+    from accounts.models import Account
+    from cases.models import Case
+
+    with rls_org(org_a):
+        cuenta = Account.objects.create(org=org_a, name="Ferreteria El Tornillo")
+        caso = Case.objects.create(
+            org=org_a, name="Sin internet desde el lunes",
+            status="New", priority="High", account=cuenta,
+            provider="wisphub", external_ticket_id="91288")
+        propuesta = _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    fila = contexto[str(propuesta.id)]
+    assert fila["cliente"] == "Ferreteria El Tornillo"
+    assert fila["asunto"] == "Sin internet desde el lunes"
+    assert fila["ticket_externo"] == "91288"
+
+
+def test_un_caso_sin_cuenta_no_inventa_un_cliente(org_a):
+    """
+    'account' es opcional en el modelo. Sin cuenta sale vacio y la pantalla
+    dice "No disponible en la fuente" -- que es distinto de un nombre
+    fabricado a partir del asunto o del ticket.
+    """
+    from cases.models import Case
+
+    with rls_org(org_a):
+        caso = Case.objects.create(
+            org=org_a, name="Consulta de facturacion", status="New",
+            priority="Low")
+        propuesta = _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    assert contexto[str(propuesta.id)]["cliente"] == ""
+    assert contexto[str(propuesta.id)]["asunto"] == "Consulta de facturacion"
+
+
+def test_una_orden_trae_su_cliente_y_no_finge_un_asunto(org_a):
+    """
+    Una orden de trabajo no tiene asunto: lo que la describe es su tipo de
+    trabajo, que ya viaja aparte. Repetir ahi el tipo llenaria la columna sin
+    decir nada nuevo.
+    """
+    with rls_org(org_a):
+        orden = _orden(org_a, cliente_nombre="Panaderia La Espiga")
+        propuesta = _propuesta(org_a, origen_id=str(orden.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    assert contexto[str(propuesta.id)]["cliente"] == "Panaderia La Espiga"
+    assert contexto[str(propuesta.id)]["asunto"] == ""
+
+
+def test_la_antiguedad_se_mide_sobre_el_ORIGEN_y_no_sobre_la_propuesta(org_a):
+    """
+    LA PRUEBA QUE JUSTIFICA EL CAMPO.
+
+    La propuesta se vuelve a emitir cada ciclo. Si la antiguedad saliera de
+    'PropuestaSupervisor.created_at', un caso de 40 dias se veria como
+    "detectado hace 2 horas" cada vez que el Supervisor corre -- y la columna
+    diria lo contrario de lo que quiere decir.
+
+    Aqui el caso es viejo y la propuesta recien nacida: lo que viaja tiene que
+    ser la fecha del caso.
+    """
+    from cases.models import Case
+
+    with rls_org(org_a):
+        viejo = timezone.now() - timezone.timedelta(days=40)
+        caso = Case.objects.create(
+            org=org_a, name="Caso antiguo", status="New", priority="Low")
+        Case.objects.filter(id=caso.id).update(created_at=viejo)
+        propuesta = _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    salida = contexto[str(propuesta.id)]["origen_creado_en"]
+    assert salida is not None
+    # La del caso, no la de la propuesta: difieren en 40 dias.
+    assert salida.startswith(viejo.date().isoformat())
+    assert not salida.startswith(propuesta.created_at.date().isoformat())
+
+
+def test_una_propuesta_sin_origen_alcanzable_no_trae_ni_cliente_ni_fecha(org_a):
+    with rls_org(org_a):
+        propuesta = _propuesta(org_a, origen_tipo="actividad")
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    fila = contexto[str(propuesta.id)]
+    assert fila["cliente"] == ""
+    assert fila["asunto"] == ""
+    assert fila["origen_creado_en"] is None
+
+
+def test_la_lista_expone_cliente_asunto_y_antiguedad(org_a, admin_client, admin_profile):
+    """Los tres campos, atravesando la API entera."""
+    from accounts.models import Account
+    from cases.models import Case
+
+    with rls_org(org_a):
+        cuenta = Account.objects.create(org=org_a, name="Hotel Miramar")
+        caso = Case.objects.create(
+            org=org_a, name="Intermitencia en la fibra", status="New",
+            priority="High", account=cuenta)
+        _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+
+    fila = admin_client.get("/api/operaciones/propuestas/").json()["resultados"][0]
+
+    assert fila["cliente"] == "Hotel Miramar"
+    assert fila["asunto"] == "Intermitencia en la fibra"
+    assert fila["origen_creado_en"] is not None
+
+
+def test_las_coordenadas_siguen_sin_salir_con_los_campos_nuevos(org_a):
+    """
+    La §2 otra vez, ahora que el contexto crecio con cliente y asunto. Un
+    campo nuevo es la ocasion tipica para que se cuele otro al lado.
+    """
+    with rls_org(org_a):
+        orden = _orden(org_a, gps_lat=10.9878, gps_lng=-74.7889,
+                       cliente_nombre="Cliente con GPS")
+        propuesta = _propuesta(org_a, origen_id=str(orden.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    fila = contexto[str(propuesta.id)]
+    plano = " ".join(str(v) for v in fila.values())
+    for prohibido in ("10.98", "-74.78"):
+        assert prohibido not in plano, f"se filtro {prohibido}"
+    assert fila["cliente"] == "Cliente con GPS"

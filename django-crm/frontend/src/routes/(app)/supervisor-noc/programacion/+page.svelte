@@ -314,7 +314,7 @@
 
         <!-- Pestañas: las dos vistas del mismo módulo, alcanzables entre sí -->
         <div class="snoc-envuelve snoc-pestanas">
-          <a class="snoc-pildora" href="/supervisor-noc">Hallazgos y propuestas</a>
+          <a class="snoc-pildora" href="/supervisor-noc">Pendientes por revisión</a>
           <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc/programacion">Programación</a>
         </div>
       </section>

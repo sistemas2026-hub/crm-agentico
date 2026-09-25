@@ -61,6 +61,21 @@ VACIO = {
     # pantalla las dice distinto.
     "sla_estado": "",
     "sla_minutos": None,
+    # El nombre del cliente y el asunto del caso. Los dos salen del origen, no
+    # de la propuesta: la orden trae 'cliente_nombre', el caso trae su cuenta
+    # y su 'name' (que es el asunto). Vacio cuando el origen no los tiene --
+    # una orden no tiene asunto y un caso puede no tener cuenta -- y la
+    # pantalla lo dice en palabras, no con una raya.
+    #
+    # El nombre del cliente SI sale y las coordenadas no, y no es incoherente:
+    # 'programacion-noc.js::leerOrden' ya sirve 'cliente_nombre' hoy y quita
+    # telefono, lat y lng. Se sigue esa misma linea, no una nueva.
+    "cliente": "",
+    "asunto": "",
+    # Desde cuando existe el caso o la orden. La antiguedad se mide sobre el
+    # ORIGEN y no sobre la propuesta: la propuesta se vuelve a emitir cada
+    # ciclo y su fecha diria "detectado hace 2 horas" de un caso de 40 dias.
+    "origen_creado_en": None,
 }
 
 
@@ -170,7 +185,9 @@ def contexto_de(org, propuestas) -> dict:
         casos = {
             str(c.id): c
             for c in Case.objects.filter(org=org, id__in=ids_caso)
-            .only("id", "provider", "external_ticket_id")
+            .select_related("account")
+            .only("id", "provider", "external_ticket_id", "name", "created_at",
+                  "account__name")
         }
 
     # --- El plazo operativo ------------------------------------------------
@@ -197,17 +214,29 @@ def contexto_de(org, propuestas) -> dict:
         clave = str(p.id)
         origen = str(p.origen_id)
         if p.origen_tipo == ORIGEN_ORDEN and origen in ordenes:
+            orden = ordenes[origen]
             salida[clave].update({
-                "orden_numero": ordenes[origen].numero,
+                "orden_numero": orden.numero,
                 "tecnico": tecnicos.get(origen, ""),
                 "zona": zonas.get(origen, ""),
+                "cliente": orden.cliente_nombre or "",
+                # Una orden de trabajo no tiene asunto: lo que la describe es
+                # su tipo de trabajo, que ya viaja aparte. Queda vacio en vez
+                # de repetir ahi el tipo.
+                "origen_creado_en": (orden.created_at.isoformat()
+                                     if orden.created_at else None),
                 **plazos.get(origen, {}),
             })
         elif p.origen_tipo == ORIGEN_CASO and origen in casos:
             caso = casos[origen]
+            cuenta = getattr(caso, "account", None)
             salida[clave].update({
                 "ticket_externo": caso.external_ticket_id or "",
                 "proveedor_externo": caso.provider or "",
+                "cliente": (cuenta.name if cuenta else "") or "",
+                "asunto": caso.name or "",
+                "origen_creado_en": (caso.created_at.isoformat()
+                                     if caso.created_at else None),
             })
 
     return salida
