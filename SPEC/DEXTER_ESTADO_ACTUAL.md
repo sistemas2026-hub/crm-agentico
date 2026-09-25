@@ -472,18 +472,53 @@ test_m06e_consolidacion.py   FaltaIdentidadEnSesion: 'ping_cliente' necesita
                              ['id_servicio'] de la sesion verificada
 ```
 
-**Al menos el primero está MAL CLASIFICADO**, y eso cambia qué significa su
-rojo: `test_centro_mando.py` importa `nucleo.persistencia.db` y **no contiene
-ninguno de los patrones que `clasificar()` busca** (`psycopg|DATABASE_URL|DBHOST|
-dsn(|conexion.dsn`), así que el corredor lo trata como aislado y lo corre sin
-base. Su rojo es probablemente **NO SE PUDO MEDIR presentado como FALLO** — el
-mismo defecto del contrato que el CI encontró tres veces el 24/09, ahora en el
-clasificador y no en las pruebas. El segundo no importa `db` y queda sin
-diagnosticar.
+### `test_centro_mando.py` — ROJO REAL, y el Centro de Mando está desplegado
 
-No se arreglaron acá a propósito: son de otra familia y confundirlos con el rojo
-declarado es lo que esta sección existe para evitar. **Lo que sí hay que corregir
-es `clasificar()`**: mirar los imports y no solo el texto.
+⚠️ La primera versión de este bloque dijo que era *probablemente «no se pudo
+medir» presentado como fallo, por estar mal clasificada*. **Esa hipótesis se
+midió y es falsa**, y se corrige acá en vez de borrarse porque el error de
+razonamiento vale más que la conclusión: la prueba **no toca la base** — define
+sus `totales` a mano (línea 113) y golpea el endpoint con el cliente de test. Que
+esté mal clasificada es cierto como hecho y **no** es la causa de su rojo.
+
+Lo que de verdad falla, corrido a mano:
+
+```
+[FALLA] el agente con error nombra la herramienta que fallo
+[FALLA] el que procesa nombra la herramienta en curso
+[FALLA] el disponible lo dice sin inventar actividad
+[FALLA] 'agentes con trabajo' cuenta los mismos que muestran las tarjetas
+        la franja dice None y hay 0: []
+TypeError: '>' not supported between 'NoneType' and 'int'   (linea 214)
+```
+
+`totales.get("agentes_activos")` llega **`None`**: el endpoint dejó de devolver
+ese campo. Y el comentario de la propia prueba dice que ese contador ya se rompió
+una vez, por lo mismo:
+
+> *"Nace de un error real: al renombrar los estados, este conteo se quedo
+> buscando 'procesando' y 'atendiendo'. Nadie lo vio hasta abrir la pantalla en
+> produccion y leer '0 agentes con trabajo' sobre tres tarjetas activas."*
+
+**El Centro de Mando está en producción**, así que esto no es deuda de
+laboratorio: la franja de arriba puede estar mostrando un contador vacío sobre
+tarjetas activas, que es exactamente el síntoma que la prueba nació para cazar.
+Ninguno de los commits del 25/09 de esta rama toca `nucleo/canales/api.py` —
+los de la planta son JS y Svelte, y los de este trabajo son una prueba, `cli/` y
+documentos—, así que la regresión es anterior y el CI en verde del 24/09 ya no
+describe el árbol. **Hay que mirarlo con la pantalla delante, no solo con la
+prueba.**
+
+`test_m06e_consolidacion.py` queda sin diagnosticar: no importa `db` y su
+`FaltaIdentidadEnSesion` no se investigó.
+
+**Y aparte, `clasificar()` sí tiene un defecto propio**, aunque no explique estos
+rojos: decide leyendo el texto del archivo, así que una prueba que llega a la
+base por un import (`test_centro_mando.py` importa `nucleo.persistencia.db`) se
+clasifica como aislada. Mirar los imports, no solo el texto.
+
+Ninguno de los dos se arregló acá: son de otra familia, y confundirlos con el
+rojo declarado es lo que esta sección existe para evitar.
 
 El exit 1 de la corrida viene de esos dos, **no** del rojo declarado: el
 declarado da exit 0 por sí solo, medido.
