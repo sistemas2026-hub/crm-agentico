@@ -1,75 +1,64 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
- UN ROL QUE SOLO DERIVA NO PUEDE ESCALAR  --  prueba de la condicion, sin modelo
+ POSPONER UNA ESCALADA: la decision entera, probada donde vive
 ================================================================================
     py -3.13 tests/test_escalada_del_rol_de_entrada.py
 
 QUE DEFIENDE
 ------------
-`nucleo/seguimiento/forzado.py::con_las_manos_vacias` devuelve True cuando el
-asistente no ejecuto NINGUNA herramienta en toda la conversacion. Es un hecho de
-la traza --los mensajes de rol 'tool'-- y esta bien calculado.
+`nucleo/seguimiento/forzado.py::por_que_posponer` decide si una escalada que el
+evaluador pidio se difiere un turno, y con que nota. `nucleo/canales/api.py`
+solo aplica lo que devuelve. Esta prueba importa ESA funcion --no una copia--
+y ademas comprueba que `_atender_turno` no tenga logica paralela.
 
-El problema no era esa funcion: era como la usaban las dos ramas de posposicion
-de `nucleo/canales/api.py` hasta el 25/09/2026 (la condicion de abajo es la de
-ANTES; hoy va precedida por `puede_intentar_algo(config, rol_cfg)`).
+DE DONDE SALE, en tres pasos del 25/09/2026
+-------------------------------------------
+1. Se midio que el rol de entrada de rapilink declara UNA herramienta en
+   'puede_consultar', y es la de derivar. Con la condicion de entonces
+   --"no ejecuto ninguna herramienta -> se pospone"-- su escalada se
+   posponia SIEMPRE: si no deriva no hay mensaje 'tool', y si deriva ya no
+   esta ahi. Y la nota le pedia identificar al cliente y avanzar con un
+   procedimiento, dos cosas que no puede hacer.
 
-    if (not forzado and not estado["intento_antes_de_escalar"]
-            and con_las_manos_vacias(estado["historial"])):
-        posponer = True        # la escalada NO ocurre: se difiere un turno
+2. El primer arreglo (A) fue no posponer para ese rol: escalar en el acto.
+   Tres lentes lo auditaron y una llego a lo mismo que la reconsideracion
+   propia: anulaba lo que el tenant declaro en 'intentar_resolver_antes' y le
+   quitaba al router la vuelta en la que podia derivar. Y otra PROBO que la
+   prueba de entonces no veia el enganche: puso el api.py anterior y siguio
+   16/16 en verde.
 
-Cruzado con la configuracion real (medido el 25/09/2026 sobre los ocho roles de
-rapilink, y coincide con la base):
+3. Esto es B: se pospone UNA vez con una nota que le pide lo unico que puede
+   --derivar, nombrando la herramienta de su catalogo--, y si tampoco deriva,
+   la siguiente escala. La decision se saco a una funcion pura para que esta
+   prueba y el codigo que corre sean el mismo objeto.
 
-    soporte                    28 declara   28 ejecutables
-    cliente_final               1            0      <-- el rol de entrada
-    facturacion_cliente         7            6
-    ...
+POR QUE NO LLAMA AL MODELO NI A LA BASE
+---------------------------------------
+La decision es determinista. Lo que si necesita al sistema real --que el
+router derive con esa nota-- se mide con cli/bateria_flujos.py, que pasa por
+atender_turno. Medir aca contra DeepSeek mediria dos cosas a la vez.
 
-El rol de entrada declara UNA herramienta y es `derivar_a_area`. Entonces:
-
-    si NO deriva  ->  ningun mensaje 'tool'  ->  manos vacias  ->  se POSPONE
-    si SI deriva  ->  ya salio del router, y el area toma el caso
-
-No puede escalar en su primer intento NUNCA. Y no es un caso raro: es su estado
-permanente. Para ese rol "manos vacias" no significa "no intento lo que sabe
-hacer" -- significa "no tiene manos".
-
-La nota que se le inyecta lo confirma sola:
-
-    "Primero intenta lo tuyo: identifica al cliente si hace falta y avanza con
-     el procedimiento que corresponda."
-
-El router no puede identificar --ninguna herramienta suya declara
-`verifica_identidad`, que es la primera condicion de
-`debe_reencauzar_a_derivacion`-- y no tiene procedimiento. Se le pide lo que no
-esta en su capacidad: el mismo error que el reencauzamiento corrigio en agosto,
-en otra guarda.
-
-POR QUE ESTA PRUEBA NO LLAMA AL MODELO NI A LA BASE
----------------------------------------------------
-La condicion es determinista. Medir esto contra DeepSeek mediria dos cosas a la
-vez --la condicion y la varianza del modelo-- y este laboratorio ya sabe como
-termina eso: el 25/09 la misma celda dio 5/6 y 2/6 en dos tandas.
-
-Lo que si necesita al sistema real --que la conversacion termine con dueño-- no
-vive aca.
-
-LO QUE ESTA PRUEBA NO AFIRMA
-----------------------------
-Que corregir esto elimine el limbo. Arregla el camino del escalamiento cuando el
-evaluador YA decidio que hace falta una persona. Un turno donde el evaluador no
-pide nada y el router tampoco deriva sigue sin cobertura.
+LO QUE LA PRUEBA 6 AFIRMA, Y LO QUE NO
+--------------------------------------
+Que `_atender_turno` llama a `por_que_posponer` y NO recompone la decision con
+`con_las_manos_vacias` ni `merece_un_intento` por su cuenta. Es una afirmacion
+sobre ausencia de logica paralela --el hueco que el auditor demostro--, no
+sobre el efecto en un turno completo. Eso ultimo lo cubre la bateria.
 ================================================================================
 """
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+
+from nucleo.seguimiento.forzado import (            # noqa: E402
+    por_que_posponer, puede_intentar_algo, con_las_manos_vacias,
+    NOTA_MANOS_VACIAS, NOTA_INTENTAR_PRIMERO, MENSAJES_POSPONER)
 
 fallos = []
 
@@ -81,8 +70,6 @@ def afirmar(condicion: bool, que: str) -> None:
 
 
 class _H:
-    """Una herramienta del catalogo, con lo poco que mira la condicion."""
-
     def __init__(self, nombre, deriva_rol=False, verifica_identidad=False):
         self.nombre = nombre
         self.deriva_rol = deriva_rol
@@ -94,135 +81,144 @@ class _Rol:
         self.puede_consultar = list(puede_consultar)
 
 
+class _Esc:
+    def __init__(self, intentar):
+        self.intentar_resolver_antes = list(intentar or [])
+
+
 class _Cfg:
-    def __init__(self, roles, herramientas):
+    def __init__(self, roles, herramientas, intentar=None):
         self.roles = roles
         self.herramientas = herramientas
-
-
-# ══════════════════════════════════════════════════════════════════════════
-#  LA CONDICION VIVE EN EL NUCLEO, y esta prueba la importa de ahi
-#
-#  Se escribio primero aca, como funcion de referencia sin llamador, el
-#  25/09/2026. Ese mismo dia se decidio implementarla: esta en
-#  nucleo/seguimiento/forzado.py al lado de con_las_manos_vacias, y la usan
-#  las dos ramas de posposicion de nucleo/canales/api.py. Importarla y no
-#  copiarla es lo que hace que esta prueba afirme sobre el codigo que corre.
-# ══════════════════════════════════════════════════════════════════════════
-from nucleo.seguimiento.forzado import puede_intentar_algo
-
-# Nombre con el que se escribieron las afirmaciones de abajo, para que digan
-# lo mismo que decian cuando la condicion todavia era una propuesta.
-tenia_algo_que_intentar = puede_intentar_algo
-
-
-def _pospone_sin_la_pieza(historial) -> bool:
-    """La condicion como estaba en api.py ANTES del 25/09/2026, sin el resto del `if`."""
-    from nucleo.seguimiento.forzado import con_las_manos_vacias
-    return con_las_manos_vacias(historial)
-
-
-def _pospone_corregido(config, cfg_rol, historial) -> bool:
-    """La condicion con la pieza que falta."""
-    from nucleo.seguimiento.forzado import con_las_manos_vacias
-    return tenia_algo_que_intentar(config, cfg_rol) and con_las_manos_vacias(historial)
+        self.escalamiento = _Esc(intentar)
 
 
 SIN_TOOL = [{"role": "user", "content": "quiero cancelar"},
             {"role": "assistant", "content": "Entiendo. Para ayudarte necesito saber..."}]
+CON_TOOL = SIN_TOOL + [{"role": "tool", "content": '{"saldo": 0}'}]
+
+# El rol de entrada de rapilink, tal como esta en la config: solo deriva.
+ROUTER = _Cfg({"cliente_final": _Rol(["derivar_a_area"])},
+              [_H("derivar_a_area", deriva_rol=True)],
+              intentar=["frustracion_detectada"])
+# Un ejecutor: tiene con que intentar algo antes de molestar a una persona.
+EJECUTOR = _Cfg({"soporte": _Rol(["consultar_cliente", "reiniciar_ont", "derivar_a_area"])},
+                [_H("consultar_cliente"), _H("reiniciar_ont"), _H("derivar_a_area", deriva_rol=True)],
+                intentar=["frustracion_detectada"])
+
+
+def decide(cfg, rol, historial, *, forzado=False, ya_intento=False, motivo="informacion_a_confirmar"):
+    return por_que_posponer(cfg, cfg.roles.get(rol) if rol else None, historial,
+                            forzado=forzado, ya_intento=ya_intento, motivo=motivo)
 
 
 def prueba_1_la_funcion_de_la_traza_esta_bien():
-    """
-    con_las_manos_vacias no es el defecto. Se afirma para que quede claro que
-    la correccion NO va ahi -- tocarla romperia a los roles ejecutores, que es
-    para quienes fue escrita.
-    """
-    from nucleo.seguimiento.forzado import con_las_manos_vacias
     afirmar(con_las_manos_vacias(SIN_TOOL) is True,
             "sin turnos 'tool', la traza esta vacia -- el hecho es correcto")
-    con_tool = SIN_TOOL + [{"role": "tool", "content": '{"saldo": 0}'}]
-    afirmar(con_las_manos_vacias(con_tool) is False,
+    afirmar(con_las_manos_vacias(CON_TOOL) is False,
             "con un turno 'tool' real, ya no estan vacias")
-    bloqueada = SIN_TOOL + [{"role": "tool",
-                             "content": '{"error": "IDENTIDAD_NO_VERIFICADA"}'}]
+    bloqueada = SIN_TOOL + [{"role": "tool", "content": '{"error": "IDENTIDAD_NO_VERIFICADA"}'}]
     afirmar(con_las_manos_vacias(bloqueada) is True,
             "una llamada que el motor BLOQUEO no cuenta como ejecutada")
 
 
-def prueba_2_el_rol_de_entrada_queda_bloqueado_hoy():
-    cfg = _Cfg({"cliente_final": _Rol(["derivar_a_area"])},
-               [_H("derivar_a_area", deriva_rol=True)])
-    rol = cfg.roles["cliente_final"]
-    afirmar(_pospone_sin_la_pieza(SIN_TOOL) is True,
-            "ANTES DEL 25/09: el rol que solo deriva posponia la escalada -- su estado permanente")
-    afirmar(tenia_algo_que_intentar(cfg, rol) is False,
-            "no tenia nada que intentar: su unica herramienta lo saca del rol")
-    afirmar(_pospone_corregido(cfg, rol, SIN_TOOL) is False,
-            "CORREGIDO: ya no pospone, porque esperar un turno no le da nada nuevo")
+def prueba_2_el_rol_que_solo_deriva_recibe_la_nota_que_puede_cumplir():
+    razon, nota = decide(ROUTER, "cliente_final", SIN_TOOL)
+    afirmar(razon == "derivar_primero",
+            f"el rol que solo deriva se pospone UNA vez con razon 'derivar_primero' (dio {razon!r})")
+    afirmar("derivar_a_area" in nota,
+            "la nota nombra la herramienta de derivacion DE SU CATALOGO")
+    prohibidas = [p for p in ("herramientas", "identifica", "procedimiento", "cedula")
+                  if p in nota.lower()]
+    afirmar(not prohibidas,
+            f"la nota NO le pide lo que no puede: sin {['herramientas','identifica','procedimiento','cedula']}"
+            + (f" -- aparecio {prohibidas}" if prohibidas else ""))
+    afirmar(razon in MENSAJES_POSPONER, "y tiene su linea de log")
+    razon2, _ = decide(ROUTER, "cliente_final", SIN_TOOL, ya_intento=True)
+    afirmar(razon2 is None, "una sola vez: con ya_intento, la siguiente escala")
+    razon3, _ = decide(ROUTER, "cliente_final", SIN_TOOL, forzado=True)
+    afirmar(razon3 is None, "una escalada forzada por un hecho nunca se pospone")
+    razon4, _ = decide(ROUTER, "cliente_final", SIN_TOOL, motivo="frustracion_detectada")
+    afirmar(razon4 == "derivar_primero",
+            "con un motivo de 'intentar_resolver_antes' el tenant sigue teniendo su vuelta, "
+            "y la nota es la que ese rol puede cumplir")
 
 
-def prueba_3_el_ejecutor_sigue_posponiendo():
-    """
-    La razon de ser de la guarda: un caso que llega a la bandeja con la traza
-    vacia le pide a una persona que empiece de cero. Eso NO se toca.
-    """
-    cfg = _Cfg({"soporte_tecnico_cliente": _Rol(["consultar_cliente",
-                                                 "reiniciar_ont", "derivar_a_area"])},
-               [_H("consultar_cliente"), _H("reiniciar_ont"),
-                _H("derivar_a_area", deriva_rol=True)])
-    rol = cfg.roles["soporte_tecnico_cliente"]
-    afirmar(tenia_algo_que_intentar(cfg, rol) is True,
-            "un rol con herramientas de datos SI tenia algo que intentar")
-    afirmar(_pospone_corregido(cfg, rol, SIN_TOOL) is True,
-            "y sigue posponiendo con la traza vacia -- no se rompe lo que funciona")
-    con_tool = SIN_TOOL + [{"role": "tool", "content": '{"plan": "x"}'}]
-    afirmar(_pospone_corregido(cfg, rol, con_tool) is False,
-            "si ya consulto algo, tampoco se pospone -- como hoy")
+def prueba_3_el_ejecutor_conserva_sus_dos_razones():
+    razon, nota = decide(EJECUTOR, "soporte", SIN_TOOL)
+    afirmar(razon == "manos_vacias" and nota == NOTA_MANOS_VACIAS,
+            "con la traza vacia sigue posponiendo, con la nota de siempre -- no se rompe lo que funciona")
+    razon, _ = decide(EJECUTOR, "soporte", CON_TOOL)
+    afirmar(razon is None, "si ya consulto algo y el motivo no esta en la lista del tenant, no se pospone")
+    razon, nota = decide(EJECUTOR, "soporte", CON_TOOL, motivo="frustracion_detectada")
+    afirmar(razon == "intentar_resolver_antes" and nota == NOTA_INTENTAR_PRIMERO,
+            "un motivo de 'intentar_resolver_antes' pospone una vuelta, con su nota")
+    razon, _ = decide(EJECUTOR, "soporte", CON_TOOL, motivo="frustracion_detectada", forzado=True)
+    afirmar(razon is None,
+            "y forzado corta TAMBIEN esa rama (antes del 25/09 solo cortaba la primera)")
+    razon, _ = decide(EJECUTOR, "soporte", SIN_TOOL, ya_intento=True)
+    afirmar(razon is None, "una sola vuelta extra por conversacion")
 
 
 def prueba_4_no_depende_de_ningun_nombre_de_rol():
-    """
-    CLAUDE.md 3.3: un tenant nuevo con otro rol de entrada queda cubierto sin
-    tocar codigo. Se prueba con nombres que no existen en ninguna config.
-    """
     for nombre in ("ventas_entrada", "cobranzas_whatsapp", "recepcion_l0"):
-        cfg = _Cfg({nombre: _Rol(["pasar_al_area"])},
-                   [_H("pasar_al_area", deriva_rol=True)])
-        afirmar(_pospone_corregido(cfg, cfg.roles[nombre], SIN_TOOL) is False,
-                f"'{nombre}' que solo deriva -> no pospone (el nombre no entra)")
+        cfg = _Cfg({nombre: _Rol(["pasar_al_area"])}, [_H("pasar_al_area", deriva_rol=True)])
+        razon, nota = decide(cfg, nombre, SIN_TOOL)
+        afirmar(razon == "derivar_primero" and "pasar_al_area" in nota,
+                f"'{nombre}' que solo deriva -> derivar_primero, nombrando SU herramienta")
     cfg = _Cfg({"recepcion_l0": _Rol(["ver_factura", "pasar_al_area"])},
                [_H("ver_factura"), _H("pasar_al_area", deriva_rol=True)])
-    afirmar(_pospone_corregido(cfg, cfg.roles["recepcion_l0"], SIN_TOOL) is True,
-            "'recepcion_l0' CON una ejecutable -> sigue posponiendo")
+    razon, _ = decide(cfg, "recepcion_l0", SIN_TOOL)
+    afirmar(razon == "manos_vacias", "'recepcion_l0' CON una ejecutable -> manos_vacias, como un ejecutor")
 
 
-def prueba_5_falla_cerrado():
-    """
-    Sin config legible, el comportamiento de antes. No porque posponer sea el
-    lado seguro --posponer de mas es justamente lo que dejaba a alguien sin
-    dueño-- sino porque el cambio se limita al caso demostrado: un rol cuya
-    config se puede leer y no declara nada ejecutable. Lo que no se puede leer
-    no se toca.
-    """
-    afirmar(tenia_algo_que_intentar(_Cfg({}, []), None) is True,
-            "sin cfg_rol -> se comporta como hoy (FALLA CERRADO)")
-    cfg = _Cfg({"raro": _Rol([])}, [_H("derivar_a_area", deriva_rol=True)])
-    afirmar(tenia_algo_que_intentar(cfg, cfg.roles["raro"]) is False,
-            "un rol LEGIBLE sin herramientas declaradas -> no tiene manos, no pospone")
+def prueba_5_sin_nada_que_dar_y_falla_cerrado():
+    razon, _ = decide(_Cfg({}, []), None, SIN_TOOL)
+    afirmar(razon == "manos_vacias",
+            "sin cfg_rol (config ilegible) se comporta como antes: manos vacias (FALLA CERRADO)")
+    afirmar(puede_intentar_algo(_Cfg({}, []), None) is True, "  ... porque puede_intentar_algo no afirma nada")
+    cfg = _Cfg({"charla": _Rol([])}, [_H("consultar_documentacion")])
+    razon, _ = decide(cfg, "charla", SIN_TOOL)
+    afirmar(razon is None,
+            "un rol legible que ni ejecuta ni deriva -> no hay nada que darle: no se pospone")
     cfg2 = _Cfg({"raro": _Rol(["no_existe_en_el_catalogo"])}, [])
-    afirmar(tenia_algo_que_intentar(cfg2, cfg2.roles["raro"]) is False,
-            "declara solo nombres fuera del catalogo -> tampoco tiene manos")
+    razon, _ = decide(cfg2, "raro", SIN_TOOL)
+    afirmar(razon is None, "declara solo nombres fuera del catalogo -> tampoco")
+
+
+def prueba_6_el_enganche_no_tiene_logica_paralela():
+    """
+    Afirma sobre AUSENCIA de logica paralela, no sobre el efecto: si alguien
+    vuelve a escribir un 'if con_las_manos_vacias(...)' en _atender_turno, la
+    decision deja de ser la que esta prueba importa, y eso es exactamente lo
+    que el auditor demostro el 25/09 con el api.py anterior en verde.
+    """
+    try:
+        from nucleo.canales import api
+    except Exception as e:                                          # noqa: BLE001
+        print(f"  (se saltea: no se pudo importar api -- {type(e).__name__})")
+        return
+    fuente = inspect.getsource(api._atender_turno)
+    afirmar("por_que_posponer(" in fuente, "_atender_turno llama a por_que_posponer")
+    afirmar("con_las_manos_vacias(" not in fuente,
+            "y NO decide con con_las_manos_vacias por su cuenta")
+    afirmar("merece_un_intento(" not in fuente,
+            "ni con merece_un_intento por su cuenta")
+    afirmar("MENSAJES_POSPONER[razon]" in fuente,
+            "la linea de log sale de la misma razon que la decision")
+    afirmar("puede_intentar_algo(config, rol_cfg)" in fuente,
+            "el agendamiento automatico sigue exigiendo que el rol tenga con que (api.py, tras el evaluador)")
 
 
 def main() -> int:
     print(__doc__.split("=" * 80)[1].strip())
     print()
     for prueba in (prueba_1_la_funcion_de_la_traza_esta_bien,
-                   prueba_2_el_rol_de_entrada_queda_bloqueado_hoy,
-                   prueba_3_el_ejecutor_sigue_posponiendo,
+                   prueba_2_el_rol_que_solo_deriva_recibe_la_nota_que_puede_cumplir,
+                   prueba_3_el_ejecutor_conserva_sus_dos_razones,
                    prueba_4_no_depende_de_ningun_nombre_de_rol,
-                   prueba_5_falla_cerrado):
+                   prueba_5_sin_nada_que_dar_y_falla_cerrado,
+                   prueba_6_el_enganche_no_tiene_logica_paralela):
         print(f"\n{prueba.__name__}")
         prueba()
     print()
@@ -231,8 +227,8 @@ def main() -> int:
         for f in fallos:
             print(f"  - {f}")
         return 1
-    print("Todo en orden: posponer una escalada solo tiene sentido cuando el rol",
-          "tenia algo que intentar, y eso sale de `puede_consultar`.")
+    print("Todo en orden: la decision de posponer vive en una sola funcion, el rol que solo",
+          "deriva recibe una nota que puede cumplir, y el enganche no la recompone.")
     return 0
 
 

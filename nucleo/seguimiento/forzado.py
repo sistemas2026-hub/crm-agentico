@@ -474,6 +474,116 @@ def puede_intentar_algo(config, cfg_rol) -> bool:
     return any(not getattr(h, "deriva_rol", False) for h in suyas)
 
 
+# ── Posponer una escalada: la decision entera, en un solo lugar ─────────────
+#
+# Hasta el 25/09/2026 esta decision vivia inline en nucleo/canales/api.py,
+# repartida en un if/elif con sus textos. Se saco a una funcion por una razon
+# medida ese mismo dia, dos veces: una funcion correcta y un camino real que
+# no la usaba. Un auditor reemplazo api.py por la version anterior y la prueba
+# siguio en verde. Ahora api.py solo aplica lo que esta funcion decide, y la
+# prueba importa ESTA funcion -- la misma que corre.
+
+NOTA_MANOS_VACIAS = (
+    "(Nota del sistema, no del cliente) Ibas a pasar esto a una persona sin "
+    "haber usado ninguna herramienta todavia. Primero intenta lo tuyo: "
+    "identifica al cliente si hace falta y avanza con el procedimiento que "
+    "corresponda. Si de verdad hace falta una persona, en el proximo mensaje "
+    "se pasa.")
+
+NOTA_INTENTAR_PRIMERO = (
+    "(Nota del sistema, no del cliente) El cliente esta molesto. NO lo escales "
+    "todavia y NO le contestes con frases de consuelo ni le pidas que se calme: "
+    "usa tus herramientas ahora, deciles que encontraste y que estas haciendo "
+    "al respecto. Si todavia no lo verificaste, pedile la cedula UNA vez y "
+    "segui de una. Si con eso no alcanza, en el proximo mensaje se pasa a un "
+    "companero.")
+
+# Para el rol que SOLO puede derivar. Le pide lo unico que puede hacer, y
+# nombra la herramienta desde su catalogo, no un nombre fijo. No dice que le
+# pidio identidad a nadie ni que use herramientas que no tiene: un system que
+# afirma algo que no paso deja de ser cierto, y el modelo lo sostiene.
+NOTA_DERIVAR_PRIMERO = (
+    "(Nota del sistema, no del cliente) Ibas a pasar esto a una persona. Vos "
+    "no podes resolverlo ni verificar a nadie: lo unico que podes hacer es "
+    "derivar. Si el pedido corresponde a un area, llama a {herramienta} ahora, "
+    "sin anunciarle el pase ni pedirle que espere. Si de verdad ninguna area "
+    "puede con esto, en el proximo mensaje se pasa a una persona.")
+
+# Lo que queda en el log por cada razon. Los dos primeros textos son los de
+# siempre, para no romper ninguna busqueda; el tercero es nuevo.
+MENSAJES_POSPONER = {
+    "manos_vacias": "se pospone: el asistente todavia no habia hecho nada",
+    "intentar_resolver_antes": "se pospone una vuelta: el asistente lo intenta primero",
+    "derivar_primero": "se pospone una vuelta: el rol solo puede derivar, y no derivo",
+}
+
+
+def _derivadoras_de(config, cfg_rol) -> list[str]:
+    """Nombres de las herramientas del rol que declaran deriva_rol, en orden."""
+    if cfg_rol is None:
+        return []
+    catalogo = {h.nombre: h for h in (getattr(config, "herramientas", None) or [])}
+    return [n for n in (getattr(cfg_rol, "puede_consultar", None) or [])
+            if n in catalogo and getattr(catalogo[n], "deriva_rol", False)]
+
+
+def por_que_posponer(config, cfg_rol, historial: list[dict], *,
+                     forzado: bool, ya_intento: bool, motivo: str) -> tuple[str | None, str]:
+    """
+    Se pospone esta escalada un turno? Devuelve (razon, nota) -- razon None
+    cuando no se pospone. La nota es lo que se le inyecta al modelo en el
+    turno siguiente.
+
+    Tres razones, y el orden importa:
+
+      nunca      si la escalada es FORZADA por un hecho (escalar_si_falla,
+                 escalar_al_completar, pedido explicito) o si esta
+                 conversacion ya tuvo su vuelta extra. Una sola vez, nunca en
+                 bucle. Que 'forzado' corte tambien la rama de
+                 'intentar_resolver_antes' es del 25/09/2026: antes solo
+                 cortaba la primera, y un tenant que listara ahi un motivo por
+                 hecho posponia una escalada que no era del modelo.
+
+      derivar_primero
+                 el rol no declara NADA ejecutable (puede_intentar_algo) pero
+                 SI declara una herramienta de derivacion. Es el rol de
+                 entrada. Posponer para que "intente lo suyo" no tenia sentido
+                 --no tiene manos-- y por eso hasta el 25/09/2026 su escalada
+                 se posponia SIEMPRE, con una nota que le pedia identificar al
+                 cliente y avanzar con un procedimiento. Ahora se le pide lo
+                 unico que puede: derivar. Si tampoco deriva, la proxima no se
+                 pospone y se escala. Respeta lo que el tenant declaro en
+                 'intentar_resolver_antes' en vez de anularlo para ese rol, y
+                 no decide destino por el modelo. Si el rol no declara ni
+                 ejecutables ni derivacion, no hay nada que darle: no se
+                 pospone.
+
+      manos_vacias
+                 un rol CON herramientas que no ejecuto ninguna en toda la
+                 conversacion (con_las_manos_vacias). Vale para cualquier
+                 motivo: es la regla de abajo de todo.
+
+      intentar_resolver_antes
+                 el motivo esta en la lista que el tenant declaro
+                 (escalamiento.merece_un_intento).
+    """
+    if forzado or ya_intento:
+        return None, ""
+    if not puede_intentar_algo(config, cfg_rol):
+        derivadoras = _derivadoras_de(config, cfg_rol)
+        if not derivadoras:
+            return None, ""
+        return ("derivar_primero",
+                NOTA_DERIVAR_PRIMERO.format(herramienta=" o ".join(derivadoras)))
+    if con_las_manos_vacias(historial):
+        return "manos_vacias", NOTA_MANOS_VACIAS
+    # Import perezoso: escalamiento.py importa este modulo a nivel de modulo.
+    from nucleo.seguimiento.escalamiento import merece_un_intento
+    if merece_un_intento(config, motivo or "", ya_intento):
+        return "intentar_resolver_antes", NOTA_INTENTAR_PRIMERO
+    return None, ""
+
+
 def motivos_por_hecho(config) -> set[str]:
     """
     Los motivos que NO puede elegir el modelo: los que declara una herramienta

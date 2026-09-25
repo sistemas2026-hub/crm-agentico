@@ -72,7 +72,8 @@ from nucleo.seguimiento import agendamiento
 from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
 from nucleo.seguimiento import verificacion_accion
-from nucleo.seguimiento.forzado import (con_las_manos_vacias, puede_intentar_algo,
+from nucleo.seguimiento.forzado import (puede_intentar_algo, por_que_posponer,
+                                        MENSAJES_POSPONER,
                                         decidir_pedido_humano_de,
                                         pidio_hablar_con_humano,
                                         decidir_pedido_humano,
@@ -2248,47 +2249,36 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
             #
             # Una escalada forzada por una herramienta NO pasa por aca: esa ya
             # tiene un hecho detras, que es justo lo que aca falta.
-            # Y SOLO SI HABIA ALGO QUE INTENTAR. El rol de entrada declara una
-            # sola herramienta, la de derivar: si no derivo no hay ningun
-            # mensaje 'tool', y si derivo ya no esta aca. Para el, las manos
-            # vacias eran su estado permanente y esta rama posponia SIEMPRE
-            # su escalada a un mensaje siguiente que muchas veces no llega.
-            # Medido el 25/09/2026; ver forzado.puede_intentar_algo.
-            if (not forzado and not estado["intento_antes_de_escalar"]
-                    and puede_intentar_algo(config, rol_cfg)
-                    and con_las_manos_vacias(estado["historial"])):
+            #
+            # LA DECISION ENTERA VIVE EN forzado.por_que_posponer, y aca solo
+            # se aplica. Es una sola funcion por una razon medida el
+            # 25/09/2026, dos veces el mismo dia: una funcion correcta y un
+            # camino real que no la usaba -- un auditor puso el api.py
+            # anterior y la prueba siguio en verde. Si esta rama vuelve a
+            # tener un 'if' propio, la prueba que importa esa funcion deja de
+            # afirmar sobre lo que corre.
+            #
+            # Desde ese dia hay ademas una tercera razon para posponer: el rol
+            # de entrada declara una sola herramienta, la de derivar. Para el,
+            # "manos vacias" era su estado permanente y su escalada se
+            # posponia SIEMPRE, con una nota que le pedia identificar al
+            # cliente y avanzar con un procedimiento -- dos cosas que no puede
+            # hacer. Ahora se pospone UNA vez con una nota que le pide lo
+            # unico que puede: derivar. Si tampoco deriva, la siguiente no se
+            # pospone y se escala. Respeta 'intentar_resolver_antes' del tenant
+            # y no elige destino por el modelo. Ver el docstring de la funcion.
+            razon, nota = por_que_posponer(
+                config, rol_cfg, estado["historial"],
+                forzado=forzado,
+                ya_intento=estado["intento_antes_de_escalar"],
+                motivo=evaluacion.get("motivo", ""))
+            if razon:
                 estado["intento_antes_de_escalar"] = True
-                estado["nota_pendiente"] = (
-                    "(Nota del sistema, no del cliente) Ibas a pasar esto a "
-                    "una persona sin haber usado ninguna herramienta todavia. "
-                    "Primero intenta lo tuyo: identifica al cliente si hace "
-                    "falta y avanza con el procedimiento que corresponda. Si "
-                    "de verdad hace falta una persona, en el proximo mensaje "
-                    "se pasa.")
+                estado["nota_pendiente"] = nota
                 posponer = True
-                registrar("escalamiento", "se pospone: el asistente todavia no habia hecho nada",
+                registrar("escalamiento", MENSAJES_POSPONER[razon],
                           conversation_id=id_interno(estado.get("conversacion_id")),
-                          motivo=evaluacion.get("motivo"))
-            # Misma condicion que arriba, por el mismo motivo: la nota de esta
-            # rama tambien le pide "usa tus herramientas ahora", y un rol que
-            # no tiene ninguna no puede hacerle caso.
-            elif (puede_intentar_algo(config, rol_cfg)
-                  and escalamiento.merece_un_intento(
-                      config, evaluacion.get("motivo", ""),
-                      estado["intento_antes_de_escalar"])):
-                estado["intento_antes_de_escalar"] = True
-                estado["nota_pendiente"] = (
-                    "(Nota del sistema, no del cliente) El cliente esta "
-                    "molesto. NO lo escales todavia y NO le contestes con "
-                    "frases de consuelo ni le pidas que se calme: usa tus "
-                    "herramientas ahora, deciles que encontraste y que estas "
-                    "haciendo al respecto. Si todavia no lo verificaste, "
-                    "pedile la cedula UNA vez y segui de una. Si con eso no "
-                    "alcanza, en el proximo mensaje se pasa a un companero.")
-                posponer = True
-                registrar("escalamiento", "se pospone una vuelta: el asistente lo intenta primero",
-                          conversation_id=id_interno(estado.get("conversacion_id")),
-                          motivo=evaluacion.get("motivo"))
+                          razon=razon, motivo=evaluacion.get("motivo"))
 
             # --- verificacion automatica de agendamiento --------------------
             # Solo corre si el tenant declaro ESTE caso puntual en
