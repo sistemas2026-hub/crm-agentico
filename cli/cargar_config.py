@@ -205,6 +205,60 @@ def _corto(valor, tope: int = 70) -> str:
     return texto if len(texto) <= tope else texto[:tope - 1] + "…"
 
 
+def copia_mas_vieja_que_la_base(guardado: dict | None, slug: str,
+                                version: int) -> str | None:
+    """
+    El aviso de que ESTA COPIA no puede escribir, o None si puede.
+
+    Se lee lo que HAY en la base con el esquema de esta copia. Si no valida
+    por campos que el esquema no conoce, la conclusion es exacta y no hace
+    falta interpretarla: produccion tiene capacidades que este codigo no sabe
+    representar, asi que cualquier cosa que escriba las borra.
+
+    POR QUE NO ALCANZABA LO QUE YA HABIA
+    ------------------------------------
+    '_lo_que_pisaria' compara hoja por hoja y SE SALTA lo que el archivo no
+    trae -- "la completa el esquema con su default", que es cierto y es lo
+    correcto para no llenar cada corrida de ruido. Pero cuando el esquema ni
+    siquiera CONOCE el campo no hay ruta que comparar, y la perdida pasa en
+    silencio. Y la guarda de git tampoco servia: mide contra el remoto de la
+    rama actual, y un push a una rama de trabajo la satisface sin desplegar
+    nada.
+
+    Medido el 24/09/2026 sobre una rama de diseno 283 commits atras: su YAML
+    no tenia NI UNO de los campos de la frontera de autorizacion
+    ('irreversible', 'nivel_autonomia', 'exige_declaracion', 'aprobacion') y
+    las dos guardas la dejaban pasar. Cargarlo habria dejado al motor
+    desplegado ejecutando acciones irreversibles sin la puerta que hoy las
+    frena, y el dato viejo ya no estaria para volver.
+
+    Responde otra pregunta que '_lo_que_pisaria': aquello es "que trabajo de
+    otro se pierde", esto es "puedo yo escribir esta tabla". La segunda se
+    contesta antes.
+    """
+    if not guardado:
+        return None
+    try:
+        TenantConfig(**guardado)
+    except Exception as e:                                # noqa: BLE001
+        texto = str(e)
+        lineas = texto.splitlines()
+        primera = lineas[1].strip() if len(lineas) > 1 else texto[:120]
+        nl = chr(10)
+        return (
+            f"'{slug}': la configuracion que ya esta en la base (v{version}) NO "
+            f"la entiende el esquema de esta copia.{nl}{nl}"
+            f"  Eso significa que produccion esta mas adelante que este codigo, "
+            f"y cualquier cosa que se escriba desde aca borra lo que esta copia "
+            f"no sabe representar.{nl}{nl}"
+            f"  Primero se sincroniza el codigo; despues se carga la config. "
+            f"Nunca al reves.{nl}{nl}"
+            f"      git fetch origin && git merge origin/<rama-que-despliega>{nl}{nl}"
+            f"  Lo primero que no entiende:{nl}"
+            f"      {primera}")
+    return None
+
+
 def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
     """
     Que se PERDERIA de la base al cargar 'nuevo' encima.
@@ -325,6 +379,38 @@ def cargar(ruta: Path, org_id: str | None = None, forzar: bool = False) -> None:
         if actual and actual[0] == datos:
             print(f"[=] {slug}: sin cambios (v{actual[1]})")
             return
+
+        # ESTA COPIA ES MAS VIEJA QUE PRODUCCION: no escribe.
+        #
+        # La comprobacion es leer lo que HAY en la base con el esquema de esta
+        # copia. Si no valida por campos que el esquema no conoce, la
+        # conclusion es exacta y no hace falta interpretarla: produccion tiene
+        # capacidades que este codigo no sabe representar, asi que cualquier
+        # cosa que escriba las borra.
+        #
+        # Por que no alcanzaba lo que ya habia. '_lo_que_pisaria' compara hoja
+        # por hoja y SE SALTA lo que el archivo no trae -- "la completa el
+        # esquema con su default", que es cierto y es lo correcto para no
+        # llenar cada corrida de ruido. Pero cuando el esquema ni siquiera
+        # CONOCE el campo no hay ruta que comparar, y la perdida pasa en
+        # silencio. Y la guarda de git tampoco: mide contra el remoto de la
+        # rama actual, que un push a una rama de trabajo satisface sin
+        # desplegar nada.
+        #
+        # Medido el 24/09/2026 sobre una rama de diseno 283 commits atras: su
+        # YAML no tenia NI UNO de los campos de la frontera de autorizacion
+        # --'irreversible', 'nivel_autonomia', 'exige_declaracion',
+        # 'aprobacion'-- y las dos guardas la dejaban pasar. Cargarlo habria
+        # dejado al motor desplegado ejecutando acciones irreversibles sin la
+        # puerta que hoy las frena, y el dato viejo ya no estaria para volver.
+        #
+        # Va aca y no en '_lo_que_pisaria' a proposito: aquello responde "que
+        # trabajo de otro se pierde", esto responde "puedo yo escribir esta
+        # tabla". La segunda se contesta antes.
+        aviso = copia_mas_vieja_que_la_base(actual[0] if actual else None,
+                                            slug, actual[1] if actual else 0)
+        if aviso:
+            raise SystemExit(aviso)
 
         # La config puede estrenar campos que el codigo DESPLEGADO no conoce.
         # Cuando pasa, el motor de produccion no puede cargar su propia
