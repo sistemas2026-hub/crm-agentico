@@ -84,6 +84,38 @@ describe('la rejilla', () => {
     expect(Math.max(r.cols, r.filas) / Math.min(r.cols, r.filas)).toBeLessThan(4);
   });
 
+  it('aprovecha un lienzo ancho en vez de quedarse chica en el medio', () => {
+    // El defecto que se vio en produccion el 24/09: la planta usaba el 57%
+    // del ancho con todo el lado derecho vacio. La causa no era el margen:
+    // un rombo isometrico a 34 grados tiene relacion 1.48:1 y un monitor
+    // ancho ronda 2:1, y NINGUN reparto de columnas arregla eso -- el
+    // bounding box depende de (cols-1)+(filas-1), asi que 4x2 y 3x3 miden
+    // lo mismo. Lo que lo arregla es bajar la elevacion.
+    const anchoDisponible = 1240;
+    const r = rejillaPlanta(8, {
+      ancho: anchoDisponible, alto: 600, lado: 100, separacion: 30, holguraAlto: 1.06
+    });
+    expect(r.ancho * r.escala / anchoDisponible).toBeGreaterThan(0.70);
+  });
+
+  it('con elevacion fija, no la busca', () => {
+    const r = rejillaPlanta(8, {
+      ancho: 1240, alto: 600, lado: 100, separacion: 30, elevacion: 34
+    });
+    expect(r.ejes.ex).toBeCloseTo(Math.cos((34 * Math.PI) / 180), 6);
+  });
+
+  it('nunca aplana tanto que pierda el volumen', () => {
+    // Una elevacion muy baja gana pixeles y convierte la oficina en un plano.
+    // La tolerancia es por el viaje de ida y vuelta: ejes() va de grados a
+    // cos/sin y atan2 vuelve, y 26 grados regresa como 25,999999999999996.
+    for (const ancho of [900, 1240, 1900, 3000]) {
+      const r = rejillaPlanta(8, { ancho, alto: 600, lado: 100, separacion: 30, holguraAlto: 1.06 });
+      const grados = (Math.atan2(r.ejes.ey, r.ejes.ex) * 180) / Math.PI;
+      expect(grados).toBeGreaterThan(25.99);
+    }
+  });
+
   it('un lienzo angosto encoge en vez de romperse', () => {
     const r = rejillaPlanta(12, { ...caja, ancho: 300, alto: 240 });
     expect(r.celdas).toHaveLength(12);
