@@ -404,11 +404,18 @@
     </div>
   </div>
 
-  <div class="leyenda">
-    <span><i style="background:#0e7490"></i> el grosor es la carga que pasa por esa vía</span>
-    <span><i style="background:#a15c07"></i> el color es el estado del agente</span>
-    <span><i class="rayas"></i> punteada: sin tráfico ahora</span>
-  </div>
+  <!-- La leyenda explica LAS VIAS, que solo existen en el anillo. Mostrarla
+       en la planta describia un dibujo que no estaba: «el grosor es la carga
+       que pasa por esa via» y «punteada: sin trafico ahora» sobre una
+       pantalla sin una sola via. La planta trae la suya propia (las zonas),
+       dentro de su componente. -->
+  {#if vista === 'anillo'}
+    <div class="leyenda">
+      <span><i style="background:#0e7490"></i> el grosor es la carga que pasa por esa vía</span>
+      <span><i style="background:#a15c07"></i> el color es el estado del agente</span>
+      <span><i class="rayas"></i> punteada: sin tráfico ahora</span>
+    </div>
+  {/if}
 </div>
 
 {#if seleccionado}

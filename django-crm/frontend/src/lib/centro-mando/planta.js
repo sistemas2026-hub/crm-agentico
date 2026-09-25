@@ -87,10 +87,11 @@ export const extensionY = (cols, filas, paso, lado, e) =>
 export function rejillaPlanta(n, caja) {
   const {
     ancho, alto, lado, separacion,
-    holguraAlto = 0, elevacion = 34, escalaMaxima = 1.7
+    holguraAlto = 0, elevacion = null, escalaMaxima = 1.7
   } = caja;
-  const e = ejes(elevacion);
-  if (n <= 0) return { celdas: [], escala: 1, ancho: 0, alto: 0, cols: 0, filas: 0, ejes: e };
+  if (n <= 0) {
+    return { celdas: [], escala: 1, ancho: 0, alto: 0, cols: 0, filas: 0, ejes: ejes(34) };
+  }
 
   const paso = lado + separacion;
   // Lo que sobresale del rombo por arriba y por abajo (el rotulo del puesto),
@@ -98,18 +99,44 @@ export function rejillaPlanta(n, caja) {
   // fila cabe segun la cuenta y se corta en la pantalla.
   const extra = holguraAlto * lado;
 
+  /* LA ELEVACION TAMBIEN SE DERIVA, y no es un adorno: es lo que decide si la
+     planta llena la pantalla o se queda chica en el medio.
+     Un rombo isometrico tiene SIEMPRE la relacion ex/ey de su elevacion --
+     1.48:1 a 34 grados-- mientras que un monitor ancho ronda 2:1. Con la
+     elevacion fija, ese sobrante de ancho no hay reparto de columnas que lo
+     aproveche: el bounding box de la rejilla depende de (cols-1)+(filas-1),
+     asi que 4x2 y 3x3 miden EXACTAMENTE lo mismo. Medido en produccion el
+     24/09: la planta usaba el 57% del ancho con todo el lado derecho vacio.
+     Bajar la elevacion ensancha el rombo (a 26 grados la relacion es 2.05:1)
+     y con ello sube la escala. Se prueban varias y gana la que mas grande
+     deja el conjunto, igual que ya se elegian las columnas.
+     El piso son 26 grados y no menos, aunque 22 diera mas pixeles (86% contra
+     74%): por debajo de ahi el rombo se estira tanto que los puestos se ven
+     desde arriba y la escena deja de leerse como una oficina. Se gana tamano
+     y se pierde lo que hace entendible el dibujo.
+     Pasar `elevacion` fuerza una sola y desactiva la busqueda. */
+  const candidatas = elevacion != null ? [elevacion] : [26, 28, 31, 34, 38];
+
   let mejor = null;
-  for (let cols = 1; cols <= n; cols++) {
-    const filas = Math.ceil(n / cols);
-    const w = extensionX(cols, filas, paso, lado, e);
-    const h = extensionY(cols, filas, paso, lado, e) + extra;
-    const escala = Math.min(ancho / w, alto / h, escalaMaxima);
-    const desbalance = Math.max(cols, filas) / Math.min(cols, filas);
-    const puntaje = escala / Math.pow(desbalance, 0.35);
-    if (!mejor || puntaje > mejor.puntaje) mejor = { cols, filas, escala, puntaje };
+  for (const grados of candidatas) {
+    const e = ejes(grados);
+    for (let cols = 1; cols <= n; cols++) {
+      const filas = Math.ceil(n / cols);
+      const w = extensionX(cols, filas, paso, lado, e);
+      const h = extensionY(cols, filas, paso, lado, e) + extra;
+      const escala = Math.min(ancho / w, alto / h, escalaMaxima);
+      const desbalance = Math.max(cols, filas) / Math.min(cols, filas);
+      /* Se penaliza el reparto alargado (una fila de doce cabe y deja los
+         puestos ilegibles) y, mas suave, la elevacion baja: aplanar demasiado
+         gana pixeles y pierde el volumen que hace que esto se lea como una
+         oficina y no como un plano. */
+      const aplanado = 34 / grados;
+      const puntaje = escala / (Math.pow(desbalance, 0.35) * Math.pow(aplanado, 0.18));
+      if (!mejor || puntaje > mejor.puntaje) mejor = { cols, filas, escala, puntaje, e };
+    }
   }
 
-  const { cols, filas, escala } = mejor;
+  const { cols, filas, escala, e } = mejor;
   const celdas = [];
   for (let i = 0; i < n; i++) {
     const c = i % cols;
