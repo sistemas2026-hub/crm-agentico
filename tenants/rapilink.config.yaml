@@ -3783,6 +3783,21 @@ herramientas:
     auth_ref: IMPORTACION_API_TOKEN
     auth_esquema: Bearer
 
+  - nombre: fijar_nombre_cliente_externo
+    tipo: http
+    descripcion: >
+      Escribe el nombre del cliente que dio el proveedor en los casos de ese
+      servicio que todavia no lo tengan. No sobrescribe y no toca ningun otro
+      campo. NO la llames tu: la ejecuta el backfill.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000/api
+    endpoint: /importacion/casos/nombre-cliente/
+    metodo: POST
+    auth_ref: IMPORTACION_API_TOKEN
+    auth_esquema: Bearer
+
   - nombre: reconciliar_caso_externo
     tipo: http
     descripcion: >

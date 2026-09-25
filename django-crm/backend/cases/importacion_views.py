@@ -37,13 +37,14 @@ state a person decided.
 from __future__ import annotations
 
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 from rest_framework import status as http
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from cases.models import (EXTERNAL_AUTHOR_DEXTER, EXTERNAL_AUTHOR_TYPE, Case)
-from common.models import Profile
+from common.models import Activity, Profile
 from common.permissions import HasOrgContext
 from common.utils import PRIORITY_CHOICE
 
@@ -353,7 +354,21 @@ class CasosExternosView(APIView):
 
     CAMPOS = ("id", "external_ticket_id", "status", "closed_on",
               "external_status", "external_created_by",
-              "external_created_by_type", "external_fetch_error")
+              "external_created_by_type", "external_fetch_error",
+              #  El id del SERVICIO, que es con lo que el backfill le pregunta
+              #  al proveedor por el nombre del cliente. Es un identificador,
+              #  no un dato personal.
+              "external_service_id")
+
+    #  Se LEE para saber si falta, y NO se devuelve.
+    #
+    #  El backfill necesita saber a que servicios les falta el nombre; no
+    #  necesita que se lo digan. Devolver 'external_client_name' aqui pondria el
+    #  nombre del cliente en una respuesta que promete, tres parrafos mas
+    #  arriba, no traer nada del cliente -- y seria ademas redundante: el motor
+    #  ya lo tiene, se lo acaba de pedir al proveedor. Lo que viaja es un
+    #  booleano.
+    CAMPO_INTERNO_NOMBRE = "external_client_name"
 
     # Hoy son 16 casos y devolverlos todos no cuesta nada. Manana son miles, y
     # una consulta sin tope es de las que funcionan durante meses y despues
@@ -383,11 +398,17 @@ class CasosExternosView(APIView):
             org=request.org, provider=proveedor
         ).exclude(external_ticket_id="").order_by("external_ticket_id")
         total = base.count()
-        filas = base.values(*self.CAMPOS)[desde:desde + limite]
+        filas = base.values(*self.CAMPOS,
+                            self.CAMPO_INTERNO_NOMBRE)[desde:desde + limite]
 
         return Response({
-            "casos": [{k: (str(v) if k == "id" else v) for k, v in f.items()}
-                      for f in filas],
+            "casos": [
+                {**{k: (str(v) if k == "id" else v) for k, v in f.items()
+                    if k != self.CAMPO_INTERNO_NOMBRE},
+                 "tiene_nombre_cliente": bool(
+                     (f.get(self.CAMPO_INTERNO_NOMBRE) or "").strip())}
+                for f in filas
+            ],
             "total": total,
             "offset": desde,
             "limit": limite,
@@ -560,3 +581,123 @@ class RespuestasExternasView(APIView):
 
         return Response({"nuevas": nuevas, "ya_estaban": repetidas,
                          "total": len(filas)})
+
+
+# ===========================================================================
+#  EL NOMBRE DEL CLIENTE  --  el motor lo resuelve, el CRM lo escribe
+# ===========================================================================
+#  POR QUE ESTA RUTA EXISTE
+#  -----------------------
+#  El nombre del cliente vive en WispHub y solo el motor sabe hablarle. La
+#  tabla 'case' es del CRM. El primer intento fue un comando del motor que
+#  hacia el UPDATE directo, y no funciona -- medido en produccion el
+#  25/09/2026:
+#
+#    - 'app_backend' (el rol al que baja nucleo/persistencia/db.py) no tiene
+#      NINGUN privilegio sobre public."case": solo crm_owner, crm_user y
+#      service_role;
+#    - y la RLS de esa tabla esta activa Y FORZADA, comparando org_id contra
+#      'app.current_org', mientras que el motor fija 'app.current_tenant'. O
+#      sea que incluso con permisos habria visto cero filas y habria informado
+#      "0 actualizados" sin un error.
+#
+#  Medido tambien: el motor no lee ni escribe NINGUNA tabla public.* del CRM
+#  hoy. Esa frontera es deliberada (el incidente del 18/08/2026 que separo los
+#  usuarios de base), y esta ruta es como se cruza: por HTTP, con el token del
+#  importador, dentro de la red del compose.
+#
+#  LA LLAVE ES EL SERVICIO, NO EL CASO
+#  -----------------------------------
+#  El motor manda 'external_service_id' y el nombre, y nada mas: es lo unico
+#  que sabe. Un servicio puede tener varios casos -- medidos 16 con mas de
+#  uno-- y los toma todos de una, asi el motor no tiene que enumerar casos que
+#  no conoce ni pedir su lista.
+
+#  Lo unico que esta ruta acepta. Igual que en el resto del archivo: un campo
+#  de mas no se ignora, se rechaza.
+CAMPOS_NOMBRE_CLIENTE = frozenset({"external_service_id", "external_client_name"})
+
+
+class NombreClienteView(APIView):
+    """
+    POST /api/importacion/casos/nombre-cliente/
+
+    Escribe 'external_client_name' en los casos de un servicio que todavia no
+    lo tengan. No toca ningun otro campo, y no sobrescribe.
+
+    Idempotente por diseno y no por convencion: la condicion del vacio va en
+    el propio UPDATE (``external_client_name=""`` en el filtro), no en un 'if'
+    de Python. Entre leer y escribir puede correr una importacion, y quien
+    decide es la base.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def post(self, request):
+        cuerpo = request.data if isinstance(request.data, dict) else {}
+        sobra = _campos_inesperados(cuerpo, CAMPOS_NOMBRE_CLIENTE)
+        if sobra:
+            return _error(
+                f"esta ruta solo escribe el nombre del cliente. No acepta "
+                f"{sobra}: para cualquier otro campo estan las otras dos.",
+                "CAMPO_NO_PERMITIDO")
+
+        servicio = str(cuerpo.get("external_service_id") or "").strip()
+        if not servicio:
+            return _error("'external_service_id' es obligatorio",
+                          "CAMPO_REQUERIDO")
+
+        nombre = str(cuerpo.get("external_client_name") or "").strip()
+        if not nombre:
+            # No es un error del llamante: el proveedor no dio nombre para ese
+            # servicio. Se contesta que no se escribio nada, y el backfill lo
+            # cuenta. Aceptarlo como vacio y "guardarlo" borraria un nombre
+            # bueno el dia que alguien reintente.
+            return Response({"actualizados": 0, "ya_tenian": 0,
+                             "sin_nombre": True,
+                             "detalle": "el proveedor no entrego nombre"},
+                            status=http.HTTP_200_OK)
+
+        # El filtro por org va aqui ADEMAS de la RLS, igual que en el resto del
+        # CRM: dos capas. 'request.org' lo pone el middleware desde el token --
+        # el cuerpo no puede elegir organizacion, y por eso 'org' esta fuera de
+        # CAMPOS_NOMBRE_CLIENTE.
+        del_servicio = Case.objects.filter(
+            org=request.org, external_service_id=servicio)
+
+        ya_tenian = del_servicio.exclude(external_client_name="").count()
+        pendientes = list(del_servicio.filter(external_client_name="")
+                          .values_list("id", flat=True))
+        if not pendientes:
+            return Response({"actualizados": 0, "ya_tenian": ya_tenian,
+                             "sin_nombre": False},
+                            status=http.HTTP_200_OK)
+
+        with transaction.atomic():
+            actualizados = Case.objects.filter(
+                org=request.org, id__in=pendientes, external_client_name=""
+            ).update(external_client_name=nombre[:255],
+                     updated_at=timezone.now())
+
+            #  La auditoria va DENTRO de la transaccion: un cambio en una fila
+            #  del CRM sin rastro no sirve, y si no se puede anotar, no ocurre.
+            #  Se escribe en common.Activity, que es la bitacora que ya existe
+            #  -- 'Case' y 'UPDATE' ya estan declarados en sus choices.
+            for caso_id in pendientes[:actualizados]:
+                Activity.objects.create(
+                    org=request.org,
+                    user=getattr(request, "profile", None),
+                    action="UPDATE",
+                    entity_type="Case",
+                    entity_id=caso_id,
+                    description="Nombre del cliente tomado del proveedor",
+                    #  El nombre NO se copia al metadata: ya quedo en la fila
+                    #  del caso, y repetirlo en la bitacora seria una segunda
+                    #  copia del dato personal en otra tabla.
+                    metadata={"external_service_id": servicio,
+                              "campo": "external_client_name",
+                              "origen": "importador"},
+                )
+
+        return Response({"actualizados": actualizados, "ya_tenian": ya_tenian,
+                         "sin_nombre": False}, status=http.HTTP_200_OK)

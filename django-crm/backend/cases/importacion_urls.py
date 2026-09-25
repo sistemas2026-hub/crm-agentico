@@ -25,4 +25,10 @@ urlpatterns = [
          name="reconciliar"),
     path("casos/<uuid:pk>/respuestas/", vistas.RespuestasExternasView.as_view(),
          name="respuestas"),
+    #  Va ANTES de 'casos/<uuid:pk>/...' en el orden de lectura mental, pero no
+    #  compite con ellas: 'nombre-cliente' no es un UUID, asi que el convertidor
+    #  de la ruta de arriba no la captura. La llave de esta es el SERVICIO, no
+    #  el caso -- el motor no conoce los ids de los casos.
+    path("casos/nombre-cliente/", vistas.NombreClienteView.as_view(),
+         name="nombre_cliente"),
 ]

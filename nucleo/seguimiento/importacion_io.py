@@ -420,6 +420,60 @@ def aplicar(config, tenant, veredictos, actor: str = "") -> dict:
     return resumen
 
 
+def fijar_nombre_cliente(config, tenant, servicio: str, nombre: str,
+                         actor: str = "") -> dict:
+    """
+    Le pide al CRM que escriba el nombre del cliente de un servicio.
+
+    Por HTTP y con el token del importador, NO con un UPDATE. El motor resuelve
+    el dato en el proveedor; la tabla 'case' es del CRM y la escribe el CRM.
+    Esa frontera no es estilo: medido el 25/09/2026, el rol al que baja
+    'nucleo/persistencia/db.py' no tiene ningun privilegio sobre public."case",
+    y la RLS de esa tabla compara contra 'app.current_org' -- una variable que
+    este lado no fija. Un UPDATE desde aca habria informado "0 actualizados"
+    sin un error.
+
+    Se mandan DOS datos y nada mas: el id del servicio y el nombre. El CRM
+    decide a que casos les toca y cual ya tenia.
+    """
+    herr = _herramienta(config, "fijar_nombre_cliente_externo")
+    if herr is None:
+        raise SystemExit("falta 'fijar_nombre_cliente_externo' en el catalogo")
+
+    with _puerta(tenant, herr.nombre, actor):
+        r = ejecutor_http.ejecutar(
+            herr, {"external_service_id": str(servicio),
+                   "external_client_name": str(nombre)},
+            tenant, variables_tenant=config.variables_tenant)
+    return r if isinstance(r, dict) else {}
+
+
+def casos_sin_nombre_de_cliente(config, tenant: str) -> dict:
+    """
+    {servicio: [ticket, ...]} de los casos a los que les falta el nombre.
+
+    Sale de 'consultar_casos_externos', la misma lectura paginada que usa la
+    reconciliacion: por la API, no por SQL. La respuesta trae el id del
+    servicio y un booleano -- nunca el nombre-- asi que preguntar "a quien le
+    falta" no devuelve ningun dato personal.
+    """
+    pendientes: dict[str, list[str]] = {}
+    for caso in casos_de_este_proveedor(config, tenant):
+        if caso.get("tiene_nombre_cliente"):
+            continue
+        servicio = str(caso.get("external_service_id") or "").strip()
+        if not servicio:
+            # Un caso sin servicio no se puede resolver: no hay con que
+            # preguntarle al proveedor. Se cuenta aparte, no se descarta en
+            # silencio.
+            pendientes.setdefault("", []).append(
+                str(caso.get("external_ticket_id") or ""))
+            continue
+        pendientes.setdefault(servicio, []).append(
+            str(caso.get("external_ticket_id") or ""))
+    return pendientes
+
+
 def aplicar_reconciliacion(config, tenant, cambios, actor: str = "") -> dict:
     """Persiste los external_* de los casos ya conocidos. Nunca el estado."""
     herr = _herramienta(config, "reconciliar_caso_externo")
