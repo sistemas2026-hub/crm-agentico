@@ -3641,6 +3641,20 @@ def centro_mando():
         "tenant": tenant,
         "generado_en": datetime.now(timezone.utc).isoformat(),
         "ventana_min": datos["ventana_min"],
+        # Quien atiende a todo el que escribe por un canal publico. Ya vive en
+        # la configuracion del tenant (config/schema.py::rol_de_entrada) y
+        # hasta ahora no salia de ahi, asi que la pantalla no tenia forma de
+        # distinguir la PUERTA DE ENTRADA de un agente cualquiera: los ocho
+        # roles de Rapilink se veian iguales.
+        #
+        # Viaja tal cual, y None cuando el tenant no lo declara. Esa
+        # distincion importa y por eso no se rellena con un valor deducido:
+        # tomar "el primer rol orientado al cliente" es exactamente el error
+        # que el 07/09/2026 hizo que un suscriptor sin internet terminara
+        # hablando con el agente comercial -- Rapilink tiene CUATRO roles de
+        # cara al cliente y el orden lo decidia un diccionario. Quien lo
+        # consuma debe poder ver que falta, no recibir una suposicion.
+        "rol_de_entrada": config.rol_de_entrada,
         "totales": {
             "conversaciones_activas": t.get("conversaciones_activas") or 0,
             "abiertas_total": t.get("abiertas_total") or 0,
