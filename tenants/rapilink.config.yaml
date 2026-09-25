@@ -3172,7 +3172,7 @@ herramientas:
     # 'inyectar_sesion' no lo completa y 'inyectados_obligatorios' la frena
     # --que es lo correcto, sin ese campo el ping preguntaria por nadie--.
     # El backend de campo lo manda desde la ficha congelada de la orden, que
-    # es el unico lugar donde ese numero esta atado a ESTE trabajo.
+    # es el unico lugar donde ese numero esta atado a ESE trabajo.
     #
     # Es de solo lectura y no cambia nada del cliente: no le aplica la
     # frontera de acciones externas ni pide aprobacion.

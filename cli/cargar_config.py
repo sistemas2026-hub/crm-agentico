@@ -380,6 +380,33 @@ def cargar(ruta: Path, org_id: str | None = None, forzar: bool = False) -> None:
             print(f"[=] {slug}: sin cambios (v{actual[1]})")
             return
 
+        # ESTA COPIA ES MAS VIEJA QUE PRODUCCION: no escribe.
+        #
+        # La comprobacion es leer lo que HAY en la base con el esquema de esta
+        # copia. Si no valida por campos que el esquema no conoce, la
+        # conclusion es exacta y no hace falta interpretarla: produccion tiene
+        # capacidades que este codigo no sabe representar, asi que cualquier
+        # cosa que escriba las borra.
+        #
+        # Por que no alcanzaba lo que ya habia. '_lo_que_pisaria' compara hoja
+        # por hoja y SE SALTA lo que el archivo no trae -- "la completa el
+        # esquema con su default", que es cierto y es lo correcto para no
+        # llenar cada corrida de ruido. Pero cuando el esquema ni siquiera
+        # CONOCE el campo no hay ruta que comparar, y la perdida pasa en
+        # silencio. Y la guarda de git tampoco: mide contra el remoto de la
+        # rama actual, que un push a una rama de trabajo satisface sin
+        # desplegar nada.
+        #
+        # Medido el 24/09/2026 sobre una rama de diseno 283 commits atras: su
+        # YAML no tenia NI UNO de los campos de la frontera de autorizacion
+        # --'irreversible', 'nivel_autonomia', 'exige_declaracion',
+        # 'aprobacion'-- y las dos guardas la dejaban pasar. Cargarlo habria
+        # dejado al motor desplegado ejecutando acciones irreversibles sin la
+        # puerta que hoy las frena, y el dato viejo ya no estaria para volver.
+        #
+        # Va aca y no en '_lo_que_pisaria' a proposito: aquello responde "que
+        # trabajo de otro se pierde", esto responde "puedo yo escribir esta
+        # tabla". La segunda se contesta antes.
         aviso = copia_mas_vieja_que_la_base(actual[0] if actual else None,
                                             slug, actual[1] if actual else 0)
         if aviso:

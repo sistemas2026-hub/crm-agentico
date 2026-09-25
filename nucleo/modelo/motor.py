@@ -2366,7 +2366,24 @@ def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict,
     for arg_llamada, atributo_sesion in herramienta.inyectar_sesion.items():
         valor = getattr(sesion, atributo_sesion, None)
         if valor is None or valor == "":
-            argumentos.pop(arg_llamada, None)
+            # Se borra lo que haya propuesto el MODELO, no lo que el CODIGO
+            # decidio por 'sobrescribir'.
+            #
+            # La diferencia aparecio el 24/09/2026 y dejaba inutilizable la
+            # ruta interna de servicio para cualquier herramienta con
+            # 'inyectar_sesion': ahi la sesion es None a proposito, asi que
+            # este pop borraba el valor explicito y dos lineas mas abajo
+            # 'inyectados_obligatorios' frenaba la llamada. Sintoma: el ping
+            # del tecnico no salia nunca, con un mensaje que hablaba de una
+            # sesion verificada que del otro lado no existe.
+            #
+            # Sigue sin abrir nada: 'sobrescribir' no llega por ningun camino
+            # del modelo -- lo arma quien llama, en codigo-- y solo sobre las
+            # claves que el tenant declaro en 'argumentos_sobrescribibles'.
+            # Y una sesion CON valor sigue ganando, que es la precedencia que
+            # protege al cliente equivocado.
+            if arg_llamada not in (sobrescribir or {}):
+                argumentos.pop(arg_llamada, None)
         else:
             argumentos[arg_llamada] = valor
 
