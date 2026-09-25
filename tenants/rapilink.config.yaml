@@ -3177,7 +3177,13 @@ herramientas:
     # Es de solo lectura y no cambia nada del cliente: no le aplica la
     # frontera de acciones externas ni pide aprobacion.
     invocable_por_servicio: true
-    argumentos_sobrescribibles: [id_servicio]
+    # 'pings' lo decide quien llama, no el catalogo: el asistente sigue con
+    # los 3 de 'argumentos_fijos' --tres bastan para una conversacion y
+    # cuestan menos-- y la app del tecnico pide diez, porque parado en la
+    # casa lo que importa es ver la INTERMITENCIA, y tres muestras no la
+    # dibujan. Esta medido que el mismo equipo sano da 1, 2 y 3 de 3 en
+    # corridas seguidas: con diez, un patron se distingue de una racha.
+    argumentos_sobrescribibles: [id_servicio, pings]
     # Si la llamada MISMA falla (WispHub caido, la tarea asincrona no
     # termina) el caso pasa a una persona por este motivo, sin que dependa de
     # como lo lea el modelo. Un '0 de 3' NO es esto -- la llamada funciono y

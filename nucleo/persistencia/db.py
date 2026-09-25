@@ -2557,7 +2557,14 @@ def conversacion_de_caso(tenant: str, caso_id: str) -> dict | None:
         cur.execute(
             """select id, canal, etiqueta, motivo_escalamiento, nombre_cliente,
                       escalada_a_humano, necesita_atencion_humana, creado_en,
-                      id_cliente, datos_sesion
+                      id_cliente, datos_sesion,
+                      -- LO QUE EL ASISTENTE YA AVERIGUO, y que hasta el
+                      -- 25/09/2026 se quedaba en esta tabla. Quien recibe el
+                      -- caso --una persona en la bandeja, o el tecnico que va
+                      -- a la casa-- llegaba a preguntar lo que Dexter ya
+                      -- habia preguntado: identidad verificada, mediciones
+                      -- hechas, y que falta averiguar.
+                      caso_manual, resumen, escalada_siguiente_paso
                from asistente.conversations
                where organization_id = %s and caso_id = %s
                limit 1""",

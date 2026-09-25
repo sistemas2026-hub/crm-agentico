@@ -4916,17 +4916,38 @@ def _enlaces_externos(config, conv: dict, tenant: str) -> dict:
 # ademas la causa de la ultima caida, pero tarda ~10 s y el proveedor pide no
 # usarla en consultas repetidas -- diez segundos al abrir cada ticket se
 # sienten, y esa causa se puede ver entrando por el enlace.
-_HERRAMIENTAS_EQUIPO = ("consultar_estado_ont", "consultar_senal_ont")
+_HERRAMIENTAS_EQUIPO = ("consultar_estado_ont", "consultar_senal_ont",
+                        "consultar_topologia_ont")
+
+# DE QUE HERRAMIENTAS NO SE COPIA TODO, Y POR QUE.
+#
+# 'consultar_estado_ont' y 'consultar_senal_ont' devuelven estado y niveles, y
+# nada de la persona: de esas se toma cada escalar. 'consultar_topologia_ont'
+# pega a 'get_onu_details', que trae 82 campos -- entre ellos 'name' (el
+# NOMBRE COMPLETO del cliente en el registro de la ONU), 'address', el GPS y
+# credenciales. Verificado en vivo el 25/09/2026 contra HWTCA6FB5263: 'name'
+# viene con valor.
+#
+# Eso NO puede entrar a la ficha: la ficha se congela en la orden de trabajo y
+# viaja al telefono del tecnico. Lista blanca, como en todo el resto del
+# sistema, y con los mismos campos que ya usa /conversaciones/<id>/optica.
+_CAMPOS_TOPOLOGIA = ("olt_name", "olt_id", "board", "port", "onu",
+                     "zone_name", "odb_name", "onu_type_name", "distance")
 
 
 def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
     """
-    Estado y niveles opticos del equipo, o {} si no se pudo leer.
+    Estado, niveles opticos y topologia del equipo, o {} si no se pudo leer.
 
     Se consulta cada herramienta por separado y se sigue aunque una falle: que
     no responda la señal no tiene por que ocultar que el equipo esta en linea.
-    Y si fallan las dos, la pantalla muestra el enlace igual -- sin refresco
+    Y si fallan las tres, la pantalla muestra el enlace igual -- sin refresco
     automatico, una tarjeta vacia no se arregla sola.
+
+    La topologia (de que OLT cuelga, por que puerto PON, en que caja) entra
+    desde el 25/09/2026: el tecnico de campo la necesita para llegar al punto
+    correcto, y hasta ahora la pantalla la pintaba con un valor de ejemplo.
+    Cuesta 2,4 s medidos, en linea con las otras dos.
     """
     salida = {}
     por_nombre = {h.nombre: h for h in config.herramientas}
@@ -4938,9 +4959,13 @@ def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
             datos = ejecutor_http.ejecutar(
                 herr, {"sn_onu": sn_onu}, tenant,
                 variables_tenant=config.variables_tenant)
-            if isinstance(datos, dict):
-                salida.update({k: v for k, v in datos.items()
-                               if isinstance(v, (str, int, float, bool)) and v != ""})
+            if not isinstance(datos, dict):
+                continue
+            if nombre == "consultar_topologia_ont":
+                datos = {k: v for k, v in datos.items()
+                         if k in _CAMPOS_TOPOLOGIA}
+            salida.update({k: v for k, v in datos.items()
+                           if isinstance(v, (str, int, float, bool)) and v != ""})
         except Exception as e:
             registrar("enlaces", "la herramienta de equipo no respondio",
                       herramienta=nombre, error=e)
