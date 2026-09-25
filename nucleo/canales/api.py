@@ -2326,7 +2326,15 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
                                           "sigue el camino normal", veto=veto)
                 herramienta_auto = None
 
-            if herramienta_auto and not posponer and not forzado:
+            # Y solo si el rol tiene con que completar un checklist. Un rol sin
+            # herramientas no verifica identidad, y agendar() rechaza sin
+            # sesion.id_cliente: sin esto, la escalada del rol de entrada
+            # --que desde el 25/09/2026 ya no se pospone-- entraba aca por
+            # primera vez, gastaba la llamada del verificador y, si este
+            # devolvia una pregunta, volvia a posponer. El mismo limbo, un
+            # turno mas corto.
+            if (herramienta_auto and not posponer and not forzado
+                    and puede_intentar_algo(config, rol_cfg)):
                 # Primero lo barato: si la traza ya prueba por si sola que
                 # corresponde visita (evidencia de la RED, no del relato del
                 # cliente), se agenda sin consultar el manual -- y sin gastar

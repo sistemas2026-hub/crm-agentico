@@ -11,7 +11,9 @@ QUE DEFIENDE
 asistente no ejecuto NINGUNA herramienta en toda la conversacion. Es un hecho de
 la traza --los mensajes de rol 'tool'-- y esta bien calculado.
 
-El problema no es esa funcion: es como la usa `nucleo/canales/api.py:2252`.
+El problema no era esa funcion: era como la usaban las dos ramas de posposicion
+de `nucleo/canales/api.py` hasta el 25/09/2026 (la condicion de abajo es la de
+ANTES; hoy va precedida por `puede_intentar_algo(config, rol_cfg)`).
 
     if (not forzado and not estado["intento_antes_de_escalar"]
             and con_las_manos_vacias(estado["historial"])):
@@ -114,8 +116,8 @@ from nucleo.seguimiento.forzado import puede_intentar_algo
 tenia_algo_que_intentar = puede_intentar_algo
 
 
-def _pospone_hoy(historial) -> bool:
-    """La condicion tal como esta HOY en api.py:2252, sin el resto del `if`."""
+def _pospone_sin_la_pieza(historial) -> bool:
+    """La condicion como estaba en api.py ANTES del 25/09/2026, sin el resto del `if`."""
     from nucleo.seguimiento.forzado import con_las_manos_vacias
     return con_las_manos_vacias(historial)
 
@@ -152,8 +154,8 @@ def prueba_2_el_rol_de_entrada_queda_bloqueado_hoy():
     cfg = _Cfg({"cliente_final": _Rol(["derivar_a_area"])},
                [_H("derivar_a_area", deriva_rol=True)])
     rol = cfg.roles["cliente_final"]
-    afirmar(_pospone_hoy(SIN_TOOL) is True,
-            "HOY: el rol que solo deriva pospone la escalada -- y es su estado permanente")
+    afirmar(_pospone_sin_la_pieza(SIN_TOOL) is True,
+            "ANTES DEL 25/09: el rol que solo deriva posponia la escalada -- su estado permanente")
     afirmar(tenia_algo_que_intentar(cfg, rol) is False,
             "no tenia nada que intentar: su unica herramienta lo saca del rol")
     afirmar(_pospone_corregido(cfg, rol, SIN_TOOL) is False,
@@ -206,11 +208,11 @@ def prueba_5_falla_cerrado():
     afirmar(tenia_algo_que_intentar(_Cfg({}, []), None) is True,
             "sin cfg_rol -> se comporta como hoy (FALLA CERRADO)")
     cfg = _Cfg({"raro": _Rol([])}, [_H("derivar_a_area", deriva_rol=True)])
-    afirmar(tenia_algo_que_intentar(cfg, cfg.roles["raro"]) is True,
-            "un rol sin herramientas declaradas -> se comporta como hoy")
+    afirmar(tenia_algo_que_intentar(cfg, cfg.roles["raro"]) is False,
+            "un rol LEGIBLE sin herramientas declaradas -> no tiene manos, no pospone")
     cfg2 = _Cfg({"raro": _Rol(["no_existe_en_el_catalogo"])}, [])
-    afirmar(tenia_algo_que_intentar(cfg2, cfg2.roles["raro"]) is True,
-            "declara algo que no esta en el catalogo -> se comporta como hoy")
+    afirmar(tenia_algo_que_intentar(cfg2, cfg2.roles["raro"]) is False,
+            "declara solo nombres fuera del catalogo -> tampoco tiene manos")
 
 
 def main() -> int:

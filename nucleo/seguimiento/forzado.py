@@ -450,8 +450,17 @@ def puede_intentar_algo(config, cfg_rol) -> bool:
     los ocho roles de rapilink sin herramientas ejecutables, y es el que recibe
     todos los mensajes iniciales.
 
-    Sin config legible devuelve True, que deja la posposicion como estaba: el
-    cambio se limita al caso demostrado, no a lo que no se puede leer.
+    Sin cfg_rol --config ilegible-- devuelve True y deja la posposicion como
+    estaba: lo que no se puede leer no se toca. Un rol que SI se leyo y no
+    declara nada ejecutable devuelve False aunque la lista este vacia: por la
+    misma regla, no tiene con que intentar nada.
+
+    Lo que esta funcion NO garantiza, y se dice porque el docstring anterior lo
+    daba a entender: que un rol con herramientas de datos siga posponiendo
+    "con la traza vacia" en la topologia real. Una derivacion deja un mensaje
+    'tool' propio ({"ok": true, ...}), asi que en cuanto el router deriva,
+    con_las_manos_vacias() da False para el especialista aunque no haya
+    consultado nada. Eso es previo a esta funcion y es un cambio aparte.
 
     Prueba: tests/test_escalada_del_rol_de_entrada.py.
     """
@@ -460,8 +469,8 @@ def puede_intentar_algo(config, cfg_rol) -> bool:
     catalogo = {h.nombre: h for h in (getattr(config, "herramientas", None) or [])}
     suyas = [catalogo[n] for n in (getattr(cfg_rol, "puede_consultar", None) or [])
              if n in catalogo]
-    if not suyas:
-        return True
+    # Lista vacia, o solo nombres que no estan en el catalogo: se leyo, y no
+    # hay nada ejecutable. Eso es "no tiene manos", no "no se pudo leer".
     return any(not getattr(h, "deriva_rol", False) for h in suyas)
 
 
