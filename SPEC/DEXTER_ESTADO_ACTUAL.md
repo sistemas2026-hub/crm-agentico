@@ -500,14 +500,25 @@ una vez, por lo mismo:
 > buscando 'procesando' y 'atendiendo'. Nadie lo vio hasta abrir la pantalla en
 > produccion y leer '0 agentes con trabajo' sobre tres tarjetas activas."*
 
-**El Centro de Mando está en producción**, así que esto no es deuda de
-laboratorio: la franja de arriba puede estar mostrando un contador vacío sobre
-tarjetas activas, que es exactamente el síntoma que la prueba nació para cazar.
-Ninguno de los commits del 25/09 de esta rama toca `nucleo/canales/api.py` —
-los de la planta son JS y Svelte, y los de este trabajo son una prueba, `cli/` y
-documentos—, así que la regresión es anterior y el CI en verde del 24/09 ya no
-describe el árbol. **Hay que mirarlo con la pantalla delante, no solo con la
-prueba.**
+**El Centro de Mando está en producción, y el código que falla es EL MISMO que
+está afuera.** Medido contra la rama de despliegue:
+
+```
+tests/test_centro_mando.py     0 líneas de diff
+nucleo/canales/api.py          0 líneas de diff
+```
+
+No es una regresión de esta rama ni de nadie que trabajara hoy: es un defecto que
+ya estaba cuando esta sección declaró «CI EN VERDE, 0 en rojo». **Hay que mirarlo
+con la pantalla delante**, porque el síntoma que la prueba nació para cazar es
+justamente el que no se ve solo: un cero falso no obliga a investigar como lo
+haría un «no disponible».
+
+Lo que la prueba dice y **no** se terminó de diagnosticar: la respuesta llega sin
+`agentes` ni `totales` —de ahí el `None`—, o sea que la petición falla antes de
+armarlos. El endpoint SÍ calcula `agentes_activos` (`api.py:3666`), así que el
+problema está aguas arriba, en la resolución del pedido. Queda ahí a propósito:
+seguir era abrir otro frente, y este trabajo era otra cosa.
 
 `test_m06e_consolidacion.py` queda sin diagnosticar: no importa `db` y su
 `FaltaIdentidadEnSesion` no se investigó.
