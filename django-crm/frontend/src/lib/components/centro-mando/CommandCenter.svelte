@@ -34,6 +34,7 @@
   import AgentStation from './AgentStation.svelte';
   import AgentDetail from './AgentDetail.svelte';
   import MetricsPanel from './MetricsPanel.svelte';
+  import PlantaOficina from './PlantaOficina.svelte';
   import EventTimeline from './EventTimeline.svelte';
   import ExternalToolNode from './ExternalToolNode.svelte';
   import OrchestratorNode from './OrchestratorNode.svelte';
@@ -50,6 +51,9 @@
   let { panorama, sello = null } = $props();
 
   let seleccionado = $state(/** @type {any} */ (null));
+  /** Cual de las dos vistas se muestra. El anillo manda por omisión: es el
+      que esta medido en produccion. */
+  let vista = $state(/** @type {'anillo'|'planta'} */ ('anillo'));
 
   const totales = $derived(panorama?.totales || {});
   const servicios = $derived(panorama?.servicios || []);
@@ -339,11 +343,26 @@
       <span class="dato rojo">{totales.fallos_hoy} fallos hoy</span>
     {/if}
     <span class="reloj">{hora(sello || panorama.generado_en)} <em>(Bogotá)</em></span>
+    <!-- Dos vistas de lo mismo, y el anillo sigue siendo la de por defecto:
+         esta medido en produccion desde el 24/09/2026, y estrenar la planta
+         como unica vista seria cambiar algo que funciona por algo que nadie
+         miro todavia en la operacion real. La planta aporta lo que el anillo
+         no muestra -- la estructura del tenant: quien atiende al cliente,
+         quien trabaja para adentro y por donde entran las conversaciones. -->
+    <div class="vistas" role="group" aria-label="Forma de ver la operación">
+      <button class:activa={vista === 'anillo'} onclick={() => (vista = 'anillo')}>Anillo</button>
+      <button class:activa={vista === 'planta'} onclick={() => (vista = 'planta')}>Planta</button>
+    </div>
   </div>
 
   <MetricsPanel {totales} {ms} />
 
   <div class="cuerpo">
+    {#if vista === 'planta'}
+      <div class="mapa planta">
+        <PlantaOficina {panorama} alSeleccionar={(x) => (seleccionado = x)} />
+      </div>
+    {:else}
     <div class="mapa" class:rejilla={!hayMapa} use:observar>
       {#if hayMapa}
         <svg class="vias" viewBox="0 0 {caja.ancho} {caja.alto}" aria-hidden="true">
@@ -370,6 +389,7 @@
         />
       {/each}
     </div>
+    {/if}
 
     <div class="lateral">
       <EventTimeline {eventos} {hora} {ms} sello={hora(sello || panorama.generado_en)} />
@@ -424,6 +444,19 @@
   .dato.rojo { color: #b91c1c; }
   .reloj { font-family: ui-monospace, monospace; font-size: 11px; color: #0f172a; }
   .reloj em { color: #64748b; font-style: normal; }
+
+  .vistas { display: inline-flex; gap: 2px; padding: 2px; border-radius: 6px; background: #f1f5f9; }
+  .vistas button {
+    font: inherit; font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+    padding: 3px 10px; border: 0; border-radius: 4px;
+    background: transparent; color: #475569; cursor: pointer;
+  }
+  .vistas button:hover { color: #0f172a; }
+  .vistas button.activa { background: #fff; color: #0f172a; box-shadow: 0 1px 2px rgb(15 23 42 / 12%); }
+
+  /* La planta trae su propio lienzo y su propio encaje: aqui solo se le da
+     el sitio. */
+  .mapa.planta { display: flex; }
 
   .cuerpo { flex: 1; display: flex; min-height: 0; }
   .mapa { flex: 1; position: relative; min-width: 0; min-height: 0; }
