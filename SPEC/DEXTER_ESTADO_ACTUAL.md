@@ -7,7 +7,12 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **25/09/2026 13:44 Bogotá** — se abren dos fichas en
+Última actualización: **25/09/2026 13:57 Bogotá** — la planta del centro de
+mando pasa a **salas por área** (`8d9a3d7`) y entra una **propuesta** de planta
+radial sin enchufar (`c660474`). Los dos **sin desplegar**. Se remide el mapa de
+ramas: producción ya no está donde decía este archivo hace tres horas.
+
+La anterior fue el **25/09/2026 13:44 Bogotá** — se abren dos fichas en
 `TRABAJO ACTIVO`: la custodia de materiales, con su diseño congelado, y la
 integración de Campo, que es su prerrequisito y está **bloqueada hasta cumplir su
 contrato**. Ninguna arrancada; nada de código tocado. El detalle de por qué la
@@ -92,26 +97,119 @@ f946d84  Un servicio puede decir de quien habla, y la sesion sigue mandando
 afd721a  D1 cierra su parte: el CI queda en verde en las dos ramas
 ```
 
-**REMEDIDO el 25/09/2026 13:44 Bogotá, por contenido (`git patch-id --stable`)
-contra `origin/fix/integracion-wisphub`. Siguen siendo 3, pero NO son estos:**
+**REMEDIDO el 25/09/2026 13:57 Bogotá, por contenido (`git patch-id --stable`)
+contra `origin/fix/integracion-wisphub`, que está en `8d37f70`.** De 16 commits
+locales, **10 ya están afuera con otro hash** y 6 no:
 
 ```
-YA ESTÁN AFUERA, con otro hash --otra sesión los publicó por la rama
-`deploy/arreglo-servicio` (worktree C:/tmp/deploy-arreglo):
-   78d20b8 → e1080a1        f946d84 → 6b096af        c3ec175 → a60cb85
-
-LO QUE SIGUE FUERA:
-   c017bdb  Ver la pantalla encontro lo que las guardas no podian
-   e957e06  El estado dice que la planta salio, y corrige lo que ya no era cierto
+FUERA (6):
    afd721a  D1 cierra su parte: el CI queda en verde en las dos ramas
+   e957e06  El estado dice que la planta salio, y corrige lo que ya no era cierto
+   c017bdb  Ver la pantalla encontro lo que las guardas no podian
+   109a550  La integracion de Campo tiene contrato antes de que alguien la fusione
+   8d9a3d7  Cada area es una oficina con paredes  (25/09 13:47)
+   c660474  Propuesta de planta radial, sin enchufar  (25/09 13:48)
+
+YA DESPLEGADOS, con otro hash (los publicó otra sesión):
+   78d20b8 → e1080a1     f946d84 → 6b096af     bea9a8b → 0925a7e
+   063d0fa → 0c98fa5     b8cbb85 → 2f14565     29fdb1e → 05ef873
+   7566e0b → fab796b     a4985f4 → 76e29bf     c3ec175 → a60cb85
+   ea483ed → 8d37f70
 ```
 
-Dos de los tres que quedan son **documentación de este archivo**; el tercero sigue
-siendo el CI. Y producción se movió otra vez el 25/09: `a60cb85 → 61a7f74`.
+**Tres de los seis que faltan son documentación de este archivo**; los otros tres
+son el CI, el contrato de Campo y el trabajo de hoy.
 
-Es la **cuarta** vez que esta sección envejece en dos días, y por cuarta vez el
-método aguantó y el número no. Lo que hay que conservar es la primera línea de este
-bloque, no la lista.
+Es la **quinta** vez que esta sección envejece en dos días. Producción se movió
+otra vez: `a60cb85 → 61a7f74 → 8d37f70`, y los tres últimos saltos son de OTRA
+sesión (bandeja rediseñada, nombre del cliente, referencia de Stitch). Por quinta
+vez el método aguantó y el número no: lo que hay que conservar es la primera línea
+de este bloque, no la lista.
+
+### SIN DESPLEGAR — 25/09/2026 13:47 Bogotá — la planta pasa a salas por área
+
+`8d9a3d7`, tres archivos. **No está en producción**: producción sigue mostrando
+la planta de puestos sueltos de `a60cb85`.
+
+El agrupamiento por color de piso **no se leía**: en una rejilla diagonal, dos
+vecinos de la misma área se ven igual que dos de áreas distintas. Ahora cada área
+es una sala con paredes, puerta y cuadros, con los puestos de sus agentes dentro,
+y la puerta de entrada del tenant queda sola como principal.
+
+**Lo que costó cada pieza** — todas salieron de mirar la pantalla, no del código:
+
+```
+el nombre del área flotaba y no decía de quién era: "FACTURACION" aparecía
+  sobre la recepción. Va pintado en el SUELO de su oficina. Para que quepa,
+  cada sala reserva una franja libre al frente -- sin ella caía bajo los
+  escritorios y se leía "RECEP|ION" partido por un monitor
+el cuerpo de letra sale del ANCHO DE SU SALA: con un número fijo (26),
+  "ATENCION AL CLIENTE" cruzaba tres oficinas
+el cartel del agente recortaba a "SOPORTE TECNICO CLIE..." TENIENDO la pared
+  medio vacía al lado. La cuenta: zona útil 56, cuerpo 56/(23*0,72) = 3,4, por
+  debajo del mínimo. A 1,24 L la zona útil es 88 y entra a cuerpo 5,3. El sitio
+  lo dio mover la PUERTA a la pared izquierda
+paredes a 46 y no más: a 62 la pared de la oficina de delante se come a la de
+  atrás y "FACTURACION" quedaba en "ATURACION"
+el color de área se reparte por POSICIÓN, no por hash del nombre: por hash,
+  administración, ventas y atención al cliente salían del mismo gris azulado,
+  y entonces el color deja de agrupar, que es para lo único que está
+```
+
+**Un archivo se perdió durante el trabajo y hubo que reescribirlo.** Una expresión
+regular se comió 370 líneas de `planta.js`, que estaba sin commitear y sin copia.
+Se restauró desde la versión commiteada y se reescribió `rejillaDeSalas` a mano.
+Dos consecuencias reales, no cosméticas: `rejillaPorGrupos` desapareció (no la
+importaba nadie, pero se fue por esto y no por decisión), y `colorDeArea` se
+reescribió — de ahí el cambio de criterio del color. **Desde entonces se respalda
+fuera del repo antes de tocar un archivo sin commitear.**
+
+```
+93 pruebas de src/lib/centro-mando          verdes
+docker exec dexter-frontend-1 pnpm check    0 errores en los 3 archivos
+                                            (39 del total, todos preexistentes)
+que ningún nombre quede recortado           LEÍDO DEL DOM, no a ojo:
+                                            cero ocurrencias de "…"
+```
+
+### SIN DESPLEGAR — propuesta de planta radial, sin enchufar — `c660474`
+
+Dos archivos nuevos (`planta-radial.js`, `PlantaRadial.svelte`). **Nadie los
+monta**: no están en ninguna ruta. Existen para mirarlos al lado de la planta en
+uso y decidir.
+
+La puerta de entrada del tenant va al centro y las áreas en anillo alrededor, que
+es la topología real del motor: todo el que escribe por un canal público entra por
+`rol_de_entrada` y de ahí se deriva. El radio se deriva de que dos salas contiguas
+no se toquen, así que el anillo se adapta solo con tres áreas o con nueve.
+
+Nacen de una imagen de referencia que trajo el usuario. **De ella se toman cuatro
+cosas, y las cuatro con dato que el payload YA traía**: la ficha pegada a la
+oficina, el número grande en la pared, el gráfico en el monitor (los 15 cubos de 2
+minutos de `serie`, que no se dibujaban en ningún sitio) y el orquestador al
+centro.
+
+**Tres no se toman, y conviene que quede escrito por qué** — es el mismo criterio
+que gobierna la animación de esta pantalla:
+
+```
+"Calidad 98%"        no existe ninguna métrica de calidad
+"Conectado" en verde no hacemos healthcheck a ningún sistema externo. Lo que
+                     sabemos es la tasa de fallo de las llamadas que HICIMOS:
+                     un sistema caído al que no llamamos hace media hora se
+                     vería "Conectado"
+cintas de tráfico    el destino de cada derivación vive en tool_calls.parametros
+                     y NO sale en el payload. Los pasillos radiales dicen POR
+                     DÓNDE se deriva --estructura, que es cierta-- y no cuánto
+```
+
+Alguien recorre un pasillo **cuando el motor contó un evento** de un agente de esa
+área. No hay figurantes: si en una ventana no pasó nada, los pasillos están
+vacíos, y que estén vacíos ES la información.
+
+**Lo que queda pendiente si esta propuesta avanza:** la franja de sistemas
+externos no está montada en ella, y animar la derivación de verdad exige que el
+motor exponga el área de destino desde `tool_calls.parametros`.
 
 ### DESPLEGADO el 24/09/2026 21:2x Bogotá — la planta de oficina
 
@@ -542,11 +640,21 @@ M  (3 registrants generados de macos/ y windows/)
 M  SPEC/CONTRATO_RELEVO_IA_HUMANO.md   arrastre ajeno sobre G9, sin destino propio
 ```
 
-**En este árbol** (`integrar-centro-mando`): 43 archivos, **todos sin seguimiento**,
-ninguno modificado ni en stage. 21 `.playwright-mcp/*.yml` y 7 PNG en la raíz
-(`disco-*`, `radial-*`, `proto-radial`) son artefactos de sesión — justo lo que
-el `pre-commit` bloquea; 10 en `documentos/command-center/` (avatares y
-prototipo radial); 5 en `apps/tecnicos-mobile/`, las copias de B2.
+**En este árbol** (`integrar-centro-mando`) — **remedido el 25/09 13:57**: el
+trabajo del centro de mando **ya está commiteado** (`8d9a3d7`, `c660474`); lo que
+queda no es suyo ni va al repositorio:
+
+```
+M  cli/revision_g8.py                 arrastre ajeno, sin destino propio
+?? apps/tecnicos-mobile/{docs,test}   copias de B2, 5 archivos
+?? django-crm/frontend/banco-tmp/     banco local de la sesión: NO se versiona
+?? documentos/command-center/*.png    ~30 capturas de trabajo, artefacto de sesión
+?? documentos/command-center/*.html   los dos prototipos sueltos
+?? documentos/command-center/avatares/  8 webp
+```
+
+El banco (`banco-tmp/`) monta las dos plantas con un conmutador y es la forma de
+compararlas; se levanta con vite y no depende de nada del repositorio.
 
 ⚠️ **Stage por rutas explícitas siempre, también para documentación**:
 prohibidos `git add .`, `git add -A`, `commit -a` y **`git add SPEC/`**. El
