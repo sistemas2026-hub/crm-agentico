@@ -394,21 +394,29 @@ export function celdaDeSla(estado, minutos) {
         tono: 'critico'
       };
     case 'VENCE_PRONTO':
-      return { texto: dias(minutos) || 'Por vencer', detalle: 'por vencer', tono: 'alerta' };
+      return {
+        texto: 'Vence pronto',
+        detalle: minutos != null ? `quedan ${dias(minutos)}` : '',
+        tono: 'alerta'
+      };
     case 'A_TIEMPO':
-      return { texto: dias(minutos) || 'A tiempo', detalle: 'a tiempo', tono: 'ok' };
+      return {
+        texto: 'A tiempo',
+        detalle: minutos != null ? `quedan ${dias(minutos)}` : '',
+        tono: 'ok'
+      };
     case 'NO_APLICA':
       // La orden terminó. El plazo no corre; no es un incumplimiento ni un
       // cumplimiento.
-      return { texto: 'N/A', detalle: 'la orden ya terminó', tono: 'neutro' };
+      return { texto: 'Sin plazo', detalle: 'la orden ya terminó', tono: 'neutro' };
     case 'SIN_PLAZO':
-      return { texto: 'N/A', detalle: 'el tipo de trabajo no declara plazo', tono: 'neutro' };
+      return { texto: 'Sin plazo', detalle: 'el tipo de trabajo no declara plazo', tono: 'neutro' };
     case 'DATOS_INSUFICIENTES':
-      return { texto: '—', detalle: 'no se pudo determinar el plazo', tono: 'neutro' };
+      return { texto: 'Sin plazo', detalle: 'no se pudo determinar el plazo', tono: 'neutro' };
     default:
       // Sin estado: la propuesta no cuelga de una orden, que es donde vive el
       // plazo. Un caso o una actividad no tienen uno.
-      return { texto: 'N/A', detalle: 'no cuelga de una orden de trabajo', tono: 'neutro' };
+      return { texto: 'Sin plazo', detalle: 'no cuelga de una orden de trabajo', tono: 'neutro' };
   }
 }
 
@@ -553,7 +561,7 @@ export function estadoDeRevision(estado) {
  * regla que el backend ya aplica con `ordering = ["prioridad", "-created_at"]`.
  *
  * @param {any[]} propuestas
- * @param {{ nivel?: string, tipo?: string, estado?: string, conPropuesta?: string }} filtros
+ * @param {{ nivel?: string, tipo?: string, estado?: string, conPropuesta?: string, texto?: string }} filtros
  * @param {Date} [ahora]
  */
 export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) {
@@ -577,6 +585,7 @@ export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) 
   });
 
   const visibles = enriquecidas.filter((p) => {
+    if (!coincideConBusqueda(p, filtros.texto ?? '')) return false;
     if (filtros.estado === 'pendientes' && !p.revision.pendiente) return false;
     if (filtros.estado === 'decididas' && p.revision.pendiente) return false;
     if (filtros.nivel && p.nivel.texto !== filtros.nivel) return false;
@@ -599,4 +608,80 @@ export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) 
   });
 
   return visibles.map((p, i) => ({ ...p, n: i + 1 }));
+}
+
+/**
+ * El buscador de la bandeja.
+ *
+ * Busca en lo que la tabla MUESTRA -- cliente, caso/OT, asunto y técnico --
+ * y nada más. Meter la evidencia o el motivo haría que una fila apareciera
+ * por un texto que no está a la vista, y quien busca no entendería por qué
+ * salió.
+ *
+ * Sin acentos y sin mayúsculas: nadie escribe «Ferretería» con tilde en un
+ * buscador.
+ */
+function normalizar(v) {
+  return String(v ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+}
+
+/**
+ * @param {any} p  una fila ya enriquecida por `bandejaDeRevision`
+ * @param {string} texto
+ */
+export function coincideConBusqueda(p, texto) {
+  const q = normalizar(texto).trim();
+  if (!q) return true;
+  const campos = [
+    p?.cliente,
+    p?.asunto,
+    p?.tecnico,
+    p?.ticket_externo,
+    p?.orden_numero != null ? `OT-${p.orden_numero}` : '',
+    p?.origen_id
+  ];
+  return campos.some((c) => normalizar(c).includes(q));
+}
+
+/**
+ * Los números de la paginación, calculados sobre el total real.
+ *
+ * `desde`/`hasta` son 1-indexados y se muestran tal cual («Mostrando 1 a 6
+ * de 121»). Con la lista vacía, `desde` es 0 y no 1: «Mostrando 1 a 0»
+ * afirmaría que hay un primer registro.
+ *
+ * `ventana` es qué botones dibujar. Con 21 páginas no caben todas, así que
+ * lleva la primera, la última, las vecinas de la actual y `null` donde va un
+ * «…». El `null` es un hueco declarado, no un número que falta.
+ *
+ * @param {number} total
+ * @param {number} pagina  1-indexada
+ * @param {number} porPagina
+ */
+export function paginacion(total, pagina, porPagina) {
+  const paginas = Math.max(1, Math.ceil(total / porPagina));
+  // La página se recorta a lo que existe: al filtrar, la 7 puede dejar de
+  // haber y quedarse ahí mostraría una tabla vacía sin decir por qué.
+  const actual = Math.min(Math.max(1, pagina), paginas);
+
+  const desde = total === 0 ? 0 : (actual - 1) * porPagina + 1;
+  const hasta = Math.min(actual * porPagina, total);
+
+  /** @type {(number|null)[]} */
+  let ventana = [];
+  if (paginas <= 7) {
+    ventana = Array.from({ length: paginas }, (_, i) => i + 1);
+  } else {
+    const cerca = [actual - 1, actual, actual + 1].filter((n) => n > 1 && n < paginas);
+    const numeros = [1, ...cerca, paginas];
+    for (let i = 0; i < numeros.length; i++) {
+      if (i > 0 && numeros[i] - numeros[i - 1] > 1) ventana.push(null);
+      ventana.push(numeros[i]);
+    }
+  }
+
+  return { actual, paginas, desde, hasta, total, ventana };
 }
