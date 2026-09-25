@@ -66,17 +66,65 @@ describe('la planta dibuja', () => {
     expect(body).toBeTypeOf('string');
   });
 
-  it('el nombre del area sale ENTERO, no recortado', () => {
-    // Recortar el nombre es lo peor que puede hacer el rotulo: "SOPORTE
-    // TE..." no identifica a nadie, que es lo unico para lo que existe.
+  it('dos agentes de la MISMA area se distinguen', () => {
+    // El defecto que se vio en produccion: la planta rotulaba por area, y en
+    // Rapilink tres pares comparten una -- Atencion al Cliente, Facturacion y
+    // Administracion tienen dos agentes cada una. Habia dos puestos que
+    // decian "FACTURACIÓN" y no habia forma de saber cual era cual.
+    const agentes = [
+      agente('facturacion', { area: 'Facturación' }),
+      agente('facturacion_cliente', { area: 'Facturación' })
+    ];
+    const { body } = render(PlantaOficina, { props: { panorama: panorama(agentes) } });
+    expect(body).toContain('FACTURACION');
+    expect(body).toContain('FACTURACION CLIENTE');
+  });
+
+  it('los ocho roles de Rapilink dan ocho rótulos distintos', () => {
+    const reales = [
+      ['administracion', 'Administración'], ['cliente_final', 'Atención al Cliente'],
+      ['configuracion_guiada', 'Administración'], ['facturacion', 'Facturación'],
+      ['facturacion_cliente', 'Facturación'], ['soporte', 'Atención al Cliente'],
+      ['soporte_tecnico_cliente', 'Soporte Técnico'], ['ventas', 'Ventas']
+    ];
+    const { body } = render(PlantaOficina, {
+      props: { panorama: panorama(reales.map(([n, a]) => agente(n, { area: a }))) }
+    });
+    // Se leen los rotulos pintados y se comprueba que no haya dos iguales.
+    const rotulos = [...body.matchAll(/letter-spacing="[^"]*"[^>]*>([A-ZÁÉÍÓÚÑ ]{4,})</g)]
+      .map((m) => m[1].trim());
+    expect(rotulos.length).toBeGreaterThanOrEqual(8);
+    expect(new Set(rotulos).size).toBe(rotulos.length);
+  });
+
+  it('el nombre sale ENTERO, no recortado', () => {
+    // Recortar el rotulo es lo peor que puede hacerse aqui: "SOPORTE TE..."
+    // no identifica a nadie, que es lo unico para lo que existe.
     const agentes = [
       agente('soporte_tecnico_cliente', { area: 'Soporte Técnico' }),
       agente('cliente_final', { area: 'Atención al Cliente', orientado_a: 'cliente_final' })
     ];
     const { body } = render(PlantaOficina, { props: { panorama: panorama(agentes) } });
-    expect(body).toContain('SOPORTE TÉCNICO');
-    expect(body).toContain('ATENCIÓN AL CLIENTE');
-    expect(body).not.toContain('SOPORTE TÉ…');
+    expect(body).toContain('SOPORTE TECNICO CLIENTE');
+    expect(body).toContain('CLIENTE FINAL');
+    expect(body).not.toContain('SOPORTE TE…');
+  });
+
+  it('los filtros cuentan lo que hay', () => {
+    const agentes = [
+      agente('a', { estado: 'error' }),
+      agente('b', { estado: 'working', conversaciones: 3 }),
+      agente('c', { esperando_humano: 2 })
+    ];
+    const { body } = render(PlantaOficina, { props: { panorama: panorama(agentes) } });
+    expect(body).toContain('Con errores');
+    expect(body).toContain('Esperan a alguien');
+    expect(body).toContain('Todos');
+  });
+
+  it('trae los mandos de la camara', () => {
+    const { body } = render(PlantaOficina, { props: { panorama: panorama([agente('soporte')]) } });
+    expect(body).toContain('Volver al encuadre automático');
   });
 });
 

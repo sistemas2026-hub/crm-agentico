@@ -106,14 +106,29 @@
   const u = $derived(L / 100);
 
   const p = (x, y, z = 0) => iso(x, y, z, e);
-  const anchoC = $derived(L * 0.98);
+  /* El cartel asoma un poco de la pared (1.06 L contra el L que mide) porque
+     los NOMBRES son mas largos que las areas: "soporte tecnico cliente" son
+     23 caracteres contra los 15 de "Soporte Tecnico". Con 0.98 L el cuerpo
+     de letra caia por debajo del minimo y el rotulo se recortaba a "SOPORTE
+     TECNICO CLIE...", que es justo lo que este rotulo no puede hacer. */
+  const anchoC = $derived(L * 1.06);
   const altoC = $derived(L * 0.21);
   const za = $derived(H + L * 0.16);
   const xa = $derived((L - anchoC) / 2);
 
-  const nombreArea = $derived(String(agente.area || agente.nombre).toUpperCase());
-  const zonaX = $derived(L * 0.22);
-  const zonaW = $derived(anchoC - L * 0.22 - L * 0.20);
+  /* EL ROTULO ES EL NOMBRE DEL AGENTE, no su area.
+     Estuvo al reves y en produccion se vio el problema: en Rapilink tres
+     pares de agentes comparten area --Atencion al Cliente, Facturacion y
+     Administracion tienen dos cada una-- asi que la planta mostraba
+     "FACTURACION" en dos puestos distintos y no habia forma de saber cual
+     era cual. Un tablero cuya funcion es decir quien hace que no puede tener
+     dos puestos indistinguibles.
+     El nombre es unico por construccion (es la clave del rol en la config) y
+     es ademas como se llama el agente en /agentes: la misma entidad se
+     nombra igual en las dos pantallas. */
+  const nombreArea = $derived(String(agente.nombre).replaceAll('_', ' ').toUpperCase());
+  const zonaX = $derived(L * 0.20);
+  const zonaW = $derived(anchoC - L * 0.20 - L * 0.16);
   const cuerpoNombre = $derived(cuerpoQueCabe(nombreArea, zonaW, L * 0.072, L * 0.036));
 
   // Medidas del mobiliario. Viven aqui y no en el marcado porque son
