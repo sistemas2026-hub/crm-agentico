@@ -23,7 +23,7 @@
   import SistemasExternos from './SistemasExternos.svelte';
   import ActividadViva from './ActividadViva.svelte';
   import { ESTADOS, normalizar } from '$lib/centro-mando/estados.js';
-  import { rejillaPlanta, ordenDePintado, zonaDe, ZONAS, cambios } from '$lib/centro-mando/planta.js';
+  import { rejillaDeSalas, zonaDe, ZONAS, cambios, colorDeArea, poli, punto, iso, tono } from '$lib/centro-mando/planta.js';
 
   /** @type {{ panorama: any, ms?: (v:any)=>string, alSeleccionar?: (a:any)=>void }} */
   let {
@@ -37,16 +37,46 @@
 
   const entrada = $derived(panorama?.rol_de_entrada || null);
 
-  /* Orden de lectura: primero la ZONA, y dentro de cada una lo que exige
-     atencion. Agrupar por zona hace visible la estructura del tenant. */
+  /* Orden de lectura: ZONA, despues AREA, y dentro lo que exige atencion.
+     El area entra en el orden para que los agentes que la comparten queden
+     CONTIGUOS -- en Rapilink son tres pares-- y con el piso tenido del mismo
+     color eso dibuja bloques sin gastar espacio.
+     Se probo la alternativa de verdad, salas con paredes por area, y sale
+     cara: con 8 agentes en 5 areas --1,6 por sala-- tres salas quedan medio
+     vacias y los nombres de los puestos se vuelven ilegibles. Agrupar cuesta
+     espacio, y el espacio sale del tamaño de los puestos. Esto agrupa sin
+     pagar ese precio. */
   const agentes = $derived(
     [...(panorama?.agentes || [])].sort((a, b) =>
+      String(a.area || '').localeCompare(String(b.area || '')) ||
       ZONAS[zonaDe(a, entrada)].orden - ZONAS[zonaDe(b, entrada)].orden ||
       ESTADOS[normalizar(a.estado)].orden - ESTADOS[normalizar(b.estado)].orden ||
       (b.conversaciones || 0) - (a.conversaciones || 0) ||
       String(a.nombre).localeCompare(String(b.nombre))
     )
   );
+
+  /* LAS SALAS. La recepcion va SOLA y primera, no dentro del area que
+     comparte: es la puerta de entrada del tenant, no un miembro mas de
+     Atencion al Cliente. Que este aparte es justamente lo que se quiere ver
+     -- por ahi entra todo. */
+  const grupos = $derived.by(() => {
+    const recep = agentes.filter((a) => entrada && a.nombre === entrada);
+    const resto = agentes.filter((a) => !(entrada && a.nombre === entrada));
+    const porArea = new Map();
+    for (const a of resto) {
+      const k = a.area || '(sin área)';
+      if (!porArea.has(k)) porArea.set(k, []);
+      porArea.get(k).push(a);
+    }
+    const salas = [...porArea.entries()]
+      .map(([area, miembros]) => ({ area, miembros, n: miembros.length, principal: false }))
+      .sort((x, y) => y.n - x.n || x.area.localeCompare(y.area));
+    return recep.length
+      ? [{ area: 'Recepción', miembros: recep, n: recep.length, principal: true }, ...salas]
+      : salas;
+  });
+  const areasPresentes = $derived(grupos.map((g) => g.area));
 
   /* QUE CAMBIO ENTRE DOS FOTOS.
      Los datos llegan por sondeo cada 12 s, asi que no hay tiempo real que
@@ -83,10 +113,17 @@
   const MARGEN_SUP = LADO * 0.88, MARGEN_INF = LADO * 0.18, MARGEN_LAT = 24;
 
   const rej = $derived(
-    rejillaPlanta(agentes.length, {
-      ancho: Math.max(120, caja.ancho - MARGEN_LAT * 2),
-      alto: Math.max(120, caja.alto),
+    rejillaDeSalas(grupos.map((g) => ({ n: g.n, principal: !!g.principal })), {
+      ancho: Math.max(160, caja.ancho - MARGEN_LAT * 2),
+      alto: Math.max(160, caja.alto),
       lado: LADO, separacion: SEP,
+      /* Franja de suelo libre al frente de cada sala, para el nombre pintado
+         en el piso. Sin ella el nombre cae bajo los escritorios. */
+      rotulo: LADO * 0.34,
+      /* EL PASILLO CENTRAL: parte las oficinas en dos bandas con un corredor
+         por el medio. Es lo que convierte seis cajas sueltas en una PLANTA
+         -- un edificio se recorre, y se recorre por algun sitio. */
+      pasilloCentral: LADO * 0.95,
       holguraAlto: (MARGEN_SUP + MARGEN_INF) / LADO
     })
   );
@@ -96,23 +133,111 @@
     const anchoTotal = rej.ancho * esc;
     const altoTotal = (rej.alto + MARGEN_SUP + MARGEN_INF) * esc;
     return {
-      dx: (caja.ancho - anchoTotal) / 2,
-      dy: (caja.alto - altoTotal) / 2 + MARGEN_SUP * esc,
+      // al centrado se le suma el corrimiento propio de la rejilla, que es
+      // lo que lleva el dibujo al origen
+      dx: (caja.ancho - anchoTotal) / 2 + (rej.dx || 0) * esc,
+      dy: (caja.alto - altoTotal) / 2 + MARGEN_SUP * esc + (rej.dy || 0) * esc,
       esc
     };
   });
 
   /* En isometrica lo que esta mas adelante se pinta DESPUES, o los tabiques
      del puesto de atras tapan el escritorio del de adelante. */
-  const pintado = $derived(ordenDePintado(rej.celdas));
 
-  $effect(() => {
-    if (!envoltura) return;
-    const ro = new ResizeObserver(([e]) => {
-      caja = { ancho: e.contentRect.width, alto: e.contentRect.height };
-    });
-    ro.observe(envoltura);
-    return () => ro.disconnect();
+  /* La tarima de cada area: un suelo continuo bajo sus puestos. Separar no
+     agrupa --en una rejilla diagonal dos vecinos de la misma area se ven
+     igual que dos de areas distintas-- pero un suelo compartido si. Es la
+     mitad util de las salas sin la cara: agrupa sin paredes, y las paredes
+     eran las que costaban el tamaño de los puestos. */
+  /* Paredes altas. A 34 las salas se leian como bandejas vistas desde
+     arriba; a 62 se leen como habitaciones. El techo lo pone lo que tapan:
+     mas altas y la pared de una sala empieza a comerse la de atras. */
+  const ALTO_PARED = 46;
+  const dibujo = $derived.by(() => {
+    const e = rej.ejes, H = ALTO_PARED;
+    return (rej.salas || []).map((sala, i) => {
+      const g = grupos[i];
+      if (!g) return null;
+      const c = g.principal ? '#8B5FBF' : colorDeArea(g.area, areasPresentes);
+      const { u0, v0, u1, v1, rotulo: FR } = sala;
+      return {
+        clave: g.area, area: g.area, color: c, principal: !!g.principal,
+        profundidad: sala.col + sala.fila,
+        suelo: poli(e, [u0,v0,0], [u1,v0,0], [u1,v1,0], [u0,v1,0]),
+        fondo: poli(e, [u0,v0,0], [u1,v0,0], [u1,v0,H], [u0,v0,H]),
+        izq:   poli(e, [u0,v0,0], [u0,v1,0], [u0,v1,H], [u0,v0,H]),
+        cantoFondo: poli(e, [u0,v0,H], [u1,v0,H], [u1,v0-4,H], [u0,v0-4,H]),
+        cantoIzq:   poli(e, [u0,v0,H], [u0,v1,H], [u0-4,v1,H], [u0-4,v0,H]),
+        /* El rotulo va DENTRO de la sala, sobre su suelo y junto al borde de
+           delante. Colgado arriba se tapaba con la sala vecina -- se veia
+           "SOPORTE TECNI..." cortado por la de al lado. */
+        /* LA PUERTA VA EN LA PARED IZQUIERDA, no en la del fondo. En el fondo
+           caia justo al lado del cartel del agente y le comia el ancho: el
+           nombre se recortaba a "SOPORTE TECNICO CLIE..." teniendo la pared
+           medio vacia al lado. Aqui no compite con nada, y se entra por
+           delante, que es de donde viene el pasillo. */
+        puerta: poli(e, [u0, v1 - 66, 2], [u0, v1 - 22, 2], [u0, v1 - 22, H - 4], [u0, v1 - 66, H - 4]),
+        puertaMarco: poli(e, [u0, v1 - 70, 0], [u0, v1 - 18, 0], [u0, v1 - 18, H], [u0, v1 - 70, H]),
+        /* Dos cuadros en la pared izquierda. Decoracion, si -- pero es lo que
+           hace que una caja de color se lea como una habitacion. */
+        cuadros: [
+          poli(e, [u0, v0 + 26, H * 0.66], [u0, v0 + 62, H * 0.66], [u0, v0 + 62, H * 0.26], [u0, v0 + 26, H * 0.26]),
+          poli(e, [u0, v0 + 78, H * 0.60], [u0, v0 + 104, H * 0.60], [u0, v0 + 104, H * 0.30], [u0, v0 + 78, H * 0.30])
+        ],
+        /* EL NOMBRE VA PINTADO EN EL SUELO, en la franja libre del frente.
+           Las placas flotantes que habia antes no decian de que oficina
+           eran: "FACTURACION" aparecia sobre la recepcion y "VENTAS" entre
+           dos salas. Pintado dentro no hay confusion posible.
+           La matriz es la del plano horizontal: el eje u se proyecta en
+           (ex, ey) y el v en (-ex, ey). Su determinante es 2*ex*ey, positivo,
+           asi que el texto NO sale espejado -- el mismo cuidado que hubo que
+           tener con el cartel de la pared izquierda. */
+        suelo_texto: {
+          centro: iso(u0 + (u1 - u0) / 2, v1 - FR * 0.45, 0, e),
+          matriz: `${e.ex} ${e.ey} ${-e.ex} ${e.ey}`,
+          /* El cuerpo sale del ANCHO DE SU SALA, no de un numero fijo. Con 26
+             fijo, "ATENCION AL CLIENTE" se desbordaba y cruzaba tres oficinas
+             -- y el ancho util no es el mismo para una sala de un puesto que
+             para una de dos. Mismo criterio que el nombre de cada agente en
+             su cartel: se encoge la letra hasta que entra. */
+          cuerpo: Math.max(10, Math.min(FR * 0.62,
+            ((u1 - u0) - 30) / Math.max(1, String(g.area).length * 0.68)))
+        },
+        rotulo: iso((u0 + u1) / 2, v1 - 12, 0, e),
+        miembros: g.miembros.map((a, k) => ({
+          agente: a,
+          numero: k + 1,
+          pos: iso(sala.puestos[k].u, sala.puestos[k].v, 0, e),
+          p: sala.puestos[k]
+        }))
+      };
+    }).filter(Boolean).sort((a, b) => a.profundidad - b.profundidad);
+  });
+
+  /** El suelo del edificio: el rectangulo que abarca todas las salas. */
+  /* EL CORREDOR: el suelo del pasillo central, con su eje marcado. Se pinta
+     aparte del piso del edificio para que se lea como transito y no como
+     hueco -- un pasillo es un sitio por donde se pasa, no la ausencia de
+     oficinas. */
+  const corredor = $derived.by(() => {
+    const c = rej.corredor;
+    if (!c) return null;
+    const e = rej.ejes, m = (c.u0 + c.u1) / 2;
+    return {
+      suelo: poli(e, [c.u0, c.v0, 0], [c.u1, c.v0, 0], [c.u1, c.v1, 0], [c.u0, c.v1, 0]),
+      eje: `${punto(m, c.v0 + 16, 0, e)} ${punto(m, c.v1 - 16, 0, e)}`
+    };
+  });
+
+  const piso = $derived.by(() => {
+    const ss = rej.salas || [];
+    if (!ss.length) return null;
+    const m = 58;
+    return poli(rej.ejes,
+      [Math.min(...ss.map((x) => x.u0)) - m, Math.min(...ss.map((x) => x.v0)) - m, 0],
+      [Math.max(...ss.map((x) => x.u1)) + m, Math.min(...ss.map((x) => x.v0)) - m, 0],
+      [Math.max(...ss.map((x) => x.u1)) + m, Math.max(...ss.map((x) => x.v1)) + m, 0],
+      [Math.min(...ss.map((x) => x.u0)) - m, Math.max(...ss.map((x) => x.v1)) + m, 0]);
   });
 
   /* Donde esta cada puesto, por nombre. Lo necesita la capa de actividad:
@@ -122,11 +247,30 @@
   const posiciones = $derived.by(() => {
     /** @type {Record<string, {x:number,y:number}>} */
     const m = {};
-    rej.celdas.forEach((c, i) => {
-      const a = agentes[i];
-      if (a) m[a.nombre] = { x: c.x, y: c.y + LADO * rej.ejes.ey };
-    });
+    for (const sala of dibujo) {
+      for (const mi of sala.miembros) {
+        m[mi.agente.nombre] = { x: mi.pos[0], y: mi.pos[1] + LADO * rej.ejes.ey };
+      }
+    }
     return m;
+  });
+
+  $effect(() => {
+    if (!envoltura) return;
+    /* Se mide AL MONTAR y ademas se observa. El ResizeObserver no garantiza
+       una primera entrega --y en este repo ya hay medido que pierde avisos:
+       de cuatro cambios de tamano entregaba dos-- asi que sin la lectura
+       inicial el lienzo se queda en 0x0 y no se dibuja nada, aunque los
+       elementos SI esten en el DOM. Paso exactamente eso. */
+    const medir = () => {
+      const r = envoltura.getBoundingClientRect();
+      if (r.width && r.height) caja = { ancho: r.width, alto: r.height };
+    };
+    medir();
+    const ro = new ResizeObserver(medir);
+    ro.observe(envoltura);
+    const repaso = setInterval(medir, 500);
+    return () => { ro.disconnect(); clearInterval(repaso); };
   });
 
   const zonasPresentes = $derived(
@@ -253,23 +397,71 @@
            la del encaje automatico. El orden importa -- al reves, mover la
            vista escalaria tambien el desplazamiento. -->
       <g transform="translate({vista.x}, {vista.y}) scale({vista.k}) translate({encuadre.dx}, {encuadre.dy}) scale({encuadre.esc})">
-        {#each pintado as i (agentes[i]?.nombre ?? i)}
-          {#if agentes[i] && rej.celdas[i]}
-            <g class="celda" class:apagado={!pasa(agentes[i])}
-               transform="translate({rej.celdas[i].x}, {rej.celdas[i].y})">
-              <PuestoAgente
-                agente={agentes[i]}
-                numero={i + 1}
-                lado={LADO}
-                {entrada}
-                ejes={rej.ejes}
-                cambio={delta[agentes[i].nombre]}
-                {ahora}
-                alSeleccionar={seleccionar}
-              />
+        <!-- El suelo del edificio. Lo que queda entre salas pasa a leerse
+             como PASILLO en vez de como fondo vacio: el hueco entre dos
+             oficinas solo es un pasillo si hay piso debajo. -->
+        {#if piso}
+          <polygon points={piso} fill="#EDF1F6" stroke="#D8DFE8" stroke-width="1.5" />
+        {/if}
+        {#if corredor}
+          <polygon points={corredor.suelo} fill="#FFFFFF" fill-opacity=".72"
+            stroke="#C7D1DE" stroke-width="1.4" />
+          <polyline points={corredor.eje} fill="none" stroke="#C7D1DE"
+            stroke-width="2" stroke-dasharray="9 11" opacity=".75" />
+        {/if}
+
+        <!-- Cada sala con sus escritorios dentro. Se pinta de atras hacia
+             adelante: en isometrica, la sala de delante tapa a la de atras. -->
+        {#each dibujo as sala (sala.clave)}
+          <g class="sala" class:principal={sala.principal}>
+            <polygon points={sala.suelo} fill={sala.color} fill-opacity=".13"
+              stroke={sala.color} stroke-width="1.4" stroke-opacity=".45" />
+            <polygon points={sala.fondo} fill={tono(sala.color, 0.42)} />
+            <polygon points={sala.izq} fill={tono(sala.color, 0.28)} />
+            <polygon points={sala.cantoFondo} fill={tono(sala.color, 0.60)} />
+            <polygon points={sala.cantoIzq} fill={tono(sala.color, 0.52)} />
+
+            <!-- la puerta, en la pared izquierda -->
+            <polygon points={sala.puertaMarco} fill={tono(sala.color, -0.18)} />
+            <polygon points={sala.puerta} fill="#F7F9FC" />
+            <!-- cuadros en la pared izquierda -->
+            {#each sala.cuadros as c, ci (ci)}
+              <polygon points={c} fill="#FFFFFF" fill-opacity=".82" stroke={tono(sala.color, -0.1)} stroke-width="1" />
+            {/each}
+
+            <!-- el nombre, pintado en el suelo de SU oficina -->
+            <g transform="matrix({sala.suelo_texto.matriz} {sala.suelo_texto.centro[0]} {sala.suelo_texto.centro[1]})">
+              <text x="0" y="0" text-anchor="middle" fill={tono(sala.color, -0.4)}
+                font-size={sala.suelo_texto.cuerpo} font-weight="800"
+                letter-spacing={sala.suelo_texto.cuerpo * 0.1}
+                opacity=".8">{sala.area.toUpperCase()}</text>
             </g>
-          {/if}
+
+            {#each sala.miembros as m (m.agente.nombre)}
+              <g class="celda" class:apagado={!pasa(m.agente)}
+                 transform="translate({m.pos[0]}, {m.pos[1]})">
+                <PuestoAgente
+                  agente={m.agente}
+                  numero={m.numero}
+                  lado={LADO}
+                  {entrada}
+                  ejes={rej.ejes}
+                  cambio={delta[m.agente.nombre]}
+                  {ahora}
+                  enSala={true}
+                  alSeleccionar={seleccionar}
+                />
+              </g>
+            {/each}
+
+          </g>
         {/each}
+
+        <!-- LOS ROTULOS, TODOS AL FINAL. Dibujados dentro de cada sala, la
+             sala de delante los tapaba a medias: se leia "...CTURACION" y
+             "...ION AL CLIENTE". Pintados al final quedan por encima de todo
+             y ninguno pierde su nombre. -->
+
         <ActividadViva eventos={panorama?.eventos || []} {posiciones} lado={LADO} />
       </g>
     </svg>
@@ -301,8 +493,8 @@
         Sin recepción declarada
       </span>
     {/if}
-    {#each zonasPresentes as z (z)}
-      <span class="zona"><i style="background:{ZONAS[z].color}"></i>{ZONAS[z].rotulo}</span>
+    {#each areasPresentes as a (a)}
+      <span class="zona"><i style="background:{colorDeArea(a, areasPresentes)}"></i>{a}</span>
     {/each}
     <span class="crece"></span>
     {#if segundosDesdeLaLectura != null}
