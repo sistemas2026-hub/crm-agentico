@@ -372,8 +372,23 @@ def _esquema_evaluacion(config, rol_cfg=None) -> dict:
     # comentario mas arriba): siendo opcionales salieron vacios en las 52
     # conversaciones escaladas que hay. Con escalar=false la salida segura es
     # la cadena vacia, que db.py ya guarda como NULL.
+    # 'motivo' VA OBLIGATORIO, y no es burocracia: el motivo elige el texto
+    # que recibe el cliente mientras espera (escalamiento.mensajes_por_motivo,
+    # uno distinto para cada uno). Sin el, le llega el generico.
+    #
+    # Estaba opcional y el 23/09/2026 se vio la consecuencia en produccion:
+    # una conversacion escalo con {"motivo": null}. El modelo decidio bien
+    # --una baja la ve una persona-- pero ninguno de los motivos del menu
+    # nombra una baja, asi que no eligio ninguno y el esquema lo dejo pasar.
+    # La conversacion quedo en la cola humana sin poder decir por que.
+    #
+    # Obligarlo no le pone palabras en la boca: cuando 'escalar' es false su
+    # propia descripcion dice que se ignore, y nadie lo lee. Lo que cambia es
+    # que cuando SI escala tiene que nombrarlo, aunque sea con el mas cercano
+    # -- y ese "mas cercano" es el dato que dice si al vocabulario del tenant
+    # le falta un motivo. Un null no dice nada.
     requeridos = ["escalar", "etiqueta", "resuelta",
-                  "no_se_pudo_comprobar", "siguiente_paso"]
+                  "no_se_pudo_comprobar", "siguiente_paso", "motivo"]
     if config.manual.casos:
         requeridos.append("caso_manual")
 
@@ -778,7 +793,14 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
                                      etiqueta, necesita_humano,
                                      resumen=resumen,
                                      no_comprobado=no_se_pudo_comprobar,
-                                     siguiente_paso=siguiente_paso)
+                                     siguiente_paso=siguiente_paso,
+                                     # B4: si no hubo caso, la intencion queda
+                                     # encolada con el nombre CANONICO. Sin el
+                                     # no hay idempotencia posible -- es lo
+                                     # unico con lo que el reconciliador puede
+                                     # preguntar despues "¿esto ya se creo?".
+                                     nombre_caso=payload["name"],
+                                     descripcion_caso=asunto)
         if not caso_id:
             registrar("escalamiento", "el CRM acepto el caso pero no devolvio id -- no queda en "
                                       "la cola de nadie",

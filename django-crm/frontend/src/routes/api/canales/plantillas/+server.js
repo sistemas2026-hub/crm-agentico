@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * Las plantillas que Meta tiene aprobadas para esta cuenta, con su texto.
@@ -24,7 +25,7 @@ export async function GET({ locals, fetch }) {
   }
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     return json({ error: 'Asistente no configurado.' }, { status: 500 });
   }

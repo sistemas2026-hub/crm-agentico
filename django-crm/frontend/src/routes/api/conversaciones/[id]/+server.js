@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * Proxy hacia el motor para continuar una conversación abierta desde la
@@ -17,12 +18,16 @@ export async function POST({ request, locals, fetch }) {
   }
 
   const { mensaje, usuario_externo, rol_efectivo, canal } = await request.json();
-  if (!mensaje || !usuario_externo) {
-    return json({ error: 'Falta mensaje o usuario_externo' }, { status: 400 });
+  // Sin canal no se adivina. Antes caía en 'whatsapp-simulado', que
+  // re-etiquetaba en silencio cualquier hilo; y un hilo real de WhatsApp lo
+  // rechaza el motor (403): /chat no le escribe al cliente, solo guardaría un
+  // mensaje que el cliente no mandó (SPEC/CONTRATO_RELEVO_IA_HUMANO.md, D3).
+  if (!mensaje || !usuario_externo || !canal) {
+    return json({ error: 'Falta mensaje, usuario_externo o canal' }, { status: 400 });
   }
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });
@@ -37,10 +42,9 @@ export async function POST({ request, locals, fetch }) {
         rol: rol_efectivo || 'cliente_final',
         identificador_sesion: usuario_externo,
         mensaje,
-        // Se preserva el canal original de la conversacion en vez de
-        // asumir uno: no se re-etiqueta un hilo real como simulado o
-        // viceversa solo por responder desde acá.
-        canal: canal || 'whatsapp-simulado'
+        // El canal original de la conversacion, tal cual: el motor es quien
+        // decide si ese canal se puede atender por /chat.
+        canal
       })
     });
     const datos = await resp.json();
@@ -68,7 +72,7 @@ export async function DELETE({ params, locals, fetch }) {
   }
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });

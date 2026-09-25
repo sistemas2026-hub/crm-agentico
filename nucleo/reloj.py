@@ -41,6 +41,20 @@ Los dos trabajos se comportan distinto ante una ejecucion doble simultanea:
                    a la vez converjan al mismo Case; la segunda choca contra la
                    restriccion en vez de duplicar.
 
+  cerrar_inactivas_de_ia
+                   SI, y por construccion. Su consulta de elegibilidad exige
+                   'ticket_operativo is null' y 'caso_id is null', asi que
+                   'cerrar_todo' no hace ninguna llamada externa: lo unico que
+                   ejecuta es 'transiciones.cerrar', que en la segunda pasada
+                   devuelve 'ya_cerrada' y no escribe. Es justo la propiedad
+                   que le falta a 'cerrar_vencidas', y por eso aquella se
+                   quedo afuera y esta no.
+
+                   La guarda es estructural, no incidental: el dia que se
+                   escribio, las 147 elegibles tenian 0 tickets y 0 casos. Se
+                   exige igual -- una que aparezca con ticket pertenece a las
+                   reglas del otro barrido.
+
   cerrar_vencidas  NO. Auditado el 10/09/2026 leyendo el camino completo:
                    'conversaciones_sin_respuesta' filtra por
                    "estado <> 'cerrada'", asi que en pasadas SUCESIVAS si es
@@ -99,11 +113,17 @@ verdad ("¿este proceso puede resolverla?") sin exponer ningun valor, y
 
 QUE HACE Y QUE NO
 -----------------
-Solo los dos trabajos que ya existian y estaban aprobados: cerrar vencidas e
-importar tickets. Esta version no agrega ninguna politica nueva de ciclo de
-vida. Un proceso que "corre cosas periodicas" es un cajon comodo, y lo que
-entre aca sin discutirse va a correr solo en produccion sin que nadie lo haya
-mirado.
+Tres trabajos: cerrar vencidas, importar tickets, y cerrar las inactivas que
+atendio solo el asistente. Un proceso que "corre cosas periodicas" es un cajon
+comodo, y lo que entre aca sin discutirse va a correr solo en produccion sin
+que nadie lo haya mirado -- asi que cada uno se anota con por que entro.
+
+El tercero se agrego el 22/09/2026, aprobado explicitamente. Es una politica
+nueva de ciclo de vida y por eso no entro solo: 'conversaciones_sin_respuesta'
+exige 'escalada_a_humano', asi que las conversaciones que la IA resolvia sola
+NO las cerraba nadie nunca. Medido contra produccion ese dia: 151 abiertas en
+ese estado, 145 sin un mensaje en mas de una semana, y de las 4 creadas ese
+dia, las 4.
 ================================================================================
 """
 
@@ -121,6 +141,7 @@ if str(RAIZ) not in sys.path:
 
 from nucleo.config import fuente
 from nucleo.observabilidad.registro import registrar
+from nucleo.seguridad import interruptor
 from nucleo.seguimiento import importacion, importacion_io, operativo
 
 # Cuando se intento importar por ultima vez en cada tenant. Vive en memoria a
@@ -224,6 +245,36 @@ def _vencimientos(config, tenant: str, seco: bool) -> dict:
     return {"plazo_horas": horas, **operativo.cerrar_vencidas(config, tenant)}
 
 
+def _inactivas_de_ia(config, tenant: str, seco: bool) -> dict:
+    """
+    Cierra las que atendio SOLO el asistente y quedaron mudas.
+
+    HERMANA DE '_vencimientos', Y LA DIFERENCIA IMPORTA
+    ---------------------------------------------------
+    Aquella solo alcanza a las ESCALADAS. Las que la IA resolvio sola no las
+    cerraba nadie: medido contra produccion el 22/09/2026, 151 asi, 145 sin un
+    mensaje en mas de una semana, y de las 4 creadas ese dia, las 4.
+
+    POR QUE ESTA SI PUEDE VIVIR EN EL RELOJ
+    ---------------------------------------
+    La cabecera de este archivo explica que 'cerrar_vencidas' NO esta aca
+    porque dos pasadas simultaneas publican el texto de cierre dos veces en el
+    ticket del proveedor. Esta exige 'ticket_operativo is null' y 'caso_id is
+    null' en su propia consulta, asi que no hace NINGUNA llamada externa: lo
+    unico que ejecuta es 'transiciones.cerrar', que en la segunda pasada
+    devuelve 'ya_cerrada' y no escribe.
+
+    EL SECO NO REIMPLEMENTA NADA
+    ----------------------------
+    Llama al MISMO barrido con 'simular=True', que ya informa las dos cohortes
+    por separado. '_vencimientos' arma su seco a mano porque su barrido no
+    tiene modo simulacion; este si, y duplicar la regla aca seria tener dos
+    motores -- uno que decide y otro que explica-- que terminan discrepando
+    justo cuando hace falta confiar en el segundo.
+    """
+    return operativo.cerrar_inactivas_de_ia(config, tenant, simular=seco)
+
+
 def _importacion(config, tenant: str, seco: bool, ahora: datetime) -> dict:
     """
     El subsistema de importacion entero: descubrir e importar (B), y despues
@@ -297,6 +348,48 @@ def una_pasada(seco: bool = False) -> list[dict]:
             salida.append(r)
             continue
 
+        # EL INTERRUPTOR DE AUTONOMIA, ANTES DE CUALQUIER TRABAJO.
+        #
+        # Los dos trabajos de este proceso son autonomos por definicion: nadie
+        # los pidio, corren porque llego la hora. Cierran conversaciones,
+        # contestan tickets del proveedor y crean casos en el CRM sin que haya
+        # una persona mirando -- es exactamente lo que el interruptor existe
+        # para poder detener.
+        #
+        # El corte es POR TENANT y no por proceso: una empresa detenida no
+        # puede dejar sin atender a las demas. El interruptor del PROCESO
+        # entero ya existe aparte y es otra cosa ('RELOJ_HABILITADO', una
+        # decision de despliegue, ver el encabezado de este archivo).
+        #
+        # En seco se informa el estado pero NO se corta: la gracia de --dry-run
+        # es ver que HARIA, y ocultarlo cuando el interruptor esta tirado seria
+        # esconder justo lo que hay que revisar antes de reactivar.
+        try:
+            veredicto = interruptor.veredicto(tenant)
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            # Fail-closed: si ni siquiera se pudo preguntar, no se trabaja.
+            veredicto = None
+            r["autonomia"] = {"estado": "desconocido",
+                              "error": f"{type(e).__name__}: {e}"}
+        if veredicto is not None:
+            r["autonomia"] = {"estado": veredicto.estado,
+                              "motivo": veredicto.motivo}
+        if not (veredicto and veredicto.permitido) and not seco:
+            porque = (r["autonomia"].get("motivo")
+                      or r["autonomia"].get("error") or "sin motivo")
+            registrar("reloj", "autonomia detenida: no se ejecuta ningun trabajo",
+                      tenant=tenant, motivo=porque)
+            # Las dos claves se informan igual, diciendo que NO se hicieron.
+            # Omitirlas cambiaria la forma del informe del ciclo segun el
+            # estado del interruptor, y quien lo lee (o lo prueba) tendria que
+            # adivinar si falta la clave porque no se hizo o porque se rompio.
+            saltado = {"omitido": "autonomia detenida", "motivo": porque}
+            r["vencimientos"] = dict(saltado)
+            r["importacion"] = dict(saltado)
+            registrar("reloj", "trabajo omitido por el interruptor", tenant=tenant)
+            salida.append(r)
+            continue
+
         if seco:
             # La ficha del tenant: lo que hace falta para decidir si encender.
             # Solo en seco -- en una pasada de verdad seria una consulta de
@@ -312,6 +405,16 @@ def una_pasada(seco: bool = False) -> list[dict]:
             r["vencimientos"] = {"error": f"{type(e).__name__}: {e}"}
             registrar("reloj", "los vencimientos fallaron", tenant=tenant, error=e)
 
+        # Su propio try/except, como las otras dos: que el cierre de las
+        # inactivas falle no puede dejar sin correr la importacion, ni al
+        # reves. Ver la lista de aislamientos en la docstring de arriba.
+        try:
+            r["inactivas_ia"] = _inactivas_de_ia(config, tenant, seco)
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            r["inactivas_ia"] = {"error": f"{type(e).__name__}: {e}"}
+            registrar("reloj", "el cierre de inactivas de la IA fallo",
+                      tenant=tenant, error=e)
+
         try:
             r["importacion"] = _importacion(config, tenant, seco, ahora)
         except (Exception, SystemExit) as e:                     # noqa: BLE001
@@ -324,6 +427,7 @@ def una_pasada(seco: bool = False) -> list[dict]:
         registrar("reloj", "tenant", tenant=tenant,
                   credenciales=r.get("credenciales"),
                   vencimientos=_solo_contadores(r.get("vencimientos")),
+                  inactivas_ia=_solo_contadores(r.get("inactivas_ia")),
                   importacion=_solo_contadores(r.get("importacion")))
         salida.append(r)
     duro = (datetime.now(timezone.utc) - ahora).total_seconds()
@@ -350,15 +454,84 @@ def _solo_contadores(datos) -> dict | None:
     return salida
 
 
+def _backfill(argv: list[str], seco: bool) -> int:
+    """
+    El backlog historico, a mano y de a lotes.
+
+    POR QUE NO CORRE CON EL RELOJ
+    -----------------------------
+    Porque el reloj corre cada 60 minutos. Un lote de 10 por ciclo son 240
+    cierres por dia: las 147 historicas se irian en menos de un dia, que es
+    exactamente lo que las cohortes existen para evitar. Ir mas despacio no
+    arregla nada si igual va solo -- lo que hace falta es que alguien decida
+    cada tanda.
+
+    No se programa una cadencia. Se teclea, se mira el resultado, y se vuelve
+    a teclear si corresponde.
+
+    Pide el interruptor IGUAL: 'cierre_inactivas_ia.backfill_habilitado'
+    autoriza y el comando ejecuta. Hacen falta los dos, porque un comando se
+    puede teclear por costumbre y la autorizacion es una decision que quedo
+    escrita en la config y se puede revisar en git.
+    """
+    lote = None
+    if "--limit" in argv:
+        i = argv.index("--limit")
+        if i + 1 >= len(argv):
+            registrar("reloj", "--limit necesita un numero")
+            return 2
+        try:
+            lote = int(argv[i + 1])
+        except ValueError:
+            registrar("reloj", "--limit necesita un numero")
+            return 2
+        if lote < 1:
+            registrar("reloj", "--limit tiene que ser mayor que cero")
+            return 2
+
+    salida = []
+    for tenant in tenants_conocidos():
+        try:
+            config = fuente.cargar(tenant, RAIZ)
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            registrar("reloj", "no se pudo leer la config", tenant=tenant, error=e)
+            continue
+        try:
+            r = operativo.cerrar_inactivas_de_ia(
+                config, tenant, simular=seco, backlog=True, lote=lote)
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            registrar("reloj", "el backfill fallo", tenant=tenant, error=e)
+            continue
+        registrar("reloj", "backfill", tenant=tenant, **(_solo_contadores(r) or {}))
+        salida.append(r)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    desconocidos = [a for a in argv if a not in ("--once", "--dry-run")]
+    conocidos = ("--once", "--dry-run", "--backfill-inactivas-ia", "--limit")
+    desconocidos = [a for i, a in enumerate(argv)
+                    if a not in conocidos
+                    # el valor de --limit no es un argumento suelto
+                    and not (i > 0 and argv[i - 1] == "--limit")]
     if desconocidos:
-        registrar("reloj", "argumentos desconocidos: solo --once y --dry-run",
+        registrar("reloj", "argumentos desconocidos: solo --once, --dry-run, "
+                           "--backfill-inactivas-ia y --limit N",
                   cuantos=len(desconocidos))
         return 2
     una_vez = "--once" in argv
     seco = "--dry-run" in argv
+
+    # EL BACKFILL ES OTRO PROGRAMA, no una variante del ciclo. Sale por aca
+    # antes de mirar 'RELOJ_HABILITADO': ese interruptor gobierna la cadencia
+    # automatica, y esto es justamente lo que NO tiene cadencia. Frenar el
+    # reloj no deberia impedir drenar el backlog a mano, ni al reves.
+    if "--backfill-inactivas-ia" in argv:
+        if una_vez:
+            registrar("reloj", "--backfill-inactivas-ia no se combina con --once: "
+                               "no es una pasada del reloj, es otra cosa")
+            return 2
+        return _backfill(argv, seco)
 
     if seco and not una_vez:
         # Un bucle "en seco" para siempre no le sirve a nadie y es una trampa:

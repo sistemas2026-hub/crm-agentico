@@ -135,6 +135,25 @@ SECCIONES_EDITABLES = (
     # ahi hay algo que solo la interfaz escribe.
     "llm",                # _mutar_tarifa / _mutar_saldo_proveedor
     "limites",            # _mutar_tope_gasto
+    # 'importacion_tickets' NO la escribe ningun mutador de este archivo: la
+    # escribe 'cli/activar_importacion.py' directo contra la base. Igual va
+    # aca, por el mismo motivo que 'llm' y 'limites' -- el criterio de esta
+    # lista no es "quien la edita" sino "existe solo en la base, y el YAML no
+    # tiene con que reponerla".
+    #
+    # Medido el 22/09/2026 contra produccion, ANTES de que pasara: la base
+    # tenia 6 filtros de asunto, 6 destinos de enrutamiento, el departamento,
+    # los estados de descubrimiento y reconciliacion, las ventanas y la
+    # cuenta de API; el YAML no declara la seccion, asi que una carga la
+    # habria reemplazado por el default del esquema -- 'cada_horas: 0', que
+    # es APAGADO. La importacion de tickets se habria detenido sin un solo
+    # mensaje, que es la misma forma de fallar que el seguimiento de entregas
+    # de WhatsApp (D17): nada se rompe, simplemente deja de pasar.
+    #
+    # Era la UNICA seccion de la config de produccion que no cubria ninguna
+    # de las dos listas. Comprobado enumerando las claves de la base contra
+    # SECCIONES_EDITABLES + TenantConfig.SINCRONIZADOS.
+    "importacion_tickets",
 )
 
 
@@ -145,6 +164,60 @@ class ErrorEdicion(ValueError):
 # =============================================================================
 #  VALIDACION Y ESCRITURA
 # =============================================================================
+
+# La rama que DESPLIEGA. Pushear a cualquier otra no pone una sola linea en
+# produccion, asi que comparar contra el upstream de la rama actual no mide lo
+# que estas guardas creen medir -- ver el comentario de _ref_de_despliegue().
+#
+# SIN VALOR POR DEFECTO, y no por comodidad: el nombre de la rama de
+# despliegue es de la INSTALACION, no del motor -- otra empresa despliega
+# desde 'main' o desde 'produccion'. Escribirlo aca ponia el nombre de un
+# proveedor concreto dentro de nucleo/, que es justo lo que la guarda de
+# arquitectura prohibe (y lo cazo el 22/09/2026, al primer intento).
+#
+# Sin la variable la comprobacion cae a '@{u}', que es la version debil: por
+# eso 'problemas_de_alineacion_git()' AVISA cuando no esta configurada, en vez
+# de degradarse en silencio. Una guarda que se debilita sin decirlo es peor
+# que no tenerla, porque se confia en ella igual.
+VAR_RAMA_DESPLIEGUE = "RAMA_DESPLIEGUE"
+
+
+def _ref_de_despliegue(raiz) -> str | None:
+    """
+    La referencia remota contra la que hay que comparar, o None si no existe.
+
+    POR QUE NO '@{u}'
+    -----------------
+    Estas guardas existen para contestar "¿el codigo que entiende esta config
+    ya esta donde va a leerla?". '@{u}' contesta otra cosa: si llego al remoto
+    de LA RAMA ACTUAL. En una rama de trabajo eso se satisface con un push que
+    no despliega nada.
+
+    Medido el 22/09/2026: con cinco commits en 'feature/bandeja-relevo', la
+    guarda bloqueo correctamente; se pusheo esa rama a SU remoto y la guarda
+    paso, con el codigo todavia fuera de produccion. Esa vez no hizo dano --
+    los commits eran de frontend-- pero el mismo movimiento con un campo nuevo
+    de esquema habria dejado a produccion con una config que su propio codigo
+    rechaza, que es exactamente el incidente del 03/09/2026 que estas guardas
+    documentan.
+
+    Si la rama de despliegue no existe en este repositorio (un clon parcial,
+    otra instalacion), se cae a '@{u}' -- que es peor que nada pero mejor que
+    no comprobar.
+    """
+    import os
+    import subprocess
+    rama = os.environ.get(VAR_RAMA_DESPLIEGUE, "").strip()
+    if not rama:
+        return "@{u}"
+    ref = f"origin/{rama}"
+    try:
+        r = subprocess.run(["git", "rev-parse", "--verify", "--quiet", ref],
+                           cwd=raiz, capture_output=True, text=True, timeout=10)
+    except Exception:                                    # noqa: BLE001
+        return "@{u}"
+    return ref if r.returncode == 0 else "@{u}"
+
 
 def commits_sin_empujar() -> int:
     """Cuantos commits locales todavia no estan en el remoto.
@@ -160,9 +233,11 @@ def commits_sin_empujar() -> int:
     """
     import subprocess
     try:
+        raiz = Path(__file__).resolve().parents[2]
+        ref = _ref_de_despliegue(raiz)
         salida = subprocess.run(
-            ["git", "rev-list", "--count", "@{u}..HEAD"],
-            cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, timeout=10)
+            ["git", "rev-list", "--count", f"{ref}..HEAD"],
+            cwd=raiz, capture_output=True, text=True, timeout=10)
     except Exception:                                    # noqa: BLE001
         return 0
     if salida.returncode != 0:
@@ -232,7 +307,11 @@ def commits_atrasados() -> int | None:
     if hay_repo is None or hay_repo.returncode != 0:
         return 0
 
-    salida = _git("rev-list", "--count", "HEAD..@{u}")
+    # Misma referencia que commits_sin_empujar(): la rama que DESPLIEGA, no el
+    # upstream de la rama actual. Un commit del remoto que esta copia no tiene
+    # solo importa si ese commit ya esta corriendo en produccion.
+    ref = _ref_de_despliegue(raiz)
+    salida = _git("rev-list", "--count", f"HEAD..{ref}")
     if salida is None or salida.returncode != 0:
         return None
     try:
@@ -254,16 +333,42 @@ def problemas_de_alineacion_git() -> list[str]:
     (SystemExit tiene sentido ahi) y la otra corre dentro del proceso
     servido, donde SystemExit lo tumbaria entero.
     """
+    import os
+    import subprocess
+
     adelante = commits_sin_empujar()
     atras = commits_atrasados()
 
     problemas: list[str] = []
+    # Sin RAMA_DESPLIEGUE la comprobacion mira el upstream de la rama actual,
+    # que se satisface con un push que no despliega nada. Se dice, en vez de
+    # dejar creer que la guarda es mas fuerte de lo que es.
+    #
+    # Solo si HAY repositorio: en el contenedor productivo no hay ninguno, y
+    # ahi este desfase no puede existir (ver commits_atrasados()). Avisar ahi
+    # bloquearia toda edicion desde la interfaz, que es exactamente el
+    # incidente del 08/09/2026.
+    if not os.environ.get(VAR_RAMA_DESPLIEGUE, "").strip():
+        try:
+            hay_repo = subprocess.run(
+                ["git", "rev-parse", "--git-dir"],
+                cwd=Path(__file__).resolve().parents[2],
+                capture_output=True, text=True, timeout=10).returncode == 0
+        except Exception:                                # noqa: BLE001
+            hay_repo = False
+        if hay_repo:
+            problemas.append(
+                f"falta {VAR_RAMA_DESPLIEGUE} en el entorno -- sin ella solo se "
+                f"comprueba contra el remoto de la rama actual, y empujar a una "
+                f"rama de trabajo no despliega nada. Poner el nombre de la rama "
+                f"que despliega (ej. {VAR_RAMA_DESPLIEGUE}=main) en el .env.")
     if adelante:
         problemas.append(
-            f"esta copia tiene {adelante} commit(s) locales que todavia no "
-            f"llegaron al remoto -- si esta config usa un campo del esquema "
-            f"que solo existe en esos commits, el motor desplegado no va a "
-            f"poder leerla.")
+            f"esta copia tiene {adelante} commit(s) que todavia no estan en "
+            f"la rama que despliega -- si esta config usa un campo del "
+            f"esquema que solo existe en esos commits, el motor desplegado no "
+            f"va a poder leerla y deja de atender. Empujar a otra rama no "
+            f"alcanza: lo que importa es que el codigo este CORRIENDO.")
     if atras is None:
         problemas.append(
             "no se pudo determinar si esta copia esta al dia con el remoto "
@@ -271,7 +376,8 @@ def problemas_de_alineacion_git() -> list[str]:
             "la duda, no se procede.")
     elif atras:
         problemas.append(
-            f"esta copia esta {atras} commit(s) atras del remoto -- si un "
+            f"esta copia esta {atras} commit(s) atras de lo que corre en "
+            f"produccion -- si un "
             f"commit mas reciente cambio el esquema (por ejemplo, quito un "
             f"campo que esta copia todavia declara valido), escribir esta "
             f"config puede reintroducir en produccion algo que el codigo "
@@ -977,6 +1083,47 @@ def guardar_plazo_visita_tecnica(tenant: str, dias: int) -> TenantConfig:
     if dias < 1 or dias > 30:
         raise ErrorEdicion("el plazo tiene que ser entre 1 y 30 dias.")
     return _editar(tenant, lambda doc: _mutar_plazo_visita_tecnica(doc, dias))
+
+
+def guardar_ajustes_bandeja(tenant: str, sla_toma_minutos: int,
+                            umbral_rx_dbm: float | None) -> TenantConfig:
+    """
+    Los dos numeros que la Bandeja usa para emitir un VEREDICTO, y que cada
+    empresa tiene que poder poner desde la pantalla.
+
+    POR QUE SE EDITAN Y NO SE FIJAN EN CODIGO
+    -----------------------------------------
+    'sla_toma_minutos'  cuanto puede esperar una escalada sin dueño. Un ISP
+                        con guardia 24 h y uno que atiende de 8 a 18 no
+                        toleran lo mismo.
+    'umbral_rx_dbm'     desde que potencia optica se considera atenuado el
+                        enlace. Depende de la planta de cada empresa --largo
+                        de los tramos, splitters, tipo de ONU-- y no de este
+                        software.
+
+    LOS DOS ADMITEN "SIN DEFINIR", y eso es parte del diseño: 0 y None hacen
+    que la pantalla muestre el dato SIN veredicto. Un valor por defecto
+    inventado seria peor, porque se veria igual que uno decidido.
+    """
+    if sla_toma_minutos < 0 or sla_toma_minutos > 1440:
+        raise ErrorEdicion("el plazo de toma tiene que estar entre 0 y 1440 minutos.")
+    if umbral_rx_dbm is not None and not (-40.0 <= umbral_rx_dbm <= 0.0):
+        # La potencia optica de recepcion es negativa y cuanto mas negativa,
+        # peor. Fuera de ese rango el numero no es un umbral: es un error de
+        # tipeo, y guardarlo haria que la pantalla marcara sano un enlace
+        # caido -- o al reves.
+        raise ErrorEdicion("el umbral óptico tiene que estar entre -40 y 0 dBm.")
+    return _editar(tenant, lambda doc: _mutar_ajustes_bandeja(
+        doc, sla_toma_minutos, umbral_rx_dbm))
+
+
+def _mutar_ajustes_bandeja(doc, sla_toma_minutos: int,
+                           umbral_rx_dbm: float | None) -> None:
+    doc["sla_toma_minutos"] = int(sla_toma_minutos)
+    if umbral_rx_dbm is None:
+        doc.pop("umbral_rx_dbm", None)
+    else:
+        doc["umbral_rx_dbm"] = float(umbral_rx_dbm)
 
 
 def guardar_canal_whatsapp(tenant: str, activo: bool,

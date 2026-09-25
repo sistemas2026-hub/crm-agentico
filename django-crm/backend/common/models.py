@@ -680,6 +680,17 @@ class Activity(BaseModel):
         ("Event", "Event"),
         ("Document", "Document"),
         ("Team", "Team"),
+        # Modulo 'operaciones' (M02/M09). Se declaran aca porque Activity es
+        # la bitacora de TODO el CRM: un entity_type sin declarar se guarda
+        # igual --Django valida 'choices' en formularios, no al guardar-- y
+        # queda divergiendo sin que nadie lo vea, que es como
+        # AsignacionTrabajo.rol termino con un 'tecnico_lider' que su propio
+        # modelo no documenta.
+        ("ActividadOperativa", "Actividad operativa"),
+        ("PropuestaSupervisor", "Propuesta del Supervisor NOC IA"),
+        #  M05-A. La incidencia tiene ciclo de vida propio, y sus transiciones
+        #  se auditan aqui como las de cualquier otra entidad del CRM.
+        ("NovedadOperativa", "Novedad / incidencia operativa"),
     )
 
     user = models.ForeignKey(

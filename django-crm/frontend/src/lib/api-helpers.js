@@ -6,6 +6,7 @@
  */
 
 import { env } from '$env/dynamic/private';
+import { describirError } from '$lib/observabilidad/privacidad.js';
 import { env as publicEnv } from '$env/dynamic/public';
 
 // This helper runs server-side (inside the frontend container in Docker),
@@ -147,7 +148,7 @@ export async function apiRequest(endpoint, options = {}, locals) {
     // Return JSON response
     return await response.json();
   } catch (error) {
-    console.error(`API request failed: ${method} ${endpoint}`, error);
+    console.error({ tipo: 'api_request_failed', method, endpoint: endpoint.split('?')[0], ...describirError(error) });
     throw error;
   }
 }

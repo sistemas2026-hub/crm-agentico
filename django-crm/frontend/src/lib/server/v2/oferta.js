@@ -14,15 +14,8 @@
  * Mismo puente que planes-venta.js hacia crm-agentico -- ver
  * GET /configuracion/oferta y los POST en nucleo/canales/api.py.
  */
-import { env } from '$env/dynamic/private';
 import { headersMotor } from './motor-headers.js';
-
-function destino() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
+import { destinoDelAsistente } from './tenant.js';
 
 /**
  * @typedef {{ nombre: string, activo: boolean, descripcion: string }} ServicioOfrecido
@@ -33,8 +26,8 @@ function destino() {
  * config del tenant, que el motor ya tiene en memoria.
  * @returns {Promise<{ servicios_ofrecidos: ServicioOfrecido[], parrilla_canales: string[] } | null>}
  */
-export async function leerOferta() {
-  const cfg = destino();
+export async function leerOferta(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return null;
   try {
     const resp = await fetch(
@@ -54,8 +47,8 @@ export async function leerOferta() {
  * deja de vender vuelve, y borrarlo pierde su descripcion.
  * @param {ServicioOfrecido[]} servicios
  */
-export async function guardarServicios(servicios) {
-  const cfg = destino();
+export async function guardarServicios(locals, fetch, servicios) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/servicios`, {
@@ -78,8 +71,8 @@ export async function guardarServicios(servicios) {
  * @param {File} archivo
  * @returns {Promise<{ parrilla_canales: string[], descartados: string[], total: number }>}
  */
-export async function subirParrilla(archivo) {
-  const cfg = destino();
+export async function subirParrilla(locals, fetch, archivo) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
 
   const cuerpo = new FormData();

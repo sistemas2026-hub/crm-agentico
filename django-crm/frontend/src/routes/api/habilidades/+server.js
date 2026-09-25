@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { destinoDelAsistente } from '$lib/server/v2/tenant.js';
 
 /**
  * Proxy hacia el motor para las habilidades: los procedimientos que un agente
@@ -17,21 +17,14 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  * que /api/agentes y /api/configuracion-guiada.
  */
 
-function cfg() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
-
 /** Gate comun: ADMIN autenticado y motor configurado. */
-function guardia(locals) {
+async function guardia(locals, fetch) {
   if (!locals.user) return json({ error: 'No autenticado' }, { status: 401 });
   if (locals.profile?.role !== 'ADMIN') {
     return json({ error: 'Solo un administrador puede ver los procedimientos.' },
       { status: 403 });
   }
-  if (!cfg()) {
+  if (!(await destinoDelAsistente(locals, fetch))) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });
   }
@@ -40,9 +33,9 @@ function guardia(locals) {
 
 /** @type {import('./$types').RequestHandler} */
 export async function GET({ locals, fetch, url }) {
-  const negado = guardia(locals);
+  const negado = await guardia(locals, fetch);
   if (negado) return negado;
-  const { baseUrl, tenant } = /** @type {any} */ (cfg());
+  const { baseUrl, tenant } = /** @type {any} */ (await destinoDelAsistente(locals, fetch));
 
   // 'huecos' no es una habilidad: es el analisis de que le falta a cada
   // agente. Se sirve por la misma ruta para no multiplicar proxies, pero
@@ -72,9 +65,9 @@ export async function GET({ locals, fetch, url }) {
  * el gate de ADMIN es identico en todas.
  */
 export async function POST({ locals, request, fetch }) {
-  const negado = guardia(locals);
+  const negado = await guardia(locals, fetch);
   if (negado) return negado;
-  const { baseUrl, tenant } = /** @type {any} */ (cfg());
+  const { baseUrl, tenant } = /** @type {any} */ (await destinoDelAsistente(locals, fetch));
 
   const cuerpo = await request.json().catch(() => ({}));
   const { accion, id, ...resto } = cuerpo ?? {};

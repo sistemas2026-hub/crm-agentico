@@ -2808,13 +2808,24 @@ herramientas:
       haya dicho su nombre completo. El motivo va TAL CUAL lo escribio
       el: no lo resumas, no lo reformules, no lo interpretes -- se guarda
       literal porque leido en conjunto es lo que dice por que se caen las
-      ventas.
+      ventas. Llamarla NO cancela en ese momento: queda PENDIENTE de
+      aprobacion de un colaborador. Dile al cliente que la cancelacion quedo
+      solicitada y que un colaborador la confirma -- nunca que ya se cancelo.
     base_url: http://backend:8000/api
     auth_ref: BOTTLECRM_API_TOKEN
     endpoint: /solicitudes/cancelar/
     metodo: POST
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-E (22/09/2026), EXCEPCION CONSERVADORA documentada en
+    # M04-M06_CIERRE_FASE_GOBIERNO.md: la evidencia de M06-D muestra que es
+    # IRREVERSIBLE (CANCELADA es un estado final, solicitudes/gestion.py) y
+    # que cierra en cascada el ticket de WispHub (solicitudes/entrega.py).
+    # Por eso exige aprobacion humana atada a la operacion exacta (puerta
+    # critica), como las R3/R4. Su clase historica (R2 en M10-A) no cambia.
+    aprobacion_humana: true
+    irreversible: true
+    plantilla_resumen: "Cancelar la solicitud de instalacion del documento {numero_documento}"
     roles_permitidos: [ventas]
     requeridos: [numero_documento, nombre_confirmado, motivo]
     filtros_verificados:
@@ -3040,6 +3051,12 @@ herramientas:
       tema -- no antes de verificar identidad, SALVO que el area de destino
       este marcada como que no la requiere (es alguien que todavia no es
       cliente), y no para preguntas generales que tu mismo resuelves.
+      SOBRE ESA CONDICION DE VERIFICAR ANTES, UNA SOLA EXCEPCION: si NO
+      tienes ninguna herramienta de verificacion, no te aplica -- deriva sin
+      pedirle documentos, que el area de destino es la que verifica. Si SI
+      tienes una herramienta de verificacion, esto no te exime de nada:
+      verificas como siempre, y si el cliente ya dio su cedula la usas con
+      tu herramienta en vez de volver a pedirsela.
       No sirve para lo que ninguna area puede resolver sola (reclamos
       formales, traslados): eso se sigue escalando a un humano, como
       siempre.
@@ -3447,6 +3464,13 @@ herramientas:
       codigo cuando alguien responde desde la pantalla del ticket.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-E (22/09/2026), EXCEPCION CONSERVADORA: M06-D la dejo INDETERMINADA
+    # (no hay evidencia de si WispHub notifica al cliente ni de si lo que
+    # escribe se puede retirar). Hasta tener esa evidencia NO puede salir
+    # por la puerta autonoma: 'aprobacion_humana' hace que la frontera la
+    # frene (APROBACION_HUMANA_REQUERIDA). Por la puerta humana -- una
+    # persona que responde desde la pantalla -- sigue funcionando igual.
+    aprobacion_humana: true
     roles_permitidos: [soporte]
     base_url: https://api.wisphub.io
     endpoint: /api/tickets/{id_ticket}/respuesta/
@@ -3471,6 +3495,13 @@ herramientas:
       llames tu: la ejecuta el codigo cuando el caso termina.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-E (22/09/2026), EXCEPCION CONSERVADORA: M06-D la dejo INDETERMINADA
+    # (no hay evidencia de si WispHub notifica al cliente ni de si lo que
+    # escribe se puede retirar). Hasta tener esa evidencia NO puede salir
+    # por la puerta autonoma: 'aprobacion_humana' hace que la frontera la
+    # frene (APROBACION_HUMANA_REQUERIDA). Por la puerta humana -- una
+    # persona que responde desde la pantalla -- sigue funcionando igual.
+    aprobacion_humana: true
     roles_permitidos: [soporte]
     base_url: https://api.wisphub.io
     endpoint: /api/tickets/{id_ticket}/respuesta/
@@ -3493,6 +3524,9 @@ herramientas:
 
   - nombre: crear_ticket_caso
     tipo: http
+    # Capacidad de la cola (B4): el ticket que respalda una escalada. El
+    # reconciliador le embebe un DEXTER_REF en la descripcion.
+    crea_ticket_operativo: true
     multipart: true
     descripcion: >
       Deja el caso anotado en WispHub para que lo trabaje una persona. NO la
@@ -3583,6 +3617,9 @@ herramientas:
   # el historico. Y mas de dos meses responde HTTP 400.
   - nombre: listar_tickets_recientes
     tipo: http
+    # Capacidad de la cola (B4): recuperar un ticket por su DEXTER_REF
+    # barriendo una ventana, cuando el id se perdio (Q2.1).
+    lista_tickets: true
     descripcion: >
       Lista los tickets de WispHub creados dentro de una ventana de fechas.
       NO la llames tu: la ejecuta el importador de tickets.
@@ -3787,6 +3824,8 @@ herramientas:
 
   - nombre: consultar_ticket_por_id
     tipo: http
+    # Capacidad de la cola (B4): leer antes de cerrar.
+    lee_ticket: true
     descripcion: >
       Trae UN ticket de WispHub por su numero. NO la llames tu: la ejecuta el
       importador para reconciliar un ticket que ya tiene caso.
@@ -4125,9 +4164,22 @@ herramientas:
       (necesitas su id_factura). Si el colaborador menciona la forma de
       pago por nombre, resolvela primero con consultar_formas_pago -- no
       inventes el ID. 'accion' decide si ademas de registrar el pago se
-      reactiva el servicio del cliente.
+      reactiva el servicio del cliente. Queda PENDIENTE de aprobacion
+      humana -- decile al colaborador que el pago todavia NO se registro
+      y que alguien tiene que aprobarlo.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-A (21/09/2026): el dinero del cliente exige aprobacion por
+    # operacion. Hasta aca era autonoma a proposito (PRD 8.6); se decidio
+    # cerrar la brecha R4 que dejo abierta M10-A. 'fecha_pago' se resuelve
+    # al PROPONER, no al aprobar: queda la hora en que el colaborador lo
+    # registro, que es la mas cercana al pago real. Con 'accion' = 1 la
+    # reactivacion del servicio tambien espera a la aprobacion.
+    aprobacion_humana: true
+    # R4: la aprobacion se ata a ESTA factura y ESTOS argumentos, y pasa por
+    # la cadena entera (frontera.critica). Ver nucleo/seguridad/aprobacion.py.
+    irreversible: true
+    plantilla_resumen: "Registrar pago de la factura {id} (accion {accion}: 0 = solo registrar, 1 = registrar y reactivar el servicio)"
     roles_permitidos: [facturacion]
     base_url: https://api.wisphub.io
     endpoint: /api/facturas/{id}/registrar-pago/
@@ -4181,18 +4233,59 @@ herramientas:
       fecha limite. Necesitas el id_factura (de consultar_facturas o
       consultar_factura_detalle). Queda PENDIENTE de aprobacion humana
       -- decile al colaborador que todavia no se registro, alguien tiene
-      que aprobarla.
+      que aprobarla. NO reconecta ni reactiva el servicio: si te lo
+      piden, decilo asi y derivalo, no lo prometas.
     solo_lectura: false
     requiere_confirmacion: true
     aprobacion_humana: true
+    # M06-C (21/09/2026): R4, la aprobacion se ATA a esta promesa exacta --
+    # factura, fecha, accion, origen, tenant y aprobador, con su sello -- y
+    # pasa por la puerta critica (kill switch, techo, etapa, autorizacion
+    # granular). Hasta aca tenia aprobacion humana pero no atada: una
+    # aprobacion valia para la herramienta, no para la operacion.
+    irreversible: true
     roles_permitidos: [facturacion]
     base_url: https://api.wisphub.io
     endpoint: /api/promesa-pago/
     metodo: POST
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
-    plantilla_resumen: "Promesa de pago de la factura {id_factura} para el {fecha_limite}"
+    # El resumen es lo UNICO que ve quien aprueba (acciones.js): tiene que
+    # nombrar el efecto completo. Antes decia solo "Promesa de pago de la
+    # factura N" mientras el modelo podia elegir 'accion', y una de las dos
+    # opciones reactivaba el servicio -- se aprobaba a ciegas algo que no
+    # estaba escrito en ningun lado. Ahora 'accion' esta fija en 0 y el
+    # resumen dice exactamente lo que va a pasar.
+    plantilla_resumen: "Registrar promesa de pago de la factura {id_factura} para el {fecha_limite} (no reactiva el servicio)"
     campos_texto_libre: [comentarios]
+    # ================== accion: FIJA EN 0, Y NO ES UN DETALLE ==================
+    # La API acepta dos:
+    #   0  Registrar Promesa de Pago
+    #   1  Registrar Promesa de Pago Y ACTIVAR SERVICIO
+    #
+    # Hasta hoy 'accion' estaba en 'requeridos' y en 'filtros_verificados', o
+    # sea que la ELEGIA EL MODELO. Reactivarle el internet a un cliente
+    # suspendido no es una decision de redaccion: es una decision comercial,
+    # y ademas el resumen que lee quien aprueba no la nombraba.
+    #
+    # Va en 'argumentos_fijos' porque los fijos PISAN lo que manda el modelo
+    # (motor.py, argumentos.update(herramienta.argumentos_fijos)), y NO en
+    # 'argumentos_sobrescribibles' para que tampoco pueda cambiarla un
+    # llamador interno. Es la regla que schema.py ya declara: un campo con
+    # valor fijo conocido va en 'argumentos_fijos', y 'requeridos' es solo
+    # para lo que el modelo tiene que decidir.
+    #
+    # Y se saca del catalogo que ve el modelo, no solo del valor enviado: si
+    # siguiera viendo 'registrar_promesa_y_activar_servicio' entre las
+    # opciones, podria PROMETERLE al cliente que le reconectan aunque la
+    # llamada saliera con 0. Mentirle al cliente es peor que mandar el valor
+    # equivocado.
+    #
+    # Si alguna vez hace falta activar el servicio, va como herramienta
+    # SEPARADA, con su propio resumen y su propia aprobacion. No como una
+    # opcion escondida de esta.
+    argumentos_fijos:
+      accion: 0
     # Hallazgo 19/08/2026: la doc marca 'id_factura' como requerido, pero
     # el serializer NO lo valida -- un valor imposible (999999999) no
     # genero error junto a los demas campos vacios. Se fuerza igual via
@@ -4201,7 +4294,7 @@ herramientas:
     # (ejemplo '2022/08/26' con barras); la API real exige guiones
     # (YYYY-MM-DD), confirmado con un 400 real antes de acertar el
     # formato.
-    requeridos: [id_factura, fecha_limite, accion]
+    requeridos: [id_factura, fecha_limite]
     filtros_verificados:
       id_factura:
         param: id_factura
@@ -4212,10 +4305,88 @@ herramientas:
       comentarios:
         param: comentarios
         tipo: texto
-      accion:
-        param: accion
-        tipo: enum
-        valores: {registrar_promesa: 0, registrar_promesa_y_activar_servicio: 1}
+
+  # ===========================================================================
+  #  PROMESA DE PAGO **Y REACTIVACION** -- accion separada a proposito
+  # ===========================================================================
+  # Es la misma API que 'agregar_promesa_pago' con accion=1, y AUN ASI va
+  # aparte. El motivo no es tecnico: quien aprueba tiene que estar aprobando
+  # "promesa + reactivar", no una promesa a secas con una opcion escondida.
+  # Una herramienta por efecto, y cada una con su resumen.
+  #
+  # LO QUE HACE WISPHUB, segun el equipo de cartera (21/09/2026): si el
+  # servicio estaba suspendido pasa a activo, y cuando vence la promesa sin
+  # pago el propio WispHub lo vuelve a suspender. Esa reversion automatica es
+  # lo que le pone TECHO al riesgo, y es la razon por la que esta accion puede
+  # existir.
+  #
+  # NO depende de 'auto_activar_servicio': esa bandera dice "Auto Activar
+  # Servicio Al Reportar Pago" y pertenece al flujo de PAGOS. Medida en 3000
+  # clientes: en False para todos, activos incluidos. Verificado 21/09/2026.
+  #
+  # NO SE OFRECE si el tenant no cargo su politica (promesas_pago). Sin dias
+  # maximos, tope de monto y espaciado, no hay con que evaluar -- y ofrecerla
+  # con numeros que nadie decidio es peor que no ofrecerla.
+  - nombre: registrar_promesa_y_reactivar
+    tipo: http
+    descripcion: >
+      Registra una promesa de pago Y REACTIVA el servicio de un cliente
+      suspendido. Usala SOLO si el colaborador pide las dos cosas. Si el
+      servicio esta activo o solo quieren dejar constancia de la promesa, usa
+      'agregar_promesa_pago'. Queda PENDIENTE de aprobacion humana -- decile
+      al colaborador que todavia no se aplico.
+    solo_lectura: false
+    requiere_confirmacion: true
+    aprobacion_humana: true
+    # M06-F (22/09/2026): R4 por la regla mas restrictiva. Registra una
+    # promesa de pago -- el mismo efecto que agregar_promesa_pago, que es R4 --
+    # y ademas reactiva el servicio. Llego en origin despues de la matriz de
+    # M06-D (69 herramientas), asi que no estaba clasificada. Irreversible:
+    # sale solo por la puerta critica, con la aprobacion sellada a esta accion
+    # exacta. La politica y la revalidacion de origin siguen corriendo igual.
+    irreversible: true
+    roles_permitidos: [facturacion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/promesa-pago/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    # El resumen es lo UNICO que ve quien aprueba: nombra los DOS efectos y
+    # dice que el servicio esta hoy suspendido. Lo arma
+    # nucleo/facturacion/promesas.py::resumen_de_aprobacion cuando hay datos
+    # de la evaluacion; esta plantilla es el respaldo.
+    plantilla_resumen: "Registrar promesa de pago de la factura {id_factura} hasta el {fecha_limite} Y REACTIVAR el servicio (hoy suspendido)"
+    campos_texto_libre: [comentarios]
+    # accion=1 FIJA. Igual que en la hermana, va en 'argumentos_fijos' --que
+    # pisa lo del modelo-- y fuera de 'filtros_verificados', para que el
+    # modelo no vea un interruptor entre 0 y 1 en ninguna de las dos.
+    argumentos_fijos:
+      accion: 1
+    # La politica que decide si esto se puede siquiera PROPONER. La regla vive
+    # en nucleo/facturacion/promesas.py --es de plataforma--; aca se dice con
+    # que lecturas de ESTE catalogo alimentarla. Si alguna falta o no es de
+    # solo lectura, la accion no se propone.
+    #
+    # La cadena empieza por la factura porque es lo unico que trae la
+    # propuesta del modelo: de ahi sale el cliente, y del cliente su estado y
+    # sus facturas pendientes.
+    politica:
+      nombre: promesa_reactivacion
+      lecturas:
+        factura: consultar_factura_detalle
+        cliente: consultar_cliente
+        facturas: consultar_facturas
+    requeridos: [id_factura, fecha_limite]
+    filtros_verificados:
+      id_factura:
+        param: id_factura
+        tipo: id
+      fecha_limite:
+        param: fecha_limite
+        tipo: texto
+      comentarios:
+        param: comentarios
+        tipo: texto
 
   # --- reporte de comprobante de pago (Fase #7, 03/09/2026) ------------------
   # NO registra nada en WispHub, NO reconecta, NO confirma el pago. Junta lo
@@ -4282,7 +4453,13 @@ herramientas:
 
   # --- BottleCRM (verificado en vivo, ver skill bottlecrm-api) ---------------
 
+  # 'busca_caso': la usa el reconciliador (T20) para ADOPTAR un caso que ya
+  # existe en vez de crear un segundo cuando un reintento no se pudo confirmar
+  # (B4). Sin esta bandera, buscar_por_nombre devuelve None y todo reintento
+  # intentaria crear -- no es inseguro (el CRM rechaza el nombre repetido con
+  # 400 y esa carrera se maneja) pero es un viaje de mas y un 400 evitable.
   - nombre: consultar_casos_bottlecrm
+    busca_caso: true
     tipo: http
     descripcion: >
       Casos/tickets registrados en BottleCRM. Se puede buscar por texto libre
@@ -4564,6 +4741,134 @@ herramientas:
     auth_ref: BOTTLECRM_API_TOKEN
     auth_esquema: Bearer
 
+  # ===========================================================================
+  #  D28 -- reflejar en el caso del CRM quien lo esta atendiendo
+  # ===========================================================================
+  #  Las tres las ejecuta el RECONCILIADOR, nunca el modelo: no estan en el
+  #  catalogo para que la IA las llame, sino para que T20 sepa con que hacerlo.
+  #  Por eso ninguna lleva 'roles_permitidos' util mas alla del minimo que el
+  #  validador exige.
+  #
+  #  Dexter decide quien atiende; el CRM muestra un CONJUNTO de personas
+  #  asociadas al caso. El efecto es ADITIVO y no hay forma de quitar a nadie:
+  #  la tabla intermedia del CRM no guarda quien creo cada relacion, asi que
+  #  nada distingue una asignacion automatica vieja de una colaboracion que
+  #  alguien armo a mano.
+
+  - nombre: asignar_caso_crm
+    tipo: http
+    asigna_caso: true
+    descripcion: >
+      Agrega UNA persona a los asignados del caso, sin tocar a las demas. NO la
+      llames tu: la ejecuta el reconciliador cuando alguien toma o reasigna una
+      conversacion.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000
+    # ⚠️ EXCLUSIVAMENTE este endpoint. 'bulk/update' y el PUT del detalle
+    # REEMPLAZAN el conjunto: borrarian a cualquier colaborador que un
+    # supervisor haya sumado, y el PUT ademas vacia contacts, teams y tags.
+    # Este es el unico aditivo -- ver django-crm/backend/cases/assignee_views.py
+    # y SPEC/auditorias/D28-ASIGNADO-CRM.md.
+    endpoint: /api/cases/{id_caso}/assignees/
+    metodo: POST
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+
+  - nombre: consultar_asignados_caso_crm
+    tipo: http
+    lee_asignados: true
+    descripcion: >
+      Quienes figuran en el caso AHORA. La usa el reconciliador para confirmar
+      una asignacion: el codigo de estado no prueba el efecto.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000
+    endpoint: /api/cases/{id_caso}/assignees/
+    metodo: GET
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+
+  # ===========================================================================
+  #  CERRAR EL TICKET DEL ISP -- por PUT, y nunca por /respuesta/
+  # ===========================================================================
+  # Aparte de 'actualizar_estado_ticket', que existe para que el modelo mueva
+  # un ticket entre estados y por eso le deja elegir 'estado'. Esta es de la
+  # COLA (B4): cierra y nada mas, con el codigo fijo, para que ninguna otra
+  # transicion pueda colarse por aca.
+  #
+  # POR QUE PUT Y NO /respuesta/, medido el 21/09/2026 sobre un ticket real:
+  #   * '/api/tickets/{id}/respuesta/' exige un texto y lo PUBLICA en el
+  #     ticket. Cada reintento le deja al cliente otra copia del mensaje de
+  #     cierre.
+  #   * el PUT con SOLO 'estado' no publica nada --las respuestas quedaron en
+  #     0 antes y despues-- y no vacia ningun otro campo: 16 de 17 campos
+  #     intactos. El unico que se mueve es 'fecha_fin', que es el sello del
+  #     cierre y le corresponde moverse.
+  #
+  # Y por eso el ejecutor LEE ANTES: un PUT repetido sobre un ticket ya
+  # cerrado le corre 'fecha_fin' (de 14:42:10 a 14:42:12, medido) sin dar
+  # ningun error. Mismo daño que 'closed_on' en el CRM.
+  - nombre: cerrar_ticket_operativo_estado
+    tipo: http
+    cierra_ticket_estado: true
+    descripcion: >
+      Cierra el ticket del ISP cambiando SOLO su estado. NO la llames tu: la
+      ejecuta el reconciliador cuando una conversacion se cierra.
+    solo_lectura: false
+    requiere_confirmacion: true
+    # M06-F (22/09/2026): la misma familia que cerrar_ticket_operativo, que
+    # M06-D dejo INDETERMINADA y M06-E saco de la autonomia. Llego en origin
+    # despues de la matriz, y por la regla mas restrictiva recibe el mismo
+    # trato: con aprobacion humana no sale por la puerta autonoma. La usa el
+    # reconciliador (T20), que hoy no corre en produccion.
+    aprobacion_humana: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/
+    metodo: PUT
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    # 4 = Cerrado. Fijo: esta herramienta cierra, no cambia de estado.
+    # Se ESCRIBE por codigo y se LEE por etiqueta ('Cerrado') -- asimetria
+    # verificada, y por eso el ejecutor compara contra la etiqueta.
+    argumentos_fijos:
+      estado: 4
+
+  - nombre: consultar_caso_crm
+    tipo: http
+    lee_caso: true
+    descripcion: >
+      UN caso del CRM con su estado. La usa el reconciliador ANTES de cerrarlo:
+      medido contra el CRM real, un PATCH sobre un caso ya cerrado responde 200
+      y le reescribe la fecha de cierre con la del reintento. Leer primero es lo
+      que impide que un reintento reescriba el pasado. NO la llames tu.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000
+    # El GET del detalle. NUNCA el PUT del mismo recurso: ese vacia contacts,
+    # teams y tags -- ver django-crm/backend/cases/views.py::CaseDetailView.
+    endpoint: /api/cases/{id_caso}/
+    metodo: GET
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+
+  - nombre: consultar_perfiles_crm
+    tipo: http
+    lee_perfiles: true
+    descripcion: >
+      Los perfiles de la organizacion en el CRM. Sirve para traducir el usuario
+      de Dexter al perfil de alla POR ID (user_details.id), nunca por nombre:
+      dos personas pueden llamarse igual.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000
+    endpoint: /api/users/get-teams-and-users/
+    metodo: GET
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+
   # El ticket de instalacion que hoy crea el formulario del sitio web.
   #
   # WispHub EXIGE un cliente para crear un ticket -- verificado con un POST
@@ -4614,6 +4919,13 @@ herramientas:
       NO la llama el modelo: la llama el backend.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-E (22/09/2026), EXCEPCION CONSERVADORA: M06-D la dejo INDETERMINADA
+    # (no hay evidencia de si WispHub notifica al cliente ni de si lo que
+    # escribe se puede retirar). Hasta tener esa evidencia NO puede salir
+    # por la puerta autonoma: 'aprobacion_humana' hace que la frontera la
+    # frene (APROBACION_HUMANA_REQUERIDA). Por la puerta humana -- una
+    # persona que responde desde la pantalla -- sigue funcionando igual.
+    aprobacion_humana: true
     invocable_por_servicio: true
     roles_permitidos: [administracion]
     base_url: https://api.wisphub.io
@@ -4880,6 +5192,35 @@ herramientas:
     reintentar_identificador_como:
       sn_onu: gpon_hex
 
+  - nombre: consultar_topologia_ont
+    tipo: http
+    descripcion: >
+      Donde esta conectado fisicamente el equipo del cliente: OLT, tarjeta,
+      puerto PON, indice de ONU, zona y caja (ODB/CTO). Sirve para saber si
+      una falla es de UN cliente o del tramo entero -- dos clientes en el
+      mismo puerto PON con la misma caida no son dos casos, son uno.
+      NO trae señal ni estado: para eso estan consultar_estado_ont y
+      consultar_senal_ont.
+    solo_lectura: true
+    # Sin 'cliente_final': a quien llama por su internet no le sirve saber
+    # en que tarjeta de la OLT esta, y es topologia de la red de la empresa.
+    roles_permitidos: [soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/get_onu_details/{sn_onu}
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    extraer_de: onu_details
+    inyectar_sesion:
+      sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
+    # Mismo reintento que las otras de SmartOLT: 68 de las 4.966 ONUs solo
+    # responden con el serial en su forma hexadecimal (verificado en vivo,
+    # agosto 2026) y entre ellas hay clientes ACTIVOS.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
+
   - nombre: consultar_senal_ont
     tipo: http
     descripcion: >
@@ -5068,32 +5409,70 @@ herramientas:
     descripcion: >
       LLAMA A ESTA HERRAMIENTA (no sugieras el reinicio manual del router, no escales) apenas
       consultar_senal_ont haya dado 'aceptable' Y ping_cliente haya
-      respondido bien, en un cliente que dice no tener internet -- ese es
-      exactamente el caso para el que existe esta herramienta, y usar el
+      respondido bien, en un cliente que dice NO TENER SERVICIO -- sin internet,
+      nada carga, ningun aparato anda. Ese es exactamente el caso para el que existe esta herramienta, y usar el
       reinicio manual en su lugar le hace perder tiempo al cliente para
-      lograr lo mismo que esto hace en un paso. Reinicia la ONT del cliente.
-      Contrato del proveedor (documentado,
-      agosto 2026): comando fire-and-forget -- confirma que SE MANDO, no que
-      la ONT ya reinicio ni que el problema se resolvio. Dile al cliente
-      que el equipo va a estar sin conexion **uno o dos minutos** (medido en
-      vivo, 14/08/2026: volvio a responder en ~73 segundos) y que revise si
-      volvio la señal despues de ese tiempo.
+      lograr lo mismo que esto hace en un paso. NUNCA la llames por una queja de LENTITUD o de
+      velocidad: 'esta lento', 'me anda mal', 'no me da los megas que pago'
+      NO son falta de servicio -- son servicio degradado, y reiniciar no los
+      arregla. En esos casos el camino es consultar_velocidad_aprovisionada y
+      derivar. La diferencia es si el cliente PUEDE usar internet o no puede en
+      absoluto; si dice que anda pero mal, NO es esta herramienta. Y ojo: que el
+      diagnostico de senal y ping salga bien NO alcanza por si solo, porque en
+      una queja de lentitud tambien sale bien -- el equipo sano es una
+      CONDICION, no el motivo. Reinicia la ONT del cliente.
+      Llamarla NO reinicia el equipo en ese momento: deja el reinicio
+      PENDIENTE de aprobacion de un colaborador. Dile al cliente que el
+      reinicio remoto de su equipo quedo solicitado y que un colaborador lo
+      tiene que aprobar -- NUNCA le digas que ya se reinicio. Cuando se
+      apruebe, el equipo va a estar sin conexion **uno o dos minutos**
+      (medido en vivo, 14/08/2026: volvio a responder en ~73 segundos).
 
-      SIN paso de aprobacion humana -- el codigo exige en su lugar que ya
-      hayas corrido consultar_senal_ont y ping_cliente EN ESTA conversacion
-      y que los dos hayan dado resultado favorable (senal aceptable, ping
-      exitoso). Si no se cumple, la herramienta se rechaza sola con el
-      motivo -- no lo intentes "igual", sigue el protocolo alternativo. Es
-      exactamente la logica del equipo electronico que a veces necesita
-      reinicio PERO solo tiene sentido si ya se descarto que el problema es
-      de red: si la senal esta mal, reiniciar no arregla nada y solo
-      retrasa mandar un tecnico.
+      Ademas de la aprobacion, el codigo exige que ya hayas corrido
+      consultar_senal_ont y ping_cliente EN ESTA conversacion y que los dos
+      hayan dado resultado favorable (senal aceptable, ping exitoso) -- y los
+      vuelve a medir al aprobar. Si no se cumple, la herramienta se rechaza
+      sola con el motivo -- no lo intentes "igual", sigue el protocolo
+      alternativo. Es exactamente la logica del equipo electronico que a
+      veces necesita reinicio PERO solo tiene sentido si ya se descarto que
+      el problema es de red: si la senal esta mal, reiniciar no arregla nada
+      y solo retrasa mandar un tecnico.
 
       Maximo UNA vez por conversacion -- si el cliente insiste en que lo
       reinicies de nuevo, no lo repitas: dile que un colaborador humano
       sigue el caso.
     solo_lectura: false
     requiere_confirmacion: true
+    # ── LO QUE EL CLIENTE DIJO, VALIDADO EN CODIGO ────────────────────────
+    # 'exige_previas' (mas abajo) exige senal aceptable y ping respondiendo.
+    # Eso NO distingue "no tengo internet" de "esta lento": en una queja de
+    # lentitud las dos condiciones se cumplen, porque el equipo ESTA sano --
+    # es exactamente lo que significa "lento".
+    #
+    # La regla vivia en la descripcion de arriba, o sea en el prompt. Medido
+    # el 22/09/2026 contra el motor real, cuatro corridas del mismo caso
+    # dorado: tres la respetaron y UNA reinicio el equipo de un cliente real
+    # por una queja de lentitud. El PRD (§7.4) ya lo decia -- el prompt es
+    # guia, nunca la garantia -- y ese 1 de 4 es el numero.
+    #
+    # A 'lento' se lo ofrece a proposito: si solo se le dieran las respuestas
+    # que habilitan la accion, el modelo elige la mas cercana y la guarda no
+    # mide nada. Dandole la opcion honesta, el rechazo significa algo y queda
+    # en la traza que se pidio el reinicio para un sintoma que no le toca.
+    exige_declaracion:
+      param: sintoma
+      valores: [sin_servicio, intermitente, lento]
+      aceptados: [sin_servicio, intermitente]
+      pregunta: >-
+        Que reporto el cliente EN SUS PALABRAS, sin interpretarlo:
+        'sin_servicio' = no puede usar internet en absoluto, nada carga;
+        'intermitente' = anda y se corta, de a ratos;
+        'lento' = anda pero mal, tarda, no llega a la velocidad del plan.
+        Si dijo que anda aunque sea mal, es 'lento'.
+      si_no_alcanza: >-
+        Reiniciar no arregla un servicio degradado. Para 'lento' el camino es
+        consultar_velocidad_aprovisionada y derivar a soporte tecnico. No
+        vuelvas a llamar esta herramienta con otro valor.
     # Reiniciar deja al cliente sin internet uno o dos minutos, asi que no
     # puede salir del mensaje con que la puerta derivo el caso: ese mensaje
     # suele ser ambiguo ("me quede sin servicio") y bien puede estar
@@ -5102,6 +5481,14 @@ herramientas:
     # Medir sigue permitido en ese turno; actuar no. Ver
     # 'exige_turno_propio' en nucleo/config/schema.py.
     exige_turno_propio: true
+    # M06-A (21/09/2026), decision de negocio: el equipo en casa del cliente
+    # (R3) exige aprobacion humana por operacion. 'irreversible' la manda por
+    # frontera.critica: kill switch, etapa, autorizacion granular y la
+    # aprobacion atada a ESTA ONU. Al aprobar se vuelven a medir las previas
+    # y se anota la verificacion contra la conversacion de origen.
+    aprobacion_humana: true
+    irreversible: true
+    plantilla_resumen: "Reiniciar la ONT {sn_onu}"
     roles_permitidos: [cliente_final, soporte]
     base_url_ref: SMARTOLT_SUBDOMINIO
     endpoint: /api/onu/reboot/{sn_onu}
@@ -5189,10 +5576,10 @@ herramientas:
       un humano.
 
       LLAMA LA HERRAMIENTA reiniciar_ont AHORA, en este mismo paso. No
-      anuncies que la vas a usar ni le prometas al cliente que vas a
-      reiniciar: si no la llamas, el reinicio NO ocurre y le habrias
-      mentido. Primero ejecutala, y recien despues cuentale al cliente que
-      ya la reiniciaste y que espere uno o dos minutos.
+      anuncies que la vas a usar sin llamarla: si no la llamas, el reinicio
+      ni siquiera queda solicitado. Primero llamala, y recien despues
+      cuentale al cliente que el reinicio remoto quedo SOLICITADO y que un
+      colaborador lo tiene que aprobar -- no le digas que ya se reinicio.
 
       Unica excepcion: si el cliente ya te dijo en este intercambio que no
       quiere que la reinicies.
@@ -5277,10 +5664,18 @@ herramientas:
       su television va por un decodificador aparte y el puerto de la ONU no
       interviene -- cambiar el tipo ahi no arregla nada.
 
-      Despues de llamarla, vuelve a leer consultar_estado_catv: tiene que
-      dejar de decir 'Not supported'. Recien entonces activar_catv.
+      Llamarla NO cambia el tipo en ese momento: queda PENDIENTE de
+      aprobacion de un colaborador. Dile al cliente que el ajuste quedo
+      solicitado y que un colaborador lo tiene que aprobar -- no le digas que
+      ya se hizo, y no sigas con activar_catv en esta conversacion: hasta que
+      se apruebe, consultar_estado_catv va a seguir diciendo 'Not supported'.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-A (21/09/2026): R3, aprobacion humana por operacion atada a esta
+    # ONU. Ver el comentario en reiniciar_ont.
+    aprobacion_humana: true
+    irreversible: true
+    plantilla_resumen: "Cambiar el tipo de la ONU {sn_onu} a {onu_type}"
     # No en el turno en que la conversacion llega al area: hace falta que el
     # cliente haya contestado cuantos equipos tiene, y eso es un turno suyo.
     exige_turno_propio: true
@@ -5326,15 +5721,23 @@ herramientas:
       alguna de las dos condiciones, asi que no lo intentes "por si acaso":
       sigue el protocolo normal.
 
-      Despues de encenderla, dile al cliente que ya quedo activada y
-      preguntale si le volvio la señal. Si todavia no la ve, el equipo
-      necesita volver a buscar los canales: pedile los pasos a
+      Llamarla NO enciende la television en ese momento: queda PENDIENTE de
+      aprobacion de un colaborador. Dile al cliente que la activacion quedo
+      solicitada y que un colaborador la tiene que aprobar -- NUNCA le digas
+      que ya quedo activada. Cuando se active, si todavia no ve los canales,
+      el equipo necesita volver a buscarlos: los pasos salen de
       consultar_guia_sintonizacion -- son distintos segun la marca del
       televisor y segun use TDT, y por eso no van escritos aca.
 
       Maximo UNA vez por conversacion.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-A (21/09/2026): R3, aprobacion humana por operacion atada a esta
+    # ONU. Al aprobar se vuelven a medir las dos previas (plan con TV y CATV
+    # 'Disabled'): si entretanto cambio algo, no se enciende.
+    aprobacion_humana: true
+    irreversible: true
+    plantilla_resumen: "Activar la television (CATV) en la ONU {sn_onu}"
     roles_permitidos: [soporte_tecnico_cliente, soporte]
     base_url_ref: SMARTOLT_SUBDOMINIO
     endpoint: /api/onu/enable_catv/{sn_onu}
@@ -6219,3 +6622,104 @@ evaluacion:
   # factura: un sistema con 92% de acierto que inventa el 3% es peligroso.
   maximo_invenciones: 0
   minimo_casos: 50
+
+# ==========================================================================
+#  IMPORTACION DE TICKETS  --  bajada de produccion el 22/09/2026
+# ==========================================================================
+# Esta seccion NO estaba en el archivo y SI en la base, que es la combinacion
+# peligrosa: la configuracion existe solo en un lado y el YAML no tiene con
+# que reponerla. Una carga la habria reemplazado por el default del esquema
+# ('cada_horas: 0', que es APAGADO) y la importacion se habria detenido sin un
+# solo mensaje -- la misma forma de fallar que el seguimiento de entregas de
+# WhatsApp (D17): nada se rompe, simplemente deja de pasar.
+#
+# La escribe 'cli/activar_importacion.py' directo contra la base, no el editor
+# de la interfaz. Por eso ademas se agrego a SECCIONES_EDITABLES
+# (nucleo/config/editor.py): sin estar en esa lista el cargador ni siquiera
+# avisaba.
+#
+# Los valores son los que estaban vivos en produccion (config v146). Si se
+# cambian desde 'activar_importacion.py', hay que volver a bajarlos aca.
+#
+# 'cuenta_api' es el NOMBRE de la cuenta en WispHub, no una credencial: la
+# clave va por 'auth_ref', como todo secreto en este archivo.
+importacion_tickets:
+  asuntos:
+  - soporte tecnico|no tiene internet
+  - soporte tecnico|problemas de tv
+  - soporte tecnico|internet intermitente/niveles altos
+  - soporte tecnico|vista reiterativa post soporte
+  - soporte tecnico|internet intermitente
+  - soporte tecnico|configuracion dns
+  cada_horas: 1
+  cuenta_api: Rapilink SAS - admin@rapilink-sas
+  departamentos:
+  - Soporte Técnico
+  destinos:
+    soporte tecnico|configuracion dns:
+      area: soporte_tecnico
+      prioridad: Normal
+    soporte tecnico|internet intermitente:
+      area: soporte_tecnico
+      prioridad: Normal
+    soporte tecnico|internet intermitente/niveles altos:
+      area: soporte_tecnico
+      prioridad: Normal
+    soporte tecnico|no tiene internet:
+      area: soporte_tecnico
+      prioridad: Normal
+    soporte tecnico|problemas de tv:
+      area: soporte_tecnico
+      prioridad: Normal
+    soporte tecnico|vista reiterativa post soporte:
+      area: soporte_tecnico
+      prioridad: Normal
+  estados_descubrimiento:
+  - Nuevo
+  - En Progreso
+  gracia_cierre_dias: 7
+  proveedor: wisphub
+  reconciliar_estados:
+  - New
+  - Assigned
+  - Pending
+  solapamiento_horas: 6
+  tipos_de_creador: []
+  ventana_dias: 30
+
+# ==========================================================================
+#  CIERRE DE LO QUE ATENDIO SOLO EL ASISTENTE
+# ==========================================================================
+# 'conversaciones_sin_respuesta' --el barrido que cierra por inactividad--
+# exige 'escalada_a_humano'. Las que la IA resolvio sola nunca entraban ahi y
+# ningun otro camino las cerraba: quedaban abiertas para siempre. Medido
+# contra produccion el 22/09/2026: 151 asi, 145 sin un mensaje en mas de una
+# semana, y de las 4 creadas ese dia, las 4.
+#
+# EL CORTE ES LA FRONTERA, y por eso lleva la hora exacta de la activacion:
+# lo que quede del lado viejo (las 147 historicas) es BACKLOG y no se toca.
+# Solo se cierra lo que entre a la regla de aca en adelante.
+#
+# El corte se compara contra la ULTIMA ACTIVIDAD, no contra la creacion: una
+# conversacion vieja que vuelve a hablar despues de esta hora es flujo normal.
+#
+# EL BACKLOG QUEDA APAGADO. No se drena con el reloj --serian 240 cierres por
+# dia y las 147 se irian en menos de uno-- sino a mano y de a lotes:
+#
+#     python -m nucleo.reloj --backfill-inactivas-ia --limit 10
+#
+# Y ese comando exige ADEMAS que 'backfill_habilitado' este en true. Uno
+# autoriza, el otro ejecuta.
+#
+# 'backfill_lote' es un techo duro: el --limit del comando puede bajarlo,
+# nunca subirlo.
+#
+# El plazo NO esta aca: sale de 'limites.horas_inactividad_cierra', que ya
+# significa exactamente esto -- pasado ese tiempo un mensaje del cliente abre
+# una conversacion nueva en vez de reutilizar esta, asi que cerrarla no le
+# quita nada a nadie.
+cierre_inactivas_ia:
+  habilitado: true
+  rollout_cutoff: '2026-09-22T15:58:07Z'
+  backfill_habilitado: false
+  backfill_lote: 10

@@ -114,11 +114,22 @@ export function updateOrgSettings({ cookies }, body) {
 }
 
 /**
- * Vertical-pack label overrides for this org. Read via the same
- * `/api/org/settings/` endpoint the settings page uses, not a second
+ * Lo que el cascarón necesita de la organización, en UNA sola respuesta.
+ *
+ * Vertical-pack label overrides for this org, plus the org logo. Read via the
+ * same `/api/org/settings/` endpoint the settings page uses, not a second
  * endpoint. `terminology` and `vertical` are `read_only_fields` on
  * `OrgSettingsSerializer`: the pack applier writes them server-side, so
  * there is nothing to validate or scope on the way out.
+ *
+ * SE LLAMABA `getOrgTerminology`. Cambió de nombre al agregarle `logo_url`:
+ * una función que devuelve un logo desde algo llamado "terminology" es una
+ * mentira que el próximo lector paga. El logo viaja acá y no en una llamada
+ * propia justamente porque ESTA respuesta ya lo trae -- pedirlo aparte sería
+ * un viaje de red por página para un dato que ya está en la mano.
+ *
+ * `logo_url` es opcional y normalmente falta: una organización sin logo es el
+ * caso corriente, no un error. Quien lo consuma tiene que tener un respaldo.
  *
  * Called from the `(app)` shell load on *every* page (see
  * `routes/(app)/+layout.server.js`), not just the settings page, so it must
@@ -127,11 +138,12 @@ export function updateOrgSettings({ cookies }, body) {
  * badge-count fetches already do, rather than let it propagate.
  *
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
- * @returns {Promise<{ terminology?: Record<string, string>, vertical?: string }>}
+ * @returns {Promise<{ terminology?: Record<string, string>, vertical?: string,
+ *                     logo_url?: string }>}
  */
-export async function getOrgTerminology({ cookies }) {
+export async function getOrgShell({ cookies }) {
   const org = await apiRequest('/org/settings/', {}, { cookies });
-  return { terminology: org?.terminology, vertical: org?.vertical };
+  return { terminology: org?.terminology, vertical: org?.vertical, logo_url: org?.logo_url };
 }
 
 /**

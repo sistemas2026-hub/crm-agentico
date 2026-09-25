@@ -52,10 +52,31 @@ if sys.stdout.encoding != "utf-8":
 from dotenv import load_dotenv                     # noqa: E402
 load_dotenv(RAIZ / ".env", override=True)          # noqa: E402
 
+#  M06-E (22/09/2026): esta prueba ESCRIBE (crea, aprueba, retira y borra un
+#  documento de prueba) en la base que diga el .env -- y el .env de desarrollo
+#  apunta a PRODUCCION (crm.rapilinksas.co). Mientras corre, el documento de
+#  prueba queda 'vigente' y el asistente real podria recuperarlo. Correrla
+#  dentro de una suite de regresion la llevaba a produccion sin que nadie lo
+#  decidiera. Ahora se niega contra una base no local salvo pedido explicito.
+import os                                          # noqa: E402
+if (os.environ.get("DBHOST", "") not in ("", "db", "localhost", "127.0.0.1", "pg-b7")
+        and os.environ.get("PERMITIR_PRUEBA_EN_BASE_REAL") != "1"):
+    print(f"[aprobacion_documentos] OMITIDA: la base configurada "
+          f"({os.environ.get('DBHOST')}) no es local y esta prueba escribe en ella. "
+          f"Para correrla ahi a proposito: PERMITIR_PRUEBA_EN_BASE_REAL=1.")
+    raise SystemExit(0)
+
 from nucleo.config import fuente                   # noqa: E402
 from nucleo.ingesta import corpus as ingesta       # noqa: E402
 from nucleo.persistencia.db import sesion          # noqa: E402
 from nucleo.recuperacion.busqueda import recuperar_candidatos  # noqa: E402
+
+# VECTORES FALSOS: desde el 22/09/2026 `ingerir` no vectoriza --
+# recibe los vectores ya calculados. Que la prueba los invente la hace
+# HERMETICA: deja de llamar a OpenAI, deja de costar y deja de fallar
+# cuando esa API tiene un mal dia. Lo que esta prueba mide es la
+# aprobacion de documentos, no el vectorizado.
+_VECTORES_FALSOS = [[0.0] * 1536 for _ in range(50)]
 
 TENANT = "rapilink"
 CODIGO = "ZZ-TEST-APROBACION"
@@ -78,6 +99,7 @@ def comprobar(condicion: bool, que: str) -> None:
 
 class _FragmentoFalso:
     """Lo minimo que ingerir() necesita, sin pasar por un .docx real."""
+
     def __init__(self, orden, contenido):
         self.orden = orden
         self.contenido = contenido
@@ -124,6 +146,7 @@ try:
         _limpiar(cur, org)
         r = ingesta.ingerir(
             cur, org, _DocFalso(), "hash-de-prueba-1",
+            vectores=_VECTORES_FALSOS,
             modelo_embeddings=config.rag.modelo_embeddings,
             roles_permitidos=[rol], estado="pendiente",
             original=b"bytes-falsos-del-docx", nombre_archivo="prueba.docx",
@@ -183,6 +206,7 @@ try:
     with sesion(TENANT) as (cur, org):
         r2 = ingesta.ingerir(
             cur, org, _DocFalso(), "hash-de-prueba-1",   # mismo hash
+            vectores=_VECTORES_FALSOS,
             modelo_embeddings=config.rag.modelo_embeddings,
             roles_permitidos=[rol], estado="pendiente", forzar=True,
             original=b"bytes-falsos-del-docx")
@@ -202,6 +226,7 @@ try:
         with sesion(TENANT) as (cur, org):
             ingesta.ingerir(
                 cur, org, _DocFalso(), "hash-DISTINTO",
+            vectores=_VECTORES_FALSOS,
                 modelo_embeddings=config.rag.modelo_embeddings,
                 roles_permitidos=[rol], estado="pendiente",
                 original=b"otros-bytes")

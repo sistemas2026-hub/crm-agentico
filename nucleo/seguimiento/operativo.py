@@ -73,6 +73,25 @@ def cerrar(config, tenant: str, ticket: str, texto: str, autor: str = "") -> boo
                      ticket, texto, autor)
 
 
+def _permiso(tenant: str, herramienta: str, actor: str, evidencia: str):
+    """
+    Que puerta de la frontera le corresponde a esta escritura  --  paso 10.14A.
+
+    Delega en frontera.puerta(), que aplica la misma regla en todo el nucleo:
+    con actor identificado entra por la puerta humana (el interruptor no frena
+    el trabajo de un operador); sin actor, por la autonoma (consulta el
+    interruptor).
+
+    Esta es la separacion que pedia el punto 7: no se declara "humana" porque
+    la funcion reciba texto, sino porque llega con un responsable. Sin
+    responsable no hay autoria humana que demostrar -- y entonces no se asume.
+    """
+    from nucleo.seguridad import frontera
+
+    return frontera.puerta(tenant, herramienta, actor=actor,
+                           evidencia=evidencia, origen="operativo")
+
+
 def _ejecutar(config, tenant: str, atributo: str, ticket: str,
               texto: str, autor: str) -> bool:
     herr = _herramienta(config, atributo)
@@ -86,7 +105,8 @@ def _ejecutar(config, tenant: str, atributo: str, ticket: str,
     argumentos.update({"id_ticket": str(ticket),
                        "respuesta": _firmado(texto, autor)})
     try:
-        ejecutor_http.ejecutar(herr, argumentos, tenant)
+        with _permiso(tenant, herr.nombre, autor, f"ticket:{ticket}"):
+            ejecutor_http.ejecutar(herr, argumentos, tenant)
         return True
     except Exception as e:
         registrar("operativo", "fallo la herramienta sobre el ticket",
@@ -116,7 +136,11 @@ def cerrar_caso_crm(config, tenant: str, caso_id: str) -> bool:
         argumentos[campo] = fecha.strftime(herr.formato_fechas_automaticas)
     argumentos["id_caso"] = str(caso_id)
     try:
-        ejecutor_http.ejecutar(herr, argumentos, tenant)
+        # Cerrar el caso del CRM NUNCA lo pide una persona por esta via: lo
+        # decide 'cerrar_todo' cuando el cliente confirma, o el barrido de
+        # vencidas. Es autonoma, y pasa por el interruptor.
+        with _permiso(tenant, herr.nombre, "", f"caso:{caso_id}"):
+            ejecutor_http.ejecutar(herr, argumentos, tenant)
         return True
     except Exception as e:
         registrar("operativo", "no se pudo cerrar el caso", caso_id=id_interno(caso_id), error=e)
@@ -124,7 +148,7 @@ def cerrar_caso_crm(config, tenant: str, caso_id: str) -> bool:
 
 
 def cerrar_todo(config, tenant: str, conversacion: dict, texto: str,
-                autor: str = "") -> dict:
+                autor: str = "", *, por: str = "cliente") -> dict:
     """
     Termina un caso en los TRES lados donde dejo rastro: el ticket del ISP, el
     caso del CRM y la conversacion.
@@ -134,8 +158,14 @@ def cerrar_todo(config, tenant: str, conversacion: dict, texto: str,
     no cierre queda en el log y se vuelve a intentar la proxima pasada, porque
     la conversacion recien se cierra si el caso tambien se cerro -- si no,
     seguiria apareciendo como pendiente sin que nadie la mire.
+
+    'por' dice cual de los caminos de §6 es este, y por lo tanto que queda
+    escrito en la conversacion (B6): 'cliente' cuando el cliente confirmo
+    (T15a/T15b, la transicion distingue cual segun 'atendida_manual') y
+    'plazo' cuando lo cierra el barrido (T16, desenlace 'sin_respuesta_cliente').
+    Sin ese dato el cierre no diria por que, que es lo que B6 vino a arreglar.
     """
-    from nucleo.persistencia import db as persistencia
+    from nucleo.relevo import transiciones
 
     hecho = {"ticket": False, "caso": False, "conversacion": False}
     if conversacion.get("ticket_operativo"):
@@ -145,8 +175,18 @@ def cerrar_todo(config, tenant: str, conversacion: dict, texto: str,
         hecho["caso"] = cerrar_caso_crm(config, tenant, conversacion["caso_id"])
     if hecho["caso"] or not conversacion.get("caso_id"):
         try:
-            persistencia.cerrar_conversacion(tenant, conversacion["id"])
-            hecho["conversacion"] = True
+            r = transiciones.cerrar(tenant, conversacion["id"], por=por,
+                                    config=config)
+            # 'ya_cerrada' cuenta como cerrada: alguien se adelanto, y el
+            # resultado es el que se buscaba. Lo que NO cuenta es una negativa
+            # con motivo ('accion_viva', 'verificacion_pendiente'): ahi la
+            # conversacion sigue abierta a proposito y el barrido tiene que
+            # volver a pasar.
+            hecho["conversacion"] = r.aplicada or r.motivo == "ya_cerrada"
+            if not hecho["conversacion"]:
+                registrar("operativo", "el cierre no procedio",
+                          conversation_id=id_interno(conversacion["id"]),
+                          motivo=r.motivo)
         except Exception as e:
             registrar("operativo", "no se pudo cerrar la conversacion",
                       conversation_id=id_interno(conversacion["id"]), error=e)
@@ -159,6 +199,165 @@ def cerrar_todo(config, tenant: str, conversacion: dict, texto: str,
 # nadie, mientras que revisar cada minuto son 60 consultas por hora para no
 # encontrar nada.
 INTERVALO_BARRIDO_SEGUNDOS = 3600
+
+
+def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False, *,
+                           backlog: bool = False,
+                           lote: int | None = None) -> dict:
+    """
+    Cierra las que atendio SOLO el asistente y quedaron mudas.
+
+    DOS COHORTES, Y ESA ES LA GUARDA
+    --------------------------------
+    'cierre_inactivas_ia.rollout_cutoff' parte el mundo en dos:
+
+      flujo normal  ultima actividad >= corte. Se cierra solo.
+      backlog       ultima actividad <  corte. NO se toca hasta que alguien
+                    encienda 'backfill_habilitado', y entonces de a
+                    'backfill_lote' por pasada.
+
+    La primera version de esta guarda era un tope por pasada, sin frontera.
+    Estaba mal de dos formas medidas: ordenaba por mas antigua primero --o
+    sea, cerraba el backlog PRIMERO, justo lo que el tope queria evitar-- y
+    con el reloj corriendo cada 60 minutos un tope de 10 son 240 cierres por
+    dia: las 147 historicas se iban en 0,6 dias. Ir mas despacio no era la
+    respuesta; la frontera si.
+
+    SIN CORTE NO CIERRA NADA
+    ------------------------
+    Ni flujo ni backlog. Desplegar este codigo no puede empezar a cerrar
+    conversaciones sin que alguien haya elegido desde cuando.
+
+    EL INTERRUPTOR ES PROPIO
+    ------------------------
+    'cierre_inactivas_ia.habilitado' apaga ESTE trabajo. Frenarlo apagando el
+    reloj entero se llevaria puestos los otros dos, que son legitimos.
+
+    EL PLAZO SIGUE SIENDO 'limites.horas_inactividad_cierra'
+    --------------------------------------------------------
+    Es el momento exacto en que la conversacion deja de reutilizarse: a
+    partir de ahi cerrarla no le quita nada a nadie, y antes le costaria al
+    cliente reverificar identidad y perder el serial de la ONU.
+
+    EL DESENLACE ES 'sin_respuesta_cliente', NO 'resuelto'
+    ------------------------------------------------------
+    Lo fija la transicion (por='plazo'). Es lo unico que se sabe: el
+    asistente contesto y el cliente no volvio.
+
+    EL BACKLOG NO CORRE CON EL RELOJ, NUNCA
+    ---------------------------------------
+    'backlog=False' es el default y es lo que llama el reloj: solo flujo
+    normal. Aunque 'backfill_habilitado' este en true, una pasada automatica
+    NO consume lote -- si lo hiciera, con el reloj cada 60 minutos y lote 10
+    serian 240 cierres por dia y el backlog se iria en menos de un dia, que es
+    justo lo que las cohortes existen para evitar.
+
+    'backlog=True' es la ejecucion explicita, a mano:
+
+        python -m nucleo.reloj --backfill-inactivas-ia --limit 10
+
+    Toma como maximo el lote, mas antiguas primero, con las MISMAS guardas que
+    el flujo normal y la misma transicion. No toca ninguna conversacion nueva.
+
+    'backfill_lote' es un TECHO DURO: el '--limit' del comando puede bajarlo,
+    nunca subirlo. Con la config en 10, '--limit 3' toma 3 y '--limit 50' toma
+    10. Un limite que el comando puede pisar no es un limite.
+
+    Los dos interruptores siguen valiendo: sin 'backfill_habilitado' el
+    comando tampoco hace nada. Uno autoriza, el otro ejecuta -- y hacen falta
+    los dos, porque el comando se puede teclear por costumbre y la
+    autorizacion es una decision que quedo escrita en la config.
+
+    'simular' informa las DOS cohortes por separado y no cierra nada.
+    """
+    from nucleo.persistencia import db as persistencia
+
+    ajustes = getattr(config, "cierre_inactivas_ia", None)
+    horas = getattr(config.limites, "horas_inactividad_cierra", None)
+    corte = getattr(ajustes, "rollout_cutoff", None) if ajustes else None
+
+    resumen = {"revisadas": 0, "cerradas": 0, "horas": horas,
+               "simulado": simular, "nuevas_elegibles": 0,
+               "backlog_elegible": 0, "backfill_que_cerraria": 0,
+               "backfill_habilitado": bool(getattr(ajustes, "backfill_habilitado", False))}
+
+    if not ajustes or not ajustes.habilitado:
+        resumen["motivo"] = "apagado: cierre_inactivas_ia.habilitado esta en false"
+        return resumen
+    if not horas or horas <= 0:
+        resumen["motivo"] = "el tenant no declara limites.horas_inactividad_cierra"
+        return resumen
+    if corte is None:
+        resumen["motivo"] = ("sin cierre_inactivas_ia.rollout_cutoff no se cierra "
+                             "nada: hay que elegir desde cuando cuenta la regla")
+        return resumen
+
+    lote_config = getattr(ajustes, "backfill_lote", 10)
+    try:
+        nuevas = persistencia.conversaciones_ia_inactivas(
+            tenant, horas, corte=corte, cohorte="normal")
+        # 'backfill_lote' ES UN TECHO DURO, no un valor por defecto.
+        #
+        # El '--limit' del comando solo puede BAJARLO. La primera version
+        # dejaba que lo pisara --"quien lo teclea esta mirando"-- y eso
+        # convierte el limite de la config en una sugerencia: un '--limit 500'
+        # tecleado de apuro se lleva el backlog entero, y la unica barrera
+        # seria la persona que acaba de escribir el numero.
+        #
+        # La config se decide una vez, queda en git y se revisa; el comando se
+        # teclea. El techo va del lado que se revisa.
+        tope = min(int(lote), lote_config) if lote else lote_config
+        candidatas_backlog = persistencia.conversaciones_ia_inactivas(
+            tenant, horas, corte=corte, cohorte="backlog", limite=tope)
+        # Cuantas hay en total en el backlog, no solo el lote: es el numero
+        # que dice cuanto falta, y sin el no se sabe si esto avanza.
+        backlog_total = persistencia.conversaciones_ia_inactivas(
+            tenant, horas, corte=corte, cohorte="backlog")
+    except Exception as e:
+        registrar("operativo", "no se pudieron listar las inactivas de la IA",
+                  tenant=tenant, error=e)
+        return resumen
+
+    resumen["nuevas_elegibles"] = len(nuevas)
+    resumen["backlog_elegible"] = len(backlog_total)
+    resumen["modo"] = "backlog" if backlog else "normal"
+
+    # Cuantas tomaria la PROXIMA tanda manual. Es informativo y se calcula
+    # siempre, tambien en la pasada del reloj: el seco tiene que poder decir
+    # cuanto falta y cuanto se llevaria el proximo comando, sin que eso
+    # signifique que la pasada las va a cerrar.
+    resumen["backfill_que_cerraria"] = (
+        len(candidatas_backlog) if resumen["backfill_habilitado"] else 0)
+
+    if backlog:
+        # Ejecucion explicita: SOLO el backlog. No se mezclan las cohortes ni
+        # aca -- una corrida a mano que ademas cierre las nuevas hace que el
+        # informe no diga lo que hizo.
+        if not resumen["backfill_habilitado"]:
+            resumen["motivo"] = ("el backfill esta apagado: poner "
+                                 "cierre_inactivas_ia.backfill_habilitado en true")
+            return resumen
+        a_cerrar = list(candidatas_backlog)
+    else:
+        # El reloj. Nunca consume lote del backlog, aunque este autorizado.
+        a_cerrar = list(nuevas)
+    resumen["revisadas"] = len(a_cerrar)
+
+    if simular:
+        resumen["serian"] = [id_interno(c["id"]) for c in a_cerrar]
+        return resumen
+
+    for conv in a_cerrar:
+        # Mismo camino que el barrido de escaladas. Estas no tienen ticket ni
+        # caso --lo exige la consulta-- asi que 'cerrar_todo' solo cierra la
+        # conversacion y el texto no se usa.
+        hecho = cerrar_todo(config, tenant, conv, "", por="plazo")
+        if hecho["conversacion"]:
+            resumen["cerradas"] += 1
+        registrar("operativo", "inactiva de la IA",
+                  conversation_id=id_interno(conv["id"]),
+                  conversacion=hecho["conversacion"])
+    return resumen
 
 
 def cerrar_vencidas(config, tenant: str) -> dict:
@@ -192,7 +391,7 @@ def cerrar_vencidas(config, tenant: str) -> dict:
 
     resumen["revisadas"] = len(pendientes)
     for conv in pendientes:
-        hecho = cerrar_todo(config, tenant, conv, texto)
+        hecho = cerrar_todo(config, tenant, conv, texto, por="plazo")
         if hecho["conversacion"]:
             resumen["cerradas"] += 1
         registrar("operativo", "vencida", conversation_id=id_interno(conv["id"]),

@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal
 
@@ -673,6 +673,77 @@ class RangoVeredicto(Base):
         return self
 
 
+class Declaracion(Base):
+    """
+    Un dato que SOLO existe en lo que dijo el cliente, que el modelo tiene que
+    declarar explicitamente, y que el codigo valida contra una lista cerrada
+    antes de dejar ejecutar la herramienta.
+
+    POR QUE HIZO FALTA ALGO DISTINTO DE 'Precondicion'
+    --------------------------------------------------
+    'Precondicion' mira RESULTADOS de herramientas anteriores, y eso alcanza
+    mientras lo que decide la accion sea medible. El 22/09/2026 se midio un
+    caso donde no lo es: 'reiniciar_ont' exige senal aceptable y ping
+    respondiendo, y una queja de LENTITUD cumple las dos -- el equipo esta
+    sano, que es justamente lo que significa "lento". Lo unico que separa
+    "no tengo internet" de "esta lento" es lo que dijo el cliente, y eso no
+    sale de ninguna medicion de la red.
+
+    Estaba resuelto en la DESCRIPCION de la herramienta, o sea en el prompt.
+    Medido cuatro veces contra el motor real: tres respetaron la regla y una
+    reinicio igual el equipo de un cliente real. El PRD (§7.4) ya lo dice --
+    el prompt es guia, nunca la garantia-- y aca esta el numero.
+
+    POR QUE LA LISTA QUE VE EL MODELO ES MAS LARGA QUE LA ACEPTADA
+    --------------------------------------------------------------
+    'valores' es todo lo que el modelo PUEDE contestar; 'aceptados' es el
+    subconjunto que deja pasar la herramienta. La diferencia no es un
+    descuido: si al modelo solo se le ofrecen las respuestas que habilitan la
+    accion, elige la mas cercana y se vuelve al problema anterior. Dandole la
+    opcion honesta --'lento'-- el rechazo significa algo, y queda escrito en
+    la traza que la herramienta se pidio para un sintoma que no le
+    corresponde.
+
+    Esto NO garantiza que el modelo diga la verdad. Garantiza que tenga que
+    decir ALGO, que ese algo este en una lista cerrada, y que el codigo --no
+    el prompt-- decida si alcanza. Un valor ausente o fuera de lista no
+    ejecuta.
+    """
+    # El nombre del argumento, tal como lo ve el modelo y como viaja al ISP.
+    param: str
+    # Todo lo que el modelo puede contestar. Incluye a proposito las opciones
+    # que NO habilitan la accion.
+    valores: list[str]
+    # El subconjunto que deja ejecutar. Tiene que estar contenido en 'valores'.
+    aceptados: list[str]
+    # Que se le pregunta al modelo. Va en la descripcion del argumento, asi
+    # que se lee como una instruccion, no como el nombre de un campo.
+    pregunta: str = ""
+    # Que hacer cuando el valor no alcanza. Es lo que el modelo recibe en vez
+    # de la ejecucion, asi que tiene que decirle el camino, no solo que no.
+    si_no_alcanza: str = ""
+
+    @model_validator(mode="after")
+    def _coherente(self):
+        if not self.valores:
+            raise ValueError("Declaracion.valores no puede estar vacia.")
+        if not self.aceptados:
+            raise ValueError("Declaracion.aceptados no puede estar vacia: una "
+                             "declaracion que no acepta nada bloquea la "
+                             "herramienta siempre.")
+        fuera = [v for v in self.aceptados if v not in self.valores]
+        if fuera:
+            raise ValueError(f"Declaracion.aceptados tiene valores que no estan "
+                             f"en 'valores': {fuera}. El modelo no podria "
+                             f"contestarlos nunca.")
+        if set(self.aceptados) == set(self.valores):
+            raise ValueError("Declaracion.aceptados es igual a 'valores': "
+                             "entonces no rechaza nada y la guarda es un "
+                             "adorno. Si de verdad todo vale, no declares una "
+                             "Declaracion.")
+        return self
+
+
 class Precondicion(Base):
     """
     Una condicion que otra herramienta ya tiene que haber cumplido, EN ESTA
@@ -776,6 +847,87 @@ class Verificacion(Base):
     escalar_si_no_confirma: str = ""
 
 
+class CondicionRevalidacion(Base):
+    """
+    Una condicion sobre lo que devuelve la lectura de revalidacion (§3.7).
+
+    'campo' se busca en el resultado; 'operador' dice como se compara. El valor
+    de comparacion viene de UNO de dos lados y nunca de los dos:
+
+        valor                 un literal declarado aca
+        valor_de_propuesta    el nombre de un argumento de la propuesta, para
+                              "el estado actual es el MISMO que se vio al
+                              proponer" -- comparar y cambiar. Sin esto, dos
+                              operadores que aprueban a la vez pisan el cambio
+                              del otro sin enterarse.
+    """
+    campo: str
+    operador: Literal["igual_a", "distinto_de", "en", "no_en",
+                      "menor_que", "mayor_que"] = "igual_a"
+    valor: Any = None
+    valor_de_propuesta: str | None = None
+
+    @model_validator(mode="after")
+    def _un_solo_origen(self):
+        if (self.valor is None) == (self.valor_de_propuesta is None):
+            raise ValueError(
+                f"condicion sobre '{self.campo}': declara 'valor' O "
+                f"'valor_de_propuesta', exactamente uno de los dos.")
+        return self
+
+
+class Revalidacion(Base):
+    """
+    La comprobacion que corre AL APROBAR, antes de ejecutar (§3.7).
+
+    Es una lectura del MISMO catalogo -- no una URL suelta-- porque asi hereda
+    credenciales, timeouts y el resto de las guardas que ya tiene una
+    herramienta declarada. 'argumentos' toma sus valores de la propuesta con
+    marcadores '{clave}'.
+    """
+    herramienta: str
+    argumentos: dict[str, str] = Field(default_factory=dict)
+    condiciones: list[CondicionRevalidacion] = Field(default_factory=list)
+
+
+class Aprobacion(Base):
+    """
+    Lo que una herramienta aprobable tiene que declarar (§3.7).
+
+    Los dos campos son obligatorios en el contrato. El validador que lo EXIGE
+    todavia no se puede encender: activarlo hoy romperia la config vigente de
+    Rapilink, que no los declara, y escribir esa config parte la medicion de
+    razonamiento ON vs OFF (Q3). Asi que la regla se despliega en modo
+    ADVERTENCIA -- ver Herramienta.advertencias_de_aprobacion().
+
+    El paso a error va en el mismo cambio que activa la config nueva. Mientras
+    tanto, una herramienta aprobable sin esto sigue el flujo de aprobacion
+    actual MAS las guardas que no dependen de config: transicion condicionada,
+    conversacion abierta y operador autenticado.
+    """
+    vigencia_minutos: int = Field(gt=0)
+    revalidar: Revalidacion
+
+
+class PoliticaDeclarada(Base):
+    """
+    Una politica de plataforma, atada a las lecturas de ESTE tenant.
+
+    El motor no puede saber que 'consultar_cliente' se llama asi: eso es
+    catalogo del tenant. Y el tenant no deberia reimplementar la regla: eso es
+    plataforma. Asi que la regla vive en codigo, se elige por 'nombre', y aqui
+    se dice con que herramientas de LECTURA alimentarla.
+
+    Es la misma forma que 'aprobacion.revalidar' (§3.7): la herramienta declara
+    que leer, el nucleo lo busca en el catalogo, y si no esta, no ejecuta.
+    """
+    #: Que politica de nucleo/facturacion/politicas.py aplicar.
+    nombre: str
+    #: rol logico -> nombre de una herramienta de SOLO LECTURA del catalogo.
+    #: Cada politica declara que roles necesita; si falta uno, no se propone.
+    lecturas: dict[str, str] = Field(default_factory=dict)
+
+
 class Herramienta(Base):
     nombre: str
     # 'interno': no llama a ninguna API -- el motor la resuelve el mismo
@@ -803,6 +955,96 @@ class Herramienta(Base):
     # todo lo existente -- no cambia el comportamiento de ninguna
     # herramienta que no la declare explicitamente.
     aprobacion_humana: bool = False
+    # =========================================================================
+    #  CAPACIDADES QUE EL RECONCILIADOR BUSCA POR BANDERA
+    # =========================================================================
+    #  El reconciliador (T20) no puede pedir herramientas por nombre: cada
+    #  empresa las llama como quiere. Las busca por estas banderas, y sin la
+    #  bandera NO intenta el efecto -- falla cerrado y visible.
+    #
+    #  ⚠️ LAS CUATRO SON NUEVAS AQUI Y ANTES NO SE PODIAN DECLARAR. El modelo
+    #  usa extra="forbid", asi que un YAML con 'busca_caso: true' fallaba la
+    #  carga entera -- y el codigo de B4 ya lo leia con getattr(..., False),
+    #  que devuelve False en silencio. O sea: la capacidad se consultaba, no
+    #  se podia declarar, y nadie se enteraba. Encontrado al construir D28.
+    #
+    #  Que cada una sea una BANDERA y no un nombre fijo es lo que deja que el
+    #  tenant elija el suyo sin tocar codigo -- mismo criterio que
+    #  'invocable_por_servicio'.
+
+    #: Busca un caso del CRM por su nombre exacto. La usa la reconciliacion de
+    #: 'crear_caso' para adoptar el que ya existe en vez de crear un segundo.
+    busca_caso: bool = False
+    #: Agrega UNA persona al caso sin reemplazar a las demas (D28). Tiene que
+    #: apuntar a un endpoint aditivo: uno que mande el conjunto entero borraria
+    #: a los colaboradores que alguien sumo a mano.
+    asigna_caso: bool = False
+    #: Lee quienes figuran en el caso AHORA. Sin esto no se puede confirmar una
+    #: asignacion, y una asignacion sin confirmar no se declara hecha.
+    lee_asignados: bool = False
+    #: Lista los perfiles de la organizacion en el CRM, para traducir el
+    #: usuario durable de Dexter al perfil de alla POR ID.
+    lee_perfiles: bool = False
+    #: Lee UN caso del CRM y devuelve su 'status'. Es lo que permite cerrar sin
+    #: escribir a ciegas (B6): medido contra el CRM real, un PATCH sobre un
+    #: caso ya cerrado responde 200 y le reescribe la fecha de cierre. Sin esta
+    #: capacidad, 'cerrar_caso' no se intenta -- queda visible y sin reintentos.
+    lee_caso: bool = False
+    #: Lee UN ticket del ISP por su id y devuelve su 'estado'. Sin esto,
+    #: 'cerrar_ticket' no se intenta: un PUT sobre uno ya cerrado le corre
+    #: 'fecha_fin' (medido, 21/09/2026).
+    lee_ticket: bool = False
+    #: Cambia el ESTADO de un ticket por PUT, mandando solo ese campo. NUNCA
+    #: la que responde el ticket: esa publica un comentario en cada intento.
+    cierra_ticket_estado: bool = False
+    #: Lista tickets por ventana de fechas, para recuperar uno por su
+    #: DEXTER_REF cuando el id se perdio (Q2.1). Tiene que aceptar
+    #: 'fecha_creacion_0/_1', 'limit' y 'offset'.
+    lista_tickets: bool = False
+    # Vigencia y revalidacion (§3.7). El contrato las exige para toda
+    # herramienta aprobable, pero el validador NO puede fallar todavia: la
+    # config vigente de Rapilink no las declara, y escribirla parte la medicion
+    # ON vs OFF (Q3). Hasta entonces esto es opcional y su ausencia se reporta
+    # como advertencia -- ver advertencias_de_aprobacion().
+    aprobacion: Aprobacion | None = None
+    # Politica de plataforma que decide si esta accion se puede siquiera
+    # PROPONER. Corre antes de crear la propuesta: no tiene sentido dejarle a
+    # una persona una accion que de entrada no procede, y menos una que
+    # aprobaria sin saber que no procedia.
+    #
+    # Es distinto de 'aprobacion.revalidar', y los dos hacen falta: la politica
+    # mira si corresponde AHORA, la revalidacion vuelve a mirar cuando alguien
+    # aprueba --porque entre las dos cosas pasa tiempo y el mundo se mueve.
+    #
+    # Ausente = sin politica, comportamiento de siempre. Ninguna herramienta la
+    # declara hoy salvo las que lo digan explicitamente.
+    politica: PoliticaDeclarada | None = None
+    # 'irreversible' (M06-A, 21/09/2026): el efecto de esta herramienta no lo
+    # puede deshacer el mismo sistema que lo produjo -- un reinicio no se
+    # des-reinicia, un pago no se des-registra con otra llamada. Es el criterio
+    # R3/R4 de tests/test_m10a_gobierno_frontera.py, y vive aca porque ahora
+    # hay CODIGO que lo aplica: la frontera (nucleo/seguridad/frontera.py) no
+    # deja salir una herramienta irreversible con otro permiso que el de la
+    # puerta 'critica', que exige la cadena entera MAS una aprobacion humana
+    # atada a la accion exacta (herramienta + argumentos + origen). Ver
+    # nucleo/seguridad/aprobacion.py.
+    #
+    # Es un dato del tenant y no del nucleo porque que herramienta es
+    # irreversible depende del catalogo de cada empresa -- el nucleo no conoce
+    # 'reiniciar_ont'. El validador de abajo impide declararla sin
+    # aprobacion_humana, o invocable por un servicio.
+    irreversible: bool = False
+    # 'nivel_autonomia' (M06-B, 21/09/2026): el nivel de autonomia que exige
+    # esta herramienta para correr sin una persona. El techo de la empresa
+    # (nucleo/seguridad/techo.py) tiene que alcanzarlo. Vacio = el de siempre:
+    # 0 para una lectura, 2 para una escritura -- asi ninguna herramienta del
+    # catalogo cambio de nivel al construirse el mecanismo.
+    #
+    # Es del CATALOGO, no de la llamada: el modelo no puede bajarlo pasando un
+    # argumento, y ninguna herramienta puede cambiar el suyo (la config solo la
+    # edita un administrador). 0..3 porque 3 es el tope de politica global; una
+    # escritura no puede exigir 0, que es "observar".
+    nivel_autonomia: int | None = Field(default=None, ge=0, le=3)
     # Solo tiene efecto con aprobacion_humana=True. Texto con marcadores
     # '{clave}' que se rellenan con los argumentos YA resueltos (los mismos
     # que se le mandarian a la API) -- para que quien aprueba lea "Crear
@@ -993,6 +1235,10 @@ class Herramienta(Base):
     verificacion: Verificacion | None = None
     responde_ticket_operativo: bool = False
     cierra_ticket_operativo: bool = False
+    #: Crea el ticket del ISP que respalda una escalada. La usa la cola de
+    #: efectos externos (B4), que le embebe un DEXTER_REF en la descripcion
+    #: para poder recuperarlo si el id se pierde (Q2.1).
+    crea_ticket_operativo: bool = False
     # La que cierra el caso en el CRM. Misma idea: el motor no sabe con que
     # palabra cierra un caso cada CRM ('Closed' aqui), eso va en la config.
     cierra_caso: bool = False
@@ -1163,6 +1409,13 @@ class Herramienta(Base):
     # RECIENTE de cada herramienta requerida -- una que cumplio hace varios
     # mensajes pero ya no representa el estado actual no cuenta.
     exige_previas: list[Precondicion] = Field(default_factory=list)
+    # Un dato que el modelo tiene que DECLARAR y el codigo valida contra una
+    # lista cerrada. Complementa 'exige_previas', no la reemplaza: aquella
+    # mira mediciones, esta mira lo que dijo el cliente, que es lo unico que
+    # existe cuando la accion no se puede decidir desde la red. Ver la
+    # docstring de Declaracion -- nace de un reinicio real disparado por una
+    # queja de lentitud, medido el 22/09/2026.
+    exige_declaracion: Declaracion | None = None
     # Texto que el motor inyecta como mensaje 'system' apenas 'exige_previas'
     # queda satisfecha (y esta herramienta todavia no se llamo en la
     # conversacion) -- SOLO si 'exige_previas' esta declarado, no tiene
@@ -1512,6 +1765,35 @@ class Herramienta(Base):
                 f"'{self.nombre}': aprobacion_humana solo tiene sentido en una "
                 f"escritura -- una consulta de solo lectura no necesita cola de "
                 f"aprobacion.")
+
+        if self.aprobacion and not self.aprobacion_humana:
+            raise ValueError(
+                f"'{self.nombre}': declara 'aprobacion' (vigencia y "
+                f"revalidacion) sin 'aprobacion_humana: true'. Esos campos solo "
+                f"corren al aprobar, asi que declararlos sin la cola promete "
+                f"una comprobacion que nunca se hace.")
+        #  Una irreversible sin aprobacion no seria ejecutable nunca (la
+        #  frontera exige la aprobacion atada a la accion), y un catalogo que
+        #  lo declare igual esta diciendo otra cosa de la que cree: se rechaza
+        #  al cargar, no se descubre en produccion.
+        if self.irreversible and self.solo_lectura:
+            raise ValueError(
+                f"'{self.nombre}': 'irreversible' solo tiene sentido en una "
+                f"escritura.")
+        if self.irreversible and not self.aprobacion_humana:
+            raise ValueError(
+                f"'{self.nombre}' es irreversible y no declara "
+                f"aprobacion_humana: su efecto no se deshace, asi que exige "
+                f"que una persona apruebe cada operacion.")
+        if (self.nivel_autonomia is not None and not self.solo_lectura
+                and self.nivel_autonomia < 1):
+            raise ValueError(
+                f"'{self.nombre}' escribe y declara nivel_autonomia 0: el nivel 0 "
+                f"es observar, y una escritura siempre tiene efecto.")
+        if self.irreversible and self.invocable_por_servicio:
+            raise ValueError(
+                f"'{self.nombre}' es irreversible y no puede ser invocable por "
+                f"un servicio: esa ruta no tiene a quien pedirle la aprobacion.")
 
         sobrantes_inyectados = set(self.inyectados_obligatorios) - set(self.inyectar_sesion)
         if sobrantes_inyectados:
@@ -1944,7 +2226,65 @@ class Escalamiento(Base):
     intentar_resolver_antes: list[str] = Field(default_factory=list)
 
 
+class CierreInactivasIA(Base):
+    """
+    El cierre automatico de lo que atendio SOLO el asistente.
+
+    POR QUE DOS COHORTES Y NO UN TOPE
+    ---------------------------------
+    La primera version de esta guarda era un tope por pasada, ordenando por
+    mas antigua primero. Estaba mal de dos formas, las dos medidas:
+
+      - Ordenar por antiguedad cierra EL BACKLOG PRIMERO, que es exactamente
+        lo que el tope pretendia evitar.
+      - El reloj corre cada 60 minutos. Con tope 10 eso son 240 cierres por
+        dia: las 147 historicas se iban en 0,6 dias, no en dos semanas.
+
+    Lo que hace falta no es ir mas despacio: es una FRONTERA TEMPORAL. Las
+    conversaciones que entran a la regla despues del corte son flujo normal y
+    se cierran solas; las anteriores son backlog y no se tocan hasta que
+    alguien lo habilite a proposito.
+
+    'rollout_cutoff' es la marca. Sin ella no se cierra NADA -- ni flujo ni
+    backlog. Es fail-closed a proposito: desplegar este codigo no puede
+    empezar a cerrar conversaciones sin que alguien haya elegido desde cuando.
+
+    UNA CONVERSACION VIEJA QUE VUELVE A HABLAR ES FLUJO NORMAL
+    ----------------------------------------------------------
+    El corte se compara contra la ULTIMA ACTIVIDAD, no contra la fecha de
+    creacion. Una de 2026-08 que recibio un mensaje despues del corte ya no es
+    backlog: entro a la regla nueva por la puerta de adelante.
+    """
+    # Apagado por defecto. El interruptor propio de ESTE trabajo: apagar el
+    # reloj entero para frenarlo se llevaria puestos los otros dos, que son
+    # legitimos.
+    habilitado: bool = False
+
+    # Desde cuando cuenta la regla. Sin esto no se cierra nada.
+    rollout_cutoff: datetime | None = None
+
+    # El backlog anterior al corte. Aparte, y apagado hasta que se mire.
+    backfill_habilitado: bool = False
+    # Cuantas del backlog por pasada. Con el reloj cada hora, 10 son 240 al
+    # dia -- el numero importa y por eso se configura, no se fija en codigo.
+    backfill_lote: int = Field(default=10, ge=1, le=500)
+
+
 class Limites(Base):
+    # CUANTOS TURNOS DE ESTA EMPRESA PUEDEN CORRER A LA VEZ.
+    #
+    # Los datos de cada empresa ya estan aislados; la CAPACIDAD no lo estaba.
+    # Una con un corte masivo --quinientos clientes escribiendo a la vez--
+    # llena los hilos del motor y las demas esperan detras, aunque no compartan
+    # una sola fila. Este tope convierte la avalancha de una en una fila de esa
+    # una.
+    #
+    # None = sin tope, que es como funciono siempre. Nace apagado porque
+    # encenderlo INTRODUCE ESPERA: con el tope puesto, el turno 11 aguarda a
+    # que termine alguno de los 10 en curso. Cual es el numero bueno depende
+    # del volumen real de cada empresa y del tiempo que tarde su modelo, y eso
+    # se mide antes de elegirlo -- no se adivina desde el esquema.
+    max_turnos_simultaneos: int | None = Field(default=None, ge=1)
     max_conversaciones_dia: int | None = None
     max_costo_usd_mes: float | None = None
     # Que se le dice al cliente cuando la empresa alcanzo su tope de gasto.
@@ -1980,6 +2320,74 @@ class Limites(Base):
     # mostrar la casa, la cedula o una cara. La foto sirve para resolver el
     # caso, y un caso vive dias. Ver supabase/202608121842_multimedia.sql.
     retencion_multimedia_dias: int = Field(default=30, ge=1)
+
+
+class PromesasPago(Base):
+    """
+    La politica de promesas de pago de ESTA empresa.
+
+    Los valores son decisiones COMERCIALES y no tiene sentido que los fije la
+    plataforma: cuantos dias de gracia da un ISP, hasta que monto, y cada
+    cuanto le acepta una promesa al mismo cliente. Van vacios a proposito --
+    ver 'faltan_valores()': sin ellos la accion no se ofrece, en vez de
+    ofrecerse con numeros que nadie decidio.
+
+    Las REGLAS, en cambio, son de plataforma y viven en codigo
+    (nucleo/facturacion/promesas.py). Esto es solo donde se aprietan.
+    """
+    #: Cuantos dias hacia adelante puede pedir el cliente. Sin tope, "prometo
+    #: pagar en seis meses" es servicio gratis por seis meses.
+    dias_maximos_promesa: int | None = Field(default=None, ge=1)
+    #: Tope del monto de la factura. 0 = sin tope (y es distinto de None:
+    #: None es "nadie lo decidio", 0 es "se decidio que no hay tope").
+    monto_maximo_promesa: float | None = Field(default=None, ge=0)
+    #: Minimo entre dos promesas al mismo cliente. Es la unica defensa contra
+    #: el que promete todos los meses -- y es PARCIAL: solo ve las promesas
+    #: que registro Dexter, no las que un agente cargo en el panel de WispHub,
+    #: porque esa API no permite consultarlas.
+    dias_entre_promesas: int | None = Field(default=None, ge=0)
+    #: Se deja en true y no se toca hasta que exista una lectura independiente
+    #: de promesas vigentes. Mientras no exista, la persona que aprueba es lo
+    #: unico que cubre el punto ciego de arriba.
+    requiere_aprobacion_humana: bool = True
+
+    def faltan_valores(self) -> list[str]:
+        """Lo que la empresa todavia no decidio. Vacio = politica completa."""
+        return [c for c in ("dias_maximos_promesa", "monto_maximo_promesa",
+                            "dias_entre_promesas")
+                if getattr(self, c) is None]
+
+
+class DesenlacePropio(Base):
+    """
+    Un codigo de desenlace de ESTA empresa (contrato §3.5, B6).
+
+    'categoria_base' es obligatoria y tiene que ser uno de los doce codigos de
+    plataforma (I16). No es burocracia: es lo unico que permite que las
+    metricas sumen entre empresas que le ponen nombres distintos a la misma
+    falla. Sin ella, 'fibra_poste_17' seria un dato que solo entiende quien lo
+    escribio.
+
+    El catalogo base vive en codigo (nucleo/relevo/desenlaces.py) y funciona
+    sin que nadie configure nada. Esto es la extension, no el reemplazo: un
+    codigo base no se puede redefinir aca.
+    """
+    codigo: str
+    nombre: str
+    categoria_base: str
+
+
+class Desenlaces(Base):
+    """
+    Que puede elegir un operador al cerrar a mano (T17).
+
+    'ocultos' saca codigos base de la LISTA, no del significado: lo ya cerrado
+    con ellos conserva su categoria, y la plataforma sigue escribiendo
+    'sin_respuesta_cliente' en el cierre por plazo aunque este oculto -- ahi no
+    hay ninguna eleccion que ocultar.
+    """
+    propios: list[DesenlacePropio] = Field(default_factory=list)
+    ocultos: list[str] = Field(default_factory=list)
 
 
 class Conversaciones(Base):
@@ -2503,6 +2911,28 @@ class TenantConfig(Base):
     # una sola, y esa es la diferencia entre un dato de PLATAFORMA (nucleo/,
     # igual para todas) y uno de EMPRESA (aca, distinto por tenant).
     variables_tenant: dict[str, str] = Field(default_factory=dict)
+    # Cuantos minutos puede esperar una conversacion ESCALADA Y SIN DUEÑO
+    # antes de que se considere vencida. Es el unico plazo que hay, y es a
+    # proposito: mide lo que de verdad duele --que alguien escribio, el
+    # asistente lo paso a una persona, y ninguna persona lo tomo todavia--.
+    # No mide cuanto tarda en resolverse: eso depende del caso y convertirlo
+    # en un numero obliga a inventar categorias que nadie midio.
+    #
+    # VA ACA Y NO EN CODIGO porque cada empresa lo decide: un ISP con guardia
+    # 24h y uno que atiende de 8 a 18 no toleran lo mismo. 0 = sin objetivo
+    # definido, y entonces la pantalla NO muestra cuenta regresiva -- no se
+    # inventa un plazo por defecto para tener algo que dibujar.
+    sla_toma_minutos: int = Field(default=0, ge=0)
+    # Desde que potencia optica de recepcion (dBm) se considera que el enlace
+    # esta atenuado. Es un numero NEGATIVO y cuanto mas negativo, peor: -20
+    # es una señal sana y -30 es un enlace al borde de caerse.
+    #
+    # VA EN LA CONFIG DEL TENANT porque depende de la planta de cada empresa
+    # --el largo de los tramos, los splitters, el tipo de ONU-- y no de este
+    # software. Sin umbral definido (None) la pantalla muestra la potencia
+    # pero NO dice si esta bien o mal: preferible un dato sin veredicto que
+    # un veredicto con un umbral inventado.
+    umbral_rx_dbm: float | None = Field(default=None)
     # Lista curada de planes para OFRECER a un prospecto nuevo -- ver
     # PlanVenta arriba sobre por que es distinta del catalogo tecnico del
     # proveedor. Vacio = ningun plan configurado todavia: el rol de ventas
@@ -2532,11 +2962,86 @@ class TenantConfig(Base):
     # Las areas de trabajo del equipo. Vacio = la pantalla no ofrece area.
     areas: list[AreaDeTrabajo] = Field(default_factory=list)
     conversaciones: Conversaciones = Field(default_factory=Conversaciones)
+    # Los codigos de cierre propios de esta empresa (B6, §3.5). Vacio es el
+    # caso normal y funciona: el catalogo base de plataforma alcanza para
+    # cerrar, asi que activar B6 no obliga a escribir 'tenant_config' -- y
+    # escribirla hoy partiria la medicion ON vs OFF (Q3).
+    desenlaces: Desenlaces = Field(default_factory=Desenlaces)
+    # La politica de promesas de pago. Vacia por defecto: sin valores, la
+    # accion de reactivar no se ofrece. Es deliberado -- los numeros son
+    # decisiones comerciales de cada empresa, no de la plataforma.
+    promesas_pago: PromesasPago = Field(default_factory=PromesasPago)
     limites: Limites = Field(default_factory=Limites)
+    # El cierre de lo que atendio solo el asistente. Seccion propia y no un
+    # campo mas de 'limites' porque tiene cuatro perillas que se mueven
+    # juntas, y porque su interruptor tiene que poder apagarse sin tocar nada
+    # mas. Ver CierreInactivasIA.
+    cierre_inactivas_ia: CierreInactivasIA = Field(default_factory=CierreInactivasIA)
     evaluacion: Evaluacion = Field(default_factory=Evaluacion)
     manual: Manual = Field(default_factory=Manual)
     importacion_tickets: ImportacionTickets = Field(
         default_factory=ImportacionTickets)
+
+    def advertencias_de_aprobacion(self) -> list[str]:
+        """
+        Lo que §3.7 exigiria y todavia no se puede exigir (Q3).
+
+        Devuelve texto en vez de levantar: activar la regla hoy romperia la
+        config vigente de Rapilink --que no declara vigencia ni revalidacion--
+        y escribir esa config parte la medicion ON vs OFF. El paso a error va
+        en el mismo cambio que active la config nueva; entonces esto se vuelve
+        un ValueError y este metodo desaparece.
+
+        Lo que SI falla cerrado hoy es lo que no depende de config: una accion
+        sin revalidacion declarada no se ejecuta con menos guardas, se ejecuta
+        con las que no necesitan catalogo (§9.3) -- y una revalidacion
+        declarada que no se puede correr NUNCA ejecuta (X17).
+        """
+        avisos: list[str] = []
+        por_nombre = {h.nombre: h for h in self.herramientas}
+        for h in self.herramientas:
+            if not h.aprobacion_humana:
+                continue
+            if h.aprobacion is None:
+                avisos.append(
+                    f"'{h.nombre}' es aprobable y no declara 'aprobacion' "
+                    f"(vigencia_minutos + revalidar). Sin vigencia, una "
+                    f"propuesta se puede aprobar semanas despues con los "
+                    f"argumentos de entonces (§3.7).")
+                continue
+            lectura = por_nombre.get(h.aprobacion.revalidar.herramienta)
+            if lectura is None:
+                avisos.append(
+                    f"'{h.nombre}' revalida con "
+                    f"'{h.aprobacion.revalidar.herramienta}', que no esta en el "
+                    f"catalogo: la revalidacion no va a poder correr, y una que "
+                    f"no corre impide ejecutar (X17).")
+            elif not lectura.solo_lectura:
+                avisos.append(
+                    f"'{h.nombre}' revalida con "
+                    f"'{lectura.nombre}', que NO es de solo lectura. Revalidar "
+                    f"no puede escribir: correria un efecto antes de decidir si "
+                    f"se ejecuta el efecto.")
+        return avisos
+
+    @model_validator(mode="after")
+    def _desenlaces_validos(self):
+        """
+        I16: todo codigo propio tiene una categoria base valida.
+
+        Esta regla SI falla cerrado, a diferencia de la de aprobacion (Q3), y
+        la diferencia es que aca no hay config vigente que romper: hoy ningun
+        tenant declara desenlaces, asi que exigirlo desde el primero no deja a
+        nadie afuera. Una regla que nace en modo advertencia rara vez pasa a
+        error; esta nace en error porque puede.
+        """
+        from nucleo.relevo import desenlaces as catalogo_desenlaces
+
+        fallos = catalogo_desenlaces.problemas(
+            self.desenlaces.propios, self.desenlaces.ocultos)
+        if fallos:
+            raise ValueError("desenlaces: " + "; ".join(fallos))
+        return self
 
     @model_validator(mode="after")
     def _coherencia_global(self):

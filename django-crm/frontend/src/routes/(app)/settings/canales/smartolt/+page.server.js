@@ -10,8 +10,8 @@ import {
 const SOLO_ADMIN = 'Solo un administrador puede cambiar esto.';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ locals }) {
-  const [smartolt, secretos] = await Promise.all([leerSmartOlt(), listarSecretos()]);
+export async function load({ fetch, locals }) {
+  const [smartolt, secretos] = await Promise.all([leerSmartOlt(locals, fetch), listarSecretos(locals, fetch)]);
   return {
     smartolt,
     secretoApiKey: secretos.find((s) => s.nombre === REF_API_KEY),
@@ -21,7 +21,7 @@ export async function load({ locals }) {
 
 /** @type {import('./$types').Actions} */
 export const actions = {
-  async guardar({ request, locals }) {
+  async guardar({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN') return fail(403, { error: SOLO_ADMIN });
 
     const form = await request.formData();
@@ -29,18 +29,18 @@ export const actions = {
     if (!valor.trim()) return fail(400, { error: 'Falta la clave.' });
 
     try {
-      await guardarSecreto(REF_API_KEY, valor.trim(), 'SmartOLT — control de ONUs');
+      await guardarSecreto(locals, fetch, REF_API_KEY, valor.trim(), 'SmartOLT — control de ONUs');
     } catch (/** @type {any} */ err) {
       return fail(400, { error: err?.message || 'No se pudo guardar la clave.' });
     }
     return { guardado: true };
   },
 
-  async borrar({ locals }) {
+  async borrar({ fetch, locals }) {
     if (locals.profile?.role !== 'ADMIN') return fail(403, { error: SOLO_ADMIN });
 
     try {
-      await borrarSecreto(REF_API_KEY);
+      await borrarSecreto(locals, fetch, REF_API_KEY);
     } catch (/** @type {any} */ err) {
       return fail(400, { error: err?.message || 'No se pudo borrar la clave.' });
     }
@@ -53,7 +53,7 @@ export const actions = {
    * hidden que arma la pantalla a partir de smartolt.subdominio_ref -- este
    * archivo no lo hardcodea, lo lee de lo que declaro la herramienta.
    */
-  async guardarSubdominio({ request, locals }) {
+  async guardarSubdominio({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN') return fail(403, { subdominioError: SOLO_ADMIN });
 
     const form = await request.formData();
@@ -63,7 +63,7 @@ export const actions = {
     if (!valor) return fail(400, { subdominioError: 'Falta el subdominio.' });
 
     try {
-      await guardarVariable(nombre, valor);
+      await guardarVariable(locals, fetch, nombre, valor);
     } catch (/** @type {any} */ err) {
       return fail(400, { subdominioError: err?.message || 'No se pudo guardar el subdominio.' });
     }
@@ -73,9 +73,9 @@ export const actions = {
   /**
    * Prueba con lo que la persona tiene escrito en ESE momento (subdominio +
    * clave), no con lo ya guardado -- asi se corrige un dato mal pegado sin
-   * guardar primero. Ver smartolt.js::probarConexion().
+   * guardar primero. Ver smartolt.js::probarConexion(locals, fetch).
    */
-  async probarConexion({ request, locals }) {
+  async probarConexion({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN') return fail(403, { pruebaError: SOLO_ADMIN });
 
     const form = await request.formData();
@@ -86,7 +86,7 @@ export const actions = {
     }
 
     try {
-      const resultado = await probarConexionSmartolt(subdominio, apiKey);
+      const resultado = await probarConexionSmartolt(locals, fetch, subdominio, apiKey);
       return { prueba: resultado };
     } catch (/** @type {any} */ err) {
       return fail(400, { pruebaError: err?.message || 'No se pudo probar la conexión.' });

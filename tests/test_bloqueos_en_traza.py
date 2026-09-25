@@ -61,9 +61,10 @@ ESPERADOS = {
     "FALTA_HABLAR_CON_EL_CLIENTE",
     "HERRAMIENTA_DESCONOCIDA",
     "LIMITE_DE_CONVERSACION",
+    "CAMBIO_DE_CONTROL",
 }
 faltan = ESPERADOS - CODIGOS_DE_BLOQUEO
-revisar(not faltan, "los siete codigos de gate cuentan como bloqueo",
+revisar(not faltan, "los ocho codigos de gate cuentan como bloqueo",
         f"sin clasificar: {sorted(faltan)}" if faltan else "")
 
 

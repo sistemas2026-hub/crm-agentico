@@ -4,8 +4,8 @@ import { leerGuiasTV, guardarGuiasTV } from '$lib/server/v2/guias-tv.js';
 const SOLO_ADMIN = 'Solo un administrador puede cambiar esto.';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ locals }) {
-  const datos = await leerGuiasTV();
+export async function load({ locals, fetch }) {
+  const datos = await leerGuiasTV(locals, fetch);
   return {
     guias: datos?.guias_tv ?? [],
     // Los tipos válidos los manda el motor: la pantalla no tiene por qué
@@ -32,7 +32,7 @@ export const actions = {
     }
 
     try {
-      await guardarGuiasTV(guias);
+      await guardarGuiasTV(locals, fetch, guias);
     } catch (/** @type {any} */ err) {
       // El motivo del motor viaja TAL CUAL. Sus mensajes no dicen solo qué
       // falló: dicen por qué esa regla existe («con TDT quien sintoniza es la

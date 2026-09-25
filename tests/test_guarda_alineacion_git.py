@@ -74,6 +74,9 @@ _COMMITS_ATRASADOS_ORIGINAL = editor.commits_atrasados
 fallos: list[str] = []
 
 
+import os
+
+
 def comprobar(condicion: bool, que: str) -> None:
     if condicion:
         print(f"  [OK]   {que}")
@@ -82,9 +85,42 @@ def comprobar(condicion: bool, que: str) -> None:
         fallos.append(que)
 
 
+def menciona(texto: str, cuantos: int) -> bool:
+    """El mensaje deja ver CUANTOS commits, que es el dato que importa.
+
+    Antes estos casos exigian frases literales --"commit(s) locales que
+    todavia no", "commit(s) atras del remoto"--. El 24/09/2026 las dos habian
+    cambiado (la guarda paso a decir "la rama que despliega" al ganar
+    RAMA_DESPLIEGUE) y siete comprobaciones estaban en rojo sin que nada
+    estuviera roto: el bloqueo funcionaba igual.
+
+    Es el anti-patron que CLAUDE.md §6 prohibe -- afirmar sobre la redaccion
+    en vez de sobre el efecto. Aqui el efecto es que quien lee el bloqueo
+    pueda saber EN QUE DIRECCION esta desalineado y POR CUANTO, y eso se
+    comprueba con los numeros: en el caso combinado los dos son distintos a
+    proposito (2 y 7), asi que el numero sirve de firma de cada direccion sin
+    depender de una sola palabra.
+    """
+    return f"{cuantos} commit" in texto
+
+
 def _con(adelante, atras):
     """Sustituye las dos funciones de bajo nivel por valores fijos, para
-    ejercitar solo la logica de combinacion de problemas_de_alineacion_git()."""
+    ejercitar solo la logica de combinacion de problemas_de_alineacion_git().
+
+    Tambien fija RAMA_DESPLIEGUE, y eso se agrego el 24/09/2026 arreglando
+    esta prueba: la guarda gano una TERCERA condicion --avisar cuando esa
+    variable falta-- despues de que este archivo se escribiera con dos. En
+    cualquier maquina de desarrollo hay repositorio y no hay variable, asi que
+    ese tercer problema se colaba en los 17 escenarios y hasta
+    "0 adelante y 0 atras -> sin problemas" salia en rojo. Los 17 fallaban por
+    una sola causa, y ninguno estaba midiendo lo que decia medir.
+
+    Fijarla aqui NO tapa esa condicion: tiene su propio escenario mas abajo.
+    Lo que hace es aislar la logica de adelanto/atraso, que es lo que estos
+    casos afirman.
+    """
+    os.environ[editor.VAR_RAMA_DESPLIEGUE] = "rama-de-despliegue-de-prueba"
     editor.commits_sin_empujar = lambda: adelante
     editor.commits_atrasados = lambda: atras
 
@@ -104,16 +140,16 @@ print("\n[2] Local ADELANTADO -> reporta la condicion")
 _con(3, 0)
 problemas = editor.problemas_de_alineacion_git()
 comprobar(len(problemas) == 1, "3 commits de adelanto -> exactamente 1 problema")
-comprobar(bool(problemas) and "commit(s) locales que todavia no" in problemas[0],
-          "el problema nombra la condicion de ADELANTO")
+comprobar(bool(problemas) and menciona(problemas[0], 3),
+          "el problema dice CUANTOS commits de adelanto (3)")
 
 # ---------------------------------------------------------------------- 3 --
 print("\n[3] Local ATRASADO -> reporta la condicion (Fase #20.4/#20.6.4)")
 _con(0, 5)
 problemas = editor.problemas_de_alineacion_git()
 comprobar(len(problemas) == 1, "5 commits de atraso -> exactamente 1 problema")
-comprobar(bool(problemas) and "commit(s) atras del remoto" in problemas[0],
-          "el problema nombra la condicion de ATRASO")
+comprobar(bool(problemas) and menciona(problemas[0], 5),
+          "el problema dice CUANTOS commits de atraso (5)")
 
 # ---------------------------------------------------------------------- 4 --
 print("\n[4] Las dos condiciones a la vez -> reporta AMBAS")
@@ -121,8 +157,9 @@ _con(2, 7)
 problemas = editor.problemas_de_alineacion_git()
 comprobar(len(problemas) == 2, "adelanto Y atraso simultaneos -> 2 problemas")
 texto = " ".join(problemas)
-comprobar("commit(s) locales que todavia no" in texto and "commit(s) atras del remoto" in texto,
-          "se nombran las DOS condiciones, no solo la primera evaluada")
+comprobar(menciona(texto, 2) and menciona(texto, 7)
+          and problemas[0] != problemas[1],
+          "se reportan las DOS condiciones por separado (2 y 7), no solo la primera")
 
 # ---------------------------------------------------------------------- 5 --
 print("\n[5] Estado indeterminado -> se trata como bloqueo, no como 0")
@@ -208,6 +245,48 @@ comprobar(editor.commits_atrasados() == 0,
           "binario de git esta en la misma situacion que uno sin repositorio: "
           "no hay copia local que pueda estar desincronizada")
 
+
+# ------------------------------------------------------------------- 6bis --
+# La TERCERA condicion, que hasta el 24/09/2026 no tenia ninguna prueba.
+#
+# Se agrego a la guarda despues de que este archivo se escribiera, y nadie
+# actualizo los escenarios: el resultado fue que se colaba en los 17 y los
+# ponia a todos en rojo sin medir nada. Arreglarlos sin escribir ESTA habria
+# dejado la condicion sin cubrir -- o sea, habria cambiado 17 falsos rojos por
+# un verde que tampoco significaba nada.
+print("\n[6bis] Sin RAMA_DESPLIEGUE: se avisa, pero solo si HAY repositorio")
+
+# Se guardan las reales: mas abajo hay casos que las ejercitan de verdad,
+# con subprocess sustituido. Dejarlas pisadas rompia dos comprobaciones
+# posteriores -- y el sintoma aparecia lejos de la causa.
+_sin_empujar_real, _atrasados_real = editor.commits_sin_empujar, editor.commits_atrasados
+editor.commits_sin_empujar = lambda: 0
+editor.commits_atrasados = lambda: 0
+_rama_previa = os.environ.pop(editor.VAR_RAMA_DESPLIEGUE, None)
+
+# CON repositorio: la guarda mira el upstream de la rama actual, que se
+# satisface con un push a cualquier rama de trabajo -- o sea que es mas debil
+# de lo que aparenta. Decirlo es el punto.
+subprocess.run = _git_falso({"rev-parse": (0, ".git\n"), "rev-list": (0, "0\n")})
+problemas = editor.problemas_de_alineacion_git()
+comprobar(len(problemas) == 1 and editor.VAR_RAMA_DESPLIEGUE in problemas[0],
+          "alineado pero sin RAMA_DESPLIEGUE -> avisa, y nombra la variable "
+          "que falta para que se pueda arreglar")
+
+# SIN repositorio: es el contenedor productivo, donde este desfase no puede
+# existir. Avisar ahi bloquearia toda edicion desde la interfaz -- el mismo
+# incidente del 08/09/2026 que ya cuesta un caso mas arriba.
+subprocess.run = _git_falso({"rev-parse": (128, ""), "rev-list": (128, "")})
+comprobar(editor.problemas_de_alineacion_git() == [],
+          "sin repositorio NO avisa por la variable: en produccion no hay "
+          "copia que pueda estar desalineada, y avisar ahi apaga la pantalla")
+
+editor.commits_sin_empujar, editor.commits_atrasados = _sin_empujar_real, _atrasados_real
+if _rama_previa is not None:
+    os.environ[editor.VAR_RAMA_DESPLIEGUE] = _rama_previa
+subprocess.run = _explota
+
+
 subprocess.run = lambda *a, **k: _ProcesoFalso(0, "no-es-un-numero\n")
 comprobar(editor.commits_atrasados() is None,
           "salida que no es un entero -> None, no una excepcion sin atrapar")
@@ -239,8 +318,8 @@ try:
     editor._editar("tenant_de_prueba", lambda doc: None)
     comprobar(False, "_editar() deberia haber lanzado ErrorEdicion")
 except ErrorEdicion as e:
-    comprobar("commit(s) locales que todavia no" in str(e),
-              "_editar() bloquea local ADELANTADO con ErrorEdicion, mensaje correcto")
+    comprobar(menciona(str(e), 3),
+              "_editar() bloquea local ADELANTADO y el error dice cuantos (3)")
 except _SesionAlcanzada:
     comprobar(False, "_editar() NO deberia haber intentado abrir una sesion")
 
@@ -249,8 +328,8 @@ try:
     editor._editar("tenant_de_prueba", lambda doc: None)
     comprobar(False, "_editar() deberia haber lanzado ErrorEdicion")
 except ErrorEdicion as e:
-    comprobar("commit(s) atras del remoto" in str(e),
-              "_editar() bloquea local ATRASADO con ErrorEdicion, mensaje correcto")
+    comprobar(menciona(str(e), 5),
+              "_editar() bloquea local ATRASADO y el error dice cuantos (5)")
 except _SesionAlcanzada:
     comprobar(False, "_editar() NO deberia haber intentado abrir una sesion")
 
@@ -301,6 +380,15 @@ class _CursorFalso:
     def execute(self, sql, params=None):
         self.llamadas.append(sql)
 
+    # Desde el 15/09/2026 el alta de un tenant siembra tambien su interruptor
+    # de autonomia, en la MISMA transaccion (ver interruptor.sembrar y el
+    # comentario en cli/cargar_config.py). Esa funcion lee 'rowcount' para
+    # saber si escribio o si ya habia fila. Este doble no ejecuta SQL de
+    # verdad, asi que declara el atributo y nada mas: lo que este archivo
+    # prueba es el guardia de alineacion con git, no el alta del interruptor
+    # -- de eso se ocupa tests/test_alta_tenant_autonomia.py.
+    rowcount = 1
+
     def fetchone(self):
         return self._respuestas.pop(0) if self._respuestas else None
 
@@ -339,16 +427,16 @@ try:
     cc.cargar(RUTA_YAML_REAL)
     comprobar(False, "cargar() deberia haber lanzado SystemExit")
 except SystemExit as e:
-    comprobar("commit(s) locales que todavia no" in str(e),
-              "cargar() bloquea local ADELANTADO con SystemExit, mensaje correcto")
+    comprobar(menciona(str(e), 4),
+              "cargar() bloquea local ADELANTADO y el error dice cuantos (4)")
 
 _con(0, 6)
 try:
     cc.cargar(RUTA_YAML_REAL)
     comprobar(False, "cargar() deberia haber lanzado SystemExit")
 except SystemExit as e:
-    comprobar("commit(s) atras del remoto" in str(e),
-              "cargar() bloquea local ATRASADO con SystemExit, mensaje correcto")
+    comprobar(menciona(str(e), 6),
+              "cargar() bloquea local ATRASADO y el error dice cuantos (6)")
 
 print("\n[8b] Alineado -> NO bloquea, corre hasta el final (INSERT simulado)")
 _con(0, 0)

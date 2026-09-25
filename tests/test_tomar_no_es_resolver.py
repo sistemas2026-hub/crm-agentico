@@ -81,26 +81,29 @@ def _cuerpo(fuente: str, encabezado: str, sin_doc: bool = False) -> str:
 
 
 # --- 1. tomar no toca la marca de resolucion ---------------------------------
-# Es LA propiedad. Si tomar_caso escribe 'atendida_manual', vuelve todo el
-# problema: el caso queda cerrable por un "gracias" y por el barrido.
-fn = _cuerpo(db, "def tomar_caso(tenant: str, conversation_id: str, por: str | None,",
+# Es LA propiedad. Si tomar escribe 'atendida_manual', vuelve todo el problema:
+# el caso queda cerrable por un "gracias" y por el barrido. Desde B3.2 tomar y
+# soltar viven en nucleo/relevo/transiciones.py (el efecto contra PostgreSQL lo
+# prueba tests/test_relevo_transiciones_base.py).
+trans = (RAIZ / "nucleo" / "relevo" / "transiciones.py").read_text(encoding="utf-8")
+fn = _cuerpo(trans, "def tomar(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,",
              sin_doc=True)
 revisar("atendida_manual" not in fn,
         "tomar un caso NO escribe 'atendida_manual'",
         "Esa marca significa 'resuelto por otro canal' y habilita el cierre "
-        "por 'gracias' del cliente (db.py:625) y el barrido por plazo "
-        "(db.py:799). Tomar un caso no resuelve nada.")
+        "por 'gracias' del cliente y el barrido por plazo. Tomar un caso no "
+        "resuelve nada.")
 
 # --- 2. tomar se puede deshacer ----------------------------------------------
-# Al reves que marcar_atendida(), que no tiene desmarcar a proposito: un caso
-# se toma por error, se acaba un turno, o resulta que era de otra area.
-revisar("soltar" in fn and "tomada_por = null" in fn,
-        "tomar es reversible: se puede soltar")
+fn_soltar = _cuerpo(trans, "def soltar(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,",
+                    sin_doc=True)
+revisar("tomada_por = null" in fn_soltar and "control" not in fn_soltar.replace("# El control NO", ""),
+        "tomar es reversible: se puede soltar, y soltar no toca el control")
 
-# --- 3. la ruta de 'atender' usa tomar, no marcar_atendida -------------------
+# --- 3. la ruta de 'atender' usa tomar/soltar, no marcar_atendida ------------
 ruta = _cuerpo(api, "def conversaciones_atender(id_conversacion):")
-revisar("tomar_caso" in ruta and "marcar_atendida" not in ruta,
-        "la ruta /atender toma el caso, no lo marca como resuelto")
+revisar("transiciones.tomar" in ruta and "transiciones.soltar" in ruta and "marcar_atendida" not in ruta,
+        "la ruta /atender toma o suelta el caso, no lo marca como resuelto")
 
 # --- 4. marcar_atendida sigue existiendo, para lo suyo -----------------------
 # No se borro: 'Marcar como resuelta' la sigue necesitando, y ahi SI

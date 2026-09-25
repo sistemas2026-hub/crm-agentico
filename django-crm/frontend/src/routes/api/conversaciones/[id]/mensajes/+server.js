@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * El hilo de una conversación del asistente, para pantallas que lo miran
@@ -20,7 +21,7 @@ export async function GET({ params, locals, fetch }) {
   }
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     return json({ mensajes: [] });
   }
@@ -41,6 +42,21 @@ export async function GET({ params, locals, fetch }) {
         // saber cuál es cuál para no responder dos veces lo mismo.
         quien: m.rol === 'user' ? 'cliente' : m.rol === 'humano' ? 'humano' : 'asistente',
         texto: m.contenido,
+        // QUIEN LO PRODUJO, TAL CUAL (D30). Faltaba, y el efecto se veia en
+        // produccion: un mensaje que entra mientras alguien mira la pantalla
+        // llega por esta ruta --no por el `load`-- y se dibujaba como «ORIGEN
+        // NO REGISTRADO», que es la etiqueta reservada a las filas anteriores
+        // al registro de origen. O sea que la pantalla afirmaba no saber algo
+        // que la base sabia perfectamente, y sobre un mensaje de hace un
+        // segundo. Recargar lo arreglaba, que es la peor forma de arreglarse:
+        // parece intermitente.
+        //
+        // 'quien' NO sirve para deducirlo: sale de `rol`, y `rol = assistant`
+        // cubre por igual a la IA y a una persona. Es justo la distincion que
+        // D30 existe para sostener, asi que la columna viaja entera. NULL se
+        // devuelve NULL -- no se rellena.
+        origen: m.origen ?? null,
+        autor_nombre: m.autor_nombre ?? null,
         creado_en: m.creado_en,
         // Los adjuntos SIN los bytes -- la interfaz los pide por su id. Sin
         // esto, una foto que entra mientras alguien mira la conversación se
@@ -49,7 +65,9 @@ export async function GET({ params, locals, fetch }) {
         adjuntos: m.adjuntos ?? [],
         // Estado de entrega, para que un fallo aparezca sin recargar.
         estado_entrega: m.estado_entrega ?? null,
-        error_entrega: m.error_entrega ?? null
+        error_entrega: m.error_entrega ?? null,
+        // Para que "Reintentar" reuse la clave y no cree otra fila (D15).
+        clave_idempotencia: m.clave_idempotencia ?? null
       })),
       // El encabezado ENTERO, tal como lo devuelve el motor. La pantalla de
       // conversacion lo necesita para refrescar sin recargar: si se escalo,

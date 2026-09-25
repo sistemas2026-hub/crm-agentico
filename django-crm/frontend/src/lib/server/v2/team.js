@@ -293,49 +293,31 @@ export function setStatus({ cookies }, userId, status) {
 }
 
 /**
- * Definirle una contraseña nueva a alguien: `POST /api/user/<userId>/password/`.
+ * Se conserva 'setPassword' y no 'definirClave' (24/09/2026): las dos ramas
+ * escribieron esta llamada por separado y el cuerpo difiere --{password}
+ * contra {nueva}--. Gana la que habla el idioma del endpoint que quedo
+ * enrutado en common/urls.py, que es el que corre en produccion y el que
+ * tiene pruebas. Ver el comentario de esa ruta para las dos guardas que
+ * quedaron sin plegar.
+ * Le define la clave a una persona: `POST /api/user/<userId>/password/`.
  *
- * El servidor pone las tres guardas que importan y que la pantalla no puede
- * garantizar: solo un administrador, nunca sobre uno mismo (para eso está la
- * de tu propio perfil, que pide la actual) y nunca sobre una cuenta que
- * también pertenece a otra organización -- la contraseña cuelga de la cuenta,
- * no del perfil, y cambiarla abriría la puerta de la otra empresa.
+ * Endpoint aparte del PATCH a proposito. `CreateUserSerializer` es un
+ * ModelSerializer sobre User: si aceptara `password` guardaria el texto plano
+ * en la columna. Alla la clave se aplica con `set_password`, que la hashea.
+ *
+ * El servidor es el que valida: pide administrador, exige que la persona sea
+ * de la misma organizacion y corre los validadores de Django (largo minimo,
+ * claves comunes, solo numeros). Esta pantalla no repite esas reglas: muestra
+ * lo que el servidor conteste.
  *
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  * @param {string} userId  el id del USUARIO, no el del perfil
- * @param {string} nueva
+ * @param {string} password
  */
-export function definirClave({ cookies }, userId, nueva) {
+export function setPassword({ cookies }, userId, password) {
   return apiRequest(
     `/user/${userId}/password/`,
-    { method: 'POST', body: { nueva } },
+    { method: 'POST', body: { password } },
     { cookies }
   );
-}
-
-/**
- * Borrar a alguien de verdad: `DELETE /api/user/<userId>/`.
- *
- * Esto NO es desactivar. Desactivar deja la persona y su historial; esto borra
- * el perfil. El servidor se niega (409) si tiene órdenes de trabajo en su
- * historial, porque borrarlo se llevaría por delante quién hizo qué.
- *
- * La pantalla no decide eso: manda, y muestra el motivo si el servidor dice
- * que no. Una regla escrita dos veces es una regla que va a diverger.
- *
- * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
- * @param {string} userId
- */
-export function eliminarPersona({ cookies }, userId) {
-  return apiRequest(`/user/${userId}/`, { method: 'DELETE' }, { cookies });
-}
-
-/**
- * Cambiar la contraseña propia: `POST /api/auth/password/`. Exige la actual.
- *
- * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
- * @param {{ actual: string, nueva: string }} body
- */
-export function cambiarMiClave({ cookies }, body) {
-  return apiRequest('/auth/password/', { method: 'POST', body }, { cookies });
 }

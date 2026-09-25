@@ -44,7 +44,13 @@ las conversaciones de otro ISP.
 Por eso cada operacion abre transaccion, hace 'set local role app_backend'
 -que si esta sujeto a RLS- y fija app.current_tenant. El 'local' de ambos es
 lo que impide que una peticion herede el tenant de otra si se reutiliza la
-conexion.
+conexion, y tambien que quede algun privilegio elevado cuando la transaccion
+termina.
+
+La UNICA excepcion al rol es 'registrar_transicion_autonomia', que baja a
+'autonomia_operador': mover el interruptor de autonomia es administracion y no
+runtime, y con un solo rol para las dos cosas el motor podia reactivarse solo.
+Ver ROLES_PERMITIDOS mas abajo y PASO10.12.
 
 El orden importa: el slug se resuelve ANTES de bajar de rol, porque leer
 tenant_config ya requiere el tenant fijado y seria circular.
@@ -61,15 +67,20 @@ igual que ya decidia el PRD para 'messages'.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import unicodedata
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 
 import psycopg
 from psycopg.rows import dict_row
 
 from nucleo.persistencia.conexion import dsn
+from nucleo.relevo import control as regla_control
+from nucleo.relevo import historial as regla_historial
 from nucleo.observabilidad.registro import id_interno, registrar
 
 # Cache de slug -> organization_id. El vinculo lo crea cli/cargar_config.py y
@@ -105,18 +116,176 @@ def _organizacion(cur, tenant: str) -> str:
     return _ORGS[tenant]
 
 
-@contextmanager
-def sesion(tenant: str):
-    """
-    Conexion con el tenant fijado y el rol degradado a app_backend.
+#: Cache de la INVERSA: organization_id -> slug.
+#:
+#: Aparte de `_ORGS` y no derivado de el: `_ORGS` se llena con los tenants que
+#: alguien pidio, asi que invertirlo solo conoceria a los ya preguntados.
+_SLUGS: dict[str, str] = {}
 
-    Entrega (cursor, organization_id). Commit al salir sin excepcion.
+
+def slug_de_organizacion(cur, organization_id: str) -> str | None:
     """
-    con = psycopg.connect(dsn(), connect_timeout=30, row_factory=dict_row)
+    organization_id -> slug. La inversa de `_organizacion`.
+
+    La necesita la plataforma para varios ISPs (PRD 8.13): el frontend sabe
+    QUIEN inicio sesion --su organizacion viene en el JWT-- y no de que empresa
+    son los datos que va a pedir. Hasta hoy eso salia de una variable de
+    entorno, o sea que la instalacion entera servia a una sola empresa.
+
+    Que la inversa EXISTA no es casualidad ni suerte: `asistente.tenant_config`
+    tiene `organization_id` como clave primaria y `slug` con UNIQUE, asi que la
+    relacion es una biyeccion (comprobado contra el esquema el 24/09/2026). Si
+    una organizacion pudiera tener dos tenants, esta funcion no podria existir.
+
+    Devuelve None si esa organizacion no tiene tenant configurado. **None no es
+    un error y no se convierte en un default**: significa que esa empresa
+    todavia no tiene asistente, y servirle el de otra seria exactamente la
+    fuga que el aislamiento por organizacion existe para impedir.
+
+    Como `_organizacion`, corre con el usuario que conecta: es la consulta que
+    AVERIGUA que tenant fijar, asi que no puede depender de que ya este fijado.
+    """
+    clave = str(organization_id or "").strip()
+    if not clave:
+        return None
+    if clave in _SLUGS:
+        return _SLUGS[clave]
+    cur.execute("select slug from asistente.tenant_config where organization_id = %s",
+                (clave,))
+    fila = cur.fetchone()
+    if not fila:
+        return None
+    slug = fila[0] if not isinstance(fila, dict) else fila["slug"]
+    _SLUGS[clave] = str(slug)
+    return _SLUGS[clave]
+
+
+def tenant_de_organizacion(organization_id: str) -> str | None:
+    """
+    `slug_de_organizacion` con su propia conexion, para quien no tiene una.
+
+    No puede usar `sesion()`: esa exige un tenant fijado, y esta es justamente
+    la consulta que AVERIGUA cual es. Mismo patron y mismo timeout corto que la
+    lectura del interruptor, por el mismo motivo -- la atiende el frontend en
+    cada peticion, y una que se cuelga deja la pantalla esperando.
+    """
+    if not str(organization_id or "").strip():
+        return None
+    con = psycopg.connect(dsn(), connect_timeout=SEGUNDOS_CONEXION_GATE,
+                          row_factory=dict_row)
     try:
         with con.cursor() as cur:
+            cur.execute("select set_config('statement_timeout', %s, false)",
+                        (str(SEGUNDOS_CONEXION_GATE * 1000),))
+            return slug_de_organizacion(cur, organization_id)
+    finally:
+        con.close()
+
+
+# El timeout de conexion de casi todo: una consulta de conversacion, una
+# escritura de traza, un barrido del reloj. No se toca.
+SEGUNDOS_CONEXION = 30
+
+# EL TIMEOUT DEL CAMINO DEL INTERRUPTOR  --  corto, y aparte a proposito.
+#
+# Lo usan SOLO estas tres: estado_autonomia, estado_autonomia_de_organizacion y
+# registrar_auditoria. Son las tres que corren ANTES de dejar pasar una accion,
+# con alguien esperando del otro lado.
+#
+# Medido el 15/09/2026 con la base caida y los 30 s de siempre: UNA lectura del
+# interruptor tardaba 30,1 s contra un host que no responde y 60,2 s contra un
+# puerto cerrado en 'localhost' -- porque el nombre resuelve a ::1 y a
+# 127.0.0.1, y libpq gasta el timeout COMPLETO en cada direccion antes de
+# rendirse. Y una accion bloqueada toca la base mas de una vez (la lectura, y
+# despues la fila de auditoria del bloqueo).
+#
+# El efecto en produccion no es teorico: DESPLIEGUE.md ya documenta que cuando
+# el motor tarda de mas, el proxy corta la conexion y el cliente ve un error
+# por una respuesta que si existia. Aca el retraso ocurre ANTES de la
+# respuesta, asi que el turno entero se cuelga en vez de fallar rapido.
+#
+# POR QUE 3 Y NO 1: el gate tiene que distinguir "la base no esta" de "la base
+# tardo un poco". Contra el pooler sano la conexion se resuelve en
+# milisegundos; 3 s deja margen para un pico de carga sin volver el bloqueo un
+# falso positivo -- y un falso bloqueo es seguro pero interrumpe trabajo real.
+#
+# Y NO PROMETE UN TOPE GLOBAL: son 3 s POR DIRECCION que libpq intente. Con un
+# nombre de doble pila el peor caso sigue siendo el doble. Se dice aca en vez
+# de fingir que el numero es un tope total.
+SEGUNDOS_CONEXION_GATE = 3
+
+
+# -----------------------------------------------------------------------------
+#  LOS DOS ROLES A LOS QUE ESTE MODULO PUEDE BAJAR  (paso 10.12)
+# -----------------------------------------------------------------------------
+#  'app_backend' es el RUNTIME: todo lo que hace el motor en caliente.
+#  'autonomia_operador' es el flujo ADMINISTRATIVO del interruptor, y nada mas.
+#
+#  Estan separados porque hasta el 17/09/2026 eran el mismo rol, y eso permitia
+#  que el proceso del motor insertara 'activo' en el interruptor -- reactivar la
+#  autonomia sin pasar por cli/autonomia.py ni dejar actor y motivo. Medido en
+#  el paso 10.10; la segregacion se diseño y se probo en el 10.11.
+#
+#  La lista blanca no es decoracion: 'SET ROLE' es una sentencia de utilidad y
+#  NO acepta parametros (el mismo motivo que 'statement_timeout' unas lineas mas
+#  abajo), asi que el nombre del rol se interpola en el SQL. Interpolar algo que
+#  no este en esta tupla seria una inyeccion.
+ROL_RUNTIME = "app_backend"
+ROL_OPERADOR_AUTONOMIA = "autonomia_operador"
+ROLES_PERMITIDOS = (ROL_RUNTIME, ROL_OPERADOR_AUTONOMIA)
+
+
+@contextmanager
+def sesion(tenant: str, connect_timeout: int = SEGUNDOS_CONEXION,
+           rol: str = ROL_RUNTIME):
+    """
+    Conexion con el tenant fijado y el rol degradado.
+
+    Entrega (cursor, organization_id). Commit al salir sin excepcion.
+
+    'rol' es 'app_backend' por omision -- el runtime, o sea todo el modulo menos
+    una funcion. El unico que pide otro es 'registrar_transicion_autonomia', que
+    baja a 'autonomia_operador' porque mover el interruptor es administracion y
+    no runtime (paso 10.12). Solo se admiten los de ROLES_PERMITIDOS.
+
+    El 'set local role' muere con la transaccion: al cerrarla no queda ningun
+    privilegio elevado en la conexion, y la conexion ademas se cierra aca.
+
+    'connect_timeout' existe solo para el camino del interruptor (ver
+    SEGUNDOS_CONEXION_GATE). Quien no lo pasa -- o sea todo el resto del
+    modulo -- sigue con los 30 s de siempre, sin un cambio.
+
+    Cuando se pide el timeout corto se acota tambien 'statement_timeout' al
+    mismo valor: el 'connect_timeout' solo cubre el apreton de manos, y una
+    base que ACEPTA la conexion y despues no contesta dejaria el gate colgado
+    igual. Va como 'set local', asi que vive y muere con esta transaccion y no
+    toca a nadie mas.
+    """
+    con = psycopg.connect(dsn(), connect_timeout=connect_timeout,
+                          row_factory=dict_row)
+    try:
+        with con.cursor() as cur:
+            if connect_timeout != SEGUNDOS_CONEXION:
+                # set_config() y NO 'set local statement_timeout = %s': SET es
+                # una sentencia de utilidad y NO acepta parametros -- Postgres
+                # responde 'syntax error at or near "$1"'. Costo real: la
+                # primera version de esto hacia fallar TODA lectura del
+                # interruptor contra una base de verdad, y como el gate falla
+                # cerrado, el sintoma habria sido "ninguna accion autonoma
+                # funciona en ningun tenant". No lo vio ninguna prueba sin
+                # base; lo vio la verificacion contra PostgreSQL real.
+                #
+                # Es la misma forma que ya se usa dos lineas mas abajo para
+                # app.current_tenant, que estaba ahi todo el tiempo.
+                cur.execute("select set_config('statement_timeout', %s, true)",
+                            (str(connect_timeout * 1000),))
             org = _organizacion(cur, tenant)         # antes de bajar de rol
-            cur.execute("set local role app_backend")
+            # Lista blanca ANTES de interpolar: SET ROLE no acepta parametros.
+            # Ver el comentario de ROLES_PERMITIDOS.
+            if rol not in ROLES_PERMITIDOS:
+                raise ValueError(
+                    f"rol no permitido: {rol!r}. Solo {ROLES_PERMITIDOS}")
+            cur.execute(f"set local role {rol}")
             cur.execute("select set_config('app.current_tenant', %s, true)", (org,))
             yield cur, org
         con.commit()
@@ -281,22 +450,83 @@ def historial_para_el_modelo(tenant: str, conversation_id: str,
     try:
         with sesion(tenant) as (cur, org):
             cur.execute(
-                """select rol, contenido from (
-                     select rol, contenido, creado_en
+                # La regla de que entra y como la decide nucleo/relevo/
+                # historial.py, la MISMA que usa el camino en vivo. Antes esto
+                # devolvia 'rol, contenido' a secas: lo que habia escrito una
+                # persona volvia sin firma y la IA lo tomaba como propio (D8),
+                # y la unica fila de legado con rol 'humano' ni siquiera entraba.
+                # El filtro de rol va en el SQL para que el limite cuente solo
+                # filas que el modelo va a ver: las notas no le roban lugar.
+                """select rol, contenido, origen, autor_nombre, estado_entrega from (
+                     select rol, contenido, origen, autor_nombre, estado_entrega, creado_en
                        from asistente.messages
                       where organization_id = %s and conversation_id = %s
                         and contenido is not null and contenido <> ''
-                        and rol in ('user', 'assistant')
+                        and rol = any(%s)
+                        and coalesce(estado_entrega, '') <> 'descartado'
                       order by creado_en desc limit %s
                    ) ultimos order by creado_en""",
-                (org, conversation_id, limite))
-            return [{"role": f["rol"], "content": f["contenido"]}
-                    for f in cur.fetchall()]
+                (org, conversation_id, list(regla_historial.ROLES_DEL_MODELO), limite))
+            return regla_historial.construir(cur.fetchall())
     except Exception as e:
         # Igual que el resto de la rehidratacion: un fallo al leer no impide
         # atender. Se arranca sin memoria, que es lo que pasaba siempre.
         registrar("sesion", "no se pudo rehidratar el historial", error=e)
         return []
+
+
+# =============================================================================
+#  ORIGEN Y AUTOR DE UN MENSAJE  (supabase/202609161600_origen_de_mensajes.sql)
+# =============================================================================
+#  'rol' es el protocolo del modelo y del canal; 'origen' es quien produjo el
+#  mensaje. La base admite origen NULL solo por el legado: TODA fila nueva lo
+#  lleva, y eso se exige aca, en el unico lugar por donde se escribe
+#  (SPEC/CONTRATO_RELEVO_IA_HUMANO.md, I4).
+ORIGENES = frozenset({"cliente", "ia", "humano", "sistema"})
+
+# Que origenes tienen sentido para cada rol. Un 'user' que no es del lado
+# cliente, o una nota que no escribio una persona, es un error de quien llama.
+_ORIGENES_POR_ROL = {
+    "user": frozenset({"cliente"}),
+    "assistant": frozenset({"ia", "sistema", "humano"}),
+    "nota": frozenset({"humano"}),
+}
+
+
+class AutorInvalido(ValueError):
+    """Un mensaje de una persona sin autor identificable."""
+
+
+class CanalNoAdmite(ValueError):
+    """La conversacion es de un canal que no puede recibir este envio."""
+
+
+def validar_origen(rol: str, origen: str) -> None:
+    """Levanta ValueError si 'origen' falta, es desconocido o no corresponde
+    al rol. Se llama antes de cualquier escritura."""
+    if origen not in ORIGENES:
+        raise ValueError(f"origen invalido o ausente: {origen!r}")
+    if origen not in _ORIGENES_POR_ROL.get(rol, frozenset()):
+        raise ValueError(f"origen {origen!r} no corresponde al rol {rol!r}")
+
+
+def validar_autor(autor_nombre: str | None, autor_usuario_id: str | None) -> tuple[str, str]:
+    """
+    (nombre, usuario_id) normalizados, o AutorInvalido.
+
+    Un mensaje humano sin autor no se guarda. Los dos datos: el id identifica
+    a la persona aunque cambie de nombre; el nombre es lo que se firma y lo que
+    ve el modelo. Los arma el proxy con la sesion autenticada, nunca el
+    navegador.
+    """
+    nombre = (autor_nombre or "").strip()
+    if not nombre:
+        raise AutorInvalido("falta el nombre de quien escribe")
+    try:
+        usuario = str(uuid.UUID(str(autor_usuario_id)))
+    except (ValueError, TypeError, AttributeError):
+        raise AutorInvalido("falta o es invalido el id de quien escribe") from None
+    return nombre, usuario
 
 
 def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
@@ -307,7 +537,7 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
                       tokens_salida: int | None = None,
                       costo_usd: float | None = None,
                       llamadas_modelo: int | None = None,
-                      modelo: str | None = None) -> tuple[str, str]:
+                      modelo: str | None = None, *, origen: str) -> tuple[str, str]:
     """
     Une una fila de conversacion (crea si no existe) con una fila de
     mensaje, y actualiza 'actualizado_en' -- es la unica señal que necesita
@@ -318,7 +548,15 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
     despues; lo segundo, marcar_ejemplo (este mismo archivo) para poder
     marcar UNA respuesta puntual como buen ejemplo -- evita una consulta
     aparte para algo que esta funcion ya resolvio.
+
+    'origen' es obligatorio y va sin valor por defecto a proposito: un
+    llamador nuevo que lo olvide falla en el acto (TypeError), no guarda
+    filas sin procedencia. Solo 'cliente' con 'user'; 'ia' o 'sistema' con
+    'assistant'. Las personas escriben por agregar_mensaje_humano().
     """
+    validar_origen(rol, origen)
+    if origen == "humano":
+        raise ValueError("los mensajes de personas van por agregar_mensaje_humano()")
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select id from asistente.conversations
@@ -361,12 +599,12 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
             """insert into asistente.messages
                  (organization_id, conversation_id, rol, contenido,
                   creado_en, latencia_ms, tokens_entrada, tokens_salida,
-                  costo_usd, modelo, llamadas_modelo)
-               values (%s, %s, %s, %s, coalesce(%s, now()), %s, %s, %s, %s, %s, %s)
+                  costo_usd, modelo, llamadas_modelo, origen)
+               values (%s, %s, %s, %s, coalesce(%s, now()), %s, %s, %s, %s, %s, %s, %s)
                returning id""",
             (org, conv, rol, contenido, creado_en, latencia_ms,
              tokens_entrada, tokens_salida, costo_usd, modelo,
-             llamadas_modelo))
+             llamadas_modelo, origen))
         mensaje = cur.fetchone()["id"]
 
         return str(conv), str(mensaje)
@@ -440,6 +678,27 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                   -- en esto" de "esto ya se cerro a mano", y son pestañas
                   -- distintas.
                   c.atendida_manual, c.tomada_por, c.tomada_en,
+                  -- B3.5 (D18): lo durable que necesita la proyeccion de la
+                  -- bandeja (nucleo/relevo/proyeccion.py). El orden de la cola
+                  -- sale de aca, no de un puntaje en la pantalla.
+                  c.relevo_version, c.control, c.control_motivo,
+                  c.asignada_a_usuario_id, c.asignada_a_nombre, c.asignada_en,
+                  c.pendiente_interno_desde, c.estado_escalada,
+                  -- La ultima vez que le respondio UNA PERSONA. Con esto se
+                  -- sabe si el mensaje del cliente es posterior, que es la
+                  -- diferencia entre "alguien espera respuesta" y "ya le
+                  -- contestaron". 'humano' es el rol de legado; desde B2 una
+                  -- respuesta de persona es rol 'assistant' con origen
+                  -- 'humano'.
+                  humana.creado_en as ultima_atencion_humana,
+                  cliente.creado_en as ultimo_mensaje_cliente,
+                  -- T19: si la evaluacion que quedo NO_DETERMINADO ya la
+                  -- reviso alguien. Sin esto, una conversacion vieja pediria
+                  -- revision para siempre.
+                  exists (select 1 from asistente.relevo_eventos ev
+                           where ev.organization_id = c.organization_id
+                             and ev.conversation_id = c.id
+                             and ev.tipo = 'evaluacion_revisada') as evaluacion_revisada,
                   (c.atendida_manual or exists (
                        select 1 from asistente.messages h
                         where h.conversation_id = c.id
@@ -468,7 +727,18 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                       and m.rol = 'user'
                       and c.escalada_en is not null
                       and m.creado_en > c.escalada_en
-               ) insiste on true"""
+               ) insiste on true
+               left join lateral (
+                   select max(creado_en) as creado_en
+                     from asistente.messages
+                    where conversation_id = c.id
+                      and (rol = 'humano' or (rol = 'assistant' and origen = 'humano'))
+               ) humana on true
+               left join lateral (
+                   select max(creado_en) as creado_en
+                     from asistente.messages
+                    where conversation_id = c.id and rol = 'user'
+               ) cliente on true"""
 
     with sesion(tenant) as (cur, org):
         if canal:
@@ -500,7 +770,11 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       motivo_escalamiento, caso_id, etiqueta,
                       actualizado_en, conservar, conservar_motivo, conservar_por,
                       atendida_manual, atendida_por, tomada_por, tomada_en,
-                      id_cliente, nombre_cliente,
+                      id_cliente, nombre_cliente, datos_sesion,
+                      -- El control del relevo (B3): la pantalla recibe el
+                      -- control EFECTIVO ya calculado (api.py), no la regla.
+                      relevo_version, control, control_motivo,
+                      asignada_a_usuario_id, asignada_a_nombre, aviso_relevo,
                       -- Lo que el modelo ya habia escrito al escalar y hasta
                       -- ahora solo viajaba a la descripcion del ticket. Es lo
                       -- que arma el resumen de arriba en el detalle: que
@@ -535,9 +809,25 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
 
         cur.execute(
             """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_marcado,
+                      -- QUIEN produjo el mensaje, y su nombre si fue una
+                      -- persona (D30). 'rol' es el protocolo del canal y NO
+                      -- alcanza: desde B2 una respuesta humana es rol
+                      -- 'assistant' con origen 'humano', igual que una de la
+                      -- IA, asi que sin esta columna la pantalla no puede
+                      -- distinguirlas y termina mostrando las dos como si las
+                      -- hubiera escrito Dexter.
+                      --
+                      -- NULL es un valor con significado y se devuelve TAL
+                      -- CUAL: son las filas anteriores al registro de origen.
+                      -- No se rellena, ni por rol ni por nada -- afirmar quien
+                      -- escribio algo que no sabemos es peor que no decirlo.
+                      m.origen, m.autor_nombre,
                       -- Si le llego o no. NULL = no se sabe (otro canal, o
                       -- anterior al registro): la pantalla no dibuja nada.
                       m.estado_entrega, m.error_entrega,
+                      -- La clave con la que se guardo: "Reintentar" la reusa
+                      -- para no crear otra fila (D15).
+                      m.clave_idempotencia,
                       -- Los adjuntos de ESA burbuja, sin los bytes: la interfaz
                       -- los pide despues por su id (/media/<id>). Devolverlos
                       -- aca serian varios MB de base64 en cada carga del hilo.
@@ -679,7 +969,8 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
                     caso_id: str | None, etiqueta: str | None,
                     necesita_atencion_humana: bool = True,
                     resumen: str = "", no_comprobado: str = "",
-                    siguiente_paso: str = "") -> None:
+                    siguiente_paso: str = "",
+                    nombre_caso: str = "", descripcion_caso: str = "") -> None:
     """
     Registra que la conversacion paso a un humano: la marca escalada, guarda
     por que (una de escalamiento.activar_si) y el caso/etiqueta que resulto
@@ -721,6 +1012,26 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
              (resumen or "").strip(), (no_comprobado or "").strip(),
              (siguiente_paso or "").strip(), org, conversation_id))
 
+        # B4: si el CRM no devolvio caso, la intencion queda ENCOLADA en la
+        # misma transaccion que la marca de escalada. Antes de esto el except
+        # de escalar() la mandaba al log y se perdia: la conversacion quedaba
+        # escalada, visible en la bandeja, y sin caso -- y nadie se enteraba
+        # hasta que alguien lo buscaba a mano.
+        #
+        # La clave se deriva de (conversacion, tipo): reintentar la misma
+        # escalada no encola dos veces el mismo efecto. Y 'datos_intencion'
+        # lleva solo lo minimo para rehacerlo, nunca el texto del cliente.
+        if not caso_id:
+            encolar_sincronizacion(
+                cur, org, conversation_id, tipo="crear_caso",
+                clave=f"crear_caso:{conversation_id}",
+                datos={"motivo": motivo, "etiqueta": etiqueta,
+                       # El nombre canonico es la idempotencia: lleva el
+                       # conversation_id y es unico por organizacion. Sin el,
+                       # el reconciliador no puede preguntar si ya existe.
+                       "nombre_caso": (nombre_caso or "").strip(),
+                       "descripcion": (descripcion_caso or "").strip()})
+
 
 def guardar_ticket_operativo(tenant: str, conversation_id: str,
                              ticket: str) -> None:
@@ -746,31 +1057,6 @@ def guardar_ticket_operativo(tenant: str, conversation_id: str,
     except Exception as e:
         registrar("persistencia", "no se pudo anotar el ticket operativo", ticket=ticket,
                   conversation_id=id_interno(conversation_id), error=e)
-
-
-def devolver_al_asistente(tenant: str, conversation_id: str) -> None:
-    """
-    Saca la conversacion de la pausa: el asistente vuelve a atenderla.
-
-    NO borra el caso ni el ticket -- siguen ahi, y por eso cuando el cliente
-    diga que ya quedo se cierran los tres juntos. Lo unico que cambia es quien
-    contesta el proximo mensaje.
-
-    Lo decide la persona al responder, no el sistema: quien acaba de aplicar
-    un cambio sabe si su parte termino o si todavia le esta preguntando algo
-    al cliente. Adivinarlo desde el codigo es como se termina con dos
-    interlocutores hablando encima.
-    """
-    try:
-        with sesion(tenant) as (cur, org):
-            cur.execute(
-                """update asistente.conversations
-                   set escalada_a_humano = false, necesita_atencion_humana = false,
-                       actualizado_en = now()
-                   where organization_id = %s and id = %s""",
-                (org, conversation_id))
-    except Exception as e:
-        registrar("persistencia", "no se pudo devolver la conversacion al asistente", error=e)
 
 
 def atendida_por_humano(tenant: str, conversation_id: str) -> bool:
@@ -950,6 +1236,145 @@ def marcar_caso(tenant: str, conversation_id: str, caso: str | None,
                   conversation_id=id_interno(conversation_id), error=e)
 
 
+def conversaciones_ia_inactivas(tenant: str, horas: int, *, corte=None,
+                                cohorte: str = "normal",
+                                limite: int | None = None) -> list[dict]:
+    """
+    Las que atendio SOLO el asistente y quedaron en silencio.
+
+    POR QUE HACIA FALTA OTRA CONSULTA
+    ---------------------------------
+    'conversaciones_sin_respuesta' (mas abajo) exige 'escalada_a_humano'. Las
+    que nunca se escalaron no entran ahi, y NINGUN otro camino las cierra:
+    quedan abiertas para siempre. Medido contra produccion el 22/09/2026 --
+    151 conversaciones en ese estado, 145 de ellas sin un solo mensaje en mas
+    de una semana. Y sigue pasando: de las 4 creadas en las ultimas 24 h, las
+    4 estaban ahi.
+
+    EL ULTIMO MENSAJE TIENE QUE SER DEL ASISTENTE
+    ---------------------------------------------
+    Es la guarda que importa. Si el ultimo lo escribio el CLIENTE, lo que hay
+    es una pregunta sin contestar -- cerrarla seria enterrar trabajo sin hacer
+    con cara de trabajo terminado, el mismo error que la consulta de al lado
+    evita con su condicion de "ya atendida".
+
+    NO SE LE ESCRIBE AL CLIENTE AL CERRAR
+    -------------------------------------
+    'cerrar_todo' usa su 'texto' solo para comentar el ticket del ISP, y estas
+    no tienen ticket ni caso: nunca se escalaron. Se cierra la fila y nada mas.
+    Avisarle a alguien que dejo de escribir hace una semana que "su caso se
+    cerro" es un mensaje que nadie pidio.
+
+    QUE BLOQUEA EL CIERRE
+    ---------------------
+    Trabajo durable todavia ligado a esta conversacion: una accion propuesta
+    sin resolver, una sincronizacion externa que no se sabe si ocurrio, un
+    pendiente interno, un proximo paso anotado, o una marca de conservar.
+    Medido el mismo dia: hoy ninguna de las 151 tiene nada de eso, asi que
+    estas guardas no filtran nada todavia -- estan por lo que puede pasar
+    cuando el volumen suba, no por lo que hay.
+
+    Un caso del CRM o un ticket abierto NO bloquean por si solos: son
+    expedientes aparte y cerrar la conversacion no los cierra (ver la
+    docstring de transiciones.cerrar).
+
+    LAS DOS COHORTES
+    ----------------
+    'corte' es la frontera temporal (rollout_cutoff). Se compara contra la
+    ULTIMA ACTIVIDAD, no contra la fecha de creacion:
+
+      cohorte='normal'   ultima actividad >= corte. Lo que entro a la regla
+                         despues de activarla. Se cierra solo.
+      cohorte='backlog'  ultima actividad < corte. Lo que ya estaba. NO se
+                         toca salvo que alguien habilite el backfill, y
+                         entonces de a lotes, mas antiguas primero.
+
+    Sin 'corte' devuelve vacio, en las dos cohortes. Fail-closed: desplegar
+    este codigo no puede empezar a cerrar conversaciones sin que alguien haya
+    elegido desde cuando.
+
+    Una conversacion vieja que VOLVIO A HABLAR despues del corte es flujo
+    normal, no backlog: entro a la regla por la puerta de adelante.
+
+    'limite' solo tiene sentido en el backlog -- el flujo normal no se acota,
+    porque son las pocas del dia y acotarlas dejaria trabajo sin hacer sin
+    que nadie se entere.
+    """
+    if corte is None:
+        return []
+    if cohorte not in ("normal", "backlog"):
+        raise ValueError(f"cohorte desconocida: {cohorte!r}")
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select c.id, c.caso_id, c.ticket_operativo, c.usuario_externo,
+                      c.nombre_cliente
+               from asistente.conversations c
+               where c.organization_id = %s
+                 and c.estado <> 'cerrada'
+                 -- Nunca pidio una persona.
+                 and not coalesce(c.escalada_a_humano, false)
+                 and not coalesce(c.necesita_atencion_humana, false)
+                 -- Nadie se hizo cargo.
+                 and coalesce(c.tomada_por, '') = ''
+                 and not coalesce(c.atendida_manual, false)
+                 -- El asistente sigue teniendo el control.
+                 and coalesce(c.control, 'ia') = 'ia'
+                 -- SIN RASTRO EN SISTEMAS EXTERNOS, y esto no es cosmetico:
+                 -- es lo que hace que este barrido SI se pueda programar.
+                 -- 'cerrar_vencidas' esta fuera del reloj a proposito porque
+                 -- no es idempotente bajo concurrencia -- dos pasadas
+                 -- simultaneas publican el texto de cierre DOS VECES en el
+                 -- ticket del proveedor (ver nucleo/reloj.py). Sin ticket ni
+                 -- caso, 'cerrar_todo' no hace ninguna llamada externa y lo
+                 -- unico que queda es 'transiciones.cerrar', que ya es
+                 -- idempotente (una cerrada devuelve 'ya_cerrada').
+                 --
+                 -- Medido el 22/09/2026: de las 147 elegibles, 0 tenian
+                 -- ticket y 0 tenian caso. Se exige igual en vez de confiar
+                 -- en ese cero: una que aparezca con ticket pertenece a las
+                 -- reglas del OTRO barrido, no a estas.
+                 and c.ticket_operativo is null
+                 and c.caso_id is null
+                 -- Trabajo durable pendiente: cualquiera de estos la salva.
+                 and c.pendiente_interno_desde is null
+                 and coalesce(c.escalada_siguiente_paso, '') = ''
+                 and not coalesce(c.conservar, false)
+                 and not exists (
+                       select 1 from asistente.acciones_propuestas a
+                        where a.conversation_id = c.id
+                          and a.estado in ('propuesta', 'pendiente'))
+                 and not exists (
+                       select 1 from asistente.sincronizaciones_externas s
+                        where s.conversation_id = c.id
+                          and s.estado in ('pendiente', 'desconocida'))
+                 -- El ultimo mensaje VISIBLE es del asistente. Las notas
+                 -- internas ('humano' sin salida al cliente) no cuentan: no
+                 -- son turno de nadie en la conversacion.
+                 and (select m.rol from asistente.messages m
+                       where m.conversation_id = c.id
+                         and m.rol in ('user', 'assistant')
+                       order by m.creado_en desc limit 1) = 'assistant'
+                 -- Y hace mas del plazo que nadie escribe.
+                 and coalesce(
+                       (select max(m.creado_en) from asistente.messages m
+                         where m.conversation_id = c.id),
+                       c.creado_en) < now() - make_interval(hours => %s)
+                 -- LA FRONTERA. Misma expresion de "ultima actividad" que
+                 -- arriba, con el signo que corresponde a cada cohorte.
+                 and coalesce(
+                       (select max(m.creado_en) from asistente.messages m
+                         where m.conversation_id = c.id),
+                       c.creado_en) {comparacion} %s
+               order by c.actualizado_en
+               {limite}""".format(
+                comparacion=">=" if cohorte == "normal" else "<",
+                # Mas antiguas primero ya lo da el 'order by'; el limite solo
+                # se aplica al backlog (ver la docstring).
+                limite="limit %s" if (limite and cohorte == "backlog") else ""),
+            (org, int(horas), corte) + ((int(limite),) if (limite and cohorte == "backlog") else ()))
+        return [dict(f) for f in cur.fetchall()]
+
+
 def conversaciones_sin_respuesta(tenant: str, horas: int) -> list[dict]:
     """
     Las conversaciones escaladas donde el cliente lleva 'horas' sin escribir.
@@ -1090,7 +1515,10 @@ def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:
 
 
 def agregar_mensaje_humano(tenant: str, conversation_id: str,
-                           contenido: str, autor: str = "") -> dict | None:
+                           contenido: str, autor: str, *,
+                           autor_usuario_id: str,
+                           clave_idempotencia: str | None = None,
+                           solo_canal: str | None = None) -> dict | None:
     """
     Un agente humano responde directo en el hilo, sin pasar por el modelo --
     para una conversacion ya escalada (marcar_escalada le puso caso_id), que
@@ -1110,7 +1538,24 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
     El ticket viaja aca y no en una consulta aparte porque es la misma fila:
     pedirla dos veces para leer una columna mas es una ida a la base por cada
     respuesta que escribe una persona.
+
+    AUTOR, ORIGEN E IDEMPOTENCIA (B2)
+    ---------------------------------
+    'autor' (nombre) y 'autor_usuario_id' son obligatorios: sin ellos,
+    AutorInvalido y nada se escribe. La fila queda con origen = 'humano'.
+
+    'clave_idempotencia' la genera quien compone el mensaje. Si ya existe una
+    fila con esa clave en esta conversacion, NO se inserta otra: se devuelve
+    la existente con 'existente': True y su 'estado_entrega', y quien llama
+    decide si reintentar la entrega (solo si fallo). Antes, cada "Reintentar"
+    insertaba una copia del mensaje.
+
+    'solo_canal': si la conversacion no es de ese canal, CanalNoAdmite ANTES
+    de insertar. La plantilla lo usa: guardaba la fila y recien despues
+    descubria que la conversacion no era de WhatsApp (D16).
     """
+    nombre, usuario = validar_autor(autor, autor_usuario_id)
+    clave = (clave_idempotencia or "").strip() or None
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select canal, usuario_externo, ticket_operativo
@@ -1120,6 +1565,9 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
         fila = cur.fetchone()
         if not fila:
             return None
+        if solo_canal is not None and fila["canal"] != solo_canal:
+            raise CanalNoAdmite(
+                f"la conversacion es del canal '{fila['canal']}', no '{solo_canal}'")
 
         # 'pendiente' solo si hay a donde entregarlo. En el simulador o la API
         # no hay entrega que esperar, y dejarlo en NULL es lo honesto: la
@@ -1127,12 +1575,29 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
         cur.execute(
             """insert into asistente.messages
                  (organization_id, conversation_id, rol, contenido,
-                  estado_entrega)
-               values (%s, %s, 'assistant', %s, %s)
+                  estado_entrega, origen, autor_usuario_id, autor_nombre,
+                  clave_idempotencia)
+               values (%s, %s, 'assistant', %s, %s, 'humano', %s, %s, %s)
+               on conflict (organization_id, conversation_id, clave_idempotencia)
+                 where clave_idempotencia is not null
+               do nothing
                returning id""",
             (org, conversation_id, contenido,
-             "pendiente" if fila["canal"] == "whatsapp" else None))
-        mensaje_id = cur.fetchone()["id"]
+             "pendiente" if fila["canal"] == "whatsapp" else None,
+             usuario, nombre, clave))
+        insertada = cur.fetchone()
+        if insertada is None:
+            # La clave ya estaba: es un reintento del MISMO mensaje.
+            cur.execute(
+                """select id, estado_entrega from asistente.messages
+                   where organization_id = %s and conversation_id = %s
+                     and clave_idempotencia = %s""",
+                (org, conversation_id, clave))
+            previa = cur.fetchone()
+            return {**dict(fila), "mensaje_id": previa["id"], "existente": True,
+                    "estado_entrega": previa["estado_entrega"]}
+        mensaje_id = insertada["id"]
+        autor = nombre
         # Y queda marcada como atendida por una persona. No es cosmetico:
         # dos reglas dependen de saberlo -- el cierre por confirmacion del
         # cliente (que no vale si nadie le contesto todavia) y el barrido por
@@ -1155,11 +1620,12 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
         # 'mensaje_id' se suma aparte: quien llama tiene que poder sellar el
         # wamid en ESTA fila cuando WhatsApp le responda, y sin el id habria
         # que adivinar cual de los mensajes de la conversacion es.
-        return {**dict(fila), "mensaje_id": mensaje_id}
+        return {**dict(fila), "mensaje_id": mensaje_id, "existente": False,
+                "estado_entrega": "pendiente" if fila["canal"] == "whatsapp" else None}
 
 
 def agregar_nota_interna(tenant: str, conversation_id: str, contenido: str,
-                         autor: str) -> str | None:
+                         autor: str, *, autor_usuario_id: str) -> str | None:
     """
     Una nota que el equipo se deja a si mismo. NO se le envia a nadie.
 
@@ -1181,17 +1647,23 @@ def agregar_nota_interna(tenant: str, conversation_id: str, contenido: str,
     anotado algo y hacerse cargo del caso.
 
     Devuelve el id de la nota, o None si la conversacion no existe.
+
+    Autor obligatorio, como en agregar_mensaje_humano (AutorInvalido). El
+    contenido conserva el prefijo "(autor)" que la pantalla ya muestra; el
+    autor ademas queda en sus columnas (origen = 'humano').
     """
+    nombre, usuario = validar_autor(autor, autor_usuario_id)
     with sesion(tenant) as (cur, org):
         cur.execute(
             """insert into asistente.messages
-                 (organization_id, conversation_id, rol, contenido)
-               select %s, %s, 'nota', %s
+                 (organization_id, conversation_id, rol, contenido,
+                  origen, autor_usuario_id, autor_nombre)
+               select %s, %s, 'nota', %s, 'humano', %s, %s
                 where exists (select 1 from asistente.conversations
                                where organization_id = %s and id = %s)
                returning id""",
-            (org, conversation_id, f"({autor or 'Equipo'}) {contenido}"
-             if autor else contenido, org, conversation_id))
+            (org, conversation_id, f"({nombre}) {contenido}",
+             usuario, nombre, org, conversation_id))
         fila = cur.fetchone()
         return fila["id"] if fila else None
 
@@ -1202,8 +1674,92 @@ SIN_IDENTIFICADOR = ("WhatsApp aceptó la petición pero no devolvió el id del 
                      "mensaje: no se puede confirmar la entrega.")
 
 
+class ResultadoEntrega(str, Enum):
+    ACTUALIZADO = "actualizado"
+    YA_APLICADO = "ya_aplicado"
+    REGRESIVO = "regresivo"
+    NO_ENCONTRADO = "no_encontrado"
+
+
+def adquirir_salida_whatsapp(tenant: str, clave: str, *, proposito: str,
+                              mensaje_id: str | None = None,
+                              conversation_id: str | None = None) -> bool:
+    """Adquiere una sola vez el derecho durable a hacer el POST a Meta."""
+    if not (clave or "").strip():
+        raise ValueError("la salida de WhatsApp necesita clave de idempotencia")
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.whatsapp_salidas
+                 (organization_id, clave_idempotencia, mensaje_id,
+                  conversation_id, proposito)
+               values (%s, %s, %s, %s, %s)
+               on conflict (organization_id, clave_idempotencia) do nothing
+               returning clave_idempotencia""",
+            (org, clave, mensaje_id, conversation_id, proposito))
+        return cur.fetchone() is not None
+
+
+def salida_whatsapp(tenant: str, clave: str) -> dict | None:
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select estado, wamid, error from asistente.whatsapp_salidas
+               where organization_id = %s and clave_idempotencia = %s""", (org, clave))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
+
+
+def resolver_salida_whatsapp(tenant: str, clave: str, resultado: str,
+                              wamid: str | None = None,
+                              error: str | None = None) -> bool:
+    """Sella una salida sin message asociado (avisos automaticos/proactivos)."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.whatsapp_salidas
+               set estado = %s, wamid = %s, error = %s,
+                   estado_entrega = case when %s::text is not null then 'enviado' end,
+                   resuelto_en = clock_timestamp()
+               where organization_id = %s and clave_idempotencia = %s
+                 and estado = 'adquirido'""",
+            (resultado, wamid, error, wamid, org, clave))
+        escrita = cur.rowcount == 1
+        if escrita and wamid:
+            cur.execute(
+                """select estado, error from asistente.whatsapp_acuses_pendientes
+                   where organization_id = %s and wamid = %s for update""", (org, wamid))
+            acuse = cur.fetchone()
+            if acuse:
+                cur.execute(
+                    """update asistente.whatsapp_salidas
+                       set estado_entrega = %s,
+                           error_entrega = coalesce(%s, error_entrega)
+                       where organization_id = %s and clave_idempotencia = %s""",
+                    (acuse["estado"], acuse["error"], org, clave))
+                cur.execute(
+                    """delete from asistente.whatsapp_acuses_pendientes
+                       where organization_id = %s and wamid = %s""", (org, wamid))
+        return escrita
+
+
+def _aplicar_acuse_pendiente(cur, org: str, mensaje_id: str, wamid: str) -> None:
+    cur.execute(
+        """select estado, error from asistente.whatsapp_acuses_pendientes
+           where organization_id = %s and wamid = %s for update""", (org, wamid))
+    acuse = cur.fetchone()
+    if not acuse:
+        return
+    cur.execute(
+        """update asistente.messages
+           set estado_entrega = %s, error_entrega = coalesce(%s, error_entrega)
+           where organization_id = %s and id = %s""",
+        (acuse["estado"], acuse["error"], org, mensaje_id))
+    cur.execute(
+        """delete from asistente.whatsapp_acuses_pendientes
+           where organization_id = %s and wamid = %s""", (org, wamid))
+
+
 def marcar_envio(tenant: str, mensaje_id: str, wamid: str | None,
-                 error: str | None = None) -> bool:
+                 error: str | None = None, *, clave_salida: str | None = None,
+                 resultado: str | None = None) -> bool:
     """
     Cierra el circuito del envio: o salio (y quedo su wamid, con el que
     despues se casan los acuses), o no salio y se guarda por que.
@@ -1232,7 +1788,9 @@ def marcar_envio(tenant: str, mensaje_id: str, wamid: str | None,
     'error' tiene que venir ya saneado por quien llama: se guarda y se muestra
     tal cual, y nunca puede ser la respuesta cruda de una API externa.
     """
-    if error is not None:
+    if resultado == "incierto":
+        estado = "desconocido"
+    elif error is not None:
         estado = "fallido"
     elif wamid:
         estado = "enviado"
@@ -1248,6 +1806,17 @@ def marcar_envio(tenant: str, mensaje_id: str, wamid: str | None,
                    where organization_id = %s and id = %s""",
                 (wamid, estado, error, org, mensaje_id))
             escrita = cur.rowcount == 1
+            if escrita and wamid:
+                _aplicar_acuse_pendiente(cur, org, mensaje_id, wamid)
+            if clave_salida:
+                cur.execute(
+                    """update asistente.whatsapp_salidas
+                       set estado = %s, wamid = %s, error = %s,
+                           resuelto_en = clock_timestamp()
+                       where organization_id = %s and clave_idempotencia = %s
+                         and estado = 'adquirido'""",
+                    (resultado or ("aceptado" if wamid else "rechazado"),
+                     wamid, error, org, clave_salida))
     except Exception as e:
         registrar("entrega", "NO se pudo anotar el envio", mensaje=id_interno(mensaje_id),
                   estado=estado, error=e)
@@ -1266,7 +1835,7 @@ _RANGO_ENTREGA = {"pendiente": 0, "enviado": 1, "entregado": 2, "leido": 3,
 
 
 def marcar_entrega(tenant: str, wamid: str, estado: str,
-                   error: str | None = None) -> bool:
+                   error: str | None = None) -> ResultadoEntrega:
     """
     Un acuse de WhatsApp, aplicado al mensaje que lo produjo.
 
@@ -1274,26 +1843,53 @@ def marcar_entrega(tenant: str, wamid: str, estado: str,
     dice que no se pudo entregar, eso es lo ultimo que se sabe del mensaje
     aunque antes hubiera dicho 'enviado'.
 
-    Devuelve False si el wamid no es de esta empresa o no se conoce -- lo
-    normal cuando el acuse corresponde a un mensaje que mando el bot antes de
-    que existiera este registro.
+    Si la salida aun no existe, conserva el mejor acuse tenant-scoped para que
+    marcar_envio lo reconcilie atomicamente, y devuelve no_encontrado: no
+    afirma haber actualizado una salida que todavia no pudo correlacionar.
     """
     rango = _RANGO_ENTREGA.get(estado)
     if rango is None:
-        return False
+        return ResultadoEntrega.NO_ENCONTRADO
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """update asistente.messages
-               set estado_entrega = %s,
-                   error_entrega = coalesce(%s, error_entrega)
-               where organization_id = %s and wamid = %s
-                 and coalesce(%s, 0) > coalesce(
-                       case estado_entrega
-                         when 'pendiente' then 0 when 'enviado' then 1
-                         when 'entregado' then 2 when 'leido' then 3
-                         when 'fallido' then 4 end, -1)""",
-            (estado, error, org, wamid, rango))
-        return cur.rowcount > 0
+            """select estado_entrega from asistente.messages
+               where organization_id = %s and wamid = %s for update""", (org, wamid))
+        fila = cur.fetchone()
+        tabla = "messages"
+        if not fila:
+            cur.execute(
+                """select estado_entrega from asistente.whatsapp_salidas
+                   where organization_id = %s and wamid = %s for update""", (org, wamid))
+            fila = cur.fetchone()
+            tabla = "whatsapp_salidas"
+        if fila:
+            actual = _RANGO_ENTREGA.get(fila["estado_entrega"], 0)
+            if rango == actual:
+                return ResultadoEntrega.YA_APLICADO
+            if rango < actual:
+                return ResultadoEntrega.REGRESIVO
+            cur.execute(
+                f"""update asistente.{tabla}
+                    set estado_entrega = %s,
+                        error_entrega = coalesce(%s, error_entrega)
+                    where organization_id = %s and wamid = %s""",
+                (estado, error, org, wamid))
+            return ResultadoEntrega.ACTUALIZADO
+
+        cur.execute(
+            """insert into asistente.whatsapp_acuses_pendientes
+                 (organization_id, wamid, estado, precedencia, error)
+               values (%s, %s, %s, %s, %s)
+               on conflict (organization_id, wamid) do update
+                 set estado = excluded.estado,
+                     precedencia = excluded.precedencia,
+                     error = coalesce(excluded.error,
+                                      asistente.whatsapp_acuses_pendientes.error),
+                     actualizado_en = clock_timestamp()
+               where excluded.precedencia >
+                     asistente.whatsapp_acuses_pendientes.precedencia""",
+            (org, wamid, estado, rango, error))
+        return ResultadoEntrega.NO_ENCONTRADO
 
 
 def agentes_de_colaborador(tenant: str, profile_id: str) -> list[str]:
@@ -1509,6 +2105,344 @@ def guardar_cache(tenant: str, herramienta: str, clave: str, respuesta) -> None:
         registrar("persistencia", "no se pudo guardar la cache", herramienta=herramienta, error=e)
 
 
+# =============================================================================
+#  INTERRUPTOR DE AUTONOMIA  --  ver nucleo/seguridad/interruptor.py
+# =============================================================================
+#  Estas funciones son lo unico que toca asistente.interruptor_autonomia. La
+#  tabla SOLO SE AGREGA (a app_backend se le dieron 'select, insert' y nada
+#  mas, ver supabase/202609151710_interruptor_autonomia.sql), asi que aca no
+#  hay --ni puede haber-- un UPDATE.
+
+
+def estado_autonomia(tenant: str) -> dict | None:
+    """
+    La transicion mas reciente del interruptor de esta empresa, o None si no
+    hay ninguna fila.
+
+    NO atrapa excepciones a proposito, al reves que casi todo lo demas de este
+    modulo. Perder una fila de auditoria no puede tumbar un turno; no poder
+    leer el interruptor SI tiene que frenar la accion. Quien llama
+    (nucleo/seguridad/interruptor.py) convierte el fallo en bloqueo -- si el
+    error se tragara aca, el bloqueo se volveria un permiso.
+
+    Va con el timeout corto (SEGUNDOS_CONEXION_GATE): alguien esta esperando
+    del otro lado de esta decision.
+    """
+    with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+        cur.execute(
+            """select estado, estado_anterior, actor, motivo, creado_en
+                 from asistente.interruptor_autonomia
+                where organization_id = %s
+                order by creado_en desc, id desc
+                limit 1""", (org,))
+        return cur.fetchone()
+
+
+def estado_autonomia_de_organizacion(organization_id: str) -> dict | None:
+    """
+    Lo mismo, pero por organizacion en vez de por slug.
+
+    Existe por el scheduler persistente: 'puerta.vencidos' devuelve
+    'organization_id', no el slug, y traducirlo primero costaria una consulta
+    de mas por cada candidato de cada tick.
+
+    Se conecta SIN bajar de rol, igual que _organizacion(): la consulta nombra
+    una sola organizacion explicitamente en el WHERE, y el proceso del
+    coordinador no tiene un tenant fijado al que pertenecer.
+
+    Mismo timeout corto que la lectura por slug: el coordinador la consulta por
+    cada candidato de cada tick, y un tick que se cuelga en la primera empresa
+    deja sin atender a todas las demas.
+    """
+    con = psycopg.connect(dsn(), connect_timeout=SEGUNDOS_CONEXION_GATE,
+                          row_factory=dict_row)
+    try:
+        with con.cursor() as cur:
+            # Ver la nota en sesion(): SET no acepta parametros, set_config si.
+            # 'false' porque esta conexion no abre transaccion propia.
+            cur.execute("select set_config('statement_timeout', %s, false)",
+                        (str(SEGUNDOS_CONEXION_GATE * 1000),))
+            cur.execute(
+                """select estado, estado_anterior, actor, motivo, creado_en
+                     from asistente.interruptor_autonomia
+                    where organization_id = %s
+                    order by creado_en desc, id desc
+                    limit 1""", (organization_id,))
+            return cur.fetchone()
+    finally:
+        con.close()
+
+
+def registrar_transicion_autonomia(tenant: str, estado: str,
+                                   estado_anterior: str | None,
+                                   actor: str, motivo: str | None) -> dict:
+    """
+    Agrega una fila al interruptor. Devuelve la fila escrita.
+
+    'estado_anterior' lo calcula quien llama, leyendo el estado vigente antes.
+    Se guarda aunque sea deducible del historial: una consulta de auditoria no
+    tiene por que reconstruir la transicion ordenando filas para saber que
+    cambio.
+
+    Tampoco atrapa: si esto falla, el operador tiene que enterarse de que su
+    orden NO quedo registrada, en vez de creer que el interruptor esta tirado.
+
+    BAJA A 'autonomia_operador', NO A 'app_backend'  (paso 10.12)
+    -------------------------------------------------------------
+    Es la UNICA funcion de este modulo que pide otro rol, y en eso consiste la
+    segregacion: mover el interruptor es administracion, no runtime. Con
+    'app_backend' el proceso del motor podia insertar 'activo' y reactivar la
+    autonomia por su cuenta, sin pasar por cli/autonomia.py ni dejar actor y
+    motivo. Medido en el paso 10.10, diseñado y probado en el 10.11.
+
+    Al runtime le quedan DOS cosas y ninguna mas: LEER el estado, y la parada de
+    emergencia 'asistente.autonomia_detener()', cuyo cuerpo tiene el estado
+    escrito y no admite 'activo' por ninguna via.
+    """
+    with sesion(tenant, rol=ROL_OPERADOR_AUTONOMIA) as (cur, org):
+        cur.execute(
+            """insert into asistente.interruptor_autonomia
+                 (organization_id, estado, estado_anterior, actor, motivo)
+               values (%s, %s, %s, %s, %s)
+               returning estado, estado_anterior, actor, motivo, creado_en""",
+            (org, estado, estado_anterior, actor, motivo))
+        return cur.fetchone()
+
+
+def historial_autonomia(tenant: str, limite: int = 50) -> list[dict]:
+    """El historial del interruptor, lo mas reciente primero."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select estado, estado_anterior, actor, motivo, creado_en
+                 from asistente.interruptor_autonomia
+                where organization_id = %s
+                order by creado_en desc, id desc
+                limit %s""", (org, limite))
+        return cur.fetchall()
+
+
+# =============================================================================
+#  AUDITORIA DE AUTORIZACION  --  asistente.audit_log
+# =============================================================================
+
+
+def registrar_auditoria(tenant: str, actor: str, accion: str,
+                        recurso: str | None, resultado: str,
+                        motivo_denegacion: str | None = None) -> None:
+    """
+    Una fila en asistente.audit_log: quien pidio que, y si se le permitio.
+
+    POR QUE ACA Y NO EN asistente.tool_calls
+    ----------------------------------------
+    'tool_calls' es la traza de UNA CONVERSACION -- es lo que muestra "ver
+    proceso" en la bandeja, y se lee por conversation_id. Una accion autonoma
+    del scheduler no tiene conversacion, asi que esa traza no puede ser su
+    registro. 'audit_log' existe para esto exacto desde el esquema inicial del
+    04/08/2026 (actor / accion / recurso / resultado permitido|denegado /
+    motivo_denegacion) y estaba SIN USAR: cero filas, medidas el 15/09/2026.
+    Este es su primer escritor -- no hay un tercer sistema de auditoria, hay
+    uno que por fin se usa.
+
+    Nunca rompe el turno, mismo criterio que registrar_llamada_herramienta:
+    perder la fila no puede impedir que el bloqueo se aplique, porque el
+    bloqueo ya se decidio antes de llegar aca.
+
+    Y va con el timeout corto (SEGUNDOS_CONEXION_GATE) por la misma razon que
+    la lectura: esta escritura ocurre mientras alguien espera el resultado del
+    gate. Perder la fila ya se acepta como mal menor -- lo que no se puede
+    aceptar es que ANOTAR el bloqueo cueste mas que decidirlo.
+    """
+    try:
+        with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+            cur.execute(
+                """insert into asistente.audit_log
+                     (organization_id, actor, accion, recurso, resultado,
+                      motivo_denegacion)
+                   values (%s, %s, %s, %s, %s, %s)""",
+                (org, actor, accion, recurso, resultado,
+                 motivo_denegacion or None))
+    except (Exception, SystemExit) as e:
+        # SystemExit se atrapa a proposito, y NO es paranoia: dsn() lo levanta
+        # cuando faltan los datos de conexion (ver nucleo/persistencia/
+        # conexion.py, y la misma nota en nucleo/reloj.py). Sin esto, un motor
+        # sin base configurada no se quedaba sin auditoria: se le moria el
+        # turno entero al cliente por no poder ESCRIBIR una fila de registro.
+        # Lo encontro la bateria existente, no una revision.
+        registrar("auditoria", "no se pudo anotar la decision", accion=accion, error=e)
+
+
+def auditoria_reciente(tenant: str, limite: int = 50) -> list[dict]:
+    """Las ultimas decisiones de autorizacion -- para inspeccion y pruebas."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select actor, accion, recurso, resultado, motivo_denegacion,
+                      creado_en
+                 from asistente.audit_log
+                where organization_id = %s
+                order by creado_en desc
+                limit %s""", (org, limite))
+        return cur.fetchall()
+
+
+# =============================================================================
+#  OPERACIONES EXTERNAS  --  ver nucleo/seguridad/idempotencia.py
+# =============================================================================
+
+
+def reclamar_operacion_externa(tenant: str, clave: str, herramienta: str,
+                               argumentos_hash: str, origen: str,
+                               segundos_vencida: int,
+                               reintentar_fallida: bool = False) -> dict:
+    """
+    Intenta quedarse con el derecho a ejecutar esta operacion. Devuelve
+    {'decision': ..., 'fila': ...} y NO ejecuta nada.
+
+    'decision' es una de:
+      ejecutar    la operacion es tuya. Nadie mas la va a correr.
+      repetida    ya se ejecuto con exito; en 'fila.respuesta' esta lo que
+                  contesto el tercero la primera vez.
+      en_curso    otro proceso la tiene tomada y todavia no vencio.
+      rechazada   la misma clave llego con OTROS argumentos.
+      fallida     termino en error antes, y no se autorizo el reintento.
+
+    COMO SE GARANTIZA QUE SOLO UNO EJECUTE
+    --------------------------------------
+    Por la clave primaria (organization_id, clave), no por un lock en memoria
+    ni por un chequeo previo. El INSERT con 'on conflict do nothing' es
+    atomico: o devuelve fila --y entonces fue esta sesion la que la creo-- o no
+    devuelve nada. Dos procesos simultaneos con la misma clave: el segundo
+    espera en el indice unico hasta que el primero confirme, y despues ve la
+    fila que el primero dejo. No hay ventana entre 'mirar' y 'crear' porque no
+    se mira antes de crear.
+
+    La transaccion termina al salir de sesion(), ANTES de que quien llama haga
+    la llamada externa. Es a proposito: sostener la transaccion durante una
+    llamada HTTP de hasta 15 s dejaria a cualquier otro proceso esperando en el
+    indice todo ese rato.
+
+    EL RESCATE POR VENCIMIENTO
+    --------------------------
+    Si el proceso muere entre la llamada y el registro del resultado, la fila
+    queda en 'ejecutando' y la operacion no se podria reintentar nunca. Pasado
+    'segundos_vencida' sin novedades, otra pasada se la queda y suma un
+    intento. Lo que eso NO resuelve esta escrito en la migracion: si la llamada
+    original llego al tercero, el reintento la repite. Desde este lado nadie
+    puede saberlo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.operaciones_externas
+                 (organization_id, clave, herramienta, argumentos_hash,
+                  estado, origen, intentos)
+               values (%s, %s, %s, %s, 'ejecutando', %s, 1)
+               on conflict (organization_id, clave) do nothing
+               returning clave, herramienta, estado, origen, intentos,
+                         respuesta, error, creado_en""",
+            (org, clave, herramienta, argumentos_hash, origen))
+        fila = cur.fetchone()
+        if fila is not None:
+            return {"decision": "ejecutar", "fila": fila}
+
+        # No la creamos nosotros: ya existia. 'for update' la fija mientras se
+        # decide, para que dos rescates simultaneos no se la lleven los dos.
+        cur.execute(
+            """select clave, herramienta, argumentos_hash, estado, origen,
+                      intentos, respuesta, error, creado_en, actualizado_en
+                 from asistente.operaciones_externas
+                where organization_id = %s and clave = %s
+                for update""", (org, clave))
+        previa = cur.fetchone()
+        if previa is None:
+            # Solo si alguien la borro entre el insert y el select. No deberia
+            # poder pasar: app_backend no tiene DELETE sobre esta tabla.
+            return {"decision": "rechazada", "fila": None,
+                    "motivo": "la operacion desaparecio entre el alta y la lectura"}
+
+        if previa["argumentos_hash"] != argumentos_hash:
+            # NO se toca la fila existente. La legitima es la primera; la que
+            # llega despues con otros argumentos es la que se rechaza.
+            return {"decision": "rechazada", "fila": previa,
+                    "motivo": "la misma clave ya se uso con otros argumentos"}
+
+        if previa["estado"] == "exitosa":
+            return {"decision": "repetida", "fila": previa}
+
+        if previa["estado"] in ("ejecutando", "pendiente"):
+            vencida = previa["actualizado_en"] < (
+                datetime.now(timezone.utc) - timedelta(seconds=segundos_vencida))
+            if not vencida:
+                return {"decision": "en_curso", "fila": previa}
+            cur.execute(
+                """update asistente.operaciones_externas
+                      set estado = 'ejecutando', intentos = intentos + 1,
+                          actualizado_en = now()
+                    where organization_id = %s and clave = %s
+                    returning clave, herramienta, estado, origen, intentos,
+                              respuesta, error, creado_en""", (org, clave))
+            return {"decision": "ejecutar", "fila": cur.fetchone(),
+                    "rescatada": True}
+
+        # 'fallida': el reintento es una decision explicita de quien llama, no
+        # algo que pase solo. Un reintento automatico sobre una mutacion que no
+        # es idempotente es justo lo que esta tabla existe para evitar.
+        if not reintentar_fallida:
+            return {"decision": "fallida", "fila": previa}
+        cur.execute(
+            """update asistente.operaciones_externas
+                  set estado = 'ejecutando', intentos = intentos + 1,
+                      error = null, actualizado_en = now()
+                where organization_id = %s and clave = %s
+                returning clave, herramienta, estado, origen, intentos,
+                          respuesta, error, creado_en""", (org, clave))
+        return {"decision": "ejecutar", "fila": cur.fetchone(), "reintento": True}
+
+
+def finalizar_operacion_externa(tenant: str, clave: str, estado: str,
+                                respuesta=None, error: str | None = None) -> None:
+    """
+    Cierra la operacion con lo que contesto el tercero.
+
+    Solo mueve filas que estan en 'ejecutando': si otro proceso la rescato por
+    vencimiento, el dueño viejo ya no manda sobre ella y su resultado tardio no
+    puede pisar el del dueño nuevo.
+
+    Esta SI atrapa, y la asimetria con el reclamo es deliberada: fallar al
+    RECLAMAR tiene que impedir la ejecucion, pero fallar al ANOTAR ocurre
+    cuando la llamada externa ya salio -- ahi tumbar el turno no deshace nada,
+    solo le suma un error al cliente. La fila queda en 'ejecutando' y vence
+    sola.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.operaciones_externas
+                      set estado = %s, respuesta = %s, error = %s,
+                          ejecutado_en = now(), actualizado_en = now()
+                    where organization_id = %s and clave = %s
+                      and estado = 'ejecutando'""",
+                (estado,
+                 json.dumps(respuesta, ensure_ascii=False, default=str)
+                 if respuesta is not None else None,
+                 error[:2000] if error else None,
+                 org, clave))
+    except (Exception, SystemExit) as e:
+        # Igual que en registrar_auditoria: dsn() levanta SystemExit, que no es
+        # una Exception. Y aca importa todavia mas -- si esto revienta, la
+        # llamada externa YA SALIO, y tumbar el turno no la deshace.
+        registrar("idempotencia", "no se pudo cerrar la operacion", error=e)
+
+
+def operacion_externa(tenant: str, clave: str) -> dict | None:
+    """Una operacion por su clave -- para inspeccion y para las pruebas."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select clave, herramienta, argumentos_hash, estado, origen,
+                      intentos, respuesta, error, creado_en, ejecutado_en,
+                      actualizado_en
+                 from asistente.operaciones_externas
+                where organization_id = %s and clave = %s""", (org, clave))
+        return cur.fetchone()
+
 def registrar_marca_tv_desconocida(tenant: str, conversation_id: str,
                                    marca: str) -> None:
     """
@@ -1630,6 +2564,84 @@ def conversacion_de_caso(tenant: str, caso_id: str) -> dict | None:
             (org, caso_id))
         fila = cur.fetchone()
         return dict(fila) if fila else None
+
+
+def identidad_de_conversacion(tenant: str, conversation_id: str) -> dict | None:
+    """
+    A QUE cliente del sistema externo apunta esta conversacion. Nada mas.
+
+    Existe para no leer el hilo entero cuando lo unico que hace falta es el
+    identificador: 'mensajes_de()' trae todos los mensajes y sus adjuntos, y
+    quien necesita saber a que cliente consultarle la ficha no necesita nada
+    de eso.
+
+    Devuelve solo identificadores -- ninguno de los datos personales que la
+    ficha traera despues. Esos se leen en vivo del sistema del ISP y no se
+    guardan aca (PRD: las respuestas crudas de la API externa no se
+    persisten), asi que esta fila no puede tenerlos aunque se quisiera.
+
+    None si la conversacion no existe o es de otra empresa -- el filtro por
+    organizacion lo hace la politica de aislamiento, no un if.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, id_cliente, nombre_cliente, usuario_externo,
+                      datos_sesion, escalada_a_humano, control, estado,
+                      asignada_a_usuario_id
+               from asistente.conversations
+               where organization_id = %s and id = %s
+               limit 1""",
+            (org, conversation_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
+
+
+def salud_canal_whatsapp(tenant: str, minutos: int = 60) -> dict:
+    """
+    Si el canal de WhatsApp esta funcionando, medido sobre lo que YA paso.
+
+    QUE MIDE, Y POR QUE ESTO Y NO OTRA COSA
+    ---------------------------------------
+    Cuenta los envios de la ultima ventana y CUANTOS DE ELLOS TIENEN ACUSE de
+    Meta. Un envio que falla se ve solo: la burbuja queda marcada en el hilo y
+    con su boton de reintento, asi que quien atiende se entera. Lo que NO se
+    ve es que los envios salgan bien y los acuses dejen de volver -- el
+    servicio parece sano y nadie sabe si al cliente le llego nada.
+
+    Esa falla exacta ocurrio: el seguimiento de entregas estuvo roto DIEZ DIAS
+    (D17) sin que ninguna pantalla lo dijera. Este contador existe por eso.
+
+    No hace ninguna llamada a Meta: no hay endpoint de salud que preguntarle,
+    y un "99.99%" inventado seria peor que no decir nada. Se mide lo que pasó.
+
+    Devuelve los tres numeros crudos y NINGUN veredicto: que significa cada
+    combinacion lo decide quien los muestra, en un solo lugar y con pruebas
+    (ver lib/conversaciones/canal.js).
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select
+                     count(*) as enviados,
+                     count(*) filter (where estado_entrega is not null) as con_acuse,
+                     count(*) filter (where error is not null
+                                         or estado in ('rechazado', 'incierto')) as fallidos
+                   from asistente.whatsapp_salidas
+                   where organization_id = %s
+                     and adquirido_en > now() - make_interval(mins => %s)""",
+                (org, int(minutos)))
+            fila = cur.fetchone() or {}
+            return {"ventana_minutos": int(minutos),
+                    "enviados": int(fila.get("enviados") or 0),
+                    "con_acuse": int(fila.get("con_acuse") or 0),
+                    "fallidos": int(fila.get("fallidos") or 0)}
+    except Exception as e:
+        # No poder medir la salud del canal no puede tumbar la cola. Se
+        # devuelve None en 'enviados' para que la pantalla diga "no se pudo
+        # medir" en vez de "todo bien", que es lo que diria un cero.
+        registrar("canal", "no se pudo medir la salud de whatsapp", error=e)
+        return {"ventana_minutos": int(minutos), "enviados": None,
+                "con_acuse": None, "fallidos": None}
 
 
 def media_bytes(tenant: str, media_uuid: str) -> tuple[bytes, str] | None:
@@ -1756,37 +2768,104 @@ def registrar_estado_escalada(tenant: str, conversation_id: str, estado: str,
                   conversation_id=id_interno(conversation_id), error=e)
 
 
-def tomar_caso(tenant: str, conversation_id: str, por: str | None,
-               soltar: bool = False) -> bool:
+def control_de_conversacion_abierta(tenant: str, canal: str,
+                                    usuario_externo: str) -> dict | None:
     """
-    Alguien se hace cargo de este caso -- o lo suelta.
+    Quien controla la conversacion ABIERTA de este usuario, leido de la base en
+    cada turno. None si no hay ninguna abierta (un contacto nuevo: no hay nada
+    que controlar). LEVANTA si la base no responde: quien llama falla cerrado y
+    no corre el modelo -- la memoria del proceso nunca decide el control.
 
-    NO ES marcar_atendida(). Esa significa "resuelto por otro canal" y
-    habilita dos cierres automaticos: el "ok, gracias" del cliente y el
-    barrido por plazo vencido. Tomar un caso no resuelve nada; solo dice
-    quien lo tiene, y por eso NO toca 'atendida_manual'.
-
-    Reversible a proposito, al reves que marcar_atendida(): un caso se toma
-    por error, o se acaba el turno, o resulta que era de otra area. Soltar es
-    poner 'tomada_por' en NULL.
-
-    Devuelve False si la conversacion no existe o no es de este tenant.
+    Devuelve {'conversation_id', 'control_efectivo', 'control_motivo',
+    'relevo_version'}.
     """
     with sesion(tenant) as (cur, org):
-        if soltar:
-            cur.execute(
-                """update asistente.conversations
-                   set tomada_por = null, tomada_en = null
-                   where organization_id = %s and id = %s""",
-                (org, conversation_id))
-        else:
-            cur.execute(
-                """update asistente.conversations
-                   set tomada_por = %s, tomada_en = now(),
-                       actualizado_en = actualizado_en
-                   where organization_id = %s and id = %s""",
-                (por or "alguien del equipo", org, conversation_id))
+        cur.execute(
+            """select id, relevo_version, control, control_motivo,
+                      escalada_a_humano, necesita_atencion_humana
+               from asistente.conversations
+               where organization_id = %s and canal = %s and usuario_externo = %s
+                 and estado = 'abierta'
+               order by actualizado_en desc limit 1""",
+            (org, canal, usuario_externo))
+        fila = cur.fetchone()
+    if not fila:
+        return None
+    return {"conversation_id": str(fila["id"]),
+            "control_efectivo": regla_control.control_efectivo(fila),
+            "control_motivo": fila["control_motivo"],
+            "relevo_version": fila["relevo_version"]}
+
+
+def descartar_respuesta_ia(tenant: str, mensaje_id: str) -> bool:
+    """
+    Marca una respuesta de la IA que quedo guardada y NO se le envio al cliente
+    porque el control cambio antes del envio (D24). La fila se conserva --es
+    auditoria: la IA la calculo y se pago-- pero con estado_entrega
+    'descartado' no entra al historial del modelo ni al resumen.
+
+    Solo toca filas 'assistant' de origen 'ia' que todavia no tienen wamid: una
+    respuesta que Meta ya acepto no se puede descartar.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.messages
+               set estado_entrega = 'descartado', error_entrega = 'cambio_de_control'
+               where organization_id = %s and id = %s
+                 and rol = 'assistant' and origen = 'ia' and wamid is null""",
+            (org, mensaje_id))
         return cur.rowcount > 0
+
+
+def vigencia_de_escalada(tenant: str, conversation_id: str, version: int,
+                         invalidan: tuple[str, ...]) -> dict | None:
+    """
+    Si la escalada que dejo la conversacion en relevo_version 'version' sigue
+    vigente (nucleo/relevo/autorizacion.py, SYNC_ESCALADA). None si la
+    conversacion no existe. LEVANTA si la base no responde: quien llama falla
+    cerrado.
+
+    'invalidada' mira los eventos POSTERIORES a esa escalada, por la version
+    que cada evento guarda en 'datos': una toma o una reasignacion suben la
+    version y no invalidan; una devolucion o un cierre, si.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select c.estado, c.relevo_version, c.control, c.control_motivo,
+                      c.escalada_a_humano, c.necesita_atencion_humana,
+                      exists(select 1 from asistente.relevo_eventos e
+                              where e.organization_id = c.organization_id
+                                and e.conversation_id = c.id and e.tipo = 'escalada'
+                                and (e.datos->>'version')::int = %s) as originada,
+                      exists(select 1 from asistente.relevo_eventos e
+                              where e.organization_id = c.organization_id
+                                and e.conversation_id = c.id and e.tipo = any(%s)
+                                and (e.datos->>'version')::int > %s) as invalidada
+               from asistente.conversations c
+               where c.organization_id = %s and c.id = %s""",
+            (int(version), list(invalidan), int(version), org, conversation_id))
+        fila = cur.fetchone()
+    if not fila:
+        return None
+    return {"estado": fila["estado"], "control_efectivo": regla_control.control_efectivo(fila),
+            "relevo_version": fila["relevo_version"], "originada": bool(fila["originada"]),
+            "invalidada": bool(fila["invalidada"])}
+
+
+def control_efectivo_de(tenant: str, conversation_id: str) -> str | None:
+    """
+    Quien controla la conversacion hoy ('ia' | 'humano'), por la regla unica de
+    nucleo/relevo/control.py. None si no existe o no es de este tenant. La usan
+    las guardas del backend; ninguna ruta deriva el control por su cuenta.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select relevo_version, control, escalada_a_humano, necesita_atencion_humana
+               from asistente.conversations
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+        fila = cur.fetchone()
+    return regla_control.control_efectivo(fila) if fila else None
 
 
 def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
@@ -1812,41 +2891,6 @@ def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
                where organization_id = %s and id = %s""",
             (por, org, conversation_id))
         return cur.rowcount > 0
-
-
-def resolver_conversacion(tenant: str, conversation_id: str,
-                          por: str | None) -> str | None:
-    """
-    Da el caso por TERMINADO: lo cierra y lo saca de la bandeja.
-
-    Distinto de marcar_atendida(), y la diferencia importa:
-
-      atendida   alguien esta en esto   -> sale de "Sin atender", sigue viva
-      resuelta   esto ya termino        -> se cierra
-
-    Cerrarla es lo que hace que el proximo mensaje de esa persona empiece un
-    hilo nuevo en vez de pegarse a este -- el mismo efecto que el cierre por
-    inactividad, pero decidido por alguien en vez de por un reloj. Sin esto,
-    un caso resuelto hoy sigue arrastrando su contexto una semana despues
-    (medido el 18/08/2026: un hilo llego a 67 mensajes mezclando tres
-    problemas distintos, y el modelo citaba mediciones de horas antes como
-    si fueran de ahora).
-
-    Devuelve el 'usuario_externo' de la conversacion cerrada -- quien llama
-    lo necesita para descartar tambien la sesion viva en memoria, que si no
-    seguiria recordando el hilo aunque la base ya no. None si no existe.
-    """
-    with sesion(tenant) as (cur, org):
-        cur.execute(
-            """update asistente.conversations
-               set estado = 'cerrada', atendida_manual = true,
-                   atendida_por = coalesce(%s, atendida_por),
-                   actualizado_en = now()
-               where organization_id = %s and id = %s
-               returning usuario_externo""",
-            (por, org, conversation_id))
-        fila = cur.fetchone()
-        return fila["usuario_externo"] if fila else None
 
 
 def borrar_conversacion(tenant: str, conversation_id: str) -> dict | None:
@@ -2007,6 +3051,35 @@ def registrar_llamadas_herramienta(tenant: str, conversation_id: str, rol: str,
         registrar("persistencia", "no se pudo guardar la traza", error=e)
 
 
+def registrar_eventos_identidad(tenant: str, conversation_id: str | None,
+                                rol: str, eventos: list[dict]) -> None:
+    """
+    El embudo de identidad del turno, en UNA ida a la base (Fase 1, 23/09/2026).
+
+    Cada evento viene ya clasificado por nucleo/modelo/motor.py::evento_identidad
+    (etapa, motivo de vocabulario fijo, siguiente_paso, intentos) mas la
+    herramienta que lo produjo. Aqui no se mira nada del cliente: no llega.
+
+    Misma regla que la traza: perder auditoria no puede tumbar la atencion.
+    Corre en el mismo hilo que registrar_llamadas_herramienta, despues de
+    responder.
+    """
+    if not eventos:
+        return
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.executemany(
+                """insert into asistente.identidad_eventos
+                     (organization_id, conversation_id, rol, herramienta,
+                      etapa, motivo, siguiente_paso, intentos)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                [(org, conversation_id, rol, e.get("herramienta"),
+                  e["etapa"], e.get("motivo"), e.get("siguiente_paso"),
+                  e.get("intentos")) for e in eventos])
+    except Exception as e:
+        registrar("persistencia", "no se pudo guardar el embudo de identidad", error=e)
+
+
 def herramientas_de(tenant: str, conversation_id: str) -> list[dict]:
     """
     El registro de herramientas que uso el agente en una conversacion, en
@@ -2020,6 +3093,191 @@ def herramientas_de(tenant: str, conversation_id: str) -> list[dict]:
                from asistente.tool_calls
                where organization_id = %s and conversation_id = %s
                order by creado_en asc""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def eventos_de_relevo(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    Quien tuvo esta conversacion, en orden -- el registro del relevo.
+
+    Los eventos se escriben en cada transicion desde que existe el relevo
+    (B3.3) y hasta ahora NADIE los leia: la pantalla mostraba el estado
+    ACTUAL --quien la lleva-- pero no como se llego ahi. Una reasignacion y
+    una devolucion a la IA se veian igual desde afuera: la conversacion
+    simplemente aparecia en otras manos.
+
+    Solo lectura y tenant-scoped, mismo criterio que herramientas_de. 'datos'
+    sale tal cual: lo que hay ahi son versiones del relevo, nombres de quienes
+    actuaron y motivos que escribio el equipo -- nunca texto del cliente ni
+    respuestas de un sistema externo. El esquema de cada tipo esta declarado
+    en nucleo/relevo/transiciones.py (ESQUEMAS) y la base lo valida.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select tipo, actor_tipo, actor_usuario_id, actor_nombre,
+                      datos, creado_en
+               from asistente.relevo_eventos
+               where organization_id = %s and conversation_id = %s
+               order by creado_en asc, id asc""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
+# =============================================================================
+#  B4 -- la cola de efectos externos (contrato §3.6)
+# =============================================================================
+
+#: Cuanto espera cada reintento, en segundos. Creciente, y con tope: pasados
+#: estos, el trabajo es 'fallida_definitiva' y lo mira una persona. No es
+#: exponencial puro -- lo que se gana pasada la media hora es despreciable
+#: frente a que alguien lo vea.
+ESPERAS_REINTENTO = (30, 120, 600, 1800)
+MAX_INTENTOS_SINCRONIZACION = len(ESPERAS_REINTENTO)
+
+
+def encolar_sincronizacion(cur, org: str, conversation_id: str, *, tipo: str,
+                           clave: str, datos: dict, datos_version: int = 1) -> str | None:
+    """
+    Anota que un efecto externo HAY QUE hacerlo. Recibe el cursor: va en la
+    MISMA transaccion que la transicion que lo necesita, para que no exista un
+    estado donde la conversacion quedo escalada y la intencion se perdio.
+
+    'datos' es la intencion, no el resultado: exactamente lo que habia que
+    hacer cuando se decidio. El reconciliador no lo reconstruye con la config
+    actual, que pudo cambiar entre el intento y el reintento.
+
+    Devuelve el id, o None si esa clave ya estaba encolada -- la misma
+    transicion reintentada no encola dos veces el mismo efecto.
+    """
+    cur.execute(
+        """insert into asistente.sincronizaciones_externas
+             (organization_id, conversation_id, tipo, estado, datos_version,
+              datos_intencion, proximo_intento_en, clave_idempotencia)
+           values (%s, %s, %s, 'pendiente', %s, %s::jsonb, now(), %s)
+           on conflict (organization_id, clave_idempotencia) do nothing
+           returning id""",
+        (org, conversation_id, tipo, datos_version,
+         json.dumps(datos or {}, ensure_ascii=False), clave))
+    fila = cur.fetchone()
+    return str(fila["id"]) if fila else None
+
+
+def sincronizaciones_elegibles(tenant: str, limite: int = 50) -> list[dict]:
+    """
+    Lo que el reconciliador puede tomar AHORA: pendientes cuya hora llego.
+
+    'desconocida' y 'fallida_definitiva' no salen nunca de aca -- son
+    terminales y esperan a una persona, no a un reloj. Es la diferencia entre
+    una cola de reintentos y una de revision, y mezclarlas es justo lo que el
+    gate Q2 prohibe para crear_ticket.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, conversation_id, tipo, estado, datos_version,
+                      datos_intencion, intentos, referencia_externa,
+                      clave_idempotencia
+               from asistente.sincronizaciones_externas
+               where organization_id = %s
+                 and estado = 'pendiente'
+                 and proximo_intento_en <= now()
+               order by proximo_intento_en asc
+               limit %s
+               for update skip locked""",
+            (org, limite))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def tomar_sincronizacion(tenant: str, sincronizacion_id: str) -> bool:
+    """
+    Reserva un trabajo antes de salir a la red. Devuelve False si otro proceso
+    llego primero: el 'and estado = pendiente' es el candado, y sin el dos
+    reconciliadores podrian crear dos casos para la misma conversacion.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.sincronizaciones_externas
+               set estado = 'en_curso', intentos = intentos + 1,
+                   actualizado_en = now()
+               where organization_id = %s and id = %s and estado = 'pendiente'""",
+            (org, sincronizacion_id))
+        return cur.rowcount == 1
+
+
+def resolver_sincronizacion(tenant: str, sincronizacion_id: str, *, estado: str,
+                            referencia: str | None = None,
+                            error_clase: str | None = None,
+                            error_codigo: str | None = None) -> bool:
+    """
+    Sella el desenlace de un intento.
+
+    'pendiente' vuelve a la cola con su espera calculada por el numero de
+    intentos; el resto es terminal. La espera se calcula en SQL contra la
+    columna de intentos y no con un valor de Python para que dos procesos que
+    resuelvan el mismo trabajo no se pisen la hora.
+    """
+    esperas = ", ".join(str(s) for s in ESPERAS_REINTENTO)
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            f"""update asistente.sincronizaciones_externas
+                set estado = %s,
+                    referencia_externa = coalesce(%s, referencia_externa),
+                    ultimo_error_clase = %s,
+                    ultimo_error_codigo = %s,
+                    proximo_intento_en = case
+                      when %s = 'pendiente' then
+                        now() + make_interval(secs =>
+                          (array[{esperas}])[least(greatest(intentos, 1), {len(ESPERAS_REINTENTO)})])
+                      else null end,
+                    actualizado_en = now()
+                where organization_id = %s and id = %s""",
+            (estado, referencia, error_clase, error_codigo, estado,
+             org, sincronizacion_id))
+        return cur.rowcount == 1
+
+
+def sincronizaciones_de(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    Que le falta a ESTA conversacion, para el panel de la bandeja.
+
+    Sin 'datos_intencion': lo que la pantalla necesita es que quedo sin hacer y
+    si alguien tiene que mirarlo, no los parametros con los que se iba a hacer.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, tipo, estado, intentos, ultimo_error_clase,
+                      ultimo_error_codigo, referencia_externa,
+                      proximo_intento_en, creado_en, actualizado_en
+               from asistente.sincronizaciones_externas
+               where organization_id = %s and conversation_id = %s
+               order by creado_en asc""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def acciones_sobre_el_equipo(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    Que se le hizo al equipo del cliente en esta conversacion, y si funciono.
+
+    SIN las mediciones. 'medicion_previa' y 'medicion_posterior' se guardan
+    crudas a proposito --para poder rehacer la conclusion a mano si alguna vez
+    el estado no se entiende-- y son respuestas del sistema externo: no salen
+    de la base por esta puerta, igual que herramientas_de no devuelve el dato
+    consultado. Lo que la pantalla necesita es el veredicto y su motivo, que
+    los escribe Dexter.
+
+    Ojo con 'ACCION_CONFIRMADA': significa que la accion produjo el efecto
+    tecnico que el sistema PUEDE medir --en reiniciar_ont, que el equipo
+    reinicio y volvio-- y no que el cliente tenga internet. Eso no lo dice
+    ningun endpoint; lo sabe el cliente y hay que preguntarselo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, herramienta, ejecutada_en, estado, por_que,
+                      intentos, max_intentos, verificada_en
+               from asistente.verificaciones_accion
+               where organization_id = %s and conversation_id = %s
+               order by ejecutada_en desc""",
             (org, conversation_id))
         return [dict(f) for f in cur.fetchall()]
 
@@ -2199,35 +3457,131 @@ def resolver_herramienta_propuesta(tenant: str, propuesta_id: str, estado: str,
         return cur.rowcount > 0
 
 
+def clave_de_equivalencia(conversation_id: str | None, herramienta: str,
+                          argumentos: dict) -> str | None:
+    """
+    Hash de (conversacion, herramienta, argumentos en forma canonica) (§3.4).
+
+    Sirve para una sola cosa: que la IA no proponga dos veces lo mismo mientras
+    la primera sigue viva. Canonica = claves ordenadas y separadores fijos, o
+    el mismo pedido escrito en otro orden daria otro hash y pasaria como
+    distinto.
+
+    Sin conversacion no hay clave: una accion de legado no se compara con nada,
+    y darle una la haria colisionar con las demas de legado.
+    """
+    if not conversation_id:
+        return None
+    canonico = json.dumps(argumentos or {}, sort_keys=True, ensure_ascii=False,
+                          separators=(",", ":"))
+    crudo = f"{conversation_id}|{herramienta}|{canonico}"
+    return hashlib.sha256(crudo.encode("utf-8")).hexdigest()
+
+
 def guardar_accion_propuesta(tenant: str, herramienta: str, argumentos: dict,
                              resumen: str, rol_solicitante: str,
-                             propuesto_por: str) -> str:
+                             propuesto_por: str,
+                             conversation_id: str | None = None,
+                             vigencia_minutos: int | None = None, *,
+                             hash_argumentos: str | None = None,
+                             origen: str | None = None,
+                             contexto: dict | None = None
+                             ) -> tuple[str, bool]:
     """
     Una escritura real (crear/editar algo en un sistema externo) que quedo
     pendiente porque su Herramienta declara requiere_confirmacion -- ver
     nucleo/modelo/motor.py, el punto donde se intercepta antes de llegar a
     _ejecutar_tool(). 'argumentos' guarda los valores REALES (no
     enmascarados, a diferencia de tool_calls): sin ellos no se podria
-    ejecutar la accion al aprobar. Devuelve el id para que el turno se lo
-    diga a quien pregunto.
+    ejecutar la accion al aprobar.
+
+    Devuelve (id, ya_existia). 'ya_existia' es True cuando habia una propuesta
+    EQUIVALENTE viva y se devuelve esa en vez de crear otra (T12): misma
+    conversacion, misma herramienta, mismos argumentos. Sin eso, un cliente que
+    insiste tres veces deja tres tickets para el mismo problema, y quien
+    aprueba no tiene como saber que son el mismo.
+
+    La deduplicacion la sostiene el INDICE, no una consulta previa: comprobar
+    antes y escribir despues deja una ventana entre las dos, y ocho hilos
+    concurrentes la encuentran.
+
+    'vigencia_minutos' sale de la herramienta (§3.7). Si no la declara, la fila
+    nace sin 'vence_en' -- fabricar un plazo seria inventar una decision que
+    nadie tomo. Sin vence_en no vence; con el, aprobar despues es imposible.
+
+    'hash_argumentos', 'origen' y 'contexto' (M06-A) solo los manda una
+    herramienta IRREVERSIBLE: atan la aprobacion a la accion exacta, y el sello
+    que se escribe al reservarla (reservar_accion) se calcula sobre ellos. Se
+    escriben SOLO cuando vienen, asi una propuesta comun no depende de que la
+    migracion de aprobacion vinculante este aplicada -- y una irreversible SI:
+    sin esas columnas el insert falla y la accion no queda propuesta, que es
+    fallar cerrado.
     """
+    clave = clave_de_equivalencia(conversation_id, herramienta, argumentos)
+    vinculante = hash_argumentos is not None
+    cols_extra = (", hash_argumentos, origen, contexto" if vinculante else "")
+    vals_extra = (", %s, %s, %s" if vinculante else "")
+    params_extra = ((hash_argumentos, origen,
+                     json.dumps(contexto or {}, ensure_ascii=False))
+                    if vinculante else ())
     with sesion(tenant) as (cur, org):
         cur.execute(
             """insert into asistente.acciones_propuestas
                  (organization_id, herramienta, argumentos, resumen,
-                  rol_solicitante, propuesto_por)
-               values (%s, %s, %s, %s, %s, %s)
+                  rol_solicitante, propuesto_por, conversation_id, vence_en,
+                  clave_equivalencia""" + cols_extra + """)
+               values (%s, %s, %s, %s, %s, %s, %s,
+                       case when %s::int is null then null
+                            else now() + make_interval(mins => %s::int) end,
+                       %s""" + vals_extra + """)
+               on conflict (organization_id, clave_equivalencia)
+                 where estado in ('pendiente', 'ejecutando')
+                 do nothing
                returning id""",
             (org, herramienta, json.dumps(argumentos, ensure_ascii=False),
-             resumen, rol_solicitante, propuesto_por))
-        return str(cur.fetchone()["id"])
+             resumen, rol_solicitante, propuesto_por, conversation_id,
+             vigencia_minutos, vigencia_minutos, clave) + params_extra)
+        fila = cur.fetchone()
+        if fila is not None:
+            return str(fila["id"]), False
+
+        # La equivalente viva gano la carrera (o ya estaba). No se crea otra y
+        # se devuelve la que existe: el modelo tiene que recibir ESA, no una
+        # copia -- si recibiera una nueva, hablaria de una accion que nadie va
+        # a aprobar (T12).
+        cur.execute(
+            """select id from asistente.acciones_propuestas
+               where organization_id = %s and clave_equivalencia = %s
+                 and estado in ('pendiente', 'ejecutando')""",
+            (org, clave))
+        existente = cur.fetchone()
+        if existente is None:
+            # Carrera perdida contra algo que ya no esta vivo: el conflicto
+            # existio y para cuando se fue a leer, la otra ya se resolvio.
+            # Reintentar aca seria abrir un bucle; el turno lo informa.
+            raise RuntimeError("no se pudo guardar la accion propuesta")
+        if conversation_id:
+            registrar_evento_de_accion(
+                cur, org, str(existente["id"]), "accion_propuesta_duplicada",
+                motivo="ya habia una propuesta equivalente viva",
+                actor_tipo="sistema", conversation_id=conversation_id)
+        return str(existente["id"]), True
 
 
 def acciones_propuestas_de(tenant: str, estado: str | None = None) -> list[dict]:
-    """'estado=None' trae todas -- mismo patron que herramientas_propuestas_de()."""
+    """
+    'estado=None' trae todas -- mismo patron que herramientas_propuestas_de().
+
+    SIN 'argumentos'. A diferencia de tool_calls, ahi estan los valores REALES
+    y sin enmascarar (ver guardar_accion_propuesta): el telefono, la cedula, la
+    direccion con los que se iba a escribir afuera. Para revisar una accion
+    alcanza el resumen --que existe justamente para eso-- y quien la necesita
+    completa para ejecutarla usa accion_propuesta_de(), que es otro camino y
+    otra decision.
+    """
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select id, herramienta, argumentos, resumen, rol_solicitante,
+            """select id, herramienta, resumen, rol_solicitante,
                       propuesto_por, estado, motivo_rechazo, revisado_por,
                       resultado_ejecucion, codigo_error, creado_en, revisado_en
                from asistente.acciones_propuestas
@@ -2240,12 +3594,15 @@ def acciones_propuestas_de(tenant: str, estado: str | None = None) -> list[dict]
 
 def accion_propuesta_de(tenant: str, accion_id: str) -> dict | None:
     """Una propuesta puntual -- para ejecutarla al aprobar, que necesita
-    'herramienta'+'argumentos' completos."""
+    'herramienta'+'argumentos' completos.
+
+    'select *' a proposito (M06-A): trae 'hash_argumentos', 'origen',
+    'contexto' y 'conversation_id' cuando la migracion ya esta aplicada, y
+    sigue funcionando cuando todavia no -- en ese caso una irreversible llega
+    sin huella y aprobacion.veredicto la bloquea (APROBACION_SIN_HUELLA)."""
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select id, herramienta, argumentos, resumen, rol_solicitante,
-                      propuesto_por, estado, motivo_rechazo, revisado_por,
-                      resultado_ejecucion, codigo_error, creado_en, revisado_en
+            """select *
                from asistente.acciones_propuestas
                where organization_id = %s and id = %s""",
             (org, accion_id))
@@ -2261,18 +3618,551 @@ def resolver_accion_propuesta(tenant: str, accion_id: str, estado: str,
     llamador pasa 'resultado_ejecucion' (lo que devolvio la API real) en la
     MISMA actualizacion -- para que 'aprobada' y 'ya se sabe que paso'
     queden juntos, nunca una fila 'aprobada' que en realidad todavia no se
-    intento ejecutar. Devuelve False si el id no existe o no es de este
-    tenant."""
+    intento ejecutar. M06-F: solo actua sobre una fila 'pendiente' (hoy la
+    usa unicamente /rechazar); una reservada o ya resuelta no se pisa.
+    Devuelve False si el id no existe, no es de este tenant o ya no estaba
+    pendiente -- el llamador distingue releyendo."""
     with sesion(tenant) as (cur, org):
         cur.execute(
             """update asistente.acciones_propuestas
                set estado = %s, revisado_por = %s, revisado_en = now(),
                    motivo_rechazo = %s, resultado_ejecucion = %s, codigo_error = %s
-               where organization_id = %s and id = %s""",
+               where organization_id = %s and id = %s and estado = 'pendiente'""",
             (estado, revisado_por, motivo_rechazo,
              json.dumps(resultado_ejecucion, ensure_ascii=False) if resultado_ejecucion is not None else None,
              codigo_error, org, accion_id))
         return cur.rowcount > 0
+
+
+# =============================================================================
+#  G3 -- el legado de acciones propuestas (contrato §11.4, X24, I6, I12)
+# =============================================================================
+
+def es_accion_de_legado(accion: dict) -> bool:
+    """
+    Si esta accion NO tiene con que revalidarse.
+
+    El criterio es UNO SOLO y sale del contrato: sin `conversation_id` no hay
+    contexto actual contra el cual comprobar que lo que se iba a hacer todavia
+    tiene sentido (§3.7), asi que aprobarla es ejecutar a ciegas argumentos
+    congelados -- lo que X24 prohibe.
+
+    NO se mira la edad ni el tipo. Una accion de hace un minuto sin
+    conversacion es igual de inejecutable que una de hace un mes: el problema
+    nunca fue el tiempo, fue que no hay nada contra que revalidar. Y una regla
+    por edad ademas se vuelve falsa sola, en silencio, el dia que alguien
+    cambie el plazo.
+
+    Hoy la columna no existe --llega en B5-- asi que esto es True para todas.
+    Cuando exista, la misma funcion deja pasar las que la tengan, sin tocarla.
+    """
+    return not (accion or {}).get("conversation_id")
+
+
+def registrar_evento_de_accion(cur, org, accion_id: str, tipo: str, *,
+                               motivo: str | None = None,
+                               actor_tipo: str = "operador",
+                               actor_nombre: str | None = None,
+                               conversation_id: str | None = None,
+                               datos: dict | None = None) -> None:
+    """
+    Un evento en el expediente de una accion.
+
+    Recibe el cursor en vez de abrir su propia sesion: I12 exige que el evento
+    y el cambio de estado entren en la MISMA transaccion. Con una sesion propia
+    existiria el estado intermedio donde la accion ya esta cancelada y nadie
+    registro quien ni por que.
+    """
+    cur.execute(
+        """insert into asistente.acciones_eventos
+             (organization_id, accion_id, conversation_id, tipo, motivo,
+              actor_tipo, actor_nombre, datos)
+           values (%s, %s, %s, %s, %s, %s, %s, %s)""",
+        (org, accion_id, conversation_id, tipo, motivo, actor_tipo,
+         actor_nombre, json.dumps(datos or {}, ensure_ascii=False)))
+
+
+def ultima_promesa_registrada(tenant: str, id_factura: str):
+    """
+    Cuando fue la ultima promesa que DEXTER dejo registrada sobre esta factura,
+    o None si no hay ninguna.
+
+    Devuelve None cuando consulto y no hay. LEVANTA si no pudo consultar -- y
+    esa diferencia es el punto: quien llama distingue "no hay promesa" de "no
+    pude averiguarlo", y lo segundo impide proponer. Tragarse el error aqui
+    haria que una base caida pareciera un cliente sin historial.
+
+    SOLO VE LO DE DEXTER. Una promesa que un agente cargo a mano en el panel
+    de facturacion es invisible: esa API no permite consultarlas. Es una
+    cobertura parcial, dicha y no disimulada.
+
+    'aprobada' entra ademas de 'ejecutada_ok': entre que alguien aprueba y que
+    el efecto se resuelve hay una ventana, y en esa ventana la promesa ya se
+    decidio. Contarla como inexistente dejaria proponer una segunda.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select max(coalesce(revisado_en, creado_en)) as cuando
+                 from asistente.acciones_propuestas
+                where organization_id = %s
+                  and estado in ('aprobada', 'ejecutando', 'ejecutada_ok', 'desconocida')
+                  and argumentos ->> 'id_factura' = %s""",
+            (org, str(id_factura)))
+        fila = cur.fetchone()
+        return fila["cuando"] if fila else None
+
+
+def cancelar_accion_propuesta(tenant: str, accion_id: str, motivo: str,
+                              cancelada_por: str) -> tuple[str | None, bool]:
+    """
+    Cancela una accion pendiente y deja su evento, en una sola transaccion.
+
+    Devuelve (estado, la_cancelo_esta_llamada):
+
+        (None, False)         no existe, o es de otro tenant
+        ('cancelada', True)   la cancelo esta llamada
+        ('cancelada', False)  ya estaba cancelada por alguien mas
+        (<otro>, False)       ya estaba resuelta de otra forma
+
+    Los dos booleanos importan y por eso el estado solo no alcanza: devolver
+    'cancelada' a secas hacia indistinguible "la cancele" de "ya lo estaba", y
+    el endpoint respondia 200 a la segunda. Dos operadores sobre la misma lista
+    es lo normal, y el segundo tiene que enterarse de que llego tarde.
+
+    'cancelada' NO es 'rechazada'. Rechazada es "alguien la evaluo y dijo que
+    no"; cancelada es "quedo obsoleta y nadie la va a evaluar". Las dos evitan
+    la ejecucion, pero en un registro que existe para auditar decir cual fue es
+    el registro entero.
+    """
+    with sesion(tenant) as (cur, org):
+        # El 'and estado' del UPDATE es el candado: dos operadores cancelando a
+        # la vez, o un doble clic, escriben una sola vez y el segundo se entera.
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = 'cancelada', motivo_rechazo = %s,
+                   revisado_por = %s, revisado_en = now()
+               where organization_id = %s and id = %s and estado = 'pendiente'
+               returning id""",
+            (motivo, cancelada_por, org, accion_id))
+        if cur.fetchone() is None:
+            cur.execute(
+                """select estado from asistente.acciones_propuestas
+                   where organization_id = %s and id = %s""", (org, accion_id))
+            fila = cur.fetchone()
+            return (fila["estado"], False) if fila else (None, False)
+
+        registrar_evento_de_accion(
+            cur, org, accion_id, "accion_cancelada", motivo=motivo,
+            actor_nombre=cancelada_por)
+        return "cancelada", True
+
+
+def registrar_aprobacion_rechazada(tenant: str, accion_id: str, motivo: str,
+                                   intentada_por: str | None) -> None:
+    """
+    Deja constancia de que alguien intento aprobar una accion de legado.
+
+    Un 409 se responde y se pierde. Un intento repetido contra el legado es
+    algo que deberia poder verse -- si pasa seguido, lo que falta es explicar
+    mejor por que esas acciones no se aprueban, no repetir el rechazo.
+    """
+    with sesion(tenant) as (cur, org):
+        registrar_evento_de_accion(
+            cur, org, accion_id, "accion_aprobacion_rechazada", motivo=motivo,
+            actor_tipo="operador" if intentada_por else "sistema",
+            actor_nombre=intentada_por)
+
+
+# =============================================================================
+#  B5 -- aprobar una accion, en los cuatro pasos de §9.3
+# =============================================================================
+#  1. reservar   transaccion corta y CONDICIONADA. Quien obtiene la fila sigue.
+#  2. revalidar  fuera de transaccion (§3.7). Lo hace el llamador.
+#  3. ejecutar   fuera de transaccion. Lo hace el llamador.
+#  4. resolver   transaccion corta con el desenlace.
+#
+#  Los pasos 2 y 3 NO estan aca a proposito: mantener una transaccion abierta
+#  mientras se espera una API deja sesiones 'idle in transaction' detras del
+#  pooler, y eso ya se midio una vez (X23). El estado 'ejecutando' existe
+#  justamente para cubrir ese hueco sin lock: dice "alguien la tomo" sin que
+#  nadie tenga una transaccion abierta.
+
+def reservar_accion(tenant: str, accion_id: str, reservada_por: str) -> dict:
+    """
+    Paso 1: toma la accion para ejecutarla, o explica por que no se puede.
+
+    Devuelve {'ok': True, 'accion': fila} o {'ok': False, 'motivo': <codigo>}.
+
+    Las tres condiciones viajan DENTRO del UPDATE y no antes: comprobarlas en
+    una consulta aparte deja una ventana entre la comprobacion y la escritura,
+    y dos operadores que aprueban a la vez la encuentran. Solo el que obtiene
+    la fila sigue; el otro recibe 'ya_no_pendiente' y no ejecuta nada.
+
+    Motivos posibles:
+        no_existe          otro tenant, o nunca existio
+        de_legado          sin conversation_id (X24). No se reserva jamas.
+        vencida            paso su vence_en -- se marca 'vencida' al pasar
+        conversacion_cerrada
+        ya_no_pendiente    alguien llego primero
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, estado, conversation_id, vence_en, herramienta,
+                      argumentos,
+                      to_jsonb(a) ->> 'hash_argumentos' as hash_argumentos,
+                      to_jsonb(a) ->> 'origen' as origen,
+                      (vence_en is not null and vence_en <= now()) as expirada,
+                      (select estado from asistente.conversations c
+                        where c.id = a.conversation_id) as estado_conversacion
+               from asistente.acciones_propuestas a
+               where organization_id = %s and id = %s""",
+            (org, accion_id))
+        previa = cur.fetchone()
+        if previa is None:
+            return {"ok": False, "motivo": "no_existe"}
+        if not previa["conversation_id"]:
+            return {"ok": False, "motivo": "de_legado", "estado": previa["estado"]}
+
+        # Vencida: se marca al pasar por aca. No hay proceso que venza acciones
+        # solo --§11.4 lo prohibe para el legado y no hace falta para el resto--
+        # asi que el momento de descubrirlo es cuando alguien la toca.
+        if previa["expirada"] and previa["estado"] == "pendiente":
+            cur.execute(
+                """update asistente.acciones_propuestas
+                   set estado = 'vencida', revisado_en = now()
+                   where organization_id = %s and id = %s and estado = 'pendiente'""",
+                (org, accion_id))
+            if cur.rowcount:
+                registrar_evento_de_accion(
+                    cur, org, accion_id, "accion_vencida",
+                    motivo="paso su plazo de vigencia antes de que alguien la aprobara",
+                    actor_tipo="sistema",
+                    conversation_id=str(previa["conversation_id"]))
+            return {"ok": False, "motivo": "vencida"}
+
+        # M06-F: RESERVAR ES APROBAR, y para una accion con aprobacion
+        # vinculante (la que guardo hash y origen al proponerse: las
+        # irreversibles) el SELLO se escribe en esta MISMA escritura. No hay una
+        # segunda maquina de aprobacion: es el compare-and-set de B5 con una
+        # columna mas. El sello ata empresa, organizacion, herramienta, origen,
+        # huella y aprobador; las tres primeras condiciones del WHERE aseguran
+        # que se calcula sobre lo mismo que la fila tiene al escribirlo, y el
+        # trigger de la tabla impide cambiarlo despues.
+        #
+        # 'to_jsonb(a)' arriba y no las columnas por nombre: asi, con la
+        # migracion todavia sin aplicar, una propuesta comun sigue reservandose
+        # igual que en B5 (hash NULL -> sin sello), y una vinculante no puede
+        # existir porque no pudo guardarse.
+        vinculante = bool(previa["hash_argumentos"])
+        extra_set, extra_where = "", ""
+        if vinculante:
+            from nucleo.seguridad.aprobacion import sello_de
+            sello = sello_de(tenant=tenant, organization_id=str(org),
+                             herramienta=previa["herramienta"],
+                             origen=previa["origen"] or "",
+                             huella=previa["hash_argumentos"],
+                             aprobador=reservada_por)
+            extra_set = ", sello_aprobacion = %s"
+            extra_where = (" and a.herramienta = %s and a.hash_argumentos = %s"
+                           " and a.origen is not distinct from %s")
+        cur.execute(
+            """update asistente.acciones_propuestas a
+               set estado = 'ejecutando', revisado_por = %s, revisado_en = now()"""
+            + extra_set + """
+               where a.organization_id = %s and a.id = %s
+                 and a.estado = 'pendiente'
+                 and (a.vence_en is null or a.vence_en > now())
+                 and a.conversation_id is not null
+                 and exists (select 1 from asistente.conversations c
+                              where c.id = a.conversation_id
+                                and c.organization_id = a.organization_id
+                                and c.estado = 'abierta')""" + extra_where + """
+               returning a.*""",
+            (reservada_por,) + ((sello,) if vinculante else ()) + (org, accion_id)
+            + ((previa["herramienta"], previa["hash_argumentos"], previa["origen"])
+               if vinculante else ()))
+        fila = cur.fetchone()
+        if fila is None:
+            if (previa["estado_conversacion"] or "") != "abierta":
+                return {"ok": False, "motivo": "conversacion_cerrada"}
+            return {"ok": False, "motivo": "ya_no_pendiente",
+                    "estado": previa["estado"]}
+        return {"ok": True, "accion": dict(fila)}
+
+
+def liberar_accion(tenant: str, accion_id: str, motivo: str) -> bool:
+    """
+    Devuelve una accion reservada a 'pendiente' (§9.3 paso 2).
+
+    Es para UN solo caso: la revalidacion no se pudo correr --API caida,
+    timeout-- asi que no se sabe si la condicion se cumple. Como no se ejecuto
+    nada, la accion vuelve a estar disponible y el operador ve "no se pudo
+    comprobar, reintentar".
+
+    NO se usa cuando la revalidacion corre y falla: eso es 'vencida', porque la
+    condicion se comprobo y no se cumple. La diferencia es la misma de siempre:
+    no saber no es lo mismo que saber que no.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = 'pendiente', revisado_por = null, revisado_en = null,
+                   codigo_error = %s
+               where organization_id = %s and id = %s and estado = 'ejecutando'""",
+            (motivo[:200], org, accion_id))
+        return cur.rowcount > 0
+
+
+def vencer_accion(tenant: str, accion_id: str, codigo: str,
+                  conversation_id: str | None = None) -> bool:
+    """
+    La revalidacion corrio y su condicion NO se cumple (§3.7): la accion ya no
+    aplica y no se va a ejecutar. 'codigo' dice cual condicion fallo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = 'vencida', revisado_en = now(), codigo_error = %s
+               where organization_id = %s and id = %s
+                 and estado in ('ejecutando', 'pendiente')""",
+            (codigo[:200], org, accion_id))
+        if not cur.rowcount:
+            return False
+        registrar_evento_de_accion(
+            cur, org, accion_id, "accion_vencida", motivo=codigo[:500],
+            actor_tipo="sistema", conversation_id=conversation_id)
+        return True
+
+
+def resolver_ejecucion_de_accion(tenant: str, accion_id: str, *,
+                                 resultado: dict | None, codigo_error: str | None,
+                                 incierto: bool = False,
+                                 aprobada_por: str | None = None,
+                                 conversation_id: str | None = None) -> bool:
+    """
+    Paso 4: el desenlace de la ejecucion, con su evento (I12).
+
+        codigo_error None      -> ejecutada_ok
+        incierto               -> desconocida       (unknown != failed)
+        resto                  -> ejecutada_fallo
+
+    'desconocida' es terminal y NO se reintenta sola (§9.3 paso 5): el pedido
+    pudo haber llegado al sistema externo. Reintentar a ciegas un ticket que
+    quiza ya existe manda dos visitas tecnicas al mismo cliente.
+
+    La condicion 'estado = ejecutando' es lo que hace que una doble aprobacion
+    no pueda escribir dos veces: la segunda no reservo, asi que nunca llega
+    aca, y si llegara no encontraria fila.
+    """
+    if incierto:
+        estado, tipo = "desconocida", "accion_desconocida"
+    elif codigo_error:
+        estado, tipo = "ejecutada_fallo", "accion_aprobada"
+    else:
+        estado, tipo = "ejecutada_ok", "accion_aprobada"
+
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = %s, revisado_en = now(),
+                   resultado_ejecucion = %s, codigo_error = %s
+               where organization_id = %s and id = %s and estado = 'ejecutando'""",
+            (estado, json.dumps(resultado, ensure_ascii=False) if resultado is not None else None,
+             (codigo_error or None) and codigo_error[:200], org, accion_id))
+        if not cur.rowcount:
+            return False
+        registrar_evento_de_accion(
+            cur, org, accion_id, tipo,
+            motivo=(codigo_error or None) and codigo_error[:500],
+            actor_tipo="operador" if aprobada_por else "sistema",
+            actor_nombre=aprobada_por, conversation_id=conversation_id,
+            datos={"desenlace": estado})
+        return True
+
+
+def vincular_accion_a_conversacion(tenant: str, accion_id: str,
+                                   conversation_id: str,
+                                   vigencia_minutos: int | None = None) -> str:
+    """
+    Le pone conversacion, vigencia y clave de equivalencia a una accion recien
+    propuesta.
+
+    POR QUE EN DOS PASOS Y NO AL INSERTAR: durante el turno todavia NO existe
+    el conversation_id -- la conversacion se crea o se reusa recien al
+    persistir el turno, en api.py. Es el mismo problema que ya tenian
+    'tool_calls' y los archivos generados, y se resuelve igual: el motor
+    escribe lo que sabe, y api.py completa cuando el id existe.
+
+    La ventana entre los dos pasos es segura y NO hay que taparla: mientras la
+    accion no tiene conversacion se la trata como de legado, asi que NO SE
+    PUEDE APROBAR (X24). Falla cerrado, que es el lado correcto -- y nadie
+    puede aprobar en ese lapso porque el operador todavia no la vio.
+
+    Devuelve 'vinculada', 'duplicada' (ya habia una equivalente viva: esta se
+    cancela en vez de quedar como segunda propuesta del mismo pedido) o
+    'no_encontrada'.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select herramienta, argumentos, estado
+               from asistente.acciones_propuestas
+               where organization_id = %s and id = %s""",
+            (org, accion_id))
+        fila = cur.fetchone()
+        if fila is None:
+            return "no_encontrada"
+
+        clave = clave_de_equivalencia(conversation_id, fila["herramienta"],
+                                      fila["argumentos"] or {})
+        try:
+            cur.execute(
+                """update asistente.acciones_propuestas
+                   set conversation_id = %s, clave_equivalencia = %s,
+                       vence_en = case when %s::int is null then null
+                                       else creado_en + make_interval(mins => %s::int) end
+                   where organization_id = %s and id = %s
+                     and conversation_id is null""",
+                (conversation_id, clave, vigencia_minutos, vigencia_minutos,
+                 org, accion_id))
+        except psycopg.errors.UniqueViolation:
+            # Ya hay una equivalente viva en esta conversacion: el cliente
+            # pidio dos veces lo mismo. La segunda se cancela --con su motivo,
+            # como cualquier cancelacion-- en vez de quedar viva sin
+            # conversacion, que la volveria indistinguible del legado.
+            cur.execute(
+                """update asistente.acciones_propuestas
+                   set estado = 'cancelada',
+                       motivo_rechazo = 'duplicada: ya habia una propuesta '
+                                        'equivalente viva en esta conversacion',
+                       revisado_en = now()
+                   where organization_id = %s and id = %s and estado = 'pendiente'""",
+                (org, accion_id))
+            if cur.rowcount:
+                registrar_evento_de_accion(
+                    cur, org, accion_id, "accion_propuesta_duplicada",
+                    motivo="ya habia una propuesta equivalente viva",
+                    actor_tipo="sistema", conversation_id=conversation_id)
+            return "duplicada"
+        return "vinculada" if cur.rowcount else "no_encontrada"
+
+
+def barrer_acciones_ejecutando(tenant: str, minutos: int, limite: int = 50) -> list[dict]:
+    """
+    T20 (c): las `ejecutando` que quedaron colgadas pasan a `desconocida`.
+
+    Se llega a este estado de una sola forma: el proceso murio entre la reserva
+    (§9.3 paso 1) y el desenlace (paso 4). Y eso significa que el pedido PUDO
+    haber salido -- la unica respuesta honesta es que no se sabe.
+
+    POR QUE 'desconocida' Y NO 'pendiente': devolverla a la cola seria
+    invitarla a ejecutarse otra vez, y nadie puede demostrar que la primera no
+    llego. Un ticket duplicado son dos visitas tecnicas al mismo cliente, y eso
+    no se deshace. X21 lo prohibe expresamente: el reconciliador nunca
+    reejecuta una accion por su cuenta.
+
+    El UPDATE es la transicion completa --seleccionar y escribir en un solo
+    paso, condicionado a que siga 'ejecutando'-- asi que dos reconciliadores
+    corriendo a la vez no pueden resolver la misma fila dos veces: el segundo
+    no la encuentra.
+
+    'minutos' NO se elige aca: viene de §14.1 Q4, que lo fijo como default de
+    plataforma y no como configuracion por tenant.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = 'desconocida', revisado_en = now(),
+                   codigo_error = 'ejecutando_huerfana'
+               where id in (
+                 select id from asistente.acciones_propuestas
+                  where organization_id = %s and estado = 'ejecutando'
+                    and revisado_en < now() - make_interval(mins => %s::int)
+                  order by revisado_en
+                  limit %s
+                  for update skip locked)
+               returning id, conversation_id""",
+            (org, minutos, limite))
+        barridas = [dict(f) for f in cur.fetchall()]
+        for fila in barridas:
+            registrar_evento_de_accion(
+                cur, org, str(fila["id"]), "accion_desconocida",
+                motivo=f"quedo 'ejecutando' mas de {minutos} min: el proceso murio "
+                       f"entre la reserva y el desenlace, y no se sabe si el "
+                       f"efecto llego a ocurrir",
+                actor_tipo="sistema",
+                conversation_id=str(fila["conversation_id"]) if fila["conversation_id"] else None)
+        return barridas
+
+
+def barrer_acciones_vencidas(tenant: str, limite: int = 50) -> list[dict]:
+    """
+    T20 (d): las `pendiente` que pasaron su plazo -> `vencida`, con evento.
+
+    Es lo mismo que hace reservar_accion() al tropezarse con una, pero sin
+    esperar a que alguien la toque: una propuesta vencida que sigue figurando
+    como 'pendiente' invita a aprobarla, y quien lo intente recibe un 409 que
+    parece una falla del sistema.
+
+    NO alcanza a las de legado: no tienen vence_en, asi que el filtro las deja
+    fuera solo. Es lo que §11.4 pide --nada de vencerlas para que
+    desaparezcan-- y conviene que sea por construccion y no por una condicion
+    aparte que alguien pueda borrar.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = 'vencida', revisado_en = now(),
+                   codigo_error = coalesce(codigo_error, 'plazo_cumplido')
+               where id in (
+                 select id from asistente.acciones_propuestas
+                  where organization_id = %s and estado = 'pendiente'
+                    and vence_en is not null and vence_en <= now()
+                  order by vence_en
+                  limit %s
+                  for update skip locked)
+               returning id, conversation_id""",
+            (org, limite))
+        vencidas = [dict(f) for f in cur.fetchall()]
+        for fila in vencidas:
+            registrar_evento_de_accion(
+                cur, org, str(fila["id"]), "accion_vencida",
+                motivo="paso su plazo de vigencia sin que nadie la aprobara",
+                actor_tipo="sistema",
+                conversation_id=str(fila["conversation_id"]) if fila["conversation_id"] else None)
+        return vencidas
+
+
+def acciones_de_conversacion(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    Las acciones de una conversacion, para la pantalla del hilo.
+
+    SIN 'argumentos', igual que la lista general: son los valores reales sin
+    enmascarar. El resumen existe para que quien aprueba lea "Crear ticket 'No
+    tiene internet' para el servicio 1234" en vez del JSON crudo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, herramienta, resumen, estado, motivo_rechazo,
+                      revisado_por, codigo_error, creado_en, revisado_en,
+                      vence_en,
+                      (vence_en is not null and vence_en <= now()) as expirada
+               from asistente.acciones_propuestas
+               where organization_id = %s and conversation_id = %s
+               order by creado_en desc""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def eventos_de_accion(tenant: str, accion_id: str) -> list[dict]:
+    """El expediente de una accion, en orden. Solo lectura y tenant-scoped."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select tipo, motivo, actor_tipo, actor_nombre, datos, creado_en
+               from asistente.acciones_eventos
+               where organization_id = %s and accion_id = %s
+               order by creado_en asc, id asc""",
+            (org, accion_id))
+        return [dict(f) for f in cur.fetchall()]
 
 
 def guardar_revision_supervisor(tenant: str, conversation_id: str,
@@ -2379,13 +4269,20 @@ def conversacion_vencida(tenant: str, canal: str, usuario_externo: str,
         fila = cur.fetchone()
         if not fila:
             return None
+        # El insumo del resumen pasa por la MISMA regla que el historial del
+        # modelo (nucleo/relevo/historial.py). Antes eran todas las filas, y
+        # todo lo que no era 'user' se volvia 'assistant': una nota interna
+        # entraba al resumen como si el asistente se la hubiera dicho al
+        # cliente, y ese resumen es contexto del modelo en la conversacion
+        # siguiente (D12). Las notas se excluyen en el SQL y otra vez en la
+        # regla.
         cur.execute(
-            """select rol, contenido from asistente.messages
+            """select rol, contenido, origen, autor_nombre, estado_entrega from asistente.messages
                where organization_id = %s and conversation_id = %s
+                 and rol = any(%s)
                order by creado_en""",
-            (org, fila["id"]))
-        mensajes = [{"role": "user" if r["rol"] == "user" else "assistant",
-                     "content": r["contenido"] or ""} for r in cur.fetchall()]
+            (org, fila["id"], list(regla_historial.ROLES_DEL_MODELO)))
+        mensajes = regla_historial.construir(cur.fetchall())
     return {"conversation_id": str(fila["id"]),
             "resumen_previo": fila["resumen"],
             "historial": mensajes}
@@ -2424,6 +4321,202 @@ def resumen_anterior(tenant: str, canal: str,
         return None
 
 
+# ============================================================================
+#  AUTONOMIA 2  --  AUTORIZACION GRANULAR
+# ============================================================================
+#  Las tres van con el timeout corto (SEGUNDOS_CONEXION_GATE) y NO atrapan
+#  excepciones, por el mismo motivo que 'estado_autonomia': quien llama
+#  (nucleo/seguridad/autorizacion.py) convierte el fallo en bloqueo. Si el
+#  error se tragara aca, el bloqueo se volveria un permiso.
+
+
+def nivel_autonomia(tenant: str) -> dict | None:
+    """
+    El techo de autonomia vigente de la empresa, o None si nunca se fijo.
+
+    Devuelve tambien 'organization_id' (de la fila) y 'org_consultada' (la que
+    se resolvio para este tenant): nucleo/seguridad/techo.py exige que sean la
+    misma antes de creerle al nivel (M06-B). No selecciona 'origen' a
+    proposito: la lectura del gate no lo necesita, y asi funciona antes y
+    despues de la migracion 202609221010_techo_autonomia.sql.
+    """
+    with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+        cur.execute(
+            """select organization_id::text as organization_id,
+                      %s::text as org_consultada,
+                      nivel, nivel_anterior, actor, motivo, creado_en
+                 from asistente.nivel_autonomia
+                where organization_id = %s
+                order by creado_en desc, id desc
+                limit 1""", (org, org))
+        return cur.fetchone()
+
+
+def registrar_cambio_techo(tenant: str, nivel_nuevo: int,
+                           anterior_esperado: int | None, actor: str,
+                           motivo: str, origen: str) -> dict:
+    """
+    Mueve el techo de autonomia (M06-B). Como 'autonomia_operador', igual que
+    el interruptor: el runtime no tiene INSERT sobre asistente.nivel_autonomia.
+
+    Todo en UNA transaccion, con un lock por empresa:
+      - si la ultima fila ya es este mismo pedido (mismo origen, mismo nivel)
+        -> 'repetido', no escribe otra: el mismo pedido reenviado no deja dos
+        transiciones;
+      - si el techo vigente no es el que el operador vio -> 'conflicto', no
+        escribe el techo;
+      - si no -> escribe el techo y 'aplicado'.
+    En los tres casos deja el intento en techo_autonomia_intentos.
+
+    No atrapa: si esto falla, el operador tiene que saber que su orden NO
+    quedo registrada.
+    """
+    with sesion(tenant, rol=ROL_OPERADOR_AUTONOMIA) as (cur, org):
+        cur.execute("select pg_advisory_xact_lock(hashtext(%s))",
+                    (f"techo_autonomia:{org}",))
+        cur.execute(
+            """select nivel, origen from asistente.nivel_autonomia
+                where organization_id = %s
+                order by creado_en desc, id desc limit 1""", (org,))
+        vigente = cur.fetchone()
+        actual = vigente["nivel"] if vigente else None
+
+        if vigente and vigente.get("origen") == origen and actual == nivel_nuevo:
+            resultado = "repetido"
+        elif actual != anterior_esperado:
+            resultado = "conflicto"
+        else:
+            resultado = "aplicado"
+            cur.execute(
+                """insert into asistente.nivel_autonomia
+                     (organization_id, nivel, nivel_anterior, actor, motivo, origen)
+                   values (%s, %s, %s, %s, %s, %s)""",
+                (org, nivel_nuevo, actual, actor, motivo, origen))
+
+        cur.execute(
+            """insert into asistente.techo_autonomia_intentos
+                 (organization_id, nivel_anterior, nivel_solicitado, actor,
+                  motivo, origen, resultado, codigo)
+               values (%s, %s, %s, %s, %s, %s, %s, %s)
+               returning organization_id::text as organization_id,
+                         nivel_anterior, nivel_solicitado, actor, motivo,
+                         origen, resultado, codigo, creado_en""",
+            (org, actual, nivel_nuevo, actor, motivo, origen, resultado,
+             None if resultado != "conflicto" else "CAMBIO_DE_TECHO_CONFLICTO"))
+        return dict(cur.fetchone())
+
+
+def registrar_intento_techo(tenant: str, *, nivel_solicitado: int | None,
+                            nivel_anterior: int | None, actor: str,
+                            motivo: str, origen: str, resultado: str,
+                            codigo: str) -> None:
+    """
+    Un intento de mover el techo que el CODIGO rechazo antes de llegar a la
+    base (M06-B). Va como 'app_backend': la politica de la tabla solo le deja
+    escribir filas 'rechazado', asi que el runtime puede dejar constancia de
+    que alguien lo intento pero no puede fabricar un 'aplicado'.
+    """
+    with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+        cur.execute(
+            """insert into asistente.techo_autonomia_intentos
+                 (organization_id, nivel_anterior, nivel_solicitado, actor,
+                  motivo, origen, resultado, codigo)
+               values (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (org, nivel_anterior, nivel_solicitado, actor, motivo, origen,
+             resultado, codigo))
+
+
+def historial_techo(tenant: str, limite: int = 50) -> list[dict]:
+    """Los intentos de mover el techo, aplicados o no, lo mas reciente primero."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select nivel_anterior, nivel_solicitado, actor, motivo, origen,
+                      resultado, codigo, creado_en
+                 from asistente.techo_autonomia_intentos
+                where organization_id = %s
+                order by creado_en desc, id desc
+                limit %s""", (org, limite))
+        return cur.fetchall()
+
+
+def autorizacion_herramienta(tenant: str, herramienta: str) -> dict | None:
+    """
+    La autorizacion vigente de UNA herramienta, o None si nunca se autorizo.
+
+    'vigente' = la fila mas reciente de esa herramienta en esa empresa. Una
+    revocacion es una fila nueva con estado='revocada', asi que sale de aca y
+    quien llama la lee como bloqueo -- no hay borrado que auditar despues.
+    """
+    with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+        cur.execute(
+            """select id, herramienta, estado, estado_anterior, nivel_maximo,
+                      vigente_desde, vigente_hasta, autorizado_por, motivo,
+                      limites, creado_en
+                 from asistente.autorizacion_herramienta
+                where organization_id = %s and herramienta = %s
+                order by creado_en desc, id desc
+                limit 1""", (org, herramienta))
+        return cur.fetchone()
+
+
+def secreto_jwt_en_base() -> str:
+    """
+    Si el GUC con el secreto de firma de JWT sigue puesto en esta base.
+
+    Devuelve la CADENA VACIA cuando no esta -- nunca el valor, que no hace
+    falta para decidir y que no debe viajar a ningun log. Lo unico que se mira
+    es si hay algo.
+
+    Va sin bajar de rol y con el timeout corto: es una pregunta de
+    configuracion del servidor, no de datos de una empresa.
+    """
+    con = psycopg.connect(dsn(), connect_timeout=SEGUNDOS_CONEXION_GATE,
+                          row_factory=dict_row)
+    try:
+        with con.cursor() as cur:
+            cur.execute(
+                "select current_setting('app.settings.jwt_secret', true) as v")
+            fila = cur.fetchone()
+        #  Se devuelve solo la presencia, no el contenido.
+        return "presente" if (fila and (fila.get("v") or "").strip()) else ""
+    finally:
+        con.close()
+
+
+def registrar_ejecucion_autonoma(tenant: str, *, herramienta: str,
+                                 decision: str, codigo: str = "",
+                                 motivo: str = "", propuesta_id: str = "",
+                                 clave_idempotencia: str = "",
+                                 autorizacion_id: str = "",
+                                 nivel_efectivo: int | None = None,
+                                 actor: str = "", evidencia: str = "",
+                                 resultado: str = "", error: str = "") -> None:
+    """
+    Deja la decision en la bitacora. NUNCA tumba la accion por no poder anotar.
+
+    Al reves que las lecturas de arriba, esta SI se traga la excepcion: perder
+    una fila de auditoria es malo, pero convertir eso en un bloqueo haria que
+    una base lenta apagara la autonomia entera. La lectura decide, la escritura
+    registra -- no son lo mismo y no fallan igual.
+    """
+    try:
+        with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+            cur.execute(
+                """insert into asistente.ejecucion_autonoma
+                     (organization_id, propuesta_id, herramienta,
+                      clave_idempotencia, autorizacion_id, nivel_efectivo,
+                      decision, codigo, motivo, actor, evidencia, resultado,
+                      error)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (org, propuesta_id or None, herramienta,
+                 clave_idempotencia or None, autorizacion_id or None,
+                 nivel_efectivo, decision, codigo or None, motivo or None,
+                 actor or None, evidencia or None, resultado or None,
+                 error or None))
+    except BaseException as e:                                   # noqa: BLE001
+        # La decision NO cambia por esto.
+        registrar("autonomia2", "no se pudo registrar la decision en la bitacora",
+                  herramienta=herramienta, error=e)
 def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
     """
     Lo que esta pasando AHORA, agregado en SQL: cuantas conversaciones tiene
@@ -2444,6 +4537,14 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
     conversacion (mismo criterio que PRD RNF-01 sobre tool_calls, que guarda
     un resumen y nunca el payload).
 
+    'Activa' es abierta Y con movimiento en las ultimas 24 horas, no solo
+    abierta. Medido en produccion el 23/09/2026: 231 conversaciones en estado
+    'abierta' contra 1 sola con actividad ese dia -- una conversacion que
+    nadie cierra se queda abierta para siempre, asi que contar el estado a
+    secas convierte el tablero en un acumulado historico con nombre de
+    "ahora". El total sin acotar viaja igual, como 'abiertas_total', porque
+    sirve para otra pregunta: cuanta cola vieja hay sin cerrar.
+
     'ventana_min' es lo que se considera actividad reciente para decir que un
     agente esta en algo ahora mismo. 10 minutos por defecto: mas corto deja
     en blanco a un agente que espera la respuesta de una herramienta lenta;
@@ -2460,17 +4561,33 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
     with sesion(tenant) as (cur, org):
         # 1) Carga por agente. 'rol_efectivo' es con que permisos se atendio
         #    la conversacion, que es justamente el agente que la tiene.
+        # 'esperando_cliente' sale del rol del ultimo mensaje: si el ultimo
+        # turno lo puso el asistente, el agente ya contesto y la pelota esta
+        # del lado del cliente. Es la diferencia entre un agente detenido y
+        # uno que hizo lo suyo y espera -- y sin esto los dos se ven igual.
         cur.execute(
             f"""select coalesce(c.rol_efectivo, '(sin rol)') as agente,
-                       count(*) filter (where c.estado = 'abierta')
+                       count(*) filter (where c.estado = 'abierta'
+                                          and c.actualizado_en >= now() - interval '24 hours')
                            as conversaciones,
+                       count(*) filter (where c.estado = 'abierta') as abiertas_total,
                        count(*) filter (where c.estado = 'abierta'
                                           and c.necesita_atencion_humana)
                            as esperando_humano,
+                       count(*) filter (where c.estado = 'abierta'
+                                          and c.actualizado_en >= now() - interval '24 hours'
+                                          and ultimo.rol = 'assistant')
+                           as esperando_cliente,
                        count(*) filter (where c.creado_en >= {dia_bogota})
                            as recibidas_hoy,
                        max(c.actualizado_en) as ultima_actividad
                   from asistente.conversations c
+                  left join lateral (
+                      select rol from asistente.messages
+                       where conversation_id = c.id and contenido is not null
+                         and rol <> 'nota'
+                       order by creado_en desc limit 1
+                  ) ultimo on true
                  where c.organization_id = %s
                    and (c.estado = 'abierta' or c.actualizado_en >= {dia_bogota})
                  group by 1""",
@@ -2500,8 +4617,12 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
         cur.execute(
             f"""select
                   (select count(*) from asistente.conversations
-                    where organization_id = %s and estado = 'abierta')
+                    where organization_id = %s and estado = 'abierta'
+                      and actualizado_en >= now() - interval '24 hours')
                     as conversaciones_activas,
+                  (select count(*) from asistente.conversations
+                    where organization_id = %s and estado = 'abierta')
+                    as abiertas_total,
                   (select count(*) from asistente.conversations
                     where organization_id = %s and estado = 'abierta'
                       and necesita_atencion_humana) as esperando_humano,
@@ -2519,8 +4640,64 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
                   (select count(*) from asistente.tool_calls
                     where organization_id = %s and not exito
                       and creado_en >= {dia_bogota}) as fallos_hoy""",
-            (org, org, org, org, org, org))
+            (org, org, org, org, org, org, org))
         totales = dict(cur.fetchone())
+
+        # 2b) La misma actividad, pero repartida en cubos de tiempo. Son los
+        #     ultimos 30 minutos en 15 cubos de 2: suficiente para ver una
+        #     rafaga o una caida, y barato -- una fila por agente y cubo con
+        #     actividad, no una por llamada.
+        cur.execute(
+            """select coalesce(rol_solicitante, '(sin rol)') as agente,
+                      floor(extract(epoch from (now() - creado_en)) / 120)::int as cubo,
+                      count(*) as n
+                 from asistente.tool_calls
+                where organization_id = %s
+                  and creado_en >= now() - interval '30 minutes'
+                group by 1, 2""",
+            (org,))
+        serie = {}
+        for f in cur.fetchall():
+            # El cubo 0 es el minuto que corre; se guarda al final de la serie
+            # para que el tiempo avance de izquierda a derecha, como se lee.
+            fila = serie.setdefault(f["agente"], [0] * 15)
+            if 0 <= f["cubo"] < 15:
+                fila[14 - f["cubo"]] = f["n"]
+
+        # 3a) Acciones ejecutadas que todavia nadie comprobo. Es lo unico que
+        #     el sistema sabe de una espera de aprobacion: la verificacion de
+        #     'reiniciar_ont' abierta significa que el agente hizo algo cuyo
+        #     efecto aun no se confirmo (ver verificacion_accion.py).
+        cur.execute(
+            """select coalesce(c.rol_efectivo, '(sin rol)') as agente,
+                      count(*) as pendientes
+                 from asistente.verificaciones_accion v
+                 join asistente.conversations c on c.id = v.conversation_id
+                where v.organization_id = %s
+                  and v.estado = 'VERIFICACION_PENDIENTE'
+                group by 1""",
+            (org,))
+        aprobaciones = {f["agente"]: f["pendientes"] for f in cur.fetchall()}
+
+        # 3b) Que servicios externos se usaron hoy y cuanto. Es lo que la
+        #     pantalla dibuja como capsulas en el borde de la sala: sin esto,
+        #     un agente "consultando" no dice contra QUE sistema.
+        cur.execute(
+            f"""select herramienta,
+                       count(*) as usos,
+                       count(*) filter (where not exito) as fallos,
+                       avg(duracion_ms)::int as duracion_media_ms,
+                       max(creado_en) as ultimo_uso,
+                       (array_agg(coalesce(rol_solicitante, '(sin rol)')
+                                  order by creado_en desc))[1] as ultimo_agente
+                  from asistente.tool_calls
+                 where organization_id = %s
+                   and creado_en >= {dia_bogota}
+                 group by herramienta
+                 order by count(*) desc
+                 limit 6""",
+            (org,))
+        servicios = [dict(f) for f in cur.fetchall()]
 
         # 4) Ticker: ultimas herramientas ejecutadas. Sin parametros -- ahi
         #    viaja el identificador de lo consultado (enmascarado, pero
@@ -2556,8 +4733,11 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
     return {
         "ventana_min": ventana_min,
         "carga": carga,
+        "aprobaciones": aprobaciones,
         "actividad": actividad,
+        "serie": serie,
         "totales": totales,
+        "servicios": servicios,
         "eventos_herramienta": eventos_herramienta,
         "eventos_escalada": eventos_escalada,
     }

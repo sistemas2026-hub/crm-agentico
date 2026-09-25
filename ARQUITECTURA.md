@@ -38,14 +38,24 @@ Cuando falla, no se agrega una excepción. Se mueve el comportamiento a la confi
 ```
 nucleo/                    EL MOTOR — genérico, sin clientes
   config/                  carga y validación de tenant.config.yaml
-  seguridad/               listas blancas, permisos por rol, autenticación
-  herramientas/            tipos genéricos: http · agregado · sql · batch
+  seguridad/               listas blancas, frontera de autorización, techo,
+                            interruptor, aprobación, idempotencia, redacción,
+                            guardia de salida, verificación de identidad
+  herramientas/            tipos genéricos: http · agregado · sql · batch · interno
   ingesta/                 fragmentación, contextualización, versionado
   recuperacion/            búsqueda híbrida, ensamblado del prompt
-  modelo/                  cliente LLM, selección por canal/rol
+  modelo/                  cliente LLM, selección por canal/rol, bucle de tool calling
   canales/                 whatsapp, web
   persistencia/            repositorios sobre Supabase
-  observabilidad/          auditoría, consumo, Langfuse
+  observabilidad/          auditoría, consumo, registro sin PII
+  relevo/                  el traspaso IA ↔ humano: control, transiciones,
+                            efectos externos, reconciliador
+  seguimiento/             escalamiento, agendamiento, importación de tickets,
+                            verificación de acción
+  habilidades/             procedimientos que se cargan cuando hacen falta
+  programador/             el reloj de tareas y su cola persistente
+  conectores/ facturacion/ ingesta/  (ver el árbol real)
+  reloj.py                 el daemon de tareas periódicas
 
 tenants/                   DATOS por empresa — sin código
   tenant.config.example.yaml    plantilla de alta
@@ -61,6 +71,12 @@ django-crm/                LA PLATAFORMA — CRM (BottleCRM/Django-CRM)
   frontend/                SvelteKit — incluye /agentes, /asistente,
                             /simulador-whatsapp (hablan con nucleo/canales/api.py)
 ```
+
+*Este mapa listaba **9** submódulos y los reales son **15** (medido el
+24/09/2026 con `ls -d nucleo/*/`). Faltaban `relevo/`, `seguimiento/`,
+`habilidades/`, `programador/`, `conectores/` y `facturacion/` — seis piezas
+que crecieron sin que el mapa las siguiera. `SPEC/CONTEXTO_PROYECTO.md` decía
+11, también viejo. Si volvés a encontrar una diferencia, el árbol manda.*
 
 **`tenants/` no contiene código a propósito.** El validador vive en `nucleo/config/schema.py`: la configuración es dato, y lo que la interpreta es motor.
 

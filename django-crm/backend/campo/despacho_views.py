@@ -28,17 +28,32 @@ from common.models import Profile
 from campo.models import OrdenTrabajo, WorkTypeVersion
 from campo.permissions import IsCampoAuthenticated, ROLES_GESTION
 from campo.serializers import (
+    AgregarIntegranteSerializer,
     AsignarSerializer,
+    CambiarPrincipalSerializer,
+    ContingenciaSerializer,
     CrearOrdenSerializer,
+    DesasignarSerializer,
     OrdenTrabajoDetailSerializer,
+    ProgramarSerializer,
+    ReprogramarSerializer,
+    RetirarIntegranteSerializer,
     ValidarSerializer,
 )
 from campo.services.despacho import (
-    ErrorDespacho, asignar, contexto_del_caso, crear_orden,
+    ConflictoDeCuadrilla, ErrorDespacho, RequiereSucesor, agregar_integrante,
+    asignar, cambiar_principal, contexto_del_caso, crear_orden, desasignar,
+    retirar_integrante,
 )
 from campo.services.idempotencia import manejar_idempotencia
 from campo.services.transiciones import (
-    TransicionInvalidaError, aprobar, requerir_correccion,
+    TransicionInvalidaError, aprobar, cerrar_orden, requerir_correccion,
+)
+from operaciones.models import ProgramacionSemanal
+from operaciones.programacion import (
+    ErrorProgramacion, NoEstaProgramada, PlanNoPublicable, RequiereContingencia,
+    YaEnEsaFecha, YaProgramada, clasificar_ruta, programar_orden,
+    registrar_contingencia, reprogramar_orden,
 )
 
 
@@ -208,6 +223,86 @@ class AsignarTrabajoView(APIView):
                          "server_time": timezone.now().isoformat()})
 
 
+class ProgramarTrabajoView(APIView):
+    """
+    Le pone fecha a una orden  --  paso M03-B.
+
+    Vive aqui, junto a crear/asignar/validar, y no en una API propia: es el
+    mismo recurso ('trabajos/<pk>/'), el mismo verbo operativo que 'asignar', y
+    reusa las tres piezas que ya resuelven lo dificil -- el 404 estricto entre
+    empresas, el permiso de gestion y la idempotencia por cabecera. Una ruta
+    nueva bajo otro prefijo habria sido una segunda arquitectura para el mismo
+    problema.
+
+    El servicio vive en 'operaciones/programacion.py' por la direccion de las
+    dependencias: 'operaciones' ya importa 'campo' (sus modelos tienen FK a
+    OrdenTrabajo), y 'campo' no importaba 'operaciones'. Poner el servicio del
+    otro lado habria cerrado el ciclo.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        negado = _exigir_gestion(request)
+        if negado:
+            return negado
+
+        orden = _orden_o_404(request, pk)
+        s = ProgramarSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+
+        #  El plan se busca ACOTADO a request.org, igual que el perfil en
+        #  A-3.3: un id de otra empresa no da 403 --eso confirmaria que
+        #  existe-- sino que simplemente no aparece dentro de la propia.
+        plan = ProgramacionSemanal.objects.filter(
+            pk=d["programacion_semanal_id"], org=request.org).first()
+        if plan is None:
+            raise Http404("No existe ese plan semanal.")
+
+        try:
+            linea = programar_orden(
+                org=request.org,
+                orden=orden,
+                programacion=plan,
+                programada_para=d["programada_para"],
+                actor=request.profile,
+                zona=d.get("zona") or "",
+                prioridad=d.get("prioridad"),
+                secuencia=d.get("secuencia"),
+                #  M03-D3: sobre un plan PUBLICADO el servicio las exige; sobre
+                #  un borrador quedan vacias y no cambia nada.
+                causa=d.get("causa") or "",
+                motivo=d.get("motivo") or "",
+            )
+        except YaProgramada as e:
+            #  409 y no 400: la peticion es valida, el conflicto es con el
+            #  estado actual del recurso. Reprogramar es otra operacion.
+            return Response(
+                {"error": "YA_PROGRAMADA", "detalle": str(e),
+                 "pendiente": "REPROGRAMACION"},
+                status=status.HTTP_409_CONFLICT)
+        except ErrorProgramacion as e:
+            return Response({"error": "NO_SE_PUDO_PROGRAMAR", "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        orden.refresh_from_db()
+        return Response(
+            {"orden": OrdenTrabajoDetailSerializer(orden).data,
+             "programacion": {
+                 "linea": str(linea.id),
+                 "programacion_semanal": str(plan.id),
+                 "dia": str(linea.dia),
+                 "hora_inicio": str(linea.hora_inicio),
+                 "estado": linea.estado,
+             },
+             "aviso": ("Programado. Esto NO asigna tecnico ni calcula "
+                       "capacidad: solo fija cuando se hace el trabajo."),
+             "server_time": timezone.now().isoformat()},
+            status=status.HTTP_201_CREATED)
+
+
 class ValidarTrabajoView(APIView):
     """Aprobar el trabajo, o devolverlo diciendo que hay que rehacer."""
 
@@ -239,3 +334,380 @@ class ValidarTrabajoView(APIView):
         orden.refresh_from_db()
         return Response({"orden": OrdenTrabajoDetailSerializer(orden).data,
                          "server_time": timezone.now().isoformat()})
+
+
+class CerrarTrabajoView(APIView):
+    """
+    El ultimo paso del recorrido: la orden se da por terminada.
+
+        POST /api/campo/trabajos/<pk>/cerrar/
+
+    POR QUE ESTA VISTA EXISTE
+    -------------------------
+    'transiciones.cerrar_orden' estaba escrita desde el primer dia, la maquina
+    de estados declara 'completada_campo -> cerrada', y NADIE la llamaba: no
+    habia ruta, ni servicio, ni pantalla. El efecto es que una orden aprobada
+    se quedaba en 'completada_campo' para siempre y el recorrido
+    --caso, programacion, ejecucion, evidencia, validacion, CIERRE-- no
+    terminaba nunca. Lo encontro la validacion de punta a punta del Supervisor.
+
+    NO ES UN SEGUNDO CAMINO DE VALIDACION
+    -------------------------------------
+    Aprobar y cerrar son cosas distintas y siguen separadas: 'aprobar' mueve
+    'estado_validacion' y dice "el trabajo esta bien hecho"; esto mueve
+    'estado_operativo' y dice "este trabajo ya no esta en curso". Por eso
+    'ValidarTrabajoView' no gana una tercera decision: la validacion la firma
+    quien revisa la evidencia, el cierre lo firma quien cierra la operacion.
+
+    SOLO SE CIERRA LO APROBADO
+    --------------------------
+    Cerrar una orden con la evidencia sin validar la sacaria de la bandeja del
+    supervisor sin que nadie la haya mirado, que es justo lo que el flujo de
+    validacion existe para impedir. La comprobacion va aqui --y no dentro de
+    'cerrar_orden'-- porque el servicio tambien lo usa la conciliacion
+    posterior, que cierra ordenes viejas por otro motivo.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        negado = _exigir_gestion(request)
+        if negado:
+            return negado
+
+        orden = _orden_o_404(request, pk)
+        if orden.estado_validacion != OrdenTrabajo.APROBADO:
+            return Response(
+                {"error": "SIN_VALIDAR",
+                 "detalle": (f"La orden esta en validacion "
+                             f"'{orden.get_estado_validacion_display()}'. Se cierra "
+                             f"lo que ya fue aprobado."),
+                 "pendiente": "VALIDACION"},
+                status=status.HTTP_409_CONFLICT)
+
+        try:
+            orden = cerrar_orden(
+                orden, profile=request.profile,
+                metadatos={"observacion": (request.data or {}).get("observacion", "")})
+        except TransicionInvalidaError as e:
+            return Response({"error": "CIERRE_INVALIDO", "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        orden.refresh_from_db()
+        return Response({"orden": OrdenTrabajoDetailSerializer(orden).data,
+                         "aviso": ("Cerrada. Esto no notifica al cliente ni toca "
+                                   "ningun sistema externo."),
+                         "server_time": timezone.now().isoformat()})
+
+
+class ReprogramarTrabajoView(APIView):
+    """
+    Cambia el CUANDO de una orden que ya tenia un cuando  --  paso M03-D3.
+
+        POST /api/campo/trabajos/<pk>/reprogramar/
+
+    Cubre las rutas NORMAL y CORRECCION. Si la vuelta actual ya arranco NO
+    registra una contingencia por su cuenta: devuelve 409 y dice que hay que
+    usar la otra ruta. Hacer algo distinto de lo que pidieron y contestar 2xx
+    seria peor que rechazar.
+
+    Vive junto a crear/asignar/validar/programar porque es el mismo recurso y
+    el mismo verbo operativo, y reusa el 404 estricto entre empresas, el
+    permiso de gestion y la idempotencia por cabecera.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        negado = _exigir_gestion(request)
+        if negado:
+            return negado
+
+        orden = _orden_o_404(request, pk)
+        s = ReprogramarSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+
+        plan = ProgramacionSemanal.objects.filter(
+            pk=d["programacion_semanal_id"], org=request.org).first()
+        if plan is None:
+            raise Http404("No existe ese plan semanal.")
+
+        try:
+            linea, evento, novedad = reprogramar_orden(
+                org=request.org,
+                orden=orden,
+                programada_para=d["programada_para"],
+                programacion_destino=plan,
+                actor=request.profile,
+                causa=d.get("causa") or "",
+                motivo=d.get("motivo") or "",
+                contexto=d.get("contexto") or {},
+            )
+        except RequiereContingencia as e:
+            return Response(
+                {"error": "REQUIERE_CONTINGENCIA", "detalle": str(e),
+                 "ruta": clasificar_ruta(orden),
+                 "siguiente": f"/api/campo/trabajos/{orden.id}/contingencia/"},
+                status=status.HTTP_409_CONFLICT)
+        except YaEnEsaFecha as e:
+            #  [BLOQUEADO] M03-D2 dejo este caso PENDIENTE de decision
+            #  empresarial. Se rechaza porque es lo REVERSIBLE: aceptarlo
+            #  escribiria en una bitacora append-only un cambio que no ocurrio.
+            return Response(
+                {"error": "YA_EN_ESA_FECHA", "detalle": str(e),
+                 "pendiente": "DECISION_EMPRESARIAL_YaEnEsaFecha"},
+                status=status.HTTP_409_CONFLICT)
+        except NoEstaProgramada as e:
+            return Response(
+                {"error": "NO_ESTA_PROGRAMADA", "detalle": str(e),
+                 "siguiente": f"/api/campo/trabajos/{orden.id}/programar/"},
+                status=status.HTTP_409_CONFLICT)
+        except PlanNoPublicable as e:
+            return Response({"error": "PLAN_NO_ADMITE_LINEAS",
+                             "detalle": str(e)},
+                            status=status.HTTP_409_CONFLICT)
+        except ErrorProgramacion as e:
+            return Response({"error": "NO_SE_PUDO_REPROGRAMAR",
+                             "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        orden.refresh_from_db()
+        return Response({
+            "orden": OrdenTrabajoDetailSerializer(orden).data,
+            "programacion": {
+                "linea": str(linea.id),
+                "programacion_semanal": str(plan.id),
+                "dia": str(linea.dia),
+                "hora_inicio": str(linea.hora_inicio),
+                "estado": linea.estado,
+            },
+            "traza": {"evento": str(evento.id), "ruta": evento.datos["ruta"],
+                      "novedad": (str(novedad.id) if novedad else None)},
+            "aviso": ("Reprogramado. Esto NO cambia el tecnico asignado ni el "
+                      "estado del trabajo: solo cuando se hace."),
+            "server_time": timezone.now().isoformat(),
+        })
+
+
+class ContingenciaTrabajoView(APIView):
+    """
+    Un trabajo EN CURSO se complico  --  paso M03-D3.
+
+        POST /api/campo/trabajos/<pk>/contingencia/
+
+    Registra la novedad y NO toca la programacion. 'programada_para' dice lo
+    que se PLANIFICO; 'iniciada_en' y 'completada_campo_en' dicen lo que PASO.
+    Reescribir el plan borraria justo la diferencia entre lo previsto y lo
+    ocurrido.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        negado = _exigir_gestion(request)
+        if negado:
+            return negado
+
+        orden = _orden_o_404(request, pk)
+        s = ContingenciaSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+
+        try:
+            novedad, evento = registrar_contingencia(
+                org=request.org, orden=orden, actor=request.profile,
+                causa=d["causa"], motivo=d.get("motivo") or "",
+                contexto=d.get("contexto") or {})
+        except ErrorProgramacion as e:
+            return Response({"error": "NO_SE_PUDO_REGISTRAR",
+                             "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            "contingencia": {
+                "novedad": str(novedad.id),
+                "evento": str(evento.id),
+                "causa": novedad.tipo,
+            },
+            "aviso": ("Registrado. La programacion NO se modifico: un trabajo "
+                      "en curso conserva la fecha que se planifico."),
+            "server_time": timezone.now().isoformat(),
+        }, status=status.HTTP_201_CREATED)
+
+
+# ==============================================================================
+#  LAS CUATRO PUERTAS DE LA CUADRILLA  --  M03-F-B
+# ==============================================================================
+#
+#  'asignar' ya existia y significa "pon (o cambia) al responsable". Lo que
+#  faltaba era poder tener una cuadrilla sin que cada persona nueva le robara
+#  la principalia a la anterior -- que es lo que M03-F-A.1 midio que pasaba.
+#
+#  Las cuatro comparten forma con el resto del despacho: rol de gestion, 404
+#  estricto al cruzar empresas, idempotencia por cabecera y la composicion
+#  completa en la respuesta, para que quien opera vea como quedo la cuadrilla
+#  sin tener que volver a preguntar.
+
+
+def _profile_o_404(request, pid, que="persona"):
+    """
+    Dentro de la empresa de la sesion, o no existe. Nunca 403: confirmar que un
+    UUID de otra empresa existe ya seria demasiado.
+    """
+    p = Profile.objects.filter(pk=pid, org=request.org).first()
+    if p is None:
+        raise Http404(f"No existe esa {que}.")
+    return p
+
+
+def _respuesta_cuadrilla(orden, **extra):
+    orden.refresh_from_db()
+    cuerpo = {"orden": OrdenTrabajoDetailSerializer(orden).data,
+              "server_time": timezone.now().isoformat()}
+    cuerpo.update(extra)
+    return Response(cuerpo)
+
+
+def _error_de_cuadrilla(e):
+    """
+    El mapeo de errores, en un solo lugar para que las cuatro puertas
+    respondan igual. El orden importa: las dos primeras son subclases de
+    ErrorDespacho y un 'except' generico se las tragaria.
+    """
+    if isinstance(e, RequiereSucesor):
+        return Response({"error": "REQUIERE_SUCESOR", "detalle": str(e)},
+                        status=status.HTTP_409_CONFLICT)
+    if isinstance(e, ConflictoDeCuadrilla):
+        return Response({"error": "CUADRILLA_CAMBIO", "detalle": str(e)},
+                        status=status.HTTP_409_CONFLICT)
+    return Response({"error": "NO_SE_PUDO_CAMBIAR_CUADRILLA", "detalle": str(e)},
+                    status=status.HTTP_400_BAD_REQUEST)
+
+
+class AgregarIntegranteView(APIView):
+    """Suma a alguien a la cuadrilla. NO mueve al principal."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        negado = _exigir_gestion(request)
+        if negado:
+            return negado
+
+        orden = _orden_o_404(request, pk)
+        s = AgregarIntegranteSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        persona = _profile_o_404(request, s.validated_data["profile_id"])
+
+        try:
+            agregar_integrante(
+                orden, persona, request.profile,
+                rol=s.validated_data["rol"] or "tecnico",
+                motivo=s.validated_data["motivo"])
+        except ErrorDespacho as e:
+            return _error_de_cuadrilla(e)
+
+        return _respuesta_cuadrilla(orden, resultado="integrante_agregado")
+
+
+class CambiarPrincipalView(APIView):
+    """Traslada la responsabilidad entre dos integrantes. Atomico."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        negado = _exigir_gestion(request)
+        if negado:
+            return negado
+
+        orden = _orden_o_404(request, pk)
+        s = CambiarPrincipalSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        persona = _profile_o_404(request, s.validated_data["profile_id"])
+
+        try:
+            _, cambio = cambiar_principal(orden, persona, request.profile,
+                                          motivo=s.validated_data["motivo"])
+        except ErrorDespacho as e:
+            return _error_de_cuadrilla(e)
+
+        if not cambio:
+            #  Ya era el principal. 200 'sin_cambios', mismo contrato que
+            #  M03-B1 fijo para la secuenciacion: un no-op no es un conflicto.
+            return _respuesta_cuadrilla(
+                orden, resultado="sin_cambios",
+                aviso="Esa persona ya era la principal. No se modifico nada y "
+                      "no se registro ningun evento.")
+        return _respuesta_cuadrilla(orden, resultado="principal_cambiado")
+
+
+class RetirarIntegranteView(APIView):
+    """
+    Saca a alguien. Si es la persona principal y quedan otros integrantes, el
+    sucesor viaja en esta misma llamada -- nunca en dos pasos.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        negado = _exigir_gestion(request)
+        if negado:
+            return negado
+
+        orden = _orden_o_404(request, pk)
+        s = RetirarIntegranteSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        persona = _profile_o_404(request, s.validated_data["profile_id"])
+
+        sucesor = None
+        sucesor_id = s.validated_data.get("nuevo_principal_id")
+        if sucesor_id:
+            sucesor = _profile_o_404(request, sucesor_id, que="persona sucesora")
+
+        try:
+            r = retirar_integrante(orden, persona, request.profile,
+                                   nuevo_principal=sucesor,
+                                   motivo=s.validated_data["motivo"])
+        except ErrorDespacho as e:
+            return _error_de_cuadrilla(e)
+
+        return _respuesta_cuadrilla(
+            orden,
+            resultado=("principal_retirado" if r["cambio_principal"]
+                       else "integrante_retirado"))
+
+
+class DesasignarTrabajoView(APIView):
+    """Deja la orden sin nadie. 0 integrantes es un estado valido."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        negado = _exigir_gestion(request)
+        if negado:
+            return negado
+
+        orden = _orden_o_404(request, pk)
+        s = DesasignarSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+
+        try:
+            cuantos = desasignar(orden, request.profile,
+                                 motivo=s.validated_data["motivo"])
+        except ErrorDespacho as e:
+            return _error_de_cuadrilla(e)
+
+        if cuantos == 0:
+            return _respuesta_cuadrilla(
+                orden, resultado="sin_cambios",
+                aviso="La orden ya estaba sin asignar.")
+        return _respuesta_cuadrilla(orden, resultado="desasignada",
+                                    integrantes_retirados=cuantos)

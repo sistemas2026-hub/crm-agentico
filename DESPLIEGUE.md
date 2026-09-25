@@ -68,6 +68,44 @@ docker compose restart frontend
 
 Para verificar tipos o compilar sin romper el entorno, hacerlo **dentro** del contenedor: `docker exec <contenedor-frontend> pnpm check`.
 
+## Un entorno local de verdad, sin tocar produccion
+
+Armado el 24/09/2026. Hasta ese dia "local" significaba *codigo local contra la
+base de produccion*: el `.env` de la raiz tiene `DBHOST=crm.rapilinksas.co` y es
+lo unico que decide a que base se conecta todo el stack, motor incluido. Eso no
+es aislamiento -- el motor **escribe** su auditoria (`tool_calls`, conversaciones,
+consumo) ahi.
+
+La receta, verificada de punta a punta:
+
+```
+# 1. La base del motor, desde cero y por el ledger
+DBPASSWORD=<la del postgres local>  IMAGEN_DJANGO=<imagen del backend>    py -3.13 cli/base_desde_cero.py --base dexter_local       --host localhost --puerto 5432 --usuario postgres
+
+# 2. La organizacion la crea django-crm, no el asistente
+manage.py shell -c "from common.models import Org; Org.objects.get_or_create(name='...')"
+
+# 3. La config del tenant
+DBNAME=dexter_local ... py -3.13 cli/cargar_config.py tenants/rapilink.config.yaml --forzar
+```
+
+**Tres cosas que no son evidentes:**
+
+- `cargar_config.py` toma la **ruta del YAML**, no el slug. Con el slug falla con
+  un `FileNotFoundError` que no explica nada.
+- El paso 2 no se puede saltear: *"el asistente no inventa organizaciones, esa
+  tabla la mantiene django-crm"*. Sin una fila ahi, el paso 3 se niega.
+- El `--forzar` del paso 3 **no es a ciegas**, y conviene saber por que. La
+  guarda de alineacion git bloquea cuando la copia local difiere de origin, para
+  evitar cargar a produccion desde un repo desincronizado. Pero **no distingue
+  una base local recien creada de la real**: aca la base tenia diez minutos y
+  salio de esa misma copia de trabajo. La guarda no tiene forma de saberlo, asi
+  que el escape es legitimo con el motivo escrito. Si algun dia se afina, esa es
+  la distincion que le falta.
+
+La config nace con la **autonomia DETENIDA** hasta que alguien la habilite: falla
+cerrado, tambien en local.
+
 ## Procedimiento
 
 ### 1. Antes de nada: swap
@@ -366,6 +404,32 @@ Se cargan **por empresa y cifradas** en `asistente.tenant_secrets` (ver `nucleo/
 | `WHATSAPP_APP_SECRET` | App → Settings → Basic. Firma los webhooks |
 | `WHATSAPP_VERIFY_TOKEN` | **Lo inventa la empresa.** Solo se usa en el handshake de alta |
 
+### `RAMA_DESPLIEGUE` — hace falta en la máquina desde la que se carga config
+
+```
+RAMA_DESPLIEGUE=fix/integracion-wisphub
+```
+
+Es la rama cuyo push **despliega**. La usan las guardas de `cli/cargar_config.py`
+y del editor de agentes para contestar una sola pregunta: *¿el código que
+entiende esta configuración ya está corriendo?* Si la configuración estrena un
+campo del esquema y el código todavía no está desplegado, el motor no puede
+leer su propia configuración —los modelos usan `extra="forbid"`— y **deja de
+atender**. Pasó el 03/09/2026.
+
+Sin esta variable la comprobación cae al remoto de la rama actual, que se
+satisface empujando a una rama de trabajo sin desplegar nada. Las guardas lo
+avisan en vez de degradarse en silencio, pero avisar no es comprobar:
+**ponerla**.
+
+No tiene valor por defecto a propósito. El nombre de la rama es de esta
+instalación, y escribirlo en `nucleo/` metía el nombre de un proveedor en el
+motor genérico — lo rechazó `tests/test_nucleo_sin_tenants.py`.
+
+En el contenedor productivo no hace falta: no hay repositorio git, y sin copia
+local el desfase que estas guardas persiguen no puede existir.
+
+
 La única que sigue en el `.env` (y en las variables de Dokploy) es `SECRETOS_CLAVE_MAESTRA`, que es la que descifra las demás. **Si se pierde hay que volver a cargar todos los secretos a mano** — no hay forma de recuperarlos, y esa es la propiedad buscada. Generarla con:
 
 ```
@@ -581,6 +645,30 @@ Redesplegar, y esta vez **verificar el motor específicamente** (no alcanza con 
 
 Sigue en pie el pendiente de fondo del lado de Django: el día que una migración de BottleCRM necesite activar RLS en una tabla nueva, va a fallar bajo `crm_user` porque no es dueño de las tablas (`postgres` sí). No es una tarea de hoy — se resuelve separando la credencial de migración de la de tráfico normal cuando haga falta.
 
+### Credencial de migraciones — el mecanismo ya está, los roles no (16/09/2026)
+
+Ese pendiente dejó de ser hipotético: la migración que lo dispara ya está escrita (`operaciones/0002_rls_operaciones`, y la que falta para las 11 tablas sin RLS). Medido contra PostgreSQL 17 en una base desechable: con las tablas en manos de `postgres` y `migrate` corriendo como `crm_user`, falla con `must be owner of table` **a mitad de la migración**, no al arrancar.
+
+**Lo que ya está en el repositorio** (no toca producción, no crea ningún rol):
+
+`docker/backend/entrypoint.sh` corre `migrate` con `MIGRATOR_DBUSER`/`MIGRATOR_DBPASSWORD` si están definidas, y con `DBUSER` si no. El override es **por proceso**, no un `export`: gunicorn sigue levantando con la credencial de tráfico. Esa distinción importa — servir peticiones como `crm_migrator` sería servirlas como dueño de las tablas, y un dueño se saltea su propia política de RLS salvo que esté `FORCE`.
+
+Antes de cada paso corre `manage.py verificar_credenciales` (`common/credenciales.py`), que falla cerrado ante siete configuraciones incorrectas. Dos merecen mención:
+
+- **El rol se compara sin el sufijo del pooler.** En producción `DBUSER` es `postgres.05b5a4b4-…`, no `postgres`; una guarda que comparara la cadena completa nunca coincidiría y quedaría en verde sin comprobar nada.
+- **Que una credencial sirva para migrar no se decide por su nombre.** Se cuenta cuántas tablas de `public` tienen un dueño que el rol efectivo no puede ejercer. Da igual cómo se llame: vale para `crm_user` dueño en desarrollo, para `postgres` en producción y para `crm_migrator` actuando como `crm_owner`. Decidirlo por el nombre habría roto el compose de desarrollo, donde `crm_user` **sí** es dueño de todo el esquema (`docker/postgres/init-rls-user.sql`).
+
+**Qué falta, y es una decisión, no una tarea:** crear `crm_owner` (sin LOGIN) y `crm_migrator` en la base, transferir la propiedad de las 129 tablas, y cargar `MIGRATOR_DBUSER`/`MIGRATOR_DBPASSWORD` en Dokploy. Sin eso, el entrypoint se comporta exactamente como antes — por eso estas variables son opcionales y desplegarlas no cambia nada.
+
+**Verificar el rol efectivo** (no la variable, que es otra cosa):
+
+```
+docker compose exec backend python manage.py verificar_credenciales --proposito trafico --con-base
+docker compose exec backend sh -c 'echo $DBUSER'
+```
+
+**Rollback:** vaciar `MIGRATOR_DBUSER` y redesplegar. El entrypoint vuelve a migrar con `DBUSER`.
+
 **Lección de esto, para cualquier corte de credencial futuro: verificar CADA servicio que lea la variable que se está cambiando, no el primero que responda bien.** Un `grep` de la variable en el compose antes de cortar hubiera mostrado los cuatro servicios que la usaban, no solo los tres que se pensaban cambiar.
 
 **El webhook de WhatsApp — falta el dominio, no el código.** Las rutas ya existen (`GET`/`POST /canales/whatsapp/<tenant>`, ver §4.c) y sus guardas pasan (`py -3.13 tests/test_canal_whatsapp.py`). Lo que falta para el piloto: el DNS de `motor.rapilinksas.co`, crear el dominio en Dokploy con el `PathPrefix`, cargar las variables del §4.c, y cargar los secretos de Meta desde **Ajustes → WhatsApp**. Lo único de producto que sigue dependiendo de terceros son las plantillas para avisos proactivos, que las aprueba Meta.
@@ -684,7 +772,9 @@ Qué evaluar cuando se retome: `model_dump(exclude_unset=True)` en el camino de 
 
 **Dar de alta un segundo ISP: el motor está listo, el pegamento no.** El motor ya es multi-empresa de verdad —la URL del webhook lleva el tenant (`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en `asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin fijar empresa ve **0 filas**, no todas—. BottleCRM, por su lado, ya es multi-organización.
 
-Lo que no acompaña es lo que los une: **`PRIVATE_ASISTENTE_TENANT` es una variable de entorno usada en 23 lugares del frontend, y nunca se deriva de la organización del usuario logueado**. Con una sola empresa no se nota; con dos, hay que elegir:
+Lo que no acompaña es lo que los une: **`PRIVATE_ASISTENTE_TENANT` es una variable de entorno usada en el frontend, y nunca se deriva de la organización del usuario logueado**.
+
+⚠️ **Y la deuda crece.** Cuando esto se escribió eran **23 lugares**; medido el 24/09/2026 son **70 archivos y 80 apariciones**, y **ninguna** deriva el tenant de `locals.org`. Se triplicó mientras el camino seguía sin decidirse. Cada pantalla nueva del asistente suma una más, así que el costo de la opción «una plataforma» sube solo con el tiempo — que es justamente el argumento para decidir antes y no después. Con una sola empresa no se nota; con dos, hay que elegir:
 
 | Camino | Qué implica | Costo |
 |---|---|---|

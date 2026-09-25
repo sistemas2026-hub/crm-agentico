@@ -431,10 +431,32 @@ class AsignacionTrabajo(BaseModel):
     profile = models.ForeignKey(
         Profile, on_delete=models.CASCADE, related_name="asignaciones_campo"
     )
+    # CATALOGO CERRADO (15/09/2026). Antes era texto libre con la lista solo
+    # en el help_text, y ya habia divergido: las 3 asignaciones de produccion
+    # dicen 'tecnico_lider', que no estaba entre los cuatro documentados.
+    #
+    # 'tecnico_lider' se INCLUYE en el catalogo en vez de corregirse: las filas
+    # existentes son datos de produccion y renombrarlas seria reescribir
+    # historico por una razon cosmetica. Lo que se cierra es lo que se puede
+    # escribir de ahora en adelante.
+    TECNICO = "tecnico"
+    TECNICO_LIDER = "tecnico_lider"
+    AYUDANTE = "ayudante"
+    CHOFER = "chofer"
+    SUPERVISOR = "supervisor"
+    ROLES_CUADRILLA = (
+        (TECNICO, "Técnico"),
+        (TECNICO_LIDER, "Técnico líder"),
+        (AYUDANTE, "Ayudante"),
+        (CHOFER, "Chofer"),
+        (SUPERVISOR, "Supervisor"),
+    )
+
     rol = models.CharField(
         max_length=64,
-        default="tecnico",
-        help_text="Rol en la cuadrilla: tecnico, ayudante, chofer, supervisor",
+        choices=ROLES_CUADRILLA,
+        default=TECNICO,
+        help_text="Rol en la cuadrilla. Catálogo cerrado, ver ROLES_CUADRILLA.",
     )
     es_principal = models.BooleanField(
         default=False,

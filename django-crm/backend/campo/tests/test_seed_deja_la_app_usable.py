@@ -18,15 +18,25 @@ import pytest
 from django.core.management import call_command
 
 from campo.models import OrdenTrabajo, WorkTypeVersion
+from common.models import Org
 from campo.services.validador import devolucion_vigente
 
 pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def sembrado():
-    call_command("seed_campo_demo", verbosity=0)
-    return OrdenTrabajo.objects.all()
+def sembrado(db, settings):
+    # '--org' es OBLIGATORIO desde que la rama que despliega lo hizo asi, y es
+    # correcto: sembrar sin decir en que organizacion es como se metieron tres
+    # ordenes de demostracion en produccion. La prueba crea la suya y siembra
+    # ahi, que ademas la deja aislada de cualquier otra.
+    # El comando se niega con DEBUG=False, y esta bien: ya ensucio una base
+    # real una vez (08/09/2026). La prueba lo declara en vez de saltearse la
+    # puerta -- asi sigue habiendo una, y se ve quien la abre.
+    settings.DEBUG = True
+    org = Org.objects.create(name="Demo de pruebas")
+    call_command("seed_campo_demo", org=str(org.id), verbosity=0)
+    return OrdenTrabajo.objects.filter(org=org)
 
 
 def test_1_siembra_mas_de_una_orden_y_mas_de_un_tipo(sembrado):

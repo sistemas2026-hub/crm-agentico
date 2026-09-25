@@ -143,6 +143,11 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
     # intento, pero no le hizo nada a nadie. La distincion importa para
     # 'no_usa', que afirma que algo no le paso al cliente -- ver mas abajo.
     ejecutadas: list[str] = []
+    # Las que quedaron en la cola de aprobacion (aprobacion_humana): el modelo
+    # las pidio, el motor NO las corrio. No son 'ejecutadas' -- desde M06-A
+    # (21/09/2026) un reinicio pedido en la conversacion queda propuesto, y
+    # contarlo como ejecutado afirmaria un reinicio que no ocurrio.
+    propuestas: list[str] = []
     errores: list[str] = []
     respuesta = ""
     # Sigue el mismo patron que nucleo/canales/api.py::atender_turno(): si un
@@ -203,6 +208,8 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
                 continue
             if r.get("codigo_error"):
                 errores.append(f"{r['herramienta']}: {r['codigo_error']}")
+            elif r.get("accion_id"):
+                propuestas.append(r["herramienta"])
             else:
                 ejecutadas.append(r["herramienta"])
 
@@ -236,9 +243,30 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
     # el caso pasa, porque para el cliente no paso nada. Contarlo como uso
     # hacia fallar justo a los casos que existen para probar una guarda
     # fail-closed: la guarda funcionaba y el caso decia que no.
+    #
+    # Una PROPUESTA tambien falla 'no_usa' (M06-A): no le hizo nada al
+    # cliente todavia, pero queda en la cola y una persona puede aprobarla.
+    # Proponer un reinicio que no correspondia es el mismo error que
+    # ejecutarlo, un paso antes.
     for herr in espera.get("no_usa") or []:
         if herr in ejecutadas:
             fallas.append(f"no_usa: ejecuto '{herr}' y no debia")
+        elif herr in propuestas:
+            fallas.append(f"no_usa: propuso '{herr}' (quedo en la cola de "
+                          f"aprobacion) y no debia")
+
+    # 'propone': la accion tenia que quedar en la cola de aprobacion -- ni
+    # ejecutada ni ausente. 'propone_una_sola_vez': y una sola vez, que es
+    # como se afirma ahora el limite por conversacion de una irreversible.
+    for herr in espera.get("propone") or []:
+        if herr not in propuestas:
+            fallas.append(f"propone: '{herr}' no quedo propuesta "
+                          f"(propuestas: {propuestas}, ejecutadas: {ejecutadas})")
+    for herr in espera.get("propone_una_sola_vez") or []:
+        veces = propuestas.count(herr)
+        if veces != 1:
+            fallas.append(f"propone_una_sola_vez: '{herr}' quedo propuesta "
+                          f"{veces} veces")
 
     # 'no_intenta' es el hermano estricto de 'no_usa', y la diferencia no es
     # un matiz: mira 'usadas' -- los INTENTOS -- en vez de 'ejecutadas'.

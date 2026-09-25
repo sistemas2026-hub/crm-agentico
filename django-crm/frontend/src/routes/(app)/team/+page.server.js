@@ -4,17 +4,18 @@ import {
   inviteUser,
   setRole,
   setStatus,
+  setPassword,
   updateUser,
   ROLES,
   perfilPorCorreo,
   casosDe,
   reasignarCaso,
-  definirClave,
   eliminarPersona
 } from '$lib/server/v2/team.js';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
+import { tenantDeLaSesion, destinoDelAsistente } from '$lib/server/v2/tenant.js';
 
 /**
  * Team and access.
@@ -26,7 +27,7 @@ import { readableError } from '$lib/server/v2/form-errors.js';
  *
  * @type {import('./$types').PageServerLoad}
  */
-export async function load({ cookies, fetch }) {
+export async function load({ locals, cookies, fetch }) {
   const equipo = await listTeam({ cookies });
 
   // Las areas de trabajo salen del asistente, no de una lista fija aca: son
@@ -44,7 +45,7 @@ export async function load({ cookies, fetch }) {
   let externos = [];
   let etiquetaExterna = '';
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (baseUrl && tenant) {
     try {
       const resp = await fetch(
@@ -68,7 +69,7 @@ export async function load({ cookies, fetch }) {
       areas = [];
     }
   } else {
-    console.warn('[equipo] falta PRIVATE_ASISTENTE_URL o PRIVATE_ASISTENTE_TENANT');
+    console.warn('[equipo] no hay motor configurado, o la sesion no dice de que empresa es');
   }
   return {
     ...equipo,
@@ -96,12 +97,12 @@ export async function load({ cookies, fetch }) {
  * Devuelve un aviso si algo no se pudo, o null. Nunca lanza: que falle el
  * traspaso no puede impedir desactivar a alguien -- si se va, se va.
  *
- * @param {{ cookies: import('@sveltejs/kit').Cookies, fetch: typeof globalThis.fetch }} event
+ * @param {{ cookies: import('@sveltejs/kit').Cookies, fetch: typeof globalThis.fetch, locals: App.Locals }} event
  * @param {string} userId
  */
-async function traspasarTrabajo({ cookies, fetch }, userId) {
+async function traspasarTrabajo({ cookies, fetch, locals }, userId) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) return null;
 
   try {
@@ -217,6 +218,10 @@ export const actions = {
     const externo = form.get('externo')?.toString() || '';
     const externoNombre = form.get('externo_nombre')?.toString() || '';
     const agentes = form.getAll('agentes').map((v) => v.toString());
+    // Vacia = no se toca. Es la unica forma de que un campo de clave dentro de
+    // un formulario que guarda OTRAS cosas no le resetee la clave a alguien
+    // cada vez que se le corrige el correo.
+    const clave = form.get('password')?.toString() || '';
 
     if (!userId || !profileId) {
       return fail(400, { edicion: { error: 'Falta identificar a la persona.' } });
@@ -253,6 +258,28 @@ export const actions = {
       }
     }
 
+    // La clave, si se escribio una. Endpoint aparte (ver setPassword): el
+    // PATCH de arriba no puede tocarla sin guardarla en texto plano.
+    //
+    // Su fallo SI corta: el resto ya quedo guardado, pero decir "guardado" a
+    // secas cuando la clave que se acaba de escribir fue rechazada es peor que
+    // no guardar nada -- el administrador se va creyendo que se la dio, y la
+    // persona no puede entrar.
+    if (clave) {
+      try {
+        await setPassword({ cookies }, userId, clave);
+      } catch (/** @type {any} */ err) {
+        return fail(err?.status === 403 ? 403 : 400, {
+          edicion: {
+            error: readableError(
+              err,
+              'Se guardaron los datos, pero no la contraseña.'
+            )
+          }
+        });
+      }
+    }
+
     // Y lo del asistente. Su fallo NO invalida lo anterior, que ya quedo
     // guardado: se avisa y se dice donde corregirlo.
     let aviso = null;
@@ -274,18 +301,23 @@ export const actions = {
       aviso = err?.message || 'Se guardaron los datos, pero no el área ni los agentes.';
     }
 
-    return { editado: name || email, avisoEdicion: aviso };
+    return { editado: name || email, avisoEdicion: aviso, claveCambiada: !!clave };
   },
 
-  invite: async ({ cookies, request, fetch }) => {
+  invite: async ({ cookies, request, fetch, locals }) => {
     // Las areas se releen aca: el action no comparte estado con el load, y
     // hace falta saber que agentes precarga la elegida.
+    //
+    // `locals` se recibe a proposito aunque el action no lo usaba antes: de
+    // ahi sale de que empresa son las areas. Leerlo del entorno significaba
+    // que una instalacion con dos ISPs le ofrecia a uno las areas del otro.
     let areasDeclaradas = [];
-    if (env.PRIVATE_ASISTENTE_URL && env.PRIVATE_ASISTENTE_TENANT) {
+    const destino = await destinoDelAsistente(locals, fetch);
+    if (destino) {
       try {
         const r = await fetch(
-          `${env.PRIVATE_ASISTENTE_URL}/agentes/asignaciones?tenant=` +
-            encodeURIComponent(env.PRIVATE_ASISTENTE_TENANT),
+          `${destino.baseUrl}/agentes/asignaciones?tenant=` +
+            encodeURIComponent(destino.tenant),
           { headers: headersMotor() }
         );
         if (r.ok) areasDeclaradas = (await r.json()).areas ?? [];
@@ -300,7 +332,23 @@ export const actions = {
     const area = form.get('area')?.toString().trim() || '';
     const activo = form.get('activo')?.toString() !== 'no';
 
-    const clave = generarClave();
+    // La clave la genera el SERVIDOR, no el navegador ni el administrador. Si
+    // la escribe el admin, la conoce; y la gente reusa claves. Con
+    // crypto.getRandomValues no depende de Math.random, que no sirve para
+    // esto.
+    const abc = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = new Uint32Array(16);
+    crypto.getRandomValues(bytes);
+    const generada = Array.from(bytes, (b) => abc[b % abc.length])
+      .join('')
+      .replace(/^(.{5})(.{5})(.{6})$/, '$1-$2-$3');
+    // Si el administrador escribio una, gana la suya; si no, la generada. El
+    // campo es opcional a proposito: lo normal es no escribir nada y dejar que
+    // salga una al azar. Lo escrito NO se muestra despues en el cartel de
+    // "se muestra una sola vez" -- quien la escribio ya la sabe, y repetirla
+    // en pantalla solo la deja a la vista de quien pase por atras.
+    const claveElegida = form.get('password')?.toString().trim() || '';
+    const clave = claveElegida || generada;
     const externo = form.get('externo')?.toString().trim() || '';
     const externoNombre = form.get('externo_nombre')?.toString().trim() || '';
     if (!email) return fail(400, { invite: { error: 'Ingresá un correo electrónico.' } });
@@ -373,7 +421,7 @@ export const actions = {
       }
     }
 
-    return { invited: email, area: area || null, avisoArea, clave };
+    return { invited: email, area: area || null, avisoArea, clave: claveElegida ? null : clave };
   },
 
   /**
@@ -419,7 +467,7 @@ export const actions = {
    * pasan a quien queda en esa area. Los cerrados no se tocan: son historia,
    * y moverlos falsearia quien atendio que.
    */
-  setStatus: async ({ cookies, request, fetch }) => {
+  setStatus: async ({ cookies, request, fetch, locals }) => {
     const form = await request.formData();
     const userId = form.get('userId')?.toString();
     const status = form.get('status')?.toString();
@@ -441,7 +489,7 @@ export const actions = {
     // desactivacion fallara, la persona se quedaria activa y sin trabajo.
     let avisoTraspaso = null;
     if (status === 'Inactive') {
-      avisoTraspaso = await traspasarTrabajo({ cookies, fetch }, userId);
+      avisoTraspaso = await traspasarTrabajo({ cookies, fetch, locals }, userId);
     }
     return { statusChanged: userId, avisoTraspaso };
   },
@@ -477,7 +525,7 @@ export const actions = {
     const elegida = form.get('nueva')?.toString().trim() || '';
     const nueva = elegida || generarClave();
     try {
-      await definirClave({ cookies }, userId, nueva);
+      await setPassword({ cookies }, userId, nueva);
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 403 ? 403 : 400, {
         // 'clave' a secas ya significa otra cosa en esta pantalla: la que

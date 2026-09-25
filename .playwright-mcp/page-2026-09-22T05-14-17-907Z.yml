@@ -1,0 +1,270 @@
+- generic [ref=f20e2]:
+  - generic [ref=f20e3]:
+    - navigation "Principal" [ref=f20e4]:
+      - generic [ref=f20e5]:
+        - generic [ref=f20e6]: Q
+        - generic [ref=f20e7]: QA BANDEJA (datos de prueba)
+      - generic [ref=f20e8]: Vender
+      - link "Hoy" [ref=f20e9] [cursor=pointer]:
+        - /url: /
+      - link "Negociaciones" [ref=f20e16] [cursor=pointer]:
+        - /url: /pipeline
+      - link "Prospectos" [ref=f20e19] [cursor=pointer]:
+        - /url: /leads
+      - link "Cuentas" [ref=f20e24] [cursor=pointer]:
+        - /url: /accounts
+      - link "Contactos" [ref=f20e29] [cursor=pointer]:
+        - /url: /contacts
+      - link "Objetivos" [ref=f20e35] [cursor=pointer]:
+        - /url: /goals
+      - generic [ref=f20e42]: Atender
+      - link "Tareas" [ref=f20e43] [cursor=pointer]:
+        - /url: /tasks
+      - link "Tickets" [ref=f20e47] [cursor=pointer]:
+        - /url: /tickets
+      - link "Asistente" [ref=f20e55] [cursor=pointer]:
+        - /url: /asistente
+      - link "Conversaciones" [ref=f20e59] [cursor=pointer]:
+        - /url: /conversaciones
+      - link "Simulador WhatsApp" [ref=f20e62] [cursor=pointer]:
+        - /url: /simulador-whatsapp
+      - link "Agentes" [ref=f20e65] [cursor=pointer]:
+        - /url: /agentes
+      - link "Manual" [ref=f20e71] [cursor=pointer]:
+        - /url: /manual
+      - link "Instalaciones" [ref=f20e75] [cursor=pointer]:
+        - /url: /instalaciones
+      - link "Base de conocimiento" [ref=f20e80] [cursor=pointer]:
+        - /url: /solutions
+      - link "Documentos" [ref=f20e83] [cursor=pointer]:
+        - /url: /documents
+      - generic [ref=f20e87]: Facturar
+      - link "Facturas" [ref=f20e88] [cursor=pointer]:
+        - /url: /invoices
+      - link "Registro de horas" [ref=f20e92] [cursor=pointer]:
+        - /url: /timesheet
+      - generic [ref=f20e96]: Administrar
+      - link "Equipo y accesos" [ref=f20e97] [cursor=pointer]:
+        - /url: /team
+      - link "Configuración" [ref=f20e110] [cursor=pointer]:
+        - /url: /settings
+      - link "Conectar sistema" [ref=f20e112] [cursor=pointer]:
+        - /url: /conectores
+      - link "Conectar API nueva" [ref=f20e119] [cursor=pointer]:
+        - /url: /configuracion-guiada
+      - link "Habilidades" [ref=f20e125] [cursor=pointer]:
+        - /url: /habilidades
+      - link "Consumo" [ref=f20e129] [cursor=pointer]:
+        - /url: /consumo
+      - generic [ref=f20e133]:
+        - button "Buscar ⌘K" [ref=f20e134] [cursor=pointer]:
+          - text: Buscar
+          - generic [ref=f20e138]: ⌘K
+        - link "Notificaciones" [ref=f20e139] [cursor=pointer]:
+          - /url: /notifications
+        - link "Tu perfil" [ref=f20e143] [cursor=pointer]:
+          - /url: /profile
+        - link "Ayuda" [ref=f20e148] [cursor=pointer]:
+          - /url: /support
+        - link "Descargar app" [ref=f20e152] [cursor=pointer]:
+          - /url: https://play.google.com/store/apps/details?id=io.bottlecrm&hl=en
+        - link "Cerrar sesión" [ref=f20e155] [cursor=pointer]:
+          - /url: /logout
+    - generic [ref=f20e159]:
+      - banner [ref=f20e160]:
+        - button "Recoger el menú lateral" [ref=f20e161] [cursor=pointer]
+        - link "Dexter" [ref=f20e165] [cursor=pointer]:
+          - /url: /
+        - navigation "Módulos" [ref=f20e166]:
+          - link "Conversaciones" [ref=f20e167] [cursor=pointer]:
+            - /url: /conversaciones
+          - link "Tickets" [ref=f20e168] [cursor=pointer]:
+            - /url: /tickets
+          - link "Asistente" [ref=f20e169] [cursor=pointer]:
+            - /url: /asistente
+          - link "Agentes" [ref=f20e170] [cursor=pointer]:
+            - /url: /agentes
+        - textbox "Buscar conversaciones" [ref=f20e175]:
+          - /placeholder: Buscar conversación, cliente o mensaje…
+        - generic [ref=f20e176]:
+          - generic [ref=f20e177]:
+            - text: Por atender
+            - generic [ref=f20e178]: "2"
+          - generic [ref=f20e179]:
+            - text: Espera máx.
+            - generic [ref=f20e180]: 8h
+          - generic [ref=f20e181]:
+            - text: Total
+            - generic [ref=f20e182]: "8"
+          - generic [ref=f20e183]: En vivo
+          - 'generic "No salió ningún mensaje en 60 min: no hay con qué comprobar el canal." [ref=f20e185]': WhatsApp —
+          - generic "Sesión de ana.qa" [ref=f20e187]: ana.qa
+      - generic [ref=f20e188]:
+        - complementary "Conversaciones" [ref=f20e189]:
+          - navigation "Filtrar por estado" [ref=f20e190]:
+            - button "Por atender 2" [ref=f20e191] [cursor=pointer]:
+              - generic [ref=f20e192]: Por atender
+              - generic [ref=f20e193]: "2"
+            - button "En atención 4" [active] [ref=f20e194] [cursor=pointer]:
+              - generic [ref=f20e195]: En atención
+              - generic [ref=f20e196]: "4"
+            - button "Resueltas 1" [ref=f20e197] [cursor=pointer]:
+              - generic [ref=f20e198]: Resueltas
+              - generic [ref=f20e199]: "1"
+            - button "Todas 8" [ref=f20e200] [cursor=pointer]:
+              - generic [ref=f20e201]: Todas
+              - generic [ref=f20e202]: "8"
+          - generic [ref=f20e203]:
+            - generic [ref=f20e204]:
+              - generic [ref=f20e205]: Canal
+              - combobox "Qué canales se ven" [ref=f20e206] [cursor=pointer]:
+                - option "Operativo" [selected]
+                - option "Pruebas"
+                - option "Todos"
+            - generic [ref=f20e207]:
+              - generic [ref=f20e208]: Orden
+              - combobox "Ordenar la lista" [ref=f20e209] [cursor=pointer]:
+                - option "Actividad" [selected]
+                - option "Recomendado"
+                - option "Mayor espera"
+                - option "Más recientes"
+            - button "Solo escaladas" [ref=f20e210] [cursor=pointer]
+          - generic [ref=f20e211]:
+            - 'link "Cliente respondió Espera: 8h CLIENTE QA 4 7h Cliente respondió — espera a Carlos QA (otro operador) ¿Hay novedades? QA Carlos QA (otro operador) WhatsApp" [ref=f20e368] [cursor=pointer]':
+              - /url: /conversaciones/807ae5b9-b4bd-4b8d-9447-c43bf108b44c
+              - generic [ref=f20e369]:
+                - generic [ref=f20e370]:
+                  - generic [ref=f20e371]: Cliente respondió
+                  - generic "Esperando desde hace 8h" [ref=f20e373]: "Espera: 8h"
+                - generic [ref=f20e374]:
+                  - generic [ref=f20e375]: CLIENTE QA 4
+                  - generic [ref=f20e376]: 7h
+                - generic [ref=f20e377]: Cliente respondió — espera a Carlos QA (otro operador)
+                - paragraph [ref=f20e378]: ¿Hay novedades? QA
+                - generic [ref=f20e379]:
+                  - generic [ref=f20e380]: Carlos QA (otro operador)
+                  - generic [ref=f20e382]: WhatsApp
+            - 'link "En atención CLIENTE QA 3 7h En atención: Ana QA Asistente: Hola, soy Ana. Estoy revisando tu caso. Ana QA WhatsApp" [ref=f20e383] [cursor=pointer]':
+              - /url: /conversaciones/2054e7a8-63e2-44ac-a1f2-fa4524692e4d
+              - generic [ref=f20e384]:
+                - generic [ref=f20e385]: En atención
+                - generic [ref=f20e388]:
+                  - generic [ref=f20e389]: CLIENTE QA 3
+                  - generic [ref=f20e390]: 7h
+                - generic [ref=f20e391]: "En atención: Ana QA"
+                - paragraph [ref=f20e392]: "Asistente: Hola, soy Ana. Estoy revisando tu caso."
+                - generic [ref=f20e393]:
+                  - generic [ref=f20e394]: Ana QA
+                  - generic [ref=f20e396]: WhatsApp
+            - 'link "Cliente respondió Espera: 9h CLIENTE QA 8 7h Cliente respondió — espera a Ana QA Quiero reportar que pague la factura QA Ana QA WhatsApp" [ref=f20e397] [cursor=pointer]':
+              - /url: /conversaciones/ec98cc4b-21f3-4eb8-9a5b-b5e9781a1fa8
+              - generic [ref=f20e398]:
+                - generic [ref=f20e399]:
+                  - generic [ref=f20e400]: Cliente respondió
+                  - generic "Esperando desde hace 9h" [ref=f20e402]: "Espera: 9h"
+                - generic [ref=f20e403]:
+                  - generic [ref=f20e404]: CLIENTE QA 8
+                  - generic [ref=f20e405]: 7h
+                - generic [ref=f20e406]: Cliente respondió — espera a Ana QA
+                - paragraph [ref=f20e407]: Quiero reportar que pague la factura QA
+                - generic [ref=f20e408]:
+                  - generic [ref=f20e409]: Ana QA
+                  - generic [ref=f20e411]: WhatsApp
+            - 'link "En atención CLIENTE QA 5 7h En atención: Ana QA Asistente: Listo, agendamos la visita. Ana QA WhatsApp" [ref=f20e412] [cursor=pointer]':
+              - /url: /conversaciones/6d12a63b-2630-47af-bef8-7800efd99732
+              - generic [ref=f20e413]:
+                - generic [ref=f20e414]: En atención
+                - generic [ref=f20e417]:
+                  - generic [ref=f20e418]: CLIENTE QA 5
+                  - generic [ref=f20e419]: 7h
+                - generic [ref=f20e420]: "En atención: Ana QA"
+                - paragraph [ref=f20e421]: "Asistente: Listo, agendamos la visita."
+                - generic [ref=f20e422]:
+                  - generic [ref=f20e423]: Ana QA
+                  - generic [ref=f20e425]: WhatsApp
+        - generic [ref=f20e267]:
+          - generic [ref=f20e268]:
+            - generic [aria-hidden] [ref=f20e269]: CQ
+            - generic [ref=f20e270]:
+              - generic [ref=f20e271]:
+                - heading "CLIENTE QA 2" [level=2] [ref=f20e272]
+                - generic [ref=f20e273]: "57300000002"
+              - generic [ref=f20e275]:
+                - generic [ref=f20e276]: Humano · sin asignar
+                - generic [ref=f20e278]: WhatsApp
+                - generic [ref=f20e279]: abierta
+          - paragraph [ref=f20e280]:
+            - strong [ref=f20e283]: Escalada · IA no responde
+            - button "Tomar" [ref=f20e284] [cursor=pointer]
+            - button "Reasignar" [ref=f20e286] [cursor=pointer]
+            - generic [ref=f20e287]:
+              - button "Marcar como resuelta" [ref=f20e288] [cursor=pointer]
+              - tooltip "Usá esto si el caso se resolvió por teléfono, presencialmente o por otro canal. Abajo elegís en qué terminó y se cierra la conversación; el próximo mensaje del cliente abre una nueva."
+          - generic [ref=f20e289]:
+            - generic [ref=f20e290]:
+              - term [ref=f20e291]: Qué quiere
+              - definition [ref=f20e292]: Buenas tardes, les escribo porque desde el martes de la semana pasada vengo presentando intermitencias en el servicio, sobre todo entre las siete y las diez de la noche, que es justo cuando mi hija tiene clases virtuales y yo necesito conectarme al trabajo remoto. Ya reinicie el router como me indicaron la vez pasada, revise que los cables esten bien puestos y probe conectando directamente por cable sin el wifi, y el problema sigue igual. Tambien note que la luz roja del equipo se enciende cada tanto. Agradezco si pueden enviar un tecnico. QA — lo que escribió, sin resumir
+            - generic [ref=f20e293]:
+              - term [ref=f20e294]: Le prometimos
+              - definition [ref=f20e295]: No se encontró el mensaje con el que se le avisó.
+            - generic [ref=f20e296]:
+              - term [ref=f20e297]: Qué falta
+              - definition [ref=f20e298]:
+                - generic [ref=f20e299]: "Sin próximo paso anotado y sin caso abierto en el CRM: no está en ninguna cola."
+            - generic [ref=f20e301]:
+              - term [ref=f20e302]: Qué hizo la IA
+              - definition [ref=f20e303]: No consultó ningún sistema antes de derivar.
+          - generic [ref=f20e305]:
+            - generic [ref=f20e306]: Ayer
+            - generic [ref=f20e308]:
+              - generic [ref=f20e309]: Buenas tardes, les escribo porque desde el martes de la semana pasada vengo presentando intermitencias en el servicio, sobre todo entre las siete y las diez de la noche, que es justo cuando mi hija tiene clases virtuales y yo necesito conectarme al trabajo remoto. Ya reinicie el router como me indicaron la vez pasada, revise que los cables esten bien puestos y probe conectando directamente por cable sin el wifi, y el problema sigue igual. Tambien note que la luz roja del equipo se enciende cada tanto. Agradezco si pueden enviar un tecnico. QA
+              - generic [ref=f20e310]: 14:27
+            - generic [ref=f20e311]:
+              - generic [ref=f20e312]: Sistema
+              - generic [ref=f20e314]: Ya te estamos atendiendo, en un momento te responde una persona.
+              - generic [ref=f20e315]: 14:28
+              - button "☆ Marcar" [ref=f20e317] [cursor=pointer]
+          - generic [ref=f20e318]:
+            - group "Qué estás escribiendo" [ref=f20e319]:
+              - button "Responder al cliente" [pressed] [ref=f20e320] [cursor=pointer]
+              - button "Nota interna" [ref=f20e321] [cursor=pointer]
+              - button "Responder y devolver a IA" [ref=f20e322] [cursor=pointer]
+            - status [ref=f20e323]:
+              - generic [ref=f20e324]: Ventana abierta · quedan 14 h 15 min
+            - generic [ref=f20e325]:
+              - textbox "Escribí tu respuesta…" [ref=f20e326]
+              - generic [ref=f20e327]:
+                - generic [ref=f20e328]:
+                  - button "Emoji" [ref=f20e330] [cursor=pointer]
+                  - button "Adjuntar" [ref=f20e333] [cursor=pointer]
+                  - button "Grabar una nota de voz" [ref=f20e335] [cursor=pointer]
+                - generic [ref=f20e337]:
+                  - strong [ref=f20e338]: Se envía directo al cliente
+                  - text: · no pasa por el asistente · Enter envía
+                - button "Enviar" [disabled] [ref=f20e339]
+        - complementary "Contexto de la conversación" [ref=f20e341]:
+          - navigation "Contexto de la conversación" [ref=f20e342]:
+            - button "Cliente" [ref=f20e343] [cursor=pointer]
+            - button "Equipo" [ref=f20e344] [cursor=pointer]
+            - button "Caso" [ref=f20e345] [cursor=pointer]
+            - button "Actividad" [ref=f20e346] [cursor=pointer]
+            - button "Proceso" [ref=f20e347] [cursor=pointer]
+          - generic [ref=f20e363]:
+            - generic [ref=f20e364]:
+              - generic [ref=f20e365]: Registro de relevo
+              - generic [ref=f20e366]: 0 eventos
+            - paragraph [ref=f20e367]: "Todavía no cambió de manos: no hay ninguna toma, devolución, reasignación ni cierre registrado en esta conversación."
+      - contentinfo [ref=f20e251]:
+        - generic [ref=f20e252]:
+          - text: Las lleva la IA
+          - generic [ref=f20e254]: "1"
+        - generic [ref=f20e255]:
+          - text: En manos de una persona
+          - generic [ref=f20e257]: "6"
+        - generic [ref=f20e258]:
+          - text: Sin dueño
+          - generic [ref=f20e259]: "2"
+        - generic [ref=f20e261]:
+          - text: Cola leída hace
+          - generic [ref=f20e262]: 0s
+  - generic [ref=f20e362]: BottleCRM v2

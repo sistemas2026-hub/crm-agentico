@@ -5,9 +5,11 @@ import { leerResumenDelAgente } from '$lib/server/v2/resumen-agente.js';
 import { leerAreas } from '$lib/server/v2/areas.js';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ cookies, params, fetch }) {
+export async function load({ locals, cookies, params, fetch }) {
   const datos = await getTicket({ cookies }, params.id);
 
   // El area del caso, para el panel lateral. Misma derivacion que la cola: el
@@ -18,7 +20,7 @@ export async function load({ cookies, params, fetch }) {
   let area = null;
   const responsable = datos.ticket?.assignee_id;
   if (responsable) {
-    const { areas, areaPorPersona } = await leerAreas(fetch);
+    const { areas, areaPorPersona } = await leerAreas(locals, fetch);
     const nombre = areaPorPersona[responsable];
     area = areas.find((/** @type {any} */ a) => a.nombre === nombre) ?? null;
   }
@@ -46,7 +48,7 @@ export async function load({ cookies, params, fetch }) {
   const delMotor = (async () => {
     try {
       const base = env.PRIVATE_ASISTENTE_URL;
-      const tenant = env.PRIVATE_ASISTENTE_TENANT;
+      const tenant = await tenantDeLaSesion(locals, fetch);
       if (!base || !tenant) return null;
       const params_ = new URLSearchParams({ tenant });
       // El identificador de servicio del caso importado. El motor no puede
@@ -126,7 +128,7 @@ export const actions = {
     if (!internal) {
       try {
         const base = env.PRIVATE_ASISTENTE_URL;
-        const tenant = env.PRIVATE_ASISTENTE_TENANT;
+        const tenant = await tenantDeLaSesion(locals, fetch);
         if (base && tenant) {
           const r = await fetch(`${base}/casos/${params.id}/mensajes`, {
             method: 'POST',
@@ -134,7 +136,10 @@ export const actions = {
             body: JSON.stringify({
               tenant,
               mensaje: body,
-              autor: /** @type {any} */ (locals).user?.name || '',
+              ...autorDeSesion(locals),
+              // Una por envío del formulario: evita el doble POST, no un
+              // reenvío manual del formulario (que es otro mensaje).
+              clave_idempotencia: claveIdempotencia(null),
               devolver_al_asistente: devolver
             }),
             signal: AbortSignal.timeout(20000)
@@ -145,7 +150,8 @@ export const actions = {
         }
       } catch (/** @type {any} */ err) {
         console.error('[tickets] no se pudo entregar la respuesta al cliente', err);
-        entrega = { ok: false, entregado: false };
+        entrega = { ok: false, aceptado_por_meta: false,
+          aceptacion_registrada: false, resultado: 'incierto' };
       }
     }
 
@@ -166,13 +172,15 @@ export const actions = {
       }
     }
 
-    // 'entregado' es null cuando no había a dónde entregar (nota interna, o
+    // 'aceptado_por_meta' es null cuando no había a dónde entregar (nota interna, o
     // un ticket sin conversación detrás): eso no es un fallo y no se avisa.
     return {
       sent: true,
       internal,
-      entregado: entrega ? entrega.entregado : null,
-      aviso: entrega && entrega.entregado === false
+      aceptado_por_meta: entrega ? entrega.aceptado_por_meta : null,
+      aceptacion_registrada: entrega ? entrega.aceptacion_registrada : null,
+      resultado: entrega ? entrega.resultado : null,
+      aviso: entrega && entrega.resultado === 'rechazado'
         ? (entrega.aviso || 'La respuesta quedó guardada, pero no se pudo entregar al cliente.')
         : ''
     };

@@ -72,7 +72,8 @@ def rol(nombre):
                                  cargo="Cargo", orientado_a="cliente_final")
 
 
-AGENTES = ["ocupado", "con_error", "en_cola", "libre", "escalado"]
+AGENTES = ["ocupado", "con_error", "en_cola", "libre", "escalado",
+           "aprobando", "apagado", "espera_cliente"]
 CONFIG = types.SimpleNamespace(roles={n: rol(n) for n in AGENTES})
 
 PANORAMA = {
@@ -89,6 +90,13 @@ PANORAMA = {
         # el caso que motivo la regla: escaladas esperando persona Y trabajando
         "escalado": {"conversaciones": 3, "esperando_humano": 2, "recibidas_hoy": 5,
                      "ultima_actividad": None},
+        # ejecuto algo cuyo efecto nadie comprobo todavia
+        "aprobando": {"conversaciones": 2, "esperando_humano": 0, "recibidas_hoy": 2,
+                      "ultima_actividad": None},
+        # contesto y la pelota esta del lado del cliente
+        "espera_cliente": {"conversaciones": 4, "esperando_humano": 0,
+                           "esperando_cliente": 4, "recibidas_hoy": 4,
+                           "ultima_actividad": None},
     },
     "actividad": {
         "ocupado": {"llamadas": 5, "fallos": 0, "duracion_media_ms": 300,
@@ -97,9 +105,16 @@ PANORAMA = {
                       "ultima_llamada": None, "ultima_herramienta": "consultar_olt"},
         "escalado": {"llamadas": 4, "fallos": 0, "duracion_media_ms": 250,
                      "ultima_llamada": None, "ultima_herramienta": "buscar_cliente"},
+        "aprobando": {"llamadas": 2, "fallos": 0, "duracion_media_ms": 400,
+                      "ultima_llamada": None, "ultima_herramienta": "reiniciar_ont"},
     },
+    # 'aprobando' tiene una verificacion sin resolver; los demas, ninguna
+    "aprobaciones": {"aprobando": 1},
     "totales": {"conversaciones_activas": 9, "esperando_humano": 2, "atendidas_hoy": 12,
                 "herramientas_hoy": 40, "duracion_media_ms": 320, "fallos_hoy": 1},
+    "servicios": [],
+    # 15 cubos de 2 minutos; el ultimo es el minuto que corre
+    "serie": {"ocupado": [0] * 13 + [2, 3]},
     "eventos_herramienta": [],
     "eventos_escalada": [],
 }
@@ -134,10 +149,12 @@ revisar(r.status_code == 200, "responde 200 con datos", f"dio {r.status_code}")
 por_nombre = {a["nombre"]: a for a in (r.get_json() or {}).get("agentes", [])}
 
 esperado = {
-    "con_error": "error",       # un fallo manda, aunque tambien haya llamadas
-    "ocupado": "procesando",    # llamo herramientas dentro de la ventana
-    "en_cola": "atendiendo",    # tiene conversaciones, sin actividad reciente
-    "libre": "disponible",      # ni conversaciones ni llamadas
+    "con_error": "error",             # un fallo manda sobre todo lo demas
+    "aprobando": "waiting_approval",  # una accion sin comprobar gana al trabajo
+    "ocupado": "working",             # llamo herramientas dentro de la ventana
+    "en_cola": "working",             # tiene conversaciones y le toca a el
+    "espera_cliente": "waiting_user",  # contesto y espera al cliente
+    "libre": "idle",                  # ni conversaciones ni llamadas
 }
 for nombre, estado in esperado.items():
     real = por_nombre.get(nombre, {}).get("estado")
@@ -146,15 +163,70 @@ for nombre, estado in esperado.items():
 
 print("\n3. 'esperando humano' es cifra, no estado")
 escalado = por_nombre.get("escalado", {})
-revisar(escalado.get("estado") == "procesando",
-        "un agente con escaladas y trabajo sale 'procesando'",
+revisar(escalado.get("estado") == "working",
+        "un agente con escaladas y trabajo sale 'working', no detenido",
         f"quedo en '{escalado.get('estado')}'")
 revisar(escalado.get("esperando_humano") == 2,
         "la cifra de escaladas viaja igual", f"viajo {escalado.get('esperando_humano')}")
 estados = {a["estado"] for a in por_nombre.values()}
 revisar("esperando" not in estados,
-        "'esperando' no aparece como estado de ningun agente", f"estados: {sorted(estados)}")
+        "'esperando' a secas no es un estado", f"estados: {sorted(estados)}")
+# Los dos que la interfaz sabe pintar pero el motor no puede medir todavia.
+# Si alguien los emite sin registrar la llamada al invocarla, esto lo caza.
+revisar("waiting_tool" not in estados,
+        "no se emite 'waiting_tool': tool_calls se escribe al terminar")
+revisar("completed" not in estados,
+        "no se emite 'completed': es estado de una tarea, no de un agente")
+# 'apagado' no tiene ninguna fila en la base. Eso NO es estar caido: un agente
+# que hoy no atendio a nadie se ve igual. Si alguien lo pinta como 'offline',
+# la pantalla avisa de una averia que no existe.
+revisar(por_nombre.get("apagado", {}).get("estado") == "idle",
+        "un agente sin filas queda 'idle', no 'offline'",
+        f"quedo en '{por_nombre.get('apagado', {}).get('estado')}'")
+revisar("offline" not in estados,
+        "no se emite 'offline': nada dice que un agente este apagado")
 
+
+print("\n5. la frase de tarea se compone de lo medido, no del contenido")
+frases = {n: a.get("haciendo") for n, a in por_nombre.items()}
+revisar(all(frases.values()), "todos los agentes traen frase", f"{frases}")
+revisar("consultar_olt" in (frases.get("con_error") or ""),
+        "el agente con error nombra la herramienta que fallo", frases.get("con_error"))
+revisar("consultar_cliente" in (frases.get("ocupado") or ""),
+        "el que procesa nombra la herramienta en curso", frases.get("ocupado"))
+revisar("Sin conversaciones" in (frases.get("libre") or ""),
+        "el disponible lo dice sin inventar actividad", frases.get("libre"))
+# la frase se arma con conteos y nombres de herramienta; si alguien la compone
+# alguna vez con el ultimo mensaje del cliente, esto lo caza
+revisar(all("@" not in f and "+57" not in f for f in frases.values()),
+        "ninguna frase trae algo con forma de dato de cliente")
+
+print("\n6. la franja de arriba no puede contradecir a las tarjetas")
+totales = (r.get_json() or {}).get("totales", {})
+con_trabajo = [n for n, a in por_nombre.items()
+               if a["estado"] not in ("idle", "offline", "completed")]
+revisar(totales.get("agentes_activos") == len(con_trabajo),
+        "'agentes con trabajo' cuenta los mismos que muestran las tarjetas",
+        f"la franja dice {totales.get('agentes_activos')} y hay {len(con_trabajo)}: {sorted(con_trabajo)}")
+# Nace de un error real: al renombrar los estados, este conteo se quedo
+# buscando 'procesando' y 'atendiendo'. Nadie lo vio hasta abrir la pantalla
+# en produccion y leer '0 agentes con trabajo' sobre tres tarjetas activas.
+revisar(totales.get("agentes_activos") > 0,
+        "con agentes trabajando, el contador no es cero")
+
+print("\n7. la serie de actividad de cada agente")
+ocupado = por_nombre.get("ocupado", {})
+revisar(len(ocupado.get("serie") or []) == 15,
+        "cada agente trae los 15 cubos, aunque no haya movido nada",
+        f"trajo {len(ocupado.get('serie') or [])}")
+revisar(por_nombre.get("libre", {}).get("serie") == [0] * 15,
+        "el agente sin actividad trae la serie en cero, no vacia ni nula")
+# Con el total solo, un agente que hizo diez llamadas hace media hora y otro
+# que lleva diez en el ultimo minuto se ven igual. La serie es lo que los
+# distingue, asi que tiene que llegar completa y en orden.
+revisar((ocupado.get("serie") or [0])[-1] == 3,
+        "el ultimo cubo es el minuto que corre",
+        f"llego {(ocupado.get('serie') or [0])[-1]}")
 
 print("\n4. el ticker no lleva contenido de conversaciones")
 panorama_con_eventos = dict(PANORAMA)

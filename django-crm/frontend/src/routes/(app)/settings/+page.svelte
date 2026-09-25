@@ -47,6 +47,27 @@
       : `${open.length} días, horario variable`;
   });
 
+  /**
+   * Los dos ajustes de la Bandeja en una linea.
+   *
+   * "Sin definir" se dice, no se omite: es el estado real y el default, y un
+   * destino sin valor al lado se lee como "no se pudo cargar" -- que es lo que
+   * significa `null` acá, un caso distinto.
+   */
+  let resumenBandeja = $derived.by(() => {
+    const a = data.ajustesBandeja;
+    if (!a) return null;
+    const sla = Number(a.sla_toma_minutos) > 0 ? `${a.sla_toma_minutos} min` : null;
+    const umbral =
+      a.umbral_rx_dbm === null || a.umbral_rx_dbm === undefined
+        ? null
+        : `${a.umbral_rx_dbm} dBm`;
+    if (sla && umbral) return `${sla} · ${umbral}`;
+    if (sla) return `${sla} · sin umbral`;
+    if (umbral) return `Sin plazo · ${umbral}`;
+    return 'Sin definir';
+  });
+
   /** An approval rule set to MANAGER with no named approvers matches nobody. */
   let stuckApprovalRules = $derived(
     data.approvalRules.filter(
@@ -190,6 +211,18 @@
           value: data.asistente
             ? `${data.asistente.persona.nombre_asistente} · ${data.asistente.persona.tono}`
             : null,
+          warn: false
+        },
+        {
+          href: '/settings/bandeja',
+          title: 'Bandeja',
+          body: 'Los dos números con los que la Bandeja se permite emitir un veredicto: el plazo de toma y el umbral óptico.',
+          value: data.ajustesBandeja ? resumenBandeja : null,
+          // Nunca avisa. Que los dos esten sin definir es el default
+          // deliberado --la Bandeja entonces muestra el dato crudo sin
+          // afirmar nada-- y no una falta que alguien tenga que ir a
+          // corregir. Una advertencia que no hay que atender ensena a
+          // ignorar las advertencias.
           warn: false
         },
         {

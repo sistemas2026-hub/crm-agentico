@@ -20,23 +20,16 @@
  * `guardar`, en cambio, SI lanza: ahi alguien apreto un boton y tiene que
  * enterarse de que no se guardo.
  */
-import { env } from '$env/dynamic/private';
 import { headersMotor } from './motor-headers.js';
-
-function destino() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
+import { destinoDelAsistente } from './tenant.js';
 
 /**
  * La configuracion editable del asistente, o `null` si no hay asistente
  * configurado o no contesta.
  * @returns {Promise<{ persona: any, modelo: string, roles: string[] } | null>}
  */
-export async function leerConfiguracionAsistente() {
-  const cfg = destino();
+export async function leerConfiguracionAsistente(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return null;
   try {
     const resp = await fetch(
@@ -57,8 +50,8 @@ export async function leerConfiguracionAsistente() {
  * @param {{ nombre_asistente: string, tono: string, longitud_respuesta: string,
  *           instrucciones_adicionales: string }} valores
  */
-export async function guardarPersonaAsistente(valores) {
-  const cfg = destino();
+export async function guardarPersonaAsistente(locals, fetch, valores) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) {
     throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
   }
@@ -82,8 +75,8 @@ export async function guardarPersonaAsistente(valores) {
  * diferencia del corpus (RAG, solo si la pregunta matchea).
  * @param {string} descripcion
  */
-export async function guardarDescripcionEmpresa(descripcion) {
-  const cfg = destino();
+export async function guardarDescripcionEmpresa(locals, fetch, descripcion) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) {
     throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
   }
@@ -108,8 +101,8 @@ export async function guardarDescripcionEmpresa(descripcion) {
  * tiene la herramienta 'agendar_visita_tecnica' en su catalogo.
  * @param {number} dias
  */
-export async function guardarPlazoVisitaTecnica(dias) {
-  const cfg = destino();
+export async function guardarPlazoVisitaTecnica(locals, fetch, dias) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) {
     throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
   }
@@ -132,8 +125,8 @@ export async function guardarPlazoVisitaTecnica(dias) {
  * atiende cada uno. Alimenta /agentes/flujo, que ahora se edita.
  * @returns {Promise<any | null>}
  */
-export async function leerFlujoDerivacion() {
-  const cfg = destino();
+export async function leerFlujoDerivacion(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return null;
   try {
     const resp = await fetch(
@@ -154,8 +147,8 @@ export async function leerFlujoDerivacion() {
  * @param {string[]} destinos
  * @param {Record<string, string>} atiende
  */
-export async function guardarFlujoDerivacion(destinos, atiende) {
-  const cfg = destino();
+export async function guardarFlujoDerivacion(locals, fetch, destinos, atiende) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
 
   const resp = await fetch(`${cfg.baseUrl}/agentes/flujo`, {

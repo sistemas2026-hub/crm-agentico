@@ -56,7 +56,7 @@ export async function load({ cookies, url, locals, fetch }) {
   // Si el asistente no responde, 'areas' queda vacio y la pantalla cae a la
   // lista de siempre: ver los tickets no puede depender de que el motor este
   // arriba. Ver leerAreas().
-  const { areas, areaPorPersona } = await leerAreas(fetch);
+  const { areas, areaPorPersona } = await leerAreas(locals, fetch);
 
   const SIN_AREA = '__sin_area__';
   /**

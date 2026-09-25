@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
 import path from 'node:path';
 
 /**
@@ -32,15 +33,37 @@ import path from 'node:path';
  * `sentrySvelteKit()` and `tailwindcss()` into every test run, which this
  * standalone config exists specifically to avoid.
  *
+ * EL TECHO SUBIO UN ESCALON EL 22/09/2026, Y POR UN FALLO CONCRETO.
+ * Al fundir dos bandas del compositor en una, la rama nueva quedo ANTES que
+ * la de la IA y se llevo puesto el boton «Intervenir»: con la IA atendiendo y
+ * la ventana de WhatsApp cerrada, no habia forma de tomar el control. Ningun
+ * test se puso rojo, porque ninguno podia -- las guardas del compositor son
+ * greps sobre el archivo, y un grep no sabe que rama gana.
+ *
+ * Asi que se agrega `svelte()` A SECAS, no `sveltekit()`. Es lo que el parrafo
+ * de arriba contemplaba sin llegar a hacer, y en su version barata: compila
+ * `.svelte` y nada mas. NO trae `$app/*` ni `$env/static/*`, NO trae
+ * `sentrySvelteKit()` ni `tailwindcss()`, y por lo tanto no le cuesta nada a
+ * las corridas que no tocan componentes.
+ *
+ * LO QUE ESTO HABILITA, Y LO QUE NO: un componente cuyos imports sean solo
+ * `$lib`, paquetes de node y `svelte/*` se puede renderizar con
+ * `render()` de 'svelte/server' y AFIRMAR SOBRE LO QUE DIBUJA. Uno que
+ * importe `$app/forms` --CasePanel, por ejemplo-- sigue sin poder: le haria
+ * falta un stub, y ese es el proximo escalon, no este.
+ *
  * `path.resolve('./src/lib')` below resolves against `process.cwd()`, not
  * against this file's location, so `pnpm test` (and `vitest` directly) must
  * be run from `frontend/`. Running it from the repo root or from `src/`
  * silently resolves `$lib` to the wrong place.
  */
 export default defineConfig({
+  plugins: [svelte()],
   test: {
-    // Server modules only. They are plain functions over `apiRequest`, so they
-    // need no DOM, and a node environment keeps the run fast.
+    // Node alcanza incluso para los componentes: se renderizan con `render()`
+    // de 'svelte/server', que devuelve HTML sin tocar el DOM. Un jsdom serviria
+    // para probar clics; para afirmar QUE DIBUJA cada combinacion de props no
+    // hace falta, y cuesta arranque en cada corrida.
     environment: 'node',
     include: ['src/**/*.test.js']
   },

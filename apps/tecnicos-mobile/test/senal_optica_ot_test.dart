@@ -69,8 +69,7 @@ void main() {
               'onu_signal_1490_veredicto': veredicto,
               'last_status_change': '2026-09-22 08:40:29',
             },
-          if (equipoNoDisponible != null)
-            'equipo_no_disponible': equipoNoDisponible,
+          'equipo_no_disponible': ?equipoNoDisponible,
         }),
       };
 

@@ -323,12 +323,28 @@
           >
             {form.aviso}
           </p>
-        {:else if form?.sent && form?.entregado}
+        {:else if form?.sent && form?.aceptado_por_meta && form?.aceptacion_registrada}
           <p
             class="v2-card"
             style="padding:10px 13px;margin-bottom:16px;font-size:13px"
           >
             Enviado al cliente y copiado al ticket de la operación.
+          </p>
+        {:else if form?.sent && form?.resultado && form.resultado !== 'aceptado' && form.aceptado_por_meta !== null}
+          <!-- Ni éxito ni fallo: NO CONSTA. Pasa cuando el canal aceptó sin
+               devolver identificador, cuando la red se cortó, o cuando el
+               recibo no se pudo guardar. Antes este caso no decía nada y se
+               leía como si hubiera salido bien.
+
+               Deliberadamente sin "Reintentar": el mensaje pudo haber salido,
+               y reenviarlo se lo mandaría al cliente dos veces. -->
+          <p
+            class="v2-card"
+            style="padding:10px 13px;margin-bottom:16px;color:var(--v2-rust);font-size:13px"
+          >
+            La respuesta quedó guardada y copiada al ticket, pero no podemos confirmar
+            que le haya llegado al cliente. No la envíes de nuevo: si salió, la
+            recibiría dos veces.
           </p>
         {/if}
 

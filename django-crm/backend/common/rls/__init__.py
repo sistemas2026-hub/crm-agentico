@@ -132,6 +132,17 @@ ORG_SCOPED_TABLES = [
     # Approval workflows (Tier 3 approvals).
     "approval_rule",
     "approval",
+    # Operaciones: M02 actividades, M03 programacion y M09 propuestas del
+    # Supervisor NOC IA. Las cinco llevan org_id directo. Se registran aca Y se
+    # estampan desde la migracion operaciones/0002, que es lo que hace que una
+    # base construida solo con migraciones tenga sus politicas -- el hueco que
+    # common/0034 tuvo que venir a tapar para los pipelines.
+    "operaciones_actividad",
+    "operaciones_disponibilidad",
+    "operaciones_programacion_semanal",
+    "operaciones_programacion_orden",
+    "operaciones_novedad",
+    "operaciones_propuesta_supervisor",
     # Programmatic API access
     # NOTE: personal_access_token is intentionally NOT RLS-protected. It is an
     # auth-bootstrap table (looked up by token_hash before any tenant context

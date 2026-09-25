@@ -52,10 +52,11 @@ def _publicas() -> tuple[type, ...]:
     from nucleo.config.fusion import FusionInvalida
     from nucleo.ingesta.corpus import RolesInvalidos, VersionAprobadaInmutable
     from nucleo.modelo.motor import ErrorMotor
-    from nucleo.persistencia.db import TenantSinConfiguracion
+    from nucleo.persistencia.db import AutorInvalido, TenantSinConfiguracion
     from nucleo.seguridad.secretos import ErrorSecreto
     return (ErrorWhatsApp, ErrorConector, ErrorEdicion, FusionInvalida, RolesInvalidos,
-            VersionAprobadaInmutable, ErrorMotor, TenantSinConfiguracion, ErrorSecreto)
+            VersionAprobadaInmutable, ErrorMotor, TenantSinConfiguracion, ErrorSecreto,
+            AutorInvalido)
 
 
 def mensaje_publico(e: BaseException, por_defecto: str) -> str:

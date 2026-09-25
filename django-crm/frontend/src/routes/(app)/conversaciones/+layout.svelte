@@ -31,18 +31,44 @@
    */
   import { page } from '$app/state';
   import { invalidate } from '$app/navigation';
-  import PageHeader from '$lib/v2/components/PageHeader.svelte';
-  import EmptyState from '$lib/v2/components/EmptyState.svelte';
-  import Pill from '$lib/v2/components/Pill.svelte';
-  import Avatar from '$lib/v2/components/Avatar.svelte';
-  import { shortAge } from '$lib/v2/format.js';
-  import { MessagesSquare, TriangleAlert, Search, X, Phone, User } from '@lucide/svelte';
+  // El sistema visual de la Bandeja. Todo cuelga de `.bandeja`, que es la
+  // clase de la mesa de abajo: cubre las tres columnas y la conversación
+  // abierta, y no puede alcanzar ninguna otra ruta del CRM.
+  import '$lib/conversaciones/estilos/bandeja.css';
   import { pendiente, resuelta, enAtencion } from '$lib/conversaciones/estado.js';
+  import { ordenar, horasEsperando } from '$lib/conversaciones/cola/ordenamiento.js';
+  import { saludDelCanal } from '$lib/conversaciones/canal.js';
+  import { barra, alternar } from '$lib/conversaciones/barra-lateral.svelte.js';
+  import { PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
+  import QueueTabs from '$lib/conversaciones/cola/QueueTabs.svelte';
+  import QueueSearch from '$lib/conversaciones/cola/QueueSearch.svelte';
+  import QueueFilters from '$lib/conversaciones/cola/QueueFilters.svelte';
+  import ConversationList from '$lib/conversaciones/cola/ConversationList.svelte';
 
   /** @type {{ data: any, children: import('svelte').Snippet }} */
   let { data, children } = $props();
 
+  /* Los módulos de la barra de consola. Rutas REALES del CRM, las cuatro con
+     las que se trabaja un turno de atención. No es la barra lateral entera:
+     poner los veinte destinos acá arriba sería mudarla, no reemplazarla. */
+  const MODULOS = [
+    { href: '/conversaciones', label: 'Conversaciones' },
+    { href: '/tickets', label: 'Tickets' },
+    { href: '/asistente', label: 'Asistente' },
+    { href: '/agentes', label: 'Agentes' }
+  ];
+
   let conversaciones = $derived(data.conversaciones ?? []);
+  /* El plazo de toma que definió la empresa, en minutos. Viene con la cola
+     --es uno solo para todas-- y 0 significa que no hay objetivo definido:
+     entonces no se dibuja ninguna cuenta regresiva. Ver
+     TenantConfig.sla_toma_minutos y lib/conversaciones/sla.js. */
+  let slaToma = $derived(Number(data.sla_toma_minutos) || 0);
+
+  /* Si el canal de WhatsApp está funcionando, medido sobre los acuses que
+     volvieron. El veredicto vive en `canal.js` con sus pruebas: acá sólo se
+     dibuja. Ver ahí por qué se miden los acuses y no la tasa de error. */
+  let canal = $derived(saludDelCanal(data.canal_whatsapp));
   let abierta = $derived(page.params.id ?? null);
 
   // Sondeo: mientras esta pestaña esta abierta, revisa cada pocos segundos
@@ -80,45 +106,29 @@
     };
   });
 
-  const CANAL_LABEL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
-  const canalLabel = (/** @type {string} */ c) => CANAL_LABEL[c] ?? c;
-
-  // Un color por etiqueta, no toda la taxonomia hardcodeada -- si el tenant
-  // agrega una categoria nueva en conversaciones.etiquetas, cae en 'ink' en
-  // vez de romper.
-  // ETIQUETA_TONE / etiquetaTone se fueron con la pildora de etiqueta: la
-  // fila mostraba hasta tres pildoras y el pedido era justo lo contrario --
-  // cliente, tiempo esperando, motivo, y la excepcion. El tema de la
-  // conversacion sigue estando en 'caso_manual', que es mas especifico.
-  const etiquetaLabel = (/** @type {string} */ e) => (e ? e.replaceAll('_', ' ') : '');
 
   // pendiente / resuelta / enAtencion viven en $lib/conversaciones/estado.js:
   // el indice necesita el mismo criterio y una copia ya se desincronizo
   // una vez (la cabecera decia 41 y el panel vacio 44, el 07/09/2026).
 
-  const AUTOR = { user: 'Cliente', assistant: 'Asistente', humano: 'Vos', tool: 'Herramienta' };
-
-  // Quien escribe por WhatsApp se identifica con un telefono, y quien prueba
-  // desde el CRM con un uuid. Ninguno de los dos tiene iniciales: initials()
-  // devuelve '3' o 'B', un circulo con una letra que no significa nada. Un
-  // icono dice mas y no finge ser un nombre.
-  const esTelefono = (/** @type {string} */ v) => !!v && /^\+?\d[\d\s-]{5,}$/.test(v);
-  const esUuid = (/** @type {string} */ v) =>
-    !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
-
-  /** '3007778899' -> '300 777 8899'. Diez digitos seguidos no se leen. */
-  function quien(/** @type {string} */ v) {
-    if (!v) return 'Sin identificar';
-    const d = v.replace(/\D/g, '');
-    if (esTelefono(v) && d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
-    return v;
-  }
 
   // 'por-atender' de entrada: es a lo que se viene. Antes abria en "Todas",
   // que es la vista en la que un caso urgente se ve exactamente igual que uno
   // de hace un mes ya resuelto.
   let filtro = $state('por-atender');
   let busqueda = $state('');
+
+  /* El logo de la empresa se cargó pero el archivo no se pudo mostrar. No es
+     lo mismo que no tener logo: acá SÍ hay una URL y falló. Se separa para
+     que el respaldo de texto cubra los dos casos sin dibujar una imagen rota
+     donde está la única salida de la consola. */
+  let logoRoto = $state(false);
+  /* Que canales se ven. Por defecto SOLO los reales: el simulador, el
+     asistente interno y las baterias escriben en las mismas tablas, y mezclar
+     una prueba de hace dos horas con un cliente esperando hace que la cola
+     deje de servir para trabajar. El motor marca cada fila con
+     'canal_operativo' (canal.REALES); aca no hay una lista de canales. */
+  let vista = $state('operativo');
   /** '' = todos. Filtra por el motivo por el que el asistente escalo. */
   let motivo = $state('');
   /** Escalada no es un estado paralelo a los otros: una conversacion escalada
@@ -130,6 +140,51 @@
   let orden = $state('recomendado');
 
   let pendientes = $derived(conversaciones.filter(pendiente).length);
+
+  /* INDICADORES DE LA BARRA DE CONSOLA.
+     La referencia pone arriba el estado del sistema: SLA de entrada, espera
+     máxima, poller, latencia. Acá se calculan los que salen de datos que ya
+     están cargados -- no hay ninguna llamada nueva ni ningún número fabricado.
+
+     `esperaMaxima`  el mayor `horasEsperando()` entre las que de verdad
+                     esperan. Es el mismo cálculo con el que la cola ordena,
+                     así que la barra y la lista no pueden decir cosas
+                     distintas.
+     `sondeadoEn`    cuándo se leyó la cola por última vez. El layout se
+                     invalida cada 8s, así que este número dice si lo que se
+                     está mirando es de hace un momento o de hace un rato --
+                     que es lo que un operador necesita saber de una consola. */
+  let esperaMaxima = $derived.by(() => {
+    const esperando = conversaciones.filter(pendiente);
+    if (esperando.length === 0) return null;
+    return Math.max(...esperando.map((/** @type {any} */ c) => horasEsperando(c)));
+  });
+
+  const enHoras = (/** @type {number|null} */ h) => {
+    if (h === null) return '—';
+    if (h < 1) return `${Math.max(1, Math.round(h * 60))}m`;
+    if (h < 48) return `${Math.round(h)}h`;
+    return `${Math.round(h / 24)}d`;
+  };
+
+  /* EL REPARTO DEL TRABAJO, para la barra de estado de abajo.
+     Quién está llevando cada conversación ahora mismo. `control` lo decide el
+     motor (control_efectivo, B3.3b) y acá sólo se cuenta -- esta pantalla no
+     vuelve a deducir quién la lleva. "Sin dueño" son las que están en manos
+     de una persona pero que todavía no tomó nadie: es el número que dice si
+     la cola se está quedando sin atender. */
+  let llevaIA = $derived(
+    conversaciones.filter((/** @type {any} */ c) => c.control === 'ia' && !resuelta(c)).length
+  );
+  let llevaHumano = $derived(
+    conversaciones.filter((/** @type {any} */ c) => c.control === 'humano' && !resuelta(c)).length
+  );
+  let sinDueno = $derived(
+    conversaciones.filter(
+      (/** @type {any} */ c) => c.control === 'humano' && !resuelta(c) && !c.asignada_a_usuario_id
+    ).length
+  );
+
   // El numero que de verdad duele. Va en la cabecera al lado del total
   // porque "44 por atender" no dice nada si 20 llevan mas de una semana.
   let criticas = $derived(
@@ -137,19 +192,12 @@
   );
 
   // --- por donde empezar ----------------------------------------------------
-  // Con decenas esperando, "la mas nueva primero" ordena al reves de lo que
-  // hace falta: quien escalo hace tres dias y no volvio a escribir se hunde
-  // al fondo, y es justo el que lleva tres dias esperando.
-  //
-  // El orden es: primero las que esperan a alguien, y entre ellas la de
-  // espera mas larga arriba. El resto queda como estaba, por ultima
-  // actividad. No hay un puntaje ponderado a proposito -- un numero que
-  // mezcla antiguedad, insistencia y motivo no se puede explicar, y quien
-  // atiende tiene que poder entender por que una fila esta donde esta.
-  const espera = (/** @type {any} */ c) =>
-    new Date(c.escalada_en ?? c.actualizado_en).getTime();
-
-  const HORA = 3600 * 1000;
+  // El orden vive en $lib/conversaciones/cola/ordenamiento.js -- las MISMAS
+  // funciones que se importan acá, no una copia. De ahí depende D18 (que una
+  // escalada nueva sin dueño no quede enterrada detrás de las viejas) y es lo
+  // único de esta pantalla que puede romperse sin que se note mirándola: una
+  // lista mal ordenada se ve perfecta. El harness no compila .svelte, así que
+  // sin extraerlas no había forma de ponerles una guarda.
 
   // Cada cuanto se recalcula "activa". El sondeo de la lista ya corre cada 8s
   // e invalida el load, asi que la posicion se reordena sola; esto es solo
@@ -160,16 +208,17 @@
     return () => clearInterval(i);
   });
 
-  /** Se movio en los ultimos minutos. Cinco y no uno: con uno el punto
-      parpadea y se pierde; con quince deja de significar "ahora". */
-  const MINUTOS_ACTIVA = 5;
-  const estaActiva = (/** @type {any} */ c) =>
-    !!c.ultimo_mensaje_en &&
-    ahora - new Date(c.ultimo_mensaje_en).getTime() < MINUTOS_ACTIVA * 60 * 1000;
+  /* Hace cuánto se leyó la cola, para la barra de consola y la de estado.
+     Va DESPUÉS de `ahora` y no antes: `$derived` se evalúa perezoso, así que
+     en ejecución funcionaba igual, pero leer una variable declarada más abajo
+     es una zona muerta esperando a que alguien mueva una línea. svelte-check
+     lo marcó como error y tenía razón. */
+  let sondeoHaceSegundos = $derived(
+    data.sondeadoEn
+      ? Math.max(0, Math.round((ahora - new Date(data.sondeadoEn).getTime()) / 1000))
+      : null
+  );
 
-  /** Horas que lleva esperando. 0 si no espera a nadie. */
-  const horasEsperando = (/** @type {any} */ c) =>
-    pendiente(c) ? Math.max(0, (Date.now() - espera(c)) / HORA) : 0;
 
   // Tres tramos, no un gradiente: el ojo no distingue 61h de 58h, y si
   // distingue "hoy" de "hace mas de una semana". Los cortes son a un dia y a
@@ -182,43 +231,20 @@
     return 'fresco';
   };
 
-  // Los motivos donde hay una persona molesta del otro lado pesan mas que un
-  // tramite. No es un puntaje afinado -- es un desempate, y por eso son dos
-  // valores y no cinco: cualquier cosa mas fina seria inventada.
-  const MOTIVO_URGENTE = new Set(['frustracion_detectada', 'tres_fallos_seguidos']);
-
-  /** Cuanto pesa una conversacion en el orden "Recomendado". Mas alto, mas
-      arriba. Se calcula con lo que ya existe: tiempo esperando, si el cliente
-      volvio a escribir, y el motivo. */
-  function peso(/** @type {any} */ c) {
-    if (!pendiente(c)) return -1;
-    // La espera es la base y manda: es lo que de verdad mide el maltrato al
-    // cliente. Se cuenta en dias para que las otras dos señales puedan
-    // moverla sin taparla del todo.
-    let p = horasEsperando(c) / 24;
-    // Volver a escribir mientras espera es alguien golpeando la puerta, y
-    // tiene que ganarle a la antiguedad: quien escribio hace dos minutos esta
-    // ahi AHORA, y quien lleva 26 dias ya se acostumbro a esperar.
-    //
-    // 30 dias equivalentes, no 3: con el peso anterior una insistencia de hoy
-    // perdia contra cualquier caso de mas de tres dias, y hay 34 con mas de
-    // una semana. En la practica no subia a nadie.
-    //
-    // Ojo con lo que esto NO arregla: hay CERO mensajes posteriores a una
-    // escalada en toda la base, y no porque nadie insista -- las
-    // conversaciones se cierran a las 24 h de inactividad, asi que quien
-    // vuelve a los dos dias abre una conversacion NUEVA y su insistencia no
-    // se cuenta como tal. Esta señal solo ve al que insiste dentro del dia.
-    if (c.mensajes_tras_escalar > 0) p += 30 + Math.min(c.mensajes_tras_escalar, 10);
-    if (MOTIVO_URGENTE.has(c.motivo_escalamiento)) p += 2;
-    return p;
-  }
-
+  // Se dibuja en QueueFilters pero se declara acá, al lado de
+  // ORDEN_POR_PESTANA: ese mapa apunta a estos mismos ids, y separarlos
+  // dejaría la correspondencia repartida en dos archivos sin nada que la
+  // mantenga junta.
+  /* Rótulos cortos: el selector se dibuja al ancho de su opción MÁS LARGA, y
+     "Más reciente creación" lo estiraba a 216px en una columna de 304 -- o sea
+     que una sola palabra de más obligaba a los filtros a ocupar dos renglones.
+     Los ids no cambian: `ORDEN_POR_PESTANA` y `ordenamiento.js` siguen
+     apuntando a los mismos cuatro. */
   const ORDENES = [
-    { id: 'actividad', label: 'Actividad reciente' },
+    { id: 'actividad', label: 'Actividad' },
     { id: 'recomendado', label: 'Recomendado' },
     { id: 'espera', label: 'Mayor espera' },
-    { id: 'creacion', label: 'Más reciente creación' }
+    { id: 'creacion', label: 'Más recientes' }
   ];
 
   // Cada pestaña arranca con el orden que le corresponde POR LO QUE ES.
@@ -246,40 +272,6 @@
     filtro = id;
     ordenElegido = false;
     orden = ORDEN_POR_PESTANA[id] ?? 'actividad';
-  }
-
-  /** La hora del ULTIMO MENSAJE, de quien sea -- cliente, asistente o
-      colaborador. No 'actualizado_en': esa la mueve cualquier cosa que toque
-      la fila, incluido cerrarla, y una conversacion cerrada hoy con su ultimo
-      mensaje de hace 26 dias quedaba arriba de una con charla de verdad ayer. */
-  const actividad = (/** @type {any} */ c) =>
-    new Date(c.ultimo_mensaje_en ?? c.actualizado_en).getTime();
-
-  function ordenar(/** @type {any[]} */ lista) {
-    const recientes = (/** @type {any} */ a, /** @type {any} */ b) =>
-      new Date(b.actualizado_en).getTime() - new Date(a.actualizado_en).getTime();
-
-    // Actividad: SIN bloque de prioridad delante. Es lo que hace que un
-    // mensaje que acaba de entrar aparezca primero aunque el bot lo este
-    // llevando solo -- que es justo para lo que sirve esta vista.
-    if (orden === 'actividad') {
-      return [...lista].sort((a, b) => actividad(b) - actividad(a));
-    }
-    if (orden === 'creacion') return [...lista].sort(recientes);
-
-    return [...lista].sort((a, b) => {
-      // En los dos ordenes que priorizan, lo que espera va primero: una
-      // conversacion resuelta no compite por el lugar de arriba.
-      const pa = pendiente(a) ? 0 : 1;
-      const pb = pendiente(b) ? 0 : 1;
-      if (pa !== pb) return pa - pb;
-      if (pa === 1) return recientes(a, b);
-      // 'Mayor espera' es a proposito el orden CRUDO, sin ponderar: existe
-      // para poder comprobar el otro. Si "Recomendado" pone algo arriba que
-      // no lleva la espera mas larga, se puede ver por que cambiando aca.
-      if (orden === 'espera') return espera(a) - espera(b);
-      return peso(b) - peso(a);
-    });
   }
 
   // Los motivos que de verdad hay en la bandeja, no una lista fija: los
@@ -334,6 +326,13 @@
 
   let visibles = $derived.by(() => {
     let lista = conversaciones;
+    if (vista !== 'todos') {
+      const operativo = vista === 'operativo';
+      // 'canal_operativo' puede faltar si el motor todavia no la manda: en ese
+      // caso no se esconde nada (mejor de mas que ocultar un cliente real).
+      lista = lista.filter((/** @type {any} */ c) =>
+        c.canal_operativo === undefined ? true : c.canal_operativo === operativo);
+    }
     if (filtro === 'por-atender') lista = lista.filter(pendiente);
     else if (filtro === 'en-atencion') lista = lista.filter(enAtencion);
     else if (filtro === 'resueltas') lista = lista.filter(resuelta);
@@ -350,307 +349,155 @@
           .some((campo) => String(campo).toLowerCase().includes(q))
       );
     }
-    return ordenar(lista);
+    return ordenar(lista, orden);
   });
 </script>
 
-<PageHeader title="Conversaciones">
-  {#snippet sub()}
+<!-- LA BARRA DE CONSOLA.
+     Era un `<PageHeader>` del CRM: título "Conversaciones" a 26px con su
+     subtítulo debajo, 76px de alto. Medido contra la referencia, esos primeros
+     píxeles son los que hacían que las dos pantallas se leyeran como dos
+     productos distintos -- la referencia arranca con una barra fina de consola
+     y enseguida las tres columnas; acá arrancaba con una portada de página
+     administrativa.
+
+     Lo que va adentro es TODO dato real y ya calculado acá: no hay ningún
+     indicador inventado. La referencia muestra además "Telemetry", "Incidents"
+     y el estado de Radius; Dexter no tiene ninguna de esas tres medidas, así
+     que no se dibujan -- una barra de consola con indicadores falsos es peor
+     que una sin ellos.
+
+     El nombre de la organización NO se repite acá: ya está arriba a la
+     izquierda, en la barra lateral, y sale de la config del tenant. -->
+<header class="consola bandeja">
+  <!-- RECOGER LA BARRA LATERAL. Recogida, la Bandeja ocupa la pantalla
+       entera y las tres columnas llegan a 360/730/350 -- los números de la
+       referencia. Desplegada, la navegación del CRM está donde la gente la
+       conoce. Lo decide quien trabaja, y se recuerda entre visitas. -->
+  <button
+    type="button"
+    class="consola-recoger"
+    onclick={alternar}
+    aria-pressed={barra.recogida}
+    title={barra.recogida ? 'Mostrar el menú lateral' : 'Recoger el menú lateral'}
+    aria-label={barra.recogida ? 'Mostrar el menú lateral' : 'Recoger el menú lateral'}
+  >
+    {#if barra.recogida}<PanelLeftOpen size={15} />{:else}<PanelLeftClose size={15} />{/if}
+  </button>
+
+  <!-- LA SALIDA. Con la barra lateral recogida, ésta es la única puerta de
+       vuelta al resto del CRM: por eso la marca es un enlace y no un rótulo.
+       Una consola a pantalla completa sin salida visible es una trampa.
+
+       EL LOGO ES UN SLOT, NO UN DIBUJO FIJO. La empresa que cargó el suyo en
+       Ajustes → Organización lo ve acá; la que no, ve la marca Dexter. Es la
+       misma regla multi-tenant del resto del proyecto: un dato que varía por
+       empresa no se escribe en el código.
+
+       El respaldo cubre DOS casos, no uno: que no haya logo cargado (lo
+       corriente) y que el archivo esté cargado pero no se pueda mostrar
+       (borrado del almacenamiento, URL vencida). Lo segundo dibujaría el
+       ícono de imagen rota justo donde está la única salida de la consola. -->
+  <a class="consola-marca" href="/" title="Volver al inicio">
+    {#if data.org?.logo_url && !logoRoto}
+      <img
+        class="consola-logo"
+        src={data.org.logo_url}
+        alt={data.org.name || 'Inicio'}
+        onerror={() => (logoRoto = true)}
+      />
+    {:else}
+      Dexter
+    {/if}
+  </a>
+
+  <!-- Los módulos operativos. Son rutas que YA existen -- no hay ninguna
+       inventada -- y son las cuatro con las que se trabaja un turno: la
+       cola, los tickets del CRM, el asistente y su configuración.
+       El resto del CRM (facturación, negociaciones, ajustes) sigue a un clic
+       por la marca: no se duplica acá la barra lateral entera, que era el
+       motivo por el que esta navegación no existía. -->
+  <nav class="consola-nav" aria-label="Módulos">
+    {#each MODULOS as m (m.href)}
+      <a
+        href={m.href}
+        class="consola-modulo"
+        aria-current={page.url.pathname.startsWith(m.href) ? 'page' : undefined}
+      >{m.label}</a>
+    {/each}
+  </nav>
+
+  <!-- El buscador vive acá, como en la referencia, y no dentro de la columna
+       de la cola. Sigue escribiendo en el mismo `busqueda` del layout y el
+       filtrado se deriva igual en `visibles`: no cambió qué busca ni cómo,
+       cambió dónde está. Sólo tiene sentido si hay algo que buscar. -->
+  {#if !data.error && conversaciones.length > 0}
+    <QueueSearch bind:busqueda />
+  {/if}
+
+  <span class="consola-datos">
     {#if pendientes > 0}
       <!-- Solo las que de verdad esperan: ni cerradas ni las que traian
            puesta la marca por el default viejo. Decia 155 y eran 31. -->
-      <span class="v2-num">{pendientes}</span>
-      por atender{#if criticas > 0},
-        <span class="v2-num critico">{criticas}</span> hace más de una semana{/if} ·
-      <span class="v2-num">{conversaciones.length}</span> en total
+      <span class="consola-dato">
+        Por atender <b class="v2-num">{pendientes}</b>
+      </span>
+      <span class="consola-dato" class:consola-critico={criticas > 0}>
+        Espera máx. <b class="v2-num">{enHoras(esperaMaxima)}</b>
+      </span>
     {:else}
-      <span class="v2-num">{conversaciones.length}</span>
-      {conversaciones.length === 1 ? 'conversación' : 'conversaciones'}, ninguna esperando
+      <span class="consola-dato">Ninguna esperando</span>
     {/if}
-  {/snippet}
-</PageHeader>
+    <span class="consola-dato consola-total">
+      Total <b class="v2-num">{conversaciones.length}</b>
+    </span>
 
-<div class="mesa">
+    <!-- El estado del enlace con el motor. No es un "99.99% uptime"
+         inventado: es cuándo se leyó esta cola. Si el sondeo se cae, el
+         número crece a la vista en vez de quedarse todo igual y mentir. -->
+    {#if sondeoHaceSegundos !== null}
+      <span class="consola-dato consola-sondeo" class:consola-frio={sondeoHaceSegundos > 60}>
+        <span class="consola-punto"></span>
+        {#if sondeoHaceSegundos < 60}En vivo{:else}Hace {enHoras(sondeoHaceSegundos / 3600)}{/if}
+      </span>
+    {/if}
+
+    <!-- El estado del canal. No es un "uptime" del proveedor: es cuántos de
+         los mensajes que salieron tienen acuse de vuelta. -->
+    <span
+      class="consola-dato consola-canal"
+      class:consola-canal-mal={canal.alerta}
+      class:consola-canal-mudo={canal.estado === 'sin_trafico' || canal.estado === 'no_medido'}
+      title={canal.detalle}
+    >
+      <span class="consola-punto"></span>{canal.etiqueta}
+    </span>
+
+    {#if data.yo?.nombre}
+      <span class="consola-operador" title="Sesión de {data.yo.nombre}">{data.yo.nombre}</span>
+    {/if}
+  </span>
+</header>
+
+<div class="mesa bandeja" data-privado>
   <aside class="columna" class:hay-abierta={abierta} aria-label="Conversaciones">
     {#if !data.error && conversaciones.length > 0}
       <!-- Pestanas de estado. Nunca ember en la activa: "donde estoy" no es una
            accion. El contador de "Sin atender" si lo lleva, porque ese numero
            es trabajo sin tomar. -->
-      <nav class="tabs" aria-label="Filtrar por estado">
-        {#each pestanas as t (t.id)}
-          <button
-            type="button"
-            class="tab"
-            aria-current={filtro === t.id ? 'true' : undefined}
-            onclick={() => irA(t.id)}
-          >
-            {t.label}
-            <span class="tab-n v2-num" class:urge={t.urge && t.n > 0}>{t.n}</span>
-          </button>
-        {/each}
-      </nav>
+      <QueueTabs {pestanas} {filtro} onIr={irA} />
 
-      <label class="buscar">
-        <Search size={14} />
-        <input
-          type="text"
-          bind:value={busqueda}
-          placeholder="Buscar cliente o mensaje…"
-          aria-label="Buscar conversaciones"
-        />
-        {#if busqueda}
-          <button
-            type="button"
-            class="limpiar"
-            onclick={() => (busqueda = '')}
-            aria-label="Limpiar"
-          >
-            <X size={13} />
-          </button>
-        {/if}
-      </label>
-
-      <!-- Por que escalo. Veinte casos del mismo tipo se resuelven mas rapido
-           seguidos que mezclados con otros veinte de otra cosa: quien atiende
-           ya tiene el contexto cargado. El dato estaba guardado desde
-           siempre y no habia forma de filtrarlo.
-
-           Se dibuja solo si hay mas de un motivo entre las que esperan: con
-           uno solo, el filtro no separa nada y es una fila de ruido. -->
-      <div class="controles">
-        <label class="orden">
-          <span class="orden-rotulo">Ordenar por</span>
-          <select
-            bind:value={orden}
-            onchange={() => (ordenElegido = true)}
-            aria-label="Ordenar la lista"
-          >
-            {#each ORDENES as o (o.id)}
-              <option value={o.id}>{o.label}</option>
-            {/each}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          class="motivo"
-          aria-pressed={soloEscaladas}
-          onclick={() => (soloEscaladas = !soloEscaladas)}
-          title="Escalada no es un estado aparte: se cruza con la pestaña que estés viendo"
-        >
-          Solo escaladas
-        </button>
-      </div>
-
-      {#if motivos.length > 1}
-        <div class="motivos" role="group" aria-label="Filtrar por motivo de escalada">
-          <button
-            type="button"
-            class="motivo"
-            aria-pressed={motivo === ''}
-            onclick={() => (motivo = '')}>Todos</button
-          >
-          {#each motivosVisibles as [m, n] (m)}
-            <button
-              type="button"
-              class="motivo"
-              aria-pressed={motivo === m}
-              onclick={() => (motivo = motivo === m ? '' : m)}
-            >
-              {motivoLabel(m)}
-              <span class="v2-num">{n}</span>
-            </button>
-          {/each}
-          {#if motivos.length > motivosVisibles.length}
-            <button
-              type="button"
-              class="motivo motivo-mas"
-              onclick={() => (motivosDesplegados = true)}
-            >
-              +{motivos.length - motivosVisibles.length} más
-            </button>
-          {/if}
-        </div>
-      {/if}
+      <QueueFilters
+        bind:vista bind:orden bind:ordenElegido
+        bind:soloEscaladas bind:motivo bind:motivosDesplegados
+        {motivos} {motivosVisibles} {motivoLabel} {ORDENES}
+      />
     {/if}
 
-    <div class="lista">
-      {#if data.error}
-        <div class="hueco">
-          <EmptyState title="No se pudo cargar la bandeja" body={data.error}>
-            {#snippet icon()}<TriangleAlert size={21} />{/snippet}
-          </EmptyState>
-        </div>
-      {:else if conversaciones.length === 0}
-        <div class="hueco">
-          <EmptyState
-            title="Todavía no hay conversaciones"
-            body="Acá van a aparecer los chats de WhatsApp con tus clientes."
-          >
-            {#snippet icon()}<MessagesSquare size={21} />{/snippet}
-          </EmptyState>
-        </div>
-      {:else if visibles.length === 0}
-        <div class="hueco">
-          <EmptyState
-            title="Nada acá"
-            body={busqueda
-              ? `Ninguna coincide con «${busqueda}».`
-              : 'No hay conversaciones en este estado.'}
-          >
-            {#snippet icon()}<Search size={20} />{/snippet}
-          </EmptyState>
-        </div>
-      {:else}
-        {#each visibles as c (c.id)}
-          <a
-            class="fila"
-            class:pide={pendiente(c)}
-            class:activa={c.id === abierta}
-            href="/conversaciones/{c.id}"
-            aria-current={c.id === abierta ? 'page' : undefined}
-          >
-            {#if c.nombre_cliente}
-              <Avatar name={c.nombre_cliente} size={30} />
-            {:else if esTelefono(c.usuario_externo)}
-              <span class="ident" aria-hidden="true"><Phone size={14} /></span>
-            {:else if !c.usuario_externo || esUuid(c.usuario_externo)}
-              <span class="ident" aria-hidden="true"><User size={14} /></span>
-            {:else}
-              <Avatar name={c.usuario_externo} size={30} />
-            {/if}
-
-            <div class="cuerpo">
-              <div class="alta">
-                <span class="quien">{c.nombre_cliente || quien(c.usuario_externo)}</span>
-                <!-- En las que esperan, el tiempo que se muestra es el de la
-                     ESPERA, no el del ultimo movimiento: es el numero que
-                     decide a cual entrar primero, y son distintos en cuanto
-                     el cliente vuelve a escribir. -->
-                {#if pendiente(c) && c.escalada_en}
-                  <span
-                    class="cuando v2-num espera-{tramoEspera(c)}"
-                    title="Esperando desde hace {shortAge(c.escalada_en)}"
-                  >
-                    {shortAge(c.escalada_en)} esperando
-                  </span>
-                {:else}
-                  <span class="cuando v2-num">{shortAge(c.actualizado_en)}</span>
-                {/if}
-              </div>
-
-              <!-- De que se trata, en una linea. El ultimo mensaje casi nunca
-                   lo dice ("ok", "gracias", "listo"): quien atiende tiene que
-                   abrir la conversacion solo para enterarse. El resumen lo
-                   redacta el modelo al escalar, sin una llamada extra. Solo
-                   existe en las escaladas DESPUES del 06/09/2026; en el
-                   resto se cae al ultimo mensaje, como antes. -->
-              {#if c.resumen}
-                <p class="avance resumen">{c.resumen}</p>
-              {:else}
-                <!-- El RESUMEN si lo hay, y solo si no, el ultimo mensaje.
-                     "Asistente: Entiendo, eso necesita revision..." vuelve a
-                     contar la ultima respuesta del bot, que casi nunca dice de
-                     que trataba el caso. El resumen lo escribe el modelo al
-                     escalar y dice justo eso.
-
-                     Todavia no lo tienen todas: son 2 de 51 escaladas, porque
-                     el campo existe desde el 06/09/2026. Por eso el respaldo
-                     sigue siendo el ultimo mensaje y no un hueco. -->
-                <!-- Que TRABAJO hay delante, no que dijo el bot.
-                     Tres fuentes, en orden de cuanto dicen:
-
-                       resumen      lo escribe el modelo al escalar y dice de
-                                    que trata el caso. Es el bueno.
-                       caso_manual  de que es la conversacion, asignado en
-                                    cada turno. Existe tambien donde el bot
-                                    resolvio solo.
-                       ultimo msj   el respaldo. "Asistente: Entiendo, eso
-                                    necesita revision..." vuelve a contar la
-                                    ultima respuesta, que casi nunca dice de
-                                    que iba el caso -- pero es mejor que un
-                                    hueco.
-
-                     Hoy 'resumen' lo tienen 2 de 51 escaladas (el campo es
-                     del 06/09/2026), asi que el respaldo se usa mucho
-                     todavia. Va a ir desapareciendo solo. -->
-                {#if (c.resumen ?? '').trim()}
-                  <p class="avance avance-resumen">{c.resumen}</p>
-                {:else if c.caso_manual}
-                  <p class="avance avance-resumen">{etiquetaLabel(c.caso_manual)}</p>
-                {:else}
-                  <p class="avance">
-                    {#if c.ultimo_rol && c.ultimo_rol !== 'user'}
-                      <span class="avance-quien">{AUTOR[c.ultimo_rol] ?? c.ultimo_rol}:</span>
-                    {/if}
-                    {c.ultimo_mensaje || 'Sin mensajes todavía'}
-                  </p>
-                {/if}
-              {/if}
-
-              <!-- Solo se dibuja si hay algo que decir. "El bot la está
-                   llevando" es el caso normal: ponerle una píldora a cada fila
-                   agrega una línea y un rectángulo por conversación para no
-                   informar nada. -->
-              {#if c.escalada_a_humano || c.caso_manual || resuelta(c)}
-                <div class="baja">
-                  {#if pendiente(c)}
-                    <!-- El motivo va en TEXTO y no en pildora: es lo mas
-                         parecido a un subtitulo del caso, y una pildora mas
-                         en una fila que ya tiene tres compite con la unica
-                         que pide una accion. La pildora "Sin atender" se fue:
-                         dentro de la pestaña "Por atender" repetia el nombre
-                         de la pestaña en cada fila. -->
-                    {#if c.motivo_escalamiento}
-                      <span class="motivo-fila">{motivoLabel(c.motivo_escalamiento)}</span>
-                    {/if}
-                  {:else if c.escalada_a_humano && !resuelta(c)}
-                    <Pill tone="clay" dot>En curso</Pill>
-                  {:else if resuelta(c)}
-                    <Pill tone="moss">Resuelta</Pill>
-                  {/if}
-
-                  <!-- De qué es la conversación, no si escaló: lo asigna el
-                       asistente en cada turno y existe también en las que
-                       resolvió solo (ver supabase/202608180923_caso_conversacion.sql).
-                       Solo cuando NO hay motivo -- si hay, ese dice mas y los
-                       dos juntos son ruido. -->
-                  <!-- Solo si 'caso_manual' NO se uso ya como la linea de
-                       arriba: decir lo mismo dos veces en la misma fila es
-                       justo el ruido que se estaba sacando. -->
-                  {#if c.caso_manual && (c.resumen ?? '').trim() && !(pendiente(c) && c.motivo_escalamiento)}
-                    <Pill tone="ink">{etiquetaLabel(c.caso_manual)}</Pill>
-                  {/if}
-                </div>
-              {/if}
-
-              <!-- Actividad viva. Un punto y una palabra, no una pildora mas:
-                   se enciende con cualquier mensaje de los ultimos minutos
-                   --cliente, asistente o colaborador-- y se apaga solo. La
-                   conversacion CONSERVA su posicion segun la hora de esa
-                   actividad; el punto solo dice "esto se movio recien". -->
-              {#if estaActiva(c)}
-                <span class="activa">Activa</span>
-              {/if}
-
-              <!-- La excepcion va sola, en su propio renglon y al final: el
-                   cliente escribio de nuevo despues de que le dijeramos que
-                   un companero lo iba a atender. Es lo mas parecido a alguien
-                   golpeando la puerta. Metida entre las pildoras se perdia. -->
-              {#if pendiente(c) && c.mensajes_tras_escalar > 0}
-                <span class="insiste">
-                  Volvió a escribir{c.mensajes_tras_escalar > 1
-                    ? ` ×${c.mensajes_tras_escalar}`
-                    : ''} · hace {shortAge(c.actualizado_en)}
-                </span>
-              {/if}
-
-              <span class="canal">{canalLabel(c.canal)}</span>
-            </div>
-          </a>
-        {/each}
-      {/if}
-    </div>
+    <ConversationList
+      {visibles} {conversaciones} error={data.error} {busqueda}
+      {abierta} {ahora} {tramoEspera} {motivoLabel} {slaToma}
+    />
   </aside>
 
   <!-- 'abierta' (el id de la URL) como key: [id]/+page.svelte inicializa su
@@ -671,7 +518,318 @@
   {/key}
 </div>
 
+<!-- LA BARRA DE ESTADO.
+     La referencia cierra con una franja de estado del sistema. Acá lleva lo
+     mismo que la de arriba pero del lado del proceso, y todo sale de datos ya
+     cargados: cuántas lleva cada quién, y de cuándo es lo que se está
+     mirando. Nada de SLA, cluster ni latencia inventados -- si alguna de esas
+     se mide algún día, éste es el lugar donde va. -->
+<footer class="pie-consola bandeja">
+  <span class="pie-dato">
+    <span class="pie-marca pie-ia"></span>
+    Las lleva la IA <b class="v2-num">{llevaIA}</b>
+  </span>
+  <span class="pie-dato">
+    <span class="pie-marca pie-humano"></span>
+    En manos de una persona <b class="v2-num">{llevaHumano}</b>
+  </span>
+  {#if sinDueno > 0}
+    <span class="pie-dato pie-alerta">Sin dueño <b class="v2-num">{sinDueno}</b></span>
+  {/if}
+  <span class="pie-derecha">
+    {#if data.error}
+      <span class="pie-dato pie-alerta">Sin conexión con el motor</span>
+    {:else if sondeoHaceSegundos !== null}
+      <span class="pie-dato">Cola leída hace <b class="v2-num">{sondeoHaceSegundos}s</b></span>
+    {/if}
+  </span>
+</footer>
+
 <style>
+  /* ── la barra de consola ────────────────────────────────────────────────
+     Fina, de borde a borde y con una sola línea de contenido. 40px contra los
+     76 del encabezado de página que reemplaza: 36px que se van enteros a las
+     tres columnas. */
+  .consola {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px;
+    height: 40px;
+    background: var(--bandeja-superficie);
+    border-bottom: 1px solid var(--bandeja-borde);
+  }
+
+  /* El botón de recoger. Icono solo: es un control de cromo, no una acción
+     sobre una conversación, y en una barra de 40px un rótulo al lado le
+     quitaría lugar a lo que sí se lee. Lleva `aria-label` y `title`. */
+  .consola-recoger {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--bandeja-radio-sm);
+    background: none;
+    color: var(--bandeja-texto-2);
+    cursor: pointer;
+  }
+
+  .consola-recoger:hover {
+    color: var(--bandeja-texto);
+    background: var(--bandeja-superficie-suave);
+    border-color: var(--bandeja-borde);
+  }
+
+  /* La marca, y la salida. Con la barra lateral oculta es la única puerta de
+     vuelta al resto del CRM, así que se ve como lo que es: un enlace. */
+  .consola-marca {
+    flex: none;
+    display: flex;
+    align-items: center;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: -0.01em;
+    color: var(--bandeja-texto);
+    text-decoration: none;
+  }
+  /* Alto fijo y ancho libre: un logo es de la proporción que la empresa
+     haya subido, y recortarlo a una caja cuadrada deforma marcas anchas.
+     El tope de ancho evita que un logo apaisado empuje la navegación. */
+  .consola-logo {
+    height: 22px;
+    max-width: 132px;
+    width: auto;
+    object-fit: contain;
+    display: block;
+  }
+
+  .consola-marca:hover {
+    color: var(--bandeja-humano);
+  }
+
+  /* Los módulos. En angosto la tira se desplaza en horizontal en vez de
+     envolver: una barra de consola que crece a dos renglones deja de ser una
+     barra. Sin barra de desplazamiento a la vista, como las pestañas del
+     CRM. */
+  .consola-nav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    /* `1 1 auto` y no `none`: con `none` la tira no podía encogerse y era la
+       BARRA la que se desbordaba -- medido a 390px, se salía de la pantalla.
+       Encogiendo, el desplazamiento ocurre adentro de la tira, que es donde
+       tiene que ocurrir. */
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-left: 10px;
+    border-left: 1px solid var(--bandeja-borde);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .consola-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* El módulo, en mono y versalita: es un rótulo, igual que los de la cola,
+     el hilo y la columna de contexto. El activo lleva el azul de "acá
+     estás", el mismo que las pestañas de la cola y las del contexto. */
+  .consola-modulo {
+    padding: 4px 8px;
+    border-radius: var(--bandeja-radio-sm);
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-2);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .consola-modulo:hover {
+    color: var(--bandeja-texto);
+    background: var(--bandeja-superficie-suave);
+  }
+
+  .consola-modulo[aria-current='page'] {
+    color: var(--bandeja-humano);
+    background: var(--bandeja-humano-fondo);
+  }
+
+  /* Los indicadores van a la derecha, como en la referencia. Sin `margin-left:
+     auto`: ahora el buscador crece en el medio y ya los empuja. */
+  .consola-datos {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .consola-dato {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-2);
+    white-space: nowrap;
+  }
+
+  .consola-dato b {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--bandeja-texto);
+  }
+
+  /* El único número de la barra que pide una reacción. */
+  .consola-critico,
+  .consola-critico b {
+    color: var(--v2-rust);
+  }
+
+  .consola-total,
+  .consola-total b {
+    color: var(--bandeja-texto-3);
+  }
+
+  /* El latido del sondeo. Verde mientras la cola es reciente; apagado cuando
+     pasó más de un minuto sin releerla, que con un intervalo de 8s significa
+     que algo no está andando. */
+  .consola-sondeo {
+    color: var(--v2-moss);
+  }
+
+  .consola-punto {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+    align-self: center;
+  }
+
+  .consola-frio {
+    color: var(--bandeja-aviso);
+  }
+
+  /* El canal. Verde cuando los acuses vuelven, ámbar cuando no vuelve
+     ninguno, apagado cuando no hay con qué afirmar nada -- que NO es lo
+     mismo que estar bien. */
+  .consola-canal {
+    color: var(--v2-moss);
+  }
+
+  .consola-canal-mal {
+    color: var(--bandeja-aviso);
+  }
+
+  .consola-canal-mudo {
+    color: var(--bandeja-texto-3);
+  }
+
+  /* Quién está operando. Sale del JWT ya verificado, igual que `esMia`. */
+  .consola-operador {
+    padding-left: 12px;
+    border-left: 1px solid var(--bandeja-borde);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--bandeja-texto);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 170px;
+  }
+
+  /* Angosto: la marca y el módulo alcanzan. Los contadores de la cola siguen
+     estando en sus pestañas, que es donde se usan. */
+  @media (max-width: 760px) {
+    .consola-datos {
+      display: none;
+    }
+    /* El buscador tampoco: en un teléfono la barra tiene que ser una línea
+       con la marca y los módulos, y nada más. Buscar se hace desde la cola. */
+    .consola :global(.buscar) {
+      display: none;
+    }
+  }
+
+  /* ── la barra de estado ─────────────────────────────────────────────────
+     Mismo lenguaje que la de arriba --mono, versalita, filete-- y la mitad de
+     alto: es cromo de fondo, no algo que se lea todo el tiempo. */
+  .pie-consola {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 26px;
+    padding: 0 16px;
+    background: var(--bandeja-superficie);
+    border-top: 1px solid var(--bandeja-borde);
+  }
+
+  .pie-dato {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--bandeja-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-3);
+    white-space: nowrap;
+  }
+
+  .pie-dato b {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--bandeja-texto-2);
+  }
+
+  /* Los dos puntos de color son los mismos dos de toda la Bandeja: violeta la
+     IA, azul la persona. Nunca van solos -- la palabra está al lado. */
+  .pie-marca {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: none;
+  }
+
+  .pie-ia {
+    background: var(--bandeja-ia);
+  }
+
+  .pie-humano {
+    background: var(--bandeja-humano);
+  }
+
+  .pie-alerta,
+  .pie-alerta b {
+    color: var(--bandeja-aviso);
+  }
+
+  .pie-derecha {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+  }
+
+  @media (max-width: 760px) {
+    .pie-consola {
+      display: none;
+    }
+  }
+
   /* La mesa ocupa lo que queda bajo el encabezado y no scrollea: cada columna
      maneja su propio desborde, para que leer un hilo largo no arrastre la
      lista fuera de la vista. */
@@ -683,7 +841,12 @@
     border-top: 1px solid var(--v2-line);
   }
   .columna {
-    width: 330px;
+    /* 360px: el número EXACTO de la referencia, que ahora sí se puede usar
+       porque la Bandeja ocupa la pantalla entera. Mientras convivía con la
+       barra lateral del CRM había que trabajar en proporción (304 sobre los
+       1218 que quedaban); sin ella, 360/730/350 sobre 1440 cierra igual que
+       en el diseño. */
+    width: 360px;
     flex: none;
     display: flex;
     flex-direction: column;
@@ -691,402 +854,15 @@
     border-right: 1px solid var(--v2-line);
   }
 
-  /* ── pestañas + buscador ────────────────────────────────────────────── */
-  /* MEDIDO el 07/09/2026: el contenido pedia 396px en 329 disponibles, y
-     "Todas" se dibujaba 66px POR ENCIMA de la columna del chat. Lo mismo a
-     1440, 1280 y 1100 -- no era un problema de pantalla chica: la barra no
-     era responsive en absoluto.
-     
-     Se arregla en tres pasos, en este orden:
-       1. repartir el espacio (flex:1 con min-width:0 en cada pestaña)
-       2. menos padding lateral y el numero pegado al texto
-       3. si aun asi no entra, desplazamiento horizontal DENTRO de la barra
-     
-     El tercero es la red: pase lo que pase con los numeros --169 puede ser
-     16.900-- la barra scrollea y NUNCA se sale de su columna. 'overflow-x'
-     necesita 'min-width: 0' en el contenedor flex o no recorta nada. */
-  .tabs {
-    display: flex;
-    align-items: stretch;
-    gap: 1px;
-    padding: 8px 6px 0;
-    border-bottom: 1px solid var(--v2-line);
-    flex: none;
-    min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .tabs::-webkit-scrollbar {
-    display: none;
-  }
-  .tab {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    /* Reparten el ancho en vez de tomar cada una lo que necesita. */
-    flex: 1 1 auto;
-    min-width: 0;
-    padding: 7px 4px 8px;
-    background: none;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    font: inherit;
-    font-size: 11.8px;
-    font-weight: 550;
-    color: var(--v2-slate);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .tab:hover {
-    color: var(--v2-ink);
-  }
-  /* Activa = peso y tinta. Ember marca lo que hay que hacer, no dónde estás. */
-  .tab[aria-current='true'] {
-    color: var(--v2-ink);
-    font-weight: 640;
-    border-bottom-color: var(--v2-ink);
-  }
-  /* El numero es parte de la pestaña, no una pildora aparte flotando al lado:
-     sin fondo propio, mismo color que su texto, y solo se separa por el peso.
-     Asi las cuatro se leen como cuatro unidades y no como ocho elementos. */
-  .tab-n {
-    font-size: 10.5px;
-    font-weight: 650;
-    color: inherit;
-    opacity: 0.62;
-    font-variant-numeric: tabular-nums;
-  }
-  /* La activa destaca su numero; las inactivas lo dejan neutro. */
-  .tab[aria-current='true'] .tab-n {
-    opacity: 1;
-  }
-  /* El unico numero con color propio, y NO es el naranja de accion: trabajo
-     que espera a alguien es una ALARMA, no algo que se pulsa. Ver la
-     semantica de color en v2.css. */
-  .tab-n.urge {
-    color: var(--v2-rust);
-    opacity: 1;
-  }
-  .buscar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: none;
-    margin: 9px 10px 3px;
-    padding: 5px 9px;
-    border: 1px solid var(--v2-line);
-    border-radius: 8px;
-    background: var(--v2-card);
-    color: var(--v2-slate);
-  }
-  .buscar:focus-within {
-    border-color: var(--v2-slate);
-  }
-  .buscar input {
-    flex: 1;
-    min-width: 0;
-    border: 0;
-    background: none;
-    color: var(--v2-ink);
-    font: inherit;
-    font-size: 12.5px;
-    outline: none;
-  }
-  .limpiar {
-    border: 0;
-    background: none;
-    color: var(--v2-slate);
-    cursor: pointer;
-    display: grid;
-    place-items: center;
-    padding: 0;
-  }
-  .limpiar:hover {
-    color: var(--v2-ink);
-  }
-
   /* ── filas ──────────────────────────────────────────────────────────── */
-  .lista {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 4px 6px 10px;
-  }
-  .hueco {
-    padding: 18px 10px;
-  }
-  .fila {
-    display: flex;
-    gap: 10px;
-    padding: 9px 9px 10px;
-    border-radius: 8px;
-    color: inherit;
-    text-decoration: none;
-  }
-  .fila:hover {
-    background: var(--v2-hover);
-  }
-  /* La abierta se marca con la superficie, no con ember: "estoy acá" no es
-     trabajo pendiente. */
-  .fila.activa {
-    background: var(--v2-line-soft);
-  }
-  /* Un tinte apenas perceptible, no un bloque. Lo que marca "sin atender" es
-     el punto ember de abajo; el fondo solo tiene que hacer que la fila salte
-     al pasar la vista, no gritar. */
-  .fila.pide {
-    background: color-mix(in srgb, var(--v2-ember) 5%, transparent);
-  }
-  .fila.pide:hover,
-  .fila.pide.activa {
-    background: color-mix(in srgb, var(--v2-ember) 9%, transparent);
-  }
-  /* Círculo para quien no tiene nombre: un teléfono o un uuid no dan iniciales. */
-  .ident {
-    flex: none;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    background: var(--v2-line-soft);
-    color: var(--v2-slate);
-  }
-  .fila.activa .ident {
-    background: var(--v2-card);
-  }
-  .cuerpo {
-    flex: 1;
-    min-width: 0;
-  }
-  .alta {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-  }
-  .quien {
-    font-weight: 620;
-    font-size: 13px;
-    letter-spacing: -0.01em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .cuando {
-    margin-left: auto;
-    flex: none;
-    font-size: 10.5px;
-    color: var(--v2-slate);
-  }
-  /* El tiempo de espera no es un dato de contexto como "hace 3h": es el
-     numero por el que esta fila esta donde esta.
-
-     Tres tramos, y la diferencia entre ellos es de PESO, no solo de color:
-     23 dias esperando no puede tener la misma presencia que el nombre del
-     canal. Quien mira la lista de reojo tiene que ver el numero grande antes
-     de leer nada. */
-  .cuando.espera-fresco {
-    color: var(--v2-slate);
-    font-weight: 600;
-  }
-  .cuando.espera-viejo {
-    color: var(--v2-clay);
-    font-weight: 650;
-  }
-  .cuando.espera-critico {
-    color: var(--v2-rust);
-    font-weight: 750;
-    font-size: 11.5px;
-    letter-spacing: -0.01em;
-  }
-
-  /* El resumen del caso pesa mas que el eco del ultimo mensaje: es lo que
-     responde "de que iba esto" sin abrir la conversacion. */
-  .avance-resumen {
-    color: var(--v2-ink);
-  }
-
-  /* El motivo, como subtitulo del caso. Texto y no pildora a proposito. */
-  .motivo-fila {
-    font-size: 11.2px;
-    color: var(--v2-slate);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* ── orden y filtro de escalada ──────────────────────────────────────── */
-  .controles {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 12px 8px;
-  }
-  .orden {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: var(--v2-slate);
-  }
-  .orden-rotulo {
-    white-space: nowrap;
-  }
-  .orden select {
-    font: inherit;
-    font-size: 11.5px;
-    color: var(--v2-ink);
-    background: none;
-    border: 1px solid var(--v2-line);
-    border-radius: 6px;
-    /* 28px de alto: por debajo de eso un select deja de ser comodo de
-       apuntar, y esta pantalla se usa con prisa. */
-    min-height: 28px;
-    padding: 2px 6px;
-    cursor: pointer;
-  }
-  .orden select:hover {
-    border-color: var(--v2-slate);
-  }
-  .motivo-mas {
-    border-style: dashed;
-  }
-  /* El unico numero de la cabecera que pide una reaccion. */
-  .critico {
-    color: var(--v2-rust);
-    font-weight: 750;
-  }
-
-  /* El resumen se lee, a diferencia del ultimo mensaje, que solo orienta --
-     por eso no lleva el gris apagado de .avance. Misma linea, mismo lugar. */
-  .avance.resumen {
-    color: var(--v2-ink);
-  }
-
-  /* El cliente volvio a escribir mientras espera. Va al lado de "Sin
-     atender" y no la reemplaza: son dos hechos distintos. */
-  /* Actividad viva: verde y discreto. No pide nada -- dice que algo se movio
-     recien, que es informacion, no trabajo. Por eso no compite con el rojo de
-     "volvio a escribir" ni con el tiempo de espera. */
-  .activa {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 10.5px;
-    font-weight: 600;
-    color: var(--v2-moss);
-  }
-  .activa::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--v2-moss);
-    flex: none;
-  }
-
-  /* Renglon propio. Lleva punto rojo porque es la unica excepcion de la fila
-     que pide mirar: no se apoya SOLO en el color -- tambien lo dice el
-     texto-- pero el punto es lo que hace que se encuentre de reojo. */
-  .insiste {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11px;
-    font-weight: 650;
-    color: var(--v2-rust);
-    white-space: nowrap;
-  }
-  .insiste::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--v2-rust);
-    flex: none;
-  }
-
-  /* ── filtro por motivo ───────────────────────────────────────────────── */
-  .motivos {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    padding: 0 12px 8px;
-  }
-  .motivo {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    border: 1px solid var(--v2-line);
-    background: none;
-    border-radius: 999px;
-    padding: 2px 9px;
-    font: inherit;
-    font-size: 11px;
-    color: var(--v2-slate);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .motivo:hover {
-    color: var(--v2-ink);
-    border-color: var(--v2-slate);
-  }
-  .motivo[aria-pressed='true'] {
-    color: var(--v2-ink);
-    border-color: var(--v2-ink);
-    font-weight: 650;
-  }
-  /* Una sola línea: el preview orienta, no se lee. Dos líneas hacen que la
-     altura de cada fila dependa de lo largo que fue el último mensaje. */
-  .avance {
-    margin: 2px 0 0;
-    font-size: 12px;
-    color: var(--v2-slate);
-    line-height: 1.4;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .avance-quien {
-    font-weight: 600;
-    color: var(--v2-ink);
-    opacity: 0.6;
-  }
-  .baja {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-top: 6px;
-  }
-  .canal {
-    display: block;
-    margin-top: 4px;
-    font-size: 10.5px;
-    color: var(--v2-slate);
-  }
-  /* No es un Pill: Pill.svelte excluye ember a propósito porque ember no es
-     "un estado en el que un registro está". Acá no describe un estado, marca
-     trabajo sin tomar -- el mismo sentido que la tira .v2-next. */
-  .marca {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11.2px;
-    font-weight: 650;
-    color: var(--v2-ember);
-    white-space: nowrap;
-  }
-  .marca::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--v2-ember);
-    flex: none;
-  }
+  /* `.critico` se fue con el `<PageHeader>`: su único consumidor era el
+     subtítulo de esa portada. El mismo número lo marca ahora
+     `.consola-critico`, arriba. */
+  /* `.marca` se fue el 22/09/2026, por el mismo motivo que `.critico` de
+     arriba: no le quedaba ningún consumidor en el marcado. Marcaba «trabajo
+     sin tomar» en ámbar, y ese sentido lo lleva hoy el chip de plazo de la
+     fila de la cola (`.plazo` en ConversationRow). svelte-check lo venía
+     reportando como selector sin usar. */
 
   /* En pantallas angostas no caben tres columnas al lado. La lista pasa a ser
      la pantalla, y abrir una conversación la reemplaza -- el comportamiento

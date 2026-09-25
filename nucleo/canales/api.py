@@ -30,9 +30,12 @@ y se verifica DURANTE la conversacion, con una herramienta como
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+import contextlib
 import threading
+import uuid
 import time
 from datetime import datetime, timezone
 
@@ -40,8 +43,16 @@ import requests
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 
+from nucleo.canales import canal as canales
 from nucleo.canales import media, whatsapp
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
+from nucleo.relevo import desenlaces
+from nucleo.relevo import historial as regla_historial
+from nucleo.relevo import proyeccion
+from nucleo.relevo import revalidacion
+from nucleo.relevo import transiciones
+from nucleo.relevo import autorizacion as autorizacion_relevo
+from nucleo.relevo.control import control_efectivo
 from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
@@ -50,6 +61,8 @@ from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
+from nucleo.seguridad import interruptor
+from nucleo.seguridad import idempotencia
 from nucleo.modelo import motor
 from nucleo.observabilidad import consumo
 from nucleo.persistencia import db as persistencia
@@ -77,7 +90,117 @@ app = Flask(__name__)
 
 _configs: dict = {}    # tenant -> TenantConfig, cacheado por proceso
 _servidas: dict = {}   # tenant -> (config_version servida, monotonic de la ultima comprobacion)
-_sesiones: dict = {}   # (tenant, id_sesion) -> {"sesion": Sesion, "historial": [...]}
+_sesiones: dict = {}   # canales.clave_sesion(tenant, canal, id_sesion) -> {"sesion": Sesion, "historial": [...]}
+
+# ════════════════════════════════════════════════════════════════════════════
+#  CONTROL DE CONCURRENCIA
+#
+#  El webhook contesta a Meta al instante y lanza UN HILO POR MENSAJE. Es
+#  simple y tiene baja latencia, y con poco volumen alcanza. Lo que no tiene
+#  es freno: cincuenta mensajes seguidos son cincuenta hilos, cada uno
+#  llamando al modelo, abriendo su conexion y pegandole a los sistemas del
+#  ISP. Nada limita eso hoy.
+#
+#  Dos problemas distintos, y por eso dos mecanismos:
+#
+#  1. ORDEN. Dos mensajes del MISMO cliente con medio segundo de diferencia
+#     se atienden en paralelo, y el segundo puede contestarse antes que el
+#     primero -- el cliente escribe "no tengo internet" y despues "ya volvio",
+#     y recibe el diagnostico despues de la confirmacion. Eso no es un
+#     problema de escala: la escala solo lo vuelve frecuente. El lock por
+#     conversacion lo cierra, y va SIEMPRE PUESTO porque es correccion, no
+#     capacidad.
+#
+#  2. AISLAMIENTO. Los datos de cada empresa ya estan aislados
+#     (organization_id en cada consulta), pero la CAPACIDAD no: una empresa
+#     con un corte masivo llena los hilos y las demas esperan detras. El
+#     semaforo por tenant convierte la avalancha de una en una fila de esa
+#     una. Nace APAGADO (max_turnos_simultaneos = None): encenderlo introduce
+#     espera, y eso se decide por empresa y midiendo, no por defecto.
+#
+#  LIMITACION EXPLICITA DE ESTA FASE, Y NO ES UN DETALLE
+#  -----------------------------------------------------
+#  El lock y el semaforo son estructuras EN MEMORIA DE ESTE PROCESO. Hoy
+#  alcanzan porque el motor corre con UN worker (gunicorn --workers 1). El dia
+#  que haya dos workers, dos contenedores o escalado horizontal dejan de ser
+#  globales:
+#
+#      worker A  ->  lock de la conversacion 123
+#      worker B  ->  OTRO lock de la conversacion 123
+#      los dos procesan a la vez
+#
+#  O sea que esto protege lo que hay, no lo que venga. Antes de subir a mas de
+#  un worker hay que mover la exclusion a algo compartido -- un lock consultivo
+#  de Postgres (pg_advisory_lock) sobre el id de la conversacion es lo mas
+#  barato, porque la base ya esta y ya es el punto de serializacion de todo lo
+#  demas. Queda dicho aca y no en un documento aparte: quien suba los workers
+#  va a leer este archivo, no ese documento.
+# ════════════════════════════════════════════════════════════════════════════
+
+# clave de sesion -> [Lock, cuantos lo estan usando]. El contador es para
+# poder BORRAR la entrada: sin eso el diccionario crece un lock por cada
+# conversacion que existio, para siempre.
+_locks_conversacion: dict = {}
+_locks_maestro = threading.Lock()
+
+# tenant -> (semaforo, tope con el que se creo). El tope se relee de la config
+# en cada turno; si cambia, el semaforo se rehace. Lo que estaba en vuelo con
+# el semaforo viejo no se pierde -- lo suelta en el suyo, que deja de usarse.
+_semaforos_tenant: dict = {}
+_semaforos_maestro = threading.Lock()
+
+# Cuanto espera un turno por su lugar antes de rendirse. Generoso a proposito:
+# rendirse deja al cliente sin respuesta, y eso es peor que tardar. El tope
+# esta atado al timeout de gunicorn (180 s) -- pasarse de ahi solo cambia
+# quien corta la llamada.
+SEGUNDOS_ESPERA_TURNO = 150
+
+
+@contextlib.contextmanager
+def _turno_en_orden(tenant: str, clave, maximo):
+    """
+    El turno corre solo, y dentro del cupo de su empresa.
+
+    ORDEN DE ADQUISICION: primero el lock de la conversacion, despues el
+    semaforo del tenant. Al reves, los mensajes apilados de UN cliente
+    ocuparian los cupos de toda la empresa mientras esperan su turno entre
+    ellos. Siempre en este orden -- dos ordenes distintos es como se arma un
+    abrazo mortal.
+
+    Si no consigue lugar a tiempo levanta TimeoutError: quien llama decide.
+    No se atiende igual "por si acaso": atender fuera de orden es justo lo que
+    esto viene a impedir.
+    """
+    with _locks_maestro:
+        par = _locks_conversacion.setdefault(clave, [threading.Lock(), 0])
+        par[1] += 1
+    lock = par[0]
+    tomado = lock.acquire(timeout=SEGUNDOS_ESPERA_TURNO)
+    try:
+        if not tomado:
+            raise TimeoutError("no se consiguio el turno de la conversacion")
+        semaforo = None
+        if maximo:
+            with _semaforos_maestro:
+                actual = _semaforos_tenant.get(tenant)
+                if actual is None or actual[1] != maximo:
+                    actual = (threading.BoundedSemaphore(maximo), maximo)
+                    _semaforos_tenant[tenant] = actual
+                semaforo = actual[0]
+            if not semaforo.acquire(timeout=SEGUNDOS_ESPERA_TURNO):
+                raise TimeoutError("la empresa esta en su tope de turnos simultaneos")
+        try:
+            yield
+        finally:
+            if semaforo is not None:
+                semaforo.release()
+    finally:
+        if tomado:
+            lock.release()
+        with _locks_maestro:
+            par[1] -= 1
+            if par[1] <= 0:
+                _locks_conversacion.pop(clave, None)
 
 # Cuantos mensajes se vuelven a poner en contexto cuando este proceso no tiene
 # la conversacion en memoria (un reinicio, un despliegue). Ver
@@ -337,7 +460,7 @@ def _resolver_verificacion_pendiente(config, tenant: str, estado: dict) -> dict 
 def _cerrar_el_traspaso(config, tenant: str, conversation_id, mensaje_id,
                         respuesta: str, id_sesion: str, *, evaluador_fallo: bool,
                         se_intento: bool, caso_creado: bool,
-                        ticket_creado: bool) -> str:
+                        ticket_creado: bool, reservado: bool = False) -> str:
     """
     Decide en que termino el traspaso, lo deja escrito, y --si no quedo
     confirmado-- impide que la respuesta lo prometa.
@@ -367,6 +490,12 @@ def _cerrar_el_traspaso(config, tenant: str, conversation_id, mensaje_id,
               conversation_id=str(conversation_id), estado=estado)
 
     if estado == estado_escalada.CONFIRMADO:
+        return respuesta
+    # Con el control humano reservado en la base, prometer una persona es
+    # cierto aunque no haya caso ni ticket: la conversacion ya esta en la cola
+    # de personas. El estado NO_CONFIRMADO queda anotado igual (el efecto
+    # externo fallo), pero la respuesta no se reemplaza.
+    if reservado:
         return respuesta
 
     # No quedo confirmado: la respuesta no puede prometer una persona. Se
@@ -744,9 +873,323 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
     return estado
 
 
+def _sincronizar_respuesta_en_memoria(historial: list[dict], desde: int,
+                                      respuesta: str) -> None:
+    """Deja la ULTIMA respuesta del asistente agregada en este turno (a partir
+    del indice 'desde') con el texto que de verdad salio. No toca lo anterior
+    al turno ni agrega nada si el turno no produjo respuesta."""
+    for msg in reversed(historial[desde:]):
+        if msg.get("role") == "assistant":
+            if msg.get("content") != respuesta:
+                msg["content"] = respuesta
+            return
+
+
+# --- D24: el control puede cambiar mientras el modelo piensa -----------------
+#
+# La compuerta de B3.3b lee el control ANTES de llamar al modelo, y el modelo
+# tarda segundos. Si en ese intervalo una persona interviene, la respuesta que
+# vuelve se calculo con un control que ya no existe. Por eso el turno guarda que
+# autorizo (conversacion y relevo_version) y lo vuelve a comprobar en dos
+# puntos, siempre fuera de cualquier transaccion:
+#
+#   1. al volver del modelo, antes de guardar la respuesta o tocar la memoria;
+#   2. justo antes del POST a Meta (whatsapp_webhook).
+#
+# PUNTO DE NO RETORNO: una intervencion impide todo envio de la IA cuyo POST al
+# proveedor todavia no empezo cuando la intervencion queda durable. Un POST que
+# ya estaba en vuelo puede completar. No se sostiene una transaccion abierta
+# esperando a Meta (P-A); la garantia absoluta pediria una reserva durable de
+# salida (outbox), que no es de esta fase.
+#
+# Contadores por proceso, para que operaciones vea si esto pasa seguido. Los
+# logs llevan el id de la conversacion y versiones: nunca el telefono ni el
+# contenido.
+contadores_relevo = {"control_no_determinado": 0,
+                     "respuesta_ia_descartada_por_cambio_de_control": 0,
+                     "accion_ia_cancelada_por_cambio_de_control": 0}
+
+
+def _contar_relevo(evento: str, **campos) -> None:
+    contadores_relevo[evento] = contadores_relevo.get(evento, 0) + 1
+    # Campos con nombre y no un texto armado: ver nucleo/observabilidad/registro.py (D20).
+    registrar("relevo", "contador", contador=evento, **campos)
+
+
+def _autorizacion_de(control_actual: dict | None) -> dict:
+    """Lo que autorizo el turno: la conversacion abierta (None si no habia) y
+    su relevo_version (0 si no habia: una conversacion nueva nace en 0)."""
+    if control_actual is None:
+        return {"conversation_id": None, "relevo_version": 0}
+    return {"conversation_id": control_actual["conversation_id"],
+            "relevo_version": control_actual["relevo_version"]}
+
+
+def _turno_sigue_autorizado(tenant: str, canal: str, id_sesion: str,
+                            autorizacion: dict, *, exigir_ia: bool) -> bool:
+    """
+    True solo si la conversacion sigue abierta, es la misma, no cambio de
+    relevo_version y (si se pide) su control efectivo sigue siendo 'ia'. Si la
+    base no responde, False: falla cerrado.
+
+    'exigir_ia' es False en el segundo punto porque el mismo turno puede haber
+    escalado (y entonces el control es humano con la version que ESE turno
+    escribio, que ya esta en la autorizacion): lo que se compara es que nadie
+    mas haya movido la version.
+    """
+    try:
+        actual = persistencia.control_de_conversacion_abierta(tenant, canal, id_sesion)
+    except Exception as e:
+        _contar_relevo("control_no_determinado",
+                       conversation_id=id_interno(autorizacion.get("conversation_id")),
+                       punto="al_revalidar", error=e)
+        return False
+    return autorizacion_relevo.regla_turno(autorizacion, actual, exigir_ia=exigir_ia)
+
+
+def _escalada_sigue_vigente(tenant: str, escalada: dict) -> bool:
+    """SYNC_ESCALADA (autorizacion.regla_escalada), leido de la base. Si la base
+    no responde, False: falla cerrado."""
+    try:
+        vigencia = persistencia.vigencia_de_escalada(
+            tenant, escalada["conversation_id"], escalada["version"],
+            autorizacion_relevo.INVALIDAN_ESCALADA)
+    except Exception as e:
+        _contar_relevo("control_no_determinado",
+                       conversation_id=id_interno(escalada.get("conversation_id")),
+                       punto="vigencia_de_escalada", error=e)
+        return False
+    return autorizacion_relevo.regla_escalada(vigencia)
+
+
+def _efecto_del_turno(tenant: str, canal: str, id_sesion: str, estado: dict, que: str, *,
+                      clase: str = autorizacion_relevo.AUTONOMO_IA) -> bool:
+    """
+    D25: si un efecto que escribe, originado por este turno, todavia puede
+    empezar. Se pregunta justo antes de iniciarlo. Las reglas de cada clase
+    viven en nucleo/relevo/autorizacion.py; aca solo se lee la base.
+
+    Una denegacion AUTONOMO_IA dura todo el turno: despues de una intervencion
+    la IA no vuelve a preguntar ni reintenta. SYNC_ESCALADA no se revoca por
+    eso: su obligacion es de la escalada, no de la IA.
+    """
+    autorizacion = estado["autorizacion_turno"]
+    if clase == autorizacion_relevo.SYNC_ESCALADA:
+        escalada = estado.get("escalada_del_turno")
+        permitido = bool(escalada) and _escalada_sigue_vigente(tenant, escalada)
+    elif clase == autorizacion_relevo.AUTOMATICO_EN_PAUSA:
+        permitido = _turno_sigue_autorizado(tenant, canal, id_sesion, autorizacion, exigir_ia=False)
+    elif autorizacion.get("revocada"):
+        permitido = False
+    else:
+        permitido = _turno_sigue_autorizado(
+            tenant, canal, id_sesion, autorizacion,
+            exigir_ia=not autorizacion.get("legado_retomado"))
+        if not permitido:
+            autorizacion["revocada"] = True
+    if not permitido:
+        _contar_relevo("accion_ia_cancelada_por_cambio_de_control",
+                       conversation_id=id_interno(autorizacion.get("conversation_id")),
+                       version=autorizacion.get("relevo_version"), efecto=que, clase=clase)
+    return permitido
+
+
+def eventos_identidad_de(llamadas) -> list[dict]:
+    """Los eventos del embudo de identidad que dejo el turno, listos para la
+    base: lo que motor.evento_identidad clasifico, mas la herramienta. Funcion
+    aparte para poder afirmarla sin hilo ni base."""
+    return [dict(l["identidad"], herramienta=l.get("herramienta"))
+            for l in (llamadas or []) if l and l.get("identidad")]
+
+
+def _quitar_respuesta_de_memoria(historial: list, desde: int | None = None) -> None:
+    """Saca de la memoria lo que produjo el modelo en este turno y deja el
+    mensaje del cliente. 'desde' es el largo antes del modelo; sin el, se corta
+    despues del ultimo mensaje del cliente."""
+    if desde is None:
+        ultimos = [i for i, m in enumerate(historial) if m.get("role") == "user"]
+        if not ultimos:
+            return
+        del historial[ultimos[-1] + 1:]
+        return
+    del historial[desde:]
+
+
+class _CierreCancelado(Exception):
+    """El cierre por confirmacion no empieza: cambio el control (D25)."""
+
+
+# Lo que un rol que NO puede verificar no tiene por que estar pidiendo. Sin
+# tildes y en minuscula, porque asi se compara.
+_PIDE_IDENTIDAD = ("cedula", "documento de identidad", "numero de documento",
+                   "dni", "numero de identificacion", "tu documento")
+
+# Lo que se le dice al modelo al reencauzarlo. No es un regaño ni una regla
+# nueva: es la que YA tiene, repetida en el unico momento en que se puede
+# comprobar que no la siguio.
+INSTRUCCION_REENCAUZAR = (
+    "AVISO INTERNO (no se lo menciones al cliente): en tu respuesta anterior "
+    "le pediste un dato de identidad, y vos no verificas identidad ni tenes "
+    "herramienta para hacerlo. El dato que te de no lo vas a poder usar. "
+    "Llama a derivar_a_area con el area que corresponda: alli SI se verifica "
+    "y alli se le va a pedir lo que haga falta. No le anuncies el pase ni le "
+    "pidas que espere. "
+    "Y si la descripcion de derivar_a_area te pide verificar identidad antes "
+    "de derivar: esa condicion es para los roles que SI pueden verificarla. "
+    "No es tu caso. Si esperas a verificar, esta conversacion no avanza nunca."
+)
+
+
+def _sin_tildes(texto: str) -> str:
+    reemplazos = {"a": "áà", "e": "éè", "i": "íì", "o": "óò", "u": "úùü"}
+    salida = texto.lower()
+    for llano, acentuadas in reemplazos.items():
+        for x in acentuadas:
+            salida = salida.replace(x, llano)
+    return salida
+
+
+def _derivo_en_este_turno(config, rol: str, llamadas) -> bool:
+    """Se llamo una herramienta que deriva, EN ESTE TURNO.
+
+    No es lo mismo que "ya no pide identidad": una respuesta que deja de
+    nombrar la cedula sin derivar tampoco resolvio nada, y contarla como
+    derivacion vuelve inutil la medicion que justifica esta guarda.
+    """
+    cfg_rol = (getattr(config, "roles", None) or {}).get(rol)
+    if cfg_rol is None:
+        return False
+    catalogo = {h.nombre: h for h in getattr(config, "herramientas", []) or []}
+    derivadoras = {n for n in (getattr(cfg_rol, "puede_consultar", None) or [])
+                   if n in catalogo and getattr(catalogo[n], "deriva_rol", None)}
+    return any((l or {}).get("herramienta") in derivadoras for l in (llamadas or []))
+
+
+def debe_reencauzar_a_derivacion(config, rol: str, respuesta: str, llamadas) -> bool:
+    """
+    Este turno pidio un dato de identidad SIN poder verificarlo ni haber
+    derivado?
+
+    DE DONDE SALE. El 22/09/2026, en produccion, 'cliente_final' le pidio a un
+    cliente el nombre y el "DNI" para darse de baja, el cliente los mando, y
+    el asistente volvio a pedirlos. Ocho horas dando vueltas, cero
+    herramientas. Su instruccion dice tres veces que no verifica y que derive
+    a facturacion; ademas 'DNI' no aparece en ninguna parte de esa
+    instruccion. El modelo se invento un flujo.
+
+    POR QUE NO ALCANZA EL PROMPT, dicho por el propio PRD (7.4): el prompt es
+    guia, nunca la garantia. Ya hay tres frases ahi y no bastaron. Lo que
+    puede garantizar algo es el codigo, y este es el unico momento en que se
+    puede COMPROBAR que no la siguio: cuando la respuesta ya esta escrita.
+
+    TRES CONDICIONES, Y LAS TRES HACEN FALTA:
+
+      no puede verificar   ninguna herramienta suya declara verifica_identidad.
+                           Si puede, pedir la cedula es su trabajo y no hay
+                           nada que corregir.
+      no derivo            si derivo, quien contesta es el area -- y el area SI
+                           debe pedirla. Prohibirselo marcaria como falla el
+                           comportamiento correcto (se probo, y fallaba).
+      pide identidad       la frase pide el dato. Nombrar la cedula para decir
+                           "en facturacion te la van a pedir" no alcanza: eso
+                           queda cubierto por la condicion de arriba, porque
+                           para decirlo tuvo que derivar.
+    """
+    cfg_rol = (getattr(config, "roles", None) or {}).get(rol)
+    if cfg_rol is None:
+        return False
+    catalogo = {h.nombre: h for h in getattr(config, "herramientas", []) or []}
+    suyas = [catalogo[n] for n in (getattr(cfg_rol, "puede_consultar", None) or [])
+             if n in catalogo]
+    if any(getattr(h, "verifica_identidad", False) for h in suyas):
+        return False
+    if not any(getattr(h, "deriva_rol", None) for h in suyas):
+        # Sin a donde derivar, reencauzar solo produciria otra vuelta igual.
+        return False
+    derivadoras = {h.nombre for h in suyas if getattr(h, "deriva_rol", None)}
+    if any((l or {}).get("herramienta") in derivadoras for l in (llamadas or [])):
+        return False
+    texto = _sin_tildes(respuesta or "")
+    return any(p in texto for p in _PIDE_IDENTIDAD)
+
+
+def decision_del_router(rol_evaluado: str, rol_final: str, sesion,
+                        cfg_rol, llamadas) -> dict:
+    """
+    Los campos con los que queda registrado POR QUE este turno derivo, o por
+    que no.
+
+    ESTA SEPARADA PARA PODER PROBARLA, y no es un detalle de estilo: el
+    corredor de casos dorados (cli/evaluar.py) llama a motor.responder()
+    DIRECTO y no pasa por atender_turno, asi que nada de lo que se agregue
+    alrededor del modelo lo ven los casos dorados. Una funcion pura si se
+    puede probar sin base, sin modelo y sin red.
+
+    SIN PII: numeros y nombres de rol. 'identidad' dice en que estado quedo el
+    turno, nunca con que dato se llego a el -- la cedula que el cliente ofrece
+    no aparece por ningun lado.
+    """
+    if sesion is not None and getattr(sesion, "verificado", False):
+        identidad = "verificada"
+    elif sesion is not None and getattr(sesion, "id_cliente_pendiente", None):
+        # Localizada pero SIN confirmar: es el estado intermedio que existe
+        # justo para que esta distincion se pueda auditar despues.
+        identidad = "candidata"
+    else:
+        identidad = "sin_verificar"
+    return {
+        "rol": rol_evaluado,
+        "identidad": identidad,
+        "herramientas_disponibles": len(getattr(cfg_rol, "puede_consultar", None) or []),
+        "herramientas_usadas": len(llamadas or []),
+        # Vacio cuando no derivo. Se compara contra el rol EVALUADO, no contra
+        # una bandera: si el turno termino en otra area, eso es la derivacion.
+        "derivo_a": rol_final if rol_final != rol_evaluado else "",
+    }
+
+
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                   mensaje: str, canal: str, profile_id: str | None = None,
-                  nombre_colaborador: str = "") -> dict:
+                  nombre_colaborador: str = "",
+                  evento_id: str | None = None,
+                  conversacion_ya_guardada: str | None = None) -> dict:
+    """
+    Un turno, atendido EN ORDEN y dentro del cupo de su empresa.
+
+    Es un envoltorio fino sobre el turno de verdad (`_atender_turno`), y esta
+    separado para no reindentar quinientas lineas -- no para esconder nada.
+    Todo lo que decide el turno sigue abajo; lo unico que pasa aca es esperar
+    el lugar.
+
+    POR QUE ACA Y NO EN EL WEBHOOK: por esta funcion entran los TRES caminos
+    --el webhook de WhatsApp, /chat y la devolucion a la IA-- y el orden hay
+    que sostenerlo en los tres. Ponerlo en el webhook dejaria a los otros dos
+    sin proteccion y con la sensacion de que la tienen.
+
+    Si no consigue lugar en `SEGUNDOS_ESPERA_TURNO` devuelve 'sin_turno' y NO
+    atiende: contestar fuera de orden es lo que esto viene a impedir, y
+    contestar tarde de mas es peor que no contestar -- el cliente ya escribio
+    otra cosa. Queda en el log, que es donde se ve si el tope quedo corto.
+    """
+    clave = canales.clave_sesion(tenant, canal, id_sesion)
+    maximo = getattr(config.limites, "max_turnos_simultaneos", None)
+    try:
+        with _turno_en_orden(tenant, clave, maximo):
+            return _atender_turno(config, tenant, rol, id_sesion, mensaje, canal,
+                                  profile_id, nombre_colaborador, evento_id,
+                                  conversacion_ya_guardada)
+    except TimeoutError as e:
+        registrar("turno", "no se consiguio lugar para atender el turno",
+                  tenant=tenant, canal=canal, tope=maximo, error=e)
+        return {"respuesta": "", "verificado": False, "pausada": True,
+                "sin_turno": True}
+
+
+def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
+                   mensaje: str, canal: str, profile_id: str | None = None,
+                   nombre_colaborador: str = "",
+                   evento_id: str | None = None,
+                   conversacion_ya_guardada: str | None = None) -> dict:
     """
     Un turno completo de conversacion: pausa por escalamiento, modelo,
     persistencia y evaluacion de escalamiento.
@@ -761,11 +1204,56 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     solo se propaga a asistente.tool_calls.profile_id para la auditoria por
     persona (ver supabase/202608180800_tool_calls_profile_id.sql).
 
+    'evento_id': el identificador ESTABLE del mensaje entrante, cuando el canal
+    tiene uno. En WhatsApp es el wamid, y es estable porque Meta reentrega el
+    mismo mensaje con el mismo id -- por eso sirve como identidad de la
+    solicitud para el control de repeticion de operaciones externas (ver
+    nucleo/seguridad/idempotencia.py). En /chat no existe: ahi el turno recibe
+    un identificador propio y el control protege el reintento DENTRO del turno,
+    no la reentrega del turno entero. Eso esta dicho tambien en la migracion,
+    y no se disimula: la garantia vale lo que valga este dato.
+
     Devuelve {'respuesta', 'verificado', 'pausada'}. Levanta motor.ErrorMotor
     si el rol o el mensaje no son atendibles -- quien llama decide si eso es un
     400 (HTTP) o una linea de registro (webhook, donde no hay a quien
     devolverle un error).
+
+    'conversacion_ya_guardada': el id de la conversacion cuando el mensaje
+    entrante YA ESTA en la base y este turno no tiene que volver a escribirlo.
+    Existe por un solo caso: devolverle la conversacion a la IA cuando el
+    cliente escribio mientras la tenia una persona. Ese mensaje se guardo
+    cuando llego; atenderlo ahora sin esto lo dibujaria DOS VECES en el hilo.
+
+    Apagado por defecto, y eso es lo que importa: el webhook y /chat no pasan
+    nada, asi que su camino no cambia en un solo byte. Los seis lugares donde
+    el turno guarda el mensaje del cliente --uno por rama-- pasan por el mismo
+    ayudante de abajo, que sin la bandera hace exactamente lo de siempre.
+
+    'canal' se normaliza ANTES de cualquier lectura o escritura: un canal
+    desconocido levanta canales.CanalInvalido sin haber tocado la base ni la
+    memoria. /chat ya lo valida antes de llamar; esto cubre a cualquier otro
+    llamador.
     """
+
+    def _guardar_del_cliente(*extra, **opciones):
+        """El mensaje entrante, guardado UNA SOLA VEZ.
+
+        Devuelve (conversation_id, message_id), igual que registrar_mensaje:
+        dos ramas usan el primero para cerrar el caso y el camino normal usa
+        el segundo para colgarle el adjunto a la burbuja correcta.
+
+        Con 'conversacion_ya_guardada' no escribe nada y devuelve ese id con
+        message_id en None -- no hay burbuja nueva a la que colgarle nada,
+        porque el mensaje ya estaba.
+        """
+        if conversacion_ya_guardada:
+            return conversacion_ya_guardada, None
+        return persistencia.registrar_mensaje(
+            tenant, canal, id_sesion, rol, "user", mensaje, *extra,
+            origen="cliente", **opciones)
+
+    clave = canales.clave_sesion(tenant, canal, id_sesion)
+    canal = clave[1]
     # Antes de nada: si la conversacion anterior de esta persona quedo abierta
     # pero ya paso el plazo de inactividad, se la resume y se la cierra. Asi el
     # turno que sigue empieza limpio en vez de pegarse a un hilo de dias --
@@ -790,14 +1278,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # La sesion en memoria tambien se descarta: si no, el turno
                 # nuevo arrancaria con el historial viejo igual y el cierre no
                 # habria servido de nada.
-                _sesiones.pop((tenant, id_sesion), None)
+                _sesiones.pop(clave, None)
                 registrar("conversacion", "cerrada por inactividad y resumida",
                           conversation_id=str(vencida["conversation_id"]),
                           horas=horas, caracteres_resumen=len(texto))
         except Exception as e:
             registrar("conversacion", "no se pudo cerrar por inactividad", error=e)
 
-    clave = (tenant, id_sesion)
     nueva = clave not in _sesiones
     if nueva:
         _sesiones[clave] = _sesion_nueva(tenant, id_sesion, canal, horas)
@@ -872,6 +1359,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     "claramente de un tema distinto al tuyo.")
             rol = estado["rol_activo"]
 
+    # Desde aca, todo lo que se agregue al historial es de ESTE turno. Lo usa
+    # _sincronizar_respuesta_en_memoria() al final para no tocar turnos previos.
+    inicio_turno = len(estado["historial"])
+    # Si ESTE turno reservo el control humano (escalada). Lo lee el candado del
+    # traspaso al final: con la reserva hecha, prometer una persona es cierto.
+    reservado_turno = False
+
     # --- repregunta pendiente del verificador de agendamiento -----------------
     # nucleo/seguimiento/agendamiento.py dejo esto en un turno anterior porque
     # el checklist del manual quedo con UN dato puntual sin confirmar. Se
@@ -890,6 +1384,45 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # barrido por inactividad.
     veredicto_accion = _resolver_verificacion_pendiente(config, tenant, estado)
 
+    # --- QUIEN CONTROLA LA CONVERSACION: LO DICE LA BASE ---------------------
+    # B3.3b. Antes lo decidia estado["escalada"], la memoria del proceso: una
+    # devolucion, una intervencion o un reinicio en otro lado no se enteraban.
+    # Ahora se lee en cada turno con control_efectivo() (nucleo/relevo/control.py),
+    # la misma regla que las guardas: legado -> las banderas de siempre;
+    # gobernada -> la columna control. La memoria solo refleja lo leido.
+    #
+    # Si la base no responde, FALLA CERRADO: sin saber quien controla, no se
+    # corre el modelo. Un silencio es un problema; que la IA le conteste a un
+    # cliente que una persona esta atendiendo es otro peor.
+    try:
+        control_actual = persistencia.control_de_conversacion_abierta(tenant, canal, id_sesion)
+    except Exception as e:
+        _contar_relevo("control_no_determinado",
+                       conversation_id=id_interno(estado.get("conversacion_id")),
+                       punto="antes_del_modelo_no_se_corre", error=e)
+        return {"respuesta": "", "verificado": estado["sesion"].verificado,
+                "pausada": True, "control_desconocido": True}
+    # Lo que autoriza ESTE turno (D24). Se vuelve a comprobar al salir del
+    # modelo y antes de enviar.
+    estado["autorizacion_turno"] = _autorizacion_de(control_actual)
+    estado["escalada_del_turno"] = None
+    if control_actual is None:
+        estado["escalada"] = False
+    else:
+        estado["escalada"] = control_actual["control_efectivo"] == "humano"
+        if estado["escalada"] and control_actual["control_motivo"] == "intervencion":
+            # Una persona tomo la conversacion por su cuenta. La IA no corre y
+            # NO se usa nada de la escalada: ni el acuse "ya te estamos
+            # atendiendo", ni el cierre por confirmacion, ni el CRM. Quien
+            # intervino esta ahi; el mensaje queda guardado para que lo lea.
+            estado["historial"].append({"role": "user", "content": mensaje})
+            try:
+                _guardar_del_cliente()
+            except Exception as e:
+                registrar("persistencia", "no se pudo guardar el mensaje durante la intervencion",
+                          error=e)
+            return {"respuesta": "", "verificado": estado["sesion"].verificado, "pausada": True}
+
     # --- si ya se escalo, el bot NO contesta ---------------------------------
     # Va antes de motor.responder() a proposito. Marcar la conversacion como
     # escalada y despues dejar que el modelo siga respondiendo deja al cliente
@@ -897,7 +1430,19 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # una persona. Se verifica contra el CRM en vez de confiar en la marca:
     # cuando el humano cierra el caso, el asistente retoma solo.
     if estado["escalada"]:
-        if escalamiento.caso_sigue_abierto(config, estado["caso_id"]):
+        seguir_en_pausa = escalamiento.caso_sigue_abierto(config, estado["caso_id"])
+        if not seguir_en_pausa and estado.get("conversacion_id"):
+            # Caso cerrado en el CRM. En una conversacion que ya esta en el
+            # modelo nuevo (relevo_version > 0) eso NO la devuelve a la IA:
+            # queda un aviso para la persona y la pausa sigue, porque el unico
+            # camino de vuelta es devolver_a_ia(). En el legado (version 0)
+            # se retoma como siempre, hasta la reconciliacion de G8.
+            try:
+                if transiciones.caso_externo_cerrado(tenant, estado["conversacion_id"]).gobernada:
+                    seguir_en_pausa = True
+            except Exception as e:
+                registrar("relevo", "no se pudo registrar el cierre externo del caso", error=e)
+        if seguir_en_pausa:
             estado["historial"].append({"role": "user", "content": mensaje})
             # ¿El cliente esta diciendo que ya quedo?
             #
@@ -977,8 +1522,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 respuesta = _pregunta_de_cierre(config)
                 estado["historial"].append({"role": "assistant", "content": respuesta})
                 try:
-                    persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
-                    persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta)
+                    _guardar_del_cliente()
+                    persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta,
+                                                   origen="sistema")
                 except Exception as e:
                     registrar("persistencia", "no se pudo guardar la pregunta de cierre", error=e)
                 return {"respuesta": respuesta,
@@ -989,21 +1535,34 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # preguntar en vez de darlo por cerrado de una.
                 estado["cierre_propuesto"] = False
 
+            # D25: el evaluador tardo; si mientras tanto alguien movio el relevo
+            # (tomo, solto, intervino), el cierre automatico no empieza. Control
+            # humano es lo esperado aca, asi que se compara solo la version.
+            if cerrado and not _efecto_del_turno(tenant, canal, id_sesion, estado,
+                                                 "cierre_confirmado_en_pausa",
+                                                 clase=autorizacion_relevo.AUTOMATICO_EN_PAUSA):
+                cerrado = False
+
             if cerrado:
                 respuesta = _mensaje_de_cierre(config)
                 try:
-                    conv, _ = persistencia.registrar_mensaje(
-                        tenant, canal, id_sesion, rol, "user", mensaje)
+                    conv, _ = _guardar_del_cliente()
                     persistencia.registrar_mensaje(
-                        tenant, canal, id_sesion, rol, "assistant", respuesta)
-                    operativo.cerrar_todo(
+                        tenant, canal, id_sesion, rol, "assistant", respuesta, origen="sistema")
+                    hecho = operativo.cerrar_todo(
                         config, tenant,
                         {"id": conv, "caso_id": estado["caso_id"],
                          "ticket_operativo": persistencia.ticket_operativo_de(tenant, conv)},
                         (config.escalamiento.texto_cierre_confirmado or "").strip()
                         or "El cliente confirmo que su caso quedo resuelto.")
-                    estado["escalada"] = False
-                    estado["caso_id"] = None
+                    # La memoria solo se limpia si la base cerro de verdad. Si
+                    # la transicion se nego --queda una accion viva o una
+                    # verificacion sin resolver-- dejar aca 'escalada = False'
+                    # haria justo lo que D9/D10 costaron: que la memoria diga
+                    # una cosa y la base otra.
+                    if hecho["conversacion"]:
+                        estado["escalada"] = False
+                        estado["caso_id"] = None
                 except Exception as e:
                     registrar("operativo", "no se pudo cerrar tras la confirmacion del cliente", error=e)
                 estado["historial"].append({"role": "assistant", "content": respuesta})
@@ -1019,8 +1578,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # la persona lo ve en la bandeja, que es donde esta mirando.
             if hubo_humano:
                 try:
-                    persistencia.registrar_mensaje(
-                        tenant, canal, id_sesion, rol, "user", mensaje)
+                    _guardar_del_cliente()
                 except Exception as e:
                     registrar("persistencia", "no se pudo guardar el mensaje del cliente", error=e)
                 return {"respuesta": "", "verificado": estado["sesion"].verificado,
@@ -1043,19 +1601,25 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 "revisar y te escribe por aca."
             estado["historial"].append({"role": "assistant", "content": respuesta})
             try:
-                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
-                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta)
+                _guardar_del_cliente()
+                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta,
+                                               origen="sistema")
             except Exception as e:
                 registrar("persistencia", "no se pudo guardar el turno pausado", error=e)
             return {"respuesta": respuesta,
                     "verificado": estado["sesion"].verificado,
                     "pausada": True}
-        # El caso se cerro: el asistente vuelve a atender desde este turno.
+        # El caso se cerro y la conversacion es de legado: el asistente
+        # vuelve a atender desde este turno, como hasta hoy.
         estado["escalada"] = False
         estado["caso_id"] = None
         # Y vuelve a poder escalar: el caso anterior ya no esta abierto, asi
         # que un caso nuevo no seria un duplicado sino uno legitimo.
         estado["ya_escalada"] = False
+        # Este turno decidio retomar un legado cuyas banderas siguen en la
+        # base: al volver del modelo no se exige control 'ia' (seguiria
+        # diciendo humano), solo que nadie haya movido la version (D24).
+        estado["autorizacion_turno"]["legado_retomado"] = True
 
     # El resultado ya calculado entra al contexto del modelo ANTES de que
     # redacte: si llegara despues, le contestaria al cliente sin saber si el
@@ -1092,10 +1656,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         estado["historial"].append({"role": "user", "content": mensaje})
         estado["historial"].append({"role": "assistant", "content": respuesta})
         try:
-            conv_id, _ = persistencia.registrar_mensaje(
-                tenant, canal, id_sesion, rol, "user", mensaje)
+            conv_id, _ = _guardar_del_cliente()
             persistencia.registrar_mensaje(
-                tenant, canal, id_sesion, rol, "assistant", respuesta)
+                tenant, canal, id_sesion, rol, "assistant", respuesta, origen="sistema")
             if conv_id:
                 persistencia.registrar_estado_escalada(
                     tenant, conv_id, estado_escalada.NO_DETERMINADO,
@@ -1125,10 +1688,106 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # una llamada en promedio, pero no CUAL turno salio caro ni por que --
     # que es justo lo que hace falta para bajar de los 4-11 segundos que
     # tarda el modelo. Las columnas por mensaje existian y estaban vacias.
-    with consumo.abrir(config) as ficha_consumo:
+    antes_del_modelo = len(estado["historial"])
+    # D25: mientras el modelo corre, cada herramienta que escribe le pregunta a
+    # este autorizador justo antes de empezar.
+    with consumo.abrir(config) as ficha_consumo, autorizacion_relevo.autorizando(
+            lambda que: _efecto_del_turno(tenant, canal, id_sesion, estado, que)):
+        # Con que rol se EVALUO este turno. Se guarda antes de la derivacion,
+        # que mas abajo pisa 'rol' con el area nueva: sin esto, el registro de
+        # la decision diria que fue facturacion quien decidio derivar a
+        # facturacion.
+        rol_evaluado = rol
+        # El origen se calcula UNA vez y se guarda: si se reencauza, la
+        # segunda vuelta lo reusa con un sufijo. Generarlo de nuevo daria un
+        # uuid distinto, y las dos vueltas del mismo turno quedarian sin
+        # forma de juntarse al revisar la traza.
+        origen_del_turno = (f"evento:{evento_id}" if evento_id
+                            else f"turno:{uuid.uuid4()}")
         respuesta, registro_herramientas, medios_pendientes = motor.responder(
             config, rol, mensaje, estado["historial"], estado["sesion"],
-            nota_continuidad=nota_continuidad)
+            nota_continuidad=nota_continuidad,
+            origen=origen_del_turno)
+
+        # ── REENCAUZAR: PIDIO IDENTIDAD SIN PODER VERIFICARLA ───────────────
+        #
+        # Una sola vez, y en la capa donde sirve. La leccion del 09/09/2026 es
+        # que un reintento solo sirve donde puede entrar informacion nueva: la
+        # redaccion final corre sin catalogo, asi que pedirle tres veces que
+        # reescriba devuelve tres veces la misma frase. Aca se vuelve a entrar
+        # al BUCLE DEL AGENTE, que es donde todavia puede llamar
+        # derivar_a_area -- y llamarla es justamente lo que le falto.
+        #
+        # UNA, nunca en bucle: si la segunda tampoco deriva, se manda lo que
+        # haya. Una guarda que puede dar vueltas es peor que el problema que
+        # arregla, y el cliente esperando no tiene la culpa.
+        if debe_reencauzar_a_derivacion(config, rol, respuesta, registro_herramientas):
+            registrar("router", "pidio identidad sin poder verificar: se reencauza",
+                      rol=rol, herramientas_usadas=len(registro_herramientas or []))
+            # La respuesta descartada sale de la memoria: si se queda, el
+            # modelo la ve como algo que ya dijo y la sostiene -- que es
+            # exactamente como esta conversacion se quedo ocho horas pidiendo
+            # lo mismo.
+            _quitar_respuesta_de_memoria(estado["historial"], antes_del_modelo)
+            # EL AVISO VA AL HISTORIAL, NO POR 'nota_continuidad'.
+            #
+            # Ese parametro se inyecta UNICAMENTE dentro de 'if not historial'
+            # (nucleo/modelo/motor.py): existe para la amnesia por reinicio, y
+            # el comentario de mas arriba en este mismo archivo ya lo decia.
+            # Con historial --o sea, siempre que haya un turno previo, que es
+            # el caso que motivo esta guarda-- la nota se descartaba en
+            # silencio y el reintento corria con el MISMO payload que la
+            # primera vuelta. Eso convertia la guarda en un turno de modelo
+            # regalado: la leccion del 09/09/2026 al reves.
+            posicion_aviso = len(estado["historial"])
+            estado["historial"].append({"role": "system",
+                                        "content": INSTRUCCION_REENCAUZAR})
+            respuesta, registro_herramientas, medios_pendientes = motor.responder(
+                config, rol, mensaje, estado["historial"], estado["sesion"],
+                origen=f"{origen_del_turno}:reencauzado")
+            # Era para ESTA vuelta. Si se queda, los turnos siguientes leen
+            # "en tu respuesta anterior le pediste un dato de identidad"
+            # cuando ya no es cierto.
+            if (posicion_aviso < len(estado["historial"])
+                    and estado["historial"][posicion_aviso].get("content")
+                    == INSTRUCCION_REENCAUZAR):
+                estado["historial"].pop(posicion_aviso)
+            # 'derivo' se mide por la herramienta que corrio EN ESTE TURNO.
+            # Ni por 'sesion.rol_siguiente' --el motor lo deja puesto entre
+            # turnos a proposito (motor.py, "NO se limpia aca"), asi que una
+            # derivacion vieja diria que si-- ni por la ausencia del sintoma:
+            # una respuesta que deja de nombrar la cedula sin derivar tampoco
+            # resolvio nada, y contarla como exito arruina la unica medicion
+            # que puede decir si esta guarda sirve.
+            registrar("router", "resultado del reencauzamiento",
+                      rol=rol, herramientas_usadas=len(registro_herramientas or []),
+                      derivo=_derivo_en_este_turno(config, rol,
+                                                   registro_herramientas))
+
+    # --- D24, punto 1: el control no cambio mientras el modelo pensaba ------
+    # Si cambio (una persona intervino, se cerro, otra version), la respuesta
+    # se DESCARTA: no se guarda como dicha, no entra a la memoria y no se
+    # envia. El consumo del modelo ya ocurrio y queda medido; el texto no se
+    # registra en ningun lado. El mensaje del cliente si se guarda: lo escribio
+    # y quien tomo la conversacion tiene que leerlo.
+    if not _turno_sigue_autorizado(
+            tenant, canal, id_sesion, estado["autorizacion_turno"],
+            exigir_ia=not estado["autorizacion_turno"].get("legado_retomado")):
+        _quitar_respuesta_de_memoria(estado["historial"], antes_del_modelo)
+        estado["historial"].append({"role": "user", "content": mensaje})
+        if estado["sesion"] is not None:
+            estado["sesion"].rol_siguiente = None
+        _contar_relevo("respuesta_ia_descartada_por_cambio_de_control",
+                       conversation_id=id_interno(estado["autorizacion_turno"].get("conversation_id")),
+                       version=estado["autorizacion_turno"].get("relevo_version"),
+                       punto="al_volver_del_modelo")
+        try:
+            _guardar_del_cliente(horas, creado_en=llego_en)
+        except Exception as e:
+            registrar("persistencia", "no se pudo guardar el mensaje del turno descartado",
+                      error=e)
+        return {"respuesta": "", "verificado": estado["sesion"].verificado,
+                "pausada": True, "descartada": True}
 
     # --- si este turno derivo a otra area, persistir YA con el rol nuevo -----
     # 'rol_siguiente' lo pone motor._ejecutar_derivacion() cuando el modelo
@@ -1142,6 +1801,31 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         estado["rol_activo"] = rol
         estado["sesion"].rol_siguiente = None
 
+    # ── POR QUE ESTE TURNO DERIVO, O POR QUE NO ──────────────────────────────
+    #
+    # Nace de un caso del 22/09/2026 que costo dos horas reconstruir: el router
+    # le pidio la cedula a un cliente en vez de derivar, y con lo que quedaba
+    # guardado no habia forma de saber POR QUE. La traza tenia lo que se
+    # ejecuto --nada-- y el hilo tenia lo que respondio. Faltaba el medio: con
+    # que rol se evaluo, si habia identidad, cuantas herramientas tenia a mano
+    # y que eligio.
+    #
+    # Doce corridas contra el motor real no lo reprodujeron. Cuando algo pasa
+    # una vez y no se repite, lo unico que queda es que la PROXIMA vez haya
+    # dejado rastro.
+    #
+    # SIN PII, y por eso son numeros y nombres de rol, nunca texto del cliente
+    # ni el dato de identidad que ofrecio. 'identidad' dice en que estado
+    # quedo, no con que se llego a el.
+    try:
+        registrar("router", "decision del turno",
+                  **decision_del_router(rol_evaluado, rol, estado["sesion"],
+                                        config.roles.get(rol_evaluado),
+                                        registro_herramientas))
+    except Exception:
+        # Observabilidad, no funcionalidad: si esto falla, el turno sigue.
+        pass
+
     conversation_id = None
     mensaje_id = None
     mensaje_usuario_id = None
@@ -1149,15 +1833,18 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # El id del turno del CLIENTE se conserva: es a esa burbuja a la que
         # hay que colgarle la foto que mando, para que aparezca en el hilo
         # donde la mando y no en una lista aparte al final.
-        _, mensaje_usuario_id = persistencia.registrar_mensaje(
-            tenant, canal, id_sesion, rol, "user", mensaje, horas,
-            creado_en=llego_en)
+        _, mensaje_usuario_id = _guardar_del_cliente(horas, creado_en=llego_en)
         # 'latencia_ms' es lo que el cliente ESPERO: desde que su mensaje
         # llego hasta que la respuesta estuvo lista. La columna existia y
         # nadie la llenaba -- por eso no habia con que responder "¿cuanto
         # tarda?" salvo adivinando.
         conversation_id, mensaje_id = persistencia.registrar_mensaje(
             tenant, canal, id_sesion, rol, "assistant", respuesta, horas,
+            # 'ia' aunque una guarda del codigo reescriba despues el texto
+            # (actualizar_contenido_mensaje): sigue siendo el turno del
+            # asistente, del lado maquina. 'sistema' queda para los textos
+            # fijos que salen sin turno del modelo.
+            origen="ia",
             latencia_ms=int(
                 (datetime.now(timezone.utc) - llego_en).total_seconds() * 1000),
             # De ESTE turno, no del dia. 'n_llamadas' es cuantas veces se
@@ -1170,6 +1857,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             llamadas_modelo=ficha_consumo.n_llamadas,
             modelo=config.llm.modelo_por_defecto)
         mensaje_id_turno = mensaje_id
+        if estado["autorizacion_turno"].get("conversation_id") is None and conversation_id:
+            estado["autorizacion_turno"]["conversation_id"] = str(conversation_id)
         # La sesion viva se queda con el id. Solo lo tenia cuando venia de una
         # conversacion ANTERIOR: si la creo este mismo proceso, quedaba en
         # None y las reglas que preguntan por esta fila --si ya la atendio una
@@ -1200,6 +1889,12 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             try:
                 persistencia.registrar_llamadas_herramienta(
                     tenant, cid, rol, llamadas, profile_id=profile_id)
+                # Fase 1 del ciclo de identidad (23/09/2026): el embudo del
+                # turno va en la misma ida de auditoria, despues de responder,
+                # y con la misma regla -- perderlo no tumba la atencion.
+                eventos = eventos_identidad_de(llamadas)
+                if eventos:
+                    persistencia.registrar_eventos_identidad(tenant, cid, rol, eventos)
                 for llamada in llamadas:
                     # La accion quedo hecha pero sin comprobar: se anota para
                     # medirla en un turno siguiente, cuando pase el plazo.
@@ -1241,6 +1936,26 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 persistencia.registrar_marca_tv_desconocida(
                     tenant, conversation_id, marca)
             estado["sesion"].marcas_tv_sin_guia = []
+        # Las acciones que el turno dejo propuestas: recien aca existe el
+        # conversation_id con el que ligarlas (B5). Hasta este punto no se
+        # pueden aprobar --sin conversacion son indistinguibles del legado, que
+        # esta bloqueado-- asi que la ventana falla cerrado.
+        if estado["sesion"] is not None and estado["sesion"].acciones_por_vincular:
+            for pendiente in estado["sesion"].acciones_por_vincular:
+                try:
+                    herr = next((h for h in config.herramientas
+                                 if h.nombre == pendiente["herramienta"]), None)
+                    aprob = getattr(herr, "aprobacion", None) if herr else None
+                    persistencia.vincular_accion_a_conversacion(
+                        tenant, pendiente["accion_id"], conversation_id,
+                        aprob.vigencia_minutos if aprob else None)
+                except Exception as e:
+                    # La accion existe y sigue sin conversacion: no se puede
+                    # aprobar, que es el lado seguro. Se registra para que no
+                    # quede invisible.
+                    registrar("acciones", "no se pudo ligar la accion a su conversacion",
+                              tenant=tenant, error=e)
+            estado["sesion"].acciones_por_vincular = []
         # Recien aca existe conversation_id (ver el docstring de
         # motor.responder): antes de esto no habia donde persistir a quien
         # verifico _ejecutar_confirmacion. Se repite cada turno una vez
@@ -1643,7 +2358,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                               corresponde_agendar=veredicto.get("corresponde_agendar"),
                               falta_dato=bool(veredicto.get("pregunta_faltante")))
 
-                if veredicto and veredicto.get("checklist_completo") and veredicto.get("corresponde_agendar"):
+                if (veredicto and veredicto.get("checklist_completo") and veredicto.get("corresponde_agendar")
+                        and _efecto_del_turno(tenant, canal, id_sesion, estado,
+                                              "agendamiento_automatico")):
                     id_ticket_auto = agendamiento.agendar(
                         config, tenant, estado["sesion"], herramienta_auto,
                         veredicto.get("descripcion_visita", ""))
@@ -1684,6 +2401,38 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     posponer = True
 
             if not posponer:
+                # RESERVA DEL CONTROL HUMANO, antes de cualquier efecto de la
+                # escalada (ticket operativo, caso del CRM). Escritura en
+                # paralelo (B3.2): la verdad nueva queda en 'humano' aunque
+                # despues fallen el ticket o el CRM, y nunca vuelve sola a la
+                # IA. Todavia no decide la pausa -- eso sigue en el legado
+                # hasta el corte de control --, por eso un fallo aca se anota
+                # y no detiene el turno. Si ya se agendo una visita sola
+                # (necesita_humano=False) no hay nada que reservar.
+                reservado = False
+                escalada_propia = False
+                if necesita_humano:
+                    try:
+                        r_reserva = transiciones.escalar(
+                            tenant, conversation_id, motivo=evaluacion.get("motivo", ""),
+                            clave=f"escalada:{mensaje_id}" if mensaje_id else None)
+                        # Reservado = la base YA dice humano, se haya aplicado
+                        # ahora o por un reintento de la misma escalada.
+                        reservado = r_reserva.aplicada or r_reserva.motivo in ("reintento", "sin_cambio")
+                        # La version que escribio ESTE turno es la esperada al
+                        # enviar (D24, punto 2). 'sin_cambio' no la mueve: si
+                        # otro ya la paso a humano, el envio tiene que frenar.
+                        if r_reserva.aplicada or r_reserva.motivo == "reintento":
+                            escalada_propia = True
+                            estado["escalada_del_turno"] = {
+                                "conversation_id": str(conversation_id),
+                                "version": r_reserva.version}
+                            estado["autorizacion_turno"] = {
+                                "conversation_id": str(conversation_id),
+                                "relevo_version": r_reserva.version,
+                                "escalada_version": r_reserva.version}
+                    except Exception as e:
+                        registrar("relevo", "no se pudo reservar el control humano", error=e)
                 # El trabajo queda anotado donde la operacion lo ve, con un
                 # tecnico asignado -- no solo en la bandeja interna del
                 # asistente. Distinto del agendamiento automatico: eso decide
@@ -1706,6 +2455,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                                                      estado["historial"])
                     if caso_manual and not id_ticket_auto else None)
                 nombre_ticket = entrada_ticket.herramienta if entrada_ticket else None
+                # D25: el ticket y el caso del CRM son de ESTA escalada si la
+                # reserva la escribio este turno; si no, son un efecto autonomo
+                # y piden que la IA siga controlando.
+                clase_escalada = (autorizacion_relevo.SYNC_ESCALADA if escalada_propia
+                                  else autorizacion_relevo.AUTONOMO_IA)
+                if nombre_ticket and not _efecto_del_turno(
+                        tenant, canal, id_sesion, estado, "ticket_de_escalada",
+                        clase=clase_escalada):
+                    nombre_ticket = None
                 if nombre_ticket:
                     # La sugerencia va PRIMERO en la descripcion, no al
                     # final: un ticket con asunto generico se abre para saber
@@ -1812,7 +2570,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         config, evaluacion.get("motivo")) or respuesta
 
                 se_intento_escalar = True
-                caso_creado = escalamiento.escalar(
+                caso_creado = _efecto_del_turno(
+                    tenant, canal, id_sesion, estado, "caso_de_escalada",
+                    clase=clase_escalada) and escalamiento.escalar(
                     config, tenant, id_sesion, conversation_id, estado["historial"],
                     evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
                     resumen=(evaluacion.get("resumen", "") + nota_ticket).strip(),
@@ -1858,7 +2618,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # esperar -- si se agendo solo, el bot sigue atendiendo
                 # normal desde el proximo mensaje. Y si no quedo registrado
                 # en ningun lado, tampoco: ver mas abajo.
-                estado["escalada"] = necesita_humano and quedo_registrado
+                # FAIL-CLOSED (Q5): si la reserva quedo en la base, la pausa es
+                # un hecho aunque el ticket y el CRM hayan fallado -- la base
+                # ya dice que esta conversacion espera a una persona, y la
+                # memoria no puede decir otra cosa. Solo si ni siquiera la
+                # reserva se pudo guardar se vuelve a lo de antes.
+                estado["escalada"] = necesita_humano and (quedo_registrado or reservado)
+                reservado_turno = reservado
                 # Y POR QUE se escalo. Lo lee el aviso que recibe el cliente
                 # en cada mensaje mientras espera: sin esto se le contestaba
                 # con el texto generico ("entiendo tu molestia") aunque
@@ -1906,7 +2672,12 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # 400 y al cliente se le contesto igual que su pedido habia
                 # quedado registrado -- se le dice la verdad y se le pide que
                 # escriba de nuevo, que es lo que dispara el reintento.
-                if quedo_registrado:
+                #
+                # Con la reserva hecha, el pedido de atencion humana SI quedo:
+                # se le dice el anuncio normal, que promete una persona y no
+                # un numero de caso. Pedirle que escriba de nuevo seria
+                # mandarlo a insistirle a un bot que ya no le va a contestar.
+                if quedo_registrado or reservado:
                     respuesta = respuesta_al_cliente
                 else:
                     respuesta = _mensaje_si_no_quedo(config) or respuesta
@@ -1922,7 +2693,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 #
                 # Sin registro no hay nadie a quien esperar ni caso que
                 # consultar: se limpia todo y la conversacion sigue viva.
-                estado["ya_escalada"] = quedo_registrado
+                estado["ya_escalada"] = quedo_registrado or reservado
                 if not quedo_registrado:
                     estado["caso_id"] = None
                 # El mensaje del asistente ya se guardo (mas arriba, antes de
@@ -1992,19 +2763,38 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # el caso y el ticket abiertos obligaria a cerrarlos a mano
             # justo cuando el cliente ya dijo que quedo conforme.
             try:
+                if not _efecto_del_turno(tenant, canal, id_sesion, estado, "cierre_por_confirmacion"):
+                    raise _CierreCancelado()
                 caso = estado.get("caso_id") or persistencia.caso_de_conversacion(
                     tenant, conversation_id)
                 if caso:
-                    operativo.cerrar_todo(
+                    hecho = operativo.cerrar_todo(
                         config, tenant,
                         {"id": conversation_id, "caso_id": caso,
                          "ticket_operativo": persistencia.ticket_operativo_de(
                              tenant, conversation_id)},
                         (config.escalamiento.texto_cierre_confirmado or "").strip()
                         or "El cliente confirmo que su caso quedo resuelto.")
+                    cerrada = hecho["conversacion"]
                 else:
-                    persistencia.cerrar_conversacion(tenant, conversation_id)
-                cerrada = True
+                    # T15a/T15b: lo cierra la confirmacion del cliente. La
+                    # transicion mira 'atendida_manual' para saber cual de las
+                    # dos es, y deja el desenlace en NULL: que el cliente diga
+                    # "ya funciona" no dice si era la ONT, el WiFi o la fibra,
+                    # y esa columna existe para contar eso (B6, §3.5).
+                    r_cierre = transiciones.cerrar(tenant, conversation_id,
+                                                   por="cliente", config=config)
+                    cerrada = r_cierre.aplicada or r_cierre.motivo == "ya_cerrada"
+                if not cerrada:
+                    # Quedo algo vivo (una accion propuesta, una verificacion
+                    # sin resolver): no se cierra. Decirle al cliente que su
+                    # caso quedo cerrado mientras el sistema sigue esperando
+                    # una respuesta de afuera es la clase de mentira chica que
+                    # despues nadie puede explicar.
+                    registrar("conversaciones", "el cierre por confirmacion no procedio",
+                              conversation_id=id_interno(conversation_id))
+            except _CierreCancelado:
+                pass
             except Exception as e:
                 registrar("conversaciones", "no se pudo cerrar la conversacion", error=e)
             # El supervisor audita la conversacion ya cerrada y deja un
@@ -2012,10 +2802,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # /manual -- nunca publica solo (ver nucleo/seguimiento/
             # supervisor.py). Aparte del cierre: un fallo aca no debe
             # revertir que la conversacion ya quedo cerrada.
-            try:
-                supervisor.revisar(config, rol, tenant, conversation_id, estado["historial"])
-            except Exception as e:
-                registrar("supervisor", "fallo al revisar la conversacion", error=e)
+            if cerrada:
+                try:
+                    supervisor.revisar(config, rol, tenant, conversation_id, estado["historial"])
+                except Exception as e:
+                    registrar("supervisor", "fallo al revisar la conversacion", error=e)
 
     # --- ¿el traspaso ocurrio de verdad? ------------------------------------
     # Tres situaciones distintas que antes se veian iguales desde afuera, y la
@@ -2025,7 +2816,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     respuesta = _cerrar_el_traspaso(
         config, tenant, conversation_id, mensaje_id, respuesta, id_sesion,
         evaluador_fallo=evaluador_fallo, se_intento=se_intento_escalar,
-        caso_creado=caso_creado, ticket_creado=ticket_creado)
+        caso_creado=caso_creado, ticket_creado=ticket_creado,
+        reservado=reservado_turno)
 
     # --- "¿quieres que te comunique con una persona?" -----------------------
     # Se agrega ACA, con el candado ya corrido: la pregunta nombra a un
@@ -2080,6 +2872,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # la base. Los tres bugs de derivacion del 08 y 09/09/2026 se veian todos
     # aca: uno anunciaba un pase que ya habia ocurrido, y saber que quien
     # escribia era 'ventas' -- no la puerta-- lo hacia obvio de inmediato.
+    # LO QUE EL MODELO RECUERDA ES LO QUE EL CLIENTE LEYO.
+    #
+    # Varias guardas reescriben la respuesta DESPUES de que el motor la agrego
+    # al historial (la promesa de traspaso sin registro, el aviso de escalada,
+    # la pregunta de cierre) y corregian solo la fila guardada. En vivo el
+    # modelo seguia recordando su texto original; tras un reinicio, el
+    # reconstruido traia el corregido. Un solo punto al final, para todas.
+    _sincronizar_respuesta_en_memoria(estado["historial"], inicio_turno, respuesta)
+
     rol_cfg_final = config.roles.get(rol)
     return {"respuesta": respuesta, "verificado": estado["sesion"].verificado,
             "cerrada": cerrada, "conversacion_id": conversation_id,
@@ -2087,7 +2888,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             "rol_activo": rol,
             "rol_activo_nombre": (getattr(rol_cfg_final, "area", None)
                                   or rol) if rol_cfg_final else rol,
-            "pausada": False}
+            "pausada": False,
+            # Para el punto 2 de D24 (antes del POST a Meta). No sale por /chat.
+            "_autorizacion": dict(estado["autorizacion_turno"])}
 
 
 @app.post("/chat")
@@ -2105,12 +2908,36 @@ def chat():
                   sin elegir a cual agente le habla.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
+
+    # EL CANAL SE DECIDE PRIMERO, antes de leer config, crear sesion o
+    # escribir nada. /chat no envia a ningun medio externo: un turno con canal
+    # real que entra por aca guarda como mensaje del cliente algo que el
+    # cliente no escribio, y le mueve la ventana de 24 h y el cierre por plazo
+    # (SPEC/CONTRATO_RELEVO_IA_HUMANO.md, D3 y X1). El cliente real solo entra
+    # por su webhook firmado. Rechazar despues de haber tocado algo no seria
+    # fallar cerrado.
+    #
+    # Sin 'canal' sigue valiendo "api", como siempre (el asistente interno y
+    # el smoke de DESPLIEGUE.md no lo mandan). Presente pero desconocido o
+    # vacio NO cae en ese default: se rechaza.
+    canal_pedido = cuerpo["canal"] if cuerpo.get("canal") is not None else canales.API
+    try:
+        canal = canales.normalizar_canal(canal_pedido)
+    except canales.CanalInvalido:
+        return jsonify({"error": "Canal desconocido."}), 400
+    if canal in canales.REALES:
+        # Sin identificador ni texto en el registro: son datos del cliente.
+        registrar("chat", "rechazado un turno con canal real", canal=canal,
+                  tenant=cuerpo.get("tenant"))
+        return jsonify({"error": f"El canal '{canal}' no se atiende por /chat: "
+                                 "sus mensajes solo entran por el webhook del "
+                                 "proveedor."}), 403
+
     tenant = cuerpo.get("tenant")
     rol = cuerpo.get("rol")
     profile_id = cuerpo.get("profile_id")
     id_sesion = cuerpo.get("identificador_sesion")
     mensaje = cuerpo.get("mensaje")
-    canal = cuerpo.get("canal", "api")
     # Lo manda la plataforma: el motor no lee las tablas del CRM, asi que
     # quien sabe el nombre de quien inicio sesion es la pantalla.
     nombre_colaborador = (cuerpo.get("nombre_colaborador") or "").strip()
@@ -2172,6 +2999,7 @@ def chat():
     # antes de que existiera el webhook, y el simulador depende de ella.
     if not salida.get("pausada"):
         salida.pop("pausada", None)
+    salida.pop("_autorizacion", None)
     return jsonify(salida)
 
 
@@ -2476,8 +3304,11 @@ def _flujo_de(config) -> dict:
     for nombre, rol in config.roles.items():
         if rol.orientado_a != "cliente_final":
             continue          # el flujo de derivacion es del lado del cliente
+        aprobaciones = datos["aprobaciones"].get(nombre, 0)
+        estado = _estado(carga, act, aprobaciones)
         agentes.append({
             "nombre": nombre,
+            "haciendo": _haciendo(estado, carga, act),
             "area": rol.area,
             "cargo": rol.cargo,
             "atiende": rol.atiende,
@@ -2682,31 +3513,100 @@ def centro_mando():
         registrar("centro_mando", "fallo al calcular el panorama", error=e)
         return jsonify({"error": "No se pudo calcular el panorama."}), 500
 
-    def _estado(carga: dict, act: dict) -> str:
+    # Los estados que cuentan como "este agente tiene algo entre manos". Se
+    # declara aqui, al lado de la derivacion, y no suelto en el agregado: al
+    # renombrar los estados el contador se quedo con los viejos y la franja
+    # mostraba 0 agentes con trabajo mientras tres tarjetas decian TRABAJANDO.
+    CON_TRABAJO = {"error", "waiting_approval", "working", "waiting_tool", "waiting_user"}
+
+    def _haciendo(estado: str, carga: dict, act: dict) -> str:
+        """
+        Una frase de que trae entre manos el agente, compuesta con lo medido.
+
+        No sale del contenido de la conversacion a proposito: ahi vive lo que
+        escribio el cliente, y esta pantalla se mira de lejos y en grupo. Se
+        arma con la herramienta en curso y los conteos, que es lo que se
+        puede decir en voz alta sin exponer a nadie.
+        """
+        n = carga.get("conversaciones") or 0
+        esperan = carga.get("esperando_humano") or 0
+        herr = act.get("ultima_herramienta")
+        if estado == "error":
+            fallos = act.get("fallos") or 0
+            return f"{fallos} llamada{'s' if fallos != 1 else ''} a {herr} fallaron" if herr \
+                else f"{fallos} herramienta{'s' if fallos != 1 else ''} fallaron"
+        if estado == "working":
+            return f"Ejecutando {herr}" if herr else f"Atendiendo {n} conversacion(es)"
+        if n == 0:
+            return "Sin conversaciones en curso"
+        if esperan:
+            return f"{esperan} esperando a una persona, {n} en curso"
+        return f"{n} conversacion{'es' if n != 1 else ''} en curso"
+
+    def _estado(carga: dict, act: dict, aprobaciones: int) -> str:
+        """
+        El estado que se muestra, derivado de lo que se pudo contar.
+
+        El orden importa: lo que exige a una persona gana sobre lo que el
+        agente esta haciendo solo, y el trabajo en curso gana sobre la espera.
+
+        De los ocho estados que la interfaz sabe pintar, aqui solo se emiten
+        seis. Los otros dos no se emiten porque HOY NO HAY CON QUE MEDIRLOS,
+        y un estado que se adivina es peor que uno que falta:
+
+          waiting_tool  'tool_calls' se escribe cuando la llamada TERMINA, con
+                        su duracion. No existe la fila "en vuelo", asi que una
+                        herramienta lenta y una recien terminada se ven igual.
+                        Exigiria registrar al invocar, no al responder.
+          completed     no es un estado de un agente sino de una tarea. Un
+                        agente que termino algo vuelve a 'idle' o sigue con lo
+                        siguiente; pintarlo como 'completed' seria inventar una
+                        pausa que no existe.
+          offline       no hay nada que diga que un agente esta apagado. Se
+                        intento derivarlo de "no tiene ninguna fila", y es
+                        falso: un agente configurado que hoy no atendio a
+                        nadie tampoco las tiene, y esta perfectamente vivo.
+                        Confundir "sin datos" con "caido" hace que la pantalla
+                        avise de una averia que no existe.
+        """
         if (act.get("fallos") or 0) > 0:
             return "error"
+        if aprobaciones > 0:
+            return "waiting_approval"
         if (act.get("llamadas") or 0) > 0:
-            return "procesando"
+            return "working"
+        if (carga.get("esperando_humano") or 0) > 0:
+            return "waiting_user"
+        if (carga.get("esperando_cliente") or 0) > 0:
+            return "waiting_user"
         if (carga.get("conversaciones") or 0) > 0:
-            return "atendiendo"
-        return "disponible"
+            return "working"
+        return "idle"
 
     agentes = []
     for nombre, rol in config.roles.items():
         carga = datos["carga"].get(nombre, {})
         act = datos["actividad"].get(nombre, {})
         ultima = carga.get("ultima_actividad") or act.get("ultima_llamada")
+        aprobaciones = datos["aprobaciones"].get(nombre, 0)
+        estado = _estado(carga, act, aprobaciones)
         agentes.append({
             "nombre": nombre,
+            "haciendo": _haciendo(estado, carga, act),
             "descripcion": rol.descripcion.strip(),
             "area": rol.area,
             "cargo": rol.cargo,
             "orientado_a": rol.orientado_a,
-            "estado": _estado(carga, act),
+            "estado": estado,
             "conversaciones": carga.get("conversaciones") or 0,
+            "abiertas_total": carga.get("abiertas_total") or 0,
             "esperando_humano": carga.get("esperando_humano") or 0,
+            "esperando_cliente": carga.get("esperando_cliente") or 0,
+            "esperando_aprobacion": aprobaciones,
             "recibidas_hoy": carga.get("recibidas_hoy") or 0,
             "llamadas_ventana": act.get("llamadas") or 0,
+            # 15 cubos de 2 minutos, el ultimo es ahora
+            "serie": datos["serie"].get(nombre, [0] * 15),
             "fallos_ventana": act.get("fallos") or 0,
             "duracion_media_ms": act.get("duracion_media_ms"),
             "ultima_herramienta": act.get("ultima_herramienta"),
@@ -2743,15 +3643,22 @@ def centro_mando():
         "ventana_min": datos["ventana_min"],
         "totales": {
             "conversaciones_activas": t.get("conversaciones_activas") or 0,
+            "abiertas_total": t.get("abiertas_total") or 0,
             "esperando_humano": t.get("esperando_humano") or 0,
             "atendidas_hoy": t.get("atendidas_hoy") or 0,
             "herramientas_hoy": t.get("herramientas_hoy") or 0,
             "duracion_media_ms": t.get("duracion_media_ms"),
             "fallos_hoy": t.get("fallos_hoy") or 0,
-            "agentes_activos": sum(
-                1 for a in agentes if a["estado"] in ("procesando", "atendiendo")),
+            "agentes_activos": sum(1 for a in agentes if a["estado"] in CON_TRABAJO),
         },
         "agentes": agentes,
+        "servicios": [
+            {"herramienta": s["herramienta"], "usos": s["usos"],
+             "fallos": s["fallos"], "duracion_media_ms": s["duracion_media_ms"],
+             "ultimo_agente": s["ultimo_agente"],
+             "ultimo_uso": s["ultimo_uso"].isoformat() if s["ultimo_uso"] else None}
+            for s in datos["servicios"]
+        ],
         "eventos": eventos[:20],
     })
 
@@ -2853,6 +3760,63 @@ def configuracion_plazo_visita_tecnica():
     olvidar_config(tenant)
     herramienta = next(h for h in config.herramientas if h.nombre == "agendar_visita_tecnica")
     return jsonify({"dias": herramienta.fechas_automaticas.get("fecha_final")})
+
+
+@app.get("/configuracion/bandeja")
+def configuracion_bandeja():
+    """Los dos ajustes de la Bandeja, para la pantalla de configuracion."""
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify({
+        "sla_toma_minutos": getattr(config, "sla_toma_minutos", 0) or 0,
+        "umbral_rx_dbm": getattr(config, "umbral_rx_dbm", None),
+    })
+
+
+@app.put("/configuracion/bandeja")
+def configuracion_bandeja_guardar():
+    """
+    Cambia los dos numeros con los que la Bandeja emite un veredicto.
+
+    Los DOS admiten "sin definir" -- 0 y null-- y eso no es un hueco: es la
+    manera de decir que la empresa todavia no lo decidio, y entonces la
+    pantalla muestra el dato crudo sin afirmar si esta bien o mal.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        sla = int(cuerpo.get("sla_toma_minutos") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "'sla_toma_minutos' tiene que ser un numero entero."}), 400
+
+    crudo = cuerpo.get("umbral_rx_dbm")
+    umbral = None
+    if crudo not in (None, ""):
+        try:
+            umbral = float(crudo)
+        except (TypeError, ValueError):
+            return jsonify({"error": "'umbral_rx_dbm' tiene que ser un numero."}), 400
+
+    try:
+        config = editor.guardar_ajustes_bandeja(tenant, sla, umbral)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({
+        "sla_toma_minutos": getattr(config, "sla_toma_minutos", 0) or 0,
+        "umbral_rx_dbm": getattr(config, "umbral_rx_dbm", None),
+    })
 
 
 @app.get("/configuracion/canales")
@@ -3058,13 +4022,118 @@ def interno_ejecutar_herramienta(nombre: str):
     if not isinstance(argumentos, dict):
         return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
 
+    # La cabecera es el unico identificador ESTABLE que puede aportar quien
+    # llama: si reenvia la misma peticion con la misma clave, la mutacion no
+    # sale dos veces (ver nucleo/seguridad/idempotencia.py). Se aceptan los dos
+    # nombres por la misma razon que campo/services/idempotencia.py los acepta.
+    # Sin cabecera se ejecuta igual, como siempre -- no se rompe a ningun
+    # llamador existente -- pero un reenvio no se reconoce.
+    clave_idem = (request.headers.get("Idempotency-Key")
+                  or request.headers.get("X-Idempotency-Key") or "").strip()
     try:
-        salida = motor.ejecutar_para_servicio(config, herramienta, argumentos)
+        salida = motor.ejecutar_para_servicio(
+            config, herramienta, argumentos,
+            origen=f"idem:{clave_idem}" if clave_idem else None)
+    except motor.AutonomiaDetenida as e:
+        # 409 y no 500: la peticion estaba bien, el sistema decidio no
+        # ejecutarla. Quien llama tiene que poder distinguir "fallo" de "no se
+        # hizo a proposito", porque la reaccion correcta no es la misma.
+        #  M06-F: el motivo va al log, no a la respuesta (regla de origin,
+        #  tests/test_errores_http.py): la respuesta lleva un codigo fijo.
+        registrar("interno", "accion bloqueada por el interruptor",
+                  herramienta=nombre, error=e)
+        return jsonify({"error": "AUTONOMIA_DETENIDA",
+                        "detalle": "Las acciones automaticas de esta empresa "
+                                   "estan detenidas."}), 409
+    except motor.OperacionNoEjecutada as e:
+        registrar("interno", "operacion externa no ejecutada",
+                  herramienta=nombre, error=e)
+        codigo = e.resultado.codigo           # una constante de idempotencia.py
+        return jsonify({"error": codigo,
+                        "detalle": "La operacion no se ejecuto: el registro de "
+                                   "operaciones externas lo impidio."}), 409
     except Exception as e:
         return fallo(502, "herramienta_fallo", "La herramienta no pudo completarse.",
                      componente="interno", e=e, estado_proveedor=estado_http_de(e))
 
     return jsonify({"resultado": salida})
+
+
+@app.get("/autonomia")
+def autonomia_estado():
+    """
+    El estado del interruptor de autonomia de una empresa, y su historial.
+
+    Solo lectura, y a proposito NO carga la configuracion del tenant: el
+    interruptor tiene que poder consultarse aunque la config este rota, que es
+    justo uno de los momentos en que alguien querria tirarlo.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        veredicto = interruptor.veredicto(tenant)
+        historial = interruptor.historial(tenant, limite=20)
+    except Exception as e:
+        return fallo(500, "autonomia_no_legible",
+                     "No se pudo leer el interruptor de autonomia.",
+                     componente="autonomia", e=e)
+    return jsonify({
+        "estado": veredicto.estado,
+        "permitido": veredicto.permitido,
+        "motivo": veredicto.motivo,
+        "actor": veredicto.actor,
+        "historial": [
+            {"estado": h["estado"], "estado_anterior": h["estado_anterior"],
+             "actor": h["actor"], "motivo": h["motivo"],
+             "creado_en": h["creado_en"].isoformat() if h["creado_en"] else None}
+            for h in historial],
+    })
+
+
+@app.post("/autonomia/detener")
+def autonomia_detener():
+    """
+    Tira el interruptor: esta empresa deja de ejecutar acciones autonomas.
+
+    Cuerpo: {"actor": "...", "motivo": "..."}. Los dos obligatorios -- una
+    parada de emergencia sin nombre ni razon es la que despues nadie se anima a
+    levantar porque no sabe que estaba pasando.
+
+    Quien puede llamarla: esta ruta esta detras de _exigir_token_de_servicio()
+    como todas las internas, y del lado de la app web el gate de ADMIN es el
+    mismo que ya usan /agentes y /configuracion-guiada. NO es una ruta publica.
+    """
+    return _mover_autonomia(interruptor.detener)
+
+
+@app.post("/autonomia/reactivar")
+def autonomia_reactivar():
+    """Levanta el interruptor. Mismo cuerpo y mismos requisitos que detener."""
+    return _mover_autonomia(interruptor.reactivar)
+
+
+def _mover_autonomia(accion):
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    try:
+        fila = accion(tenant, (cuerpo.get("actor") or "").strip(),
+                      (cuerpo.get("motivo") or "").strip())
+    except ValueError as e:
+        # Falta el actor o el motivo: es un pedido incompleto, no una falla.
+        return jsonify({"error": mensaje_publico(
+            e, "Hacen falta el actor y el motivo.")}), 400
+    except Exception as e:
+        return fallo(500, "autonomia_no_movida",
+                     "No se pudo cambiar el interruptor de autonomia.",
+                     componente="autonomia", e=e)
+    return jsonify({
+        "estado": fila["estado"], "estado_anterior": fila["estado_anterior"],
+        "actor": fila["actor"], "motivo": fila["motivo"],
+        "creado_en": fila["creado_en"].isoformat() if fila["creado_en"] else None,
+    })
 
 
 @app.get("/configuracion/planes-venta")
@@ -3521,7 +4590,70 @@ def conversaciones():
         registrar("conversaciones", "fallo al listar", error=e)
         return jsonify({"error": "No se pudo leer las conversaciones."}), 500
 
-    return jsonify({"tenant": tenant, "conversaciones": salida})
+    # B3.5 (D18): la proyeccion viaja calculada. Que necesita cada
+    # conversacion, en que banda de la cola cae, desde cuando espera y por que
+    # -- para que la pantalla ordene y lo explique sin reimplementar la regla.
+    for fila in salida:
+        fila.update(proyeccion.proyectar(fila))
+        fila["canal_operativo"] = fila.get("canal") in canales.REALES
+    salida.sort(key=proyeccion.orden_de_cola)
+
+    # El plazo de toma viaja con la cola y no por conversacion: es uno solo
+    # para toda la empresa, y mandarlo repetido en cada fila seria el mismo
+    # numero N veces. 0 = la empresa no definio objetivo, y entonces la
+    # pantalla no dibuja cuenta regresiva -- ver TenantConfig.sla_toma_minutos.
+    try:
+        sla = int(getattr(_config_de(tenant), "sla_toma_minutos", 0) or 0)
+    except Exception:
+        # No poder leer la config no puede tumbar la cola entera: sin plazo,
+        # la Bandeja funciona igual, sólo que sin el reloj.
+        sla = 0
+
+    # La salud del canal viaja con la cola por lo mismo que el plazo: es una
+    # sola para la empresa. Son los tres numeros crudos -- el veredicto lo
+    # arma la pantalla, en un solo lugar y con pruebas.
+    canal_whatsapp = persistencia.salud_canal_whatsapp(tenant)
+
+    return jsonify({"tenant": tenant, "conversaciones": salida,
+                    "sla_toma_minutos": sla,
+                    "canal_whatsapp": canal_whatsapp})
+
+
+@app.get("/tenant-de-organizacion/<organization_id>")
+def tenant_de_organizacion(organization_id):
+    """
+    De que empresa son los datos que puede pedir quien inicio sesion.
+
+    Existe para la plataforma multi-ISP (PRD 8.13). Hasta ahora el frontend
+    sacaba el tenant de una variable de entorno, o sea que la instalacion
+    entera servia a una sola empresa: con dos, cada lectura le habria servido a
+    un ISP los datos del otro.
+
+    Por que lo resuelve el MOTOR y no Django: el frontend entra por Django como
+    'crm_user', que no tiene privilegios sobre el esquema 'asistente', y esa
+    tabla ademas tiene RLS por organizacion. Es el mismo principio que ya
+    gobierna el contexto tecnico -- Django no habla con WispHub ni con
+    SmartOLT, el motor si -- aplicado a la configuracion: abrir un segundo
+    camino a esa tabla seria mantener dos formas de contestar lo mismo.
+
+    404 cuando esa organizacion no tiene asistente configurado. **No hay
+    default**, y eso es la mitad del valor de este endpoint: servir 'el tenant
+    de siempre' cuando no se sabe cual corresponde es exactamente la fuga que
+    el aislamiento por organizacion existe para impedir. Falla cerrado, como
+    'app_backend' sin tenant fijado, que ve 0 filas en vez de todas.
+    """
+    try:
+        slug = persistencia.tenant_de_organizacion(organization_id)
+    except Exception as e:
+        registrar("tenant", "fallo al resolver la organizacion", error=e)
+        return jsonify({"error": "No se pudo resolver el tenant."}), 500
+
+    if not slug:
+        return jsonify({
+            "error": "SIN_TENANT",
+            "detalle": "Esa organizacion no tiene un asistente configurado.",
+        }), 404
+    return jsonify({"tenant": slug})
 
 
 @app.get("/conversaciones/por-caso/<caso_id>")
@@ -3992,6 +5124,20 @@ def conversaciones_mensajes(id_conversacion):
     if conv.get("canal") == "whatsapp":
         conv["ventana_whatsapp"] = whatsapp.estado_de_ventana(
             conv.get("ultimo_mensaje_cliente"))
+    # Quien controla HOY, ya calculado: la pantalla no reimplementa la regla.
+    conv["control_efectivo"] = control_efectivo(conv)
+
+    # Los identificadores tecnicos del equipo del cliente, FILTRADOS por la
+    # misma lista que decide que se persiste al verificar. 'datos_sesion'
+    # guarda ademas el estado de anti-rebote (las areas ya visitadas), que es
+    # del ROUTING y no del cliente: mandarlo entero seria enviar a la pantalla
+    # cosas que no le tocan. Se filtra por Sesion.CAMPOS_PERSISTIBLES y no por
+    # una lista escrita aca, para que el motor siga sin conocer el vocabulario
+    # del tenant: 'sn_onu' es de un ISP de fibra y el proximo puede capturar
+    # otra cosa -- cuando esa lista crezca, esto crece solo.
+    sesion_guardada = conv.pop("datos_sesion", None) or {}
+    conv["equipo"] = {c: sesion_guardada.get(c) for c in Sesion.CAMPOS_PERSISTIBLES
+                      if sesion_guardada.get(c)}
 
     return jsonify(resultado)
 
@@ -4025,6 +5171,62 @@ def canales_plantillas():
     return jsonify({"plantillas": aprobadas, "total_en_meta": len(todas)})
 
 
+def _autor_y_clave(campos) -> tuple[str, str, str | None]:
+    """
+    (autor_nombre, autor_usuario_id, clave_idempotencia) de un cuerpo JSON o
+    de un formulario multipart. Levanta persistencia.AutorInvalido si falta
+    el autor: un mensaje de persona sin autor no se guarda (D2). Los arma el
+    proxy del frontend con la sesion autenticada, nunca el navegador.
+    """
+    nombre, usuario = persistencia.validar_autor(
+        campos.get("autor"), campos.get("autor_usuario_id"))
+    return nombre, usuario, (campos.get("clave_idempotencia") or "").strip() or None
+
+
+def _exigir_control_humano(tenant: str, id_conversacion: str):
+    """
+    GUARDA DEL RELEVO (B3.3, contrato X25): nada que escribe una persona le
+    llega al cliente mientras la conversacion la atiende la IA. Texto, media y
+    plantilla la llaman ANTES de guardar nada y antes de hablar con Meta.
+
+    Devuelve None si se puede seguir, o (respuesta, codigo) para devolver:
+      409  la controla la IA -- hay que intervenir primero
+      404  no existe o no es de este tenant
+      503  no se pudo leer el control: falla cerrado, no se envia a ciegas
+
+    Decide con control_efectivo() (nucleo/relevo/control.py), la misma regla
+    para todas las rutas: en una conversacion de legado escalada, que todavia
+    tiene control 'ia' por default, cuenta como humana y no se bloquea a quien
+    la esta atendiendo. La nota interna NO pasa por aca: no sale del equipo.
+    """
+    try:
+        control = persistencia.control_efectivo_de(tenant, id_conversacion)
+    except Exception as e:
+        registrar("relevo", "no se pudo leer el control", conversation_id=id_interno(id_conversacion),
+                  error=e)
+        return jsonify({"error": "No se pudo comprobar quien atiende la conversacion. "
+                                 "No se envio nada.", "codigo": "control_desconocido"}), 503
+    if control is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if control != "humano":
+        return jsonify({"error": "La IA esta atendiendo esta conversacion. Para escribirle "
+                                 "al cliente hay que intervenir primero.",
+                        "codigo": "control_ia", "control": control}), 409
+    return None
+
+
+def _ya_guardado(destino: dict) -> bool:
+    """
+    True si 'destino' es un REINTENTO de un mensaje que ya existia (misma
+    clave de idempotencia) y NO hay que volver a entregarlo: solo se reenvia
+    lo que fallo. Un 'pendiente' sin resultado puede estar en vuelo o haber
+    salido sin que se anotara; reenviarlo arriesga un duplicado ante el
+    cliente, asi que tampoco se reenvia (SPEC/CONTRATO_RELEVO_IA_HUMANO.md,
+    §9.5).
+    """
+    return bool(destino.get("existente")) and destino.get("estado_entrega") != "fallido"
+
+
 @app.post("/conversaciones/<id_conversacion>/plantilla")
 def conversaciones_enviar_plantilla(id_conversacion):
     """
@@ -4037,16 +5239,26 @@ def conversaciones_enviar_plantilla(id_conversacion):
     porque el texto de una plantilla lo puede cambiar Meta despues.
 
     NO abre la ventana. La ventana la abre el cliente cuando responde, y
-    nada mas: esto queda como mensaje 'humano', que es justamente el rol que
-    el calculo de la ventana ignora.
+    nada mas: esto queda con rol 'assistant' (origen 'humano'), y el calculo
+    de la ventana solo cuenta los mensajes del cliente.
+
+    El canal se valida ANTES de guardar (D16): antes la fila quedaba escrita
+    y recien despues se respondia 400 porque la conversacion no era de
+    WhatsApp.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     nombre = (cuerpo.get("plantilla") or "").strip()
     variables = [str(v) for v in (cuerpo.get("variables") or [])]
-    autor = (cuerpo.get("autor") or "").strip()
     if not tenant or not nombre:
         return jsonify({"error": "Faltan campos: tenant, plantilla"}), 400
+    try:
+        autor, autor_id, clave = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    bloqueo = _exigir_control_humano(tenant, id_conversacion)
+    if bloqueo:
+        return bloqueo
 
     try:
         config = _config_de(tenant)
@@ -4067,6 +5279,13 @@ def conversaciones_enviar_plantilla(id_conversacion):
     if elegida is None:
         return jsonify({"error": f"'{nombre}' no es una plantilla aprobada de "
                                  f"esta cuenta."}), 400
+    # Una plantilla que mezcla {{1}} con {{nombre}} no es un formato de Meta.
+    # No se adivina cual de las dos lecturas vale: se rechaza, porque
+    # cualquiera de las dos pondria un valor en el lugar de otro.
+    if elegida.get("formato_variables") == "mixto":
+        return jsonify({"error": f"'{nombre}' mezcla variables numeradas y con "
+                                 f"nombre. Hay que corregirla en Meta antes de "
+                                 f"poder enviarla."}), 400
     if len(variables) != elegida["variables"]:
         return jsonify({"error": f"'{nombre}' necesita {elegida['variables']} "
                                  f"variable(s) y llegaron {len(variables)}."}), 400
@@ -4075,7 +5294,11 @@ def conversaciones_enviar_plantilla(id_conversacion):
 
     try:
         destino = persistencia.agregar_mensaje_humano(
-            tenant, id_conversacion, texto, autor)
+            tenant, id_conversacion, texto, autor, autor_usuario_id=autor_id,
+            clave_idempotencia=clave, solo_canal=canales.WHATSAPP)
+    except persistencia.CanalNoAdmite:
+        return jsonify({"error": "Las plantillas son de WhatsApp; esta "
+                                 "conversacion es de otro canal."}), 400
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
@@ -4083,28 +5306,48 @@ def conversaciones_enviar_plantilla(id_conversacion):
         return jsonify({"error": "No se pudo guardar el mensaje."}), 500
     if destino is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
-
-    if destino["canal"] != "whatsapp":
-        return jsonify({"error": "Las plantillas son de WhatsApp; esta "
-                                 "conversacion es de otro canal."}), 400
+    if _ya_guardado(destino):
+        return jsonify({"ok": True, "ya_existia": True, "texto": texto,
+                        "mensaje_id": destino["mensaje_id"],
+                        "estado_entrega": destino["estado_entrega"]}), 200
 
     salida = {"ok": True, "texto": texto, "mensaje_id": destino["mensaje_id"]}
     salida.update(_entregar_y_registrar(
         tenant, destino["mensaje_id"],
         lambda: whatsapp.enviar_plantilla_aprobada(
             config, tenant, destino["usuario_externo"], nombre, variables,
-            elegida.get("idioma") or "es"),
+            elegida.get("idioma") or "es", plantilla=elegida),
         f"plantillas '{nombre}'"))
     return jsonify(salida), 201
 
 
+def _rellenar(texto: str, huecos: list[str], valores: list[str]) -> str:
+    """Cada hueco con su valor, por posicion en la lista de huecos."""
+    for hueco, valor in zip(huecos, valores):
+        texto = texto.replace("{{" + hueco + "}}", valor)
+    return texto
+
+
 def _armar_plantilla(plantilla: dict, variables: list[str]) -> str:
-    """El texto final, con los {{n}} reemplazados -- lo que va a leer el
-    cliente y lo que queda en el hilo."""
-    cuerpo = plantilla.get("cuerpo") or ""
-    for i, valor in enumerate(variables, start=1):
-        cuerpo = cuerpo.replace("{{" + str(i) + "}}", valor)
-    encabezado = (plantilla.get("encabezado") or "").strip()
+    """
+    El texto final, con los huecos reemplazados -- lo que va a leer el cliente
+    y lo que queda en el hilo.
+
+    Reparte la lista plana igual que whatsapp.componentes_de_plantilla:
+    primero el encabezado, despues el cuerpo. Y rellena CADA componente con
+    los suyos, porque en posicional los dos numeran desde 1 -- el {{1}} del
+    cuerpo no es el mismo valor que el {{1}} del encabezado.
+
+    Si este reparto dejara de coincidir con el del envio, el cliente leeria
+    una cosa y el hilo guardaria otra.
+    """
+    del_encabezado = list(plantilla.get("variables_encabezado") or [])
+    del_cuerpo = list(plantilla.get("variables_cuerpo") or [])
+    corte = len(del_encabezado)
+    encabezado = _rellenar(plantilla.get("encabezado") or "",
+                           del_encabezado, variables[:corte]).strip()
+    cuerpo = _rellenar(plantilla.get("cuerpo") or "", del_cuerpo,
+                       variables[corte:corte + len(del_cuerpo)])
     return f"{encabezado}\n\n{cuerpo}".strip() if encabezado else cuerpo
 
 
@@ -4126,6 +5369,32 @@ def mantenimiento_cerrar_sin_respuesta():
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     return jsonify(operativo.cerrar_vencidas(config, tenant))
+
+
+@app.post("/mantenimiento/cerrar-inactivas-ia")
+def mantenimiento_cerrar_inactivas_ia():
+    """
+    Cierra las conversaciones que atendio SOLO el asistente y quedaron mudas.
+
+    Hermano de '/mantenimiento/cerrar-sin-respuesta', que solo alcanza a las
+    ESCALADAS: sin este, una conversacion que la IA resolvio sola no la cierra
+    nadie nunca. Medido contra produccion el 22/09/2026: 151 asi, 145 de ellas
+    sin un mensaje en mas de una semana.
+
+    'simular=1' lista las que se cerrarian sin tocarlas. Se usa primero,
+    siempre: la primera corrida sobre un backlog acumulado es la unica que no
+    se puede deshacer mirando despues.
+    """
+    tenant = request.args.get("tenant") or (
+        request.get_json(force=True, silent=True) or {}).get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    simular = request.args.get("simular") in ("1", "true", "si")
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify(operativo.cerrar_inactivas_de_ia(config, tenant, simular=simular))
 
 
 @app.post("/casos/<caso_id>/mensajes")
@@ -4178,21 +5447,37 @@ def conversaciones_responder_humano(id_conversacion):
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     contenido = cuerpo.get("mensaje")
-    # Quien contesta. Lo manda la pantalla porque el motor no lee las tablas
-    # del CRM, y sirve para firmar la copia que va al ticket del ISP: ahi toda
-    # respuesta queda a nombre de la cuenta de la API key, asi que sin esto el
-    # historico del ticket dice que contesto el sistema.
-    autor = (cuerpo.get("autor") or "").strip()
     # Si con esta respuesta la persona da por terminada su parte. Lo elige
     # ella: acaba de hacer el trabajo y sabe si le quedo algo preguntado al
     # cliente. Ver devolver_al_asistente().
     devolver = bool(cuerpo.get("devolver_al_asistente"))
     if not tenant or not contenido:
         return jsonify({"error": "Faltan campos: tenant, mensaje"}), 400
+    # Quien contesta, OBLIGATORIO (D2). Lo manda el proxy porque el motor no
+    # lee las tablas del CRM; firma la copia al ticket del ISP (ahi toda
+    # respuesta queda a nombre de la cuenta de la API key) y el historial que
+    # ve el modelo.
+    try:
+        autor, autor_id, clave = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    # T6 sin clave no se puede reintentar sin arriesgar un segundo mensaje al
+    # cliente, y el reintento es justo lo que recupera una devolucion cortada a
+    # la mitad. Se exige antes de escribir nada, y se dice por que.
+    if devolver and not (clave or "").strip():
+        return jsonify({"error": "Devolver al asistente requiere clave_idempotencia.",
+                        "codigo": "clave_requerida"}), 400
+    bloqueo = _exigir_control_humano(tenant, id_conversacion)
+    if bloqueo:
+        return bloqueo
 
     try:
-        destino = persistencia.agregar_mensaje_humano(
-            tenant, id_conversacion, contenido, autor)
+        destino = (transiciones.solicitar_devolucion(
+            tenant, id_conversacion, contenido, operador_id=autor_id,
+            operador_nombre=autor, clave=clave)
+                   if devolver else persistencia.agregar_mensaje_humano(
+                       tenant, id_conversacion, contenido, autor,
+                       autor_usuario_id=autor_id, clave_idempotencia=clave))
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
@@ -4201,6 +5486,51 @@ def conversaciones_responder_humano(id_conversacion):
 
     if destino is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if _ya_guardado(destino):
+        # Reintento de un mensaje que no fallo: ni otra fila, ni otra copia al
+        # ticket, ni otra entrada al historial, ni otro envio.
+        #
+        # El estado de la FILA no alcanza para decidir. Un 'pendiente' puede ser
+        # "el proceso se cayo antes de hablar con Meta" o "Meta acepto y el
+        # proceso se cayo antes de anotarlo": lo primero no ocurrio, lo segundo
+        # si le llego al cliente, y la fila los escribe igual. El desempate esta
+        # en whatsapp_salidas, que es lo unico que se reservo ANTES del POST.
+        estado_previo = destino["estado_entrega"]
+        if estado_previo in ("enviado", "entregado", "leido"):
+            # La fila ya lleva el sello durable: Meta acepto y quedo anotado.
+            entrega = {"resultado": "aceptado", "aceptado_por_meta": True,
+                       "aceptacion_registrada": True}
+        else:
+            entrega = _salida_previa(tenant, f"humano:{clave}")
+        aceptado = entrega["resultado"] == "aceptado" and entrega["aceptacion_registrada"]
+        devuelto = False
+        if devolver and aceptado:
+            r = transiciones.devolver_a_ia(
+                tenant, id_conversacion, operador_id=autor_id,
+                operador_nombre=autor, clave=f"devolver:{clave}")
+            devuelto = r.aplicada or r.motivo == "reintento"
+            if devuelto:
+                clave_viva = canales.clave_sesion_de_fila(
+                    tenant, destino.get("canal"), destino["usuario_externo"])
+                if clave_viva in _sesiones:
+                    _sesiones[clave_viva]["escalada"] = False
+        elif devolver:
+            # B1/B2: el primer intento se corto sin dejar rastro. Sin esto la
+            # conversacion queda con el control humano correcto pero SIN una
+            # sola linea que diga que alguien quiso devolverla y no se pudo --
+            # y el operador no tiene como saber que su accion no llego.
+            transiciones.registrar_devolucion_fallida(
+                tenant, id_conversacion, destino["mensaje_id"],
+                operador_id=autor_id, operador_nombre=autor,
+                resultado=entrega["resultado"], clave=f"fallo:{clave}")
+        return jsonify({"ok": True, "ya_existia": True,
+                        "mensaje_id": destino["mensaje_id"],
+                        "estado_entrega": estado_previo,
+                        "resultado": entrega["resultado"],
+                        "aceptado_por_meta": entrega["aceptado_por_meta"],
+                        "aceptacion_registrada": entrega["aceptacion_registrada"],
+                        "devuelto_al_asistente": devuelto}), 200
+    reintento = bool(destino.get("existente"))
 
     # Lo que escribio la persona entra al HISTORIAL que ve el modelo, marcado
     # como suyo.
@@ -4218,29 +5548,22 @@ def conversaciones_responder_humano(id_conversacion):
     # permite al modelo NO confundirlo con algo que dijo el. Y como la
     # transcripcion del caso sale de este mismo historial, en el ticket
     # tambien queda claro quien escribio cada cosa.
-    clave_sesion = (tenant, destino["usuario_externo"])
-    if clave_sesion in _sesiones:
-        quien = autor or "Compañero del equipo"
+    clave_sesion = canales.clave_sesion_de_fila(
+        tenant, destino.get("canal"), destino["usuario_externo"])
+    if clave_sesion in _sesiones and not reintento:
+        # La misma regla que la reconstruccion tras un reinicio: en vivo y
+        # reconstruido el modelo ve exactamente lo mismo (D8).
         _sesiones[clave_sesion]["historial"].append(
-            {"role": "assistant", "content": f"({quien}) {contenido}"})
+            regla_historial.entrada("assistant", "humano", contenido, autor))
 
-    if devolver:
-        persistencia.devolver_al_asistente(tenant, id_conversacion)
-        # Y la sesion VIVA, no solo la base: la pausa se decide con lo que
-        # tiene este proceso en memoria, asi que sin esto el asistente seguia
-        # callado hasta el proximo reinicio.
-        if clave_sesion in _sesiones:
-            _sesiones[clave_sesion]["escalada"] = False
-            # 'ya_escalada' se deja como esta: es lo que evita que la misma
-            # conversacion abra un segundo caso. Lo que se apaga es la pausa,
-            # no la memoria de que esto ya paso por una persona.
-
-    salida = {"ok": True, "entregado": False, "devuelto_al_asistente": devolver}
+    salida = {"ok": True, "aceptado_por_meta": False,
+              "aceptacion_registrada": False, "resultado": None,
+              "devuelto_al_asistente": False}
 
     # La misma respuesta, copiada al ticket del sistema del ISP. Va aparte de
     # la entrega al cliente y no la condiciona: que la operacion no se entere
     # es un problema, pero uno menor que no contestarle a quien espera.
-    if destino.get("ticket_operativo"):
+    if destino.get("ticket_operativo") and not reintento:
         try:
             config = _config_de(tenant)
             salida["copiado_al_ticket"] = operativo.responder(
@@ -4252,7 +5575,20 @@ def conversaciones_responder_humano(id_conversacion):
     if destino["canal"] != "whatsapp":
         # El simulador y la API no tienen a donde entregar: la conversacion se
         # lee desde la misma pantalla. No es un fallo.
-        salida["entregado"] = None
+        salida["aceptado_por_meta"] = None
+        salida["aceptacion_registrada"] = True
+        salida["resultado"] = "aceptado"
+        if devolver:
+            r = transiciones.devolver_a_ia(
+                tenant, id_conversacion, operador_id=autor_id,
+                operador_nombre=autor, clave=f"devolver:{clave}")
+            salida["devuelto_al_asistente"] = r.aplicada or r.motivo == "reintento"
+            # La sesion viva tambien: sin esto la base dice 'ia' y la sesion en
+            # memoria sigue en pausa, asi que el asistente no reanuda hasta que
+            # se reconstruya. Los otros dos caminos de T6 ya lo hacen; este se
+            # quedaba afuera.
+            if salida["devuelto_al_asistente"] and clave_sesion in _sesiones:
+                _sesiones[clave_sesion]["escalada"] = False
         return jsonify(salida), 201
 
     # 201 aunque la entrega falle: el mensaje SI quedo guardado, y el agente
@@ -4265,7 +5601,22 @@ def conversaciones_responder_humano(id_conversacion):
         tenant, destino["mensaje_id"],
         lambda: whatsapp.enviar_texto(_config_de(tenant), tenant,
                                       destino["usuario_externo"], contenido),
-        f"conversaciones '{id_conversacion}'"))
+        f"conversaciones '{id_conversacion}'", clave_salida=f"humano:{clave}",
+        conversation_id=id_conversacion))
+    if devolver:
+        if salida["resultado"] == "aceptado" and salida["aceptacion_registrada"]:
+            # T6 paso 4: solo después del commit que guardó el wamid.
+            r = transiciones.devolver_a_ia(
+                tenant, id_conversacion, operador_id=autor_id,
+                operador_nombre=autor, clave=f"devolver:{clave}")
+            salida["devuelto_al_asistente"] = r.aplicada or r.motivo == "reintento"
+            if salida["devuelto_al_asistente"] and clave_sesion in _sesiones:
+                _sesiones[clave_sesion]["escalada"] = False
+        else:
+            transiciones.registrar_devolucion_fallida(
+                tenant, id_conversacion, destino["mensaje_id"],
+                operador_id=autor_id, operador_nombre=autor,
+                resultado=salida["resultado"], clave=f"fallo:{clave}")
     return jsonify(salida), 201
 
 
@@ -4312,6 +5663,644 @@ def conversaciones_herramientas(id_conversacion):
                            if not l["exito"] and not l.get("es_bloqueo")),
         },
     })
+
+
+@app.get("/conversaciones/<id_conversacion>/sincronizaciones")
+def conversaciones_sincronizaciones(id_conversacion):
+    """
+    Que efectos externos de esta conversacion quedaron sin hacer (B4).
+
+    Solo lectura y SIN 'datos_intencion': lo que la pantalla necesita es que
+    falto y si alguien tiene que mirarlo, no los parametros con los que se iba
+    a hacer. Tampoco sale nunca el cuerpo de la respuesta del sistema externo
+    -- de el solo se guarda el codigo (X19).
+
+    Esta ruta NO reintenta nada. El reconciliador (T20) corre aparte con su
+    propia cadencia, y lo que quedo 'desconocida' no vuelve a intentarse solo:
+    espera a una persona, que es justo lo que este panel deja ver.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        pendientes = persistencia.sincronizaciones_de(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("reconciliador", "fallo al leer las sincronizaciones",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer el estado de sincronizacion."}), 500
+
+    return jsonify({"sincronizaciones": pendientes})
+
+
+@app.get("/conversaciones/<id_conversacion>/acciones")
+def conversaciones_acciones(id_conversacion):
+    """
+    Las acciones que la IA propuso en esta conversacion, con su estado REAL (B5).
+
+    Antes de B5 una accion terminaba en 'aprobada' y nada mas -- que es lo que
+    alguien decidio, no lo que paso. Ahora el estado dice como termino:
+    ejecutada_ok, ejecutada_fallo, vencida o desconocida. Decir 'aprobada' de
+    algo que fallo es afirmar un efecto que no ocurrio.
+
+    Solo lectura y SIN 'argumentos': ahi estan los valores reales con los que
+    se iba a escribir afuera. Para decidir alcanza el resumen.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        acciones = persistencia.acciones_de_conversacion(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("acciones", "fallo al leer las acciones de la conversacion",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudieron leer las acciones."}), 500
+
+    return jsonify({"acciones": acciones})
+
+
+"""
+Los campos de la ficha del cliente que la Bandeja puede mostrar.
+
+Es una lista blanca EXPLICITA y no la del rol: 'campos_permitidos' del rol
+decide que ve el MODELO, y esto decide que ve una PERSONA autenticada en la
+pantalla. Son dos preguntas distintas y mezclarlas haria que ampliar una
+ampliara la otra sin que nadie lo decida.
+
+Lo que NO esta, y por que: contrasenas de cualquier tipo, coordenadas y
+cualquier campo de red del equipo. La ficha responde "quien es este cliente y
+como esta su servicio", no "como entro a su router".
+"""
+CAMPOS_FICHA_CLIENTE = (
+    "id_servicio", "nombre", "cedula", "estado", "telefono", "email",
+    "direccion", "localidad", "ciudad", "plan_internet", "zona",
+    "fecha_instalacion", "estado_facturas", "saldo", "fecha_corte",
+)
+
+
+@app.get("/conversaciones/<id_conversacion>/cliente")
+def conversaciones_cliente(id_conversacion):
+    """
+    La ficha del cliente, LEIDA EN VIVO del sistema del ISP.
+
+    POR QUE EN VIVO Y NO GUARDADA
+    -----------------------------
+    El plan, el estado del servicio, el saldo y la fecha de corte cambian sin
+    que esta conversacion se entere. Una copia guardada envejece en silencio,
+    y en esta pantalla se usa para decidir: decirle a alguien que el cliente
+    esta al dia cuando lleva dos meses cortado es peor que no decirle nada.
+    Ademas, el PRD prohibe persistir las respuestas crudas de la API externa
+    -- traen contrasenas, GPS y documento.
+
+    Por eso esta ruta lee y devuelve, sin escribir una sola fila.
+
+    REUSA LA HERRAMIENTA DEL TENANT, NO UNA URL PROPIA
+    --------------------------------------------------
+    Llama a 'consultar_cliente' tal como esta declarada en la config de la
+    empresa. Eso no es comodidad: es lo que hace que el subdominio, la
+    credencial (auth_ref) y el filtro verificado salgan de la configuracion
+    del tenant y no de una constante en este archivo. Una empresa nueva se
+    conecta editando su config, sin tocar codigo -- que es la regla de
+    arquitectura del repo.
+
+    Si la empresa no declara la herramienta, o no tiene cargada la credencial,
+    NO es un error del servidor: es que este tenant todavia no tiene conectado
+    su sistema. Se contesta 200 con 'disponible: false' y el motivo, y la
+    pantalla dibuja un estado vacio honesto en vez de un error rojo.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        identidad = persistencia.identidad_de_conversacion(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("cliente", "fallo al leer la identidad de la conversacion",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+
+    if not identidad:
+        return jsonify({"error": "No existe esa conversacion."}), 404
+
+    id_servicio = (identidad.get("id_cliente") or "").strip()
+    if not id_servicio:
+        # El asistente todavia no identifico al cliente. No es una falla: una
+        # conversacion recien abierta por un numero desconocido esta asi.
+        return jsonify({"disponible": False, "motivo": "sin_identificar", "cliente": None})
+
+    config = _config_de(tenant)
+    herramienta = next((h for h in config.herramientas if h.nombre == "consultar_cliente"), None)
+    if herramienta is None:
+        return jsonify({"disponible": False, "motivo": "sin_herramienta", "cliente": None})
+
+    try:
+        crudo = ejecutor_http.ejecutar(
+            herramienta, {"id_servicio": id_servicio}, tenant=tenant,
+            variables_tenant=getattr(config, "variables_tenant", None))
+    except Exception as e:
+        # Ni el mensaje ni el error llevan datos del cliente: el fallo es de
+        # conexion o de credencial, y lo que se pidio fue un identificador.
+        registrar("cliente", "no se pudo leer la ficha del cliente",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"disponible": False, "motivo": "sin_conexion", "cliente": None})
+
+    # Una coleccion paginada contesta {"results": [...]} aun filtrando por un
+    # id que es unico, asi que la ficha viene adentro de una lista de uno. Se
+    # acepta tambien una lista desnuda: que forma tiene la respuesta depende
+    # del sistema que cada empresa tenga conectado, y este archivo no conoce
+    # ninguno en particular.
+    # Si no vino ninguna fila, el cliente no existe alla -- que TAMBIEN es una
+    # respuesta util y no un error.
+    filas = crudo.get("results") if isinstance(crudo, dict) else crudo
+    fila = (filas or [None])[0] if isinstance(filas, list) else None
+    if not isinstance(fila, dict):
+        return jsonify({"disponible": False, "motivo": "no_encontrado", "cliente": None})
+
+    ficha = {}
+    for campo in CAMPOS_FICHA_CLIENTE:
+        valor = fila.get(campo)
+        # Los catalogos del sistema externo suelen venir anidados
+        # y lo que se muestra es el nombre; el id no le dice nada a nadie.
+        if isinstance(valor, dict):
+            valor = valor.get("nombre") or valor.get("id")
+        if valor not in (None, ""):
+            ficha[campo] = valor
+
+    # Sin 'registrar' de los valores: esta respuesta es la ficha personal de
+    # alguien y no entra a ningun log ni a ninguna traza.
+    return jsonify({"disponible": True, "motivo": None, "cliente": ficha})
+
+
+"""
+Cuanto vale una lectura optica antes de volver a pedirla.
+
+CINCO MINUTOS, Y EL NUMERO NO ES ARBITRARIO: la consulta profunda tarda ~10
+segundos y el proveedor pide expresamente no usarla en polling ni en bulk
+(skill 'smartolt-api', verificado el 14/08/2026). Sin cache, cambiar de
+pestaña dos veces serian dos consultas; con cinco minutos, una conversacion
+que se atiende en una sentada hace UNA.
+
+Es el mismo TTL que ya usa la verificacion de sesion del frontend, por la
+misma razon: es el tiempo que alguien tolera ver un dato de hace un rato sin
+que deje de ser util.
+"""
+SEGUNDOS_CACHE_OPTICA = 300
+
+# (tenant, serial) -> (momento, payload). En memoria del proceso y a
+# proposito: es una lectura de un sistema externo y el PRD prohibe
+# persistirla. Si el motor se reinicia, se vuelve a consultar, que es
+# exactamente lo correcto.
+_optica: dict[tuple[str, str], tuple[float, dict]] = {}
+_optica_lock = threading.Lock()
+
+
+def _serial_de(identidad: dict) -> str:
+    """El serial del equipo, de la sesion de la conversacion."""
+    datos = identidad.get("datos_sesion") or {}
+    if isinstance(datos, str):
+        try:
+            datos = json.loads(datos)
+        except Exception:
+            datos = {}
+    return str((datos or {}).get("sn_onu") or "").strip()
+
+
+# Las rutas EXACTAS de lo que puede salir de la lectura profunda.
+#
+# POR QUE UNA LISTA BLANCA Y NO UN FILTRO DE LO MALO: la misma respuesta trae
+# 'ONU details.Description', que es el NOMBRE COMPLETO del cliente en el
+# registro de la ONU. Una lista negra deja pasar lo que el proveedor agregue
+# manana; esta nombra lo que sale, campo por campo, y todo lo demas se queda.
+#
+# Los cinco primeros son (destino, seccion, campo). La MAC y el conteo de
+# equipos tienen forma propia --viven bajo indices numericos-- y se resuelven
+# aparte, abajo.
+CAMPOS_PROFUNDOS = (
+    ("temperatura", "Optical status", "Temperature(C)"),
+    ("tx", "Optical status", "Tx optical power(dBm)"),
+    ("olt_rx", "Optical status", "OLT Rx ONT optical power(dBm)"),
+    ("encendido", "ONU details", "ONT online duration"),
+    ("perfil", "ONU details", "Line profile name"),
+)
+
+
+def _profundidad_de(completo: dict) -> dict | None:
+    """Lo que la pantalla puede mostrar de la lectura profunda, y nada mas.
+
+    Vive aparte del endpoint para poder probarse: las rutas son cadenas, y un
+    espacio de mas en "Tx optical power(dBm)" no falla -- devuelve None en
+    silencio, que es la clase de error que nadie ve hasta que un operador
+    pregunta por que la temperatura siempre esta vacia.
+    """
+    salida: dict = {}
+    for destino, seccion, campo in CAMPOS_PROFUNDOS:
+        bloque = completo.get(seccion)
+        if not isinstance(bloque, dict):
+            continue
+        valor = bloque.get(campo)
+        if valor not in (None, ""):
+            salida[destino] = valor
+
+    # La MAC vive bajo un indice numerico ('1', '2', ...): se toma la de la
+    # PRIMERA interfaz WAN y no se concatenan todas -- un equipo con dos WAN
+    # tiene dos MAC y elegir una a ojo seria inventar.
+    wan = completo.get("ONU WAN Interfaces")
+    if isinstance(wan, dict):
+        for clave in sorted(k for k in wan if isinstance(wan[k], dict)):
+            mac = (wan[clave] or {}).get("MAC address")
+            if mac:
+                salida["mac"] = mac
+                break
+
+    # CUANTOS EQUIPOS SE VEN detras de la ONU. Es un conteo, no una lista: las
+    # MAC de los aparatos de una casa son dato personal, y el numero contesta
+    # la unica pregunta que la pantalla hace -- si hay algo del otro lado.
+    macs = completo.get("MACs on OLT from this ONU")
+    if isinstance(macs, dict):
+        cuantos = sum(1 for v in macs.values() if isinstance(v, dict))
+        if cuantos:
+            salida["dispositivos"] = cuantos
+
+    return salida or None
+
+
+@app.get("/conversaciones/<id_conversacion>/optica")
+def conversaciones_optica(id_conversacion):
+    """
+    Como esta el equipo del cliente AHORA: enlace y potencia optica.
+
+    LAS DOS LIVIANAS, NO LA PROFUNDA. Usa 'consultar_estado_ont' y
+    'consultar_senal_ont', que contestan rapido. El diagnostico profundo
+    ('diagnosticar_falla_ont') tarda ~10 segundos y el proveedor pide no
+    automatizarlo: ese se pide aparte y a proposito, nunca al abrir una
+    pantalla.
+
+    NO SE GUARDA. Se cachea en memoria del proceso por
+    SEGUNDOS_CACHE_OPTICA y nada mas: el PRD prohibe persistir las
+    respuestas crudas del sistema externo. 'forzar=1' salta el cache -- es
+    lo que hace el boton "Consultar ahora" cuando alguien quiere el dato
+    del segundo, no el de hace cuatro minutos.
+
+    Devuelve SIEMPRE 'leido_en' junto al dato. Una medicion sin su hora es
+    una afirmacion sobre el presente que puede tener cinco minutos, y en
+    esta pantalla se usa para decidir si mandar un tecnico.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    forzar = request.args.get("forzar") in ("1", "true", "si")
+    # LA LECTURA PROFUNDA VA APARTE, Y SOLO CUANDO ALGUIEN LA PIDE.
+    # 'get_onu_full_status_info' tarda ~10 s y el proveedor pide no usarla en
+    # bucle (skill 'smartolt-api', 14/08/2026). Las dos lecturas livianas
+    # --estado y senal-- siguen respondiendo en el acto y son las que se hacen
+    # solas; esta la dispara el boton. Mezclarlas haria que abrir una
+    # conversacion costara diez segundos.
+    profundo = request.args.get("profundo") in ("1", "true", "si")
+
+    try:
+        identidad = persistencia.identidad_de_conversacion(tenant, id_conversacion)
+    except Exception as e:
+        registrar("optica", "fallo al leer la conversacion",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+    if not identidad:
+        return jsonify({"error": "No existe esa conversacion."}), 404
+
+    serial = _serial_de(identidad)
+    if not serial:
+        # El asistente todavia no identifico el equipo. No es una falla.
+        return jsonify({"disponible": False, "motivo": "sin_equipo", "optica": None})
+
+    clave = (tenant, serial)
+    if not forzar:
+        with _optica_lock:
+            guardado = _optica.get(clave)
+        if guardado and (time.monotonic() - guardado[0]) < SEGUNDOS_CACHE_OPTICA:
+            return jsonify(guardado[1])
+
+    config = _config_de(tenant)
+    por_nombre = {h.nombre: h for h in config.herramientas}
+    estado_h = por_nombre.get("consultar_estado_ont")
+    senal_h = por_nombre.get("consultar_senal_ont")
+    if estado_h is None and senal_h is None:
+        return jsonify({"disponible": False, "motivo": "sin_herramienta", "optica": None})
+
+    variables = getattr(config, "variables_tenant", None)
+
+    def _leer(herramienta):
+        if herramienta is None:
+            return None
+        try:
+            return ejecutor_http.ejecutar(herramienta, {"sn_onu": serial},
+                                          tenant=tenant, variables_tenant=variables)
+        except Exception as e:
+            # Que una de las dos falle no invalida la otra: una ONU offline
+            # no tiene lectura de senal util, y eso no es un error.
+            registrar("optica", "no se pudo leer una medicion del equipo",
+                      conversation_id=id_interno(id_conversacion),
+                      herramienta=herramienta.nombre, error=e)
+            return None
+
+    estado = _leer(estado_h)
+    senal = _leer(senal_h)
+    if estado is None and senal is None:
+        return jsonify({"disponible": False, "motivo": "sin_conexion", "optica": None})
+
+    # DONDE esta conectado el equipo. Es una tercera lectura y es opcional a
+    # proposito: si la empresa no declara la herramienta, o el sistema no la
+    # contesta, la potencia y el estado se muestran igual. La topologia
+    # explica una falla; no es lo que hace falta para verla.
+    topologia = None
+    detalle = _leer(por_nombre.get("consultar_topologia_ont"))
+    if isinstance(detalle, dict):
+        # LISTA BLANCA, y acá importa especialmente: la respuesta de detalle
+        # trae 'name' -- el NOMBRE COMPLETO del cliente en el registro de la
+        # ONU. Es el mismo dato personal que ya se cuida en todo lo demas, y
+        # por esta puerta no sale: la pantalla ya sabe con quien habla.
+        topologia = {}
+        # 'onu_type_name' es el MODELO del equipo, y ya venia en esta misma
+        # respuesta: medido el 22/09/2026 contra la instancia de Rapilink, 82
+        # campos, y ahi estaba. Se habia dado por inexistente leyendo la lista
+        # parcial de la skill -- que aclara "60+ campos totales, no todos
+        # abajo". Concluir desde una lista parcial es el error que la regla
+        # "la documentacion es una hipotesis" existe para evitar.
+        for campo in ("olt_name", "olt_id", "board", "port", "onu",
+                      "zone_name", "odb_name", "onu_type_name"):
+            valor = detalle.get(campo)
+            if isinstance(valor, dict):
+                valor = valor.get("nombre") or valor.get("name") or valor.get("id")
+            if valor not in (None, ""):
+                topologia[campo] = valor
+        topologia = topologia or None
+
+    # LO QUE SOLO SABE LA LECTURA PROFUNDA: temperatura del modulo optico,
+    # potencia de subida medida en la OLT, MAC de la interfaz WAN y el perfil
+    # de linea. Medido el 22/09/2026 contra la instancia de Rapilink: los
+    # cuatro estan en la respuesta, y ninguno estaba llegando a la pantalla.
+    #
+    # LISTA BLANCA POR RUTA EXACTA, y aca no es una formalidad: la misma
+    # respuesta trae 'ONU details.Description', que es el NOMBRE COMPLETO del
+    # cliente. Se nombran los campos que salen, uno por uno; lo que no este en
+    # esta tupla no puede salir aunque el proveedor lo agregue manana.
+    profundidad = None
+    if profundo:
+        completo = _leer(por_nombre.get("diagnosticar_falla_ont"))
+        if isinstance(completo, dict):
+            profundidad = _profundidad_de(completo)
+
+    # El umbral viaja con la medicion: sin el, la pantalla puede mostrar la
+    # potencia pero no decir si esta bien o mal. Y decirlo con un numero
+    # inventado seria peor que no decirlo -- ver TenantConfig.umbral_rx_dbm.
+    umbral = getattr(config, "umbral_rx_dbm", None)
+
+    payload = {
+        "disponible": True,
+        "motivo": None,
+        "leido_en": datetime.now(timezone.utc).isoformat(),
+        "umbral_rx_dbm": umbral,
+        "optica": {"serial": serial, "estado": estado, "senal": senal,
+                   "topologia": topologia, "profundidad": profundidad},
+    }
+
+    # UNA LECTURA LIVIANA NO BORRA LA PROFUNDA. Si alguien ya pago los diez
+    # segundos y despues se refresca lo barato, la temperatura y la MAC tienen
+    # que seguir ahi: se arrastra lo que habia, marcado con SU hora, que es lo
+    # que deja ver que es mas vieja que el resto.
+    if profundidad is None:
+        with _optica_lock:
+            previo = _optica.get(clave)
+        anterior = ((previo[1].get("optica") or {}) if previo else {}).get("profundidad")
+        if anterior:
+            payload["optica"]["profundidad"] = anterior
+            payload["profundidad_leida_en"] = (previo[1] or {}).get(
+                "profundidad_leida_en") or (previo[1] or {}).get("leido_en")
+    else:
+        payload["profundidad_leida_en"] = payload["leido_en"]
+    with _optica_lock:
+        _optica[clave] = (time.monotonic(), payload)
+    return jsonify(payload)
+
+
+@app.post("/conversaciones/<id_conversacion>/equipo/reiniciar")
+def conversaciones_reiniciar_equipo(id_conversacion):
+    """
+    Una PERSONA reinicia el equipo del cliente desde la Bandeja.
+
+    POR QUE ESTO NO CONTRADICE LA COLA DE ACCIONES
+    ----------------------------------------------
+    La cola de acciones propuestas existe para lo que decide el MODELO: el
+    asistente no puede cortarle el servicio a nadie por su cuenta, y por eso
+    lo que propone espera una aprobacion. Acá el actor es otro -- una persona
+    autenticada, con el caso en la mano, que es quien en cualquier NOC aprieta
+    ese boton. No se salta la confirmacion del modelo: es una puerta distinta,
+    para un actor distinto, y con sus propias condiciones.
+
+    Y ESAS CONDICIONES VIVEN ACA, NO EN EL NAVEGADOR. El dialogo de
+    confirmacion de la pantalla es cortesia; si alguien llama a esta ruta
+    directo, el dialogo no existe. Lo que de verdad protege es esto:
+
+      400  sin motivo (obligatorio: queda en el expediente)
+      403  quien pide no es el dueño de la conversacion ni ADMIN
+      404  no existe, o no se sabe cual es el equipo
+      409  la lleva la IA, o esta cerrada -- reiniciar no es un gesto que
+           corresponda hacer por encima del asistente sin tomarla primero
+
+    El actor y su rol los arma el proxy DESDE LA SESION (el JWT ya verificado
+    contra el backend), nunca el navegador -- mismo mecanismo que /reasignar.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, autor_rol, motivo}
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    motivo = (cuerpo.get("motivo") or "").strip()
+    if not motivo:
+        return jsonify({"error": "Hace falta un motivo: queda en el expediente."}), 400
+
+    autor_id = (cuerpo.get("autor_usuario_id") or "").strip()
+    autor_nombre = (cuerpo.get("autor") or "").strip()
+    es_admin = (cuerpo.get("autor_rol") or "").upper() == "ADMIN"
+    if not autor_id:
+        return jsonify({"error": "No se sabe quien pide el reinicio."}), 400
+
+    try:
+        identidad = persistencia.identidad_de_conversacion(tenant, id_conversacion)
+    except Exception as e:
+        registrar("equipo", "fallo al leer la conversacion",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+    if not identidad:
+        return jsonify({"error": "No existe esa conversacion."}), 404
+
+    # La lleva la IA: reiniciar por encima del asistente, sin tomarla, deja al
+    # cliente con el servicio cortado y una conversacion que sigue automatica.
+    if (identidad.get("control") or "ia") != "humano":
+        return jsonify({"error": "Tomá la conversación antes de tocar el equipo."}), 409
+
+    if (identidad.get("estado") or "") == "cerrada":
+        return jsonify({"error": "La conversación está cerrada."}), 409
+
+    # Dueño o ADMIN. El mismo criterio que ya usan soltar y reasignar: quien
+    # solo esta mirando no actua sobre el equipo de un caso ajeno.
+    #
+    # EL DUEÑO LO DICE LA BASE, NO EL PEDIDO. La primera version leia
+    # 'duenio_usuario_id' del cuerpo, que es exactamente el agujero que este
+    # bloque existe para tapar: quien llama la ruta decidiria contra quien se
+    # compara. Sale de la fila.
+    duenio = str(identidad.get("asignada_a_usuario_id") or "").strip()
+    if not es_admin and duenio and duenio != autor_id:
+        return jsonify({"error": "La conversación la tiene otra persona."}), 403
+
+    serial = _serial_de(identidad)
+    if not serial:
+        return jsonify({"error": "No se sabe cuál es el equipo de este cliente."}), 404
+
+    config = _config_de(tenant)
+    herramienta = next((h for h in config.herramientas if h.nombre == "reiniciar_ont"), None)
+    if herramienta is None:
+        return jsonify({"error": "Esta empresa no tiene conectado el reinicio de equipos."}), 409
+
+    # M06-F: EL EFECTO VA POR LA MISMA CADENA QUE CUALQUIER R3.
+    #
+    # Hasta aca esta ruta llamaba al ejecutor directo. Es una persona la que
+    # decide, y eso no cambia: pero un reinicio es irreversible (M06-A) y la
+    # frontera solo lo deja salir con una aprobacion atada a la accion exacta.
+    # En vez de abrir una segunda puerta, el boton hace lo que haria la cola:
+    #
+    #   1. deja la propuesta en asistente.acciones_propuestas, ya ligada a esta
+    #      conversacion, con la huella de sus argumentos y un origen propio;
+    #   2. la aprueba QUIEN APRIETA EL BOTON (su nombre queda en el sello);
+    #   3. y sigue los mismos pasos que /acciones/propuestas/<id>/aprobar:
+    #      kill switch, techo, etapa, autorizacion, sello, previas frescas,
+    #      idempotencia, frontera, efecto, desenlace con su evento.
+    #
+    # Las cuatro condiciones de arriba -- motivo, control humano, dueño o
+    # ADMIN, conversacion abierta -- siguen siendo las de esta ruta; la cadena
+    # se suma, no las reemplaza.
+    quien = autor_nombre or autor_id
+    argumentos = {"sn_onu": serial}
+    sesion_min = Sesion(identificador_canal=quien)
+    sesion_min.sn_onu = serial
+    if identidad.get("id_cliente"):
+        sesion_min.id_cliente = identidad.get("id_cliente")
+    try:
+        accion_id, _ = persistencia.guardar_accion_propuesta(
+            tenant, herramienta.nombre, argumentos,
+            _resumen_de_reinicio(herramienta, argumentos), "bandeja", quien,
+            str(id_conversacion),
+            herramienta.aprobacion.vigencia_minutos if herramienta.aprobacion else None,
+            hash_argumentos=idempotencia.hash_de(argumentos),
+            origen=f"bandeja:{id_conversacion}:{uuid.uuid4()}",
+            contexto=motor._contexto_de_revalidacion(config, herramienta,
+                                                     sesion_min, None))
+    except Exception as e:
+        registrar("equipo", "no se pudo dejar el reinicio en la cola",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo registrar el pedido de reinicio. "
+                                 "No se reinicio nada."}), 500
+
+    # El rastro de quien lo hizo y por que. El motivo es obligatorio justamente
+    # para que este renglon exista: dentro de un mes, saber por que alguien
+    # corto el servicio vale mas que los segundos que costo escribirlo.
+    # 'autor_nombre' NO va al log -- solo al expediente.
+    registrar("equipo", "reinicio pedido por una persona",
+              conversation_id=id_interno(id_conversacion),
+              autor_usuario_id=autor_id, con_motivo=bool(motivo),
+              accion_id=accion_id)
+
+    salida = _aprobar_y_ejecutar(config, tenant, accion_id, quien)
+    respuesta, codigo_http = salida if isinstance(salida, tuple) else (salida, 200)
+    cuerpo_respuesta = respuesta.get_json() or {}
+    if codigo_http == 200 and cuerpo_respuesta.get("ok"):
+        return jsonify({"ok": True, "reiniciado": True, "verificando": True,
+                        "autor": autor_nombre, "motivo": motivo,
+                        "accion_id": accion_id})
+    cuerpo_respuesta.setdefault("error", "No se reinicio el equipo.")
+    cuerpo_respuesta["accion_id"] = accion_id
+    return jsonify(cuerpo_respuesta), codigo_http
+
+
+def _resumen_de_reinicio(herramienta, argumentos: dict) -> str:
+    """El resumen de la propuesta que deja el boton: el de la plantilla del
+    tenant, igual que una propuesta del modelo."""
+    if herramienta.plantilla_resumen:
+        try:
+            return herramienta.plantilla_resumen.format(**argumentos)
+        except (KeyError, IndexError):
+            pass
+    return f"{herramienta.nombre}(sn_onu={argumentos.get('sn_onu')})"
+
+
+@app.get("/conversaciones/<id_conversacion>/equipo")
+def conversaciones_equipo(id_conversacion):
+    """
+    Que se le hizo al equipo del cliente en esta conversacion, y si funciono.
+
+    Solo lectura y SIN las mediciones crudas: son respuestas del sistema
+    externo, y por esta puerta no salen -- mismo criterio que /herramientas,
+    que devuelve el resultado de cada llamada y nunca el dato consultado.
+
+    Esta ruta NO ejecuta nada. Reiniciar una ONU corta el servicio de alguien
+    y pasa por la cola de acciones propuestas (PRD 7.4, fail-closed en
+    codigo); exponer un boton que la ejecute desde aca seria abrir una segunda
+    puerta a la misma accion, sin la confirmacion que la primera exige.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        acciones = persistencia.acciones_sobre_el_equipo(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("verificacion", "fallo al leer las acciones sobre el equipo",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer el registro de acciones."}), 500
+
+    return jsonify({"acciones": acciones})
+
+
+@app.get("/conversaciones/<id_conversacion>/relevo")
+def conversaciones_relevo(id_conversacion):
+    """
+    Como llego esta conversacion a las manos en las que esta.
+
+    El relevo escribe un evento por transicion desde B3.3, y hasta ahora nadie
+    los leia: la pantalla decia QUIEN la lleva, no COMO llego. Una reasignacion
+    de supervisor y una devolucion a la IA se veian igual desde afuera -- la
+    conversacion aparecia en otras manos y no habia donde mirar por que.
+
+    Solo lectura, mismo criterio de auditoria que /herramientas: lo que sale
+    son tipos de transicion, quien actuo y los datos que el propio contrato
+    declara para cada tipo (ver ESQUEMAS en nucleo/relevo/transiciones.py).
+    Nunca texto del cliente ni respuestas de un sistema externo.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        eventos = persistencia.eventos_de_relevo(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        # Sin el nombre de quien actuo en el log: autor_nombre no va a
+        # telemetria (D2), ni siquiera cuando algo falla leyendolo.
+        registrar("relevo", "fallo al leer el registro de relevo",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer el registro de relevo."}), 500
+
+    return jsonify({"eventos": eventos})
 
 
 @app.post("/conversaciones/<id_conversacion>/mensajes/<mensaje_id>/marcar")
@@ -5015,7 +7004,22 @@ def acciones_propuestas():
     except Exception as e:
         registrar("acciones", "fallo al leer propuestas", error=e)
         return jsonify({"error": "No se pudieron leer las acciones propuestas."}), 500
+
+    # Que sea de legado lo decide el motor, no la pantalla: es la misma regla
+    # que usa la guarda de aprobar, y tenerla en dos lugares es tenerla en
+    # ninguno. La lista NO trae 'argumentos' (valores reales sin enmascarar).
+    for accion in acciones:
+        accion["es_legado"] = persistencia.es_accion_de_legado(accion)
     return jsonify({"acciones": acciones})
+
+
+#: Lo que se le dice a quien intenta aprobar una accion de legado. Explica el
+#: camino, porque un 409 sin salida se lee como una falla del sistema.
+MOTIVO_LEGADO = (
+    "Esta accion no esta vinculada a ninguna conversacion, asi que no hay "
+    "contexto actual contra el cual comprobar que todavia tiene sentido. No se "
+    "puede aprobar: si el problema sigue vivo, la conversacion de hoy la vuelve "
+    "a proponer; si no, se cancela.")
 
 
 @app.post("/acciones/propuestas/<id_accion>/aprobar")
@@ -5025,6 +7029,15 @@ def acciones_propuesta_aprobar(id_accion):
     la accion como 'aprobada' -- mismo orden que aprobar una herramienta
     propuesta: si la API la rechaza, el resultado (y el error) quedan
     visibles en la misma fila, no se pierde ni se finge que salio bien.
+
+    ⚠️ SALVO QUE SEA DE LEGADO (X24, gate G3). Una accion sin conversacion no
+    tiene contra que revalidarse (§3.7) y sus argumentos son los de hace
+    semanas: aprobarla ejecutaria a ciegas. Se rechaza con 409 ANTES de tocar
+    nada -- ni la API externa, ni el estado de la fila.
+
+    Hoy eso alcanza a las 36 (A5), porque la columna 'conversation_id' todavia
+    no existe. Cuando B5 la traiga, la misma guarda deja pasar las que la
+    tengan sin que haya que tocarla.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
@@ -5038,6 +7051,24 @@ def acciones_propuesta_aprobar(id_accion):
         return jsonify({"error": "No se pudo leer la accion."}), 500
     if not accion:
         return jsonify({"error": f"La accion '{id_accion}' no existe."}), 404
+
+    # ANTES del chequeo de estado y ANTES de leer la config: lo que se prohibe
+    # es llegar al ejecutor, y cualquier paso previo que pueda fallar o
+    # escribir es un paso de mas en un camino que no deberia existir.
+    if persistencia.es_accion_de_legado(accion):
+        try:
+            persistencia.registrar_aprobacion_rechazada(
+                tenant, id_accion, MOTIVO_LEGADO, cuerpo.get("revisado_por"))
+        except Exception as e:
+            # Que no se pueda dejar constancia no puede convertir un rechazo en
+            # una ejecucion: se registra el fallo y se rechaza igual.
+            registrar("acciones", "no se pudo registrar el intento de aprobar legado",
+                      error=e)
+        registrar("acciones", "se rechazo aprobar una accion de legado", tenant=tenant)
+        return jsonify({"error": MOTIVO_LEGADO, "codigo": "accion_de_legado",
+                        "estado": accion["estado"],
+                        "puede_cancelarse": accion["estado"] == "pendiente"}), 409
+
     if accion["estado"] != "pendiente":
         return jsonify({"error": f"Esta accion ya esta '{accion['estado']}', "
                                  f"no se puede volver a aprobar."}), 400
@@ -5047,19 +7078,241 @@ def acciones_propuesta_aprobar(id_accion):
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
 
-    resultado, codigo_error = motor.ejecutar_accion_aprobada(config, accion)
+    quien = (cuerpo.get("revisado_por") or "").strip()
+    if not quien:
+        # Quien aprueba da la cara. El proxy lo saca de la sesion autenticada,
+        # nunca del cuerpo que arma el navegador (§3.4) -- este endpoint solo
+        # comprueba que llegue.
+        return jsonify({"error": "Falta 'revisado_por': una ejecucion aprobada "
+                                 "sin responsable no se puede auditar."}), 400
 
+    return _aprobar_y_ejecutar(config, tenant, id_accion, quien)
+
+
+def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
+    """
+    Los cuatro pasos de §9.3 sobre una accion ya propuesta: reservar (que es
+    aprobar, y para una irreversible escribe el sello), revalidar, ejecutar,
+    resolver. Devuelve la respuesta Flask.
+
+    M06-F: vive aparte del endpoint porque hay DOS entradas humanas a la misma
+    cadena -- aprobar una propuesta de la cola, y el boton de reinicio de la
+    Bandeja -- y las dos tienen que ser exactamente el mismo camino. Una
+    segunda copia de estos pasos seria una segunda maquina de aprobacion.
+    """
+    # ---- PASO 1: reservar. Transaccion corta y condicionada (§9.3) ----------
     try:
-        persistencia.resolver_accion_propuesta(
-            tenant, id_accion, "aprobada", cuerpo.get("revisado_por"),
-            resultado_ejecucion=resultado, codigo_error=codigo_error)
+        reserva = persistencia.reservar_accion(tenant, id_accion, quien)
     except Exception as e:
-        registrar("acciones", "la accion se ejecuto pero no se pudo guardar el resultado", error=e)
+        registrar("acciones", "fallo al reservar la accion", error=e)
+        return jsonify({"error": "No se pudo tomar la accion."}), 500
 
+    if not reserva["ok"]:
+        return jsonify(_NEGATIVAS.get(reserva["motivo"], {
+            "error": "No se pudo aprobar esta accion.",
+            "codigo": reserva["motivo"]})), _CODIGO_HTTP.get(reserva["motivo"], 409)
+
+    reservada = reserva["accion"]
+    conv = str(reservada.get("conversation_id") or "") or None
+    herramienta = next((h for h in config.herramientas
+                        if h.nombre == reservada["herramienta"]), None)
+    if herramienta is None or not herramienta.aprobacion_humana:
+        # El catalogo cambio entre proponer y aprobar (§3.7, condicion 3). No
+        # se ejecuta, y vuelve a pendiente: puede que alguien este editando el
+        # catalogo justo ahora.
+        persistencia.liberar_accion(tenant, id_accion, "herramienta_fuera_de_catalogo")
+        return jsonify({"error": "La herramienta de esta accion ya no esta "
+                                 "disponible para aprobacion.",
+                        "codigo": "herramienta_fuera_de_catalogo"}), 409
+
+    # ---- PASO 2: revalidar. FUERA de transaccion (§3.7, X23) ----------------
+    veredicto = revalidacion.revalidar(config, tenant, herramienta, reservada)
+
+    if veredicto.desenlace == revalidacion.NO_SE_PUDO:
+        # No se pudo comprobar != no se cumple. No se ejecuta nada y la accion
+        # vuelve a estar disponible: el operador reintenta cuando la API
+        # responda.
+        persistencia.liberar_accion(tenant, id_accion, veredicto.codigo)
+        return jsonify({"error": "No se pudo comprobar que esta accion siga "
+                                 "aplicando. No se ejecuto nada: se puede "
+                                 "reintentar.",
+                        "codigo": "revalidacion_indeterminada",
+                        "detalle": veredicto.codigo, "estado": "pendiente"}), 503
+
+    if veredicto.desenlace == revalidacion.NO_CUMPLE:
+        persistencia.vencer_accion(tenant, id_accion, veredicto.codigo, conv)
+        return jsonify({"error": veredicto.detalle or "Esta accion ya no aplica.",
+                        "codigo": "revalidacion_fallida",
+                        "detalle": veredicto.codigo, "estado": "vencida"}), 409
+
+    # ---- PASO 3: ejecutar. FUERA de transaccion -----------------------------
+    # M06-F: UNA sola cadena. Una irreversible (R3/R4 y las excepciones de
+    # M06-E) sigue el mismo ciclo B5 -- reservar, revalidar, ejecutar,
+    # resolver -- y lo unico que cambia es QUIEN ejecuta: la puerta critica de
+    # la frontera, que exige la aprobacion atada a la accion exacta. Esa
+    # aprobacion es la reserva de arriba: 'reservar_accion' escribio el sello
+    # en la misma escritura que paso la fila a 'ejecutando'.
+    #
+    # Se ejecuta la fila RELEIDA de la base, nunca el cuerpo de este request ni
+    # el 'returning' de la reserva: lo que sale es lo que quedo escrito.
+    verificacion_pendiente = None
+    if getattr(herramienta, "irreversible", False):
+        try:
+            fila = persistencia.accion_propuesta_de(tenant, id_accion)
+        except Exception as e:
+            registrar("acciones", "fallo al releer la accion reservada", error=e)
+            fila = None
+        if not fila or fila.get("estado") != "ejecutando":
+            # No se ejecuto nada: vuelve a estar disponible.
+            persistencia.liberar_accion(tenant, id_accion, "relectura_fallida")
+            return jsonify({"error": "No se pudo releer la accion aprobada. No "
+                                     "se ejecuto nada: se puede reintentar.",
+                            "codigo": "relectura_fallida", "estado": "pendiente"}), 503
+        resultado, codigo_error, verificacion_pendiente =             motor.ejecutar_accion_irreversible(config, fila, tenant)
+    else:
+        resultado, codigo_error = motor.ejecutar_accion_aprobada(config, reservada)
+
+    # Una guarda del CODIGO freno la accion antes del efecto (kill switch,
+    # techo, aprobacion alterada, previas que ya no se cumplen, idempotencia):
+    # no salio nada hacia el tercero. No es un fallo del sistema externo y no
+    # queda como 'ejecutada_fallo'. Queda 'vencida' con el codigo del bloqueo:
+    # la aprobacion era para ESE momento y no se reutiliza sola.
+    if codigo_error in motor.CODIGOS_DE_BLOQUEO:
+        persistencia.vencer_accion(tenant, id_accion, codigo_error, conv)
+        return jsonify({"ok": False, "estado": "vencida", "codigo": codigo_error,
+                        "error": (resultado or {}).get("error")
+                                 or "Una guarda del sistema freno esta accion.",
+                        "resultado": resultado}), 409
+    incierto = bool(codigo_error) and _es_incierto(codigo_error)
+
+    # ---- PASO 3b: confirmar el efecto, releyendo ----------------------------
+    # Un 2xx dice que el pedido se acepto, no que el efecto ocurrio. Para las
+    # herramientas cuya politica sabe como comprobarlo, se vuelve a leer.
+    #
+    # Y NO se reintenta el POST pase lo que pase: WispHub no permite consultar
+    # promesas ni recuperarlas por referencia, asi que un segundo intento no
+    # se puede reconciliar con el primero. Maximo un POST por accion aprobada
+    # (misma regla que Q2 para crear_ticket).
+    confirmado, detalle_confirmacion = _confirmar_efecto(
+        config, tenant, herramienta, reservada, codigo_error)
+
+    # ---- PASO 4: el desenlace, con su evento --------------------------------
+    try:
+        persistencia.resolver_ejecucion_de_accion(
+            tenant, id_accion, resultado=resultado, codigo_error=codigo_error,
+            incierto=incierto, aprobada_por=quien, conversation_id=conv)
+    except Exception as e:
+        # El efecto pudo haber ocurrido y no se pudo anotar. Queda
+        # 'ejecutando', que es lo correcto: T20 la pasa a 'desconocida' y nadie
+        # la reejecuta sola (§9.3 paso 5).
+        registrar("acciones", "la accion se ejecuto y no se pudo guardar el desenlace",
+                  error=e)
+
+    if verificacion_pendiente and conv and not codigo_error:
+        # El efecto salio EN ESTA pasada (reiniciar_ont): se comprueba despues,
+        # contra la conversacion de la que salio la propuesta.
+        try:
+            persistencia.guardar_verificacion_pendiente(
+                tenant, conv, herramienta.nombre, verificacion_pendiente)
+        except Exception as e:
+            registrar("acciones", "no se pudo anotar la verificacion de la accion",
+                      error=e)
+
+    if incierto:
+        return jsonify({"ok": False, "estado": "desconocida",
+                        "error_ejecucion": codigo_error,
+                        "mensaje": "No se sabe si la accion llegó a hacerse. NO se "
+                                   "reintenta: hay que comprobarlo a mano."}), 502
     if codigo_error:
-        return jsonify({"ok": False, "estado": "aprobada", "error_ejecucion": codigo_error,
-                        "resultado": resultado}), 502
-    return jsonify({"ok": True, "estado": "aprobada", "resultado": resultado})
+        return jsonify({"ok": False, "estado": "ejecutada_fallo",
+                        "error_ejecucion": codigo_error, "resultado": resultado}), 502
+
+    return jsonify(_salida_ejecutada_ok(resultado, confirmado, detalle_confirmacion))
+
+
+def _confirmar_efecto(config, tenant, herramienta, reservada, codigo_error):
+    """
+    Releer para comprobar que el efecto ocurrio. Devuelve (confirmado, detalle).
+
+    Dos casos no se comprueban, y por razones opuestas:
+      con codigo_error   el pedido ya fallo o quedo incierto; releer no
+                         cambiaria el desenlace y puede confundirlo
+      sin politica       la herramienta no declara como comprobarse
+
+    Vive aparte del endpoint porque el 'if' es la guarda: dentro, una mutacion
+    que lo apagaba entero dejaba el test verde -- el arbol de sintaxis ve la
+    llamada aunque este muerta, y una prueba que mira el archivo no distingue
+    codigo alcanzable de codigo presente.
+    """
+    if codigo_error or getattr(herramienta, "politica", None) is None:
+        return None, None
+    from nucleo.facturacion import politicas as politicas_facturacion
+
+    confirmado, detalle = politicas_facturacion.confirmar(
+        config, tenant, herramienta, reservada.get("argumentos") or {})
+    registrar("acciones", "confirmacion del efecto", herramienta=herramienta.nombre,
+              confirmado=confirmado, detalle=detalle)
+    return confirmado, detalle
+
+
+def _salida_ejecutada_ok(resultado, confirmado, detalle):
+    """
+    La respuesta cuando el sistema externo ACEPTO el pedido.
+
+    Son TRES hechos distintos y no se colapsan en uno:
+
+        ok: True          el pedido se acepto. Siempre, si llegamos aca.
+        confirmado: True  ademas se releyo y el efecto ESTA
+        confirmado: False se releyo y NO esta
+        confirmado: None  no se pudo releer -- ni si ni no
+
+    Vive aparte del endpoint para poder ejercitar las cuatro ramas sin montar
+    Flask ni una base. Antes estaba dentro, y una mutacion que apagaba la
+    confirmacion entera dejaba el test verde: se estaba afirmando sobre el
+    TEXTO del archivo en vez de sobre lo que devuelve.
+    """
+    salida = {"ok": True, "estado": "ejecutada_ok", "resultado": resultado}
+    if detalle is None:
+        return salida
+    salida["confirmado"] = confirmado
+    salida["confirmacion"] = detalle
+    if confirmado is False:
+        salida["mensaje"] = ("El pedido se aceptó pero el efecto NO se pudo "
+                             "verificar en el sistema externo. No se reintenta: "
+                             "hay que revisarlo a mano.")
+    elif confirmado is None:
+        salida["mensaje"] = ("El pedido se aceptó y no se pudo comprobar el "
+                             "efecto. NO se reintenta.")
+    return salida
+
+
+#: Lo que se le responde a cada negativa de la reserva. Texto propio por motivo:
+#: "no se pudo" a secas obliga a adivinar si hay que reintentar, esperar o
+#: avisarle a alguien.
+_NEGATIVAS = {
+    "no_existe": {"error": "Esta accion no existe.", "codigo": "no_existe"},
+    "de_legado": {"error": MOTIVO_LEGADO, "codigo": "accion_de_legado"},
+    "vencida": {"error": "Esta accion pasó su plazo de vigencia y ya no se "
+                         "ejecuta. Si el problema sigue, hay que proponerla de "
+                         "nuevo desde la conversación.",
+                "codigo": "vencida", "estado": "vencida"},
+    "conversacion_cerrada": {"error": "La conversación de esta accion está "
+                                      "cerrada.",
+                             "codigo": "conversacion_cerrada"},
+    "ya_no_pendiente": {"error": "Alguien más ya resolvió esta accion.",
+                        "codigo": "ya_no_pendiente"},
+}
+_CODIGO_HTTP = {"no_existe": 404}
+
+#: Fallos donde NO se puede afirmar que el efecto no ocurrio: el pedido pudo
+#: haber viajado antes de cortarse. Mismo criterio que B4 -- unknown != failed,
+#: y por eso terminan en 'desconocida' en vez de 'ejecutada_fallo'.
+_ERRORES_INCIERTOS = ("Timeout", "ConnectionError", "ChunkedEncoding",
+                      "ReadTimeout", "ConnectTimeout", "RemoteDisconnected")
+
+
+def _es_incierto(codigo_error: str) -> bool:
+    return any(marca in (codigo_error or "") for marca in _ERRORES_INCIERTOS)
 
 
 @app.post("/acciones/propuestas/<id_accion>/rechazar")
@@ -5078,8 +7331,66 @@ def acciones_propuesta_rechazar(id_accion):
         return jsonify({"error": "No se pudo guardar."}), 500
 
     if not existe:
+        # M06-F: rechazar es un compare-and-set sobre 'pendiente'. Antes pisaba
+        # cualquier estado -- una accion ya 'ejecutando' (aprobada, con su sello
+        # y quiza con el efecto en viaje) podia quedar como 'rechazada' y
+        # borrar el rastro de que salio. Si la fila existe, se dice en que
+        # estado esta; si no, 404.
+        try:
+            actual = persistencia.accion_propuesta_de(tenant, id_accion)
+        except Exception:
+            actual = None
+        if actual:
+            return jsonify({"error": f"Esta accion ya esta '{actual['estado']}', "
+                                     f"no se puede rechazar.",
+                            "estado": actual["estado"]}), 409
         return jsonify({"error": f"La accion '{id_accion}' no existe."}), 404
     return jsonify({"ok": True, "estado": "rechazada"})
+
+
+@app.post("/acciones/propuestas/<id_accion>/cancelar")
+def acciones_propuesta_cancelar(id_accion):
+    """
+    Cancela una accion que quedo obsoleta, con su motivo y su evento (§11.4).
+
+    NO es rechazar. Rechazada es "alguien la evaluo y dijo que no"; cancelada
+    es "quedo obsoleta y nadie la va a evaluar". Ninguna de las dos ejecuta
+    nada, pero en un registro que existe para auditar la diferencia es el
+    registro entero -- y es la que §11.4 pide para las 36.
+
+    El motivo es obligatorio: 36 filas canceladas sin explicacion no le dicen
+    nada a quien las mire el mes que viene. Quien cancela tambien da la cara,
+    igual que en cualquier otro evento de operador.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    motivo = (cuerpo.get("motivo") or "").strip()
+    quien = (cuerpo.get("cancelada_por") or "").strip()
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+    if not motivo:
+        return jsonify({"error": "Falta el campo 'motivo': una cancelacion sin "
+                                 "motivo no explica nada."}), 400
+    if not quien:
+        return jsonify({"error": "Falta el campo 'cancelada_por'."}), 400
+
+    try:
+        estado, la_cancele = persistencia.cancelar_accion_propuesta(
+            tenant, id_accion, motivo, quien)
+    except Exception as e:
+        registrar("acciones", "fallo al cancelar", error=e)
+        return jsonify({"error": "No se pudo cancelar la accion."}), 500
+
+    if estado is None:
+        return jsonify({"error": f"La accion '{id_accion}' no existe."}), 404
+    if not la_cancele:
+        # Ya la habia resuelto alguien -- incluso si tambien fue cancelando.
+        # Se dice cual es su estado en vez de pisarlo: dos operadores mirando
+        # la misma lista es lo normal, y el segundo tiene que enterarse de que
+        # llego tarde en vez de creer que hizo algo.
+        return jsonify({"error": f"Esta accion ya esta '{estado}'.",
+                        "estado": estado}), 409
+    return jsonify({"ok": True, "estado": "cancelada"})
 
 
 # =============================================================================
@@ -5163,9 +7474,27 @@ def corpus_ingerir():
             # los que todavia no la tienen.
             roles_doc = ingesta.roles_validos(config, getattr(doc, "roles", None))
 
+            # VECTORIZAR SIN UNA CONEXION TOMADA (22/09/2026, auditoria previa
+            # al pool). `ingerir` recibia el cursor y llamaba a OpenAI UNA VEZ
+            # POR FRAGMENTO dentro del `with`: un documento largo retenia la
+            # conexion minutos. Con un pool eso no agota conexiones nuevas --
+            # agota las del pool, y de paso hace esperar a todos los demas.
+            #
+            # Ahora son tres pasos: una consulta corta para saber si hace
+            # falta, los embeddings SIN conexion, y otra consulta corta para
+            # escribir. La decision sigue siendo de `ingerir`; esto solo evita
+            # gastar embeddings cuando el archivo no cambio.
+            with persistencia.sesion(tenant) as (cur, org):
+                hace_falta = ingesta.hay_que_vectorizar(
+                    cur, org, doc, hash_, forzar=forzar)
+
+            vectores = ([ingesta.vectorizar(f.contextualizar(doc))
+                         for f in doc.fragmentos] if hace_falta else [])
+
             with persistencia.sesion(tenant) as (cur, org):
                 resultado = ingesta.ingerir(
                     cur, org, doc, hash_,
+                    vectores=vectores,
                     modelo_embeddings=config.rag.modelo_embeddings,
                     roles_permitidos=roles_doc or roles,
                     storage_path=request.form.get("storage_path"),
@@ -5483,7 +7812,8 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
                 "Cuéntame en palabras qué necesitas y te ayudo.")
             return
 
-        salida = atender_turno(config, tenant, rol, de, texto, "whatsapp")
+        salida = atender_turno(config, tenant, rol, de, texto, "whatsapp",
+                               evento_id=wamid)
 
         # El adjunto se guarda DESPUES del turno, con la conversacion ya
         # creada: es lo que le da el conversation_id al que colgarlo. Va
@@ -5497,10 +7827,48 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         # conversacion y el bot se calla para no contradecirla. Mandarla igual
         # seria un mensaje en blanco al cliente (y un 400 de Meta).
         if (salida.get("respuesta") or "").strip():
+            # D24, punto 2: lo ultimo antes del POST. Entre el punto 1 y aca
+            # corren el evaluador de escalamiento, el CRM y el adjunto, y
+            # tardan. Si una persona intervino en ese intervalo, no se envia.
+            if (salida.get("_autorizacion") is not None
+                    and not _respuesta_sigue_autorizada(tenant, "whatsapp", de, salida)):
+                _descartar_respuesta_guardada(tenant, "whatsapp", de, salida)
+                return
             whatsapp.enviar_texto(config, tenant, de, salida["respuesta"])
     except Exception as e:
         registrar("whatsapp", "fallo al atender un mensaje entrante",
                   tenant=tenant, remitente=ref_sesion(de), wamid=ref_proveedor(wamid), error=e)
+
+
+def _respuesta_sigue_autorizada(tenant: str, canal: str, id_sesion: str, salida: dict) -> bool:
+    """
+    D24, punto 2. Si el turno escalo, su respuesta es el aviso de ESA escalada
+    y sigue la regla SYNC_ESCALADA: que un operador la haya tomado no le quita
+    al cliente el aviso de que lo atiende una persona; una devolucion o un
+    cierre, si. Si no escalo, la version no puede haber cambiado.
+    """
+    autorizacion = salida["_autorizacion"]
+    if autorizacion.get("escalada_version") is not None:
+        return _escalada_sigue_vigente(tenant, {"conversation_id": autorizacion.get("conversation_id"),
+                                                "version": autorizacion["escalada_version"]})
+    return _turno_sigue_autorizado(tenant, canal, id_sesion, autorizacion, exigir_ia=False)
+
+
+def _descartar_respuesta_guardada(tenant: str, canal: str, id_sesion: str, salida: dict) -> None:
+    """La respuesta ya estaba guardada y no se va a enviar (D24, punto 2): la
+    fila queda 'descartado' y sale de la memoria viva."""
+    autorizacion = salida.get("_autorizacion") or {}
+    _contar_relevo("respuesta_ia_descartada_por_cambio_de_control",
+                   conversation_id=id_interno(autorizacion.get("conversation_id")),
+                   version=autorizacion.get("relevo_version"), punto="antes_del_envio")
+    if salida.get("mensaje_id"):
+        try:
+            persistencia.descartar_respuesta_ia(tenant, salida["mensaje_id"])
+        except Exception as e:
+            registrar("relevo", "no se pudo marcar la respuesta descartada", error=e)
+    estado = _sesiones.get(canales.clave_sesion(tenant, canal, id_sesion))
+    if estado is not None:
+        _quitar_respuesta_de_memoria(estado["historial"])
 
 
 @app.get("/canales/whatsapp/<tenant>")
@@ -5555,14 +7923,15 @@ def whatsapp_webhook(tenant):
 
     cuerpo = request.get_json(force=True, silent=True) or {}
 
-    rol = _rol_de_cliente(config)
-    if not rol:
-        registrar("whatsapp", "no hay ningun rol orientado a cliente_final: no hay con que "
-                              "atender el mensaje", tenant=tenant)
-        return jsonify({"recibido": True}), 200
-
     entrantes = whatsapp.mensajes_entrantes(cuerpo)
     estados = whatsapp.estados_entrantes(cuerpo)
+    rol = _rol_de_cliente(config)
+    if not rol and entrantes:
+        registrar("whatsapp", "no hay ningun rol orientado a cliente_final: no hay con que "
+                              "atender mensajes; los statuses se procesan igual", tenant=tenant)
+        # La ausencia de rol solo cierra la puerta conversacional. Los acuses
+        # ya autenticados son hechos del canal y se conservan abajo.
+        entrantes = []
 
     # Que trajo esta entrega. Sin esto, un webhook que llega y no produce nada
     # es indistinguible de uno que no llego: los dos se ven como un 200 en el
@@ -5847,6 +8216,199 @@ def conversaciones_conservar(id_conversacion):
     return jsonify({"conservar": conservar, "motivo": motivo})
 
 
+@app.post("/conversaciones/<id_conversacion>/intervenir")
+def conversaciones_intervenir(id_conversacion):
+    """
+    Una persona toma el control de una conversacion que atendia la IA. B3.3b.
+
+    Solo adquiere el control: NO le envia nada al cliente. Responder es otra
+    llamada, despues, y pasa por la guarda de control como cualquier respuesta.
+    Mezclar las dos cosas meteria el envio a Meta y su incertidumbre (D17)
+    dentro de la toma de control.
+
+    No es una escalada: no toca escalada_a_humano ni necesita_atencion_humana,
+    asi que no cuenta en la tasa de escalamiento ni dispara nada de ella.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, motivo?, clave_operacion?}
+      200  intervenida (o reintento de la misma operacion)
+      409  ya no la controla la IA: otra persona intervino o esta escalada
+      404  no existe
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    try:
+        r = transiciones.intervenir(
+            tenant, id_conversacion, operador_id=autor_id, operador_nombre=autor,
+            motivo_texto=(cuerpo.get("motivo") or "").strip(),
+            clave=(cuerpo.get("clave_operacion") or "").strip() or None)
+    except Exception as e:
+        registrar("relevo", "fallo al intervenir", conversation_id=id_interno(id_conversacion),
+                  error=e)
+        return jsonify({"error": "No se pudo tomar el control."}), 500
+    if r.motivo == "no_existe":
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if r.motivo == "clave_ajena":
+        # La clave ya la uso otra operacion u otro operador: no se le responde
+        # exito a quien no fue el que intervino.
+        return jsonify({"error": "Esa clave de operacion ya pertenece a otra operacion.",
+                        "codigo": "clave_de_otra_operacion"}), 409
+    if r.aplicada or r.motivo == "reintento":
+        return jsonify({"intervenida": True, "relevo_version": r.version,
+                        "reintento": r.motivo == "reintento"}), 200
+    return jsonify({"error": "Esta conversacion ya no la atiende la IA: otra persona la tomo "
+                             "o esta escalada.", "codigo": "no_es_de_la_ia"}), 409
+
+
+def _atender_pendiente_tras_devolver(tenant: str, pendiente: dict) -> None:
+    """
+    El mensaje que el cliente mando mientras la conversacion la tenia una
+    persona, atendido por la IA justo despues de que se la devuelvan.
+
+    NO VUELVE A GUARDAR EL MENSAJE: ya esta en la base desde que llego, y por
+    eso el turno recibe 'conversacion_ya_guardada'. Sin eso el hilo mostraria
+    la misma frase del cliente dos veces.
+
+    Corre en su propio hilo y no puede devolverle un error a nadie: lo que
+    falle se registra y se corta ahi, igual que el webhook.
+    """
+    try:
+        config = _config_de(tenant)
+        salida = atender_turno(
+            config, tenant, pendiente["rol"], pendiente["usuario_externo"],
+            pendiente["texto"], pendiente["canal"],
+            conversacion_ya_guardada=pendiente["conversacion_id"])
+        respuesta = (salida.get("respuesta") or "").strip()
+        if respuesta and pendiente["canal"] == "whatsapp":
+            whatsapp.enviar_texto(config, tenant, pendiente["usuario_externo"], respuesta)
+    except Exception as e:
+        registrar("relevo", "no se pudo atender el mensaje pendiente tras la devolucion",
+                  conversation_id=id_interno(pendiente.get("conversacion_id")), error=e)
+
+
+@app.post("/conversaciones/<id_conversacion>/devolver")
+def conversaciones_devolver(id_conversacion):
+    """
+    Una persona le devuelve la conversacion a la IA. La inversa de /intervenir.
+
+    POR QUE HACIA FALTA ESTA RUTA, Y NO ESTABA
+    ------------------------------------------
+    Hasta el 22/09/2026 devolver SOLO existia pegado a un envio: el modo
+    "responder y devolver" de la Bandeja manda un mensaje y, si sale, devuelve.
+    Quien queria devolver sin decir nada no tenia como -- y en produccion
+    alguien apreto el boton esperando exactamente eso, el cliente escribio dos
+    veces mas y la IA no contesto porque el control seguia en 'humano'. No
+    fallo nada: no habia nada que fallara.
+
+    Devolver sin responder es una intencion legitima y distinta: "ya esta, que
+    siga el asistente". Atarla a tener algo que decir obliga a escribir un
+    mensaje de relleno, que es peor que no decir nada.
+
+    NO ENVIA NADA AL CLIENTE, por el mismo motivo que /intervenir no envia:
+    mezclar el envio a Meta --y su incertidumbre, D17-- dentro de un cambio de
+    control hace que un fallo de red deje el control a medias. Son dos cosas y
+    se piden por separado.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, clave_operacion?}
+      200  devuelta (o reintento de la misma operacion)
+      409  no la lleva una persona: ya es de la IA, o esta cerrada
+      404  no existe
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+
+    try:
+        r = transiciones.devolver_a_ia(
+            tenant, id_conversacion, operador_id=autor_id, operador_nombre=autor,
+            clave=(cuerpo.get("clave_operacion") or "").strip() or None)
+    except Exception as e:
+        registrar("relevo", "fallo al devolver a la IA",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo devolver la conversacion."}), 500
+
+    if r.motivo == "no_existe":
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if r.motivo == "clave_ajena":
+        return jsonify({"error": "Esa clave de operacion ya pertenece a otra operacion.",
+                        "codigo": "clave_de_otra_operacion"}), 409
+    if not (r.aplicada or r.motivo == "reintento"):
+        return jsonify({"error": "Esta conversacion no la lleva una persona: ya es de la IA "
+                                 "o esta cerrada.", "codigo": "no_es_humana"}), 409
+
+    # LA SESION VIVA TAMBIEN TIENE QUE ENTERARSE. El motor guarda en memoria si
+    # la conversacion estaba escalada, y con esa bandera puesta el asistente
+    # sigue en pausa aunque la base ya diga 'ia'. Es el mismo gesto que hace el
+    # envio-con-devolucion; sin el, devolver "funciona" en la pantalla y no en
+    # el comportamiento, que es la peor forma de funcionar.
+    #
+    # SE LEE CON mensajes_de Y NO CON identidad_de_conversacion, y no es un
+    # detalle: identidad_de_conversacion NO devuelve 'canal' --su docstring lo
+    # dice, "solo identificadores"-- asi que la clave de sesion salia armada
+    # con None y no coincidia con ninguna. La bandera quedaba puesta. Ademas
+    # hace falta el hilo entero para lo de abajo, asi que es una lectura y no
+    # dos.
+    pendiente = None
+    try:
+        hilo = persistencia.mensajes_de(tenant, id_conversacion)
+        conv = hilo.get("conversacion") or {}
+        if conv:
+            clave_viva = canales.clave_sesion_de_fila(
+                tenant, conv.get("canal"), conv.get("usuario_externo"))
+            if clave_viva in _sesiones:
+                _sesiones[clave_viva]["escalada"] = False
+
+        # EL MENSAJE QUE QUEDO SIN CONTESTAR.
+        #
+        # Si el cliente escribio mientras la conversacion la tenia una persona,
+        # ese mensaje no lo contesto nadie: la IA estaba en pausa. Al devolver,
+        # sin esto se quedaba sin respuesta PARA SIEMPRE -- la IA solo actua
+        # cuando entra un mensaje nuevo, asi que el cliente tenia que insistir
+        # para que alguien le hablara. Visto en produccion el 22/09/2026.
+        #
+        # La condicion es estrecha a proposito: solo si el ULTIMO mensaje del
+        # hilo es del cliente. Si despues de el hubo una respuesta --de la
+        # persona o del asistente-- ya se le contesto, y volver a hacerlo seria
+        # repetirle algo que quiza ya se resolvio por telefono.
+        mensajes = hilo.get("mensajes") or []
+        ultimo = mensajes[-1] if mensajes else None
+        if ultimo and ultimo.get("rol") == "user" and (ultimo.get("contenido") or "").strip():
+            pendiente = {"texto": ultimo["contenido"],
+                         "canal": conv.get("canal"),
+                         "usuario_externo": conv.get("usuario_externo"),
+                         "rol": conv.get("rol_efectivo") or "cliente_final",
+                         "conversacion_id": id_conversacion}
+    except Exception as e:
+        # La transicion ya se aplico y es la fuente de verdad. Que no se haya
+        # podido limpiar la sesion en memoria --o mirar si quedaba algo sin
+        # contestar-- se registra y no se oculta, pero no convierte un exito en
+        # un error.
+        registrar("relevo", "devuelta pero no se pudo leer el hilo",
+                  conversation_id=id_interno(id_conversacion), error=e)
+
+    # FUERA DEL CICLO DE RESPUESTA, como el webhook. Atender un turno llama al
+    # modelo y puede tardar segundos: dejar esperando a quien apreto el boton
+    # convertiria "devolver" en una operacion lenta, y peor, un timeout del
+    # navegador haria parecer que fallo algo que ya se aplico.
+    if pendiente:
+        threading.Thread(target=_atender_pendiente_tras_devolver,
+                         args=(tenant, pendiente), daemon=True).start()
+
+    return jsonify({"devuelta": True, "relevo_version": r.version,
+                    "reintento": r.motivo == "reintento",
+                    "atiende_pendiente": bool(pendiente)}), 200
+
+
 @app.post("/conversaciones/<id_conversacion>/atender")
 def conversaciones_atender(id_conversacion):
     """
@@ -5863,24 +8425,117 @@ def conversaciones_atender(id_conversacion):
     caso, y el barrido por plazo vencido lo cierra solo. Tomar un caso para
     trabajarlo lo dejaba expuesto a los dos.
 
-    Cuerpo: {tenant, por?, soltar?}
+    Cuerpo: {tenant, autor, autor_usuario_id, soltar?, clave_operacion?}
+
+    Tomar asigna; soltar quita la asignacion y la conversacion SIGUE esperando
+    a una persona (no vuelve a la IA). Ver nucleo/relevo/transiciones.py.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
 
     soltar = bool(cuerpo.get("soltar"))
+    clave = (cuerpo.get("clave_operacion") or "").strip() or None
     try:
-        existe = persistencia.tomar_caso(tenant, id_conversacion,
-                                         cuerpo.get("por"), soltar)
+        hacer = transiciones.soltar if soltar else transiciones.tomar
+        r = hacer(tenant, id_conversacion, operador_id=autor_id, operador_nombre=autor, clave=clave)
     except Exception as e:
         registrar("conversaciones", "fallo al tomar el caso", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500
 
-    if not existe:
+    if r.motivo == "no_existe":
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
-    return jsonify({"tomada": not soltar, "por": None if soltar else cuerpo.get("por")})
+    conflicto = _conflicto_de_asignacion(r)
+    if conflicto:
+        return conflicto
+    # Exito, o nada que hacer porque ya estaba como se pidio (ya era suya, ya
+    # estaba libre, el mismo clic reintentado).
+    return jsonify({"tomada": not soltar, "por": None if soltar else autor,
+                    "aplicada": r.aplicada, "relevo_version": r.version,
+                    "reintento": r.motivo == "reintento"})
+
+
+# Los 409 de la asignacion (B3.4). 'codigo' es lo que lee la pantalla para
+# refrescar y decir que paso; 'asignada_a' dice quien gano, cuando lo hay.
+_CONFLICTOS_DE_ASIGNACION = {
+    "ya_asignada": "Esta conversacion ya la tomo otra persona.",
+    "no_es_suya": "Solo quien tiene la conversacion puede soltarla.",
+    "control_ia": "Esta conversacion la atiende la IA: para tomarla, usa Intervenir.",
+    "no_abierta": "Esta conversacion ya esta cerrada.",
+    "clave_ajena": "Esa clave de operacion ya pertenece a otra operacion.",
+    "legado_sin_relevo": "Esta conversacion es anterior al relevo: no se puede reasignar hasta adoptarla.",
+}
+
+
+def _conflicto_de_asignacion(r):
+    mensaje = _CONFLICTOS_DE_ASIGNACION.get(r.motivo)
+    if not mensaje:
+        return None
+    codigo = "clave_de_otra_operacion" if r.motivo == "clave_ajena" else r.motivo
+    return jsonify({"error": mensaje, "codigo": codigo,
+                    "asignada_a": (r.datos or {}).get("asignada_a_nombre")}), 409
+
+
+@app.post("/conversaciones/<id_conversacion>/reasignar")
+def conversaciones_reasignar(id_conversacion):
+    """
+    T4 (B3.4, D4): un ADMIN pasa la conversacion a otra persona, o a si mismo.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, autor_rol, destino_usuario_id,
+             destino_nombre, motivo, clave_operacion?}
+
+    El actor, su rol y el destino los arma el proxy DESDE LA SESION (el rol del
+    JWT verificado; el destino, contra las personas activas de la
+    organizacion), nunca el navegador. Esta ruta queda detras del token de
+    servicio (G1), y ademas exige el rol: un pedido sin 'ADMIN' es 403 aunque
+    traiga todo lo demas -- no 409, el problema es de autorizacion.
+
+      200  reasignada (o ya era del destino, o reintento de la misma operacion)
+      400  sin motivo, o autor/destino invalidos
+      403  el actor no es ADMIN
+      404  no existe
+      409  cerrada, bajo control ia, legado sin adoptar, o clave ajena
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    if (cuerpo.get("autor_rol") or "").strip().upper() != "ADMIN":
+        return jsonify({"error": "Solo un administrador puede reasignar una conversacion.",
+                        "codigo": "no_es_admin"}), 403
+    try:
+        r = transiciones.reasignar(
+            tenant, id_conversacion, admin_id=autor_id, admin_nombre=autor,
+            destino_id=cuerpo.get("destino_usuario_id") or "",
+            destino_nombre=cuerpo.get("destino_nombre") or "",
+            motivo=cuerpo.get("motivo") or "",
+            clave=(cuerpo.get("clave_operacion") or "").strip() or None)
+    except (persistencia.AutorInvalido, ValueError) as e:
+        # 'ValueError' tambien llega desde bibliotecas: mensaje_publico solo
+        # deja pasar el texto si la excepcion es de Dexter (D23).
+        return jsonify({"error": f"Reasignacion invalida: "
+                                 f"{mensaje_publico(e, 'faltan datos de la reasignacion')}",
+                        "codigo": "reasignacion_invalida"}), 400
+    except Exception as e:
+        registrar("conversaciones", "fallo al reasignar", error=e)
+        return jsonify({"error": "No se pudo guardar."}), 500
+    if r.motivo == "no_existe":
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    conflicto = _conflicto_de_asignacion(r)
+    if conflicto:
+        return conflicto
+    return jsonify({"reasignada": True, "aplicada": r.aplicada, "relevo_version": r.version,
+                    "asignada_a": (r.datos or {}).get("nuevo_nombre") if r.aplicada else None,
+                    "reintento": r.motivo == "reintento"})
 
 
 @app.post("/conversaciones/<id_conversacion>/humano/media")
@@ -5913,10 +8568,16 @@ def conversaciones_enviar_media(id_conversacion):
     tenant = request.form.get("tenant")
     tipo = (request.form.get("tipo") or "").strip()
     pie = (request.form.get("pie") or "").strip()
-    autor = (request.form.get("autor") or "").strip()
 
     if not subido or not tenant or not tipo:
         return jsonify({"error": "Faltan campos: archivo, tenant, tipo"}), 400
+    try:
+        autor, autor_id, clave = _autor_y_clave(request.form)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    bloqueo = _exigir_control_humano(tenant, id_conversacion)
+    if bloqueo:
+        return bloqueo
 
     contenido = subido.read()
     mime = subido.mimetype or "application/octet-stream"
@@ -5936,23 +8597,31 @@ def conversaciones_enviar_media(id_conversacion):
 
     try:
         destino = persistencia.agregar_mensaje_humano(
-            tenant, id_conversacion, texto, autor)
+            tenant, id_conversacion, texto, autor, autor_usuario_id=autor_id,
+            clave_idempotencia=clave)
     except Exception as e:
         registrar("media", "fallo al guardar el mensaje", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500
     if destino is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if _ya_guardado(destino):
+        return jsonify({"ok": True, "ya_existia": True,
+                        "mensaje_id": destino["mensaje_id"],
+                        "estado_entrega": destino["estado_entrega"]}), 200
 
     # Se comprime con el mismo criterio que lo que ENTRA (media.preparar):
     # una foto de 8 MB del celular de un tecnico no tiene por que viajar
     # entera, y ademas asi entra en el tope de 5 MB de WhatsApp.
     guardado, mime_guardado = media.preparar(contenido, tipo, mime)
 
-    salida = {"ok": True, "entregado": False,
+    salida = {"ok": True, "aceptado_por_meta": False,
+              "aceptacion_registrada": False, "resultado": None,
               "mensaje_id": destino["mensaje_id"]}
 
     if destino["canal"] != "whatsapp":
-        salida["entregado"] = None
+        salida["aceptado_por_meta"] = None
+        salida["aceptacion_registrada"] = True
+        salida["resultado"] = "aceptado"
     else:
         salida.update(_entregar_y_registrar(
             tenant, destino["mensaje_id"],
@@ -5986,7 +8655,7 @@ def conversaciones_nota(id_conversacion):
     que se decida no enviar, es que no hay con que. La ruta que entrega
     (POST .../humano) es otra funcion, con otro nombre y otro verbo.
 
-    Cuerpo: {tenant, mensaje, autor?}
+    Cuerpo: {tenant, mensaje, autor, autor_usuario_id} -- autor obligatorio.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
@@ -5995,9 +8664,12 @@ def conversaciones_nota(id_conversacion):
         return jsonify({"error": "Faltan campos: tenant, mensaje"}), 400
 
     try:
+        autor, autor_id, _clave = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    try:
         nota_id = persistencia.agregar_nota_interna(
-            tenant, id_conversacion, contenido,
-            (cuerpo.get("autor") or "").strip())
+            tenant, id_conversacion, contenido, autor, autor_usuario_id=autor_id)
     except Exception as e:
         registrar("nota", "fallo al guardar", error=e)
         return jsonify({"error": "No se pudo guardar la nota."}), 500
@@ -6073,7 +8745,45 @@ def _motivo_de_envio(e: Exception) -> str:
     return "No se pudo enviar el mensaje por WhatsApp."
 
 
-def _entregar_y_registrar(tenant: str, mensaje_id: str, enviar, etiqueta: str) -> dict:
+def _rechazo_es_definitivo(e: Exception) -> bool:
+    """Solo un rechazo inequívoco habilita el aviso de que no salió."""
+    if not isinstance(e, whatsapp.ErrorWhatsApp):
+        return False
+    if e.http_status is None:  # configuración/validación antes del POST
+        return True
+    return 400 <= e.http_status < 500 and e.http_status not in (408, 429)
+
+
+def _salida_previa(tenant: str, clave: str) -> dict:
+    """
+    Que se sabe de una salida que YA fue adquirida con esta clave.
+
+    Es el unico desempate entre "no salio nunca" y "pudo haber salido y no
+    sabemos": la fila de messages no distingue los dos casos --en los dos queda
+    'pendiente'-- y whatsapp_salidas si. 'adquirido' es el estado de una salida
+    que se reservo y nunca se resolvio: el proceso se cayo entre el POST y el
+    registro, o esta en vuelo ahora mismo. Los dos son INCIERTO, no fallo: no se
+    reenvia nada y tampoco se afirma que no salio.
+    """
+    previa = persistencia.salida_whatsapp(tenant, clave) or {}
+    estado = previa.get("estado")
+    resultado = ({"aceptado": "aceptado", "rechazado": "rechazado",
+                  "sin_id": "sin_id"}.get(estado, "incierto"))
+    return _contrato_entrega(resultado, previa.get("wamid"), estado == "aceptado")
+
+
+def _contrato_entrega(resultado: str, wamid: str | None, registrado: bool,
+                      aviso: str | None = None) -> dict:
+    salida = {"resultado": resultado, "aceptado_por_meta": bool(wamid),
+              "aceptacion_registrada": bool(wamid) and registrado}
+    if aviso:
+        salida["aviso"] = aviso
+    return salida
+
+
+def _entregar_y_registrar(tenant: str, mensaje_id: str | None, enviar, etiqueta: str,
+                           *, clave_salida: str | None = None,
+                           conversation_id: str | None = None) -> dict:
     """
     El UNICO camino por el que una respuesta humana sale por WhatsApp y deja su
     resultado en la fila. Lo usan texto, plantilla y multimedia.
@@ -6104,19 +8814,47 @@ def _entregar_y_registrar(tenant: str, mensaje_id: str, enviar, etiqueta: str) -
     Los logs llevan solo metadata: nunca el texto de una excepcion ajena ni lo
     que respondio Meta, porque un log de produccion tambien persiste.
     """
+    clave = clave_salida or f"mensaje:{mensaje_id}"
+    try:
+        adquirida = persistencia.adquirir_salida_whatsapp(
+            tenant, clave, proposito=etiqueta, mensaje_id=mensaje_id,
+            conversation_id=conversation_id)
+    except Exception as e:
+        registrar("entrega", "no se pudo adquirir el derecho a enviar", operacion=etiqueta,
+                  mensaje=id_interno(mensaje_id), error=e)
+        return _contrato_entrega("incierto", None, False)
+    if not adquirida:
+        return _salida_previa(tenant, clave)
+
     try:
         wamid = enviar()
     except Exception as e:
         motivo = _motivo_de_envio(e)
-        registrado = persistencia.marcar_envio(tenant, mensaje_id, None, motivo)
+        definitivo = _rechazo_es_definitivo(e)
+        resultado = "rechazado" if definitivo else "incierto"
+        if mensaje_id:
+            registrado = persistencia.marcar_envio(
+                tenant, mensaje_id, None, motivo if definitivo else None,
+                clave_salida=clave, resultado=resultado)
+        else:
+            registrado = persistencia.resolver_salida_whatsapp(
+                tenant, clave, resultado, error=motivo if definitivo else None)
         # error_seguro ya aporta tipo, codigo y http_status del rechazo.
-        registrar("entrega", "rechazado", proveedor="meta", operacion=etiqueta,
-                  resultado="rechazado", mensaje=id_interno(mensaje_id),
-                  registrado=registrado, error=e)
-        return {"resultado": "rechazado", "entregado": False, "aviso": motivo,
-                "registrado": registrado}
+        # El evento es fijo y el desenlace va como campo: un evento armado con
+        # una variable no se puede buscar en el log (tests/test_registro_sin_pii).
+        registrar("entrega", "el envio no fue aceptado", proveedor="meta",
+                  operacion=etiqueta, resultado=resultado,
+                  mensaje=id_interno(mensaje_id), registrado=registrado, error=e)
+        return _contrato_entrega(resultado, None, registrado,
+                                 motivo if definitivo else None)
 
-    registrado = persistencia.marcar_envio(tenant, mensaje_id, wamid)
+    if mensaje_id:
+        registrado = persistencia.marcar_envio(
+            tenant, mensaje_id, wamid, clave_salida=clave,
+            resultado="aceptado" if wamid else "sin_id")
+    else:
+        registrado = persistencia.resolver_salida_whatsapp(
+            tenant, clave, "aceptado" if wamid else "sin_id", wamid=wamid)
     if not wamid:
         resultado = "sin_id"
     elif not registrado:
@@ -6130,7 +8868,80 @@ def _entregar_y_registrar(tenant: str, mensaje_id: str, enviar, etiqueta: str) -
     elif resultado != "aceptado":
         registrar("entrega", "sin identificador", proveedor="meta", operacion=etiqueta,
                   resultado=resultado, mensaje=id_interno(mensaje_id), registrado=registrado)
-    return {"resultado": resultado, "entregado": bool(wamid), "registrado": registrado}
+    return _contrato_entrega(resultado, wamid, registrado)
+
+
+@app.get("/conversaciones/desenlaces")
+def conversaciones_desenlaces():
+    """
+    El catalogo de cierre de esta empresa: que puede elegir un operador (B6).
+
+    Sale del backend y no de una lista en la pantalla por la misma razon de
+    siempre: la lista de la pantalla se copia, se desincroniza y termina
+    ofreciendo un codigo que el motor rechaza. Aca el que ofrece y el que
+    valida leen lo mismo (nucleo/relevo/desenlaces.py).
+    """
+    tenant = (request.args.get("tenant") or "").strip()
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'"}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception:
+        # Sin config cargada quedan los doce de plataforma, que es justo lo que
+        # una empresa sin nada configurado tiene que poder usar (§3.5).
+        config = None
+    return jsonify({"desenlaces": desenlaces.catalogo(config)})
+
+
+@app.post("/conversaciones/<id_conversacion>/desenlace")
+def conversaciones_completar_desenlace(id_conversacion):
+    """
+    Ponerle desenlace a una conversacion que se cerro sin uno (B6, §3.5).
+
+    Los cierres por confirmacion del cliente (T15a, T15b) y por inactividad
+    (T18) dejan el codigo en NULL a proposito: ahi nadie eligio nada. Esto es
+    la otra mitad de esa frase del contrato -- "se completan despues si una
+    persona revisa".
+
+    NO reabre la conversacion, NO cambia quien la cerro y NO toca el caso ni
+    el ticket de afuera. Solo escribe sobre NULL: si ya tiene desenlace
+    responde 409, porque pisar el que puso otra persona seria reescribir el
+    pasado en silencio.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, desenlace, nota?, clave_operacion?}
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+
+    try:
+        r = transiciones.completar_desenlace(
+            tenant, id_conversacion,
+            desenlace=(cuerpo.get("desenlace") or "").strip(),
+            nota=(cuerpo.get("nota") or "").strip() or None,
+            operador_id=autor_id, operador_nombre=autor,
+            config=_config_de(tenant),
+            clave=(cuerpo.get("clave_operacion") or "").strip() or None)
+    except ValueError as e:
+        return jsonify({"error": mensaje_publico(e, "desenlace invalido")}), 400
+    except Exception as e:
+        registrar("conversaciones", "fallo al completar el desenlace", error=e)
+        return jsonify({"error": "No se pudo guardar."}), 500
+
+    if r.motivo == "no_existe":
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if r.motivo == "no_esta_cerrada":
+        return jsonify({"error": "La conversacion sigue abierta: se cierra, no se completa."}), 409
+    if r.motivo == "ya_completado":
+        # 409 y no 200: el segundo tiene que enterarse de que llego tarde.
+        return jsonify({"error": "Esta conversacion ya tiene desenlace."}), 409
+    return jsonify({"completado": True, "desenlace": r.datos.get("desenlace"),
+                    "categoria": r.datos.get("categoria")})
 
 
 @app.post("/conversaciones/<id_conversacion>/resolver")
@@ -6147,26 +8958,50 @@ def conversaciones_resolver(id_conversacion):
     seguiria recordando el historial, si ya escalo y el rol activo -- la base
     diria 'cerrada' y el asistente contestaria como si nada hubiera pasado.
 
-    Cuerpo: {tenant, por?}
+    Cuerpo: {tenant, autor, autor_usuario_id, desenlace, nota?,
+             clave_operacion?}
+
+    Cerrar NO es devolver a la IA: libera la asignacion y deja la
+    conversacion cerrada. Ver nucleo/relevo/transiciones.py.
+
+    'desenlace' es OBLIGATORIO desde B6 (T17, §3.5) y sale del catalogo de
+    /conversaciones/desenlaces. No hay valor por defecto a proposito: uno
+    --'otro', el mas probable-- convertiria la columna en ruido, y la columna
+    existe justo para poder contar en que terminan los casos.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
 
     try:
-        usuario = persistencia.resolver_conversacion(tenant, id_conversacion,
-                                                     cuerpo.get("por"))
+        r = transiciones.resolver(tenant, id_conversacion, operador_id=autor_id,
+                                  operador_nombre=autor,
+                                  desenlace=(cuerpo.get("desenlace") or "").strip(),
+                                  nota=(cuerpo.get("nota") or "").strip() or None,
+                                  config=_config_de(tenant),
+                                  clave=(cuerpo.get("clave_operacion") or "").strip() or None)
+    except ValueError as e:
+        # Desenlace ausente, fuera del catalogo o nota demasiado larga. Es un
+        # error del pedido, no una falla: 400 y el motivo, para que la pantalla
+        # pueda decirlo en vez de mostrar "no se pudo guardar".
+        return jsonify({"error": mensaje_publico(e, "desenlace invalido")}), 400
     except Exception as e:
         registrar("conversaciones", "fallo al resolver", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500
 
-    if usuario is None:
+    if r.motivo == "no_existe":
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
 
-    # La clave de _sesiones es (tenant, id_sesion), y el id de sesion es el
-    # usuario externo del canal -- el mismo que devuelve resolver_conversacion.
-    _sesiones.pop((tenant, usuario), None)
+    # La clave de _sesiones lleva el canal: sin el, resolver un hilo del
+    # simulador descartaba tambien la sesion real del mismo telefono.
+    if r.datos.get("usuario_externo"):
+        _sesiones.pop(canales.clave_sesion_de_fila(
+            tenant, r.datos.get("canal"), r.datos["usuario_externo"]), None)
     return jsonify({"resuelta": True})
 
 
@@ -6197,7 +9032,8 @@ def conversaciones_borrar(id_conversacion):
     if not borrada:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
 
-    _sesiones.pop((tenant, borrada["usuario_externo"]), None)
+    _sesiones.pop(canales.clave_sesion_de_fila(
+        tenant, borrada.get("canal"), borrada["usuario_externo"]), None)
     return "", 204
 
 

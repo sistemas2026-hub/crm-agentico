@@ -69,7 +69,7 @@
 
 <svelte:head><title>Instalaciones</title></svelte:head>
 
-<div class="hoja">
+<div class="hoja" data-privado>
   <header>
     <h1>Solicitudes de instalación</h1>
     <p class="bajada">

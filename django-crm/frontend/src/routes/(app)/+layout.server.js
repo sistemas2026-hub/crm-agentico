@@ -5,7 +5,7 @@ import { listTasks } from '$lib/server/v2/tasks.js';
 import { listInvoices } from '$lib/server/v2/invoices.js';
 import { countAwaitingApprovals } from '$lib/server/v2/approvals.js';
 import { countUnread } from '$lib/server/v2/notifications.js';
-import { getOrgTerminology } from '$lib/server/v2/organization.js';
+import { getOrgShell } from '$lib/server/v2/organization.js';
 
 /**
  * Counts for migrated modules, fetched for real and merged over the fixtures.
@@ -122,6 +122,10 @@ export async function load(event) {
     org: {
       name: event.locals.org?.name || 'BottleCRM',
       terminology: /** @type {Record<string, string> | undefined} */ (undefined),
+      // El logo de la empresa, si cargó uno. Viaja con la terminología porque
+      // sale de la MISMA respuesta de `/org/settings/` -- no cuesta un viaje
+      // de red extra. `undefined` es el caso normal, no un fallo.
+      logo_url: /** @type {string | undefined} */ (undefined),
       // The currency for figures that are sums rather than one record: pipeline
       // totals, invoice ageing, goal progress. A per-record currency cannot
       // label a sum, and `money()` falls back to a hardcoded USD when it is not
@@ -148,11 +152,11 @@ export async function load(event) {
   // Promise.allSettled call so they all fire in the same network wave. The
   // terminology lookup is not a second round trip, it rides the wave that was
   // already here for the badges. `results` is indexed by position: the count
-  // keys first (in `countKeys` order), terminology last.
+  // keys first (in `countKeys` order), lo de la organizacion al final.
   const countKeys = Object.keys(LIVE_COUNTS);
   const results = await Promise.allSettled([
     ...countKeys.map((key) => LIVE_COUNTS[/** @type {keyof typeof LIVE_COUNTS} */ (key)](event)),
-    getOrgTerminology(event)
+    getOrgShell(event)
   ]);
 
   countKeys.forEach((key, index) => {
@@ -160,9 +164,13 @@ export async function load(event) {
     if (result.status === 'fulfilled') shell.counts[key] = result.value;
   });
 
-  const terminologyResult = results[countKeys.length];
-  if (terminologyResult.status === 'fulfilled') {
-    shell.org.terminology = terminologyResult.value.terminology;
+  const orgResult = results[countKeys.length];
+  if (orgResult.status === 'fulfilled') {
+    shell.org.terminology = orgResult.value.terminology;
+    // Queda `undefined` cuando la organizacion no cargo ninguno, que es el
+    // caso corriente. Quien lo dibuje tiene que tener un respaldo: la marca
+    // no puede depender de un archivo que casi nunca esta.
+    shell.org.logo_url = orgResult.value.logo_url;
   }
 
   return shell;

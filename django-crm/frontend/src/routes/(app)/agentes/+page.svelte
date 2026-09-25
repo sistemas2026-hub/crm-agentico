@@ -18,7 +18,8 @@
   import { Button } from '$lib/components/ui/button/index.js';
   import { toast } from 'svelte-sonner';
   import { invalidateAll } from '$app/navigation';
-  import { AlertTriangle, Bot, BotMessageSquare, ScanEye } from '@lucide/svelte';
+  import { AlertTriangle, Bot, BotMessageSquare, ScanEye, Radar, ArrowRight } from '@lucide/svelte';
+  import { AGENTES_OPERATIVOS } from '$lib/v2/agentes-operativos.js';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -171,6 +172,48 @@
     </div>
   </div>
 {/if}
+
+<!--
+  AGENTES OPERATIVOS  --  fuera del bloque que depende del motor, a proposito.
+
+  Lo que hay debajo sale de `GET /agentes` del motor y desaparece entero si el
+  motor no responde. El Supervisor NOC IA no vive ahi: vive en el CRM, en la
+  app `operaciones`. Si estuviera dentro de ese `{#if}`, un fallo del motor lo
+  borraria de la pantalla aunque el este perfectamente vivo.
+
+  Y NO se declara como rol del tenant: si lo fuera, el motor lo meteria en el
+  enrutador de derivacion y alguien podria acabar derivandole un cliente. Esta
+  tarjeta lo representa; no lo registra.
+-->
+<div class="v2-pad seccion-operativos">
+  <h2 class="titulo-familia">Agentes operativos</h2>
+  <p class="nota-familia">
+    Trabajan sobre la operación, no sobre una conversación. No tienen prompt ni modelo:
+    lo que saben hacer es código.
+  </p>
+  <div class="grilla">
+    {#each AGENTES_OPERATIVOS as operativo (operativo.clave)}
+      <a class="tarjeta tarjeta-operativa" href={operativo.href}>
+        <div class="encabezado-tarjeta">
+          <span class="marca-agente" aria-hidden="true"><Radar size={19} /></span>
+          <div class="identidad">
+            <h3>{operativo.nombre}</h3>
+            <p class="organizacion">{operativo.rotulo}</p>
+          </div>
+          <span class="pill-orientacion pill-operativo">Operativo</span>
+        </div>
+
+        <p class="descripcion">{operativo.descripcion}</p>
+
+        <!-- Sin metricas: las que importan cambian cada minuto y su tablero
+             las muestra con su fuente. Un numero escrito aqui envejeceria. -->
+        <span class="enlace-tablero">
+          {operativo.enlace}<ArrowRight size={15} />
+        </span>
+      </a>
+    {/each}
+  </div>
+</div>
 
 {#if data.error}
   <p class="aviso-error">⚠️ {data.error}</p>
@@ -437,6 +480,49 @@
   .tarjeta-automatica {
     border-style: dashed;
     background: var(--v2-line-soft);
+  }
+
+  /* --- Agentes operativos ------------------------------------------------
+     Misma tarjeta que el resto: la familia se distingue por el rotulo y la
+     pildora, no por un diseno aparte. Lo unico distinto es que ESTA tarjeta
+     es un enlace entero -- lleva a su tablero, que es el punto. */
+  .seccion-operativos {
+    padding-bottom: 0;
+  }
+  .titulo-familia {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--v2-ink);
+    margin: 0 0 2px;
+  }
+  .nota-familia {
+    font-size: 11px;
+    color: var(--v2-slate);
+    margin: 0 0 12px;
+    max-width: 62ch;
+  }
+  .tarjeta-operativa {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    text-decoration: none;
+    color: inherit;
+  }
+  .tarjeta-operativa:hover {
+    border-color: color-mix(in oklab, var(--v2-ink) 25%, transparent);
+  }
+  .pill-orientacion.pill-operativo {
+    color: var(--v2-ink);
+    border-color: color-mix(in oklab, var(--v2-ink) 22%, transparent);
+  }
+  .enlace-tablero {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--v2-ink);
+    margin-top: auto;
   }
   .modelo-automatico {
     font-size: 11px;

@@ -211,7 +211,11 @@ def _valor_seguro(valor) -> str:
     return f"<{type(valor).__name__}>"
 
 
-def formatear(componente: str, evento: str, **campos) -> str:
+# 'componente' y 'evento' son SOLO posicionales (la '/'): asi un campo que se
+# llame 'evento' o 'componente' es un campo mas y no choca con el parametro.
+# Sin esto, _contar_relevo(evento=...) tiraba TypeError justo dentro de la
+# compuerta que tiene que fallar cerrado.
+def formatear(componente: str, evento: str, /, **campos) -> str:
     partes = [f"[{componente}] {evento}"]
     for clave, valor in campos.items():
         if isinstance(valor, BaseException):
@@ -222,6 +226,24 @@ def formatear(componente: str, evento: str, **campos) -> str:
     return " ".join(partes)
 
 
-def registrar(componente: str, evento: str, **campos) -> None:
-    """Escribe una linea de log. 'evento' es texto fijo; lo variable, en campos."""
-    print(formatear(componente, evento, **campos), file=sys.stdout, flush=True)
+def registrar(componente: str, evento: str, /, **campos) -> None:
+    """
+    Escribe una linea de log. 'evento' es texto fijo; lo variable, en campos.
+
+    NUNCA LEVANTA (D26). Se llama desde adentro de los 'except' de caminos que
+    tienen que fallar cerrado -- la compuerta del relevo, el webhook, la
+    entrega--, y un log que revienta ahi cambia el flujo por culpa de la
+    observabilidad. Si un valor no se puede formatear (un __str__ que tira, un
+    set que no se puede ordenar) sale una linea fija con el componente y el
+    tipo del problema; si ni siquiera se puede escribir (stdout cerrado), se
+    pierde la linea y el flujo sigue igual.
+    """
+    try:
+        linea = formatear(componente, evento, **campos)
+    except Exception as e:                                    # noqa: BLE001
+        linea = (f"[registro] no se pudo formatear una linea de "
+                 f"'{_valor_seguro(componente)}' ({type(e).__name__})")
+    try:
+        print(linea, file=sys.stdout, flush=True)
+    except Exception:                                         # noqa: BLE001
+        pass

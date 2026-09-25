@@ -245,18 +245,29 @@ pedir("plantillas: WhatsApp rechaza con mensaje de Dexter",
 
 pedir("adjunto: una validacion ajena falla",
       lambda: cliente.post("/conversaciones/c1/humano/media",
-                           data={"tenant": TENANT, "tipo": "image",
+                           data={"tenant": TENANT, "tipo": "image", "autor": "Operador",
+                                 "autor_usuario_id": "5a9e996e-2a9f-4cd0-9677-db33165c5fd0",
                                  "archivo": (io.BytesIO(b"x"), "a.png", "image/png")},
                            content_type="multipart/form-data"),
-      400, (api.whatsapp, "_validar_media", lanza(ValueError(CANARIO))))
+      400, (api.whatsapp, "_validar_media", lanza(ValueError(CANARIO))),
+      (api, "_exigir_control_humano", lambda *a, **k: None))
 pedir("adjunto: el mensaje propio de WhatsApp sigue llegando",
       lambda: cliente.post("/conversaciones/c1/humano/media",
-                           data={"tenant": TENANT, "tipo": "sticker",
+                           data={"tenant": TENANT, "tipo": "sticker", "autor": "Operador",
+                                 "autor_usuario_id": "5a9e996e-2a9f-4cd0-9677-db33165c5fd0",
                                  "archivo": (io.BytesIO(b"x"), "a.png", "image/png")},
                            content_type="multipart/form-data"),
       400, (api.whatsapp, "_validar_media",
             lanza(whatsapp.ErrorWhatsApp("WhatsApp no acepta envios de tipo 'sticker'."))),
+      (api, "_exigir_control_humano", lambda *a, **k: None),
       debe_contener="no acepta envios de tipo")
+
+pedir("adjunto sin autor: el mensaje propio del relevo sigue llegando",
+      lambda: cliente.post("/conversaciones/c1/humano/media",
+                           data={"tenant": TENANT, "tipo": "image",
+                                 "archivo": (io.BytesIO(b"x"), "a.png", "image/png")},
+                           content_type="multipart/form-data"),
+      400, debe_contener="falta el nombre de quien escribe")
 
 pedir("conversaciones: un RuntimeError ajeno",
       lambda: cliente.get(f"/conversaciones?tenant={TENANT}"),

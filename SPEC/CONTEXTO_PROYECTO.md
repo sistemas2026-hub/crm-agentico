@@ -1,8 +1,13 @@
 # CONTEXTO DEL PROYECTO — estado técnico actual
 
 > Documento de contexto para el agente de desarrollo.
-> Fuente de verdad para implementación: [MASTER_SPEC_CRM_AGENTE_IA_RAPILINK_v1.2.md](MASTER_SPEC_CRM_AGENTE_IA_RAPILINK_v1.2.md).
-> `PRD.md` y `ARQUITECTURA.md` (raíz del repo) son documentación complementaria/histórica.
+> **La jerarquía de autoridad la fija [CLAUDE.md](../CLAUDE.md) §1**, y este documento
+> no está por encima de ella: `PRD.md` manda sobre qué se construye y por qué,
+> `ARQUITECTURA.md` sobre cómo se organiza el código. Este archivo es el mapa
+> técnico del estado, y [MASTER_SPEC_CRM_AGENTE_IA_RAPILINK_v1.2.md](MASTER_SPEC_CRM_AGENTE_IA_RAPILINK_v1.2.md)
+> el detalle de implementación de su alcance — ninguno de los dos los reemplaza.
+> (Corregido el 23/09/2026: esta línea decía que PRD y ARQUITECTURA eran
+> "complementaria/histórica", y contradecía a CLAUDE.md sobre quién manda.)
 
 Cada afirmación de la sección "Estado actual conocido" lleva una etiqueta:
 
@@ -54,7 +59,7 @@ tests/                   guardas, incluida la del núcleo
 SPEC/ · PROMPTS/         esta documentación
 ```
 
-> **Nota:** el mapa de `ARQUITECTURA.md` lista 9 submódulos de `nucleo/`; los reales son 11 — no incluye `habilidades/` ni `seguimiento/`. Es desactualización de ese documento, no una discrepancia de diseño.
+> **Nota:** el mapa de `ARQUITECTURA.md` lista 9 submódulos de `nucleo/`; los reales son **15** (medidos el 23/09/2026) — faltan `habilidades/`, `seguimiento/`, `relevo/`, `programador/`, `conectores/` y `facturacion/`. Es desactualización de ese documento, no una discrepancia de diseño. Esta misma nota decía 11 y también estaba vieja.
 
 **La única regla de arquitectura:** `nucleo/` nunca conoce un cliente; `tenants/` es configuración sin código. Se verifica con `py -3.13 tests/test_nucleo_sin_tenants.py`.
 

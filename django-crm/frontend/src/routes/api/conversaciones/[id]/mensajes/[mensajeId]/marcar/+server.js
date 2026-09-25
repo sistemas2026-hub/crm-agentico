@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { destinoDelAsistente } from '$lib/server/v2/tenant.js';
 
 /**
  * Marcar/desmarcar una respuesta del agente como buen ejemplo de un caso --
@@ -11,13 +11,6 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  * 'marcado_por' NUNCA viene del cliente: se toma de la sesion logueada
  * (locals.user.email), igual que cualquier dato de auditoria.
  */
-
-function baseUrlYTenant() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
 
 /** @type {import('./$types').RequestHandler} */
 export async function POST({ request, params, locals, fetch }) {
@@ -30,7 +23,7 @@ export async function POST({ request, params, locals, fetch }) {
     return json({ error: 'Falta el caso' }, { status: 400 });
   }
 
-  const cfg = baseUrlYTenant();
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });
@@ -61,7 +54,7 @@ export async function DELETE({ params, locals, fetch }) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const cfg = baseUrlYTenant();
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });

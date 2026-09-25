@@ -56,6 +56,7 @@ cada endpoint tiene su propio sobre, no asumir un patrón común entre ellos.
 | `/api/system/get_outage_pons/{olt_id}` | GET | Sí, 14/08/2026 | **Resuelve la regla del splitter (G-GO-11) sin reconstruirla a mano** -- ver seccion propia abajo |
 | `/api/system/get_odbs/{zona_id opcional}` | GET | Documentado, no llamado | Metadata de cada ODB (splitter fisico): id, nombre, lat/long, zona. Coordenadas de la CAJA, no del cliente -- mucho menos sensible |
 | `/api/onu/get_onu_full_status_info/{sn}` | GET | Sí, 14/08/2026 | **El mas completo. Reemplaza a `get_onu_details`+`get_onu_signal` para el diagnostico real** -- ver seccion propia abajo. ~10s de latencia, el proveedor pide no usarlo en polling/bulk |
+| `/api/onu/get_onu_router_hosts/{onu_external_id}` | GET | Sí, 24/09/2026 | Equipos conectados al router del cliente, vía TR-069. **Exige `tr069: "Enabled"` en la ONU — 4 de 5.061 en Rapilink.** Ver sección propia abajo |
 | `/api/onu/get_onus_by_pon_port/...` | GET | Probado, **no existe** | 405 "Unknown method" |
 | `/api/onu/get_onus_by_olt_board_port/...` | GET | Probado, **no existe** | 405 "Unknown method" |
 
@@ -491,6 +492,76 @@ valor que no le corresponde) rompe `ping_cliente` de la misma forma, y el
 sintoma seria identico a "el equipo no responde" -- vale la pena tenerlo
 presente si alguna vez un ping falla de forma sospechosamente consistente
 para UN cliente puntual.
+
+## `get_onu_router_hosts` — el 400 no es del serial ni del modo: es TR-069 (24/09/2026)
+
+Medido en vivo el 24/09/2026 contra la instancia de Rapilink, a raíz de que
+`consultar_dispositivos_conectados` fallara **3 de 3** en la batería de flujos
+mientras `consultar_estado_ont`, `consultar_senal_ont` y `ping_cliente`
+respondían bien para la misma ONU.
+
+**La precondición dura es `tr069` de `get_onu_details`, no el modo del equipo.**
+
+```
+GET /api/onu/get_onu_router_hosts/HWTCA6FB5263   (ONU de laboratorio, mode: "Routing")
+-> HTTP 400 {"status": false,
+             "error": "Invalid parameters: TR069 profile disabled",
+             "error_code": "tr069_unable_to_process_command"}
+```
+
+Los tres fallos posibles, distinguibles por `error_code` + texto:
+
+| Respuesta | Qué pasó | Qué hacer |
+|---|---|---|
+| `400` · `TR069 profile disabled` · `tr069_unable_to_process_command` | La ONU tiene `tr069: "Disabled"`. **No hay nada que reintentar**: es configuración del equipo en la OLT, no un problema transitorio | Ni siquiera llamar: leer `tr069` antes |
+| `400` · `The ONU is not responding to TR-069 ACS requests` · `tr069_unable_to_process_command` | TR-069 habilitado, pero el equipo no contesta al ACS | **NO es "no hay equipos conectados"**, es "no pude mirar". Determinista, no ruido: 3 de 4 ONUs habilitadas, idéntico en 3 corridas seguidas |
+| `400` · `Please specify a valid ONU external ID` · `specify_valid_field` | Se mandó la forma corta de un serial cuyo `unique_external_id` es el hexadecimal | Es el caso de `reintentar_identificador_como: {sn_onu: gpon_hex}` — con la forma hex el mismo equipo pasa a devolver el error de TR-069, o sea que el identificador ya no estorba |
+
+**Cobertura real, contada sobre las 5.061 ONUs de `get_all_onus_details`
+(ambas OLTs, 24/09/2026):**
+
+| `tr069` × `mode` | ONUs |
+|---|---|
+| `Disabled` + `Routing` | 5.051 |
+| `Disabled` + `Bridging` | 6 |
+| **`Enabled` + `Routing`** | **4** |
+
+Y de esas 4 (las únicas con `tr069_profile: "SmartOLT"`, todas de tipos
+`*-4-ANTENAS`, con pinta de equipos de prueba):
+
+```
+3 de 4 -> 400 "The ONU is not responding to TR-069 ACS requests"
+1 de 4 -> 200 {"response": {"hostlist": []}}      <- lista VACIA
+```
+
+Repetido 3 veces seguidas con separación de segundos: mismo resultado, ONU por
+ONU. **Hoy no hay en Rapilink una sola ONU que devuelva un equipo conectado.**
+
+⚠️ **La trampa de la lista vacía.** El único `200` devuelve `hostlist: []`, y
+"lista vacía con la ONT en línea" se interpreta como *no hay nada conectado, el
+router del cliente está apagado*. No se midió nunca un `hostlist` poblado, así
+que **no está verificado que un vacío signifique ausencia de equipos** y no
+"el ACS todavía no tiene inventario de este equipo". Es la misma clase de falla
+que el filtro ignorado: no da error, da una respuesta confiadamente falsa.
+
+**Lo que quedó descartado, con evidencia** (no por argumento):
+
+- *No es el modo del equipo.* La ONU que falla está en `mode: "Routing"`, y las
+  2 ONUs en `Bridging` que se probaron devuelven el **mismo** error de TR-069,
+  no uno de modo. El nombre `router_hosts` no implica "modo router".
+- *No es el serial ni el formato del identificador.* Mismo serial, mismo
+  endpoint: `get_onu_details` y `get_onu_status` responden `200`. Y el serial
+  imposible da un error **distinto** (`specify_valid_field`), o sea que el
+  endpoint valida el identificador y llegó a pasar esa etapa.
+- *No es auth ni transitorio.* Misma `X-Token` que el resto de las llamadas del
+  mismo script; 14 ONUs con `tr069: "Disabled"` (Routing y Bridging) dieron
+  `TR069 profile disabled` 14 de 14.
+
+**Cómo debería usarse**: `get_onu_details/{sn}` (0,6–1,2 s) trae `tr069` y
+`tr069_profile` — con eso se sabe *antes* de llamar si el endpoint puede
+responder. Una herramienta que no mira esa precondición falla para el 99,92%
+de los clientes, y el modelo recibe un `HTTPError 400` crudo que no le dice
+por qué.
 
 ## No verificado todavía (fuera del alcance del sondeo de hoy)
 

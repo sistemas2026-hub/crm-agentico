@@ -16,6 +16,7 @@ import axios from 'axios';
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { describeError } from '$lib/server/log-safe.js';
+import { verificarToken, leerSinVerificar } from '$lib/server/v2/verificar-jwt.js';
 
 // Server-side (this file runs per-request on the server), so PRIVATE_ over
 // PUBLIC_ -- see the comment in lib/api-helpers.js for why.
@@ -32,51 +33,43 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  */
 
 /**
- * Decode JWT payload without verification (for reading claims only)
- * @param {string} token - JWT token
- * @returns {JWTPayload|null} Decoded payload or null if invalid
- */
-function decodeJwtPayload(token) {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-
-    const payload = parts[1];
-    // Handle base64url encoding
-    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const jsonPayload = Buffer.from(base64, 'base64').toString('utf8');
-    return /** @type {JWTPayload} */ (JSON.parse(jsonPayload));
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
  * Check if JWT token has the specified org_id in its payload
  * @param {string} token - JWT token
  * @param {string} orgId - Organization UUID to check
  * @returns {boolean} True if token has the org context
  */
 function tokenHasOrgContext(token, orgId) {
-  const payload = decodeJwtPayload(token);
+  // Lee claims sin verificar, y puede: esta funcion solo se llama DESPUES de
+  // que verificarToken() haya confirmado la firma con el backend. Sobre un
+  // token verificado, los claims son del backend y valen.
+  const payload = leerSinVerificar(token)?.payload ?? null;
   return Boolean(payload && payload.org_id === orgId);
 }
 
 /**
- * Verify JWT token locally by checking expiration
+ * Pregunta si el token es autentico. NO lo verifica acá: delega.
+ *
+ * La firma decía `@returns {JWTPayload|null}` de cuando esto decodificaba y
+ * miraba `exp`. Desde que es `async` devuelve una promesa, y svelte-check lo
+ * marcaba como error -- la anotación mentía justo sobre lo que hay que
+ * esperar: sin `await`, el resultado es una promesa, que es SIEMPRE verdadera,
+ * y la guarda de ruta dejaría pasar cualquier cookie.
+ *
  * @param {string} accessToken - JWT access token
- * @returns {JWTPayload|null} JWT payload or null if expired/invalid
+ * @returns {Promise<JWTPayload|null>} los claims verificados, o null
  */
-function verifyTokenLocally(accessToken) {
-  const payload = decodeJwtPayload(accessToken);
-  if (!payload) return null;
-
-  // Check if token is expired
-  if (payload.exp && payload.exp * 1000 < Date.now()) {
-    return null;
-  }
-
-  return payload;
+async function verifyTokenLocally(accessToken) {
+  // El nombre se conserva para no tocar los cinco puntos que lo llaman, pero
+  // ya NO verifica local: delega en el backend, que es el unico que tiene la
+  // clave. Ver $lib/server/v2/verificar-jwt.js sobre por que no se verifica
+  // aca --HS256 con la SECRET_KEY de Django-- y por que se cachea.
+  //
+  // Antes de este cambio, esta funcion decodificaba el token y miraba 'exp'.
+  // Un JWT fabricado a mano, sin ninguna clave, producia una sesion valida y
+  // con ella la IDENTIDAD que el motor guarda como autor de cada accion del
+  // relevo (autorDeSesion). El motor no podia detectarlo: autentica al
+  // servicio, no al usuario.
+  return await verificarToken(accessToken);
 }
 
 /**
@@ -192,7 +185,7 @@ export const handle = sequence(Sentry.sentryHandle(), async function _handle({ e
 
   // Try to authenticate user (LOCAL JWT DECODE - no API call!)
   if (accessToken) {
-    jwtPayload = verifyTokenLocally(accessToken);
+    jwtPayload = await verifyTokenLocally(accessToken);
 
     // If access token expired, try to refresh
     if (!jwtPayload && refreshToken) {
@@ -220,7 +213,7 @@ export const handle = sequence(Sentry.sentryHandle(), async function _handle({ e
           refreshToken = refreshed.refresh;
         }
         accessToken = refreshed.access;
-        jwtPayload = verifyTokenLocally(refreshed.access);
+        jwtPayload = await verifyTokenLocally(refreshed.access);
       } else {
         // Refresh failed, clear cookies
         event.cookies.delete('jwt_access', { path: '/' });
@@ -290,7 +283,9 @@ export const handle = sequence(Sentry.sentryHandle(), async function _handle({ e
           // The freshly-issued token carries this org's role and settings, so
           // read both from it. Assuming 'USER' here would drop an admin's
           // admin-only nav for the one navigation right after an org switch.
-          const newPayload = decodeJwtPayload(switchResult.access_token);
+          // Token recien EMITIDO por el backend en esta misma respuesta:
+          // su procedencia es la respuesta, no la cookie del navegador.
+          const newPayload = leerSinVerificar(switchResult.access_token)?.payload ?? null;
           /** @type {any} */ (event.locals).profile = {
             org: switchResult.current_org,
             role: newPayload?.role || 'USER'

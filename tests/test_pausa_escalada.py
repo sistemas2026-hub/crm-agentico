@@ -36,6 +36,14 @@ queda en true si el traspaso quedo registrado en algun lado. Recien entonces
 "sin caso" significa sin ambiguedad "quedo en la otra cola", y el fail-safe de
 caso_sigue_abierto es correcto.
 
+ACTUALIZACION 16/09/2026 (B3.2, politica fail-closed Q5): desde que la escalada
+RESERVA el control humano en la base antes del ticket y del CRM, "registrado"
+incluye esa reserva. Si despues fallan el ticket y el CRM, la conversacion sigue
+pausada y al cliente se le da el anuncio de atencion humana, no "escribime de
+nuevo". Ese texto queda solo para cuando ni la reserva se pudo guardar. Lo
+prueba contra PostgreSQL tests/test_relevo_transiciones_base.py, seccion 5;
+esta suite sigue midiendo la compuerta de pausa a partir del estado previo.
+
 POR QUE A NIVEL DE TURNO
 ------------------------
 La regla no vive en una funcion: vive en el acuerdo entre tres piezas -- lo
@@ -118,6 +126,14 @@ class Turno:
         # prueba mide la DECISION de pausar, no la persistencia.
         postizos = {
             p: {"estado_de_conversacion_abierta": lambda *a, **k: self.previo,
+                # B3.3b: el control se lee de la base en cada turno. Se deriva del
+                # mismo estado previo, con la regla de legado de control_efectivo.
+                "control_de_conversacion_abierta": lambda *a, **k: (
+                    None if not self.previo else {
+                        "conversation_id": self.previo.get("conversation_id") or "conv-1",
+                        "control_efectivo": "humano" if (self.previo.get("escalada")
+                                                         and self.previo.get("necesita_atencion_humana")) else "ia",
+                        "control_motivo": None, "relevo_version": 0}),
                 "atendida_por_humano": lambda *a, **k: self.hubo_humano,
                 "registrar_mensaje": lambda t_, c_, i_, r_, rol_, txt_, *a, **k:
                     (self.guardados.append((rol_, txt_)), ("conv-1", "msg-1"))[1],
@@ -138,6 +154,9 @@ class Turno:
             esc: {"caso_sigue_abierto": _caso_sigue_abierto,
                   "evaluar": _evaluar},
             mot: {"responder": _responder},
+            # B3.2: el cierre externo del caso tambien se anota en la verdad
+            # nueva; aca se mide la DECISION de pausar, no esa escritura.
+            api.transiciones: {"caso_externo_cerrado": lambda *a, **k: None},
             api: {"_resolver_verificacion_pendiente": lambda *a, **k: None,
                   "_hay_verificacion_pendiente": lambda *a, **k: False},
             api.consumo: {"estado_del_gasto": lambda *a, **k:

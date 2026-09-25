@@ -1,0 +1,76 @@
+- generic [ref=f6e4]:
+  - generic [ref=f6e5]:
+    - button "Abrir menú" [ref=f6e6] [cursor=pointer]
+    - generic [ref=f6e8]: Q
+    - heading "QA BANDEJA (datos de prueba)" [level=2] [ref=f6e9]
+    - button "Buscar" [ref=f6e10] [cursor=pointer]
+  - banner [ref=f6e14]:
+    - generic [ref=f6e15]:
+      - heading "Conversaciones" [level=1] [ref=f6e16]
+      - generic [ref=f6e17]: 1 por atender · 8 en total
+  - generic [ref=f6e19]:
+    - generic [ref=f6e20]:
+      - link "Volver a la lista" [ref=f6e21] [cursor=pointer]:
+        - /url: /conversaciones
+      - generic [aria-hidden] [ref=f6e24]: CQ
+      - generic [ref=f6e25]:
+        - heading "CLIENTE QA 5" [level=2] [ref=f6e26]
+        - generic [ref=f6e27]:
+          - generic [ref=f6e28]: Humano · Ana QA
+          - generic [ref=f6e30]: WhatsApp
+          - generic [ref=f6e31]: abierta
+      - button "Contexto" [ref=f6e32] [cursor=pointer]
+    - paragraph [ref=f6e35]:
+      - strong [ref=f6e40]: Escalada · IA no responde
+      - generic [ref=f6e41]: Atendida
+      - generic [ref=f6e45]:
+        - button "Marcar como resuelta" [ref=f6e46] [cursor=pointer]
+        - tooltip "Usá esto si el caso se resolvió por teléfono, presencialmente o por otro canal. Abajo elegís en qué terminó y se cierra la conversación; el próximo mensaje del cliente abre una nueva."
+    - generic [ref=f6e47]:
+      - generic [ref=f6e48]:
+        - term [ref=f6e49]: Qué quiere
+        - definition [ref=f6e50]: Necesito que venga un tecnico QA — lo que escribió, sin resumir
+      - generic [ref=f6e51]:
+        - term [ref=f6e52]: Le prometimos
+        - definition [ref=f6e53]: No se encontró el mensaje con el que se le avisó.
+      - generic [ref=f6e54]:
+        - term [ref=f6e55]: Qué falta
+        - definition [ref=f6e56]: El asistente no dejó anotado el próximo paso. El caso quedó abierto en el CRM.
+      - generic [ref=f6e57]:
+        - term [ref=f6e58]: Qué hizo la IA
+        - definition [ref=f6e59]: No consultó ningún sistema antes de derivar.
+    - generic [ref=f6e61]:
+      - generic [ref=f6e62]: Hoy
+      - generic [ref=f6e64]:
+        - generic [ref=f6e65]: Necesito que venga un tecnico QA
+        - generic [ref=f6e66]: 13:07
+      - generic [ref=f6e67]:
+        - generic [ref=f6e68]: Ana QA
+        - generic [ref=f6e70]: Listo, agendamos la visita.
+        - generic [ref=f6e71]: 13:17
+        - button "☆ Marcar" [ref=f6e73] [cursor=pointer]
+    - generic [ref=f6e74]:
+      - group "Qué estás escribiendo" [ref=f6e75]:
+        - button "Responder al cliente" [pressed] [ref=f6e76] [cursor=pointer]
+        - button "Nota interna" [ref=f6e77] [cursor=pointer]
+        - button "Responder y devolver a IA" [ref=f6e78] [cursor=pointer]
+      - generic [ref=f6e79]:
+        - textbox "Escribí tu respuesta…" [ref=f6e80]
+        - generic [ref=f6e81]:
+          - generic [ref=f6e82]:
+            - button "Emoji" [ref=f6e84] [cursor=pointer]
+            - button "Adjuntar" [ref=f6e89] [cursor=pointer]
+            - button "Grabar una nota de voz" [ref=f6e92] [cursor=pointer]
+          - generic [ref=f6e96]:
+            - strong [ref=f6e97]: Se envía directo al cliente
+            - text: · no pasa por el asistente · Enter envía
+          - button "Enviar" [disabled] [ref=f6e98]
+  - navigation "Secciones" [ref=f6e102]:
+    - link "Hoy" [ref=f6e103] [cursor=pointer]:
+      - /url: /
+    - link "Negociaciones" [ref=f6e110] [cursor=pointer]:
+      - /url: /pipeline
+    - link "Tickets" [ref=f6e113] [cursor=pointer]:
+      - /url: /tickets
+    - link "Facturas" [ref=f6e121] [cursor=pointer]:
+      - /url: /invoices

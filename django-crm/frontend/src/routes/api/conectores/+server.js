@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { destinoDelAsistente } from '$lib/server/v2/tenant.js';
 
 /**
  * Proxy hacia el motor para los conectores: conectar un sistema conocido
@@ -18,19 +18,12 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  * de una persona y no del que apretó el botón.
  */
 
-function cfg() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
-
-function guardia(locals) {
+async function guardia(locals, fetch) {
   if (!locals.user) return json({ error: 'No autenticado' }, { status: 401 });
   if (locals.profile?.role !== 'ADMIN') {
     return json({ error: 'Solo un administrador puede conectar sistemas.' }, { status: 403 });
   }
-  if (!cfg()) {
+  if (!(await destinoDelAsistente(locals, fetch))) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });
   }
@@ -39,9 +32,9 @@ function guardia(locals) {
 
 /** @type {import('./$types').RequestHandler} */
 export async function GET({ locals, fetch }) {
-  const negado = guardia(locals);
+  const negado = await guardia(locals, fetch);
   if (negado) return negado;
-  const { baseUrl } = /** @type {any} */ (cfg());
+  const { baseUrl } = /** @type {any} */ (await destinoDelAsistente(locals, fetch));
 
   try {
     const resp = await fetch(`${baseUrl}/conectores`, { headers: headersMotor() });
@@ -55,9 +48,9 @@ export async function GET({ locals, fetch }) {
 }
 
 export async function POST({ locals, request, fetch }) {
-  const negado = guardia(locals);
+  const negado = await guardia(locals, fetch);
   if (negado) return negado;
-  const { baseUrl, tenant } = /** @type {any} */ (cfg());
+  const { baseUrl, tenant } = /** @type {any} */ (await destinoDelAsistente(locals, fetch));
 
   const cuerpo = await request.json().catch(() => ({}));
   const { accion, id, areas } = cuerpo ?? {};

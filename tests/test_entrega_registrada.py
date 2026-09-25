@@ -27,6 +27,8 @@ escondio el problema.
   3. marcar_envio contra la base: exito, fallo, sin id, fila ajena, base rota
   4. el mecanismo completo contra la base, incluido "Meta acepto y no se guardo"
   5. punta a punta: POST de la respuesta humana -> fila con wamid
+  6. D15 + D17: Meta acepta y el recibo no se guarda; repetir con la misma clave
+     de idempotencia NUNCA produce un segundo POST
 ================================================================================
 """
 
@@ -50,6 +52,7 @@ from nucleo.canales import whatsapp                               # noqa: E402
 
 fallos: list[str] = []
 CRUDO = "CUERPO-CRUDO-DE-META-que-no-puede-persistirse"
+AUTOR = {"autor": "Operador de prueba", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"}
 
 
 def revisar(condicion, que, porque=""):
@@ -265,7 +268,7 @@ else:
 
         m = mensaje_pendiente(ORG, conv)
         r = api._entregar_y_registrar(TENANT, m, lambda: "wamid.MECANISMO", "prueba")
-        revisar(r == {"resultado": "aceptado", "entregado": True, "registrado": True}
+        revisar(r == {"resultado": "aceptado", "aceptado_por_meta": True, "aceptacion_registrada": True}
                 and fila(m)[1] == "enviado",
                 "Meta acepta: resultado 'aceptado', entregado y registrado", f"{r} {fila(m)}")
 
@@ -278,8 +281,8 @@ else:
                 400, {"error": {"code": 131026, "message": CRUDO,
                                 "error_data": {"details": CRUDO}}}), "el envío")
         r, log = con_log(lambda: api._entregar_y_registrar(TENANT, m, rechaza, "prueba"))
-        revisar(r["resultado"] == "rechazado" and r["entregado"] is False
-                and r["registrado"] is True and r["aviso"] == api.MOTIVOS_DE_FALLO[131026]
+        revisar(r["resultado"] == "rechazado" and r["aceptado_por_meta"] is False
+                and r["aceptacion_registrada"] is False and r["aviso"] == api.MOTIVOS_DE_FALLO[131026]
                 and fila(m)[1] == "fallido",
                 "Meta rechaza: 'fallido', aviso legible, registrado", f"{r} {fila(m)}")
         revisar(all(CRUDO not in (c or "") for c in fila(m)) and CRUDO not in str(r),
@@ -290,14 +293,21 @@ else:
         m = mensaje_pendiente(ORG, conv)
         r, log = con_log(lambda: api._entregar_y_registrar(
             TENANT, m, lambda: (_ for _ in ()).throw(requests.ConnectionError(CRUDO)), "prueba"))
-        revisar(r["resultado"] == "rechazado" and CRUDO not in log and CRUDO not in str(r)
+        # 'incierto', no 'rechazado': un fallo de red ocurre SIN respuesta de
+        # Meta, asi que no consta que el mensaje no haya salido. Decir
+        # 'rechazado' seria afirmar algo que no se sabe, y ademas haria que la
+        # bandeja ofreciera reintentar un mensaje que pudo haber llegado.
+        revisar(r["resultado"] == "incierto" and CRUDO not in log and CRUDO not in str(r)
                 and CRUDO not in (fila(m)[2] or ""),
                 "una excepcion ajena no filtra su texto al log, la respuesta ni la base",
                 log.strip())
+        revisar(fila(m)[1] != "fallido",
+                "y un fallo de red no deja la fila 'fallido': eso ofreceria reintentar",
+                f"{fila(m)}")
 
         m = mensaje_pendiente(ORG, conv)
         r = api._entregar_y_registrar(TENANT, m, lambda: None, "prueba")
-        revisar(r == {"resultado": "sin_id", "entregado": False, "registrado": True}
+        revisar(r == {"resultado": "sin_id", "aceptado_por_meta": False, "aceptacion_registrada": False}
                 and fila(m)[1] == "pendiente",
                 "200 sin id: 'sin_id', no se da por entregado y no hay aviso", f"{r} {fila(m)}")
 
@@ -308,9 +318,20 @@ else:
         def acepta():
             llamadas.append(1)
             return "wamid.NO_GUARDADO"
-        r, log = con_log(lambda: api._entregar_y_registrar(SIN_CONFIG, m, acepta, "prueba"))
-        revisar(r["resultado"] == "aceptado_sin_registro" and r["entregado"] is True
-                and r["registrado"] is False,
+        # Antes este caso se provocaba con un tenant sin configuracion. Ya no
+        # sirve: desde la compuerta durable, un tenant que no puede escribir
+        # falla al ADQUIRIR el derecho a enviar y no llega a hablar con Meta --
+        # que es mas seguro, pero deja de ejercitar este estado. El camino por
+        # el que 'aceptado_sin_registro' sigue siendo alcanzable es el real:
+        # Meta acepto y la escritura POSTERIOR del wamid no quedo.
+        marcar_original = db.marcar_envio
+        db.marcar_envio = lambda *a, **k: False
+        try:
+            r, log = con_log(lambda: api._entregar_y_registrar(TENANT, m, acepta, "prueba"))
+        finally:
+            db.marcar_envio = marcar_original
+        revisar(r["resultado"] == "aceptado_sin_registro" and r["aceptado_por_meta"] is True
+                and r["aceptacion_registrada"] is False,
                 "se distingue como 'aceptado_sin_registro', no como exito ni como fallo", f"{r}")
         revisar(len(llamadas) == 1,
                 "el envio se hizo UNA sola vez: no hay reenvio automatico", f"{len(llamadas)} envios")
@@ -327,12 +348,15 @@ else:
         api._config_de = lambda tenant: object()
         try:
             cliente = api.app.test_client()
+            # Desde B2.2 una respuesta de persona exige autor (nombre + id de
+            # usuario) y lleva su clave de idempotencia: lo arma el proxy.
             resp = cliente.post(f"/conversaciones/{conv}/mensajes",
-                                json={"tenant": TENANT, "mensaje": "respuesta de prueba"})
+                                json={"tenant": TENANT, "mensaje": "respuesta de prueba",
+                                      **AUTOR, "clave_idempotencia": str(uuid.uuid4())})
             datos = resp.get_json() or {}
             mid = datos.get("mensaje_id")
-            revisar(resp.status_code == 201 and datos.get("entregado") is True
-                    and datos.get("registrado") is True,
+            revisar(resp.status_code == 201 and datos.get("aceptado_por_meta") is True
+                    and datos.get("aceptacion_registrada") is True,
                     "el endpoint responde entregado y registrado", f"{resp.status_code} {datos}")
             revisar(bool(mid) and fila(mid) == ("wamid.PUNTA_A_PUNTA", "enviado", None),
                     "y la fila creada por el endpoint tiene el wamid y 'enviado' (G9-A en local)",
@@ -342,12 +366,53 @@ else:
             revisar(atendida is True, "la conversacion queda atendida por una persona")
 
             # Y el acuse posterior del webhook ahora SI tiene con que casar.
+            # marcar_entrega dejo de devolver bool: ahora dice QUE paso con el
+            # acuse (actualizado / ya aplicado / regresivo / no encontrado).
             casado = db.marcar_entrega(TENANT, "wamid.PUNTA_A_PUNTA", "entregado")
-            revisar(casado is True and fila(mid)[1] == "entregado",
+            revisar(casado is db.ResultadoEntrega.ACTUALIZADO and fila(mid)[1] == "entregado",
                     "un acuse con ese wamid avanza la misma fila a 'entregado' (G9-B en local)",
                     f"{casado} {fila(mid)}")
         finally:
             whatsapp.enviar_texto, api._config_de = enviar_original, config_original
+
+        titulo("6. D15 + D17: Meta acepta, el recibo no se guarda, y se repite la accion")
+        # Cada mitad esta probada por separado (4b aca, reintento en
+        # tests/test_autor_y_reintento.py). Esto prueba que JUNTAS no reenvian:
+        # una entrega incierta deja la fila en 'pendiente', y un reintento con
+        # la misma clave sobre un 'pendiente' no vuelve a llamar a Meta.
+        posts = []
+        enviar_original, config_original = whatsapp.enviar_texto, api._config_de
+        marcar_original = api.persistencia.marcar_envio
+        whatsapp.enviar_texto = lambda config, tenant, para, texto: posts.append(texto) or "wamid.INCIERTO"
+        api._config_de = lambda tenant: object()
+        api.persistencia.marcar_envio = lambda *a, **k: False   # la base no guarda el recibo
+        try:
+            cliente = api.app.test_client()
+            clave = str(uuid.uuid4())
+            cuerpo = {"tenant": TENANT, "mensaje": "incierto", **AUTOR, "clave_idempotencia": clave}
+            r1, _log = con_log(lambda: cliente.post(f"/conversaciones/{conv}/mensajes", json=cuerpo))
+            d1 = r1.get_json() or {}
+            revisar(r1.status_code == 201 and d1.get("resultado") == "aceptado_sin_registro"
+                    and "aviso" not in d1,
+                    "primer envio: 'aceptado_sin_registro', sin aviso de fallo", f"{r1.status_code} {d1}")
+            mid = d1.get("mensaje_id")
+            revisar(bool(mid) and fila(mid)[1] == "pendiente",
+                    "la fila queda 'pendiente' (no 'fallido')", f"{fila(mid) if mid else None}")
+            for intento in (2, 3):
+                r, _log = con_log(lambda: cliente.post(f"/conversaciones/{conv}/mensajes", json=cuerpo))
+                d = r.get_json() or {}
+                revisar(r.status_code == 200 and d.get("ya_existia") is True
+                        and str(d.get("mensaje_id")) == str(mid),
+                        f"intento {intento} con la misma clave: reconoce el mensaje existente",
+                        f"{r.status_code} {d}")
+            revisar(len(posts) == 1, "Meta recibio UN solo POST en total: nunca hay segundo envio automatico",
+                    f"{len(posts)} POST")
+            filas_clave = admin.execute("select count(*) from asistente.messages where clave_idempotencia = %s",
+                                        (clave,)).fetchone()[0]
+            revisar(filas_clave == 1, "y hay UNA sola fila para esa clave", f"{filas_clave}")
+        finally:
+            whatsapp.enviar_texto, api._config_de = enviar_original, config_original
+            api.persistencia.marcar_envio = marcar_original
     finally:
         admin.execute("delete from public.organization where id in (%s, %s)", (str(ORG), str(OTRA)))
         admin.close()

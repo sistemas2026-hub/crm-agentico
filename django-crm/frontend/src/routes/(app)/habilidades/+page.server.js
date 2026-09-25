@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * Habilidades: los procedimientos que cada agente puede cargar cuando le hacen
@@ -25,7 +26,7 @@ export async function load({ locals, fetch }) {
   }
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     return { habilidades: [], roles: [], error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' };
   }

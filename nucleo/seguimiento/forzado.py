@@ -541,6 +541,12 @@ def decidir_pedido_humano_de(config, historial: list[dict]):
 
 CODIGOS_MOTOR_GUARD = frozenset({
     "PRECONDICION_NO_CUMPLIDA",
+    # Hermano del anterior, agregado el 24/09/2026. El gate existia desde el
+    # 22/09 sin clasificar en ninguna de las tres listas: el sintoma que el
+    # cliente reporto no corresponde a esa accion. Sin estar aca, el bloqueo
+    # se cuenta como fallo de la herramienta y fuerza una escalada con un
+    # motivo -- y un mensaje al cliente -- que no es cierto.
+    "DECLARACION_NO_ALCANZA",
     "LIMITE_DE_CONVERSACION",
     "FALTA_HABLAR_CON_EL_CLIENTE",
     "IDENTIDAD_NO_RESUELTA",
@@ -552,6 +558,60 @@ CODIGOS_MOTOR_GUARD = frozenset({
     "DATO_DEL_EQUIPO_NO_CARGADO",
     "IDENTIDAD_NO_VERIFICADA",
     "HERRAMIENTA_DESCONOCIDA",
+    # D25: una persona tomo la conversacion y el motor no inicio la accion. No
+    # fallo nada afuera; contarlo como fallo forzaria una escalada -- con su
+    # ticket y su caso -- sobre una conversacion que ya atiende una persona.
+    "CAMBIO_DE_CONTROL",
+    # Los cinco de la fase 1 de seguridad (15/09/2026). Entran por el MISMO
+    # motivo que 'DATO_DEL_EQUIPO_NO_CARGADO' de arriba: son el motor
+    # impidiendo la llamada, no la herramienta fallando. Sin esto,
+    # 'escalar_si_falla' se dispararia y al cliente se le diria que fallo un
+    # sistema -- cuando lo que paso es que alguien detuvo la autonomia a
+    # proposito, o que la operacion no se repitio porque no debia repetirse.
+    #
+    # Que NO escalen por esta via no significa que nadie se entere: el bloqueo
+    # va a la traza marcado (es_bloqueo) y, cuando no hay conversacion, a
+    # asistente.audit_log.
+    "AUTONOMIA_DETENIDA",
+    "OPERACION_EN_CURSO",
+    "CLAVE_REUTILIZADA",
+    "OPERACION_FALLIDA_PREVIA",
+    "OPERACION_SIN_REGISTRO",
+    # El registro de operaciones no esta instalado (paso 10.10). Faltaba aca
+    # desde entonces: la lista de motor.py lo tenia y esta no, y el test que
+    # compara las dos lo destapo al agregarse los tres de abajo.
+    "REGISTRO_NO_INSTALADO",
+    # El registro contesto una decision que idempotencia.py no conoce
+    # (19/09/2026). Entra por el mismo motivo que los de arriba: es el codigo
+    # negandose a ejecutar ante una respuesta que no entiende, no la
+    # herramienta fallando. Sin esto, 'escalar_si_falla' le diria al cliente
+    # que fallo un sistema -- cuando lo que paso es que el sistema prefirio no
+    # actuar.
+    "DECISION_DE_RECLAMO_DESCONOCIDA",
+    # La frontera de acciones externas (paso 10.14A). Mismo motivo que todos
+    # los de arriba: es el codigo impidiendo la llamada -- sin tenant valido,
+    # sin permiso, o con un permiso de otra empresa-- no un tercero fallando.
+    # Ver nucleo/seguridad/frontera.py.
+    "ACCION_EXTERNA_SIN_TENANT",
+    "ACCION_EXTERNA_SIN_AUTORIZAR",
+    "ACCION_EXTERNA_TENANT_DISTINTO",
+    # M06-A (21/09/2026): la puerta de las irreversibles. Una irreversible sin
+    # su aprobacion atada, un permiso critico usado para otra accion, las
+    # previas que ya no se cumplen al aprobar, y un contexto que no coincide
+    # con lo aprobado. Todos son el codigo negandose, no un tercero fallando.
+    "IRREVERSIBLE_SIN_APROBACION_VINCULANTE",
+    "PERMISO_CRITICO_DE_OTRA_ACCION",
+    "PREVIAS_NO_VIGENTES_AL_APROBAR",
+    "CONTEXTO_DE_APROBACION_INCOHERENTE",
+    # M06-B (21/09/2026): el techo de autonomia. Mismo criterio.
+    "TECHO_AUTONOMIA_AUSENTE",
+    "TECHO_AUTONOMIA_INVALIDO",
+    "TECHO_AUTONOMIA_NO_LEGIBLE",
+    "TECHO_AUTONOMIA_NO_INSTALADO",
+    "TECHO_AUTONOMIA_DE_OTRO_TENANT",
+    "TECHO_AUTONOMIA_INSUFICIENTE",
+    "NIVEL_REQUERIDO_INVALIDO",
+    "APROBACION_HUMANA_REQUERIDA",
 })
 
 # Distinto de CODIGOS_MOTOR_GUARD a proposito, aunque a los ojos de

@@ -2,6 +2,8 @@ import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { getTicketFormOptions, updateTicket } from '$lib/server/v2/tickets.js';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
+import { autorDeSesion } from '$lib/server/v2/autor.js';
 
 /**
  * Proxy para marcar una conversacion escalada como atendida sin pasar por
@@ -22,7 +24,7 @@ export async function POST({ params, locals, fetch, cookies, request }) {
   }
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });
@@ -36,15 +38,29 @@ export async function POST({ params, locals, fetch, cookies, request }) {
       method: 'POST',
       headers: headersMotor({ 'Content-Type': 'application/json' }),
       // 'por' sale de la sesion, nunca del cuerpo que manda el navegador.
-      body: JSON.stringify({ tenant, por: locals.user.email })
+      // 'soltar' y la clave vienen de la pantalla; el autor, de la sesion.
+      // Antes 'soltar' se perdia aca: el motor volvia a TOMAR la conversacion
+      // y el boton "Soltar" no hacia nada (D22).
+      body: JSON.stringify({
+        tenant,
+        ...autorDeSesion(locals),
+        soltar: !!cuerpo?.soltar,
+        clave_operacion: typeof cuerpo?.clave_operacion === 'string' ? cuerpo.clave_operacion : undefined
+      })
     });
-    const datos = await resp.json();
+    const datos = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      return json({ error: datos.error || 'No se pudo guardar' }, { status: resp.status });
+      // El 409 viaja entero: 'codigo' y 'asignada_a' son lo que la pantalla
+      // necesita para decir que paso (otra persona la tomo primero) en vez de
+      // un error generico (B3.4).
+      return json({ error: datos.error || 'No se pudo guardar', codigo: datos.codigo,
+        asignada_a: datos.asignada_a }, { status: resp.status });
     }
 
     let asignado = null;
-    if (casoId) {
+    // Solo al TOMAR y solo si de verdad se tomo ahora: al soltar, o si el
+    // motor no cambio nada, asignarse el ticket seria mentirle al CRM.
+    if (casoId && !cuerpo?.soltar && datos.aplicada) {
       try {
         const { owners } = await getTicketFormOptions({ cookies });
         const propio = owners.find(

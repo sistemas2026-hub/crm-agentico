@@ -16,15 +16,8 @@
  * el que garantiza. Duplicarlas en JavaScript daría dos lugares donde
  * corregirlas y uno donde olvidarse.
  */
-import { env } from '$env/dynamic/private';
 import { headersMotor } from './motor-headers.js';
-
-function destino() {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) return null;
-  return { baseUrl, tenant };
-}
+import { destinoDelAsistente } from './tenant.js';
 
 /**
  * @typedef {{
@@ -47,8 +40,8 @@ function destino() {
  *
  * @returns {Promise<{ guias_tv: GuiaTV[], tipos_conexion: string[] } | null>}
  */
-export async function leerGuiasTV() {
-  const cfg = destino();
+export async function leerGuiasTV(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return null;
   try {
     const resp = await fetch(
@@ -75,8 +68,8 @@ export async function leerGuiasTV() {
  *
  * @param {GuiaTV[]} guias
  */
-export async function guardarGuiasTV(guias) {
-  const cfg = destino();
+export async function guardarGuiasTV(locals, fetch, guias) {
+  const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/guias-tv`, {

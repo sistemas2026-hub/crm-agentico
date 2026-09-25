@@ -90,6 +90,14 @@ def un_turno(veredicto: dict) -> list[tuple]:
 
     postizos = {
         p: {"estado_de_conversacion_abierta": lambda *a, **k: None,
+                # B3.3b: el control se lee de la base en cada turno. Se deriva del
+                # mismo estado previo, con la regla de legado de control_efectivo.
+                "control_de_conversacion_abierta": lambda *a, **k: (
+                    None if not None else {
+                        "conversation_id": None.get("conversation_id") or "conv-1",
+                        "control_efectivo": "humano" if (None.get("escalada")
+                                                         and None.get("necesita_atencion_humana")) else "ia",
+                        "control_motivo": None, "relevo_version": 0}),
             "atendida_por_humano": lambda *a, **k: False,
             "registrar_mensaje": lambda *a, **k: ("conv-1", "msg-1"),
             "conversacion_vencida": lambda *a, **k: False,

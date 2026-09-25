@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /**
  * Proxy hacia el motor del asistente para listar el catalogo de herramientas
@@ -11,9 +12,9 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  * servidor, nunca del cliente.
  */
 
-function baseUrlYTenant() {
+async function baseUrlYTenant(locals, fetch) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) return null;
   return { baseUrl, tenant };
 }
@@ -24,7 +25,7 @@ export async function GET({ locals, fetch }) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const cfg = baseUrlYTenant();
+  const cfg = await baseUrlYTenant(locals, fetch);
   if (!cfg) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });
@@ -52,7 +53,7 @@ export async function POST({ request, locals, fetch }) {
     return json({ error: 'Solo un administrador puede crear agentes.' }, { status: 403 });
   }
 
-  const cfg = baseUrlYTenant();
+  const cfg = await baseUrlYTenant(locals, fetch);
   if (!cfg) {
     return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
       { status: 500 });

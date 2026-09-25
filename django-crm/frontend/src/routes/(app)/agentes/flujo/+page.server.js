@@ -7,9 +7,9 @@ import {
 const SOLO_ADMIN = 'Solo un administrador puede cambiar el flujo.';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ locals }) {
+export async function load({ fetch, locals }) {
   return {
-    flujo: await leerFlujoDerivacion(),
+    flujo: await leerFlujoDerivacion(locals, fetch),
     // Mismo criterio que el resto de /settings: esto esconde los controles,
     // no es el permiso -- la action lo vuelve a comprobar.
     can_edit: locals.profile?.role === 'ADMIN'
@@ -24,7 +24,7 @@ export const actions = {
    * deja enganchado pero invisible para el router (nunca le llegaria una
    * conversacion), y ese estado a medias es dificil de diagnosticar despues.
    */
-  async guardar({ request, locals }) {
+  async guardar({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN') return fail(403, { error: SOLO_ADMIN });
 
     const form = await request.formData();
@@ -39,7 +39,7 @@ export const actions = {
     }
 
     try {
-      await guardarFlujoDerivacion(destinos, atiende);
+      await guardarFlujoDerivacion(locals, fetch, destinos, atiende);
     } catch (/** @type {any} */ err) {
       return fail(400, { error: err?.message || 'No se pudo guardar el flujo.' });
     }

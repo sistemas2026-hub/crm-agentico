@@ -36,6 +36,23 @@ sys.path.insert(0, str(RAIZ))
 import yaml  # noqa: E402
 
 from nucleo import reloj  # noqa: E402
+
+# EL INTERRUPTOR DE AUTONOMIA, DECLARADO (15/09/2026)
+# ---------------------------------------------------
+# Desde la fase 1 de seguridad, el reloj le pregunta al interruptor de cada
+# tenant antes de trabajar (nucleo/seguridad/interruptor.py). Esta prueba corre
+# SIN base, asi que esa lectura falla y el reloj --haciendo exactamente lo que
+# debe-- no ejecuta nada. Sin esta declaracion, todo lo que este archivo afirma
+# sobre los dos trabajos quedaria probando el fail-closed y nada mas.
+#
+# Se sustituye la RESPUESTA de la base, no el gate: el camino del codigo sigue
+# siendo el real. Que el reloj SI corta cuando el interruptor esta tirado lo
+# prueba tests/test_interruptor_autonomia.py, seccion 8.
+from nucleo.persistencia import db as _persistencia_de_prueba  # noqa: E402
+
+_persistencia_de_prueba.estado_autonomia = lambda tenant: {
+    "estado": "activo", "estado_anterior": None, "actor": "prueba",
+    "motivo": "", "creado_en": None}
 from nucleo.config.schema import ImportacionTickets  # noqa: E402
 
 fallos: list[str] = []
@@ -68,9 +85,13 @@ class Espia:
         return dict(self._devuelve or {})
 
 
-def config_falsa(horas=0, cada_horas=0):
+def config_falsa(horas=0, cada_horas=0, horas_inactividad=0):
     return SimpleNamespace(
         escalamiento=SimpleNamespace(cerrar_sin_respuesta_horas=horas),
+        # El tercer trabajo del reloj (cerrar lo que atendio solo el
+        # asistente) lee su plazo de aca. En 0 no hace nada, que es el default
+        # y lo que quiere la mayoria de los escenarios.
+        limites=SimpleNamespace(horas_inactividad_cierra=horas_inactividad),
         # El objeto REAL del schema, no un doble: 'debe_correr' es la compuerta
         # que hay que probar, y probarla contra un namespace inventado no
         # probaria la compuerta que corre en produccion.
@@ -80,11 +101,13 @@ def config_falsa(horas=0, cada_horas=0):
 class Escenario:
     """Cambia el mundo de 'reloj' por espias y lo deja como estaba al salir."""
 
-    def __init__(self, tenants, configs, vencidas=None, barrido=None):
+    def __init__(self, tenants, configs, vencidas=None, barrido=None,
+                 inactivas=None):
         self.tenants = tenants
         self.configs = configs          # tenant -> config, o una excepcion
         self.vencidas = vencidas or Espia({"revisadas": 0, "cerradas": 0})
         self.barrido = barrido or Espia({"creados": 0})
+        self.inactivas = inactivas or Espia({"revisadas": 0, "cerradas": 0})
         self.db = Espia([])
 
     def _cargar(self, tenant, raiz=None):
@@ -106,12 +129,21 @@ class Escenario:
             # prueba necesitaria Postgres para responder algo que no es sobre
             # Postgres.
             "consulta": db.conversaciones_sin_respuesta,
+            # Lo mismo para el tercer trabajo: sin espiarla, el seco de las
+            # inactivas de la IA saldria a Postgres a responder algo que no es
+            # sobre Postgres. Y sin esto el trabajo pasaba la prueba solo
+            # porque degrada en silencio cuando la base no contesta -- que es
+            # justo lo contrario de estar probado.
+            "consulta_ia": db.conversaciones_ia_inactivas,
+            "inactivas": reloj.operativo.cerrar_inactivas_de_ia,
         }
         reloj.tenants_conocidos = lambda: list(self.tenants)
         reloj.fuente.cargar = self._cargar
         reloj.operativo.cerrar_vencidas = self.vencidas
         reloj.importacion_io.barrido = self.barrido
         db.conversaciones_sin_respuesta = self.db
+        db.conversaciones_ia_inactivas = lambda t, h: []
+        reloj.operativo.cerrar_inactivas_de_ia = self.inactivas
         reloj._ultimo_intento_importacion.clear()
         return self
 
@@ -120,6 +152,8 @@ class Escenario:
         reloj.fuente.cargar = self._previo["cargar"]
         reloj.operativo.cerrar_vencidas = self._previo["vencidas"]
         reloj.importacion_io.barrido = self._previo["barrido"]
+        self._db_mod.conversaciones_ia_inactivas = self._previo["consulta_ia"]
+        reloj.operativo.cerrar_inactivas_de_ia = self._previo["inactivas"]
         self._db_mod.conversaciones_sin_respuesta = self._previo["consulta"]
         reloj._ultimo_intento_importacion.clear()
         return False
@@ -309,6 +343,43 @@ try:
             "y aun asi la importacion corre")
 
     # ------------------------------------------------------------------
+    #  5-bis. EL TERCER TRABAJO: cerrar lo que atendio solo el asistente
+    # ------------------------------------------------------------------
+    print("\n" + "cerrar las inactivas de la IA")
+
+    # El reloj SIEMPRE delega; quien decide si corresponde cerrar es el
+    # barrido, que tiene los dos interruptores y la frontera temporal. La
+    # regla vive en UN solo lugar a proposito: '_vencimientos' arma su seco a
+    # mano porque su barrido no tiene modo simulacion, y eso ya son dos
+    # motores -- uno que decide y otro que explica. Aca no se repite.
+    with Escenario(["a"], {"a": config_falsa(horas=0, horas_inactividad=24)}) as e:
+        reloj.main(["--once"])
+    revisar(len(e.inactivas.llamadas) == 1,
+            "el reloj delega en el barrido, que es quien decide")
+
+    with Escenario(["a"], {"a": config_falsa(horas=0, horas_inactividad=24)}) as e:
+        reloj.main(["--once", "--dry-run"])
+    revisar(e.inactivas.llamadas
+            and e.inactivas.llamadas[-1][1].get("simular") is True,
+            "y en seco le pasa 'simular=True' en vez de reimplementar la regla")
+
+    # EL AISLAMIENTO, que es a lo que existe este archivo. Sin esto, el tercer
+    # trabajo entro al reloj sin estar en la lista que la docstring promete.
+    with Escenario(["a"], {"a": config_falsa(horas=24, horas_inactividad=24, cada_horas=1)},
+                   inactivas=Espia(revienta=RuntimeError("se cayo el cierre de inactivas"))) as e:
+        reloj.main(["--once"])
+    revisar(len(e.vencidas.llamadas) == 1,
+            "si el cierre de inactivas revienta, los vencimientos corren igual")
+    revisar(len(e.barrido.llamadas) >= 1,
+            "y la importacion tambien")
+
+    with Escenario(["a"], {"a": config_falsa(horas=24, horas_inactividad=24, cada_horas=1)},
+                   vencidas=Espia(revienta=RuntimeError("se cayeron los vencimientos"))) as e:
+        reloj.main(["--once"])
+    revisar(len(e.inactivas.llamadas) == 1,
+            "y al reves: si revientan los vencimientos, las inactivas se cierran igual")
+
+
     #  6. AISLAMIENTO DE FALLOS
     # ------------------------------------------------------------------
     print("\naislamiento: un fallo no puede llevarse nada por delante")

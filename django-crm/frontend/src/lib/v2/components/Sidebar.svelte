@@ -104,6 +104,7 @@
         // distintas y por eso son dos entradas.
         { href: '/centro-mando', label: 'Centro de mando', icon: Radar },
         { href: '/agentes', label: 'Agentes', icon: Network },
+        { href: '/supervisor-noc', label: 'Supervisor NOC IA', icon: Radar },
         { href: '/manual', label: 'Manual', icon: ListChecks },
         // La bandeja donde se decide la factibilidad de cada solicitud.
         // Existia desde el 02/09 y NO estaba enlazada en ningun lado: solo

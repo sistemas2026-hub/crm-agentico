@@ -7,8 +7,8 @@ import {
 } from '$lib/server/v2/asistente-config.js';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ locals }) {
-  const config = await leerConfiguracionAsistente();
+export async function load({ fetch, locals }) {
+  const config = await leerConfiguracionAsistente(locals, fetch);
   return {
     config,
     // El motor no tiene identidad propia: quien decide si esto se puede
@@ -21,7 +21,7 @@ export async function load({ locals }) {
 
 /** @type {import('./$types').Actions} */
 export const actions = {
-  async update({ request, locals }) {
+  async update({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN') {
       return fail(403, {
         update: { error: 'Solo un administrador puede cambiar la personalidad del asistente.' }
@@ -37,7 +37,7 @@ export const actions = {
     };
 
     try {
-      await guardarPersonaAsistente(valores);
+      await guardarPersonaAsistente(locals, fetch, valores);
     } catch (/** @type {any} */ err) {
       // El texto viene del validador del motor y nombra el campo y el motivo.
       // Se pasa tal cual en vez de reemplazarlo por un mensaje generico: es la
@@ -53,7 +53,7 @@ export const actions = {
     return { updated: true };
   },
 
-  async updateEmpresa({ request, locals }) {
+  async updateEmpresa({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN') {
       return fail(403, {
         updateEmpresa: { error: 'Solo un administrador puede cambiar esta informacion.' }
@@ -64,7 +64,7 @@ export const actions = {
     const descripcion = form.get('descripcion')?.toString().trim() ?? '';
 
     try {
-      await guardarDescripcionEmpresa(descripcion);
+      await guardarDescripcionEmpresa(locals, fetch, descripcion);
     } catch (/** @type {any} */ err) {
       return fail(400, {
         updateEmpresa: { error: err?.message || 'No se pudo guardar.' }
@@ -74,7 +74,7 @@ export const actions = {
     return { updatedEmpresa: true };
   },
 
-  async updatePlazo({ request, locals }) {
+  async updatePlazo({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN') {
       return fail(403, {
         updatePlazo: { error: 'Solo un administrador puede cambiar este plazo.' }
@@ -88,7 +88,7 @@ export const actions = {
     }
 
     try {
-      await guardarPlazoVisitaTecnica(dias);
+      await guardarPlazoVisitaTecnica(locals, fetch, dias);
     } catch (/** @type {any} */ err) {
       return fail(400, {
         updatePlazo: { error: err?.message || 'No se pudo guardar el plazo.' }

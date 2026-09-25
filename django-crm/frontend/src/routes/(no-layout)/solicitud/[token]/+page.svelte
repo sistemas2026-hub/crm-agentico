@@ -144,7 +144,7 @@
 <svelte:head><title>Solicitud de servicio · Rapilink</title></svelte:head>
 
 <PortalShell>
-  <div class="hoja">
+  <div class="hoja" data-privado>
     {#if data.vencida || data.invalida}
       <section class="tarjeta centro">
         <Clock size={22} />

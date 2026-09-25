@@ -16,6 +16,15 @@ declare global {
         role?: string;
         is_organization_admin?: boolean;
       };
+      /**
+       * De que empresa son los datos que puede pedir quien inicio sesion.
+       *
+       * Lo resuelve `lib/server/v2/tenant.js::tenantDeLaSesion` una vez por
+       * peticion y lo deja aca para que las siguientes lecturas no vuelvan a
+       * preguntarle al motor. Es cache de request, no una fuente: quien lo
+       * necesita llama a `tenantDeLaSesion`, nunca lee este campo directo.
+       */
+      tenant?: string;
     }
     // interface PageData {}
     // interface PageState {}

@@ -33,7 +33,7 @@ from common.views.organization_views import (
     ProfileView,
 )
 from common.views.pack_views import PackApplyView, PackListView, PackSampleDataView
-from common.views.password_views import ClaveDeUsuarioView, MiClaveView
+from common.views.password_views import MiClaveView
 from common.views.pat_views import (
     OrgAccessTokenDetailView,
     OrgAccessTokenListView,
@@ -52,6 +52,7 @@ from common.views.team_views import TeamsDetailView, TeamsListView
 from common.views.user_views import (
     GetTeamsAndUsersView,
     UserDetailView,
+    UserPasswordView,
     UsersListView,
     UserStatusView,
 )
@@ -137,11 +138,31 @@ urlpatterns = [
     path("users/", UsersListView.as_view()),
     path("user/<uid:pk>/", UserDetailView.as_view()),
     path("user/<uid:pk>/status/", UserStatusView.as_view()),
-    path(
-        "user/<uid:pk>/password/",
-        ClaveDeUsuarioView.as_view(),
-        name="clave_de_usuario",
-    ),
+    # DOS VISTAS PARA ESTA MISMA RUTA, Y GANA LA QUE YA CORRE (24/09/2026).
+    #
+    # Las dos ramas implementaron "un admin le define la clave a otra persona"
+    # sin saber la una de la otra: 'UserPasswordView' (user_views.py) en la
+    # rama que despliega, y 'ClaveDeUsuarioView' (password_views.py) en la de
+    # campo. No es una preferencia de estilo -- el contrato del cuerpo difiere:
+    # {"password": ...} contra {"nueva": ...}.
+    #
+    # Se enruta la desplegada porque es la que el frontend de produccion ya
+    # llama y la que tiene pruebas afirmando el efecto
+    # (common/tests/test_users.py::TestUserPasswordView). Cambiar el nombre del
+    # campo dejaria la pantalla de equipo rota hasta que las dos partes salgan
+    # juntas, y un cambio de contrato no es algo que deba colarse dentro de una
+    # fusion.
+    #
+    # 'ClaveDeUsuarioView' queda SIN enrutar y no se borra: trae dos guardas
+    # que esta no tiene --se niega si la cuenta pertenece ademas a otra
+    # organizacion, y prohibe que un admin se reinicie la propia desde aca-- y
+    # valen la pena. Plegarlas dentro de 'UserPasswordView', con su prueba, es
+    # un trabajo propio; hacerlo aca escondido seria el cambio de conducta que
+    # nadie revisa.
+    #
+    # 'MiClaveView' (POST /api/auth/password/, la propia, exige la actual) no
+    # entra en esto: es otra ruta y sigue igual.
+    path("user/<uid:pk>/password/", UserPasswordView.as_view()),
     # Documents
     path("documents/", DocumentListView.as_view()),
     path("documents/<uid:pk>/", DocumentDetailView.as_view()),

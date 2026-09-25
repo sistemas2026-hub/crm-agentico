@@ -61,6 +61,51 @@ from nucleo.config import cargar_config                            # noqa: E402
 from nucleo.modelo import cliente, motor                           # noqa: E402
 from nucleo.seguridad.verificacion import Sesion                   # noqa: E402
 
+# EL INTERRUPTOR DE AUTONOMIA, DECLARADO (15/09/2026)
+# ---------------------------------------------------
+# Desde la fase 1 de seguridad, toda escritura pasa por
+# nucleo/seguridad/interruptor.py, que lee una fila de la base. Esta prueba
+# corre SIN base, asi que esa lectura falla y el gate --haciendo exactamente lo
+# que debe-- bloquea la accion; sin esta declaracion, lo que se probaria aca es
+# el fail-closed y no lo que el archivo dice probar.
+#
+# Se declara 'activo' y no se desactiva el gate: lo que se sustituye es la
+# RESPUESTA de la base, igual que se sustituye la respuesta de WispHub mas
+# abajo. El camino del codigo es el real.
+from nucleo.persistencia import db as _persistencia_de_prueba      # noqa: E402
+
+_persistencia_de_prueba.estado_autonomia = lambda tenant: {
+    "estado": "activo", "estado_anterior": None, "actor": "prueba",
+    "motivo": "", "creado_en": None}
+_persistencia_de_prueba.registrar_auditoria = lambda *a, **k: None
+_persistencia_de_prueba.reclamar_operacion_externa = (
+    lambda *a, **k: {"decision": "ejecutar", "fila": {"intentos": 1}})
+_persistencia_de_prueba.finalizar_operacion_externa = lambda *a, **k: None
+
+# --- AUTONOMIA 2 (19/09/2026) ---------------------------------------------
+# Desde este bloque, una escritura autonoma necesita ADEMAS del interruptor:
+# la etapa encendida, el prerequisito de B-7 y una autorizacion granular de ESA
+# herramienta (nucleo/seguridad/autonomia2.py y autorizacion.py). Esta prueba
+# no trata de eso, asi que declara las respuestas igual que declara el
+# interruptor arriba -- se sustituye la RESPUESTA de la base, nunca el gate.
+# El camino del codigo sigue siendo el real: frontera.autonoma() consulta las
+# tres, y quien las prueba de verdad es tests/test_autonomia2.py.
+import os                                                           # noqa: E402
+
+os.environ["AUTONOMIA_2_ACTIVA"] = "1"
+_persistencia_de_prueba.secreto_jwt_en_base = lambda: ""
+_persistencia_de_prueba.nivel_autonomia = lambda tenant: {
+    "nivel": 2, "nivel_anterior": None, "organization_id": "org-prueba", "org_consultada": "org-prueba", "actor": "prueba", "motivo": "",
+    "creado_en": None}
+_persistencia_de_prueba.autorizacion_herramienta = lambda tenant, herramienta: {
+    "id": "00000000-0000-0000-0000-000000000001", "herramienta": herramienta,
+    "estado": "autorizada", "estado_anterior": None, "nivel_maximo": 2,
+    "vigente_desde": None, "vigente_hasta": None, "autorizado_por": "prueba",
+    "motivo": "", "limites": {}, "creado_en": None}
+_persistencia_de_prueba.registrar_ejecucion_autonoma = lambda *a, **k: None
+
+
+
 fallos: list[str] = []
 
 
@@ -95,7 +140,11 @@ class ModeloGuionado:
 
 def correr(guion, catv="Disabled"):
     """
-    Devuelve (herramientas_intentadas, ejecutadas, llamadas_http).
+    Devuelve (herramientas_intentadas, ejecutadas, llamadas_http, propuestas).
+
+    Desde M06-A (21/09/2026) activar_catv exige aprobacion humana: pedida en
+    la conversacion queda PROPUESTA en la cola, no se ejecuta. 'propuestas'
+    son las que quedaron en la cola; 'ejecutadas' excluye esas.
 
     'catv' es lo que contesta la OLT. Es el dato del que cuelga la
     precondicion, asi que es el unico parametro que hace falta variar.
@@ -117,9 +166,17 @@ def correr(guion, catv="Disabled"):
     # 'consultar_plan_tv' declara cache: sin esto la prueba pide la base solo
     # para leer una cache vacia. Devolver None es "no cacheado", que es
     # justo lo que hace falta para que se ejecute la llamada.
+    propuestas = []
+
+    def _proponer(tenant, herramienta, argumentos, *a, **k):
+        propuestas.append(herramienta)
+        return f"prop-{len(propuestas)}", False  # M06-F: firma de B5, (id, ya_existia)
+
     originales = (motor.cliente.chat, motor.ejecutor_http.ejecutar,
                   motor.catalogo_habilidades.indice_de,
-                  motor.persistencia.leer_cache, motor.persistencia.guardar_cache)
+                  motor.persistencia.leer_cache, motor.persistencia.guardar_cache,
+                  motor.persistencia.guardar_accion_propuesta)
+    motor.persistencia.guardar_accion_propuesta = _proponer
     motor.cliente.chat = doble
     motor.ejecutor_http.ejecutar = _http
     motor.catalogo_habilidades.indice_de = lambda *a, **k: []
@@ -134,16 +191,18 @@ def correr(guion, catv="Disabled"):
     finally:
         (motor.cliente.chat, motor.ejecutor_http.ejecutar,
          motor.catalogo_habilidades.indice_de,
-         motor.persistencia.leer_cache, motor.persistencia.guardar_cache) = originales
+         motor.persistencia.leer_cache, motor.persistencia.guardar_cache,
+         motor.persistencia.guardar_accion_propuesta) = originales
 
     intentadas = [r["herramienta"] for r in registro]
     ejecutadas = [r["herramienta"] for r in registro
-                  if not r.get("es_bloqueo") and not r.get("codigo_error")]
-    return intentadas, ejecutadas, http_hechas
+                  if not r.get("es_bloqueo") and not r.get("codigo_error")
+                  and not r.get("accion_id")]
+    return intentadas, ejecutadas, http_hechas, propuestas
 
 
 print("=" * 74)
-print(" ENCENDER LA TV  --  se ejecuta cuando se pide, y una sola vez")
+print(" ENCENDER LA TV  --  se PROPONE cuando corresponde, y una sola vez")
 print("=" * 74)
 
 # ---------------------------------------------------------------------------
@@ -163,30 +222,34 @@ for rol in ("soporte_tecnico_cliente", "soporte"):
               f"esta en el catalogo de {rol}")
 
 # ---------------------------------------------------------------------------
-print("\n== 2. cuando el modelo la pide, SE EJECUTA ==")
-# La guarda de confirmacion no puede volverse un bloqueo silencioso: el
-# cliente queda sin TV y en la traza no se ve por que.
+print("\n== 2. cuando el modelo la pide, queda PROPUESTA (M06-A) ==")
+# La guarda no puede volverse un bloqueo silencioso: si el caso esta bien, el
+# pedido tiene que llegar a la COLA para que una persona lo apruebe. Hasta
+# M06-A (21/09/2026) aca se afirmaba que se ejecutaba; la decision de negocio
+# es que el equipo del cliente exige aprobacion humana por operacion.
 # El motor exige que la traza PRUEBE las dos cosas antes de dejarla escribir:
 # que el plan incluya TV y que el puerto este apagado. Asi que el guion las
 # pide en orden, como lo hace el agente real.
 PREVIAS = [("", [("consultar_plan_tv", {"id_plan": "173064"})]),
            ("", [("consultar_estado_catv", {})])]
 
-intentadas, ejecutadas, http = correr(PREVIAS + [
+intentadas, ejecutadas, http, propuestas = correr(PREVIAS + [
     ("", [("activar_catv", {})]),
-    ("Ya quedo activada. Ahora hay que volver a buscar los canales.", []),
+    ("Quedo solicitada; un colaborador la tiene que aprobar.", []),
 ])
-comprobar("activar_catv" in ejecutadas,
-          "con el plan confirmado y el puerto en Disabled, corre de verdad")
-comprobar(http.count("activar_catv") == 1,
-          f"y sale UNA escritura al proveedor ({http.count('activar_catv')})")
+comprobar(propuestas == ["activar_catv"],
+          f"con el plan confirmado y el puerto en Disabled, queda en la cola "
+          f"({propuestas})")
+comprobar("activar_catv" not in ejecutadas and http.count("activar_catv") == 0,
+          f"y en la conversacion NO sale ninguna escritura al proveedor "
+          f"({http.count('activar_catv')})")
 
 # ---------------------------------------------------------------------------
 print("\n== 2b. con el puerto ENCENDIDO, el motor la bloquea ==")
 # Esto es mas fuerte que el caso dorado C4, que afirma que el modelo no lo
 # intenta. Aca lo intenta A PROPOSITO y el codigo lo frena igual: la
 # precondicion exige catv='Disabled' y el puerto dice 'Enabled'.
-intentadas, ejecutadas, http = correr(PREVIAS + [
+intentadas, ejecutadas, http, propuestas = correr(PREVIAS + [
     ("", [("activar_catv", {})]),
     ("Del lado nuestro la señal sale bien.", []),
 ], catv="Enabled")
@@ -196,24 +259,27 @@ comprobar("activar_catv" not in ejecutadas,
           "pero el motor NO la ejecuto: la precondicion exige 'Disabled'")
 comprobar("activar_catv" not in http,
           "al equipo del cliente no le llego ninguna escritura")
+comprobar(propuestas == [],
+          "y ni siquiera quedo en la cola: una precondicion fallida no se propone")
 
 # ---------------------------------------------------------------------------
-print("\n== 3. la segunda vez NO se ejecuta ==")
+print("\n== 3. la segunda vez NO se vuelve a proponer ==")
 # El cliente insiste en que sigue sin ver nada y el modelo lo vuelve a pedir.
 # Encender lo que ya esta encendido no arregla nada y escribe otra vez sobre
 # el equipo de alguien.
-intentadas, ejecutadas, http = correr(PREVIAS + [
+intentadas, ejecutadas, http, propuestas = correr(PREVIAS + [
     ("", [("activar_catv", {})]),
     ("", [("activar_catv", {})]),
-    ("Del lado nuestro ya quedo. Probemos la sintonizacion.", []),
+    ("Ya quedo solicitada. Hay que esperar la aprobacion.", []),
 ])
 comprobar(intentadas.count("activar_catv") == 2,
           "el modelo la pidio dos veces (que es lo que pasa en vivo)")
-comprobar(ejecutadas.count("activar_catv") == 1,
-          "pero se EJECUTO una sola: el limite la freno")
-comprobar(http.count("activar_catv") == 1,
-          f"y al equipo del cliente le llego una sola escritura "
-          f"({http.count(chr(39)+chr(39)) if False else http.count('activar_catv')})")
+comprobar(propuestas.count("activar_catv") == 1,
+          f"pero quedo propuesta UNA sola vez: el limite freno la segunda "
+          f"({propuestas.count('activar_catv')})")
+comprobar(http.count("activar_catv") == 0,
+          f"y al equipo del cliente no le llego ninguna escritura "
+          f"({http.count('activar_catv')})")
 
 print()
 if fallos:
@@ -221,4 +287,4 @@ if fallos:
     for f in fallos:
         print(f"   - {f}")
     raise SystemExit(1)
-print("[OK] Se enciende cuando se pide, y una sola vez.")
+print("[OK] Se propone cuando corresponde, una sola vez, y no escribe sin aprobacion.")

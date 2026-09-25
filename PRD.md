@@ -462,6 +462,14 @@ Primer caso concreto de escritura donde el propio colaborador de soporte propone
 
 **Por qué no se reusó `requiere_confirmacion`.** Ese campo existe desde antes y el validador lo *fuerza* a `true` en toda herramienta de escritura (`if not solo_lectura and not requiere_confirmacion: raise ValueError`) — pero nunca se aplicó en tiempo de ejecución (`motor.py` no lo mira). Herramientas ya en producción y deliberadamente autónomas (`registrar_pago`, `activar_catv`, `crear_tag_crm`) lo llevan puesto solo para pasar la validación. Convertirlo en un gate real las hubiera frenado a todas de un día para el otro, sin que nadie lo pidiera. Por eso el gate nuevo es un campo separado y opt-in: `Herramienta.aprobacion_humana`, con su propia regla de coherencia (no tiene sentido en una herramienta `solo_lectura`).
 
+**Actualización 21/09/2026 (M06-A): las acciones irreversibles exigen aprobación humana atada a la acción.** Decisión de negocio: `registrar_pago` (R4) y `reiniciar_ont`, `activar_catv`, `cambiar_tipo_onu` (R3) exigen aprobación humana obligatoria. Se marcan `Herramienta.irreversible` y salen **solo** por `frontera.critica()`, que exige en orden: tenant → kill switch → etapa de Autonomía 2 (+B-7) → autorización granular (+nivel) → **aprobación persistida y atada** a tenant + herramienta + origen + huella canónica de los argumentos (`nucleo/seguridad/aprobacion.py`) → auditoría → permiso → idempotencia → último metro (`frontera.exigir` vuelve a comparar la huella contra lo que sale). Una irreversible que llegue al ejecutor por cualquier otro camino (conversación, panel, ruta de servicio, ejecutor directo) no sale.
+
+Una primera versión dejó las R3 sin gate porque la cola de aprobación no revalidaba las condiciones previas, no creaba la verificación posterior y había un defecto que registraba una verificación sobre una acción solo propuesta. Se corrigió el **mecanismo**, no la decisión: al aprobar se vuelven a **medir** las previas (fallan cerradas), la verificación se anota contra la conversación de origen (sin conversación no se aprueba), y una propuesta ya no deja verificación pendiente. Diferencias de conducta a tener presentes: (1) el kill switch **sí** frena una irreversible aprobada — `humana()` sigue sin mirarlo para todo lo demás; (2) la aprobación se persiste **antes** del efecto con compare-and-set, y si una barrera la frena queda `aprobada` con el código del bloqueo, sin reintentarse; (3) `fecha_pago` se fija al proponer; (4) al cliente nadie le avisa cuando se aprueba: se entera en su siguiente mensaje, por la verificación. `agregar_promesa_pago` (R4) queda con su aprobación anterior, no atada: no estaba en la decisión. Detalle en `M06-A_FRONTERA_AUTORIZACION.md`; las guardas son `tests/test_m06a_gate_critico.py` y `tests/test_m06a_frontera_autorizacion.py`.
+
+**Actualización 21/09/2026 (M06-B): techo de autonomía por niveles.** El kill switch sigue siendo binario (¿puede actuar sola?); lo acompaña un **techo** por empresa (¿hasta qué nivel?): 0 observar · 1 recomendar · 2 coordinar · 3 ejecutar autorizado. Tope de política global: 3, constante del núcleo (el 4 de M09-J, "crítico, siempre humano", lo gobierna el gate de irreversibles, no un número). Es el mismo `asistente.nivel_autonomia` de Autonomía 2, ahora consultado como paso propio de la frontera justo después del kill switch (`nucleo/seguridad/techo.py`) y leído en un solo lugar. **Acota, nunca autoriza**: una acción que lo pasa sigue necesitando etapa, autorización granular, aprobación si corresponde, idempotencia y último metro. Falla cerrado sin asumir nivel (sin fila, inválido, ilegible, de otra empresa → no ejecuta; antes "sin fila" se leía como 0). Cada herramienta exige un nivel (`Herramienta.nivel_autonomia`); ninguna lo declara todavía, así que el efectivo es el de siempre: 0 lectura, 2 escritura. Solo lo mueve `autonomia_operador` vía `cli/autonomia.py --techo N --desde M`, con compare-and-set y cada intento auditado en `asistente.techo_autonomia_intentos`. De paso se cerró un hueco: una herramienta con `aprobacion_humana` (p. ej. `agregar_promesa_pago`) ya no puede salir por la puerta autónoma. Detalle en `M06-B_TECHO_AUTONOMIA.md`.
+
+**Actualización 21/09/2026 (M06-C): aislamiento de la autorización y aprobación R4 completa.** `asistente.autorizacion_herramienta` y `asistente.ejecucion_autonoma` tenían GRANTs pero no RLS; ahora tienen RLS forzada por organización con el mismo patrón que el interruptor y el techo (el runtime lee autorizaciones y escribe su bitácora solo de su empresa; el operador autoriza y lee solo la suya). `agregar_promesa_pago` pasa a la puerta crítica (`irreversible`): todo R3 y R4 va atado. Y toda aprobación atada lleva un **sello** (hash de tenant, organización, herramienta, origen, huella y aprobador) escrito al aprobar y recalculado al ejecutar: antes el origen y el tenant solo se exigían "no vacíos", ahora se comparan. Detalle en `M06-C_AISLAMIENTO_Y_PROMESA.md`.
+
 **El mecanismo, genérico — no específico de tickets.** Cuando el modelo llama una herramienta con `aprobacion_humana: true`, `motor.py` no ejecuta nada contra la API externa: resuelve los argumentos (misma `_resolver_argumentos()` que usa la ejecución normal — filtros verificados, argumentos fijos, fechas automáticas, inyección de sesión) y guarda la propuesta en `asistente.acciones_propuestas` (`estado='pendiente'`), con un resumen legible (`Herramienta.plantilla_resumen`, ej. `"Crear ticket '{asunto}' para el servicio {servicio}"`). Al modelo le vuelve una instrucción explícita de no confirmar que ya se hizo. Un humano aprueba o rechaza desde `/acciones/propuestas` (tres endpoints nuevos en `nucleo/canales/api.py`); solo al aprobar se ejecuta de verdad, vía `motor.ejecutar_accion_aprobada()`, contra la herramienta HTTP real del catálogo. Aprobar registra el resultado (éxito o error de la API) pero el estado queda `'aprobada'` en ambos casos — aprobar es "un humano autorizó la intención", no "necesariamente salió bien".
 
 **`espejar_campos` (nuevo, genérico).** WispHub pide el mismo valor duplicado en dos campos (`asunto`/`asuntos_default`, `departamento`/`departamentos_default`) — capricho de su API, no algo que el modelo deba resolver ni que amerite lógica especial. `Herramienta.espejar_campos: {origen: destino}` copia el valor ya resuelto de un campo a otro, como paso final de `_resolver_argumentos()`.
@@ -569,40 +577,68 @@ Tres defectos salieron de esa corrida, ninguno visible en lo que el asistente co
 
 ---
 
-### 8.11 Bandeja de conversaciones — qué le falta para ser un inbox de soporte (septiembre 2026)
+### 8.11 Bandeja de conversaciones — el relevo entre la IA y una persona (reescrita el 16/09/2026)
 
-Comparación contra Intercom, Zendesk, Front y respond.io. **No se copia una bandeja entera**: se toman las funciones de operación diaria que faltan, y se descartan las que resuelven problemas de escala que esta operación todavía no tiene.
+**Por qué se reescribió.** La versión anterior era una tabla de 18 funciones copiadas de Intercom, Zendesk, Front y respond.io, y tenía dos errores de método:
 
-Lo que ya tiene y esos productos no traen tan integrado: **el diagnóstico de lo que hizo realmente la IA** — qué ejecutó, qué frenó el código y qué falló un tercero (§8.2, `es_bloqueo`).
+1. **Esos productos están hechos para que una persona atienda desde el primer mensaje**, así que lo que optimizan es escribir rápido (citar, macros, atajos). Aquí la IA atiende primero y la persona entra en el relevo: recibe un caso, entiende qué hizo la IA, actúa, y lo devuelve o lo cierra. Las etapas que no existen en un inbox genérico —devolver a la IA, intervenir sin escalada, aprobar lo que la IA propone— no estaban en la lista, y "citar un mensaje" figuraba como lo siguiente mientras el relevo estaba roto.
+2. **Frenaba funciones con datos de Rapilink** (cuántos operadores tiene, ~5 conversaciones por día). Eso varía por empresa —una trabaja con 1 operador, otra con 10— y la bandeja es la misma para todas. Es el mismo error que la regla multi-tenant prohíbe para la configuración, aplicado a la priorización.
 
-| # | Funcionalidad | Estado |
-|---|---------------|--------|
-| 1 | Responder citando un mensaje (`context.message_id` de Meta) | Falta — **es lo siguiente** |
-| 2 | Estados Enviado/Entregado/Leído/Error + reintentar | ✅ Hecho (06/09/2026) |
-| 3 | Borradores persistentes (respuesta y nota, por separado) | Falta |
-| 4 | "Otro operador está escribiendo" | Falta — **depende de cuántas personas usan la bandeja** |
-| 5 | Respuestas rápidas / macros (mensaje + etiqueta + derivar + posponer) | Falta — **bloqueado a propósito**, ver abajo |
-| 6 | Ventana de WhatsApp de 24 h visible + selector de plantillas | ✅ Hecho (08/09/2026, §8.12) |
-| 7 | Posponer / snooze, con reapertura si el cliente responde | Falta |
-| 8 | @Menciones en notas internas (colaborador ≠ responsable) | Falta — depende de #4 |
-| 9 | Transcripción de audios | Falta — alto valor para un ISP, decidir proveedor y costo por minuto |
-| 10 | Galería de adjuntos del caso | Falta |
-| 11 | Buscar **dentro de** los mensajes | Falta — hoy el buscador filtra la lista ya cargada |
-| 12 | Acciones masivas | Falta — problema de escala |
-| 13 | SLA de primera respuesta / siguiente respuesta | Falta — problema de escala |
-| 14 | Atajos de teclado / Command-K | Falta — problema de escala |
-| 15 | Traducir mensajes | Falta |
-| 16 | Enlace directo a un mensaje | Falta |
-| 17 | Mensajes interactivos de WhatsApp (botones, listas) | Falta — sirve al asistente más que al operador |
-| 18 | Llamadas desde el inbox | Falta — posterior |
-| — | **"Responder con contexto técnico"**: borrador para el humano armado desde la traza | Falta — es lo único de esta lista que ningún inbox genérico puede tener de fábrica |
+**Fuente de verdad del diseño: [SPEC/CONTRATO_RELEVO_IA_HUMANO.md](SPEC/CONTRATO_RELEVO_IA_HUMANO.md).** Esta sección resume el porqué y el orden; el modelo de estados, las transiciones, las invariantes, los 16 defectos con su evidencia y los tests viven en el contrato. Si difieren, manda el contrato.
 
-**Dos cosas que gobiernan el orden, y no son la madurez del producto:**
+**Cómo se llegó.** Dos revisiones independientes del código coincidieron en el hueco principal (no se puede devolver a la IA desde la bandeja). Después, una auditoría externa (sin acceso al repo) marcó que D1–D7 no eran siete problemas sino síntomas de una carencia: **no existía un modelo explícito del relevo IA ↔ humano**, solo cinco booleanos con combinaciones ambiguas. El contrato se escribió sobre un mapeo del código en `92ebe78` y pasó una ronda de auditoría (arquitectura base aprobada; 14 correcciones incorporadas en la versión 2).
 
-- **El volumen real.** Medido el 08/09/2026 sobre 21 días: **5 días con tráfico, ~5 conversaciones por día**, con un solo día de 106 turnos. Acciones masivas sobre 29 casos, SLA, carga equilibrada y atajos para "cientos de chats" resuelven un problema que esta operación no tiene. Construirlos ahora es mantenerlos durante todo el período en que no hacen nada.
-- **Macros escriben `tenant_config`.** Por la regla multi-tenant (§7), las macros de una empresa son configuración persistida, no código. Mientras corra la medición de razonamiento ON vs OFF, cada guardado de config crea una versión nueva y parte la comparación en un tercer grupo. Ver la memoria de la ventana de medición.
+**Qué define el contrato, en una línea cada cosa:**
+- **Control** (`ia`/`humano`) y **asignación** se guardan en base; la memoria del proceso nunca decide la pausa.
+- **A quién le toca actuar** se calcula con reglas en orden sobre hechos guardados (control, asignación, origen de los mensajes, aprobaciones, pendiente interno), nunca se guarda.
+- **Origen y autor** de cada mensaje van aparte del `rol` que usa el modelo, y el `rol` nunca se reemplaza.
+- **Eventos del relevo** en una tabla donde solo se agregan filas, con esquema versionado y sin datos crudos.
+- **Efectos externos** (caso CRM, ticket) en una cola con reintento: un fallo de integración no le devuelve la conversación a la IA.
+- **Devolver a la IA** solo se completa cuando el mensaje que la acompaña fue aceptado por el canal.
+- **Acciones aprobables** con revalidación declarada por herramienta y vigencia; si no se puede comprobar, no se ejecuta.
 
-**Lo que depende de un dato que todavía no se tiene:** cuántas personas trabajan la bandeja. Si hoy es una sola, el bloque entero de colaboración (#4, #8, borrador compartido, asignación) no resuelve nada.
+**Defectos encontrados (detalle y evidencia en el contrato, §13):** D1–D7 de la primera revisión, más D8 (tras un reinicio la IA toma como propio lo que escribió una persona), D9–D10 (la pausa se pone o se levanta solo en memoria), D11 (aprobar una acción: doble ejecución posible, quién aprobó sale del request, sin revalidación), D12 (notas internas en el insumo de resúmenes), D13 (el cierre por inactividad cierra conversaciones que esperan a una persona), D14–D16. **D7 estaba mal descrito en la versión anterior de esta sección:** las acciones de la IA que esperan aprobación no se aprueban en `/tickets/approvals` (ese es el cierre de casos del CRM); no aparecen en **ninguna** pantalla.
+
+**Verificado después:** la lista de conversaciones se pide entera cada 8 s y la consulta no tiene `LIMIT` (`+layout.svelte:65-67`, `db.py:469-481`). **De otro alcance:** cada instalación del frontend atiende un solo tenant (`PRIVATE_ASISTENTE_TENANT`).
+
+**Ya hecho:** estados de entrega + reintentar (06/09/2026); ventana de 24 h + plantillas (08/09/2026, §8.12); buscador de documentación dentro de la conversación (`/api/sugerencias`; copia, no inserta).
+
+#### Orden de construcción (acordado en auditoría, 16/09/2026)
+
+| # | Trabajo | Por qué en esta posición |
+|---|---------|--------------------------|
+| 0 | **Contrato del relevo + invariantes** | Sin modelo, cada arreglo parcha booleanos y rompe el anterior |
+| 1 | **D3 falla cerrado** (UI + backend) | Hoy se contaminan historiales con mensajes que el cliente no escribió |
+| 2 | **Origen y autor de mensajes + D8** | Integridad del historial que reconstruye la IA tras cada deploy |
+| 3 | **D1: devolver a la IA** (en fases, con entrega aceptada) | Cierra el ciclo humano → IA |
+| 4 | **D4 + D5: asignación y cola** | La cola deja de mentir |
+| 5 | **Intervenir completo** | Tomar el control sin escalada |
+| 6 | **D7: aprobación en contexto** + revalidación | La intervención humana propia del producto |
+| 7 | **Desenlace + cierre + sincronización del ticket** | Cierre operacional verdadero y dato para aprender |
+| 8 | **Paginación y búsqueda en servidor** | Deuda de escala; va después de los problemas de corrección |
+| 9 | **Ficha de handoff con fuente y frescura** | Entender el caso en segundos (extiende la ficha que ya arma el código) |
+| 10 | **Transcripción de audio** | Hoy la IA recibe `"[El cliente envio un audio]"`; es entrada de negocio en WhatsApp |
+| 11 | **Borrador asistido** | Depende de 9 |
+| 12 | **Comodidades** (citar, borradores, @menciones, macros, atajos) | Las de equipos grandes, diseñadas para no estorbar a quien trabaja solo |
+
+Fuera de la bandeja, anotadas en la auditoría como de alto valor: **correlación de averías** (varios clientes de la misma PON escalando a la vez → posible incidencia común; verificar antes qué expone SmartOLT) y **datos con frescura** en toda ficha técnica (fuente + hora de cada medición).
+
+**Construcción en fases B1–B7** (contrato §15), cada una auditada antes de integrarse; se construye en `feature/bandeja-relevo` y **un único responsable integra y despliega** (separación de git, no de diseño: es un solo desarrollo). B1 D3 falla cerrado · B2 origen y autor de mensajes · B3 control, asignación y eventos · B4 sincronizaciones externas y reconciliador · B5 acciones y revalidación · B6 frontend del relevo y desenlaces · B7 lectores del legado y backfill.
+
+**Gates antes de desplegar** (contrato §16): G1 el motor exige `MOTOR_SERVICE_TOKEN` (**verde en producción**) · G2 reloj activo (medido en producción: sí, ciclo ~60 min) · G3 acciones pendientes contadas · G4 evidencia del backfill · G5 casos dorados · G6 preflight de DDL y backfill (sin sesiones retenidas, volumen medido) · G7 reconciliador con cadencia propia de 1–5 min. · G8 revisión de las 16 conversaciones reales de legado · G9 recibo de entrega (**verde en producción** el 16/09/2026: `wamid` persistido y entregado correlacionado; ya no es pendiente) Restricción transversal: **ninguna transacción de base abierta mientras se espera una operación externa** (`idle_in_transaction_session_timeout = 60s` en producción).
+
+**Dos decisiones de la auditoría que no hay que redescubrir:** (1) si el evaluador decidió que hace falta una persona, un fallo del CRM o de WispHub **no** le devuelve la conversación a la IA; (2) la medición de razonamiento ON/OFF **nunca** justifica quitar una aprobación humana: la config nueva de revalidación se activa cuando la medición cierre.
+
+#### Reglas que gobiernan este orden
+
+- **Ninguna métrica de una empresa decide si algo se construye.** Puede ordenar prioridades; no puede descartar una función que otra empresa necesita.
+- **Las macros siguen bloqueadas por método, no por tamaño:** se guardan en `tenant_config`, y cada guardado parte la medición de razonamiento ON vs OFF en un grupo nuevo. Se destraban cuando termine esa medición.
+
+#### Descartado, con motivo
+
+- **Traducir mensajes:** los clientes de un ISP local escriben en el idioma del ISP. Reabrir si entra una empresa con clientela multilingüe.
+- **Llamadas desde la bandeja, enlace directo a un mensaje, galería de adjuntos:** no resuelven ninguna etapa del relevo.
+- **Mensajes interactivos de WhatsApp (botones, listas):** no son de la bandeja; son del roadmap del asistente.
 
 ---
 
@@ -617,6 +653,76 @@ Meta solo acepta texto libre dentro de las 24 h desde el **último mensaje del c
 **Enviar una plantilla no reabre la ventana** — se guarda con rol `assistant`, que es el rol que el cálculo ignora. No hay bandera que alguien pueda olvidar de apagar.
 
 **Limitación real de la cuenta, que esta pantalla destapó:** Rapilink tiene **una sola plantilla aprobada** en Meta (`bienvenida`, categoría MARKETING, sin variables) y su texto dice *"Bienvenido a Isergy"*. Para retomar un caso de soporte hace falta una plantilla **UTILITY** propia, y aprobarla lleva días. **Acción operativa pendiente, independiente del desarrollo.**
+
+---
+
+### 8.13 DECISIÓN — una plataforma para varios ISPs, no una instalación por cliente
+
+**Decidido el 24/09/2026.** Ante la pregunta de cómo se vende Dexter cuando
+aparezca el segundo ISP, se elige **una sola plataforma donde entran varias
+empresas**, y se descarta el despliegue por cliente.
+
+Lo que se descarta y por qué: un stack completo por ISP no cuesta código —hoy
+funcionaría tal cual— pero se paga en mantenimiento para siempre. Cada
+actualización se repite N veces, cada cliente puede quedar en una versión
+distinta, y el día que una migración falle en uno solo hay que diagnosticar un
+entorno que ya no es igual a los demás.
+
+**El motor ya está listo para esto.** La URL del webhook lleva el tenant
+(`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en
+`asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin
+fijar empresa ve **0 filas**, no todas. BottleCRM ya es multi-organización.
+
+**Lo que falta es el frontend.** Saca el tenant de una variable de entorno y
+nunca de la organización de quien inició sesión. Medido el 24/09/2026:
+
+| | |
+|---|---|
+| Archivos | 70 |
+| Apariciones | 80 |
+| De ellas, **la misma línea exacta** (`const tenant = env.PRIVATE_ASISTENTE_TENANT;`) | **73** |
+| Que deriven el tenant de la sesión | **0** |
+| Repartidas en | `routes/api` 46 · `routes/(app)` 13 · `lib/server` 11 |
+
+Que 73 de 80 sean idénticas cambia el tamaño del problema: **no son 80
+ediciones a medida, es un ayudante y una sustitución mecánica**, más cuatro
+casos particulares. Y el ayudante tiene que ser uno solo — el esquema del
+formulario de Campo ya enseñó qué pasa cuando el mismo dato se interpreta en
+varios lugares.
+
+**El problema de diseño que queda abierto, y no es menor.** El motor resuelve
+`slug → organization_id` (`asistente.tenant_config`). La plataforma necesita la
+**inversa**, y el frontend no puede consultarla: se conecta a través de Django,
+que entra como `crm_user` y **no tiene privilegios sobre el esquema
+`asistente`**. Es el mismo principio que ya gobierna el contexto técnico —
+*"Django no habla con WispHub ni con SmartOLT; el motor sí"*— así que la
+resolución debería pedírsela al motor, no abrir un segundo camino.
+
+**El supuesto del que depende todo esto está comprobado** (24/09/2026, contra
+el esquema): `asistente.tenant_config` tiene `organization_id` como **clave
+primaria** y `slug` con **restricción UNIQUE**. Es una biyección, así que la
+inversa es una función y el diseño se sostiene. Si no lo hubiera sido —una
+organización con varios tenants— habría que haber replanteado todo antes de
+tocar una línea.
+
+La tabla además tiene RLS por organización (`organization_id =
+asistente.org_actual()`), así que el endpoint que resuelva la inversa tiene que
+fijar el contexto como cualquier otra lectura.
+
+**Dos decisiones que van junto con esta:**
+
+- **El dominio del webhook.** `motor.rapilinksas.co` lleva la marca del primer
+  cliente. Con esta decisión tomada, conviene mudarlo a un dominio neutro
+  **antes** del segundo ISP: después obliga a que *cada* cliente reconfigure su
+  webhook en Meta a mano.
+- **`--workers 1`.** El historial caliente de las conversaciones vive en la RAM
+  del proceso. Aguanta con hilos, pero es un techo real con varias empresas, y
+  se levanta el día que ese historial viva en `asistente.conversations`.
+
+**Y una advertencia medida:** esta deuda **crece sola**. Cuando se anotó por
+primera vez eran 23 lugares; hoy son 80. Cada pantalla nueva del asistente suma
+otra aparición, así que posponer la ejecución encarece la decisión que ya se
+tomó.
 
 ---
 

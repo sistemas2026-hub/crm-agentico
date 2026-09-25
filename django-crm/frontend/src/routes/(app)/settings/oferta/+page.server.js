@@ -4,8 +4,8 @@ import { leerOferta, guardarServicios, subirParrilla } from '$lib/server/v2/ofer
 const SOLO_ADMIN = 'Solo un administrador puede cambiar esto.';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ locals }) {
-  const datos = await leerOferta();
+export async function load({ fetch, locals }) {
+  const datos = await leerOferta(locals, fetch);
   return {
     servicios: datos?.servicios_ofrecidos ?? [],
     canales: datos?.parrilla_canales ?? [],
@@ -16,7 +16,7 @@ export async function load({ locals }) {
 
 /** @type {import('./$types').Actions} */
 export const actions = {
-  async guardarServicios({ request, locals }) {
+  async guardarServicios({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN')
       return fail(403, { error: SOLO_ADMIN, action: 'guardarServicios' });
 
@@ -33,7 +33,7 @@ export const actions = {
     }
 
     try {
-      await guardarServicios(servicios);
+      await guardarServicios(locals, fetch, servicios);
     } catch (/** @type {any} */ err) {
       return fail(400, {
         error: err?.message || 'No se pudieron guardar los servicios.',
@@ -43,7 +43,7 @@ export const actions = {
     return { guardado: true };
   },
 
-  async subirParrilla({ request, locals }) {
+  async subirParrilla({ fetch, request, locals }) {
     if (locals.profile?.role !== 'ADMIN')
       return fail(403, { error: SOLO_ADMIN, action: 'subirParrilla' });
 
@@ -54,7 +54,7 @@ export const actions = {
     }
 
     try {
-      const datos = await subirParrilla(archivo);
+      const datos = await subirParrilla(locals, fetch, archivo);
       // Los descartados viajan de vuelta a proposito: si no se muestran,
       // quien subio el archivo cree que cargo mas canales de los que cargo.
       return {

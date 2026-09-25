@@ -35,6 +35,22 @@ _MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
           "agosto", "septiembre", "octubre", "noviembre", "diciembre")
 
 
+def franja_del_dia(hora: int) -> str:
+    """
+    En que parte del dia estamos, con los cortes del saludo en español.
+
+    Publica y aparte para poder afirmarla sin reloj ni zona horaria: lo que
+    importa es DONDE caen los bordes, y eso no se ve mirando una cadena.
+    """
+    if hora < 6:
+        return "madrugada"
+    if hora < 12:
+        return "mañana"
+    if hora < 19:
+        return "tarde"
+    return "noche"
+
+
 def _hoy_en(zona: str) -> str:
     """
     Que dia es hoy, en la zona horaria del tenant.
@@ -46,12 +62,18 @@ def _hoy_en(zona: str) -> str:
     corregirlo dos veces -- "hoy apenas es 13"-- y recien ahi acepto que
     tenia razon. Sabia razonarlo; le faltaba el dato.
 
-    SOLO EL DIA, sin hora: el prompt se arma en cada turno, y si trajera la
-    hora cambiaria cada minuto, rompiendo el cacheo de prefijo del proveedor
-    en todas las llamadas (RNF-03). Con granularidad de dia, el prompt es
-    identico durante toda la jornada. Lo que se pierde es responder "¿estan
-    abiertos AHORA?"; para eso puede decir el horario y que la persona
-    juzgue.
+    EL DIA, Y LA FRANJA -- NO LA HORA. Si trajera la hora exacta, el prompt
+    cambiaria cada minuto y rompería el cacheo de prefijo del proveedor en
+    todas las llamadas (RNF-03). Por eso la version original traia solo el
+    dia... y con eso el modelo saludaba a ciegas: visto en produccion el
+    23/09/2026 a las 13:51 de Bogota, "Buenos dias" a un cliente que estaba
+    almorzando. No sabia la hora porque nunca se la dimos.
+
+    La franja (madrugada / mañana / tarde / noche) cuesta CUATRO cambios de
+    prefijo al dia en vez de 1.440: el cacheo sobrevive practicamente entero
+    y el saludo deja de ser una adivinanza. Lo que se sigue perdiendo es
+    responder "¿estan abiertos AHORA?" al minuto; para eso puede decir el
+    horario y que la persona juzgue.
 
     Los nombres van escritos a mano y no por locale: un contenedor no suele
     traer el locale español instalado, y strftime devolveria 'Friday'.
@@ -68,10 +90,11 @@ def _hoy_en(zona: str) -> str:
         ahora = datetime.now()
 
     return (f"Hoy es {_DIAS[ahora.weekday()]} {ahora.day} de "
-            f"{_MESES[ahora.month - 1]} de {ahora.year}. Usalo para cualquier "
+            f"{_MESES[ahora.month - 1]} de {ahora.year}, y es de "
+            f"{franja_del_dia(ahora.hour)}. Usalo para cualquier "
             f"cuenta con fechas -- si una fecha de corte, de vencimiento o de "
             f"cita todavia no llego, NO hables de ella como si ya hubiera "
-            f"pasado.")
+            f"pasado -- y para saludar a la hora que es.")
 
 
 def construir_system(config, nombre_rol: str) -> str:
