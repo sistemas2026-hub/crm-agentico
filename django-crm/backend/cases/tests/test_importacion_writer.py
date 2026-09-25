@@ -78,6 +78,46 @@ def test_crea_el_caso_con_su_identidad_externa(cliente_a, org_a):
     assert caso.status == "New"
 
 
+# --- el nombre del cliente (25/09/2026) -----------------------------------
+
+def test_el_nombre_del_cliente_se_persiste(cliente_a):
+    """
+    El nombre que dio el proveedor queda en la fila.
+
+    Es lo que la bandeja del Supervisor lee cuando el caso no tiene cuenta del
+    CRM, y en este despliegue ninguno la tiene: la tabla 'accounts' esta vacia.
+    """
+    r = cliente_a.post(
+        IMPORTAR, cuerpo(external_client_name="JUAN DAVID BARRIOS BARRIOS"),
+        format="json")
+    assert r.status_code == 201, r.content
+
+    caso = Case.objects.get(id=r.json()["case_id"])
+    assert caso.external_client_name == "JUAN DAVID BARRIOS BARRIOS"
+    #  Y no se confunde con quien abrio el ticket, que es una cuenta del ISP.
+    assert caso.external_created_by != caso.external_client_name
+
+
+def test_sin_nombre_el_campo_queda_vacio_y_el_caso_se_crea_igual(cliente_a):
+    """
+    Un proveedor que no da nombre no impide importar el ticket.
+
+    Los 6 casos medidos sin servicio externo son exactamente esto: el ticket
+    vale, el nombre no esta, y la pantalla lo dice.
+    """
+    r = cliente_a.post(IMPORTAR, cuerpo(), format="json")
+    assert r.status_code == 201, r.content
+    assert Case.objects.get(id=r.json()["case_id"]).external_client_name == ""
+
+
+def test_un_nombre_larguisimo_no_tumba_la_importacion(cliente_a):
+    """Se recorta a la columna, igual que 'name'. No revienta el ticket."""
+    r = cliente_a.post(IMPORTAR, cuerpo(external_client_name="Z" * 400),
+                       format="json")
+    assert r.status_code == 201, r.content
+    assert len(Case.objects.get(id=r.json()["case_id"]).external_client_name) == 255
+
+
 def test_el_reintento_no_duplica_y_no_pisa_nada(cliente_a, admin_profile):
     primero = cliente_a.post(IMPORTAR, cuerpo(), format="json").json()
     caso = Case.objects.get(id=primero["case_id"])
@@ -197,6 +237,11 @@ def test_reconciliar_actualiza_lo_externo_y_solo_eso(cliente_a, importado):
 @pytest.mark.parametrize("prohibido", [
     {"status": "Closed"}, {"assigned_to": str(uuid.uuid4())},
     {"stage": "x"}, {"priority": "High"}, {"name": "otro"},
+    #  El nombre del cliente NO se reconcilia: la reconciliacion relee el
+    #  TICKET, no la ficha del cliente, asi que nunca tiene el nombre para
+    #  mandar. Aceptarlo aqui solo habilitaria que una lectura que no lo trae
+    #  borre con vacio un nombre bueno.
+    {"external_client_name": "OTRO NOMBRE"},
 ])
 def test_la_reconciliacion_rechaza_lo_que_no_le_toca(cliente_a, importado, prohibido):
     r = cliente_a.post(_reconciliar(importado),
@@ -206,6 +251,30 @@ def test_la_reconciliacion_rechaza_lo_que_no_le_toca(cliente_a, importado, prohi
     importado.refresh_from_db()
     assert importado.status == "New"
     assert importado.external_status == "Nuevo", "escribio pese a rechazar"
+
+
+def test_reconciliar_no_borra_el_nombre_del_cliente(cliente_a, org_a):
+    """
+    El caso ya tiene nombre y llega una reconciliacion normal.
+
+    Se afirma sobre el EFECTO -- que el nombre siga ahi despues -- y no sobre
+    que el campo este fuera de una lista: una lista que gane el campo por
+    descuido pasaria una prueba escrita al reves.
+    """
+    r = cliente_a.post(
+        IMPORTAR, cuerpo(external_client_name="JUAN DAVID BARRIOS BARRIOS"),
+        format="json")
+    caso = Case.objects.get(id=r.json()["case_id"])
+
+    r = cliente_a.post(_reconciliar(caso), {
+        "external_status": "Cerrado",
+        "external_fetched_at": "2026-09-25T12:00:00Z",
+    }, format="json")
+    assert r.status_code == 200, r.content
+
+    caso.refresh_from_db()
+    assert caso.external_client_name == "JUAN DAVID BARRIOS BARRIOS"
+    assert caso.external_status == "Cerrado"
 
 
 def test_dexter_no_se_degrada_ni_aunque_lo_pidan(cliente_a, importado):

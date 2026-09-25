@@ -63,9 +63,10 @@ VACIO = {
     "sla_minutos": None,
     # El nombre del cliente y el asunto del caso. Los dos salen del origen, no
     # de la propuesta: la orden trae 'cliente_nombre', el caso trae su cuenta
-    # y su 'name' (que es el asunto). Vacio cuando el origen no los tiene --
-    # una orden no tiene asunto y un caso puede no tener cuenta -- y la
-    # pantalla lo dice en palabras, no con una raya.
+    # o, si no la tiene, el nombre que dio el proveedor al importar
+    # ('external_client_name'; ver '_nombre_de_cliente'). Vacio cuando el
+    # origen no tiene ninguno de los dos -- y la pantalla lo dice en palabras,
+    # no con una raya.
     #
     # El nombre del cliente SI sale y las coordenadas no, y no es incoherente:
     # 'programacion-noc.js::leerOrden' ya sirve 'cliente_nombre' hoy y quita
@@ -96,6 +97,32 @@ def _uuids(valores):
         except (ValueError, AttributeError, TypeError):
             continue
     return salida
+
+
+def _nombre_de_cliente(caso) -> str:
+    """
+    Como se nombra al cliente de un caso, en orden de confianza.
+
+    1. 'account.name' -- el registro del propio CRM. Manda siempre que exista:
+       es el dato que alguien de la empresa mantiene, y una cuenta renombrada
+       aqui se ve al instante.
+    2. 'external_client_name' -- lo que dijo el proveedor cuando se importo el
+       ticket. Puede estar viejo (nadie lo refresca salvo el backfill), y aun
+       asi nombrar al cliente con un dato de hace un mes es mejor que no
+       nombrarlo: hoy es el unico que hay para los 177 casos importados.
+    3. Cadena vacia -- y la pantalla dice "No disponible en la fuente", que es
+       la respuesta correcta cuando no hay ninguna de las dos. No se compone un
+       nombre a partir del ticket, del asunto ni de quien abrio el ticket: ese
+       ultimo campo es una cuenta del ISP, no el cliente.
+
+    NO lee cedula, telefono, direccion ni coordenadas. Ninguno de esos llega
+    siquiera a este modulo.
+    """
+    cuenta = getattr(caso, "account", None)
+    del_crm = (getattr(cuenta, "name", "") or "").strip() if cuenta else ""
+    if del_crm:
+        return del_crm
+    return (getattr(caso, "external_client_name", "") or "").strip()
 
 
 def contexto_de(org, propuestas) -> dict:
@@ -187,7 +214,7 @@ def contexto_de(org, propuestas) -> dict:
             for c in Case.objects.filter(org=org, id__in=ids_caso)
             .select_related("account")
             .only("id", "provider", "external_ticket_id", "name", "created_at",
-                  "account__name")
+                  "account__name", "external_client_name")
         }
 
     # --- El plazo operativo ------------------------------------------------
@@ -229,11 +256,10 @@ def contexto_de(org, propuestas) -> dict:
             })
         elif p.origen_tipo == ORIGEN_CASO and origen in casos:
             caso = casos[origen]
-            cuenta = getattr(caso, "account", None)
             salida[clave].update({
                 "ticket_externo": caso.external_ticket_id or "",
                 "proveedor_externo": caso.provider or "",
-                "cliente": (cuenta.name if cuenta else "") or "",
+                "cliente": _nombre_de_cliente(caso),
                 "asunto": caso.name or "",
                 "origen_creado_en": (caso.created_at.isoformat()
                                      if caso.created_at else None),

@@ -192,9 +192,24 @@ def resolver_servicios(config, tenant):
                     # Solo lo que el importador necesita. La fila cruda trae 54
                     # campos, incluidas cuatro contraseñas y el GPS del
                     # domicilio: nada de eso tiene por que salir de aca.
+                    #
+                    # 'nombre' SI sale, y es el unico dato personal de los
+                    # cuatro. Entra porque el tablero del Supervisor no tiene
+                    # otra forma de nombrar al cliente: 'Case.account' es la
+                    # via del CRM y la tabla 'accounts' esta vacia -- no
+                    # desenlazada, vacia-- asi que los 177 casos importados
+                    # mostraban "No disponible en la fuente" (medido el
+                    # 25/09/2026). La llamada ya se hacia y la respuesta ya
+                    # traia el nombre; lo unico que pasaba es que se tiraba.
+                    #
+                    # Los otros tres datos personales de la misma fila
+                    # --cedula, telefono, direccion-- NO entran. Nombrar a
+                    # quien espera una decision es lo que hace falta para
+                    # decidir; su cedula no.
                     salida[str(sid)] = {"sn_onu": fila.get("sn_onu") or "",
                                         "usuario": fila.get("usuario") or "",
-                                        "estado": fila.get("estado") or ""}
+                                        "estado": fila.get("estado") or "",
+                                        "nombre": fila.get("nombre") or ""}
             except Exception as e:                          # noqa: BLE001
                 # El id de servicio del ISP identifica a un cliente y es secuencial (se enumera): HMAC, no hash plano.
                 registrar("importacion", "no se pudo resolver un servicio",
@@ -357,6 +372,11 @@ def _cuerpo_de(v, config) -> dict:
         "external_status_at": None,
         "external_created_by": v.external_created_by,
         "external_created_by_type": v.external_created_by_type,
+        # Quien es el cliente, no quien abrio el ticket: los dos campos suenan
+        # parecido y dicen cosas distintas. 'external_created_by' es una cuenta
+        # del ISP (ocho en 1.162 tickets medidos, una de ellas la de la API
+        # compartida); esto es la persona del servicio.
+        "external_client_name": v.cliente_nombre,
         "external_fetched_at": datetime.now(timezone.utc).isoformat(),
         "assigned_to": v.responsable,
         "priority": v.prioridad or "Normal",

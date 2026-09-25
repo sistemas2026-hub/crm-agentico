@@ -825,6 +825,69 @@ revisar(_cuerpo["description"].startswith("Importado de"),
 
 
 # =============================================================================
+#  EL NOMBRE DEL CLIENTE  (25/09/2026)
+# =============================================================================
+# La ficha del servicio ya se pedia -- una llamada por servicio unico, para el
+# 'sn_onu'-- y la respuesta ya traia el nombre del cliente. Se descartaba, y el
+# tablero del Supervisor no tenia con que nombrar a nadie: medido, la tabla
+# 'accounts' esta vacia, asi que los 237 casos importados mostraban "No
+# disponible en la fuente" en las 121 propuestas.
+#
+# Lo que se afirma aca es lo que VIAJA, no que el codigo lea tal clave.
+
+print("\nel nombre del cliente viaja, y nada mas de la persona")
+
+_FICHA = {"6580": {"sn_onu": "HWTCAF721761", "usuario": "juan@rapilink-sas",
+                   "estado": "Activo", "nombre": "JUAN DAVID BARRIOS BARRIOS"}}
+
+_vs = descubrir(config_piloto(), [ticket(80, servicio="6580")],
+                resolver_servicio=lambda ids: _FICHA)
+revisar(_vs[0].cliente_nombre == "JUAN DAVID BARRIOS BARRIOS",
+        "el nombre de la ficha llega al veredicto",
+        "es el unico dato personal que se toma de una fila de 54 campos")
+
+_cuerpo_cli = io._cuerpo_de(_vs[0], _CFG)
+revisar(_cuerpo_cli["external_client_name"] == "JUAN DAVID BARRIOS BARRIOS",
+        "y se manda al CRM en su propio campo")
+revisar(_cuerpo_cli["external_client_name"] != _cuerpo_cli["external_created_by"],
+        "en un campo DISTINTO de quien abrio el ticket",
+        "'external_created_by' es una cuenta del ISP -- ocho en 1.162 tickets "
+        "medidos, una de ellas la de la API compartida-- y no el cliente")
+
+# El envio entero, no solo el campo nuevo: si alguien agrega la cedula a la
+# ficha, esto falla aca y no cuando ya este en la base.
+_PROHIBIDOS = ("cedula", "telefono", "direccion", "coordenadas", "password",
+               "latitud", "longitud", "gps")
+_sobra = [k for k in _cuerpo_cli
+          if any(p in k.lower() for p in _PROHIBIDOS)]
+revisar(_sobra == [],
+        "y NINGUN otro dato personal viaja con el caso",
+        f"la misma fila trae cedula, telefono, direccion, GPS y cuatro "
+        f"contrasenas; nada de eso sale (sobraba: {_sobra})")
+
+# Un proveedor que no da nombre deja el campo vacio. NO se arma uno con el
+# usuario, el ticket ni el asunto: una celda vacia se ve y se corrige, un
+# nombre inventado se cree.
+_vs_sin = descubrir(config_piloto(), [ticket(81, servicio="6580")],
+                    resolver_servicio=lambda ids: {"6580": {"sn_onu": "SN1"}})
+revisar(_vs_sin[0].cliente_nombre == "",
+        "sin nombre del proveedor queda vacio, no inventado")
+revisar(io._cuerpo_de(_vs_sin[0], _CFG)["external_client_name"] == "",
+        "y asi viaja al CRM")
+
+# El placeholder de instalaciones NO es una persona: su servicio se excluye de
+# la consulta a proposito (es el registro con el que la empresa abre un ticket
+# de instalacion antes de que el cliente exista), asi que no puede traer un
+# nombre. Si lo trajera, la pantalla le pondria nombre propio a un prospecto.
+_vs_ph = descubrir(config_piloto(), [ticket(82, servicio=PLACEHOLDER)],
+                   resolver_servicio=lambda ids: {PLACEHOLDER: {"nombre": "NO"}},
+                   servicio_placeholder=PLACEHOLDER)
+revisar(_vs_ph[0].cliente_nombre == "",
+        "el registro de instalaciones no recibe nombre de cliente",
+        "es un prospecto sin identidad resuelta, y se dice asi")
+
+
+# =============================================================================
 #  EL HILO DEL TICKET  (10/09/2026)
 # =============================================================================
 # Medido: de 25 tickets mirados, 24 tienen respuestas -- 70 en total. O sea que

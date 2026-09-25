@@ -52,11 +52,19 @@ CAMPOS_DESCUBRIMIENTO = frozenset({
     "provider", "external_ticket_id", "external_service_id",
     "external_status", "external_status_at", "external_created_by",
     "external_created_by_type", "external_fetched_at",
+    "external_client_name",
     "assigned_to", "priority", "status", "name", "description",
 })
 
 # Lo que la reconciliacion puede escribir. 'status', 'assigned_to', 'stage' y
 # 'priority' NO estan, y esa ausencia es el invariante entero de la fase.
+#
+# 'external_client_name' tampoco esta, y no es un olvido: la reconciliacion
+# relee EL TICKET, no la ficha del cliente, asi que no tiene el nombre para
+# mandar. Aceptarlo aqui solo habilitaria que una lectura que no lo trae
+# sobreescriba con vacio un nombre bueno -- el mismo dano que 'external_status'
+# tiene que esquivar con un 'continue' mas abajo. El nombre se pone al importar
+# y se corrige con el backfill, que es explicito.
 CAMPOS_RECONCILIACION = frozenset({
     "external_status", "external_status_at", "external_fetched_at",
     "external_fetch_error", "external_created_by", "external_created_by_type",
@@ -154,6 +162,11 @@ class ImportarCaseView(APIView):
             "external_status_at": cuerpo.get("external_status_at") or None,
             "external_created_by": str(cuerpo.get("external_created_by") or ""),
             "external_created_by_type": tipo_autor,
+            # El nombre del cliente segun el proveedor. Se recorta al largo de
+            # la columna igual que 'name': un nombre mas largo que 255 se
+            # guarda cortado, no tumba la importacion del ticket.
+            "external_client_name": str(
+                cuerpo.get("external_client_name") or "")[:255],
             "external_fetched_at": cuerpo.get("external_fetched_at") or None,
             "name": nombre[:64],
             "description": cuerpo.get("description") or "",

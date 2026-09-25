@@ -228,6 +228,36 @@ class Case(AssignableMixin, BaseModel):
         ),
     )
 
+    # The customer's name as the provider holds it.
+    #
+    # This does NOT replace `account`, and does not change what `account`
+    # means: `account` is the CRM's own customer record, and a case that has
+    # one keeps using it. This field exists because in this deployment the
+    # `accounts` table is *empty* -- not unlinked, empty -- so every imported
+    # case had no name to show at all (237 of 237 measured 25/09/2026), and
+    # the importer already had the name in hand and threw it away.
+    #
+    # It is the provider's word, frozen at import time, and it is allowed to
+    # go stale: a rename in WispHub does not reach rows already written. That
+    # is the same trade `campo.OrdenTrabajo.cliente_nombre` already makes so a
+    # field technician can read a name offline.
+    #
+    # Only the name. The same provider row carries the national id, the phone,
+    # the address, the GPS of the home and four passwords; none of those are
+    # here, and none of them should be added to this field's family without
+    # the same argument being made again.
+    external_client_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=(
+            "Customer name as reported by `provider`, verbatim. Empty when "
+            "the provider did not give one -- never composed from other "
+            "fields. Fallback for display when `account` is null; it is not "
+            "an identifier and nothing is matched against it."
+        ),
+    )
+
     # What the provider says, kept apart from what Dexter says. `status` is
     # owned by Dexter and no importer writes it; these two are owned by the
     # provider and nothing but the importer writes them. Divergence between

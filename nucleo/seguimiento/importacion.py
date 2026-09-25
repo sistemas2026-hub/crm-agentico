@@ -223,6 +223,12 @@ class Veredicto:
     cliente_identificado: bool = False
     identidad_es_placeholder: bool = False
     sn_onu: str = ""
+    # El nombre que el proveedor tiene del cliente, tal cual. Sale de la misma
+    # ficha que 'sn_onu' -- una sola llamada por servicio, ya existente-- y es
+    # el unico dato personal que se guarda de ahi: sin el, el tablero del
+    # Supervisor no puede nombrar a quien espera una decision. Cadena vacia
+    # cuando el proveedor no lo entrega; nunca se compone a partir de otra cosa.
+    cliente_nombre: str = ""
     area: str = ""
     responsable: str = ""
     prioridad: str = ""
@@ -639,6 +645,7 @@ def descubrir(config, tickets: list[dict], *,
                 ficha = fichas.get(v.external_service_id) or {}
                 v.cliente_identificado = bool(ficha)
                 v.sn_onu = str(ficha.get("sn_onu") or "")
+                v.cliente_nombre = str(ficha.get("nombre") or "").strip()
             v.resultado = CANDIDATO
     else:
         for v in pendientes:
