@@ -30,7 +30,6 @@
   import AgentDetail from './AgentDetail.svelte';
   import MetricsPanel from './MetricsPanel.svelte';
   import EventTimeline from './EventTimeline.svelte';
-  import ExternalToolNode from './ExternalToolNode.svelte';
   import { cargaMaxima } from '$lib/centro-mando/telemetria.js';
 
   /** @type {{ panorama: any, sello?: string|null }} */
@@ -39,7 +38,6 @@
   let seleccionado = $state(/** @type {any} */ (null));
 
   const totales = $derived(panorama?.totales || {});
-  const servicios = $derived(panorama?.servicios || []);
   const eventos = $derived(panorama?.eventos || []);
   const agentes = $derived(panorama?.agentes || []);
   const referencia = $derived(cargaMaxima(panorama?.agentes || []));
@@ -106,19 +104,15 @@
 
   <div class="cuerpo">
     <div class="mapa">
-      <PlantaOficina {panorama} alSeleccionar={(x) => (seleccionado = x)} />
+      <PlantaOficina {panorama} {ms} alSeleccionar={(x) => (seleccionado = x)} />
     </div>
 
     <div class="lateral">
+      <!-- Los sistemas externos ESTABAN aqui, como chips. Se movieron al pie
+           de la planta (SistemasExternos.svelte): cuando uno se cae, el
+           efecto son varios puestos en rojo, y tener la causa en otra columna
+           obligaba a cruzar la pantalla para unir las dos cosas. -->
       <EventTimeline {eventos} {hora} {ms} sello={hora(sello || panorama.generado_en)} />
-      {#if servicios.length}
-        <div class="servicios">
-          <span class="et">Servicios usados hoy</span>
-          {#each servicios as s (s.herramienta)}
-            <ExternalToolNode servicio={s} {ms} />
-          {/each}
-        </div>
-      {/if}
     </div>
   </div>
 </div>
@@ -164,8 +158,6 @@
 
   .lateral { flex: 0 0 319px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid #e2e8f0; }
   .lateral :global(.eventos) { flex: 1; min-height: 0; border-left: 0; }
-  .servicios { display: flex; flex-wrap: wrap; align-content: start; gap: 8px; padding: 10px 14px; border-top: 1px solid #e2e8f0; background: #f8fafc; max-height: 132px; overflow-y: auto; }
-  .servicios .et { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #475569; margin-right: 4px; }
 
   @media (max-width: 1100px) {
     .cuerpo { flex-direction: column; }
