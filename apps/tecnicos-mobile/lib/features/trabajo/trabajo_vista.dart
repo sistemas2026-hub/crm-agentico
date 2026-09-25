@@ -369,6 +369,90 @@ class TrabajoVista {
   /// conclusión equivocada el 15/08/2026.
   String get ultimoCambioEquipo => _delEquipo('last_status_change');
 
+  /// El puerto PON del que cuelga el equipo, como `0/10`.
+  ///
+  /// Es `board/port` y NADA MÁS: la tarjeta de la OLT y su puerto. Así lo
+  /// rotula el propio SmartOLT cuando agrupa una caída
+  /// (`{"label": "1/3", "board": "1", "port": "3"}`), y así lo busca un
+  /// técnico en la OLT.
+  ///
+  /// Estuvo un rato mostrando `board/port/onu` —`0/10/5`— y eso mezclaba dos
+  /// cosas: el número de ONU es su posición DENTRO del puerto, no parte del
+  /// identificador del puerto. Va aparte, en [indiceOnu].
+  String get puertoPon {
+    final String tarjeta = _delEquipo('board');
+    final String puerto = _delEquipo('port');
+    if (tarjeta.isEmpty || puerto.isEmpty) return '';
+    return '$tarjeta/$puerto';
+  }
+
+  /// Qué número de ONU es, dentro de ese puerto PON. Sirve para encontrarla
+  /// en la lista de la OLT; no identifica el puerto.
+  String get indiceOnu => _delEquipo('onu');
+
+  /// La caja de distribución. **Puede venir vacía y es normal**: medido el
+  /// 25/09/2026, el cliente de la orden 1849 no la tiene cargada en SmartOLT.
+  /// La pantalla lo dice en vez de inventar una.
+  String get cajaDeDistribucion => _delEquipo('odb_name');
+
+  /// De qué OLT cuelga, y la zona de red. No es la localidad del cliente:
+  /// `zone_name` es cómo SmartOLT agrupa la planta.
+  String get oltDelEquipo => _delEquipo('olt_name');
+  String get zonaDeRed => _delEquipo('zone_name');
+
+  /// El modelo del equipo, si el proveedor lo tiene.
+  String get modeloDelEquipo => _delEquipo('onu_type_name');
+
+  /// A cuántos metros de la OLT está el equipo, según la medición óptica.
+  String get distanciaOlt {
+    final String crudo = _delEquipo('distance');
+    return crudo.isEmpty ? '' : '$crudo m';
+  }
+
+  /// Lo que el asistente ya averiguó de este caso, antes de que existiera la
+  /// orden.
+  ///
+  /// Dexter habla con el cliente por WhatsApp: verifica identidad, mide el
+  /// equipo, descarta causas y deja escrito qué falta averiguar. Hasta el
+  /// 25/09/2026 eso se quedaba en su base y el técnico llegaba a preguntar lo
+  /// que el cliente ya había contestado.
+  String _deDexter(String clave) {
+    final dynamic d = contexto['dexter'];
+    if (d is Map && d[clave] != null) return d[clave].toString();
+    return '';
+  }
+
+  /// Qué falta averiguar, en la frase del asistente. **Es lo más útil de
+  /// todo**: no es una etiqueta, es la instrucción.
+  String get siguientePasoDexter => _deDexter('siguiente_paso');
+
+  /// Qué pasó en la conversación, resumido. Viene **sin el documento del
+  /// cliente**: lo redacta el modelo y trae la cédula cuando la verificó.
+  String get resumenDexter => _deDexter('resumen');
+
+  /// De qué trata, clasificado por el asistente, y por qué pasó a una persona.
+  String get casoDexter => _deDexter('caso');
+  String get motivoEscaladaDexter => _deDexter('motivo_escalada');
+
+  bool get hayEvaluacionDexter =>
+      siguientePasoDexter.isNotEmpty || resumenDexter.isNotEmpty;
+
+  /// El ticket en el sistema del ISP. Un UUID de caso no le sirve a nadie: la
+  /// oficina y el técnico hablan de «el 93426».
+  String _delTicket(String clave) {
+    final dynamic t = contexto['ticket'];
+    if (t is Map && t[clave] != null) return t[clave].toString();
+    return '';
+  }
+
+  String get numeroTicket => _delTicket('numero');
+  String get proveedorTicket => _delTicket('proveedor');
+
+  /// El estado **en el sistema del ISP**, que no tiene por qué coincidir con
+  /// el del CRM: alguien pudo cerrarlo del otro lado.
+  String get estadoTicketIsp => _delTicket('estado');
+  String get abiertoPorTicket => _delTicket('abierto_por');
+
   /// Si hay alguna lectura del equipo que mostrar.
   bool get hayLecturaDeEquipo => potenciaOptica.isNotEmpty || estadoOnu.isNotEmpty;
 

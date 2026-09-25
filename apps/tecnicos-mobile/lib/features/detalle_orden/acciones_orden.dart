@@ -39,7 +39,8 @@ class AccionesOrden {
   /// cambia el mundo y puede esperar. Un ping encolado se ejecutaria cuando el
   /// tecnico ya se fue, midiendo un momento que a nadie le importa y con cara
   /// de respuesta a lo que pregunto. Sin señal se dice que no se pudo, y ya.
-  final Future<ResultadoPing> Function(String ordenId)? probarConexion;
+  final Future<ResultadoPing> Function(String ordenId, int paquetes)?
+      probarConexion;
 
   factory AccionesOrden.reales() {
     final baseLocal = LocalDatabase();
@@ -71,10 +72,11 @@ class AccionesOrden {
         await sincronizacion.procesarCola();
       },
       sincronizar: sincronizacion.procesarCola,
-      probarConexion: (String ordenId) async {
+      probarConexion: (String ordenId, int paquetes) async {
         try {
           final Response<dynamic> r = await ApiClient().dio.post<dynamic>(
                 ApiEndpoints.trabajoProbarConexion(ordenId),
+                data: <String, dynamic>{'paquetes': paquetes},
               );
           return ResultadoPing.desde(r.data as Map<String, dynamic>?);
         } on DioException catch (e) {
@@ -99,7 +101,7 @@ class ResultadoPing {
   const ResultadoPing({
     required this.medido,
     this.respondieron = '',
-    this.latencias = const <String>[],
+    this.paquetes = const <PaqueteDePing>[],
     this.motivo = '',
   });
 
@@ -111,8 +113,9 @@ class ResultadoPing {
     return ResultadoPing(
       medido: true,
       respondieron: d['respondieron']?.toString() ?? '',
-      latencias: (d['latencias'] as List<dynamic>? ?? <dynamic>[])
-          .map((dynamic e) => e.toString())
+      paquetes: (d['paquetes'] as List<dynamic>? ?? <dynamic>[])
+          .whereType<Map<dynamic, dynamic>>()
+          .map(PaqueteDePing.desde)
           .toList(),
     );
   }
@@ -122,14 +125,41 @@ class ResultadoPing {
 
   final bool medido;
 
-  /// Texto crudo de WispHub: '3 de 3', '0 de 3'. **No se convierte a numero**:
-  /// esta medido dos veces que el mismo equipo sano da 1, 2 y 3 de 3 en
-  /// corridas seguidas, asi que no es una escala -- es una muestra.
+  /// Texto crudo de WispHub: '10 de 10', '0 de 10'. **No se convierte a
+  /// numero**: esta medido dos veces que el mismo equipo sano da 1, 2 y 3 de 3
+  /// en corridas seguidas, asi que no es una escala -- es una muestra.
   final String respondieron;
 
-  /// Las tres, por separado. Un promedio esconde si el enlace es intermitente
-  /// o esta caido parejo, que es justo lo que decide que hace el tecnico.
-  final List<String> latencias;
+  /// Los diez, uno por uno. Un promedio esconde si el enlace es intermitente o
+  /// esta caido parejo, que es justo lo que decide que hace el tecnico -- y
+  /// con tres muestras esa diferencia no se dibuja.
+  final List<PaqueteDePing> paquetes;
 
   final String motivo;
+}
+
+/// Un intento del ping: cual fue, si volvio, y cuanto tardo.
+///
+/// 'respondio' llega resuelto del backend y no se deduce del texto del tiempo:
+/// un paquete perdido trae el tiempo vacio, y leer "sin tiempo" como "no
+/// volvio" funcionaria hasta el dia que el proveedor mande un cero.
+class PaqueteDePing {
+  const PaqueteDePing({
+    required this.n,
+    required this.respondio,
+    this.rtt = '',
+    this.perdida = '',
+  });
+
+  factory PaqueteDePing.desde(Map<dynamic, dynamic> d) => PaqueteDePing(
+        n: int.tryParse('${d['n']}') ?? 0,
+        respondio: d['respondio'] == true,
+        rtt: d['rtt']?.toString() ?? '',
+        perdida: d['perdida']?.toString() ?? '',
+      );
+
+  final int n;
+  final bool respondio;
+  final String rtt;
+  final String perdida;
 }

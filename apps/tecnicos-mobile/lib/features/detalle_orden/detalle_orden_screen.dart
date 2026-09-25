@@ -68,6 +68,21 @@ class DetalleOrdenScreen extends StatefulWidget {
   State<DetalleOrdenScreen> createState() => _DetalleOrdenScreenState();
 }
 
+/// En cuantas tandas se piden los paquetes del ping, y de que tamaño.
+///
+/// **El mínimo que WispHub acepta es 3**, medido el 25/09/2026: pedir 1 o 2
+/// devuelve HTTP 400. Por eso los paquetes no se pueden pedir de a uno para
+/// irlos mostrando -- la tanda más chica es de tres.
+///
+/// Y no se pide una sola de diez: esa tarda ~18 s con el técnico mirando una
+/// rueda girar sin saber si el primero volvió. En tandas, los primeros caen a
+/// los ~5 s. Se pagan tres llamadas en vez de una; a cambio se ve el ping
+/// pasar, que es para lo que se pide.
+///
+/// Tiene que sumar lo mismo que TANDAS en campo/services/telemetria.py.
+const List<int> _tandasDelPing = <int>[3, 3, 4];
+const int _paquetesDelPing = 10;
+
 class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   StreamSubscription<SyncSummary>? _suscripcionResumen;
   SyncSummary? _resumen;
@@ -250,6 +265,10 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                     widget.mostrarDatosFuturos) ...<Widget>[
                   const SizedBox(height: AppSpacing.md),
                   _telemetria(trabajo),
+                ],
+                if (trabajo.hayEvaluacionDexter) ...<Widget>[
+                  const SizedBox(height: AppSpacing.md),
+                  _loQueDexterAveriguo(trabajo),
                 ],
                 if (trabajo.diagnosticoPrevio.isNotEmpty ||
                     widget.mostrarDatosFuturos) ...<Widget>[
@@ -914,7 +933,14 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     final String origen = trabajo.origen?.etiqueta ?? '';
     final List<String> seguridad = trabajo.requisitosSeguridad;
 
-    if (ventana.isEmpty && origen.isEmpty && seguridad.isEmpty) {
+    // El ticket del ISP cuenta para decidir si la tarjeta existe. Sin esto,
+    // una orden que SOLO trae el número de ticket --que es el caso normal de
+    // un caso importado-- escondía la tarjeta entera y el número no se veía
+    // en ningún lado.
+    if (ventana.isEmpty &&
+        origen.isEmpty &&
+        seguridad.isEmpty &&
+        trabajo.numeroTicket.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -972,7 +998,37 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               valor: ventana,
             ),
           ],
-          if (origen.isNotEmpty) ...<Widget>[
+          // EL TICKET DEL ISP, NO EL UUID DEL CASO. Acá decía
+          // «Viene de · Case · 293f1eb8-958d-4ada-96af-731b2797e08c», que no
+          // le sirve a nadie: la oficina y el técnico hablan de «el 93426».
+          // El número entra a la ficha desde el 25/09/2026.
+          if (trabajo.numeroTicket.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            _lineaDeDato(
+              icono: Icons.confirmation_number_outlined,
+              // La etiqueta va antes del número y en mayúsculas: es un
+              // identificador, y quien lo busca lo busca por esa palabra.
+              etiqueta: 'TICKET:',
+              // El estado es el de ALLÁ, y puede no coincidir con el del CRM:
+              // alguien pudo cerrarlo del otro lado.
+              // El proveedor va en el valor y no en la etiqueta: el número
+              // es lo que se lee primero, y de qué sistema es importa después.
+              valor: <String>[
+                '#${trabajo.numeroTicket}',
+                if (trabajo.estadoTicketIsp.isNotEmpty) trabajo.estadoTicketIsp,
+                if (trabajo.proveedorTicket.isNotEmpty) trabajo.proveedorTicket,
+              ].join(' · '),
+            ),
+            if (trabajo.abiertoPorTicket.isNotEmpty)
+              // Quién lo abrió cambia la conversación: no es lo mismo que lo
+              // haya pedido el cliente a que lo haya abierto la oficina. Si el
+              // cliente no sabe de qué le hablan, esto lo explica.
+              _lineaDeDato(
+                icono: Icons.person_outline,
+                etiqueta: 'Lo abrió',
+                valor: trabajo.abiertoPorTicket,
+              ),
+          ] else if (origen.isNotEmpty) ...<Widget>[
             const SizedBox(height: AppSpacing.sm),
             _lineaDeDato(
               icono: Icons.alt_route,
@@ -1296,19 +1352,23 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   static String _hhmm(DateTime f) =>
       '${f.hour.toString().padLeft(2, '0')}:${f.minute.toString().padLeft(2, '0')}';
 
-  /// La potencia óptica que recibe la ONT, tal como la leyó SmartOLT.
+  /// La potencia óptica, con la forma del panel de SmartOLT y los colores de
+  /// la aplicación: dos tarjetas, la que RECIBE la ONT y la que recibe la OLT.
   ///
   /// **Dato real desde el 24/09/2026.** Antes acá se dibujaba
   /// `FieldMockData.potenciaRxPrevia` (-28.9 dBm) con la etiqueta roja
   /// «ATENUACIÓN ALTA» **siempre**, sin mirar la bandera de demostración. Con
   /// la orden 1849 en la mano, la lectura real era -21.19 dBm y el veredicto
   /// `aceptable`: la pantalla le decía al técnico que la señal estaba mal
-  /// cuando estaba bien. Es el mismo defecto que Materiales corrigió el
-  /// 22/09 —«el acta de ejemplo tapaba la real»— y acá mandaba a buscar una
-  /// falla que no existía.
+  /// cuando estaba bien, y lo mandaba a buscar una atenuación que no existía.
   ///
-  /// El veredicto **no se calcula acá**: llega resuelto del motor contra los
-  /// umbrales de G-GO-04 (`onu_signal_1490_veredicto`). La pantalla lo muestra.
+  /// **Los umbrales son los del motor, no los del panel del proveedor.** El
+  /// panel de SmartOLT rotula `crit -30 · warn -28`; acá manda G-GO-04, que
+  /// declara aceptable entre -8 y -25 dBm. Dibujar la regla del proveedor al
+  /// lado de un veredicto calculado con otra haría que la barra y la etiqueta
+  /// se contradigan en los casos de borde, que son justo los que importan.
+  /// El veredicto **no se recalcula acá**: llega resuelto
+  /// (`onu_signal_1490_veredicto`) y la pantalla lo muestra.
   Widget _potenciaOptica(TrabajoVista trabajo) {
     if (!trabajo.hayLecturaDeEquipo) {
       // El ejemplo solo aparece donde NO hay lectura real, y solo con la
@@ -1320,115 +1380,59 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     }
 
     final bool aceptable = trabajo.veredictoSenal == 'aceptable';
-    final Color fondo =
-        aceptable ? AppColors.exitoFondo : AppColors.errorContainer;
-    final Color tinta =
-        aceptable ? AppColors.exitoTexto : AppColors.onErrorContainer;
-    final Color acento = aceptable ? AppColors.exito : AppColors.error;
 
-    // 'onu_signal_1490' llega como '-21.19 dBm': la unidad se separa para que
-    // el numero pueda ir en el tamaño de medicion y no se repita 'dBm'.
-    final String crudo = trabajo.potenciaOptica;
-    final String numero = crudo.replaceAll(RegExp(r'\s*dBm\s*$'), '').trim();
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: fondo,
-        borderRadius: AppRadius.brTarjeta,
-      ),
-      child: Row(
-        children: <Widget>[
-          Icon(
-            aceptable ? Icons.check_circle : Icons.warning,
-            size: 18,
-            color: tinta,
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Flexible(
-                      child: Text(
-                        'Potencia RX ONT',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTypography.etiquetaChica.copyWith(
-                          color: tinta,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (trabajo.veredictoSenal.isNotEmpty) ...<Widget>[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 1,
-                        ),
-                        decoration: BoxDecoration(
-                          color: acento,
-                          borderRadius: AppRadius.brChico,
-                        ),
-                        child: Text(
-                          trabajo.veredictoSenal.toUpperCase(),
-                          style: AppTypography.etiquetaChica.copyWith(
-                            fontSize: 9,
-                            color: AppColors.onError,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                Text(
-                  // El rango sale del motor junto al veredicto (G-GO-04). Si
-                  // algun dia cada empresa define el suyo (CAMPO-DATA-031),
-                  // este texto lo lee de ahi y no de una constante.
-                  'Aceptable entre -8 y -25 dBm'
-                  '${trabajo.potenciaOpticaSubida.isEmpty ? '' : ' · subida ${trabajo.potenciaOpticaSubida}'}',
-                  style: AppTypography.etiquetaChica.copyWith(color: tinta),
-                ),
-              ],
+    return Column(
+      children: <Widget>[
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              child: _MedidaOptica(
+                titulo: 'Rx ONU',
+                detalle: 'lo que recibe el equipo del cliente',
+                valor: trabajo.potenciaOptica,
+                // El veredicto del motor es sobre 1490: es la de bajada, la
+                // única que habla de lo que llega a la casa.
+                etiqueta: trabajo.veredictoSenal,
+                buena: aceptable,
+              ),
             ),
-          ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: <Widget>[
-              Text(
-                numero,
-                style: AppTypography.medicion.copyWith(color: acento),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: _MedidaOptica(
+                titulo: 'Rx OLT',
+                detalle: 'lo que la central recibe del equipo',
+                valor: trabajo.potenciaOpticaSubida,
+                // Sin etiqueta: el motor no emite veredicto para la de
+                // subida, y ponerle uno acá sería inventarlo.
+                etiqueta: '',
+                buena: aceptable,
               ),
-              const SizedBox(width: 2),
-              Text(
-                'dBm',
-                style: AppTypography.etiquetaChica.copyWith(color: tinta),
-              ),
-            ],
-          ),
-        ],
-      ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          'Aceptable entre -8 y -25 dBm (G-GO-04)',
+          style: AppTypography.etiquetaChica.copyWith(color: AppColors.outline),
+        ),
+      ],
     );
   }
 
-  /// Probar la conexión AHORA, que es lo único que la ficha congelada no
-  /// puede contestar.
+
+  /// Un ping en vivo, que es lo único que la ficha congelada no puede
+  /// contestar: el técnico movió un conector y necesita saber si el equipo
+  /// responde AHORA.
   ///
-  /// La potencia de arriba se midió al despachar y sirve para llegar sabiendo
-  /// qué esperar. Esto es otra pregunta: el técnico movió un conector y
-  /// necesita saber si el equipo contesta en este momento.
+  /// **Diez paquetes, listados uno por uno.** Un promedio esconde lo que le
+  /// interesa a quien está parado en la casa —si el enlace es intermitente o
+  /// está caído parejo—, y con tres muestras esa diferencia no se dibuja:
+  /// está medido que el mismo equipo sano devuelve 1, 2 y 3 de 3 en corridas
+  /// seguidas, así que una racha corta no se distingue de un patrón.
   ///
-  /// **Lo que muestra no es un veredicto.** Está medido dos veces en este
-  /// proyecto que el mismo equipo sano devuelve `1 de 3`, `2 de 3` y `3 de 3`
-  /// en corridas seguidas, y que un reinicio real y confirmado dejó el ping
-  /// igual antes y después. Por eso se enseña el conteo crudo y las tres
-  /// latencias por separado: quien decide qué significa es la persona que está
-  /// parada ahí, no la pantalla.
+  /// **No dictamina.** Se enseña el conteo crudo y cada intento; quien decide
+  /// qué significa es la persona que está ahí.
   Widget _probarConexion() {
     final bool disponible = widget.acciones.probarConexion != null;
     final ResultadoPing? r = _ping;
@@ -1448,37 +1452,85 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   color: AppColors.secondary),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
-                child: Text('Probar la conexión ahora',
-                    style: AppTypography.cuerpoChico),
+                child: Text('Ping', style: AppTypography.cuerpoChico),
               ),
-              if (_pingEnCurso)
+              if (_pingEnCurso) ...<Widget>[
+                Text(
+                  _ping == null
+                      ? '$_paquetesDelPing paquetes…'
+                      : '${_ping!.paquetes.length} de $_paquetesDelPing…',
+                  style: AppTypography.etiquetaChica,
+                ),
+                const SizedBox(width: AppSpacing.sm),
                 const SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
+                ),
+              ] else ...<Widget>[
                 TextButton(
                   onPressed: disponible ? _lanzarPing : null,
-                  child: Text(r == null ? 'Probar' : 'Repetir'),
+                  child: Text(r == null ? 'Ping' : 'Repetir'),
                 ),
+                // Cerrar el resultado. No es cosmética: la lista ocupa media
+                // pantalla y debajo está el botón con el que el técnico
+                // avanza la orden.
+                if (r != null)
+                  IconButton(
+                    onPressed: () => setState(() => _ping = null),
+                    icon: const Icon(Icons.close, size: 18),
+                    tooltip: 'Cerrar el resultado',
+                    visualDensity: VisualDensity.compact,
+                  ),
+              ],
             ],
           ),
           if (r != null) ...<Widget>[
             const SizedBox(height: AppSpacing.xs),
-            if (r.medido)
+            if (r.medido) ...<Widget>[
               Text(
-                'Respondieron ${r.respondieron}'
-                '${r.latencias.isEmpty ? '' : ' · ${r.latencias.join(" · ")}'}',
+                'Respondieron ${r.respondieron}',
                 style: AppTypography.datoChico.copyWith(
                   color: AppColors.onSurface,
                 ),
-              )
-            else
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              for (final PaqueteDePing p in r.paquetes)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 1),
+                  child: Row(
+                    children: <Widget>[
+                      SizedBox(
+                        width: 26,
+                        child: Text('${p.n}.',
+                            style: AppTypography.etiquetaChica),
+                      ),
+                      Icon(
+                        p.respondio ? Icons.check_circle : Icons.cancel,
+                        size: 13,
+                        color: p.respondio ? AppColors.exito : AppColors.error,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          p.respondio
+                              ? (p.rtt.isEmpty ? 'volvió' : p.rtt)
+                              : 'sin respuesta',
+                          style: AppTypography.datoChico.copyWith(
+                            color: p.respondio
+                                ? AppColors.onSurface
+                                : AppColors.error,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ] else
               Text(
                 // Cada motivo se arregla distinto, así que cada uno dice lo
-                // suyo. "No se pudo medir" jamás se dibuja como "no respondió":
-                // esa confusión manda a revisar una roseta sana.
+                // suyo. «No se pudo medir» jamás se dibuja como «no
+                // respondió»: esa confusión manda a revisar una roseta sana.
                 switch (r.motivo) {
                   'sin_conexion' =>
                     'Sin conexión: esta prueba necesita señal y no se encola. '
@@ -1499,19 +1551,72 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     );
   }
 
+  /// Pide las tandas en orden y va agregando cada una apenas llega, para que
+  /// los paquetes se vean caer en vez de aparecer los diez al final.
+  ///
+  /// Si una tanda falla, se corta ahí y se muestra el motivo **conservando lo
+  /// que ya volvió**: cinco paquetes medidos y una explicación valen más que
+  /// una pantalla en blanco.
   Future<void> _lanzarPing() async {
-    final Future<ResultadoPing> Function(String)? probar =
+    final Future<ResultadoPing> Function(String, int)? probar =
         widget.acciones.probarConexion;
     if (probar == null || _pingEnCurso) return;
 
-    setState(() => _pingEnCurso = true);
-    final ResultadoPing r = await probar(widget.ordenId);
-    if (!mounted) return;
     setState(() {
-      _pingEnCurso = false;
-      _ping = r;
+      _pingEnCurso = true;
+      // El resultado anterior se borra al arrancar: dejarlo en pantalla
+      // mientras corre el siguiente invita a leer el viejo como el nuevo.
+      _ping = null;
     });
+
+    final List<PaqueteDePing> acumulados = <PaqueteDePing>[];
+    for (final int tanda in _tandasDelPing) {
+      final ResultadoPing r = await probar(widget.ordenId, tanda);
+      if (!mounted) return;
+
+      if (!r.medido) {
+        setState(() {
+          _pingEnCurso = false;
+          // Lo que ya se midió no se tira: se muestra con el motivo al lado.
+          _ping = acumulados.isEmpty
+              ? r
+              : ResultadoPing(
+                  medido: true,
+                  respondieron: _conteo(acumulados),
+                  paquetes: List<PaqueteDePing>.of(acumulados),
+                  motivo: r.motivo,
+                );
+        });
+        return;
+      }
+
+      // Se renumeran de corrido: cada tanda vuelve empezando en 1, y una
+      // lista que dijera 1,2,3,1,2,3 sería ilegible.
+      for (final PaqueteDePing p in r.paquetes) {
+        acumulados.add(PaqueteDePing(
+          n: acumulados.length + 1,
+          respondio: p.respondio,
+          rtt: p.rtt,
+          perdida: p.perdida,
+        ));
+      }
+      setState(() {
+        _ping = ResultadoPing(
+          medido: true,
+          respondieron: _conteo(acumulados),
+          paquetes: List<PaqueteDePing>.of(acumulados),
+        );
+      });
+    }
+
+    if (mounted) setState(() => _pingEnCurso = false);
   }
+
+  /// «X de Y» con lo que se lleva medido. Se cuenta acá y no se reenvía el
+  /// texto de una tanda: cada una dice «3 de 3», y pegar el de la última haría
+  /// que diez paquetes con dos perdidos se anuncien como «4 de 4».
+  static String _conteo(List<PaqueteDePing> ps) =>
+      '${ps.where((PaqueteDePing p) => p.respondio).length} de ${ps.length}';
 
   /// CAMPO-DATA-001 · La potencia de ejemplo, para ver el producto completo
   /// cuando la orden todavía no trae lectura. Es el bloque que estaba acá
@@ -1721,36 +1826,93 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
+          // El serial va SOLO en su fila: doce caracteres no entran en media
+          // pantalla sin partirse, y es la única llave con la que se llega a
+          // SmartOLT -- si se corta, no sirve para buscar nada.
+          _CajaDato(
+            titulo: 'ONT SERIAL',
+            valor: trabajo.serialOnu.isNotEmpty
+                ? trabajo.serialOnu
+                : (widget.mostrarDatosFuturos ? FieldMockData.serialOnt : '—'),
+            detalle: trabajo.estadoOnu.isNotEmpty
+                ? 'Equipo ${trabajo.estadoOnu}'
+                : 'Sin lectura',
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          // CAMPO-DATA-011, ya no es de ejemplo: el puerto PON y la caja
+          // entran a la ficha desde el 25/09/2026 (api.py::_estado_equipo,
+          // con lista blanca -- esa respuesta trae el nombre del cliente).
+          //
+          // DOS TARJETAS Y NO UNA. Estaban juntas bajo «PUERTO PON / CAJA» y
+          // se leía mal: el valor grande era el puerto y la caja quedaba
+          // debajo como si fuera su detalle. Son dos datos distintos, de dos
+          // cosas distintas de la red, y cada uno puede faltar por su cuenta.
           Row(
             children: <Widget>[
-              // El serial es REAL desde que la ficha lo congela: es la única
-              // llave con la que se llega a SmartOLT.
               Expanded(
                 child: _CajaDato(
-                  titulo: 'ONT SERIAL',
-                  valor: trabajo.serialOnu.isNotEmpty
-                      ? trabajo.serialOnu
-                      : (widget.mostrarDatosFuturos ? FieldMockData.serialOnt : '—'),
-                  detalle: trabajo.estadoOnu.isNotEmpty
-                      ? 'Equipo ${trabajo.estadoOnu}'
-                      : 'Sin lectura',
+                  titulo: 'PUERTO PON',
+                  valor: trabajo.puertoPon.isNotEmpty
+                      ? trabajo.puertoPon
+                      : (widget.mostrarDatosFuturos
+                          ? FieldMockData.puertoPon
+                          : '—'),
+                  // 'board/port'. El número de ONU va aparte: es su posición
+                  // DENTRO del puerto, no parte del identificador.
+                  detalle: trabajo.puertoPon.isNotEmpty
+                      ? 'tarjeta / puerto'
+                      : 'Dato no disponible',
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
-              // El puerto PON y la CTO siguen sin llegar (CAMPO-DATA-011).
+              // La CAJA puede venir vacía y es normal, no un fallo: medido, el
+              // cliente de la orden 1849 no la tiene cargada en SmartOLT. Se
+              // dice, en vez de dibujar una que no existe.
               Expanded(
                 child: _CajaDato(
-                  titulo: 'PUERTO PON / CTO',
-                  valor: widget.mostrarDatosFuturos ? FieldMockData.puertoPon : '—',
-                  detalle: widget.mostrarDatosFuturos
-                      ? FieldMockData.terminal
-                      : 'Dato no disponible',
+                  titulo: 'CAJA / CTO',
+                  valor: trabajo.cajaDeDistribucion.isNotEmpty
+                      ? trabajo.cajaDeDistribucion
+                      : '—',
+                  detalle: trabajo.cajaDeDistribucion.isNotEmpty
+                      ? 'caja de distribución'
+                      : 'Sin caja cargada',
                 ),
               ),
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
           _potenciaOptica(trabajo),
+          const SizedBox(height: AppSpacing.sm),
+          // La planta, con lo que la ficha capturó de verdad. Cada fila
+          // aparece solo si su dato llegó: una etiqueta con un guion al lado
+          // ocupa el mismo lugar y no informa nada.
+          for (final (String titulo, String valor) in <(String, String)>[
+            ('OLT', trabajo.oltDelEquipo),
+            // El número de ONU va acá y no pegado al puerto: es su posición
+            // DENTRO del PON, no parte del identificador del puerto.
+            ('ONU en el puerto', trabajo.indiceOnu),
+            ('Zona de red', trabajo.zonaDeRed),
+            ('Equipo', trabajo.modeloDelEquipo),
+            ('Distancia a la OLT', trabajo.distanciaOlt),
+          ])
+            if (valor.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(titulo, style: AppTypography.etiquetaChica),
+                    ),
+                    Text(
+                      valor,
+                      style: AppTypography.datoChico.copyWith(
+                        color: AppColors.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           const SizedBox(height: AppSpacing.sm),
           _probarConexion(),
           const SizedBox(height: AppSpacing.sm),
@@ -1837,6 +1999,102 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               fontSize: 10,
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Lo que el asistente ya averiguó, antes de que existiera esta orden.
+  ///
+  /// **Es trabajo hecho que se estaba tirando.** Dexter habla con el cliente
+  /// por WhatsApp: verifica identidad, mide el equipo, descarta causas y deja
+  /// escrito qué falta averiguar. Todo eso vivía en su base y no salía de ahí,
+  /// así que el técnico llegaba a la casa a preguntar lo que el cliente ya
+  /// había contestado.
+  ///
+  /// El «siguiente paso» va arriba y destacado: no es una etiqueta, es la
+  /// instrucción concreta con la que conviene tocar el timbre.
+  ///
+  /// El resumen viaja **sin el documento del cliente** (lo redacta el modelo y
+  /// trae la cédula cuando la verificó). Ver `_sin_documentos` en el backend.
+  Widget _loQueDexterAveriguo(TrabajoVista trabajo) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: AppRadius.brTarjeta,
+        boxShadow: AppTheme.sombraNivel1,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.auto_awesome, size: 18,
+                  color: AppColors.primary),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text('Lo que el asistente ya averiguó',
+                    style: AppTypography.cuerpoGrande),
+              ),
+              if (trabajo.motivoEscaladaDexter.isNotEmpty)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: const BoxDecoration(
+                    color: AppColors.surfaceContainerHigh,
+                    borderRadius: AppRadius.brChico,
+                  ),
+                  child: Text(
+                    trabajo.motivoEscaladaDexter.replaceAll('_', ' '),
+                    style: AppTypography.etiquetaChica,
+                  ),
+                ),
+            ],
+          ),
+          if (trabajo.siguientePasoDexter.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: const BoxDecoration(
+                color: AppColors.surfaceContainer,
+                borderRadius: AppRadius.brCampo,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'QUÉ FALTA AVERIGUAR',
+                    style: AppTypography.etiquetaChica.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    trabajo.siguientePasoDexter,
+                    style: AppTypography.cuerpoChico,
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (trabajo.resumenDexter.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            Text(trabajo.resumenDexter,
+                style: AppTypography.datoChico.copyWith(
+                  color: AppColors.onSurfaceVariant,
+                )),
+          ],
+          if (trabajo.casoDexter.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Clasificado como ${trabajo.casoDexter.replaceAll('_', ' ')}',
+              style: AppTypography.etiquetaChica
+                  .copyWith(color: AppColors.outline),
+            ),
+          ],
         ],
       ),
     );
@@ -2418,4 +2676,194 @@ class _Reticula extends CustomPainter {
 
   @override
   bool shouldRepaint(_Reticula anterior) => false;
+}
+
+/// Una medida óptica con la forma del panel de SmartOLT —valor grande,
+/// etiqueta de estado y una barra con la zona buena— y los colores de esta
+/// aplicación.
+///
+/// La barra usa los umbrales de **G-GO-04**, no los del panel del proveedor
+/// (`crit -30 · warn -28`). Mezclarlos haría que la barra contradiga al
+/// veredicto en los casos de borde, que son los únicos en los que alguien
+/// mira la barra.
+class _MedidaOptica extends StatelessWidget {
+  const _MedidaOptica({
+    required this.titulo,
+    required this.detalle,
+    required this.valor,
+    required this.etiqueta,
+    required this.buena,
+  });
+
+  final String titulo;
+  final String detalle;
+
+  /// Como lo manda SmartOLT: '-21.19 dBm'.
+  final String valor;
+
+  /// El veredicto del motor, o vacío si no emitió ninguno para esta medida.
+  final String etiqueta;
+  final bool buena;
+
+  /// Los bordes de la zona aceptable, en dBm.
+  static const double _min = -25.0;
+  static const double _max = -8.0;
+
+  /// Hasta dónde se dibuja la regla. No empieza en el umbral: una barra que
+  /// arranca justo donde termina lo aceptable no deja ver CUÁNTO se pasó.
+  static const double _pisoRegla = -32.0;
+  static const double _techoRegla = -4.0;
+
+  double? get _numero {
+    final String limpio = valor.replaceAll(RegExp(r'[^0-9.\-]'), '');
+    return double.tryParse(limpio);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double? dbm = _numero;
+    final bool hay = dbm != null;
+    final Color acento = buena ? AppColors.exito : AppColors.error;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: buena ? AppColors.exitoFondo : AppColors.errorContainer,
+        borderRadius: AppRadius.brTarjeta,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            titulo.toUpperCase(),
+            style: AppTypography.etiquetaChica.copyWith(
+              fontWeight: FontWeight.w700,
+              color: buena ? AppColors.exitoTexto : AppColors.onErrorContainer,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: <Widget>[
+              Text(
+                hay ? dbm.toStringAsFixed(2) : '—',
+                style: AppTypography.medicion.copyWith(color: acento),
+              ),
+              const SizedBox(width: 2),
+              Text(
+                'dBm',
+                style: AppTypography.etiquetaChica.copyWith(
+                  color: buena
+                      ? AppColors.exitoTexto
+                      : AppColors.onErrorContainer,
+                ),
+              ),
+            ],
+          ),
+          if (etiqueta.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: acento,
+                borderRadius: AppRadius.brChico,
+              ),
+              child: Text(
+                etiqueta.replaceAll('_', ' ').toUpperCase(),
+                style: AppTypography.etiquetaChica.copyWith(
+                  fontSize: 9,
+                  color: AppColors.onError,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+          if (hay) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            SizedBox(
+              height: 10,
+              child: CustomPaint(
+                painter: _ReglaOptica(
+                  dbm: dbm,
+                  min: _min,
+                  max: _max,
+                  piso: _pisoRegla,
+                  techo: _techoRegla,
+                  marca: acento,
+                ),
+                size: Size.infinite,
+              ),
+            ),
+          ],
+          const SizedBox(height: 4),
+          Text(
+            detalle,
+            style: AppTypography.etiquetaChica.copyWith(
+              fontSize: 10,
+              color: buena ? AppColors.exitoTexto : AppColors.onErrorContainer,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// La regla de la medida: la franja verde es la zona aceptable y la marca es
+/// dónde cayó esta lectura. Fuera de la regla, la marca se queda en el borde
+/// en vez de salirse: decir «está fuera» es la información; cuánto más allá,
+/// no cambia lo que hace el técnico.
+class _ReglaOptica extends CustomPainter {
+  const _ReglaOptica({
+    required this.dbm,
+    required this.min,
+    required this.max,
+    required this.piso,
+    required this.techo,
+    required this.marca,
+  });
+
+  final double dbm;
+  final double min;
+  final double max;
+  final double piso;
+  final double techo;
+  final Color marca;
+
+  double _x(double v, double ancho) =>
+      ((v - piso) / (techo - piso)).clamp(0.0, 1.0) * ancho;
+
+  @override
+  void paint(Canvas lienzo, Size medida) {
+    final double alto = medida.height;
+    final RRect fondo = RRect.fromRectAndRadius(
+      Rect.fromLTWH(0, alto / 2 - 3, medida.width, 6),
+      const Radius.circular(3),
+    );
+    lienzo.drawRRect(fondo, Paint()..color = AppColors.outlineVariant);
+
+    final double ini = _x(min, medida.width);
+    final double fin = _x(max, medida.width);
+    lienzo.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTRB(ini, alto / 2 - 3, fin, alto / 2 + 3),
+        const Radius.circular(3),
+      ),
+      Paint()..color = AppColors.exito.withValues(alpha: 0.45),
+    );
+
+    final double x = _x(dbm, medida.width);
+    lienzo.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(x - 1.5, 0, 3, alto),
+        const Radius.circular(2),
+      ),
+      Paint()..color = marca,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ReglaOptica anterior) =>
+      anterior.dbm != dbm || anterior.marca != marca;
 }
