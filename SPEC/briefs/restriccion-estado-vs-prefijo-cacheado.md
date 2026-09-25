@@ -98,17 +98,51 @@ más que un campo ausente. **La regla que se conserva es la misma: no se arregla
 eliminando información.** La identidad de agosto queda, el historial queda, la
 auditoría queda. Lo que cambia es qué vista recibe cada componente.
 
-## Lo que falta antes de la ficha
+## Lo que falta antes de la ficha: **una sola medición**
 
 ```
-1  A/B/C contra el modelo, N>=5           C:\tmp\abc_router_con_modelo.py
-     Hoy está probado que la contradicción EXISTE; falta cuánto mueve la
-     decisión. Sin eso no hay causalidad. Mide sobre la traza, no la redacción,
-     y repite porque el modelo es probabilístico -- el proyecto ya pagó esa
-     lección dos veces con el ping (1 de 3, 2 de 3 y 3 de 3 con el mismo equipo
-     sano).
-2  la segunda medición pendiente del hilo de investigación
-     (`puede_consultar` declarado contra capacidad real)
+A/B/C contra el modelo, N>=5             C:\tmp\abc_router_con_modelo.py
 ```
 
-Con esos dos, la ficha. Sin ellos, esta restricción sola.
+Hoy está probado que la contradicción **existe**; falta **cuánto mueve la
+decisión**. La ficha tiene que poder distinguir las dos cosas:
+
+```
+contradicción de contexto   ≠   causa conductual del modelo
+```
+
+Mide sobre la traza —si el turno llamó a `derivar_a_area`— y no sobre la
+redacción. Y repite N veces cada variante porque el modelo es probabilístico: el
+proyecto ya pagó esa lección dos veces con el ping, donde el mismo equipo sano
+devuelve `1 de 3`, `2 de 3` y `3 de 3` en corridas seguidas. Lecturas:
+
+```
+A 5/5 · B 0/5 · C 5/5    causalidad cerrada
+A 5/5 · B 3/5 · C 5/5    hay efecto, falta muestra -- NO es una refutación
+A 5/5 · B 5/5 · C 5/5    la contradicción existe y NO explica este caso
+```
+
+### Ya cerrado, y no se remide
+
+**Dónde se decide qué vista recibe cada rol.** La capacidad de un rol la define
+`puede_consultar`, y de ahí `atender_turno` puede derivar la vista. Cerrado en
+otra sesión de la investigación — *reportado, no medido acá*: si hace falta
+reabrirlo, la evidencia está en esa sesión, no en este brief.
+
+## Fuera de alcance, con su motivo
+
+**La auditoría de integridad de herramientas queda como deuda aparte.** Son tres
+preguntas distintas, todas legítimas y ninguna de este trabajo:
+
+```
+1  herramienta declarada en puede_consultar que NO existe en el catálogo
+     -> el rol cree poder algo que no puede
+2  herramienta que existe y está declarada pero falla siempre
+     (credencial, endpoint, parámetro)  -> declarada y muerta
+3  herramienta ejecutable cuya lista blanca de campos deja la respuesta vacía
+     -> la llama y no obtiene nada
+```
+
+Las tres dan resultados distintos y la 1 y la 3 se miden sin base ni red,
+leyendo la config. **No se mezclan acá**: abren otro frente, y este trabajo es
+sobre qué vista del contexto recibe cada rol, no sobre la salud del catálogo.
