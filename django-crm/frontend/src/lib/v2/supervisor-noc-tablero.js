@@ -70,7 +70,7 @@ export function kpisDelTablero(indicadores, propuestas) {
     {
       clave: 'propuestas',
       n: pendientes,
-      titulo: 'Propuestas pendientes',
+      titulo: 'Pendientes por revisión',
       sub: 'Requieren revisión',
       tono: 'info'
     },

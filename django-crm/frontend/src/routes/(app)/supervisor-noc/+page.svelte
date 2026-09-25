@@ -2,6 +2,14 @@
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import {
+    AUSENTE,
+    nombreHumano,
+    quePasa,
+    prioridadHumana,
+    identificacion,
+    comparacionFuentes,
+    analisisSeparado,
+    siAcepto,
     comunDeEvidencia,
     fuentesDeEvidencia,
     baseDePrioridad,
@@ -185,7 +193,13 @@
    *
    * @param {string} id
    */
+  //  El contexto de la fila --ticket, zona, tecnico, SLA-- lo resuelve el
+  //  backend para el LISTADO (contexto_propuesta.py) y no viaja en el detalle.
+  //  Se guarda al abrir en vez de pedirlo otra vez: ya esta en pantalla.
+  let contextoFila = $state(/** @type {any} */ (null));
+
   async function abrirDetalle(id) {
+    contextoFila = propuestas.find((/** @type {any} */ p) => p.id === id) ?? null;
     abierta = id;
     detalle = null;
     errorDetalle = null;
@@ -259,6 +273,14 @@
   // son reglas de presentacion con casos borde, y probarlas exige poder
   // llamarlas sin montar el componente.
   const comun = $derived(comunDeEvidencia(detalle?.evidencia));
+  //  --- la lectura humana del hallazgo ---
+  const titulo = $derived(nombreHumano(detalle));
+  const resumen = $derived(quePasa(detalle, contraste));
+  const prioridad = $derived(prioridadHumana(detalle));
+  const identidad = $derived(identificacion(detalle, contextoFila));
+  const comparacion = $derived(comparacionFuentes(detalle, contextoFila));
+  const analisis = $derived(analisisSeparado(detalle));
+  const aceptar = $derived(siAcepto(detalle, contraste));
   const fuentes = $derived(fuentesDeEvidencia(detalle?.evidencia));
   const basePrioridad = $derived(baseDePrioridad(detalle?.evidencia));
   const contraste = $derived(contrasteDeEstados(detalle?.evidencia));
@@ -869,7 +891,7 @@
                 <div class="snoc-fila-sep">
                   <div class="snoc-fila" style="gap:var(--snoc-xs);">
                     <span class="snoc-icono snoc-primario" style="font-size:22px;">assignment_turned_in</span>
-                    <h3 class="snoc-h3">Pendientes de revisión</h3>
+                    <h3 class="snoc-h3">Pendientes por revisión</h3>
                   </div>
                   <span class="snoc-insignia snoc-insignia-neutra">{pendientes.length} pendientes</span>
                   {#if pendientes.length > FILAS_A_LA_VISTA}
@@ -1119,7 +1141,7 @@
             </div>
           {:else if detalle}
             <div class="snoc-fila-sep" style="flex-wrap:wrap;">
-              <h3 class="snoc-h2" id="snoc-hallazgo-titulo">DETALLE DEL HALLAZGO</h3>
+              <h3 class="snoc-h2" id="snoc-hallazgo-titulo">{titulo}</h3>
               <span class="snoc-mono-sm snoc-tenue">Leído {haceCuanto(comun?.leido ?? detalle.created_at)}</span>
             </div>
 
@@ -1178,6 +1200,87 @@
               </span>
             </div>
 
+            <!-- ============ 1 · IDENTIFICACIÓN ============ -->
+            <!--
+              Lo primero que la pantalla tiene que contestar es DE QUÉ habla.
+              Las cuatro casillas salen del contexto que el backend ya resolvió
+              para la fila; las que la fuente no entrega lo dicen con todas las
+              letras en vez de quedarse vacías.
+            -->
+            <dl class="snoc-identidad">
+              {#each identidad as casilla (casilla.rotulo)}
+                <div>
+                  <dt>{casilla.rotulo}</dt>
+                  <dd class:snoc-ausente={casilla.valor === AUSENTE}>
+                    {#if casilla.href && casilla.valor !== AUSENTE}
+                      <a class="snoc-enlace-externo" href={casilla.href}>{casilla.valor}</a>
+                    {:else}
+                      {casilla.valor}
+                    {/if}
+                  </dd>
+                </div>
+              {/each}
+            </dl>
+
+            <!-- ============ 2 · ¿QUÉ ESTÁ PASANDO? ============ -->
+            <section class="snoc-que-pasa">
+              <h4 class="snoc-h4">¿Qué está pasando?</h4>
+              <p class="snoc-que-pasa-frase">{resumen}</p>
+            </section>
+
+            <!-- ============ 3 · DEXTER vs WISPHUB ============ -->
+            <section class="snoc-columna">
+              <div class="snoc-columna-titulo">
+                <span class="snoc-icono snoc-primario" style="font-size:15px;">compare_arrows</span>
+                <span class="snoc-label-sm" style="text-transform:uppercase;">Dexter vs WispHub</span>
+              </div>
+              <table class="snoc-comparacion">
+                <thead>
+                  <tr><th>Información</th><th>Dexter</th><th>WispHub</th></tr>
+                </thead>
+                <tbody>
+                  {#each comparacion as fila (fila.campo)}
+                    <tr>
+                      <th scope="row">{fila.campo}</th>
+                      <td class:snoc-ausente={fila.dexter === AUSENTE}>{fila.dexter}</td>
+                      <td class:snoc-ausente={fila.wisphub === AUSENTE}>{fila.wisphub}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </section>
+
+            <!-- ============ 4 · ¿QUÉ DETECTÓ EL SUPERVISOR? ============ -->
+            <section class="snoc-columna">
+              <div class="snoc-columna-titulo">
+                <span class="snoc-icono snoc-primario" style="font-size:15px;">radar</span>
+                <span class="snoc-label-sm" style="text-transform:uppercase;">¿Qué detectó el Supervisor NOC IA?</span>
+              </div>
+              <dl class="snoc-dl">
+                <div><dt>Hallazgo</dt><dd>{titulo}</dd></div>
+                <div><dt>Clave técnica</dt><dd class="snoc-mono-sm">{detalle.tipo_senal}</dd></div>
+                <div><dt>Detectado</dt><dd class="snoc-mono-sm">{fecha(detalle.created_at)}</dd></div>
+                <div>
+                  <dt>Fuente</dt>
+                  <dd class="snoc-mono-sm">{detalle.conocimiento_version || AUSENTE}</dd>
+                </div>
+                {#if antiguedad}
+                  <div>
+                    <dt>Antigüedad</dt>
+                    <dd>{antiguedad.dias != null ? `${antiguedad.dias} días` : `desde ${antiguedad.desde}`}</dd>
+                  </div>
+                {/if}
+              </dl>
+              <p class="snoc-body-sm snoc-secundario" style="margin:var(--snoc-xs) 0 0;">
+                {detalle.motivo || AUSENTE}
+              </p>
+            </section>
+
+            <!-- ============ 10 · INFORMACIÓN TÉCNICA (se conserva entera) ============
+                 Baja de sitio, no se pierde: primero lo que hace falta para
+                 decidir, y el detalle técnico a un clic. -->
+            <details class="snoc-tecnico">
+              <summary class="snoc-label-sm">Información técnica de la señal</summary>
             <!-- DOS COLUMNAS: identificación y contexto -->
             <div class="snoc-dos-columnas">
               <section class="snoc-columna">
@@ -1259,8 +1362,97 @@
                 </div>
               </section>
             </div>
+            </details>
 
-            <!-- ANÁLISIS -->
+            <!-- ============ 6 · ANÁLISIS DEL SUPERVISOR ============ -->
+            <!--
+              Las tres cosas van SEPARADAS y rotuladas. Un lector apurado lee
+              la interpretación como si fuera un hecho, y sobre eso decide.
+            -->
+            <section class="snoc-columna">
+              <div class="snoc-columna-titulo">
+                <span class="snoc-icono snoc-primario" style="font-size:15px;">psychology</span>
+                <span class="snoc-label-sm" style="text-transform:uppercase;">Análisis del Supervisor NOC IA</span>
+              </div>
+
+              <p class="snoc-etiqueta-analisis">Hechos observados</p>
+              {#if analisis.hechos.length === 0}
+                <p class="snoc-ausente snoc-body-sm">{AUSENTE}</p>
+              {:else}
+                <ul class="snoc-lista-hechos">
+                  {#each analisis.hechos as h, i (i)}
+                    <li>
+                      <span class="snoc-body-sm">{h.dato}</span>
+                      <span class="snoc-mono-sm snoc-tenue">{h.fuente}</span>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+
+              <p class="snoc-etiqueta-analisis">Interpretación del Supervisor</p>
+              <p class="snoc-body-sm" class:snoc-ausente={analisis.interpretacion === AUSENTE}>
+                {analisis.interpretacion}
+              </p>
+
+              <p class="snoc-etiqueta-analisis">Impacto operativo</p>
+              <p class="snoc-body-sm" class:snoc-ausente={analisis.impacto === AUSENTE}>
+                {analisis.impacto}
+              </p>
+
+              {#if analisis.faltantes.length > 0}
+                <p class="snoc-etiqueta-analisis">Información que falta</p>
+                <ul class="snoc-lista-hechos">
+                  {#each analisis.faltantes as f, i (i)}
+                    <li><span class="snoc-body-sm">{f}</span></li>
+                  {/each}
+                </ul>
+              {/if}
+            </section>
+
+            <!-- ============ 7 · LA PROPUESTA ============ -->
+            <section class="snoc-propuesta">
+              <h4 class="snoc-h4">¿Qué propone el Supervisor NOC IA?</h4>
+              <p class="snoc-propuesta-accion">{detalle.accion_propuesta || AUSENTE}</p>
+              <dl class="snoc-dl">
+                <div>
+                  <dt>Nivel de autonomía</dt>
+                  <dd>{detalle.nivel_autonomia_requerido} · {NIVELES[detalle.nivel_autonomia_requerido] ?? AUSENTE}</dd>
+                </div>
+                <div><dt>Confirmación humana</dt><dd>Obligatoria</dd></div>
+                <div><dt>Evidencia que la respalda</dt><dd>{analisis.hechos.length} observaciones</dd></div>
+              </dl>
+            </section>
+
+            <!-- ============ 8 · ¿QUÉ PASA SI ACEPTO? ============ -->
+            <!--
+              La sección que evita el malentendido más caro de esta pantalla.
+              NO dice «resultado: caso cerrado»: aceptar registra un acuerdo y
+              no ejecuta nada mientras siga el Shadow Mode. El estado
+              «ejecutada» no existe en el modelo.
+            -->
+            <section class="snoc-si-acepto">
+              <h4 class="snoc-h4">Si aceptas esta propuesta</h4>
+              <dl class="snoc-dl">
+                <div>
+                  <dt>Estado actual en Dexter</dt>
+                  <dd class:snoc-ausente={aceptar.estadoActual === AUSENTE}>{aceptar.estadoActual}</dd>
+                </div>
+                <div><dt>Acción propuesta</dt><dd>{aceptar.accion}</dd></div>
+                <div>
+                  <dt>Origen de la decisión</dt>
+                  <dd class:snoc-ausente={aceptar.origenDecision === AUSENTE}>{aceptar.origenDecision}</dd>
+                </div>
+                <div><dt>Tipo</dt><dd>{aceptar.tipo}</dd></div>
+              </dl>
+              <p class="snoc-aviso-shadow">
+                <span class="snoc-icono" style="font-size:16px;">info</span>
+                {aceptar.efecto}
+              </p>
+            </section>
+
+            <!-- ANÁLISIS TÉCNICO COMPLETO (el que ya existía, desplegable) -->
+            <details class="snoc-tecnico">
+              <summary class="snoc-label-sm">Ver análisis técnico completo</summary>
             <section class="snoc-analisis-caja">
               <div class="snoc-fila-sep" style="flex-wrap:wrap;">
                 <div class="snoc-fila" style="gap:var(--snoc-xs);">
@@ -1349,6 +1541,8 @@
             </details>
 
             <!-- CICLO: revisión humana ➔ ejecución -->
+            </details>
+
             <section class="snoc-ciclo">
               <div class="snoc-fila-sep" style="flex-wrap:wrap;">
                 <span class="snoc-label" style="text-transform:uppercase; letter-spacing:0.06em;">

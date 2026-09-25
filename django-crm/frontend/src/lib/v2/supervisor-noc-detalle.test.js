@@ -9,7 +9,15 @@ import {
   antiguedadDelCaso,
   lecturaExterna,
   CONTEXTO_AUSENTE,
-  pasosDelCiclo
+  pasosDelCiclo,
+  AUSENTE,
+  nombreHumano,
+  quePasa,
+  prioridadHumana,
+  identificacion,
+  comparacionFuentes,
+  analisisSeparado,
+  siAcepto
 } from '$lib/v2/supervisor-noc-detalle.js';
 
 /** La evidencia real de un 'caso_desincronizado', tal como la manda el backend. */
@@ -243,5 +251,189 @@ describe('pasosDelCiclo', () => {
     const claves = pasosDelCiclo('propuesta').map((p) => p.clave);
 
     expect(claves).toEqual(['propuesta', 'revisada', 'aprobada', 'encolada', 'ejecutada', 'validada']);
+  });
+});
+
+// ===========================================================================
+//  LA LECTURA HUMANA DEL HALLAZGO
+// ===========================================================================
+//  Estas pruebas guardan una sola cosa, y es la que la pantalla puede romper
+//  sin que nadie lo note: que un dato ausente se DIGA, y que la sección
+//  «¿qué pasa si acepto?» no prometa una ejecución que el sistema no hace.
+//
+//  El caso de referencia es real, copiado de producción el 25/09/2026:
+//  ticket 92751, caso abierto en Dexter (New) y cerrado en WispHub.
+
+const DESINCRONIZADO = {
+  id: 'p-1',
+  tipo_senal: 'caso_desincronizado',
+  tipo_senal_display: 'Caso cerrado en el proveedor y abierto en el CRM',
+  origen_tipo: 'case',
+  origen_id: 'feee6eb7-4714-40c7-bc90-624bf2baf7d1',
+  estado: 'propuesta',
+  prioridad: 30,
+  nivel_autonomia_requerido: 0,
+  accion_propuesta: 'Revisar la sincronización con el proveedor: el caso figura cerrado allá y abierto en el CRM',
+  motivo: 'El proveedor lo reporta como «Cerrado» y en el CRM sigue sin fecha de resolución.',
+  impacto: 'Infla la cola del CRM y los conteos dejan de describir la operación.',
+  evidencia: [
+    { fuente: 'caso', id: 'c', dato: 'abierto desde 2026-09-15 (7 dias)', observado_en: '2026-09-22T20:34:18Z' },
+    { fuente: 'caso', id: 'c', dato: 'estado actual: New', observado_en: '2026-09-22T20:34:18Z' },
+    { fuente: 'caso', id: 'c', dato: 'estado en el proveedor: Cerrado', observado_en: '2026-09-22T20:34:18Z' },
+    { fuente: 'caso', id: 'c', dato: 'estado externo leido el 2026-09-22 14:53 UTC', observado_en: '2026-09-22T20:34:18Z' },
+    { fuente: 'calculo_prioridad', id: 'c', dato: 'base 30', observado_en: '2026-09-22T20:34:18Z' }
+  ]
+};
+
+const CONTEXTO = { ticket_externo: '92751', proveedor_externo: 'wisphub', tecnico: '', zona: '' };
+
+describe('nombre humano de la señal', () => {
+  it('traduce la clave técnica a lo que el usuario reconoce', () => {
+    expect(nombreHumano(DESINCRONIZADO)).toBe('Desincronización WispHub ↔ Dexter');
+  });
+
+  it('un tipo sin rótulo propio cae en lo que el backend ya traduce', () => {
+    const otro = { tipo_senal: 'algo_nuevo', tipo_senal_display: 'Algo nuevo' };
+    expect(nombreHumano(otro)).toBe('Algo nuevo');
+  });
+
+  it('sin propuesta, lo dice', () => {
+    expect(nombreHumano(null)).toBe(AUSENTE);
+  });
+});
+
+describe('¿qué está pasando?', () => {
+  it('nombra los dos estados REALES, no unos supuestos', () => {
+    const f = quePasa(DESINCRONIZADO);
+    expect(f).toContain('Cerrado');
+    expect(f).toContain('New');
+  });
+
+  it('un tipo sin frase propia usa el motivo del Supervisor', () => {
+    const otro = { tipo_senal: 'x', motivo: 'Lo que el Supervisor escribió' };
+    expect(quePasa(otro)).toBe('Lo que el Supervisor escribió');
+  });
+});
+
+describe('prioridad humana', () => {
+  it('nivel 0 (observar) es baja, aunque el número sea alto', () => {
+    //  El número NO decide solo: 30 con nivel 0 es observar, no urgencia.
+    const p = prioridadHumana(DESINCRONIZADO);
+    expect(p.texto).toBe('Baja');
+    expect(p.n).toBe(30);
+  });
+
+  it('distingue alta y media dentro del rango real medido (30-42)', () => {
+    expect(prioridadHumana({ prioridad: 42, nivel_autonomia_requerido: 1 }).texto).toBe('Alta');
+    expect(prioridadHumana({ prioridad: 40, nivel_autonomia_requerido: 1 }).texto).toBe('Media');
+    expect(prioridadHumana({ prioridad: 30, nivel_autonomia_requerido: 1 }).texto).toBe('Baja');
+  });
+
+  it('sin prioridad no inventa una', () => {
+    expect(prioridadHumana({}).texto).toBe(AUSENTE);
+  });
+});
+
+describe('identificación', () => {
+  it('trae el ticket del contexto de la fila, sin pedir nada más', () => {
+    const filas = identificacion(DESINCRONIZADO, CONTEXTO);
+    expect(filas.find((f) => f.rotulo === 'Ticket WispHub').valor).toBe('92751');
+  });
+
+  it('el caso enlaza a su ficha', () => {
+    const caso = identificacion(DESINCRONIZADO, CONTEXTO).find((f) => f.rotulo === 'Caso Dexter');
+    expect(caso.valor).toBe('CS-feee6eb7');
+    expect(caso.href).toBe(`/tickets/${DESINCRONIZADO.origen_id}`);
+  });
+
+  it('cliente y asunto DICEN que no están, en vez de quedarse vacíos', () => {
+    //  Medido: los 237 casos de producción no tienen cuenta asociada.
+    const filas = identificacion(DESINCRONIZADO, CONTEXTO);
+    expect(filas.find((f) => f.rotulo === 'Cliente').valor).toBe(AUSENTE);
+    expect(filas.find((f) => f.rotulo === 'Asunto del ticket').valor).toBe(AUSENTE);
+  });
+
+  it('sin contexto no se cae, y declara las cuatro', () => {
+    const filas = identificacion(DESINCRONIZADO);
+    expect(filas).toHaveLength(4);
+    expect(filas.filter((f) => f.valor === AUSENTE).length).toBe(3);
+  });
+});
+
+describe('comparación Dexter ↔ WispHub', () => {
+  it('pone cada estado en su columna', () => {
+    const estado = comparacionFuentes(DESINCRONIZADO, CONTEXTO).find((f) => f.campo === 'Estado');
+    expect(estado.dexter).toBe('New');
+    expect(estado.wisphub).toBe('Cerrado');
+  });
+
+  it('no rellena una celda por simetría', () => {
+    const resp = comparacionFuentes(DESINCRONIZADO, CONTEXTO).find((f) => f.campo === 'Responsable');
+    expect(resp.dexter).toBe(AUSENTE);
+    expect(resp.wisphub).toBe(AUSENTE);
+  });
+
+  it('la fila del proveedor habla de LECTURA, no de cambio', () => {
+    //  De WispHub solo se sabe cuándo se leyó, no cuándo cambió allá.
+    const filas = comparacionFuentes(DESINCRONIZADO, CONTEXTO);
+    expect(filas.some((f) => f.campo === 'Última lectura')).toBe(true);
+    expect(filas.some((f) => /actualizaci[oó]n/i.test(f.campo))).toBe(false);
+  });
+
+  it('con una propuesta vacía devuelve las cuatro filas, todas declaradas', () => {
+    const filas = comparacionFuentes({}, {});
+    expect(filas).toHaveLength(4);
+    expect(filas.every((f) => f.dexter === AUSENTE && f.wisphub === AUSENTE)).toBe(true);
+  });
+});
+
+describe('análisis separado', () => {
+  it('separa hechos de interpretación', () => {
+    const a = analisisSeparado(DESINCRONIZADO);
+    expect(a.hechos.map((h) => h.dato)).toContain('estado en el proveedor: Cerrado');
+    expect(a.interpretacion).toBe(DESINCRONIZADO.motivo);
+    expect(a.impacto).toBe(DESINCRONIZADO.impacto);
+  });
+
+  it('el cálculo de prioridad no es un hecho observado', () => {
+    const a = analisisSeparado(DESINCRONIZADO);
+    expect(a.hechos.map((h) => h.dato)).not.toContain('base 30');
+  });
+
+  it('recoge lo que la evidencia declara como faltante', () => {
+    const conFalta = {
+      ...DESINCRONIZADO,
+      evidencia: [{ fuente: 'caso', dato: 'falta el estado externo: no se pudo leer', observado_en: null }]
+    };
+    expect(analisisSeparado(conFalta).faltantes).toHaveLength(1);
+  });
+
+  it('sin evidencia no inventa hechos', () => {
+    expect(analisisSeparado({}).hechos).toEqual([]);
+  });
+});
+
+describe('¿qué pasa si acepto?', () => {
+  it('NO promete que el caso se cierre', () => {
+    //  La garantía más importante de esta pantalla: aceptar registra un
+    //  acuerdo, no ejecuta nada. El estado «ejecutada» no existe en el modelo.
+    const r = siAcepto(DESINCRONIZADO);
+    expect(r.efecto).toMatch(/no cierra el caso/i);
+    expect(r.efecto).toMatch(/no ejecuta/i);
+    expect(JSON.stringify(r)).not.toMatch(/Dexter: ?Cerrado/);
+  });
+
+  it('muestra la acción con las palabras de la propuesta', () => {
+    expect(siAcepto(DESINCRONIZADO).accion).toBe(DESINCRONIZADO.accion_propuesta);
+  });
+
+  it('dice de dónde viene la decisión y que exige confirmación humana', () => {
+    const r = siAcepto(DESINCRONIZADO);
+    expect(r.origenDecision).toBe('WispHub');
+    expect(r.requiereConfirmacion).toBe(true);
+  });
+
+  it('sin evidencia externa no atribuye el origen a nadie', () => {
+    expect(siAcepto({ accion_propuesta: 'x' }).origenDecision).toBe(AUSENTE);
   });
 });

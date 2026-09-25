@@ -860,3 +860,104 @@
   z-index: 1;
   background: var(--snoc-surface-container-low);
 }
+
+/* ==========================================================================
+   EL DETALLE DEL HALLAZGO, EN ORDEN DE DECISIÓN
+   ==========================================================================
+   Primero lo que hace falta para decidir; el detalle técnico, a un clic. Nada
+   se borró: la información de antes vive dentro de los <details>. */
+
+.snoc-identidad {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--snoc-xs) var(--snoc-sm);
+  margin: 0 0 var(--snoc-sm);
+}
+@media (min-width: 900px) { .snoc-identidad { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.snoc-identidad dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--snoc-on-surface-variant);
+  margin-bottom: 2px;
+}
+.snoc-identidad dd { margin: 0; font-size: 13px; font-weight: 600; word-break: break-word; }
+
+/*  Un dato que la fuente no trae se ve DISTINTO de uno que sí: en gris y en
+    cursiva, para que nadie lo lea como un valor. */
+.snoc-ausente { color: var(--snoc-on-surface-variant); font-style: italic; font-weight: 400; }
+
+.snoc-que-pasa {
+  border: 1px solid var(--snoc-outline-variant);
+  border-left: 4px solid var(--snoc-primary);
+  border-radius: var(--snoc-r-md);
+  background: var(--snoc-surface-container-low);
+  padding: var(--snoc-sm);
+  margin-bottom: var(--snoc-sm);
+}
+.snoc-que-pasa-frase { margin: 4px 0 0; font-size: 15px; line-height: 1.5; }
+
+.snoc-comparacion { width: 100%; border-collapse: collapse; font-size: 13px; }
+.snoc-comparacion th, .snoc-comparacion td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--snoc-outline-variant);
+}
+.snoc-comparacion thead th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--snoc-on-surface-variant);
+}
+.snoc-comparacion tbody th { font-weight: 600; width: 34%; }
+
+.snoc-etiqueta-analisis {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--snoc-on-surface-variant);
+  margin: var(--snoc-sm) 0 4px;
+}
+.snoc-lista-hechos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.snoc-lista-hechos li { display: flex; justify-content: space-between; gap: var(--snoc-sm); }
+
+.snoc-propuesta, .snoc-si-acepto {
+  border: 1px solid var(--snoc-outline-variant);
+  border-radius: var(--snoc-r-md);
+  padding: var(--snoc-sm);
+  margin-bottom: var(--snoc-sm);
+}
+.snoc-propuesta {
+  border-left: 4px solid var(--snoc-primary);
+  background: var(--snoc-surface-container-low);
+}
+.snoc-propuesta-accion { margin: 4px 0 var(--snoc-xs); font-size: 15px; font-weight: 600; line-height: 1.45; }
+.snoc-si-acepto { border-style: dashed; }
+.snoc-aviso-shadow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: var(--snoc-xs) 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--snoc-on-surface-variant);
+}
+.snoc-tecnico { margin-bottom: var(--snoc-sm); }
+.snoc-tecnico > summary { cursor: pointer; padding: 6px 0; }
+
+/*  La lista de pares rotulo/valor del detalle. La usaban tres secciones y no
+    estaba definida: lo encontro la guarda de clases, no la pantalla. */
+.snoc-dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--snoc-xs) var(--snoc-sm);
+  margin: 0;
+}
+.snoc-dl dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--snoc-on-surface-variant);
+  margin-bottom: 2px;
+}
+.snoc-dl dd { margin: 0; font-size: 13px; word-break: break-word; }
