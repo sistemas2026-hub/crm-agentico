@@ -6,6 +6,10 @@
 auditoria.log
 *.log
 
+# Persistencia local (SQLite) -- conversaciones, PII. Nunca al repositorio.
+datos/
+*.db
+
 # Python
 __pycache__/
 *.py[cod]
@@ -27,3 +31,34 @@ informe_materiales_*_redactado.txt
 corpus/**
 !corpus/**/
 !corpus/README.md
+
+# Reportes de backfill de sn_onu (cli/proponer_sn_onu.py, cli/aplicar_sn_onu.py).
+# Traen NOMBRE COMPLETO de cientos de clientes cruzado con el serial de su
+# equipo: es exactamente el tipo de dato que el PRD (RNF-01) mantiene fuera de
+# cualquier lugar donde no haga falta. Se generan cuando se necesitan y se
+# borran; no se versionan.
+candidatos_sn_onu.csv
+pendientes_sn_onu_manual.md
+seriales_propuestos.csv
+
+# Capturas y volcados de UI del emulador Android. Se generan trabajando en la
+# app de tecnicos y no describen nada que el repositorio tenga que recordar:
+# son 5,7 MB de PNG del estado de una pantalla en un momento. Estuvieron a
+# punto de entrar al repositorio compartido el 10/09/2026.
+.tmp/
+
+# Volcados de accesibilidad del navegador (Playwright MCP). Se generan solos,
+# uno por pagina visitada, mientras se trabaja con la interfaz: el 24/09/2026
+# habia 21 sin commitear. No describen nada que el repositorio deba recordar.
+# Ya entraron una vez, en d97ea22, junto con lanzadores y registros de sesion
+# que no forman parte del sistema; el pre-commit de CLAUDE.md §9 existe en
+# parte por eso. Ignorarlos es mas barato que depender de que la puerta los
+# frene en cada commit.
+.playwright-mcp/
+
+# Prototipos de diseno sueltos en la RAIZ del repositorio (disco-*.png,
+# radial-*.png, proto-*.png y los que vengan). Son iteraciones descartables de
+# una pantalla, no documentacion: lo que se conserva vive en documentos/.
+# Solo la raiz — las 118 imagenes versionadas en subcarpetas no se tocan.
+/*.png
+!/bandeja-desktop-1440.png

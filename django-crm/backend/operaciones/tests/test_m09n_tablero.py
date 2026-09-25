@@ -1,0 +1,671 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ M09-N  --  el tablero: contexto resuelto y feed de actividad
+================================================================================
+
+QUE SE AGREGO Y POR QUE HAY QUE VIGILARLO
+-----------------------------------------
+El tablero necesitaba mostrar la zona, el tecnico y el ticket del proveedor de
+cada hallazgo. Los tres ya existian --en 'ProgramacionOrden', en
+'campo.AsignacionTrabajo' y en 'cases.Case'-- y lo que faltaba era alcanzarlos.
+'contexto_propuesta.contexto_de' los resuelve para el lote entero.
+
+Ese modulo toca tres aplicaciones desde una cuarta, asi que tiene tres maneras
+de salir mal que ninguna prueba anterior miraria:
+
+  1. QUE DEVUELVA EL TECNICO EQUIVOCADO. 'responsable_sugerido' es a quien la
+     IA propone. Ponerlo en la columna 'Tecnico' afirmaria que alguien ya tiene
+     la orden. §1 lo afirma sobre el EFECTO: se crea una propuesta CON
+     responsable sugerido y SIN asignacion, y el contexto tiene que salir
+     vacio.
+
+  2. QUE FILTRE COORDENADAS. 'campo.OrdenTrabajo' tiene gps_lat/gps_lng, y son
+     PII: 'programacion-noc.js::leerOrden' las quita en el servidor a
+     proposito. §2 afirma que no aparecen en ninguna clave del contexto, con
+     una orden que SI las tiene pobladas -- una prueba con la orden en blanco
+     pasaria sin probar nada.
+
+  3. QUE CRUCE ORGANIZACIONES. 'origen_id' es texto libre: nada impide que
+     apunte a una orden de otro tenant. §3 lo intenta a proposito.
+
+Y el feed ('auditoria.recientes') tiene la suya: es la unica ruta nueva del
+modulo, y el Shadow Mode vive de que ninguna ruta escriba. §4 lo afirma
+contando filas antes y despues, no leyendo la vista.
+================================================================================
+"""
+
+import uuid
+
+import pytest
+from django.utils import timezone
+
+from conftest import rls_org
+from operaciones import auditoria, contexto_propuesta
+from operaciones.models import PropuestaSupervisor
+
+RUTA_FEED = "/api/operaciones/actividad-supervisor/"
+
+#  'OrdenTrabajo.numero' es unico por organizacion y aqui se crean varias.
+_n = [1800]
+
+
+# =============================================================================
+#  utilidades
+# =============================================================================
+
+def _propuesta(org, **extra):
+    """Una propuesta valida. La evidencia la exige una restriccion de la base."""
+    datos = dict(
+        org=org,
+        tipo_senal=PropuestaSupervisor.ORDEN_SIN_PROGRAMAR,
+        origen_tipo="orden_trabajo",
+        origen_id=str(uuid.uuid4()),
+        accion_propuesta="Programar la orden",
+        motivo="Lleva 3 dias abierta sin fecha.",
+        evidencia=[{
+            "fuente": "campo.OrdenTrabajo",
+            "id": "ot-1",
+            "dato": "sin programada_para",
+            "observado_en": timezone.now().isoformat(),
+        }],
+        prioridad=30,
+        impacto="El cliente no tiene fecha",
+        huella_condicion="huella-" + uuid.uuid4().hex[:8],
+        expira_en=timezone.now() + timezone.timedelta(days=7),
+    )
+    datos.update(extra)
+    return PropuestaSupervisor.objects.create(**datos)
+
+
+def _orden(org, **extra):
+    """
+    Una orden de trabajo minima, con su tipo de trabajo.
+
+    El codigo del WorkType lleva un sufijo unico: es unico por organizacion, y
+    varias pruebas de este archivo crean mas de una orden.
+    """
+    from campo.models import OrdenTrabajo, WorkType, WorkTypeVersion
+
+    sufijo = uuid.uuid4().hex[:8]
+    tipo = WorkType.objects.create(
+        org=org, nombre=f"Instalacion {sufijo}", codigo=f"ins_{sufijo}")
+    esquema = {"campos": [], "evidencias": []}
+    duracion = extra.pop("duracion", None)
+    if duracion is not None:
+        from operaciones.sla import CLAVE_DURACION
+        esquema[CLAVE_DURACION] = duracion
+    version = WorkTypeVersion.objects.create(
+        work_type=tipo, version=1, schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA, esquema=esquema)
+    _n[0] += 1
+    datos = dict(
+        org=org,
+        numero=_n[0],
+        tipo_trabajo_version=version,
+        cliente_nombre="Cliente de prueba",
+        cliente_direccion="Calle 1 #2-3",
+    )
+    datos.update(extra)
+    return OrdenTrabajo.objects.create(**datos)
+
+
+def _perfil(org, correo):
+    from common.models import Profile, User
+    u = User.objects.create_user(email=correo, password="clave-de-prueba-1")
+    return Profile.objects.create(user=u, org=org, role="OPERACIONES",
+                                  is_active=True)
+
+
+# =============================================================================
+#  §1  EL TECNICO ES LA ASIGNACION REAL, NUNCA LA SUGERENCIA
+# =============================================================================
+
+def test_una_propuesta_con_responsable_sugerido_y_sin_asignacion_no_tiene_tecnico(org_a):
+    """
+    LA PRUEBA QUE IMPORTA DE TODO EL ARCHIVO.
+
+    'responsable_sugerido' esta poblado, la orden existe, y NADIE la tiene
+    asignada. Si el contexto devolviera ese nombre, la pantalla diria que Ana
+    esta trabajando en algo que nadie le dio.
+
+    Se afirma sobre el EFECTO -- el valor que sale -- y no sobre que el codigo
+    no mencione 'responsable_sugerido': un 'or' de respaldo agregado despues
+    pasaria esa segunda version sin que nadie se entere.
+    """
+    with rls_org(org_a):
+        ana = _perfil(org_a, "ana@prueba.co")
+        orden = _orden(org_a)
+        propuesta = _propuesta(
+            org_a, origen_id=str(orden.id), responsable_sugerido=ana)
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    assert propuesta.responsable_sugerido_id == ana.id, "el montaje debe tener sugerido"
+    assert contexto[str(propuesta.id)]["tecnico"] == ""
+    # Y el numero de la orden SI sale: lo que falta es el tecnico, no el enlace.
+    assert contexto[str(propuesta.id)]["orden_numero"] == orden.numero
+
+
+def test_el_tecnico_sale_cuando_hay_asignacion_principal(org_a):
+    from campo.models import AsignacionTrabajo
+
+    with rls_org(org_a):
+        luis = _perfil(org_a, "luis@prueba.co")
+        orden = _orden(org_a)
+        AsignacionTrabajo.objects.create(
+            orden=orden, profile=luis, es_principal=True)
+        propuesta = _propuesta(org_a, origen_id=str(orden.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    # 'name' cuando lo hay, el correo cuando no. 'create_user' deriva el name
+    # del correo, asi que aqui sale 'luis'; lo que se afirma es que sale la
+    # persona ASIGNADA y no una cadena vacia.
+    assert contexto[str(propuesta.id)]["tecnico"] == luis.user.name
+
+
+def test_una_cuadrilla_sin_principal_no_elige_a_uno_cualquiera(org_a):
+    """
+    Tres personas asignadas y ninguna marcada como principal. "Hay tres
+    personas" no responde "quien responde por esto", asi que sale vacio en vez
+    de la primera de la lista.
+    """
+    from campo.models import AsignacionTrabajo
+
+    with rls_org(org_a):
+        orden = _orden(org_a)
+        for i in range(3):
+            AsignacionTrabajo.objects.create(
+                orden=orden, profile=_perfil(org_a, f"p{i}@prueba.co"),
+                es_principal=False)
+        propuesta = _propuesta(org_a, origen_id=str(orden.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    assert contexto[str(propuesta.id)]["tecnico"] == ""
+
+
+# =============================================================================
+#  §2  LAS COORDENADAS NO SALEN
+# =============================================================================
+
+def test_el_contexto_no_devuelve_coordenadas_aunque_la_orden_las_tenga(org_a):
+    """
+    La orden tiene gps_lat/gps_lng POBLADOS. Con la orden en blanco esta
+    prueba pasaria sin probar nada.
+
+    No es una omision: 'programacion-noc.js::leerOrden' ya las quita en el
+    servidor junto con el telefono. Mientras la decision de PII no se tome,
+    ningun camino nuevo las expone.
+    """
+    with rls_org(org_a):
+        orden = _orden(org_a, gps_lat=10.9878, gps_lng=-74.7889)
+        propuesta = _propuesta(org_a, origen_id=str(orden.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    fila = contexto[str(propuesta.id)]
+    assert orden.gps_lat is not None, "el montaje debe tener coordenadas"
+    plano = " ".join(str(v) for v in fila.values())
+    for prohibido in ("10.98", "-74.78", "lat", "lng", "gps"):
+        assert prohibido not in plano, f"se filtro {prohibido}"
+    # El conjunto es EXACTO y no una lista de prohibidos: asi, cada campo que
+    # se agregue al contexto rompe esta prueba y obliga a mirarlo. Ya cazo los
+    # tres de la bandeja -- cliente, asunto y origen_creado_en -- que se
+    # declaran aqui despues de comprobar que ninguno trae coordenadas.
+    assert set(fila) == {
+        "zona", "tecnico", "ticket_externo", "proveedor_externo", "orden_numero",
+        "sla_estado", "sla_minutos", "cliente", "asunto", "origen_creado_en"}
+
+
+# =============================================================================
+#  §3  AISLAMIENTO ENTRE ORGANIZACIONES
+# =============================================================================
+
+def test_una_propuesta_que_apunta_a_una_orden_ajena_no_la_alcanza(org_a, org_b):
+    """
+    'origen_id' es un CharField: nada impide que apunte a una orden de otro
+    tenant. El filtro por org va en la consulta, no en la confianza.
+    """
+    with rls_org(org_b):
+        ajena = _orden(org_b, numero=9999)
+
+    with rls_org(org_a):
+        propuesta = _propuesta(org_a, origen_id=str(ajena.id))
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    assert contexto[str(propuesta.id)]["orden_numero"] is None
+
+
+# =============================================================================
+#  §4  EL CONTEXTO NO SE CAE NI INVENTA
+# =============================================================================
+
+def test_un_origen_que_no_es_un_uuid_no_tumba_el_lote(org_a):
+    """
+    'origen_id' es texto libre. Un valor raro no puede llevarse por delante la
+    lista entera con un DataError -- las demas propuestas tienen que llegar.
+    """
+    with rls_org(org_a):
+        orden = _orden(org_a)
+        rota = _propuesta(org_a, origen_id="no-soy-un-uuid")
+        sana = _propuesta(org_a, origen_id=str(orden.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [rota, sana])
+
+    assert contexto[str(rota.id)]["orden_numero"] is None
+    assert contexto[str(sana.id)]["orden_numero"] == orden.numero
+
+
+def test_toda_propuesta_del_lote_tiene_entrada(org_a):
+    """
+    Incluso las que no alcanzan nada. Quien lee el dict no deberia tener que
+    distinguir "no estaba" de "no tiene".
+    """
+    with rls_org(org_a):
+        unas = [_propuesta(org_a, origen_tipo="actividad") for _ in range(3)]
+        contexto = contexto_propuesta.contexto_de(org_a, unas)
+
+    assert set(contexto) == {str(p.id) for p in unas}
+    for fila in contexto.values():
+        assert fila["tecnico"] == "" and fila["zona"] == ""
+
+
+def test_un_lote_vacio_devuelve_un_dict_vacio_sin_consultar(org_a):
+    assert contexto_propuesta.contexto_de(org_a, []) == {}
+
+
+# =============================================================================
+#  §4b  EL PLAZO OPERATIVO
+# =============================================================================
+
+def test_el_sla_sale_de_la_orden_y_no_de_expira_en(org_a):
+    """
+    La columna SLA es el PLAZO OPERATIVO de la orden, no 'expira_en' de la
+    propuesta. Son dos relojes distintos: 'expira_en' dice cuando la
+    recomendacion deja de estar vigente; el plazo dice cuando el trabajo
+    llega tarde. Confundirlos daria una columna que cambia sola cada vez que
+    el Supervisor recicla sus propuestas.
+    """
+    from operaciones import sla
+
+    with rls_org(org_a):
+        orden = _orden(org_a, duracion=60)
+        propuesta = _propuesta(org_a, origen_id=str(orden.id))
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    fila = contexto[str(propuesta.id)]
+    # Recien creada, con 60 minutos de plazo: no puede estar vencida.
+    assert fila["sla_estado"] in (sla.A_TIEMPO, sla.VENCE_PRONTO)
+    assert fila["sla_minutos"] is not None
+
+
+def test_un_tipo_de_trabajo_sin_duracion_dice_SIN_PLAZO_y_no_a_tiempo(org_a):
+    """
+    'SIN_PLAZO' y 'A_TIEMPO' se verian igual como una celda en blanco, y son
+    cosas distintas: la primera es una decision del tipo de trabajo, no una
+    medicion.
+    """
+    from operaciones import sla
+
+    with rls_org(org_a):
+        orden = _orden(org_a)  # sin duracion en el esquema
+        propuesta = _propuesta(org_a, origen_id=str(orden.id))
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    assert contexto[str(propuesta.id)]["sla_estado"] == sla.SIN_PLAZO
+
+
+def test_una_propuesta_que_no_cuelga_de_una_orden_no_tiene_plazo(org_a):
+    """Un caso o una actividad no tienen plazo operativo: ahi no vive."""
+    with rls_org(org_a):
+        propuesta = _propuesta(org_a, origen_tipo="case")
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    assert contexto[str(propuesta.id)]["sla_estado"] == ""
+    assert contexto[str(propuesta.id)]["sla_minutos"] is None
+
+
+def test_el_calendario_se_busca_una_vez_para_todo_el_lote(org_a,
+                                                          django_assert_num_queries):
+    """
+    'get_default_calendar' no cachea. Sin el calendario inyectado, veinte
+    ordenes eran veinte consultas identicas.
+
+    Se afirma contando CONSULTAS, no leyendo el codigo: una refactorizacion
+    que vuelva a buscarlo por orden pasaria cualquier prueba que solo mire el
+    resultado.
+    """
+    from business_hours.models import BusinessCalendar
+
+    with rls_org(org_a):
+        BusinessCalendar.objects.create(
+            org=org_a, name="Default", timezone="UTC", is_default=True)
+        propuestas = []
+        for _ in range(5):
+            orden = _orden(org_a, duracion=60)
+            propuestas.append(_propuesta(org_a, origen_id=str(orden.id)))
+
+        # 4 del contexto (ordenes, asignaciones, zonas, casos) + 1 calendario.
+        # Sin la inyeccion serian 5 calendarios en vez de 1.
+        with django_assert_num_queries(5):
+            contexto_propuesta.contexto_de(org_a, propuestas)
+
+
+def test_plazo_de_sin_calendario_explicito_se_comporta_igual_que_antes(org_a):
+    """
+    El parametro nuevo es opcional y su ausencia no cambia nada: todos los
+    llamadores que ya existian siguen recibiendo lo mismo.
+    """
+    from business_hours.models import BusinessCalendar
+    from operaciones import sla
+
+    with rls_org(org_a):
+        cal = BusinessCalendar.objects.create(
+            org=org_a, name="Default", timezone="UTC", is_default=True)
+        orden = _orden(org_a, duracion=60)
+
+        sin_pasarlo = sla.plazo_de(orden)
+        pasandolo = sla.plazo_de(orden, calendario=cal)
+
+    assert sin_pasarlo["calendario"] == pasandolo["calendario"] == "Default"
+    assert sin_pasarlo["estado"] == pasandolo["estado"]
+
+
+# =============================================================================
+#  §5  EL FEED LEE Y NO ESCRIBE
+# =============================================================================
+
+def test_el_feed_no_escribe_ninguna_fila(org_a, admin_client, admin_profile):
+    """
+    La regla del Shadow Mode: ninguna ruta de este modulo produce trabajo. Se
+    cuenta antes y despues -- no se lee la vista para concluir que no vio una
+    escritura.
+    """
+    from common.models import Activity
+
+    with rls_org(org_a):
+        propuesta = _propuesta(org_a)
+        auditoria.registrar(
+            org=org_a, actor=None, accion="CREATED",
+            entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=propuesta.id,
+            nombre="Orden sin programar")
+        antes_actividad = Activity.objects.count()
+        antes_propuestas = PropuestaSupervisor.objects.count()
+
+    r = admin_client.get(RUTA_FEED)
+    assert r.status_code == 200
+
+    with rls_org(org_a):
+        assert Activity.objects.count() == antes_actividad
+        assert PropuestaSupervisor.objects.count() == antes_propuestas
+
+
+def test_el_feed_solo_trae_las_entidades_de_este_modulo(org_a, admin_client,
+                                                        admin_profile):
+    """
+    'common.Activity' es la auditoria del CRM entero. Sin el filtro, el feed
+    del Supervisor se llenaria de contactos editados: cierto, pero no es lo que
+    esta pantalla pregunta.
+    """
+    from common.models import Activity
+
+    with rls_org(org_a):
+        propuesta = _propuesta(org_a)
+        auditoria.registrar(
+            org=org_a, actor=None, accion="CREATED",
+            entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=propuesta.id,
+            nombre="Orden sin programar")
+        Activity.objects.create(
+            org=org_a, user=None, action="UPDATED", entity_type="Contact",
+            entity_id=uuid.uuid4(), entity_name="Un contacto cualquiera")
+
+    r = admin_client.get(RUTA_FEED)
+    entidades = {f["entidad"] for f in r.json()["resultados"]}
+
+    assert "Contact" not in entidades
+    assert entidades == {auditoria.ENTIDAD_PROPUESTA}
+
+
+def test_el_feed_marca_como_ia_lo_que_no_tiene_usuario(org_a, admin_client,
+                                                       admin_profile):
+    """
+    'user=None' es como se reconoce lo que escribio el Supervisor -- no por un
+    usuario de sistema inventado que despues se confunda con una persona.
+    """
+    with rls_org(org_a):
+        propuesta = _propuesta(org_a)
+        auditoria.registrar(
+            org=org_a, actor=None, accion="CREATED",
+            entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=propuesta.id)
+        auditoria.registrar(
+            org=org_a, actor=admin_profile, accion="APPROVED",
+            entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=propuesta.id)
+
+    filas = admin_client.get(RUTA_FEED).json()["resultados"]
+    por_accion = {f["accion"]: f for f in filas}
+
+    assert por_accion["CREATED"]["es_ia"] is True
+    assert por_accion["CREATED"]["quien"] == "Supervisor NOC IA"
+    assert por_accion["APPROVED"]["es_ia"] is False
+
+
+def test_el_feed_respeta_el_limite_y_no_acepta_uno_absurdo(org_a, admin_client,
+                                                           admin_profile):
+    with rls_org(org_a):
+        propuesta = _propuesta(org_a)
+        for _ in range(6):
+            auditoria.registrar(
+                org=org_a, actor=None, accion="CREATED",
+                entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=propuesta.id)
+
+    assert len(admin_client.get(RUTA_FEED + "?limite=3").json()["resultados"]) == 3
+    # Un limite basura no revienta ni trae la tabla entera: cae al de por
+    # defecto y sigue acotado.
+    assert admin_client.get(RUTA_FEED + "?limite=abc").status_code == 200
+    assert len(admin_client.get(RUTA_FEED + "?limite=99999").json()["resultados"]) <= 100
+
+
+def test_el_feed_lo_mas_reciente_primero(org_a, admin_client, admin_profile):
+    with rls_org(org_a):
+        propuesta = _propuesta(org_a)
+        for accion in ("CREATED", "STATUS_CHANGED", "APPROVED"):
+            auditoria.registrar(
+                org=org_a, actor=None, accion=accion,
+                entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=propuesta.id)
+
+    acciones = [f["accion"] for f in admin_client.get(RUTA_FEED).json()["resultados"]]
+    assert acciones[0] == "APPROVED"
+
+
+def test_el_feed_no_cruza_organizaciones(org_a, org_b, admin_client, admin_profile):
+    with rls_org(org_b):
+        ajena = _propuesta(org_b)
+        auditoria.registrar(
+            org=org_b, actor=None, accion="CREATED",
+            entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=ajena.id,
+            nombre="De la otra empresa")
+
+    filas = admin_client.get(RUTA_FEED).json()["resultados"]
+    assert all(f["nombre"] != "De la otra empresa" for f in filas)
+
+
+# =============================================================================
+#  §6  LA LISTA DE PROPUESTAS SIGUE SIENDO LA MISMA, CON MAS CAMPOS
+# =============================================================================
+
+def test_la_lista_trae_el_contexto_resuelto(org_a, admin_client, admin_profile):
+    from campo.models import AsignacionTrabajo
+
+    with rls_org(org_a):
+        luis = _perfil(org_a, "luis2@prueba.co")
+        orden = _orden(org_a)
+        AsignacionTrabajo.objects.create(
+            orden=orden, profile=luis, es_principal=True)
+        _propuesta(org_a, origen_id=str(orden.id))
+
+    fila = admin_client.get("/api/operaciones/propuestas/").json()["resultados"][0]
+
+    assert fila["tecnico"] == luis.user.name
+    assert fila["tecnico"] != ""
+    assert fila["orden_numero"] == orden.numero
+    # Y lo que no hay sale vacio, no ausente: el frontend lee la clave siempre.
+    assert fila["zona"] == ""
+    assert fila["ticket_externo"] == ""
+
+
+def test_la_lista_no_expone_responsable_sugerido_como_tecnico(org_a, admin_client,
+                                                              admin_profile):
+    """La §1, pero atravesando la API entera."""
+    with rls_org(org_a):
+        ana = _perfil(org_a, "ana2@prueba.co")
+        orden = _orden(org_a)
+        _propuesta(org_a, origen_id=str(orden.id), responsable_sugerido=ana)
+
+    fila = admin_client.get("/api/operaciones/propuestas/").json()["resultados"][0]
+    assert fila["tecnico"] == ""
+    assert "ana2@prueba.co" not in str(fila)
+
+
+# =============================================================================
+#  §7  CLIENTE, ASUNTO Y ANTIGUEDAD  --  para la bandeja de revision
+# =============================================================================
+
+def test_un_caso_trae_el_nombre_de_la_cuenta_y_su_asunto(org_a):
+    """
+    La bandeja muestra de quien es el problema y de que se trata. Los dos
+    salen del caso: la cuenta y su 'name', que es el asunto.
+    """
+    from accounts.models import Account
+    from cases.models import Case
+
+    with rls_org(org_a):
+        cuenta = Account.objects.create(org=org_a, name="Ferreteria El Tornillo")
+        caso = Case.objects.create(
+            org=org_a, name="Sin internet desde el lunes",
+            status="New", priority="High", account=cuenta,
+            provider="wisphub", external_ticket_id="91288")
+        propuesta = _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    fila = contexto[str(propuesta.id)]
+    assert fila["cliente"] == "Ferreteria El Tornillo"
+    assert fila["asunto"] == "Sin internet desde el lunes"
+    assert fila["ticket_externo"] == "91288"
+
+
+def test_un_caso_sin_cuenta_no_inventa_un_cliente(org_a):
+    """
+    'account' es opcional en el modelo. Sin cuenta sale vacio y la pantalla
+    dice "No disponible en la fuente" -- que es distinto de un nombre
+    fabricado a partir del asunto o del ticket.
+    """
+    from cases.models import Case
+
+    with rls_org(org_a):
+        caso = Case.objects.create(
+            org=org_a, name="Consulta de facturacion", status="New",
+            priority="Low")
+        propuesta = _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    assert contexto[str(propuesta.id)]["cliente"] == ""
+    assert contexto[str(propuesta.id)]["asunto"] == "Consulta de facturacion"
+
+
+def test_una_orden_trae_su_cliente_y_no_finge_un_asunto(org_a):
+    """
+    Una orden de trabajo no tiene asunto: lo que la describe es su tipo de
+    trabajo, que ya viaja aparte. Repetir ahi el tipo llenaria la columna sin
+    decir nada nuevo.
+    """
+    with rls_org(org_a):
+        orden = _orden(org_a, cliente_nombre="Panaderia La Espiga")
+        propuesta = _propuesta(org_a, origen_id=str(orden.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    assert contexto[str(propuesta.id)]["cliente"] == "Panaderia La Espiga"
+    assert contexto[str(propuesta.id)]["asunto"] == ""
+
+
+def test_la_antiguedad_se_mide_sobre_el_ORIGEN_y_no_sobre_la_propuesta(org_a):
+    """
+    LA PRUEBA QUE JUSTIFICA EL CAMPO.
+
+    La propuesta se vuelve a emitir cada ciclo. Si la antiguedad saliera de
+    'PropuestaSupervisor.created_at', un caso de 40 dias se veria como
+    "detectado hace 2 horas" cada vez que el Supervisor corre -- y la columna
+    diria lo contrario de lo que quiere decir.
+
+    Aqui el caso es viejo y la propuesta recien nacida: lo que viaja tiene que
+    ser la fecha del caso.
+    """
+    from cases.models import Case
+
+    with rls_org(org_a):
+        viejo = timezone.now() - timezone.timedelta(days=40)
+        caso = Case.objects.create(
+            org=org_a, name="Caso antiguo", status="New", priority="Low")
+        Case.objects.filter(id=caso.id).update(created_at=viejo)
+        propuesta = _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    salida = contexto[str(propuesta.id)]["origen_creado_en"]
+    assert salida is not None
+    # La del caso, no la de la propuesta: difieren en 40 dias.
+    assert salida.startswith(viejo.date().isoformat())
+    assert not salida.startswith(propuesta.created_at.date().isoformat())
+
+
+def test_una_propuesta_sin_origen_alcanzable_no_trae_ni_cliente_ni_fecha(org_a):
+    with rls_org(org_a):
+        propuesta = _propuesta(org_a, origen_tipo="actividad")
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    fila = contexto[str(propuesta.id)]
+    assert fila["cliente"] == ""
+    assert fila["asunto"] == ""
+    assert fila["origen_creado_en"] is None
+
+
+def test_la_lista_expone_cliente_asunto_y_antiguedad(org_a, admin_client, admin_profile):
+    """Los tres campos, atravesando la API entera."""
+    from accounts.models import Account
+    from cases.models import Case
+
+    with rls_org(org_a):
+        cuenta = Account.objects.create(org=org_a, name="Hotel Miramar")
+        caso = Case.objects.create(
+            org=org_a, name="Intermitencia en la fibra", status="New",
+            priority="High", account=cuenta)
+        _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+
+    fila = admin_client.get("/api/operaciones/propuestas/").json()["resultados"][0]
+
+    assert fila["cliente"] == "Hotel Miramar"
+    assert fila["asunto"] == "Intermitencia en la fibra"
+    assert fila["origen_creado_en"] is not None
+
+
+def test_las_coordenadas_siguen_sin_salir_con_los_campos_nuevos(org_a):
+    """
+    La §2 otra vez, ahora que el contexto crecio con cliente y asunto. Un
+    campo nuevo es la ocasion tipica para que se cuele otro al lado.
+    """
+    with rls_org(org_a):
+        orden = _orden(org_a, gps_lat=10.9878, gps_lng=-74.7889,
+                       cliente_nombre="Cliente con GPS")
+        propuesta = _propuesta(org_a, origen_id=str(orden.id))
+
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    fila = contexto[str(propuesta.id)]
+    plano = " ".join(str(v) for v in fila.values())
+    for prohibido in ("10.98", "-74.78"):
+        assert prohibido not in plano, f"se filtro {prohibido}"
+    assert fila["cliente"] == "Cliente con GPS"

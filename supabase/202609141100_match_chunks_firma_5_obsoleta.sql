@@ -1,0 +1,40 @@
+-- =============================================================================
+--  match_chunks: la firma de 5 argumentos ya no existe
+-- =============================================================================
+--
+--  Escrito el 15/09/2026. El timestamp del nombre (14/09/2026 11:00) NO es la
+--  fecha de autoria: es ORDEN de migracion. Tiene que quedar despues del ultimo
+--  archivo del manifiesto de adopcion (202609101200_marcas_tv_desconocidas) y
+--  antes de P2 (202609141200_scheduler_persistente): con un nombre posterior,
+--  los dos archivos de P2 quedarian intercalados dentro del conjunto del
+--  manifiesto y la adopcion se negaria.
+--
+--  Que habia
+--  ---------
+--  'schema.sql' creo match_chunks(p_org, p_query_embedding, p_match_count,
+--  p_umbral, p_filtros), sin filtro de rol. 'documentos_roles.sql' agrego la
+--  de 6 argumentos con 'p_rol' (create or replace con otra firma no reemplaza:
+--  convivieron las dos). Con ambas, una llamada con 2 a 5 argumentos era
+--  ambigua (AmbiguousFunction).
+--
+--  Por que se borra
+--  ----------------
+--  * Ningun llamador la usa. El unico llamador de codigo,
+--    nucleo/recuperacion/busqueda.py, pasa 'p_rol' por nombre y resuelve a la
+--    de 6. match_chunks_hibrido no se toca aca.
+--  * El estado deseado es su ausencia: una firma sin filtro de rol que vuelve a
+--    ser alcanzable el dia que desaparezca la de 6.
+--  * Sin ella, una llamada sin 'p_rol' resuelve a la de 6 con p_rol NULL y no
+--    devuelve filas ('p_rol = any(...)' nunca es verdadero): falla cerrado.
+--
+--  Produccion ya no la tiene (inspeccion de solo lectura del 14/09/2026). Por
+--  que no la tiene es DESCONOCIDO: ningun archivo de este repositorio la
+--  borraba. Este archivo no lo explica ni lo afirma: declara el estado deseado,
+--  para que una base construida desde cero y la de produccion coincidan.
+--
+--  Nada mas: sin REVOKE, sin tocar la de 6, la hibrida, los grants ni RLS. El
+--  resto del hardening de funciones es un trabajo aparte
+--  (supabase/ledger/analisis/DEUDA_HARDENING_FUNCIONES.md).
+-- =============================================================================
+
+drop function if exists asistente.match_chunks(uuid, vector, integer, real, jsonb);

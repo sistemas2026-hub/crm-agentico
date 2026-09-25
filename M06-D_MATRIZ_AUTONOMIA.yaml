@@ -1,0 +1,970 @@
+# =============================================================================
+#  M06-D -- MATRIZ DE CLASIFICACION DE AUTONOMIA DE LAS 76 HERRAMIENTAS
+#  21/09/2026 -- PROPUESTA PARA REVISION. NO SE USA EN RUNTIME.
+#  M06-F (22/09/2026): 69 -> 76 con las siete que trajo origin (al final).
+# =============================================================================
+#
+#  Este archivo NO lo lee el motor ni ningun modulo: es un documento de
+#  gobierno. La clasificacion efectiva sigue siendo la de siempre
+#  (Herramienta.nivel_autonomia vacio en las 69 -> lecturas 0, escrituras 2).
+#  Llevarla al runtime es el bloque siguiente, y es una decision aparte.
+#
+#  La integridad de esta matriz la comprueba tests/test_m06d_matriz_autonomia.py
+#  contra el catalogo real (tenants/rapilink.config.yaml) y contra la
+#  clasificacion R1-R4 de tests/test_m10a_gobierno_frontera.py.
+#
+#  CRITERIO (aplicado en orden; el primero que corresponde decide)
+#  ----------------------------------------------------------------
+#   C1  Lectura (solo_lectura=true)                                  -> 0
+#       salvo que su destino no este fijado por el catalogo           -> INDETERMINADA
+#   C2  Escritura INTERNA que solo deja un pedido o una propuesta
+#       para que una persona decida                                   -> 1
+#   C3  Escritura con aprobacion_humana declarada                     -> 3 y la
+#       aprobacion SE MANTIENE (mismo tratamiento que R3/R4)
+#   C4  Escritura sin aprobacion, segun la EVIDENCIA:
+#       a) CRM propio + reversible o inerte (evidenciado) + sin efecto
+#          visible al cliente ni recursos comprometidos               -> 2
+#       b) sistema del proveedor (WispHub) o compromete recursos, y
+#          reversible (evidenciado)                                   -> 3
+#       c) irreversibilidad evidenciada                               -> 3 + se
+#          recomienda gate de aprobacion (discrepancia)
+#       d) reversibilidad o visibilidad al cliente sin evidencia      -> INDETERMINADA
+#
+#  "Evidencia" = un campo del catalogo, una linea de codigo o un hecho medido
+#  que se cita en 'evidencia'. Una afirmacion de diseño sin medir (por
+#  ejemplo, que R2 "se deshace con otra operacion") no cuenta sola.
+#
+#  CLASES: R0 = lectura. R1-R4 como en tests/test_m10a_gobierno_frontera.py.
+#  BARRERAS DE TODA ESCRITURA (se abrevian como "cadena autonoma"):
+#    kill switch -> techo -> etapa Autonomia 2 (+B-7) -> autorizacion granular
+#    -> bitacora -> permiso -> idempotencia -> ultimo metro (frontera.exigir).
+#  "cadena critica" = la misma + aprobacion humana atada con sello
+#    (frontera.critica, M06-A/C).
+# =============================================================================
+
+herramientas:
+
+# ---------------------------------------------------------------- LECTURAS (42)
+
+  - nombre: consultar_cliente
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub /api/clientes/)"
+    reversible: no_aplica
+    riesgo: "exposicion de datos personales del cliente"
+    justificacion: "consulta de un cliente por id; no cambia estado en ningun sistema"
+    barreras: "roles soporte/facturacion/administracion; lista blanca de campos por rol"
+    evidencia: "solo_lectura=true, metodo GET (catalogo)"
+
+  - nombre: consultar_cliente_por_cedula
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub /api/clientes/)"
+    reversible: no_aplica
+    riesgo: "exposicion de datos personales"
+    justificacion: "busqueda por cedula; solo lectura"
+    barreras: "roles soporte/facturacion; lista blanca por rol"
+    evidencia: "solo_lectura=true, GET"
+
+  - nombre: consultar_mi_servicio
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub)"
+    reversible: no_aplica
+    riesgo: "consultar el servicio de otro cliente (cerrado: el id viene de la sesion)"
+    justificacion: "estado del servicio del cliente autenticado"
+    barreras: "identidad inyectada desde la sesion (inyectar_sesion); roles de cliente"
+    evidencia: "solo_lectura=true, GET, inyectar_sesion (catalogo)"
+
+  - nombre: consultar_plan_tv
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub plan-internet)"
+    reversible: no_aplica
+    riesgo: "bajo: dato de catalogo"
+    justificacion: "lee la descripcion de un plan"
+    barreras: "roles; cache"
+    evidencia: "solo_lectura=true, GET, cache=true"
+
+  - nombre: consultar_documentacion
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (interno: corpus aprobado)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "busqueda en manuales aprobados"
+    barreras: "solo documentos en estado vigente (match_chunks)"
+    evidencia: "tipo=interno, solo_lectura=true, consulta_documentacion"
+
+  - nombre: cargar_habilidad
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (interno)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "trae los pasos de un procedimiento aprobado"
+    barreras: "solo habilidades aprobadas por una persona"
+    evidencia: "tipo=interno, solo_lectura=true, carga_habilidad"
+
+  - nombre: consultar_solicitud_por_cedula
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (POST de busqueda al CRM propio)"
+    reversible: no_aplica
+    riesgo: "exposicion de una solicitud ajena (mitigado: nombre enmascarado)"
+    justificacion: "busca una solicitud; el POST es de busqueda, no de escritura"
+    barreras: "rol ventas; nombre enmascarado en la respuesta"
+    evidencia: "solo_lectura=true; endpoint /api/solicitudes/buscar/; descripcion ('Devuelve el nombre ENMASCARADO')"
+
+  - nombre: consultar_servicios_ofrecidos
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (interno: config del tenant)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "lee el catalogo comercial"
+    barreras: "rol ventas"
+    evidencia: "tipo=interno, solo_lectura=true"
+
+  - nombre: consultar_guia_sintonizacion
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (interno)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "lee guias de TV de la config"
+    barreras: "roles de soporte"
+    evidencia: "tipo=interno, solo_lectura=true, consulta_guias_tv"
+
+  - nombre: consultar_parrilla_canales
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (interno)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "lee la parrilla de la config"
+    barreras: "rol ventas"
+    evidencia: "tipo=interno, solo_lectura=true, consulta_parrilla"
+
+  - nombre: consultar_planes_venta
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (interno)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "cobertura y planes curados, calculados de la config"
+    barreras: "rol ventas; invocable por servicio (lectura)"
+    evidencia: "tipo=interno, solo_lectura=true, invocable_por_servicio=true"
+
+  - nombre: consultar_planes
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "catalogo tecnico de planes"
+    barreras: "rol ventas; cache"
+    evidencia: "solo_lectura=true, GET, cache=true"
+
+  - nombre: consultar_plan_detalle
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "precio y velocidad de un plan"
+    barreras: "rol ventas; cache"
+    evidencia: "solo_lectura=true, GET, cache=true"
+
+  - nombre: verificar_identidad_por_cedula
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub)"
+    reversible: no_aplica
+    riesgo: "enumeracion de cedulas (mitigado: no devuelve datos, solo el nombre a confirmar)"
+    justificacion: "primer paso de verificacion"
+    barreras: "roles de cliente; respuesta reducida"
+    evidencia: "solo_lectura=true, GET, verifica_identidad"
+
+  - nombre: confirmar_identidad
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (cambia solo el estado de la SESION)"
+    reversible: si
+    riesgo: "marcar verificada una sesion equivocada"
+    justificacion: "cierra la verificacion pendiente de la conversacion; no llama a ninguna API"
+    barreras: "requiere verificar_identidad_por_cedula previo"
+    evidencia: "tipo=interno, solo_lectura=true; descripcion ('No llama a ninguna API')"
+
+  - nombre: derivar_a_area
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (cambia el ROL que atiende la conversacion)"
+    reversible: si
+    riesgo: "derivar al area equivocada"
+    justificacion: "enrutamiento interno de la conversacion, sin sistema externo"
+    barreras: "areas_destino declaradas; anti-rebote por conversacion"
+    evidencia: "tipo=interno, solo_lectura=true, deriva_rol=true"
+
+  - nombre: ping_cliente
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "sonda ACTIVA: POST que dispara un ping al equipo del cliente via WispHub; no cambia estado"
+    reversible: no_aplica
+    riesgo: "carga sobre el equipo del cliente si se repite; es una accion, no una lectura pasiva"
+    justificacion: "observa conectividad; no modifica configuracion ni registros"
+    barreras: "identidad de sesion; roles de cliente; asincrona"
+    evidencia: "solo_lectura=true pero metodo POST /api/clientes/{id_servicio}/ping/ (catalogo); verificado en vivo agosto 2026 (descripcion)"
+
+  - nombre: consultar_ticket
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "lee tickets"
+    barreras: "roles soporte/administracion"
+    evidencia: "solo_lectura=true, GET"
+
+  - nombre: consultar_tickets_de_cliente
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "tickets abiertos filtrados por cliente en codigo"
+    barreras: "roles soporte/administracion"
+    evidencia: "solo_lectura=true, GET"
+
+  - nombre: listar_tickets_recientes
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "lectura del importador"
+    barreras: "rol administracion; invocable por servicio (lectura)"
+    evidencia: "solo_lectura=true, GET, invocable_por_servicio=true"
+
+  - nombre: consultar_casos_externos
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET CRM propio)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "lectura del importador"
+    barreras: "rol administracion"
+    evidencia: "solo_lectura=true, GET"
+
+  - nombre: consultar_tickets_conocidos
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET CRM propio)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "lectura del importador"
+    barreras: "rol administracion"
+    evidencia: "solo_lectura=true, GET"
+
+  - nombre: consultar_ticket_por_id
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "lectura del importador"
+    barreras: "rol administracion; invocable por servicio (lectura)"
+    evidencia: "solo_lectura=true, GET, invocable_por_servicio=true"
+
+  - nombre: consultar_tecnicos
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub /api/staff/)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "lista el personal"
+    barreras: "rol soporte; cache; invocable por servicio (lectura)"
+    evidencia: "solo_lectura=true, GET, cache=true"
+
+  - nombre: consultar_facturas
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub)"
+    reversible: no_aplica
+    riesgo: "datos financieros del cliente"
+    justificacion: "lee facturas"
+    barreras: "rol facturacion"
+    evidencia: "solo_lectura=true, GET"
+
+  - nombre: consultar_factura_detalle
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub)"
+    reversible: no_aplica
+    riesgo: "datos financieros del cliente"
+    justificacion: "detalle de una factura"
+    barreras: "rol facturacion"
+    evidencia: "solo_lectura=true, GET"
+
+  - nombre: consultar_formas_pago
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET WispHub)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "catalogo de formas de pago"
+    barreras: "rol facturacion; cache"
+    evidencia: "solo_lectura=true, GET, cache=true"
+
+  - nombre: consultar_casos_bottlecrm
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET CRM propio)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "lee casos"
+    barreras: "rol soporte"
+    evidencia: "solo_lectura=true, GET"
+
+  - nombre: contar_clientes
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no; puede generar un archivo exportable INTERNO (adjunto a la respuesta)"
+    reversible: no_aplica
+    riesgo: "volumen de llamadas al agrupar; archivo con datos agregados"
+    justificacion: "agregado calculado por codigo; el archivo es para una persona"
+    barreras: "roles; filtros verificados; tope de grupos"
+    evidencia: "tipo=agregado, solo_lectura=true, exportable=true"
+
+  - nombre: contar_facturas
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no; archivo exportable interno"
+    reversible: no_aplica
+    riesgo: "volumen de llamadas"
+    justificacion: "agregado calculado por codigo"
+    barreras: "roles; filtros verificados"
+    evidencia: "tipo=agregado, solo_lectura=true, exportable=true"
+
+  - nombre: contar_tickets
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no; archivo exportable interno"
+    reversible: no_aplica
+    riesgo: "volumen de llamadas"
+    justificacion: "agregado calculado por codigo"
+    barreras: "roles; filtros verificados"
+    evidencia: "tipo=agregado, solo_lectura=true, exportable=true"
+
+  - nombre: informe_materiales
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no"
+    reversible: no_aplica
+    riesgo: "costo: ~2.700 llamadas por mes; es proceso por lotes"
+    justificacion: "lee y agrega respuestas de tickets"
+    barreras: "rol administracion"
+    evidencia: "tipo=batch, solo_lectura=true; descripcion ('Coste ~2.700 llamadas por mes')"
+
+  - nombre: listar_tags_crm
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET CRM propio)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "lista etiquetas"
+    barreras: "rol administracion"
+    evidencia: "solo_lectura=true, GET"
+
+  - nombre: consultar_estado_ont
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET SmartOLT)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "estado de la ONU"
+    barreras: "identidad de sesion"
+    evidencia: "solo_lectura=true, GET get_onu_status"
+
+  - nombre: consultar_senal_ont
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET SmartOLT)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "senal optica"
+    barreras: "identidad de sesion; veredicto calculado en codigo"
+    evidencia: "solo_lectura=true, GET get_onu_signal"
+
+  - nombre: consultar_velocidad_aprovisionada
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET SmartOLT)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "perfil de velocidad configurado"
+    barreras: "identidad de sesion"
+    evidencia: "solo_lectura=true, GET get_onu_speed_profiles"
+
+  - nombre: consultar_incidente_red
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (lecturas a SmartOLT, correlacion en codigo)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "correlaciona la ONU con incidentes activos"
+    barreras: "identidad de sesion"
+    evidencia: "tipo=interno, solo_lectura=true, detecta_incidente"
+
+  - nombre: consultar_estabilidad_enlace
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (lecturas a SmartOLT)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "resume caidas de 24 h"
+    barreras: "identidad de sesion"
+    evidencia: "tipo=interno, solo_lectura=true, resume_estabilidad"
+
+  - nombre: diagnosticar_falla_ont
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET SmartOLT get_onu_full_status_info)"
+    reversible: no_aplica
+    riesgo: "costo: ~10 s por llamada; el proveedor prohibe usarla en polling o en lote"
+    justificacion: "diagnostico profundo, solo lectura"
+    barreras: "identidad de sesion"
+    evidencia: "solo_lectura=true, GET; skill smartolt-api ('~10s de latencia, no usar en polling/bulk')"
+
+  - nombre: consultar_dispositivos_conectados
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET SmartOLT TR-069)"
+    reversible: no_aplica
+    riesgo: "datos del interior de la casa (equipos conectados)"
+    justificacion: "lista equipos conectados"
+    barreras: "identidad de sesion"
+    evidencia: "solo_lectura=true, GET get_onu_router_hosts"
+
+  - nombre: consultar_estado_catv
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET SmartOLT)"
+    reversible: no_aplica
+    riesgo: "bajo"
+    justificacion: "estado del puerto de TV"
+    barreras: "identidad de sesion"
+    evidencia: "solo_lectura=true, GET get_onu_details"
+
+  - nombre: sondear_api
+    tipo: lectura
+    clase: R0
+    nivel: INDETERMINADA
+    aprobacion_humana: false
+    efecto_externo: "desconocido: GET contra una URL externa que elige el modelo o el ADMIN"
+    reversible: no_verificado
+    riesgo: "un GET no es inocuo por definicion (hay APIs que mutan por GET); la URL puede sacar datos hacia afuera"
+    justificacion: "el catalogo NO fija el destino, asi que su efecto depende de a donde apunte"
+    barreras: "rol configuracion_guiada; bloqueo de redes privadas; devuelve solo un resumen"
+    evidencia: "tipo=interno, solo_lectura=true, sondea_api; descripcion ('Hace un GET ... contra una URL externa que describis vos')"
+    falta: "lista cerrada de hosts permitidos, o evidencia de que los destinos sondeados son de solo lectura"
+
+# ------------------------------------------------------------- ESCRITURAS (27)
+
+  - nombre: registrar_pedido_wifi
+    tipo: escritura
+    clase: R1
+    nivel: 1
+    aprobacion_humana: false
+    efecto_externo: "indirecto: al completarse ESCALA, y la escalada crea caso y ticket por codigo"
+    reversible: si
+    riesgo: "un pedido de cambio de WiFi mal tomado"
+    justificacion: "no aplica el cambio: deja el pedido para que lo aplique una persona (C2)"
+    barreras: "cadena autonoma (pasa por la frontera); valida el pedido; escalar_al_completar"
+    evidencia: "tipo=interno, valida_pedido_wifi, escalar_al_completar=pedido_para_ejecutar; descripcion ('NO aplica el cambio: lo aplica una persona')"
+
+  - nombre: reportar_comprobante_pago
+    tipo: escritura
+    clase: R1
+    nivel: 1
+    aprobacion_humana: false
+    efecto_externo: "indirecto: escala a cartera (caso y ticket por codigo)"
+    reversible: si
+    riesgo: "reporte de pago falso (mitigado: no registra nada, lo valida una persona)"
+    justificacion: "junta lo que dijo el cliente para que una persona lo valide (C2)"
+    barreras: "cadena autonoma; identidad de sesion; escalar_al_completar"
+    evidencia: "tipo=interno, reporta_comprobante_pago, escalar_al_completar=comprobante_para_validar; YAML ('NO registra nada en WispHub, NO reconecta')"
+
+  - nombre: proponer_herramienta
+    tipo: escritura
+    clase: R1
+    nivel: 1
+    aprobacion_humana: false
+    efecto_externo: "no: deja un borrador interno"
+    reversible: si
+    riesgo: "una herramienta mal declarada (mitigado: queda pendiente hasta que un ADMIN la apruebe)"
+    justificacion: "genera una propuesta para decision humana (C2)"
+    barreras: "rol configuracion_guiada; aprobacion de un ADMIN en la pantalla"
+    evidencia: "tipo=interno, propone_herramienta; descripcion ('NO la activa -- queda pendiente hasta que un ADMIN humano la apruebe')"
+
+  - nombre: crear_tag_crm
+    tipo: escritura
+    clase: R2
+    nivel: 2
+    aprobacion_humana: false
+    efecto_externo: "si, CRM propio (crea una etiqueta)"
+    reversible: "si (evidenciado: DELETE y restore en el CRM)"
+    riesgo: "bajo: etiquetas duplicadas"
+    justificacion: "CRM propio, reversible con evidencia, sin efecto visible al cliente (C4a). Es ademas el piloto elegido para Autonomia 2"
+    barreras: "cadena autonoma"
+    evidencia: "django-crm/backend/common/urls.py:151-152 (tags/<pk>/ con delete, tags/<pk>/restore/); common/views/tags_views.py:366"
+
+  - nombre: crear_caso_soporte
+    tipo: escritura
+    clase: R2
+    nivel: 2
+    aprobacion_humana: false
+    efecto_externo: "si, CRM propio (crea un caso); correo al usuario ASIGNADO (personal interno)"
+    reversible: "si (evidenciado: el caso se cierra con cerrar_caso_crm y se reabre por estado)"
+    riesgo: "casos duplicados; carga de trabajo para el equipo"
+    justificacion: "coordinacion interna en el CRM propio, reversible, no notifica al cliente (C4a)"
+    barreras: "cadena autonoma"
+    evidencia: "cases/views.py:395,535 (send_email_to_assigned_user: al asignado, no al cliente); existe cerrar_caso_crm"
+
+  - nombre: cerrar_caso_crm
+    tipo: escritura
+    clase: R2
+    nivel: 2
+    aprobacion_humana: false
+    efecto_externo: "si, CRM propio (PATCH del estado del caso)"
+    reversible: "si (evidenciado: politica de reapertura y cambio de estado por el mismo endpoint)"
+    riesgo: "cerrar un caso vivo"
+    justificacion: "CRM propio, reversible, sin notificacion al cliente desde el CRM (C4a)"
+    barreras: "cadena autonoma; la ejecuta el codigo (operativo.cerrar_caso_crm)"
+    evidencia: "cases/models.py:757-781 (ReopenPolicy); PATCH /api/cases/{id_caso}/"
+
+  - nombre: importar_caso_externo
+    tipo: escritura
+    clase: R2
+    nivel: 2
+    aprobacion_humana: false
+    efecto_externo: "si, CRM propio (crea un caso espejo de un ticket)"
+    reversible: "si (idempotente: get_or_create; el caso se cierra)"
+    riesgo: "casos espejo duplicados (mitigado: idempotente)"
+    justificacion: "sincronizacion hacia el CRM propio, idempotente (C4a)"
+    barreras: "cadena autonoma; lista de estados iniciales permitidos"
+    evidencia: "cases/importacion_views.py:83-180 (ImportarCaseView, 'status' inicial validado, 201/200 segun creado)"
+
+  - nombre: reconciliar_caso_externo
+    tipo: escritura
+    clase: R2
+    nivel: 2
+    aprobacion_humana: false
+    efecto_externo: "si, CRM propio (solo campos espejo del proveedor)"
+    reversible: "si (re-derivable desde el proveedor; nunca toca Case.status ni assigned_to)"
+    riesgo: "datos espejo desactualizados"
+    justificacion: "escribe solo una lista blanca de campos espejo (C4a)"
+    barreras: "cadena autonoma; lista blanca de campos; assert de que no mueve el estado"
+    evidencia: "cases/importacion_views.py:58-61 (campos permitidos), :387-453 (assert caso.status == estado_previo)"
+
+  - nombre: sincronizar_respuestas_externas
+    tipo: escritura
+    clase: R2
+    nivel: 2
+    aprobacion_humana: false
+    efecto_externo: "si, CRM propio (hilo de respuestas espejo)"
+    reversible: "si (upsert por huella: repetir no duplica)"
+    riesgo: "bajo"
+    justificacion: "espejo idempotente hacia el CRM propio (C4a)"
+    barreras: "cadena autonoma"
+    evidencia: "cases/importacion_views.py:474-528 (RespuestasExternasView, upsert por huella)"
+
+  - nombre: registrar_solicitud_servicio
+    tipo: escritura
+    clase: R2
+    nivel: 2
+    aprobacion_humana: false
+    efecto_externo: "si, CRM propio (solicitud NUEVA + link de formulario)"
+    reversible: "inerte (evidenciado): una NUEVA no tiene efecto hasta que el prospecto envia el formulario"
+    riesgo: "solicitudes NUEVA acumuladas"
+    justificacion: "no compromete recursos; el efecto real lo dispara el prospecto al enviar el formulario (C4a, efecto inerte)"
+    barreras: "cadena autonoma; identidad de sesion"
+    evidencia: "solicitudes/models.py:128 ('NUEVA: el link se genero, todavia no la enviaron') y :136-139 ('si el cliente nunca lleno el formulario no hay expediente')"
+
+  - nombre: agendar_visita_tecnica
+    tipo: escritura
+    clase: R2
+    nivel: 3
+    aprobacion_humana: false
+    efecto_externo: "si, WispHub (crea un ticket de visita: compromete a un tecnico)"
+    reversible: "si, mientras la visita no ocurra (el ticket se cierra); el costo del tecnico no se revierte despues"
+    riesgo: "enviar un tecnico sin necesidad"
+    justificacion: "sistema del proveedor y compromete recursos; reversible por cierre del ticket (C4b)"
+    barreras: "cadena autonoma; rol soporte; el colaborador confirma antes (descripcion)"
+    evidencia: "POST WispHub /api/tickets/; descripcion ('se ejecuta de inmediato, SIN ningun paso de confirmacion humana'); existen herramientas de cierre de ticket"
+
+  - nombre: agendar_visita_internet
+    tipo: escritura
+    clase: R2
+    nivel: 3
+    aprobacion_humana: false
+    efecto_externo: "si, WispHub (ticket de visita)"
+    reversible: "si, mientras la visita no ocurra"
+    riesgo: "enviar un tecnico sin necesidad"
+    justificacion: "igual que agendar_visita_tecnica (C4b); la dispara el codigo, no el modelo"
+    barreras: "cadena autonoma; la ejecuta nucleo/seguimiento/agendamiento.py"
+    evidencia: "POST WispHub /api/tickets/; descripcion ('la ejecuta el codigo cuando el caso no_internet llega a una rama que requiere visita')"
+
+  - nombre: crear_ticket_caso
+    tipo: escritura
+    clase: R2
+    nivel: 3
+    aprobacion_humana: false
+    efecto_externo: "si, WispHub (crea un ticket al escalar)"
+    reversible: "si (el ticket se cierra)"
+    riesgo: "tickets duplicados en el sistema del proveedor"
+    justificacion: "escribe en el sistema del proveedor, reversible por cierre (C4b)"
+    barreras: "cadena autonoma; la ejecuta el codigo al escalar"
+    evidencia: "POST WispHub /api/tickets/; descripcion ('la ejecuta el codigo cuando una conversacion se escala')"
+
+  - nombre: crear_ticket_instalacion
+    tipo: escritura
+    clase: R2
+    nivel: 3
+    aprobacion_humana: false
+    efecto_externo: "si, WispHub (ticket de instalacion)"
+    reversible: "si (evidenciado: cancelar la solicitud cierra el ticket con cerrar_ticket_operativo)"
+    riesgo: "instalacion agendada por error"
+    justificacion: "sistema del proveedor, reversible (C4b); la dispara el formulario del prospecto"
+    barreras: "cadena autonoma; invocable por servicio (backend)"
+    evidencia: "POST WispHub /api/tickets/, invocable_por_servicio=true; solicitudes/entrega.py:272-290 (cerrar_ticket_wisphub)"
+
+  - nombre: reasignar_ticket_instalacion
+    tipo: escritura
+    clase: R2
+    nivel: 3
+    aprobacion_humana: false
+    efecto_externo: "si, WispHub (PUT: cambia a quien esta asignado el ticket)"
+    reversible: "si (el mismo PUT lo reasigna de vuelta)"
+    riesgo: "asignar la instalacion al equipo equivocado"
+    justificacion: "sistema del proveedor, reversible con la misma operacion (C4b); la dispara una persona desde la plataforma"
+    barreras: "cadena autonoma; invocable por servicio"
+    evidencia: "PUT WispHub /api/tickets/{id_ticket}/, invocable_por_servicio=true; descripcion ('la llama el backend cuando una persona confirma la factibilidad')"
+
+  - nombre: cancelar_solicitud_servicio
+    tipo: escritura
+    clase: R2
+    nivel: 3
+    aprobacion_humana: true
+    efecto_externo: "si, CRM propio Y, en cascada, WispHub (cierra el ticket de instalacion)"
+    reversible: "NO (evidenciado): CANCELADA es un estado final, ninguna transicion sale de el"
+    riesgo: "cancelar la instalacion de otra persona o por error (mitigado: exige el nombre completo)"
+    justificacion: "irreversible con evidencia y con efecto en cascada en el proveedor: no puede quedar en un nivel permisivo (C4c). M06-E aplico la recomendacion: aprobacion humana atada (C3) por la puerta critica"
+    barreras: "cadena critica con sello (M06-E); exige consultar_solicitud_por_cedula y el nombre completo; solo solicitudes ENVIADA"
+    evidencia: "solicitudes/gestion.py:556 (s.estado = CANCELADA; ninguna otra linea sale de CANCELADA); solicitudes/entrega.py:275-278 ('cancelar solo en el CRM deja el ticket vivo en WispHub')"
+
+  - nombre: responder_ticket_operativo
+    tipo: escritura
+    clase: R2
+    nivel: INDETERMINADA
+    aprobacion_humana: true
+    efecto_externo: "si, WispHub (agrega una respuesta al ticket y lo deja En Progreso)"
+    reversible: no_verificado
+    riesgo: "una respuesta publicada no se puede retirar con ninguna herramienta; puede ser visible o notificada al cliente"
+    justificacion: "no hay evidencia de si WispHub permite borrar una respuesta ni de si notifica al cliente"
+    barreras: "cadena autonoma; la ejecuta el codigo al responder una persona desde la pantalla; M06-E: aprobacion_humana=true -> bloqueada para la puerta autonoma hasta tener evidencia"
+    evidencia: "POST WispHub /api/tickets/{id_ticket}/respuesta/; ninguna herramienta del catalogo borra respuestas; skill wisphub-api: 'do_not_notify_client' solo documentado en otra instancia, no verificado aqui"
+    falta: "si WispHub notifica al cliente al agregar una respuesta, y si una respuesta puede eliminarse"
+
+  - nombre: cerrar_ticket_operativo
+    tipo: escritura
+    clase: R2
+    nivel: INDETERMINADA
+    aprobacion_humana: true
+    efecto_externo: "si, WispHub (respuesta + cierre del ticket)"
+    reversible: "parcial: el cierre se revierte (responder_ticket puede reabrir); la respuesta agregada no se verifico"
+    riesgo: "cerrar un ticket vivo; nota permanente posiblemente visible al cliente"
+    justificacion: "misma falta de evidencia que responder_ticket_operativo sobre la respuesta que deja"
+    barreras: "cadena autonoma; invocable por servicio (la usa la cascada de cancelacion); M06-E: aprobacion_humana=true -> bloqueada para la puerta autonoma hasta tener evidencia"
+    evidencia: "POST WispHub /api/tickets/{id_ticket}/respuesta/, invocable_por_servicio=true; responder_ticket: 'con la opcion de reabrirlo'"
+    falta: "si la respuesta de cierre se notifica al cliente y si puede eliminarse"
+
+  - nombre: completar_ticket_instalacion
+    tipo: escritura
+    clase: R2
+    nivel: INDETERMINADA
+    aprobacion_humana: true
+    efecto_externo: "si, WispHub (PATCH de fechas + adjunta la orden)"
+    reversible: "parcial: las fechas se corrigen con otro PATCH; retirar el adjunto no se verifico"
+    riesgo: "adjuntar la orden de otra persona (datos personales en el archivo)"
+    justificacion: "no hay evidencia de que un adjunto se pueda retirar"
+    barreras: "cadena autonoma; invocable por servicio; M06-E: aprobacion_humana=true -> bloqueada para la puerta autonoma hasta tener evidencia"
+    evidencia: "PATCH WispHub /api/tickets/{id_ticket}/, multipart con argumentos_archivo; descripcion ('le adjunta la orden')"
+    falta: "si WispHub permite eliminar un adjunto de ticket por API"
+
+  - nombre: crear_ticket
+    tipo: escritura
+    clase: R2
+    nivel: 3
+    aprobacion_humana: true
+    efecto_externo: "si, WispHub (crea un ticket)"
+    reversible: "si (se cierra con actualizar_estado_ticket)"
+    riesgo: "tickets erroneos en el sistema del proveedor"
+    justificacion: "declara aprobacion humana: se mantiene y no puede ir por la puerta autonoma (C3)"
+    barreras: "aprobacion humana (cola); M06-B: no sale con permiso autonomo"
+    evidencia: "aprobacion_humana=true (catalogo); frontera.exigir, APROBACION_HUMANA_REQUERIDA"
+
+  - nombre: responder_ticket
+    tipo: escritura
+    clase: R2
+    nivel: 3
+    aprobacion_humana: true
+    efecto_externo: "si, WispHub (respuesta, puede reabrir)"
+    reversible: no_verificado
+    riesgo: "respuesta publicada que no se retira"
+    justificacion: "declara aprobacion humana: se mantiene (C3)"
+    barreras: "aprobacion humana (cola); M06-B: no sale con permiso autonomo"
+    evidencia: "aprobacion_humana=true"
+
+  - nombre: actualizar_estado_ticket
+    tipo: escritura
+    clase: R2
+    nivel: 3
+    aprobacion_humana: true
+    efecto_externo: "si, WispHub (PUT del estado)"
+    reversible: "si (el mismo PUT)"
+    riesgo: "cerrar o abrir un ticket por error"
+    justificacion: "declara aprobacion humana: se mantiene (C3)"
+    barreras: "aprobacion humana (cola); M06-B: no sale con permiso autonomo"
+    evidencia: "aprobacion_humana=true"
+
+  - nombre: reiniciar_ont
+    tipo: escritura
+    clase: R3
+    nivel: 3
+    aprobacion_humana: true
+    efecto_externo: "si, SmartOLT (reinicia el equipo en casa del cliente)"
+    reversible: "no (un reinicio no se deshace; el cliente queda sin servicio 1-2 min)"
+    riesgo: "corte de servicio; reiniciar el equipo equivocado"
+    justificacion: "R3: aprobacion humana OBLIGATORIA y atada; el nivel no la reemplaza (C3)"
+    barreras: "cadena critica; previas re-medidas al aprobar; verificacion posterior; limite 1; turno propio"
+    evidencia: "irreversible=true, aprobacion_humana=true, exige_previas, verificacion (catalogo); M06-A"
+
+  - nombre: activar_catv
+    tipo: escritura
+    clase: R3
+    nivel: 3
+    aprobacion_humana: true
+    efecto_externo: "si, SmartOLT (enciende la TV en el equipo)"
+    reversible: "no verificado como reversible por el sistema (M10-A la clasifica R3)"
+    riesgo: "dar un servicio no contratado"
+    justificacion: "R3: aprobacion humana obligatoria y atada (C3)"
+    barreras: "cadena critica; previas (plan con TV, CATV Disabled) re-medidas; limite 1"
+    evidencia: "irreversible=true, aprobacion_humana=true, exige_previas"
+
+  - nombre: cambiar_tipo_onu
+    tipo: escritura
+    clase: R3
+    nivel: 3
+    aprobacion_humana: true
+    efecto_externo: "si, SmartOLT (cambia el tipo registrado de la ONU)"
+    reversible: "no verificado (M10-A la clasifica R3)"
+    riesgo: "dejar el equipo mal clasificado"
+    justificacion: "R3: aprobacion humana obligatoria y atada (C3)"
+    barreras: "cadena critica; previa (CATV Not supported) re-medida; limite 1; turno propio"
+    evidencia: "irreversible=true, aprobacion_humana=true, exige_previas"
+
+  - nombre: registrar_pago
+    tipo: escritura
+    clase: R4
+    nivel: 3
+    aprobacion_humana: true
+    efecto_externo: "si, WispHub (registra el pago; con accion=1 reactiva el servicio)"
+    reversible: "no (revertir un pago es una operacion contable)"
+    riesgo: "dinero"
+    justificacion: "R4: aprobacion humana obligatoria y atada (C3)"
+    barreras: "cadena critica con sello"
+    evidencia: "irreversible=true, aprobacion_humana=true; M06-A"
+
+  - nombre: agregar_promesa_pago
+    tipo: escritura
+    clase: R4
+    nivel: 3
+    aprobacion_humana: true
+    efecto_externo: "si, WispHub (promesa de pago; puede reactivar el servicio)"
+    reversible: no_verificado
+    riesgo: "dinero / reactivacion"
+    justificacion: "R4: aprobacion humana obligatoria y atada (C3)"
+    barreras: "cadena critica con sello"
+    evidencia: "irreversible=true, aprobacion_humana=true; M06-C"
+
+# ------------------------------------------- AGREGADAS EN M06-F (22/09/2026, 7)
+#  Llegaron en origin/fix/integracion-wisphub despues de esta matriz. Mismo
+#  criterio, y ante la duda la opcion mas restrictiva (M06-E, seccion 4).
+
+  - nombre: consultar_caso_crm
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET CRM propio /api/cases/{id_caso}/)"
+    reversible: no_aplica
+    riesgo: "ninguno propio: lee el estado de un caso"
+    justificacion: "lectura del CRM propio (C1); la usa el reconciliador (lee_caso) para no cerrar a ciegas"
+    barreras: "rol administracion"
+    evidencia: "solo_lectura=true, metodo GET, lee_caso=true (catalogo)"
+
+  - nombre: consultar_asignados_caso_crm
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET CRM propio /api/cases/{id_caso}/assignees/)"
+    reversible: no_aplica
+    riesgo: "ninguno propio"
+    justificacion: "lectura del CRM propio (C1)"
+    barreras: "rol administracion"
+    evidencia: "solo_lectura=true, metodo GET, lee_asignados (catalogo)"
+
+  - nombre: consultar_perfiles_crm
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET CRM propio /api/users/get-teams-and-users/)"
+    reversible: no_aplica
+    riesgo: "exposicion del directorio interno de colaboradores"
+    justificacion: "lectura del CRM propio (C1)"
+    barreras: "rol administracion"
+    evidencia: "solo_lectura=true, metodo GET, lee_perfiles (catalogo)"
+
+  - nombre: consultar_topologia_ont
+    tipo: lectura
+    clase: R0
+    nivel: 0
+    aprobacion_humana: false
+    efecto_externo: "no (GET SmartOLT /api/onu/get_onu_details/{sn_onu})"
+    reversible: no_aplica
+    riesgo: "el registro de la ONU trae nombre y posible direccion del cliente"
+    justificacion: "lectura (C1); el destino lo fija el catalogo"
+    barreras: "rol soporte; lista blanca de campos por rol"
+    evidencia: "solo_lectura=true, metodo GET (catalogo); skill smartolt-api: campos de get_onu_details"
+
+  - nombre: asignar_caso_crm
+    tipo: escritura
+    clase: R2
+    nivel: 2
+    aprobacion_humana: false
+    efecto_externo: "si, CRM propio (POST agrega un asignado al caso)"
+    reversible: "si, solo a mano (evidenciado: idempotente -- ManyToMany.add ignora duplicados -- y aditivo; la API NO tiene DELETE a proposito, desasignar se hace desde el CRM: cases/assignee_views.py:24-35)"
+    riesgo: "asignar un caso a quien no corresponde"
+    justificacion: "CRM propio, aditivo y reversible, sin efecto visible al cliente (C4a)"
+    barreras: "cadena autonoma; la usa el reconciliador (T20), apagado en produccion"
+    evidencia: "POST /api/cases/{id_caso}/assignees/, asigna_caso=true (catalogo); cases/assignee_views.py:24-35 (origin): aditivo, sin DELETE"
+
+  - nombre: cerrar_ticket_operativo_estado
+    tipo: escritura
+    clase: R2
+    nivel: INDETERMINADA
+    aprobacion_humana: true
+    efecto_externo: "si, WispHub (PUT del estado del ticket)"
+    reversible: no_verificado
+    riesgo: "cerrar un ticket vivo; medido en origin: un PUT sobre uno ya cerrado le corre 'fecha_fin'"
+    justificacion: "misma familia que cerrar_ticket_operativo (INDETERMINADA en M06-D); sin evidencia de reversibilidad"
+    barreras: "cadena autonoma; M06-F: aprobacion_humana=true -> bloqueada para la puerta autonoma hasta tener evidencia"
+    evidencia: "PUT WispHub /api/tickets/{id_ticket}/, cierra_ticket_estado=true (catalogo); schema.py lee_ticket"
+    falta: "si el cambio de estado notifica al cliente y si se revierte sin efectos"
+
+  - nombre: registrar_promesa_y_reactivar
+    tipo: escritura
+    clase: R4
+    nivel: 3
+    aprobacion_humana: true
+    efecto_externo: "si, WispHub (promesa de pago Y reactivacion del servicio)"
+    reversible: no_verificado
+    riesgo: "dinero / reactivacion"
+    justificacion: "R4 por la regla mas restrictiva: el efecto de agregar_promesa_pago mas la reactivacion (C3)"
+    barreras: "cadena critica con sello (M06-F); ademas la politica y la revalidacion de origin"
+    evidencia: "POST WispHub /api/promesa-pago/, aprobacion_humana=true, irreversible=true (M06-F), politica promesa_reactivacion"

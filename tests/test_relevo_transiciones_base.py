@@ -1,0 +1,1381 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ LAS TRANSICIONES DEL RELEVO  --  escritura en paralelo, contra PostgreSQL
+================================================================================
+
+    DBHOST=localhost DBPORT=55435 DBUSER=motor DBPASSWORD=motor \\
+        py -3.13 tests/test_relevo_transiciones_base.py
+
+B3.2 de SPEC/CONTRATO_RELEVO_IA_HUMANO.md. Base efimera del ledger.
+
+  1. Cada transicion sobre una conversacion gobernada: estado nuevo, legado,
+     UN evento con la version resultante, version +1. Y lo que NO hace:
+     soltar no devuelve a la IA, resolver no devuelve, tomar no marca
+     atendida_manual, un cierre externo no le quita la conversacion a quien
+     la tiene.
+  2. Legado (version 0): tomar, soltar, resolver y devolver escriben solo las
+     banderas de siempre; ni evento ni version.
+  3. Idempotencia: la misma clave dos veces (y dos hilos a la vez) -> un
+     cambio, un evento, una version.
+  4. Rollback: si el evento falla, o algo falla despues de escribir y antes del
+     commit, no queda ni estado ni evento.
+  5. La escalada en un turno real de atender_turno(): cuando se llama al
+     ticket operativo y al CRM, el control YA es humano en la base y NO hay
+     ninguna transaccion abierta; si el CRM falla, el control no vuelve a la IA.
+  9. D24, IA en vuelo contra Intervenir, por el camino real de WhatsApp: el
+     modelo queda frenado, una persona interviene y hace commit, el modelo
+     termina -> cero POST a Meta, cero respuesta de la IA guardada, nada en
+     memoria. Y la intervencion entre la respuesta guardada y el POST: no se
+     envia y la fila queda 'descartado', fuera del historial.
+ 10. Una clave de operacion ya usada por otro operador no le devuelve exito.
+ 11. D25, con el motor.responder REAL y el modelo guionado: el modelo queda
+     frenado, una persona interviene, el modelo pide una herramienta que
+     escribe -> cero llamadas al proveedor (control positivo: sin
+     intervencion, una). Y el cierre por confirmacion no empieza si alguien
+     intervino mientras corria el evaluador. La escalada PROPIA sigue
+     sincronizando con el CRM (seccion 5).
+ 14. B3.5 (D18) por la ruta real /conversaciones: 45 de legado viejas y una
+     escalada nueva -> la nueva primero; el cliente que vuelve a escribir sube
+     a la banda 1 con su hora; dentro de una banda gana la espera mas larga;
+     los canales de prueba quedan marcados como no operativos; el legado se
+     muestra como revision y sigue en version 0.
+ 13. B3.4 (D4), por las rutas HTTP reales: tomar normal; un segundo operador
+     no roba (409 ya_asignada); dos a la vez con claves distintas -> uno gana;
+     reintento del mismo actor y clave ajena; tomar bajo control ia -> 409
+     control_ia; soltar solo el dueno; reasignar solo ADMIN (403), con motivo
+     (400), auditado y no sobre legado; el legado con la misma exclusion sobre
+     tomada_por sin eventos ni version; y tomar contra reasignar a la vez deja
+     un solo dueno coherente con el ultimo evento.
+ 12. La sincronizacion de una escalada ya comprometida (SYNC_ESCALADA): una
+     toma posterior NO la cancela (ticket, caso y aviso salen); una devolucion
+     o un cierre antes del efecto SI; y el punto de no retorno: una llamada
+     que ya empezo completa, la siguiente no empieza.
+  8. B3.3b en turnos reales: tras /intervenir el cliente escribe y el modelo NO
+     corre, sin acuse de escalada ni banderas ni tasa; devolver reanuda; la
+     memoria nunca decide contra la base (en las dos direcciones); reintento
+     de la misma clave; dos operadores a la vez (uno gana, el otro 409); legado
+     escalado no se puede intervenir.
+================================================================================
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import uuid
+from contextlib import contextmanager
+from pathlib import Path
+
+RAIZ = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RAIZ))
+
+faltan = [v for v in ("DBHOST", "DBPORT", "DBUSER", "DBPASSWORD") if not os.environ.get(v)]
+if faltan:
+    print(f"  [saltado] faltan {faltan}")
+    raise SystemExit(0)
+if not shutil.which("docker"):
+    print("  [saltado] hace falta Docker")
+    raise SystemExit(0)
+
+import psycopg                                                      # noqa: E402
+
+HOST, PUERTO = os.environ["DBHOST"], os.environ["DBPORT"]
+USUARIO, CLAVE = os.environ["DBUSER"], os.environ["DBPASSWORD"]
+BASE = "b3_trans_" + uuid.uuid4().hex[:6]
+TENANT = "rapilink"          # el slug de la config real: el turno de la seccion 5 la usa
+ANA = ("7c9e6679-7425-40de-944b-e07fc1f90ae7", "Ana Perez")
+LUIS = ("0f8fad5b-d9cb-469f-a165-70867728950e", "Luis Rojas")
+
+fallos: list[str] = []
+
+
+def comprobar(condicion: bool, que: str, detalle: str = "") -> None:
+    print(f"  {'[ok]  ' if condicion else '[FALLA]'} {que}" + (f"\n          {detalle}" if detalle and not condicion else ""))
+    if not condicion:
+        fallos.append(que)
+
+
+def dsn(base: str) -> str:
+    return (f"host={HOST} port={PUERTO} dbname={base} user={USUARIO} password={CLAVE} "
+            f"sslmode=disable connect_timeout=15")
+
+
+def q(sentencia, params=None):
+    with psycopg.connect(dsn(BASE), autocommit=True) as con:
+        cur = con.execute(sentencia, params)
+        return cur.fetchall() if cur.description else []
+
+
+def fila_minima(tabla: str, fijos: dict) -> None:
+    cols = q("""select column_name, data_type, character_maximum_length from information_schema.columns
+                where table_schema = 'public' and table_name = %s
+                  and is_nullable = 'NO' and column_default is null""", (tabla,))
+    valores = dict(fijos)
+    por_tipo = {"uuid": lambda: str(uuid.uuid4()), "boolean": lambda: False,
+                "integer": lambda: 0, "bigint": lambda: 0, "smallint": lambda: 0,
+                "jsonb": lambda: "{}", "json": lambda: "{}",
+                "timestamp with time zone": lambda: "now", "date": lambda: "2026-01-01"}
+    for nombre, tipo, largo in cols:
+        if nombre not in valores:
+            valor = por_tipo.get(tipo, lambda: "x" + uuid.uuid4().hex[:8])()
+            valores[nombre] = valor[:largo] if largo and isinstance(valor, str) else valor
+    nombres = list(valores)
+    q(f"insert into public.{tabla} ({', '.join(nombres)}) values ({', '.join(['%s'] * len(nombres))})",
+      [valores[n] for n in nombres])
+
+
+def estado(conv):
+    return q("""select control, control_motivo, asignada_a_nombre, relevo_version, estado,
+                       escalada_a_humano, necesita_atencion_humana, tomada_por, atendida_manual, aviso_relevo
+                from asistente.conversations where id = %s""", (conv,))[0]
+
+
+def eventos(conv):
+    return q("""select tipo, actor_tipo, actor_nombre, (datos->>'version')::int, datos, creado_en
+                from asistente.relevo_eventos where conversation_id = %s
+                order by (datos->>'version')::int nulls first, creado_en""", (conv,))
+# ORDEN POR VERSION, NO POR creado_en (D27). creado_en es now(): la hora en que
+# EMPEZO la transaccion. Con dos transiciones concurrentes, la que espero el
+# lock de la fila puede tener una hora anterior y haber escrito despues --
+# visto en la seccion 13 (tomar contra reasignar).
+
+
+def nueva_conv(org, tel):
+    return str(q("""insert into asistente.conversations (organization_id, canal, usuario_externo)
+                    values (%s, 'whatsapp-simulado', %s) returning id""", (org, tel))[0][0])
+
+
+print("=" * 74)
+print(" LAS TRANSICIONES DEL RELEVO")
+print("=" * 74)
+
+try:
+    print(f"\n       -> construyendo {BASE}", flush=True)
+    r = subprocess.run([sys.executable, str(RAIZ / "cli" / "base_desde_cero.py"), "--base", BASE,
+                        "--host", HOST, "--puerto", PUERTO, "--usuario", USUARIO],
+                       capture_output=True, text=True, timeout=1800,
+                       env={**os.environ, "DBHOST": HOST, "DBPORT": PUERTO, "DBUSER": USUARIO, "DBPASSWORD": CLAVE})
+    if r.returncode != 0:
+        comprobar(False, "base desde cero", (r.stdout + r.stderr)[-1500:])
+        raise SystemExit(1)
+    org = str(uuid.uuid4())
+    fila_minima("organization", {"id": org, "name": "Org B3.2"})
+    q("insert into asistente.tenant_config (organization_id, slug) values (%s, %s)", (org, TENANT))
+    os.environ["DBNAME"] = BASE
+    from nucleo.persistencia import db                              # noqa: E402
+    from nucleo.relevo import transiciones as T                     # noqa: E402
+
+    # -----------------------------------------------------------------------
+    print("\n== 1. transiciones sobre una conversacion gobernada ==")
+    c = nueva_conv(org, "573000000010")
+    r1 = T.escalar(TENANT, c, motivo="solicitud_explicita")
+    e = estado(c)
+    comprobar(r1.aplicada and e[:4] == ("humano", "escalada", None, 1),
+              f"escalar: humano/escalada, sin asignacion, version 1 ({e[:4]})")
+    comprobar(e[5] is True and e[6] is True,
+              "escalar escribe TAMBIEN las banderas de legado que deciden la pausa, en la misma transaccion")
+    ev = eventos(c)
+    comprobar(len(ev) == 1 and ev[0][:2] == ("escalada", "ia") and ev[0][3] == 1,
+              f"un evento 'escalada' del actor ia con version 1 ({ev})")
+    r1b = T.escalar(TENANT, c)
+    comprobar(not r1b.aplicada and len(eventos(c)) == 1 and estado(c)[3] == 1,
+              "escalar otra vez: no-op, sin evento ni version")
+
+    r2 = T.tomar(TENANT, c, operador_id=ANA[0], operador_nombre=ANA[1])
+    e = estado(c)
+    comprobar(r2.aplicada and e[:4] == ("humano", "escalada", "Ana Perez", 2) and e[7] == "Ana Perez",
+              f"tomar: asignada a Ana, control y motivo intactos, version 2, legado tomada_por ({e})")
+    comprobar(e[8] is False, "tomar NO marca atendida_manual (no es resolver)")
+    comprobar(not T.tomar(TENANT, c, operador_id=ANA[0], operador_nombre=ANA[1]).aplicada
+              and estado(c)[3] == 2 and len(eventos(c)) == 2,
+              "tomar de nuevo por la misma persona: no-op")
+
+    r3 = T.soltar(TENANT, c, operador_id=ANA[0], operador_nombre=ANA[1])
+    e = estado(c)
+    comprobar(r3.aplicada and e[:4] == ("humano", "escalada", None, 3) and e[7] is None,
+              f"soltar: sin asignacion y SIGUE humana (no es devolver) ({e})")
+    ult = eventos(c)[-1]
+    comprobar(ult[0] == "soltada" and ult[2] == "Ana Perez" and ult[4].get("anterior_nombre") == "Ana Perez",
+              "evento 'soltada' con quien la tenia")
+
+    T.tomar(TENANT, c, operador_id=LUIS[0], operador_nombre=LUIS[1])
+    r4 = T.devolver_a_ia(TENANT, c, operador_id=LUIS[0], operador_nombre=LUIS[1])
+    e = estado(c)
+    comprobar(r4.aplicada and e[:4] == ("ia", None, None, 5) and e[5] is False and e[6] is False,
+              f"devolver: control ia, sin motivo ni asignacion, legado sin pausa ({e})")
+    comprobar(eventos(c)[-1][0] == "devuelta_a_ia", "evento 'devuelta_a_ia'")
+
+    c2 = nueva_conv(org, "573000000011")
+    T.escalar(TENANT, c2)
+    T.tomar(TENANT, c2, operador_id=ANA[0], operador_nombre=ANA[1])
+    r5 = T.resolver(TENANT, c2, operador_id=ANA[0], operador_nombre=ANA[1],
+                    desenlace="otro")
+    e = estado(c2)
+    comprobar(r5.aplicada and e[4] == "cerrada" and e[8] is True and e[2] is None,
+              f"resolver: cerrada, atendida_manual, asignacion liberada ({e})")
+    comprobar(e[0] == "humano", "resolver NO devuelve a la IA: el control queda como estaba")
+    comprobar(eventos(c2)[-1][0] == "cerrada" and r5.datos.get("usuario_externo") == "573000000011",
+              "evento 'cerrada' y devuelve usuario/canal para limpiar la sesion")
+
+    c3 = nueva_conv(org, "573000000012")
+    T.escalar(TENANT, c3)
+    T.tomar(TENANT, c3, operador_id=ANA[0], operador_nombre=ANA[1])
+    r6 = T.caso_externo_cerrado(TENANT, c3)
+    e = estado(c3)
+    comprobar(r6.aplicada and e[0] == "humano" and e[2] == "Ana Perez" and e[9] == "caso_externo_cerrado",
+              f"caso cerrado afuera con Ana a cargo: aviso, control y asignacion intactos ({e})")
+    comprobar(eventos(c3)[-1][4].get("aplicado") is False, "evento con aplicado=false")
+    comprobar(not T.caso_externo_cerrado(TENANT, c3).aplicada, "el mismo aviso no se repite")
+    c4 = nueva_conv(org, "573000000013")
+    T.escalar(TENANT, c4)
+    T.caso_externo_cerrado(TENANT, c4)
+    e = estado(c4)
+    comprobar(e[0] == "humano" and e[5] is True and e[9] == "caso_externo_cerrado"
+              and eventos(c4)[-1][4].get("aplicado") is False,
+              f"caso cerrado afuera SIN nadie a cargo: tampoco devuelve a la IA, solo aviso ({e})")
+    comprobar([x[0] for x in eventos(c4)].count("devuelta_a_ia") == 0,
+              "el unico camino de vuelta a la IA sigue siendo devolver_a_ia")
+
+    c5 = nueva_conv(org, "573000000014")
+    r7 = T.intervenir(TENANT, c5, operador_id=ANA[0], operador_nombre=ANA[1], motivo_texto="respuesta incorrecta")
+    e = estado(c5)
+    comprobar(r7.aplicada and e[:4] == ("humano", "intervencion", "Ana Perez", 1),
+              f"intervenir: humano/intervencion y tomada por quien intervino ({e[:4]})")
+    ev = eventos(c5)[-1]
+    comprobar(ev[:3] == ("intervencion", "operador", "Ana Perez") and ev[4].get("tomada") is True,
+              "evento 'intervencion' del operador")
+
+    c9 = nueva_conv(org, "573000000015")
+    db.cerrar_conversacion(TENANT, c9)
+    comprobar(estado(c9)[4] == "cerrada" and estado(c9)[8] is False,
+              "T15b: el cierre que hace la IA (cerrar_conversacion) NO marca atendida_manual")
+
+    print("\n== 1b. control efectivo ==")
+    leg_esc = str(q("""insert into asistente.conversations
+                         (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                       values (%s, 'whatsapp', '573000000016', true, true) returning id""", (org,))[0][0])
+    leg_agenda = str(q("""insert into asistente.conversations
+                            (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                          values (%s, 'whatsapp', '573000000017', true, false) returning id""", (org,))[0][0])
+    comprobar(db.control_efectivo_de(TENANT, leg_esc) == "humano",
+              "legado escalado (version 0, control 'ia' por default): control efectivo HUMANO")
+    comprobar(db.control_efectivo_de(TENANT, leg_agenda) == "ia",
+              "legado agendado solo (no necesita persona): control efectivo ia")
+    comprobar(db.control_efectivo_de(TENANT, nueva_conv(org, "573000000018")) == "ia",
+              "conversacion nueva sin escalar: ia")
+    comprobar(db.control_efectivo_de(TENANT, c) == "ia" and db.control_efectivo_de(TENANT, c3) == "humano",
+              "gobernadas: manda la columna control (devuelta = ia, escalada = humano)")
+    comprobar(db.control_efectivo_de(TENANT, str(uuid.uuid4())) is None, "inexistente: None")
+
+    # -----------------------------------------------------------------------
+    print("\n== 2. legado (version 0) ==")
+    leg = str(q("""insert into asistente.conversations
+                     (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                   values (%s, 'whatsapp', '573000000020', true, true) returning id""", (org,))[0][0])
+    rt = T.tomar(TENANT, leg, operador_id=ANA[0], operador_nombre=ANA[1])
+    e = estado(leg)
+    comprobar(not rt.gobernada and e[7] == "Ana Perez" and e[0] == "ia" and e[2] is None and e[3] == 0,
+              f"tomar en legado: solo tomada_por, control y version intactos ({e})")
+    T.soltar(TENANT, leg, operador_id=ANA[0], operador_nombre=ANA[1])
+    comprobar(estado(leg)[7] is None, "soltar en legado: solo tomada_por")
+    T.devolver_a_ia(TENANT, leg, operador_id=ANA[0], operador_nombre=ANA[1])
+    e = estado(leg)
+    comprobar(e[5] is False and e[6] is False and e[3] == 0, "devolver en legado: solo las banderas")
+    T.resolver(TENANT, leg, operador_id=ANA[0], operador_nombre=ANA[1],
+               desenlace="otro")
+    e = estado(leg)
+    comprobar(e[4] == "cerrada" and e[8] is True and e[3] == 0, "resolver en legado: como siempre")
+    comprobar(eventos(leg) == [], "el legado no genera ningun evento")
+
+    # -----------------------------------------------------------------------
+    print("\n== 3. idempotencia ==")
+    c6 = nueva_conv(org, "573000000030")
+    T.escalar(TENANT, c6)
+    a = T.tomar(TENANT, c6, operador_id=ANA[0], operador_nombre=ANA[1], clave="op-1")
+    b = T.tomar(TENANT, c6, operador_id=ANA[0], operador_nombre=ANA[1], clave="op-1")
+    comprobar(a.aplicada and not b.aplicada and b.motivo == "reintento" and b.version == a.version
+              and estado(c6)[2] == "Ana Perez" and len(eventos(c6)) == 2,
+              "misma clave dos veces: un cambio, un evento, la version del primero")
+    b2 = T.tomar(TENANT, c6, operador_id=LUIS[0], operador_nombre=LUIS[1], clave="op-1")
+    comprobar(not b2.aplicada and b2.motivo == "clave_ajena" and b2.evento_id is None
+              and estado(c6)[2] == "Ana Perez" and len(eventos(c6)) == 2,
+              f"la misma clave desde OTRO operador: clave_ajena, no un reintento a su nombre ({b2.motivo})")
+    c7 = nueva_conv(org, "573000000031")
+    T.escalar(TENANT, c7)
+    resultados = []
+    barrera = threading.Barrier(2)
+
+    def en_paralelo():
+        barrera.wait()
+        resultados.append(T.soltar(TENANT, c7, operador_id=ANA[0], operador_nombre=ANA[1], clave="op-par")
+                          if False else T.tomar(TENANT, c7, operador_id=ANA[0], operador_nombre=ANA[1], clave="op-par"))
+    hilos = [threading.Thread(target=en_paralelo) for _ in range(2)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+    comprobar(sum(1 for x in resultados if x.aplicada) == 1 and estado(c7)[3] == 2
+              and [x[0] for x in eventos(c7)].count("tomada") == 1,
+              f"dos hilos con la misma clave a la vez: un cambio, una version, un evento "
+              f"({[(x.aplicada, x.motivo) for x in resultados]})")
+
+    # -----------------------------------------------------------------------
+    print("\n== 4. rollback ==")
+    c8 = nueva_conv(org, "573000000040")
+    T.escalar(TENANT, c8)
+    antes, ev_antes = estado(c8), eventos(c8)
+    real_validar = T.validar_datos
+    T.validar_datos = lambda tipo, datos: (_ for _ in ()).throw(ValueError("evento roto a proposito"))
+    try:
+        T.tomar(TENANT, c8, operador_id=ANA[0], operador_nombre=ANA[1])
+        comprobar(False, "deberia fallar")
+    except ValueError:
+        pass
+    finally:
+        T.validar_datos = real_validar
+    comprobar(estado(c8) == antes and eventos(c8) == ev_antes,
+              "el evento falla DESPUES del UPDATE: ni asignacion, ni legado, ni version")
+    T._gancho_antes_del_commit = lambda: (_ for _ in ()).throw(RuntimeError("falla antes del commit"))
+    try:
+        T.devolver_a_ia(TENANT, c8, operador_id=ANA[0], operador_nombre=ANA[1])
+        comprobar(False, "deberia fallar")
+    except RuntimeError:
+        pass
+    finally:
+        T._gancho_antes_del_commit = None
+    comprobar(estado(c8) == antes and eventos(c8) == ev_antes,
+              "falla despues de estado + legado + evento y antes del commit: no queda nada")
+
+    # -----------------------------------------------------------------------
+    print("\n== 5. la escalada en un turno real ==")
+    from nucleo.canales import api                                  # noqa: E402
+    from nucleo.config import cargar_config                         # noqa: E402
+    CONFIG = cargar_config(RAIZ / "tenants" / "rapilink.config.yaml")
+    TEL = "573000000099"
+    abiertas = threading.local()
+    real_sesion = db.sesion
+
+    @contextmanager
+    def sesion_vigilada(tenant):
+        abiertas.n = getattr(abiertas, "n", 0) + 1
+        try:
+            with real_sesion(tenant) as par:
+                yield par
+        finally:
+            abiertas.n -= 1
+
+    vistos = []
+
+    def externo(nombre, devuelve):
+        def f(*a, **k):
+            conv_id = q("select id::text from asistente.conversations where usuario_externo = %s", (TEL,))
+            ctrl = estado(conv_id[0][0])[0] if conv_id else None
+            vistos.append((nombre, getattr(abiertas, "n", 0), ctrl))
+            return devuelve
+        return f
+
+    reemplazos = {
+        (db, "sesion"): sesion_vigilada,
+        (api.motor, "responder"): lambda config, rol, mensaje, historial, sesion, nota_continuidad=None: (
+            historial.append({"role": "assistant", "content": "Te paso con alguien del equipo."}),
+            ("Te paso con alguien del equipo.", [], []))[1],
+        (api.escalamiento, "evaluar"): lambda *a, **k: {"escalar": True, "necesita_humano": True,
+                                                        "motivo": "informacion_a_confirmar", "etiqueta": "",
+                                                        "resumen": "cobertura de un barrio sin catalogo"},
+        (api.escalamiento, "escalar"): externo("crm", False),          # el CRM falla
+        (api.agendamiento, "agendar"): externo("ticket", None),
+        (api.agendamiento, "ticket_para_escalar"): lambda *a, **k: None,
+        # Guarda real que pospone una escalada si el asistente no uso ninguna
+        # herramienta todavia: no es lo que se mide aca.
+        (api, "con_las_manos_vacias"): lambda *a, **k: False,
+        (api.agendamiento, "perfil_del_area"): lambda *a, **k: "",
+        (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
+        (api.consumo, "estado_del_gasto"): lambda *a, **k: {"accion": "seguir", "gastado": 0, "tope": 0, "porcentaje": 0.0},
+    }
+    originales = {k: getattr(*k) for k in reemplazos}
+    for (m, n), f in reemplazos.items():
+        setattr(m, n, f)
+    llamadas_modelo = []
+    responder_real_stub = reemplazos[(api.motor, "responder")]
+
+    def responder_contado(*a, **k):
+        llamadas_modelo.append(1)
+        return responder_real_stub(*a, **k)
+    reemplazos[(api.motor, "responder")] = responder_contado
+    setattr(api.motor, "responder", responder_contado)
+    api._sesiones.clear()
+    salida_turno = {}
+    try:
+        # 'informacion_a_confirmar' y no el motivo de "pide una persona": ese
+        # tiene su propia guarda (se descarta si el cliente no lo pidio con
+        # palabras), que no es lo que se mide aca.
+        salida_turno = api.atender_turno(CONFIG, TENANT, "cliente_final", TEL,
+                                         "hay cobertura en el barrio Los Almendros?", "whatsapp-simulado")
+        memoria_pausada = api._sesiones[(TENANT, "whatsapp-simulado", TEL)]["escalada"]
+        autorizado_propio = api._turno_sigue_autorizado(
+            TENANT, "whatsapp-simulado", TEL, salida_turno.get("_autorizacion") or {}, exigir_ia=False)
+        modelo_antes = len(llamadas_modelo)
+        segunda = api.atender_turno(CONFIG, TENANT, "cliente_final", TEL, "hola? sigue ahi?",
+                                    "whatsapp-simulado")
+        # Mismo proceso reiniciado: la sesion se reconstruye desde la base.
+        api._sesiones.clear()
+        tercera = api.atender_turno(CONFIG, TENANT, "cliente_final", TEL, "alguien me atiende?",
+                                    "whatsapp-simulado")
+    except Exception as ex:                                          # noqa: BLE001
+        comprobar(False, "el turno de escalada corre", f"{type(ex).__name__}: {ex}")
+    finally:
+        for (m, n), f in originales.items():
+            setattr(m, n, f)
+        api._sesiones.clear()
+    crm = [v for v in vistos if v[0] == "crm"]
+    comprobar(bool(crm) and crm[0][2] == "humano",
+              f"cuando se llama al CRM, el control YA es humano en la base ({vistos})")
+    comprobar(bool(vistos) and all(v[1] == 0 for v in vistos),
+              f"ningun efecto externo corre con una transaccion abierta ({vistos})")
+    conv_turno = q("select id::text from asistente.conversations where usuario_externo = %s", (TEL,))[0][0]
+    e = estado(conv_turno)
+    comprobar(e[0] == "humano" and e[5] is True and e[6] is True
+              and [x[0] for x in eventos(conv_turno)] == ["escalada"],
+              f"el CRM fallo: control humano Y legado pausado en la base; un solo evento ({e})")
+    comprobar(memoria_pausada is True, "y la memoria del proceso tambien quedo en pausa (sin split-brain)")
+    comprobar(autorizado_propio is True,
+              "D24: la escalada que hizo ESTE turno no le frena su propio aviso al cliente")
+    comprobar(bool(crm),
+              "D25: la sincronizacion de la escalada PROPIA (el caso del CRM) corre aunque el control ya sea humano")
+    texto = (salida_turno or {}).get("respuesta") or ""
+    comprobar("confirmar con un compañero" in texto and "de nuevo" not in texto.lower(),
+              f"al cliente: el anuncio de atencion humana, NO 'escribime de nuevo' ({texto!r})")
+    comprobar(len(llamadas_modelo) == modelo_antes and segunda.get("pausada") and tercera.get("pausada"),
+              f"el mensaje siguiente, y despues de reconstruir la sesion, NO llega a la IA "
+              f"(modelo llamado {len(llamadas_modelo) - modelo_antes} veces)")
+
+    print("\n== 6. caso cerrado en el CRM durante la pausa ==")
+    for tel, gobernada in (("573000000097", True), ("573000000096", False)):
+        if gobernada:
+            cid = nueva_conv(org, tel)
+            T.escalar(TENANT, cid)
+        else:
+            cid = str(q("""insert into asistente.conversations
+                             (organization_id, canal, usuario_externo, escalada_a_humano,
+                              necesita_atencion_humana, caso_id)
+                           values (%s, 'whatsapp-simulado', %s, true, true, gen_random_uuid()) returning id""",
+                        (org, tel))[0][0])
+        q("update asistente.conversations set caso_id = gen_random_uuid() where id = %s", (cid,))
+        llamadas_modelo.clear()
+        extra = dict(reemplazos)
+        extra[(api.escalamiento, "caso_sigue_abierto")] = lambda *a, **k: False   # el CRM dice: cerrado
+        extra[(api.escalamiento, "evaluar")] = lambda *a, **k: {}
+        orig2 = {k: getattr(*k) for k in extra}
+        for (m, n), f in extra.items():
+            setattr(m, n, f)
+        api._sesiones.clear()
+        try:
+            r6 = api.atender_turno(CONFIG, TENANT, "cliente_final", tel, "ya me resolvieron?", "whatsapp-simulado")
+        finally:
+            for (m, n), f in orig2.items():
+                setattr(m, n, f)
+            api._sesiones.clear()
+        if gobernada:
+            e = estado(cid)
+            comprobar(r6.get("pausada") and not llamadas_modelo and e[0] == "humano"
+                      and e[9] == "caso_externo_cerrado",
+                      f"gobernada: el cierre externo deja aviso y la IA NO retoma ({e}, modelo={len(llamadas_modelo)})")
+        else:
+            comprobar(not r6.get("pausada") and llamadas_modelo,
+                      "legado (version 0): se retoma como hasta hoy, hasta la reconciliacion de G8")
+
+    # -----------------------------------------------------------------------
+    print("\n== 7. B3.3: la guarda de control con la base real ==")
+    envios = []
+    orig_texto = api.whatsapp.enviar_texto
+    api.whatsapp.enviar_texto = lambda *a, **k: envios.append(1) or "wamid.G"
+    token = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+    cliente = api.app.test_client()
+
+    def responder(conv):
+        antes = q("select count(*) from asistente.messages where conversation_id = %s", (conv,))[0][0]
+        r = cliente.post(f"/conversaciones/{conv}/mensajes",
+                         json={"tenant": TENANT, "mensaje": "hola, soy Ana", "autor": ANA[1],
+                               "autor_usuario_id": ANA[0]})
+        despues = q("select count(*) from asistente.messages where conversation_id = %s", (conv,))[0][0]
+        return r.status_code, despues - antes
+    try:
+        agendada = str(q("""insert into asistente.conversations
+                              (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                            values (%s, 'whatsapp', '573000000070', true, false) returning id""", (org,))[0][0])
+        comprobar(responder(agendada) == (409, 0) and not envios,
+                  "legado agendado solo (la IA sigue atendiendo): 409, cero filas, cero envios a Meta")
+        leg_h = str(q("""insert into asistente.conversations
+                           (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                         values (%s, 'whatsapp-simulado', '573000000071', true, true) returning id""", (org,))[0][0])
+        comprobar(responder(leg_h) == (201, 1),
+                  "legado escalado con control 'ia' por default: NO se bloquea (control efectivo humano)")
+        gob = nueva_conv(org, "573000000072")
+        T.escalar(TENANT, gob)
+        comprobar(responder(gob) == (201, 1), "gobernada escalada: la persona responde")
+        T.devolver_a_ia(TENANT, gob, operador_id=ANA[0], operador_nombre=ANA[1])
+        comprobar(responder(gob) == (409, 0), "devuelta a la IA: 409, cero filas")
+        T.intervenir(TENANT, gob, operador_id=ANA[0], operador_nombre=ANA[1])
+        comprobar(responder(gob) == (201, 1), "despues de intervenir: la persona responde")
+        nota = cliente.post(f"/conversaciones/{agendada}/nota",
+                            json={"tenant": TENANT, "mensaje": "revisar", "autor": ANA[1], "autor_usuario_id": ANA[0]})
+        comprobar(nota.status_code == 201, "la nota interna no se bloquea con la IA atendiendo")
+    finally:
+        api.whatsapp.enviar_texto = orig_texto
+        api._TOKEN_SERVICIO = token
+
+    # -----------------------------------------------------------------------
+    print("\n== 8. B3.3b: intervenir, y la compuerta lee la base ==")
+    modelo8 = []
+
+    def responder8(config, rol, mensaje, historial, sesion, nota_continuidad=None):
+        modelo8.append(mensaje)
+        historial.append({"role": "assistant", "content": "respuesta de la IA"})
+        return "respuesta de la IA", [], []
+    base8 = {
+        (api.motor, "responder"): responder8,
+        (api.escalamiento, "evaluar"): lambda *a, **k: {},
+        (api.escalamiento, "caso_sigue_abierto"): lambda *a, **k: True,
+        (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
+        (api.consumo, "estado_del_gasto"): lambda *a, **k: {"accion": "seguir", "gastado": 0, "tope": 0, "porcentaje": 0.0},
+    }
+    orig8 = {k: getattr(*k) for k in base8}
+    for (m, n), f in base8.items():
+        setattr(m, n, f)
+    token8 = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+
+    def turno(tel, texto):
+        return api.atender_turno(CONFIG, TENANT, "cliente_final", tel, texto, "whatsapp-simulado")
+
+    def conv_de(tel):
+        return q("select id::text from asistente.conversations where usuario_externo = %s and estado = 'abierta'",
+                 (tel,))[0][0]
+
+    def intervenir_http(conv, operador, clave):
+        return api.app.test_client().post(f"/conversaciones/{conv}/intervenir", json={
+            "tenant": TENANT, "autor": operador[1], "autor_usuario_id": operador[0], "clave_operacion": clave})
+
+    def escaladas():
+        return db.tasa_escalamiento(TENANT, 30)
+    try:
+        api._sesiones.clear()
+        tel = "573000000080"
+        turno(tel, "hola, tengo una duda")
+        cv = conv_de(tel)
+        comprobar(len(modelo8) == 1, "turno normal: la IA responde")
+        antes_tasa = escaladas()
+        r = intervenir_http(cv, ANA, "int-ana")
+        e = estado(cv)
+        comprobar(r.status_code == 200 and e[:3] == ("humano", "intervencion", "Ana Perez"),
+                  f"Ana interviene: 200, humano/intervencion, asignada a Ana ({r.status_code} {e[:3]})")
+        comprobar(e[5] is False and e[6] is False,
+                  "intervenir NO toca las banderas de escalada")
+        salida = turno(tel, "hola? alguien?")
+        comprobar(len(modelo8) == 1 and salida.get("respuesta") == "" and salida.get("pausada"),
+                  f"mensaje del cliente con la conversacion intervenida: la IA NO corre y no hay acuse ({salida})")
+        ult = q("""select rol, origen, contenido from asistente.messages where conversation_id = %s
+                   order by creado_en desc limit 1""", (cv,))[0]
+        comprobar(ult == ("user", "cliente", "hola? alguien?"), f"el mensaje del cliente queda guardado ({ult})")
+        comprobar(escaladas() == antes_tasa, "la tasa de escalamiento no cambia: intervenir no es escalar")
+        r_b = intervenir_http(cv, LUIS, "int-luis")
+        comprobar(r_b.status_code == 409 and estado(cv)[2] == "Ana Perez",
+                  f"Luis intenta intervenir despues: 409 y NO le roba la conversacion a Ana ({r_b.status_code})")
+        v = estado(cv)[3]
+        r_re = intervenir_http(cv, ANA, "int-ana")
+        comprobar(r_re.status_code == 200 and r_re.get_json().get("reintento") and estado(cv)[3] == v
+                  and [x[0] for x in eventos(cv)].count("intervencion") == 1,
+                  "el mismo clic reintentado: 200 reintento, sin otra version ni otro evento")
+        resp = api.app.test_client().post(f"/conversaciones/{cv}/mensajes", json={
+            "tenant": TENANT, "mensaje": "Soy Ana, te ayudo yo", "autor": ANA[1], "autor_usuario_id": ANA[0]})
+        comprobar(resp.status_code == 201, f"Ana responde: 201 ({resp.status_code})")
+        T.devolver_a_ia(TENANT, cv, operador_id=ANA[0], operador_nombre=ANA[1])
+        turno(tel, "gracias, otra pregunta")
+        comprobar(len(modelo8) == 2, "devuelta a la IA: el siguiente mensaje vuelve a la IA")
+
+        # La memoria no decide.
+        api._sesiones[(TENANT, "whatsapp-simulado", tel)]["escalada"] = True
+        turno(tel, "y otra cosa")
+        comprobar(len(modelo8) == 3, "memoria dice pausa y la base dice IA: la IA responde (manda la base)")
+        tel2 = "573000000081"
+        turno(tel2, "hola")
+        cv2 = conv_de(tel2)
+        T.escalar(TENANT, cv2)                 # "otro proceso" escala; esta memoria no se entero
+        n = len(modelo8)
+        salida2 = turno(tel2, "sigo esperando")
+        comprobar(len(modelo8) == n and salida2.get("pausada"),
+                  "memoria sin pausa y la base dice humano (escalada en otro lado): la IA NO corre")
+
+        # Dos operadores a la vez, con claves distintas.
+        tel3 = "573000000082"
+        turno(tel3, "hola")
+        cv3 = conv_de(tel3)
+        resultados = []
+        barrera = threading.Barrier(2)
+
+        def carrera(op, clave):
+            barrera.wait()
+            resultados.append((op[1], intervenir_http(cv3, op, clave).status_code))
+        hilos = [threading.Thread(target=carrera, args=(ANA, "c-ana")),
+                 threading.Thread(target=carrera, args=(LUIS, "c-luis"))]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
+        codigos = sorted(c for _, c in resultados)
+        ganador = [op for op, c in resultados if c == 200]
+        comprobar(codigos == [200, 409] and ganador and estado(cv3)[2] == ganador[0]
+                  and [x[0] for x in eventos(cv3)].count("intervencion") == 1,
+                  f"dos operadores intervienen a la vez: uno gana, el otro 409, una sola intervencion ({resultados})")
+
+        leg = str(q("""insert into asistente.conversations
+                         (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                       values (%s, 'whatsapp-simulado', '573000000083', true, true) returning id""", (org,))[0][0])
+        r_leg = intervenir_http(leg, ANA, "int-leg")
+        comprobar(r_leg.status_code == 409 and estado(leg)[3] == 0 and estado(leg)[0] == "ia",
+                  "legado escalado (control efectivo humano): intervenir 409, no se le roba a la escalada")
+    finally:
+        for (m, n), f in orig8.items():
+            setattr(m, n, f)
+        api._TOKEN_SERVICIO = token8
+        api._sesiones.clear()
+
+    # -----------------------------------------------------------------------
+    print("\n== 9. D24: la IA en vuelo no sobrevive a una intervencion ==")
+    posts = []
+    empezo, liberar = threading.Event(), threading.Event()
+    modo = {"frenar": False, "en_el_medio": None}
+
+    def responder9(config, rol, mensaje, historial, sesion, nota_continuidad=None):
+        historial.append({"role": "user", "content": mensaje})
+        if modo["frenar"]:
+            empezo.set()
+            liberar.wait(60)
+        historial.append({"role": "assistant", "content": "RESPUESTA-IA-D24"})
+        return "RESPUESTA-IA-D24", [], []
+
+    def adjunto9(config, tenant, entrante, conversacion_id, mensaje_id=None):
+        if modo["en_el_medio"]:
+            modo["en_el_medio"]()
+    base9 = {
+        (api.motor, "responder"): responder9,
+        (api.escalamiento, "evaluar"): lambda *a, **k: {},
+        (api.escalamiento, "caso_sigue_abierto"): lambda *a, **k: True,
+        (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
+        (api.consumo, "estado_del_gasto"): lambda *a, **k: {"accion": "seguir", "gastado": 0, "tope": 0, "porcentaje": 0.0},
+        (api.whatsapp, "enviar_texto"): lambda config, tenant, para, texto: posts.append(texto) or "wamid.x",
+        (api.whatsapp, "marcar_leido"): lambda *a, **k: None,
+        (api, "_atendio_baja_o_alta"): lambda *a, **k: False,
+        (api, "_guardar_adjunto"): adjunto9,
+    }
+    orig9 = {k: getattr(*k) for k in base9}
+    for (m, n), f in base9.items():
+        setattr(m, n, f)
+    token9 = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+
+    def whatsapp_turno(tel, texto):
+        api._procesar_mensaje_whatsapp(CONFIG, TENANT, "cliente_final",
+                                       {"de": tel, "telefono": tel, "texto": texto})
+
+    def conv_wa(tel):
+        return q("""select id::text from asistente.conversations
+                    where usuario_externo = %s and canal = 'whatsapp' and estado = 'abierta'""", (tel,))[0][0]
+
+    def filas_ia(conv):
+        return q("""select contenido, estado_entrega from asistente.messages
+                    where conversation_id = %s and rol = 'assistant' and origen = 'ia'
+                    order by creado_en""", (conv,))
+    try:
+        api._sesiones.clear()
+        tel = "573000000090"
+        whatsapp_turno(tel, "hola")
+        cv = conv_wa(tel)
+        comprobar(posts == ["RESPUESTA-IA-D24"], f"turno sin intervencion: sale un POST ({len(posts)})")
+        posts.clear()
+        ia_antes = len(filas_ia(cv))
+        v_antes = estado(cv)[3]
+        descartes_antes = api.contadores_relevo["respuesta_ia_descartada_por_cambio_de_control"]
+
+        # 9a. el modelo esta pensando cuando la persona interviene
+        modo["frenar"] = True
+        hilo = threading.Thread(target=whatsapp_turno, args=(tel, "me ayudas con la factura?"))
+        hilo.start()
+        comprobar(empezo.wait(30), "el modelo arranco (leyo control = ia)")
+        r9 = intervenir_http(cv, ANA, "d24-ana")
+        comprobar(r9.status_code == 200, f"la persona interviene mientras el modelo piensa: 200 ({r9.status_code})")
+        liberar.set()
+        hilo.join(60)
+        modo["frenar"] = False
+        e = estado(cv)
+        comprobar(posts == [], f"cero POST a Meta con la respuesta calculada antes ({len(posts)})")
+        comprobar(len(filas_ia(cv)) == ia_antes, "cero respuestas de la IA guardadas en ese turno")
+        memoria = api._sesiones[(TENANT, "whatsapp", tel)]["historial"]
+        comprobar(sum("RESPUESTA-IA-D24" in (m.get("content") or "") for m in memoria) == 1
+                  and memoria[-1] == {"role": "user", "content": "me ayudas con la factura?"},
+                  f"la memoria termina en el mensaje del cliente; solo queda la respuesta del turno "
+                  f"anterior, que si salio ({memoria[-2:]})")
+        ult = q("""select rol, origen, contenido from asistente.messages where conversation_id = %s
+                   order by creado_en desc limit 1""", (cv,))[0]
+        comprobar(ult == ("user", "cliente", "me ayudas con la factura?"),
+                  f"el mensaje del cliente queda guardado para quien intervino ({ult})")
+        comprobar(e[:3] == ("humano", "intervencion", "Ana Perez") and e[3] == v_antes + 1
+                  and [x[0] for x in eventos(cv)].count("intervencion") == 1,
+                  f"control humano, asignada a Ana, relevo_version +1, un evento ({e[:4]})")
+        comprobar(api.contadores_relevo["respuesta_ia_descartada_por_cambio_de_control"] == descartes_antes + 1,
+                  "queda contado como respuesta_ia_descartada_por_cambio_de_control")
+
+        # 9b. la persona interviene despues de guardada la respuesta y antes del POST
+        tel2 = "573000000091"
+        whatsapp_turno(tel2, "hola")
+        cv2 = conv_wa(tel2)
+        posts.clear()
+        modo["en_el_medio"] = lambda: intervenir_http(cv2, LUIS, "d24-luis")
+        whatsapp_turno(tel2, "cuanto debo?")
+        modo["en_el_medio"] = None
+        filas = filas_ia(cv2)
+        comprobar(posts == [], f"intervencion justo antes del envio: cero POST a Meta ({len(posts)})")
+        comprobar(filas[-1] == ("RESPUESTA-IA-D24", "descartado"),
+                  f"la respuesta guardada queda 'descartado' ({filas[-1]})")
+        reconstruido = db.historial_para_el_modelo(TENANT, cv2)
+        comprobar(sum("RESPUESTA-IA-D24" in (m.get("content") or "") for m in reconstruido) == 1,
+                  "el historial reconstruido no la incluye (solo la del primer turno, que si salio)")
+        memoria2 = api._sesiones[(TENANT, "whatsapp", tel2)]["historial"]
+        comprobar(memoria2[-1] == {"role": "user", "content": "cuanto debo?"},
+                  f"y sale de la memoria viva ({memoria2[-1]})")
+        comprobar(estado(cv2)[:3] == ("humano", "intervencion", "Luis Rojas"), "control de Luis")
+
+        # 10. la clave de otro operador
+        tel3 = "573000000092"
+        whatsapp_turno(tel3, "hola")
+        cv3 = conv_wa(tel3)
+        r_a = intervenir_http(cv3, ANA, "clave-compartida")
+        r_b = intervenir_http(cv3, LUIS, "clave-compartida")
+        comprobar(r_a.status_code == 200 and r_b.status_code == 409
+                  and (r_b.get_json() or {}).get("codigo") == "clave_de_otra_operacion"
+                  and estado(cv3)[2] == "Ana Perez",
+                  f"== 10 == otro operador con la misma clave: 409, no aparece como quien intervino "
+                  f"({r_a.status_code} {r_b.status_code})")
+        r_tipo = T.devolver_a_ia(TENANT, cv3, operador_id=ANA[0], operador_nombre=ANA[1], clave="clave-compartida")
+        comprobar(r_tipo.motivo == "clave_ajena" and estado(cv3)[0] == "humano",
+                  f"la misma clave para OTRA operacion del mismo actor: clave_ajena, nada cambia ({r_tipo.motivo})")
+    finally:
+        liberar.set()
+        for (m, n), f in orig9.items():
+            setattr(m, n, f)
+        api._TOKEN_SERVICIO = token9
+        api._sesiones.clear()
+
+    # -----------------------------------------------------------------------
+    print("\n== 11. D25: la IA no empieza efectos despues de una intervencion ==")
+    from nucleo.modelo import cliente as cliente_modelo              # noqa: E402
+    http11, posts11 = [], []
+    empezo11, liberar11 = threading.Event(), threading.Event()
+    guion = {"frenar": False, "herramienta": True, "al_evaluar": None, "veredicto": {}}
+    ARGS = {"numero_documento": "1000000000", "nombre_confirmado": "CLIENTE DE PRUEBA",
+            "motivo": "ya no la necesito"}
+
+    def chat11(referencia_modelo, mensajes, tools=None, temperatura=0.1, timeout=None, **resto):
+        # Pide la herramienta solo en la primera vuelta del turno (lo ultimo
+        # es el mensaje del cliente); despues de ver su resultado, contesta.
+        pide = tools is not None and guion["herramienta"] and mensajes[-1].get("role") == "user"
+        if pide:
+            if guion["frenar"]:
+                empezo11.set()
+                liberar11.wait(60)
+            return cliente_modelo.Respuesta(contenido="", llamadas=[
+                cliente_modelo.Llamada(nombre="cancelar_solicitud_servicio", argumentos=dict(ARGS))])
+        return cliente_modelo.Respuesta(contenido="Listo.", llamadas=[])
+
+    def http_11(herramienta, argumentos, tenant=None, *a, **k):
+        http11.append(herramienta.nombre)
+        return {"ok": True}
+
+    def evaluar11(*a, **k):
+        if guion["al_evaluar"]:
+            guion["al_evaluar"]()
+        return dict(guion["veredicto"])
+    base11 = {
+        (api.motor.cliente, "chat"): chat11,
+        (api.motor.ejecutor_http, "ejecutar"): http_11,
+        (api.motor.catalogo_habilidades, "indice_de"): lambda *a, **k: [],
+        (api.escalamiento, "evaluar"): evaluar11,
+        (api.escalamiento, "caso_sigue_abierto"): lambda *a, **k: True,
+        (api.consumo, "estado_del_gasto"): lambda *a, **k: {"accion": "seguir", "gastado": 0, "tope": 0, "porcentaje": 0.0},
+        (api.whatsapp, "enviar_texto"): lambda config, tenant, para, texto: posts11.append(texto) or "wamid.y",
+        (api.whatsapp, "marcar_leido"): lambda *a, **k: None,
+        (api, "_atendio_baja_o_alta"): lambda *a, **k: False,
+        (api, "_guardar_adjunto"): lambda *a, **k: None,
+    }
+    orig11 = {k: getattr(*k) for k in base11}
+    for (m, n), f in base11.items():
+        setattr(m, n, f)
+    token11 = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+
+    def turno11(tel, texto):
+        api._procesar_mensaje_whatsapp(CONFIG, TENANT, "ventas", {"de": tel, "telefono": tel, "texto": texto})
+    try:
+        api._sesiones.clear()
+        # control positivo: sin intervencion la escritura SI sale
+        tel = "573000000110"
+        guion["herramienta"] = False
+        turno11(tel, "hola")
+        cv = conv_wa(tel)
+        guion["herramienta"] = True
+        turno11(tel, "quiero cancelar mi solicitud")
+        comprobar(http11.count("cancelar_solicitud_servicio") == 1,
+                  f"control positivo: sin intervencion, la herramienta que escribe SI llega al proveedor ({http11})")
+
+        # 11a. la carrera
+        http11.clear()
+        posts11.clear()
+        v_antes = estado(cv)[3]
+        canceladas = api.contadores_relevo["accion_ia_cancelada_por_cambio_de_control"]
+        guion["frenar"] = True
+        hilo = threading.Thread(target=turno11, args=(tel, "cancelala otra vez por favor"))
+        hilo.start()
+        comprobar(empezo11.wait(60), "el modelo arranco con control = ia y quedo frenado")
+        r11 = intervenir_http(cv, ANA, "d25-ana")
+        comprobar(r11.status_code == 200, f"una persona interviene y hace commit ({r11.status_code})")
+        liberar11.set()
+        hilo.join(90)
+        guion["frenar"] = False
+        comprobar(http11.count("cancelar_solicitud_servicio") == 0,
+                  f"el modelo pidio la escritura DESPUES del commit: cero llamadas al proveedor ({http11})")
+        comprobar(posts11 == [], "y cero POST a Meta")
+        e = estado(cv)
+        comprobar(e[:3] == ("humano", "intervencion", "Ana Perez") and e[3] == v_antes + 1
+                  and [x[0] for x in eventos(cv)].count("intervencion") == 1,
+                  f"control humano, asignada a Ana, version +1, un evento ({e[:4]})")
+        comprobar(api.contadores_relevo["accion_ia_cancelada_por_cambio_de_control"] == canceladas + 1,
+                  "queda contado como accion_ia_cancelada_por_cambio_de_control")
+
+        # 11b. el cierre por confirmacion no empieza si alguien intervino mientras evaluaba
+        tel2 = "573000000111"
+        guion["herramienta"] = False
+        turno11(tel2, "hola")
+        cv2 = conv_wa(tel2)
+        guion["veredicto"] = {"resuelta": True, "confirma_cierre": True}
+        guion["al_evaluar"] = lambda: intervenir_http(cv2, LUIS, "d25-luis")
+        turno11(tel2, "listo, ya quedo, gracias")
+        guion["al_evaluar"], guion["veredicto"] = None, {}
+        e2 = estado(cv2)
+        comprobar(e2[4] == "abierta" and e2[:3] == ("humano", "intervencion", "Luis Rojas"),
+                  f"intervencion durante el evaluador: la conversacion NO se cierra sola ({e2[:5]})")
+
+        # 11c. la escalada que ya NO es de este turno no sincroniza nada
+        import types                                                  # noqa: E402
+        externos = []
+        base11c = {
+            (api.agendamiento, "ticket_para_escalar"): lambda *a, **k: types.SimpleNamespace(
+                herramienta="crear_ticket_caso", area="soporte", asunto="Revision", prioridad="media"),
+            (api.agendamiento, "agendar"): lambda *a, **k: externos.append("ticket") or "T-1",
+            (api.escalamiento, "escalar"): lambda *a, **k: externos.append("crm") or True,
+            (api.agendamiento, "perfil_del_area"): lambda *a, **k: "",
+            (api, "con_las_manos_vacias"): lambda *a, **k: False,
+            (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
+        }
+        orig11c = {k: getattr(*k) for k in base11c}
+        for (m, n), f in base11c.items():
+            setattr(m, n, f)
+        try:
+            tel3 = "573000000112"
+            turno11(tel3, "hola")
+            cv3 = conv_wa(tel3)
+            veredicto_escala = {"escalar": True, "necesita_humano": True, "motivo": "informacion_a_confirmar",
+                                "etiqueta": "", "caso_manual": "caso_de_prueba_d25", "resumen": "cobertura sin catalogo"}
+            # control positivo: sin intervencion, la escalada propia SI crea ticket y caso
+            guion["veredicto"] = veredicto_escala
+            turno11(tel3, "hay cobertura en Los Almendros?")
+            comprobar(externos == ["ticket", "crm"],
+                      f"control positivo: la escalada propia crea ticket y caso con control humano ({externos})")
+            externos.clear()
+            tel4 = "573000000113"
+            guion["veredicto"] = {}
+            turno11(tel4, "hola")
+            cv4 = conv_wa(tel4)
+            guion["veredicto"] = veredicto_escala
+            guion["al_evaluar"] = lambda: intervenir_http(cv4, ANA, "d25-ana-esc")
+            turno11(tel4, "hay cobertura en Los Almendros?")
+            e4 = estado(cv4)
+            comprobar(externos == [] and e4[:3] == ("humano", "intervencion", "Ana Perez")
+                      and "escalada" not in [x[0] for x in eventos(cv4)],
+                      f"intervencion antes de reservar: la escalada no es de este turno, ni ticket ni caso ({externos}, {e4[:3]})")
+        finally:
+            guion["al_evaluar"], guion["veredicto"] = None, {}
+            for (m, n), f in orig11c.items():
+                setattr(m, n, f)
+
+        # ---------------------------------------------------------------
+        print("\n== 12. SYNC_ESCALADA: la escalada comprometida y lo que la invalida ==")
+        externos12 = []
+        en_medio = {"antes_del_ticket": None, "durante_el_ticket": None}
+
+        def ticket12(*a, **k):
+            if en_medio["antes_del_ticket"]:
+                en_medio["antes_del_ticket"]()
+            return types.SimpleNamespace(herramienta="crear_ticket_caso", area="soporte",
+                                         asunto="Revision", prioridad="media")
+
+        def agendar12(*a, **k):
+            externos12.append("ticket")            # la llamada YA empezo
+            if en_medio["durante_el_ticket"]:
+                en_medio["durante_el_ticket"]()
+            return "T-12"
+        base12 = {
+            (api.agendamiento, "ticket_para_escalar"): ticket12,
+            (api.agendamiento, "agendar"): agendar12,
+            (api.escalamiento, "escalar"): lambda *a, **k: externos12.append("crm") or True,
+            (api.agendamiento, "perfil_del_area"): lambda *a, **k: "",
+            (api, "con_las_manos_vacias"): lambda *a, **k: False,
+            (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
+        }
+        orig12 = {k: getattr(*k) for k in base12}
+        for (m, n), f in base12.items():
+            setattr(m, n, f)
+        escala12 = {"escalar": True, "necesita_humano": True, "motivo": "informacion_a_confirmar",
+                    "etiqueta": "", "caso_manual": "caso_de_prueba_d25", "resumen": "cobertura sin catalogo"}
+
+        def escalar_con(tel, antes=None, durante=None):
+            guion["herramienta"], guion["veredicto"] = False, {}
+            turno11(tel, "hola")
+            conv = conv_wa(tel)
+            externos12.clear()
+            posts11.clear()
+            en_medio["antes_del_ticket"] = (lambda: antes(conv)) if antes else None
+            en_medio["durante_el_ticket"] = (lambda: durante(conv)) if durante else None
+            guion["veredicto"] = escala12
+            turno11(tel, "hay cobertura en Los Almendros?")
+            guion["veredicto"] = {}
+            en_medio["antes_del_ticket"] = en_medio["durante_el_ticket"] = None
+            return conv
+        try:
+            # 12.1 toma posterior: la obligacion de la escalada sigue
+            c1 = escalar_con("573000000120",
+                             antes=lambda conv: T.tomar(TENANT, conv, operador_id=ANA[0], operador_nombre=ANA[1]))
+            e1 = estado(c1)
+            tipos1 = [x[0] for x in eventos(c1)]
+            comprobar(tipos1 == ["escalada", "tomada"] and e1[2] == "Ana Perez",
+                      f"la escalada quedo durable y despues Ana la tomo (version movida) ({tipos1}, {e1[:4]})")
+            comprobar(externos12 == ["ticket", "crm"],
+                      f"toma posterior: el ticket y el caso de ESA escalada SI se sincronizan ({externos12})")
+            comprobar(len(posts11) == 1,
+                      f"y el cliente recibe el aviso de la escalada: la toma no se lo quita ({len(posts11)})")
+
+            # 12.2 devolucion a la IA antes del efecto
+            c2 = escalar_con("573000000121",
+                             antes=lambda conv: T.devolver_a_ia(TENANT, conv, operador_id=ANA[0],
+                                                                operador_nombre=ANA[1]))
+            comprobar(externos12 == [] and estado(c2)[0] == "ia",
+                      f"devuelta a la IA antes del efecto: ni ticket ni caso ({externos12})")
+            comprobar(posts11 == [], "ni el aviso de una escalada que ya no existe")
+
+            # 12.3 cierre antes del efecto
+            c3 = escalar_con("573000000122",
+                             antes=lambda conv: T.resolver(TENANT, conv, operador_id=ANA[0],
+                                                           operador_nombre=ANA[1],
+                                                           desenlace="otro"))
+            comprobar(externos12 == [] and estado(c3)[4] == "cerrada",
+                      f"cerrada antes del efecto: ni ticket ni caso ({externos12})")
+
+            # 12.4 punto de no retorno: la llamada al ticket ya empezo cuando se
+            # devuelve a la IA -> completa; el caso del CRM, que no empezo, no.
+            escalar_con("573000000123",
+                        durante=lambda conv: T.devolver_a_ia(TENANT, conv, operador_id=ANA[0],
+                                                             operador_nombre=ANA[1]))
+            comprobar(externos12 == ["ticket"],
+                      f"punto de no retorno: el ticket ya en vuelo completa, el caso no empieza ({externos12})")
+
+            # 12.5 la herramienta autonoma ya en vuelo cuando alguien interviene
+            http11.clear()
+            posts11.clear()
+            tel5 = "573000000124"
+            guion["herramienta"] = False
+            turno11(tel5, "hola")
+            c5 = conv_wa(tel5)
+            http11.clear()
+            posts11.clear()
+            orig_http = api.motor.ejecutor_http.ejecutar
+
+            def http_con_intervencion(herramienta, argumentos, tenant=None, *a, **k):
+                http11.append(herramienta.nombre)            # ya empezo
+                intervenir_http(c5, LUIS, "d25-luis-vuelo")
+                return {"ok": True}
+            api.motor.ejecutor_http.ejecutar = http_con_intervencion
+            try:
+                guion["herramienta"] = True
+                turno11(tel5, "quiero cancelar mi solicitud")
+            finally:
+                api.motor.ejecutor_http.ejecutar = orig_http
+                guion["herramienta"] = False
+            comprobar(http11 == ["cancelar_solicitud_servicio"] and posts11 == []
+                      and estado(c5)[:3] == ("humano", "intervencion", "Luis Rojas"),
+                      f"una escritura ya en vuelo completa una sola vez, sin reintento, y la respuesta "
+                      f"no sale ({http11}, posts={len(posts11)})")
+        finally:
+            for (m, n), f in orig12.items():
+                setattr(m, n, f)
+    finally:
+        liberar11.set()
+        for (m, n), f in orig11.items():
+            setattr(m, n, f)
+        api._TOKEN_SERVICIO = token11
+        api._sesiones.clear()
+
+    # -----------------------------------------------------------------------
+    print("\n== 13. B3.4: toma atomica y reasignacion (D4) ==")
+    ADMIN = ("9b2d5c1e-3f4a-4b6c-8d7e-1a2b3c4d5e6f", "Marta Admin")
+    token13 = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+    http = api.app.test_client()
+
+    def atender(conv, op, clave=None, soltar=False):
+        return http.post(f"/conversaciones/{conv}/atender", json={
+            "tenant": TENANT, "autor": op[1], "autor_usuario_id": op[0],
+            "soltar": soltar, "clave_operacion": clave})
+
+    def reasignar_http(conv, op, destino, motivo="cambio de turno", rol="ADMIN", clave=None):
+        return http.post(f"/conversaciones/{conv}/reasignar", json={
+            "tenant": TENANT, "autor": op[1], "autor_usuario_id": op[0], "autor_rol": rol,
+            "destino_usuario_id": destino[0], "destino_nombre": destino[1],
+            "motivo": motivo, "clave_operacion": clave})
+
+    def escalada_libre(tel):
+        conv = nueva_conv(org, tel)
+        T.escalar(TENANT, conv)
+        return conv
+
+    def codigo(r):
+        return (r.get_json() or {}).get("codigo")
+    try:
+        # 1. toma normal
+        c = escalada_libre("573000000130")
+        v0 = estado(c)[3]
+        r = atender(c, ANA, "t-ana")
+        e = estado(c)
+        comprobar(r.status_code == 200 and e[2] == "Ana Perez" and e[3] == v0 + 1
+                  and [x[0] for x in eventos(c)] == ["escalada", "tomada"],
+                  f"toma normal: 200, asignada a Ana, version +1, evento tomada ({r.status_code}, {e[:4]})")
+
+        # 2. intento de robo
+        r = atender(c, LUIS, "t-luis")
+        comprobar(r.status_code == 409 and codigo(r) == "ya_asignada"
+                  and (r.get_json() or {}).get("asignada_a") == "Ana Perez"
+                  and estado(c)[2] == "Ana Perez" and estado(c)[3] == v0 + 1 and len(eventos(c)) == 2,
+                  f"Luis intenta tomarla: 409 ya_asignada, dice que la tiene Ana, nada cambia ({r.status_code})")
+
+        # 3. reintento del mismo actor y clave ajena
+        r = atender(c, ANA, "t-ana")
+        comprobar(r.status_code == 200 and (r.get_json() or {}).get("reintento")
+                  and estado(c)[3] == v0 + 1 and len(eventos(c)) == 2,
+                  "Ana reintenta la misma operacion: 200 reintento, sin evento ni version")
+        r = atender(c, LUIS, "t-ana")
+        comprobar(r.status_code == 409 and codigo(r) == "clave_de_otra_operacion" and estado(c)[2] == "Ana Perez",
+                  f"Luis con la clave de Ana: 409 clave_de_otra_operacion ({r.status_code} {codigo(r)})")
+
+        # 4. soltar: solo la duena
+        r = atender(c, LUIS, "s-luis", soltar=True)
+        comprobar(r.status_code == 409 and codigo(r) == "no_es_suya" and estado(c)[2] == "Ana Perez",
+                  f"Luis intenta soltarla: 409 no_es_suya, sigue de Ana ({r.status_code})")
+        r = atender(c, ANA, "s-ana", soltar=True)
+        e = estado(c)
+        comprobar(r.status_code == 200 and e[2] is None and e[0] == "humano",
+                  f"Ana la suelta: libre y SIGUE en manos de personas ({e[:3]})")
+
+        # 5. carrera con claves distintas (varias vueltas)
+        ganadores_ok = True
+        for vuelta in range(5):
+            cc = escalada_libre(f"57300000014{vuelta}")
+            barrera = threading.Barrier(2)
+            res = []
+
+            def correr_toma(op, clave, conv=cc, b=barrera, salida=res):
+                b.wait()
+                rr = atender(conv, op, clave)
+                salida.append((op[1], rr.status_code, codigo(rr)))
+            hilos = [threading.Thread(target=correr_toma, args=(ANA, f"c-ana-{vuelta}")),
+                     threading.Thread(target=correr_toma, args=(LUIS, f"c-luis-{vuelta}"))]
+            for h in hilos:
+                h.start()
+            for h in hilos:
+                h.join()
+            ganador = [n for n, st, _ in res if st == 200]
+            perdedor = [cd for _, st, cd in res if st == 409]
+            ev = [x for x in eventos(cc) if x[0] == "tomada"]
+            ganadores_ok = ganadores_ok and (len(ganador) == 1 and perdedor == ["ya_asignada"]
+                                             and estado(cc)[2] == ganador[0] and len(ev) == 1
+                                             and ev[0][2] == ganador[0])
+        comprobar(ganadores_ok, "dos operadores a la vez, 5 vueltas: siempre uno 200 y otro 409 ya_asignada, "
+                                "un dueno, un evento tomada, del ganador")
+
+        # 6. tomar bajo control ia -> intervenir
+        cia = nueva_conv(org, "573000000150")          # nunca escalo: la atiende la IA
+        r = atender(cia, ANA, "ia-ana")
+        comprobar(r.status_code == 409 and codigo(r) == "control_ia" and estado(cia)[2] is None
+                  and estado(cia)[3] == 0 and estado(cia)[7] is None,
+                  f"tomar una conversacion de la IA: 409 control_ia, nada cambia ({r.status_code} {codigo(r)})")
+        cdev = escalada_libre("573000000151")
+        T.devolver_a_ia(TENANT, cdev, operador_id=ANA[0], operador_nombre=ANA[1])
+        vdev = estado(cdev)[3]
+        r = atender(cdev, LUIS, "dev-luis")
+        comprobar(r.status_code == 409 and codigo(r) == "control_ia" and estado(cdev)[3] == vdev,
+                  "gobernada devuelta a la IA: 409 control_ia, sin version")
+
+        # 7. reasignar
+        cr = escalada_libre("573000000160")
+        atender(cr, ANA, "r-ana")
+        vr = estado(cr)[3]
+        r = reasignar_http(cr, LUIS, LUIS, rol="USER", clave="r-user")
+        comprobar(r.status_code == 403 and codigo(r) == "no_es_admin" and estado(cr)[2] == "Ana Perez"
+                  and estado(cr)[3] == vr,
+                  f"un operador no ADMIN intenta reasignar: 403, nada cambia ({r.status_code})")
+        r = reasignar_http(cr, ADMIN, LUIS, motivo="  ", clave="r-sin-motivo")
+        comprobar(r.status_code == 400 and estado(cr)[2] == "Ana Perez",
+                  f"ADMIN sin motivo: 400 ({r.status_code})")
+        r = reasignar_http(cr, ADMIN, LUIS, motivo="Ana termino su turno", clave="r-admin")
+        e = estado(cr)
+        ev = eventos(cr)[-1]
+        comprobar(r.status_code == 200 and e[2] == "Luis Rojas" and e[3] == vr + 1 and ev[0] == "reasignada"
+                  and ev[2] == "Marta Admin" and ev[4].get("anterior_nombre") == "Ana Perez"
+                  and ev[4].get("anterior_usuario_id") == ANA[0] and ev[4].get("nuevo_nombre") == "Luis Rojas"
+                  and ev[4].get("nuevo_usuario_id") == LUIS[0] and ev[4].get("motivo") == "Ana termino su turno"
+                  and ev[3] == vr + 1,
+                  f"ADMIN reasigna Ana -> Luis: evento con actor, anterior, nuevo, motivo y version ({e[:4]})")
+        r = reasignar_http(cr, ADMIN, LUIS, motivo="Ana termino su turno", clave="r-admin")
+        comprobar(r.status_code == 200 and (r.get_json() or {}).get("reintento") and estado(cr)[3] == vr + 1,
+                  "reintento de la misma reasignacion: 200 reintento, sin evento ni version")
+        r = atender(cr, ANA, "r-ana-2", soltar=True)
+        comprobar(r.status_code == 409 and codigo(r) == "no_es_suya",
+                  "despues de reasignada, Ana ya no puede soltarla")
+
+        # 8. legado (version 0): misma exclusion, sin eventos ni version
+        leg = str(q("""insert into asistente.conversations
+                         (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                       values (%s, 'whatsapp-simulado', '573000000170', true, true) returning id""", (org,))[0][0])
+        r1 = atender(leg, ANA, "l-ana")
+        r2 = atender(leg, LUIS, "l-luis")
+        r3 = atender(leg, LUIS, "l-luis-s", soltar=True)
+        e = estado(leg)
+        comprobar(r1.status_code == 200 and r2.status_code == 409 and codigo(r2) == "ya_asignada"
+                  and r3.status_code == 409 and codigo(r3) == "no_es_suya"
+                  and e[7] == "Ana Perez" and e[3] == 0 and e[2] is None and eventos(leg) == [],
+                  f"legado: Ana la toma, Luis no la roba ni la suelta; sin evento, version 0, sin adopcion ({e})")
+        r = reasignar_http(leg, ADMIN, LUIS, clave="l-admin")
+        comprobar(r.status_code == 409 and codigo(r) == "legado_sin_relevo" and estado(leg)[7] == "Ana Perez"
+                  and estado(leg)[3] == 0,
+                  f"reasignar legado: 409 legado_sin_relevo, no se adopta por un clic ({r.status_code})")
+        leg2 = str(q("""insert into asistente.conversations
+                          (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                        values (%s, 'whatsapp-simulado', '573000000171', true, true) returning id""", (org,))[0][0])
+        barrera = threading.Barrier(2)
+        res_leg = []
+
+        def toma_legado(op, clave):
+            barrera.wait()
+            res_leg.append(atender(leg2, op, clave).status_code)
+        hilos = [threading.Thread(target=toma_legado, args=(ANA, "l2-ana")),
+                 threading.Thread(target=toma_legado, args=(LUIS, "l2-luis"))]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
+        comprobar(sorted(res_leg) == [200, 409] and estado(leg2)[7] in ("Ana Perez", "Luis Rojas")
+                  and estado(leg2)[3] == 0,
+                  f"legado, dos a la vez: uno gana, el otro 409 ({res_leg}, {estado(leg2)[7]})")
+
+        # 9. tomar contra reasignar a la vez: un dueno, coherente con el ultimo evento
+        coherente = True
+        for vuelta in range(5):
+            cx = escalada_libre(f"57300000018{vuelta}")
+            barrera = threading.Barrier(2)
+
+            def toma_x(conv=cx, b=barrera):
+                b.wait()
+                atender(conv, ANA, f"x-ana-{vuelta}")
+
+            def reasigna_x(conv=cx, b=barrera):
+                b.wait()
+                reasignar_http(conv, ADMIN, LUIS, motivo="balanceo", clave=f"x-admin-{vuelta}")
+            hilos = [threading.Thread(target=toma_x), threading.Thread(target=reasigna_x)]
+            for h in hilos:
+                h.start()
+            for h in hilos:
+                h.join()
+            evs = [x for x in eventos(cx) if x[0] in ("tomada", "reasignada")]
+            ultimo = evs[-1] if evs else None
+            dueno = estado(cx)[2]
+            esperado = (ultimo[2] if ultimo and ultimo[0] == "tomada"
+                        else (ultimo[4].get("nuevo_nombre") if ultimo else None))
+            versiones = [x[3] for x in eventos(cx)]
+            # D27: con la hora tomada DESPUES del lock (clock_timestamp), el
+            # orden por hora ya no contradice al de versiones.
+            horas = [x[5] for x in sorted(eventos(cx), key=lambda x: x[3])]
+            coherente = coherente and (dueno == "Luis Rojas" and dueno == esperado
+                                       and versiones == sorted(versiones) and len(set(versiones)) == len(versiones)
+                                       and estado(cx)[3] == versiones[-1]
+                                       and horas == sorted(horas))
+        comprobar(coherente, "tomar contra reasignar a la vez, 5 vueltas: la reasignacion siempre queda, el dueno "
+                             "coincide con el ultimo evento, las versiones no se repiten y las horas no decrecen (D27)")
+        # 10. D27, forzado: una transicion que ABRE su transaccion antes y
+        # escribe DESPUES no puede quedar fechada antes. Con el default now()
+        # (la hora del BEGIN) quedaba invertida; con clock_timestamp(), no.
+        # Se provoca a proposito en vez de esperar a que la carrera lo pegue:
+        # en 5 vueltas al azar puede no pasar nunca.
+        demora = threading.local()
+        real_sesion = db.sesion
+
+        @contextmanager
+        def sesion_demorada(tenant):
+            with real_sesion(tenant) as par:
+                if getattr(demora, "activa", False):
+                    par[0].execute("select 1")      # aca empieza la transaccion: now() queda fijado
+                    time.sleep(1.2)
+                yield par
+        db.sesion = sesion_demorada
+        try:
+            cd27 = escalada_libre("573000000190")
+            lento = {}
+
+            def toma_lenta():
+                demora.activa = True
+                try:
+                    lento["r"] = T.tomar(TENANT, cd27, operador_id=ANA[0], operador_nombre=ANA[1])
+                finally:
+                    demora.activa = False
+            h = threading.Thread(target=toma_lenta)
+            h.start()
+            time.sleep(0.4)                          # la otra transicion entra y termina primero
+            T.caso_externo_cerrado(TENANT, cd27)
+            h.join(30)
+            evs = sorted(eventos(cd27), key=lambda x: x[3])
+            horas = [x[5] for x in evs]
+            comprobar(lento.get("r") is not None and lento["r"].aplicada
+                      and [x[0] for x in evs] == ["escalada", "caso_externo_cerrado", "tomada"]
+                      and horas == sorted(horas),
+                      f"D27: la transicion que empezo antes y escribio despues queda fechada despues "
+                      f"({[x[0] for x in evs]})")
+        finally:
+            db.sesion = real_sesion
+    finally:
+        api._TOKEN_SERVICIO = token13
+
+    # -----------------------------------------------------------------------
+    print("\n== 14. B3.5: la cola de la bandeja (D18) ==")
+    token14 = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+    http14 = api.app.test_client()
+
+    def conv_con(tel, *, canal="whatsapp", legado=False, minutos=60):
+        """Una conversacion en manos de personas, con su antiguedad."""
+        cid = str(q("""insert into asistente.conversations (organization_id, canal, usuario_externo)
+                       values (%s, %s, %s) returning id""", (org, canal, tel))[0][0])
+        if legado:
+            q("""update asistente.conversations
+                 set escalada_a_humano = true, necesita_atencion_humana = true,
+                     escalada_en = now() - make_interval(mins => %s),
+                     actualizado_en = now() - make_interval(mins => %s)
+                 where id = %s""", (minutos, minutos, cid))
+        else:
+            T.escalar(TENANT, cid)
+            q("""update asistente.conversations
+                 set escalada_en = now() - make_interval(mins => %s),
+                     actualizado_en = now() - make_interval(mins => %s)
+                 where id = %s""", (minutos, minutos, cid))
+        return cid
+
+    def mensaje(cid, rol, origen, minutos, contenido="x"):
+        q("""insert into asistente.messages
+               (organization_id, conversation_id, rol, contenido, origen, creado_en)
+             values (%s, %s, %s, %s, %s, now() - make_interval(mins => %s))""",
+          (org, cid, rol, contenido, origen, minutos))
+
+    def cola(vista_operativa=True):
+        r = http14.get(f"/conversaciones?tenant={TENANT}")
+        filas = (r.get_json() or {}).get("conversaciones", [])
+        return [f for f in filas if f["canal_operativo"]] if vista_operativa else filas
+    try:
+        q("delete from asistente.conversations where organization_id = %s", (org,))
+        legados = [conv_con(f"5730000002{i:02d}", legado=True, minutos=60 * 24 * (3 + i))
+                   for i in range(45)]
+        nueva = conv_con("573000000300", minutos=4)                 # escalada de hace 4 minutos
+        filas = cola()
+        comprobar(filas and filas[0]["id"] == nueva and filas[0]["banda"] == 2
+                  and filas[0]["motivo_cola"] == "Escalada, sin asignar",
+                  f"D18: la escalada de hace 4 minutos queda primera sobre 45 de legado de dias "
+                  f"({filas[0]['motivo_cola'] if filas else '(vacia)'})")
+        comprobar(all(f["banda"] == 6 and f["es_legado"] and f["necesita_accion_de"] == "revision"
+                      for f in filas[1:]),
+                  "las 45 de legado quedan detras, como revision")
+        comprobar(all(q("select relevo_version from asistente.conversations where id = %s", (c,))[0][0] == 0
+                      for c in legados[:5]),
+                  "y mirarlas en la cola NO las adopta: siguen en version 0 (G8)")
+
+        # el cliente vuelve a escribir en una que ya tiene dueno
+        conversada = conv_con("573000000301", minutos=120)
+        atender(conversada, ANA, "cola-ana")
+        mensaje(conversada, "assistant", "humano", 90, "Soy Ana, lo reviso")
+        mensaje(conversada, "user", "cliente", 7, "sigo sin internet")
+        filas = cola()
+        primera = filas[0]
+        comprobar(primera["id"] == conversada and primera["banda"] == 1
+                  and primera["motivo_cola"] == "Cliente respondió — espera a Ana Perez",
+                  f"el cliente que responde a su operadora sube a la banda 1 ({primera['motivo_cola']})")
+        # La espera tiene que ser la de SU mensaje (hace 7 minutos), no la de la
+        # escalada (hace 2 horas): es el numero que la pantalla muestra y con el
+        # que el motor ordena.
+        minutos = q("""select extract(epoch from (now() - %s::timestamptz)) / 60""",
+                    (primera["esperando_desde"],))[0][0]
+        comprobar(5 <= float(minutos) <= 15,
+                  f"y la espera se cuenta desde SU mensaje (~7 min), no desde la escalada "
+                  f"(~120 min): dio {float(minutos):.0f} min")
+
+        # dentro de la banda 2, la espera mas larga primero
+        vieja = conv_con("573000000302", minutos=300)
+        filas = cola()
+        banda2 = [f["id"] for f in filas if f["banda"] == 2]
+        comprobar(banda2[:2] == [vieja, nueva],
+                  f"dentro de la banda 2, 5 horas esperando va antes que 4 minutos ({banda2[:2] == [vieja, nueva]})")
+
+        # canales de prueba
+        simulada = conv_con("573000000303", canal="whatsapp-simulado", minutos=2)
+        todas = cola(vista_operativa=False)
+        operativas = cola()
+        comprobar(any(f["id"] == simulada and f["canal_operativo"] is False for f in todas)
+                  and all(f["id"] != simulada for f in operativas),
+                  "una conversacion del simulador queda marcada no operativa y fuera de la vista de trabajo")
+        comprobar(all(f["canal_operativo"] for f in operativas),
+                  "en la vista operativa solo quedan canales reales")
+
+        # una que atiende la IA no compite en la cola
+        deia = str(q("""insert into asistente.conversations (organization_id, canal, usuario_externo)
+                        values (%s, 'whatsapp', '573000000304') returning id""", (org,))[0][0])
+        filas = cola(vista_operativa=False)
+        suya = next(f for f in filas if f["id"] == deia)
+        comprobar(suya["banda"] is None and suya["necesita_accion_de"] == "ia"
+                  and filas.index(suya) > 0,
+                  f"la que atiende la IA queda fuera de la cola, al final ({suya['motivo_cola']})")
+    finally:
+        api._TOKEN_SERVICIO = token14
+finally:
+    try:
+        with psycopg.connect(dsn("postgres"), autocommit=True) as con:
+            con.execute("select pg_terminate_backend(pid) from pg_stat_activity "
+                        "where datname = %s and pid <> pg_backend_pid()", (BASE,))
+            con.execute(f'drop database if exists "{BASE}"')
+        print(f"\n       -> {BASE} borrada")
+    except Exception as ex:
+        print(f"\n  [aviso] no se pudo borrar {BASE}: {type(ex).__name__}: {ex}")
+
+if fallos:
+    print(f"\n[FALLA] {len(fallos)} caso(s):")
+    for f in fallos:
+        print(f"  - {f}")
+    sys.exit(1)
+print("\n[OK] Cada transicion escribe estado, legado y evento juntos, o nada.")

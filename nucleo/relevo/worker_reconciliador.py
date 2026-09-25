@@ -1,0 +1,382 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ El proceso que corre T20  (B4)
+================================================================================
+
+    python -m nucleo.relevo.worker_reconciliador --once
+    python -m nucleo.relevo.worker_reconciliador --once --dry-run
+    python -m nucleo.relevo.worker_reconciliador            (daemon)
+
+POR QUE UN PROCESO APARTE
+-------------------------
+El 'motor-reloj' corre cada ~60 minutos y los plazos que la cola tiene que
+cumplir son de 10 y 15 (§14.1 Q4). Bajar ese reloj para esto moveria TODAS las
+tareas periodicas del motor -- el cierre de vencidas, la importacion, el
+barrido operativo-- que no piden esa frecuencia y que cuestan bastante mas que
+una consulta a un indice parcial.
+
+Asi que T20 vive aparte, cada 5 minutos, y en cada vuelta mira solo lo que ya
+vencio. Un ciclo sin trabajo elegible es una consulta y nada mas.
+
+EL INTERRUPTOR
+--------------
+'RECONCILIADOR_HABILITADO' tiene que valer exactamente '1'. Propio, y no el del
+reloj general: encender uno no puede encender el otro por descuido, y este toca
+sistemas externos.
+
+En daemon se lee UNA VEZ, al arrancar, igual que el reloj general: el entorno
+de un proceso ya arrancado no cambia solo, y consultarlo en cada vuelta
+prometeria una capacidad que no existe. '--once' si lo lee en el momento, para
+poder hacer un smoke dentro del contenedor sin tocar lo que Dokploy guarda.
+
+Encenderlo en produccion es el gate G7, y no se hace desde aca.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import time
+from datetime import datetime, timedelta
+
+from nucleo.observabilidad.registro import registrar
+from nucleo.relevo import reconciliador
+
+#: Cada cuanto trabaja. Es la cadencia que §3.6 pide (1 a 5 minutos).
+INTERVALO_SEGUNDOS = reconciliador.CADENCIA_SEGUNDOS
+
+#: Cuantos trabajos por vuelta y por tenant. Un tope bajo a proposito: la cola
+#: se vacia en varias vueltas de cinco minutos en vez de en una sola que
+#: mantiene abiertas decenas de conexiones a sistemas externos.
+POR_VUELTA = 50
+
+#: Tope del barrido que busca un ticket por su referencia. A 17 tickets por
+#: dia medidos, una ventana de 7 dias son ~120 filas: 2000 deja margen de
+#: sobra y evita que un tenant con mucho volumen pagine para siempre. Si se
+#: alcanza, la busqueda devuelve lo que encontro -- y no encontrar nada
+#: termina en 'desconocida', que es revision humana y no un segundo POST.
+MAX_FILAS_BUSQUEDA = 2000
+
+
+def encendido() -> bool:
+    return os.environ.get("RECONCILIADOR_HABILITADO", "0").strip() == "1"
+
+
+def _tenants() -> list[str]:
+    from nucleo.reloj import tenants_conocidos
+    return list(tenants_conocidos())
+
+
+def _ejecutor_de(tenant: str):
+    """
+    Con que se ejecuta cada efecto en este tenant.
+
+    Devuelve None cuando el tenant no tiene con que hacerlo -- sin catalogo o
+    sin la herramienta del caso. Un tenant asi NO se procesa: tomar sus
+    trabajos solo para fallarlos les gastaria los intentos y los dejaria en
+    'fallida_definitiva' por una razon que no es suya.
+    """
+    from nucleo.canales.api import _config_de
+    from nucleo.herramientas import http as herramientas_http
+    from nucleo.relevo import efectos_externos
+    from nucleo.seguimiento import escalamiento
+
+    try:
+        config = _config_de(tenant)
+    except Exception as e:
+        registrar("reconciliador", "sin configuracion: el tenant no se procesa",
+                  tenant=tenant, error=e)
+        return None
+
+    herramienta = next((h for h in config.herramientas
+                        if h.nombre == escalamiento.NOMBRE_HERRAMIENTA_CASO_CREAR), None)
+    if not herramienta:
+        registrar("reconciliador", "el tenant no tiene la herramienta de crear caso",
+                  tenant=tenant)
+        return None
+
+    def crear(nombre: str, datos: dict):
+        respuesta = herramientas_http.ejecutar(herramienta, {
+            "name": nombre,
+            "description": (datos or {}).get("descripcion") or nombre,
+            "status": "New", "case_type": "Question", "priority": "Normal",
+        })
+        return respuesta.get("id") if isinstance(respuesta, dict) else None
+
+    def buscar_por_nombre(nombre: str):
+        # El caso se busca por su nombre exacto, que lleva el conversation_id y
+        # es unico por organizacion. Si el catalogo del tenant no declara una
+        # herramienta de busqueda, esto devuelve None y el efecto se reintenta
+        # entero mas tarde -- nunca se crea a ciegas.
+        buscador = next((h for h in config.herramientas
+                         if getattr(h, "busca_caso", False)), None)
+        if not buscador:
+            return None
+        respuesta = herramientas_http.ejecutar(buscador, {"name": nombre})
+        if isinstance(respuesta, dict):
+            filas = respuesta.get("results") or respuesta.get("cases") or []
+            for fila in filas:
+                if isinstance(fila, dict) and fila.get("name") == nombre:
+                    return fila.get("id")
+        return None
+
+    def agregar_asignado(caso_id: str, perfil_id: str):
+        """Pone a una persona en el caso SIN reemplazar a las demas (D28).
+
+        Exige una herramienta declarada con 'asigna_caso'. Sin ella no se
+        intenta nada: el unico endpoint que agrega sin pisar es el aditivo, y
+        caer al de asignacion masiva reemplazaria el conjunto -- que es
+        exactamente lo que este trabajo existe para no hacer."""
+        herr = next((h for h in config.herramientas
+                     if getattr(h, "asigna_caso", False)), None)
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para asignar el caso")
+        return herramientas_http.ejecutar(herr, {"id": caso_id, "profile_id": perfil_id})
+
+    def leer_asignados(caso_id: str):
+        """Quien figura en el caso AHORA. Es lo que permite confirmar el
+        efecto: el codigo de estado no lo prueba."""
+        herr = next((h for h in config.herramientas
+                     if getattr(h, "lee_asignados", False)), None)
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para leer los asignados")
+        return herramientas_http.ejecutar(herr, {"id": caso_id})
+
+    def leer_perfiles():
+        """Los perfiles del CRM, para traducir el usuario durable al perfil de
+        alla POR ID. Nunca por nombre: dos personas pueden llamarse igual."""
+        herr = next((h for h in config.herramientas
+                     if getattr(h, "lee_perfiles", False)), None)
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para leer los perfiles")
+        return herramientas_http.ejecutar(herr, {})
+
+    def leer_caso(caso_id: str):
+        """UN caso con su 'status'. Es lo que permite cerrar sin escribir a
+        ciegas: un PATCH sobre un caso ya cerrado le corre la fecha de cierre
+        (medido, cases/tests/test_cierre_idempotente.py)."""
+        herr = next((h for h in config.herramientas
+                     if getattr(h, "lee_caso", False)), None)
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para leer el caso")
+        return herramientas_http.ejecutar(herr, {"id_caso": caso_id})
+
+    def cerrar_caso_crm(caso_id: str):
+        """Cierra el caso. Los argumentos fijos del catalogo llevan el estado
+        y la fecha; aca solo va el id."""
+        herr = next((h for h in config.herramientas
+                     if getattr(h, "cierra_caso", False)), None)
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para cerrar el caso")
+        argumentos = dict(herr.argumentos_fijos or {})
+        for campo, dias in (herr.fechas_automaticas or {}).items():
+            fecha = datetime.now() + timedelta(days=dias)
+            argumentos[campo] = fecha.strftime(herr.formato_fechas_automaticas)
+        argumentos["id_caso"] = str(caso_id)
+        return herramientas_http.ejecutar(herr, argumentos)
+
+    def _herramienta(bandera):
+        return next((h for h in config.herramientas
+                     if getattr(h, bandera, False)), None)
+
+    def leer_ticket(id_ticket: str):
+        """UN ticket con su 'estado'. Es lo que permite cerrar sin escribir a
+        ciegas: un PUT sobre uno ya cerrado le corre 'fecha_fin'."""
+        herr = _herramienta("lee_ticket")
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para leer el ticket")
+        return herramientas_http.ejecutar(herr, {"id_ticket": id_ticket})
+
+    def cerrar_ticket_isp(id_ticket: str):
+        """PUT con SOLO el estado. Los argumentos fijos del catalogo llevan el
+        codigo (4); aca solo va el id. Nunca '/respuesta/': esa via publica un
+        comentario en el ticket del cliente en cada intento."""
+        herr = _herramienta("cierra_ticket_estado")
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para cerrar el ticket")
+        argumentos = dict(herr.argumentos_fijos or {})
+        argumentos["id_ticket"] = str(id_ticket)
+        return herramientas_http.ejecutar(herr, argumentos)
+
+    def buscar_ticket_por_referencia(ref: str):
+        """Los id de los tickets cuya 'descripcion' contiene la referencia.
+
+        Barrido exhaustivo de una ventana acotada, con los DOS extremos --la
+        API exige ambos y topa en 2 meses-- y comparacion EXACTA. Nunca sin
+        ventana: el conteo sin filtro de fechas es un recorte silencioso, no
+        el total (medido: 1807 sin filtro contra 5040 a 60 dias).
+        """
+        herr = _herramienta("lista_tickets")
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para listar tickets")
+        desde = (datetime.now()
+                 - timedelta(days=efectos_externos.VENTANA_BUSQUEDA_DIAS)).strftime("%Y-%m-%d")
+        hasta = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        hallados, off = [], 0
+        while off < MAX_FILAS_BUSQUEDA:
+            respuesta = herramientas_http.ejecutar(
+                herr, {"limit": 50, "offset": off,
+                       "fecha_creacion_0": desde, "fecha_creacion_1": hasta})
+            filas = (respuesta or {}).get("results") if isinstance(respuesta, dict) else None
+            if not filas:
+                break
+            hallados += [f.get("id_ticket") for f in filas
+                         if ref in (f.get("descripcion") or "")]
+            off += 50
+        return hallados
+
+    def crear_ticket_isp(ref: str, datos: dict):
+        """Crea el ticket con la referencia embebida en la descripcion.
+
+        La referencia va al FINAL y en su propia linea: 'descripcion' es lo
+        que lee el tecnico en su celular a las 7 de la mañana, y un
+        identificador opaco en el medio del texto le estorba.
+        """
+        herr = _herramienta("crea_ticket_operativo")
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para crear el ticket")
+        argumentos = dict(herr.argumentos_fijos or {})
+        argumentos.update({k: v for k, v in (datos or {}).items()
+                           if k not in ("referencia",)})
+        base = str(argumentos.get("descripcion") or "").rstrip()
+        argumentos["descripcion"] = f"{base}\n{ref}" if base else ref
+        respuesta = herramientas_http.ejecutar(herr, argumentos)
+        if isinstance(respuesta, dict):
+            return respuesta.get("id_ticket") or respuesta.get("id")
+        return None
+
+    puede_crear_ticket = all(_herramienta(b) for b in
+                             ("crea_ticket_operativo", "lista_tickets"))
+    puede_cerrar_ticket = all(_herramienta(b) for b in
+                              ("lee_ticket", "cierra_ticket_estado"))
+    for etiqueta, puede in (("crear tickets", puede_crear_ticket),
+                            ("cerrar tickets", puede_cerrar_ticket)):
+        if not puede:
+            # EL EVENTO ES FIJO Y LA VARIABLE ES UN CAMPO. Con la f-string en el
+            # texto, `registrar()` recibe un evento distinto por cada valor: no
+            # se puede agrupar en el log, y --lo que la guarda protege de
+            # verdad-- cualquier variable que alguien interpole ahi manana sale
+            # entera, sin pasar por la redaccion de campos.
+            registrar("reconciliador", "el tenant no puede operar tickets desde la cola",
+                      tenant=tenant, operacion=etiqueta)
+
+    # Fail-closed: sin LAS TRES, el ejecutor devuelve 'permanente' para
+    # asignar_caso -- visible, y nunca 'desconocida'. Escribir sin poder
+    # comprobar despues seria afirmar un efecto que no se vio, y traducir el
+    # usuario sin el catalogo de perfiles obligaria a adivinar por nombre.
+    puede_asignar = all(
+        any(getattr(h, bandera, False) for h in config.herramientas)
+        for bandera in ("asigna_caso", "lee_asignados", "lee_perfiles"))
+    if not puede_asignar:
+        registrar("reconciliador", "el tenant no puede reflejar la asignacion en el CRM",
+                  tenant=tenant)
+
+    # Mismo criterio para cerrar: hacen falta LAS DOS. Con la de cerrar sola se
+    # podria escribir, y eso es justo lo que no se quiere -- escribir sin poder
+    # mirar antes es lo que le corre la fecha de cierre a un caso que ya estaba
+    # cerrado.
+    puede_cerrar = all(
+        any(getattr(h, bandera, False) for h in config.herramientas)
+        for bandera in ("lee_caso", "cierra_caso"))
+    if not puede_cerrar:
+        registrar("reconciliador", "el tenant no puede cerrar casos del CRM desde la cola",
+                  tenant=tenant)
+
+    return efectos_externos.ejecutor(
+        config, tenant, crear=crear, buscar_por_nombre=buscar_por_nombre,
+        agregar_asignado=agregar_asignado if puede_asignar else None,
+        leer_asignados=leer_asignados if puede_asignar else None,
+        leer_perfiles=leer_perfiles if puede_asignar else None,
+        leer_caso=leer_caso if puede_cerrar else None,
+        cerrar_caso_crm=cerrar_caso_crm if puede_cerrar else None,
+        crear_ticket_isp=crear_ticket_isp if puede_crear_ticket else None,
+        buscar_ticket_por_referencia=(buscar_ticket_por_referencia
+                                      if puede_crear_ticket else None),
+        leer_ticket=leer_ticket if puede_cerrar_ticket else None,
+        cerrar_ticket_isp=cerrar_ticket_isp if puede_cerrar_ticket else None)
+
+
+def una_vuelta(*, seco: bool = False) -> dict:
+    """Una pasada por todos los tenants. Devuelve el conteo agregado."""
+    total: dict[str, int] = {}
+    for tenant in _tenants():
+        if seco:
+            try:
+                pendientes = len(reconciliador.db.sincronizaciones_elegibles(tenant, POR_VUELTA))
+            except Exception as e:
+                registrar("reconciliador", "no se pudo leer la cola", tenant=tenant, error=e)
+                continue
+            registrar("reconciliador", "dry-run: trabajos elegibles",
+                      tenant=tenant, elegibles=pendientes)
+            total["elegibles"] = total.get("elegibles", 0) + pendientes
+            continue
+
+        # El barrido de acciones va PRIMERO y fuera del if: no toca ningun
+        # sistema externo, asi que un tenant sin ejecutor --sin catalogo, sin
+        # la herramienta del caso-- igual tiene que poder cerrar lo que quedo
+        # colgado. Dejarlo dentro del if lo condicionaria a algo que no
+        # necesita, y esas acciones quedarian 'ejecutando' para siempre.
+        for estado, n in reconciliador.barrer_acciones(tenant, POR_VUELTA).items():
+            total[estado] = total.get(estado, 0) + n
+
+        ejecutar = _ejecutor_de(tenant)
+        if ejecutar is None:
+            continue
+        for estado, n in reconciliador.correr(tenant, ejecutar, POR_VUELTA).items():
+            total[estado] = total.get(estado, 0) + n
+    return total
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    desconocidos = [a for a in argv if a not in ("--once", "--dry-run")]
+    if desconocidos:
+        registrar("reconciliador", "argumentos desconocidos: solo --once y --dry-run")
+        return 2
+    una_vez = "--once" in argv
+    seco = "--dry-run" in argv
+    if seco and not una_vez:
+        registrar("reconciliador", "--dry-run solo tiene sentido junto con --once.")
+        return 2
+
+    if una_vez:
+        if not encendido():
+            registrar("reconciliador", "RECONCILIADOR_HABILITADO=0: no se hace nada.")
+            return 0
+        registrar("reconciliador", "pasada suelta", **una_vuelta(seco=seco))
+        return 0
+
+    registrar("reconciliador", "worker iniciado")
+    # Texto fijo por estado, y no un campo: 'RECONCILIADOR_HABILITADO=0' es lo
+    # que se busca en el log del contenedor para saber si arranco apagado.
+    # Mismo criterio que el reloj general (y lo exige test_registro_sin_pii).
+    if encendido():
+        registrar("reconciliador", "RECONCILIADOR_HABILITADO=1")
+    else:
+        registrar("reconciliador", "RECONCILIADOR_HABILITADO=0")
+    if not encendido():
+        # Inerte pero vivo: un proceso que imprime y termina lo reinicia Docker
+        # una y otra vez. Mismo criterio que el reloj general.
+        registrar("reconciliador", "worker inerte: no se procesa ningun efecto. Para "
+                                   "encenderlo, RECONCILIADOR_HABILITADO=1 (redespliega).")
+        while True:
+            time.sleep(INTERVALO_SEGUNDOS)
+
+    registrar("reconciliador", "worker activo", intervalo_seg=INTERVALO_SEGUNDOS)
+    while True:
+        # Duerme PRIMERO: al desplegar, el proceso no dispara en el segundo
+        # cero contra sistemas externos que quiza siguen levantandose.
+        time.sleep(INTERVALO_SEGUNDOS)
+        try:
+            conteo = una_vuelta()
+            if conteo:
+                registrar("reconciliador", "vuelta completa", **conteo)
+        except Exception as e:
+            # Una vuelta que falla no puede matar el worker: la siguiente
+            # vuelve a intentarlo en cinco minutos.
+            registrar("reconciliador", "fallo una vuelta completa", error=e)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

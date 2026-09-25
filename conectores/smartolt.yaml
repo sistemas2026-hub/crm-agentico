@@ -1,0 +1,555 @@
+id: smartolt
+nombre: Smartolt
+descripcion: Herramientas verificadas contra smartolt.
+extraido_de: rapilink
+variables:
+- nombre: SMARTOLT_BASE_URL
+  etiqueta: URL base de la API
+  ejemplo: https://smartolt
+secretos:
+- nombre: SMARTOLT_API_KEY
+  etiqueta: Credencial de Smartolt
+areas:
+  soporte:
+    descripcion: Atiende a un colaborador interno (nunca al cliente directo), revisa
+    orientado_a: colaborador
+  soporte_tecnico_cliente:
+    descripcion: El suscriptor, ya derivado desde el agente general porque su consulta
+    orientado_a: cliente_final
+herramientas:
+- nombre: consultar_estado_ont
+  tipo: http
+  descripcion: 'Estado de la ONU del cliente en la OLT (Online/Offline) y hace cuanto cambio. PRIMER paso
+    del diagnostico de SmartOLT -- liviano (sin PII, sin latencia relevante). Si da Offline sin que consultar_senal_ont
+    alcance para explicar por que, y hace falta distinguir sin energia de falla optica, ese es un diagnostico
+    mas profundo que todavia no esta disponible como herramienta -- en ese caso sigue el protocolo de
+    preguntar por las luces del equipo.
+
+    '
+  solo_lectura: true
+  endpoint: /api/onu/get_onu_status/{sn_onu}
+  metodo: GET
+  auth_ref: SMARTOLT_API_KEY
+  auth_esquema: ''
+  auth_header: X-Token
+  inyectar_sesion:
+    sn_onu: sn_onu
+  inyectados_obligatorios:
+  - sn_onu
+  reintentar_identificador_como:
+    sn_onu: gpon_hex
+  base_url_ref: SMARTOLT_BASE_URL
+  areas:
+  - soporte
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte:
+    - onu_status
+    - last_status_change
+    soporte_tecnico_cliente:
+    - onu_status
+- nombre: consultar_senal_ont
+  tipo: http
+  descripcion: 'Nivel de senal optica de la ONU del cliente. SEGUNDO paso del diagnostico de SmartOLT,
+    junto con consultar_estado_ont -- llama a las dos juntas para un diagnostico completo. El veredicto
+    (onu_signal_1490_veredicto) ya viene calculado contra los umbrales de G-GO-04, no lo calcules tu:
+    ''aceptable'' es -8 a -25 dBm, fuera de ese rango es un problema real de senal.
+
+    '
+  solo_lectura: true
+  endpoint: /api/onu/get_onu_signal/{sn_onu}
+  metodo: GET
+  auth_ref: SMARTOLT_API_KEY
+  auth_esquema: ''
+  auth_header: X-Token
+  inyectar_sesion:
+    sn_onu: sn_onu
+  inyectados_obligatorios:
+  - sn_onu
+  reintentar_identificador_como:
+    sn_onu: gpon_hex
+  veredictos:
+    onu_signal_1490:
+    - desde: -25.0
+      hasta: -8.0
+      etiqueta: aceptable
+    - desde: null
+      hasta: -25.0001
+      etiqueta: 'fuera de rango -- senal debil: problema en el drop (conector, cable o tensores)'
+    - desde: -7.9999
+      hasta: null
+      etiqueta: 'fuera de rango -- senal muy fuerte: revisar con un tecnico'
+  base_url_ref: SMARTOLT_BASE_URL
+  areas:
+  - soporte
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte:
+    - onu_signal
+    - onu_signal_1310
+    - onu_signal_1490
+    - onu_signal_1490_veredicto
+    soporte_tecnico_cliente:
+    - onu_signal
+    - onu_signal_1490_veredicto
+- nombre: consultar_velocidad_aprovisionada
+  tipo: http
+  descripcion: 'A que velocidad esta REALMENTE configurado el equipo del cliente en la red, que no es
+    lo mismo que el plan que contrato. Devuelve el perfil de bajada y el de subida; el nombre del perfil
+    ES la velocidad (PLAN_100MB = 100 megas de bajada).
+
+    USALA en cualquier reporte de internet lento, ANTES de pedirle al cliente que corra una prueba de
+    velocidad: si el equipo quedo configurado por debajo de su plan, esa es la causa y ya la tienes --
+    hacerlo medir no agrega nada y lo hace trabajar al pepe.
+
+    LA SUBIDA ES NORMALMENTE LA MITAD DE LA BAJADA en esta red (medido sobre 22 clientes reales el 21/08/2026:
+    PLAN_100MB/PLAN_50MB, PLAN_200MB_SV/PLAN_100MB). Un par asimetrico asi NO es una falla, no lo reportes
+    como problema.
+
+    Lo que SI es un hallazgo: que el perfil de bajada no corresponda al plan contratado, o que no haya
+    ningun perfil asignado. En los dos casos, el cliente no puede alcanzar su velocidad por mas pruebas
+    que haga, y eso se resuelve del lado nuestro, no en su casa.
+
+    '
+  solo_lectura: true
+  endpoint: /api/onu/get_onu_speed_profiles/{sn_onu}
+  metodo: GET
+  auth_ref: SMARTOLT_API_KEY
+  auth_esquema: ''
+  auth_header: X-Token
+  inyectar_sesion:
+    sn_onu: sn_onu
+  inyectados_obligatorios:
+  - sn_onu
+  reintentar_identificador_como:
+    sn_onu: gpon_hex
+  base_url_ref: SMARTOLT_BASE_URL
+  areas:
+  - soporte
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte:
+    - download_speed_profile_name
+    - upload_speed_profile_name
+    soporte_tecnico_cliente:
+    - download_speed_profile_name
+    - upload_speed_profile_name
+- nombre: consultar_incidente_red
+  tipo: interno
+  detecta_incidente: true
+  descripcion: 'Correlaciona la ONU de ESTE cliente contra los incidentes activos de su OLT en SmartOLT
+    -- resuelve si su falla es un caso aislado o parte de una caida que afecta a mas gente (mismo splitter/PON).
+    El veredicto (''es_incidente_de_red'', cuantos clientes, desde cuando) ya viene calculado, no lo recalcules
+    ni lo cuestiones. IMPORTANTE: SmartOLT tarda 2 a 5 minutos en agrupar una caida recien empezada (dato
+    del proveedor) -- ''es_incidente_de_red: false'' en un reporte muy reciente significa "todavia no
+    hay nada agrupado", no "confirmado que es solo suyo". Comunicaselo asi al colaborador, no lo simplifiques
+    a un si/no tajante cuando el reporte tiene pocos minutos.
+
+    VIENEN DOS NUMEROS Y NO MIDEN LO MISMO. ''clientes_afectados'' es lo que agrupa SmartOLT con su propio
+    criterio. ''clientes_caidos_a_la_vez'' es evidencia cruda: cuantos equipos del mismo puerto se cayeron
+    en el mismo momento que el de este cliente, contado sobre los tiempos reales. Para hablarle al cliente
+    usa el SEGUNDO, y lo mismo con ''desde_por_tiempos'' en vez de ''desde'' -- en la caida del 21/08/2026
+    SmartOLT declaraba 8 afectados desde las 12:16 cuando los tiempos mostraban 7 caidos juntos desde
+    las 07:16, cinco horas antes.
+
+    Por que importa: un puerto acumula equipos apagados hace meses (clientes que se fueron y nadie dio
+    de baja). Contarlos como afectados hincha el numero y lo vuelve inutil -- en ese mismo puerto habia
+    17 caidos, y 10 llevaban entre mes y medio y ocho meses. Los que importan son los que se cayeron JUNTOS.
+
+    '
+  solo_lectura: true
+  auth_ref: SMARTOLT_API_KEY
+  auth_esquema: ''
+  auth_header: X-Token
+  inyectar_sesion:
+    sn_onu: sn_onu
+  inyectados_obligatorios:
+  - sn_onu
+  reintentar_identificador_como:
+    sn_onu: gpon_hex
+  base_url_ref: SMARTOLT_BASE_URL
+  areas:
+  - soporte
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte:
+    - es_incidente_de_red
+    - tipo_alerta
+    - clientes_afectados
+    - porcentaje_afectado
+    - desde
+    - zona
+    - caja
+    - motivo
+    - clientes_caidos_a_la_vez
+    - desde_por_tiempos
+    soporte_tecnico_cliente:
+    - es_incidente_de_red
+    - desde_por_tiempos
+    - motivo
+- nombre: consultar_estabilidad_enlace
+  tipo: interno
+  resume_estabilidad: true
+  descripcion: 'Cuantas veces se cayo y volvio el enlace de ESTE cliente en las ultimas 24 horas, y por
+    que. El veredicto (''enlace_inestable'', cuantas caidas, cual fue la causa dominante) ya viene calculado:
+    no lo recalcules ni lo cuestiones.
+
+    USALA cuando el cliente diga que le anda MAL A RATOS -- "a veces bien y a veces no", "se cae y vuelve",
+    "en las noches se pone lento". Ese es el caso que ninguna otra herramienta puede ver: todas miden
+    AHORA, y ahora suele estar andando bien. Un equipo que responde ''Online'' con señal ''Very good''
+    puede haberse caido nueve veces en el dia, y esto es lo unico que lo muestra.
+
+    NO reemplaza a diagnosticar_falla_ont: esa dice por que se cayo LA ULTIMA vez, y esa ultima causa
+    puede tapar el patron. Visto el 21/08/2026 en la ONU de prueba: la ultima causa era un simple ''re-register''
+    mientras el historial del mismo dia tenia ocho alarmas de perdida optica.
+
+    Si da ''enlace_inestable'', ya tienes evidencia suficiente: no le hagas hacer pruebas de velocidad
+    para confirmar algo que la red ya conto.
+
+    '
+  solo_lectura: true
+  auth_ref: SMARTOLT_API_KEY
+  auth_esquema: ''
+  auth_header: X-Token
+  inyectar_sesion:
+    sn_onu: sn_onu
+  inyectados_obligatorios:
+  - sn_onu
+  reintentar_identificador_como:
+    sn_onu: gpon_hex
+  base_url_ref: SMARTOLT_BASE_URL
+  areas:
+  - soporte
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte:
+    - enlace_inestable
+    - caidas_en_ventana
+    - ventana_horas
+    - causa_dominante
+    - veces_la_causa_dominante
+    - ultima_caida
+    - motivo
+    soporte_tecnico_cliente:
+    - enlace_inestable
+    - caidas_en_ventana
+    - ventana_horas
+    - causa_dominante
+    - veces_la_causa_dominante
+    - ultima_caida
+    - motivo
+- nombre: reiniciar_ont
+  tipo: http
+  descripcion: 'LLAMA A ESTA HERRAMIENTA (no sugieras el reinicio manual del router, no escales) apenas
+    consultar_senal_ont haya dado ''aceptable'' Y ping_cliente haya respondido bien, en un cliente que
+    dice no tener internet -- ese es exactamente el caso para el que existe esta herramienta, y usar el
+    reinicio manual en su lugar le hace perder tiempo al cliente para lograr lo mismo que esto hace en
+    un paso. Reinicia la ONT del cliente. Contrato del proveedor (documentado, agosto 2026): comando fire-and-forget
+    -- confirma que SE MANDO, no que la ONT ya reinicio ni que el problema se resolvio. Dile al cliente
+    que el equipo va a estar sin conexion **uno o dos minutos** (medido en vivo, 14/08/2026: volvio a
+    responder en ~73 segundos) y que revise si volvio la señal despues de ese tiempo.
+
+    SIN paso de aprobacion humana -- el codigo exige en su lugar que ya hayas corrido consultar_senal_ont
+    y ping_cliente EN ESTA conversacion y que los dos hayan dado resultado favorable (senal aceptable,
+    ping exitoso). Si no se cumple, la herramienta se rechaza sola con el motivo -- no lo intentes "igual",
+    sigue el protocolo alternativo. Es exactamente la logica del equipo electronico que a veces necesita
+    reinicio PERO solo tiene sentido si ya se descarto que el problema es de red: si la senal esta mal,
+    reiniciar no arregla nada y solo retrasa mandar un tecnico.
+
+    Maximo UNA vez por conversacion -- si el cliente insiste en que lo reinicies de nuevo, no lo repitas:
+    dile que un colaborador humano sigue el caso.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  exige_turno_propio: true
+  endpoint: /api/onu/reboot/{sn_onu}
+  metodo: POST
+  auth_ref: SMARTOLT_API_KEY
+  auth_esquema: ''
+  auth_header: X-Token
+  inyectar_sesion:
+    sn_onu: sn_onu
+  inyectados_obligatorios:
+  - sn_onu
+  reintentar_identificador_como:
+    sn_onu: gpon_hex
+  exige_previas:
+  - herramienta: consultar_senal_ont
+    campo: onu_signal_1490_veredicto
+    valor: aceptable
+  - herramienta: ping_cliente
+    campo: ping-exitoso
+    valores:
+    - 1 de 3
+    - 2 de 3
+    - 3 de 3
+  limite_por_conversacion: 1
+  verificacion:
+    espera_segundos: 120
+    max_intentos: 3
+    escalar_si_no_confirma: accion_sin_efecto
+    comprobaciones:
+    - herramienta: consultar_estado_ont
+      campo: last_status_change
+      regla: cambio
+    - herramienta: ping_cliente
+      campo: ping-exitoso
+      regla: valores
+      valores:
+      - 1 de 3
+      - 2 de 3
+      - 3 de 3
+  escalar_si_falla: sin_datos_para_diagnosticar
+  sugerir_cuando_disponible: 'El diagnostico (señal + ping) dio favorable, asi que reiniciar la ONT es
+    el siguiente paso -- no el reinicio manual del router, no escalar a un humano.
+
+    LLAMA LA HERRAMIENTA reiniciar_ont AHORA, en este mismo paso. No anuncies que la vas a usar ni le
+    prometas al cliente que vas a reiniciar: si no la llamas, el reinicio NO ocurre y le habrias mentido.
+    Primero ejecutala, y recien despues cuentale al cliente que ya la reiniciaste y que espere uno o dos
+    minutos.
+
+    Unica excepcion: si el cliente ya te dijo en este intercambio que no quiere que la reinicies.
+
+    '
+  base_url_ref: SMARTOLT_BASE_URL
+  areas:
+  - soporte
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte:
+    - status
+    - response
+    soporte_tecnico_cliente:
+    - response
+- nombre: diagnosticar_falla_ont
+  tipo: http
+  descripcion: 'Diagnostico PROFUNDO de por que la ONU esta offline. Distingue el corte de energia CONFIRMADO
+    (el equipo alcanzo a avisar) de una caida sin aviso -- que puede ser la fibra, pero tambien un equipo
+    apagado o desenchufado de golpe: esos dos se ven identicos desde la OLT y solo los separa preguntarle
+    al cliente. SOLO llama a esta herramienta como SEGUNDO paso, y solo cuando consultar_estado_ont ya
+    dio Offline y consultar_senal_ont no alcanzo para explicar por que (offline no tiene lectura de senal
+    util) -- nunca la llames primero ni la llames si el equipo esta Online, ahi no aporta nada mas que
+    las dos herramientas livianas. Tarda ~10 segundos (mucho mas que las otras herramientas de SmartOLT)
+    -- es el costo de tener la causa real en vez de adivinar, dile al cliente que estas revisando algo
+    mas a fondo si la conversacion se alarga.
+
+    ''ONU details.Last down cause_interpretado'' ya viene calculado: no interpretes tu el texto crudo
+    en ingles (''dying-gasp'', ''ONT LOSi/LOBi alarm''), usa la version interpretada. Si no viene el campo
+    ''_interpretado'' es porque la causa no esta en el mapeo conocido -- en ese caso no inventes que significa,
+    di que no se pudo determinar la causa exacta y seguí con el protocolo (luces del equipo, o escalar).
+
+    '
+  solo_lectura: true
+  endpoint: /api/onu/get_onu_full_status_info/{sn_onu}
+  metodo: GET
+  auth_ref: SMARTOLT_API_KEY
+  auth_esquema: ''
+  auth_header: X-Token
+  extraer_de: full_status_json
+  inyectar_sesion:
+    sn_onu: sn_onu
+  inyectados_obligatorios:
+  - sn_onu
+  reintentar_identificador_como:
+    sn_onu: gpon_hex
+  mapeos:
+    ONU details.Last down cause:
+      dying-gasp: sin energia electrica en el domicilio (corte de luz o el equipo se desenchufo)
+      ONT LOSi/LOBi alarm: 'sin señal optica: puede ser la fibra (cortada o falla en la caja NAP) O el
+        equipo apagado/desenchufado -- desde la OLT los dos se ven identicos, hay que preguntarle al cliente
+        por la corriente para distinguirlos'
+      ONT LOFi alarm: 'sin señal optica: puede ser la fibra (cortada o falla en la caja NAP) O el equipo
+        apagado/desenchufado -- desde la OLT los dos se ven identicos, hay que preguntarle al cliente
+        por la corriente para distinguirlos'
+      re-register: 'el equipo se volvio a registrar en la red hace poco (reconexion reciente). Esto NO
+        dice por que se cayo antes: si el cliente sigue sin servicio, hay que tratarlo como una caida
+        sin causa confirmada'
+      ONU is currently online: el equipo esta en linea, no hay una caida que explicar
+  base_url_ref: SMARTOLT_BASE_URL
+  areas:
+  - soporte
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte:
+    - ONU details.Last down cause
+    - ONU details.Last down cause_interpretado
+    - ONU details.Run state
+    - ONU details.Last down time
+    - Optical status.Rx optical power(dBm)
+    soporte_tecnico_cliente:
+    - ONU details.Last down cause_interpretado
+    - ONU WAN Interfaces.MAC address
+- nombre: cambiar_tipo_onu
+  tipo: http
+  multipart: true
+  descripcion: 'Corrige el TIPO con que la ONU quedo registrada en SmartOLT, para que exponga el puerto
+    de television. No cambia nada fisico en la casa del cliente: cambia como esta clasificado su equipo.
+
+    SOLO se usa cuando consultar_estado_catv devolvio ''Not supported by ONU-Type'' Y el cliente confirmo
+    que tiene UN SOLO equipo. Si tiene dos, su television va por un decodificador aparte y el puerto de
+    la ONU no interviene -- cambiar el tipo ahi no arregla nada.
+
+    Despues de llamarla, vuelve a leer consultar_estado_catv: tiene que dejar de decir ''Not supported''.
+    Recien entonces activar_catv.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  exige_turno_propio: true
+  limite_por_conversacion: 1
+  exige_previas:
+  - herramienta: consultar_estado_catv
+    campo: catv
+    contiene: Not supported
+  endpoint: /api/onu/change_onu_type/{sn_onu}
+  metodo: POST
+  auth_ref: SMARTOLT_API_KEY
+  auth_esquema: ''
+  auth_header: X-Token
+  inyectar_sesion:
+    sn_onu: sn_onu
+  inyectados_obligatorios:
+  - sn_onu
+  argumentos_fijos:
+    onu_type: CDATA-CATV
+  base_url_ref: SMARTOLT_BASE_URL
+  areas:
+  - soporte
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte:
+    - response
+    - status
+    soporte_tecnico_cliente:
+    - response
+    - status
+- nombre: activar_catv
+  tipo: http
+  descripcion: 'Enciende el servicio de television en el equipo del cliente. Se usa en UN solo caso: consultar_estado_catv
+    dio ''Disabled'' y su plan SI incluye TV. Ahi la television esta apagada en el equipo por error, y
+    encenderla resuelve el caso entero sin visita ni tecnico.
+
+    NO la llames en ningun otro caso. Si el plan no incluye TV, el servicio esta apagado A PROPOSITO y
+    encenderlo seria darle algo que no contrato -- medido: de cada dos clientes con la TV apagada, uno
+    la tiene apagada con razon. El motor ademas lo rechaza solo si falta alguna de las dos condiciones,
+    asi que no lo intentes "por si acaso": sigue el protocolo normal.
+
+    Despues de encenderla, dile al cliente que ya quedo activada y preguntale si le volvio la señal. Si
+    todavia no la ve, el equipo necesita volver a buscar los canales: pedile los pasos a
+    consultar_guia_sintonizacion -- son distintos segun la marca del televisor y segun use TDT, y por
+    eso no van escritos aca.
+
+    Maximo UNA vez por conversacion.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  endpoint: /api/onu/enable_catv/{sn_onu}
+  metodo: POST
+  auth_ref: SMARTOLT_API_KEY
+  auth_esquema: ''
+  auth_header: X-Token
+  inyectar_sesion:
+    sn_onu: sn_onu
+  inyectados_obligatorios:
+  - sn_onu
+  reintentar_identificador_como:
+    sn_onu: gpon_hex
+  limite_por_conversacion: 1
+  exige_previas:
+  - herramienta: consultar_plan_tv
+    campo: descripcion
+    contiene: TV
+  - herramienta: consultar_estado_catv
+    campo: catv
+    valor: Disabled
+  base_url_ref: SMARTOLT_BASE_URL
+  areas:
+  - soporte
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte:
+    - response
+    soporte_tecnico_cliente:
+    - response
+- nombre: consultar_dispositivos_conectados
+  tipo: http
+  descripcion: "Los equipos que estan conectados AHORA al router del cliente, via TR-069. Es lo unico\
+    \ que deja ver del lado de adentro de la casa: hasta aca el diagnostico llega a la ONT y despues hay\
+    \ que preguntar.\nCuando el cliente dice que no tiene internet pero la ONT responde y la señal esta\
+    \ bien, esto separa los tres casos que antes se distinguian preguntando:\n- Varios equipos activos,\
+    \ de WiFi Y de cable: el servicio llega. Falla\n  UN dispositivo puntual, no la conexion.\n- Solo\
+    \ equipos de cable activos ('InterfaceType' Ethernet) y ninguno de\n  WiFi ('802.11'): el problema\
+    \ es el WiFi -- banda, clave o alcance.\n- Lista vacia con la ONT en linea: no hay NADA conectado.\
+    \ O el router\n  del cliente esta apagado, o el WiFi entero se cayo.\n\n'HostName' trae el nombre\
+    \ real del equipo (\"DESKTOP-C8V2688\", el celular de alguien). Sirve para hablarle concreto -- \"\
+    veo tu computador conectado pero ningun celular\" -- en vez de interrogarlo.\nOJO CON EL ERROR: si\
+    \ responde 'The ONU is not responding to TR-069 ACS requests', eso NO es \"no hay equipos conectados\"\
+    , es \"no pude mirar\". Medido el 19/08/2026: de 5 ONUs con TR-069 habilitado, 2 contestaron con datos,\
+    \ 1 con lista vacia y 2 fallaron asi. Tratar un fallo como lista vacia le diria a alguien que no tiene\
+    \ nada conectado cuando en realidad no se pudo ver.\nNo la llames si la ONT esta caida o la señal\
+    \ esta fuera de rango: el problema esta antes y los equipos de adentro no importan todavia.\n"
+  solo_lectura: true
+  endpoint: /api/onu/get_onu_router_hosts/{sn_onu}
+  metodo: GET
+  auth_ref: SMARTOLT_API_KEY
+  auth_esquema: ''
+  auth_header: X-Token
+  inyectar_sesion:
+    sn_onu: sn_onu
+  inyectados_obligatorios:
+  - sn_onu
+  extraer_de: response.hostlist
+  base_url_ref: SMARTOLT_BASE_URL
+  areas:
+  - soporte
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte:
+    - HostName
+    - Active
+    - InterfaceType
+    soporte_tecnico_cliente:
+    - HostName
+    - Active
+    - InterfaceType
+- nombre: consultar_estado_catv
+  tipo: http
+  descripcion: "Si el servicio de TV esta habilitado en el equipo del cliente, segun la OLT. Para una\
+    \ falla de TV es el UNICO dato duro que tenemos de nuestro lado -- todo lo demas del protocolo (cableado,\
+    \ entrada, sintonizacion) depende de lo que el cliente reporte.\nLLAMA A ESTA HERRAMIENTA APENAS el\
+    \ cliente reporta una falla de TV y ya confirmaste que su plan la incluye, ANTES de arrancar con la\
+    \ lista de preguntas. El manual (5.9) pide verificar en SmartOLT como PARTE del procedimiento, no\
+    \ despues de agotar al cliente.\nComo leer 'catv': - 'Enabled'  = el servicio esta habilitado en el\
+    \ equipo. De nuestro\n               lado sale bien, asi que el problema esta del lado del\n     \
+    \          cliente: sigue el protocolo (cableado, entrada del TV,\n               sintonizacion).\n\
+    - 'Disabled' = el servicio de TV esta APAGADO en el equipo. ESO es la\n               falla, ya la\
+    \ encontraste, y la resuelves tu: llama a\n               activar_catv. No derives a un humano por\
+    \ esto ni le\n               pidas que sintonice antes de encenderlo.\n- 'Not supported by ONU-Type'\
+    \ = el modelo de equipo que tiene no\n               soporta television. No es algo que el cliente\
+    \ pueda\n               resolver ni que se arregle sintonizando: pasa el caso a\n               un\
+    \ colaborador humano, porque si su plan incluye TV hay\n               que cambiarle el equipo.\n"
+  solo_lectura: true
+  escalar_si_falla: sin_datos_para_diagnosticar
+  endpoint: /api/onu/get_onu_details/{sn_onu}
+  metodo: GET
+  auth_ref: SMARTOLT_API_KEY
+  auth_esquema: ''
+  auth_header: X-Token
+  extraer_de: onu_details
+  inyectar_sesion:
+    sn_onu: sn_onu
+  inyectados_obligatorios:
+  - sn_onu
+  reintentar_identificador_como:
+    sn_onu: gpon_hex
+  base_url_ref: SMARTOLT_BASE_URL
+  areas:
+  - soporte
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte:
+    - catv
+    soporte_tecnico_cliente:
+    - catv

@@ -1,0 +1,387 @@
+- generic [active] [ref=f37e1]:
+  - banner [ref=f37e2]:
+    - generic [ref=f37e3]:
+      - generic [ref=f37e4]:
+        - img "Dexter Operations Logo" [ref=f37e5]
+        - generic [ref=f37e6]: Dexter Ops
+        - navigation [ref=f37e7]:
+          - link "NOC Console" [ref=f37e8] [cursor=pointer]:
+            - /url: "#"
+          - link "Telemetry" [ref=f37e9] [cursor=pointer]:
+            - /url: "#"
+          - link "Incidents" [ref=f37e10] [cursor=pointer]:
+            - /url: "#"
+        - generic [ref=f37e11]:
+          - generic [ref=f37e12]: "WA API: Normal · 99.98%"
+          - generic [ref=f37e15]: "Radius/OLT: Active"
+      - generic [ref=f37e18]:
+        - generic [ref=f37e19]:
+          - generic [ref=f37e20]: search
+          - 'textbox "Search customer phone, DNI, ONT MAC, Ticket #..." [ref=f37e21]'
+          - generic [ref=f37e22]: ⌘K
+        - generic [ref=f37e23]:
+          - generic [ref=f37e24]: "Channel: WhatsApp"
+          - generic [ref=f37e25]: Prod
+      - generic [ref=f37e26]:
+        - generic [ref=f37e27]:
+          - generic [ref=f37e28]: Ana Pérez
+          - generic [ref=f37e31]: Tier 2 Support · 08:00-16:00
+        - button "notifications 3" [ref=f37e32] [cursor=pointer]:
+          - generic [ref=f37e33]: notifications
+          - generic [ref=f37e34]: "3"
+        - button "settings" [ref=f37e35] [cursor=pointer]
+        - button "terminal" [ref=f37e37] [cursor=pointer]
+        - generic [ref=f37e39]: person
+  - main [ref=f37e41]:
+    - generic [ref=f37e43]:
+      - complementary [ref=f37e44]:
+        - generic [ref=f37e45]:
+          - generic [ref=f37e46]:
+            - generic [ref=f37e47]: Conversations
+            - generic [ref=f37e52]:
+              - button "sync" [ref=f37e53] [cursor=pointer]
+              - button "density_small" [ref=f37e55] [cursor=pointer]
+          - generic [ref=f37e57]:
+            - generic [ref=f37e58]:
+              - generic [ref=f37e59]: Needs Attn
+              - generic [ref=f37e60]: 4 active
+            - generic [ref=f37e61]:
+              - generic [ref=f37e62]: In Progress
+              - generic [ref=f37e63]: 11 open
+            - generic [ref=f37e64]:
+              - generic [ref=f37e65]: Resolved
+              - generic [ref=f37e66]: 86 today
+        - generic [ref=f37e67]:
+          - button "Needs Attention 4" [ref=f37e68] [cursor=pointer]:
+            - generic [ref=f37e69]: Needs Attention
+            - generic [ref=f37e70]: "4"
+          - button "In Progress 11" [ref=f37e71] [cursor=pointer]:
+            - generic [ref=f37e72]: In Progress
+            - generic [ref=f37e73]: "11"
+          - button "Resolved" [ref=f37e74] [cursor=pointer]
+          - button "All" [ref=f37e75] [cursor=pointer]
+        - generic [ref=f37e76]:
+          - generic [ref=f37e77]:
+            - generic [ref=f37e78]: filter_list
+            - textbox "Filter by name, phone, issue..." [ref=f37e79]
+            - generic [ref=f37e80]: ESC
+          - generic [ref=f37e81]:
+            - generic [ref=f37e82]:
+              - button "WhatsApp expand_more" [ref=f37e83] [cursor=pointer]:
+                - generic [ref=f37e84]: WhatsApp
+                - generic [ref=f37e85]: expand_more
+              - button "Escalations Only" [ref=f37e86] [cursor=pointer]
+            - 'button "Sort: Recommended sort" [ref=f37e90] [cursor=pointer]':
+              - generic [ref=f37e91]: "Sort: Recommended"
+              - generic [ref=f37e92]: sort
+        - generic [ref=f37e93]:
+          - generic [ref=f37e94] [cursor=pointer]:
+            - generic [ref=f37e95]:
+              - generic [ref=f37e96]:
+                - generic [ref=f37e97]: Carlos Pérez
+                - generic [ref=f37e98]: DNI 28.491.022
+              - generic [ref=f37e99]: "Wait: 4m"
+            - generic [ref=f37e101]:
+              - generic [ref=f37e102]: "[UNASSIGNED ESCALATION]"
+              - generic [ref=f37e103]: Fibra 300 Mbps · Belgrano
+            - paragraph [ref=f37e104]: "\"Internet service still offline after restarting ONT\""
+            - generic [ref=f37e105]:
+              - generic [ref=f37e106]:
+                - generic [ref=f37e107]: WhatsApp
+                - generic [ref=f37e108]: ·
+                - generic [ref=f37e109]: Customer wrote ×2
+              - generic [ref=f37e110]: ONT LOS
+          - generic [ref=f37e111] [cursor=pointer]:
+            - generic [ref=f37e112]:
+              - generic [ref=f37e113]:
+                - generic [ref=f37e114]: María Fernández
+                - generic [ref=f37e115]: "#CX-7718"
+              - generic [ref=f37e116]: "Wait: 12m"
+            - generic [ref=f37e117]:
+              - generic [ref=f37e118]: "[CUSTOMER REPLIED]"
+              - generic [ref=f37e119]: "Assigned: Ana P."
+            - paragraph [ref=f37e120]: "\"No, todavía sigo sin internet ni luz de PON fija...\""
+            - generic [ref=f37e121]:
+              - generic [ref=f37e122]: WhatsApp · Plan 500M
+              - generic [ref=f37e123]: 10:06 AM
+          - generic [ref=f37e124] [cursor=pointer]:
+            - generic [ref=f37e125]:
+              - generic [ref=f37e126]:
+                - generic [ref=f37e127]: Roberto Gómez
+                - generic [ref=f37e128]: DNI 14.882.110
+              - generic [ref=f37e129]: "Wait: 28m"
+            - generic [ref=f37e130]:
+              - generic [ref=f37e131]: "[HUMAN ACTION REQ]"
+              - generic [ref=f37e132]: "Assigned: Luis V."
+            - paragraph [ref=f37e133]: "\"Envié el comprobante de transferencia bancaria para reactivación\""
+            - generic [ref=f37e134]:
+              - generic [ref=f37e135]: Billing Desk · WhatsApp
+              - generic [ref=f37e136]: 09:50 AM
+          - generic [ref=f37e137] [cursor=pointer]:
+            - generic [ref=f37e138]:
+              - generic [ref=f37e139]:
+                - generic [ref=f37e140]: Javier Silva
+                - generic [ref=f37e141]: "#CX-4921"
+              - generic [ref=f37e142]: Live AI
+            - generic [ref=f37e144]:
+              - generic [ref=f37e145]: "[AI HANDLING]"
+              - generic [ref=f37e146]: Step 3/5 Remote Loop
+            - paragraph [ref=f37e147]: "\"Dexter AI ejecutando diagnóstico de atenuación óptica...\""
+            - generic [ref=f37e148]:
+              - generic [ref=f37e149]: WhatsApp · Auto-Triage
+              - generic [ref=f37e150]: 10:17 AM
+          - generic [ref=f37e151] [cursor=pointer]:
+            - generic [ref=f37e152]:
+              - generic [ref=f37e153]:
+                - generic [ref=f37e154]: Tech Services S.A.
+                - generic [ref=f37e155]: CUIT 30-7128-4
+              - generic [ref=f37e156]: 1h 14m
+            - generic [ref=f37e157]:
+              - generic [ref=f37e158]: "[LEGACY · REVIEW]"
+              - generic [ref=f37e159]: TK-8819
+            - paragraph [ref=f37e160]: "\"Migration audit pending - ticket TK-8819 OLT cutover\""
+            - generic [ref=f37e161]:
+              - generic [ref=f37e162]: Corporate Trunk · Tier-2
+              - generic [ref=f37e163]: 09:04 AM
+        - generic [ref=f37e164]:
+          - generic [ref=f37e167]:
+            - text: "NOC Inbound SLA:"
+            - strong [ref=f37e168]: 94.2%
+          - generic [ref=f37e169]: "Max Wait: 28m"
+      - generic [ref=f37e170]:
+        - generic [ref=f37e171]:
+          - generic [ref=f37e172]:
+            - generic [ref=f37e173]:
+              - generic [ref=f37e174]: CP
+              - generic [ref=f37e175]:
+                - generic [ref=f37e176]:
+                  - generic [ref=f37e177]: Carlos Pérez
+                  - generic [ref=f37e178]: +54 9 11 4820-9912
+                  - generic "WhatsApp Business Verified" [ref=f37e179]: verified
+                - generic [ref=f37e180]:
+                  - generic [ref=f37e181]: DNI 28.491.022
+                  - generic [ref=f37e182]: ·
+                  - generic [ref=f37e183]:
+                    - text: "Account:"
+                    - strong [ref=f37e184]: "#CX-90214"
+                  - generic [ref=f37e185]: ·
+                  - generic [ref=f37e186]: Residential GPON 300 Mbps
+            - generic [ref=f37e187]:
+              - button "pan_tool Take Conversation" [ref=f37e188] [cursor=pointer]:
+                - generic [ref=f37e189]: pan_tool
+                - generic [ref=f37e190]: Take Conversation
+              - button "smart_toy Return to AI" [ref=f37e191] [cursor=pointer]:
+                - generic [ref=f37e192]: smart_toy
+                - generic [ref=f37e193]: Return to AI
+              - button "more_vert" [ref=f37e194] [cursor=pointer]
+          - generic [ref=f37e196]:
+            - generic [ref=f37e197]:
+              - generic [ref=f37e201]: "[HUMAN CONTROL NEEDED]"
+              - generic [ref=f37e202]: · Escalated 4 minutes ago via Dexter AI Rule Engine
+            - generic [ref=f37e203]:
+              - generic [ref=f37e204]:
+                - text: "SLA Target Response:"
+                - strong [ref=f37e205]: < 5m
+              - generic [ref=f37e206]: T-Minus 00:54
+        - generic [ref=f37e208]:
+          - generic [ref=f37e209]:
+            - generic [ref=f37e210]:
+              - generic [ref=f37e211]: psychology
+              - generic [ref=f37e212]: "Why Dexter Escalated:"
+            - generic [ref=f37e213]:
+              - generic [ref=f37e214]: "AI Conf: 32% (Uncertain)"
+              - generic [ref=f37e215]: "#DIAG-8821"
+          - paragraph [ref=f37e216]: Loss of Optical Signal (LOS alarm triggered on Huawei MA5800 OLT). Automated PON interface restart did not restore continuity. Customer confirms physical LOS LED flashing red. Fiber drop attenuation exceeds operational threshold (-32.4 dBm vs. -27.0 dBm cut-off).
+          - generic [ref=f37e217]:
+            - generic [ref=f37e218]: "Trigger: Hard Optical Failure"
+            - generic [ref=f37e219]: "OLT Alarm ID: ALM-GPON-0922"
+            - generic [ref=f37e220]: "Radius Session: Dropped (Code 0x41)"
+        - generic [ref=f37e221]:
+          - generic [ref=f37e222]: Today · 10:14 AM
+          - generic [ref=f37e223]:
+            - generic [ref=f37e224]: CP
+            - generic [ref=f37e225]:
+              - generic [ref=f37e226]: Hola, desde las 9:30 se cortó internet y la luz roja de LOS titila en la caja de fibra.
+              - generic [ref=f37e227]:
+                - generic [ref=f37e228]: 10:14 AM
+                - generic [ref=f37e229]: ·
+                - generic [ref=f37e230]: Delivered to WhatsApp
+          - generic [ref=f37e231]:
+            - generic [ref=f37e232]: smart_toy
+            - generic [ref=f37e234]:
+              - generic [ref=f37e235]:
+                - generic [ref=f37e236]:
+                  - generic [ref=f37e237]: Dexter AI · Diagnostic Engine
+                  - generic [ref=f37e239]: AUTONOMOUS
+                - text: Hola Carlos, detectamos una anomalía en tu enlace de fibra óptica. Estoy realizando un test de atenuación remota y consulta al puerto PON en tu ONT...
+              - generic [ref=f37e240]:
+                - button "thumb_up Helpful AI" [ref=f37e241] [cursor=pointer]:
+                  - generic [ref=f37e242]: thumb_up
+                  - text: Helpful AI
+                - generic [ref=f37e243]: ·
+                - generic [ref=f37e244]: 10:15 AM
+          - generic [ref=f37e245]:
+            - generic [ref=f37e246]: CP
+            - generic [ref=f37e247]:
+              - generic [ref=f37e248]: Ya reinicié el módem desenchufando 30 segundos y sigue igual en rojo. Trabajo remoto y necesito saber cuánto demora la solución por favor.
+              - generic [ref=f37e249]:
+                - generic [ref=f37e250]: 10:17 AM
+                - generic [ref=f37e251]: ·
+                - generic [ref=f37e252]: Read
+          - generic [ref=f37e253]:
+            - generic [ref=f37e254]: smart_toy
+            - generic [ref=f37e256]:
+              - generic [ref=f37e257]:
+                - generic [ref=f37e258]:
+                  - generic [ref=f37e259]: Dexter AI · Diagnostic Engine
+                  - generic [ref=f37e260]: ESCALATING
+                - text: "El test confirmó potencia óptica fuera de rango (RX: -32.4 dBm, límite operativo: -27.0 dBm). Escalando inmediatamente con nuestro equipo de soporte humano para gestión técnica especializada."
+              - generic [ref=f37e261]: 10:18 AM
+          - generic [ref=f37e265]:
+            - generic [ref=f37e266]: notification_important
+            - generic [ref=f37e267]: "10:18 AM: Dexter AI escalated conversation to Human Queue (Reason: Optical signal failure -32.4 dBm)"
+          - generic [ref=f37e269]:
+            - generic [ref=f37e270]: CP
+            - generic [ref=f37e271]:
+              - generic [ref=f37e272]: Internet service still offline after restarting ONT. Hay alguien conectado?
+              - generic [ref=f37e273]:
+                - generic [ref=f37e274]: 10:20 AM (4m ago)
+                - generic [ref=f37e275]: ·
+                - generic [ref=f37e276]: Read by Dexter
+        - generic [ref=f37e277]:
+          - generic [ref=f37e278]:
+            - generic [ref=f37e279]:
+              - generic [ref=f37e280]: lock_clock
+              - generic [ref=f37e281]:
+                - text: "Thread Unassigned: Click"
+                - strong [ref=f37e282]: Take Conversation
+                - text: above to respond as Ana Pérez.
+            - generic [ref=f37e283]:
+              - button "Quick Templates (HSM)" [ref=f37e284] [cursor=pointer]
+              - button "+ Internal Note" [ref=f37e285] [cursor=pointer]
+          - generic [ref=f37e286]:
+            - 'textbox "Take conversation or type internal team note (prepend #note for private ISP staff note)..." [ref=f37e287]'
+            - generic [ref=f37e288]:
+              - generic [ref=f37e289]:
+                - button "attach_file" [ref=f37e290] [cursor=pointer]
+                - button "image" [ref=f37e292] [cursor=pointer]
+                - button "mic" [ref=f37e294] [cursor=pointer]
+                - button "bolt" [ref=f37e296] [cursor=pointer]
+              - generic [ref=f37e298]:
+                - generic [ref=f37e299]: Press ⌘ + Enter to Send
+                - button "Send send" [ref=f37e300] [cursor=pointer]:
+                  - generic [ref=f37e301]: Send
+                  - generic [ref=f37e302]: send
+      - complementary [ref=f37e303]:
+        - generic [ref=f37e304]:
+          - button "Customer" [ref=f37e305] [cursor=pointer]
+          - button "Network (NOC)" [ref=f37e306] [cursor=pointer]
+          - 'button "Case #8821" [ref=f37e307] [cursor=pointer]'
+          - button "Activity" [ref=f37e308] [cursor=pointer]
+          - button "Tools" [ref=f37e309] [cursor=pointer]
+        - generic [ref=f37e310]:
+          - generic [ref=f37e311]:
+            - generic [ref=f37e316]:
+              - generic [ref=f37e317]: LOS ALARM ACTIVE
+              - generic [ref=f37e318]: Loss of Optical Continuity
+            - generic [ref=f37e319]: OFFLINE
+          - generic [ref=f37e320]:
+            - generic [ref=f37e321]:
+              - generic [ref=f37e322]:
+                - generic [ref=f37e323]: router
+                - text: ONT / ONU Subscriber Unit
+              - generic [ref=f37e324]: GPON
+            - generic [ref=f37e325]:
+              - generic [ref=f37e326]:
+                - generic [ref=f37e327]: "Model:"
+                - generic [ref=f37e328]: Huawei EchoLife HG8245W5
+              - generic [ref=f37e329]:
+                - generic [ref=f37e330]: "GPON Serial:"
+                - generic [ref=f37e331]: 4857544321A890
+              - generic [ref=f37e332]:
+                - generic [ref=f37e333]: "MAC Address:"
+                - generic [ref=f37e334]: 48:57:02:8A:F1:C0
+              - generic [ref=f37e335]:
+                - generic [ref=f37e336]: "Firmware:"
+                - generic [ref=f37e337]: V5R019C20S125
+              - generic [ref=f37e338]:
+                - generic [ref=f37e339]: "Last Heartbeat:"
+                - generic [ref=f37e340]: 10:14:12 (6m ago)
+          - generic [ref=f37e341]:
+            - generic [ref=f37e342]:
+              - generic [ref=f37e343]:
+                - generic [ref=f37e344]: cable
+                - text: Optical Power Telemetry
+              - generic [ref=f37e345]: Polled 10:15
+            - generic [ref=f37e346]:
+              - generic [ref=f37e347]:
+                - generic [ref=f37e348]: "Rx Optical Power:"
+                - generic [ref=f37e349]: "-32.4 dBm"
+              - generic [ref=f37e350]:
+                - generic "Optimal Range (-14 to -24 dBm)" [ref=f37e351]
+                - generic "Marginal Range (-25 to -27 dBm)" [ref=f37e352]
+                - generic "Critical LOS Range (< -27 dBm)" [ref=f37e353]
+              - generic [ref=f37e354]:
+                - generic [ref=f37e355]: "-14 dBm"
+                - generic [ref=f37e356]: "-24 (Normal)"
+                - generic [ref=f37e357]: "-27.0 (Threshold)"
+                - generic [ref=f37e358]: "-32.4 (Actual)"
+            - generic [ref=f37e359]:
+              - generic [ref=f37e360]:
+                - generic [ref=f37e361]: Tx Power (OLT)
+                - text: +2.15 dBm
+              - generic [ref=f37e362]:
+                - generic [ref=f37e363]: ONT Laser Temp
+                - text: 44.2 °C (Normal)
+              - generic [ref=f37e364]:
+                - generic [ref=f37e365]: Supply Voltage
+                - text: 3.28 V
+              - generic [ref=f37e366]:
+                - generic [ref=f37e367]: Bias Current
+                - text: 14.8 mA
+          - generic [ref=f37e368]:
+            - generic [ref=f37e369]:
+              - generic [ref=f37e370]:
+                - generic [ref=f37e371]: lan
+                - text: Physical Plant Topology
+              - generic [ref=f37e372]: NODE-BA-04
+            - generic [ref=f37e373]:
+              - generic [ref=f37e374]:
+                - generic [ref=f37e375]: "OLT Chassis:"
+                - generic [ref=f37e376]: OLT-CENTRAL-04 (Slot 2/Port 6)
+              - generic [ref=f37e377]:
+                - generic [ref=f37e378]: "PON Port ID:"
+                - generic [ref=f37e379]: PON-02-06-03
+              - generic [ref=f37e380]:
+                - generic [ref=f37e381]: "Primary Splitter:"
+                - generic [ref=f37e382]: 1:64 Balanced
+              - generic [ref=f37e383]:
+                - generic [ref=f37e384]: "CTO Terminal:"
+                - generic [ref=f37e385]: CTO-BELGRANO-114 (Port 7)
+              - generic [ref=f37e386]:
+                - generic [ref=f37e387]: "Physical Address:"
+                - generic [ref=f37e388]: Av. Cabildo 2410, CABA
+            - generic [ref=f37e390]:
+              - generic [ref=f37e391]: check_circle
+              - generic [ref=f37e392]:
+                - strong [ref=f37e393]: "Isolated Drop Failure:"
+                - text: 0 other clients affected on CTO-114.
+          - generic [ref=f37e394]:
+            - generic [ref=f37e395]: Diagnostic & Field Controls
+            - generic [ref=f37e396]:
+              - button "network_ping Ping ONT" [ref=f37e397] [cursor=pointer]:
+                - generic [ref=f37e398]: network_ping
+                - generic [ref=f37e399]: Ping ONT
+              - button "restart_alt Reboot ONT" [ref=f37e400] [cursor=pointer]:
+                - generic [ref=f37e401]: restart_alt
+                - generic [ref=f37e402]: Reboot ONT
+            - button "engineering Dispatch Field Tech to CTO" [ref=f37e403] [cursor=pointer]:
+              - generic [ref=f37e404]: engineering
+              - generic [ref=f37e405]: Dispatch Field Tech to CTO
+        - generic [ref=f37e406]:
+          - generic [ref=f37e407]: "SNMP Poller: OK (Interval: 15s)"
+          - generic [ref=f37e408]: BGP AS65100
+  - contentinfo [ref=f37e409]:
+    - generic [ref=f37e410]:
+      - generic [ref=f37e411]: Dexter Operations v4.2.1-isp · High Density NOC Engine
+      - generic [ref=f37e412]: "Connected Node: US-EAST-OLT-CLUSTER-09 · Latency: 12ms"

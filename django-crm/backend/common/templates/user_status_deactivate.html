@@ -1,0 +1,15 @@
+{% extends 'root_email_template_new.html' %}
+
+{% block preheader %}Your BottleCRM account has been deactivated{% endblock preheader %}
+
+{% block heading %}Account Deactivated{% endblock heading %}
+
+{% block content_body %}
+<p style="margin:0 0 8px 0;">Your account has been deactivated by {{ status_changed_user }}. You'll receive an email if your account is reactivated.</p>
+{% endblock content_body %}
+
+{% block extra_content %}
+<p style="font-size:13px;color:#757575;margin:0;">
+  Please contact your admin if you have any questions.
+</p>
+{% endblock extra_content %}
