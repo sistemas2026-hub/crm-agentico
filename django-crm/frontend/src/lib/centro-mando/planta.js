@@ -325,3 +325,178 @@ export function cambios(antes, ahora) {
   }
   return salida;
 }
+
+/* -------------------------------------------------------------- LAS AREAS
+   Un color por area. NO es un diccionario con las areas de Rapilink: cuales
+   existen lo decide cada empresa (CLAUDE.md §3.3), asi que el color se
+   DERIVA del nombre. Un area nueva queda pintada sin tocar codigo, y siempre
+   del mismo color entre recargas porque la semilla es el nombre. */
+export const COLORES_AREA = [
+  '#9BB8E0', '#E0A0A8', '#C89BD4', '#9FB0CC', '#DDB36F',
+  '#8FC7B0', '#D9A78C', '#A8B6D9'
+];
+
+/**
+ * El color de un area.
+ *
+ * Con la lista de areas presentes reparte por POSICION, y asi dos areas
+ * nunca comparten color: el reparto por hash del nombre daba colisiones
+ * --administracion, ventas y atencion al cliente salieron los tres del mismo
+ * gris azulado-- y entonces el color deja de agrupar, que es para lo unico
+ * que esta. Sin esa lista cae al hash, que al menos es estable.
+ *
+ * @param {string} area
+ * @param {string[]} [areas] las areas presentes, en orden estable
+ */
+export function colorDeArea(area, areas) {
+  const k = areas ? areas.indexOf(area) : -1;
+  if (k >= 0) return COLORES_AREA[k % COLORES_AREA.length];
+  return tomaDe(semillaDe(String(area || '(sin área)')), 0, COLORES_AREA);
+}
+
+/**
+ * SALAS POR AREA: una oficina con paredes por cada area, y dentro los
+ * escritorios de sus agentes.
+ *
+ * Es el reemplazo de la rejilla plana de puestos sueltos. La diferencia que
+ * importa no es estetica: con los puestos sueltos, dos vecinos de la misma
+ * area se veian igual que dos de areas distintas, asi que el agrupamiento no
+ * se leia. Una pared si se lee.
+ *
+ * LO QUE COSTO
+ *  - Cada sala mide lo que SU contenido, no lo que la mas poblada: con un
+ *    tamaño unico, tres de seis salas quedaban medio vacias.
+ *  - La sala principal (la recepcion) queda FUERA del calculo del tamaño:
+ *    lleva un puesto por definicion y estirar todas las demas por ella es al
+ *    reves de lo que hace falta.
+ *  - El conjunto se corre al origen (`dx`/`dy`): proyectadas, las salas de
+ *    abajo a la izquierda dan coordenadas negativas y la planta salia
+ *    cortada por el borde.
+ *
+ * @param {{n:number, principal?:boolean}[]} grupos
+ * @param {{ancho:number, alto:number, lado:number, separacion?:number,
+ *          pared?:number, pasillo?:number, rotulo?:number,
+ *          pasilloCentral?:number, holguraAlto?:number,
+ *          elevacion?:number, escalaMaxima?:number}} caja
+ */
+export function rejillaDeSalas(grupos, caja) {
+  const {
+    ancho, alto, lado,
+    separacion = 22, pared = 30, pasillo = 40, rotulo = 0, pasilloCentral = 0,
+    holguraAlto = 0, elevacion = null, escalaMaxima = 1.6
+  } = caja;
+
+  const lista = grupos || [];
+  if (!lista.length) return { salas: [], escala: 1, ancho: 0, alto: 0, ejes: ejes(34) };
+
+  const paso = lado + separacion;
+  const maxN = Math.max(1, ...lista.filter((g) => !g.principal).map((g) => g.n), 1);
+  const subCols = Math.min(2, Math.max(1, maxN));
+  const subFilas = Math.ceil(maxN / subCols);
+
+  const salaW = subCols * paso - separacion + pared * 2;
+  /* `rotulo` es una franja de suelo LIBRE al frente de la sala. Sin ella el
+     nombre pintado en el piso caia debajo de los escritorios y de la pared
+     del fondo: se leia "RECEP|ION" partido por un monitor. El nombre no se
+     achica hasta desaparecer -- se le hace sitio. */
+  const salaH = subFilas * paso - separacion + pared * 2 + rotulo;
+  const pasoX = salaW + pasillo;
+  const pasoY = salaH + pasillo;
+
+  const n = lista.length;
+  const candidatas = elevacion != null ? [elevacion] : [26, 29, 32, 35];
+  let mejor = null;
+  for (const grados of candidatas) {
+    const e = ejes(grados);
+    for (let cols = 1; cols <= n; cols++) {
+      const filas = Math.ceil(n / cols);
+      // El pasillo central ensancha el conjunto, y si no entra en la cuenta
+      // la escala sale optimista y la planta se corta por un lado.
+      const pc = cols > 1 ? pasilloCentral : 0;
+      const largo = (cols - 1) * pasoX + (filas - 1) * pasoY + salaW + salaH + pc;
+      const w = largo * e.ex;
+      const h = largo * e.ey + holguraAlto * lado;
+      const escala = Math.min(ancho / w, alto / h, escalaMaxima);
+      const desbalance = Math.max(cols, filas) / Math.min(cols, filas);
+      const puntaje = escala / Math.pow(desbalance, 0.3);
+      if (!mejor || puntaje > mejor.puntaje) mejor = { cols, filas, escala, puntaje, e, w, h };
+    }
+  }
+  const { cols, filas, escala, e } = mejor;
+
+  /* EL PASILLO CENTRAL. Las columnas se parten en dos bandas y el corredor va
+     por el medio, como en un edificio de verdad: las oficinas quedan a
+     izquierda y derecha de un pasaje. Con una sola columna no hay mitad que
+     partir, y entonces no hay pasillo. */
+  const corte = cols > 1 && pasilloCentral > 0 ? Math.ceil(cols / 2) : -1;
+  const hueco = (c) => (corte >= 0 && c >= corte ? pasilloCentral : 0);
+
+  const salas = lista.map((g, i) => {
+    const c = i % cols, f = Math.floor(i / cols);
+    const u0 = c * pasoX + hueco(c), v0 = f * pasoY;
+    /* La sala mide lo que SU contenido, no lo que la mas poblada: una sala
+       de un puesto con el ancho de una de dos queda medio vacia, y eso es
+       justo lo que hace que el agrupamiento se vea como desperdicio. */
+    const anchas = Math.min(g.n, subCols);
+    const altas = Math.ceil(g.n / subCols);
+    const w = anchas * paso - separacion + pared * 2;
+    const h = altas * paso - separacion + pared * 2 + rotulo;
+    const puestos = Array.from({ length: g.n }, (_, k) => ({
+      u: u0 + pared + (k % subCols) * paso,
+      v: v0 + pared + Math.floor(k / subCols) * paso
+    }));
+    return { ...g, indice: i, col: c, fila: f, u0, v0, u1: u0 + w, v1: v0 + h, rotulo, puestos };
+  });
+
+  /* El corredor ocupa TODO el hueco entre las dos bandas --el pasillo normal
+     mas el central-- y se pasa de largo por los dos extremos: un pasillo que
+     muere justo en la ultima oficina parece un patio, no un corredor. */
+  const corredor = corte < 0 ? null : {
+    u0: (corte - 1) * pasoX + salaW,
+    u1: corte * pasoX + pasilloCentral,
+    v0: -pasillo * 0.8,
+    v1: (filas - 1) * pasoY + salaH + pasillo * 0.8
+  };
+
+  /* El conjunto tiene que empezar en x=0: proyectadas, las salas de abajo a
+     la izquierda dan coordenadas NEGATIVAS, y sin corregirlo la planta sale
+     cortada por el borde izquierdo -- que es lo que se vio. El corredor entra
+     en la cuenta porque sobresale por los dos extremos. */
+  const cajas = corredor ? [...salas, corredor] : salas;
+  const esquinas = cajas.flatMap((sa) => [
+    iso(sa.u0, sa.v0, 0, e), iso(sa.u1, sa.v0, 0, e),
+    iso(sa.u1, sa.v1, 0, e), iso(sa.u0, sa.v1, 0, e)
+  ]);
+  const minX = Math.min(...esquinas.map((q) => q[0]));
+  const minY = Math.min(...esquinas.map((q) => q[1]));
+  const maxX = Math.max(...esquinas.map((q) => q[0]));
+  const maxY = Math.max(...esquinas.map((q) => q[1]));
+
+  return {
+    salas, escala, cols, filas, corredor, ejes: e, salaW, salaH,
+    // lo que hay que correr para que el dibujo arranque en el origen
+    dx: -minX, dy: -minY,
+    ancho: maxX - minX, alto: maxY - minY
+  };
+}
+
+/**
+ * Un sparkline sobre la PANTALLA de un monitor, con su perspectiva.
+ *
+ * La pantalla es un paralelogramo proyectado, asi que mezclar sus dos lados
+ * da el punto exacto -- no hace falta reproyectar. `serie` son los 15 cubos
+ * de 2 minutos que ya trae el panorama: es el unico dato de la propuesta que
+ * no estaba ya en pantalla, y es medido, no adornado.
+ *
+ * @param {number[]} serie
+ * @param {(s:number,t:number)=>[number,number]} en punto de la pantalla en [0,1]x[0,1]
+ */
+export function sparkline(serie, en) {
+  const v = (serie || []).filter((x) => Number.isFinite(x));
+  if (v.length < 2) return null;
+  const max = Math.max(1, ...v);
+  return v
+    .map((x, k) => en(k / (v.length - 1), 0.16 + 0.62 * (x / max)))
+    .map((q) => `${q[0]},${q[1]}`)
+    .join(' ');
+}

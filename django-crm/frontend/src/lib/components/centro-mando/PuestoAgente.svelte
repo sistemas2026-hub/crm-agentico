@@ -25,15 +25,27 @@
   import { colorDe, rotuloDe, pulsaEn } from '$lib/centro-mando/estados.js';
   import {
     iso, poli, ZONAS, zonaDe, semillaDe, tomaDe, tono,
-    cuerpoQueCabe, recortar, COLORES_AGENTE
+    cuerpoQueCabe, recortar, COLORES_AGENTE, colorDeArea, sparkline
   } from '$lib/centro-mando/planta.js';
 
   /** @type {{ agente: any, numero: number, lado: number, entrada: string|null,
    *           ejes: {ex:number,ey:number}, cambio?: any, ahora?: Date,
-   *           alSeleccionar?: (a:any)=>void }} */
+   *           alSeleccionar?: (a:any)=>void, enSala?: boolean,
+   *           serie?: boolean }} */
   let {
     agente, numero, lado: L, entrada, ejes: e,
-    cambio = null, ahora = new Date(), alSeleccionar = () => {}
+    cambio = null, ahora = new Date(), alSeleccionar = () => {},
+    /* DENTRO DE UNA SALA el puesto no lleva sus propias paredes.
+       Fue el error de la primera prueba de agrupamiento: cada puesto seguia
+       siendo una habitacion completa dentro de la habitacion del area, o sea
+       paredes dentro de paredes, y todo se encogia hasta que los nombres
+       dejaban de leerse. Una oficina de verdad tiene UNA pared por sala y
+       escritorios adentro. */
+    enSala = false,
+    /* Pinta los 15 cubos de 2 minutos del panorama DENTRO de la pantalla del
+       monitor. Va apagado por defecto: el puesto en uso no lo lleva, y
+       encenderlo es cosa de quien lo monta. */
+    serie = false
   } = $props();
 
   const zona = $derived(zonaDe(agente, entrada));
@@ -44,6 +56,7 @@
      del puesto entero porque es lo unico que hace que alguien se levante. */
   const llaman = $derived((agente.esperando_humano || 0) + (agente.esperando_aprobacion || 0));
 
+  const colorArea = $derived(colorDeArea(agente.area));
   const semilla = $derived(semillaDe(agente.nombre));
   const colorAgente = $derived(esRecep ? '#7C5BAF' : tomaDe(semilla, 23, COLORES_AGENTE));
   const piel = $derived(tomaDe(semilla, 0, ['#C9906A', '#E0B48C', '#8D5C3D', '#F0C9A6', '#A56F4A', '#6E4630']));
@@ -100,20 +113,28 @@
   });
 
   // --- geometria del puesto, toda derivada del lado ---
-  const H = $derived(L * 0.34);
+  const H = $derived(enSala ? 0 : L * 0.34);
   const ex0 = $derived(L * 0.11), ey0 = $derived(L * 0.12);
   const ew = $derived(L * 0.78), eh = $derived(L * 0.34), ez = $derived(L * 0.17);
   const u = $derived(L / 100);
 
   const p = (x, y, z = 0) => iso(x, y, z, e);
-  /* El cartel asoma un poco de la pared (1.06 L contra el L que mide) porque
-     los NOMBRES son mas largos que las areas: "soporte tecnico cliente" son
-     23 caracteres contra los 15 de "Soporte Tecnico". Con 0.98 L el cuerpo
-     de letra caia por debajo del minimo y el rotulo se recortaba a "SOPORTE
-     TECNICO CLIE...", que es justo lo que este rotulo no puede hacer. */
-  const anchoC = $derived(L * 1.06);
+  /* Un punto de la PANTALLA de un monitor, en coordenadas [0,1]x[0,1]. La
+     pantalla es un paralelogramo proyectado, asi que mezclar sus dos lados
+     da el punto exacto y no hace falta reproyectar nada. */
+  const enPantalla = (mx) => (s2, t) =>
+    iso(mx + s2 * mw, ey0 + eh * (0.22 + t * 0.08), ez + mh * (0.16 + t * 0.84), e);
+  /* El cartel asoma de la pared porque los NOMBRES son mas largos que las
+     areas: "soporte tecnico cliente" son 23 caracteres contra los 15 de
+     "Soporte Tecnico". Con 0.92 L la zona util quedaba en 56 y el cuerpo que
+     cabia --56/(23*0.72) = 3.4-- caia por debajo del minimo, asi que se leia
+     "SOPORTE TECNICO CLIE...", que es justo lo que este rotulo no puede
+     hacer. A 1.24 L la zona util es 88 y el nombre entero entra a cuerpo 5.3.
+     El techo es el paso entre puestos (1.30 L): mas ancho y dos carteles de
+     la misma sala se solapan. */
+  const anchoC = $derived(enSala ? L * 1.24 : L * 1.06);
   const altoC = $derived(L * 0.21);
-  const za = $derived(H + L * 0.16);
+  const za = $derived(enSala ? L * 0.56 : H + L * 0.16);
   const xa = $derived((L - anchoC) / 2);
 
   /* EL ROTULO ES EL NOMBRE DEL AGENTE, no su area.
@@ -192,17 +213,22 @@
     fill={llaman ? '#FBF7FF' : '#FCFDFE'} stroke="#C9D1DC" stroke-width="1" />
   <polygon class="tenido" points={poli(e, [0,L,0], [L,L,0], [L,L-3,0], [0,L-3,0])}
     fill={color} fill-opacity=".55" />
-  <polygon points={poli(e, [L,0,0], [L,L,0], [L-3,L,0], [L-3,0,0])} fill={ZONAS[zona].color} />
-  <polygon points={poli(e, [L*0.18,L*0.50,0], [L*0.82,L*0.50,0], [L*0.82,L*0.92,0], [L*0.18,L*0.92,0])}
-    fill={ZONAS[zona].color} fill-opacity=".16" />
+  {#if !enSala}
+    <polygon points={poli(e, [L,0,0], [L,L,0], [L-3,L,0], [L-3,0,0])} fill={colorArea} />
+    <polygon points={poli(e, [L*0.18,L*0.50,0], [L*0.82,L*0.50,0], [L*0.82,L*0.92,0], [L*0.18,L*0.92,0])}
+      fill={colorArea} fill-opacity=".22" />
+  {/if}
 
-  <!-- tabiques: la pared lleva el color del AGENTE, que no cambia nunca -->
-  <polygon points={poli(e, [0,0,0], [L,0,0], [L,0,H], [0,0,H])} fill={tono(colorAgente, 0.52)} />
-  <polygon points={poli(e, [0,0,0], [0,L,0], [0,L,H], [0,0,H])} fill={tono(colorAgente, 0.38)} />
-  <polygon points={poli(e, [0,0,H], [L,0,H], [L,-2.5,H], [0,-2.5,H])} fill={tono(colorAgente, 0.66)} />
-  <polygon points={poli(e, [0,0,H], [0,L,H], [-2.5,L,H], [-2.5,0,H])} fill={tono(colorAgente, 0.58)} />
-  <polygon points={poli(e, [L*0.62,0.6,H*0.72], [L*0.86,0.6,H*0.72], [L*0.86,0.6,H*0.28], [L*0.62,0.6,H*0.28])}
-    fill="#FFFFFF" fill-opacity=".72" />
+  {#if !enSala}
+    <!-- tabiques: la pared lleva el color del AGENTE, que no cambia nunca.
+         Dentro de una sala no se dibujan: la pared es la del area. -->
+    <polygon points={poli(e, [0,0,0], [L,0,0], [L,0,H], [0,0,H])} fill={tono(colorAgente, 0.52)} />
+    <polygon points={poli(e, [0,0,0], [0,L,0], [0,L,H], [0,0,H])} fill={tono(colorAgente, 0.38)} />
+    <polygon points={poli(e, [0,0,H], [L,0,H], [L,-2.5,H], [0,-2.5,H])} fill={tono(colorAgente, 0.66)} />
+    <polygon points={poli(e, [0,0,H], [0,L,H], [-2.5,L,H], [-2.5,0,H])} fill={tono(colorAgente, 0.58)} />
+    <polygon points={poli(e, [L*0.62,0.6,H*0.72], [L*0.86,0.6,H*0.72], [L*0.86,0.6,H*0.28], [L*0.62,0.6,H*0.28])}
+      fill="#FFFFFF" fill-opacity=".72" />
+  {/if}
 
   <!-- escritorio -->
   <polygon points={poli(e, [ex0+L*0.04, ey0+eh*0.72, 0], [ex0+L*0.075, ey0+eh*0.72, 0],
@@ -215,7 +241,7 @@
     fill="#E9EEF4" stroke="#AEB9C8" stroke-width="0.8" />
 
   <!-- monitores: la pantalla lleva el estado, y vira en vez de saltar -->
-  {#each mon as mx (mx)}
+  {#each mon as mx, mi (mx)}
     <polygon points={poli(e, [mx+mw*0.42, ey0+eh*0.3, ez], [mx+mw*0.58, ey0+eh*0.3, ez],
       [mx+mw*0.58, ey0+eh*0.3, ez+mh*0.18], [mx+mw*0.42, ey0+eh*0.3, ez+mh*0.18])} fill="#B6BFCC" />
     <polygon class="tenido" class:pulsa={pulsaEn(agente.estado)}
@@ -225,6 +251,16 @@
     <polygon points={poli(e, [mx, ey0+eh*0.22, ez+mh*0.16], [mx+mw, ey0+eh*0.22, ez+mh*0.16],
       [mx+mw, ey0+eh*0.30, ez+mh], [mx, ey0+eh*0.30, ez+mh])}
       fill="none" stroke="#334155" stroke-width="1.1" />
+    <!-- La actividad de los ultimos 30 minutos, en la pantalla de quien la
+         produjo. Es dato medido --los 15 cubos que ya venian en el payload y
+         no se dibujaban en ningun sitio-- y no un adorno de pantalla. -->
+    {#if serie && mi === mon.length - 1}
+      {@const linea = sparkline(agente.serie, enPantalla(mx))}
+      {#if linea}
+        <polyline points={linea} fill="none" stroke="#FFFFFF" stroke-opacity=".85"
+          stroke-width={L * 0.016} stroke-linejoin="round" stroke-linecap="round" />
+      {/if}
+    {/if}
   {/each}
 
   <!-- teclado y raton: lo que convierte una mesa con pantallas en un puesto -->
@@ -244,12 +280,14 @@
     fill="#FFFFFF" stroke="#AEB9C8" stroke-width="0.8" />
   <ellipse cx={tz[0]} cy={tz[1] - L * 0.016} rx={L * 0.021} ry={L * 0.009} fill="#6B4A32" />
 
-  <!-- planta en maceta -->
+  <!-- planta en maceta: solo cuando el puesto va suelto -->
+  {#if !enSala}
   <ellipse cx={mc[0]} cy={mc[1] + L*0.012} rx={L*0.05} ry={L*0.024} fill="#000" fill-opacity=".06" />
   {#each [[-0.035,-0.055,0.040], [0.033,-0.050,0.036], [0,-0.085,0.042], [-0.010,-0.030,0.034]] as h (h[0] + ':' + h[1])}
     <circle cx={mc[0] + L*h[0]} cy={mc[1] + L*h[1]} r={L*h[2]} fill="#5FA87C" />
   {/each}
   <path d="M {mc[0]-L*0.038} {mc[1]-L*0.014} L {mc[0]+L*0.038} {mc[1]-L*0.014} L {mc[0]+L*0.028} {mc[1]+L*0.018} L {mc[0]-L*0.028} {mc[1]+L*0.018} Z" fill="#C98A63" />
+  {/if}
 
   <!-- LA PERSONA: sentada de espaldas, mirando su monitor.
        La ROPA la identifica; la SILLA lleva el estado. -->
