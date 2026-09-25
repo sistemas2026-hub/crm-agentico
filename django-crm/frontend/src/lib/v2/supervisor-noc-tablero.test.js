@@ -12,7 +12,9 @@ import {
   rotuloDeHallazgo,
   antiguedadDe,
   estadoDeRevision,
-  bandejaDeRevision
+  bandejaDeRevision,
+  coincideConBusqueda,
+  paginacion
 } from './supervisor-noc-tablero.js';
 
 /**
@@ -347,10 +349,11 @@ describe('celdaDeSla', () => {
     expect(c.detalle).toBe('hace 2 d');
   });
 
-  it('escala la unidad segun el tamaño', () => {
-    expect(celdaDeSla('A_TIEMPO', 45).texto).toBe('45 min');
-    expect(celdaDeSla('A_TIEMPO', 180).texto).toBe('3 h');
-    expect(celdaDeSla('A_TIEMPO', 4320).texto).toBe('3 d');
+  it('escala la unidad segun el tamaño en el detalle', () => {
+    // El rotulo es fijo ('A tiempo'); lo que escala es el cuanto queda.
+    expect(celdaDeSla('A_TIEMPO', 45).detalle).toBe('quedan 45 min');
+    expect(celdaDeSla('A_TIEMPO', 180).detalle).toBe('quedan 3 h');
+    expect(celdaDeSla('A_TIEMPO', 4320).detalle).toBe('quedan 3 d');
   });
 
   it('NO colapsa los tres estados que no afirman nada sobre el cumplimiento', () => {
@@ -366,19 +369,19 @@ describe('celdaDeSla', () => {
   it('una orden terminada no se llama "a tiempo"', () => {
     // El plazo ya no corre. Decir "a tiempo" afirmaria algo sobre el.
     const c = celdaDeSla('NO_APLICA', null);
-    expect(c.texto).toBe('N/A');
+    expect(c.texto).toBe('Sin plazo');
     expect(c.tono).toBe('neutro');
   });
 
   it('sin estado no se inventa un plazo', () => {
     // Un caso o una actividad no cuelgan de una orden, que es donde vive.
     const c = celdaDeSla('', null);
-    expect(c.texto).toBe('N/A');
+    expect(c.texto).toBe('Sin plazo');
     expect(c.detalle).toContain('orden de trabajo');
   });
 
   it('un estado con los minutos perdidos sigue siendo legible', () => {
-    expect(celdaDeSla('VENCE_PRONTO', null).texto).toBe('Por vencer');
+    expect(celdaDeSla('VENCE_PRONTO', null).texto).toBe('Vence pronto');
     expect(celdaDeSla('VENCIDA', null).texto).toBe('Vencido');
   });
 });
@@ -595,5 +598,165 @@ describe('bandejaDeRevision', () => {
   it('sin propuestas devuelve una lista vacia, no revienta', () => {
     expect(bandejaDeRevision([], {}, hoy)).toEqual([]);
     expect(bandejaDeRevision(null, {}, hoy)).toEqual([]);
+  });
+});
+
+describe('coincideConBusqueda', () => {
+  const fila = {
+    cliente: 'Ferretería El Tornillo',
+    asunto: 'No Tiene Internet',
+    tecnico: 'Carlos Pérez',
+    ticket_externo: '91288',
+    orden_numero: 1842,
+    origen_id: 'abc-123'
+  };
+
+  it('sin texto no filtra nada', () => {
+    expect(coincideConBusqueda(fila, '')).toBe(true);
+    expect(coincideConBusqueda(fila, '   ')).toBe(true);
+  });
+
+  it('ignora acentos y mayusculas', () => {
+    // Nadie escribe «Ferretería» con tilde en un buscador.
+    expect(coincideConBusqueda(fila, 'ferreteria')).toBe(true);
+    expect(coincideConBusqueda(fila, 'PEREZ')).toBe(true);
+    expect(coincideConBusqueda(fila, 'Pérez')).toBe(true);
+  });
+
+  it('busca en los cuatro campos que la tabla muestra', () => {
+    expect(coincideConBusqueda(fila, 'tornillo')).toBe(true);
+    expect(coincideConBusqueda(fila, 'internet')).toBe(true);
+    expect(coincideConBusqueda(fila, 'carlos')).toBe(true);
+    expect(coincideConBusqueda(fila, '91288')).toBe(true);
+    expect(coincideConBusqueda(fila, 'OT-1842')).toBe(true);
+  });
+
+  it('NO busca en lo que la tabla no muestra', () => {
+    // Una fila que aparece por un texto invisible deja a quien busca sin
+    // entender por que salio.
+    const conMotivo = { ...fila, motivo: 'palabraoculta', accion_propuesta: 'otracosa' };
+    expect(coincideConBusqueda(conMotivo, 'palabraoculta')).toBe(false);
+  });
+
+  it('lo que no coincide queda fuera', () => {
+    expect(coincideConBusqueda(fila, 'panaderia')).toBe(false);
+  });
+
+  it('una fila con campos vacios no revienta', () => {
+    expect(coincideConBusqueda({}, 'algo')).toBe(false);
+    expect(coincideConBusqueda({}, '')).toBe(true);
+  });
+});
+
+describe('paginacion', () => {
+  it('cuenta las paginas y el rango visible', () => {
+    const p = paginacion(121, 1, 6);
+    expect(p.paginas).toBe(21);
+    expect(p.desde).toBe(1);
+    expect(p.hasta).toBe(6);
+    expect(p.total).toBe(121);
+  });
+
+  it('la ultima pagina no pasa del total', () => {
+    const p = paginacion(121, 21, 6);
+    expect(p.desde).toBe(121);
+    expect(p.hasta).toBe(121);
+  });
+
+  it('con la lista vacia el rango arranca en cero, no en uno', () => {
+    // «Mostrando 1 a 0 de 0» afirmaria que hay un primer registro.
+    const p = paginacion(0, 1, 6);
+    expect(p.desde).toBe(0);
+    expect(p.hasta).toBe(0);
+    expect(p.paginas).toBe(1);
+  });
+
+  it('recorta una pagina que ya no existe', () => {
+    // Al filtrar de 121 a 4 resultados, la pagina 7 deja de haber: quedarse
+    // ahi mostraria una tabla vacia sin decir por que.
+    expect(paginacion(4, 7, 6).actual).toBe(1);
+    expect(paginacion(0, 99, 6).actual).toBe(1);
+    expect(paginacion(121, -3, 6).actual).toBe(1);
+  });
+
+  it('con pocas paginas las muestra todas, sin huecos', () => {
+    expect(paginacion(30, 1, 6).ventana).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('con muchas paginas deja la primera, la ultima y las vecinas', () => {
+    const p = paginacion(121, 1, 6);
+    expect(p.ventana).toEqual([1, 2, null, 21]);
+
+    const media = paginacion(121, 10, 6);
+    expect(media.ventana).toEqual([1, null, 9, 10, 11, null, 21]);
+
+    const fin = paginacion(121, 21, 6);
+    expect(fin.ventana).toEqual([1, null, 20, 21]);
+  });
+
+  it('la ventana nunca repite un numero', () => {
+    for (const n of [1, 2, 3, 10, 19, 20, 21]) {
+      const v = paginacion(121, n, 6).ventana.filter((x) => x !== null);
+      expect(new Set(v).size).toBe(v.length);
+    }
+  });
+
+  it('un solo registro no dibuja paginacion', () => {
+    const p = paginacion(1, 1, 6);
+    expect(p.paginas).toBe(1);
+    expect(p.desde).toBe(1);
+    expect(p.hasta).toBe(1);
+  });
+});
+
+describe('la bandeja con buscador', () => {
+  const hoy = new Date('2026-09-25T12:00:00Z');
+  const prop = (extra) => ({
+    id: extra.id,
+    estado: 'propuesta',
+    prioridad: 30,
+    tipo_senal: 'caso_antiguo',
+    tipo_senal_display: 'Caso abierto antiguo',
+    accion_propuesta: 'Revisar',
+    origen_creado_en: '2026-09-20T12:00:00Z',
+    ...extra
+  });
+
+  it('el texto filtra como un filtro mas', () => {
+    const b = bandejaDeRevision(
+      [
+        prop({ id: 'a', cliente: 'Hotel Miramar' }),
+        prop({ id: 'b', cliente: 'Panaderia La Espiga' })
+      ],
+      { texto: 'miramar' },
+      hoy
+    );
+    expect(b.map((p) => p.id)).toEqual(['a']);
+  });
+
+  it('el buscador se combina con los demas filtros', () => {
+    const b = bandejaDeRevision(
+      [
+        prop({ id: 'si', cliente: 'Hotel Miramar', prioridad: 10 }),
+        prop({ id: 'otro-nivel', cliente: 'Hotel Miramar', prioridad: 80 }),
+        prop({ id: 'otro-cliente', cliente: 'Otro', prioridad: 10 })
+      ],
+      { texto: 'miramar', nivel: 'Alta' },
+      hoy
+    );
+    expect(b.map((p) => p.id)).toEqual(['si']);
+  });
+
+  it('la numeracion se rehace sobre lo que quedo tras buscar', () => {
+    const b = bandejaDeRevision(
+      [
+        prop({ id: 'a', cliente: 'Hotel Miramar', prioridad: 10 }),
+        prop({ id: 'x', cliente: 'Otro' }),
+        prop({ id: 'c', cliente: 'Hotel Central', prioridad: 20 })
+      ],
+      { texto: 'hotel' },
+      hoy
+    );
+    expect(b.map((p) => p.n)).toEqual([1, 2]);
   });
 });

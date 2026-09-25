@@ -30,6 +30,7 @@
     ticketsPorOrigen,
     bandejaDeRevision,
     rotuloDeHallazgo,
+    paginacion,
     actividadReciente,
     celdaDeSla,
     BLOQUES_SIN_DATO
@@ -62,6 +63,19 @@
   let filtroNivel = $state(/** @type {string | null} */ (null));
   let filtroPropuesta = $state('');
 
+  // El buscador. Mira cliente, caso/OT, asunto y tecnico -- lo que la tabla
+  // muestra. Buscar tambien en la evidencia haria aparecer filas por un texto
+  // que no esta a la vista, y quien busca no entenderia por que salieron.
+  let busqueda = $state('');
+
+  // La pagina pedida. `paginacion` la recorta a lo que existe: al filtrar, la
+  // 7 puede dejar de haber, y quedarse ahi mostraria una tabla vacia sin
+  // decir por que.
+  let nPagina = $state(1);
+
+  /** Cuantas filas por pagina. */
+  const POR_PAGINA = 6;
+
   const NIVELES_VISIBLES = ['Alta', 'Media', 'Baja'];
 
   /**
@@ -74,6 +88,7 @@
     filtroNivel = null;
     filtroPropuesta = '';
     filtro = null;
+    busqueda = '';
   }
 
   function limpiarFiltros() {
@@ -81,6 +96,7 @@
     filtroNivel = null;
     filtroPropuesta = '';
     filtroEstado = '';
+    busqueda = '';
   }
 
   let revisando = $state(/** @type {string | null} */ (null));
@@ -148,9 +164,27 @@
       estado: filtroEstado,
       nivel: filtroNivel,
       tipo: filtro,
-      conPropuesta: filtroPropuesta
+      conPropuesta: filtroPropuesta,
+      texto: busqueda
     })
   );
+
+  const pag = $derived(paginacion(bandeja.length, nPagina, POR_PAGINA));
+
+  /**
+   * Las filas de esta pagina. El N.º que ya traen es la posicion dentro de
+   * TODOS los resultados filtrados, no dentro de la pagina: asi el numero de
+   * la fila coincide con el "Mostrando 7 a 12" de abajo en vez de reiniciar
+   * en 1 cada vez.
+   */
+  const pagina = $derived(bandeja.slice(pag.desde - 1, pag.hasta));
+
+  // Cambiar un filtro o buscar vuelve a la primera pagina. Sin esto, filtrar
+  // de 121 a 4 resultados estando en la pagina 7 deja la tabla vacia.
+  $effect(() => {
+    void [filtroEstado, filtroNivel, filtro, filtroPropuesta, busqueda];
+    nPagina = 1;
+  });
 
   /** Cuantas hay en cada estado, para que la pastilla no mienta. */
   const conteoPorEstado = $derived.by(() => {
@@ -328,13 +362,13 @@
 
   /** Donde esta la propuesta abierta dentro de la lista visible. */
   const posicion = $derived.by(() => {
-    const indice = bandeja.findIndex((/** @type {any} */ p) => p.id === abierta);
-    return { indice, total: bandeja.length };
+    const indice = pagina.findIndex((/** @type {any} */ p) => p.id === abierta);
+    return { indice, total: pagina.length };
   });
 
   /** Salta a la anterior o la siguiente sin cerrar el panel. */
   function irA(/** @type {number} */ paso) {
-    const destino = bandeja[posicion.indice + paso];
+    const destino = pagina[posicion.indice + paso];
     if (destino) abrirDetalle(destino.id);
   }
 
@@ -485,275 +519,6 @@
           </div>
         </section>
 
-
-        <!--
-          ============ PENDIENTES POR REVISIÓN ============
-          Va ARRIBA, antes de los indicadores, porque es lo único de esta
-          pantalla que pide una decisión de una persona. Un KPI se mira; esto
-          se atiende.
-
-          Antes eran DOS tablas con las mismas filas: «Hallazgos recientes»
-          aquí y «Pendientes de revisión» al final, y como las 93 propuestas
-          estaban en estado `propuesta`, coincidían fila por fila. Leerlas dos
-          veces no era redundancia inofensiva -- hacía dudar de si eran dos
-          cosas distintas que casualmente coincidían.
-
-          Los botones de decisión no están en la fila: viven en «Ver detalle»,
-          junto a la evidencia. Decidir sobre una fila de tabla es decidir sin
-          mirar por qué.
-        -->
-        <section class="snoc-panel" id="pendientes">
-          <div class="snoc-fila-sep" style="flex-wrap:wrap;">
-            <div class="snoc-fila" style="gap:var(--snoc-xs);">
-              <span class="snoc-icono snoc-primario" style="font-size:20px;">rule</span>
-              <h2 class="snoc-h3">Pendientes por revisión</h2>
-              {#if data.hallazgos.error}
-                <span class="snoc-insignia snoc-insignia-error">sin datos</span>
-              {:else}
-                <span class="snoc-insignia snoc-insignia-neutra">
-                  {bandeja.length}
-                  {filtroEstado === 'pendientes' ? 'esperando decisión' : 'en la lista'}
-                </span>
-                {#if bandeja.length > FILAS_A_LA_VISTA}
-                  <span class="snoc-insignia" title="Las demás están abajo, desplazando dentro de la tabla">
-                    se ven {FILAS_A_LA_VISTA}
-                  </span>
-                {/if}
-              {/if}
-            </div>
-            <span class="snoc-mono-sm snoc-tenue">
-              Aceptar registra que estás de acuerdo · no ejecuta nada
-            </span>
-          </div>
-
-          {#if !data.hallazgos.error && propuestas.length > 0}
-            <!-- Los filtros se aplican en el navegador: el GET ya trajo el
-                 conjunto entero, así que una vuelta al servidor por pastilla
-                 sería reordenar datos que ya están en pantalla. -->
-            <div class="snoc-pila-xs">
-              <div class="snoc-envuelve">
-                <span class="snoc-label-sm snoc-secundario" style="text-transform:uppercase; align-self:center;">
-                  Revisión
-                </span>
-                {#each [{ v: 'pendientes', t: 'Pendientes' }, { v: 'decididas', t: 'Ya decididas' }, { v: '', t: 'Todas' }] as o (o.v)}
-                  <button
-                    class="snoc-pildora {filtroEstado === o.v ? 'snoc-pildora-activa' : ''}"
-                    type="button"
-                    onclick={() => (filtroEstado = o.v)}
-                  >
-                    {o.t} ({conteoPorEstado[o.v] ?? 0})
-                  </button>
-                {/each}
-              </div>
-
-              <div class="snoc-envuelve">
-                <span class="snoc-label-sm snoc-secundario" style="text-transform:uppercase; align-self:center;">
-                  Prioridad
-                </span>
-                <button
-                  class="snoc-pildora {filtroNivel ? '' : 'snoc-pildora-activa'}"
-                  type="button"
-                  onclick={() => (filtroNivel = null)}
-                >
-                  Todas
-                </button>
-                {#each NIVELES_VISIBLES as nv (nv)}
-                  <button
-                    class="snoc-pildora {filtroNivel === nv ? 'snoc-pildora-activa' : ''}"
-                    type="button"
-                    onclick={() => (filtroNivel = nv)}
-                    disabled={(conteoPorNivel[nv] ?? 0) === 0}
-                    title="Prioridad {nv}"
-                  >
-                    {nv} ({conteoPorNivel[nv] ?? 0})
-                  </button>
-                {/each}
-                <button
-                  class="snoc-pildora {filtroPropuesta === 'si' ? 'snoc-pildora-activa' : ''}"
-                  type="button"
-                  onclick={() => (filtroPropuesta = filtroPropuesta === 'si' ? '' : 'si')}
-                  title="Las que traen una acción recomendada escrita"
-                >
-                  Con propuesta
-                </button>
-                <button
-                  class="snoc-pildora {filtroPropuesta === 'no' ? 'snoc-pildora-activa' : ''}"
-                  type="button"
-                  onclick={() => (filtroPropuesta = filtroPropuesta === 'no' ? '' : 'no')}
-                  title="Detectadas, sin acción recomendada"
-                >
-                  Sin propuesta
-                </button>
-              </div>
-
-              <div class="snoc-envuelve">
-                <span class="snoc-label-sm snoc-secundario" style="text-transform:uppercase; align-self:center;">
-                  Tipo
-                </span>
-                <button
-                  class="snoc-pildora {filtro ? '' : 'snoc-pildora-activa'}"
-                  type="button"
-                  onclick={() => (filtro = null)}
-                >
-                  Todos
-                </button>
-                <!-- Las pastillas de tipo se derivan de lo que el backend
-                     devolvió: una fija que filtra a cero es peor que no
-                     estar. -->
-                {#each porSenal as [clave, info] (clave)}
-                  <button
-                    class="snoc-pildora {filtro === clave ? 'snoc-pildora-activa' : ''}"
-                    type="button"
-                    onclick={() => (filtro = clave)}
-                    title={clave}
-                  >
-                    {rotuloDeHallazgo(clave, info.etiqueta)} ({info.n})
-                  </button>
-                {/each}
-              </div>
-            </div>
-          {/if}
-
-          {#if form?.error}
-            <div class="snoc-aviso">
-              <span class="snoc-icono snoc-error-txt" style="font-size:18px;">error</span>
-              <span class="snoc-body">{form.error}</span>
-            </div>
-          {:else if form?.ok && form.tipo === 'revision'}
-            <div class="snoc-aviso">
-              <span class="snoc-icono snoc-primario" style="font-size:18px;">check_circle</span>
-              <span class="snoc-body">
-                Revisión registrada: <strong>{form.decision}</strong>.
-                {form.aviso ?? 'Ninguna acción se ejecutó.'}
-              </span>
-            </div>
-          {:else if form?.ok && form.tipo === 'cancelacion'}
-            <div class="snoc-aviso">
-              <span class="snoc-icono snoc-primario" style="font-size:18px;">check_circle</span>
-              <span class="snoc-body">Propuesta cancelada. Ninguna acción se ejecutó.</span>
-            </div>
-          {/if}
-
-          {#if data.hallazgos.error}
-            <div class="snoc-aviso">
-              <span class="snoc-icono snoc-error-txt" style="font-size:18px;">error</span>
-              <span class="snoc-body">{data.hallazgos.error.mensaje}</span>
-            </div>
-          {:else if propuestas.length === 0}
-            <p class="snoc-body snoc-secundario">
-              No hay propuestas registradas. Corré un ciclo de análisis para que el Supervisor revise la operación.
-            </p>
-          {:else if bandeja.length === 0}
-            <p class="snoc-body snoc-secundario">
-              Ninguna propuesta con esos filtros.
-              <button class="snoc-enlace" type="button" onclick={limpiarFiltros}>Ver todas</button>
-            </p>
-          {:else}
-            <div class="snoc-tabla-caja snoc-tabla-alta">
-              <table class="snoc-tabla">
-                <thead>
-                  <tr>
-                    <th style="width:2.5rem;">N.º</th>
-                    <th>Prioridad</th>
-                    <th>Tipo de hallazgo</th>
-                    <th>Cliente</th>
-                    <th>Caso / OT</th>
-                    <th>Asunto del ticket</th>
-                    <th>Antigüedad</th>
-                    <th>Propuesta</th>
-                    <th class="snoc-derecha">Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each bandeja as p (p.id)}
-                    <tr class={abierta === p.id ? 'snoc-fila-activa' : ''}>
-                      <!-- La posición en lo que se está viendo, no el id: con
-                           un filtro puesto, numerar por id dejaría huecos. -->
-                      <td class="snoc-mono-sm snoc-tenue">{p.n}</td>
-                      <td>
-                        <span
-                          class="snoc-insignia snoc-sla-{p.nivel.tono}"
-                          title="Prioridad {p.prioridad} en la escala del Supervisor (0-99, menor es más urgente)"
-                        >
-                          {p.nivel.texto}
-                        </span>
-                        {#if !p.revision.pendiente}
-                          <div>
-                            <span class="snoc-insignia snoc-insignia-variante" title="Ya pasó por una persona">
-                              {p.revision.texto}
-                            </span>
-                          </div>
-                        {/if}
-                      </td>
-                      <td class="snoc-label">{p.rotulo}</td>
-                      <td class="snoc-body-sm">
-                        {#if p.cliente}
-                          {p.cliente}
-                        {:else}
-                          <span class="snoc-celda-ausente">No disponible en la fuente</span>
-                        {/if}
-                      </td>
-                      <td>
-                        {#if p.orden_numero != null}
-                          <span class="snoc-id">OT-{p.orden_numero}</span>
-                        {:else if p.ticket_externo}
-                          <span class="snoc-id">{p.ticket_externo}</span>
-                          {#if p.proveedor_externo}
-                            <div class="snoc-mono-sm snoc-tenue">{p.proveedor_externo}</div>
-                          {/if}
-                        {:else}
-                          <span class="snoc-mono-sm snoc-tenue" title={p.origen_id}>
-                            {String(p.origen_id).slice(0, 8)}
-                          </span>
-                        {/if}
-                      </td>
-                      <td class="snoc-body-sm snoc-recorte" title={p.asunto}>
-                        {#if p.asunto}
-                          {p.asunto}
-                        {:else}
-                          <span class="snoc-celda-ausente">No disponible en la fuente</span>
-                        {/if}
-                      </td>
-                      <td class="snoc-mono-sm snoc-tenue">
-                        {#if p.edad.texto}
-                          {p.edad.texto}
-                        {:else}
-                          <span class="snoc-celda-ausente">—</span>
-                        {/if}
-                      </td>
-                      <td class="snoc-body-sm snoc-recorte" title={p.accion_propuesta}>
-                        {#if p.tienePropuesta}
-                          {p.accion_propuesta}
-                        {:else}
-                          <span class="snoc-celda-ausente">Sin acción recomendada</span>
-                        {/if}
-                      </td>
-                      <td class="snoc-derecha">
-                        <button
-                          class="snoc-btn {abierta === p.id ? 'snoc-btn-primario' : ''}"
-                          type="button"
-                          onclick={() => abrirDetalle(p.id)}
-                        >
-                          Ver detalle
-                        </button>
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-            <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs);">
-              <span class="snoc-mono-sm snoc-tenue">
-                Se revisa desde «Ver detalle», junto a la evidencia.
-              </span>
-              {#if bandeja.length > FILAS_A_LA_VISTA}
-                <span class="snoc-mono-sm snoc-tenue">
-                  Se desplaza dentro de la tabla · quedan {bandeja.length - FILAS_A_LA_VISTA} más abajo
-                </span>
-              {/if}
-            </div>
-          {/if}
-        </section>
 
         <!-- ============ LOS SEIS KPI ============ -->
         {#if data.errorIndicadores}
@@ -957,6 +722,332 @@
               <p class="snoc-hueco-motivo">{SIN_DATO.mapa.motivo}</p>
             </div>
           </div>
+        </section>
+
+        <!--
+          ============ PENDIENTES POR REVISIÓN ============
+          Va ARRIBA, antes de los indicadores, porque es lo único de esta
+          pantalla que pide una decisión de una persona. Un KPI se mira; esto
+          se atiende.
+
+          Antes eran DOS tablas con las mismas filas: «Hallazgos recientes»
+          aquí y «Pendientes de revisión» al final, y como las 93 propuestas
+          estaban en estado `propuesta`, coincidían fila por fila. Leerlas dos
+          veces no era redundancia inofensiva -- hacía dudar de si eran dos
+          cosas distintas que casualmente coincidían.
+
+          Los botones de decisión no están en la fila: viven en «Ver detalle»,
+          junto a la evidencia. Decidir sobre una fila de tabla es decidir sin
+          mirar por qué.
+        -->
+        <section class="snoc-panel" id="pendientes">
+          <!-- CABECERA: el título, cuántas esperan y el buscador -->
+          <div class="snoc-bandeja-cabecera">
+            <div class="snoc-fila" style="gap:var(--snoc-sm);">
+              <div class="snoc-chip-icono snoc-chip-icono-solido">
+                <span class="snoc-icono" style="font-size:18px;">rule</span>
+              </div>
+              <div class="snoc-pila-xs">
+                <h2 class="snoc-h3">Pendientes por revisión</h2>
+                {#if data.hallazgos.error}
+                  <span class="snoc-body-sm snoc-error-txt">No se pudieron leer</span>
+                {:else}
+                  <span class="snoc-body-sm snoc-secundario">
+                    <strong class="snoc-primario">{bandeja.length}</strong>
+                    {filtroEstado === 'pendientes' ? 'pendientes de decisión' : 'en la lista'}
+                  </span>
+                {/if}
+              </div>
+            </div>
+
+            <label class="snoc-buscador">
+              <span class="snoc-icono snoc-tenue" style="font-size:18px;" aria-hidden="true">search</span>
+              <input
+                type="search"
+                class="snoc-buscador-campo"
+                placeholder="Buscar cliente, caso, asunto o técnico…"
+                bind:value={busqueda}
+                aria-label="Buscar en los pendientes por revisión"
+              />
+            </label>
+          </div>
+
+          {#if !data.hallazgos.error && propuestas.length > 0}
+            <!-- Los filtros se aplican en el navegador: el GET ya trajo el
+                 conjunto entero, así que una vuelta al servidor por pastilla
+                 sería reordenar datos que ya están en pantalla. -->
+            <div class="snoc-filtros-bandeja">
+              <div class="snoc-grupo-filtro">
+                <span class="snoc-label-sm snoc-secundario snoc-rotulo-filtro">Revisión</span>
+                {#each [{ v: 'pendientes', t: 'Pendientes' }, { v: 'decididas', t: 'Ya decididas' }, { v: '', t: 'Todas' }] as o (o.v)}
+                  <button
+                    class="snoc-pildora {filtroEstado === o.v ? 'snoc-pildora-activa' : ''}"
+                    type="button"
+                    onclick={() => (filtroEstado = o.v)}
+                  >
+                    {o.t} ({conteoPorEstado[o.v] ?? 0})
+                  </button>
+                {/each}
+              </div>
+
+              <div class="snoc-grupo-filtro">
+                <span class="snoc-label-sm snoc-secundario snoc-rotulo-filtro">Prioridad</span>
+                <button
+                  class="snoc-pildora {filtroNivel ? '' : 'snoc-pildora-activa'}"
+                  type="button"
+                  onclick={() => (filtroNivel = null)}
+                >
+                  Todas
+                </button>
+                {#each NIVELES_VISIBLES as nv (nv)}
+                  <button
+                    class="snoc-pildora {filtroNivel === nv ? 'snoc-pildora-activa' : ''}"
+                    type="button"
+                    onclick={() => (filtroNivel = nv)}
+                    disabled={(conteoPorNivel[nv] ?? 0) === 0}
+                    title="Prioridad {nv}"
+                  >
+                    <span class="snoc-punto-nivel snoc-nivel-{nv.toLowerCase()}"></span>
+                    {nv} ({conteoPorNivel[nv] ?? 0})
+                  </button>
+                {/each}
+                <button
+                  class="snoc-pildora {filtroPropuesta === 'si' ? 'snoc-pildora-activa' : ''}"
+                  type="button"
+                  onclick={() => (filtroPropuesta = filtroPropuesta === 'si' ? '' : 'si')}
+                  title="Las que traen una acción recomendada escrita"
+                >
+                  Con propuesta
+                </button>
+                <button
+                  class="snoc-pildora {filtroPropuesta === 'no' ? 'snoc-pildora-activa' : ''}"
+                  type="button"
+                  onclick={() => (filtroPropuesta = filtroPropuesta === 'no' ? '' : 'no')}
+                  title="Detectadas, sin acción recomendada"
+                >
+                  Sin propuesta
+                </button>
+              </div>
+
+              <!--
+                El tipo de hallazgo pasa a desplegable y sale de la tabla: son
+                quince señales, y quince pastillas más dejaban la cabecera
+                ilegible. El filtro sigue siendo el mismo y sobre los mismos
+                datos; lo que cambia es cuánto sitio ocupa.
+              -->
+              <div class="snoc-grupo-filtro">
+                <label class="snoc-label-sm snoc-secundario snoc-rotulo-filtro" for="snoc-filtro-tipo">
+                  Tipo
+                </label>
+                <select
+                  id="snoc-filtro-tipo"
+                  class="snoc-select"
+                  value={filtro ?? ''}
+                  onchange={(e) => (filtro = e.currentTarget.value || null)}
+                >
+                  <option value="">Todos los tipos ({propuestas.length})</option>
+                  {#each porSenal as [clave, info] (clave)}
+                    <option value={clave}>{rotuloDeHallazgo(clave, info.etiqueta)} ({info.n})</option>
+                  {/each}
+                </select>
+              </div>
+            </div>
+          {/if}
+
+          {#if form?.error}
+            <div class="snoc-aviso">
+              <span class="snoc-icono snoc-error-txt" style="font-size:18px;">error</span>
+              <span class="snoc-body">{form.error}</span>
+            </div>
+          {:else if form?.ok && form.tipo === 'revision'}
+            <div class="snoc-aviso">
+              <span class="snoc-icono snoc-primario" style="font-size:18px;">check_circle</span>
+              <span class="snoc-body">
+                Revisión registrada: <strong>{form.decision}</strong>.
+                {form.aviso ?? 'Ninguna acción se ejecutó.'}
+              </span>
+            </div>
+          {:else if form?.ok && form.tipo === 'cancelacion'}
+            <div class="snoc-aviso">
+              <span class="snoc-icono snoc-primario" style="font-size:18px;">check_circle</span>
+              <span class="snoc-body">Propuesta cancelada. Ninguna acción se ejecutó.</span>
+            </div>
+          {/if}
+
+          {#if data.hallazgos.error}
+            <div class="snoc-aviso">
+              <span class="snoc-icono snoc-error-txt" style="font-size:18px;">error</span>
+              <span class="snoc-body">{data.hallazgos.error.mensaje}</span>
+            </div>
+          {:else if propuestas.length === 0}
+            <p class="snoc-body snoc-secundario">
+              No hay propuestas registradas. Corré un ciclo de análisis para que el Supervisor revise la operación.
+            </p>
+          {:else if bandeja.length === 0}
+            <p class="snoc-body snoc-secundario">
+              {busqueda.trim()
+                ? `Ninguna propuesta coincide con «${busqueda.trim()}».`
+                : 'Ninguna propuesta con esos filtros.'}
+              <button class="snoc-enlace" type="button" onclick={limpiarFiltros}>Ver todas</button>
+            </p>
+          {:else}
+            <div class="snoc-tabla-caja">
+              <table class="snoc-tabla snoc-tabla-bandeja">
+                <thead>
+                  <tr>
+                    <th style="width:2.5rem;">N.º</th>
+                    <th>Prioridad</th>
+                    <th>Cliente</th>
+                    <th>Caso / OT</th>
+                    <th>Asunto del ticket</th>
+                    <th>Técnico actual</th>
+                    <th>SLA</th>
+                    <th>Antigüedad</th>
+                    <th>Propuesta</th>
+                    <th class="snoc-derecha">Acción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each pagina as p (p.id)}
+                    {@const sla = celdaDeSla(p.sla_estado, p.sla_minutos)}
+                    <tr class={abierta === p.id ? 'snoc-fila-activa' : ''}>
+                      <!-- La posición dentro de los resultados, no el id: con
+                           un filtro puesto, numerar por id dejaría huecos. -->
+                      <td class="snoc-mono-sm snoc-tenue">{p.n}</td>
+                      <td>
+                        <span
+                          class="snoc-nivel snoc-nivel-{p.nivel.texto.toLowerCase()}"
+                          title="Prioridad {p.prioridad} en la escala del Supervisor (0-99, menor es más urgente)"
+                        >
+                          <span class="snoc-punto-nivel snoc-nivel-{p.nivel.texto.toLowerCase()}"></span>
+                          {p.nivel.texto}
+                        </span>
+                        {#if !p.revision.pendiente}
+                          <div>
+                            <span class="snoc-insignia snoc-insignia-variante" title="Ya pasó por una persona">
+                              {p.revision.texto}
+                            </span>
+                          </div>
+                        {/if}
+                      </td>
+                      <td class="snoc-body-sm">
+                        {#if p.cliente}
+                          {p.cliente}
+                        {:else}
+                          <span class="snoc-celda-ausente">No disponible en la fuente</span>
+                        {/if}
+                      </td>
+                      <td>
+                        {#if p.orden_numero != null}
+                          <span class="snoc-id">OT-{p.orden_numero}</span>
+                        {:else if p.ticket_externo}
+                          <span class="snoc-id">{p.ticket_externo}</span>
+                          {#if p.proveedor_externo}
+                            <div class="snoc-mono-sm snoc-tenue">{p.proveedor_externo}</div>
+                          {/if}
+                        {:else}
+                          <span class="snoc-mono-sm snoc-tenue" title={p.origen_id}>
+                            {String(p.origen_id).slice(0, 8)}
+                          </span>
+                        {/if}
+                      </td>
+                      <td class="snoc-body-sm snoc-recorte" title={p.asunto}>
+                        {#if p.asunto}
+                          {p.asunto}
+                        {:else}
+                          <span class="snoc-celda-ausente">No disponible en la fuente</span>
+                        {/if}
+                      </td>
+                      <td class="snoc-body-sm">
+                        <!--
+                          EL TÉCNICO ACTUAL, no el que la IA sugiere. El
+                          detalle trae `responsable_sugerido` y ponerlo aquí
+                          diría que alguien ya tiene la orden.
+                        -->
+                        {#if p.tecnico}
+                          {p.tecnico}
+                        {:else}
+                          <span class="snoc-celda-ausente">Sin técnico asignado</span>
+                        {/if}
+                      </td>
+                      <td>
+                        <span class="snoc-insignia snoc-sla-{sla.tono}" title={sla.detalle}>{sla.texto}</span>
+                      </td>
+                      <td class="snoc-mono-sm snoc-tenue">
+                        {#if p.edad.texto}
+                          {p.edad.texto}
+                        {:else}
+                          <span class="snoc-celda-ausente">—</span>
+                        {/if}
+                      </td>
+                      <td class="snoc-body-sm snoc-recorte" title={p.accion_propuesta}>
+                        {#if p.tienePropuesta}
+                          {p.accion_propuesta}
+                        {:else}
+                          <span class="snoc-celda-ausente">Sin acción recomendada</span>
+                        {/if}
+                      </td>
+                      <td class="snoc-derecha">
+                        <button
+                          class="snoc-btn {abierta === p.id ? 'snoc-btn-primario' : ''}"
+                          type="button"
+                          onclick={() => abrirDetalle(p.id)}
+                        >
+                          Ver detalle
+                        </button>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- PAGINACIÓN -->
+            <div class="snoc-paginacion">
+              <span class="snoc-mono-sm snoc-tenue">
+                Mostrando {pag.desde} a {pag.hasta} de {pag.total} registro{pag.total === 1 ? '' : 's'}
+              </span>
+              {#if pag.paginas > 1}
+                <div class="snoc-paginacion-botones">
+                  <button
+                    class="snoc-pildora"
+                    type="button"
+                    onclick={() => (nPagina = pag.actual - 1)}
+                    disabled={pag.actual === 1}
+                  >
+                    Anterior
+                  </button>
+                  {#each pag.ventana as n, i (i)}
+                    {#if n === null}
+                      <!-- Un hueco declarado, no un número que falte. -->
+                      <span class="snoc-paginacion-hueco" aria-hidden="true">…</span>
+                    {:else}
+                      <button
+                        class="snoc-pildora {n === pag.actual ? 'snoc-pildora-activa' : ''}"
+                        type="button"
+                        onclick={() => (nPagina = n)}
+                        aria-current={n === pag.actual ? 'page' : undefined}
+                        aria-label="Página {n}"
+                      >
+                        {n}
+                      </button>
+                    {/if}
+                  {/each}
+                  <button
+                    class="snoc-pildora"
+                    type="button"
+                    onclick={() => (nPagina = pag.actual + 1)}
+                    disabled={pag.actual === pag.paginas}
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              {/if}
+            </div>
+            <span class="snoc-mono-sm snoc-tenue">
+              Se revisa desde «Ver detalle», junto a la evidencia.
+            </span>
+          {/if}
         </section>
 
         <!-- ============ LOS TRES BLOQUES DE ABAJO ============ -->

@@ -978,3 +978,96 @@
 @media (prefers-reduced-motion: reduce) {
   .snoc-kpi-enlace { transition: none; }
 }
+
+/* ==========================================================================
+   LA BANDEJA: cabecera, filtros, niveles y paginación
+   ========================================================================== */
+
+.snoc-bandeja-cabecera {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--snoc-md); flex-wrap: wrap;
+}
+
+/* El buscador. Crece hasta un tope y se va a su propia línea en pantallas
+   angostas -- un campo de 40px al lado de un título no se usa. */
+.snoc-buscador {
+  display: flex; align-items: center; gap: var(--snoc-xs);
+  flex: 1 1 260px; max-width: 380px;
+  padding: 0 var(--snoc-sm);
+  border: 1px solid var(--snoc-outline-variant);
+  border-radius: var(--snoc-r-full);
+  background: var(--snoc-surface-container-lowest);
+}
+.snoc-buscador:focus-within {
+  border-color: var(--snoc-primary);
+  box-shadow: 0 0 0 1px var(--snoc-primary);
+}
+.snoc-buscador-campo {
+  flex: 1; min-width: 0; border: 0; outline: none; background: transparent;
+  padding: var(--snoc-sm) 0; font: inherit; font-size: 0.8125rem;
+  color: var(--snoc-on-surface);
+}
+.snoc-buscador-campo::placeholder { color: var(--snoc-outline); }
+
+.snoc-filtros-bandeja {
+  display: flex; flex-direction: column; gap: var(--snoc-sm);
+  padding: var(--snoc-sm) 0;
+  border-top: 1px solid var(--snoc-outline-variant);
+  border-bottom: 1px solid var(--snoc-outline-variant);
+}
+.snoc-grupo-filtro {
+  display: flex; align-items: center; gap: var(--snoc-xs); flex-wrap: wrap;
+}
+/* El rótulo del grupo tiene ancho fijo para que las tres filas de pastillas
+   arranquen alineadas. Sin eso, «Revisión», «Prioridad» y «Tipo» empujan cada
+   fila a un sitio distinto y se lee como tres cosas sin relación. */
+.snoc-rotulo-filtro {
+  text-transform: uppercase; letter-spacing: 0.06em;
+  min-width: 5.5rem; flex-shrink: 0;
+}
+
+.snoc-select {
+  font: inherit; font-size: 0.75rem; padding: 5px 9px;
+  border: 1px solid var(--snoc-outline-variant);
+  border-radius: var(--snoc-r-full);
+  background: var(--snoc-surface-container-lowest);
+  color: var(--snoc-on-surface); max-width: 22rem;
+}
+.snoc-select:focus-visible { outline: 2px solid var(--snoc-primary); outline-offset: 1px; }
+
+/* --- Los tres niveles de prioridad ---
+   El punto de color acompaña al texto, nunca lo reemplaza: un círculo solo
+   no dice nada a quien no distingue rojo de verde, y tampoco a un lector de
+   pantalla. */
+.snoc-nivel {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; white-space: nowrap;
+}
+.snoc-punto-nivel {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--snoc-outline);
+}
+.snoc-nivel-alta { color: var(--snoc-error); }
+.snoc-punto-nivel.snoc-nivel-alta { background: var(--snoc-error); }
+.snoc-nivel-media { color: #8a5300; }
+.snoc-punto-nivel.snoc-nivel-media { background: #d98324; }
+.snoc-nivel-baja { color: #1b6b2f; }
+.snoc-punto-nivel.snoc-nivel-baja { background: #2e7d32; }
+
+/* Diez columnas no caben en una laptop: la tabla se desplaza en horizontal
+   antes que apretar las celdas hasta que no se lean. */
+.snoc-tabla-bandeja { min-width: 60rem; }
+
+/* --- La paginación --- */
+.snoc-paginacion {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--snoc-sm); flex-wrap: wrap; padding-top: var(--snoc-sm);
+}
+.snoc-paginacion-botones {
+  display: flex; align-items: center; gap: var(--snoc-xs); flex-wrap: wrap;
+}
+.snoc-paginacion-hueco {
+  padding: 0 var(--snoc-xs); color: var(--snoc-outline);
+  font-size: 0.75rem; user-select: none;
+}
