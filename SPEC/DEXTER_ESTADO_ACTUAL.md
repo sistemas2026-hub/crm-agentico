@@ -7,7 +7,8 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **24/09/2026 ~16:30 Bogotá**. Esta versión es la
+Última actualización: **24/09/2026 ~21:30 Bogotá** — deploy de la planta de
+oficina (`0925a7e`) y remedición del mapa de ramas. Esta versión es la
 **FUSIÓN A MANO** de las dos copias que existían de este archivo — una en
 `integrar-centro-mando` y otra en `feature/bandeja-relevo`, editadas las dos
 el mismo día, divergidas 252 lineas. No se borró nada de ninguna: se importó
@@ -49,20 +50,107 @@ git rev-list --left-right --count origin/integrar-centro-mando...HEAD   -> 2  46
 último push es del 23/09 (`5cd47e6`). Por eso los 46 «sin pushear» y los 19
 «fuera de producción» no se contradicen — miden contra bases distintas.
 
-**Lo que está REALMENTE fuera de producción son 17 commits**, y son el trabajo
-de hoy: el sistema de trabajo con IA (CLAUDE.md, 9 agentes, 4 comandos,
-`pre-commit`, CI), la plataforma multi-ISP entera (70 -> 14 archivos), el
-entorno local aislado, y el arreglo de `DECLARACION_NO_ALCANZA` (`6207b9a`).
+~~**Lo que está REALMENTE fuera de producción son 17 commits.**~~
+~~Además hay **2 commits en producción que no están acá** (`790e185`,
+`b7cfa90`).~~
 
-Además hay **2 commits en producción que no están acá** (`790e185`, `b7cfa90`)
-— los mismos dos de arriba, rebasados por la otra sesión.
+**Ya no. Remedido el 24/09 21:30: son 3, y están listados abajo.** Los 17
+salieron esa misma tarde en dos tandas (`1a83886 → 8d1fbf4` y
+`8d1fbf4 → 0925a7e`).
+
+La medición de arriba queda tachada y no borrada a propósito: es la tercera
+vez en el mismo día que esta sección afirma un número que deja de ser cierto
+en cuestión de horas. **El número envejece; el método no.** Lo que hay que
+conservar de este bloque es cómo se mide —`git patch-id --stable` contra la
+rama de despliegue, nunca `merge-base --is-ancestor`, que no ve un commit
+rebaseado por otra sesión— y no cuántos commits había una tarde cualquiera.
 
 | Rama | Qué tiene | Estado medido |
 |---|---|---|
-| `integrar-centro-mando` | **Activa, es esta.** Centro de Mando, sistema de trabajo con IA, plataforma multi-ISP | 🔴 **17 commits fuera de producción**, 46 sin pushear a su propio remoto, 2 detrás |
+| `integrar-centro-mando` | **Activa, es esta.** Centro de Mando, sistema de trabajo con IA, plataforma multi-ISP | 🟡 **3 commits fuera de producción** (remedido 24/09 21:30) |
 | `feature/bandeja-relevo` | Bandeja Fase 1, batería de 41 flujos, validación de producción | 🟡 activa en `C:/tmp/dexter-bandeja`. **NO está congelada** pese a lo que dice la memoria: 3 commits hoy 16:12-16:14 |
 | `feat/campo-diseno-stitch` | **Dexter Campo.** 101 archivos de prueba, 551 pruebas | 🟡 activa en `C:/wisphub/_wt_campo`. Una tercera sesión implementa ahí «refrescar ficha» (`test_refrescar_ficha.py`, sin commitear) |
-| `fix/integracion-wisphub` | **Producción.** Push ahí ES deploy | Centro de Mando desde `ee4563f` (23/09 12:29) + los dos tableros de hoy |
+| `fix/integracion-wisphub` | **Producción.** Push ahí ES deploy | `0925a7e` (24/09 21:2x) — la planta de oficina |
+
+**Los 3 que siguen fuera, remedidos el 24/09 21:30.** No son deuda olvidada:
+son trabajo de otra sesión, sin pushear a ninguna parte, y tocan config del
+tenant y el motor. Por eso el deploy de la planta se hizo por **cherry-pick de
+un solo commit** y no por push de la rama: publicar `tenants/rapilink.config.
+yaml`, `cli/cargar_config.py` y `nucleo/modelo/motor.py` sin que nadie lo
+decidiera habría sido un deploy de tres cosas disfrazado de uno.
+
+```
+78d20b8  Una copia mas vieja que produccion ya no puede escribir la config
+f946d84  Un servicio puede decir de quien habla, y la sesion sigue mandando
+afd721a  D1 cierra su parte: el CI queda en verde en las dos ramas
+```
+
+### DESPLEGADO el 24/09/2026 21:2x Bogotá — la planta de oficina
+
+`8d1fbf4 .. 0925a7e`. Un solo commit, siete archivos, 1.273 líneas, todas
+altas. Medido **por contenido y no por hash** (`git patch-id --stable`):
+`d62a4df6be5f` a los dos lados.
+
+El centro de mando gana una **segunda vista**: una planta isométrica donde
+cada agente es un puesto de trabajo. El anillo de discos sigue siendo el de
+por omisión y no se tocó — está medido en producción desde esta mañana, y
+estrenar la planta como única vista sería cambiar algo que funciona por algo
+que nadie miró todavía en la operación real.
+
+**Lo que la planta muestra y el anillo no:** la estructura del tenant, que ya
+viajaba en el panorama y no se pintaba en ningún lado — quién atiende al
+cliente, quién trabaja para adentro, y por dónde entran las conversaciones.
+Para lo último el motor ahora expone `rol_de_entrada`, que vivía en
+`config/schema.py:2897` y no salía. **Si un tenant no lo declara, la pantalla
+lo dice** en vez de deducirlo: tomar «el primer rol orientado al cliente» es
+el error que el 07/09 dejó a un suscriptor sin internet hablando con ventas.
+
+**Por qué se anima tan poco.** Los datos llegan por sondeo cada 12 s
+(`lib/centro-mando/eventos.js`), así que no hay tiempo real que animar: lo
+único honesto es la diferencia entre dos fotos. El color de estado vira en vez
+de saltar, la carga cuenta de un número al otro, y un puesto que ENTRA en
+alarma destella una vez — seguir en alarma no dispara nada, o el aviso se
+repetiría cada 12 s hasta dejar de avisar. Un sello dice hace cuántos segundos
+se leyó. Cero movimiento perpetuo: en un tablero, lo que se mueve siempre deja
+de significar.
+
+```
+planta.test.js + PlantaOficina.test.js   43 verdes. Render REAL con
+                                         svelte/server: no que el componente
+                                         exista, sino que dibuje
+motor local, reiniciado                  rol_de_entrada: 'cliente_final'
+suite del frontend                       979 pasan (936 antes + 43 nuevas).
+                                         63 rojos en los MISMOS 17 archivos
+                                         de siempre: cero regresiones
+docker exec pnpm check                   45 -> 40 errores; 0 de los archivos
+                                         nuevos
+test_nucleo_sin_tenants                  verde
+test_registro_sin_pii                    verde (lo pidió el pre-commit)
+test_timeouts_modelo · test_editor_config verde
+```
+
+**Dos defectos los encontraron las guardas, no mirar la pantalla.** Vale
+anotarlos porque son el argumento entero a favor de correrlas:
+
+```
+{@const} suelto en el marcado NO COMPILA en Svelte. El componente no se
+  habria renderizado nunca, y `pnpm check` lo caza; abrir la pantalla, no.
+el nombre del area se recortaba TENIENDO SITIO: cuerpoQueCabe() devuelve el
+  cuerpo exacto para que entre, y rehacer esa division en recortar() daba
+  14,999 en vez de 15. Lo caza la prueba de render, no la vista.
+```
+
+⚠️ **LO QUE NO SE VERIFICÓ, y hay que cerrarlo mirando:** ningún píxel de esta
+vista se vio renderizado en un navegador. El dev server redirige a `/login` y
+entrar exige un JWT del backend — el mismo bloqueo que este archivo ya
+registra como *QA visual 🔴 NO EJECUTABLE*. Se sustituyó por pruebas que
+afirman sobre el HTML producido, que es más que compilar y menos que mirarlo.
+Queda pendiente: abrir `/centro-mando` en producción y pulsar **Planta**.
+
+**Saltado, diciéndolo:** los casos dorados (`cli/evaluar.py`) no corrieron —
+este cambio no toca prompt, catálogo ni modelo. Tampoco pasó por
+`auditor-independiente` ni `revisor-de-pii` como agentes; se corrió la guarda
+de PII a mano en su lugar.
 
 ### DESPLEGADO el 24/09/2026 17:0x Bogotá — y verificado en la pantalla
 
@@ -116,7 +204,12 @@ proxies era síncrono llamando a `cfg()`, así que los dos cambiaron de firma.
 Por eso se hizo a mano archivo por archivo: una sustitución por regex ya
 rompió ocho archivos antes, exactamente por esto.
 
-**Esta versión NO está desplegada.** Producción sigue en `1a83886`.
+~~**Esta versión NO está desplegada.** Producción sigue en `1a83886`.~~
+**Corregido el 24/09 21:30: SÍ está desplegada.** Producción pasó por
+`1a83886 → 8d1fbf4 → 0925a7e` esa misma tarde. La frase tachada se quedó
+vieja en cuestión de horas, que es exactamente el riesgo que este archivo
+tiene por construcción — se deja tachada, y no borrada, porque la siguiente
+sesión merece ver que se midió mal y cuándo.
 
 ⚠️ Ruido esperado y ya explicado, para que la próxima sesión no lo investigue
 de nuevo: al reiniciar el frontend aparecen `Token refresh failed ... 401` en
