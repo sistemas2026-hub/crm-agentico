@@ -2223,6 +2223,16 @@ class Escalamiento(Base):
     # inmediato, y esa es una decision suya. Un motivo que no este aca escala
     # como siempre, a la primera -- entre ellos 'solicitud_explicita', que es
     # el cliente PIDIENDO un humano y nunca debe hacerse esperar.
+    #
+    # La vuelta se concede a CUALQUIER rol, pero la nota que la acompaña
+    # depende de lo que ese rol puede hacer (nucleo/seguimiento/forzado.py,
+    # por_que_posponer): a un rol con herramientas se le pide que las use; a
+    # un rol que solo puede derivar --el de entrada-- se le pide que derive,
+    # porque pedirle "usa tus herramientas" era pedirle lo imposible y su
+    # escalada se posponia para siempre (25/09/2026). Y una escalada forzada
+    # por un hecho (escalar_si_falla, escalar_al_completar, pedido explicito)
+    # nunca se pospone, este o no su motivo en esta lista: el schema no lo
+    # valida todavia, el codigo si lo corta.
     intentar_resolver_antes: list[str] = Field(default_factory=list)
 
 
