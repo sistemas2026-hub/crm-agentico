@@ -173,6 +173,51 @@ R4  agosto 2026 · en un rol SIN herramientas de datos --el router-- el modelo n
 R4 importa doble: explica por qué el aviso existe justamente en el rol donde se
 está investigando el defecto. El mensaje no está ahí por descuido.
 
+## El criterio de la vista: **suficiente**, no mínima
+
+La pregunta que cierra este trabajo no es *cuánto* contexto darle al modelo, sino
+**qué tipo de contexto corresponde a la responsabilidad que está ejerciendo**. Y
+de ahí sale el criterio, que hay que fijar **antes** de leer los resultados o los
+resultados eligen mal:
+
+```
+MÍNIMA        solo los mensajes del cliente.
+              Puede alcanzar para UNA intención y perder identidad, estado y
+              lo que evita repetir preguntas ya contestadas.
+
+SUFICIENTE    el prompt del rol (estable, cacheable)
+            + el hilo conversacional necesario
+            + el estado actual, recalculado
+              SIN: narrativa de herramientas · historial administrativo ·
+                   escaladas previas como relato · procesos internos
+```
+
+### Por qué el criterio va antes del resultado
+
+`30_solo_user` **puede ganar el experimento y ser inaceptable.** Si da 5/5 en la
+decisión, la lectura tentadora es «la vista mínima alcanza». Pero esa vista quita
+el aviso de verificación, y eso es exactamente **R4**: en un rol sin herramientas
+de datos —el router— el modelo volvía a pedir la cédula de alguien ya verificado,
+en cada conversación.
+
+Una vista sirve si cumple **las dos** condiciones, y por eso el arnés mide dos
+preguntas sobre el **mismo** contexto:
+
+```
+deriva como la referencia     Y     pide documento 0/N
+```
+
+`deriva 5/5 · pide documento 3/5` no es una solución: decide bien y reintroduce
+la regresión de agosto. Es la trampa de optimizar una sola métrica.
+
+**La segunda pregunta se mide sobre el TEXTO**, y es la excepción justificada a la
+regla de medir sobre la traza: R4 se define como *le pide la cédula a alguien ya
+verificado*, y eso no deja rastro en ninguna herramienta — el router tiene
+`deriva_verificacion` y no verifica él mismo. Es un proxy por patrones y se
+declara como tal: un falso negativo es posible si el modelo lo pide con otras
+palabras, así que las respuestas de los casos en `0/N` se leen antes de darlos
+por limpios.
+
 ## Fuera de alcance, con su motivo
 
 **La auditoría de integridad de herramientas queda como deuda aparte.** Son tres
