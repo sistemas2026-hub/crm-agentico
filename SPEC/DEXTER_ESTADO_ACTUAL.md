@@ -7,8 +7,9 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **24/09/2026 ~21:30 Bogotá** — deploy de la planta de
-oficina (`0925a7e`) y remedición del mapa de ramas. Esta versión es la
+Última actualización: **24/09/2026 ~22:05 Bogotá** — deploy de la planta de
+oficina (`0925a7e`), su ajuste tras verla (`0c98fa5`) y la remedición del
+mapa de ramas. Esta versión es la
 **FUSIÓN A MANO** de las dos copias que existían de este archivo — una en
 `integrar-centro-mando` y otra en `feature/bandeja-relevo`, editadas las dos
 el mismo día, divergidas 252 lineas. No se borró nada de ninguna: se importó
@@ -70,7 +71,7 @@ rebaseado por otra sesión— y no cuántos commits había una tarde cualquiera.
 | `integrar-centro-mando` | **Activa, es esta.** Centro de Mando, sistema de trabajo con IA, plataforma multi-ISP | 🟡 **3 commits fuera de producción** (remedido 24/09 21:30) |
 | `feature/bandeja-relevo` | Bandeja Fase 1, batería de 41 flujos, validación de producción | 🟡 activa en `C:/tmp/dexter-bandeja`. **NO está congelada** pese a lo que dice la memoria: 3 commits hoy 16:12-16:14 |
 | `feat/campo-diseno-stitch` | **Dexter Campo.** 101 archivos de prueba, 551 pruebas | 🟡 activa en `C:/wisphub/_wt_campo`. Una tercera sesión implementa ahí «refrescar ficha» (`test_refrescar_ficha.py`, sin commitear) |
-| `fix/integracion-wisphub` | **Producción.** Push ahí ES deploy | `0925a7e` (24/09 21:2x) — la planta de oficina |
+| `fix/integracion-wisphub` | **Producción.** Push ahí ES deploy | `0c98fa5` (24/09 22:0x) — la planta de oficina, ajustada tras verla |
 
 **Los 3 que siguen fuera, remedidos el 24/09 21:30.** No son deuda olvidada:
 son trabajo de otra sesión, sin pushear a ninguna parte, y tocan config del
@@ -139,6 +140,41 @@ el nombre del area se recortaba TENIENDO SITIO: cuerpoQueCabe() devuelve el
   cuerpo exacto para que entre, y rehacer esa division en recortar() daba
   14,999 en vez de 15. Lo caza la prueba de render, no la vista.
 ```
+
+### AJUSTADA el 24/09 22:0x tras VERLA en producción — `0925a7e .. 0c98fa5`
+
+Se abrió la pantalla y salieron dos defectos que ninguna guarda podía cazar,
+porque las dos eran sobre lo que se VE y no sobre lo que el código afirma.
+Vale escribirlo así: el bloque de arriba dice que las guardas encontraron dos
+defectos que mirar no habría encontrado; este dice lo contrario, y los dos son
+ciertos. **Ninguna de las dos formas de verificar sustituye a la otra.**
+
+```
+la planta usaba el 57% DEL ANCHO, con el lado derecho vacio y los nombres
+  diminutos. No era el margen ni el reparto de columnas: un rombo isometrico
+  tiene SIEMPRE la relacion de su elevacion --1.48:1 a 34 grados-- y un
+  monitor ancho ronda 2:1. Ningun reparto lo arregla, porque el bounding box
+  depende de (cols-1)+(filas-1) y 4x2 mide lo mismo que 3x3.
+  -> la elevacion tambien se deriva del lienzo ahora. Medido sobre 1240x600
+     con 8 agentes:   fija a 34  escala 1.18 -> 57% del ancho
+                      derivada   escala 1.42 -> 74%  (elige 26 grados)
+     El piso son 26 aunque 22 diera 86%: mas plano, los puestos se ven desde
+     arriba y deja de leerse como una oficina.
+
+la leyenda del ANILLO se mostraba en la planta, describiendo un dibujo que no
+  estaba: "el grosor es la carga que pasa por esa via" y "punteada: sin
+  trafico ahora" sobre una pantalla sin una sola via.
+  -> solo sale con el anillo. La planta ya traia la suya: las zonas.
+```
+
+Verificado: 46 verdes en las pruebas de la planta (3 nuevas), 982 en la suite
+(979 + 3), 63 rojos en los MISMOS 17 archivos, `pnpm check` 40 errores en 29
+archivos y ninguno de los tocados.
+
+⚠️ **LO QUE NO SE VERIFICÓ EN EL PRIMER DEPLOY, y se cerró en el segundo:** el
+texto de abajo quedó obsoleto en una hora — la pantalla SÍ se vio, y de ahí
+salieron los dos defectos de este bloque. Se conserva porque describe un
+bloqueo que sigue vigente para la próxima pantalla que se construya.
 
 ⚠️ **LO QUE NO SE VERIFICÓ, y hay que cerrarlo mirando:** ningún píxel de esta
 vista se vio renderizado en un navegador. El dev server redirige a `/login` y
