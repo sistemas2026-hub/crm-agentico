@@ -21,6 +21,7 @@
   import { untrack } from 'svelte';
   import PuestoAgente from './PuestoAgente.svelte';
   import SistemasExternos from './SistemasExternos.svelte';
+  import ActividadViva from './ActividadViva.svelte';
   import { ESTADOS, normalizar } from '$lib/centro-mando/estados.js';
   import { rejillaPlanta, ordenDePintado, zonaDe, ZONAS, cambios } from '$lib/centro-mando/planta.js';
 
@@ -112,6 +113,20 @@
     });
     ro.observe(envoltura);
     return () => ro.disconnect();
+  });
+
+  /* Donde esta cada puesto, por nombre. Lo necesita la capa de actividad:
+     un puesto se dibuja a si mismo y no sabe donde estan los demas, asi que
+     lo que va DE un sitio A otro no lo puede dibujar el. El punto es el
+     centro del piso del modulo, no su esquina. */
+  const posiciones = $derived.by(() => {
+    /** @type {Record<string, {x:number,y:number}>} */
+    const m = {};
+    rej.celdas.forEach((c, i) => {
+      const a = agentes[i];
+      if (a) m[a.nombre] = { x: c.x, y: c.y + LADO * rej.ejes.ey };
+    });
+    return m;
   });
 
   const zonasPresentes = $derived(
@@ -255,6 +270,7 @@
             </g>
           {/if}
         {/each}
+        <ActividadViva eventos={panorama?.eventos || []} {posiciones} lado={LADO} />
       </g>
     </svg>
 
