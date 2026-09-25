@@ -2,17 +2,15 @@
   /**
    * La planta de la oficina: un puesto por agente, en rejilla isometrica.
    *
-   * Es la segunda vista del centro de mando. La primera --el anillo de
-   * discos-- sigue existiendo y no se toco: esta convive con ella, no la
-   * reemplaza. El anillo esta medido en produccion desde el 24/09/2026 y
-   * tirarlo para estrenar esto seria cambiar algo que funciona por algo que
-   * todavia nadie miro en la operacion real.
+   * Es la UNICA vista del centro de mando desde el 24/09/2026. Nacio como la
+   * segunda --convivia con un anillo de discos-- y ese anillo se retiro el
+   * mismo dia, por decision de producto, cuando esta llevaba tres
+   * despliegues verificados con datos reales.
    *
-   * QUE APORTA SOBRE EL ANILLO
-   * Hace visible la ESTRUCTURA del tenant, que el anillo no muestra: quien
-   * atiende al cliente, quien trabaja para adentro, y por donde entran las
-   * conversaciones (el `rol_de_entrada`). Todo eso ya viajaba en el panorama
-   * y no se pintaba en ningun lado.
+   * QUE MUESTRA QUE EL ANILLO NO MOSTRABA
+   * La ESTRUCTURA del tenant: quien atiende al cliente, quien trabaja para
+   * adentro, y por donde entran las conversaciones (el `rol_de_entrada`).
+   * Todo eso ya viajaba en el panorama y no se pintaba en ningun lado.
    *
    * LO QUE NO SE MUESTRA, A PROPOSITO
    * Nada del contenido de una conversacion: ni un mensaje, ni un nombre de
@@ -22,11 +20,16 @@
    */
   import { untrack } from 'svelte';
   import PuestoAgente from './PuestoAgente.svelte';
+  import SistemasExternos from './SistemasExternos.svelte';
   import { ESTADOS, normalizar } from '$lib/centro-mando/estados.js';
   import { rejillaPlanta, ordenDePintado, zonaDe, ZONAS, cambios } from '$lib/centro-mando/planta.js';
 
-  /** @type {{ panorama: any, alSeleccionar?: (a:any)=>void }} */
-  let { panorama, alSeleccionar = () => {} } = $props();
+  /** @type {{ panorama: any, ms?: (v:any)=>string, alSeleccionar?: (a:any)=>void }} */
+  let {
+    panorama,
+    ms = (v) => (v == null ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${v} ms`),
+    alSeleccionar = () => {}
+  } = $props();
 
   let caja = $state({ ancho: 0, alto: 0 });
   let envoltura = $state(/** @type {HTMLDivElement|null} */ (null));
@@ -245,6 +248,8 @@
       </button>
     {/each}
   </div>
+
+  <SistemasExternos servicios={panorama?.servicios || []} {ms} />
 
   <div class="pieplanta">
     {#if !entrada}
