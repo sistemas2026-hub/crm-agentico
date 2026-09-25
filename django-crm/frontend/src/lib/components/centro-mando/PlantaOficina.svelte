@@ -146,24 +146,49 @@
   }
 
   let arrastre = $state(/** @type {any} */ (null));
+  const UMBRAL = 4;
+
   function alBajar(ev) {
     if (ev.button !== 0) return;
-    arrastre = { x: ev.clientX, y: ev.clientY, vx: vista.x, vy: vista.y, movido: 0 };
-    try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch { /* sin captura */ }
+    /* NO se captura el puntero aqui, y ese detalle es el que rompio abrir la
+       ficha de un agente (24/09/2026, visto en produccion).
+       Con `setPointerCapture` activa, el elemento capturador se queda con
+       todos los eventos de puntero Y con el `click` que sale del par
+       pointerdown/pointerup: el evento se dispara en el DIV del lienzo y no
+       en el <g> del puesto, asi que el `onclick` del puesto no corria nunca.
+       Pulsar un agente dejaba de mostrar su ficha, sin ningun error.
+       Se captura mas abajo, solo cuando el gesto resulta ser un arrastre de
+       verdad. Un clic limpio no captura nada y llega a su destino. */
+    arrastre = { x: ev.clientX, y: ev.clientY, vx: vista.x, vy: vista.y, movido: 0, capturado: false };
   }
+
   function alMover(ev) {
     if (!arrastre) return;
     const dx = ev.clientX - arrastre.x, dy = ev.clientY - arrastre.y;
     arrastre.movido = Math.max(arrastre.movido, Math.abs(dx) + Math.abs(dy));
+    if (arrastre.movido < UMBRAL) return;   // todavia puede ser un clic
+    /* Ya es un arrastre: ahora si conviene capturar, para que siga
+       funcionando aunque el cursor se salga del lienzo. */
+    if (!arrastre.capturado) {
+      arrastre.capturado = true;
+      try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch { /* sin captura */ }
+    }
     vista = { ...vista, x: arrastre.vx + dx, y: arrastre.vy + dy };
   }
-  function alSoltar() { arrastre = null; }
-  /* Un arrastre de menos de 4 px cuenta como clic. Sin este umbral, abrir la
-     ficha de un puesto se vuelve imposible: el dedo siempre mueve algo. */
-  const arrastroDeVerdad = () => !!arrastre && arrastre.movido >= 4;
+
+  /* Un gesto de menos de 4 px cuenta como clic. Sin este umbral, abrir la
+     ficha de un puesto se vuelve imposible: el dedo siempre mueve algo.
+     Se mira `ultimoGesto` y no `arrastre`, porque para cuando llega el
+     `click` el `pointerup` ya limpio el arrastre -- leerlo ahi daba siempre
+     null y el umbral no filtraba nada. */
+  let ultimoGesto = $state(0);
+  function alSoltarGesto() {
+    ultimoGesto = arrastre ? arrastre.movido : 0;
+    arrastre = null;
+  }
 
   function seleccionar(a) {
-    if (arrastroDeVerdad()) return;
+    if (ultimoGesto >= UMBRAL) return;
     alSeleccionar(a);
   }
 
@@ -203,8 +228,8 @@
     onwheel={alaRueda}
     onpointerdown={alBajar}
     onpointermove={alMover}
-    onpointerup={alSoltar}
-    onpointercancel={alSoltar}
+    onpointerup={alSoltarGesto}
+    onpointercancel={alSoltarGesto}
     ondblclick={ajustar}
   >
     <svg role="img" aria-label="Planta de la oficina: un puesto por cada agente"
