@@ -7,7 +7,12 @@ import {
   cargaPorTecnico,
   ticketsPorOrigen,
   actividadReciente,
-  celdaDeSla
+  celdaDeSla,
+  nivelDePrioridad,
+  rotuloDeHallazgo,
+  antiguedadDe,
+  estadoDeRevision,
+  bandejaDeRevision
 } from './supervisor-noc-tablero.js';
 
 /**
@@ -375,5 +380,220 @@ describe('celdaDeSla', () => {
   it('un estado con los minutos perdidos sigue siendo legible', () => {
     expect(celdaDeSla('VENCE_PRONTO', null).texto).toBe('Por vencer');
     expect(celdaDeSla('VENCIDA', null).texto).toBe('Vencido');
+  });
+});
+
+describe('nivelDePrioridad', () => {
+  it('parte la escala declarada del backend en tres tramos', () => {
+    // 0-99, menor mas urgente: es lo que dice `supervisor.py::_prioridad`.
+    expect(nivelDePrioridad(0).texto).toBe('Alta');
+    expect(nivelDePrioridad(33).texto).toBe('Alta');
+    expect(nivelDePrioridad(34).texto).toBe('Media');
+    expect(nivelDePrioridad(66).texto).toBe('Media');
+    expect(nivelDePrioridad(67).texto).toBe('Baja');
+    expect(nivelDePrioridad(99).texto).toBe('Baja');
+  });
+
+  it('menor numero es MAS urgente, no menos', () => {
+    // Invertir la escala es el error facil: 30 tiene que ser Alta.
+    expect(nivelDePrioridad(30).orden).toBeLessThan(nivelDePrioridad(80).orden);
+  });
+
+  it('sin prioridad no se elige un nivel al azar', () => {
+    expect(nivelDePrioridad(null).texto).toBe('Sin prioridad');
+    expect(nivelDePrioridad(undefined).texto).toBe('Sin prioridad');
+  });
+});
+
+describe('rotuloDeHallazgo', () => {
+  it('unifica los nombres del mismo fenomeno', () => {
+    const crudo = 'Caso cerrado en el proveedor y abierto en el CRM';
+    expect(rotuloDeHallazgo('caso_desincronizado', crudo)).toBe(
+      'Desincronización WispHub ↔ Dexter'
+    );
+  });
+
+  it('respeta el catalogo del backend para todo lo demas', () => {
+    // El rotulo solo se cambia donde el mismo hecho tenia varios nombres. Un
+    // mapa que reescriba todo seria un segundo catalogo desincronizandose.
+    expect(rotuloDeHallazgo('orden_sin_programar', 'Orden sin programación')).toBe(
+      'Orden sin programación'
+    );
+  });
+
+  it('sin display cae a la clave en vez de quedar vacio', () => {
+    expect(rotuloDeHallazgo('tipo_nuevo', null)).toBe('tipo_nuevo');
+  });
+});
+
+describe('antiguedadDe', () => {
+  const ahora = new Date('2026-09-25T12:00:00Z');
+
+  it('escala la unidad segun el tamaño', () => {
+    expect(antiguedadDe('2026-09-25T11:30:00Z', ahora).texto).toBe('30 min');
+    expect(antiguedadDe('2026-09-25T06:00:00Z', ahora).texto).toBe('6 horas');
+    expect(antiguedadDe('2026-09-17T12:00:00Z', ahora).texto).toBe('8 días');
+  });
+
+  it('singulariza', () => {
+    expect(antiguedadDe('2026-09-25T11:00:00Z', ahora).texto).toBe('1 hora');
+    expect(antiguedadDe('2026-09-22T12:00:00Z', ahora).texto).toBe('3 días');
+  });
+
+  it('sin fecha no estima una antiguedad', () => {
+    expect(antiguedadDe(null, ahora)).toEqual({ texto: '', minutos: null });
+    expect(antiguedadDe('no-es-fecha', ahora)).toEqual({ texto: '', minutos: null });
+  });
+
+  it('una fecha futura no da un negativo', () => {
+    expect(antiguedadDe('2026-09-26T12:00:00Z', ahora).minutos).toBe(0);
+  });
+});
+
+describe('estadoDeRevision', () => {
+  it('solo propuesta esta pendiente', () => {
+    expect(estadoDeRevision('propuesta').pendiente).toBe(true);
+    for (const e of ['aceptada', 'modificada', 'rechazada', 'cancelada', 'expirada']) {
+      expect(estadoDeRevision(e).pendiente).toBe(false);
+    }
+  });
+
+  it('expirada NO se muestra como rechazada', () => {
+    // Nadie la rechazo: se vencio sin que la miraran. Llamarla rechazada
+    // diria que alguien decidio.
+    expect(estadoDeRevision('expirada').texto).not.toBe(estadoDeRevision('rechazada').texto);
+    expect(estadoDeRevision('expirada').texto).toContain('sin revisar');
+  });
+
+  it('los seis estados dicen cosas distintas', () => {
+    const textos = ['propuesta', 'aceptada', 'modificada', 'rechazada', 'cancelada', 'expirada'].map(
+      (e) => estadoDeRevision(e).texto
+    );
+    expect(new Set(textos).size).toBe(6);
+  });
+});
+
+describe('bandejaDeRevision', () => {
+  const hoy = new Date('2026-09-25T12:00:00Z');
+  let contador = 0;
+  const prop = (extra) => ({
+    id: `p${++contador}`,
+    estado: 'propuesta',
+    prioridad: 50,
+    tipo_senal: 'caso_antiguo',
+    tipo_senal_display: 'Caso abierto antiguo',
+    accion_propuesta: 'Revisar el caso',
+    origen_creado_en: '2026-09-20T12:00:00Z',
+    ...extra
+  });
+
+  it('numera por posicion en lo que se ve, no por id', () => {
+    const b = bandejaDeRevision(
+      [prop({ id: 'zzz', prioridad: 10 }), prop({ id: 'aaa', prioridad: 20 })],
+      {},
+      hoy
+    );
+    expect(b.map((p) => p.n)).toEqual([1, 2]);
+    expect(b[0].id).toBe('zzz');
+  });
+
+  it('la numeracion no deja huecos al filtrar', () => {
+    // Numerar antes de filtrar daria 1, 3: el numero dejaria de corresponder
+    // con la fila que se esta mirando.
+    const b = bandejaDeRevision(
+      [
+        prop({ id: 'a', prioridad: 10 }),
+        prop({ id: 'b', prioridad: 50 }),
+        prop({ id: 'c', prioridad: 20 }),
+        prop({ id: 'd', prioridad: 80 })
+      ],
+      { nivel: 'Alta' },
+      hoy
+    );
+    expect(b.map((p) => p.n)).toEqual([1, 2]);
+    expect(b.map((p) => p.id)).toEqual(['a', 'c']);
+  });
+
+  it('ordena por nivel, luego por urgencia, luego por antiguedad', () => {
+    const b = bandejaDeRevision(
+      [
+        prop({ id: 'media', prioridad: 50 }),
+        prop({ id: 'alta-nueva', prioridad: 20, origen_creado_en: '2026-09-24T12:00:00Z' }),
+        prop({ id: 'alta-vieja', prioridad: 20, origen_creado_en: '2026-08-01T12:00:00Z' }),
+        prop({ id: 'mas-urgente', prioridad: 5 })
+      ],
+      {},
+      hoy
+    );
+    expect(b.map((p) => p.id)).toEqual(['mas-urgente', 'alta-vieja', 'alta-nueva', 'media']);
+  });
+
+  it('lo que no tiene fecha de origen va al final de su grupo', () => {
+    // No se le inventa una edad para poder compararlo.
+    const b = bandejaDeRevision(
+      [
+        prop({ id: 'sin-fecha', prioridad: 20, origen_creado_en: null }),
+        prop({ id: 'con-fecha', prioridad: 20 })
+      ],
+      {},
+      hoy
+    );
+    expect(b.map((p) => p.id)).toEqual(['con-fecha', 'sin-fecha']);
+  });
+
+  it('el filtro de pendientes deja fuera lo ya decidido', () => {
+    const b = bandejaDeRevision(
+      [
+        prop({ id: 'p' }),
+        prop({ id: 'a', estado: 'aceptada' }),
+        prop({ id: 'r', estado: 'rechazada' })
+      ],
+      { estado: 'pendientes' },
+      hoy
+    );
+    expect(b.map((p) => p.id)).toEqual(['p']);
+  });
+
+  it('el filtro de decididas es el complemento exacto', () => {
+    const todas = [prop({ id: 'p' }), prop({ id: 'a', estado: 'aceptada' })];
+    const pend = bandejaDeRevision(todas, { estado: 'pendientes' }, hoy).length;
+    const dec = bandejaDeRevision(todas, { estado: 'decididas' }, hoy).length;
+    expect(pend + dec).toBe(todas.length);
+  });
+
+  it('distingue con propuesta de sin propuesta', () => {
+    const todas = [prop({ id: 'con' }), prop({ id: 'sin', accion_propuesta: '' })];
+    expect(bandejaDeRevision(todas, { conPropuesta: 'si' }, hoy).map((p) => p.id)).toEqual(['con']);
+    expect(bandejaDeRevision(todas, { conPropuesta: 'no' }, hoy).map((p) => p.id)).toEqual(['sin']);
+  });
+
+  it('los filtros se combinan sin pisarse', () => {
+    const b = bandejaDeRevision(
+      [
+        prop({ id: 'si', prioridad: 10, tipo_senal: 'caso_desincronizado' }),
+        prop({ id: 'otro-tipo', prioridad: 10, tipo_senal: 'caso_antiguo' }),
+        prop({ id: 'otro-nivel', prioridad: 80, tipo_senal: 'caso_desincronizado' }),
+        prop({
+          id: 'decidida',
+          prioridad: 10,
+          tipo_senal: 'caso_desincronizado',
+          estado: 'aceptada'
+        })
+      ],
+      { estado: 'pendientes', nivel: 'Alta', tipo: 'caso_desincronizado' },
+      hoy
+    );
+    expect(b.map((p) => p.id)).toEqual(['si']);
+  });
+
+  it('cada fila llega con su rotulo unificado y su antiguedad', () => {
+    const b = bandejaDeRevision([prop({ tipo_senal: 'caso_desincronizado' })], {}, hoy);
+    expect(b[0].rotulo).toBe('Desincronización WispHub ↔ Dexter');
+    expect(b[0].edad.texto).toBe('5 días');
+  });
+
+  it('sin propuestas devuelve una lista vacia, no revienta', () => {
+    expect(bandejaDeRevision([], {}, hoy)).toEqual([]);
+    expect(bandejaDeRevision(null, {}, hoy)).toEqual([]);
   });
 });

@@ -36,6 +36,9 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
     orden_numero = serializers.SerializerMethodField()
     sla_estado = serializers.SerializerMethodField()
     sla_minutos = serializers.SerializerMethodField()
+    cliente = serializers.SerializerMethodField()
+    asunto = serializers.SerializerMethodField()
+    origen_creado_en = serializers.SerializerMethodField()
 
     class Meta:
         model = PropuestaSupervisor
@@ -46,6 +49,7 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
             "created_at", "expira_en",
             "zona", "tecnico", "ticket_externo", "proveedor_externo",
             "orden_numero", "sla_estado", "sla_minutos",
+            "cliente", "asunto", "origen_creado_en",
         ]
 
     def _contexto(self, obj):
@@ -71,6 +75,15 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
 
     def get_sla_minutos(self, obj):
         return self._contexto(obj).get("sla_minutos")
+
+    def get_cliente(self, obj):
+        return self._contexto(obj).get("cliente", "")
+
+    def get_asunto(self, obj):
+        return self._contexto(obj).get("asunto", "")
+
+    def get_origen_creado_en(self, obj):
+        return self._contexto(obj).get("origen_creado_en")
 
 
 class PropuestaDetalleSerializer(serializers.ModelSerializer):

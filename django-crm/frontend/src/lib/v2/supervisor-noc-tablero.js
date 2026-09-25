@@ -70,8 +70,11 @@ export function kpisDelTablero(indicadores, propuestas) {
     {
       clave: 'propuestas',
       n: pendientes,
-      titulo: 'Propuestas pendientes',
-      sub: 'Requieren revisión',
+      // Solo cambia el texto: el valor sigue siendo el conteo de propuestas
+      // en estado `propuesta`, y el estado del modelo no se toca para
+      // arreglar un rotulo de pantalla.
+      titulo: 'Pendientes por revisión',
+      sub: 'Esperan decisión humana',
       tono: 'info'
     },
     {
@@ -430,3 +433,170 @@ export const BLOQUES_SIN_DATO = {
  * una columna de rayas sin explicación.
  */
 export const COLUMNAS_SIN_DATO = [];
+
+/* ===========================================================================
+   LA BANDEJA · «Pendientes por revisión»
+   Antes eran dos tablas: «Hallazgos recientes» arriba y «Pendientes de
+   revisión» abajo, con las MISMAS 93 filas -- todas estaban en estado
+   `propuesta`, así que las dos listas coincidían fila por fila. Leer dos
+   veces lo mismo no es redundancia inofensiva: hace dudar de si son dos
+   cosas distintas que casualmente coinciden.
+   =========================================================================== */
+
+/**
+ * La prioridad como palabra.
+ *
+ * DE DÓNDE SALEN LOS CORTES, porque no son una opinión: el backend declara
+ * la escala en `supervisor.py::_prioridad` -- 0 a 99, y **menor es más
+ * urgente**, igual que en `ProgramacionOrden`. Esto la parte en tres tramos
+ * iguales de esa misma escala, sin añadir ninguna regla de negocio nueva.
+ *
+ * Lo que hoy se ve con eso: las bases del detector van de 30 a 90 y casi
+ * todas las señales frecuentes arrancan entre 30 y 55, así que la mayoría
+ * cae en Alta o Media. No es un fallo del corte -- es lo que el detector
+ * asigna. El número exacto sigue a la vista en el `title`.
+ *
+ * @param {number|null} n
+ */
+export function nivelDePrioridad(n) {
+  if (typeof n !== 'number') return { texto: 'Sin prioridad', tono: 'neutro', orden: 3 };
+  if (n <= 33) return { texto: 'Alta', tono: 'critico', orden: 0 };
+  if (n <= 66) return { texto: 'Media', tono: 'alerta', orden: 1 };
+  return { texto: 'Baja', tono: 'ok', orden: 2 };
+}
+
+/**
+ * Los rótulos unificados de tipo de hallazgo.
+ *
+ * El backend manda `tipo_senal_display` («Caso cerrado en el proveedor y
+ * abierto en el CRM») y ese texto se queda como está: es su catálogo y
+ * cambiarlo para arreglar la pantalla sería mover la regla al lado
+ * equivocado. Lo que cambia es CÓMO SE LEE, y solo donde el mismo fenómeno
+ * tenía varios nombres.
+ */
+const ROTULO_UNIFICADO = {
+  caso_desincronizado: 'Desincronización WispHub ↔ Dexter',
+  caso_antiguo: 'Caso abierto antiguo'
+};
+
+/**
+ * @param {string} tipoSenal
+ * @param {string} display  el `tipo_senal_display` del backend
+ */
+export function rotuloDeHallazgo(tipoSenal, display) {
+  return ROTULO_UNIFICADO[tipoSenal] ?? display ?? tipoSenal ?? '';
+}
+
+/**
+ * Cuánto lleva existiendo algo, en palabras.
+ *
+ * Se mide sobre el ORIGEN -- el caso o la orden -- y no sobre la propuesta:
+ * la propuesta se vuelve a emitir y su fecha diría «hace 2 horas» de un caso
+ * de 40 días. Sin fecha no se estima: devuelve cadena vacía y la pantalla lo
+ * dice en palabras.
+ *
+ * @param {string|null} iso
+ * @param {Date} [ahora]
+ */
+export function antiguedadDe(iso, ahora = new Date()) {
+  if (!iso) return { texto: '', minutos: null };
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return { texto: '', minutos: null };
+
+  const minutos = Math.max(0, Math.round((ahora.getTime() - t) / 60000));
+  if (minutos < 60) return { texto: `${minutos} min`, minutos };
+  const horas = Math.round(minutos / 60);
+  if (horas < 48) return { texto: `${horas} ${horas === 1 ? 'hora' : 'horas'}`, minutos };
+  const dias = Math.round(horas / 24);
+  return { texto: `${dias} ${dias === 1 ? 'día' : 'días'}`, minutos };
+}
+
+/**
+ * En qué punto de la revisión humana está cada propuesta.
+ *
+ * REVISADO NO ES RESUELTO, y los seis estados del modelo no se colapsan:
+ *
+ *   - `propuesta`  espera una decisión. Es lo que esta bandeja existe para
+ *                  mostrar.
+ *   - `aceptada`   alguien estuvo de acuerdo. La condición que la originó
+ *                  puede seguir viva: aceptar no ejecuta nada.
+ *   - `modificada` alguien la corrigió y la aceptó cambiada.
+ *   - `rechazada`  alguien dijo que no.
+ *   - `cancelada`  la condición dejó de aplicar. Nadie opinó sobre el fondo.
+ *   - `expirada`   se venció sin que nadie la mirara. NO es un rechazo, y
+ *                  mostrarla como tal diría que alguien decidió.
+ *
+ * @param {string} estado
+ */
+export function estadoDeRevision(estado) {
+  const MAPA = {
+    propuesta: { texto: 'Pendiente', tono: 'info', pendiente: true },
+    aceptada: { texto: 'Revisada', tono: 'ok', pendiente: false },
+    modificada: { texto: 'Revisada con cambios', tono: 'ok', pendiente: false },
+    rechazada: { texto: 'Rechazada', tono: 'critico', pendiente: false },
+    cancelada: { texto: 'Ya no aplica', tono: 'neutro', pendiente: false },
+    expirada: { texto: 'Expiró sin revisar', tono: 'alerta', pendiente: false }
+  };
+  return MAPA[estado] ?? { texto: estado ?? '', tono: 'neutro', pendiente: false };
+}
+
+/**
+ * Las propuestas listas para la bandeja: filtradas, ordenadas y numeradas.
+ *
+ * LA NUMERACIÓN ES LA POSICIÓN EN LO QUE SE ESTÁ VIENDO, no el id. Se asigna
+ * al final, después de filtrar y ordenar, que es lo único que la hace
+ * corresponder con lo que hay en pantalla: numerar antes dejaría huecos
+ * (1, 4, 7) en cuanto un filtro sacara filas del medio.
+ *
+ * El orden: prioridad alta primero; dentro de cada nivel, el número crudo
+ * (más urgente antes); y a igual urgencia, lo más viejo primero -- que es la
+ * regla que el backend ya aplica con `ordering = ["prioridad", "-created_at"]`.
+ *
+ * @param {any[]} propuestas
+ * @param {{ nivel?: string, tipo?: string, estado?: string, conPropuesta?: string }} filtros
+ * @param {Date} [ahora]
+ */
+export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) {
+  if (!Array.isArray(propuestas)) return [];
+
+  const enriquecidas = propuestas.map((p) => {
+    const nivel = nivelDePrioridad(p?.prioridad);
+    const revision = estadoDeRevision(p?.estado);
+    const edad = antiguedadDe(p?.origen_creado_en, ahora);
+    return {
+      ...p,
+      nivel,
+      revision,
+      edad,
+      rotulo: rotuloDeHallazgo(p?.tipo_senal, p?.tipo_senal_display),
+      // «Con propuesta» significa que hay una acción recomendada escrita.
+      // Una señal detectada sin acción es un hallazgo sin recomendación, y
+      // son dos situaciones distintas para quien tiene que decidir.
+      tienePropuesta: Boolean(p?.accion_propuesta)
+    };
+  });
+
+  const visibles = enriquecidas.filter((p) => {
+    if (filtros.estado === 'pendientes' && !p.revision.pendiente) return false;
+    if (filtros.estado === 'decididas' && p.revision.pendiente) return false;
+    if (filtros.nivel && p.nivel.texto !== filtros.nivel) return false;
+    if (filtros.tipo && p.tipo_senal !== filtros.tipo) return false;
+    if (filtros.conPropuesta === 'si' && !p.tienePropuesta) return false;
+    if (filtros.conPropuesta === 'no' && p.tienePropuesta) return false;
+    return true;
+  });
+
+  visibles.sort((a, b) => {
+    if (a.nivel.orden !== b.nivel.orden) return a.nivel.orden - b.nivel.orden;
+    const pa = typeof a.prioridad === 'number' ? a.prioridad : 999;
+    const pb = typeof b.prioridad === 'number' ? b.prioridad : 999;
+    if (pa !== pb) return pa - pb;
+    // Lo más viejo primero. Sin fecha va al final: no se le inventa una edad
+    // para poder compararlo.
+    const ea = a.edad.minutos ?? -1;
+    const eb = b.edad.minutos ?? -1;
+    return eb - ea;
+  });
+
+  return visibles.map((p, i) => ({ ...p, n: i + 1 }));
+}

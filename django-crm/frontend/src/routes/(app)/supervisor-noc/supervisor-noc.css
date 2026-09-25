@@ -860,3 +860,21 @@
   z-index: 1;
   background: var(--snoc-surface-container-low);
 }
+
+/* El unico KPI que es un enlace. Hereda todo del resto y solo anuncia que se
+   puede pulsar: dos KPI que se ven igual y se comportan distinto confunden
+   mas que uno que se ve distinto. */
+.snoc-kpi-enlace {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.snoc-kpi-enlace:hover,
+.snoc-kpi-enlace:focus-visible {
+  border-color: var(--snoc-primary);
+  box-shadow: 0 0 0 1px var(--snoc-primary);
+}
+@media (prefers-reduced-motion: reduce) {
+  .snoc-kpi-enlace { transition: none; }
+}
