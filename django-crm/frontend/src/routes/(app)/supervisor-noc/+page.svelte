@@ -91,11 +91,18 @@
     busqueda = '';
   }
 
+  /** Si hay algo que limpiar. El estado abre en 'pendientes', que es el
+      valor por defecto y no cuenta como filtro puesto. */
+  const hayFiltros = $derived(
+    Boolean(filtro || filtroNivel || filtroPropuesta || busqueda.trim()) ||
+      filtroEstado !== 'pendientes'
+  );
+
   function limpiarFiltros() {
     filtro = null;
     filtroNivel = null;
     filtroPropuesta = '';
-    filtroEstado = '';
+    filtroEstado = 'pendientes';
     busqueda = '';
   }
 
@@ -748,6 +755,16 @@
                 <span class="snoc-icono" style="font-size:18px;">rule</span>
               </div>
               <div class="snoc-pila-xs">
+                <!--
+                  Dos lineas y no un titulo largo: la de arriba dice DONDE
+                  estas -- el centro entero -- y la de abajo QUE es esta
+                  seccion. Fundirlas en «Centro del Supervisor NOC IA -
+                  Pendientes por revision» daria un titulo que se lee como un
+                  breadcrumb y pesa mas que la tabla que encabeza.
+                -->
+                <span class="snoc-label-sm snoc-secundario snoc-rotulo-centro">
+                  Centro del Supervisor NOC IA
+                </span>
                 <h2 class="snoc-h3">Pendientes por revisión</h2>
                 {#if data.hallazgos.error}
                   <span class="snoc-body-sm snoc-error-txt">No se pudieron leer</span>
@@ -827,6 +844,18 @@
                 >
                   Sin propuesta
                 </button>
+
+                <!--
+                  Solo aparece cuando hay algo que limpiar. Un boton siempre
+                  presente que la mitad de las veces no hace nada enseña a
+                  ignorarlo.
+                -->
+                {#if hayFiltros}
+                  <button class="snoc-enlace snoc-limpiar" type="button" onclick={limpiarFiltros}>
+                    <span class="snoc-icono" style="font-size:14px;" aria-hidden="true">filter_alt_off</span>
+                    Limpiar filtros
+                  </button>
+                {/if}
               </div>
 
               <!--
@@ -888,7 +917,7 @@
               {busqueda.trim()
                 ? `Ninguna propuesta coincide con «${busqueda.trim()}».`
                 : 'Ninguna propuesta con esos filtros.'}
-              <button class="snoc-enlace" type="button" onclick={limpiarFiltros}>Ver todas</button>
+              <button class="snoc-enlace" type="button" onclick={limpiarFiltros}>Limpiar filtros</button>
             </p>
           {:else}
             <div class="snoc-tabla-caja">
@@ -993,6 +1022,7 @@
                           type="button"
                           onclick={() => abrirDetalle(p.id)}
                         >
+                          <span class="snoc-icono" style="font-size:14px;" aria-hidden="true">visibility</span>
                           Ver detalle
                         </button>
                       </td>

@@ -80,7 +80,7 @@ export function kpisDelTablero(indicadores, propuestas) {
     {
       clave: 'sla',
       n: suma('orden_sla_por_vencer', 'orden_sla_vencido'),
-      titulo: 'SLA en riesgo',
+      titulo: 'SLA a riesgo',
       sub: 'Próximos a vencer',
       tono: 'alerta'
     },

@@ -1071,3 +1071,16 @@
   padding: 0 var(--snoc-xs); color: var(--snoc-outline);
   font-size: 0.75rem; user-select: none;
 }
+
+/* El nombre del centro, sobre el titulo de la bandeja. Discreto a proposito:
+   dice donde estas, no que estas mirando. */
+.snoc-rotulo-centro {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--snoc-on-surface-variant);
+}
+
+.snoc-limpiar {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.6875rem; margin-left: auto;
+}
