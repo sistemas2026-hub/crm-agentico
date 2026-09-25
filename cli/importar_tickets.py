@@ -181,12 +181,23 @@ def main():
     p.add_argument("--detalle", action="store_true", help="una linea por ticket")
     p.add_argument("--reconciliar", action="store_true",
                    help="ademas, que cambiaria de los casos ya conocidos")
+    p.add_argument("--solo-reconciliar", action="store_true",
+                   help="SOLO refresca los external_* de los casos que YA "
+                        "existen. No lista tickets, no descubre y no crea "
+                        "ningun caso. Implica --reconciliar.")
     p.add_argument("--aplicar", action="store_true",
                    help="ESCRIBE: crea los casos de los candidatos. Sin esto, "
                         "el comando es de solo lectura.")
     p.add_argument("--config-yaml", action="store_true",
                    help="usar tenants/<slug>.config.yaml en vez de la base")
     args = p.parse_args()
+
+    #  '--solo-reconciliar' implica '--reconciliar' en vez de exigir las dos.
+    #  Sin esto, pasarla sola no hace nada -- el bloque de reconciliacion mira
+    #  'args.reconciliar'-- y el comando terminaria diciendo "no se actualizo
+    #  ningun caso" sobre una bandera que se pidio justamente para actualizar.
+    if args.solo_reconciliar:
+        args.reconciliar = True
 
     if args.config_yaml:
         config = cargar_config(RAIZ / "tenants" / f"{args.tenant}.config.yaml")
@@ -206,12 +217,36 @@ def main():
           f"(cada_horas={conf.cada_horas}, departamentos={len(conf.departamentos)}, "
           f"asuntos={len(conf.asuntos)}, estados={conf.estados_descubrimiento or 'ninguno'})")
 
-    tickets = listar_tickets(config, args.tenant, desde, hasta)
-    print(f"[wisphub] tickets en la ventana: {len(tickets)}")
-    ids = [str(t.get("id_ticket")) for t in tickets if t.get("id_ticket")]
-    conocidos, registro = tickets_conocidos(config, args.tenant, ids)
-    casos = casos_de_este_proveedor(config, args.tenant) if args.reconciliar else []
-    print(f"[casos] con referencia externa: {len(conocidos)}")
+    #  SOLO RECONCILIAR  --  el camino que no PUEDE crear nada
+    #  ------------------------------------------------------
+    #  No se llama a 'listar_tickets': sin tickets no hay candidatos, y sin
+    #  candidatos no hay nada que crear. El corte va ACA, en el origen del dato,
+    #  y no en un 'if' justo antes de escribir -- una bandera que solo se
+    #  consulta al final deja el descubrimiento corriendo y depende de que nadie
+    #  agregue una segunda escritura mas abajo.
+    #
+    #  El registro de tickets que abrio Dexter se obtiene igual, pero de los ids
+    #  de los PROPIOS CASOS en vez de los del listado. Importa y no es un
+    #  detalle: ese set alimenta 'clasificar_creador_persistente', y con un set
+    #  vacio un caso cuyo 'external_created_by_type' no fuera ya 'dexter' podria
+    #  degradarse a 'externo_desconocido'. Los que Dexter creo estan protegidos
+    #  por su tipo guardado, pero pasar el set correcto no cuesta ninguna llamada
+    #  extra: los ids ya vienen en los casos que se acaban de leer.
+    if args.solo_reconciliar:
+        casos = casos_de_este_proveedor(config, args.tenant)
+        ids = [str(c.get("external_ticket_id")) for c in casos
+               if c.get("external_ticket_id")]
+        conocidos, registro = tickets_conocidos(config, args.tenant, ids)
+        tickets = []
+        print("[solo-reconciliar] NO se lista WispHub y NO se crea ningun caso")
+        print(f"[casos] con referencia externa: {len(casos)}")
+    else:
+        tickets = listar_tickets(config, args.tenant, desde, hasta)
+        print(f"[wisphub] tickets en la ventana: {len(tickets)}")
+        ids = [str(t.get("id_ticket")) for t in tickets if t.get("id_ticket")]
+        conocidos, registro = tickets_conocidos(config, args.tenant, ids)
+        casos = casos_de_este_proveedor(config, args.tenant) if args.reconciliar else []
+        print(f"[casos] con referencia externa: {len(conocidos)}")
 
     areas_por_persona = persistencia.areas_de_colaboradores(args.tenant)
     print(f"[areas] colaboradores con area: {len(areas_por_persona)} "
@@ -247,7 +282,11 @@ def main():
     _ACTOR_CLI = f"cli:{getpass.getuser()}"
 
     _resultado = {"creados": 0, "ya_estaban": 0, "fallidos": 0}
-    if args.aplicar:
+    #  La segunda barrera, y es a proposito redundante: 'tickets' ya viene vacio
+    #  arriba, asi que 'veredictos' no trae candidatos y esto no crearia nada
+    #  igual. La condicion explicita esta para que la intencion se lea tambien
+    #  aqui, que es donde alguien va a agregar la proxima escritura.
+    if args.aplicar and not args.solo_reconciliar:
         print(f"\n{'=' * 74}\n  APLICANDO  --  esto ESCRIBE casos\n{'=' * 74}")
         _resultado = aplicar(config, args.tenant, veredictos,
                              actor=_ACTOR_CLI)
@@ -281,7 +320,14 @@ def main():
             print(f"    ticket {c.external_ticket_id}: {dif}")
 
     print(f"\n{'=' * 74}")
-    if args.aplicar:
+    if args.aplicar and args.solo_reconciliar:
+        #  Decir "0 creados" seria cierto y confuso: en este modo no es que no
+        #  se haya creado nada, es que no habia camino para crearlo. La ultima
+        #  linea es la que alguien lee para saber que paso, y ya dijo una vez lo
+        #  contrario de lo que habia pasado.
+        print("  Solo reconciliacion: 0 casos creados porque no se busco "
+              "ninguno. Contra WispHub, solo GET.")
+    elif args.aplicar:
         # Decir "no se creo nada" despues de crear 28 casos no es un detalle de
         # redaccion: es la ultima linea que alguien lee para saber que paso, y
         # decia lo contrario de lo que habia pasado.
