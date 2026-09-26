@@ -146,6 +146,16 @@ Cada paso **acota, nunca autoriza**: pasarlo no exime de los siguientes. Las her
 | descubrir endpoints de WispHub (solo lectura) | `py -3.13 cli/sondear_api.py` |  |
 | el interruptor de autonomía | `py -3.13 cli/autonomia.py rapilink` |  |
 
+**Un instrumento solo mide el camino que recorre, y el disparador de arriba no lo dice.** `cli/evaluar.py` llama `motor.responder()` y replica *parte* de `atender_turno`: **no pasa por la posposición de una escalada, ni por el reencauzamiento, ni por nada que viva en el turno** (medido el 26/09/2026: `grep -c "por_que_posponer|_aplicar_posposicion|intento_antes_de_escalar|nota_pendiente" cli/evaluar.py` = **0**). Ese día se corrieron los 88 casos para validar un cambio en la nota que el motor le inyecta al modelo dentro del turno, y el set no podía verlo. Entonces:
+
+| Qué cambió | Qué lo mide | Qué es |
+|---|---|---|
+| Una decisión en **código** dentro del turno | una prueba de `tests/` que invoque esa función | **guarda**: corre sin modelo, y sirve si mata la mutación que la rompe |
+| La **conducta del modelo** dentro del turno | `cli/bateria_flujos.py` (pasa por `atender_turno`) | instrumento, no guarda: pide el modelo, tiene varianza y no corre en CI |
+| La **conducta del modelo** en `responder()` | `cli/evaluar.py` | instrumento, y es el que **no alcanza** el camino del turno |
+
+Y un porcentaje de los casos dorados **no se lee solo**: sin `SMARTOLT_API_KEY`, `BOTTLECRM_API_TOKEN` o el RAG, cadenas enteras fallan aguas arriba. La misma corrida sobre lo desplegado, en el mismo entorno, es el único control que separa una regresión del ruido — 70/88 contra 69/88, con divergentes en direcciones opuestas, es varianza.
+
 **Los casos dorados** (`evaluacion/<slug>.casos.yaml`) corren contra el motor **real** y afirman sobre la **traza** —qué herramientas se llamaron, a qué área se derivó, si hubo errores, qué no puede aparecer en la respuesta— nunca sobre la redacción: el modelo dice lo mismo de diez formas y un test que exige una frase exacta falla por lo que no importa.
 
 Nacen de una lección cara (14/08/2026): tres bugs estuvieron rotos horas —una herramienta devolviendo un *error* donde debía haber un dato, un veredicto que no se calculaba, una precondición imposible de cumplir— y **ninguno se veía leyendo la respuesta**. Los tres se ven en la traza. Abrir el simulador a mano no los detecta. Cuando algo falle en producción, agregarlo al set con lo que *debería* haber pasado.
