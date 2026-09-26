@@ -62,7 +62,7 @@ export async function leerAjustesBandeja(locals, fetch) {
  * El rango lo valida el motor (0-1440 minutos, -40..0 dBm) y su mensaje de
  * error es más útil que uno genérico, así que se deja pasar tal cual.
  *
- * @param {{ sla_toma_minutos: string | number, umbral_rx_dbm: string | number | null, sin_gestion_horas?: string | number | null }} valores
+ * @param {{ sla_toma_minutos: string | number, umbral_rx_dbm: string | number | null, sin_gestion_horas: string | number | null }} valores
  */
 export async function guardarAjustesBandeja(locals, fetch, valores) {
   const cfg = await destinoDelAsistente(locals, fetch);

@@ -495,6 +495,15 @@ def prueba_banda_sin_gestion() -> None:
     else:
         comprobar(False, "la firma vieja de tres argumentos todavia se acepta")
 
+    # --- 5. y la carga del YAML no lo puede pisar sin frenar --------------
+    # SECCIONES_EDITABLES es la lista que cli/cargar_config.py mira antes de
+    # sobrescribir la base con el archivo. Sin el umbral ahi, el comando que
+    # CLAUDE.md 8 manda correr tras cada pull apagaba la banda -- y con ella
+    # la excepcion del barrido -- sin avisar. Mismo patron que guias_tv.
+    from nucleo.config import editor as _ed
+    comprobar("sin_gestion_horas" in _ed.SECCIONES_EDITABLES,
+              "el umbral esta protegido de la carga del YAML (SECCIONES_EDITABLES)")
+
     # Y lo mutado sigue siendo una configuracion valida.
     doc4 = documento_base()
     doc4["rol_de_entrada"] = _rol_de_cliente_cualquiera(doc4)
@@ -514,6 +523,86 @@ def _rol_de_cliente_cualquiera(doc: dict) -> str:
     raise SystemExit("ningun rol orientado a cliente_final con que probar")
 
 
+# =============================================================================
+#  DE DONDE SALIO LA CONFIG, Y EL UMBRAL CON EL QUE LA BANDA SE CALCULA
+# =============================================================================
+#
+# Las dos cosas las agrego b3ce928 y ninguna tenia prueba: el auditor del
+# delta mostro que borrar el marcado o invertir su default dejaba todo en
+# verde con la proteccion apagada -- o, al reves, con el barrido apagado para
+# siempre y sin que nadie se enterara.
+
+
+def prueba_origen_de_la_config() -> None:
+    print()
+    print("origen_de_la_config: 'apagado' y 'no pude leer' no son lo mismo")
+    from nucleo.config import fuente
+    from nucleo.config.schema import cargar_config as leer_yaml
+
+    yamls = [p for p in sorted((RAIZ / "tenants").glob("*.config.yaml"))
+             if not p.name.startswith("tenant.config.example")]
+    ruta = yamls[0]
+    nombre = ruta.name.replace(".config.yaml", "")
+
+    # 1. Leer un archivo marca 'yaml', y se marca en el lector: asi vale por
+    #    los usos de cli/, no solo por el camino del reloj.
+    comprobar(leer_yaml(ruta)._origen == "yaml",
+              "leer un YAML marca la config como venida de un archivo")
+
+    # 2. El default es 'base', y tiene que serlo: un documento que sale de la
+    #    tabla es la fuente de verdad.
+    comprobar(_validar(TENANT, documento_base())._origen == "base",
+              "y una config armada desde el documento de la base queda en 'base'")
+
+    # 3. El camino real: fuente.cargar cae al YAML cuando la base no tiene la
+    #    fila, y lo que devuelve queda marcado.
+    original = fuente.desde_base
+    try:
+        fuente.desde_base = lambda t: None
+        comprobar(fuente.cargar(nombre, RAIZ)._origen == "yaml",
+                  "y fuente.cargar, al caer a la semilla, devuelve una config marcada")
+    finally:
+        fuente.desde_base = original
+
+    # 4. Y no al reves: lo que la base sirve no se marca como degradado.
+    desde_la_base = _validar(TENANT, documento_base())
+    try:
+        fuente.desde_base = lambda t: (desde_la_base, 7)
+        comprobar(fuente.cargar(nombre, RAIZ)._origen == "base",
+                  "y lo que la base si sirve NO queda marcado como degradado")
+    finally:
+        fuente.desde_base = original
+
+
+def prueba_umbral_efectivo_de_la_banda() -> None:
+    print()
+    print("umbral_efectivo: la banda nunca aparece despues del cierre")
+    doc = documento_base()
+    doc["sin_gestion_horas"] = 72                       # entra por el YAML,
+    doc.setdefault("limites", {})["horas_inactividad_cierra"] = 24   # sin pasar
+    doc["cierre_inactivas_ia"] = {"habilitado": True,   # por el editor
+                                  "rollout_cutoff": "2026-09-22T15:58:07Z"}
+    config = _validar(TENANT, doc)
+    comprobar(config.sin_gestion_horas == 72,
+              "el esquema acepta el par incoherente (no vuelve incargable la config)")
+    comprobar(config.sin_gestion_horas_efectivas() == 24,
+              "pero el umbral EFECTIVO se acota al del cierre: no hay ventana invisible")
+
+    doc["cierre_inactivas_ia"] = {"habilitado": False}
+    comprobar(_validar(TENANT, doc).sin_gestion_horas_efectivas() == 72,
+              "con el barrido apagado no hay nada que acotar y vale el numero pedido")
+
+    doc["cierre_inactivas_ia"] = {"habilitado": True,
+                                  "rollout_cutoff": "2026-09-22T15:58:07Z"}
+    doc["sin_gestion_horas"] = 6
+    comprobar(_validar(TENANT, doc).sin_gestion_horas_efectivas() == 6,
+              "y un umbral anterior al cierre se respeta tal cual")
+
+    doc["sin_gestion_horas"] = None
+    comprobar(_validar(TENANT, doc).sin_gestion_horas_efectivas() is None,
+              "sin umbral no hay banda, y acotar nada sigue siendo nada")
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print(" EDITOR DE ROLES  --  mutaciones sobre el documento de configuracion")
@@ -528,6 +617,8 @@ if __name__ == "__main__":
     prueba_ida_y_vuelta()
     prueba_catalogo()
     prueba_banda_sin_gestion()
+    prueba_origen_de_la_config()
+    prueba_umbral_efectivo_de_la_banda()
 
     print("\n" + "=" * 70)
     if fallos:

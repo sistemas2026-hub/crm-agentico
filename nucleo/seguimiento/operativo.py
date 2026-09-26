@@ -307,15 +307,25 @@ def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False, *,
     # existe para proteger. Hallado por el auditor independiente el
     # 26/09/2026 sobre 4f1ea12; no es teorico: el YAML semilla trae
     # habilitado=true, rollout_cutoff y 24 horas, asi que el barrido corre.
-    # Cuando no se puede confirmar que la banda este apagada se exceptua:
-    # dejar una conversacion abierta es reversible y se ve en la Bandeja;
-    # cerrarla afirmando algo del cliente, no.
-    degradada = getattr(config, "_origen", "base") != "base"
-    entrada = (getattr(config, "rol_de_entrada", None)
-               if (getattr(config, "sin_gestion_horas", None) or degradada)
-               else None)
-    if degradada and entrada:
+    # LA PRIMERA VERSION DE ESTA GUARDA EXCEPTUABA EL ROL DE ENTRADA, Y NO
+    # ALCANZABA: si la semilla no declara 'rol_de_entrada' --que se fija desde
+    # la interfaz, asi que la semilla de alta del segundo ISP no lo va a
+    # tener-- no habia rol que exceptuar y el barrido cerraba igual, sin
+    # emitir ninguna señal. Lo hallo el auditor sobre b3ce928.
+    #
+    # Asi que no se cierra NADA. Un trabajo que borra no corre sobre una
+    # configuracion que nadie puede editar desde la interfaz: el aviso de
+    # fuente.cargar dice "eso hay que verlo", y mientras nadie lo vea, la
+    # decision segura es no tocar. Dejar conversaciones abiertas se ve en la
+    # Bandeja y se deshace; cerrarlas afirmando que el cliente no volvio, no.
+    if getattr(config, "_origen", "base") != "base":
+        resumen["motivo"] = ("la config no salio de la base (fuente.cargar cayo al YAML "
+                             "de la imagen): no se cierra nada hasta que se pueda leer")
         resumen["config_degradada"] = True
+        return resumen
+
+    entrada = (getattr(config, "rol_de_entrada", None)
+               if getattr(config, "sin_gestion_horas", None) else None)
     lote_config = getattr(ajustes, "backfill_lote", 10)
     try:
         nuevas = persistencia.conversaciones_ia_inactivas(

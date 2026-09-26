@@ -304,31 +304,49 @@ correr(sin_banda, espia=espia, modo_backlog=True)
 afirmar(espia.roles_exceptuados and all(r is None for r in espia.roles_exceptuados),
         "sin sin_gestion_horas no se exceptua nada: el barrido cierra como siempre")
 
-# ── y la proteccion no se cae cuando la config no se pudo leer ────────────────
-# El reloj lee con fuente.cargar, que ante una base que no contesta sirve el
-# YAML de la imagen -- y el YAML no declara 'sin_gestion_horas'. Con la logica
-# anterior eso apagaba la excepcion y el barrido cerraba, con
-# 'sin_respuesta_cliente', las filas que la banda protegia. Lo que se afirma
-# es el efecto: con la config marcada como degradada se exceptua igual, aunque
-# el umbral llegue vacio. Un cierre es irreversible; dejarla abierta se ve en
-# la Bandeja y se deshace.
+# ── y un trabajo que BORRA no corre sobre una config que nadie puede editar ───
+# El reloj lee con fuente.cargar, que ante una base que no sirve la fila del
+# tenant cae al YAML de la imagen. La primera version de esta guarda exceptuaba
+# el rol de entrada, y no alcanzaba: si la semilla no lo declara --y la de alta
+# del segundo ISP no lo va a declarar, porque se fija desde la interfaz-- no
+# habia rol que exceptuar y el barrido cerraba igual, en silencio. Ahora no se
+# cierra nada. Lo que se afirma es el efecto: ni una llamada a la base.
+print()
+print("--- la config que no salio de la base ---")
 degradada = cfg()
 degradada.rol_de_entrada = "cliente_final"
+degradada.sin_gestion_horas = 6
 degradada._origen = "yaml"                  # lo que hace fuente.cargar al caer
 espia = Falsa(nuevas=2, backlog=1)
-correr(degradada, espia=espia, modo_backlog=True)
-afirmar(espia.roles_exceptuados and all(r == "cliente_final" for r in espia.roles_exceptuados),
-        "con la config caida al YAML se exceptua igual, aunque el umbral llegue vacio")
+r = correr(degradada, espia=espia, modo_backlog=True)
+afirmar(r["cerradas"] == 0 and r["_cerrados"] == [],
+        "con la config caida al YAML no se cierra NI UNA conversacion")
+afirmar(not getattr(espia, "roles_exceptuados", []),
+        "y ni se le pregunta a la base: se sale antes de consultar")
+afirmar(r.get("config_degradada") is True and "no salio de la base" in r.get("motivo", ""),
+        "y el resumen dice por que, para que no parezca que no habia nada que cerrar")
 
-# Y el contrario, para que la guarda no sea "exceptuar siempre": una config
-# leida de la base y con la banda apagada sigue barriendo todo.
+# El caso peligroso que la version anterior no cubria: degradada Y sin rol de
+# entrada en la semilla. Antes cerraba sin emitir ninguna señal.
+sin_rol = cfg()
+sin_rol._origen = "yaml"
+espia = Falsa(nuevas=2, backlog=1)
+r = correr(sin_rol, espia=espia, modo_backlog=True)
+afirmar(r["cerradas"] == 0 and not getattr(espia, "roles_exceptuados", []),
+        "y tampoco cierra cuando la semilla no declara rol_de_entrada (el caso del 2do ISP)")
+
+# Y el contrario, para que la guarda no sea "no cerrar nunca": una config leida
+# de la base y con la banda apagada sigue barriendo todo.
 de_la_base = cfg()
 de_la_base.rol_de_entrada = "cliente_final"
 de_la_base._origen = "base"
 espia = Falsa(nuevas=2, backlog=1)
-correr(de_la_base, espia=espia, modo_backlog=True)
-afirmar(espia.roles_exceptuados and all(r is None for r in espia.roles_exceptuados),
+r = correr(de_la_base, espia=espia, modo_backlog=True)
+afirmar(espia.roles_exceptuados and all(r2 is None for r2 in espia.roles_exceptuados),
         "y con la config leida de la base y la banda apagada no se exceptua nada")
+afirmar(not r.get("config_degradada")
+        and "no salio de la base" not in (r.get("motivo") or ""),
+        "y no se sale por la guarda: el barrido sigue su curso normal")
 
 print("\n" + "=" * 62)
 if fallos:

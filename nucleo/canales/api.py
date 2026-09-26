@@ -1208,7 +1208,7 @@ def _aplicar_posposicion(config, rol_cfg, estado, *, forzado: bool,
         config, rol_cfg, estado["historial"],
         forzado=forzado,
         ya_intento=estado["intento_antes_de_escalar"],
-        motivo=motivo)
+        motivo=motivo or "")
     if not razon:
         return False
     estado["intento_antes_de_escalar"] = True
@@ -2304,7 +2304,7 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # pospone y se escala. Respeta 'intentar_resolver_antes' del tenant
             # y no elige destino por el modelo. Ver el docstring de la funcion.
             if _aplicar_posposicion(config, rol_cfg, estado, forzado=forzado,
-                                    motivo=evaluacion.get("motivo", "")):
+                                    motivo=evaluacion.get("motivo")):
                 posponer = True
 
             # --- verificacion automatica de agendamiento --------------------
@@ -3832,9 +3832,9 @@ def configuracion_bandeja():
 @app.put("/configuracion/bandeja")
 def configuracion_bandeja_guardar():
     """
-    Cambia los dos numeros con los que la Bandeja emite un veredicto.
+    Cambia los tres numeros con los que la Bandeja emite un veredicto.
 
-    Los DOS admiten "sin definir" -- 0 y null-- y eso no es un hueco: es la
+    LOS TRES admiten "sin definir" -- 0 y null-- y eso no es un hueco: es la
     manera de decir que la empresa todavia no lo decidio, y entonces la
     pantalla muestra el dato crudo sin afirmar si esta bien o mal.
     """
@@ -3859,6 +3859,16 @@ def configuracion_bandeja_guardar():
     # Guarda anti-limbo: horas sin respuesta del cliente antes de que una
     # conversacion que la IA dejo sin gestion registrada entre a la cola.
     # Vacio o null = la banda no existe (ver TenantConfig.sin_gestion_horas).
+    #
+    # LA CLAVE TIENE QUE VENIR, aunque venga en null. 'Ausente' y 'apagalo' no
+    # son lo mismo cuando apagarlo devuelve al barrido las conversaciones que
+    # la banda protege: un formulario nuevo que reutilice este endpoint con
+    # dos campos apagaria la guarda sin pedirlo. Es la misma razon por la que
+    # el cuarto parametro de guardar_ajustes_bandeja no tiene default, y acá
+    # hace falta decirlo aparte porque JSON no tiene firma que lo exija.
+    if "sin_gestion_horas" not in cuerpo:
+        return jsonify({"error": "Falta el campo 'sin_gestion_horas'. Para apagar la "
+                                 "banda hay que mandarlo en null, no omitirlo."}), 400
     crudo_sg = cuerpo.get("sin_gestion_horas")
     horas_sg = None
     if crudo_sg not in (None, ""):
@@ -4664,7 +4674,13 @@ def conversaciones():
     try:
         cfg_bandeja = _config_de(tenant)
         rol_entrada = getattr(cfg_bandeja, "rol_de_entrada", None)
-        horas_sg = getattr(cfg_bandeja, "sin_gestion_horas", None)
+        # El umbral EFECTIVO, no el guardado: ver
+        # TenantConfig.sin_gestion_horas_efectivas. Asi la banda nunca
+        # aparece despues de que el barrido empiece a exceptuar, entre el
+        # numero por donde entre.
+        horas_sg = (cfg_bandeja.sin_gestion_horas_efectivas()
+                    if hasattr(cfg_bandeja, "sin_gestion_horas_efectivas")
+                    else getattr(cfg_bandeja, "sin_gestion_horas", None))
     except Exception as e:
         registrar("conversaciones", "sin config del tenant: la banda 'sin_gestion' no se calcula",
                   tenant=tenant, error=e)

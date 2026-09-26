@@ -222,6 +222,14 @@ def prueba_6_el_enganche_no_tiene_logica_paralela():
     # auditor y la unica que prueba_7 no alcanza.
     afirmar("_aplicar_posposicion(config, rol_cfg, estado" in turno,
             "y le pasa el rol del turno, no cualquier rol de la config")
+    # Y los dos keywords, por la misma razon y con el mismo limite: el auditor
+    # mostro el 26/09 que 'forzado=False' en la llamada posterga una escalada
+    # FORZADA por una herramienta --el incidente del 18/08-- y que ninguna de
+    # las nueve pruebas que conducen el turno lo veia.
+    afirmar("forzado=forzado" in turno,
+            "y le pasa el forzado del turno: una escalada forzada no se pospone")
+    afirmar('motivo=evaluacion.get("motivo")' in turno,
+            "y el motivo del evaluador, que es lo que decide 'intentar_resolver_antes'")
     afirmar("puede_intentar_algo(config, rol_cfg)" in turno,
             "el agendamiento automatico sigue exigiendo que el rol tenga con que (api.py, tras el evaluador)")
 

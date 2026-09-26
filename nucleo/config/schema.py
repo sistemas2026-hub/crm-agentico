@@ -2915,6 +2915,31 @@ class TenantConfig(Base):
     # ver nucleo/seguimiento/operativo.py::cerrar_inactivas_de_ia.
     _origen: str = PrivateAttr(default="base")
 
+    def sin_gestion_horas_efectivas(self) -> int | None:
+        """
+        El umbral con el que la banda 'sin gestion' se calcula de verdad.
+
+        NUNCA MAS TARDE QUE EL CIERRE POR INACTIVIDAD. El barrido exceptua la
+        fila desde 'limites.horas_inactividad_cierra'; si la banda apareciera
+        despues, quedaria una ventana en la que la conversacion ya no se
+        cierra y todavia no se ve -- 72 contra 24 daban 48 horas, y el maximo
+        del formulario, 29 dias. El editor rechaza ese par, pero el editor es
+        UNA puerta: cli/cargar_config.py valida contra este esquema y nada
+        mas, asi que el par entraba por el YAML. Acotarlo aca hace que el
+        invariante valga por cualquier puerta, y sin que una config ya
+        guardada pueda volverse incargable: rechazarla en un validador
+        cruzado dejaria al motor sirviendo el YAML de la imagen, que es peor
+        que mostrar la banda antes de lo pedido.
+        """
+        horas = self.sin_gestion_horas
+        if horas is None:
+            return None
+        cierre = getattr(self, "cierre_inactivas_ia", None)
+        tope = getattr(getattr(self, "limites", None), "horas_inactividad_cierra", None)
+        if cierre is not None and getattr(cierre, "habilitado", False) and tope:
+            return min(int(horas), int(tope))
+        return int(horas)
+
     rol_de_entrada: str | None = None
     seguridad: Seguridad = Field(default_factory=Seguridad)
     autenticacion: Autenticacion = Field(default_factory=Autenticacion)
@@ -3576,7 +3601,14 @@ def cargar_config(ruta: str | Path) -> TenantConfig:
             + "\n  - ".join(secretos))
 
     try:
-        return TenantConfig(**crudo)
+        config = TenantConfig(**crudo)
+        # ESTO SALIO DE UN ARCHIVO, y el default del atributo dice 'base'. Se
+        # marca aca --en el unico lugar que lee el YAML-- y no en el llamador:
+        # asi vale por los usos de cli/ y no solo por fuente.cargar. Un
+        # trabajo que borra lo consulta antes de tocar nada; ver
+        # nucleo/seguimiento/operativo.py::cerrar_inactivas_de_ia.
+        config._origen = "yaml"
+        return config
     except ValidationError as e:
         lineas = [f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
                   for err in e.errors()]

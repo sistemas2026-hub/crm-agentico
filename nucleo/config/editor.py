@@ -98,6 +98,17 @@ _RE_NOMBRE_ROL = re.compile(r"^[a-z][a-z0-9_]{1,29}$")
 # criterio que TenantConfig.SINCRONIZADOS: la declaracion vive donde esta el
 # codigo que la vuelve necesaria.
 SECCIONES_EDITABLES = (
+    # 26/09/2026: sin esta linea, la carga del YAML --que CLAUDE.md 8 manda
+    # correr despues de cada pull que toque el archivo-- dejaba
+    # 'sin_gestion_horas' en None sin avisar. Eso apaga la banda Y devuelve al
+    # barrido las conversaciones que protegia, que se cierran afirmando que el
+    # cliente no volvio. Es la misma forma de fallar que la parrilla de
+    # canales, y la puerta mas rutinaria de todas. Hallada por el auditor
+    # sobre b3ce928, que es justo el commit que decia cerrar este silencio.
+    # 'sla_toma_minutos' y 'umbral_rx_dbm' siguen expuestos por esta puerta:
+    # es previo y solo cuesta un veredicto en pantalla, no un cierre -- queda
+    # declarado en SPEC/objetivos/guarda-anti-limbo.md (L9), no arreglado aca.
+    "sin_gestion_horas",  # _mutar_ajustes_bandeja
     "rol_de_entrada",     # _mutar_rol_de_entrada
     "roles",              # _mutar_crear / _mutar_editar / _mutar_borrar
     "canales",            # _mutar_canal_whatsapp

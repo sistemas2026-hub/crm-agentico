@@ -123,9 +123,7 @@ def cargar(tenant: str, raiz: str | Path = ".") -> TenantConfig:
     ruta = Path(raiz) / "tenants" / f"{tenant}.config.yaml"
     registrar("config", "usando el YAML semilla: los cambios hechos desde la interfaz NO "
                         "se veran aqui", tenant=tenant, archivo=ruta.name, motivo=motivo)
-    config = cargar_config(ruta)
-    # Queda marcado, y no solo en el log: quien lee esta config no puede
+    # cargar_config marca el origen: quien lee esta config no puede
     # distinguir por el contenido si un campo esta apagado o si no se pudo
-    # leer. Ver TenantConfig._origen.
-    config._origen = "yaml"
-    return config
+    # leer. Ver TenantConfig._origen y el docstring de cargar_config.
+    return cargar_config(ruta)

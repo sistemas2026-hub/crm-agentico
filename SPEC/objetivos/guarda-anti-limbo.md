@@ -1123,6 +1123,86 @@ cuatro capas; el número 3 compartido no rompe nada (ningún `banda === 3` en el
 `IndeterminateDatatype` de psycopg 3 (corrida en las cuatro combinaciones); y la regla 3b
 del contrato coincide condición por condición con el código.
 
+### Segunda pasada: auditoría del delta `4f1ea12..b3ce928`, 26/09/2026
+
+El arreglo de los tres agujeros era código nuevo que nadie había auditado —~340 líneas,
+una de ellas una extracción dentro de `_atender_turno`—, así que se auditó el delta solo.
+Encontró **tres altos, y dos golpean justo lo que el commit anterior decía cerrar.**
+
+**D1 · `cli/cargar_config.py` apagaba la banda en silencio.** `sin_gestion_horas` no estaba
+en `SECCIONES_EDITABLES`, la lista que el cargador mira antes de sobrescribir la base con
+el archivo. El YAML no declara el campo, así que el comando que §8 manda correr **después
+de cada pull que toque el YAML** dejaba el umbral en `None`: banda apagada y las
+conversaciones protegidas devueltas al barrido. La puerta más rutinaria de todas, y la
+misma forma de fallar que la parrilla de canales. Corregido agregándolo a la lista, con la
+afirmación que el repo ya usa para `guias_tv`.
+
+**D2 · La regla del umbral valía por una sola puerta.** La validación cruzada vivía solo en
+el editor; `cli/cargar_config.py` valida contra `TenantConfig` y nada más, así que el par
+72/24 **entraba por el YAML** y la ventana invisible volvía. El auditor citó el criterio
+del propio repo —*"la validación la hace el esquema, así vale por cualquier puerta"*— y en
+eso tiene razón, pero **no en el remedio**: un validador cruzado puede volver **incargable
+una config ya guardada**, y §8 dice qué pasa entonces (`fuente.cargar` cae al YAML de la
+imagen). Sería cambiar una ventana de 48 horas por un motor sirviendo config que nadie
+puede editar: un fail-open peor. Resuelto por el otro lado, con
+`TenantConfig.sin_gestion_horas_efectivas()`: el umbral **efectivo** nunca es más tarde que
+el cierre por inactividad, entre por donde entre el número, y ninguna config puede dejar de
+cargar. El editor sigue rechazando el par para que la persona reciba el mensaje.
+
+**D3 · La guarda del barrido no alcanzaba, y el caso peligroso no emitía señal.** La
+primera versión exceptuaba el rol de entrada; si la semilla **no declara `rol_de_entrada`**
+—y la de alta del segundo ISP no lo va a declarar, porque se fija desde la interfaz— no
+había rol que exceptuar y el barrido cerraba igual. Peor: `resumen["config_degradada"]`
+estaba dentro de `if degradada and entrada`, así que **en el caso peligroso no avisaba
+nada**. Corregido con la decisión más simple y más fuerte: con la config degradada **no se
+cierra nada**, y el resumen dice por qué. Un trabajo que borra no corre sobre una
+configuración que nadie puede editar.
+
+**Y tres del mismo tipo, cerradas:** el marcado del origen pasó al único lugar que lee el
+YAML (`cargar_config`), así que vale por los doce usos de `cli/` y no solo por el camino
+del reloj; el endpoint `/configuracion/bandeja` **exige la clave** `sin_gestion_horas`
+aunque venga en `null` (JSON no tiene firma que lo obligue, y "ausente" no puede significar
+"apagá la guarda"); y el tipo del cliente JS dejó de marcarla opcional.
+
+**Las cinco mutaciones que el auditor mostró sobreviviendo, ahora mueren:**
+
+```
+ROJO (la caza)   <- N1 cargar_config deja de marcar el origen          [test_editor_config]
+ROJO (la caza)   <- N5 el default del marcador pasa a 'yaml'           [test_editor_config]
+ROJO (la caza)   <- N4 el barrido deja de mirar el origen              [test_cierre_inactivas_ia]
+ROJO (la caza)   <- M7 forzado=False en el sitio de llamada            [test_escalada_del_rol_de_entrada]
+ROJO (la caza)   <- A2b el umbral efectivo deja de acotarse            [test_editor_config]
+```
+
+M7 era el peor de los cinco: `forzado=False` en la llamada posterga una escalada **forzada
+por una herramienta** —el incidente del 18/08/2026 que el comentario de `api.py` dice
+evitar— y ninguna de las nueve pruebas que conducen el turno lo veía.
+
+**Lo que el auditor verificó y salió limpio:** la extracción es semánticamente idéntica
+(comparada línea por línea contra `4f1ea12`; `posponer` vale `False` sin excepción al
+llegar al bloque, y `razon`/`nota` no se usan en las 630 líneas siguientes); el
+`PrivateAttr` sobrevive a `model_copy`, `deepcopy` y `pickle`, no aparece en `model_dump`
+—así que `extra="forbid"` no se rompe en el ida y vuelta del editor— y la caché de
+`_config_de` no lo pierde; ningún camino real pone `"yaml"` sobre algo salido de la base;
+las validaciones del editor resistieron seis mutaciones propias; el PUT devuelve 400 y no
+500; y `prueba_6` sigue sirviendo después de la extracción, porque es la que caza pasarle
+una copia del estado.
+
+**Casos dorados, con su varianza medida.** `--humo` sobre la rama: **9/10 (90%, el mínimo
+exigido)**; el único rojo es `BOTTLECRM_API_TOKEN`, que el contenedor local no expone. Una
+corrida anterior dio 7/10 y **la causa era el entorno, no el código**: faltaba exportar
+`WISPHUB_API_KEY`. Y el control sobre `4f1ea12` —el árbol *previo* al delta, mismo
+entorno— dio **8/10**, fallando un caso que en la rama pasa. O sea que el set varía ±1 caso
+entre corridas, tal como el propio comando avisa (pide ≥50 casos para ser criterio de
+aceptación). No hay regresión atribuible al delta.
+
+| # | Deuda que suma esta pasada | Por qué se deja |
+|---|---|---|
+| L9 | `sla_toma_minutos` y `umbral_rx_dbm` siguen expuestos a que `cli/cargar_config.py` los pise sin avisar: no están en `SECCIONES_EDITABLES` | Es previo y cuesta un veredicto en pantalla, no un cierre de conversación. Agregarlos hace frenar la carga a más tenants y merece su propia decisión |
+| L10 | `resumen["config_degradada"]` no tiene consumidor: llega al log del reloj y al JSON del endpoint, y ninguna pantalla ni alerta lo lee | La banda de alertas del reloj es trabajo aparte; sin eso, agregar un consumidor a medias es peor |
+| L11 | El camino degradado alcanzable es `tenant_no_esta_en_la_base` (base arriba, fila ausente), que es **persistente**: ahí el barrido no cierra nunca hasta que alguien lo vea | Es la dirección segura, y el aviso de `fuente.cargar` ya dice *"eso hay que verlo"*. Lo que falta es que alguien lo vea: ver L10 |
+| L12 | `cargar_config` marcando `"yaml"` cambia el comportamiento de cualquier `cli/` que cargue del archivo y corra el barrido: ahora no cerraría | Correcto por diseño (un archivo no es la fuente de verdad), pero no lo medí en los doce usos de `cli/`: el único que barre es el reloj, y ese usa `fuente.cargar` |
+
 ### Deuda declarada, con su motivo — no se arregla en esta rama
 
 | # | Qué | Por qué se deja |
@@ -1174,3 +1254,4 @@ divergente que hay que unificar.
 | 25/09/2026 | **D4 medido en producción, autorizado, solo lectura.** Clientes reales (`canal = 'whatsapp'`, ≥2 mensajes, seis semanas): **5 en limbo de 39 (13%)**, tres todavía abiertas sin dueño, dos de 12 y 20 mensajes. Causa estructural confirmada en la config desplegada. Segunda lección de canal: producción tiene siete canales y **294 corridas de laboratorio viven ahí**; solo `whatsapp` son clientes | Decidir la forma de **C** (por corrección, no por urgencia); D1; D2; regenerar baseline de escalación; limpiar o etiquetar las 294 filas simuladas de producción |
 | 26/09/2026 | **Integrados B y C sobre `origin/fix` (`f90d3ec`)** en la rama `integracion/b-c-limbo`, ocho commits por cherry-pick, sin push. Dos conflictos reales en C (`+page.server.js`, `bandeja-config.test.js`) contra el refactor `35a6723` de `guardarAjustesBandeja(locals, fetch, valores)`, resueltos con la firma nueva. `test_registro_sin_pii` cazó una regresión de B que ninguna prueba propia veía: el evento del log de la posposición dejaba de ser texto fijo; corregido en `1642935` (evento fijo, la razón como campo). Verificado en la rama: las nueve pruebas rápidas de B y C en verde; relevo contra PostgreSQL con §14 en verde y solo §11-12 en rojo, **y esos dos fallan igual sobre `f90d3ec` puro** —medido con la prueba corregida encima, porque origin con su propia prueba ni llega: se cae en §5 por los tres dobles previos sin `origen`—; vitest con 63 rojos en las dos puntas (1049/1112 en origin puro, 1051/1114 en la rama), ninguno de la bandeja; `test_reloj` falla igual en origin puro (`fijar_nombre_cliente_externo` fuera de `importacion_io.HERRAMIENTAS`). Fuera de la rama a propósito: el laboratorio, `test_contexto_del_router.py` y los 18 commits de validación | Push y la línea en `DEXTER_ESTADO_ACTUAL.md`: sesión dueña. Después: métricas con `canales.REALES`, D5 `sin_respuesta` |
 | 26/09/2026 | **Auditada antes de integrar, y corregida.** Dos lentes de solo lectura sobre `4f1ea12`: el `auditor-independiente` mato cinco mutaciones de `api.py` que dejaban la prueba de B en verde --una de ellas posposicion infinita-- y midio dos agujeros de C (48 h exceptuadas y sin banda con 72/24, 25 de 25 filas; la proteccion cayendose cuando el reloj lee el YAML); el `arquitecto-dexter` hallo que un umbral sin `rol_de_entrada` se guardaba sin efecto. **Los tres altos corregidos en la rama**: bloque extraido a `api._aplicar_posposicion` con prueba de dos vueltas que caza las cinco mutaciones, validacion cruzada del umbral contra `horas_inactividad_cierra`, `TenantConfig._origen` para que el barrido exceptue cuando no puede confirmar, y las dos puertas del vaciado silencioso cerradas. Corregido tambien lo que **B realmente hace**: el codigo previo ya escalaba en el turno 2 con la sesion viva, asi que el subject de `b920c25` afirma de mas. Verificado: nueve guardas en verde, relevo con base solo los dos rojos previos y §14 en verde, y casos dorados `--humo` 9/10 (90%, el minimo), con el unico rojo por una credencial local de BottleCRM | Ocho deudas declaradas con su motivo (L1..L8). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
+| 26/09/2026 | **Segunda auditoria, sobre el delta del arreglo.** Los ~340 renglones que corrigieron los tres altos eran codigo sin auditar, y la pasada encontro tres mas: `cli/cargar_config.py` apagaba la banda en silencio (el umbral no estaba en `SECCIONES_EDITABLES`, y ese comando se corre tras cada pull); la regla del umbral valia por una sola puerta (el par 72/24 entraba por el YAML); y la guarda del barrido no alcanzaba si la semilla no declara `rol_de_entrada` --el caso del segundo ISP-- sin emitir ninguna señal. Corregidos: umbral en la lista protegida, `sin_gestion_horas_efectivas()` que acota el umbral por cualquier puerta sin poder volver incargable una config, y el barrido que **no cierra nada** con la config degradada. Mas el marcado del origen movido al lector de YAML, la clave obligatoria en el endpoint, y `forzado`/`motivo` fijados en el sitio de llamada (una mutacion del auditor postergaba una escalada FORZADA y ninguna de nueve pruebas lo veia). Las cinco mutaciones que sobrevivian ahora mueren. Verificado: once guardas rapidas verdes, relevo con base solo los dos rojos previos, vitest 345/345 en las superficies tocadas, y casos dorados 9/10 con la varianza medida contra `4f1ea12` (8/10 en el mismo entorno) | Cuatro deudas nuevas (L9..L12). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
