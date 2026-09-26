@@ -83,6 +83,7 @@ from nucleo.seguimiento import escalamiento
 from nucleo.seguimiento import resumen
 from nucleo.seguimiento import supervisor
 from nucleo.seguridad import secretos
+from nucleo.seguridad import verificacion
 from nucleo.seguridad.verificacion import Sesion
 from nucleo.observabilidad.registro import id_interno, ref_proveedor, ref_sesion, registrar
 
@@ -857,12 +858,15 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
     # dentro habria protegido solo a las conversaciones ya verificadas y
     # ninguna otra. Ver Sesion.CAMPOS_ROUTING_PERSISTIBLES.
     #
-    # Se copia la lista en vez de asignar la de la base: asignarla dejaria a
-    # dos sesiones distintas compartiendo el mismo objeto si alguna vez se
-    # rehidratan del mismo diccionario, y esta lista se muta con append.
-    for campo, valor in (previo.get("datos_sesion") or {}).items():
-        if campo in Sesion.CAMPOS_ROUTING_PERSISTIBLES and valor:
-            setattr(estado["sesion"], campo, list(valor))
+    # La copia de listas y el que no todo lo persistido sea una lista los
+    # resuelve la funcion, que vive junto a la declaracion de los campos y por
+    # eso se puede probar sin base. Ver verificacion.rehidratar_routing.
+    verificacion.rehidratar_routing(estado["sesion"], previo.get("datos_sesion"))
+    # Y la vuelta extra antes de escalar viaja con ella: desde el 26/09/2026
+    # sobrevive a un reinicio del motor, que con --workers 1 y autodeploy le
+    # regalaba una posposicion mas a cada conversacion en curso.
+    estado["intento_antes_de_escalar"] = bool(
+        getattr(estado["sesion"], "intento_antes_de_escalar", False))
 
     visitadas = getattr(estado["sesion"], "areas_visitadas", [])
     registrar("sesion", "se retoma la conversacion abierta",
@@ -1212,6 +1216,10 @@ def _aplicar_posposicion(config, rol_cfg, estado, *, forzado: bool,
     if not razon:
         return False
     estado["intento_antes_de_escalar"] = True
+    # En la sesion tambien, porque es lo que se persiste: sin esta linea la
+    # vuelta se consumiria solo en memoria y un reinicio la regalaria de nuevo.
+    if estado.get("sesion") is not None:
+        estado["sesion"].intento_antes_de_escalar = True
     estado["nota_pendiente"] = nota
     # Evento FIJO y la razon como campo: registro.py exige texto constante en
     # el evento (tests/test_registro_sin_pii.py), y asi se busca 'se pospone'
@@ -2028,9 +2036,7 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # escribe si hay algo que proteger, asi que el turno normal -- el que
         # no deriva -- no paga ninguna escritura extra.
         if estado["sesion"] is not None:
-            routing = {c: getattr(estado["sesion"], c, None)
-                       for c in Sesion.CAMPOS_ROUTING_PERSISTIBLES
-                       if getattr(estado["sesion"], c, None)}
+            routing = verificacion.routing_a_persistir(estado["sesion"])
             if routing:
                 try:
                     persistencia.guardar_estado_routing(

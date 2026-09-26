@@ -75,7 +75,7 @@ class Sesion:
     # 3): al cerrarse la conversacion el anti-rebote arranca limpio. Es la
     # misma frontera que ya rige para la identidad -- se continua una
     # conversacion, no se recuerda a una persona para siempre.
-    CAMPOS_ROUTING_PERSISTIBLES = ("areas_visitadas",)
+    CAMPOS_ROUTING_PERSISTIBLES = ("areas_visitadas", "intento_antes_de_escalar")
 
     identificador_canal: str          # ej. numero de whatsapp, tal cual llega
     # El nombre del COLABORADOR que esta usando el asistente, cuando lo hay.
@@ -183,6 +183,26 @@ class Sesion:
     # las dos areas sin que nadie le contestara.
     areas_visitadas: list = field(default_factory=list)
 
+    #: Esta conversacion ya tuvo su vuelta extra antes de escalar (ver
+    #: escalamiento.merece_un_intento y forzado.por_que_posponer).
+    #:
+    #: PERSISTE, y hasta el 26/09/2026 no lo hacia. Vivia solo en memoria del
+    #: proceso, con este argumento escrito: "si el motor se reinicia se concede
+    #: un intento mas, que es un costo aceptable frente a una lectura extra a
+    #: la base en cada turno". La primera mitad es cierta; la segunda es falsa
+    #: y se midio: la lectura YA ocurre --estado_de_conversacion_abierta() se
+    #: llama igual en cada turno y ya trae 'datos_sesion'-- asi que persistirlo
+    #: no cuesta ninguna lectura nueva. Lo que cuesta es una escritura, y solo
+    #: cuando se pospone, que es raro.
+    #:
+    #: Lo que se evita: con --workers 1 y autodeploy, CADA despliegue vacia la
+    #: memoria del proceso y le regala una posposicion mas a cada conversacion
+    #: en curso. Al cliente eso le llega como una espera que ya habia pasado.
+    #:
+    #: Es bool, no lista, y por eso la hidratacion de abajo dejo de asumir que
+    #: todo lo persistido es una lista.
+    intento_antes_de_escalar: bool = False
+
 
 def nivel_requerido(rol_cfg, seguridad_cfg) -> int:
     """
@@ -233,4 +253,59 @@ def resolver_candidato(sesion: Sesion, id_cliente_elegido: str) -> Sesion:
     sesion.nivel = 1
     sesion.id_cliente = id_cliente_elegido
     sesion.candidatos = []
+    return sesion
+
+
+# =============================================================================
+#  LO QUE SOBREVIVE A UN REINICIO DEL MOTOR, Y COMO
+# =============================================================================
+#
+# Las dos mitades del mismo contrato, juntas y en el modulo que declara los
+# campos. Vivian como dos bucles inline en nucleo/canales/api.py, y eso tenia
+# dos consecuencias medidas el 26/09/2026:
+#
+#   1. La unica prueba que las cubre (tests/test_anti_rebote_persistente.py)
+#      REPLICABA los dos bucles en vez de invocarlos, porque importar api.py
+#      exige credenciales de base. Una prueba que reimplementa lo que mide
+#      pasa igual cuando el original cambia -- es la falla que CLAUDE.md 6
+#      llama "una prueba que dice que algo existe no prueba que funcione".
+#   2. La hidratacion hacia list(valor) sobre TODO lo persistido, asi que
+#      agregar un campo que no fuera lista la rompia en silencio.
+#
+# Aca no se importa nada del nucleo (solo dataclasses), asi que una prueba
+# puede invocar esto de verdad sin Postgres.
+
+
+def routing_a_persistir(sesion: Sesion | None) -> dict:
+    """
+    Lo que hay que guardar en 'datos_sesion' de esta conversacion.
+
+    Solo los campos declarados en CAMPOS_ROUTING_PERSISTIBLES, y solo si traen
+    algo: el turno normal --el que no deriva ni pospone-- no paga ninguna
+    escritura.
+    """
+    if sesion is None:
+        return {}
+    return {c: getattr(sesion, c, None)
+            for c in Sesion.CAMPOS_ROUTING_PERSISTIBLES
+            if getattr(sesion, c, None)}
+
+
+def rehidratar_routing(sesion: Sesion, datos_sesion: dict | None) -> Sesion:
+    """
+    Vuelve a poner en la sesion lo que sobrevivio en la base.
+
+    LAS LISTAS SE COPIAN, no se asignan: asignar la de la base dejaria a dos
+    sesiones compartiendo el mismo objeto si alguna vez se rehidratan del
+    mismo diccionario, y 'areas_visitadas' se muta con append.
+
+    Y NO todo lo persistido es una lista. 'intento_antes_de_escalar' es un
+    bool; con el list(valor) de antes, agregarlo habria lanzado TypeError
+    dentro del try que envuelve la lectura del estado previo -- o sea, la
+    conversacion habria arrancado en blanco sin que nadie lo notara.
+    """
+    for campo, valor in (datos_sesion or {}).items():
+        if campo not in Sesion.CAMPOS_ROUTING_PERSISTIBLES or not valor:
+            continue
+        setattr(sesion, campo, list(valor) if isinstance(valor, list) else valor)
     return sesion

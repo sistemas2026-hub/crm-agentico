@@ -1092,14 +1092,32 @@ turno 2 antes de B**. Entonces:
      frontera que rige el anti-rebote y la identidad: *se continúa una conversación, no se
      recuerda a una persona para siempre*.
 
-  Se evaluó **persistirlo** en la columna `datos_sesion` —el JSONB que ya existe para
-  `areas_visitadas`, sin migración— y **se decidió NO hacerlo**, con el argumento medido:
-  el comentario del código justifica la RAM por *"una lectura extra a la base en cada
-  turno"*, y esa premisa es falsa (la lectura ya ocurre: `estado_de_conversacion_abierta`
-  se llama igual y ya trae `datos_sesion`). Pero el beneficio que quedaba también es chico
-  —quitar un mensaje extra ocasional tras un deploy— y el cambio pedía volver la hidratación
-  sensible al tipo, porque hoy hace `list(valor)` sobre todo lo que persiste. **No se toca
-  algo del camino del turno por un beneficio de ese tamaño.**
+  **Y sobre persistirlo: primero se decidió que no, y después se revisó esa decisión.**
+  Queda escrito así porque el cambio de opinión tiene un motivo concreto, no un cambio de
+  humor.
+
+  El argumento del código para dejarlo en RAM es *"una lectura extra a la base en cada
+  turno"*, y esa premisa es **falsa**: la lectura ya ocurre —`estado_de_conversacion_abierta`
+  se llama igual en cada turno y ya trae `datos_sesion`—. Aun así se decidió no tocarlo,
+  estimando que el beneficio era chico y el costo alto. **El costo estaba mal estimado en
+  dos puntos:** (1) `tests/test_anti_rebote_persistente.py` ya tenía el arnés para probar
+  exactamente estos dos bucles sin Postgres, y (2) el beneficio no es "un mensaje
+  ocasional": con `--workers 1` y **autodeploy**, cada despliegue vacía la memoria del
+  proceso y le regala una posposición más a **cada** conversación en curso. Al cliente eso
+  le llega como una espera que ya había pasado.
+
+  Implementado (`intento_antes_de_escalar` en `CAMPOS_ROUTING_PERSISTIBLES`), **sin
+  migración**, y con dos cosas que el cambio obligó a arreglar y valen por sí solas:
+
+  - **La hidratación dejó de asumir que todo lo persistido es una lista.** Hacía
+    `list(valor)` sobre cada campo; un `bool` habría lanzado `TypeError` **dentro del `try`
+    que envuelve la lectura del estado previo**, o sea: la conversación arrancaba en blanco
+    y nadie se enteraba.
+  - **La prueba dejó de reimplementar lo que mide.** Copiaba los dos bucles de `api.py`
+    —porque importar `api` exige credenciales— así que pasaba igual sin importar qué hiciera
+    el original. Los bucles se mudaron a `verificacion.py`, que no importa nada del núcleo, y
+    ahora la prueba los **invoca**. Siete afirmaciones nuevas, incluida que una fila vieja
+    sin la clave rehidrata en `False` en vez de reventar.
 
   Lo que sí queda anotado, porque no lo cubre ninguna de las dos guardas: una conversación
   con **un solo mensaje del cliente** que se cierra por inactividad no entra a la banda

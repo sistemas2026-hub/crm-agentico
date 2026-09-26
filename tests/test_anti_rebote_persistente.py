@@ -55,7 +55,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from nucleo.modelo.motor import _ejecutar_derivacion          # noqa: E402
-from nucleo.seguridad.verificacion import Sesion               # noqa: E402
+from nucleo.seguridad.verificacion import (Sesion,             # noqa: E402
+                                           rehidratar_routing,
+                                           routing_a_persistir)
 
 fallos: list[str] = []
 
@@ -78,22 +80,19 @@ def _sesion(**kw) -> Sesion:
     return Sesion(identificador_canal="573000000000", **kw)
 
 
+# Estas dos NO reimplementan nada: llaman a las mismas funciones que llama
+# nucleo/canales/api.py. Hasta el 26/09/2026 esta prueba copiaba los dos bucles
+# --api.py los tenia inline y no se puede importar sin credenciales de base-- y
+# por eso pasaba igual sin importar lo que api.py hiciera de verdad. Las
+# funciones se mudaron a verificacion.py, que no importa nada del nucleo.
 def _persistir(sesion: Sesion) -> dict:
-    """Lo que nucleo/canales/api.py manda a guardar_estado_routing(): solo los
-    campos declarados, y solo si traen algo."""
-    return {c: getattr(sesion, c, None)
-            for c in Sesion.CAMPOS_ROUTING_PERSISTIBLES
-            if getattr(sesion, c, None)}
+    """Lo que nucleo/canales/api.py manda a guardar_estado_routing()."""
+    return routing_a_persistir(sesion)
 
 
 def _rehidratar(datos_sesion: dict) -> Sesion:
-    """Un proceso NUEVO: sesion en blanco mas lo que habia en la base. Copia
-    de la lista, igual que _sesion_nueva()."""
-    nueva = _sesion()
-    for campo, valor in (datos_sesion or {}).items():
-        if campo in Sesion.CAMPOS_ROUTING_PERSISTIBLES and valor:
-            setattr(nueva, campo, list(valor))
-    return nueva
+    """Un proceso NUEVO: sesion en blanco mas lo que habia en la base."""
+    return rehidratar_routing(_sesion(), datos_sesion)
 
 
 DERIVA = _HerramientaDoble(["facturacion_cliente", "soporte_tecnico_cliente"])
@@ -242,12 +241,56 @@ revivida_b = _sesion()
 for campo, valor in fila.items():
     if campo in Sesion.CAMPOS_PERSISTIBLES and valor:
         setattr(revivida_b, campo, valor)
-    if campo in Sesion.CAMPOS_ROUTING_PERSISTIBLES and valor:
-        setattr(revivida_b, campo, list(valor))
+rehidratar_routing(revivida_b, fila)
 comprobar(revivida_b.sn_onu is None,
           "tras el reinicio la sesion NO arranca con el serial de otro cliente")
 comprobar(len(revivida_b.areas_visitadas) == 2,
           "y si arranca con el anti-rebote completo")
+
+# =============================================================================
+#  Y LA VUELTA EXTRA ANTES DE ESCALAR TAMBIEN SOBREVIVE (26/09/2026)
+# =============================================================================
+#
+# Vivia solo en memoria del proceso. Con --workers 1 y autodeploy, cada
+# despliegue vaciaba esa memoria y le regalaba una posposicion mas a cada
+# conversacion en curso -- al cliente le llega como una espera que ya habia
+# pasado. Se persiste por la misma puerta que el anti-rebote, y por eso hacen
+# falta dos afirmaciones: que viaja, y que un bool no rompe una hidratacion
+# que antes asumia que todo lo persistido era una lista.
+print()
+print("--- la vuelta antes de escalar sobrevive al reinicio ---")
+
+s_v = _sesion()
+comprobar(_persistir(s_v) == {},
+          "una sesion sin nada no escribe nada (el turno normal no paga escritura)")
+
+s_v.intento_antes_de_escalar = True
+guardado_v = _persistir(s_v)
+comprobar(guardado_v.get("intento_antes_de_escalar") is True,
+          "consumida la vuelta, viaja a la base")
+comprobar(_rehidratar(guardado_v).intento_antes_de_escalar is True,
+          "y un proceso NUEVO arranca sabiendo que ya se pospuso una vez")
+
+# El bool y la lista conviven: esto es lo que el list(valor) de antes rompia.
+s_v2 = _sesion()
+s_v2.areas_visitadas.extend(["facturacion", "soporte_tecnico_cliente"])
+s_v2.intento_antes_de_escalar = True
+revivida_v = _rehidratar(_persistir(s_v2))
+comprobar(revivida_v.intento_antes_de_escalar is True
+          and revivida_v.areas_visitadas == ["facturacion", "soporte_tecnico_cliente"],
+          "el bool y la lista sobreviven juntos: la hidratacion dejo de asumir listas")
+comprobar(revivida_v.areas_visitadas is not s_v2.areas_visitadas,
+          "y la lista sigue siendo una COPIA, no el mismo objeto")
+
+# Sin consumir la vuelta no se escribe la clave: False no es un dato que valga
+# guardar, y asi el turno que no pospone no toca la base.
+s_v3 = _sesion()
+s_v3.areas_visitadas.append("ventas")
+comprobar("intento_antes_de_escalar" not in _persistir(s_v3),
+          "sin posponer, la clave no se escribe")
+comprobar(_rehidratar({"areas_visitadas": ["ventas"]}).intento_antes_de_escalar is False,
+          "y una fila vieja sin la clave rehidrata en False, no revienta")
+
 
 print("\n" + "=" * 70)
 if fallos:
