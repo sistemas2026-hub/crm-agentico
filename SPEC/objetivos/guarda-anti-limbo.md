@@ -1018,12 +1018,48 @@ select coalesce(c.caso_manual,'(sin)') caso, count(*) total,
        count(*) filter (where c.rol_efectivo = <rol_de_entrada>
                           and not c.escalada_a_humano) as limbo
   from asistente.conversations c join m on m.conversation_id = c.id
- where m.n_user >= 2 and c.canal <> 'whatsapp-simulado'
+ where m.n_user >= 2 and c.canal = 'whatsapp'      -- lista BLANCA, ver abajo
  group by 1 order by 3 desc;
 ```
 
-El `canal <> 'whatsapp-simulado'` no es cosmético: **es la línea que hubiera
-evitado el error de esta ficha.**
+**El filtro de canal no es cosmético: es la línea que hubiera evitado el error de
+esta ficha.** Y va como lista **blanca**: la primera versión de esta consulta
+decía `canal <> 'whatsapp-simulado'`, que deja pasar `api`, `prueba-wifi`,
+`test-verificacion`, `prueba-manual`, `demo-bandeja` y `web` — seis canales que
+tampoco son clientes. Corregido el 26/09 al normalizar las métricas: la
+definición única es `nucleo/canales/canal.py::REALES`, y en código se pide con
+`canal = any(%s)` pasándole `sorted(canales.REALES)`, nunca enumerando lo que no
+es cliente.
+
+### Y la que hace falta para atender las tres que quedaron abiertas
+
+La medición contó; esto las **nombra**, que es lo que hace falta para que alguien
+las mire. Solo lectura, no toca configuración:
+
+```sql
+with m as (select conversation_id,
+                  count(*) filter (where rol = 'user') n_user,
+                  max(creado_en) filter (where rol = 'user') ultimo_cliente,
+                  max(creado_en) filter (where rol = 'assistant') ultima_ia
+             from asistente.messages group by 1)
+select c.id, c.usuario_externo, c.rol_efectivo, m.n_user,
+       m.ultimo_cliente, m.ultima_ia, c.creado_en, c.actualizado_en
+  from asistente.conversations c join m on m.conversation_id = c.id
+ where c.canal = 'whatsapp'                  -- clientes, nada mas
+   and c.estado = 'abierta'
+   and c.rol_efectivo = <rol_de_entrada>      -- nunca salió del rol de entrada
+   and not c.escalada_a_humano
+   and c.caso_id is null and c.ticket_operativo is null
+   and m.n_user >= 2                          -- hubo un pedido, no un saludo
+   and m.ultima_ia > coalesce(m.ultimo_cliente, '-infinity'::timestamptz)
+ order by m.ultima_ia;                        -- la más vieja primero
+```
+
+Esa consulta es, a propósito, **la misma regla que la banda `sin_gestion`**
+(`nucleo/relevo/proyeccion.py::_sin_gestion_registrada`) sin el umbral de horas:
+si devuelve filas y la banda está encendida, esas filas tienen que estar en la
+cola. Si devuelve filas y la banda está apagada, esas son las que nadie ve — y
+son las que hay que atender a mano hasta que se encienda.
 
 ## Auditoría antes de integrar, 26/09/2026 — dos lentes sobre `4f1ea12`
 
