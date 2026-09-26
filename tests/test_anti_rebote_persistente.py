@@ -291,6 +291,24 @@ comprobar("intento_antes_de_escalar" not in _persistir(s_v3),
 comprobar(_rehidratar({"areas_visitadas": ["ventas"]}).intento_antes_de_escalar is False,
           "y una fila vieja sin la clave rehidrata en False, no revienta")
 
+# Y LA PUERTA DEL ROUTING NO ES UNA PUERTA DE IDENTIDAD. Esto no es conducta,
+# es seguridad: 'datos_sesion' es una columna de la base, y rehidratar recorre
+# lo que venga en ella. Si un dia trajera 'id_cliente', 'sn_onu' o 'verificado'
+# --por una escritura vieja, por otra puerta, o por un error-- no puede fijarlos:
+# la identidad se verifica en el turno, no se restaura de una fila. Hoy se
+# cumple porque CAMPOS_ROUTING_PERSISTIBLES no los incluye; queda afirmado para
+# que siga cumpliendose cuando alguien agregue el campo siguiente.
+intruso = _rehidratar({"id_cliente": "999", "sn_onu": "ABC123",
+                       "interfaz_lan": "eth0", "verificado": True, "nivel": 9,
+                       "areas_visitadas": ["ventas"]})
+comprobar(intruso.id_cliente is None and intruso.sn_onu is None
+          and intruso.interfaz_lan is None,
+          "una fila con identidad NO la restaura por la puerta del routing")
+comprobar(intruso.verificado is False and intruso.nivel == 0,
+          "ni deja a la sesion verificada: eso se gana en el turno, no se lee")
+comprobar(intruso.areas_visitadas == ["ventas"],
+          "y lo que si esta declarado entra igual")
+
 
 print("\n" + "=" * 70)
 if fallos:
