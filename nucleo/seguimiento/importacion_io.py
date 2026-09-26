@@ -57,6 +57,12 @@ HERRAMIENTAS = frozenset({
     "importar_caso_externo",
     "reconciliar_caso_externo",
     "sincronizar_respuestas_externas",
+    # Agregada el 26/09/2026. El modulo ya la usaba por nombre desde f90d3ec
+    # --linea 439, _herramienta(config, "fijar_nombre_cliente_externo")-- y no
+    # estaba declarada aca, que es justo la deriva que esta lista existe para
+    # evitar. La guarda de tests/test_reloj.py lo venia diciendo en rojo; lo
+    # que faltaba era correrla.
+    "fijar_nombre_cliente_externo",
 })
 
 
