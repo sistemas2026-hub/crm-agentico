@@ -102,6 +102,16 @@ R2_REGISTRO_EXTERNO = {
     #  cerrar_ticket_operativo (el ticket del ISP).
     "asignar_caso_crm",
     "cerrar_ticket_operativo_estado",
+    #  26/09/2026: 'fijar_nombre_cliente_externo' llego en origin (f90d3ec) sin
+    #  clase, y cinco guardas de M06 estaban en rojo por eso -- o sea que la
+    #  herramienta ya estaba en el catalogo de produccion y su riesgo nunca se
+    #  habia decidido. Va en R2 por lo mismo que sus hermanas: POST al backend
+    #  interno que escribe el nombre en los CASOS del CRM
+    #  (/importacion/casos/nombre-cliente/). No es R1 --registra afuera de
+    #  Dexter--, no es R3 --no toca un equipo-- y no es R4 --no mueve dinero--.
+    #  Escribe solo donde el nombre falta y no sobrescribe nada, y pasa por la
+    #  frontera como las demas (importacion_io.py::_puerta).
+    "fijar_nombre_cliente_externo",
     "completar_ticket_instalacion",
     "crear_caso_soporte",
     "crear_tag_crm",

@@ -932,6 +932,23 @@ herramientas:
     barreras: "rol soporte; lista blanca de campos por rol"
     evidencia: "solo_lectura=true, metodo GET (catalogo); skill smartolt-api: campos de get_onu_details"
 
+  # Llego en origin (f90d3ec) y quedo sin fila hasta el 26/09/2026: cinco
+  # guardas de M06 estaban en rojo por eso, o sea que la herramienta ya vivia en
+  # el catalogo de produccion y su nivel nunca se habia propuesto. Se propone 2
+  # por lo mismo que 'asignar_caso_crm': CRM propio, aditivo, no sobrescribe, y
+  # el cliente no ve nada. Esta matriz es una PROPUESTA -- el runtime no la lee.
+  - nombre: fijar_nombre_cliente_externo
+    tipo: escritura
+    clase: R2
+    nivel: 2
+    aprobacion_humana: false
+    efecto_externo: "si, CRM propio (POST escribe el nombre del cliente en los casos del servicio que no lo tengan)"
+    reversible: "si, solo a mano (evidenciado: escribe SOLO donde el campo esta vacio y no sobrescribe -- importacion_io.py::fijar_nombre_cliente; deshacerlo es editar el caso en el CRM)"
+    riesgo: "escribir en un caso un nombre que el proveedor informo mal"
+    justificacion: "CRM propio, aditivo y sin sobrescritura, sin efecto visible al cliente (C4a). Ademas no la llama el modelo: la ejecuta el backfill (descripcion del catalogo) y pasa por la frontera con actor"
+    barreras: "no la llama el modelo -- 'NO la llames tu' en el catalogo; requiere_confirmacion=true; roles_permitidos=[administracion]; la ejecuta el backfill de importacion_io con actor, o sea por la puerta humana"
+    evidencia: "POST /importacion/casos/nombre-cliente/, solo_lectura=false (catalogo); importacion_io.py::fijar_nombre_cliente manda DOS datos (id de servicio y nombre) y el CRM decide a que casos les toca y cual ya tenia"
+
   - nombre: asignar_caso_crm
     tipo: escritura
     clase: R2

@@ -46,7 +46,9 @@ CAMPOS = ("nombre", "tipo", "clase", "nivel", "aprobacion_humana", "efecto_exter
 #  M06-F: registrar_promesa_y_reactivar (R4, llego en origin) es la sexta.
 CRITICAS = {"reiniciar_ont", "activar_catv", "cambiar_tipo_onu",
             "registrar_pago", "agregar_promesa_pago", "registrar_promesa_y_reactivar"}
-TOTAL = 76      # 69 de M06-D + 7 que trajo origin (M06-F)
+TOTAL = 77      # 69 de M06-D + 7 que trajo origin (M06-F) + 1 del 26/09/2026
+#               ('fijar_nombre_cliente_externo', que llego en f90d3ec sin fila;
+#                ver la nota de su entrada en M06-D_MATRIZ_AUTONOMIA.yaml)
 
 
 def afirmar(c: bool, que: str, detalle: str = "") -> None:

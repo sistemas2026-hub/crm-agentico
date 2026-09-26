@@ -789,7 +789,11 @@ def r1_r2_sin_cambio():
     #  23 desde M06-F: origin trajo dos escrituras nuevas que NO son
     #  irreversibles (asignar_caso_crm, cerrar_ticket_operativo_estado) y una
     #  que si (registrar_promesa_y_reactivar, que no cuenta aca).
-    afirmar(len(no_irreversibles) == 23 and "agregar_promesa_pago" not in no_irreversibles
+    #  24 desde el 26/09/2026: origin (f90d3ec) trajo otra que tampoco lo es,
+    #  'fijar_nombre_cliente_externo' -- escribe un nombre donde falta, en el
+    #  CRM, sin sobrescribir. Se clasifico en R2 el mismo dia; ver la nota de
+    #  tests/test_m10a_gobierno_frontera.py.
+    afirmar(len(no_irreversibles) == 24 and "agregar_promesa_pago" not in no_irreversibles
             and "registrar_promesa_y_reactivar" not in no_irreversibles
             and "cancelar_solicitud_servicio" not in no_irreversibles,
             f"las otras {len(no_irreversibles)} escrituras NO son irreversibles "

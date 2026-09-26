@@ -475,12 +475,16 @@ def sin_cambios_de_catalogo():
                                                    R3_EQUIPO_FISICO, R4_DINERO)
     todas = CONFIG.herramientas
     escrituras = {h.nombre for h in todas if not h.solo_lectura}
-    afirmar(len(todas) == 76 and len(escrituras) == 30,
+    # 77 y 31 desde el 26/09/2026: origin (f90d3ec) trajo
+    # 'fijar_nombre_cliente_externo', una escritura mas, clasificada en R2 --
+    # registra en el CRM como sus hermanas. Ver la nota de
+    # tests/test_m10a_gobierno_frontera.py.
+    afirmar(len(todas) == 77 and len(escrituras) == 31,
             f"{len(todas)} herramientas, {len(escrituras)} escrituras")
     afirmar((len(R1_INTERNO), len(R2_REGISTRO_EXTERNO), len(R3_EQUIPO_FISICO),
-             len(R4_DINERO)) == (3, 21, 3, 3)
+             len(R4_DINERO)) == (3, 22, 3, 3)
             and (R1_INTERNO | R2_REGISTRO_EXTERNO | R3_EQUIPO_FISICO | R4_DINERO) == escrituras,
-            "R1=3 R2=21 R3=3 R4=3, y cubren exactamente las 30 escrituras")
+            "R1=3 R2=22 R3=3 R4=3, y cubren exactamente las 31 escrituras")
     afirmar(all(h.nivel_autonomia is None for h in todas),
             "ninguna herramienta del catalogo declara nivel: no se reasigno ninguna")
     afirmar({techos.nivel_requerido_de(h) for h in todas if h.solo_lectura} == {0}
