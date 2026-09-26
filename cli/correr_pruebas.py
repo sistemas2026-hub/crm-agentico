@@ -87,9 +87,25 @@ def descubrir() -> list[tuple[Path, str]]:
 _FALTA_ENTORNO = re.compile(
     r"No hay datos de conexion|"
     r"Definir DBHOST|"
+    # 26/09/2026: la capa de conexion tiene DOS mensajes, y este faltaba. Con
+    # cuatro de las cinco variables puestas, cinco pruebas decian "Conexion
+    # incompleta: falta DBNAME" y el corredor las contaba como FALLO -- o sea
+    # justo la distincion que existe para hacer (D1). Un rojo que en realidad
+    # es "no se pudo medir" infla el numero y esconde los fallos de verdad
+    # entre ruido de entorno.
+    r"Conexion incompleta|"
     r"could not connect to server|"
     r"connection to server .* failed",
     re.IGNORECASE,
+)
+
+
+#: Lo que una prueba de este repo imprime cuando algo NO paso. Se busca esto
+#: antes que cualquier otra linea: es la diferencia entre un motivo que explica
+#: y uno que describe lo ultimo que salio bien.
+_MARCA_DE_FALLO = re.compile(
+    r"\[FALLA\]|\[falla\]|^FALLA|AssertionError|Error:|"
+    r"Exception|Traceback \(most recent|se colgo|no pasaron",
 )
 
 
@@ -101,12 +117,25 @@ def _primer_motivo_legible(lineas: list[str]) -> str:
     queda ninguna, se devuelve vacio y quien llama pone el codigo de salida --
     antes que una linea de iguales, que parece un motivo y no lo es.
     """
+    # PRIMERO lo que se declara como fallo, y solo despues la ultima linea
+    # util. Sin esta pasada, el motivo que salia era casi siempre una linea de
+    # OK -- estas pruebas imprimen sus comprobaciones y cierran con la ultima
+    # que paso, asi que "las 31 escrituras estan clasificadas, sin sobras ni
+    # faltas" se reportaba como el motivo de un rojo (medido el 26/09/2026 en
+    # nueve de catorce fallos). Un motivo que describe algo que SALIO BIEN es
+    # peor que ninguno: manda a buscar donde no esta.
+    for linea in reversed(lineas):
+        limpia = linea.strip()
+        if _MARCA_DE_FALLO.search(limpia) and limpia.strip("=-_ "):
+            return limpia[:160]
     for linea in reversed(lineas):
         limpia = linea.strip()
         if not limpia.strip("=-_ "):          # solo barras: no explica nada
             continue
         if limpia.startswith("Traceback ("):   # el encabezado, no la causa
             continue
+        if limpia.startswith(("[ok]", "[OK]", "- ", "  - ")):
+            continue                           # una comprobacion que paso
         return limpia[:160]
     return ""
 
