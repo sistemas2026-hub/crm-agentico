@@ -198,18 +198,90 @@ def prueba_6_el_enganche_no_tiene_logica_paralela():
     try:
         from nucleo.canales import api
     except Exception as e:                                          # noqa: BLE001
-        print(f"  (se saltea: no se pudo importar api -- {type(e).__name__})")
+        # NO SE PUDO CORRER no es lo mismo que PASO (D1). Saltearse con exit 0
+        # dejaba la unica afirmacion sobre el enganche desactivada en silencio.
+        print(f"  (NO SE PUDO CORRER: no se importa api -- {type(e).__name__})")
+        afirmar(False, "la guarda del enganche no pudo correr (no es un exito)")
         return
-    fuente = inspect.getsource(api._atender_turno)
-    afirmar("por_que_posponer(" in fuente, "_atender_turno llama a por_que_posponer")
+    turno = inspect.getsource(api._atender_turno)
+    aplica = inspect.getsource(api._aplicar_posposicion)
+    fuente = turno + aplica
+    afirmar("_aplicar_posposicion(" in turno,
+            "_atender_turno aplica la posposicion por la funcion que la prueba mide")
+    afirmar("por_que_posponer(" in aplica and "por_que_posponer(" not in turno,
+            "y la decision se pide UNA vez, en _aplicar_posposicion")
     afirmar("con_las_manos_vacias(" not in fuente,
             "y NO decide con con_las_manos_vacias por su cuenta")
     afirmar("merece_un_intento(" not in fuente,
             "ni con merece_un_intento por su cuenta")
-    afirmar('"se pospone una vuelta antes de escalar"' in fuente and "razon=razon" in fuente,
+    afirmar('"se pospone una vuelta antes de escalar"' in aplica and "razon=razon" in aplica,
             "el log lleva un evento FIJO y la razon como campo (registro.py exige texto constante)")
-    afirmar("puede_intentar_algo(config, rol_cfg)" in fuente,
+    # Esta ultima SI es una afirmacion sobre el texto, y es a proposito: que
+    # el sitio de llamada pase el rol DEL TURNO y no otro no se puede medir
+    # sin conducir _atender_turno entero con base. Era la quinta mutacion del
+    # auditor y la unica que prueba_7 no alcanza.
+    afirmar("_aplicar_posposicion(config, rol_cfg, estado" in turno,
+            "y le pasa el rol del turno, no cualquier rol de la config")
+    afirmar("puede_intentar_algo(config, rol_cfg)" in turno,
             "el agendamiento automatico sigue exigiendo que el rol tenga con que (api.py, tras el evaluador)")
+
+
+
+def prueba_7_el_ciclo_de_dos_vueltas_se_cumple_de_verdad():
+    """
+    EL EFECTO, no el texto del fuente. El 26/09/2026 el auditor mostro que
+    cinco mutaciones distintas de api.py --dos de ellas posposicion infinita--
+    dejaban prueba_6 en verde. Esto las mata: se corre el mecanismo real dos
+    veces sobre el mismo estado de sesion y se afirma que la segunda escala.
+    """
+    try:
+        from nucleo.canales import api
+    except Exception as e:                                          # noqa: BLE001
+        print(f"  (NO SE PUDO CORRER: no se importa api -- {type(e).__name__})")
+        afirmar(False, "la prueba del efecto no pudo correr (no es un exito)")
+        return
+
+    rol_cfg = ROUTER.roles["cliente_final"]
+    estado = {"historial": list(SIN_TOOL), "intento_antes_de_escalar": False,
+              "nota_pendiente": None, "conversacion_id": None}
+
+    # Vuelta 1: se pospone, con la nota que ese rol SI puede cumplir.
+    primera = api._aplicar_posposicion(ROUTER, rol_cfg, estado, forzado=False,
+                                       motivo="solicitud_explicita")
+    afirmar(primera is True, "vuelta 1: la escalada se pospone")
+    afirmar(estado["intento_antes_de_escalar"] is True,
+            "y la vuelta queda CONSUMIDA en el estado de la sesion")
+    nota = estado["nota_pendiente"] or ""
+    afirmar("derivar_a_area" in nota,
+            "la nota nombra la herramienta que el rol tiene, sacada del catalogo")
+
+    # Vuelta 2: sobre el MISMO estado, ya no se pospone -- escala.
+    segunda = api._aplicar_posposicion(ROUTER, rol_cfg, estado, forzado=False,
+                                       motivo="solicitud_explicita")
+    afirmar(segunda is False,
+            "vuelta 2: sobre el mismo estado NO se pospone -- la escalada sale")
+
+    # Una escalada forzada por una herramienta no se pospone nunca, ni la
+    # primera vez: ya tiene un hecho detras.
+    estado_f = {"historial": list(SIN_TOOL), "intento_antes_de_escalar": False,
+                "nota_pendiente": None, "conversacion_id": None}
+    afirmar(api._aplicar_posposicion(ROUTER, rol_cfg, estado_f, forzado=True,
+                                     motivo="solicitud_explicita") is False,
+            "y una escalada forzada no se pospone ni en la primera vuelta")
+    afirmar(estado_f["nota_pendiente"] is None,
+            "ni le deja una nota al modelo")
+
+    # Un ejecutor sin nada en la traza tambien recibe una vuelta, y una sola:
+    # la funcion no es un caso especial del rol de entrada.
+    estado_e = {"historial": list(SIN_TOOL), "intento_antes_de_escalar": False,
+                "nota_pendiente": None, "conversacion_id": None}
+    rol_e = EJECUTOR.roles["soporte"]
+    afirmar(api._aplicar_posposicion(EJECUTOR, rol_e, estado_e, forzado=False,
+                                     motivo="informacion_a_confirmar") is True,
+            "un ejecutor con la traza vacia tambien recibe su vuelta")
+    afirmar(api._aplicar_posposicion(EJECUTOR, rol_e, estado_e, forzado=False,
+                                     motivo="informacion_a_confirmar") is False,
+            "y tampoco recibe dos")
 
 
 def main() -> int:
@@ -220,7 +292,8 @@ def main() -> int:
                    prueba_3_el_ejecutor_conserva_sus_dos_razones,
                    prueba_4_no_depende_de_ningun_nombre_de_rol,
                    prueba_5_sin_nada_que_dar_y_falla_cerrado,
-                   prueba_6_el_enganche_no_tiene_logica_paralela):
+                   prueba_6_el_enganche_no_tiene_logica_paralela,
+                   prueba_7_el_ciclo_de_dos_vueltas_se_cumple_de_verdad):
         print(f"\n{prueba.__name__}")
         prueba()
     print()

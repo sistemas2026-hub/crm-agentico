@@ -37,11 +37,14 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
 from nucleo.config import cargar_config                              # noqa: E402
-from nucleo.config.editor import (ErrorEdicion, _mutar_borrar,       # noqa: E402
+from nucleo.config.editor import (ErrorEdicion, _mutar_ajustes_bandeja,  # noqa: E402
+                                  _mutar_borrar,
                                   _mutar_crear, _mutar_editar,
-                                  _mutar_persona, _validar,
+                                  _mutar_persona, _mutar_rol_de_entrada,
+                                  _validar,
                                   _validar_nombre_rol,
-                                  catalogo_herramientas)
+                                  catalogo_herramientas,
+                                  guardar_ajustes_bandeja)
 
 TENANT = "prueba"      # el nucleo no nombra clientes: solo rotula los errores
 
@@ -414,6 +417,103 @@ def prueba_catalogo() -> None:
               "una herramienta de verificacion no ofrece campos (no los usa)")
 
 
+# =============================================================================
+#  LA BANDA 'SIN GESTION' NO SE PUEDE GUARDAR DE FORMA QUE NO HAGA NADA
+# =============================================================================
+#
+# Tres silencios, los tres hallados el 26/09/2026 al auditar la rama de
+# integracion antes de integrarla, y los tres del mismo tipo: la
+# configuracion aceptaba un estado en el que la guarda quedaba apagada sin
+# que nadie se enterara. Lo que se afirma aca es el EFECTO --que el
+# documento no queda en ese estado-- y no que exista una validacion.
+
+
+def prueba_banda_sin_gestion() -> None:
+    print()
+    print("banda_sin_gestion: no se puede apagar sin decirlo")
+
+    # --- 1. un umbral sin rol de entrada se guardaria sin efecto ------------
+    doc = documento_base()
+    doc.pop("rol_de_entrada", None)
+    lanza("sin rol de entrada, el umbral no se guarda",
+          lambda: _mutar_ajustes_bandeja(doc, 30, None, 24))
+    comprobar(doc.get("sin_gestion_horas") is None,
+              "y el umbral sigue apagado, no a medio escribir")
+
+    # --- 2. la banda no puede aparecer despues de que el barrido cierre ----
+    doc = documento_base()
+    doc["rol_de_entrada"] = _rol_de_cliente_cualquiera(doc)
+    doc.setdefault("limites", {})["horas_inactividad_cierra"] = 24
+    doc["cierre_inactivas_ia"] = {"habilitado": True,
+                                  "rollout_cutoff": "2026-09-22T15:58:07Z"}
+    lanza("con el barrido en 24 h, un umbral de 72 no se guarda",
+          lambda: _mutar_ajustes_bandeja(doc, 30, None, 72))
+    comprobar(doc.get("sin_gestion_horas") is None,
+              "y la ventana en que nadie la cierra ni la ve no existe")
+
+    _mutar_ajustes_bandeja(doc, 30, None, 24)
+    comprobar(doc.get("sin_gestion_horas") == 24,
+              "el umbral igual al del barrido si se guarda (no hay ventana)")
+
+    # Con el barrido apagado no hay ventana que proteger, y el umbral es
+    # libre: la validacion acota lo que hace daño, no lo que se le parece.
+    doc2 = documento_base()
+    doc2["rol_de_entrada"] = _rol_de_cliente_cualquiera(doc2)
+    doc2.setdefault("limites", {})["horas_inactividad_cierra"] = 24
+    doc2["cierre_inactivas_ia"] = {"habilitado": False}
+    _mutar_ajustes_bandeja(doc2, 30, None, 720)
+    comprobar(doc2.get("sin_gestion_horas") == 720,
+              "con el barrido apagado, 720 h se guarda igual")
+
+    # --- 3. vaciar el rol de entrada apagaria la banda por la otra puerta --
+    doc3 = documento_base()
+    doc3["rol_de_entrada"] = _rol_de_cliente_cualquiera(doc3)
+    _mutar_ajustes_bandeja(doc3, 30, None, 24)
+    antes = doc3["rol_de_entrada"]
+    lanza("con la banda encendida, el rol de entrada no se puede vaciar",
+          lambda: _mutar_rol_de_entrada(doc3, None))
+    comprobar(doc3.get("rol_de_entrada") == antes,
+              "y el rol sigue puesto: la banda no se apaga de rebote")
+
+    _mutar_ajustes_bandeja(doc3, 30, None, None)
+    comprobar(doc3.get("sin_gestion_horas") is None,
+              "vaciar el umbral SI apaga la banda (es la puerta correcta)")
+    _mutar_rol_de_entrada(doc3, None)
+    comprobar(doc3.get("rol_de_entrada") is None,
+              "y recien entonces el rol se puede vaciar")
+
+    # --- 4. el cuarto parametro es obligatorio ----------------------------
+    # Un llamador con la firma vieja borraria el umbral --y con el, la
+    # excepcion del barrido-- sin decir nada. Se afirma el efecto: la
+    # llamada no llega a la base.
+    try:
+        guardar_ajustes_bandeja(TENANT, 30, None)      # type: ignore[call-arg]
+    except TypeError:
+        comprobar(True, "la firma vieja de tres argumentos ya no compila")
+    except Exception as e:
+        comprobar(False, f"la firma vieja lanzo {type(e).__name__}, no TypeError")
+    else:
+        comprobar(False, "la firma vieja de tres argumentos todavia se acepta")
+
+    # Y lo mutado sigue siendo una configuracion valida.
+    doc4 = documento_base()
+    doc4["rol_de_entrada"] = _rol_de_cliente_cualquiera(doc4)
+    _mutar_ajustes_bandeja(doc4, 30, None, 12)
+    config = _validar(TENANT, doc4)
+    comprobar(config.sin_gestion_horas == 12,
+              "y el documento pasa por el validador del motor con el umbral puesto")
+
+
+def _rol_de_cliente_cualquiera(doc: dict) -> str:
+    """El nucleo no nombra roles de ningun cliente: se toma el primero que
+    atienda a cliente_final, que es lo que el esquema exige del rol de
+    entrada."""
+    for nombre, rol in doc["roles"].items():
+        if rol.get("orientado_a") == "cliente_final":
+            return nombre
+    raise SystemExit("ningun rol orientado a cliente_final con que probar")
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print(" EDITOR DE ROLES  --  mutaciones sobre el documento de configuracion")
@@ -427,6 +527,7 @@ if __name__ == "__main__":
     prueba_persona()
     prueba_ida_y_vuelta()
     prueba_catalogo()
+    prueba_banda_sin_gestion()
 
     print("\n" + "=" * 70)
     if fallos:

@@ -304,6 +304,32 @@ correr(sin_banda, espia=espia, modo_backlog=True)
 afirmar(espia.roles_exceptuados and all(r is None for r in espia.roles_exceptuados),
         "sin sin_gestion_horas no se exceptua nada: el barrido cierra como siempre")
 
+# ── y la proteccion no se cae cuando la config no se pudo leer ────────────────
+# El reloj lee con fuente.cargar, que ante una base que no contesta sirve el
+# YAML de la imagen -- y el YAML no declara 'sin_gestion_horas'. Con la logica
+# anterior eso apagaba la excepcion y el barrido cerraba, con
+# 'sin_respuesta_cliente', las filas que la banda protegia. Lo que se afirma
+# es el efecto: con la config marcada como degradada se exceptua igual, aunque
+# el umbral llegue vacio. Un cierre es irreversible; dejarla abierta se ve en
+# la Bandeja y se deshace.
+degradada = cfg()
+degradada.rol_de_entrada = "cliente_final"
+degradada._origen = "yaml"                  # lo que hace fuente.cargar al caer
+espia = Falsa(nuevas=2, backlog=1)
+correr(degradada, espia=espia, modo_backlog=True)
+afirmar(espia.roles_exceptuados and all(r == "cliente_final" for r in espia.roles_exceptuados),
+        "con la config caida al YAML se exceptua igual, aunque el umbral llegue vacio")
+
+# Y el contrario, para que la guarda no sea "exceptuar siempre": una config
+# leida de la base y con la banda apagada sigue barriendo todo.
+de_la_base = cfg()
+de_la_base.rol_de_entrada = "cliente_final"
+de_la_base._origen = "base"
+espia = Falsa(nuevas=2, backlog=1)
+correr(de_la_base, espia=espia, modo_backlog=True)
+afirmar(espia.roles_exceptuados and all(r is None for r in espia.roles_exceptuados),
+        "y con la config leida de la base y la banda apagada no se exceptua nada")
+
 print("\n" + "=" * 62)
 if fallos:
     print(f" {len(fallos)} falla(s).")

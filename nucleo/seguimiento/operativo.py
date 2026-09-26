@@ -298,8 +298,24 @@ def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False, *,
     # apagada se barre como siempre: exceptuarlo sin mostrarlo seria dejarlo
     # abierto para siempre sin que nadie lo vea. Por eso las dos cosas van
     # atadas al mismo campo de config, y no a dos.
+    # Y LA PROTECCION NO PUEDE DEPENDER DE UNA CONFIG QUE FALLA ABIERTA.
+    # El reloj lee con fuente.cargar, que cae al YAML de la imagen cuando la
+    # base no contesta (tenant_no_esta_en_la_base, base_ilegible), y el YAML
+    # no declara 'sin_gestion_horas'. Sin esta guarda una lectura degradada
+    # borraba la excepcion y el barrido cerraba con 'sin_respuesta_cliente'
+    # --que afirma que el cliente no volvio-- justo las filas que la banda
+    # existe para proteger. Hallado por el auditor independiente el
+    # 26/09/2026 sobre 4f1ea12; no es teorico: el YAML semilla trae
+    # habilitado=true, rollout_cutoff y 24 horas, asi que el barrido corre.
+    # Cuando no se puede confirmar que la banda este apagada se exceptua:
+    # dejar una conversacion abierta es reversible y se ve en la Bandeja;
+    # cerrarla afirmando algo del cliente, no.
+    degradada = getattr(config, "_origen", "base") != "base"
     entrada = (getattr(config, "rol_de_entrada", None)
-               if getattr(config, "sin_gestion_horas", None) else None)
+               if (getattr(config, "sin_gestion_horas", None) or degradada)
+               else None)
+    if degradada and entrada:
+        resumen["config_degradada"] = True
     lote_config = getattr(ajustes, "backfill_lote", 10)
     try:
         nuevas = persistencia.conversaciones_ia_inactivas(

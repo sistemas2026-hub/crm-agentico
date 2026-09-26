@@ -1185,6 +1185,43 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 "sin_turno": True}
 
 
+def _aplicar_posposicion(config, rol_cfg, estado, *, forzado: bool,
+                         motivo: str) -> bool:
+    """
+    Aplica la decision de posponer una escalada, y devuelve si se pospuso.
+
+    ESTA FUNCION EXISTE PARA QUE LA DECISION SE PUEDA MEDIR POR SU EFECTO.
+    Vivia inline en _atender_turno, y el 26/09/2026 el auditor independiente
+    demostro que eso dejaba el enganche sin ninguna prueba que lo cubriera:
+    aplico cinco mutaciones --entre ellas 'ya_intento=False', que pospone en
+    CADA turno y no escala nunca-- y la guarda quedo EN VERDE con las cinco,
+    porque solo podia afirmar sobre el texto del fuente. Extraida, el ciclo
+    de dos vueltas se afirma como efecto: ver
+    tests/test_escalada_del_rol_de_entrada.py::prueba_7.
+
+    Lo que no cambia: la decision entera sigue siendo de
+    forzado.por_que_posponer y aca no se recompone ninguna condicion.
+    'ya_intento' sale del estado de la sesion, que es lo que convierte la
+    posposicion en UNA vuelta y no en una espera sin final.
+    """
+    razon, nota = por_que_posponer(
+        config, rol_cfg, estado["historial"],
+        forzado=forzado,
+        ya_intento=estado["intento_antes_de_escalar"],
+        motivo=motivo)
+    if not razon:
+        return False
+    estado["intento_antes_de_escalar"] = True
+    estado["nota_pendiente"] = nota
+    # Evento FIJO y la razon como campo: registro.py exige texto constante en
+    # el evento (tests/test_registro_sin_pii.py), y asi se busca 'se pospone'
+    # en el log y se filtra por razon.
+    registrar("escalamiento", "se pospone una vuelta antes de escalar",
+              conversation_id=id_interno(estado.get("conversacion_id")),
+              razon=razon, motivo=motivo)
+    return True
+
+
 def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
                    mensaje: str, canal: str, profile_id: str | None = None,
                    nombre_colaborador: str = "",
@@ -2266,21 +2303,9 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # unico que puede: derivar. Si tampoco deriva, la siguiente no se
             # pospone y se escala. Respeta 'intentar_resolver_antes' del tenant
             # y no elige destino por el modelo. Ver el docstring de la funcion.
-            razon, nota = por_que_posponer(
-                config, rol_cfg, estado["historial"],
-                forzado=forzado,
-                ya_intento=estado["intento_antes_de_escalar"],
-                motivo=evaluacion.get("motivo", ""))
-            if razon:
-                estado["intento_antes_de_escalar"] = True
-                estado["nota_pendiente"] = nota
+            if _aplicar_posposicion(config, rol_cfg, estado, forzado=forzado,
+                                    motivo=evaluacion.get("motivo", "")):
                 posponer = True
-                # Evento FIJO y la razon como campo: registro.py exige texto
-                # constante en el evento (tests/test_registro_sin_pii.py), y
-                # asi se busca 'se pospone' en el log y se filtra por razon.
-                registrar("escalamiento", "se pospone una vuelta antes de escalar",
-                          conversation_id=id_interno(estado.get("conversacion_id")),
-                          razon=razon, motivo=evaluacion.get("motivo"))
 
             # --- verificacion automatica de agendamiento --------------------
             # Solo corre si el tenant declaro ESTE caso puntual en

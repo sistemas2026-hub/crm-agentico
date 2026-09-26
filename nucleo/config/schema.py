@@ -53,7 +53,7 @@ from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal
 
 import yaml
-from pydantic import (BaseModel, ConfigDict, Field, ValidationError,
+from pydantic import (BaseModel, ConfigDict, Field, PrivateAttr, ValidationError,
                       field_validator, model_validator)
 
 
@@ -2904,6 +2904,17 @@ class TenantConfig(Base):
     # Vacio = se sigue tomando el primero, con un aviso por consola. No se hace
     # obligatorio para no romper a un tenant ya cargado, pero el aviso deja
     # dicho que se esta eligiendo por un orden que nadie decidio.
+    # DE DONDE SALIO ESTA CONFIG, y por que un trabajo que BORRA lo necesita.
+    #
+    # 'base' es lo normal. 'yaml' significa que fuente.cargar cayo a la
+    # semilla de la imagen porque la base no la pudo servir, y entonces los
+    # campos que solo viven en la base --como 'sin_gestion_horas', que el
+    # YAML no declara-- llegan vacios sin que eso sea la decision de nadie.
+    # "el campo esta apagado" y "no pude leer el campo" no son lo mismo
+    # cuando lo que sigue es cerrar una conversacion:
+    # ver nucleo/seguimiento/operativo.py::cerrar_inactivas_de_ia.
+    _origen: str = PrivateAttr(default="base")
+
     rol_de_entrada: str | None = None
     seguridad: Seguridad = Field(default_factory=Seguridad)
     autenticacion: Autenticacion = Field(default_factory=Autenticacion)

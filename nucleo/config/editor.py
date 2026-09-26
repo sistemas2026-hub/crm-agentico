@@ -1087,7 +1087,7 @@ def guardar_plazo_visita_tecnica(tenant: str, dias: int) -> TenantConfig:
 
 def guardar_ajustes_bandeja(tenant: str, sla_toma_minutos: int,
                             umbral_rx_dbm: float | None,
-                            sin_gestion_horas: int | None = None) -> TenantConfig:
+                            sin_gestion_horas: int | None) -> TenantConfig:
     """
     Los numeros que la Bandeja usa para emitir un VEREDICTO, y que cada
     empresa tiene que poder poner desde la pantalla.
@@ -1130,7 +1130,47 @@ def guardar_ajustes_bandeja(tenant: str, sla_toma_minutos: int,
 
 def _mutar_ajustes_bandeja(doc, sla_toma_minutos: int,
                            umbral_rx_dbm: float | None,
-                           sin_gestion_horas: int | None = None) -> None:
+                           sin_gestion_horas: int | None) -> None:
+    """
+    SIN DEFAULT EN EL CUARTO PARAMETRO, y no es descuido. Su None significa
+    BORRAR, y borrarlo apaga la banda 'sin gestion' y con ella la excepcion
+    del barrido que cierra conversaciones: un llamador que lo omitiera por
+    escribir la firma vieja reactivaria el cierre sin decir nada. Con el
+    parametro obligatorio eso es un TypeError al importar, no un silencio.
+    Hallado por el arquitecto el 26/09/2026 sobre 4f1ea12.
+
+    LAS DOS VALIDACIONES CRUZADAS VIVEN ACA, no en guardar_*, porque solo
+    desde el documento se ve el estado ya guardado del tenant.
+    """
+    if sin_gestion_horas is not None:
+        # 1. Sin rol de entrada la banda no existe: mira las conversaciones
+        #    que nunca salieron de el. Guardar el umbral igual dejaba un
+        #    numero persistido, visible en el formulario, sin ningun efecto
+        #    --y nadie se enteraba. Rapilink lo declara; el segundo ISP es
+        #    quien lo pagaba, que es el razonamiento que CLAUDE.md 3.3
+        #    prohibe repetir.
+        if not str(doc.get("rol_de_entrada") or "").strip():
+            raise ErrorEdicion(
+                "primero hay que fijar el rol de entrada: la banda 'sin gestión' "
+                "mira las conversaciones que nunca salieron de él, y sin ese dato "
+                "el umbral se guardaría sin hacer absolutamente nada.")
+        # 2. La banda tiene que aparecer ANTES de que el barrido cierre, no
+        #    despues. La excepcion del barrido arranca en
+        #    'limites.horas_inactividad_cierra'; la banda, en este umbral.
+        #    Con 72 contra 24 quedaban 48 horas en que la fila no se cerraba
+        #    y no aparecia en ninguna pestaña -- exactamente el limbo que la
+        #    banda vino a cerrar, y el estado que el comentario del barrido
+        #    dice querer evitar. Medido por el auditor el 26/09/2026: 25 de
+        #    25 filas exceptuadas y sin banda con 72, y 29 dias de ventana
+        #    con el maximo del formulario.
+        cierre = doc.get("cierre_inactivas_ia") or {}
+        tope = (doc.get("limites") or {}).get("horas_inactividad_cierra")
+        if cierre.get("habilitado") and tope and int(sin_gestion_horas) > int(tope):
+            raise ErrorEdicion(
+                f"el umbral de 'sin gestión' no puede pasar de {int(tope)} horas, que es "
+                "cuando el cierre por inactividad entra a actuar: más allá de ahí la "
+                "conversación deja de cerrarse sola y todavía no aparece en la Bandeja, "
+                "que es justo el caso que esta banda existe para que no ocurra.")
     doc["sla_toma_minutos"] = int(sla_toma_minutos)
     if umbral_rx_dbm is None:
         doc.pop("umbral_rx_dbm", None)
@@ -1348,6 +1388,19 @@ def _mutar_rol_de_entrada(doc: dict, rol: str | None) -> None:
     (TenantConfig), no esta funcion: asi vale por cualquier puerta, no solo
     por esta.
     """
+    if not rol and doc.get("sin_gestion_horas"):
+        # La otra puerta del mismo silencio. Vaciar el rol de entrada estando
+        # la banda encendida la apaga --proyeccion.py falla cerrado sin ese
+        # dato-- y, peor, devuelve al barrido las conversaciones que la banda
+        # estaba protegiendo: se cierran con 'sin_respuesta_cliente', que
+        # afirma que el cliente no volvio, sobre filas que nadie atendio.
+        # Se rechaza en vez de arrastrar la banda, porque apagar una guarda
+        # tiene que ser una decision escrita y no el efecto de otra.
+        raise ErrorEdicion(
+            "no se puede dejar sin rol de entrada mientras la banda 'sin gestión' "
+            "esté encendida: se apagaría sola y esas conversaciones volverían a "
+            "cerrarse por inactividad. Primero vaciá el umbral en Ajustes de la "
+            "Bandeja, y después el rol.")
     if rol:
         doc["rol_de_entrada"] = rol.strip()
     else:

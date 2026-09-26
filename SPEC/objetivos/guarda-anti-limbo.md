@@ -1016,6 +1016,126 @@ select coalesce(c.caso_manual,'(sin)') caso, count(*) total,
 El `canal <> 'whatsapp-simulado'` no es cosmético: **es la línea que hubiera
 evitado el error de esta ficha.**
 
+## Auditoría antes de integrar, 26/09/2026 — dos lentes sobre `4f1ea12`
+
+Pedida por el usuario antes del merge, con el argumento correcto: hasta acá se había
+auditado una **idea** (la versión A de B, y los *diseños* de C), no el estado que se
+quiere integrar. Las dos corridas son de solo lectura y se hicieron sobre el tip de la
+rama, no sobre el laboratorio.
+
+### La corrección que más duele, y va primero
+
+**El código de `f90d3ec` ya marcaba `estado["intento_antes_de_escalar"] = True`** dentro
+de la rama de manos vacías. Con la sesión viva, el rol de entrada **ya escalaba en el
+turno 2 antes de B**. Entonces:
+
+- El subject de `b920c25` —*"Un rol que solo puede derivar ya no espera un turno que no
+  llega"*— **afirma más de lo que el código hace**. No se puede reescribir (no amend);
+  queda corregido acá, que es donde la próxima sesión lo va a leer.
+- El *"posponía SIEMPRE"* se cumple por un camino distinto del que esta ficha decía: el
+  estado de sesión vive en RAM del proceso (`_sesiones`, D4). Un cliente que escribe una
+  vez al día reentra con el contador en cero y **vuelve a recibir posposición cada vez**.
+  Eso **B tampoco lo cambia**, y hay que decirlo.
+- Lo que B sí cambia **en código**: el gating del agendamiento automático (`api.py`, tras
+  el evaluador) y la centralización de la decisión. Lo que cambia **por guía**: la nota,
+  que pasa de pedirle algo imposible a pedirle lo único que puede. Por PRD §7.4 —*el
+  prompt es guía, el código es la garantía*— la parte de B que cierra limbo es el gating;
+  la nota es una mejora medida en n=5 sintéticos (3 de 5 derivaron), no una garantía.
+
+### Tres hallazgos altos, los tres corregidos en la rama
+
+**1 · La prueba de B no veía el enganche: cinco mutaciones de `api.py` la dejaban en
+verde.** El auditor copió el árbol y mutó una cosa por vez; `prueba_6` afirmaba sobre el
+*texto del fuente*, así que sobrevivió a las cinco —incluida `ya_intento=False`, que
+pospone en cada turno y **no escala nunca**, el limbo original pero peor—.
+
+Corregido volviendo el bloque **invocable**: `api._aplicar_posposicion(config, rol_cfg,
+estado, *, forzado, motivo) -> bool`, con la decisión todavía entera en
+`forzado.por_que_posponer`. `prueba_7` corre el mecanismo real **dos veces sobre el mismo
+estado** y afirma que la segunda escala. Medido con el mismo método del auditor:
+
+```
+ROJO (la caza)   <- M1 ya_intento=False (pospone en CADA turno, no escala nunca)
+ROJO (la caza)   <- M2 no se marca el intento (posposicion infinita)
+ROJO (la caza)   <- M3 nunca se pospone
+ROJO (la caza)   <- M5 la nota se descarta
+ROJO (la caza)   <- M4 se pasa el primer rol del dict en vez de rol_cfg
+```
+
+Las cinco, donde antes eran cinco verdes. M4 se caza con una afirmación sobre el texto, y
+está escrito en la prueba que lo es: que el sitio de llamada pase el rol **del turno** no
+se puede medir sin conducir `_atender_turno` entero contra base.
+
+**2 · La banda exceptuaba del cierre lo que no mostraba.** Con `sin_gestion_horas = 72` y
+`limites.horas_inactividad_cierra = 24`, desde la hora 24 la fila deja de cerrarse y la
+banda no la muestra hasta la 72: **48 horas invisibles**, 29 días con el máximo del
+formulario. Medido por el auditor contra `dexter_local`: **25 de 25** filas exceptuadas y
+sin banda con 72. Es el estado que el comentario del propio barrido dice querer evitar.
+
+Corregido en `_mutar_ajustes_bandeja`: con el barrido habilitado, un umbral **mayor** que
+`horas_inactividad_cierra` se rechaza con un mensaje que dice por qué. Con el barrido
+apagado no hay ventana y el umbral es libre —la validación acota lo que hace daño, no lo
+que se le parece—. El invariante quedó escrito en el contrato (§4.10).
+
+**3 · La protección fallaba ABIERTA en el proceso que borra.** El reloj lee con
+`fuente.cargar`, que cae al YAML de la imagen cuando la base no contesta; el YAML **no
+declara `sin_gestion_horas`**, así que `operativo.py` calculaba `entrada = None`, la
+excepción desaparecía y el barrido cerraba con `sin_respuesta_cliente` —que afirma que el
+cliente no volvió— justo las filas que la banda protege. **No es teórico:** el YAML
+semilla trae `habilitado: true`, `rollout_cutoff` y `24` horas, y el propio log del
+fallback apareció en la corrida de §14 (`motivo=tenant_no_esta_en_la_base`).
+
+Corregido donde estaba la causa: `TenantConfig._origen` marca de dónde salió la config
+(`base` | `yaml`), `fuente.cargar` lo sella al degradar, y el barrido **exceptúa igual**
+cuando no puede confirmar que la banda esté apagada. Dejar una conversación abierta es
+reversible y se ve en la Bandeja; cerrarla afirmando algo del cliente, no.
+
+### Dos silencios más del arquitecto, corregidos
+
+- **Un umbral sin `rol_de_entrada` se guardaba y no hacía nada.** El campo es opcional en
+  el esquema y la banda falla cerrado sin él: el formulario aceptaba el número, lo
+  persistía, y la banda no existía. Rapilink lo declara; **lo pagaba el segundo ISP**, que
+  es el razonamiento que §3.3 prohíbe repetir. Ahora se rechaza.
+- **Y la otra puerta del mismo silencio, que el arquitecto no vio:**
+  `guardar_rol_de_entrada(tenant, None)` permite **vaciarlo a propósito**. Encender la
+  banda bien y vaciar el rol después la apagaba *y devolvía al barrido* las conversaciones
+  protegidas. Ahora ese vaciado se rechaza mientras el umbral esté puesto, con el orden
+  correcto en el mensaje.
+- **El cuarto parámetro de `guardar_ajustes_bandeja` perdió su default.** Su `None`
+  significa *borrar*: un llamador con la firma vieja apagaba la banda y reactivaba el
+  cierre sin decir nada. Ahora es un `TypeError` al importar, y la prueba lo afirma como
+  efecto llamando con tres argumentos.
+
+Todo esto se afirma en `tests/test_editor_config.py::prueba_banda_sin_gestion` (13
+afirmaciones, sobre los mutadores puros, sin base) y en
+`tests/test_cierre_inactivas_ia.py` (config degradada exceptúa; config de la base con la
+banda apagada no).
+
+### Lo que las dos lentes buscaron y no encontró ninguna
+
+El motor sigue genérico (`test_nucleo_sin_tenants`, 93 archivos); `rol_de_entrada` sale de
+la config y no de un nombre de rol; la banda **no duplica** ningún mecanismo —se
+descartaron cinco candidatas con su motivo: T19 `REVISAR_EVALUACION`, `sla_toma_minutos`,
+`SIN_ASIGNAR`, el propio barrido y el reconciliador—; `sin_gestion_horas` está modelado de
+punta a punta y ausente del YAML (la base manda, §3.2); vacío = apagar es coherente en las
+cuatro capas; el número 3 compartido no rompe nada (ningún `banda === 3` en el frontend);
+**0 apariciones nuevas** de `PRIVATE_ASISTENTE_TENANT` (D5); la SQL nueva no tiene el
+`IndeterminateDatatype` de psycopg 3 (corrida en las cuatro combinaciones); y la regla 3b
+del contrato coincide condición por condición con el código.
+
+### Deuda declarada, con su motivo — no se arregla en esta rama
+
+| # | Qué | Por qué se deja |
+|---|---|---|
+| L1 | `forzado.py` dice en su cabecera *"sin dependencias a propósito"* y después importa `escalamiento` en perezoso por un ciclo. **Un comentario que miente es peor que la deuda que oculta.** El arreglo existe y es chico: `merece_un_intento` es pura y se puede mover | Mover toca `escalamiento.py` y `test_escalamiento_paciente.py`, dos archivos fuera de este diff, por un beneficio que hoy nadie consume |
+| L2 | La regla vive dos veces —Python en `proyeccion.py`, SQL en `db.py`— y **ninguna prueba afirma que coincidan**. La divergencia dañina (el umbral) quedó cerrada por validación; la estructural queda | Una prueba de equivalencia exige base y una matriz de filas; es el trabajo siguiente de esta guarda |
+| L3 | `devolver_a_ia` **no limpia `tomada_por`** (`soltar` sí limpia los dos). Una devuelta a la IA con banda cae en «En atención», donde nadie la atiende, y el barrido tampoco la cierra: **permanente** | Cambiar la semántica de una transición del relevo dentro de la rama de integración es justo lo que §7 dice no hacer. Es defecto previo de `transiciones.py`, no de C |
+| L4 | Un último mensaje de rol `'humano'` (legado) queda **protegida y sin banda**: `ultima_actividad` lo reporta como `ultimo_rol='humano'` y el barrido lo ve como `assistant` | Caso estrecho (rol de legado) y el arreglo correcto es unificar qué cuenta como "último visible", que toca las dos consultas |
+| L5 | `TenantConfig` hereda `extra="forbid"`: una vez que el formulario escribe `sin_gestion_horas`, **volver el motor a una imagen anterior rechaza la config entera** y el asistente deja de atender | No es código: es una nota de despliegue. Vale para cualquier campo nuevo de config y hay que decirla al encender la banda |
+| L6 | `estado.js` reconoce la banda por **literal** (`banda_nombre === 'sin_gestion'`) en una pantalla cuyo docstring dice que *"no clasifica nada"*. La próxima banda que el motor agregue será invisible hasta que alguien edite ese archivo | Usar `necesita_accion_de === 'humano'` es más limpio pero mueve los conteos de las bandas 1, 2 y 5, y esa medición no está en esta rama |
+| L7 | `34412ac` incluye un arreglo que **no es de C**: el refactor `base` de `+layout.svelte`, que corrige que la cabecera contara sobre todas las conversaciones mientras la lista se filtraba por canal (el defecto del 07/09, repetido por canal) | Partir el commit exige rehacer el cherry-pick y revalidar con base. Queda anotado para la sesión de métricas, que es la que va a mirar ese lado |
+| L8 | Los indicadores de consola (`criticas`, `esperaMaxima`, `Total`) ahora dependen de la vista: con la vista en «simulado» se lee *"Ninguna esperando"* habiendo clientes reales esperando | `vista` no persiste entre recargas, así que el riesgo muere con la pestaña, y el cambio corrige una incoherencia mayor |
+
 ## Siguiente bloque, decidido el 26/09/2026: métricas — no arrancado a propósito
 
 > *"Normalizar métricas operativas usando `canales.REALES` como única
@@ -1053,3 +1173,4 @@ divergente que hay que unificar.
 | 26/09/2026 | **C liviano implementado** (`8baefcf`): banda `sin_gestion` sin migración ni cierre automático, umbral por tenant de punta a punta, barrido exceptuando solo con la banda encendida, frontend y contrato. Verificado sin base, con base real (relevo §14 en verde por primera vez en la rama) y vitest (345/345 en las superficies tocadas; 63 fallos previos idénticos en HEAD). Correr la prueba con base destapó cinco dobles obsoletos —dos de B, tres previos— corregidos acá, y dos fallos previos (§11-12, guarda D25) que quedan anotados | Rapilink enciende `sin_gestion_horas` desde `/settings/bandeja`; métricas que cuentan simulados (`canal.REALES`); D5 `sin_respuesta`; baseline de escalación; las 294 filas simuladas de producción; que "saltado" no se vea igual que "pasó" en `cli/correr_pruebas.py` |
 | 25/09/2026 | **D4 medido en producción, autorizado, solo lectura.** Clientes reales (`canal = 'whatsapp'`, ≥2 mensajes, seis semanas): **5 en limbo de 39 (13%)**, tres todavía abiertas sin dueño, dos de 12 y 20 mensajes. Causa estructural confirmada en la config desplegada. Segunda lección de canal: producción tiene siete canales y **294 corridas de laboratorio viven ahí**; solo `whatsapp` son clientes | Decidir la forma de **C** (por corrección, no por urgencia); D1; D2; regenerar baseline de escalación; limpiar o etiquetar las 294 filas simuladas de producción |
 | 26/09/2026 | **Integrados B y C sobre `origin/fix` (`f90d3ec`)** en la rama `integracion/b-c-limbo`, ocho commits por cherry-pick, sin push. Dos conflictos reales en C (`+page.server.js`, `bandeja-config.test.js`) contra el refactor `35a6723` de `guardarAjustesBandeja(locals, fetch, valores)`, resueltos con la firma nueva. `test_registro_sin_pii` cazó una regresión de B que ninguna prueba propia veía: el evento del log de la posposición dejaba de ser texto fijo; corregido en `1642935` (evento fijo, la razón como campo). Verificado en la rama: las nueve pruebas rápidas de B y C en verde; relevo contra PostgreSQL con §14 en verde y solo §11-12 en rojo, **y esos dos fallan igual sobre `f90d3ec` puro** —medido con la prueba corregida encima, porque origin con su propia prueba ni llega: se cae en §5 por los tres dobles previos sin `origen`—; vitest con 63 rojos en las dos puntas (1049/1112 en origin puro, 1051/1114 en la rama), ninguno de la bandeja; `test_reloj` falla igual en origin puro (`fijar_nombre_cliente_externo` fuera de `importacion_io.HERRAMIENTAS`). Fuera de la rama a propósito: el laboratorio, `test_contexto_del_router.py` y los 18 commits de validación | Push y la línea en `DEXTER_ESTADO_ACTUAL.md`: sesión dueña. Después: métricas con `canales.REALES`, D5 `sin_respuesta` |
+| 26/09/2026 | **Auditada antes de integrar, y corregida.** Dos lentes de solo lectura sobre `4f1ea12`: el `auditor-independiente` mato cinco mutaciones de `api.py` que dejaban la prueba de B en verde --una de ellas posposicion infinita-- y midio dos agujeros de C (48 h exceptuadas y sin banda con 72/24, 25 de 25 filas; la proteccion cayendose cuando el reloj lee el YAML); el `arquitecto-dexter` hallo que un umbral sin `rol_de_entrada` se guardaba sin efecto. **Los tres altos corregidos en la rama**: bloque extraido a `api._aplicar_posposicion` con prueba de dos vueltas que caza las cinco mutaciones, validacion cruzada del umbral contra `horas_inactividad_cierra`, `TenantConfig._origen` para que el barrido exceptue cuando no puede confirmar, y las dos puertas del vaciado silencioso cerradas. Corregido tambien lo que **B realmente hace**: el codigo previo ya escalaba en el turno 2 con la sesion viva, asi que el subject de `b920c25` afirma de mas. Verificado: nueve guardas en verde, relevo con base solo los dos rojos previos y §14 en verde, y casos dorados `--humo` 9/10 (90%, el minimo), con el unico rojo por una credencial local de BottleCRM | Ocho deudas declaradas con su motivo (L1..L8). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
