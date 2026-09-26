@@ -509,13 +509,10 @@ NOTA_DERIVAR_PRIMERO = (
     "sin anunciarle el pase ni pedirle que espere. Si de verdad ninguna area "
     "puede con esto, en el proximo mensaje se pasa a una persona.")
 
-# Lo que queda en el log por cada razon. Los dos primeros textos son los de
-# siempre, para no romper ninguna busqueda; el tercero es nuevo.
-MENSAJES_POSPONER = {
-    "manos_vacias": "se pospone: el asistente todavia no habia hecho nada",
-    "intentar_resolver_antes": "se pospone una vuelta: el asistente lo intenta primero",
-    "derivar_primero": "se pospone una vuelta: el rol solo puede derivar, y no derivo",
-}
+# En el log la razon viaja como CAMPO ('razon=...') bajo un evento fijo, "se
+# pospone una vuelta antes de escalar": registro.py exige texto constante en
+# el evento (tests/test_registro_sin_pii.py). Las tres razones se buscan por
+# ese campo, no por tres textos distintos.
 
 
 def _derivadoras_de(config, cfg_rol) -> list[str]:

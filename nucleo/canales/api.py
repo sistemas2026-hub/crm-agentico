@@ -73,7 +73,6 @@ from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
 from nucleo.seguimiento import verificacion_accion
 from nucleo.seguimiento.forzado import (puede_intentar_algo, por_que_posponer,
-                                        MENSAJES_POSPONER,
                                         decidir_pedido_humano_de,
                                         pidio_hablar_con_humano,
                                         decidir_pedido_humano,
@@ -2276,7 +2275,10 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 estado["intento_antes_de_escalar"] = True
                 estado["nota_pendiente"] = nota
                 posponer = True
-                registrar("escalamiento", MENSAJES_POSPONER[razon],
+                # Evento FIJO y la razon como campo: registro.py exige texto
+                # constante en el evento (tests/test_registro_sin_pii.py), y
+                # asi se busca 'se pospone' en el log y se filtra por razon.
+                registrar("escalamiento", "se pospone una vuelta antes de escalar",
                           conversation_id=id_interno(estado.get("conversacion_id")),
                           razon=razon, motivo=evaluacion.get("motivo"))
 

@@ -58,7 +58,9 @@ sys.path.insert(0, str(RAIZ))
 
 from nucleo.seguimiento.forzado import (            # noqa: E402
     por_que_posponer, puede_intentar_algo, con_las_manos_vacias,
-    NOTA_MANOS_VACIAS, NOTA_INTENTAR_PRIMERO, MENSAJES_POSPONER)
+    NOTA_MANOS_VACIAS, NOTA_INTENTAR_PRIMERO)
+
+RAZONES = ("derivar_primero", "manos_vacias", "intentar_resolver_antes")
 
 fallos = []
 
@@ -133,7 +135,7 @@ def prueba_2_el_rol_que_solo_deriva_recibe_la_nota_que_puede_cumplir():
     afirmar(not prohibidas,
             f"la nota NO le pide lo que no puede: sin {['herramientas','identifica','procedimiento','cedula']}"
             + (f" -- aparecio {prohibidas}" if prohibidas else ""))
-    afirmar(razon in MENSAJES_POSPONER, "y tiene su linea de log")
+    afirmar(razon in RAZONES, "y es una de las tres razones que el log distingue por campo")
     razon2, _ = decide(ROUTER, "cliente_final", SIN_TOOL, ya_intento=True)
     afirmar(razon2 is None, "una sola vez: con ya_intento, la siguiente escala")
     razon3, _ = decide(ROUTER, "cliente_final", SIN_TOOL, forzado=True)
@@ -204,8 +206,8 @@ def prueba_6_el_enganche_no_tiene_logica_paralela():
             "y NO decide con con_las_manos_vacias por su cuenta")
     afirmar("merece_un_intento(" not in fuente,
             "ni con merece_un_intento por su cuenta")
-    afirmar("MENSAJES_POSPONER[razon]" in fuente,
-            "la linea de log sale de la misma razon que la decision")
+    afirmar('"se pospone una vuelta antes de escalar"' in fuente and "razon=razon" in fuente,
+            "el log lleva un evento FIJO y la razon como campo (registro.py exige texto constante)")
     afirmar("puede_intentar_algo(config, rol_cfg)" in fuente,
             "el agendamiento automatico sigue exigiendo que el rol tenga con que (api.py, tras el evaluador)")
 
