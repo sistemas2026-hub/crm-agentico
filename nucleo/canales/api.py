@@ -1186,7 +1186,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
 
 
 def _aplicar_posposicion(config, rol_cfg, estado, *, forzado: bool,
-                         motivo: str) -> bool:
+                         motivo: str | None) -> bool:
     """
     Aplica la decision de posponer una escalada, y devuelve si se pospuso.
 
@@ -3814,7 +3814,7 @@ def configuracion_plazo_visita_tecnica():
 
 @app.get("/configuracion/bandeja")
 def configuracion_bandeja():
-    """Los dos ajustes de la Bandeja, para la pantalla de configuracion."""
+    """Los tres ajustes de la Bandeja, para la pantalla de configuracion."""
     tenant = request.args.get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
@@ -3822,10 +3822,17 @@ def configuracion_bandeja():
         config = _config_de(tenant)
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    # Los DOS umbrales: el GUARDADO, que es lo que el formulario muestra para
+    # que Guardar no cambie nada sin pedirlo, y el EFECTIVO, con el que la
+    # banda se calcula. Difieren solo si el par entro por el YAML --el editor
+    # lo rechaza-- y ahi la pantalla tiene que decirlo: un operador que ve 72
+    # y tiene una banda que actua a las 24 no puede distinguir eso de un error
+    # suyo. Ver TenantConfig.sin_gestion_horas_efectivas.
     return jsonify({
         "sla_toma_minutos": getattr(config, "sla_toma_minutos", 0) or 0,
         "umbral_rx_dbm": getattr(config, "umbral_rx_dbm", None),
         "sin_gestion_horas": getattr(config, "sin_gestion_horas", None),
+        "sin_gestion_horas_efectivas": config.sin_gestion_horas_efectivas(),
     })
 
 
@@ -3885,10 +3892,17 @@ def configuracion_bandeja_guardar():
         return _error_al_guardar(e)
 
     olvidar_config(tenant)
+    # Los DOS umbrales: el GUARDADO, que es lo que el formulario muestra para
+    # que Guardar no cambie nada sin pedirlo, y el EFECTIVO, con el que la
+    # banda se calcula. Difieren solo si el par entro por el YAML --el editor
+    # lo rechaza-- y ahi la pantalla tiene que decirlo: un operador que ve 72
+    # y tiene una banda que actua a las 24 no puede distinguir eso de un error
+    # suyo. Ver TenantConfig.sin_gestion_horas_efectivas.
     return jsonify({
         "sla_toma_minutos": getattr(config, "sla_toma_minutos", 0) or 0,
         "umbral_rx_dbm": getattr(config, "umbral_rx_dbm", None),
         "sin_gestion_horas": getattr(config, "sin_gestion_horas", None),
+        "sin_gestion_horas_efectivas": config.sin_gestion_horas_efectivas(),
     })
 
 
@@ -4678,9 +4692,10 @@ def conversaciones():
         # TenantConfig.sin_gestion_horas_efectivas. Asi la banda nunca
         # aparece despues de que el barrido empiece a exceptuar, entre el
         # numero por donde entre.
-        horas_sg = (cfg_bandeja.sin_gestion_horas_efectivas()
-                    if hasattr(cfg_bandeja, "sin_gestion_horas_efectivas")
-                    else getattr(cfg_bandeja, "sin_gestion_horas", None))
+        # SIN hasattr: esa rama defensiva era, linea por linea, la conducta
+        # previa al acotado, asi que un renombre del metodo devolvia la
+        # ventana de 48 horas en silencio en vez de dar AttributeError.
+        horas_sg = cfg_bandeja.sin_gestion_horas_efectivas()
     except Exception as e:
         registrar("conversaciones", "sin config del tenant: la banda 'sin_gestion' no se calcula",
                   tenant=tenant, error=e)

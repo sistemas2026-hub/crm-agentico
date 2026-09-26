@@ -75,6 +75,20 @@ export async function guardarAjustesBandeja(locals, fetch, valores) {
   // que la IA dejo sin resolucion registrada entre a la cola. Vacio = null =
   // la banda no existe. Se manda siempre, por lo mismo que los otros dos.
   const sinGestion = valores.sin_gestion_horas;
+  // 'AUSENTE' Y 'APAGALA' NO SON LO MISMO, y acá es donde se decidía.
+  //
+  // El motor devuelve 400 si la clave no viene, pero nadie llegaba a ese 400:
+  // esta línea convertía la ausencia en null, o sea en «apagá la banda» -- y
+  // apagarla devuelve al barrido las conversaciones que protege, que se
+  // cierran afirmando que el cliente no volvió. Un formulario nuevo que
+  // reutilizara este helper con dos campos lo hacía sin pedirlo. Hallado por
+  // el auditor el 26/09/2026: la garantía estaba en el borde equivocado.
+  if (!('sin_gestion_horas' in valores)) {
+    throw new Error(
+      "Falta 'sin_gestion_horas'. Para apagar la banda «Sin resolución registrada» " +
+        'hay que pasarla en null o vacío, no omitirla.'
+    );
+  }
   const resp = await fetch(`${cfg.baseUrl}/configuracion/bandeja`, {
     method: 'PUT',
     headers: headersMotor({ 'Content-Type': 'application/json' }),

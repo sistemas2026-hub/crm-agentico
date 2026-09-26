@@ -1369,6 +1369,68 @@ try:
         comprobar(suya["banda"] is None and suya["necesita_accion_de"] == "ia"
                   and filas.index(suya) > 0,
                   f"la que atiende la IA queda fuera de la cola, al final ({suya['motivo_cola']})")
+
+        # --- el umbral con el que la banda se calcula es el EFECTIVO --------
+        #
+        # Acotado al del cierre por inactividad: si la banda apareciera
+        # despues de que el barrido empiece a exceptuar la fila, quedaria una
+        # ventana en la que nadie la cierra y nadie la ve. El editor rechaza
+        # ese par, pero por el YAML entra, asi que el acotado vive en
+        # TenantConfig.sin_gestion_horas_efectivas y lo aplica /conversaciones.
+        #
+        # ESTA GUARDA VIVE ACA y no en tests/test_cola_bandeja.py porque lo
+        # que hay que afirmar es lo que hace el ENDPOINT, no la proyeccion:
+        # el 26/09/2026 el auditor mostro que mutar api.py para leer el umbral
+        # crudo --un renglon-- devolvia la ventana de 48 horas con la bateria
+        # entera en verde, porque ninguna prueba que pega a /conversaciones
+        # declaraba el umbral. Importar api pide credenciales de base, asi que
+        # la unica prueba que puede hacerlo es esta.
+        limbo = str(q("""insert into asistente.conversations (organization_id, canal, usuario_externo)
+                         values (%s, 'whatsapp', '573000000305') returning id""", (org,))[0][0])
+        mensaje(limbo, "user", "cliente", 60 * 34, "se me cayo el internet")
+        mensaje(limbo, "user", "cliente", 60 * 33, "hola? sigue sin andar")
+        mensaje(limbo, "assistant", "ia", 60 * 30, "dejame ver")
+
+        from nucleo.config import editor as editor_cfg
+
+        cfg_real = api._config_de
+
+        def con_umbral(horas, tope=24, barrido=True):
+            """La config del tenant con el par que el editor rechaza."""
+            base = cfg_real(TENANT)
+            doc = base.model_dump(mode="json")
+            doc["rol_de_entrada"] = doc.get("rol_de_entrada") or next(
+                n for n, r in doc["roles"].items() if r.get("orientado_a") == "cliente_final")
+            doc["sin_gestion_horas"] = horas
+            doc["limites"] = dict(doc.get("limites") or {}, horas_inactividad_cierra=tope)
+            doc["cierre_inactivas_ia"] = ({"habilitado": True,
+                                           "rollout_cutoff": "2026-09-22T15:58:07Z"}
+                                          if barrido else {"habilitado": False})
+            return editor_cfg._validar(TENANT, doc)
+
+        def banda_de(cid, horas, tope=24, barrido=True):
+            cfg = con_umbral(horas, tope, barrido)
+            api._config_de = lambda t: cfg
+            try:
+                fila = next((f for f in cola(vista_operativa=False) if f["id"] == cid), None)
+                return (fila or {}).get("banda_nombre", "(no vino)")
+            finally:
+                api._config_de = cfg_real
+
+        # El rol efectivo tiene que ser el de entrada para que la banda aplique.
+        rol_entrada = con_umbral(24).rol_de_entrada
+        q("update asistente.conversations set rol_efectivo = %s where id = %s",
+          (rol_entrada, limbo))
+
+        comprobar(banda_de(limbo, 72, tope=24) == "sin_gestion",
+                  "guardado 72 y cierre en 24: a las 30 horas el ENDPOINT ya la pone en la cola "
+                  "(con el umbral crudo no entraria hasta las 72, y esas 42 horas son la ventana)")
+        comprobar(banda_de(limbo, 72, tope=24, barrido=False) == "fuera_de_cola",
+                  "y con el barrido apagado vale el 72 pedido: no hay ventana que cerrar")
+        comprobar(banda_de(limbo, 6, tope=24) == "sin_gestion",
+                  "un umbral anterior al cierre se respeta tal cual")
+        comprobar(banda_de(limbo, None, tope=24) == "fuera_de_cola",
+                  "y sin umbral la banda no existe, por mas horas que pasen")
     finally:
         api._TOKEN_SERVICIO = token14
 finally:

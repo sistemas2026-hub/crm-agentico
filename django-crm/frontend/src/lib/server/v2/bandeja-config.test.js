@@ -116,23 +116,44 @@ describe('guardarAjustesBandeja', () => {
     expect(cuerpoEnviado()).toHaveProperty('sin_gestion_horas', null);
   });
 
-  it('y si el llamador ni la manda, tambien viaja como null', async () => {
-    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: -27 });
-    expect(cuerpoEnviado()).toHaveProperty('sin_gestion_horas', null);
+  // Antes esto pasaba: la ausencia se convertía en null y el motor la leía
+  // como «apagá la banda», que devuelve al barrido las conversaciones que
+  // protege. Ahora revienta acá, y no llega a la red: el 400 del motor no
+  // alcanzaba porque nadie llegaba a él.
+  it('y si el llamador ni la manda, revienta antes de mandar nada', async () => {
+    await expect(
+      guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: -27 })
+    ).rejects.toThrow(/sin_gestion_horas/);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('/configuracion/bandeja'),
+      expect.objectContaining({ method: 'PUT' })
+    );
   });
 
   it('el tenant lo pone el servidor, no el llamador', async () => {
-    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 0, umbral_rx_dbm: null });
+    await guardarAjustesBandeja(LOCALS, fetchMock, {
+      sla_toma_minutos: 0,
+      umbral_rx_dbm: null,
+      sin_gestion_horas: null
+    });
     expect(cuerpoEnviado().tenant).toBe('rapilink');
   });
 
   it('vacío en el plazo viaja como 0, que es el "sin definir" del motor', async () => {
-    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: '', umbral_rx_dbm: -27 });
+    await guardarAjustesBandeja(LOCALS, fetchMock, {
+      sla_toma_minutos: '',
+      umbral_rx_dbm: -27,
+      sin_gestion_horas: null
+    });
     expect(cuerpoEnviado().sla_toma_minutos).toBe(0);
   });
 
   it('vacío en el umbral viaja como null, no como 0 ni como ausencia', async () => {
-    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: '' });
+    await guardarAjustesBandeja(LOCALS, fetchMock, {
+      sla_toma_minutos: 15,
+      umbral_rx_dbm: '',
+      sin_gestion_horas: null
+    });
     const cuerpo = cuerpoEnviado();
     expect(cuerpo.umbral_rx_dbm).toBeNull();
     // 0 dBm es una potencia válida y distinta de "sin definir": si el vacío
@@ -143,7 +164,11 @@ describe('guardarAjustesBandeja', () => {
   });
 
   it('un umbral de 0 dBm se manda como 0, no se confunde con vacío', async () => {
-    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: 0 });
+    await guardarAjustesBandeja(LOCALS, fetchMock, {
+      sla_toma_minutos: 15,
+      umbral_rx_dbm: 0,
+      sin_gestion_horas: null
+    });
     expect(cuerpoEnviado().umbral_rx_dbm).toBe(0);
   });
 
@@ -153,7 +178,11 @@ describe('guardarAjustesBandeja', () => {
       json: async () => ({ error: 'El umbral tiene que estar entre -40 y 0.' })
     });
     await expect(
-      guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: -99 })
+      guardarAjustesBandeja(LOCALS, fetchMock, {
+        sla_toma_minutos: 15,
+        umbral_rx_dbm: -99,
+        sin_gestion_horas: null
+      })
     ).rejects.toThrow(/entre -40 y 0/);
   });
 

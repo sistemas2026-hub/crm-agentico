@@ -1203,6 +1203,68 @@ aceptación). No hay regresión atribuible al delta.
 | L11 | El camino degradado alcanzable es `tenant_no_esta_en_la_base` (base arriba, fila ausente), que es **persistente**: ahí el barrido no cierra nunca hasta que alguien lo vea | Es la dirección segura, y el aviso de `fuente.cargar` ya dice *"eso hay que verlo"*. Lo que falta es que alguien lo vea: ver L10 |
 | L12 | `cargar_config` marcando `"yaml"` cambia el comportamiento de cualquier `cli/` que cargue del archivo y corra el barrido: ahora no cerraría | Correcto por diseño (un archivo no es la fuente de verdad), pero no lo medí en los doce usos de `cli/`: el único que barre es el reloj, y ese usa `fuente.cargar` |
 
+### Tercera pasada: auditoría del delta `b3ce928..8659479`, 26/09/2026
+
+Con una **regla de parada declarada antes de correrla**, porque si no la cadena no termina:
+se audita de nuevo cuando el arreglo **agrega mecanismo** (caminos nuevos con modos de falla
+nuevos), no cuando solo **acota** algo que ya existía. Ese delta agregaba tres mecanismos
+—el umbral efectivo, el corte temprano del barrido y el 400 del endpoint—, así que
+correspondía. Encontró **un alto y dos medios**, todos sobre lo agregado.
+
+**T1 · La línea que arreglaba el agujero no tenía guarda, y su propio `hasattr` restituía la
+conducta vieja en silencio.** Mutar `/conversaciones` para leer `sin_gestion_horas` crudo —un
+renglón, con pinta de simplificación— devolvía la ventana de 48 horas **con toda la batería
+en verde**: ninguna de las cuatro pruebas que pegan a ese endpoint declaraba el umbral, así
+que la banda no existía en ninguna. Y el `else` del `hasattr` era, línea por línea, la
+conducta previa al acotado.
+
+Corregido en los dos frentes: el `hasattr` fuera (un renombre del método ahora es
+`AttributeError`, no un silencio), y **la guarda vive donde el repo prueba ese borde de
+verdad** — §14 de `tests/test_relevo_transiciones_base.py`, contra PostgreSQL real, con el
+par 72/24 puesto y una fila en limbo de 30 horas. Cuatro afirmaciones nuevas, incluida la que
+distingue acotar de *encender siempre* (con el barrido apagado vale el 72 pedido). Se intentó
+primero en `test_cola_bandeja` —sin base, que sería mejor— y **no se puede**: importar `api`
+exige credenciales y con variables ficticias el proceso se cuelga intentando conectar. Eso
+está dicho en el comentario de la prueba, porque explica por qué la guarda no está donde
+alguien la buscaría.
+
+**T2 · El 400 del endpoint vigilaba una puerta por la que nadie entra.** El comentario
+nombraba su amenaza —*"un formulario nuevo que reutilice este endpoint con dos campos"*— y ese
+formulario **no llega al 400**: llega al helper de JavaScript, que convertía la ausencia en
+`null`, o sea en "apagá la banda". Y había una prueba mía bendiciendo exactamente eso
+(*"y si el llamador ni la manda, también viaja como null"*). La garantía estaba en el borde
+equivocado, y la ficha afirmaba que el sistema lo cubría: cierto del endpoint, falso del
+sistema. Corregido: el helper **revienta** si la clave falta, sin llegar a la red, y la prueba
+ahora afirma eso y que no se hizo ningún PUT. Las otras cinco llamadas de esa suite pasan el
+trío completo.
+
+**T3 · El formulario mostraba 72 y la banda actuaba a las 24, sin ninguna señal.** Silencio
+nuevo, introducido por el acotado: inevitable es que el efectivo difiera del guardado;
+evitable es que la pantalla no lo diga. Corregido: `GET` y `PUT` de `/configuracion/bandeja`
+devuelven **los dos** umbrales, y el formulario muestra un aviso cuando difieren, con qué
+guardar para que lo que se ve sea lo que pasa. El campo sigue mostrando el guardado, para que
+apretar Guardar no cambie nada sin pedirlo.
+
+**Y la anotación que mentía:** `_aplicar_posposicion` declaraba `motivo: str` y recibe `None`
+desde el 26/09 (`evaluacion.get("motivo")`). Corregida a `str | None`.
+
+**Lo que el auditor verificó y salió limpio** (lo cito porque es lo que sostiene el acotado):
+`sin_gestion_horas_efectivas()` no puede devolver 0 ni apagar la banda —los dos campos son
+`ge=1` y el `min` de dos enteros ≥1 es ≥1—; y el acotado **no abre ninguna ventana en el otro
+sentido**, ni con los dos relojes distintos que usan banda y barrido: el del barrido es
+`max(creado_en)` sobre todos los mensajes y el de la banda excluye las notas, así que el
+tiempo que ve la banda es siempre ≥ el que ve el barrido, y la banda muestra igual o antes de
+que la fila deje de ser cerrable. También midió que el corte temprano del barrido no deja
+mintiendo a ningún lector (las claves que no llena tienen dos lectores, los dos tolerantes) y
+cerró L12 por medición: **ningún `cli/` corre el barrido**, así que marcar `"yaml"` en el
+lector de archivos no cambia la conducta de ninguno.
+
+| # | Deuda que suma esta pasada | Por qué se deja |
+|---|---|---|
+| L13 | **`habilitado: true` no es "el barrido corre":** falta `rollout_cutoff`. Con ese par el barrido no cierra ni exceptúa —no hay ventana— y sin embargo el acotado adelanta la banda, y el editor rechaza un 72 legítimo citando un cierre que no ocurre | Solo entra editando el YAML a mano (`cierre_inactivas_ia` no está en `SECCIONES_EDITABLES`) y la semilla de ejemplo lo trae apagado, así que el segundo ISP arranca seguro. Sumar `rollout_cutoff` a las dos condiciones es correcto y no urgente |
+| L14 | **La igualdad de `TenantConfig` cambió:** pydantic v2 compara los atributos privados, así que la misma config leída del archivo y de la base ya no son `==`. **Medido: ningún lugar del repo compara instancias** —`diferencias_config.py` y `cargar_config.py` comparan volcados, y el marcador no viaja en el volcado— así que es latente, no activo | Neutralizarlo exige pisar `__eq__` del modelo central de configuración, que es superficie nueva en el archivo más delicado. El escenario queda escrito: el día que alguien escriba `config_repo == config_base` va a recibir "distintas" para siempre |
+| L15 | La afirmación de `forzado=forzado` en el sitio de llamada es **sobre el texto del fuente**, y está declarado en la prueba. Sobrevive a cualquier mutación que sombree `forzado` antes, en el turno | Medirlo exige conducir `_atender_turno` entero contra base, que es el trabajo que T1 hizo para el otro parámetro; se puede repetir para este cuando haga falta |
+
 ### Deuda declarada, con su motivo — no se arregla en esta rama
 
 | # | Qué | Por qué se deja |
@@ -1255,3 +1317,4 @@ divergente que hay que unificar.
 | 26/09/2026 | **Integrados B y C sobre `origin/fix` (`f90d3ec`)** en la rama `integracion/b-c-limbo`, ocho commits por cherry-pick, sin push. Dos conflictos reales en C (`+page.server.js`, `bandeja-config.test.js`) contra el refactor `35a6723` de `guardarAjustesBandeja(locals, fetch, valores)`, resueltos con la firma nueva. `test_registro_sin_pii` cazó una regresión de B que ninguna prueba propia veía: el evento del log de la posposición dejaba de ser texto fijo; corregido en `1642935` (evento fijo, la razón como campo). Verificado en la rama: las nueve pruebas rápidas de B y C en verde; relevo contra PostgreSQL con §14 en verde y solo §11-12 en rojo, **y esos dos fallan igual sobre `f90d3ec` puro** —medido con la prueba corregida encima, porque origin con su propia prueba ni llega: se cae en §5 por los tres dobles previos sin `origen`—; vitest con 63 rojos en las dos puntas (1049/1112 en origin puro, 1051/1114 en la rama), ninguno de la bandeja; `test_reloj` falla igual en origin puro (`fijar_nombre_cliente_externo` fuera de `importacion_io.HERRAMIENTAS`). Fuera de la rama a propósito: el laboratorio, `test_contexto_del_router.py` y los 18 commits de validación | Push y la línea en `DEXTER_ESTADO_ACTUAL.md`: sesión dueña. Después: métricas con `canales.REALES`, D5 `sin_respuesta` |
 | 26/09/2026 | **Auditada antes de integrar, y corregida.** Dos lentes de solo lectura sobre `4f1ea12`: el `auditor-independiente` mato cinco mutaciones de `api.py` que dejaban la prueba de B en verde --una de ellas posposicion infinita-- y midio dos agujeros de C (48 h exceptuadas y sin banda con 72/24, 25 de 25 filas; la proteccion cayendose cuando el reloj lee el YAML); el `arquitecto-dexter` hallo que un umbral sin `rol_de_entrada` se guardaba sin efecto. **Los tres altos corregidos en la rama**: bloque extraido a `api._aplicar_posposicion` con prueba de dos vueltas que caza las cinco mutaciones, validacion cruzada del umbral contra `horas_inactividad_cierra`, `TenantConfig._origen` para que el barrido exceptue cuando no puede confirmar, y las dos puertas del vaciado silencioso cerradas. Corregido tambien lo que **B realmente hace**: el codigo previo ya escalaba en el turno 2 con la sesion viva, asi que el subject de `b920c25` afirma de mas. Verificado: nueve guardas en verde, relevo con base solo los dos rojos previos y §14 en verde, y casos dorados `--humo` 9/10 (90%, el minimo), con el unico rojo por una credencial local de BottleCRM | Ocho deudas declaradas con su motivo (L1..L8). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
 | 26/09/2026 | **Segunda auditoria, sobre el delta del arreglo.** Los ~340 renglones que corrigieron los tres altos eran codigo sin auditar, y la pasada encontro tres mas: `cli/cargar_config.py` apagaba la banda en silencio (el umbral no estaba en `SECCIONES_EDITABLES`, y ese comando se corre tras cada pull); la regla del umbral valia por una sola puerta (el par 72/24 entraba por el YAML); y la guarda del barrido no alcanzaba si la semilla no declara `rol_de_entrada` --el caso del segundo ISP-- sin emitir ninguna señal. Corregidos: umbral en la lista protegida, `sin_gestion_horas_efectivas()` que acota el umbral por cualquier puerta sin poder volver incargable una config, y el barrido que **no cierra nada** con la config degradada. Mas el marcado del origen movido al lector de YAML, la clave obligatoria en el endpoint, y `forzado`/`motivo` fijados en el sitio de llamada (una mutacion del auditor postergaba una escalada FORZADA y ninguna de nueve pruebas lo veia). Las cinco mutaciones que sobrevivian ahora mueren. Verificado: once guardas rapidas verdes, relevo con base solo los dos rojos previos, vitest 345/345 en las superficies tocadas, y casos dorados 9/10 con la varianza medida contra `4f1ea12` (8/10 en el mismo entorno) | Cuatro deudas nuevas (L9..L12). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
+| 26/09/2026 | **Tercera auditoria, con regla de parada declarada:** se audita lo que AGREGA mecanismo, no lo que solo acota. Encontro que la linea que arreglaba el agujero no tenia guarda --mutar `/conversaciones` al umbral crudo devolvia la ventana de 48 h con la bateria entera en verde-- y que su `hasattr` restituia la conducta vieja en silencio; que el 400 del endpoint vigilaba una puerta por la que nadie entra, porque el helper de JS convertia la ausencia en null (con una prueba mia bendiciendolo); y que el formulario mostraba 72 mientras la banda actuaba a las 24, sin señal. Corregidos los tres: guarda de efecto en §14 contra PostgreSQL --se intento sin base y no se puede, importar `api` exige credenciales--, el helper revienta sin llegar a la red, y el GET/PUT devuelven los dos umbrales con aviso en la pantalla. **La mutacion que sobrevivia ahora pone §14 en rojo (medido).** Verificado: once guardas verdes, vitest 345/345, relevo con §14 en verde y solo los dos rojos previos | Tres deudas nuevas (L13..L15). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |

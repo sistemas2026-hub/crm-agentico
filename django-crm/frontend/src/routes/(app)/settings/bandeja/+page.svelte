@@ -48,6 +48,17 @@
   /* Guarda anti-limbo (26/09/2026): vacío = la banda "Sin resolución
      registrada" no existe. No se inventa un valor por defecto: se vería igual
      que uno decidido. */
+  // El umbral guardado y el que de verdad usa la banda pueden diferir si el
+  // par entró por el YAML (el editor lo rechaza). Mostrarlo es la diferencia
+  // entre un operador que entiende la cola y uno que cree que el campo miente.
+  const efectivoAcotado = $derived(
+    !!a &&
+      a.sin_gestion_horas !== null &&
+      a.sin_gestion_horas !== undefined &&
+      a.sin_gestion_horas_efectivas !== null &&
+      a.sin_gestion_horas_efectivas !== undefined &&
+      a.sin_gestion_horas_efectivas !== a.sin_gestion_horas
+  );
   const tieneSinGestion = $derived(
     !!a && a.sin_gestion_horas !== null && a.sin_gestion_horas !== undefined
   );
@@ -206,6 +217,16 @@
                 alguien la mire. Mientras esté ahí no se cierra sola por
                 inactividad. Vacío significa que esa banda no existe.
               </p>
+              {#if efectivoAcotado}
+                <p class="v2-hint aviso-acotado">
+                  Guardado: {a.sin_gestion_horas} h — pero la banda aparece a las
+                  {a.sin_gestion_horas_efectivas} h, porque desde ahí el cierre por
+                  inactividad deja de actuar y esperar más dejaría la conversación
+                  sin cerrarse y sin verse. Guardá un valor de
+                  {a.sin_gestion_horas_efectivas} h o menos para que lo que se
+                  muestra sea lo que pasa.
+                </p>
+              {/if}
             </div>
           {/snippet}
         </SettingsFormPanel>
@@ -277,6 +298,13 @@
 {/if}
 
 <style>
+  /* El umbral guardado y el efectivo difieren: es un aviso, no una ayuda. */
+  .aviso-acotado {
+    border-left: 3px solid var(--v2-warn, #b45309);
+    padding-left: 10px;
+    margin-top: 8px;
+  }
+
   .explica {
     padding: 16px;
     display: flex;
