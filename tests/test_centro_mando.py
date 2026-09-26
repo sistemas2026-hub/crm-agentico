@@ -74,7 +74,16 @@ def rol(nombre):
 
 AGENTES = ["ocupado", "con_error", "en_cola", "libre", "escalado",
            "aprobando", "apagado", "espera_cliente"]
-CONFIG = types.SimpleNamespace(roles={n: rol(n) for n in AGENTES})
+# 'rol_de_entrada' viaja en la respuesta desde que el endpoint dejo de deducirlo
+# --el 07/09/2026 un suscriptor sin internet termino hablando con el agente
+# comercial porque "el primero orientado al cliente" lo decidia un diccionario--.
+# Este doble no lo tenia, y por eso las CATORCE afirmaciones de abajo fallaban con
+# un 500: AttributeError en api.py, tragado por el redirect_stdout de pedir().
+# Un doble que se queda atras del codigo que dobla no falla donde esta el
+# problema; falla en todo lo que venia despues. Es el cuarto caso de esta misma
+# familia en dos dias (ver SPEC/objetivos/guarda-anti-limbo.md).
+CONFIG = types.SimpleNamespace(roles={n: rol(n) for n in AGENTES},
+                               rol_de_entrada="cliente_final")
 
 PANORAMA = {
     "ventana_min": 10,
