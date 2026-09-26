@@ -1265,6 +1265,75 @@ lector de archivos no cambia la conducta de ninguno.
 | L14 | **La igualdad de `TenantConfig` cambió:** pydantic v2 compara los atributos privados, así que la misma config leída del archivo y de la base ya no son `==`. **Medido: ningún lugar del repo compara instancias** —`diferencias_config.py` y `cargar_config.py` comparan volcados, y el marcador no viaja en el volcado— así que es latente, no activo | Neutralizarlo exige pisar `__eq__` del modelo central de configuración, que es superficie nueva en el archivo más delicado. El escenario queda escrito: el día que alguien escriba `config_repo == config_base` va a recibir "distintas" para siempre |
 | L15 | La afirmación de `forzado=forzado` en el sitio de llamada es **sobre el texto del fuente**, y está declarado en la prueba. Sobrevive a cualquier mutación que sombree `forzado` antes, en el turno | Medirlo exige conducir `_atender_turno` entero contra base, que es el trabajo que T1 hizo para el otro parámetro; se puede repetir para este cuando haga falta |
 
+### Checklist de salida (`guardia-de-release`), 26/09/2026 — el paso 7 del flujo
+
+No es una cuarta auditoría: no mira código nuevo, mira la rama **como entregable**. Semáforo
+**verde con tres avisos de despliegue**. Lo que midió y hay que conservar:
+
+- **El merge es fast-forward.** `merge-base` = tip de origin, 12 commits en una dirección y
+  **0 en la contraria**: la base no derivó. Los 12 con `+` en `git cherry` (comparación por
+  contenido, no por hash — la regla del 24/09). Solape de archivos con
+  `integrar-centro-mando`: **cero**, medido.
+- **Cero migraciones, cero variables de entorno nuevas, cero cambios en el catálogo de
+  herramientas** (`git diff -- tenants/ nucleo/herramientas/` = 0 líneas). `migrar_asistente.py`
+  no aplica a este merge.
+- **La puerta de `cargar_config.py` funciona, y se midió ejecutándola:** con el umbral
+  guardado en la base y el YAML sin declararlo, el comando **se niega** nombrando el campo
+  (`SystemExit`). Con la banda apagada no avisa nada, que es lo correcto. Consecuencia
+  operativa que hay que respetar: **una vez encendido el umbral, `cargar_config.py --forzar`
+  sobre ese tenant deja de ser rutina** — borrarlo no apaga una banda en pantalla, devuelve
+  las conversaciones al barrido, que las cierra afirmando que el cliente no volvió.
+- **`diferencias_config.py` lo va a reportar como `[i] solo la base lo tiene`**, que es la
+  dirección normal y no hace fallar el comando. La que rompe —*el repo lo declara y la base
+  no*— es imposible para este campo, porque el YAML no lo declara a propósito.
+- **Qué hay que reiniciar y qué queda inerte:** el motor web (la banda), el reloj (la
+  excepción del barrido) y el frontend (sin él la fila llega en la respuesta y **no aparece
+  en ninguna pestaña**). Con `RELOJ_HABILITADO=0` la mitad del barrido queda inerte y no
+  importa: si no corre, no hay nada que exceptuar. Y hay una **tercera puerta** que no pasa
+  por ese interruptor: `POST /mantenimiento/cerrar-inactivas-ia`, que corre en el proceso web
+  — ahí la excepción sí aplica.
+
+**Tres riesgos de despliegue, y qué se hizo con cada uno:**
+
+1. **Los contadores de la cabecera van a bajar de golpe** el minuto del deploy, y no es la
+   banda: es el arreglo de L7 (la cabecera contaba sobre todas las conversaciones mientras la
+   lista se filtraba por canal), con 294 corridas de laboratorio viviendo en producción. Es la
+   corrección de una incoherencia real, pero **si nadie lo avisa se lee como "desaparecieron
+   conversaciones"**. Queda dicho acá y en la entrega.
+2. **Ventana motor↔frontend**, que era riesgo introducido por esta rama: el motor nuevo exigía
+   la clave `sin_gestion_horas` y el formulario viejo no la manda, así que en esa ventana no
+   se podía guardar **ninguno** de los tres ajustes. **Corregido** (`d8f1e39`): el 400 entra
+   solo cuando hay un umbral guardado, o sea cuando "ausente" significaría apagar la guarda.
+   Sin banda encendida no hay nada que perder y la omisión se acepta.
+3. **L5, el rollback:** con el umbral guardado, volver el motor a una imagen anterior
+   **rechaza la config entera** y el tenant deja de atender — medido cargando el schema previo
+   con la clave puesta (`extra_forbidden`). Escrito en **`DESPLIEGUE.md` §7**, que es donde se
+   busca, con las dos reglas de orden: encender después de desplegar, y apagar antes de
+   revertir.
+
+**Dos correcciones al informe del guardia**, para que el registro quede fiel:
+
+- **vitest no está pendiente:** el guardia no pudo correrlo (este worktree no tiene
+  `node_modules`), pero **yo lo corrí dos veces en contenedor limpio: 345/345** en las
+  superficies tocadas, la última con el `throw` nuevo del helper y su prueba reescrita.
+- **Alcance de `290eaab`:** ese commit trae 6 archivos de `SPEC/` que no son de B ni de C
+  —entre ellos la ficha de otro objetivo, `contexto-por-capacidad-del-turno.md`, que está
+  **propuesto y sin implementar**—. Son solo documentación, no existen en ninguna rama remota
+  y no generan conflicto, pero es el gesto que §7 prohíbe. **Que nadie lea esa ficha como
+  trabajo cerrado**; se deja porque partir el commit obligaría a rehacer el cherry-pick y
+  revalidar con base.
+
+**El hueco que queda, nombrado:** la corrida completa de los 56 casos dorados. La tabla de §6
+la exige porque B cambió el texto que se le inyecta al modelo, y `--humo` son 10 casos con una
+varianza medida de ±1 — o sea que **el humo no puede distinguir una regresión chica**. Es el
+único paso del flujo §11.2 que el diff exige y no corrió. Los otros tres —`verificador-de-api`,
+`auditor-de-frontera`, `revisor-de-pii`— quedaron descartados con su motivo medido: cero
+cambios en el catálogo o en llamadas externas; cero apariciones de `frontera`, `critica(`,
+`idempot`, `interruptor` o `irreversible` en el diff del núcleo, y los dos cambios que tocan
+el camino de una acción con efecto **acotan** (el agendamiento se dispara menos, el barrido
+cierra menos); y ninguna lista blanca ni campo de texto libre tocado, con
+`test_registro_sin_pii` en verde.
+
 ### Deuda declarada, con su motivo — no se arregla en esta rama
 
 | # | Qué | Por qué se deja |
@@ -1318,3 +1387,4 @@ divergente que hay que unificar.
 | 26/09/2026 | **Auditada antes de integrar, y corregida.** Dos lentes de solo lectura sobre `4f1ea12`: el `auditor-independiente` mato cinco mutaciones de `api.py` que dejaban la prueba de B en verde --una de ellas posposicion infinita-- y midio dos agujeros de C (48 h exceptuadas y sin banda con 72/24, 25 de 25 filas; la proteccion cayendose cuando el reloj lee el YAML); el `arquitecto-dexter` hallo que un umbral sin `rol_de_entrada` se guardaba sin efecto. **Los tres altos corregidos en la rama**: bloque extraido a `api._aplicar_posposicion` con prueba de dos vueltas que caza las cinco mutaciones, validacion cruzada del umbral contra `horas_inactividad_cierra`, `TenantConfig._origen` para que el barrido exceptue cuando no puede confirmar, y las dos puertas del vaciado silencioso cerradas. Corregido tambien lo que **B realmente hace**: el codigo previo ya escalaba en el turno 2 con la sesion viva, asi que el subject de `b920c25` afirma de mas. Verificado: nueve guardas en verde, relevo con base solo los dos rojos previos y §14 en verde, y casos dorados `--humo` 9/10 (90%, el minimo), con el unico rojo por una credencial local de BottleCRM | Ocho deudas declaradas con su motivo (L1..L8). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
 | 26/09/2026 | **Segunda auditoria, sobre el delta del arreglo.** Los ~340 renglones que corrigieron los tres altos eran codigo sin auditar, y la pasada encontro tres mas: `cli/cargar_config.py` apagaba la banda en silencio (el umbral no estaba en `SECCIONES_EDITABLES`, y ese comando se corre tras cada pull); la regla del umbral valia por una sola puerta (el par 72/24 entraba por el YAML); y la guarda del barrido no alcanzaba si la semilla no declara `rol_de_entrada` --el caso del segundo ISP-- sin emitir ninguna señal. Corregidos: umbral en la lista protegida, `sin_gestion_horas_efectivas()` que acota el umbral por cualquier puerta sin poder volver incargable una config, y el barrido que **no cierra nada** con la config degradada. Mas el marcado del origen movido al lector de YAML, la clave obligatoria en el endpoint, y `forzado`/`motivo` fijados en el sitio de llamada (una mutacion del auditor postergaba una escalada FORZADA y ninguna de nueve pruebas lo veia). Las cinco mutaciones que sobrevivian ahora mueren. Verificado: once guardas rapidas verdes, relevo con base solo los dos rojos previos, vitest 345/345 en las superficies tocadas, y casos dorados 9/10 con la varianza medida contra `4f1ea12` (8/10 en el mismo entorno) | Cuatro deudas nuevas (L9..L12). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
 | 26/09/2026 | **Tercera auditoria, con regla de parada declarada:** se audita lo que AGREGA mecanismo, no lo que solo acota. Encontro que la linea que arreglaba el agujero no tenia guarda --mutar `/conversaciones` al umbral crudo devolvia la ventana de 48 h con la bateria entera en verde-- y que su `hasattr` restituia la conducta vieja en silencio; que el 400 del endpoint vigilaba una puerta por la que nadie entra, porque el helper de JS convertia la ausencia en null (con una prueba mia bendiciendolo); y que el formulario mostraba 72 mientras la banda actuaba a las 24, sin señal. Corregidos los tres: guarda de efecto en §14 contra PostgreSQL --se intento sin base y no se puede, importar `api` exige credenciales--, el helper revienta sin llegar a la red, y el GET/PUT devuelven los dos umbrales con aviso en la pantalla. **La mutacion que sobrevivia ahora pone §14 en rojo (medido).** Verificado: once guardas verdes, vitest 345/345, relevo con §14 en verde y solo los dos rojos previos | Tres deudas nuevas (L13..L15). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
+| 26/09/2026 | **Checklist de salida (`guardia-de-release`), el paso 7 del flujo.** Verde con tres avisos. Medido: el merge es fast-forward (la base no derivo, 0 commits en la direccion contraria, comparado por contenido), cero migraciones, cero variables nuevas, cero solape de archivos con `integrar-centro-mando`, y la puerta de `cargar_config.py` se NIEGA de verdad con el umbral guardado (ejecutada, no leida). **Riesgo propio corregido:** el 400 del endpoint rompia la ventana entre el motor nuevo y el bundle viejo --no se podia guardar ninguno de los tres ajustes--; ahora entra solo cuando hay una banda encendida. La trampa del rollback (L5) quedo escrita en `DESPLIEGUE.md` §7, que es donde se busca. Aviso que hay que dar antes del deploy: los contadores de la cabecera bajan de golpe por el arreglo de L7, y se lee como si desaparecieran conversaciones | **Hueco unico y nombrado: los 56 casos dorados completos**, que §6 exige porque la nota al modelo cambio y `--humo` no distingue una regresion chica. Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |

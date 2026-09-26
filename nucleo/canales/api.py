@@ -3873,9 +3873,23 @@ def configuracion_bandeja_guardar():
     # dos campos apagaria la guarda sin pedirlo. Es la misma razon por la que
     # el cuarto parametro de guardar_ajustes_bandeja no tiene default, y acá
     # hace falta decirlo aparte porque JSON no tiene firma que lo exija.
+    # Se rechaza solo si hay algo que perder. Entre que el motor nuevo publica
+    # y el bundle del frontend se reemplaza hay una ventana con el formulario
+    # VIEJO --que no manda esta clave-- contra el motor nuevo: con un 400 seco,
+    # en esa ventana no se puede guardar NINGUNO de los tres ajustes. Y no
+    # hace falta: si el tenant no tiene umbral guardado, omitir la clave no
+    # apaga nada. Lo que no se permite es omitirla cuando SI hay una banda
+    # encendida, que es el caso en que "ausente" significaria apagar la guarda
+    # y devolver al barrido las conversaciones que protege.
     if "sin_gestion_horas" not in cuerpo:
-        return jsonify({"error": "Falta el campo 'sin_gestion_horas'. Para apagar la "
-                                 "banda hay que mandarlo en null, no omitirlo."}), 400
+        try:
+            ya_guardado = getattr(_config_de(tenant), "sin_gestion_horas", None)
+        except Exception:
+            ya_guardado = None
+        if ya_guardado is not None:
+            return jsonify({"error": "Falta el campo 'sin_gestion_horas'. La banda «Sin "
+                                     "resolución registrada» está encendida: para apagarla "
+                                     "hay que mandarlo en null, no omitirlo."}), 400
     crudo_sg = cuerpo.get("sin_gestion_horas")
     horas_sg = None
     if crudo_sg not in (None, ""):

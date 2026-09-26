@@ -571,6 +571,13 @@ py -3.13 cli/cargar_config.py tenants/rapilink.config.yaml   # archivo -> base
 
 ⚠️ **Esa protección cubre los ROLES y nada más.** El resto de la configuración se pisa con lo que diga el archivo, incluidos los campos que se pueblan en caliente y que el YAML no tiene — `localidades` es el caso conocido (128 entradas el 02/09/2026, y el archivo las traía vacías). Contra **producción**, entonces: comparar primero, y para un cambio acotado usar `editor._editar` en vez de la carga completa. Ver la advertencia de la sección 2, que explica el procedimiento y el orden respecto del despliegue.
 
+**Un campo de configuración nuevo vuelve el rollback de imagen destructivo, y hay que saberlo ANTES de encenderlo.** `TenantConfig` hereda `extra="forbid"`, y `fuente.cargar` **re-lanza** el error de validación en vez de caer al YAML. Entonces: si la interfaz escribió un campo que una imagen anterior no declara, volver a esa imagen hace que **la configuración entera se rechace y el tenant deje de atender** — y el formulario que podría borrar el campo no existe en esa imagen, así que la única salida es SQL directo sobre `asistente.tenant_config`. Medido el 26/09/2026 con `sin_gestion_horas` (guarda anti-limbo) cargando el schema anterior: `extra_forbidden`, la config no valida.
+
+Dos reglas de orden que salen de eso:
+
+- **Al desplegar:** primero el código, y encender el interruptor nuevo **después**, cuando la imagen lleve un rato sana. Mientras nadie lo encienda, el rollback es libre.
+- **Al revertir:** **apagar el campo desde la interfaz primero** (con la imagen nueva todavía arriba), comprobar que se apagó, y **recién entonces** volver la imagen. Si se revierte con el campo puesto, el orden ya no se puede corregir desde la pantalla.
+
 La exportación conserva los comentarios del YAML — son notas de verificación en vivo, no adorno — y es idempotente: exportar dos veces seguidas no cambia el archivo, así que lo que salga en el diff es cambio real.
 
 ## Pendientes
