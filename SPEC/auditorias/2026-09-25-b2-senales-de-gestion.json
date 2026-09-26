@@ -1,0 +1,151 @@
+{
+ "generado_en": "2026-09-25T15:29:20-0500",
+ "esperada": "facturacion_cliente",
+ "filas": [
+  {
+   "conv": "24d60d9d",
+   "condicion": "00_neutro         (control 12/12)",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "condicion": "01_completo       (control  0/12)",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "condicion": "10_identidad",
+   "aciertos": 5,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 5,
+    "null": 1
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "condicion": "11_herramientas",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "condicion": "12_escalada",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "condicion": "13_las_tres",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "condicion": "20_tool_una",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "condicion": "21_tool_varias",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "condicion": "00_neutro         (control 12/12)",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "condicion": "01_completo       (control  0/12)",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "condicion": "10_identidad",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "condicion": "11_herramientas",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "condicion": "12_escalada",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "condicion": "13_las_tres",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "condicion": "20_tool_una",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "condicion": "21_tool_varias",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  }
+ ]
+}
