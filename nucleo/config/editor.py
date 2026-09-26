@@ -1086,10 +1086,16 @@ def guardar_plazo_visita_tecnica(tenant: str, dias: int) -> TenantConfig:
 
 
 def guardar_ajustes_bandeja(tenant: str, sla_toma_minutos: int,
-                            umbral_rx_dbm: float | None) -> TenantConfig:
+                            umbral_rx_dbm: float | None,
+                            sin_gestion_horas: int | None = None) -> TenantConfig:
     """
-    Los dos numeros que la Bandeja usa para emitir un VEREDICTO, y que cada
+    Los numeros que la Bandeja usa para emitir un VEREDICTO, y que cada
     empresa tiene que poder poner desde la pantalla.
+
+    'sin_gestion_horas' (26/09/2026) enciende la banda de conversaciones que
+    la IA dejo sin una accion de resolucion registrada. None = apagada. Un
+    campo nuevo de config no existe para nadie hasta que este mutador y el
+    formulario lo conocen: por eso entra aca y no solo en el schema.
 
     POR QUE SE EDITAN Y NO SE FIJAN EN CODIGO
     -----------------------------------------
@@ -1113,17 +1119,27 @@ def guardar_ajustes_bandeja(tenant: str, sla_toma_minutos: int,
         # tipeo, y guardarlo haria que la pantalla marcara sano un enlace
         # caido -- o al reves.
         raise ErrorEdicion("el umbral óptico tiene que estar entre -40 y 0 dBm.")
+    if sin_gestion_horas is not None and not (1 <= int(sin_gestion_horas) <= 720):
+        # Menos de una hora es una conversacion en curso entre turno y turno;
+        # mas de treinta dias es no querer verla. Ninguno de los dos es un
+        # umbral: es un error de tipeo.
+        raise ErrorEdicion("el umbral de 'sin gestión' tiene que estar entre 1 y 720 horas.")
     return _editar(tenant, lambda doc: _mutar_ajustes_bandeja(
-        doc, sla_toma_minutos, umbral_rx_dbm))
+        doc, sla_toma_minutos, umbral_rx_dbm, sin_gestion_horas))
 
 
 def _mutar_ajustes_bandeja(doc, sla_toma_minutos: int,
-                           umbral_rx_dbm: float | None) -> None:
+                           umbral_rx_dbm: float | None,
+                           sin_gestion_horas: int | None = None) -> None:
     doc["sla_toma_minutos"] = int(sla_toma_minutos)
     if umbral_rx_dbm is None:
         doc.pop("umbral_rx_dbm", None)
     else:
         doc["umbral_rx_dbm"] = float(umbral_rx_dbm)
+    if sin_gestion_horas is None:
+        doc.pop("sin_gestion_horas", None)
+    else:
+        doc["sin_gestion_horas"] = int(sin_gestion_horas)
 
 
 def guardar_canal_whatsapp(tenant: str, activo: bool,

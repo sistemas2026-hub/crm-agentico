@@ -662,6 +662,9 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                   c.motivo_escalamiento, c.caso_id, c.etiqueta, c.caso_manual,
                   c.actualizado_en, c.id_cliente, c.nombre_cliente,
                   c.escalada_en, c.resumen,
+                  -- Guarda anti-limbo (proyeccion.py, banda 'sin_gestion'):
+                  -- un ticket abierto es una accion de resolucion registrada.
+                  c.ticket_operativo,
                   ultimo.contenido as ultimo_mensaje,
                   ultimo.rol       as ultimo_rol,
                   -- CUANDO fue ese ultimo mensaje. Distinto de
@@ -692,6 +695,7 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                   -- 'humano'.
                   humana.creado_en as ultima_atencion_humana,
                   cliente.creado_en as ultimo_mensaje_cliente,
+                  coalesce(cliente.n, 0) as mensajes_cliente,
                   -- T19: si la evaluacion que quedo NO_DETERMINADO ya la
                   -- reviso alguien. Sin esto, una conversacion vieja pediria
                   -- revision para siempre.
@@ -735,7 +739,9 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                       and (rol = 'humano' or (rol = 'assistant' and origen = 'humano'))
                ) humana on true
                left join lateral (
-                   select max(creado_en) as creado_en
+                   -- 'n' es para la guarda anti-limbo: un 'hola' y el saludo
+                   -- de vuelta no es un pedido sin resolver.
+                   select max(creado_en) as creado_en, count(*) as n
                      from asistente.messages
                     where conversation_id = c.id and rol = 'user'
                ) cliente on true"""
@@ -1238,7 +1244,8 @@ def marcar_caso(tenant: str, conversation_id: str, caso: str | None,
 
 def conversaciones_ia_inactivas(tenant: str, horas: int, *, corte=None,
                                 cohorte: str = "normal",
-                                limite: int | None = None) -> list[dict]:
+                                limite: int | None = None,
+                                rol_de_entrada: str | None = None) -> list[dict]:
     """
     Las que atendio SOLO el asistente y quedaron en silencio.
 
@@ -1335,6 +1342,20 @@ def conversaciones_ia_inactivas(tenant: str, horas: int, *, corte=None,
                  -- reglas del OTRO barrido, no a estas.
                  and c.ticket_operativo is null
                  and c.caso_id is null
+                 -- Sin una accion de resolucion registrada (guarda anti-limbo,
+                 -- 26/09/2026): si la banda 'sin_gestion' de la Bandeja esta
+                 -- encendida, lo que nunca salio del rol de entrada con un
+                 -- pedido real NO se cierra solo -- lo cierra una persona con
+                 -- motivo (T17). Cerrarlo por plazo afirmaria "el cliente no
+                 -- respondio" sobre una conversacion que nadie atendio, y
+                 -- vaciaria la banda antes de que alguien la viera. Con la
+                 -- banda apagada (rol_de_entrada = null) se barre como siempre:
+                 -- exceptuar sin mostrar seria dejarlas abiertas para siempre.
+                 -- El cast evita el IndeterminateDatatype de psycopg 3.
+                 and (%s::text is null
+                      or c.rol_efectivo is distinct from %s::text
+                      or (select count(*) from asistente.messages mc
+                           where mc.conversation_id = c.id and mc.rol = 'user') < 2)
                  -- Trabajo durable pendiente: cualquiera de estos la salva.
                  and c.pendiente_interno_desde is null
                  and coalesce(c.escalada_siguiente_paso, '') = ''
@@ -1371,7 +1392,8 @@ def conversaciones_ia_inactivas(tenant: str, horas: int, *, corte=None,
                 # Mas antiguas primero ya lo da el 'order by'; el limite solo
                 # se aplica al backlog (ver la docstring).
                 limite="limit %s" if (limite and cohorte == "backlog") else ""),
-            (org, int(horas), corte) + ((int(limite),) if (limite and cohorte == "backlog") else ()))
+            (org, rol_de_entrada, rol_de_entrada, int(horas), corte)
+            + ((int(limite),) if (limite and cohorte == "backlog") else ()))
         return [dict(f) for f in cur.fetchall()]
 
 

@@ -162,6 +162,68 @@ comprobar(legado == copia, "proyectar no modifica la fila: es lectura")
 comprobar(all(proyeccion.proyectar(f).get("relevo_version", 0) == 0 for f in [legado]),
           "y no toca relevo_version: adoptar es G8")
 
+# ---------------------------------------------------------------------------
+print("\n== 5. sin una accion de resolucion registrada (guarda anti-limbo) ==")
+# La fila de un limbo como los cinco medidos en produccion el 25/09/2026: la
+# atiende la IA, nunca salio del rol de entrada, sin escalada ni caso ni
+# ticket, hubo un pedido (2+ mensajes), lo ultimo visible lo dijo la IA hace
+# horas y el cliente no volvio. Todo son columnas que la fila YA trae.
+
+
+def limbo(**campos):
+    base = fila(control="ia", control_motivo=None, escalada_a_humano=False,
+                necesita_atencion_humana=False, rol_efectivo="cliente_final",
+                caso_id=None, ticket_operativo=None, mensajes_cliente=2,
+                ultimo_rol="assistant", ultimo_mensaje_en=hace(60 * 5),
+                escalada_en=None, tomada_en=None, ultima_atencion_humana=None)
+    base.update(campos)
+    return base
+
+
+BANDA = dict(rol_de_entrada="cliente_final", sin_gestion_horas=2, ahora=AHORA)
+p = proyeccion.proyectar(limbo(), **BANDA)
+comprobar(p["banda"] == 3 and p["banda_nombre"] == "sin_gestion"
+          and p["necesita_accion_de"] == "humano"
+          and p["motivo_cola"] == "Sin una acción de resolución registrada"
+          and p["esperando_desde"] == hace(60 * 5),
+          "un limbo de 5 horas entra a la banda 3 como 'sin_gestion', para una persona, "
+          "esperando desde el ultimo mensaje de la IA")
+comprobar(proyeccion.proyectar(limbo())["banda"] is None,
+          "sin rol_de_entrada ni umbral la banda NO existe (falla cerrado): sigue 'la atiende la IA'")
+comprobar(proyeccion.proyectar(limbo(), rol_de_entrada="cliente_final", ahora=AHORA)["banda"] is None,
+          "con rol pero sin umbral, tampoco")
+comprobar(proyeccion.proyectar(limbo(ultimo_mensaje_en=hace(30)), **BANDA)["banda"] is None,
+          "la IA contesto hace 30 minutos: es una conversacion en curso, no un limbo")
+comprobar(proyeccion.proyectar(limbo(rol_efectivo="facturacion_cliente"), **BANDA)["banda"] is None,
+          "si derivo a un area, hubo una accion de resolucion: no es limbo")
+comprobar(proyeccion.proyectar(limbo(mensajes_cliente=1), **BANDA)["banda"] is None,
+          "un 'hola' y el saludo de vuelta no es un pedido sin resolver (hace falta 2+)")
+comprobar(proyeccion.proyectar(limbo(ultimo_rol="user"), **BANDA)["banda"] is None,
+          "si lo ultimo visible es del cliente, es el cliente quien espera: eso es otra banda")
+comprobar(proyeccion.proyectar(limbo(caso_id="caso-1"), **BANDA)["banda"] is None,
+          "con un caso abierto hay una accion registrada")
+comprobar(proyeccion.proyectar(limbo(ticket_operativo="T-1"), **BANDA)["banda"] is None,
+          "con un ticket, tambien")
+comprobar(proyeccion.proyectar(limbo(ultima_atencion_humana=hace(60 * 5)), **BANDA)["banda"] is None,
+          "el ultimo 'assistant' es de una persona (mismo instante que ultima_atencion_humana): no entra")
+comprobar(proyeccion.proyectar(limbo(ultima_atencion_humana=hace(60 * 3)), **BANDA)["banda"] is None,
+          "una persona la toco DESPUES del ultimo mensaje de la IA: no reentra (sin ping-pong)")
+comprobar(proyeccion.proyectar(limbo(tomada_en=hace(60 * 4)), **BANDA)["banda"] is None,
+          "ni si alguien la tomo despues")
+comprobar(proyeccion.proyectar(limbo(ultima_atencion_humana=hace(60 * 9)), **BANDA)["banda"] == 3,
+          "pero si la IA volvio a contestar despues de la persona y el cliente no volvio, entra "
+          "con antiguedad nueva")
+viejo = {**limbo(id="L"), **proyeccion.proyectar(limbo(id="L"), **BANDA)}
+f_rev = fila(id="R", control="ia", control_motivo=None, escalada_a_humano=False,
+             necesita_atencion_humana=False, estado_escalada="NO_DETERMINADO",
+             escalada_en=hace(10))
+rev = {**f_rev, **proyeccion.proyectar(f_rev, **BANDA)}
+comprobar([c["id"] for c in sorted([rev, viejo], key=proyeccion.orden_de_cola)] == ["L", "R"],
+          "comparte la banda 3 con 'falta revisar', y dentro manda la espera mas larga")
+copia = limbo()
+proyeccion.proyectar(copia, **BANDA)
+comprobar(copia == limbo(), "la banda nueva tampoco escribe: proyectar sigue siendo lectura")
+
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")
     for f in fallos:

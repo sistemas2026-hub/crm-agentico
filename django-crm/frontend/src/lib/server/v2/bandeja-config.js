@@ -32,7 +32,9 @@ import { destinoDelAsistente } from './tenant.js';
 
 /**
  * Los ajustes de la Bandeja, o `null` si no hay asistente o no contesta.
- * @returns {Promise<{ sla_toma_minutos: number, umbral_rx_dbm: number | null } | null>}
+ * `sin_gestion_horas` (26/09/2026) es el umbral de la banda «Sin resolución
+ * registrada»; `null` = la banda no existe.
+ * @returns {Promise<{ sla_toma_minutos: number, umbral_rx_dbm: number | null, sin_gestion_horas: number | null } | null>}
  */
 export async function leerAjustesBandeja(locals, fetch) {
   const cfg = await destinoDelAsistente(locals, fetch);
@@ -60,7 +62,7 @@ export async function leerAjustesBandeja(locals, fetch) {
  * El rango lo valida el motor (0-1440 minutos, -40..0 dBm) y su mensaje de
  * error es más útil que uno genérico, así que se deja pasar tal cual.
  *
- * @param {{ sla_toma_minutos: string | number, umbral_rx_dbm: string | number | null }} valores
+ * @param {{ sla_toma_minutos: string | number, umbral_rx_dbm: string | number | null, sin_gestion_horas?: string | number | null }} valores
  */
 export async function guardarAjustesBandeja(locals, fetch, valores) {
   const cfg = await destinoDelAsistente(locals, fetch);
@@ -69,13 +71,18 @@ export async function guardarAjustesBandeja(locals, fetch, valores) {
   }
 
   const crudo = valores.umbral_rx_dbm;
+  // El tercero (26/09/2026): horas sin respuesta antes de que una conversacion
+  // que la IA dejo sin resolucion registrada entre a la cola. Vacio = null =
+  // la banda no existe. Se manda siempre, por lo mismo que los otros dos.
+  const sinGestion = valores.sin_gestion_horas;
   const resp = await fetch(`${cfg.baseUrl}/configuracion/bandeja`, {
     method: 'PUT',
     headers: headersMotor({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       tenant: cfg.tenant,
       sla_toma_minutos: valores.sla_toma_minutos === '' ? 0 : valores.sla_toma_minutos,
-      umbral_rx_dbm: crudo === '' || crudo === undefined ? null : crudo
+      umbral_rx_dbm: crudo === '' || crudo === undefined ? null : crudo,
+      sin_gestion_horas: sinGestion === '' || sinGestion === undefined ? null : sinGestion
     })
   });
 

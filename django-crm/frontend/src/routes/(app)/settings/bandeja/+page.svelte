@@ -45,6 +45,12 @@
   const tieneUmbral = $derived(
     !!a && a.umbral_rx_dbm !== null && a.umbral_rx_dbm !== undefined
   );
+  /* Guarda anti-limbo (26/09/2026): vacío = la banda "Sin resolución
+     registrada" no existe. No se inventa un valor por defecto: se vería igual
+     que uno decidido. */
+  const tieneSinGestion = $derived(
+    !!a && a.sin_gestion_horas !== null && a.sin_gestion_horas !== undefined
+  );
 
   /* El plazo se guarda en minutos porque es lo que consume `plazoDeToma()`,
      pero 90 minutos se lee peor que "1 h 30 min". Se traduce sólo para
@@ -177,6 +183,28 @@
               <p class="v2-hint">
                 Negativo — la potencia recibida en GPON siempre lo es. Vacío
                 significa que la Bandeja muestra la lectura sin emitir veredicto.
+              </p>
+            </div>
+
+            <div class="v2-field">
+              <label for="f-sin-gestion">Horas sin resolución registrada</label>
+              <input
+                id="f-sin-gestion"
+                class="v2-input"
+                type="number"
+                name="sin_gestion_horas"
+                min="1"
+                max="720"
+                step="1"
+                placeholder="Sin definir"
+                value={tieneSinGestion ? a.sin_gestion_horas : ''}
+              />
+              <p class="v2-hint">
+                Una conversación que el asistente dejó sin derivar, sin escalar y
+                sin caso, y en la que el cliente no volvió a escribir en estas
+                horas, entra a la cola como «Sin resolución registrada» para que
+                alguien la mire. Mientras esté ahí no se cierra sola por
+                inactividad. Vacío significa que esa banda no existe.
               </p>
             </div>
           {/snippet}

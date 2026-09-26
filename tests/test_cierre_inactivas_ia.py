@@ -76,8 +76,12 @@ class Falsa:
         self.nuevas, self.backlog = nuevas, backlog
         self.pedidos = []
 
-    def __call__(self, tenant, horas, *, corte=None, cohorte="normal", limite=None):
+    def __call__(self, tenant, horas, *, corte=None, cohorte="normal", limite=None,
+                 rol_de_entrada=None):
         self.pedidos.append((cohorte, limite, corte))
+        # Guarda anti-limbo (26/09/2026): que rol le pidieron exceptuar. Se
+        # anota aparte para afirmar el EFECTO y no solo la firma.
+        self.roles_exceptuados = getattr(self, "roles_exceptuados", []) + [rol_de_entrada]
         if corte is None:
             return []
         n = self.nuevas if cohorte == "normal" else self.backlog
@@ -196,7 +200,8 @@ class Drenando:
     def __init__(self, total):
         self.quedan = list(range(total))
 
-    def __call__(self, tenant, horas, *, corte=None, cohorte="normal", limite=None):
+    def __call__(self, tenant, horas, *, corte=None, cohorte="normal", limite=None,
+                 rol_de_entrada=None):
         if cohorte == "normal":
             return []
         filas = [conv(i) for i in self.quedan]
@@ -267,11 +272,37 @@ for fragmento, que in [
     ("order by m.creado_en desc limit 1) = 'assistant'",
      "EL ULTIMO MENSAJE TIENE QUE SER DEL ASISTENTE -- si hablo el cliente hay "
      "una pregunta sin contestar"),
+    ("c.rol_efectivo is distinct from %s::text",
+     "y con la banda 'sin_gestion' encendida NO cierra lo que nunca salio del rol "
+     "de entrada con un pedido real: cerrarlo por plazo afirmaria que el cliente "
+     "no respondio sobre una conversacion que nadie atendio (guarda anti-limbo)"),
 ]:
     afirmar(fragmento in consulta, que)
 
 afirmar("if corte is None:" in consulta and "return []" in consulta,
         "y sin corte devuelve vacio antes de tocar la base")
+
+# ── la excepcion del rol de entrada viaja SOLO con la banda encendida ─────────
+# Afirmar el EFECTO en el llamador, no la presencia del kwarg: lo que importa
+# es que operativo le pase a la consulta el rol que hay que exceptuar, y que
+# no se lo pase cuando la banda de la Bandeja esta apagada -- exceptuar sin
+# mostrar seria dejar esas conversaciones abiertas para siempre sin que
+# nadie las vea.
+print("\n--- la excepcion del rol de entrada ---")
+con_banda = cfg()
+con_banda.rol_de_entrada = "cliente_final"
+con_banda.sin_gestion_horas = 6
+espia = Falsa(nuevas=2, backlog=1)
+correr(con_banda, espia=espia, modo_backlog=True)
+afirmar(espia.roles_exceptuados and all(r == "cliente_final" for r in espia.roles_exceptuados),
+        f"con rol_de_entrada y sin_gestion_horas, las {len(espia.roles_exceptuados)} llamadas "
+        "piden exceptuar 'cliente_final' (nuevas, backlog y su total)")
+sin_banda = cfg()
+sin_banda.rol_de_entrada = "cliente_final"          # el rol existe, la banda no
+espia = Falsa(nuevas=2, backlog=1)
+correr(sin_banda, espia=espia, modo_backlog=True)
+afirmar(espia.roles_exceptuados and all(r is None for r in espia.roles_exceptuados),
+        "sin sin_gestion_horas no se exceptua nada: el barrido cierra como siempre")
 
 print("\n" + "=" * 62)
 if fallos:

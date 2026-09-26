@@ -3798,6 +3798,7 @@ def configuracion_bandeja():
     return jsonify({
         "sla_toma_minutos": getattr(config, "sla_toma_minutos", 0) or 0,
         "umbral_rx_dbm": getattr(config, "umbral_rx_dbm", None),
+        "sin_gestion_horas": getattr(config, "sin_gestion_horas", None),
     })
 
 
@@ -3828,8 +3829,19 @@ def configuracion_bandeja_guardar():
         except (TypeError, ValueError):
             return jsonify({"error": "'umbral_rx_dbm' tiene que ser un numero."}), 400
 
+    # Guarda anti-limbo: horas sin respuesta del cliente antes de que una
+    # conversacion que la IA dejo sin gestion registrada entre a la cola.
+    # Vacio o null = la banda no existe (ver TenantConfig.sin_gestion_horas).
+    crudo_sg = cuerpo.get("sin_gestion_horas")
+    horas_sg = None
+    if crudo_sg not in (None, ""):
+        try:
+            horas_sg = int(crudo_sg)
+        except (TypeError, ValueError):
+            return jsonify({"error": "'sin_gestion_horas' tiene que ser un numero entero."}), 400
+
     try:
-        config = editor.guardar_ajustes_bandeja(tenant, sla, umbral)
+        config = editor.guardar_ajustes_bandeja(tenant, sla, umbral, horas_sg)
     except editor.ErrorEdicion as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
@@ -3839,6 +3851,7 @@ def configuracion_bandeja_guardar():
     return jsonify({
         "sla_toma_minutos": getattr(config, "sla_toma_minutos", 0) or 0,
         "umbral_rx_dbm": getattr(config, "umbral_rx_dbm", None),
+        "sin_gestion_horas": getattr(config, "sin_gestion_horas", None),
     })
 
 
@@ -4616,8 +4629,22 @@ def conversaciones():
     # B3.5 (D18): la proyeccion viaja calculada. Que necesita cada
     # conversacion, en que banda de la cola cae, desde cuando espera y por que
     # -- para que la pantalla ordene y lo explique sin reimplementar la regla.
+    # Lo que la proyeccion necesita de la CONFIG del tenant se lee antes del
+    # bucle, una vez: el rol de entrada y el umbral de la banda 'sin_gestion'
+    # (guarda anti-limbo, 26/09/2026). Si la config no se puede leer, la banda
+    # no existe -- fail-closed, al reves del reloj del SLA de mas abajo, que
+    # degrada a 0 -- y queda dicho en el log en vez de pasar en silencio.
+    try:
+        cfg_bandeja = _config_de(tenant)
+        rol_entrada = getattr(cfg_bandeja, "rol_de_entrada", None)
+        horas_sg = getattr(cfg_bandeja, "sin_gestion_horas", None)
+    except Exception as e:
+        registrar("conversaciones", "sin config del tenant: la banda 'sin_gestion' no se calcula",
+                  tenant=tenant, error=e)
+        rol_entrada, horas_sg = None, None
     for fila in salida:
-        fila.update(proyeccion.proyectar(fila))
+        fila.update(proyeccion.proyectar(fila, rol_de_entrada=rol_entrada,
+                                         sin_gestion_horas=horas_sg))
         fila["canal_operativo"] = fila.get("canal") in canales.REALES
     salida.sort(key=proyeccion.orden_de_cola)
 

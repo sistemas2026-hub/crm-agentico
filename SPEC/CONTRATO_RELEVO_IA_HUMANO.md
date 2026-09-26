@@ -74,7 +74,7 @@ No reabre la arquitectura: corrige supuestos con datos y agrega dos gates. Afect
 
 | # | Medición | Consecuencia | Dónde |
 |---|---|---|---|
-| A1 | **0 `wamid` y 0 `estado_entrega`/`error_entrega` guardados en 2584 mensajes**; el camino humano está implementado pero no se usó realmente desde el 06/09 | No se asume que el recibo del envío humano funciona hoy. Gate **G9**: envío controlado → `wamid` en base → webhook correlaciona, **sin reinicio provocado**; T6 no se activa sin G9. Aceptación del proveedor ≠ entregado ≠ leído. Si G9 destapa un defecto, se corrige dentro de este mismo plan. | T6, §2, §16 |
+| A1 | **Medición histórica anterior al 16/09/2026:** había 0 `wamid` y 0 `estado_entrega`/`error_entrega` guardados en 2584 mensajes; no describe el estado actual. | G9 se verificó el 16/09/2026: envío controlado → `wamid` en base → webhook correlacionado, **sin reinicio provocado**. Aceptación del proveedor ≠ entregado ≠ leído. **Estado actual: VERDE.** | T6, §2, §16 |
 | A2 | Las reglas de backfill de `origen` de §11.1 (v2.1) identifican **0 filas** (G4) | No se inventa procedencia: **todo el histórico queda `origen = NULL`**. Desde el corte de B2, `origen` es obligatorio en filas nuevas. | §11.1 |
 | A3 | — | Legado `rol = assistant` / `origen NULL`: **un único bloque de contexto por conversación** avisa que la procedencia de esos mensajes no está garantizada; los mensajes entran intactos, sin marca individual. | §10, S16 |
 | A4 | Existe **1 fila con `rol = 'humano'`** | Se corrige "nadie lo escribe": ningún código lo escribe **hoy**, pero hay legado. Entra al modelo como `assistant` con el contenido intacto, cubierta por el bloque de legado de su conversación. | D6, §4.6, §10, S34 |
@@ -279,6 +279,7 @@ Reglas en orden; gana la primera que se cumple:
 | 1 | `estado = 'cerrada'` | `nadie` |
 | 2 | Hay una acción propuesta de esta conversación en `pendiente` o `desconocida` | `aprobacion` |
 | 3 | `control = 'ia'` y `estado_escalada = 'NO_DETERMINADO'` **sin evento `evaluacion_revisada` posterior** | `humano` |
+| 3b | `control = 'ia'` y **sin una acción de resolución registrada** [GUARDA ANTI-LIMBO, 26/09/2026]: `rol_efectivo` = `rol_de_entrada` del tenant, sin escalada, sin caso ni ticket, ≥ 2 mensajes del cliente, el último mensaje visible es del asistente y es **estrictamente posterior** a toda marca humana (`ultima_atencion_humana`, `tomada_en`, `escalada_en`), y ya pasaron `sin_gestion_horas` (config del tenant; `NULL` = esta regla no existe) | `humano` |
 | 4 | `control = 'ia'` | `ia` |
 | 5 | `control = 'humano'` y (`aviso_relevo` no nulo **o** último evento de devolución = `devolucion_fallida`) | `humano` |
 | 6 | `control = 'humano'` y `pendiente_interno_desde` no nulo | `humano` |
@@ -320,12 +321,15 @@ Sin esto, una guarda que leyera solo `control` bloquearía a los operadores en l
 | 1 | El cliente escribió después de la última respuesta de una persona | `humano` | ese mensaje del cliente |
 | 2 | En manos de personas y **sin asignar** (escalada o intervención) | `humano` | la escalada |
 | 3 | `estado_escalada = NO_DETERMINADO` sin evento `evaluacion_revisada` (T19) | `humano` | la escalada |
+| 3 | **Sin una acción de resolución registrada** (`sin_gestion`, regla 3b de §4.2): la IA la dejó sin derivar, sin escalar, sin caso ni ticket, y el cliente no volvió en `sin_gestion_horas` [GUARDA ANTI-LIMBO, 26/09/2026] | `humano` | el último mensaje del asistente |
 | 4 | `pendiente_interno_desde` no nulo | `interno` | ese pendiente |
 | 5 | Asignada y sin nada nuevo del cliente | `humano` | la asignación |
 | 6 | Legado (`relevo_version = 0`) en manos de personas | `revision` | la escalada |
 | — | La atiende la IA, o está cerrada | `ia` / `nadie` | — |
 
 Si no se puede derivar `esperando_desde` queda en `NULL` y esa fila va al final de su banda: no se inventa una antigüedad para poder ordenarla.
+
+**La banda `sin_gestion` existe solo si el tenant fijó `sin_gestion_horas`** (ajustes de la Bandeja); con `NULL` la proyección es la de antes del 26/09/2026. Dos consecuencias que no son de la proyección y por eso se dicen acá: (1) mientras la banda esté encendida, el barrido `cierre_inactivas_ia` **no cierra** esas filas —cerrarlas por plazo afirmaría *"el cliente no respondió"* sobre una conversación que nadie atendió y vaciaría la banda antes de que alguien la viera—: las cierra una persona con motivo (T17) o las toma (T8); (2) ese barrido **no figura en §6** —no es T16, que exige escalada, ni T18—, hueco previo de este contrato que queda anotado y no resuelto acá. Medido en producción el 25/09/2026: 5 de 39 conversaciones reales en seis semanas terminaron así, tres todavía abiertas (`SPEC/objetivos/guarda-anti-limbo.md`).
 
 **Lo que todavía no proyecta**, y converge con §4.2 cuando exista lo suyo: `aprobacion` (las acciones propuestas no tienen `conversation_id` hasta B5), `cliente` (esperando al cliente) y las señales de entrega fallida / `aviso_relevo` (T6 y B4). Mientras tanto esos casos caen en la banda 5, que falla hacia lo visible.
 
@@ -782,7 +786,7 @@ Los verifica quien despliega **antes** de desplegar los endpoints nuevos. Ningun
 | **G5** | Casos dorados actualizados y en verde | `cli/evaluar.py rapilink --humo --base` después de aplicar |
 | **G6** | Preflight de DDL y backfill [PRODUCCIÓN] | Volumen medido; sesiones `idle in transaction` = 0 y locks problemáticos = 0 sobre `asistente.conversations`, `asistente.messages` y `asistente.acciones_propuestas` (`pg_stat_activity`, `pg_locks`, solo lectura) inmediatamente antes de aplicar; estrategia de backfill aprobada por el área de producción. Con sesiones retenidas **no se aplica**, y subir `lock_timeout` no es la primera respuesta. |
 | **G8** | **Revisión operativa de las 16 conversaciones reales** que quedarían en control humano sin `atendida_manual` [PRODUCCIÓN A7] | Antes del corte de control (B3): una persona decide cada una — seguir en humano, cerrar con desenlace, resolver el estado externo o volver a la IA. Queda registrada. Ninguna se oculta ni se resuelve sola. |
-| **G9** | **Recibo de entrega punta a punta** [PRODUCCIÓN A1] | **Gate inicial:** envío real **controlado** desde la Bandeja → proxy → motor → Meta acepta → **`wamid` guardado en PostgreSQL** → el webhook correlaciona los acuses con esa fila. Hoy producción tiene 0 `wamid` guardados en 2584 mensajes. **No se provoca un reinicio de producción para esta prueba** [AUDITORÍA]: con el `wamid` en la base, la durabilidad ya está; la reconstrucción después de reiniciar se comprueba en el **siguiente reinicio o despliegue natural**. La arquitectura sí debe sobrevivir reinicios (§10). **T6 no se activa para canal real hasta aprobar el gate inicial.** Aceptado (`wamid`), entregado y leído (acuses) se verifican por separado. **Estado: VERDE en producción (16/09/2026)** — G9-A `wamid` persistido, G9-B entregado correlacionado. Ya no es un gate pendiente. |
+| **G9** | **Recibo de entrega punta a punta** [PRODUCCIÓN A1] | **Gate inicial, aprobado:** envío real **controlado** desde la Bandeja → proxy → motor → Meta acepta → **`wamid` guardado en PostgreSQL** → el webhook correlaciona los acuses con esa fila. La cifra de 0 `wamid` en 2584 mensajes es una **medición histórica previa al 16/09/2026**, no el estado actual. **No se provoca un reinicio de producción para esta prueba** [AUDITORÍA]: con el `wamid` en la base, la durabilidad ya está; la reconstrucción después de reiniciar se comprueba en el **siguiente reinicio o despliegue natural**. La arquitectura sí debe sobrevivir reinicios (§10). Aceptado (`wamid`), entregado y leído (acuses) se verifican por separado. **Estado actual: VERDE en producción (16/09/2026)** — G9-A `wamid` persistido, G9-B entregado correlacionado. Ya no es un gate pendiente. |
 | **G7** | Reconciliador [AUDITORÍA] | T20 habilitado; **cadencia efectiva medida** y compatible con los plazos de Q4 (1–5 min, no el ciclo horario); una sincronización artificial de laboratorio recorre `pendiente → en_curso → hecha` **sin tocar un sistema externo real**. |
 
 ### 16.1b Restricciones de implementación del área de producción

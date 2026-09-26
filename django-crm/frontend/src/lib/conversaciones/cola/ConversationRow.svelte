@@ -82,7 +82,7 @@
   /**
    * El distintivo de la fila: SIEMPRE la banda que mandó el motor.
    *
-   * Los seis nombres salen de `nucleo/relevo/proyeccion.py` y el mapa es uno a
+   * Los siete nombres salen de `nucleo/relevo/proyeccion.py` y el mapa es uno a
    * uno: esta pantalla no clasifica nada, sólo le pone palabras y color a lo
    * que ya vino decidido. Si mañana el motor agrega una banda, acá cae en
    * `undefined` y no se dibuja distintivo -- que es mejor que inventarle uno.
@@ -95,6 +95,9 @@
     cliente_espera: { texto: 'Cliente respondió', clase: 'b-cliente' },
     sin_asignar: { texto: 'Sin asignar', clase: 'b-sin-asignar' },
     revisar_evaluacion: { texto: 'Falta revisar', clase: 'b-revisar' },
+    // No dice "el cliente abandono": no se sabe por que no volvio. Dice lo que
+    // si se sabe: nadie registro una accion de resolucion.
+    sin_gestion: { texto: 'Sin resolución registrada', clase: 'b-sin-gestion' },
     interno_pendiente: { texto: 'Pendiente interno', clase: 'b-interno' },
     en_curso: { texto: 'En atención', clase: 'b-en-curso' },
     legado: { texto: 'Legado · revisar', clase: 'b-legado' }
@@ -446,7 +449,8 @@
     border-color: var(--bandeja-error-borde);
   }
   .b-sin-asignar,
-  .b-interno {
+  .b-interno,
+  .b-sin-gestion {
     background: var(--bandeja-aviso-fondo);
     color: var(--bandeja-aviso);
     border-color: var(--bandeja-aviso-borde);

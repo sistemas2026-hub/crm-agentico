@@ -2933,6 +2933,22 @@ class TenantConfig(Base):
     # definido, y entonces la pantalla NO muestra cuenta regresiva -- no se
     # inventa un plazo por defecto para tener algo que dibujar.
     sla_toma_minutos: int = Field(default=0, ge=0)
+    # Desde cuantas horas sin respuesta del cliente una conversacion que la IA
+    # dejo SIN UNA ACCION DE RESOLUCION REGISTRADA --nunca salio del rol de
+    # entrada, sin escalada, sin caso ni ticket, y con un pedido real (2+
+    # mensajes)-- entra a la cola de la Bandeja para que una persona la mire
+    # (nucleo/relevo/proyeccion.py, banda 'sin_gestion'). Es la guarda
+    # anti-limbo: medido en produccion el 25/09/2026, 5 de 39 conversaciones
+    # reales en seis semanas, tres todavia abiertas sin dueño
+    # (SPEC/objetivos/guarda-anti-limbo.md).
+    #
+    # None = la banda NO existe, y eso es deliberado: significa que la empresa
+    # todavia no lo decidio, y entonces esas conversaciones se ven como
+    # cualquier otra que la IA atiende. Va por tenant porque el umbral es el
+    # precio que cada empresa elige entre "limbo mas largo" y "banda con
+    # ruido" -- y porque con la banda encendida esas conversaciones dejan de
+    # cerrarse solas por inactividad: las cierra una persona con motivo.
+    sin_gestion_horas: int | None = Field(default=None, ge=1, le=720)
     # Desde que potencia optica de recepcion (dBm) se considera que el enlace
     # esta atenuado. Es un numero NEGATIVO y cuanto mas negativo, peor: -20
     # es una señal sana y -30 es un enlace al borde de caerse.

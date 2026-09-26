@@ -31,7 +31,12 @@
  * @param {any} c
  */
 export const pendiente = (c) =>
-  (c.escalada_a_humano || c.necesita_atencion_humana) &&
+  // La tercera forma (26/09/2026): la IA la dejo SIN una accion de resolucion
+  // registrada y el cliente no volvio. No hay escalada ni marca --nadie
+  // decidio nada, que es justamente el problema-- asi que la unica señal es
+  // la banda que calcula el motor (nucleo/relevo/proyeccion.py). Sin esto la
+  // fila existia en la respuesta y no aparecia en ninguna pestaña.
+  (c.escalada_a_humano || c.necesita_atencion_humana || c.banda_nombre === 'sin_gestion') &&
   !c.atendida &&
   // Si alguien se la adjudico, ya no espera a "una persona": espera a ESA
   // persona, y eso es la pestaña de al lado.

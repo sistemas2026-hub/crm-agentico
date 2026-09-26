@@ -381,7 +381,10 @@ try:
 
     reemplazos = {
         (db, "sesion"): sesion_vigilada,
-        (api.motor, "responder"): lambda config, rol, mensaje, historial, sesion, nota_continuidad=None: (
+        # 'origen' llego a responder() con la idempotencia de las mutaciones
+        # externas y este doble no lo aceptaba: la prueba se saltea sin
+        # Postgres, asi que nadie lo vio hasta correrla contra una base real.
+        (api.motor, "responder"): lambda config, rol, mensaje, historial, sesion, nota_continuidad=None, origen=None: (
             historial.append({"role": "assistant", "content": "Te paso con alguien del equipo."}),
             ("Te paso con alguien del equipo.", [], []))[1],
         (api.escalamiento, "evaluar"): lambda *a, **k: {"escalar": True, "necesita_humano": True,
@@ -390,9 +393,14 @@ try:
         (api.escalamiento, "escalar"): externo("crm", False),          # el CRM falla
         (api.agendamiento, "agendar"): externo("ticket", None),
         (api.agendamiento, "ticket_para_escalar"): lambda *a, **k: None,
-        # Guarda real que pospone una escalada si el asistente no uso ninguna
-        # herramienta todavia: no es lo que se mide aca.
-        (api, "con_las_manos_vacias"): lambda *a, **k: False,
+        # La decision real de posponer una escalada (desde el 25/09/2026 vive
+        # entera en forzado.por_que_posponer y api.py solo la aplica): no es
+        # lo que se mide aca. Sin este parche, un rol que solo deriva
+        # posponia UNA vez con la nota de derivar --que es lo correcto en
+        # produccion-- y esta seccion, que mide el camino de la escalada,
+        # nunca llegaba al CRM. Antes se parcheaba con_las_manos_vacias, que
+        # ya no existe en api.
+        (api, "por_que_posponer"): lambda *a, **k: (None, ""),
         (api.agendamiento, "perfil_del_area"): lambda *a, **k: "",
         (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
         (api.consumo, "estado_del_gasto"): lambda *a, **k: {"accion": "seguir", "gastado": 0, "tope": 0, "porcentaje": 0.0},
@@ -534,7 +542,7 @@ try:
     print("\n== 8. B3.3b: intervenir, y la compuerta lee la base ==")
     modelo8 = []
 
-    def responder8(config, rol, mensaje, historial, sesion, nota_continuidad=None):
+    def responder8(config, rol, mensaje, historial, sesion, nota_continuidad=None, origen=None):
         modelo8.append(mensaje)
         historial.append({"role": "assistant", "content": "respuesta de la IA"})
         return "respuesta de la IA", [], []
@@ -652,7 +660,7 @@ try:
     empezo, liberar = threading.Event(), threading.Event()
     modo = {"frenar": False, "en_el_medio": None}
 
-    def responder9(config, rol, mensaje, historial, sesion, nota_continuidad=None):
+    def responder9(config, rol, mensaje, historial, sesion, nota_continuidad=None, origen=None):
         historial.append({"role": "user", "content": mensaje})
         if modo["frenar"]:
             empezo.set()
@@ -879,7 +887,7 @@ try:
             (api.agendamiento, "agendar"): lambda *a, **k: externos.append("ticket") or "T-1",
             (api.escalamiento, "escalar"): lambda *a, **k: externos.append("crm") or True,
             (api.agendamiento, "perfil_del_area"): lambda *a, **k: "",
-            (api, "con_las_manos_vacias"): lambda *a, **k: False,
+            (api, "por_que_posponer"): lambda *a, **k: (None, ""),   # ver la nota de la seccion 5
             (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
         }
         orig11c = {k: getattr(*k) for k in base11c}
@@ -934,7 +942,7 @@ try:
             (api.agendamiento, "agendar"): agendar12,
             (api.escalamiento, "escalar"): lambda *a, **k: externos12.append("crm") or True,
             (api.agendamiento, "perfil_del_area"): lambda *a, **k: "",
-            (api, "con_las_manos_vacias"): lambda *a, **k: False,
+            (api, "por_que_posponer"): lambda *a, **k: (None, ""),   # ver la nota de la seccion 5
             (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
         }
         orig12 = {k: getattr(*k) for k in base12}

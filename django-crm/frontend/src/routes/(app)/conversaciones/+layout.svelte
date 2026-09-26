@@ -139,7 +139,20 @@
       la pestaña con la que abre la bandeja. */
   let orden = $state('recomendado');
 
-  let pendientes = $derived(conversaciones.filter(pendiente).length);
+  /* LA BASE DE TODA CUENTA. Hasta el 26/09/2026 la lista se filtraba por
+     'canal_operativo' pero la cabecera y las pestañas contaban sobre TODO:
+     la misma pantalla decia "N por atender" arriba y mostraba otra cosa
+     abajo -- el mismo defecto que estado.js documenta del 07/09, esta vez
+     por canal, y con 294 corridas de laboratorio viviendo en produccion.
+     Regla de FASE_0B: si 'canal_operativo' falta, no se esconde nada. */
+  let base = $derived.by(() => {
+    if (vista === 'todos') return conversaciones;
+    const operativo = vista === 'operativo';
+    return conversaciones.filter((/** @type {any} */ c) =>
+      c.canal_operativo === undefined ? true : c.canal_operativo === operativo);
+  });
+
+  let pendientes = $derived(base.filter(pendiente).length);
 
   /* INDICADORES DE LA BARRA DE CONSOLA.
      La referencia pone arriba el estado del sistema: SLA de entrada, espera
@@ -155,7 +168,7 @@
                      está mirando es de hace un momento o de hace un rato --
                      que es lo que un operador necesita saber de una consola. */
   let esperaMaxima = $derived.by(() => {
-    const esperando = conversaciones.filter(pendiente);
+    const esperando = base.filter(pendiente);
     if (esperando.length === 0) return null;
     return Math.max(...esperando.map((/** @type {any} */ c) => horasEsperando(c)));
   });
@@ -174,13 +187,13 @@
      de una persona pero que todavía no tomó nadie: es el número que dice si
      la cola se está quedando sin atender. */
   let llevaIA = $derived(
-    conversaciones.filter((/** @type {any} */ c) => c.control === 'ia' && !resuelta(c)).length
+    base.filter((/** @type {any} */ c) => c.control === 'ia' && !resuelta(c)).length
   );
   let llevaHumano = $derived(
-    conversaciones.filter((/** @type {any} */ c) => c.control === 'humano' && !resuelta(c)).length
+    base.filter((/** @type {any} */ c) => c.control === 'humano' && !resuelta(c)).length
   );
   let sinDueno = $derived(
-    conversaciones.filter(
+    base.filter(
       (/** @type {any} */ c) => c.control === 'humano' && !resuelta(c) && !c.asignada_a_usuario_id
     ).length
   );
@@ -188,7 +201,7 @@
   // El numero que de verdad duele. Va en la cabecera al lado del total
   // porque "44 por atender" no dice nada si 20 llevan mas de una semana.
   let criticas = $derived(
-    conversaciones.filter((/** @type {any} */ c) => tramoEspera(c) === 'critico').length
+    base.filter((/** @type {any} */ c) => tramoEspera(c) === 'critico').length
   );
 
   // --- por donde empezar ----------------------------------------------------
@@ -281,7 +294,7 @@
   // unos chips que cuentan las que estan por atender ofrecen filtros que no
   // devuelven nada.
   let motivos = $derived.by(() => {
-    const enPestana = conversaciones.filter((/** @type {any} */ c) =>
+    const enPestana = base.filter((/** @type {any} */ c) =>
       filtro === 'por-atender' ? pendiente(c)
       : filtro === 'en-atencion' ? enAtencion(c)
       : filtro === 'resueltas' ? resuelta(c)
@@ -319,20 +332,15 @@
   // "Resueltas", que si es trabajo terminado y alguien quiere revisar.
   let pestanas = $derived([
     { id: 'por-atender', label: 'Por atender', n: pendientes, urge: true },
-    { id: 'en-atencion', label: 'En atención', n: conversaciones.filter(enAtencion).length },
-    { id: 'resueltas', label: 'Resueltas', n: conversaciones.filter(resuelta).length },
-    { id: 'todas', label: 'Todas', n: conversaciones.length }
+    { id: 'en-atencion', label: 'En atención', n: base.filter(enAtencion).length },
+    { id: 'resueltas', label: 'Resueltas', n: base.filter(resuelta).length },
+    { id: 'todas', label: 'Todas', n: base.length }
   ]);
 
   let visibles = $derived.by(() => {
-    let lista = conversaciones;
-    if (vista !== 'todos') {
-      const operativo = vista === 'operativo';
-      // 'canal_operativo' puede faltar si el motor todavia no la manda: en ese
-      // caso no se esconde nada (mejor de mas que ocultar un cliente real).
-      lista = lista.filter((/** @type {any} */ c) =>
-        c.canal_operativo === undefined ? true : c.canal_operativo === operativo);
-    }
+    // La vista por canal ya esta aplicada en 'base': la lista y las cuentas
+    // de la cabecera salen del MISMO conjunto, o dicen numeros distintos.
+    let lista = base;
     if (filtro === 'por-atender') lista = lista.filter(pendiente);
     else if (filtro === 'en-atencion') lista = lista.filter(enAtencion);
     else if (filtro === 'resueltas') lista = lista.filter(resuelta);
@@ -449,7 +457,7 @@
       <span class="consola-dato">Ninguna esperando</span>
     {/if}
     <span class="consola-dato consola-total">
-      Total <b class="v2-num">{conversaciones.length}</b>
+      Total <b class="v2-num">{base.length}</b>
     </span>
 
     <!-- El estado del enlace con el motor. No es un "99.99% uptime"

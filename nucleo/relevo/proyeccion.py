@@ -20,8 +20,14 @@ sumo 87 puntos. La pantalla muestra el motivo en palabras.
 
     banda 1  el cliente escribio y espera a una persona
     banda 2  en manos de personas y SIN dueno (la escalada nueva)
-    banda 3  hace falta que una persona revise algo (hoy: la evaluacion que
-             quedo en NO_DETERMINADO, T19)
+    banda 3  hace falta que una persona revise algo: la evaluacion que quedo
+             en NO_DETERMINADO (T19), o --desde el 26/09/2026-- una
+             conversacion que la IA dejo SIN una accion de resolucion
+             registrada ('sin_gestion': nunca salio del rol de entrada, sin
+             escalada ni caso ni ticket, y el cliente no volvio). Es la
+             guarda anti-limbo: medido en produccion el 25/09/2026, 5 de 39
+             conversaciones reales en seis semanas, tres todavia abiertas.
+             Ver SPEC/objetivos/guarda-anti-limbo.md
     banda 4  trabajo interno pendiente (pendiente_interno_desde)
     banda 5  en curso con dueno, sin nada nuevo del cliente
     banda 6  legado sin reconciliar: se revisa en G8, no se mezcla con la cola
@@ -43,7 +49,7 @@ LO QUE NO HACE
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from nucleo.relevo import control as regla_control
 
@@ -55,6 +61,9 @@ HUMANO, IA, INTERNO, NADIE, REVISION = "humano", "ia", "interno", "nadie", "revi
 CLIENTE_ESPERA = (1, "cliente_espera")
 SIN_ASIGNAR = (2, "sin_asignar")
 REVISAR_EVALUACION = (3, "revisar_evaluacion")
+# Comparte el numero 3 --"una persona tiene que revisar algo"-- con nombre
+# propio. No se renumera: pruebas y pantalla mapean por numero y por nombre.
+SIN_GESTION = (3, "sin_gestion")
 INTERNO_PENDIENTE = (4, "interno_pendiente")
 EN_CURSO = (5, "en_curso")
 LEGADO = (6, "legado")
@@ -73,11 +82,63 @@ def _mas_nuevo(a, b) -> bool:
     return b is None or a > b
 
 
-def proyectar(fila) -> dict:
+def _sin_gestion_registrada(fila, rol_de_entrada, horas, ahora) -> bool:
+    """
+    La IA la dejo sin una accion de resolucion registrada, y el cliente no
+    volvio. Es el criterio con el que se midio el limbo en produccion el
+    25/09/2026 (SPEC/objetivos/guarda-anti-limbo.md, D4), sobre columnas que
+    la fila YA trae: no hay contador nuevo ni migracion.
+
+      nunca salio del rol de entrada     rol_efectivo == rol_de_entrada (config)
+      nadie quedo a cargo                sin escalada, sin caso, sin ticket
+      hubo un pedido, no solo un saludo  >= 2 mensajes del cliente
+      lo ultimo visible lo dijo la IA    ultimo_rol == 'assistant', y ese
+                                         mensaje es ESTRICTAMENTE posterior a
+                                         toda marca humana: si el ultimo
+                                         'assistant' es de una persona, su
+                                         creado_en coincide con
+                                         ultima_atencion_humana y no pasa.
+                                         Eso es tambien lo que evita el
+                                         ping-pong: una devuelta por una
+                                         persona reentra solo si la IA volvio
+                                         a contestar despues.
+      y ya paso el umbral del tenant     si no, es una conversacion en curso
+                                         entre un turno y el siguiente.
+
+    FALLA CERRADO: sin rol_de_entrada o sin umbral, la banda no existe.
+    """
+    if rol_de_entrada is None or horas is None:
+        return False
+    if fila.get("rol_efectivo") != rol_de_entrada:
+        return False
+    if fila.get("escalada_a_humano") or fila.get("caso_id") or fila.get("ticket_operativo"):
+        return False
+    if (fila.get("mensajes_cliente") or 0) < 2:
+        return False
+    if fila.get("ultimo_rol") != "assistant":
+        return False
+    ultimo = _hora(fila.get("ultimo_mensaje_en"))
+    if ultimo is None:
+        return False
+    for marca in ("ultima_atencion_humana", "tomada_en", "escalada_en"):
+        if not _mas_nuevo(ultimo, fila.get(marca)):
+            return False
+    limite = (ahora or datetime.now(timezone.utc)) - timedelta(hours=int(horas))
+    return ultimo <= limite
+
+
+def proyectar(fila, *, rol_de_entrada: str | None = None,
+              sin_gestion_horas: int | None = None,
+              ahora: datetime | None = None) -> dict:
     """
     La proyeccion de UNA conversacion. 'fila' es lo que devuelve
     db.ultima_actividad(): columnas durables mas 'ultima_atencion_humana' y
     'evaluacion_revisada'.
+
+    'rol_de_entrada' y 'sin_gestion_horas' vienen de la config del tenant y
+    encienden la banda 'sin_gestion' (guarda anti-limbo). Con cualquiera de
+    los dos en None la banda no existe y esta funcion es, byte a byte, la de
+    antes del 26/09/2026. 'ahora' existe para que una prueba fije el reloj.
 
     Devuelve:
       necesita_accion_de  humano | ia | interno | nadie | revision
@@ -137,6 +198,12 @@ def proyectar(fila) -> dict:
     if revision_pendiente:
         return salida(HUMANO, REVISAR_EVALUACION, "Falta revisar la evaluación",
                       fila.get("escalada_en") or fila.get("actualizado_en"))
+    # Guarda anti-limbo (C): antes de afirmar "la atiende la IA", comprobar
+    # que la IA la este atendiendo. El texto no dice que el cliente abandono
+    # --no se sabe por que no volvio--: dice que no hay accion registrada.
+    if _sin_gestion_registrada(fila, rol_de_entrada, sin_gestion_horas, ahora):
+        return salida(HUMANO, SIN_GESTION, "Sin una acción de resolución registrada",
+                      fila.get("ultimo_mensaje_en"))
     return salida(IA, FUERA_DE_COLA, "La atiende la IA", None)
 
 

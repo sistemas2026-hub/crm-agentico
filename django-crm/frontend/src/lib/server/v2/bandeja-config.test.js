@@ -92,11 +92,33 @@ describe('guardarAjustesBandeja', () => {
     });
   });
 
-  it('manda los DOS valores aunque solo cambie uno', async () => {
-    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: -27 });
+  it('manda los TRES valores aunque solo cambie uno', async () => {
+    await guardarAjustesBandeja(LOCALS, fetchMock, {
+      sla_toma_minutos: 15,
+      umbral_rx_dbm: -27,
+      sin_gestion_horas: 6
+    });
     const cuerpo = cuerpoEnviado();
     expect(cuerpo).toHaveProperty('sla_toma_minutos', 15);
     expect(cuerpo).toHaveProperty('umbral_rx_dbm', -27);
+    expect(cuerpo).toHaveProperty('sin_gestion_horas', 6);
+  });
+
+  // Guarda anti-limbo (26/09/2026). Omitir la clave la borraria del trio;
+  // mandar '' seria un numero invalido para el motor. null es "sin definir".
+  // Una llamada por prueba: cuerpoEnviado() lee la PRIMERA llamada a fetch.
+  it('las horas sin resolución vacías viajan como null: la banda no existe', async () => {
+    await guardarAjustesBandeja(LOCALS, fetchMock, {
+      sla_toma_minutos: 15,
+      umbral_rx_dbm: -27,
+      sin_gestion_horas: ''
+    });
+    expect(cuerpoEnviado()).toHaveProperty('sin_gestion_horas', null);
+  });
+
+  it('y si el llamador ni la manda, tambien viaja como null', async () => {
+    await guardarAjustesBandeja(LOCALS, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: -27 });
+    expect(cuerpoEnviado()).toHaveProperty('sin_gestion_horas', null);
   });
 
   it('el tenant lo pone el servidor, no el llamador', async () => {

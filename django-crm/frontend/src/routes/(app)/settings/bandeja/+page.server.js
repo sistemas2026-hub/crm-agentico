@@ -37,6 +37,7 @@ export const actions = {
     const form = await request.formData();
     const slaCrudo = form.get('sla_toma_minutos')?.toString().trim() ?? '';
     const umbralCrudo = form.get('umbral_rx_dbm')?.toString().trim() ?? '';
+    const sinGestionCrudo = form.get('sin_gestion_horas')?.toString().trim() ?? '';
 
     // Vacio NO es un error: es como se dice "sin definir". Se traduce al valor
     // que el motor entiende como tal (0 para el plazo) en vez de rechazarlo.
@@ -61,8 +62,27 @@ export const actions = {
       }
     }
 
+    // Guarda anti-limbo: vacio = null = la banda "sin resolucion registrada"
+    // no existe. El rango fino lo valida el motor (1..720 h); aca solo se
+    // exige que sea un entero, para que el mensaje del motor llegue tal cual.
+    let sinGestion = null;
+    if (sinGestionCrudo !== '') {
+      sinGestion = Number(sinGestionCrudo);
+      if (!Number.isInteger(sinGestion) || sinGestion < 1) {
+        return fail(400, {
+          update: {
+            error: 'Las horas sin resolución tienen que ser un número entero, 1 o más. Dejalo vacío para no encender la banda.'
+          }
+        });
+      }
+    }
+
     try {
-      await guardarAjustesBandeja(locals, fetch, { sla_toma_minutos: sla, umbral_rx_dbm: umbral });
+      await guardarAjustesBandeja(locals, fetch, {
+        sla_toma_minutos: sla,
+        umbral_rx_dbm: umbral,
+        sin_gestion_horas: sinGestion
+      });
     } catch (/** @type {any} */ err) {
       // El texto viene del validador del motor y nombra el campo y el motivo.
       // Se pasa tal cual: es la diferencia entre "no se pudo guardar" y

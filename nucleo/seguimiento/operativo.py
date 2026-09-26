@@ -292,10 +292,18 @@ def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False, *,
                              "nada: hay que elegir desde cuando cuenta la regla")
         return resumen
 
+    # Guarda anti-limbo (26/09/2026): con la banda 'sin_gestion' de la Bandeja
+    # encendida, lo que nunca salio del rol de entrada con un pedido real no
+    # se cierra solo -- lo cierra una persona con motivo (T17). Con la banda
+    # apagada se barre como siempre: exceptuarlo sin mostrarlo seria dejarlo
+    # abierto para siempre sin que nadie lo vea. Por eso las dos cosas van
+    # atadas al mismo campo de config, y no a dos.
+    entrada = (getattr(config, "rol_de_entrada", None)
+               if getattr(config, "sin_gestion_horas", None) else None)
     lote_config = getattr(ajustes, "backfill_lote", 10)
     try:
         nuevas = persistencia.conversaciones_ia_inactivas(
-            tenant, horas, corte=corte, cohorte="normal")
+            tenant, horas, corte=corte, cohorte="normal", rol_de_entrada=entrada)
         # 'backfill_lote' ES UN TECHO DURO, no un valor por defecto.
         #
         # El '--limit' del comando solo puede BAJARLO. La primera version
@@ -308,11 +316,12 @@ def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False, *,
         # teclea. El techo va del lado que se revisa.
         tope = min(int(lote), lote_config) if lote else lote_config
         candidatas_backlog = persistencia.conversaciones_ia_inactivas(
-            tenant, horas, corte=corte, cohorte="backlog", limite=tope)
+            tenant, horas, corte=corte, cohorte="backlog", limite=tope,
+            rol_de_entrada=entrada)
         # Cuantas hay en total en el backlog, no solo el lote: es el numero
         # que dice cuanto falta, y sin el no se sabe si esto avanza.
         backlog_total = persistencia.conversaciones_ia_inactivas(
-            tenant, horas, corte=corte, cohorte="backlog")
+            tenant, horas, corte=corte, cohorte="backlog", rol_de_entrada=entrada)
     except Exception as e:
         registrar("operativo", "no se pudieron listar las inactivas de la IA",
                   tenant=tenant, error=e)
