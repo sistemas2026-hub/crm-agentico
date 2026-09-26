@@ -8,8 +8,9 @@
 > `sin_gestion_horas` desde `/settings/bandeja` — sin eso, C no existe. Y lo
 > que este objetivo NO resuelve: las **3 conversaciones que la medición del
 > 25/09 encontró abiertas y sin dueño** siguen ahí (el código no toca datos
-> que ya existen), y la posposición que se repite cuando el estado de sesión
-> se pierde entre mensajes (`_sesiones` en RAM, D4) tampoco se arregla acá.
+> que ya existen). Lo de la posposición y el estado en RAM quedó **medido y
+> corregido como afirmación**: no se repite entre turnos — ver la corrección en
+> la sección de auditoría.
 >
 > Entradas: `SPEC/auditorias/2026-09-25-degradacion-por-contexto.md` y
 > `SPEC/objetivos/contexto-por-capacidad-del-turno.md`, que llegó a este
@@ -1040,10 +1041,35 @@ turno 2 antes de B**. Entonces:
 - El subject de `b920c25` —*"Un rol que solo puede derivar ya no espera un turno que no
   llega"*— **afirma más de lo que el código hace**. No se puede reescribir (no amend);
   queda corregido acá, que es donde la próxima sesión lo va a leer.
-- El *"posponía SIEMPRE"* se cumple por un camino distinto del que esta ficha decía: el
-  estado de sesión vive en RAM del proceso (`_sesiones`, D4). Un cliente que escribe una
-  vez al día reentra con el contador en cero y **vuelve a recibir posposición cada vez**.
-  Eso **B tampoco lo cambia**, y hay que decirlo.
+- **Y una corrección de esta misma ficha, del 26/09 más tarde.** Acá se escribió que el
+  *"posponía SIEMPRE"* sobrevivía porque `intento_antes_de_escalar` vive en RAM
+  (`_sesiones`, D4) y que *"un cliente que escribe una vez al día vuelve a recibir
+  posposición cada vez"*. **Eso estaba mal planteado**, y se midió leyendo el código:
+  `_sesiones` **no se vacía entre turnos** —sobrevive mientras el proceso viva y la
+  conversación esté abierta (`api.py:1326`)— y solo se pierde por dos caminos:
+
+  1. **Reinicio del motor.** Concede **un** intento extra y nada más: al turno siguiente la
+     bandera vuelve a estar puesta. Es lo que el propio código declara como costo aceptable,
+     y lo es.
+  2. **Cierre por inactividad** (`api.py:1318`, `_sesiones.pop`). Ahí la conversación
+     siguiente es **otra**, y que tenga su propia vuelta es la conducta correcta —la misma
+     frontera que rige el anti-rebote y la identidad: *se continúa una conversación, no se
+     recuerda a una persona para siempre*.
+
+  Se evaluó **persistirlo** en la columna `datos_sesion` —el JSONB que ya existe para
+  `areas_visitadas`, sin migración— y **se decidió NO hacerlo**, con el argumento medido:
+  el comentario del código justifica la RAM por *"una lectura extra a la base en cada
+  turno"*, y esa premisa es falsa (la lectura ya ocurre: `estado_de_conversacion_abierta`
+  se llama igual y ya trae `datos_sesion`). Pero el beneficio que quedaba también es chico
+  —quitar un mensaje extra ocasional tras un deploy— y el cambio pedía volver la hidratación
+  sensible al tipo, porque hoy hace `list(valor)` sobre todo lo que persiste. **No se toca
+  algo del camino del turno por un beneficio de ese tamaño.**
+
+  Lo que sí queda anotado, porque no lo cubre ninguna de las dos guardas: una conversación
+  con **un solo mensaje del cliente** que se cierra por inactividad no entra a la banda
+  —`mensajes_cliente >= 2` la excluye— y su posposición no se hereda. Es angosto y
+  probablemente correcto (un mensaje, el cliente no volvió, no hay nada que escalar), pero
+  está dicho en vez de supuesto.
 - Lo que B sí cambia **en código**: el gating del agendamiento automático (`api.py`, tras
   el evaluador) y la centralización de la decisión. Lo que cambia **por guía**: la nota,
   que pasa de pedirle algo imposible a pedirle lo único que puede. Por PRD §7.4 —*el
