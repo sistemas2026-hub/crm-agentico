@@ -1,7 +1,15 @@
 # Objetivo · Ninguna conversación viva se queda sin dueño
 
-> Abierto el 25/09/2026. Estado: **fenómeno reproducido en laboratorio; sin
-> dimensionar en uso real, y sin implementar.**
+> Abierto el 25/09/2026. Estado al 26/09/2026: **medido en producción,
+> implementado y auditado tres veces en la rama `integracion/b-c-limbo`
+> (`c509baf`, 16 commits sobre `f90d3ec`) — NO desplegado, y la banda nace
+> apagada.** Lo que falta para que el problema deje de ocurrir, en orden: que
+> la sesión dueña haga el merge (push = deploy), y que Rapilink **encienda**
+> `sin_gestion_horas` desde `/settings/bandeja` — sin eso, C no existe. Y lo
+> que este objetivo NO resuelve: las **3 conversaciones que la medición del
+> 25/09 encontró abiertas y sin dueño** siguen ahí (el código no toca datos
+> que ya existen), y la posposición que se repite cuando el estado de sesión
+> se pierde entre mensajes (`_sesiones` en RAM, D4) tampoco se arregla acá.
 >
 > Entradas: `SPEC/auditorias/2026-09-25-degradacion-por-contexto.md` y
 > `SPEC/objetivos/contexto-por-capacidad-del-turno.md`, que llegó a este
