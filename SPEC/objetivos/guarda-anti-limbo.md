@@ -1302,7 +1302,7 @@ No es una cuarta auditoría: no mira código nuevo, mira la rama **como entregab
    conversaciones"**. Queda dicho acá y en la entrega.
 2. **Ventana motor↔frontend**, que era riesgo introducido por esta rama: el motor nuevo exigía
    la clave `sin_gestion_horas` y el formulario viejo no la manda, así que en esa ventana no
-   se podía guardar **ninguno** de los tres ajustes. **Corregido** (`d8f1e39`): el 400 entra
+   se podía guardar **ninguno** de los tres ajustes. **Corregido** (`1b95550`): el 400 entra
    solo cuando hay un umbral guardado, o sea cuando "ausente" significaría apagar la guarda.
    Sin banda encendida no hay nada que perder y la omisión se acepta.
 3. **L5, el rollback:** con el umbral guardado, volver el motor a una imagen anterior
