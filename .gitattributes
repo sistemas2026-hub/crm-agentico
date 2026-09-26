@@ -4,3 +4,14 @@
 # en Windows, un checkout normal les pega \r\n y el contenedor los rechaza
 # ("$'\r': command not found") -- ya paso una vez con entrypoint.sh.
 *.sh text eol=lf
+
+# Las migraciones del ledger, por la MISMA razon y una mas: su checksum se
+# calcula sobre el archivo. Con core.autocrlf=true en Windows el checkout les
+# pega fin de linea de Windows, el hash del arbol deja de coincidir con el del
+# blob de git, y el ledger puede ver "modificada" una migracion que nadie toco.
+#
+# Medido el 26/09/2026: los 70 .sql de supabase/ estaban con CRLF en el arbol y
+# LF puro en git, y por eso tests/test_comentarios_canonicos.py fallaba en toda
+# copia de Windows -- afirmaba "sin CR: LF puro" sobre el archivo, y tenia
+# razon. La prueba no estaba vieja: el arbol estaba mal.
+*.sql text eol=lf
