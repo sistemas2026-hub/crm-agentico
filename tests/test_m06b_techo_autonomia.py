@@ -470,7 +470,7 @@ def sin_cambios_de_catalogo():
     #  M06-F: 76 y 30 desde que origin sumo siete herramientas (cuatro
     #  lecturas, dos R2 y una R4). Ninguna declara nivel: siguen en el de
     #  siempre.
-    seccion("19. Las 76 herramientas conservan su clasificacion")
+    seccion("19. Las 77 herramientas conservan su clasificacion")
     from tests.test_m10a_gobierno_frontera import (R1_INTERNO, R2_REGISTRO_EXTERNO,
                                                    R3_EQUIPO_FISICO, R4_DINERO)
     todas = CONFIG.herramientas
@@ -494,7 +494,7 @@ def sin_cambios_de_catalogo():
     seccion("20. Las barreras R3/R4 de M06-A no cambiaron")
     irreversibles = sorted(h.nombre for h in todas if h.irreversible)
     afirmar(irreversibles == sorted(g.IRREVERSIBLES),
-            f"las mismas cuatro irreversibles: {irreversibles}")
+            f"las mismas siete irreversibles: {irreversibles}")
     r = subprocess.run([sys.executable, str(RAIZ / "tests" / "test_m06a_gate_critico.py")],
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     ok = r.stdout.count("[ok]")

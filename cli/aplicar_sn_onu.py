@@ -17,15 +17,17 @@ persistir -- nada se pierde silenciosamente.
 
 Uso
 ---
-    py -3.13 cli/aplicar_sn_onu.py --csv candidatos_sn_onu.csv --piloto 10
-        # solo escribe los primeros 10 alta_confianza, para validar el patron
-        # antes de comprometerse con el resto
-
     py -3.13 cli/aplicar_sn_onu.py --csv candidatos_sn_onu.csv
-        # escribe TODOS los alta_confianza
+        # NO escribe: simula y arma el reporte. Es el default desde el
+        # 26/09/2026, porque esto hace PATCH en WispHub de PRODUCCION sin pasar
+        # por el catalogo ni por la frontera -- ver la nota de --aplicar.
 
-    py -3.13 cli/aplicar_sn_onu.py --csv candidatos_sn_onu.csv --dry-run
-        # no escribe nada, solo simula y arma el reporte
+    py -3.13 cli/aplicar_sn_onu.py --csv candidatos_sn_onu.csv --aplicar --piloto 10
+        # escribe los primeros 10 alta_confianza, para validar el patron antes
+        # de comprometerse con el resto
+
+    py -3.13 cli/aplicar_sn_onu.py --csv candidatos_sn_onu.csv --aplicar
+        # escribe TODOS los alta_confianza
 ================================================================================
 """
 
@@ -96,7 +98,19 @@ def main() -> None:
     ap.add_argument("--csv", required=True, help="CSV generado por proponer_sn_onu.py")
     ap.add_argument("--piloto", type=int, default=None,
                     help="Escribir solo los primeros N alta_confianza, para validar antes del resto")
-    ap.add_argument("--dry-run", action="store_true", help="No escribe nada, solo simula")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="(ya es el default; se acepta para no romper comandos viejos)")
+    # ESCRIBIR ES LO EXPLICITO, NO EL DEFAULT. Hasta el 26/09/2026 este comando
+    # hacia PATCH sobre la ficha del cliente en WispHub de produccion --y sobre
+    # 'sn_onu', que es con lo que SmartOLT encuentra despues la ONU-- con solo
+    # pasarle el CSV. No pasa por el catalogo ni por la frontera: no es una
+    # herramienta, es requests.patch directo, asi que no lo ve el interruptor,
+    # ni el techo, ni queda en operaciones_externas, ni lo miran las guardas de
+    # M06 (que solo recorren CONFIG.herramientas). Mientras eso siga asi, lo
+    # minimo es que escribir requiera decirlo. Mismo criterio que
+    # cli/backfill_nombre_cliente.py::--aplicar.
+    ap.add_argument("--aplicar", action="store_true",
+                    help="Escribe de verdad en WispHub. Sin esto solo simula.")
     ap.add_argument("--pendientes-doc", default="pendientes_sn_onu_manual.md",
                     help="Donde guardar el documento de pendientes")
     ap.add_argument("--desde-indice", type=int, default=0,
@@ -128,7 +142,8 @@ def main() -> None:
              f"({len(ya_saltados_por_reanudacion)} ya confirmados antes, no se tocan)")
 
     print("=" * 72)
-    print(f"  {'[DRY-RUN] ' if args.dry_run else ''}Aplicando sn_onu -- "
+    simula = args.dry_run or not args.aplicar
+    print(f"  {'[DRY-RUN] ' if simula else ''}Aplicando sn_onu -- "
          f"{len(alta_a_escribir)} candidatos de alta confianza")
     print("=" * 72)
 
@@ -141,7 +156,7 @@ def main() -> None:
         sn_onu = fila["sn_onu_candidato"]
         nombre = fila["nombre_wisphub"]
 
-        if args.dry_run:
+        if simula:
             print(f"[{i}/{len(alta_a_escribir)}] (simulado) {id_servicio} {nombre} -> {sn_onu}")
             confirmados.append(fila)
             continue

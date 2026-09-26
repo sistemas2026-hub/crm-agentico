@@ -944,9 +944,9 @@ herramientas:
     aprobacion_humana: false
     efecto_externo: "si, CRM propio (POST escribe el nombre del cliente en los casos del servicio que no lo tengan)"
     reversible: "si, solo a mano (evidenciado: escribe SOLO donde el campo esta vacio y no sobrescribe -- importacion_io.py::fijar_nombre_cliente; deshacerlo es editar el caso en el CRM)"
-    riesgo: "escribir en un caso un nombre que el proveedor informo mal"
+    riesgo: "atribuir el nombre del titular ACTUAL a casos de un titular anterior: la llave es el SERVICIO, no el caso, y no hay ventana temporal (importacion_views.py::filter(external_service_id=servicio)). No es sobrescritura --el campo estaba vacio-- y aun asi es un dato personal en el caso de otra persona, visible para el equipo, silencioso y permanente porque la reconciliacion excluye este campo a proposito. El otro riesgo, menor, es que el proveedor informe mal el nombre"
     justificacion: "CRM propio, aditivo y sin sobrescritura, sin efecto visible al cliente (C4a). Ademas no la llama el modelo: la ejecuta el backfill (descripcion del catalogo) y pasa por la frontera con actor"
-    barreras: "no la llama el modelo -- 'NO la llames tu' en el catalogo; requiere_confirmacion=true; roles_permitidos=[administracion]; la ejecuta el backfill de importacion_io con actor, o sea por la puerta humana"
+    barreras: "LAS QUE DE VERDAD LA FRENAN, medido el 26/09/2026: (1) su unico llamador es cli/backfill_nombre_cliente.py y por defecto NO escribe, hace falta --aplicar; (2) el UPDATE del CRM lleva external_client_name='' en el WHERE, asi que la garantia de no sobrescribir vive en la base y no en el motor; (3) roles_permitidos=[administracion] y el modelo no la invoca. LO QUE NO LA FRENA, y por eso 'nivel: 2' es propuesta y no barrera: entra por frontera.humana() --porque el backfill pasa actor-- y ese camino NO consulta el interruptor, NI el techo, NI la autorizacion granular, y NO escribe bitacora de ejecucion autonoma. El nivel de esta fila no es una barrera relajada: en este camino es una barrera ausente"
     evidencia: "POST /importacion/casos/nombre-cliente/, solo_lectura=false (catalogo); importacion_io.py::fijar_nombre_cliente manda DOS datos (id de servicio y nombre) y el CRM decide a que casos les toca y cual ya tenia"
 
   - nombre: asignar_caso_crm
