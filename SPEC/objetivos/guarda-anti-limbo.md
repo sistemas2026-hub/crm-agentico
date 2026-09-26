@@ -1334,6 +1334,61 @@ el camino de una acción con efecto **acotan** (el agendamiento se dispara menos
 cierra menos); y ninguna lista blanca ni campo de texto libre tocado, con
 `test_registro_sin_pii` en verde.
 
+### Los casos dorados completos, 26/09/2026 — corridos, y lo que resultó no medir
+
+Decisión del usuario: correr el set completo antes del merge, porque `--humo` son 10 casos con
+varianza de ±1 y no puede distinguir una regresión chica. Se corrió, y el resultado tiene dos
+partes: un número, y un hallazgo sobre el instrumento que vale más que el número.
+
+**Registro de la corrida.** Commit `f519af4`; set **88 casos**, no 56 (el dato de "56" que
+circulaba en los resúmenes estaba viejo); config desde el YAML (no `--base`: eso exige
+credenciales de producción); base `dexter_local`; credenciales presentes `DEEPSEEK_API_KEY` y
+`WISPHUB_API_KEY`, **ausentes `SMARTOLT_API_KEY` y `BOTTLECRM_API_TOKEN`**, y **el RAG no
+funciona en este entorno** (`recuperacion/embeddings.py:57`, `RuntimeError` en cada caso). El
+informe JSON quedó fuera de git a propósito: sus trazas llevan respuestas crudas de la API de
+WispHub, y §5 dice que eso no se persiste.
+
+**El número, con su control.** No se puede leer solo:
+
+| | Rama `f519af4` | Control `f90d3ec` (lo desplegado) |
+|---|---|---|
+| Casos OK | **70/88 (80%)** | **69/88 (78%)** |
+| Fallan en las dos puntas | 16 | 16 |
+| Fallan solo en esa punta | 2 | 3 |
+
+Las dos corridas son en el **mismo entorno roto**, que es lo que las vuelve comparables. La
+rama queda **un caso mejor** que lo desplegado, y los divergentes van en direcciones
+opuestas (2 contra 3, casos distintos): eso es varianza del modelo, no regresión. De los 18
+fallos de la rama, **4 son credenciales ausentes** (`SMARTOLT_API_KEY` ×3,
+`BOTTLECRM_API_TOKEN` ×1) y buena parte del resto son cadenas que se rompen aguas arriba de
+eso o piden el RAG que acá no responde. **El 80% no es el número del sistema sano**, y no se
+puede usar como tal: es el número de este entorno, útil solo contra su propio control.
+
+**El hallazgo que importa: los casos dorados no pueden ver a B.** Verificado en el código, no
+inferido — `cli/evaluar.py` llama `motor.responder()` y *replica parte* de `atender_turno`
+(lo dice su propio comentario), invoca `escalamiento.evaluar()` solo cuando el caso declara
+una clave de escalada, y tiene **cero** apariciones de `por_que_posponer`,
+`_aplicar_posposicion`, `intento_antes_de_escalar` y `nota_pendiente`:
+
+```
+$ grep -cE "por_que_posponer|_aplicar_posposicion|intento_antes_de_escalar|nota_pendiente" cli/evaluar.py
+0
+```
+
+O sea que **la nota de B nunca llega al modelo por este camino**, y tampoco nada de C (banda,
+proyección, editor, endpoint). La tabla de §6 manda correr `cli/evaluar.py` cuando cambia el
+texto que se le inyecta al modelo, y para *este* cambio ese disparador apunta a un instrumento
+estructuralmente ciego. Corresponde decirlo así y no fabricar una conclusión: **la corrida no
+confirma ni desmiente la conducta de B; lo único que demuestra es que la rama no empeora lo
+que el set sí mide.** El instrumento que sí alcanza este camino es `cli/bateria_flujos.py`
+—que pasa por `atender_turno`— y su medición está más arriba en esta ficha: baseline 37/38 →
+B 40/41, con la nota llevando a derivar en 3 de 5.
+
+Es el mismo hueco de cobertura que esta ficha ya había anotado el 25/09 al abrir B1, ahora
+medido de punta a punta y con su consecuencia práctica: **para un cambio en el camino del
+turno, "corré los casos dorados" no es la verificación correcta.** Queda para el bloque de
+métricas / cobertura, no para esta rama.
+
 ### Deuda declarada, con su motivo — no se arregla en esta rama
 
 | # | Qué | Por qué se deja |
@@ -1388,3 +1443,4 @@ divergente que hay que unificar.
 | 26/09/2026 | **Segunda auditoria, sobre el delta del arreglo.** Los ~340 renglones que corrigieron los tres altos eran codigo sin auditar, y la pasada encontro tres mas: `cli/cargar_config.py` apagaba la banda en silencio (el umbral no estaba en `SECCIONES_EDITABLES`, y ese comando se corre tras cada pull); la regla del umbral valia por una sola puerta (el par 72/24 entraba por el YAML); y la guarda del barrido no alcanzaba si la semilla no declara `rol_de_entrada` --el caso del segundo ISP-- sin emitir ninguna señal. Corregidos: umbral en la lista protegida, `sin_gestion_horas_efectivas()` que acota el umbral por cualquier puerta sin poder volver incargable una config, y el barrido que **no cierra nada** con la config degradada. Mas el marcado del origen movido al lector de YAML, la clave obligatoria en el endpoint, y `forzado`/`motivo` fijados en el sitio de llamada (una mutacion del auditor postergaba una escalada FORZADA y ninguna de nueve pruebas lo veia). Las cinco mutaciones que sobrevivian ahora mueren. Verificado: once guardas rapidas verdes, relevo con base solo los dos rojos previos, vitest 345/345 en las superficies tocadas, y casos dorados 9/10 con la varianza medida contra `4f1ea12` (8/10 en el mismo entorno) | Cuatro deudas nuevas (L9..L12). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
 | 26/09/2026 | **Tercera auditoria, con regla de parada declarada:** se audita lo que AGREGA mecanismo, no lo que solo acota. Encontro que la linea que arreglaba el agujero no tenia guarda --mutar `/conversaciones` al umbral crudo devolvia la ventana de 48 h con la bateria entera en verde-- y que su `hasattr` restituia la conducta vieja en silencio; que el 400 del endpoint vigilaba una puerta por la que nadie entra, porque el helper de JS convertia la ausencia en null (con una prueba mia bendiciendolo); y que el formulario mostraba 72 mientras la banda actuaba a las 24, sin señal. Corregidos los tres: guarda de efecto en §14 contra PostgreSQL --se intento sin base y no se puede, importar `api` exige credenciales--, el helper revienta sin llegar a la red, y el GET/PUT devuelven los dos umbrales con aviso en la pantalla. **La mutacion que sobrevivia ahora pone §14 en rojo (medido).** Verificado: once guardas verdes, vitest 345/345, relevo con §14 en verde y solo los dos rojos previos | Tres deudas nuevas (L13..L15). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
 | 26/09/2026 | **Checklist de salida (`guardia-de-release`), el paso 7 del flujo.** Verde con tres avisos. Medido: el merge es fast-forward (la base no derivo, 0 commits en la direccion contraria, comparado por contenido), cero migraciones, cero variables nuevas, cero solape de archivos con `integrar-centro-mando`, y la puerta de `cargar_config.py` se NIEGA de verdad con el umbral guardado (ejecutada, no leida). **Riesgo propio corregido:** el 400 del endpoint rompia la ventana entre el motor nuevo y el bundle viejo --no se podia guardar ninguno de los tres ajustes--; ahora entra solo cuando hay una banda encendida. La trampa del rollback (L5) quedo escrita en `DESPLIEGUE.md` §7, que es donde se busca. Aviso que hay que dar antes del deploy: los contadores de la cabecera bajan de golpe por el arreglo de L7, y se lee como si desaparecieran conversaciones | **Hueco unico y nombrado: los 56 casos dorados completos**, que §6 exige porque la nota al modelo cambio y `--humo` no distingue una regresion chica. Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
+| 26/09/2026 | **Casos dorados completos corridos (88 casos, no 56), y el hueco que destaparon.** Rama `f519af4` **70/88**; control sobre `f90d3ec` en el MISMO entorno **69/88**: la rama queda un caso mejor, con 2 divergentes de un lado y 3 del otro --varianza del modelo, no regresion--. De los 18 fallos, 4 son credenciales ausentes (`SMARTOLT_API_KEY`, `BOTTLECRM_API_TOKEN`) y el RAG no responde en este entorno, asi que **el 80% no es el numero del sistema sano** y solo vale contra su propio control. **Y lo que importa mas: verificado en codigo que `cli/evaluar.py` NO ejercita la posposicion (cero apariciones de `por_que_posponer`, `_aplicar_posposicion`, `intento_antes_de_escalar`, `nota_pendiente`), asi que los casos dorados no pueden ver a B.** La corrida no confirma ni desmiente su conducta: solo que la rama no empeora lo que el set si mide. El instrumento correcto para este camino es `cli/bateria_flujos.py` (40/41 bajo B, mas arriba en esta ficha) | Para un cambio en el camino del turno, 'corre los casos dorados' NO es la verificacion correcta: va al bloque de cobertura. Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
