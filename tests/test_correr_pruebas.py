@@ -193,6 +193,32 @@ comprobar(_veredicto('No hay datos de conexion') == 'SALTEADA',
 #  El discriminador es ESTRECHO a proposito: 'Traceback' y 'Exception' no
 #  alcanzan, porque una prueba que no pudo correr tambien los imprime. Si
 #  alguien los agrega, esto se pone rojo.
+#  Y EL MOTIVO DICE QUE FALTO, no siempre "Postgres". Antes una guarda que
+#  necesitaba bash --la del entrypoint-- se reportaba como "pide Postgres", que
+#  manda a revisar credenciales de base por un problema que no es ese.
+def _motivo_de(salida: str) -> str:
+    import tempfile
+
+    cuerpo = ("import sys" + chr(10) + "print(" + repr(salida) + ")" + chr(10)
+              + "sys.exit(1)" + chr(10))
+    with tempfile.TemporaryDirectory() as carpeta:
+        archivo = Path(carpeta) / "test_falso_para_medir.py"
+        archivo.write_text(cuerpo, encoding="utf-8")
+        _paso, motivo, _tardo = corredor.correr(archivo, 60)
+    return motivo
+
+
+comprobar("Postgres" in _motivo_de("Conexion incompleta: falta DBNAME"),
+          "si falto la base, el motivo nombra Postgres")
+
+comprobar("Postgres" not in _motivo_de(
+              "NO SE PUDO CORRER: falta una dependencia del entorno (bash)"),
+          "si falto OTRA dependencia, el motivo NO dice Postgres")
+
+comprobar("dependencia del entorno" in _motivo_de(
+              "NO SE PUDO CORRER: falta una dependencia del entorno (bash)"),
+          "y dice que fue una dependencia del entorno")
+
 comprobar(not corredor._VEREDICTO_PROPIO_EN_ROJO.search(
               'Traceback (most recent call last):' + chr(10) + 'Exception: x'),
           'Traceback y Exception NO cuentan como veredicto propio en rojo')

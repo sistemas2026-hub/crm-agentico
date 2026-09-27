@@ -95,7 +95,14 @@ _FALTA_ENTORNO = re.compile(
     # entre ruido de entorno.
     r"Conexion incompleta|"
     r"could not connect to server|"
-    r"connection to server .* failed",
+    r"connection to server .* failed|"
+    #  27/09/2026: una guarda puede necesitar algo que NO es la base -- la del
+    #  entrypoint necesita un bash que funcione, y en Windows puede resolver al
+    #  de WSL y fallar. Cuando una prueba DECLARA su dependencia con esta frase
+    #  exacta, se cuenta como no medida en vez de como rojo. La frase es larga y
+    #  literal a proposito: acortarla la volveria facil de disparar por
+    #  accidente, y entonces esconderia fallos reales -- el error simetrico.
+    r"NO SE PUDO CORRER: falta una dependencia del entorno",
     re.IGNORECASE,
 )
 
@@ -192,9 +199,20 @@ def correr(archivo: Path, segundos: int) -> tuple[bool, str, float]:
     #  propio veredicto en rojo, FALLO -- mencionar una frase de entorno no la
     #  vuelve inmedible. Al reves si vale: sin veredicto propio y con la frase,
     #  no se pudo medir.
-    if _FALTA_ENTORNO.search(salida) and not _VEREDICTO_PROPIO_EN_ROJO.search(salida):
-        # No fallo: no se pudo medir. Se devuelve como salteada.
-        return None, "pide Postgres (lo dijo al correr, no se leia en el codigo)", tardo
+    coincide = _FALTA_ENTORNO.search(salida)
+    if coincide and not _VEREDICTO_PROPIO_EN_ROJO.search(salida):
+        #  No fallo: no se pudo medir. Se devuelve como salteada, y el motivo
+        #  dice QUE falto -- no siempre es la base. Antes decia "pide Postgres"
+        #  para todo, asi que una guarda que necesitaba bash mandaba a revisar
+        #  credenciales de base. Un motivo que describe el problema equivocado
+        #  es la version de "un motivo que describe algo que salio bien": manda
+        #  a buscar donde no esta.
+        if "dependencia del entorno" in coincide.group(0).lower():
+            motivo_entorno = ("pide una dependencia del entorno que no es la "
+                              "base (lo dijo al correr)")
+        else:
+            motivo_entorno = "pide Postgres (lo dijo al correr, no se leia en el codigo)"
+        return None, motivo_entorno, tardo
     return False, motivo, tardo
 
 

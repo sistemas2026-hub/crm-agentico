@@ -181,6 +181,38 @@ print("=" * 78)
 print("  GUARDA  --  entrypoint.sh y la credencial de migraciones")
 print("=" * 78)
 
+#  ESTA GUARDA NECESITA UN bash QUE FUNCIONE, y hay que comprobarlo ANTES de
+#  afirmar nada.
+#
+#  Corre el entrypoint de verdad con 'subprocess.run(["bash", ...])'. En Windows
+#  ese 'bash' puede resolver al de WSL y fallar con
+#  'execvpe(/bin/bash) failed', y entonces las cuatro afirmaciones daban
+#  [FALLA] con codigo=1: cuatro rojos que no dicen nada del codigo, solo del
+#  entorno. Medido el 27/09/2026 -- era uno de los rojos que la base arrastraba
+#  y que nadie habia separado de un fallo real.
+#
+#  La frase de abajo es la que 'cli/correr_pruebas.py' reconoce como
+#  'no se pudo correr'. Saltado no es pasado: el codigo de salida es 1.
+def _bash_sirve() -> bool:
+    if shutil.which("bash") is None:
+        return False
+    try:
+        r = subprocess.run(["bash", "-c", "exit 0"],
+                           capture_output=True, text=True, timeout=30)
+    except Exception:                                          # noqa: BLE001
+        return False
+    return r.returncode == 0
+
+
+if not _bash_sirve():
+    print()
+    print("  NO SE PUDO CORRER: falta una dependencia del entorno (bash).")
+    print("  Esta guarda ejecuta django-crm/docker/backend/entrypoint.sh con")
+    print("  bash. Sin un bash que funcione no mide nada, y afirmar en rojo")
+    print("  seria culpar al codigo de un problema de la maquina.")
+    print("=" * 78)
+    raise SystemExit(1)
+
 # El bucle de espera del entrypoint llama a python con un socket contra DBHOST.
 # Con DBHOST=db y sin ese servicio, fallaria 30 veces y tardaria 30 segundos.
 # Se comprueba primero que el archivo exista, para no confundir un error de
