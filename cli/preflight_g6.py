@@ -220,11 +220,18 @@ def _sembrar(cn, filas: int) -> str:
         from generate_series(1, %s) g""", (str(org), conversaciones))
     cn.execute("""
         insert into asistente.messages
-            (organization_id, conversation_id, rol, contenido, creado_en)
+            (organization_id, conversation_id, rol, contenido, creado_en, origen)
         select c.organization_id, c.id,
                case when g %% 2 = 0 then 'user' else 'assistant' end,
                repeat('texto de prueba ', 1 + (g %% 20)),
-               now() - (g || ' minutes')::interval
+               now() - (g || ' minutes')::interval,
+               -- 'origen' se nombra a proposito. La columna NO tiene 'not null'
+               -- ni default, asi que omitirla deja filas sin procedencia -- que
+               -- es justo lo que esa columna existe para evitar, y lo que
+               -- tests/test_autor_y_reintento.py afirma de TODO insert a
+               -- messages. Estas filas las siembra este script, asi que su
+               -- procedencia es el sistema.
+               'sistema'
         from asistente.conversations c
         cross join generate_series(1, %s) g
         where c.organization_id = %s""", (por_conversacion, str(org)))
@@ -302,8 +309,10 @@ def medir(cn, filas: int, repeticiones: int = 2):
             t_idx = (time.perf_counter() - t0) * 1000
             t1 = time.perf_counter()
             otra.execute("""insert into asistente.messages
-                              (organization_id, conversation_id, rol, contenido)
-                            values (%s, %s, 'user', 'durante el ddl')""",
+                              (organization_id, conversation_id, rol, contenido,
+                               origen)
+                            values (%s, %s, 'user', 'durante el ddl',
+                                    'sistema')""",
                          (org, conv))
             t_ins = (time.perf_counter() - t1) * 1000
             print(f"     create index                   {t_idx:>9.1f} ms")

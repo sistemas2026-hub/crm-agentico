@@ -55,7 +55,28 @@ print("=" * 74)
 
 # ---------------------------------------------------------------------------
 print("\n== 1. inventario: todo INSERT en messages nombra 'origen' ==")
-ESCRITORES = {"registrar_mensaje", "agregar_mensaje_humano", "agregar_nota_interna"}
+#  Los escritores conocidos de asistente.messages. Cada uno tiene que
+#  nombrar 'origen': la columna no tiene 'not null' ni default, asi que
+#  omitirla deja una fila sin procedencia y el check la acepta igual.
+#
+#  'solicitar_devolucion' se agrego el 27/09/2026: es un escritor legitimo
+#  desde T6 y SI nombra origen, pero este conjunto no lo conocia, asi que la
+#  prueba estaba en rojo por estar vieja. Lo destapo el arreglo del corredor,
+#  que hasta ese dia contaba este rojo como "no se pudo correr".
+ESCRITORES = {
+    #  Los tres del motor: el turno, la respuesta humana y la nota interna.
+    "registrar_mensaje", "agregar_mensaje_humano", "agregar_nota_interna",
+    #  El cuarto del motor, desde T6: la devolucion al asistente deja su
+    #  mensaje. Nombra origen.
+    "solicitar_devolucion",
+    #  Y los dos de cli/preflight_g6.py, que siembra filas sinteticas para
+    #  cronometrar el DDL. Solo escriben con --medir, y ese comando se niega
+    #  si la base se llama como la de produccion o si encuentra datos que no
+    #  sembro. Estan en el inventario y no exceptuados a proposito: lo que
+    #  importa de esta prueba es que TODO insert nombre 'origen', y estos dos
+    #  no lo hacian hasta el 27/09/2026.
+    "_sembrar", "medir",
+}
 encontrados: list[tuple[str, str, bool]] = []
 for ruta in sorted(list((RAIZ / "nucleo").rglob("*.py")) + list((RAIZ / "cli").rglob("*.py"))
                    + list((RAIZ / "django-crm" / "backend").rglob("*.py"))):
@@ -74,7 +95,7 @@ for ruta in sorted(list((RAIZ / "nucleo").rglob("*.py")) + list((RAIZ / "cli").r
                 encontrados.append((f"{ruta.relative_to(RAIZ)}::{nodo.name}", sub.value,
                                     "origen" in sub.value))
 comprobar({f.split("::")[1] for f, _s, _o in encontrados} == ESCRITORES,
-          f"los escritores son exactamente los tres conocidos "
+          f"los escritores de messages son exactamente los declarados "
           f"({sorted({f for f, _s, _o in encontrados})})")
 for donde, _sql, tiene in encontrados:
     comprobar(tiene, f"{donde} inserta 'origen'")
