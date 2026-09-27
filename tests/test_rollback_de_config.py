@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
- APAGAR UN CAMPO NUEVO NO BORRA SU CLAVE, Y ESO DECIDE SI EL ROLLBACK SIRVE
+ APAGAR UN CAMPO NUEVO BORRA SU CLAVE, Y ESO DECIDE SI EL ROLLBACK SIRVE
 ================================================================================
 
     py -3.13 tests/test_rollback_de_config.py
@@ -19,9 +19,17 @@ dejaria al tenant SIN ATENDER creyendo que hizo lo correcto:
      ENTERO -- y eso REINTRODUCE la clave con valor None (deuda D7);
   3. y extra='forbid' rechaza una clave por ESTAR PRESENTE, no por su valor.
 
-Esta prueba no afirma que el rollback funcione: afirma **lo que de verdad pasa**,
-para que el dia que alguien arregle D7 --o rompa este comportamiento de otra forma--
-se ponga roja y el documento se actualice con ella.
+ARREGLADO el mismo dia, con 'editor._sin_los_que_se_borraron': el volcado respeta
+el borrado de una clave de primer nivel. Alcance minimo a proposito -- solo saca
+claves que (a) el mutador dejo fuera y (b) el volcado trae en None. NO arregla D7:
+el editor sigue reescribiendo los defaults anidados. Arregla el caso concreto en que
+esa reescritura vuelve destructivo un rollback.
+
+Verificado extrayendo el arbol de f90d3ec y cargando las dos versiones del
+documento contra SU esquema:
+
+    ANTES del arreglo      la RECHAZA   -> rollback destructivo
+    DESPUES del arreglo    LA CARGA     -> rollback seguro
 
 La pregunta correcta nunca fue "la banda esta apagada?" sino "la imagen anterior
 puede cargar lo que quedo en la base?".
@@ -60,7 +68,7 @@ CAMPO = "sin_gestion_horas"
 
 print()
 print("=" * 78)
-print("  APAGAR UN CAMPO NUEVO NO BORRA SU CLAVE")
+print("  APAGAR UN CAMPO NUEVO BORRA SU CLAVE")
 print("=" * 78)
 print()
 
@@ -94,22 +102,100 @@ for _ruta in _rutas:
     comprobar(CAMPO not in _doc,
               f"{_ruta.name}: apagada, el mutador saca {CAMPO} del documento")
 
-    #  3. PERO lo que se PERSISTE es el volcado del modelo, y ahi vuelve en None.
-    #     Esta es la afirmacion que corrige el documento. Si algun dia deja de ser
-    #     cierta, esto se pone rojo y hay que actualizar DESPLIEGUE.md 7.
-    _datos = editor._validar(_ruta.stem.replace(".config", ""),
-                             copy.deepcopy(_doc)).model_dump(mode="json")
-    comprobar(CAMPO in _datos and _datos[CAMPO] is None,
-              f"{_ruta.name}: lo que se PERSISTE trae {CAMPO} en None "
-              f"(presente: {CAMPO in _datos}, valor: {_datos.get(CAMPO)!r})")
+    #  3. Y LO QUE SE PERSISTE TAMPOCO LA TRAE. Es la afirmacion central.
+    #
+    #     Hasta el 27/09/2026 si la traia: 'model_dump()' emite todos los campos
+    #     del modelo, asi que la clave volvia con valor None y una imagen anterior
+    #     que no la declarara no podia cargar la config -- el tenant dejaba de
+    #     atender justo durante un rollback. Lo arregla
+    #     'editor._sin_los_que_se_borraron'.
+    _tenant = _ruta.stem.replace(".config", "")
+    _datos = editor._sin_los_que_se_borraron(
+        editor._validar(_tenant, copy.deepcopy(_doc)).model_dump(mode="json"),
+        _doc)
+    comprobar(CAMPO not in _datos,
+              f"{_ruta.name}: lo que se PERSISTE tampoco trae {CAMPO} "
+              f"(valor: {_datos.get(CAMPO, '(ausente)')!r})")
 
-    if CAMPO in _datos:
-        avisos.append(
-            f"{_ruta.name}: apagar la banda deja '{CAMPO}' persistido en None, "
-            f"asi que una imagen que no declare ese campo NO puede cargar esta "
-            f"config. El rollback exige borrar la clave. Ver DESPLIEGUE.md 7.")
+    #  4. Y sigue siendo una config valida: sacar la clave no rompe nada, porque
+    #     el modelo da None por defecto.
+    try:
+        editor._validar(_tenant, copy.deepcopy(_datos))
+        comprobar(True, f"{_ruta.name}: y el documento sin la clave sigue siendo "
+                        f"una config valida")
+    except Exception as e:                                         # noqa: BLE001
+        comprobar(False, f"{_ruta.name}: el documento sin la clave ya no valida: "
+                         f"{type(e).__name__}")
 
-#  4. Y la propiedad general que lo explica: 'extra=forbid' rechaza por PRESENCIA.
+    #  5. LA PROPIEDAD QUE DECIDE EL ROLLBACK: no queda en el documento ninguna
+    #     clave que una imagen anterior rechazaria. 'extra=forbid' rechaza por
+    #     PRESENCIA, asi que basta con que la clave no este.
+    _sobran = [k for k in _datos if k == CAMPO]
+    comprobar(not _sobran,
+              f"{_ruta.name}: no queda ninguna clave que un esquema anterior "
+              f"rechazaria por 'extra_forbidden' (sobran: {_sobran})")
+
+    avisos.append(
+        f"{_ruta.name}: apagar la banda BORRA la clave, asi que una imagen que "
+        f"no declare ese campo puede cargar la config. El rollback es seguro sin "
+        f"tocar SQL. Verificado contra el esquema de f90d3ec el 27/09/2026.")
+
+#  EL ENGANCHE, que es lo que faltaba. Las afirmaciones de arriba llaman al
+#  ayudante directamente, asi que seguian VERDES con el arreglo desconectado de
+#  '_editar' -- medido, y es el mismo error que esta suite documenta: afirmar
+#  sobre la pieza y no sobre el camino.
+#
+#  '_editar' exige base, asi que el enganche se mide sobre el arbol sintactico:
+#  la llamada tiene que estar DENTRO de '_editar', DESPUES del volcado, y en una
+#  rama alcanzable.
+import ast                                                          # noqa: E402
+
+_FUENTE_EDITOR = (RAIZ / "nucleo" / "config" / "editor.py").read_text(encoding="utf-8")
+_ARBOL_EDITOR = ast.parse(_FUENTE_EDITOR)
+
+_editar_nodo = next((n for n in ast.walk(_ARBOL_EDITOR)
+                     if isinstance(n, ast.FunctionDef) and n.name == "_editar"), None)
+comprobar(_editar_nodo is not None, "se encontro _editar en el arbol del editor")
+
+if _editar_nodo is not None:
+    def _alcanzables(cuerpo):
+        """Sin entrar en ramas estaticamente muertas."""
+        for s in cuerpo:
+            if isinstance(s, ast.If):
+                constante = (s.test.value if isinstance(s.test, ast.Constant)
+                             else None)
+                if constante is None or bool(constante):
+                    yield from _alcanzables(s.body)
+                if not (isinstance(s.test, ast.Constant) and bool(s.test.value)):
+                    yield from _alcanzables(s.orelse)
+                continue
+            if isinstance(s, (ast.For, ast.While, ast.With, ast.Try)):
+                yield from _alcanzables(getattr(s, "body", []))
+                for rama in ("orelse", "finalbody"):
+                    yield from _alcanzables(getattr(s, rama, []))
+                for h in getattr(s, "handlers", []):
+                    yield from _alcanzables(h.body)
+                continue
+            yield s
+
+    _sentencias = list(_alcanzables(_editar_nodo.body))
+    _linea_volcado = [c.lineno for s in _sentencias for c in ast.walk(s)
+                      if isinstance(c, ast.Call)
+                      and isinstance(c.func, ast.Attribute)
+                      and c.func.attr == "model_dump"]
+    _linea_arreglo = [c.lineno for s in _sentencias for c in ast.walk(s)
+                      if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+                      and c.func.id == "_sin_los_que_se_borraron"]
+
+    comprobar(len(_linea_arreglo) == 1,
+              f"_editar llama a _sin_los_que_se_borraron, y es alcanzable "
+              f"(encontradas: {_linea_arreglo})")
+    comprobar(bool(_linea_volcado) and bool(_linea_arreglo)
+              and min(_linea_arreglo) > min(_linea_volcado),
+              f"y lo llama DESPUES del volcado, que es donde la clave vuelve "
+              f"(volcado en {_linea_volcado}, arreglo en {_linea_arreglo})")
+
+#  6. Y la propiedad general que lo explica: 'extra=forbid' rechaza por PRESENCIA.
 #     Se mide con un campo inventado, para no depender de que exista una version
 #     anterior del esquema en el arbol.
 from nucleo.config.schema import TenantConfig                       # noqa: E402
@@ -136,15 +222,16 @@ if fallos:
     for f in fallos:
         print(f"  - {f}")
     print()
-    print("  Si fallo la afirmacion 3, el comportamiento CAMBIO: puede que")
-    print("  alguien haya arreglado D7. Es una buena noticia, pero hay que")
-    print("  actualizar DESPLIEGUE.md 7, que hoy dice que el rollback exige")
-    print("  borrar la clave por SQL.")
+    print("  Si fallo la afirmacion 3, el volcado VOLVIO a reintroducir la clave")
+    print("  que el mutador borro, y con eso un rollback de imagen vuelve a")
+    print("  dejar al tenant sin atender. Ver editor._sin_los_que_se_borraron")
+    print("  y DESPLIEGUE.md 7.")
     print("=" * 78)
     print()
     sys.exit(1)
 print()
-print("[OK] Medido: apagar el campo NO habilita el rollback de imagen.")
+print("[OK] Medido: apagar el campo BORRA su clave, asi que el rollback de")
+print("     imagen no queda destructivo.")
 if avisos:
     print()
     print("  LO QUE ESTO SIGNIFICA PARA UN INCIDENTE:")

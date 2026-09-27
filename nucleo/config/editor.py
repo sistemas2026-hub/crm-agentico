@@ -460,6 +460,38 @@ def anotar_version(cur, org, version: int, datos: dict) -> None:
                 (org, version, json.dumps(datos)))
 
 
+def _sin_los_que_se_borraron(datos: dict, doc: dict) -> dict:
+    """
+    Respeta el BORRADO de una clave de primer nivel, que el volcado deshacia.
+
+    'model_dump()' emite TODOS los campos del modelo, asi que una clave que el
+    mutador quito a proposito --`doc.pop("sin_gestion_horas", None)`, que es como
+    la interfaz apaga la banda-- volvia a aparecer con valor None. Apagarla
+    dejaba la clave puesta.
+
+    POR QUE IMPORTA, y no es cosmetico: 'extra="forbid"' rechaza una clave por
+    ESTAR PRESENTE, no por su valor. Con la clave puesta, una imagen anterior que
+    no la declare NO PUEDE CARGAR la config y el tenant deja de atender. Medido
+    el 27/09/2026 contra el esquema de f90d3ec: 'extra_forbidden', input None.
+    Y el procedimiento de rollback de DESPLIEGUE.md 7 decia que apagar el campo
+    desde la interfaz alcanzaba, asi que quien lo siguiera durante un incidente
+    rompia el tenant creyendo que hacia lo correcto.
+
+    ALCANCE, a proposito minimo: solo saca claves de PRIMER NIVEL que (a) el
+    mutador dejo fuera del documento y (b) el volcado trae en None. No toca nada
+    mas, asi que NO es un arreglo de D7 --el editor sigue reescribiendo los
+    defaults anidados-- sino el caso concreto en que esa reescritura vuelve
+    destructivo un rollback.
+
+    Se puede leer al reves y tambien es cierto: el modelo da None por defecto, y
+    nadie consulta estas claves dentro del JSONB por SQL (medido), asi que sacar
+    la clave y dejarla en None se leen igual desde el codigo. Lo que cambia es
+    que una version anterior puede cargar el documento.
+    """
+    return {k: v for k, v in datos.items()
+            if not (v is None and k not in doc)}
+
+
 def _editar(tenant: str, mutar: Callable[[dict], None]) -> TenantConfig:
     """
     Lee la configuracion vigente, le aplica 'mutar', valida el resultado y lo
@@ -525,6 +557,7 @@ def _editar(tenant: str, mutar: Callable[[dict], None]) -> TenantConfig:
         mutar(doc)
         config = _validar(tenant, doc)
         datos = config.model_dump(mode="json")
+        datos = _sin_los_que_se_borraron(datos, doc)
 
         # Igual que cli/cargar_config.py: si el contenido no cambio, no se sube
         # la version. Asi 'config_version' cuenta cambios reales y no clics en

@@ -608,27 +608,39 @@ Dos reglas de orden que salen de eso:
 > # en el árbol viejo: TenantConfig(**ese volcado)  ->  extra_forbidden
 > ```
 >
-> **Qué hacer HOY, si hay que revertir con la banda encendida.** La pregunta correcta
-> no es *«¿la banda está apagada?»* sino **«¿la imagen anterior puede cargar lo que
-> quedó en la base?»**. Y hoy la respuesta es no mientras la clave exista, con
-> cualquier valor. Así que el rollback exige **borrar la clave**, y desde la pantalla
-> no se puede: es `jsonb - 'sin_gestion_horas'` sobre `asistente.tenant_config`, con
-> el `config_version` subido en la misma transacción. Eso es SQL directo sobre la
-> config, que esta misma sección dice que hay que evitar — y es la razón por la que
-> esto está escrito acá y no como una nota al pie.
+> ### ARREGLADO el mismo día, y por eso el procedimiento vuelve a ser simple
 >
-> **Lo que NO está decidido, y no lo decide una sesión de código.** Hay dos arreglos
-> posibles y son decisiones distintas:
+> `editor._sin_los_que_se_borraron` hace que el volcado **respete el borrado** de una
+> clave de primer nivel. Alcance mínimo a propósito: solo saca claves que (a) el
+> mutador dejó fuera del documento y (b) el volcado trae en `None`. **No arregla D7**
+> —el editor sigue reescribiendo los defaults anidados— sino el caso concreto en que
+> esa reescritura vuelve destructivo un rollback.
 >
-> | Arreglo | Qué implica |
-> |---|---|
-> | que el volcado omita los campos en `None` que no estaban en el documento | toca `editor._editar`, o sea **toda** edición de config, no solo esta banda. Es atacar D7, que ya produjo 68 hojas distintas en una mutación de una clave |
-> | dejar el código como está y documentar que el rollback exige el `DELETE` de la clave por SQL | no toca nada, pero deja un procedimiento de incidente que pasa por fuera del editor y del ledger |
+> Verificado extrayendo el árbol de `f90d3ec` y cargando las dos versiones del
+> documento contra **su** esquema:
 >
-> **Mientras eso no se decida, la regla de orden que SÍ vale es la de arriba:** no
-> encender el campo hasta que la imagen lleve un rato sana, porque **mientras nadie
-> lo encienda el rollback es libre.** Esa es la única parte del procedimiento que
-> estaba bien.
+> ```
+> ANTES del arreglo      la RECHAZA   -> rollback destructivo
+> DESPUES del arreglo    LA CARGA     -> rollback seguro
+> ```
+>
+> Por qué sacar la clave no rompe nada: el modelo da `None` por defecto, y **nadie
+> consulta estas claves dentro del JSONB por SQL** (medido). Así que desde el código
+> «clave ausente» y «clave en null» se leen igual. Lo único que cambia es que una
+> versión anterior puede cargar el documento.
+>
+> **Guarda:** `tests/test_rollback_de_config.py`, 10 afirmaciones, sin base y sin red.
+> Afirma el efecto y además **el enganche por AST** —que `_editar` llame al ayudante,
+> después del volcado y en una rama alcanzable—, porque la primera versión probaba el
+> ayudante suelto y seguía verde con el arreglo desconectado. Tres mutaciones la matan.
+>
+> **Entonces el procedimiento al revertir es el que decía esta sección**, y ahora es
+> verdad: apagar el campo desde la interfaz con la imagen nueva todavía arriba,
+> comprobar que se apagó, y recién entonces volver la imagen.
+>
+> **La regla de orden de arriba sigue siendo la más barata:** no encender el campo
+> hasta que la imagen lleve un rato sana, porque mientras nadie lo encienda el
+> rollback es libre y no hace falta nada de esto.
 
 La exportación conserva los comentarios del YAML — son notas de verificación en vivo, no adorno — y es idempotente: exportar dos veces seguidas no cambia el archivo, así que lo que salga en el diff es cambio real.
 
