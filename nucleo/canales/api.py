@@ -1189,6 +1189,36 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 "sin_turno": True}
 
 
+def _persistir_posposicion(tenant, conversacion_id, estado) -> None:
+    """
+    Escribe la vuelta extra EN EL TURNO EN QUE SE DECIDE.
+
+    POR QUE EXISTE, y no alcanzaba el bloque de persistencia de mas arriba:
+    ese bloque corre ANTES de esta decision dentro del mismo turno (medido el
+    27/09/2026 por la cuarta auditoria: el guardado esta cerca de la linea
+    2039 y la decision cerca de la 2312, las dos en _atender_turno). O sea que
+    el flag puesto en este turno recien se escribia en el turno SIGUIENTE, que
+    es justo el turno en que se consume -- y un despliegue entre los dos
+    seguia regalandole una vuelta extra a cada conversacion en curso, que es
+    exactamente el defecto que este mecanismo vino a cerrar.
+
+    Solo escribe cuando hubo posposicion, asi que el turno normal no paga
+    ninguna escritura extra -- el mismo criterio del otro bloque.
+
+    NUNCA rompe el turno: un fallo de persistencia no puede dejar sin
+    respuesta a quien esta esperando.
+    """
+    sesion = estado.get('sesion')
+    if sesion is None or not conversacion_id:
+        return
+    try:
+        routing = verificacion.routing_a_persistir(sesion)
+        if routing:
+            persistencia.guardar_estado_routing(tenant, conversacion_id, routing)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("persistencia", "no se pudo guardar la posposicion", error=e)
+
+
 def _aplicar_posposicion(config, rol_cfg, estado, *, forzado: bool,
                          motivo: str | None) -> bool:
     """
@@ -2312,6 +2342,10 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
             if _aplicar_posposicion(config, rol_cfg, estado, forzado=forzado,
                                     motivo=evaluacion.get("motivo")):
                 posponer = True
+                # Se persiste ACA, en el turno que decide. Ver el
+                # docstring de _persistir_posposicion: el bloque de
+                # persistencia de arriba ya paso cuando llegamos aca.
+                _persistir_posposicion(tenant, conversation_id, estado)
 
             # --- verificacion automatica de agendamiento --------------------
             # Solo corre si el tenant declaro ESTE caso puntual en

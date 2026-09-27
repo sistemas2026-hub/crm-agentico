@@ -124,6 +124,79 @@ comprobar(corredor._primer_motivo_legible([]) == "",
 comprobar("colgo" in corredor._primer_motivo_legible(["se colgo: mas de 180s"]),
           "un cuelgue se reporta como lo que es")
 
+# ==========================================================================
+#  UN FALLO PROPIO LE GANA A LA FRASE DE ENTORNO  (hallado el 27/09/2026)
+# ==========================================================================
+#  La cuarta pasada del auditor midio esto rompiendo una afirmacion de ESTA
+#  prueba: salia con 1, y el corredor la contaba como "no se pudo correr" y
+#  salia con 0. La causa: '_FALTA_ENTORNO' se busca sobre la salida ENTERA, y
+#  los ejemplos de esta prueba imprimen esas frases a proposito.
+#
+#  O sea que la guarda del instrumento que dice si el repo esta en verde era la
+#  unica que el instrumento no podia reportar en rojo, y el workflow de CI
+#  quedaba verde con ella caida.
+#
+#  Se afirma por EFECTO --como clasifica una salida concreta-- y no por la
+#  presencia del patron.
+
+def _veredicto(salida: str) -> str:
+    """
+    Corre 'corredor.correr' DE VERDAD sobre un archivo temporal que imprime
+    'salida' y sale con 1.
+
+    La primera version de este ayudante REIMPLEMENTABA la regla, y por eso
+    sobrevivio a la mutacion que volvia el orden atras: afirmaba sobre una
+    copia del mecanismo y no sobre el mecanismo. El metodo de CLAUDE.md 6 lo
+    dice con esas palabras -- el instrumento tiene que recorrer el camino que
+    mide.
+    """
+    import tempfile
+
+    cuerpo = (
+        'import sys' + chr(10) +
+        'print(' + repr(salida) + ')' + chr(10) +
+        'sys.exit(1)' + chr(10)
+    )
+    with tempfile.TemporaryDirectory() as carpeta:
+        archivo = Path(carpeta) / 'test_falso_para_medir.py'
+        archivo.write_text(cuerpo, encoding='utf-8')
+        paso, _motivo, _tardo = corredor.correr(archivo, 60)
+    if paso is None:
+        return 'SALTEADA'
+    return 'FALLO' if paso is False else 'PASO'
+
+
+#  Lo que la version anterior clasificaba mal: corrio, fallo, y MENCIONA la
+#  frase de entorno porque su ejemplo la imprime.
+comprobar(_veredicto('  [FALLA] algo real' + chr(10) +
+                     '   imprime: Conexion incompleta: falta DBNAME' + chr(10) +
+                     'FALLAS (1)') == 'FALLO',
+          'un fallo propio NO se degrada a salteado por mencionar el entorno')
+
+comprobar(_veredicto('  ROJO  algo que alguien tiene que ver' + chr(10) +
+                     'could not connect to server') == 'FALLO',
+          'y tampoco si el veredicto propio dice ROJO')
+
+comprobar(_veredicto('[FALLA] 2 comprobacion(es) no pasaron.' + chr(10) +
+                     'Definir DBHOST') == 'FALLO',
+          'ni cuando el rojo viene con el conteo')
+
+#  Y lo que SI tiene que seguir siendo salteado: sin veredicto propio.
+comprobar(_veredicto('Traceback (most recent call last):' + chr(10) +
+                     'RuntimeError: Conexion incompleta: falta DBNAME')
+          == 'SALTEADA',
+          'una prueba que NO pudo correr sigue contando como no medida')
+
+comprobar(_veredicto('No hay datos de conexion') == 'SALTEADA',
+          'y el caso sin traceback tambien')
+
+#  El discriminador es ESTRECHO a proposito: 'Traceback' y 'Exception' no
+#  alcanzan, porque una prueba que no pudo correr tambien los imprime. Si
+#  alguien los agrega, esto se pone rojo.
+comprobar(not corredor._VEREDICTO_PROPIO_EN_ROJO.search(
+              'Traceback (most recent call last):' + chr(10) + 'Exception: x'),
+          'Traceback y Exception NO cuentan como veredicto propio en rojo')
+
 print("\n" + "=" * 74)
 if fallos:
     print(f"[FALLA] {len(fallos)} caso(s):")

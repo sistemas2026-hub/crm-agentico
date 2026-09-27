@@ -103,6 +103,27 @@ _FALTA_ENTORNO = re.compile(
 #: Lo que una prueba de este repo imprime cuando algo NO paso. Se busca esto
 #: antes que cualquier otra linea: es la diferencia entre un motivo que explica
 #: y uno que describe lo ultimo que salio bien.
+#  EL VEREDICTO QUE LA PRUEBA DA DE SI MISMA, y solo eso.
+#
+#  Existe porque '_FALTA_ENTORNO' se aplica sobre la salida ENTERA, asi que
+#  cualquier prueba que MENCIONE una frase de entorno --por ejemplo porque su
+#  fixture la imprime a proposito-- quedaba degradada a "no se pudo correr"
+#  aunque hubiera corrido y fallado. Medido el 27/09/2026: rompiendo una
+#  afirmacion de 'tests/test_correr_pruebas.py' la prueba sale con 1 y este
+#  corredor la contaba como salteada y salia con 0. O sea que la guarda del
+#  instrumento que dice si el repo esta en verde era justo la unica que el
+#  instrumento no podia reportar en rojo, y el workflow de CI quedaba verde.
+#
+#  DELIBERADAMENTE ESTRECHO: no incluye 'Traceback' ni 'Exception', porque una
+#  prueba que NO PUDO correr por falta de base tambien los imprime. Lo que
+#  distingue las dos cosas no es que haya habido un error: es que la prueba
+#  haya alcanzado a emitir SU PROPIO veredicto en rojo.
+_VEREDICTO_PROPIO_EN_ROJO = re.compile(
+    r"\[FALLA\]|\[falla\]|^\s*FALLAS?\s*\(|^\s*FALLA\b|"
+    r"no pasaron|\bROJO\b",
+    re.MULTILINE,
+)
+
 _MARCA_DE_FALLO = re.compile(
     r"\[FALLA\]|\[falla\]|^FALLA|AssertionError|Error:|"
     r"Exception|Traceback \(most recent|se colgo|no pasaron",
@@ -167,7 +188,11 @@ def correr(archivo: Path, segundos: int) -> tuple[bool, str, float]:
     salida = (r.stdout or "") + (r.stderr or "")
     lineas = [l for l in salida.strip().splitlines() if l.strip()]
     motivo = _primer_motivo_legible(lineas) or f"codigo {r.returncode}"
-    if _FALTA_ENTORNO.search(salida):
+    #  El orden importa y antes estaba al reves: si la prueba alcanzo a dar su
+    #  propio veredicto en rojo, FALLO -- mencionar una frase de entorno no la
+    #  vuelve inmedible. Al reves si vale: sin veredicto propio y con la frase,
+    #  no se pudo medir.
+    if _FALTA_ENTORNO.search(salida) and not _VEREDICTO_PROPIO_EN_ROJO.search(salida):
         # No fallo: no se pudo medir. Se devuelve como salteada.
         return None, "pide Postgres (lo dijo al correr, no se leia en el codigo)", tardo
     return False, motivo, tardo
