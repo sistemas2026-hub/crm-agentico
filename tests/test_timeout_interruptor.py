@@ -148,8 +148,22 @@ afirmar(funciones_con_gate == {"estado_autonomia",
                                # M06-B: la constancia de un intento RECHAZADO
                                # de mover el techo. Mismo criterio que la
                                # bitacora: corre en el tramo del rechazo.
-                               "registrar_intento_techo"},
-        f"solo las funciones del gate lo usan ({sorted(funciones_con_gate)})")
+                               "registrar_intento_techo",
+                               # 27/09/2026: la consulta que AVERIGUA el tenant.
+                               # No es parte de la decision de autonomia, pero
+                               # pertenece a la misma familia por el mismo
+                               # motivo, y su docstring lo dice: la atiende el
+                               # frontend en CADA peticion, y una que se cuelga
+                               # deja la pantalla esperando. Tampoco puede usar
+                               # sesion(), porque esa exige un tenant fijado y
+                               # esta es justo la que lo busca.
+                               #
+                               # Estaba sin declarar y por eso esta prueba venia
+                               # en rojo. La deriva era legitima; lo que faltaba
+                               # era escribirla.
+                               "tenant_de_organizacion"},
+        f"solo la familia del tope corto lo usa: decisiones y lecturas con "
+        f"alguien esperando del otro lado ({sorted(funciones_con_gate)})")
 
 # EL TOPE DE SENTENCIA SE PONE CON set_config(), NUNCA CON UN 'SET' CON %s.
 #
