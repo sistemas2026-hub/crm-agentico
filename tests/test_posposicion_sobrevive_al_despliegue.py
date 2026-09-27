@@ -314,6 +314,40 @@ try:
                   f"y la segunda lleva las dos cosas "
                   f"(escribio {_escrituras[1][2]})")
 
+    #  LA PROPIEDAD DE SEGURIDAD DEL DEDUPLICADO: si la escritura FALLA, el
+    #  marcador no queda puesto, asi que el proximo intento vuelve a escribir.
+    #  Sin esto, un fallo de base dejaria la vuelta extra sin persistir para
+    #  siempre y el deduplicado seria peor que las dos escrituras que evita.
+    _escrituras.clear()
+    _sesion_falla = SesionFalsa()
+    _sesion_falla.intento_antes_de_escalar = True
+    _estado_falla = {"sesion": _sesion_falla}
+
+    def _falla_una_vez(*_a, **_k):
+        raise RuntimeError("la base se cayo justo ahora")
+
+    api.persistencia.guardar_estado_routing = _falla_una_vez
+    api._persistir_routing("rapilink", "conv-falla", _estado_falla)
+    comprobar("_routing_persistido" not in _estado_falla,
+              f"si la escritura FALLA, el marcador no queda puesto "
+              f"(estado: {sorted(_estado_falla)})")
+
+    #  Y al reintentar con la base sana, SI escribe.
+    api.persistencia.guardar_estado_routing = (
+        lambda tenant, cid, datos: _escrituras.append((tenant, cid, dict(datos))))
+    api._persistir_routing("rapilink", "conv-falla", _estado_falla)
+    comprobar(len(_escrituras) == 1,
+              f"y el reintento con la base sana SI escribe "
+              f"(escribio {len(_escrituras)})")
+
+    #  El marcador es interno y NUNCA sale del proceso: no aparece en el cuerpo
+    #  que se escribe. Si algun dia se serializara 'estado' entero a
+    #  'datos_sesion', esto se pone rojo.
+    if _escrituras:
+        comprobar("_routing_persistido" not in _escrituras[0][2],
+                  f"el marcador interno NO viaja a la base "
+                  f"(escrito: {_escrituras[0][2]})")
+
     #  El turno que NO pospone no paga una escritura extra: es la propiedad que
     #  el bloque de persistencia de arriba cuidaba y que no hay que perder.
     _escrituras.clear()
