@@ -1518,6 +1518,126 @@ el editor lo conoce); la definición es de inclusión y vive en el motor:
 divergente que hay que unificar.
 
 
+
+## Cuarta pasada: auditoría del delta `8659479..0664344`, 27/09/2026
+
+**Por qué existe.** Las tres pasadas anteriores cubrieron `4f1ea12`, el delta
+`4f1ea12..b3ce928` y el delta `b3ce928..8659479`. Después de la tercera entraron
+**17 commits más** y nadie los miró. Decir "auditada tres veces" invitaba a leer que
+cubría el tip, y no lo cubría. La regla de parada declarada —*se re-audita lo que
+AGREGA mecanismo*— obligaba a esta pasada: siete de esos 17 agregan mecanismo,
+incluido el que le puso la compuerta `--aplicar` al CLI que escribía en WispHub de
+producción.
+
+Veredicto del auditor: **aprueba con reservas.** Ningún commit regresiona nada, pero
+**dos no producían el efecto que afirmaban** — y las dos afirmaciones ya estaban
+escritas acá como hechas. Lo que había que frenar era la afirmación, no el
+despliegue.
+
+### A1 · La posposición se persistía un turno tarde
+
+El commit decía que la vuelta extra *"sobrevive a un reinicio del motor"*. Medido
+sobre el AST de `api.py`, las dos mitades están en `_atender_turno` en este orden:
+
+```
+~2039   se guardaba el estado de routing        <-- ANTES
+~2342   se decide posponer y se pone el flag    <-- DESPUES
+```
+
+Así que el flag puesto en el turno N recién se escribía en el turno N+1, **que es
+justo el turno en que se consume**. Un despliegue entre los dos seguía regalándole
+una vuelta extra a cada conversación en curso: el defecto que el commit decía
+cerrar seguía abierto.
+
+Y ninguna prueba lo veía. El auditor borró **las dos mitades del enganche** y trece
+pruebas quedaron en verde: las que existían invocaban `routing_a_persistir` y
+`rehidratar_routing` **en aislamiento**, nunca el enganche.
+
+**Corregido** con `api._persistir_posposicion`, que escribe en el turno que decide.
+Solo cuando hubo posposición, así que el turno normal no paga una escritura extra, y
+nunca rompe el turno.
+
+**Guarda nueva:** `tests/test_posposicion_sobrevive_al_despliegue.py`, 16
+afirmaciones, sin base y sin red. Tres piezas y las tres por efecto: el **orden** del
+enganche medido sobre el AST —que es exactamente lo que estaba mal—, que la decisión
+deja el flag donde se persiste, y que el escritor escribe una sola vez con el dato
+adentro.
+
+No se prueba a nivel de turno **a propósito**, y el docstring dice por qué:
+`_atender_turno` toca la base por media docena de caminos antes de llegar a la
+decisión, y sustituirlos de a uno da una prueba frágil que mide el arnés más que el
+código. Además la capa de conexión lanza `SystemExit` (deuda **D11**), que un
+`except Exception` no atrapa, así que ese arnés moría sin reportar nada.
+
+| Mutación | ¿Se pone roja? |
+|---|---|
+| borrar la llamada al escritor | **sí** |
+| no escribir el flag en la sesión | **sí** |
+| que el escritor no escriba | **sí** |
+| sacar la guarda de sesión vacía | **sí** |
+
+### A2 · El corredor reportaba su propia guarda en rojo como "no se pudo correr"
+
+`_FALTA_ENTORNO` se buscaba sobre la salida **entera**, así que cualquier prueba que
+**mencione** una frase de entorno —por ejemplo porque su propio ejemplo la imprime—
+quedaba degradada a *"no se pudo medir"* aunque hubiera corrido y fallado.
+
+O sea que **la guarda del instrumento que dice si el repo está en verde era justo la
+única que el instrumento no podía reportar en rojo**, y el workflow de CI quedaba
+verde con ella caída.
+
+**Corregido** con un discriminador nuevo y **deliberadamente estrecho**: si la prueba
+alcanzó a emitir *su propio* veredicto en rojo, falló. No incluye `Traceback` ni
+`Exception`, porque una prueba que no pudo correr también los imprime — ensancharlo
+produciría el error simétrico.
+
+Medido punta a punta: rompiendo una afirmación a propósito, el corredor pasa de
+`1 sin correr · exit 0` a **`1 en rojo · exit 1`**.
+
+**Y la guarda de esto tuvo que reescribirse.** La primera versión reimplementaba la
+regla en un ayudante, y por eso **sobrevivió** a la mutación que volvía el orden
+atrás: afirmaba sobre una copia del mecanismo y no sobre el mecanismo. Ahora llama a
+`corredor.correr` de verdad sobre un archivo temporal. Es el mismo error que esta
+ficha viene corrigiendo todo el día, cometido dentro de la guarda que lo corrige.
+
+### Lo que el arreglo A2 destapó
+
+**`tests/test_autor_y_reintento.py` pasa de "sin correr" a ROJO, y no es una
+regresión.** La prueba tiene los **mismos 3 `[FALLA]`** en esta rama y en
+`objetivo/frontera-puerta-humana`, que sale de la misma base: el fallo es
+preexistente. Lo que cambió es que **ahora se ve**. En la base estaba contado como
+*"no se pudo medir"*.
+
+Ese es el valor concreto del arreglo, medido: un rojo real que la base esconde.
+
+### Verificado
+
+Suite completa, **sin credenciales de base a propósito**, contra el control de la
+rama hermana:
+
+| Rama | Pruebas | Verde | Rojo | Sin correr |
+|---|---|---|---|---|
+| `integracion/b-c-limbo` | 152 | **142** | 6 | 4 |
+| `objetivo/frontera-puerta-humana` (control, misma base) | 149 | 131 | 13 | 5 |
+
+**Ocho rojos que esta rama arregla**, y el único que aparece solo acá es el
+desenmascarado. **Cero regresiones.**
+
+Más: `test_nucleo_sin_tenants` en verde, y `test_registro_sin_pii` en verde — esta
+última la pidió el `pre-commit` porque el cambio agrega una línea de log, y se corrió
+en vez de saltearla.
+
+### Lo que el auditor dejó abierto y NO se arregló acá
+
+Con su motivo, porque reducir el alcance en silencio es lo que esta ficha combate:
+
+| # | Qué | Por qué no se tocó |
+|---|---|---|
+| M2 | el 400 de `/configuracion/bandeja` falla **abierto**: decide en un `except` | Es una compuerta más; arreglarla es mecanismo nuevo sobre `api.py` en una rama que espera despliegue, y la ventana práctica es angosta. Queda como L16 |
+| M3 | la compuerta `--aplicar` del CLI que escribe en WispHub **no tiene ninguna guarda**: borrarla deja 12 pruebas en verde | Es el hueco de fondo que `objetivo/frontera-puerta-humana` ya tiene abierto como decisión de producto: ese CLI no pasa por el catálogo ni por la frontera. No se cierra con una prueba suelta |
+| M1 | la justificación de que *"importar `api` exige credenciales"* es **falsa** (`test_pausa_escalada` lo hace sin base) | Cierto, y quedó aprovechado: la guarda nueva importa `api` sin base. Corregir el comentario viejo queda para quien pase por ahí |
+| M4 | un comentario de `api.py:768` sigue diciendo lo contrario de lo que hace el código | Corregir al de abajo es parte del trabajo (§1), pero no vale un commit sobre el archivo más delicado justo antes de un despliegue |
+
 ## Qué verificar DESPUÉS del despliegue · escrito el 27/09/2026, antes de que exista
 
 Esto se escribe antes del deploy a propósito. Una verificación que se improvisa
@@ -1616,3 +1736,4 @@ el mismo error de categoría que esta ficha viene corrigiendo todo el día.
 | 26/09/2026 | **Checklist de salida (`guardia-de-release`), el paso 7 del flujo.** Verde con tres avisos. Medido: el merge es fast-forward (la base no derivo, 0 commits en la direccion contraria, comparado por contenido), cero migraciones, cero variables nuevas, cero solape de archivos con `integrar-centro-mando`, y la puerta de `cargar_config.py` se NIEGA de verdad con el umbral guardado (ejecutada, no leida). **Riesgo propio corregido:** el 400 del endpoint rompia la ventana entre el motor nuevo y el bundle viejo --no se podia guardar ninguno de los tres ajustes--; ahora entra solo cuando hay una banda encendida. La trampa del rollback (L5) quedo escrita en `DESPLIEGUE.md` §7, que es donde se busca. Aviso que hay que dar antes del deploy: los contadores de la cabecera bajan de golpe por el arreglo de L7, y se lee como si desaparecieran conversaciones | **Hueco unico y nombrado: los 56 casos dorados completos**, que §6 exige porque la nota al modelo cambio y `--humo` no distingue una regresion chica. Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
 | 26/09/2026 | **Casos dorados completos corridos (88 casos, no 56), y el hueco que destaparon.** Rama `f519af4` **70/88**; control sobre `f90d3ec` en el MISMO entorno **69/88**: la rama queda un caso mejor, con 2 divergentes de un lado y 3 del otro --varianza del modelo, no regresion--. De los 18 fallos, 4 son credenciales ausentes (`SMARTOLT_API_KEY`, `BOTTLECRM_API_TOKEN`) y el RAG no responde en este entorno, asi que **el 80% no es el numero del sistema sano** y solo vale contra su propio control. **Y lo que importa mas: verificado en codigo que `cli/evaluar.py` NO ejercita la posposicion (cero apariciones de `por_que_posponer`, `_aplicar_posposicion`, `intento_antes_de_escalar`, `nota_pendiente`), asi que los casos dorados no pueden ver a B.** La corrida no confirma ni desmiente su conducta: solo que la rama no empeora lo que el set si mide. El instrumento correcto para este camino es `cli/bateria_flujos.py` (40/41 bajo B, mas arriba en esta ficha) | Para un cambio en el camino del turno, 'corre los casos dorados' NO es la verificacion correcta: va al bloque de cobertura. Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
 | 27/09/2026 | **Escrita la verificacion post-despliegue, antes de que el despliegue exista.** Cuatro pasos con su comando y lo que tiene que imprimir: que corre este codigo medido por CONTENIDO y no por hash ni por fecha de imagen (las dos formas en que este proyecto ya se equivoco), que la banda sigue apagada porque `sin_gestion_horas` es `None` por defecto, que el turno anda con `--humo --base`, y que el defecto dejo de producirse — lo cual **no es inmediato**: se ve en dias, con la consulta de D4 y una lectura autorizada. Queda dicho tambien que las **3 conversaciones ya abiertas no las arregla el deploy**: confundir «el defecto dejo de producirse» con «las victimas estan atendidas» seria el mismo error de categoria que esta ficha viene corrigiendo | Solo la autorizacion de despliegue |
+| 27/09/2026 | **Cuarta auditoria, sobre los 17 commits que entraron despues de la tercera y que nadie habia mirado.** Dos altos, y los dos eran afirmaciones de mas, no defectos ajenos. (1) La posposicion se persistia **un turno tarde**: el guardado esta cerca de la linea 2039 de `_atender_turno` y la decision cerca de la 2342, asi que el flag puesto en el turno N se escribia en el N+1, que es el turno en que se consume — el despliegue seguia regalando la vuelta extra que el commit decia haber cerrado, y el auditor borro **las dos mitades del enganche** con trece pruebas en verde. Corregido con `_persistir_posposicion` y una guarda de 16 afirmaciones que **cuatro mutaciones matan**. (2) El corredor reportaba su propia guarda en rojo como *no se pudo correr* y salia con 0, asi que el CI quedaba verde con ella caida; corregido con un discriminador estrecho, y la guarda **tuvo que reescribirse** porque la primera version reimplementaba la regla y sobrevivia a la mutacion. El arreglo destapo un rojo REAL que la base esconde (`test_autor_y_reintento`, los mismos 3 `[FALLA]` en las dos ramas). Verificado: **152 pruebas, 142 verde, 6 rojo, 4 sin correr**, contra el control de la rama hermana (131/13/5): **ocho rojos que esta rama arregla y cero regresiones** | Cuatro reservas del auditor sin tocar, con su motivo escrito (L16 y tres remisiones). Solo la autorizacion de despliegue |
