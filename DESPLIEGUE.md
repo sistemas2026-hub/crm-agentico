@@ -576,7 +576,59 @@ py -3.13 cli/cargar_config.py tenants/rapilink.config.yaml   # archivo -> base
 Dos reglas de orden que salen de eso:
 
 - **Al desplegar:** primero el código, y encender el interruptor nuevo **después**, cuando la imagen lleve un rato sana. Mientras nadie lo encienda, el rollback es libre.
-- **Al revertir:** **apagar el campo desde la interfaz primero** (con la imagen nueva todavía arriba), comprobar que se apagó, y **recién entonces** volver la imagen. Si se revierte con el campo puesto, el orden ya no se puede corregir desde la pantalla.
+- **Al revertir:** **apagar el campo desde la interfaz NO ALCANZA.** Ver el aviso de abajo: está medido y el procedimiento anterior dejaba al tenant sin atender.
+
+> ### El apagado desde la interfaz NO habilita el rollback · medido el 27/09/2026
+>
+> Hasta hoy esta sección decía: *apagar el campo desde la interfaz, comprobar que
+> se apagó, y recién entonces volver la imagen*. **Es falso**, y quien lo siguiera
+> durante un incidente dejaría al tenant sin atender creyendo que hizo lo correcto.
+>
+> La cadena, cada paso medido sobre `sin_gestion_horas`:
+>
+> 1. `editor._mutar_ajustes_bandeja` hace `doc.pop("sin_gestion_horas", None)`, así
+>    que del documento **sí** desaparece.
+> 2. Pero `editor._editar` persiste `config.model_dump(mode="json")` — un volcado
+>    del **modelo entero** — y eso **reintroduce la clave con valor `None`**, porque
+>    el campo existe en el modelo con ese default. Es la deuda **D7** actuando sobre
+>    un campo nuevo.
+> 3. `extra="forbid"` rechaza una clave **por estar presente**, no por su valor.
+>    Cargando ese documento contra el esquema de `f90d3ec`:
+>
+> ```
+> sin_gestion_horas
+>   Extra inputs are not permitted [type=extra_forbidden, input_value=None]
+> ```
+>
+> **Cómo se reproduce** (sin base, sin credenciales, unos segundos):
+>
+> ```
+> git archive <commit-anterior> | tar -x -C <carpeta-temporal>
+> # en el árbol nuevo: apagar la banda y quedarse con el volcado
+> # en el árbol viejo: TenantConfig(**ese volcado)  ->  extra_forbidden
+> ```
+>
+> **Qué hacer HOY, si hay que revertir con la banda encendida.** La pregunta correcta
+> no es *«¿la banda está apagada?»* sino **«¿la imagen anterior puede cargar lo que
+> quedó en la base?»**. Y hoy la respuesta es no mientras la clave exista, con
+> cualquier valor. Así que el rollback exige **borrar la clave**, y desde la pantalla
+> no se puede: es `jsonb - 'sin_gestion_horas'` sobre `asistente.tenant_config`, con
+> el `config_version` subido en la misma transacción. Eso es SQL directo sobre la
+> config, que esta misma sección dice que hay que evitar — y es la razón por la que
+> esto está escrito acá y no como una nota al pie.
+>
+> **Lo que NO está decidido, y no lo decide una sesión de código.** Hay dos arreglos
+> posibles y son decisiones distintas:
+>
+> | Arreglo | Qué implica |
+> |---|---|
+> | que el volcado omita los campos en `None` que no estaban en el documento | toca `editor._editar`, o sea **toda** edición de config, no solo esta banda. Es atacar D7, que ya produjo 68 hojas distintas en una mutación de una clave |
+> | dejar el código como está y documentar que el rollback exige el `DELETE` de la clave por SQL | no toca nada, pero deja un procedimiento de incidente que pasa por fuera del editor y del ledger |
+>
+> **Mientras eso no se decida, la regla de orden que SÍ vale es la de arriba:** no
+> encender el campo hasta que la imagen lleve un rato sana, porque **mientras nadie
+> lo encienda el rollback es libre.** Esa es la única parte del procedimiento que
+> estaba bien.
 
 La exportación conserva los comentarios del YAML — son notas de verificación en vivo, no adorno — y es idempotente: exportar dos veces seguidas no cambia el archivo, así que lo que salga en el diff es cambio real.
 
