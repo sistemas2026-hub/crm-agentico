@@ -1383,7 +1383,13 @@ try:
         # el 26/09/2026 el auditor mostro que mutar api.py para leer el umbral
         # crudo --un renglon-- devolvia la ventana de 48 horas con la bateria
         # entera en verde, porque ninguna prueba que pega a /conversaciones
-        # declaraba el umbral. Importar api pide credenciales de base, asi que
+        # declaraba el umbral. Esta seccion corre CON base porque mide el
+        # efecto sobre filas reales -- no porque importar 'api' lo exija:
+        # eso se creyo hasta el 27/09/2026 y es falso. Lo midio la cuarta
+        # auditoria, y lo aprovecha
+        # tests/test_posposicion_sobrevive_al_despliegue.py, que importa
+        # 'api' sin credenciales. Antes decia: 'Importar api pide
+        # credenciales de base, asi que
         # la unica prueba que puede hacerlo es esta.
         limbo = str(q("""insert into asistente.conversations (organization_id, canal, usuario_externo)
                          values (%s, 'whatsapp', '573000000305') returning id""", (org,))[0][0])

@@ -766,10 +766,18 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
               # turno siguiente y se creaba un caso duplicado.
               "ya_escalada": False,
               # Esta conversacion ya tuvo su vuelta extra antes de escalar
-              # (ver escalamiento.merece_un_intento). Vive en memoria, como
-              # 'repreguntado_agendamiento': si el motor se reinicia se
-              # concede un intento mas, que es un costo aceptable frente a
-              # una lectura extra a la base en cada turno.
+              # (ver escalamiento.merece_un_intento).
+              #
+              # YA NO VIVE SOLO EN MEMORIA, y este comentario decia lo
+              # contrario hasta el 27/09/2026. Se persiste en
+              # 'datos_sesion' --ver CAMPOS_ROUTING_PERSISTIBLES en
+              # nucleo/seguridad/verificacion.py-- porque "si el motor se
+              # reinicia se concede un intento mas" no era un costo
+              # aceptable: cada despliegue le regalaba una vuelta extra a
+              # CADA conversacion en curso, y una conversacion que siempre
+              # recibe una vuelta mas no escala nunca. Se escribe en el
+              # mismo turno que la decide (_persistir_posposicion), que es
+              # la mitad que la cuarta auditoria encontro faltando.
               "intento_antes_de_escalar": False,
               # La conversacion abierta de este usuario, si ya habia una.
               "conversacion_id": None,
@@ -3921,11 +3929,25 @@ def configuracion_bandeja_guardar():
     # apaga nada. Lo que no se permite es omitirla cuando SI hay una banda
     # encendida, que es el caso en que "ausente" significaria apagar la guarda
     # y devolver al barrido las conversaciones que protege.
+    #
+    # Y SI NO SE PUEDE COMPROBAR, NO SE ACEPTA (fail-closed, CLAUDE.md 5).
+    # Hasta el 27/09/2026 un fallo al leer la config respondia "no hay nada que
+    # perder" y la omision se aceptaba: la banda quedaba apagada por no poder
+    # confirmar que estaba encendida. Lo encontro la cuarta auditoria. La unica
+    # compuerta del endpoint decidia en un 'except', que es exactamente el
+    # patron que este proyecto tiene prohibido -- el interruptor de autonomia
+    # vive fuera de tenant_config por esta misma razon.
     if "sin_gestion_horas" not in cuerpo:
         try:
             ya_guardado = getattr(_config_de(tenant), "sin_gestion_horas", None)
-        except Exception:
-            ya_guardado = None
+        except Exception as e:
+            registrar("configuracion", "no se pudo comprobar la banda antes de "
+                                       "aceptar una omision", error=e)
+            return jsonify({"error": "No se pudo comprobar si la banda «Sin resolucion "
+                                     "registrada» esta encendida, asi que no se acepta "
+                                     "omitir 'sin_gestion_horas'. Mandalo explicito "
+                                     "(un numero, o null para apagarla).",
+                            "codigo": "no_se_pudo_comprobar"}), 409
         if ya_guardado is not None:
             return jsonify({"error": "Falta el campo 'sin_gestion_horas'. La banda «Sin "
                                      "resolución registrada» está encendida: para apagarla "
