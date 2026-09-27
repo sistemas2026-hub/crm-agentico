@@ -1517,6 +1517,89 @@ el editor lo conoce); la definición es de inclusión y vive en el motor:
 `nucleo/canales/canal.REALES`. `cli/revision_g8.py` tiene una segunda lista
 divergente que hay que unificar.
 
+
+## Qué verificar DESPUÉS del despliegue · escrito el 27/09/2026, antes de que exista
+
+Esto se escribe antes del deploy a propósito. Una verificación que se improvisa
+después mide lo que sea fácil de mirar, y en este proyecto lo fácil de mirar ya
+engañó dos veces.
+
+**Nada de esto lo puedo correr yo.** Son los pasos para quien tenga la autoridad y
+el acceso, y el orden importa.
+
+### 1 · Que el código que corre es este, medido por CONTENIDO
+
+Comparar hashes **no alcanza** (`CLAUDE.md` §11): `merge-base --is-ancestor` no ve un
+commit rebaseado por otra sesión y lo cuenta como ausente estando presente. Así se
+midió mal el 24/09, **dos veces el mismo día, una en cada dirección.**
+
+```
+git fetch origin
+git log --oneline -1 origin/fix/integracion-wisphub      # tiene que decir 9519f43
+git rev-list origin/fix/integracion-wisphub | head -30 | xargs -n1 git show | git patch-id --stable | sort > /tmp/desplegado.txt
+```
+
+Y **la fecha de la imagen no dice qué código tiene**: con cachés completos BuildKit
+reexporta la misma imagen. Medir el contenido del contenedor, no su `uptime` ni su
+fecha de build.
+
+### 2 · Que la banda sigue APAGADA, que es lo que hace este deploy seguro
+
+`sin_gestion_horas` tiene `default=None` (`schema.py:2987`). O sea que **este deploy
+no enciende nada**: entrega el mecanismo y lo deja dormido. Si después del deploy la
+Bandeja se comportara distinto en esa banda, algo está mal.
+
+```
+py -3.13 cli/diferencias_config.py rapilink
+```
+
+Lo esperado: **ninguna diferencia**, o a lo sumo `[i] solo la base lo tiene`, que es
+normal porque la base es la fuente de verdad. Lo que rompe es *"el repo lo declara y
+la base no"*.
+
+> **La trampa del rollback, ya escrita en `DESPLIEGUE.md` §7 y que hay que releer el
+> día que alguien encienda la banda:** con `extra="forbid"` y `fuente.cargar`
+> relanzando, volver la imagen atrás **con el campo nuevo ya escrito en la base deja
+> la config entera inválida**. El orden seguro es: revertir la config primero, la
+> imagen después. Nunca al revés.
+
+### 3 · Que el turno sigue andando
+
+```
+py -3.13 cli/evaluar.py rapilink --humo --base
+```
+
+**`--base` no es opcional** después de aplicar config: sin él el corredor lee el
+YAML, que es justo el lado donde el dato sí estaba. Entre el 08 y el 09/09/2026, de
+19 arreglos, **cuatro no eran bugs de lógica** sino el repo declarando algo que
+producción no tenía.
+
+### 4 · Que el defecto de verdad se fue, y esto NO es inmediato
+
+Lo que este bloque arregla es que el rol de entrada **posponía siempre** su escalada.
+Eso no se ve en un chequeo estático ni en un turno de humo: se ve en que **dejen de
+aparecer conversaciones nuevas en limbo.**
+
+El instrumento es la consulta de D4, la misma con la que se midió el 25/09
+—**5 de 39 clientes reales en limbo, 3 aún abiertas**—. Correrla otra vez **exige una
+lectura autorizada de producción**, y la comparación honesta es contra una ventana
+del mismo largo, no contra el total histórico.
+
+**Y tres conversaciones abiertas no se arreglan con el deploy.** El código nuevo no
+retrocede sobre lo que ya quedó sin dueño: esas las atiende una persona. Confundir
+"el defecto dejó de producirse" con "las víctimas del defecto están atendidas" sería
+el mismo error de categoría que esta ficha viene corrigiendo todo el día.
+
+### El resumen, en una tabla
+
+| # | Qué | Cuándo se puede saber | ¿Necesita autorización? |
+|---|---|---|---|
+| 1 | que corre este código, por contenido | al minuto | sí, acceso al servidor |
+| 2 | que la banda sigue apagada | al minuto | sí |
+| 3 | que el turno anda | ~3 min | sí |
+| 4 | que no entran conversaciones nuevas al limbo | **días**, una ventana entera | sí, lectura de producción |
+| — | las 3 conversaciones ya abiertas | las atiende una persona, no el deploy | — |
+
 ## Bitácora
 
 | Fecha | Qué avanzó | Qué falta |
@@ -1532,3 +1615,4 @@ divergente que hay que unificar.
 | 26/09/2026 | **Tercera auditoria, con regla de parada declarada:** se audita lo que AGREGA mecanismo, no lo que solo acota. Encontro que la linea que arreglaba el agujero no tenia guarda --mutar `/conversaciones` al umbral crudo devolvia la ventana de 48 h con la bateria entera en verde-- y que su `hasattr` restituia la conducta vieja en silencio; que el 400 del endpoint vigilaba una puerta por la que nadie entra, porque el helper de JS convertia la ausencia en null (con una prueba mia bendiciendolo); y que el formulario mostraba 72 mientras la banda actuaba a las 24, sin señal. Corregidos los tres: guarda de efecto en §14 contra PostgreSQL --se intento sin base y no se puede, importar `api` exige credenciales--, el helper revienta sin llegar a la red, y el GET/PUT devuelven los dos umbrales con aviso en la pantalla. **La mutacion que sobrevivia ahora pone §14 en rojo (medido).** Verificado: once guardas verdes, vitest 345/345, relevo con §14 en verde y solo los dos rojos previos | Tres deudas nuevas (L13..L15). Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
 | 26/09/2026 | **Checklist de salida (`guardia-de-release`), el paso 7 del flujo.** Verde con tres avisos. Medido: el merge es fast-forward (la base no derivo, 0 commits en la direccion contraria, comparado por contenido), cero migraciones, cero variables nuevas, cero solape de archivos con `integrar-centro-mando`, y la puerta de `cargar_config.py` se NIEGA de verdad con el umbral guardado (ejecutada, no leida). **Riesgo propio corregido:** el 400 del endpoint rompia la ventana entre el motor nuevo y el bundle viejo --no se podia guardar ninguno de los tres ajustes--; ahora entra solo cuando hay una banda encendida. La trampa del rollback (L5) quedo escrita en `DESPLIEGUE.md` §7, que es donde se busca. Aviso que hay que dar antes del deploy: los contadores de la cabecera bajan de golpe por el arreglo de L7, y se lee como si desaparecieran conversaciones | **Hueco unico y nombrado: los 56 casos dorados completos**, que §6 exige porque la nota al modelo cambio y `--humo` no distingue una regresion chica. Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
 | 26/09/2026 | **Casos dorados completos corridos (88 casos, no 56), y el hueco que destaparon.** Rama `f519af4` **70/88**; control sobre `f90d3ec` en el MISMO entorno **69/88**: la rama queda un caso mejor, con 2 divergentes de un lado y 3 del otro --varianza del modelo, no regresion--. De los 18 fallos, 4 son credenciales ausentes (`SMARTOLT_API_KEY`, `BOTTLECRM_API_TOKEN`) y el RAG no responde en este entorno, asi que **el 80% no es el numero del sistema sano** y solo vale contra su propio control. **Y lo que importa mas: verificado en codigo que `cli/evaluar.py` NO ejercita la posposicion (cero apariciones de `por_que_posponer`, `_aplicar_posposicion`, `intento_antes_de_escalar`, `nota_pendiente`), asi que los casos dorados no pueden ver a B.** La corrida no confirma ni desmiente su conducta: solo que la rama no empeora lo que el set si mide. El instrumento correcto para este camino es `cli/bateria_flujos.py` (40/41 bajo B, mas arriba en esta ficha) | Para un cambio en el camino del turno, 'corre los casos dorados' NO es la verificacion correcta: va al bloque de cobertura. Push y `DEXTER_ESTADO_ACTUAL.md`: sesion dueña |
+| 27/09/2026 | **Escrita la verificacion post-despliegue, antes de que el despliegue exista.** Cuatro pasos con su comando y lo que tiene que imprimir: que corre este codigo medido por CONTENIDO y no por hash ni por fecha de imagen (las dos formas en que este proyecto ya se equivoco), que la banda sigue apagada porque `sin_gestion_horas` es `None` por defecto, que el turno anda con `--humo --base`, y que el defecto dejo de producirse — lo cual **no es inmediato**: se ve en dias, con la consulta de D4 y una lectura autorizada. Queda dicho tambien que las **3 conversaciones ya abiertas no las arregla el deploy**: confundir «el defecto dejo de producirse» con «las victimas estan atendidas» seria el mismo error de categoria que esta ficha viene corrigiendo | Solo la autorizacion de despliegue |
