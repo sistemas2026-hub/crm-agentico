@@ -67,11 +67,16 @@ class ConfigFalsa:
     sin el da 500 y esconde el resultado que la prueba mide.
     """
 
-    def __init__(self, horas, sla=15, umbral=-25.0, tope=24):
+    def __init__(self, horas, sla=15, umbral=-25.0, tope=24, origen="base"):
         self.sin_gestion_horas = horas
         self.sla_toma_minutos = sla
         self.umbral_rx_dbm = umbral
         self._tope = tope
+        #  El marcador que dice DE DONDE salio esta config. 'base' es la fuente
+        #  de verdad; 'yaml' significa que se leyo del archivo de la imagen,
+        #  donde 'sin_gestion_horas' NO vive -- asi que un None ahi no significa
+        #  "no hay banda", significa "no se sabe".
+        self._origen = origen
 
     def sin_gestion_horas_efectivas(self):
         if self.sin_gestion_horas is None:
@@ -128,6 +133,27 @@ comprobar(not escrituras,
           f"y no escribe nada (escribio {len(escrituras)} veces)")
 comprobar(cuerpo.get("codigo") == "no_se_pudo_comprobar",
           f"con un codigo propio, distinguible de 'falta el campo' "
+          f"(devolvio {cuerpo.get('codigo')!r})")
+
+# ---------------------------------------------------------------------------
+#  1b. EL CAMINO REAL DEL FAIL-OPEN, que el 409 del except NO cubria
+# ---------------------------------------------------------------------------
+#  Lo midio la quinta auditoria: '_config_de' NO levanta cuando no puede
+#  comprobar la version -- sirve la copia cacheada -- y 'fuente.cargar' cae al
+#  YAML de la imagen si la base no responde. Como 'sin_gestion_horas' solo vive
+#  en la base, una config de origen 'yaml' la trae en None, la omision se
+#  aceptaba, y la banda se apagaba SIN PASAR NUNCA por el except.
+#
+#  Este es el caso que de verdad ocurre en produccion, y el anterior era el raro.
+codigo, cuerpo, escrituras = pedir(
+    dict(BASE), lambda _t: ConfigFalsa(None, origen="yaml"))
+comprobar(codigo >= 400,
+          f"con la config leida del YAML --donde la banda no vive-- la omision "
+          f"se RECHAZA (devolvio {codigo})")
+comprobar(not escrituras,
+          f"y no apaga la banda (escribio {len(escrituras)} veces)")
+comprobar(cuerpo.get("codigo") == "no_se_pudo_comprobar",
+          f"con el mismo codigo, porque es el mismo problema: no se sabe "
           f"(devolvio {cuerpo.get('codigo')!r})")
 
 # ---------------------------------------------------------------------------

@@ -776,7 +776,7 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
               # aceptable: cada despliegue le regalaba una vuelta extra a
               # CADA conversacion en curso, y una conversacion que siempre
               # recibe una vuelta mas no escala nunca. Se escribe en el
-              # mismo turno que la decide (_persistir_posposicion), que es
+              # mismo turno que la decide (_persistir_routing), que es
               # la mitad que la cuarta auditoria encontro faltando.
               "intento_antes_de_escalar": False,
               # La conversacion abierta de este usuario, si ya habia una.
@@ -1197,9 +1197,16 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 "sin_turno": True}
 
 
-def _persistir_posposicion(tenant, conversacion_id, estado) -> None:
+def _persistir_routing(tenant, conversacion_id, estado) -> None:
     """
-    Escribe la vuelta extra EN EL TURNO EN QUE SE DECIDE.
+    El UNICO escritor del estado de routing del turno.
+
+    Se llama dos veces: despues de la derivacion --que llena
+    'areas_visitadas'-- y despues de la decision de posponer. Las dos pasan por
+    aca para que compartan la regla de "una escritura por CAMBIO": la segunda no
+    repite lo que la primera ya dejo.
+
+    Y ESCRIBE LA VUELTA EXTRA EN EL TURNO EN QUE SE DECIDE.
 
     POR QUE EXISTE, y no alcanzaba el bloque de persistencia de mas arriba:
     ese bloque corre ANTES de esta decision dentro del mismo turno (medido el
@@ -1221,9 +1228,24 @@ def _persistir_posposicion(tenant, conversacion_id, estado) -> None:
         return
     try:
         routing = verificacion.routing_a_persistir(sesion)
-        if routing:
+        #  UNA escritura por CAMBIO, no una por sitio de llamada. Los dos
+        #  bloques que persisten el routing en este turno --el de la derivacion
+        #  y este-- pasan por aca, y el segundo no repite lo que el primero ya
+        #  dejo. La quinta auditoria (27/09/2026) midio que sin esto el turno
+        #  que pospone despues de derivar hacia DOS idas a la base, la segunda
+        #  un superconjunto de la primera, cuando el diseño dice una.
+        if routing and routing != estado.get("_routing_persistido"):
             persistencia.guardar_estado_routing(tenant, conversacion_id, routing)
-    except Exception as e:                                   # noqa: BLE001
+            estado["_routing_persistido"] = dict(routing)
+    except (Exception, SystemExit) as e:                      # noqa: BLE001
+        #  SystemExit ADEMAS de Exception, y no es paranoia: la capa de
+        #  conexion la lanza (nucleo/persistencia/conexion.py, cuando falta una
+        #  variable de entorno) y NO hereda de Exception, asi que un
+        #  'except Exception' la deja escapar y el turno muere sin contestarle
+        #  a quien esta esperando. Es la deuda D11 de CLAUDE.md, y el resto del
+        #  repo ya la resolvio asi en cinco lugares (db.py, reloj.py,
+        #  programador/ejecutor.py). La quinta auditoria midio que esta funcion
+        #  era el sexto sitio y le faltaba.
         registrar("persistencia", "no se pudo guardar la posposicion", error=e)
 
 
@@ -2073,14 +2095,10 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # al derivar, y derivar pasa antes de que nadie verifique. Solo se
         # escribe si hay algo que proteger, asi que el turno normal -- el que
         # no deriva -- no paga ninguna escritura extra.
-        if estado["sesion"] is not None:
-            routing = verificacion.routing_a_persistir(estado["sesion"])
-            if routing:
-                try:
-                    persistencia.guardar_estado_routing(
-                        tenant, conversation_id, routing)
-                except Exception as e:
-                    registrar("persistencia", "no se pudo guardar el routing", error=e)
+        #  Pasa por el MISMO escritor que la posposicion, para que los dos
+        #  sitios de este turno compartan el "una escritura por cambio" y el
+        #  segundo no repita lo que este ya dejo. Ver _persistir_routing.
+        _persistir_routing(tenant, conversation_id, estado)
     except Exception as e:  # nunca se rompe el turno por un fallo de persistencia
         registrar("persistencia", "no se pudo guardar el turno", error=e)
 
@@ -2351,9 +2369,9 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
                                     motivo=evaluacion.get("motivo")):
                 posponer = True
                 # Se persiste ACA, en el turno que decide. Ver el
-                # docstring de _persistir_posposicion: el bloque de
+                # docstring de _persistir_routing: el bloque de
                 # persistencia de arriba ya paso cuando llegamos aca.
-                _persistir_posposicion(tenant, conversation_id, estado)
+                _persistir_routing(tenant, conversation_id, estado)
 
             # --- verificacion automatica de agendamiento --------------------
             # Solo corre si el tenant declaro ESTE caso puntual en
@@ -3939,7 +3957,28 @@ def configuracion_bandeja_guardar():
     # vive fuera de tenant_config por esta misma razon.
     if "sin_gestion_horas" not in cuerpo:
         try:
-            ya_guardado = getattr(_config_de(tenant), "sin_gestion_horas", None)
+            cfg_actual = _config_de(tenant)
+            #  Y NO ALCANZA CON QUE NO LEVANTE. La quinta auditoria midio que el
+            #  camino real del fail-open no era el 'except': '_config_de' NO
+            #  levanta cuando no puede comprobar la version --sirve la copia
+            #  cacheada-- y 'fuente.cargar' cae al YAML de la imagen si la base
+            #  no responde. Y 'sin_gestion_horas' SOLO vive en la base, asi que
+            #  una config de origen 'yaml' la trae en None: la omision se
+            #  aceptaba y la banda se apagaba sin pasar nunca por el except.
+            #
+            #  '_origen' es el mismo marcador que ya usa
+            #  seguimiento/operativo.py::cerrar_inactivas_de_ia para no cerrar
+            #  nada con una config degradada. Mismo criterio, misma razon.
+            if getattr(cfg_actual, "_origen", "base") != "base":
+                registrar("configuracion", "config degradada: no se acepta omitir "
+                                           "la banda", tenant=tenant,
+                          origen=getattr(cfg_actual, "_origen", "?"))
+                return jsonify({"error": "La configuracion no se esta leyendo de la base, "
+                                         "asi que no se puede saber si la banda «Sin "
+                                         "resolucion registrada» esta encendida. Mandala "
+                                         "explicita (un numero, o null para apagarla).",
+                                "codigo": "no_se_pudo_comprobar"}), 409
+            ya_guardado = getattr(cfg_actual, "sin_gestion_horas", None)
         except Exception as e:
             registrar("configuracion", "no se pudo comprobar la banda antes de "
                                        "aceptar una omision", error=e)

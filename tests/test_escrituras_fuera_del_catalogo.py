@@ -67,6 +67,26 @@ EXCEPTUADO = "nucleo/herramientas/http.py"
 VERBOS_DE_ESCRITURA = {"post", "put", "patch", "delete", "request"}
 CLIENTES_HTTP = {"requests", "httpx", "session", "sesion"}
 
+#  'urlopen' no tiene verbo: manda POST en cuanto le pasan 'data'. Se cuenta
+#  siempre, porque distinguirlo exigiria seguir el argumento.
+ABRIDORES = {"urlopen"}
+
+#  Constructores que devuelven un cliente HTTP guardado en un nombre
+#  cualquiera. Sin esto, 'mi_http = requests.Session()' y despues
+#  'mi_http.post(...)' pasaba invisible -- las dos mutaciones que la quinta
+#  auditoria logro colar.
+CONSTRUCTORES = {("requests", "Session"), ("httpx", "Client"),
+                 ("httpx", "AsyncClient")}
+
+#  Fuera de alcance A PROPOSITO, y conviene decir por que en vez de dejarlo
+#  implicito: 'django-crm/' es la plataforma vendorizada (BottleCRM), no el
+#  motor. Sus escrituras HTTP son de Django y de sus tareas, viven bajo otro
+#  ciclo de vida y no pasan ni deben pasar por la frontera de Dexter.
+#  Incluirlas volveria este inventario ruido, y un inventario ruidoso se
+#  saltea. Si algun dia el motor llama a una de ellas, el barrido de
+#  'nucleo/' lo va a ver del lado del motor.
+FUERA_DE_ALCANCE = ("django-crm",)
+
 
 #  EL INVENTARIO. Clave: archivo. Valor: lista de (verbo, clase, motivo).
 #  Las clases y lo que significan:
@@ -108,35 +128,83 @@ DECLARADAS: dict[str, list[tuple[str, str, str]]] = {
          "reboot a SmartOLT, con la misma compuerta. Tiene efecto fisico, y "
          "por eso la compuerta nombra el serial"),
     ],
+    "soporte_wisphub.py": [
+        ("post", "prototipo",
+         "EL PROTOTIPO VIEJO de un solo tenant (PRD 11). Hace POST al endpoint "
+         "de PAGO -- 'registrar_pago', una de las cinco irreversibles de "
+         "CLAUDE.md 5 -- y no pasa por la frontera. Nada de nucleo/ ni de cli/ "
+         "lo importa: solo lo citan cuatro docstrings, verificado. Entro al "
+         "inventario el 27/09/2026 porque la quinta auditoria midio que este "
+         "archivo quedaba fuera del barrido mientras la prueba afirmaba 'el "
+         "repo'. NO es una excepcion bendecida: es una que alguien tendria que "
+         "decidir si se borra"),
+    ],
 }
+
+
+def _archivos_a_revisar():
+    """`nucleo/`, `cli/` y los .py de primer nivel del repo."""
+    for carpeta in ("nucleo", "cli"):
+        yield from sorted((RAIZ / carpeta).rglob("*.py"))
+    #  Los de la raiz entran desde el 27/09/2026: el inventario decia "el repo"
+    #  y medía dos carpetas, y afuera habia una escritura real -- un PAGO.
+    yield from sorted(RAIZ.glob("*.py"))
+
+
+def _nombres_de_cliente_http(arbol) -> set[str]:
+    """
+    Los nombres locales que guardan un cliente HTTP.
+
+    'mi_http = requests.Session()' hace que 'mi_http.post(...)' sea una
+    escritura, y sin esto era invisible.
+    """
+    nombres: set[str] = set()
+    for n in ast.walk(arbol):
+        if not isinstance(n, ast.Assign) or not isinstance(n.value, ast.Call):
+            continue
+        f = n.value.func
+        if not isinstance(f, ast.Attribute) or not isinstance(f.value, ast.Name):
+            continue
+        if (f.value.id, f.attr) not in CONSTRUCTORES:
+            continue
+        for destino in n.targets:
+            if isinstance(destino, ast.Name):
+                nombres.add(destino.id)
+            elif isinstance(destino, ast.Attribute):
+                nombres.add(destino.attr)
+    return nombres
 
 
 def _encontradas() -> dict[str, list[tuple[int, str]]]:
     """Todas las escrituras HTTP directas del arbol, por AST."""
     fuera: dict[str, list[tuple[int, str]]] = {}
-    for carpeta in ("nucleo", "cli"):
-        for archivo in sorted((RAIZ / carpeta).rglob("*.py")):
-            relativo = archivo.relative_to(RAIZ).as_posix()
-            if relativo == EXCEPTUADO:
+    for archivo in _archivos_a_revisar():
+        relativo = archivo.relative_to(RAIZ).as_posix()
+        if relativo == EXCEPTUADO or relativo.startswith(FUERA_DE_ALCANCE):
+            continue
+        try:
+            arbol = ast.parse(archivo.read_text(encoding="utf-8"))
+        except SyntaxError:
+            #  Un archivo que no parsea es un problema, pero no de esta
+            #  prueba. Se dice y se sigue -- nunca se ignora en silencio.
+            print(f"  [aviso] {relativo} no parsea; NO se pudo revisar")
+            continue
+        locales = _nombres_de_cliente_http(arbol)
+        for n in ast.walk(arbol):
+            if not (isinstance(n, ast.Call)
+                    and isinstance(n.func, ast.Attribute)):
                 continue
-            try:
-                arbol = ast.parse(archivo.read_text(encoding="utf-8"))
-            except SyntaxError:
-                #  Un archivo que no parsea es un problema, pero no de esta
-                #  prueba. Se dice y se sigue.
-                print(f"  [aviso] {relativo} no parsea; no se pudo revisar")
+            if n.func.attr in ABRIDORES:
+                fuera.setdefault(relativo, []).append((n.lineno, n.func.attr))
                 continue
-            for n in ast.walk(arbol):
-                if not (isinstance(n, ast.Call)
-                        and isinstance(n.func, ast.Attribute)
-                        and n.func.attr in VERBOS_DE_ESCRITURA):
-                    continue
-                valor = n.func.value
-                base = (valor.id if isinstance(valor, ast.Name)
-                        else valor.attr if isinstance(valor, ast.Attribute)
-                        else "")
-                if base in CLIENTES_HTTP:
-                    fuera.setdefault(relativo, []).append((n.lineno, n.func.attr))
+            if n.func.attr not in VERBOS_DE_ESCRITURA:
+                continue
+            valor = n.func.value
+            base = (valor.id if isinstance(valor, ast.Name)
+                    else valor.attr if isinstance(valor, ast.Attribute)
+                    else "")
+            if base in CLIENTES_HTTP or base in locales:
+                fuera.setdefault(relativo, []).append((n.lineno, n.func.attr))
     return fuera
 
 

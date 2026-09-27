@@ -117,24 +117,106 @@ comprobar(_desde > 0, "se encontro _atender_turno en el arbol de api.py")
 
 _decision = [l for l in _lineas_de_llamada("_aplicar_posposicion")
              if _desde <= l <= _hasta]
-_guardado = [l for l in _lineas_de_llamada("_persistir_posposicion")
+_guardado = [l for l in _lineas_de_llamada("_persistir_routing")
              if _desde <= l <= _hasta]
 
 comprobar(len(_decision) == 1,
           f"hay UN sitio que decide posponer dentro del turno (hay {len(_decision)})")
-comprobar(len(_guardado) == 1,
-          f"hay UN sitio que persiste la posposicion dentro del turno "
+#  DOS sitios a proposito: uno despues de la derivacion y otro despues de la
+#  decision de posponer, los dos por el mismo escritor, que no repite una
+#  escritura identica. Lo que importa no es cuantos son: es que haya uno DESPUES
+#  de la decision, que es lo que faltaba.
+comprobar(len(_guardado) >= 1,
+          f"hay al menos un sitio que persiste el routing dentro del turno "
           f"(hay {len(_guardado)})")
 
 #  LA AFIRMACION QUE FALTABA. Si alguien vuelve a apoyarse solo en el bloque de
 #  persistencia de arriba, o mueve el guardado antes de la decision, esto se
 #  pone rojo.
 if _decision and _guardado:
-    comprobar(_guardado[0] > _decision[0],
-              f"la posposicion se persiste DESPUES de decidirla "
-              f"(decide en {_decision[0]}, guarda en {_guardado[0]})")
+    comprobar(max(_guardado) > _decision[0],
+              f"el routing se persiste DESPUES de decidir posponer "
+              f"(decide en {_decision[0]}, guarda en {sorted(_guardado)})")
 else:
     comprobar(False, "falta uno de los dos sitios: no se puede medir el orden")
+
+
+#  Y QUE SEA ALCANZABLE, no solo que este despues.
+#
+#  La quinta auditoria midio que la afirmacion de orden, sola, es ciega: meter la
+#  llamada dentro de 'if False:' o de una rama que nunca se cumple la dejaba
+#  VERDE. Afirmar que una linea existe y esta en cierto lugar no prueba que
+#  corra -- es literalmente lo que CLAUDE.md 6 llama "una prueba que dice que
+#  algo EXISTE no prueba que funcione".
+#
+#  Lo que se afirma acá es estructural y fuerte: el guardado de despues de la
+#  decision vive DENTRO DEL MISMO BLOQUE que el 'posponer = True', o sea en la
+#  rama que solo se alcanza cuando de verdad se pospuso.
+def _llama_a(nodo, nombre: str) -> bool:
+    return any(isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+               and c.func.id == nombre
+               for c in ast.walk(nodo))
+
+
+def _bloque_de_la_posposicion():
+    """
+    El `if` MAS INTERNO que decide posponer, o sea el que tiene la llamada en su
+    propio test: `if _aplicar_posposicion(...):`.
+
+    La primera version recorria con ast.walk y devolvia el primer `if` cuyo
+    CUERPO contuviera la llamada, que en un archivo de 9.000 lineas es un `if`
+    de tres niveles mas arriba. Afirmaba algo cierto pero mucho mas debil.
+    """
+    candidatos = [n for n in ast.walk(_ARBOL)
+                  if isinstance(n, ast.If) and _llama_a(n.test, "_aplicar_posposicion")]
+    return candidatos[0] if len(candidatos) == 1 else None
+
+
+def _sentencias_alcanzables(cuerpo):
+    """
+    Las sentencias del cuerpo, descendiendo por el control de flujo pero SIN
+    entrar en una rama estaticamente muerta.
+
+    Existe porque la afirmacion de orden, sola, dejaba pasar `if False:`
+    alrededor de la llamada -- medido por la quinta auditoria y confirmado acá:
+    la primera version de esta comprobacion tambien lo dejaba pasar, porque
+    ast.walk entra igual en el cuerpo de un `if` constante-falso.
+    """
+    for sentencia in cuerpo:
+        if isinstance(sentencia, ast.If):
+            constante = (sentencia.test.value
+                         if isinstance(sentencia.test, ast.Constant) else None)
+            if constante is None or bool(constante):
+                yield from _sentencias_alcanzables(sentencia.body)
+            if not (isinstance(sentencia.test, ast.Constant)
+                    and bool(sentencia.test.value)):
+                yield from _sentencias_alcanzables(sentencia.orelse)
+            continue
+        if isinstance(sentencia, (ast.For, ast.While, ast.With, ast.Try)):
+            yield from _sentencias_alcanzables(getattr(sentencia, "body", []))
+            for rama in ("orelse", "finalbody"):
+                yield from _sentencias_alcanzables(getattr(sentencia, rama, []))
+            for manejador in getattr(sentencia, "handlers", []):
+                yield from _sentencias_alcanzables(manejador.body)
+            continue
+        yield sentencia
+
+
+_bloque = _bloque_de_la_posposicion()
+comprobar(_bloque is not None,
+          "se encontro EL bloque que decide posponer, y es uno solo")
+
+if _bloque is not None:
+    _guarda_dentro = [
+        c.lineno
+        for sentencia in _sentencias_alcanzables(_bloque.body)
+        for c in ast.walk(sentencia)
+        if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+        and c.func.id == "_persistir_routing"]
+    comprobar(len(_guarda_dentro) == 1,
+              f"el guardado vive dentro del bloque que pospone Y ES ALCANZABLE, "
+              f"asi que corre cuando se pospuso de verdad "
+              f"(encontrados: {_guarda_dentro})")
 
 # ---------------------------------------------------------------------------
 #  2. EL EFECTO de la decision: deja el flag donde se persiste
@@ -190,7 +272,7 @@ comprobar(_real is not None, "persistencia declara guardar_estado_routing")
 api.persistencia.guardar_estado_routing = (
     lambda tenant, cid, datos: _escrituras.append((tenant, cid, dict(datos))))
 try:
-    api._persistir_posposicion("rapilink", "conv-posp", {"sesion": _sesion})
+    api._persistir_routing("rapilink", "conv-posp", {"sesion": _sesion})
     comprobar(len(_escrituras) == 1,
               f"persistir la posposicion hace UNA escritura "
               f"(hizo {len(_escrituras)})")
@@ -201,25 +283,68 @@ try:
         comprobar(_datos.get("intento_antes_de_escalar") is True,
                   f"con la vuelta usada adentro (escrito: {_datos})")
 
+    #  UNA ESCRITURA POR CAMBIO, no una por sitio de llamada. Es el defecto que
+    #  midio la quinta auditoria: el turno que pospone DESPUES de derivar pasaba
+    #  por los dos sitios y hacia dos idas a la base, la segunda un
+    #  superconjunto de la primera.
+    _escrituras.clear()
+    _sesion_derivo = SesionFalsa()
+    _sesion_derivo.areas_visitadas = ["soporte_tecnico_cliente"]
+    _estado_dos = {"sesion": _sesion_derivo}
+
+    #  1) el sitio de la derivacion escribe las areas
+    api._persistir_routing("rapilink", "conv-dos", _estado_dos)
+    comprobar(len(_escrituras) == 1,
+              f"la derivacion escribe una vez (escribio {len(_escrituras)})")
+
+    #  2) el mismo escritor otra vez, sin que nada cambie: NO repite
+    api._persistir_routing("rapilink", "conv-dos", _estado_dos)
+    comprobar(len(_escrituras) == 1,
+              f"llamarlo de nuevo sin cambios NO repite la escritura "
+              f"(van {len(_escrituras)})")
+
+    #  3) ahora se pospone: el paquete cambia, asi que SI escribe una vez mas
+    _sesion_derivo.intento_antes_de_escalar = True
+    api._persistir_routing("rapilink", "conv-dos", _estado_dos)
+    comprobar(len(_escrituras) == 2,
+              f"cuando el paquete CAMBIA si escribe (van {len(_escrituras)})")
+    if len(_escrituras) == 2:
+        comprobar(_escrituras[1][2].get("intento_antes_de_escalar") is True
+                  and "areas_visitadas" in _escrituras[1][2],
+                  f"y la segunda lleva las dos cosas "
+                  f"(escribio {_escrituras[1][2]})")
+
     #  El turno que NO pospone no paga una escritura extra: es la propiedad que
     #  el bloque de persistencia de arriba cuidaba y que no hay que perder.
     _escrituras.clear()
-    api._persistir_posposicion("rapilink", "conv-posp", {"sesion": None})
-    api._persistir_posposicion("rapilink", "", {"sesion": _sesion})
+    api._persistir_routing("rapilink", "conv-posp", {"sesion": None})
+    api._persistir_routing("rapilink", "", {"sesion": _sesion})
     comprobar(not _escrituras, "sin sesion o sin conversacion no escribe nada")
 
     #  Y un fallo de la base NO tumba el turno: quien espera una respuesta no
     #  paga el costo de nuestro registro.
-    def _revienta(*a, **k):
-        raise RuntimeError("la base se cayo")
+    #
+    #  SE PRUEBAN LAS DOS FAMILIAS, y la segunda es la que importa: la capa de
+    #  conexion lanza SystemExit, que NO hereda de Exception. La primera
+    #  version de esta prueba inyectaba solo un RuntimeError y quedaba VERDE
+    #  con el 'except Exception' que dejaba escapar la que de verdad ocurre.
+    #  Lo midio la quinta auditoria (27/09/2026): verde por la familia
+    #  equivocada.
+    for tipo, construir in (("Exception", lambda: RuntimeError("la base se cayo")),
+                            ("SystemExit", lambda: SystemExit(
+                                "No hay datos de conexion en el entorno."))):
+        def _revienta(*_a, **_k):
+            raise construir()
 
-    api.persistencia.guardar_estado_routing = _revienta
-    try:
-        api._persistir_posposicion("rapilink", "conv-posp", {"sesion": _sesion})
-        comprobar(True, "un fallo al persistir NO rompe el turno")
-    except Exception as e:                                     # noqa: BLE001
-        comprobar(False,
-                  f"un fallo al persistir rompio el turno: {type(e).__name__}")
+        api.persistencia.guardar_estado_routing = _revienta
+        try:
+            api._persistir_routing("rapilink", "conv-posp",
+                                       {"sesion": _sesion})
+            comprobar(True, f"un fallo de la familia {tipo} NO rompe el turno")
+        except BaseException as e:                             # noqa: BLE001
+            comprobar(False,
+                      f"un fallo de la familia {tipo} rompio el turno: "
+                      f"{type(e).__name__}")
 finally:
     if _real is not None:
         api.persistencia.guardar_estado_routing = _real
