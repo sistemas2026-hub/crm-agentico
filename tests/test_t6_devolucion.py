@@ -87,21 +87,85 @@ def _guardas_de(nodo):
 llamadas = [n for n in ast.walk(arbol_api)
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
             and n.func.attr == "devolver_a_ia"]
-revisar(len(llamadas) == 3,
-        "devolver_a_ia se llama en exactamente 3 lugares",
-        f"encontrados {len(llamadas)} en lineas {[n.lineno for n in llamadas]}")
+
+
+def _funcion_de(nodo):
+    """La funcion mas interna que contiene ese nodo."""
+    dueno = None
+    for f in ast.walk(arbol_api):
+        if isinstance(f, ast.FunctionDef) and f.lineno <= nodo.lineno <= (f.end_lineno or 0):
+            if dueno is None or f.lineno > dueno.lineno:
+                dueno = f
+    return dueno.name if dueno else "(?)"
+
+
+#  EL INVARIANTE SE EXPRESA POR FUNCION, NO POR CONTEO.
+#
+#  Decia "en exactamente 3 lugares" y el 27/09/2026 eran 4, con la cuarta sin
+#  guarda de aceptacion. No era una regresion: es
+#  'conversaciones_devolver' (POST /conversaciones/<id>/devolver), un endpoint
+#  legitimo que devuelve el control SIN ENVIAR NADA al cliente -- y su docstring
+#  dice por que: mezclar el envio a Meta, con su incertidumbre (D17), dentro de un
+#  cambio de control hace que un fallo de red deje el control a medias.
+#
+#  O sea que no exige aceptacion porque NO HAY NADA QUE ACEPTAR. Un conteo no
+#  puede expresar eso; el nombre de la funcion si. Y asi, agregar un camino de
+#  entrega nuevo sin guarda SIGUE poniendo esto en rojo, que es lo que importa.
+SIN_ENTREGA = {
+    #  funcion -> por que no le corresponde la guarda
+    "conversaciones_devolver":
+        "devuelve el control sin enviar nada al cliente, a proposito: el envio y "
+        "el cambio de control se piden por separado para que un fallo de red no "
+        "deje el control a medias",
+}
+
+por_funcion = {}
+for n in llamadas:
+    por_funcion.setdefault(_funcion_de(n), []).append(n)
+
+revisar(bool(llamadas),
+        "devolver_a_ia se llama desde algun lado",
+        f"encontradas {len(llamadas)} llamadas")
+
+nuevas = sorted(set(por_funcion) - set(SIN_ENTREGA) - {"conversaciones_responder_humano"})
+revisar(not nuevas,
+        "no hay funciones NUEVAS devolviendo el control sin declararse",
+        f"funciones no declaradas: {nuevas}. Si una entrega al cliente, tiene que "
+        f"exigir aceptacion; si no entrega nada, va en SIN_ENTREGA con su motivo")
 
 sin_guarda = []
-for n in llamadas:
-    guardas = " ".join(_guardas_de(n))
-    # O bien la guarda nombra la aceptacion, o bien es el canal que no entrega
-    # por WhatsApp (simulador/API: no hay wamid posible y el contrato lo dice
-    # devolviendo aceptado_por_meta = None).
-    if not ("aceptado" in guardas or "!= 'whatsapp'" in guardas):
-        sin_guarda.append(n.lineno)
+for funcion, nodos in por_funcion.items():
+    if funcion in SIN_ENTREGA:
+        continue
+    for n in nodos:
+        guardas = " ".join(_guardas_de(n))
+        # O bien la guarda nombra la aceptacion, o bien es el canal que no entrega
+        # por WhatsApp (simulador/API: no hay wamid posible y el contrato lo dice
+        # devolviendo aceptado_por_meta = None).
+        if not ("aceptado" in guardas or "!= 'whatsapp'" in guardas):
+            sin_guarda.append(f"{funcion}:{n.lineno}")
 revisar(not sin_guarda,
-        "las 3 llamadas exigen aceptacion (o son de un canal sin entrega)",
-        f"sin guarda de aceptacion: lineas {sin_guarda}")
+        "toda devolucion QUE ENTREGA exige aceptacion (o es un canal sin entrega)",
+        f"sin guarda de aceptacion: {sin_guarda}")
+
+#  Y que la exencion no sea una excusa: la funcion exenta NO tiene que enviar.
+for funcion in SIN_ENTREGA:
+    cuerpo = next((f for f in ast.walk(arbol_api)
+                   if isinstance(f, ast.FunctionDef) and f.name == funcion), None)
+    #  Se miran las sentencias del CUERPO, no el nodo entero: 'ast.walk' de una
+    #  FunctionDef incluye sus decoradores, y '@app.post(...)' matcheaba como si
+    #  la funcion enviara algo. Y los nombres son los reales de este archivo:
+    #  '_entregar_y_registrar' y 'whatsapp.enviar_*'.
+    ENVIOS = {"_entregar_y_registrar", "enviar_texto", "enviar_plantilla_aprobada"}
+    envia = cuerpo is not None and any(
+        isinstance(c, ast.Call)
+        and ((isinstance(c.func, ast.Name) and c.func.id in ENVIOS)
+             or (isinstance(c.func, ast.Attribute) and c.func.attr in ENVIOS))
+        for s in cuerpo.body for c in ast.walk(s))
+    revisar(not envia,
+            f"{funcion} sigue sin enviar nada, que es lo que la exime",
+            "si empezo a enviar, la exencion dejo de valer y tiene que exigir "
+            "aceptacion")
 
 revisar("_salida_previa(tenant, f'humano:{clave}')" in fuente_api.replace('"', "'"),
         "el reintento desempata por whatsapp_salidas y no solo por la fila",
