@@ -52,6 +52,19 @@ PUEDEN_SUMAR = {
     "services/inventario.py",
     "services/materiales.py",
     "services/cierre_jornada.py",
+    # Agregado el 28/09/2026 al construir la Fase 2, y ESTA GUARDA LO EXIGIO:
+    # fallo nombrando las dos lineas --`reservado()` y el reporte de consumo por
+    # material-- a las dos horas de haberse escrito, contra su propio autor. Es
+    # justo lo que tenia que hacer.
+    #
+    # Suma dos cosas que NO son la existencia:
+    #   reservado()               lo comprometido, que sale de las reservas y no
+    #                             de los movimientos
+    #   consumo_por_material()    un reporte: agrupa consumos por material sobre
+    #                             una ventana de tiempo
+    # Ninguna de las dos es un segundo calculo de existencia --esa sigue viniendo
+    # de `inventario.py::existencia`-- y `libre()` la LLAMA en vez de recalcularla.
+    "services/inventario_operacion.py",
 }
 
 #: Donde SI se guarda un derivado, con su justificacion escrita.

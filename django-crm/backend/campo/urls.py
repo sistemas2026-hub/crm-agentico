@@ -3,7 +3,13 @@
 
 from django.urls import path
 
-from campo import despacho_views, inventario_views, materiales_views, views
+from campo import (
+    despacho_views,
+    inventario_operacion_views,
+    inventario_views,
+    materiales_views,
+    views,
+)
 
 app_name = "campo"
 
@@ -38,6 +44,19 @@ urlpatterns = [
     path("inventario/despachos/", inventario_views.DespachosView.as_view(), name="inv_despachos"),
     path("inventario/devoluciones/", inventario_views.DevolucionesView.as_view(), name="inv_devoluciones"),
     path("inventario/serie/<str:serie>/", inventario_views.HistoriaDeSerieView.as_view(), name="inv_serie"),
+    # Fase 2: reservas, traslados y conteo fisico.
+    path("inventario/libre/", inventario_operacion_views.LibreView.as_view(), name="inv_libre"),
+    path("inventario/reservas/", inventario_operacion_views.ReservasView.as_view(), name="inv_reservas"),
+    path("inventario/reservas/<uid:pk>/liberar/", inventario_operacion_views.LiberarReservaView.as_view(), name="inv_reserva_liberar"),
+    path("inventario/traslados/", inventario_operacion_views.TrasladosView.as_view(), name="inv_traslados"),
+    path("inventario/conteos/", inventario_operacion_views.ConteosView.as_view(), name="inv_conteos"),
+    path("inventario/conteos/<uid:pk>/anotar/", inventario_operacion_views.AnotarConteoView.as_view(), name="inv_conteo_anotar"),
+    path("inventario/conteos/<uid:pk>/cerrar/", inventario_operacion_views.CerrarConteoView.as_view(), name="inv_conteo_cerrar"),
+    # Fase 3: proveedores, compras y valorizacion.
+    path("inventario/proveedores/", inventario_operacion_views.ProveedoresView.as_view(), name="inv_proveedores"),
+    path("inventario/compras/", inventario_operacion_views.ComprasView.as_view(), name="inv_compras"),
+    path("inventario/valorizacion/", inventario_operacion_views.ValorizacionView.as_view(), name="inv_valorizacion"),
+    path("inventario/reportes/", inventario_operacion_views.ReportesView.as_view(), name="inv_reportes"),
     # Despacho: lo que hace la oficina, no el tecnico.
     path("trabajos/crear/", despacho_views.CrearOrdenView.as_view(), name="trabajo_crear"),
     path("trabajos/<uid:pk>/asignar/", despacho_views.AsignarTrabajoView.as_view(), name="trabajo_asignar"),

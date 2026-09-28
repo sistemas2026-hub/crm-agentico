@@ -885,6 +885,26 @@ class MovimientoDeMaterial(BaseModel):
         blank=True,
         related_name="movimientos_de_entrada",
     )
+    # --- costo, solo en las ENTRADAS -----------------------------------------
+    #
+    # Lo trae la compra y viaja con el movimiento que la registra. No se propaga
+    # a los consumos: el costo de lo que sale se calcula por promedio ponderado
+    # sobre lo que entro (services/inventario_operacion.py::valorizacion), y
+    # copiarlo a cada salida seria guardar un derivado que se puede recalcular.
+    #
+    # Nullable porque la mayoria del material ya adentro no lo tiene, y porque
+    # hay entradas sin costo: un equipo retirado de un cliente no se compro.
+    # Rellenarlo con cero diria que es gratis, que es distinto de no saberlo.
+    costo_unitario = models.DecimalField(
+        max_digits=14, decimal_places=4, null=True, blank=True
+    )
+    compra = models.ForeignKey(
+        "campo.Compra",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimientos",
+    )
     cantidad = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     serie = models.CharField(max_length=128, blank=True, default="")
     estado = models.CharField(max_length=20, choices=ESTADOS, default=ACEPTADO)
@@ -1213,4 +1233,11 @@ from campo.inventario import (  # noqa: E402,F401
     ActivoSerializado,
     UbicacionDeActivo,
     UbicacionInventario,
+)
+from campo.inventario_operacion import (  # noqa: E402,F401
+    Compra,
+    ConteoFisico,
+    LineaDeConteo,
+    Proveedor,
+    ReservaDeMaterial,
 )
