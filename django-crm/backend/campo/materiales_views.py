@@ -56,6 +56,7 @@ from campo.services.cierre_jornada import (
     transferencias_abiertas,
 )
 from campo.services.idempotencia import manejar_idempotencia
+from campo.services import lazo_isp
 from campo.services.materiales import (
     ConsumoInvalido,
     kit_de,
@@ -293,6 +294,26 @@ class MovimientosMaterialView(APIView):
                     })
                     continue
 
+                # EL SERIAL INSTALADO VUELVE AL ISP, y va DESPUES de guardar.
+                #
+                # Guardar primero, avisar despues -- invariante congelado del
+                # proyecto. Si esto se hiciera antes, un fallo de red dejaria el
+                # consumo sin registrar y el material perdido del inventario: un
+                # problema de red convertido en un problema de datos.
+                #
+                # Y nunca revierte: la serie salio de la custodia del tecnico
+                # (hecho) y el ISP la tiene registrada (otro hecho) son dos cosas
+                # distintas, y el segundo puede fallar sin que el primero deje de
+                # ser cierto. Es el mismo patron que ACCION_CONFIRMADA.
+                #
+                # Solo para movimientos NUEVOS: un reenvio de la cola offline no
+                # vuelve a salir a la red. `intentar_avisar` ademas lo reconoceria
+                # por su Idempotency-Key, pero no llamar es mas barato que llamar
+                # y que el otro lado lo descarte.
+                aviso = None
+                if era_nuevo:
+                    aviso = lazo_isp.intentar_avisar(movimiento)
+
                 resultados.append({
                     "clave": datos["clave"],
                     "id": str(movimiento.id),
@@ -301,6 +322,13 @@ class MovimientosMaterialView(APIView):
                     "avisos": movimiento.datos.get("avisos", []),
                     "cantidad": _numero(movimiento.cantidad),
                     "duplicado": not era_nuevo,
+                    # El desenlace viaja a la app para que quien instalo pueda
+                    # ver que el ISP quedo al tanto -- o que no, y por que. Un
+                    # 201 mudo sobre un aviso que no salio es exactamente
+                    # esconder lo que hay que mirar.
+                    "aviso_al_isp": None if aviso is None else {
+                        "estado": aviso.estado, "detalle": aviso.detalle,
+                    },
                 })
 
         return Response(

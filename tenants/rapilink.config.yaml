@@ -4967,6 +4967,58 @@ herramientas:
     argumentos_sobrescribibles: [id_ticket, archivo_ticket]
     filtros_verificados: {}
 
+  # =========================================================================
+  # El serial del equipo instalado vuelve al sistema del ISP.
+  #
+  # POR QUE EXISTE, con su medicion
+  # `sn_onu` esta VACIO en 1.299 de los 4.163 clientes activos (medido el
+  # 14/08/2026, paginacion verificada). Y es la llave contra SmartOLT: uno de
+  # cada tres clientes no se puede diagnosticar por ahi. El unico que sabe que
+  # aparato quedo en esa casa es el tecnico, y hasta ahora ese dato moria en el
+  # inventario de Dexter sin llegar nunca al ISP.
+  #
+  # QUIEN LA LLAMA: el backend del CRM cuando un tecnico consume una ONT
+  # serializada en una orden de trabajo. NO la llama el modelo -- ver
+  # 'invocable_por_servicio', y el rol de abajo esta solo porque el esquema
+  # exige uno.
+  #
+  # POR QUE ES EL EFECTO EXTERNO MAS SEGURO DE ESTA API
+  # Escribir un campo no crea nada: reintentarlo deja el mismo estado que
+  # hacerlo una vez. `crear_ticket` no se reintenta porque crearia un segundo
+  # ticket (gate Q2, cerrado en rojo) y `crear_caso` lo logra artificialmente
+  # metiendo el conversation_id en el nombre. Esta es idempotente por
+  # naturaleza, y por eso NO necesita la cola del reconciliador: el siguiente
+  # intento es seguro por si mismo.
+  #
+  # ⚠️ DECLARADA Y NO ACTIVADA. Falta UNA medicion, y es grave: un PUT
+  # normalmente espera el recurso COMPLETO, asi que mandar solo `sn_onu`
+  # podria VACIAR los demas campos del cliente. OPTIONS confirma que el metodo
+  # es PUT y que el campo es escribible (28/09/2026), pero OPTIONS ya mintio en
+  # esta API -- las fechas de 'crear_ticket_instalacion' aparecen en actions y
+  # el POST las descarta--. Se cierra con un PUT real contra un cliente de
+  # PRUEBA comprobando por GET que lo demas sigue ahi. Ver la skill
+  # wisphub-api. Hasta entonces, el productor del CRM no la invoca.
+  # =========================================================================
+  - nombre: actualizar_sn_onu
+    tipo: http
+    descripcion: >
+      Escribe el numero de serie del equipo instalado en la ficha del cliente
+      de WispHub. La llama el backend cuando un tecnico registra el consumo de
+      una ONT en una orden de trabajo; no la llama el modelo.
+    solo_lectura: false
+    requiere_confirmacion: true
+    invocable_por_servicio: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/clientes/{id_servicio}/
+    metodo: PUT
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    filtros_verificados:
+      id_servicio: {param: id_servicio, tipo: texto, verificado_el: 2026-09-28}
+      sn_onu: {param: sn_onu, tipo: texto, verificado_el: 2026-09-28}
+
   - nombre: crear_ticket_instalacion
     tipo: http
     descripcion: >
