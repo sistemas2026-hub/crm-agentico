@@ -149,3 +149,141 @@ export async function leerPersonas(ctx) {
     return { personas: [], error: true };
   }
 }
+
+/* ===========================================================================
+ * FASE 2 -- reservas, traslados y conteo
+ *
+ * Las lecturas siguen la misma regla que las de arriba: forma vacía Y `error`
+ * aparte, nunca un cero inventado. Y todas reciben `{ cookies }`, no `locals`.
+ * =========================================================================== */
+
+/**
+ * Existencia, reservado y libre de una ubicación — las tres juntas.
+ *
+ * Juntas y no solo `libre`: «quedan 70» sin decir que hay 100 y 30 comprometidos
+ * obliga a abrir otra pantalla para entender el número.
+ *
+ * @param {{cookies: any}} ctx
+ * @param {string} ubicacion
+ */
+export async function leerLibre(ctx, ubicacion) {
+  try {
+    const d = await apiRequest(
+      `/campo/inventario/libre/?ubicacion=${encodeURIComponent(ubicacion)}`, {}, ctx
+    );
+    return { materiales: d?.materiales ?? [], ubicacion: d?.ubicacion ?? null, error: false };
+  } catch {
+    return { materiales: [], ubicacion: null, error: true };
+  }
+}
+
+/** @param {{cookies: any}} ctx @param {string} ubicacion @param {boolean} todas */
+export async function leerReservas(ctx, ubicacion, todas = false) {
+  try {
+    const q = `?ubicacion=${encodeURIComponent(ubicacion)}${todas ? '&todas=1' : ''}`;
+    const d = await apiRequest(`/campo/inventario/reservas/${q}`, {}, ctx);
+    return { reservas: d?.reservas ?? [], error: false };
+  } catch {
+    return { reservas: [], error: true };
+  }
+}
+
+/** @param {{cookies: any}} ctx @param {Record<string, any>} cuerpo */
+export async function reservar(ctx, cuerpo) {
+  return apiRequest('/campo/inventario/reservas/', { method: 'POST', body: cuerpo }, ctx);
+}
+
+/** @param {{cookies: any}} ctx @param {string} id @param {string} motivo */
+export async function liberarReserva(ctx, id, motivo) {
+  return apiRequest(`/campo/inventario/reservas/${id}/liberar/`,
+    { method: 'POST', body: { motivo } }, ctx);
+}
+
+/** @param {{cookies: any}} ctx @param {Record<string, any>} cuerpo */
+export async function trasladar(ctx, cuerpo) {
+  return apiRequest('/campo/inventario/traslados/', { method: 'POST', body: cuerpo }, ctx);
+}
+
+/** @param {{cookies: any}} ctx */
+export async function leerConteos(ctx) {
+  try {
+    const d = await apiRequest('/campo/inventario/conteos/', {}, ctx);
+    return { conteos: d?.conteos ?? [], error: false };
+  } catch {
+    return { conteos: [], error: true };
+  }
+}
+
+/** @param {{cookies: any}} ctx @param {string} ubicacion */
+export async function abrirConteo(ctx, ubicacion) {
+  return apiRequest('/campo/inventario/conteos/',
+    { method: 'POST', body: { ubicacion } }, ctx);
+}
+
+/** @param {{cookies: any}} ctx @param {string} id @param {Record<string, any>} cuerpo */
+export async function anotarConteo(ctx, id, cuerpo) {
+  return apiRequest(`/campo/inventario/conteos/${id}/anotar/`,
+    { method: 'POST', body: cuerpo }, ctx);
+}
+
+/** @param {{cookies: any}} ctx @param {string} id */
+export async function cerrarConteo(ctx, id) {
+  return apiRequest(`/campo/inventario/conteos/${id}/cerrar/`,
+    { method: 'POST', body: {} }, ctx);
+}
+
+/* ===========================================================================
+ * FASE 3 -- proveedores, compras y valorización
+ * =========================================================================== */
+
+/** @param {{cookies: any}} ctx */
+export async function leerProveedores(ctx) {
+  try {
+    const d = await apiRequest('/campo/inventario/proveedores/', {}, ctx);
+    return { proveedores: d?.proveedores ?? [], error: false };
+  } catch {
+    return { proveedores: [], error: true };
+  }
+}
+
+/** @param {{cookies: any}} ctx @param {Record<string, any>} cuerpo */
+export async function crearProveedor(ctx, cuerpo) {
+  return apiRequest('/campo/inventario/proveedores/', { method: 'POST', body: cuerpo }, ctx);
+}
+
+/** @param {{cookies: any}} ctx @param {Record<string, any>} cuerpo */
+export async function registrarCompra(ctx, cuerpo) {
+  return apiRequest('/campo/inventario/compras/', { method: 'POST', body: cuerpo }, ctx);
+}
+
+/**
+ * Cuánto vale lo que hay, y de qué no se sabe.
+ *
+ * `sin_costo_conocido` viaja tal cual hasta la pantalla: el total que el backend
+ * calcula EXCLUYE lo que no puede valorizar, y esconder esa lista convertiría un
+ * total incompleto en uno que parece completo.
+ *
+ * @param {{cookies: any}} ctx @param {string} ubicacion
+ */
+export async function leerValorizacion(ctx, ubicacion) {
+  try {
+    const d = await apiRequest(
+      `/campo/inventario/valorizacion/?ubicacion=${encodeURIComponent(ubicacion)}`, {}, ctx
+    );
+    return { ...d, error: false };
+  } catch {
+    return { total: null, materiales: [], sin_costo_conocido: [], advertencia: '', error: true };
+  }
+}
+
+/** @param {{cookies: any}} ctx @param {string} de */
+export async function leerReporte(ctx, de) {
+  try {
+    const d = await apiRequest(
+      `/campo/inventario/reportes/?de=${encodeURIComponent(de)}`, {}, ctx
+    );
+    return { filas: d?.filas ?? [], error: false };
+  } catch {
+    return { filas: [], error: true };
+  }
+}
