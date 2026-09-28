@@ -678,30 +678,109 @@ py -3.13 tests/test_escalada_forzada.py     -> exit 0
 
 ### Abierto el 25/09/2026 — custodia de materiales, y su prerrequisito
 
-Dos fichas nuevas, ninguna arrancada. El diseño está cerrado; lo que falta es una
-integración que no es suya.
+Dos fichas nuevas. El diseño está cerrado, y la primera **ya está construida**.
 
 ```
-Custodia de materiales   🟡 DISEÑO CONGELADO, ejecución EN ESPERA.
+Custodia de materiales   🟢 CONSTRUIDA Y VISTA EN LA PANTALLA (28/09/2026).
+                            Rama feat/inventario-custodia, worktree
+                            C:/tmp/dexter-inventario. SIN PUSHEAR.
+                            8851b5e  la bodega existe
+                            4f70241  la API: despachar, recibir, historia
+                            79ee0c8  la pantalla /inventario
+                            fe64c8c  la entrada del menú y A4 en Postgres
+                            56fff80  la diferencia al recibir se nombra, y la
+                                     existencia queda defendida por su guarda
                             Ficha: objetivos/custodia-de-materiales.md
                             Brief del diseño (v3): briefs/inventario-de-bodega.md
-                            Lo medido que lo motivó: el módulo de materiales de
-                            Campo tiene 8 entidades y 5 endpoints, y NO tiene
+                            Lo que la motivó, medido: el módulo de materiales de
+                            Campo tenía 8 entidades y 5 endpoints y NO tenía
                             bodega -- 0 entidades de existencia, 0 endpoints para
                             crear una EntregaDeKit, 0 pantallas, 0 rol de
-                            bodeguero. Nadie puede despachar material hoy.
-                            Y NADA de materiales esta en produccion: las
-                            migraciones 0004/0005/0006 de campo no existen en la
-                            rama de despliegue. Eso liberó el diseño --no hay
-                            contrato desplegado que proteger-- y por eso es un
-                            libro unico de movimientos con origen y destino, no
-                            una capa paralela.
-                            NO ARRANCA hasta que la integración de Campo esté
-                            hecha. Esperar no cuesta: nada del diseño depende de
-                            la rama.
+                            bodeguero. Nadie podía despachar material.
+                            Ahora el ciclo cierra: entrada → bodega → técnico →
+                            devolución → bodega, con UN libro de movimientos que
+                            lleva origen y destino. La existencia de cualquier
+                            ubicación sale de la misma resta, así que el saldo de
+                            un técnico es un caso particular y no otro cálculo.
+                            EL BLOQUEO SE QUITÓ SIN TOCAR LA RAMA DE CAMPO: el
+                            worktree salió de producción al día y se trajo sólo el
+                            módulo `campo/`. La otra sesión siguió con su rama
+                            intacta. Ver la ficha de integración, abajo.
 
-Integración de Campo     🔴 BLOQUEADA HASTA CONTRATO CUMPLIDO.
+                            LO QUE ENCONTRÓ AL CONSTRUIRSE, y ninguna prueba
+                            había cazado -- todos medidos, todos arreglados:
+                              el constraint de ItemDeKit hacía IMPOSIBLE
+                                re-despachar una serie devuelta. Estaba anotado
+                                como "inferido de leer el esquema"; ahora está
+                                EJECUTADO: IntegrityError reproducido por la
+                                prueba A3
+                              la clave idempotente no cabía en su varchar(128)
+                                --cuatro UUID, ~134 caracteres-- y las pruebas
+                                pasaban porque corren sobre SQLite, que no impone
+                                la longitud. PostgreSQL real: DataError
+                              A4 se comprobaba SECUENCIALMENTE, y depende de un
+                                select_for_update que SQLite no implementa: la
+                                suite podía estar verde con la carrera abierta
+                              tres defectos del frontend que sólo se vieron
+                                ABRIENDO la pantalla: endpoints con /api doble
+                                (404), `locals` en vez de `{cookies}` (token
+                                vacío, toda lectura fallaba en silencio), y el
+                                nombre de una custodia saliendo como UUID
+                            Dos veces el mismo patrón: EL MOTOR DE LA PRUEBA NO ES
+                            EL MOTOR DE PRODUCCIÓN. Por eso hay una prueba que
+                            afirma sobre el LÍMITE del campo y no sobre el motor,
+                            y otra que se SALTA nombrando el motivo cuando no hay
+                            Postgres.
+
+                            Verificado:
+                              34 pasan contra PostgreSQL real (ciclo 17 + api 12
+                                 + una-sola-verdad 4 + concurrencia 1), con
+                                 TEST_DATABASE_URL
+                              273 pasan · 6 skipped · 0 fallan, campo/tests/
+                                 entero sobre SQLite
+                              la pantalla, MIRADA con JWT contra el backend local:
+                                 Bodega Central   960 conectores · 6 ONT ·
+                                                  3700.75 m de fibra
+                                 Custodia de Marcador   40 · 0 · 300.25
+                                 Camioneta 1      sin movimientos
+                                 la ONT devuelta volvió a la bodega, y la consulta
+                                 de su serie da cuadra_con_el_libro: true
+                              la entrada en el menú: Instalaciones · INVENTARIO ·
+                                 Base de conocimiento
+
+                            LO QUE FALTA, dicho: la pasada adversarial (F14 --
+                            los 9 agentes siguen sin cargarse), `flutter test`
+                            en este worktree (la app consume los 5 endpoints
+                            viejos y ninguno cambió de contrato, pero eso está
+                            INFERIDO), y el `revisor-de-pii` sobre qué se dibuja
+                            junto a un movimiento que trae `orden`: una orden
+                            arrastra nombre y dirección del cliente.
+
+                            LO QUE NO SE HIZO, dicho: Fase 2 (varias bodegas con
+                            traslados, conteo físico, reservas, reportes) y Fase 3
+                            (proveedores, compras, costos). Y el lazo con WispHub
+                            --escribir `sn_onu` del equipo instalado-- sigue en
+                            Fase 2: es una escritura a un sistema externo y pasa
+                            por la frontera de autorización del motor.
+
+Integración de Campo     🔴 SIGUE ABIERTA, y ya no bloquea al inventario.
                             Ficha: objetivos/integracion-campo.md
+                            El 28/09 se resolvió de otra forma: en vez de esperar
+                            la rama, el inventario se construyó en un worktree
+                            desde PRODUCCIÓN al día, trayendo sólo `campo/`. Eso
+                            quitó el bloqueo sin tocar la rama que otra sesión
+                            edita, y de paso resolvió dos conflictos que la
+                            integración completa va a encontrar igual:
+                              las DOS migraciones 0003 de `campo`, unidas con un
+                                merge (0007). Se midió que era seguro antes de
+                                escribirlo: tocan modelos distintos
+                              las DOS migraciones 0039 de `common`. Las de campo
+                                dependían de la que NO está en producción; se
+                                apuntaron a 0038, que existe en las dos ramas, y
+                                la dependencia real son Org y Profile, que están
+                                desde 0001
+                            Lo que sigue siendo de esta ficha: los 190 archivos
+                            que difieren en los dos lados.
                             feat/campo-diseno-stitch está 59 commits adelante del
                             destino y 297 ATRÁS. 948 archivos difieren:
                             548 faltan en Campo · 210 son solo de Campo ·

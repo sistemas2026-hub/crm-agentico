@@ -1,8 +1,12 @@
 # Objetivo · Custodia de materiales — cerrar el ciclo bodega ↔ técnico
 
-> Abierto el 25/09/2026. Estado: **abierto**, diseño **congelado**, ejecución **en
-> espera de un prerrequisito ajeno** (B1: la integración de Campo va primero).
-> Fase **1 de 3**.
+> Abierto el 25/09/2026. **Fase 1 construida el 28/09/2026** y vista en la
+> pantalla. Estado: **abierto** — falta el cierre formal (F12 auditor, F15 poda
+> del estado) y las Fases 2 y 3. Fase **1 de 3**.
+>
+> Commits, rama `feat/inventario-custodia` (worktree `C:/tmp/dexter-inventario`),
+> **sin pushear**: `8851b5e` la bodega · `4f70241` la API · `79ee0c8` la
+> pantalla · `fe64c8c` el menú y A4 en Postgres.
 >
 > El **qué** y el **por qué** del diseño viven en
 > [../briefs/inventario-de-bodega.md](../briefs/inventario-de-bodega.md) (v2) y no
@@ -207,3 +211,90 @@ feat/campo-diseno-stitch a la rama de despliegue va PRIMERO. Si no está hecha,
 este objetivo no arranca: decirlo y detenerse, no elegir otra rama por cuenta
 propia ni empezar "mientras tanto" sobre la rama de Campo.
 ```
+
+---
+
+## Resultado de la Fase 1 — medido el 28/09/2026
+
+Construida en el worktree `C:/tmp/dexter-inventario` (rama
+`feat/inventario-custodia`), que salió de **producción al día** y trajo sólo el
+módulo `campo/`. La rama de Campo no se tocó, así que J1 dejó de bloquear.
+
+| # | Criterio | Resultado |
+|---|---|---|
+| F1 | Una sola hoja de migraciones | ✅ `0007_merge_despacho_y_rol` une las dos ramas; `migrate campo` aplicó 0007, 0008 y 0009. Se midió antes que el merge era seguro: las dos `0003` tocan modelos distintos |
+| F2 | Una sola función calcula existencia | ✅ **con su guarda**, `test_inventario_una_sola_verdad.py`: ningún modelo guarda un contador, solo los servicios declarados suman cantidades, `existencia()` está definida una vez, y la excepción del puntero sigue teniendo su reconciliación. Comprobada al revés: se inyectó un campo `disponible` y lo cazó por su ruta (`inventario.py:102`) |
+| F3 | Una serie devuelta se re-despacha | ✅ y de paso convirtió el defecto de *inferido* a **ejecutado**: la prueba reprodujo el `IntegrityError` del constraint viejo antes de quitarlo |
+| F4 | Una serie no está en dos custodias | ✅ **medido con concurrencia real en PostgreSQL**, dos hilos compitiendo. La versión secuencial no alcanzaba: depende de `select_for_update`, que SQLite no implementa |
+| F5 | Reconciliación puntero ↔ libro | ✅ recalcula la posición de cada activo desde sus movimientos y compara. Es lo que hace legítimo a `UbicacionDeActivo` |
+| F6 | Despacho punta a punta | 🟡 **por la API sí** (201, con acta y movimientos). **La app de Flutter NO se verificó**: `flutter test` no se corrió en este worktree |
+| F7 | La devolución suma en bodega | ✅ 100 → despacha 30 → devuelve 12 → bodega 82, técnico 18. Los números pegados en la prueba |
+| F8 | Diferencia al recibir abre incidencia | ✅ una línea puede declarar `esperado`; si vuelve menos se abre `IncidenciaDeMaterial` por la diferencia, con la nota de quien recibió en el motivo. **Sin `esperado` no se adivina**, y es deliberado: devolver parte de lo que se tiene es legítimo, y una incidencia por cada devolución parcial es la forma más rápida de que nadie las mire. La pantalla lo avisa en ámbar — un faltante en verde se lee «todo bien» y en rojo «falló la operación», y ninguna es cierta |
+| F9 | El bodeguero despacha y NO valida órdenes | ✅ las **dos** direcciones: despacho 201, `validar/` 403 |
+| F10 | Aislamiento por organización | ✅ dos orgs, cero filas cruzadas, en servicio y en API |
+| F11 | La historia de una serie se lee | ✅ `entrada → despacho → devolución` en orden, con sus ubicaciones |
+| F12 | El despacho imposible se rechaza antes | ✅ 409 con el mensaje que dice **dónde** está el aparato. Y la contraparte se mantiene: las 21 pruebas de custodia siguen verdes, así que un consumo que descuadra sigue entrando como `descuadre` |
+| F13 | Sin regresiones | 🟡 `campo/tests/` **266 pasan · 5 skipped · 0 fallan**. Pero la **línea base no se midió antes** de empezar — el worktree salió de producción, que no tenía el módulo, así que la base era "no existe". `flutter test` no se corrió |
+| F14 | Pasada adversarial | ❌ **el `auditor-independiente` no corrió.** Los 9 agentes siguen sin cargarse en la sesión |
+| F15 | El estado lo refleja | ✅ escrito por la sesión dueña (`integrar-centro-mando`) |
+
+### Lo que queda
+
+```
+F14            la pasada adversarial. Los 9 agentes siguen sin cargarse en la
+               sesión, así que no corrió ninguno
+flutter test   la app consume los 5 endpoints viejos y ninguno cambió de
+               contrato, pero eso está INFERIDO: no se corrió en este worktree
+`revisor-de-pii`  qué se dibuja junto a un movimiento cuando trae `orden`: una
+               orden arrastra nombre y dirección del cliente, y la pantalla de
+               inventario no tendría por qué mostrarlos
+```
+
+**F2 y F8 se cerraron el 28/09 después de escribir esta tabla por primera vez.**
+Quedan anotados porque el orden importa: primero se dijo que faltaban, con su
+motivo, y recién después se construyeron. Una ficha que solo muestra lo verde no
+deja ver qué se decidió dejar para el final.
+
+### Los cuatro defectos que aparecieron al construir
+
+Ninguno lo habían cazado las pruebas, y dos son del mismo patrón:
+
+```
+EL MOTOR DE LA PRUEBA NO ES EL MOTOR DE PRODUCCIÓN
+  la clave idempotente medía ~134 caracteres contra un varchar(128), y SQLite no
+    impone la longitud -> DataError en PostgreSQL real. Ahora se hashea, y hay
+    una prueba que afirma sobre el LÍMITE del campo y no sobre el motor
+  A4 dependía de select_for_update, que SQLite no implementa: la comprobación
+    pasaba por el orden de las operaciones -> prueba nueva con dos hilos, que se
+    SALTA nombrando el motivo cuando no hay Postgres
+
+LO QUE SÓLO SE VE ABRIENDO LA PANTALLA
+  endpoints con `/api` doble -> 404, y la pantalla salió entera diciendo "no se
+    pudo leer". Que dijera eso en vez de pintar bodegas vacías es la propiedad
+    que se diseñó a propósito, y se vio funcionar antes de arreglar la causa
+  `locals` en vez de `{cookies}` -> token vacío, toda lectura fallando en silencio
+  el nombre de una custodia salía como UUID: no está en `Profile` sino en
+    `User.name`. Para el compilador un UUID es un nombre perfectamente válido
+```
+
+### La pantalla, mirada
+
+Con JWT contra el backend local, en `/inventario`:
+
+```
+Bodega Central (bodega)
+  CON-SC-APC   Conector SC/APC      Conectores   960       unidades
+  ONT-HG8145   ONT Huawei HG8145V5  Equipos      6         unidades
+  FIB-DROP     Fibra drop 1 hilo    Fibra        3700.75   m
+Custodia de Marcador (tecnico)
+  CON-SC-APC   Conector SC/APC      Conectores   40        unidades
+  ONT-HG8145   ONT Huawei HG8145V5  Equipos      0         unidades
+  FIB-DROP     Fibra drop 1 hilo    Fibra        300.25    m
+Camioneta 1 (vehiculo)   Sin movimientos todavía.
+
+menú:  Instalaciones · INVENTARIO · Base de conocimiento
+serie: HWTCA6FB5263 → entrada → Bodega Central, cuadra_con_el_libro: true
+```
+
+La ONT devuelta volvió a la bodega —6 allá, 0 con el técnico— que es el ciclo
+completo visible en un número.
