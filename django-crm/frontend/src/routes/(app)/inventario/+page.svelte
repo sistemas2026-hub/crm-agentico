@@ -79,6 +79,18 @@
 {#if form?.error}
   <div class="aviso aviso--roto">{form.error}</div>
 {/if}
+{#if form?.incidencias?.length}
+  <div class="aviso aviso--ojo">
+    <strong>Quedó una diferencia abierta.</strong>
+    La devolución se registró por lo que llegó, y lo que falta quedó como
+    incidencia — no se absorbió en un ajuste:
+    <ul>
+      {#each form.incidencias as i (i.id)}
+        <li><span class="mono">{i.material}</span> · faltan {i.cantidad} · {i.motivo}</li>
+      {/each}
+    </ul>
+  </div>
+{/if}
 
 <nav class="pestanas">
   <button class:activa={pestana === 'existencias'} onclick={() => (pestana = 'existencias')}>
@@ -298,6 +310,15 @@
       {/if}
 
       <label>
+        Se esperaba <span class="tenue">(opcional — cuánto debía volver)</span>
+        <input name="esperado" type="number" step="0.001" min="0" />
+        <small>
+          Si vuelve menos de lo que se esperaba, se abre una incidencia por la
+          diferencia. Vacío significa entrega parcial: no se abre nada.
+        </small>
+      </label>
+
+      <label>
         Nota <span class="tenue">(por qué vuelve — opcional)</span>
         <input name="notas" placeholder="el cliente canceló, vuelve sin instalar" />
       </label>
@@ -445,6 +466,11 @@
   .aviso { padding: 0.7rem 0.9rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
   .aviso--roto { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
   .aviso--bien { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+  /* Ni error ni exito: algo que hay que MIRAR. Un faltante en verde se lee
+     como "todo bien" y en rojo como "fallo la operacion"; ninguna de las dos
+     es cierta. */
+  .aviso--ojo { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+  .aviso--ojo ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
 
   .vacio { color: var(--text-muted, #6b7280); font-size: 0.9rem; max-width: 62ch; }
 

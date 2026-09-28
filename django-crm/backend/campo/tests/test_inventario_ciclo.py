@@ -416,3 +416,89 @@ def test_la_clave_idempotente_cabe_en_el_campo(org_a, bodega, ont, tecnico):
     assert not largas, (
         f"hay claves mas largas que el campo ({largo_declarado}): {largas}"
     )
+
+
+# ---------------------------------------------------------------------------
+# F8 -- lo que falta se nombra, no se absorbe
+# ---------------------------------------------------------------------------
+
+def test_f8_recibir_menos_de_lo_esperado_abre_incidencia(
+    org_a, bodega, conector, tecnico
+):
+    """La diferencia es un hecho aparte, con su motivo.
+
+    Es la decision del brief §2.4: "faltan 3 conectores" y "se dañaron 3 al
+    retirarlos" son cosas distintas, y absorber la diferencia en un ajuste
+    silencioso borra la pregunta antes de que alguien la haga.
+    """
+    from campo.models import IncidenciaDeMaterial
+
+    inv.registrar_entrada(
+        org=org_a, material=conector, cantidad=100, ubicacion_destino=bodega,
+    )
+    inv.despachar(
+        org=org_a, ubicacion_origen=bodega, profile_destino=tecnico,
+        lineas=[{"material": conector, "cantidad": 30}],
+    )
+
+    movs, incidencias = inv.recibir_devolucion(
+        org=org_a, profile_origen=tecnico, ubicacion_destino=bodega,
+        lineas=[{"material": conector, "cantidad": 25, "esperado": 30}],
+        notas="el tecnico dice que no sabe",
+    )
+
+    assert len(incidencias) == 1, "la diferencia de 5 no abrio incidencia"
+    inc = incidencias[0]
+    assert inc.cantidad == Decimal("5")
+    assert "se esperaban 30" in inc.motivo and "volvieron 25" in inc.motivo
+    # La nota de quien recibio viaja en el motivo: sin ella la incidencia dice
+    # que falta algo y no lo que se dijo en el momento.
+    assert "no sabe" in inc.motivo
+
+    # Y la devolucion registra lo que LLEGO, no lo que se esperaba: el
+    # movimiento no se infla para que cuadre.
+    assert len(movs) == 1 and movs[0].cantidad == Decimal("25")
+    assert inv.existencia(bodega, conector) == Decimal("95")
+
+    assert IncidenciaDeMaterial.objects.filter(org=org_a).count() == 1
+
+
+def test_f8_sin_esperado_no_se_adivina_un_faltante(
+    org_a, bodega, conector, tecnico
+):
+    """Devolver parte de lo que se tiene es legitimo y no abre nada.
+
+    Al tecnico le quedan 5 y sigue trabajando. Abrir una incidencia por cada
+    devolucion parcial es la forma mas rapida de que nadie las mire.
+    """
+    inv.registrar_entrada(
+        org=org_a, material=conector, cantidad=100, ubicacion_destino=bodega,
+    )
+    inv.despachar(
+        org=org_a, ubicacion_origen=bodega, profile_destino=tecnico,
+        lineas=[{"material": conector, "cantidad": 30}],
+    )
+    movs, incidencias = inv.recibir_devolucion(
+        org=org_a, profile_origen=tecnico, ubicacion_destino=bodega,
+        lineas=[{"material": conector, "cantidad": 25}],
+    )
+    assert incidencias == []
+    assert len(movs) == 1
+
+
+def test_f8_devolver_todo_lo_esperado_no_abre_incidencia(
+    org_a, bodega, conector, tecnico
+):
+    """El control de la prueba de arriba: cuando cuadra, no pasa nada."""
+    inv.registrar_entrada(
+        org=org_a, material=conector, cantidad=100, ubicacion_destino=bodega,
+    )
+    inv.despachar(
+        org=org_a, ubicacion_origen=bodega, profile_destino=tecnico,
+        lineas=[{"material": conector, "cantidad": 30}],
+    )
+    _, incidencias = inv.recibir_devolucion(
+        org=org_a, profile_origen=tecnico, ubicacion_destino=bodega,
+        lineas=[{"material": conector, "cantidad": 30, "esperado": 30}],
+    )
+    assert incidencias == []

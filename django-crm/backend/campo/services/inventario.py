@@ -39,7 +39,13 @@ from django.db import transaction
 from django.db.models import Sum
 
 from campo.inventario import ActivoSerializado, UbicacionDeActivo, UbicacionInventario
-from campo.models import EntregaDeKit, ItemDeKit, MaterialCatalogo, MovimientoDeMaterial
+from campo.models import (
+    EntregaDeKit,
+    IncidenciaDeMaterial,
+    ItemDeKit,
+    MaterialCatalogo,
+    MovimientoDeMaterial,
+)
 
 CERO = Decimal("0")
 
@@ -399,6 +405,19 @@ def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
 
     Es lo que faltaba del ciclo: antes `saldo_de` le restaba la devolucion al
     tecnico y ahi terminaba el rastro, porque no habia bodega donde sumarla.
+
+    LO QUE FALTA NO SE ESCONDE: SE NOMBRA
+    -------------------------------------
+    Una linea puede traer `esperado`: cuanto DEBIA volver. Si vuelve menos, la
+    diferencia NO se absorbe en la devolucion -- se abre una
+    `IncidenciaDeMaterial` por lo que falta, y la devolucion registra lo que de
+    verdad llego. Son dos hechos distintos y los dos tienen que poder explicarse
+    despues.
+
+    Sin `esperado` no se adivina: devolver 12 de 18 es legitimo --al tecnico le
+    quedan 6 y sigue trabajando-- y tratarlo como faltante abriria una incidencia
+    por cada devolucion parcial, que es la forma mas rapida de que nadie las mire.
+    Quien recibe es el que sabe si esto es un cierre o una entrega parcial.
     """
     if ubicacion_destino is None:
         raise DespachoInvalido("Una devolucion necesita decir a que bodega vuelve.")
@@ -410,6 +429,7 @@ def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
         )
 
     movimientos = []
+    incidencias = []
     for i, linea in enumerate(lineas):
         material = linea["material"]
         serie = (linea.get("serie") or "").strip()
@@ -430,7 +450,33 @@ def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
         movimientos.append(mov)
         if serie:
             _mover_activo(activo_de(org, material, serie), ubicacion_destino, mov)
-    return movimientos
+
+        # Lo que falta se NOMBRA. La devolucion registra lo que llego; la
+        # diferencia es un hecho aparte, con su motivo, y NO se absorbe en un
+        # ajuste silencioso: "faltan 3 conectores" y "se dañaron 3 al retirarlos"
+        # son cosas distintas y la empresa necesita saber cual de las dos tiene.
+        esperado = linea.get("esperado")
+        if esperado is not None:
+            falta = Decimal(str(esperado)) - cantidad
+            if falta > CERO:
+                incidencias.append(IncidenciaDeMaterial.objects.create(
+                    org=org,
+                    profile=profile_origen,
+                    material=material,
+                    tipo=IncidenciaDeMaterial.OTRO,
+                    cantidad=falta,
+                    serie=serie,
+                    motivo=(
+                        f"Al recibir se esperaban {esperado} y volvieron "
+                        f"{cantidad}. Falta por explicar: {falta}."
+                        + (f" Nota de quien recibio: {notas}" if notas else "")
+                    ),
+                    idempotency_key=_clave("faltante", org.id, origen.id, i,
+                                           material.id, serie or cantidad,
+                                           esperado),
+                ))
+
+    return movimientos, incidencias
 
 
 def historia_de(org, material, serie) -> list:

@@ -98,7 +98,8 @@ export const actions = {
   devolucion: async ({ request, cookies }) => {
     const f = await request.formData();
     try {
-      await recibirDevolucion({ cookies }, {
+      const esperado = (f.get('esperado') ?? '').toString().trim();
+      const r = await recibirDevolucion({ cookies }, {
         profile_origen: f.get('profile_origen'),
         ubicacion_destino: f.get('ubicacion_destino'),
         notas: f.get('notas') ?? '',
@@ -106,8 +107,20 @@ export const actions = {
           material: f.get('material'),
           cantidad: f.get('cantidad'),
           serie: f.get('serie') ?? '',
+          // Solo viaja si quien recibe lo declaró. Sin esto el backend NO
+          // adivina un faltante: devolver parte de lo que se tiene es legítimo.
+          ...(esperado ? { esperado } : {}),
         }],
       });
+      const abiertas = r?.incidencias ?? [];
+      if (abiertas.length) {
+        // La diferencia se DICE. Un 201 silencioso sobre una devolución que no
+        // cuadra es esconder justo lo que hay que mirar.
+        return {
+          hecho: 'La devolución quedó registrada.',
+          incidencias: abiertas,
+        };
+      }
       return { hecho: 'La devolución quedó registrada.' };
     } catch (e) {
       return fail(409, { error: mensajeDe(e) });

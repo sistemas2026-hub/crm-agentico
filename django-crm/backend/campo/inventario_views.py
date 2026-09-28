@@ -308,7 +308,7 @@ class DevolucionesView(APIView):
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            movs = inv.recibir_devolucion(
+            movs, incidencias = inv.recibir_devolucion(
                 org=org, profile_origen=tecnico, ubicacion_destino=destino,
                 lineas=lineas, recibida_por=request.profile,
                 notas=(request.data.get("notas") or "").strip(),
@@ -316,8 +316,18 @@ class DevolucionesView(APIView):
         except inv.DespachoInvalido as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
 
-        return Response({"movimientos": [str(m.id) for m in movs]},
-                        status=status.HTTP_201_CREATED)
+        # Las incidencias viajan de vuelta a proposito: quien recibio tiene que
+        # VER que quedo una diferencia abierta, no enterarse despues. Un 201
+        # silencioso sobre una devolucion que no cuadra es exactamente esconder
+        # lo que falta.
+        return Response({
+            "movimientos": [str(m.id) for m in movs],
+            "incidencias": [
+                {"id": str(i.id), "material": i.material.codigo,
+                 "cantidad": str(i.cantidad), "motivo": i.motivo}
+                for i in incidencias
+            ],
+        }, status=status.HTTP_201_CREATED)
 
 
 class HistoriaDeSerieView(APIView):
