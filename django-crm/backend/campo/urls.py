@@ -3,7 +3,7 @@
 
 from django.urls import path
 
-from campo import despacho_views, materiales_views, views
+from campo import despacho_views, inventario_views, materiales_views, views
 
 app_name = "campo"
 
@@ -28,6 +28,15 @@ urlpatterns = [
         materiales_views.CerrarJornadaView.as_view(),
         name="jornada_cerrar",
     ),
+    # Inventario: lo que hace la oficina. Ver campo/inventario_views.py sobre
+    # por que el bodeguero es un rol aparte y no hereda lo de un supervisor.
+    path("inventario/ubicaciones/", inventario_views.UbicacionesView.as_view(), name="inv_ubicaciones"),
+    path("inventario/existencias/", inventario_views.ExistenciasView.as_view(), name="inv_existencias"),
+    path("inventario/catalogo/", inventario_views.CatalogoView.as_view(), name="inv_catalogo"),
+    path("inventario/entradas/", inventario_views.EntradasView.as_view(), name="inv_entradas"),
+    path("inventario/despachos/", inventario_views.DespachosView.as_view(), name="inv_despachos"),
+    path("inventario/devoluciones/", inventario_views.DevolucionesView.as_view(), name="inv_devoluciones"),
+    path("inventario/serie/<str:serie>/", inventario_views.HistoriaDeSerieView.as_view(), name="inv_serie"),
     # Despacho: lo que hace la oficina, no el tecnico.
     path("trabajos/crear/", despacho_views.CrearOrdenView.as_view(), name="trabajo_crear"),
     path("trabajos/<uid:pk>/asignar/", despacho_views.AsignarTrabajoView.as_view(), name="trabajo_asignar"),

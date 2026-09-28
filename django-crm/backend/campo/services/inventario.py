@@ -42,6 +42,13 @@ from campo.models import EntregaDeKit, ItemDeKit, MaterialCatalogo, MovimientoDe
 
 CERO = Decimal("0")
 
+#: La precision del DecimalField de `cantidad` (3 decimales). Se cuantiza al
+#: presentar porque un `Sum` devuelve el Decimal que le sale --"40" o
+#: "40.000" segun los operandos-- y un formato que varia obliga a cada
+#: consumidor a normalizar. Un solo formato, predecible; como mostrarlo lo
+#: decide la pantalla, que ya recibe `clase` y `unidad`.
+PRECISION = Decimal("0.001")
+
 #: Los movimientos que NO cuentan para una existencia. Un conflicto por
 #: definicion no ocurrio --alguien mas ya habia consumido esa serie-- y contarlo
 #: descuadraria la existencia de quien no hizo nada malo. Mismo criterio que
@@ -106,7 +113,11 @@ def existencias_de(ubicacion) -> list[dict]:
             "categoria": material.categoria,
             "clase": material.clase,
             "unidad": material.unidad,
-            "existencia": existencia(ubicacion, material),
+            # STRING y no Decimal: DRF serializa un Decimal como float, y un
+            # float pierde precision justo donde este modulo la cuida --una
+            # bobina se consume en metros con tres decimales--. Medido: 40.000
+            # llegaba como 40.0 al JSON.
+            "existencia": str(existencia(ubicacion, material).quantize(PRECISION)),
         })
     return sorted(filas, key=lambda f: (f["categoria"], f["nombre"]))
 
