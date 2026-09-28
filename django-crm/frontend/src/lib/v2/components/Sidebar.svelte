@@ -29,7 +29,8 @@
     GraduationCap,
     Gauge,
     ClipboardCheck,
-    Radar
+    Radar,
+    Boxes
   } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
 
@@ -111,6 +112,10 @@
         // se llegaba escribiendo la URL. Una pantalla sin entrada no esta
         // terminada, esta escondida.
         { href: '/instalaciones', label: 'Instalaciones', icon: ClipboardCheck },
+        // Que hay en bodega y que tiene cada tecnico. Va aca y no bajo
+        // Configurar porque es una pantalla de OPERACION: se abre para
+        // decidir si se puede despachar, no para ajustar nada.
+        { href: '/inventario', label: 'Inventario', icon: Boxes },
         { href: '/solutions', label: 'Base de conocimiento', icon: BookOpen },
         { href: '/documents', label: 'Documentos', icon: FileText }
       ]
