@@ -1715,6 +1715,38 @@ retrocede sobre lo que ya quedó sin dueño: esas las atiende una persona. Confu
 "el defecto dejó de producirse" con "las víctimas del defecto están atendidas" sería
 el mismo error de categoría que esta ficha viene corrigiendo todo el día.
 
+### El rojo que queda, y por qué NO es de este bloque
+
+Al cerrar, la suite deja **un solo rojo**: `test_manifiesto_oficial_pg17`. Conviene
+dejar dicho por qué no se tocó, porque un rojo sin explicación invita a pensar que lo
+causó esta rama.
+
+**Localizado, no supuesto.** Su primera afirmación compara byte a byte el manifiesto
+de adopción versionado contra uno regenerado, y el detalle señala **una sola
+migración**: `202609141110_roles_operativos_public.sql`. Eso hizo sospechar de esta
+rama, que cambió el fin de línea de 70 `.sql` con `.gitattributes`. **Medido, no es
+eso:**
+
+| Comprobación | Resultado |
+|---|---|
+| ¿esta rama cambió ese archivo en git? | **no**, `git diff` vacío contra `origin/fix` |
+| ¿el disco coincide con git? | **sí**, los dos en LF, 3.626 bytes |
+| ¿el checksum del ledger normaliza CRLF? | **sí**, `migrar_asistente.bytes_canonicos` pasa `
+` a `
+` antes de hashear |
+| ¿el `sha256` guardado coincide con el del archivo? | **sí**, `f8a3487…` en los dos |
+
+Así que **el contenido de la migración no cambió y su checksum está bien**. Lo que
+difiere es el resto del registro de esa migración —`verificaciones`, el mapa de ACL
+esperadas para las ~129 tablas de `public`—, y eso **se genera inspeccionando una base
+viva**. O sea que el manifiesto oficial y el esquema que produce Django hoy no
+coinciden en algún permiso.
+
+**Eso es del bloque de migraciones, no de este.** Y arreglarlo no es una limpieza:
+regenerar un artefacto versionado que gobierna la adopción en producción es una
+decisión, con su propia verificación. Queda nombrado acá para que la próxima sesión no
+lo vuelva a atribuir al fin de línea, que es la pista falsa obvia.
+
 ### El resumen, en una tabla
 
 | # | Qué | Cuándo se puede saber | ¿Necesita autorización? |
