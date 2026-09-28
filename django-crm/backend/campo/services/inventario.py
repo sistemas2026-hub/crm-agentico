@@ -32,6 +32,7 @@ Nada de lo ya ocurrido se bloquea jamas.
 
 from __future__ import annotations
 
+import hashlib
 from decimal import Decimal
 
 from django.db import transaction
@@ -134,12 +135,31 @@ def ubicacion_de_tecnico(profile, org, *, crear: bool = True):
     ).first()
     if existente or not crear:
         return existente
-    nombre = getattr(profile, "name", None) or getattr(profile, "id", "tecnico")
     return UbicacionInventario.objects.create(
         org=org,
         tipo=UbicacionInventario.TECNICO,
         profile=profile,
-        nombre=f"Custodia de {nombre}",
+        nombre=f"Custodia de {nombre_de(profile)}",
+    )
+
+
+def nombre_de(profile) -> str:
+    """Como se llama una persona, para que la pantalla no muestre un UUID.
+
+    El nombre NO esta en `Profile` --no tiene campo `name`-- sino en `User.name`.
+    La primera version probaba `profile.name` y caia al `id`, asi que la pantalla
+    decia "Custodia de 47905efd-4009-4861-91a9-4f29785d7f36". Se vio al abrirla,
+    no al leer el codigo: para el compilador un UUID es un nombre perfectamente
+    valido.
+
+    El email es el ultimo recurso antes del id porque identifica a una persona
+    real; el id no le dice nada a nadie.
+    """
+    user = getattr(profile, "user", None)
+    return (
+        (getattr(user, "name", "") or "").strip()
+        or (getattr(user, "email", "") or "").strip()
+        or str(getattr(profile, "id", "sin nombre"))
     )
 
 
@@ -206,14 +226,39 @@ def _mover_activo(activo, ubicacion, movimiento) -> None:
 # Las tres operaciones del ciclo
 # ---------------------------------------------------------------------------
 
-def _clave(*partes) -> str:
-    """Clave idempotente ESTABLE, derivada de algo durable.
+#: Lo que aguanta `MovimientoDeMaterial.idempotency_key`.
+LARGO_CLAVE = 128
+
+
+def _clave(prefijo: str, *partes) -> str:
+    """Clave idempotente ESTABLE, derivada de algo durable, y que CABE.
 
     Un uuid nuevo por intento es un identificador unico, no una clave
-    idempotente -- es un invariante congelado del proyecto. Por eso la clave sale
-    del acta y la linea, nunca de la hora ni de un random.
+    idempotente -- invariante congelado del proyecto. Por eso sale del acta y la
+    linea, nunca de la hora ni de un random.
+
+    POR QUE SE HASHEA EN VEZ DE CONCATENAR
+    Concatenar las partes en claro era legible y no cabia: cuatro UUID mas el
+    prefijo dan ~134 caracteres contra un campo de 128. Medido el 28/09/2026
+    contra PostgreSQL real:
+
+        DataError: value too long for type character varying(128)
+
+    Y las pruebas de este modulo NO lo cazaron: corren sobre SQLite, que no
+    impone la longitud de un varchar. Es la razon por la que este proyecto exige
+    probar persistencia contra PostgreSQL de verdad, y aca se cobro.
+
+    El prefijo queda en claro a proposito: al mirar la tabla se ve de que
+    operacion es cada fila sin tener que reconstruir el hash.
     """
-    return ":".join(str(p) for p in partes if p is not None)
+    crudo = ":".join(str(p) for p in partes if p is not None)
+    resumen = hashlib.sha256(crudo.encode("utf-8")).hexdigest()[:48]
+    clave = f"{prefijo}:{resumen}"
+    assert len(clave) <= LARGO_CLAVE, (
+        f"la clave idempotente mide {len(clave)} y el campo aguanta "
+        f"{LARGO_CLAVE}: revisar el prefijo '{prefijo}'"
+    )
+    return clave
 
 
 @transaction.atomic

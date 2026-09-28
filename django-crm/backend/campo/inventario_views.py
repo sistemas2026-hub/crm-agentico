@@ -87,6 +87,33 @@ def _decimal(valor, campo):
         raise ValueError(f"'{campo}' tiene que ser un numero: llego '{valor}'.")
 
 
+class PersonasView(APIView):
+    """``GET`` a quien se le puede despachar.
+
+    POR QUE ESTA RUTA EXISTE, si el CRM ya lista gente
+    -------------------------------------------------
+    `/users/get-teams-and-users/` devuelve 403 "Organization context is required"
+    con el mismo JWT que estas rutas aceptan sin problema. Medido el 28/09/2026:
+    la pantalla del inventario quedaba con el selector de personas vacio, o sea
+    sin poder despachar, por un endpoint ajeno.
+
+    Se expone lo minimo --id, nombre, rol-- y nada mas: un selector no necesita
+    telefono ni email de nadie. Es la misma regla de las listas blancas del
+    motor, aplicada a una pantalla interna.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = request.profile.org
+        filas = [
+            {"id": str(p.id), "nombre": inv.nombre_de(p), "rol": p.role or ""}
+            for p in Profile.objects.filter(org=org, is_active=True)
+                                    .select_related("user")
+        ]
+        return Response({"personas": sorted(filas, key=lambda f: f["nombre"])})
+
+
 class UbicacionesView(APIView):
     """``GET`` las ubicaciones · ``POST`` una nueva bodega o vehiculo."""
 

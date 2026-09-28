@@ -30,6 +30,7 @@ urlpatterns = [
     ),
     # Inventario: lo que hace la oficina. Ver campo/inventario_views.py sobre
     # por que el bodeguero es un rol aparte y no hereda lo de un supervisor.
+    path("inventario/personas/", inventario_views.PersonasView.as_view(), name="inv_personas"),
     path("inventario/ubicaciones/", inventario_views.UbicacionesView.as_view(), name="inv_ubicaciones"),
     path("inventario/existencias/", inventario_views.ExistenciasView.as_view(), name="inv_existencias"),
     path("inventario/catalogo/", inventario_views.CatalogoView.as_view(), name="inv_catalogo"),

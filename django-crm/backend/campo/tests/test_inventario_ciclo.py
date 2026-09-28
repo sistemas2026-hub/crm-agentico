@@ -376,3 +376,43 @@ def test_una_empresa_no_ve_el_inventario_de_otra(org_a, org_b, bodega, conector)
     )
     assert inv.existencia(bodega_b, material_b) == Decimal("0")
     assert inv.existencias_de(bodega_b) == []
+
+
+# ---------------------------------------------------------------------------
+# El limite del esquema, que SQLite no impone y Postgres si
+# ---------------------------------------------------------------------------
+
+def test_la_clave_idempotente_cabe_en_el_campo(org_a, bodega, ont, tecnico):
+    """Un defecto que las pruebas casi no cazan, y por que esta prueba existe.
+
+    `idempotency_key` es varchar(128). La primera version de `_clave()`
+    concatenaba las partes en claro --cuatro UUID mas el prefijo, ~134
+    caracteres-- y esta suite pasaba entera: corre sobre SQLite, que NO impone la
+    longitud de un varchar. En PostgreSQL real revento al sembrar datos:
+
+        DataError: value too long for type character varying(128)
+
+    Esta prueba afirma sobre el LIMITE y no sobre el motor, asi que caza el
+    defecto en cualquiera de los dos.
+    """
+    from campo.models import MovimientoDeMaterial as M
+    largo_declarado = M._meta.get_field("idempotency_key").max_length
+
+    inv.registrar_entrada(
+        org=org_a, material=ont, cantidad=1, ubicacion_destino=bodega,
+        serie="SERIE-PARA-MEDIR-LA-CLAVE", origen_ref="FAC-CON-REFERENCIA-LARGA",
+    )
+    inv.despachar(
+        org=org_a, ubicacion_origen=bodega, profile_destino=tecnico,
+        lineas=[{"material": ont, "serie": "SERIE-PARA-MEDIR-LA-CLAVE"}],
+        acta="ACTA-CON-UN-NOMBRE-BASTANTE-LARGO-TAMBIEN",
+    )
+
+    largas = [
+        (m.idempotency_key, len(m.idempotency_key))
+        for m in M.objects.filter(org=org_a)
+        if len(m.idempotency_key) > largo_declarado
+    ]
+    assert not largas, (
+        f"hay claves mas largas que el campo ({largo_declarado}): {largas}"
+    )
