@@ -10079,6 +10079,36 @@
        "postgres=arwdDxtm/postgres",
        "service_role=arwdDxtm/postgres"
       ],
+      "operaciones_actividad": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "operaciones_disponibilidad": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "operaciones_novedad": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "operaciones_programacion_orden": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "operaciones_programacion_semanal": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "operaciones_propuesta_supervisor": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
       "opportunity": [
        "crm_user=arwdDxtm/postgres",
        "postgres=arwdDxtm/postgres",

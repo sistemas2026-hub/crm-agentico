@@ -254,13 +254,68 @@ try:
                        capture_output=True, text=True, env=entorno("postgres"), timeout=900)
     revisar(r.returncode == 0 and regenerado.exists(), "se regenera contra esta referencia",
             limpiar((r.stdout or "") + (r.stderr or ""))[-400:])
+    #  UNA SALIDA PARA QUIEN TENGA QUE ACTUALIZARLO.
+    #
+    #  El manifiesto se queda viejo solo: cada tabla nueva de Django aparece como
+    #  diferencia. Quien lo actualice necesita EXACTAMENTE este archivo --el
+    #  regenerado contra la imagen de produccion fijada por digest-- y hasta hoy
+    #  se borraba con el directorio temporal, asi que habia que reconstruir a
+    #  mano las 100 lineas de preparacion.
+    #
+    #  No se copia sobre el versionado: se deja donde se pida y la decision de
+    #  adoptarlo sigue siendo de una persona. Ver la guarda de mas abajo, que
+    #  afirma que el artefacto no puede bendecir un permiso publico -- es lo que
+    #  vuelve segura esa adopcion.
+    destino = os.environ.get("MANIFIESTO_REGENERADO_A", "").strip()
+    if destino and regenerado.exists():
+        shutil.copyfile(regenerado, destino)
+        print(f"  [i] regenerado copiado a {destino}")
+
     iguales = regenerado.read_bytes() == OFICIAL.read_bytes()
     if not iguales:
         a, b = json.loads(regenerado.read_bytes().decode("utf-8")), oficial
         difs = [k for k in set(a) | set(b) if a.get(k) != b.get(k)]
         dif_mig = sorted({m for m in set(a["migraciones"]) | set(b["migraciones"])
                           if a["migraciones"].get(m) != b["migraciones"].get(m)})[:6]
-        porque = f"claves distintas: {difs}; migraciones distintas: {dif_mig}"
+
+        #  Y QUE CAMPO, no solo que migracion. Nombrar el archivo manda a abrir un
+        #  registro de miles de lineas; nombrar el campo dice si hay que
+        #  preocuparse. 'sha256' distinto = el contenido de la migracion cambio
+        #  (grave). 'verificaciones' distinto = el mapa de ACL esperadas ya no
+        #  coincide con lo que produce el esquema de hoy (otra cosa, y hay que
+        #  mirar CUAL permiso).
+        detalle = []
+        for m in dif_mig:
+            ra, rb = a["migraciones"].get(m) or {}, b["migraciones"].get(m) or {}
+            campos = sorted(k for k in set(ra) | set(rb) if ra.get(k) != rb.get(k))
+            detalle.append(f"{m} -> campos {campos}")
+            #  Si lo que difiere son las verificaciones, se nombran las CLAVES que
+            #  cambiaron, que es lo que dice si es un permiso o una tabla nueva.
+            if "verificaciones" in campos:
+                def _por_clave(reg):
+                    return {tuple(v.get("clave") or []): v.get("esperado")
+                            for v in (reg.get("verificaciones") or [])}
+                va, vb = _por_clave(ra), _por_clave(rb)
+                claves = sorted(str(k) for k in set(va) | set(vb) if va.get(k) != vb.get(k))
+                detalle.append(f"    verificaciones distintas en: {claves[:4]}")
+                #  Y dentro de la primera que difiera, que entradas cambiaron.
+                for k in list(set(va) | set(vb)):
+                    if va.get(k) == vb.get(k):
+                        continue
+                    ea, eb = va.get(k) or {}, vb.get(k) or {}
+                    if isinstance(ea, dict) and isinstance(eb, dict):
+                        cambiadas = sorted(x for x in set(ea) | set(eb)
+                                           if ea.get(x) != eb.get(x))
+                        detalle.append(f"    en {k}: {len(cambiadas)} entrada(s), "
+                                       f"primeras {cambiadas[:6]}")
+                        for x in cambiadas[:2]:
+                            detalle.append(f"      {x}: regenerado={ea.get(x)} "
+                                           f"vs versionado={eb.get(x)}")
+                    break
+
+        salto = chr(10) + "         "
+        porque = (f"claves distintas: {difs}; migraciones distintas: {dif_mig}"
+                  + (salto + salto.join(detalle) if detalle else ""))
     else:
         porque = ""
     revisar(iguales, "el artefacto versionado sale EXACTAMENTE de esta referencia (bytes identicos)", porque)
@@ -334,6 +389,52 @@ try:
             "--estado: 0 pendientes y sin hueco", limpiar(r.stdout)[-300:])
     revisar(catalogo("adopta") == antes,
             "y ni un solo archivo historico se re-ejecuto: el catalogo quedo igual que antes de adoptar")
+    #  ==================================================================
+    #   EL ARTEFACTO VERSIONADO NO PUEDE BENDECIR UN PERMISO PUBLICO
+    #  ==================================================================
+    #  Esta seccion existe para que REGENERAR el manifiesto sea una operacion
+    #  segura y rutinaria.
+    #
+    #  El manifiesto se queda viejo solo: cada tabla nueva de Django aparece
+    #  como diferencia, y la reaccion natural es regenerarlo. El riesgo de eso
+    #  es bendecir, sin mirar, un ACL que le de acceso a 'anon' o
+    #  'authenticated' -- que es EXACTAMENTE el incidente del 15/09/2026 que
+    #  este archivo vino a cerrar: 129 tablas de public con CRUD para esos dos
+    #  roles y PostgREST publicado.
+    #
+    #  Asi que se afirma sobre el ARTEFACTO, no solo sobre la base viva: ni una
+    #  sola tabla del manifiesto versionado puede nombrarlos.
+    oficial_reg = oficial["migraciones"].get(
+        "202609141110_roles_operativos_public.sql") or {}
+    por_clave = {tuple(v.get("clave") or []): v.get("esperado")
+                 for v in (oficial_reg.get("verificaciones") or [])}
+    acl_tablas = por_clave.get(("acl_tablas", "public")) or {}
+    revisar(bool(acl_tablas),
+            "el manifiesto versionado declara los ACL de public (si no, esta "
+            "seccion no midio nada)",
+            f"{len(acl_tablas)} tablas")
+    publicas = {tabla: acl for tabla, acl in acl_tablas.items()
+                if acl and any(str(a).startswith(("anon=", "authenticated="))
+                               for a in acl)}
+    revisar(not publicas,
+            "NI UNA tabla del manifiesto versionado le da acceso a anon o "
+            "authenticated",
+            f"las dan: {sorted(publicas)[:6]}")
+
+    #  Y que el patron estandar siga siendo el estandar: si una tabla nueva
+    #  entrara con MAS roles que los tres de siempre, hay que mirarla a mano.
+    import collections as _col
+
+    patrones = _col.Counter(tuple(sorted(v)) for v in acl_tablas.values() if v)
+    estandar, cuantas = patrones.most_common(1)[0]
+    revisar(cuantas >= len(acl_tablas) - 3,
+            f"el patron de ACL es uniforme: {cuantas} de {len(acl_tablas)} tablas "
+            f"comparten el mismo, y las excepciones son contadas",
+            f"patrones distintos: {len(patrones)}")
+    revisar(not any(str(a).startswith(("anon=", "authenticated="))
+                    for a in estandar),
+            f"y el patron estandar no nombra roles publicos: {list(estandar)}")
+
 finally:
     subprocess.run(["docker", "rm", "-f", NOMBRE], capture_output=True)
     shutil.rmtree(TMP, ignore_errors=True)
