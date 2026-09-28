@@ -59,6 +59,25 @@ HERRAMIENTAS = frozenset({
 })
 
 
+def _puerta(tenant, herramienta, actor: str = ""):
+    """
+    La frontera de acciones externas  --  paso 10.14A.
+
+    Las tres funciones de este modulo que ESCRIBEN en el CRM ('aplicar',
+    'aplicar_reconciliacion', 'sincronizar_respuestas') pasan por aqui. Con
+    'actor' entran por la puerta humana --alguien corrio el CLI y la accion
+    queda atribuida--; sin actor, por la autonoma, que es como llegan desde el
+    reloj, y entonces consultan el interruptor.
+
+    El import va adentro para no atar este modulo a la cadena
+    frontera -> interruptor -> persistencia en las pruebas que corren sin base.
+    """
+    from nucleo.seguridad import frontera
+
+    return frontera.puerta(tenant, herramienta, actor=actor,
+                           evidencia="importacion", origen="importacion")
+
+
 def _herramienta(config, nombre):
     return next((h for h in config.herramientas if h.nombre == nombre), None)
 
@@ -345,7 +364,7 @@ def _cuerpo_de(v, config) -> dict:
     }
 
 
-def aplicar(config, tenant, veredictos) -> dict:
+def aplicar(config, tenant, veredictos, actor: str = "") -> dict:
     """
     Crea los casos de los candidatos. Un fallo por ticket no corta el lote.
 
@@ -363,8 +382,9 @@ def aplicar(config, tenant, veredictos) -> dict:
         if v.resultado != imp.CANDIDATO:
             continue
         try:
-            r = ejecutor_http.ejecutar(herr, _cuerpo_de(v, config), tenant,
-                                       variables_tenant=config.variables_tenant)
+            with _puerta(tenant, herr.nombre, actor):
+                r = ejecutor_http.ejecutar(herr, _cuerpo_de(v, config), tenant,
+                                           variables_tenant=config.variables_tenant)
             if isinstance(r, dict) and r.get("created"):
                 resumen["creados"] += 1
             else:
@@ -377,7 +397,7 @@ def aplicar(config, tenant, veredictos) -> dict:
     return resumen
 
 
-def aplicar_reconciliacion(config, tenant, cambios) -> dict:
+def aplicar_reconciliacion(config, tenant, cambios, actor: str = "") -> dict:
     """Persiste los external_* de los casos ya conocidos. Nunca el estado."""
     herr = _herramienta(config, "reconciliar_caso_externo")
     if herr is None:
@@ -394,8 +414,9 @@ def aplicar_reconciliacion(config, tenant, cambios) -> dict:
         cuerpo = {k: v for k, v in c.despues.items() if v is not None}
         cuerpo["id_caso"] = c.caso_id
         try:
-            r = ejecutor_http.ejecutar(herr, cuerpo, tenant,
-                                       variables_tenant=config.variables_tenant)
+            with _puerta(tenant, herr.nombre, actor):
+                r = ejecutor_http.ejecutar(herr, cuerpo, tenant,
+                                           variables_tenant=config.variables_tenant)
             if isinstance(r, dict) and r.get("actualizados"):
                 resumen["actualizados"] += 1
             else:
@@ -409,7 +430,7 @@ def aplicar_reconciliacion(config, tenant, cambios) -> dict:
 #  EL CICLO COMPLETO  --  lo que corre el reloj, y tambien el CLI
 # =============================================================================
 
-def sincronizar_respuestas(config, tenant, cambios) -> dict:
+def sincronizar_respuestas(config, tenant, cambios, actor: str = "") -> dict:
     """
     Manda el hilo de cada ticket al caso que le corresponde.
 
@@ -437,10 +458,11 @@ def sincronizar_respuestas(config, tenant, cambios) -> dict:
         resumen["hilos"] += 1
         resumen["respuestas"] += len(c.respuestas)
         try:
-            r = ejecutor_http.ejecutar(
-                herr, {"id_caso": c.caso_id, "provider": proveedor,
-                       "respuestas": c.respuestas},
-                tenant, variables_tenant=config.variables_tenant)
+            with _puerta(tenant, herr.nombre, actor):
+                r = ejecutor_http.ejecutar(
+                    herr, {"id_caso": c.caso_id, "provider": proveedor,
+                           "respuestas": c.respuestas},
+                    tenant, variables_tenant=config.variables_tenant)
             if isinstance(r, dict):
                 resumen["nuevas"] += int(r.get("nuevas") or 0)
         except Exception as e:                              # noqa: BLE001

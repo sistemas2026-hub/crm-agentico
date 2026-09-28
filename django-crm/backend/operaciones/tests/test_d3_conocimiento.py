@@ -197,10 +197,14 @@ def test_la_version_citada_coincide_con_la_del_documento():
 
 
 def test_conocimiento_de_devuelve_vacio_donde_no_hay_documento():
-    """Nueve de las catorce no tienen conocimiento. El vacío es el dato."""
+    """
+    Doce de las dieciséis no tienen documento de conocimiento. El vacío es el
+    dato, y no un pendiente: H-11 y H-12 (M04-A) tampoco lo tienen, porque D-3
+    prohíbe inventarles uno para completar la tabla.
+    """
     sin_documento = [i for i in habilidades.IDS
                      if i not in habilidades.CONOCIMIENTO]
-    assert len(sin_documento) == 10
+    assert len(sin_documento) == 14
     for i in sin_documento:
         assert habilidades.conocimiento_de(i) == ""
 
@@ -210,8 +214,13 @@ def test_conocimiento_de_devuelve_vacio_donde_no_hay_documento():
 # =============================================================================
 
 def test_las_catorce_habilidades_siguen_intactas():
-    assert len(habilidades.HABILIDADES) == 14
-    assert len(habilidades.IDS) == 14
+    #  Eran 14 hasta M09-M. M04-A agrega H-11 y H-12 (plazo operativo de
+    #  una orden) con autorizacion explicita. Las 14 originales NO se
+    #  tocaron: lo verifica 'test_las_catorce_originales_no_cambiaron'.
+    #  M04-A agrego H-11/H-12 y M05-A agrega H-13, las tres con autorizacion explicita.
+    #  M09-M dejo 14. Despues se agregaron, con autorizacion explicita: H-11/H-12 (M04-A), H-13 (M05-A) y H-14 (M05-B).
+    assert len(habilidades.HABILIDADES) == 18
+    assert len(habilidades.IDS) == 18
 
 
 def test_ninguna_habilidad_gano_herramienta_de_escritura():

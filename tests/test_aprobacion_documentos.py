@@ -52,6 +52,20 @@ if sys.stdout.encoding != "utf-8":
 from dotenv import load_dotenv                     # noqa: E402
 load_dotenv(RAIZ / ".env", override=True)          # noqa: E402
 
+#  M06-E (22/09/2026): esta prueba ESCRIBE (crea, aprueba, retira y borra un
+#  documento de prueba) en la base que diga el .env -- y el .env de desarrollo
+#  apunta a PRODUCCION (crm.rapilinksas.co). Mientras corre, el documento de
+#  prueba queda 'vigente' y el asistente real podria recuperarlo. Correrla
+#  dentro de una suite de regresion la llevaba a produccion sin que nadie lo
+#  decidiera. Ahora se niega contra una base no local salvo pedido explicito.
+import os                                          # noqa: E402
+if (os.environ.get("DBHOST", "") not in ("", "db", "localhost", "127.0.0.1", "pg-b7")
+        and os.environ.get("PERMITIR_PRUEBA_EN_BASE_REAL") != "1"):
+    print(f"[aprobacion_documentos] OMITIDA: la base configurada "
+          f"({os.environ.get('DBHOST')}) no es local y esta prueba escribe en ella. "
+          f"Para correrla ahi a proposito: PERMITIR_PRUEBA_EN_BASE_REAL=1.")
+    raise SystemExit(0)
+
 from nucleo.config import fuente                   # noqa: E402
 from nucleo.ingesta import corpus as ingesta       # noqa: E402
 from nucleo.persistencia.db import sesion          # noqa: E402

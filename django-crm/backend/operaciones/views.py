@@ -930,7 +930,27 @@ class TransicionActividadView(APIView):
                 a = actividades.desbloquear(a, actor=actor, motivo=motivo,
                                             destino=d["destino"])
             elif accion == "escalar":
-                a = actividades.escalar(a, actor=actor, motivo=motivo)
+                #  Los dos son obligatorios y no se completan solos: sin
+                #  destinatario el escalamiento no llega a nadie, y no hay
+                #  politica que permita elegirlo por el usuario.
+                if not d.get("escalado_a_id"):
+                    return Response(
+                        {"error": "FALTA_DESTINATARIO",
+                         "detalle": "Escalar exige 'escalado_a_id'."},
+                        status=status.HTTP_400_BAD_REQUEST)
+                if not d.get("nivel_escalamiento"):
+                    return Response(
+                        {"error": "FALTA_NIVEL",
+                         "detalle": "Escalar exige 'nivel_escalamiento'."},
+                        status=status.HTTP_400_BAD_REQUEST)
+                #  '_perfil_o_404' ya filtra por request.org: es la misma
+                #  convencion de tenancy del resto del modulo, y deja el
+                #  rechazo de otra empresa como segunda barrera en el servicio.
+                destino_esc = _perfil_o_404(request, d["escalado_a_id"],
+                                            que="persona destinataria")
+                a = actividades.escalar(
+                    a, actor=actor, motivo=motivo,
+                    escalado_a=destino_esc, nivel=d["nivel_escalamiento"])
             elif accion == "completar":
                 a = actividades.completar(
                     a, actor=actor, motivo=motivo,

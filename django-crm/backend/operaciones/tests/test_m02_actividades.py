@@ -178,10 +178,14 @@ def test_9_desbloquear_limpia_el_motivo(org_a, actor):
 
 @pytest.mark.django_db
 def test_9b_escalar_exige_motivo(org_a, actor):
+    #  M05-B agrego destinatario y nivel como obligatorios. Esta prueba sigue
+    #  afirmando lo suyo --que sin motivo no se escala-- y ahora pasa los tres.
     a = _crear(org_a, actor)
     with pytest.raises(act.ErrorActividad, match="necesita su motivo"):
-        act.escalar(a, actor=actor, motivo="")
-    a = act.escalar(a, actor=actor, motivo="supera el nivel 1")
+        act.escalar(a, actor=actor, motivo="", escalado_a=actor,
+                    nivel=A.NIVEL_1)
+    a = act.escalar(a, actor=actor, motivo="supera el nivel 1",
+                    escalado_a=actor, nivel=A.NIVEL_1)
     assert a.estado_operativo == A.ESCALADA
 
 
@@ -191,7 +195,8 @@ def test_9c_transiciones_invalidas(org_a, actor):
     a = act.cancelar(_crear(org_a, actor), actor=actor, motivo="ya no aplica")
     for fn in (lambda: act.iniciar_gestion(a, actor=actor),
                lambda: act.completar(a, actor=actor),
-               lambda: act.escalar(a, actor=actor, motivo="x")):
+               lambda: act.escalar(a, actor=actor, motivo="x",
+                                   escalado_a=actor, nivel=A.NIVEL_1)):
         with pytest.raises(act.TransicionInvalida):
             fn()
 

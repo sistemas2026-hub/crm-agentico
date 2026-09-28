@@ -5,6 +5,7 @@ mismo mecanismo que ping_cliente) cada pocos segundos hasta que responda,
 para medir el tiempo real de recuperacion. Uso unico, no se integra a nada.
 """
 import os
+import sys
 import time
 
 from dotenv import load_dotenv
@@ -24,6 +25,22 @@ SO_HEADERS = {"X-Token": os.environ["SMARTOLT_API_KEY"]}
 WH_HEADERS = {"Authorization": f"Api-Key {os.environ['WISPHUB_API_KEY']}"}
 SN = "CDTC505AE4AB"
 ID_SERVICIO = 6555
+
+# M06-E (22/09/2026): este script REINICIA una ONU por SmartOLT directo, sin
+# pasar por la frontera ni por la aprobacion humana que exige toda accion R3.
+# Fue una medicion de uso unico sobre el equipo de LABORATORIO (14/08/2026).
+# Se deja por su valor de referencia, pero ya no corre por accidente: exige
+# confirmar a mano el serial exacto de la ONU de laboratorio. El reinicio del
+# equipo de un cliente se hace por el asistente, con su aprobacion atada
+# (reiniciar_ont, frontera.critica) -- nunca con esto.
+ONU_DE_LABORATORIO = "CDTC505AE4AB"
+_confirmacion = next((a.split("=", 1)[1] for a in sys.argv[1:]
+                      if a.startswith("--confirmo-reinicio-de-laboratorio=")), "")
+if SN != ONU_DE_LABORATORIO or _confirmacion != ONU_DE_LABORATORIO:
+    print("[prueba_reinicio] NO se reinicia nada. Este script actua sobre un "
+          "equipo real sin la aprobacion que exige R3. Solo corre sobre la ONU "
+          f"de laboratorio y con --confirmo-reinicio-de-laboratorio={ONU_DE_LABORATORIO}.")
+    raise SystemExit(2)
 
 
 def ping() -> tuple[bool, dict]:

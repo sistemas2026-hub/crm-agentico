@@ -175,7 +175,9 @@ def test_los_estados_que_el_supervisor_ve_se_reportan_tal_cual(org_a, actor):
         ("pendiente", lambda x: None),
         ("en gestion", lambda x: m02.iniciar_gestion(x, actor=actor)),
         ("en espera", lambda x: m02.poner_en_espera(x, actor=actor)),
-        ("escalada", lambda x: m02.escalar(x, actor=actor, motivo="sin respuesta")),
+        ("escalada", lambda x: m02.escalar(x, actor=actor, motivo="sin respuesta",
+                                           escalado_a=actor,
+                                           nivel=ACT.NIVEL_1)),
     ):
         a = m02.crear(org=org_a, actor=actor, titulo=titulo,
                       vence_en=ahora - timedelta(hours=3))

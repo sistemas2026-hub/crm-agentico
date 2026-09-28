@@ -37,18 +37,26 @@ from operaciones.models import PropuestaSupervisor
 #  1-5.  LAS 14 ESTAN, Y ESTAN COMPLETAS
 # =============================================================================
 
-def test_hay_exactamente_catorce():
-    assert len(habilidades.HABILIDADES) == 14
-    assert len(habilidades.IDS) == 14
-    assert len(set(habilidades.IDS)) == 14, "hay ids repetidos"
+def test_hay_exactamente_dieciocho():
+    #  Eran 14 hasta M09-M. M04-A agrega H-11 y H-12 (plazo operativo de
+    #  una orden) con autorizacion explicita. Las 14 originales NO se
+    #  tocaron: lo verifica 'test_las_catorce_originales_no_cambiaron'.
+    #  M04-A agrego H-11/H-12 y M05-A agrega H-13, las tres con autorizacion explicita.
+    #  M09-M dejo 14. Despues se agregaron, con autorizacion explicita: H-11/H-12 (M04-A), H-13 (M05-A) y H-14 (M05-B).
+    assert len(habilidades.HABILIDADES) == 18
+    assert len(habilidades.IDS) == 18
+    assert len(set(habilidades.IDS)) == 18, "hay ids repetidos"
 
 
-def test_diez_de_dominio_y_cuatro_transversales():
+def test_catorce_de_dominio_y_cuatro_transversales():
+    #  Eran 10 de dominio hasta M09-M. M04-A agrega H-11 y H-12, las dos de
+    #  dominio (plazo operativo de una orden). Las 4 transversales no cambian:
+    #  M04-A no toco ninguna.
     dominio = [h for h in habilidades.HABILIDADES.values()
                if h.tipo == habilidades.DOMINIO]
     transversales = [h for h in habilidades.HABILIDADES.values()
                      if h.tipo == habilidades.TRANSVERSAL]
-    assert len(dominio) == 10
+    assert len(dominio) == 14
     assert len(transversales) == 4
 
 
@@ -208,7 +216,11 @@ def test_la_huella_es_reproducible(id_habilidad):
 
 def test_dos_fichas_distintas_tienen_huellas_distintas():
     huellas = {h.id: h.huella() for h in habilidades.HABILIDADES.values()}
-    assert len(set(huellas.values())) == 14, "hay huellas repetidas"
+    #  Lo que importa no es el numero sino que NINGUNA se repita: se compara
+    #  contra el total de fichas, no contra una constante que hay que recordar
+    #  actualizar. Con un numero fijo, el mensaje "hay huellas repetidas"
+    #  aparecia al agregar una ficha aunque todas fueran distintas.
+    assert len(set(huellas.values())) == len(huellas), "hay huellas repetidas"
 
 
 def test_el_canonico_es_determinista_y_ordenado():

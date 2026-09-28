@@ -33,6 +33,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import threading
+import uuid
 import time
 from datetime import datetime, timezone
 
@@ -47,6 +48,7 @@ from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
+from nucleo.seguridad import interruptor
 from nucleo.modelo import motor
 from nucleo.observabilidad import consumo
 from nucleo.persistencia import db as persistencia
@@ -703,7 +705,8 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
 
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                   mensaje: str, canal: str, profile_id: str | None = None,
-                  nombre_colaborador: str = "") -> dict:
+                  nombre_colaborador: str = "",
+                  evento_id: str | None = None) -> dict:
     """
     Un turno completo de conversacion: pausa por escalamiento, modelo,
     persistencia y evaluacion de escalamiento.
@@ -717,6 +720,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     el webhook de WhatsApp -- ahi no hay un colaborador del CRM de por medio,
     solo se propaga a asistente.tool_calls.profile_id para la auditoria por
     persona (ver supabase/202608180800_tool_calls_profile_id.sql).
+
+    'evento_id': el identificador ESTABLE del mensaje entrante, cuando el canal
+    tiene uno. En WhatsApp es el wamid, y es estable porque Meta reentrega el
+    mismo mensaje con el mismo id -- por eso sirve como identidad de la
+    solicitud para el control de repeticion de operaciones externas (ver
+    nucleo/seguridad/idempotencia.py). En /chat no existe: ahi el turno recibe
+    un identificador propio y el control protege el reintento DENTRO del turno,
+    no la reentrega del turno entero. Eso esta dicho tambien en la migracion,
+    y no se disimula: la garantia vale lo que valga este dato.
 
     Devuelve {'respuesta', 'verificado', 'pausada'}. Levanta motor.ErrorMotor
     si el rol o el mensaje no son atendibles -- quien llama decide si eso es un
@@ -1085,7 +1097,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     with consumo.abrir(config) as ficha_consumo:
         respuesta, registro_herramientas, medios_pendientes = motor.responder(
             config, rol, mensaje, estado["historial"], estado["sesion"],
-            nota_continuidad=nota_continuidad)
+            nota_continuidad=nota_continuidad,
+            origen=(f"evento:{evento_id}" if evento_id
+                    else f"turno:{uuid.uuid4()}"))
 
     # --- si este turno derivo a otra area, persistir YA con el rol nuevo -----
     # 'rol_siguiente' lo pone motor._ejecutar_derivacion() cuando el modelo
@@ -1132,6 +1146,19 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # None y las reglas que preguntan por esta fila --si ya la atendio una
         # persona, sobre todo-- respondian que no sin poder mirar.
         estado["conversacion_id"] = conversation_id
+        # M06-A: una propuesta de accion quedo en la cola este turno. Se ata
+        # YA a su conversacion (sincrono, no en el hilo de la traza): al
+        # aprobar una irreversible, la verificacion se anota contra esta
+        # conversacion, y sin el vinculo esa comprobacion se perderia.
+        for llamada in registro_herramientas:
+            if llamada.get("accion_id"):
+                try:
+                    persistencia.vincular_accion_a_conversacion(
+                        tenant, llamada["accion_id"], conversation_id)
+                except Exception as e:
+                    print(f"[acciones] no se pudo atar la propuesta "
+                          f"{llamada['accion_id']} a su conversacion: "
+                          f"{type(e).__name__}: {e}")
         # LA TRAZA VA EN UN HILO, Y FUERA DEL CAMINO CRITICO.
         #
         # Eran N inserciones --una por herramienta-- y cada una es una ida a
@@ -2883,13 +2910,105 @@ def interno_ejecutar_herramienta(nombre: str):
     if not isinstance(argumentos, dict):
         return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
 
+    # La cabecera es el unico identificador ESTABLE que puede aportar quien
+    # llama: si reenvia la misma peticion con la misma clave, la mutacion no
+    # sale dos veces (ver nucleo/seguridad/idempotencia.py). Se aceptan los dos
+    # nombres por la misma razon que campo/services/idempotencia.py los acepta.
+    # Sin cabecera se ejecuta igual, como siempre -- no se rompe a ningun
+    # llamador existente -- pero un reenvio no se reconoce.
+    clave_idem = (request.headers.get("Idempotency-Key")
+                  or request.headers.get("X-Idempotency-Key") or "").strip()
     try:
-        salida = motor.ejecutar_para_servicio(config, herramienta, argumentos)
+        salida = motor.ejecutar_para_servicio(
+            config, herramienta, argumentos,
+            origen=f"idem:{clave_idem}" if clave_idem else None)
+    except motor.AutonomiaDetenida as e:
+        # 409 y no 500: la peticion estaba bien, el sistema decidio no
+        # ejecutarla. Quien llama tiene que poder distinguir "fallo" de "no se
+        # hizo a proposito", porque la reaccion correcta no es la misma.
+        print(f"[interno] '{nombre}' bloqueado: {e}")
+        return jsonify({"error": "AUTONOMIA_DETENIDA", "detalle": str(e)}), 409
+    except motor.OperacionNoEjecutada as e:
+        print(f"[interno] '{nombre}' no se ejecuto: {e}")
+        return jsonify({"error": e.resultado.codigo,
+                        "detalle": e.resultado.motivo}), 409
     except Exception as e:
         print(f"[interno] '{nombre}' fallo: {type(e).__name__}: {e}")
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 502
 
     return jsonify({"resultado": salida})
+
+
+@app.get("/autonomia")
+def autonomia_estado():
+    """
+    El estado del interruptor de autonomia de una empresa, y su historial.
+
+    Solo lectura, y a proposito NO carga la configuracion del tenant: el
+    interruptor tiene que poder consultarse aunque la config este rota, que es
+    justo uno de los momentos en que alguien querria tirarlo.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        veredicto = interruptor.veredicto(tenant)
+        historial = interruptor.historial(tenant, limite=20)
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+    return jsonify({
+        "estado": veredicto.estado,
+        "permitido": veredicto.permitido,
+        "motivo": veredicto.motivo,
+        "actor": veredicto.actor,
+        "historial": [
+            {"estado": h["estado"], "estado_anterior": h["estado_anterior"],
+             "actor": h["actor"], "motivo": h["motivo"],
+             "creado_en": h["creado_en"].isoformat() if h["creado_en"] else None}
+            for h in historial],
+    })
+
+
+@app.post("/autonomia/detener")
+def autonomia_detener():
+    """
+    Tira el interruptor: esta empresa deja de ejecutar acciones autonomas.
+
+    Cuerpo: {"actor": "...", "motivo": "..."}. Los dos obligatorios -- una
+    parada de emergencia sin nombre ni razon es la que despues nadie se anima a
+    levantar porque no sabe que estaba pasando.
+
+    Quien puede llamarla: esta ruta esta detras de _exigir_token_de_servicio()
+    como todas las internas, y del lado de la app web el gate de ADMIN es el
+    mismo que ya usan /agentes y /configuracion-guiada. NO es una ruta publica.
+    """
+    return _mover_autonomia(interruptor.detener)
+
+
+@app.post("/autonomia/reactivar")
+def autonomia_reactivar():
+    """Levanta el interruptor. Mismo cuerpo y mismos requisitos que detener."""
+    return _mover_autonomia(interruptor.reactivar)
+
+
+def _mover_autonomia(accion):
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    try:
+        fila = accion(tenant, (cuerpo.get("actor") or "").strip(),
+                      (cuerpo.get("motivo") or "").strip())
+    except ValueError as e:
+        # Falta el actor o el motivo: es un pedido incompleto, no una falla.
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+    return jsonify({
+        "estado": fila["estado"], "estado_anterior": fila["estado_anterior"],
+        "actor": fila["actor"], "motivo": fila["motivo"],
+        "creado_en": fila["creado_en"].isoformat() if fila["creado_en"] else None,
+    })
 
 
 @app.get("/configuracion/planes-venta")
@@ -4887,6 +5006,11 @@ def acciones_propuesta_aprobar(id_accion):
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
 
+    herramienta = next((h for h in config.herramientas
+                        if h.nombre == accion["herramienta"]), None)
+    if herramienta is not None and herramienta.irreversible:
+        return _aprobar_irreversible(config, tenant, id_accion, cuerpo)
+
     resultado, codigo_error = motor.ejecutar_accion_aprobada(config, accion)
 
     try:
@@ -4899,6 +5023,84 @@ def acciones_propuesta_aprobar(id_accion):
 
     if codigo_error:
         return jsonify({"ok": False, "estado": "aprobada", "error_ejecucion": codigo_error,
+                        "resultado": resultado}), 502
+    return jsonify({"ok": True, "estado": "aprobada", "resultado": resultado})
+
+
+def _aprobar_irreversible(config, tenant: str, id_accion: str, cuerpo: dict):
+    """
+    Aprobar una herramienta IRREVERSIBLE (R3/R4) -- M06-A, 21/09/2026.
+
+    Distinto del camino comun en el ORDEN, y el orden es la garantia:
+
+      1. quien aprueba es obligatorio: sin nombre no hay aprobacion;
+      2. la aprobacion se PERSISTE antes del efecto, con compare-and-set
+         (solo de 'pendiente' a 'aprobada': dos clicks no ejecutan dos veces);
+      3. la fila se RELEE de la base -- lo que se ejecuta es lo que quedo
+         escrito, nunca el cuerpo de este request;
+      4. motor.ejecutar_accion_irreversible pasa por frontera.critica: kill
+         switch, etapa, autorizacion granular, la aprobacion atada a la accion,
+         las previas medidas de nuevo;
+      5. el resultado se guarda aparte, sin reescribir la aprobacion;
+      6. si la accion se comprueba despues (reiniciar_ont), la verificacion
+         se anota contra la conversacion de la que salio la propuesta.
+
+    Si una compuerta la frena, la fila queda 'aprobada' con el codigo del
+    bloqueo y NO se reintenta sola: la aprobacion era para ESE momento.
+    """
+    revisado_por = (cuerpo.get("revisado_por") or "").strip()
+    if not revisado_por:
+        return jsonify({"error": "Una accion irreversible exige decir quien la "
+                                 "aprueba ('revisado_por')."}), 400
+    try:
+        previa = persistencia.accion_propuesta_de(tenant, id_accion)
+    except Exception as e:
+        print(f"[acciones] fallo al leer la accion: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer la accion."}), 500
+    herramienta = next((h for h in config.herramientas
+                        if previa and h.nombre == previa.get("herramienta")), None)
+    #  Una accion que se COMPRUEBA despues (reiniciar_ont) necesita donde
+    #  anotar esa comprobacion. Sin conversacion de origen, ejecutarla seria
+    #  perder la garantia que tiene cuando corre en la conversacion -- asi que
+    #  no se aprueba, y la fila sigue pendiente para que alguien lo vea.
+    if (herramienta is not None and herramienta.verificacion
+            and not (previa or {}).get("conversation_id")):
+        return jsonify({"error": "Esta accion se comprueba despues de "
+                                 "ejecutarse y no tiene conversacion de "
+                                 "origen donde anotar la comprobacion. No se "
+                                 "aprobo ni se ejecuto.",
+                        "codigo": "VERIFICACION_SIN_CONVERSACION"}), 409
+    try:
+        if not persistencia.aprobar_accion_propuesta(tenant, id_accion, revisado_por):
+            return jsonify({"error": "Esta accion ya no esta pendiente: otra "
+                                     "aprobacion o un rechazo llego primero."}), 409
+        accion = persistencia.accion_propuesta_de(tenant, id_accion)
+    except Exception as e:
+        print(f"[acciones] fallo al aprobar una irreversible: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo registrar la aprobacion. No se "
+                                 "ejecuto nada."}), 500
+    if not accion:
+        return jsonify({"error": f"La accion '{id_accion}' no existe."}), 404
+
+    resultado, codigo_error, pendiente = motor.ejecutar_accion_irreversible(
+        config, accion, tenant)
+
+    try:
+        persistencia.registrar_resultado_accion(tenant, id_accion, resultado,
+                                                codigo_error)
+    except Exception as e:
+        print(f"[acciones] la irreversible termino pero no se pudo guardar el "
+              f"resultado: {type(e).__name__}: {e}")
+
+    if pendiente and accion.get("conversation_id"):
+        #  Llega aca con conversacion: sin ella no se habria aprobado (arriba).
+        persistencia.guardar_verificacion_pendiente(
+            tenant, str(accion["conversation_id"]), accion["herramienta"],
+            pendiente)
+
+    if codigo_error:
+        return jsonify({"ok": False, "estado": "aprobada",
+                        "error_ejecucion": codigo_error,
                         "resultado": resultado}), 502
     return jsonify({"ok": True, "estado": "aprobada", "resultado": resultado})
 
@@ -5321,7 +5523,8 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
                 "Cuéntame en palabras qué necesitas y te ayudo.")
             return
 
-        salida = atender_turno(config, tenant, rol, de, texto, "whatsapp")
+        salida = atender_turno(config, tenant, rol, de, texto, "whatsapp",
+                               evento_id=wamid)
 
         # El adjunto se guarda DESPUES del turno, con la conversacion ya
         # creada: es lo que le da el conversation_id al que colgarlo. Va

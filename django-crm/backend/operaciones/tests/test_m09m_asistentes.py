@@ -616,7 +616,12 @@ def test_habilidades_ni_nuevas_ni_ocultas(org_a, actor):
     §D: ninguna habilidad nueva. Y cada recomendación declara con cuál se
     sostiene Y en qué estado está -- H-05 sigue BLOQUEADA.
     """
-    assert len(habilidades.HABILIDADES) == 14, "se creó una habilidad"
+    #  Eran 14 en M09-M. M04-A agrega H-11 y H-12 (plazo operativo de una
+    #  orden) CON autorizacion explicita; las 14 originales no se tocaron y sus
+    #  huellas de M09-K siguen valiendo.
+    #  M04-A agrego H-11/H-12 y M05-A agrega H-13, las tres con autorizacion explicita.
+    #  M09-M dejo 14. Despues se agregaron, con autorizacion explicita: H-11/H-12 (M04-A), H-13 (M05-A) y H-14 (M05-B).
+    assert len(habilidades.HABILIDADES) == 18, "se creó una habilidad no prevista"
     assert habilidades.HABILIDADES["H-05"].estado == habilidades.BLOQUEADA
 
     _, p1 = _persona(org_a)
