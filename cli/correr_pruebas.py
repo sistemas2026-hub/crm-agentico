@@ -58,6 +58,37 @@ _PIDE_RED = re.compile(r"requests\.(get|post|put|delete)|openai\.|anthropic\.")
 #: No son pruebas aunque vivan en tests/.
 _NO_SON_PRUEBAS = {"manifiesto_de_laboratorio.py"}
 
+#  UNA PRUEBA PUEDE PEDIR MAS TIEMPO, Y TIENE QUE DECIR POR QUE.
+#
+#  Existe porque 'test_revocar_data_api.py' vive al borde del tope: 160s, 176s y
+#  a la tercera se colgo (medido el 27/09/2026 en tres corridas seguidas).
+#  Levanta la imagen EXACTA de produccion fijada por digest, corre las
+#  migraciones de Django y aplica la cadena del ledger, asi que con el Docker
+#  ocupado pasa de 180 sin que nada este roto.
+#
+#  Un rojo intermitente es peor que un rojo: ensena a ignorar los rojos. Y subir
+#  el tope para TODAS esconderia un cuelgue de verdad en las otras 155. Asi que
+#  el permiso es por prueba, con su motivo escrito al lado.
+#
+#  La marca la pone la prueba en su propio texto, no esta lista: se busca
+#  'TOPE_DE_TIEMPO = <segundos>' en el archivo. Asi el motivo vive junto al
+#  codigo que lo necesita y no se desincroniza.
+_TOPE_PROPIO = re.compile(r"^TOPE_DE_TIEMPO\s*=\s*(\d+)\s*$", re.MULTILINE)
+
+#  Techo absoluto: ni declarandolo una prueba puede tardar mas que esto. Sin el,
+#  'TOPE_DE_TIEMPO = 99999' seria una forma de desactivar la deteccion de
+#  cuelgues escribiendo una linea.
+_TOPE_MAXIMO = 900
+
+
+def tope_de(archivo: Path, por_defecto: int) -> int:
+    """Los segundos que esta prueba puede tardar. Nunca mas que _TOPE_MAXIMO."""
+    texto = archivo.read_text(encoding="utf-8", errors="replace")
+    m = _TOPE_PROPIO.search(texto)
+    if not m:
+        return por_defecto
+    return max(por_defecto, min(int(m.group(1)), _TOPE_MAXIMO))
+
 
 def clasificar(archivo: Path) -> str:
     """base | red | aislada. Se decide leyendo, no ejecutando."""
@@ -258,7 +289,7 @@ def main() -> int:
     fallaron: list[tuple[str, str]] = []
     arranque = time.monotonic()
     for i, archivo in enumerate(a_correr, 1):
-        ok, motivo, tardo = correr(archivo, args.timeout)
+        ok, motivo, tardo = correr(archivo, tope_de(archivo, args.timeout))
         marca = {True: "ok  ", False: "FALLA", None: "sin "}[ok]
         print(f"  [{i:3}/{len(a_correr)}] {marca} {archivo.name:52} {tardo:5.1f}s")
         if ok is None:

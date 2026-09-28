@@ -35,6 +35,17 @@ sobre las funciones de extension, a traves de PUBLIC.
 
 from __future__ import annotations
 
+#  MAS TIEMPO QUE EL RESTO, y por un motivo concreto: esta prueba levanta la
+#  imagen EXACTA de produccion fijada por digest, corre las migraciones de Django
+#  y aplica la cadena del ledger. Medido el 27/09/2026 en tres corridas seguidas:
+#  160s, 176s y a la tercera se colgo -- con el Docker ocupado pasa del tope de
+#  180 sin que nada este roto.
+#
+#  Un rojo intermitente es peor que un rojo, porque ensena a ignorar los rojos.
+#  Y subir el tope para las 156 esconderia un cuelgue de verdad en las otras.
+#  'cli/correr_pruebas.py' lee esta linea; el techo absoluto sigue siendo suyo.
+TOPE_DE_TIEMPO = 420
+
 import os
 import secrets
 import shutil

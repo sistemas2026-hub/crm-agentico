@@ -219,6 +219,71 @@ comprobar("dependencia del entorno" in _motivo_de(
               "NO SE PUDO CORRER: falta una dependencia del entorno (bash)"),
           "y dice que fue una dependencia del entorno")
 
+#  UNA PRUEBA PUEDE PEDIR MAS TIEMPO, PERO NO PUEDE DESACTIVAR LA DETECCION.
+#
+#  Existe porque una prueba que vive al borde del tope da un rojo INTERMITENTE, y
+#  eso ensena a ignorar los rojos. El permiso es por prueba y con el motivo al
+#  lado; el techo absoluto lo pone el corredor.
+def _tope(texto: str, por_defecto: int = 180) -> int:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as carpeta:
+        archivo = Path(carpeta) / "test_falso_para_medir.py"
+        archivo.write_text(texto, encoding="utf-8")
+        return corredor.tope_de(archivo, por_defecto)
+
+
+comprobar(_tope("print('hola')") == 180,
+          "una prueba que no declara nada usa el tope por defecto")
+
+comprobar(_tope("TOPE_DE_TIEMPO = 420" + chr(10) + "print('hola')") == 420,
+          "una prueba que declara TOPE_DE_TIEMPO obtiene ese tope")
+
+comprobar(_tope("TOPE_DE_TIEMPO = 99999" + chr(10) + "print('x')")
+          == corredor._TOPE_MAXIMO,
+          f"y no puede pasar del techo del corredor ({corredor._TOPE_MAXIMO}s): "
+          f"si no, 'TOPE_DE_TIEMPO = 99999' seria apagar la deteccion de "
+          f"cuelgues escribiendo una linea")
+
+comprobar(_tope("TOPE_DE_TIEMPO = 30" + chr(10) + "print('x')") == 180,
+          "y tampoco puede pedir MENOS que el default, que seria fabricar un "
+          "cuelgue ajeno")
+
+#  Y que la marca no se dispare desde un comentario o un docstring: tiene que ser
+#  una asignacion de verdad, al principio de linea.
+comprobar(_tope("#  TOPE_DE_TIEMPO = 420" + chr(10) + "print('x')") == 180,
+          "la marca en un comentario NO cuenta")
+
+comprobar(_tope("texto = 'TOPE_DE_TIEMPO = 420'" + chr(10) + "print('x')") == 180,
+          "ni dentro de una cadena")
+
+#  Y EL ENGANCHE: que 'main' se lo pase a 'correr' de verdad.
+#
+#  Las afirmaciones de arriba llaman a 'tope_de' directamente, asi que seguian
+#  VERDES con el tope desconectado de 'main' -- medido. Es la septima vez hoy que
+#  una guarda propia afirma sobre la pieza y no sobre el camino, asi que va la
+#  comprobacion estructural.
+import ast as _ast
+
+_FUENTE_CORREDOR = (Path(corredor.__file__)).read_text(encoding="utf-8")
+_ARBOL_CORREDOR = _ast.parse(_FUENTE_CORREDOR)
+
+_llamadas_correr = [
+    n for n in _ast.walk(_ARBOL_CORREDOR)
+    if isinstance(n, _ast.Call) and isinstance(n.func, _ast.Name)
+    and n.func.id == "correr"]
+comprobar(len(_llamadas_correr) == 1,
+          f"hay UN solo sitio que ejecuta una prueba "
+          f"(hay {len(_llamadas_correr)})")
+
+_con_tope = [
+    n for n in _llamadas_correr
+    if any(isinstance(c, _ast.Call) and isinstance(c.func, _ast.Name)
+           and c.func.id == "tope_de" for a in n.args for c in _ast.walk(a))]
+comprobar(len(_con_tope) == len(_llamadas_correr),
+          f"y le pasa el tope declarado por la prueba, no el fijo "
+          f"(con tope: {len(_con_tope)} de {len(_llamadas_correr)})")
+
 comprobar(not corredor._VEREDICTO_PROPIO_EN_ROJO.search(
               'Traceback (most recent call last):' + chr(10) + 'Exception: x'),
           'Traceback y Exception NO cuentan como veredicto propio en rojo')

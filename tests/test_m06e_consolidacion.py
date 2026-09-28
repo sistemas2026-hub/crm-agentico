@@ -132,8 +132,22 @@ def main() -> int:
 
     seccion("3.B  sondear_api y 3.D ping_cliente: ninguna ruta sin persona")
     sin_persona = fuentes(*MODULOS_SIN_PERSONA)
+    #  LO QUE IMPORTA ES EL EFECTO: que por la ruta de servicio --sin persona-- no
+    #  salga NI UNA llamada. Como se lo impide es secundario, y hay dos formas
+    #  legitimas de impedirlo:
+    #
+    #    a) no estar declarada 'invocable_por_servicio' (sondear_api);
+    #    b) exigir un dato de la SESION VERIFICADA que la ruta de servicio no
+    #       tiene (ping_cliente pide 'id_servicio'), asi que la llamada no sale
+    #       aunque este declarada.
+    #
+    #  Hasta el 27/09/2026 esto afirmaba la BANDERA y no el efecto, y por eso
+    #  venia en rojo: 'ping_cliente' si esta declarada invocable, y la proteccion
+    #  real es (b). Peor: cuando esa proteccion se disparaba, la prueba se caia
+    #  con traceback en vez de registrar que el efecto se cumplio. Afirmar sobre
+    #  el mecanismo y no sobre el efecto es exactamente lo que CLAUDE.md 6
+    #  prohibe, y aca estaba escrito en la guarda de la frontera.
     for n in ("sondear_api", "ping_cliente"):
-        afirmar(not H[n].invocable_por_servicio, f"{n}: no invocable por servicio")
         afirmar(n not in sin_persona,
                 f"{n}: ningun modulo sin persona (scheduler, importador, agendamiento, "
                 f"operativo) lo nombra")
@@ -141,11 +155,24 @@ def main() -> int:
             try:
                 motor.ejecutar_para_servicio(CONFIG, H[n], {})
                 motivo = ""
-            except ValueError as ex:
-                motivo = str(ex)
-        afirmar("invocable_por_servicio" in motivo and e.red.llamadas == [],
-                f"{n}: la ruta de servicio lo rechaza por no ser invocable "
-                f"({motivo[:60]}...)")
+            except BaseException as ex:            # noqa: BLE001
+                #  BaseException: la cadena de identidad puede levantar algo que
+                #  no hereda de Exception, y un traceback aca esconderia el
+                #  resultado que se esta midiendo.
+                motivo = f"{type(ex).__name__}: {ex}"
+        afirmar(e.red.llamadas == [],
+                f"{n}: por la ruta de servicio NO sale ninguna llamada "
+                f"(salieron {len(e.red.llamadas)})")
+        afirmar(bool(motivo),
+                f"{n}: y la ruta de servicio la RECHAZA, no la deja pasar en silencio "
+                f"({motivo[:70]})")
+        #  Y que el motivo sea uno de los dos legitimos, no cualquier error.
+        esperado = ("invocable_por_servicio" in motivo
+                    or "sesion verificada" in motivo
+                    or "FaltaIdentidad" in motivo)
+        afirmar(esperado,
+                f"{n}: y la rechaza por el motivo correcto -- no declarada, o le "
+                f"falta un dato de la sesion verificada ({motivo[:70]})")
     afirmar(H["sondear_api"].roles_permitidos == ["configuracion_guiada"],
             "sondear_api: solo en la configuracion guiada (un ADMIN en la pantalla)")
     afirmar(H["ping_cliente"].metodo == "POST",
