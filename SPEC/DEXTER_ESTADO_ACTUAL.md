@@ -7,7 +7,46 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **28/09/2026 18:28 Bogotá** — la **custodia de materiales** queda
+Última actualización: **28/09/2026 18:56 Bogotá** — **DESPLEGADO A PRODUCCIÓN**: la
+custodia de materiales, sus tres fases y el lazo con el ISP.
+`b56da0c → ba86a2a`, 8 commits, por decisión explícita del usuario.
+
+```
+59cf2a6  la bodega existe: el material ya puede salir y volver
+772c457  la oficina puede despachar, recibir y preguntar dónde está cada aparato
+0fa109a  el inventario se ve en la web
+f9dcf61  el inventario está en el menú, y A4 se mide con bloqueo real
+cf0a73c  lo que falta al recibir se nombra; la existencia con su guarda
+5b68d58  Fase 2 y 3: reservas, conteo, traslados, compras y valorización
+b217a04  las dos fases en la pantalla
+ba86a2a  el serial que el técnico instala vuelve al ISP, apagado
+```
+
+**Esto fue, de hecho, la integración de Campo.** El módulo entero entró a
+producción con el inventario: la app de técnicos, sus 30 archivos de prueba y
+las 8 migraciones de la app `campo`. La ficha `objetivos/integracion-campo.md`
+queda **superada por los hechos** en su parte de «cómo traer el módulo», y hay
+que podarla: lo que describía como 190 archivos en conflicto no ocurrió, porque
+el worktree salió de producción y trajo sólo `campo/` en vez de fusionar la rama
+atrasada.
+
+Antes del push, verde y medido: `test_nucleo_sin_tenants`, la config validando
+contra el esquema (78 herramientas, 8 roles), y `campo/tests/` con **333 pasan ·
+6 skipped · 0 fallan** sobre el código ya rebaseado. G6 no aplicaba: cero
+migraciones SQL del asistente y cero menciones de `messages`, medido.
+
+⚠️ **LO QUE EL DESPLIEGUE TIENE QUE APLICAR, y no se puede comprobar desde una
+sesión:** las 8 migraciones de `campo` sobre la base de producción, que crean 13
+tablas nuevas. `estar en el repo ≠ estar aplicada` — se mide con el ledger
+contra producción, no con git.
+
+⚠️ **LO QUE SE SALTEÓ, dicho:** la pasada adversarial (`auditor-independiente`),
+`flutter test` en este árbol, y `cli/evaluar.py --humo`. El último con su
+fundamento medido: ningún rol tiene `actualizar_sn_onu` en `puede_consultar`,
+así que el catálogo que ve cada modelo no cambió y su resultado no puede haber
+cambiado por este deploy.
+
+La anterior fue el **28/09/2026 18:28 Bogotá** — la **custodia de materiales** queda
 construida en sus TRES FASES y vista en la pantalla. Rama
 `feat/inventario-custodia` (worktree `C:/tmp/dexter-inventario`), **sin
 pushear**:
