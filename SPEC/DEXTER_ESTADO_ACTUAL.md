@@ -801,6 +801,40 @@ Custodia de materiales   🟢 CONSTRUIDA Y VISTA EN LA PANTALLA (28/09/2026).
                               318 pasan · 6 skipped · 0 fallan sobre SQLite
                               svelte-check  0 errores en los archivos nuevos
 
+                            EL LAZO CON WISPHUB, CONSTRUIDO el 28/09 y
+                            APAGADO a propósito (`b487a84`).
+                            No hizo falta tocar `nucleo/`: el camino ya existía
+                            --`POST /interno/herramienta/<nombre>`, con token de
+                            servicio, `invocable_por_servicio` declarado una por
+                            una, sin sesión, con Idempotency-Key y el interruptor
+                            de autonomía devolviendo 409--. Así que la herramienta
+                            es CONFIGURACIÓN del tenant y el productor vive en el
+                            CRM (`campo/services/lazo_isp.py`).
+                            VERIFICADO contra la API real, solo lectura: OPTIONS
+                            sobre `/api/clientes/<id>/` declara UN método, PUT (no
+                            PATCH), y `sn_onu` como escribible. Anotado en la
+                            skill con su fecha.
+                            ⚠️ APAGADO hasta medir UNA cosa, y es grave: un PUT
+                            normalmente espera el recurso COMPLETO, así que mandar
+                            solo `sn_onu` podría VACIAR los demás campos del
+                            cliente. Y OPTIONS ya mintió en esta API. Se cierra
+                            con un PUT real contra un cliente de PRUEBA
+                            comprobando por GET que lo demás sigue ahí. Hasta
+                            entonces `CAMPO_AVISAR_SN_ONU_AL_ISP != '1'` y no sale
+                            a la red -- con su prueba, que no lo supone.
+
+                            ⚠️ DIFERENCIA DELIBERADA REPO ↔ BASE. La herramienta
+                            está en `tenants/rapilink.config.yaml` y **NO** en
+                            `tenant_config`. `cli/diferencias_config.py` la va a
+                            reportar como «el repo lo declara y la base no», que es
+                            la dirección que §6 marca como la que rompe -- acá es
+                            a propósito: cargarla activaría un efecto externo
+                            cuyo riesgo no se midió. **No cargarla por inercia.**
+                            Y el catálogo que ve cada modelo NO cambia: medido,
+                            ningún rol la tiene en `puede_consultar`, así que
+                            `evaluar.py` no la ejercita. Por eso ese paso se
+                            saltea, dicho.
+
                             LO ÚNICO DE FASE 2 QUE NO SE CONSTRUYÓ: el lazo con
                             WispHub --escribir `sn_onu` del equipo instalado--.
                             Motivo: toca `nucleo/`, que es el motor DESPLEGADO,
