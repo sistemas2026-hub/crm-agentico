@@ -61,6 +61,7 @@ from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
+from nucleo.seguimiento import cierre_por_propuesta
 from nucleo.seguridad import interruptor
 from nucleo.seguridad import idempotencia
 from nucleo.modelo import motor
@@ -4259,6 +4260,75 @@ def interno_ejecutar_herramienta(nombre: str):
                      componente="interno", e=e, estado_proveedor=estado_http_de(e))
 
     return jsonify({"resultado": salida})
+
+
+@app.post("/interno/propuesta/<propuesta_id>/cerrar-caso")
+def interno_cerrar_caso_de_propuesta(propuesta_id: str):
+    """
+    Cierra el caso que una persona autorizo al aceptar una propuesta.
+
+    POR QUE UNA RUTA PROPIA Y NO '/interno/herramienta/cerrar_caso_crm'
+    ------------------------------------------------------------------
+    Esa ruta entra por la puerta AUTONOMA -- es la correcta cuando el que llama
+    es un servicio decidiendo solo, y esta bloqueada hoy por Autonomia 2. Aca el
+    que decidio es una persona, sobre una propuesta concreta, asi que la puerta
+    que corresponde es 'humana()', con el id de esa propuesta como evidencia.
+
+    Abrir la puerta humana desde la ruta generica seria peor que inutil: haria
+    que CUALQUIER servicio que mande un actor entre por ahi, que es exactamente
+    el bypass que 'frontera.puerta' documenta como su limite. Esta ruta hace una
+    sola cosa, con un solo tipo de evidencia, y el kill switch se comprueba
+    adentro.
+
+    LO QUE ESTA RUTA NO HACE, Y NO PUEDE HACER
+    ------------------------------------------
+    Validar si el caso debe cerrarse. No puede: 'app_backend' no tiene ningun
+    privilegio sobre public."case" y la RLS de esa tabla compara contra
+    'app.current_org', una variable que este proceso no fija. Quien valida es
+    Django, que es el unico que lee esa tabla -- y quien llama aca ya lo hizo.
+
+    Por eso el contrato es angosto a proposito: recibe QUE caso cerrar y de que
+    propuesta viene, y nada mas. No acepta 'status' ni 'closed_on': salen de la
+    declaracion de la herramienta.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+
+    #  Ni un campo mas. 'status' y 'closed_on' se rechazan en vez de ignorarse:
+    #  ignorarlos dejaria al llamante creyendo que eligio el estado de cierre.
+    permitidos = {"id_caso"}
+    sobra = sorted(set(cuerpo) - permitidos)
+    if sobra:
+        return jsonify({
+            "error": f"esta ruta solo acepta {sorted(permitidos)}. No acepta "
+                     f"{sobra}: el estado y la fecha de cierre los fija la "
+                     f"herramienta."}), 400
+
+    id_caso = str(cuerpo.get("id_caso") or "").strip()
+    if not id_caso:
+        return jsonify({"error": "Falta 'id_caso'."}), 400
+
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+
+    resultado = cierre_por_propuesta.cerrar_caso_de_propuesta(
+        config, tenant, propuesta_id=propuesta_id, id_caso=id_caso,
+        actor=f"propuesta:{propuesta_id}")
+
+    #  409 y no 500 cuando no se cerro: la peticion estaba bien y el sistema
+    #  decidio no ejecutarla. Quien llama tiene que poder distinguir "fallo" de
+    #  "no se hizo a proposito", porque lo que le dice a la persona no es lo
+    #  mismo -- y porque de eso depende si conviene reintentar.
+    codigo_http = 200 if resultado.cerrado else 409
+    return jsonify(resultado.como_dict()), codigo_http
 
 
 @app.get("/autonomia")
