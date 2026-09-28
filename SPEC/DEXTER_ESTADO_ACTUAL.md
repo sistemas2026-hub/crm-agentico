@@ -7,7 +7,33 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **25/09/2026 13:57 Bogotá** — la planta del centro de
+Última actualización: **28/09/2026 18:28 Bogotá** — la **custodia de materiales** queda
+construida en sus TRES FASES y vista en la pantalla. Rama
+`feat/inventario-custodia` (worktree `C:/tmp/dexter-inventario`), **sin
+pushear**:
+
+```
+8851b5e  la bodega existe: el material puede salir y volver
+4f70241  la API: despachar, recibir, historia de un aparato
+79ee0c8  la pantalla /inventario
+fe64c8c  la entrada del menú, y A4 medida con bloqueo real
+56fff80  la diferencia al recibir se nombra; la existencia con su guarda
+c3fdc10  Fase 2 y 3: reservas, conteo, traslados, compras y valorización
+b8f264e  las dos fases en la pantalla: lo libre, lo contado y lo que vale
+```
+
+La **Fase 3 se construyó por decisión explícita del usuario**, que levantó la
+restricción del brief (*«el modo de fallar de este trabajo es volverse un
+ERP»*). Esa advertencia queda escrita en `campo/inventario_operacion.py`.
+
+⚠️ Y una corrección de este mismo archivo: la actualización del 28/09 metió su
+sección en `TRABAJO ACTIVO` pero **no cambió esta línea** — el reemplazo buscaba
+un texto que otra sesión ya había editado y falló en silencio, así que la
+cabecera afirmó el 25/09 durante todo el día 28. Es la tercera vez que este
+archivo afirma algo que no verificó quien lo escribió. **Un reemplazo sobre un
+documento que otra sesión puede tocar se comprueba después de hacerlo.**
+
+La anterior fue el **25/09/2026 13:57 Bogotá** — la planta del centro de
 mando pasa a **salas por área** (`8d9a3d7`) y entra una **propuesta** de planta
 radial sin enchufar (`c660474`). Los dos **sin desplegar**. Se remide el mapa de
 ramas: producción ya no está donde decía este archivo hace tres horas.
@@ -747,6 +773,50 @@ Custodia de materiales   🟢 CONSTRUIDA Y VISTA EN LA PANTALLA (28/09/2026).
                                  de su serie da cuadra_con_el_libro: true
                               la entrada en el menú: Instalaciones · INVENTARIO ·
                                  Base de conocimiento
+
+                            FASE 2 Y 3, construidas el 28/09 (`c3fdc10`,
+                            `b8f264e`). La 3 por decisión explícita del
+                            usuario, que levantó la restricción del brief --
+                            «el modo de fallar de este trabajo es volverse un
+                            ERP»--; la advertencia queda en el módulo.
+                              Fase 2  reservas con plazo que se vence solo ·
+                                      traslados entre ubicaciones · conteo
+                                      físico que produce AJUSTES y no
+                                      reescribe el saldo · tres reportes
+                              Fase 3  proveedores · compras con costo ·
+                                      valorización por promedio PONDERADO,
+                                      declarado porque FIFO/LIFO/promedio dan
+                                      números distintos sobre los mismos datos
+                            Ninguna de las cuentas nuevas es una columna:
+                            reservado, libre y valorización salen de sumas.
+                            Y el total de la valorización DICE lo que no
+                            incluye: se vio en vivo pasar de 0.00 con «3
+                            material(es) sin costo conocido» a 1752000.00 con
+                            el aviso en 2, al registrar una compra con costo.
+                            LA GUARDA DE F2 CAZÓ A SU AUTOR dos horas después
+                            de escribirse: el servicio nuevo sumaba cantidades
+                            sin estar declarado. Se agregó a la lista CON SU
+                            MOTIVO, que es el procedimiento que la guarda pide.
+                              34 pasan contra PostgreSQL real
+                              318 pasan · 6 skipped · 0 fallan sobre SQLite
+                              svelte-check  0 errores en los archivos nuevos
+
+                            LO ÚNICO DE FASE 2 QUE NO SE CONSTRUYÓ: el lazo con
+                            WispHub --escribir `sn_onu` del equipo instalado--.
+                            Motivo: toca `nucleo/`, que es el motor DESPLEGADO,
+                            y pasa por la frontera de autorización de 8 pasos;
+                            y exige `verificador-de-api` contra WispHub real,
+                            que necesita credenciales de producción. Lo medido
+                            que lo justifica sigue en pie: `sn_onu` está vacío
+                            en 1.299 de 4.163 clientes activos, y es la llave
+                            contra SmartOLT. La cola donde va ya existe
+                            (`asistente.operaciones_externas`, reconciliador
+                            cerrado en código y APAGADO), y hace falta ampliar
+                            su `check` de tipos: hoy admite cuatro y ninguno es
+                            éste. `actualizar_sn_onu` sería el primer efecto
+                            externo de WispHub naturalmente idempotente --pone
+                            un valor, no crea nada-- y eso cambia su
+                            clasificación en el gate Q2.
 
                             LO QUE FALTA, dicho: la pasada adversarial (F14 --
                             los 9 agentes siguen sin cargarse), `flutter test`

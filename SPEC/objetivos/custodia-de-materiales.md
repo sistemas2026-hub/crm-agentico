@@ -1,8 +1,16 @@
 # Objetivo · Custodia de materiales — cerrar el ciclo bodega ↔ técnico
 
-> Abierto el 25/09/2026. **Fase 1 construida el 28/09/2026** y vista en la
-> pantalla. Estado: **abierto** — falta el cierre formal (F12 auditor, F15 poda
-> del estado) y las Fases 2 y 3. Fase **1 de 3**.
+> Abierto el 25/09/2026. **Las tres fases construidas el 28/09/2026** y vistas
+> en la pantalla. Estado: **abierto** — falta el cierre formal (la pasada
+> adversarial) y el lazo con WispHub, que es lo único de Fase 2 que no se
+> construyó y tiene su motivo al final.
+>
+> **La Fase 3 se construyó por decisión explícita del usuario**, que levantó la
+> restricción del brief. Esa restricción decía: *«es el modo de fallar de este
+> trabajo: volverse un ERP y perder la filosofía que ya está bien resuelta»*, y
+> queda escrita en `campo/inventario_operacion.py` porque sigue siendo cierta:
+> cada cosa que se agregue ahí tiene que respetar las mismas reglas que el
+> núcleo, o el módulo se convierte en lo que el brief temía.
 >
 > Commits, rama `feat/inventario-custodia` (worktree `C:/tmp/dexter-inventario`),
 > **sin pushear**: `8851b5e` la bodega · `4f70241` la API · `79ee0c8` la
