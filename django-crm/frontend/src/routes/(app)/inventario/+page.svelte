@@ -143,7 +143,17 @@
         Son enlaces y no botones: cada pestaña es una URL (`?ver=`), se puede
         compartir y el servidor carga solo lo de esa sección.
       -->
-      <nav class="flex items-center gap-gutter overflow-x-auto whitespace-nowrap">
+      <!--
+        LAS PESTAÑAS ENVUELVEN EN VEZ DE DESPLAZARSE.
+
+        El diseño de Stitch usa `overflow-x-auto` y funciona en su lienzo de
+        1280px, que no tiene barra lateral. Acá el shell de la app se lleva 222px,
+        así que las diez no entran: medido, el nav pide 1227px y dispone de 1186.
+        Con scroll horizontal, «Buscar aparato» queda cortada y aparece una barra
+        gris dentro de la página. Envolviendo a dos filas se ven las diez, que es
+        lo que la barra de pestañas existe para hacer.
+      -->
+      <nav class="flex flex-wrap items-center gap-gutter">
         {#each PESTANAS as p (p.id)}
           {#if p.id === pestana}
             <a

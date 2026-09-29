@@ -88,6 +88,26 @@
   font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
   color: var(--inv-on-surface);
   background: var(--inv-surface);
+
+  /* --- LA ALTURA, QUE ES LO QUE HACE POSIBLE EL SCROLL ---------------------
+   *
+   * `.v2-scroll` --el contenedor que desplaza, de lib/v2/styles/v2.css-- es
+   * `flex: 1; min-height: 0; overflow-y: auto`. O sea que espera un PADRE flex
+   * en columna y con altura acotada: sin eso, `flex: 1` no acota nada, el hijo
+   * crece con su contenido y no desplaza nunca.
+   *
+   * Eso pasaba acá. Medido el 29/09/2026 en la pantalla:
+   *
+   *     .v2-main   overflow:hidden   visible 900   contenido 975   recorta 75
+   *     .v2-scroll overflow:auto     visible 975   contenido 975   no desplaza
+   *
+   * El resultado era contenido cortado abajo y sin forma de llegar a el -- el
+   * boton de Despachar quedaba a medias. Poner la envoltura `v2-scroll` no
+   * alcanza: hay que darle de donde colgar. */
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* --------------------------------------------------------------------------
