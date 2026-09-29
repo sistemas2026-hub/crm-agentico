@@ -231,9 +231,21 @@ def series_sin_devolver(profile, org):
     if not entregadas:
         return []
 
+    # SOLO LOS MOVIMIENTOS QUE SACAN EL EQUIPO DE LA CUSTODIA RESUELVEN ALGO.
+    #
+    # Antes contaba CUALQUIER movimiento con esa serie, y valia mientras la app
+    # fuera lo unico que escribia. Desde que el kit se entrega con un despacho de
+    # verdad, ese despacho --que es justamente lo que CREA la pendencia-- tambien
+    # traia la serie y se contaba como resuelta: un equipo entregado y no
+    # devuelto dejaba de listarse. Medido el 28/09/2026, y lo cazo la prueba 12.
     resueltas = set(
         MovimientoDeMaterial.objects.filter(
-            profile=profile, org=org, serie__in=entregadas
+            profile=profile, org=org, serie__in=entregadas,
+            tipo__in=(
+                MovimientoDeMaterial.CONSUMO,
+                MovimientoDeMaterial.DEVOLUCION,
+                MovimientoDeMaterial.BAJA,
+            ),
         )
         .exclude(estado=MovimientoDeMaterial.CONFLICTO)
         .values_list("serie", flat=True)

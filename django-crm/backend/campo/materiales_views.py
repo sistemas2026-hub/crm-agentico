@@ -250,6 +250,10 @@ class MovimientosMaterialView(APIView):
             )
 
         resultados = []
+        #: (indice en `resultados`, movimiento) de los que hay que avisarle al
+        #: ISP. Se juntan acá y se emiten DESPUÉS de cerrar la transacción --
+        #: ver el bloque que sigue al `with`.
+        por_avisar: list[tuple[int, object]] = []
         with transaction.atomic():
             for datos in serializer.validated_data:
                 orden = None
@@ -294,25 +298,12 @@ class MovimientosMaterialView(APIView):
                     })
                     continue
 
-                # EL SERIAL INSTALADO VUELVE AL ISP, y va DESPUES de guardar.
-                #
-                # Guardar primero, avisar despues -- invariante congelado del
-                # proyecto. Si esto se hiciera antes, un fallo de red dejaria el
-                # consumo sin registrar y el material perdido del inventario: un
-                # problema de red convertido en un problema de datos.
-                #
-                # Y nunca revierte: la serie salio de la custodia del tecnico
-                # (hecho) y el ISP la tiene registrada (otro hecho) son dos cosas
-                # distintas, y el segundo puede fallar sin que el primero deje de
-                # ser cierto. Es el mismo patron que ACCION_CONFIRMADA.
-                #
-                # Solo para movimientos NUEVOS: un reenvio de la cola offline no
-                # vuelve a salir a la red. `intentar_avisar` ademas lo reconoceria
-                # por su Idempotency-Key, pero no llamar es mas barato que llamar
-                # y que el otro lado lo descarte.
-                aviso = None
+                # Solo los movimientos NUEVOS salen a la red: un reenvio de
+                # la cola offline no vuelve a avisar. `intentar_avisar` ademas lo
+                # reconoceria por su Idempotency-Key, pero no llamar es mas
+                # barato que llamar y que el otro lado lo descarte.
                 if era_nuevo:
-                    aviso = lazo_isp.intentar_avisar(movimiento)
+                    por_avisar.append((len(resultados), movimiento))
 
                 resultados.append({
                     "clave": datos["clave"],
@@ -326,10 +317,38 @@ class MovimientosMaterialView(APIView):
                     # ver que el ISP quedo al tanto -- o que no, y por que. Un
                     # 201 mudo sobre un aviso que no salio es exactamente
                     # esconder lo que hay que mirar.
-                    "aviso_al_isp": None if aviso is None else {
-                        "estado": aviso.estado, "detalle": aviso.detalle,
-                    },
+                    "aviso_al_isp": None,
                 })
+
+        # EL SERIAL INSTALADO VUELVE AL ISP, Y SALE CON LA TRANSACCION CERRADA.
+        #
+        # NINGUNA TRANSACCION DE BASE ABIERTA MIENTRAS SE ESPERA UNA OPERACION
+        # EXTERNA -- invariante congelado del proyecto. Hasta el 28/09/2026 esta
+        # llamada estaba DENTRO del `with transaction.atomic()` de arriba, y el
+        # cliente HTTP espera hasta 45 s: con un lote de diez seriales, una
+        # transaccion abierta cuarenta y cinco segundos por linea, tomando
+        # candados sobre filas del inventario mientras un tercero no contesta.
+        # Es la forma de convertir la lentitud de otro sistema en una caida del
+        # propio -- y en este proyecto ya paso una vez, con sesiones colgadas
+        # detras del pooler.
+        #
+        # Guardar primero, avisar despues: si esto se hiciera antes, un fallo de
+        # red dejaria el consumo sin registrar y el material perdido del
+        # inventario -- un problema de red convertido en un problema de datos.
+        #
+        # Y nunca revierte: "la serie salio de la custodia del tecnico" (hecho) y
+        # "el ISP la tiene registrada" (otro hecho) son cosas distintas, y el
+        # segundo puede fallar sin que el primero deje de ser cierto. Es el mismo
+        # patron que ACCION_CONFIRMADA.
+        for indice, movimiento in por_avisar:
+            aviso = lazo_isp.intentar_avisar(movimiento)
+            if aviso is not None:
+                # El desenlace viaja a la app para que quien instalo pueda ver
+                # que el ISP quedo al tanto -- o que no, y por que. Un 201 mudo
+                # sobre un aviso que no salio es esconder lo que hay que mirar.
+                resultados[indice]["aviso_al_isp"] = {
+                    "estado": aviso.estado, "detalle": aviso.detalle,
+                }
 
         return Response(
             {

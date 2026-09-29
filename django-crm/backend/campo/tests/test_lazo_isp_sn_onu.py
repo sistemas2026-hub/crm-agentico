@@ -107,8 +107,12 @@ def test_apagado_por_omision_no_sale_a_la_red(org_a, ont, orden_con_cliente,
     assert r.estado == lazo_isp.ResultadoAviso.APAGADO
     post.assert_not_called()
     # El detalle dice QUÉ falta, no solo que está apagado: quien lo lea tiene que
-    # poder saber qué hay que hacer para encenderlo.
-    assert "PUT parcial" in r.detalle
+    # poder saber qué hay que hacer para encenderlo. Cambió el 28/09/2026 cuando
+    # se midió el PUT: antes decía «falta medir el riesgo», y ahora que está
+    # medido dice lo único que queda, que es poner la variable. Una prueba que
+    # siguiera exigiendo el texto viejo defendería una afirmación vencida.
+    assert "ya se midio y es seguro" in r.detalle
+    assert "variable en el entorno" in r.detalle
 
 
 def test_un_valor_que_no_es_uno_exacto_deja_apagado(org_a, ont,
@@ -124,6 +128,33 @@ def test_un_valor_que_no_es_uno_exacto_deja_apagado(org_a, ont,
             r = lazo_isp.intentar_avisar(mov)
         assert r.estado == lazo_isp.ResultadoAviso.APAGADO, valor
         post.assert_not_called()
+
+
+def test_sin_MOTOR_TENANT_no_sale_a_la_red(org_a, ont, orden_con_cliente,
+                                           monkeypatch):
+    """Sin saber de qué empresa es el movimiento, no se le escribe al ISP.
+
+    Este parámetro decide A QUÉ EMPRESA se le escribe. Hasta el 28/09/2026 el
+    código traía `or "rapilink"`: un hardcode de cliente en el que lo grave no es
+    el estilo — el día que exista una segunda instalación y alguien olvide la
+    variable, el consumo de un técnico de otra empresa se escribe sobre los
+    clientes de Rapilink.
+
+    La prueba mide el EFECTO —que no hay llamada— y no la presencia del `if`. Y
+    hace falta: en la topología real la variable siempre llega (docker-compose la
+    define), así que sin esta prueba el camino nunca se ejercitaría y el
+    fail-closed sería una intención, no una garantía.
+    """
+    monkeypatch.setenv(lazo_isp.BANDERA, "1")
+    monkeypatch.delenv("MOTOR_TENANT", raising=False)
+    mov = _consumo(org_a, ont, orden_con_cliente, serie="HWT-SIN-TENANT")
+
+    with patch("requests.post") as post:
+        r = lazo_isp.intentar_avisar(mov)
+
+    post.assert_not_called()
+    assert r.estado == lazo_isp.ResultadoAviso.NO_CORRESPONDE
+    assert "MOTOR_TENANT" in r.detalle
 
 
 # ---------------------------------------------------------------------------

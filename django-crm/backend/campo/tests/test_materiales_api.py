@@ -16,6 +16,9 @@ qué.
 """
 
 import pytest
+
+from campo.inventario import UbicacionInventario
+from campo.services import inventario as inv
 from rest_framework import status
 
 from campo.models import (
@@ -32,6 +35,27 @@ pytestmark = pytest.mark.django_db
 
 KIT = "/api/campo/kit/"
 MOVIMIENTOS = "/api/campo/materiales/movimientos/"
+
+
+def movimientos_del_telefono() -> int:
+    """Los movimientos que escribio la APP, sin los del inventario.
+
+    POR QUE NO SE CUENTA LA TABLA ENTERA (28/09/2026)
+    -------------------------------------------------
+    Estos asserts decian `MovimientoDeMaterial.objects.count()`, y valia mientras
+    la app fuera lo unico que escribia en esa tabla. Desde que el kit se entrega
+    con un despacho de verdad --entrada a bodega y salida al tecnico-- la tabla
+    trae tambien esos hechos, que son reales y que la prueba no esta midiendo.
+    Contar por tipo dice lo que la prueba siempre quiso decir: "no se registro el
+    consumo", en vez de "la tabla esta vacia".
+    """
+    return MovimientoDeMaterial.objects.filter(
+        tipo__in=(
+            MovimientoDeMaterial.CONSUMO,
+            MovimientoDeMaterial.DEVOLUCION,
+            MovimientoDeMaterial.AJUSTE,
+        )
+    ).count()
 
 
 @pytest.fixture
@@ -61,16 +85,46 @@ def ont(org_a):
 
 
 @pytest.fixture
-def kit(org_a, user_profile, conector, fibra, ont):
-    entrega = EntregaDeKit.objects.create(
-        org=org_a, profile=user_profile, acta="K-2024-094"
+def bodega(org_a):
+    """De donde sale el material. Las entregas de kit nacen de un despacho real.
+
+    POR QUE ESTA FIXTURE APARECIO EL 28/09/2026
+    -------------------------------------------
+    Antes el kit se insertaba a mano --EntregaDeKit + ItemDeKit-- y `saldo_de`
+    sumaba esos items. Desde que el saldo de un tecnico ES la existencia de su
+    custodia (un solo libro para todo el inventario), un acta sin movimientos
+    detras es un papel que describe algo que no ocurrio: no hay bodega de la que
+    haya salido nada. Ademas `inventario.despachar` es el UNICO camino que existe
+    en produccion para entregar un kit, asi que pasar por el hace que estas
+    pruebas cubran el camino real en vez de un atajo que nadie usa.
+    """
+    return UbicacionInventario.objects.create(
+        org=org_a, tipo=UbicacionInventario.BODEGA, nombre="Bodega Central"
     )
-    ItemDeKit.objects.create(entrega=entrega, material=conector, cantidad=24)
-    ItemDeKit.objects.create(entrega=entrega, material=fibra, cantidad=300)
-    ItemDeKit.objects.create(
-        entrega=entrega, material=ont, cantidad=1, serie="48575448A9B0C1"
+
+
+def _despachar(org, bodega, profile, acta, lineas):
+    """Entra a la bodega y sale al tecnico, como en la calle."""
+    for linea in lineas:
+        inv.registrar_entrada(
+            org=org, material=linea["material"],
+            cantidad=linea.get("cantidad") or 1,
+            ubicacion_destino=bodega, serie=linea.get("serie", ""),
+        )
+    entrega, _ = inv.despachar(
+        org=org, ubicacion_origen=bodega, profile_destino=profile,
+        acta=acta, lineas=lineas,
     )
     return entrega
+
+
+@pytest.fixture
+def kit(org_a, bodega, user_profile, conector, fibra, ont):
+    return _despachar(org_a, bodega, user_profile, "K-2024-094", [
+        {"material": conector, "cantidad": 24},
+        {"material": fibra, "cantidad": 300},
+        {"material": ont, "serie": "48575448A9B0C1"},
+    ])
 
 
 @pytest.fixture
@@ -196,7 +250,7 @@ class TestRegistrarLoQueSeGasto:
         assert r.status_code == status.HTTP_201_CREATED
         assert len(r.data["resultados"]) == 3
         assert {x["clave"] for x in r.data["resultados"]} == {"m1", "m2", "m3"}
-        assert MovimientoDeMaterial.objects.count() == 3
+        assert movimientos_del_telefono() == 3
 
     def test_9_se_puede_decir_en_que_trabajo_se_uso(
         self, user_client, kit, org_a, user_profile, orden
@@ -207,7 +261,10 @@ class TestRegistrarLoQueSeGasto:
         )
 
         assert r.status_code == status.HTTP_201_CREATED
-        assert MovimientoDeMaterial.objects.get().orden_id == orden.id
+        consumo = MovimientoDeMaterial.objects.get(
+            tipo=MovimientoDeMaterial.CONSUMO
+        )
+        assert consumo.orden_id == orden.id
 
     def test_10_una_devolucion_de_jornada_no_necesita_trabajo(
         self, user_client, kit, orden
@@ -235,7 +292,7 @@ class TestElReintentoNoDuplica:
         assert segundo.data["resultados"][0]["duplicado"] is True
         assert primero.data["resultados"][0]["id"] == segundo.data["resultados"][0]["id"]
 
-        assert MovimientoDeMaterial.objects.count() == 1
+        assert movimientos_del_telefono() == 1
         kit_ahora = user_client.get(KIT).data["materiales"]
         conector = next(m for m in kit_ahora if m["codigo"] == "CON-SC-APC")
         assert conector["disponible"] == "20"
@@ -253,7 +310,7 @@ class TestElReintentoNoDuplica:
         lote(user_client, movimientos)
         lote(user_client, movimientos)
 
-        assert MovimientoDeMaterial.objects.count() == 2
+        assert movimientos_del_telefono() == 2
 
     def test_13_un_lote_a_medias_completa_lo_que_falta(self, user_client, kit, orden):
         """El reintento trae lo viejo y lo nuevo junto: lo viejo se reconoce y
@@ -274,7 +331,7 @@ class TestElReintentoNoDuplica:
         por_clave = {x["clave"]: x for x in r.data["resultados"]}
         assert por_clave["m1"]["duplicado"] is True
         assert por_clave["m2"]["duplicado"] is False
-        assert MovimientoDeMaterial.objects.count() == 2
+        assert movimientos_del_telefono() == 2
 
         kit_ahora = user_client.get(KIT).data["materiales"]
         conector = next(m for m in kit_ahora if m["codigo"] == "CON-SC-APC")
@@ -291,7 +348,7 @@ class TestLoQueNoCuadraEntraIgual:
         assert r.status_code == status.HTTP_201_CREATED
         assert r.data["resultados"][0]["estado"] == "descuadre"
         assert r.data["resultados"][0]["motivo"].strip()
-        assert MovimientoDeMaterial.objects.count() == 1
+        assert movimientos_del_telefono() == 1
 
     def test_15_el_descuadre_aparece_al_consultar_el_kit(self, user_client, kit, orden):
         """Aceptar sin dejar rastro sería peor que rechazar."""
@@ -329,7 +386,7 @@ class TestLoQueNoCuadraEntraIgual:
         assert estados["ok"] == "aceptado"
         assert estados["mal"] == "descuadre"
         assert estados["ok2"] == "aceptado"
-        assert MovimientoDeMaterial.objects.count() == 3
+        assert movimientos_del_telefono() == 3
 
 
 class TestLoQueSiSeRechaza:
@@ -340,7 +397,7 @@ class TestLoQueSiSeRechaza:
         assert r.status_code == status.HTTP_400_BAD_REQUEST
         assert r.data["error"] == "MATERIAL_DESCONOCIDO"
         assert "NO-EXISTE" in r.data["codigos"]
-        assert MovimientoDeMaterial.objects.count() == 0
+        assert movimientos_del_telefono() == 0
 
     def test_19_los_codigos_desconocidos_se_nombran_todos_de_una_vez(
         self, user_client, kit, orden
@@ -359,7 +416,7 @@ class TestLoQueSiSeRechaza:
         r = mover(user_client, clave="neg", material="CON-SC-APC", cantidad="-5")
 
         assert r.status_code == status.HTTP_400_BAD_REQUEST
-        assert MovimientoDeMaterial.objects.count() == 0
+        assert movimientos_del_telefono() == 0
 
     def test_21_un_tipo_de_movimiento_inventado(self, user_client, kit, orden):
         r = mover(user_client, clave="raro", material="CON-SC-APC",
@@ -427,4 +484,4 @@ class TestElKitEsDeCadaUno:
         assert por_clave["mov-ajeno"]["estado"] == "rechazado"
         assert por_clave["mov-ajeno"]["id"] is None
         assert por_clave["mov-propio"]["estado"] == "aceptado"
-        assert MovimientoDeMaterial.objects.count() == 1
+        assert movimientos_del_telefono() == 1

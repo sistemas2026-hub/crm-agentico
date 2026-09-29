@@ -44,10 +44,16 @@ CAMPOS_PROHIBIDOS = (
     "cantidad_disponible",
 )
 
-#: Los UNICOS archivos que pueden sumar cantidades. `materiales.py` esta por
-#: compatibilidad: calcula el saldo del tecnico desde antes de que existiera el
-#: inventario, y unificarlo es trabajo aparte -- queda anotado aca para que se
-#: vea que son dos y no uno.
+#: Los UNICOS archivos que pueden sumar cantidades.
+#:
+#: `materiales.py` estuvo aca "por compatibilidad: calcula el saldo del tecnico
+#: desde antes de que existiera el inventario, y unificarlo es trabajo aparte".
+#: ESO YA NO ES CIERTO desde el 28/09/2026: `saldo_de` llama a
+#: `inventario.existencia(custodia)` y no suma nada por su cuenta. Las dos
+#: aritmeticas SI llegaron a diferir --48 contra 52 tras un conteo fisico-- y por
+#: eso se unifico. Sigue en la lista porque suma otras dos cosas que no son la
+#: existencia: `entregado_a` (lo que dice el acta firmada, que no baja cuando el
+#: material se gasta) y `movido_por` (cuanto movio una persona, por tipo).
 PUEDEN_SUMAR = {
     "services/inventario.py",
     "services/materiales.py",
@@ -136,8 +142,29 @@ def test_la_excepcion_del_puntero_esta_declarada_y_reconciliada():
         "UbicacionDeActivo es un contador guardado con otro nombre, y la "
         "excepcion que lo permite ya no vale."
     )
-    for modelo in DERIVADOS_PERMITIDOS:
-        assert modelo in DERIVADOS_PERMITIDOS, modelo
+    # Antes esto decia `for modelo in DERIVADOS_PERMITIDOS: assert modelo in
+    # DERIVADOS_PERMITIDOS`, que es verdad por construccion y no mide nada -- una
+    # tautologia sobrevive intacta a cualquier cambio de conducta, que es justo el
+    # defecto que este proyecto ya se cobro tres veces el mismo dia. Lo que hay
+    # que comprobar es que cada excepcion siga EXISTIENDO y siga teniendo su
+    # motivo escrito: una lista que nombra un modelo borrado permite algo que ya
+    # no existe, y un motivo vacio es una excepcion sin justificar.
+    definidos = {}
+    for rel, texto in _archivos_py():
+        for modelo in DERIVADOS_PERMITIDOS:
+            if re.search(r"^class " + re.escape(modelo) + r"\(", texto, re.M):
+                definidos[modelo] = rel
+    faltan = sorted(set(DERIVADOS_PERMITIDOS) - set(definidos))
+    assert not faltan, (
+        f"la lista de derivados permitidos nombra modelos que ya no existen: "
+        f"{faltan}. Una excepcion a una regla de arquitectura que apunta a nada "
+        f"deja la puerta abierta sin que nadie la vea."
+    )
+    sin_motivo = sorted(m for m, motivo in DERIVADOS_PERMITIDOS.items()
+                        if not (motivo or "").strip())
+    assert not sin_motivo, (
+        f"estos derivados estan permitidos sin decir por que: {sin_motivo}."
+    )
 
 
 def test_existencia_vive_en_un_solo_lugar():
@@ -151,3 +178,96 @@ def test_existencia_vive_en_un_solo_lugar():
         f"`existencia()` esta definida {len(definiciones)} veces: {definiciones}."
         " Tiene que haber una, y servir igual para una bodega y para un tecnico."
     )
+
+
+# ---------------------------------------------------------------------------
+# Y UNA QUE ES ARITMETICA SOBRE DATOS, NO GREP SOBRE TEXTO
+# ---------------------------------------------------------------------------
+#
+# Las cuatro de arriba recorren el codigo. Ninguna cazo el defecto mas grave que
+# tuvo este modulo --un consumo que no restaba de ninguna ubicacion-- porque
+# comprobaban que `existencia()` estuviera definida UNA vez, no que los
+# movimientos tuvieran direccion. Una guarda de texto no puede ver eso: el codigo
+# que no escribe una columna se ve igual que el que no la necesita.
+
+import pytest  # noqa: E402
+
+from campo.inventario import UbicacionInventario  # noqa: E402
+from campo.models import MaterialCatalogo, MovimientoDeMaterial  # noqa: E402
+from campo.services import inventario as inv  # noqa: E402
+from campo.services import inventario_operacion as op  # noqa: E402
+from campo.services.materiales import registrar_movimiento, saldo_de  # noqa: E402
+
+
+@pytest.mark.django_db
+def test_ningun_movimiento_queda_sin_direccion(org_a, user_profile):
+    """Un movimiento sin origen NI destino no resta ni suma en ninguna parte.
+
+    ES EL DEFECTO 1 CONVERTIDO EN PROPIEDAD, para cualquier escritor futuro.
+    `registrar_movimiento` --el camino de la app del tecnico-- no escribia ninguna
+    de las dos, asi que la existencia de una custodia solo podia subir y la
+    pantalla mostraba material que ya estaba instalado en casas de clientes. Cada
+    escritor nuevo del libro puede repetir el error; esta prueba ejercita LOS
+    NUEVE caminos que existen hoy y mira el dato, no el codigo.
+
+    Los dos nulls legitimos son de UN lado cada uno: una ENTRADA no tiene origen
+    interno y un CONSUMO no tiene destino interno. Los dos a la vez, nunca.
+    """
+    from campo.models import OrdenTrabajo, WorkType, WorkTypeVersion
+
+    bodega = UbicacionInventario.objects.create(
+        org=org_a, tipo=UbicacionInventario.BODEGA, nombre="Bodega de la guarda")
+    otra = UbicacionInventario.objects.create(
+        org=org_a, tipo=UbicacionInventario.BODEGA, nombre="Bodega Norte")
+    material = MaterialCatalogo.objects.create(
+        org=org_a, codigo="GUARDA-1", nombre="Conector de la guarda")
+    wt = WorkType.objects.create(org=org_a, codigo="g", nombre="Guarda")
+    ver = WorkTypeVersion.objects.create(
+        work_type=wt, version=1, estado=WorkTypeVersion.PUBLICADA, esquema={})
+    orden = OrdenTrabajo.objects.create(
+        org=org_a, numero=9900, tipo_trabajo_version=ver,
+        cliente_nombre="Guarda", cliente_direccion="Calle 0")
+
+    # Todos los caminos que escriben el libro hoy.
+    inv.registrar_entrada(org=org_a, material=material, cantidad=100,
+                          ubicacion_destino=bodega, origen_ref="GUARDA")
+    op.registrar_compra(org=org_a, ubicacion_destino=bodega, referencia="F-G",
+                        lineas=[{"material": material, "cantidad": 10,
+                                 "costo_unitario": "5"}])
+    op.trasladar(org=org_a, ubicacion_origen=bodega, ubicacion_destino=otra,
+                 lineas=[{"material": material, "cantidad": 5}],
+                 referencia="T-G")
+    inv.despachar(org=org_a, ubicacion_origen=bodega,
+                  profile_destino=user_profile, acta="ACTA-GUARDA",
+                  lineas=[{"material": material, "cantidad": 20}])
+    registrar_movimiento(org=org_a, profile=user_profile, material=material,
+                         tipo=MovimientoDeMaterial.CONSUMO, cantidad=3,
+                         idempotency_key="guarda-consumo", orden=orden)
+    registrar_movimiento(org=org_a, profile=user_profile, material=material,
+                         tipo=MovimientoDeMaterial.DEVOLUCION, cantidad=2,
+                         idempotency_key="guarda-devolucion")
+    registrar_movimiento(org=org_a, profile=user_profile, material=material,
+                         tipo=MovimientoDeMaterial.AJUSTE, cantidad="-4",
+                         idempotency_key="guarda-ajuste")
+    conteo = op.abrir_conteo(org=org_a, ubicacion=bodega)
+    op.anotar_conteo(conteo, material=material, cantidad=50, motivo="guarda")
+    op.cerrar_conteo(conteo)
+    inv.recibir_devolucion(org=org_a, profile_origen=user_profile,
+                           ubicacion_destino=bodega, referencia="D-G",
+                           lineas=[{"material": material, "cantidad": 1}])
+
+    huerfanos = list(
+        MovimientoDeMaterial.objects.filter(
+            org=org_a, ubicacion_origen__isnull=True,
+            ubicacion_destino__isnull=True,
+        ).values_list("tipo", "cantidad", "idempotency_key")
+    )
+    assert not huerfanos, (
+        "estos movimientos no salen ni entran a ninguna ubicacion, asi que no "
+        f"cambian ninguna existencia: {huerfanos}. Un movimiento sin direccion es "
+        "una fila que dice que algo paso y no lo refleja en ningun saldo."
+    )
+
+    # Y el saldo del tecnico ES la existencia de su custodia: un solo numero.
+    custodia = inv.ubicacion_de_tecnico(user_profile, org_a, crear=False)
+    assert saldo_de(user_profile, material) == inv.existencia(custodia, material)

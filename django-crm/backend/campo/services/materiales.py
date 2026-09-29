@@ -81,17 +81,82 @@ def movido_por(profile, material, tipo) -> Decimal:
 
 
 def saldo_de(profile, material) -> Decimal:
-    """Lo que esta persona debería tener encima de este material.
+    """Lo que esta persona tiene encima de este material.
+
+    ES LA MISMA CUENTA QUE `existencia`, NO OTRA
+    --------------------------------------------
+    Hasta el 28/09/2026 esta función sumaba por su cuenta:
+
+        entregado − consumido − devuelto + ajustado
+
+    y `services/inventario.existencia()` sumaba el libro. Dos aritméticas sobre
+    los mismos hechos, y el día que difirieran nadie sabría cuál de los dos
+    números es el bueno. Difirieron: un conteo físico que le QUITA 2 unidades al
+    técnico escribe un ajuste con dirección "sale de la custodia", y el `+
+    ajustado` de acá lo leía como material que APARECE. Medido: `existencia`
+    decía 48 y `saldo_de` decía 52 — y `clasificar()` usa este número para
+    decidir si un consumo es descuadre, así que un ajuste a la baja le agrandaba
+    el cupo al técnico en vez de achicárselo.
+
+    Ahora hay un solo libro y esta función es una pregunta sobre él: la custodia
+    de una persona es una ubicación como una bodega, y su saldo es su existencia.
+    `entregado_a` sigue existiendo porque responde otra cosa —cuánto se le
+    entregó en total, que es lo que dice el acta firmada— y eso no cambia cuando
+    el material se gasta.
 
     Puede dar negativo, y que pueda es el punto: un negativo es justamente lo
     que hay que poder ver. Taparlo con un `max(0, ...)` haría que el descuadre
     desapareciera de la pantalla sin haberse resuelto.
     """
-    entregado = entregado_a(profile, material)
-    consumido = movido_por(profile, material, MovimientoDeMaterial.CONSUMO)
-    devuelto = movido_por(profile, material, MovimientoDeMaterial.DEVOLUCION)
-    ajustado = movido_por(profile, material, MovimientoDeMaterial.AJUSTE)
-    return entregado - consumido - devuelto + ajustado
+    from campo.services.inventario import existencia, ubicacion_de_tecnico
+
+    custodia = ubicacion_de_tecnico(profile, profile.org, crear=False)
+    if custodia is None:
+        # Nadie le despachó nada nunca. Y no se crea la custodia para leer: una
+        # lectura que escribe deja filas por el solo hecho de abrir una pantalla.
+        return CERO
+    return existencia(custodia, material)
+
+
+def _direccion_de(tipo, custodia, cantidad):
+    """De qué ubicación sale y a cuál entra un movimiento que manda el teléfono.
+
+    POR QUÉ ESTA FUNCIÓN EXISTE
+    ---------------------------
+    Hasta el 28/09/2026 `registrar_movimiento` no escribía ninguna de las dos, y
+    la consecuencia estaba en producción: un consumo no restaba de ninguna parte,
+    así que la existencia de una custodia **solo podía subir**. La pantalla de
+    inventario mostraba material que ya estaba dentro de las paredes de las casas
+    de los clientes, y cada consumo que sincronizaba un técnico agrandaba la
+    diferencia. Medido: se despachan 100, el técnico instala los 100, y la
+    custodia seguía diciendo 100.
+
+    Los tres tipos que escribe la app, y el null de cada uno con su motivo:
+
+        CONSUMO     custodia → None    el material entró a la casa de un cliente
+                                       y de ahí el dueño es WispHub, no Dexter.
+                                       Es una de las dos fronteras del sistema
+        DEVOLUCIÓN  custodia → None    salió de las manos del técnico; a qué
+                                       bodega llegó lo dice quien la recibe
+                                       (inventario.recibir_devolucion), porque el
+                                       teléfono no lo sabe y suponerlo sería
+                                       inventar una recepción que nadie firmó
+        AJUSTE      según el signo     sobra → entra a la custodia
+                                       falta → sale de ella
+
+    LA CANTIDAD NUNCA LLEVA EL SIGNO
+    Un ajuste negativo se guarda como cantidad positiva con la dirección "sale".
+    Un signo dentro de la cantidad y una dirección en las ubicaciones son dos
+    formas de decir lo mismo, y dos formas es la que termina contradiciéndose:
+    `existencia` leería −5 en el origen como +5. Es el mismo criterio que ya usa
+    `cerrar_conteo`, que guarda `abs(diferencia)`.
+    """
+    if tipo == MovimientoDeMaterial.AJUSTE:
+        if cantidad < CERO:
+            return custodia, None
+        return None, custodia
+    # Consumo y devolución: las dos salen de la custodia.
+    return custodia, None
 
 
 class ConsumoInvalido(Exception):
@@ -271,7 +336,8 @@ def registrar_movimiento(
     if ya is not None:
         return ya, False
 
-    cantidad = a_decimal(cantidad)
+    cantidad_como_llego = a_decimal(cantidad)
+    cantidad = cantidad_como_llego
     if not material.admite_fraccion:
         # Un conector y medio no existe. Se trunca hacia abajo en vez de
         # redondear: inventar media unidad de más es peor que perderla.
@@ -309,6 +375,31 @@ def registrar_movimiento(
         serie=serie,
     )
 
+    # DE DÓNDE SALE Y A DÓNDE VA. Sin esto el movimiento no resta de ninguna
+    # ubicación y la custodia de un técnico solo puede subir -- ver
+    # `_direccion_de`, que lleva la medición.
+    #
+    # Import tardío y no arriba: `services/inventario` e
+    # `services/inventario_operacion` ya se referencian en los dos sentidos, y
+    # sumar una arista más al grafo de imports de `services/` es la forma de que
+    # un día el orden de carga importe. Acá no cuesta nada.
+    from campo.services.inventario import (
+        activo_de,
+        _mover_activo,
+        ubicacion_de_tecnico,
+    )
+
+    custodia = ubicacion_de_tecnico(profile, org) if profile is not None else None
+    origen, destino = _direccion_de(tipo, custodia, cantidad)
+    if tipo == MovimientoDeMaterial.AJUSTE:
+        cantidad = abs(cantidad)
+
+    extra_datos = {}
+    if cantidad_como_llego != cantidad:
+        # Lo que mandó el teléfono no se pierde: la cantidad guardada está
+        # truncada o sin signo, y la original explica por qué.
+        extra_datos["cantidad_recibida"] = str(cantidad_como_llego)
+
     campos = dict(
         org=org,
         profile=profile,
@@ -319,9 +410,12 @@ def registrar_movimiento(
         serie=serie or "",
         estado=estado,
         motivo=motivo,
+        ubicacion_origen=origen,
+        ubicacion_destino=destino,
         idempotency_key=idempotency_key,
         motivo_tecnico=motivo_tecnico or "",
-        datos={**(datos or {}), **({"avisos": avisos} if avisos else {})},
+        datos={**(datos or {}), **extra_datos,
+               **({"avisos": avisos} if avisos else {})},
     )
     # Solo se manda si el telefono dijo cuando fue. Pasar None explicito
     # anularia el default del modelo y dejaria la columna en nulo.
@@ -329,6 +423,20 @@ def registrar_movimiento(
         campos["ocurrido_en"] = ocurrido_en
 
     movimiento = MovimientoDeMaterial.objects.create(**campos)
+
+    # EL PUNTERO SIGUE AL APARATO. `UbicacionDeActivo` existe para contestar
+    # "dónde está esta ONT" sin recorrer el libro, y el consumo era el único
+    # movimiento que no lo movía: la pantalla decía que estaba en la custodia del
+    # técnico cuando estaba en la casa de un cliente, y `cuadra_con_el_libro`
+    # daba False para TODO serial instalado -- el indicador que existe para
+    # detectar el defecto se saturaba y dejaba de significar algo.
+    #
+    # Un movimiento en CONFLICTO no mueve nada, por definición no ocurrió.
+    if serie and estado != MovimientoDeMaterial.CONFLICTO:
+        activo = activo_de(org, material, serie)
+        if activo is not None:
+            _mover_activo(activo, destino, movimiento)
+
     return movimiento, True
 
 
