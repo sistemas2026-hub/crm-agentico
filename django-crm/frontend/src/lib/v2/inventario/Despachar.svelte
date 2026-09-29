@@ -115,14 +115,18 @@
       if (tiene > 0) {
         descontado.push({ material: l.material, pide, tiene, falta });
       }
-      nuevas.push({
-        n: siguiente++,
-        material: l.material,
-        // Se deja escrito incluso si da 0: que una línea diga 0 es la forma de
-        // ver que ese material ya lo tiene, en vez de que desaparezca sin avisar.
-        cantidad: String(falta),
-        serie: ''
-      });
+      // Una línea en cero NO se agrega: el servidor la rechazaría --«la línea 1
+      // no dice cuánto se entrega»-- y el despacho entero fallaría por un
+      // material que justamente no hace falta entregar. Que no esté se explica
+      // arriba, en el aviso, con los tres números.
+      if (falta > 0) {
+        nuevas.push({
+          n: siguiente++,
+          material: l.material,
+          cantidad: String(falta),
+          serie: ''
+        });
+      }
     }
 
     lineas = nuevas.length ? nuevas : [{ n: siguiente++, material: '', cantidad: '', serie: '' }];
@@ -423,7 +427,12 @@
               {#each loQueYaTenia as d (d.material)}
                 <li class="font-body-sm text-body-sm text-secondary">
                   <span class="font-label-code text-label-code text-on-surface">{d.material}</span>
-                  · el kit pide {d.pide}, tiene {d.tiene} → se propone {d.falta}
+                  · el kit pide {d.pide}, tiene {d.tiene} →
+                  {#if d.falta > 0}
+                    se propone {d.falta}
+                  {:else}
+                    ya tiene suficiente, no se agregó la línea
+                  {/if}
                 </li>
               {/each}
             </ul>
@@ -493,11 +502,18 @@
                     </div>
                   {:else}
                     <div class="flex items-center gap-2">
+                      <!--
+                        `bind:value` no es decoracion: sin el, cargar una
+                        plantilla escribia las cantidades en el estado y los
+                        campos quedaban vacios. Se vio probando la carga, no
+                        leyendo el codigo.
+                      -->
                       <input
                         name="cantidad"
                         type="number"
                         step={m?.clase === 'bobina' ? '0.001' : '1'}
                         min="0.001"
+                        bind:value={linea.cantidad}
                         class="w-28 h-9 px-2.5 text-right font-label-numeric text-body-md bg-surface-container-lowest text-on-surface rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                       <span class="font-body-sm text-body-sm text-secondary">{m?.unidad ?? ''}</span>

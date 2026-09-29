@@ -469,7 +469,12 @@ class LineaDePlantilla(BaseModel):
         PlantillaDeKit, on_delete=models.CASCADE, related_name="lineas"
     )
     material = models.ForeignKey(
-        MaterialCatalogo, on_delete=models.PROTECT, related_name="en_plantillas"
+        # Por CADENA y no por clase, igual que los demas modelos de este archivo:
+        # `campo/models.py` importa este modulo al final, asi que la clase no
+        # existe todavia cuando Django evalua esta linea. Con la clase el proceso
+        # ni arranca -- `NameError: name 'MaterialCatalogo' is not defined`.
+        "campo.MaterialCatalogo", on_delete=models.PROTECT,
+        related_name="en_plantillas",
     )
     cantidad = models.DecimalField(max_digits=12, decimal_places=3, default=0)
 
