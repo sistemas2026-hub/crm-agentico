@@ -26,6 +26,7 @@ from rest_framework.views import APIView
 from campo.inventario import ActivoSerializado, UbicacionInventario
 from campo.models import MaterialCatalogo
 from campo.permissions import IsCampoAuthenticated, ROLES_GESTION
+from campo.services import catalogo as cat
 from campo.services import inventario as inv
 from common.models import Profile
 
@@ -408,3 +409,81 @@ class HistoriaDeSerieView(APIView):
                 "historia": inv.historia_de(org, activo.material, activo.serie),
             })
         return Response({"activos": salida})
+
+
+class MaterialesView(APIView):
+    """``GET`` el catalogo completo · ``POST`` un material nuevo.
+
+    Es el MAESTRO del catalogo, y contesta otra pregunta que las existencias:
+    "que cosas maneja esta empresa" en vez de "cuanto hay y donde".
+
+    A diferencia de `CatalogoView` --que sirve los desplegables y devuelve solo
+    los activos-- esta ruta devuelve TODO, incluidos los dados de baja, porque
+    administrarlos es justamente para lo que existe.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = request.profile.org
+        return Response({"materiales": cat.materiales_de(org)})
+
+    def post(self, request):
+        _exigir_inventario(request)
+        try:
+            m = cat.crear_material(
+                org=request.profile.org,
+                codigo=request.data.get("codigo"),
+                nombre=request.data.get("nombre"),
+                clase=request.data.get("clase") or "",
+                unidad=request.data.get("unidad") or "",
+                categoria=request.data.get("categoria") or "",
+            )
+        except cat.MaterialInvalido as e:
+            # 409 y no 400: el dato esta bien escrito; lo que no se puede es
+            # tener dos materiales con el mismo codigo en la misma empresa.
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        return Response({"id": str(m.id), "codigo": m.codigo},
+                        status=status.HTTP_201_CREATED)
+
+
+class MaterialView(APIView):
+    """``PATCH`` corrige un material o lo da de baja.
+
+    NO HAY DELETE, Y NO ES UN OLVIDO. Un material con historial no se puede
+    borrar sin romper el libro: sus movimientos lo referencian y esos movimientos
+    son lo que explica una existencia. Dar de baja lo saca de las operaciones
+    nuevas y lo deja intacto en los registros viejos.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def patch(self, request, pk):
+        _exigir_inventario(request)
+        org = request.profile.org
+        material = MaterialCatalogo.objects.filter(org=org, id=pk).first()
+        if material is None:
+            # 404 y no 403: un material de otra empresa no existe para esta. Que
+            # la respuesta no distinga entre "no esta" y "es de otro" es lo que
+            # evita que alguien averigue los codigos ajenos probando.
+            raise Http404("Ese material no existe en esta empresa.")
+
+        try:
+            cat.editar_material(
+                material,
+                codigo=request.data.get("codigo"),
+                nombre=request.data.get("nombre"),
+                clase=request.data.get("clase"),
+                unidad=request.data.get("unidad"),
+                categoria=request.data.get("categoria"),
+                activo=request.data.get("activo"),
+            )
+        except cat.MaterialInvalido as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+
+        return Response({
+            "id": str(material.id),
+            "codigo": material.codigo,
+            "activo": material.activo,
+            "tiene_movimientos": cat.tiene_movimientos(material),
+        })

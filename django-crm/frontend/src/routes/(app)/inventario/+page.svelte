@@ -38,6 +38,7 @@
   import ComprasYValor from '$lib/v2/inventario/ComprasYValor.svelte';
   import Reportes from '$lib/v2/inventario/Reportes.svelte';
   import BuscarAparato from '$lib/v2/inventario/BuscarAparato.svelte';
+  import Materiales from '$lib/v2/inventario/Materiales.svelte';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
@@ -76,7 +77,11 @@
     { id: 'conteo', texto: 'Conteo físico' },
     { id: 'compras', texto: 'Compras y valor' },
     { id: 'reportes', texto: 'Reportes' },
-    { id: 'serie', texto: 'Buscar aparato' }
+    { id: 'serie', texto: 'Buscar aparato' },
+    // El maestro del catálogo, al final: contesta «qué cosas maneja esta
+    // empresa», que es otra pregunta que las nueve de arriba y se toca mucho
+    // menos. Ponerla primero correría de lugar el trabajo de todos los días.
+    { id: 'materiales', texto: 'Materiales' }
   ];
 
   /**
@@ -85,6 +90,7 @@
    * la misma pantalla se lee como dos problemas distintos.
    */
   const CON_AVISO_PROPIO = new Set([
+    'materiales',
     'despacho',
     'devolucion',
     'traslado',
@@ -291,6 +297,8 @@
           <Reportes reporte={data.reporte} {internas} />
         {:else if pestana === 'serie'}
           <BuscarAparato consulta={data.consulta} serieConsultada={data.serieConsultada} />
+        {:else if pestana === 'materiales'}
+          <Materiales catalogo={data.catalogo} {form} />
         {/if}
       </div>
     </div>

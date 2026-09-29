@@ -29,6 +29,10 @@ import {
   crearPlantilla,
   editarPlantilla,
   desactivarPlantilla,
+  // El maestro del catálogo
+  leerMateriales,
+  crearMaterial,
+  editarMaterial,
 } from '$lib/server/v2/inventario.js';
 
 /**
@@ -86,6 +90,10 @@ export async function load({ url, cookies }) {
     const p = await leerPlantillas(ctx, true);
     extra.plantillas = p.plantillas;
     extra.errorExtra = p.error;
+  } else if (ver === 'materiales') {
+    const m = await leerMateriales(ctx);
+    extra.catalogo = m.materiales;
+    extra.errorExtra = m.error;
   } else if (ver === 'conteo') {
     const conteos = await leerConteos(ctx);
     extra.conteos = conteos.conteos;
@@ -381,6 +389,50 @@ export const actions = {
       };
     } catch (e) {
       return fail(400, { error: mensajeDe(e) });
+    }
+  },
+
+  material: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const id = String(f.get('material_id') ?? '').trim();
+    // El formulario manda los campos bloqueados igual; el servidor los acepta
+    // mientras no cambien y los rechaza si cambian. La regla vive allá, no acá:
+    // deshabilitar un campo en la pantalla no protege de un PATCH a mano.
+    const cuerpo = {
+      codigo: f.get('codigo'),
+      nombre: f.get('nombre'),
+      clase: f.get('clase'),
+      unidad: f.get('unidad'),
+      categoria: f.get('categoria') ?? ''
+    };
+    try {
+      const r = id
+        ? await editarMaterial({ cookies }, id, cuerpo)
+        : await crearMaterial({ cookies }, cuerpo);
+      return {
+        hecho: id
+          ? `El material ${r?.codigo} quedó actualizado.`
+          : `El material ${r?.codigo} quedó dado de alta.`
+      };
+    } catch (e) {
+      return fail(409, { error: mensajeDe(e) });
+    }
+  },
+
+  materialEstado: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const activo = String(f.get('activo')) === 'true';
+    try {
+      const r = await editarMaterial({ cookies }, String(f.get('material_id')), {
+        activo
+      });
+      return {
+        hecho: activo
+          ? `${r?.codigo} vuelve a ofrecerse en las operaciones.`
+          : `${r?.codigo} ya no se ofrece en operaciones nuevas. No se borró: sigue explicando los movimientos que lo usaron.`
+      };
+    } catch (e) {
+      return fail(409, { error: mensajeDe(e) });
     }
   },
 

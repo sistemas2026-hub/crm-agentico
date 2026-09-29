@@ -352,3 +352,43 @@ export async function desactivarPlantilla(ctx, id) {
   return apiRequest(`/campo/inventario/plantillas/${id}/`,
     { method: 'DELETE' }, ctx);
 }
+
+/**
+ * El catálogo COMPLETO, con los dados de baja y si cada uno ya tiene movimientos.
+ *
+ * Distinto de `leerCatalogo`, que sirve los desplegables y devuelve solo los
+ * activos: acá se administra, así que hay que ver todo.
+ *
+ * @param {{cookies: any}} ctx
+ */
+export async function leerMateriales(ctx) {
+  try {
+    const d = await apiRequest('/campo/inventario/materiales/', {}, ctx);
+    return { materiales: d?.materiales ?? [], error: false };
+  } catch {
+    return { materiales: [], error: true };
+  }
+}
+
+/**
+ * Da de alta un material.
+ *
+ * @param {{cookies: any}} ctx
+ * @param {Record<string, any>} cuerpo
+ */
+export async function crearMaterial(ctx, cuerpo) {
+  return apiRequest('/campo/inventario/materiales/',
+    { method: 'POST', body: cuerpo }, ctx);
+}
+
+/**
+ * Corrige un material o lo da de baja. No hay borrado: ver la vista.
+ *
+ * @param {{cookies: any}} ctx
+ * @param {string} id
+ * @param {Record<string, any>} cuerpo
+ */
+export async function editarMaterial(ctx, id, cuerpo) {
+  return apiRequest(`/campo/inventario/materiales/${id}/`,
+    { method: 'PATCH', body: cuerpo }, ctx);
+}

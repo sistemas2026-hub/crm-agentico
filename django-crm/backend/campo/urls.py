@@ -40,6 +40,10 @@ urlpatterns = [
     path("inventario/ubicaciones/", inventario_views.UbicacionesView.as_view(), name="inv_ubicaciones"),
     path("inventario/existencias/", inventario_views.ExistenciasView.as_view(), name="inv_existencias"),
     path("inventario/catalogo/", inventario_views.CatalogoView.as_view(), name="inv_catalogo"),
+    # El maestro del catalogo: `catalogo/` sirve los desplegables (solo activos),
+    # `materiales/` administra (todos, y escribe).
+    path("inventario/materiales/", inventario_views.MaterialesView.as_view(), name="inv_materiales"),
+    path("inventario/materiales/<uid:pk>/", inventario_views.MaterialView.as_view(), name="inv_material"),
     path("inventario/entradas/", inventario_views.EntradasView.as_view(), name="inv_entradas"),
     path("inventario/despachos/", inventario_views.DespachosView.as_view(), name="inv_despachos"),
     path("inventario/devoluciones/", inventario_views.DevolucionesView.as_view(), name="inv_devoluciones"),
