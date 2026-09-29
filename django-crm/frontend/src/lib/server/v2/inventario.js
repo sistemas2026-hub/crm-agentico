@@ -92,7 +92,16 @@ export async function leerSerie(ctx, serie) {
     // 404 no es un fallo: es la respuesta a «no hay ningún aparato con esa
     // serie». Mezclarlo con un error de red haría que la pantalla dijera
     // «no se pudo consultar» cuando la verdad es «no existe».
-    const noExiste = /404/.test(String(e?.message ?? e));
+    //
+    // SE MIRA EL `status`, NO EL TEXTO. Esta línea buscaba "404" dentro del
+    // mensaje, y el mensaje es el `detail` que manda Django --«No hay ningun
+    // aparato con esa serie en esta empresa.»--, que no contiene ese número. Asi
+    // que TODA serie inexistente se mostraba como «No se pudo consultar.
+    // Reintentá», que es justo la confusión que este bloque existía para evitar.
+    // Medido en la pantalla el 29/09/2026, y es el mismo defecto que
+    // `lib/api-helpers.js` ya dejó documentado al agregar `failure.status`:
+    // olfatear la prosa para recuperar un número que estaba ahí al lado.
+    const noExiste = e?.status === 404;
     return { activos: [], error: !noExiste, noExiste };
   }
 }

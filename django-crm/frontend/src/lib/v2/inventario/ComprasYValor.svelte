@@ -65,6 +65,21 @@
     return n.toLocaleString('es-CO', { maximumFractionDigits: 2 });
   }
 
+  /**
+   * El total que manda el backend, legible.
+   *
+   * Viene como string con dos decimales y sin separadores --"1752000.00"--
+   * porque ahí se cuida la precisión, no la lectura. Un número de siete cifras
+   * sin puntos se lee mal justo donde alguien decide una compra, así que el
+   * formato se pone acá, que es donde se sabe el idioma. Si no es un número, se
+   * muestra tal cual en vez de inventar: puede ser un aviso.
+   * @param {string} valor
+   */
+  function totalLegible(valor) {
+    const n = Number(valor);
+    return Number.isFinite(n) ? pesos(n) : valor;
+  }
+
   let nombreUbicacion = $derived(
     internas.find((u) => u.id === ubicacionElegida)?.nombre ?? 'la bodega'
   );
@@ -386,7 +401,8 @@
         </p>
       {:else}
         <p class="font-headline-lg text-headline-lg text-on-surface tabular-nums" style="font-size:1.7rem;">
-          {valorizacion.total}
+          {totalLegible(valorizacion.total)}
+          <span class="font-body-sm text-body-sm text-secondary font-normal">COP</span>
         </p>
 
         {#if valorizacion.advertencia}
