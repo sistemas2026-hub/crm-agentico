@@ -243,7 +243,7 @@
                           name="cantidad"
                           type="number"
                           step={m?.clase === 'bobina' ? '0.001' : '1'}
-                          min="0.001"
+                          min={m?.clase === 'bobina' ? '0.001' : '1'}
                           bind:value={linea.cantidad}
                           class="w-24 h-9 px-2.5 text-right font-label-numeric text-body-md bg-surface-container-lowest text-on-surface rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-primary"
                         />

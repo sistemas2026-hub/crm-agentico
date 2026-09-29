@@ -244,11 +244,21 @@
                 </td>
                 <td class="py-2 px-space-md text-right">
                   <div class="inline-flex items-center gap-1.5">
+                  <!--
+                    EL `min` SIGUE AL `step`, y no es un detalle de estilo.
+
+                    `type="number"` valida contra min MÁS múltiplos de step. Con
+                    min="0.001" y step="1" los válidos eran 0.001, 1.001, 2.001…
+                    así que escribir 12 daba «Introduce un valor válido. Los dos
+                    valores válidos más aproximados son 11,001 y 12,001». Un
+                    consumible se cuenta en enteros y su mínimo es 1; una bobina
+                    admite milésimas y el suyo es 0.001.
+                  -->
                     <input
                       name="cantidad"
                       type="number"
                       step={m?.clase === 'bobina' ? '0.001' : '1'}
-                      min="0.001"
+                      min={m?.clase === 'bobina' ? '0.001' : '1'}
                       bind:value={linea.cantidad}
                       class="w-28 h-9 px-2.5 text-right font-label-numeric text-body-md bg-surface-container-lowest text-on-surface rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-primary"
                     />

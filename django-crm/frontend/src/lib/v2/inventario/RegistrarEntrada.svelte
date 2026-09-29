@@ -229,7 +229,7 @@
                 name="cantidad"
                 type="number"
                 step={clase === 'bobina' ? '0.001' : '1'}
-                min="0.001"
+                min={clase === 'bobina' ? '0.001' : '1'}
                 required
                 placeholder={clase === 'bobina' ? '500.00' : '0'}
                 class="w-full h-10 px-3 bg-surface-container-lowest text-on-surface font-label-numeric text-body-md rounded shadow-sm focus:outline-none placeholder:text-secondary/60"

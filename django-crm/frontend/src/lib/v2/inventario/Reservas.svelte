@@ -281,7 +281,7 @@
               name="cantidad"
               type="number"
               step={elegido?.clase === 'bobina' ? '0.001' : '1'}
-              min="0.001"
+              min={elegido?.clase === 'bobina' ? '0.001' : '1'}
               required
               class="w-full h-10 px-3 bg-surface-container-lowest text-on-surface font-label-numeric text-body-md rounded shadow-sm text-right focus:outline-none focus:ring-2 focus:ring-primary"
             />
