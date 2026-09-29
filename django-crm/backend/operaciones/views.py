@@ -225,12 +225,45 @@ class RevisarPropuestaView(APIView):
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({
+        #  EL CIERRE VA DESPUES, Y FUERA DE LA TRANSACCION DE 'revisar'
+        #  ------------------------------------------------------------
+        #  'supervisor.revisar' ya cerro su transaccion aca arriba, asi que la
+        #  decision humana esta PERSISTIDA antes de que se intente nada. El
+        #  orden importa por dos motivos: una llamada de red dentro de esa
+        #  transaccion mantendria la fila bloqueada todo su tiempo, y un fallo
+        #  haria rollback de una decision que SI se tomo.
+        #
+        #  Consecuencia que la pantalla tiene que poder contar: "aceptada" y
+        #  "cerrada" son dos hechos distintos, y el segundo puede no ocurrir.
+        cierre = None
+        if (propuesta.estado == PropuestaSupervisor.ACEPTADA
+                and propuesta.tipo_senal == PropuestaSupervisor.CASO_DESINCRONIZADO):
+            from operaciones import cierre_de_caso
+            cierre = cierre_de_caso.cerrar(propuesta, actor=request.profile)
+            propuesta.refresh_from_db()
+
+        cuerpo = {
             "propuesta": PropuestaDetalleSerializer(propuesta).data,
-            "ejecutada": False,
-            "aviso": ("Shadow Mode: la decisión quedó registrada y auditada. "
-                      "Ninguna acción se ejecutó."),
-        })
+            #  'ejecutada' ya lo consume el frontend y conserva su significado:
+            #  si una accion salio de verdad. Para todo lo que no es un cierre
+            #  de caso sigue siendo False, que es la verdad -- el Supervisor
+            #  observa y recomienda, y esta es la unica accion que ejecuta.
+            "ejecutada": bool(cierre and cierre.get("cerrado")),
+            "motivo": (cierre or {}).get("motivo", ""),
+            "detalle": (cierre or {}).get("detalle", ""),
+        }
+        if cierre is None:
+            cuerpo["aviso"] = ("La decisión quedó registrada y auditada. "
+                               "Ninguna acción se ejecutó.")
+        elif cierre.get("cerrado"):
+            cuerpo["aviso"] = "El caso quedó cerrado en Dexter."
+        else:
+            #  El motivo viaja aparte y en clave: la pantalla decide como
+            #  decirlo, y no tiene que interpretar prosa para distinguir "el
+            #  sistema esta detenido" de "el caso cambio".
+            cuerpo["aviso"] = ("La decisión quedó registrada, pero el caso NO "
+                               "se cerró.")
+        return Response(cuerpo)
 
     @staticmethod
     def _resolver_cambios(cambios: dict, request) -> dict:

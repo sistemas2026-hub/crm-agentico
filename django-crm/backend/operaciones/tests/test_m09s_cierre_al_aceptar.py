@@ -86,6 +86,32 @@ def _motor_dice(respuesta, registro=None):
     return falso
 
 
+def _jefe(org, correo):
+    """Un Jefe de Operaciones: el unico rol que puede revisar una propuesta."""
+    from common.models import Profile, User
+
+    u = User.objects.create_user(email=correo, password="clave-de-prueba-1")
+    return u, Profile.objects.create(user=u, org=org, role="OPERACIONES",
+                                     is_active=True)
+
+
+def _cliente(u, org, perfil):
+    """
+    Un cliente con el JWT consciente de la organizacion.
+
+    'force_authenticate' NO alcanza: el middleware resuelve 'request.org' del
+    token, y sin eso 'HasOrgContext' responde 403 -- que es exactamente lo que
+    hizo la primera version de estas pruebas.
+    """
+    from common.serializer import OrgAwareRefreshToken
+    from rest_framework.test import APIClient
+
+    c = APIClient()
+    c.credentials(HTTP_AUTHORIZATION=(
+        f"Bearer {OrgAwareRefreshToken.for_user_and_org(u, org, perfil).access_token}"))
+    return c
+
+
 def _cerro_de_verdad(caso):
     """Se mira la FILA, no lo que devolvio la funcion."""
     caso.refresh_from_db()
@@ -338,14 +364,27 @@ def test_8b_una_respuesta_ANTERIOR_al_cierre_no_lo_impide(org_a, user_profile,
     assert r["cerrado"] is True, r
 
 
-def test_9_una_actividad_pendiente_bloquea_el_cierre(org_a, user_profile,
+def test_9_una_actividad_abierta_NO_bloquea_el_cierre(org_a, user_profile,
                                                       monkeypatch):
-    """Alguien todavia esta trabajando en el caso."""
+    """
+    LA REGLA QUE SE QUITO, Y POR QUE.
+
+    La primera version de este flujo vetaba el cierre si habia una actividad
+    abierta sobre el caso. Era una regla nueva sin respaldo: nada en el CRM la
+    declara, y el docstring de ActividadOperativa dice lo contrario en la otra
+    direccion -- "cerrar la actividad no cierra el caso". De la direccion que
+    importaba aca no dice nada.
+
+    Y el fondo: el caso se cierra porque EL PROVEEDOR YA LO CERRO. Una actividad
+    de seguimiento abierta no contradice eso.
+
+    El conteo se conserva como DATO en el resultado, porque quien decide puede
+    querer saberlo. Contar no es vetar.
+    """
     from operaciones.models import ActividadOperativa
 
-    llamadas = []
     monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor",
-                        _motor_dice(OK_MOTOR, llamadas))
+                        _motor_dice(OK_MOTOR))
     with rls_org(org_a):
         caso = _caso(org_a)
         p = _propuesta(org_a, caso)
@@ -355,12 +394,44 @@ def test_9_una_actividad_pendiente_bloquea_el_cierre(org_a, user_profile,
             origen_id=str(caso.id))
         r = cierre_de_caso.cerrar(p, actor=user_profile)
 
-    assert r["motivo"] == cierre_de_caso.TRABAJO_PENDIENTE
-    assert llamadas == []
+    assert r["cerrado"] is True, r
+    #  Y el dato viaja, para que la pantalla pueda mostrarlo si algun dia se
+    #  decide que importa.
+    assert r["actividades_abiertas"] == 1
+    assert r["ordenes_abiertas"] == 0
 
 
-def test_9b_una_actividad_ya_completada_no_bloquea(org_a, user_profile,
-                                                    monkeypatch):
+def test_9b_una_orden_de_trabajo_abierta_tampoco_bloquea(org_a, user_profile,
+                                                          monkeypatch):
+    """Mismo criterio. Se cuenta y no se veta."""
+    import uuid as _uuid
+
+    from campo.models import OrdenTrabajo, WorkType, WorkTypeVersion
+
+    monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor",
+                        _motor_dice(OK_MOTOR))
+    with rls_org(org_a):
+        caso = _caso(org_a)
+        p = _propuesta(org_a, caso)
+        sufijo = _uuid.uuid4().hex[:8]
+        tipo = WorkType.objects.create(org=org_a, nombre="Visita " + sufijo,
+                                       codigo="vis_" + sufijo)
+        version = WorkTypeVersion.objects.create(
+            work_type=tipo, version=1, schema_version=1,
+            estado=WorkTypeVersion.PUBLICADA,
+            esquema={"campos": [], "evidencias": []})
+        OrdenTrabajo.objects.create(
+            org=org_a, numero=9501, tipo_trabajo_version=version,
+            cliente_nombre="Cliente", cliente_direccion="Calle 1",
+            origen_tipo="case", origen_ref=str(caso.id))
+        r = cierre_de_caso.cerrar(p, actor=user_profile)
+
+    assert r["cerrado"] is True, r
+    assert r["ordenes_abiertas"] == 1
+
+
+def test_9c_una_actividad_completada_no_se_cuenta(org_a, user_profile,
+                                                   monkeypatch):
     from operaciones.models import ActividadOperativa
 
     monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor",
@@ -374,7 +445,8 @@ def test_9b_una_actividad_ya_completada_no_bloquea(org_a, user_profile,
             estado_operativo=ActividadOperativa.COMPLETADA)
         r = cierre_de_caso.cerrar(p, actor=user_profile)
 
-    assert r["cerrado"] is True, r
+    assert r["cerrado"] is True
+    assert r["actividades_abiertas"] == 0
 
 
 def test_16_un_caso_de_otra_organizacion_no_se_toca(org_a, org_b, user_profile,
@@ -425,7 +497,7 @@ def test_10_si_el_interruptor_esta_detenido_no_se_cierra(org_a, user_profile,
     assert r["motivo"] == cierre_de_caso.BLOQUEADO_POR_INTERRUPTOR
     assert not _cerro_de_verdad(caso)
     assert p.estado == PropuestaSupervisor.ACEPTADA, "se perdio la decision humana"
-    assert p.accion_propuesta_ref == "", "el reclamo no se solto: no se podria reintentar"
+    assert p.accion_propuesta_ref == "", "sin cierre no hay referencia que guardar"
 
     anotado = Activity.objects.filter(entity_type="PropuestaSupervisor",
                                       entity_id=p.id).first()
@@ -456,38 +528,74 @@ def test_11_una_propuesta_no_se_puede_aceptar_dos_veces(org_a, user_profile):
     assert not _cerro_de_verdad(caso)
 
 
-def test_12_dos_cierres_a_la_vez_solo_llaman_al_motor_una_vez(org_a, user_profile,
-                                                               monkeypatch):
+def test_12_dos_cierres_de_la_misma_propuesta_no_cierran_dos_veces(
+        org_a, user_profile, monkeypatch):
     """
-    EL RECLAMO, Y POR QUE NO ES UN 'if'.
+    QUIEN PROTEGE AHORA, Y QUIEN NO.
 
-    El derecho a cerrar se gana con un UPDATE condicional sobre la propuesta y
-    se mira el rowcount. La segunda llamada no ejecuta nada.
+    Este modulo tuvo un "reclamo" propio -- un UPDATE condicional sobre
+    accion_propuesta_ref -- y se saco: era redundante con
+    asistente.operaciones_externas, que excluye por clave primaria, compara el
+    hash de los argumentos resueltos y falla cerrado. El reclamo local no hacia
+    ninguna de las tres, y encima le daba dos significados a un campo que tenia
+    uno.
+
+    Lo que se pierde, dicho sin adornos: las dos llamadas SALEN. Lo que no pasa
+    es que el caso se cierre dos veces -- la segunda recibe del motor el
+    resultado de la primera. Esta prueba afirma eso, no que se llame una vez.
     """
     llamadas = []
-    monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor",
-                        _motor_dice(OK_MOTOR, llamadas))
+    #  La segunda vez el motor contesta lo que contesto la primera, que es lo
+    #  que hace de verdad cuando la clave ya esta registrada como exitosa.
+    respuestas = [OK_MOTOR,
+                  {"cerrado": True, "codigo": "CERRADO",
+                   "motivo": "ya se habia ejecutado antes",
+                   "referencia": "propuesta:x"}]
+
+    def motor(propuesta_id, id_caso):
+        llamadas.append((propuesta_id, id_caso))
+        return dict(respuestas[min(len(llamadas) - 1, 1)])
+
+    monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor", motor)
     with rls_org(org_a):
         caso = _caso(org_a)
         p = _propuesta(org_a, caso)
         primera = cierre_de_caso.cerrar(p, actor=user_profile)
-        #  Una segunda copia del objeto, como la que traeria otra peticion HTTP.
         otra = PropuestaSupervisor.objects.get(pk=p.pk)
         segunda = cierre_de_caso.cerrar(otra, actor=user_profile)
+        p.refresh_from_db()
 
     assert primera["cerrado"] is True
-    assert segunda["cerrado"] is False
-    assert len(llamadas) == 1, f"el motor se llamo {len(llamadas)} veces"
+    assert segunda["cerrado"] is True, "la segunda no es un error: ya estaba hecho"
+    assert len(llamadas) == 2, (
+        "las dos llamadas salen; la idempotencia esta del otro lado")
+    #  Y el campo conserva UN solo significado: la referencia de la ejecucion.
+    assert p.accion_propuesta_ref == "propuesta:x"
 
 
-def test_13_el_reclamo_no_se_puede_tomar_dos_veces(org_a, user_profile):
-    """La mecanica del reclamo, aislada: el segundo intento devuelve False."""
+def test_13_el_campo_de_referencia_tiene_un_solo_significado(
+        org_a, user_profile, monkeypatch):
+    """
+    accion_propuesta_ref guarda la referencia de la ejecucion y nada mas.
+
+    Nunca vale un marcador de "en curso": ese uso existio y se quito. Un campo
+    con dos semanticas es lo que este proyecto evita en otros sitios, y aca no
+    hacia falta porque el registro del motor ya distingue "en curso" de "hecha".
+    """
+    monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor",
+                        _motor_dice(OK_MOTOR))
     with rls_org(org_a):
-        p = _propuesta(org_a, _caso(org_a))
-        assert cierre_de_caso._reclamar(p) is True
-        assert cierre_de_caso._reclamar(p) is False
+        caso = _caso(org_a)
+        p = _propuesta(org_a, caso)
+        assert p.accion_propuesta_ref == "", "nace vacio"
+        cierre_de_caso.cerrar(p, actor=user_profile)
         p.refresh_from_db()
-        assert p.accion_propuesta_ref == cierre_de_caso.EN_CURSO
+
+    assert p.accion_propuesta_ref == "propuesta:x"
+    assert "en_curso" not in p.accion_propuesta_ref
+    assert not hasattr(cierre_de_caso, "_reclamar"), (
+        "el reclamo local volvio: la concurrencia la pone la idempotencia "
+        "del motor")
 
 
 def test_13b_si_el_motor_dice_repetida_el_resultado_es_cerrado(org_a, user_profile,
@@ -528,7 +636,7 @@ def test_14_un_error_del_endpoint_deja_el_caso_abierto(org_a, user_profile,
     assert "400" in anotado.metadata["detalle"]
 
 
-def test_15_si_la_red_se_corta_se_suelta_el_reclamo_para_reintentar(org_a,
+def test_15_si_la_red_se_corta_el_caso_queda_abierto_y_se_puede_reintentar(org_a,
                                                                     user_profile,
                                                                     monkeypatch):
     """
@@ -552,7 +660,7 @@ def test_15_si_la_red_se_corta_se_suelta_el_reclamo_para_reintentar(org_a,
     assert r["cerrado"] is False
     assert r["motivo"] == cierre_de_caso.MOTOR_NO_RESPONDIO
     assert not _cerro_de_verdad(caso)
-    assert p.accion_propuesta_ref == "", "sin soltar el reclamo no hay reintento"
+    assert p.accion_propuesta_ref == "", "no se cerro: no hay referencia que guardar"
     assert p.estado == PropuestaSupervisor.ACEPTADA
 
 
@@ -583,3 +691,111 @@ def test_aceptar_por_si_solo_no_cierra_ningun_caso(org_a, user_profile):
         despues = Case.objects.filter(id=caso.id).values().first()
 
     assert antes == despues, "aceptar movio el caso sin pasar por las validaciones"
+
+
+# =============================================================================
+#  §5  LA VISTA  --  el unico punto donde aceptar dispara el cierre
+# =============================================================================
+
+def test_la_vista_cierra_al_aceptar_y_devuelve_el_resultado(org_a, monkeypatch):
+    """
+    EL PUNTO A y B, comprobados desde el borde de HTTP.
+
+    A. 'supervisor.revisar' corre primero y en su propia transaccion, asi que la
+       decision humana esta persistida antes de que se intente cerrar.
+    B. El cierre pasa DESPUES y fuera de esa transaccion. Se comprueba por el
+       efecto observable: la propuesta queda ACEPTADA y el caso cerrado, y el
+       cuerpo trae los tres campos que la pantalla necesita.
+
+    Sin esta prueba, el punto 3 del bloque quedaba sin verificar: las 25 de
+    arriba prueban 'cierre_de_caso.cerrar' directamente, no que alguien lo llame.
+    """
+    from rest_framework.test import APIClient
+
+    llamadas = []
+    monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor",
+                        _motor_dice(OK_MOTOR, llamadas))
+
+    with rls_org(org_a):
+        caso = _caso(org_a)
+        p = _propuesta(org_a, caso, estado=PropuestaSupervisor.PROPUESTA)
+
+        u, perfil = _jefe(org_a, "jefe.m09s@test.com")
+        cli = _cliente(u, org_a, perfil)
+        r = cli.post(f"/api/operaciones/propuestas/{p.id}/revisar/",
+                     {"decision": PropuestaSupervisor.ACEPTADA,
+                      "comentario": "de acuerdo, cerrar"}, format="json")
+
+    assert r.status_code == 200, r.data
+    #  Los tres campos del contrato con el frontend.
+    assert r.data["ejecutada"] is True, r.data
+    assert r.data["motivo"] == ""
+    assert "detalle" in r.data
+
+    p.refresh_from_db()
+    assert p.estado == PropuestaSupervisor.ACEPTADA
+    assert len(llamadas) == 1, "la vista no disparo el cierre"
+    assert perfil.id is not None
+
+
+def test_la_vista_conserva_la_decision_si_el_cierre_falla(org_a, monkeypatch):
+    """
+    EL PUNTO C, desde HTTP. La decision vale aunque el cierre no ocurra.
+
+    Y la respuesta lo dice con un motivo en CLAVE, no en prosa: de eso depende
+    que la pantalla distinga "esta detenido" de "cambio la condicion".
+    """
+    from rest_framework.test import APIClient
+
+    monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor", _motor_dice(
+        {"cerrado": False, "codigo": cierre_de_caso.BLOQUEADO_POR_INTERRUPTOR,
+         "motivo": "detenido: parada de emergencia", "referencia": ""}))
+
+    with rls_org(org_a):
+        caso = _caso(org_a)
+        p = _propuesta(org_a, caso, estado=PropuestaSupervisor.PROPUESTA)
+        u, perfil2 = _jefe(org_a, "jefe2.m09s@test.com")
+        cli = _cliente(u, org_a, perfil2)
+        r = cli.post(f"/api/operaciones/propuestas/{p.id}/revisar/",
+                     {"decision": PropuestaSupervisor.ACEPTADA,
+                      "comentario": "de acuerdo"}, format="json")
+
+    assert r.status_code == 200, r.data
+    assert r.data["ejecutada"] is False
+    assert r.data["motivo"] == cierre_de_caso.BLOQUEADO_POR_INTERRUPTOR
+
+    p.refresh_from_db()
+    assert p.estado == PropuestaSupervisor.ACEPTADA, "se perdio la decision"
+    assert not _cerro_de_verdad(caso)
+
+
+def test_una_propuesta_de_otro_tipo_no_intenta_ningun_cierre(org_a, monkeypatch):
+    """
+    La vista solo cierra para 'caso_desincronizado'. Aceptar cualquier otra
+    propuesta no dispara nada, y 'ejecutada' sigue siendo False -- que es la
+    verdad: el Supervisor observa y recomienda, y esta es la unica accion que
+    ejecuta.
+    """
+    from rest_framework.test import APIClient
+
+    llamadas = []
+    monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor",
+                        _motor_dice(OK_MOTOR, llamadas))
+
+    with rls_org(org_a):
+        caso = _caso(org_a)
+        p = _propuesta(org_a, caso, estado=PropuestaSupervisor.PROPUESTA)
+        #  Se le cambia el tipo: lo que se prueba es el filtro de la vista.
+        PropuestaSupervisor.objects.filter(pk=p.pk).update(
+            tipo_senal=PropuestaSupervisor.CASO_ANTIGUO)
+        u, perfil3 = _jefe(org_a, "jefe3.m09s@test.com")
+        cli = _cliente(u, org_a, perfil3)
+        r = cli.post(f"/api/operaciones/propuestas/{p.id}/revisar/",
+                     {"decision": PropuestaSupervisor.ACEPTADA,
+                      "comentario": "de acuerdo"}, format="json")
+
+    assert r.status_code == 200, r.data
+    assert r.data["ejecutada"] is False
+    assert r.data["motivo"] == ""
+    assert llamadas == [], "intento cerrar una propuesta que no es de cierre"
+    assert not _cerro_de_verdad(caso)

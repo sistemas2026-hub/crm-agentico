@@ -71,8 +71,6 @@ SIN_FECHA_DE_CIERRE = "SIN_FECHA_DE_CIERRE_DEL_PROVEEDOR"
 LECTURA_VIEJA = "LECTURA_EXTERNA_FUERA_DE_FRESCURA"
 LECTURA_CON_ERROR = "LA_ULTIMA_LECTURA_FALLO"
 RESPUESTA_POSTERIOR = "HAY_RESPUESTA_POSTERIOR_AL_CIERRE"
-TRABAJO_PENDIENTE = "HAY_TRABAJO_PENDIENTE_SOBRE_EL_CASO"
-YA_EN_CURSO = "EL_CIERRE_YA_ESTA_EN_CURSO"
 MOTOR_NO_RESPONDIO = "EL_MOTOR_NO_RESPONDIO"
 
 #  Lo que el motor contesta cuando no cerro por el interruptor. Se reconoce para
@@ -85,9 +83,10 @@ BLOQUEADO_POR_INTERRUPTOR = "BLOQUEADO_POR_INTERRUPTOR"
 #  inventan estados nuevos de PropuestaSupervisor.
 EN_CURSO = "en_curso"
 
-#  Estados de actividad que NO frenan un cierre. Todo lo demas si: una actividad
-#  viva sobre el caso significa que alguien todavia esta trabajando en el.
+#  Que se considera terminal al CONTAR trabajo abierto. No frena ningun cierre
+#  -- ver 'trabajo_abierto' -- pero el conteo tiene que saber que ya termino.
 ACTIVIDAD_TERMINAL = ("completada", "cancelada")
+ORDEN_TERMINAL = ("cerrada", "cancelada")
 
 
 class NoSeCerro(Exception):
@@ -170,8 +169,37 @@ def validar(propuesta: PropuestaSupervisor, caso: Case, *, ahora=None) -> None:
             "el proveedor registro una respuesta despues de la fecha en que "
             "dice haberlo cerrado")
 
-    # 12. no hay trabajo vivo sobre el caso. Se usan las relaciones que YA
-    #     existen ('origen_tipo'/'origen_id'); no se inventa ninguna.
+    #  LO QUE SE MIRA Y NO BLOQUEA  --  y por que no
+    #  --------------------------------------------
+    #  Una actividad o una orden de trabajo abierta sobre el caso NO impide
+    #  cerrarlo, y la primera version de este modulo si lo impedia. Se saco
+    #  porque era una regla nueva sin respaldo: nada en el CRM la declara, y el
+    #  modelo de ActividadOperativa dice lo CONTRARIO en su propio docstring --
+    #  "una actividad puede colgar de un caso, pero cerrar la actividad no
+    #  cierra el caso". Esa frase habla de la direccion inversa, y de la
+    #  direccion que a mi me interesaba no dice nada.
+    #
+    #  Y el fondo: el caso se cierra porque EL PROVEEDOR YA LO CERRO. El trabajo
+    #  se hizo. Una actividad de seguimiento abierta no contradice eso, y
+    #  tratarla como veto habria dejado casos imposibles de cerrar sin que nadie
+    #  supiera por que -- medido: hoy hay 0 actividades y 0 ordenes con
+    #  origen_tipo='case', asi que el falso bloqueo no se habria visto hasta que
+    #  alguien empezara a usar esa relacion.
+    #
+    #  Se cuenta igual, para que viaje como DATO en el resultado: quien decide
+    #  puede querer saberlo. Contar no es vetar.
+    return trabajo_abierto(caso)
+
+
+def trabajo_abierto(caso) -> dict:
+    """
+    Cuanta actividad y cuantas ordenes hay vivas sobre el caso. INFORMATIVO.
+
+    Usa las relaciones que YA existen ('origen_tipo'/'origen_id' y
+    'origen_tipo'/'origen_ref'); no se inventa ninguna. Devuelve conteos, no un
+    veredicto: la unica forma de que esto vuelva a bloquear un cierre es que
+    alguien lo decida y lo escriba.
+    """
     from campo.models import OrdenTrabajo
     from operaciones.models import ActividadOperativa
 
@@ -180,34 +208,12 @@ def validar(propuesta: PropuestaSupervisor, caso: Case, *, ahora=None) -> None:
                            origen_id=str(caso.id))
                    .exclude(estado_operativo__in=ACTIVIDAD_TERMINAL)
                    .count())
-    if actividades:
-        raise NoSeCerro(TRABAJO_PENDIENTE,
-                        f"{actividades} actividad(es) sin terminar")
-
     ordenes = (OrdenTrabajo.objects
                .filter(org_id=caso.org_id, origen_tipo="case",
                        origen_ref=str(caso.id))
-               .exclude(estado_operativo__in=("cerrada", "cancelada"))
+               .exclude(estado_operativo__in=ORDEN_TERMINAL)
                .count())
-    if ordenes:
-        raise NoSeCerro(TRABAJO_PENDIENTE,
-                        f"{ordenes} orden(es) de trabajo sin cerrar")
-
-
-def _reclamar(propuesta: PropuestaSupervisor) -> bool:
-    """
-    Gana el derecho a cerrar, o devuelve False.
-
-    La condicion va en el UPDATE y no en un 'if': entre leer y escribir puede
-    entrar otra peticion, y quien decide es la base. 'accion_propuesta_ref'
-    vacia es "nadie lo intento todavia".
-    """
-    filas = (PropuestaSupervisor.objects
-             .filter(pk=propuesta.pk, estado=PropuestaSupervisor.ACEPTADA,
-                     accion_propuesta_ref="")
-             .update(accion_propuesta_ref=EN_CURSO,
-                     updated_at=timezone.now()))
-    return filas == 1
+    return {"actividades_abiertas": actividades, "ordenes_abiertas": ordenes}
 
 
 def _pedirle_al_motor(propuesta_id: str, id_caso: str) -> dict:
@@ -242,15 +248,31 @@ def cerrar(propuesta: PropuestaSupervisor, *, actor=None, ahora=None) -> dict:
     """
     El camino entero, despues de que una persona acepto.
 
-    Devuelve {cerrado, motivo, referencia}. NO levanta por un cierre que no
-    ocurrio: que el caso no se cierre es un resultado posible y hay que poder
-    contarlo. Si levanta, es por algo que nadie previo.
+    Devuelve {cerrado, motivo, detalle, referencia}. NO levanta por un cierre
+    que no ocurrio: que el caso no se cierre es un resultado posible y hay que
+    poder contarlo. Si levanta, es por algo que nadie previo.
+
+    QUIEN PROTEGE CONTRA LA DOBLE EJECUCION
+    ---------------------------------------
+    El registro de operaciones externas del motor, y nadie mas. Este modulo
+    tuvo un "reclamo" propio -- un UPDATE condicional sobre
+    'accion_propuesta_ref'-- y se saco: era redundante con un mecanismo que ya
+    existe y esta mejor hecho. 'asistente.operaciones_externas' excluye por
+    clave primaria, compara el hash de los argumentos RESUELTOS y falla cerrado;
+    el reclamo local no hacia ninguna de las tres cosas, y encima le daba dos
+    significados a un campo que tenia uno.
+
+    Lo que se pierde es solo esto: dos clics simultaneos hacen dos peticiones
+    HTTP en vez de una. Ninguna de las dos cierra dos veces -- la segunda recibe
+    OPERACION_EN_CURSO, que es exactamente para lo que ese registro existe.
     """
     ahora = ahora or timezone.now()
 
-    #  El caso se relee con la fila bloqueada, y se valida sobre ESA copia. El
-    #  lock se suelta al cerrar la transaccion, ANTES de la llamada de red: lo
-    #  que protege contra la doble ejecucion es el reclamo, no el lock.
+    #  El caso se relee con la fila bloqueada y se valida sobre ESA copia: entre
+    #  que alguien abrio la pantalla y apreto el boton pudieron pasar dias. El
+    #  lock se suelta al cerrar la transaccion, antes de la llamada de red --
+    #  sostenerlo durante una llamada HTTP bloquearia la fila todo ese tiempo.
+    caso = None
     try:
         with transaction.atomic():
             caso = (Case.objects
@@ -260,14 +282,9 @@ def cerrar(propuesta: PropuestaSupervisor, *, actor=None, ahora=None) -> dict:
             if caso is None:
                 raise NoSeCerro(CASO_NO_ENCONTRADO,
                                 "no existe, o es de otra organizacion")
-            validar(propuesta, caso, ahora=ahora)
-
-            if not _reclamar(propuesta):
-                raise NoSeCerro(
-                    YA_EN_CURSO,
-                    "otra peticion ya tiene el cierre de esta propuesta")
+            contexto = validar(propuesta, caso, ahora=ahora)
     except NoSeCerro as no:
-        _anotar(propuesta, caso=None, motivo=no.motivo, detalle=no.detalle,
+        _anotar(propuesta, caso=caso, motivo=no.motivo, detalle=no.detalle,
                 actor=actor)
         return {"cerrado": False, "motivo": no.motivo, "detalle": no.detalle,
                 "referencia": ""}
@@ -276,11 +293,10 @@ def cerrar(propuesta: PropuestaSupervisor, *, actor=None, ahora=None) -> dict:
     try:
         respuesta = _pedirle_al_motor(str(propuesta.id), str(caso.id))
     except Exception as e:                                    # noqa: BLE001
-        #  El motor no contesto. NO se sabe si el cierre salio o no: puede haber
-        #  llegado y perderse la respuesta. Se suelta el reclamo para que se
-        #  pueda reintentar, y la idempotencia del motor es lo que garantiza que
-        #  un reintento no cierre dos veces.
-        _soltar_reclamo(propuesta)
+        #  El motor no contesto. NO se sabe si el cierre salio o no: pudo llegar
+        #  y perderse la respuesta. Reintentar es legitimo, y lo que garantiza
+        #  que un reintento no cierre dos veces es la idempotencia del motor --
+        #  no este modulo.
         _anotar(propuesta, caso=caso, motivo=MOTOR_NO_RESPONDIO,
                 detalle=f"{type(e).__name__}: {e}", actor=actor)
         return {"cerrado": False, "motivo": MOTOR_NO_RESPONDIO,
@@ -289,11 +305,6 @@ def cerrar(propuesta: PropuestaSupervisor, *, actor=None, ahora=None) -> dict:
     referencia = str(respuesta.get("referencia") or "")
     if not respuesta.get("cerrado"):
         motivo = str(respuesta.get("codigo") or "") or "NO_EJECUTADA"
-        #  Se suelta el reclamo: no se ejecuto nada, asi que reintentar es
-        #  legitimo. La excepcion es el interruptor, donde reintentar en bucle
-        #  no aporta -- pero tampoco hace dano, y dejar la propuesta trabada
-        #  obligaria a tocarla a mano cuando se levante.
-        _soltar_reclamo(propuesta)
         _anotar(propuesta, caso=caso, motivo=motivo,
                 detalle=str(respuesta.get("motivo") or ""), actor=actor)
         return {"cerrado": False, "motivo": motivo,
@@ -301,8 +312,8 @@ def cerrar(propuesta: PropuestaSupervisor, *, actor=None, ahora=None) -> dict:
                 "referencia": referencia}
 
     #  Cerrado. Se guarda la referencia de la operacion --que es la clave
-    #  idempotente, no un id inventado-- y se relee el caso para auditar lo que
-    #  de verdad quedo, no lo que se pidio.
+    #  idempotente, no un id inventado aca-- y se relee el caso para auditar lo
+    #  que de verdad quedo, no lo que se pidio.
     PropuestaSupervisor.objects.filter(pk=propuesta.pk).update(
         accion_propuesta_ref=referencia[:128], updated_at=timezone.now())
     caso.refresh_from_db()
@@ -315,17 +326,13 @@ def cerrar(propuesta: PropuestaSupervisor, *, actor=None, ahora=None) -> dict:
                   "estado_nuevo": caso.status,
                   "closed_on": caso.closed_on.isoformat() if caso.closed_on else "",
                   "referencia": referencia,
-                  "external_status": caso.external_status or ""})
+                  "external_status": caso.external_status or "",
+                  #  Informativo, no un veto: ver 'trabajo_abierto'.
+                  **(contexto or {})})
 
     return {"cerrado": True, "motivo": "", "detalle": "",
-            "referencia": referencia, "estado": caso.status}
-
-
-def _soltar_reclamo(propuesta: PropuestaSupervisor) -> None:
-    """Devuelve la propuesta a 'nadie lo intento', solo si sigue en curso."""
-    PropuestaSupervisor.objects.filter(
-        pk=propuesta.pk, accion_propuesta_ref=EN_CURSO
-    ).update(accion_propuesta_ref="", updated_at=timezone.now())
+            "referencia": referencia, "estado": caso.status,
+            **(contexto or {})}
 
 
 def _anotar(propuesta, *, caso, motivo: str, detalle: str, actor) -> None:

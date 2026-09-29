@@ -1,4 +1,5 @@
 <script>
+  import { resultadoDelCierre } from '$lib/v2/resultado-del-cierre.js';
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import {
@@ -888,11 +889,30 @@
               <span class="snoc-body">{form.error}</span>
             </div>
           {:else if form?.ok && form.tipo === 'revision'}
+            <!--
+              Seis resultados posibles, y dos de ellos se parecen sin ser lo
+              mismo: "el interruptor esta detenido" se arregla levantandolo y
+              "cambio la condicion" no se arregla. La traduccion vive en
+              $lib/v2/resultado-del-cierre.js y esta probada aparte; aca solo se
+              muestra, sin rediseniar nada.
+            -->
+            {@const res = resultadoDelCierre({
+              estado: 'aceptada',
+              ejecutada: form.ejecutada,
+              motivo: form.motivo,
+              detalle: form.detalle
+            })}
             <div class="snoc-aviso">
-              <span class="snoc-icono snoc-primario" style="font-size:18px;">check_circle</span>
+              <span
+                class="snoc-icono {res.tono === 'ok' ? 'snoc-primario' : 'snoc-error-txt'}"
+                style="font-size:18px;"
+              >
+                {res.tono === 'ok' ? 'check_circle' : 'warning'}
+              </span>
               <span class="snoc-body">
                 Revisión registrada: <strong>{form.decision}</strong>.
-                {form.aviso ?? 'Ninguna acción se ejecutó.'}
+                <strong>{res.titulo}.</strong>
+                {res.explicacion}
               </span>
             </div>
           {:else if form?.ok && form.tipo === 'cancelacion'}

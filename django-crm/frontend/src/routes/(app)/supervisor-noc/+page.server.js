@@ -155,9 +155,15 @@ export const actions = {
         tipo: 'revision',
         id,
         decision,
-        // Viaja tal cual lo devuelve el backend. Es la prueba, en la propia
-        // respuesta, de que revisar no ejecuto nada.
+        // Viajan tal cual los devuelve el backend. 'ejecutada' conserva su
+        // significado -- si una accion salio de verdad -- y ahora puede ser
+        // true: el cierre de un caso desincronizado es la unica que ejecuta.
+        //
+        // 'motivo' es una CLAVE, no prosa: la pantalla distingue "el sistema
+        // esta detenido" de "el caso cambio" sin interpretar un texto.
         ejecutada: r?.ejecutada ?? false,
+        motivo: r?.motivo ?? "",
+        detalle: r?.detalle ?? "",
         aviso: r?.aviso ?? null
       };
     } catch (/** @type {any} */ err) {
