@@ -20,6 +20,7 @@ hacerlo.
 from __future__ import annotations
 
 import os
+import re
 
 from django.db import IntegrityError, transaction
 from django.db.models import Max
@@ -65,6 +66,7 @@ def crear_orden(
     programada_para=None,
     diagnostico_previo: dict | None = None,
     contexto: dict | None = None,
+    despacho: dict | None = None,
 ) -> OrdenTrabajo:
     """
     Crea la orden y deja su nacimiento escrito en la bitacora.
@@ -76,7 +78,14 @@ def crear_orden(
     orden -- si manana alguien publica la v2, esta orden sigue exigiendo lo que
     exigia el dia que salio, que es lo que hace que una evidencia vieja se
     pueda auditar contra la regla que estaba vigente.
+
+    'despacho' trae lo que decide la oficina y el tecnico no puede deducir:
+    prioridad, zona, resumen, la franja prometida al cliente, cuando vence el
+    compromiso, como se entra al inmueble y que requisitos de seguridad tiene
+    el trabajo. Todo opcional: una orden sin nada de esto sigue siendo valida
+    y se ve como se veia antes.
     """
+    despacho = despacho or {}
     # La organizacion cuelga del WorkType, no de la version: la version es la
     # plantilla congelada, el tipo de trabajo es de quien la definio.
     if version.work_type.org_id != org.id:
@@ -106,6 +115,15 @@ def crear_orden(
                     gps_lat=cliente.get("gps_lat"),
                     gps_lng=cliente.get("gps_lng"),
                     programada_para=programada_para,
+                    ventana_inicio=despacho.get("ventana_inicio"),
+                    ventana_fin=despacho.get("ventana_fin"),
+                    sla_vence_en=despacho.get("sla_vence_en"),
+                    prioridad=despacho.get("prioridad") or OrdenTrabajo.PRIORIDAD_MEDIA,
+                    zona=despacho.get("zona") or "",
+                    resumen=despacho.get("resumen") or "",
+                    cliente_detalle_acceso=cliente.get("detalle_acceso") or "",
+                    cliente_id_abonado=cliente.get("id_abonado") or "",
+                    requisitos_seguridad=despacho.get("requisitos_seguridad") or [],
                     diagnostico_previo=diagnostico_previo or {},
                     contexto=contexto or {},
                 )
@@ -159,27 +177,18 @@ def asignar(orden: OrdenTrabajo, profile_tecnico, profile_actor,
     """
     if profile_tecnico.org_id != orden.org_id:
         raise ErrorDespacho("Esa persona es de otra empresa.")
-
-    #  EL LOCK  --  agregado en M03-F-B
-    #  --------------------------------
-    #  Sin el, dos asignaciones simultaneas sobre la misma OT se resolvian con
-    #  un IntegrityError del indice unico parcial: la base salvaba el estado
-    #  final, pero el segundo solicitante recibia un 500 en vez de un conflicto
-    #  explicado. Se bloquea la OT, el mismo objeto que bloquea
-    #  'programar_orden', asi que no se introduce un orden de locks nuevo.
-    fresca = OrdenTrabajo.objects.select_for_update().get(pk=orden.pk)
-    if fresca.estado_operativo in (OrdenTrabajo.CERRADA, OrdenTrabajo.CANCELADA):
+    if orden.estado_operativo in (OrdenTrabajo.CERRADA, OrdenTrabajo.CANCELADA):
         raise ErrorDespacho(
-            f"La orden esta '{fresca.get_estado_operativo_display()}'. No se "
+            f"La orden esta '{orden.get_estado_operativo_display()}'. No se "
             f"reasigna un trabajo terminado.")
 
-    anterior = fresca.tecnico_principal
+    anterior = orden.tecnico_principal
     if anterior is not None and anterior.id == profile_tecnico.id:
-        return fresca.asignaciones.get(profile=profile_tecnico)
+        return orden.asignaciones.get(profile=profile_tecnico)
 
-    fresca.asignaciones.filter(es_principal=True).update(es_principal=False)
+    orden.asignaciones.filter(es_principal=True).update(es_principal=False)
     asignacion, creada = AsignacionTrabajo.objects.get_or_create(
-        orden=fresca, profile=profile_tecnico,
+        orden=orden, profile=profile_tecnico,
         defaults={"rol": rol, "es_principal": True},
     )
     if not creada:
@@ -187,11 +196,11 @@ def asignar(orden: OrdenTrabajo, profile_tecnico, profile_actor,
         asignacion.rol = rol
         asignacion.save(update_fields=["es_principal", "rol"])
 
-    fresca.revision += 1
-    fresca.save(update_fields=["revision", "updated_at"])
+    orden.revision += 1
+    orden.save(update_fields=["revision", "updated_at"])
 
     EventoTrabajo.objects.create(
-        org=fresca.org, orden=fresca,
+        org=orden.org, orden=orden,
         tipo="asignacion" if anterior is None else "reasignacion",
         profile=profile_actor,
         datos={
@@ -223,6 +232,42 @@ def contexto_del_caso(case_id: str) -> dict:
     import requests
     from django.utils import timezone
 
+    # Un caso sin servicio asociado no se puede resolver ni con el motor
+    # arriba: no hay contra que identificador preguntar. Se responde aca y no
+    # se llama a nadie.
+    #
+    # Importa que sea su PROPIO motivo y no 'sin_identidad_resoluble'. Los dos
+    # terminan sin ficha, pero para quien mira la orden son cosas distintas:
+    # 'no se pudo consultar' se reintenta, 'no se pudo identificar' se resuelve
+    # preguntandole a la persona, y este NO SE ARREGLA SOLO -- ese caso nacio
+    # de una conversacion, no de un ticket, y nunca va a tener servicio.
+    # Decirle al tecnico que reintente seria mandarlo a esperar algo que no va
+    # a pasar. Medido: 4 de 100 casos reales estan asi (24/09/2026).
+    from cases.models import Case
+    caso = Case.objects.filter(pk=case_id).only(
+        "external_service_id", "external_ticket_id", "provider",
+        "external_status", "external_created_by").first()
+    servicio = (caso.external_service_id or "").strip() if caso else ""
+    if caso is not None and not servicio:
+        # SIN SERVICIO NO HAY CONTEXTO TECNICO, PERO SI HAY EVALUACION.
+        #
+        # Un caso nacido de una conversacion no tiene servicio asociado y
+        # nunca va a tenerlo. Hasta el 25/09/2026 eso cortaba aca y la orden
+        # quedaba sin NADA -- y es justo el caso que SI tiene lo que el
+        # asistente averiguo: son los dos lados de la misma moneda. Un caso
+        # importado del ISP trae ticket y no trae conversacion; uno nacido de
+        # un chat trae conversacion y no trae ticket.
+        #
+        # Se perdia lo mas util exactamente cuando existia.
+        vacio = sin_contexto("caso_sin_servicio", motor_alcanzado=True)
+        dexter = _lo_que_el_asistente_averiguo(_conversacion_del_caso(case_id))
+        if dexter:
+            vacio["dexter"] = dexter
+        ticket = _ticket_del_proveedor(caso)
+        if ticket:
+            vacio["ticket"] = ticket
+        return vacio
+
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
     tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
     cabeceras = {}
@@ -231,10 +276,28 @@ def contexto_del_caso(case_id: str) -> dict:
         cabeceras["X-Servicio-Token"] = token
 
     try:
+        # 'servicio' es el identificador que el proveedor le puso al ticket, y
+        # va SIEMPRE que el caso lo traiga. Sin el, un caso importado del ISP
+        # --que no tiene conversacion detras-- nunca conseguia ficha: el motor
+        # resolvia la identidad solo desde el chat, y ahi no hay ninguno.
+        #
+        # El motor ya lo contemplaba y nadie se lo mandaba. Su propio
+        # 'identidad_del_contexto' lo dice: "un caso importado del sistema del
+        # ISP trae su propio identificador de servicio y no tiene conversacion
+        # detras; uno nacido de un chat tiene la conversacion y no el
+        # identificador". Cuando estan los dos gana el del caso, y si no
+        # coinciden lo informa como discrepancia en vez de elegir en silencio.
+        parametros = {"tenant": tenant}
+        if servicio:
+            parametros["servicio"] = servicio
         r = requests.get(f"{base}/conversaciones/por-caso/{case_id}",
-                         params={"tenant": tenant}, headers=cabeceras, timeout=30)
+                         params=parametros, headers=cabeceras, timeout=30)
         r.raise_for_status()
-        crudo = (r.json() or {}).get("contexto") or {}
+        cuerpo = r.json() or {}
+        crudo = cuerpo.get("contexto") or {}
+        # La conversacion viene en la MISMA respuesta y hasta el 25/09/2026 se
+        # tiraba. Ahi esta lo que el asistente ya averiguo.
+        conversacion = cuerpo.get("conversacion") or {}
     except Exception as e:                                   # noqa: BLE001
         return sin_contexto(f"{type(e).__name__}", motor_alcanzado=False)
 
@@ -244,7 +307,38 @@ def contexto_del_caso(case_id: str) -> dict:
         # la diferencia le importa a quien mire la orden despues.
         return sin_contexto("sin_identidad_resoluble", motor_alcanzado=True)
 
-    return depurar_contexto(crudo)
+    return depurar_contexto(crudo, conversacion=conversacion, caso=caso)
+
+
+def _conversacion_del_caso(case_id: str) -> dict:
+    """
+    Solo la conversacion que origino el caso, sin pedir contexto tecnico.
+
+    Se usa cuando el caso NO tiene servicio: ahi no hay ficha del cliente que
+    traer --el motor no sabe de quien hablar-- pero la conversacion existe y
+    con ella lo que el asistente averiguo. Un fallo aca no es un error: se
+    devuelve vacio y la orden queda como estaba.
+    """
+    # Importado ACA y no arriba, como el resto del modulo: asi se mantiene
+    # importable sin la dependencia. Que el import faltara costo un rato --
+    # el NameError caia en el 'except' de abajo y la funcion devolvia vacio
+    # como si el motor no hubiera contestado.
+    import requests
+
+    base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
+    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    cabeceras = {}
+    token = os.environ.get("MOTOR_SERVICE_TOKEN")
+    if token:
+        cabeceras["X-Servicio-Token"] = token
+    try:
+        r = requests.get(f"{base}/conversaciones/por-caso/{case_id}",
+                         params={"tenant": tenant}, headers=cabeceras,
+                         timeout=30)
+        r.raise_for_status()
+        return (r.json() or {}).get("conversacion") or {}
+    except Exception:                                        # noqa: BLE001
+        return {}
 
 
 def sin_contexto(motivo: str, *, motor_alcanzado: bool) -> dict:
@@ -280,10 +374,30 @@ def sin_contexto(motivo: str, *, motor_alcanzado: bool) -> dict:
 # nombre y la direccion si -- hay que saber a quien se visita y donde.
 # Tampoco entra nada crudo del proveedor: la fila del cliente trae 54 campos,
 # cuatro de ellos contraseñas y uno el GPS del domicilio.
-CAMPOS_CLIENTE_SNAPSHOT = ("nombre", "estado", "plan", "ip")
+#
+# 'localidad' (24/09/2026): el motor ya la manda -- esta en su _CAMPOS_FICHA
+# junto a 'ip' y 'direccion'-- y esta lista era el unico lugar donde se caia.
+# No hizo falta migracion ni tocar el motor: el dato ya viajaba entero hasta
+# aca. La direccion sola dice el numero de la casa; la localidad dice en que
+# parte del pueblo queda, que es lo que decide si una visita entra en la ruta
+# de hoy.
+#
+# 'direccion' y 'telefono' (24/09/2026): el comentario de arriba decia desde
+# siempre que la direccion entra --"hay que saber a quien se visita y donde"--
+# y NO estaba en la tupla. El codigo contradecia a su propio comentario, y se
+# noto recien al mirar una orden real: el tecnico veia "Sin direccion" y "Sin
+# telefono" con los dos datos cargados del otro lado.
+#
+# No alcanzaba con que vivan en la orden (cliente_direccion, cliente_telefono):
+# esos los llena quien despacha desde el formulario, y un caso IMPORTADO del
+# ISP no pasa por ningun formulario. Para esas ordenes, la ficha es la unica
+# fuente -- y sin direccion el tecnico no sabe a donde ir.
+CAMPOS_CLIENTE_SNAPSHOT = ("nombre", "estado", "plan", "ip", "localidad",
+                           "direccion", "telefono")
 
 
-def depurar_contexto(crudo: dict) -> dict:
+def depurar_contexto(crudo: dict, *, conversacion: dict | None = None,
+                     caso=None) -> dict:
     """
     Deja solo lo que se puede congelar, y le pone la hora.
 
@@ -318,290 +432,231 @@ def depurar_contexto(crudo: dict) -> dict:
         snapshot["equipo_no_disponible"] = crudo["equipo_no_disponible"]
     if crudo.get("identidad_en_conflicto"):
         snapshot["identidad_en_conflicto"] = crudo["identidad_en_conflicto"]
+
+    dexter = _lo_que_el_asistente_averiguo(conversacion or {})
+    if dexter:
+        snapshot["dexter"] = dexter
+    ticket = _ticket_del_proveedor(caso)
+    if ticket:
+        snapshot["ticket"] = ticket
     return snapshot
 
 
-# ==============================================================================
-#  CUADRILLA AD-HOC POR OT  --  M03-F-B
-# ==============================================================================
-#
-#  La cuadrilla NO es una entidad: es el conjunto de AsignacionTrabajo de una
-#  OT, agrupado por 'orden_id'. Eso ya lo declaraba operaciones/models.py:19 y
-#  M03-F-A.1 lo confirmo midiendo. Aqui no se crea ningun modelo nuevo.
-#
-#  LAS TRES REGLAS QUE MANDAN (contrato M03-F-A.2 / A.3)
-#  ----------------------------------------------------
-#  1. 0 integrantes es valido. Con >= 1 integrante hay EXACTAMENTE un principal.
-#  2. 'es_principal' es la fuente de verdad. 'rol' es descriptivo y no decide
-#     nada -- por eso ninguna de estas funciones lo toca para "ascender" a
-#     nadie a 'tecnico_lider'.
-#  3. Retirar al principal exige el sucesor EN EL MISMO ACTO. Nunca dos pasos:
-#     M03-F-A.3 midio que el estado a medio camino es LEGAL y por tanto
-#     invisible -- ninguna comprobacion existente puede distinguirlo de una
-#     cuadrilla correcta. Lo que no se puede detectar, hay que hacerlo
-#     imposible.
-#
-#  EL LOCK
-#  -------
-#  Todas bloquean la OT y solo la OT. El invariante "exactamente un principal"
-#  es del CONJUNTO, no de una fila: bloquear filas sueltas no impide que llegue
-#  una fila nueva. Es ademas el mismo objeto que bloquea 'programar_orden', asi
-#  que no se introduce un orden de locks distinto al de M03 -- y como ninguna
-#  de estas operaciones toca el plan, jamas se toma un segundo lock.
+#  Numeros que parecen un documento. No se baja la cedula a la orden de
+#  trabajo: el tecnico necesita saber A QUIEN visita --y el nombre ya viaja en
+#  la orden-- pero no su documento, y la ficha se congela y queda guardada.
+#  Cuatro a doce digitos seguidos, que es la forma de una cedula colombiana y
+#  tambien la de un NIT. Un numero precedido de '#' NO se toca: es un
+#  ticket ('ticket #93426'), y recortarlo escondia el unico dato con
+#  el que la oficina y el tecnico se refieren al caso.
+_PARECE_DOCUMENTO = re.compile(r"(?<![#\d])\b\d{4,12}\b")
 
 
-class RequiereSucesor(ErrorDespacho):
+def _sin_documentos(texto: str) -> str:
+    """El texto libre del asistente, sin numeros que parezcan un documento."""
+    return _PARECE_DOCUMENTO.sub("(documento)", texto or "").strip()
+
+
+def _lo_que_el_asistente_averiguo(conversacion: dict) -> dict:
     """
-    Se intento retirar al principal sin decir quien queda a cargo.
+    Lo que Dexter ya hizo con este caso, para que no se vuelva a hacer.
 
-    No es un error de validacion: es un conflicto de estado. Va con 409, igual
-    que el resto de conflictos reales del modulo.
+    POR QUE IMPORTA. El asistente habla con el cliente antes de que exista la
+    orden: verifica identidad, mide el equipo, descarta causas y deja escrito
+    QUE FALTA AVERIGUAR. Todo eso vivia en asistente.conversations y no salia
+    de ahi: el tecnico llegaba a la casa a preguntar lo mismo que el cliente ya
+    habia contestado por WhatsApp.
+
+    'siguiente_paso' es el mas util de los tres y es literal, no una etiqueta:
+    "Confirmar con el cliente si el coaxial lo instalo la empresa o lo
+    modifico el, y con eso cerrar el diagnostico de TV".
+
+    SE LE QUITAN LOS DOCUMENTOS. 'resumen' es texto que redacta el modelo y
+    trae la cedula cuando la verifico ("Mario Sabanagrande, cedula 000021",
+    visto en produccion). El nombre si puede ir --ya esta en la orden--; el
+    documento no: esto se congela en la orden de trabajo y viaja al telefono.
     """
+    if not conversacion:
+        return {}
+    salida = {}
+    for clave, origen in (("caso", "caso_manual"),
+                          ("motivo_escalada", "motivo_escalamiento"),
+                          ("etiqueta", "etiqueta")):
+        valor = (conversacion.get(origen) or "").strip()
+        if valor:
+            salida[clave] = valor
+    for clave, origen in (("resumen", "resumen"),
+                          ("siguiente_paso", "escalada_siguiente_paso")):
+        valor = _sin_documentos(conversacion.get(origen) or "")
+        if valor:
+            salida[clave] = valor
+    return salida
 
 
-class ConflictoDeCuadrilla(ErrorDespacho):
-    """La foto que traia el solicitante ya no corresponde a la realidad."""
+def _ticket_del_proveedor(caso) -> dict:
+    """
+    El ticket del sistema del ISP, con su numero y su estado ALLA.
+
+    Un UUID de caso no le sirve a nadie: el tecnico y la oficina hablan de
+    "el 93426". Y 'external_status' es el estado EN WISPHUB, que no tiene por
+    que coincidir con el del CRM -- alguien pudo cerrarlo del otro lado.
+    """
+    if caso is None:
+        return {}
+    numero = str(getattr(caso, "external_ticket_id", "") or "").strip()
+    if not numero:
+        return {}
+    ticket = {"numero": numero}
+    for clave, atributo in (("proveedor", "provider"),
+                            ("estado", "external_status"),
+                            ("abierto_por", "external_created_by")):
+        valor = str(getattr(caso, atributo, "") or "").strip()
+        if valor:
+            ticket[clave] = valor
+    return ticket
 
 
-ESTADOS_TERMINALES = (OrdenTrabajo.CERRADA, OrdenTrabajo.CANCELADA)
+# ============================================================================
+#  REFRESCAR LA FICHA  --  volver a capturar lo que se congelo al despachar
+# ============================================================================
+#
+# POR QUE HACE FALTA
+# ------------------
+# Al crear la orden, la ficha del cliente se congela. Eso es deliberado y no se
+# discute: "al congelarse, una medicion deja de ser una medicion -- pasa a ser
+# un registro de lo que se veia en un momento". Por eso lleva 'capturado_en'.
+#
+# El problema es que hasta hoy NO habia forma de volver a capturarla. Un ticket
+# se importa apenas se abre y los datos del cliente se completan mas tarde: la
+# orden quedaba con esa foto para siempre y el tecnico veia "Sin direccion"
+# aunque alguien hubiera cargado la direccion despues. La unica salida era un
+# script contra la base.
+#
+# LAS TRES DECISIONES, Y SU MOTIVO
+# --------------------------------
+# 1. NO TOCA LAS COLUMNAS de la orden (cliente_nombre, cliente_telefono,
+#    cliente_direccion). Esas las escribe quien despacha, a mano, y dicen cosas
+#    que el ISP no tiene y no puede tener: "Casa porton verde, timbre roto,
+#    llamar al llegar". El ISP responde "Cl. 45 #12-88", que para llegar es
+#    PEOR. Un refresco que las sobrescribiera destruiria trabajo humano en cada
+#    llamada. La ficha rellena el hueco cuando la columna esta vacia, y eso ya
+#    lo resuelve _cliente() en serializers.py, en un solo sentido.
+#
+# 2. SOLO LA ULTIMA FICHA vive en 'contexto'; la anterior COMPLETA queda dentro
+#    del EventoTrabajo del refresco. La bitacora es append-only y ya existe:
+#    responde "que se veia cuando el tecnico fue" sin inventar una tabla ni
+#    engordar la orden con un historial que casi nadie lee.
+#
+# 3. MANUAL, nunca automatico al abrir. Cada refresco le pega al sistema del
+#    ISP, que tiene limite de tasa (SmartOLT: 1.000 llamadas/hora, confirmado
+#    por cabecera). Un refresco por apertura de orden lo gastaria en visitas
+#    que no lo necesitan.
+#
+# LA PROPIEDAD QUE MAS IMPORTA
+# ----------------------------
+# Un refresco que falla NO destruye la ficha que habia. Por eso se captura
+# PRIMERO, se comprueba que la ficha nueva exista de verdad, y recien entonces
+# se escribe. 'contexto_del_caso' nunca lanza: devuelve el dict de
+# 'sin_contexto' cuando no pudo. Si se guardara ese dict, un motor caido
+# borraria los datos del cliente de una orden en curso -- que es exactamente lo
+# que no puede pasar.
+def refrescar_contexto(orden: OrdenTrabajo, *, profile) -> dict:
+    """
+    Vuelve a capturar la ficha del cliente de una orden ya despachada.
 
+    Devuelve (ok, motivo, motor_alcanzado, capturado_en). No lanza cuando el
+    motor falla -- eso no es un error del refresco, es una respuesta.
 
-def _exigir_operable(orden: OrdenTrabajo) -> None:
-    if orden.estado_operativo in ESTADOS_TERMINALES:
+    Lanza ErrorDespacho solo cuando la orden no admite el refresco: esta
+    cerrada o cancelada, o no nacio de un caso.
+    """
+    from django.utils import timezone
+
+    # Una orden cerrada o cancelada no se refresca: su ficha es parte del acta.
+    # Cambiarla despues seria reescribir lo que se veia cuando se trabajo.
+    if orden.estado_operativo in (OrdenTrabajo.CERRADA, OrdenTrabajo.CANCELADA):
         raise ErrorDespacho(
-            f"La orden #{orden.numero} esta "
-            f"'{orden.get_estado_operativo_display()}'. No se cambia la "
-            f"cuadrilla de un trabajo terminado.")
+            "Una orden cerrada o cancelada no se refresca: su ficha es parte "
+            "del acta de lo que se vio cuando se trabajo.")
 
-
-def _bloquear(orden: OrdenTrabajo) -> OrdenTrabajo:
-    """
-    Relee la OT bajo lock. Lo que decide es la fila bloqueada, nunca la copia
-    en memoria -- mismo criterio que 'programar_orden' (M03-B).
-    """
-    return OrdenTrabajo.objects.select_for_update().get(pk=orden.pk)
-
-
-def _foto_cuadrilla(orden: OrdenTrabajo) -> list[dict]:
-    """
-    La composicion completa, para que el evento permita RECONSTRUIR la
-    transicion y no solo enterarse de que hubo una.
-    """
-    return [
-        {"profile": str(a.profile_id), "rol": a.rol,
-         "es_principal": a.es_principal}
-        for a in orden.asignaciones.all().order_by("asignado_en")
-    ]
-
-
-def _integrante(orden: OrdenTrabajo, profile) -> AsignacionTrabajo:
-    fila = orden.asignaciones.filter(profile=profile).first()
-    if fila is None:
-        raise ErrorDespacho("Esa persona no esta asignada a esta orden.")
-    return fila
-
-
-def _misma_empresa(orden: OrdenTrabajo, profile) -> None:
-    if profile.org_id != orden.org_id:
-        raise ErrorDespacho("Esa persona es de otra empresa.")
-
-
-def _evento(orden, tipo, actor, antes, **datos):
-    return EventoTrabajo.objects.create(
-        org=orden.org, orden=orden, tipo=tipo, profile=actor,
-        datos={"antes": antes, "despues": _foto_cuadrilla(orden), **datos},
-    )
-
-
-@transaction.atomic
-def agregar_integrante(orden: OrdenTrabajo, profile, actor,
-                       rol: str = "tecnico",
-                       motivo: str = "") -> AsignacionTrabajo:
-    """
-    Suma a alguien a la cuadrilla SIN tocar al principal.
-
-    'es_principal=False' se fija AQUI y no es parametro: mover el principal es
-    otra operacion, con otro nombre y otro evento. M03-F-A.1 midio que la unica
-    via que existia hacia lo contrario -- agregar a un ayudante le robaba la
-    principalia al lider -- y esa es la conducta que este modulo separa en dos
-    actos distintos.
-
-    Exige que YA haya alguien: una cuadrilla no empieza por el ayudante. La
-    primera persona entra por 'asignar', que la deja como principal.
-    """
-    _misma_empresa(orden, profile)
-    fresca = _bloquear(orden)
-    _exigir_operable(fresca)
-
-    if not fresca.asignaciones.exists():
+    # Sin caso detras no hay a quien preguntarle. Una orden manual no tiene
+    # ficha que refrescar, y decir "no se pudo" seria confundir dos cosas.
+    case_id = (orden.origen_ref or "").strip()
+    if orden.origen_sistema != "crm" or not case_id:
         raise ErrorDespacho(
-            f"La orden #{fresca.numero} no tiene a nadie asignado. La primera "
-            f"persona se asigna con 'asignar', y queda como principal.")
-    if fresca.asignaciones.filter(profile=profile).exists():
-        raise ErrorDespacho("Esa persona ya esta en la cuadrilla.")
+            "Esta orden no nacio de un caso del CRM: no hay contra que "
+            "identificador preguntar.")
 
-    antes = _foto_cuadrilla(fresca)
-    asignacion = AsignacionTrabajo.objects.create(
-        orden=fresca, profile=profile, rol=rol, es_principal=False)
+    # PRIMERO se captura. Nada se escribe hasta tener la ficha nueva en mano.
+    fresco = contexto_del_caso(case_id)
+    if fresco.get("contexto_disponible") is not True:
+        # No se pudo, y la ficha tecnica anterior queda EXACTAMENTE como
+        # estaba. Se devuelven los tres motivos distinguibles que la app ya
+        # sabe leer.
+        #
+        # LO QUE SI SE GUARDA, Y NO ES UNA EXCEPCION A LA REGLA DE ARRIBA.
+        # 'caso_sin_servicio' es el caso de un ticket nacido de una
+        # conversacion: no hay cliente que resolver --y nunca lo va a haber--
+        # pero SI esta lo que el asistente averiguo y el ticket del ISP. Son
+        # los dos lados de la misma moneda: un caso importado trae ticket y no
+        # trae conversacion; uno nacido de un chat trae conversacion y no trae
+        # ticket. Hasta el 25/09/2026 se perdia lo mas util exactamente cuando
+        # existia.
+        #
+        # Se AGREGAN al contexto que ya habia, no lo reemplazan: la ficha
+        # tecnica sigue intacta, que es lo que esta funcion promete.
+        extra = {k: fresco[k] for k in ("dexter", "ticket") if fresco.get(k)}
+        if extra:
+            with transaction.atomic():
+                fila = OrdenTrabajo.objects.select_for_update().get(pk=orden.pk)
+                contexto = dict(fila.contexto or {})
+                contexto.update(extra)
+                fila.contexto = contexto
+                fila.save(update_fields=["contexto"])
+            orden.refresh_from_db(fields=["contexto"])
+        return {
+            "ok": False,
+            "motivo": fresco.get("motivo") or "",
+            "motor_alcanzado": fresco.get("motor_alcanzado", False),
+        }
 
-    fresca.revision += 1
-    fresca.save(update_fields=["revision", "updated_at"])
+    anterior = dict(orden.contexto or {})
 
-    _evento(fresca, "integrante_agregado", actor, antes,
-            integrante=str(profile.id), rol=rol, motivo=motivo)
-    return asignacion
+    with transaction.atomic():
+        fresca = OrdenTrabajo.objects.select_for_update().get(pk=orden.pk)
+        # Se revalida el estado DENTRO de la transaccion: entre la captura y la
+        # escritura pasaron los segundos que tarda el motor, y en ese rato
+        # alguien pudo cerrar la orden.
+        if fresca.estado_operativo in (OrdenTrabajo.CERRADA,
+                                       OrdenTrabajo.CANCELADA):
+            raise ErrorDespacho(
+                "La orden se cerro mientras se consultaba la ficha: no se "
+                "escribio nada.")
 
-
-@transaction.atomic
-def cambiar_principal(orden: OrdenTrabajo, nuevo_principal, actor,
-                      motivo: str = "") -> tuple[AsignacionTrabajo, bool]:
-    """
-    Traslada la responsabilidad entre DOS personas que ya estan en la cuadrilla.
-
-    Devuelve (asignacion, cambio). 'cambio' en False significa que ya era el
-    principal: es un no-op y responde 200 'sin_cambios', el mismo contrato que
-    M03-B1 fijo para la secuenciacion. Un no-op no escribe, no audita y no
-    exige motivo, porque no hay nada que justificar.
-
-    NO toca 'rol'. 'principal' y 'tecnico_lider' no son sinonimos (F-3): quien
-    pasa a responder por la OT no cambia de oficio por hacerlo.
-    """
-    _misma_empresa(orden, nuevo_principal)
-    fresca = _bloquear(orden)
-    _exigir_operable(fresca)
-
-    entrante = _integrante(fresca, nuevo_principal)
-    if entrante.es_principal:
-        return entrante, False
-
-    antes = _foto_cuadrilla(fresca)
-    anterior = fresca.tecnico_principal
-
-    #  Bajar ANTES de subir: el indice unico parcial no admite dos principales
-    #  ni por un instante. Las dos escrituras van en la misma transaccion, asi
-    #  que el hueco de cero principales no existe fuera de ella.
-    fresca.asignaciones.filter(es_principal=True).update(es_principal=False)
-    fresca.asignaciones.filter(profile=nuevo_principal).update(es_principal=True)
-
-    fresca.revision += 1
-    fresca.save(update_fields=["revision", "updated_at"])
-
-    _evento(fresca, "cambio_principal", actor, antes,
-            principal_anterior=str(anterior.id) if anterior else None,
-            principal_nuevo=str(nuevo_principal.id), motivo=motivo)
-    entrante.refresh_from_db()
-    return entrante, True
-
-
-@transaction.atomic
-def retirar_integrante(orden: OrdenTrabajo, profile, actor,
-                       nuevo_principal=None, motivo: str = "") -> dict:
-    """
-    Saca a alguien de la cuadrilla. Si es el principal, el sucesor viaja en la
-    MISMA llamada (decision A de M03-F-A.3).
-
-    Por que no se permite en dos pasos: M03-F-A.3 midio el estado intermedio
-    --cambiar el principal y no llegar a retirar-- y resulto ser LEGAL. Cumple
-    el invariante, pasa 'revisar_coherencia' y no dispara H-05. O sea que un
-    retiro a medias es indistinguible de una cuadrilla correcta, y nadie puede
-    detectarlo despues. La unica defensa posible es que no pueda ocurrir.
-
-    Sale el ULTIMO integrante: no hace falta sucesor. La OT queda en 0
-    asignaciones, que es un estado valido y deliberado (F-2), no un accidente.
-    """
-    fresca = _bloquear(orden)
-    _exigir_operable(fresca)
-
-    saliente = _integrante(fresca, profile)
-    quedan_otros = fresca.asignaciones.exclude(profile=profile).exists()
-    principal_actual = fresca.tecnico_principal
-
-    if not saliente.es_principal:
-        #  Sale un auxiliar: el principal no se mueve. Un sucesor aqui solo se
-        #  acepta si coincide con quien YA es principal -- si nombra a otro, la
-        #  foto del solicitante quedo vieja y hay que decirselo, no adivinar.
-        if (nuevo_principal is not None and principal_actual is not None
-                and nuevo_principal.id != principal_actual.id):
-            raise ConflictoDeCuadrilla(
-                "Esa persona ya no es la principal de la orden. Vuelva a "
-                "consultar la cuadrilla antes de retirar a alguien.")
-        antes = _foto_cuadrilla(fresca)
-        rol_que_tenia = saliente.rol
-        saliente.delete()
+        fresca.contexto = fresco
         fresca.revision += 1
-        fresca.save(update_fields=["revision", "updated_at"])
-        _evento(fresca, "integrante_retirado", actor, antes,
-                integrante_retirado=str(profile.id),
-                rol_que_tenia=rol_que_tenia, motivo=motivo)
-        return {"retirado": profile, "principal": principal_actual,
-                "cambio_principal": False}
+        fresca.save(update_fields=["contexto", "revision", "updated_at"])
 
-    #  ---------------- sale el PRINCIPAL ----------------
-    if not quedan_otros:
-        antes = _foto_cuadrilla(fresca)
-        rol_que_tenia = saliente.rol
-        saliente.delete()
-        fresca.revision += 1
-        fresca.save(update_fields=["revision", "updated_at"])
-        _evento(fresca, "integrante_retirado", actor, antes,
-                integrante_retirado=str(profile.id),
-                rol_que_tenia=rol_que_tenia, era_principal=True,
-                orden_queda_sin_asignar=True, motivo=motivo)
-        return {"retirado": profile, "principal": None,
-                "cambio_principal": False}
+        EventoTrabajo.objects.create(
+            org=fresca.org,
+            orden=fresca,
+            tipo="contexto_refrescado",
+            profile=profile,
+            datos={
+                # La ficha ANTERIOR entera. Es lo que responde "que se veia
+                # cuando el tecnico fue" una vez que 'contexto' ya cambio.
+                "anterior": anterior,
+                "capturado_en": fresco.get("capturado_en") or "",
+                "fuente": fresco.get("fuente") or "",
+                "revision": fresca.revision,
+                "refrescado_en": timezone.now().isoformat(),
+            },
+        )
 
-    if nuevo_principal is None:
-        raise RequiereSucesor(
-            f"Esa persona es la principal de la orden #{fresca.numero} y "
-            f"quedan otros integrantes. Indique quien queda a cargo en esta "
-            f"misma operacion.")
-
-    _misma_empresa(fresca, nuevo_principal)
-    if nuevo_principal.id == profile.id:
-        raise ErrorDespacho(
-            "El sucesor no puede ser la misma persona que se retira.")
-    _integrante(fresca, nuevo_principal)      # tiene que estar en ESTA orden
-
-    antes = _foto_cuadrilla(fresca)
-    rol_que_tenia = saliente.rol
-
-    #  Primero se va el principal, despues sube el sucesor: al reves habria dos
-    #  principales a la vez y el indice unico parcial lo rechazaria.
-    saliente.delete()
-    fresca.asignaciones.filter(profile=nuevo_principal).update(es_principal=True)
-
-    fresca.revision += 1
-    fresca.save(update_fields=["revision", "updated_at"])
-
-    _evento(fresca, "principal_retirado", actor, antes,
-            integrante_retirado=str(profile.id), rol_que_tenia=rol_que_tenia,
-            principal_anterior=str(profile.id),
-            principal_nuevo=str(nuevo_principal.id), motivo=motivo)
-    return {"retirado": profile, "principal": nuevo_principal,
-            "cambio_principal": True}
-
-
-@transaction.atomic
-def desasignar(orden: OrdenTrabajo, actor, motivo: str = "") -> int:
-    """
-    Deja la OT sin nadie. 0 integrantes es un estado valido (F-2): una orden
-    puede quedar esperando a que alguien la tome.
-
-    NO es un atajo para sacar al principal conservando al resto -- eso es
-    'retirar_integrante' con sucesor. Aqui se van TODOS, asi que no puede
-    producir el estado "quedan integrantes y no hay principal".
-    """
-    fresca = _bloquear(orden)
-    _exigir_operable(fresca)
-
-    antes = _foto_cuadrilla(fresca)
-    cuantos = fresca.asignaciones.count()
-    if cuantos == 0:
-        return 0
-
-    fresca.asignaciones.all().delete()
-    fresca.revision += 1
-    fresca.save(update_fields=["revision", "updated_at"])
-    _evento(fresca, "cuadrilla_desasignada", actor, antes,
-            integrantes_retirados=cuantos, motivo=motivo)
-    return cuantos
+    orden.contexto = fresco
+    orden.revision = fresca.revision
+    return {
+        "ok": True,
+        "capturado_en": fresco.get("capturado_en") or "",
+        "revision": fresca.revision,
+    }

@@ -112,6 +112,20 @@ class WorkTypeVersion(BaseModel):
 
     def clean(self):
         super().clean()
+
+        # Una plantilla se vuelve inmutable al publicarse, y a partir de ahi
+        # viaja a los telefonos. Si su vocabulario no es el que la aplicacion
+        # sabe ejecutar, el error no aparece aca: aparece en la calle, cuando
+        # el tecnico abre la orden y el formulario no se puede responder.
+        #
+        # `validar_esquema_plantilla` existia desde el principio y no la
+        # llamaba nadie (hallazgo del inventario del 22/09/2026). Se llama al
+        # publicar, no en borrador: un borrador puede estar a medias.
+        if self.estado == self.PUBLICADA and self.schema_version == 1:
+            from campo.services.validador import validar_esquema_plantilla
+
+            validar_esquema_plantilla(self.esquema or {})
+
         if self.pk:
             original = WorkTypeVersion.objects.filter(pk=self.pk).first()
             if original and original.estado == self.PUBLICADA:
@@ -216,6 +230,26 @@ class OrdenTrabajo(BaseModel):
     gps_lat = models.FloatField(null=True, blank=True)
     gps_lng = models.FloatField(null=True, blank=True)
 
+    # Como se entra al inmueble: torre, piso, apartamento, a quien preguntar.
+    #
+    # Sin esto el tecnico llega al edificio y no al apartamento. La direccion
+    # sola alcanza para el GPS y no para tocar la puerta correcta.
+    cliente_detalle_acceso = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Torre, piso, apartamento, portería: cómo se entra.",
+    )
+
+    # El identificador del abonado en el sistema del ISP. Sirve para que el
+    # tecnico lo dicte por telefono al NOC sin tener que buscarlo.
+    cliente_id_abonado = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Identificador del abonado en el sistema del ISP (ej. WispHub).",
+    )
+
     # Contexto técnico y datos recolectados
     diagnostico_previo = models.JSONField(
         default=dict,
@@ -230,6 +264,80 @@ class OrdenTrabajo(BaseModel):
     revision = models.PositiveIntegerField(
         default=1,
         help_text="Control de concurrencia optimista para sincronización offline",
+    )
+
+    # --- Lo que la orden promete -------------------------------------------
+
+    #: Prioridades. Se ordena por ellas, asi que el valor guardado importa.
+    PRIORIDAD_ALTA = "alta"
+    PRIORIDAD_MEDIA = "media"
+    PRIORIDAD_BAJA = "baja"
+    PRIORIDADES = [
+        (PRIORIDAD_ALTA, "Alta"),
+        (PRIORIDAD_MEDIA, "Media"),
+        (PRIORIDAD_BAJA, "Baja"),
+    ]
+
+    prioridad = models.CharField(
+        max_length=10,
+        choices=PRIORIDADES,
+        default=PRIORIDAD_MEDIA,
+        db_index=True,
+        help_text="Con qué urgencia se despacha. Ordena la lista del técnico.",
+    )
+
+    zona = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Zona operativa del trabajo. Agrupa la jornada por cercanía.",
+    )
+
+    resumen = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Qué hay que hacer, en una línea. El tipo de trabajo dice la "
+                  "categoría; esto dice el caso.",
+    )
+
+    # La franja que se le prometio al cliente.
+    #
+    # No alcanza con 'programada_para', que es un instante: al abonado se le
+    # dice "entre 9 y 11", y el SLA de la visita se mide contra esa franja.
+    ventana_inicio = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Comienzo de la franja comprometida con el cliente.",
+    )
+    ventana_fin = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Fin de la franja comprometida con el cliente.",
+    )
+
+    # Cuando vence el compromiso de atencion.
+    #
+    # El telefono no puede calcularlo: no sabe las reglas de SLA de la empresa
+    # ni su calendario laboral. Si lo calculara, cada version de la aplicacion
+    # tendria su propia idea de cuando una orden esta vencida.
+    sla_vence_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Cuándo vence el compromiso. Lo calcula el backend, no la app.",
+    )
+
+    # Que hace falta para poder ejecutar este trabajo.
+    #
+    # Lista de identificadores de requisito (trabajo en altura, espacios
+    # confinados, certificacion electrica). Se MUESTRA; no habilita ni bloquea:
+    # decidir si alguien puede subir a un poste exige saber si su certificacion
+    # esta vigente, y eso todavia no vive en ningun lado.
+    requisitos_seguridad = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Requisitos de seguridad del trabajo. Se informan; no habilitan.",
     )
 
     # Estados
@@ -323,32 +431,10 @@ class AsignacionTrabajo(BaseModel):
     profile = models.ForeignKey(
         Profile, on_delete=models.CASCADE, related_name="asignaciones_campo"
     )
-    # CATALOGO CERRADO (15/09/2026). Antes era texto libre con la lista solo
-    # en el help_text, y ya habia divergido: las 3 asignaciones de produccion
-    # dicen 'tecnico_lider', que no estaba entre los cuatro documentados.
-    #
-    # 'tecnico_lider' se INCLUYE en el catalogo en vez de corregirse: las filas
-    # existentes son datos de produccion y renombrarlas seria reescribir
-    # historico por una razon cosmetica. Lo que se cierra es lo que se puede
-    # escribir de ahora en adelante.
-    TECNICO = "tecnico"
-    TECNICO_LIDER = "tecnico_lider"
-    AYUDANTE = "ayudante"
-    CHOFER = "chofer"
-    SUPERVISOR = "supervisor"
-    ROLES_CUADRILLA = (
-        (TECNICO, "Técnico"),
-        (TECNICO_LIDER, "Técnico líder"),
-        (AYUDANTE, "Ayudante"),
-        (CHOFER, "Chofer"),
-        (SUPERVISOR, "Supervisor"),
-    )
-
     rol = models.CharField(
         max_length=64,
-        choices=ROLES_CUADRILLA,
-        default=TECNICO,
-        help_text="Rol en la cuadrilla. Catálogo cerrado, ver ROLES_CUADRILLA.",
+        default="tecnico",
+        help_text="Rol en la cuadrilla: tecnico, ayudante, chofer, supervisor",
     )
     es_principal = models.BooleanField(
         default=False,
@@ -468,6 +554,630 @@ class EvidenciaTrabajo(BaseModel):
         return f"Evidencia {self.requisito_id} en OT #{self.orden_trabajo.numero}"
 
 
+# =============================================================================
+# Materiales: la custodia del tecnico
+#
+# POR QUE ESTO VIVE EN DEXTER Y NO ES UN ESPEJO DEL ISP
+# -----------------------------------------------------
+# La pregunta quedo abierta en SPEC/BACKEND_CAMPO_DATOS.md (tanda 4) y se
+# resolvio mirando que expone el ISP: WispHub y SmartOLT hablan de equipos ya
+# instalados en un cliente (consultar_estado_ont, cambiar_tipo_onu), no de
+# bodega ni de custodia. No hay de que ser espejo. Y hacerlo depender del
+# sistema de cada empresa obligaria a una integracion distinta por tenant, que
+# es justo lo que la regla multi-tenant del proyecto prohibe.
+#
+# Lo que si viaja hacia el ISP es el serial instalado, que ya va hoy en el
+# `datos_json` de la orden.
+#
+# LA DECISION QUE ORDENA TODO EL DISENO
+# -------------------------------------
+# Un movimiento de material **es un hecho que ya ocurrio en la calle**, no una
+# solicitud que el servidor pueda aprobar. Cuando el telefono lo envia, el
+# conector ya esta ponchado y los metros de fibra ya no estan en la bobina.
+#
+# De ahi sale todo lo demas: la tabla es append-only como la bitacora, el saldo
+# se calcula y no se guarda, y un consumo que deja el saldo en negativo **se
+# acepta igual** y se marca como descuadre. Rechazarlo no devolveria el
+# material a la camioneta: solo borraria el unico registro de que se uso, y
+# dejaria al tecnico explicando de memoria a fin de mes.
+# =============================================================================
+
+
+class MaterialCatalogo(BaseModel):
+    """Que materiales maneja esta empresa. Uno por codigo y por organizacion."""
+
+    CONSUMIBLE = "consumible"
+    BOBINA = "bobina"
+    SERIALIZADO = "serializado"
+    TERMINAL = "terminal"
+    CLASES = (
+        (CONSUMIBLE, "Consumible"),
+        (BOBINA, "Bobina"),
+        (SERIALIZADO, "Serializado"),
+        (TERMINAL, "Terminal"),
+    )
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="materiales_campo"
+    )
+    codigo = models.CharField(max_length=64)
+    nombre = models.CharField(max_length=200)
+    categoria = models.CharField(max_length=100, blank=True, default="")
+    clase = models.CharField(max_length=20, choices=CLASES, default=CONSUMIBLE)
+    unidad = models.CharField(
+        max_length=20,
+        default="unidades",
+        help_text="Como se cuenta: unidades, m, kg.",
+    )
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "campo_material_catalogo"
+        ordering = ["categoria", "nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "codigo"], name="unique_material_codigo_por_org"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.codigo} - {self.nombre}"
+
+    @property
+    def es_serializado(self) -> bool:
+        return self.clase == self.SERIALIZADO
+
+    @property
+    def admite_fraccion(self) -> bool:
+        """Una bobina se consume en metros con decimales; un conector, no."""
+        return self.clase == self.BOBINA
+
+
+class EntregaDeKit(BaseModel):
+    """El acta de lo que la bodega le entrego a un tecnico.
+
+    Es el punto de partida de la custodia: sin una entrega, un consumo no
+    tiene contra que descontarse.
+    """
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="kits_campo")
+    profile = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="kits_recibidos"
+    )
+    acta = models.CharField(max_length=64, blank=True, default="")
+    despachado_por = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="kits_despachados",
+    )
+    entregado_en = models.DateTimeField(default=timezone.now)
+    confirmado_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Cuando el tecnico confirmo que recibio lo que dice el acta.",
+    )
+    notas = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "campo_entrega_kit"
+        ordering = ["-entregado_en"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "acta"],
+                condition=models.Q(acta__gt=""),
+                name="unique_acta_por_org",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"Kit {self.acta or self.pk}"
+
+
+class ItemDeKit(BaseModel):
+    """Una linea del acta: cuanto de un material se entrego."""
+
+    entrega = models.ForeignKey(
+        EntregaDeKit, on_delete=models.CASCADE, related_name="items"
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, on_delete=models.PROTECT, related_name="entregas"
+    )
+    cantidad = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    serie = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        help_text="Solo para material serializado. Una serie, una unidad.",
+    )
+
+    class Meta:
+        db_table = "campo_item_kit"
+        # SIN CONSTRAINT DE SERIE, y el motivo importa.
+        #
+        # Aca habia un `unique(material, serie)` con el comentario "una serie no
+        # se entrega dos veces SIN HABER VUELTO: es el mismo aparato fisico". La
+        # intencion era correcta y la condicion no la modelaba: era absoluto, asi
+        # que una ONT que volvia intacta de un cliente que cancelo no se podia
+        # volver a entregar NUNCA.
+        #
+        # Medido el 28/09/2026 ejecutandolo, no leyendolo:
+        #     IntegrityError: UNIQUE constraint failed:
+        #     campo_item_kit.material_id, campo_item_kit.serie
+        # (campo/tests/test_inventario_ciclo.py::test_a3_...)
+        #
+        # Un acta es un DOCUMENTO historico: la misma serie aparece en tantas
+        # actas como veces se entrego, y eso es el registro correcto, no un
+        # duplicado. La garantia de que un aparato no esta en dos manos a la vez
+        # la da `UbicacionDeActivo` --una fila por activo--, que es donde
+        # pertenece: es una invariante sobre el PRESENTE, no sobre la historia.
+        constraints = []
+
+    def __str__(self) -> str:
+        return f"{self.material.codigo} x{self.cantidad}"
+
+
+class ReglaDeConsumo(BaseModel):
+    """Cuanto material se suele usar, segun esta empresa.
+
+    POR QUE ES UNA TABLA Y NO UN NUMERO EN EL CODIGO
+    ------------------------------------------------
+    "Una instalacion usa dos conectores" es verdad en una empresa y falso en
+    la siguiente: depende del tipo de acometida, del proveedor del material y
+    de como cada ISP arma sus kits. Escribirlo en el codigo obligaria a una
+    sesion de programacion para cambiar un numero que un supervisor conoce
+    mejor que nadie, y es exactamente lo que la regla multi-tenant del
+    proyecto prohibe.
+
+    La regla puede ser general para un material, o especifica para un tipo de
+    trabajo: cambiar una ONT gasta distinto que instalar desde cero. Cuando
+    hay dos, gana la del tipo de trabajo, que es la mas concreta.
+
+    NINGUNA DE ESTAS REGLAS BLOQUEA POR SI SOLA
+    -------------------------------------------
+    Lo habitual es una referencia, no un limite: el material ya se gasto
+    cuando el telefono lo informa. Por eso `cantidad_habitual` solo produce un
+    aviso y, si la empresa lo pide, la obligacion de escribir por que. Bloquear
+    de verdad solo ocurre con `bloquea_sobre_maximo`, que viene apagado.
+    """
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="reglas_consumo"
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, on_delete=models.CASCADE, related_name="reglas"
+    )
+    work_type = models.ForeignKey(
+        WorkType,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="reglas_consumo",
+        help_text="Vacio: vale para cualquier trabajo. Con valor: solo para ese tipo.",
+    )
+    cantidad_habitual = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Lo que se suele usar. Es una referencia, no un limite.",
+    )
+    maximo = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Por encima de esto se avisa fuerte. Vacio: sin tope.",
+    )
+    exige_motivo_sobre_habitual = models.BooleanField(
+        default=False,
+        help_text="Si se pasa de lo habitual, hay que escribir por que.",
+    )
+    bloquea_sobre_maximo = models.BooleanField(
+        default=False,
+        help_text=(
+            "La unica opcion que RECHAZA un consumo. Apagada por defecto: el "
+            "material ya se gasto cuando el telefono lo informa, y rechazarlo "
+            "borra el registro en vez de devolver el material."
+        ),
+    )
+
+    class Meta:
+        db_table = "campo_regla_consumo"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "material", "work_type"],
+                name="unique_regla_por_material_y_tipo",
+            )
+        ]
+
+    def __str__(self) -> str:
+        alcance = self.work_type.codigo if self.work_type else "cualquier trabajo"
+        return f"{self.material.codigo} en {alcance}"
+
+
+class MovimientoDeMaterial(BaseModel):
+    """Append-only: lo que se consumio, se devolvio o se ajusto.
+
+    Nunca se edita ni se borra. Corregir un movimiento es registrar otro en
+    sentido contrario, igual que en cualquier libro contable, porque lo que
+    paso en la calle paso y el registro tiene que poder explicarlo despues.
+    """
+
+    CONSUMO = "consumo"
+    DEVOLUCION = "devolucion"
+    AJUSTE = "ajuste"
+    #: Los cuatro que trae el inventario. Ver campo/inventario.py sobre por que
+    #: una entrada no tiene origen y un consumo no tiene destino: son las dos
+    #: fronteras del sistema y los dos nulls son legitimos.
+    ENTRADA = "entrada"
+    DESPACHO = "despacho"
+    TRASLADO = "traslado"
+    BAJA = "baja"
+    TIPOS = (
+        (CONSUMO, "Consumo"),
+        (DEVOLUCION, "Devolucion"),
+        (AJUSTE, "Ajuste"),
+        (ENTRADA, "Entrada"),
+        (DESPACHO, "Despacho"),
+        (TRASLADO, "Traslado"),
+        (BAJA, "Baja"),
+    )
+
+    #: El movimiento entro y cuadra con lo que el tecnico tenia.
+    ACEPTADO = "aceptado"
+    #: Entro, pero deja el saldo en negativo. El hecho se respeta; la oficina
+    #: tiene que mirarlo.
+    DESCUADRE = "descuadre"
+    #: Una serie que otro ya consumio. Dos tecnicos no instalaron la misma ONT.
+    CONFLICTO = "conflicto"
+    ESTADOS = (
+        (ACEPTADO, "Aceptado"),
+        (DESCUADRE, "Descuadre"),
+        (CONFLICTO, "Conflicto"),
+    )
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="movimientos_material"
+    )
+    profile = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimientos_material",
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, on_delete=models.PROTECT, related_name="movimientos"
+    )
+    orden = models.ForeignKey(
+        OrdenTrabajo,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimientos_material",
+        help_text="En que trabajo se uso. Vacio para una devolucion de jornada.",
+    )
+    tipo = models.CharField(max_length=20, choices=TIPOS, default=CONSUMO)
+    # --- de donde sale y a donde va -----------------------------------------
+    #
+    # LOS DOS SON NULLABLES Y ESO NO ES LAXITUD: son las dos fronteras del
+    # sistema. Una ENTRADA no tiene origen interno --el material entra-- y un
+    # CONSUMO no tiene destino interno --el material sale hacia una casa, y de
+    # eso el dueño es WispHub, no Dexter--. Ver campo/inventario.py.
+    #
+    # Nullables tambien por compatibilidad: los movimientos que ya existen
+    # --consumo, devolucion y ajuste, escritos por la app del tecnico-- no los
+    # traen, y rellenarlos con una suposicion seria inventar de donde salio
+    # material que nadie sabe de donde salio.
+    ubicacion_origen = models.ForeignKey(
+        "campo.UbicacionInventario",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="movimientos_de_salida",
+    )
+    ubicacion_destino = models.ForeignKey(
+        "campo.UbicacionInventario",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="movimientos_de_entrada",
+    )
+    # --- costo, solo en las ENTRADAS -----------------------------------------
+    #
+    # Lo trae la compra y viaja con el movimiento que la registra. No se propaga
+    # a los consumos: el costo de lo que sale se calcula por promedio ponderado
+    # sobre lo que entro (services/inventario_operacion.py::valorizacion), y
+    # copiarlo a cada salida seria guardar un derivado que se puede recalcular.
+    #
+    # Nullable porque la mayoria del material ya adentro no lo tiene, y porque
+    # hay entradas sin costo: un equipo retirado de un cliente no se compro.
+    # Rellenarlo con cero diria que es gratis, que es distinto de no saberlo.
+    costo_unitario = models.DecimalField(
+        max_digits=14, decimal_places=4, null=True, blank=True
+    )
+    compra = models.ForeignKey(
+        "campo.Compra",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimientos",
+    )
+    cantidad = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    serie = models.CharField(max_length=128, blank=True, default="")
+    estado = models.CharField(max_length=20, choices=ESTADOS, default=ACEPTADO)
+    motivo = models.TextField(
+        blank=True,
+        default="",
+        help_text="Por que quedo en descuadre o conflicto, en palabras.",
+    )
+    motivo_tecnico = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "Lo que escribio el tecnico al usar mas de lo habitual. Es suyo y "
+            "no se mezcla con `motivo`, que lo escribe el servidor: cuando hay "
+            "que reconstruir que paso, importa quien dijo cada cosa."
+        ),
+    )
+    idempotency_key = models.CharField(max_length=128, db_index=True)
+    ocurrido_en = models.DateTimeField(
+        default=timezone.now,
+        help_text=(
+            "Cuando paso en la calle, segun el telefono. No es created_at: un "
+            "movimiento sin senal puede llegar horas despues, y el orden del "
+            "consumo importa para explicar un saldo."
+        ),
+    )
+    datos = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "campo_movimiento_material"
+        ordering = ["ocurrido_en", "created_at"]
+        constraints = [
+            # El reenvio de una cola offline no puede duplicar un consumo.
+            models.UniqueConstraint(
+                fields=["org", "idempotency_key"],
+                name="unique_movimiento_idempotente_por_org",
+            ),
+            # Un serializado se consume una sola vez. El segundo intento entra
+            # como conflicto, no como consumo, y por eso la condicion mira el
+            # estado: los conflictos pueden repetirse, los consumos buenos no.
+            models.UniqueConstraint(
+                fields=["org", "material", "serie"],
+                condition=models.Q(serie__gt="", tipo="consumo", estado="aceptado"),
+                name="unique_serie_consumida_por_org",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_tipo_display()} {self.material.codigo} x{self.cantidad}"
+
+
+# =============================================================================
+# El cierre del ciclo: devolucion, diferencias y acta
+#
+# UNA DEVOLUCION NO CORRIGE NADA: ES UN HECHO NUEVO
+# -------------------------------------------------
+# Devolver diez conectores no edita el consumo de ayer ni lo anula. Son dos
+# cosas que pasaron, en ese orden, y las dos tienen que poder explicarse
+# despues. Por eso la devolucion entra como un MovimientoDeMaterial mas --tipo
+# `devolucion`-- y ningun movimiento anterior se toca jamas.
+#
+# Es la misma razon por la que un libro contable no se corrige con goma.
+#
+# LO QUE FALTA NO SE ESCONDE: SE NOMBRA
+# -------------------------------------
+# Cuando lo que vuelve no coincide con lo que deberia volver, la diferencia no
+# se absorbe en un ajuste silencioso. Se abre una incidencia con su motivo,
+# porque "faltan 3 conectores" y "se dañaron 3 conectores al retirarlos" son
+# hechos distintos y la empresa necesita saber cual de los dos tiene.
+# =============================================================================
+
+
+class IncidenciaDeMaterial(BaseModel):
+    """Por que lo que volvio no es lo que deberia haber vuelto.
+
+    No bloquea el cierre por existir --las cosas se pierden y se rompen-- pero
+    sin motivo escrito no se puede cerrar la jornada: una diferencia sin
+    explicacion es exactamente lo que despues nadie puede reconstruir.
+    """
+
+    PERDIDO = "perdido"
+    DANADO = "danado"
+    USADO_SIN_REGISTRAR = "usado_sin_registrar"
+    ENTREGADO_A_OTRO = "entregado_a_otro"
+    OTRO = "otro"
+    TIPOS = (
+        (PERDIDO, "Perdido"),
+        (DANADO, "Dañado"),
+        (USADO_SIN_REGISTRAR, "Utilizado y no registrado"),
+        (ENTREGADO_A_OTRO, "Entregado a otro tecnico"),
+        (OTRO, "Otro"),
+    )
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="incidencias_material"
+    )
+    profile = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="incidencias_material",
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, on_delete=models.PROTECT, related_name="incidencias"
+    )
+    acta = models.ForeignKey(
+        "campo.ActaDeDevolucion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="incidencias",
+    )
+    tipo = models.CharField(max_length=32, choices=TIPOS, default=OTRO)
+    cantidad = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    serie = models.CharField(max_length=128, blank=True, default="")
+    motivo = models.TextField(
+        help_text="En palabras. Es lo que alguien va a leer para decidir."
+    )
+    evidencia = models.ForeignKey(
+        "campo.EvidenciaTrabajo",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="incidencias_material",
+        help_text=(
+            "Preparado para cuando las evidencias se integren con materiales. "
+            "Hoy no se exige: pedir una foto de algo que se perdio hace seis "
+            "horas no la hace aparecer."
+        ),
+    )
+    idempotency_key = models.CharField(max_length=128, db_index=True)
+    ocurrido_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "campo_incidencia_material"
+        ordering = ["-ocurrido_en"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "idempotency_key"],
+                name="unique_incidencia_idempotente_por_org",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_tipo_display()}: {self.material.codigo} x{self.cantidad}"
+
+
+class TransferenciaDeMaterial(BaseModel):
+    """Material que pasa de un tecnico a otro.
+
+    EL MATERIAL NO DESAPARECE MIENTRAS NADIE LO ACEPTA
+    --------------------------------------------------
+    Entre que uno entrega y el otro acepta hay un rato --a veces una jornada--
+    y en ese rato el material tiene que seguir siendo de alguien. Si se
+    descontara al enviarla, una transferencia que el otro nunca acepta haria
+    desaparecer inventario sin que nadie responda por el.
+
+    Asi que solo la transferencia ACEPTADA mueve el saldo: descuenta de quien
+    entrega y suma a quien recibe, en el mismo instante. Pendiente y rechazada
+    no mueven nada, y la rechazada deja el material donde estaba.
+
+    Se modela ahora aunque el flujo completo venga despues: el calculo del
+    esperado a devolver ya tiene que contarla, o el primer traspaso real
+    aparecera como un faltante.
+    """
+
+    PENDIENTE = "pendiente"
+    ACEPTADA = "aceptada"
+    RECHAZADA = "rechazada"
+    ESTADOS = (
+        (PENDIENTE, "Pendiente"),
+        (ACEPTADA, "Aceptada"),
+        (RECHAZADA, "Rechazada"),
+    )
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="transferencias_material"
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, on_delete=models.PROTECT, related_name="transferencias"
+    )
+    entrega = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="transferencias_enviadas"
+    )
+    recibe = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="transferencias_recibidas"
+    )
+    cantidad = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    serie = models.CharField(max_length=128, blank=True, default="")
+    estado = models.CharField(max_length=20, choices=ESTADOS, default=PENDIENTE)
+    motivo = models.TextField(blank=True, default="")
+    idempotency_key = models.CharField(max_length=128, db_index=True)
+    resuelta_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "campo_transferencia_material"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "idempotency_key"],
+                name="unique_transferencia_idempotente_por_org",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.material.codigo} x{self.cantidad} ({self.estado})"
+
+
+class ActaDeDevolucion(BaseModel):
+    """Lo que un tecnico devolvio al terminar su jornada, y que falto.
+
+    NO ES UN RESUMEN QUE SE PUEDA RECALCULAR DESPUES
+    ------------------------------------------------
+    Mientras esta `pendiente` todo se calcula al vuelo desde los movimientos,
+    que es la regla de esta fase entera. Pero al CONFIRMARLA se congelan los
+    numeros: un acta es lo que dos personas acordaron ese dia, y si el mes que
+    viene alguien corrige un movimiento viejo, el acta no puede cambiar sola y
+    contar otra historia.
+
+    Es la unica tabla de este modulo que guarda totales, y por esa razon.
+    """
+
+    PENDIENTE = "pendiente"
+    CONFIRMADA = "confirmada"
+    ESTADOS = (
+        (PENDIENTE, "Pendiente"),
+        (CONFIRMADA, "Confirmada"),
+    )
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="actas_devolucion"
+    )
+    profile = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="actas_devolucion"
+    )
+    jornada = models.DateField(
+        default=timezone.localdate,
+        help_text="El dia de trabajo que cierra esta acta.",
+    )
+    estado = models.CharField(max_length=20, choices=ESTADOS, default=PENDIENTE)
+    recibida_por = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="actas_recibidas",
+    )
+    confirmada_en = models.DateTimeField(null=True, blank=True)
+    resumen = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Los numeros congelados al confirmar. Vacio mientras esta "
+            "pendiente: hasta entonces se calculan desde los movimientos."
+        ),
+    )
+    notas = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "campo_acta_devolucion"
+        ordering = ["-jornada"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "profile", "jornada"],
+                name="unique_acta_por_jornada",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"Acta {self.jornada} de {self.profile_id} ({self.estado})"
+
+
 class MutacionIdempotente(BaseModel):
     """Registro de control de idempotencia para mutaciones offline y reintentos móviles."""
 
@@ -503,3 +1213,31 @@ class MutacionIdempotente(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.org.name} - Key {self.idempotency_key} [{self.estado}]"
+
+
+# =============================================================================
+# EL INVENTARIO, en su propio modulo
+#
+# Los modelos de `campo/inventario.py` se importan aca para que Django los
+# registre en esta app. Viven aparte a proposito: este archivo ya es uno de los
+# monolitos que CLAUDE.md marca como superficie de conflicto alta (1.149 lineas
+# antes de esto), y el inventario es un dominio completo con su propio porque.
+#
+# El import va al FINAL y no arriba: `inventario.py` referencia
+# `campo.MaterialCatalogo` y `campo.MovimientoDeMaterial` por cadena --no por
+# clase-- justamente para no depender del orden, pero un import al principio
+# crearia un ciclo con el modulo a medio cargar.
+# =============================================================================
+
+from campo.inventario import (  # noqa: E402,F401
+    ActivoSerializado,
+    UbicacionDeActivo,
+    UbicacionInventario,
+)
+from campo.inventario_operacion import (  # noqa: E402,F401
+    Compra,
+    ConteoFisico,
+    LineaDeConteo,
+    Proveedor,
+    ReservaDeMaterial,
+)

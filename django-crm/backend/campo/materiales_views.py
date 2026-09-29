@@ -1,0 +1,521 @@
+# -*- coding: utf-8 -*-
+"""
+La API de materiales: qué llevo encima y qué gasté.
+
+DOS NIVELES DE IDEMPOTENCIA, Y HACEN FALTA LOS DOS
+--------------------------------------------------
+``@manejar_idempotencia`` protege la petición HTTP: el mismo ``Idempotency-Key``
+devuelve la respuesta guardada sin volver a ejecutar nada. Es el mecanismo que
+ya usa el resto de campo.
+
+La ``clave`` que viaja en el cuerpo protege el **hecho**: aunque la petición
+cambie de forma —otro reintento, otro lote, otra versión de la app— un consumo
+con la misma clave sigue siendo el mismo consumo. Esa es la que impide
+descontar dos veces un conector.
+
+El primero es una optimización; el segundo es la regla. Por eso el segundo vive
+en una restricción de la base y no solo en este archivo.
+
+POR QUÉ ESTE ENDPOINT CASI NUNCA DEVUELVE 400
+---------------------------------------------
+Porque lo que recibe ya pasó. Un consumo sin saldo entra con estado
+``descuadre`` y responde 201, no 400: el material ya se usó, y negarse a
+guardarlo solo borraría el único registro que existe de eso. Lo que el cliente
+recibe es **con qué estado entró**, para poder mostrarlo.
+
+Se rechaza lo que no se puede interpretar —un material que no existe, un tipo
+de movimiento inventado, una cantidad que no es número— porque ahí no hay
+ningún hecho que preservar, solo una petición mal armada.
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+from django.db import transaction
+from django.utils import timezone
+from rest_framework import serializers, status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from campo.models import (
+    ActaDeDevolucion,
+    IncidenciaDeMaterial,
+    MaterialCatalogo,
+    MovimientoDeMaterial,
+    OrdenTrabajo,
+)
+from campo.permissions import IsCampoAuthenticated
+from campo.services.cierre_jornada import (
+    CierreBloqueado,
+    confirmar_acta,
+    motivos_para_no_cerrar,
+    registrar_incidencia,
+    resumen_de_jornada,
+    series_sin_devolver,
+    transferencias_abiertas,
+)
+from campo.services.idempotencia import manejar_idempotencia
+from campo.services import lazo_isp
+from campo.services.materiales import (
+    ConsumoInvalido,
+    kit_de,
+    materiales_sin_cuadrar,
+    regla_para,
+    registrar_movimiento,
+)
+
+
+def _numero(valor: Decimal) -> str:
+    """Un decimal como texto, sin ceros de más.
+
+    Va como texto y no como float a propósito: 42.5 metros de fibra en coma
+    flotante deja de ser 42.5 en cuanto alguien suma, y un saldo que no cuadra
+    por milésimas es indistinguible de un descuadre real.
+    """
+    return format(valor.normalize(), "f") if valor is not None else "0"
+
+
+class MovimientoEntradaSerializer(serializers.Serializer):
+    """Lo que el teléfono manda por cada movimiento."""
+
+    clave = serializers.CharField(max_length=128)
+    material = serializers.CharField(
+        max_length=64, help_text="El código del material, no su id interno."
+    )
+    tipo = serializers.ChoiceField(
+        choices=[t[0] for t in MovimientoDeMaterial.TIPOS],
+        default=MovimientoDeMaterial.CONSUMO,
+    )
+    cantidad = serializers.DecimalField(max_digits=12, decimal_places=3)
+    serie = serializers.CharField(
+        max_length=128, required=False, allow_blank=True, default=""
+    )
+    orden_id = serializers.UUIDField(required=False, allow_null=True)
+    ocurrido_en = serializers.DateTimeField(
+        required=False,
+        allow_null=True,
+        help_text=(
+            "Cuándo pasó en la calle, según el reloj del teléfono. Si no "
+            "viene, se usa la hora de llegada, que para un movimiento offline "
+            "es una mentira piadosa: mejor que el cliente la mande."
+        ),
+    )
+    motivo = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text=(
+            "Lo que escribe el tecnico cuando usa mas de lo habitual. Se "
+            "guarda aparte del motivo que escribe el servidor: cuando hay que "
+            "reconstruir que paso, importa quien dijo cada cosa."
+        ),
+    )
+    datos = serializers.JSONField(required=False, default=dict)
+
+    def validate_cantidad(self, valor):
+        # Una cantidad negativa no es un error de saldo sino de forma: para
+        # devolver está el tipo `devolucion`, que es explícito y se puede leer
+        # en un listado sin tener que interpretar el signo.
+        if valor <= 0:
+            raise serializers.ValidationError(
+                "La cantidad tiene que ser mayor que cero. Para devolver "
+                "material, usá el tipo 'devolucion'."
+            )
+        return valor
+
+
+class KitView(APIView):
+    """``GET /api/campo/kit/`` — lo que este técnico tiene a cargo."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        profile = request.profile
+        org = profile.org
+
+        materiales = []
+        for fila in kit_de(profile, org):
+            material = fila["material"]
+            # La regla viaja con el material para que la app pueda avisar
+            # ANTES de registrar, sin señal y sin preguntarle al servidor.
+            # Sin esto el aviso solo llegaria al sincronizar, horas despues,
+            # cuando ya no sirve para nada.
+            regla = regla_para(org=org, material=material, orden=None)
+            materiales.append({
+                "codigo": material.codigo,
+                "nombre": material.nombre,
+                "categoria": material.categoria,
+                "clase": material.clase,
+                "unidad": material.unidad,
+                "regla": None if regla is None else {
+                    "cantidad_habitual": (
+                        _numero(regla.cantidad_habitual)
+                        if regla.cantidad_habitual is not None else None
+                    ),
+                    "maximo": (
+                        _numero(regla.maximo) if regla.maximo is not None else None
+                    ),
+                    "exige_motivo": regla.exige_motivo_sobre_habitual,
+                    "bloquea": regla.bloquea_sobre_maximo,
+                },
+                "recibido": _numero(fila["recibido"]),
+                "consumido": _numero(fila["consumido"]),
+                "devuelto": _numero(fila["devuelto"]),
+                "disponible": _numero(fila["disponible"]),
+                "series": fila["series"],
+                "acta": fila["acta"],
+                "entregado_en": (
+                    fila["entregado_en"].isoformat() if fila["entregado_en"] else None
+                ),
+            })
+
+        sin_cuadrar = [
+            {
+                "id": str(m.id),
+                "material": m.material.codigo,
+                "tipo": m.tipo,
+                "cantidad": _numero(m.cantidad),
+                "serie": m.serie,
+                "estado": m.estado,
+                "motivo": m.motivo,
+                "orden_numero": m.orden.numero if m.orden else None,
+                "ocurrido_en": m.ocurrido_en.isoformat(),
+            }
+            for m in materiales_sin_cuadrar(profile, org)
+        ]
+
+        return Response({
+            "materiales": materiales,
+            # Se entrega junto con el kit y no en otro endpoint porque es la
+            # misma pregunta: "¿cómo voy?". Separarlo obligaría a la app a
+            # pedir dos veces para poder responderla.
+            "sin_cuadrar": sin_cuadrar,
+            "server_time": timezone.now().isoformat(),
+        })
+
+
+class MovimientosMaterialView(APIView):
+    """``POST /api/campo/materiales/movimientos/`` — registrar lo que se gastó.
+
+    Acepta uno o varios movimientos en la misma petición. Un lote no es un
+    capricho: una cuadrilla sin señal acumula varios y los manda todos juntos
+    al reconectar, y hacerlo de a uno multiplica los viajes justo cuando la
+    conexión es peor.
+
+    Cada movimiento se resuelve por separado y trae su propio resultado: que
+    uno quede en descuadre no invalida a los demás.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request):
+        profile = request.profile
+        org = profile.org
+
+        crudos = request.data.get("movimientos")
+        if crudos is None:
+            crudos = [request.data]
+        if not isinstance(crudos, list):
+            return Response(
+                {"error": "FORMATO_INVALIDO",
+                 "detalle": "Se esperaba un movimiento o una lista."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = MovimientoEntradaSerializer(data=crudos, many=True)
+        serializer.is_valid(raise_exception=True)
+
+        codigos = {d["material"] for d in serializer.validated_data}
+        catalogo = {
+            m.codigo: m
+            for m in MaterialCatalogo.objects.filter(org=org, codigo__in=codigos)
+        }
+        desconocidos = sorted(codigos - set(catalogo))
+        if desconocidos:
+            # Acá sí se rechaza: no hay hecho que preservar si no se sabe de
+            # qué material habla. Y se nombran todos de una vez, para que la
+            # app no descubra el siguiente en el reintento.
+            return Response(
+                {
+                    "error": "MATERIAL_DESCONOCIDO",
+                    "detalle": (
+                        "Estos códigos no están en el catálogo de la empresa: "
+                        + ", ".join(desconocidos)
+                    ),
+                    "codigos": desconocidos,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        resultados = []
+        with transaction.atomic():
+            for datos in serializer.validated_data:
+                orden = None
+                orden_id = datos.get("orden_id")
+                if orden_id:
+                    # Una orden de otra organización no existe para este
+                    # técnico: el movimiento entra igual, sin atar, en vez de
+                    # fallar entero. El material se gastó de todos modos.
+                    orden = OrdenTrabajo.objects.filter(
+                        id=orden_id, org=org
+                    ).first()
+
+                try:
+                    movimiento, era_nuevo = registrar_movimiento(
+                        org=org,
+                        profile=profile,
+                        material=catalogo[datos["material"]],
+                        tipo=datos["tipo"],
+                        cantidad=datos["cantidad"],
+                        idempotency_key=datos["clave"],
+                        serie=datos.get("serie") or "",
+                        orden=orden,
+                        ocurrido_en=datos.get("ocurrido_en"),
+                        motivo_tecnico=datos.get("motivo") or "",
+                        datos=datos.get("datos") or {},
+                    )
+                except ConsumoInvalido as e:
+                    # No se puede interpretar como un hecho: un consumo que no
+                    # dice en que trabajo, un equipo sin su numero, o una
+                    # cantidad que la empresa decidio no aceptar.
+                    #
+                    # El lote NO se cae por esto: el resto son hechos que si
+                    # se pueden guardar, y tirarlos castigaria una jornada
+                    # entera por una linea mal armada.
+                    resultados.append({
+                        "clave": datos["clave"],
+                        "id": None,
+                        "estado": "rechazado",
+                        "motivo": str(e),
+                        "cantidad": _numero(datos["cantidad"]),
+                        "duplicado": False,
+                    })
+                    continue
+
+                # EL SERIAL INSTALADO VUELVE AL ISP, y va DESPUES de guardar.
+                #
+                # Guardar primero, avisar despues -- invariante congelado del
+                # proyecto. Si esto se hiciera antes, un fallo de red dejaria el
+                # consumo sin registrar y el material perdido del inventario: un
+                # problema de red convertido en un problema de datos.
+                #
+                # Y nunca revierte: la serie salio de la custodia del tecnico
+                # (hecho) y el ISP la tiene registrada (otro hecho) son dos cosas
+                # distintas, y el segundo puede fallar sin que el primero deje de
+                # ser cierto. Es el mismo patron que ACCION_CONFIRMADA.
+                #
+                # Solo para movimientos NUEVOS: un reenvio de la cola offline no
+                # vuelve a salir a la red. `intentar_avisar` ademas lo reconoceria
+                # por su Idempotency-Key, pero no llamar es mas barato que llamar
+                # y que el otro lado lo descarte.
+                aviso = None
+                if era_nuevo:
+                    aviso = lazo_isp.intentar_avisar(movimiento)
+
+                resultados.append({
+                    "clave": datos["clave"],
+                    "id": str(movimiento.id),
+                    "estado": movimiento.estado,
+                    "motivo": movimiento.motivo,
+                    "avisos": movimiento.datos.get("avisos", []),
+                    "cantidad": _numero(movimiento.cantidad),
+                    "duplicado": not era_nuevo,
+                    # El desenlace viaja a la app para que quien instalo pueda
+                    # ver que el ISP quedo al tanto -- o que no, y por que. Un
+                    # 201 mudo sobre un aviso que no salio es exactamente
+                    # esconder lo que hay que mirar.
+                    "aviso_al_isp": None if aviso is None else {
+                        "estado": aviso.estado, "detalle": aviso.detalle,
+                    },
+                })
+
+        return Response(
+            {
+                "resultados": resultados,
+                "server_time": timezone.now().isoformat(),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class IncidenciaEntradaSerializer(serializers.Serializer):
+    """Una diferencia de inventario, con su explicación."""
+
+    clave = serializers.CharField(max_length=128)
+    material = serializers.CharField(max_length=64)
+    tipo = serializers.ChoiceField(
+        choices=[t[0] for t in IncidenciaDeMaterial.TIPOS]
+    )
+    cantidad = serializers.DecimalField(max_digits=12, decimal_places=3)
+    serie = serializers.CharField(
+        max_length=128, required=False, allow_blank=True, default=""
+    )
+    # Se acepta vacio aca y lo rechaza el servicio, por linea. Si lo
+    # rechazara el serializador, una incidencia sin motivo tiraria el lote
+    # entero y con el las demas, que si estaban bien explicadas.
+    motivo = serializers.CharField(allow_blank=True, default="")
+    ocurrido_en = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class IncidenciasMaterialView(APIView):
+    """``POST /api/campo/materiales/incidencias/`` — por qué falta material.
+
+    Va por su propio endpoint y no por el de movimientos porque no es un
+    movimiento: no mueve material de un lado a otro, explica por qué algo no
+    está. Mezclarlos obligaría a que cada consumidor del listado supiera
+    distinguir dos cosas distintas dentro de la misma tabla.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request):
+        profile = request.profile
+        org = profile.org
+
+        crudas = request.data.get("incidencias")
+        if crudas is None:
+            crudas = [request.data]
+        serializer = IncidenciaEntradaSerializer(data=crudas, many=True)
+        serializer.is_valid(raise_exception=True)
+
+        codigos = {d["material"] for d in serializer.validated_data}
+        catalogo = {
+            m.codigo: m
+            for m in MaterialCatalogo.objects.filter(org=org, codigo__in=codigos)
+        }
+        desconocidos = sorted(codigos - set(catalogo))
+        if desconocidos:
+            return Response(
+                {"error": "MATERIAL_DESCONOCIDO", "codigos": desconocidos},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        resultados = []
+        for datos in serializer.validated_data:
+            try:
+                incidencia, era_nueva = registrar_incidencia(
+                    org=org,
+                    profile=profile,
+                    material=catalogo[datos["material"]],
+                    tipo=datos["tipo"],
+                    cantidad=datos["cantidad"],
+                    motivo=datos["motivo"],
+                    serie=datos.get("serie") or "",
+                    idempotency_key=datos["clave"],
+                    ocurrido_en=datos.get("ocurrido_en"),
+                )
+            except CierreBloqueado as e:
+                resultados.append({
+                    "clave": datos["clave"],
+                    "id": None,
+                    "estado": "rechazada",
+                    "motivo": str(e),
+                })
+                continue
+
+            resultados.append({
+                "clave": datos["clave"],
+                "id": str(incidencia.id),
+                "estado": "registrada",
+                "duplicada": not era_nueva,
+            })
+
+        return Response(
+            {"resultados": resultados, "server_time": timezone.now().isoformat()},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class JornadaView(APIView):
+    """``GET /api/campo/jornada/`` — cómo va el día y qué falta para cerrarlo."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        profile = request.profile
+        org = profile.org
+
+        acta = ActaDeDevolucion.objects.filter(
+            org=org, profile=profile, jornada=timezone.localdate()
+        ).first()
+
+        # Si el acta ya está confirmada se devuelve lo que se congeló, no un
+        # cálculo nuevo: el acta es lo que se acordó ese día, y recalcularla
+        # la haría contar otra historia si algo cambió después.
+        if acta is not None and acta.estado == ActaDeDevolucion.CONFIRMADA:
+            return Response({
+                "estado": acta.estado,
+                "resumen": acta.resumen,
+                "puede_cerrar": False,
+                "motivos": [],
+                "confirmada_en": acta.confirmada_en.isoformat(),
+            })
+
+        motivos = motivos_para_no_cerrar(profile, org)
+        return Response({
+            "estado": ActaDeDevolucion.PENDIENTE,
+            "resumen": resumen_de_jornada(profile, org),
+            "series_sin_devolver": series_sin_devolver(profile, org),
+            # Se listan porque explican un saldo que no baja: el material
+            # sigue siendo de quien lo entrego hasta que el otro acepte.
+            "transferencias_pendientes": [
+                {
+                    "id": str(t.id),
+                    "material": t.material.codigo,
+                    "material_nombre": t.material.nombre,
+                    "cantidad": _numero(t.cantidad),
+                    "serie": t.serie,
+                    "recibe": (
+                        t.recibe.user.name or t.recibe.user.email
+                        if t.recibe.user else ""
+                    ),
+                }
+                for t in transferencias_abiertas(profile, org)
+            ],
+            "puede_cerrar": not motivos,
+            "motivos": motivos,
+        })
+
+
+class CerrarJornadaView(APIView):
+    """``POST /api/campo/jornada/cerrar/`` — afirmar que la jornada terminó.
+
+    Es lo único de este módulo que puede negarse por el estado de las cosas.
+    Registrar hechos nunca se bloquea; afirmar que todo cuadra, sí: es una
+    declaración sobre el mundo, y no se puede hacer mientras la jornada se
+    contradiga a sí misma.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request):
+        profile = request.profile
+        org = profile.org
+
+        try:
+            acta, era_nueva = confirmar_acta(
+                org=org, profile=profile, notas=request.data.get("notas", "") or ""
+            )
+        except CierreBloqueado as e:
+            return Response(
+                {
+                    "error": "JORNADA_INCOMPLETA",
+                    "detalle": str(e),
+                    "motivos": motivos_para_no_cerrar(profile, org),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        return Response(
+            {
+                "acta_id": str(acta.id),
+                "estado": acta.estado,
+                "resumen": acta.resumen,
+                "duplicada": not era_nueva,
+            },
+            status=status.HTTP_201_CREATED,
+        )

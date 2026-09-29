@@ -3,8 +3,14 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import uuid
+from datetime import datetime
+
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.http import Http404
 from django.utils import timezone
 from rest_framework import status
@@ -22,6 +28,11 @@ from campo.serializers import (
     RegistroEvidenciaSerializer,
 )
 from campo.services.idempotencia import manejar_idempotencia
+from campo.services.telemetria import (
+    TANDAS,
+    SinServicioParaPing,
+    probar_conexion,
+)
 from campo.services.storage import CampoStorage
 from campo.services.transiciones import TransicionInvalidaError, completar_campo, ejecutar_accion_operativa
 from campo.services.validador import validar_campos_tecnicos, verificar_checklist_completo
@@ -84,6 +95,49 @@ class BootstrapView(APIView):
         })
 
 
+#: Cuantas ordenes se entregan por pagina si el cliente no pide otra cosa.
+LIMITE_POR_DEFECTO = 100
+
+#: Techo duro. Una cuadrilla con mil ordenes no puede pedirlas todas de una:
+#: la respuesta no entra en memoria del telefono y el tiempo de espera hace
+#: que la sincronizacion se reintente encima de si misma.
+LIMITE_MAXIMO = 200
+
+
+def _limite_pedido(request) -> int:
+    """Cuantas filas pidio el cliente, acotado."""
+    crudo = request.query_params.get("limite")
+    if not crudo:
+        return LIMITE_POR_DEFECTO
+    try:
+        pedido = int(crudo)
+    except (TypeError, ValueError):
+        return LIMITE_POR_DEFECTO
+    return max(1, min(pedido, LIMITE_MAXIMO))
+
+
+def _escribir_cursor(orden) -> str:
+    """
+    Donde quedo la pagina: fecha de creacion e identificador.
+
+    Van los dos porque el orden es por fecha y la fecha se repite. Con solo la
+    fecha, dos ordenes del mismo milisegundo se pisan entre paginas.
+    """
+    crudo = f"{orden.created_at.isoformat()}|{orden.id}"
+    return base64.urlsafe_b64encode(crudo.encode("utf-8")).decode("ascii")
+
+
+def _leer_cursor(cursor: str):
+    """El corte que representa el cursor, o None si viene roto."""
+    try:
+        crudo = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        fecha_texto, ident = crudo.split("|", 1)
+        fecha = datetime.fromisoformat(fecha_texto)
+        return fecha, uuid.UUID(ident)
+    except (ValueError, TypeError, binascii.Error, UnicodeDecodeError):
+        return None
+
+
 class TrabajosListView(APIView):
     """Listado de órdenes de trabajo disponibles para el técnico o supervisor."""
 
@@ -110,8 +164,38 @@ class TrabajosListView(APIView):
             estados = [e.strip() for e in estado.split(",") if e.strip()]
             qs = qs.filter(estado_operativo__in=estados)
 
-        serializer = OrdenTrabajoListSerializer(qs.distinct()[:100], many=True)
-        return Response({"results": serializer.data, "next_cursor": None})
+        # Orden estable: sin un desempate, dos ordenes creadas en el mismo
+        # milisegundo pueden intercambiarse entre paginas y una se pierde.
+        qs = qs.distinct().order_by("-created_at", "-id")
+
+        limite = _limite_pedido(request)
+        cursor = request.query_params.get("cursor")
+        if cursor:
+            corte = _leer_cursor(cursor)
+            if corte is None:
+                return Response(
+                    {"detail": "El cursor no es valido."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            creada_en, ident = corte
+            qs = qs.filter(
+                Q(created_at__lt=creada_en)
+                | Q(created_at=creada_en, id__lt=ident)
+            )
+
+        # Se pide una fila de mas: es como se sabe si hay pagina siguiente sin
+        # contar la tabla entera.
+        filas = list(qs[: limite + 1])
+        hay_mas = len(filas) > limite
+        filas = filas[:limite]
+
+        serializer = OrdenTrabajoListSerializer(filas, many=True)
+        return Response(
+            {
+                "results": serializer.data,
+                "next_cursor": _escribir_cursor(filas[-1]) if hay_mas and filas else None,
+            }
+        )
 
 
 class TrabajoDetailView(APIView):
@@ -588,5 +672,79 @@ class CompletarTrabajoView(APIView):
             "estado_operativo": orden.estado_operativo,
             "revision": orden.revision,
             "completada_campo_en": orden.completada_campo_en.isoformat(),
+            "server_time": timezone.now().isoformat(),
+        })
+
+
+class ProbarConexionView(APIView):
+    """
+    Un ping en vivo al equipo del cliente, pedido desde el terreno.
+
+    ES DEL TECNICO, a diferencia del refresco de ficha: el que la pide es el
+    que esta parado en la casa despues de mover un conector, y la respuesta
+    solo le sirve en ese momento.
+
+    SIN SEÑAL SE RECHAZA, NUNCA SE ENCOLA. Es el mismo criterio que
+    RefrescarFichaView dejo escrito para lo suyo, y aca aprieta mas: un ping
+    encolado se ejecutaria cuando el tecnico ya se fue, midiendo un momento
+    que a nadie le importa y con cara de respuesta a lo que pregunto. La
+    aplicacion no lo mete en la cola; si no hay conexion, lo dice.
+
+    TRES RESPUESTAS, NO DOS
+    -----------------------
+      200 medido=true      se pregunto y contesto -- con el conteo crudo
+      200 medido=false     no se pudo preguntar, con el motivo
+      409                  la orden no tiene servicio identificado: no hay a
+                           que equipo pingear
+
+    'no se pudo medir' y 'se midio y no respondio' son cosas distintas y la
+    diferencia es el punto entero de este endpoint. La primera se reintenta;
+    la segunda es un dato sobre el equipo del cliente.
+
+    Y lo que devuelve NO es un veredicto. Esta medido dos veces en este
+    proyecto que el mismo equipo sano da '1 de 3', '2 de 3' y '3 de 3' en
+    corridas seguidas: el conteo viaja crudo, y quien decide que significa es
+    la persona que esta ahi.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+
+        # Cuantos paquetes pide ESTA llamada. La app manda tandas para ir
+        # mostrandolas; el minimo que WispHub acepta es 3, medido (1 y 2 dan
+        # 400), asi que se acota en vez de confiar en lo que llegue.
+        try:
+            pedidos = int(request.data.get("paquetes") or max(TANDAS))
+        except (TypeError, ValueError):
+            pedidos = max(TANDAS)
+        pedidos = max(3, min(pedidos, 10))
+
+        try:
+            resultado = probar_conexion(orden, paquetes=pedidos)
+        except SinServicioParaPing as e:
+            return Response(
+                {"error": "SIN_SERVICIO", "detalle": str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        if not resultado["ok"]:
+            # 200 y no 5xx: la peticion al CRM se proceso bien, y "no se pudo
+            # medir" es un dato sobre el intento, no un error del servidor.
+            # Mandarlo como 5xx haria que la app dijera "algo salio mal" en
+            # vez del motivo, que es justo la distincion que cuida el modulo.
+            return Response({
+                "medido": False,
+                "motivo": resultado["motivo"],
+                "server_time": timezone.now().isoformat(),
+            })
+
+        return Response({
+            "medido": True,
+            "respondieron": resultado["respondieron"],
+            # Uno por uno, no un promedio: la pantalla los lista y quien mira
+            # ve DONDE se cayo, no solo cuantos volvieron.
+            "paquetes": resultado["paquetes"],
             "server_time": timezone.now().isoformat(),
         })
