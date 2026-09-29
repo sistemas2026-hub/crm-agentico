@@ -33,6 +33,8 @@ import {
   leerMateriales,
   crearMaterial,
   editarMaterial,
+  subirImagenMaterial,
+  quitarImagenMaterial,
 } from '$lib/server/v2/inventario.js';
 
 /**
@@ -414,6 +416,26 @@ export const actions = {
           ? `El material ${r?.codigo} quedó actualizado.`
           : `El material ${r?.codigo} quedó dado de alta.`
       };
+    } catch (e) {
+      return fail(409, { error: mensajeDe(e) });
+    }
+  },
+
+  materialImagen: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const id = String(f.get('material_id') ?? '').trim();
+    const archivo = f.get('imagen');
+    try {
+      if (!archivo || typeof archivo === 'string' || archivo.size === 0) {
+        // Sin archivo, el botón es el de quitar: el mismo formulario sirve para
+        // las dos cosas y así no hay dos rutas para una foto.
+        await quitarImagenMaterial({ cookies }, id);
+        return { hecho: 'La foto se quitó. El material queda como estaba.' };
+      }
+      const datos = new FormData();
+      datos.append('imagen', archivo);
+      await subirImagenMaterial({ cookies }, id, datos);
+      return { hecho: 'La foto quedó guardada.' };
     } catch (e) {
       return fail(409, { error: mensajeDe(e) });
     }

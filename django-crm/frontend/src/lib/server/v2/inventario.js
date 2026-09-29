@@ -392,3 +392,29 @@ export async function editarMaterial(ctx, id, cuerpo) {
   return apiRequest(`/campo/inventario/materiales/${id}/`,
     { method: 'PATCH', body: cuerpo }, ctx);
 }
+
+/**
+ * Pone o reemplaza la foto de un material.
+ *
+ * `apiRequest` reconoce el FormData y deja que fetch ponga el boundary: por eso
+ * el cuerpo va como FormData y no como objeto.
+ *
+ * @param {{cookies: any}} ctx
+ * @param {string} id
+ * @param {FormData} datos
+ */
+export async function subirImagenMaterial(ctx, id, datos) {
+  return apiRequest(`/campo/inventario/materiales/${id}/imagen/`,
+    { method: 'POST', body: datos }, ctx);
+}
+
+/**
+ * Quita la foto. El material queda.
+ *
+ * @param {{cookies: any}} ctx
+ * @param {string} id
+ */
+export async function quitarImagenMaterial(ctx, id) {
+  return apiRequest(`/campo/inventario/materiales/${id}/imagen/`,
+    { method: 'DELETE' }, ctx);
+}

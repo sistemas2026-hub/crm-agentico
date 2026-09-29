@@ -28,6 +28,9 @@
   let lineas = $state([{ n: 1, material: '', cantidad: '' }]);
   let siguiente = 2;
   let abierto = $state(false);
+  /** Qué plantilla está preguntando «¿seguro?». Misma razón que en Materiales:
+   *  dar de baja con un solo clic se hace sin querer. */
+  let confirmando = $state('');
 
   function nueva() {
     editando = '';
@@ -149,16 +152,39 @@
             >
               Editar
             </button>
-            <form method="POST" action="?/plantillaBaja" use:enhance>
-              <input type="hidden" name="plantilla" value={p.id} />
+            {#if confirmando === p.id}
+              <div class="flex items-center gap-space-xs">
+                <span class="font-body-sm text-body-sm text-secondary">¿Darla de baja?</span>
+                <form method="POST" action="?/plantillaBaja" use:enhance={() => {
+                  confirmando = '';
+                  return async ({ update }) => await update();
+                }}>
+                  <input type="hidden" name="plantilla" value={p.id} />
+                  <button
+                    type="submit"
+                    class="h-8 px-space-md bg-error text-on-error rounded font-body-sm text-body-sm font-medium shadow-sm transition-colors"
+                  >
+                    Sí
+                  </button>
+                </form>
+                <button
+                  type="button"
+                  onclick={() => (confirmando = '')}
+                  class="h-8 px-space-md bg-surface-container-lowest hover:bg-surface-container text-on-surface rounded font-body-sm text-body-sm font-medium shadow-sm transition-colors"
+                >
+                  No
+                </button>
+              </div>
+            {:else}
               <button
-                type="submit"
+                type="button"
+                onclick={() => (confirmando = p.id)}
                 class="h-8 px-space-md bg-surface-container-lowest hover:bg-error-container/30 text-secondary hover:text-error rounded font-body-sm text-body-sm font-medium shadow-sm transition-colors"
                 title="Deja de ofrecerse. No se borra: sigue explicando los despachos que la usaron"
               >
                 Dar de baja
               </button>
-            </form>
+            {/if}
           </div>
         </div>
       {/each}

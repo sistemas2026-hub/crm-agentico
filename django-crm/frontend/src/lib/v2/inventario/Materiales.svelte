@@ -36,6 +36,16 @@
   /** Del material que se está editando: de esto dependen los bloqueos. */
   let conMovimientos = $state(false);
   let verBajas = $state(false);
+  /**
+   * Qué fila está preguntando «¿seguro?».
+   *
+   * Dar de baja cambia lo que la empresa puede despachar mañana, y estaba
+   * ocurriendo con un solo clic -- sin aviso y sin poder volver atrás en el
+   * momento. La confirmación va EN LÍNEA y no en un `confirm()` del navegador:
+   * así se lee qué material es y qué implica, que es lo que falta cuando uno
+   * aprieta sin querer.
+   */
+  let confirmando = $state('');
 
   const CLASES = [
     { id: 'consumible', texto: 'Consumible', ayuda: 'Se cuenta en unidades enteras. Un conector y medio no existe.' },
@@ -70,6 +80,29 @@
   }
 
   const MOTIVO = 'Este campo no puede modificarse porque el material ya tiene movimientos registrados.';
+
+  /** Con qué se dibuja un material que todavía no tiene foto. */
+  const ICONO_CLASE = {
+    consumible: 'join_inner',
+    bobina: 'cable',
+    serializado: 'router',
+    terminal: 'settings_input_antenna'
+  };
+
+  /** El material que se está editando, para poder mostrar y cambiar su foto. */
+  let enEdicion = $derived((catalogo ?? []).find((m) => m.id === editando) ?? null);
+
+  /**
+   * Dónde pedir la foto de un material.
+   *
+   * Pasa por `/api` del propio CRM y no por `/media/` del backend: ese prefijo
+   * solo existe en desarrollo, y una foto del catálogo es un dato de la empresa
+   * que tiene que viajar con la sesión como todo lo demás.
+   * @param {any} m
+   */
+  function fotoDe(m) {
+    return m?.tiene_imagen ? `/api/inventario/material-imagen/${m.id}` : '';
+  }
 
   let ayudaClase = $derived(CLASES.find((c) => c.id === clase)?.ayuda ?? '');
 </script>
@@ -141,6 +174,7 @@
       <table class="w-full text-left">
         <thead>
           <tr class="bg-surface-container-low text-secondary font-table-header text-table-header uppercase">
+            <th class="py-2.5 px-space-lg w-16"></th>
             <th class="py-2.5 px-space-lg w-44">Código</th>
             <th class="py-2.5 px-space-lg">Material</th>
             <th class="py-2.5 px-space-lg w-32">Clase</th>
@@ -152,7 +186,7 @@
         <tbody>
           {#if mostrados.length === 0}
             <tr>
-              <td colspan="6" class="py-space-lg px-space-lg font-body-md text-body-md text-secondary">
+              <td colspan="7" class="py-space-lg px-space-lg font-body-md text-body-md text-secondary">
                 Todavía no hay materiales en el catálogo. Hasta que exista al menos uno no
                 se puede registrar una entrada ni despachar nada: los formularios eligen
                 de acá.
@@ -165,6 +199,30 @@
                 ? 'hover:bg-surface-container-low/40'
                 : 'bg-surface-container-low/40'}"
             >
+              <td class="py-space-md px-space-lg">
+                <!--
+                  La foto, para reconocer el material de un vistazo. Cuando no
+                  hay, un recuadro con el icono de su clase: un hueco vacío se
+                  lee como que la imagen no cargó.
+                -->
+                {#if m.tiene_imagen}
+                  <img
+                    src={fotoDe(m)}
+                    alt={m.nombre}
+                    class="w-10 h-10 rounded object-cover bg-surface-container"
+                    loading="lazy"
+                  />
+                {:else}
+                  <div
+                    class="w-10 h-10 rounded bg-surface-container flex items-center justify-center text-secondary"
+                    title="Sin foto"
+                  >
+                    <span class="material-symbols-outlined text-[18px]">
+                      {ICONO_CLASE[m.clase] ?? 'inventory_2'}
+                    </span>
+                  </div>
+                {/if}
+              </td>
               <td class="py-space-md px-space-lg font-label-code text-label-code font-semibold {m.activo ? 'text-on-surface' : 'text-secondary'}">
                 {m.codigo}
               </td>
@@ -210,21 +268,53 @@
                   >
                     Editar
                   </button>
-                  <form method="POST" action="?/materialEstado" use:enhance>
-                    <input type="hidden" name="material_id" value={m.id} />
-                    <input type="hidden" name="activo" value={m.activo ? 'false' : 'true'} />
+                  {#if !m.activo}
+                    <!-- Reactivar no pregunta: devuelve algo, no lo saca. -->
+                    <form method="POST" action="?/materialEstado" use:enhance>
+                      <input type="hidden" name="material_id" value={m.id} />
+                      <input type="hidden" name="activo" value="true" />
+                      <button
+                        type="submit"
+                        class="h-8 px-space-md bg-surface-container-lowest rounded font-body-sm text-body-sm font-medium shadow-sm transition-colors text-primary hover:bg-primary-fixed/40"
+                        title="Vuelve a ofrecerse en las operaciones"
+                      >
+                        Reactivar
+                      </button>
+                    </form>
+                  {:else if confirmando === m.id}
+                    <div class="flex items-center gap-space-xs">
+                      <span class="font-body-sm text-body-sm text-secondary">¿Darlo de baja?</span>
+                      <form method="POST" action="?/materialEstado" use:enhance={() => {
+                        confirmando = '';
+                        return async ({ update }) => await update();
+                      }}>
+                        <input type="hidden" name="material_id" value={m.id} />
+                        <input type="hidden" name="activo" value="false" />
+                        <button
+                          type="submit"
+                          class="h-8 px-space-md bg-error text-on-error rounded font-body-sm text-body-sm font-medium shadow-sm transition-colors"
+                        >
+                          Sí, darlo de baja
+                        </button>
+                      </form>
+                      <button
+                        type="button"
+                        onclick={() => (confirmando = '')}
+                        class="h-8 px-space-md bg-surface-container-lowest hover:bg-surface-container text-on-surface rounded font-body-sm text-body-sm font-medium shadow-sm transition-colors"
+                      >
+                        No
+                      </button>
+                    </div>
+                  {:else}
                     <button
-                      type="submit"
-                      class="h-8 px-space-md bg-surface-container-lowest rounded font-body-sm text-body-sm font-medium shadow-sm transition-colors {m.activo
-                        ? 'text-secondary hover:text-error hover:bg-error-container/30'
-                        : 'text-primary hover:bg-primary-fixed/40'}"
-                      title={m.activo
-                        ? 'Deja de ofrecerse en operaciones nuevas. No se borra: sigue explicando los movimientos que lo usaron'
-                        : 'Vuelve a ofrecerse en las operaciones'}
+                      type="button"
+                      onclick={() => (confirmando = m.id)}
+                      class="h-8 px-space-md bg-surface-container-lowest rounded font-body-sm text-body-sm font-medium shadow-sm transition-colors text-secondary hover:text-error hover:bg-error-container/30"
+                      title="Deja de ofrecerse en operaciones nuevas. No se borra: sigue explicando los movimientos que lo usaron"
                     >
-                      {m.activo ? 'Dar de baja' : 'Reactivar'}
+                      Dar de baja
                     </button>
-                  </form>
+                  {/if}
                 </div>
               </td>
             </tr>
@@ -414,5 +504,86 @@
         </button>
       </div>
     </form>
+
+    <!--
+      LA FOTO VA EN SU PROPIO FORMULARIO, y no es capricho: una subida es
+      multipart y el resto de la edición es JSON. Mezclarlas obligaría a que
+      cambiar un nombre viajara como multipart. Y un `<form>` dentro de otro no
+      es HTML válido, así que va después.
+
+      Solo aparece al editar: para poner la foto hace falta que el material ya
+      exista --su identificador es parte de la clave del archivo--.
+    -->
+    {#if editando}
+      <form
+        method="POST"
+        action="?/materialImagen"
+        enctype="multipart/form-data"
+        use:enhance
+        class="bg-surface-container-lowest rounded-xl shadow-sm p-space-lg flex flex-col gap-space-md max-w-[520px] mt-space-lg"
+      >
+        <input type="hidden" name="material_id" value={editando} />
+
+        <div class="flex items-center gap-space-xs">
+          <span class="material-symbols-outlined text-primary text-[20px]">photo_camera</span>
+          <h3 class="font-headline-sm text-body-md text-on-surface font-semibold">
+            Foto del material
+          </h3>
+        </div>
+
+        <div class="flex items-start gap-space-md">
+          {#if enEdicion?.tiene_imagen}
+            <img
+              src={fotoDe(enEdicion)}
+              alt={enEdicion.nombre}
+              class="w-24 h-24 rounded-lg object-cover bg-surface-container shrink-0"
+            />
+          {:else}
+            <div class="w-24 h-24 rounded-lg bg-surface-container flex items-center justify-center text-secondary shrink-0">
+              <span class="material-symbols-outlined text-[32px]">
+                {ICONO_CLASE[clase] ?? 'inventory_2'}
+              </span>
+            </div>
+          {/if}
+
+          <div class="flex flex-col gap-space-sm flex-1 min-w-0">
+            <input
+              type="file"
+              name="imagen"
+              accept="image/jpeg,image/png,image/webp"
+              class="font-body-sm text-body-sm text-on-surface file:mr-3 file:h-9 file:px-space-md file:rounded file:border-0 file:bg-surface-container file:text-on-surface file:font-body-sm file:text-body-sm file:cursor-pointer hover:file:bg-surface-container-high"
+            />
+            <span class="font-body-sm text-body-sm text-secondary">
+              JPG, PNG o WebP, hasta 5 MB. Sirve para reconocer el material de un
+              vistazo en la lista y al despachar.
+            </span>
+            <div class="flex items-center gap-space-sm">
+              <button
+                type="submit"
+                class="h-9 px-space-md bg-primary-container hover:bg-primary text-on-primary rounded font-body-sm text-body-sm font-medium shadow-sm transition-colors inline-flex items-center gap-1"
+              >
+                <span class="material-symbols-outlined text-[16px]">upload</span>
+                {enEdicion?.tiene_imagen ? 'Reemplazar' : 'Subir'}
+              </button>
+              {#if enEdicion?.tiene_imagen}
+                <!-- Enviar el formulario sin archivo es lo que la quita. -->
+                <button
+                  type="submit"
+                  onclick={(e) => {
+                    const f = /** @type {HTMLInputElement | null} */ (
+                      e.currentTarget.form?.querySelector('input[type=file]') ?? null
+                    );
+                    if (f) f.value = '';
+                  }}
+                  class="h-9 px-space-md bg-surface-container-lowest hover:bg-error-container/30 text-secondary hover:text-error rounded font-body-sm text-body-sm font-medium shadow-sm transition-colors"
+                >
+                  Quitar la foto
+                </button>
+              {/if}
+            </div>
+          </div>
+        </div>
+      </form>
+    {/if}
   </section>
 </div>

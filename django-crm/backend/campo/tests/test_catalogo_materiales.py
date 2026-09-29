@@ -297,3 +297,111 @@ def test_una_clase_que_no_existe_lo_dice_y_lista_las_que_hay(admin_client, org_a
     r = _crear(admin_client, clase="liquido")
     assert r.status_code == 409, r.content
     assert "consumible" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# La foto del material
+# ---------------------------------------------------------------------------
+
+def _png():
+    """Un PNG de 1x1 de verdad: el mas chico que un navegador acepta como imagen."""
+    import base64
+    return base64.b64decode(
+        b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM"
+        b"IQAAAABJRU5ErkJggg=="
+    )
+
+
+def _subir(client, material_id, contenido=None, nombre="foto.png",
+           tipo="image/png"):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    archivo = SimpleUploadedFile(nombre, contenido if contenido is not None else _png(),
+                                 content_type=tipo)
+    return client.post(f"{MATERIALES}{material_id}/imagen/", {"imagen": archivo},
+                       format="multipart")
+
+
+def test_se_le_puede_poner_una_foto_al_material(admin_client, org_a):
+    creado = _crear(admin_client).json()
+
+    r = _subir(admin_client, creado["id"])
+    assert r.status_code == 200, r.content
+    assert r.json()["tiene_imagen"] is True
+
+    # El catalogo dice que HAY foto; la pantalla la pide aparte.
+    fila = admin_client.get(MATERIALES).json()["materiales"][0]
+    assert fila["tiene_imagen"] is True
+
+    # Y el binario se sirve por la API, con sesion -- no por /media, que solo
+    # existe en desarrollo.
+    foto = admin_client.get(f"{MATERIALES}{creado['id']}/imagen/")
+    assert foto.status_code == 200, foto.content
+    assert foto["Content-Type"].startswith("image/")
+    assert b"".join(foto.streaming_content) == _png()
+
+
+def test_la_foto_se_reemplaza_y_la_anterior_se_borra(admin_client, org_a):
+    """Nadie quiere la version vieja de una foto que salio mal.
+
+    Es lo contrario de una evidencia, que no se borra nunca porque es la prueba
+    de un trabajo.
+    """
+    from campo.services.storage import CampoStorage
+    creado = _crear(admin_client).json()
+
+    _subir(admin_client, creado["id"])
+    key_vieja = MaterialCatalogo.objects.get(id=creado["id"]).imagen_key
+    assert CampoStorage.verify_upload(key_vieja)
+
+    _subir(admin_client, creado["id"], nombre="mejor.png")
+    key_nueva = MaterialCatalogo.objects.get(id=creado["id"]).imagen_key
+
+    assert key_nueva != key_vieja
+    assert not CampoStorage.verify_upload(key_vieja), "quedo la foto anterior"
+    assert CampoStorage.verify_upload(key_nueva)
+
+
+def test_quitar_la_foto_no_borra_el_material(admin_client, org_a):
+    creado = _crear(admin_client).json()
+    _subir(admin_client, creado["id"])
+
+    r = admin_client.delete(f"{MATERIALES}{creado['id']}/imagen/")
+    assert r.status_code == 200, r.content
+    assert r.json()["tiene_imagen"] is False
+    # Y pedirla devuelve 404, que la pantalla lee como "no tiene foto".
+    assert admin_client.get(f"{MATERIALES}{creado['id']}/imagen/").status_code == 404
+    # El material sigue, que es lo que no se borra nunca.
+    assert MaterialCatalogo.objects.filter(id=creado["id"]).exists()
+
+
+def test_un_archivo_que_no_es_imagen_se_rechaza(admin_client, org_a):
+    """Un PDF sirve como evidencia de un trabajo, no para reconocer un conector."""
+    creado = _crear(admin_client).json()
+
+    r = _subir(admin_client, creado["id"], contenido=b"%PDF-1.4 no soy una foto",
+               nombre="ficha.pdf", tipo="application/pdf")
+
+    assert r.status_code == 409, r.content
+    assert "tiene que ser una imagen" in r.json()["detail"]
+    assert MaterialCatalogo.objects.get(id=creado["id"]).imagen_key == ""
+
+
+def test_una_foto_demasiado_pesada_lo_dice_con_los_dos_numeros(admin_client, org_a):
+    creado = _crear(admin_client).json()
+
+    r = _subir(admin_client, creado["id"], contenido=b"x" * (6 * 1024 * 1024))
+
+    assert r.status_code == 409, r.content
+    detalle = r.json()["detail"]
+    assert "5120 KB" in detalle and "6144 KB" in detalle
+
+
+def test_la_foto_de_otra_empresa_no_se_puede_tocar(admin_client, org_b_client, org_a):
+    creado = _crear(admin_client).json()
+    r = _subir(org_b_client, creado["id"])
+    assert r.status_code == 404, r.content
+
+
+def test_un_tecnico_raso_no_puede_cambiar_la_foto(user_client, admin_client, org_a):
+    creado = _crear(admin_client).json()
+    assert _subir(user_client, creado["id"]).status_code == 403

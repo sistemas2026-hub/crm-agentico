@@ -33,6 +33,32 @@ class CampoStorage:
         return f"campo/{org_id}/{orden_id}/{requisito_id}_{unique_id}{ext}"
 
     @classmethod
+    def generar_key_catalogo(cls, org_id: str, material_id: str,
+                             nombre_original: str) -> str:
+        """La clave de la foto de un material del catalogo.
+
+        Aparte de la de evidencias porque no es lo mismo: una evidencia pertenece
+        a una orden y a un requisito, y una foto de catalogo pertenece a un
+        material y se reemplaza cuando alguien saca una mejor. El uuid evita que
+        el navegador siga mostrando la anterior desde su cache.
+        """
+        ext = os.path.splitext(nombre_original)[1].lower() or ".jpg"
+        return f"catalogo/{org_id}/{material_id}_{uuid.uuid4().hex[:12]}{ext}"
+
+    @classmethod
+    def borrar(cls, storage_key: str) -> bool:
+        """Saca un archivo del storage. Solo para lo que no es evidencia.
+
+        Una evidencia NO se borra --es la prueba de un trabajo-- pero la foto de
+        un material es ilustrativa: si alguien subio la equivocada, se quita.
+        """
+        destino = cls.ruta_absoluta(storage_key)
+        if destino is None or not os.path.exists(destino):
+            return False
+        os.remove(destino)
+        return True
+
+    @classmethod
     def descriptor_subida(cls, evidencia_id) -> dict:
         """
         Como sube el cliente ESTA evidencia.

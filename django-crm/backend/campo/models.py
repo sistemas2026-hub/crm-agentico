@@ -609,6 +609,13 @@ class MaterialCatalogo(BaseModel):
         default="unidades",
         help_text="Como se cuenta: unidades, m, kg.",
     )
+    #: La foto del material, para reconocerlo de un vistazo.
+    #:
+    #: Se guarda la CLAVE del archivo en el storage, no la URL: la URL depende de
+    #: quien sirva los medios --hoy el disco local, manaña un S3-- y guardarla
+    #: dejaria filas apuntando a un dominio viejo el dia que eso cambie. La URL
+    #: se arma al leer, con la misma abstraccion que usan las evidencias.
+    imagen_key = models.CharField(max_length=255, blank=True, default="")
     activo = models.BooleanField(default=True)
 
     class Meta:

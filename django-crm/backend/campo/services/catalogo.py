@@ -39,10 +39,20 @@ ayuda para quien lo usa, no una garantia: cualquiera puede mandar un PATCH.
 from __future__ import annotations
 
 from campo.models import MaterialCatalogo, MovimientoDeMaterial
+from campo.services.storage import CampoStorage
 
 
 class MaterialInvalido(Exception):
     """Lo que se niega antes de tocar el catalogo."""
+
+
+#: Lo que se acepta como foto de un material. Solo imagenes: un PDF sirve como
+#: evidencia de un trabajo, no para reconocer un conector en un estante.
+MIME_IMAGEN = ("image/jpeg", "image/png", "image/webp")
+
+#: Mas chico que el de una evidencia (25 MB) a proposito: una foto de catalogo se
+#: mira en una tabla, no se periza como prueba, y cada fila la carga.
+MAX_BYTES_IMAGEN = 5 * 1024 * 1024
 
 
 #: Los tres que dejan de ser editables en cuanto hay movimientos, con el motivo
@@ -85,6 +95,75 @@ def tiene_movimientos(material) -> bool:
     return MovimientoDeMaterial.objects.filter(material=material).exists()
 
 
+def tiene_imagen(material) -> bool:
+    """¿Este material tiene foto?
+
+    Se devuelve un SI/NO y no una URL a `/media/`, por dos razones medidas: ese
+    prefijo solo lo sirve Django en modo desarrollo --en produccion nadie
+    responde ahi-- y una foto del catalogo es un dato de la empresa, asi que pasa
+    por la sesion como todo lo demas. El binario se pide a esta misma API y la
+    pantalla lo muestra a traves de su propio proxy.
+    """
+    return bool(material.imagen_key)
+
+
+def leer_imagen(material):
+    """El archivo y su tipo, para servirlo. `None` si no hay o si se perdio."""
+    if not material.imagen_key:
+        return None
+    ruta = CampoStorage.ruta_absoluta(material.imagen_key)
+    if not ruta or not CampoStorage.verify_upload(material.imagen_key):
+        return None
+    import mimetypes
+    tipo = mimetypes.guess_type(ruta)[0] or "application/octet-stream"
+    return ruta, tipo
+
+
+def guardar_imagen(material, *, nombre, contenido, mime):
+    """Pone (o reemplaza) la foto de un material.
+
+    La anterior se borra: es ilustrativa y nadie va a querer la version vieja de
+    una foto que alguien reemplazo porque salio mal. Es lo contrario de una
+    evidencia, que no se borra nunca porque es la prueba de un trabajo.
+    """
+    mime = (mime or "").lower()
+    if mime not in MIME_IMAGEN:
+        raise MaterialInvalido(
+            "La foto tiene que ser una imagen (JPG, PNG o WebP). Llego: "
+            + (mime or "sin tipo") + "."
+        )
+    if not contenido:
+        raise MaterialInvalido("El archivo llego vacio.")
+    if len(contenido) > MAX_BYTES_IMAGEN:
+        raise MaterialInvalido(
+            f"La foto pesa {len(contenido) // 1024} KB y el maximo son "
+            f"{MAX_BYTES_IMAGEN // 1024} KB. Sacale una mas liviana o reducila."
+        )
+
+    anterior = material.imagen_key
+    key = CampoStorage.generar_key_catalogo(
+        str(material.org_id), str(material.id), nombre or "foto.jpg"
+    )
+    if not CampoStorage.guardar(key, contenido):
+        raise MaterialInvalido("No se pudo guardar la foto. Reintenta.")
+
+    material.imagen_key = key
+    material.save(update_fields=["imagen_key", "updated_at"])
+    if anterior:
+        CampoStorage.borrar(anterior)
+    return material
+
+
+def quitar_imagen(material):
+    """Saca la foto. El material queda; lo que se va es la ilustracion."""
+    anterior = material.imagen_key
+    material.imagen_key = ""
+    material.save(update_fields=["imagen_key", "updated_at"])
+    if anterior:
+        CampoStorage.borrar(anterior)
+    return material
+
+
 def materiales_de(org, *, solo_activos: bool = False) -> list[dict]:
     """El catalogo entero, con lo que la pantalla necesita para decidir.
 
@@ -111,6 +190,7 @@ def materiales_de(org, *, solo_activos: bool = False) -> list[dict]:
             "activo": m.activo,
             "es_serializado": m.es_serializado,
             "tiene_movimientos": m.id in usados,
+            "tiene_imagen": bool(m.imagen_key),
         }
         for m in qs
     ]

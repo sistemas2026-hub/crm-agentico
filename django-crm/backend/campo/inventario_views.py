@@ -487,3 +487,64 @@ class MaterialView(APIView):
             "activo": material.activo,
             "tiene_movimientos": cat.tiene_movimientos(material),
         })
+
+
+class MaterialImagenView(APIView):
+    """``POST`` pone o reemplaza la foto de un material · ``DELETE`` la quita.
+
+    ACA SI HAY DELETE, Y NO CONTRADICE LO ANTERIOR. Lo que no se borra es el
+    material --sus movimientos lo referencian y son los que explican una
+    existencia--; la foto es ilustrativa y quitarla no deja ningun registro sin
+    sentido.
+
+    Va por su propia ruta y no dentro del PATCH porque una subida es multipart y
+    el resto del formulario es JSON: mezclarlas obligaria a que toda edicion de
+    nombre viajara como multipart.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def _material(self, request, pk):
+        m = MaterialCatalogo.objects.filter(org=request.profile.org, id=pk).first()
+        if m is None:
+            raise Http404("Ese material no existe en esta empresa.")
+        return m
+
+    def get(self, request, pk):
+        """Sirve la foto a quien tiene sesion en esta empresa.
+
+        No se publica en `/media/`: ese prefijo solo existe en desarrollo y una
+        foto del catalogo es un dato de la empresa como cualquier otro.
+        """
+        material = self._material(request, pk)
+        archivo = cat.leer_imagen(material)
+        if archivo is None:
+            raise Http404("Este material no tiene foto.")
+        ruta, tipo = archivo
+        from django.http import FileResponse
+        return FileResponse(open(ruta, "rb"), content_type=tipo)
+
+    def post(self, request, pk):
+        _exigir_inventario(request)
+        material = self._material(request, pk)
+        archivo = request.FILES.get("imagen")
+        if archivo is None:
+            return Response({"detail": "No llego ningun archivo."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            cat.guardar_imagen(
+                material,
+                nombre=archivo.name,
+                contenido=archivo.read(),
+                mime=archivo.content_type,
+            )
+        except cat.MaterialInvalido as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        return Response({"id": str(material.id),
+                         "tiene_imagen": cat.tiene_imagen(material)})
+
+    def delete(self, request, pk):
+        _exigir_inventario(request)
+        material = self._material(request, pk)
+        cat.quitar_imagen(material)
+        return Response({"id": str(material.id), "tiene_imagen": False})

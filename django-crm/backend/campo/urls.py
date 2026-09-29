@@ -44,6 +44,7 @@ urlpatterns = [
     # `materiales/` administra (todos, y escribe).
     path("inventario/materiales/", inventario_views.MaterialesView.as_view(), name="inv_materiales"),
     path("inventario/materiales/<uid:pk>/", inventario_views.MaterialView.as_view(), name="inv_material"),
+    path("inventario/materiales/<uid:pk>/imagen/", inventario_views.MaterialImagenView.as_view(), name="inv_material_imagen"),
     path("inventario/entradas/", inventario_views.EntradasView.as_view(), name="inv_entradas"),
     path("inventario/despachos/", inventario_views.DespachosView.as_view(), name="inv_despachos"),
     path("inventario/devoluciones/", inventario_views.DevolucionesView.as_view(), name="inv_devoluciones"),
