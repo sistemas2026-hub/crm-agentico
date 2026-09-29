@@ -39,6 +39,7 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
     cliente = serializers.SerializerMethodField()
     asunto = serializers.SerializerMethodField()
     origen_creado_en = serializers.SerializerMethodField()
+    caso_cerrado = serializers.SerializerMethodField()
 
     class Meta:
         model = PropuestaSupervisor
@@ -49,7 +50,7 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
             "created_at", "expira_en",
             "zona", "tecnico", "ticket_externo", "proveedor_externo",
             "orden_numero", "sla_estado", "sla_minutos",
-            "cliente", "asunto", "origen_creado_en",
+            "cliente", "asunto", "origen_creado_en", "caso_cerrado",
         ]
 
     def _contexto(self, obj):
@@ -84,6 +85,11 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
 
     def get_origen_creado_en(self, obj):
         return self._contexto(obj).get("origen_creado_en")
+
+    def get_caso_cerrado(self, obj):
+        #  None a proposito cuando no se sabe: el frontend oculta con True y
+        #  solo con True.
+        return self._contexto(obj).get("caso_cerrado")
 
 
 class PropuestaDetalleSerializer(serializers.ModelSerializer):

@@ -30,6 +30,7 @@
     cargaPorTecnico,
     ticketsPorOrigen,
     bandejaDeRevision,
+    bandejaDe,
     rotuloDeHallazgo,
     paginacion,
     actividadReciente,
@@ -194,10 +195,18 @@
     nPagina = 1;
   });
 
-  /** Cuantas hay en cada estado, para que la pastilla no mienta. */
+  /**
+   * Cuantas hay en cada bandeja, para que la pastilla no mienta.
+   *
+   * SE CUENTAN LAS TRES, no dos y una resta. Antes 'decididas' salia de
+   * 'total - pendientes' porque eran complementarias exactas; con la tercera
+   * bandeja esa resta le sumaria a 'decididas' las resueltas por otra via, y
+   * la pastilla anunciaria un numero distinto del que filtra.
+   */
   const conteoPorEstado = $derived.by(() => {
-    const pend = bandejaDeRevision(propuestas, { estado: 'pendientes' }).length;
-    return { pendientes: pend, decididas: propuestas.length - pend, '': propuestas.length };
+    const cuenta = { pendientes: 0, otra_via: 0, decididas: 0 };
+    for (const p of propuestas) cuenta[bandejaDe(p)] += 1;
+    return { ...cuenta, '': propuestas.length };
   });
 
   /**
@@ -778,7 +787,11 @@
                 {:else}
                   <span class="snoc-body-sm snoc-secundario">
                     <strong class="snoc-primario">{bandeja.length}</strong>
-                    {filtroEstado === 'pendientes' ? 'pendientes de decisión' : 'en la lista'}
+                    {filtroEstado === 'pendientes'
+                      ? 'pendientes de decisión'
+                      : filtroEstado === 'otra_via'
+                        ? 'resueltas sin que nadie las mirara'
+                        : 'en la lista'}
                   </span>
                 {/if}
               </div>
@@ -807,7 +820,13 @@
               las propias pastillas ya dicen.
             -->
             <div class="snoc-filtros-bandeja">
-              {#each [{ v: 'pendientes', t: 'Pendientes' }, { v: 'decididas', t: 'Ya decididas' }, { v: '', t: 'Todas' }] as o (o.v)}
+              <!--
+                Tres bandejas. «Resueltas por otra vía» son las que siguen en
+                estado `propuesta` y cuyo caso ya se cerró sin que nadie las
+                mirara: pedirle a alguien que decida sobre trabajo hecho es
+                ruido, y ponerlas en «Ya decididas» diría que alguien decidió.
+              -->
+              {#each [{ v: 'pendientes', t: 'Pendientes' }, { v: 'otra_via', t: 'Resueltas por otra vía' }, { v: 'decididas', t: 'Ya decididas' }, { v: '', t: 'Todas' }] as o (o.v)}
                 <button
                   class="snoc-pildora {filtroEstado === o.v ? 'snoc-pildora-activa' : ''}"
                   type="button"

@@ -548,6 +548,45 @@ export function estadoDeRevision(estado) {
   return MAPA[estado] ?? { texto: estado ?? '', tono: 'neutro', pendiente: false };
 }
 
+/** Las tres bandejas. Ya NO son «pendiente» y su complemento. */
+export const PENDIENTES = 'pendientes';
+export const OTRA_VIA = 'otra_via';
+export const DECIDIDAS = 'decididas';
+
+/**
+ * En qué bandeja cae una propuesta.
+ *
+ * POR QUÉ TRES Y NO DOS. Hasta ahora «Pendientes» y «Ya decididas» eran
+ * complementarias exactas: lo que no estaba en una estaba en la otra. Eso
+ * dejaba sin sitio a un caso real y frecuente -- la propuesta sigue en estado
+ * `propuesta`, nadie la miró, y el caso se cerró por otra vía.
+ *
+ * Meterla en «Pendientes» pide una decisión sobre trabajo ya hecho. Meterla en
+ * «Ya decididas» afirma que alguien decidió, y no es cierto. Es el mismo
+ * criterio con el que `expirada` no se muestra como `rechazada`: nadie la
+ * rechazó, se venció.
+ *
+ * EL ESTADO DEL CASO MANDA SOBRE EL DE LA PROPUESTA, y solo en un sentido: una
+ * propuesta ya decidida se queda en «Ya decididas» aunque su caso esté
+ * cerrado, porque ahí lo que importa es que hubo una decisión humana. La
+ * tercera bandeja es solo para las que nadie tocó.
+ *
+ * SE LEE EL CASO DE AHORA. `caso_cerrado` lo calcula el backend sobre la fila
+ * actual, no sobre la evidencia que la propuesta guardó. Por eso un caso que
+ * se reabre devuelve su propuesta a «Pendientes» sin que nadie haga nada: no
+ * hay marca que revertir.
+ *
+ * @param {any} p  una propuesta con su `estado` y su `caso_cerrado`
+ */
+export function bandejaDe(p) {
+  if (!estadoDeRevision(p?.estado).pendiente) return DECIDIDAS;
+  //  `caso_cerrado` tiene TRES valores. Se oculta con `true` y solo con
+  //  `true`: `null` significa que no se sabe --sin caso, o no se alcanzó-- y
+  //  un dato que falta no puede esconder trabajo pendiente.
+  if (p?.caso_cerrado === true) return OTRA_VIA;
+  return PENDIENTES;
+}
+
 /**
  * Las propuestas listas para la bandeja: filtradas, ordenadas y numeradas.
  *
@@ -577,6 +616,7 @@ export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) 
       revision,
       edad,
       rotulo: rotuloDeHallazgo(p?.tipo_senal, p?.tipo_senal_display),
+      bandeja: bandejaDe(p),
       // «Con propuesta» significa que hay una acción recomendada escrita.
       // Una señal detectada sin acción es un hallazgo sin recomendación, y
       // son dos situaciones distintas para quien tiene que decidir.
@@ -586,8 +626,8 @@ export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) 
 
   const visibles = enriquecidas.filter((p) => {
     if (!coincideConBusqueda(p, filtros.texto ?? '')) return false;
-    if (filtros.estado === 'pendientes' && !p.revision.pendiente) return false;
-    if (filtros.estado === 'decididas' && p.revision.pendiente) return false;
+    //  'Todas' (cadena vacia) incluye las tres bandejas.
+    if (filtros.estado && p.bandeja !== filtros.estado) return false;
     if (filtros.nivel && p.nivel.texto !== filtros.nivel) return false;
     if (filtros.tipo && p.tipo_senal !== filtros.tipo) return false;
     if (filtros.conPropuesta === 'si' && !p.tienePropuesta) return false;

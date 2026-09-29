@@ -14,7 +14,11 @@ import {
   estadoDeRevision,
   bandejaDeRevision,
   coincideConBusqueda,
-  paginacion
+  paginacion,
+  bandejaDe,
+  PENDIENTES,
+  OTRA_VIA,
+  DECIDIDAS
 } from './supervisor-noc-tablero.js';
 
 /**
@@ -758,5 +762,133 @@ describe('la bandeja con buscador', () => {
       hoy
     );
     expect(b.map((p) => p.n)).toEqual([1, 2]);
+  });
+});
+
+describe('las tres bandejas', () => {
+  const hoy = new Date('2026-09-29T12:00:00Z');
+  let n = 0;
+  const prop = (extra) => ({
+    id: `b${++n}`,
+    estado: 'propuesta',
+    prioridad: 30,
+    tipo_senal: 'caso_desincronizado',
+    tipo_senal_display: 'Caso cerrado en el proveedor y abierto en el CRM',
+    accion_propuesta: 'Revisar la sincronización',
+    origen_creado_en: '2026-09-20T12:00:00Z',
+    caso_cerrado: false,
+    ...extra
+  });
+
+  // --- las cuatro reglas del pedido ------------------------------------
+
+  it('1 · pendiente con el caso abierto se queda en Pendientes', () => {
+    expect(bandejaDe(prop({ caso_cerrado: false }))).toBe(PENDIENTES);
+  });
+
+  it('2 · pendiente con el caso ya cerrado pasa a Resueltas por otra via', () => {
+    expect(bandejaDe(prop({ caso_cerrado: true }))).toBe(OTRA_VIA);
+  });
+
+  it('3 · una aceptada se queda en Ya decididas aunque el caso este cerrado', () => {
+    // El estado del caso NO manda sobre una decision humana: ahi lo que
+    // importa es que alguien decidio, y eso no se deshace.
+    expect(bandejaDe(prop({ estado: 'aceptada', caso_cerrado: true }))).toBe(DECIDIDAS);
+    expect(bandejaDe(prop({ estado: 'modificada', caso_cerrado: true }))).toBe(DECIDIDAS);
+  });
+
+  it('4 · una rechazada va a Ya decididas', () => {
+    expect(bandejaDe(prop({ estado: 'rechazada' }))).toBe(DECIDIDAS);
+    expect(bandejaDe(prop({ estado: 'cancelada' }))).toBe(DECIDIDAS);
+    expect(bandejaDe(prop({ estado: 'expirada' }))).toBe(DECIDIDAS);
+  });
+
+  it('6 · un caso reabierto devuelve la propuesta a Pendientes', () => {
+    // No hay marca que revertir: la bandeja se calcula sobre el estado del
+    // caso de AHORA, asi que reabrirlo basta.
+    const cerrada = prop({ caso_cerrado: true });
+    expect(bandejaDe(cerrada)).toBe(OTRA_VIA);
+    expect(bandejaDe({ ...cerrada, caso_cerrado: false })).toBe(PENDIENTES);
+  });
+
+  it('7 · una propuesta sin caso NO se oculta', () => {
+    // LA REGLA QUE MAS FACIL SE ROMPE. `caso_cerrado` tiene TRES valores y
+    // solo `true` esconde: un dato que falta no puede tapar trabajo
+    // pendiente. Un `?? true` o un truthy-check de mas rompe esto.
+    expect(bandejaDe(prop({ caso_cerrado: null }))).toBe(PENDIENTES);
+    expect(bandejaDe(prop({ caso_cerrado: undefined }))).toBe(PENDIENTES);
+    expect(bandejaDe({ estado: 'propuesta' })).toBe(PENDIENTES);
+  });
+
+  it('no esconde con un valor que solo PARECE cerrado', () => {
+    // Solo `true`. Una cadena no vacia es truthy y no significa cerrado.
+    expect(bandejaDe(prop({ caso_cerrado: 'Closed' }))).toBe(PENDIENTES);
+    expect(bandejaDe(prop({ caso_cerrado: 1 }))).toBe(PENDIENTES);
+  });
+
+  // --- el filtro y los conteos -----------------------------------------
+
+  const lote = () => [
+    prop({ id: 'p1', caso_cerrado: false }),
+    prop({ id: 'p2', caso_cerrado: null }),
+    prop({ id: 'v1', caso_cerrado: true }),
+    prop({ id: 'v2', caso_cerrado: true }),
+    prop({ id: 'd1', estado: 'aceptada', caso_cerrado: true }),
+    prop({ id: 'd2', estado: 'rechazada', caso_cerrado: false })
+  ];
+
+  it('cada filtro trae solo su bandeja', () => {
+    const l = lote();
+    const ids = (e) => bandejaDeRevision(l, { estado: e }, hoy).map((p) => p.id).sort();
+    expect(ids(PENDIENTES)).toEqual(['p1', 'p2']);
+    expect(ids(OTRA_VIA)).toEqual(['v1', 'v2']);
+    expect(ids(DECIDIDAS)).toEqual(['d1', 'd2']);
+  });
+
+  it('8 · «Todas» incluye las tres y los conteos cuadran', () => {
+    const l = lote();
+    const todas = bandejaDeRevision(l, { estado: '' }, hoy);
+    const porBandeja = [PENDIENTES, OTRA_VIA, DECIDIDAS].map(
+      (e) => bandejaDeRevision(l, { estado: e }, hoy).length
+    );
+    expect(todas.length).toBe(l.length);
+    expect(porBandeja.reduce((a, b) => a + b, 0)).toBe(todas.length);
+  });
+
+  it('las tres bandejas no se solapan', () => {
+    // Cada propuesta cae en exactamente una. Sin esto, «Todas» podria cuadrar
+    // por casualidad con una en dos sitios y otra en ninguno.
+    for (const p of lote()) {
+      const en = [PENDIENTES, OTRA_VIA, DECIDIDAS].filter((e) => bandejaDe(p) === e);
+      expect(en).toHaveLength(1);
+    }
+  });
+
+  it('Pendientes y Ya decididas YA NO son complementarias', () => {
+    // Es el punto del cambio: antes lo que no estaba en una estaba en la
+    // otra, y por eso una resuelta por otra via acababa contada como decidida.
+    const l = lote();
+    const pend = bandejaDeRevision(l, { estado: PENDIENTES }, hoy).length;
+    const dec = bandejaDeRevision(l, { estado: DECIDIDAS }, hoy).length;
+    expect(pend + dec).toBeLessThan(l.length);
+  });
+
+  it('el buscador y los demas filtros siguen valiendo dentro de cada bandeja', () => {
+    const l = [
+      prop({ id: 'a', caso_cerrado: true, cliente: 'Hotel Miramar' }),
+      prop({ id: 'b', caso_cerrado: true, cliente: 'Panaderia' })
+    ];
+    const r = bandejaDeRevision(l, { estado: OTRA_VIA, texto: 'miramar' }, hoy);
+    expect(r.map((p) => p.id)).toEqual(['a']);
+  });
+
+  it('la numeracion se rehace dentro de cada bandeja', () => {
+    const r = bandejaDeRevision(lote(), { estado: OTRA_VIA }, hoy);
+    expect(r.map((p) => p.n)).toEqual([1, 2]);
+  });
+
+  it('cada fila llega sabiendo en que bandeja esta', () => {
+    const r = bandejaDeRevision(lote(), { estado: '' }, hoy);
+    expect(r.every((p) => [PENDIENTES, OTRA_VIA, DECIDIDAS].includes(p.bandeja))).toBe(true);
   });
 });

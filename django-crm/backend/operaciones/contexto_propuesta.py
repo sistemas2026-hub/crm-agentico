@@ -77,6 +77,17 @@ VACIO = {
     # ORIGEN y no sobre la propuesta: la propuesta se vuelve a emitir cada
     # ciclo y su fecha diria "detectado hace 2 horas" de un caso de 40 dias.
     "origen_creado_en": None,
+    # Si el caso de Dexter YA esta cerrado, ahora mismo.
+    #
+    # TRES VALORES Y NO DOS. None significa "no se sabe" -- la propuesta no
+    # cuelga de un caso, o el caso no se alcanzo-- y es distinto de False,
+    # que afirma que esta abierto. La pantalla oculta con True y solo con
+    # True: un dato que falta no puede esconder trabajo pendiente.
+    #
+    # Se calcula sobre la fila ACTUAL del caso, no sobre la evidencia que la
+    # propuesta guardo: la evidencia es una foto del momento de detectar, y
+    # entre eso y hoy pueden haber pasado dias.
+    "caso_cerrado": None,
 }
 
 
@@ -123,6 +134,26 @@ def _nombre_de_cliente(caso) -> str:
     if del_crm:
         return del_crm
     return (getattr(caso, "external_client_name", "") or "").strip()
+
+
+def _esta_cerrado(caso) -> bool:
+    """
+    Si este caso ya termino.
+
+    EL CRITERIO NO SE INVENTA AQUI: 'cases.workflow.TERMINAL_STATUSES' ya dice
+    cuales son los estados finales --Closed, Rejected, Duplicate-- y es el que
+    usa el resto del CRM. Una segunda lista aqui se desincronizaria con la
+    primera el dia que alguien agregue un estado.
+
+    Se miran los dos campos porque un caso puede tener uno sin el otro:
+    'resolved_at' es la marca y 'status' es el estado, y no siempre viajan
+    juntos.
+    """
+    from cases.workflow import TERMINAL_STATUSES
+
+    if getattr(caso, "resolved_at", None) is not None:
+        return True
+    return (getattr(caso, "status", "") or "") in TERMINAL_STATUSES
 
 
 def contexto_de(org, propuestas) -> dict:
@@ -213,8 +244,12 @@ def contexto_de(org, propuestas) -> dict:
             str(c.id): c
             for c in Case.objects.filter(org=org, id__in=ids_caso)
             .select_related("account")
+            #  'status' y 'resolved_at' NO agregan una consulta: la fila del
+            #  caso ya se estaba trayendo para el cliente y el asunto. Lo unico
+            #  que cambia es cuantas columnas vienen en ella.
             .only("id", "provider", "external_ticket_id", "name", "created_at",
-                  "account__name", "external_client_name")
+                  "account__name", "external_client_name",
+                  "status", "resolved_at")
         }
 
     # --- El plazo operativo ------------------------------------------------
@@ -263,6 +298,7 @@ def contexto_de(org, propuestas) -> dict:
                 "asunto": caso.name or "",
                 "origen_creado_en": (caso.created_at.isoformat()
                                      if caso.created_at else None),
+                "caso_cerrado": _esta_cerrado(caso),
             })
 
     return salida
