@@ -83,7 +83,15 @@ def _cuadrilla(obj: OrdenTrabajo) -> list[dict]:
             "profile_id": str(a.profile_id),
             "nombre": a.profile.user.name or a.profile.user.email,
             "rol": a.rol,
+            #  La etiqueta del catalogo, no una traduccion en el cliente. 'rol'
+            #  se conserva porque es la clave con la que la aplicacion decide;
+            #  'rol_display' es lo unico que se muestra. Sale de
+            #  'get_rol_display()', que lee los 'choices' del modelo -- si el
+            #  catalogo se vuelve a abrir, esto devuelve el valor crudo y se
+            #  nota.
+            "rol_display": a.get_rol_display(),
             "es_principal": a.es_principal,
+            "asignado_en": a.asignado_en.isoformat(),
         }
         for a in obj.asignaciones.select_related("profile__user").order_by(
             "-es_principal", "asignado_en"
@@ -159,8 +167,20 @@ class OrdenTrabajoListSerializer(serializers.ModelSerializer):
         tec = obj.tecnico_principal
         if not tec:
             return None
+        #  'str' y no el UUID crudo. Sobre HTTP no cambia nada -- el renderer
+        #  de DRF ya lo serializaba a texto -- pero el cuerpo se GUARDA tal
+        #  cual en 'MutacionIdempotente', y ahi un UUID no es JSON. Hasta
+        #  M03-F-B, cualquier POST a /asignar/ con cabecera 'Idempotency-Key'
+        #  reventaba por esto; no se veia porque ninguna prueba la enviaba a
+        #  este endpoint.
+        #
+        #  RESTAURADO: 59cf2a6 quito el str() y este comentario a la vez, en
+        #  los DOS serializers, y el fallo volvio tal como esta descrito
+        #  arriba -- 'Object of type UUID is not JSON serializable' al guardar
+        #  el cuerpo de la respuesta. El decorador de idempotencia no cambio;
+        #  cambio lo que se le da para guardar.
         return {
-            "id": tec.id,
+            "id": str(tec.id),
             "nombre": tec.user.name or tec.user.email,
         }
 
@@ -260,8 +280,20 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
         tec = obj.tecnico_principal
         if not tec:
             return None
+        #  'str' y no el UUID crudo. Sobre HTTP no cambia nada -- el renderer
+        #  de DRF ya lo serializaba a texto -- pero el cuerpo se GUARDA tal
+        #  cual en 'MutacionIdempotente', y ahi un UUID no es JSON. Hasta
+        #  M03-F-B, cualquier POST a /asignar/ con cabecera 'Idempotency-Key'
+        #  reventaba por esto; no se veia porque ninguna prueba la enviaba a
+        #  este endpoint.
+        #
+        #  RESTAURADO: 59cf2a6 quito el str() y este comentario a la vez, en
+        #  los DOS serializers, y el fallo volvio tal como esta descrito
+        #  arriba -- 'Object of type UUID is not JSON serializable' al guardar
+        #  el cuerpo de la respuesta. El decorador de idempotencia no cambio;
+        #  cambio lo que se le da para guardar.
         return {
-            "id": tec.id,
+            "id": str(tec.id),
             "nombre": tec.user.name or tec.user.email,
         }
 
@@ -338,8 +370,27 @@ class CrearOrdenSerializer(serializers.Serializer):
 
 
 class AsignarSerializer(serializers.Serializer):
+    """
+    A quien se le pone la orden. El 'rol' viaja por CATALOGO CERRADO -- F-4.
+
+    Era un CharField, y por eso la API aceptaba y persistia cualquier cadena:
+    el modelo declara 'choices', pero Django solo los valida en formularios y
+    admin, nunca al guardar, y nadie llamaba a full_clean(). El catalogo se
+    habia cerrado en el modelo el 15/09/2026 y la puerta de entrada habia
+    quedado abierta -- medido en M03-F-A.1.
+
+    'allow_blank' se conserva: la vista ya traduce "" a 'tecnico', y quitarlo
+    romperia a un cliente que hoy manda el campo vacio.
+
+    RESTAURADO: 59cf2a6 lo devolvio a CharField y la puerta quedo abierta otra
+    vez. La validacion vive AQUI, no en el modelo -- 'choices' en el campo del
+    modelo no valida en save(), asi que la migracion 0011 sola no la repone.
+    """
+
     profile_id = serializers.UUIDField()
-    rol = serializers.CharField(required=False, allow_blank=True, default="tecnico")
+    rol = serializers.ChoiceField(
+        choices=AsignacionTrabajo.ROLES_CUADRILLA,
+        required=False, allow_blank=True, default=AsignacionTrabajo.TECNICO)
     motivo = serializers.CharField(required=False, allow_blank=True, default="")
 
 
@@ -362,3 +413,110 @@ class ValidarSerializer(serializers.Serializer):
                     "Hay que decir que se devuelve. Una devolucion sin "
                     "requisitos no exige nada nuevo al completar."})
         return attrs
+
+
+# ===========================================================================
+#  RESTAURADOS  --  los siete se fueron en 59cf2a6 ("La bodega existe"), que
+#  reescribio este archivo (149 lineas nuevas, 179 borradas) al agregar los
+#  serializers de materiales. Sin ellos, 'campo/despacho_views.py' no se puede
+#  ni importar, y toda la app de campo responde 500.
+# ===========================================================================
+
+class ProgramarSerializer(serializers.Serializer):
+    """
+    Lo que entra al programar una orden  --  paso M03-B.
+
+    NO declara 'org' ni 'organization_id'. Es la misma decision que A-3.3:
+    lo que el cliente no debe elegir, no se declara. La organizacion sale de
+    la sesion ya validada, asi que un 'organization_id' en el cuerpo no tiene
+    donde aterrizar -- no se ignora despues, no llega a existir.
+
+    Tampoco declara 'estado': la linea nace 'planificada' y el estado
+    operativo de la orden no lo toca esta operacion.
+    """
+
+    programacion_semanal_id = serializers.UUIDField()
+    programada_para = serializers.DateTimeField()
+    #  M03-D3: agregar una orden a un plan YA PUBLICADO es una adicion formal
+    #  y exige causa. Sobre un borrador siguen siendo opcionales -- la conducta
+    #  que M03-B dejo validada no cambia.
+    causa = serializers.CharField(required=False, allow_blank=True, default="")
+    motivo = serializers.CharField(required=False, allow_blank=True,
+                                   default="", max_length=255)
+    zona = serializers.CharField(required=False, allow_blank=True, default="")
+    prioridad = serializers.IntegerField(required=False, min_value=0,
+                                         max_value=32767, allow_null=True,
+                                         default=None)
+    secuencia = serializers.IntegerField(required=False, min_value=0,
+                                         max_value=32767, allow_null=True,
+                                         default=None)
+
+class ReprogramarSerializer(serializers.Serializer):
+    """
+    Lo que entra al reprogramar  --  paso M03-D3.
+
+    NO declara 'org' ni 'organization_id': la organizacion sale de la sesion ya
+    validada, asi que un 'organization_id' en el cuerpo no tiene donde
+    aterrizar -- no se ignora despues, no llega a existir.
+
+    'causa' pertenece al catalogo cerrado de NovedadOperativa y se valida en el
+    servicio, no aca: la lista vive en el modelo y duplicarla en un serializer
+    seria dos catalogos que se desincronizan.
+    """
+
+    programacion_semanal_id = serializers.UUIDField()
+    programada_para = serializers.DateTimeField()
+    causa = serializers.CharField(required=False, allow_blank=True, default="")
+    motivo = serializers.CharField(required=False, allow_blank=True,
+                                   default="", max_length=255)
+    contexto = serializers.DictField(required=False, default=dict)
+
+class ContingenciaSerializer(serializers.Serializer):
+    """
+    Lo que entra al registrar una contingencia  --  paso M03-D3.
+
+    No lleva fecha: una contingencia NO propone una fecha nueva. Registra que
+    un trabajo en curso se complico, y por que.
+    """
+
+    causa = serializers.CharField()
+    motivo = serializers.CharField(required=False, allow_blank=True,
+                                   default="", max_length=255)
+    contexto = serializers.DictField(required=False, default=dict)
+
+class AgregarIntegranteSerializer(serializers.Serializer):
+    """Sumar a alguien a la cuadrilla. NO declara 'es_principal' a proposito:
+    mover el principal es otra operacion. Lo que el cliente no debe elegir, no
+    se declara -- misma decision que 'ProgramarSerializer' en M03-B."""
+
+    profile_id = serializers.UUIDField()
+    rol = serializers.ChoiceField(
+        choices=AsignacionTrabajo.ROLES_CUADRILLA,
+        required=False, allow_blank=True, default=AsignacionTrabajo.TECNICO)
+    motivo = serializers.CharField(required=False, allow_blank=True, default="")
+
+class CambiarPrincipalSerializer(serializers.Serializer):
+    """Quien pasa a responder por la orden. Tiene que estar ya en la cuadrilla."""
+
+    profile_id = serializers.UUIDField()
+    motivo = serializers.CharField(required=False, allow_blank=True, default="")
+
+class RetirarIntegranteSerializer(serializers.Serializer):
+    """
+    Quien sale, y -- si es la persona principal y quedan otros -- quien queda
+    a cargo, EN LA MISMA OPERACION (decision A de M03-F-A.3).
+
+    'nuevo_principal_id' es opcional en el esquema y obligatorio en la regla:
+    se exige solo cuando hace falta, igual que '_validar_causa(exigida=...)'
+    en M03. Un esquema que lo hiciera siempre obligatorio impediria retirar al
+    ultimo integrante, que es un caso legitimo.
+    """
+
+    profile_id = serializers.UUIDField()
+    nuevo_principal_id = serializers.UUIDField(required=False, allow_null=True)
+    motivo = serializers.CharField(required=False, allow_blank=True, default="")
+
+class DesasignarSerializer(serializers.Serializer):
+    """Dejar la orden sin nadie. 0 integrantes es un estado valido (F-2)."""
+
+    motivo = serializers.CharField(required=False, allow_blank=True, default="")

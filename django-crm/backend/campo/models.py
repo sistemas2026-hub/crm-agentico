@@ -431,10 +431,38 @@ class AsignacionTrabajo(BaseModel):
     profile = models.ForeignKey(
         Profile, on_delete=models.CASCADE, related_name="asignaciones_campo"
     )
+    #  RESTAURADO  --  59cf2a6 dejo el campo sin su catalogo.
+    #
+    #  El catalogo estaba solo en el help_text, y ya habia divergido: las 3
+    #  asignaciones de produccion dicen 'tecnico_lider', que no estaba entre los
+    #  cuatro documentados. 'tecnico_lider' se INCLUYE en vez de corregirse --
+    #  las filas existentes son datos de produccion y renombrarlas seria
+    #  reescribir historico por una razon cosmetica. Lo que se cierra es lo que
+    #  se puede escribir de ahora en adelante.
+    #
+    #  SI HACE FALTA MIGRACION, y esta: '0012_restaurar_catalogo_de_rol'.
+    #  '0003' habia cerrado el catalogo, pero '0008' volvio a declarar 'rol'
+    #  SIN choices -- Django la genero desde el modelo ya roto por 59cf2a6 --
+    #  asi que el estado de las migraciones describe un campo abierto. 0012
+    #  devuelve el modelo y sus migraciones al mismo estado.
+    TECNICO = "tecnico"
+    TECNICO_LIDER = "tecnico_lider"
+    AYUDANTE = "ayudante"
+    CHOFER = "chofer"
+    SUPERVISOR = "supervisor"
+    ROLES_CUADRILLA = (
+        (TECNICO, "Técnico"),
+        (TECNICO_LIDER, "Técnico líder"),
+        (AYUDANTE, "Ayudante"),
+        (CHOFER, "Chofer"),
+        (SUPERVISOR, "Supervisor"),
+    )
+
     rol = models.CharField(
         max_length=64,
-        default="tecnico",
-        help_text="Rol en la cuadrilla: tecnico, ayudante, chofer, supervisor",
+        choices=ROLES_CUADRILLA,
+        default=TECNICO,
+        help_text="Rol en la cuadrilla. Catálogo cerrado, ver ROLES_CUADRILLA.",
     )
     es_principal = models.BooleanField(
         default=False,

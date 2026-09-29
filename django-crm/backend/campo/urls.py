@@ -65,6 +65,26 @@ urlpatterns = [
     path("trabajos/<uid:pk>/acciones/", views.AccionesTrabajoView.as_view(), name="trabajo_acciones"),
     path("trabajos/<uid:pk>/datos/", views.GuardarDatosTrabajoView.as_view(), name="trabajo_datos"),
     path("trabajos/<uid:pk>/probar-conexion/", views.ProbarConexionView.as_view(), name="trabajo_probar_conexion"),
+
+    # RESTAURADAS  --  estas ocho desaparecieron en 59cf2a6 junto con sus vistas.
+    # El frontend nunca dejo de llamar a 'programar' y 'reprogramar'
+    # (programacion-noc.js:398 y :316), asi que programar una orden devolvia 404
+    # en produccion. Se reponen con los MISMOS nombres de ruta: cambiar uno
+    # habria roto cualquier 'reverse()' que los use.
+    #
+    # Cuadrilla ad-hoc por OT  --  M03-F-B. 'asignar' pone al responsable;
+    # estas cuatro manejan la composicion sin moverlo por accidente.
+    path("trabajos/<uid:pk>/cuadrilla/agregar/", despacho_views.AgregarIntegranteView.as_view(), name="cuadrilla_agregar"),
+    path("trabajos/<uid:pk>/cuadrilla/principal/", despacho_views.CambiarPrincipalView.as_view(), name="cuadrilla_principal"),
+    path("trabajos/<uid:pk>/cuadrilla/retirar/", despacho_views.RetirarIntegranteView.as_view(), name="cuadrilla_retirar"),
+    path("trabajos/<uid:pk>/cuadrilla/desasignar/", despacho_views.DesasignarTrabajoView.as_view(), name="cuadrilla_desasignar"),
+    path("trabajos/<uid:pk>/programar/", despacho_views.ProgramarTrabajoView.as_view(), name="trabajo_programar"),
+    path("trabajos/<uid:pk>/reprogramar/", despacho_views.ReprogramarTrabajoView.as_view(), name="trabajo_reprogramar"),
+    path("trabajos/<uid:pk>/contingencia/", despacho_views.ContingenciaTrabajoView.as_view(), name="trabajo_contingencia"),
+    #  El ultimo paso del recorrido. 'cerrar_orden' existia en el servicio desde
+    #  el primer dia y no la llamaba nadie: una orden aprobada se quedaba en
+    #  'completada_campo' para siempre.
+    path("trabajos/<uid:pk>/cerrar/", despacho_views.CerrarTrabajoView.as_view(), name="trabajo_cerrar"),
     path("trabajos/<uid:pk>/evidencias/", views.EvidenciasTrabajoView.as_view(), name="trabajo_evidencias"),
     path("trabajos/<uid:pk>/completar/", views.CompletarTrabajoView.as_view(), name="trabajo_completar"),
     # Solo backend local de desarrollo: en produccion la subida va

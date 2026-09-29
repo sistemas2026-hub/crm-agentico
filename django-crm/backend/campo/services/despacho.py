@@ -36,6 +36,26 @@ class ErrorDespacho(Exception):
     """Algo impide crear o asignar. El mensaje va al operador, no al log."""
 
 
+#  RESTAURADAS  --  las dos se fueron en 59cf2a6 junto con las operaciones de
+#  cuadrilla que las levantan. Sin ellas 'campo/despacho_views.py' y
+#  'test_m03fb_cuadrilla.py' no se pueden ni importar.
+class RequiereSucesor(ErrorDespacho):
+    """
+    Se intento retirar al principal sin decir quien queda a cargo.
+
+    No es un error de validacion: es un conflicto de estado. Va con 409, igual
+    que el resto de conflictos reales del modulo.
+    """
+
+
+class ConflictoDeCuadrilla(ErrorDespacho):
+    """La foto que traia el solicitante ya no corresponde a la realidad."""
+
+
+#  Un trabajo terminado no cambia de cuadrilla. Lo usa '_exigir_operable'.
+ESTADOS_TERMINALES = (OrdenTrabajo.CERRADA, OrdenTrabajo.CANCELADA)
+
+
 def siguiente_numero(org) -> int:
     """
     El consecutivo por empresa.
@@ -660,3 +680,253 @@ def refrescar_contexto(orden: OrdenTrabajo, *, profile) -> dict:
         "capturado_en": fresco.get("capturado_en") or "",
         "revision": fresca.revision,
     }
+
+
+# ===========================================================================
+#  RESTAURADO  --  las cuatro operaciones de cuadrilla y sus seis ayudantes se
+#  fueron en 59cf2a6 ("La bodega existe"), que reescribio este archivo (343
+#  lineas nuevas, 288 borradas) al agregar el despacho de materiales.
+#
+#  No fue una decision: el mismo commit dejo 'campo/despacho_views.py' llamando
+#  a estas funciones, y 'campo/urls.py' sin las rutas. El sintoma en produccion
+#  era un 404 en programar/reprogramar una orden.
+# ===========================================================================
+
+def _misma_empresa(orden: OrdenTrabajo, profile) -> None:
+    if profile.org_id != orden.org_id:
+        raise ErrorDespacho("Esa persona es de otra empresa.")
+
+def _integrante(orden: OrdenTrabajo, profile) -> AsignacionTrabajo:
+    fila = orden.asignaciones.filter(profile=profile).first()
+    if fila is None:
+        raise ErrorDespacho("Esa persona no esta asignada a esta orden.")
+    return fila
+
+def _bloquear(orden: OrdenTrabajo) -> OrdenTrabajo:
+    """
+    Relee la OT bajo lock. Lo que decide es la fila bloqueada, nunca la copia
+    en memoria -- mismo criterio que 'programar_orden' (M03-B).
+    """
+    return OrdenTrabajo.objects.select_for_update().get(pk=orden.pk)
+
+def _exigir_operable(orden: OrdenTrabajo) -> None:
+    if orden.estado_operativo in ESTADOS_TERMINALES:
+        raise ErrorDespacho(
+            f"La orden #{orden.numero} esta "
+            f"'{orden.get_estado_operativo_display()}'. No se cambia la "
+            f"cuadrilla de un trabajo terminado.")
+
+def _foto_cuadrilla(orden: OrdenTrabajo) -> list[dict]:
+    """
+    La composicion completa, para que el evento permita RECONSTRUIR la
+    transicion y no solo enterarse de que hubo una.
+    """
+    return [
+        {"profile": str(a.profile_id), "rol": a.rol,
+         "es_principal": a.es_principal}
+        for a in orden.asignaciones.all().order_by("asignado_en")
+    ]
+
+def _evento(orden, tipo, actor, antes, **datos):
+    return EventoTrabajo.objects.create(
+        org=orden.org, orden=orden, tipo=tipo, profile=actor,
+        datos={"antes": antes, "despues": _foto_cuadrilla(orden), **datos},
+    )
+
+
+@transaction.atomic
+
+def agregar_integrante(orden: OrdenTrabajo, profile, actor,
+                       rol: str = "tecnico",
+                       motivo: str = "") -> AsignacionTrabajo:
+    """
+    Suma a alguien a la cuadrilla SIN tocar al principal.
+
+    'es_principal=False' se fija AQUI y no es parametro: mover el principal es
+    otra operacion, con otro nombre y otro evento. M03-F-A.1 midio que la unica
+    via que existia hacia lo contrario -- agregar a un ayudante le robaba la
+    principalia al lider -- y esa es la conducta que este modulo separa en dos
+    actos distintos.
+
+    Exige que YA haya alguien: una cuadrilla no empieza por el ayudante. La
+    primera persona entra por 'asignar', que la deja como principal.
+    """
+    _misma_empresa(orden, profile)
+    fresca = _bloquear(orden)
+    _exigir_operable(fresca)
+
+    if not fresca.asignaciones.exists():
+        raise ErrorDespacho(
+            f"La orden #{fresca.numero} no tiene a nadie asignado. La primera "
+            f"persona se asigna con 'asignar', y queda como principal.")
+    if fresca.asignaciones.filter(profile=profile).exists():
+        raise ErrorDespacho("Esa persona ya esta en la cuadrilla.")
+
+    antes = _foto_cuadrilla(fresca)
+    asignacion = AsignacionTrabajo.objects.create(
+        orden=fresca, profile=profile, rol=rol, es_principal=False)
+
+    fresca.revision += 1
+    fresca.save(update_fields=["revision", "updated_at"])
+
+    _evento(fresca, "integrante_agregado", actor, antes,
+            integrante=str(profile.id), rol=rol, motivo=motivo)
+    return asignacion
+
+
+@transaction.atomic
+
+def cambiar_principal(orden: OrdenTrabajo, nuevo_principal, actor,
+                      motivo: str = "") -> tuple[AsignacionTrabajo, bool]:
+    """
+    Traslada la responsabilidad entre DOS personas que ya estan en la cuadrilla.
+
+    Devuelve (asignacion, cambio). 'cambio' en False significa que ya era el
+    principal: es un no-op y responde 200 'sin_cambios', el mismo contrato que
+    M03-B1 fijo para la secuenciacion. Un no-op no escribe, no audita y no
+    exige motivo, porque no hay nada que justificar.
+
+    NO toca 'rol'. 'principal' y 'tecnico_lider' no son sinonimos (F-3): quien
+    pasa a responder por la OT no cambia de oficio por hacerlo.
+    """
+    _misma_empresa(orden, nuevo_principal)
+    fresca = _bloquear(orden)
+    _exigir_operable(fresca)
+
+    entrante = _integrante(fresca, nuevo_principal)
+    if entrante.es_principal:
+        return entrante, False
+
+    antes = _foto_cuadrilla(fresca)
+    anterior = fresca.tecnico_principal
+
+    #  Bajar ANTES de subir: el indice unico parcial no admite dos principales
+    #  ni por un instante. Las dos escrituras van en la misma transaccion, asi
+    #  que el hueco de cero principales no existe fuera de ella.
+    fresca.asignaciones.filter(es_principal=True).update(es_principal=False)
+    fresca.asignaciones.filter(profile=nuevo_principal).update(es_principal=True)
+
+    fresca.revision += 1
+    fresca.save(update_fields=["revision", "updated_at"])
+
+    _evento(fresca, "cambio_principal", actor, antes,
+            principal_anterior=str(anterior.id) if anterior else None,
+            principal_nuevo=str(nuevo_principal.id), motivo=motivo)
+    entrante.refresh_from_db()
+    return entrante, True
+
+
+@transaction.atomic
+
+def retirar_integrante(orden: OrdenTrabajo, profile, actor,
+                       nuevo_principal=None, motivo: str = "") -> dict:
+    """
+    Saca a alguien de la cuadrilla. Si es el principal, el sucesor viaja en la
+    MISMA llamada (decision A de M03-F-A.3).
+
+    Por que no se permite en dos pasos: M03-F-A.3 midio el estado intermedio
+    --cambiar el principal y no llegar a retirar-- y resulto ser LEGAL. Cumple
+    el invariante, pasa 'revisar_coherencia' y no dispara H-05. O sea que un
+    retiro a medias es indistinguible de una cuadrilla correcta, y nadie puede
+    detectarlo despues. La unica defensa posible es que no pueda ocurrir.
+
+    Sale el ULTIMO integrante: no hace falta sucesor. La OT queda en 0
+    asignaciones, que es un estado valido y deliberado (F-2), no un accidente.
+    """
+    fresca = _bloquear(orden)
+    _exigir_operable(fresca)
+
+    saliente = _integrante(fresca, profile)
+    quedan_otros = fresca.asignaciones.exclude(profile=profile).exists()
+    principal_actual = fresca.tecnico_principal
+
+    if not saliente.es_principal:
+        #  Sale un auxiliar: el principal no se mueve. Un sucesor aqui solo se
+        #  acepta si coincide con quien YA es principal -- si nombra a otro, la
+        #  foto del solicitante quedo vieja y hay que decirselo, no adivinar.
+        if (nuevo_principal is not None and principal_actual is not None
+                and nuevo_principal.id != principal_actual.id):
+            raise ConflictoDeCuadrilla(
+                "Esa persona ya no es la principal de la orden. Vuelva a "
+                "consultar la cuadrilla antes de retirar a alguien.")
+        antes = _foto_cuadrilla(fresca)
+        rol_que_tenia = saliente.rol
+        saliente.delete()
+        fresca.revision += 1
+        fresca.save(update_fields=["revision", "updated_at"])
+        _evento(fresca, "integrante_retirado", actor, antes,
+                integrante_retirado=str(profile.id),
+                rol_que_tenia=rol_que_tenia, motivo=motivo)
+        return {"retirado": profile, "principal": principal_actual,
+                "cambio_principal": False}
+
+    #  ---------------- sale el PRINCIPAL ----------------
+    if not quedan_otros:
+        antes = _foto_cuadrilla(fresca)
+        rol_que_tenia = saliente.rol
+        saliente.delete()
+        fresca.revision += 1
+        fresca.save(update_fields=["revision", "updated_at"])
+        _evento(fresca, "integrante_retirado", actor, antes,
+                integrante_retirado=str(profile.id),
+                rol_que_tenia=rol_que_tenia, era_principal=True,
+                orden_queda_sin_asignar=True, motivo=motivo)
+        return {"retirado": profile, "principal": None,
+                "cambio_principal": False}
+
+    if nuevo_principal is None:
+        raise RequiereSucesor(
+            f"Esa persona es la principal de la orden #{fresca.numero} y "
+            f"quedan otros integrantes. Indique quien queda a cargo en esta "
+            f"misma operacion.")
+
+    _misma_empresa(fresca, nuevo_principal)
+    if nuevo_principal.id == profile.id:
+        raise ErrorDespacho(
+            "El sucesor no puede ser la misma persona que se retira.")
+    _integrante(fresca, nuevo_principal)      # tiene que estar en ESTA orden
+
+    antes = _foto_cuadrilla(fresca)
+    rol_que_tenia = saliente.rol
+
+    #  Primero se va el principal, despues sube el sucesor: al reves habria dos
+    #  principales a la vez y el indice unico parcial lo rechazaria.
+    saliente.delete()
+    fresca.asignaciones.filter(profile=nuevo_principal).update(es_principal=True)
+
+    fresca.revision += 1
+    fresca.save(update_fields=["revision", "updated_at"])
+
+    _evento(fresca, "principal_retirado", actor, antes,
+            integrante_retirado=str(profile.id), rol_que_tenia=rol_que_tenia,
+            principal_anterior=str(profile.id),
+            principal_nuevo=str(nuevo_principal.id), motivo=motivo)
+    return {"retirado": profile, "principal": nuevo_principal,
+            "cambio_principal": True}
+
+
+@transaction.atomic
+
+def desasignar(orden: OrdenTrabajo, actor, motivo: str = "") -> int:
+    """
+    Deja la OT sin nadie. 0 integrantes es un estado valido (F-2): una orden
+    puede quedar esperando a que alguien la tome.
+
+    NO es un atajo para sacar al principal conservando al resto -- eso es
+    'retirar_integrante' con sucesor. Aqui se van TODOS, asi que no puede
+    producir el estado "quedan integrantes y no hay principal".
+    """
+    fresca = _bloquear(orden)
+    _exigir_operable(fresca)
+
+    antes = _foto_cuadrilla(fresca)
+    cuantos = fresca.asignaciones.count()
+    if cuantos == 0:
+        return 0
+
+    fresca.asignaciones.all().delete()
+    fresca.revision += 1
+    fresca.save(update_fields=["revision", "updated_at"])
+    _evento(fresca, "cuadrilla_desasignada", actor, antes,
+            integrantes_retirados=cuantos, motivo=motivo)
+    return cuantos
