@@ -21,6 +21,9 @@ from decimal import Decimal
 
 import pytest
 
+from campo.inventario import UbicacionInventario
+from campo.services import inventario as inv
+
 from campo.models import (
     ActaDeDevolucion,
     AsignacionTrabajo,
@@ -49,6 +52,27 @@ from campo.services.cierre_jornada import (
 from campo.services.materiales import registrar_movimiento
 
 pytestmark = pytest.mark.django_db
+
+
+def movimientos_del_telefono() -> int:
+    """Los movimientos que escribio la APP, sin los del inventario.
+
+    POR QUE NO SE CUENTA LA TABLA ENTERA (28/09/2026)
+    -------------------------------------------------
+    Estos asserts decian `MovimientoDeMaterial.objects.count()`, y valia mientras
+    la app fuera lo unico que escribia en esa tabla. Desde que el kit se entrega
+    con un despacho de verdad --entrada a bodega y salida al tecnico-- la tabla
+    trae tambien esos hechos, que son reales y que la prueba no esta midiendo.
+    Contar por tipo dice lo que la prueba siempre quiso decir: "no se registro el
+    consumo", en vez de "la tabla esta vacia".
+    """
+    return MovimientoDeMaterial.objects.filter(
+        tipo__in=(
+            MovimientoDeMaterial.CONSUMO,
+            MovimientoDeMaterial.DEVOLUCION,
+            MovimientoDeMaterial.AJUSTE,
+        )
+    ).count()
 
 
 @pytest.fixture
@@ -86,23 +110,51 @@ def orden(org_a, user_profile):
 
 
 @pytest.fixture
-def kit(org_a, user_profile, conector):
-    entrega = EntregaDeKit.objects.create(
-        org=org_a, profile=user_profile, acta="K-2024-094"
+def bodega(org_a):
+    """De donde sale el material. Las entregas de kit nacen de un despacho real.
+
+    POR QUE ESTA FIXTURE APARECIO EL 28/09/2026
+    -------------------------------------------
+    Antes el kit se insertaba a mano --EntregaDeKit + ItemDeKit-- y `saldo_de`
+    sumaba esos items. Desde que el saldo de un tecnico ES la existencia de su
+    custodia (un solo libro para todo el inventario), un acta sin movimientos
+    detras es un papel que describe algo que no ocurrio: no hay bodega de la que
+    haya salido nada. Ademas `inventario.despachar` es el UNICO camino que existe
+    en produccion para entregar un kit, asi que pasar por el hace que estas
+    pruebas cubran el camino real en vez de un atajo que nadie usa.
+    """
+    return UbicacionInventario.objects.create(
+        org=org_a, tipo=UbicacionInventario.BODEGA, nombre="Bodega Central"
     )
-    ItemDeKit.objects.create(entrega=entrega, material=conector, cantidad=10)
+
+
+def _despachar(org, bodega, profile, acta, lineas):
+    """Entra a la bodega y sale al tecnico, como en la calle."""
+    for linea in lineas:
+        inv.registrar_entrada(
+            org=org, material=linea["material"],
+            cantidad=linea.get("cantidad") or 1,
+            ubicacion_destino=bodega, serie=linea.get("serie", ""),
+        )
+    entrega, _ = inv.despachar(
+        org=org, ubicacion_origen=bodega, profile_destino=profile,
+        acta=acta, lineas=lineas,
+    )
     return entrega
 
 
 @pytest.fixture
-def kit_con_equipo(org_a, user_profile, ont):
-    entrega = EntregaDeKit.objects.create(
-        org=org_a, profile=user_profile, acta="K-EQUIPO"
-    )
-    ItemDeKit.objects.create(
-        entrega=entrega, material=ont, cantidad=1, serie="48575448A9B0C1"
-    )
-    return entrega
+def kit(org_a, bodega, user_profile, conector):
+    return _despachar(org_a, bodega, user_profile, "K-2024-094", [
+        {"material": conector, "cantidad": 10},
+    ])
+
+
+@pytest.fixture
+def kit_con_equipo(org_a, bodega, user_profile, ont):
+    return _despachar(org_a, bodega, user_profile, "K-EQUIPO", [
+        {"material": ont, "serie": "48575448A9B0C1"},
+    ])
 
 
 def consumir(org, profile, material, cantidad, clave, orden, serie=""):
@@ -137,7 +189,7 @@ class TestLaCuentaDelDia:
         consumir(org_a, user_profile, conector, 3, "c1", orden)
         devolver(org_a, user_profile, conector, 7, "d1")
 
-        assert MovimientoDeMaterial.objects.count() == 2
+        assert movimientos_del_telefono() == 2
         consumo = MovimientoDeMaterial.objects.get(tipo="consumo")
         assert consumo.cantidad == Decimal("3"), "el consumo no se tocó"
 

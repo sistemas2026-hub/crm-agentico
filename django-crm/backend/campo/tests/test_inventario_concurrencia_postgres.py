@@ -32,6 +32,7 @@ from django.db import connection
 from campo.inventario import ActivoSerializado, UbicacionDeActivo, UbicacionInventario
 from campo.models import MaterialCatalogo, MovimientoDeMaterial
 from campo.services import inventario as inv
+from campo.services import inventario_operacion as op
 from common.models import Profile
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -116,3 +117,57 @@ def test_a4_dos_despachos_concurrentes_de_la_misma_serie(
     pos = inv.posicion_de(activo)
     recalc, _ = inv.posicion_recalculada(activo)
     assert (pos.ubicacion_id if pos else None) == (recalc.id if recalc else None)
+
+
+@pytest.fixture
+def conector(org_a):
+    return MaterialCatalogo.objects.create(
+        org=org_a, codigo="CON-CONC", nombre="Conector de concurrencia",
+        clase=MaterialCatalogo.CONSUMIBLE,
+    )
+
+
+@pytest.mark.postgres_only
+def test_dos_reservas_concurrentes_no_pueden_pasarse_del_stock(
+    org_a, bodega, conector
+):
+    """La segunda carrera del modulo, y la que faltaba: reservar.
+
+    `_comprobar_serie_libre` razonaba sobre su carrera desde el principio;
+    `reservar` no. Dos despachadores reservan 60 de 100 al mismo tiempo: los dos
+    leen `libre = 100`, los dos pasan la validacion, `reservado` queda en 120 y
+    `libre` en -20. Es exactamente el caso que la tabla de reservas existe para
+    evitar -- prometerle material a un tecnico que no lo va a encontrar.
+
+    No hay fila de stock que bloquear --`libre` es una suma sobre dos tablas-- asi
+    que el candado va sobre la fila de la UBICACION, que es lo unico estable que
+    todas las reservas de esa bodega comparten.
+    """
+    if connection.vendor != "postgresql":
+        pytest.skip(
+            "la carrera depende de select_for_update, que SQLite no implementa: "
+            "ahi las dos reservas se ordenarian solas. NO SE PUDO MEDIR."
+        )
+
+    inv.registrar_entrada(org=org_a, material=conector, cantidad=100,
+                          ubicacion_destino=bodega)
+
+    def reservar_60(_):
+        try:
+            op.reservar(org=org_a, ubicacion=bodega, material=conector,
+                        cantidad=60)
+            return "ok"
+        except op.ReservaInvalida:
+            return "rechazada"
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        resultados = list(pool.map(reservar_60, [1, 2]))
+
+    # Una gana y la otra se rechaza. Cual, es indistinto.
+    assert sorted(resultados) == ["ok", "rechazada"], (
+        f"las dos reservas terminaron asi: {resultados}. `reservado` quedo en "
+        f"{op.reservado(bodega, conector)} sobre una existencia de 100."
+    )
+    assert op.libre(bodega, conector) >= 0

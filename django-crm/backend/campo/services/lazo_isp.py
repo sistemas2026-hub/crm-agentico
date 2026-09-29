@@ -52,18 +52,42 @@ no tiene conversacion.
 Se manda igual una `Idempotency-Key` estable derivada del movimiento, para que un
 reenvio se reconozca como tal en `asistente.operaciones_externas`.
 
-APAGADO POR OMISION, Y NO ES PRUDENCIA GENERICA
------------------------------------------------
-`CAMPO_AVISAR_SN_ONU_AL_ISP` tiene que valer exactamente `"1"`. Falta UNA medicion
-y es grave: un `PUT` normalmente espera el recurso COMPLETO, asi que mandar solo
-`sn_onu` podria **vaciar los demas campos del cliente**. OPTIONS dice que el
-metodo es PUT y que el campo es escribible (28/09/2026), pero OPTIONS ya mintio en
-esta API: las fechas de `crear_ticket_instalacion` aparecen en `actions` y el POST
-las descarta en silencio.
+EL RIESGO DEL PUT: MEDIDO EL 28/09/2026, Y NO SE MATERIALIZO
+-----------------------------------------------------------
+Este modulo nacio apagado por una sola pregunta: un `PUT` normalmente espera el
+recurso COMPLETO, asi que mandar solo `sn_onu` podria vaciar los demas campos del
+cliente. Se midio con un PUT real contra el cliente de prueba 6555:
 
-Se cierra con un PUT real contra un cliente de PRUEBA, comprobando por GET que lo
-demas sigue ahi. Hasta entonces esto no sale a la red, y `intentar_avisar()`
-devuelve por que no.
+    PUT {"sn_onu": "CANARIO-SN-1"}    -> 200, y al leer QUEDO ESCRITO
+    PUT {"comentarios": "canario-2"}  -> 200, y sn_onu SOBREVIVIO intacto
+
+**El PUT de este endpoint es PARCIAL.** Escribe lo que se manda y no toca el
+resto. Mandar solo `sn_onu` es seguro.
+
+DOS TRAMPAS QUE APARECIERON AL MEDIRLO
+--------------------------------------
+Las dos estan en la skill wisphub-api con su evidencia, y una afecta a este
+modulo:
+
+  1. UN 200 DE ESTA API NO PRUEBA QUE SE ESCRIBIO. Un PUT con campos que la API
+     no acepta devuelve 200 y no aplica nada -- se vio con `nombre`, `direccion` y
+     `telefono` a la vez. Por eso `intentar_avisar()` devuelve AVISADO cuando el
+     motor responde 2xx, y eso significa "el pedido salio", no "el ISP lo
+     aplico". Son dos hechos, como siempre en este proyecto. Comprobar el
+     segundo exigiria leer el cliente despues, y eso es otra pieza: hoy no se
+     hace y queda dicho.
+
+  2. `sn_onu` NO SE PUEDE VACIAR: `""` y `" "` devuelven 200 sin efecto, y `null`
+     da 400. Solo se puede SOBRESCRIBIR con otro valor. Este modulo no lo
+     necesita --solo escribe al instalar-- pero una funcion futura de
+     "desinstalar" que espere limpiar el campo va a fallar en silencio.
+
+QUE FALTA PARA ENCENDERLO
+-------------------------
+Solo poner `CAMPO_AVISAR_SN_ONU_AL_ISP=1` en el entorno del despliegue. La
+variable no vive en el repo: es una decision de operacion, igual que
+`RECONCILIADOR_HABILITADO`. Mientras no este, `intentar_avisar()` devuelve
+`APAGADO` con su motivo y no sale a la red.
 """
 
 from __future__ import annotations
@@ -154,8 +178,9 @@ def intentar_avisar(movimiento) -> ResultadoAviso:
     if not _habilitado():
         return ResultadoAviso(
             ResultadoAviso.APAGADO,
-            f"{BANDERA} != '1'. Falta medir si el PUT parcial vacia los demas "
-            f"campos del cliente; ver el docstring de este modulo.")
+            f"{BANDERA} != '1'. El riesgo del PUT ya se midio y es seguro "
+            f"(28/09/2026): solo falta poner la variable en el entorno del "
+            f"despliegue. Ver el docstring de este modulo.")
 
     if movimiento.tipo != MovimientoDeMaterial.CONSUMO:
         return ResultadoAviso(
@@ -187,7 +212,22 @@ def intentar_avisar(movimiento) -> ResultadoAviso:
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+
+    # NINGUNA EMPRESA CONCRETA VIVE EN EL CODIGO.
+    #
+    # Esta linea decia `or "rapilink"`. Es un hardcode de cliente, y lo peligroso
+    # no es el estilo: este parametro decide A QUE EMPRESA se le escribe en el
+    # ISP. Si un dia se despliega una segunda instalacion y alguien olvida la
+    # variable, el aviso de un tecnico de otra empresa sale con el tenant de
+    # Rapilink y escribe sobre los clientes de Rapilink. Fail-closed: sin el dato
+    # no se avisa, y se dice que falta.
+    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    if not tenant:
+        return ResultadoAviso(
+            ResultadoAviso.NO_CORRESPONDE,
+            "falta MOTOR_TENANT: sin saber de que empresa es este movimiento no "
+            "se le puede escribir al ISP, y suponerlo escribiria sobre los "
+            "clientes de otra.")
     herramienta = (os.environ.get(VARIABLE_HERRAMIENTA, "")
                    or HERRAMIENTA_POR_DEFECTO)
 

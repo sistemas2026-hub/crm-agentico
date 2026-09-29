@@ -33,6 +33,7 @@ Nada de lo ya ocurrido se bloquea jamas.
 from __future__ import annotations
 
 import hashlib
+import uuid
 from decimal import Decimal
 
 from django.db import transaction
@@ -267,6 +268,40 @@ def _clave(prefijo: str, *partes) -> str:
     return clave
 
 
+def _clave_de_hecho(prefijo: str, referencia, *partes) -> str:
+    """La clave de un hecho QUE YA OCURRIO, y por que a veces no puede ser estable.
+
+    EL DEFECTO QUE ESTO ARREGLA, MEDIDO EL 28/09/2026
+    -------------------------------------------------
+    La clave de una entrada salia de (org, material, cantidad, referencia). Sin
+    referencia --que es el caso normal: llegan diez conectores sin remision-- dos
+    entradas legitimas producen la MISMA clave:
+
+        llegan 10 el lunes     -> entrada:ab3f...
+        llegan 10 el miercoles -> entrada:ab3f...   IntegrityError, no entra
+
+    Y eso rompe la regla que ordena todo el modulo: un hecho que ya ocurrio no se
+    rechaza. El material estaba sobre la mesa y el sistema decia que no habia
+    llegado.
+
+    LA SALIDA NO ES INVENTAR UNA CLAVE ESTABLE
+    Una clave nueva por intento es un identificador unico, no una clave
+    idempotente -- invariante congelado del proyecto. Asi que no se finge: si hay
+    un documento durable (una remision, una factura, un acta, un numero de
+    conteo) la clave sale de ahi y protege de verdad. Si no lo hay, la clave es
+    unica Y LO DICE EN SU PROPIO VALOR -- el prefijo queda `<algo>-libre`, asi que
+    al mirar la tabla se ve cual fila estaba protegida y cual no, sin tener que
+    reconstruir nada.
+
+    Donde SI hace falta idempotencia de verdad, la da quien puede darla: el
+    llamador, con la cabecera `Idempotency-Key` de su peticion, que viaja hasta
+    aca como `referencia`.
+    """
+    if referencia:
+        return _clave(prefijo, referencia, *partes)
+    return _clave(f"{prefijo}-libre", uuid.uuid4())
+
+
 @transaction.atomic
 def registrar_entrada(*, org, material, cantidad, ubicacion_destino,
                       serie="", origen_ref="", profile=None, orden=None,
@@ -294,8 +329,9 @@ def registrar_entrada(*, org, material, cantidad, ubicacion_destino,
         serie=serie,
         ubicacion_origen=None,
         ubicacion_destino=ubicacion_destino,
-        idempotency_key=_clave("entrada", org.id, material.id,
-                               serie or cantidad, origen_ref or "sin-ref"),
+        idempotency_key=_clave_de_hecho("entrada", origen_ref, org.id,
+                                        material.id, serie or cantidad,
+                                        ubicacion_destino.id),
         datos=datos,
         **extra,
     )
@@ -346,6 +382,27 @@ def despachar(*, org, ubicacion_origen, profile_destino, lineas,
     if not lineas:
         raise DespachoInvalido("Un despacho sin lineas no es un despacho.")
 
+    # EL MISMO ACTA DOS VECES ES EL MISMO HECHO, NO DOS DESPACHOS.
+    #
+    # Medido el 28/09/2026: la clave idempotente de cada movimiento llevaba
+    # `entrega.id`, y la entrega se creaba en ESA MISMA llamada -- asi que la
+    # clave era nueva en cada intento y no habia idempotencia ninguna. Un doble
+    # clic o el reintento de un proxy despachaba dos veces, y la bodega quedaba
+    # descontada de mas. Con serie quedaba tapado por `_comprobar_serie_libre`;
+    # todo el material NO serializado --que es la mayoria del volumen-- estaba
+    # expuesto.
+    #
+    # El acta es la clave porque es el documento que las dos personas firman: es
+    # durable, existe antes de la peticion y no la inventa el servidor.
+    if acta:
+        ya = EntregaDeKit.objects.filter(org=org, acta=acta).first()
+        if ya is not None:
+            return ya, list(
+                MovimientoDeMaterial.objects.filter(
+                    org=org, tipo=MovimientoDeMaterial.DESPACHO, datos__acta=acta
+                ).order_by("created_at")
+            )
+
     destino = ubicacion_de_tecnico(profile_destino, org)
     entrega = EntregaDeKit.objects.create(
         org=org,
@@ -387,20 +444,30 @@ def despachar(*, org, ubicacion_origen, profile_destino, lineas,
             serie=serie,
             ubicacion_origen=ubicacion_origen,
             ubicacion_destino=destino,
-            idempotency_key=_clave("despacho", org.id, entrega.id, i,
-                                   material.id, serie or cantidad),
+            idempotency_key=_clave_de_hecho("despacho", acta, org.id, i,
+                                            material.id, serie or cantidad),
             datos={"acta": acta} if acta else {},
         )
         movimientos.append(mov)
         if serie:
             _mover_activo(activo_de(org, material, serie), destino, mov)
 
+        # LO DESPACHADO DEJA DE ESTAR COMPROMETIDO.
+        #
+        # Medido: se reservan 10, se despachan esos 10, la existencia baja a 90 y
+        # `reservado` seguia diciendo 10 -- asi que `libre` decia 80 cuando habia
+        # 90. El mismo material quedaba descontado dos veces y el error era
+        # PERMANENTE: nada volvia a mirar esa reserva nunca.
+        from campo.services.inventario_operacion import consumir_reservas
+        consumir_reservas(org=org, ubicacion=ubicacion_origen, material=material,
+                          cantidad=cantidad, serie=serie, movimiento=mov)
+
     return entrega, movimientos
 
 
 @transaction.atomic
 def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
-                       recibida_por=None, notas=""):
+                       recibida_por=None, notas="", referencia=""):
     """Tecnico -> bodega. El material vuelve a existir en la bodega.
 
     Es lo que faltaba del ciclo: antes `saldo_de` le restaba la devolucion al
@@ -418,6 +485,13 @@ def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
     quedan 6 y sigue trabajando-- y tratarlo como faltante abriria una incidencia
     por cada devolucion parcial, que es la forma mas rapida de que nadie las mire.
     Quien recibe es el que sabe si esto es un cierre o una entrega parcial.
+
+    `referencia` es lo que hace idempotente a esta recepcion: el numero del acta
+    de devolucion, o el `Idempotency-Key` de la peticion. Las `notas` NO sirven
+    para eso --dos devoluciones distintas pueden decir "cierre de jornada"-- y
+    usarlas como clave rechazaria la segunda. Sin referencia se registra igual,
+    porque el material ya volvio, y la fila queda marcada como no protegida
+    (ver `_clave_de_hecho`).
     """
     if ubicacion_destino is None:
         raise DespachoInvalido("Una devolucion necesita decir a que bodega vuelve.")
@@ -443,8 +517,9 @@ def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
             serie=serie,
             ubicacion_origen=origen,
             ubicacion_destino=ubicacion_destino,
-            idempotency_key=_clave("devolucion", org.id, origen.id, i,
-                                   material.id, serie or cantidad),
+            idempotency_key=_clave_de_hecho("devolucion", referencia, org.id,
+                                            origen.id, i, material.id,
+                                            serie or cantidad),
             motivo=notas,
         )
         movimientos.append(mov)
@@ -471,9 +546,9 @@ def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
                         f"{cantidad}. Falta por explicar: {falta}."
                         + (f" Nota de quien recibio: {notas}" if notas else "")
                     ),
-                    idempotency_key=_clave("faltante", org.id, origen.id, i,
-                                           material.id, serie or cantidad,
-                                           esperado),
+                    idempotency_key=_clave_de_hecho(
+                        "faltante", referencia, org.id, origen.id, i,
+                        material.id, serie or cantidad, esperado),
                 ))
 
     return movimientos, incidencias

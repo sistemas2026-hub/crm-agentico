@@ -47,7 +47,9 @@ from campo.services.inventario import (
     CERO,
     PRECISION,
     DespachoInvalido,
+    UbicacionInventario,
     _clave,
+    _clave_de_hecho,
     _mover_activo,
     activo_de,
     existencia,
@@ -104,6 +106,21 @@ def reservar(*, org, ubicacion, material, cantidad=None, serie="", orden=None,
     if cant <= CERO:
         raise ReservaInvalida("Una reserva sin cantidad no reserva nada.")
 
+    # SE BLOQUEA LA UBICACION ANTES DE LEER LO LIBRE.
+    #
+    # `libre` es una suma sobre dos tablas, no una fila: no hay nada que bloquear
+    # ahi. Dos despachadores que reservan 60 de 100 al mismo tiempo leen los dos
+    # `libre = 100`, los dos pasan la validacion, y `reservado` queda en 120 sobre
+    # una existencia de 100 -- exactamente el caso que esta tabla existe para
+    # evitar. El candado va sobre la fila de la ubicacion, que es lo unico estable
+    # que todas las reservas de esa bodega comparten: serializa las reservas de
+    # una bodega entre si y no toca las de las demas.
+    #
+    # `_comprobar_serie_libre` ya razonaba sobre esta misma carrera; esta no.
+    UbicacionInventario.objects.select_for_update().filter(
+        pk=ubicacion.pk
+    ).first()
+
     if serie:
         # Una serie reservada esta reservada una vez. El constraint lo garantiza;
         # esto da el mensaje util antes de que Postgres tire IntegrityError.
@@ -151,6 +168,74 @@ def liberar(reserva, *, motivo="", desenlace=ReservaDeMaterial.LIBERADA,
     reserva.save(update_fields=["resuelta_en", "desenlace", "movimiento",
                                 "motivo", "updated_at"])
     return reserva
+
+
+@transaction.atomic
+def consumir_reservas(*, org, ubicacion, material, cantidad, serie="",
+                      movimiento=None) -> list:
+    """Lo que se despacho deja de estar comprometido.
+
+    EL DEFECTO QUE ESTO ARREGLA, MEDIDO EL 28/09/2026
+    -------------------------------------------------
+    `ReservaDeMaterial.CONSUMIDA` existia en el modelo y ningun codigo de
+    produccion lo escribia nunca. Consecuencia: se reservan 10, se despachan esos
+    10, la existencia baja a 90 y `reservado` sigue diciendo 10. `libre` contesta
+    80 cuando hay 90, el mismo material queda descontado dos veces, y el error es
+    PERMANENTE porque nada vuelve a mirar esa reserva -- ni `vencer_reservas`, que
+    solo toca las que tienen plazo.
+
+    COMO SE ELIGE CUAL RESERVA SE CIERRA
+    La mas antigua primero: es la que llevaba mas tiempo bloqueando material, y
+    cerrar la mas nueva dejaria viva una promesa que nadie va a cumplir. Si la
+    reserva es mas grande que lo despachado se REDUCE en vez de cerrarse -- una
+    reserva de 50 de la que salieron 10 sigue comprometiendo 40, y cerrarla
+    entera liberaria material que sigue prometido. Reducir una reserva es
+    legitimo justamente porque una reserva no es un hecho ocurrido: es una
+    promesa, y se anota por que cambio.
+
+    Con serie se busca primero la reserva de ESA serie. Si no hay, se usa una
+    generica del mismo material: reservar "una ONT" y despachar la ONT con serie
+    tal es cumplir esa reserva, no otra distinta.
+    """
+    restante = Decimal(str(cantidad))
+    # `select_for_update` por la misma razon que en `reservar`: dos despachos del
+    # mismo material a la vez podrian cerrar LA MISMA reserva cada uno y bajar
+    # `reservado` dos veces por un solo compromiso. `liberar` es idempotente, pero
+    # decide mirando el objeto que ya tiene en memoria, y ahi la carrera ya paso.
+    activas = ReservaDeMaterial.objects.select_for_update().filter(
+        org=org, ubicacion=ubicacion, material=material, resuelta_en__isnull=True
+    )
+    if serie:
+        de_la_serie = list(activas.filter(serie=serie).order_by("created_at"))
+        candidatas = de_la_serie or list(
+            activas.filter(serie="").order_by("created_at")
+        )
+    else:
+        candidatas = list(activas.filter(serie="").order_by("created_at"))
+
+    tocadas = []
+    for reserva in candidatas:
+        if restante <= CERO:
+            break
+        if reserva.cantidad <= restante:
+            restante -= reserva.cantidad
+            tocadas.append(liberar(
+                reserva, desenlace=ReservaDeMaterial.CONSUMIDA,
+                movimiento=movimiento,
+                motivo="Se despacho y dejo de estar comprometido.",
+            ))
+        else:
+            antes = reserva.cantidad
+            reserva.cantidad = antes - restante
+            reserva.motivo = (
+                reserva.motivo
+                + f" Se despacharon {restante} de {antes}: la reserva "
+                + f"queda en {reserva.cantidad}."
+            ).strip()
+            reserva.save(update_fields=["cantidad", "motivo", "updated_at"])
+            restante = CERO
+            tocadas.append(reserva)
+    return tocadas
 
 
 def vencer_reservas(org) -> list:
@@ -203,7 +288,7 @@ def reservas_de(ubicacion, *, solo_activas: bool = True) -> list[dict]:
 
 @transaction.atomic
 def trasladar(*, org, ubicacion_origen, ubicacion_destino, lineas,
-              profile=None, motivo=""):
+              profile=None, motivo="", referencia=""):
     """Bodega -> bodega, o bodega -> vehiculo. El material cambia de sitio.
 
     Es el movimiento mas simple de todos y el que hace util tener mas de una
@@ -239,9 +324,9 @@ def trasladar(*, org, ubicacion_origen, ubicacion_destino, lineas,
             cantidad=cant, serie=serie,
             ubicacion_origen=ubicacion_origen,
             ubicacion_destino=ubicacion_destino,
-            idempotency_key=_clave("traslado", org.id, ubicacion_origen.id,
-                                   ubicacion_destino.id, i, material.id,
-                                   serie or cant),
+            idempotency_key=_clave_de_hecho(
+                "traslado", referencia, org.id, ubicacion_origen.id,
+                ubicacion_destino.id, i, material.id, serie or cant),
             motivo=motivo,
         )
         movimientos.append(mov)
@@ -390,8 +475,8 @@ def registrar_compra(*, org, ubicacion_destino, lineas, proveedor=None,
             ubicacion_destino=ubicacion_destino,
             costo_unitario=Decimal(str(costo)) if costo is not None else None,
             compra=compra,
-            idempotency_key=_clave("compra", org.id, compra.id, i, material.id,
-                                   serie or cant),
+            idempotency_key=_clave_de_hecho("compra", referencia, org.id, i,
+                                            material.id, serie or cant),
             motivo=f"Compra {referencia}" if referencia else "Compra",
         )
         movimientos.append(mov)
