@@ -197,6 +197,78 @@ def test_la_devolucion_vuelve_por_la_api(
     assert inv.existencia(bodega, conector) == Decimal("82")
 
 
+def test_una_devolucion_que_no_cuadra_abre_la_incidencia_POR_LA_API(
+    admin_client, org_a, bodega, conector, user_profile
+):
+    """El camino completo, que estaba cortado en el ultimo tramo.
+
+    `recibir_devolucion` abre una incidencia cuando la linea dice `esperado` y
+    vuelve menos. La VISTA armaba la linea con material, cantidad y serie, y
+    descartaba `esperado`: por la API web la incidencia NUNCA se abria. La
+    pantalla lo mandaba, el serializador lo tiraba, y quien recibia veia un 201
+    limpio sobre una devolucion a la que le faltaban tres conectores.
+
+    Se afirma sobre el EFECTO --que la incidencia existe y que su cantidad es la
+    diferencia-- y no sobre que la vista lea el campo: eso ya estaba "probado" por
+    las pruebas del servicio, que pasaban con el hueco vivo porque llamaban al
+    servicio directamente.
+    """
+    inv.registrar_entrada(
+        org=org_a, material=conector, cantidad=100, ubicacion_destino=bodega,
+    )
+    inv.despachar(
+        org=org_a, ubicacion_origen=bodega, profile_destino=user_profile,
+        lineas=[{"material": conector, "cantidad": 18}], acta="ACTA-ESPERADO",
+    )
+
+    r = admin_client.post(DEVOLUCIONES, {
+        "profile_origen": str(user_profile.id),
+        "ubicacion_destino": str(bodega.id),
+        "lineas": [{"material": "CON-SC-APC", "cantidad": "15", "esperado": "18"}],
+    }, format="json")
+
+    assert r.status_code == 201, r.content
+    incidencias = r.json()["incidencias"]
+    assert len(incidencias) == 1, (
+        f"volvieron 15 de 18 esperados y no se abrio ninguna incidencia: "
+        f"{r.json()}"
+    )
+    i = incidencias[0]
+    assert i["material"] == "CON-SC-APC"
+    assert Decimal(i["cantidad"]) == Decimal("3")
+    # Los dos numeros que la originaron viajan, para que la pantalla no tenga que
+    # leerlos del texto del motivo.
+    assert i["esperado"] == "18"
+    assert i["recibido"] == "15"
+
+
+def test_sin_esperado_no_se_supone_un_faltante(
+    admin_client, org_a, bodega, conector, user_profile
+):
+    """Devolver 12 de 18 es legitimo: al tecnico le quedan 6 y sigue trabajando.
+
+    La contraparte de la prueba anterior, y la razon por la que el campo es
+    opcional: si la ausencia de `esperado` abriera una incidencia, habria una por
+    cada devolucion parcial y nadie las mirarian mas.
+    """
+    inv.registrar_entrada(
+        org=org_a, material=conector, cantidad=100, ubicacion_destino=bodega,
+    )
+    inv.despachar(
+        org=org_a, ubicacion_origen=bodega, profile_destino=user_profile,
+        lineas=[{"material": conector, "cantidad": 18}], acta="ACTA-SIN-ESPERADO",
+    )
+
+    r = admin_client.post(DEVOLUCIONES, {
+        "profile_origen": str(user_profile.id),
+        "ubicacion_destino": str(bodega.id),
+        "lineas": [{"material": "CON-SC-APC", "cantidad": "12"}],
+    }, format="json")
+
+    assert r.status_code == 201, r.content
+    assert r.json()["incidencias"] == []
+
+
 def test_la_historia_de_una_serie_se_consulta(
     admin_client, org_a, bodega, ont, user_profile
 ):

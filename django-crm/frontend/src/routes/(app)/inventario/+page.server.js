@@ -89,14 +89,17 @@ export async function load({ url, cookies }) {
     extra.errorExtra = provs.error || Boolean(val?.error);
   } else if (ver === 'reportes') {
     const cual = (url.searchParams.get('de') ?? 'consumo').trim();
-    const rep = await leerReporte(ctx, cual);
-    extra.reporte = { de: cual, filas: rep.filas };
+    const desde = (url.searchParams.get('desde') ?? '').trim();
+    const hasta = (url.searchParams.get('hasta') ?? '').trim();
+    const rep = await leerReporte(ctx, cual, desde, hasta);
+    extra.reporte = { de: cual, filas: rep.filas, desde, hasta };
     extra.errorExtra = rep.error;
   }
 
   const consulta = serie ? await leerSerie(ctx, serie) : null;
 
   return {
+    metricas: contar(existencias),
     existencias: existencias.ubicaciones,
     materiales: catalogo.materiales,
     ubicaciones: ubicaciones.ubicaciones,
@@ -110,6 +113,74 @@ export async function load({ url, cookies }) {
     noSePudoLeer:
       existencias.error || catalogo.error || ubicaciones.error || personas.error,
   };
+}
+
+/**
+ * Las líneas de material de un formulario multilínea.
+ *
+ * Los campos llegan repetidos --tres `material`, tres `cantidad`, tres `serie`--
+ * y `getAll` los devuelve en orden, así que la posición es lo que las une. Se
+ * descartan las que no dicen de qué material son: una fila vacía que el operador
+ * agregó y no llenó no es una línea, y mandarla haría fallar el lote entero.
+ *
+ * @param {FormData} f
+ */
+function leerLineas(f) {
+  const materiales = f.getAll('material');
+  const cantidades = f.getAll('cantidad');
+  const series = f.getAll('serie');
+  const esperados = f.getAll('esperado');
+  const costos = f.getAll('costo_unitario');
+  const lineas = [];
+  for (let i = 0; i < materiales.length; i += 1) {
+    const material = String(materiales[i] ?? '').trim();
+    if (!material) continue;
+    const esperado = String(esperados[i] ?? '').trim();
+    lineas.push({
+      material,
+      cantidad: cantidades[i] ?? '',
+      serie: String(series[i] ?? '').trim(),
+      // Solo viaja si quien recibe lo declaró. Sin esto el backend NO adivina un
+      // faltante: devolver parte de lo que se tiene es legítimo.
+      ...(esperado ? { esperado } : {}),
+      // Y el costo solo lo usa la compra. `null` cuando no se sabe: cero diría
+      // que el material es gratis, que es distinto de no conocer su precio.
+      ...(String(costos[i] ?? '').trim()
+        ? { costo_unitario: String(costos[i]).trim() }
+        : {})
+    });
+  }
+  return lineas;
+}
+
+/**
+ * Los indicadores de la cabecera, calculados de lo que ya se leyó.
+ *
+ * NINGUNO SE INVENTA, Y SI LA LECTURA FALLÓ NO HAY NÚMERO. Cuando `existencias`
+ * viene con error, sus listas están vacías: contar sobre eso daría «0 ubicaciones,
+ * 0 alertas», que es la peor respuesta posible — un cero tranquilizador sobre un
+ * dato que no se pudo leer. En ese caso se devuelve `null` y la pantalla muestra
+ * `—`.
+ *
+ * El diseño pide un cuarto indicador, «equipos en tránsito», que no sale de acá:
+ * haría falta contar los activos serializados que están en la custodia de un
+ * técnico, y esa consulta todavía no existe en la API.
+ *
+ * @param {any} existencias
+ */
+function contar(existencias) {
+  if (existencias?.error) return { ubicaciones: null, materiales: null, negativos: null };
+
+  const bloques = existencias?.ubicaciones ?? [];
+  const materiales = new Set();
+  let negativos = 0;
+  for (const bloque of bloques) {
+    for (const m of bloque.materiales ?? []) {
+      materiales.add(m.material_id);
+      if (Number(m.existencia) < 0) negativos += 1;
+    }
+  }
+  return { ubicaciones: bloques.length, materiales: materiales.size, negativos };
 }
 
 /**
@@ -138,11 +209,16 @@ export const actions = {
 
   despacho: async ({ request, cookies }) => {
     const f = await request.formData();
-    const lineas = [{
-      material: f.get('material'),
-      cantidad: f.get('cantidad'),
-      serie: f.get('serie') ?? '',
-    }];
+    // VARIAS LÍNEAS EN UN DESPACHO, que es como se entrega un kit de verdad: el
+    // técnico se lleva conectores, metros de fibra y una ONT en el mismo acta.
+    // El servicio del backend ya recibía una lista; la pantalla mandaba una sola
+    // línea y obligaba a repetir el acta, que además es la clave idempotente --
+    // el segundo despacho con la misma acta habría devuelto el primero sin
+    // agregar nada.
+    const lineas = leerLineas(f);
+    if (lineas.length === 0) {
+      return fail(400, { error: 'Un despacho sin líneas no es un despacho.' });
+    }
     try {
       const r = await despachar({ cookies }, {
         ubicacion_origen: f.get('ubicacion_origen'),
@@ -158,20 +234,17 @@ export const actions = {
 
   devolucion: async ({ request, cookies }) => {
     const f = await request.formData();
+    const lineas = leerLineas(f);
+    if (lineas.length === 0) {
+      return fail(400, { error: 'Hace falta decir qué material volvió.' });
+    }
     try {
-      const esperado = (f.get('esperado') ?? '').toString().trim();
       const r = await recibirDevolucion({ cookies }, {
         profile_origen: f.get('profile_origen'),
         ubicacion_destino: f.get('ubicacion_destino'),
         notas: f.get('notas') ?? '',
-        lineas: [{
-          material: f.get('material'),
-          cantidad: f.get('cantidad'),
-          serie: f.get('serie') ?? '',
-          // Solo viaja si quien recibe lo declaró. Sin esto el backend NO
-          // adivina un faltante: devolver parte de lo que se tiene es legítimo.
-          ...(esperado ? { esperado } : {}),
-        }],
+        referencia: f.get('referencia') ?? '',
+        lineas,
       });
       const abiertas = r?.incidencias ?? [];
       if (abiertas.length) {
@@ -224,15 +297,16 @@ export const actions = {
   traslado: async ({ request, cookies }) => {
     const f = await request.formData();
     try {
+      const lineas = leerLineas(f);
+      if (lineas.length === 0) {
+        return fail(400, { error: 'Un traslado sin líneas no mueve nada.' });
+      }
       await trasladar({ cookies }, {
         ubicacion_origen: f.get('ubicacion_origen'),
         ubicacion_destino: f.get('ubicacion_destino'),
         motivo: f.get('motivo') ?? '',
-        lineas: [{
-          material: f.get('material'),
-          cantidad: f.get('cantidad'),
-          serie: f.get('serie') ?? '',
-        }],
+        referencia: f.get('referencia') ?? '',
+        lineas,
       });
       return { hecho: 'El traslado quedó registrado.' };
     } catch (e) {
@@ -302,17 +376,16 @@ export const actions = {
   compra: async ({ request, cookies }) => {
     const f = await request.formData();
     try {
+      const lineas = leerLineas(f);
+      if (lineas.length === 0) {
+        return fail(400, { error: 'Una compra sin líneas no es una compra.' });
+      }
       await registrarCompra({ cookies }, {
         ubicacion_destino: f.get('ubicacion_destino'),
         proveedor: f.get('proveedor') || null,
         referencia: f.get('referencia') ?? '',
         moneda: f.get('moneda') || 'COP',
-        lineas: [{
-          material: f.get('material'),
-          cantidad: f.get('cantidad'),
-          serie: f.get('serie') ?? '',
-          costo_unitario: f.get('costo_unitario') || null,
-        }],
+        lineas,
       });
       return { hecho: 'La compra quedó registrada y el material entró.' };
     } catch (e) {

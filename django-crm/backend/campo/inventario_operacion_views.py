@@ -199,6 +199,11 @@ class TrasladosView(APIView):
                 org=org, ubicacion_origen=origen, ubicacion_destino=destino,
                 lineas=lineas, profile=request.profile,
                 motivo=(request.data.get("motivo") or "").strip(),
+                # El numero de la hoja de ruta, si existe: es lo que hace que
+                # reenviar el formulario no traslade dos veces. Sin el, el
+                # traslado se registra igual y su clave queda marcada como no
+                # protegida -- ver `_clave_de_hecho` en services/inventario.py.
+                referencia=(request.data.get("referencia") or "").strip(),
             )
         except inv.DespachoInvalido as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)

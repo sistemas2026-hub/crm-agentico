@@ -1,0 +1,300 @@
+/*
+ * Inventario -- el sistema visual de la pantalla, portado de Google Stitch.
+ *
+ * DE DONDE SALE
+ * -------------
+ * Del proyecto "Modulo Inventario Dexter" de Stitch (10 pantallas, una por
+ * pestana). Los 47 colores, 7 espaciados, 4 radios y 8 tipografias son los del
+ * `tailwind.config` que Stitch genero, al valor exacto: este archivo lo produce
+ * un generador (`generar_css.py` en el material de trabajo) y no una
+ * transcripcion a mano, porque un color casi igual no se ve al mirar.
+ *
+ * POR QUE CSS PROPIO Y NO EL @theme GLOBAL
+ * ----------------------------------------
+ * El design system del CRM es BottleCRM: naranja #ea580c. El de esta pantalla es
+ * Material 3 azul. Son dos sistemas incompatibles, y meter estos tokens en el
+ * `@theme` de app.css los volveria visibles en TODAS las pantallas. Asi que viven
+ * aca, bajo `.inv`, y no salen de esta ruta. Mismo criterio --y misma razon-- que
+ * `supervisor-noc/supervisor-noc.css`, la otra pantalla portada de Stitch.
+ *
+ * LAS CLASES CONSERVAN EL NOMBRE QUE LES PUSO STITCH
+ * --------------------------------------------------
+ * `bg-surface-container-lowest`, `text-label-code`, `px-space-lg`. Asi el marcado
+ * se pega tal como se diseno y no hay un paso de renombrado donde perder
+ * fidelidad. Las 266 clases restantes del marcado son utilidades corrientes
+ * (flex, grid, shadow-sm, tabular-nums) y las sirve el Tailwind del proyecto.
+ *
+ * TRES RADIOS QUE SIGNIFICAN OTRA COSA ACA
+ * ----------------------------------------
+ * En Stitch `rounded` es 2px, `rounded-lg` 4px, `rounded-xl` 8px y `rounded-full`
+ * 12px -- NO un circulo. Las cuatro existen en el Tailwind del proyecto con otros
+ * valores, asi que las reglas de este archivo tienen que ganar: lo hacen por
+ * especificidad, porque `.inv .rounded-full` (0,2,0) le gana a `.rounded-full`
+ * (0,1,0). Si algun dia se ve un boton con esquinas de 9999px, es esto.
+ */
+
+.inv {
+
+  /* --- los 47 colores del config, al valor exacto --- */
+  --inv-background: #f7f9fb;
+  --inv-error: #ba1a1a;
+  --inv-error-container: #ffdad6;
+  --inv-inverse-on-surface: #eff1f3;
+  --inv-inverse-primary: #b4c5ff;
+  --inv-inverse-surface: #2d3133;
+  --inv-on-background: #191c1e;
+  --inv-on-error: #ffffff;
+  --inv-on-error-container: #93000a;
+  --inv-on-primary: #ffffff;
+  --inv-on-primary-container: #eeefff;
+  --inv-on-primary-fixed: #00174b;
+  --inv-on-primary-fixed-variant: #003ea8;
+  --inv-on-secondary: #ffffff;
+  --inv-on-secondary-container: #57657a;
+  --inv-on-secondary-fixed: #0d1c2e;
+  --inv-on-secondary-fixed-variant: #3a485b;
+  --inv-on-surface: #191c1e;
+  --inv-on-surface-variant: #434655;
+  --inv-on-tertiary: #ffffff;
+  --inv-on-tertiary-container: #ffede6;
+  --inv-on-tertiary-fixed: #360f00;
+  --inv-on-tertiary-fixed-variant: #7d2d00;
+  --inv-outline: #737686;
+  --inv-outline-variant: #c3c6d7;
+  --inv-primary: #004ac6;
+  --inv-primary-container: #2563eb;
+  --inv-primary-fixed: #dbe1ff;
+  --inv-primary-fixed-dim: #b4c5ff;
+  --inv-secondary: #515f74;
+  --inv-secondary-container: #d5e3fc;
+  --inv-secondary-fixed: #d5e3fc;
+  --inv-secondary-fixed-dim: #b9c7df;
+  --inv-surface: #f7f9fb;
+  --inv-surface-bright: #f7f9fb;
+  --inv-surface-container: #eceef0;
+  --inv-surface-container-high: #e6e8ea;
+  --inv-surface-container-highest: #e0e3e5;
+  --inv-surface-container-low: #f2f4f6;
+  --inv-surface-container-lowest: #ffffff;
+  --inv-surface-dim: #d8dadc;
+  --inv-surface-tint: #0053db;
+  --inv-surface-variant: #e0e3e5;
+  --inv-tertiary: #943700;
+  --inv-tertiary-container: #bc4800;
+  --inv-tertiary-fixed: #ffdbcd;
+  --inv-tertiary-fixed-dim: #ffb596;
+
+  /* La tipografia del diseno. Las dos se cargan en +page.svelte. */
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--inv-on-surface);
+  background: var(--inv-surface);
+}
+
+/* --------------------------------------------------------------------------
+ * Base de la pantalla
+ * ------------------------------------------------------------------------ */
+
+.inv *,
+.inv *::before,
+.inv *::after { box-sizing: border-box; }
+
+/* El marcado de Stitch cuenta con que el navegador no traiga margenes propios en
+ * titulos y parrafos: el espaciado lo pone el layout con `gap`. Sin esto, cada
+ * h1/h2/p suma su margen y la pantalla se ve mas suelta que el diseno. */
+.inv h1, .inv h2, .inv h3, .inv p, .inv ul, .inv ol { margin: 0; }
+.inv ul, .inv ol { padding: 0; list-style: none; }
+
+.inv table { border-collapse: collapse; }
+
+/* Los controles heredan la tipografia: si no, el navegador les pone la suya y los
+ * formularios quedan con otra fuente que el resto de la pantalla. */
+.inv input, .inv select, .inv textarea, .inv button { font: inherit; color: inherit; }
+.inv button { cursor: pointer; }
+.inv button:disabled { cursor: not-allowed; }
+
+/* Los iconos: Material Symbols Outlined, la fuente que usa el diseno. El tamano
+ * lo fija cada uso con `text-[20px]`, asi que aca solo va lo que hace que la
+ * ligadura se dibuje como icono y no como la palabra "warehouse". */
+.inv .material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}
+
+/* --------------------------------------------------------------------------
+ * Tokens del diseno, generados desde el config de Stitch
+ * ------------------------------------------------------------------------ */
+
+.inv .bg-error { background-color: var(--inv-error); }
+.inv .bg-error-container { background-color: var(--inv-error-container); }
+.inv .bg-error-container\/20 { background-color: color-mix(in srgb, var(--inv-error-container) 20%, transparent); }
+.inv .bg-error-container\/30 { background-color: color-mix(in srgb, var(--inv-error-container) 30%, transparent); }
+.inv .bg-error-container\/40 { background-color: color-mix(in srgb, var(--inv-error-container) 40%, transparent); }
+.inv .bg-outline { background-color: var(--inv-outline); }
+.inv .bg-primary { background-color: var(--inv-primary); }
+.inv .bg-primary-container { background-color: var(--inv-primary-container); }
+.inv .bg-primary-container\/10 { background-color: color-mix(in srgb, var(--inv-primary-container) 10%, transparent); }
+.inv .bg-primary-fixed { background-color: var(--inv-primary-fixed); }
+.inv .bg-primary-fixed\/20 { background-color: color-mix(in srgb, var(--inv-primary-fixed) 20%, transparent); }
+.inv .bg-primary-fixed\/40 { background-color: color-mix(in srgb, var(--inv-primary-fixed) 40%, transparent); }
+.inv .bg-secondary { background-color: var(--inv-secondary); }
+.inv .bg-secondary-container { background-color: var(--inv-secondary-container); }
+.inv .bg-secondary-fixed { background-color: var(--inv-secondary-fixed); }
+.inv .bg-surface { background-color: var(--inv-surface); }
+.inv .bg-surface-container { background-color: var(--inv-surface-container); }
+.inv .bg-surface-container-high { background-color: var(--inv-surface-container-high); }
+.inv .bg-surface-container-highest { background-color: var(--inv-surface-container-highest); }
+.inv .bg-surface-container-low { background-color: var(--inv-surface-container-low); }
+.inv .bg-surface-container-low\/20 { background-color: color-mix(in srgb, var(--inv-surface-container-low) 20%, transparent); }
+.inv .bg-surface-container-low\/40 { background-color: color-mix(in srgb, var(--inv-surface-container-low) 40%, transparent); }
+.inv .bg-surface-container-low\/50 { background-color: color-mix(in srgb, var(--inv-surface-container-low) 50%, transparent); }
+.inv .bg-surface-container-low\/60 { background-color: color-mix(in srgb, var(--inv-surface-container-low) 60%, transparent); }
+.inv .bg-surface-container-lowest { background-color: var(--inv-surface-container-lowest); }
+.inv .bg-surface-container-lowest\/40 { background-color: color-mix(in srgb, var(--inv-surface-container-lowest) 40%, transparent); }
+.inv .bg-surface-container-lowest\/90 { background-color: color-mix(in srgb, var(--inv-surface-container-lowest) 90%, transparent); }
+.inv .bg-surface-container\/60 { background-color: color-mix(in srgb, var(--inv-surface-container) 60%, transparent); }
+.inv .bg-surface-variant { background-color: var(--inv-surface-variant); }
+.inv .bg-tertiary { background-color: var(--inv-tertiary); }
+.inv .bg-tertiary-fixed { background-color: var(--inv-tertiary-fixed); }
+.inv .border-error { border-color: var(--inv-error); }
+.inv .border-primary { border-color: var(--inv-primary); }
+.inv .border-surface-container { border-color: var(--inv-surface-container); }
+.inv .divide-error-container\/40 { border-color: color-mix(in srgb, var(--inv-error-container) 40%, transparent); }
+.inv .divide-outline-variant\/30 { border-color: color-mix(in srgb, var(--inv-outline-variant) 30%, transparent); }
+.inv .divide-surface-container { border-color: var(--inv-surface-container); }
+.inv .divide-surface-container-low { border-color: var(--inv-surface-container-low); }
+.inv .fill-primary { fill: var(--inv-primary); }
+.inv .fill-primary-fixed { fill: var(--inv-primary-fixed); }
+.inv .fill-secondary-container { fill: var(--inv-secondary-container); }
+.inv .focus\:bg-surface-bright:focus { background-color: var(--inv-surface-bright); }
+.inv .focus\:bg-surface-container-lowest:focus { background-color: var(--inv-surface-container-lowest); }
+.inv .focus\:ring-error:focus { --tw-ring-color: var(--inv-error); }
+.inv .focus\:ring-primary:focus { --tw-ring-color: var(--inv-primary); }
+.inv .focus\:ring-primary\/20:focus { --tw-ring-color: color-mix(in srgb, var(--inv-primary) 20%, transparent); }
+.inv .font-body-md { font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.inv .font-body-sm { font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.inv .font-headline-lg { font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.inv .font-headline-md { font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.inv .font-headline-sm { font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.inv .font-label-code { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+.inv .font-label-numeric { font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.inv .font-table-header { font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.inv .gap-gutter { gap: 1rem; }
+.inv .gap-margin { gap: 1.5rem; }
+.inv .gap-space-lg { gap: 1rem; }
+.inv .gap-space-md { gap: 0.75rem; }
+.inv .gap-space-sm { gap: 0.5rem; }
+.inv .gap-space-xl { gap: 1.5rem; }
+.inv .gap-space-xs { gap: 0.25rem; }
+.inv .gap-x-space-md { column-gap: 0.75rem; }
+.inv .gap-y-space-xs { row-gap: 0.25rem; }
+.inv .hover\:bg-error-container:hover { background-color: var(--inv-error-container); }
+.inv .hover\:bg-error-container\/20:hover { background-color: color-mix(in srgb, var(--inv-error-container) 20%, transparent); }
+.inv .hover\:bg-error-container\/30:hover { background-color: color-mix(in srgb, var(--inv-error-container) 30%, transparent); }
+.inv .hover\:bg-error-container\/40:hover { background-color: color-mix(in srgb, var(--inv-error-container) 40%, transparent); }
+.inv .hover\:bg-primary:hover { background-color: var(--inv-primary); }
+.inv .hover\:bg-primary-container:hover { background-color: var(--inv-primary-container); }
+.inv .hover\:bg-primary-fixed\/30:hover { background-color: color-mix(in srgb, var(--inv-primary-fixed) 30%, transparent); }
+.inv .hover\:bg-primary\/90:hover { background-color: color-mix(in srgb, var(--inv-primary) 90%, transparent); }
+.inv .hover\:bg-surface:hover { background-color: var(--inv-surface); }
+.inv .hover\:bg-surface-bright:hover { background-color: var(--inv-surface-bright); }
+.inv .hover\:bg-surface-container:hover { background-color: var(--inv-surface-container); }
+.inv .hover\:bg-surface-container-high:hover { background-color: var(--inv-surface-container-high); }
+.inv .hover\:bg-surface-container-low:hover { background-color: var(--inv-surface-container-low); }
+.inv .hover\:bg-surface-container-low\/40:hover { background-color: color-mix(in srgb, var(--inv-surface-container-low) 40%, transparent); }
+.inv .hover\:bg-surface-container-low\/60:hover { background-color: color-mix(in srgb, var(--inv-surface-container-low) 60%, transparent); }
+.inv .hover\:bg-surface-container-lowest:hover { background-color: var(--inv-surface-container-lowest); }
+.inv .hover\:text-error:hover { color: var(--inv-error); }
+.inv .hover\:text-on-error-container:hover { color: var(--inv-on-error-container); }
+.inv .hover\:text-on-surface:hover { color: var(--inv-on-surface); }
+.inv .hover\:text-primary:hover { color: var(--inv-primary); }
+.inv .hover\:text-tertiary-container:hover { color: var(--inv-tertiary-container); }
+.inv .left-space-md { left: 0.75rem; }
+.inv .mb-space-lg { margin-bottom: 1rem; }
+.inv .mb-space-md { margin-bottom: 0.75rem; }
+.inv .mb-space-sm { margin-bottom: 0.5rem; }
+.inv .mb-space-xs { margin-bottom: 0.25rem; }
+.inv .mt-space-lg { margin-top: 1rem; }
+.inv .mt-space-md { margin-top: 0.75rem; }
+.inv .mt-space-sm { margin-top: 0.5rem; }
+.inv .mt-space-xl { margin-top: 1.5rem; }
+.inv .mt-space-xs { margin-top: 0.25rem; }
+.inv .p-margin { padding: 1.5rem; }
+.inv .p-space-lg { padding: 1rem; }
+.inv .p-space-md { padding: 0.75rem; }
+.inv .p-space-sm { padding: 0.5rem; }
+.inv .p-space-xl { padding: 1.5rem; }
+.inv .p-space-xs { padding: 0.25rem; }
+.inv .pb-space-lg { padding-bottom: 1rem; }
+.inv .pb-space-md { padding-bottom: 0.75rem; }
+.inv .pb-space-sm { padding-bottom: 0.5rem; }
+.inv .pb-space-xl { padding-bottom: 1.5rem; }
+.inv .pb-space-xs { padding-bottom: 0.25rem; }
+.inv .pl-space-lg { padding-left: 1rem; }
+.inv .pl-space-md { padding-left: 0.75rem; }
+.inv .placeholder\:text-outline::placeholder { color: var(--inv-outline); }
+.inv .placeholder\:text-secondary::placeholder { color: var(--inv-secondary); }
+.inv .placeholder\:text-secondary\/60::placeholder { color: color-mix(in srgb, var(--inv-secondary) 60%, transparent); }
+.inv .pr-space-md { padding-right: 0.75rem; }
+.inv .pr-space-xs { padding-right: 0.25rem; }
+.inv .pt-margin { padding-top: 1.5rem; }
+.inv .pt-space-lg { padding-top: 1rem; }
+.inv .pt-space-md { padding-top: 0.75rem; }
+.inv .pt-space-sm { padding-top: 0.5rem; }
+.inv .pt-space-xs { padding-top: 0.25rem; }
+.inv .px-gutter { padding-left: 1rem; padding-right: 1rem; }
+.inv .px-space-lg { padding-left: 1rem; padding-right: 1rem; }
+.inv .px-space-md { padding-left: 0.75rem; padding-right: 0.75rem; }
+.inv .px-space-sm { padding-left: 0.5rem; padding-right: 0.5rem; }
+.inv .px-space-xl { padding-left: 1.5rem; padding-right: 1.5rem; }
+.inv .px-space-xs { padding-left: 0.25rem; padding-right: 0.25rem; }
+.inv .py-space-lg { padding-top: 1rem; padding-bottom: 1rem; }
+.inv .py-space-md { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+.inv .py-space-sm { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.inv .py-space-xs { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.inv .right-space-md { right: 0.75rem; }
+.inv .rounded { border-radius: 0.125rem; }
+.inv .rounded-full { border-radius: 0.75rem; }
+.inv .rounded-l { border-top-left-radius: 0.125rem; border-bottom-left-radius: 0.125rem; }
+.inv .rounded-lg { border-radius: 0.25rem; }
+.inv .rounded-r { border-top-right-radius: 0.125rem; border-bottom-right-radius: 0.125rem; }
+.inv .rounded-xl { border-radius: 0.5rem; }
+.inv .space-y-space-lg > * + * { margin-top: 1rem; }
+.inv .text-body-md { font-size: 0.875rem; line-height: 1.25rem; font-weight: 400; }
+.inv .text-body-sm { font-size: 0.75rem; line-height: 1rem; font-weight: 400; }
+.inv .text-error { color: var(--inv-error); }
+.inv .text-error-container { color: var(--inv-error-container); }
+.inv .text-headline-lg { font-size: 1.5rem; line-height: 2rem; letter-spacing: -0.015em; font-weight: 600; }
+.inv .text-headline-md { font-size: 1.25rem; line-height: 1.75rem; letter-spacing: -0.01em; font-weight: 600; }
+.inv .text-headline-sm { font-size: 1.125rem; line-height: 1.5rem; font-weight: 600; }
+.inv .text-label-code { font-size: 0.8125rem; line-height: 1.125rem; letter-spacing: 0.025em; font-weight: 500; }
+.inv .text-label-numeric { font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; }
+.inv .text-on-error { color: var(--inv-on-error); }
+.inv .text-on-error-container { color: var(--inv-on-error-container); }
+.inv .text-on-primary { color: var(--inv-on-primary); }
+.inv .text-on-primary-fixed { color: var(--inv-on-primary-fixed); }
+.inv .text-on-secondary-container { color: var(--inv-on-secondary-container); }
+.inv .text-on-secondary-fixed { color: var(--inv-on-secondary-fixed); }
+.inv .text-on-surface { color: var(--inv-on-surface); }
+.inv .text-on-surface-variant { color: var(--inv-on-surface-variant); }
+.inv .text-on-tertiary-fixed { color: var(--inv-on-tertiary-fixed); }
+.inv .text-on-tertiary-fixed-variant { color: var(--inv-on-tertiary-fixed-variant); }
+.inv .text-outline { color: var(--inv-outline); }
+.inv .text-outline-variant { color: var(--inv-outline-variant); }
+.inv .text-primary { color: var(--inv-primary); }
+.inv .text-primary-container { color: var(--inv-primary-container); }
+.inv .text-secondary { color: var(--inv-secondary); }
+.inv .text-table-header { font-size: 0.75rem; line-height: 1rem; letter-spacing: 0.035em; font-weight: 600; }
+.inv .text-tertiary { color: var(--inv-tertiary); }
+.inv .text-tertiary-container { color: var(--inv-tertiary-container); }

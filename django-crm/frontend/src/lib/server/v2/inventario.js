@@ -277,11 +277,16 @@ export async function leerValorizacion(ctx, ubicacion) {
 }
 
 /** @param {{cookies: any}} ctx @param {string} de */
-export async function leerReporte(ctx, de) {
+export async function leerReporte(ctx, de, desde = '', hasta = '') {
+  // El rango VIAJA, y antes no: la API ya aceptaba `desde` y `hasta` --los usa
+  // para acotar el consumo-- y este cliente los ignoraba, asi que la pantalla
+  // solo podia mostrar el acumulado de siempre. El filtro del diseno seria un
+  // adorno sin esto.
+  const q = new URLSearchParams({ de });
+  if (desde) q.set('desde', desde);
+  if (hasta) q.set('hasta', hasta);
   try {
-    const d = await apiRequest(
-      `/campo/inventario/reportes/?de=${encodeURIComponent(de)}`, {}, ctx
-    );
+    const d = await apiRequest(`/campo/inventario/reportes/?${q}`, {}, ctx);
     return { filas: d?.filas ?? [], error: false };
   } catch {
     return { filas: [], error: true };

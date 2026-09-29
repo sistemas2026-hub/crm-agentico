@@ -80,6 +80,23 @@ def _material(org, valor):
     return m
 
 
+def _numeros_de(incidencia, lineas) -> dict:
+    """El esperado y el recibido de la linea que origino esta incidencia.
+
+    Se busca por material y serie, que es lo que identifica una linea dentro de
+    una devolucion. Si no se encuentra --no deberia pasar-- se devuelve vacio en
+    vez de un cero: un cero diria que no volvio nada.
+    """
+    for linea in lineas:
+        if linea["material"].id != incidencia.material_id:
+            continue
+        if (linea.get("serie") or "") != (incidencia.serie or ""):
+            continue
+        return {"esperado": str(linea.get("esperado", "")),
+                "recibido": str(linea.get("cantidad", ""))}
+    return {}
+
+
 def _decimal(valor, campo):
     try:
         return Decimal(str(valor))
@@ -166,14 +183,20 @@ class ExistenciasView(APIView):
         if pedida:
             u = _ubicacion(org, pedida)
             return Response({
-                "ubicacion": {"id": str(u.id), "nombre": u.nombre, "tipo": u.tipo},
+                "ubicacion": {"id": str(u.id), "nombre": u.nombre, "tipo": u.tipo,
+                              "notas": u.notas},
                 "materiales": inv.existencias_de(u),
             })
 
         bloques = []
         for u in UbicacionInventario.objects.filter(org=org, activa=True):
             bloques.append({
-                "ubicacion": {"id": str(u.id), "nombre": u.nombre, "tipo": u.tipo},
+                # `notas` viaja porque la pantalla la usa como subtitulo de cada
+                # panel --"Deposito principal", "Zona Oeste"--. El campo existia en
+                # el modelo desde el principio y no se serializaba, asi que la
+                # pantalla no tenia de donde sacarlo y el diseno lo pedia.
+                "ubicacion": {"id": str(u.id), "nombre": u.nombre, "tipo": u.tipo,
+                              "notas": u.notas},
                 "materiales": inv.existencias_de(u),
             })
         return Response({"ubicaciones": bloques})
@@ -301,7 +324,20 @@ class DevolucionesView(APIView):
             lineas = [
                 {"material": _material(org, c.get("material")),
                  "cantidad": c.get("cantidad") or 0,
-                 "serie": (c.get("serie") or "").strip()}
+                 "serie": (c.get("serie") or "").strip(),
+                 # `esperado` LLEGA AL SERVICIO, y antes se perdia aca.
+                 #
+                 # El servicio lo usa para abrir una incidencia por lo que falta;
+                 # esta vista armaba la linea sin el campo, asi que por la API
+                 # web NUNCA se abria una: la pantalla lo mandaba, el serializador
+                 # lo tiraba, y el resultado era un 201 silencioso sobre una
+                 # devolucion que no cuadraba. Medido el 29/09/2026 al portar la
+                 # pantalla de Stitch, que pide mostrar esa diferencia.
+                 #
+                 # Se manda solo si vino: `None` significa "no se sabe cuanto
+                 # debia volver", y en ese caso el servicio no supone un faltante.
+                 **({"esperado": c["esperado"]}
+                    if str(c.get("esperado") or "").strip() else {})}
                 for c in (request.data.get("lineas") or [])
             ]
         except ValueError as e:
@@ -312,6 +348,10 @@ class DevolucionesView(APIView):
                 org=org, profile_origen=tecnico, ubicacion_destino=destino,
                 lineas=lineas, recibida_por=request.profile,
                 notas=(request.data.get("notas") or "").strip(),
+                # El numero del acta de devolucion, si existe. Es lo que hace
+                # idempotente la recepcion: sin el, dos envios del mismo
+                # formulario registran dos devoluciones.
+                referencia=(request.data.get("referencia") or "").strip(),
             )
         except inv.DespachoInvalido as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
@@ -322,9 +362,13 @@ class DevolucionesView(APIView):
         # lo que falta.
         return Response({
             "movimientos": [str(m.id) for m in movs],
+            # Cada incidencia viaja con el par de numeros que la origino, para que
+            # la pantalla pueda mostrar "esperado 18 / recibido 15 / falta 3" sin
+            # tener que leerlo del texto del motivo.
             "incidencias": [
                 {"id": str(i.id), "material": i.material.codigo,
-                 "cantidad": str(i.cantidad), "motivo": i.motivo}
+                 "cantidad": str(i.cantidad), "motivo": i.motivo,
+                 **_numeros_de(i, lineas)}
                 for i in incidencias
             ],
         }, status=status.HTTP_201_CREATED)
