@@ -395,3 +395,93 @@ class Compra(BaseModel):
 
     def __str__(self) -> str:
         return f"Compra {self.referencia or self.pk}"
+
+
+# ---------------------------------------------------------------------------
+# Plantillas de kit: lo que se le entrega a un tecnico una mañana cualquiera
+# ---------------------------------------------------------------------------
+
+class PlantillaDeKit(BaseModel):
+    """Una lista de materiales que se repite todos los dias.
+
+    POR QUE ES UNA TABLA POR EMPRESA Y NO UNA LISTA EN EL CODIGO
+    -----------------------------------------------------------
+    "Un kit de instalacion lleva 24 conectores y 300 metros" es verdad en una
+    empresa y falso en la siguiente: depende del tipo de acometida, del material
+    que compra cada ISP y de como arma sus cuadrillas. Escribirlo en el codigo
+    obligaria a una sesion de programacion para cambiar un numero que un jefe de
+    bodega conoce mejor que nadie -- y es exactamente lo que la regla multi-tenant
+    del proyecto prohibe. La empresa A y la empresa B tienen plantillas distintas
+    y ninguna de las dos necesita que alguien toque el repositorio.
+
+    NO ES UN KIT ENTREGADO, ES UN BORRADOR
+    --------------------------------------
+    Una plantilla no mueve material ni queda en el libro: solo rellena las lineas
+    del despacho, que despues alguien revisa y confirma. Por eso no se versiona ni
+    se congela como un acta: si manaña cambia, cambia -- lo que quedo escrito de
+    lo que de verdad salio es el acta de entrega, no esto.
+
+    Y POR ESO TAMPOCO GUARDA SERIES
+    Una plantilla puede decir "una ONT", nunca "la ONT HWTCA6FB5263": cada aparato
+    es distinto y su numero se lee al despachar.
+    """
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="plantillas_kit"
+    )
+    nombre = models.CharField(max_length=120)
+    descripcion = models.CharField(
+        max_length=300,
+        blank=True,
+        default="",
+        help_text="Para que sirve este kit, en palabras de quien lo arma.",
+    )
+    activa = models.BooleanField(
+        default=True,
+        help_text=(
+            "Una plantilla que se deja de usar se desactiva en vez de borrarse: "
+            "sigue explicando por que un despacho viejo llevaba lo que llevaba."
+        ),
+    )
+
+    class Meta:
+        db_table = "campo_plantilla_kit"
+        ordering = ["nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "nombre"], name="unique_plantilla_por_org"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.nombre
+
+
+class LineaDePlantilla(BaseModel):
+    """Un material de la plantilla, y cuanto de el.
+
+    La cantidad de un material serializado es CUANTOS aparatos, no cual: al
+    cargar la plantilla se abren esas lineas con el numero de serie vacio, para
+    que se lea uno por uno con el lector.
+    """
+
+    plantilla = models.ForeignKey(
+        PlantillaDeKit, on_delete=models.CASCADE, related_name="lineas"
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, on_delete=models.PROTECT, related_name="en_plantillas"
+    )
+    cantidad = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+
+    class Meta:
+        db_table = "campo_linea_plantilla"
+        ordering = ["material__categoria", "material__nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["plantilla", "material"],
+                name="unique_material_por_plantilla",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.material_id} x{self.cantidad}"

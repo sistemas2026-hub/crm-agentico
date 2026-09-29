@@ -53,6 +53,8 @@ urlpatterns = [
     path("inventario/conteos/<uid:pk>/anotar/", inventario_operacion_views.AnotarConteoView.as_view(), name="inv_conteo_anotar"),
     path("inventario/conteos/<uid:pk>/cerrar/", inventario_operacion_views.CerrarConteoView.as_view(), name="inv_conteo_cerrar"),
     # Fase 3: proveedores, compras y valorizacion.
+    path("inventario/plantillas/", inventario_operacion_views.PlantillasView.as_view(), name="inv_plantillas"),
+    path("inventario/plantillas/<uid:pk>/", inventario_operacion_views.PlantillaView.as_view(), name="inv_plantilla"),
     path("inventario/proveedores/", inventario_operacion_views.ProveedoresView.as_view(), name="inv_proveedores"),
     path("inventario/compras/", inventario_operacion_views.ComprasView.as_view(), name="inv_compras"),
     path("inventario/valorizacion/", inventario_operacion_views.ValorizacionView.as_view(), name="inv_valorizacion"),

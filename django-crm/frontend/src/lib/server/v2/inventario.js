@@ -301,3 +301,54 @@ export async function leerReporte(ctx, de, desde = '', hasta = '') {
     return { filas: [], error: true };
   }
 }
+
+/**
+ * Las plantillas de kit de la empresa, con sus líneas.
+ *
+ * @param {{cookies: any}} ctx
+ * @param {boolean} todas incluir las desactivadas
+ */
+export async function leerPlantillas(ctx, todas = false) {
+  try {
+    const d = await apiRequest(
+      `/campo/inventario/plantillas/${todas ? '?todas=1' : ''}`, {}, ctx
+    );
+    return { plantillas: d?.plantillas ?? [], error: false };
+  } catch {
+    return { plantillas: [], error: true };
+  }
+}
+
+/**
+ * Crea una plantilla.
+ *
+ * @param {{cookies: any}} ctx
+ * @param {Record<string, any>} cuerpo
+ */
+export async function crearPlantilla(ctx, cuerpo) {
+  return apiRequest('/campo/inventario/plantillas/',
+    { method: 'POST', body: cuerpo }, ctx);
+}
+
+/**
+ * Reescribe una plantilla entera: nombre, descripción y líneas.
+ *
+ * @param {{cookies: any}} ctx
+ * @param {string} id
+ * @param {Record<string, any>} cuerpo
+ */
+export async function editarPlantilla(ctx, id, cuerpo) {
+  return apiRequest(`/campo/inventario/plantillas/${id}/`,
+    { method: 'PUT', body: cuerpo }, ctx);
+}
+
+/**
+ * La deja de ofrecer. No la borra: sigue explicando despachos viejos.
+ *
+ * @param {{cookies: any}} ctx
+ * @param {string} id
+ */
+export async function desactivarPlantilla(ctx, id) {
+  return apiRequest(`/campo/inventario/plantillas/${id}/`,
+    { method: 'DELETE' }, ctx);
+}

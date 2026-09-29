@@ -24,9 +24,11 @@
    * entregar dos veces el mismo aparato.
    */
   import { enhance } from '$app/forms';
+  import PlantillasDeKit from './PlantillasDeKit.svelte';
 
-  /** @type {{ materiales: any[], personas: any[], internas: any[], existencias: any[], ubicaciones: any[], form: any }} */
-  let { materiales, personas, internas, existencias, ubicaciones, form } = $props();
+  /** @type {{ materiales: any[], personas: any[], internas: any[], existencias: any[], ubicaciones: any[], plantillas: any[], form: any }} */
+  let { materiales, personas, internas, existencias, ubicaciones, plantillas, form } =
+    $props();
 
   // svelte-ignore state_referenced_locally
   // Es a propósito: se quiere el valor INICIAL. Los props de esta pantalla no
@@ -56,6 +58,75 @@
   /** @param {string} codigo */
   function materialDe(codigo) {
     return materiales.find((m) => m.codigo === codigo) ?? null;
+  }
+
+  // --- PLANTILLAS DE KIT ----------------------------------------------------
+  //
+  // Una plantilla es la lista que se repite todas las mañanas, y es de la
+  // empresa: lo que lleva un kit en una no es lo que lleva en otra.
+
+  let plantillaElegida = $state('');
+  /** Lo que se descontó al cargar, para poder decirlo. */
+  let loQueYaTenia = $state(/** @type {any[]} */ ([]));
+
+  let activas = $derived((plantillas ?? []).filter((p) => p.activa));
+
+  /**
+   * Carga la plantilla en el editor, descontando lo que el técnico ya tiene.
+   *
+   * POR QUÉ SE DESCUENTA
+   * La custodia no se vacía al terminar el día: si le quedaron 6 conectores y el
+   * kit pide 24, entregarle 24 le deja 30 y el saldo empieza a crecer solo. Lo
+   * que hace falta a la mañana es la diferencia.
+   *
+   * La sugerencia se puede cambiar: es una cuenta, no una orden. Un técnico que
+   * arranca una zona lejos puede querer llevar el kit completo igual.
+   *
+   * UN SERIALIZADO NO SE DESCUENTA ASÍ. Cada aparato es uno, y «ya tiene una
+   * ONT» no significa que sea la que necesita hoy: se abren tantas líneas como
+   * pida el kit, con la serie vacía para leerla con el lector.
+   */
+  function cargarPlantilla() {
+    const p = activas.find((x) => x.id === plantillaElegida);
+    if (!p) return;
+
+    /** @type {any[]} */
+    const nuevas = [];
+    /** @type {any[]} */
+    const descontado = [];
+
+    for (const l of p.lineas) {
+      const enMano = custodia
+        ? (custodia.materiales.find((/** @type {any} */ m) => m.codigo === l.material)
+            ?.existencia ?? 0)
+        : 0;
+
+      if (l.es_serializado) {
+        const cuantos = Math.max(1, Math.round(Number(l.cantidad)));
+        for (let i = 0; i < cuantos; i += 1) {
+          nuevas.push({ n: siguiente++, material: l.material, cantidad: '1', serie: '' });
+        }
+        continue;
+      }
+
+      const pide = Number(l.cantidad);
+      const tiene = Number(enMano);
+      const falta = Math.max(0, pide - tiene);
+      if (tiene > 0) {
+        descontado.push({ material: l.material, pide, tiene, falta });
+      }
+      nuevas.push({
+        n: siguiente++,
+        material: l.material,
+        // Se deja escrito incluso si da 0: que una línea diga 0 es la forma de
+        // ver que ese material ya lo tiene, en vez de que desaparezca sin avisar.
+        cantidad: String(falta),
+        serie: ''
+      });
+    }
+
+    lineas = nuevas.length ? nuevas : [{ n: siguiente++, material: '', cantidad: '', serie: '' }];
+    loQueYaTenia = descontado;
   }
 
   /**
@@ -300,11 +371,69 @@
             </p>
           </div>
         </div>
-        <div class="flex items-center gap-space-xs font-label-numeric text-body-sm text-secondary">
-          <span class="w-2 h-2 rounded-full bg-primary-container"></span>
-          <span>{lineas.length} {lineas.length === 1 ? 'línea' : 'líneas'}</span>
+        <div class="flex items-center gap-space-md flex-wrap">
+          <!--
+            CARGAR UN KIT ARMADO. Las plantillas son de la empresa: lo que lleva
+            un kit de instalación acá no es lo que lleva en otra.
+          -->
+          {#if activas.length}
+            <div class="flex items-center gap-space-xs">
+              <select
+                bind:value={plantillaElegida}
+                class="h-9 px-2.5 bg-surface-container-lowest text-on-surface font-body-sm text-body-sm rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+                aria-label="Plantilla de kit"
+              >
+                <option value="">Cargar una plantilla…</option>
+                {#each activas as p (p.id)}
+                  <option value={p.id}>{p.nombre}</option>
+                {/each}
+              </select>
+              <button
+                type="button"
+                onclick={cargarPlantilla}
+                disabled={!plantillaElegida}
+                class="h-9 px-space-md rounded font-body-sm text-body-sm font-medium shadow-sm transition-colors inline-flex items-center gap-1 {plantillaElegida
+                  ? 'bg-surface-container hover:bg-surface-container-high text-on-surface'
+                  : 'bg-surface-container-low text-outline'}"
+              >
+                <span class="material-symbols-outlined text-[16px]">playlist_add</span>
+                Cargar
+              </button>
+            </div>
+          {/if}
+          <div class="flex items-center gap-space-xs font-label-numeric text-body-sm text-secondary">
+            <span class="w-2 h-2 rounded-full bg-primary-container"></span>
+            <span>{lineas.length} {lineas.length === 1 ? 'línea' : 'líneas'}</span>
+          </div>
         </div>
       </div>
+
+      {#if loQueYaTenia.length}
+        <!--
+          Lo que la plantilla descontó, dicho. Una cantidad que aparece más chica
+          que la del kit sin explicación se lee como un error de carga.
+        -->
+        <div class="mx-space-lg mb-space-md bg-surface-container-low rounded p-space-md flex items-start gap-space-sm">
+          <span class="material-symbols-outlined text-primary text-[18px] shrink-0">calculate</span>
+          <div class="flex flex-col gap-space-xs">
+            <span class="font-headline-sm text-body-sm font-semibold text-on-surface">
+              Se descontó lo que ya tiene encima
+            </span>
+            <ul class="flex flex-col">
+              {#each loQueYaTenia as d (d.material)}
+                <li class="font-body-sm text-body-sm text-secondary">
+                  <span class="font-label-code text-label-code text-on-surface">{d.material}</span>
+                  · el kit pide {d.pide}, tiene {d.tiene} → se propone {d.falta}
+                </li>
+              {/each}
+            </ul>
+            <span class="font-body-sm text-body-sm text-secondary">
+              Es una cuenta, no una orden: cambiá el número si querés entregarle el kit
+              completo igual.
+            </span>
+          </div>
+        </div>
+      {/if}
 
       <div class="w-full overflow-x-auto">
         <table class="w-full text-left">
@@ -578,3 +707,9 @@
     </div>
   </div>
 </form>
+
+<!--
+  Las plantillas van DESPUÉS del formulario y no adentro: un `<form>` dentro de
+  otro no es HTML válido, y este panel tiene los suyos para guardar y dar de baja.
+-->
+<PlantillasDeKit {plantillas} {materiales} />

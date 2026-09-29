@@ -24,6 +24,11 @@ import {
   registrarCompra,
   leerValorizacion,
   leerReporte,
+  // Plantillas de kit
+  leerPlantillas,
+  crearPlantilla,
+  editarPlantilla,
+  desactivarPlantilla,
 } from '$lib/server/v2/inventario.js';
 
 /**
@@ -75,6 +80,12 @@ export async function load({ url, cookies }) {
     extra.libre = libre.materiales;
     extra.reservas = reservas.reservas;
     extra.errorExtra = libre.error || reservas.error;
+  } else if (ver === 'despacho') {
+    // Solo acá: son la ayuda para armar una entrega, y cargarlas en las otras
+    // nueve pestañas costaría una consulta que nadie mira.
+    const p = await leerPlantillas(ctx, true);
+    extra.plantillas = p.plantillas;
+    extra.errorExtra = p.error;
   } else if (ver === 'conteo') {
     const conteos = await leerConteos(ctx);
     extra.conteos = conteos.conteos;
@@ -367,6 +378,42 @@ export const actions = {
         hecho: r?.creado
           ? `Proveedor «${r.nombre}» creado.`
           : `«${r?.nombre}» ya existía: se usa el que había.`,
+      };
+    } catch (e) {
+      return fail(400, { error: mensajeDe(e) });
+    }
+  },
+
+  plantilla: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const id = String(f.get('plantilla') ?? '').trim();
+    // Las líneas llegan con el mismo formato que las de un despacho, así que
+    // las lee la misma función. La plantilla ignora `serie`: no fija aparatos.
+    const lineas = leerLineas(f).map((l) => ({
+      material: l.material,
+      cantidad: l.cantidad
+    }));
+    const cuerpo = {
+      nombre: f.get('nombre'),
+      descripcion: f.get('descripcion') ?? '',
+      lineas
+    };
+    try {
+      const r = id
+        ? await editarPlantilla({ cookies }, id, cuerpo)
+        : await crearPlantilla({ cookies }, cuerpo);
+      return { hecho: `La plantilla «${r?.nombre}» quedó guardada.` };
+    } catch (e) {
+      return fail(409, { error: mensajeDe(e) });
+    }
+  },
+
+  plantillaBaja: async ({ request, cookies }) => {
+    const f = await request.formData();
+    try {
+      await desactivarPlantilla({ cookies }, String(f.get('plantilla')));
+      return {
+        hecho: 'La plantilla ya no se ofrece. No se borró: sigue explicando los despachos que la usaron.'
       };
     } catch (e) {
       return fail(400, { error: mensajeDe(e) });

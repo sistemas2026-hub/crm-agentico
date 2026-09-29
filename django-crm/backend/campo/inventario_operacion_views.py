@@ -29,6 +29,7 @@ from rest_framework.views import APIView
 
 from campo.inventario_operacion import (
     ConteoFisico,
+    PlantillaDeKit,
     Proveedor,
     ReservaDeMaterial,
 )
@@ -36,6 +37,7 @@ from campo.models import OrdenTrabajo
 from campo.permissions import IsCampoAuthenticated
 from campo.inventario_views import (
     ROLES_INVENTARIO,
+    _decimal,
     _exigir_inventario,
     _material,
     _ubicacion,
@@ -468,3 +470,94 @@ class ReportesView(APIView):
             {"detail": f"No hay un reporte '{cual}'. Los que hay: consumo, "
                        f"tecnicos, descuadres."},
             status=status.HTTP_400_BAD_REQUEST)
+
+
+class PlantillasView(APIView):
+    """``GET`` las plantillas de kit · ``POST`` una nueva.
+
+    LEER NO EXIGE ROL DE INVENTARIO; ESCRIBIR SI. Saber que lleva un kit no mueve
+    nada y le sirve a cualquiera que planifique el dia; armarlo es decidir que se
+    entrega, y eso es gestion o bodega.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = request.profile.org
+        todas = request.query_params.get("todas") == "1"
+        return Response({
+            "plantillas": op.plantillas_de(org, solo_activas=not todas)
+        })
+
+    def post(self, request):
+        _exigir_inventario(request)
+        org = request.profile.org
+        try:
+            lineas = _lineas_de_plantilla(org, request.data.get("lineas"))
+            p = op.guardar_plantilla(
+                org=org,
+                nombre=request.data.get("nombre"),
+                descripcion=request.data.get("descripcion") or "",
+                lineas=lineas,
+            )
+        except op.ConteoInvalido as e:
+            # 409 y no 400: el dato esta bien escrito, lo que no se puede es
+            # tener dos plantillas con el mismo nombre o una sin materiales.
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"id": str(p.id), "nombre": p.nombre},
+                        status=status.HTTP_201_CREATED)
+
+
+class PlantillaView(APIView):
+    """``PUT`` reescribe una plantilla · ``DELETE`` la desactiva."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def _plantilla(self, request, pk):
+        p = PlantillaDeKit.objects.filter(org=request.profile.org, id=pk).first()
+        if p is None:
+            raise Http404("Esa plantilla no existe en esta empresa.")
+        return p
+
+    def put(self, request, pk):
+        _exigir_inventario(request)
+        org = request.profile.org
+        plantilla = self._plantilla(request, pk)
+        try:
+            lineas = _lineas_de_plantilla(org, request.data.get("lineas"))
+            op.guardar_plantilla(
+                org=org,
+                nombre=request.data.get("nombre") or plantilla.nombre,
+                descripcion=request.data.get("descripcion") or "",
+                lineas=lineas,
+                plantilla=plantilla,
+            )
+        except op.ConteoInvalido as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"id": str(plantilla.id), "nombre": plantilla.nombre})
+
+    def delete(self, request, pk):
+        _exigir_inventario(request)
+        plantilla = self._plantilla(request, pk)
+        op.desactivar_plantilla(plantilla)
+        # 200 y no 204: la plantilla sigue existiendo, solo dejo de ofrecerse.
+        return Response({"id": str(plantilla.id), "activa": False})
+
+
+def _lineas_de_plantilla(org, crudas) -> list[dict]:
+    """Las lineas que llegan por JSON, con su material resuelto.
+
+    Levanta `ValueError` con el nombre del campo que esta mal, en vez de un 500:
+    quien arma una plantilla escribe codigos a mano y se equivoca.
+    """
+    salida = []
+    for linea in (crudas or []):
+        salida.append({
+            "material": _material(org, linea.get("material")),
+            "cantidad": _decimal(linea.get("cantidad"), "cantidad"),
+        })
+    return salida

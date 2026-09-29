@@ -248,7 +248,15 @@
         {:else if pestana === 'entrada'}
           <RegistrarEntrada {materiales} {internas} {form} />
         {:else if pestana === 'despacho'}
-          <Despachar {materiales} {personas} {internas} {existencias} {ubicaciones} {form} />
+          <Despachar
+            {materiales}
+            {personas}
+            {internas}
+            {existencias}
+            {ubicaciones}
+            plantillas={data.plantillas}
+            {form}
+          />
         {:else if pestana === 'devolucion'}
           <RecibirDevolucion {materiales} {personas} {internas} {existencias} {ubicaciones} {form} />
         {:else if pestana === 'traslado'}

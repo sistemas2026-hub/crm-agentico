@@ -1238,6 +1238,8 @@ from campo.inventario_operacion import (  # noqa: E402,F401
     Compra,
     ConteoFisico,
     LineaDeConteo,
+    LineaDePlantilla,
+    PlantillaDeKit,
     Proveedor,
     ReservaDeMaterial,
 )

@@ -40,6 +40,8 @@ from campo.inventario_operacion import (
     Compra,
     ConteoFisico,
     LineaDeConteo,
+    LineaDePlantilla,
+    PlantillaDeKit,
     ReservaDeMaterial,
 )
 from campo.models import MaterialCatalogo, MovimientoDeMaterial
@@ -648,3 +650,114 @@ def descuadres_abiertos(org) -> list[dict]:
         "motivo": m.motivo,
         "motivo_tecnico": m.motivo_tecnico,
     } for m in qs]
+
+
+# ---------------------------------------------------------------------------
+# Plantillas de kit
+# ---------------------------------------------------------------------------
+
+def plantillas_de(org, *, solo_activas: bool = True) -> list[dict]:
+    """Las plantillas de esta empresa, listas para la pantalla.
+
+    Cada una con sus lineas: son pocas y chicas, y traerlas por separado
+    obligaria a una consulta por plantilla para pintar un desplegable.
+    """
+    qs = PlantillaDeKit.objects.filter(org=org)
+    if solo_activas:
+        qs = qs.filter(activa=True)
+    salida = []
+    for p in qs.prefetch_related("lineas__material"):
+        salida.append({
+            "id": str(p.id),
+            "nombre": p.nombre,
+            "descripcion": p.descripcion,
+            "activa": p.activa,
+            "lineas": [
+                {
+                    "material": l.material.codigo,
+                    "nombre": l.material.nombre,
+                    "clase": l.material.clase,
+                    "unidad": l.material.unidad,
+                    "es_serializado": l.material.es_serializado,
+                    "cantidad": str(l.cantidad.quantize(PRECISION)),
+                }
+                for l in p.lineas.all()
+            ],
+        })
+    return salida
+
+
+@transaction.atomic
+def guardar_plantilla(*, org, nombre, lineas, descripcion="", plantilla=None):
+    """Crea o reescribe una plantilla. `lineas`: [{material, cantidad}].
+
+    LAS LINEAS SE REEMPLAZAN ENTERAS, no se van parcheando. Una plantilla es
+    una lista corta que alguien reescribe cuando cambia el kit; llevar el detalle
+    de que linea se agrego o se quito seria un historial que nadie va a leer, y
+    lo que de verdad importa --que salio ese dia-- ya queda en el acta de entrega.
+
+    No guarda series: una plantilla dice "una ONT", nunca cual. Ver el modelo.
+    """
+    nombre = (nombre or "").strip()
+    if not nombre:
+        raise ConteoInvalido("Una plantilla necesita un nombre para poder elegirla.")
+
+    limpias = []
+    for i, linea in enumerate(lineas or []):
+        material = linea["material"]
+        cant = Decimal(str(linea.get("cantidad") or 0))
+        if cant <= CERO:
+            raise ConteoInvalido(
+                f"La linea {i + 1} ({material.codigo}) no dice cuanto lleva el kit."
+            )
+        limpias.append((material, cant))
+
+    if not limpias:
+        raise ConteoInvalido(
+            "Una plantilla sin materiales no sirve para armar una entrega."
+        )
+
+    vistos = set()
+    for material, _ in limpias:
+        if material.id in vistos:
+            raise ConteoInvalido(
+                f"{material.codigo} esta dos veces en la plantilla: poné la "
+                f"cantidad total en una sola linea."
+            )
+        vistos.add(material.id)
+
+    if plantilla is None:
+        if PlantillaDeKit.objects.filter(org=org, nombre=nombre).exists():
+            raise ConteoInvalido(f"Ya hay una plantilla que se llama «{nombre}».")
+        plantilla = PlantillaDeKit.objects.create(
+            org=org, nombre=nombre, descripcion=(descripcion or "").strip()
+        )
+    else:
+        chocan = PlantillaDeKit.objects.filter(org=org, nombre=nombre).exclude(
+            pk=plantilla.pk
+        )
+        if chocan.exists():
+            raise ConteoInvalido(f"Ya hay otra plantilla que se llama «{nombre}».")
+        plantilla.nombre = nombre
+        plantilla.descripcion = (descripcion or "").strip()
+        plantilla.save(update_fields=["nombre", "descripcion", "updated_at"])
+        plantilla.lineas.all().delete()
+
+    for material, cant in limpias:
+        LineaDePlantilla.objects.create(
+            plantilla=plantilla, material=material, cantidad=cant
+        )
+    return plantilla
+
+
+@transaction.atomic
+def desactivar_plantilla(plantilla):
+    """Se desactiva, no se borra.
+
+    Una plantilla que se deja de usar sigue explicando por que un despacho de
+    hace tres meses llevaba lo que llevaba. Borrarla no libera nada -- son dos
+    filas -- y si el nombre se necesita otra vez, se crea uno nuevo.
+    """
+    plantilla.activa = False
+    plantilla.save(update_fields=["activa", "updated_at"])
+    return plantilla
