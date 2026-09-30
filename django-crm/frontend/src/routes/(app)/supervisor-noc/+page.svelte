@@ -29,6 +29,7 @@
     ordenesDeTrabajo,
     cargaPorTecnico,
     ticketsPorOrigen,
+    bandejaDe,
     bandejaDeRevision,
     rotuloDeHallazgo,
     paginacion,
@@ -207,9 +208,15 @@
    * calcula, no una coincidencia que haya que recordar mantener.
    */
   const conteoPorEstado = $derived.by(() => {
-    const pend = bandejaDeRevision(propuestas, { estado: 'pendientes' }).length;
-    const dec = bandejaDeRevision(propuestas, { estado: 'decididas' }).length;
-    return { pendientes: pend, decididas: dec, '': pend + dec };
+    //  Se cuenta con la MISMA funcion que clasifica, una pasada y sin restas.
+    //  Una propuesta que no cae en ninguna bandeja no se cuenta en ninguna --
+    //  ni siquiera en «Todas», que es la union de las dos y no el total.
+    const cuenta = { pendientes: 0, decididas: 0 };
+    for (const p of propuestas) {
+      const b = bandejaDe(p);
+      if (b) cuenta[b] += 1;
+    }
+    return { ...cuenta, '': cuenta.pendientes + cuenta.decididas };
   });
 
   /**

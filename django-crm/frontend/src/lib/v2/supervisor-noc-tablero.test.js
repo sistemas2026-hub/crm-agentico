@@ -12,6 +12,7 @@ import {
   rotuloDeHallazgo,
   antiguedadDe,
   estadoDeRevision,
+  bandejaDe,
   bandejaDeRevision,
   coincideConBusqueda,
   paginacion
@@ -772,10 +773,10 @@ describe('la bandeja con buscador', () => {
 //  decidir sobre un caso cerrado NO se convierta en una decision que nadie tomo.
 
 describe('las dos bandejas', () => {
-  const fila = (id, estado, origen_cerrado) => ({
+  const fila = (id, estado, caso_cerrado) => ({
     id,
     estado,
-    origen_cerrado,
+    caso_cerrado,
     prioridad: 50,
     accion_propuesta: 'algo',
     tipo_senal: 'caso_desincronizado'
@@ -843,9 +844,9 @@ describe('las dos bandejas', () => {
   });
 
   it('9. si el caso se reabre, vuelve a Pendientes', () => {
-    //  'origen_cerrado' es un dato derivado del caso, no un sello: basta que el
+    //  'caso_cerrado' es un dato derivado del caso, no un sello: basta que el
     //  caso vuelva a estar abierto para que la propuesta reaparezca.
-    const reabierto = { ...CASO_CERRADO_SIN_DECIDIR, origen_cerrado: false };
+    const reabierto = { ...CASO_CERRADO_SIN_DECIDIR, caso_cerrado: false };
 
     expect(bandejaDeRevision([reabierto], { estado: 'pendientes' })).toHaveLength(1);
   });
@@ -881,15 +882,65 @@ describe('las dos bandejas', () => {
     const [p] = bandejaDeRevision([CASO_CERRADO_ACEPTADA], { estado: 'decididas' });
 
     expect(p.estado).toBe('aceptada');
-    expect(p.origen_cerrado).toBe(true);
+    expect(p.caso_cerrado).toBe(true);
     expect(p.revision.texto).toBe('Revisada');
   });
 
-  it('sin el dato del caso, una propuesta sin decidir sigue siendo pendiente', () => {
-    //  Fail-safe hacia lo visible: si el backend no manda 'origen_cerrado'
+  it('7. sin el dato del caso, una propuesta sin decidir sigue siendo pendiente', () => {
+    //  Fail-safe hacia lo visible: si el backend no manda 'caso_cerrado'
     //  --una version vieja, un origen que no es un caso-- no se esconde nada.
     const sinDato = { id: 'z', estado: 'propuesta', prioridad: 50 };
 
     expect(bandejaDeRevision([sinDato], { estado: 'pendientes' })).toHaveLength(1);
+    expect(bandejaDe(sinDato)).toBe('pendientes');
+  });
+
+  it('7b. «no se sabe» es null, y null NO oculta', () => {
+    //  Los TRES valores del dato, y la diferencia que importa: 'false' es
+    //  "esta abierto" y 'null' es "no se pudo determinar". Los dos dejan la
+    //  propuesta a la vista; solo 'true' la saca.
+    const nulo = { id: 'n', estado: 'propuesta', prioridad: 50, caso_cerrado: null };
+
+    expect(bandejaDe(nulo)).toBe('pendientes');
+    expect(bandejaDe({ ...nulo, caso_cerrado: false })).toBe('pendientes');
+    expect(bandejaDe({ ...nulo, caso_cerrado: true })).toBe(null);
+  });
+
+  it('7c. no esconde con un valor que solo PARECE cerrado', () => {
+    //  Se compara con '=== true' y no por verdad: una cadena como 'Closed' es
+    //  truthy sin ser el booleano que el backend promete, y esconder trabajo
+    //  pendiente por un tipo equivocado es el error caro de los dos.
+    for (const enganoso of ['Closed', 'true', 1, {}, []]) {
+      expect(bandejaDe({ estado: 'propuesta', caso_cerrado: enganoso }))
+        .toBe('pendientes');
+    }
+  });
+
+  it('12. cada fila llega sabiendo en que bandeja esta', () => {
+    for (const p of bandejaDeRevision(TODAS, {})) {
+      expect(['pendientes', 'decididas']).toContain(p.bandeja);
+      expect(p.bandeja).toBe(bandejaDe(p));
+    }
+  });
+
+  it('12b. no existe una tercera bandeja: la ausencia es null, no un rotulo', () => {
+    //  La guarda que impide que «Resueltas por otra via» vuelva por la ventana.
+    expect(bandejaDe(CASO_CERRADO_SIN_DECIDIR)).toBe(null);
+    expect(bandejaDeRevision(TODAS, { estado: 'otra_via' })).toHaveLength(0);
+  });
+
+  it('el buscador y los demas filtros siguen valiendo dentro de cada bandeja', () => {
+    const conTexto = TODAS.map((p) => ({ ...p, cliente: p.id === 'a' ? 'Ana' : 'Beto' }));
+
+    expect(bandejaDeRevision(conTexto, { estado: 'pendientes', texto: 'Ana' }))
+      .toHaveLength(1);
+    expect(bandejaDeRevision(conTexto, { estado: 'decididas', texto: 'Ana' }))
+      .toHaveLength(0);
+  });
+
+  it('la numeracion se rehace dentro de cada bandeja', () => {
+    const nums = bandejaDeRevision(TODAS, { estado: 'decididas' }).map((p) => p.n);
+
+    expect(nums).toEqual([1, 2, 3]);
   });
 });

@@ -939,7 +939,7 @@ def test_20_una_propuesta_aceptada_con_cierre_fallido_no_tiene_vuelta(
 
 def test_21_el_contexto_dice_si_el_caso_del_origen_ya_cerro(org_a):
     """
-    'origen_cerrado' es un DATO del caso, no un estado nuevo de la propuesta.
+    'caso_cerrado' es un DATO del caso, no un estado nuevo de la propuesta.
 
     La bandeja de pendientes lo necesita para no mostrar como trabajo operativo
     algo que ya no lo es. Se afirma sobre los dos lados -- abierto y cerrado --
@@ -960,8 +960,8 @@ def test_21_el_contexto_dice_si_el_caso_del_origen_ya_cerro(org_a):
 
         ctx = contexto_propuesta.contexto_de(org_a, [p_abierto, p_cerrado])
 
-    assert ctx[str(p_abierto.id)]["origen_cerrado"] is False
-    assert ctx[str(p_cerrado.id)]["origen_cerrado"] is True
+    assert ctx[str(p_abierto.id)]["caso_cerrado"] is False
+    assert ctx[str(p_cerrado.id)]["caso_cerrado"] is True
     #  Y lo que NO cambia: el estado de la propuesta sigue siendo el suyo. Un
     #  caso cerrado no inventa una decision que nadie tomo.
     p_cerrado.refresh_from_db()
@@ -986,6 +986,6 @@ def test_22_la_bandeja_recibe_el_dato_por_el_serializer(org_a):
         ctx = contexto_propuesta.contexto_de(org_a, [p])
         datos = PropuestaListaSerializer(p, context={"contexto": ctx}).data
 
-    assert "origen_cerrado" in datos, "el serializer no entrega el dato"
-    assert datos["origen_cerrado"] is True
+    assert "caso_cerrado" in datos, "el serializer no entrega el dato"
+    assert datos["caso_cerrado"] is True
     assert datos["estado"] == PropuestaSupervisor.PROPUESTA

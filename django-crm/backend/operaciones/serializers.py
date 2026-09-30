@@ -31,11 +31,6 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
     # ausente de verdad, no un fallo que haya que rellenar.
     zona = serializers.SerializerMethodField()
     tecnico = serializers.SerializerMethodField()
-    #  Si el caso del que nacio esta cerrado. Lo necesita la bandeja para no
-    #  mostrar como pendiente algo que ya no es trabajo de nadie -- y viaja como
-    #  DATO, no como un estado nuevo de la propuesta: la propuesta conserva el
-    #  suyo intacto.
-    origen_cerrado = serializers.SerializerMethodField()
     ticket_externo = serializers.SerializerMethodField()
     proveedor_externo = serializers.SerializerMethodField()
     orden_numero = serializers.SerializerMethodField()
@@ -44,24 +39,22 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
     cliente = serializers.SerializerMethodField()
     asunto = serializers.SerializerMethodField()
     origen_creado_en = serializers.SerializerMethodField()
+    caso_cerrado = serializers.SerializerMethodField()
 
     class Meta:
         model = PropuestaSupervisor
         fields = [
             "id", "tipo_senal", "tipo_senal_display", "origen_tipo", "origen_id",
-            "accion_propuesta", "prioridad", "estado", "origen_cerrado",
+            "accion_propuesta", "prioridad", "estado",
             "nivel_autonomia_requerido", "dentro_del_alcance",
             "created_at", "expira_en",
             "zona", "tecnico", "ticket_externo", "proveedor_externo",
             "orden_numero", "sla_estado", "sla_minutos",
-            "cliente", "asunto", "origen_creado_en",
+            "cliente", "asunto", "origen_creado_en", "caso_cerrado",
         ]
 
     def _contexto(self, obj):
         return (self.context.get("contexto") or {}).get(str(obj.id)) or {}
-
-    def get_origen_cerrado(self, obj):
-        return bool(self._contexto(obj).get("origen_cerrado", False))
 
     def get_zona(self, obj):
         return self._contexto(obj).get("zona", "")
@@ -92,6 +85,11 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
 
     def get_origen_creado_en(self, obj):
         return self._contexto(obj).get("origen_creado_en")
+
+    def get_caso_cerrado(self, obj):
+        #  None a proposito cuando no se sabe: el frontend oculta con True y
+        #  solo con True.
+        return self._contexto(obj).get("caso_cerrado")
 
 
 class PropuestaDetalleSerializer(serializers.ModelSerializer):

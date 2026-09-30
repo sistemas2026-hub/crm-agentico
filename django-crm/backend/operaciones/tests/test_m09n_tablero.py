@@ -214,14 +214,10 @@ def test_el_contexto_no_devuelve_coordenadas_aunque_la_orden_las_tenga(org_a):
     # se agregue al contexto rompe esta prueba y obliga a mirarlo. Ya cazo los
     # tres de la bandeja -- cliente, asunto y origen_creado_en -- que se
     # declaran aqui despues de comprobar que ninguno trae coordenadas.
-    #  'origen_cerrado' entro el 29/09/2026: es un BOOLEANO derivado de
-    #  'Case.status', no un dato de ubicacion ni de persona. Se declara aca
-    #  porque este conjunto es exacto a proposito -- cualquier clave nueva del
-    #  contexto tiene que pasar por esta prueba antes de llegar a la pantalla.
     assert set(fila) == {
         "zona", "tecnico", "ticket_externo", "proveedor_externo", "orden_numero",
         "sla_estado", "sla_minutos", "cliente", "asunto", "origen_creado_en",
-        "origen_cerrado"}
+        "caso_cerrado"}
 
 
 # =============================================================================
@@ -674,3 +670,186 @@ def test_las_coordenadas_siguen_sin_salir_con_los_campos_nuevos(org_a):
     for prohibido in ("10.98", "-74.78"):
         assert prohibido not in plano, f"se filtro {prohibido}"
     assert fila["cliente"] == "Cliente con GPS"
+
+
+# =============================================================================
+#  §8  EL ESTADO REAL DEL CASO  --  para la tercera bandeja
+# =============================================================================
+
+def test_un_caso_abierto_dice_que_NO_esta_cerrado(org_a):
+    """
+    False, no None. Saber que esta abierto es un dato; no tener caso es otra
+    cosa, y la pantalla las trata distinto.
+    """
+    from cases.models import Case
+
+    with rls_org(org_a):
+        caso = Case.objects.create(org=org_a, name="Sin internet",
+                                   status="New", priority="High")
+        p = _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+        contexto = contexto_propuesta.contexto_de(org_a, [p])
+
+    assert contexto[str(p.id)]["caso_cerrado"] is False
+
+
+@pytest.mark.parametrize("estado", ["Closed", "Rejected", "Duplicate"])
+def test_los_tres_estados_finales_cuentan_como_cerrado(org_a, estado):
+    """
+    EL CRITERIO NO SE INVENTA AQUI: sale de 'cases.workflow.TERMINAL_STATUSES',
+    que es el que usa el resto del CRM. Una segunda lista en el contexto se
+    desincronizaria el dia que alguien agregue un estado.
+    """
+    from cases.models import Case
+
+    with rls_org(org_a):
+        caso = Case.objects.create(org=org_a, name="Caso", status=estado,
+                                   priority="Low")
+        p = _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+        contexto = contexto_propuesta.contexto_de(org_a, [p])
+
+    assert contexto[str(p.id)]["caso_cerrado"] is True
+
+
+def test_resolved_at_alcanza_aunque_el_estado_siga_abierto(org_a):
+    """Un caso puede tener la marca sin el estado. Se miran los dos."""
+    from cases.models import Case
+
+    with rls_org(org_a):
+        caso = Case.objects.create(org=org_a, name="Caso", status="New",
+                                   priority="Low", resolved_at=timezone.now())
+        p = _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+        contexto = contexto_propuesta.contexto_de(org_a, [p])
+
+    assert contexto[str(p.id)]["caso_cerrado"] is True
+
+
+def test_una_propuesta_sin_caso_no_afirma_nada(org_a):
+    """
+    None, y NO False. La pantalla oculta con True y solo con True, asi que un
+    None no esconde nada -- pero decir False aqui afirmaria que hay un caso
+    abierto, y no hay caso.
+    """
+    with rls_org(org_a):
+        p = _propuesta(org_a, origen_tipo="actividad")
+        contexto = contexto_propuesta.contexto_de(org_a, [p])
+
+    assert contexto[str(p.id)]["caso_cerrado"] is None
+
+
+def test_un_caso_de_otra_organizacion_no_se_alcanza_ni_para_esto(org_a, org_b):
+    """
+    'origen_id' es texto libre. Si el filtro por org fallara, una propuesta
+    podria ocultarse por el estado de un caso ajeno.
+    """
+    from cases.models import Case
+
+    with rls_org(org_b):
+        ajeno = Case.objects.create(org=org_b, name="De la otra empresa",
+                                    status="Closed", priority="Low")
+
+    with rls_org(org_a):
+        p = _propuesta(org_a, origen_tipo="case", origen_id=str(ajeno.id))
+        contexto = contexto_propuesta.contexto_de(org_a, [p])
+
+    assert contexto[str(p.id)]["caso_cerrado"] is None, (
+        "el caso es de otra organizacion: no debe alcanzarse")
+
+
+def test_el_estado_del_caso_NO_agrega_consultas(org_a, django_assert_num_queries):
+    """
+    LA PRUEBA QUE JUSTIFICA DONDE SE PUSO.
+
+    'status' y 'resolved_at' entran en el '.only()' de una consulta que ya se
+    hacia para el cliente y el asunto. Se cuentan CONSULTAS y no se lee el
+    codigo: una version que resolviera el estado caso por caso daria el mismo
+    resultado y N consultas mas.
+    """
+    from cases.models import Case
+
+    with rls_org(org_a):
+        propuestas = []
+        for i in range(5):
+            caso = Case.objects.create(org=org_a, name=f"Caso {i}",
+                                       status="Closed" if i % 2 else "New",
+                                       priority="Low")
+            propuestas.append(_propuesta(org_a, origen_tipo="case",
+                                         origen_id=str(caso.id)))
+
+        #  UNA consulta para los cinco casos, y es la unica: las de ordenes,
+        #  asignaciones y zonas ni se lanzan porque ninguna propuesta cuelga
+        #  de una orden de trabajo.
+        #
+        #  El numero se midio, no se supuso: la primera version de esta
+        #  prueba esperaba 4 --las cuatro que el contexto puede hacer-- y el
+        #  rojo dijo que era 1. Afirmar 4 habria dejado pasar tres consultas
+        #  nuevas sin que nadie se enterara.
+        with django_assert_num_queries(1):
+            contexto_propuesta.contexto_de(org_a, propuestas)
+
+
+def test_se_lee_el_caso_de_AHORA_y_no_la_evidencia_de_la_propuesta(org_a):
+    """
+    LA REGLA CENTRAL DE ESTE BLOQUE.
+
+    La evidencia de la propuesta es una foto del momento de detectar. Entre
+    eso y hoy el caso pudo cerrarse -- y pudo volver a abrirse. El contexto
+    tiene que decir lo que pasa AHORA, asi que no hay marca que revertir
+    cuando un caso se reabre.
+    """
+    from cases.models import Case
+
+    with rls_org(org_a):
+        caso = Case.objects.create(org=org_a, name="Va y viene", status="New",
+                                   priority="Low")
+        p = _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id),
+                       evidencia=[{
+                           "fuente": "case", "id": "c-1",
+                           "dato": "estado en el proveedor: Cerrado",
+                           "observado_en": timezone.now().isoformat(),
+                       }])
+
+        abierto = contexto_propuesta.contexto_de(org_a, [p])[str(p.id)]["caso_cerrado"]
+
+        Case.objects.filter(id=caso.id).update(status="Closed")
+        cerrado = contexto_propuesta.contexto_de(org_a, [p])[str(p.id)]["caso_cerrado"]
+
+        #  Y REABIERTO: vuelve solo, sin tocar la propuesta.
+        Case.objects.filter(id=caso.id).update(status="New")
+        reabierto = contexto_propuesta.contexto_de(org_a, [p])[str(p.id)]["caso_cerrado"]
+
+    assert (abierto, cerrado, reabierto) == (False, True, False)
+
+
+def test_la_lista_expone_caso_cerrado(org_a, admin_client, admin_profile):
+    """Atravesando la API entera, que es de donde lo lee la pantalla."""
+    from cases.models import Case
+
+    with rls_org(org_a):
+        caso = Case.objects.create(org=org_a, name="Cerrado ya", status="Closed",
+                                   priority="Low")
+        _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+
+    fila = admin_client.get("/api/operaciones/propuestas/").json()["resultados"][0]
+    assert fila["caso_cerrado"] is True
+
+
+def test_el_estado_de_la_propuesta_no_se_toca_nunca(org_a):
+    """
+    NADA DE ESTO CAMBIA UNA PROPUESTA. La tercera bandeja es una lectura, no
+    una transicion: la propuesta sigue en 'propuesta' y su auditoria intacta.
+    """
+    from common.models import Activity
+    from cases.models import Case
+
+    with rls_org(org_a):
+        caso = Case.objects.create(org=org_a, name="Caso", status="Closed",
+                                   priority="Low")
+        p = _propuesta(org_a, origen_tipo="case", origen_id=str(caso.id))
+        renglones_antes = Activity.objects.count()
+
+        contexto_propuesta.contexto_de(org_a, [p])
+        p.refresh_from_db()
+
+        assert p.estado == PropuestaSupervisor.PROPUESTA
+        assert p.revisado_por_id is None
+        assert Activity.objects.count() == renglones_antes
