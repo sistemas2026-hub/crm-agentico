@@ -68,6 +68,15 @@ automática queda **bloqueada** hasta resolver tratamiento de datos con terceros
 la autorización que firma el cliente nombra al proveedor del modelo, y Chat no
 está ahí (CLAUDE.md §5, mismo motivo por el que Sentry sigue apagado).
 
+**8 · `bloqueada` y `requiere_noc` son dos conceptos distintos** (29/09/2026, al
+construir la Fase C). El estado dice que el trabajo está detenido; el booleano dice
+que hace falta una acción del NOC. Un trabajo esperando al cliente, al material o a
+que pare de llover está bloqueado y **no** lo destraba el NOC: si fueran uno, esa
+bandeja mostraría trabajos que nadie de esa mesa puede resolver y a la semana la
+dejarían de mirar. `requiere_noc` es **estructural** y no se deduce de un campo del
+esquema del ISP —otra empresa lo llamaría «Requerimiento a NOC»— así que un filtro
+que dependa de ese nombre deja de funcionar con la segunda.
+
 **7 · Los movimientos de material no se duplican.** Se consultan por
 `MovimientoDeMaterial.orden`. La pestaña **no calcula una segunda contabilidad**:
 solo presenta movimientos que ya existen.
@@ -218,3 +227,6 @@ Lo devuelve el `orquestador`. Pendiente de correr.
 | 29/09/2026 | **Fase A cerrada.** Servicio, vista solo-lectura, proxy y los cuatro bloques en la ficha de la orden. 16 pruebas nuevas (401 en `campo/`), 24 contra Postgres real, y la del kit **verificada en negativo**: al colarlo, tres fallan y una nombra el 150. En el navegador, con datos reales: custodia 300 m, orden 37,5 m | Fases B, C y D | `2e24c3b` |
 | 29/09/2026 | **Fase B cerrada.** Los cuatro tipos de evento, el formulario derivado de `WorkTypeVersion` y la línea de tiempo única. 25 pruebas nuevas (426 en `campo/`), 49 contra Postgres real. **En negativo**: leer con el esquema vigente en vez del snapshot hace fallar la prueba. Ciclo completo verificado en el navegador | Fases C y D | `98367ef` |
 | 29/09/2026 | **Decisión nueva, medida en la pantalla:** un AVANCE antes del INICIO **se acepta** —un reporte perdido es peor que uno desordenado— pero la ficha avisa que falta la condición inicial, y la línea de tiempo **no se reordena** para que parezca prolija | — | `98367ef` |
+| 29/09/2026 | **Fase C cerrada.** `bloqueada` como estado operativo con su mapa (`SE_PUEDE_BLOQUEAR_DESDE`), `BloqueoDeTrabajo` como hecho con apertura y cierre, `bloqueo_resuelto` con quién/qué/minutos, y los dos filtros en la bandeja existente. 31 pruebas + 4 de la cadena del frontend; 457 en `campo/`; 80 contra Postgres real. **En negativo**: deducir `requiere_noc` del formulario hace fallar la prueba | Fase D | `6ea7dd2` |
+| 29/09/2026 | **Tres defectos que solo se vieron probando la pantalla:** la cadena del CRM no reenviaba `requiere_noc` (el backend lo respetaba y tenía prueba; la bandeja del NOC quedaba vacía para siempre), la vista de resolver devolvía un `orden` en memoria ya viejo, y la fila de la tabla no se refrescaba sin `invalidateAll`. Se agregaron 4 pruebas de la capa servidor del frontend, que es donde se perdía el dato | — | `6ea7dd2` |
+| 29/09/2026 | **Defecto de la Fase B, hallado leyendo el código:** la línea de tiempo leía `estado_nuevo` y `transiciones.py` escribe `nuevo_estado`, así que las transiciones salían mudas. La prueba estaba en verde porque **fabricaba** el evento con la clave equivocada en vez de ejecutar una transición real | — | `6ea7dd2` |
