@@ -1,6 +1,8 @@
 # Objetivo · El seguimiento de campo vive en la orden, no en un chat
 
-> Abierto el 29/09/2026. Estado: **abierto**.
+> Abierto el 29/09/2026. **Las cuatro fases cerradas el 30/09/2026** (`affadd9`),
+> SIN push. Queda una sola cosa pendiente y está dicha: el latido de la app, sin
+> el cual «sin sincronización reciente» no se puede encender.
 
 ## Qué significa terminado
 
@@ -80,6 +82,24 @@ que dependa de ese nombre deja de funcionar con la segunda.
 **7 · Los movimientos de material no se duplican.** Se consultan por
 `MovimientoDeMaterial.orden`. La pestaña **no calcula una segunda contabilidad**:
 solo presenta movimientos que ya existen.
+
+**9 · La salud del seguimiento se calcula, no se guarda** (30/09/2026, Fase D). No
+hay `estado_seguimiento` en ninguna tabla: sería el tercer eje que la decisión 1
+prohibió. Un veredicto guardado diría «al día» mientras el reloj sigue corriendo.
+Hay una guarda que recorre los modelos de `campo` y falla si alguien agrega esa
+columna.
+
+**10 · «No reportó» y «no sé si tiene señal» no se juntan nunca.** Medido el
+30/09/2026 en `apps/tecnicos-mobile`: la cola se drena por **eventos de la
+interfaz** y no hay `Timer.periodic` ni escucha de conectividad. Sin latido, la
+ausencia de contacto no distingue «sin señal» de «app cerrada en el bolsillo», así
+que `minutos_contacto_reciente` viene **en nulo = no se evalúa** y el sistema no
+afirma lo que no puede medir. Se enciende cuando la app tenga latido; la lógica ya
+está construida y probada.
+
+**11 · Dos umbrales, nunca un número compartido.** `minutos_para_reportar` sale del
+procedimiento de la empresa; `minutos_contacto_reciente` sale de cómo funciona la
+app. Los dos por empresa.
 
 ## El hallazgo que corrige la Fase A
 
@@ -230,3 +250,6 @@ Lo devuelve el `orquestador`. Pendiente de correr.
 | 29/09/2026 | **Fase C cerrada.** `bloqueada` como estado operativo con su mapa (`SE_PUEDE_BLOQUEAR_DESDE`), `BloqueoDeTrabajo` como hecho con apertura y cierre, `bloqueo_resuelto` con quién/qué/minutos, y los dos filtros en la bandeja existente. 31 pruebas + 4 de la cadena del frontend; 457 en `campo/`; 80 contra Postgres real. **En negativo**: deducir `requiere_noc` del formulario hace fallar la prueba | Fase D | `6ea7dd2` |
 | 29/09/2026 | **Tres defectos que solo se vieron probando la pantalla:** la cadena del CRM no reenviaba `requiere_noc` (el backend lo respetaba y tenía prueba; la bandeja del NOC quedaba vacía para siempre), la vista de resolver devolvía un `orden` en memoria ya viejo, y la fila de la tabla no se refrescaba sin `invalidateAll`. Se agregaron 4 pruebas de la capa servidor del frontend, que es donde se perdía el dato | — | `6ea7dd2` |
 | 29/09/2026 | **Defecto de la Fase B, hallado leyendo el código:** la línea de tiempo leía `estado_nuevo` y `transiciones.py` escribe `nuevo_estado`, así que las transiciones salían mudas. La prueba estaba en verde porque **fabricaba** el evento con la clave equivocada en vez de ejecutar una transición real | — | `6ea7dd2` |
+| 30/09/2026 | **Fase D cerrada.** `salud_seguimiento.calcular` con el orden de prioridad, los dos umbrales por empresa, `ContactoDeDispositivo` con freno, la columna y los dos filtros, y el bloque en la ficha. 29 pruebas (486 en `campo/`), 87 contra Postgres real, 42 en vitest. **En negativo**: invertir el orden de las preguntas, y evaluar la sincronización con el umbral apagado | — | `affadd9` |
+| 30/09/2026 | **Medición que cambió el diseño:** la app **no tiene latido** (la cola se drena por eventos de la interfaz). Sin él la ausencia de contacto no prueba nada, así que la cuarta situación queda construida, probada y **apagada**. Lo único que falta para encenderla es un `Timer.periodic` en Flutter, que quedó fuera a propósito: es otra superficie y no se midió | el latido en la app | `affadd9` |
+| 30/09/2026 | **El recorrido completo, medido:** al día (12 min) → vencido (38) → sin contacto (dispositivo hace 40) → vencido otra vez (dispositivo hace 2) → pausado (2 h) → al día. **El mismo atraso de 38 minutos da dos veredictos distintos según si el teléfono apareció** | — | `affadd9` |
