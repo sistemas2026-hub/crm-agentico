@@ -1,8 +1,8 @@
 # Objetivo · El seguimiento de campo vive en la orden, no en un chat
 
 > **Objetivo: CERRADO — 30/09/2026.** Abierto el 29/09/2026.
-> **Producción: DESPLEGADO, pendiente de confirmación de arranque** — ver la
-> sección siguiente y su punto de no retorno.
+> **Producción: CERRADO EN PRODUCCIÓN** — 30/09/2026, `6332710`. Confirmado con
+> el log del `migrate` y los siete contenedores arriba; ver la sección siguiente.
 >
 > Fases A–D implementadas, medidas y con sus límites escritos. **No quedan
 > funciones pendientes dentro de este objetivo.**
@@ -23,7 +23,7 @@
 
 ## Estado de producción
 
-> **DESPLEGADO — pendiente de confirmación de arranque.** 30/09/2026.
+> **CERRADO EN PRODUCCIÓN — 30/09/2026.**
 >
 > Commit desplegado: **`6332710`** en `fix/integracion-wisphub`
 > (`fb8cb84..6332710`, fast-forward). Verificado **por contenido y no por hash** —
@@ -47,16 +47,31 @@ llegaron a tener **dos nodos hoja**, y Django se niega a arrancar con eso. Como 
 entrypoint del backend corre `migrate`, ese fallo no aparece en una prueba: aparece
 con el servicio abajo.
 
-### Falta confirmar en producción
+### Confirmado en producción (30/09/2026)
 
-- [ ] backend iniciado sin errores;
-- [ ] migración `0016` aplicada;
-- [ ] ausencia de excepciones nuevas después del deploy;
-- [ ] Materiales y Seguimiento cargan en una orden real.
+- [x] **migración `0016` aplicada** — el log del arranque lo muestra corriendo, que
+      es evidencia más fuerte que `showmigrations`: dice el momento, no solo el
+      estado final:
 
-Esta sesión **no puede** hacer ninguna de las cuatro: no tiene acceso al servidor
-ni a la base de producción, y el repo prohíbe conectarse a producción y leer los
-secretos donde estarían esas credenciales.
+      Applying campo.0012_plantillas_de_kit... OK
+      Applying campo.0013_materialcatalogo_imagen_key... OK
+      Applying campo.0014_bloqueo_de_trabajo... OK
+      Applying campo.0015_seguimiento_y_contacto... OK
+      Applying campo.0016_unir_inventario_y_catalogo_de_rol... OK
+
+      `0012_restaurar_catalogo_de_rol` no figura porque ya estaba aplicada allá:
+      solo corren las nuevas.
+
+- [x] **backend iniciado sin errores** — los siete contenedores `Up`, ninguno en
+      `Restarting`, el backend reiniciado con el deploy.
+- [x] **ausencia de excepciones nuevas** — dos horas de log filtradas por
+      `Traceback|Conflicting|does not exist|ERROR` (sin distinguir mayúsculas) no
+      devolvieron **nada** más que esas cinco líneas de `Applying`.
+- [ ] Materiales y Seguimiento en una orden real — confirmación funcional
+      adicional, **no parte del gate**. Queda como smoke no destructivo.
+
+Las salidas las obtuvo el usuario: esta sesión no tiene acceso al servidor ni a la
+base de producción, y el repo prohíbe conectarse allá y leer los secretos.
 
 ### Riesgo operativo separado, y NO es de este despliegue
 
