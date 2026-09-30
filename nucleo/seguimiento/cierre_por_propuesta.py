@@ -161,18 +161,40 @@ def cerrar_caso_de_propuesta(config, tenant: str, *, propuesta_id: str,
     evidencia = origen
 
     def _hacer():
-        #  La puerta se abre DENTRO de la operacion idempotente, no al reves: si
-        #  la operacion ya estaba hecha, no hace falta ningun permiso porque no
-        #  se va a ejecutar nada.
+        return ejecutor_http.ejecutar(
+            herr, argumentos, tenant,
+            variables_tenant=config.variables_tenant)
+
+    #  LA PUERTA ENVUELVE A LA IDEMPOTENCIA, NO AL REVES  --  30/09/2026
+    #  ----------------------------------------------------------------
+    #  Hasta hoy el 'with' estaba DENTRO de '_hacer', con este razonamiento
+    #  escrito al lado: "si la operacion ya estaba hecha, no hace falta ningun
+    #  permiso porque no se va a ejecutar nada". Suena bien y es falso, porque
+    #  'idempotencia.ejecutar' comprueba el permiso ANTES de llamar a lo que se
+    #  le pasa (idempotencia.py, paso 10.14A): mira 'frontera.permiso_vigente()'
+    #  y, si no hay, devuelve 'sin_autorizar' sin invocar '_hacer' -- o sea que
+    #  la puerta se abria despues de que alguien ya habia preguntado si estaba
+    #  abierta.
+    #
+    #  Resultado: el cierre NUNCA pudo ejecutarse. Medido en produccion el
+    #  30/09/2026 sobre el ticket 93223: las doce validaciones pasaron, la
+    #  lectura estaba fresca, y la bitacora quedo en 'NO_EJECUTADA /
+    #  ACCION_EXTERNA_SIN_AUTORIZAR' con CERO filas en
+    #  'asistente.operaciones_externas' -- ni siquiera se reclamo la operacion.
+    #
+    #  Este es el orden que ya usaban los cinco llamadores de 'nucleo/modelo/
+    #  motor.py': 'with frontera.X(): idempotencia.ejecutar(...)'. Este modulo
+    #  era el unico que lo hacia al reves, y era el unico sin pruebas.
+    #
+    #  Lo que se pierde con el orden correcto: una operacion ya ejecutada abre
+    #  el permiso para nada. No cuesta nada -- abrir el permiso es fijar una
+    #  contextvar, no una llamada ni una escritura-- y a cambio la mutacion
+    #  vuelve a ser posible.
+    try:
         with frontera.humana(tenant, herr.nombre, actor=actor or origen,
                              evidencia=evidencia, origen=origen):
-            return ejecutor_http.ejecutar(
-                herr, argumentos, tenant,
-                variables_tenant=config.variables_tenant)
-
-    try:
-        resultado = idempotencia.ejecutar(
-            tenant, herr.nombre, argumentos, origen, _hacer)
+            resultado = idempotencia.ejecutar(
+                tenant, herr.nombre, argumentos, origen, _hacer)
     except Exception as e:                                   # noqa: BLE001
         #  La excepcion se vuelve a levantar tal cual por idempotencia.ejecutar,
         #  y la operacion queda 'fallida' con su error. El caso NO se cierra, y
