@@ -482,7 +482,12 @@ export async function leerSeguimientoDeOrden({ cookies }, ordenId) {
  *
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  * @param {string} ordenId
- * @param {{ momento: string, respuestas: Record<string, any>, idempotencyKey?: string }} reporte
+ * `requiereNoc` y `detener` viajan APARTE de las respuestas, y solo significan
+ * algo en un bloqueo. Son datos de plataforma: el campo del formulario que dice
+ * "qué necesitás del NOC" lo nombra cada empresa como quiere, y un filtro que
+ * dependa de ese nombre deja de funcionar con la segunda.
+ *
+ * @param {{ momento: string, respuestas: Record<string, any>, requiereNoc?: boolean, detener?: boolean, idempotencyKey?: string }} reporte
  */
 export async function registrarSeguimiento({ cookies }, ordenId, reporte) {
   const cabeceras = reporte.idempotencyKey
@@ -495,7 +500,17 @@ export async function registrarSeguimiento({ cookies }, ordenId, reporte) {
         method: 'POST',
         // `apiRequest` serializa el objeto: pasarlo ya en texto lo enviaria
         // como un string JSON dentro de otro.
-        body: { momento: reporte.momento, respuestas: reporte.respuestas },
+        body: {
+          momento: reporte.momento,
+          respuestas: reporte.respuestas,
+          // Se mandan siempre que vengan definidos. Olvidarlos aca fue un defecto
+          // real: el backend los respetaba --tenia prueba-- y esta capa los
+          // dejaba caer, asi que la bandeja del NOC quedaba siempre vacia.
+          ...(reporte.requiereNoc !== undefined
+            ? { requiere_noc: !!reporte.requiereNoc }
+            : {}),
+          ...(reporte.detener !== undefined ? { detener: !!reporte.detener } : {})
+        },
         ...(cabeceras ? { headers: cabeceras } : {})
       },
       { cookies }
@@ -527,5 +542,80 @@ export async function registrarSeguimiento({ cookies }, ordenId, reporte) {
 
     const error = traducirError(err, 'el reporte de seguimiento');
     return { datos: null, error: { ...error, campos } };
+  }
+}
+
+/**
+ * Los bloqueos vivos de la empresa.
+ *
+ * DOS FILTROS, NO UNO
+ * -------------------
+ * `soloNoc` existe para que «Bloqueados» y «Requiere NOC» puedan ser dos filtros
+ * distintos y los dos digan la verdad. Un trabajo detenido esperando al cliente
+ * está bloqueado y NO requiere NOC; mezclarlos llenaría esa bandeja de cosas que
+ * nadie de esa mesa puede resolver, y a la semana la dejarían de mirar.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {{ soloNoc?: boolean }} [opciones]
+ */
+export async function leerBloqueosAbiertos({ cookies }, opciones = {}) {
+  const sufijo = opciones.soloNoc ? '?requiere_noc=1' : '';
+  try {
+    const d = await apiRequest(`/campo/bloqueos/${sufijo}`, {}, { cookies });
+    return { datos: d, error: null };
+  } catch (/** @type {any} */ err) {
+    return { datos: null, error: traducirError(err, 'los bloqueos abiertos') };
+  }
+}
+
+/**
+ * Destraba un trabajo detenido.
+ *
+ * El estado al que vuelve lo guardó el bloqueo al abrirse; `volverA` solo se manda
+ * cuando alguien quiere otro destino, y el backend lo valida contra la máquina de
+ * transiciones igual que cualquier otro movimiento de estado.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} ordenId
+ * @param {{ queSeHizo: string, rol?: string, volverA?: string, idempotencyKey?: string }} datos
+ */
+export async function resolverBloqueo({ cookies }, ordenId, datos) {
+  const cabeceras = datos.idempotencyKey
+    ? { 'Idempotency-Key': datos.idempotencyKey }
+    : undefined;
+  try {
+    const d = await apiRequest(
+      `/campo/trabajos/${ordenId}/bloqueo/resolver/`,
+      {
+        method: 'POST',
+        body: {
+          que_se_hizo: datos.queSeHizo,
+          resuelto_por_rol: datos.rol ?? '',
+          ...(datos.volverA ? { volver_a: datos.volverA } : {})
+        },
+        ...(cabeceras ? { headers: cabeceras } : {})
+      },
+      { cookies }
+    );
+    return { datos: d, error: null };
+  } catch (/** @type {any} */ err) {
+    // 422: el motivo está escrito para quien lo lee. 409: no hay bloqueo abierto,
+    // que casi siempre significa que alguien lo resolvió mientras mirabas.
+    if (err?.status === 422 || err?.status === 409) {
+      return {
+        datos: null,
+        error: {
+          codigo: err.status === 409 ? 'SIN_BLOQUEO_ABIERTO' : 'BLOQUEO_INVALIDO',
+          status: err.status,
+          mensaje:
+            err?.body?.detalle ??
+            (err.status === 409
+              ? 'Este trabajo ya no tiene un bloqueo abierto: alguien lo resolvió.'
+              : 'No se pudo resolver el bloqueo.'),
+          campos: err?.body?.campos ?? null
+        }
+      };
+    }
+    return { datos: null, error: traducirError(err, 'este bloqueo') };
   }
 }

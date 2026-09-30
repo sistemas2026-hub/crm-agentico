@@ -89,12 +89,34 @@ TIPOS = {
 
 MOMENTOS = tuple(TIPOS.keys())
 
+#: De que hechos del sistema se muestra algo mas que el cambio de estado, y QUE
+#: exactamente. Es una lista blanca: `datos` es un JSONField y volcarlo completo
+#: dejaria pasar lo que cualquier servicio haya guardado ahi.
+CAMPOS_EXPUESTOS = {
+    "bloqueo_resuelto": (
+        "que_se_hizo",
+        "resuelto_por_rol",
+        "minutos_detenido",
+        "volvio_a",
+        "requeria_noc",
+    ),
+    "bloqueo_detuvo_el_trabajo": ("requiere_noc", "estado_operativo_anterior"),
+    "bloqueo_libero_el_trabajo": ("volvio_a",),
+}
+
+
 #: Como se lee cada uno en una linea de tiempo.
 ETIQUETAS = {
     "inicio_campo": "INICIO",
     "avance_campo": "AVANCE",
     "bloqueo_campo": "BLOQUEO",
     "cierre_campo": "CIERRE DE CAMPO",
+    # Los hechos del sistema alrededor de un bloqueo. Se distinguen del REPORTE
+    # --`bloqueo_campo`-- a proposito: uno es lo que dijo una persona, los otros
+    # son lo que hizo la maquina de estados.
+    "bloqueo_detuvo_el_trabajo": "ESTADO → BLOQUEADA",
+    "bloqueo_libero_el_trabajo": "ESTADO → en marcha",
+    "bloqueo_resuelto": "BLOQUEO RESUELTO",
     # Los que ya se escribian, para que la linea de tiempo sea UNA sola y no dos
     # listas que el lector tiene que cruzar a mano.
     "orden_creada": "Orden creada",
@@ -333,11 +355,36 @@ def linea_de_tiempo(orden) -> dict:
             # Se lee con el snapshot del evento, NO con el esquema vigente.
             fila["detalle"] = _leer_con_su_esquema(datos)
             fila["declaraciones"] = datos.get("declaraciones") or {}
+        elif e.tipo in CAMPOS_EXPUESTOS:
+            # Hechos del sistema que si tienen algo que contar. Se exponen las
+            # claves nombradas y NADA MAS: volcar el JSON entero dejaria salir lo
+            # que cualquier servicio haya metido ahi, hoy o dentro de un año.
+            fila["datos"] = {
+                k: datos.get(k) for k in CAMPOS_EXPUESTOS[e.tipo] if k in datos
+            }
+            fila["estado_anterior"] = datos.get("estado_anterior")
+            fila["estado_nuevo"] = datos.get("nuevo_estado") or datos.get("estado_nuevo")
         else:
             # De los otros se muestra el cambio de estado si lo trae; nunca el
             # JSON entero, que puede llevar cualquier cosa.
-            fila["estado_anterior"] = datos.get("estado_anterior")
-            fila["estado_nuevo"] = datos.get("estado_nuevo")
+            #
+            # LAS TRES CLAVES, porque el sistema escribe tres nombres distintos y
+            # leer uno solo deja la mitad de la bitacora muda:
+            #   `nuevo_estado`              -- transiciones.py::_aplicar_transicion
+            #   `estado_validacion_nuevo`   -- transiciones.py::_aplicar_validacion
+            #   `estado_nuevo`              -- por si alguien lo escribe asi
+            # Se descubrio leyendo el codigo: la primera version de esta funcion
+            # leia solo `estado_nuevo`, y la prueba pasaba porque CREABA el evento
+            # con esa clave en vez de ejecutar una transicion de verdad.
+            fila["estado_anterior"] = (
+                datos.get("estado_anterior")
+                or datos.get("estado_validacion_anterior")
+            )
+            fila["estado_nuevo"] = (
+                datos.get("nuevo_estado")
+                or datos.get("estado_nuevo")
+                or datos.get("estado_validacion_nuevo")
+            )
         salida.append(fila)
 
     registrados = [e.tipo for e in eventos if e.tipo in tipos_seguimiento]

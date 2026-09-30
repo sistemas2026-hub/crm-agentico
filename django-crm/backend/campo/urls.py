@@ -76,6 +76,12 @@ urlpatterns = [
     # La bitacora de la intervencion: INICIO, AVANCE, BLOQUEO y CIERRE. No
     # mueve el estado operativo; eso sigue siendo cosa de las transiciones.
     path("trabajos/<uid:pk>/seguimiento/", views.SeguimientoDeOrdenView.as_view(), name="trabajo_seguimiento"),
+    # Destrabar un trabajo detenido. El estado al que vuelve lo guardo el
+    # bloqueo al abrirse, y la maquina de transiciones lo valida.
+    path("trabajos/<uid:pk>/bloqueo/resolver/", views.ResolverBloqueoView.as_view(), name="trabajo_bloqueo_resolver"),
+    # Los bloqueos vivos de la empresa. `?requiere_noc=1` es el otro filtro:
+    # estar detenido y necesitar al NOC no son lo mismo.
+    path("bloqueos/", views.BloqueosAbiertosView.as_view(), name="bloqueos_abiertos"),
     path("trabajos/<uid:pk>/datos/", views.GuardarDatosTrabajoView.as_view(), name="trabajo_datos"),
     path("trabajos/<uid:pk>/probar-conexion/", views.ProbarConexionView.as_view(), name="trabajo_probar_conexion"),
     path("trabajos/<uid:pk>/evidencias/", views.EvidenciasTrabajoView.as_view(), name="trabajo_evidencias"),

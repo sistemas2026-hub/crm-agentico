@@ -16,10 +16,39 @@ class TransicionInvalidaError(ValidationError):
 
 
 # Matriz de transiciones operativas válidas
+#: Desde donde se puede DETENER un trabajo.
+#:
+#: Quedan afuera a proposito `completada_campo`, `cerrada` y `cancelada`: un
+#: trabajo que ya se hizo no se puede "bloquear" -- lo que haya pasado despues es
+#: otra cosa (una correccion, un reclamo) y tiene su propio camino. Bloquear algo
+#: terminado dejaria una orden detenida que nadie va a destrabar porque no hay
+#: nada que hacer.
+SE_PUEDE_BLOQUEAR_DESDE = frozenset({
+    OrdenTrabajo.ASIGNADA,
+    OrdenTrabajo.EN_CAMINO,
+    OrdenTrabajo.EN_SITIO,
+    OrdenTrabajo.CORRECCION_REQUERIDA,
+})
+
 TRANSICIONES_PERMITIDAS = {
-    OrdenTrabajo.ASIGNADA: {OrdenTrabajo.EN_CAMINO, OrdenTrabajo.EN_SITIO, OrdenTrabajo.CANCELADA},
-    OrdenTrabajo.EN_CAMINO: {OrdenTrabajo.EN_SITIO, OrdenTrabajo.CANCELADA},
-    OrdenTrabajo.EN_SITIO: {OrdenTrabajo.COMPLETADA_CAMPO, OrdenTrabajo.CANCELADA},
+    OrdenTrabajo.ASIGNADA: {OrdenTrabajo.EN_CAMINO, OrdenTrabajo.EN_SITIO,
+                            OrdenTrabajo.BLOQUEADA, OrdenTrabajo.CANCELADA},
+    OrdenTrabajo.EN_CAMINO: {OrdenTrabajo.EN_SITIO, OrdenTrabajo.BLOQUEADA,
+                             OrdenTrabajo.CANCELADA},
+    OrdenTrabajo.EN_SITIO: {OrdenTrabajo.COMPLETADA_CAMPO, OrdenTrabajo.BLOQUEADA,
+                            OrdenTrabajo.CANCELADA},
+    # De un bloqueo se vuelve a donde se estaba, y ese estado lo guarda la fila
+    # del bloqueo al abrirse (campo/bloqueos.py). Los cuatro estan declarados
+    # porque se puede bloquear desde los cuatro; el servicio PROPONE el anterior y
+    # esta maquina sigue siendo la que dice si ese retorno es legal.
+    #
+    # `cancelada` tambien: un trabajo que quedo trabado semanas se cancela sin
+    # tener que destrabarlo primero.
+    OrdenTrabajo.BLOQUEADA: {OrdenTrabajo.ASIGNADA,
+                             OrdenTrabajo.EN_CAMINO,
+                             OrdenTrabajo.EN_SITIO,
+                             OrdenTrabajo.CORRECCION_REQUERIDA,
+                             OrdenTrabajo.CANCELADA},
     # El unico camino de vuelta del ciclo. Antes 'completada_campo' solo podia
     # ir a 'cerrada': una ejecucion mal hecha no tenia forma de volver al
     # tecnico, asi que la unica salida era corregirla desde la oficina, que no
@@ -28,6 +57,7 @@ TRANSICIONES_PERMITIDAS = {
                                     OrdenTrabajo.CORRECCION_REQUERIDA},
     OrdenTrabajo.CORRECCION_REQUERIDA: {OrdenTrabajo.EN_CAMINO,
                                         OrdenTrabajo.EN_SITIO,
+                                        OrdenTrabajo.BLOQUEADA,
                                         OrdenTrabajo.CANCELADA},
     OrdenTrabajo.CERRADA: set(),
     OrdenTrabajo.CANCELADA: set(),
@@ -262,6 +292,29 @@ def cerrar_orden(
         profile=profile,
         metadatos=metadatos or {},
         establecer_fecha_cierre=True,
+    )
+
+
+def aplicar_transicion(
+    orden: OrdenTrabajo,
+    nuevo_estado: str,
+    tipo_evento: str,
+    profile=None,
+    metadatos: dict | None = None,
+) -> OrdenTrabajo:
+    """Mueve el estado operativo por la maquina, para OTRO servicio del modulo.
+
+    Existe para que quien necesite una transicion --por ejemplo el servicio de
+    bloqueos-- no tenga que tocar una funcion privada ni, peor, escribir
+    `orden.estado_operativo = ...` por su cuenta. La validacion y el evento son los
+    mismos: lo unico que cambia es que el nombre no empieza con guion bajo.
+    """
+    return _aplicar_transicion(
+        orden=orden,
+        nuevo_estado=nuevo_estado,
+        tipo_evento=tipo_evento,
+        profile=profile,
+        metadatos=metadatos or {},
     )
 
 

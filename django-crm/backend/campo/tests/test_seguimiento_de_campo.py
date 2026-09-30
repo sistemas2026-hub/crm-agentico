@@ -481,10 +481,18 @@ def test_m_la_linea_de_tiempo_es_una_sola(orden, tecnico, org_a):
         orden, profile=tecnico[1], momento=seg.INICIO,
         respuestas={"punto_intervenido": "CTO-045", "nivel_inicial_1550": -4.8},
     )
-    EventoTrabajo.objects.create(
-        org=org_a, orden=orden, tipo="correccion_requerida", profile=tecnico[1],
-        datos={"estado_anterior": "completada_campo", "estado_nuevo": "correccion_requerida"},
-    )
+    # UNA TRANSICION DE VERDAD, no un evento fabricado a mano.
+    #
+    # La primera version de esta prueba creaba el evento con la clave
+    # `estado_nuevo`, que es la que la funcion leia... porque la habia escrito la
+    # misma persona. El sistema real escribe `nuevo_estado`, asi que la prueba
+    # estaba en verde con la linea de tiempo muda. Es exactamente el error que
+    # CLAUDE.md §6 describe: usar la frase que SI funciona en vez de la que falla.
+    from campo.services.transiciones import ejecutar_accion_operativa
+
+    # `cancelar` es la transicion que SI sale de `en_sitio`: la maquina niega
+    # volver a `en_camino`, y esa negativa es la garantia que no se toca.
+    ejecutar_accion_operativa(orden, "cancelar", profile=tecnico[1])
     seg.registrar(
         orden, profile=tecnico[1], momento=seg.AVANCE,
         respuestas={"validaciones": "revise la entrada"},
@@ -492,13 +500,16 @@ def test_m_la_linea_de_tiempo_es_una_sola(orden, tecnico, org_a):
 
     t = seg.linea_de_tiempo(orden)
     tipos = [e["tipo"] for e in t["eventos"]]
-    assert tipos == ["orden_creada", "inicio_campo", "correccion_requerida", "avance_campo"]
+    assert tipos == ["orden_creada", "inicio_campo", "accion_cancelar", "avance_campo"]
 
-    # Los de seguimiento traen detalle; los otros, el cambio de estado.
+    # Los de seguimiento traen detalle; los otros, el cambio de estado LEIDO DE
+    # LA CLAVE QUE EL SISTEMA ESCRIBE.
     por_tipo = {e["tipo"]: e for e in t["eventos"]}
     assert por_tipo["inicio_campo"]["detalle"]
-    assert por_tipo["correccion_requerida"]["estado_nuevo"] == "correccion_requerida"
-    assert "detalle" not in por_tipo["correccion_requerida"]
+    transicion = por_tipo["accion_cancelar"]
+    assert transicion["estado_nuevo"] == "cancelada", transicion
+    assert transicion["estado_anterior"] == "en_sitio", transicion
+    assert "detalle" not in transicion
     assert por_tipo["orden_creada"]["etiqueta"] == "Orden creada"
     assert por_tipo["inicio_campo"]["etiqueta"] == "INICIO"
 

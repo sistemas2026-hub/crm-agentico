@@ -29,6 +29,7 @@ from campo.serializers import (
 )
 from campo.services.idempotencia import manejar_idempotencia
 from campo.services.materiales_de_orden import materiales_de_orden
+from campo.services import bloqueos
 from campo.services import seguimiento_campo as seguimiento
 from campo.services.telemetria import (
     TANDAS,
@@ -242,6 +243,12 @@ class SeguimientoDeOrdenView(APIView):
         datos["formularios"] = {
             m: seguimiento.formulario_de(orden, m) for m in seguimiento.MOMENTOS
         }
+        # El bloqueo vivo, si hay. La ficha lo necesita para poder decir dos cosas
+        # distintas: "detenida desde tal hora, vuelve a tal estado" y "reportado,
+        # pero el estado operativo NO cambió".
+        abierto = bloqueos.bloqueo_abierto_de(orden)
+        datos["bloqueo_abierto"] = bloqueos.serializar(abierto) if abierto else None
+        datos["estado_operativo"] = orden.estado_operativo
         return Response(datos)
 
     @manejar_idempotencia
@@ -257,12 +264,35 @@ class SeguimientoDeOrdenView(APIView):
             )
 
         try:
-            evento = seguimiento.registrar(
-                orden,
-                profile=getattr(request, "profile", None),
-                momento=momento,
-                respuestas=respuestas,
-                capturado_en_dispositivo=request.data.get("capturado_en_dispositivo"),
+            if momento == seguimiento.BLOQUEO:
+                # UN SOLO CAMINO para un bloqueo. Si esta ruta escribiera solo el
+                # evento, habria dos formas de reportar lo mismo y una de ellas no
+                # dejaria la fila que la bandeja del NOC necesita.
+                #
+                # `requiere_noc` viaja aparte de las respuestas a proposito: el
+                # campo del formulario lo nombra cada empresa como quiere, y un
+                # filtro que depende de ese nombre deja de funcionar con la
+                # segunda. Ver campo/bloqueos.py.
+                _bloqueo, evento, _detuvo = bloqueos.bloquear(
+                    orden,
+                    profile=getattr(request, "profile", None),
+                    respuestas=respuestas,
+                    requiere_noc=bool(request.data.get("requiere_noc")),
+                    detener=request.data.get("detener", True) is not False,
+                    capturado_en_dispositivo=request.data.get("capturado_en_dispositivo"),
+                )
+            else:
+                evento = seguimiento.registrar(
+                    orden,
+                    profile=getattr(request, "profile", None),
+                    momento=momento,
+                    respuestas=respuestas,
+                    capturado_en_dispositivo=request.data.get("capturado_en_dispositivo"),
+                )
+        except bloqueos.BloqueoInvalido as e:
+            return Response(
+                {"error": "BLOQUEO_INVALIDO", "detalle": e.mensaje, "campos": e.errores},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
         except seguimiento.SeguimientoInvalido as e:
             # 422 y no 400: el cuerpo esta bien formado y la ruta es la correcta;
@@ -283,6 +313,80 @@ class SeguimientoDeOrdenView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class ResolverBloqueoView(APIView):
+    """Destraba un trabajo detenido.
+
+    El estado al que vuelve NO se adivina: lo guardo la fila del bloqueo cuando se
+    abrio, y la maquina de transiciones valida que ese retorno sea legal. Se puede
+    pedir otro destino --el mundo cambio mientras estaba trabado-- y se valida
+    igual.
+
+    Idempotente por `Idempotency-Key`: destrabar dos veces por un reintento de red
+    dejaria dos eventos y una historia que cuenta dos resoluciones donde hubo una.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        bloqueo = bloqueos.bloqueo_abierto_de(orden)
+        if bloqueo is None:
+            return Response(
+                {"error": "SIN_BLOQUEO_ABIERTO",
+                 "detalle": "Esta orden no tiene ningún bloqueo abierto."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            bloqueo, evento, volvio_a = bloqueos.resolver(
+                bloqueo,
+                profile=getattr(request, "profile", None),
+                que_se_hizo=request.data.get("que_se_hizo", ""),
+                resuelto_por_rol=request.data.get("resuelto_por_rol", ""),
+                volver_a=request.data.get("volver_a") or None,
+            )
+        except bloqueos.BloqueoInvalido as e:
+            return Response(
+                {"error": "BLOQUEO_INVALIDO", "detalle": e.mensaje, "campos": e.errores},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        # El estado sale de la instancia que la transicion MOVIO --la que cuelga
+        # del bloqueo--, no de la que cargo esta vista: son dos objetos distintos
+        # en memoria apuntando a la misma fila, y el de aca quedo viejo. La
+        # pantalla pinta el estado con esto, asi que devolverlo sin refrescar
+        # mostraria "bloqueada" justo despues de destrabar.
+        return Response(
+            {
+                "bloqueo": bloqueos.serializar(bloqueo),
+                "evento_id": str(evento.id),
+                "volvio_a": volvio_a,
+                "estado_operativo": bloqueo.orden.estado_operativo,
+            }
+        )
+
+
+class BloqueosAbiertosView(APIView):
+    """Los bloqueos vivos de la empresa, para los filtros de la bandeja.
+
+    `?requiere_noc=1` devuelve SOLO los que le tocan al NOC. Son dos filtros
+    distintos y los dos dicen la verdad: un trabajo detenido esperando al cliente
+    esta bloqueado y NO requiere NOC, y mezclarlos llenaria esa bandeja de cosas
+    que nadie de esa mesa puede resolver.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = getattr(request, "org", None)
+        if org is None:
+            raise Http404
+        solo_noc = str(request.query_params.get("requiere_noc", "")).lower() in (
+            "1", "true", "si", "sí",
+        )
+        filas = bloqueos.abiertos_de(org, solo_noc=solo_noc)
+        return Response({"bloqueos": filas, "total": len(filas)})
 
 
 class MaterialesDeOrdenView(APIView):

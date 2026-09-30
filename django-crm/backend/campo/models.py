@@ -171,12 +171,24 @@ class OrdenTrabajo(BaseModel):
     # No es "en proceso otra vez": es un estado propio para poder contarlo,
     # filtrarlo en la bandeja y medir cuantas ordenes se aprueban a la primera.
     CORRECCION_REQUERIDA = "correccion_requerida"
+    # El trabajo esta detenido por algo que el tecnico no puede resolver solo: no
+    # hay acceso al poste, falta material, el cliente no esta.
+    #
+    # ES UN ESTADO Y NO UNA BANDERA, y tampoco se deduce de "el ultimo evento":
+    # entra por la misma maquina de transiciones que niega los saltos invalidos.
+    # Reportar un bloqueo --`bloqueo_campo` en la bitacora-- y DETENER el trabajo
+    # son dos hechos distintos aunque nazcan de una sola pantalla: el primero es
+    # lo que una persona dice, el segundo es lo que el sistema hace.
+    #
+    # Y no confundir con `requiere_noc`, que es otra cosa: ver campo/bloqueos.py.
+    BLOQUEADA = "bloqueada"
     CERRADA = "cerrada"
     CANCELADA = "cancelada"
     ESTADOS_OPERATIVOS = (
         (ASIGNADA, "Asignada"),
         (EN_CAMINO, "En camino"),
         (EN_SITIO, "En sitio"),
+        (BLOQUEADA, "Bloqueada"),
         (COMPLETADA_CAMPO, "Completada en campo"),
         (CORRECCION_REQUERIDA, "Corrección requerida"),
         (CERRADA, "Cerrada"),
@@ -1241,6 +1253,7 @@ from campo.inventario import (  # noqa: E402,F401
     UbicacionDeActivo,
     UbicacionInventario,
 )
+from campo.bloqueos import BloqueoDeTrabajo  # noqa: E402,F401
 from campo.inventario_operacion import (  # noqa: E402,F401
     Compra,
     ConteoFisico,

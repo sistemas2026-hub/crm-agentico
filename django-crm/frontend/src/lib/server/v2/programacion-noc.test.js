@@ -18,7 +18,12 @@ const {
   CAUSAS,
   listarPlanes,
   programarOrden,
-  planesQueCubren
+  planesQueCubren,
+  leerMaterialesDeOrden,
+  leerSeguimientoDeOrden,
+  registrarSeguimiento,
+  leerBloqueosAbiertos,
+  resolverBloqueo
 } = await import('$lib/server/v2/programacion-noc.js');
 
 const event = /** @type {any} */ ({ cookies: { get: () => 'token' } });
@@ -392,5 +397,130 @@ describe('planes semanales', () => {
     await listarPlanes(event);
 
     expect(apiRequest.mock.calls[0][1]).toEqual({});
+  });
+});
+
+
+describe('el seguimiento de campo', () => {
+  it('manda requiere_noc y detener al backend', async () => {
+    // LA GUARDA DEL DEFECTO REAL: esta capa no reenviaba esos dos campos, asi que
+    // todo bloqueo entraba como "no es del NOC" y esa bandeja quedaba vacia para
+    // siempre. El backend los respetaba y tenia prueba; el dato se perdia ANTES de
+    // llegarle. Una prueba de backend no podia verlo.
+    apiRequest.mockResolvedValue({ id: 'x', tipo: 'bloqueo_campo' });
+
+    await registrarSeguimiento(event, 'o1', {
+      momento: 'bloqueo',
+      respuestas: { motivo: 'sin acceso' },
+      requiereNoc: true,
+      detener: true
+    });
+
+    const cuerpo = apiRequest.mock.calls[0][1].body;
+    expect(cuerpo.requiere_noc).toBe(true);
+    expect(cuerpo.detener).toBe(true);
+    // Y las respuestas del formulario siguen viajando aparte: `requiere_noc` es
+    // dato de plataforma, no un campo del esquema del ISP.
+    expect(cuerpo.respuestas).toEqual({ motivo: 'sin acceso' });
+  });
+
+  it('no inventa requiere_noc cuando nadie lo mando', async () => {
+    apiRequest.mockResolvedValue({ id: 'x' });
+
+    await registrarSeguimiento(event, 'o1', {
+      momento: 'avance',
+      respuestas: { nota: 'sigo' }
+    });
+
+    const cuerpo = apiRequest.mock.calls[0][1].body;
+    expect('requiere_noc' in cuerpo).toBe(false);
+    expect('detener' in cuerpo).toBe(false);
+  });
+
+  it('el body va como objeto: apiRequest es el que serializa', async () => {
+    // Pasarlo ya en texto lo enviaria como un string JSON dentro de otro, y el
+    // backend leeria un cuerpo vacio.
+    apiRequest.mockResolvedValue({ id: 'x' });
+    await registrarSeguimiento(event, 'o1', { momento: 'avance', respuestas: {} });
+    expect(typeof apiRequest.mock.calls[0][1].body).toBe('object');
+  });
+
+  it('un 422 devuelve el motivo del backend y los errores por campo', async () => {
+    // `traducirError` es el traductor de las LECTURAS y su texto generico
+    // ("no fue posible consultar...") taparia justo el dato util.
+    // `mockImplementationOnce` y no `mockRejectedValue`: el segundo crea la
+    // promesa rechazada al configurar el mock y queda sin consumir, asi que el
+    // runner la reporta como fallo del test aunque el codigo la maneje bien. Es el
+    // patron que ya usa el resto de este archivo.
+    apiRequest.mockImplementationOnce(() =>
+      Promise.reject(
+        Object.assign(new Error('x'), {
+          status: 422,
+          body: { detalle: 'Falta el nivel inicial.', campos: { nivel: 'requerido' } }
+        })
+      )
+    );
+
+    const { error } = await registrarSeguimiento(event, 'o1', {
+      momento: 'inicio',
+      respuestas: {}
+    });
+
+    expect(error.mensaje).toBe('Falta el nivel inicial.');
+    expect(error.campos).toEqual({ nivel: 'requerido' });
+  });
+});
+
+describe('los bloqueos', () => {
+  it('bloqueados y requiere NOC son dos consultas distintas', async () => {
+    apiRequest.mockResolvedValue({ bloqueos: [], total: 0 });
+
+    await leerBloqueosAbiertos(event);
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/bloqueos/');
+
+    apiRequest.mockClear();
+    await leerBloqueosAbiertos(event, { soloNoc: true });
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/bloqueos/?requiere_noc=1');
+  });
+
+  it('resolver no manda volver_a cuando nadie eligio otro destino', async () => {
+    // El estado al que vuelve lo guardo el bloqueo al abrirse: mandar un destino
+    // por defecto desde el frontend seria adivinarlo.
+    apiRequest.mockResolvedValue({ volvio_a: 'en_sitio' });
+
+    await resolverBloqueo(event, 'o1', { queSeHizo: 'se gestiono', rol: 'noc' });
+
+    const cuerpo = apiRequest.mock.calls[0][1].body;
+    expect('volver_a' in cuerpo).toBe(false);
+    expect(cuerpo.que_se_hizo).toBe('se gestiono');
+    expect(cuerpo.resuelto_por_rol).toBe('noc');
+  });
+
+  it('un 409 dice que alguien lo resolvio antes', async () => {
+    apiRequest.mockImplementationOnce(() =>
+      Promise.reject(Object.assign(new Error('x'), { status: 409, body: {} }))
+    );
+    const { error } = await resolverBloqueo(event, 'o1', { queSeHizo: 'algo' });
+    expect(error.codigo).toBe('SIN_BLOQUEO_ABIERTO');
+  });
+});
+
+describe('los materiales de la orden', () => {
+  it('la custodia del tecnico no se pide si no se la piden', async () => {
+    // El kit del dia es de la PERSONA, no del trabajo.
+    apiRequest.mockResolvedValue({ consumido: [] });
+
+    await leerMaterialesDeOrden(event, 'o1');
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/trabajos/o1/materiales/');
+
+    apiRequest.mockClear();
+    await leerMaterialesDeOrden(event, 'o1', { custodia: true });
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/trabajos/o1/materiales/?custodia=1');
+  });
+
+  it('la bitacora se lee de su propia ruta', async () => {
+    apiRequest.mockResolvedValue({ eventos: [] });
+    await leerSeguimientoDeOrden(event, 'o1');
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/trabajos/o1/seguimiento/');
   });
 });

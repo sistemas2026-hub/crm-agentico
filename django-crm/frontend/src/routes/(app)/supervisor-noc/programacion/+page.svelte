@@ -43,6 +43,38 @@
   //: nueva por intento sería un identificador único, no una clave idempotente, y
   //: un doble clic dejaría dos AVANCE idénticos en la bitácora.
   let claveReporte = $state('');
+  //: Las dos preguntas del bloqueo, separadas a proposito (ver el markup).
+  let bloqueoRequiereNoc = $state(false);
+  let bloqueoDetiene = $state(true);
+
+  // Los bloqueos vivos de la empresa, para los filtros de la bandeja. Se piden una
+  // vez y se cruzan por id: así no hay que tocar la API de la jornada.
+  let bloqueos = $state(/** @type {any[]} */ ([]));
+  //: `bloqueada` y `requiere NOC` son dos preguntas distintas, y por eso son dos
+  //: filtros. Un trabajo detenido esperando al cliente está bloqueado y NO es
+  //: cosa del NOC; juntarlos llenaría esa bandeja de lo que esa mesa no resuelve.
+  let filtroTrabado = $state(/** @type {null | 'bloqueados' | 'noc'} */ (null));
+
+  // Resolver un bloqueo, desde la ficha.
+  let resolviendo = $state(false);
+  let queSeHizo = $state('');
+  let rolQueResolvio = $state('');
+  let avisoResolver = $state(/** @type {string|null} */ (null));
+  let claveResolver = $state('');
+
+  /** Los roles que puede haber destrabado. Los mismos que `BloqueoDeTrabajo.QUIENES`. */
+  const ROLES_RESOLUCION = [
+    { valor: 'noc', texto: 'NOC' },
+    { valor: 'coordinacion', texto: 'Coordinación' },
+    { valor: 'bodega', texto: 'Bodega' },
+    { valor: 'tecnico', texto: 'El técnico' },
+    { valor: 'cliente', texto: 'El cliente' },
+    { valor: 'tercero', texto: 'Un tercero' },
+    { valor: 'otro', texto: 'Otro' }
+  ];
+
+  /** El bloqueo vivo de una orden de la tabla, si tiene. */
+  const bloqueoDe = (ordenId) => bloqueos.find((b) => b.orden_id === ordenId) ?? null;
 
   // Formularios de escritura, cada uno detras de su confirmacion.
   let modalReprogramar = $state(/** @type {any} */ (null));
@@ -80,9 +112,22 @@
       (/** @type {any} */ l) =>
         (!fEstado || l.estado === fEstado) &&
         (!fZona || l.zona === fZona) &&
-        (!fPrioridad || String(l.prioridad) === fPrioridad)
+        (!fPrioridad || String(l.prioridad) === fPrioridad) &&
+        // DOS FILTROS DISTINTOS, y los dos dicen la verdad:
+        //   'bloqueados' -> el trabajo está detenido, sea por lo que sea;
+        //   'noc'        -> hace falta que alguien de esa mesa haga algo.
+        // Un trabajo esperando al cliente entra en el primero y no en el segundo.
+        (filtroTrabado !== 'bloqueados' || !!bloqueoDe(l.orden)) &&
+        (filtroTrabado !== 'noc' || bloqueoDe(l.orden)?.requiere_noc === true)
     )
   );
+
+  /** Cuántos hay en cada uno. Se muestran para que el filtro no parezca roto cuando da cero. */
+  const cuentaTrabados = $derived.by(() => {
+    const ids = new Set(lineas.map((/** @type {any} */ l) => l.orden));
+    const míos = bloqueos.filter((b) => ids.has(b.orden_id));
+    return { bloqueados: míos.length, noc: míos.filter((b) => b.requiere_noc).length };
+  });
 
   const hora = (/** @type {string|null} */ h) => (h ? String(h).slice(0, 5) : '—');
   const fecha = (/** @type {string|null} */ iso) =>
@@ -148,6 +193,8 @@
     }
     void cargarMateriales(ordenId);
     void cargarBitacora(ordenId);
+    void cargarBloqueos();
+    claveResolver = `crm-resolver-${ordenId}-${Date.now()}`;
   }
 
   /**
@@ -209,6 +256,8 @@
     erroresCampo = {};
     avisoReporte = null;
     claveReporte = `crm-${bitacora?.orden_id ?? 'x'}-${cual}-${Date.now()}`;
+    bloqueoRequiereNoc = false;
+    bloqueoDetiene = true;
   }
 
   function cerrarReporte() {
@@ -227,7 +276,14 @@
       const r = await fetch(`/api/supervisor-noc/ordenes/${bitacora.orden_id}/seguimiento`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': claveReporte },
-        body: JSON.stringify({ momento, respuestas })
+        body: JSON.stringify({
+          momento,
+          respuestas,
+          // Solo significan algo en el bloqueo; el backend ignora el resto.
+          ...(momento === 'bloqueo'
+            ? { requiere_noc: bloqueoRequiereNoc, detener: bloqueoDetiene }
+            : {})
+        })
       });
       const cuerpo = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -236,8 +292,20 @@
         return;
       }
       const ordenId = bitacora.orden_id;
+      const eraBloqueo = momento === 'bloqueo';
       cerrarReporte();
-      await cargarBitacora(ordenId);
+      // Los bloqueos tambien: si no, alguien registra un bloqueo y los contadores
+      // de SU PROPIA bandeja siguen en cero hasta recargar la pagina. Medido en el
+      // laboratorio justo despues de escribir los filtros.
+      //
+      // Y si el bloqueo detuvo el trabajo, el estado operativo de la TABLA viene
+      // del `load` del servidor: sin invalidar, la fila sigue mostrando el estado
+      // anterior.
+      await Promise.all([
+        cargarBitacora(ordenId),
+        cargarBloqueos(),
+        ...(eraBloqueo ? [invalidateAll()] : [])
+      ]);
     } catch {
       avisoReporte = 'El reporte no se pudo guardar: el servicio no respondió.';
     } finally {
@@ -250,6 +318,63 @@
     if (!momento || !bitacora?.formularios) return [];
     return bitacora.formularios[momento]?.campos ?? [];
   });
+
+  // La tabla necesita los bloqueos antes de que alguien abra una ficha: los
+  // filtros y las marcas de fila se dibujan con esto.
+  $effect(() => {
+    void data.dia;
+    void cargarBloqueos();
+  });
+
+  /** Los bloqueos abiertos de la empresa. Una sola llamada para toda la tabla. */
+  async function cargarBloqueos() {
+    try {
+      const r = await fetch('/api/supervisor-noc/bloqueos');
+      const cuerpo = await r.json().catch(() => ({}));
+      bloqueos = r.ok ? (cuerpo?.bloqueos ?? []) : [];
+    } catch {
+      // Sin esto la tabla se dibuja igual, solo sin las marcas de bloqueo: es
+      // información adicional, no la razón por la que alguien abrió la pantalla.
+      bloqueos = [];
+    }
+  }
+
+  /** Destraba el trabajo. El estado al que vuelve lo decidió el bloqueo al abrirse. */
+  async function resolverElBloqueo() {
+    const ordenId = bitacora?.orden_id ?? ficha?.id;
+    if (!ordenId) return;
+    if (!queSeHizo.trim()) {
+      avisoResolver = 'Decí qué se hizo para destrabarlo.';
+      return;
+    }
+    resolviendo = true;
+    avisoResolver = null;
+    try {
+      const r = await fetch(`/api/supervisor-noc/ordenes/${ordenId}/bloqueo/resolver`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': claveResolver },
+        body: JSON.stringify({ que_se_hizo: queSeHizo, resuelto_por_rol: rolQueResolvio })
+      });
+      const cuerpo = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        avisoResolver = cuerpo?.error ?? 'No se pudo resolver el bloqueo.';
+        return;
+      }
+      queSeHizo = '';
+      rolQueResolvio = '';
+      // `invalidateAll` tambien: el estado operativo que muestra la TABLA viene
+      // del `load` del servidor, y sin esto la fila sigue diciendo "bloqueada"
+      // despues de destrabar. Medido en el laboratorio.
+      await Promise.all([cargarBloqueos(), cargarBitacora(ordenId), invalidateAll()]);
+      // La ficha muestra el estado operativo: se vuelve a pedir para que no quede
+      // diciendo «bloqueada» después de destrabar.
+      void abrirOrden(ordenId);
+    } catch {
+      avisoResolver = 'No se pudo resolver el bloqueo: el servicio no respondió.';
+    } finally {
+      resolviendo = false;
+    }
+  }
 
   /** Enciende o apaga el kit del dia, y vuelve a pedirlo. */
   function alternarCustodia() {
@@ -584,6 +709,34 @@
                 {:else}
                   <span class="snoc-insignia snoc-insignia-neutra">{data.jornada.count} líneas</span>
                 {/if}
+
+                <!--
+                  Los dos filtros de trabajos trabados. Van ACA, en la bandeja que
+                  ya existe, y no en una pantalla nueva: dos lugares donde el NOC
+                  mira trabajos es peor que uno incomodo. Si el volumen demuestra
+                  que hace falta una cola dedicada, ahi se separa.
+                -->
+                <button
+                  type="button"
+                  class="snoc-pildora"
+                  aria-pressed={filtroTrabado === 'bloqueados'}
+                  style={filtroTrabado === 'bloqueados' ? 'font-weight:700;' : ''}
+                  onclick={() =>
+                    (filtroTrabado = filtroTrabado === 'bloqueados' ? null : 'bloqueados')}
+                  title="Trabajos detenidos, por cualquier motivo"
+                >
+                  Bloqueados {cuentaTrabados.bloqueados}
+                </button>
+                <button
+                  type="button"
+                  class="snoc-pildora"
+                  aria-pressed={filtroTrabado === 'noc'}
+                  style={filtroTrabado === 'noc' ? 'font-weight:700;' : ''}
+                  onclick={() => (filtroTrabado = filtroTrabado === 'noc' ? null : 'noc')}
+                  title="Los que esperan una acción del NOC. No es lo mismo que estar bloqueado."
+                >
+                  Requiere NOC {cuentaTrabados.noc}
+                </button>
               </div>
               <!--
                 Abre la confirmacion; el POST vive en el modal. Es la unica
@@ -657,7 +810,28 @@
                         <td class="snoc-body-sm">{l.zona || '—'}</td>
                         <td class="snoc-mono-sm snoc-tenue" title="Expuesta pero no ordena">{l.prioridad ?? '—'}</td>
                         <td><span class="snoc-insignia">{l.estado ?? '—'}</span></td>
-                        <td class="snoc-body-sm">{l.estado_orden ?? '—'}</td>
+                        <td class="snoc-body-sm">
+                          {l.estado_orden ?? '—'}
+                          {#if bloqueoDe(l.orden)}
+                            {@const b = bloqueoDe(l.orden)}
+                            <!-- Detenido y «cosa del NOC» son dos marcas distintas
+                                 porque son dos hechos distintos. -->
+                            {#if b.detuvo_el_trabajo}
+                              <span class="snoc-insignia snoc-insignia-error"
+                                    title={`Detenido hace ${b.minutos_detenido} min. Vuelve a ${b.estado_operativo_anterior || '—'}.`}>
+                                detenido
+                              </span>
+                            {:else}
+                              <span class="snoc-insignia snoc-insignia-variante"
+                                    title="Bloqueo reportado; el estado operativo no cambió.">
+                                bloqueo reportado
+                              </span>
+                            {/if}
+                            {#if b.requiere_noc}
+                              <span class="snoc-insignia snoc-insignia-variante">NOC</span>
+                            {/if}
+                          {/if}
+                        </td>
                         <td class="snoc-derecha">
                           <div class="snoc-envuelve" style="justify-content:flex-end;">
                             <button class="snoc-pildora" type="button" onclick={() => abrirOrden(l.orden)}>
@@ -1071,6 +1245,97 @@
                   </p>
                 {/if}
 
+                <!--
+                  EL BLOQUEO VIVO, si hay.
+
+                  Dice dos cosas que NO son lo mismo:
+                    - si el trabajo esta DETENIDO (estado operativo `bloqueada`);
+                    - si hace falta que alguien del NOC haga algo.
+                  Un trabajo detenido esperando al cliente esta bloqueado y no es
+                  cosa del NOC. Ver campo/bloqueos.py.
+                -->
+                {#if bitacora.bloqueo_abierto}
+                  {@const bloq = bitacora.bloqueo_abierto}
+                  <div class="snoc-analisis snoc-faltante">
+                    <span class="snoc-insignia snoc-insignia-error">
+                      {bloq.detuvo_el_trabajo ? 'Trabajo detenido' : 'Bloqueo reportado'}
+                    </span>
+                    {#if bloq.requiere_noc}
+                      <span class="snoc-insignia snoc-insignia-variante">Requiere NOC</span>
+                    {/if}
+
+                    <div class="snoc-meta">
+                      {#if bloq.detuvo_el_trabajo}
+                        <div>
+                          <span>Detenido desde:</span>
+                          <span class="snoc-mono-sm">
+                            {fecha(bloq.abierto_en)} · {bloq.minutos_detenido} min
+                          </span>
+                        </div>
+                        <div>
+                          <span>Vuelve a:</span>
+                          <span class="snoc-insignia">{bloq.estado_operativo_anterior || '—'}</span>
+                        </div>
+                      {/if}
+                      {#if bloq.categoria}
+                        <div><span>Categoría:</span><span class="snoc-body-sm">{bloq.categoria}</span></div>
+                      {/if}
+                    </div>
+
+                    {#if !bloq.detuvo_el_trabajo}
+                      <p class="snoc-body" style="margin:0;">
+                        <strong>El estado operativo no fue cambiado.</strong> Se reportó el bloqueo y
+                        el trabajo sigue en <span class="snoc-insignia">{bitacora.estado_operativo}</span>:
+                        son dos hechos distintos y acá solo pasó el primero.
+                      </p>
+                    {/if}
+                    {#if bloq.motivo}
+                      <p class="snoc-body" style="margin:0;">{bloq.motivo}</p>
+                    {/if}
+                    {#if bloq.necesita}
+                      <p class="snoc-body-sm snoc-tenue" style="margin:0;">
+                        Hace falta: {bloq.necesita}
+                      </p>
+                    {/if}
+
+                    <!-- Destrabarlo. El estado al que vuelve ya lo decidio el
+                         bloqueo cuando se abrio: esta pantalla no lo elige. -->
+                    <div class="snoc-campo">
+                      <label class="snoc-label-sm" for="bloq-que-se-hizo">
+                        Qué se hizo para destrabarlo <span aria-hidden="true">*</span>
+                      </label>
+                      <textarea
+                        id="bloq-que-se-hizo"
+                        class="snoc-buscador-campo"
+                        rows="2"
+                        bind:value={queSeHizo}
+                      ></textarea>
+                    </div>
+                    <div class="snoc-campo">
+                      <label class="snoc-label-sm" for="bloq-rol">Quién lo resolvió</label>
+                      <select id="bloq-rol" class="snoc-buscador-campo" bind:value={rolQueResolvio}>
+                        <option value="">Sin especificar</option>
+                        {#each ROLES_RESOLUCION as rol (rol.valor)}
+                          <option value={rol.valor}>{rol.texto}</option>
+                        {/each}
+                      </select>
+                    </div>
+                    {#if avisoResolver}
+                      <p class="snoc-body-sm snoc-error-txt" style="margin:0;">{avisoResolver}</p>
+                    {/if}
+                    <div class="snoc-acciones">
+                      <button
+                        type="button"
+                        class="snoc-btn snoc-btn-primario"
+                        disabled={resolviendo}
+                        onclick={resolverElBloqueo}
+                      >
+                        {resolviendo ? 'Resolviendo…' : 'Resolver el bloqueo'}
+                      </button>
+                    </div>
+                  </div>
+                {/if}
+
                 <!-- Lo que la bitacora tiene de raro. No bloquea nada: avisa. -->
                 {#each bitacora.avisos ?? [] as aviso, i (i)}
                   <div class="snoc-analisis snoc-faltante">
@@ -1090,9 +1355,11 @@
                   <button type="button" class="snoc-btn" onclick={() => abrirReporte('avance')}>
                     Registrar avance
                   </button>
-                  <button type="button" class="snoc-btn" onclick={() => abrirReporte('bloqueo')}>
-                    Registrar bloqueo
-                  </button>
+                  {#if !bitacora.bloqueo_abierto}
+                    <button type="button" class="snoc-btn" onclick={() => abrirReporte('bloqueo')}>
+                      Registrar bloqueo
+                    </button>
+                  {/if}
                   <button type="button" class="snoc-btn" onclick={() => abrirReporte('cierre')}>
                     Cerrar intervención
                   </button>
@@ -1198,10 +1465,33 @@
                     </div>
 
                     {#if momento === 'bloqueo'}
-                      <p class="snoc-body-sm snoc-tenue" style="margin:0;">
-                        Queda anotado como bloqueo en la bitácora. <strong>No cambia el estado
-                        operativo de la orden</strong>: eso es una transición y tiene sus reglas.
-                      </p>
+                      <!--
+                        Las dos casillas son las dos preguntas que no son la misma.
+                        `requiere_noc` viaja aparte de las respuestas del formulario
+                        a proposito: el campo del esquema lo nombra cada empresa
+                        como quiere, y un filtro que dependa de ese nombre deja de
+                        funcionar con la segunda.
+                      -->
+                      <div class="snoc-campo">
+                        <label class="snoc-label-sm">
+                          <input type="checkbox" bind:checked={bloqueoRequiereNoc} />
+                          Hace falta que el NOC haga algo
+                        </label>
+                        <span class="snoc-body-sm snoc-tenue">
+                          Esto lo pone en la bandeja «Requiere NOC». Un trabajo detenido esperando
+                          al cliente o al material está bloqueado igual, pero no es de esa mesa.
+                        </span>
+                      </div>
+                      <div class="snoc-campo">
+                        <label class="snoc-label-sm">
+                          <input type="checkbox" bind:checked={bloqueoDetiene} />
+                          Detener el trabajo
+                        </label>
+                        <span class="snoc-body-sm snoc-tenue">
+                          Si se destilda, el bloqueo queda anotado y el estado operativo
+                          <strong>no cambia</strong>: algo demora pero se puede seguir.
+                        </span>
+                      </div>
                     {/if}
                   </div>
                 {/if}
@@ -1239,10 +1529,33 @@
                               Escrito en el teléfono a las {fecha(ev.capturado_en_dispositivo)}
                             </span>
                           {/if}
-                        {:else if ev.estado_nuevo}
-                          <span class="snoc-body-sm snoc-tenue">
-                            {ev.estado_anterior ?? '—'} → {ev.estado_nuevo}
-                          </span>
+                        {:else}
+                          <!--
+                            Los hechos del sistema. `datos` trae SOLO las claves que
+                            el backend decidio exponer para ese tipo: es una lista
+                            blanca alla, no un volcado del JSON.
+                          -->
+                          {#if ev.datos?.que_se_hizo}
+                            <div class="snoc-body-sm">
+                              <span>{ev.datos.que_se_hizo}</span>
+                              {#if ev.datos.resuelto_por_rol}
+                                <span class="snoc-body-sm snoc-tenue">
+                                  — lo resolvió {ev.datos.resuelto_por_rol}
+                                </span>
+                              {/if}
+                            </div>
+                          {/if}
+                          {#if ev.datos?.minutos_detenido != null}
+                            <span class="snoc-body-sm snoc-tenue">
+                              Estuvo detenido {ev.datos.minutos_detenido} min
+                              {#if ev.datos.volvio_a}· volvió a {ev.datos.volvio_a}{/if}
+                            </span>
+                          {/if}
+                          {#if ev.estado_nuevo}
+                            <span class="snoc-body-sm snoc-tenue">
+                              {ev.estado_anterior ?? '—'} → {ev.estado_nuevo}
+                            </span>
+                          {/if}
                         {/if}
                       </div>
                     {/each}

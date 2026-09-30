@@ -61,6 +61,11 @@ export async function POST({ params, request, cookies, locals }) {
   const { datos, error } = await registrarSeguimiento({ cookies }, params.id, {
     momento: cuerpo?.momento,
     respuestas: cuerpo?.respuestas ?? {},
+    // Los dos datos de plataforma del bloqueo. Van explícitos: en la primera
+    // versión no se reenviaban y el bloqueo entraba siempre como «no es del NOC»,
+    // con la bandeja en cero para siempre. El backend nunca se enteró.
+    ...(cuerpo?.requiere_noc !== undefined ? { requiereNoc: !!cuerpo.requiere_noc } : {}),
+    ...(cuerpo?.detener !== undefined ? { detener: !!cuerpo.detener } : {}),
     idempotencyKey
   });
 
