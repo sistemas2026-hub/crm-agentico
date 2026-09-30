@@ -554,6 +554,26 @@ export function estadoDeRevision(estado) {
   return MAPA[estado] ?? { texto: estado ?? '', tono: 'neutro', pendiente: false };
 }
 
+/**
+ * Los estados que quedan EN SEGUIMIENTO mientras el caso siga abierto.
+ *
+ * Son estados del modelo (`PropuestaSupervisor`), no rótulos de pantalla: si el
+ * backend renombra uno, esto tiene que cambiar con él.
+ *
+ * QUE TIENEN EN COMUN, Y POR QUE `expirada` ESTA AQUI
+ * ---------------------------------------------------
+ * Que el caso sigue abierto y alguien tendría que mirarlo. `expirada` no es una
+ * decisión --se venció sin que nadie la revisara-- y justamente por eso no
+ * puede desaparecer: son 63 filas en producción (30/09/2026) con el caso
+ * todavía vivo. Esconderlas sería perder trabajo real por no haberlo mirado a
+ * tiempo, que es lo contrario de lo que esta bandeja existe para hacer.
+ *
+ * `modificada` y `cancelada` NO están, y hoy son 0 filas en producción. Si
+ * alguna aparece, caerá fuera de las dos bandejas -- que es visible y
+ * corregible, y preferible a incluirla por analogía sin que nadie lo decida.
+ */
+export const EN_SEGUIMIENTO = new Set(['aceptada', 'rechazada', 'expirada']);
+
 /** Las dos bandejas. No hay una tercera: la ausencia de bandeja es `null`. */
 export const PENDIENTES = 'pendientes';
 export const DECIDIDAS = 'decididas';
@@ -586,12 +606,33 @@ export const DECIDIDAS = 'decididas';
  * @returns {'pendientes'|'decididas'|null}
  */
 export function bandejaDe(p) {
-  if (!estadoDeRevision(p?.estado).pendiente) return DECIDIDAS;
-  //  `caso_cerrado` tiene TRES valores. Se oculta con `true` y solo con
-  //  `true`: `null` significa que no se sabe --sin caso, o no se alcanzó-- y
-  //  un dato que falta no puede esconder trabajo pendiente.
+  //  EL CASO CERRADO SACA DE LAS DOS, Y ES LO PRIMERO QUE SE MIRA
+  //  -----------------------------------------------------------
+  //  Un caso terminado no deja trabajo de seguimiento, lo haya revisado alguien
+  //  o no. Su expediente vive en Tickets -> Cerrados, que es donde se consulta,
+  //  y la propuesta sigue guardada en la base con toda su trazabilidad: lo que
+  //  cambia es la visibilidad, no el dato.
+  //
+  //  `caso_cerrado` tiene TRES valores y se oculta con `true` y solo con
+  //  `true`: `null` significa que no se sabe --sin caso, o no se alcanzó-- y un
+  //  dato que falta no puede esconder trabajo pendiente.
   if (p?.caso_cerrado === true) return null;
-  return PENDIENTES;
+
+  //  «Pendientes»: hace falta una decisión humana. Se pregunta por
+  //  `estadoDeRevision` y no por la cadena, para no tener dos definiciones de
+  //  «pendiente» que se desincronicen.
+  if (estadoDeRevision(p?.estado).pendiente) return PENDIENTES;
+
+  //  «Ya decididas / seguimiento»: la propuesta ya no espera una decisión, pero
+  //  su caso sigue abierto. Es la lista de lo que hay que seguir mirando --
+  //  incluida `expirada`, que nadie llegó a revisar.
+  //
+  //  Lo que queda fuera es el resto de los estados del modelo. Es deliberado y
+  //  no una omisión: `EN_SEGUIMIENTO` es una lista BLANCA, así que un estado
+  //  nuevo del backend no entra a la pantalla sin que alguien lo decida.
+  if (EN_SEGUIMIENTO.has(String(p?.estado ?? ''))) return DECIDIDAS;
+
+  return null;
 }
 
 /**
