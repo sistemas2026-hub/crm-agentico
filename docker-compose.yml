@@ -1,0 +1,213 @@
+# Un solo compose para toda la plataforma: el motor (nucleo/) y la
+# plataforma CRM (django-crm/, vendorizada sin su historial -- ver
+# ARQUITECTURA.md). Antes eran dos archivos a proposito, para no pisar
+# actualizaciones de upstream de django-crm; ese motivo ya no aplica: al
+# unificar sin historial, no queda una relacion de git con el proyecto
+# original para sincronizar.
+#
+# Arriba: docker compose up
+services:
+  db:
+    # pgvector/pgvector, no la postgres:16-alpine de antes: el esquema
+    # 'asistente' (supabase/202608042055_schema.sql) necesita la extension 'vector'
+    # para los embeddings del corpus, que la imagen oficial no trae. Misma
+    # version mayor de Postgres (16), asi que el volumen existente sigue
+    # sirviendo tal cual -- no hace falta reinicializar la base.
+    image: pgvector/pgvector:pg16
+    env_file:
+      - django-crm/.env.docker
+      - path: django-crm/.env.docker.local
+        required: false
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./django-crm/docker/postgres/init-rls-user.sql:/docker-entrypoint-initdb.d/init-rls-user.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    env_file:
+      - django-crm/.env.docker
+      - path: django-crm/.env.docker.local
+        required: false
+    environment:
+      # Traduccion del .env de la raiz a los nombres que usa Django
+      # (settings.py lee DBNAME/DBUSER/DBPASSWORD/DBHOST/DBPORT). Una sola
+      # fuente: si el .env apunta a Supabase, el CRM y el motor van los dos
+      # a Supabase; si no define nada, ambos se quedan en el 'db' local.
+      # Los valores por defecto reproducen lo que traia .env.docker.
+      DBHOST: ${DBHOST:-db}
+      # El backend le pide al motor que cree el ticket de instalacion cuando
+      # alguien envia el formulario de contratacion (solicitudes/entrega.py).
+      # Sin esto el motor responde 401: la solicitud no se pierde, pero el
+      # ticket no se crea. Ver el mismo bloque en docker-compose.prod.yml.
+      MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
+      MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
+      MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      DBPORT: ${DBPORT:-5432}
+      DBNAME: ${DBNAME:-crm_db}
+      DBUSER: ${DBUSER:-crm_user}
+      DBPASSWORD: ${DBPASSWORD:-crm_password}
+      # Para la ingesta de documentos al corpus: la vista encola la tarea y el
+      # worker le manda el archivo al motor. Sin estas dos, un documento
+      # marcado "usar en el asistente" queda en estado de error diciendolo.
+      ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
+    volumes:
+      - ./django-crm/backend:/app
+      - ./django-crm/docker/backend/entrypoint.sh:/entrypoint.sh:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: /bin/bash /entrypoint.sh
+
+  celery-worker:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    env_file:
+      - django-crm/.env.docker
+      - path: django-crm/.env.docker.local
+        required: false
+    environment:
+      # Traduccion del .env de la raiz a los nombres que usa Django
+      # (settings.py lee DBNAME/DBUSER/DBPASSWORD/DBHOST/DBPORT). Una sola
+      # fuente: si el .env apunta a Supabase, el CRM y el motor van los dos
+      # a Supabase; si no define nada, ambos se quedan en el 'db' local.
+      # Los valores por defecto reproducen lo que traia .env.docker.
+      DBHOST: ${DBHOST:-db}
+      DBPORT: ${DBPORT:-5432}
+      DBNAME: ${DBNAME:-crm_db}
+      DBUSER: ${DBUSER:-crm_user}
+      DBPASSWORD: ${DBPASSWORD:-crm_password}
+      # El worker es quien de verdad manda el archivo al motor: tiene los
+      # bytes (comparte /app/media con el backend) y el motor no.
+      ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
+    volumes:
+      - ./django-crm/backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A crm worker --loglevel=info
+
+  celery-beat:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    env_file:
+      - django-crm/.env.docker
+      - path: django-crm/.env.docker.local
+        required: false
+    environment:
+      # Traduccion del .env de la raiz a los nombres que usa Django
+      # (settings.py lee DBNAME/DBUSER/DBPASSWORD/DBHOST/DBPORT). Una sola
+      # fuente: si el .env apunta a Supabase, el CRM y el motor van los dos
+      # a Supabase; si no define nada, ambos se quedan en el 'db' local.
+      # Los valores por defecto reproducen lo que traia .env.docker.
+      DBHOST: ${DBHOST:-db}
+      DBPORT: ${DBPORT:-5432}
+      DBNAME: ${DBNAME:-crm_db}
+      DBUSER: ${DBUSER:-crm_user}
+      DBPASSWORD: ${DBPASSWORD:-crm_password}
+    volumes:
+      - ./django-crm/backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A crm beat --loglevel=info
+
+  frontend:
+    build:
+      context: ./django-crm/frontend
+      dockerfile: Dockerfile
+      # Servidor de Vite con recarga en caliente. El codigo entra por el bind
+      # mount de abajo; el destino 'prod' compila y no lo necesita.
+      target: dev
+    env_file:
+      - django-crm/.env.docker
+      - path: django-crm/.env.docker.local
+        required: false
+    environment:
+      # Igual que en produccion, pero con valor por defecto: en desarrollo se
+      # levanta el stack entero y el tenant es el unico que hay. Ver el mismo
+      # bloque en docker-compose.prod.yml para por que van aca y no en un .env.
+      PRIVATE_ASISTENTE_URL: http://motor:5000
+      PRIVATE_ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      # El header que nucleo/canales/api.py exige cuando el motor tiene
+      # MOTOR_SERVICE_TOKEN puesto (ver ese mismo nombre en el .env de la
+      # raiz -- 'motor:' abajo lo hereda solo via env_file, este servicio
+      # necesita el nombre PRIVATE_ porque no lee el .env de la raiz). Vacio
+      # por defecto: sin la variable puesta, headersMotor() no manda nada y
+      # nada se rompe -- ver lib/server/v2/motor-headers.js.
+      PRIVATE_MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
+    volumes:
+      - ./django-crm/frontend:/app
+      - frontend_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+
+  motor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      # Embeddings del corpus (nucleo/recuperacion/embeddings.py): API de
+      # OpenAI, no Ollama local (agosto 2026). Antes este servicio corria un
+      # contenedor 'ollama' aparte solo para bge-m3 (~1.2 GB en disco, ~2-3 GB
+      # residente) -- se saco por completo, no solo se apunto a otro lado: sin
+      # otro consumidor (los cinco roles de chat ya estaban redirigidos a
+      # DeepSeek/Anthropic), era el unico motivo para tenerlo corriendo.
+      # Requiere OPENAI_API_KEY en el .env de la raiz.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?agregalo al .env -- ver nucleo/recuperacion/embeddings.py}
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./nucleo:/app/nucleo
+      - ./tenants:/app/tenants
+      - ./corpus:/app/corpus
+      - ./cli:/app/cli
+      # Los casos dorados TAMBIEN se montan. Sin esta linea el contenedor lee
+      # la copia horneada en la imagen: 'cli/evaluar.py' esta montado y el
+      # archivo que evalua no, asi que editar un caso no cambiaba nada y la
+      # corrida seguia midiendo un set viejo -- en silencio, con aspecto de
+      # resultado bueno. Costo una tarde el 24/08/2026: tres casos "fallaban"
+      # por expectativas que ya se habian reescrito en el archivo del disco.
+      - ./evaluacion:/app/evaluacion
+
+volumes:
+  # external: reusa el volumen que ya existia cuando django-crm corria como
+  # proyecto de compose aparte (carpeta django-crm/), en vez de que Compose
+  # arme uno nuevo vacio con el nombre de proyecto "crm-agentico". Compose no
+  # gestiona su ciclo de vida (no lo crea ni lo borra con "down -v").
+  postgres_data:
+    name: django-crm_postgres_data
+    external: true
+  frontend_node_modules:

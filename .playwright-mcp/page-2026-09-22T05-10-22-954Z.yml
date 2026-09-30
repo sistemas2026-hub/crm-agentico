@@ -1,0 +1,31 @@
+- generic [ref=f19e4]:
+  - link "BottleCRM" [ref=f19e5] [cursor=pointer]:
+    - /url: /
+  - generic [ref=f19e7]:
+    - generic [ref=f19e8]:
+      - heading "Iniciar sesión" [level=1] [ref=f19e9]
+      - paragraph [ref=f19e10]: Bienvenido de nuevo. Elegí cómo querés continuar.
+    - link "Continuar con Google" [ref=f19e11] [cursor=pointer]:
+      - /url: https://accounts.google.com/o/oauth2/v2/auth?client_id=undefined&redirect_uri=undefined%2Flogin&response_type=code&scope=openid+email+profile&state=lc36I5RWs3lAV5lH8zmxoA&code_challenge=sCOuuP_rxIOJsdg9M_JF2d9gJ27aAMiI9aqysxgjyUs&code_challenge_method=S256&access_type=offline&prompt=consent
+    - generic [ref=f19e13]: o
+    - generic [ref=f19e14]:
+      - generic [ref=f19e15]: Correo electrónico
+      - textbox "Correo electrónico" [ref=f19e16]:
+        - /placeholder: vos@empresa.com
+      - generic [ref=f19e17]: Contraseña
+      - textbox "Contraseña" [ref=f19e18]
+      - button "Iniciar sesión" [ref=f19e19] [cursor=pointer]
+    - generic [ref=f19e21]: o
+    - generic [ref=f19e22]:
+      - generic [ref=f19e23]: Correo electrónico
+      - textbox "Correo electrónico" [ref=f19e24]:
+        - /placeholder: vos@empresa.com
+      - button "Continuar con correo" [ref=f19e25] [cursor=pointer]
+  - paragraph [ref=f19e30]: ¿Primera vez? Ingresá tu correo arriba para empezar.
+  - generic [ref=f19e31]:
+    - link "Privacidad" [ref=f19e32] [cursor=pointer]:
+      - /url: https://bottlecrm.io/privacy-policy
+    - link "Términos" [ref=f19e34] [cursor=pointer]:
+      - /url: https://bottlecrm.io/terms
+    - link "GitHub" [ref=f19e36] [cursor=pointer]:
+      - /url: https://github.com/django-crm/Django-CRM

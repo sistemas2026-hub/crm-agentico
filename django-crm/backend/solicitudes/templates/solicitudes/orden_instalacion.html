@@ -1,0 +1,161 @@
+{% comment %}
+================================================================================
+ ORDEN DE INSTALACION -- la version que SI puede salir de la plataforma
+================================================================================
+
+Por que existe, y por que NO es el expediente
+---------------------------------------------
+Esta hoja se sube como adjunto al ticket de WispHub, para que el tecnico la
+tenga en el celular sin entrar al CRM.
+
+Medido el 09/09/2026: lo que se sube a 'archivo_ticket' queda en
+https://avisos.wisphub.io/media/... y se descarga SIN NINGUNA CREDENCIAL --
+HTTP 200 a secas. No es un problema de WispHub, es que ese campo no tiene
+donde guardar algo privado.
+
+El expediente completo trae foto de la cedula, recibo de servicios, foto del
+solicitante y firma. Eso NO puede vivir en una URL abierta: se sirve por
+solicitudes/gestion.py::ExpedienteView, que exige sesion Y organizacion, y
+por eso mismo el 08/09/2026 se decidio no publicarlo por /media/. Subirlo al
+ticket seria deshacer esa decision por la puerta de atras.
+
+Entonces esta plantilla lleva SOLO lo que hace falta para ir a instalar:
+a donde ir, con quien, que plan. Sin numero de documento, sin fotos, sin
+firma, sin recibo, sin correo.
+
+Si alguien necesita verificar la identidad, el link del final lleva al
+expediente -- y ahi el CRM le pide sesion, como debe ser.
+
+Al agregar un campo aca, la pregunta no es "¿sirve?" sino "¿aguanta que
+cualquiera lo lea?".
+================================================================================
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: letter; margin: 14mm; }
+  body { font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
+         font-size: 10.5pt; color: #1b1b1b; }
+  .marca { display: flex; justify-content: space-between; align-items: center;
+           border-bottom: 2px solid #17335c; padding-bottom: 8px; }
+  .logo { max-height: 42px; }
+  .empresa { font-size: 13pt; font-weight: 700; color: #17335c; }
+  h1 { font-size: 13pt; margin: 0; text-align: right; color: #17335c; }
+  .caja { border: 1px solid #cfd6e0; border-radius: 5px; padding: 10px 12px;
+          margin-top: 12px; }
+  .titulo { font-size: 8.5pt; text-transform: uppercase; letter-spacing: .06em;
+            color: #5a6473; margin-bottom: 8px; }
+  .rotulo { font-size: 8pt; text-transform: uppercase; letter-spacing: .05em;
+            color: #6b7280; }
+  .valor { font-size: 11pt; font-weight: 600; }
+  .direccion { font-size: 13pt; font-weight: 700; line-height: 1.25; }
+  table { width: 100%; border-collapse: collapse; }
+  td { vertical-align: top; padding: 4px 8px 8px 0; }
+  .gps { font-family: "DejaVu Sans Mono", monospace; font-size: 11pt; }
+  .aviso { margin-top: 14px; border-left: 3px solid #b45309; background: #fffbeb;
+           padding: 8px 12px; font-size: 9pt; color: #6b4a10; }
+  .pie { margin-top: 16px; border-top: 1px solid #cfd6e0; padding-top: 8px;
+         font-size: 8.5pt; color: #5a6473; }
+  .enlace { color: #1668c1; word-break: break-all; }
+</style>
+</head>
+<body>
+
+<div class="marca">
+  {% if logo %}
+    <img class="logo" src="{{ logo }}" alt="{{ empresa }}">
+  {% else %}
+    <div class="empresa">{{ empresa|default:"Orden de instalación" }}</div>
+  {% endif %}
+  <h1>Orden de instalación</h1>
+</div>
+
+<div class="caja">
+  <table>
+    <tr>
+      <td style="width:34%">
+        <div class="rotulo">Radicado</div>
+        <div class="valor" style="color:#1668c1">{{ radicado }}</div>
+      </td>
+      <td style="width:33%">
+        <div class="rotulo">Ticket</div>
+        <div class="valor">{{ s.ticket_wisphub|default:"—" }}</div>
+      </td>
+      <td>
+        <div class="rotulo">Solicitud enviada</div>
+        <div class="valor">{{ s.enviada_en|date:"d/m/Y  H:i" }}</div>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div class="caja">
+  <div class="titulo">◉ A dónde ir</div>
+  <div class="rotulo">Dirección</div>
+  <div class="direccion">{{ s.direccion|default:"(sin dirección)" }}</div>
+  <table style="margin-top:8px">
+    <tr>
+      <td style="width:50%">
+        <div class="rotulo">Barrio</div>
+        <div class="valor">{{ s.barrio|default:"—" }}</div>
+      </td>
+      <td>
+        <div class="rotulo">Coordenadas</div>
+        {% if s.tiene_gps %}
+          <div class="gps">{{ s.gps_lat }},{{ s.gps_lng }}</div>
+        {% else %}
+          {% comment %} Se dice, y no se deja en blanco: sin coordenadas hay
+             que verificar viabilidad en sitio, y quien va tiene que saberlo
+             antes de salir, no al llegar. {% endcomment %}
+          <div class="valor" style="color:#b45309">SIN GPS — verificar
+            viabilidad en sitio</div>
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+  {% if mapa %}
+    <div style="margin-top:8px">
+      <div class="rotulo">Mapa</div>
+      <div class="enlace">{{ mapa }}</div>
+    </div>
+  {% endif %}
+</div>
+
+<div class="caja">
+  <div class="titulo">◉ Con quién y qué</div>
+  <table>
+    <tr>
+      <td style="width:40%">
+        <div class="rotulo">Solicitante</div>
+        <div class="valor">{{ s.nombre_completo|default:"—" }}</div>
+      </td>
+      <td style="width:30%">
+        <div class="rotulo">Teléfono</div>
+        <div class="valor">{{ s.telefono|default:"—" }}</div>
+      </td>
+      <td>
+        <div class="rotulo">Plan</div>
+        <div class="valor">{{ s.plan_interesado|default:"—" }}</div>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div class="aviso">
+  <strong>Esta hoja no es el expediente.</strong> No incluye documento de
+  identidad, fotos, recibo ni firma: esos documentos solo se consultan desde
+  la plataforma, con sesión iniciada.
+  {% if url_expediente %}
+    <div style="margin-top:6px">Expediente completo:
+      <span class="enlace">{{ url_expediente }}</span></div>
+  {% endif %}
+</div>
+
+<div class="pie">
+  Generado el {{ generado_en|date:"d/m/Y H:i" }} — {{ empresa }}
+</div>
+
+</body>
+</html>

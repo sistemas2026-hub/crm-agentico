@@ -1,0 +1,1140 @@
+/*
+ * Supervisor NOC IA -- el sistema visual de la pantalla.
+ *
+ * POR QUE CSS PROPIO Y NO LAS UTILIDADES DEL PROYECTO
+ * ---------------------------------------------------
+ * El design system del CRM (src/app.css) es BottleCRM: naranja #ea580c y
+ * --radius 0.625rem. El diseno de esta pantalla es Material 3 azul con radios
+ * de 2-12px. Son dos sistemas incompatibles, y meter los tokens M3 en el
+ * @theme global los volveria visibles en TODAS las pantallas. Asi que viven
+ * aca, bajo .snoc, y no salen de esta ruta.
+ *
+ * Todo lleva prefijo 'snoc-' por el mismo motivo: un CSS importado desde un
+ * componente termina en el bundle global, y una clase llamada '.card' se
+ * comeria las de cualquier otra pantalla.
+ *
+ * CUATRO TOKENS QUE EL HTML DE STITCH USA Y SU PROPIA CONFIG NO DEFINE
+ * --------------------------------------------------------------------
+ * Verificado sobre el tailwind.config generado (41 colores): 'primary',
+ * 'surface-container-low', 'surface-container-highest' y 'on-surface-variant'
+ * se usan en el marcado pero no existen en la paleta. En el render de Stitch
+ * esas clases no producen color -- el boton principal queda sin fondo. Se
+ * completan aca con los valores M3 que corresponden a esa misma rampa azul,
+ * porque reproducir el defecto habria dado una pantalla con botones
+ * invisibles. Los otros 41 son los del config, al valor exacto.
+ */
+
+.snoc {
+  /* --- paleta del config de Stitch (valores exactos) --- */
+  --snoc-outline: #707881;
+  --snoc-on-surface: #0b1c30;
+  --snoc-inverse-on-surface: #eaf1ff;
+  --snoc-surface-variant: #d3e4fe;
+  --snoc-on-error: #ffffff;
+  --snoc-surface-container-high: #dce9ff;
+  --snoc-error: #ba1a1a;
+  --snoc-surface-container: #e5eeff;
+  --snoc-primary-container: #007bb9;
+  --snoc-on-primary-container: #fdfcff;
+  --snoc-on-primary: #ffffff;
+  --snoc-primary-fixed-dim: #93ccff;
+  --snoc-primary-fixed: #cce5ff;
+  --snoc-on-error-container: #93000a;
+  --snoc-secondary-container: #dae2fd;
+  --snoc-outline-variant: #bfc7d2;
+  --snoc-secondary: #565e74;
+  --snoc-inverse-surface: #213145;
+  --snoc-error-container: #ffdad6;
+  --snoc-secondary-fixed-dim: #bec6e0;
+  --snoc-on-secondary-container: #5c647a;
+  --snoc-on-secondary-fixed-variant: #3f465c;
+  --snoc-surface-container-lowest: #ffffff;
+  --snoc-on-secondary: #ffffff;
+  --snoc-tertiary: #006195;
+  --snoc-surface: #f8f9ff;
+
+  /* --- los cuatro que faltaban (ver cabecera) --- */
+  --snoc-primary: #00639b;
+  --snoc-surface-container-low: #eff3fd;
+  --snoc-surface-container-highest: #d6e3f9;
+  --snoc-on-surface-variant: #424a54;
+
+  /* --- espaciado del config --- */
+  --snoc-xs: 0.25rem;
+  --snoc-sm: 0.5rem;
+  --snoc-md: 0.75rem;
+  --snoc-lg: 1rem;
+  --snoc-xl: 1.5rem;
+
+  /* --- radios del config: consola, no tarjetas redondeadas --- */
+  --snoc-r: 0.125rem;
+  --snoc-r-lg: 0.25rem;
+  --snoc-r-xl: 0.5rem;
+  --snoc-r-full: 0.75rem;
+
+  --snoc-sombra: 0 1px 8px rgba(0, 0, 0, 0.04);
+
+  background: var(--snoc-surface);
+  color: var(--snoc-on-surface);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+  -webkit-font-smoothing: antialiased;
+  /* Sin min-height ni fondo de documento: el layout de (app) ya los define y
+     esta pantalla es una seccion dentro de el, no una app aparte.
+
+     SI hace falta ser una columna flex que no crezca de mas: '.v2-main' es
+     'display:flex; flex-direction:column; overflow:hidden', y el hijo que
+     scrollea ('.v2-scroll') solo puede hacerlo si su padre le da un alto
+     acotado. Sin 'min-height:0' el contenido empuja la caja y el overflow
+     nunca se activa -- la pantalla se recorta en silencio. */
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* El respiro va DENTRO del contenedor que se desplaza: en '.snoc' se comeria
+   parte del alto disponible y dejaria el ultimo panel pegado al borde. */
+.snoc .v2-scroll { padding: var(--snoc-lg) 0 var(--snoc-xl); }
+
+/* ---------------------------------------------------------------------------
+   TIPOGRAFIA -- las tres familias con sus roles, del config de Stitch.
+   Los datos tecnicos van SIEMPRE en mono: es lo que separa una cifra de una
+   frase de un vistazo.
+   --------------------------------------------------------------------------- */
+.snoc-h1 { font-family: 'Hanken Grotesk', sans-serif; font-size: 28px; line-height: 34px; letter-spacing: -0.02em; font-weight: 700; margin: 0; }
+.snoc-h2 { font-family: 'Hanken Grotesk', sans-serif; font-size: 22px; line-height: 28px; letter-spacing: -0.015em; font-weight: 600; margin: 0; }
+.snoc-h3 { font-family: 'Hanken Grotesk', sans-serif; font-size: 18px; line-height: 24px; letter-spacing: -0.01em; font-weight: 600; margin: 0; }
+.snoc-h4 { font-family: 'Hanken Grotesk', sans-serif; font-size: 15px; line-height: 20px; letter-spacing: -0.005em; font-weight: 600; margin: 0; }
+.snoc-body-lg { font-size: 15px; line-height: 22px; font-weight: 400; }
+.snoc-body { font-size: 13px; line-height: 18px; font-weight: 400; }
+.snoc-body-sm { font-size: 12px; line-height: 16px; font-weight: 400; }
+.snoc-label { font-size: 12px; line-height: 16px; letter-spacing: 0.02em; font-weight: 600; }
+.snoc-label-sm { font-size: 11px; line-height: 14px; letter-spacing: 0.03em; font-weight: 600; }
+.snoc-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; line-height: 16px; font-weight: 500; }
+.snoc-mono-sm { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 14px; letter-spacing: 0.02em; font-weight: 500; }
+.snoc-mono-lg { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 14px; line-height: 18px; letter-spacing: -0.01em; font-weight: 500; }
+.snoc-tag { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; line-height: 12px; letter-spacing: 0.05em; font-weight: 700; text-transform: uppercase; }
+
+/* El lienzo. La barra lateral y la cabecera las pone el layout de (app):
+   esta pantalla es contenido, no una aplicacion aparte. */
+.snoc-lienzo { display: flex; flex-direction: column; gap: var(--snoc-lg); }
+
+/* ---------------------------------------------------------------------------
+   PIEZAS
+   --------------------------------------------------------------------------- */
+.snoc-tarjeta {
+  background: var(--snoc-surface-container-lowest); padding: var(--snoc-md);
+  border-radius: var(--snoc-r-xl); box-shadow: var(--snoc-sombra);
+  display: flex; flex-direction: column; justify-content: space-between;
+  position: relative; overflow: hidden;
+}
+.snoc-panel {
+  background: var(--snoc-surface-container-lowest); padding: var(--snoc-md);
+  border-radius: var(--snoc-r-xl); box-shadow: var(--snoc-sombra);
+  display: flex; flex-direction: column; gap: var(--snoc-md);
+}
+.snoc-filo { position: absolute; top: 0; left: 0; right: 0; height: 4px; }
+.snoc-filo-error { background: var(--snoc-error); }
+.snoc-filo-secundario { background: var(--snoc-secondary); }
+.snoc-filo-primario { background: var(--snoc-primary); }
+.snoc-filo-neutro { background: var(--snoc-outline-variant); }
+
+/* El orden de estos tres bloques importa: todos tienen la misma
+   especificidad, asi que en un ancho que cumple varios gana el ultimo. Van de
+   menor a mayor -- al reves, el de 768px pisaba al de 1024px y las cuatro
+   tarjetas de seguridad quedaban en dos columnas en un monitor. */
+.snoc-rejilla { display: grid; gap: var(--snoc-md); grid-template-columns: repeat(1, minmax(0, 1fr)); }
+@media (min-width: 640px) { .snoc-rejilla-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 768px) { .snoc-rejilla-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) {
+  .snoc-rejilla-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .snoc-rejilla-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+.snoc-taller { display: grid; grid-template-columns: 1fr; gap: var(--snoc-lg); align-items: start; }
+@media (min-width: 1024px) { .snoc-taller { grid-template-columns: repeat(12, minmax(0, 1fr)); } }
+.snoc-col-8 { min-width: 0; display: flex; flex-direction: column; gap: var(--snoc-lg); }
+.snoc-col-4 { display: flex; flex-direction: column; gap: var(--snoc-md); }
+@media (min-width: 1024px) {
+  .snoc-col-8 { grid-column: span 8 / span 8; }
+  .snoc-col-4 { grid-column: span 4 / span 4; position: sticky; top: 4rem; }
+}
+
+/* Insignias. El tono dice el estado; el texto nunca depende solo del color. */
+.snoc-insignia {
+  display: inline-flex; align-items: center; gap: var(--snoc-xs);
+  padding: 2px var(--snoc-xs); border-radius: var(--snoc-r);
+  background: var(--snoc-surface-container-high); color: var(--snoc-on-surface);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px; line-height: 12px; letter-spacing: 0.05em; font-weight: 700;
+  text-transform: uppercase; white-space: nowrap;
+}
+.snoc-insignia-error { background: var(--snoc-error-container); color: var(--snoc-on-error-container); }
+.snoc-insignia-error-solida { background: var(--snoc-error); color: var(--snoc-on-error); }
+.snoc-insignia-secundaria { background: var(--snoc-secondary); color: var(--snoc-on-secondary); }
+.snoc-insignia-secundaria-suave { background: var(--snoc-secondary-container); color: var(--snoc-on-secondary-container); }
+.snoc-insignia-variante { background: var(--snoc-surface-variant); color: var(--snoc-on-surface); }
+.snoc-insignia-neutra { background: var(--snoc-surface-container); color: var(--snoc-secondary); }
+
+.snoc-punto { width: 8px; height: 8px; border-radius: 9999px; display: inline-block; flex: none; }
+.snoc-punto-error { background: var(--snoc-error); }
+.snoc-punto-primario { background: var(--snoc-primary); }
+.snoc-punto-secundario { background: var(--snoc-secondary); }
+
+/* Botones */
+.snoc-btn {
+  display: inline-flex; align-items: center; gap: var(--snoc-xs);
+  padding: 4px var(--snoc-sm); border-radius: var(--snoc-r-lg); border: 0;
+  background: var(--snoc-surface-container); color: var(--snoc-on-surface);
+  font-family: Inter, sans-serif; font-size: 12px; line-height: 16px;
+  letter-spacing: 0.02em; font-weight: 600; cursor: pointer;
+  transition: background 0.15s;
+}
+.snoc-btn:hover { background: var(--snoc-surface-container-high); }
+.snoc-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.snoc-btn-primario { background: var(--snoc-primary); color: var(--snoc-on-primary); box-shadow: var(--snoc-sombra); }
+.snoc-btn-primario:hover { background: var(--snoc-primary-container); }
+.snoc-btn-error { background: var(--snoc-error); color: var(--snoc-on-error); }
+.snoc-btn-error:hover { background: var(--snoc-on-error-container); }
+
+.snoc-pildora {
+  padding: 4px var(--snoc-sm); border-radius: var(--snoc-r-lg); border: 0;
+  background: var(--snoc-surface-container); color: var(--snoc-on-surface);
+  font-size: 12px; line-height: 16px; letter-spacing: 0.02em; font-weight: 600;
+  cursor: pointer; text-decoration: none; display: inline-block;
+}
+.snoc-pildora:hover { background: var(--snoc-surface-container-high); }
+.snoc-pildora-activa { background: var(--snoc-primary); color: var(--snoc-on-primary); }
+
+/* Tablas: densas a proposito, es una consola de operacion. */
+.snoc-tabla-caja { overflow-x: auto; }
+.snoc-tabla { width: 100%; text-align: left; border-collapse: collapse; font-size: 12px; line-height: 16px; }
+.snoc-tabla thead tr { background: var(--snoc-surface-container-low); color: var(--snoc-secondary); text-transform: uppercase; }
+.snoc-tabla th { padding: var(--snoc-xs) var(--snoc-sm); font-size: 11px; letter-spacing: 0.03em; font-weight: 600; white-space: nowrap; }
+.snoc-tabla td { padding: var(--snoc-sm); vertical-align: top; }
+.snoc-tabla tbody tr { border-top: 1px solid var(--snoc-surface-container); }
+.snoc-tabla tbody tr:hover { background: var(--snoc-surface-container-low); }
+.snoc-fila-activa { background: color-mix(in srgb, var(--snoc-surface-container-low) 80%, transparent); }
+.snoc-id { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; font-weight: 600; color: var(--snoc-primary); }
+.snoc-recorte { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Los tres tonos del analisis: observado / inferido / datos faltantes.
+   La distincion es el corazon de la pantalla y por eso son tres cajas
+   distintas y no tres parrafos. */
+.snoc-analisis { padding: var(--snoc-sm); border-radius: var(--snoc-r-lg); display: flex; flex-direction: column; gap: var(--snoc-xs); }
+.snoc-observado { background: var(--snoc-surface-container); }
+.snoc-inferido { background: color-mix(in srgb, var(--snoc-secondary-container) 60%, transparent); }
+.snoc-faltante { background: var(--snoc-surface-container-high); }
+
+.snoc-aviso {
+  display: flex; align-items: center; gap: var(--snoc-sm);
+  background: var(--snoc-surface-container-low); padding: var(--snoc-sm) var(--snoc-md);
+  border-radius: var(--snoc-r-lg); box-shadow: var(--snoc-sombra);
+}
+.snoc-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--snoc-sm); background: var(--snoc-surface-container-low); padding: var(--snoc-md); border-radius: var(--snoc-r-lg); }
+@media (min-width: 640px) { .snoc-meta { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.snoc-meta span:first-child { display: block; color: var(--snoc-outline); font-size: 11px; letter-spacing: 0.03em; font-weight: 600; }
+
+/* Modal de confirmacion del ciclo. */
+.snoc-velo {
+  position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--snoc-inverse-surface) 60%, transparent);
+  backdrop-filter: blur(4px); padding: var(--snoc-md);
+}
+.snoc-modal {
+  background: var(--snoc-surface-container-lowest); max-width: 28rem; width: 100%;
+  border-radius: var(--snoc-r-xl); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  padding: var(--snoc-lg); display: flex; flex-direction: column; gap: var(--snoc-md);
+}
+
+/* Utilidades chicas, para no repetir style="" en el marcado. */
+.snoc-fila { display: flex; align-items: center; gap: var(--snoc-sm); }
+.snoc-fila-sep { display: flex; align-items: center; justify-content: space-between; gap: var(--snoc-sm); }
+.snoc-pila { display: flex; flex-direction: column; gap: var(--snoc-sm); }
+.snoc-pila-xs { display: flex; flex-direction: column; gap: var(--snoc-xs); }
+.snoc-envuelve { display: flex; flex-wrap: wrap; align-items: center; gap: var(--snoc-xs); }
+.snoc-cifra { font-family: 'Hanken Grotesk', sans-serif; font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -0.02em; }
+.snoc-error-txt { color: var(--snoc-error); }
+.snoc-tenue { color: var(--snoc-outline); }
+.snoc-secundario { color: var(--snoc-secondary); }
+.snoc-primario { color: var(--snoc-primary); }
+.snoc-derecha { text-align: right; }
+.snoc-italica { font-style: italic; }
+
+.snoc-icono { font-family: 'Material Symbols Outlined'; font-weight: normal; font-style: normal; line-height: 1; letter-spacing: normal; text-transform: none; display: inline-block; white-space: nowrap; word-wrap: normal; direction: ltr; -webkit-font-feature-settings: 'liga'; -webkit-font-smoothing: antialiased; }
+
+/* El latido del indicador "en linea". Se apaga para quien pidio menos
+   movimiento: un punto que pulsa no comunica nada que el texto no diga. */
+@keyframes snoc-latido { 75%, 100% { transform: scale(2); opacity: 0; } }
+.snoc-latido { position: relative; display: inline-flex; width: 8px; height: 8px; }
+.snoc-latido span:first-child { position: absolute; inset: 0; border-radius: 9999px; background: var(--snoc-primary-fixed-dim); opacity: 0.75; animation: snoc-latido 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; }
+.snoc-latido span:last-child { position: relative; display: inline-flex; width: 8px; height: 8px; border-radius: 9999px; background: var(--snoc-primary-fixed); }
+@media (prefers-reduced-motion: reduce) {
+  .snoc-latido span:first-child { animation: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   PANEL LATERAL DE DETALLE
+   Reemplaza la seccion que antes se abria navegando con ?propuesta=<id>: eso
+   recargaba la pagina entera -- las 92 propuestas, los indicadores y el estado
+   del motor -- para mostrar una ficha.
+   --------------------------------------------------------------------------- */
+.snoc-drawer {
+  margin-left: auto; height: 100%;
+  /* Media pantalla, con tope: por debajo de 460px el contexto operativo no
+     entra en dos columnas, y por encima de 900px las lineas se vuelven
+     demasiado largas para leerlas de un vistazo. */
+  width: clamp(460px, 50vw, 900px); max-width: 100%;
+  background: var(--snoc-surface); box-shadow: -8px 0 32px rgba(0, 0, 0, 0.18);
+  display: flex; flex-direction: column;
+}
+.snoc-drawer-cabecera {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--snoc-sm);
+  padding: var(--snoc-md) var(--snoc-lg);
+  background: var(--snoc-surface-container-low);
+  border-bottom: 1px solid var(--snoc-outline-variant);
+}
+.snoc-drawer-cuerpo {
+  flex: 1; overflow-y: auto; padding: var(--snoc-lg);
+  display: flex; flex-direction: column; gap: var(--snoc-lg);
+}
+.snoc-velo { align-items: stretch; padding: 0; }
+
+.snoc-cargando { display: flex; align-items: center; gap: var(--snoc-sm); padding: var(--snoc-xl) 0; }
+@keyframes snoc-girar { to { transform: rotate(360deg); } }
+.snoc-girando { animation: snoc-girar 1s linear infinite; color: var(--snoc-primary); }
+@media (prefers-reduced-motion: reduce) { .snoc-girando { animation: none; } }
+
+/* La evidencia: cada observacion con su fuente, su id y CUANDO se leyo. Las
+   cuatro claves que manda el backend, sin resumir -- 'observado_en' es lo que
+   permite saber, semanas despues, si la propuesta se tomo con informacion
+   fresca o vieja. */
+.snoc-evidencia { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: var(--snoc-sm); }
+.snoc-evidencia li { padding-left: 0.2rem; }
+
+.snoc-accion {
+  margin: 0; padding: var(--snoc-sm) var(--snoc-md);
+  background: var(--snoc-surface-container); border-radius: var(--snoc-r-lg);
+  border-left: 3px solid var(--snoc-primary); font-weight: 500;
+}
+.snoc-generado {
+  display: flex; align-items: flex-start; gap: var(--snoc-sm);
+  padding: var(--snoc-sm) var(--snoc-md);
+  background: color-mix(in srgb, var(--snoc-secondary-container) 50%, transparent);
+  border-radius: var(--snoc-r-lg);
+}
+.snoc-historial {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--snoc-surface-container-low); padding: var(--snoc-xs) var(--snoc-sm);
+  border-radius: var(--snoc-r-lg);
+}
+.snoc-detalles { background: var(--snoc-surface-container-low); border-radius: var(--snoc-r-lg); padding: var(--snoc-sm); }
+.snoc-detalles summary { cursor: pointer; }
+.snoc-pre {
+  margin: var(--snoc-sm) 0 0; padding: var(--snoc-sm); overflow-x: auto;
+  background: var(--snoc-surface-container); border-radius: var(--snoc-r-lg);
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 15px;
+}
+
+/* ---------------------------------------------------------------------------
+   PIEZAS QUE ANTES IBAN CON style="" EN EL MARCADO
+   --------------------------------------------------------------------------- */
+.snoc-marca-grande {
+  width: 3rem; height: 3rem; border-radius: var(--snoc-r-xl);
+  background: var(--snoc-primary); color: var(--snoc-on-primary);
+  display: flex; align-items: center; justify-content: center; box-shadow: var(--snoc-sombra);
+}
+.snoc-chip-modo {
+  background: var(--snoc-surface-container-low); padding: var(--snoc-sm) var(--snoc-md);
+  border-radius: var(--snoc-r-xl); box-shadow: var(--snoc-sombra);
+}
+.snoc-chip-icono {
+  width: 2.25rem; height: 2.25rem; border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-high); color: var(--snoc-primary);
+  display: flex; align-items: center; justify-content: center; flex: none;
+}
+.snoc-chip-icono-solido { width: 2rem; height: 2rem; background: var(--snoc-primary); color: var(--snoc-on-primary); }
+.snoc-caja-asistente { background: var(--snoc-surface-container-low); padding: var(--snoc-sm); border-radius: var(--snoc-r-lg); }
+.snoc-caja-datos { background: var(--snoc-surface-container-low); padding: var(--snoc-sm); border-radius: var(--snoc-r-lg); }
+.snoc-resultado {
+  display: flex; flex-direction: column; gap: var(--snoc-xs);
+  background: var(--snoc-surface-container); padding: var(--snoc-sm);
+  border-radius: var(--snoc-r-lg); max-height: 22rem; overflow-y: auto;
+}
+.snoc-resultado-fila {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--snoc-surface-container-lowest); padding: var(--snoc-xs) var(--snoc-sm);
+  border-radius: var(--snoc-r-lg);
+}
+.snoc-nota {
+  display: flex; align-items: center; gap: var(--snoc-xs);
+  background: var(--snoc-surface-container-low); padding: var(--snoc-xs) var(--snoc-sm);
+  border-radius: var(--snoc-r-lg);
+}
+.snoc-kpi-cifra {
+  margin: var(--snoc-sm) 0; display: flex; align-items: baseline;
+  justify-content: space-between; gap: var(--snoc-sm);
+}
+/* "Sin datos" NO se ve como un numero: la diferencia entre 0 y "no se pudo
+   preguntar" tiene que notarse de un vistazo, no leyendo la letra chica. */
+.snoc-sin-dato {
+  font-family: Inter, sans-serif; font-size: 15px; line-height: 22px;
+  font-style: italic; color: var(--snoc-outline);
+}
+.snoc-campo {
+  width: 100%; padding: 5px var(--snoc-sm);
+  border: 1px solid var(--snoc-outline-variant); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-lowest); color: var(--snoc-on-surface);
+  font-family: Inter, sans-serif; font-size: 12px; line-height: 16px;
+}
+.snoc-campo:focus { outline: 2px solid var(--snoc-primary); outline-offset: -1px; }
+.snoc-enlace {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--snoc-primary); font: inherit; text-decoration: underline;
+}
+.snoc-insignia-primaria { background: var(--snoc-primary); color: var(--snoc-on-primary); }
+
+@media (max-width: 640px) {
+  .snoc-drawer { width: 100%; }
+}
+
+/* ---------------------------------------------------------------------------
+   PROGRAMACION
+   --------------------------------------------------------------------------- */
+.snoc-guardarrailes { padding: var(--snoc-xs); background: var(--snoc-surface-container-low); border-radius: var(--snoc-r-xl); }
+.snoc-guardarrail {
+  display: inline-flex; align-items: center; gap: var(--snoc-xs);
+  padding: 4px var(--snoc-sm); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-lowest); box-shadow: var(--snoc-sombra);
+}
+.snoc-pestanas { border-top: 1px solid var(--snoc-outline-variant); padding-top: var(--snoc-sm); }
+.snoc-pestanas .snoc-pildora { text-decoration: none; }
+
+.snoc-filtros { display: grid; gap: var(--snoc-sm); grid-template-columns: repeat(1, minmax(0, 1fr)); }
+@media (min-width: 640px) { .snoc-filtros { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .snoc-filtros { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.snoc-campo-grupo { display: flex; flex-direction: column; gap: 4px; justify-content: flex-end; }
+
+/* La barra de ocupacion. Pasa a 'exceso' por encima del 100%: una barra que
+   se corta en 100 esconde justo el caso que importa. */
+.snoc-barra {
+  height: 6px; border-radius: 9999px; overflow: hidden;
+  background: var(--snoc-surface-container-high);
+}
+.snoc-barra-relleno { height: 100%; background: var(--snoc-primary); border-radius: 9999px; }
+.snoc-barra-exceso { background: var(--snoc-error); }
+
+.snoc-tabla tbody tr { cursor: default; }
+
+/* ---------------------------------------------------------------------------
+   DRAWER DEL HALLAZGO -- jerarquia
+   Lo que decide el Supervisor arriba; lo tecnico, disponible pero plegado.
+   --------------------------------------------------------------------------- */
+.snoc-modo {
+  display: flex; align-items: center; gap: var(--snoc-xs);
+  padding: var(--snoc-xs) var(--snoc-sm); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-low);
+}
+
+/* El contraste ES el hallazgo: va primero y con el peso de un titular. */
+.snoc-contraste {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  gap: var(--snoc-sm); padding: var(--snoc-md);
+  background: var(--snoc-surface-container); border-radius: var(--snoc-r-xl);
+  border-left: 3px solid var(--snoc-error);
+}
+.snoc-contraste-lado { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.snoc-contraste-vs {
+  font-family: 'Hanken Grotesk', sans-serif; font-size: 22px; font-weight: 700;
+  color: var(--snoc-error); text-align: center;
+}
+
+/* Los cinco datos de cabecera, en una tira que no roba altura. */
+.snoc-tira {
+  display: flex; flex-wrap: wrap; gap: var(--snoc-sm) var(--snoc-lg);
+  padding: var(--snoc-sm) var(--snoc-md);
+  background: var(--snoc-surface-container-low); border-radius: var(--snoc-r-lg);
+}
+.snoc-tira-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.snoc-analisis-caja {
+  display: flex; flex-direction: column; gap: var(--snoc-md);
+  padding: var(--snoc-md); border-radius: var(--snoc-r-xl);
+  background: color-mix(in srgb, var(--snoc-secondary-container) 45%, transparent);
+}
+.snoc-acciones {
+  display: flex; flex-direction: column; gap: var(--snoc-sm);
+  padding: var(--snoc-md); border-radius: var(--snoc-r-xl);
+  background: var(--snoc-surface-container-lowest); box-shadow: var(--snoc-sombra);
+}
+/* Un UUID que nadie lee no tiene por que ocupar tres renglones. */
+.snoc-copiable {
+  user-select: all; word-break: break-all;
+  background: var(--snoc-surface-container); padding: 1px 4px; border-radius: var(--snoc-r);
+}
+
+@media (max-width: 560px) {
+  .snoc-contraste { grid-template-columns: 1fr; text-align: left; }
+  .snoc-contraste-vs { text-align: left; }
+  .snoc-meta { grid-template-columns: 1fr; }
+}
+
+
+/* ---------------------------------------------------------------------------
+   DRAWER A MEDIA PANTALLA -- el contexto operativo en dos columnas
+   --------------------------------------------------------------------------- */
+/* El hallazgo, en rojo y arriba: es lo que el supervisor tiene que entender
+   antes que nada. */
+.snoc-hallazgo {
+  display: flex; flex-direction: column; gap: var(--snoc-xs);
+  padding: var(--snoc-md); border-radius: var(--snoc-r-xl);
+  background: var(--snoc-error-container); color: var(--snoc-on-error-container);
+}
+.snoc-hallazgo-titulo {
+  font-family: 'Hanken Grotesk', sans-serif; font-size: 18px; line-height: 24px;
+  font-weight: 700; letter-spacing: -0.01em; text-transform: uppercase; margin: 0;
+}
+
+/* El contraste y los cuatro datos, uno al lado del otro: con el panel ancho
+   caben, y antes obligaban a bajar. */
+.snoc-cabeza { display: grid; grid-template-columns: 1fr; gap: var(--snoc-md); }
+@media (min-width: 820px) { .snoc-cabeza { grid-template-columns: 1.4fr 1fr; } }
+
+.snoc-datos-clave { display: flex; flex-direction: column; gap: var(--snoc-xs); }
+.snoc-dato-clave {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--snoc-sm);
+  padding: var(--snoc-xs) var(--snoc-sm); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-low);
+}
+
+/* La grilla del contexto: dos columnas con el panel ancho, una si se angosta. */
+.snoc-contexto { display: grid; grid-template-columns: 1fr; gap: var(--snoc-sm); }
+@media (min-width: 700px) { .snoc-contexto { grid-template-columns: 1fr 1fr; } }
+.snoc-contexto-celda {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: var(--snoc-sm); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-low);
+}
+.snoc-contexto-celda > span:first-child {
+  color: var(--snoc-outline); font-size: 11px; letter-spacing: 0.03em; font-weight: 600;
+  text-transform: uppercase;
+}
+.snoc-ancho-total { grid-column: 1 / -1; }
+
+/* Lo que el backend todavia no manda, dicho una vez y sin casillas vacias. */
+.snoc-ausente {
+  display: flex; align-items: flex-start; gap: var(--snoc-xs);
+  padding: var(--snoc-xs) var(--snoc-sm); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-high);
+}
+
+.snoc-pie-decision {
+  display: flex; align-items: center; gap: var(--snoc-xs);
+  padding: var(--snoc-sm) var(--snoc-md); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-low);
+}
+.snoc-tecla {
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; font-weight: 700;
+  padding: 1px 5px; border-radius: var(--snoc-r);
+  background: var(--snoc-surface-container-high); color: var(--snoc-on-surface-variant);
+}
+
+/* ---------------------------------------------------------------------------
+   MODAL CENTRADO DEL HALLAZGO
+   Reemplaza el panel lateral: con dos columnas de datos, un modal ancho
+   aprovecha mejor la pantalla que una banda pegada al borde.
+   --------------------------------------------------------------------------- */
+.snoc-velo-centrado { align-items: center; justify-content: center; padding: var(--snoc-md); }
+.snoc-modal-hallazgo {
+  display: flex; flex-direction: column; overflow: hidden;
+  width: 85vw; max-width: 1280px; min-width: 320px; height: 88vh;
+  background: var(--snoc-surface); border-radius: var(--snoc-r-full);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+}
+.snoc-modal-cabecera {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--snoc-sm);
+  padding: var(--snoc-sm) var(--snoc-lg); flex: none;
+  background: var(--snoc-surface-container-low);
+  border-bottom: 1px solid var(--snoc-outline-variant);
+}
+.snoc-modal-cuerpo {
+  flex: 1; overflow-y: auto; padding: var(--snoc-lg);
+  display: flex; flex-direction: column; gap: var(--snoc-lg);
+}
+/* El pie no scrollea: la decision tiene que estar siempre a mano. */
+.snoc-modal-pie {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: var(--snoc-sm); padding: var(--snoc-md) var(--snoc-lg);
+  background: var(--snoc-surface-container-low);
+  border-top: 1px solid var(--snoc-outline-variant);
+}
+.snoc-pie-acciones { display: flex; align-items: center; gap: var(--snoc-xs); flex-wrap: wrap; }
+.snoc-pie-acciones .snoc-campo { width: 260px; }
+.snoc-contador { padding: 0 var(--snoc-sm); white-space: nowrap; }
+
+/* La discrepancia: dos lados y el signo en el medio. */
+.snoc-mismatch {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--snoc-sm);
+  padding: var(--snoc-sm); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-lowest);
+}
+.snoc-mismatch-lado { display: flex; flex-direction: column; gap: 2px; min-width: 0; color: var(--snoc-on-surface); }
+.snoc-mismatch-vs {
+  font-family: 'Hanken Grotesk', sans-serif; font-size: 22px; font-weight: 700;
+  color: var(--snoc-error); text-align: center;
+}
+
+.snoc-dos-columnas { display: grid; grid-template-columns: 1fr; gap: var(--snoc-md); }
+@media (min-width: 860px) { .snoc-dos-columnas { grid-template-columns: 1fr 1fr; } }
+.snoc-columna {
+  display: flex; flex-direction: column; gap: var(--snoc-sm);
+  padding: var(--snoc-md); border-radius: var(--snoc-r-xl);
+  background: var(--snoc-surface-container-lowest); box-shadow: var(--snoc-sombra);
+}
+.snoc-columna-titulo { display: flex; align-items: center; gap: var(--snoc-xs); }
+
+/* Etiqueta y valor en dos columnas: se escanea vertical. */
+.snoc-lista-datos { margin: 0; display: flex; flex-direction: column; gap: var(--snoc-xs); }
+.snoc-lista-datos > div {
+  display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: var(--snoc-sm); align-items: baseline;
+  padding-bottom: var(--snoc-xs); border-bottom: 1px solid var(--snoc-surface-container);
+}
+.snoc-lista-datos > div:last-child { border-bottom: 0; padding-bottom: 0; }
+.snoc-lista-datos dt {
+  color: var(--snoc-outline); font-size: 11px; letter-spacing: 0.03em; font-weight: 600;
+  text-transform: uppercase;
+}
+.snoc-lista-datos dd { margin: 0; font-size: 13px; line-height: 18px; min-width: 0; }
+.snoc-enlace-externo {
+  display: inline-flex; align-items: center; gap: 2px; margin-left: var(--snoc-xs);
+  color: var(--snoc-primary); text-decoration: none; font-size: 12px; font-weight: 600;
+}
+.snoc-enlace-externo:hover { text-decoration: underline; }
+
+/* El ciclo. Las etapas inalcanzables van apagadas, no ocultas: mostrar donde
+   TERMINA lo que esta etapa puede hacer es la mitad del mensaje. */
+.snoc-ciclo {
+  display: flex; flex-direction: column; gap: var(--snoc-sm);
+  padding: var(--snoc-md); border-radius: var(--snoc-r-xl);
+  background: var(--snoc-surface-container-lowest); box-shadow: var(--snoc-sombra);
+}
+.snoc-pasos {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-wrap: wrap; gap: var(--snoc-sm) var(--snoc-lg);
+}
+.snoc-paso { display: flex; align-items: center; gap: var(--snoc-xs); }
+.snoc-paso-punto {
+  width: 10px; height: 10px; border-radius: 9999px; flex: none;
+  background: var(--snoc-outline-variant);
+}
+.snoc-paso-texto { font-size: 12px; font-weight: 600; color: var(--snoc-outline); }
+.snoc-paso.hecho .snoc-paso-punto { background: var(--snoc-primary); }
+.snoc-paso.hecho .snoc-paso-texto { color: var(--snoc-on-surface); }
+.snoc-paso.actual .snoc-paso-punto { background: var(--snoc-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--snoc-primary) 25%, transparent); }
+.snoc-paso.actual .snoc-paso-texto { color: var(--snoc-primary); }
+.snoc-paso.inactivo .snoc-paso-texto { font-style: italic; }
+
+@media (max-width: 700px) {
+  .snoc-modal-hallazgo { width: 100%; height: 94vh; }
+  .snoc-mismatch { grid-template-columns: 1fr; }
+  .snoc-mismatch-vs { text-align: left; }
+  .snoc-lista-datos > div { grid-template-columns: 1fr; }
+  .snoc-pie-acciones .snoc-campo { width: 100%; }
+}
+
+/* ==========================================================================
+   EL TABLERO
+   Los bloques que el diseño de Stitch pide: seis KPI, cuatro gráficos y tres
+   paneles abajo. Todo con el mismo sistema de color de arriba -- el diseño
+   trae azules propios, pero mezclar dos paletas en una pantalla se nota más
+   que respetar una al pie de la letra.
+   ========================================================================== */
+
+@media (min-width: 640px) { .snoc-rejilla-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 768px) { .snoc-rejilla-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1024px) {
+  .snoc-rejilla-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .snoc-rejilla-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+/* --- La tarjeta de KPI --- */
+.snoc-kpi {
+  position: relative; overflow: hidden;
+  background: var(--snoc-surface-container-lowest);
+  border: 1px solid var(--snoc-outline-variant);
+  border-radius: var(--snoc-r-xl); padding: var(--snoc-md);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.snoc-kpi-n { font-size: 1.75rem; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
+.snoc-kpi-titulo { font-size: 0.8125rem; font-weight: 600; }
+.snoc-kpi-sub { font-size: 0.6875rem; color: var(--snoc-on-surface-variant); }
+.snoc-kpi-icono {
+  position: absolute; top: var(--snoc-md); right: var(--snoc-md);
+  width: 26px; height: 26px; border-radius: var(--snoc-r-lg);
+  display: grid; place-items: center;
+}
+.snoc-tono-critico .snoc-kpi-n { color: var(--snoc-error); }
+.snoc-tono-critico .snoc-kpi-icono { background: var(--snoc-error-container); color: var(--snoc-on-error-container); }
+.snoc-tono-alerta .snoc-kpi-n { color: #8a5300; }
+.snoc-tono-alerta .snoc-kpi-icono { background: #ffe0b2; color: #6b4000; }
+.snoc-tono-info .snoc-kpi-n { color: var(--snoc-primary); }
+.snoc-tono-info .snoc-kpi-icono { background: var(--snoc-primary-fixed); color: var(--snoc-primary); }
+.snoc-tono-teal .snoc-kpi-n { color: #00696d; }
+.snoc-tono-teal .snoc-kpi-icono { background: #9cf1f0; color: #004f51; }
+.snoc-tono-ok .snoc-kpi-n { color: #1b6b2f; }
+.snoc-tono-neutro .snoc-kpi-n { color: var(--snoc-on-surface-variant); }
+.snoc-tono-neutro .snoc-kpi-icono { background: var(--snoc-surface-container-high); color: var(--snoc-on-surface-variant); }
+
+/* --- La tarjeta de un gráfico --- */
+.snoc-grafico {
+  background: var(--snoc-surface-container-lowest);
+  border: 1px solid var(--snoc-outline-variant);
+  border-radius: var(--snoc-r-xl); padding: var(--snoc-md);
+  display: flex; flex-direction: column; gap: var(--snoc-sm); min-width: 0;
+}
+.snoc-grafico-titulo {
+  display: flex; align-items: center; gap: var(--snoc-xs);
+  font-size: 0.8125rem; font-weight: 600; margin: 0;
+}
+.snoc-grafico-cuerpo { display: flex; align-items: center; gap: var(--snoc-md); min-height: 122px; }
+
+/* --- El donut --- */
+.snoc-donut { flex-shrink: 0; transform: rotate(-90deg); }
+.snoc-donut-centro { position: relative; width: 110px; height: 110px; flex-shrink: 0; }
+.snoc-donut-cifra {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 1.25rem; font-weight: 700; line-height: 1;
+}
+.snoc-leyenda { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.snoc-leyenda-fila {
+  display: flex; align-items: center; gap: var(--snoc-xs);
+  font-size: 0.6875rem; min-width: 0;
+}
+.snoc-leyenda-punto { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.snoc-leyenda-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.snoc-leyenda-n { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* --- Las barras --- */
+.snoc-barras {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--snoc-sm); height: 122px;
+}
+.snoc-barra-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.snoc-barra {
+  width: 100%; max-width: 34px; border-radius: 3px 3px 0 0;
+  background: var(--snoc-primary); min-height: 2px;
+}
+.snoc-barra-n { font-size: 0.6875rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.snoc-barra-txt {
+  font-size: 0.5625rem; color: var(--snoc-on-surface-variant);
+  text-align: center; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; max-width: 100%;
+}
+
+/* --- Una fila de órdenes de trabajo --- */
+.snoc-fila-orden {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--snoc-sm) 0; border-bottom: 1px solid var(--snoc-outline-variant);
+  font-size: 0.75rem;
+}
+.snoc-fila-orden:last-child { border-bottom: 0; }
+.snoc-fila-orden-n { font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* --- La carga de un técnico --- */
+.snoc-tecnico { display: flex; flex-direction: column; gap: 3px; padding: var(--snoc-sm) 0; }
+.snoc-tecnico + .snoc-tecnico { border-top: 1px solid var(--snoc-outline-variant); }
+.snoc-tecnico-cabeza {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--snoc-xs); font-size: 0.75rem;
+}
+.snoc-tecnico-nombre { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snoc-riel { height: 5px; border-radius: 3px; background: var(--snoc-surface-container-high); overflow: hidden; }
+.snoc-riel-relleno { height: 100%; border-radius: 3px; background: var(--snoc-primary); }
+.snoc-riel-critico { background: var(--snoc-error); }
+.snoc-riel-alerta { background: #c77800; }
+.snoc-riel-ok { background: #2e7d32; }
+.snoc-riel-neutro { background: var(--snoc-outline); }
+
+/* --- Un bloque que el backend no puede llenar ---
+   No es un estado vacío: es un hueco declarado, con su motivo a la vista.
+   Sin el motivo, un recuadro en blanco se lee como "no hay nada que mostrar",
+   que es justo lo que no sabemos. */
+.snoc-hueco {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: var(--snoc-xs); text-align: center;
+  padding: var(--snoc-md); min-height: 122px;
+  border: 1px dashed var(--snoc-outline-variant); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-low);
+}
+.snoc-hueco-rotulo {
+  font-size: 0.625rem; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--snoc-on-surface-variant);
+}
+.snoc-hueco-motivo {
+  font-size: 0.6875rem; color: var(--snoc-on-surface-variant);
+  max-width: 34ch; line-height: 1.5; margin: 0;
+}
+
+/* Una columna que el diseño pide y el backend no entrega. La cabecera lo
+   dice; la celda queda con una raya, no con un valor inventado. */
+.snoc-col-ausente { color: var(--snoc-outline); font-weight: 400; }
+.snoc-celda-ausente { color: var(--snoc-outline); }
+
+/* --- Lo que no cabe se desplaza ---
+   Los tres paneles de abajo crecen con la operación: seis técnicos hoy,
+   veinte el mes que viene. Antes la lista de técnicos se cortaba en seis sin
+   decirlo, que es peor que no mostrarla -- el que falta no se sabe que falta.
+   Ahora entran todos y la caja se desplaza. */
+.snoc-desplazable {
+  max-height: 232px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.snoc-desplazable::-webkit-scrollbar { width: 8px; }
+.snoc-desplazable::-webkit-scrollbar-thumb {
+  background: var(--snoc-outline-variant);
+  border-radius: 4px;
+}
+.snoc-desplazable::-webkit-scrollbar-track { background: transparent; }
+/* La cabecera de la tabla del feed no se va con el scroll. */
+.snoc-desplazable thead th {
+  position: sticky;
+  top: 0;
+  background: var(--snoc-surface-container-lowest);
+  z-index: 1;
+}
+
+/* --- La celda de SLA ---
+   Seis estados, cuatro tonos: 'sin plazo', 'no aplica' y 'no se pudo
+   calcular' comparten el gris porque ninguno de los tres afirma nada sobre
+   el cumplimiento. Lo que los distingue es el title, no el color. */
+.snoc-sla-critico {
+  background: var(--snoc-error-container);
+  color: var(--snoc-on-error-container);
+  border-color: transparent;
+}
+.snoc-sla-alerta { background: #ffe0b2; color: #6b4000; border-color: transparent; }
+.snoc-sla-ok { background: #c8e6c9; color: #1b5e20; border-color: transparent; }
+.snoc-sla-neutro { color: var(--snoc-on-surface-variant); }
+
+/* --- Las dos tablas largas se desplazan por dentro ---
+   Con las 93 propuestas de hoy median ~9.900px juntas: unas once pantallas
+   solo de tablas, y los tecnicos, las ordenes y la actividad quedaban a un
+   viaje de distancia. Ahora se ven cinco filas y el resto desplaza dentro.
+
+   Los dos altos son distintos porque las filas lo son: la de hallazgos lleva
+   el ticket, el proveedor y la accion recortada --tres lineas-- y la de
+   pendientes una sola. Un alto comun dejaria media fila asomando en una de
+   las dos, que es la manera de que nadie sepa si hay mas.
+
+   El numero de filas vive en FILAS_A_LA_VISTA, en el componente: los textos
+   que lo dicen lo necesitan, y un alto aqui con un "se ven 5" escrito alla se
+   desincronizan en cuanto alguien toca uno de los dos. Si cambia, cambian los
+   dos. */
+.snoc-tabla-alta { max-height: 296px; }
+.snoc-tabla-baja { max-height: 246px; }
+.snoc-tabla-alta,
+.snoc-tabla-baja {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.snoc-tabla-alta::-webkit-scrollbar,
+.snoc-tabla-baja::-webkit-scrollbar { width: 9px; }
+.snoc-tabla-alta::-webkit-scrollbar-thumb,
+.snoc-tabla-baja::-webkit-scrollbar-thumb {
+  background: var(--snoc-outline-variant);
+  border-radius: 5px;
+}
+.snoc-tabla-alta::-webkit-scrollbar-track,
+.snoc-tabla-baja::-webkit-scrollbar-track { background: transparent; }
+
+/* La cabecera no se va con el scroll: sin ella, diez columnas desplazadas son
+   diez celdas sin nombre. */
+.snoc-tabla-alta thead th,
+.snoc-tabla-baja thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--snoc-surface-container-low);
+}
+
+/* ==========================================================================
+   EL DETALLE DEL HALLAZGO, EN ORDEN DE DECISIÓN
+   ==========================================================================
+   Primero lo que hace falta para decidir; el detalle técnico, a un clic. Nada
+   se borró: la información de antes vive dentro de los <details>. */
+
+.snoc-identidad {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--snoc-xs) var(--snoc-sm);
+  margin: 0 0 var(--snoc-sm);
+}
+@media (min-width: 900px) { .snoc-identidad { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.snoc-identidad dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--snoc-on-surface-variant);
+  margin-bottom: 2px;
+}
+.snoc-identidad dd { margin: 0; font-size: 13px; font-weight: 600; word-break: break-word; }
+
+/*  Un dato que la fuente no trae se ve DISTINTO de uno que sí: en gris y en
+    cursiva, para que nadie lo lea como un valor. */
+.snoc-sin-fuente { color: var(--snoc-on-surface-variant); font-style: italic; font-weight: 400; }
+
+.snoc-que-pasa {
+  border: 1px solid var(--snoc-outline-variant);
+  border-left: 4px solid var(--snoc-primary);
+  border-radius: var(--snoc-r-md);
+  background: var(--snoc-surface-container-low);
+  padding: var(--snoc-sm);
+  margin-bottom: var(--snoc-sm);
+}
+.snoc-que-pasa-frase { margin: 4px 0 0; font-size: 15px; line-height: 1.5; }
+
+.snoc-comparacion { width: 100%; border-collapse: collapse; font-size: 13px; }
+.snoc-comparacion th, .snoc-comparacion td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--snoc-outline-variant);
+}
+.snoc-comparacion thead th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--snoc-on-surface-variant);
+}
+.snoc-comparacion tbody th { font-weight: 600; width: 34%; }
+
+.snoc-etiqueta-analisis {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--snoc-on-surface-variant);
+  margin: var(--snoc-sm) 0 4px;
+}
+.snoc-lista-hechos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.snoc-lista-hechos li { display: flex; justify-content: space-between; gap: var(--snoc-sm); }
+
+.snoc-propuesta, .snoc-si-acepto {
+  border: 1px solid var(--snoc-outline-variant);
+  border-radius: var(--snoc-r-md);
+  padding: var(--snoc-sm);
+  margin-bottom: var(--snoc-sm);
+}
+.snoc-propuesta {
+  border-left: 4px solid var(--snoc-primary);
+  background: var(--snoc-surface-container-low);
+}
+.snoc-propuesta-accion { margin: 4px 0 var(--snoc-xs); font-size: 15px; font-weight: 600; line-height: 1.45; }
+.snoc-si-acepto { border-style: dashed; }
+.snoc-aviso-shadow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: var(--snoc-xs) 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--snoc-on-surface-variant);
+}
+.snoc-detalle-tecnico { margin-bottom: var(--snoc-sm); }
+.snoc-detalle-tecnico > summary { cursor: pointer; padding: 6px 0; }
+
+/*  La lista de pares rotulo/valor del detalle. La usaban tres secciones y no
+    estaba definida: lo encontro la guarda de clases, no la pantalla. */
+.snoc-dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--snoc-xs) var(--snoc-sm);
+  margin: 0;
+}
+.snoc-dl dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--snoc-on-surface-variant);
+  margin-bottom: 2px;
+}
+.snoc-dl dd { margin: 0; font-size: 13px; word-break: break-word; }
+/* El unico KPI que es un enlace. Hereda todo del resto y solo anuncia que se
+   puede pulsar: dos KPI que se ven igual y se comportan distinto confunden
+   mas que uno que se ve distinto. */
+.snoc-kpi-enlace {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.snoc-kpi-enlace:hover,
+.snoc-kpi-enlace:focus-visible {
+  border-color: var(--snoc-primary);
+  box-shadow: 0 0 0 1px var(--snoc-primary);
+}
+@media (prefers-reduced-motion: reduce) {
+  .snoc-kpi-enlace { transition: none; }
+}
+
+/* ==========================================================================
+   LA BANDEJA: cabecera, filtros, niveles y paginación
+   ========================================================================== */
+
+.snoc-bandeja-cabecera {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--snoc-md); flex-wrap: wrap;
+}
+
+/* El buscador. Crece hasta un tope y se va a su propia línea en pantallas
+   angostas -- un campo de 40px al lado de un título no se usa. */
+.snoc-buscador {
+  display: flex; align-items: center; gap: var(--snoc-xs);
+  flex: 1 1 260px; max-width: 380px;
+  padding: 0 var(--snoc-sm);
+  border: 1px solid var(--snoc-outline-variant);
+  border-radius: var(--snoc-r-full);
+  background: var(--snoc-surface-container-lowest);
+}
+.snoc-buscador:focus-within {
+  border-color: var(--snoc-primary);
+  box-shadow: 0 0 0 1px var(--snoc-primary);
+}
+.snoc-buscador-campo {
+  flex: 1; min-width: 0; border: 0; outline: none; background: transparent;
+  padding: var(--snoc-sm) 0; font: inherit; font-size: 0.8125rem;
+  color: var(--snoc-on-surface);
+}
+.snoc-buscador-campo::placeholder { color: var(--snoc-outline); }
+
+.snoc-filtros-bandeja {
+  display: flex; flex-direction: column; gap: var(--snoc-sm);
+  padding: var(--snoc-sm) 0;
+  border-top: 1px solid var(--snoc-outline-variant);
+  border-bottom: 1px solid var(--snoc-outline-variant);
+}
+.snoc-grupo-filtro {
+  display: flex; align-items: center; gap: var(--snoc-xs); flex-wrap: wrap;
+}
+/* El rótulo del grupo tiene ancho fijo para que las tres filas de pastillas
+   arranquen alineadas. Sin eso, «Revisión», «Prioridad» y «Tipo» empujan cada
+   fila a un sitio distinto y se lee como tres cosas sin relación. */
+.snoc-rotulo-filtro {
+  text-transform: uppercase; letter-spacing: 0.06em;
+  min-width: 5.5rem; flex-shrink: 0;
+}
+
+.snoc-select {
+  font: inherit; font-size: 0.75rem; padding: 5px 9px;
+  border: 1px solid var(--snoc-outline-variant);
+  border-radius: var(--snoc-r-full);
+  background: var(--snoc-surface-container-lowest);
+  color: var(--snoc-on-surface); max-width: 22rem;
+}
+.snoc-select:focus-visible { outline: 2px solid var(--snoc-primary); outline-offset: 1px; }
+
+/* --- Los tres niveles de prioridad ---
+   El punto de color acompaña al texto, nunca lo reemplaza: un círculo solo
+   no dice nada a quien no distingue rojo de verde, y tampoco a un lector de
+   pantalla. */
+.snoc-nivel {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; white-space: nowrap;
+}
+.snoc-punto-nivel {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--snoc-outline);
+}
+.snoc-nivel-alta { color: var(--snoc-error); }
+.snoc-punto-nivel.snoc-nivel-alta { background: var(--snoc-error); }
+.snoc-nivel-media { color: #8a5300; }
+.snoc-punto-nivel.snoc-nivel-media { background: #d98324; }
+.snoc-nivel-baja { color: #1b6b2f; }
+.snoc-punto-nivel.snoc-nivel-baja { background: #2e7d32; }
+
+/* Diez columnas no caben en una laptop: la tabla se desplaza en horizontal
+   antes que apretar las celdas hasta que no se lean. */
+.snoc-tabla-bandeja { min-width: 60rem; }
+
+/* --- La paginación --- */
+.snoc-paginacion {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--snoc-sm); flex-wrap: wrap; padding-top: var(--snoc-sm);
+}
+.snoc-paginacion-botones {
+  display: flex; align-items: center; gap: var(--snoc-xs); flex-wrap: wrap;
+}
+.snoc-paginacion-hueco {
+  padding: 0 var(--snoc-xs); color: var(--snoc-outline);
+  font-size: 0.75rem; user-select: none;
+}
+
+/* El nombre del centro, sobre el titulo de la bandeja. Discreto a proposito:
+   dice donde estas, no que estas mirando. */
+.snoc-rotulo-centro {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--snoc-on-surface-variant);
+}
+
+.snoc-limpiar {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.6875rem; margin-left: auto;
+}
+
+/* ==========================================================================
+   AJUSTE CONTRA LA REFERENCIA DE STITCH
+   «Centro del Supervisor NOC IA - Pendientes por Revisión», leída del
+   proyecto por su API. Lo de aquí sale de medir ese HTML, no de recordarlo.
+   ========================================================================== */
+
+/* La barra de filtros es UNA fila. Los rótulos de grupo ocupaban tres líneas
+   para decir lo que las propias pastillas ya dicen. */
+.snoc-filtros-bandeja {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--snoc-xs);
+}
+.snoc-separador-filtro {
+  color: var(--snoc-outline-variant);
+  margin: 0 var(--snoc-xs);
+  user-select: none;
+}
+
+/* La referencia usa esquina de 8px en las pastillas, no la cápsula completa
+   que traía esta pantalla. */
+.snoc-filtros-bandeja .snoc-pildora,
+.snoc-paginacion-botones .snoc-pildora {
+  border-radius: var(--snoc-r-xl);
+}
+
+/* Prioridad y SLA comparten formato en la referencia: cápsula con fondo
+   suave, texto fuerte y un punto del mismo color delante. Antes la prioridad
+   era texto suelto y el SLA una insignia, y se leían como dos cosas
+   distintas cuando son dos lecturas del mismo caso. */
+.snoc-pildora-nivel {
+  display: inline-flex; align-items: center; gap: 5px;
+  border-radius: var(--snoc-r-full);
+  font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; white-space: nowrap;
+}
+.snoc-pildora-nivel.snoc-nivel-alta {
+  background: #fff1f2; color: #dc2626; border-color: #ffe4e6;
+}
+.snoc-pildora-nivel.snoc-nivel-media {
+  background: #fff7ed; color: #c2410c; border-color: #ffedd5;
+}
+.snoc-pildora-nivel.snoc-nivel-baja {
+  background: #f0fdf4; color: #15803d; border-color: #dcfce7;
+}
+.snoc-pildora-nivel.snoc-nivel-sin {
+  background: var(--snoc-surface-container-high); color: var(--snoc-on-surface-variant);
+}
+
+/* El mismo punto, también en las pastillas del filtro. */
+.snoc-pildora .snoc-punto-nivel { margin-right: 1px; }
+.snoc-pildora-activa .snoc-punto-nivel { background: currentColor; }

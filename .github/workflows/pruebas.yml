@@ -1,0 +1,89 @@
+# Las guardas, corridas por alguien que no se olvida.
+#
+# POR QUE EN LA RAIZ
+# ------------------
+# GitHub Actions solo lee `.github/workflows` del RAIZ del repositorio. Los dos
+# workflows que viven en `django-crm/.github/workflows/` vinieron con el
+# proyecto vendorizado y **nunca corrieron**: no es que fallaran, es que nadie
+# los miraba. Hasta hoy este repositorio no tenia ninguna verificacion
+# automatica (D1 de CLAUDE.md).
+#
+# QUE CORRE, Y QUE NO
+# -------------------
+# Las 95 pruebas que no necesitan Postgres ni salir a la red. Las 48 que piden
+# base quedan afuera **por ahora** y el corredor las nombra al final: un verde
+# sobre 95 de 145 miente si no se dice cuantas quedaron sin correr. El paso
+# siguiente es levantar un Postgres de servicio aca y correrlas tambien.
+#
+# Lo que NO hace, a proposito: desplegar. El despliegue lo dispara un push a
+# la rama de produccion, y eso lo decide una persona.
+
+name: guardas
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'nucleo/**'
+      - 'cli/**'
+      - 'tests/**'
+      - 'tenants/**'
+      - 'conectores/**'
+      - 'requirements.txt'
+      - '.github/workflows/pruebas.yml'
+  pull_request:
+    paths:
+      - 'nucleo/**'
+      - 'cli/**'
+      - 'tests/**'
+      - 'tenants/**'
+      - 'conectores/**'
+      - 'requirements.txt'
+
+# Un push nuevo sobre la misma rama cancela la corrida anterior: lo que importa
+# es si el ULTIMO commit esta en verde.
+concurrency:
+  group: guardas-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guardas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # La historia entera, no el clon superficial que trae por defecto.
+          # test_ledger_checksum compara contra el blob de un commit FIJADO
+          # (f60beda) como referencia dorada del checksum. Con profundidad 1
+          # ese commit no esta, `git show` devuelve vacio y la prueba salia en
+          # ROJO diciendo que el hash no cuadraba -- cuando lo que pasaba era
+          # que no habia con que compararlo. Costo la primera corrida en la
+          # rama de despliegue, el 24/09/2026.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Primero y aparte: es la unica regla de arquitectura del proyecto y
+      # corre en segundos. Si el nucleo aprendio a distinguir un cliente, eso
+      # no se discute en una revision.
+      - name: El nucleo no conoce a ningun cliente
+        run: python tests/test_nucleo_sin_tenants.py
+
+      - name: Las guardas que no necesitan base ni red
+        run: python cli/correr_pruebas.py --sin-base --sin-red
+
+      # Informativo: el repositorio declarando algo que no existe. No frena la
+      # corrida porque compara contra la base y aca no hay ninguna.
+      - name: Que quedo sin correr
+        if: always()
+        run: python cli/correr_pruebas.py --listar

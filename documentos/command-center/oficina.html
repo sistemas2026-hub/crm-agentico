@@ -1,0 +1,1038 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DEXTER COMMAND CENTER — Oficina Virtual de Agentes IA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --fondo:#050B18; --panel:#0F172A; --holo:#16233A;
+  --cian:#00E5FF; --azul:#2563EB; --violeta:#8B5CF6;
+  --activo:#22C55E; --procesando:#06B6D4; --esperando:#F59E0B; --error:#EF4444;
+  --texto:#E6F1FF; --texto2:#8AA2C0; --texto3:#47607F;
+  --borde:rgba(0,229,255,.14); --borde-vivo:rgba(0,229,255,.45);
+  --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
+  --titulo:'Space Grotesk',system-ui,sans-serif;
+  --cuerpo:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--fondo); color:var(--texto); font-family:var(--cuerpo);
+  overflow:hidden;
+  display:flex; flex-direction:column;
+}
+
+/* ---------- barra superior ---------- */
+.barra{
+  height:56px; flex:0 0 56px; display:flex; align-items:center; gap:14px;
+  padding:0 18px; border-bottom:1px solid var(--borde); background:var(--fondo);
+}
+.logo{font-family:var(--titulo); font-weight:700; letter-spacing:.18em; font-size:15px; display:flex; align-items:center; gap:9px}
+.logo .punto{width:8px;height:8px;border-radius:50%;background:var(--cian);box-shadow:0 0 10px var(--cian);animation:latido 2.4s infinite}
+.logo span{color:var(--texto2); font-weight:500; letter-spacing:.22em; font-size:12.5px}
+.pastilla{
+  font-family:var(--mono); font-size:11px; letter-spacing:.08em;
+  padding:5px 11px; border-radius:8px; border:1px solid var(--borde);
+  background:var(--panel); color:var(--texto2); display:flex; align-items:center; gap:8px;
+}
+.pastilla b{color:var(--texto); font-weight:500}
+.centro-barra{flex:1; text-align:center; font-family:var(--mono); font-size:11.5px; letter-spacing:.22em; color:var(--cian)}
+.demo{
+  font-family:var(--mono); font-size:11px; letter-spacing:.12em; padding:5px 12px; border-radius:8px;
+  color:var(--esperando); border:1px dashed var(--esperando); background:rgba(245,158,11,.08);
+}
+
+/* ---------- metricas ---------- */
+.metricas{
+  flex:0 0 76px; display:grid; grid-template-columns:repeat(6,1fr);
+  border-bottom:1px solid var(--borde);
+}
+.metrica{padding:12px 20px; border-right:1px solid var(--borde); display:flex; flex-direction:column; justify-content:center}
+.metrica:last-child{border-right:0}
+.metrica .cifra{font-family:var(--mono); font-size:26px; font-weight:700; line-height:1}
+.metrica .rotulo{font-size:10px; letter-spacing:.14em; color:var(--texto2); text-transform:uppercase; margin-top:6px}
+.metrica.alerta .cifra{color:var(--error)}
+
+/* ---------- cuerpo ---------- */
+.cuerpo{flex:1; display:flex; min-height:0}
+.escena-envoltura{flex:1; position:relative; overflow:hidden; min-width:0}
+.escena{
+  position:absolute; inset:0;
+  background:
+    radial-gradient(ellipse at 50% 12%, rgba(0,229,255,.10) 0%, rgba(5,11,24,.92) 58%, var(--fondo) 100%);
+}
+/* lienzo proporcional 1200x700 */
+.stage{position:absolute; left:50%; top:50%; width:1200px; height:820px; transform:translate(-50%,-50%) scale(var(--z,1)); transform-origin:center}
+.stage svg.piso{position:absolute; inset:0; width:1200px; height:820px; overflow:visible}
+
+.zona{position:absolute; cursor:pointer; transition:transform 2.2s cubic-bezier(.45,.05,.3,1)}
+.zona:hover img.figura{filter:drop-shadow(0 0 22px var(--c)) brightness(1.12)}
+.zona .figura-envoltura{animation:flotar 4.2s ease-in-out infinite}
+.zona.trabaja .figura-envoltura{animation:flotar 2.1s ease-in-out infinite}
+.zona.trabaja img.figura.es-retrato{box-shadow:0 0 26px var(--c), 0 12px 16px rgba(0,0,0,.6)}
+.zona.caminando{z-index:9}
+.paquete{
+  position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; border-radius:50%;
+  background:radial-gradient(circle, #fff 0%, var(--c) 45%, transparent 72%);
+  box-shadow:0 0 14px var(--c); pointer-events:none; z-index:8;
+  transition-property:left,top; transition-timing-function:cubic-bezier(.4,0,.5,1);
+}
+.paquete b{
+  position:absolute; left:50%; top:-20px; transform:translateX(-50%);
+  font-family:var(--mono); font-size:8.5px; letter-spacing:.06em; color:var(--c);
+  white-space:nowrap; text-shadow:0 0 8px rgba(0,0,0,.95); font-weight:500;
+}
+.chispa{
+  position:absolute; width:4px; height:4px; border-radius:50%; background:var(--c);
+  box-shadow:0 0 8px var(--c); pointer-events:none; z-index:7;
+  animation:subir 1.5s ease-out forwards;
+}
+@keyframes flotar{0%,100%{transform:translate(-50%,0)}50%{transform:translate(-50%,-9px)}}
+@keyframes subir{
+  0%{opacity:0; transform:translateY(0) scale(.6)}
+  25%{opacity:1}
+  100%{opacity:0; transform:translateY(-62px) scale(1.15)}
+}
+.zona .figura-envoltura{position:absolute; left:50%; bottom:18px; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center}
+.zona img.figura{width:118px; height:auto; display:block; filter:drop-shadow(0 12px 16px rgba(0,0,0,.65))}
+.zona img.figura.es-retrato{
+  width:92px; height:92px; border-radius:50%; object-fit:cover;
+  border:2px solid var(--c); box-shadow:0 0 18px var(--c), 0 12px 16px rgba(0,0,0,.6);
+}
+.zona .pedestal{
+  width:96px; height:10px; margin-top:-4px; border-radius:50%;
+  background:radial-gradient(ellipse at center, var(--c) 0%, transparent 72%); opacity:.7;
+}
+.placa{
+  position:absolute; left:50%; transform:translateX(-50%);
+  width:230px; padding:8px 10px; border-radius:10px;
+  background:rgba(15,23,42,.94); border:1px solid var(--c);
+  box-shadow:0 0 16px color-mix(in srgb, var(--c) 35%, transparent);
+  backdrop-filter:blur(6px);
+}
+.placa .fila1{display:flex; align-items:center; justify-content:space-between; gap:6px}
+.placa .nombre{font-family:var(--titulo); font-weight:700; font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap}
+.chip{
+  font-family:var(--mono); font-size:8.5px; letter-spacing:.09em; font-weight:700;
+  padding:2px 6px; border-radius:5px; white-space:nowrap;
+  color:var(--c); border:1px solid var(--c); background:color-mix(in srgb, var(--c) 14%, transparent);
+  display:inline-flex; align-items:center; gap:5px;
+}
+.chip i{width:6px;height:6px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c);display:inline-block}
+.chip i.vivo{animation:latido 1.6s infinite}
+.placa .area{font-size:9.5px; color:var(--texto2); margin-top:3px; letter-spacing:.02em}
+.placa .tarea{
+  font-family:var(--mono); font-size:9.5px; color:var(--texto); margin-top:6px;
+  padding:4px 6px; border-radius:6px; background:#030917; border:1px solid var(--borde);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.placa .metricas-mini{display:flex; gap:10px; margin-top:6px; font-family:var(--mono); font-size:9px; color:var(--texto2)}
+.placa .metricas-mini b{color:var(--texto); font-weight:700}
+
+/* nucleo */
+.nucleo{
+  position:absolute; left:50%; transform:translateX(-50%);
+  width:168px; height:168px; border-radius:50%;
+  background:rgba(3,10,23,.92); border:1px solid rgba(0,229,255,.42);
+  box-shadow:0 0 38px rgba(0,229,255,.3), inset 0 0 26px rgba(0,229,255,.14);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+  pointer-events:none;
+}
+.nucleo .anillo{position:absolute; inset:-9px; border-radius:50%; border:1px solid rgba(0,229,255,.22); border-top-color:var(--cian); border-bottom-color:var(--violeta); animation:gira 9s linear infinite}
+.nucleo .rot{font-family:var(--mono); font-size:8px; letter-spacing:.2em; color:var(--cian)}
+.nucleo .n{font-family:var(--mono); font-size:34px; font-weight:700; line-height:1.1; text-shadow:0 0 14px rgba(0,229,255,.75)}
+.nucleo .sub{font-size:9px; letter-spacing:.12em; color:var(--texto2); text-transform:uppercase}
+.nucleo .sinapsis{font-family:var(--mono); font-size:8.5px; color:var(--activo); margin-top:6px}
+
+/* capsulas de servicio */
+.capsula{
+  position:absolute; padding:7px 11px; border-radius:9px;
+  background:rgba(4,21,37,.96); border:1px solid var(--c);
+  box-shadow:0 0 14px color-mix(in srgb, var(--c) 32%, transparent);
+  font-family:var(--mono); font-size:9px; line-height:1.45; white-space:nowrap;
+}
+.capsula .t{color:var(--c); font-weight:700; letter-spacing:.09em; display:flex; align-items:center; gap:6px}
+.capsula .d{color:var(--texto2); font-size:8px}
+
+/* ---------- panel de eventos ---------- */
+.eventos{
+  flex:0 0 340px; background:var(--panel); border-left:1px solid var(--borde);
+  display:flex; flex-direction:column; min-height:0;
+}
+.eventos header{padding:13px 16px; border-bottom:1px solid var(--borde); display:flex; align-items:center; justify-content:space-between}
+.eventos header .t{font-family:var(--titulo); font-size:11.5px; letter-spacing:.16em; display:flex; align-items:center; gap:8px}
+.eventos header .t i{width:7px;height:7px;border-radius:50%;background:var(--error);box-shadow:0 0 8px var(--error);animation:latido 1.4s infinite}
+.envivo{font-family:var(--mono); font-size:9px; letter-spacing:.1em; color:var(--error); border:1px solid var(--error); border-radius:5px; padding:2px 7px}
+.linea-tiempo{flex:1; overflow-y:auto; padding:12px 16px}
+.evento{position:relative; padding:9px 0 9px 20px; border-left:1px solid var(--borde)}
+.evento:before{content:''; position:absolute; left:-4.5px; top:15px; width:8px; height:8px; border-radius:50%; background:var(--c); box-shadow:0 0 8px var(--c)}
+.evento .h{font-family:var(--mono); font-size:10px; color:var(--texto2)}
+.evento .q{font-family:var(--titulo); font-size:10.5px; letter-spacing:.09em; margin-top:2px}
+.evento .d{font-size:11px; color:var(--texto2); margin-top:2px; line-height:1.4}
+.evento.nuevo{background:rgba(0,229,255,.06); border-radius:0 8px 8px 0}
+
+/* ---------- panel de detalle ---------- */
+.telon{position:fixed; inset:0; background:rgba(2,6,18,.62); backdrop-filter:blur(3px); opacity:0; pointer-events:none; transition:opacity .2s}
+.telon.abierto{opacity:1; pointer-events:auto}
+.detalle{
+  position:fixed; top:0; right:0; width:470px; height:100%; z-index:20;
+  background:var(--panel); border-left:1px solid var(--borde-vivo);
+  box-shadow:-24px 0 56px rgba(0,0,0,.82);
+  transform:translateX(100%); transition:transform .26s cubic-bezier(.4,0,.2,1);
+  display:flex; flex-direction:column;
+}
+.detalle.abierto{transform:none}
+.detalle .cab{padding:16px; border-bottom:1px solid var(--borde); display:flex; gap:14px; align-items:center}
+.detalle .cab img{width:96px; height:96px; border-radius:14px; object-fit:cover; border:2px solid var(--c); box-shadow:0 0 22px color-mix(in srgb,var(--c) 45%,transparent)}
+.detalle .cab h2{font-family:var(--titulo); font-size:19px; margin:0 0 3px; letter-spacing:.04em}
+.detalle .cab .area{font-size:11.5px; color:var(--texto2); margin-bottom:8px}
+.cerrar{position:absolute; top:14px; right:14px; width:30px; height:30px; border-radius:8px; border:1px solid var(--borde); background:var(--holo); color:var(--texto2); cursor:pointer; font-size:15px; line-height:1}
+.cerrar:hover{color:var(--texto); border-color:var(--borde-vivo)}
+.detalle .cifras{display:grid; grid-template-columns:repeat(4,1fr); border-bottom:1px solid var(--borde)}
+.detalle .cifras div{padding:12px 6px; text-align:center; border-right:1px solid var(--borde)}
+.detalle .cifras div:last-child{border-right:0}
+.detalle .cifras .v{font-family:var(--mono); font-size:16px; font-weight:700}
+.detalle .cifras .k{font-size:8.5px; letter-spacing:.1em; color:var(--texto2); text-transform:uppercase; margin-top:4px}
+.detalle .cuerpo-panel{flex:1; overflow-y:auto; padding:14px 16px; display:flex; flex-direction:column; gap:16px}
+.bloque h3{font-family:var(--mono); font-size:10px; letter-spacing:.16em; color:var(--texto2); margin:0 0 9px; text-transform:uppercase}
+.tarea-caja{border:1px solid var(--c); background:color-mix(in srgb,var(--c) 7%,transparent); border-radius:10px; padding:11px}
+.tarea-caja .frase{font-family:var(--mono); font-size:12px; color:var(--texto)}
+.barra-prog{height:4px; border-radius:3px; background:#071427; margin:10px 0 8px; overflow:hidden}
+.barra-prog i{display:block; height:100%; background:var(--cian); box-shadow:0 0 10px var(--cian)}
+.tarea-caja .llamada{font-family:var(--mono); font-size:10px; color:var(--texto2); display:flex; justify-content:space-between}
+.herramienta{display:flex; align-items:center; justify-content:space-between; padding:9px 11px; border:1px solid var(--borde); border-radius:9px; margin-bottom:7px; background:#0a1426}
+.herramienta .n{font-family:var(--mono); font-size:11px}
+.herramienta .n s{text-decoration:none; color:var(--texto2)}
+.herramienta .u{font-family:var(--mono); font-size:10px; color:var(--texto2)}
+.salud{width:7px;height:7px;border-radius:50%;background:var(--activo);box-shadow:0 0 7px var(--activo);display:inline-block;margin-right:8px}
+.confirma{font-family:var(--mono); font-size:8.5px; color:var(--violeta); border:1px solid var(--violeta); border-radius:5px; padding:2px 6px}
+.accion{display:flex; gap:10px; padding:7px 0; font-size:11.5px; align-items:baseline}
+.accion .h{font-family:var(--mono); font-size:10px; color:var(--texto2); flex:0 0 58px}
+.conversacion{display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid rgba(255,255,255,.05)}
+.conversacion .ini{width:30px;height:30px;border-radius:50%;background:var(--holo); border:1px solid var(--borde); display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:10px; color:var(--cian)}
+.conversacion .txt{flex:1; min-width:0}
+.conversacion .txt b{display:block; font-size:11.5px; font-weight:600}
+.conversacion .txt span{font-family:var(--mono); font-size:10px; color:var(--texto2); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.conversacion .t{font-family:var(--mono); font-size:10px; color:var(--texto2)}
+.detalle footer{padding:13px 16px; border-top:1px solid var(--borde)}
+.detalle footer .botones{display:flex; gap:10px}
+.btn{flex:1; padding:10px; border-radius:9px; font-family:var(--titulo); font-size:11.5px; letter-spacing:.08em; cursor:pointer; text-transform:uppercase}
+.btn.primario{background:var(--cian); color:#04212c; border:0; font-weight:700}
+.btn.secundario{background:transparent; color:var(--texto2); border:1px solid var(--borde)}
+.detalle footer .sync{font-family:var(--mono); font-size:9.5px; color:var(--texto3); margin-top:9px; text-align:center}
+
+/* ---------- pie ---------- */
+.pie{
+  flex:0 0 38px; display:flex; align-items:center; justify-content:space-between;
+  padding:0 18px; border-top:1px solid var(--borde); font-family:var(--mono); font-size:10px; color:var(--texto3);
+}
+.leyenda{display:flex; gap:16px}
+.leyenda span{display:flex; align-items:center; gap:6px}
+.leyenda i{width:7px;height:7px;border-radius:50%;display:inline-block}
+
+
+/* ---------- selector de avatar ---------- */
+.btn-avatar{
+  margin-top:8px; font-family:var(--mono); font-size:9px; letter-spacing:.09em;
+  padding:4px 9px; border-radius:6px; cursor:pointer;
+  background:transparent; color:var(--texto2); border:1px solid var(--borde);
+}
+.btn-avatar:hover{color:var(--cian); border-color:var(--borde-vivo)}
+.detalle .cab img{cursor:pointer}
+.galeria{
+  position:fixed; inset:0; z-index:40; display:none;
+  align-items:center; justify-content:center;
+  background:rgba(2,6,18,.78); backdrop-filter:blur(4px);
+}
+.galeria.abierta{display:flex}
+.galeria .caja{
+  width:660px; max-width:92vw; max-height:88vh; overflow-y:auto;
+  background:var(--panel); border:1px solid var(--borde-vivo); border-radius:14px;
+  box-shadow:0 30px 70px rgba(0,0,0,.7); padding:20px;
+}
+.galeria h3{font-family:var(--titulo); font-size:15px; margin:0 0 4px; letter-spacing:.05em}
+.galeria .sub{font-size:11.5px; color:var(--texto2); margin-bottom:16px}
+.galeria .rejilla{display:grid; grid-template-columns:repeat(4,1fr); gap:12px}
+.opcion{
+  border:1px solid var(--borde); border-radius:10px; padding:8px; cursor:pointer;
+  background:#0a1426; text-align:center; transition:border-color .15s, transform .15s;
+}
+.opcion:hover{transform:translateY(-3px); border-color:var(--borde-vivo)}
+.opcion.activa{border-color:var(--cian); box-shadow:0 0 16px rgba(0,229,255,.35)}
+.opcion img{width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; display:block}
+.opcion .et{font-family:var(--mono); font-size:8.5px; color:var(--texto2); margin-top:6px; letter-spacing:.05em}
+.opcion .uso{font-family:var(--mono); font-size:8px; color:var(--esperando); margin-top:2px}
+.opcion.activa .et{color:var(--cian)}
+.galeria .pie-galeria{display:flex; gap:10px; margin-top:18px; align-items:center}
+.galeria .pie-galeria .aviso{flex:1; font-size:10.5px; color:var(--texto3); line-height:1.45}
+
+@keyframes latido{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes gira{to{transform:rotate(360deg)}}
+@keyframes viaja{to{stroke-dashoffset:-34}}
+.flujo{stroke-dasharray:5 12; animation:viaja 1.5s linear infinite}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="barra">
+  <div class="logo"><span class="punto"></span>DEXTER<span>· COMMAND CENTER</span></div>
+  <div class="pastilla"><b>RAPILINK S.A.S.</b> · ISP CORE</div>
+  <div class="centro-barra">OFICINA VIRTUAL · 6 AGENTES EN LÍNEA</div>
+  <div class="pastilla">10:43:27 <span style="color:var(--texto3)">(America/Bogotá)</span></div>
+  <div class="demo">● MODO DEMOSTRACIÓN · DATOS SIMULADOS</div>
+</div>
+
+<div class="metricas" id="metricas"></div>
+
+<div class="cuerpo">
+  <div class="escena-envoltura">
+    <div class="escena">
+      <div class="stage" id="stage">
+        <svg class="piso" id="piso" viewBox="0 0 1200 820" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+  </div>
+
+  <aside class="eventos">
+    <header>
+      <div class="t"><i></i> EVENTOS EN TIEMPO REAL</div>
+      <div class="envivo">EN VIVO</div>
+    </header>
+    <div class="linea-tiempo" id="linea-tiempo"></div>
+  </aside>
+</div>
+
+<div class="pie">
+  <div>SEGURIDAD: E2E cifrado · TLS 1.3 · Ley 1581 (Habeas Data)</div>
+  <div class="leyenda">
+    <span><i style="background:#22C55E"></i>DISPONIBLE</span>
+    <span><i style="background:#06B6D4"></i>PROCESANDO</span>
+    <span><i style="background:#F59E0B"></i>ESPERANDO</span>
+    <span><i style="background:#8B5CF6"></i>SUPERVISANDO</span>
+    <span><i style="background:#EF4444"></i>ERROR</span>
+  </div>
+</div>
+
+<div class="telon" id="telon"></div>
+<aside class="detalle" id="detalle" aria-hidden="true"></aside>
+
+<div class="galeria" id="galeria">
+  <div class="caja">
+    <h3 id="galeria-titulo">Imagen del agente</h3>
+    <div class="sub" id="galeria-sub">Elige el retrato con el que este agente aparece en la oficina.</div>
+    <div class="rejilla" id="galeria-rejilla"></div>
+    <div class="pie-galeria">
+      <div class="aviso">
+        La selección queda guardada en este navegador. En producción se persiste
+        en la configuración del tenant, junto al resto de los datos de la empresa.
+      </div>
+      <input type="file" id="subir-avatar" accept="image/*" hidden>
+      <button class="btn secundario" id="btn-subir" style="flex:0 0 auto">Subir imagen…</button>
+      <button class="btn secundario" id="btn-restablecer" style="flex:0 0 auto">Restablecer</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+const METRICAS = [
+  {cifra:'27',    rotulo:'Conversaciones activas'},
+  {cifra:'18',    rotulo:'Agentes IA trabajando'},
+  {cifra:'1.240', rotulo:'Clientes atendidos hoy'},
+  {cifra:'1,2 s', rotulo:'Latencia IA promedio'},
+  {cifra:'3.812', rotulo:'Herramientas ejecutadas'},
+  {cifra:'2',     rotulo:'Alertas activas', alerta:true},
+];
+
+/* gx,gy = coordenadas de planta; la proyeccion isometrica las lleva a pantalla */
+const AGENTES = [
+  {
+    id:'supervisor', ang:270, placa:'abajo', elevado:true,
+    nombre:'Supervisor IA', zona:'Supervisión', area:'Orquestación y auditoría',
+    estado:'SUPERVISANDO', color:'#8B5CF6', vivo:true,
+    tarea:'Auditando 27 conversaciones en curso',
+    mini:[['Escaladas','2'],['Errores','0']],
+    cifras:[['27','Auditadas'],['2','Escaladas'],['0','Errores'],['100%','SLA']],
+    progreso:45, llamada:'auditar_conversaciones(lote=27)', ms:'118 ms',
+    herramientas:[['Auditoría',' (revisar_traza)','412'],['Escalamiento',' (asignar_humano)','36']],
+    acciones:[['10:42:31','Conversación escalada a operador humano'],['10:41:12','Calibración de umbral de confianza'],['10:39:50','Auditoría de lote completada']],
+    conversaciones:[['CM','Carlos M. Mendoza','Revisión de escalamiento','—']],
+  },
+  {
+    id:'facturacion', ang:210, placa:'arriba',
+    nombre:'Facturación', zona:'Facturación y cartera', area:'Cartera y pagos',
+    estado:'DISPONIBLE', color:'#22C55E', vivo:false,
+    tarea:'Sin tareas pendientes · Cartera al día',
+    mini:[['Cola','0'],['Resueltas','96%']],
+    cifras:[['0','En cola'],['0,9 s','Respuesta'],['0','Errores'],['96%','Resolución']],
+    progreso:0, llamada:'—', ms:'—',
+    herramientas:[['WispHub CRM',' (consultar_factura)','208'],['Pagos',' (registrar_acuerdo)','54']],
+    acciones:[['10:41:58','Acuerdo de pago registrado'],['10:38:20','Recordatorio de corte enviado'],['10:35:02','Factura consultada por cliente']],
+    conversaciones:[],
+  },
+  {
+    id:'ventas', ang:330, placa:'arriba',
+    nombre:'Ventas', zona:'Ventas y contratación', area:'Planes y contratación',
+    estado:'PROCESANDO', color:'#06B6D4', vivo:true,
+    tarea:'Cotizando plan 300 Mbps en Sabanalarga',
+    mini:[['Conv','5'],['Cotiz','3']],
+    cifras:[['5','Conversaciones'],['1,1 s','Respuesta'],['0','Errores'],['3','Cotizaciones']],
+    progreso:35, llamada:'consultar_cobertura(zona=Sabanalarga)', ms:'210 ms',
+    herramientas:[['Cobertura',' (consultar_cobertura)','86'],['CRM Leads',' (crear_lead)','62']],
+    acciones:[['10:42:55','Cobertura verificada en Sabanalarga'],['10:42:10','Lead creado en CRM'],['10:40:33','Cotización enviada por WhatsApp']],
+    conversaciones:[['LR','Lucía Ramírez','Plan 300 Mbps hogar','1m 15s']],
+  },
+  {
+    id:'router', ang:150, placa:'abajo',
+    nombre:'Router IA', zona:'Recepción y triaje', area:'Clasificación y enrutamiento',
+    estado:'PROCESANDO', color:'#06B6D4', vivo:true,
+    tarea:'Clasificando mensaje entrante de WhatsApp',
+    mini:[['Conv','24'],['Resp','0,8 s']],
+    cifras:[['24','Conversaciones'],['0,8 s','Respuesta'],['0','Errores'],['99%','Acierto']],
+    progreso:70, llamada:'clasificar_intencion(canal=whatsapp)', ms:'96 ms',
+    herramientas:[['WhatsApp API',' (recibir_mensaje)','1.204'],['Identidad',' (verificar_cliente)','318']],
+    acciones:[['10:42:47','Derivado a Soporte Fibra (falla LOS)'],['10:42:44','Nueva conversación de WhatsApp'],['10:42:12','Cliente verificado por cédula']],
+    conversaciones:[['JA','Jorge Arbeláez','Sin servicio desde anoche','12s'],['MP','María Pérez','Cambio de plan','48s']],
+  },
+  {
+    id:'campo', ang:30, placa:'abajo',
+    nombre:'Agente Campo', zona:'Despacho de campo', area:'Instalaciones y visitas',
+    estado:'ESPERANDO', color:'#F59E0B', vivo:false,
+    tarea:'Esperando checklist del técnico en sitio',
+    mini:[['Órdenes','4'],['Zona','Norte']],
+    cifras:[['4','Órdenes'],['—','Respuesta'],['0','Errores'],['6/8','Cuadrillas']],
+    progreso:20, llamada:'esperar_checklist(orden=OT-4471)', ms:'—',
+    herramientas:[['Órdenes',' (crear_orden)','142'],['Rutas',' (asignar_cuadrilla)','77']],
+    acciones:[['10:40:02','Orden OT-4471 asignada a cuadrilla 3'],['10:36:44','Visita reprogramada'],['10:31:19','Checklist recibido de OT-4468']],
+    conversaciones:[['TS','Técnico Sandoval','Checklist OT-4471','4m 02s']],
+  },
+  {
+    id:'soporte', ang:90, placa:'abajo', frente:true,
+    nombre:'Soporte Fibra', zona:'Soporte técnico FTTH', area:'Diagnóstico técnico FTTH',
+    estado:'CONSULTANDO', color:'#F59E0B', vivo:true,
+    tarea:'Analizando potencia óptica de la ONU',
+    mini:[['Conv','12'],['Tool','consultar_olt']],
+    cifras:[['12','Conversaciones'],['1,4 s','Respuesta'],['0','Errores'],['98%','Resolución']],
+    progreso:60, llamada:'consultar_olt(serial=ALCLF8A2B1C9)', ms:'342 ms',
+    herramientas:[['SmartOLT',' (consultar_olt)','128'],['WispHub CRM',' (buscar_cliente)','94'],['Tickets',' (crear_ticket)','31'],['SmartOLT',' (reiniciar_ont)','7','confirma']],
+    acciones:[['10:43:02','Respuesta generada y enviada a WhatsApp'],['10:43:00','Consulta de ONU completada (−19.2 dBm, OK)'],['10:42:58','Herramienta consultar_olt invocada'],['10:42:51','Cliente verificado por cédula']],
+    conversaciones:[['CM','Carlos M. Mendoza','Falla LOS luz roja en módem','42s'],['LR','Lucía Ramírez','Lentitud en horario pico','1m 15s'],['JA','Jorge Arbeláez','Reubicación de fibra óptica','2m 04s']],
+  },
+];
+
+const SERVICIOS = [
+  {id:'whatsapp', agente:'router',  x:40,   y:690, titulo:'CANAL: WHATSAPP API', detalle:'Webhook activo · 18 ms', color:'#00E5FF'},
+  {id:'smartolt', agente:'soporte', x:940,  y:740, titulo:'TOOL: SMARTOLT',      detalle:'consultar_olt · 342 ms', color:'#F59E0B'},
+  {id:'crm',      agente:'facturacion', x:30, y:120, titulo:'WISPHUB CRM',        detalle:'sincronizado · 2 min',  color:'#22C55E'},
+];
+
+const EVENTOS = [
+  {h:'10:43:02', q:'SOPORTE FIBRA', d:'Respuesta generada y enviada a WhatsApp', c:'#F59E0B', nuevo:true},
+  {h:'10:43:00', q:'SMARTOLT',      d:'Consulta de ONU completada (−19.2 dBm OK)', c:'#F59E0B'},
+  {h:'10:42:51', q:'IDENTIDAD',     d:'Cliente verificado por cédula en CRM', c:'#22C55E'},
+  {h:'10:42:47', q:'ROUTER IA',     d:'Derivado a Soporte Fibra (intención: falla LOS)', c:'#06B6D4'},
+  {h:'10:42:44', q:'ROUTER IA',     d:'Nueva conversación de WhatsApp entrante', c:'#06B6D4'},
+  {h:'10:42:31', q:'SUPERVISOR IA', d:'Conversación escalada a operador humano', c:'#8B5CF6'},
+  {h:'10:41:58', q:'FACTURACIÓN',   d:'Acuerdo de pago registrado y servicio activo', c:'#22C55E'},
+];
+
+
+/* ==========================================================
+   IMAGEN POR AGENTE — catálogo y persistencia
+   En producción esta preferencia vive en la config del tenant
+   (asistente.tenant_config); aquí se guarda en el navegador.
+   ========================================================== */
+const TENANT = 'rapilink';
+const CLAVE_CFG = 'dexter.avatares.' + TENANT;
+
+const CATALOGO = [
+  {archivo:'avatares/router.png',      et:'Red de nodos'},
+  {archivo:'avatares/soporte.png',     et:'Visor analítico'},
+  {archivo:'avatares/facturacion.png', et:'Finanzas'},
+  {archivo:'avatares/ventas.png',      et:'Comercial'},
+  {archivo:'avatares/supervisor.png',  et:'Mando'},
+  {archivo:'avatares/campo.png',       et:'Campo'},
+  {archivo:'avatares/identidad.png',   et:'Seguridad'},
+  {archivo:'avatares/datos.png',       et:'Datos'},
+];
+
+/* ----------------------------------------------------------
+   PUNTO DE ENGANCHE — de dónde salen y a dónde van estas preferencias.
+
+   Hoy: el navegador de quien mira la demo (localStorage).
+   Mañana: la config del tenant en base de datos, que es donde ya viven
+   el resto de los datos que cambian de una empresa a otra.
+
+   Para conectarlo NO hay que tocar nada más de este archivo: basta
+   reemplazar el cuerpo de estas dos funciones por las dos llamadas de
+   abajo. Todo lo demás (galería, aplicar, restablecer, subir imagen)
+   pasa por aquí.
+
+     ALMACEN.leer   ->  GET  /api/tenants/{TENANT}/config/avatares
+     ALMACEN.grabar ->  PUT  /api/tenants/{TENANT}/config/avatares
+
+   El servidor guarda ese objeto {idAgente: rutaImagen} dentro de
+   asistente.tenant_config, versionado como el resto de la config.
+   Mientras leer() sea asíncrono, conviene volver async esta pareja y
+   esperar la carga inicial antes de pintar la oficina.
+   ---------------------------------------------------------- */
+const ALMACEN = {
+  leer() {
+    try { return JSON.parse(localStorage.getItem(CLAVE_CFG)) || {}; }
+    catch (e) { return {}; }
+    /* tenant:
+       const r = await fetch(`/api/tenants/${TENANT}/config/avatares`);
+       return r.ok ? await r.json() : {};
+    */
+  },
+  grabar(cfg) {
+    try { localStorage.setItem(CLAVE_CFG, JSON.stringify(cfg)); }
+    catch (e) { console.warn('No se pudo guardar la preferencia de avatar', e); }
+    /* tenant:
+       await fetch(`/api/tenants/${TENANT}/config/avatares`, {
+         method: 'PUT',
+         headers: {'Content-Type': 'application/json'},
+         body: JSON.stringify(cfg),
+       });
+    */
+  },
+};
+
+const leerCfg = () => ALMACEN.leer();
+const guardarCfg = cfg => ALMACEN.grabar(cfg);
+
+const cfgAvatares = leerCfg();
+AGENTES.forEach(a => { a.avatar = cfgAvatares[a.id] || ('avatares/' + a.id + '.png'); });
+
+/* ---------- proyeccion isometrica ---------- */
+const CX = 600, CY = 400, RX = 430, RY = 250;
+const pos = a => ({
+  x: CX + RX * Math.cos(a.ang * Math.PI / 180),
+  y: CY + RY * Math.sin(a.ang * Math.PI / 180),
+});
+const ROMBO_W = 250, ROMBO_H = 126;
+const ALTO_PLACA = 92;
+
+const ns = 'http://www.w3.org/2000/svg';
+const el = (t, attrs = {}) => {
+  const n = document.createElementNS(ns, t);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+};
+const rombo = (x, y, w = ROMBO_W, h = ROMBO_H) =>
+  `${x},${y - h/2} ${x + w/2},${y} ${x},${y + h/2} ${x - w/2},${y}`;
+
+/* ---------- pintar metricas ---------- */
+document.getElementById('metricas').innerHTML = METRICAS.map(m => `
+  <div class="metrica${m.alerta ? ' alerta' : ''}">
+    <div class="cifra">${m.cifra}</div>
+    <div class="rotulo">${m.rotulo}</div>
+  </div>`).join('');
+
+/* ---------- pintar eventos ---------- */
+document.getElementById('linea-tiempo').innerHTML = EVENTOS.map(e => `
+  <div class="evento${e.nuevo ? ' nuevo' : ''}" style="--c:${e.c}">
+    <div class="h">${e.h}</div>
+    <div class="q">${e.q}</div>
+    <div class="d">${e.d}</div>
+  </div>`).join('');
+
+/* ---------- pintar el piso ---------- */
+const piso = document.getElementById('piso');
+const nucleoPos = {x: CX, y: CY};
+
+// retícula isométrica de la planta
+const g = el('g', {opacity:'.5'});
+for (let i = -3; i <= 5; i++) {
+  const a = {x: CX - 520 + i*130, y: CY - 300}, b = {x: CX - 520 + i*130 - 260, y: CY + 300};
+  g.appendChild(el('line', {x1:a.x, y1:a.y, x2:b.x, y2:b.y, stroke:'rgba(0,229,255,.07)', 'stroke-width':1}));
+  const c = {x: CX - 560 + i*130, y: CY + 300}, d = {x: CX - 560 + i*130 + 260, y: CY - 300};
+  g.appendChild(el('line', {x1:c.x, y1:c.y, x2:d.x, y2:d.y, stroke:'rgba(0,229,255,.07)', 'stroke-width':1}));
+}
+piso.appendChild(g);
+
+// líneas de circuito del núcleo a cada zona, grabadas en el suelo
+AGENTES.forEach(a => {
+  const p = pos(a);
+  piso.appendChild(el('line', {
+    x1:nucleoPos.x, y1:nucleoPos.y, x2:p.x, y2:p.y,
+    stroke:a.color, 'stroke-width':1.6, opacity:'.42'
+  }));
+  const f = el('line', {
+    x1:nucleoPos.x, y1:nucleoPos.y, x2:p.x, y2:p.y,
+    stroke:a.color, 'stroke-width':2.4, opacity:'.95'
+  });
+  f.setAttribute('class', 'flujo');
+  piso.appendChild(f);
+});
+
+// pisos de zona + halo de estado
+AGENTES.forEach(a => {
+  const p = pos(a);
+  piso.appendChild(el('polygon', {
+    points: rombo(p.x, p.y + (a.elevado ? 6 : 0)),
+    fill:'#0F172A', stroke:a.color, 'stroke-width':2, 'fill-opacity':'.92', 'stroke-opacity':'.55'
+  }));
+  piso.appendChild(el('ellipse', {
+    cx:p.x, cy:p.y + 6, rx:86, ry:30, fill:a.color, opacity:'.16'
+  }));
+});
+
+// líneas de servicio externo, también por el suelo
+SERVICIOS.forEach(s => {
+  const a = AGENTES.find(x => x.id === s.agente);
+  const p = pos(a);
+  piso.appendChild(el('path', {
+    d:`M ${s.x + 70} ${s.y + 16} L ${(s.x + 70 + p.x) / 2} ${s.y + 16} L ${(s.x + 70 + p.x) / 2} ${p.y} L ${p.x} ${p.y}`,
+    fill:'none', stroke:s.color, 'stroke-width':1.2, opacity:'.4', 'stroke-dasharray':'4 4'
+  }));
+});
+
+/* ---------- pintar zonas, figuras y placas ---------- */
+const stage = document.getElementById('stage');
+
+AGENTES.forEach(a => {
+  const p = pos(a);
+  const zona = document.createElement('div');
+  zona.className = 'zona';
+  zona.style.cssText = `--c:${a.color}; left:${p.x - ROMBO_W/2}px; top:${p.y - 150}px; width:${ROMBO_W}px; height:${150 + ROMBO_H/2}px`;
+  zona.innerHTML = `
+    <div class="figura-envoltura">
+      <img class="figura" src="avatares/cuerpo/${a.id}.png" alt="${a.nombre}"
+           onerror="this.onerror=null; this.src='${a.avatar}'; this.classList.add('es-retrato')">
+      <div class="pedestal"></div>
+    </div>`;
+  zona.addEventListener('click', () => abrir(a.id));
+  stage.appendChild(zona);
+  a._zona = zona;
+  a._img = zona.querySelector('img.figura');
+  a._base = {x: p.x, y: p.y};
+
+  const placa = document.createElement('div');
+  placa.className = 'placa';
+  const topPlaca = a.placa === 'arriba'
+    ? p.y - ROMBO_H/2 - 128 - ALTO_PLACA
+    : p.y + ROMBO_H/2 + 10;
+  placa.style.cssText = `--c:${a.color}; left:${p.x}px; top:${topPlaca}px`;
+  placa.innerHTML = `
+    <div class="fila1">
+      <span class="nombre">${a.nombre}</span>
+      <span class="chip"><i class="${a.vivo ? 'vivo' : ''}"></i>${a.estado}</span>
+    </div>
+    <div class="area">${a.zona}</div>
+    <div class="tarea">"${a.tarea}"</div>
+    <div class="metricas-mini">${a.mini.map(m => `<span>${m[0]}: <b>${m[1]}</b></span>`).join('')}</div>`;
+  placa.addEventListener('click', () => abrir(a.id));
+  placa.style.cursor = 'pointer';
+  stage.appendChild(placa);
+  a._placa = placa;
+});
+
+/* núcleo */
+const nuc = document.createElement('div');
+nuc.className = 'nucleo';
+nuc.style.cssText = `left:${nucleoPos.x}px; top:${nucleoPos.y - 84}px`;
+nuc.innerHTML = `
+  <div class="anillo"></div>
+  <div class="rot">NÚCLEO DE ORQUESTACIÓN</div>
+  <div class="n">27</div>
+  <div class="sub">Conversaciones en curso</div>
+  <div class="sinapsis">● sinapsis 14 ms</div>`;
+stage.appendChild(nuc);
+
+/* cápsulas de servicio */
+SERVICIOS.forEach(s => {
+  const c = document.createElement('div');
+  c.className = 'capsula';
+  c.style.cssText = `--c:${s.color}; left:${s.x}px; top:${s.y}px`;
+  c.innerHTML = `<div class="t">● ${s.titulo}</div><div class="d">${s.detalle}</div>`;
+  stage.appendChild(c);
+});
+
+/* ---------- panel de detalle ---------- */
+const detalle = document.getElementById('detalle');
+const telon = document.getElementById('telon');
+
+function abrir(id) {
+  const a = AGENTES.find(x => x.id === id);
+  detalle.style.setProperty('--c', a.color);
+  detalle.innerHTML = `
+    <button class="cerrar" aria-label="Cerrar">✕</button>
+    <div class="cab">
+      <img src="${a.avatar}" alt="${a.nombre}" title="Cambiar imagen del agente">
+      <div>
+        <h2>${a.nombre.toUpperCase()}</h2>
+        <div class="area">${a.area}</div>
+        <span class="chip"><i class="${a.vivo ? 'vivo' : ''}"></i>${a.estado}</span>
+        <div><button class="btn-avatar" data-cambiar-avatar>Cambiar imagen</button></div>
+      </div>
+    </div>
+    <div class="cifras">
+      ${a.cifras.map(c => `<div><div class="v">${c[0]}</div><div class="k">${c[1]}</div></div>`).join('')}
+    </div>
+    <div class="cuerpo-panel">
+      <div class="bloque">
+        <h3>Tarea en curso</h3>
+        <div class="tarea-caja">
+          <div class="frase">"${a.tarea}"</div>
+          <div class="barra-prog"><i style="width:${a.progreso}%"></i></div>
+          <div class="llamada"><span>${a.llamada}</span><span>${a.ms}</span></div>
+        </div>
+      </div>
+      <div class="bloque">
+        <h3>Herramientas autorizadas</h3>
+        ${a.herramientas.map(h => `
+          <div class="herramienta">
+            <div class="n"><span class="salud"></span>${h[0]}<s>${h[1]}</s></div>
+            ${h[3] === 'confirma'
+              ? `<span class="confirma">REQUIERE CONFIRMACIÓN</span>`
+              : `<div class="u">${h[2]} usos</div>`}
+          </div>`).join('')}
+      </div>
+      <div class="bloque">
+        <h3>Últimas acciones</h3>
+        ${a.acciones.map(x => `<div class="accion"><span class="h">${x[0]}</span><span>${x[1]}</span></div>`).join('')}
+      </div>
+      <div class="bloque">
+        <h3>Conversaciones activas</h3>
+        ${a.conversaciones.length
+          ? a.conversaciones.map(c => `
+            <div class="conversacion">
+              <div class="ini">${c[0]}</div>
+              <div class="txt"><b>${c[1]}</b><span>"${c[2]}"</span></div>
+              <div class="t">${c[3]}</div>
+            </div>`).join('')
+          : `<div style="font-size:11.5px;color:var(--texto3)">Sin conversaciones en curso.</div>`}
+      </div>
+    </div>
+    <footer>
+      <div class="botones">
+        <button class="btn primario">Ver conversaciones</button>
+        <button class="btn secundario">Pausar agente</button>
+      </div>
+      <div class="sync">Última sincronización 10:43:27 · America/Bogotá</div>
+    </footer>`;
+  detalle.querySelector('.cerrar').addEventListener('click', cerrar);
+  detalle.querySelector('[data-cambiar-avatar]').addEventListener('click', () => abrirGaleria(id));
+  detalle.querySelector('.cab img').addEventListener('click', () => abrirGaleria(id));
+  detalle.dataset.agente = id;
+  detalle.classList.add('abierto');
+  detalle.setAttribute('aria-hidden', 'false');
+  telon.classList.add('abierto');
+}
+
+function cerrar() {
+  detalle.classList.remove('abierto');
+  detalle.setAttribute('aria-hidden', 'true');
+  telon.classList.remove('abierto');
+}
+telon.addEventListener('click', cerrar);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrar(); });
+
+/* ---------- escalado del lienzo al viewport ---------- */
+function ajustar() {
+  const env = document.querySelector('.escena-envoltura');
+  const z = Math.min(env.clientWidth / 1230, env.clientHeight / 840);
+  document.getElementById('stage').style.setProperty('--z', z);
+}
+window.addEventListener('resize', ajustar);
+ajustar();
+
+/* ==========================================================
+   MOTOR DE SIMULACIÓN — la oficina trabaja sola
+   ========================================================== */
+const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const ESTADOS = {
+  disponible:  {txt:'DISPONIBLE',   color:'#22C55E', vivo:false, trabaja:false},
+  procesando:  {txt:'PROCESANDO',   color:'#06B6D4', vivo:true,  trabaja:true},
+  consultando: {txt:'CONSULTANDO',  color:'#F59E0B', vivo:true,  trabaja:true},
+  esperando:   {txt:'ESPERANDO',    color:'#F59E0B', vivo:false, trabaja:false},
+  supervisando:{txt:'SUPERVISANDO', color:'#8B5CF6', vivo:true,  trabaja:true},
+};
+
+const CLIENTES = [
+  ['Carlos M. Mendoza','Sabanalarga'], ['Lucía Ramírez','Baranoa'],
+  ['Jorge Arbeláez','Polonuevo'],      ['María Pérez','Usiacurí'],
+  ['Andrés Támara','Santo Tomás'],     ['Yulieth Consuegra','Ponedera'],
+  ['Rafael Olivero','Malambo'],        ['Diana Salcedo','Galapa'],
+];
+
+const CASOS = [
+  {agente:'soporte', estado:'consultando', intencion:'falla LOS luz roja',
+   tarea:c => 'Analizando potencia óptica de ' + c[0].split(' ')[0],
+   servicio:'smartolt', herramienta:'consultar_olt', cierre:'Diagnóstico enviado (−19.2 dBm, OK)'},
+  {agente:'soporte', estado:'consultando', intencion:'lentitud en horario pico',
+   tarea:c => 'Midiendo tráfico de la ONU en ' + c[1],
+   servicio:'smartolt', herramienta:'consultar_trafico', cierre:'Congestión descartada, respuesta enviada'},
+  {agente:'ventas', estado:'procesando', intencion:'quiere contratar plan',
+   tarea:c => 'Cotizando plan 300 Mbps en ' + c[1],
+   servicio:null, herramienta:'consultar_cobertura', cierre:'Cotización enviada por WhatsApp'},
+  {agente:'facturacion', estado:'procesando', intencion:'consulta de factura',
+   tarea:c => 'Revisando cartera de ' + c[0].split(' ')[0],
+   servicio:'crm', herramienta:'consultar_factura', cierre:'Estado de cuenta enviado'},
+  {agente:'facturacion', estado:'procesando', intencion:'acuerdo de pago',
+   tarea:c => 'Registrando acuerdo de pago de ' + c[0].split(' ')[0],
+   servicio:'crm', herramienta:'registrar_acuerdo', cierre:'Acuerdo registrado, servicio activo'},
+  {agente:'campo', estado:'procesando', intencion:'agendar instalación',
+   tarea:c => 'Asignando cuadrilla en ' + c[1],
+   servicio:null, herramienta:'asignar_cuadrilla', cierre:'Visita agendada para mañana 8:00'},
+];
+
+const REPOSO = {
+  router:      {estado:'procesando',   tarea:'A la espera de mensajes entrantes'},
+  soporte:     {estado:'disponible',   tarea:'Sin diagnósticos en curso'},
+  facturacion: {estado:'disponible',   tarea:'Sin tareas pendientes'},
+  ventas:      {estado:'disponible',   tarea:'Sin cotizaciones en curso'},
+  campo:       {estado:'esperando',    tarea:'Esperando checklist del técnico en sitio'},
+  supervisor:  {estado:'supervisando', tarea:'Auditando conversaciones en curso'},
+};
+
+const porId = id => AGENTES.find(a => a.id === id);
+const servicioPos = id => {
+  const s = SERVICIOS.find(x => x.id === id);
+  return s ? {x: s.x + 70, y: s.y + 16} : null;
+};
+const espera = ms => new Promise(r => setTimeout(r, ms));
+const alAzar = a => a[Math.floor(Math.random() * a.length)];
+
+/* reloj */
+let t = new Date(2026, 8, 23, 10, 43, 27);
+const hhmmss = () => t.toTimeString().slice(0, 8);
+const relojNodo = document.querySelectorAll('.pastilla')[1];
+setInterval(() => {
+  t = new Date(t.getTime() + 1000);
+  relojNodo.innerHTML = hhmmss() + ' <span style="color:var(--texto3)">(America/Bogotá)</span>';
+}, 1000);
+
+/* estado de un agente */
+function setEstado(id, clave, tarea) {
+  const a = porId(id), e = ESTADOS[clave];
+  a.estado = e.txt; a.color = e.color; a.vivo = e.vivo;
+  if (tarea) a.tarea = tarea;
+  a._zona.style.setProperty('--c', e.color);
+  a._placa.style.setProperty('--c', e.color);
+  a._zona.classList.toggle('trabaja', e.trabaja);
+  a._placa.querySelector('.chip').innerHTML = '<i class="' + (e.vivo ? 'vivo' : '') + '"></i>' + e.txt;
+  a._placa.querySelector('.tarea').textContent = '"' + a.tarea + '"';
+  if (detalle.classList.contains('abierto') && detalle.dataset.agente === id) abrir(id);
+}
+
+/* un paquete de luz que viaja de un punto a otro */
+function viaje(desde, hasta, color, ms, etiqueta) {
+  if (reduce) return espera(ms / 3);
+  const p = document.createElement('div');
+  p.className = 'paquete';
+  p.style.cssText = '--c:' + color + '; left:' + desde.x + 'px; top:' + desde.y + 'px; transition-duration:' + ms + 'ms';
+  if (etiqueta) p.innerHTML = '<b>' + etiqueta + '</b>';
+  stage.appendChild(p);
+  requestAnimationFrame(() => { p.style.left = hasta.x + 'px'; p.style.top = hasta.y + 'px'; });
+  return espera(ms).then(() => p.remove());
+}
+
+/* chispas sobre el agente que trabaja */
+setInterval(() => {
+  if (reduce) return;
+  AGENTES.filter(a => a._zona.classList.contains('trabaja')).forEach(a => {
+    const c = document.createElement('div');
+    c.className = 'chispa';
+    c.style.cssText = '--c:' + a.color + '; left:' + (a._base.x + (Math.random() * 54 - 27)) + 'px; top:' + (a._base.y - 26) + 'px';
+    stage.appendChild(c);
+    setTimeout(() => c.remove(), 1500);
+  });
+}, 420);
+
+/* eventos en vivo */
+const listaEventos = document.getElementById('linea-tiempo');
+function evento(quien, texto, color) {
+  const d = document.createElement('div');
+  d.className = 'evento nuevo';
+  d.style.setProperty('--c', color);
+  d.innerHTML = '<div class="h">' + hhmmss() + '</div><div class="q">' + quien + '</div><div class="d">' + texto + '</div>';
+  listaEventos.prepend(d);
+  setTimeout(() => d.classList.remove('nuevo'), 2600);
+  while (listaEventos.children.length > 14) listaEventos.lastChild.remove();
+}
+
+/* contadores */
+const nodosMetrica = document.querySelectorAll('.metrica .cifra');
+let nConv = 27, nAtendidos = 1240, nTools = 3812;
+function pintarMetricas() {
+  nodosMetrica[0].textContent = nConv;
+  nodosMetrica[2].textContent = nAtendidos.toLocaleString('es-CO');
+  nodosMetrica[4].textContent = nTools.toLocaleString('es-CO');
+  const n = document.querySelector('.nucleo .n');
+  if (n) n.textContent = nConv;
+}
+
+/* ciclo completo de una conversacion */
+async function conversacion() {
+  const cliente = alAzar(CLIENTES), caso = alAzar(CASOS);
+  const wa = servicioPos('whatsapp');
+  const router = porId('router'), destino = porId(caso.agente);
+
+  nConv++; pintarMetricas();
+  evento('WHATSAPP', 'Mensaje entrante de ' + cliente[0] + ' (' + cliente[1] + ')', '#00E5FF');
+
+  setEstado('router', 'procesando', 'Clasificando mensaje de ' + cliente[0].split(' ')[0]);
+  await viaje(wa, router._base, '#00E5FF', 1100, cliente[0].split(' ')[0]);
+  await espera(900);
+  evento('ROUTER IA', 'Intención detectada: ' + caso.intencion, '#06B6D4');
+  await espera(500);
+
+  evento('ROUTER IA', 'Derivado a ' + destino.nombre, '#06B6D4');
+  await viaje(router._base, destino._base, destino.color, 1000, '');
+  setEstado(caso.agente, caso.estado, caso.tarea(cliente));
+  setEstado('router', REPOSO.router.estado, REPOSO.router.tarea);
+  await espera(800);
+
+  if (caso.servicio) {
+    const sp = servicioPos(caso.servicio);
+    setEstado(caso.agente, 'consultando', caso.tarea(cliente));
+    evento(caso.herramienta.toUpperCase(), 'Invocada por ' + destino.nombre, destino.color);
+    await viaje(destino._base, sp, destino.color, 850, caso.herramienta);
+    nTools++; pintarMetricas();
+    await espera(650);
+    await viaje(sp, destino._base, destino.color, 850, 'respuesta');
+  } else {
+    nTools++; pintarMetricas();
+    await espera(1500);
+  }
+
+  await espera(700);
+  evento(destino.nombre.toUpperCase(), caso.cierre, destino.color);
+  await viaje(destino._base, wa, '#22C55E', 1000, 'respuesta');
+
+  const r = REPOSO[caso.agente];
+  setEstado(caso.agente, r.estado, r.tarea);
+  nConv--; nAtendidos++; pintarMetricas();
+}
+
+/* el supervisor recorre la oficina */
+async function rondaSupervisor() {
+  const s = porId('supervisor');
+  const visitado = alAzar(AGENTES.filter(a => a.id !== 'supervisor'));
+  const dx = visitado._base.x - s._base.x, dy = visitado._base.y - s._base.y - 86;
+
+  s._zona.classList.add('caminando');
+  s._zona.style.transform = 'translate(' + (dx * 0.74) + 'px, ' + (dy * 0.74) + 'px)';
+  setEstado('supervisor', 'supervisando', 'Auditando en ' + visitado.zona);
+  evento('SUPERVISOR IA', 'Auditoría en sitio: ' + visitado.zona, '#8B5CF6');
+
+  await espera(5200);
+  s._zona.style.transform = '';
+  await espera(2400);
+  s._zona.classList.remove('caminando');
+  setEstado('supervisor', 'supervisando', REPOSO.supervisor.tarea);
+}
+
+/* arranque */
+pintarMetricas();
+if (!reduce) {
+  setTimeout(conversacion, 1200);
+  setInterval(conversacion, 7000);
+  setInterval(rondaSupervisor, 23000);
+}
+
+
+
+/* ==========================================================
+   GALERÍA DE IMÁGENES DE AGENTE
+   ========================================================== */
+const galeria = document.getElementById('galeria');
+const rejilla = document.getElementById('galeria-rejilla');
+const inputSubir = document.getElementById('subir-avatar');
+let agenteEnEdicion = null;
+
+function aplicarAvatar(id, ruta) {
+  const a = porId(id);
+  a.avatar = ruta;
+  const img = a._zona.querySelector('img.figura');
+  img.onerror = null;
+  img.src = ruta;
+  img.classList.add('es-retrato');
+  const cfg = leerCfg();
+  if (ruta === 'avatares/' + id + '.png') delete cfg[id]; else cfg[id] = ruta;
+  guardarCfg(cfg);
+  if (detalle.classList.contains('abierto') && detalle.dataset.agente === id) abrir(id);
+}
+
+function abrirGaleria(id) {
+  agenteEnEdicion = id;
+  const a = porId(id);
+  document.getElementById('galeria-titulo').textContent = 'Imagen de ' + a.nombre;
+  document.getElementById('galeria-sub').textContent =
+    'Elige el retrato con el que ' + a.nombre + ' aparece en la oficina y en su ficha.';
+
+  const enUso = {};
+  AGENTES.forEach(x => { if (x.id !== id) enUso[x.avatar] = x.nombre; });
+
+  rejilla.innerHTML = CATALOGO.map(c => `
+    <div class="opcion ${a.avatar === c.archivo ? 'activa' : ''}" data-archivo="${c.archivo}">
+      <img src="${c.archivo}" alt="${c.et}">
+      <div class="et">${c.et}</div>
+      <div class="uso">${enUso[c.archivo] ? 'en uso: ' + enUso[c.archivo] : ''}</div>
+    </div>`).join('');
+
+  if (a.avatar.startsWith('data:')) {
+    const propia = document.createElement('div');
+    propia.className = 'opcion activa';
+    propia.dataset.archivo = a.avatar;
+    propia.innerHTML = `<img src="${a.avatar}" alt="Imagen propia"><div class="et">Imagen propia</div><div class="uso"></div>`;
+    rejilla.appendChild(propia);
+  }
+
+  rejilla.querySelectorAll('.opcion').forEach(o => {
+    o.addEventListener('click', () => {
+      aplicarAvatar(agenteEnEdicion, o.dataset.archivo);
+      cerrarGaleria();
+    });
+  });
+
+  galeria.classList.add('abierta');
+}
+
+function cerrarGaleria() {
+  galeria.classList.remove('abierta');
+  agenteEnEdicion = null;
+}
+
+galeria.addEventListener('click', e => { if (e.target === galeria) cerrarGaleria(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarGaleria(); });
+
+document.getElementById('btn-subir').addEventListener('click', () => inputSubir.click());
+inputSubir.addEventListener('change', () => {
+  const f = inputSubir.files[0];
+  if (!f || !agenteEnEdicion) return;
+  const lector = new FileReader();
+  lector.onload = () => {
+    /* se reescala a 320px antes de guardar: el navegador solo admite unos pocos MB */
+    const im = new Image();
+    im.onload = () => {
+      const lienzo = document.createElement('canvas');
+      lienzo.width = lienzo.height = 320;
+      const cx = lienzo.getContext('2d');
+      const lado = Math.min(im.width, im.height);
+      cx.drawImage(im, (im.width - lado) / 2, (im.height - lado) / 2, lado, lado, 0, 0, 320, 320);
+      aplicarAvatar(agenteEnEdicion, lienzo.toDataURL('image/jpeg', 0.86));
+      cerrarGaleria();
+    };
+    im.src = lector.result;
+  };
+  lector.readAsDataURL(f);
+  inputSubir.value = '';
+});
+
+document.getElementById('btn-restablecer').addEventListener('click', () => {
+  if (agenteEnEdicion) aplicarAvatar(agenteEnEdicion, 'avatares/' + agenteEnEdicion + '.png');
+  cerrarGaleria();
+});
+
+</script>
+</body>
+</html>
