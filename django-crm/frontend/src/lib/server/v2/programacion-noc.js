@@ -619,3 +619,27 @@ export async function resolverBloqueo({ cookies }, ordenId, datos) {
     return { datos: null, error: traducirError(err, 'este bloqueo') };
   }
 }
+
+/**
+ * La salud del seguimiento de la jornada.
+ *
+ * QUIEN DECIDE Y QUIEN DIBUJA
+ * ---------------------------
+ * El veredicto —al día, vencido, sin sincronización reciente, pausado por NOC—
+ * viene calculado del backend, con su etiqueta y sus números. Esta capa lo pasa
+ * tal cual y la pantalla lo muestra.
+ *
+ * Reconstruir la regla acá sería repetir el defecto de la fase C: viviría en dos
+ * lados y uno se quedaría viejo. Y peor en este caso: la diferencia entre «no
+ * reportó» y «no sé si tiene señal» es una acusación, no un detalle de formato.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ */
+export async function leerSaludDelSeguimiento({ cookies }) {
+  try {
+    const d = await apiRequest('/campo/seguimiento/salud/', {}, { cookies });
+    return { datos: d, error: null };
+  } catch (/** @type {any} */ err) {
+    return { datos: null, error: traducirError(err, 'la salud del seguimiento') };
+  }
+}

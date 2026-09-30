@@ -1254,6 +1254,10 @@ from campo.inventario import (  # noqa: E402,F401
     UbicacionInventario,
 )
 from campo.bloqueos import BloqueoDeTrabajo  # noqa: E402,F401
+from campo.seguimiento import (  # noqa: E402,F401
+    ConfiguracionDeSeguimiento,
+    ContactoDeDispositivo,
+)
 from campo.inventario_operacion import (  # noqa: E402,F401
     Compra,
     ConteoFisico,

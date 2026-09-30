@@ -82,6 +82,9 @@ urlpatterns = [
     # Los bloqueos vivos de la empresa. `?requiere_noc=1` es el otro filtro:
     # estar detenido y necesitar al NOC no son lo mismo.
     path("bloqueos/", views.BloqueosAbiertosView.as_view(), name="bloqueos_abiertos"),
+    # La salud del seguimiento de la jornada. Se CALCULA al preguntar: no hay
+    # ningun "estado_seguimiento" guardado que pueda quedar viejo.
+    path("seguimiento/salud/", views.SaludDelSeguimientoView.as_view(), name="seguimiento_salud"),
     path("trabajos/<uid:pk>/datos/", views.GuardarDatosTrabajoView.as_view(), name="trabajo_datos"),
     path("trabajos/<uid:pk>/probar-conexion/", views.ProbarConexionView.as_view(), name="trabajo_probar_conexion"),
     path("trabajos/<uid:pk>/evidencias/", views.EvidenciasTrabajoView.as_view(), name="trabajo_evidencias"),

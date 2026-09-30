@@ -23,7 +23,8 @@ const {
   leerSeguimientoDeOrden,
   registrarSeguimiento,
   leerBloqueosAbiertos,
-  resolverBloqueo
+  resolverBloqueo,
+  leerSaludDelSeguimiento
 } = await import('$lib/server/v2/programacion-noc.js');
 
 const event = /** @type {any} */ ({ cookies: { get: () => 'token' } });
@@ -522,5 +523,66 @@ describe('los materiales de la orden', () => {
     apiRequest.mockResolvedValue({ eventos: [] });
     await leerSeguimientoDeOrden(event, 'o1');
     expect(apiRequest.mock.calls[0][0]).toBe('/campo/trabajos/o1/seguimiento/');
+  });
+});
+
+
+describe('la salud del seguimiento', () => {
+  it('el veredicto viene del backend y esta capa no lo recalcula', async () => {
+    // LA REGLA DE LA FASE D: backend decide, frontend representa. La diferencia
+    // entre "no reporto" y "no se si tiene señal" es una acusacion, no un detalle
+    // de formato, y no puede vivir en dos lugares.
+    apiRequest.mockResolvedValue({
+      por_orden: {
+        o1: {
+          tipo: 'sin_contacto_reciente',
+          etiqueta: 'Sin sincronización reciente',
+          minutos_desde_la_referencia: 56,
+          minutos_vencido: null
+        }
+      },
+      conteo: { vencido: 0, sin_contacto_reciente: 1 },
+      evalua_la_sincronizacion: true
+    });
+
+    const { datos } = await leerSaludDelSeguimiento(event);
+
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/seguimiento/salud/');
+    // Se pasa TAL CUAL: ni se renombra el tipo, ni se recalcula el veredicto a
+    // partir de los minutos.
+    expect(datos.por_orden.o1.tipo).toBe('sin_contacto_reciente');
+    expect(datos.por_orden.o1.etiqueta).toBe('Sin sincronización reciente');
+    expect(datos.por_orden.o1.minutos_vencido).toBeNull();
+  });
+
+  it('un vencido llega con sus minutos, sin que el frontend los derive', async () => {
+    apiRequest.mockResolvedValue({
+      por_orden: { o1: { tipo: 'vencido', etiqueta: 'Seguimiento vencido', minutos_vencido: 7 } },
+      conteo: { vencido: 1 },
+      evalua_la_sincronizacion: false
+    });
+    const { datos } = await leerSaludDelSeguimiento(event);
+    expect(datos.por_orden.o1.minutos_vencido).toBe(7);
+    // Y la pantalla sabe que NO puede ofrecer el filtro de sincronizacion.
+    expect(datos.evalua_la_sincronizacion).toBe(false);
+  });
+
+  it('es solo lectura: no manda metodo ni cuerpo', async () => {
+    apiRequest.mockResolvedValue({ por_orden: {}, conteo: {} });
+    await leerSaludDelSeguimiento(event);
+    const opciones = apiRequest.mock.calls[0][1] ?? {};
+    expect(opciones.method ?? 'GET').toBe('GET');
+    expect('body' in opciones).toBe(false);
+  });
+
+  it('un fallo no inventa un veredicto', async () => {
+    // Sin datos, la pantalla no dibuja la columna. Devolver "al dia" por defecto
+    // seria afirmar que todo esta bien porque no se pudo preguntar.
+    apiRequest.mockImplementationOnce(() =>
+      Promise.reject(Object.assign(new Error('x'), { status: 502 }))
+    );
+    const { datos, error } = await leerSaludDelSeguimiento(event);
+    expect(datos).toBeNull();
+    expect(error.mensaje).toContain('la salud del seguimiento');
   });
 });

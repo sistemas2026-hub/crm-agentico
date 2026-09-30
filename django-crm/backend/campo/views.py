@@ -30,6 +30,7 @@ from campo.serializers import (
 from campo.services.idempotencia import manejar_idempotencia
 from campo.services.materiales_de_orden import materiales_de_orden
 from campo.services import bloqueos
+from campo.services import salud_seguimiento
 from campo.services import seguimiento_campo as seguimiento
 from campo.services.telemetria import (
     TANDAS,
@@ -249,6 +250,15 @@ class SeguimientoDeOrdenView(APIView):
         abierto = bloqueos.bloqueo_abierto_de(orden)
         datos["bloqueo_abierto"] = bloqueos.serializar(abierto) if abierto else None
         datos["estado_operativo"] = orden.estado_operativo
+        # La salud del seguimiento viaja con la bitacora: es la misma pregunta
+        # --"¿este trabajo esta reportando?"-- y separarla en otra llamada haria
+        # que la pantalla mostrara la linea de tiempo y el veredicto en dos
+        # momentos distintos.
+        #
+        # El BACKEND decide y la pantalla dibuja. Reconstruir la regla en el
+        # frontend seria repetir el defecto que encontro la fase C: la regla
+        # viviria en dos lados y uno se quedaria viejo.
+        datos["salud"] = salud_seguimiento.calcular(orden)
         return Response(datos)
 
     @manejar_idempotencia
@@ -387,6 +397,26 @@ class BloqueosAbiertosView(APIView):
         )
         filas = bloqueos.abiertos_de(org, solo_noc=solo_noc)
         return Response({"bloqueos": filas, "total": len(filas)})
+
+
+class SaludDelSeguimientoView(APIView):
+    """La salud del seguimiento de todas las ordenes en ejecucion.
+
+    Una llamada para toda la bandeja, en vez de una por fila: con veinte lineas
+    serian veinte viajes y el calculo es el mismo.
+
+    NO DEVUELVE UN ESTADO GUARDADO. Se calcula al preguntar, a proposito: un
+    veredicto guardado diria "al dia" mientras el reloj sigue corriendo, y haria
+    falta un proceso que lo refresque. Ver campo/services/salud_seguimiento.py.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = getattr(request, "org", None)
+        if org is None:
+            raise Http404
+        return Response(salud_seguimiento.resumen_de_org(org))
 
 
 class MaterialesDeOrdenView(APIView):

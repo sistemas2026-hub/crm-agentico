@@ -102,6 +102,10 @@ MIDDLEWARE = [
     "crum.CurrentRequestUserMiddleware",
     "common.middleware.get_company.GetProfileAndOrg",
     "common.middleware.rls_context.RequireOrgContext",  # RLS: Enforce org context + set PostgreSQL session variable
+    # Anota que el telefono de campo hablo. VA AL FINAL: necesita el profile y
+    # la org que pone GetProfileAndOrg, y falla en silencio para que una marca
+    # de telemetria no pueda tumbar la peticion de un tecnico.
+    "campo.middleware_contacto.ContactoDeCampoMiddleware",
 ]
 
 ROOT_URLCONF = "crm.urls"

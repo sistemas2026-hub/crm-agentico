@@ -73,6 +73,26 @@
     { valor: 'otro', texto: 'Otro' }
   ];
 
+  // La salud del seguimiento, calculada por el backend. Acá NO se reconstruye la
+  // regla: la diferencia entre «no reportó» y «no sé si tiene señal» es una
+  // acusación, no un detalle de formato.
+  let salud = $state(/** @type {any} */ ({ por_orden: {}, conteo: {}, evalua_la_sincronizacion: false }));
+  //: El tercer y cuarto filtro. Separados de «Bloqueados» y «Requiere NOC», que
+  //: contestan otra pregunta.
+  let filtroSalud = $state(/** @type {null | 'vencido' | 'sin_contacto_reciente'} */ (null));
+
+  /** El veredicto de una fila, o null si no aplica. */
+  const saludDe = (ordenId) => salud.por_orden?.[ordenId] ?? null;
+
+  /** El color de cada situación. Los nombres los pone el backend. */
+  const CLASE_SALUD = {
+    al_dia: '',
+    vencido: 'snoc-insignia-error',
+    sin_contacto_reciente: 'snoc-insignia-neutra',
+    pausado_noc: 'snoc-insignia-variante',
+    no_aplica: ''
+  };
+
   /** El bloqueo vivo de una orden de la tabla, si tiene. */
   const bloqueoDe = (ordenId) => bloqueos.find((b) => b.orden_id === ordenId) ?? null;
 
@@ -118,7 +138,10 @@
         //   'noc'        -> hace falta que alguien de esa mesa haga algo.
         // Un trabajo esperando al cliente entra en el primero y no en el segundo.
         (filtroTrabado !== 'bloqueados' || !!bloqueoDe(l.orden)) &&
-        (filtroTrabado !== 'noc' || bloqueoDe(l.orden)?.requiere_noc === true)
+        (filtroTrabado !== 'noc' || bloqueoDe(l.orden)?.requiere_noc === true) &&
+        // Y los dos del seguimiento, que contestan otra pregunta: no si está
+        // detenido, sino si está reportando.
+        (!filtroSalud || saludDe(l.orden)?.tipo === filtroSalud)
     )
   );
 
@@ -304,6 +327,7 @@
       await Promise.all([
         cargarBitacora(ordenId),
         cargarBloqueos(),
+        cargarSalud(),
         ...(eraBloqueo ? [invalidateAll()] : [])
       ]);
     } catch {
@@ -324,7 +348,22 @@
   $effect(() => {
     void data.dia;
     void cargarBloqueos();
+    void cargarSalud();
   });
+
+  /** La salud del seguimiento de la jornada. Una llamada para toda la tabla. */
+  async function cargarSalud() {
+    try {
+      const r = await fetch('/api/supervisor-noc/seguimiento-salud');
+      const cuerpo = await r.json().catch(() => ({}));
+      salud = r.ok
+        ? cuerpo
+        : { por_orden: {}, conteo: {}, evalua_la_sincronizacion: false };
+    } catch {
+      // La tabla se dibuja igual, sin la columna: es información adicional.
+      salud = { por_orden: {}, conteo: {}, evalua_la_sincronizacion: false };
+    }
+  }
 
   /** Los bloqueos abiertos de la empresa. Una sola llamada para toda la tabla. */
   async function cargarBloqueos() {
@@ -365,7 +404,12 @@
       // `invalidateAll` tambien: el estado operativo que muestra la TABLA viene
       // del `load` del servidor, y sin esto la fila sigue diciendo "bloqueada"
       // despues de destrabar. Medido en el laboratorio.
-      await Promise.all([cargarBloqueos(), cargarBitacora(ordenId), invalidateAll()]);
+      await Promise.all([
+        cargarBloqueos(),
+        cargarBitacora(ordenId),
+        cargarSalud(),
+        invalidateAll()
+      ]);
       // La ficha muestra el estado operativo: se vuelve a pedir para que no quede
       // diciendo «bloqueada» después de destrabar.
       void abrirOrden(ordenId);
@@ -730,6 +774,37 @@
                 <button
                   type="button"
                   class="snoc-pildora"
+                  aria-pressed={filtroSalud === 'vencido'}
+                  style={filtroSalud === 'vencido' ? 'font-weight:700;' : ''}
+                  onclick={() => (filtroSalud = filtroSalud === 'vencido' ? null : 'vencido')}
+                  title="Hay contacto reciente del dispositivo y no reportó. Eso sí es un atraso."
+                >
+                  Seguimiento vencido {salud.conteo?.vencido ?? 0}
+                </button>
+                <!--
+                  Este filtro solo aparece si el sistema PUEDE contestar esa
+                  pregunta. Mientras la app no tenga latido regular, la ausencia de
+                  contacto no distingue "sin señal" de "app cerrada en el bolsillo",
+                  y mostrar un filtro que nunca encuentra nada haria pensar que esta
+                  roto. Se enciende con `minutos_contacto_reciente` en la config.
+                -->
+                {#if salud.evalua_la_sincronizacion}
+                  <button
+                    type="button"
+                    class="snoc-pildora"
+                    aria-pressed={filtroSalud === 'sin_contacto_reciente'}
+                    style={filtroSalud === 'sin_contacto_reciente' ? 'font-weight:700;' : ''}
+                    onclick={() =>
+                      (filtroSalud =
+                        filtroSalud === 'sin_contacto_reciente' ? null : 'sin_contacto_reciente')}
+                    title="El dispositivo no aparece: no se puede saber si hay atraso de reporte."
+                  >
+                    Sin sincronización {salud.conteo?.sin_contacto_reciente ?? 0}
+                  </button>
+                {/if}
+                <button
+                  type="button"
+                  class="snoc-pildora"
                   aria-pressed={filtroTrabado === 'noc'}
                   style={filtroTrabado === 'noc' ? 'font-weight:700;' : ''}
                   onclick={() => (filtroTrabado = filtroTrabado === 'noc' ? null : 'noc')}
@@ -786,6 +861,7 @@
                     <tr>
                       <th>Sec.</th><th>OT</th><th>Cliente</th><th>Horario</th>
                       <th>Zona</th><th>Prioridad</th><th>Estado línea</th><th>Estado OT</th>
+                      <th>Seguimiento</th>
                       <th class="snoc-derecha">Acciones</th>
                     </tr>
                   </thead>
@@ -830,6 +906,23 @@
                             {#if b.requiere_noc}
                               <span class="snoc-insignia snoc-insignia-variante">NOC</span>
                             {/if}
+                          {/if}
+                        </td>
+                        <td>
+                          {#if saludDe(l.orden)}
+                            {@const sa = saludDe(l.orden)}
+                            <span class="snoc-insignia {CLASE_SALUD[sa.tipo] ?? ''}">
+                              {sa.etiqueta}
+                            </span>
+                            {#if sa.tipo === 'vencido'}
+                              <span class="snoc-mono-sm snoc-tenue">+{sa.minutos_vencido} min</span>
+                            {:else if sa.minutos_desde_la_referencia != null}
+                              <span class="snoc-mono-sm snoc-tenue">
+                                {sa.minutos_desde_la_referencia} min
+                              </span>
+                            {/if}
+                          {:else}
+                            <span class="snoc-tenue">—</span>
                           {/if}
                         </td>
                         <td class="snoc-derecha">
@@ -1209,6 +1302,60 @@
               <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">
                 Seguimiento de la intervención
               </span>
+
+              <!--
+                LA SALUD DEL SEGUIMIENTO.
+
+                Viene calculada del backend, etiqueta incluida. Aca no se decide
+                nada: "no reporto" y "no se si tiene señal" son dos afirmaciones
+                distintas y una de las dos acusa a una persona.
+              -->
+              {#if bitacora?.salud && bitacora.salud.tipo !== 'no_aplica'}
+                {@const sa = bitacora.salud}
+                <div class="snoc-analisis {sa.tipo === 'vencido' ? 'snoc-faltante' : 'snoc-observado'}">
+                  <span class="snoc-insignia {CLASE_SALUD[sa.tipo] ?? ''}">{sa.etiqueta}</span>
+                  {#if sa.tipo === 'vencido'}
+                    <span class="snoc-mono-sm">hace {sa.minutos_vencido} min que venció</span>
+                  {/if}
+                  <p class="snoc-body" style="margin:0;">{sa.motivo}</p>
+                  <div class="snoc-meta">
+                    {#if sa.referencia}
+                      <div>
+                        <span>Última actualización:</span>
+                        <span class="snoc-mono-sm">
+                          {fecha(sa.referencia)} · hace {sa.minutos_desde_la_referencia} min
+                        </span>
+                      </div>
+                    {/if}
+                    {#if sa.vence_en}
+                      <div>
+                        <span>Debía actualizar antes de:</span>
+                        <span class="snoc-mono-sm">{fecha(sa.vence_en)}</span>
+                      </div>
+                    {/if}
+                    {#if sa.ultimo_contacto}
+                      <div>
+                        <span>Última sincronización conocida:</span>
+                        <span class="snoc-mono-sm">
+                          {fecha(sa.ultimo_contacto)} · hace {sa.minutos_desde_el_contacto} min
+                        </span>
+                      </div>
+                    {/if}
+                    <div>
+                      <span>Ventana de la empresa:</span>
+                      <span class="snoc-mono-sm">{sa.minutos_para_reportar} min</span>
+                    </div>
+                  </div>
+                  {#if !sa.evalua_la_sincronizacion}
+                    <span class="snoc-body-sm snoc-tenue">
+                      La sincronización del dispositivo <strong>no se evalúa</strong>: la app de
+                      campo no tiene un latido regular, así que la falta de contacto no distingue
+                      «sin señal» de «app cerrada». Se enciende configurando los minutos de
+                      contacto reciente.
+                    </span>
+                  {/if}
+                </div>
+              {/if}
 
               {#if cargandoBitacora}
                 <p class="snoc-body-sm snoc-tenue" style="margin:0;">Leyendo la bitácora…</p>
