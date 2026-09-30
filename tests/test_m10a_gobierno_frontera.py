@@ -91,6 +91,29 @@ R1_INTERNO = {
 
 R2_REGISTRO_EXTERNO = {
     "actualizar_estado_ticket",
+    #  30/09/2026. El nombre invita a leerla como R3 y no lo es: NO actua sobre
+    #  la ONT/ONU en la casa del cliente. Escribe UN campo --'sn_onu'-- en la
+    #  ficha del cliente de WispHub, con 'PUT /api/clientes/{id_servicio}/'. Es
+    #  un registro, no el equipo: no reinicia, no reconfigura y no interrumpe el
+    #  servicio de nadie.
+    #
+    #  EL RIESGO DEL PUT ESTA MEDIDO, y no se materializo (28/09/2026, cliente
+    #  de prueba 6555): un PUT normalmente espera el recurso COMPLETO, asi que
+    #  mandar solo 'sn_onu' podria vaciar el resto. Se probo y el PUT de ESTE
+    #  endpoint es PARCIAL -- escribe lo que se manda y no toca lo demas. La
+    #  evidencia esta en campo/services/lazo_isp.py.
+    #
+    #  Va en R2 porque su efecto lo deshace el MISMO sistema que lo produjo: se
+    #  sobrescribe con otro PUT. Ese es el criterio de la matriz, no la
+    #  gravedad en abstracto.
+    #
+    #  CON UN ASTERISCO, y queda escrito en vez de disimulado: 'sn_onu' NO se
+    #  puede VACIAR por la API --'' y ' ' devuelven 200 sin efecto, 'null' da
+    #  400--, solo sobrescribir. Si el campo estaba vacio, no hay vuelta al
+    #  estado original. Sigue siendo R2 --hay una operacion de registro que
+    #  corrige-- pero la reversibilidad es parcial y alguien tiene que saber el
+    #  valor anterior.
+    "actualizar_sn_onu",
     "agendar_visita_internet",
     "agendar_visita_tecnica",
     "cancelar_solicitud_servicio",
