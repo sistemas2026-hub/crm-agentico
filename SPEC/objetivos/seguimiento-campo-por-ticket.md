@@ -1,6 +1,8 @@
 # Objetivo · El seguimiento de campo vive en la orden, no en un chat
 
-> **Estado: CERRADO — 30/09/2026.** Abierto el 29/09/2026.
+> **Objetivo: CERRADO — 30/09/2026.** Abierto el 29/09/2026.
+> **Producción: DESPLEGADO, pendiente de confirmación de arranque** — ver la
+> sección siguiente y su punto de no retorno.
 >
 > Fases A–D implementadas, medidas y con sus límites escritos. **No quedan
 > funciones pendientes dentro de este objetivo.**
@@ -18,6 +20,69 @@
 >
 > Las invariantes que salieron de acá quedaron congeladas en `CLAUDE.md` §12, y la
 > regla de la prueba de cadena real en §6.
+
+## Estado de producción
+
+> **DESPLEGADO — pendiente de confirmación de arranque.** 30/09/2026.
+>
+> Commit desplegado: **`6332710`** en `fix/integracion-wisphub`
+> (`fb8cb84..6332710`, fast-forward). Verificado **por contenido y no por hash** —
+> `git hash-object` de cada archivo contra la rama remota— que la rama desplegada
+> trae `salud_seguimiento.py`, `bloqueos.py`, `seguimiento_campo.py`,
+> `materiales_de_orden.py` y la migración `0016_unir_inventario_y_catalogo_de_rol`.
+>
+> Las fases A–D están implementadas y verificadas contra Postgres real.
+
+### El punto de no retorno
+
+**Este objetivo pasa a `CERRADO EN PRODUCCIÓN` cuando, y solo cuando:**
+
+1. `docker exec <backend> python manage.py showmigrations campo` muestre
+   `[X] 0016_unir_inventario_y_catalogo_de_rol`;
+2. el backend esté arrancado **sin traceback asociado al despliegue**.
+
+El smoke funcional de Materiales y Seguimiento es confirmación adicional, no la
+condición. Y la condición es esa por un motivo medido: las migraciones de `campo`
+llegaron a tener **dos nodos hoja**, y Django se niega a arrancar con eso. Como el
+entrypoint del backend corre `migrate`, ese fallo no aparece en una prueba: aparece
+con el servicio abajo.
+
+### Falta confirmar en producción
+
+- [ ] backend iniciado sin errores;
+- [ ] migración `0016` aplicada;
+- [ ] ausencia de excepciones nuevas después del deploy;
+- [ ] Materiales y Seguimiento cargan en una orden real.
+
+Esta sesión **no puede** hacer ninguna de las cuatro: no tiene acceso al servidor
+ni a la base de producción, y el repo prohíbe conectarse a producción y leer los
+secretos donde estarían esas credenciales.
+
+### Riesgo operativo separado, y NO es de este despliegue
+
+`tenants/rapilink.config.yaml` cambió en la rama de despliegue —no en este
+trabajo— agregando a `cerrar_caso_crm` las banderas `invocable_por_servicio: true`
+y `argumentos_sobrescribibles: [id_caso]`. Viene de **M09-S** (el Supervisor
+cerrando un caso cuando una persona acepta una propuesta).
+
+**El código que las lee ya está desplegado**: `nucleo/canales/api.py:4218` hace
+`if not herramienta.invocable_por_servicio` y responde **403**. Y la base manda
+sobre el YAML, así que si esa configuración no está cargada, aceptar una propuesta
+de caso desincronizado **falla con 403** — y el síntoma se lee como un problema de
+integración o de red, no de configuración.
+
+Se mide con `py -3.13 cli/diferencias_config.py rapilink`: la dirección que rompe
+es «el repo lo declara y la base no». **No se carga desde esta sesión ni se mezcla
+con este cierre**: es del dueño de M09-S.
+
+### Pendientes ajenos a este objetivo
+
+- **12 pruebas rojas** en `campo/tests/test_seguridad_seed_y_admin.py`,
+  **preexistentes en producción** y verificadas byte a byte contra la rama de
+  despliegue: la prueba le pasa `--org` a `seed_campo_demo`, que no declara ningún
+  `add_argument`. Llegó así en `f74eaf0`; el arreglo es de quien la escribió.
+- **Rotar la credencial** que quedó expuesta en la transcripción de la sesión del
+  30/09/2026. Pendiente operativo de mayor prioridad.
 
 ## Gate de cierre (30/09/2026)
 
