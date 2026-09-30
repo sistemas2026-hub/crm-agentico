@@ -194,10 +194,22 @@
     nPagina = 1;
   });
 
-  /** Cuantas hay en cada estado, para que la pastilla no mienta. */
+  /**
+   * Cuantas hay en cada estado, para que la pastilla no mienta.
+   *
+   * Los tres numeros salen de la MISMA funcion que llena la tabla, y ninguno se
+   * calcula por resta. Hasta el 29/09/2026 'decididas' era `total - pendientes`
+   * y «Todas» era `total`: dejo de ser cierto cuando «Pendientes» empezo a
+   * excluir las propuestas cuyo caso ya cerro -- esas no estan en ninguna de las
+   * dos bandejas, asi que la resta las contaba como decididas sin serlo.
+   *
+   * Que «Todas» sea la suma de las otras dos es ahora una propiedad de como se
+   * calcula, no una coincidencia que haya que recordar mantener.
+   */
   const conteoPorEstado = $derived.by(() => {
     const pend = bandejaDeRevision(propuestas, { estado: 'pendientes' }).length;
-    return { pendientes: pend, decididas: propuestas.length - pend, '': propuestas.length };
+    const dec = bandejaDeRevision(propuestas, { estado: 'decididas' }).length;
+    return { pendientes: pend, decididas: dec, '': pend + dec };
   });
 
   /**
@@ -509,7 +521,10 @@
           <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
             <div class="snoc-fila" style="gap:var(--snoc-xs);">
               <span class="snoc-icono snoc-primario" style="font-size:18px;">visibility</span>
-              <span class="snoc-body-sm">Modo observación · <strong>analiza y propone, no ejecuta</strong></span>
+              <span class="snoc-body-sm">
+                Analiza y propone. En <strong>casos desincronizados</strong>, aceptar autoriza un cierre
+                controlado en Dexter.
+              </span>
             </div>
             <div class="snoc-envuelve">
               <span class="snoc-insignia snoc-insignia-neutra" title="Interruptor del motor, en solo lectura">
@@ -1324,8 +1339,15 @@
             {/if}
           </div>
           <div class="snoc-fila" style="gap:var(--snoc-sm);">
+            <!--
+              La insignia dice lo que aceptar HACE, no en que modo esta el
+              producto: para una desincronizacion aceptar autoriza un cierre.
+            -->
             <span class="snoc-insignia snoc-insignia-neutra">
-              <span class="snoc-punto snoc-punto-primario"></span> Observación · sin ejecución
+              <span class="snoc-punto snoc-punto-primario"></span>
+              {aceptar.ejecuta
+                ? 'Cierre controlado · requiere tu autorización'
+                : 'Observación · sin ejecución'}
             </span>
             <button class="snoc-btn" type="button" onclick={cerrarDetalle} aria-label="Cerrar">
               <span class="snoc-icono" style="font-size:18px;">close</span>
@@ -1753,10 +1775,12 @@
                 <span class="snoc-label" style="text-transform:uppercase; letter-spacing:0.06em;">
                   Ciclo de ejecución
                 </span>
-                <span class="snoc-mono-sm snoc-tenue">Revisión humana ➔ Ejecución</span>
+                <span class="snoc-mono-sm snoc-tenue">
+                  {aceptar.ejecuta ? 'Revisión humana ➔ Cierre' : 'Revisión humana ➔ Ejecución'}
+                </span>
               </div>
               <ol class="snoc-pasos">
-                {#each pasosDelCiclo(detalle.estado) as p (p.clave)}
+                {#each pasosDelCiclo(detalle.estado, detalle.tipo_senal) as p (p.clave)}
                   <li class="snoc-paso {p.estado}">
                     <span class="snoc-paso-punto"></span>
                     <span class="snoc-paso-texto">{p.texto}</span>
@@ -1764,9 +1788,14 @@
                 {/each}
               </ol>
               <span class="snoc-mono-sm snoc-tenue">
-                Las tres últimas etapas <strong>no existen en esta etapa del producto</strong>: no hay camino de
-                ejecución, y el estado «ejecutada» no está en el modelo. Se muestran para que se vea dónde termina
-                lo que esta pantalla puede hacer.
+                {#if aceptar.ejecuta}
+                  El cierre se intenta <strong>de inmediato al aceptar</strong>, dentro de la misma petición: no
+                  queda encolado. Antes de ejecutarlo el sistema revalida las condiciones, así que
+                  «Aprobada» no implica «Cerrada».
+                {:else}
+                  Las tres últimas etapas <strong>no existen para este tipo de señal</strong>: aceptar registra el
+                  acuerdo y nada más. Se muestran para que se vea dónde termina lo que esta pantalla puede hacer.
+                {/if}
               </span>
             </section>
 
@@ -1796,7 +1825,12 @@
             <div class="snoc-fila" style="gap:var(--snoc-xs); min-width:0;">
               <span class="snoc-icono snoc-primario" style="font-size:16px;">verified_user</span>
               <span class="snoc-body-sm snoc-secundario">
-                La IA observa y propone. <strong>La decisión es tuya</strong>: aceptar no ejecuta nada.
+                {#if aceptar.ejecuta}
+                  La IA observa y propone. <strong>La decisión es tuya</strong>: aceptar autoriza un intento de
+                  cierre en Dexter, que el sistema revalida antes de ejecutar.
+                {:else}
+                  La IA observa y propone. <strong>La decisión es tuya</strong>: aceptar no ejecuta nada.
+                {/if}
               </span>
             </div>
             {#if detalle.estado === 'propuesta'}

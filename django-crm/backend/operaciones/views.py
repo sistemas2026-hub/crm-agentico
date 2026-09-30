@@ -183,8 +183,18 @@ class RevisarPropuestaView(APIView):
     """
     El Jefe de Operaciones decide: aceptar, modificar o rechazar.
 
-    Aceptar NO ejecuta la propuesta. Es deliberado y está dicho en la respuesta,
-    para que nadie que use esta API asuma lo contrario.
+    ACEPTAR REGISTRA LA DECISIÓN; PARA UN TIPO, ADEMÁS INTENTA EL CIERRE
+    -------------------------------------------------------------------
+    Hasta el cierre controlado, aceptar no ejecutaba nada y este docstring lo
+    decía así. Hoy es cierto para todos los tipos MENOS uno: con
+    'caso_desincronizado', una vez persistida la revisión se intenta cerrar el
+    caso en Dexter -- se revalidan las doce condiciones y, si siguen dándose, el
+    caso se cierra. Nunca se toca el sistema del proveedor.
+
+    Y sigue valiendo lo que importa: ACEPTADA no es CERRADA. El intento ocurre
+    FUERA de la transacción de la revisión, así que un fallo no revierte la
+    decisión humana. La respuesta lo dice con 'ejecutada', 'motivo' y 'aviso',
+    para que nadie que use esta API confunda las dos cosas.
     """
 
     permission_classes = [EsJefeDeOperaciones]

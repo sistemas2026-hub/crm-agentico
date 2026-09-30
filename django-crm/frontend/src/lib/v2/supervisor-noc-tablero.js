@@ -55,8 +55,14 @@ export function kpisDelTablero(indicadores, propuestas) {
     return tipos.reduce((t, x) => t + (porTipo(x) ?? 0), 0);
   };
 
+  //  LA MISMA REGLA QUE LA BANDEJA, O LA TARJETA MIENTE
+  //  --------------------------------------------------
+  //  Esta tarjeta es un ENLACE a «Pendientes por revisión»: contar aqui
+  //  `estado === 'propuesta'` a secas anunciaba un numero y llevaba a una tabla
+  //  con otro, en cuanto la bandeja empezo a excluir las propuestas cuyo caso ya
+  //  cerro. Se cuenta lo mismo que se va a mostrar.
   const pendientes = Array.isArray(propuestas)
-    ? propuestas.filter((p) => p?.estado === 'propuesta').length
+    ? propuestas.filter((p) => p?.estado === 'propuesta' && !p?.origen_cerrado).length
     : null;
 
   return [
@@ -584,10 +590,34 @@ export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) 
     };
   });
 
+  //  DOS BANDEJAS, Y LA DIFERENCIA NO ES SOLO EL ESTADO DE LA PROPUESTA
+  //  ------------------------------------------------------------------
+  //  «Pendientes» es la bandeja OPERATIVA: hay algo detectado y hace falta que
+  //  alguien decida. Para eso tienen que darse LAS DOS cosas -- la propuesta sin
+  //  decidir Y el caso todavia abierto. Un caso que ya cerro (lo cerro este
+  //  flujo, o lo cerro otra via) dejo de ser trabajo de nadie, aunque su
+  //  propuesta siga sin revisar.
+  //
+  //  «Ya decididas» es la bandeja de TRAZABILIDAD: mira solo la propuesta, nunca
+  //  el caso. Una propuesta aceptada no vuelve a pendientes ni desaparece porque
+  //  su caso haya cerrado -- que es justo lo que hay que poder consultar despues.
+  //
+  //  El estado de la propuesta y el del caso NO se mezclan: 'origen_cerrado'
+  //  viaja como dato del caso y la propuesta conserva el suyo intacto. Una
+  //  propuesta en 'propuesta' sobre un caso cerrado NO se convierte en una
+  //  decision que nadie tomo.
+  const esPendiente = (p) => p.revision.pendiente && !p.origen_cerrado;
+  const esDecidida = (p) => !p.revision.pendiente;
+
   const visibles = enriquecidas.filter((p) => {
     if (!coincideConBusqueda(p, filtros.texto ?? '')) return false;
-    if (filtros.estado === 'pendientes' && !p.revision.pendiente) return false;
-    if (filtros.estado === 'decididas' && p.revision.pendiente) return false;
+    if (filtros.estado === 'pendientes' && !esPendiente(p)) return false;
+    if (filtros.estado === 'decididas' && !esDecidida(p)) return false;
+    //  «Todas» es exactamente la union de las dos bandejas, sin duplicados: no
+    //  es "todo lo que hay en la base". Una propuesta sin decidir sobre un caso
+    //  cerrado no esta en ninguna de las dos, y por lo tanto tampoco aca -- su
+    //  expediente vive en Tickets -> Cerrados, que es donde corresponde.
+    if (!filtros.estado && !esPendiente(p) && !esDecidida(p)) return false;
     if (filtros.nivel && p.nivel.texto !== filtros.nivel) return false;
     if (filtros.tipo && p.tipo_senal !== filtros.tipo) return false;
     if (filtros.conPropuesta === 'si' && !p.tienePropuesta) return false;

@@ -835,9 +835,17 @@ class PropuestaSupervisor(BaseModel):
     #  nadie la miro, y entonces volver a preguntar es lo correcto.
     ESTADOS_QUE_BLOQUEAN = (PROPUESTA, ACEPTADA, MODIFICADA, RECHAZADA)
 
-    # Niveles de autonomia, tal como quedaron definidos. En esta etapa el
-    # Supervisor opera en 0/1: registra propuestas de cualquier nivel --para
-    # poder medir cuantas habria-- pero nada se ejecuta.
+    # Niveles de autonomia, tal como quedaron definidos. El Supervisor registra
+    # propuestas de cualquier nivel -- para poder medir cuantas habria -- y el
+    # nivel NO decide si algo se ejecuta: dice que nivel HABRIA hecho falta para
+    # que la IA lo hiciera SOLA. Es contrafactico, no un permiso.
+    #
+    # Lo unico que hoy se ejecuta al aceptar es el cierre controlado de un
+    # 'caso_desincronizado', y lo autoriza una PERSONA por 'frontera.humana()',
+    # que pide actor y evidencia y no consulta ni el techo ni el interruptor de
+    # autonomia. Por eso una propuesta de nivel 0 puede cerrarse: el nivel
+    # describe lo que la IA habria necesitado, no lo que un humano puede decidir.
+    # Se decidio asi el 29/09/2026 -- ver test_19 en test_m09s_cierre_al_aceptar.
     NIVEL_OBSERVAR = 0
     NIVEL_RECOMENDAR = 1
     NIVEL_COORDINAR = 2

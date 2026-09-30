@@ -252,6 +252,42 @@ describe('pasosDelCiclo', () => {
 
     expect(claves).toEqual(['propuesta', 'revisada', 'aprobada', 'encolada', 'ejecutada', 'validada']);
   });
+
+  //  ------------------------------------------------------------------------
+  //  El ciclo de una desincronizacion NO es el mismo, porque la conducta del
+  //  backend no es la misma: ahi aceptar dispara un cierre en la misma
+  //  peticion. Se afirma sobre el EFECTO -- que etapas hay y como terminan --
+  //  y no sobre el texto de ninguna.
+  //  ------------------------------------------------------------------------
+  it('una desincronizacion termina en el cierre, y son cuatro etapas', () => {
+    const claves = pasosDelCiclo('propuesta', 'caso_desincronizado').map((p) => p.clave);
+
+    expect(claves).toEqual(['propuesta', 'revisada', 'aprobada', 'cierre']);
+  });
+
+  it('no dibuja cola ni validacion para una desincronizacion: no existen', () => {
+    const claves = pasosDelCiclo('aceptada', 'caso_desincronizado').map((p) => p.clave);
+
+    expect(claves).not.toContain('encolada');
+    expect(claves).not.toContain('validada');
+  });
+
+  it('aprobada NO implica cerrada: el cierre revalida y puede no ocurrir', () => {
+    //  La garantia que reemplaza a la vieja "no ejecuta nada": el backend
+    //  intenta, pero 'aceptada' no significa que el caso haya quedado cerrado.
+    const r = Object.fromEntries(
+      pasosDelCiclo('aceptada', 'caso_desincronizado').map((p) => [p.clave, p.estado])
+    );
+
+    expect(r.aprobada).toBe('actual');
+    expect(r.cierre).toBe('inactivo');
+  });
+
+  it('un caso antiguo conserva las seis etapas: ahi aceptar no ejecuta', () => {
+    const claves = pasosDelCiclo('aceptada', 'caso_abierto_antiguo').map((p) => p.clave);
+
+    expect(claves).toEqual(['propuesta', 'revisada', 'aprobada', 'encolada', 'ejecutada', 'validada']);
+  });
 });
 
 // ===========================================================================
@@ -414,13 +450,46 @@ describe('análisis separado', () => {
 });
 
 describe('¿qué pasa si acepto?', () => {
-  it('NO promete que el caso se cierre', () => {
-    //  La garantía más importante de esta pantalla: aceptar registra un
-    //  acuerdo, no ejecuta nada. El estado «ejecutada» no existe en el modelo.
+  //  --------------------------------------------------------------------
+  //  HASTA EL 29/09/2026 ACA HABIA UNA SOLA PRUEBA -- «NO promete que el caso
+  //  se cierre» -- y usaba justo una propuesta 'caso_desincronizado' como
+  //  ejemplo. O sea que blindaba el texto falso para el unico tipo que SI
+  //  ejecuta. Se parte en dos, una por conducta, y cada una afirma sobre el
+  //  efecto anunciado, no sobre la presencia de una frase.
+  //  --------------------------------------------------------------------
+  it('una desincronizacion anuncia la revalidacion y el intento de cierre', () => {
     const r = siAcepto(DESINCRONIZADO);
+
+    expect(r.ejecuta).toBe(true);
+    expect(r.efecto).toMatch(/valida/i);
+    expect(r.efecto).toMatch(/cerrar el caso/i);
+    //  Lo que no cambia para ningun tipo, y es la garantia que queda viva.
+    expect(r.efecto).toMatch(/no toca wisphub/i);
+  });
+
+  it('una desincronizacion NO promete que el cierre vaya a ocurrir', () => {
+    //  Anunciar el intento no es prometer el resultado: el backend revalida
+    //  doce condiciones y puede no cerrar. Prometerlo seria el error opuesto
+    //  al que esta pantalla tenia.
+    const r = siAcepto(DESINCRONIZADO);
+
+    expect(r.efecto).toMatch(/si alguna cambió, no se ejecuta/i);
+    expect(JSON.stringify(r)).not.toMatch(/Dexter: ?Cerrado/);
+  });
+
+  it('un caso antiguo sigue sin ejecutar nada', () => {
+    const r = siAcepto({ ...DESINCRONIZADO, tipo_senal: 'caso_abierto_antiguo' });
+
+    expect(r.ejecuta).toBe(false);
     expect(r.efecto).toMatch(/no cierra el caso/i);
     expect(r.efecto).toMatch(/no ejecuta/i);
-    expect(JSON.stringify(r)).not.toMatch(/Dexter: ?Cerrado/);
+  });
+
+  it('un tipo de senal desconocido no ejecuta: la lista es blanca', () => {
+    //  Fail-closed. Un tipo nuevo del backend no anuncia una ejecucion que
+    //  nadie verifico -- se anuncia recien cuando se agrega a mano.
+    expect(siAcepto({ ...DESINCRONIZADO, tipo_senal: 'algo_nuevo' }).ejecuta).toBe(false);
+    expect(siAcepto({}).ejecuta).toBe(false);
   });
 
   it('muestra la acción con las palabras de la propuesta', () => {

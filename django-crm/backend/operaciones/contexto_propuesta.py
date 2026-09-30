@@ -47,9 +47,25 @@ from collections import defaultdict
 ORIGEN_ORDEN = "orden_trabajo"
 ORIGEN_CASO = "case"
 
+#  El mismo valor con el que el detector y el cierre deciden. Se declara aca y
+#  no se importa de 'supervisor' para no cerrar un ciclo de imports; si alguna
+#  vez deja de ser 'Closed', hay que moverlo en los tres lugares -- y las
+#  pruebas de este modulo lo afirman contra 'Case', no contra la constante.
+CERRADO_EN_DEXTER = "Closed"
+
 VACIO = {
     "zona": "",
     "tecnico": "",
+    #  Si el ORIGEN de la propuesta ya no tiene trabajo operativo pendiente.
+    #
+    #  Separa dos cosas que se venian mezclando: el estado de la PROPUESTA
+    #  (¿alguien decidio?) y el estado del CASO (¿queda algo por hacer?). La
+    #  bandeja de pendientes necesita los dos -- una propuesta sin decidir sobre
+    #  un caso que ya cerro no es trabajo operativo de nadie.
+    #
+    #  Falso por omision, y eso vale para los origenes que NO son un caso: no se
+    #  inventa una regla para ellos, se los deja como estaban.
+    "origen_cerrado": False,
     "ticket_externo": "",
     "proveedor_externo": "",
     "orden_numero": None,
@@ -214,7 +230,7 @@ def contexto_de(org, propuestas) -> dict:
             for c in Case.objects.filter(org=org, id__in=ids_caso)
             .select_related("account")
             .only("id", "provider", "external_ticket_id", "name", "created_at",
-                  "account__name", "external_client_name")
+                  "status", "account__name", "external_client_name")
         }
 
     # --- El plazo operativo ------------------------------------------------
@@ -257,6 +273,7 @@ def contexto_de(org, propuestas) -> dict:
         elif p.origen_tipo == ORIGEN_CASO and origen in casos:
             caso = casos[origen]
             salida[clave].update({
+                "origen_cerrado": caso.status == CERRADO_EN_DEXTER,
                 "ticket_externo": caso.external_ticket_id or "",
                 "proveedor_externo": caso.provider or "",
                 "cliente": _nombre_de_cliente(caso),

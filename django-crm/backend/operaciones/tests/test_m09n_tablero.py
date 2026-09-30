@@ -214,9 +214,14 @@ def test_el_contexto_no_devuelve_coordenadas_aunque_la_orden_las_tenga(org_a):
     # se agregue al contexto rompe esta prueba y obliga a mirarlo. Ya cazo los
     # tres de la bandeja -- cliente, asunto y origen_creado_en -- que se
     # declaran aqui despues de comprobar que ninguno trae coordenadas.
+    #  'origen_cerrado' entro el 29/09/2026: es un BOOLEANO derivado de
+    #  'Case.status', no un dato de ubicacion ni de persona. Se declara aca
+    #  porque este conjunto es exacto a proposito -- cualquier clave nueva del
+    #  contexto tiene que pasar por esta prueba antes de llegar a la pantalla.
     assert set(fila) == {
         "zona", "tecnico", "ticket_externo", "proveedor_externo", "orden_numero",
-        "sla_estado", "sla_minutos", "cliente", "asunto", "origen_creado_en"}
+        "sla_estado", "sla_minutos", "cliente", "asunto", "origen_creado_en",
+        "origen_cerrado"}
 
 
 # =============================================================================

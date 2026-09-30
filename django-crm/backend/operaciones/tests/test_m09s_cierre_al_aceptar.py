@@ -799,3 +799,193 @@ def test_una_propuesta_de_otro_tipo_no_intenta_ningun_cierre(org_a, monkeypatch)
     assert r.data["motivo"] == ""
     assert llamadas == [], "intento cerrar una propuesta que no es de cierre"
     assert not _cerro_de_verdad(caso)
+
+# =============================================================================
+#  §7  LO QUE EL CIERRE NO TOCA, Y EL NIVEL QUE NO DECIDE
+# =============================================================================
+
+def test_18_el_cierre_no_llama_a_wisphub_por_ningun_lado(org_a, user_profile,
+                                                          monkeypatch):
+    """
+    La unica salida al mundo es el motor. WispHub no se entera.
+
+    NO se sustituye '_pedirle_al_motor': se espia 'requests' entero, que es la
+    capa por donde tendria que salir cualquier llamada a un tercero. Asi la
+    prueba no cree en el disenio -- mide las URL que de verdad se pidieron.
+
+    Sin esto, la garantia "el cierre no modifica WispHub" se sostenia en que
+    nadie habia escrito esa llamada, que es exactamente el tipo de afirmacion
+    que este repositorio no acepta: se afirma sobre el efecto, no sobre la
+    ausencia observada al leer el codigo.
+    """
+    import requests
+
+    urls = []
+
+    def _espia(verbo):
+        def falso(url, *a, **kw):
+            urls.append((verbo, url))
+
+            class R:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    return dict(OK_MOTOR)
+            return R()
+        return falso
+
+    for verbo in ("post", "get", "patch", "put", "delete", "request"):
+        monkeypatch.setattr(requests, verbo, _espia(verbo), raising=False)
+
+    with rls_org(org_a):
+        caso = _caso(org_a)
+        p = _propuesta(org_a, caso)
+        r = cierre_de_caso.cerrar(p, actor=user_profile)
+
+    assert r["cerrado"] is True, r
+    assert len(urls) == 1, f"se esperaba UNA sola llamada saliente: {urls}"
+
+    verbo, url = urls[0]
+    assert verbo == "post", verbo
+    #  Va al motor, y a la ruta del cierre por propuesta.
+    assert f"/interno/propuesta/{p.id}/cerrar-caso" in url, url
+    #  Y a nada mas. Se comprueba contra el proveedor por nombre y por dominio.
+    for prohibido in ("wisphub", "api.wisphub", "smartolt"):
+        assert prohibido not in url.lower(), f"salio hacia {prohibido}: {url}"
+
+
+@pytest.mark.parametrize("nivel", [0, 1, 2, 3, 4])
+def test_19_el_nivel_de_autonomia_no_veta_una_decision_humana(org_a, user_profile,
+                                                               monkeypatch, nivel):
+    """
+    'nivel_autonomia_requerido' NO es un permiso, y esta prueba lo fija.
+
+    El campo dice "que nivel HABRIA hecho falta para ejecutarla sola": es
+    contrafactico sobre la autonomia, no una condicion sobre lo que una persona
+    puede autorizar. La autorizacion humana la da 'frontera.humana()', que pide
+    actor y evidencia y no consulta ni techo ni interruptor de autonomia.
+
+    Se decidio el 29/09/2026 NO convertirlo en permiso, y el motivo es medible:
+    las 108 propuestas 'caso_desincronizado' vivas en produccion son de nivel 0
+    --se crearon antes de que el detector pasara a 'recomendar'-- y una regla
+    "nivel 0 no cierra" las habria dejado sin salida para siempre, porque
+    'ESTADOS_QUE_BLOQUEAN' impide que el detector las vuelva a proponer.
+
+    Se recorren los cinco niveles a proposito: la prueba tiene que fallar el dia
+    que alguien introduzca el veto por CUALQUIERA de ellos, no solo por el 0.
+    """
+    monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor",
+                        _motor_dice(OK_MOTOR))
+    with rls_org(org_a):
+        caso = _caso(org_a)
+        p = _propuesta(org_a, caso)
+        PropuestaSupervisor.objects.filter(pk=p.pk).update(
+            nivel_autonomia_requerido=nivel)
+        p.refresh_from_db()
+
+        r = cierre_de_caso.cerrar(p, actor=user_profile)
+
+    #  El motor esta sustituido, asi que el PATCH real no ocurre: lo que se
+    #  afirma es que el nivel no impidio LLEGAR a pedirselo. Que el caso
+    #  quede Closed de verdad lo prueban test_2 y test_3 con el motor real.
+    assert r["cerrado"] is True, f"nivel {nivel} bloqueo una decision humana: {r}"
+    assert r["motivo"] == "", r
+
+
+def test_20_una_propuesta_aceptada_con_cierre_fallido_no_tiene_vuelta(
+        org_a, user_profile, monkeypatch):
+    """
+    ACEPTADA != CERRADA, y no hay reintento. Se afirma el estado final entero.
+
+    Decision del 29/09/2026 (alternativa D): la propuesta queda como historico.
+    No se reabre, no se repropone y no existe un endpoint de reintento. Esta
+    prueba fija las cuatro mitades de esa decision juntas, porque cada una por
+    separado se puede romper sin que las otras se enteren.
+    """
+    monkeypatch.setattr(
+        cierre_de_caso, "_pedirle_al_motor",
+        _motor_dice({"cerrado": False, "codigo": "FALLO_AL_CERRAR",
+                     "motivo": "el CRM devolvio 500", "referencia": ""}))
+    with rls_org(org_a):
+        caso = _caso(org_a)
+        p = _propuesta(org_a, caso)
+        r = cierre_de_caso.cerrar(p, actor=user_profile)
+
+        #  1. no se cerro, y el motivo viaja en clave
+        assert r["cerrado"] is False
+        assert r["motivo"] == "FALLO_AL_CERRAR"
+        #  2. el caso quedo como estaba
+        assert not _cerro_de_verdad(caso)
+        #  3. la decision humana NO se revirtio
+        p.refresh_from_db()
+        assert p.estado == PropuestaSupervisor.ACEPTADA
+        #  4. queda la trazabilidad, sobre la propuesta y no sobre el caso
+        act = Activity.objects.filter(entity_type="PropuestaSupervisor",
+                                      entity_id=p.id).order_by("-created_at").first()
+        assert act is not None
+        assert act.metadata["motivo"] == "FALLO_AL_CERRAR"
+        assert act.metadata["resultado"] == "aceptada, ejecucion fallida"
+        assert act.user_id == user_profile.id
+
+        #  5. y no vuelve sola: su estado esta entre los que frenan al detector
+        assert p.estado in PropuestaSupervisor.ESTADOS_QUE_BLOQUEAN, (
+            "si 'aceptada' dejara de bloquear, el detector repondria la "
+            "propuesta y eso SERIA un reintento automatico")
+
+# =============================================================================
+#  §8  EL ESTADO DEL CASO VIAJA A LA BANDEJA, Y NO ES EL DE LA PROPUESTA
+# =============================================================================
+
+def test_21_el_contexto_dice_si_el_caso_del_origen_ya_cerro(org_a):
+    """
+    'origen_cerrado' es un DATO del caso, no un estado nuevo de la propuesta.
+
+    La bandeja de pendientes lo necesita para no mostrar como trabajo operativo
+    algo que ya no lo es. Se afirma sobre los dos lados -- abierto y cerrado --
+    porque una version que devolviera siempre False pasaria una prueba que solo
+    mirara el caso abierto.
+    """
+    from operaciones import contexto_propuesta
+
+    with rls_org(org_a):
+        abierto = _caso(org_a, status="New")
+        p_abierto = _propuesta(org_a, abierto, estado=PropuestaSupervisor.PROPUESTA)
+
+        cerrado = _caso(org_a, status="New")
+        p_cerrado = _propuesta(org_a, cerrado, estado=PropuestaSupervisor.PROPUESTA)
+        #  Se cierra DESPUES de crear la propuesta: es el escenario real -- el
+        #  caso lo cerro otra via y la propuesta quedo sin revisar.
+        Case.objects.filter(pk=cerrado.pk).update(status="Closed")
+
+        ctx = contexto_propuesta.contexto_de(org_a, [p_abierto, p_cerrado])
+
+    assert ctx[str(p_abierto.id)]["origen_cerrado"] is False
+    assert ctx[str(p_cerrado.id)]["origen_cerrado"] is True
+    #  Y lo que NO cambia: el estado de la propuesta sigue siendo el suyo. Un
+    #  caso cerrado no inventa una decision que nadie tomo.
+    p_cerrado.refresh_from_db()
+    assert p_cerrado.estado == PropuestaSupervisor.PROPUESTA
+
+
+def test_22_la_bandeja_recibe_el_dato_por_el_serializer(org_a):
+    """
+    Que el contexto lo calcule no sirve si el serializer no lo entrega.
+
+    Es la falla que este repositorio ya vio cuatro veces: el dato existe de un
+    lado de la frontera y del otro no. Se afirma sobre la carga util.
+    """
+    from operaciones import contexto_propuesta
+    from operaciones.serializers import PropuestaListaSerializer
+
+    with rls_org(org_a):
+        caso = _caso(org_a, status="New")
+        p = _propuesta(org_a, caso, estado=PropuestaSupervisor.PROPUESTA)
+        Case.objects.filter(pk=caso.pk).update(status="Closed")
+
+        ctx = contexto_propuesta.contexto_de(org_a, [p])
+        datos = PropuestaListaSerializer(p, context={"contexto": ctx}).data
+
+    assert "origen_cerrado" in datos, "el serializer no entrega el dato"
+    assert datos["origen_cerrado"] is True
+    assert datos["estado"] == PropuestaSupervisor.PROPUESTA

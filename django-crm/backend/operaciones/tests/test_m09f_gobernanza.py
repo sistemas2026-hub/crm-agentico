@@ -25,8 +25,15 @@ preguntaba:
 
 LA REGLA QUE ATRAVIESA TODO EL ARCHIVO
 --------------------------------------
-Una decisión humana no ejecuta nada. Se afirma con espías que CUENTAN, no
-leyendo el código y concluyendo que no vio ninguna llamada.
+Ninguna de las rutas que cubre este archivo ejecuta nada. Se afirma con espías
+que CUENTAN, no leyendo el código y concluyendo que no vio ninguna llamada.
+
+La regla se enunciaba como "una decisión humana no ejecuta nada", y dejó de ser
+cierta en general el día del cierre controlado: aceptar un 'caso_desincronizado'
+SÍ intenta cerrar el caso en Dexter. Eso vive en su propia suite
+(test_m09s_cierre_al_aceptar.py) y no toca ninguna de estas rutas -- por eso
+estas pruebas siguen en verde y por eso el enunciado se acota en vez de
+borrarse.
 ================================================================================
 """
 

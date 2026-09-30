@@ -1680,7 +1680,10 @@ def expirar_vencidas(org, ahora=None) -> int:
 #                         rompe la deduplicacion: la misma condicion volveria a
 #                         proponerse mañana con la huella vieja.
 #    - 'estado'           lo decide la decision, no un campo suelto.
-#    - 'accion_propuesta_ref'  el puente a la ejecucion. Vacio toda la etapa.
+#    - 'accion_propuesta_ref'  el puente a la ejecucion. Lo escribe el cierre
+#                         controlado con la clave de la operacion idempotente,
+#                         nunca un revisor: editarlo a mano seria inventar una
+#                         ejecucion que no ocurrio.
 #    - 'nivel_autonomia_requerido'  subirlo a mano seria darse permiso.
 CAMPOS_MODIFICABLES = frozenset({
     "accion_propuesta",
