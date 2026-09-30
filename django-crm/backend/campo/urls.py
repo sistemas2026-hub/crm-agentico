@@ -70,6 +70,9 @@ urlpatterns = [
     path("trabajos/<uid:pk>/validar/", despacho_views.ValidarTrabajoView.as_view(), name="trabajo_validar"),
     path("trabajos/<uid:pk>/", views.TrabajoDetailView.as_view(), name="trabajo_detail"),
     path("trabajos/<uid:pk>/acciones/", views.AccionesTrabajoView.as_view(), name="trabajo_acciones"),
+    # Que material toco esta orden. Solo lectura: mover inventario entra por
+    # las rutas de inventario/, que son las que tienen la frontera puesta.
+    path("trabajos/<uid:pk>/materiales/", views.MaterialesDeOrdenView.as_view(), name="trabajo_materiales"),
     path("trabajos/<uid:pk>/datos/", views.GuardarDatosTrabajoView.as_view(), name="trabajo_datos"),
     path("trabajos/<uid:pk>/probar-conexion/", views.ProbarConexionView.as_view(), name="trabajo_probar_conexion"),
     path("trabajos/<uid:pk>/evidencias/", views.EvidenciasTrabajoView.as_view(), name="trabajo_evidencias"),

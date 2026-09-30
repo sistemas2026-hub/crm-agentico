@@ -419,3 +419,33 @@ export function planesQueCubren(planes, dia) {
     return p.semana_inicio <= dia && dia <= p.semana_fin;
   });
 }
+
+/**
+ * Qué material tocó una orden.
+ *
+ * NO SE RECALCULA NADA ACA
+ * ------------------------
+ * El backend devuelve movimientos que ya existen, agrupados. Esta capa los pasa
+ * tal cual. Sumar acá crearia una segunda contabilidad que compite con
+ * `existencia(ubicacion, material)`, que es la unica verdad del libro.
+ *
+ * `custodia` viene APAGADO por defecto. El kit del dia es de la persona, no del
+ * trabajo, y pedirlo siempre invitaria a dibujarlo como material de esta orden.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} ordenId
+ * @param {{ custodia?: boolean }} [opciones]
+ */
+export async function leerMaterialesDeOrden({ cookies }, ordenId, opciones = {}) {
+  const sufijo = opciones.custodia ? '?custodia=1' : '';
+  try {
+    const d = await apiRequest(
+      `/campo/trabajos/${ordenId}/materiales/${sufijo}`,
+      {},
+      { cookies }
+    );
+    return { datos: d, error: null };
+  } catch (/** @type {any} */ err) {
+    return { datos: null, error: traducirError(err, 'los materiales de esta orden') };
+  }
+}

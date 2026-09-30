@@ -28,6 +28,7 @@ from campo.serializers import (
     RegistroEvidenciaSerializer,
 )
 from campo.services.idempotencia import manejar_idempotencia
+from campo.services.materiales_de_orden import materiales_de_orden
 from campo.services.telemetria import (
     TANDAS,
     SinServicioParaPing,
@@ -207,6 +208,35 @@ class TrabajoDetailView(APIView):
         orden = _obtener_orden_o_404(request, pk)
         serializer = OrdenTrabajoDetailSerializer(orden)
         return Response(serializer.data)
+
+
+class MaterialesDeOrdenView(APIView):
+    """Que material toco esta orden: comprometido, consumido, devuelto y otros.
+
+    Solo lectura, y a proposito: la ficha de una orden no es lugar para mover
+    inventario. Despachar, devolver y trasladar siguen entrando por sus propias
+    rutas, que son las que tienen la frontera puesta.
+
+    El aislamiento lo da `_obtener_orden_o_404`: una orden de otra empresa
+    responde 404 --nunca 403-- y un tecnico que no esta asignado tampoco la ve.
+    No se repite el chequeo aca para que exista UN solo lugar donde se decide
+    quien puede leer una orden.
+
+    `?custodia=1` agrega el kit vigente del tecnico como CONTEXTO. Viene apagado
+    por defecto porque no es material de esta orden, y la respuesta lo dice en el
+    propio dato (`es_de_esta_orden: false`).
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        incluir = str(request.query_params.get("custodia", "")).lower() in (
+            "1", "true", "si", "sí",
+        )
+        return Response(
+            materiales_de_orden(orden, incluir_custodia=incluir)
+        )
 
 
 class AccionesTrabajoView(APIView):

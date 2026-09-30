@@ -17,6 +17,16 @@
   let cargandoFicha = $state(false);
   let errorFicha = $state(/** @type {string|null} */ (null));
 
+  // Los materiales de la orden abierta. Viven aparte de 'ficha' porque son otra
+  // llamada: la ficha se ve enseguida y esto llega despues, en vez de retrasar
+  // las dos cosas hasta que la mas lenta termine.
+  let materiales = $state(/** @type {any} */ (null));
+  let cargandoMateriales = $state(false);
+  let errorMateriales = $state(/** @type {string|null} */ (null));
+  //: El kit del dia es de la PERSONA, no del trabajo. Apagado por defecto y con
+  //: su propio rotulo cuando se enciende.
+  let verCustodia = $state(false);
+
   // Formularios de escritura, cada uno detras de su confirmacion.
   let modalReprogramar = $state(/** @type {any} */ (null));
   let modalSecuencia = $state(/** @type {any} */ (null));
@@ -119,12 +129,76 @@
     } finally {
       cargandoFicha = false;
     }
+    void cargarMateriales(ordenId);
+  }
+
+  /**
+   * Que material toco esta orden.
+   *
+   * No suma ni calcula: el backend devuelve movimientos que YA existen,
+   * agrupados por lo que significan. Un total en esta pantalla seria una segunda
+   * contabilidad compitiendo con el libro.
+   *
+   * @param {string} ordenId
+   */
+  async function cargarMateriales(ordenId) {
+    materiales = null;
+    errorMateriales = null;
+    cargandoMateriales = true;
+    try {
+      const q = verCustodia ? '?custodia=1' : '';
+      const r = await fetch(`/api/supervisor-noc/ordenes/${ordenId}/materiales${q}`);
+      const cuerpo = await r.json().catch(() => ({}));
+      if (!r.ok) errorMateriales = cuerpo?.error ?? 'No fue posible consultar los materiales.';
+      else materiales = cuerpo;
+    } catch {
+      errorMateriales = 'No fue posible consultar los materiales: el servicio no respondió.';
+    } finally {
+      cargandoMateriales = false;
+    }
+  }
+
+  /** Enciende o apaga el kit del dia, y vuelve a pedirlo. */
+  function alternarCustodia() {
+    verCustodia = !verCustodia;
+    const id = materiales?.orden_id ?? ficha?.id;
+    if (id) void cargarMateriales(id);
+  }
+
+  /**
+   * Los cuatro bloques, en el orden en que se leen. Cada uno dice de donde sale
+   * su dato; el pie existe para que nadie tenga que adivinarlo.
+   */
+  const GRUPOS_MATERIAL = [
+    {
+      clave: 'comprometido',
+      titulo: 'Comprometido para esta orden',
+      pie: 'Reservado contra una bodega. Es lo unico que de verdad esta asignado a este trabajo.'
+    },
+    { clave: 'consumido', titulo: 'Consumido en esta orden', pie: '' },
+    { clave: 'devuelto', titulo: 'Devuelto', pie: '' },
+    {
+      clave: 'otros',
+      titulo: 'Otros movimientos de esta orden',
+      pie: 'Ajustes, traslados y bajas que alguien ato a esta orden.'
+    }
+  ];
+
+  /** Una cantidad legible, con la unidad del material. */
+  function conUnidad(linea) {
+    const n = Number(linea?.cantidad ?? 0);
+    const texto = Number.isFinite(n)
+      ? n.toLocaleString('es-CO', { maximumFractionDigits: 3 })
+      : String(linea?.cantidad ?? '—');
+    return `${texto} ${linea?.material?.unidad ?? ''}`.trim();
   }
 
   /** @param {string} profileId */
   async function abrirPersona(profileId) {
     drawer = 'persona';
     ficha = null;
+    materiales = null;
+    errorMateriales = null;
     errorFicha = null;
     cargandoFicha = true;
     try {
@@ -848,6 +922,141 @@
                 <p class="snoc-body" style="margin:0;">{ficha.diagnostico_previo}</p>
               </div>
             {/if}
+
+            <!--
+              MATERIALES DE ESTA ORDEN
+
+              Cada bloque dice de donde sale, porque los cuatro significan cosas
+              distintas y mezclarlos es la forma de que alguien lea "150 m" como
+              gastados en una casa cuando eran el kit de todo el dia.
+
+              No hay totales a proposito: la existencia sale del libro
+              --existencia(ubicacion, material)-- y una suma aca seria una segunda
+              contabilidad.
+            -->
+            <div class="snoc-pila-xs">
+              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">
+                Materiales de esta orden
+              </span>
+
+              {#if cargandoMateriales}
+                <p class="snoc-body-sm snoc-tenue" style="margin:0;">Consultando movimientos…</p>
+              {:else if errorMateriales}
+                <p class="snoc-body-sm snoc-error-txt" style="margin:0;">{errorMateriales}</p>
+              {:else if materiales}
+                {#if materiales.con_novedad > 0}
+                  <div class="snoc-analisis snoc-faltante">
+                    <span class="snoc-insignia snoc-insignia-error">
+                      {materiales.con_novedad} movimiento(s) con novedad
+                    </span>
+                    <p class="snoc-body" style="margin:0;">
+                      Un <strong>descuadre</strong> o un <strong>conflicto</strong> quedó registrado
+                      en esta orden. El hecho se respeta —no se corrige solo—: alguien de bodega
+                      tiene que mirarlo.
+                    </p>
+                  </div>
+                {/if}
+
+                {#if !materiales.hay_algo}
+                  <p class="snoc-body-sm snoc-tenue" style="margin:0;">
+                    Esta orden todavía no tiene material reservado ni consumido.
+                  </p>
+                {/if}
+
+                {#each GRUPOS_MATERIAL as grupo (grupo.clave)}
+                  {#if (materiales[grupo.clave] ?? []).length}
+                    <div class="snoc-pila-xs">
+                      <span class="snoc-label-sm">{grupo.titulo}</span>
+                      <div class="snoc-tabla-caja">
+                        <table class="snoc-tabla">
+                          <thead>
+                            <tr>
+                              <th scope="col">Material</th>
+                              <th scope="col">Cantidad</th>
+                              <th scope="col">Serie</th>
+                              <th scope="col">Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {#each materiales[grupo.clave] as linea (linea.id)}
+                              <tr>
+                                <td>
+                                  <span class="snoc-mono-sm">{linea.material.codigo}</span>
+                                  <span class="snoc-body-sm snoc-tenue">
+                                    · {linea.material.nombre}
+                                  </span>
+                                </td>
+                                <td class="snoc-mono-sm">{conUnidad(linea)}</td>
+                                <td class="snoc-mono-sm">{linea.serie || '—'}</td>
+                                <td>
+                                  {#if grupo.clave === 'comprometido'}
+                                    <span class="snoc-insignia">
+                                      {linea.pendiente ? 'pendiente' : linea.desenlace || 'resuelta'}
+                                    </span>
+                                  {:else}
+                                    <span
+                                      class="snoc-insignia {linea.estado === 'aceptado'
+                                        ? ''
+                                        : 'snoc-insignia-error'}"
+                                    >
+                                      {linea.estado}
+                                    </span>
+                                    {#if linea.motivo}
+                                      <span class="snoc-body-sm snoc-tenue"> {linea.motivo}</span>
+                                    {/if}
+                                  {/if}
+                                </td>
+                              </tr>
+                            {/each}
+                          </tbody>
+                        </table>
+                      </div>
+                      {#if grupo.pie}
+                        <span class="snoc-body-sm snoc-tenue">{grupo.pie}</span>
+                      {/if}
+                    </div>
+                  {/if}
+                {/each}
+
+                <!--
+                  El kit del dia, aparte y rotulado. 'EntregaDeKit' no tiene FK a
+                  la orden: el despacho de la mañana es a la custodia del tecnico,
+                  que con los mismos materiales hace cinco trabajos.
+                -->
+                <button type="button" class="snoc-btn" onclick={alternarCustodia}>
+                  {verCustodia ? 'Ocultar' : 'Ver'} lo que el técnico lleva encima hoy
+                </button>
+
+                {#if verCustodia && materiales.custodia_del_tecnico}
+                  <div class="snoc-analisis snoc-observado">
+                    <span class="snoc-insignia snoc-insignia-variante">
+                      Custodia del técnico — NO es material de esta orden
+                    </span>
+                    <p class="snoc-body" style="margin:0;">
+                      Es el kit que
+                      <strong>
+                        {materiales.custodia_del_tecnico.tecnico?.nombre ?? 'el técnico'}
+                      </strong>
+                      tiene encima para toda la jornada{#if materiales.custodia_del_tecnico.acta}{' '}
+                        (acta
+                        <span class="snoc-mono-sm">{materiales.custodia_del_tecnico.acta}</span>){/if}.
+                      Con esto atiende varias órdenes, así que no dice cuánto se usó acá.
+                    </p>
+                    {#if (materiales.custodia_del_tecnico.items ?? []).length}
+                      <div class="snoc-mono-sm snoc-tenue snoc-pila-xs">
+                        {#each materiales.custodia_del_tecnico.items as item, i (i)}
+                          <span>{item.material.codigo} · {conUnidad(item)}</span>
+                        {/each}
+                      </div>
+                    {:else}
+                      <p class="snoc-body-sm snoc-tenue" style="margin:0;">
+                        Sin kit vigente registrado.
+                      </p>
+                    {/if}
+                  </div>
+                {/if}
+              {/if}
+            </div>
           {:else if ficha && drawer === 'persona'}
             <div class="snoc-pila-xs">
               <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Capacidad del {data.dia}</span>
