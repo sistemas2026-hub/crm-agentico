@@ -1,8 +1,51 @@
 # Objetivo · El seguimiento de campo vive en la orden, no en un chat
 
-> Abierto el 29/09/2026. **Las cuatro fases cerradas el 30/09/2026** (`affadd9`),
-> SIN push. Queda una sola cosa pendiente y está dicha: el latido de la app, sin
-> el cual «sin sincronización reciente» no se puede encender.
+> **Estado: CERRADO — 30/09/2026.** Abierto el 29/09/2026.
+>
+> Fases A–D implementadas, medidas y con sus límites escritos. **No quedan
+> funciones pendientes dentro de este objetivo.**
+>
+> Fuera de alcance, deliberadamente y con su motivo:
+>
+> - **el latido móvil** — no existe señal periódica de conectividad fiable en la
+>   aplicación actual, así que «sin sincronización reciente» queda construido,
+>   probado y **apagado**. Encenderlo cambia comportamiento móvil, consumo,
+>   batería, trabajo en segundo plano y frecuencia de sincronización: es otro
+>   objetivo, no un agregado de este;
+> - **la publicación automática en Google Chat** — hasta resolver el tratamiento de
+>   datos con terceros. La fase 1 (generar y copiar el texto) no tiene ese problema
+>   porque la pega una persona.
+>
+> Las invariantes que salieron de acá quedaron congeladas en `CLAUDE.md` §12, y la
+> regla de la prueba de cadena real en §6.
+
+## Gate de cierre (30/09/2026)
+
+Siete pasos, sin código nuevo salvo dos arreglos que el propio gate destapó.
+
+| # | Qué | Resultado |
+|---|---|---|
+| 1 | `pytest campo/` (SQLite) | **486 pasan**, 7 skips |
+| 2 | `pytest campo/` **entera contra Postgres real** | **493 pasan, cero rojos y cero skips.** Nunca se había corrido así, y encontró dos defectos (abajo) |
+| 3 | `vitest` de la cadena del frontend | **42 pasan**. En la carpeta entera hay 32 rojos en 13 archivos **ajenos** (business-hours, leads, macros, routing, tags…), ninguno de este trabajo |
+| 4 | `pnpm check` | **41 errores y 26 warnings en 29 archivos** — los mismos que antes de empezar; ninguno en archivos de campo ni de esta pantalla. Registrados acá para que no se lean como regresión |
+| 5 | Migraciones **desde una base vacía** | Las 16 de `campo` aplican de cero, incluida la migración de datos `0011`; cero pendientes en todo el proyecto; `makemigrations --check` → «No changes detected» |
+| 6 | Recorrido en el navegador | Materiales → INICIO → AVANCE → BLOQUEO NOC → resolución → CIERRE, entero y en orden |
+| 7 | Enlaces | Este objetivo es **una sola ficha** con las cuatro fases dentro, así que no hay fichas A/B/C/D separadas que cruzar. El enlace desde `DEXTER_ESTADO_ACTUAL.md` lo escribe la sesión dueña de ese archivo: esta entrega el hash y la línea |
+
+**Los dos defectos que destapó el paso 2**, los dos en pruebas ajenas y los dos
+invisibles en SQLite:
+
+1. `test_anonimizador.py` **mutaba** `settings.DATABASES["default"]` en vez de
+   reasignar el atributo, así que `pytest-django` no lo revertía: después de esa
+   prueba la configuración quedaba apuntando a `crm.empresa-de-verdad.co` y **toda
+   conexión nueva posterior moría** con «failed to resolve host». Eso tiraba 7
+   pruebas de concurrencia que pasan solas. Medido con el middleware de contacto
+   desactivado para descartar que fuera de este trabajo: las mismas 10.
+2. `test_inventario_fase2_api.py` comparaba decimales **por su texto**
+   (`== "30"`), y Postgres serializa esa columna como `"30.000"`. Una prueba que
+   afirma sobre el formato mide el motor de base, no el comportamiento.
+
 
 ## Qué significa terminado
 

@@ -175,6 +175,18 @@ PARSEA ≠ IMPORTA ≠ FUNCIONA
 
 El mismo día, tres pruebas estaban en verde con el síntoma vivo. Una afirmaba `deriva_a` y `usa` pero no que la respuesta no fuera una promesa; otra usaba la frase que sí funciona en vez de la que falla; la tercera afirmaba que una variable *existiera*, y **sobrevivió intacta a una inversión completa de la conducta**.
 
+**Toda función nueva necesita al menos una prueba que atraviese la cadena real**,
+no solo el servicio. El camino completo es
+`móvil/frontend → server action → API → servicio → base → load → pantalla`, y
+cualquiera de esos saltos puede perder o renombrar un dato con el backend en verde.
+
+Ya se cobró dos veces el mismo día (29/09/2026): `requiere_noc` viajaba bien desde
+el backend —con su prueba pasando— y la capa servidor del frontend lo dejaba caer,
+así que la bandeja del NOC quedaba vacía para siempre; y la línea de tiempo leía
+`estado_nuevo` mientras `transiciones.py` escribe `nuevo_estado`, con la prueba en
+verde porque *fabricaba* el evento con la clave equivocada en vez de ejecutar una
+transición. **Ninguna prueba de backend podía ver ninguno de los dos.**
+
 Corolario operativo: **código construido no es código que corre**. El reloj de tareas colgaba de un bloque `__main__` que gunicorn nunca ejecuta, y la reconciliación estaba probada y sin llamador. Ninguno dio error, log ni alerta. Al terminar algo, comprobar que *se ejecuta en la topología real*, no solo que existe.
 
 ---
@@ -365,6 +377,28 @@ Dos cosas que hay que saber antes de lanzar un `/goal` acá:
 ## §12 · Decisiones congeladas
 
 Cada una costó un incidente, una medición o las dos. No se redescubren ni se revierten sin decisión explícita.
+
+**Del seguimiento de campo** (objetivo cerrado el 30/09/2026; detalle y evidencia en
+[SPEC/objetivos/seguimiento-campo-por-ticket.md](SPEC/objetivos/seguimiento-campo-por-ticket.md)):
+
+- **El estado operativo es UNA sola máquina.** La salud del seguimiento es derivada
+  y no se guarda: un veredicto guardado diría «al día» mientras el reloj corre.
+- **`requiere_noc` no equivale a `bloqueada`.** Un trabajo esperando al cliente está
+  detenido y no lo destraba el NOC. Son dos filtros y los dos dicen la verdad.
+- **La hora del teléfono nunca decide sola un vencimiento.** La referencia es cuándo
+  el reporte LLEGÓ. La hora del dispositivo se guarda para reconstruir la historia.
+- **Un bloqueo que espera al NOC pausa la ventana; uno normal no.**
+- **Resolver un bloqueo abre una ventana nueva**, no devuelve el reloj anterior: un
+  trabajo destrabado no nace vencido.
+- **Un AVANCE sin INICIO es válido**, y visible como anomalía. Un reporte perdido es
+  peor que uno desordenado, y la línea de tiempo no se reordena para que parezca
+  prolija.
+- **Sin latido en la aplicación, Dexter no afirma «sin sincronización reciente».**
+  Medido: la cola se drena por eventos de la interfaz, así que la ausencia de
+  contacto no distingue «sin señal» de «app cerrada en el bolsillo».
+- **El backend decide, la pantalla representa.** La diferencia entre «no reportó» y
+  «no sé si tiene señal» es una acusación, no un detalle de formato: no puede vivir
+  en dos lugares.
 
 - **`ACCION_CONFIRMADA` no significa que el problema del cliente esté resuelto.** Significa que la acción produjo el efecto técnico que el sistema puede medir — en `reiniciar_ont`, que el equipo reinició y volvió. Que la casa tenga internet no lo dice ningún endpoint: lo sabe el cliente, y hay que preguntárselo. Ver [nucleo/seguimiento/verificacion_accion.py](nucleo/seguimiento/verificacion_accion.py).
 - **La condición de éxito de una acción no puede ser una mejora del ping.** Medido dos veces: el mismo equipo sano devuelve `1 de 3`, `2 de 3` y `3 de 3` en corridas seguidas (15/08/2026), y un reinicio real y confirmado dejó el ping en `3 de 3` **antes y después** (02/09/2026). Lo que prueba un reinicio es `last_status_change`: un sello discreto, comparado contra sí mismo.

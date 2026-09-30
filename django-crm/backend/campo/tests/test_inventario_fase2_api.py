@@ -75,9 +75,13 @@ def test_libre_devuelve_las_tres_cifras_juntas(admin_client, org_a, bodega,
     r = admin_client.get(LIBRE, {"ubicacion": str(bodega.id)})
     assert r.status_code == 200
     fila = r.json()["materiales"][0]
-    assert fila["existencia"] == "100.000"
-    assert fila["reservado"] == "30"
-    assert fila["libre"] == "70"
+    # Se compara el VALOR y no su texto: Postgres serializa 30 como "30.000"
+    # --la columna tiene decimal_places=3-- y SQLite como "30". Afirmar sobre el
+    # formato mide el motor de base, no el comportamiento. Encontrado el
+    # 30/09/2026, al correr campo/ entera contra Postgres real por primera vez.
+    assert Decimal(fila["existencia"]) == Decimal("100")
+    assert Decimal(fila["reservado"]) == Decimal("30")
+    assert Decimal(fila["libre"]) == Decimal("70")
 
 
 def test_reservar_por_la_api(admin_client, org_a, bodega, con_cien):
@@ -86,7 +90,7 @@ def test_reservar_por_la_api(admin_client, org_a, bodega, con_cien):
         "motivo": "instalaciones de mañana",
     }, format="json")
     assert r.status_code == 201, r.content
-    assert r.json()["libre_ahora"] == "75"
+    assert Decimal(r.json()["libre_ahora"]) == Decimal("75")
 
 
 def test_reservar_mas_de_lo_libre_da_409(admin_client, org_a, bodega, con_cien):
@@ -109,7 +113,7 @@ def test_liberar_por_la_api_no_borra_la_reserva(admin_client, org_a, bodega,
         f"{RESERVAS}{reserva.id}/liberar/", {"motivo": "se cayo la orden"},
         format="json")
     assert r.status_code == 200, r.content
-    assert r.json()["libre_ahora"] == "100"
+    assert Decimal(r.json()["libre_ahora"]) == Decimal("100")
     assert ReservaDeMaterial.objects.filter(org=org_a).count() == 1
 
 

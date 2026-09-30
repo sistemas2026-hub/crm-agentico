@@ -150,10 +150,23 @@ def test_6_se_niega_a_correr_contra_una_base_que_no_sea_local(
     en producción porque `manage.py` pisaba la configuración; un comando que
     reescribe nombres de clientes no puede depender de que nadie se equivoque.
     """
-    settings.DATABASES["default"] = {
-        **settings.DATABASES["default"],
-        "ENGINE": "django.db.backends.postgresql",
-        "HOST": "crm.empresa-de-verdad.co",
+    # SE REASIGNA EL ATRIBUTO ENTERO, no la clave de adentro.
+    #
+    # `settings.DATABASES["default"] = {...}` muta el diccionario que Django ya
+    # tiene, y entonces el fixture `settings` no tiene nada que restaurar: al
+    # terminar esta prueba la configuracion se quedaba apuntando a un host que no
+    # existe, y TODA conexion nueva posterior --los hilos de las pruebas de
+    # concurrencia, las de API-- moria con "failed to resolve host".
+    #
+    # Medido el 30/09/2026: con la mutacion, `pytest campo/` contra Postgres real
+    # dejaba 10 rojos en cinco archivos que pasan solos. Con la reasignacion, cero.
+    settings.DATABASES = {
+        **settings.DATABASES,
+        "default": {
+            **settings.DATABASES["default"],
+            "ENGINE": "django.db.backends.postgresql",
+            "HOST": "crm.empresa-de-verdad.co",
+        },
     }
 
     with pytest.raises(CommandError) as error:
