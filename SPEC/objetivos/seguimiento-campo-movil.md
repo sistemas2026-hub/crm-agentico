@@ -98,6 +98,36 @@ de lo que sea cómodo mostrar.
 Motivo medido, dos veces en una semana: cuando dos capas «saben» la misma regla,
 una queda atrás y nadie se entera hasta que alguien pierde un dato.
 
+**8 · Los eventos transportan SEMÁNTICA, no presentación.** La API expone
+`severidad` con valores controlados —`info`, `atencion`, `problema`— y la
+aplicación decide cómo se ve cada uno según sus propias reglas de diseño y
+accesibilidad. **No se envían colores, iconos ni referencias visuales desde el
+backend.**
+
+Quién es dueño de qué:
+
+| Concepto | Dueño | Motivo |
+|---|---|---|
+| Qué ocurrió (`bloqueo_campo`, `avance_campo`) | backend | Es el hecho |
+| Qué significa operacionalmente (`atencion`) | backend | Es interpretación, y la interpretación es del que sabe |
+| Cómo se ve (paleta, iconografía, contraste, modo oscuro) | frontend | Es presentación, y cada plataforma tiene la suya |
+
+Se descartó mandar `color: "warning"` e `icono: "pause"` por una razón concreta:
+eso obligaría a **dos frontends a compartir el mismo diccionario visual** —qué es
+«warning», qué ícono existe con ese nombre— que es el acoplamiento de `clave/id`
+corrido un nivel. Y dejaría un cambio de paleta como cambio de backend.
+
+Hay precedente propio, del 30/09/2026, en la salud del seguimiento del CRM: la
+`etiqueta` viaja desde el backend porque **el texto ES el veredicto** («sin
+sincronización reciente» ≠ «no reportó»), y el color vive en el frontend porque no
+afirma nada sobre el mundo.
+
+**La severidad no describe gravedad absoluta.** No es «problema = evento grave»,
+sino **cuánta atención pide ese evento en su contexto**. Un bloqueo puede ser
+`atencion` —es una situación pendiente, no un fallo— mientras que una validación
+fallida puede ser `problema` porque pide acción ahora. Sin esta distinción, todo
+termina en rojo y el rojo deja de significar algo.
+
 ## Las tres fases
 
 ### Fase 1 · Lectura
@@ -105,6 +135,25 @@ una queda atrás y nadie se entera hasta que alguien pierde un dato.
 Descargar el seguimiento, mostrar la línea de tiempo, los formularios disponibles y
 el último reporte. **Sin crear eventos todavía.** Termina cuando el técnico ve en
 el teléfono la misma historia que el NOC ve en el CRM.
+
+Su gate, y el punto de los tres primeros es que la app **no conozca** lo que
+dibuja:
+
+- [ ] la app renderiza **un tipo de evento que no conoce**;
+- [ ] la app renderiza **campos que no conoce**, declarados por el esquema;
+- [ ] una **clave extraña** en un campo no rompe la ejecución. Medido el
+      30/09/2026: `validar_esquema_plantilla` exige `id` y `tipo` y valida las
+      reglas contra lista blanca, pero **no rechaza claves desconocidas**, así que
+      un `{"id": "presion", "tipo": "decimal", "unidad": "psi"}` pasa, se dibuja
+      como decimal y `unidad` se ignora;
+- [ ] **navegar sin red no crea eventos**, y al volver la señal tampoco;
+- [ ] la lectura **no modifica datos**: ni una fila, ni una marca de contacto.
+
+La prueba que de verdad decide la fase no es pintar un formulario conocido. Es
+declarar en un tipo de trabajo de laboratorio un `avance_campo` con campos que
+nadie escribió en Flutter —temperatura del equipo, puerto físico, un selector de
+causa, un comentario obligatorio— y que la app los muestre **sin tocar una línea**.
+Esa es la promesa entera: *un esquema nuevo no exige una versión móvil nueva*.
 
 ### Fase 2 · Escritura offline
 
@@ -154,6 +203,24 @@ Comando y salida, no prosa.
 - **No construir el copiloto todavía.** Primero se capturan los hechos; después se
   interpretan. Una IA que recomienda antes de que existan los datos recomienda
   sobre nada.
+
+## Deuda que este objetivo destapa y no resuelve
+
+**Una clave no soportada en un esquema se pierde en silencio.** Hoy
+`{"id": "nivel", "tipo": "decimal", "unidad": "dBm"}` se dibuja bien y `unidad` se
+descarta sin que nadie avise. Es tolerante para producción y **mudo para quien
+configuró**.
+
+No se arregla en Flutter, y no se arregla durante la ejecución: **el técnico no
+tiene que enterarse de que alguien configuró mal un esquema**, y menos arriba de un
+poste. El lugar correcto es una advertencia **al publicar** un `WorkTypeVersion`:
+
+    Campo "nivel_optico": la propiedad "unidad" no está soportada por el
+    renderizador actual.
+
+Advertencia, no bloqueo: un esquema con una clave de más funciona, y negarse a
+publicarlo sería peor que ignorarla. Queda anotado acá y **no entra en este
+objetivo**.
 
 ## Bloqueos
 
