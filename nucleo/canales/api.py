@@ -44,7 +44,7 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from nucleo.canales import canal as canales
-from nucleo.canales import media, whatsapp
+from nucleo.canales import media, transcripcion, whatsapp
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.relevo import desenlaces
 from nucleo.relevo import historial as regla_historial
@@ -8028,25 +8028,83 @@ def _atendio_baja_o_alta(config, tenant: str, de: str, texto: str) -> bool:
     return False
 
 
+def _transcribir_si_es_voz(config, tenant: str, entrante: dict) -> dict:
+    """
+    Baja el audio y lo transcribe, ANTES del turno.
+
+    Devuelve siempre un dict con la misma forma, para que quien llame no tenga
+    que distinguir "no era audio" de "no se pudo": los dos dan texto vacio y
+    se comportan igual rio abajo.
+
+    Los BYTES vuelven en el dict a proposito. El adjunto se guarda despues del
+    turno --ahi recien existe el conversation_id-- y sin esto habria que bajar
+    el mismo archivo dos veces: dos peticiones a Meta y el doble de espera
+    para el cliente.
+
+    Nunca levanta, por la misma razon que _guardar_adjunto: un audio que no se
+    pudo transcribir no puede dejar a alguien sin respuesta.
+    """
+    vacio = {"texto": "", "estado": "", "error": "", "crudo": None, "mime": ""}
+    tipo = entrante.get("tipo", "")
+    media_id = entrante.get("media_id")
+    if tipo not in transcripcion.TIPOS_DE_VOZ or not media_id:
+        return vacio
+    try:
+        crudo, mime = whatsapp.descargar_media(config, tenant, media_id)
+    except Exception as e:
+        registrar("transcripcion", "no se pudo bajar el audio",
+                  tenant=tenant, media=ref_proveedor(media_id), error=e)
+        return dict(vacio, estado=transcripcion.ERROR,
+                    error="no se pudo bajar el audio")
+
+    r = transcripcion.transcribir(crudo, mime)
+    # EL EVENTO ES FIJO Y LA VARIABLE ES UN CAMPO. Decia
+    # "audio transcrito" if r.ok else "audio sin transcribir", y eso le da a
+    # registrar() un evento distinto por cada resultado: no se puede agrupar
+    # en el log, y --lo que la guarda protege de verdad-- cualquier variable
+    # que alguien interpole ahi manana sale entera, sin pasar por la redaccion
+    # de campos. Lo caza tests/test_registro_sin_pii.py, que es como aparecio.
+    #
+    # El TEXTO del cliente tampoco va: se dice que se transcribio, en que
+    # estado quedo y cuanto tardo -- nunca que dijo.
+    registrar("transcripcion", "audio procesado",
+              tenant=tenant, media=ref_proveedor(media_id), estado=r.estado,
+              segundos=round(r.segundos, 1), tokens=r.tokens,
+              caracteres=len(r.texto), error=r.error or None)
+    return {"texto": r.texto, "estado": r.estado, "error": r.error,
+            "crudo": crudo, "mime": mime}
+
+
 def _guardar_adjunto(config, tenant: str, entrante: dict,
                      conversacion_id: str | None,
-                     mensaje_id: str | None = None) -> None:
+                     mensaje_id: str | None = None,
+                     audio: dict | None = None) -> None:
     """
     Baja el archivo, lo comprime y lo guarda colgado de la conversacion.
 
     Nunca levanta: es informacion de apoyo. Si falla, el cliente igual recibe
     su respuesta y el agente ve el mensaje sin la foto -- que es peor que
     tenerla, pero muchisimo mejor que un turno caido.
+
+    'audio' trae lo que ya se bajo para transcribir, si era una nota de voz.
+    Con eso el archivo se descarga UNA sola vez por mensaje.
     """
     media_id = entrante.get("media_id")
     if not media_id or not conversacion_id:
         return
     try:
-        crudo, mime = whatsapp.descargar_media(config, tenant, media_id)
+        audio = audio or {}
+        if audio.get("crudo") is not None:
+            crudo, mime = audio["crudo"], audio.get("mime") or ""
+        else:
+            crudo, mime = whatsapp.descargar_media(config, tenant, media_id)
         contenido, mime = media.preparar(crudo, entrante.get("tipo", ""), mime)
         persistencia.guardar_media(
             tenant, conversacion_id, media_id, entrante.get("tipo", ""),
-            contenido, mime, entrante.get("descripcion") or None, mensaje_id)
+            contenido, mime, entrante.get("descripcion") or None, mensaje_id,
+            transcripcion=audio.get("texto") or None,
+            estado_transcripcion=audio.get("estado") or None,
+            error_transcripcion=audio.get("error") or None)
         registrar("whatsapp", "adjunto guardado", conversation_id=id_interno(conversacion_id),
                   media=ref_proveedor(media_id), kb_recibidos=len(crudo) // 1024,
                   kb_guardados=len(contenido) // 1024)
@@ -8091,12 +8149,26 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         descripcion = entrante.get("descripcion", "")
         tipo = entrante.get("tipo", "")
 
-        # Lo que el modelo lee de un adjunto es lo que el cliente ESCRIBIO al
-        # mandarlo, mas el hecho de que mando algo. No se le pasa la foto: no
-        # hay modelo de vision configurado, e inventar una descripcion seria
-        # exactamente lo que el PRD RF-07 prohibe.
+        # LA VOZ SE TRANSCRIBE ANTES DEL TURNO, y por eso se baja aca y no en
+        # _guardar_adjunto: el agente tiene que poder leer lo que el cliente
+        # dijo cuando piensa, no despues. Los bytes se reutilizan mas abajo
+        # para guardar el adjunto, asi que el archivo se descarga UNA vez.
+        #
+        # Lo demas --foto, video, documento-- sigue igual: el modelo lee lo que
+        # el cliente ESCRIBIO al mandarlo, mas el hecho de que mando algo. No
+        # se le pasa la imagen: no hay modelo de vision configurado, e inventar
+        # una descripcion seria exactamente lo que el PRD RF-07 prohibe.
+        audio = _transcribir_si_es_voz(config, tenant, entrante)
+
         if not texto.strip():
-            texto = descripcion.strip() or _AVISO_ADJUNTO.get(tipo, "")
+            if audio.get("texto"):
+                texto = transcripcion.texto_para_el_agente(
+                    audio["texto"], descripcion)
+            else:
+                # Una transcripcion que fallo NO inventa nada: se cae al mismo
+                # aviso de siempre y el cliente recibe la respuesta que ya
+                # recibia antes de que esto existiera.
+                texto = descripcion.strip() or _AVISO_ADJUNTO.get(tipo, "")
 
         if not texto:
             whatsapp.enviar_texto(
@@ -8113,7 +8185,7 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         # aparte del turno y en su propio try porque una foto que no se pudo
         # bajar no puede dejar al cliente sin respuesta.
         _guardar_adjunto(config, tenant, entrante, salida.get("conversacion_id"),
-                         salida.get("mensaje_usuario_id"))
+                         salida.get("mensaje_usuario_id"), audio=audio)
 
         # Una respuesta VACIA significa "no hay nada que decir", y hay que
         # respetarlo: pasa cuando una persona del equipo esta atendiendo la

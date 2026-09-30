@@ -144,6 +144,17 @@
     {:else if a.tipo === 'audio' || a.tipo === 'voice'}
       <!-- svelte-ignore a11y_media_has_caption -->
       <audio class="adjunto-audio" controls src="/api/media/{a.id}"></audio>
+      <!-- Lo que dice la nota de voz, debajo del reproductor. Se muestra SOLO
+           cuando hay texto: un audio que todavía no se transcribió, uno que
+           falló y uno sin voz se ven los tres igual — sin nada. El motivo
+           técnico del fallo no baja hasta aquí a propósito: no le sirve a
+           quien atiende, y menos al cliente. -->
+      {#if a.transcripcion}
+        <p class="adjunto-transcripcion">
+          <span class="adjunto-transcripcion-rotulo">Transcripción:</span>
+          {a.transcripcion}
+        </p>
+      {/if}
     {:else}
       <!-- Documento: nombre, tipo y peso, y un botón que dice qué hace. Antes
            decía "document · 428 KB", que no alcanza para saber si vale la
@@ -719,6 +730,23 @@
     font-size: 12px;
     font-style: italic;
     color: var(--v2-slate);
+  }
+
+  /* La transcripción acompaña al reproductor: se lee como una cita de lo que
+     el cliente dijo, no como un dato más de la ficha. Por eso la barra a la
+     izquierda y el tamaño menor que el del mensaje. */
+  .adjunto-transcripcion {
+    margin: 4px 0 0;
+    padding-left: 8px;
+    border-left: 2px solid var(--v2-line, #e2e8f0);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--v2-slate, #475569);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .adjunto-transcripcion-rotulo {
+    font-weight: 600;
   }
 
   .adjunto-doc {

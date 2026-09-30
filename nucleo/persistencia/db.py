@@ -837,10 +837,17 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       -- Los adjuntos de ESA burbuja, sin los bytes: la interfaz
                       -- los pide despues por su id (/media/<id>). Devolverlos
                       -- aca serian varios MB de base64 en cada carga del hilo.
+                      -- 'transcripcion' viaja y 'error_transcripcion' NO:
+                      -- el motivo tecnico de por que no se pudo oir un audio
+                      -- no le sirve a quien atiende y menos al cliente. El
+                      -- estado si viaja, porque es lo que deja distinguir
+                      -- "todavia no se intento" de "no habia nada que oir".
                       coalesce((
                         select json_agg(json_build_object(
                                  'id', a.id, 'tipo', a.tipo, 'mime', a.mime,
-                                 'bytes', a.bytes, 'descripcion', a.descripcion)
+                                 'bytes', a.bytes, 'descripcion', a.descripcion,
+                                 'transcripcion', a.transcripcion,
+                                 'estado_transcripcion', a.estado_transcripcion)
                                order by a.creado_en)
                         from asistente.media a
                         where a.mensaje_id = m.id
@@ -2510,7 +2517,10 @@ def registrar_marca_tv_desconocida(tenant: str, conversation_id: str,
 def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
                   contenido: bytes, mime: str | None = None,
                   descripcion: str | None = None,
-                  mensaje_id: str | None = None) -> str | None:
+                  mensaje_id: str | None = None,
+                  transcripcion: str | None = None,
+                  estado_transcripcion: str | None = None,
+                  error_transcripcion: str | None = None) -> str | None:
     """
     Una foto o audio del cliente, ya comprimido (ver nucleo/canales/media.py).
 
@@ -2520,15 +2530,21 @@ def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
     de objetos.
     """
     with sesion(tenant) as (cur, org):
+        #  LA TRANSCRIPCION VA EN SU PROPIA COLUMNA, no en 'descripcion'.
+        #  'descripcion' es el pie que ESCRIBIO el cliente al mandar el
+        #  archivo; pisarlo con lo que dijo hablando borraria uno de los dos y
+        #  nadie podria saber cual fue cual.
         cur.execute(
             """insert into asistente.media
                  (organization_id, conversation_id, mensaje_id, media_id, tipo,
-                  mime, contenido, bytes, descripcion)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                  mime, contenido, bytes, descripcion,
+                  transcripcion, estado_transcripcion, error_transcripcion)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                on conflict (organization_id, media_id) do nothing
                returning id""",
             (org, conversation_id, mensaje_id, media_id, tipo, mime,
-             contenido, len(contenido), descripcion))
+             contenido, len(contenido), descripcion,
+             transcripcion, estado_transcripcion, error_transcripcion))
         fila = cur.fetchone()
         return str(fila["id"]) if fila else None
 
@@ -2544,7 +2560,7 @@ def media_de(tenant: str, conversation_id: str) -> list[dict]:
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select id, media_id, tipo, mime, bytes, descripcion, mensaje_id,
-                      creado_en
+                      creado_en, transcripcion, estado_transcripcion
                from asistente.media
                where organization_id = %s and conversation_id = %s
                order by creado_en""",
