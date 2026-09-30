@@ -215,3 +215,4 @@ Lo devuelve el `orquestador`. Pendiente de correr.
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 29/09/2026 | Medido qué existía ya (8 hallazgos con archivo:línea), cerradas las 7 decisiones, corregida la Fase A por el hallazgo de `EntregaDeKit` sin FK a la orden | Fase A | — |
+| 29/09/2026 | **Fase A cerrada.** Servicio, vista solo-lectura, proxy y los cuatro bloques en la ficha de la orden. 16 pruebas nuevas (401 en `campo/`), 24 contra Postgres real, y la del kit **verificada en negativo**: al colarlo, tres fallan y una nombra el 150. En el navegador, con datos reales: custodia 300 m, orden 37,5 m | Fases B, C y D | `2e24c3b` |
