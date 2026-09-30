@@ -73,6 +73,9 @@ urlpatterns = [
     # Que material toco esta orden. Solo lectura: mover inventario entra por
     # las rutas de inventario/, que son las que tienen la frontera puesta.
     path("trabajos/<uid:pk>/materiales/", views.MaterialesDeOrdenView.as_view(), name="trabajo_materiales"),
+    # La bitacora de la intervencion: INICIO, AVANCE, BLOQUEO y CIERRE. No
+    # mueve el estado operativo; eso sigue siendo cosa de las transiciones.
+    path("trabajos/<uid:pk>/seguimiento/", views.SeguimientoDeOrdenView.as_view(), name="trabajo_seguimiento"),
     path("trabajos/<uid:pk>/datos/", views.GuardarDatosTrabajoView.as_view(), name="trabajo_datos"),
     path("trabajos/<uid:pk>/probar-conexion/", views.ProbarConexionView.as_view(), name="trabajo_probar_conexion"),
     path("trabajos/<uid:pk>/evidencias/", views.EvidenciasTrabajoView.as_view(), name="trabajo_evidencias"),

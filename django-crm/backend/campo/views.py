@@ -29,6 +29,7 @@ from campo.serializers import (
 )
 from campo.services.idempotencia import manejar_idempotencia
 from campo.services.materiales_de_orden import materiales_de_orden
+from campo.services import seguimiento_campo as seguimiento
 from campo.services.telemetria import (
     TANDAS,
     SinServicioParaPing,
@@ -208,6 +209,80 @@ class TrabajoDetailView(APIView):
         orden = _obtener_orden_o_404(request, pk)
         serializer = OrdenTrabajoDetailSerializer(orden)
         return Response(serializer.data)
+
+
+class SeguimientoDeOrdenView(APIView):
+    """La bitacora de la intervencion: leerla entera, o agregarle un reporte.
+
+    GET  devuelve la linea de tiempo --los cuatro momentos mezclados con los nueve
+         eventos que ya se escribian-- mas los formularios vigentes, para que la
+         app y la pantalla dibujen lo que ESTE tipo de trabajo pide sin saberlo de
+         antemano.
+    POST agrega un reporte: `momento` (inicio, avance, bloqueo, cierre) y
+         `respuestas`.
+
+    NO MUEVE EL ESTADO OPERATIVO, y no es un olvido: la maquina de estados vive en
+    `services/transiciones.py` y NIEGA los saltos invalidos. Que `bloqueada` sea
+    un estado --con sus transiciones y su estado de retorno-- es la fase siguiente.
+    Ver SPEC/objetivos/seguimiento-campo-por-ticket.md, decision 1.
+
+    El aislamiento lo da `_obtener_orden_o_404`: otra empresa recibe 404 --nunca
+    403-- y un tecnico que no esta asignado tampoco la ve.
+
+    La idempotencia sale de la cabecera `Idempotency-Key`, que es la que manda la
+    cola offline del telefono. Sin ella, un reintento de red dejaria dos AVANCE
+    identicos y la bitacora contaria dos hechos donde hubo uno.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        datos = seguimiento.linea_de_tiempo(orden)
+        datos["formularios"] = {
+            m: seguimiento.formulario_de(orden, m) for m in seguimiento.MOMENTOS
+        }
+        return Response(datos)
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        momento = str(request.data.get("momento") or "").strip().lower()
+        respuestas = request.data.get("respuestas") or {}
+        if not isinstance(respuestas, dict):
+            return Response(
+                {"error": "RESPUESTAS_INVALIDAS",
+                 "detalle": "'respuestas' tiene que ser un objeto."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            evento = seguimiento.registrar(
+                orden,
+                profile=getattr(request, "profile", None),
+                momento=momento,
+                respuestas=respuestas,
+                capturado_en_dispositivo=request.data.get("capturado_en_dispositivo"),
+            )
+        except seguimiento.SeguimientoInvalido as e:
+            # 422 y no 400: el cuerpo esta bien formado y la ruta es la correcta;
+            # lo que no se puede es aceptar ESTE contenido. Con un 400 para las dos
+            # cosas, la pantalla no sabe si reintentar o pedirle algo a la persona.
+            return Response(
+                {"error": "SEGUIMIENTO_INVALIDO", "detalle": e.mensaje,
+                 "campos": e.errores},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        return Response(
+            {
+                "id": str(evento.id),
+                "tipo": evento.tipo,
+                "etiqueta": seguimiento.ETIQUETAS.get(evento.tipo, evento.tipo),
+                "recibido_en": evento.created_at.isoformat() if evento.created_at else None,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class MaterialesDeOrdenView(APIView):

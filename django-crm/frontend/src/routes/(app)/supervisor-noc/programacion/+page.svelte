@@ -27,6 +27,23 @@
   //: su propio rotulo cuando se enciende.
   let verCustodia = $state(false);
 
+  // La bitácora de la intervención. Otra llamada más, por el mismo motivo que los
+  // materiales: la ficha se ve enseguida y esto llega después.
+  let bitacora = $state(/** @type {any} */ (null));
+  let cargandoBitacora = $state(false);
+  let errorBitacora = $state(/** @type {string|null} */ (null));
+
+  // El reporte que se está escribiendo. `momento` null = no hay formulario abierto.
+  let momento = $state(/** @type {string|null} */ (null));
+  let respuestas = $state(/** @type {Record<string, any>} */ ({}));
+  let erroresCampo = $state(/** @type {Record<string, string>} */ ({}));
+  let guardandoReporte = $state(false);
+  let avisoReporte = $state(/** @type {string|null} */ (null));
+  //: La clave de idempotencia se fija al ABRIR el formulario, no al enviarlo: una
+  //: nueva por intento sería un identificador único, no una clave idempotente, y
+  //: un doble clic dejaría dos AVANCE idénticos en la bitácora.
+  let claveReporte = $state('');
+
   // Formularios de escritura, cada uno detras de su confirmacion.
   let modalReprogramar = $state(/** @type {any} */ (null));
   let modalSecuencia = $state(/** @type {any} */ (null));
@@ -130,6 +147,7 @@
       cargandoFicha = false;
     }
     void cargarMateriales(ordenId);
+    void cargarBitacora(ordenId);
   }
 
   /**
@@ -157,6 +175,81 @@
       cargandoMateriales = false;
     }
   }
+
+  /**
+   * La bitácora de la orden: la línea de tiempo y los formularios vigentes.
+   *
+   * @param {string} ordenId
+   */
+  async function cargarBitacora(ordenId) {
+    bitacora = null;
+    errorBitacora = null;
+    cargandoBitacora = true;
+    try {
+      const r = await fetch(`/api/supervisor-noc/ordenes/${ordenId}/seguimiento`);
+      const cuerpo = await r.json().catch(() => ({}));
+      if (!r.ok) errorBitacora = cuerpo?.error ?? 'No fue posible consultar la bitácora.';
+      else bitacora = cuerpo;
+    } catch {
+      errorBitacora = 'No fue posible consultar la bitácora: el servicio no respondió.';
+    } finally {
+      cargandoBitacora = false;
+    }
+  }
+
+  /**
+   * Abre el formulario de un momento. Los campos salen del tipo de trabajo, así
+   * que esta pantalla no sabe cuáles son hasta que el backend los manda.
+   *
+   * @param {string} cual
+   */
+  function abrirReporte(cual) {
+    momento = cual;
+    respuestas = {};
+    erroresCampo = {};
+    avisoReporte = null;
+    claveReporte = `crm-${bitacora?.orden_id ?? 'x'}-${cual}-${Date.now()}`;
+  }
+
+  function cerrarReporte() {
+    momento = null;
+    respuestas = {};
+    erroresCampo = {};
+  }
+
+  /** Manda el reporte. Un 422 vuelve con los errores POR CAMPO. */
+  async function enviarReporte() {
+    if (!momento || !bitacora?.orden_id) return;
+    guardandoReporte = true;
+    erroresCampo = {};
+    avisoReporte = null;
+    try {
+      const r = await fetch(`/api/supervisor-noc/ordenes/${bitacora.orden_id}/seguimiento`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': claveReporte },
+        body: JSON.stringify({ momento, respuestas })
+      });
+      const cuerpo = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        erroresCampo = cuerpo?.campos ?? {};
+        avisoReporte = cuerpo?.error ?? 'El reporte no se pudo guardar.';
+        return;
+      }
+      const ordenId = bitacora.orden_id;
+      cerrarReporte();
+      await cargarBitacora(ordenId);
+    } catch {
+      avisoReporte = 'El reporte no se pudo guardar: el servicio no respondió.';
+    } finally {
+      guardandoReporte = false;
+    }
+  }
+
+  /** Los campos del momento abierto, tal como los declaró el tipo de trabajo. */
+  const camposDelMomento = $derived.by(() => {
+    if (!momento || !bitacora?.formularios) return [];
+    return bitacora.formularios[momento]?.campos ?? [];
+  });
 
   /** Enciende o apaga el kit del dia, y vuelve a pedirlo. */
   function alternarCustodia() {
@@ -199,6 +292,9 @@
     ficha = null;
     materiales = null;
     errorMateriales = null;
+    bitacora = null;
+    errorBitacora = null;
+    momento = null;
     errorFicha = null;
     cargandoFicha = true;
     try {
@@ -922,6 +1018,238 @@
                 <p class="snoc-body" style="margin:0;">{ficha.diagnostico_previo}</p>
               </div>
             {/if}
+
+            <!--
+              LA BITACORA DE LA INTERVENCION
+
+              Una sola linea de tiempo: los cuatro momentos que reporta quien
+              trabaja, mezclados con los eventos que el sistema ya escribia. Dos
+              listas separadas obligarian a cruzarlas a mano para saber que paso
+              antes, la devolucion del supervisor o el ultimo avance.
+
+              Los campos de cada formulario los declara el TIPO DE TRABAJO y
+              llegan del backend. Esta pantalla no sabe cuales son: por eso la
+              empresa siguiente trae los suyos sin tocar codigo.
+            -->
+            <div class="snoc-pila-xs">
+              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">
+                Seguimiento de la intervención
+              </span>
+
+              {#if cargandoBitacora}
+                <p class="snoc-body-sm snoc-tenue" style="margin:0;">Leyendo la bitácora…</p>
+              {:else if errorBitacora}
+                <p class="snoc-body-sm snoc-error-txt" style="margin:0;">{errorBitacora}</p>
+              {:else if bitacora}
+                {#if bitacora.ultimo_reporte}
+                  <div class="snoc-meta">
+                    <div>
+                      <span>Último reporte:</span>
+                      <span class="snoc-insignia">{bitacora.ultimo_reporte.etiqueta}</span>
+                    </div>
+                    <div>
+                      <span>Lo recibimos:</span>
+                      <span class="snoc-mono-sm">
+                        {fecha(bitacora.ultimo_reporte.recibido_en)}
+                        {#if bitacora.ultimo_reporte.minutos_desde_que_lo_recibimos != null}
+                          · hace {bitacora.ultimo_reporte.minutos_desde_que_lo_recibimos} min
+                        {/if}
+                      </span>
+                    </div>
+                    {#if bitacora.ultimo_reporte.capturado_en_dispositivo}
+                      <div>
+                        <span>Lo escribió en el teléfono:</span>
+                        <span class="snoc-mono-sm">
+                          {fecha(bitacora.ultimo_reporte.capturado_en_dispositivo)}
+                        </span>
+                      </div>
+                    {/if}
+                  </div>
+                {:else}
+                  <p class="snoc-body-sm snoc-tenue" style="margin:0;">
+                    Todavía no hay ningún reporte de campo en esta orden.
+                  </p>
+                {/if}
+
+                <!-- Lo que la bitacora tiene de raro. No bloquea nada: avisa. -->
+                {#each bitacora.avisos ?? [] as aviso, i (i)}
+                  <div class="snoc-analisis snoc-faltante">
+                    <span class="snoc-insignia snoc-insignia-error">Falta parte de la historia</span>
+                    <p class="snoc-body" style="margin:0;">{aviso}</p>
+                  </div>
+                {/each}
+
+                <!-- Los cuatro momentos. INICIO solo aparece si no hubo uno. -->
+                <div class="snoc-acciones">
+                  {#if !(bitacora.momentos_registrados ?? []).includes('inicio_campo')}
+                    <button type="button" class="snoc-btn snoc-btn-primario"
+                            onclick={() => abrirReporte('inicio')}>
+                      Registrar inicio
+                    </button>
+                  {/if}
+                  <button type="button" class="snoc-btn" onclick={() => abrirReporte('avance')}>
+                    Registrar avance
+                  </button>
+                  <button type="button" class="snoc-btn" onclick={() => abrirReporte('bloqueo')}>
+                    Registrar bloqueo
+                  </button>
+                  <button type="button" class="snoc-btn" onclick={() => abrirReporte('cierre')}>
+                    Cerrar intervención
+                  </button>
+                </div>
+
+                {#if momento}
+                  <div class="snoc-analisis snoc-observado">
+                    <span class="snoc-insignia snoc-insignia-variante">
+                      {bitacora.formularios?.[momento]?.tipo_evento === 'cierre_campo'
+                        ? 'Cierre de intervención'
+                        : `Nuevo ${momento}`}
+                    </span>
+
+                    {#if bitacora.formularios?.[momento]?.declarado_por_el_tipo_de_trabajo === false}
+                      <p class="snoc-body-sm snoc-tenue" style="margin:0;">
+                        Este tipo de trabajo no declara campos propios para este momento, así que
+                        se pide el mínimo. Los campos se configuran en el tipo de trabajo, no acá.
+                      </p>
+                    {/if}
+
+                    {#each camposDelMomento as campo (campo.id)}
+                      <div class="snoc-campo">
+                        <label class="snoc-label-sm" for={`rep-${campo.id}`}>
+                          {campo.titulo ?? campo.id}
+                          {#if campo.reglas?.required}<span aria-hidden="true"> *</span>{/if}
+                        </label>
+
+                        {#if campo.tipo === 'booleano'}
+                          <select
+                            id={`rep-${campo.id}`}
+                            class="snoc-buscador-campo"
+                            bind:value={respuestas[campo.id]}
+                          >
+                            <option value={undefined}>Elegí una opción</option>
+                            <option value={true}>Sí</option>
+                            <option value={false}>No</option>
+                          </select>
+                        {:else if campo.tipo === 'seleccion'}
+                          <select
+                            id={`rep-${campo.id}`}
+                            class="snoc-buscador-campo"
+                            bind:value={respuestas[campo.id]}
+                          >
+                            <option value={undefined}>Elegí una opción</option>
+                            {#each campo.reglas?.options ?? [] as opcion (opcion)}
+                              <option value={opcion}>{opcion}</option>
+                            {/each}
+                          </select>
+                        {:else if campo.tipo === 'entero' || campo.tipo === 'decimal'}
+                          <!-- `step` sale del tipo: un decimal con step=1 hace que el
+                               navegador rechace 37,5 con un mensaje que no explica nada. -->
+                          <input
+                            id={`rep-${campo.id}`}
+                            class="snoc-buscador-campo"
+                            type="number"
+                            step={campo.tipo === 'entero' ? '1' : 'any'}
+                            bind:value={respuestas[campo.id]}
+                          />
+                        {:else if campo.tipo === 'fecha'}
+                          <input
+                            id={`rep-${campo.id}`}
+                            class="snoc-buscador-campo"
+                            type="date"
+                            bind:value={respuestas[campo.id]}
+                          />
+                        {:else}
+                          <textarea
+                            id={`rep-${campo.id}`}
+                            class="snoc-buscador-campo"
+                            rows="2"
+                            bind:value={respuestas[campo.id]}
+                          ></textarea>
+                        {/if}
+
+                        {#if campo.declaracion}
+                          <span class="snoc-body-sm snoc-tenue">
+                            Esto queda registrado como algo que <strong>vos afirmás</strong>, con
+                            tu nombre y la hora. El sistema no puede comprobarlo.
+                          </span>
+                        {/if}
+                        {#if erroresCampo[campo.id]}
+                          <span class="snoc-body-sm snoc-error-txt">{erroresCampo[campo.id]}</span>
+                        {/if}
+                      </div>
+                    {/each}
+
+                    {#if avisoReporte}
+                      <p class="snoc-body-sm snoc-error-txt" style="margin:0;">{avisoReporte}</p>
+                    {/if}
+
+                    <div class="snoc-acciones">
+                      <button
+                        type="button"
+                        class="snoc-btn snoc-btn-primario"
+                        disabled={guardandoReporte}
+                        onclick={enviarReporte}
+                      >
+                        {guardandoReporte ? 'Guardando…' : 'Guardar el reporte'}
+                      </button>
+                      <button type="button" class="snoc-btn" onclick={cerrarReporte}>
+                        Cancelar
+                      </button>
+                    </div>
+
+                    {#if momento === 'bloqueo'}
+                      <p class="snoc-body-sm snoc-tenue" style="margin:0;">
+                        Queda anotado como bloqueo en la bitácora. <strong>No cambia el estado
+                        operativo de la orden</strong>: eso es una transición y tiene sus reglas.
+                      </p>
+                    {/if}
+                  </div>
+                {/if}
+
+                <!-- La linea de tiempo. Los de seguimiento traen su detalle leido
+                     con el esquema que tenian cuando se capturaron. -->
+                {#if (bitacora.eventos ?? []).length}
+                  <div class="snoc-historial">
+                    {#each bitacora.eventos as ev (ev.id)}
+                      <div class="snoc-pila-xs" style="padding-block:6px;">
+                        <div>
+                          <span class="snoc-mono-sm">{fecha(ev.recibido_en)}</span>
+                          <span class="snoc-insignia {ev.es_seguimiento ? '' : 'snoc-insignia-variante'}">
+                            {ev.etiqueta}
+                          </span>
+                          {#if ev.quien}
+                            <span class="snoc-body-sm snoc-tenue">· {ev.quien}</span>
+                          {/if}
+                        </div>
+
+                        {#if ev.es_seguimiento}
+                          {#each ev.detalle ?? [] as d (d.id)}
+                            <div class="snoc-body-sm">
+                              <span class="snoc-tenue">{d.titulo}:</span>
+                              <span>{d.valor === true ? 'Sí' : d.valor === false ? 'No' : d.valor}</span>
+                              {#if ev.declaraciones?.[d.id]}
+                                <span class="snoc-body-sm snoc-tenue">
+                                  — lo afirmó {ev.declaraciones[d.id].declarado_por_nombre ?? 'una persona'}
+                                </span>
+                              {/if}
+                            </div>
+                          {/each}
+                          {#if ev.capturado_en_dispositivo}
+                            <span class="snoc-body-sm snoc-tenue">
+                              Escrito en el teléfono a las {fecha(ev.capturado_en_dispositivo)}
+                            </span>
+                          {/if}
+                        {:else if ev.estado_nuevo}
+                          <span class="snoc-body-sm snoc-tenue">
+                            {ev.estado_anterior ?? '—'} → {ev.estado_nuevo}
+                          </span>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              {/if}
+            </div>
 
             <!--
               MATERIALES DE ESTA ORDEN

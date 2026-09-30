@@ -449,3 +449,83 @@ export async function leerMaterialesDeOrden({ cookies }, ordenId, opciones = {})
     return { datos: null, error: traducirError(err, 'los materiales de esta orden') };
   }
 }
+
+/**
+ * La bitácora de la intervención: los cuatro momentos y los nueve eventos que ya
+ * se escribían, en una sola línea de tiempo, más los formularios vigentes.
+ *
+ * LOS FORMULARIOS NO ESTÁN EN ESTE ARCHIVO, Y ES EL PUNTO
+ * ------------------------------------------------------
+ * Vienen del backend, que los deriva de `WorkTypeVersion`. Escribir acá los
+ * campos de un ISP --un nivel 1550, un PLC-- obligaría a un commit del frontend
+ * cada vez que una empresa nueva midiera otra cosa.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} ordenId
+ */
+export async function leerSeguimientoDeOrden({ cookies }, ordenId) {
+  try {
+    const d = await apiRequest(`/campo/trabajos/${ordenId}/seguimiento/`, {}, { cookies });
+    return { datos: d, error: null };
+  } catch (/** @type {any} */ err) {
+    return { datos: null, error: traducirError(err, 'la bitácora de esta orden') };
+  }
+}
+
+/**
+ * Agrega un reporte a la bitácora.
+ *
+ * `idempotencyKey` viaja como cabecera porque es lo que hace que un reintento de
+ * red no deje dos AVANCE idénticos: la bitácora contaría dos hechos donde hubo
+ * uno. Un valor nuevo por intento sería un identificador único, no una clave
+ * idempotente.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} ordenId
+ * @param {{ momento: string, respuestas: Record<string, any>, idempotencyKey?: string }} reporte
+ */
+export async function registrarSeguimiento({ cookies }, ordenId, reporte) {
+  const cabeceras = reporte.idempotencyKey
+    ? { 'Idempotency-Key': reporte.idempotencyKey }
+    : undefined;
+  try {
+    const d = await apiRequest(
+      `/campo/trabajos/${ordenId}/seguimiento/`,
+      {
+        method: 'POST',
+        // `apiRequest` serializa el objeto: pasarlo ya en texto lo enviaria
+        // como un string JSON dentro de otro.
+        body: { momento: reporte.momento, respuestas: reporte.respuestas },
+        ...(cabeceras ? { headers: cabeceras } : {})
+      },
+      { cookies }
+    );
+    return { datos: d, error: null };
+  } catch (/** @type {any} */ err) {
+    // 422 trae los errores POR CAMPO: se devuelven tal cual para que la pantalla
+    // los pinte donde corresponde en vez de un solo texto arriba.
+    // `api-helpers` cuelga el cuerpo del error en `.body` (y el status en `.status`).
+    const campos = err?.body?.campos ?? null;
+
+    // El 422 trae el motivo escrito para quien lo va a leer: "falta el nivel",
+    // "no se puede cerrar lo que nunca se inició". `traducirError` no lo conoce
+    // --es el traductor de las LECTURAS de esta pantalla-- y su texto genérico
+    // ("no fue posible consultar…") tapa justamente el dato útil.
+    if (err?.status === 422) {
+      return {
+        datos: null,
+        error: {
+          codigo: 'SEGUIMIENTO_INVALIDO',
+          status: 422,
+          mensaje:
+            err?.body?.detalle ??
+            'El reporte no se puede guardar todavía: revisá los campos marcados.',
+          campos
+        }
+      };
+    }
+
+    const error = traducirError(err, 'el reporte de seguimiento');
+    return { datos: null, error: { ...error, campos } };
+  }
+}
