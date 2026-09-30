@@ -171,19 +171,50 @@ export const CONTEXTO_AUSENTE = [
 ];
 
 /**
+ * Las señales en las que aceptar NO es solo registrar un acuerdo.
+ *
+ * Para estas, `operaciones/views.py::RevisarPropuestaView` llama a
+ * `cierre_de_caso.cerrar()` apenas la revisión queda persistida. La rama del
+ * backend mira SOLO `estado` y `tipo_senal` -- no el nivel de autonomía -- así
+ * que este conjunto es la copia exacta de esa condición, y no una política
+ * propia de la interfaz. Si el backend agrega un tipo, acá hay que agregarlo.
+ */
+export const EJECUTA_AL_ACEPTAR = new Set(['caso_desincronizado']);
+
+/**
+ * ¿Aceptar esta propuesta dispara una acción, o solo registra el acuerdo?
+ *
+ * @param {any} d  la propuesta
+ */
+export function aceptarEjecuta(d) {
+  return EJECUTA_AL_ACEPTAR.has(String(d?.tipo_senal ?? ''));
+}
+
+/**
  * Las etapas del ciclo, y en cuál está la propuesta.
  *
- * LAS TRES ÚLTIMAS NO EXISTEN TODAVÍA, y se muestran a propósito: el diseño
- * las pedía, y dibujarlas apagadas es la forma más clara de decir dónde
- * termina lo que esta etapa del producto puede hacer. El estado «ejecutada»
- * no está en el modelo (operaciones/models.py lo dice con todas las letras:
- * aceptar significa «el Jefe de Operaciones está de acuerdo», no «se hizo»).
+ * DOS CICLOS, PORQUE SON DOS CONDUCTAS DISTINTAS
+ * ----------------------------------------------
+ * Para `caso_desincronizado` el ciclo termina en «Cierre en Dexter», y son
+ * CUATRO etapas: el intento ocurre de inmediato al aceptar, dentro de la misma
+ * petición. No hay cola ni validación posterior, así que dibujar «Encolada» y
+ * «Validada» inventaría un recorrido que no existe.
+ *
+ * Para el resto siguen siendo seis, con las tres últimas apagadas: ahí sí
+ * aceptar es solo un acuerdo, y mostrarlas dice dónde termina lo que esta
+ * pantalla puede hacer.
+ *
+ * Hasta el 29/09/2026 esta función devolvía seis para todo y el pie decía «no
+ * hay camino de ejecución». Era falso desde que se desplegó el cierre
+ * controlado: para una señal de desincronización el camino existe y se recorre
+ * solo.
  *
  * Devuelve cada paso con su estado visual: 'hecho', 'actual' o 'inactivo'.
  *
  * @param {string | null | undefined} estado  el estado real de la propuesta
+ * @param {string | null | undefined} [tipoSenal]  para elegir el ciclo
  */
-export function pasosDelCiclo(estado) {
+export function pasosDelCiclo(estado, tipoSenal) {
   const revisada = ['aceptada', 'modificada', 'rechazada', 'cancelada', 'expirada'].includes(
     String(estado)
   );
@@ -205,10 +236,19 @@ export function pasosDelCiclo(estado) {
       texto: 'Aprobada',
       estado: aprobada ? 'actual' : 'inactivo'
     },
-    // De aquí en adelante no hay nada: ninguna de las tres es alcanzable.
-    { clave: 'encolada', texto: 'Encolada', estado: 'inactivo' },
-    { clave: 'ejecutada', texto: 'En ejecución', estado: 'inactivo' },
-    { clave: 'validada', texto: 'Validada', estado: 'inactivo' }
+    ...(EJECUTA_AL_ACEPTAR.has(String(tipoSenal ?? ''))
+      ? [
+          //  La etapa real y última: se intenta al aceptar, en la misma
+          //  petición. 'aprobada' no implica 'cerrada' -- el cierre revalida y
+          //  puede no ocurrir, y eso lo cuenta 'resultado-del-cierre.js'.
+          { clave: 'cierre', texto: 'Cierre en Dexter', estado: 'inactivo' }
+        ]
+      : [
+          // Para el resto no hay nada: ninguna de las tres es alcanzable.
+          { clave: 'encolada', texto: 'Encolada', estado: 'inactivo' },
+          { clave: 'ejecutada', texto: 'En ejecución', estado: 'inactivo' },
+          { clave: 'validada', texto: 'Validada', estado: 'inactivo' }
+        ])
   ];
 }
 
@@ -393,27 +433,48 @@ export function analisisSeparado(d) {
 /**
  * «¿Qué pasa si acepto?» — el efecto REAL, no el deseado.
  *
- * Aceptar registra que el Jefe de Operaciones está de acuerdo. NO cierra el
- * caso, no toca WispHub y no ejecuta nada: el estado «ejecutada» no existe en
- * el modelo y `ejecutar_propuesta` levanta siempre. Poner aquí «resultado:
- * Dexter cerrado» prometería una ejecución que el sistema no hace, y esta
- * pantalla es justo donde ese malentendido saldría caro.
+ * DEPENDE DEL TIPO DE SEÑAL, Y HASTA EL 29/09/2026 NO DEPENDÍA
+ * -----------------------------------------------------------
+ * Esta función devolvía siempre «no ejecuta ninguna acción», y una prueba lo
+ * blindaba usando justo una propuesta `caso_desincronizado` como ejemplo. Era
+ * falso para ese tipo desde que se desplegó el cierre controlado: aceptar una
+ * desincronización hace que el backend revalide doce condiciones y, si pasan,
+ * CIERRE el caso en Dexter dentro de la misma petición.
+ *
+ * Medido el 29/09/2026 sobre una propuesta real: a las 16:40:48 quedó la
+ * revisión y 54 ms después la bitácora decía «El cierre autorizado no se
+ * ejecuto» con el motivo. O sea que el intento salió — no cerró por la
+ * frescura de la lectura, no porque no hubiera camino.
+ *
+ * Para todo lo demás el texto anterior sigue siendo cierto y se conserva tal
+ * cual: aceptar registra un acuerdo y nada más.
+ *
+ * Lo que NO cambia para ningún tipo: esto nunca toca WispHub.
  *
  * @param {any} d
  * @param {any} [contraste]
  */
 export function siAcepto(d, contraste) {
   const c = contraste ?? contrasteDeEstados(d?.evidencia);
+  const ejecuta = aceptarEjecuta(d);
   return {
     estadoActual: oAusente(c?.crm),
     //  Lo que la propuesta pide hacer, con sus palabras. No se traduce a un
-    //  estado final: la acción de H-15 es REVISAR la sincronización, no cerrar.
+    //  estado final: la propuesta puede decir REVISAR la sincronización aunque
+    //  el efecto que el backend intenta sea cerrar, y quien revisa tiene que
+    //  ver las dos cosas -- la frase original acá, y el efecto abajo.
     accion: d?.accion_propuesta || AUSENTE,
     origenDecision: hay(c?.proveedor) ? 'WispHub' : AUSENTE,
-    tipo: 'Revisión humana · propuesta del Supervisor NOC IA',
-    efecto:
-      'Queda registrado que estás de acuerdo. No cierra el caso, no toca WispHub y no ' +
-      'ejecuta ninguna acción: en esta etapa el Supervisor observa y propone.',
+    tipo: ejecuta
+      ? 'Cierre controlado · autorizado por vos, revalidado por el sistema'
+      : 'Revisión humana · propuesta del Supervisor NOC IA',
+    ejecuta,
+    efecto: ejecuta
+      ? 'Al aceptar, se realizará una nueva validación antes de intentar cerrar el ' +
+        'caso en Dexter. Si todas las condiciones siguen dándose, el caso se cierra; ' +
+        'si alguna cambió, no se ejecuta y se te dice cuál. No toca WispHub.'
+      : 'Queda registrado que estás de acuerdo. No cierra el caso, no toca WispHub y no ' +
+        'ejecuta ninguna acción: en esta etapa el Supervisor observa y propone.',
     requiereConfirmacion: true
   };
 }

@@ -3434,6 +3434,19 @@ herramientas:
   - nombre: cerrar_caso_crm
     tipo: http
     cierra_caso: true
+    # Un servicio interno puede pedir este cierre: lo hace el Supervisor cuando
+    # una PERSONA acepta una propuesta de 'caso_desincronizado' (M09-S). Sin
+    # esta bandera, /interno/herramienta/ responde 403 antes de mirar nada mas.
+    invocable_por_servicio: true
+    # Y lo UNICO que el servicio puede aportar es de que caso se trata. 'status'
+    # y 'closed_on' siguen fijos en esta declaracion, asi que ni el modelo ni un
+    # servicio pueden elegir a que estado se cierra ni con que fecha.
+    #
+    # Sin esta lista el id se descartaria EN SILENCIO y la llamada moriria
+    # armando la URL con 'endpoint sin resolver'. Asi fue como la cancelacion de
+    # una solicitud nunca cerro su ticket: se veia como un fallo de red y el
+    # equipo salia a instalar algo ya cancelado (ver motor.py, 09/09/2026).
+    argumentos_sobrescribibles: [id_caso]
     descripcion: >
       Cierra el caso en el CRM cuando el cliente confirmo que quedo resuelto o
       cuando se vencio el plazo sin respuesta. NO la llames tu: la ejecuta el

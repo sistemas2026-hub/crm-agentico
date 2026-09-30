@@ -183,8 +183,18 @@ class RevisarPropuestaView(APIView):
     """
     El Jefe de Operaciones decide: aceptar, modificar o rechazar.
 
-    Aceptar NO ejecuta la propuesta. Es deliberado y está dicho en la respuesta,
-    para que nadie que use esta API asuma lo contrario.
+    ACEPTAR REGISTRA LA DECISIÓN; PARA UN TIPO, ADEMÁS INTENTA EL CIERRE
+    -------------------------------------------------------------------
+    Hasta el cierre controlado, aceptar no ejecutaba nada y este docstring lo
+    decía así. Hoy es cierto para todos los tipos MENOS uno: con
+    'caso_desincronizado', una vez persistida la revisión se intenta cerrar el
+    caso en Dexter -- se revalidan las doce condiciones y, si siguen dándose, el
+    caso se cierra. Nunca se toca el sistema del proveedor.
+
+    Y sigue valiendo lo que importa: ACEPTADA no es CERRADA. El intento ocurre
+    FUERA de la transacción de la revisión, así que un fallo no revierte la
+    decisión humana. La respuesta lo dice con 'ejecutada', 'motivo' y 'aviso',
+    para que nadie que use esta API confunda las dos cosas.
     """
 
     permission_classes = [EsJefeDeOperaciones]
@@ -225,12 +235,45 @@ class RevisarPropuestaView(APIView):
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({
+        #  EL CIERRE VA DESPUES, Y FUERA DE LA TRANSACCION DE 'revisar'
+        #  ------------------------------------------------------------
+        #  'supervisor.revisar' ya cerro su transaccion aca arriba, asi que la
+        #  decision humana esta PERSISTIDA antes de que se intente nada. El
+        #  orden importa por dos motivos: una llamada de red dentro de esa
+        #  transaccion mantendria la fila bloqueada todo su tiempo, y un fallo
+        #  haria rollback de una decision que SI se tomo.
+        #
+        #  Consecuencia que la pantalla tiene que poder contar: "aceptada" y
+        #  "cerrada" son dos hechos distintos, y el segundo puede no ocurrir.
+        cierre = None
+        if (propuesta.estado == PropuestaSupervisor.ACEPTADA
+                and propuesta.tipo_senal == PropuestaSupervisor.CASO_DESINCRONIZADO):
+            from operaciones import cierre_de_caso
+            cierre = cierre_de_caso.cerrar(propuesta, actor=request.profile)
+            propuesta.refresh_from_db()
+
+        cuerpo = {
             "propuesta": PropuestaDetalleSerializer(propuesta).data,
-            "ejecutada": False,
-            "aviso": ("Shadow Mode: la decisión quedó registrada y auditada. "
-                      "Ninguna acción se ejecutó."),
-        })
+            #  'ejecutada' ya lo consume el frontend y conserva su significado:
+            #  si una accion salio de verdad. Para todo lo que no es un cierre
+            #  de caso sigue siendo False, que es la verdad -- el Supervisor
+            #  observa y recomienda, y esta es la unica accion que ejecuta.
+            "ejecutada": bool(cierre and cierre.get("cerrado")),
+            "motivo": (cierre or {}).get("motivo", ""),
+            "detalle": (cierre or {}).get("detalle", ""),
+        }
+        if cierre is None:
+            cuerpo["aviso"] = ("La decisión quedó registrada y auditada. "
+                               "Ninguna acción se ejecutó.")
+        elif cierre.get("cerrado"):
+            cuerpo["aviso"] = "El caso quedó cerrado en Dexter."
+        else:
+            #  El motivo viaja aparte y en clave: la pantalla decide como
+            #  decirlo, y no tiene que interpretar prosa para distinguir "el
+            #  sistema esta detenido" de "el caso cambio".
+            cuerpo["aviso"] = ("La decisión quedó registrada, pero el caso NO "
+                               "se cerró.")
+        return Response(cuerpo)
 
     @staticmethod
     def _resolver_cambios(cambios: dict, request) -> dict:

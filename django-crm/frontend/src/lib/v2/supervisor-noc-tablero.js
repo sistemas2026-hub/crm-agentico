@@ -55,8 +55,14 @@ export function kpisDelTablero(indicadores, propuestas) {
     return tipos.reduce((t, x) => t + (porTipo(x) ?? 0), 0);
   };
 
+  //  LA MISMA REGLA QUE LA BANDEJA, O LA TARJETA MIENTE
+  //  --------------------------------------------------
+  //  Esta tarjeta es un ENLACE a «Pendientes por revisión»: contar aqui
+  //  `estado === 'propuesta'` a secas anunciaba un numero y llevaba a una tabla
+  //  con otro, en cuanto la bandeja empezo a excluir las propuestas cuyo caso ya
+  //  cerro. Se cuenta lo mismo que se va a mostrar.
   const pendientes = Array.isArray(propuestas)
-    ? propuestas.filter((p) => p?.estado === 'propuesta').length
+    ? propuestas.filter((p) => bandejaDe(p) === PENDIENTES).length
     : null;
 
   return [
@@ -548,6 +554,46 @@ export function estadoDeRevision(estado) {
   return MAPA[estado] ?? { texto: estado ?? '', tono: 'neutro', pendiente: false };
 }
 
+/** Las dos bandejas. No hay una tercera: la ausencia de bandeja es `null`. */
+export const PENDIENTES = 'pendientes';
+export const DECIDIDAS = 'decididas';
+
+/**
+ * En qué bandeja cae una propuesta, o en ninguna.
+ *
+ * DOS BANDEJAS, Y NO SON COMPLEMENTARIAS EXACTAS
+ * ----------------------------------------------
+ * «Pendientes» es la bandeja OPERATIVA: pide una decisión sobre trabajo que
+ * todavía existe, así que necesita las dos cosas -- propuesta sin revisar Y
+ * caso todavía abierto. «Ya decididas» es la de TRAZABILIDAD y mira SOLO la
+ * propuesta: una decidida se queda ahí aunque su caso cierre, porque lo que
+ * importa es que hubo una decisión humana.
+ *
+ * Queda un caso que no está en ninguna: la propuesta que nadie miró sobre un
+ * caso que se cerró por otra vía. Pedir una decisión sobre trabajo hecho es
+ * ruido; contarla como decidida afirma que alguien decidió, y no es cierto --
+ * el mismo criterio con el que `expirada` no se muestra como `rechazada`. Se
+ * devuelve `null`, que es la ausencia de bandeja y no una tercera categoría:
+ * la propuesta sigue guardada con su estado real y su expediente se consulta
+ * en Tickets -> Cerrados.
+ *
+ * SE LEE EL CASO DE AHORA. `caso_cerrado` lo calcula el backend sobre la fila
+ * actual, no sobre la evidencia que la propuesta guardó. Por eso un caso que
+ * se reabre devuelve su propuesta a «Pendientes» sin que nadie haga nada: no
+ * hay marca que revertir.
+ *
+ * @param {any} p  una propuesta con su `estado` y su `caso_cerrado`
+ * @returns {'pendientes'|'decididas'|null}
+ */
+export function bandejaDe(p) {
+  if (!estadoDeRevision(p?.estado).pendiente) return DECIDIDAS;
+  //  `caso_cerrado` tiene TRES valores. Se oculta con `true` y solo con
+  //  `true`: `null` significa que no se sabe --sin caso, o no se alcanzó-- y
+  //  un dato que falta no puede esconder trabajo pendiente.
+  if (p?.caso_cerrado === true) return null;
+  return PENDIENTES;
+}
+
 /**
  * Las propuestas listas para la bandeja: filtradas, ordenadas y numeradas.
  *
@@ -576,6 +622,7 @@ export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) 
       nivel,
       revision,
       edad,
+      bandeja: bandejaDe(p),
       rotulo: rotuloDeHallazgo(p?.tipo_senal, p?.tipo_senal_display),
       // «Con propuesta» significa que hay una acción recomendada escrita.
       // Una señal detectada sin acción es un hallazgo sin recomendación, y
@@ -586,8 +633,13 @@ export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) 
 
   const visibles = enriquecidas.filter((p) => {
     if (!coincideConBusqueda(p, filtros.texto ?? '')) return false;
-    if (filtros.estado === 'pendientes' && !p.revision.pendiente) return false;
-    if (filtros.estado === 'decididas' && p.revision.pendiente) return false;
+    //  Una sola regla de clasificacion, en 'bandejaDe'. Aca solo se compara:
+    //  repetirla seria tener dos fuentes que se desincronizan.
+    if (filtros.estado && p.bandeja !== filtros.estado) return false;
+    //  «Todas» es exactamente la union de las dos bandejas, sin duplicados: no
+    //  es "todo lo que hay". Una propuesta sin decidir sobre un caso cerrado no
+    //  esta en ninguna de las dos, y por lo tanto tampoco aca.
+    if (!filtros.estado && p.bandeja === null) return false;
     if (filtros.nivel && p.nivel.texto !== filtros.nivel) return false;
     if (filtros.tipo && p.tipo_senal !== filtros.tipo) return false;
     if (filtros.conPropuesta === 'si' && !p.tienePropuesta) return false;

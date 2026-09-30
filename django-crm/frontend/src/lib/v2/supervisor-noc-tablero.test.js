@@ -12,6 +12,7 @@ import {
   rotuloDeHallazgo,
   antiguedadDe,
   estadoDeRevision,
+  bandejaDe,
   bandejaDeRevision,
   coincideConBusqueda,
   paginacion
@@ -758,5 +759,188 @@ describe('la bandeja con buscador', () => {
       hoy
     );
     expect(b.map((p) => p.n)).toEqual([1, 2]);
+  });
+});
+
+// ===========================================================================
+//  DOS BANDEJAS, Y EL ESTADO DEL CASO NO ES EL ESTADO DE LA PROPUESTA
+// ===========================================================================
+//  «Pendientes» es operativa: hace falta que alguien decida Y que el caso siga
+//  abierto. «Ya decididas» es trazabilidad: mira solo la propuesta.
+//
+//  Lo que estas pruebas guardan no es la lista de bandejas: es que las dos no
+//  se solapen, que «Todas» sea exactamente su union, y que una propuesta sin
+//  decidir sobre un caso cerrado NO se convierta en una decision que nadie tomo.
+
+describe('las dos bandejas', () => {
+  const fila = (id, estado, caso_cerrado) => ({
+    id,
+    estado,
+    caso_cerrado,
+    prioridad: 50,
+    accion_propuesta: 'algo',
+    tipo_senal: 'caso_desincronizado'
+  });
+
+  //  Los cuatro cuadrantes de la regla, mas un rechazo y un caso reabierto.
+  const CASO_ABIERTO_SIN_DECIDIR = fila('a', 'propuesta', false);
+  const CASO_CERRADO_SIN_DECIDIR = fila('b', 'propuesta', true);
+  const CASO_ABIERTO_ACEPTADA = fila('c', 'aceptada', false);
+  const CASO_CERRADO_ACEPTADA = fila('d', 'aceptada', true);
+  const RECHAZADA = fila('e', 'rechazada', false);
+  const TODAS = [
+    CASO_ABIERTO_SIN_DECIDIR,
+    CASO_CERRADO_SIN_DECIDIR,
+    CASO_ABIERTO_ACEPTADA,
+    CASO_CERRADO_ACEPTADA,
+    RECHAZADA
+  ];
+
+  const ids = (filtros) => bandejaDeRevision(TODAS, filtros).map((p) => p.id).sort();
+
+  it('1. propuesta sin decidir y caso abierto: esta en Pendientes', () => {
+    expect(ids({ estado: 'pendientes' })).toContain('a');
+  });
+
+  it('2. propuesta sin decidir y caso CERRADO: NO esta en Pendientes', () => {
+    //  Dejo de ser trabajo operativo de nadie, aunque nadie la haya revisado.
+    expect(ids({ estado: 'pendientes' })).not.toContain('b');
+  });
+
+  it('3. aceptada con caso abierto: esta en Ya decididas, no en Pendientes', () => {
+    expect(ids({ estado: 'decididas' })).toContain('c');
+    expect(ids({ estado: 'pendientes' })).not.toContain('c');
+  });
+
+  it('4. aceptada con caso cerrado: sigue en Ya decididas', () => {
+    //  El cierre NO la saca de la trazabilidad: es justo lo que hay que poder
+    //  consultar despues.
+    expect(ids({ estado: 'decididas' })).toContain('d');
+  });
+
+  it('5. rechazada: esta en Ya decididas', () => {
+    expect(ids({ estado: 'decididas' })).toContain('e');
+  });
+
+  it('6 y 7. una aceptada nunca vuelve a Pendientes, cierre bien o mal', () => {
+    //  Da igual si el cierre funciono ('d', caso cerrado) o fallo ('c', caso
+    //  todavia abierto): las dos quedan en trazabilidad y ninguna vuelve.
+    const pend = ids({ estado: 'pendientes' });
+    expect(pend).not.toContain('c');
+    expect(pend).not.toContain('d');
+    expect(ids({ estado: 'decididas' })).toEqual(expect.arrayContaining(['c', 'd']));
+  });
+
+  it('8. un caso cerrado por otra via NO convierte la propuesta en decidida', () => {
+    //  La prueba que impide el atajo facil: sacarla de pendientes marcandola
+    //  como si alguien hubiera decidido. Su estado sigue siendo 'propuesta' y
+    //  tampoco aparece en la bandeja de decisiones.
+    const b = bandejaDeRevision([CASO_CERRADO_SIN_DECIDIR], {});
+    expect(ids({ estado: 'decididas' })).not.toContain('b');
+    for (const p of bandejaDeRevision(TODAS, {})) {
+      if (p.id === 'b') expect(p.estado).toBe('propuesta');
+    }
+    expect(b.every((p) => p.estado === 'propuesta')).toBe(true);
+  });
+
+  it('9. si el caso se reabre, vuelve a Pendientes', () => {
+    //  'caso_cerrado' es un dato derivado del caso, no un sello: basta que el
+    //  caso vuelva a estar abierto para que la propuesta reaparezca.
+    const reabierto = { ...CASO_CERRADO_SIN_DECIDIR, caso_cerrado: false };
+
+    expect(bandejaDeRevision([reabierto], { estado: 'pendientes' })).toHaveLength(1);
+  });
+
+  it('10. las dos bandejas no se solapan', () => {
+    const p = new Set(ids({ estado: 'pendientes' }));
+    const d = ids({ estado: 'decididas' });
+
+    expect(d.filter((x) => p.has(x))).toEqual([]);
+  });
+
+  it('11. «Todas» es exactamente Pendientes + Ya decididas', () => {
+    const p = ids({ estado: 'pendientes' });
+    const d = ids({ estado: 'decididas' });
+    const todas = ids({});
+
+    expect(todas).toEqual([...p, ...d].sort());
+    //  Sin duplicados, y sin la que no esta en ninguna de las dos.
+    expect(new Set(todas).size).toBe(todas.length);
+    expect(todas).not.toContain('b');
+  });
+
+  it('13. ninguna propuesta se pierde de la entrada: solo se clasifica', () => {
+    //  Cambiar de bandeja no borra nada. La fila 'b' sigue siendo alcanzable
+    //  cuando se la pide sola -- lo que cambia es en que bandeja cae.
+    expect(bandejaDeRevision([CASO_CERRADO_SIN_DECIDIR], { estado: 'decididas' }))
+      .toHaveLength(0);
+    expect(bandejaDeRevision([CASO_CERRADO_SIN_DECIDIR], { estado: 'pendientes' }))
+      .toHaveLength(0);
+  });
+
+  it('14. la trazabilidad de una decidida llega entera a la bandeja', () => {
+    const [p] = bandejaDeRevision([CASO_CERRADO_ACEPTADA], { estado: 'decididas' });
+
+    expect(p.estado).toBe('aceptada');
+    expect(p.caso_cerrado).toBe(true);
+    expect(p.revision.texto).toBe('Revisada');
+  });
+
+  it('7. sin el dato del caso, una propuesta sin decidir sigue siendo pendiente', () => {
+    //  Fail-safe hacia lo visible: si el backend no manda 'caso_cerrado'
+    //  --una version vieja, un origen que no es un caso-- no se esconde nada.
+    const sinDato = { id: 'z', estado: 'propuesta', prioridad: 50 };
+
+    expect(bandejaDeRevision([sinDato], { estado: 'pendientes' })).toHaveLength(1);
+    expect(bandejaDe(sinDato)).toBe('pendientes');
+  });
+
+  it('7b. «no se sabe» es null, y null NO oculta', () => {
+    //  Los TRES valores del dato, y la diferencia que importa: 'false' es
+    //  "esta abierto" y 'null' es "no se pudo determinar". Los dos dejan la
+    //  propuesta a la vista; solo 'true' la saca.
+    const nulo = { id: 'n', estado: 'propuesta', prioridad: 50, caso_cerrado: null };
+
+    expect(bandejaDe(nulo)).toBe('pendientes');
+    expect(bandejaDe({ ...nulo, caso_cerrado: false })).toBe('pendientes');
+    expect(bandejaDe({ ...nulo, caso_cerrado: true })).toBe(null);
+  });
+
+  it('7c. no esconde con un valor que solo PARECE cerrado', () => {
+    //  Se compara con '=== true' y no por verdad: una cadena como 'Closed' es
+    //  truthy sin ser el booleano que el backend promete, y esconder trabajo
+    //  pendiente por un tipo equivocado es el error caro de los dos.
+    for (const enganoso of ['Closed', 'true', 1, {}, []]) {
+      expect(bandejaDe({ estado: 'propuesta', caso_cerrado: enganoso }))
+        .toBe('pendientes');
+    }
+  });
+
+  it('12. cada fila llega sabiendo en que bandeja esta', () => {
+    for (const p of bandejaDeRevision(TODAS, {})) {
+      expect(['pendientes', 'decididas']).toContain(p.bandeja);
+      expect(p.bandeja).toBe(bandejaDe(p));
+    }
+  });
+
+  it('12b. no existe una tercera bandeja: la ausencia es null, no un rotulo', () => {
+    //  La guarda que impide que «Resueltas por otra via» vuelva por la ventana.
+    expect(bandejaDe(CASO_CERRADO_SIN_DECIDIR)).toBe(null);
+    expect(bandejaDeRevision(TODAS, { estado: 'otra_via' })).toHaveLength(0);
+  });
+
+  it('el buscador y los demas filtros siguen valiendo dentro de cada bandeja', () => {
+    const conTexto = TODAS.map((p) => ({ ...p, cliente: p.id === 'a' ? 'Ana' : 'Beto' }));
+
+    expect(bandejaDeRevision(conTexto, { estado: 'pendientes', texto: 'Ana' }))
+      .toHaveLength(1);
+    expect(bandejaDeRevision(conTexto, { estado: 'decididas', texto: 'Ana' }))
+      .toHaveLength(0);
+  });
+
+  it('la numeracion se rehace dentro de cada bandeja', () => {
+    const nums = bandejaDeRevision(TODAS, { estado: 'decididas' }).map((p) => p.n);
+
+    expect(nums).toEqual([1, 2, 3]);
   });
 });
