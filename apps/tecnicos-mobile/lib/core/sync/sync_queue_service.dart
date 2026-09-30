@@ -174,6 +174,18 @@ class SyncQueueService {
       // 5. Procesar mutación 'completar' (DAG: solo si no quedan dirty ni evidencias pendientes)
       await _procesarMutacionCompletar(orgId, profileId);
 
+      // 5b. Materiales: primero sube lo que se gastó, después baja el kit.
+      // En ese orden, porque el kit que devuelve el servidor ya incluye los
+      // consumos recién subidos; al revés, el saldo saltaría hacia arriba un
+      // instante antes de volver a bajar.
+      await _procesarMovimientosMaterial(orgId, profileId);
+      await _procesarIncidencias(orgId, profileId);
+      await _procesarCierreDeJornada(orgId, profileId);
+      await _descargarKit(orgId, profileId);
+      // La jornada se baja al final: asi lo que llega ya refleja los
+      // movimientos, las diferencias y el cierre que se acaban de enviar.
+      await _descargarJornada(orgId, profileId);
+
       // 6. Refresco final de estado
       await _descargarOrdenesAsignadas(orgId, profileId);
 
@@ -188,19 +200,390 @@ class SyncQueueService {
     }
   }
 
+  /// Los segundos que el servidor pidio esperar, si los pidio.
+  ///
+  /// `Retry-After` llega de dos formas y hay que entender las dos: un numero
+  /// de segundos, o una fecha HTTP. Ante cualquier duda devuelve null y manda
+  /// el backoff propio, que es el lado seguro: esperar de mas molesta, no
+  /// esperar nada cuando el servidor pidio calma empeora justo lo que estaba
+  /// mal.
+  static int? _leerRetryAfter(String? crudo) {
+    if (crudo == null) return null;
+    final texto = crudo.trim();
+    if (texto.isEmpty) return null;
+
+    final segundos = int.tryParse(texto);
+    if (segundos != null) return segundos > 0 ? segundos : null;
+
+    try {
+      final fecha = HttpDate.parse(texto);
+      final diferencia = fecha.difference(DateTime.now()).inSeconds;
+      return diferencia > 0 ? diferencia : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Cuantos movimientos van en cada envio.
+  ///
+  /// El lote existe porque una cuadrilla sin senal acumula media jornada y la
+  /// manda toda junta al reconectar: de a uno multiplica los viajes justo
+  /// cuando la conexion es peor. Y tiene tope porque una peticion enorme en
+  /// una red mala falla entera, y entonces no sube nada.
+  static const int _movimientosPorLote = 25;
+
+  /// Un mensaje de error que se puede guardar en el telefono.
+  ///
+  /// La columna `error_mensaje` sobrevive al cierre de sesion mientras haya
+  /// pendientes, asi que no puede terminar ahi una URL firmada, una cabecera
+  /// de autorizacion ni el cuerpo de una respuesta. Se guarda el codigo y una
+  /// frase corta: alcanza para saber si reintentar y no deja un secreto en el
+  /// disco de un telefono que cambia de manos.
+  static String sanearError(Object error) {
+    if (error is DioException) {
+      final codigo = error.response?.statusCode;
+      if (codigo != null) return 'El servidor respondio $codigo.';
+      return switch (error.type) {
+        DioExceptionType.connectionTimeout ||
+        DioExceptionType.sendTimeout ||
+        DioExceptionType.receiveTimeout =>
+          'Se agoto el tiempo de espera.',
+        DioExceptionType.connectionError => 'No se pudo conectar.',
+        _ => 'Fallo el envio.',
+      };
+    }
+    return 'Fallo el envio.';
+  }
+
+  /// Sube lo que el tecnico gasto en la calle.
+  ///
+  /// Se manda en lote y cada movimiento vuelve con su propio resultado, asi
+  /// que uno en descuadre no invalida a los demas. Lo que el servidor conteste
+  /// --aceptado, descuadre, conflicto-- se guarda tal cual: los tres
+  /// confirman que subio, y ninguno se reintenta. Reintentar un descuadre
+  /// seria pedirle al servidor que cambie de opinion.
+  Future<void> _procesarMovimientosMaterial(String orgId, String profileId) async {
+    final pendientes = await _localDb.getMovimientosMaterialPendientes(
+      orgId: orgId,
+      profileId: profileId,
+    );
+    if (pendientes.isEmpty) return;
+
+    for (var i = 0; i < pendientes.length; i += _movimientosPorLote) {
+      final lote = pendientes.skip(i).take(_movimientosPorLote).toList();
+      final ids = lote.map((m) => m['id'] as String).toList();
+
+      await _localDb.marcarMovimientosEnviando(
+        orgId: orgId,
+        profileId: profileId,
+        ids: ids,
+      );
+
+      try {
+        final respuesta = await _apiClient.post(
+          ApiEndpoints.movimientosMaterial,
+          data: <String, dynamic>{
+            'movimientos': <Map<String, dynamic>>[
+              for (final m in lote)
+                <String, dynamic>{
+                  // El id de la fila ES la clave de idempotencia: el servidor
+                  // la usa para reconocer el reintento.
+                  'clave': m['id'],
+                  'material': m['material_codigo'],
+                  'tipo': m['tipo'],
+                  'cantidad': m['cantidad'],
+                  if ((m['serie'] as String?)?.isNotEmpty ?? false)
+                    'serie': m['serie'],
+                  if (m['orden_id'] != null) 'orden_id': m['orden_id'],
+                  if ((m['motivo_tecnico'] as String?)?.isNotEmpty ?? false)
+                    'motivo': m['motivo_tecnico'],
+                  'ocurrido_en': m['ocurrido_en'],
+                },
+            ],
+          },
+          options: Options(
+            headers: <String, dynamic>{
+              // La misma peticion reintentada no se reprocesa en el servidor.
+              'Idempotency-Key': 'lote-${ids.first}-${ids.length}',
+            },
+          ),
+        );
+
+        final datos = respuesta.data;
+        final resultados = datos is Map ? datos['resultados'] : null;
+        if (resultados is! List) {
+          throw DioException(
+            requestOptions: RequestOptions(path: ApiEndpoints.movimientosMaterial),
+            message: 'respuesta sin resultados',
+          );
+        }
+
+        // Se confirma por clave y no por posicion: si el servidor devolviera
+        // los resultados en otro orden, confiar en el indice marcaria un
+        // movimiento con el resultado de otro.
+        final porClave = <String, Map<String, dynamic>>{
+          for (final r in resultados)
+            if (r is Map && r['clave'] != null)
+              r['clave'].toString(): Map<String, dynamic>.from(r),
+        };
+
+        for (final m in lote) {
+          final id = m['id'] as String;
+          final resultado = porClave[id];
+          if (resultado == null) {
+            // El servidor no dijo nada de este: se deja pendiente para el
+            // proximo ciclo en vez de darlo por subido.
+            await _localDb.registrarFalloMovimientoMaterial(
+              id: id,
+              orgId: orgId,
+              profileId: profileId,
+              nextAttemptAt: DateTime.now().millisecondsSinceEpoch +
+                  calcularBackoffMs(m['intentos'] as int? ?? 0, mutationId: id),
+              errorMensaje: 'El servidor no respondio por este movimiento.',
+            );
+            continue;
+          }
+          // `rechazado` tambien cierra el movimiento, aunque no se haya
+          // guardado en el servidor: es una linea que no se puede interpretar
+          // --un consumo sin trabajo, un equipo sin numero-- y reintentarla
+          // daria el mismo resultado para siempre. Queda con su motivo a la
+          // vista, que es lo unico que puede destrabarlo.
+          await _localDb.confirmarMovimientoMaterial(
+            id: id,
+            orgId: orgId,
+            profileId: profileId,
+            resultado: resultado['estado']?.toString() ?? 'aceptado',
+            motivo: resultado['motivo']?.toString() ?? '',
+          );
+        }
+      } catch (e) {
+        // Un 400 del lote entero --un material que el catalogo no conoce--
+        // tampoco se descarta: se reintenta con espera. Descartar un
+        // movimiento es perder el unico registro de que el material se uso, y
+        // eso no lo decide el telefono.
+        final retryAfter = e is DioException
+            ? _leerRetryAfter(e.response?.headers.value('retry-after'))
+            : null;
+        for (final m in lote) {
+          final id = m['id'] as String;
+          final intentos = m['intentos'] as int? ?? 0;
+          await _localDb.registrarFalloMovimientoMaterial(
+            id: id,
+            orgId: orgId,
+            profileId: profileId,
+            nextAttemptAt: DateTime.now().millisecondsSinceEpoch +
+                calcularBackoffMs(
+                  intentos,
+                  mutationId: id,
+                  retryAfterSeconds: retryAfter,
+                ),
+            errorMensaje: sanearError(e),
+          );
+        }
+      }
+    }
+  }
+
+  /// Sube las diferencias que el tecnico explico.
+  ///
+  /// Van antes del cierre a proposito: una diferencia explicada es justo lo
+  /// que destraba la jornada, y mandar el cierre primero recibiria un 409 por
+  /// algo que ya estaba resuelto en el telefono.
+  Future<void> _procesarIncidencias(String orgId, String profileId) async {
+    final pendientes = await _localDb.getIncidenciasPendientes(
+      orgId: orgId,
+      profileId: profileId,
+    );
+    if (pendientes.isEmpty) return;
+
+    try {
+      final respuesta = await _apiClient.post(
+        ApiEndpoints.incidenciasMaterial,
+        data: <String, dynamic>{
+          'incidencias': <Map<String, dynamic>>[
+            for (final i in pendientes)
+              <String, dynamic>{
+                'clave': i['id'],
+                'material': i['material_codigo'],
+                'tipo': i['tipo'],
+                'cantidad': i['cantidad'],
+                if ((i['serie'] as String?)?.isNotEmpty ?? false)
+                  'serie': i['serie'],
+                'motivo': i['motivo'],
+                'ocurrido_en': i['ocurrido_en'],
+              },
+          ],
+        },
+        options: Options(headers: <String, dynamic>{
+          'Idempotency-Key': 'inc-${pendientes.first['id']}-${pendientes.length}',
+        }),
+      );
+
+      final datos = respuesta.data;
+      final resultados = datos is Map ? datos['resultados'] : null;
+      if (resultados is! List) return;
+
+      final porClave = <String, Map<String, dynamic>>{
+        for (final r in resultados)
+          if (r is Map && r['clave'] != null)
+            r['clave'].toString(): Map<String, dynamic>.from(r),
+      };
+
+      for (final i in pendientes) {
+        final id = i['id'] as String;
+        final resultado = porClave[id];
+        if (resultado == null) continue;
+        await _localDb.confirmarIncidencia(
+          id: id,
+          orgId: orgId,
+          profileId: profileId,
+          resultado: resultado['estado']?.toString() ?? 'registrada',
+          errorMensaje: resultado['estado'] == 'rechazada'
+              ? resultado['motivo']?.toString()
+              : null,
+        );
+      }
+    } catch (e) {
+      final retryAfter = e is DioException
+          ? _leerRetryAfter(e.response?.headers.value('retry-after'))
+          : null;
+      for (final i in pendientes) {
+        await _localDb.registrarFalloIncidencia(
+          id: i['id'] as String,
+          orgId: orgId,
+          profileId: profileId,
+          nextAttemptAt: DateTime.now().millisecondsSinceEpoch +
+              calcularBackoffMs(
+                i['intentos'] as int? ?? 0,
+                mutationId: i['id'] as String?,
+                retryAfterSeconds: retryAfter,
+              ),
+          errorMensaje: sanearError(e),
+        );
+      }
+    }
+  }
+
+  /// Lleva al servidor el cierre que el tecnico ya afirmo en la calle.
+  ///
+  /// El telefono NO decide si la jornada cuadra: eso lo valida el dominio, que
+  /// es quien congela el acta. Si contesta 409, el cierre local se queda como
+  /// esta y la proxima bajada trae los motivos actualizados -- no se borra la
+  /// intencion de cerrar, porque el tecnico ya la tomo y perderla lo obligaria
+  /// a repetir el gesto sin entender por que.
+  Future<void> _procesarCierreDeJornada(String orgId, String profileId) async {
+    final jornada = await _localDb.getJornada(orgId: orgId, profileId: profileId);
+    if (jornada == null) return;
+    if ((jornada['estado'] ?? '') == 'confirmada') return;
+
+    final clave = (jornada['cierre_clave'] ?? '').toString();
+    if (clave.isEmpty) return;
+
+    try {
+      await _apiClient.post(
+        ApiEndpoints.cerrarJornada,
+        data: <String, dynamic>{},
+        options: Options(headers: <String, dynamic>{
+          // La misma clave para el mismo cierre: dos toques del boton, o un
+          // reintento, no pueden producir dos actas.
+          'Idempotency-Key': clave,
+        }),
+      );
+    } catch (_) {
+      // Un 409 es informacion, no un fallo del telefono: la jornada todavia
+      // no cuadra. La bajada siguiente trae los motivos.
+    }
+  }
+
+  /// Trae el estado de la jornada tal como lo calcula el servidor.
+  ///
+  /// Se guarda entero y no se recalcula nada en el telefono: los numeros de la
+  /// jornada los hace el dominio, que es el mismo que firma el acta. Si la
+  /// pantalla hiciera su propia cuenta, el dia que las dos difieran nadie
+  /// sabria cual creer.
+  ///
+  /// Corre al final, despues de subir los movimientos: asi lo que baja ya
+  /// incluye lo que se acaba de enviar.
+  Future<void> _descargarJornada(String orgId, String profileId) async {
+    try {
+      final respuesta = await _apiClient.get(ApiEndpoints.jornada);
+      final datos = respuesta.data;
+      if (datos is! Map) return;
+      await _localDb.guardarJornada(
+        orgId: orgId,
+        profileId: profileId,
+        datos: Map<String, dynamic>.from(datos),
+      );
+    } catch (_) {
+      // Sin senal se conserva el ultimo estado conocido. Un resumen de ayer
+      // con su fecha es mas util que una pantalla en blanco.
+    }
+  }
+
+  /// Trae el kit del servidor y reemplaza el espejo local.
+  ///
+  /// Corre DESPUES de subir los movimientos: si corriera antes, el espejo
+  /// llegaria sin los consumos que estan por subir y el saldo mostrado
+  /// saltaria hacia arriba un instante antes de volver a bajar.
+  Future<void> _descargarKit(String orgId, String profileId) async {
+    try {
+      final respuesta = await _apiClient.get(ApiEndpoints.kit);
+      final datos = respuesta.data;
+      final materiales = datos is Map ? datos['materiales'] : null;
+      if (materiales is! List) return;
+
+      await _localDb.reemplazarKit(
+        orgId: orgId,
+        profileId: profileId,
+        materiales: <Map<String, dynamic>>[
+          for (final m in materiales)
+            if (m is Map) Map<String, dynamic>.from(m),
+        ],
+      );
+    } catch (_) {
+      // Sin senal el kit se queda como estaba. Es un espejo: quedarse con el
+      // de ayer es mejor que quedarse sin ninguno.
+    }
+  }
+
+  /// Cuántas páginas del listado se recorren como máximo en una corrida.
+  ///
+  /// Es un tope de seguridad, no un límite de negocio: si el servidor
+  /// devolviera cursores en círculo, la sincronización no puede quedarse
+  /// girando para siempre con la pantalla bloqueada.
+  static const int _maximoDePaginas = 50;
+
   Future<void> _descargarOrdenesAsignadas(String orgId, String profileId) async {
     try {
-      final response = await _apiClient.get(ApiEndpoints.trabajos);
-      if (response.statusCode == 200 && response.data != null) {
-        final List results = response.data['results'] ?? response.data;
+      String? cursor;
+      var paginas = 0;
+
+      // El listado pagina con cursor. Quedarse en la primera página dejaba
+      // fuera del teléfono todo lo que pasara de cien órdenes: para el técnico
+      // esas órdenes no existían.
+      do {
+        final response = await _apiClient.get(
+          ApiEndpoints.trabajos,
+          queryParameters: cursor == null ? null : <String, dynamic>{'cursor': cursor},
+        );
+        if (response.statusCode != 200 || response.data == null) return;
+
+        final datos = response.data;
+        final List results = datos is Map ? (datos['results'] ?? const []) : datos;
+
         for (final item in results) {
           final id = item['id'] as String;
           Map<String, dynamic> fullData = item as Map<String, dynamic>;
+          // Si el detalle no llega, lo que se guarda es el retrato pobre del
+          // listado. Decirlo importa: sin esto, un fallo de red pasajero
+          // borraba el formulario y las evidencias ya descargadas (CAMPO-D2).
+          var fuente = FuenteOrden.listado;
 
           try {
             final detailRes = await _apiClient.get(ApiEndpoints.trabajoDetalle(id));
             if (detailRes.statusCode == 200 && detailRes.data is Map) {
               fullData = Map<String, dynamic>.from(detailRes.data);
+              fuente = FuenteOrden.detalle;
             }
           } catch (_) {}
 
@@ -208,9 +591,13 @@ class SyncQueueService {
             orgId: orgId,
             profileId: profileId,
             ordenData: fullData,
+            fuente: fuente,
           );
         }
-      }
+
+        cursor = datos is Map ? datos['next_cursor'] as String? : null;
+        paginas++;
+      } while (cursor != null && paginas < _maximoDePaginas);
     } catch (_) {
       // Offline o error de red: se ignora silenciosamente para mantener datos locales
     }
@@ -273,7 +660,12 @@ class SyncQueueService {
 
         if (response.statusCode == 200) {
           final data = response.data;
-          await _localDb.updateMutacionEstado(id: m['id'], estado: 'sincronizada');
+          await _localDb.updateMutacionEstado(
+            id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
+            estado: 'sincronizada',
+          );
           final estadoBackend = data?['estado_operativo']?.toString();
           if (data != null && data['revision'] != null && estadoBackend != null) {
             await _localDb.updateOrdenRevisionYEstado(
@@ -291,6 +683,8 @@ class SyncQueueService {
           // Error de validación: no reintentable automáticamente para evitar bucles
           await _localDb.updateMutacionEstado(
             id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
             estado: 'error_validacion',
             errorMensaje: dioErr.response?.data?['error']?.toString() ?? dioErr.message,
           );
@@ -298,6 +692,8 @@ class SyncQueueService {
           // Error de autenticación persistente tras intento de refresh
           await _localDb.updateMutacionEstado(
             id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
             estado: 'error_auth',
             errorMensaje: 'Sesión expirada o no autorizada.',
           );
@@ -305,6 +701,8 @@ class SyncQueueService {
           // Terminal: orden inexistente o reasignada
           await _localDb.updateMutacionEstado(
             id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
             estado: 'terminal_404',
             errorMensaje: 'La orden no existe o fue reasignada.',
           );
@@ -313,27 +711,16 @@ class SyncQueueService {
           final code = dioErr.response?.data?['code'] ?? '';
           await _localDb.updateMutacionEstado(
             id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
             estado: 'conflicto',
             errorMensaje: code.isNotEmpty ? code : 'STALE_WORK_ORDER',
           );
         } else {
           // Errores reintentables: 408 (Timeout), 429 (Rate limit), 5xx, timeouts de red, caídas de socket
-          int? retryAfterSeconds;
-          if (status == 429) {
-            final rawRetryAfter = dioErr.response?.headers.value('retry-after');
-            if (rawRetryAfter != null) {
-              final parsed = int.tryParse(rawRetryAfter.trim());
-              if (parsed != null && parsed > 0) {
-                retryAfterSeconds = parsed;
-              } else {
-                try {
-                  final httpDate = HttpDate.parse(rawRetryAfter.trim());
-                  final diff = httpDate.difference(DateTime.now()).inSeconds;
-                  if (diff > 0) retryAfterSeconds = diff;
-                } catch (_) {}
-              }
-            }
-          }
+          final retryAfterSeconds = status == 429
+              ? _leerRetryAfter(dioErr.response?.headers.value('retry-after'))
+              : null;
 
           final reintentosActuales = (m['reintentos'] as int? ?? 0);
           final delayMs = calcularBackoffMs(
@@ -345,6 +732,8 @@ class SyncQueueService {
 
           await _localDb.registrarFalloMutacion(
             id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
             nextAttemptAt: nextAttemptAt,
             errorMensaje: dioErr.message,
           );
@@ -434,6 +823,8 @@ class SyncQueueService {
         confirmacionKey = const Uuid().v4();
         await _localDb.updateEvidenciaEstado(
           id: id,
+          orgId: orgId,
+          profileId: profileId,
           subidaEstado: subidaEstado,
           confirmacionIdempotencyKey: confirmacionKey,
         );
@@ -443,6 +834,8 @@ class SyncQueueService {
       if (!await file.exists()) {
         await _localDb.updateEvidenciaEstado(
           id: id,
+          orgId: orgId,
+          profileId: profileId,
           subidaEstado: 'error_archivo_inexistente',
           errorMensaje: 'El archivo local de la foto no fue encontrado.',
         );
@@ -461,6 +854,25 @@ class SyncQueueService {
               'bytes': tamanoBytes,
               'mime_type': mimeType,
               'sha256': sha256,
+              // La hora del reloj del telefono al capturar. El servidor guarda
+              // por su cuenta `recibida_en_servidor`, y la distancia entre las
+              // dos es informacion: una foto que dice haberse tomado despues
+              // de recibida es una senal, no un dato.
+              //
+              // Va en UTC con `toIso8601String()`: Django lo interpreta como
+              // tal por la Z final, y en horario local habria guardado la hora
+              // equivocada sin avisar.
+              if (ev['capturada_en'] != null)
+                'capturada_en_cliente':
+                    DateTime.fromMillisecondsSinceEpoch(
+                            ev['capturada_en'] as int)
+                        .toUtc()
+                        .toIso8601String(),
+              // Donde y con que se tomo. El backend lo espera como objeto
+              // (`DictField`), asi que se manda decodificado, no como texto.
+              if (ev['metadatos_captura_json'] != null)
+                'metadatos_captura': jsonDecode(
+                    ev['metadatos_captura_json'] as String),
               'client_mutation_id': registroKey,
             },
             options: Options(
@@ -484,6 +896,8 @@ class SyncQueueService {
               subidaEstado = 'confirmada';
               await _localDb.updateEvidenciaEstado(
                 id: id,
+                orgId: orgId,
+                profileId: profileId,
                 subidaEstado: 'confirmada',
                 backendEvidenciaId: backendEvidenciaId,
               );
@@ -509,6 +923,8 @@ class SyncQueueService {
 
               await _localDb.updateEvidenciaEstado(
                 id: id,
+                orgId: orgId,
+                profileId: profileId,
                 subidaEstado: subidaEstado,
                 signedUploadUrl: signedUploadUrl,
                 uploadMethod: uploadMethod,
@@ -588,6 +1004,8 @@ class SyncQueueService {
             subidaEstado = 'subido_binario';
             await _localDb.updateEvidenciaEstado(
               id: id,
+              orgId: orgId,
+              profileId: profileId,
               subidaEstado: subidaEstado,
             );
           }
@@ -596,6 +1014,8 @@ class SyncQueueService {
           // para reintentar oportunamente sin duplicar la evidencia
           await _localDb.updateEvidenciaEstado(
             id: id,
+            orgId: orgId,
+            profileId: profileId,
             subidaEstado: 'url_obtenida',
             errorMensaje: 'Timeout o error en subida binaria: $e',
           );
@@ -619,6 +1039,8 @@ class SyncQueueService {
             subidaEstado = 'confirmada';
             await _localDb.updateEvidenciaEstado(
               id: id,
+              orgId: orgId,
+              profileId: profileId,
               subidaEstado: subidaEstado,
             );
           }

@@ -10,6 +10,11 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
+  // Base propia para esta suite. `flutter test` corre los archivos en
+  // paralelo y todos abrian el MISMO dexter_campo.db: la preparacion de
+  // una le vaciaba las tablas a la de al lado, y el fallo aparecia o no
+  // segun el orden -- se culpaba al ultimo cambio, nunca al vecino.
+  LocalDatabase.usarBaseDePruebas('pruebas_evidencia_idempotencia.db');
 
   const testOrgId = 'org_test_idemp';
   const testProfileId = 'prof_carlos_idemp';
@@ -104,6 +109,8 @@ void main() {
       // Simular intento fallido de registro y retry
       await localDb.updateEvidenciaEstado(
         id: evId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         subidaEstado: 'pendiente_registro',
         errorMensaje: 'Simulated network timeout',
       );
@@ -140,6 +147,8 @@ void main() {
       // Avanzar a subido_binario
       await localDb.updateEvidenciaEstado(
         id: evId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         subidaEstado: 'subido_binario',
         backendEvidenciaId: 'bev-test-123',
       );
@@ -154,6 +163,8 @@ void main() {
       // Simular fallo en confirmación y reintento
       await localDb.updateEvidenciaEstado(
         id: evId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         subidaEstado: 'subido_binario',
         errorMensaje: 'Connection error during confirmation',
       );
@@ -236,6 +247,8 @@ void main() {
       // Estado exacto en el que quedó la orden #1844
       await localDb.updateEvidenciaEstado(
         id: evId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         subidaEstado: 'subido_binario',
         backendEvidenciaId: 'bev-existente-456',
         signedUploadUrl: 'https://backend/api/campo/evidencias/bev-existente-456/subir/',
@@ -274,10 +287,19 @@ void main() {
 
       expect(tempCaptureFile.path, contains('mock_cache_'));
 
+      // El hash se calcula ANTES de persistir: desde que persistir borra la
+      // copia de cache -- cada foto quedaba dos veces en el telefono -- el
+      // original ya no esta al final para compararlo.
+      final shaOriginal = await SyncQueueService.calcularSha256(tempCaptureFile);
+
       // Persistir usando EvidenciaStorageService
       final persistentFile = await EvidenciaStorageService.persistirArchivoCaptura(
         tempCaptureFile,
         nombreOriginal: 'foto_ont.jpg',
+        orgId: testOrgId,
+        profileId: testProfileId,
+        ordenId: 'ot-idemp-1',
+        evidenciaId: 'ev-idemp-1',
       );
 
       // Verificar invariantes de almacenamiento durable
@@ -288,17 +310,23 @@ void main() {
       expect(persistentFile.path, startsWith(tempTestDir.path),
           reason: 'La ruta definitiva debe residir en el almacenamiento persistente privado de Dexter IA');
 
-      final shaOriginal = await SyncQueueService.calcularSha256(tempCaptureFile);
       final shaPersistente = await SyncQueueService.calcularSha256(persistentFile);
       expect(shaPersistente, equals(shaOriginal),
           reason: 'El hash SHA-256 del archivo persistido debe ser idéntico al original');
 
-      // Limpiar cache temporal simulando limpieza del SO
-      await tempCaptureFile.delete();
-      expect(await tempCaptureFile.exists(), isFalse);
+      // Ya no hace falta simular la limpieza del SO: la copia de cache la
+      // borra el propio servicio al terminar de copiar. Antes quedaba ahi,
+      // fuera de todo control de identidad, hasta que Android decidiera.
+      expect(await tempCaptureFile.exists(), isFalse,
+          reason: 'la copia recomprimida de la camara no se queda en el disco');
 
       // El archivo persistente debe seguir intacto
       expect(await persistentFile.exists(), isTrue);
+
+      // Y la ruta lleva la identidad: org, perfil y orden.
+      expect(persistentFile.path, contains(testOrgId));
+      expect(persistentFile.path, contains(testProfileId));
+      expect(persistentFile.path, contains('ot-idemp-1'));
 
       await tempCacheDir.delete(recursive: true);
     });

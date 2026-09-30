@@ -3,7 +3,16 @@ import '../sync/sync_queue_service.dart';
 import '../theme/app_theme.dart';
 
 class SyncBadge extends StatefulWidget {
-  const SyncBadge({super.key});
+  const SyncBadge({super.key, this.resumenFijo});
+
+  /// Un estado ya conocido. Cuando viene, el chip lo muestra y **no** consulta
+  /// la cola.
+  ///
+  /// Sin esto el widget preguntaba por su cuenta al montarse, y eso alcanzaba
+  /// para que cualquier pantalla que lo tuviera en su barra fuera imposible de
+  /// dibujar en una prueba: el almacenamiento seguro no existe ahi y la
+  /// consulta explota antes de pintar nada.
+  final SyncSummary? resumenFijo;
 
   @override
   State<SyncBadge> createState() => _SyncBadgeState();
@@ -15,15 +24,18 @@ class _SyncBadgeState extends State<SyncBadge> {
   @override
   void initState() {
     super.initState();
-    // Consultar el estado real en SQLite inmediatamente al montar el widget
-    syncService.refreshSyncSummary();
+    // Consultar el estado real en SQLite inmediatamente al montar el widget,
+    // salvo que ya nos hayan dicho cual es.
+    if (widget.resumenFijo == null) syncService.refreshSyncSummary();
   }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<SyncSummary>(
-      stream: syncService.syncSummaryStream,
-      initialData: syncService.lastSummary,
+      stream: widget.resumenFijo == null
+          ? syncService.syncSummaryStream
+          : const Stream<SyncSummary>.empty(),
+      initialData: widget.resumenFijo ?? syncService.lastSummary,
       builder: (context, snapshot) {
         final summary = snapshot.data;
 
@@ -92,12 +104,19 @@ class _SyncBadgeState extends State<SyncBadge> {
               children: [
                 Icon(icon, size: 14, color: color),
                 const SizedBox(width: 6),
-                Text(
-                  text,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+                // Flexible: en un lugar angosto el texto se recorta en vez de
+                // desbordar la caja. Pasaba dentro del encabezado de paso,
+                // donde la chapa tiene un techo de ancho.
+                Flexible(
+                  child: Text(
+                    text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ],

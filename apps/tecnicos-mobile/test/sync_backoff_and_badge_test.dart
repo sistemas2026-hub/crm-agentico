@@ -8,6 +8,11 @@ import 'package:campo/core/sync/sync_queue_service.dart';
 void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
+  // Base propia para esta suite. `flutter test` corre los archivos en
+  // paralelo y todos abrian el MISMO dexter_campo.db: la preparacion de
+  // una le vaciaba las tablas a la de al lado, y el fallo aparecia o no
+  // segun el orden -- se culpaba al ultimo cambio, nunca al vecino.
+  LocalDatabase.usarBaseDePruebas('pruebas_backoff.db');
 
   const testOrgId = 'org_rapilink_test';
   const testProfileId = 'prof_carlos_test';
@@ -55,6 +60,8 @@ void main() {
       final nextAttempt1 = now + delay1;
       await localDb.registrarFalloMutacion(
         id: mutId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         nextAttemptAt: nextAttempt1,
         errorMensaje: '504 Gateway Timeout',
       );
@@ -74,6 +81,8 @@ void main() {
       final nextAttempt2 = now + delay2;
       await localDb.registrarFalloMutacion(
         id: mutId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         nextAttemptAt: nextAttempt2,
         errorMensaje: 'Connection closed unexpectedly',
       );
@@ -163,6 +172,8 @@ void main() {
       // Programar para 10 segundos en el futuro
       await localDb.registrarFalloMutacion(
         id: mutId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         nextAttemptAt: now + 10000,
         errorMensaje: 'Error transitorio',
       );
@@ -201,6 +212,8 @@ void main() {
 
       await localDb.registrarFalloMutacion(
         id: mutId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         nextAttemptAt: nextAt,
         errorMensaje: '503 Service Unavailable',
       );
@@ -238,7 +251,12 @@ void main() {
       );
       expect(pendientes.length, 1);
 
-      await localDb.updateMutacionEstado(id: mutId, estado: 'sincronizada');
+      await localDb.updateMutacionEstado(
+        id: mutId,
+        orgId: testOrgId,
+        profileId: testProfileId,
+        estado: 'sincronizada',
+      );
 
       pendientes = await localDb.getMutacionesPendientes(
         orgId: testOrgId,
@@ -261,6 +279,8 @@ void main() {
 
       await localDb.updateMutacionEstado(
         id: mutId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         estado: 'error_validacion',
         errorMensaje: 'Payload inválido: campo requerido faltante',
       );
@@ -289,6 +309,8 @@ void main() {
 
       await localDb.updateMutacionEstado(
         id: mutId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         estado: 'conflicto',
         errorMensaje: 'STALE_WORK_ORDER',
       );
