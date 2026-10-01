@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
@@ -60,15 +61,22 @@ class LocalDatabase {
       StreamController<LocalDatabaseChangeEvent>.broadcast();
 
   /// Stream broadcast para múltiples suscriptores que notifica cambios reactivos en SQLite
-  static Stream<LocalDatabaseChangeEvent> get onDataChanged => _changeController.stream;
+  static Stream<LocalDatabaseChangeEvent> get onDataChanged =>
+      _changeController.stream;
 
-  static void _notifyChange({String? orgId, String? profileId, required String tabla}) {
+  static void _notifyChange({
+    String? orgId,
+    String? profileId,
+    required String tabla,
+  }) {
     if (!_changeController.isClosed) {
-      _changeController.add(LocalDatabaseChangeEvent(
-        orgId: orgId,
-        profileId: profileId,
-        tabla: tabla,
-      ));
+      _changeController.add(
+        LocalDatabaseChangeEvent(
+          orgId: orgId,
+          profileId: profileId,
+          tabla: tabla,
+        ),
+      );
     }
   }
 
@@ -103,7 +111,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 14,
+      version: 15,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -129,6 +137,15 @@ class LocalDatabase {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    // v15: el seguimiento de la intervencion, para poder leerlo sin señal.
+    //
+    // Es un espejo, como `local_jornada`: se reemplaza entero en cada
+    // sincronizacion y NUNCA se edita desde el telefono. Esta fase solo lee; los
+    // reportes que el tecnico escriba van a tener su propia cola.
+    if (oldVersion < 15) {
+      await _crearTablaDeSeguimiento(db);
+    }
+
     // v9: materiales. Aditiva y sin tocar nada de lo anterior -- un telefono
     // con media jornada sin subir no puede perderla por actualizar la app.
     if (oldVersion < 9) {
@@ -155,7 +172,9 @@ class LocalDatabase {
         );
       }
       if (!cols.contains('cierre_clave')) {
-        await db.execute('ALTER TABLE local_jornada ADD COLUMN cierre_clave TEXT;');
+        await db.execute(
+          'ALTER TABLE local_jornada ADD COLUMN cierre_clave TEXT;',
+        );
       }
     }
 
@@ -209,8 +228,9 @@ class LocalDatabase {
     // la regla que el servidor manda con cada material para poder avisarlo
     // sin senal.
     if (oldVersion < 10) {
-      final infoMovimientos =
-          await db.rawQuery('PRAGMA table_info(cola_movimientos_material);');
+      final infoMovimientos = await db.rawQuery(
+        'PRAGMA table_info(cola_movimientos_material);',
+      );
       final cols = infoMovimientos.map((c) => c['name'] as String).toSet();
       if (!cols.contains('motivo_tecnico')) {
         await db.execute(
@@ -224,34 +244,56 @@ class LocalDatabase {
       }
     }
 
-    final infoEvidencias = await db.rawQuery('PRAGMA table_info(cola_evidencias);');
-    final colsEvidencias = infoEvidencias.map((c) => c['name'] as String).toSet();
+    final infoEvidencias = await db.rawQuery(
+      'PRAGMA table_info(cola_evidencias);',
+    );
+    final colsEvidencias = infoEvidencias
+        .map((c) => c['name'] as String)
+        .toSet();
 
     if (oldVersion < 2 && !colsEvidencias.contains('upload_headers_json')) {
-      await db.execute('ALTER TABLE cola_evidencias ADD COLUMN upload_headers_json TEXT;');
+      await db.execute(
+        'ALTER TABLE cola_evidencias ADD COLUMN upload_headers_json TEXT;',
+      );
     }
     if (oldVersion < 3) {
       if (!colsEvidencias.contains('upload_method')) {
-        await db.execute('ALTER TABLE cola_evidencias ADD COLUMN upload_method TEXT;');
+        await db.execute(
+          'ALTER TABLE cola_evidencias ADD COLUMN upload_method TEXT;',
+        );
       }
       if (!colsEvidencias.contains('upload_requiere_auth')) {
-        await db.execute('ALTER TABLE cola_evidencias ADD COLUMN upload_requiere_auth INTEGER;');
+        await db.execute(
+          'ALTER TABLE cola_evidencias ADD COLUMN upload_requiere_auth INTEGER;',
+        );
       }
     }
     if (oldVersion < 4) {
       if (!colsEvidencias.contains('registro_idempotency_key')) {
-        await db.execute('ALTER TABLE cola_evidencias ADD COLUMN registro_idempotency_key TEXT;');
+        await db.execute(
+          'ALTER TABLE cola_evidencias ADD COLUMN registro_idempotency_key TEXT;',
+        );
       }
       if (!colsEvidencias.contains('confirmacion_idempotency_key')) {
-        await db.execute('ALTER TABLE cola_evidencias ADD COLUMN confirmacion_idempotency_key TEXT;');
+        await db.execute(
+          'ALTER TABLE cola_evidencias ADD COLUMN confirmacion_idempotency_key TEXT;',
+        );
       }
-      await db.execute('UPDATE cola_evidencias SET registro_idempotency_key = id WHERE registro_idempotency_key IS NULL;');
+      await db.execute(
+        'UPDATE cola_evidencias SET registro_idempotency_key = id WHERE registro_idempotency_key IS NULL;',
+      );
     }
     if (oldVersion < 5) {
-      final infoMutaciones = await db.rawQuery('PRAGMA table_info(cola_mutaciones);');
-      final colsMutaciones = infoMutaciones.map((c) => c['name'] as String).toSet();
+      final infoMutaciones = await db.rawQuery(
+        'PRAGMA table_info(cola_mutaciones);',
+      );
+      final colsMutaciones = infoMutaciones
+          .map((c) => c['name'] as String)
+          .toSet();
       if (!colsMutaciones.contains('next_attempt_at')) {
-        await db.execute('ALTER TABLE cola_mutaciones ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0;');
+        await db.execute(
+          'ALTER TABLE cola_mutaciones ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0;',
+        );
       }
     }
 
@@ -260,7 +302,9 @@ class LocalDatabase {
       // la orden. Se agregan como columnas nuevas y anulables, con el mismo
       // patron que las cuatro migraciones anteriores: nada se recrea, nada se
       // borra, y una orden o una mutacion que ya estaba sigue estando.
-      final infoOrdenes = await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final infoOrdenes = await db.rawQuery(
+        'PRAGMA table_info(local_ordenes);',
+      );
       final colsOrdenes = infoOrdenes.map((c) => c['name'] as String).toSet();
 
       const nuevas = <String, String>{
@@ -287,7 +331,9 @@ class LocalDatabase {
       // orden devuelta llegaba sin decir que corregir.
       //
       // Mismo patron aditivo: columnas nuevas y anulables, nada se recrea.
-      final infoOrdenes = await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final infoOrdenes = await db.rawQuery(
+        'PRAGMA table_info(local_ordenes);',
+      );
       final colsOrdenes = infoOrdenes.map((c) => c['name'] as String).toSet();
 
       const nuevas = <String, String>{
@@ -317,7 +363,9 @@ class LocalDatabase {
       //
       // La prioridad y la ventana dejan de ser datos de ejemplo: ahora se
       // pueden usar para ordenar y para avisar, porque vienen del servidor.
-      final infoOrdenes = await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final infoOrdenes = await db.rawQuery(
+        'PRAGMA table_info(local_ordenes);',
+      );
       final colsOrdenes = infoOrdenes.map((c) => c['name'] as String).toSet();
 
       const nuevas = <String, String>{
@@ -463,6 +511,42 @@ class LocalDatabase {
   /// es que los numeros de la jornada los hace el dominio, y el telefono los
   /// muestra. Guardar un calculo propio abriria la puerta a que la pantalla
   /// diga un numero y el acta diga otro.
+  /// El seguimiento de una orden, tal como lo conto el servidor.
+  ///
+  /// POR QUE SE GUARDA UN JSON Y NO UNA FILA POR EVENTO
+  /// --------------------------------------------------
+  /// Porque el telefono NO interpreta estos datos: los dibuja. Cada evento trae
+  /// su `etiqueta`, su `severidad` y sus `datos` ya resueltos por el backend
+  /// --incluido el detalle leido con el esquema que tenia cuando se capturo-- y
+  /// partir eso en columnas obligaria a la aplicacion a conocer la forma de cada
+  /// tipo de evento. Que es exactamente lo que la decision 7 del objetivo
+  /// prohibe: si una regla pertenece al flujo de campo, vive en el backend.
+  ///
+  /// El dia que haga falta buscar o filtrar eventos en el telefono, ahi si valdra
+  /// una tabla por evento. Hoy no hace falta y adelantarla seria inventar
+  /// estructura para un uso que nadie pidio.
+  ///
+  /// ES UN ESPEJO DE LECTURA
+  /// -----------------------
+  /// Se reemplaza entero con cada sincronizacion y no se edita a mano. Y si la
+  /// descarga FALLA, no se toca: quedarse con el seguimiento de hace una hora es
+  /// mejor que quedarse sin ninguno, y mucho mejor que mostrar una pantalla vacia
+  /// que se lee como "este trabajo no tiene historia".
+  static Future<void> _crearTablaDeSeguimiento(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_seguimiento (
+        orden_id TEXT NOT NULL,
+        org_id TEXT NOT NULL,
+        -- La respuesta del servidor, entera y sin interpretar.
+        seguimiento_json TEXT NOT NULL,
+        -- Cuando se trajo. Es lo que la pantalla muestra como "ultima
+        -- sincronizacion", y lo unico honesto que se puede decir de un espejo.
+        sincronizado_en INTEGER NOT NULL,
+        PRIMARY KEY (orden_id, org_id)
+      )
+    ''');
+  }
+
   static Future<void> _crearTablaDeJornada(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS local_jornada (
@@ -594,13 +678,20 @@ class LocalDatabase {
     ''');
 
     await _crearTablasDeMateriales(db);
+    await _crearTablaDeSeguimiento(db);
     await _crearTablaDeJornada(db);
     await _crearTablaDeIncidencias(db);
 
     // Índices para optimizar consultas por tenant/usuario
-    await db.execute('CREATE INDEX idx_ordenes_org_user ON local_ordenes (org_id, profile_id)');
-    await db.execute('CREATE INDEX idx_mutaciones_orden ON cola_mutaciones (orden_id, estado)');
-    await db.execute('CREATE INDEX idx_evidencias_orden ON cola_evidencias (orden_id, subida_estado)');
+    await db.execute(
+      'CREATE INDEX idx_ordenes_org_user ON local_ordenes (org_id, profile_id)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_mutaciones_orden ON cola_mutaciones (orden_id, estado)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_evidencias_orden ON cola_evidencias (orden_id, subida_estado)',
+    );
   }
 
   // Operaciones atómicas para Órdenes
@@ -614,7 +705,8 @@ class LocalDatabase {
     final id = ordenData['id'] as String;
 
     // Soportar schema directo (detalle) o anidado en tipo_trabajo_version
-    final schema = ordenData['schema'] ??
+    final schema =
+        ordenData['schema'] ??
         ordenData['tipo_trabajo_version']?['esquema'] ??
         ordenData['tipo_trabajo_version']?['formulario'] ??
         {};
@@ -623,23 +715,31 @@ class LocalDatabase {
     final evidences = schema['evidencias'] ?? [];
 
     final tipoObj = ordenData['tipo'] ?? ordenData['tipo_trabajo'] ?? {};
-    final tipoNombre = tipoObj['nombre'] ?? ordenData['tipo_trabajo_nombre'] ?? 'Instalación FTTH';
-    final tipoCodigo = tipoObj['codigo'] ?? ordenData['tipo_trabajo_codigo'] ?? 'ftth';
+    final tipoNombre =
+        tipoObj['nombre'] ??
+        ordenData['tipo_trabajo_nombre'] ??
+        'Instalación FTTH';
+    final tipoCodigo =
+        tipoObj['codigo'] ?? ordenData['tipo_trabajo_codigo'] ?? 'ftth';
     // Sin valor no se inventa una versión compatible: se marca desconocida.
-    final schemaVersion = tipoObj['schema_version'] ??
+    final schemaVersion =
+        tipoObj['schema_version'] ??
         ordenData['schema_version'] ??
         versionEsquemaDesconocida;
 
-    final estado = ordenData['estado_operativo'] ?? ordenData['estado'] ?? 'asignada';
+    final estado =
+        ordenData['estado_operativo'] ?? ordenData['estado'] ?? 'asignada';
 
     // Diagnóstico previo IA
     String diagnosticoTexto = '';
-    final diag = ordenData['diagnostico_previo'] ?? ordenData['diagnostico_previo_ia'];
+    final diag =
+        ordenData['diagnostico_previo'] ?? ordenData['diagnostico_previo_ia'];
     if (diag is Map) {
       final partes = [
         if (diag['resumen'] != null) diag['resumen'],
         if (diag['nap_sugerida'] != null) 'NAP: ${diag['nap_sugerida']}',
-        if (diag['puerto_sugerido'] != null) 'Puerto: ${diag['puerto_sugerido']}',
+        if (diag['puerto_sugerido'] != null)
+          'Puerto: ${diag['puerto_sugerido']}',
         if (diag['notas'] != null) 'Notas: ${diag['notas']}',
       ];
       diagnosticoTexto = partes.join(' | ');
@@ -668,26 +768,25 @@ class LocalDatabase {
     final ricosPrevios = fuente == FuenteOrden.detalle
         ? const <String, Object?>{}
         : (await db.query(
-            'local_ordenes',
-            columns: <String>[
-              'formulario_campos_json',
-              'formulario_evidencias_json',
-              'diagnostico_previo_ia',
-              'datos_json',
-              'schema_version',
-              // El listado tampoco trae nada de esto: son del detalle.
-              'contexto_json',
-              'correccion_json',
-              'pasos_json',
-              'cuadrilla_json',
-              'requisitos_seguridad_json',
-            ],
-            where: 'id = ? AND org_id = ? AND profile_id = ?',
-            whereArgs: <Object?>[id, orgId, profileId],
-            limit: 1,
-          ))
-            .firstOrNull ??
-            const <String, Object?>{};
+                'local_ordenes',
+                columns: <String>[
+                  'formulario_campos_json',
+                  'formulario_evidencias_json',
+                  'diagnostico_previo_ia',
+                  'datos_json',
+                  'schema_version',
+                  // El listado tampoco trae nada de esto: son del detalle.
+                  'contexto_json',
+                  'correccion_json',
+                  'pasos_json',
+                  'cuadrilla_json',
+                  'requisitos_seguridad_json',
+                ],
+                where: 'id = ? AND org_id = ? AND profile_id = ?',
+                whereArgs: <Object?>[id, orgId, profileId],
+                limit: 1,
+              )).firstOrNull ??
+              const <String, Object?>{};
 
     Object? soloDetalle(String columna, Object? valorSiEsDetalle) {
       if (fuente == FuenteOrden.detalle) return valorSiEsDetalle;
@@ -728,108 +827,160 @@ class LocalDatabase {
       whereArgs: <Object?>[id, orgId, profileId],
       limit: 1,
     );
-    final anterior = previas.isEmpty ? const <String, Object?>{} : previas.first;
+    final anterior = previas.isEmpty
+        ? const <String, Object?>{}
+        : previas.first;
 
-    Object? conservando(Map<dynamic, dynamic> origen, String clave, String columna) {
+    Object? conservando(
+      Map<dynamic, dynamic> origen,
+      String clave,
+      String columna,
+    ) {
       if (origen.containsKey(clave)) return origen[clave];
       return anterior[columna];
     }
 
-    await db.insert(
-      'local_ordenes',
-      {
-        'id': id,
-        'org_id': orgId,
-        'profile_id': profileId,
-        'numero': ordenData['numero'] ?? 0,
-        'estado': estado,
-        'cliente_nombre': clienteObj['nombre'] ?? ordenData['cliente_nombre'] ?? 'Sin cliente',
-        'direccion': clienteObj['direccion'] ?? ordenData['direccion'] ?? 'Sin dirección',
-        'telefono': clienteObj['telefono'] ?? ordenData['telefono'] ?? '',
-        'tipo_nombre': tipoNombre,
-        'tipo_codigo': tipoCodigo,
-        'work_type_version_id': ordenData['work_type_version_id']?.toString(),
-        // La version del esquema decide si la orden se puede trabajar con esta
-        // version de la aplicacion. El listado no la trae, y caer al 1 por
-        // defecto desbloquearia una orden que tiene que quedar bloqueada.
-        'schema_version': soloDetalle('schema_version', schemaVersion),
-        'formulario_campos_json':
-            soloDetalle('formulario_campos_json', jsonEncode(fields)),
-        'formulario_evidencias_json':
-            soloDetalle('formulario_evidencias_json', jsonEncode(evidences)),
-        'revision': ordenData['revision'] ?? 1,
-        'diagnostico_previo_ia':
-            soloDetalle('diagnostico_previo_ia', diagnosticoTexto),
-        'datos_json':
-            soloDetalle('datos_json', jsonEncode(ordenData['datos'] ?? {})),
-        'fecha_compromiso': ordenData['programada_para']?.toString() ??
-            compromiso['programada_para']?.toString() ??
-            ordenData['fecha_compromiso']?.toString(),
-        // Estado de la máquina de validación. Se guarda tal cual llega y no
-        // toca `estado`: son dos máquinas distintas, y una orden puede estar
-        // completada en campo y devuelta al mismo tiempo.
-        'estado_validacion':
-            conservando(ordenData, 'estado_validacion', 'estado_validacion')?.toString(),
-        // Coordenadas del cliente. Se guardan como vienen; puede existir una
-        // sin la otra.
-        'cliente_lat': _comoDecimal(conservando(clienteObj, 'lat', 'cliente_lat')),
-        'cliente_lng': _comoDecimal(conservando(clienteObj, 'lng', 'cliente_lng')),
-        // Marcas de tiempo del servidor. No se regeneran con la hora del
-        // teléfono: dicen cuándo pasó algo allá, no cuándo sincronizamos acá.
-        'iniciada_en': conservando(ordenData, 'iniciada_en', 'iniciada_en')?.toString(),
-        'completada_campo_en':
-            conservando(ordenData, 'completada_campo_en', 'completada_campo_en')?.toString(),
-        'cerrada_en': conservando(ordenData, 'cerrada_en', 'cerrada_en')?.toString(),
-        // Lo que decide la oficina. Viene en las dos respuestas.
-        'prioridad': conservando(ordenData, 'prioridad', 'prioridad')?.toString(),
-        'zona': conservando(ordenData, 'zona', 'zona')?.toString(),
-        'resumen': conservando(ordenData, 'resumen', 'resumen')?.toString(),
-        'ventana_inicio':
-            conservando(compromiso, 'ventana_inicio', 'ventana_inicio')?.toString(),
-        'ventana_fin':
-            conservando(compromiso, 'ventana_fin', 'ventana_fin')?.toString(),
-        'sla_vence_en':
-            conservando(compromiso, 'sla_vence_en', 'sla_vence_en')?.toString(),
-        'detalle_acceso':
-            conservando(clienteObj, 'detalle_acceso', 'detalle_acceso')?.toString(),
-        'id_abonado':
-            conservando(clienteObj, 'id_abonado', 'id_abonado')?.toString(),
-        // Los requisitos de seguridad solo los dice el detalle.
-        'requisitos_seguridad_json': soloDetalle(
-          'requisitos_seguridad_json',
-          ordenData['requisitos_seguridad'] == null
-              ? null
-              : jsonEncode(ordenData['requisitos_seguridad']),
-        ),
-        // En que vuelta de validacion va la orden. Viene en las dos respuestas.
-        'vuelta': _comoEntero(conservando(ordenData, 'vuelta', 'vuelta')),
-        // De que ticket nacio la orden. Tambien viene en las dos.
-        'origen_json': ordenData.containsKey('origen')
-            ? jsonEncode(ordenData['origen'])
-            : anterior['origen_json'],
-        // Lo que solo dice el detalle: el snapshot tecnico congelado al
-        // despachar, que pidio rehacer el supervisor, el procedimiento del
-        // tipo de trabajo y quienes van al trabajo.
-        'contexto_json': soloDetalle(
-          'contexto_json',
-          ordenData['contexto'] == null ? null : jsonEncode(ordenData['contexto']),
-        ),
-        'correccion_json': soloDetalle(
-          'correccion_json',
-          ordenData['correccion'] == null ? null : jsonEncode(ordenData['correccion']),
-        ),
-        'pasos_json': soloDetalle(
-          'pasos_json',
-          tipoObj['pasos'] == null ? null : jsonEncode(tipoObj['pasos']),
-        ),
-        'cuadrilla_json': soloDetalle(
-          'cuadrilla_json',
-          ordenData['cuadrilla'] == null ? null : jsonEncode(ordenData['cuadrilla']),
-        ),
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('local_ordenes', {
+      'id': id,
+      'org_id': orgId,
+      'profile_id': profileId,
+      'numero': ordenData['numero'] ?? 0,
+      'estado': estado,
+      'cliente_nombre':
+          clienteObj['nombre'] ?? ordenData['cliente_nombre'] ?? 'Sin cliente',
+      'direccion':
+          clienteObj['direccion'] ?? ordenData['direccion'] ?? 'Sin dirección',
+      'telefono': clienteObj['telefono'] ?? ordenData['telefono'] ?? '',
+      'tipo_nombre': tipoNombre,
+      'tipo_codigo': tipoCodigo,
+      'work_type_version_id': ordenData['work_type_version_id']?.toString(),
+      // La version del esquema decide si la orden se puede trabajar con esta
+      // version de la aplicacion. El listado no la trae, y caer al 1 por
+      // defecto desbloquearia una orden que tiene que quedar bloqueada.
+      'schema_version': soloDetalle('schema_version', schemaVersion),
+      'formulario_campos_json': soloDetalle(
+        'formulario_campos_json',
+        jsonEncode(fields),
+      ),
+      'formulario_evidencias_json': soloDetalle(
+        'formulario_evidencias_json',
+        jsonEncode(evidences),
+      ),
+      'revision': ordenData['revision'] ?? 1,
+      'diagnostico_previo_ia': soloDetalle(
+        'diagnostico_previo_ia',
+        diagnosticoTexto,
+      ),
+      'datos_json': soloDetalle(
+        'datos_json',
+        jsonEncode(ordenData['datos'] ?? {}),
+      ),
+      'fecha_compromiso':
+          ordenData['programada_para']?.toString() ??
+          compromiso['programada_para']?.toString() ??
+          ordenData['fecha_compromiso']?.toString(),
+      // Estado de la máquina de validación. Se guarda tal cual llega y no
+      // toca `estado`: son dos máquinas distintas, y una orden puede estar
+      // completada en campo y devuelta al mismo tiempo.
+      'estado_validacion': conservando(
+        ordenData,
+        'estado_validacion',
+        'estado_validacion',
+      )?.toString(),
+      // Coordenadas del cliente. Se guardan como vienen; puede existir una
+      // sin la otra.
+      'cliente_lat': _comoDecimal(
+        conservando(clienteObj, 'lat', 'cliente_lat'),
+      ),
+      'cliente_lng': _comoDecimal(
+        conservando(clienteObj, 'lng', 'cliente_lng'),
+      ),
+      // Marcas de tiempo del servidor. No se regeneran con la hora del
+      // teléfono: dicen cuándo pasó algo allá, no cuándo sincronizamos acá.
+      'iniciada_en': conservando(
+        ordenData,
+        'iniciada_en',
+        'iniciada_en',
+      )?.toString(),
+      'completada_campo_en': conservando(
+        ordenData,
+        'completada_campo_en',
+        'completada_campo_en',
+      )?.toString(),
+      'cerrada_en': conservando(
+        ordenData,
+        'cerrada_en',
+        'cerrada_en',
+      )?.toString(),
+      // Lo que decide la oficina. Viene en las dos respuestas.
+      'prioridad': conservando(ordenData, 'prioridad', 'prioridad')?.toString(),
+      'zona': conservando(ordenData, 'zona', 'zona')?.toString(),
+      'resumen': conservando(ordenData, 'resumen', 'resumen')?.toString(),
+      'ventana_inicio': conservando(
+        compromiso,
+        'ventana_inicio',
+        'ventana_inicio',
+      )?.toString(),
+      'ventana_fin': conservando(
+        compromiso,
+        'ventana_fin',
+        'ventana_fin',
+      )?.toString(),
+      'sla_vence_en': conservando(
+        compromiso,
+        'sla_vence_en',
+        'sla_vence_en',
+      )?.toString(),
+      'detalle_acceso': conservando(
+        clienteObj,
+        'detalle_acceso',
+        'detalle_acceso',
+      )?.toString(),
+      'id_abonado': conservando(
+        clienteObj,
+        'id_abonado',
+        'id_abonado',
+      )?.toString(),
+      // Los requisitos de seguridad solo los dice el detalle.
+      'requisitos_seguridad_json': soloDetalle(
+        'requisitos_seguridad_json',
+        ordenData['requisitos_seguridad'] == null
+            ? null
+            : jsonEncode(ordenData['requisitos_seguridad']),
+      ),
+      // En que vuelta de validacion va la orden. Viene en las dos respuestas.
+      'vuelta': _comoEntero(conservando(ordenData, 'vuelta', 'vuelta')),
+      // De que ticket nacio la orden. Tambien viene en las dos.
+      'origen_json': ordenData.containsKey('origen')
+          ? jsonEncode(ordenData['origen'])
+          : anterior['origen_json'],
+      // Lo que solo dice el detalle: el snapshot tecnico congelado al
+      // despachar, que pidio rehacer el supervisor, el procedimiento del
+      // tipo de trabajo y quienes van al trabajo.
+      'contexto_json': soloDetalle(
+        'contexto_json',
+        ordenData['contexto'] == null
+            ? null
+            : jsonEncode(ordenData['contexto']),
+      ),
+      'correccion_json': soloDetalle(
+        'correccion_json',
+        ordenData['correccion'] == null
+            ? null
+            : jsonEncode(ordenData['correccion']),
+      ),
+      'pasos_json': soloDetalle(
+        'pasos_json',
+        tipoObj['pasos'] == null ? null : jsonEncode(tipoObj['pasos']),
+      ),
+      'cuadrilla_json': soloDetalle(
+        'cuadrilla_json',
+        ordenData['cuadrilla'] == null
+            ? null
+            : jsonEncode(ordenData['cuadrilla']),
+      ),
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   /// La vuelta puede llegar como número o como texto según el serializador.
@@ -885,19 +1036,19 @@ class LocalDatabase {
     required dynamic valor,
   }) async {
     final db = await database;
-    await db.insert(
-      'local_datos_dirty',
-      {
-        'orden_id': ordenId,
-        'org_id': orgId,
-        'profile_id': profileId,
-        'campo_clave': campoClave,
-        'valor_json': jsonEncode(valor),
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+    await db.insert('local_datos_dirty', {
+      'orden_id': ordenId,
+      'org_id': orgId,
+      'profile_id': profileId,
+      'campo_clave': campoClave,
+      'valor_json': jsonEncode(valor),
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'local_datos_dirty',
     );
-    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'local_datos_dirty');
   }
 
   Future<Map<String, dynamic>> getMergedDatosOrden({
@@ -907,7 +1058,11 @@ class LocalDatabase {
   }) async {
     final db = await database;
     // 1. Obtener datos base
-    final orden = await getOrden(orgId: orgId, profileId: profileId, id: ordenId);
+    final orden = await getOrden(
+      orgId: orgId,
+      profileId: profileId,
+      id: ordenId,
+    );
     Map<String, dynamic> datos = {};
     if (orden != null && orden['datos_json'] != null) {
       try {
@@ -974,10 +1129,15 @@ class LocalDatabase {
     final placeholders = List.filled(claves.length, '?').join(',');
     await db.delete(
       'local_datos_dirty',
-      where: 'orden_id = ? AND org_id = ? AND profile_id = ? AND campo_clave IN ($placeholders)',
+      where:
+          'orden_id = ? AND org_id = ? AND profile_id = ? AND campo_clave IN ($placeholders)',
       whereArgs: [ordenId, orgId, profileId, ...claves],
     );
-    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'local_datos_dirty');
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'local_datos_dirty',
+    );
   }
 
   // Transición offline atómica: guarda estado local + encola mutación en una sola transacción
@@ -1005,22 +1165,18 @@ class LocalDatabase {
       );
 
       // 2. Encolar mutación
-      await txn.insert(
-        'cola_mutaciones',
-        {
-          'id': idempotencyKey,
-          'org_id': orgId,
-          'profile_id': profileId,
-          'orden_id': ordenId,
-          'tipo': tipoAccion,
-          'payload_json': payload != null ? jsonEncode(payload) : null,
-          'revision_base': revisionBase,
-          'idempotency_key': idempotencyKey,
-          'estado': 'pendiente',
-          'created_at': DateTime.now().millisecondsSinceEpoch,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await txn.insert('cola_mutaciones', {
+        'id': idempotencyKey,
+        'org_id': orgId,
+        'profile_id': profileId,
+        'orden_id': ordenId,
+        'tipo': tipoAccion,
+        'payload_json': payload != null ? jsonEncode(payload) : null,
+        'revision_base': revisionBase,
+        'idempotency_key': idempotencyKey,
+        'estado': 'pendiente',
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     });
     _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_mutaciones');
   }
@@ -1044,35 +1200,31 @@ class LocalDatabase {
     final db = await database;
     final regKey = registroIdempotencyKey ?? const Uuid().v4();
     final confKey = confirmacionIdempotencyKey ?? const Uuid().v4();
-    await db.insert(
-      'cola_evidencias',
-      {
-        'id': id,
-        'org_id': orgId,
-        'profile_id': profileId,
-        'orden_id': ordenId,
-        'requisito_id': requisitoId,
-        'archivo_path': archivoPath,
-        'sha256': sha256,
-        'tamano_bytes': tamanoBytes,
-        'mime_type': mimeType,
-        'subida_estado': 'pendiente_registro',
-        'registro_idempotency_key': regKey,
-        'confirmacion_idempotency_key': confKey,
-        // Sin valor explicito se usa el momento de encolar. No es un relleno:
-        // entre apretar el obturador y encolar hay una copia de archivo y un
-        // sha256 -- decimas de segundo. Quien conoce el instante exacto lo
-        // pasa igual, porque decimas gratis son decimas.
-        'capturada_en':
-            (capturadaEn ?? DateTime.now()).millisecondsSinceEpoch,
-        // Nulo cuando no se intento; un objeto con `ubicacion_motivo` cuando
-        // se intento y no se pudo. No son lo mismo y la fila los distingue.
-        'metadatos_captura_json':
-            metadatosCaptura == null ? null : jsonEncode(metadatosCaptura),
-        'created_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('cola_evidencias', {
+      'id': id,
+      'org_id': orgId,
+      'profile_id': profileId,
+      'orden_id': ordenId,
+      'requisito_id': requisitoId,
+      'archivo_path': archivoPath,
+      'sha256': sha256,
+      'tamano_bytes': tamanoBytes,
+      'mime_type': mimeType,
+      'subida_estado': 'pendiente_registro',
+      'registro_idempotency_key': regKey,
+      'confirmacion_idempotency_key': confKey,
+      // Sin valor explicito se usa el momento de encolar. No es un relleno:
+      // entre apretar el obturador y encolar hay una copia de archivo y un
+      // sha256 -- decimas de segundo. Quien conoce el instante exacto lo
+      // pasa igual, porque decimas gratis son decimas.
+      'capturada_en': (capturadaEn ?? DateTime.now()).millisecondsSinceEpoch,
+      // Nulo cuando no se intento; un objeto con `ubicacion_motivo` cuando
+      // se intento y no se pudo. No son lo mismo y la fila los distingue.
+      'metadatos_captura_json': metadatosCaptura == null
+          ? null
+          : jsonEncode(metadatosCaptura),
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
     _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_evidencias');
   }
 
@@ -1119,14 +1271,17 @@ class LocalDatabase {
     String? errorMensaje,
   }) async {
     final db = await database;
-    await db.rawUpdate('''
+    await db.rawUpdate(
+      '''
       UPDATE cola_mutaciones
       SET reintentos = reintentos + 1,
           next_attempt_at = ?,
           error_mensaje = ?,
           estado = 'pendiente'
       WHERE id = ? AND org_id = ? AND profile_id = ?
-    ''', [nextAttemptAt, errorMensaje, id, orgId, profileId]);
+    ''',
+      [nextAttemptAt, errorMensaje, id, orgId, profileId],
+    );
     _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_mutaciones');
   }
 
@@ -1140,25 +1295,29 @@ class LocalDatabase {
       "SELECT COUNT(*) as c FROM cola_mutaciones WHERE org_id = ? AND profile_id = ? AND estado = 'pendiente'",
       [orgId, profileId],
     );
-    final mutPend = (mutPendList.isNotEmpty ? mutPendList.first['c'] as int? : 0) ?? 0;
+    final mutPend =
+        (mutPendList.isNotEmpty ? mutPendList.first['c'] as int? : 0) ?? 0;
 
     final mutConfList = await db.rawQuery(
       "SELECT COUNT(*) as c FROM cola_mutaciones WHERE org_id = ? AND profile_id = ? AND estado IN ('conflicto', 'error_validacion')",
       [orgId, profileId],
     );
-    final mutConf = (mutConfList.isNotEmpty ? mutConfList.first['c'] as int? : 0) ?? 0;
+    final mutConf =
+        (mutConfList.isNotEmpty ? mutConfList.first['c'] as int? : 0) ?? 0;
 
     final evPendList = await db.rawQuery(
       "SELECT COUNT(*) as c FROM cola_evidencias WHERE org_id = ? AND profile_id = ? AND subida_estado != 'confirmada'",
       [orgId, profileId],
     );
-    final evPend = (evPendList.isNotEmpty ? evPendList.first['c'] as int? : 0) ?? 0;
+    final evPend =
+        (evPendList.isNotEmpty ? evPendList.first['c'] as int? : 0) ?? 0;
 
     final dirtyList = await db.rawQuery(
       "SELECT COUNT(DISTINCT campo_clave) as c FROM local_datos_dirty WHERE org_id = ? AND profile_id = ?",
       [orgId, profileId],
     );
-    final dirtyCount = (dirtyList.isNotEmpty ? dirtyList.first['c'] as int? : 0) ?? 0;
+    final dirtyCount =
+        (dirtyList.isNotEmpty ? dirtyList.first['c'] as int? : 0) ?? 0;
 
     return {
       'mutaciones_pendientes': mutPend,
@@ -1199,10 +1358,7 @@ class LocalDatabase {
     final db = await database;
     await db.update(
       'cola_mutaciones',
-      {
-        'estado': estado,
-        'error_mensaje': errorMensaje,
-      },
+      {'estado': estado, 'error_mensaje': errorMensaje},
       where: 'id = ? AND org_id = ? AND profile_id = ?',
       whereArgs: [id, orgId, profileId],
     );
@@ -1228,12 +1384,22 @@ class LocalDatabase {
     final Map<String, dynamic> data = {'subida_estado': subidaEstado};
     if (signedUploadUrl != null) data['signed_upload_url'] = signedUploadUrl;
     if (uploadMethod != null) data['upload_method'] = uploadMethod;
-    if (uploadHeadersJson != null) data['upload_headers_json'] = uploadHeadersJson;
-    if (uploadRequiereAuth != null) data['upload_requiere_auth'] = uploadRequiereAuth ? 1 : 0;
-    if (backendEvidenciaId != null) data['backend_evidencia_id'] = backendEvidenciaId;
+    if (uploadHeadersJson != null) {
+      data['upload_headers_json'] = uploadHeadersJson;
+    }
+    if (uploadRequiereAuth != null) {
+      data['upload_requiere_auth'] = uploadRequiereAuth ? 1 : 0;
+    }
+    if (backendEvidenciaId != null) {
+      data['backend_evidencia_id'] = backendEvidenciaId;
+    }
     if (errorMensaje != null) data['error_mensaje'] = errorMensaje;
-    if (registroIdempotencyKey != null) data['registro_idempotency_key'] = registroIdempotencyKey;
-    if (confirmacionIdempotencyKey != null) data['confirmacion_idempotency_key'] = confirmacionIdempotencyKey;
+    if (registroIdempotencyKey != null) {
+      data['registro_idempotency_key'] = registroIdempotencyKey;
+    }
+    if (confirmacionIdempotencyKey != null) {
+      data['confirmacion_idempotency_key'] = confirmacionIdempotencyKey;
+    }
 
     await db.update(
       'cola_evidencias',
@@ -1282,6 +1448,73 @@ class LocalDatabase {
   /// Se borra y se reescribe en una transaccion en vez de ir fila por fila: un
   /// material que dejo de estar en el kit tiene que desaparecer, y un upsert
   /// sin borrado lo dejaria para siempre mostrando un saldo que ya no existe.
+  /// Guarda el seguimiento de una orden tal como lo mando el servidor.
+  ///
+  /// Se guarda el JSON entero, sin interpretarlo: el telefono dibuja lo que le
+  /// llega. Ver `_crearTablaDeSeguimiento` sobre por que no hay una fila por
+  /// evento.
+  Future<void> guardarSeguimiento({
+    required String ordenId,
+    required String orgId,
+    required Map<String, dynamic> seguimiento,
+  }) async {
+    final db = await database;
+    await db.insert('local_seguimiento', <String, Object?>{
+      'orden_id': ordenId,
+      'org_id': orgId,
+      'seguimiento_json': jsonEncode(seguimiento),
+      'sincronizado_en': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// El ultimo seguimiento conocido de una orden, o `null` si nunca se trajo.
+  ///
+  /// LA DIFERENCIA ENTRE `null` Y UNA LISTA VACIA ES TODO EL SENTIDO DE ESTO.
+  ///
+  /// `null` significa "nunca se descargo en este telefono" -- y la pantalla tiene
+  /// que decir eso, no mostrar una linea de tiempo vacia que se lee como "este
+  /// trabajo no tiene historia". Es la misma regla que el inventario ya aplica:
+  /// desconocido no es cero.
+  ///
+  /// Devuelve tambien `sincronizado_en`, porque un espejo sin su hora invita a
+  /// leerlo como si fuera de ahora.
+  Future<Map<String, dynamic>?> leerSeguimiento({
+    required String ordenId,
+    required String orgId,
+  }) async {
+    final db = await database;
+    final filas = await db.query(
+      'local_seguimiento',
+      where: 'orden_id = ? AND org_id = ?',
+      whereArgs: [ordenId, orgId],
+      limit: 1,
+    );
+    if (filas.isEmpty) {
+      return null;
+    }
+
+    final fila = filas.first;
+    final crudo = fila['seguimiento_json'];
+    if (crudo is! String || crudo.isEmpty) {
+      return null;
+    }
+
+    try {
+      final decodificado = jsonDecode(crudo);
+      if (decodificado is! Map) {
+        return null;
+      }
+      return <String, dynamic>{
+        ...Map<String, dynamic>.from(decodificado),
+        'sincronizado_en': fila['sincronizado_en'],
+      };
+    } catch (_) {
+      // Un JSON corrupto se trata como "no hay": mejor decir que no se sabe que
+      // dibujar media historia.
+      return null;
+    }
+  }
+
   Future<void> reemplazarKit({
     required String orgId,
     required String profileId,
@@ -1319,8 +1552,9 @@ class LocalDatabase {
           // La regla de cantidad viaja con el material para poder avisar sin
           // senal. Si llegara solo al sincronizar, el aviso apareceria horas
           // despues de que el material ya se gasto.
-          'regla_json':
-              material['regla'] == null ? null : jsonEncode(material['regla']),
+          'regla_json': material['regla'] == null
+              ? null
+              : jsonEncode(material['regla']),
           'updated_at': ahora,
         }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
@@ -1406,7 +1640,8 @@ class LocalDatabase {
     final ahora = soloListosHasta ?? DateTime.now().millisecondsSinceEpoch;
     return db.query(
       'cola_movimientos_material',
-      where: 'org_id = ? AND profile_id = ? AND estado IN (?, ?) '
+      where:
+          'org_id = ? AND profile_id = ? AND estado IN (?, ?) '
           'AND next_attempt_at <= ?',
       whereArgs: [orgId, profileId, 'pendiente', 'error', ahora],
       orderBy: 'created_at ASC',
@@ -1461,7 +1696,8 @@ class LocalDatabase {
     final db = await database;
     return db.query(
       'cola_movimientos_material',
-      where: 'org_id = ? AND profile_id = ? AND resultado IS NOT NULL '
+      where:
+          'org_id = ? AND profile_id = ? AND resultado IS NOT NULL '
           'AND resultado != ?',
       whereArgs: [orgId, profileId, 'aceptado'],
       orderBy: 'created_at DESC',
@@ -1686,7 +1922,8 @@ class LocalDatabase {
     final pendientes = await db.query(
       'cola_movimientos_material',
       columns: ['tipo', 'cantidad'],
-      where: 'org_id = ? AND profile_id = ? AND material_codigo = ? '
+      where:
+          'org_id = ? AND profile_id = ? AND material_codigo = ? '
           'AND estado != ?',
       whereArgs: [orgId, profileId, codigo, 'confirmado'],
     );
@@ -1717,26 +1954,24 @@ class LocalDatabase {
   }) async {
     final db = await database;
     final resumen = datos['resumen'];
-    await db.insert(
-      'local_jornada',
-      <String, Object?>{
-        'org_id': orgId,
-        'profile_id': profileId,
-        'estado': (datos['estado'] ?? 'pendiente').toString(),
-        'resumen_json': jsonEncode(resumen ?? <String, dynamic>{}),
-        'detalle_json': jsonEncode(
-          (resumen is Map ? resumen['detalle'] : null) ?? <dynamic>[],
-        ),
-        'series_sin_devolver_json':
-            jsonEncode(datos['series_sin_devolver'] ?? <dynamic>[]),
-        'transferencias_json':
-            jsonEncode(datos['transferencias_pendientes'] ?? <dynamic>[]),
-        'motivos_json': jsonEncode(datos['motivos'] ?? <dynamic>[]),
-        'puede_cerrar': (datos['puede_cerrar'] == true) ? 1 : 0,
-        'actualizado_en': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('local_jornada', <String, Object?>{
+      'org_id': orgId,
+      'profile_id': profileId,
+      'estado': (datos['estado'] ?? 'pendiente').toString(),
+      'resumen_json': jsonEncode(resumen ?? <String, dynamic>{}),
+      'detalle_json': jsonEncode(
+        (resumen is Map ? resumen['detalle'] : null) ?? <dynamic>[],
+      ),
+      'series_sin_devolver_json': jsonEncode(
+        datos['series_sin_devolver'] ?? <dynamic>[],
+      ),
+      'transferencias_json': jsonEncode(
+        datos['transferencias_pendientes'] ?? <dynamic>[],
+      ),
+      'motivos_json': jsonEncode(datos['motivos'] ?? <dynamic>[]),
+      'puede_cerrar': (datos['puede_cerrar'] == true) ? 1 : 0,
+      'actualizado_en': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
     _notifyChange(orgId: orgId, profileId: profileId, tabla: 'local_jornada');
   }
 
@@ -1776,27 +2011,27 @@ class LocalDatabase {
       throw ArgumentError('Una diferencia sin motivo no se puede registrar.');
     }
     final db = await database;
-    await db.insert(
-      'cola_incidencias',
-      <String, Object?>{
-        'id': id,
-        'org_id': orgId,
-        'profile_id': profileId,
-        'material_codigo': materialCodigo,
-        'material_nombre': materialNombre,
-        'tipo': tipo,
-        'cantidad': cantidad,
-        'serie': serie,
-        'motivo': motivo.trim(),
-        'estado': 'pendiente',
-        'intentos': 0,
-        'next_attempt_at': 0,
-        'ocurrido_en': (ocurridoEn ?? DateTime.now()).toIso8601String(),
-        'created_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
+    await db.insert('cola_incidencias', <String, Object?>{
+      'id': id,
+      'org_id': orgId,
+      'profile_id': profileId,
+      'material_codigo': materialCodigo,
+      'material_nombre': materialNombre,
+      'tipo': tipo,
+      'cantidad': cantidad,
+      'serie': serie,
+      'motivo': motivo.trim(),
+      'estado': 'pendiente',
+      'intentos': 0,
+      'next_attempt_at': 0,
+      'ocurrido_en': (ocurridoEn ?? DateTime.now()).toIso8601String(),
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'cola_incidencias',
     );
-    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_incidencias');
   }
 
   Future<List<Map<String, dynamic>>> getIncidenciasPendientes({
@@ -1808,7 +2043,8 @@ class LocalDatabase {
     final ahora = soloListasHasta ?? DateTime.now().millisecondsSinceEpoch;
     return db.query(
       'cola_incidencias',
-      where: 'org_id = ? AND profile_id = ? AND estado IN (?, ?) '
+      where:
+          'org_id = ? AND profile_id = ? AND estado IN (?, ?) '
           'AND next_attempt_at <= ?',
       whereArgs: [orgId, profileId, 'pendiente', 'error', ahora],
       orderBy: 'created_at ASC',
@@ -1863,7 +2099,11 @@ class LocalDatabase {
       where: 'id = ? AND org_id = ? AND profile_id = ?',
       whereArgs: [id, orgId, profileId],
     );
-    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_incidencias');
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'cola_incidencias',
+    );
   }
 
   Future<void> registrarFalloIncidencia({
@@ -1880,7 +2120,11 @@ class LocalDatabase {
       'WHERE id = ? AND org_id = ? AND profile_id = ?',
       <Object?>[nextAttemptAt, errorMensaje, id, orgId, profileId],
     );
-    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_incidencias');
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'cola_incidencias',
+    );
   }
 
   /// El tecnico afirmo que su jornada termino, aunque no haya senal.
@@ -1938,10 +2182,12 @@ class LocalDatabase {
       UNION SELECT DISTINCT org_id, profile_id FROM cola_incidencias
     ''');
     return filas
-        .map((f) => <String, String>{
-              'org_id': (f['org_id'] ?? '').toString(),
-              'profile_id': (f['profile_id'] ?? '').toString(),
-            })
+        .map(
+          (f) => <String, String>{
+            'org_id': (f['org_id'] ?? '').toString(),
+            'profile_id': (f['profile_id'] ?? '').toString(),
+          },
+        )
         .where((f) => f['org_id']!.isNotEmpty && f['profile_id']!.isNotEmpty)
         .toList();
   }
@@ -1957,7 +2203,8 @@ class LocalDatabase {
     required String profileId,
   }) async {
     final db = await database;
-    return await db.rawQuery('''
+    return await db.rawQuery(
+      '''
       SELECT m.id, m.tipo, m.orden_id, m.estado, o.numero
       FROM cola_mutaciones m
       LEFT JOIN local_ordenes o
@@ -1965,7 +2212,9 @@ class LocalDatabase {
       WHERE m.org_id = ? AND m.profile_id = ?
         AND m.estado IN ('pendiente', 'conflicto', 'error_validacion')
       ORDER BY m.created_at ASC
-    ''', [orgId, profileId]);
+    ''',
+      [orgId, profileId],
+    );
   }
 
   /// Las órdenes que tienen datos escritos y todavía sin subir.
@@ -1974,14 +2223,17 @@ class LocalDatabase {
     required String profileId,
   }) async {
     final db = await database;
-    return await db.rawQuery('''
+    return await db.rawQuery(
+      '''
       SELECT d.orden_id, o.numero, COUNT(*) AS campos
       FROM local_datos_dirty d
       LEFT JOIN local_ordenes o
         ON o.id = d.orden_id AND o.org_id = d.org_id AND o.profile_id = d.profile_id
       WHERE d.org_id = ? AND d.profile_id = ?
       GROUP BY d.orden_id, o.numero
-    ''', [orgId, profileId]);
+    ''',
+      [orgId, profileId],
+    );
   }
 
   /// Las rutas de archivo que esta identidad tiene registradas.
@@ -2000,7 +2252,7 @@ class LocalDatabase {
       where: confirmadas == null
           ? 'org_id = ? AND profile_id = ?'
           : 'org_id = ? AND profile_id = ? AND subida_estado '
-              '${confirmadas ? '=' : '!='} ?',
+                '${confirmadas ? '=' : '!='} ?',
       whereArgs: <Object?>[
         orgId,
         profileId,
@@ -2072,7 +2324,11 @@ class LocalDatabase {
       whereArgs: [orgId, profileId, 'confirmada'],
     );
     if (borradas > 0) {
-      _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_evidencias');
+      _notifyChange(
+        orgId: orgId,
+        profileId: profileId,
+        tabla: 'cola_evidencias',
+      );
     }
     return borradas;
   }

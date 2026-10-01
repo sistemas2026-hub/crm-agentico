@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
+
 import '../api/api_client.dart';
 import '../api/api_endpoints.dart';
 import '../storage/local_database.dart';
@@ -30,7 +32,8 @@ class SyncSummary {
     required this.datosDirty,
   });
 
-  int get totalPendientes => mutacionesPendientes + evidenciasPendientes + (datosDirty > 0 ? 1 : 0);
+  int get totalPendientes =>
+      mutacionesPendientes + evidenciasPendientes + (datosDirty > 0 ? 1 : 0);
   bool get isClean => totalPendientes == 0 && mutacionesConflicto == 0;
 }
 
@@ -42,7 +45,8 @@ class SyncQueueService {
     LocalDatabase.onDataChanged.listen((event) async {
       final currentOrg = await _storage.getOrgId();
       final currentProf = await _storage.getProfileId();
-      if (event.orgId == null || (event.orgId == currentOrg && event.profileId == currentProf)) {
+      if (event.orgId == null ||
+          (event.orgId == currentOrg && event.profileId == currentProf)) {
         refreshSyncSummary();
       }
     });
@@ -102,14 +106,17 @@ class SyncQueueService {
   }
 
   /// Refresca el resumen de sincronización consultando el estado real en SQLite
-  Future<SyncSummary> refreshSyncSummary({bool? hasConnectionErrorOverride}) async {
+  Future<SyncSummary> refreshSyncSummary({
+    bool? hasConnectionErrorOverride,
+  }) async {
     final orgId = await _storage.getOrgId();
     final profileId = await _storage.getProfileId();
     if (orgId == null || profileId == null) {
       final empty = SyncSummary(
         status: _currentStatus,
         isSyncing: _isSyncing,
-        hasConnectionError: hasConnectionErrorOverride ?? (_currentStatus == SyncStatus.error),
+        hasConnectionError:
+            hasConnectionErrorOverride ?? (_currentStatus == SyncStatus.error),
         mutacionesPendientes: 0,
         mutacionesConflicto: 0,
         evidenciasPendientes: 0,
@@ -120,11 +127,15 @@ class SyncQueueService {
       return empty;
     }
 
-    final counts = await _localDb.getSyncCounts(orgId: orgId, profileId: profileId);
+    final counts = await _localDb.getSyncCounts(
+      orgId: orgId,
+      profileId: profileId,
+    );
     final summary = SyncSummary(
       status: _currentStatus,
       isSyncing: _isSyncing,
-      hasConnectionError: hasConnectionErrorOverride ?? (_currentStatus == SyncStatus.error),
+      hasConnectionError:
+          hasConnectionErrorOverride ?? (_currentStatus == SyncStatus.error),
       mutacionesPendientes: counts['mutaciones_pendientes'] ?? 0,
       mutacionesConflicto: counts['mutaciones_conflicto'] ?? 0,
       evidenciasPendientes: counts['evidencias_pendientes'] ?? 0,
@@ -163,7 +174,11 @@ class SyncQueueService {
       await _descargarOrdenesAsignadas(orgId, profileId);
 
       // 2. Procesar mutaciones de estado no finales (iniciar, en_camino, suspender)
-      await _procesarMutacionesTransicion(orgId, profileId, soloNoFinales: true);
+      await _procesarMutacionesTransicion(
+        orgId,
+        profileId,
+        soloNoFinales: true,
+      );
 
       // 3. Coalescing y sincronización de datos técnicos dirty
       await _procesarDatosDirty(orgId, profileId);
@@ -246,8 +261,7 @@ class SyncQueueService {
       return switch (error.type) {
         DioExceptionType.connectionTimeout ||
         DioExceptionType.sendTimeout ||
-        DioExceptionType.receiveTimeout =>
-          'Se agoto el tiempo de espera.',
+        DioExceptionType.receiveTimeout => 'Se agoto el tiempo de espera.',
         DioExceptionType.connectionError => 'No se pudo conectar.',
         _ => 'Fallo el envio.',
       };
@@ -262,7 +276,10 @@ class SyncQueueService {
   /// --aceptado, descuadre, conflicto-- se guarda tal cual: los tres
   /// confirman que subio, y ninguno se reintenta. Reintentar un descuadre
   /// seria pedirle al servidor que cambie de opinion.
-  Future<void> _procesarMovimientosMaterial(String orgId, String profileId) async {
+  Future<void> _procesarMovimientosMaterial(
+    String orgId,
+    String profileId,
+  ) async {
     final pendientes = await _localDb.getMovimientosMaterialPendientes(
       orgId: orgId,
       profileId: profileId,
@@ -313,7 +330,9 @@ class SyncQueueService {
         final resultados = datos is Map ? datos['resultados'] : null;
         if (resultados is! List) {
           throw DioException(
-            requestOptions: RequestOptions(path: ApiEndpoints.movimientosMaterial),
+            requestOptions: RequestOptions(
+              path: ApiEndpoints.movimientosMaterial,
+            ),
             message: 'respuesta sin resultados',
           );
         }
@@ -337,7 +356,8 @@ class SyncQueueService {
               id: id,
               orgId: orgId,
               profileId: profileId,
-              nextAttemptAt: DateTime.now().millisecondsSinceEpoch +
+              nextAttemptAt:
+                  DateTime.now().millisecondsSinceEpoch +
                   calcularBackoffMs(m['intentos'] as int? ?? 0, mutationId: id),
               errorMensaje: 'El servidor no respondio por este movimiento.',
             );
@@ -371,7 +391,8 @@ class SyncQueueService {
             id: id,
             orgId: orgId,
             profileId: profileId,
-            nextAttemptAt: DateTime.now().millisecondsSinceEpoch +
+            nextAttemptAt:
+                DateTime.now().millisecondsSinceEpoch +
                 calcularBackoffMs(
                   intentos,
                   mutationId: id,
@@ -414,9 +435,12 @@ class SyncQueueService {
               },
           ],
         },
-        options: Options(headers: <String, dynamic>{
-          'Idempotency-Key': 'inc-${pendientes.first['id']}-${pendientes.length}',
-        }),
+        options: Options(
+          headers: <String, dynamic>{
+            'Idempotency-Key':
+                'inc-${pendientes.first['id']}-${pendientes.length}',
+          },
+        ),
       );
 
       final datos = respuesta.data;
@@ -452,7 +476,8 @@ class SyncQueueService {
           id: i['id'] as String,
           orgId: orgId,
           profileId: profileId,
-          nextAttemptAt: DateTime.now().millisecondsSinceEpoch +
+          nextAttemptAt:
+              DateTime.now().millisecondsSinceEpoch +
               calcularBackoffMs(
                 i['intentos'] as int? ?? 0,
                 mutationId: i['id'] as String?,
@@ -472,7 +497,10 @@ class SyncQueueService {
   /// intencion de cerrar, porque el tecnico ya la tomo y perderla lo obligaria
   /// a repetir el gesto sin entender por que.
   Future<void> _procesarCierreDeJornada(String orgId, String profileId) async {
-    final jornada = await _localDb.getJornada(orgId: orgId, profileId: profileId);
+    final jornada = await _localDb.getJornada(
+      orgId: orgId,
+      profileId: profileId,
+    );
     if (jornada == null) return;
     if ((jornada['estado'] ?? '') == 'confirmada') return;
 
@@ -483,11 +511,13 @@ class SyncQueueService {
       await _apiClient.post(
         ApiEndpoints.cerrarJornada,
         data: <String, dynamic>{},
-        options: Options(headers: <String, dynamic>{
-          // La misma clave para el mismo cierre: dos toques del boton, o un
-          // reintento, no pueden producir dos actas.
-          'Idempotency-Key': clave,
-        }),
+        options: Options(
+          headers: <String, dynamic>{
+            // La misma clave para el mismo cierre: dos toques del boton, o un
+            // reintento, no pueden producir dos actas.
+            'Idempotency-Key': clave,
+          },
+        ),
       );
     } catch (_) {
       // Un 409 es informacion, no un fallo del telefono: la jornada todavia
@@ -546,6 +576,50 @@ class SyncQueueService {
     }
   }
 
+  /// Trae el seguimiento de UNA orden y lo guarda como espejo.
+  ///
+  /// POR QUE NO SE DESCARGA EN `procesarCola`
+  /// ----------------------------------------
+  /// Porque un tecnico puede tener veinte ordenes asignadas y mira una. Traer el
+  /// seguimiento de las veinte en cada sincronizacion gastaria datos y bateria
+  /// --los dos escasos en la calle-- para dibujar diecinueve historias que nadie
+  /// va a abrir. Se trae cuando se abre la orden.
+  ///
+  /// SI FALLA, NO SE TOCA NADA
+  /// -------------------------
+  /// Es la misma regla que `_descargarKit`: quedarse con el seguimiento de hace
+  /// una hora es mejor que quedarse sin ninguno. Y mucho mejor que mostrar una
+  /// linea de tiempo vacia, que se lee como "este trabajo no tiene historia"
+  /// cuando en realidad es "no pude preguntar".
+  ///
+  /// Devuelve `true` si pudo actualizar, para que la pantalla sepa si lo que
+  /// muestra es de ahora o de la ultima vez que hubo señal.
+  Future<bool> descargarSeguimientoDeOrden({
+    required String ordenId,
+    required String orgId,
+  }) async {
+    try {
+      final respuesta = await _apiClient.get(
+        ApiEndpoints.seguimientoDeOrden(ordenId),
+      );
+      final datos = respuesta.data;
+      if (datos is! Map) {
+        return false;
+      }
+
+      // Se guarda tal como llego. El telefono no interpreta: dibuja.
+      await _localDb.guardarSeguimiento(
+        ordenId: ordenId,
+        orgId: orgId,
+        seguimiento: Map<String, dynamic>.from(datos),
+      );
+      return true;
+    } catch (_) {
+      // Sin señal, o el servidor no respondio. El espejo anterior queda intacto.
+      return false;
+    }
+  }
+
   /// Cuántas páginas del listado se recorren como máximo en una corrida.
   ///
   /// Es un tope de seguridad, no un límite de negocio: si el servidor
@@ -553,7 +627,10 @@ class SyncQueueService {
   /// girando para siempre con la pantalla bloqueada.
   static const int _maximoDePaginas = 50;
 
-  Future<void> _descargarOrdenesAsignadas(String orgId, String profileId) async {
+  Future<void> _descargarOrdenesAsignadas(
+    String orgId,
+    String profileId,
+  ) async {
     try {
       String? cursor;
       var paginas = 0;
@@ -564,12 +641,16 @@ class SyncQueueService {
       do {
         final response = await _apiClient.get(
           ApiEndpoints.trabajos,
-          queryParameters: cursor == null ? null : <String, dynamic>{'cursor': cursor},
+          queryParameters: cursor == null
+              ? null
+              : <String, dynamic>{'cursor': cursor},
         );
         if (response.statusCode != 200 || response.data == null) return;
 
         final datos = response.data;
-        final List results = datos is Map ? (datos['results'] ?? const []) : datos;
+        final List results = datos is Map
+            ? (datos['results'] ?? const [])
+            : datos;
 
         for (final item in results) {
           final id = item['id'] as String;
@@ -580,7 +661,9 @@ class SyncQueueService {
           var fuente = FuenteOrden.listado;
 
           try {
-            final detailRes = await _apiClient.get(ApiEndpoints.trabajoDetalle(id));
+            final detailRes = await _apiClient.get(
+              ApiEndpoints.trabajoDetalle(id),
+            );
             if (detailRes.statusCode == 200 && detailRes.data is Map) {
               fullData = Map<String, dynamic>.from(detailRes.data);
               fuente = FuenteOrden.detalle;
@@ -653,7 +736,8 @@ class SyncQueueService {
           options: Options(
             headers: {
               'Idempotency-Key': idempotencyKey,
-              if (tipo == 'completar') 'X-Revision-Base': revisionBase.toString(),
+              if (tipo == 'completar')
+                'X-Revision-Base': revisionBase.toString(),
             },
           ),
         );
@@ -667,7 +751,9 @@ class SyncQueueService {
             estado: 'sincronizada',
           );
           final estadoBackend = data?['estado_operativo']?.toString();
-          if (data != null && data['revision'] != null && estadoBackend != null) {
+          if (data != null &&
+              data['revision'] != null &&
+              estadoBackend != null) {
             await _localDb.updateOrdenRevisionYEstado(
               orgId: orgId,
               profileId: profileId,
@@ -686,7 +772,8 @@ class SyncQueueService {
             orgId: orgId,
             profileId: profileId,
             estado: 'error_validacion',
-            errorMensaje: dioErr.response?.data?['error']?.toString() ?? dioErr.message,
+            errorMensaje:
+                dioErr.response?.data?['error']?.toString() ?? dioErr.message,
           );
         } else if (status == 401 || status == 403) {
           // Error de autenticación persistente tras intento de refresh
@@ -743,7 +830,10 @@ class SyncQueueService {
   }
 
   Future<void> _procesarDatosDirty(String orgId, String profileId) async {
-    final ordenes = await _localDb.getOrdenes(orgId: orgId, profileId: profileId);
+    final ordenes = await _localDb.getOrdenes(
+      orgId: orgId,
+      profileId: profileId,
+    );
 
     for (final orden in ordenes) {
       final ordenId = orden['id'] as String;
@@ -760,10 +850,7 @@ class SyncQueueService {
       try {
         final response = await _apiClient.patch(
           ApiEndpoints.datosTrabajo(ordenId),
-          data: {
-            'revision_base': currentRev,
-            'valores': dirtyDatos,
-          },
+          data: {'revision_base': currentRev, 'valores': dirtyDatos},
         );
 
         if (response.statusCode == 200) {
@@ -795,7 +882,10 @@ class SyncQueueService {
   }
 
   Future<void> _procesarEvidencias(String orgId, String profileId) async {
-    final evidencias = await _localDb.getEvidenciasPendientes(orgId: orgId, profileId: profileId);
+    final evidencias = await _localDb.getEvidenciasPendientes(
+      orgId: orgId,
+      profileId: profileId,
+    );
 
     for (final ev in evidencias) {
       final id = ev['id'] as String;
@@ -810,7 +900,9 @@ class SyncQueueService {
       var uploadMethod = ev['upload_method'] as String?;
       var uploadHeadersJson = ev['upload_headers_json'] as String?;
       final dynamic rawAuth = ev['upload_requiere_auth'];
-      var uploadRequiereAuth = rawAuth == null ? null : (rawAuth == 1 || rawAuth == true);
+      var uploadRequiereAuth = rawAuth == null
+          ? null
+          : (rawAuth == 1 || rawAuth == true);
       var backendEvidenciaId = ev['backend_evidencia_id'] as String?;
 
       var registroKey = ev['registro_idempotency_key'] as String?;
@@ -843,7 +935,10 @@ class SyncQueueService {
       }
 
       // Paso 1: Registrar intención de evidencia (o renovar signed URL expirada)
-      if (subidaEstado == 'pendiente_registro' || (subidaEstado != 'subido_binario' && subidaEstado != 'confirmada' && signedUploadUrl == null)) {
+      if (subidaEstado == 'pendiente_registro' ||
+          (subidaEstado != 'subido_binario' &&
+              subidaEstado != 'confirmada' &&
+              signedUploadUrl == null)) {
         try {
           final filename = file.path.split(Platform.pathSeparator).last;
           final response = await _apiClient.post(
@@ -863,23 +958,18 @@ class SyncQueueService {
               // tal por la Z final, y en horario local habria guardado la hora
               // equivocada sin avisar.
               if (ev['capturada_en'] != null)
-                'capturada_en_cliente':
-                    DateTime.fromMillisecondsSinceEpoch(
-                            ev['capturada_en'] as int)
-                        .toUtc()
-                        .toIso8601String(),
+                'capturada_en_cliente': DateTime.fromMillisecondsSinceEpoch(
+                  ev['capturada_en'] as int,
+                ).toUtc().toIso8601String(),
               // Donde y con que se tomo. El backend lo espera como objeto
               // (`DictField`), asi que se manda decodificado, no como texto.
               if (ev['metadatos_captura_json'] != null)
                 'metadatos_captura': jsonDecode(
-                    ev['metadatos_captura_json'] as String),
+                  ev['metadatos_captura_json'] as String,
+                ),
               'client_mutation_id': registroKey,
             },
-            options: Options(
-              headers: {
-                'Idempotency-Key': registroKey,
-              },
-            ),
+            options: Options(headers: {'Idempotency-Key': registroKey}),
           );
 
           if (response.statusCode == 201 || response.statusCode == 200) {
@@ -887,12 +977,16 @@ class SyncQueueService {
             if (data is! Map) continue;
 
             backendEvidenciaId = data['evidencia_id']?.toString();
-            final String estadoArchivo = (data['estado_archivo'] ?? '').toString().toLowerCase();
+            final String estadoArchivo = (data['estado_archivo'] ?? '')
+                .toString()
+                .toLowerCase();
 
             // Caso especial contrato: upload == null + estado_archivo RECIBIDO / VERIFICADO
             // La evidencia ya existe y está satisfecha en el servidor; no requiere subida binaria
             final uploadObj = data['upload'];
-            if (uploadObj == null && (estadoArchivo == 'recibido' || estadoArchivo == 'verificado')) {
+            if (uploadObj == null &&
+                (estadoArchivo == 'recibido' ||
+                    estadoArchivo == 'verificado')) {
               subidaEstado = 'confirmada';
               await _localDb.updateEvidenciaEstado(
                 id: id,
@@ -907,13 +1001,17 @@ class SyncQueueService {
             // Descriptor oficial upload
             if (uploadObj is Map) {
               signedUploadUrl = uploadObj['url']?.toString();
-              uploadMethod = (uploadObj['method'] ?? 'PUT').toString().toUpperCase();
+              uploadMethod = (uploadObj['method'] ?? 'PUT')
+                  .toString()
+                  .toUpperCase();
               uploadRequiereAuth = uploadObj['requiere_auth_dexter'] == true;
 
               final headersMap = uploadObj['headers'];
               if (headersMap is Map) {
                 final Map<String, String> parsedHeaders = {};
-                headersMap.forEach((k, v) => parsedHeaders[k.toString()] = v.toString());
+                headersMap.forEach(
+                  (k, v) => parsedHeaders[k.toString()] = v.toString(),
+                );
                 uploadHeadersJson = jsonEncode(parsedHeaders);
               } else {
                 uploadHeadersJson = jsonEncode({});
@@ -972,8 +1070,10 @@ class SyncQueueService {
                 method: method,
                 headers: {
                   ...descriptorHeaders,
-                  if (!descriptorHeaders.containsKey('Content-Type')) 'Content-Type': mimeType,
-                  if (!descriptorHeaders.containsKey('Content-Length')) 'Content-Length': bytes.length.toString(),
+                  if (!descriptorHeaders.containsKey('Content-Type'))
+                    'Content-Type': mimeType,
+                  if (!descriptorHeaders.containsKey('Content-Length'))
+                    'Content-Length': bytes.length.toString(),
                 },
               ),
             );
@@ -995,7 +1095,8 @@ class SyncQueueService {
               data: Stream.fromIterable([bytes]),
               options: Options(
                 method: method,
-                headers: descriptorHeaders, // Únicamente los headers del descriptor
+                headers:
+                    descriptorHeaders, // Únicamente los headers del descriptor
               ),
             );
           }
@@ -1028,11 +1129,7 @@ class SyncQueueService {
         try {
           final confirmRes = await _apiClient.post(
             ApiEndpoints.confirmarEvidencia(ordenId, backendEvidenciaId),
-            options: Options(
-              headers: {
-                'Idempotency-Key': confirmacionKey,
-              },
-            ),
+            options: Options(headers: {'Idempotency-Key': confirmacionKey}),
           );
 
           if (confirmRes.statusCode == 200) {
@@ -1052,9 +1149,17 @@ class SyncQueueService {
     }
   }
 
-  Future<void> _procesarMutacionCompletar(String orgId, String profileId) async {
-    final mutaciones = await _localDb.getMutacionesPendientes(orgId: orgId, profileId: profileId);
-    final mutacionCompletar = mutaciones.where((m) => m['tipo'] == 'completar').toList();
+  Future<void> _procesarMutacionCompletar(
+    String orgId,
+    String profileId,
+  ) async {
+    final mutaciones = await _localDb.getMutacionesPendientes(
+      orgId: orgId,
+      profileId: profileId,
+    );
+    final mutacionCompletar = mutaciones
+        .where((m) => m['tipo'] == 'completar')
+        .toList();
 
     for (final m in mutacionCompletar) {
       final ordenId = m['orden_id'] as String;
@@ -1073,11 +1178,17 @@ class SyncQueueService {
         profileId: profileId,
         ordenId: ordenId,
       );
-      final hayEvidenciasSinConfirmar = evidencias.any((e) => e['subida_estado'] != 'confirmada');
+      final hayEvidenciasSinConfirmar = evidencias.any(
+        (e) => e['subida_estado'] != 'confirmada',
+      );
       if (hayEvidenciasSinConfirmar) continue;
 
       // Todo listo: enviar transición 'completar'
-      await _procesarMutacionesTransicion(orgId, profileId, soloNoFinales: false);
+      await _procesarMutacionesTransicion(
+        orgId,
+        profileId,
+        soloNoFinales: false,
+      );
     }
   }
 }

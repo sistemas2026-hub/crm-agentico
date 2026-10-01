@@ -27,24 +27,40 @@ class ApiEndpoints {
       '$baseUrl/api/campo/materiales/movimientos/';
   static String get incidenciasMaterial =>
       '$baseUrl/api/campo/materiales/incidencias/';
+
+  /// El seguimiento de una intervencion: la linea de tiempo y los formularios
+  /// que ESE tipo de trabajo declara para cada momento.
+  ///
+  /// Los campos los decide `WorkTypeVersion`, no la aplicacion: por eso una
+  /// empresa puede cambiar lo que se pide sin que haya que publicar una version
+  /// nueva de la app.
+  static String seguimientoDeOrden(String ordenId) =>
+      '$baseUrl/api/campo/trabajos/$ordenId/seguimiento/';
+
   static String get jornada => '$baseUrl/api/campo/jornada/';
   static String get cerrarJornada => '$baseUrl/api/campo/jornada/cerrar/';
   static String trabajoDetalle(String id) => '$baseUrl/api/campo/trabajos/$id/';
-  static String trabajoAcciones(String id) => '$baseUrl/api/campo/trabajos/$id/acciones/';
-  static String trabajoDatos(String id) => '$baseUrl/api/campo/trabajos/$id/datos/';
+  static String trabajoAcciones(String id) =>
+      '$baseUrl/api/campo/trabajos/$id/acciones/';
+  static String trabajoDatos(String id) =>
+      '$baseUrl/api/campo/trabajos/$id/datos/';
   static String trabajoProbarConexion(String id) =>
       '$baseUrl/api/campo/trabajos/$id/probar-conexion/';
-  static String trabajoEvidencias(String id) => '$baseUrl/api/campo/trabajos/$id/evidencias/';
-  static String trabajoCompletar(String id) => '$baseUrl/api/campo/trabajos/$id/completar/';
+  static String trabajoEvidencias(String id) =>
+      '$baseUrl/api/campo/trabajos/$id/evidencias/';
+  static String trabajoCompletar(String id) =>
+      '$baseUrl/api/campo/trabajos/$id/completar/';
   static String confirmarEvidencia(String trabajoId, String evidenciaId) =>
       '$baseUrl/api/campo/evidencias/$evidenciaId/confirmar/';
-  static String evidenciaUrl(String id) => '$baseUrl/api/campo/evidencias/$id/url/';
+  static String evidenciaUrl(String id) =>
+      '$baseUrl/api/campo/evidencias/$id/url/';
 
   // Aliases convenientes
   static String accionTrabajo(String id, String accion) {
     if (accion == 'completar') return trabajoCompletar(id);
     return trabajoAcciones(id);
   }
+
   static String datosTrabajo(String id) => trabajoDatos(id);
   static String evidenciasTrabajo(String id) => trabajoEvidencias(id);
 }
