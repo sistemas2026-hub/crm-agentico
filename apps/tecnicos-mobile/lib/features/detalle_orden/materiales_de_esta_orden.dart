@@ -19,6 +19,31 @@ import '../../core/widgets/dexter_bloques.dart';
 /// que cada dato es —`comprometido`, `consumido`, `devuelto`, `otros`—. Acá no
 /// se suma, no se cruza y no se calcula: se dibuja. La existencia sale del libro
 /// de movimientos, y una suma en esta pantalla sería una segunda contabilidad.
+///
+/// PARA QUE SIRVE ESTA TARJETA, MEDIDO Y NO SUPUESTO (02/10/2026)
+/// -------------------------------------------------------------
+/// Durante unas horas este archivo decía que servía para saber «qué hay
+/// reservado para este trabajo, antes de entrar, para decidir si hay que pasar
+/// por bodega». **Eso es falso hoy**: el backend sabe reservar material para una
+/// orden —`reservar(..., orden=...)` existe y el endpoint lo acepta— pero el
+/// formulario del CRM nunca manda ese campo, así que `comprometido` llega
+/// siempre vacío. Un «por qué» falso es peor que ninguno.
+///
+/// Lo que sí hace, y no lo hace ninguna otra pantalla:
+///
+///   1. Muestra **el libro del servidor**, no la cola del teléfono. Ejecución
+///      dibuja lo que se registró, haya subido o no; esto dibuja lo que el
+///      backend confirmó. Después de sincronizar, es la única que dice qué quedó
+///      registrado de verdad.
+///   2. Es la única pantalla para un trabajo **al que ya no se entra**: una
+///      orden devuelta por el supervisor o cerrada no tiene «Ejecutar el
+///      trabajo», y acá se ve qué material llevó.
+///   3. Muestra **devoluciones y ajustes** (`devuelto`, `otros`), que ejecución
+///      no muestra.
+///
+/// Y por eso [siHayAlgoQueDecir]: cuando el servidor contestó que esta orden no
+/// tiene ningún movimiento, las tres razones de arriba no aplican y la tarjeta
+/// solo ocupa lugar.
 class MaterialesDeEstaOrden extends StatelessWidget {
   const MaterialesDeEstaOrden({
     super.key,
@@ -27,23 +52,44 @@ class MaterialesDeEstaOrden extends StatelessWidget {
     this.alAgregar,
   });
 
+  /// La tarjeta, o `null` cuando no tiene nada que decir.
+  ///
+  /// DESCONOCIDO SIGUE SIENDO DISTINTO DE VACIO
+  /// ------------------------------------------
+  /// Solo desaparece cuando el **servidor contestó** y la orden no tiene ningún
+  /// movimiento: ahí la respuesta está completa y una tarjeta que dice «no hay
+  /// nada» es ruido.
+  ///
+  /// Con `materiales == null` —nunca se descargó— la tarjeta **se queda**, y no
+  /// es una excepción caprichosa: «no se sabe» y «no hay» son distintos, el
+  /// técnico puede hacer algo al respecto (sincronizar), y esconderlo le haría
+  /// creer que en este trabajo no se usó nada.
+  static Widget? siHayAlgoQueDecir({
+    required Map<String, dynamic>? materiales,
+    required bool cargando,
+    VoidCallback? alAgregar,
+  }) {
+    final bool contestoYNoHayNada =
+        materiales != null &&
+        materiales['hay_algo'] != true &&
+        ((materiales['con_novedad'] as int?) ?? 0) == 0;
+    if (contestoYNoHayNada) {
+      return null;
+    }
+    return MaterialesDeEstaOrden(
+      materiales: materiales,
+      cargando: cargando,
+      alAgregar: alAgregar,
+    );
+  }
+
   /// Qué hacer cuando el técnico quiere anotar lo que gastó.
   ///
-  /// POR QUE ESTO QUEDO EN `null` Y NO HAY BOTON ACA (02/10/2026)
-  /// -----------------------------------------------------------
-  /// Lo hubo durante unas horas, y era un error: la pantalla de **ejecución** ya
+  /// POR QUE NO HAY BOTON ACA (02/10/2026)
+  /// -------------------------------------
+  /// Lo hubo durante unas horas y era un error: la pantalla de **ejecución** ya
   /// tiene «Materiales en esta orden» con su «Agregar material», que es donde el
-  /// técnico está con las manos en la caja. Dos tarjetas con distinto nombre
-  /// haciendo lo mismo es el mismo defecto que la «Guía FTTH» de ayer.
-  ///
-  /// Las dos pantallas contestan preguntas distintas y por eso las dos tarjetas
-  /// se quedan, pero con papeles distintos:
-  ///
-  ///   la FICHA   — «¿qué hay reservado para este trabajo y qué se consumió?».
-  ///                Se mira ANTES de entrar, para saber si hay que pasar por
-  ///                bodega. Es el libro de movimientos del servidor: lectura.
-  ///   EJECUCIÓN  — «anoto los dos conectores que acabo de poner». Es el acto, y
-  ///                ocurre mientras se trabaja.
+  /// técnico está con las manos en la caja.
   ///
   /// El parámetro se conserva porque la sección no decide esto: quien la usa sí.
   /// Hoy nadie se lo pasa, y la sección dice dónde se anota en vez de callarlo.

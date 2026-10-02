@@ -594,9 +594,13 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                       // El material REAL de esta orden, del libro de
                       // movimientos.
                       // En LECTURA a proposito: anotar vive en la pantalla de
-                      // ejecucion, que ya tiene su «Agregar material». Ver el
-                      // encabezado de `MaterialesDeEstaOrden`.
-                      MaterialesDeEstaOrden(
+                      // ejecucion, que ya tiene su «Agregar material».
+                      //
+                      // Y puede no ir: cuando el servidor contesto que esta
+                      // orden no tiene ningun movimiento, la tarjeta no tiene
+                      // nada que decir y solo ocupa lugar. Ver el encabezado de
+                      // `MaterialesDeEstaOrden`.
+                      MaterialesDeEstaOrden.siHayAlgoQueDecir(
                         materiales: _materiales,
                         cargando: _cargandoMateriales,
                       ),

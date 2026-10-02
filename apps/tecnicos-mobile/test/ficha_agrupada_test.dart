@@ -125,6 +125,56 @@ void main() {
     });
   });
 
+  group('1b. La tarjeta no aparece cuando no tiene nada que decir', () {
+    // LO QUE SE MIDIO (02/10/2026)
+    // ---------------------------
+    // Esta tarjeta decia servir para saber «que hay reservado antes de entrar».
+    // Es falso: el backend acepta `reservar(..., orden=...)` pero el formulario
+    // del CRM nunca manda ese campo, asi que `comprometido` llega siempre vacio.
+    //
+    // Lo que si hace --mostrar el libro del SERVIDOR, servir a un trabajo al que
+    // ya no se entra, y mostrar devoluciones-- no aplica cuando la orden no
+    // tiene ningun movimiento. Ahi la tarjeta solo ocupa lugar.
+    test('con respuesta del servidor y sin movimientos, no va', () {
+      final Widget? w = MaterialesDeEstaOrden.siHayAlgoQueDecir(
+        materiales: <String, dynamic>{'hay_algo': false, 'con_novedad': 0},
+        cargando: false,
+      );
+
+      expect(w, isNull);
+    });
+
+    test('pero una NOVEDAD la trae de vuelta', () {
+      // Un descuadre o un conflicto es justo lo que alguien tiene que mirar.
+      final Widget? w = MaterialesDeEstaOrden.siHayAlgoQueDecir(
+        materiales: <String, dynamic>{'hay_algo': false, 'con_novedad': 1},
+        cargando: false,
+      );
+
+      expect(w, isNotNull);
+    });
+
+    test('con movimientos, va', () {
+      final Widget? w = MaterialesDeEstaOrden.siHayAlgoQueDecir(
+        materiales: <String, dynamic>{'hay_algo': true, 'con_novedad': 0},
+        cargando: false,
+      );
+
+      expect(w, isNotNull);
+    });
+
+    test('DESCONOCIDO no es vacio: sin descarga previa, va', () {
+      // «No se sabe» y «no hay» son distintos. El tecnico puede sincronizar, y
+      // esconderlo le haria creer que en este trabajo no se uso nada.
+      final Widget? w = MaterialesDeEstaOrden.siHayAlgoQueDecir(
+        materiales: null,
+        cargando: false,
+      );
+
+      expect(w, isNotNull);
+    });
+  });
+
   group('2. Los grupos ordenan la ficha', () {
     Future<void> montarGrupo(
       WidgetTester tester, {
