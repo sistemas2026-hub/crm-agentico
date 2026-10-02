@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/estado/ordenes_jornada.dart';
+import '../../core/storage/local_database.dart';
+import '../../core/storage/secure_storage_service.dart';
 import '../../demo/field_mock_data.dart';
 import '../../demo/kit_mock_data.dart';
 import '../materiales/material_en_custodia.dart';
+import 'seguimiento_de_la_intervencion.dart';
 import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -65,6 +68,7 @@ class DetalleOrdenScreen extends StatefulWidget {
     this.resumenes,
     this.resumenInicial,
     this.abrirEjecucion,
+    this.cargarSeguimiento,
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
   });
 
@@ -81,6 +85,17 @@ class DetalleOrdenScreen extends StatefulWidget {
   /// ejecución que ya existe.
   final Future<void> Function(BuildContext contexto, TrabajoVista trabajo)?
   abrirEjecucion;
+
+  /// De donde sale el seguimiento de esta orden.
+  ///
+  /// Se inyecta --como `abrirEjecucion`-- para que la pantalla se pueda probar
+  /// sin base ni red. El valor por defecto lee el espejo local y, si hay señal,
+  /// lo actualiza.
+  ///
+  /// Devuelve `(seguimiento, actualizado)`: `null` significa que NUNCA se
+  /// descargo en este telefono, que no es lo mismo que no tener reportes.
+  final Future<(Map<String, dynamic>?, bool)> Function(String ordenId)?
+  cargarSeguimiento;
 
   final bool mostrarDatosFuturos;
 
@@ -115,6 +130,13 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   bool _pingEnCurso = false;
   ResultadoPing? _ping;
 
+  // El seguimiento de la intervencion. `null` mientras no se sepa; la pantalla
+  // distingue "cargando" de "nunca se descargo", porque son dos cosas distintas
+  // y la segunda hay que decirla.
+  Map<String, dynamic>? _seguimiento;
+  bool _cargandoSeguimiento = true;
+  bool _seguimientoActualizado = true;
+
   @override
   void initState() {
     super.initState();
@@ -127,6 +149,69 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     _suscripcionResumen = widget.resumenes?.listen((SyncSummary resumen) {
       if (mounted) setState(() => _resumen = resumen);
     }, onError: (Object _) {});
+    _traerSeguimiento();
+  }
+
+  /// Trae el seguimiento al abrir la orden.
+  ///
+  /// Se pide ACA y no en la sincronizacion general porque un tecnico puede tener
+  /// veinte ordenes asignadas y mira una: traer las veinte gastaria datos y
+  /// bateria para dibujar diecinueve historias que nadie va a abrir.
+  Future<void> _traerSeguimiento() async {
+    final cargar = widget.cargarSeguimiento ?? _seguimientoPorDefecto;
+    try {
+      final (Map<String, dynamic>? datos, bool actualizado) = await cargar(
+        widget.ordenId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _seguimiento = datos;
+        _seguimientoActualizado = actualizado;
+        _cargandoSeguimiento = false;
+      });
+    } catch (_) {
+      // Que falle no puede dejar la pantalla cargando para siempre: se deja de
+      // esperar y la seccion dice lo que sabe.
+      if (!mounted) return;
+      setState(() {
+        _cargandoSeguimiento = false;
+        _seguimientoActualizado = false;
+      });
+    }
+  }
+
+  /// El camino real: primero el espejo local --que funciona sin señal-- y
+  /// despues un intento de actualizarlo.
+  ///
+  /// El orden importa. Si se pidiera la red primero, un tecnico sin señal
+  /// esperaria el timeout completo mirando una pantalla vacia, teniendo la
+  /// historia guardada en el telefono.
+  Future<(Map<String, dynamic>?, bool)> _seguimientoPorDefecto(
+    String ordenId,
+  ) async {
+    final String? orgId = await SecureStorageService().getOrgId();
+    if (orgId == null) return (null, false);
+
+    final LocalDatabase base = LocalDatabase();
+    final Map<String, dynamic>? local = await base.leerSeguimiento(
+      ordenId: ordenId,
+      orgId: orgId,
+    );
+
+    final bool actualizo = await SyncQueueService().descargarSeguimientoDeOrden(
+      ordenId: ordenId,
+      orgId: orgId,
+    );
+    if (!actualizo) {
+      // Se queda con lo que habia. Si nunca hubo nada, `local` es null y la
+      // seccion lo dice.
+      return (local, false);
+    }
+    final Map<String, dynamic>? fresco = await base.leerSeguimiento(
+      ordenId: ordenId,
+      orgId: orgId,
+    );
+    return (fresco ?? local, true);
   }
 
   @override
@@ -215,123 +300,134 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       backgroundColor: AppColors.surfaceDim,
       body: ContenidoCentrado(
         child: Column(
-        children: <Widget>[
-          // El encabezado claro del diseño, en lugar de la barra azul oscura
-          // de Material. El titulo sigue siendo "OT #N" y no "Detalle Orden":
-          // a 390 px, con la chapa de la cola al lado, el titulo largo se
-          // cortaba en "Detalle Orden #..." y se perdia justamente el numero,
-          // que es lo que identifica el trabajo.
-          DexterStepHeader(
-            titulo: trabajo.numero == null
-                ? 'Detalle Orden'
-                : 'OT #${trabajo.numero}',
-            paso: lectura.pasoActual + 1,
-            deTotal: PasoOrden.values.length,
-            pastilla: DexterSyncBadge(
-              estado: SyncPresentacion.estado(_resumen),
-              detalle: SyncPresentacion.detalle(_resumen),
-              onTap: widget.acciones.sincronizar,
-            ),
-          ),
-          if (widget.mostrarDatosFuturos) _franjaDeEnlace(),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.margen,
-                AppSpacing.md,
-                AppSpacing.margen,
-                AppSpacing.xl,
+          children: <Widget>[
+            // El encabezado claro del diseño, en lugar de la barra azul oscura
+            // de Material. El titulo sigue siendo "OT #N" y no "Detalle Orden":
+            // a 390 px, con la chapa de la cola al lado, el titulo largo se
+            // cortaba en "Detalle Orden #..." y se perdia justamente el numero,
+            // que es lo que identifica el trabajo.
+            DexterStepHeader(
+              titulo: trabajo.numero == null
+                  ? 'Detalle Orden'
+                  : 'OT #${trabajo.numero}',
+              paso: lectura.pasoActual + 1,
+              deTotal: PasoOrden.values.length,
+              pastilla: DexterSyncBadge(
+                estado: SyncPresentacion.estado(_resumen),
+                detalle: SyncPresentacion.detalle(_resumen),
+                onTap: widget.acciones.sincronizar,
               ),
-              children: <Widget>[
-                if (trabajo.requiereActualizacion) _avisoActualizacion(trabajo),
-                _cabeceraConPasos(trabajo, lectura),
-                if (lectura.avisoExcepcion != null) ...<Widget>[
-                  const SizedBox(height: AppSpacing.md),
-                  _avisoExcepcion(trabajo, lectura),
-                ],
-                if (trabajo.estado ==
-                    EstadoTrabajo.completadaSinEnviar) ...<Widget>[
-                  const SizedBox(height: AppSpacing.md),
-                  _avisoSinEnviar(),
-                ],
-                if (trabajo.correccion != null) ...<Widget>[
-                  const SizedBox(height: AppSpacing.md),
-                  _loQueHayQueRehacer(trabajo, trabajo.correccion!),
-                ],
-                const SizedBox(height: AppSpacing.md),
-                _accionesRapidas(trabajo),
-                const SizedBox(height: AppSpacing.md),
-                _datosDelCliente(trabajo),
-                // Lo que la orden SÍ trae. Antes vivía detrás de la bandera
-                // de demostración junto a los datos de ejemplo, así que en
-                // producción se ocultaba también lo verdadero: el ticket de
-                // origen, la franja prometida y los requisitos de seguridad
-                // llegan del backend y nadie los veía.
-                const SizedBox(height: AppSpacing.md),
-                _datosDeLaOrden(trabajo),
-                const SizedBox(height: AppSpacing.md),
-                _datosTecnicos(trabajo),
-                // La telemetría se ve cuando la orden trae una lectura del
-                // equipo, aunque no haya modo demostración: la señal óptica es
-                // un dato REAL desde que el motor la consulta al armar la
-                // ficha. Estaba entera detrás de la bandera, así que en
-                // producción no la veía nadie — el mismo descuido que este
-                // módulo ya pagó con el ticket de origen, la franja prometida
-                // y los requisitos de seguridad.
-                //
-                // Cuando no hay lectura la tarjeta también se muestra, porque
-                // decir POR QUÉ no la hay (falta el serial, el serial no está
-                // en la OLT) es información, y callarla manda a buscar una
-                // falla de red donde no la hay.
-                if (trabajo.contextoDisponible ||
-                    widget.mostrarDatosFuturos) ...<Widget>[
-                  const SizedBox(height: AppSpacing.md),
-                  _telemetria(trabajo),
-                ],
-                if (trabajo.hayEvaluacionDexter) ...<Widget>[
-                  const SizedBox(height: AppSpacing.md),
-                  _loQueDexterAveriguo(trabajo),
-                ],
-                if (trabajo.diagnosticoPrevio.isNotEmpty ||
-                    widget.mostrarDatosFuturos) ...<Widget>[
-                  const SizedBox(height: AppSpacing.md),
-                  _triage(trabajo),
-                ],
-                // El protocolo se ve cuando la plantilla lo trae, aunque no
-                // haya modo demostración: es un dato real del tipo de trabajo.
-                if (trabajo.pasosDelProcedimiento.isNotEmpty ||
-                    widget.mostrarDatosFuturos) ...<Widget>[
-                  const SizedBox(height: AppSpacing.md),
-                  _protocoloDeAtencion(trabajo),
-                ],
-                if (widget.mostrarDatosFuturos) ...<Widget>[
-                  const SizedBox(height: AppSpacing.md),
-                  _materialesAsociados(),
-                ],
-              ],
             ),
-          ),
-          // La barra fija del diseño: la acción principal no se pierde abajo
-          // del scroll, que en esta pantalla es largo.
-          Container(
-            decoration: const BoxDecoration(
-              color: AppColors.surfaceContainerLowest,
-              boxShadow: AppTheme.sombraNivel2,
-            ),
-            child: SafeArea(
-              top: false,
-              child: Padding(
+            if (widget.mostrarDatosFuturos) _franjaDeEnlace(),
+            Expanded(
+              child: ListView(
                 padding: const EdgeInsets.fromLTRB(
                   AppSpacing.margen,
                   AppSpacing.md,
                   AppSpacing.margen,
-                  AppSpacing.md,
+                  AppSpacing.xl,
                 ),
-                child: _acciones(trabajo, acciones),
+                children: <Widget>[
+                  if (trabajo.requiereActualizacion)
+                    _avisoActualizacion(trabajo),
+                  _cabeceraConPasos(trabajo, lectura),
+                  if (lectura.avisoExcepcion != null) ...<Widget>[
+                    const SizedBox(height: AppSpacing.md),
+                    _avisoExcepcion(trabajo, lectura),
+                  ],
+                  if (trabajo.estado ==
+                      EstadoTrabajo.completadaSinEnviar) ...<Widget>[
+                    const SizedBox(height: AppSpacing.md),
+                    _avisoSinEnviar(),
+                  ],
+                  if (trabajo.correccion != null) ...<Widget>[
+                    const SizedBox(height: AppSpacing.md),
+                    _loQueHayQueRehacer(trabajo, trabajo.correccion!),
+                  ],
+                  const SizedBox(height: AppSpacing.md),
+                  _accionesRapidas(trabajo),
+                  const SizedBox(height: AppSpacing.md),
+                  _datosDelCliente(trabajo),
+                  // Lo que la orden SÍ trae. Antes vivía detrás de la bandera
+                  // de demostración junto a los datos de ejemplo, así que en
+                  // producción se ocultaba también lo verdadero: el ticket de
+                  // origen, la franja prometida y los requisitos de seguridad
+                  // llegan del backend y nadie los veía.
+                  const SizedBox(height: AppSpacing.md),
+                  _datosDeLaOrden(trabajo),
+                  const SizedBox(height: AppSpacing.md),
+                  _datosTecnicos(trabajo),
+                  // La telemetría se ve cuando la orden trae una lectura del
+                  // equipo, aunque no haya modo demostración: la señal óptica es
+                  // un dato REAL desde que el motor la consulta al armar la
+                  // ficha. Estaba entera detrás de la bandera, así que en
+                  // producción no la veía nadie — el mismo descuido que este
+                  // módulo ya pagó con el ticket de origen, la franja prometida
+                  // y los requisitos de seguridad.
+                  //
+                  // Cuando no hay lectura la tarjeta también se muestra, porque
+                  // decir POR QUÉ no la hay (falta el serial, el serial no está
+                  // en la OLT) es información, y callarla manda a buscar una
+                  // falla de red donde no la hay.
+                  if (trabajo.contextoDisponible ||
+                      widget.mostrarDatosFuturos) ...<Widget>[
+                    const SizedBox(height: AppSpacing.md),
+                    _telemetria(trabajo),
+                  ],
+                  if (trabajo.hayEvaluacionDexter) ...<Widget>[
+                    const SizedBox(height: AppSpacing.md),
+                    _loQueDexterAveriguo(trabajo),
+                  ],
+                  if (trabajo.diagnosticoPrevio.isNotEmpty ||
+                      widget.mostrarDatosFuturos) ...<Widget>[
+                    const SizedBox(height: AppSpacing.md),
+                    _triage(trabajo),
+                  ],
+                  // El protocolo se ve cuando la plantilla lo trae, aunque no
+                  // haya modo demostración: es un dato real del tipo de trabajo.
+                  if (trabajo.pasosDelProcedimiento.isNotEmpty ||
+                      widget.mostrarDatosFuturos) ...<Widget>[
+                    const SizedBox(height: AppSpacing.md),
+                    _protocoloDeAtencion(trabajo),
+                  ],
+                  // El seguimiento se muestra SIEMPRE, no detras de
+                  // `mostrarDatosFuturos`: no es una maqueta con datos de ejemplo
+                  // --como los materiales de abajo-- sino la historia real de la
+                  // intervencion, leida del servidor o del espejo del telefono.
+                  const SizedBox(height: AppSpacing.md),
+                  SeguimientoDeLaIntervencion(
+                    seguimiento: _seguimiento,
+                    cargando: _cargandoSeguimiento,
+                    actualizado: _seguimientoActualizado,
+                  ),
+                  if (widget.mostrarDatosFuturos) ...<Widget>[
+                    const SizedBox(height: AppSpacing.md),
+                    _materialesAsociados(),
+                  ],
+                ],
               ),
             ),
-          ),
-        ],
+            // La barra fija del diseño: la acción principal no se pierde abajo
+            // del scroll, que en esta pantalla es largo.
+            Container(
+              decoration: const BoxDecoration(
+                color: AppColors.surfaceContainerLowest,
+                boxShadow: AppTheme.sombraNivel2,
+              ),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.margen,
+                    AppSpacing.md,
+                    AppSpacing.margen,
+                    AppSpacing.md,
+                  ),
+                  child: _acciones(trabajo, acciones),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -429,8 +525,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
             Flexible(
               child: Text(
                 trabajo.numero == null ? 'Orden' : '#OT-${trabajo.numero}',
-                style: AppTypography.labelTelemetry
-                    .copyWith(color: AppColors.primary),
+                style: AppTypography.labelTelemetry.copyWith(
+                  color: AppColors.primary,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -480,7 +577,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
           Icon(
             sincronizado ? Icons.cloud_done : Icons.cloud_upload_outlined,
             size: 20,
-            color: sincronizado ? AppColors.secondary : AppColors.onSurfaceVariant,
+            color: sincronizado
+                ? AppColors.secondary
+                : AppColors.onSurfaceVariant,
           ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
@@ -566,7 +665,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               child: DexterAccionRapida(
                 icono: Icons.menu_book,
                 texto: 'Guía FTTH',
-                alTocar: widget.mostrarDatosFuturos ? _abrirProcedimiento : null,
+                alTocar: widget.mostrarDatosFuturos
+                    ? _abrirProcedimiento
+                    : null,
               ),
             ),
           ],
@@ -596,8 +697,11 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              const Icon(Icons.assignment_return,
-                  size: 18, color: AppColors.onErrorContainer),
+              const Icon(
+                Icons.assignment_return,
+                size: 18,
+                color: AppColors.onErrorContainer,
+              ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
@@ -644,8 +748,11 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    const Icon(Icons.photo_camera,
-                        size: 13, color: AppColors.onErrorContainer),
+                    const Icon(
+                      Icons.photo_camera,
+                      size: 13,
+                      color: AppColors.onErrorContainer,
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -851,8 +958,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     // los entrega en `tipo.pasos` desde el 22/09/2026). Solo se cae al ejemplo
     // cuando la orden todavía no los trajo.
     final bool reales = trabajo.pasosDelProcedimiento.isNotEmpty;
-    final List<String> pasos =
-        reales ? trabajo.pasosDelProcedimiento : FieldMockData.protocoloAtencion;
+    final List<String> pasos = reales
+        ? trabajo.pasosDelProcedimiento
+        : FieldMockData.protocoloAtencion;
     final int pasoActual = reales ? 0 : FieldMockData.protocoloPasoActual;
 
     return Container(
@@ -1012,13 +1120,17 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              const Icon(Icons.assignment_outlined,
-                  size: 16, color: AppColors.secondary),
+              const Icon(
+                Icons.assignment_outlined,
+                size: 16,
+                color: AppColors.secondary,
+              ),
               const SizedBox(width: 6),
               Text(
                 'El trabajo',
-                style:
-                    AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+                style: AppTypography.etiqueta.copyWith(
+                  color: AppColors.onSurface,
+                ),
               ),
             ],
           ),
@@ -1036,8 +1148,11 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    const Icon(Icons.health_and_safety_outlined,
-                        size: 16, color: AppColors.onErrorContainer),
+                    const Icon(
+                      Icons.health_and_safety_outlined,
+                      size: 16,
+                      color: AppColors.onErrorContainer,
+                    ),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: Text(
@@ -1123,13 +1238,17 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              const Icon(Icons.hub_outlined,
-                  size: 16, color: AppColors.secondary),
+              const Icon(
+                Icons.hub_outlined,
+                size: 16,
+                color: AppColors.secondary,
+              ),
               const SizedBox(width: 6),
               Text(
                 'Datos técnicos',
-                style:
-                    AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+                style: AppTypography.etiqueta.copyWith(
+                  color: AppColors.onSurface,
+                ),
               ),
             ],
           ),
@@ -1180,8 +1299,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               Text(
                 valor,
                 style: monoespaciada
-                    ? AppTypography.datoChico
-                        .copyWith(color: AppColors.onSurface)
+                    ? AppTypography.datoChico.copyWith(
+                        color: AppColors.onSurface,
+                      )
                     : AppTypography.cuerpo.copyWith(
                         color: AppColors.onSurface,
                         fontWeight: FontWeight.w600,
@@ -1201,11 +1321,17 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              const Icon(Icons.person_pin_circle, size: 16, color: AppColors.secondary),
+              const Icon(
+                Icons.person_pin_circle,
+                size: 16,
+                color: AppColors.secondary,
+              ),
               const SizedBox(width: 6),
               Text(
                 'Cliente & Ubicación',
-                style: AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+                style: AppTypography.etiqueta.copyWith(
+                  color: AppColors.onSurface,
+                ),
               ),
             ],
           ),
@@ -1261,8 +1387,11 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
             const SizedBox(height: AppSpacing.sm),
             Row(
               children: <Widget>[
-                const Icon(Icons.badge_outlined,
-                    size: 16, color: AppColors.onSurfaceVariant),
+                const Icon(
+                  Icons.badge_outlined,
+                  size: 16,
+                  color: AppColors.onSurfaceVariant,
+                ),
                 const SizedBox(width: AppSpacing.sm),
                 Text(trabajo.idAbonado, style: AppTypography.datoChico),
               ],
@@ -1459,32 +1588,32 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-            Expanded(
-              child: _MedidaOptica(
-                titulo: 'Rx ONU',
-                // La DIRECCION, que es lo que decide como leer el numero:
-                // esta es la de bajada (1490 nm), lo que llega a la casa.
-                detalle: 'OLT → CLIENTE',
-                valor: trabajo.potenciaOptica,
-                // El veredicto del motor es sobre 1490: es la de bajada, la
-                // única que habla de lo que llega a la casa.
-                etiqueta: trabajo.veredictoSenal,
-                buena: aceptable,
+              Expanded(
+                child: _MedidaOptica(
+                  titulo: 'Rx ONU',
+                  // La DIRECCION, que es lo que decide como leer el numero:
+                  // esta es la de bajada (1490 nm), lo que llega a la casa.
+                  detalle: 'OLT → CLIENTE',
+                  valor: trabajo.potenciaOptica,
+                  // El veredicto del motor es sobre 1490: es la de bajada, la
+                  // única que habla de lo que llega a la casa.
+                  etiqueta: trabajo.veredictoSenal,
+                  buena: aceptable,
+                ),
               ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: _MedidaOptica(
-                titulo: 'Rx OLT',
-                // La de subida (1310 nm): lo que la central recibe.
-                detalle: 'CLIENTE → OLT',
-                valor: trabajo.potenciaOpticaSubida,
-                // Sin etiqueta: el motor no emite veredicto para la de
-                // subida, y ponerle uno acá sería inventarlo.
-                etiqueta: '',
-                buena: aceptable,
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: _MedidaOptica(
+                  titulo: 'Rx OLT',
+                  // La de subida (1310 nm): lo que la central recibe.
+                  detalle: 'CLIENTE → OLT',
+                  valor: trabajo.potenciaOpticaSubida,
+                  // Sin etiqueta: el motor no emite veredicto para la de
+                  // subida, y ponerle uno acá sería inventarlo.
+                  etiqueta: '',
+                  buena: aceptable,
+                ),
               ),
-            ),
             ],
           ),
         ),
@@ -1496,7 +1625,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       ],
     );
   }
-
 
   /// Un ping en vivo, que es lo único que la ficha congelada no puede
   /// contestar: el técnico movió un conector y necesita saber si el equipo
@@ -1525,12 +1653,13 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              const Icon(Icons.network_ping, size: 18,
-                  color: AppColors.secondary),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text('Ping', style: AppTypography.cuerpoChico),
+              const Icon(
+                Icons.network_ping,
+                size: 18,
+                color: AppColors.secondary,
               ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(child: Text('Ping', style: AppTypography.cuerpoChico)),
               if (_pingEnCurso) ...<Widget>[
                 Text(
                   _ping == null
@@ -1577,7 +1706,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               // operación ya sabe leer.
               Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm, vertical: 4),
+                  horizontal: AppSpacing.sm,
+                  vertical: 4,
+                ),
                 decoration: const BoxDecoration(
                   color: AppColors.surfaceContainerHigh,
                   borderRadius: AppRadius.brChico,
@@ -1586,21 +1717,30 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   children: <Widget>[
                     SizedBox(
                       width: 24,
-                      child: Text('#',
-                          style: AppTypography.etiquetaChica
-                              .copyWith(fontWeight: FontWeight.w700)),
+                      child: Text(
+                        '#',
+                        style: AppTypography.etiquetaChica.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                     Expanded(
-                      child: Text('Host',
-                          style: AppTypography.etiquetaChica
-                              .copyWith(fontWeight: FontWeight.w700)),
+                      child: Text(
+                        'Host',
+                        style: AppTypography.etiquetaChica.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                     SizedBox(
                       width: 78,
-                      child: Text('Tiempo',
-                          textAlign: TextAlign.right,
-                          style: AppTypography.etiquetaChica
-                              .copyWith(fontWeight: FontWeight.w700)),
+                      child: Text(
+                        'Tiempo',
+                        textAlign: TextAlign.right,
+                        style: AppTypography.etiquetaChica.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -1608,23 +1748,27 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               for (final PaqueteDePing p in r.paquetes)
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.sm, vertical: 3),
+                    horizontal: AppSpacing.sm,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     // La fila alterna, como la tabla del proveedor. Un
                     // paquete perdido se pinta entero: es lo que hay que ver
                     // de un vistazo.
                     color: p.respondio
                         ? (p.n.isEven
-                            ? AppColors.surfaceContainerLowest
-                            : Colors.transparent)
+                              ? AppColors.surfaceContainerLowest
+                              : Colors.transparent)
                         : AppColors.errorContainer,
                   ),
                   child: Row(
                     children: <Widget>[
                       SizedBox(
                         width: 24,
-                        child: Text('${p.n}',
-                            style: AppTypography.etiquetaChica),
+                        child: Text(
+                          '${p.n}',
+                          style: AppTypography.etiquetaChica,
+                        ),
                       ),
                       Expanded(
                         child: Text(
@@ -1665,8 +1809,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                         'Se puede repetir cuando haya.',
                   'ping_no_habilitado' =>
                     'La prueba no está habilitada para esta empresa todavía.',
-                  'motor_no_responde' =>
-                    'No se pudo preguntar. No dice nada del equipo del cliente.',
+                  'motor_no_responde' => 'No se pudo preguntar. No dice nada del equipo del cliente.',
                   _ => 'No se pudo medir.',
                 },
                 style: AppTypography.etiquetaChica.copyWith(
@@ -1797,13 +1940,15 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       // Y se renumeran de corrido: cada tanda vuelve empezando en 1, y una
       // lista que dijera 1,2,3,1,2,3 sería ilegible.
       for (final PaqueteDePing p in r.paquetes) {
-        acumulados.add(PaqueteDePing(
-          n: acumulados.length + 1,
-          respondio: p.respondio,
-          rtt: p.rtt,
-          perdida: p.perdida,
-          host: p.host,
-        ));
+        acumulados.add(
+          PaqueteDePing(
+            n: acumulados.length + 1,
+            respondio: p.respondio,
+            rtt: p.rtt,
+            perdida: p.perdida,
+            host: p.host,
+          ),
+        );
         if (!mounted) return;
         setState(() {
           _ping = ResultadoPing(
@@ -1921,20 +2066,20 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   Widget _sinLecturaDeEquipo(TrabajoVista trabajo) {
     final (IconData icono, String texto) = switch (trabajo.sinEquipo) {
       SinEquipo.serialNoCargado => (
-          Icons.link_off,
-          'Este cliente no tiene el equipo cargado en el sistema, así que no '
-              'hay señal que consultar. No es una falla de red.',
-        ),
+        Icons.link_off,
+        'Este cliente no tiene el equipo cargado en el sistema, así que no '
+            'hay señal que consultar. No es una falla de red.',
+      ),
       SinEquipo.serialDesactualizado => (
-          Icons.sync_problem,
-          'El serial que figura no existe en la OLT. Suele pasar cuando se le '
-              'cambió el equipo al cliente y se actualizó un solo sistema.',
-        ),
+        Icons.sync_problem,
+        'El serial que figura no existe en la OLT. Suele pasar cuando se le '
+            'cambió el equipo al cliente y se actualizó un solo sistema.',
+      ),
       _ => (
-          Icons.cloud_off,
-          'La señal del equipo no se alcanzó a leer. Se vuelve a intentar al '
-              'refrescar la ficha.',
-        ),
+        Icons.cloud_off,
+        'La señal del equipo no se alcanzó a leer. Se vuelve a intentar al '
+            'refrescar la ficha.',
+      ),
     };
 
     return Container(
@@ -2008,8 +2153,10 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               // tiene forma de saber que está viendo el pasado.
               if (trabajo.fichaCapturadaEn != null)
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
                   decoration: const BoxDecoration(
                     color: AppColors.surfaceContainerHigh,
                     borderRadius: AppRadius.brChico,
@@ -2062,8 +2209,8 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   valor: trabajo.puertoPon.isNotEmpty
                       ? trabajo.puertoPon
                       : (widget.mostrarDatosFuturos
-                          ? FieldMockData.puertoPon
-                          : '—'),
+                            ? FieldMockData.puertoPon
+                            : '—'),
                   // 'board/port'. El número de ONU va aparte: es su posición
                   // DENTRO del puerto, no parte del identificador.
                   detalle: trabajo.puertoPon.isNotEmpty
@@ -2129,72 +2276,72 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
           // una curva de ejemplo al lado de una potencia REAL la haria pasar
           // por el historico de este cliente.
           if (widget.mostrarDatosFuturos) ...<Widget>[
-          // CAMPO-DATA-012
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.sm,
-            ),
-            decoration: const BoxDecoration(
-              color: AppColors.surfaceContainerLow,
-              borderRadius: AppRadius.brCampo,
-            ),
-            child: Row(
-              children: <Widget>[
-                Text('Histórico 48h', style: AppTypography.etiquetaChica),
-                const SizedBox(width: AppSpacing.sm),
-                // CAMPO-DATA-030 · La serie de las últimas 48 horas.
-                const Expanded(
-                  child: SizedBox(
-                    height: 28,
-                    child: CustomPaint(
-                      painter: _CurvaRx(FieldMockData.historicoRx48h),
-                      size: Size.infinite,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                const Icon(
-                  Icons.trending_down,
-                  size: 16,
-                  color: AppColors.error,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '${FieldMockData.deltaPotencia48h} dBm',
-                  style: AppTypography.etiqueta.copyWith(
-                    color: AppColors.error,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          // CAMPO-DATA-048 · La matriz completa del diseño: de qué OLT cuelga,
-          // por qué puerto, a qué distancia y con cuánta potencia sale.
-          for (final (String titulo, String valor) in <(String, String)>[
-            ('OLT & Puerto', FieldMockData.oltYPuerto),
-            ('CTO Distribución', FieldMockData.terminal),
-            ('Distancia Splitter', FieldMockData.distanciaSplitter),
-            ('Potencia TX OLT', FieldMockData.potenciaTxOlt),
-          ])
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
+            // CAMPO-DATA-012
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+              decoration: const BoxDecoration(
+                color: AppColors.surfaceContainerLow,
+                borderRadius: AppRadius.brCampo,
+              ),
               child: Row(
                 children: <Widget>[
-                  Expanded(
-                    child: Text(titulo, style: AppTypography.etiquetaChica),
+                  Text('Histórico 48h', style: AppTypography.etiquetaChica),
+                  const SizedBox(width: AppSpacing.sm),
+                  // CAMPO-DATA-030 · La serie de las últimas 48 horas.
+                  const Expanded(
+                    child: SizedBox(
+                      height: 28,
+                      child: CustomPaint(
+                        painter: _CurvaRx(FieldMockData.historicoRx48h),
+                        size: Size.infinite,
+                      ),
+                    ),
                   ),
+                  const SizedBox(width: AppSpacing.sm),
+                  const Icon(
+                    Icons.trending_down,
+                    size: 16,
+                    color: AppColors.error,
+                  ),
+                  const SizedBox(width: 4),
                   Text(
-                    valor,
-                    style: AppTypography.datoChico.copyWith(
-                      color: AppColors.onSurface,
+                    '${FieldMockData.deltaPotencia48h} dBm',
+                    style: AppTypography.etiqueta.copyWith(
+                      color: AppColors.error,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(height: AppSpacing.sm),
+            // CAMPO-DATA-048 · La matriz completa del diseño: de qué OLT cuelga,
+            // por qué puerto, a qué distancia y con cuánta potencia sale.
+            for (final (String titulo, String valor) in <(String, String)>[
+              ('OLT & Puerto', FieldMockData.oltYPuerto),
+              ('CTO Distribución', FieldMockData.terminal),
+              ('Distancia Splitter', FieldMockData.distanciaSplitter),
+              ('Potencia TX OLT', FieldMockData.potenciaTxOlt),
+            ])
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(titulo, style: AppTypography.etiquetaChica),
+                    ),
+                    Text(
+                      valor,
+                      style: AppTypography.datoChico.copyWith(
+                        color: AppColors.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
           // Aca decia 'Fuente: SmartOLT via Dexter API - lectura congelada
           // al despachar'. Se quito el 25/09/2026: la cabecera ya dice
@@ -2232,17 +2379,24 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              const Icon(Icons.auto_awesome, size: 18,
-                  color: AppColors.primary),
+              const Icon(
+                Icons.auto_awesome,
+                size: 18,
+                color: AppColors.primary,
+              ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
-                child: Text('Lo que el asistente ya averiguó',
-                    style: AppTypography.cuerpoGrande),
+                child: Text(
+                  'Lo que el asistente ya averiguó',
+                  style: AppTypography.cuerpoGrande,
+                ),
               ),
               if (trabajo.motivoEscaladaDexter.isNotEmpty)
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
                   decoration: const BoxDecoration(
                     color: AppColors.surfaceContainerHigh,
                     borderRadius: AppRadius.brChico,
@@ -2284,17 +2438,20 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
           ],
           if (trabajo.resumenDexter.isNotEmpty) ...<Widget>[
             const SizedBox(height: AppSpacing.sm),
-            Text(trabajo.resumenDexter,
-                style: AppTypography.datoChico.copyWith(
-                  color: AppColors.onSurfaceVariant,
-                )),
+            Text(
+              trabajo.resumenDexter,
+              style: AppTypography.datoChico.copyWith(
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
           ],
           if (trabajo.casoDexter.isNotEmpty) ...<Widget>[
             const SizedBox(height: AppSpacing.xs),
             Text(
               'Clasificado como ${trabajo.casoDexter.replaceAll('_', ' ')}',
-              style: AppTypography.etiquetaChica
-                  .copyWith(color: AppColors.outline),
+              style: AppTypography.etiquetaChica.copyWith(
+                color: AppColors.outline,
+              ),
             ),
           ],
         ],
@@ -2582,7 +2739,9 @@ class _BarraDePasos extends StatelessWidget {
           if (lectura.pasoActual < 0) ...<Widget>[
             Text(
               'SIN AVANCE',
-              style: AppTypography.labelBadge.copyWith(color: AppColors.outline),
+              style: AppTypography.labelBadge.copyWith(
+                color: AppColors.outline,
+              ),
             ),
             const SizedBox(height: AppSpacing.xs),
           ],
@@ -2915,11 +3074,15 @@ class _MedidaOptica extends StatelessWidget {
       final double centro = _masFuerte - ancho * (i + 0.5);
       final bool enRango = centro <= _max && centro >= _min;
       colores.add(
-        enRango ? AppColors.onTertiaryContainer : AppColors.surfaceContainerHigh,
+        enRango
+            ? AppColors.onTertiaryContainer
+            : AppColors.surfaceContainerHigh,
       );
     }
     if (dbm != null) {
-      colores[celdaDe(dbm)] = buena ? AppColors.tertiaryFixedDim : AppColors.error;
+      colores[celdaDe(dbm)] = buena
+          ? AppColors.tertiaryFixedDim
+          : AppColors.error;
     }
     return colores;
   }
@@ -2928,7 +3091,9 @@ class _MedidaOptica extends StatelessWidget {
   Widget build(BuildContext context) {
     final double? dbm = _numero;
     final bool hay = dbm != null;
-    final Color acento = buena ? AppColors.onTertiaryContainer : AppColors.error;
+    final Color acento = buena
+        ? AppColors.onTertiaryContainer
+        : AppColors.error;
 
     return DexterHundido(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -2937,7 +3102,9 @@ class _MedidaOptica extends StatelessWidget {
         children: <Widget>[
           Text(
             titulo.toUpperCase(),
-            style: AppTypography.labelCaption.copyWith(color: AppColors.outline),
+            style: AppTypography.labelCaption.copyWith(
+              color: AppColors.outline,
+            ),
           ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -2950,8 +3117,9 @@ class _MedidaOptica extends StatelessWidget {
               const SizedBox(width: 2),
               Text(
                 'dBm',
-                style: AppTypography.labelTelemetry
-                    .copyWith(color: AppColors.onSurfaceVariant),
+                style: AppTypography.labelTelemetry.copyWith(
+                  color: AppColors.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -2960,10 +3128,10 @@ class _MedidaOptica extends StatelessWidget {
             Align(
               alignment: Alignment.centerLeft,
               child: buena
-                  ? DexterPastilla.enRegla(
-                      texto: etiqueta.replaceAll('_', ' '))
+                  ? DexterPastilla.enRegla(texto: etiqueta.replaceAll('_', ' '))
                   : DexterPastilla.critica(
-                      texto: etiqueta.replaceAll('_', ' ')),
+                      texto: etiqueta.replaceAll('_', ' '),
+                    ),
             ),
           ],
           if (hay) ...<Widget>[
@@ -2983,10 +3151,7 @@ class _MedidaOptica extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 4),
-          Text(
-            detalle,
-            style: AppTypography.labelCaption,
-          ),
+          Text(detalle, style: AppTypography.labelCaption),
         ],
       ),
     );
