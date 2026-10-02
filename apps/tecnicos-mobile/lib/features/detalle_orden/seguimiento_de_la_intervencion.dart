@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_bloques.dart';
+import 'hoja_de_reporte.dart';
 
 /// La historia de la intervención, leída y nada más.
 ///
@@ -25,12 +26,14 @@ import '../../core/widgets/dexter_bloques.dart';
 /// La Fase 1 es lectura. Un botón «Registrar avance» que abriera un formulario
 /// incapaz de guardar sería peor que no tenerlo: el técnico lo llenaría en la
 /// calle y lo perdería. Los botones entran cuando exista la cola de escritura.
-class SeguimientoDeLaIntervencion extends StatelessWidget {
+class SeguimientoDeLaIntervencion extends StatefulWidget {
   const SeguimientoDeLaIntervencion({
     super.key,
     required this.seguimiento,
     required this.cargando,
     this.actualizado = true,
+    this.alReportar,
+    this.pendientesDeSubir = 0,
   });
 
   /// Lo que devolvió el backend, o `null` si **nunca se descargó** en este
@@ -47,6 +50,38 @@ class SeguimientoDeLaIntervencion extends StatelessWidget {
   /// falló. Lo que se muestra sigue siendo cierto; lo que no se puede afirmar
   /// es que esté al día.
   final bool actualizado;
+
+  /// Qué hacer con un reporte que el técnico terminó de escribir.
+  ///
+  /// Se inyecta para que la sección se pueda probar sin base ni red. Si es
+  /// `null`, la sección queda en **solo lectura** y no ofrece ningún botón —que
+  /// es exactamente lo que hacía la Fase 1.
+  final void Function(
+    String momento,
+    Map<String, dynamic> respuestas, {
+    bool requiereNoc,
+    bool detener,
+  })?
+  alReportar;
+
+  /// Cuántos reportes de esta orden esperan subir. Se muestra porque un reporte
+  /// guardado y sin subir es un hecho que el técnico tiene que poder ver: si no,
+  /// no sabe si el NOC se enteró.
+  final int pendientesDeSubir;
+
+  @override
+  State<SeguimientoDeLaIntervencion> createState() =>
+      _SeguimientoDeLaIntervencionState();
+}
+
+class _SeguimientoDeLaIntervencionState
+    extends State<SeguimientoDeLaIntervencion> {
+  /// El momento cuya hoja está abierta, o `null` si no hay ninguna.
+  String? _abierto;
+
+  Map<String, dynamic>? get seguimiento => widget.seguimiento;
+  bool get cargando => widget.cargando;
+  bool get actualizado => widget.actualizado;
 
   @override
   Widget build(BuildContext context) {
@@ -95,6 +130,7 @@ class SeguimientoDeLaIntervencion extends StatelessWidget {
           style: AppTypography.cuerpoChico,
         ),
       ],
+      ..._acciones(),
       const SizedBox(height: AppSpacing.sm),
       if (eventos.isEmpty)
         Text(
@@ -105,6 +141,143 @@ class SeguimientoDeLaIntervencion extends StatelessWidget {
         for (final dynamic crudo in eventos)
           if (crudo is Map) _evento(Map<String, dynamic>.from(crudo)),
     ];
+  }
+
+  /// Los botones, y la hoja del que esté abierto.
+  ///
+  /// SOLO SE OFRECE LO QUE LA MÁQUINA PERMITE
+  /// ----------------------------------------
+  /// La lista no sale de lo que sea cómodo mostrar: sale de `formularios`, que es
+  /// lo que el backend declaró para este tipo de trabajo, y de
+  /// `momentos_registrados`, que dice qué ya ocurrió. Un INICIO no se ofrece dos
+  /// veces porque el servidor lo rechazaría, y un botón que lleva a un rechazo es
+  /// peor que no tenerlo: el técnico escribe el reporte en la calle y lo pierde.
+  ///
+  /// Si no hay a quién entregar el reporte (`alReportar == null`), no hay
+  /// botones. Así la sección sigue sirviendo como pantalla de lectura.
+  List<Widget> _acciones() {
+    if (widget.alReportar == null) {
+      return const <Widget>[];
+    }
+
+    final Map<String, dynamic> formularios =
+        _mapa(seguimiento!['formularios']) ?? <String, dynamic>{};
+    final List<dynamic> yaOcurrio =
+        (seguimiento!['momentos_registrados'] as List<dynamic>?) ??
+        const <dynamic>[];
+    final bool huboInicio = yaOcurrio.contains('inicio_campo');
+
+    final List<Widget> botones = <Widget>[];
+    for (final (String momento, String texto) opcion in <(String, String)>[
+      ('inicio', 'Registrar inicio'),
+      ('avance', 'Registrar avance'),
+      ('bloqueo', 'Reportar bloqueo'),
+      ('cierre', 'Cerrar intervención'),
+    ]) {
+      final String momento = opcion.$1;
+      // El tipo de trabajo tiene que declarar ese momento.
+      if (!formularios.containsKey(momento)) {
+        continue;
+      }
+      // El INICIO solo antes del primer INICIO.
+      if (momento == 'inicio' && huboInicio) {
+        continue;
+      }
+      botones.add(
+        DexterAccionRapida(
+          texto: opcion.$2,
+          icono: _icono(momento),
+          alTocar: () =>
+              setState(() => _abierto = _abierto == momento ? null : momento),
+        ),
+      );
+    }
+
+    return <Widget>[
+      if (widget.pendientesDeSubir > 0) ...<Widget>[
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          widget.pendientesDeSubir == 1
+              ? '1 reporte escrito acá todavía no subió.'
+              : '${widget.pendientesDeSubir} reportes escritos acá todavía no '
+                    'subieron.',
+          style: AppTypography.etiquetaChica,
+        ),
+      ],
+      if (botones.isNotEmpty) ...<Widget>[
+        const SizedBox(height: AppSpacing.sm),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          children: botones,
+        ),
+      ],
+      if (_abierto != null) ...<Widget>[
+        const SizedBox(height: AppSpacing.sm),
+        HojaDeReporte(
+          momento: _abierto!,
+          titulo: _tituloDelMomento(_abierto!),
+          campos: _camposDe(formularios, _abierto!),
+          alGuardar:
+              (
+                Map<String, dynamic> respuestas, {
+                bool requiereNoc = false,
+                bool detener = true,
+              }) {
+                widget.alReportar!(
+                  _abierto!,
+                  respuestas,
+                  requiereNoc: requiereNoc,
+                  detener: detener,
+                );
+                setState(() => _abierto = null);
+              },
+        ),
+      ],
+    ];
+  }
+
+  /// Los campos crudos que el backend declaró para ese momento.
+  ///
+  /// Se pasan TAL CUAL a la hoja, que los interpreta con el mismo lector que el
+  /// resto de la aplicación. Acá no se mira qué campos son.
+  List<Map<String, dynamic>> _camposDe(
+    Map<String, dynamic> formularios,
+    String momento,
+  ) {
+    final Map<String, dynamic>? form = _mapa(formularios[momento]);
+    final List<dynamic> campos =
+        (form?['campos'] as List<dynamic>?) ?? const <dynamic>[];
+    return <Map<String, dynamic>>[
+      for (final dynamic c in campos)
+        if (c is Map) Map<String, dynamic>.from(c),
+    ];
+  }
+
+  static String _tituloDelMomento(String momento) {
+    switch (momento) {
+      case 'inicio':
+        return 'Registrar el inicio';
+      case 'bloqueo':
+        return 'Reportar un bloqueo';
+      case 'cierre':
+        return 'Cerrar la intervención';
+      default:
+        return 'Registrar un avance';
+    }
+  }
+
+  static IconData _icono(String momento) {
+    switch (momento) {
+      case 'inicio':
+        return Icons.play_arrow;
+      case 'bloqueo':
+        return Icons.pause_circle_outline;
+      case 'cierre':
+        return Icons.check_circle_outline;
+      default:
+        return Icons.add_comment_outlined;
+    }
   }
 
   /// El último reporte y la salud, los dos tal como los nombró el backend.

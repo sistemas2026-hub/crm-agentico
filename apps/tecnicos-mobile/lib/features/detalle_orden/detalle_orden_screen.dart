@@ -69,6 +69,7 @@ class DetalleOrdenScreen extends StatefulWidget {
     this.resumenInicial,
     this.abrirEjecucion,
     this.cargarSeguimiento,
+    this.encolarReporte,
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
   });
 
@@ -96,6 +97,20 @@ class DetalleOrdenScreen extends StatefulWidget {
   /// descargo en este telefono, que no es lo mismo que no tener reportes.
   final Future<(Map<String, dynamic>?, bool)> Function(String ordenId)?
   cargarSeguimiento;
+
+  /// Donde va un reporte que el tecnico acaba de escribir.
+  ///
+  /// Se inyecta como el resto. El valor por defecto lo encola en el telefono y
+  /// pide una sincronizacion: si hay señal sube ahora, y si no espera. El tecnico
+  /// no tiene que saber cual de las dos pasó para seguir trabajando.
+  final Future<void> Function(
+    String ordenId,
+    String momento,
+    Map<String, dynamic> respuestas, {
+    bool requiereNoc,
+    bool detener,
+  })?
+  encolarReporte;
 
   final bool mostrarDatosFuturos;
 
@@ -136,6 +151,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   Map<String, dynamic>? _seguimiento;
   bool _cargandoSeguimiento = true;
   bool _seguimientoActualizado = true;
+  int _reportesSinSubir = 0;
 
   @override
   void initState() {
@@ -164,10 +180,13 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         widget.ordenId,
       );
       if (!mounted) return;
+      final int sinSubir = await _contarSinSubir();
+      if (!mounted) return;
       setState(() {
         _seguimiento = datos;
         _seguimientoActualizado = actualizado;
         _cargandoSeguimiento = false;
+        _reportesSinSubir = sinSubir;
       });
     } catch (_) {
       // Que falle no puede dejar la pantalla cargando para siempre: se deja de
@@ -180,12 +199,90 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     }
   }
 
+  /// Guarda un reporte y lo manda a subir.
+  ///
+  /// El orden es el que importa en la calle: PRIMERO se guarda en el telefono y
+  /// despues se intenta subir. Al reves, un reporte escrito sin señal se perderia
+  /// en el error de red -- y el tecnico ya habia hecho el trabajo de escribirlo.
+  Future<void> _reportar(
+    String momento,
+    Map<String, dynamic> respuestas, {
+    bool requiereNoc = false,
+    bool detener = true,
+  }) async {
+    final encolar = widget.encolarReporte ?? _encolarPorDefecto;
+    await encolar(
+      widget.ordenId,
+      momento,
+      respuestas,
+      requiereNoc: requiereNoc,
+      detener: detener,
+    );
+    // Se vuelve a leer: si subio, el espejo ya trae el evento confirmado por el
+    // servidor; si no, al menos se actualiza cuantos esperan.
+    await _traerSeguimiento();
+  }
+
+  Future<void> _encolarPorDefecto(
+    String ordenId,
+    String momento,
+    Map<String, dynamic> respuestas, {
+    bool requiereNoc = false,
+    bool detener = true,
+  }) async {
+    final SecureStorageService almacen = SecureStorageService();
+    final String? orgId = await almacen.getOrgId();
+    final String? profileId = await almacen.getProfileId();
+    if (orgId == null || profileId == null) {
+      return;
+    }
+
+    await LocalDatabase().encolarSeguimiento(
+      ordenId: ordenId,
+      orgId: orgId,
+      profileId: profileId,
+      momento: momento,
+      respuestas: respuestas,
+      requiereNoc: requiereNoc,
+      detener: detener,
+    );
+
+    // Se intenta ahora. Si no hay señal, la cola lo reintenta sola: esto no
+    // espera ni bloquea la pantalla.
+    await SyncQueueService().procesarCola();
+  }
+
   /// El camino real: primero el espejo local --que funciona sin señal-- y
   /// despues un intento de actualizarlo.
   ///
   /// El orden importa. Si se pidiera la red primero, un tecnico sin señal
   /// esperaria el timeout completo mirando una pantalla vacia, teniendo la
   /// historia guardada en el telefono.
+  /// Cuantos reportes de ESTA orden esperan subir.
+  ///
+  /// Se cuenta para poder decirselo al tecnico: un reporte guardado y sin subir
+  /// es un hecho que tiene que poder ver, porque si no, no sabe si el NOC se
+  /// entero. No es un error ni un aviso: es el estado de su trabajo.
+  Future<int> _contarSinSubir() async {
+    try {
+      final SecureStorageService almacen = SecureStorageService();
+      final String? orgId = await almacen.getOrgId();
+      final String? profileId = await almacen.getProfileId();
+      if (orgId == null || profileId == null) {
+        return 0;
+      }
+      // Con `await` y no devolviendo el Future: sin esperarlo, el `catch` de
+      // abajo no lo atrapa y un fallo de la base rompe la pantalla en vez de
+      // contar cero.
+      return await LocalDatabase().contarSeguimientosPendientes(
+        orgId: orgId,
+        profileId: profileId,
+      );
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Future<(Map<String, dynamic>?, bool)> _seguimientoPorDefecto(
     String ordenId,
   ) async {
@@ -399,6 +496,23 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                     seguimiento: _seguimiento,
                     cargando: _cargandoSeguimiento,
                     actualizado: _seguimientoActualizado,
+                    pendientesDeSubir: _reportesSinSubir,
+                    alReportar:
+                        (
+                          String momento,
+                          Map<String, dynamic> respuestas, {
+                          bool requiereNoc = false,
+                          bool detener = true,
+                        }) {
+                          // No se espera: la pantalla no se bloquea mientras el
+                          // telefono busca señal.
+                          _reportar(
+                            momento,
+                            respuestas,
+                            requiereNoc: requiereNoc,
+                            detener: detener,
+                          );
+                        },
                   ),
                   if (widget.mostrarDatosFuturos) ...<Widget>[
                     const SizedBox(height: AppSpacing.md),
