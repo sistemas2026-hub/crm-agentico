@@ -378,6 +378,14 @@ class _SeguimientoDeLaIntervencionState
       if (_abierto != null) ...<Widget>[
         const SizedBox(height: AppSpacing.sm),
         HojaDeReporte(
+          // La clave por momento NO es decorativa: sin ella, Flutter reusa el
+          // mismo estado al cambiar de hoja y los campos se arrastran. Medido en
+          // el emulador el 02/10/2026: se escribió un BLOQUEO, se tocó «Cerrar
+          // intervención» sin guardar, y el motivo del bloqueo apareció dentro
+          // de «¿Qué se hizo para resolverlo?» — listo para mandarse como si
+          // fuera la respuesta a otra pregunta. Los dos formularios declaran un
+          // campo con el mismo id, así que para el framework eran el mismo.
+          key: ValueKey<String>(_abierto!),
           momento: _abierto!,
           titulo: _tituloDelMomento(_abierto!),
           campos: _camposDe(formularios, _abierto!),

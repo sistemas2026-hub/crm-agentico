@@ -420,4 +420,40 @@ void main() {
       expect(find.textContaining('no subieron'), findsNothing);
     });
   });
+  group('5. Cambiar de momento no arrastra lo escrito', () {
+    testWidgets('lo tipeado en una hoja no aparece en la siguiente', (
+      WidgetTester tester,
+    ) async {
+      // MEDIDO EN EL EMULADOR, 02/10/2026
+      // ---------------------------------
+      // Se escribio un BLOQUEO, se toco «Cerrar intervencion» sin guardar, y el
+      // motivo del bloqueo aparecio dentro de «Que se hizo para resolverlo»,
+      // listo para mandarse como respuesta a otra pregunta. Los dos formularios
+      // declaran un campo con el mismo id, asi que para Flutter eran el mismo
+      // widget y le reuso el estado.
+      await montar(
+        tester,
+        seguimiento: conFormularios(momentos: <String>['bloqueo', 'cierre']),
+        alReportar:
+            (
+              String momento,
+              Map<String, dynamic> respuestas, {
+              bool requiereNoc = false,
+              bool detener = true,
+            }) {},
+      );
+
+      await tester.tap(find.text('Reportar bloqueo'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'La casa cerrada');
+      await tester.pumpAndSettle();
+
+      // Se cambia de hoja SIN guardar.
+      await tester.tap(find.text('Cerrar intervención'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('La casa cerrada'), findsNothing);
+    });
+  });
+
 }

@@ -202,6 +202,62 @@ sin refactorizarlo —la Fase 2 tampoco cubrió su camino de subida, por lo mism
 Se verifica contra el backend de laboratorio, no en `flutter test`. Es
 exactamente el criterio 9 de la tabla de abajo, que **sigue abierto**.
 
+### La corrida en el emulador (02/10/2026)
+
+El objetivo no se da por cerrado con `flutter test`: la regla de `CLAUDE.md` §6
+pide una pasada por la **cadena real**, y es la que encontró lo único que las
+698 pruebas no veían.
+
+**Cómo se montó.** El backend del laboratorio servía el worktree de inventario,
+que **no tiene** estos endpoints; con él la app habría ido a 404 y la pantalla
+habría dicho «no disponible» —exactamente lo mismo que dice cuando no hay señal—.
+Se levantó un segundo contenedor con el código de esta rama contra la **misma**
+base (las 18 migraciones de `campo` ya estaban aplicadas, así que `migrate` no
+tocó nada), y la app se compiló con `--dart-define=BACKEND_URL=http://10.0.2.2:8003`.
+
+**Qué se ejecutó, en orden, y qué devolvió el servidor:**
+
+```
+GET  /trabajos/<id>/materiales/    200   100 m reservados · 37,5 m + 1 ONT usados
+GET  /trabajos/<id>/seguimiento/   200   sin reportes todavía
+POST /trabajos/<id>/seguimiento/   201   AVANCE  — sin INICIO previo, aceptado
+POST /trabajos/<id>/seguimiento/   201   BLOQUEO — detiene el trabajo
+POST /trabajos/<id>/bloqueo/resolver/  200
+```
+
+Y en la base, después:
+
+```
+estado de la orden: en_sitio
+bloqueo | requiere_noc: False | detuvo: True | estado anterior: en_sitio
+        | resuelto_en: True | que_se_hizo: El cliente volvio y abrio la casa
+eventos: avance_campo, bloqueo_campo, bloqueo_detuvo_el_trabajo,
+         bloqueo_libero_el_trabajo, bloqueo_resuelto
+```
+
+La orden volvió a `en_sitio` **porque el bloqueo lo guardó al abrirse**, no
+porque nadie lo dedujera. Con eso el **criterio 9 queda cumplido**.
+
+Tres cosas se vieron funcionando que ninguna prueba unitaria afirma del todo: el
+formulario salió del **respaldo genérico** (el tipo de trabajo del laboratorio no
+declara momentos) y aun así se dibujó completo; el material apareció separado en
+sus bloques **sin sumarse**; y la salida del bloqueo se ofreció porque
+`requiere_noc` era `false`.
+
+**El defecto que encontró la corrida.** Se escribió un BLOQUEO, se tocó «Cerrar
+intervención» **sin guardar**, y el motivo del bloqueo apareció dentro de «¿Qué
+se hizo para resolverlo?», listo para mandarse como respuesta a otra pregunta.
+Los dos formularios declaran un campo con el mismo `id`, así que para Flutter
+eran el mismo widget y le reusó el estado. Arreglado con una `ValueKey` por
+momento, con prueba que lo reproduce y verificación en negativo (quitar la clave
+la pone en rojo).
+
+**Lo que se vio y NO se tocó.** Una fila dice `1 unidades`: el texto de la unidad
+sale del catálogo del tenant, y la app lo dibuja como está. Singularizarlo en
+código sería que la aplicación adivine gramática española sobre un campo libre
+que cada empresa escribe a su manera — por §3.3 eso es un dato de la empresa, y
+se corrige en el catálogo, no acá.
+
 ## Criterios de aceptación
 
 Comando y salida, no prosa.
@@ -216,7 +272,7 @@ Comando y salida, no prosa.
 | 6 | 2 | Los dos tiempos llegan al servidor y **no coinciden** | `capturado_en_dispositivo` ≠ `recibido_en_servidor` |
 | 7 | 2 | Un reporte capturado hace 50 min y recibido ahora deja el trabajo **al día** | la decisión de arriba, afirmada donde se puede romper |
 | 8 | 3 | La barra no ofrece una acción que la máquina niega | prueba sobre el mapa de transiciones, no sobre la pantalla |
-| 9 | todas | **Una prueba que atraviesa la cadena real** — app → API → servicio → base | regla de `CLAUDE.md` §6; es la que habría cazado los dos defectos de esta semana |
+| 9 | todas | **Una prueba que atraviesa la cadena real** — app → API → servicio → base | **CUMPLIDO 02/10/2026**: corrida en el emulador contra el backend de esta rama, con las salidas pegadas arriba. Encontró un defecto que las 698 pruebas no veían |
 
 ## Restricciones
 
