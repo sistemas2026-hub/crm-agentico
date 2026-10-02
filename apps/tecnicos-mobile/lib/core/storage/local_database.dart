@@ -111,7 +111,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 15,
+      version: 16,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -144,6 +144,12 @@ class LocalDatabase {
     // reportes que el tecnico escriba van a tener su propia cola.
     if (oldVersion < 15) {
       await _crearTablaDeSeguimiento(db);
+    }
+
+    // v16: la cola de los reportes que el tecnico escribe. Aditiva: un telefono
+    // con media jornada sin subir no puede perderla por actualizar la app.
+    if (oldVersion < 16) {
+      await _crearColaDeSeguimiento(db);
     }
 
     // v9: materiales. Aditiva y sin tocar nada de lo anterior -- un telefono
@@ -547,6 +553,53 @@ class LocalDatabase {
     ''');
   }
 
+  /// Los reportes de seguimiento que todavia no subieron.
+  ///
+  /// `id` ES LA CLAVE DE IDEMPOTENCIA
+  /// -------------------------------
+  /// La misma decision que `cola_movimientos_material`, y por el mismo motivo:
+  /// tenerlos separados invita a regenerar la clave al reintentar, y eso duplica
+  /// el hecho. El servidor reconoce el reintento por esta clave, asi que no puede
+  /// haber dos ids para el mismo reporte ni un reporte sin id.
+  ///
+  /// `capturado_en_dispositivo` SE GUARDA AL ESCRIBIR, NO AL SUBIR
+  /// ------------------------------------------------------------
+  /// Es la hora en que el tecnico escribio el reporte, que puede ser una hora
+  /// antes de que haya señal. Viaja al servidor y queda en la historia.
+  ///
+  /// Lo que NO hace es producir vencimientos: el seguimiento operativo lo
+  /// gobierna la llegada al servidor. Un reporte escrito a las 08:00 y recibido a
+  /// las 09:47 deja el trabajo al dia a las 09:47, porque el sistema no sabe si
+  /// hubo señal, cobertura o la aplicacion cerrada. Ver la ficha del objetivo.
+  static Future<void> _crearColaDeSeguimiento(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cola_seguimiento (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        orden_id TEXT NOT NULL,
+        -- inicio | avance | bloqueo | cierre
+        momento TEXT NOT NULL,
+        -- Las respuestas del formulario, tal como las dejo el tecnico.
+        respuestas_json TEXT NOT NULL,
+        -- Solo significan algo en un bloqueo. Son datos de plataforma, no del
+        -- esquema del ISP: ver la decision de `requiere_noc` en el CRM.
+        requiere_noc INTEGER NOT NULL DEFAULT 0,
+        detener INTEGER NOT NULL DEFAULT 1,
+        capturado_en_dispositivo TEXT NOT NULL,
+        estado TEXT NOT NULL DEFAULT 'pendiente',
+        intentos INTEGER NOT NULL DEFAULT 0,
+        error_mensaje TEXT,
+        -- Los errores por campo que devolvio el servidor, para poder mostrarlos
+        -- donde corresponde en vez de un texto suelto arriba.
+        errores_json TEXT,
+        next_attempt_at INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        confirmado_en INTEGER
+      )
+    ''');
+  }
+
   static Future<void> _crearTablaDeJornada(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS local_jornada (
@@ -679,6 +732,7 @@ class LocalDatabase {
 
     await _crearTablasDeMateriales(db);
     await _crearTablaDeSeguimiento(db);
+    await _crearColaDeSeguimiento(db);
     await _crearTablaDeJornada(db);
     await _crearTablaDeIncidencias(db);
 
@@ -1448,6 +1502,150 @@ class LocalDatabase {
   /// Se borra y se reescribe en una transaccion en vez de ir fila por fila: un
   /// material que dejo de estar en el kit tiene que desaparecer, y un upsert
   /// sin borrado lo dejaria para siempre mostrando un saldo que ya no existe.
+  /// Encola un reporte de seguimiento escrito por el tecnico.
+  ///
+  /// Devuelve el `id`, que ES la clave de idempotencia. Quien lo llama no la
+  /// genera dos veces: si el envio falla, se reintenta con la MISMA, porque una
+  /// clave nueva por intento es un identificador unico y no una clave
+  /// idempotente -- y el servidor contaria dos reportes donde hubo uno.
+  Future<String> encolarSeguimiento({
+    required String ordenId,
+    required String orgId,
+    required String profileId,
+    required String momento,
+    required Map<String, dynamic> respuestas,
+    bool requiereNoc = false,
+    bool detener = true,
+    DateTime? capturadoEn,
+  }) async {
+    final db = await database;
+    final DateTime cuando = capturadoEn ?? DateTime.now();
+    // El id lleva la orden y el momento para que sea legible en un volcado, y un
+    // sufijo de reloj para que dos reportes del mismo momento no choquen.
+    final String id = 'seg-$ordenId-$momento-${cuando.millisecondsSinceEpoch}';
+
+    await db.insert('cola_seguimiento', <String, Object?>{
+      'id': id,
+      'org_id': orgId,
+      'profile_id': profileId,
+      'orden_id': ordenId,
+      'momento': momento,
+      'respuestas_json': jsonEncode(respuestas),
+      'requiere_noc': requiereNoc ? 1 : 0,
+      'detener': detener ? 1 : 0,
+      // La hora de ESCRITURA, no la de subida. Ver la tabla.
+      'capturado_en_dispositivo': cuando.toUtc().toIso8601String(),
+      'estado': 'pendiente',
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+    return id;
+  }
+
+  /// Los reportes que todavia tienen que subir, en el orden en que se escribieron.
+  ///
+  /// El orden importa: un AVANCE y despues un CIERRE no se pueden subir al revés,
+  /// porque el servidor se niega a cerrar lo que no empezo. `next_attempt_at`
+  /// respeta la espera de un reintento.
+  Future<List<Map<String, dynamic>>> seguimientosPendientes({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final int ahora = DateTime.now().millisecondsSinceEpoch;
+    return db.query(
+      'cola_seguimiento',
+      where: "org_id = ? AND profile_id = ? AND estado = 'pendiente' AND next_attempt_at <= ?",
+      whereArgs: [orgId, profileId, ahora],
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  /// Cuantos reportes de seguimiento esperan subir. Para el sello de
+  /// sincronizacion, que es lo unico que le dice al tecnico que algo no salio.
+  Future<int> contarSeguimientosPendientes({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final filas = await db.rawQuery(
+      "SELECT COUNT(*) AS n FROM cola_seguimiento "
+      "WHERE org_id = ? AND profile_id = ? AND estado = 'pendiente'",
+      [orgId, profileId],
+    );
+    final Object? n = filas.isEmpty ? 0 : filas.first['n'];
+    return n is int ? n : 0;
+  }
+
+  /// Marca como subido.
+  Future<void> marcarSeguimientoSubido(String id) async {
+    final db = await database;
+    await db.update(
+      'cola_seguimiento',
+      <String, Object?>{
+        'estado': 'sincronizado',
+        'confirmado_en': DateTime.now().millisecondsSinceEpoch,
+        'error_mensaje': null,
+        'errores_json': null,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Anota que un intento fallo.
+  ///
+  /// `estadoFinal` distingue las dos cosas que no son lo mismo:
+  ///
+  ///   `pendiente`  se reintenta, con una espera que crece
+  ///   cualquier otro  NO se reintenta -- el servidor dijo algo que no va a
+  ///                   cambiar solo, como un formulario incompleto
+  ///
+  /// Reintentar un rechazo de validacion para siempre es un bucle que gasta
+  /// bateria y nunca va a entrar.
+  Future<void> marcarSeguimientoConError({
+    required String id,
+    required String estadoFinal,
+    String? mensaje,
+    Map<String, dynamic>? erroresPorCampo,
+    int? esperarSegundos,
+  }) async {
+    final db = await database;
+    final filas = await db.query(
+      'cola_seguimiento',
+      columns: <String>['intentos'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    final Object? previos = filas.isEmpty ? 0 : filas.first['intentos'];
+    final int intentos = (previos is int ? previos : 0) + 1;
+
+    // La espera crece con los intentos y tiene techo: sin tope, un reporte que
+    // falla diez veces no se vuelve a intentar hasta el dia siguiente.
+    final int espera =
+        esperarSegundos ?? <int>[30, 120, 300, 900][intentos.clamp(1, 4) - 1];
+
+    await db.update(
+      'cola_seguimiento',
+      <String, Object?>{
+        'estado': estadoFinal,
+        'intentos': intentos,
+        'error_mensaje': mensaje,
+        'errores_json': erroresPorCampo == null
+            ? null
+            : jsonEncode(erroresPorCampo),
+        'next_attempt_at': estadoFinal == 'pendiente'
+            ? DateTime.now()
+                  .add(Duration(seconds: espera))
+                  .millisecondsSinceEpoch
+            : 0,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   /// Guarda el seguimiento de una orden tal como lo mando el servidor.
   ///
   /// Se guarda el JSON entero, sin interpretarlo: el telefono dibuja lo que le

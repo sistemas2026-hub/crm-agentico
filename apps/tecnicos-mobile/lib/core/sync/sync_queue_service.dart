@@ -195,6 +195,10 @@ class SyncQueueService {
       // instante antes de volver a bajar.
       await _procesarMovimientosMaterial(orgId, profileId);
       await _procesarIncidencias(orgId, profileId);
+      // 5c. Los reportes de seguimiento. Despues de los movimientos a proposito:
+      // un CIERRE puede traer el consumo final, y si el consumo subiera despues
+      // el NOC veria el trabajo cerrado con material que todavia no figura.
+      await _procesarSeguimiento(orgId, profileId);
       await _procesarCierreDeJornada(orgId, profileId);
       await _descargarKit(orgId, profileId);
       // La jornada se baja al final: asi lo que llega ya refleja los
@@ -573,6 +577,150 @@ class SyncQueueService {
     } catch (_) {
       // Sin senal el kit se queda como estaba. Es un espejo: quedarse con el
       // de ayer es mejor que quedarse sin ninguno.
+    }
+  }
+
+  /// Sube los reportes de seguimiento que el tecnico escribio.
+  ///
+  /// EN ORDEN, Y DE A UNO
+  /// --------------------
+  /// Un AVANCE y despues un CIERRE no se pueden subir al reves: el servidor se
+  /// niega a cerrar una intervencion que nunca empezo, y el rechazo seria culpa
+  /// del orden y no del reporte. Por eso se recorren por `created_at` y si uno
+  /// queda pendiente se corta: subir el siguiente lo dejaria huerfano.
+  ///
+  /// LA CLAVE DE IDEMPOTENCIA ES EL `id` DE LA FILA
+  /// ---------------------------------------------
+  /// La misma en todos los reintentos. Si la respuesta se perdio pero el servidor
+  /// lo habia guardado, el siguiente intento se reconoce como repetido y no
+  /// duplica el hecho. Generar una clave nueva por intento es lo que duplica.
+  Future<void> _procesarSeguimiento(String orgId, String profileId) async {
+    final List<Map<String, dynamic>> pendientes = await _localDb
+        .seguimientosPendientes(orgId: orgId, profileId: profileId);
+    if (pendientes.isEmpty) {
+      return;
+    }
+
+    for (final Map<String, dynamic> fila in pendientes) {
+      final String id = fila['id'].toString();
+      final String ordenId = fila['orden_id'].toString();
+      final String momento = fila['momento'].toString();
+
+      Map<String, dynamic> respuestas = <String, dynamic>{};
+      final Object? crudo = fila['respuestas_json'];
+      if (crudo is String && crudo.isNotEmpty) {
+        try {
+          final Object? d = jsonDecode(crudo);
+          if (d is Map) {
+            respuestas = Map<String, dynamic>.from(d);
+          }
+        } catch (_) {
+          // Un cuerpo corrupto no se puede arreglar reintentando: el reporte se
+          // marca y no se vuelve a intentar, en vez de girar para siempre.
+          await _localDb.marcarSeguimientoConError(
+            id: id,
+            estadoFinal: 'error_local',
+            mensaje: 'El reporte quedó ilegible en el teléfono.',
+          );
+          return;
+        }
+      }
+
+      final Map<String, dynamic> cuerpo = <String, dynamic>{
+        'momento': momento,
+        'respuestas': respuestas,
+        // La hora en que el tecnico lo escribio. Viaja para la historia; lo que
+        // gobierna el seguimiento operativo es la llegada al servidor.
+        'capturado_en_dispositivo': fila['capturado_en_dispositivo'],
+        if (momento == 'bloqueo') ...<String, dynamic>{
+          'requiere_noc': fila['requiere_noc'] == 1,
+          'detener': fila['detener'] == 1,
+        },
+      };
+
+      try {
+        final respuesta = await _apiClient.post(
+          ApiEndpoints.seguimientoDeOrden(ordenId),
+          data: cuerpo,
+          options: Options(
+            headers: <String, dynamic>{
+              // El id de la fila. La MISMA en cada reintento.
+              'Idempotency-Key': id,
+            },
+          ),
+        );
+
+        if (respuesta.statusCode == 201 || respuesta.statusCode == 200) {
+          await _localDb.marcarSeguimientoSubido(id);
+          // El espejo se actualiza para que la pantalla muestre el reporte ya
+          // confirmado por el servidor, con su etiqueta y su hora de llegada.
+          await descargarSeguimientoDeOrden(ordenId: ordenId, orgId: orgId);
+          continue;
+        }
+
+        // Un codigo que no se esperaba: se reintenta.
+        await _localDb.marcarSeguimientoConError(
+          id: id,
+          estadoFinal: 'pendiente',
+          mensaje: 'El servidor respondió ${respuesta.statusCode}.',
+        );
+        return;
+      } on DioException catch (e) {
+        final int? status = e.response?.statusCode;
+
+        // 422: el contenido no se puede aceptar y no va a cambiar solo. Trae los
+        // errores POR CAMPO, que se guardan para mostrarlos donde corresponde.
+        if (status == 422) {
+          final Object? datos = e.response?.data;
+          Map<String, dynamic>? porCampo;
+          String? detalle;
+          if (datos is Map) {
+            final Object? campos = datos['campos'];
+            if (campos is Map) {
+              porCampo = Map<String, dynamic>.from(campos);
+            }
+            detalle = datos['detalle']?.toString();
+          }
+          await _localDb.marcarSeguimientoConError(
+            id: id,
+            estadoFinal: 'error_validacion',
+            mensaje: detalle ?? 'El reporte no se pudo guardar.',
+            erroresPorCampo: porCampo,
+          );
+          continue;
+        }
+
+        // 404: la orden no existe o ya no es de este tecnico. Reintentar no la
+        // va a devolver.
+        if (status == 404) {
+          await _localDb.marcarSeguimientoConError(
+            id: id,
+            estadoFinal: 'error_no_encontrada',
+            mensaje: 'Esta orden ya no está asignada a vos.',
+          );
+          continue;
+        }
+
+        // 401/403 tras el refresh: la sesion no sirve. No se pierde el reporte;
+        // espera a que alguien vuelva a entrar.
+        if (status == 401 || status == 403) {
+          await _localDb.marcarSeguimientoConError(
+            id: id,
+            estadoFinal: 'error_auth',
+            mensaje: 'La sesión expiró. Volvé a iniciar sesión.',
+          );
+          return;
+        }
+
+        // Sin señal, timeout, o el servidor caido: se reintenta mas tarde y se
+        // corta la corrida para no romper el orden.
+        await _localDb.marcarSeguimientoConError(
+          id: id,
+          estadoFinal: 'pendiente',
+          mensaje: e.message,
+        );
+        return;
+      }
     }
   }
 
