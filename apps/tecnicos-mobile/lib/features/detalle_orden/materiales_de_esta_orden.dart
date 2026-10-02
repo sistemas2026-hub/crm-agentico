@@ -24,7 +24,23 @@ class MaterialesDeEstaOrden extends StatelessWidget {
     super.key,
     required this.materiales,
     required this.cargando,
+    this.alAgregar,
   });
+
+  /// Qué hacer cuando el técnico anota lo que gastó.
+  ///
+  /// POR QUE EL GESTO VIVE ACA, Y NO SOLO EN LA PANTALLA DE EJECUCION
+  /// ---------------------------------------------------------------
+  /// El registro de consumo existe desde antes y está bien resuelto —atado a la
+  /// orden, sin señal, con el disponible leído de la base local—. Pero vive
+  /// detrás de «Ejecutar el trabajo», y esta sección es donde el técnico está
+  /// mirando qué se usó. Ver «37,5 m» y no tener cómo anotar el conector que
+  /// acaba de poner es el camino corto a que no lo anote, y entonces el
+  /// inventario se corrige a fin de mes de memoria.
+  ///
+  /// No es un flujo nuevo: abre el mismo que ya existía. `null` deja la sección
+  /// en lectura.
+  final VoidCallback? alAgregar;
 
   /// Lo que devolvió el backend, o `null` si **nunca se descargó** acá.
   ///
@@ -83,6 +99,11 @@ class MaterialesDeEstaOrden extends StatelessWidget {
           'Que no esté acá no quiere decir que no se haya usado nada.',
           style: AppTypography.cuerpoChico,
         ),
+        // Se puede anotar igual. No saber qué hay en el servidor no impide
+        // registrar lo que uno acaba de usar, y es justo cuando el técnico está
+        // sin señal: si el botón desapareciera ahí, desaparecería cuando más
+        // falta hace.
+        ..._accionDeAgregar(),
       ];
     }
 
@@ -121,6 +142,22 @@ class MaterialesDeEstaOrden extends StatelessWidget {
       Text(
         'Lo que llevás encima para toda la jornada se ve en Materiales.',
         style: AppTypography.etiquetaChica,
+      ),
+
+      ..._accionDeAgregar(),
+    ];
+  }
+
+  List<Widget> _accionDeAgregar() {
+    if (alAgregar == null) {
+      return const <Widget>[];
+    }
+    return <Widget>[
+      const SizedBox(height: AppSpacing.sm),
+      DexterAccionRapida(
+        texto: 'Anotar lo que usé',
+        icono: Icons.add,
+        alTocar: alAgregar,
       ),
     ];
   }

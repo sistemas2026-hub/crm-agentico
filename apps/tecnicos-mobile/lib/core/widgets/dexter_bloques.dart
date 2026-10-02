@@ -67,7 +67,11 @@ class DexterBloque extends StatelessWidget {
           Padding(
             padding: recortar
                 ? const EdgeInsets.fromLTRB(
-                    AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.sm)
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.sm,
+                  )
                 : EdgeInsets.zero,
             child: EncabezadoDeBloque(
               titulo: titulo!,
@@ -94,6 +98,75 @@ class DexterBloque extends StatelessWidget {
       child: recortar
           ? ClipRRect(borderRadius: AppRadius.brCompleto, child: contenido)
           : Padding(padding: padding, child: contenido),
+    );
+  }
+}
+
+/// Un tramo de la ficha: varias tarjetas que contestan la misma pregunta.
+///
+/// EL PROBLEMA QUE RESUELVE
+/// ------------------------
+/// Una ficha de trabajo apila una docena de `DexterBloque` con el mismo fondo,
+/// el mismo borde y la misma sombra. Todas se leen como pares, así que al bajar
+/// parece una sola sección larga: nada distingue lo que se **consulta** —la
+/// telemetría, el triage, los datos técnicos— de lo que se **hace** —reportar,
+/// anotar material—.
+///
+/// Esto no agrega una tarjeta más. Pone un rótulo **fuera** de las tarjetas,
+/// sobre el fondo de la página, y separa los grupos más de lo que separa a sus
+/// miembros. El ojo encuentra dónde empieza cada cosa sin leer un título.
+///
+/// La separación es la que hace el trabajo, no el rótulo: por eso [entre] es
+/// menor que el espacio que cada pantalla deja entre un grupo y el siguiente.
+class GrupoDeFicha extends StatelessWidget {
+  const GrupoDeFicha({
+    super.key,
+    required this.titulo,
+    required this.children,
+    this.entre = AppSpacing.sm,
+  });
+
+  /// Dos o tres palabras, en mayúsculas. Nombra el MOMENTO del trabajo, no la
+  /// categoría del dato: «para llegar» le dice al técnico cuándo mirar esto;
+  /// «información del cliente» no.
+  final String titulo;
+
+  final List<Widget> children;
+
+  /// Lo que separa a las tarjetas DE ESTE grupo entre sí.
+  final double entre;
+
+  @override
+  Widget build(BuildContext context) {
+    // Un grupo cuyas tarjetas son todas condicionales puede quedar sin ninguna.
+    // Dibujar el rótulo solo sería anunciar una sección vacía, que es peor que
+    // no anunciarla: el técnico baja buscando algo que no está.
+    if (children.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.only(
+            left: AppSpacing.xs,
+            bottom: AppSpacing.xs,
+          ),
+          child: Text(
+            titulo.toUpperCase(),
+            style: AppTypography.labelCaption.copyWith(
+              letterSpacing: 1.1,
+              color: AppColors.onSurfaceVariant,
+            ),
+          ),
+        ),
+        for (int i = 0; i < children.length; i++) ...<Widget>[
+          if (i > 0) SizedBox(height: entre),
+          children[i],
+        ],
+      ],
     );
   }
 }
@@ -153,45 +226,57 @@ class DexterPastilla extends StatelessWidget {
   });
 
   /// Rojo pleno: lo que está mal y no admite matices.
-  const DexterPastilla.critica({Key? key, required String texto, IconData? icono})
-      : this(
-          key: key,
-          texto: texto,
-          color: AppColors.onError,
-          fondo: AppColors.error,
-          icono: icono,
-        );
+  const DexterPastilla.critica({
+    Key? key,
+    required String texto,
+    IconData? icono,
+  }) : this(
+         key: key,
+         texto: texto,
+         color: AppColors.onError,
+         fondo: AppColors.error,
+         icono: icono,
+       );
 
   /// Rojo claro: una advertencia, o una prioridad alta.
-  const DexterPastilla.alerta({Key? key, required String texto, IconData? icono})
-      : this(
-          key: key,
-          texto: texto,
-          color: AppColors.onErrorContainer,
-          fondo: AppColors.errorContainer,
-          icono: icono,
-        );
+  const DexterPastilla.alerta({
+    Key? key,
+    required String texto,
+    IconData? icono,
+  }) : this(
+         key: key,
+         texto: texto,
+         color: AppColors.onErrorContainer,
+         fondo: AppColors.errorContainer,
+         icono: icono,
+       );
 
   /// Verde sobre superficie elevada: lo que está en regla. En esta paleta el
   /// chip verde no tiene fondo verde — lleva el texto en verde.
-  const DexterPastilla.enRegla({Key? key, required String texto, IconData? icono})
-      : this(
-          key: key,
-          texto: texto,
-          color: AppColors.onTertiaryContainer,
-          fondo: AppColors.surfaceContainerHigh,
-          icono: icono,
-        );
+  const DexterPastilla.enRegla({
+    Key? key,
+    required String texto,
+    IconData? icono,
+  }) : this(
+         key: key,
+         texto: texto,
+         color: AppColors.onTertiaryContainer,
+         fondo: AppColors.surfaceContainerHigh,
+         icono: icono,
+       );
 
   /// El tono por omisión del diseño: azul oscuro sobre superficie elevada.
-  const DexterPastilla.neutra({Key? key, required String texto, IconData? icono})
-      : this(
-          key: key,
-          texto: texto,
-          color: AppColors.onPrimaryFixed,
-          fondo: AppColors.surfaceContainerHigh,
-          icono: icono,
-        );
+  const DexterPastilla.neutra({
+    Key? key,
+    required String texto,
+    IconData? icono,
+  }) : this(
+         key: key,
+         texto: texto,
+         color: AppColors.onPrimaryFixed,
+         fondo: AppColors.surfaceContainerHigh,
+         icono: icono,
+       );
 
   final String texto;
   final Color color;
@@ -206,7 +291,10 @@ class DexterPastilla extends StatelessWidget {
       excludeSemantics: true,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(color: fondo, borderRadius: AppRadius.brChico),
+        decoration: BoxDecoration(
+          color: fondo,
+          borderRadius: AppRadius.brChico,
+        ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
@@ -260,8 +348,10 @@ class DexterPastillaConPunto extends StatelessWidget {
           Container(
             width: 8,
             height: 8,
-            decoration:
-                BoxDecoration(color: colorDelPunto, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: colorDelPunto,
+              shape: BoxShape.circle,
+            ),
           ),
           const SizedBox(width: 6),
           Flexible(
@@ -297,7 +387,10 @@ class DexterHundido extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: padding,
-      decoration: BoxDecoration(color: color, borderRadius: AppRadius.brTarjeta),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: AppRadius.brTarjeta,
+      ),
       child: child,
     );
   }
@@ -329,7 +422,10 @@ class DexterBaldosa extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(color: fondo, borderRadius: AppRadius.brTarjeta),
+      decoration: BoxDecoration(
+        color: fondo,
+        borderRadius: AppRadius.brTarjeta,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -337,7 +433,9 @@ class DexterBaldosa extends StatelessWidget {
         children: <Widget>[
           Text(
             rotulo.toUpperCase(),
-            style: AppTypography.labelCaption.copyWith(color: AppColors.outline),
+            style: AppTypography.labelCaption.copyWith(
+              color: AppColors.outline,
+            ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -408,15 +506,17 @@ class DexterBaldosaConIcono extends StatelessWidget {
                 children: <Widget>[
                   Text(
                     rotulo.toUpperCase(),
-                    style: AppTypography.labelCaption
-                        .copyWith(color: AppColors.outline),
+                    style: AppTypography.labelCaption.copyWith(
+                      color: AppColors.outline,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
                     valor,
-                    style: AppTypography.labelTelemetry
-                        .copyWith(color: colorDelValor),
+                    style: AppTypography.labelTelemetry.copyWith(
+                      color: colorDelValor,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -457,9 +557,7 @@ class DexterFilaDeDato extends StatelessWidget {
           child: Icon(icono, size: 18, color: colorDelIcono),
         ),
         const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: Text(texto, style: estilo ?? AppTypography.bodySm),
-        ),
+        Expanded(child: Text(texto, style: estilo ?? AppTypography.bodySm)),
         if (alFinal != null) ...<Widget>[
           const SizedBox(width: AppSpacing.sm),
           alFinal!,
@@ -521,7 +619,9 @@ class DexterBarraSegmentada extends StatelessWidget {
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: celdas[i],
-                        borderRadius: const BorderRadius.all(Radius.circular(2)),
+                        borderRadius: const BorderRadius.all(
+                          Radius.circular(2),
+                        ),
                       ),
                     ),
                   ),
@@ -537,8 +637,9 @@ class DexterBarraSegmentada extends StatelessWidget {
                 Expanded(
                   child: Text(
                     izquierda ?? '',
-                    style: AppTypography.labelBadge
-                        .copyWith(color: AppColors.outline),
+                    style: AppTypography.labelBadge.copyWith(
+                      color: AppColors.outline,
+                    ),
                   ),
                 ),
                 if (centro != null)
@@ -556,8 +657,9 @@ class DexterBarraSegmentada extends StatelessWidget {
                   child: Text(
                     derecha ?? '',
                     textAlign: TextAlign.end,
-                    style: AppTypography.labelBadge
-                        .copyWith(color: AppColors.outline),
+                    style: AppTypography.labelBadge.copyWith(
+                      color: AppColors.outline,
+                    ),
                   ),
                 ),
               ],
@@ -615,14 +717,18 @@ class DexterAccionRapida extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  Icon(icono,
-                      size: 22,
-                      color: activa ? AppColors.secondary : AppColors.inactivo),
+                  Icon(
+                    icono,
+                    size: 22,
+                    color: activa ? AppColors.secondary : AppColors.inactivo,
+                  ),
                   const SizedBox(width: AppSpacing.sm),
                   Flexible(
                     child: Text(
                       texto,
-                      style: AppTypography.etiquetaGrande.copyWith(color: tinta),
+                      style: AppTypography.etiquetaGrande.copyWith(
+                        color: tinta,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -695,8 +801,11 @@ class DexterAccionDominante extends StatelessWidget {
                     ),
                   )
                 else if (icono != null)
-                  Icon(icono,
-                      size: 24, color: activa ? tinta : AppColors.inactivo),
+                  Icon(
+                    icono,
+                    size: 24,
+                    color: activa ? tinta : AppColors.inactivo,
+                  ),
                 if (trabajando || icono != null)
                   const SizedBox(width: AppSpacing.sm),
                 Flexible(

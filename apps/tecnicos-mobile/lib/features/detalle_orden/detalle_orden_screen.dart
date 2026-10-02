@@ -22,6 +22,7 @@ import '../../core/widgets/dexter_empty_state.dart';
 import '../../core/widgets/contenido_centrado.dart';
 import '../../core/widgets/dexter_sync_badge.dart';
 import '../ejecucion/ejecucion_screen.dart';
+import '../ejecucion/widgets/consumo_de_material.dart';
 import '../trabajo/estado_trabajo.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'acciones_orden.dart';
@@ -353,6 +354,36 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     }
   }
 
+  /// Abre el registro de consumo, el MISMO que usa la pantalla de ejecucion.
+  ///
+  /// No se duplica nada: `ConsumoDeMaterial` ya resuelve el disponible leido de
+  /// la base local, el aviso de la regla de la empresa y el encolado sin señal.
+  /// Lo unico que cambia es desde donde se llega, que era el problema: el
+  /// tecnico mira el material de la orden y tiene que poder anotar ahi.
+  Future<void> _anotarConsumo(TrabajoVista trabajo) async {
+    final SecureStorageService almacen = SecureStorageService();
+    final String? orgId = await almacen.getOrgId();
+    final String? profileId = await almacen.getProfileId();
+    if (orgId == null || profileId == null || !mounted) {
+      return;
+    }
+
+    final bool? registrado = await ConsumoDeMaterial.abrir(
+      context,
+      orgId: orgId,
+      profileId: profileId,
+      ordenId: widget.ordenId,
+      ordenNumero: trabajo.numero,
+    );
+
+    // Se vuelve a traer aunque no haya señal: el servicio del backend lee del
+    // libro de movimientos, y lo que se acaba de encolar todavia no esta ahi.
+    // Lo que si cambia es el contador de pendientes, que el tecnico necesita ver.
+    if (registrado == true && mounted) {
+      await _traerMateriales();
+    }
+  }
+
   /// Relee del disco cuantas fotos lleva la hoja de ese momento.
   Future<void> _contarFotos(String momento) async {
     try {
@@ -631,99 +662,118 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   ],
                   const SizedBox(height: AppSpacing.md),
                   _accionesRapidas(trabajo),
-                  const SizedBox(height: AppSpacing.md),
-                  _datosDelCliente(trabajo),
-                  // Lo que la orden SÍ trae. Antes vivía detrás de la bandera
-                  // de demostración junto a los datos de ejemplo, así que en
-                  // producción se ocultaba también lo verdadero: el ticket de
-                  // origen, la franja prometida y los requisitos de seguridad
-                  // llegan del backend y nadie los veía.
-                  const SizedBox(height: AppSpacing.md),
-                  _datosDeLaOrden(trabajo),
-                  const SizedBox(height: AppSpacing.md),
-                  _datosTecnicos(trabajo),
-                  // La telemetría se ve cuando la orden trae una lectura del
-                  // equipo, aunque no haya modo demostración: la señal óptica es
-                  // un dato REAL desde que el motor la consulta al armar la
-                  // ficha. Estaba entera detrás de la bandera, así que en
-                  // producción no la veía nadie — el mismo descuido que este
-                  // módulo ya pagó con el ticket de origen, la franja prometida
-                  // y los requisitos de seguridad.
+                  // LA FICHA SE LEE POR MOMENTOS, NO POR CATEGORIAS
+                  // ----------------------------------------------
+                  // Antes esto era una pila de doce tarjetas con el mismo fondo,
+                  // el mismo borde y la misma separacion: todas se leian como
+                  // pares, y al bajar parecia una sola seccion larga. Nada
+                  // distinguia lo que se CONSULTA de lo que se HACE.
                   //
-                  // Cuando no hay lectura la tarjeta también se muestra, porque
-                  // decir POR QUÉ no la hay (falta el serial, el serial no está
-                  // en la OLT) es información, y callarla manda a buscar una
-                  // falla de red donde no la hay.
-                  if (trabajo.contextoDisponible ||
-                      widget.mostrarDatosFuturos) ...<Widget>[
-                    const SizedBox(height: AppSpacing.md),
-                    _telemetria(trabajo),
-                  ],
-                  if (trabajo.hayEvaluacionDexter) ...<Widget>[
-                    const SizedBox(height: AppSpacing.md),
-                    _loQueDexterAveriguo(trabajo),
-                  ],
-                  if (trabajo.diagnosticoPrevio.isNotEmpty ||
-                      widget.mostrarDatosFuturos) ...<Widget>[
-                    const SizedBox(height: AppSpacing.md),
-                    _triage(trabajo),
-                  ],
-                  // El protocolo se ve cuando la plantilla lo trae, aunque no
-                  // haya modo demostración: es un dato real del tipo de trabajo.
-                  if (trabajo.pasosDelProcedimiento.isNotEmpty ||
-                      widget.mostrarDatosFuturos) ...<Widget>[
-                    const SizedBox(height: AppSpacing.md),
-                    _protocoloDeAtencion(trabajo),
-                  ],
-                  // El seguimiento se muestra SIEMPRE, no detras de
-                  // `mostrarDatosFuturos`: no es una maqueta con datos de ejemplo
-                  // --como los materiales de abajo-- sino la historia real de la
-                  // intervencion, leida del servidor o del espejo del telefono.
-                  const SizedBox(height: AppSpacing.md),
-                  SeguimientoDeLaIntervencion(
-                    seguimiento: _seguimiento,
-                    cargando: _cargandoSeguimiento,
-                    actualizado: _seguimientoActualizado,
-                    pendientesDeSubir: _reportesSinSubir,
-                    alTomarFoto: _tomarFotoDelReporte,
-                    fotosTomadas: _fotosDelBorrador,
-                    alAbrirHoja: _contarFotos,
-                    alDescartarBorrador: _descartarBorrador,
-                    // La resolucion viaja por la MISMA cola que los
-                    // reportes: es otra cosa que el tecnico escribio en la
-                    // calle y tiene que subir. El momento `resolver` le dice al
-                    // procesador a que ruta va.
-                    alResolverBloqueo: (String queSeHizo) {
-                      _reportar('resolver', <String, dynamic>{
-                        'que_se_hizo': queSeHizo,
-                        'resuelto_por_rol': 'tecnico',
-                      });
-                    },
-                    alReportar:
-                        (
-                          String momento,
-                          Map<String, dynamic> respuestas, {
-                          bool requiereNoc = false,
-                          bool detener = true,
-                        }) {
-                          // No se espera: la pantalla no se bloquea mientras el
-                          // telefono busca señal.
-                          _reportar(
-                            momento,
-                            respuestas,
-                            requiereNoc: requiereNoc,
-                            detener: detener,
-                          );
-                        },
+                  // Los tres rotulos nombran el momento del trabajo --llegar,
+                  // entender, ejecutar-- y no la categoria del dato: «para
+                  // llegar» le dice al tecnico CUANDO mirar esto; «informacion
+                  // del cliente» no le dice nada que no sepa.
+                  //
+                  // Un grupo sin tarjetas no se dibuja: varias son
+                  // condicionales.
+                  const SizedBox(height: AppSpacing.lg),
+                  GrupoDeFicha(
+                    titulo: 'Para llegar',
+                    children: <Widget>[
+                      _datosDelCliente(trabajo),
+                      // Lo que la orden SI trae. Antes vivia detras de la
+                      // bandera de demostracion junto a los datos de ejemplo,
+                      // asi que en produccion se ocultaba tambien lo verdadero:
+                      // el ticket de origen, la franja prometida y los
+                      // requisitos de seguridad llegan del backend y nadie los
+                      // veia.
+                      _datosDeLaOrden(trabajo),
+                    ],
                   ),
-                  // El material REAL de esta orden, del libro de movimientos.
-                  // Reemplaza a `_materialesAsociados`, que dibujaba el catalogo
-                  // de ejemplo detras de `mostrarDatosFuturos`: ahora hay dato
-                  // de verdad, y una maqueta al lado solo confunde.
-                  const SizedBox(height: AppSpacing.md),
-                  MaterialesDeEstaOrden(
-                    materiales: _materiales,
-                    cargando: _cargandoMateriales,
+
+                  const SizedBox(height: AppSpacing.lg),
+                  GrupoDeFicha(
+                    titulo: 'Para entender la falla',
+                    children: <Widget>[
+                      _datosTecnicos(trabajo),
+                      // La telemetria se ve cuando la orden trae una lectura del
+                      // equipo, aunque no haya modo demostracion: la señal
+                      // optica es un dato REAL desde que el motor la consulta al
+                      // armar la ficha.
+                      //
+                      // Cuando no hay lectura la tarjeta tambien se muestra,
+                      // porque decir POR QUE no la hay --falta el serial, el
+                      // serial no esta en la OLT-- es informacion, y callarla
+                      // manda a buscar una falla de red donde no la hay.
+                      if (trabajo.contextoDisponible ||
+                          widget.mostrarDatosFuturos)
+                        _telemetria(trabajo),
+                      if (trabajo.hayEvaluacionDexter)
+                        _loQueDexterAveriguo(trabajo),
+                      if (trabajo.diagnosticoPrevio.isNotEmpty ||
+                          widget.mostrarDatosFuturos)
+                        _triage(trabajo),
+                    ],
+                  ),
+
+                  const SizedBox(height: AppSpacing.lg),
+                  GrupoDeFicha(
+                    titulo: 'Para ejecutar',
+                    children: <Widget>[
+                      // El protocolo se ve cuando la plantilla lo trae, aunque
+                      // no haya modo demostracion: es un dato real del tipo de
+                      // trabajo.
+                      if (trabajo.pasosDelProcedimiento.isNotEmpty ||
+                          widget.mostrarDatosFuturos)
+                        _protocoloDeAtencion(trabajo),
+                      // El seguimiento se muestra SIEMPRE, no detras de
+                      // `mostrarDatosFuturos`: es la historia real de la
+                      // intervencion, leida del servidor o del espejo del
+                      // telefono.
+                      SeguimientoDeLaIntervencion(
+                        seguimiento: _seguimiento,
+                        cargando: _cargandoSeguimiento,
+                        actualizado: _seguimientoActualizado,
+                        pendientesDeSubir: _reportesSinSubir,
+                        alTomarFoto: _tomarFotoDelReporte,
+                        fotosTomadas: _fotosDelBorrador,
+                        alAbrirHoja: _contarFotos,
+                        alDescartarBorrador: _descartarBorrador,
+                        // La resolucion viaja por la MISMA cola que los
+                        // reportes: es otra cosa que el tecnico escribio en la
+                        // calle y tiene que subir. El momento `resolver` le dice al
+                        // procesador a que ruta va.
+                        alResolverBloqueo: (String queSeHizo) {
+                          _reportar('resolver', <String, dynamic>{
+                            'que_se_hizo': queSeHizo,
+                            'resuelto_por_rol': 'tecnico',
+                          });
+                        },
+                        alReportar:
+                            (
+                              String momento,
+                              Map<String, dynamic> respuestas, {
+                              bool requiereNoc = false,
+                              bool detener = true,
+                            }) {
+                              // No se espera: la pantalla no se bloquea mientras el
+                              // telefono busca señal.
+                              _reportar(
+                                momento,
+                                respuestas,
+                                requiereNoc: requiereNoc,
+                                detener: detener,
+                              );
+                            },
+                      ),
+                      // El material REAL de esta orden, del libro de
+                      // movimientos.
+                      MaterialesDeEstaOrden(
+                        materiales: _materiales,
+                        cargando: _cargandoMateriales,
+                        alAgregar: () => _anotarConsumo(trabajo),
+                      ),
+                    ],
                   ),
                 ],
               ),
