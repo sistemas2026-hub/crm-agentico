@@ -19,6 +19,15 @@ enum EstadoTrabajo {
   /// El supervisor la devolvió: hay que rehacer algo. No es "en proceso otra
   /// vez", es un estado propio (así lo dice el modelo del backend).
   correccionRequerida,
+
+  /// Detenida por un bloqueo abierto. Existe en el backend desde la Fase C del
+  /// seguimiento de campo (`campo.bloqueos`), y hasta el 02/10/2026 esta app no
+  /// la conocía: caía en [desconocido], así que la orden se mostraba como
+  /// «Estado desconocido», con «PASO 0 DE 5» y sin ninguna acción.
+  ///
+  /// Un trabajo detenido es de los que MÁS le toca al técnico —es el que hay que
+  /// destrabar— y la aplicación lo trataba como si no existiera.
+  bloqueada,
   cerrada,
   cancelada,
   desconocido;
@@ -30,6 +39,7 @@ enum EstadoTrabajo {
         'completada_pendiente_sync' => EstadoTrabajo.completadaSinEnviar,
         'completada_campo' => EstadoTrabajo.completadaCampo,
         'correccion_requerida' => EstadoTrabajo.correccionRequerida,
+        'bloqueada' => EstadoTrabajo.bloqueada,
         'cerrada' => EstadoTrabajo.cerrada,
         'cancelada' => EstadoTrabajo.cancelada,
         _ => EstadoTrabajo.desconocido,
@@ -43,6 +53,7 @@ enum EstadoTrabajo {
         EstadoTrabajo.completadaSinEnviar => 'Lista, sin enviar',
         EstadoTrabajo.completadaCampo => 'Completada',
         EstadoTrabajo.correccionRequerida => 'Corrección requerida',
+        EstadoTrabajo.bloqueada => 'Detenida',
         EstadoTrabajo.cerrada => 'Cerrada',
         EstadoTrabajo.cancelada => 'Cancelada',
         EstadoTrabajo.desconocido => 'Estado desconocido',
@@ -57,6 +68,7 @@ enum EstadoTrabajo {
         EstadoTrabajo.completadaCampo => DexterOperationalStatus.completada,
         EstadoTrabajo.cerrada => DexterOperationalStatus.completada,
         EstadoTrabajo.correccionRequerida => DexterOperationalStatus.bloqueada,
+        EstadoTrabajo.bloqueada => DexterOperationalStatus.bloqueada,
         EstadoTrabajo.cancelada => DexterOperationalStatus.bloqueada,
         EstadoTrabajo.desconocido => DexterOperationalStatus.bloqueada,
       };
@@ -71,6 +83,8 @@ enum EstadoTrabajo {
         EstadoTrabajo.enCamino => true,
         EstadoTrabajo.enSitio => true,
         EstadoTrabajo.correccionRequerida => true,
+        // Un trabajo detenido es justamente el que hay que destrabar: cuenta.
+        EstadoTrabajo.bloqueada => true,
         EstadoTrabajo.completadaSinEnviar => false,
         EstadoTrabajo.completadaCampo => false,
         EstadoTrabajo.cerrada => false,

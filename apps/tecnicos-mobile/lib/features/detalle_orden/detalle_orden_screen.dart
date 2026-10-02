@@ -22,7 +22,6 @@ import '../../core/widgets/dexter_empty_state.dart';
 import '../../core/widgets/contenido_centrado.dart';
 import '../../core/widgets/dexter_sync_badge.dart';
 import '../ejecucion/ejecucion_screen.dart';
-import '../ejecucion/widgets/consumo_de_material.dart';
 import '../trabajo/estado_trabajo.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'acciones_orden.dart';
@@ -351,36 +350,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     } catch (_) {
       // Que la camara falle no puede tumbar la pantalla: el reporte se tiene que
       // poder guardar igual, que es toda la decision de esta fase.
-    }
-  }
-
-  /// Abre el registro de consumo, el MISMO que usa la pantalla de ejecucion.
-  ///
-  /// No se duplica nada: `ConsumoDeMaterial` ya resuelve el disponible leido de
-  /// la base local, el aviso de la regla de la empresa y el encolado sin señal.
-  /// Lo unico que cambia es desde donde se llega, que era el problema: el
-  /// tecnico mira el material de la orden y tiene que poder anotar ahi.
-  Future<void> _anotarConsumo(TrabajoVista trabajo) async {
-    final SecureStorageService almacen = SecureStorageService();
-    final String? orgId = await almacen.getOrgId();
-    final String? profileId = await almacen.getProfileId();
-    if (orgId == null || profileId == null || !mounted) {
-      return;
-    }
-
-    final bool? registrado = await ConsumoDeMaterial.abrir(
-      context,
-      orgId: orgId,
-      profileId: profileId,
-      ordenId: widget.ordenId,
-      ordenNumero: trabajo.numero,
-    );
-
-    // Se vuelve a traer aunque no haya señal: el servicio del backend lee del
-    // libro de movimientos, y lo que se acaba de encolar todavia no esta ahi.
-    // Lo que si cambia es el contador de pendientes, que el tecnico necesita ver.
-    if (registrado == true && mounted) {
-      await _traerMateriales();
     }
   }
 
@@ -768,10 +737,12 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                       ),
                       // El material REAL de esta orden, del libro de
                       // movimientos.
+                      // En LECTURA a proposito: anotar vive en la pantalla de
+                      // ejecucion, que ya tiene su «Agregar material». Ver el
+                      // encabezado de `MaterialesDeEstaOrden`.
                       MaterialesDeEstaOrden(
                         materiales: _materiales,
                         cargando: _cargandoMateriales,
-                        alAgregar: () => _anotarConsumo(trabajo),
                       ),
                     ],
                   ),

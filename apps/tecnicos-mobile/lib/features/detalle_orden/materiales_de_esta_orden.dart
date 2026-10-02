@@ -27,19 +27,26 @@ class MaterialesDeEstaOrden extends StatelessWidget {
     this.alAgregar,
   });
 
-  /// Qué hacer cuando el técnico anota lo que gastó.
+  /// Qué hacer cuando el técnico quiere anotar lo que gastó.
   ///
-  /// POR QUE EL GESTO VIVE ACA, Y NO SOLO EN LA PANTALLA DE EJECUCION
-  /// ---------------------------------------------------------------
-  /// El registro de consumo existe desde antes y está bien resuelto —atado a la
-  /// orden, sin señal, con el disponible leído de la base local—. Pero vive
-  /// detrás de «Ejecutar el trabajo», y esta sección es donde el técnico está
-  /// mirando qué se usó. Ver «37,5 m» y no tener cómo anotar el conector que
-  /// acaba de poner es el camino corto a que no lo anote, y entonces el
-  /// inventario se corrige a fin de mes de memoria.
+  /// POR QUE ESTO QUEDO EN `null` Y NO HAY BOTON ACA (02/10/2026)
+  /// -----------------------------------------------------------
+  /// Lo hubo durante unas horas, y era un error: la pantalla de **ejecución** ya
+  /// tiene «Materiales en esta orden» con su «Agregar material», que es donde el
+  /// técnico está con las manos en la caja. Dos tarjetas con distinto nombre
+  /// haciendo lo mismo es el mismo defecto que la «Guía FTTH» de ayer.
   ///
-  /// No es un flujo nuevo: abre el mismo que ya existía. `null` deja la sección
-  /// en lectura.
+  /// Las dos pantallas contestan preguntas distintas y por eso las dos tarjetas
+  /// se quedan, pero con papeles distintos:
+  ///
+  ///   la FICHA   — «¿qué hay reservado para este trabajo y qué se consumió?».
+  ///                Se mira ANTES de entrar, para saber si hay que pasar por
+  ///                bodega. Es el libro de movimientos del servidor: lectura.
+  ///   EJECUCIÓN  — «anoto los dos conectores que acabo de poner». Es el acto, y
+  ///                ocurre mientras se trabaja.
+  ///
+  /// El parámetro se conserva porque la sección no decide esto: quien la usa sí.
+  /// Hoy nadie se lo pasa, y la sección dice dónde se anota en vez de callarlo.
   final VoidCallback? alAgregar;
 
   /// Lo que devolvió el backend, o `null` si **nunca se descargó** acá.
@@ -150,7 +157,16 @@ class MaterialesDeEstaOrden extends StatelessWidget {
 
   List<Widget> _accionDeAgregar() {
     if (alAgregar == null) {
-      return const <Widget>[];
+      // Sin el gesto, se dice DONDE está. Una tarjeta de material que no deja
+      // anotar y tampoco explica dónde se anota hace que el técnico lo busque
+      // en la pantalla equivocada, o que no lo anote.
+      return <Widget>[
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          'Lo que vayas usando se anota al ejecutar el trabajo.',
+          style: AppTypography.etiquetaChica,
+        ),
+      ];
     }
     return <Widget>[
       const SizedBox(height: AppSpacing.sm),

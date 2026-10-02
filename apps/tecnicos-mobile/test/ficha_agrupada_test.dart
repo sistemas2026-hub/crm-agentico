@@ -28,7 +28,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// triage, el protocolo—, así que un grupo entero puede quedar vacío; dibujar su
 /// rótulo mandaría al técnico a buscar algo que no está.
 void main() {
-  group('1. El técnico puede anotar lo que gastó desde la ficha', () {
+  group('1. La ficha muestra el material; anotar vive en ejecución', () {
     Future<void> montar(
       WidgetTester tester, {
       Map<String, dynamic>? materiales,
@@ -65,9 +65,32 @@ void main() {
       ],
     };
 
-    testWidgets('el gesto se ofrece junto a lo que ya se usó', (
+    testWidgets('sin el gesto, la ficha dice DONDE se anota', (
       WidgetTester tester,
     ) async {
+      // LA CORRECCION DEL 02/10/2026
+      // ----------------------------
+      // Hubo un boton acá durante unas horas y era un duplicado: la pantalla de
+      // ejecución ya tiene «Materiales en esta orden» con su «Agregar material»,
+      // que es donde el técnico está con las manos en la caja.
+      //
+      // La tarjeta de la ficha se queda porque contesta OTRA pregunta --qué hay
+      // reservado y qué se consumió, antes de entrar-- pero en lectura. Y lo
+      // dice, en vez de callarlo: una tarjeta de material que no deja anotar ni
+      // explica dónde se anota manda a buscar en la pantalla equivocada.
+      await montar(tester, materiales: conMaterial(), alAgregar: null);
+
+      expect(find.text('Anotar lo que usé'), findsNothing);
+      expect(
+        find.textContaining('se anota al ejecutar el trabajo'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('con el gesto inyectado, se ofrece', (
+      WidgetTester tester,
+    ) async {
+      // La sección no decide esto: quien la usa sí. Hoy nadie se lo pasa.
       await montar(tester, materiales: conMaterial(), alAgregar: () {});
 
       expect(find.text('Anotar lo que usé'), findsOneWidget);
@@ -89,21 +112,16 @@ void main() {
       expect(pidio, isTrue);
     });
 
-    testWidgets('también sin nada descargado, que es cuando más falta hace', (
+    testWidgets('sin nada descargado también dice dónde se anota', (
       WidgetTester tester,
     ) async {
-      await montar(tester, materiales: null, alAgregar: () {});
+      await montar(tester, materiales: null, alAgregar: null);
 
       expect(find.textContaining('todavía no está disponible'), findsOneWidget);
-      expect(find.text('Anotar lo que usé'), findsOneWidget);
-    });
-
-    testWidgets('sin a quién entregarlo, la sección queda en lectura', (
-      WidgetTester tester,
-    ) async {
-      await montar(tester, materiales: conMaterial(), alAgregar: null);
-
-      expect(find.text('Anotar lo que usé'), findsNothing);
+      expect(
+        find.textContaining('se anota al ejecutar el trabajo'),
+        findsOneWidget,
+      );
     });
   });
 

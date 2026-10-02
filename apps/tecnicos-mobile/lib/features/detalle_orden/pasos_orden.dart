@@ -88,6 +88,20 @@ class LecturaDePasos {
                 'El supervisor devolvió este trabajo. Hay que rehacer lo que '
                 'quedó mal y volver a completarlo.',
           ),
+        // DETENIDA: el trabajo SIGUE en el paso donde estaba.
+        //
+        // Hasta el 02/10/2026 este estado no existía en la app y caía en
+        // `desconocido`, que dibuja «PASO 0 DE 5»: un trabajo detenido en el
+        // sitio aparecía como si no hubiera empezado nunca. El bloqueo no hace
+        // retroceder nada —el backend guarda el estado al que se vuelve— así
+        // que acá tampoco.
+        EstadoTrabajo.bloqueada => const LecturaDePasos(
+            pasoActual: 2,
+            excepcion: true,
+            avisoExcepcion:
+                'Este trabajo está detenido por un bloqueo. Mirá el '
+                'seguimiento: si no hace falta el NOC, lo podés destrabar vos.',
+          ),
         EstadoTrabajo.cancelada => const LecturaDePasos(
             pasoActual: -1,
             excepcion: true,
@@ -180,6 +194,14 @@ class AccionesDisponibles {
           ),
         // Sin esto, una orden devuelta quedaba sin ninguna salida en la
         // aplicación: el técnico veía el trabajo y no tenía cómo retomarlo.
+        // DETENIDA: ninguna acción de la máquina de estados.
+        //
+        // No es un olvido y es la razón por la que la salida del bloqueo vive en
+        // la FICHA y no en la pantalla de ejecución: con el trabajo detenido no
+        // hay «Ejecutar el trabajo», así que si destrabar viviera allá, un
+        // trabajo bloqueado sería un callejón sin salida. Se destraba desde el
+        // seguimiento, que es la única pantalla alcanzable.
+        EstadoTrabajo.bloqueada => AccionesDisponibles.ninguna,
         EstadoTrabajo.correccionRequerida => const AccionesDisponibles(
             primaria: AccionOrden(
               etiqueta: 'Volver al sitio',
