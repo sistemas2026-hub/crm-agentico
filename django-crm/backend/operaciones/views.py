@@ -41,10 +41,12 @@ from django.db import transaction
 from django.db.utils import IntegrityError
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.models import Profile
+from common.permissions import HasOrgContext
 from django.http import Http404
 from django.utils import timezone
 
@@ -1368,3 +1370,99 @@ class ReportesView(APIView):
         return Response(indicadores.reporte(
             request.org, d["reporte"], desde=d.get("desde"),
             hasta=d.get("hasta"), dias=d.get("dias")))
+
+
+class LatidoSupervisorView(APIView):
+    """
+        GET /api/operaciones/supervisor/latido/
+
+    El SCHEDULER despierta al Supervisor y le pregunta qué ve. No escribe nada.
+
+    POR QUE ESTA RUTA EXISTE, SI YA HAY UNA DE CICLO
+    -----------------------------------------------
+    `POST supervisor/ciclo/` ESCRIBE: registra propuestas, y su permiso es
+    `EsJefeDeOperaciones` porque detrás hay una persona. El scheduler no es una
+    persona y no debe entrar por la puerta de una: el proyecto ya tiene esa
+    distinción escrita en `nucleo/seguridad/frontera.py::puerta` -- con actor se
+    entra por la puerta humana, sin actor por la autónoma -- y reusar el permiso
+    del Jefe para un proceso la borraría.
+
+    Así que esta ruta hace UNA cosa, de solo lectura, con el mismo patrón de
+    servicio que ya usan los endpoints de importación que llama el motor:
+    `IsAuthenticated + HasOrgContext`, con la credencial acotada por scope
+    (`operaciones:read`) en `common.middleware.get_company`.
+
+    Y POR QUE NO SE REUSA `indicadores/`, QUE YA CALCULA ESTO MISMO
+    --------------------------------------------------------------
+    Porque `indicadores.py:346` tambien llama a `detectar()` y hasta publica
+    `senales_vigentes` y `senales_por_tipo` con esta misma cadena de fuente: lo
+    que devuelve este latido es un SUBCONJUNTO estricto de eso. La duplicacion
+    es real y esta aqui a proposito, por dos razones que no se arreglan
+    reusando:
+
+      * `IndicadoresView` esta detras de `EsJefeDeOperaciones`. Darle esa
+        credencial al scheduler seria darle a un proceso el rol de una persona,
+        que es justo lo que este bloque evita.
+      * devuelve el juego COMPLETO de indicadores operativos. Un turno que corre
+        cada hora no necesita --ni debe arrastrar al log del motor-- mas que
+        conteos.
+
+    Lo que NO se duplico es el calculo: las tres puertas (`ciclo`,
+    `indicadores`, este latido) llaman a la MISMA `supervisor.detectar()`, asi
+    que no hay una segunda definicion de "senal vigente" que se desincronice.
+
+    POR QUE `detectar()` Y NO `correr_ciclo()`
+    -----------------------------------------
+    `detectar()` es LECTURA pura -- lo dice su módulo y lo reusa
+    `indicadores.indicadores_supervisor`: «las señales VIGENTES se detectan sin
+    escribir nada». `correr_ciclo()` además registra propuestas, y este bloque
+    tiene que demostrar el circuito sin producir ningún efecto.
+
+    LO QUE DEVUELVE, Y LO QUE NO
+    ----------------------------
+    Conteos por tipo de señal y nada más. NO devuelve `origen_id`, ni evidencia,
+    ni datos: un latido que arrastre la identidad de un caso convierte la traza
+    de un turno --el informe del tick y la línea de log del motor-- en un
+    registro con datos de cliente, y ninguno de los dos es lugar para eso.
+
+    EL TENANT SE COMPRUEBA, NO SE SUPONE
+    ------------------------------------
+    La organización sale de la credencial (`request.org`). Si quien llama manda
+    `organization_id`, tiene que COINCIDIR: así un turno del scheduler que
+    apunte a otra empresa falla en vez de leer la de al lado con el token
+    equivocado. Es la misma regla que `frontera.exigir` aplica al permiso.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def get(self, request):
+        pedida = str(request.query_params.get("organization_id") or "").strip()
+        if pedida and pedida != str(request.org.id):
+            #  409 y no 403: la credencial es válida, lo que no coincide es a qué
+            #  empresa apunta el turno. Un 403 mandaría a revisar el token.
+            return Response(
+                {"error": "ORGANIZACION_DISTINTA",
+                 "detalle": "el turno apunta a una organización que no es la de "
+                            "esta credencial: no se lee nada"},
+                status=status.HTTP_409_CONFLICT)
+
+        leido_en = timezone.now()
+        senales = supervisor.detectar(request.org)
+
+        por_tipo: dict = {}
+        for s in senales:
+            por_tipo[s.tipo] = por_tipo.get(s.tipo, 0) + 1
+
+        return Response({
+            "organizacion": str(request.org.id),
+            "leido_en": leido_en.isoformat(),
+            "senales_vigentes": len(senales),
+            "senales_por_tipo": por_tipo,
+            #  Que el latido declare que no escribió viaja con la respuesta
+            #  para que quien lea el informe del tick --o la línea de log del
+            #  motor-- no tenga que ir al código a comprobarlo. No queda en una
+            #  tabla: 'job_run' no tiene columna de salida (medido el
+            #  02/10/2026, tests/test_latido_extremo_a_extremo.py).
+            "escrituras": 0,
+            "fuente": "operaciones.supervisor.detectar",
+        })

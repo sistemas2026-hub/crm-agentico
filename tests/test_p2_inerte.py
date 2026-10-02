@@ -247,9 +247,29 @@ revisar(not fuera,
         "ni Django, ni el frontend, ni el motor, ni ninguna CLI llaman a "
         "job_claim / jobs_vencidos / job_contexto / job_heartbeat / job_finalize",
         f"{fuera}")
+#  02/10/2026. Se miran las urls.py SIN SUS COMENTARIOS, y el patron queda
+#  igual de estricto. Motivo: 'operaciones/urls.py' documenta en un comentario
+#  que por 'supervisor/latido/' es por donde el SCHEDULER entra a preguntar, y
+#  la palabra en una linea que empieza con '#' ponia esto en rojo.
+#
+#  Que un comentario no cuente no afloja nada: un comentario no enruta. Y la
+#  direccion del latido es la contraria a la que esta guarda vigila -- el
+#  scheduler llama a Django, no Django al scheduler; esa ruta es un GET de
+#  lectura que no toca job_claim ni ninguna funcion de turnos, y el chequeo de
+#  arriba ('fuera') lo mide sobre el repo entero, Django incluido.
+#
+#  LO QUE NO SE HIZO, y es la tentacion obvia: sacarle la palabra "scheduler" al
+#  comentario para que la guarda pase. Eso es fabricar la marca que destraba y
+#  deja al lector de urls.py sin saber quien llama a esa ruta.
+#
+#  Limite conocido: una mencion dentro de una CADENA despues de un '#' tampoco
+#  se veria. Es contrivado en un urls.py y no es el caso que importa.
+SIN_COMENTARIOS = re.compile(r"#[^\n]*")
 urls = [f.relative_to(RAIZ).as_posix() for f in (RAIZ / "django-crm").rglob("urls.py")
         if "node_modules" not in f.parts
-        and re.search(r"job_|programador|scheduler", f.read_text(encoding="utf-8", errors="replace"))]
+        and re.search(r"job_|programador|scheduler",
+                      SIN_COMENTARIOS.sub(
+                          "", f.read_text(encoding="utf-8", errors="replace")))]
 revisar(not urls, "ninguna URL de Django toca el scheduler", f"{urls}")
 
 # =============================================================================

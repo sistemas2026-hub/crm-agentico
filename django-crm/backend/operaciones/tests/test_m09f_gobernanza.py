@@ -827,6 +827,30 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
     ciclo y no toca ninguna propuesta. Su propia vista no importa un solo
     servicio de escritura.
 
+    'supervisor-latido' (GET /supervisor/latido/) entro el 02/10/2026, y es la
+    unica de la lista que NO la llama una persona: es la puerta por donde el
+    scheduler de 'nucleo/programador/' despierta al Supervisor. Justamente por
+    eso no reusa 'ciclo' --que escribe propuestas y exige
+    'EsJefeDeOperaciones'--: un proceso no debe entrar por la puerta de alguien.
+
+    No ejecuta, y tampoco escribe: llama a 'supervisor.detectar()', que es la
+    misma lectura que ya reusa 'indicadores', y devuelve CONTEOS por tipo de
+    senal. No registra propuestas, no corre el ciclo, no toca un caso, no
+    reprograma y no llama a ningun sistema externo. Responde 405 a POST, PUT,
+    PATCH y DELETE.
+
+    Su propia suite lo afirma sobre el EFECTO
+    (tests/test_p1_latido_supervisor.py): tras DOS pasadas con una senal viva,
+    ni PropuestaSupervisor, ni common.Activity, ni Case cambiaron de cuenta --y
+    la mutacion que cambia 'detectar' por 'correr_ciclo' pone esa prueba en
+    rojo, medido el 02/10/2026, asi que el cero no es un cero de adorno.
+
+    El motivo por el que esta ruta acepta 'organization_id' es el turno, que lo
+    manda derivado de la base: NO elige la organizacion, la COMPRUEBA contra la
+    de la credencial y contesta 409 si no coinciden. La fuga que eso evitaria
+    --ignorar la comprobacion y leer con el parametro-- se probo como mutacion y
+    la suite la mata.
+
     Que esta lista haya que tocarla para agregar una ruta es el punto: esta
     guarda no comprueba que las rutas de ejecucion esten ausentes por su
     nombre --eso lo hace el bucle de abajo, y un 'aplicar_propuesta' llamado
@@ -842,7 +866,8 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        "capacidad-jornada", "actividades",
                        "actividad-detalle", "actividad-transicion",
                        "asistente", "indicadores", "reportes",
-                       "programaciones", "actividad-supervisor"}
+                       "programaciones", "actividad-supervisor",
+                       "supervisor-latido"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

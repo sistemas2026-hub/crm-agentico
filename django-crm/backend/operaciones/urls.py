@@ -68,4 +68,11 @@ urlpatterns = [
     #  declarada desde M03 y ninguna funcion la asignaba.
     path("programacion/<uuid:programacion_id>/cerrar/",
          views.CerrarProgramacionView.as_view(), name="programacion-cerrar"),
+
+    #  EL LATIDO  --  por donde el scheduler despierta al Supervisor.
+    #  GET y de solo lectura a proposito: 'supervisor/ciclo/' (POST) escribe
+    #  propuestas y lo aprieta una persona; este lo llama un proceso y no
+    #  escribe nada. Dos puertas porque son dos cosas distintas.
+    path("supervisor/latido/", views.LatidoSupervisorView.as_view(),
+         name="supervisor-latido"),
 ]
