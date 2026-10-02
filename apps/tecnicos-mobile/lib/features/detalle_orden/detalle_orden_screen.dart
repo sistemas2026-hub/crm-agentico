@@ -1008,8 +1008,18 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   /// que el sistema no ve — lo acordado ahí no existe para el NOC ni para la
   /// bitácora del trabajo. El botón no sumaba un canal: restaba trazabilidad.
   ///
-  /// Quedan tres, así que la segunda fila lleva una sola a lo ancho en vez de
-  /// una mitad con un hueco al lado.
+  /// POR QUÉ SE QUITÓ TAMBIÉN «GUÍA FTTH» (02/10/2026)
+  /// --------------------------------------------------
+  /// Prometía el procedimiento del trabajo y abría una MAQUETA: pasos
+  /// inventados de `FieldMockData`, iguales para cualquier orden, y solo en modo
+  /// demostración. Mientras tanto el protocolo REAL —el que declara el tipo de
+  /// trabajo— ya tiene su propia tarjeta en «Para ejecutar», con sus pasos y su
+  /// cuenta.
+  ///
+  /// Dos cosas con el mismo nombre y distinto contenido en la misma pantalla no
+  /// es redundancia: es una que miente. Y la que mentía era ésta.
+  ///
+  /// Quedan dos, que es exactamente la rejilla del diseño: una fila de a dos.
   Widget _accionesRapidas(TrabajoVista trabajo) {
     return Column(
       children: <Widget>[
@@ -1032,12 +1042,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               ),
             ),
           ],
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        DexterAccionRapida(
-          icono: Icons.menu_book,
-          texto: 'Guía FTTH',
-          alTocar: widget.mostrarDatosFuturos ? _abrirProcedimiento : null,
         ),
       ],
     );
@@ -1157,78 +1161,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     final String hora = fecha.hour.toString().padLeft(2, '0');
     final String minuto = fecha.minute.toString().padLeft(2, '0');
     return '$dia/$mes a las $hora:$minuto';
-  }
-
-  /// CAMPO-DATA-050 · El procedimiento para la falla, como hoja de consulta.
-  Future<void> _abrirProcedimiento() {
-    return showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.surfaceContainerLowest,
-      shape: const RoundedRectangleBorder(borderRadius: AppRadius.brHoja),
-      isScrollControlled: true,
-      builder: (BuildContext hoja) {
-        return SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    const Icon(
-                      Icons.menu_book,
-                      size: 20,
-                      color: AppColors.secondary,
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Text(
-                        FieldMockData.procedimientoTitulo,
-                        style: AppTypography.tituloChico,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.of(hoja).pop(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                for (
-                  int i = 0;
-                  i < FieldMockData.procedimientoPasos.length;
-                  i++
-                )
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                    child: Text(
-                      '${i + 1}. ${FieldMockData.procedimientoPasos[i]}',
-                      style: AppTypography.cuerpoChico,
-                    ),
-                  ),
-                const SizedBox(height: AppSpacing.md),
-                SizedBox(
-                  width: double.infinity,
-                  height: AppSpacing.objetivoTactil,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: AppColors.onPrimary,
-                      shape: const RoundedRectangleBorder(
-                        borderRadius: AppRadius.brTarjeta,
-                      ),
-                    ),
-                    onPressed: () => Navigator.of(hoja).pop(),
-                    child: const Text('Entendido'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
   }
 
   /// CAMPO-DATA-025 · Qué material tiene asignado este trabajo.

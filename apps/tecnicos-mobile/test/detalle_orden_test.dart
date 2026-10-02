@@ -463,29 +463,30 @@ void main() {
       await base.cerrar();
     });
 
-    testWidgets('27. La guía de procedimiento se abre y no toca la orden',
-        (WidgetTester tester) async {
-      _pantallaAlta(tester);
-      final base = _BaseFalsa(<Map<String, dynamic>>[_orden(estado: 'en_sitio')]);
-      await tester.pumpWidget(_app(base, mostrarDatosFuturos: true));
-      await tester.pumpAndSettle();
+    testWidgets(
+      '27. La «Guía FTTH» ya no está: prometía el procedimiento y abría una maqueta',
+      (WidgetTester tester) async {
+        // POR QUE SE QUITO (02/10/2026)
+        // -----------------------------
+        // El boton decia «Guía FTTH» y abria pasos INVENTADOS de FieldMockData,
+        // iguales para cualquier orden y solo en modo demostracion. Mientras
+        // tanto el protocolo REAL --el que declara el tipo de trabajo-- ya tiene
+        // su tarjeta en «Para ejecutar», con sus pasos y su cuenta.
+        //
+        // Dos cosas con el mismo nombre y distinto contenido en una pantalla no
+        // son redundancia: una miente. Esta prueba existe para que no vuelva.
+        _pantallaAlta(tester);
+        final base = _BaseFalsa(<Map<String, dynamic>>[
+          _orden(estado: 'en_sitio'),
+        ]);
+        await tester.pumpWidget(_app(base, mostrarDatosFuturos: true));
+        await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Guía FTTH'));
-      await tester.pumpAndSettle();
-
-      expect(find.text(FieldMockData.procedimientoTitulo), findsOneWidget);
-      expect(
-        find.textContaining(FieldMockData.procedimientoPasos.first),
-        findsOneWidget,
-      );
-      // Consultar no transiciona nada: la orden queda como estaba.
-      expect(base.mutacionesEncoladas, isEmpty);
-
-      await tester.tap(find.text('Entendido'));
-      await tester.pumpAndSettle();
-      expect(find.text(FieldMockData.procedimientoTitulo), findsNothing);
-      await base.cerrar();
-    });
+        expect(find.text('Guía FTTH'), findsNothing);
+        expect(find.text(FieldMockData.procedimientoTitulo), findsNothing);
+        await base.cerrar();
+      },
+    );
 
     testWidgets('23. El protocolo se ve aparte de la barra de estados',
         (WidgetTester tester) async {
@@ -687,7 +688,7 @@ void main() {
       await base.cerrar();
     });
 
-    testWidgets('las otras tres siguen, y apagadas mientras no haya lanzador', (
+    testWidgets('quedan las dos que sí tienen a dónde llevar, y apagadas', (
       WidgetTester tester,
     ) async {
       // Apagadas es la verdad: las dos primeras necesitan abrir otra
@@ -700,7 +701,6 @@ void main() {
 
       expect(find.text('Llamar Cliente'), findsOneWidget);
       expect(find.text('Ruta GPS'), findsOneWidget);
-      expect(find.text('Guía FTTH'), findsOneWidget);
       await base.cerrar();
     });
   });
