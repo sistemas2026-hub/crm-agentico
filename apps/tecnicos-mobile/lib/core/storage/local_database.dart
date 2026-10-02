@@ -111,7 +111,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 16,
+      version: 17,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -150,6 +150,11 @@ class LocalDatabase {
     // con media jornada sin subir no puede perderla por actualizar la app.
     if (oldVersion < 16) {
       await _crearColaDeSeguimiento(db);
+    }
+
+    // v17: el material de cada orden, para verlo sin señal.
+    if (oldVersion < 17) {
+      await _crearTablaDeMaterialesDeOrden(db);
     }
 
     // v9: materiales. Aditiva y sin tocar nada de lo anterior -- un telefono
@@ -571,6 +576,33 @@ class LocalDatabase {
   /// gobierna la llegada al servidor. Un reporte escrito a las 08:00 y recibido a
   /// las 09:47 deja el trabajo al dia a las 09:47, porque el sistema no sabe si
   /// hubo señal, cobertura o la aplicacion cerrada. Ver la ficha del objetivo.
+  /// Que material toco una orden, como lo conto el servidor.
+  ///
+  /// Otro espejo, y por el mismo motivo que el del seguimiento: el telefono no
+  /// interpreta estos datos, los dibuja. El backend ya devuelve los bloques
+  /// separados --comprometido, consumido, devuelto, otros-- y partirlos en
+  /// columnas obligaria a la aplicacion a conocer la forma de cada uno.
+  ///
+  /// NO REEMPLAZA AL KIT, Y NO SE MEZCLA CON EL
+  /// ------------------------------------------
+  /// `local_kit` es lo que el tecnico lleva encima para toda la jornada. Esto es
+  /// lo que paso en UN trabajo. Con los mismos 150 m de drop hace cinco
+  /// instalaciones, asi que sumar o cruzar las dos cosas diria que en una casa se
+  /// usaron 150 m cuando se usaron 37,5.
+  static Future<void> _crearTablaDeMaterialesDeOrden(
+    DatabaseExecutor db,
+  ) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_materiales_orden (
+        orden_id TEXT NOT NULL,
+        org_id TEXT NOT NULL,
+        materiales_json TEXT NOT NULL,
+        sincronizado_en INTEGER NOT NULL,
+        PRIMARY KEY (orden_id, org_id)
+      )
+    ''');
+  }
+
   static Future<void> _crearColaDeSeguimiento(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS cola_seguimiento (
@@ -733,6 +765,7 @@ class LocalDatabase {
     await _crearTablasDeMateriales(db);
     await _crearTablaDeSeguimiento(db);
     await _crearColaDeSeguimiento(db);
+    await _crearTablaDeMaterialesDeOrden(db);
     await _crearTablaDeJornada(db);
     await _crearTablaDeIncidencias(db);
 
@@ -1644,6 +1677,57 @@ class LocalDatabase {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  /// Guarda el material de una orden tal como lo mando el servidor.
+  Future<void> guardarMaterialesDeOrden({
+    required String ordenId,
+    required String orgId,
+    required Map<String, dynamic> materiales,
+  }) async {
+    final db = await database;
+    await db.insert('local_materiales_orden', <String, Object?>{
+      'orden_id': ordenId,
+      'org_id': orgId,
+      'materiales_json': jsonEncode(materiales),
+      'sincronizado_en': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// El material de una orden, o `null` si nunca se trajo.
+  ///
+  /// La misma regla que el seguimiento: `null` es "no se sabe" y no "no hubo
+  /// material". Una pantalla vacia diria que en este trabajo no se uso nada.
+  Future<Map<String, dynamic>?> leerMaterialesDeOrden({
+    required String ordenId,
+    required String orgId,
+  }) async {
+    final db = await database;
+    final filas = await db.query(
+      'local_materiales_orden',
+      where: 'orden_id = ? AND org_id = ?',
+      whereArgs: [ordenId, orgId],
+      limit: 1,
+    );
+    if (filas.isEmpty) {
+      return null;
+    }
+    final Object? crudo = filas.first['materiales_json'];
+    if (crudo is! String || crudo.isEmpty) {
+      return null;
+    }
+    try {
+      final Object? d = jsonDecode(crudo);
+      if (d is! Map) {
+        return null;
+      }
+      return <String, dynamic>{
+        ...Map<String, dynamic>.from(d),
+        'sincronizado_en': filas.first['sincronizado_en'],
+      };
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Guarda el seguimiento de una orden tal como lo mando el servidor.

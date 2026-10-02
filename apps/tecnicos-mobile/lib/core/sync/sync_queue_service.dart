@@ -626,6 +626,23 @@ class SyncQueueService {
         }
       }
 
+      // Resolver un bloqueo va a OTRA ruta y con otro cuerpo, pero por la MISMA
+      // cola: es una cosa que el tecnico escribio en la calle y tiene que subir,
+      // igual que un avance. Duplicar la maquinaria de reintentos e idempotencia
+      // para un solo caso seria dos lugares donde arreglar el mismo bug.
+      //
+      // Y el orden ya esta resuelto: la cola respeta `created_at`, asi que una
+      // resolucion nunca sube antes del bloqueo que resuelve.
+      if (momento == 'resolver') {
+        await _subirResolucion(
+          id: id,
+          ordenId: ordenId,
+          orgId: orgId,
+          respuestas: respuestas,
+        );
+        continue;
+      }
+
       final Map<String, dynamic> cuerpo = <String, dynamic>{
         'momento': momento,
         'respuestas': respuestas,
@@ -721,6 +738,111 @@ class SyncQueueService {
         );
         return;
       }
+    }
+  }
+
+  /// Sube una resolucion de bloqueo.
+  ///
+  /// Los codigos se tratan distinto que en un reporte, porque significan otra
+  /// cosa:
+  ///
+  ///   409  ya no hay bloqueo abierto -- alguien lo resolvio primero, y eso NO es
+  ///        un error del tecnico: su intento ya no hace falta. Se marca como
+  ///        hecho, no como fallido
+  ///   422  falta decir que se hizo
+  ///   404  la orden ya no es suya
+  Future<void> _subirResolucion({
+    required String id,
+    required String ordenId,
+    required String orgId,
+    required Map<String, dynamic> respuestas,
+  }) async {
+    try {
+      final respuesta = await _apiClient.post(
+        ApiEndpoints.resolverBloqueo(ordenId),
+        data: <String, dynamic>{
+          'que_se_hizo': respuestas['que_se_hizo'] ?? '',
+          // Desde la aplicacion siempre lo resuelve el tecnico: es el unico que
+          // la usa. Si manana la usara otro rol, el backend ya acepta cual.
+          'resuelto_por_rol': respuestas['resuelto_por_rol'] ?? 'tecnico',
+        },
+        options: Options(headers: <String, dynamic>{'Idempotency-Key': id}),
+      );
+
+      if (respuesta.statusCode == 200) {
+        await _localDb.marcarSeguimientoSubido(id);
+        await descargarSeguimientoDeOrden(ordenId: ordenId, orgId: orgId);
+        return;
+      }
+      await _localDb.marcarSeguimientoConError(
+        id: id,
+        estadoFinal: 'pendiente',
+        mensaje: 'El servidor respondió ${respuesta.statusCode}.',
+      );
+    } on DioException catch (e) {
+      final int? status = e.response?.statusCode;
+
+      // Alguien lo resolvio antes. El bloqueo ya no esta: lo que el tecnico
+      // queria ya ocurrio, asi que su fila se cierra en vez de reintentar para
+      // siempre contra algo que no existe.
+      if (status == 409) {
+        await _localDb.marcarSeguimientoSubido(id);
+        await descargarSeguimientoDeOrden(ordenId: ordenId, orgId: orgId);
+        return;
+      }
+
+      if (status == 422) {
+        final Object? datos = e.response?.data;
+        await _localDb.marcarSeguimientoConError(
+          id: id,
+          estadoFinal: 'error_validacion',
+          mensaje: datos is Map
+              ? (datos['detalle']?.toString() ?? 'No se pudo resolver.')
+              : 'No se pudo resolver.',
+        );
+        return;
+      }
+
+      if (status == 404) {
+        await _localDb.marcarSeguimientoConError(
+          id: id,
+          estadoFinal: 'error_no_encontrada',
+          mensaje: 'Esta orden ya no está asignada a vos.',
+        );
+        return;
+      }
+
+      await _localDb.marcarSeguimientoConError(
+        id: id,
+        estadoFinal: 'pendiente',
+        mensaje: e.message,
+      );
+    }
+  }
+
+  /// Trae el material de UNA orden y lo guarda como espejo.
+  ///
+  /// Si falla, no toca nada: la misma regla que el resto de los espejos.
+  Future<bool> descargarMaterialesDeOrden({
+    required String ordenId,
+    required String orgId,
+  }) async {
+    try {
+      final respuesta = await _apiClient.get(
+        ApiEndpoints.materialesDeOrden(ordenId),
+      );
+      final datos = respuesta.data;
+      if (datos is! Map) {
+        return false;
+      }
+      await _localDb.guardarMaterialesDeOrden(
+        ordenId: ordenId,
+        orgId: orgId,
+        materiales: Map<String, dynamic>.from(datos),
+      );
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 

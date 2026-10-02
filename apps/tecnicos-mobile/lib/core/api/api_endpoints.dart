@@ -34,6 +34,21 @@ class ApiEndpoints {
   /// Los campos los decide `WorkTypeVersion`, no la aplicacion: por eso una
   /// empresa puede cambiar lo que se pide sin que haya que publicar una version
   /// nueva de la app.
+  /// Que material toco ESTA orden: comprometido, consumido, devuelto.
+  ///
+  /// Distinto del kit, que es lo que el tecnico lleva encima para toda la
+  /// jornada: con los mismos 150 m de drop hace cinco instalaciones. Esto es
+  /// lo que de verdad paso en este trabajo.
+  static String materialesDeOrden(String ordenId) =>
+      '$baseUrl/api/campo/trabajos/$ordenId/materiales/';
+
+  /// Destrabar un trabajo detenido.
+  ///
+  /// El estado al que vuelve lo guardo el bloqueo al abrirse: ni la app ni
+  /// quien resuelve lo eligen.
+  static String resolverBloqueo(String ordenId) =>
+      '$baseUrl/api/campo/trabajos/$ordenId/bloqueo/resolver/';
+
   static String seguimientoDeOrden(String ordenId) =>
       '$baseUrl/api/campo/trabajos/$ordenId/seguimiento/';
 

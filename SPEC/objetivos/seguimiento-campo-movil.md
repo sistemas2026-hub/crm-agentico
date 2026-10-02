@@ -141,11 +141,12 @@ dibuja:
 
 - [ ] la app renderiza **un tipo de evento que no conoce**;
 - [ ] la app renderiza **campos que no conoce**, declarados por el esquema;
-- [ ] una **clave extraña** en un campo no rompe la ejecución. Medido el
-      30/09/2026: `validar_esquema_plantilla` exige `id` y `tipo` y valida las
-      reglas contra lista blanca, pero **no rechaza claves desconocidas**, así que
-      un `{"id": "presion", "tipo": "decimal", "unidad": "psi"}` pasa, se dibuja
-      como decimal y `unidad` se ignora;
+- [ ] una **clave extraña** en un campo no rompe la ejecución. Medido: el
+      backend no rechaza claves desconocidas y la app **lee las de presentación**
+      (`unidad`, `ayuda`, `referencia`), así que
+      `{"id": "presion", "tipo": "decimal", "unidad": "psi"}` se dibuja **con su
+      unidad**. Lo que hay que probar es el caso contrario: una clave que nadie
+      usa —`color_del_borde`— tampoco rompe nada;
 - [ ] **navegar sin red no crea eventos**, y al volver la señal tampoco;
 - [ ] la lectura **no modifica datos**: ni una fila, ni una marca de contacto.
 
@@ -167,6 +168,40 @@ La barra contextual derivada de las transiciones, los permisos, la resolución d
 bloqueos y los materiales de esa orden (`trabajos/<id>/materiales/`, que existe
 desde el 29/09 y la app no usa).
 
+**Construida el 02/10/2026.** `flutter analyze` → `No issues found!`,
+`flutter test` → **697 pruebas en verde** (eran 621 al abrir la ficha); las 25
+nuevas viven en `test/resolucion_de_bloqueo_test.dart` y
+`test/materiales_de_la_orden_test.dart`, y las cuatro mutaciones que las
+atacan —frontera de `requiere_noc` invertida, `que_se_hizo` vacío aceptado,
+`null` tratado como «no se usó nada», cantidad cruda— se ponen en **rojo**.
+
+Dos decisiones de esta fase:
+
+**Quién resuelve un bloqueo desde el teléfono.** El backend deja que lo haga el
+técnico asignado. La frontera que puso la app es otra: **resuelve solo cuando el
+bloqueo NO requiere al NOC.** La pregunta que importa no es si *puede* sino si
+*sabe qué se hizo* —`que_se_hizo` es obligatorio del otro lado y existe para
+responder «¿por qué este trabajo tardó tres días?»—. Si coordinación gestionó un
+permiso municipal, el técnico escribiría «ya puedo entrar», que no es qué se
+hizo, y el campo quedaría inservible justo para su única pregunta. Cuando
+requiere NOC la pantalla no esconde el botón en silencio: dice que lo destraba el
+NOC o coordinación, porque alguien parado en la calle necesita saber qué espera.
+
+**La resolución viaja por la MISMA cola** que un avance, con otra ruta y otro
+cuerpo. Es algo que se escribió en la calle y tiene que subir: duplicar la
+maquinaria de reintentos e idempotencia para un solo caso serían dos lugares
+donde arreglar el mismo defecto. El orden ya estaba resuelto —la cola respeta
+`created_at`—, así que una resolución nunca sube antes del bloqueo que resuelve.
+Un **409** («ya no hay bloqueo abierto») cierra la fila en vez de reintentar:
+alguien lo resolvió primero, y lo que el técnico quería ya ocurrió.
+
+**Lo que NO tiene prueba automática, y hay que decirlo.** El tratamiento de
+códigos de `_subirResolucion` (409 / 422 / 404) no está cubierto:
+`SyncQueueService` construye su `ApiClient` como campo fijo y no se puede falsear
+sin refactorizarlo —la Fase 2 tampoco cubrió su camino de subida, por lo mismo—.
+Se verifica contra el backend de laboratorio, no en `flutter test`. Es
+exactamente el criterio 9 de la tabla de abajo, que **sigue abierto**.
+
 ## Criterios de aceptación
 
 Comando y salida, no prosa.
@@ -174,7 +209,7 @@ Comando y salida, no prosa.
 | # | Fase | Evidencia | Cómo se comprueba |
 |---|---|---|---|
 | 1 | todas | `flutter analyze` → `No issues found!` | salida pegada |
-| 2 | todas | `flutter test` verde, con las nuevas | eran 621 |
+| 2 | todas | `flutter test` verde, con las nuevas | eran 621 · **medido 697 el 02/10** |
 | 3 | 1 | Los cuatro formularios se dibujan con el widget existente, **sin tocarlo** | `git diff` sobre `campo_del_formulario.dart` vacío |
 | 4 | 1 | Un campo que el tipo de trabajo declara y la app no conoce **se dibuja igual** | prueba con un campo inventado en el esquema |
 | 5 | 2 | Un reporte en modo avión entra **una sola vez** al recuperar señal | prueba de la cola con la misma clave dos veces → un solo `EventoTrabajo` |
@@ -204,23 +239,32 @@ Comando y salida, no prosa.
   interpretan. Una IA que recomienda antes de que existan los datos recomienda
   sobre nada.
 
-## Deuda que este objetivo destapa y no resuelve
+## Una deuda que se anotó mal, y se corrige acá
 
-**Una clave no soportada en un esquema se pierde en silencio.** Hoy
-`{"id": "nivel", "tipo": "decimal", "unidad": "dBm"}` se dibuja bien y `unidad` se
-descarta sin que nadie avise. Es tolerante para producción y **mudo para quien
-configuró**.
+El 30/09 se escribió que una clave no soportada —`{"id": "nivel", "tipo":
+"decimal", "unidad": "dBm"}`— **se perdía en silencio**. Medido el 01/10 sobre
+`campo_del_formulario.dart`: **es falso.** `desdeEsquema` lee `campo['unidad']`
+directamente, igual que `ayuda` y `referencia`, así que la app la usa y la muestra.
 
-No se arregla en Flutter, y no se arregla durante la ejecución: **el técnico no
-tiene que enterarse de que alguien configuró mal un esquema**, y menos arriba de un
-poste. El lugar correcto es una advertencia **al publicar** un `WorkTypeVersion`:
+Y el diseño ya tenía pensado el criterio, escrito en ese archivo:
 
-    Campo "nivel_optico": la propiedad "unidad" no está soportada por el
-    renderizador actual.
+> «La referencia viaja FUERA de `reglas` a propósito: `reglas` es el vocabulario
+> cerrado que valida el backend, y esto no valida nada.»
 
-Advertencia, no bloqueo: un esquema con una clave de más funciona, y negarse a
-publicarlo sería peor que ignorarla. Queda anotado acá y **no entra en este
-objetivo**.
+O sea que la división está hecha y es la correcta:
+
+    reglas.*        lo que el BACKEND valida (vocabulario cerrado)
+    unidad, ayuda   lo que solo sirve para PRESENTAR (claves sueltas del campo)
+    referencia
+
+Que el validador no rechace claves desconocidas **no es un descuido: es lo que
+permite que la presentación evolucione sin tocar el validador.** La advertencia al
+publicar que se había propuesto resolvería un problema que no existe, y encima
+ensuciaría ese mecanismo.
+
+Lo que queda, y es mucho más chico: una clave con un typo —`unidadd`— sí se pierde
+sin aviso. Eso vale una advertencia al publicar algún día, pero es un error de
+tipeo, no una pérdida de información declarada.
 
 ## Bloqueos
 

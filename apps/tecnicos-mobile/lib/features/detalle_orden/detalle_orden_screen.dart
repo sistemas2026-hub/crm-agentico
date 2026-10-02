@@ -6,8 +6,6 @@ import '../../core/estado/ordenes_jornada.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../demo/field_mock_data.dart';
-import '../../demo/kit_mock_data.dart';
-import '../materiales/material_en_custodia.dart';
 import 'seguimiento_de_la_intervencion.dart';
 import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
@@ -23,6 +21,7 @@ import '../trabajo/estado_trabajo.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'acciones_orden.dart';
 import 'diagnostico_de_campo.dart';
+import 'materiales_de_esta_orden.dart';
 import 'pasos_orden.dart';
 
 /// La orden, abierta.
@@ -153,6 +152,11 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   bool _seguimientoActualizado = true;
   int _reportesSinSubir = 0;
 
+  // El material de esta orden. Otro espejo: `null` es "no se sabe" y no "no se
+  // uso nada".
+  Map<String, dynamic>? _materiales;
+  bool _cargandoMateriales = true;
+
   @override
   void initState() {
     super.initState();
@@ -166,6 +170,41 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       if (mounted) setState(() => _resumen = resumen);
     }, onError: (Object _) {});
     _traerSeguimiento();
+    _traerMateriales();
+  }
+
+  /// Trae el material de esta orden. Mismo criterio que el seguimiento: espejo
+  /// primero, red despues, y si falla no se toca lo que habia.
+  Future<void> _traerMateriales() async {
+    try {
+      final SecureStorageService almacen = SecureStorageService();
+      final String? orgId = await almacen.getOrgId();
+      if (orgId == null) {
+        if (mounted) setState(() => _cargandoMateriales = false);
+        return;
+      }
+      final LocalDatabase base = LocalDatabase();
+      final Map<String, dynamic>? local = await base.leerMaterialesDeOrden(
+        ordenId: widget.ordenId,
+        orgId: orgId,
+      );
+      final bool actualizo = await SyncQueueService()
+          .descargarMaterialesDeOrden(ordenId: widget.ordenId, orgId: orgId);
+      final Map<String, dynamic>? fresco = actualizo
+          ? await base.leerMaterialesDeOrden(
+              ordenId: widget.ordenId,
+              orgId: orgId,
+            )
+          : null;
+      if (!mounted) return;
+      setState(() {
+        _materiales = fresco ?? local;
+        _cargandoMateriales = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _cargandoMateriales = false);
+    }
   }
 
   /// Trae el seguimiento al abrir la orden.
@@ -497,6 +536,16 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                     cargando: _cargandoSeguimiento,
                     actualizado: _seguimientoActualizado,
                     pendientesDeSubir: _reportesSinSubir,
+                    // La resolucion viaja por la MISMA cola que los
+                    // reportes: es otra cosa que el tecnico escribio en la
+                    // calle y tiene que subir. El momento `resolver` le dice al
+                    // procesador a que ruta va.
+                    alResolverBloqueo: (String queSeHizo) {
+                      _reportar('resolver', <String, dynamic>{
+                        'que_se_hizo': queSeHizo,
+                        'resuelto_por_rol': 'tecnico',
+                      });
+                    },
                     alReportar:
                         (
                           String momento,
@@ -514,10 +563,15 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                           );
                         },
                   ),
-                  if (widget.mostrarDatosFuturos) ...<Widget>[
-                    const SizedBox(height: AppSpacing.md),
-                    _materialesAsociados(),
-                  ],
+                  // El material REAL de esta orden, del libro de movimientos.
+                  // Reemplaza a `_materialesAsociados`, que dibujaba el catalogo
+                  // de ejemplo detras de `mostrarDatosFuturos`: ahora hay dato
+                  // de verdad, y una maqueta al lado solo confunde.
+                  const SizedBox(height: AppSpacing.md),
+                  MaterialesDeEstaOrden(
+                    materiales: _materiales,
+                    cargando: _cargandoMateriales,
+                  ),
                 ],
               ),
             ),
@@ -979,88 +1033,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   }
 
   /// CAMPO-DATA-025 · Qué material tiene asignado este trabajo.
-  Widget _materialesAsociados() {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceContainerLowest,
-        borderRadius: AppRadius.brTarjeta,
-        boxShadow: AppTheme.sombraNivel1,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              const Icon(
-                Icons.inventory_2,
-                size: 16,
-                color: AppColors.secondary,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                'Materiales & Seriales',
-                style: AppTypography.etiqueta.copyWith(
-                  color: AppColors.onSurface,
-                ),
-              ),
-              const Spacer(),
-              Text('Kit Asignado', style: AppTypography.etiquetaChica),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          for (final MaterialEnCustodia material in KitMockData.items.take(
-            3,
-          )) ...<Widget>[
-            Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          material.nombre,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTypography.etiquetaChica.copyWith(
-                            color: AppColors.onSurface,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          material.serie == null
-                              ? material.detalle
-                              : 'SN: ${material.serie}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: material.serie == null
-                              ? AppTypography.etiquetaChica
-                              : AppTypography.datoChico.copyWith(
-                                  color: AppColors.onSurfaceVariant,
-                                ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Text(
-                    material.unidad == 'm'
-                        ? '~${material.usados} m'
-                        : '${material.usados} ud',
-                    style: AppTypography.dato.copyWith(
-                      color: AppColors.primary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 
   /// CAMPO-DATA-049 · El protocolo del tipo de trabajo.
   ///

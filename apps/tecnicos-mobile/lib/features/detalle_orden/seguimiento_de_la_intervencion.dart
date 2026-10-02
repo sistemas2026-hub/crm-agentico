@@ -33,6 +33,7 @@ class SeguimientoDeLaIntervencion extends StatefulWidget {
     required this.cargando,
     this.actualizado = true,
     this.alReportar,
+    this.alResolverBloqueo,
     this.pendientesDeSubir = 0,
   });
 
@@ -64,6 +65,13 @@ class SeguimientoDeLaIntervencion extends StatefulWidget {
   })?
   alReportar;
 
+  /// Qué hacer cuando el técnico dice que el bloqueo se levantó.
+  ///
+  /// `null` deja la sección sin esa salida. Quien la usa decide si corresponde
+  /// ofrecerla; esta sección además la esconde cuando el bloqueo requiere al
+  /// NOC, por lo que explica `_bloqueoAbierto`.
+  final void Function(String queSeHizo)? alResolverBloqueo;
+
   /// Cuántos reportes de esta orden esperan subir. Se muestra porque un reporte
   /// guardado y sin subir es un hecho que el técnico tiene que poder ver: si no,
   /// no sabe si el NOC se enteró.
@@ -78,6 +86,17 @@ class _SeguimientoDeLaIntervencionState
     extends State<SeguimientoDeLaIntervencion> {
   /// El momento cuya hoja está abierta, o `null` si no hay ninguna.
   String? _abierto;
+
+  // La salida del bloqueo.
+  bool _resolviendo = false;
+  String? _avisoResolver;
+  final TextEditingController _queSeHizo = TextEditingController();
+
+  @override
+  void dispose() {
+    _queSeHizo.dispose();
+    super.dispose();
+  }
 
   Map<String, dynamic>? get seguimiento => widget.seguimiento;
   bool get cargando => widget.cargando;
@@ -130,6 +149,7 @@ class _SeguimientoDeLaIntervencionState
           style: AppTypography.cuerpoChico,
         ),
       ],
+      ..._bloqueoAbierto(),
       ..._acciones(),
       const SizedBox(height: AppSpacing.sm),
       if (eventos.isEmpty)
@@ -140,6 +160,149 @@ class _SeguimientoDeLaIntervencionState
       else
         for (final dynamic crudo in eventos)
           if (crudo is Map) _evento(Map<String, dynamic>.from(crudo)),
+    ];
+  }
+
+  /// El bloqueo vivo, si hay, y la salida cuando le toca al técnico.
+  ///
+  /// QUIÉN PUEDE RESOLVER, Y POR QUÉ NO ES UNA CUESTIÓN DE PERMISOS
+  /// -------------------------------------------------------------
+  /// El backend deja que el técnico asignado resuelva: eso está medido. Pero la
+  /// pregunta que importa no es si **puede**, es si **sabe qué se hizo** — y
+  /// `que_se_hizo` es obligatorio del otro lado.
+  ///
+  /// Si el bloqueo requiere al NOC y coordinación gestionó un permiso municipal,
+  /// el técnico no sabe qué gestionaron: escribiría «ya puedo entrar», que no es
+  /// qué se hizo, y ese campo quedaría inservible para la pregunta que existe
+  /// para responder («¿por qué este trabajo tardó tres días?»).
+  ///
+  /// Si NO requiere NOC —esperando al cliente, falta un material que el técnico
+  /// fue a buscar— el que sabe es él.
+  ///
+  /// Así que la frontera la marca `requiere_noc`, que ya existe, en vez de
+  /// inventar un permiso nuevo.
+  List<Widget> _bloqueoAbierto() {
+    final Map<String, dynamic>? bloqueo = _mapa(
+      seguimiento!['bloqueo_abierto'],
+    );
+    if (bloqueo == null) {
+      return const <Widget>[];
+    }
+
+    final bool requiereNoc = bloqueo['requiere_noc'] == true;
+    final bool detuvo = bloqueo['detuvo_el_trabajo'] == true;
+    final int? minutos = bloqueo['minutos_detenido'] as int?;
+    final String necesita = (bloqueo['necesita'] ?? '').toString();
+    final String motivo = (bloqueo['motivo'] ?? '').toString();
+    final bool puedeResolver = !requiereNoc && widget.alResolverBloqueo != null;
+
+    return <Widget>[
+      const SizedBox(height: AppSpacing.sm),
+      Container(
+        padding: const EdgeInsets.all(AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceContainerLowest,
+          borderRadius: AppRadius.brTarjeta,
+          boxShadow: AppTheme.sombraNivel1,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              children: <Widget>[
+                DexterPastilla.critica(
+                  texto: detuvo ? 'Trabajo detenido' : 'Bloqueo reportado',
+                ),
+                if (requiereNoc) DexterPastilla.alerta(texto: 'Requiere NOC'),
+              ],
+            ),
+            if (motivo.isNotEmpty) ...<Widget>[
+              const SizedBox(height: AppSpacing.xs),
+              Text(motivo, style: AppTypography.cuerpo),
+            ],
+            if (necesita.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 2),
+              Text('Hace falta: $necesita', style: AppTypography.etiquetaChica),
+            ],
+            if (detuvo && minutos != null) ...<Widget>[
+              const SizedBox(height: 2),
+              Text(
+                'Detenido hace $minutos min',
+                style: AppTypography.etiquetaChica,
+              ),
+            ],
+            if (!detuvo) ...<Widget>[
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                'El estado del trabajo no cambió: el bloqueo quedó anotado y se '
+                'puede seguir.',
+                style: AppTypography.etiquetaChica,
+              ),
+            ],
+
+            // La salida. O la explicación de por qué no está acá.
+            const SizedBox(height: AppSpacing.xs),
+            if (puedeResolver)
+              DexterAccionRapida(
+                texto: _resolviendo ? 'Escribiendo…' : 'Ya se puede seguir',
+                icono: Icons.play_circle_outline,
+                alTocar: () => setState(() => _resolviendo = !_resolviendo),
+              )
+            else if (requiereNoc)
+              Text(
+                'Lo destraba quien hizo la gestión: el NOC o coordinación. '
+                'Cuando lo resuelvan, acá va a decir que podés seguir.',
+                style: AppTypography.etiquetaChica,
+              ),
+
+            if (_resolviendo && puedeResolver) ...<Widget>[
+              const SizedBox(height: AppSpacing.xs),
+              TextField(
+                controller: _queSeHizo,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Qué se hizo para poder seguir',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              if (_avisoResolver != null) ...<Widget>[
+                const SizedBox(height: 4),
+                Text(
+                  _avisoResolver!,
+                  style: AppTypography.cuerpoChico.copyWith(
+                    color: AppColors.error,
+                  ),
+                ),
+              ],
+              const SizedBox(height: AppSpacing.xs),
+              DexterAccionDominante(
+                texto: 'Destrabar el trabajo',
+                icono: Icons.lock_open,
+                alTocar: () {
+                  final String texto = _queSeHizo.text.trim();
+                  if (texto.isEmpty) {
+                    // El backend lo exige, y con razon: un bloqueo resuelto sin
+                    // decir que se hizo no explica nada despues.
+                    setState(
+                      () => _avisoResolver =
+                          'Decí qué se hizo para poder seguir.',
+                    );
+                    return;
+                  }
+                  widget.alResolverBloqueo!(texto);
+                  setState(() {
+                    _resolviendo = false;
+                    _avisoResolver = null;
+                    _queSeHizo.clear();
+                  });
+                },
+              ),
+            ],
+          ],
+        ),
+      ),
     ];
   }
 
