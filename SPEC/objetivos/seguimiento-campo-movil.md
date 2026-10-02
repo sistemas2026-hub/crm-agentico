@@ -258,6 +258,117 @@ código sería que la aplicación adivine gramática española sobre un campo li
 que cada empresa escribe a su manera — por §3.3 eso es un dato de la empresa, y
 se corrige en el catálogo, no acá.
 
+### Fase 4 · La foto que pertenece a un reporte (02/10/2026)
+
+Nace de una pregunta del usuario: *«seguimiento de intervención ¿no es necesario
+adjuntar imagen?»*. Sí: una foto es lo que convierte «la casa está cerrada» en
+algo que el NOC no tiene que creer por fe.
+
+**Lo que ya existía, medido antes de construir.** El subsistema de evidencia está
+completo desde antes —`EvidenciaTrabajo` con deduplicado por `sha256`, subida en
+tres pasos con URL firmada, cola offline en el teléfono con claves de
+idempotencia, GPS y las dos horas— y `formulario_de` **ya devolvía `evidencias`
+por momento**. El hueco estaba previsto; faltaba el vínculo y que alguien lo
+consumiera.
+
+**Decisión 9 · Una foto de reporte no es una evidencia del checklist.** Son dos
+preguntas distintas y por eso no comparten campo. El checklist pregunta «¿existe
+evidencia de `foto_ont`?» para decidir si el trabajo se puede cerrar; una foto de
+un BLOQUEO contesta otra cosa. Meter los reportes dentro de `requisito_id` haría
+que un bloqueo fotografiado diera por cumplido un requisito de cierre que nadie
+cumplió. Se agrega `EvidenciaTrabajo.evento` (anulable): vacío = checklist.
+
+**Decisión 10 · La foto se valida contra el SNAPSHOT del reporte.** El conjunto
+válido no sale del esquema vigente sino del que ese reporte congeló al
+escribirse —`datos["evidencias"]`—. Es la misma regla que ya rige los campos: una
+versión nueva del tipo de trabajo no puede volver inválida la foto que el técnico
+sacó siguiendo lo que la app le mostró ese día.
+
+**Decisión 11 · Dos restricciones, no una ampliada.** Agregar `evento` a la
+constraint original **habría apagado el deduplicado del checklist sin ruido**: en
+PostgreSQL `NULL` no es igual a `NULL`, así que dos filas con evento vacío, el
+mismo requisito y el mismo `sha256` habrían pasado como distintas. La original se
+conserva acotada con `condition=Q(evento__isnull=True)` y la evidencia de
+bitácora recibe la suya. Hay prueba directa contra la base para cada una, porque
+la prueba por la API pasaría igual **sin ninguna constraint** —la vista
+deduplica con un `select_for_update` previo—.
+
+**Decisión 12 · Una foto que falta NO retiene el reporte.** El texto es lo que
+destraba al NOC: tiene que llegar aunque la cámara falle, el teléfono no tenga
+espacio o la persona esté apurada. Se pide, se muestra cuántas van, se dice cuál
+falta —en la hoja y en la bitácora—, y el botón de guardar nunca se bloquea por
+esto. Misma regla del módulo: guardar primero, entregar después.
+
+**El orden offline, que es el punto fino.** La foto se saca **antes** de que el
+reporte suba, cuando el evento del servidor todavía no existe. La cadena:
+
+```
+foto → se encola con el id de un BORRADOR (la hoja abierta)
+guardar → se repunta al reporte encolado (una sola escritura)
+el reporte sube → el servidor devuelve el id del evento
+sellar → la foto recién ahora es visible para la sincronización
+```
+
+`getEvidenciasPendientes` **excluye a propósito** las fotos atadas a un reporte
+sin subir: intentarlas sería gastar reintentos contra un 400 seguro. Un borrador
+abandonado se tira con su archivo —una foto que no se puede ver ni subir es
+basura en el teléfono de alguien que trabaja en la calle—. Y la cola es la que ya
+existía: duplicar la maquinaria de firmas, reintentos y confirmación para un caso
+serían dos lugares donde arreglar el mismo defecto.
+
+**Qué se midió.**
+
+```
+backend  17 pruebas nuevas, contra PostgreSQL real (no SQLite)
+app      21 pruebas nuevas · flutter test → 719 en verde · analyze limpio
+```
+
+Las once mutaciones que las atacan se ponen en **rojo**: validar contra el
+esquema vigente, aceptar un evento de otra orden, colapsar la misma foto de dos
+reportes, dejar salir `storage_key` y el GPS, no congelar qué foto se pedía,
+subir la foto antes que su reporte, resellar lo ya sellado, descartar también las
+del checklist, retener el reporte hasta que haya foto, callar la foto que falta y
+dar por llegada una que todavía sube.
+
+**Un defecto propio que cazó la suite vieja.** La migración v18 hacía `ALTER
+TABLE cola_evidencias` sobre una base de la v6, donde esa tabla **no existe
+todavía**: actualizar la app le habría borrado la jornada a un técnico. Es
+exactamente la falla que la v13 ya había documentado en ese mismo archivo, y la
+cazó la misma prueba (`migracion_v7_test`). Resuelta con su misma guarda.
+
+**La corrida en el emulador, y el defecto que encontró.** Se publicó en el
+laboratorio una **versión nueva** del tipo de trabajo que declara
+`foto_del_obstaculo` en el bloqueo —la app nunca la vio— y la hoja la dibujó
+sola. Después, la cadena entera, en este orden:
+
+```
+POST /trabajos/<id>/seguimiento/        201   el reporte
+POST /trabajos/<id>/evidencias/         200   registro, con evento_id
+PUT  /evidencias/<id>/subir/            200
+POST /evidencias/<id>/confirmar/        200
+```
+
+Y en la base: la evidencia quedó atada al `bloqueo_campo`, en estado `recibido`,
+con **capturada 22:00:14** y **recibida 22:03:24** —tres minutos de distancia, la
+regla de los dos relojes funcionando— y sin fuga de `storage_key`.
+
+**El defecto: abrir la cámara destruye la pantalla que la abrió.** Al volver,
+Flutter la reconstruye con estado nuevo. Con un borrador sorteado en memoria, la
+foto quedaba **huérfana**: no subía —no tenía evento— y no se descartaba —nadie
+recordaba su id—, y la hoja decía «todavía no hay foto» con la foto en la cola.
+Medido con `sqlite3` sobre la base del teléfono. Arreglado derivando el borrador
+de la orden y el momento —reproducible tras cualquier reconstrucción— y leyendo
+la cuenta del disco en vez de un contador en memoria. Verificado en el aparato:
+tras la cámara, la hoja dice «1 foto tomada».
+
+Esto es lo que §6 llama *código construido no es código que corre*: las 21
+pruebas pasaban y el camino real estaba roto.
+
+**Lo que queda fuera, dicho:** la imagen no se muestra todavía en la bitácora —la
+URL de lectura es firmada y dura poco, así que pedirla para cada fila sería
+emitir enlaces que vencen con la pantalla abierta—; y el CRM/NOC todavía no
+dibuja estas fotos.
+
 ## Criterios de aceptación
 
 Comando y salida, no prosa.

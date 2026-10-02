@@ -34,6 +34,10 @@ class SeguimientoDeLaIntervencion extends StatefulWidget {
     this.actualizado = true,
     this.alReportar,
     this.alResolverBloqueo,
+    this.alTomarFoto,
+    this.fotosTomadas = const <String, int>{},
+    this.alAbrirHoja,
+    this.alDescartarBorrador,
     this.pendientesDeSubir = 0,
   });
 
@@ -71,6 +75,29 @@ class SeguimientoDeLaIntervencion extends StatefulWidget {
   /// ofrecerla; esta sección además la esconde cuando el bloqueo requiere al
   /// NOC, por lo que explica `_bloqueoAbierto`.
   final void Function(String queSeHizo)? alResolverBloqueo;
+
+  /// Qué hacer cuando el técnico pide tomar una foto para un reporte.
+  ///
+  /// Recibe el momento y el requisito. `null` deja los reportes en solo texto:
+  /// esta sección no abre cámaras ni conoce la cola.
+  final Future<void> Function(String momento, String requisitoId)? alTomarFoto;
+
+  /// Cuántas fotos lleva cada requisito del momento abierto.
+  final Map<String, int> fotosTomadas;
+
+  /// Se llama cuando una hoja se ABRE, con su momento.
+  ///
+  /// Quien la recibe aprovecha para contar, desde el disco, las fotos que ese
+  /// borrador ya tenía. Hace falta porque abrir la cámara puede destruir esta
+  /// pantalla: al volver, el conteo en memoria se perdió y la hoja diría que no
+  /// hay foto cuando sí la hay.
+  final void Function(String momento)? alAbrirHoja;
+
+  /// Se llama cuando una hoja se cierra SIN guardar, con su momento.
+  ///
+  /// Lo que haya quedado del borrador --fotos sacadas y no mandadas-- es de
+  /// quien lo recibe: esta sección no sabe que existe una cola.
+  final void Function(String momento)? alDescartarBorrador;
 
   /// Cuántos reportes de esta orden esperan subir. Se muestra porque un reporte
   /// guardado y sin subir es un hecho que el técnico tiene que poder ver: si no,
@@ -161,6 +188,93 @@ class _SeguimientoDeLaIntervencionState
         for (final dynamic crudo in eventos)
           if (crudo is Map) _evento(Map<String, dynamic>.from(crudo)),
     ];
+  }
+
+  /// Las fotos de un reporte, y la que se pedía y no está.
+  ///
+  /// POR QUE SE DIBUJAN LAS DOS LISTAS
+  /// --------------------------------
+  /// El backend manda `evidencias` --las que llegaron-- y `evidencias_declaradas`
+  /// --las que ese reporte pedía, congeladas en su snapshot--. Sin la segunda, un
+  /// bloqueo sin foto y un bloqueo al que nunca se le pidió una se leen igual, y
+  /// quien revisa no puede saber si falta algo o si nunca hizo falta.
+  ///
+  /// No se muestra la imagen todavía: la URL de lectura es firmada y dura poco,
+  /// así que pedirla para cada fila de una bitácora entera sería emitir enlaces
+  /// que vencen mientras la pantalla está abierta. Acá se dice qué hay; abrirla
+  /// es un paso aparte.
+  List<Widget> _fotosDelEvento(Map<String, dynamic> evento) {
+    final List<dynamic> tiene =
+        (evento['evidencias'] as List<dynamic>?) ?? const <dynamic>[];
+    final List<dynamic> pedidas =
+        (evento['evidencias_declaradas'] as List<dynamic>?) ?? const <dynamic>[];
+    if (tiene.isEmpty && pedidas.isEmpty) {
+      return const <Widget>[];
+    }
+
+    final Set<String> llegaron = <String>{
+      for (final dynamic f in tiene)
+        if (f is Map) (f['requisito_id'] ?? '').toString(),
+    };
+    final List<dynamic> faltan = <dynamic>[
+      for (final dynamic p in pedidas)
+        if (p is Map && !llegaron.contains((p['id'] ?? '').toString())) p,
+    ];
+
+    // El título lo declara el tipo de trabajo; el servidor manda el `id`. Sin
+    // este cruce la bitácora diría «foto_del_obstaculo», que es cómo se llama el
+    // campo y no cómo se le dice a una persona.
+    final Map<String, String> titulos = <String, String>{
+      for (final dynamic p in pedidas)
+        if (p is Map)
+          (p['id'] ?? '').toString(): (p['titulo'] ?? p['id'] ?? '').toString(),
+    };
+
+    return <Widget>[
+      const SizedBox(height: AppSpacing.xs),
+      for (final dynamic f in tiene)
+        if (f is Map) _unaFoto(Map<String, dynamic>.from(f), titulos),
+      for (final dynamic p in faltan)
+        if (p is Map)
+          Text(
+            'Falta la foto: ${(p['titulo'] ?? p['id'] ?? '').toString()}',
+            style: AppTypography.etiquetaChica,
+          ),
+    ];
+  }
+
+  Widget _unaFoto(Map<String, dynamic> foto, Map<String, String> titulos) {
+    // `disponible` lo decide el servidor: que exista la fila no es que el
+    // archivo haya llegado. Decir "foto" sobre algo que todavía está subiendo
+    // haría creer que el NOC ya puede verla.
+    final bool disponible = foto['disponible'] == true;
+    final String requisito = (foto['requisito_id'] ?? '').toString();
+    // Si el reporte no declaraba esa foto --pasa con un evento viejo, cuyo
+    // snapshot es el de entonces-- se muestra el id. Es feo y es honesto: el
+    // título de hoy no es el que se le mostró a quien la sacó.
+    final String titulo = titulos[requisito] ?? (requisito.isEmpty
+        ? 'Foto'
+        : requisito);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            disponible ? Icons.photo_outlined : Icons.cloud_upload_outlined,
+            size: 14,
+            color: AppColors.onSurfaceVariant,
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              disponible ? titulo : '$titulo · subiendo',
+              style: AppTypography.etiquetaChica,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// El bloqueo vivo, si hay, y la salida cuando le toca al técnico.
@@ -351,7 +465,22 @@ class _SeguimientoDeLaIntervencionState
           texto: opcion.$2,
           icono: _icono(momento),
           alTocar: () =>
-              setState(() => _abierto = _abierto == momento ? null : momento),
+              setState(() {
+                // Cerrar o cambiar de momento descarta lo del anterior: la foto
+                // se sacó para el reporte que se estaba escribiendo, no para el
+                // siguiente.
+                final String? previo = _abierto;
+                if (previo != null && previo != momento) {
+                  widget.alDescartarBorrador?.call(previo);
+                }
+                if (previo == momento) {
+                  widget.alDescartarBorrador?.call(momento);
+                  _abierto = null;
+                } else {
+                  _abierto = momento;
+                  widget.alAbrirHoja?.call(momento);
+                }
+              }),
         ),
       );
     }
@@ -389,6 +518,14 @@ class _SeguimientoDeLaIntervencionState
           momento: _abierto!,
           titulo: _tituloDelMomento(_abierto!),
           campos: _camposDe(formularios, _abierto!),
+          evidencias: _evidenciasDe(formularios, _abierto!),
+          alTomarFoto: widget.alTomarFoto == null
+              ? null
+              : (String requisitoId) async {
+                  await widget.alTomarFoto!(_abierto!, requisitoId);
+                  if (mounted) setState(() {});
+                },
+          fotosTomadas: widget.fotosTomadas,
           alGuardar:
               (
                 Map<String, dynamic> respuestas, {
@@ -415,12 +552,28 @@ class _SeguimientoDeLaIntervencionState
   List<Map<String, dynamic>> _camposDe(
     Map<String, dynamic> formularios,
     String momento,
+  ) => _listaDe(formularios, momento, 'campos');
+
+  /// Las fotos que el tipo de trabajo pide en ese momento.
+  ///
+  /// Sale del MISMO formulario que los campos y por el mismo camino: la app no
+  /// sabe qué foto pide esta empresa hasta preguntar, igual que no sabe qué
+  /// campos pide. Una lista vacía es lo normal.
+  List<Map<String, dynamic>> _evidenciasDe(
+    Map<String, dynamic> formularios,
+    String momento,
+  ) => _listaDe(formularios, momento, 'evidencias');
+
+  List<Map<String, dynamic>> _listaDe(
+    Map<String, dynamic> formularios,
+    String momento,
+    String clave,
   ) {
     final Map<String, dynamic>? form = _mapa(formularios[momento]);
-    final List<dynamic> campos =
-        (form?['campos'] as List<dynamic>?) ?? const <dynamic>[];
+    final List<dynamic> crudos =
+        (form?[clave] as List<dynamic>?) ?? const <dynamic>[];
     return <Map<String, dynamic>>[
-      for (final dynamic c in campos)
+      for (final dynamic c in crudos)
         if (c is Map) Map<String, dynamic>.from(c),
     ];
   }
@@ -540,6 +693,8 @@ class _SeguimientoDeLaIntervencionState
                 const SizedBox(height: AppSpacing.xs),
                 _dato(_humanizar(clave), _valorLegible(datos[clave])),
               ],
+
+            ..._fotosDelEvento(evento),
 
             // Las dos horas, cuando difieren. Es la decisión del objetivo hecha
             // visible: lo que gobierna el seguimiento es la llegada al

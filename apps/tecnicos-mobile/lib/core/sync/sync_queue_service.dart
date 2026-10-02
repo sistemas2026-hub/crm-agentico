@@ -669,6 +669,33 @@ class SyncQueueService {
 
         if (respuesta.statusCode == 201 || respuesta.statusCode == 200) {
           await _localDb.marcarSeguimientoSubido(id);
+
+          // LAS FOTOS DE ESTE REPORTE, RECIEN AHORA
+          // ---------------------------------------
+          // El evento acaba de existir en el servidor. Hasta este instante sus
+          // fotos estaban encoladas y DELIBERADAMENTE invisibles para la
+          // sincronizacion: registrarlas antes habria sido colgarlas de un id
+          // que no existia.
+          //
+          // Se sellan con el id que devolvio el servidor y se corre la cola de
+          // evidencias otra vez. Si esa segunda pasada falla --se corto la red
+          // entre una cosa y la otra-- no se pierde nada: la fila queda sellada
+          // y la proxima sincronizacion la toma como cualquier otra.
+          final Object? cuerpo = respuesta.data;
+          final String eventoId = cuerpo is Map
+              ? (cuerpo['id']?.toString() ?? '')
+              : '';
+          if (eventoId.isNotEmpty) {
+            final int sellados = await _localDb.sellarEvidenciasDelReporte(
+              reporteLocalId: id,
+              eventoId: eventoId,
+              orgId: orgId,
+              profileId: profileId,
+            );
+            if (sellados > 0) {
+              await _procesarEvidencias(orgId, profileId);
+            }
+          }
           // El espejo se actualiza para que la pantalla muestre el reporte ya
           // confirmado por el servidor, con su etiqueta y su hora de llegada.
           await descargarSeguimientoDeOrden(ordenId: ordenId, orgId: orgId);
@@ -1215,6 +1242,10 @@ class SyncQueueService {
             ApiEndpoints.evidenciasTrabajo(ordenId),
             data: {
               'requisito_id': requisitoId,
+              // De que reporte es. Solo viaja cuando la foto pertenece a uno:
+              // sin esta clave el servidor la trata como evidencia del
+              // checklist, que es lo correcto para las que no tienen reporte.
+              if (ev['evento_id'] != null) 'evento_id': ev['evento_id'],
               'nombre': filename.isNotEmpty ? filename : 'evidencia.jpg',
               'bytes': tamanoBytes,
               'mime_type': mimeType,

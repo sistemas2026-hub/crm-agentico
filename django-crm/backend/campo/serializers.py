@@ -313,6 +313,9 @@ class GuardarDatosSerializer(serializers.Serializer):
 
 class RegistroEvidenciaSerializer(serializers.Serializer):
     requisito_id = serializers.CharField(max_length=64)
+    #: A que reporte de la bitacora pertenece la foto. Vacio = evidencia del
+    #: checklist de la orden, que es como funciono hasta la Fase 4.
+    evento_id = serializers.UUIDField(required=False, allow_null=True)
     nombre = serializers.CharField(max_length=255)
     mime_type = serializers.CharField(max_length=128)
     bytes = serializers.IntegerField(min_value=0)

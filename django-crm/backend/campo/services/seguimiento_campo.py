@@ -281,6 +281,18 @@ def registrar(
         # EL SNAPSHOT. Sin esto, leer este evento dentro de tres años dependeria
         # del esquema vigente entonces.
         "definicion": definicion,
+        # QUE FOTO SE PEDIA EN ESTE REPORTE, congelado igual que los campos.
+        #
+        # No es decoracion: es lo que decide, mas tarde, si una foto que llega
+        # pertenece a este evento. Validarlo contra el esquema VIGENTE dejaria
+        # que una version nueva del tipo de trabajo volviera invalida una foto
+        # que el tecnico saco siguiendo lo que la app le mostro ese dia -- o, al
+        # reves, que aceptara una que entonces nadie le pidio.
+        #
+        # Y sirve para leer: quien abre la bitacora dentro de un año puede ver
+        # que aca se pedia una foto y que no esta, en vez de no saber que
+        # faltaba.
+        "evidencias": formulario["evidencias"],
         "schema_version": getattr(version, "schema_version", None),
         "version_del_tipo": getattr(version, "version", None),
         "schema_hash": getattr(version, "schema_hash", "") or "",
@@ -325,6 +337,46 @@ def _declaraciones(mapa, limpios, profile, ahora) -> dict:
     return salida
 
 
+#: Lo que de una evidencia sale hacia afuera. Lista blanca y no un `values()`:
+#: la fila lleva `storage_key` -- la ruta real del archivo en el bucket -- y
+#: `metadatos_captura`, que trae el GPS del telefono del tecnico. Ninguna de las
+#: dos tiene nada que hacer en una pantalla, y un dia alguien agrega un campo
+#: mas sin acordarse de este punto.
+CAMPOS_DE_EVIDENCIA = (
+    "id",
+    "requisito_id",
+    "nombre_original",
+    "mime_type",
+    "bytes",
+    "estado_archivo",
+)
+
+
+def _evidencias_de(evento) -> list:
+    """Las fotos de un reporte, con lo justo para mostrarlas y pedirlas.
+
+    NO devuelve una URL. La de lectura se emite aparte, firmada y por evidencia
+    (`evidencias/<id>/url/`), porque dura poco: meterla en la linea de tiempo la
+    volveria un enlace vencido en cuanto alguien deje la pantalla abierta.
+    """
+    salida = []
+    for ev in evento.evidencias.all().order_by("created_at"):
+        fila = {c: getattr(ev, c) for c in CAMPOS_DE_EVIDENCIA}
+        fila["id"] = str(fila["id"])
+        fila["capturada_en_cliente"] = (
+            ev.capturada_en_cliente.isoformat() if ev.capturada_en_cliente else None
+        )
+        fila["recibida_en_servidor"] = (
+            ev.recibida_en_servidor.isoformat() if ev.recibida_en_servidor else None
+        )
+        #: Que la foto este EN el servidor no es lo mismo que que exista una fila
+        #: diciendo que alguien la iba a subir. Quien dibuja necesita esa
+        #: diferencia para no mostrar un hueco roto.
+        fila["disponible"] = ev.estado_archivo in ("recibido", "verificado")
+        salida.append(fila)
+    return salida
+
+
 def linea_de_tiempo(orden) -> dict:
     """La intervencion entera, en orden, mezclando los cuatro nuevos y los nueve.
 
@@ -355,6 +407,12 @@ def linea_de_tiempo(orden) -> dict:
             # Se lee con el snapshot del evento, NO con el esquema vigente.
             fila["detalle"] = _leer_con_su_esquema(datos)
             fila["declaraciones"] = datos.get("declaraciones") or {}
+            # Las fotos de ESTE reporte, y las que se le pedian. Las dos listas,
+            # porque una foto que falta solo se ve comparandolas: sin la segunda,
+            # un bloqueo sin foto y un bloqueo al que nunca se le pidio una se
+            # leen igual.
+            fila["evidencias"] = _evidencias_de(e)
+            fila["evidencias_declaradas"] = datos.get("evidencias") or []
         elif e.tipo in CAMPOS_EXPUESTOS:
             # Hechos del sistema que si tienen algo que contar. Se exponen las
             # claves nombradas y NADA MAS: volcar el JSON entero dejaria salir lo

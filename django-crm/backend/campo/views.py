@@ -566,15 +566,50 @@ class EvidenciasTrabajoView(APIView):
         sha256 = serializer.validated_data["sha256"]
         capturada_en = serializer.validated_data.get("capturada_en_cliente")
         metadatos = serializer.validated_data.get("metadatos_captura", {})
+        evento_id = serializer.validated_data.get("evento_id")
 
-        # Validación dura: requisito_id DEBE existir en la versión inmutable de esta orden
-        esquema = orden.tipo_trabajo_version.esquema
-        requisitos_validos = {e["id"] for e in esquema.get("evidencias", [])}
+        # ---------------------------------------------------------------
+        # DE QUE ES ESTA FOTO, Y CONTRA QUE SE VALIDA
+        # ---------------------------------------------------------------
+        # Sin `evento_id` es lo de siempre: una evidencia del CHECKLIST, y el
+        # requisito tiene que estar en la version inmutable de la orden.
+        #
+        # Con `evento_id` es una foto de un REPORTE de la bitacora, y entonces el
+        # conjunto valido NO sale del esquema vigente sino del snapshot que ese
+        # reporte guardo cuando se escribio. Es la misma razon por la que el
+        # reporte guarda sus campos: una version nueva del tipo de trabajo no
+        # puede volver invalida la foto que el tecnico saco siguiendo lo que la
+        # app le mostro ese dia, ni aceptar una que entonces nadie le pidio.
+        evento = None
+        if evento_id:
+            evento = EventoTrabajo.objects.filter(
+                id=evento_id, org=orden.org, orden=orden
+            ).first()
+            # Se comprueba que sea DE ESTA ORDEN: con solo el id, una foto podria
+            # colgarse del reporte de otra empresa.
+            if evento is None:
+                return Response(
+                    {
+                        "error": "EVENTO_INVALIDO",
+                        "detalle": "Ese reporte no pertenece a esta orden.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            declaradas = (evento.datos or {}).get("evidencias") or []
+            requisitos_validos = {
+                e.get("id") for e in declaradas if isinstance(e, dict)
+            }
+            donde = "el reporte"
+        else:
+            esquema = orden.tipo_trabajo_version.esquema
+            requisitos_validos = {e["id"] for e in esquema.get("evidencias", [])}
+            donde = "la versión de esta orden"
+
         if requisito_id not in requisitos_validos:
             return Response(
                 {
                     "error": "REQUISITO_INVALIDO",
-                    "detalle": f"El requisito '{requisito_id}' no pertenece a la versión de esta orden. Válidos: {list(requisitos_validos)}",
+                    "detalle": f"El requisito '{requisito_id}' no pertenece a {donde}. Válidos: {sorted(requisitos_validos)}",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -599,9 +634,18 @@ class EvidenciasTrabajoView(APIView):
         # serializan aca en vez de competir por el UniqueConstraint.
         # ---------------------------------------------------------------
         with transaction.atomic():
+            # El reintento se busca EN SU AMBITO. Buscar siempre por orden
+            # haria que la foto de un bloqueo encontrara la de otro reporte con
+            # el mismo requisito y el mismo sha, y devolviera esa -- la segunda
+            # nunca se guardaria y el segundo bloqueo quedaria sin su foto.
+            ambito = (
+                {"evento": evento}
+                if evento is not None
+                else {"orden_trabajo": orden, "evento__isnull": True}
+            )
             evidencia = (
                 EvidenciaTrabajo.objects.select_for_update()
-                .filter(orden_trabajo=orden, requisito_id=requisito_id, sha256=sha256)
+                .filter(requisito_id=requisito_id, sha256=sha256, **ambito)
                 .first()
             )
 
@@ -670,6 +714,10 @@ class EvidenciasTrabajoView(APIView):
                         evidencia = EvidenciaTrabajo.objects.create(
                             org=orden.org,
                             orden_trabajo=orden,
+                            # La orden se guarda IGUAL cuando la foto es de un
+                            # reporte: es la misma orden, y sin ella una consulta
+                            # por trabajo dejaria estas fotos afuera.
+                            evento=evento,
                             requisito_id=requisito_id,
                             # La pone el SERVIDOR desde la orden. Si viniera del
                             # cliente, un movil podria declarar la vuelta que
@@ -689,7 +737,7 @@ class EvidenciasTrabajoView(APIView):
                     # relee y se devuelve la MISMA -- el UniqueConstraint hizo
                     # su trabajo, no hay nada roto que reportar.
                     evidencia = EvidenciaTrabajo.objects.get(
-                        orden_trabajo=orden, requisito_id=requisito_id, sha256=sha256
+                        requisito_id=requisito_id, sha256=sha256, **ambito
                     )
 
         # El descriptor se arma recien aca, con el id ya resuelto: la URL de

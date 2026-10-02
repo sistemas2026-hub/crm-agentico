@@ -1,9 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../core/estado/ordenes_jornada.dart';
+import '../../core/storage/evidencia_storage_service.dart';
 import '../../core/storage/local_database.dart';
+import '../../core/storage/ubicacion_de_captura.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../demo/field_mock_data.dart';
 import 'seguimiento_de_la_intervencion.dart';
@@ -152,6 +157,29 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   bool _seguimientoActualizado = true;
   int _reportesSinSubir = 0;
 
+  /// EL BORRADOR, Y POR QUE SE DERIVA EN VEZ DE SORTEARSE
+  /// ----------------------------------------------------
+  /// La foto se saca antes de guardar el reporte: en ese momento todavia no hay
+  /// fila de `cola_seguimiento` a la cual atarla. Nace con el id del borrador y
+  /// al guardar se repunta al reporte real.
+  ///
+  /// Ese id NO puede ser un UUID guardado en memoria. Abrir la camara en Android
+  /// puede destruir esta pantalla; al volver, Flutter la reconstruye con estado
+  /// nuevo y el UUID anterior se perdio. La foto quedaria huerfana para siempre:
+  /// no sube --no tiene evento-- y no se descarta --nadie recuerda su id--.
+  /// Medido en el emulador el 02/10/2026, con la foto en la cola y la hoja
+  /// diciendo «todavia no hay foto».
+  ///
+  /// Derivarlo de la orden y el momento lo hace reproducible: despues de
+  /// cualquier reconstruccion se vuelve a calcular igual, y la foto reaparece.
+  String _borradorDe(String momento) => 'borrador-${widget.ordenId}-$momento';
+
+  /// Cuantas fotos lleva cada requisito de la hoja abierta. Sale del disco, no
+  /// de un contador: ver arriba.
+  Map<String, int> _fotosDelBorrador = <String, int>{};
+
+  final ImagePicker _camara = ImagePicker();
+
   // El material de esta orden. Otro espejo: `null` es "no se sabe" y no "no se
   // uso nada".
   Map<String, dynamic>? _materiales;
@@ -262,6 +290,111 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     await _traerSeguimiento();
   }
 
+  /// Saca una foto para el reporte que se esta escribiendo.
+  ///
+  /// Reusa el camino que la pantalla de ejecucion usa desde antes: persistir el
+  /// archivo en almacenamiento durable, calcular su sha256 y encolarlo. Lo unico
+  /// propio es el `reporteLocalId`: el borrador al que pertenece.
+  ///
+  /// La hora de captura es la del obturador, no la de encolar, y la ubicacion se
+  /// pide DESPUES de que haya foto -- pedirsela al sistema para una camara que la
+  /// persona cancela es gastarle bateria por nada.
+  Future<void> _tomarFotoDelReporte(String momento, String requisitoId) async {
+    try {
+      final SecureStorageService almacen = SecureStorageService();
+      final String? orgId = await almacen.getOrgId();
+      final String? profileId = await almacen.getProfileId();
+      if (orgId == null || profileId == null) {
+        return;
+      }
+
+      final XFile? foto = await _camara.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+        maxWidth: 1920,
+      );
+      if (foto == null) {
+        return;
+      }
+
+      final DateTime capturadaEn = DateTime.now();
+      final Map<String, dynamic> metadatos = await UbicacionDeCaptura.tomar();
+
+      final String evidenciaId = const Uuid().v4();
+      final File persistido =
+          await EvidenciaStorageService.persistirArchivoCaptura(
+            File(foto.path),
+            nombreOriginal: foto.name,
+            orgId: orgId,
+            profileId: profileId,
+            ordenId: widget.ordenId,
+            evidenciaId: evidenciaId,
+          );
+
+      await LocalDatabase().encolarEvidencia(
+        id: evidenciaId,
+        orgId: orgId,
+        profileId: profileId,
+        ordenId: widget.ordenId,
+        requisitoId: requisitoId,
+        archivoPath: persistido.path,
+        sha256: await SyncQueueService.calcularSha256(persistido),
+        tamanoBytes: await persistido.length(),
+        mimeType: 'image/jpeg',
+        capturadaEn: capturadaEn,
+        metadatosCaptura: metadatos,
+        reporteLocalId: _borradorDe(momento),
+      );
+
+      await _contarFotos(momento);
+    } catch (_) {
+      // Que la camara falle no puede tumbar la pantalla: el reporte se tiene que
+      // poder guardar igual, que es toda la decision de esta fase.
+    }
+  }
+
+  /// Relee del disco cuantas fotos lleva la hoja de ese momento.
+  Future<void> _contarFotos(String momento) async {
+    try {
+      final SecureStorageService almacen = SecureStorageService();
+      final String? orgId = await almacen.getOrgId();
+      final String? profileId = await almacen.getProfileId();
+      if (orgId == null || profileId == null) return;
+      final Map<String, int> cuenta = await LocalDatabase()
+          .fotosPorRequisitoDeBorrador(
+            borradorId: _borradorDe(momento),
+            orgId: orgId,
+            profileId: profileId,
+          );
+      if (!mounted) return;
+      setState(() => _fotosDelBorrador = cuenta);
+    } catch (_) {
+      // Sin cuenta, la hoja dice que no hay fotos. Es lo mismo que decia antes
+      // de esta fase y no impide guardar.
+    }
+  }
+
+  /// Tira las fotos de un borrador que se cerro sin guardar.
+  Future<void> _descartarBorrador(String momento) async {
+    if (mounted) {
+      setState(() => _fotosDelBorrador = <String, int>{});
+    }
+    try {
+      final SecureStorageService almacen = SecureStorageService();
+      final String? orgId = await almacen.getOrgId();
+      final String? profileId = await almacen.getProfileId();
+      if (orgId == null || profileId == null) return;
+      await LocalDatabase().descartarEvidenciasDeBorrador(
+        borradorId: _borradorDe(momento),
+        orgId: orgId,
+        profileId: profileId,
+      );
+    } catch (_) {
+      // Sin consecuencia visible: lo peor que pasa es que quede una fila que
+      // nadie mira.
+    }
+  }
+
   Future<void> _encolarPorDefecto(
     String ordenId,
     String momento,
@@ -276,7 +409,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       return;
     }
 
-    await LocalDatabase().encolarSeguimiento(
+    final String reporteId = await LocalDatabase().encolarSeguimiento(
       ordenId: ordenId,
       orgId: orgId,
       profileId: profileId,
@@ -285,6 +418,22 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       requiereNoc: requiereNoc,
       detener: detener,
     );
+
+    // LAS FOTOS DEL BORRADOR PASAN A SER DE ESTE REPORTE
+    // --------------------------------------------------
+    // Antes de esta linea las fotos estaban atadas a un id que solo existe en
+    // esta pantalla; despues, al reporte que acaba de encolarse. Es lo que
+    // permite que la sincronizacion las encuentre cuando el servidor devuelva el
+    // id del evento. El borrador se renueva para la hoja siguiente.
+    await LocalDatabase().reasignarEvidenciasDeBorrador(
+      borradorId: _borradorDe(momento),
+      reporteLocalId: reporteId,
+      orgId: orgId,
+      profileId: profileId,
+    );
+    if (mounted) {
+      setState(() => _fotosDelBorrador = <String, int>{});
+    }
 
     // Se intenta ahora. Si no hay señal, la cola lo reintenta sola: esto no
     // espera ni bloquea la pantalla.
@@ -536,6 +685,10 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                     cargando: _cargandoSeguimiento,
                     actualizado: _seguimientoActualizado,
                     pendientesDeSubir: _reportesSinSubir,
+                    alTomarFoto: _tomarFotoDelReporte,
+                    fotosTomadas: _fotosDelBorrador,
+                    alAbrirHoja: _contarFotos,
+                    alDescartarBorrador: _descartarBorrador,
                     // La resolucion viaja por la MISMA cola que los
                     // reportes: es otra cosa que el tecnico escribio en la
                     // calle y tiene que subir. El momento `resolver` le dice al

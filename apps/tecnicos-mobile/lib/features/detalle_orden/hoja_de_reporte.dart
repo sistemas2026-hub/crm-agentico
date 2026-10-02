@@ -33,6 +33,9 @@ class HojaDeReporte extends StatefulWidget {
     required this.titulo,
     required this.campos,
     required this.alGuardar,
+    this.evidencias = const <Map<String, dynamic>>[],
+    this.alTomarFoto,
+    this.fotosTomadas = const <String, int>{},
     this.erroresDelServidor = const <String, String>{},
     this.guardando = false,
   });
@@ -54,6 +57,23 @@ class HojaDeReporte extends StatefulWidget {
     bool detener,
   })
   alGuardar;
+
+  /// Las fotos que ESTE momento pide, declaradas por el tipo de trabajo igual
+  /// que los campos. Vacía es lo normal: la mayoría de los reportes son texto.
+  final List<Map<String, dynamic>> evidencias;
+
+  /// Qué hacer cuando el técnico toca «Tomar foto».
+  ///
+  /// La hoja no abre la cámara ni sabe que existe: recibe el id del requisito y
+  /// avisa. Quien la usa decide con qué se captura, y así esta hoja se sigue
+  /// pudiendo probar sin un dispositivo.
+  ///
+  /// `null` deja el reporte en solo texto, que es lo que corresponde cuando
+  /// nadie puede recibir la foto.
+  final Future<void> Function(String requisitoId)? alTomarFoto;
+
+  /// Cuántas fotos lleva cada requisito. Lo cuenta quien captura.
+  final Map<String, int> fotosTomadas;
 
   /// Lo que el servidor rechazó, por campo. Se muestra donde corresponde en vez
   /// de un texto suelto arriba.
@@ -157,6 +177,8 @@ class _HojaDeReporteState extends State<HojaDeReporte> {
             ),
           ),
 
+        ..._bloqueDeFotos(),
+
         if (widget.momento == 'bloqueo') ...<Widget>[
           const SizedBox(height: AppSpacing.xs),
           _casilla(
@@ -190,6 +212,73 @@ class _HojaDeReporteState extends State<HojaDeReporte> {
           style: AppTypography.etiquetaChica,
         ),
       ],
+    );
+  }
+
+  /// Lo que este momento pide fotografiar.
+  ///
+  /// POR QUE UNA FOTO QUE FALTA NO RETIENE EL REPORTE
+  /// -----------------------------------------------
+  /// El texto es lo que destraba al NOC: «la casa está cerrada» tiene que
+  /// llegar aunque la cámara falle, el teléfono no tenga espacio o la persona
+  /// esté apurada. Si la foto fuera condición para guardar, un problema del
+  /// aparato dejaría al NOC sin saber que el trabajo está detenido.
+  ///
+  /// Así que se pide, se muestra cuántas van, y se avisa cuando falta una — pero
+  /// el botón de guardar nunca se bloquea por esto. Es la misma regla que ya
+  /// rige el módulo: guardar primero, entregar después.
+  List<Widget> _bloqueDeFotos() {
+    if (widget.evidencias.isEmpty) {
+      return const <Widget>[];
+    }
+
+    return <Widget>[
+      const SizedBox(height: AppSpacing.sm),
+      Text('Fotos de este reporte', style: AppTypography.etiqueta),
+      for (final Map<String, dynamic> e in widget.evidencias)
+        _filaDeFoto(
+          id: (e['id'] ?? '').toString(),
+          titulo: (e['titulo'] ?? e['id'] ?? 'Foto').toString(),
+        ),
+      if (widget.alTomarFoto == null)
+        Text(
+          'En esta pantalla no se pueden tomar fotos; el reporte se guarda '
+          'igual.',
+          style: AppTypography.etiquetaChica,
+        ),
+    ];
+  }
+
+  Widget _filaDeFoto({required String id, required String titulo}) {
+    final int cuantas = widget.fotosTomadas[id] ?? 0;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(titulo, style: AppTypography.cuerpoChico),
+          const SizedBox(height: 2),
+          if (cuantas == 0)
+            Text(
+              'Todavía no hay foto. Se puede guardar igual.',
+              style: AppTypography.etiquetaChica,
+            )
+          else
+            Text(
+              cuantas == 1 ? '1 foto tomada' : '$cuantas fotos tomadas',
+              style: AppTypography.etiquetaChica,
+            ),
+          if (widget.alTomarFoto != null) ...<Widget>[
+            const SizedBox(height: 4),
+            DexterAccionRapida(
+              texto: cuantas == 0 ? 'Tomar foto' : 'Tomar otra',
+              icono: Icons.photo_camera_outlined,
+              alTocar: () => widget.alTomarFoto!(id),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

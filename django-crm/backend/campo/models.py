@@ -551,6 +551,28 @@ class EvidenciaTrabajo(BaseModel):
         max_length=64,
         help_text="Identificador del requisito en la versión de plantilla (ej. foto_ont)",
     )
+    # A QUE PERTENECE LA FOTO, Y POR QUE SON DOS COSAS DISTINTAS
+    # ---------------------------------------------------------
+    # Vacio: la foto satisface un REQUISITO DEL CHECKLIST de la orden. Es la
+    # unica clase que existia hasta la Fase 4, y el checklist pregunta por ella
+    # ("¿existe evidencia de 'foto_ont'?") para decidir si el trabajo se puede
+    # cerrar.
+    #
+    # Con valor: la foto pertenece a UN REPORTE de la bitacora -- la casa
+    # cerrada del BLOQUEO, la roseta del AVANCE. No satisface ningun requisito
+    # de cierre y no debe contarse como tal: es lo que hace creible una frase.
+    #
+    # Son dos preguntas distintas y por eso no comparten campo. Meter los
+    # reportes dentro de `requisito_id` haria que un bloqueo fotografiado diera
+    # por cumplido un requisito del cierre que nadie cumplio.
+    evento = models.ForeignKey(
+        "campo.EventoTrabajo",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="evidencias",
+        help_text="El reporte de la bitácora al que pertenece. Vacío = evidencia del checklist.",
+    )
     # En que presentacion del trabajo se tomo esta evidencia. La pone el
     # servidor desde 'orden.vuelta' -- nunca el cliente, que podria declarar
     # cualquier numero y dar por corregido lo que no corrigio.
@@ -584,10 +606,27 @@ class EvidenciaTrabajo(BaseModel):
         db_table = "campo_evidencia_trabajo"
         ordering = ["created_at"]
         constraints = [
+            # DOS RESTRICCIONES, NO UNA AMPLIADA
+            # ----------------------------------
+            # Agregar `evento` a la constraint original habria ROTO el deduplicado
+            # del checklist: en PostgreSQL NULL no es igual a NULL, asi que dos
+            # filas con `evento` vacio, el mismo requisito y el mismo sha256
+            # pasarian como distintas. La garantia que existia desde el principio
+            # -- la misma foto del mismo requisito entra una sola vez -- se habria
+            # apagado sin que ninguna prueba lo dijera.
+            #
+            # Por eso la original se conserva tal cual, acotada a su caso, y la
+            # evidencia de bitacora recibe la suya.
             models.UniqueConstraint(
                 fields=["orden_trabajo", "requisito_id", "sha256"],
+                condition=models.Q(evento__isnull=True),
                 name="unique_evidencia_requisito_sha",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["evento", "requisito_id", "sha256"],
+                condition=models.Q(evento__isnull=False),
+                name="unique_evidencia_evento_sha",
+            ),
         ]
 
     def __str__(self) -> str:

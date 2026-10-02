@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
@@ -111,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 17,
+      version: 18,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -155,6 +156,33 @@ class LocalDatabase {
     // v17: el material de cada orden, para verlo sin señal.
     if (oldVersion < 17) {
       await _crearTablaDeMaterialesDeOrden(db);
+    }
+
+    // v18: la foto que pertenece a un reporte de la bitacora.
+    //
+    // Columnas nuevas sobre la cola que ya existia, no una cola aparte: es el
+    // mismo hecho --un archivo que tiene que subir-- y duplicar la maquinaria de
+    // reintentos, firmas y confirmacion para un caso serian dos lugares donde
+    // arreglar el mismo defecto.
+    if (oldVersion < 18) {
+      // La lista VACIA significa que la tabla no existe todavia, no que no tenga
+      // columnas -- una base de la v6 no la tiene. Sin esta distincion el ALTER
+      // muere al abrir, que es el camino por el que actualizar la aplicacion le
+      // borra la jornada a un tecnico. Ya paso una vez en la v13 y lo cazo
+      // `migracion_v7_test`; volvio a cazarlo aca. Cuando la tabla se cree mas
+      // adelante nace con las dos columnas: estan en el CREATE TABLE.
+      final info = await db.rawQuery('PRAGMA table_info(cola_evidencias);');
+      final columnas = info.map((f) => f['name'] as String).toSet();
+      if (info.isNotEmpty && !columnas.contains('reporte_local_id')) {
+        await db.execute(
+          'ALTER TABLE cola_evidencias ADD COLUMN reporte_local_id TEXT;',
+        );
+      }
+      if (info.isNotEmpty && !columnas.contains('evento_id')) {
+        await db.execute(
+          'ALTER TABLE cola_evidencias ADD COLUMN evento_id TEXT;',
+        );
+      }
     }
 
     // v9: materiales. Aditiva y sin tocar nada de lo anterior -- un telefono
@@ -758,6 +786,20 @@ class LocalDatabase {
         confirmacion_idempotency_key TEXT,
         capturada_en INTEGER,
         metadatos_captura_json TEXT,
+        -- A QUE REPORTE PERTENECE, Y POR QUE SON DOS COLUMNAS
+        -- --------------------------------------------------
+        -- `reporte_local_id` es la fila de `cola_seguimiento` que la trajo: lo
+        -- unico que se sabe cuando se aprieta el obturador, porque el reporte
+        -- todavia no subio y el evento del servidor NO EXISTE.
+        --
+        -- `evento_id` lo escribe la sincronizacion cuando ese reporte sube y el
+        -- servidor devuelve su id. Hasta entonces la foto espera: subirla antes
+        -- seria colgarla de un evento inexistente.
+        --
+        -- Las dos vacias = evidencia del checklist, que es como funciono hasta
+        -- la Fase 4 y sigue subiendo sin esperar a nadie.
+        reporte_local_id TEXT,
+        evento_id TEXT,
         created_at INTEGER NOT NULL
       )
     ''');
@@ -1283,6 +1325,7 @@ class LocalDatabase {
     String? confirmacionIdempotencyKey,
     DateTime? capturadaEn,
     Map<String, dynamic>? metadatosCaptura,
+    String? reporteLocalId,
   }) async {
     final db = await database;
     final regKey = registroIdempotencyKey ?? const Uuid().v4();
@@ -1310,6 +1353,7 @@ class LocalDatabase {
       'metadatos_captura_json': metadatosCaptura == null
           ? null
           : jsonEncode(metadatosCaptura),
+      'reporte_local_id': reporteLocalId,
       'created_at': DateTime.now().millisecondsSinceEpoch,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
     _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_evidencias');
@@ -1422,10 +1466,171 @@ class LocalDatabase {
     final db = await database;
     return await db.query(
       'cola_evidencias',
-      where: 'org_id = ? AND profile_id = ? AND subida_estado != ?',
+      // La ultima condicion es la de la Fase 4: una foto atada a un reporte que
+      // todavia no subio NO se intenta. Su evento no existe en el servidor, asi
+      // que el registro fallaria con 400 y la fila se gastaria reintentos contra
+      // algo que va a existir en unos segundos.
+      where:
+          'org_id = ? AND profile_id = ? AND subida_estado != ? '
+          'AND (reporte_local_id IS NULL OR evento_id IS NOT NULL)',
       whereArgs: [orgId, profileId, 'confirmada'],
       orderBy: 'created_at ASC',
     );
+  }
+
+  /// Cuántas fotos lleva cada requisito de un borrador, leídas del disco.
+  ///
+  /// POR QUE ESTO NO PUEDE SER UN CONTADOR EN MEMORIA
+  /// -----------------------------------------------
+  /// Abrir la cámara en Android puede destruir la pantalla que la abrió: al
+  /// volver, Flutter la reconstruye y cualquier `setState` anterior se perdió.
+  /// Medido en el emulador el 02/10/2026 — la foto estaba encolada y la hoja
+  /// decía «todavía no hay foto».
+  ///
+  /// Si el contador viviera en memoria, el técnico sacaría la foto de nuevo; y
+  /// si además el borrador fuera un id al azar, la primera quedaría huérfana:
+  /// nunca subiría —no tiene evento— y nunca se descartaría —nadie recuerda su
+  /// id—. Por eso el borrador se deriva de la orden y el momento, y la cuenta
+  /// sale de acá.
+  Future<Map<String, int>> fotosPorRequisitoDeBorrador({
+    required String borradorId,
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final filas = await db.rawQuery(
+      'SELECT requisito_id, COUNT(*) AS n FROM cola_evidencias '
+      'WHERE reporte_local_id = ? AND org_id = ? AND profile_id = ? '
+      "AND subida_estado != 'confirmada' "
+      'GROUP BY requisito_id',
+      [borradorId, orgId, profileId],
+    );
+    return <String, int>{
+      for (final fila in filas)
+        (fila['requisito_id'] ?? '').toString(): (fila['n'] as int?) ?? 0,
+    };
+  }
+
+  /// Pasa las fotos de un borrador al reporte que acaba de encolarse.
+  ///
+  /// POR QUE HAY UN BORRADOR Y NO SE USA EL ID DEL REPORTE DIRECTO
+  /// ------------------------------------------------------------
+  /// La foto se saca ANTES de guardar: cuando el técnico aprieta el obturador,
+  /// la fila de `cola_seguimiento` todavía no existe. Encolarla recién al
+  /// guardar sería tenerla sólo en memoria mientras tanto, y una app que muere
+  /// con la pantalla abierta se llevaría una foto que ya se tomó en la calle.
+  ///
+  /// Así que nace con el id del borrador y se repunta acá, en una sola
+  /// escritura. El id del reporte sigue siendo el que arma `encolarSeguimiento`
+  /// —legible en un volcado y clave de idempotencia—, sin tocarlo.
+  Future<void> reasignarEvidenciasDeBorrador({
+    required String borradorId,
+    required String reporteLocalId,
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final n = await db.update(
+      'cola_evidencias',
+      <String, Object?>{'reporte_local_id': reporteLocalId},
+      where: 'reporte_local_id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: [borradorId, orgId, profileId],
+    );
+    if (n > 0) {
+      _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_evidencias');
+    }
+  }
+
+  /// Tira las fotos de un borrador que nunca se guardó.
+  ///
+  /// Sin esto quedarían para siempre: `getEvidenciasPendientes` las excluye --no
+  /// tienen evento-- así que no subirían nunca ni nadie las vería. Un archivo
+  /// que no se puede ver y no se puede subir es basura que ocupa el teléfono de
+  /// alguien que trabaja en la calle.
+  ///
+  /// Borra la fila y el archivo. Si el archivo ya no está, no es un error.
+  Future<int> descartarEvidenciasDeBorrador({
+    required String borradorId,
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final filas = await db.query(
+      'cola_evidencias',
+      columns: ['archivo_path'],
+      where: 'reporte_local_id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: [borradorId, orgId, profileId],
+    );
+    for (final fila in filas) {
+      final Object? ruta = fila['archivo_path'];
+      if (ruta is String && ruta.isNotEmpty) {
+        try {
+          final f = File(ruta);
+          if (await f.exists()) {
+            await f.delete();
+          }
+        } catch (_) {
+          // Que no se pueda borrar el archivo no justifica dejar la fila: lo
+          // que importa es que no quede una subida fantasma.
+        }
+      }
+    }
+    final n = await db.delete(
+      'cola_evidencias',
+      where: 'reporte_local_id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: [borradorId, orgId, profileId],
+    );
+    if (n > 0) {
+      _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_evidencias');
+    }
+    return n;
+  }
+
+  /// Sella las fotos de un reporte con el id que devolvió el servidor.
+  ///
+  /// Hasta que esto corre, esas fotos no son visibles para la sincronización:
+  /// `getEvidenciasPendientes` las deja fuera a propósito. Devuelve cuántas
+  /// quedaron listas, que es lo que le dice a quien llama si vale la pena
+  /// volver a correr la cola.
+  Future<int> sellarEvidenciasDelReporte({
+    required String reporteLocalId,
+    required String eventoId,
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final n = await db.update(
+      'cola_evidencias',
+      <String, Object?>{'evento_id': eventoId},
+      where:
+          'reporte_local_id = ? AND org_id = ? AND profile_id = ? '
+          'AND evento_id IS NULL',
+      whereArgs: [reporteLocalId, orgId, profileId],
+    );
+    if (n > 0) {
+      _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_evidencias');
+    }
+    return n;
+  }
+
+  /// Cuántas fotos de ESTE reporte siguen esperando a su evento.
+  ///
+  /// Sirve para decírselo al técnico: una foto sacada y no subida es un hecho
+  /// que tiene que poder ver.
+  Future<int> contarEvidenciasDelReporte({
+    required String reporteLocalId,
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final filas = await db.rawQuery(
+      'SELECT COUNT(*) AS n FROM cola_evidencias '
+      'WHERE reporte_local_id = ? AND org_id = ? AND profile_id = ? '
+      "AND subida_estado != 'confirmada'",
+      [reporteLocalId, orgId, profileId],
+    );
+    final Object? n = filas.isEmpty ? null : filas.first['n'];
+    return n is int ? n : 0;
   }
 
   /// La identidad es obligatoria aunque el `id` ya sea único.
