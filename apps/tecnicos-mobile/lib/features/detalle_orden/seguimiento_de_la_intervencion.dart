@@ -38,6 +38,8 @@ class SeguimientoDeLaIntervencion extends StatefulWidget {
     this.fotosTomadas = const <String, int>{},
     this.alAbrirHoja,
     this.alDescartarBorrador,
+    this.mostrarHistoria = true,
+    this.mostrarBloqueoAbierto = true,
     this.pendientesDeSubir = 0,
   });
 
@@ -98,6 +100,31 @@ class SeguimientoDeLaIntervencion extends StatefulWidget {
   /// Lo que haya quedado del borrador --fotos sacadas y no mandadas-- es de
   /// quien lo recibe: esta sección no sabe que existe una cola.
   final void Function(String momento)? alDescartarBorrador;
+
+  /// Si se dibuja la HISTORIA (la línea de tiempo).
+  ///
+  /// EL REPARTO ENTRE LAS DOS PANTALLAS (02/10/2026)
+  /// ----------------------------------------------
+  /// Esta sección hace dos cosas que ocurren en momentos distintos del trabajo,
+  /// y hasta hoy las hacía juntas en la ficha:
+  ///
+  ///   LEER la historia    — «¿qué pasó en este trabajo?». Se consulta antes de
+  ///                         entrar y cuando algo se traba. Vive en la FICHA.
+  ///   ESCRIBIR un reporte — «se me cayó un poste». Ocurre con las manos en la
+  ///                         caja, o sea en EJECUCIÓN.
+  ///
+  /// Tenerlas juntas obligaba al técnico a salir de la ejecución, volver atrás y
+  /// bajar para reportar un bloqueo. Ahora cada pantalla monta esta misma
+  /// sección con su mitad: una sola implementación, dos papeles.
+  final bool mostrarHistoria;
+
+  /// Si se dibuja el bloqueo abierto y su salida.
+  ///
+  /// Va en la FICHA y no en ejecución, y no es una preferencia: con el trabajo
+  /// detenido **no hay «Ejecutar el trabajo»** —lo decide la máquina de estados,
+  /// y está medido— así que si destrabar viviera allá, un trabajo bloqueado
+  /// sería un callejón sin salida. La ficha es la única pantalla alcanzable.
+  final bool mostrarBloqueoAbierto;
 
   /// Cuántos reportes de esta orden esperan subir. Se muestra porque un reporte
   /// guardado y sin subir es un hecho que el técnico tiene que poder ver: si no,
@@ -178,15 +205,17 @@ class _SeguimientoDeLaIntervencionState
       ],
       ..._bloqueoAbierto(),
       ..._acciones(),
-      const SizedBox(height: AppSpacing.sm),
-      if (eventos.isEmpty)
-        Text(
-          'Todavía no hay reportes de campo en esta orden.',
-          style: AppTypography.cuerpoChico,
-        )
-      else
-        for (final dynamic crudo in eventos)
-          if (crudo is Map) _evento(Map<String, dynamic>.from(crudo)),
+      if (widget.mostrarHistoria) ...<Widget>[
+        const SizedBox(height: AppSpacing.sm),
+        if (eventos.isEmpty)
+          Text(
+            'Todavía no hay reportes de campo en esta orden.',
+            style: AppTypography.cuerpoChico,
+          )
+        else
+          for (final dynamic crudo in eventos)
+            if (crudo is Map) _evento(Map<String, dynamic>.from(crudo)),
+      ],
     ];
   }
 
@@ -296,6 +325,11 @@ class _SeguimientoDeLaIntervencionState
   /// Así que la frontera la marca `requiere_noc`, que ya existe, en vez de
   /// inventar un permiso nuevo.
   List<Widget> _bloqueoAbierto() {
+    // En EJECUCIÓN no va: el bloqueo abierto y su salida viven en la ficha,
+    // que es la única pantalla alcanzable con el trabajo detenido.
+    if (!widget.mostrarBloqueoAbierto) {
+      return const <Widget>[];
+    }
     final Map<String, dynamic>? bloqueo = _mapa(
       seguimiento!['bloqueo_abierto'],
     );

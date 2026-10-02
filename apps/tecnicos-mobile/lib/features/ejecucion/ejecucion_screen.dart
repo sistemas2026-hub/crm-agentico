@@ -1,13 +1,17 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
+
 import '../../demo/field_mock_data.dart';
 import '../../core/storage/evidencia_storage_service.dart';
 import '../../core/storage/local_database.dart';
+import '../../core/storage/secure_storage_service.dart';
 import '../../core/storage/ubicacion_de_captura.dart';
 import '../detalle_orden/pasos_orden.dart';
+import '../detalle_orden/seguimiento_de_la_intervencion.dart';
 import '../trabajo/estado_trabajo.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'campo_del_formulario.dart';
@@ -60,7 +64,8 @@ class EjecucionScreen extends StatefulWidget {
 }
 
 class _EjecucionScreenState extends State<EjecucionScreen> {
-  late final FuenteDeEjecucion _fuente = widget.fuente ?? FuenteLocalDeEjecucion();
+  late final FuenteDeEjecucion _fuente =
+      widget.fuente ?? FuenteLocalDeEjecucion();
 
   /// Las hojas modales —consumo de material, firma— hablan con la base por su
   /// cuenta. No pasan por la fuente porque sólo existen cuando alguien toca un
@@ -79,6 +84,24 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// un numero aparte se desincronizaria en cuanto algo se reintente.
   List<Map<String, dynamic>> _materialesUsados = <Map<String, dynamic>>[];
   bool _isLoading = true;
+
+  // ------------------------------------------------------------------
+  //  EL SEGUIMIENTO, QUE DESDE EL 02/10/2026 SE ESCRIBE ACA
+  // ------------------------------------------------------------------
+  //  Los botones de reportar vivian en la ficha. El tecnico estaba en esta
+  //  pantalla con las manos en la caja, se le caia un poste, y tenia que salir,
+  //  volver atras y bajar para reportarlo.
+  //
+  //  Lo que NO se mueve: la linea de tiempo --se consulta, no se escribe-- y el
+  //  bloqueo abierto con su salida. Con el trabajo detenido no hay «Ejecutar el
+  //  trabajo», asi que si destrabar viviera aca seria un callejon sin salida.
+  Map<String, dynamic>? _seguimiento;
+  bool _cargandoSeguimiento = true;
+  int _reportesSinSubir = 0;
+
+  /// Cuantas fotos lleva cada requisito de la hoja abierta. Sale del disco, no
+  /// de un contador: abrir la camara puede destruir esta pantalla.
+  Map<String, int> _fotosDelBorrador = <String, int>{};
 
   /// La carga terminó y no había nada que mostrar.
   bool _noSePudoCargar = false;
@@ -101,6 +124,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   void initState() {
     super.initState();
     _loadOrdenData();
+    _traerSeguimiento();
   }
 
   @override
@@ -154,10 +178,13 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     //
     // El id sale del modelo normalizado, no de leer el JSON a mano: era la
     // quinta interpretacion del mismo esquema y la unica que quedaba.
-    for (final CampoDelFormulario campo
-        in CampoDelFormulario.normalizar(_campos, _valoresFormulario)) {
-      _controllers[campo.id] =
-          TextEditingController(text: campo.valor?.toString() ?? '');
+    for (final CampoDelFormulario campo in CampoDelFormulario.normalizar(
+      _campos,
+      _valoresFormulario,
+    )) {
+      _controllers[campo.id] = TextEditingController(
+        text: campo.valor?.toString() ?? '',
+      );
     }
 
     if (mounted) {
@@ -216,14 +243,15 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       // evidencia, de quien es y de que orden.
       final evId = const Uuid().v4();
       // Persistir inmediatamente en almacenamiento seguro y durable privado
-      final persistentFile = await EvidenciaStorageService.persistirArchivoCaptura(
-        tempFile,
-        nombreOriginal: foto.name,
-        orgId: _orgId!,
-        profileId: _profileId!,
-        ordenId: widget.ordenId,
-        evidenciaId: evId,
-      );
+      final persistentFile =
+          await EvidenciaStorageService.persistirArchivoCaptura(
+            tempFile,
+            nombreOriginal: foto.name,
+            orgId: _orgId!,
+            profileId: _profileId!,
+            ordenId: widget.ordenId,
+            evidenciaId: evId,
+          );
       final sha = await SyncQueueService.calcularSha256(persistentFile);
       final size = await persistentFile.length();
       final registroKey = const Uuid().v4();
@@ -259,9 +287,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       if (mounted) setState(() {});
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al capturar foto: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error al capturar foto: $e')));
       }
     }
   }
@@ -317,7 +345,11 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
-          icon: const Icon(Icons.check_circle, color: AppTheme.successGreen, size: 48),
+          icon: const Icon(
+            Icons.check_circle,
+            color: AppTheme.successGreen,
+            size: 48,
+          ),
           title: const Text('¡Trabajo Finalizado con Éxito!'),
           content: const Text(
             'La orden ha quedado guardada de forma segura en este dispositivo. Si no hay conexión, se enviará al servidor automáticamente al reconectar.',
@@ -386,6 +418,285 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// lo que se hizo, con que se hizo y como quedo. Sacarlo a otra pantalla
   /// convertiria "anotar dos conectores" en un viaje de ida y vuelta que nadie
   /// hace con las manos en la caja terminal.
+
+  // ==================================================================
+  //  EL SEGUIMIENTO: reportar inicio, avance, bloqueo y cierre
+  // ==================================================================
+  //
+  //  Estos metodos venian de la ficha, donde funcionaban y estaban verificados
+  //  contra el backend real. Lo unico que cambia es DONDE viven: el reporte se
+  //  escribe con las manos en la caja, no volviendo a la pantalla anterior.
+  //
+  //  Esta pantalla ya tenia `_orgId`, `_profileId` y la camara, asi que la
+  //  mudanza no trajo plomeria nueva.
+
+  /// EL BORRADOR, Y POR QUE SE DERIVA EN VEZ DE SORTEARSE
+  /// ----------------------------------------------------
+  /// La foto se saca antes de guardar el reporte: en ese momento todavia no hay
+  /// fila de `cola_seguimiento` a la cual atarla. Nace con el id del borrador y
+  /// al guardar se repunta al reporte real.
+  ///
+  /// Ese id NO puede ser un UUID guardado en memoria. Abrir la camara en Android
+  /// puede destruir esta pantalla; al volver, Flutter la reconstruye con estado
+  /// nuevo y el UUID anterior se perdio. La foto quedaria huerfana para siempre.
+  /// Medido en el emulador el 02/10/2026.
+  String _borradorDe(String momento) => 'borrador-${widget.ordenId}-$momento';
+
+  /// Trae el seguimiento al abrir la orden.
+  ///
+  /// Se pide ACA y no en la sincronizacion general porque un tecnico puede tener
+  /// veinte ordenes asignadas y mira una: traer las veinte gastaria datos y
+  /// bateria para dibujar diecinueve historias que nadie va a abrir.
+  Future<void> _traerSeguimiento() async {
+    try {
+      final Map<String, dynamic>? datos = await _seguimientoDelTelefono();
+      if (!mounted) return;
+      final int sinSubir = await _contarSinSubir();
+      if (!mounted) return;
+      setState(() {
+        _seguimiento = datos;
+        _cargandoSeguimiento = false;
+        _reportesSinSubir = sinSubir;
+      });
+    } catch (_) {
+      // Que falle no puede dejar la pantalla cargando para siempre: se deja de
+      // esperar y la seccion dice lo que sabe.
+      if (!mounted) return;
+      setState(() {
+        _cargandoSeguimiento = false;
+      });
+    }
+  }
+
+  /// El seguimiento, para saber QUE momentos ofrece este tipo de trabajo.
+  ///
+  /// Esta pantalla no dibuja la historia --eso es de la ficha-- pero necesita
+  /// los `formularios`: son los que dicen que campos y que fotos pide cada
+  /// momento. Sin eso no habria botones que mostrar.
+  ///
+  /// Espejo primero, red despues: el mismo orden que en la ficha y por el mismo
+  /// motivo. Si se pidiera la red primero, un tecnico sin señal esperaria el
+  /// timeout completo mirando una pantalla sin botones, teniendo el dato
+  /// guardado en el telefono.
+  Future<Map<String, dynamic>?> _seguimientoDelTelefono() async {
+    final String? orgId = _orgId ?? await SecureStorageService().getOrgId();
+    if (orgId == null) return null;
+
+    final LocalDatabase base = LocalDatabase();
+    final Map<String, dynamic>? local = await base.leerSeguimiento(
+      ordenId: widget.ordenId,
+      orgId: orgId,
+    );
+    final bool actualizo = await SyncQueueService().descargarSeguimientoDeOrden(
+      ordenId: widget.ordenId,
+      orgId: orgId,
+    );
+    if (!actualizo) {
+      return local;
+    }
+    return await base.leerSeguimiento(ordenId: widget.ordenId, orgId: orgId) ??
+        local;
+  }
+
+  /// Guarda un reporte y lo manda a subir.
+  ///
+  /// El orden es el que importa en la calle: PRIMERO se guarda en el telefono y
+  /// despues se intenta subir. Al reves, un reporte escrito sin señal se perderia
+  /// en el error de red -- y el tecnico ya habia hecho el trabajo de escribirlo.
+  Future<void> _reportar(
+    String momento,
+    Map<String, dynamic> respuestas, {
+    bool requiereNoc = false,
+    bool detener = true,
+  }) async {
+    await _encolarPorDefecto(
+      widget.ordenId,
+      momento,
+      respuestas,
+      requiereNoc: requiereNoc,
+      detener: detener,
+    );
+    // Se vuelve a leer: si subio, el espejo ya trae el evento confirmado por el
+    // servidor; si no, al menos se actualiza cuantos esperan.
+    await _traerSeguimiento();
+  }
+
+  /// Saca una foto para el reporte que se esta escribiendo.
+  ///
+  /// Reusa el camino que la pantalla de ejecucion usa desde antes: persistir el
+  /// archivo en almacenamiento durable, calcular su sha256 y encolarlo. Lo unico
+  /// propio es el `reporteLocalId`: el borrador al que pertenece.
+  ///
+  /// La hora de captura es la del obturador, no la de encolar, y la ubicacion se
+  /// pide DESPUES de que haya foto -- pedirsela al sistema para una camara que la
+  /// persona cancela es gastarle bateria por nada.
+  Future<void> _tomarFotoDelReporte(String momento, String requisitoId) async {
+    try {
+      final String? orgId = _orgId;
+      final String? profileId = _profileId;
+      if (orgId == null || profileId == null) {
+        return;
+      }
+
+      final XFile? foto = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+        maxWidth: 1920,
+      );
+      if (foto == null) {
+        return;
+      }
+
+      final DateTime capturadaEn = DateTime.now();
+      final Map<String, dynamic> metadatos = await UbicacionDeCaptura.tomar();
+
+      final String evidenciaId = const Uuid().v4();
+      final File persistido =
+          await EvidenciaStorageService.persistirArchivoCaptura(
+            File(foto.path),
+            nombreOriginal: foto.name,
+            orgId: orgId,
+            profileId: profileId,
+            ordenId: widget.ordenId,
+            evidenciaId: evidenciaId,
+          );
+
+      await LocalDatabase().encolarEvidencia(
+        id: evidenciaId,
+        orgId: orgId,
+        profileId: profileId,
+        ordenId: widget.ordenId,
+        requisitoId: requisitoId,
+        archivoPath: persistido.path,
+        sha256: await SyncQueueService.calcularSha256(persistido),
+        tamanoBytes: await persistido.length(),
+        mimeType: 'image/jpeg',
+        capturadaEn: capturadaEn,
+        metadatosCaptura: metadatos,
+        reporteLocalId: _borradorDe(momento),
+      );
+
+      await _contarFotos(momento);
+    } catch (_) {
+      // Que la camara falle no puede tumbar la pantalla: el reporte se tiene que
+      // poder guardar igual, que es toda la decision de esta fase.
+    }
+  }
+
+  /// Relee del disco cuantas fotos lleva la hoja de ese momento.
+  Future<void> _contarFotos(String momento) async {
+    try {
+      final String? orgId = _orgId;
+      final String? profileId = _profileId;
+      if (orgId == null || profileId == null) return;
+      final Map<String, int> cuenta = await LocalDatabase()
+          .fotosPorRequisitoDeBorrador(
+            borradorId: _borradorDe(momento),
+            orgId: orgId,
+            profileId: profileId,
+          );
+      if (!mounted) return;
+      setState(() => _fotosDelBorrador = cuenta);
+    } catch (_) {
+      // Sin cuenta, la hoja dice que no hay fotos. Es lo mismo que decia antes
+      // de esta fase y no impide guardar.
+    }
+  }
+
+  /// Tira las fotos de un borrador que se cerro sin guardar.
+  Future<void> _descartarBorrador(String momento) async {
+    if (mounted) {
+      setState(() => _fotosDelBorrador = <String, int>{});
+    }
+    try {
+      final String? orgId = _orgId;
+      final String? profileId = _profileId;
+      if (orgId == null || profileId == null) return;
+      await LocalDatabase().descartarEvidenciasDeBorrador(
+        borradorId: _borradorDe(momento),
+        orgId: orgId,
+        profileId: profileId,
+      );
+    } catch (_) {
+      // Sin consecuencia visible: lo peor que pasa es que quede una fila que
+      // nadie mira.
+    }
+  }
+
+  Future<void> _encolarPorDefecto(
+    String ordenId,
+    String momento,
+    Map<String, dynamic> respuestas, {
+    bool requiereNoc = false,
+    bool detener = true,
+  }) async {
+    final String? orgId = _orgId;
+    final String? profileId = _profileId;
+    if (orgId == null || profileId == null) {
+      return;
+    }
+
+    final String reporteId = await LocalDatabase().encolarSeguimiento(
+      ordenId: ordenId,
+      orgId: orgId,
+      profileId: profileId,
+      momento: momento,
+      respuestas: respuestas,
+      requiereNoc: requiereNoc,
+      detener: detener,
+    );
+
+    // LAS FOTOS DEL BORRADOR PASAN A SER DE ESTE REPORTE
+    // --------------------------------------------------
+    // Antes de esta linea las fotos estaban atadas a un id que solo existe en
+    // esta pantalla; despues, al reporte que acaba de encolarse. Es lo que
+    // permite que la sincronizacion las encuentre cuando el servidor devuelva el
+    // id del evento. El borrador se renueva para la hoja siguiente.
+    await LocalDatabase().reasignarEvidenciasDeBorrador(
+      borradorId: _borradorDe(momento),
+      reporteLocalId: reporteId,
+      orgId: orgId,
+      profileId: profileId,
+    );
+    if (mounted) {
+      setState(() => _fotosDelBorrador = <String, int>{});
+    }
+
+    // Se intenta ahora. Si no hay señal, la cola lo reintenta sola: esto no
+    // espera ni bloquea la pantalla.
+    await SyncQueueService().procesarCola();
+  }
+
+  /// El camino real: primero el espejo local --que funciona sin señal-- y
+  /// despues un intento de actualizarlo.
+  ///
+  /// El orden importa. Si se pidiera la red primero, un tecnico sin señal
+  /// esperaria el timeout completo mirando una pantalla vacia, teniendo la
+  /// historia guardada en el telefono.
+  /// Cuantos reportes de ESTA orden esperan subir.
+  ///
+  /// Se cuenta para poder decirselo al tecnico: un reporte guardado y sin subir
+  /// es un hecho que tiene que poder ver, porque si no, no sabe si el NOC se
+  /// entero. No es un error ni un aviso: es el estado de su trabajo.
+  Future<int> _contarSinSubir() async {
+    try {
+      final String? orgId = _orgId;
+      final String? profileId = _profileId;
+      if (orgId == null || profileId == null) {
+        return 0;
+      }
+      // Con `await` y no devolviendo el Future: sin esperarlo, el `catch` de
+      // abajo no lo atrapa y un fallo de la base rompe la pantalla en vez de
+      // contar cero.
+      return await LocalDatabase().contarSeguimientosPendientes(
+        orgId: orgId,
+        profileId: profileId,
+      );
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Widget _bloqueDeMateriales() {
     return Container(
       width: double.infinity,
@@ -466,16 +777,19 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   bool get _hayFirma {
     final requisito = _requisitoDeFirma;
     if (requisito == null) return false;
-    return _evidenciasCapturadas
-        .any((e) => e['requisito_id'] == requisito['id']);
+    return _evidenciasCapturadas.any(
+      (e) => e['requisito_id'] == requisito['id'],
+    );
   }
 
   bool get _firmaSinSubir {
     final requisito = _requisitoDeFirma;
     if (requisito == null) return false;
-    return _evidenciasCapturadas.any((e) =>
-        e['requisito_id'] == requisito['id'] &&
-        (e['subida_estado'] ?? '') != 'confirmada');
+    return _evidenciasCapturadas.any(
+      (e) =>
+          e['requisito_id'] == requisito['id'] &&
+          (e['subida_estado'] ?? '') != 'confirmada',
+    );
   }
 
   /// Los campos del formulario, interpretados una sola vez.
@@ -505,22 +819,22 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// Lo que impide cerrar por el lado de los datos: obligatorios sin
   /// responder, y tambien valores que no sirven.
   List<String> get _camposObligatoriosSinLlenar => <String>[
-        for (final CampoDelFormulario campo in _camposNormalizados)
-          if (campo.bloqueaCierre) campo.titulo,
-      ];
+    for (final CampoDelFormulario campo in _camposNormalizados)
+      if (campo.bloqueaCierre) campo.titulo,
+  ];
 
   CierreDeOrden get _cierre => CierreDeOrden.evaluar(
-        camposObligatoriosSinLlenar: _camposObligatoriosSinLlenar,
-        requisitosDeFoto: <dynamic>[
-          for (final dynamic r in _evidenciasRequisitos)
-            if (!(r is Map && (r['tipo'] ?? '').toString() == 'firma')) r,
-        ],
-        fotosCapturadas: _evidenciasCapturadas,
-        materialesRegistrados: _materialesUsados,
-        exigeFirma: _exigeFirma,
-        hayFirma: _hayFirma,
-        firmaSinSubir: _firmaSinSubir,
-      );
+    camposObligatoriosSinLlenar: _camposObligatoriosSinLlenar,
+    requisitosDeFoto: <dynamic>[
+      for (final dynamic r in _evidenciasRequisitos)
+        if (!(r is Map && (r['tipo'] ?? '').toString() == 'firma')) r,
+    ],
+    fotosCapturadas: _evidenciasCapturadas,
+    materialesRegistrados: _materialesUsados,
+    exigeFirma: _exigeFirma,
+    hayFirma: _hayFirma,
+    firmaSinSubir: _firmaSinSubir,
+  );
 
   Future<void> _abrirFirma() async {
     final requisito = _requisitoDeFirma;
@@ -536,7 +850,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       materialesInstalados: <String>[
         for (final m in _materialesUsados)
           '${m['material_nombre'] ?? m['material_codigo']} x${m['cantidad']}'
-          '${(m['serie'] as String?)?.isNotEmpty == true ? ' · serie ${m['serie']}' : ''}',
+              '${(m['serie'] as String?)?.isNotEmpty == true ? ' · serie ${m['serie']}' : ''}',
       ],
       baseLocal: _baseParaHojas,
     );
@@ -564,8 +878,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// leerlo entero cada vez, y esto se mira parado en una vereda.
   Widget _checklistDeCierre() {
     final cierre = _cierre;
-    final int bloquean =
-        cierre.requisitos.where((RequisitoDeCierre r) => r.bloquea).length;
+    final int bloquean = cierre.requisitos
+        .where((RequisitoDeCierre r) => r.bloquea)
+        .length;
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 16),
@@ -575,7 +890,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         insignia: bloquean == 0
             ? const DexterPastilla.enRegla(texto: 'Listo para cerrar')
             : DexterPastilla.alerta(
-                texto: bloquean == 1 ? 'Falta 1' : 'Faltan $bloquean'),
+                texto: bloquean == 1 ? 'Falta 1' : 'Faltan $bloquean',
+              ),
         separacion: AppSpacing.sm,
         children: <Widget>[
           for (final requisito in cierre.requisitos)
@@ -584,8 +900,11 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Icon(_iconoDe(requisito.estado),
-                      size: 18, color: _colorDe(requisito.estado)),
+                  Icon(
+                    _iconoDe(requisito.estado),
+                    size: 18,
+                    color: _colorDe(requisito.estado),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -633,20 +952,20 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   }
 
   IconData _iconoDe(EstadoDeRequisito estado) => switch (estado) {
-        EstadoDeRequisito.completo => Icons.check_circle,
-        EstadoDeRequisito.pendiente => Icons.radio_button_unchecked,
-        EstadoDeRequisito.opcional => Icons.remove_circle_outline,
-        EstadoDeRequisito.sinSubir => Icons.schedule,
-        EstadoDeRequisito.conConflicto => Icons.error_outline,
-      };
+    EstadoDeRequisito.completo => Icons.check_circle,
+    EstadoDeRequisito.pendiente => Icons.radio_button_unchecked,
+    EstadoDeRequisito.opcional => Icons.remove_circle_outline,
+    EstadoDeRequisito.sinSubir => Icons.schedule,
+    EstadoDeRequisito.conConflicto => Icons.error_outline,
+  };
 
   Color _colorDe(EstadoDeRequisito estado) => switch (estado) {
-        EstadoDeRequisito.completo => AppColors.exito,
-        EstadoDeRequisito.pendiente => AppColors.error,
-        EstadoDeRequisito.opcional => AppColors.onSurfaceVariant,
-        EstadoDeRequisito.sinSubir => AppColors.onSurfaceVariant,
-        EstadoDeRequisito.conConflicto => AppColors.error,
-      };
+    EstadoDeRequisito.completo => AppColors.exito,
+    EstadoDeRequisito.pendiente => AppColors.error,
+    EstadoDeRequisito.opcional => AppColors.onSurfaceVariant,
+    EstadoDeRequisito.sinSubir => AppColors.onSurfaceVariant,
+    EstadoDeRequisito.conConflicto => AppColors.error,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -660,8 +979,11 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                const Icon(Icons.cloud_off,
-                    size: 40, color: AppColors.onSurfaceVariant),
+                const Icon(
+                  Icons.cloud_off,
+                  size: 40,
+                  color: AppColors.onSurfaceVariant,
+                ),
                 const SizedBox(height: AppSpacing.md),
                 Text(
                   'No pudimos abrir este trabajo',
@@ -705,71 +1027,108 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
 
     final numero = _orden?['numero'] ?? '---';
 
-    final LecturaDePasos pasoActual =
-        LecturaDePasos.de(EstadoTrabajo.desde(_orden?['estado']?.toString()));
+    final LecturaDePasos pasoActual = LecturaDePasos.de(
+      EstadoTrabajo.desde(_orden?['estado']?.toString()),
+    );
 
     return Scaffold(
       backgroundColor: AppColors.surfaceDim,
       body: ContenidoCentrado(
         child: Column(
-        children: [
-          // El encabezado de paso del diseño, en lugar de la barra de
-          // Material. El titulo sigue siendo "OT #N" y no "Ejecución de
-          // orden" como en la maqueta: a 390 px ese texto se cortaba en
-          // "Ejecución OT #48..." y se perdia el numero, que es lo unico que
-          // identifica el trabajo. El paso, que la maqueta escribe debajo del
-          // titulo, ahora se ve aca -- y sale de LecturaDePasos, no del "2 de
-          // 5" fijo que Stitch repitio en sus cuatro pantallas.
-          DexterStepHeader(
-            titulo: 'OT #$numero',
-            paso: pasoActual.pasoActual + 1,
-            deTotal: PasoOrden.values.length,
-            // La chapa del diseño, y no la de la barra de Material: esa
-            // está pintada en blanco sobre 15% de blanco, para el azul
-            // oscuro que acá ya no existe. Sobre el encabezado claro se
-            // leería blanco sobre casi blanco.
-            pastilla: DexterSyncBadge(
-              estado: SyncPresentacion.estado(widget.resumenDeSync),
-              detalle: SyncPresentacion.detalle(widget.resumenDeSync),
-            ),
-          ),
-          OfflineSavedBanner(visible: _showSavedIndicator),
-          _paraQuienYEnQuePaso(),
-          _franjaDelFormulario(),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.margen,
-                AppSpacing.lg,
-                AppSpacing.margen,
-                AppSpacing.lg,
+          children: [
+            // El encabezado de paso del diseño, en lugar de la barra de
+            // Material. El titulo sigue siendo "OT #N" y no "Ejecución de
+            // orden" como en la maqueta: a 390 px ese texto se cortaba en
+            // "Ejecución OT #48..." y se perdia el numero, que es lo unico que
+            // identifica el trabajo. El paso, que la maqueta escribe debajo del
+            // titulo, ahora se ve aca -- y sale de LecturaDePasos, no del "2 de
+            // 5" fijo que Stitch repitio en sus cuatro pantallas.
+            DexterStepHeader(
+              titulo: 'OT #$numero',
+              paso: pasoActual.pasoActual + 1,
+              deTotal: PasoOrden.values.length,
+              // La chapa del diseño, y no la de la barra de Material: esa
+              // está pintada en blanco sobre 15% de blanco, para el azul
+              // oscuro que acá ya no existe. Sobre el encabezado claro se
+              // leería blanco sobre casi blanco.
+              pastilla: DexterSyncBadge(
+                estado: SyncPresentacion.estado(widget.resumenDeSync),
+                detalle: SyncPresentacion.detalle(widget.resumenDeSync),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  FormularioDeCampo(
-                    // Una sola lectura del esquema para toda la pantalla: la
-                    // misma que usa el checklist de cierre.
-                    campos: _camposNormalizados,
-                    valores: _valoresFormulario,
-                    controladores: _controllers,
-                    alCambiar: _onFieldChanged,
-                    mostrarDatosFuturos: widget.mostrarDatosFuturos,
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  _bloqueDeMateriales(),
-                  _evidencias(),
-                  _checklistDeCierre(),
-                  if (widget.mostrarDatosFuturos) ...[
+            ),
+            OfflineSavedBanner(visible: _showSavedIndicator),
+            _paraQuienYEnQuePaso(),
+            _franjaDelFormulario(),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.margen,
+                  AppSpacing.lg,
+                  AppSpacing.margen,
+                  AppSpacing.lg,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    FormularioDeCampo(
+                      // Una sola lectura del esquema para toda la pantalla: la
+                      // misma que usa el checklist de cierre.
+                      campos: _camposNormalizados,
+                      valores: _valoresFormulario,
+                      controladores: _controllers,
+                      alCambiar: _onFieldChanged,
+                      mostrarDatosFuturos: widget.mostrarDatosFuturos,
+                    ),
                     const SizedBox(height: AppSpacing.lg),
-                    const BloqueAcademia(),
+
+                    // REPORTAR, DONDE OCURRE LO QUE SE REPORTA
+                    // ----------------------------------------
+                    // Sin la historia y sin el bloqueo abierto: los dos viven en
+                    // la ficha. Aca van solo los gestos --inicio, avance,
+                    // bloqueo, cierre-- porque es donde el tecnico esta cuando
+                    // pasa lo que hay que reportar.
+                    SeguimientoDeLaIntervencion(
+                      seguimiento: _seguimiento,
+                      cargando: _cargandoSeguimiento,
+                      mostrarHistoria: false,
+                      mostrarBloqueoAbierto: false,
+                      pendientesDeSubir: _reportesSinSubir,
+                      alTomarFoto: _tomarFotoDelReporte,
+                      fotosTomadas: _fotosDelBorrador,
+                      alAbrirHoja: _contarFotos,
+                      alDescartarBorrador: _descartarBorrador,
+                      alReportar:
+                          (
+                            String momento,
+                            Map<String, dynamic> respuestas, {
+                            bool requiereNoc = false,
+                            bool detener = true,
+                          }) {
+                            // No se espera: la pantalla no se bloquea mientras el
+                            // telefono busca señal.
+                            _reportar(
+                              momento,
+                              respuestas,
+                              requiereNoc: requiereNoc,
+                              detener: detener,
+                            );
+                          },
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+
+                    _bloqueDeMateriales(),
+                    _evidencias(),
+                    _checklistDeCierre(),
+                    if (widget.mostrarDatosFuturos) ...[
+                      const SizedBox(height: AppSpacing.lg),
+                      const BloqueAcademia(),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
-          ),
-          _barraDeAcciones(),
-        ],
+            _barraDeAcciones(),
+          ],
         ),
       ),
     );
@@ -777,9 +1136,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
 
   /// Cuántos requisitos de foto ya tienen su captura.
   int get _fotosCapturadas => fotosCapturadas(
-        requisitos: _evidenciasRequisitos,
-        capturadas: _evidenciasCapturadas,
-      );
+    requisitos: _evidenciasRequisitos,
+    capturadas: _evidenciasCapturadas,
+  );
 
   /// Qué formulario se está respondiendo. La versión del esquema viene con la
   /// orden: si el backend cambia las preguntas, esto cambia con ellas.
@@ -807,14 +1166,18 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       ),
       child: Row(
         children: <Widget>[
-          const Icon(Icons.person_outline,
-              size: 16, color: AppColors.onSurfaceVariant),
+          const Icon(
+            Icons.person_outline,
+            size: 16,
+            color: AppColors.onSurfaceVariant,
+          ),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               cliente,
-              style: AppTypography.etiquetaGrande
-                  .copyWith(color: AppColors.onSurface),
+              style: AppTypography.etiquetaGrande.copyWith(
+                color: AppColors.onSurface,
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -854,9 +1217,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           // deja de servir para lo unico que sirve, que es saber contra que
           // esquema se esta trabajando.
           Text(
-            version == 0
-                ? '$campos campos'
-                : 'v$version · $campos campos',
+            version == 0 ? '$campos campos' : 'v$version · $campos campos',
             style: AppTypography.datoChico.copyWith(
               color: AppColors.onSurfaceVariant,
             ),
@@ -870,28 +1231,28 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// formulario, la lista viene del backend: acá solo se dibuja y se captura.
   Widget _evidencias() {
     return DexterBloque(
-        titulo: 'Evidencia Fotográfica',
-        icono: Icons.photo_camera,
-        insignia: DexterPastilla.neutra(
-          texto: '$_fotosCapturadas / ${_evidenciasRequisitos.length}',
-        ),
-        separacion: AppSpacing.md,
-        children: [
-          if (_evidenciasRequisitos.isNotEmpty) _progresoDeFotos(),
-          if (_evidenciasRequisitos.isEmpty)
-            Text(
-              'Este tipo de trabajo no exige fotografías.',
-              style: AppTypography.cuerpoChico,
-            )
-          else
-            for (var i = 0; i < _evidenciasRequisitos.length; i++) ...[
-              if (i > 0) const SizedBox(height: AppSpacing.md),
-              _buildEvidenciaRequisito(
-                Map<String, dynamic>.from(_evidenciasRequisitos[i] as Map),
-              ),
-            ],
-          _avisoSinCobertura(),
-        ],
+      titulo: 'Evidencia Fotográfica',
+      icono: Icons.photo_camera,
+      insignia: DexterPastilla.neutra(
+        texto: '$_fotosCapturadas / ${_evidenciasRequisitos.length}',
+      ),
+      separacion: AppSpacing.md,
+      children: [
+        if (_evidenciasRequisitos.isNotEmpty) _progresoDeFotos(),
+        if (_evidenciasRequisitos.isEmpty)
+          Text(
+            'Este tipo de trabajo no exige fotografías.',
+            style: AppTypography.cuerpoChico,
+          )
+        else
+          for (var i = 0; i < _evidenciasRequisitos.length; i++) ...[
+            if (i > 0) const SizedBox(height: AppSpacing.md),
+            _buildEvidenciaRequisito(
+              Map<String, dynamic>.from(_evidenciasRequisitos[i] as Map),
+            ),
+          ],
+        _avisoSinCobertura(),
+      ],
     );
   }
 
@@ -942,8 +1303,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                 ),
                 child: Text(
                   '$hechas / $total',
-                  style: AppTypography.labelBadge
-                      .copyWith(color: AppColors.onSecondary),
+                  style: AppTypography.labelBadge.copyWith(
+                    color: AppColors.onSecondary,
+                  ),
                 ),
               ),
               const Spacer(),
@@ -964,13 +1326,15 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                     Expanded(
                       flex: hechas,
                       child: const ColoredBox(
-                          color: AppColors.onTertiaryContainer),
+                        color: AppColors.onTertiaryContainer,
+                      ),
                     ),
                   if (faltan > 0)
                     Expanded(
                       flex: faltan,
                       child: const ColoredBox(
-                          color: AppColors.surfaceContainerHigh),
+                        color: AppColors.surfaceContainerHigh,
+                      ),
                     ),
                 ],
               ),
@@ -979,13 +1343,17 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           const SizedBox(height: AppSpacing.xs),
           Row(
             children: <Widget>[
-              const Icon(Icons.check_circle,
-                  size: 14, color: AppColors.onTertiaryContainer),
+              const Icon(
+                Icons.check_circle,
+                size: 14,
+                color: AppColors.onTertiaryContainer,
+              ),
               const SizedBox(width: 4),
               Text(
                 '$hechas capturadas',
-                style: AppTypography.labelCaption
-                    .copyWith(color: AppColors.onTertiaryContainer),
+                style: AppTypography.labelCaption.copyWith(
+                  color: AppColors.onTertiaryContainer,
+                ),
               ),
               const Spacer(),
               if (obligatoriasPendientes > 0) ...<Widget>[
@@ -995,8 +1363,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                   obligatoriasPendientes == 1
                       ? '1 requerida pendiente'
                       : '$obligatoriasPendientes requeridas pendientes',
-                  style:
-                      AppTypography.labelCaption.copyWith(color: AppColors.error),
+                  style: AppTypography.labelCaption.copyWith(
+                    color: AppColors.error,
+                  ),
                 ),
               ],
             ],
@@ -1028,13 +1397,16 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Text('SIN COBERTURA NO SE PIERDE',
-                    style: AppTypography.labelBadge),
+                Text(
+                  'SIN COBERTURA NO SE PIERDE',
+                  style: AppTypography.labelBadge,
+                ),
                 Text(
                   'Las fotos quedan guardadas en el teléfono y se envían '
                   'solas cuando vuelva la señal. No hace falta repetirlas.',
-                  style: AppTypography.bodySm
-                      .copyWith(color: AppColors.onSurfaceVariant),
+                  style: AppTypography.bodySm.copyWith(
+                    color: AppColors.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -1071,7 +1443,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                   onTap: _confirmarBorrador,
                   child: Container(
                     height: AppSpacing.objetivoTactilAmplio,
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                    ),
                     alignment: Alignment.center,
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -1084,8 +1458,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                         const SizedBox(width: AppSpacing.xs),
                         Text(
                           _borradorConfirmado ? 'Guardado' : 'Borrador',
-                          style: AppTypography.etiqueta
-                              .copyWith(color: AppColors.onSurface),
+                          style: AppTypography.etiqueta.copyWith(
+                            color: AppColors.onSurface,
+                          ),
                         ),
                       ],
                     ),
@@ -1108,8 +1483,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                         children: [
                           Text(
                             'Finalizar orden',
-                            style: AppTypography.etiquetaGrande
-                                .copyWith(color: AppColors.onPrimary),
+                            style: AppTypography.etiquetaGrande.copyWith(
+                              color: AppColors.onPrimary,
+                            ),
                           ),
                           const SizedBox(width: AppSpacing.sm),
                           const Icon(
@@ -1132,7 +1508,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
 
   Widget _buildEvidenciaRequisito(Map<String, dynamic> req) {
     final reqId = req['id'] as String;
-    final descripcion = (req['descripcion'] ?? req['titulo'] ?? reqId) as String;
+    final descripcion =
+        (req['descripcion'] ?? req['titulo'] ?? reqId) as String;
     final obligatorio = req['obligatorio'] == true;
     final instrucciones = req['instrucciones'] as String?;
 
@@ -1149,7 +1526,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         color: AppColors.surfaceContainerLow,
         borderRadius: AppRadius.brTarjeta,
         border: !hasFoto && obligatorio
-            ? Border.all(color: AppColors.onErrorContainer.withValues(alpha: 0.4))
+            ? Border.all(
+                color: AppColors.onErrorContainer.withValues(alpha: 0.4),
+              )
             : null,
       ),
       child: Column(
@@ -1176,7 +1555,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
               Expanded(
                 child: Text(
                   '$descripcion${obligatorio ? ' *' : ''}',
-                  style: AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+                  style: AppTypography.etiqueta.copyWith(
+                    color: AppColors.onSurface,
+                  ),
                 ),
               ),
               Container(
@@ -1185,8 +1566,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                   color: hasFoto
                       ? AppColors.exitoFondo
                       : (obligatorio
-                          ? AppColors.errorContainer
-                          : AppColors.surfaceContainer),
+                            ? AppColors.errorContainer
+                            : AppColors.surfaceContainer),
                   borderRadius: AppRadius.brChico,
                 ),
                 child: Text(
@@ -1195,8 +1576,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                     color: hasFoto
                         ? AppColors.exitoTexto
                         : (obligatorio
-                            ? AppColors.onErrorContainer
-                            : AppColors.onSurfaceVariant),
+                              ? AppColors.onErrorContainer
+                              : AppColors.onSurfaceVariant),
                     fontWeight: FontWeight.w700,
                   ),
                 ),

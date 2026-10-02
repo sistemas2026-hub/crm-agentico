@@ -456,4 +456,97 @@ void main() {
     });
   });
 
+  group('6. El reparto entre las dos pantallas', () {
+    // POR QUE ESTO SE AFIRMA
+    // ----------------------
+    // Esta seccion hace dos cosas que ocurren en momentos distintos: LEER la
+    // historia --«que paso en este trabajo»-- y ESCRIBIR un reporte --«se me
+    // cayo un poste»--. Hasta el 02/10/2026 las hacia juntas en la ficha, y el
+    // tecnico tenia que salir de la ejecucion, volver atras y bajar para
+    // reportar un bloqueo.
+    //
+    // Ahora cada pantalla monta la MISMA seccion con su mitad. Las dos
+    // direcciones se afirman: una sola se cumpliria escondiendo todo siempre.
+    Future<void> montarCon(
+      WidgetTester tester, {
+      required bool historia,
+      required bool bloqueo,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: SeguimientoDeLaIntervencion(
+                seguimiento: <String, dynamic>{
+                  'momentos_registrados': <String>[],
+                  'formularios': <String, dynamic>{},
+                  'eventos': <dynamic>[
+                    <String, dynamic>{
+                      'id': 'e1',
+                      'tipo': 'avance_campo',
+                      'etiqueta': 'Avance',
+                      'es_seguimiento': true,
+                      'quien': 'Carlos Gómez',
+                      'detalle': <dynamic>[
+                        <String, dynamic>{
+                          'id': 'nota',
+                          'titulo': 'Qué se hizo',
+                          'valor': 'Se revisó la roseta',
+                        },
+                      ],
+                    },
+                  ],
+                  'bloqueo_abierto': <String, dynamic>{
+                    'requiere_noc': false,
+                    'detuvo_el_trabajo': true,
+                    'motivo': 'Poste caído',
+                  },
+                },
+                cargando: false,
+                mostrarHistoria: historia,
+                mostrarBloqueoAbierto: bloqueo,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('la FICHA muestra la historia y el bloqueo', (
+      WidgetTester tester,
+    ) async {
+      await montarCon(tester, historia: true, bloqueo: true);
+
+      expect(find.text('Se revisó la roseta'), findsOneWidget);
+      expect(find.text('TRABAJO DETENIDO'), findsOneWidget);
+    });
+
+    testWidgets('EJECUCIÓN no repite ninguna de las dos', (
+      WidgetTester tester,
+    ) async {
+      // La historia se consulta, no se escribe; y el bloqueo abierto vive en la
+      // ficha porque con el trabajo detenido no hay «Ejecutar el trabajo»: si
+      // destrabar viviera acá, un trabajo bloqueado sería un callejón sin
+      // salida.
+      await montarCon(tester, historia: false, bloqueo: false);
+
+      expect(find.text('Se revisó la roseta'), findsNothing);
+      expect(find.text('TRABAJO DETENIDO'), findsNothing);
+    });
+
+    testWidgets('sin historia tampoco se dice «no hay reportes»', (
+      WidgetTester tester,
+    ) async {
+      // Ese texto es de la ficha: en ejecución diría que no hay historia en una
+      // pantalla que no la muestra.
+      await montarCon(tester, historia: false, bloqueo: false);
+
+      expect(
+        find.textContaining('Todavía no hay reportes de campo'),
+        findsNothing,
+      );
+    });
+  });
+
 }
