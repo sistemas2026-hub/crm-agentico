@@ -111,7 +111,7 @@ void main() {
     Future<void> montarGrupo(
       WidgetTester tester, {
       required String titulo,
-      required List<Widget> children,
+      required List<Widget?> children,
     }) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -149,7 +149,7 @@ void main() {
       await montarGrupo(
         tester,
         titulo: 'Para entender la falla',
-        children: const <Widget>[],
+        children: const <Widget?>[],
       );
 
       expect(find.text('PARA ENTENDER LA FALLA'), findsNothing);
@@ -169,6 +169,43 @@ void main() {
       );
 
       expect(find.text('PARA EJECUTAR'), findsOneWidget);
+    });
+
+    testWidgets('una tarjeta AUSENTE no cuenta como tarjeta', (
+      WidgetTester tester,
+    ) async {
+      // LO QUE ENCONTRO EL EMULADOR (02/10/2026)
+      // ----------------------------------------
+      // «PARA ENTENDER LA FALLA» aparecio con NADA debajo, en una orden sin
+      // telemetria ni datos tecnicos. La prueba de la lista vacia pasaba --la
+      // lista no estaba vacia-- con el sintoma a la vista: las secciones que no
+      // tienen nada que decir devolvian `SizedBox.shrink()`, un widget que
+      // existe y no ocupa nada, y para el grupo eso era una tarjeta mas.
+      //
+      // Ausente se dice con `null`, que si se puede contar.
+      await montarGrupo(
+        tester,
+        titulo: 'Para entender la falla',
+        children: const <Widget?>[null, null],
+      );
+
+      expect(find.text('PARA ENTENDER LA FALLA'), findsNothing);
+    });
+
+    testWidgets('con una presente y una ausente, se anuncia y va una sola', (
+      WidgetTester tester,
+    ) async {
+      await montarGrupo(
+        tester,
+        titulo: 'Para entender la falla',
+        children: <Widget?>[
+          null,
+          const DexterBloque(titulo: 'Telemetría', children: <Widget>[Text('x')]),
+        ],
+      );
+
+      expect(find.text('PARA ENTENDER LA FALLA'), findsOneWidget);
+      expect(find.text('Telemetría'), findsOneWidget);
     });
 
     testWidgets('las tarjetas del grupo se dibujan todas y en orden', (

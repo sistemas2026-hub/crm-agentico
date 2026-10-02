@@ -131,17 +131,34 @@ class GrupoDeFicha extends StatelessWidget {
   /// «información del cliente» no.
   final String titulo;
 
-  final List<Widget> children;
+  /// Las tarjetas. `null` significa «esta no va», y es distinto de una tarjeta
+  /// que se dibuja vacía: ver el filtro de abajo.
+  final List<Widget?> children;
 
   /// Lo que separa a las tarjetas DE ESTE grupo entre sí.
   final double entre;
 
   @override
   Widget build(BuildContext context) {
+    // AUSENTE NO ES LO MISMO QUE VACIA, Y ACA SE PAGA LA DIFERENCIA
+    // -------------------------------------------------------------
+    // Una sección que no tiene nada que decir devolvía `SizedBox.shrink()`: un
+    // widget que existe y no ocupa nada. Para este grupo eso era una tarjeta
+    // más, así que el rótulo se dibujaba igual y además quedaba un espacio
+    // fantasma entre hermanas.
+    //
+    // Medido en el emulador el 02/10/2026: «PARA ENTENDER LA FALLA» apareció
+    // con NADA debajo, en una orden sin telemetría ni datos técnicos. La prueba
+    // de la lista vacía pasaba —la lista no estaba vacía— mientras el síntoma
+    // estaba a la vista.
+    //
+    // Por eso lo ausente se dice con `null`, que sí se puede contar.
+    final List<Widget> visibles = children.whereType<Widget>().toList();
+
     // Un grupo cuyas tarjetas son todas condicionales puede quedar sin ninguna.
     // Dibujar el rótulo solo sería anunciar una sección vacía, que es peor que
     // no anunciarla: el técnico baja buscando algo que no está.
-    if (children.isEmpty) {
+    if (visibles.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -162,9 +179,9 @@ class GrupoDeFicha extends StatelessWidget {
             ),
           ),
         ),
-        for (int i = 0; i < children.length; i++) ...<Widget>[
+        for (int i = 0; i < visibles.length; i++) ...<Widget>[
           if (i > 0) SizedBox(height: entre),
-          children[i],
+          visibles[i],
         ],
       ],
     );

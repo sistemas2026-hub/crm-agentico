@@ -679,7 +679,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   const SizedBox(height: AppSpacing.lg),
                   GrupoDeFicha(
                     titulo: 'Para llegar',
-                    children: <Widget>[
+                    children: <Widget?>[
                       _datosDelCliente(trabajo),
                       // Lo que la orden SI trae. Antes vivia detras de la
                       // bandera de demostracion junto a los datos de ejemplo,
@@ -694,7 +694,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   const SizedBox(height: AppSpacing.lg),
                   GrupoDeFicha(
                     titulo: 'Para entender la falla',
-                    children: <Widget>[
+                    children: <Widget?>[
                       _datosTecnicos(trabajo),
                       // La telemetria se ve cuando la orden trae una lectura del
                       // equipo, aunque no haya modo demostracion: la señal
@@ -719,7 +719,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   const SizedBox(height: AppSpacing.lg),
                   GrupoDeFicha(
                     titulo: 'Para ejecutar',
-                    children: <Widget>[
+                    children: <Widget?>[
                       // El protocolo se ve cuando la plantilla lo trae, aunque
                       // no haya modo demostracion: es un dato real del tipo de
                       // trabajo.
@@ -988,16 +988,28 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   /// de dos: se conservan las cuatro y cada una entra en el pulgar con
   /// guantes.
   ///
-  /// LLAMAR, RUTA Y WHATSAPP ESTÁN APAGADOS, Y SE VE
-  /// ------------------------------------------------
-  /// Los tres necesitan abrir OTRA aplicación del teléfono, y esta no tiene
+  /// LLAMAR Y RUTA ESTÁN APAGADOS, Y SE VE
+  /// -------------------------------------
+  /// Los dos necesitan abrir OTRA aplicación del teléfono, y esta no tiene
   /// todavía la dependencia para hacerlo (`url_launcher` no está en
-  /// `pubspec.yaml`, verificado). Hasta la versión anterior se pintaban
+  /// `pubspec.yaml`, verificado). Hasta hace unas versiones se pintaban
   /// encendidos cuando el cliente tenía teléfono, y al tocarlos no pasaba
   /// nada: exactamente lo que el comentario de este mismo método decía que no
   /// había que hacer. Ahora se ven apagados, que es la verdad.
   ///
   /// El día que se agregue el lanzador, es pasarles su `alTocar` y nada más.
+  ///
+  /// POR QUÉ SE QUITÓ WHATSAPP (02/10/2026)
+  /// --------------------------------------
+  /// Decisión del usuario: los técnicos no se comunican por ahí. Y hay un
+  /// motivo que la sostiene más allá del hábito: en este producto WhatsApp es
+  /// **el canal del asistente con el cliente**, y queda registrado. Un técnico
+  /// escribiéndole desde su aplicación personal abre una conversación paralela
+  /// que el sistema no ve — lo acordado ahí no existe para el NOC ni para la
+  /// bitácora del trabajo. El botón no sumaba un canal: restaba trazabilidad.
+  ///
+  /// Quedan tres, así que la segunda fila lleva una sola a lo ancho en vez de
+  /// una mitad con un hueco al lado.
   Widget _accionesRapidas(TrabajoVista trabajo) {
     return Column(
       children: <Widget>[
@@ -1022,26 +1034,10 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: DexterAccionRapida(
-                icono: Icons.chat,
-                texto: 'WhatsApp',
-                alTocar: null,
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: DexterAccionRapida(
-                icono: Icons.menu_book,
-                texto: 'Guía FTTH',
-                alTocar: widget.mostrarDatosFuturos
-                    ? _abrirProcedimiento
-                    : null,
-              ),
-            ),
-          ],
+        DexterAccionRapida(
+          icono: Icons.menu_book,
+          texto: 'Guía FTTH',
+          alTocar: widget.mostrarDatosFuturos ? _abrirProcedimiento : null,
         ),
       ],
     );
@@ -1387,7 +1383,11 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   ///
   /// Cada línea aparece sólo si el servidor la mandó. Una orden vieja, creada
   /// antes de que existieran estos campos, muestra menos y no inventa nada.
-  Widget _datosDeLaOrden(TrabajoVista trabajo) {
+  /// `null` cuando la orden no trae ventana, origen, requisitos ni ticket.
+  ///
+  /// Misma razón que [_datosTecnicos]: una tarjeta que se dibuja vacía sigue
+  /// contando como tarjeta para el grupo que la contiene.
+  Widget? _datosDeLaOrden(TrabajoVista trabajo) {
     final String ventana = trabajo.ventanaTexto;
     final String origen = trabajo.origen?.etiqueta ?? '';
     final List<String> seguridad = trabajo.requisitosSeguridad;
@@ -1400,7 +1400,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         origen.isEmpty &&
         seguridad.isEmpty &&
         trabajo.numeroTicket.isEmpty) {
-      return const SizedBox.shrink();
+      return null;
     }
 
     return DexterCard(
@@ -1516,10 +1516,15 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   /// La potencia óptica todavía no está: la mide SmartOLT y ese puente no
   /// existe. Cuando exista va acá, con su hora al lado, porque una lectura
   /// vieja es peor que ninguna.
-  Widget _datosTecnicos(TrabajoVista trabajo) {
+  /// `null` cuando no hay ni CTO ni serial.
+  ///
+  /// Devolver `SizedBox.shrink()` parecia equivalente y no lo es: para el
+  /// grupo que la contiene era una tarjeta mas, asi que el rotulo «PARA
+  /// ENTENDER LA FALLA» se dibujaba sobre la nada. Ausente se dice con `null`.
+  Widget? _datosTecnicos(TrabajoVista trabajo) {
     final String cto = trabajo.contexto['cto']?.toString() ?? '';
     final String serial = trabajo.serialOnu;
-    if (cto.isEmpty && serial.isEmpty) return const SizedBox.shrink();
+    if (cto.isEmpty && serial.isEmpty) return null;
 
     return DexterCard(
       child: Column(

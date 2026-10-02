@@ -665,4 +665,44 @@ void main() {
       await base.cerrar();
     });
   });
+  group('Acciones rápidas: lo que hay y lo que no', () {
+    // POR QUE ESTO SE AFIRMA
+    // ----------------------
+    // WhatsApp se quitó el 02/10/2026 a pedido del usuario: los técnicos no se
+    // comunican por ahí. Y hay un motivo que lo sostiene: en este producto
+    // WhatsApp es el canal del asistente con el cliente, y queda registrado. Un
+    // técnico escribiendo desde su aplicación personal abre una conversación
+    // paralela que el NOC no ve.
+    //
+    // Sin esta prueba, alguien lo vuelve a poner en seis meses "porque falta".
+    testWidgets('WhatsApp NO está entre las acciones', (
+      WidgetTester tester,
+    ) async {
+      _pantallaAlta(tester);
+      final base = _BaseFalsa(<Map<String, dynamic>>[_orden(estado: 'en_sitio')]);
+      await tester.pumpWidget(_app(base));
+      await tester.pumpAndSettle();
+
+      expect(find.text('WhatsApp'), findsNothing);
+      await base.cerrar();
+    });
+
+    testWidgets('las otras tres siguen, y apagadas mientras no haya lanzador', (
+      WidgetTester tester,
+    ) async {
+      // Apagadas es la verdad: las dos primeras necesitan abrir otra
+      // aplicación y `url_launcher` no está en pubspec. Pintarlas encendidas y
+      // que al tocarlas no pase nada es peor que mostrarlas grises.
+      _pantallaAlta(tester);
+      final base = _BaseFalsa(<Map<String, dynamic>>[_orden(estado: 'en_sitio')]);
+      await tester.pumpWidget(_app(base));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Llamar Cliente'), findsOneWidget);
+      expect(find.text('Ruta GPS'), findsOneWidget);
+      expect(find.text('Guía FTTH'), findsOneWidget);
+      await base.cerrar();
+    });
+  });
+
 }
