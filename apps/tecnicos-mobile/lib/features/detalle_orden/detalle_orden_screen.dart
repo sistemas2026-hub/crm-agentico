@@ -543,7 +543,23 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                       // manda a buscar una falla de red donde no la hay.
                       if (trabajo.contextoDisponible ||
                           widget.mostrarDatosFuturos)
-                        _telemetria(trabajo),
+                        _telemetria(trabajo)
+                      else
+                        // SIN FICHA: SE DICE, Y SE DICE CUAL DE LOS TRES ES
+                        // -------------------------------------------------
+                        // Antes la ficha se quedaba MUDA: sin contexto no se
+                        // dibujaba ninguna tarjeta, y el tecnico no podia
+                        // distinguir «no se pudo preguntar» de «se pregunto y
+                        // este caso no tiene servicio». Los tres casos ya
+                        // estaban resueltos en `TrabajoVista.sinFicha` --y
+                        // dibujados en la tarjeta de la lista-- pero la pantalla
+                        // donde el tecnico se para a entender la falla no los
+                        // usaba.
+                        //
+                        // El consejo cambia con el caso: solo uno mejora
+                        // reintentando. Prometer un reintento donde no lo hay
+                        // deja a alguien esperando en la calle.
+                        _porQueNoHayDatosDelEquipo(trabajo),
                       if (trabajo.hayEvaluacionDexter)
                         _loQueDexterAveriguo(trabajo),
                       if (trabajo.diagnosticoPrevio.isNotEmpty ||
@@ -1604,6 +1620,63 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   /// para campo todavía; se ve solo en modo demostración.
   static String _hhmm(DateTime f) =>
       '${f.hour.toString().padLeft(2, '0')}:${f.minute.toString().padLeft(2, '0')}';
+
+  /// Por qué esta orden no trae datos del equipo.
+  ///
+  /// Lee `TrabajoVista.sinFicha`, que ya distingue los tres casos leyendo el
+  /// `motivo` normalizado del backend. Acá no se deduce ninguno: deducirlo sería
+  /// una segunda interpretación del mismo dato, y la que estaría mal sería ésta.
+  Widget _porQueNoHayDatosDelEquipo(TrabajoVista trabajo) {
+    final (IconData icono, String titulo, String consejo) = switch (trabajo
+        .sinFicha) {
+      SinFicha.noSePudoConsultar => (
+        Icons.cloud_off,
+        'No se pudo consultar el equipo',
+        'Se reintenta al sincronizar. Bajá la ficha con señal antes de salir.',
+      ),
+      SinFicha.clienteNoIdentificado => (
+        Icons.person_off,
+        'No se pudo identificar al cliente',
+        'El sistema del ISP no encontró el servicio. Preguntale en sitio.',
+      ),
+      SinFicha.casoSinServicio => (
+        Icons.link_off,
+        'Este caso no tiene servicio asociado',
+        'Nació de una conversación y no va a tener ficha. No la esperes.',
+      ),
+      SinFicha.hayFicha => (
+        Icons.info_outline,
+        'Sin lectura del equipo',
+        '',
+      ),
+    };
+
+    return DexterBloque(
+      titulo: 'Datos del equipo',
+      icono: Icons.hub_outlined,
+      children: <Widget>[
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(icono, size: 18, color: AppColors.onSurfaceVariant),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(titulo, style: AppTypography.cuerpo),
+                  if (consejo.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 2),
+                    Text(consejo, style: AppTypography.cuerpoChico),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 
   /// La potencia óptica, con la forma del panel de SmartOLT y los colores de
   /// la aplicación: dos tarjetas, la que RECIBE la ONT y la que recibe la OLT.
