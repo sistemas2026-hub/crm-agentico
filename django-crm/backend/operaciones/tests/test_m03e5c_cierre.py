@@ -539,9 +539,21 @@ def test_17_e5_no_trajo_ningun_sistema_paralelo():
     #  Ninguna entidad nueva para secuencias.
     from django.apps import apps
     modelos = {m.__name__ for m in apps.get_app_config("operaciones").get_models()}
+    #  02/10/2026: la capa de fuentes (P2) sumo 'FuenteEstado' y
+    #  'FuenteSnapshot'; el bloque de Situaciones Operativas (P3) suma
+    #  'SituacionOperativa', 'SituacionAfectado', 'SituacionEvento' y
+    #  'SituacionRelacion'. Ninguna es una cola nueva ni una segunda nocion de
+    #  caso: las dos primeras guardan el ESTADO de cada lectura, y las cuatro de
+    #  situacion son la agrupacion de señales que hoy no existe en ninguna parte.
+    #
+    #  El conjunto sigue siendo EXACTO a proposito: un modelo nuevo obliga a
+    #  venir aqui a declararlo.
     assert modelos == {"ActividadOperativa", "DisponibilidadTecnico",
                        "ProgramacionSemanal", "ProgramacionOrden",
-                       "NovedadOperativa", "PropuestaSupervisor"}, modelos
+                       "NovedadOperativa", "PropuestaSupervisor",
+                       "FuenteEstado", "FuenteSnapshot",
+                       "SituacionOperativa", "SituacionAfectado",
+                       "SituacionEvento", "SituacionRelacion"}, modelos
 
 
 @pytest.mark.django_db

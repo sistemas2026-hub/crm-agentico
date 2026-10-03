@@ -161,22 +161,24 @@ except ValueError:
 # =============================================================================
 titulo("el registro de trabajos es cerrado")
 # =============================================================================
-#  02/10/2026. Hasta hoy esto decia 'registrados() == {}' -- "P2 no cablea
-#  NINGUN trabajo real" -- y era cierto. Dejo de serlo a proposito: se cableo
-#  'supervisor_latido', de LECTURA, para demostrar el circuito completo del
-#  scheduler sin producir un solo efecto.
+#  02/10/2026. Hasta ese dia esto decia 'registrados() == {}' -- "P2 no cablea
+#  NINGUN trabajo real" -- y era cierto. Dejo de serlo a proposito, en dos pasos
+#  del mismo dia: 'supervisor_latido' (pregunta que senales ve el Supervisor) y
+#  'supervisor_sondeo' (lo despierta para que consulte sus fuentes). Los dos
+#  LEEN hacia afuera; el segundo escribe dos tablas propias del Supervisor.
 #
 #  LA AFIRMACION NO SE AFLOJA, SE REESCRIBE. Un conjunto EXACTO muerde igual
-#  que el conjunto vacio: cualquier trabajo que alguien agregue manana --por
-#  descuido o por prisa-- pone esto en rojo y obliga a decir por que. Lo que no
-#  se puede hacer es cambiarlo por 'len(...) >= 1' o por "contiene el latido":
-#  eso dejaria de medir lo unico que importa aca, que es lo que NO esta.
+#  que el conjunto vacio: un trabajo que alguien agregue manana --por descuido o
+#  por prisa-- pone esto en rojo y obliga a decir por que. Lo que no se puede
+#  hacer es cambiarlo por 'len(...) >= 2' o por "contiene los dos": eso dejaria
+#  de medir lo unico que importa aca, que es lo que NO esta.
 #
-#  Y CABLEADO NO ES ENCENDIDO: que el registro conozca el latido no lo hace
-#  correr. Lo que lo haria correr es una fila en 'asistente.job_catalogo', y que
-#  el catalogo siga vacio lo afirma tests/test_p2_inerte.py, no esta linea.
-revisar(sorted(registro.registrados()) == ["supervisor_latido"],
-        "el unico trabajo cableado es el latido del Supervisor, que solo LEE",
+#  Y CABLEADO NO ES ENCENDIDO: que el registro los conozca no los hace correr.
+#  Lo que los haria correr es una fila en 'asistente.job_catalogo', y que el
+#  catalogo siga vacio lo afirma tests/test_p2_inerte.py, no esta linea.
+revisar(sorted(registro.registrados()) == ["supervisor_latido",
+                                           "supervisor_sondeo"],
+        "los dos trabajos cableados son los del Supervisor, y los dos LEEN",
         f"registrados: {sorted(registro.registrados())}")
 revisar("cerrar_vencidas" not in registro.registrados(),
         "'cerrar_vencidas' no esta registrado -- y no puede estarlo por config",

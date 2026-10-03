@@ -851,6 +851,31 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
     --ignorar la comprobacion y leer con el parametro-- se probo como mutacion y
     la suite la mata.
 
+    'supervisor-sondeo' (POST /supervisor/sondeo/) entro el 02/10/2026, junto
+    con la capa de fuentes, y es la segunda que NO llama una persona: la llama el
+    mismo scheduler que el latido.
+
+    ESCRIBE, y hay que ser preciso con QUE escribe: dos tablas PROPIAS de la capa
+    de fuentes -- 'operaciones_fuente_estado' (como salio la ultima consulta de
+    cada fuente) y 'operaciones_fuente_snapshot' (un resumen acotado para poder
+    comparar con el ciclo anterior). Eso ES el entregable del bloque: sin
+    escribirlo no hay forma de distinguir "no hay nada" de "no se pudo
+    preguntar", que es el error que la capa existe para hacer imposible.
+
+    Y NO EJECUTA. No crea propuestas, no crea Situaciones Operativas --no
+    existen todavia--, no corre 'supervisor.correr_ciclo', no toca un caso, no
+    reprograma, no asigna, no escala, no crea tickets y no modifica el
+    interruptor de autonomia. A los dos sistemas externos que consulta
+    (SmartOLT, WispHub) les llega por 'POST /interno/herramienta/<nombre>' del
+    motor, que solo ejecuta ahi lo declarado 'invocable_por_servicio', y las
+    herramientas que usa son 'solo_lectura: true'.
+
+    Su propia suite lo afirma sobre el EFECTO
+    (operaciones/tests/test_p2_fuentes.py): tras un sondeo completo, ni
+    PropuestaSupervisor, ni common.Activity, ni Case, ni ActividadOperativa, ni
+    OrdenTrabajo cambiaron de cuenta -- y la mutacion que hace que el sondeo
+    llame al ciclo del Supervisor pone esa prueba en rojo.
+
     Que esta lista haya que tocarla para agregar una ruta es el punto: esta
     guarda no comprueba que las rutas de ejecucion esten ausentes por su
     nombre --eso lo hace el bucle de abajo, y un 'aplicar_propuesta' llamado
@@ -867,7 +892,7 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        "actividad-detalle", "actividad-transicion",
                        "asistente", "indicadores", "reportes",
                        "programaciones", "actividad-supervisor",
-                       "supervisor-latido"}
+                       "supervisor-latido", "supervisor-sondeo"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

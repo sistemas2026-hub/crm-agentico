@@ -75,4 +75,12 @@ urlpatterns = [
     #  escribe nada. Dos puertas porque son dos cosas distintas.
     path("supervisor/latido/", views.LatidoSupervisorView.as_view(),
          name="supervisor-latido"),
+
+    #  EL SONDEO DE FUENTES  --  la otra puerta del scheduler.
+    #  POST porque escribe DOS TABLAS PROPIAS (el estado de cada fuente y su
+    #  captura), que es el entregable: sin eso no hay con que comparar el ciclo
+    #  siguiente. A los sistemas externos se les consulta con herramientas
+    #  'solo_lectura'; no escribe nada afuera.
+    path("supervisor/sondeo/", views.SondeoFuentesView.as_view(),
+         name="supervisor-sondeo"),
 ]

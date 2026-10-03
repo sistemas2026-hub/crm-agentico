@@ -310,8 +310,12 @@ afirmar(not registro.conocido("cerrar_vencidas"),
         "'cerrar_vencidas' sigue SIN cablear: no es idempotente")
 afirmar(not registro.conocido("importacion_tickets"),
         "'importacion_tickets' sigue sin cablear: es P5")
-afirmar(sorted(registro.registrados()) == ["supervisor_latido"],
-        f"hay UN solo trabajo cableado "
+#  El conjunto EXACTO, y por eso crece cuando se cablea algo: el sondeo de
+#  fuentes entro el 02/10/2026. Lo que esta afirmacion impide es que aparezca un
+#  tercero sin que nadie lo declare.
+afirmar(sorted(registro.registrados()) == ["supervisor_latido",
+                                           "supervisor_sondeo"],
+        f"los trabajos cableados son exactamente los dos del Supervisor "
         f"(hay {sorted(registro.registrados())})")
 
 #  Y la puerta de pruebas sigue sin poder registrar un job real.

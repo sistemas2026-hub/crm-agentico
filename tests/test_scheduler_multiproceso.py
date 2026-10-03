@@ -414,7 +414,7 @@ print(json.dumps({"registrados": sorted(registro.registrados()),
     #  vigila la herencia entre procesos, y seguiria mordiendo el dia que el
     #  mapa de produccion tenga diez entradas.
     registrados = out.get("registrados")
-    revisar(registrados == ["supervisor_latido"],
+    revisar(registrados == ["supervisor_latido", "supervisor_sondeo"],
             "un proceso nuevo arranca con SOLO lo que declara el codigo: no "
             "hereda nada por memoria de otro proceso",
             f"{registrados}")

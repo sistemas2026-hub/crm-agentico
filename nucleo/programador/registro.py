@@ -22,15 +22,28 @@ construye nada: busca en un mapa y falla si no esta.
 
 Que hay hoy
 -----------
-UNO, desde el 02/10/2026: 'supervisor_latido', de LECTURA. Le pregunta al
-Supervisor NOC que ve y guarda conteos; no escribe, no toca casos y no llama a
-ningun proveedor. Se cableo primero por eso -- demuestra el circuito completo
-del scheduler (tick, reclamo, ejecucion, 'job_run') sin que el peor caso sea
-otra cosa que no leer nada.
+DOS, los dos del 02/10/2026 y los dos de LECTURA hacia afuera:
 
-Hasta ese dia el mapa estaba VACIO, y esta seccion decia "Nada". Si vuelve a
-quedar vacio, decirlo aca: un archivo que afirma lo contrario de lo que hace es
-peor que uno sin docstring.
+  'supervisor_latido'   le pregunta al Supervisor que senales ve y guarda
+                        conteos. No escribe nada, en ninguna parte. Se cableo
+                        primero por eso -- demuestra el circuito completo del
+                        scheduler (tick, reclamo, ejecucion, 'job_run') sin que
+                        el peor caso sea otra cosa que no leer nada.
+
+  'supervisor_sondeo'   lo despierta para que consulte SUS fuentes y deje
+                        escrito el estado y la frescura de cada una. Escribe DOS
+                        TABLAS PROPIAS del Supervisor y nada afuera: a los
+                        sistemas externos se les consulta con herramientas
+                        'solo_lectura' por el camino que ya existia.
+
+                        CUALES son esas fuentes no se enumera aca: este archivo
+                        es el motor generico, y una lista de sistemas concretos
+                        se vuelve falsa el dia que entre otro. El catalogo vive
+                        en 'operaciones/fuentes_modelos.py::Fuente'.
+
+Hasta el 02/10/2026 el mapa estaba VACIO, y esta seccion decia "Nada". Si vuelve
+a quedar vacio, o si cambia la cuenta, decirlo aca: un archivo que afirma lo
+contrario de lo que hace es peor que uno sin docstring.
 
 'importacion_tickets' y 'cerrar_vencidas' siguen SIN registrar a proposito --
 cablear el primero es P5, y 'cerrar_vencidas' ademas esta bloqueado por no ser
@@ -76,7 +89,7 @@ class JobSinImplementacion(LookupError):
 
 
 # -----------------------------------------------------------------------------
-#  EL MAPA. Literal y revisable de un vistazo -- un solo trabajo hoy, y
+#  EL MAPA. Literal y revisable de un vistazo -- dos trabajos hoy, y
 #  tests/test_programador.py afirma el conjunto EXACTO, no "al menos uno".
 # -----------------------------------------------------------------------------
 _PRODUCCION: dict[str, Handler] = {
@@ -90,6 +103,16 @@ _PRODUCCION: dict[str, Handler] = {
     #  catalogo sigue vacio (lo afirma tests/test_p2_inerte.py). Son dos
     #  interruptores a proposito: uno es codigo revisado, el otro es operacion.
     "supervisor_latido": trabajos.latido_supervisor,
+    #  El segundo, desde el 02/10/2026. Despierta al Supervisor para que
+    #  consulte sus fuentes y deje escrito el estado de cada una. Escribe DOS
+    #  TABLAS PROPIAS del Supervisor --estado y captura por fuente-- y nada
+    #  afuera: a SmartOLT y WispHub se les consulta con herramientas
+    #  'solo_lectura' por el camino que ya existia.
+    #
+    #  UNO Y NO SEIS, a proposito: la frecuencia de cada fuente vive en una fila
+    #  editable del lado del Supervisor, no en este mapa. Asi este archivo
+    #  --que es el motor generico-- no nombra ningun sistema externo.
+    "supervisor_sondeo": trabajos.sondeo_de_fuentes,
     # "importacion_tickets": ...,   <- P5
     # "cerrar_vencidas": BLOQUEADO  <- no es idempotente; no se cablea
 }

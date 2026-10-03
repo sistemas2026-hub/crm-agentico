@@ -453,9 +453,30 @@ def test_28_no_hay_ejecucion_externa_ni_modelos_nuevos(org_a, actor):
     from django.apps import apps
 
     modelos = {m.__name__ for m in apps.get_app_config("operaciones").get_models()}
+    #  02/10/2026: entran 'FuenteEstado' y 'FuenteSnapshot' con la capa de
+    #  fuentes del Supervisor (bloque P2). NO son una cola nueva ni una segunda
+    #  nocion de caso: una guarda el ESTADO de la ultima consulta a cada fuente
+    #  --si se pudo preguntar, cuando, que tan viejo es el dato-- y la otra un
+    #  resumen acotado para poder comparar un ciclo con el anterior.
+    #
+    #  Existen porque hoy "no hay nada" y "no se pudo preguntar" terminan en el
+    #  mismo numero: de los 15 detectores del Supervisor, solo 2 habian disparado
+    #  en produccion y los otros 13 leen tablas vacias devolviendo [].
+    #
+    #  El conjunto sigue siendo EXACTO a proposito: un modelo nuevo obliga a
+    #  venir aqui y declararlo.
+    #  02/10/2026, bloque P3: entran las cuatro de Situacion Operativa. NO son
+    #  una cola nueva ni una segunda nocion de caso -- son la agrupacion
+    #  sostenida de señales, que hoy no existia en ninguna parte: una situacion
+    #  puede tener cero tickets y seguir siendo valida, que es el punto.
+    #
+    #  El conjunto sigue siendo EXACTO: un modelo nuevo obliga a venir aqui.
     assert modelos == {"ActividadOperativa", "DisponibilidadTecnico",
                        "ProgramacionSemanal", "ProgramacionOrden",
-                       "NovedadOperativa", "PropuestaSupervisor"}, modelos
+                       "NovedadOperativa", "PropuestaSupervisor",
+                       "FuenteEstado", "FuenteSnapshot",
+                       "SituacionOperativa", "SituacionAfectado",
+                       "SituacionEvento", "SituacionRelacion"}, modelos
 
     #  el modulo de LECTURA no escribe
     nombres = set()

@@ -51,7 +51,8 @@ from django.http import Http404
 from django.utils import timezone
 
 from operaciones import (actividades, asistentes, auditoria, contexto_propuesta,
-                         indicadores,
+                         correlacion,
+                         fuentes, indicadores,
                          supervisor)
 from operaciones.capacidad import capacidad_de_jornada
 from campo.services.idempotencia import manejar_idempotencia
@@ -1466,3 +1467,82 @@ class LatidoSupervisorView(APIView):
             "escrituras": 0,
             "fuente": "operaciones.supervisor.detectar",
         })
+
+
+class SondeoFuentesView(APIView):
+    """
+        POST /api/operaciones/supervisor/sondeo/
+
+    El SCHEDULER despierta al Supervisor y este consulta las fuentes que ya
+    vencieron. Devuelve conteos y estados; no decide nada.
+
+    POR QUE ES POST SI EL BLOQUE ES "SOLO LECTURA"
+    ---------------------------------------------
+    Porque "solo lectura" es respecto de los sistemas EXTERNOS: a los de afuera
+    se les consulta con herramientas `solo_lectura: true` por el camino del
+    motor, y a las fuentes internas con consultas al ORM. Ninguna de las seis
+    escribe afuera.
+
+    CUALES son esas fuentes, y como se consulta cada una, vive en
+    `operaciones/fuentes_adaptadores.py` y no aqui: esta vista no habla con
+    ningun proveedor -- le pide el sondeo a la capa de fuentes. Por eso la guarda
+    de M03-E5 puede seguir exigiendo que este modulo no nombre un sistema
+    externo, y sigue siendo cierto.
+
+    Lo que SI escribe esta ruta son dos tablas PROPIAS -- el estado de cada
+    fuente y su captura-- y eso es el entregable del bloque, no un efecto
+    secundario: sin escribirlo no hay con que comparar el ciclo siguiente ni
+    forma de distinguir "no hay nada" de "no se pudo preguntar". Un GET que
+    escribe es peor que un POST honesto.
+
+    LO QUE NO HACE, Y SE AFIRMA EN LA SUITE CONTANDO FILAS
+    -----------------------------------------------------
+    No crea Situaciones Operativas (no existen todavia), no crea propuestas, no
+    corre `supervisor.correr_ciclo`, no toca un caso, no escala, no crea
+    tickets, no llama a nada que produzca un efecto afuera y no modifica el
+    interruptor de autonomia.
+
+    CORRERLA DOS VECES SEGUIDAS NO DUPLICA NADA
+    -------------------------------------------
+    No por una clave de idempotencia, sino por como esta armado: al registrar
+    una lectura se corre `proxima_consulta_en` hacia adelante, asi que el
+    segundo sondeo no encuentra ninguna fuente vencida y no consulta nada. Es
+    una propiedad del dato, no una promesa del codigo, y la suite la afirma
+    contando snapshots.
+
+    EL TENANT SE COMPRUEBA, NO SE SUPONE
+    ------------------------------------
+    Igual que el latido: la organizacion sale de la credencial, y si quien llama
+    manda `organization_id` tiene que COINCIDIR. Un turno del scheduler apuntando
+    a otra empresa falla con 409 en vez de sondear las fuentes de al lado.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def post(self, request):
+        pedida = str(request.query_params.get("organization_id") or "").strip()
+        if pedida and pedida != str(request.org.id):
+            return Response(
+                {"error": "ORGANIZACION_DISTINTA",
+                 "detalle": "el turno apunta a una organización que no es la de "
+                            "esta credencial: no se sondea nada"},
+                status=status.HTTP_409_CONFLICT)
+
+        #  Las filas de las seis fuentes se crean si faltan, y nacen APAGADAS.
+        #  Que el sondeo las cree no las enciende: sin 'activa=True' ninguna se
+        #  consulta, y encenderla es una decision de operacion.
+        creadas = fuentes.asegurar_fuentes(request.org)
+
+        ahora = timezone.now()
+        informe = fuentes.sondear(request.org, ahora=ahora)
+        informe["fuentes_creadas"] = len(creadas)
+        informe["fuente"] = "operaciones.fuentes.sondear"
+
+        #  Y en el MISMO turno, la deteccion y la correlacion sobre lo que acaba
+        #  de capturarse. Van juntas a proposito: si corrieran en turnos
+        #  distintos, una situacion se construiria sobre la foto anterior y el
+        #  conteo de afectados llegaria siempre un ciclo tarde.
+        #
+        #  Sigue siendo UN solo scheduler y UN solo turno: esto no agenda nada.
+        informe["situaciones"] = correlacion.correr(request.org, ahora=ahora)
+        return Response(informe)

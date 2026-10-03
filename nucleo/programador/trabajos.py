@@ -143,3 +143,113 @@ def latido_supervisor(turno) -> dict:
         #  una propiedad de lo que corrio del otro lado, no de este archivo.
         "escrituras": int(cuerpo.get("escrituras", 0)),
     }
+
+
+#: A donde se le pide el sondeo de fuentes. Misma clase de dato que
+#: VARIABLE_URL: topologia de despliegue, no regla de negocio de una empresa.
+VARIABLE_URL_SONDEO = "SUPERVISOR_SONDEO_URL"
+URL_SONDEO_POR_DEFECTO = "http://backend:8000/api/operaciones/supervisor/sondeo/"
+
+#: Mas largo que el del latido, y con motivo: este turno consulta SEIS fuentes
+#: y dos de ellas salen a un tercero por HTTP. Sigue siendo un tope: si tarda
+#: mas que esto, el problema esta del otro lado y el turno tiene que soltar su
+#: lease en vez de ocuparlo entero.
+SEGUNDOS_TIMEOUT_SONDEO = 90
+
+
+class SondeoFallido(Exception):
+    """No se pudo pedir el sondeo, o la respuesta no se puede interpretar."""
+
+
+def sondeo_de_fuentes(turno) -> dict:
+    """
+    Despierta al Supervisor para que consulte sus fuentes. No interpreta nada.
+
+    QUE HACE ESTE TRABAJO, Y QUE NO
+    -------------------------------
+    Pide el sondeo y guarda CUANTAS fuentes se consultaron y en que estado quedo
+    cada una. No decide si hay un problema, no crea nada y no sabe que es
+    SmartOLT: para este modulo las fuentes son nombres que vienen en la
+    respuesta. Quien sabe de fuentes es el Supervisor, del otro lado.
+
+    POR QUE NO HAY UN TRABAJO POR FUENTE
+    ------------------------------------
+    Porque el nombre de un sistema externo no tiene por que estar escrito en el
+    motor, que es generico. Un trabajo por fuente obligaria a que el registro de
+    'nucleo/programador/' nombrara 'smartolt' y 'wisphub', y a que la frecuencia
+    de cada una fuera una fila de catalogo mantenida por quien despliega.
+
+    En su lugar: UN turno, y del otro lado cada fuente tiene su propia
+    frecuencia en una fila editable. Asi SmartOLT puede ir cada 5 minutos y M03
+    cada hora con un solo temporizador -- el de este scheduler, que sigue siendo
+    el unico del sistema.
+
+    UN FALLO ES UN FALLO
+    --------------------
+    Mismo criterio que el latido: si no se pudo pedir el sondeo, LEVANTA. "No se
+    pudo preguntar" no es "ninguna fuente tiene novedades", y el dia que esa
+    confusion entre a un tablero, el tablero dira que la red esta sana porque no
+    puede verla.
+    """
+    import requests  # dentro: importar este modulo no debe traer la red
+
+    url = (os.environ.get(VARIABLE_URL_SONDEO, "")
+           or URL_SONDEO_POR_DEFECTO).strip()
+    token = (os.environ.get(VARIABLE_TOKEN, "") or "").strip()
+    if not token:
+        raise SondeoFallido(
+            f"falta {VARIABLE_TOKEN}: sin credencial no se le puede pedir el "
+            f"sondeo, y un sondeo que no salio no es un sondeo en cero")
+
+    try:
+        r = requests.post(
+            url,
+            params={"organization_id": str(turno.organization_id)},
+            headers={"Authorization": f"Bearer {token}",
+                     "Accept": "application/json"},
+            timeout=SEGUNDOS_TIMEOUT_SONDEO)
+    except Exception as e:                                       # noqa: BLE001
+        registrar("programador", "el sondeo de fuentes no salio",
+                  job=turno.job_code, error=e)
+        raise SondeoFallido(f"no se pudo pedir: {type(e).__name__}") from None
+
+    if r.status_code != 200:
+        raise SondeoFallido(f"el Supervisor contesto HTTP {r.status_code}")
+
+    try:
+        cuerpo = r.json()
+    except ValueError:
+        raise SondeoFallido("la respuesta no es JSON") from None
+    if not isinstance(cuerpo, dict):
+        raise SondeoFallido("la respuesta no es un objeto JSON")
+
+    sondeadas = cuerpo.get("sondeadas")
+    por_fuente = cuerpo.get("por_fuente")
+    if not isinstance(sondeadas, int) or not isinstance(por_fuente, dict):
+        raise SondeoFallido("la respuesta no trae los conteos esperados")
+
+    #  Se vuelve a acotar aca: de cada fuente se conserva su ESTADO y su
+    #  frescura, no el resumen de datos que el Supervisor ya guardo en su propia
+    #  tabla. Reenviarlo lo duplicaria en el log del motor sin que nadie lo use.
+    estados = {}
+    for nombre, detalle in por_fuente.items():
+        if not isinstance(detalle, dict):
+            continue
+        estados[str(nombre)] = {
+            "estado": str(detalle.get("estado") or ""),
+            "frescura": str(detalle.get("frescura") or ""),
+            "concluyente": bool(detalle.get("concluyente")),
+        }
+
+    registrar("programador", "sondeo de fuentes",
+              job=turno.job_code, fuentes=sondeadas)
+
+    return {
+        "fuentes_sondeadas": sondeadas,
+        "estados": estados,
+        #  Cuantas NO permiten concluir nada. Es el numero que importa de un
+        #  vistazo: si son todas, el Supervisor esta ciego aunque el turno haya
+        #  salido bien.
+        "no_concluyentes": sum(1 for e in estados.values()
+                               if not e["concluyente"]),
+    }
