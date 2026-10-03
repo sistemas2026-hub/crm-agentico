@@ -292,6 +292,10 @@ export const actions = {
         material: f.get('material'),
         cantidad: f.get('cantidad'),
         serie: f.get('serie') ?? '',
+        // Para que trabajo se aparta. Vacio es el caso normal --una reserva
+        // contra la bodega-- y por eso se manda '' en vez de omitirlo: el
+        // backend distingue "no viene" de "viene vacio" sin ambiguedad.
+        orden_numero: f.get('orden_numero') ?? '',
         vence_en: f.get('vence_en') || null,
         motivo: f.get('motivo') ?? '',
       });

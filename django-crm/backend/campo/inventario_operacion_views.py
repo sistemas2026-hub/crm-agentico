@@ -102,6 +102,16 @@ class ReservasView(APIView):
             return Response({"detail": "Hace falta la ubicacion."},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        # APARTAR PARA UNA ORDEN: POR NUMERO, NO SOLO POR UUID
+        # ----------------------------------------------------
+        # El id existia desde siempre y nadie lo mandaba. Quien aparta material
+        # es la bodega, y lo que la bodega tiene en la mano es el NUMERO de la
+        # OT -- el que esta impreso en la orden y el que dice el tecnico por
+        # radio--, no un UUID de 36 caracteres. Pedirle el uuid es pedirle que
+        # copie algo que no tiene.
+        #
+        # Se aceptan los dos. El uuid sigue sirviendo para quien lo tenga (otro
+        # sistema, una integracion); el numero es el camino de la persona.
         orden = None
         if request.data.get("orden"):
             orden = OrdenTrabajo.objects.filter(
@@ -109,6 +119,35 @@ class ReservasView(APIView):
             ).first()
             if orden is None:
                 raise Http404("Esa orden de trabajo no existe en esta empresa.")
+        elif str(request.data.get("orden_numero") or "").strip():
+            numero = str(request.data["orden_numero"]).strip()
+            if not numero.isdigit():
+                return Response(
+                    {"detail": f"'{numero}' no es un numero de orden."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            orden = OrdenTrabajo.objects.filter(org=org, numero=int(numero)).first()
+            if orden is None:
+                raise Http404(
+                    f"La orden #{numero} no existe en esta empresa."
+                )
+            # Apartar material para un trabajo terminado no tiene sentido y el
+            # material quedaria bloqueado hasta que alguien lo note: la propia
+            # transicion que lo soltaria ya ocurrio.
+            if orden.estado_operativo in (
+                OrdenTrabajo.CERRADA,
+                OrdenTrabajo.CANCELADA,
+            ):
+                return Response(
+                    {
+                        "detail": (
+                            f"La orden #{numero} esta "
+                            f"'{orden.estado_operativo}': no se puede apartar "
+                            "material para un trabajo que ya termino."
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
 
         try:
             r = op.reservar(

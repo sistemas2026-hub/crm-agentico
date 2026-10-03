@@ -288,6 +288,39 @@
           </div>
         {/if}
 
+        <!--
+          PARA QUE TRABAJO SE APARTA.
+
+          El backend acepta una `orden` desde siempre y este formulario nunca la
+          mandaba, asi que `comprometido` llegaba vacio a la ficha del tecnico y
+          nadie podia contestar "que hay apartado para esta OT".
+
+          Va por NUMERO y no por un desplegable de ordenes: quien aparta material
+          es la bodega, y lo que la bodega tiene en la mano es el numero impreso
+          en la orden --o el que le dicen por radio--. Un desplegable con todas
+          las ordenes abiertas del dia se vuelve inusable en cuanto hay treinta.
+
+          Opcional a proposito: la mayoria de las reservas son contra la bodega y
+          no contra un trabajo. Dejarlo vacio es el caso normal.
+        -->
+        <div class="flex flex-col gap-space-xs">
+          <label for="res-orden" class="font-table-header text-table-header text-on-surface-variant uppercase tracking-wider">
+            Para la OT <span class="text-secondary font-normal opacity-75">(opcional)</span>
+          </label>
+          <input
+            id="res-orden"
+            name="orden_numero"
+            type="number"
+            min="1"
+            placeholder="1843"
+            class="w-full h-10 px-3 bg-surface-container-lowest text-on-surface font-label-numeric text-body-md rounded shadow-sm text-right focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+          <span class="font-body-sm text-body-sm text-secondary">
+            Lo apartado para una OT no lo consume un despacho de kit, y se suelta
+            solo si la orden se cancela o se cierra.
+          </span>
+        </div>
+
         <div class="flex flex-col gap-space-xs">
           <label for="res-vence" class="font-table-header text-table-header text-on-surface-variant uppercase tracking-wider">
             Vence <span class="text-secondary font-normal opacity-75">(opcional, pero conviene)</span>

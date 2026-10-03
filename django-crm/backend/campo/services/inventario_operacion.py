@@ -33,7 +33,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from campo.inventario_operacion import (
@@ -174,7 +174,7 @@ def liberar(reserva, *, motivo="", desenlace=ReservaDeMaterial.LIBERADA,
 
 @transaction.atomic
 def consumir_reservas(*, org, ubicacion, material, cantidad, serie="",
-                      movimiento=None) -> list:
+                      movimiento=None, orden=None) -> list:
     """Lo que se despacho deja de estar comprometido.
 
     EL DEFECTO QUE ESTO ARREGLA, MEDIDO EL 28/09/2026
@@ -198,6 +198,27 @@ def consumir_reservas(*, org, ubicacion, material, cantidad, serie="",
     Con serie se busca primero la reserva de ESA serie. Si no hay, se usa una
     generica del mismo material: reservar "una ONT" y despachar la ONT con serie
     tal es cumplir esa reserva, no otra distinta.
+
+    LO QUE SE APARTO PARA UNA ORDEN NO SE CONSUME POR CUALQUIER DESPACHO
+    -------------------------------------------------------------------
+    Medido el 02/10/2026, al ir a conectar las reservas por orden desde el CRM.
+    `ReservaDeMaterial` acepta una `orden` desde siempre y esta funcion la
+    ignoraba: elegia por ubicacion y material, la mas antigua primero.
+
+    Consecuencia, si hubiera reservas por orden: la bodega aparta 100 m para la
+    OT-1843 y 50 para la OT-1844; sale un DESPACHO DE KIT --que por decision
+    congelada no nombra ninguna orden, porque el kit es a la custodia del tecnico
+    y no a un trabajo-- y se cierra la reserva de la 1843. El bloque
+    `comprometido` de la ficha diria lo contrario de la realidad, y el ajuste
+    quedaria escrito en el libro como un hecho.
+
+    Por eso el ambito ahora es explicito:
+
+      sin `orden`  -- solo las reservas SIN orden. Un despacho de kit no puede
+                      cumplir una promesa hecha para un trabajo concreto.
+      con `orden`  -- primero las de ESA orden; si no alcanzan, las genericas.
+                      Mismo criterio que la serie, por la misma razon: cumplir lo
+                      especifico antes que lo generico, nunca al reves.
     """
     restante = Decimal(str(cantidad))
     # `select_for_update` por la misma razon que en `reservar`: dos despachos del
@@ -207,13 +228,27 @@ def consumir_reservas(*, org, ubicacion, material, cantidad, serie="",
     activas = ReservaDeMaterial.objects.select_for_update().filter(
         org=org, ubicacion=ubicacion, material=material, resuelta_en__isnull=True
     )
-    if serie:
-        de_la_serie = list(activas.filter(serie=serie).order_by("created_at"))
-        candidatas = de_la_serie or list(
-            activas.filter(serie="").order_by("created_at")
-        )
+
+    # El ambito, antes que nada: ver el encabezado. `orden__isnull=True` no es
+    # una optimizacion, es la garantia de que un despacho de kit no se lleve por
+    # delante lo apartado para un trabajo.
+    if orden is None:
+        activas = activas.filter(orden__isnull=True)
     else:
-        candidatas = list(activas.filter(serie="").order_by("created_at"))
+        activas = activas.filter(Q(orden=orden) | Q(orden__isnull=True))
+
+    def _ordenadas(qs):
+        """Primero las de ESTA orden, despues las genericas; dentro de cada
+        grupo, la mas antigua. Cumplir lo especifico antes que lo generico."""
+        propias = [r for r in qs.order_by("created_at") if r.orden_id]
+        genericas = [r for r in qs.order_by("created_at") if not r.orden_id]
+        return propias + genericas
+
+    if serie:
+        de_la_serie = _ordenadas(activas.filter(serie=serie))
+        candidatas = de_la_serie or _ordenadas(activas.filter(serie=""))
+    else:
+        candidatas = _ordenadas(activas.filter(serie=""))
 
     tocadas = []
     for reserva in candidatas:

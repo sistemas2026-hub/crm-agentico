@@ -363,6 +363,18 @@ def _aplicar_transicion(
         ]
     )
 
+    # UNA ORDEN QUE TERMINA SUELTA LO QUE TENIA APARTADO
+    # ---------------------------------------------------
+    # Sin esto, una reserva atada a una orden cancelada bloquea material PARA
+    # SIEMPRE: `vencer_reservas` solo toca las que tienen plazo --y es a
+    # proposito, "una reserva sin plazo es una decision de quien la hizo"-- y
+    # nadie mas vuelve a mirarlas. El sintoma no apunta a la causa: un dia falta
+    # material que esta en la bodega, comprometido para un trabajo que no existe.
+    #
+    # Se libera, no se borra. La fila queda con su desenlace y su motivo, que es
+    # lo que permite contestar despues por que se solto.
+    liberadas = _soltar_reservas_si_la_orden_termino(orden, nuevo_estado)
+
     # Registrar evento en la bitácora append-only
     EventoTrabajo.objects.create(
         org=orden.org,
@@ -373,8 +385,53 @@ def _aplicar_transicion(
             "estado_anterior": estado_actual,
             "nuevo_estado": nuevo_estado,
             "revision": orden.revision,
+            # Cuantas promesas de material dejo de haber. Se escribe en la
+            # bitacora y no solo en un log porque es un efecto sobre el
+            # inventario: quien lea esta orden dentro de un año tiene que poder
+            # ver que al cancelarla se soltaron tres reservas.
+            **({"reservas_liberadas": liberadas} if liberadas else {}),
             **metadatos,
         },
     )
 
     return orden
+
+
+#: Los estados en los que una orden ya no va a consumir material. `CERRADA` no
+#: entra: el material ya se consumio al despacharse, y lo que quede apartado para
+#: una orden cerrada se suelta igual --por eso tambien esta--.
+_ESTADOS_TERMINALES = (OrdenTrabajo.CANCELADA, OrdenTrabajo.CERRADA)
+
+
+def _soltar_reservas_si_la_orden_termino(orden, nuevo_estado) -> int:
+    """Libera las reservas abiertas de una orden que llego a su final.
+
+    Devuelve cuantas soltó. Cero cuando no corresponde, que es el caso normal.
+
+    No usa `consumir_reservas`: eso dice "esto se despacho". Acá no se despacho
+    nada --la orden murio-- y escribir CONSUMIDA seria afirmar un hecho que no
+    ocurrio. El desenlace es LIBERADA, con el motivo adentro.
+    """
+    if nuevo_estado not in _ESTADOS_TERMINALES:
+        return 0
+
+    # Import local: `inventario_operacion` importa modelos de campo y esto corre
+    # dentro de una transaccion ya abierta. Arriba del archivo seria un ciclo.
+    from campo.inventario_operacion import ReservaDeMaterial
+    from campo.services.inventario_operacion import liberar
+
+    abiertas = list(
+        ReservaDeMaterial.objects.select_for_update().filter(
+            org=orden.org, orden=orden, resuelta_en__isnull=True
+        )
+    )
+    for reserva in abiertas:
+        liberar(
+            reserva,
+            desenlace=ReservaDeMaterial.LIBERADA,
+            motivo=(
+                f"La orden #{orden.numero} paso a '{nuevo_estado}': lo apartado "
+                "para ella se solto."
+            ),
+        )
+    return len(abiertas)
