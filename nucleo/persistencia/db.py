@@ -842,12 +842,18 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       -- no le sirve a quien atiende y menos al cliente. El
                       -- estado si viaja, porque es lo que deja distinguir
                       -- "todavia no se intento" de "no habia nada que oir".
+                      -- Mismo reparto para la imagen: 'analisis_visual' y su
+                      -- estado viajan, 'error_analisis' no. Y el analisis que
+                      -- viaja no trae lo que la camara leyo impreso en la
+                      -- foto: eso no se guardo nunca (ver vision.a_json).
                       coalesce((
                         select json_agg(json_build_object(
                                  'id', a.id, 'tipo', a.tipo, 'mime', a.mime,
                                  'bytes', a.bytes, 'descripcion', a.descripcion,
                                  'transcripcion', a.transcripcion,
-                                 'estado_transcripcion', a.estado_transcripcion)
+                                 'estado_transcripcion', a.estado_transcripcion,
+                                 'analisis_visual', a.analisis_visual,
+                                 'estado_analisis', a.estado_analisis)
                                order by a.creado_en)
                         from asistente.media a
                         where a.mensaje_id = m.id
@@ -2520,7 +2526,10 @@ def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
                   mensaje_id: str | None = None,
                   transcripcion: str | None = None,
                   estado_transcripcion: str | None = None,
-                  error_transcripcion: str | None = None) -> str | None:
+                  error_transcripcion: str | None = None,
+                  analisis_visual: str | None = None,
+                  estado_analisis: str | None = None,
+                  error_analisis: str | None = None) -> str | None:
     """
     Una foto o audio del cliente, ya comprimido (ver nucleo/canales/media.py).
 
@@ -2534,19 +2543,48 @@ def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
         #  'descripcion' es el pie que ESCRIBIO el cliente al mandar el
         #  archivo; pisarlo con lo que dijo hablando borraria uno de los dos y
         #  nadie podria saber cual fue cual.
+        #
+        #  El ANALISIS VISUAL va en las suyas, y no en las de transcripcion,
+        #  por el mismo motivo una vuelta mas: una fila con 'transcripcion'
+        #  llena no diria si alguien hablo o si una camara miro, y las dos
+        #  cosas tienen reglas distintas de privacidad y de reintento.
         cur.execute(
             """insert into asistente.media
                  (organization_id, conversation_id, mensaje_id, media_id, tipo,
                   mime, contenido, bytes, descripcion,
-                  transcripcion, estado_transcripcion, error_transcripcion)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                  transcripcion, estado_transcripcion, error_transcripcion,
+                  analisis_visual, estado_analisis, error_analisis)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                on conflict (organization_id, media_id) do nothing
                returning id""",
             (org, conversation_id, mensaje_id, media_id, tipo, mime,
              contenido, len(contenido), descripcion,
-             transcripcion, estado_transcripcion, error_transcripcion))
+             transcripcion, estado_transcripcion, error_transcripcion,
+             analisis_visual, estado_analisis, error_analisis))
         fila = cur.fetchone()
         return str(fila["id"]) if fila else None
+
+
+def analisis_visual_de(tenant: str, media_id: str) -> dict | None:
+    """
+    El analisis ya hecho de esa imagen, si lo hay. Para no pagarlo dos veces.
+
+    Devuelve None cuando no hay fila. Quien llama decide que hacer con el
+    estado: solo un 'procesado' se reusa -- un 'error' guardado significa que
+    AQUEL intento fallo, y un reintento todavia puede salir bien.
+
+    La consulta va por (organization_id, media_id), que es la clave unica de
+    la tabla, asi que un tenant no puede leer el analisis de otro ni aunque
+    los dos recibieran una imagen con el mismo id de Meta.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select analisis_visual, estado_analisis
+               from asistente.media
+               where organization_id = %s and media_id = %s""",
+            (org, media_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
 
 
 def media_de(tenant: str, conversation_id: str) -> list[dict]:
@@ -2560,7 +2598,8 @@ def media_de(tenant: str, conversation_id: str) -> list[dict]:
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select id, media_id, tipo, mime, bytes, descripcion, mensaje_id,
-                      creado_en, transcripcion, estado_transcripcion
+                      creado_en, transcripcion, estado_transcripcion,
+                      analisis_visual, estado_analisis
                from asistente.media
                where organization_id = %s and conversation_id = %s
                order by creado_en""",

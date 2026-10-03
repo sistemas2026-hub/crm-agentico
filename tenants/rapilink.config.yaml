@@ -6696,6 +6696,19 @@ limites:
   # La foto sirve para resolver el caso, y un caso vive dias.
   retencion_multimedia_dias: 30
 
+# Si las fotos de esta empresa se miran con un modelo de vision.
+#
+# APAGADO. Encenderlo manda imagenes de clientes a un tercero, y eso depende
+# de la autorizacion de tratamiento que firma el cliente al contratar (Ley
+# 1581 art. 26, PRD RNF-01), no de que el codigo este desplegado. Una foto
+# puede mostrar una cara, el interior de la casa o un documento sobre la
+# mesa: a diferencia de un texto, el titular no eligio todo lo que salio en
+# el encuadre.
+#
+# Apagado, la foto se sigue guardando y mostrando en la bandeja igual que
+# siempre; lo unico que no pasa es que el agente la mire.
+vision_habilitada: false
+
 evaluacion:
   minimo_acierto_pct: 90.0
   # CERO, no "bajo". gemma3:4b respondia bien e inventaba cliente, plan y

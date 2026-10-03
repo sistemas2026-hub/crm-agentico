@@ -3034,6 +3034,22 @@ class TenantConfig(Base):
     # decisiones comerciales de cada empresa, no de la plataforma.
     promesas_pago: PromesasPago = Field(default_factory=PromesasPago)
     limites: Limites = Field(default_factory=Limites)
+    # SI LAS FOTOS DE ESTA EMPRESA SE MIRAN.
+    #
+    # Apagado por defecto, y no es prudencia de formulario: encenderlo manda
+    # imagenes de clientes a un tercero (ver nucleo/canales/vision.py), y eso
+    # depende de la autorizacion de tratamiento que firma cada empresa --
+    # Ley 1581 art. 26, PRD RNF-01--, no de que el codigo este desplegado.
+    # Una empresa puede tener transcripcion de audio y no querer vision.
+    #
+    # Es un campo de configuracion y no una bandera de entorno porque varia
+    # POR EMPRESA: la regla de CLAUDE.md 3.3. Lo contrario seria un 'if' por
+    # slug, que es exactamente lo que test_nucleo_sin_tenants.py caza.
+    #
+    # Apagado, el turno se comporta igual que antes de que esto existiera: la
+    # foto se guarda, se muestra en la bandeja, y al modelo le llega el aviso
+    # de siempre. No se descarga nada de mas ni se llama a ningun proveedor.
+    vision_habilitada: bool = False
     # El cierre de lo que atendio solo el asistente. Seccion propia y no un
     # campo mas de 'limites' porque tiene cuatro perillas que se mueven
     # juntas, y porque su interruptor tiene que poder apagarse sin tocar nada

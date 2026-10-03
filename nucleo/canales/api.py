@@ -44,7 +44,7 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from nucleo.canales import canal as canales
-from nucleo.canales import media, transcripcion, whatsapp
+from nucleo.canales import media, transcripcion, vision, whatsapp
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.relevo import desenlaces
 from nucleo.relevo import historial as regla_historial
@@ -8075,10 +8075,118 @@ def _transcribir_si_es_voz(config, tenant: str, entrante: dict) -> dict:
             "crudo": crudo, "mime": mime}
 
 
+def _analizar_si_es_imagen(config, tenant: str, entrante: dict) -> dict:
+    """
+    Mira la foto y la traduce al catalogo, ANTES del turno.
+
+    Espejo de _transcribir_si_es_voz y con el mismo contrato: siempre un dict
+    de la misma forma, para que quien llame no tenga que distinguir "no era
+    una imagen" de "no se pudo" de "esta apagado". Los tres dan texto vacio y
+    el turno sigue exactamente como seguia antes de que esto existiera.
+
+    SE APAGA PRIMERO Y SE PREGUNTA DESPUES. La bandera se mira antes que nada
+    --antes de consultar la base y antes de bajar el archivo-- porque con
+    vision apagada no hay nada que valga la pena averiguar: la foto se va a
+    guardar igual por el camino de siempre.
+
+    LOS BYTES VUELVEN EN EL DICT, igual que en el audio: el adjunto se guarda
+    despues del turno, cuando recien existe el conversation_id, y sin esto
+    habria que bajar la misma foto dos veces. Vuelven los dos juegos --el
+    original y el ya comprimido-- para que tampoco se comprima dos veces.
+
+    Nunca levanta.
+    """
+    vacio = {"texto": "", "estado": "", "error": "", "analisis": "",
+             "crudo": None, "mime": "", "listo": None, "mime_listo": ""}
+    tipo = entrante.get("tipo", "")
+    media_id = entrante.get("media_id")
+    if tipo not in vision.TIPOS_DE_IMAGEN_ENTRANTE or not media_id:
+        return vacio
+    if not getattr(config, "vision_habilitada", False):
+        return vacio
+
+    #  EL PIE SE RESUELVE UNA SOLA VEZ, ACA, y de un solo campo.
+    #
+    #  Por el webhook de WhatsApp el pie de una foto llega SIEMPRE en
+    #  'descripcion': 'texto' solo se llena cuando el mensaje es de tipo
+    #  'text' (ver whatsapp.py::entrantes). Pero este mismo turno lo usa
+    #  tambien el simulador, y ahi nada obliga a esa forma. Tomar el primero
+    #  que tenga algo cubre los dos casos sin poder duplicarlo: es UN valor,
+    #  no la suma de dos.
+    pie = (entrante.get("descripcion") or "").strip() \
+        or (entrante.get("texto") or "").strip()
+
+    #  IDEMPOTENCIA POR media_id. Si esta foto ya se analizo y salio bien, se
+    #  reusa: un reintento del webhook, o el mismo archivo reenviado, no se
+    #  paga dos veces. Solo se reusa 'procesado' -- un 'error' guardado dice
+    #  que AQUEL intento fallo, y el de ahora todavia puede salir bien.
+    #
+    #  La consulta va por (organization_id, media_id) dentro de sesion(tenant),
+    #  asi que no hay forma de leer el analisis de otra empresa.
+    try:
+        previo = persistencia.analisis_visual_de(tenant, media_id)
+    except Exception as e:
+        #  Que no se pueda consultar lo anterior no impide analizar: el costo
+        #  de mirarla de nuevo es chico y el de no contestar no lo es.
+        previo = None
+        registrar("vision", "no se pudo consultar el analisis previo",
+                  tenant=tenant, media=ref_proveedor(media_id), error=e)
+
+    if previo and previo.get("estado_analisis") == vision.PROCESADO:
+        guardado = (previo.get("analisis_visual") or "").strip()
+        if guardado:
+            r = vision.Resultado(texto=guardado, estado=vision.PROCESADO)
+            registrar("vision", "analisis reusado", tenant=tenant,
+                      media=ref_proveedor(media_id),
+                      caracteres=len(guardado))
+            return dict(vacio, estado=r.estado, analisis=guardado,
+                        texto=vision.texto_para_el_agente(r, pie))
+
+    try:
+        crudo, mime = whatsapp.descargar_media(config, tenant, media_id)
+    except Exception as e:
+        registrar("vision", "no se pudo bajar la imagen",
+                  tenant=tenant, media=ref_proveedor(media_id), error=e)
+        return dict(vacio, estado=vision.ERROR,
+                    error="no se pudo bajar la imagen")
+
+    #  Se analiza LO QUE SE GUARDA, no el original. Si el modelo mirara una
+    #  imagen distinta de la que queda en la bandeja, nadie podria auditar
+    #  despues por que dijo lo que dijo. Ademas pesa menos y cuesta menos.
+    listo, mime_listo = media.preparar(crudo, tipo, mime)
+
+    #  EL MODELO SALE DE LA CONFIG DEL TENANT, no de una constante: es un dato
+    #  que varia por empresa (CLAUDE.md 3.3). Es el MISMO que conversa, asi
+    #  que no hay un segundo proveedor ni una segunda clave.
+    modelo = getattr(getattr(config, "llm", None), "modelo_por_defecto", "")
+
+    r = vision.analizar(listo, modelo, pie)
+    #  EL EVENTO ES FIJO Y LO QUE VARIA SON CAMPOS. Lo mismo que ya corrigio
+    #  la transcripcion: un evento distinto por resultado no se puede agrupar
+    #  en el log, y cualquier variable interpolada ahi se escapa de la
+    #  redaccion de campos. Del contenido no va NADA -- ni que se vio ni lo
+    #  que decia la foto: solo cuanto texto salio y como termino.
+    registrar("vision", "imagen procesada", tenant=tenant,
+              media=ref_proveedor(media_id), estado=r.estado,
+              segundos=round(r.segundos, 1), tokens=r.tokens,
+              caracteres=len(r.texto), error=r.error or None)
+
+    return {"texto": vision.texto_para_el_agente(r, pie),
+            "estado": r.estado, "error": r.error,
+            #  Lo que se guarda es la DESCRIPCION, no el texto rotulado: el
+            #  rotulo y el pie se vuelven a armar al reusarla, y guardarlos
+            #  dejaria el pie escrito dos veces el dia que el cliente mande
+            #  la misma foto con otro comentario.
+            "analisis": r.texto if r.ok else "",
+            "crudo": crudo, "mime": mime,
+            "listo": listo, "mime_listo": mime_listo}
+
+
 def _guardar_adjunto(config, tenant: str, entrante: dict,
                      conversacion_id: str | None,
                      mensaje_id: str | None = None,
-                     audio: dict | None = None) -> None:
+                     audio: dict | None = None,
+                     imagen: dict | None = None) -> None:
     """
     Baja el archivo, lo comprime y lo guarda colgado de la conversacion.
 
@@ -8087,24 +8195,41 @@ def _guardar_adjunto(config, tenant: str, entrante: dict,
     tenerla, pero muchisimo mejor que un turno caido.
 
     'audio' trae lo que ya se bajo para transcribir, si era una nota de voz.
-    Con eso el archivo se descarga UNA sola vez por mensaje.
+    'imagen' lo mismo para una foto que ya se miro, y ademas trae la copia ya
+    comprimida. Con los dos, el archivo se descarga UNA sola vez por mensaje
+    y la imagen se comprime una sola vez.
     """
     media_id = entrante.get("media_id")
     if not media_id or not conversacion_id:
         return
     try:
         audio = audio or {}
+        imagen = imagen or {}
         if audio.get("crudo") is not None:
             crudo, mime = audio["crudo"], audio.get("mime") or ""
+        elif imagen.get("crudo") is not None:
+            crudo, mime = imagen["crudo"], imagen.get("mime") or ""
         else:
             crudo, mime = whatsapp.descargar_media(config, tenant, media_id)
-        contenido, mime = media.preparar(crudo, entrante.get("tipo", ""), mime)
+
+        if imagen.get("listo") is not None:
+            #  Ya se comprimio para mirarla: se guarda EXACTAMENTE eso, que
+            #  es lo que el modelo vio. Comprimir de nuevo daria una tercera
+            #  version distinta de las dos que ya existen.
+            contenido, mime = imagen["listo"], imagen.get("mime_listo") or mime
+        else:
+            contenido, mime = media.preparar(
+                crudo, entrante.get("tipo", ""), mime)
+
         persistencia.guardar_media(
             tenant, conversacion_id, media_id, entrante.get("tipo", ""),
             contenido, mime, entrante.get("descripcion") or None, mensaje_id,
             transcripcion=audio.get("texto") or None,
             estado_transcripcion=audio.get("estado") or None,
-            error_transcripcion=audio.get("error") or None)
+            error_transcripcion=audio.get("error") or None,
+            analisis_visual=imagen.get("analisis") or None,
+            estado_analisis=imagen.get("estado") or None,
+            error_analisis=imagen.get("error") or None)
         registrar("whatsapp", "adjunto guardado", conversation_id=id_interno(conversacion_id),
                   media=ref_proveedor(media_id), kb_recibidos=len(crudo) // 1024,
                   kb_guardados=len(contenido) // 1024)
@@ -8154,20 +8279,45 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         # dijo cuando piensa, no despues. Los bytes se reutilizan mas abajo
         # para guardar el adjunto, asi que el archivo se descarga UNA vez.
         #
-        # Lo demas --foto, video, documento-- sigue igual: el modelo lee lo que
-        # el cliente ESCRIBIO al mandarlo, mas el hecho de que mando algo. No
-        # se le pasa la imagen: no hay modelo de vision configurado, e inventar
-        # una descripcion seria exactamente lo que el PRD RF-07 prohibe.
+        # LA FOTO SE MIRA ANTES DEL TURNO, por el mismo motivo que la voz se
+        # transcribe antes: el agente tiene que poder leer lo que el cliente
+        # mostro cuando piensa, no despues. Lo que vuelve NO es una
+        # descripcion libre de la imagen sino palabras de un catalogo cerrado
+        # (ver nucleo/canales/vision.py), y eso es lo que hace que esto no
+        # viole el PRD RF-07: el modelo no puede afirmar lo que no existe en
+        # el catalogo.
+        #
+        # Apagado por tenant (vision_habilitada), que nace en false. Con la
+        # bandera apagada esta llamada no baja nada ni llama a ningun
+        # proveedor, y el turno se comporta igual que siempre.
+        #
+        # Lo demas --video, documento-- sigue igual: el modelo lee lo que el
+        # cliente ESCRIBIO al mandarlo, mas el hecho de que mando algo.
         audio = _transcribir_si_es_voz(config, tenant, entrante)
+        imagen = _analizar_si_es_imagen(config, tenant, entrante)
 
-        if not texto.strip():
+        if imagen.get("texto"):
+            #  LA FOTO GANA SOBRE EL AVISO, Y NO PIERDE EL PIE. El texto que
+            #  vuelve ya trae adentro lo que el cliente escribio al mandarla
+            #  --rotulado aparte y antes del analisis-- porque el pie se
+            #  resolvio una sola vez en _analizar_si_es_imagen. Por eso se
+            #  asigna entero y no se concatena con nada: concatenar seria la
+            #  unica forma de que el pie saliera dos veces.
+            #
+            #  Esta rama va PRIMERO y no dentro del 'if not texto.strip()':
+            #  por el webhook de WhatsApp una imagen nunca trae 'texto'
+            #  (whatsapp.py lo llena solo para tipo 'text'), pero el
+            #  simulador no esta obligado a esa forma, y ahi el analisis se
+            #  perdia entero -- se guardaba en la base y no llegaba al turno.
+            texto = imagen["texto"]
+        elif not texto.strip():
             if audio.get("texto"):
                 texto = transcripcion.texto_para_el_agente(
                     audio["texto"], descripcion)
             else:
-                # Una transcripcion que fallo NO inventa nada: se cae al mismo
-                # aviso de siempre y el cliente recibe la respuesta que ya
-                # recibia antes de que esto existiera.
+                # Una transcripcion o un analisis que fallaron NO inventan
+                # nada: se cae al mismo aviso de siempre y el cliente recibe
+                # la respuesta que ya recibia antes de que esto existiera.
                 texto = descripcion.strip() or _AVISO_ADJUNTO.get(tipo, "")
 
         if not texto:
@@ -8185,7 +8335,8 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         # aparte del turno y en su propio try porque una foto que no se pudo
         # bajar no puede dejar al cliente sin respuesta.
         _guardar_adjunto(config, tenant, entrante, salida.get("conversacion_id"),
-                         salida.get("mensaje_usuario_id"), audio=audio)
+                         salida.get("mensaje_usuario_id"), audio=audio,
+                         imagen=imagen)
 
         # Una respuesta VACIA significa "no hay nada que decir", y hay que
         # respetarlo: pasa cuando una persona del equipo esta atendiendo la

@@ -141,6 +141,25 @@
       <a class="adjunto" href="/api/media/{a.id}" target="_blank" rel="noreferrer">
         <img src="/api/media/{a.id}" alt={a.descripcion || 'Foto del cliente'} loading="lazy" />
       </a>
+      <!-- Lo que la IA vio en la foto. CERRADO por defecto y rotulado como
+           automático Y SIN VERIFICAR: esto no lo dijo el cliente ni lo
+           comprobó nadie. Presentarlo con el mismo peso que sus palabras
+           invita a leerlo como un hecho, y el texto lo escribe un modelo sin
+           catálogo cerrado — puede decir cualquier cosa. Quien atiende tiene
+           la foto justo arriba, que es la única verificación que existe.
+
+           Cerrado también por algo práctico: son varias líneas de texto
+           corrido, y abierto empujaría el resto del hilo fuera de pantalla
+           en cada foto. -->
+      {#if a.analisis_visual}
+        <details class="analisis">
+          <summary class="analisis-titulo">
+            Análisis automático de la foto
+            <span class="analisis-aviso">sin verificar</span>
+          </summary>
+          <p class="analisis-texto">{a.analisis_visual}</p>
+        </details>
+      {/if}
     {:else if a.tipo === 'audio' || a.tipo === 'voice'}
       <!-- svelte-ignore a11y_media_has_caption -->
       <audio class="adjunto-audio" controls src="/api/media/{a.id}"></audio>
@@ -747,6 +766,45 @@
   }
   .adjunto-transcripcion-rotulo {
     font-weight: 600;
+  }
+
+  /* El análisis de una foto NO se ve como la transcripción de un audio, y la
+     diferencia es deliberada: una transcripción es lo que el cliente dijo;
+     un análisis es lo que una máquina cree ver. Por eso va cerrado, con su
+     propio marco, y no como una cita al pie de la imagen. */
+  .analisis {
+    margin: 5px 0 0;
+    padding: 0;
+    border: 1px solid var(--v2-line, #e2e8f0);
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--v2-slate, #475569);
+  }
+  .analisis-titulo {
+    padding: 6px 10px;
+    font-weight: 600;
+    cursor: pointer;
+    list-style-position: inside;
+  }
+  .analisis[open] .analisis-titulo {
+    border-bottom: 1px solid var(--v2-line, #e2e8f0);
+  }
+  /* El aviso va EN el título y no debajo: quien colapsa el bloque sin
+     abrirlo tiene que seguir viendo que esto no está verificado. */
+  .analisis-aviso {
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--v2-line, #e2e8f0);
+    font-weight: 500;
+    font-size: 0.6875rem;
+    color: var(--v2-muted, #64748b);
+  }
+  .analisis-texto {
+    margin: 8px 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .adjunto-doc {
