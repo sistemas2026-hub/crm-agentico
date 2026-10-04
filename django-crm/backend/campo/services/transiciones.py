@@ -236,13 +236,32 @@ def requerir_correccion(
             "observacion": observacion,
         },
     )
-    return _aplicar_transicion(
+    orden = _aplicar_transicion(
         orden=orden,
         nuevo_estado=OrdenTrabajo.CORRECCION_REQUERIDA,
         tipo_evento="reapertura_correccion",
         profile=profile,
         metadatos={"vuelta": orden.vuelta},
     )
+
+    # AVISARLE AL TECNICO, QUE HOY SE ENTERA POR FUERA DEL SISTEMA
+    # ------------------------------------------------------------
+    # Hasta el 04/10/2026 una devolucion se le comunicaba por Google Chat, a
+    # mano, porque la aplicacion no tiene forma de decirle nada: no hay push y la
+    # cola solo corre cuando el tecnico toca la pantalla.
+    #
+    # Y el mensaje escrito a mano dice MENOS que lo que la app ya sabe: que
+    # evidencia hay que volver a tomar esta en la ficha. Esto manda las dos cosas
+    # juntas.
+    #
+    # El envio NO ocurre aca: `avisar_devolucion` se engancha a `on_commit`. Esta
+    # funcion es atomica, y hay una decision congelada --ninguna transaccion
+    # abierta esperando a un tercero--. De paso da la garantia correcta: si la
+    # devolucion se deshace, el aviso no sale.
+    from campo.services.avisos import avisar_devolucion
+
+    avisar_devolucion(orden, sorted(set(requisitos)), observacion)
+    return orden
 
 
 def _aplicar_validacion(

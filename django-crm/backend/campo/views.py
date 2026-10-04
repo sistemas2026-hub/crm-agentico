@@ -17,6 +17,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from campo.avisos import DispositivoDeTecnico
 from campo.models import EvidenciaTrabajo, EventoTrabajo, OrdenTrabajo
 from campo.permissions import IsCampoAuthenticated, PuedeAccederOrden, ROLES_GESTION
 from campo.serializers import (
@@ -211,6 +212,74 @@ class TrabajoDetailView(APIView):
         orden = _obtener_orden_o_404(request, pk)
         serializer = OrdenTrabajoDetailSerializer(orden)
         return Response(serializer.data)
+
+
+class DispositivoDeCampoView(APIView):
+    """El telefono dice «este soy yo», para poder recibir una notificacion.
+
+    POR QUE ES UN POST Y NO ALGO QUE SE DEDUCE
+    ------------------------------------------
+    El token lo emite el servicio de notificaciones en el telefono y cambia solo:
+    al reinstalar, al limpiar datos, cada tanto por su cuenta. No hay forma de
+    que el servidor lo sepa si el telefono no lo dice. Por eso la app lo manda al
+    entrar y cada vez que cambia.
+
+    ES IDEMPOTENTE, Y NO POR PROLIJIDAD
+    -----------------------------------
+    La app lo va a mandar muchas veces --cada arranque--. Si cada envio creara
+    una fila, el mismo telefono recibiria el aviso cinco veces, que es
+    exactamente lo que hace que la gente apague las notificaciones. La unicidad
+    la garantiza la base: `(org, token)`.
+
+    DELETE da de baja el telefono de ESTE perfil. Se usa al cerrar sesion: un
+    telefono de cuadrilla pasa de mano en mano, y el que entra no tiene por que
+    recibir los avisos del que salio.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request):
+        token = (request.data.get("token") or "").strip()
+        if not token:
+            return Response(
+                {"detail": "Falta el token del dispositivo."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        plataforma = (request.data.get("plataforma") or "android").strip().lower()
+        if plataforma not in dict(DispositivoDeTecnico.PLATAFORMAS):
+            return Response(
+                {"detail": f"Plataforma '{plataforma}' desconocida."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        dispositivo, creado = DispositivoDeTecnico.objects.update_or_create(
+            org=request.org,
+            token=token,
+            defaults={
+                # El perfil se REESCRIBE a proposito: si el telefono cambio de
+                # dueño, los avisos tienen que seguir a quien lo tiene ahora.
+                "profile": request.profile,
+                "plataforma": plataforma,
+                "activo": True,
+            },
+        )
+        return Response(
+            {"id": str(dispositivo.id), "nuevo": creado},
+            status=status.HTTP_201_CREATED if creado else status.HTTP_200_OK,
+        )
+
+    def delete(self, request):
+        token = (request.data.get("token") or "").strip()
+        qs = DispositivoDeTecnico.objects.filter(
+            org=request.org, profile=request.profile
+        )
+        if token:
+            qs = qs.filter(token=token)
+        # Se desactiva, no se borra: un token que dejo de servir y CUANDO dejo de
+        # servir es lo que permite contestar por que un aviso no llego.
+        bajas = qs.update(activo=False)
+        return Response({"dados_de_baja": bajas})
 
 
 class SeguimientoDeOrdenView(APIView):

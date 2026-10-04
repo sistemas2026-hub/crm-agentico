@@ -85,6 +85,10 @@ urlpatterns = [
     # La salud del seguimiento de la jornada. Se CALCULA al preguntar: no hay
     # ningun "estado_seguimiento" guardado que pueda quedar viejo.
     path("seguimiento/salud/", views.SaludDelSeguimientoView.as_view(), name="seguimiento_salud"),
+    # El telefono se registra para poder recibir un aviso. POST al entrar y cada
+    # vez que el token cambia; DELETE al cerrar sesion, porque un telefono de
+    # cuadrilla pasa de mano en mano.
+    path("dispositivo/", views.DispositivoDeCampoView.as_view(), name="dispositivo_campo"),
     path("trabajos/<uid:pk>/datos/", views.GuardarDatosTrabajoView.as_view(), name="trabajo_datos"),
     path("trabajos/<uid:pk>/probar-conexion/", views.ProbarConexionView.as_view(), name="trabajo_probar_conexion"),
 
