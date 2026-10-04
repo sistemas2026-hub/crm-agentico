@@ -22,6 +22,7 @@ import { leerAjustesBandeja } from './bandeja-config.js';
 import { leerCanalWhatsapp } from './canal-whatsapp.js';
 import { leerCredenciales } from './credenciales.js';
 import { leerSmartOlt } from './smartolt.js';
+import { leerAvisos } from './avisos-campo.js';
 import { contarPlanesVenta } from './planes-venta.js';
 import { leerOferta } from './oferta.js';
 import { leerGuiasTV } from './guias-tv.js';
@@ -122,7 +123,8 @@ export async function getSettingsHub(event) {
     oferta,
     guiasTv,
     credenciales,
-    ajustesBandeja
+    ajustesBandeja,
+    avisosCampo
   ] = await Promise.all([
     getOrgSettings(event),
     getBusinessHours(event),
@@ -158,7 +160,11 @@ export async function getSettingsHub(event) {
     // Dos enteros de la config del tenant. Mismo contrato que los de arriba:
     // devuelve null si el motor no contesta, y el hub muestra el destino sin
     // valor en vez de caerse entero.
-    leerAjustesBandeja()
+    leerAjustesBandeja(),
+    // Cuantos canales de aviso tiene cargados esta empresa. `leerAvisos` ya
+    // atrapa su propio error y devuelve la lista vacia: el hub no se cae
+    // porque un destino no conteste.
+    leerAvisos(event)
   ]);
 
   const now = Date.now();
@@ -189,6 +195,10 @@ export async function getSettingsHub(event) {
     // Los dos numeros con los que la Bandeja emite un veredicto. Que esten
     // sin definir NO lleva warn: es el default deliberado, no una falta.
     ajustesBandeja,
+    // Cuantos canales hay. CERO no es un error --ninguna empresa nace con esto
+    // configurado-- pero la tarjeta lo avisa, porque hoy esos avisos los
+    // escribe alguien a mano.
+    avisosCampo: { cuantos: avisosCampo.canales.length },
     // Cuantas pide el catalogo y cuantas estan cargadas. La fila del hub avisa
     // cuando falta alguna: eso es una herramienta que va a fallar al usarse.
     credencialesTotales: credenciales.disponible

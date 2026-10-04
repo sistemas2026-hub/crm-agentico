@@ -32,7 +32,12 @@ from unittest import mock
 import pytest
 from django.db import transaction
 
-from campo.avisos import AvisoEnviado, CanalDeAvisos, DispositivoDeTecnico
+from campo.avisos import (
+    AvisoEnviado,
+    CanalDeAvisos,
+    ConfiguracionDeAvisos,
+    DispositivoDeTecnico,
+)
 from campo.models import (
     AsignacionTrabajo,
     OrdenTrabajo,
@@ -106,10 +111,20 @@ def orden(org_a, tecnico):
 
 @pytest.fixture
 def canal(org_a):
+    """Un canal de chat y el dominio de los enlaces.
+
+    Son DOS cosas: el canal es uno de varios posibles; el dominio es de la
+    empresa. Repetirlo en cada canal haría que un día el enlace del chat y el
+    del correo apunten a lugares distintos.
+    """
+    ConfiguracionDeAvisos.objects.create(
+        org=org_a, url_base_app="https://campo.rapilink.co"
+    )
     return CanalDeAvisos.objects.create(
         org=org_a,
-        chat_webhook="https://chat.googleapis.com/v1/spaces/XXX/messages?key=k",
-        url_base_app="https://campo.rapilink.co",
+        tipo=CanalDeAvisos.GOOGLE_CHAT,
+        nombre="Cuadrilla norte",
+        destino="https://chat.googleapis.com/v1/spaces/XXX/messages?key=k",
         activo=True,
     )
 
@@ -129,13 +144,13 @@ def _devolver(orden, profile, requisitos=None, observacion=""):
 
 def test_a_devolver_un_trabajo_publica_en_el_chat(orden, tecnico, canal):
     with mock.patch(
-        "campo.services.avisos._publicar_en_chat", return_value=True
+        "campo.services.avisos.enviar_por", return_value=True
     ) as publicar:
         _devolver(orden, tecnico[1])
 
     publicar.assert_called_once()
     assert AvisoEnviado.objects.filter(org=orden.org).count() == 1
-    assert AvisoEnviado.objects.get().canales == ["chat"]
+    assert AvisoEnviado.objects.get().canales == ["google_chat"]
 
 
 def test_b_el_aviso_NO_sale_dentro_de_la_transaccion(orden, tecnico, canal):
@@ -147,14 +162,14 @@ def test_b_el_aviso_NO_sale_dentro_de_la_transaccion(orden, tecnico, canal):
     """
     visto = {}
 
-    def _espiar(webhook, texto):
+    def _espiar(canal, *, asunto, texto):
         # `get_connection().in_atomic_block` dice si todavia estamos adentro.
         from django.db import connection
 
         visto["en_transaccion"] = connection.in_atomic_block
         return True
 
-    with mock.patch("campo.services.avisos._publicar_en_chat", side_effect=_espiar):
+    with mock.patch("campo.services.avisos.enviar_por", side_effect=_espiar):
         _devolver(orden, tecnico[1])
 
     assert visto["en_transaccion"] is False
@@ -167,7 +182,7 @@ def test_c_si_la_devolucion_se_deshace_el_aviso_no_sale(orden, tecnico, canal):
     devolucion que no existe.
     """
     with mock.patch(
-        "campo.services.avisos._publicar_en_chat", return_value=True
+        "campo.services.avisos.enviar_por", return_value=True
     ) as publicar:
         try:
             with transaction.atomic():
@@ -185,7 +200,7 @@ def test_c_si_la_devolucion_se_deshace_el_aviso_no_sale(orden, tecnico, canal):
 
 def test_d_un_webhook_caido_no_impide_devolver(orden, tecnico, canal):
     with mock.patch(
-        "campo.services.avisos._publicar_en_chat", side_effect=OSError("sin red")
+        "campo.services.avisos.enviar_por", side_effect=OSError("sin red")
     ):
         _devolver(orden, tecnico[1])
 
@@ -208,7 +223,7 @@ def test_f_un_canal_apagado_no_publica(orden, tecnico, canal):
     canal.save(update_fields=["activo"])
 
     with mock.patch(
-        "campo.services.avisos._publicar_en_chat", return_value=True
+        "campo.services.avisos.enviar_por", return_value=True
     ) as publicar:
         _devolver(orden, tecnico[1])
 
@@ -222,7 +237,7 @@ def test_f_un_canal_apagado_no_publica(orden, tecnico, canal):
 def test_g_dos_devoluciones_distintas_avisan_dos_veces(orden, tecnico, canal):
     """Devolver la vuelta 2 y la vuelta 3 son dos hechos."""
     with mock.patch(
-        "campo.services.avisos._publicar_en_chat", return_value=True
+        "campo.services.avisos.enviar_por", return_value=True
     ) as publicar:
         _devolver(orden, tecnico[1])
         orden.refresh_from_db()
@@ -242,15 +257,15 @@ def test_h_el_mismo_hecho_no_se_avisa_dos_veces(orden, tecnico, canal):
     """
     from campo.services import avisos as serv
 
-    with mock.patch.object(serv, "_publicar_en_chat", return_value=True) as publicar:
+    with mock.patch.object(serv, "enviar_por", return_value=True) as publicar:
         for _ in range(2):
             serv._enviar_ahora(
                 org=orden.org,
                 clave=f"devolucion|{orden.id}|2",
+                asunto="t",
                 texto="x",
                 enlace_a=orden.id,
                 perfiles=[],
-                titulo_push="t",
             )
 
     assert publicar.call_count == 1
@@ -269,8 +284,8 @@ def test_i_el_mensaje_dice_QUE_hay_que_rehacer_con_su_titulo(orden, tecnico, can
     """
     textos = []
     with mock.patch(
-        "campo.services.avisos._publicar_en_chat",
-        side_effect=lambda w, t: textos.append(t) or True,
+        "campo.services.avisos.enviar_por",
+        side_effect=lambda c, *, asunto, texto: textos.append(texto) or True,
     ):
         _devolver(
             orden,
@@ -295,8 +310,8 @@ def test_j_el_mensaje_NO_lleva_datos_del_cliente(orden, tecnico, canal):
     """
     textos = []
     with mock.patch(
-        "campo.services.avisos._publicar_en_chat",
-        side_effect=lambda w, t: textos.append(t) or True,
+        "campo.services.avisos.enviar_por",
+        side_effect=lambda c, *, asunto, texto: textos.append(texto) or True,
     ):
         _devolver(orden, tecnico[1])
 
@@ -309,8 +324,8 @@ def test_j_el_mensaje_NO_lleva_datos_del_cliente(orden, tecnico, canal):
 def test_k_el_enlace_sale_del_dominio_de_la_empresa(orden, tecnico, canal):
     textos = []
     with mock.patch(
-        "campo.services.avisos._publicar_en_chat",
-        side_effect=lambda w, t: textos.append(t) or True,
+        "campo.services.avisos.enviar_por",
+        side_effect=lambda c, *, asunto, texto: textos.append(texto) or True,
     ):
         _devolver(orden, tecnico[1])
 
@@ -321,13 +336,14 @@ def test_l_sin_dominio_configurado_el_aviso_sale_igual_sin_enlace(
     orden, tecnico, canal
 ):
     """Un aviso sin enlace sigue sirviendo: dice que pasó algo y en qué OT."""
-    canal.url_base_app = ""
-    canal.save(update_fields=["url_base_app"])
+    config = ConfiguracionDeAvisos.objects.get(org=canal.org)
+    config.url_base_app = ""
+    config.save(update_fields=["url_base_app"])
 
     textos = []
     with mock.patch(
-        "campo.services.avisos._publicar_en_chat",
-        side_effect=lambda w, t: textos.append(t) or True,
+        "campo.services.avisos.enviar_por",
+        side_effect=lambda c, *, asunto, texto: textos.append(texto) or True,
     ):
         _devolver(orden, tecnico[1])
 
@@ -387,7 +403,7 @@ def test_p_push_todavia_no_tiene_proveedor_y_lo_dice(orden, tecnico, canal):
         org=orden.org, profile=tecnico[1], token="tok-1", activo=True
     )
 
-    with mock.patch("campo.services.avisos._publicar_en_chat", return_value=True):
+    with mock.patch("campo.services.avisos.enviar_por", return_value=True):
         _devolver(orden, tecnico[1])
 
-    assert AvisoEnviado.objects.get().canales == ["chat"]
+    assert AvisoEnviado.objects.get().canales == ["google_chat"]

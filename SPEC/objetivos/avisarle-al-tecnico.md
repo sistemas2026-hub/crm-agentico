@@ -35,10 +35,47 @@ vuelve.
 
 ## Las decisiones
 
-**1 · Se adopta el atajo en vez de pelearle.** El sistema publica en Google Chat,
-que es donde el técnico ya mira. No entra un tercero nuevo —Chat ya está en la
-operación— y es backend puro: no hay versión nueva de la app que instalar en los
-teléfonos.
+**1 · Se adopta el atajo en vez de pelearle.** El sistema publica donde el
+técnico ya mira. No entra un tercero nuevo y es backend puro: no hay versión
+nueva de la app que instalar en los teléfonos.
+
+**1 bis · Ningún proveedor nombrado en el esquema (corregido el 04/10/2026).**
+La primera versión tenía un campo llamado `chat_webhook` y mandaba el formato de
+Google Chat. Lo escribí mal: eso pone el nombre de un proveedor en la
+estructura, y la empresa siguiente usa Teams, o Slack, o quiere un correo.
+
+Ahora hay un `tipo` y **N canales por empresa** —una puede querer el chat de la
+cuadrilla **y** una copia al correo del coordinador—. Y los proveedores no son
+todos distintos: Google Chat, Slack, Teams, Discord y Mattermost son el mismo
+gesto, un POST con un JSON de una clave. Lo único que cambia es **cómo se llama
+esa clave**, y eso cabe en una tabla del modelo: agregar un proveedor es una
+línea, no una clase.
+
+El correo es el mínimo común denominador: funciona en toda empresa sin que nadie
+configure nada del otro lado.
+
+**1 ter · Lo configura la empresa, no un programador (corregido el 04/10/2026).**
+La primera versión guardaba el webhook en una fila que solo se podía cargar por
+consola. La regla del proyecto no dice «configuración por empresa»: dice
+*editable desde la interfaz y persistida por tenant, nunca un valor fijo en
+código **ni en un archivo que solo un desarrollador sabe editar***. Una fila
+cargada a mano es la misma falla con otra cara.
+
+Hay pantalla en `/settings/canales/avisos`, con el patrón que el repositorio ya
+tenía resuelto para SmartOLT y las credenciales del asistente:
+
+- **el rol decide quién edita** — un técnico no decide a dónde sale la
+  información de la empresa, aunque sí puede mirar;
+- **el destino va en un solo sentido y no vuelve** — en un webhook esa URL *es*
+  la credencial: la pantalla recibe una pista, no el valor;
+- **hay botón de probar, y recorre el mismo camino que un aviso de verdad.**
+  Pegar una URL y no saber si sirve es como se pudren estas configuraciones:
+  alguien la carga, nadie la prueba, y el día que hay una devolución el aviso no
+  llega y nadie sabe desde cuándo. Una prueba que usa otro camino prueba otra
+  cosa.
+
+Y **qué tipos existen lo dice el backend**, no una lista escrita en el frontend:
+el día que se agregue Mattermost aparece solo en el desplegable.
 
 **2 · El aviso sale DESPUÉS del commit.** `requerir_correccion` es
 `@transaction.atomic` y el proyecto tiene una decisión congelada: *ninguna
@@ -67,7 +104,8 @@ posterior del tipo de trabajo no reescribe lo que se pidió ese día.
 ## Qué se midió
 
 ```
-16 pruebas, contra PostgreSQL real y con COMMITS REALES
+16 pruebas del aviso, contra PostgreSQL real y con COMMITS REALES
+19 pruebas de la configuración
 ```
 
 Lo último no es un detalle del andamiaje: todo esto depende de

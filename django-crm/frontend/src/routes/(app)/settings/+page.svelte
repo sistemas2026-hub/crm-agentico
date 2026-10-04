@@ -239,6 +239,18 @@
           // no el estado de "todavia nadie lo toco".
           warn: !!data.canalWhatsapp && !data.canalWhatsapp.activo && !!data.canalWhatsapp.numero_visible
         },
+        {
+          href: '/settings/canales/avisos',
+          title: 'Avisos de campo',
+          body: 'Por dónde se le avisa a la cuadrilla cuando un supervisor devuelve un trabajo.',
+          // Sin canales nadie recibe nada, y eso NO es un error: es el estado
+          // por defecto. Pero vale decirlo, porque hoy esos avisos los escribe
+          // alguien a mano.
+          value: data.avisosCampo?.cuantos
+            ? `${data.avisosCampo.cuantos} canal${data.avisosCampo.cuantos === 1 ? '' : 'es'}`
+            : null,
+          warn: !data.avisosCampo?.cuantos
+        },
         // Solo aparece si el catalogo del tenant declara las herramientas de
         // SmartOLT -- un tenant sin esa integracion no tiene por que ver un
         // destino que no lleva a nada util.

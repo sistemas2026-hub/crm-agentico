@@ -1328,6 +1328,7 @@ from campo.seguimiento import (  # noqa: E402,F401
 from campo.avisos import (  # noqa: E402,F401
     AvisoEnviado,
     CanalDeAvisos,
+    ConfiguracionDeAvisos,
     DispositivoDeTecnico,
 )
 from campo.inventario_operacion import (  # noqa: E402,F401

@@ -4,6 +4,7 @@
 from django.urls import path
 
 from campo import (
+    avisos_views,
     despacho_views,
     inventario_operacion_views,
     inventario_views,
@@ -89,6 +90,11 @@ urlpatterns = [
     # vez que el token cambia; DELETE al cerrar sesion, porque un telefono de
     # cuadrilla pasa de mano en mano.
     path("dispositivo/", views.DispositivoDeCampoView.as_view(), name="dispositivo_campo"),
+    # La configuracion de avisos, que la empresa edita desde su pantalla. No es
+    # una fila que carga un programador: ver el encabezado de `avisos_views`.
+    path("avisos/canales/", avisos_views.CanalesDeAvisosView.as_view(), name="avisos_canales"),
+    path("avisos/canales/<uid:pk>/", avisos_views.CanalDeAvisosView.as_view(), name="avisos_canal"),
+    path("avisos/canales/<uid:pk>/probar/", avisos_views.ProbarCanalView.as_view(), name="avisos_probar"),
     path("trabajos/<uid:pk>/datos/", views.GuardarDatosTrabajoView.as_view(), name="trabajo_datos"),
     path("trabajos/<uid:pk>/probar-conexion/", views.ProbarConexionView.as_view(), name="trabajo_probar_conexion"),
 
