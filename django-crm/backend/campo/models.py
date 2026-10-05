@@ -316,6 +316,33 @@ class OrdenTrabajo(BaseModel):
         help_text="Torre, piso, apartamento, portería: cómo se entra.",
     )
 
+    # A QUIEN MAS LLAMAR CUANDO EL CLIENTE NO ESTA.
+    #
+    # Lo pidio el tecnico al recorrer la app: «cuando el cliente no esta,
+    # necesito a quien mas llamar. Hoy tengo un solo numero. En un edificio eso
+    # significa porteria, y la app no la tiene».
+    #
+    # Son DOS campos y no uno con todo adentro: un numero tiene que poder
+    # marcarse de un toque, y «Porteria 3001234567 preguntar por Don Luis» no se
+    # marca. El nombre dice a quien pedir; el telefono es lo que el marcador
+    # necesita limpio.
+    #
+    # Los dos vacios por omision, y eso es lo normal: casi ninguna orden va a
+    # traerlos. La aplicacion no dibuja la fila cuando no hay numero, en vez de
+    # dejar un renglon en blanco que se lee como un dato que no cargo.
+    contacto_alterno_nombre = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        help_text="A quién preguntar si el cliente no está: portería, vecino, familiar.",
+    )
+    contacto_alterno_telefono = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="El número del contacto alterno. Se marca de un toque desde la app.",
+    )
+
     # El identificador del abonado en el sistema del ISP. Sirve para que el
     # tecnico lo dicte por telefono al NOC sin tener que buscarlo.
     cliente_id_abonado = models.CharField(

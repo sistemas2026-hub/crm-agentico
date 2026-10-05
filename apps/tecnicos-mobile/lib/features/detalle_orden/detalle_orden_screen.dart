@@ -1588,6 +1588,67 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               ],
             ),
           ],
+          // A QUIEN MAS LLAMAR SI EL CLIENTE NO ESTA.
+          //
+          // Es la pregunta que el tecnico resolvia saliendo de la app: con un
+          // solo numero, un edificio sin portero cargado es una vuelta perdida.
+          //
+          // Solo se dibuja si hay NUMERO. Un nombre sin telefono no sirve para
+          // nada parado en la puerta, y una fila vacia se lee como un dato que
+          // no cargo en vez de como uno que la orden no trae.
+          if (SalirDeLaApp.uriDeTelefono(trabajo.contactoAlternoTelefono) !=
+              null) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            Semantics(
+              container: true,
+              button: true,
+              label: 'Llamar al contacto alterno',
+              excludeSemantics: true,
+              child: InkWell(
+                onTap: () async {
+                  final bool pudo = await widget.salir
+                      .llamar(trabajo.contactoAlternoTelefono);
+                  if (!pudo && mounted) {
+                    _avisar('No se pudo abrir el marcador de este equipo.');
+                  }
+                },
+                borderRadius: AppRadius.brCampo,
+                child: Row(
+                  children: <Widget>[
+                    const Icon(
+                      Icons.support_agent,
+                      size: 16,
+                      color: AppColors.secondary,
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            // Sin nombre cargado se dice que es alterno: «quien
+                            // sea» es mas util que un numero suelto sin rotulo.
+                            trabajo.contactoAlternoNombre.trim().isEmpty
+                                ? 'Contacto alterno'
+                                : trabajo.contactoAlternoNombre,
+                            style: AppTypography.etiquetaChica,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            trabajo.contactoAlternoTelefono,
+                            style: AppTypography.etiquetaGrande,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           // Cómo se entra al inmueble: torre, piso, apartamento. Lo carga el
           // despacho y evita la vuelta al portero.
           if (trabajo.detalleAcceso.isNotEmpty) ...<Widget>[

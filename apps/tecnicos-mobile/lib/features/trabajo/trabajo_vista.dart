@@ -56,6 +56,8 @@ class TrabajoVista {
     this.ventanaFin,
     this.slaVenceEn,
     this.detalleAcceso = '',
+    this.contactoAlternoNombre = '',
+    this.contactoAlternoTelefono = '',
     this.idAbonado = '',
     this.requisitosSeguridad = const <String>[],
   });
@@ -153,6 +155,17 @@ class TrabajoVista {
   /// Cómo se entra al inmueble: torre, piso, apartamento.
   final String detalleAcceso;
 
+  /// A quién llamar si el cliente no está: portería, un vecino, un familiar.
+  ///
+  /// Lo pidió el técnico: *«cuando el cliente no está necesito a quién más
+  /// llamar. Hoy tengo un solo número. En un edificio eso significa portería, y
+  /// la app no la tiene»*.
+  ///
+  /// Son dos campos y no uno: un número tiene que poder marcarse de un toque, y
+  /// «Portería 3001234567 preguntar por Don Luis» no se marca.
+  final String contactoAlternoNombre;
+  final String contactoAlternoTelefono;
+
   /// El identificador del abonado en el sistema del ISP.
   final String idAbonado;
 
@@ -200,6 +213,10 @@ class TrabajoVista {
       ventanaFin: _fecha(orden['ventana_fin']),
       slaVenceEn: _fecha(orden['sla_vence_en']),
       detalleAcceso: orden['detalle_acceso']?.toString() ?? '',
+      contactoAlternoNombre:
+          orden['contacto_alterno_nombre']?.toString() ?? '',
+      contactoAlternoTelefono:
+          orden['contacto_alterno_telefono']?.toString() ?? '',
       idAbonado: orden['id_abonado']?.toString() ?? '',
       requisitosSeguridad: <String>[
         for (final dynamic r in _lista(orden['requisitos_seguridad_json']))

@@ -48,6 +48,12 @@ def _cliente(obj: OrdenTrabajo) -> dict:
         "telefono": obj.cliente_telefono,
         "direccion": obj.cliente_direccion,
         "detalle_acceso": obj.cliente_detalle_acceso,
+        # A quien mas llamar si el cliente no esta. Van siempre --aunque esten
+        # vacios-- porque la app distingue «no hay contacto alterno» de «la
+        # version vieja del servidor no lo manda», y eso ultimo se ve igual que
+        # lo primero si la clave falta.
+        "contacto_alterno_nombre": obj.contacto_alterno_nombre,
+        "contacto_alterno_telefono": obj.contacto_alterno_telefono,
         "id_abonado": obj.cliente_id_abonado,
         "lat": obj.gps_lat,
         "lng": obj.gps_lng,

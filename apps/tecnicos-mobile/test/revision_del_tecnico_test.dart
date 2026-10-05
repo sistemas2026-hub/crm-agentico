@@ -347,6 +347,8 @@ void main() {
     });
   });
 
+  _contactoAlterno();
+
   group('1bis · la línea de horas en la pantalla', () {
     testWidgets('a · con horas se dibujan; sin horas no ocupa lugar',
         (WidgetTester t) async {
@@ -397,6 +399,113 @@ void main() {
       await t.pumpAndSettle();
 
       expect(find.textContaining(':'), findsNothing);
+    });
+  });
+}
+
+/// 7. A quién más llamar si el cliente no está.
+void _contactoAlterno() {
+  Map<String, dynamic> conContacto({String? nombre, String? telefono}) =>
+      <String, dynamic>{
+        'id': 'ot-1',
+        'numero': 1842,
+        'estado': 'asignada',
+        'cliente_nombre': 'María Fernández',
+        'direccion': 'Cra. 48 # 12-30, Apto 402',
+        'telefono': '+57 300 999 8877',
+        'tipo_nombre': 'Instalación',
+        'tipo_codigo': 'ftth_instalacion',
+        'schema_version': 1,
+        'revision': 1,
+        'contacto_alterno_nombre': nombre,
+        'contacto_alterno_telefono': telefono,
+      };
+
+  Future<List<Uri>> montar(WidgetTester t, Map<String, dynamic> f) async {
+    t.view.physicalSize = const Size(1000, 4200);
+    t.view.devicePixelRatio = 1.0;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+
+    final StreamController<SyncStatus> avisos =
+        StreamController<SyncStatus>.broadcast();
+    final OrdenesJornada o = OrdenesJornada(
+      leerOrdenes: () async => <Map<String, dynamic>>[f],
+      sincronizar: () async {},
+      avisosDeSincronizacion: avisos.stream,
+    );
+    addTearDown(() async {
+      await avisos.close();
+      o.dispose();
+    });
+
+    final List<Uri> abiertos = <Uri>[];
+    await t.pumpWidget(MaterialApp(
+      theme: AppTheme.lightTheme,
+      home: DetalleOrdenScreen(
+        ordenId: 'ot-1',
+        ordenes: o,
+        salir: SalirDeLaApp(abrir: (Uri u) async {
+          abiertos.add(u);
+          return true;
+        }),
+        acciones: AccionesOrden(
+          transicionar: ({
+            required String ordenId,
+            required String nuevoEstadoLocal,
+            required String tipoAccion,
+            required int revisionBase,
+          }) async {},
+          sincronizar: () async {},
+        ),
+      ),
+    ));
+    await t.pumpAndSettle();
+    return abiertos;
+  }
+
+  group('7 · el contacto alterno', () {
+    testWidgets('a · con número, se ve y se puede llamar',
+        (WidgetTester t) async {
+      final SemanticsHandle sem = t.ensureSemantics();
+      final List<Uri> abiertos = await montar(
+        t,
+        conContacto(nombre: 'Portería — Don Luis', telefono: '+57 300 111 2233'),
+      );
+
+      expect(find.text('Portería — Don Luis'), findsOneWidget);
+
+      await t.tap(find.bySemanticsLabel('Llamar al contacto alterno'));
+      await t.pumpAndSettle();
+      sem.dispose();
+
+      expect(abiertos.single.path, '+573001112233');
+    });
+
+    testWidgets('b · SIN número no se dibuja, aunque haya nombre',
+        (WidgetTester t) async {
+      // Un nombre sin teléfono no sirve para nada parado en la puerta, y una
+      // fila vacía se lee como un dato que no cargó.
+      await montar(t, conContacto(nombre: 'Portería'));
+
+      expect(find.text('Portería'), findsNothing);
+    });
+
+    testWidgets('c · sin contacto alterno, la ficha queda como estaba',
+        (WidgetTester t) async {
+      await montar(t, conContacto());
+
+      expect(find.textContaining('Contacto alterno'), findsNothing);
+      // Y el teléfono del cliente sigue: son dos números y dos personas.
+      expect(find.text('+57 300 999 8877'), findsOneWidget);
+    });
+
+    testWidgets('d · con número y sin nombre, se dice que es alterno',
+        (WidgetTester t) async {
+      // «Quien sea» es más útil que un número suelto sin rótulo.
+      await montar(t, conContacto(telefono: '+57 300 111 2233'));
+
+      expect(find.text('Contacto alterno'), findsOneWidget);
     });
   });
 }

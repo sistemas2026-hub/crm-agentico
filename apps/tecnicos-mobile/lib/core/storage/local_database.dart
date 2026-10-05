@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 20,
+      version: 21,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -166,6 +166,27 @@ class LocalDatabase {
     // pueda leer sin señal.
     if (oldVersion < 19) {
       await _crearTablaDeNotificaciones(db);
+    }
+
+    // v21: a quién más llamar si el cliente no está.
+    //
+    // Va en su propio bloque y no en el de la v8: un teléfono que ya está en
+    // v20 nunca vuelve a entrar ahí, y las columnas nuevas no aparecerían. Es
+    // el tipo de error que no da error — la columna falta, el `insert` la
+    // ignora, y el dato simplemente nunca se ve.
+    if (oldVersion < 21) {
+      final List<Map<String, Object?>> info =
+          await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final Set<String> cols =
+          info.map((Map<String, Object?> c) => c['name'] as String).toSet();
+      for (final String col in <String>[
+        'contacto_alterno_nombre',
+        'contacto_alterno_telefono',
+      ]) {
+        if (!cols.contains(col)) {
+          await db.execute('ALTER TABLE local_ordenes ADD COLUMN $col TEXT;');
+        }
+      }
     }
 
     // v20: las visitas anteriores al mismo servicio, espejadas.
@@ -792,6 +813,8 @@ class LocalDatabase {
         ventana_fin TEXT,
         sla_vence_en TEXT,
         detalle_acceso TEXT,
+        contacto_alterno_nombre TEXT,
+        contacto_alterno_telefono TEXT,
         id_abonado TEXT,
         requisitos_seguridad_json TEXT,
         origen_json TEXT,
@@ -1024,6 +1047,8 @@ class LocalDatabase {
         'ventana_fin',
         'sla_vence_en',
         'detalle_acceso',
+        'contacto_alterno_nombre',
+        'contacto_alterno_telefono',
         'id_abonado',
         'requisitos_seguridad_json',
       ],
@@ -1139,6 +1164,16 @@ class LocalDatabase {
         clienteObj,
         'detalle_acceso',
         'detalle_acceso',
+      )?.toString(),
+      'contacto_alterno_nombre': conservando(
+        clienteObj,
+        'contacto_alterno_nombre',
+        'contacto_alterno_nombre',
+      )?.toString(),
+      'contacto_alterno_telefono': conservando(
+        clienteObj,
+        'contacto_alterno_telefono',
+        'contacto_alterno_telefono',
       )?.toString(),
       'id_abonado': conservando(
         clienteObj,
