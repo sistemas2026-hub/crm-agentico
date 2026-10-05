@@ -1277,6 +1277,22 @@ class Herramienta(Base):
     # nucleo/herramientas/incidentes.py y la skill smartolt-api (seccion
     # get_outage_pons) para el porque y la verificacion en vivo.
     detecta_incidente: bool = False
+
+    # LA LECTURA DE FLOTA, que es OTRA COSA que 'detecta_incidente'.
+    #
+    # 'detecta_incidente' PARTE DE UN CLIENTE: exige 'sn_onu' y contesta si
+    # la falla de esa persona es aislada o compartida. Esta no parte de
+    # nadie: descubre las OLTs con 'get_olts' y pregunta por los PON
+    # anormales de cada una. Es lo que necesita el Supervisor NOC para ver
+    # la red ANTES de que alguien abra un ticket.
+    #
+    # Las OLTs se DESCUBREN. No hay lista fija en la configuracion: se
+    # intento una vez y se revirtio, porque una lista fija se queda vieja
+    # sin que nadie lo note y el dia que la empresa agrega una OLT el
+    # Supervisor dejaria de verla y no lo diria.
+    #
+    # Ver nucleo/herramientas/flota.py.
+    detecta_caidas_flota: bool = False
     # Tipo 'interno' tambien: resume el historial de caidas del enlace en un
     # veredicto ya calculado en vez de entregar la lista cruda de eventos.
     # Ver nucleo/herramientas/estabilidad.py.

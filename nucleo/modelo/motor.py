@@ -53,6 +53,7 @@ from nucleo.modelo import nota_vision
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import incidentes as ejecutor_incidentes
+from nucleo.herramientas import flota as ejecutor_flota
 from nucleo.herramientas import estabilidad as ejecutor_estabilidad
 from nucleo.herramientas import wifi as ejecutor_wifi
 from nucleo.herramientas import pagos as ejecutor_pagos
@@ -2557,6 +2558,13 @@ def _despacho_de_herramienta(herramienta, argumentos: dict,
     """
     if herramienta.tipo == "interno" and herramienta.detecta_incidente:
         return ejecutor_incidentes.detectar(herramienta, argumentos, tenant, variables_tenant)
+
+    #  La lectura de FLOTA. Va junto a la anterior porque las dos hablan con
+    #  SmartOLT, y separadas porque contestan preguntas distintas: aquella
+    #  parte de un cliente, esta no parte de nadie.
+    if herramienta.tipo == "interno" and herramienta.detecta_caidas_flota:
+        return ejecutor_flota.caidas_por_pon(herramienta, argumentos, tenant,
+                                            variables_tenant)
 
     if herramienta.tipo == "interno" and herramienta.resume_estabilidad:
         return ejecutor_estabilidad.resumir(herramienta, argumentos, tenant, variables_tenant)

@@ -5538,6 +5538,48 @@ herramientas:
     reintentar_identificador_como:
       sn_onu: gpon_hex
 
+  #  LA LECTURA DE FLOTA DEL SUPERVISOR NOC.
+  #
+  #  No la llama el modelo: la llama el BACKEND, en el sondeo periodico de
+  #  fuentes (ver 'invocable_por_servicio'). Por eso no esta en el
+  #  'puede_consultar' de ningun rol.
+  #
+  #  Es OTRA COSA que 'consultar_incidente_red', que esta justo debajo: aquella
+  #  parte de un cliente ('sn_onu') y contesta si SU falla es compartida; esta
+  #  no parte de nadie y contesta como esta la red. El Supervisor necesita la
+  #  segunda para ver una afectacion ANTES de que alguien abra un ticket.
+  #
+  #  Las OLTs se DESCUBREN con 'get_olts'. No hay lista fija de ids aqui, y no
+  #  es un olvido: se declaro una vez y se revirtio, porque una lista fija se
+  #  queda vieja sin que nadie lo note -- el dia que la empresa agrega una OLT,
+  #  el Supervisor dejaria de verla y no lo diria.
+  #
+  #  Para que el backend la use hay que nombrarla ADEMAS en la variable
+  #  SUPERVISOR_HERRAMIENTAS_CAIDAS_PON. Mientras esa variable este vacia, la
+  #  fuente responde NO_DISPONIBLE -- no 'sin caidas'.
+  - nombre: consultar_caidas_pon_flota
+    tipo: interno
+    detecta_caidas_flota: true
+    descripcion: >
+      Las caidas por puerto PON de TODA la flota, descubriendo las OLTs con
+      get_olts y consultando get_outage_pons de cada una. Devuelve, por puerto,
+      cuantos abonados hay, cuantos estan afectados, de que tipo (partial_los /
+      los / power / offline) y desde cuando. NO parte de ningun cliente y NO
+      devuelve datos de personas: el endpoint agrupa por puerto, y lo mas
+      identificable que trae es el nombre de la caja en la calle. Si una sola
+      OLT no contesta, la lectura entera falla a proposito: un resumen al que le
+      falta una OLT se leeria como 'en esa OLT no hay caidas', que es justo lo
+      que no se puede afirmar.
+    solo_lectura: true
+    invocable_por_servicio: true
+    #  Nadie la usa en conversacion. El catalogo de un rol se arma desde
+    #  'puede_consultar', asi que declararlo aqui no se la ofrece a ningun
+    #  modelo -- pero el esquema exige al menos uno.
+    roles_permitidos: [soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
   - nombre: consultar_incidente_red
     tipo: interno
     detecta_incidente: true
