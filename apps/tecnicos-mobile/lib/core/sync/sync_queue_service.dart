@@ -195,6 +195,9 @@ class SyncQueueService {
       // instante antes de volver a bajar.
       await _procesarMovimientosMaterial(orgId, profileId);
       await _procesarIncidencias(orgId, profileId);
+      // 5d. Lo que la plataforma le aviso. Va al final: es lectura, y lo que el
+      // tecnico ESCRIBIO siempre tiene prioridad para subir.
+      await _procesarNotificaciones(orgId, profileId);
       // 5c. Los reportes de seguimiento. Despues de los movimientos a proposito:
       // un CIERRE puede traer el consumo final, y si el consumo subiera despues
       // el NOC veria el trabajo cerrado con material que todavia no figura.
@@ -844,6 +847,64 @@ class SyncQueueService {
         estadoFinal: 'pendiente',
         mensaje: e.message,
       );
+    }
+  }
+
+  /// Baja las notificaciones de esta persona y sube lo que se marcó leído.
+  ///
+  /// POR QUE ESTA EN LA COLA Y NO EN UNA PANTALLA
+  /// -------------------------------------------
+  /// La aplicación no tiene latido: se entera de las cosas cuando el técnico la
+  /// toca. Engancharlo acá hace que cada sincronización --abrir la app, mandar
+  /// un reporte, bajar la jornada-- traiga también lo que le avisaron, sin
+  /// agregar un temporizador que gaste batería.
+  ///
+  /// Mientras no haya push, esto es lo que hay. Con push, además, el golpecito.
+  Future<void> _procesarNotificaciones(String orgId, String profileId) async {
+    // Primero lo que el técnico ya leyó: si se hace al revés, la bajada
+    // devolvería esas mismas sin leer y el contador volvería a subir solo.
+    final List<String> leidas = await _localDb.lecturasSinSubir(
+      orgId: orgId,
+      profileId: profileId,
+    );
+    for (final String id in leidas) {
+      try {
+        final r = await _apiClient.post(ApiEndpoints.notificacionLeida(id));
+        if (r.statusCode == 200 || r.statusCode == 204) {
+          await _localDb.marcarLecturaSubida(id);
+        }
+      } on DioException catch (e) {
+        // 404: alguien la borró del otro lado. La marca ya no tiene a dónde ir
+        // y reintentarla para siempre sería gastar batería contra algo que no
+        // existe.
+        if (e.response?.statusCode == 404) {
+          await _localDb.marcarLecturaSubida(id);
+        }
+        // Cualquier otra cosa: queda pendiente y se reintenta sola.
+      }
+    }
+
+    try {
+      final respuesta = await _apiClient.get(ApiEndpoints.notificaciones);
+      final datos = respuesta.data;
+      final List<dynamic> crudas = datos is Map
+          ? (datos['results'] as List<dynamic>? ??
+                datos['notifications'] as List<dynamic>? ??
+                const <dynamic>[])
+          : (datos is List ? datos : const <dynamic>[]);
+      if (crudas.isEmpty) return;
+
+      await _localDb.guardarNotificaciones(
+        orgId: orgId,
+        profileId: profileId,
+        notificaciones: <Map<String, dynamic>>[
+          for (final dynamic c in crudas)
+            if (c is Map) Map<String, dynamic>.from(c),
+        ],
+      );
+    } catch (_) {
+      // Sin señal no se toca nada: lo que ya estaba sigue siendo lo último que
+      // se supo, y la pantalla lo dice.
     }
   }
 

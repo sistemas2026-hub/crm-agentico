@@ -65,6 +65,21 @@ def avisar_devolucion(orden, requisitos: list[str], observacion: str = "") -> No
     if titulos:
         lineas.append("Hay que volver a tomar: " + ", ".join(titulos))
 
+    perfiles = _asignados(orden)
+
+    # 1. LA NOTIFICACION, QUE ES EL HECHO
+    # -----------------------------------
+    # Va DENTRO de la transaccion, al reves que el envio de abajo. No es una
+    # inconsistencia: la notificacion es parte del hecho --si la devolucion se
+    # deshace, la notificacion tiene que deshacerse con ella-- mientras que
+    # mandarla por un canal externo es una ENTREGA, y una entrega no puede
+    # bloquear filas esperando a un tercero.
+    #
+    # Es la misma distincion que el proyecto ya tiene escrita para los mensajes:
+    # `aceptado != entregado != leido`.
+    _notificar_en_la_app(orden, perfiles, titulos, observacion)
+
+    # 2. LAS ENTREGAS, que son opcionales y van despues del commit.
     _despachar(
         org=orden.org,
         # La clave describe el HECHO: devolver la vuelta 2 de esta orden pasa una
@@ -73,8 +88,50 @@ def avisar_devolucion(orden, requisitos: list[str], observacion: str = "") -> No
         asunto=f"OT #{orden.numero} devuelta",
         texto="\n".join(lineas),
         enlace_a=orden.id,
-        perfiles=_asignados(orden),
+        perfiles=perfiles,
     )
+
+
+def _notificar_en_la_app(orden, perfiles, titulos: list[str], observacion: str):
+    """Escribe una notificacion por persona, con el despachador que YA existe.
+
+    POR QUE NO SE CONSTRUYO UNO NUEVO
+    ---------------------------------
+    `common/notifications.py` es el unico punto de llamada de toda la plataforma
+    --watchers, menciones, escalamientos-- y su propio encabezado dice «y futuras
+    apps». Campo era la unica parte que no lo usaba: se habia ido a buscar un
+    canal hacia afuera teniendo el mecanismo adentro.
+
+    Con esto el supervisor la ve en su campanita y el tecnico en su aplicacion,
+    sin que ninguna empresa configure nada. Los canales externos --chat, correo--
+    quedan como lo que son: ENTREGAS opcionales de esto.
+
+    QUE VA EN `data`, Y QUE NO
+    --------------------------
+    Lo que hace falta para actuar: la vuelta, que hay que rehacer y lo que
+    escribio el supervisor. **Ni nombre, ni direccion, ni telefono del cliente**:
+    una notificacion se sincroniza al telefono y se queda ahi, y el detalle del
+    cliente ya vive en la ficha, detras de la sesion.
+    """
+    from common import notifications
+
+    for perfil in perfiles:
+        notifications.create(
+            perfil,
+            "trabajo_devuelto",
+            entity=orden,
+            entity_name=f"OT #{orden.numero}",
+            # Relativo: quien lo abre ya esta autenticado, y el dominio lo pone
+            # cada cliente. Un absoluto obligaria a que la notificacion sepa si
+            # la lee la web o el telefono.
+            link=f"/ot/{orden.id}",
+            data={
+                "vuelta": orden.vuelta,
+                "observacion": observacion,
+                "rehacer": titulos,
+                "orden_numero": orden.numero,
+            },
+        )
 
 
 def _titulos_de(orden, requisitos: list[str]) -> list[str]:

@@ -34,6 +34,17 @@ class ApiEndpoints {
   /// Los campos los decide `WorkTypeVersion`, no la aplicacion: por eso una
   /// empresa puede cambiar lo que se pide sin que haya que publicar una version
   /// nueva de la app.
+  /// Las notificaciones de esta persona.
+  ///
+  /// NO es de campo: vive en `/api/notifications/`, que es el unico
+  /// despachador de la plataforma --el mismo que alimenta la campanita de
+  /// la web--. Campo era la unica parte que no lo usaba.
+  static String get notificaciones => '$baseUrl/api/notifications/';
+
+  /// Marcar una como leida.
+  static String notificacionLeida(String id) =>
+      '$baseUrl/api/notifications/$id/read/';
+
   /// Que material toco ESTA orden: comprometido, consumido, devuelto.
   ///
   /// Distinto del kit, que es lo que el tecnico lleva encima para toda la

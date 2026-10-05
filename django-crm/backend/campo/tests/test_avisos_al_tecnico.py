@@ -407,3 +407,100 @@ def test_p_push_todavia_no_tiene_proveedor_y_lo_dice(orden, tecnico, canal):
         _devolver(orden, tecnico[1])
 
     assert AvisoEnviado.objects.get().canales == ["google_chat"]
+
+
+
+# --------------------------------------------------------------------------- #
+# G. La notificación EN la plataforma, que es el hecho y no una entrega
+# --------------------------------------------------------------------------- #
+
+def test_q_devolver_escribe_una_notificacion_por_persona(orden, tecnico):
+    """LO QUE FALTABA, Y YA EXISTIA EN LA CASA.
+
+    `common/notifications.py` es el único punto de llamada de toda la plataforma
+    y su encabezado dice «y futuras apps». Campo era la única parte que no lo
+    usaba: se había ido a buscar un canal hacia afuera teniendo el mecanismo
+    adentro.
+
+    Con esto el supervisor la ve en su campanita y el técnico en su app, **sin
+    que ninguna empresa configure nada**.
+    """
+    from common.models import Notification
+
+    _devolver(orden, tecnico[1], observacion="No coincide con la OLT")
+
+    notif = Notification.objects.get(recipient=tecnico[1])
+    assert notif.verb == "trabajo_devuelto"
+    assert notif.entity_name == "OT #9301"
+    assert notif.data["rehacer"] == ["Fotografía de la medición"]
+    assert notif.data["observacion"] == "No coincide con la OLT"
+    assert notif.read_at is None
+
+
+def test_r_la_notificacion_NO_lleva_datos_del_cliente(orden, tecnico):
+    """Se sincroniza al teléfono y se queda ahí. El detalle del cliente ya vive
+    en la ficha, detrás de la sesión."""
+    from common.models import Notification
+
+    _devolver(orden, tecnico[1])
+
+    crudo = str(Notification.objects.get(recipient=tecnico[1]).data)
+    assert "Beatriz" not in crudo
+    assert "Calle 50" not in crudo
+    assert "312 455 8901" not in crudo
+
+
+def test_s_la_notificacion_es_PARTE_DEL_HECHO_y_se_deshace_con_el(orden, tecnico):
+    """LA DIFERENCIA CON UNA ENTREGA, afirmada donde se puede romper.
+
+    El envío por chat va después del commit —no se puede bloquear una fila
+    esperando a un tercero—. La notificación va DENTRO: si la devolución se
+    deshace, avisar de algo que no pasó manda al técnico a buscar una devolución
+    que no existe.
+    """
+    from common.models import Notification
+
+    try:
+        with transaction.atomic():
+            _devolver(orden, tecnico[1])
+            raise RuntimeError("algo falló después")
+    except RuntimeError:
+        pass
+
+    assert Notification.objects.count() == 0
+
+
+def test_s2_la_notificacion_EXISTE_antes_del_commit(orden, tecnico):
+    """LA PRUEBA QUE DISTINGUE, Y QUE FALTABA.
+
+    `test_s` --que la notificación se deshace con el rollback-- NO alcanza:
+    `on_commit` tampoco corre en un rollback, así que pasaba en verde con la
+    notificación movida a `on_commit`. Lo midió una mutación el 04/10/2026.
+
+    Lo que de verdad separa «parte del hecho» de «entrega» es esto: estando
+    todavía DENTRO de la transacción, la notificación ya tiene que existir. Una
+    entrega, no.
+    """
+    from common.models import Notification
+
+    with transaction.atomic():
+        _devolver(orden, tecnico[1])
+        # Sin salir del bloque: si esto fuera un `on_commit`, acá no habría nada.
+        assert Notification.objects.filter(recipient=tecnico[1]).count() == 1
+
+
+def test_t_sin_canales_configurados_la_notificacion_llega_IGUAL(orden, tecnico):
+    """La razón de fondo del cambio.
+
+    Una empresa sin Workspace, sin Slack y sin correo configurado —el caso de
+    Rapilink, medido el 04/10/2026— no recibía absolutamente nada. Ahora recibe
+    lo que importa: la notificación vive en la plataforma y no depende de que
+    alguien pegue una URL.
+    """
+    from common.models import Notification
+
+    assert CanalDeAvisos.objects.count() == 0
+
+    _devolver(orden, tecnico[1])
+
+    assert Notification.objects.filter(recipient=tecnico[1]).count() == 1

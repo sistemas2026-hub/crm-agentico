@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 18,
+      version: 19,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -156,6 +156,16 @@ class LocalDatabase {
     // v17: el material de cada orden, para verlo sin señal.
     if (oldVersion < 17) {
       await _crearTablaDeMaterialesDeOrden(db);
+    }
+
+    // v19: las notificaciones de la plataforma, espejadas.
+    //
+    // No es un canal nuevo: `/api/notifications/` es el unico despachador del
+    // sistema --el mismo que alimenta la campanita de la web-- y campo era la
+    // unica parte que no lo usaba. Esto solo guarda lo que llega, para que se
+    // pueda leer sin señal.
+    if (oldVersion < 19) {
+      await _crearTablaDeNotificaciones(db);
     }
 
     // v18: la foto que pertenece a un reporte de la bitacora.
@@ -617,6 +627,42 @@ class LocalDatabase {
   /// lo que paso en UN trabajo. Con los mismos 150 m de drop hace cinco
   /// instalaciones, asi que sumar o cruzar las dos cosas diria que en una casa se
   /// usaron 150 m cuando se usaron 37,5.
+  /// Lo que la plataforma le notifico a esta persona.
+  ///
+  /// POR QUE SE ESPEJA Y NO SE PIDE CADA VEZ
+  /// ---------------------------------------
+  /// Un tecnico que abre la aplicacion en una zona sin señal tiene que poder
+  /// leer que le devolvieron un trabajo. Pedirlo a la red en ese momento
+  /// devolveria una pantalla vacia, que se lee como «no hay nada» y es falso.
+  ///
+  /// `leida_en` es LOCAL y se sube: marcar leido sin señal tiene que quedar
+  /// marcado, y el servidor lo recibe cuando se pueda. Mientras tanto el
+  /// contador no vuelve a subir solo, que es lo que haria creer que llego algo
+  /// nuevo.
+  static Future<void> _crearTablaDeNotificaciones(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_notificaciones (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        verbo TEXT NOT NULL,
+        titulo TEXT NOT NULL,
+        enlace TEXT,
+        datos_json TEXT,
+        creada_en TEXT NOT NULL,
+        leida_en TEXT,
+        -- Si la marca de leido ya subio. Sin esto, una marca hecha sin señal se
+        -- perderia al sincronizar: el servidor la devolveria sin leer y el
+        -- contador volveria a subir solo.
+        leida_subida INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_notif_persona '
+      'ON local_notificaciones (org_id, profile_id, creada_en DESC)',
+    );
+  }
+
   static Future<void> _crearTablaDeMaterialesDeOrden(
     DatabaseExecutor db,
   ) async {
@@ -808,6 +854,7 @@ class LocalDatabase {
     await _crearTablaDeSeguimiento(db);
     await _crearColaDeSeguimiento(db);
     await _crearTablaDeMaterialesDeOrden(db);
+    await _crearTablaDeNotificaciones(db);
     await _crearTablaDeJornada(db);
     await _crearTablaDeIncidencias(db);
 
@@ -1879,6 +1926,139 @@ class LocalDatabase {
                   .millisecondsSinceEpoch
             : 0,
       },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Guarda lo que trajo el servidor, sin pisar lo que ya se leyó acá.
+  ///
+  /// `conflictAlgorithm: ignore` y después un update de los campos del
+  /// servidor: si se usara `replace`, una notificación marcada como leída sin
+  /// señal volvería a aparecer sin leer en la próxima sincronización, y el
+  /// contador subiría solo. Eso hace que la gente deje de mirarlo.
+  Future<void> guardarNotificaciones({
+    required String orgId,
+    required String profileId,
+    required List<Map<String, dynamic>> notificaciones,
+  }) async {
+    final db = await database;
+    final lote = db.batch();
+    for (final n in notificaciones) {
+      final String id = (n['id'] ?? '').toString();
+      if (id.isEmpty) continue;
+      lote.insert('local_notificaciones', <String, Object?>{
+        'id': id,
+        'org_id': orgId,
+        'profile_id': profileId,
+        'verbo': (n['verb'] ?? '').toString(),
+        'titulo': (n['entity_name'] ?? '').toString(),
+        'enlace': n['link']?.toString(),
+        'datos_json': n['data'] == null ? null : jsonEncode(n['data']),
+        'creada_en': (n['created_at'] ?? '').toString(),
+        'leida_en': n['read_at']?.toString(),
+        'leida_subida': n['read_at'] == null ? 0 : 1,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+
+      // Lo que SI se actualiza de una fila que ya estaba: el contenido puede
+      // cambiar; la marca de leído local NO se toca.
+      lote.update(
+        'local_notificaciones',
+        <String, Object?>{
+          'titulo': (n['entity_name'] ?? '').toString(),
+          'datos_json': n['data'] == null ? null : jsonEncode(n['data']),
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+    await lote.commit(noResult: true);
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'local_notificaciones',
+    );
+  }
+
+  /// Las notificaciones de esta persona, lo más nuevo primero.
+  Future<List<Map<String, dynamic>>> leerNotificaciones({
+    required String orgId,
+    required String profileId,
+    int limite = 50,
+  }) async {
+    final db = await database;
+    return await db.query(
+      'local_notificaciones',
+      where: 'org_id = ? AND profile_id = ?',
+      whereArgs: [orgId, profileId],
+      orderBy: 'creada_en DESC',
+      limit: limite,
+    );
+  }
+
+  /// Cuántas sin leer. Es el número del contador.
+  Future<int> contarNotificacionesSinLeer({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final filas = await db.rawQuery(
+      'SELECT COUNT(*) AS n FROM local_notificaciones '
+      'WHERE org_id = ? AND profile_id = ? AND leida_en IS NULL',
+      [orgId, profileId],
+    );
+    final Object? n = filas.isEmpty ? null : filas.first['n'];
+    return n is int ? n : 0;
+  }
+
+  /// Marca una como leída ACÁ. Subirla es otro paso.
+  ///
+  /// Se separa a propósito: marcar leído sin señal tiene que quedar marcado en
+  /// el acto —el técnico ya la leyó— y el servidor se entera cuando se pueda.
+  Future<void> marcarNotificacionLeida({
+    required String id,
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    await db.update(
+      'local_notificaciones',
+      <String, Object?>{
+        'leida_en': DateTime.now().toUtc().toIso8601String(),
+        'leida_subida': 0,
+      },
+      where: 'id = ? AND org_id = ? AND profile_id = ? AND leida_en IS NULL',
+      whereArgs: [id, orgId, profileId],
+    );
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'local_notificaciones',
+    );
+  }
+
+  /// Las marcas de leído que todavía no subieron.
+  Future<List<String>> lecturasSinSubir({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final filas = await db.query(
+      'local_notificaciones',
+      columns: ['id'],
+      where:
+          'org_id = ? AND profile_id = ? AND leida_en IS NOT NULL '
+          'AND leida_subida = 0',
+      whereArgs: [orgId, profileId],
+    );
+    return filas.map((f) => f['id'] as String).toList();
+  }
+
+  Future<void> marcarLecturaSubida(String id) async {
+    final db = await database;
+    await db.update(
+      'local_notificaciones',
+      <String, Object?>{'leida_subida': 1},
       where: 'id = ?',
       whereArgs: [id],
     );
