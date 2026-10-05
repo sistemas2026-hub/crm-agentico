@@ -49,6 +49,7 @@ import uuid
 from datetime import datetime, timedelta
 
 from nucleo.config.schema import _sin_tildes
+from nucleo.modelo import nota_vision
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import incidentes as ejecutor_incidentes
@@ -3208,6 +3209,24 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 "necesitas su documento. Que corresponde hacer ahora lo "
                 "decide tu rol; lo que no puedes es dar por sabido lo que no "
                 "sabes."})
+    # LO QUE VIO UNA CAMARA ES CONTEXTO, NO UN MENSAJE PARA REENVIAR.
+    #
+    # Va JUSTO ANTES del mensaje del usuario, y no arriba con el resto del
+    # system, por dos motivos: queda pegada al texto del que habla --asi el
+    # modelo no tiene que recordar a que turno se referia-- y solo existe en
+    # los turnos que de verdad traen una foto mirada. Un mensaje de texto, una
+    # nota de voz o una foto que no se pudo analizar no la ven nunca, y su
+    # historial queda byte por byte como estaba.
+    #
+    # NO QUITA NADA: el analisis sigue entero en el mensaje. Esto agrega una
+    # instruccion sobre que hacer con el. Medido en produccion el 05/10/2026,
+    # sin esto el modelo le devolvia al cliente varios parrafos
+    # describiendole su propio equipo. Ver nucleo/modelo/nota_vision.py para
+    # por que vive en el motor y no en la config del tenant.
+    nota_foto = nota_vision.nota_para(mensaje)
+    if nota_foto:
+        historial.append({"role": "system", "content": nota_foto})
+
     historial.append({"role": "user", "content": mensaje})
 
     herramientas = herramientas_del_rol(config, rol_cfg)
