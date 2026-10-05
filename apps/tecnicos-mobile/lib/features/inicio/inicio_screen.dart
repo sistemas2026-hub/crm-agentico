@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/acciones/salir_de_la_app.dart';
 import '../../core/estado/ordenes_jornada.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/sync/sync_presentacion.dart';
@@ -50,6 +51,7 @@ class InicioScreen extends StatefulWidget {
     this.jornada,
     this.ahora,
     this.abrirOrdenDeUnAviso,
+    this.salir = const SalirDeLaApp(),
   });
 
   final OrdenesJornada ordenes;
@@ -69,6 +71,10 @@ class InicioScreen extends StatefulWidget {
   /// Qué pasa al tocar un aviso que apunta a una orden. Nulo deja la lista en
   /// lectura, que es lo correcto cuando quien la monta no sabe navegar.
   final void Function(String ordenId)? abrirOrdenDeUnAviso;
+
+  /// Quién saca al técnico de la aplicación: el marcador y el mapa. Se inyecta
+  /// para poder medir qué se abre sin abrir nada.
+  final SalirDeLaApp salir;
 
   @override
   State<InicioScreen> createState() => _InicioScreenState();
@@ -565,6 +571,7 @@ class _InicioScreenState extends State<InicioScreen> {
         _TarjetaDeTrabajo(
           trabajo: siguiente,
           ahora: widget.ahora,
+          salir: widget.salir,
           onAbrir: () async {
             await widget.abrirTrabajo(context, siguiente);
             await widget.ordenes.recargar();
@@ -929,11 +936,13 @@ class _TarjetaDeTrabajo extends StatelessWidget {
   const _TarjetaDeTrabajo({
     required this.trabajo,
     required this.onAbrir,
+    required this.salir,
     this.ahora,
   });
 
   final TrabajoVista trabajo;
   final VoidCallback onAbrir;
+  final SalirDeLaApp salir;
   final DateTime? ahora;
 
   /// Si ya se empezó, el botón continúa; si no, empieza. Prometer "continuar"
@@ -1145,8 +1154,20 @@ class _TarjetaDeTrabajo extends StatelessWidget {
                       child: _AccionRapida(
                         icono: Icons.near_me,
                         texto: 'Navegar',
-                        disponible:
-                            trabajo.latitud != null && trabajo.longitud != null,
+                        // `disponible` deja de ser «hay dato» y pasa a ser «hay
+                        // algo que abrir». No es lo mismo: una latitud sin
+                        // longitud, o un 0,0, son dato y no son ubicación.
+                        alTocar: SalirDeLaApp.uriDeMapa(
+                                  latitud: trabajo.latitud,
+                                  longitud: trabajo.longitud,
+                                ) ==
+                                null
+                            ? null
+                            : () => salir.navegar(
+                                  latitud: trabajo.latitud,
+                                  longitud: trabajo.longitud,
+                                  etiqueta: trabajo.clienteNombre,
+                                ),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
@@ -1154,7 +1175,10 @@ class _TarjetaDeTrabajo extends StatelessWidget {
                       child: _AccionRapida(
                         icono: Icons.call,
                         texto: 'Llamar Cliente',
-                        disponible: trabajo.telefono.isNotEmpty,
+                        alTocar:
+                            SalirDeLaApp.uriDeTelefono(trabajo.telefono) == null
+                                ? null
+                                : () => salir.llamar(trabajo.telefono),
                       ),
                     ),
                   ],
@@ -1222,33 +1246,46 @@ class _DatoConIcono extends StatelessWidget {
   }
 }
 
-/// "Navegar GPS" y "Llamar cliente". Todavía no abren nada: falta decidir la
-/// dependencia que lanza el mapa y el teléfono. Se ven apagados cuando el dato
-/// no existe, para no prometer algo que no puede pasar.
+/// "Navegar" y "Llamar cliente", que ahora sí abren el mapa y el marcador.
+///
+/// Se ven apagados cuando **no hay nada que abrir** —sin número, sin coordenada,
+/// o con una coordenada que no ubica a nadie—, y no cuando falta la dependencia:
+/// ese era el estado anterior, y un botón gris permanente enseña a no mirarlo.
 class _AccionRapida extends StatelessWidget {
   const _AccionRapida({
     required this.icono,
     required this.texto,
-    required this.disponible,
+    this.alTocar,
   });
 
   final IconData icono;
   final String texto;
-  final bool disponible;
+  final VoidCallback? alTocar;
+
+  bool get disponible => alTocar != null;
 
   @override
   Widget build(BuildContext context) {
     final color = disponible ? AppColors.primary : AppColors.outline;
-    return Container(
-      height: 48,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
+    // ERA UN `Container` A SECAS: estaba dibujado y no recibia el toque. Ahora
+    // es un `InkWell` con su `Semantics`, para que tambien lo encuentre quien
+    // usa lector de pantalla.
+    return Semantics(
+      button: true,
+      enabled: disponible,
+      label: texto,
+      excludeSemantics: true,
+      child: Material(
         color: AppColors.surfaceContainer,
         borderRadius: AppRadius.brCampo,
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: <Widget>[
+        child: InkWell(
+          onTap: alTocar,
+          borderRadius: AppRadius.brCampo,
+          child: SizedBox(
+            height: 48,
+                  child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
           Icon(icono, size: 18, color: color),
           const SizedBox(width: 6),
           Flexible(
@@ -1260,6 +1297,9 @@ class _AccionRapida extends StatelessWidget {
             ),
           ),
         ],
+            ),
+          ),
+        ),
       ),
     );
   }

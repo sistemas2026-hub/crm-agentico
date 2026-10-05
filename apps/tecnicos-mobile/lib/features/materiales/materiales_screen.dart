@@ -1,3 +1,4 @@
+import '../../core/acciones/lector_de_codigo.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -161,7 +162,7 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
             _novedades(_kit!.conNovedad),
           ],
           const SizedBox(height: AppSpacing.md),
-          _barraDeAcciones(),
+          _barraDeAcciones(todos),
           const SizedBox(height: AppSpacing.md),
           _filtros(todos),
           const SizedBox(height: AppSpacing.md),
@@ -179,7 +180,10 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
           ),
           const SizedBox(height: AppSpacing.sm),
           for (final MaterialEnCustodia material in visibles)
-            _TarjetaMaterial(material: material),
+            _TarjetaMaterial(
+              material: material,
+              alVerificar: _verificarSerial,
+            ),
           const SizedBox(height: AppSpacing.sm),
           _cierreDeJornada(),
           const SizedBox(height: AppSpacing.md),
@@ -556,14 +560,81 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
         : 'Te quedan $pendientes materiales por conciliar y devolver a bodega.';
   }
 
-  Widget _barraDeAcciones() {
+  /// Escanea un serial y dice CUAL de tus materiales es.
+  ///
+  /// La pregunta real: el tecnico tiene cinco cajas iguales en el baul y quiere
+  /// saber si la que agarro es suya y cual es. Responderla a ojo es comparar
+  /// catorce caracteres cinco veces.
+  ///
+  /// Lo que NO hace es buscar en el catalogo de la empresa: si el serial no esta
+  /// en TU custodia, lo correcto es decir eso --«este equipo no es tuyo»-- y no
+  /// ir a preguntarle al servidor, que ademas no contestaria sin senal.
+  Future<void> _buscarPorSerial(List<MaterialEnCustodia> materiales) async {
+    final String? leido = await LectorDeCodigo.abrir(
+      context,
+      titulo: 'Buscar en tu kit',
+      ayuda: 'Apuntá al código del equipo para ver si está a tu nombre.',
+    );
+    if (leido == null || !mounted) return;
+
+    MaterialEnCustodia? encontrado;
+    for (final MaterialEnCustodia m in materiales) {
+      if (mismoSerial(m.serie ?? '', leido)) {
+        encontrado = m;
+        break;
+      }
+    }
+
+    if (!mounted) return;
+    if (encontrado == null) {
+      _decir(
+        'Ese equipo no está en tu custodia.\nLeído: $leido',
+        esProblema: true,
+      );
+      return;
+    }
+    _decir('${encontrado.nombre} · ${encontrado.serie}');
+  }
+
+  /// Compara lo escaneado contra el serial de ESTA tarjeta.
+  Future<void> _verificarSerial(MaterialEnCustodia material) async {
+    final String? leido = await LectorDeCodigo.abrir(
+      context,
+      titulo: 'Verificar ${material.nombre}',
+      ayuda: 'Apuntá al código del equipo que tenés en la mano.',
+    );
+    if (leido == null || !mounted) return;
+
+    final bool coincide = mismoSerial(material.serie ?? '', leido);
+    _decir(
+      coincide
+          ? 'Coincide: ${material.serie}'
+          : 'NO coincide.\nLa tarjeta dice ${material.serie} y leíste $leido',
+      esProblema: !coincide,
+    );
+  }
+
+  /// Un aviso en pantalla. Se dice SIEMPRE, tambien cuando sale bien: un
+  /// escaneo que no responde nada deja al tecnico sin saber si leyo o no.
+  void _decir(String texto, {bool esProblema = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(texto),
+        duration: const Duration(seconds: 5),
+        backgroundColor: esProblema ? AppColors.error : null,
+      ),
+    );
+  }
+
+  Widget _barraDeAcciones(List<MaterialEnCustodia> materiales) {
     return Row(
       children: <Widget>[
-        const Expanded(
+        Expanded(
           child: _BotonHerramienta(
             icono: Icons.qr_code_scanner,
             texto: 'Escanear QR',
             principal: true,
+            alTocar: () => _buscarPorSerial(materiales),
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
@@ -817,17 +888,19 @@ class _BotonHerramienta extends StatelessWidget {
     required this.texto,
     this.principal = false,
     this.colorIcono,
+    this.alTocar,
   });
 
   final IconData icono;
   final String texto;
   final bool principal;
   final Color? colorIcono;
+  final VoidCallback? alTocar;
 
   @override
   Widget build(BuildContext context) {
     final color = principal ? AppColors.onPrimary : AppColors.onSurface;
-    return Container(
+    final Widget cuerpo = Container(
       constraints: const BoxConstraints(minHeight: 52),
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       decoration: BoxDecoration(
@@ -847,6 +920,21 @@ class _BotonHerramienta extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ],
+      ),
+    );
+
+    // Era un `Container` a secas: dibujado y sin recibir el toque. Sin `alTocar`
+    // se deja igual que antes, para que un boton que todavia no hace nada no
+    // simule que si.
+    if (alTocar == null) return cuerpo;
+    return Semantics(
+      button: true,
+      label: texto,
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: alTocar,
+        borderRadius: AppRadius.brTarjeta,
+        child: cuerpo,
       ),
     );
   }
@@ -906,7 +994,12 @@ class _ChipCategoria extends StatelessWidget {
 
 /// Una tarjeta de material, con la forma que le corresponde a su clase.
 class _TarjetaMaterial extends StatelessWidget {
-  const _TarjetaMaterial({required this.material});
+  const _TarjetaMaterial({required this.material, this.alVerificar});
+
+  /// Qué pasa al tocar «Verificar MAC/SN». Nulo deja el botón como estaba:
+  /// dibujado y sin acción, que es lo honesto cuando quien monta la tarjeta no
+  /// sabe escanear.
+  final void Function(MaterialEnCustodia)? alVerificar;
 
   final MaterialEnCustodia material;
 
@@ -1283,13 +1376,22 @@ class _TarjetaMaterial extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
-        const Row(
+        Row(
           children: <Widget>[
             Expanded(
-              child: _AccionChica(texto: 'Verificar MAC/SN', icono: Icons.barcode_reader),
+              child: _AccionChica(
+                texto: 'Verificar MAC/SN',
+                icono: Icons.barcode_reader,
+                // «¿Es este el equipo que me entregaron?». Es la pregunta que
+                // el tecnico se hace con cinco cajas iguales en el baul, y la
+                // que hoy contestaba comparando a ojo caracter por caracter.
+                alTocar: alVerificar == null
+                    ? null
+                    : () => alVerificar!(material),
+              ),
             ),
-            SizedBox(width: AppSpacing.sm),
-            Expanded(
+            const SizedBox(width: AppSpacing.sm),
+            const Expanded(
               child: _AccionChica(
                 texto: 'Log Trazabilidad',
                 icono: Icons.history_edu,
@@ -1354,15 +1456,17 @@ class _AccionChica extends StatelessWidget {
     required this.texto,
     required this.icono,
     this.color = AppColors.primary,
+    this.alTocar,
   });
 
   final String texto;
   final IconData icono;
   final Color color;
+  final VoidCallback? alTocar;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final Widget cuerpo = Container(
       constraints: const BoxConstraints(minHeight: AppSpacing.objetivoTactil),
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
       alignment: Alignment.center,
@@ -1387,6 +1491,18 @@ class _AccionChica extends StatelessWidget {
           const SizedBox(width: 4),
           Icon(icono, size: 14, color: color),
         ],
+      ),
+    );
+
+    if (alTocar == null) return cuerpo;
+    return Semantics(
+      button: true,
+      label: texto,
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: alTocar,
+        borderRadius: AppRadius.brCampo,
+        child: cuerpo,
       ),
     );
   }

@@ -72,5 +72,19 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Android 11 en adelante una app NO VE las demas salvo que las
+             declare. Sin estos dos, `launchUrl` no encuentra el marcador ni el
+             mapa aunque esten instalados, y falla con "no activity found": el
+             boton se ve encendido y no pasa nada, que es peor que tenerlo gris.
+             No se nombra ninguna aplicacion --ni Waze ni Google Maps--: se
+             declara el ESQUEMA, y elige el telefono con lo que tenga. -->
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="geo"/>
+        </intent>
     </queries>
 </manifest>

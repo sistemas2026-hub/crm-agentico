@@ -1,3 +1,4 @@
+import '../../../core/acciones/lector_de_codigo.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -84,6 +85,21 @@ class _ConsumoDeMaterialState extends State<ConsumoDeMaterial> {
   double _disponible = 0;
   int _cantidad = 1;
   final TextEditingController _serie = TextEditingController();
+
+  /// Lee el serial con la camara y lo pone en el campo.
+  ///
+  /// Cancelar devuelve `null` y entonces NO se toca lo que ya estaba escrito:
+  /// alguien que tipeo medio serial, abrio el lector por las dudas y salio, no
+  /// puede perder lo que llevaba.
+  Future<void> _escanearSerie() async {
+    final String? leido = await LectorDeCodigo.abrir(
+      context,
+      titulo: 'Serial del equipo',
+      ayuda: 'Apuntá al código de la etiqueta del equipo que instalaste.',
+    );
+    if (leido == null || !mounted) return;
+    setState(() => _serie.text = leido);
+  }
   final TextEditingController _motivo = TextEditingController();
   bool _guardando = false;
   String? _error;
@@ -354,9 +370,18 @@ class _ConsumoDeMaterialState extends State<ConsumoDeMaterial> {
         if (_esSerializado)
           TextField(
             controller: _serie,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Número de serie',
               helperText: 'El del equipo que se instaló.',
+              // EL PUNTO DONDE MAS DUELE TIPEAR: doce a dieciseis caracteres,
+              // de pie, con guantes. Un digito mal no da error -- queda un
+              // equipo registrado con un serial que no existe, y eso se
+              // descubre semanas despues.
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.qr_code_scanner),
+                tooltip: 'Escanear el serial',
+                onPressed: _escanearSerie,
+              ),
             ),
           ),
         if (_exigeMotivo)

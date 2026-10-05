@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/acciones/salir_de_la_app.dart';
 import '../../core/estado/ordenes_jornada.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
@@ -70,7 +71,15 @@ class DetalleOrdenScreen extends StatefulWidget {
     this.cargarSeguimiento,
     this.encolarReporte,
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
+    this.salir = const SalirDeLaApp(),
   });
+
+  /// Quién saca al técnico de la aplicación: el marcador y el mapa.
+  ///
+  /// Se inyecta para poder medir QUÉ se abre sin abrir nada. Que el sistema
+  /// operativo responda no se puede probar desde acá; qué URI se le pide, sí, y
+  /// es donde viven los errores que mandan a alguien a la dirección equivocada.
+  final SalirDeLaApp salir;
 
   final String ordenId;
   final OrdenesJornada ordenes;
@@ -876,8 +885,13 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               child: DexterAccionRapida(
                 icono: Icons.phone_in_talk,
                 texto: 'Llamar Cliente',
-                // Sin lanzador de aplicaciones: ver el comentario de arriba.
-                alTocar: null,
+                // Apagado cuando NO HAY NUMERO, no cuando no se puede llamar.
+                // La diferencia importa: un boton activo que no hace nada es
+                // peor que uno gris, porque el tecnico ya camino hasta la
+                // puerta contando con el.
+                alTocar: SalirDeLaApp.uriDeTelefono(trabajo.telefono) == null
+                    ? null
+                    : () => _llamar(trabajo),
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
@@ -885,13 +899,45 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               child: DexterAccionRapida(
                 icono: Icons.directions,
                 texto: 'Ruta GPS',
-                alTocar: null,
+                alTocar: SalirDeLaApp.uriDeMapa(
+                          latitud: trabajo.latitud,
+                          longitud: trabajo.longitud,
+                        ) ==
+                        null
+                    ? null
+                    : () => _navegar(trabajo),
               ),
             ),
           ],
         ),
       ],
     );
+  }
+
+  /// Marca el número del cliente.
+  ///
+  /// Si el teléfono no tiene marcador —una tableta de campo— se dice, en vez de
+  /// que el toque no haga nada: eso último es indistinguible de una app rota.
+  Future<void> _llamar(TrabajoVista trabajo) async {
+    final bool pudo = await widget.salir.llamar(trabajo.telefono);
+    if (!pudo && mounted) _avisar('No se pudo abrir el marcador de este equipo.');
+  }
+
+  Future<void> _navegar(TrabajoVista trabajo) async {
+    final bool pudo = await widget.salir.navegar(
+      latitud: trabajo.latitud,
+      longitud: trabajo.longitud,
+      // El nombre en el pin, para reconocerlo de un vistazo entre varias
+      // órdenes del día. Si no hay cliente —planta externa— queda la coordenada.
+      etiqueta: trabajo.clienteNombre,
+    );
+    if (!pudo && mounted) {
+      _avisar('No se pudo abrir el mapa. ¿Hay alguno instalado?');
+    }
+  }
+
+  void _avisar(String texto) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto)));
   }
 
   /// Qué pidió rehacer el supervisor.

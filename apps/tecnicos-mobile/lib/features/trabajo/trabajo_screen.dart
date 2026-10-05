@@ -1,3 +1,4 @@
+import '../../core/acciones/lector_de_codigo.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/estado/ordenes_jornada.dart';
@@ -62,6 +63,17 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
 
   /// Lo que se ve: el segmento, el filtro de estado y la búsqueda, en ese
   /// orden. Ninguno de los tres toca la base: filtran la lista que ya está.
+  /// Lee el serial de un equipo y busca a qué trabajo pertenece.
+  Future<void> _escanearEquipo() async {
+    final String? leido = await LectorDeCodigo.abrir(
+      context,
+      titulo: 'Buscar por equipo',
+      ayuda: 'Apuntá al código de la ONT para ver de qué orden es.',
+    );
+    if (leido == null || !mounted) return;
+    setState(() => _busqueda.text = leido);
+  }
+
   List<TrabajoVista> _visibles() {
     final ahora = DateTime.now();
     final texto = _busqueda.text.trim().toLowerCase();
@@ -75,13 +87,19 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
   }
 
   /// Busca por lo que el técnico tiene a mano para reconocer un trabajo: el
-  /// número, el cliente, la dirección y el tipo.
+  /// número, el cliente, la dirección, el tipo y **el serial del equipo**.
+  ///
+  /// El serial entró con el lector: parado frente a una ONT, escanearla y que la
+  /// app diga de qué orden es resuelve la pregunta al revés de como se hacía
+  /// —buscar al cliente para ver qué equipo tiene—. Sin este campo, escanear
+  /// llenaría la búsqueda y no encontraría nada, que es peor que no escanear.
   static bool _coincide(TrabajoVista t, String texto) {
     final campos = <String>[
       t.numero?.toString() ?? '',
       t.clienteNombre,
       t.direccion,
       t.tipoNombre,
+      t.serialOnu,
     ];
     return campos.any((String c) => c.toLowerCase().contains(texto));
   }
@@ -301,17 +319,16 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
               ),
             ),
           ),
-          if (widget.mostrarDatosFuturos) ...<Widget>[
-            const SizedBox(width: AppSpacing.sm),
-            // CAMPO-DATA-044 · Lector de código en el equipo del cliente.
-            _BotonCuadrado(
-              icono: Icons.qr_code_scanner,
-              etiquetaSemantica: 'Escanear equipo',
-              alTocar: () => ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text(FieldMockData.escanerPendiente)),
-              ),
-            ),
-          ],
+          const SizedBox(width: AppSpacing.sm),
+          // Escanear la ONT que tengo delante y que la app diga de qué orden es.
+          // Hasta acá era una maqueta: mostraba «el escáner está pendiente» y
+          // solo en modo demostración. Ahora llena la búsqueda con lo leído, y
+          // la búsqueda mira también el serial.
+          _BotonCuadrado(
+            icono: Icons.qr_code_scanner,
+            etiquetaSemantica: 'Escanear equipo',
+            alTocar: _escanearEquipo,
+          ),
         ],
       ),
     );
