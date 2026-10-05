@@ -779,7 +779,16 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 FieldMockData.resumenDelTrabajo,
                 style: AppTypography.cuerpoChico,
               ),
-            Text(trabajo.clienteNombre, style: AppTypography.cuerpoChico),
+            // Bajo el título va a QUIÉN; en planta no hay nadie, así que va
+            // DÓNDE. Dejar "Sin cliente" ahí se lee como un dato que no cargó.
+            Text(
+              trabajo.esTrabajoDePlanta
+                  ? (trabajo.direccion.trim().isEmpty
+                      ? 'Trabajo de planta'
+                      : trabajo.direccion)
+                  : trabajo.clienteNombre,
+              style: AppTypography.cuerpoChico,
+            ),
           ],
         ),
         _loQueHayEnElTelefono(),
@@ -1440,14 +1449,18 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              const Icon(
-                Icons.person_pin_circle,
+              Icon(
+                trabajo.esTrabajoDePlanta
+                    ? Icons.location_on
+                    : Icons.person_pin_circle,
                 size: 16,
                 color: AppColors.secondary,
               ),
               const SizedBox(width: 6),
               Text(
-                'Cliente & Ubicación',
+                // En un poste no hay cliente. Encabezar el bloque con la
+                // palabra deja al técnico buscando a quién preguntarle.
+                trabajo.esTrabajoDePlanta ? 'Ubicación' : 'Cliente & Ubicación',
                 style: AppTypography.etiqueta.copyWith(
                   color: AppColors.onSurface,
                 ),
@@ -1673,6 +1686,19 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   /// `motivo` normalizado del backend. Acá no se deduce ninguno: deducirlo sería
   /// una segunda interpretación del mismo dato, y la que estaría mal sería ésta.
   Widget _porQueNoHayDatosDelEquipo(TrabajoVista trabajo) {
+    // UN TRABAJO DE PLANTA NO TIENE EQUIPO, Y ESO NO ES UN PROBLEMA.
+    // Antes caía en `clienteNoIdentificado` y mostraba «el sistema del ISP no
+    // encontró el servicio — preguntale en sitio». En un poste no hay a quién
+    // preguntarle, y el mensaje manda al técnico a buscar una falla que no
+    // existe.
+    if (trabajo.esTrabajoDePlanta) {
+      return _avisoDelEquipo(
+        Icons.cell_tower,
+        'Este trabajo no es de un cliente',
+        'Es trabajo de planta: no hay servicio ni equipo que consultar.',
+      );
+    }
+
     final (IconData icono, String titulo, String consejo) = switch (trabajo
         .sinFicha) {
       SinFicha.noSePudoConsultar => (
@@ -1697,6 +1723,11 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       ),
     };
 
+    return _avisoDelEquipo(icono, titulo, consejo);
+  }
+
+  /// El marco común de los cinco avisos de «no hay lectura del equipo».
+  Widget _avisoDelEquipo(IconData icono, String titulo, String consejo) {
     return DexterBloque(
       titulo: 'Datos del equipo',
       icono: Icons.hub_outlined,

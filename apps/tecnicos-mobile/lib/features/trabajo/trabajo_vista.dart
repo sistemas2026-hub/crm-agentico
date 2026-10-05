@@ -318,6 +318,38 @@ class TrabajoVista {
   /// El serial de la ONU del cliente, si el despacho lo capturó.
   String get serialOnu => contexto['sn_onu']?.toString() ?? '';
 
+  /// Si este trabajo NO es en la casa de nadie.
+  ///
+  /// POR QUÉ HACE FALTA DISTINGUIRLO
+  /// -------------------------------
+  /// Un técnico hace las cuatro cosas: averías, instalaciones, **planta externa**
+  /// y mantenimiento. Cuando va a un poste a hacer una fusión **no hay cliente**,
+  /// y la ficha le arma todo alrededor de «Cliente & Ubicación» y le dice «no se
+  /// pudo identificar al cliente — preguntale en sitio». No hay a quién
+  /// preguntarle: es un poste. El mensaje es correcto para una avería y **miente**
+  /// para una obra.
+  ///
+  /// SE DERIVA DEL DATO, NO DEL NOMBRE DEL TIPO DE TRABAJO
+  /// -----------------------------------------------------
+  /// `FamiliaTrabajo` se decide buscando palabras en español dentro del código y
+  /// el nombre del tipo (`instal`, `falla`, `preventivo`). Eso alcanza para
+  /// elegir un ícono y **no** para afirmar que no hay cliente: la empresa
+  /// siguiente nombra sus tipos distinto, y una palabra no es un hecho.
+  ///
+  /// Lo que sí es un hecho: la orden **no trae a nadie**. Sin nombre utilizable,
+  /// sin teléfono y sin serial del equipo, no hay cliente que identificar — y eso
+  /// vale igual en cualquier empresa y en cualquier idioma.
+  ///
+  /// `'Sin cliente'` cuenta como ausencia: es el relleno que pone la capa local
+  /// cuando el campo no vino, no el nombre de una persona.
+  bool get esTrabajoDePlanta =>
+      !_hayNombreDeCliente && telefono.trim().isEmpty && serialOnu.trim().isEmpty;
+
+  bool get _hayNombreDeCliente {
+    final String n = clienteNombre.trim().toLowerCase();
+    return n.isNotEmpty && n != 'sin cliente' && n != 'sin nombre';
+  }
+
   /// Una lectura del equipo tal como la devolvió SmartOLT al congelar la ficha.
   ///
   /// Mismo criterio que `_delCliente`: se lee en UN solo lugar. El motor ya
