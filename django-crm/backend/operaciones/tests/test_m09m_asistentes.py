@@ -630,7 +630,16 @@ def test_17_18_no_hay_segunda_cola_ni_task(org_a, actor):
                        #  Supervisor, y referencia una SituacionOperativa -- que
                        #  vive de este lado de la frontera, porque el motor no
                        #  lee las tablas del CRM.
-                       "ConversacionSupervisor", "MensajeSupervisor"}, modelos
+                       "ConversacionSupervisor", "MensajeSupervisor",
+                       #  05/10/2026, paso P8.2. 'AprendizajeSupervisor' guarda lo que se supo
+                       #  DESPUES, con su evidencia y quien lo concluyo. No es una segunda cola
+                       #  de propuestas ni una tabla de KPI: no se consulta para decidir nada,
+                       #  se escribe cuando alguien ya sabe que paso. Y es APPEND-ONLY, asi que
+                       #  tampoco es un estado que se pueda editar.
+                       #
+                       #  'OrigenAprendizaje' no tiene 'supervisor': el agente no puede concluir
+                       #  sobre su propio acierto, ni por el servicio ni por el ORM.
+                       "AprendizajeSupervisor"}
 
     #  Se miran los IDENTIFICADORES del código, no el texto del archivo: los
     #  docstrings nombran justamente lo que NO se creó, y un 'in fuente' los

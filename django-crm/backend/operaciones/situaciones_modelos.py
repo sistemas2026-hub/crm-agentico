@@ -177,8 +177,18 @@ class TipoRelacion:
     #  Una explica a la otra. SOLO lo pone una persona: la correlacion no puede
     #  afirmar causalidad, y este tipo es precisamente esa afirmacion.
     EXPLICA = "explica"
+    #  P8.2 (05/10/2026). La de antes volvio a pasar en el mismo sitio.
+    #
+    #  NO esta en AUTOMATICOS, y es la decision entera de este tipo: que dos
+    #  situaciones compartan PON no prueba que una sea reincidencia de la
+    #  otra -- un PON con una caida por semana puede estar sufriendo tres
+    #  causas distintas. Afirmar reincidencia sola convertiria una
+    #  coincidencia en un diagnostico. 'gobierno.candidatas_de_reincidencia'
+    #  las PROPONE; ponerla exige una persona.
+    REINCIDENCIA = "reincidencia"
 
-    TODOS = (COINCIDE, CONTIENE, CONTENIDA_EN, DUPLICADA_DE, EXPLICA)
+    TODOS = (COINCIDE, CONTIENE, CONTENIDA_EN, DUPLICADA_DE,
+             EXPLICA, REINCIDENCIA)
     ETIQUETAS = tuple((t, t.replace("_", " ").capitalize()) for t in TODOS)
 
     #  Los que la maquina puede poner sola. El resto exige un actor humano, y

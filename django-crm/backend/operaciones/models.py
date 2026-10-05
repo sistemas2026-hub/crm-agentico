@@ -1100,9 +1100,12 @@ from operaciones.situaciones_modelos import (                     # noqa: E402,F
 #  modulo se importa. Los CINCO NIVELES no se redefinen alla -- son los de
 #  'PropuestaSupervisor.NIVELES', que ya estaban en uso.
 from operaciones.gobierno_modelos import (                        # noqa: E402,F401
+    AprendizajeSupervisor,
     DecisionSupervisor,
     NivelAutonomia,
+    OrigenAprendizaje,
     ResultadoDecision,
+    TipoAprendizaje,
     TipoDecision,
 )
 

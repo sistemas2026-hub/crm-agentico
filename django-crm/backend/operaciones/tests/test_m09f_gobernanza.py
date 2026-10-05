@@ -195,6 +195,17 @@ def test_dos_hilos_reales_compitiendo_dejan_una_sola_decision(org_a):
     assert len(decisiones) == 1, f"quedaron {len(decisiones)} decisiones auditadas"
 
     # limpieza: 'transaction=True' no revierte solo
+    #
+    # El ORDEN importa desde P8.2: 'DecisionSupervisor.propuesta' es PROTECT
+    # --una propuesta con decision registrada NO se borra, porque esa fila es
+    # historia-- asi que hay que llevarse primero lo que cuelga. Antes bastaba
+    # con borrar las propuestas; ahora eso levanta ProtectedError, y es
+    # exactamente lo que tiene que pasar.
+    from operaciones.gobierno_modelos import (AprendizajeSupervisor,
+                                              DecisionSupervisor)
+
+    AprendizajeSupervisor.objects.filter(org=org).delete()
+    DecisionSupervisor.objects.filter(org=org).delete()
     PropuestaSupervisor.objects.filter(org=org).delete()
 
 
@@ -942,7 +953,22 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  Y NO ESCRIBE NADA si la autonomia efectiva no llega a
                        #  2: devuelve 409 AUTONOMIA_INSUFICIENTE y deja el
                        #  intento auditado en common.Activity con REJECTED.
-                       "supervisor-coordinar"}
+                       "supervisor-coordinar",
+                       #  P8.2 (05/10/2026). 'propuesta-resultado' registra
+                       #  QUE PASO con una decision ya tomada.
+                       #
+                       #  ESCRIBE: el desenlace en DecisionSupervisor
+                       #  (resultado, resultado_en, resultado_evidencia,
+                       #  correccion) y, cuando el desenlace deja una
+                       #  leccion, una fila de AprendizajeSupervisor. Nada
+                       #  mas: NO cambia el estado de la propuesta --ya fue
+                       #  revisada-- ni el de la situacion, y NO ejecuta.
+                       #
+                       #  Y NO la puede llamar el Supervisor: exige una
+                       #  persona con rol de gestion, porque un agente que
+                       #  escribe su propio resultado se declara correcto
+                       #  solo. 'OrigenAprendizaje' no tiene 'supervisor'.
+                       "propuesta-resultado"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

@@ -1765,3 +1765,78 @@ class CoordinarSupervisorView(APIView):
             "server_time": timezone.now().isoformat(),
         }, status=(status.HTTP_200_OK if salida["repetida"]
                    else status.HTTP_201_CREATED))
+
+
+class ResultadoDecisionView(APIView):
+    """
+    Registra QUE PASO con una decision. La entrada es la PROPUESTA.
+
+    POR QUE LA RUTA CUELGA DE LA PROPUESTA Y NO DE LA DECISION
+    ----------------------------------------------------------
+    Porque la propuesta es el objeto que una persona ve y que el tablero ya
+    lista; la decisión es su consecuencia. Montar `decisiones/<id>/` obligaría a
+    la pantalla a conocer un id que hoy no muestra en ninguna parte, para no
+    ganar nada: cada propuesta revisada tiene exactamente una decisión.
+
+    LO QUE ESTA RUTA NO HACE
+    ------------------------
+    No cambia el estado de la propuesta --ya fue revisada-- ni el de la
+    situación. No convierte «aceptada» en «exitosa»: el resultado lo decide
+    quien aporta la evidencia, y sin evidencia no entra. Y no la puede llamar el
+    Supervisor: exige una persona autenticada con rol de gestión, porque un
+    agente que escribe su propio resultado se declara correcto solo.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext, EsJefeDeOperaciones)
+
+    @manejar_idempotencia
+    def post(self, request, propuesta_id):
+        from operaciones import gobierno
+        from operaciones.models import DecisionSupervisor
+        from operaciones.serializers import ResultadoDecisionSerializer
+
+        s = ResultadoDecisionSerializer(data=request.data)
+        if not s.is_valid():
+            return Response({"error": "CUERPO_INVALIDO", "detalle": s.errors},
+                            status=status.HTTP_400_BAD_REQUEST)
+        d = s.validated_data
+
+        #  La decisión se busca POR ORG además de por propuesta: el filtro de
+        #  tenant va en el queryset y no en una comprobación posterior.
+        decision = (DecisionSupervisor.objects
+                    .filter(org=request.org, propuesta_id=propuesta_id)
+                    .order_by("-decidida_en").first())
+        if decision is None:
+            return Response({"error": "DECISION_NO_ENCONTRADA",
+                             "detalle": "esta propuesta no tiene una decisión "
+                                        "registrada: primero hay que revisarla"},
+                            status=status.HTTP_404_NOT_FOUND)
+        try:
+            fresca = gobierno.registrar_resultado(
+                decision, actor=request.profile, resultado=d["resultado"],
+                evidencia=d["evidencia"], correccion=d.get("correccion", ""))
+        except gobierno.DesenlaceIncompatible as e:
+            #  409: el estado del sistema impide la operación. No es un cuerpo
+            #  inválido ni una falta de permiso.
+            return Response({"error": "DESENLACE_YA_REGISTRADO",
+                             "detalle": str(e)},
+                            status=status.HTTP_409_CONFLICT)
+        except gobierno.ErrorGobierno as e:
+            return Response({"error": "RESULTADO_INVALIDO",
+                             "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            "decision": str(fresca.id),
+            "propuesta": str(propuesta_id),
+            "tipo_decision": fresca.tipo,
+            "resultado": fresca.resultado,
+            "resultado_en": fresca.resultado_en.isoformat(),
+            "hubo_correccion": bool(fresca.correccion),
+            #  Qué lección dejó, si dejó alguna. Puede ser ninguna, y eso NO es
+            #  un error: 'aceptada + falló' no prueba que no hubiera problema.
+            "aprendizajes": [
+                {"tipo": a.tipo, "conclusion": a.conclusion}
+                for a in fresca.aprendizajes.all()],
+            "server_time": timezone.now().isoformat(),
+        })

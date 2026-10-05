@@ -13,6 +13,11 @@ urlpatterns = [
          name="propuesta-detalle"),
     path("propuestas/<uuid:propuesta_id>/revisar/",
          views.RevisarPropuestaView.as_view(), name="propuesta-revisar"),
+    #  EL DESENLACE. Se registra DESPUES de revisar y con evidencia: una
+    #  decision aceptada no es una recomendacion exitosa, y medir las dos
+    #  juntas diria obediencia donde dice acierto.
+    path("propuestas/<uuid:propuesta_id>/resultado/",
+         views.ResultadoDecisionView.as_view(), name="propuesta-resultado"),
     path("propuestas/<uuid:propuesta_id>/cancelar/",
          views.CancelarPropuestaView.as_view(), name="propuesta-cancelar"),
     path("supervisor/ciclo/", views.CicloSupervisorView.as_view(), name="ciclo"),

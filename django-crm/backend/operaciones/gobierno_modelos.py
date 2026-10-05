@@ -68,9 +68,21 @@ class TipoDecision:
     #  decision humana, y se distingue para que no contamine las metricas de
     #  aceptacion.
     EXPIRO = "expiro"
+    #  P8.2 (05/10/2026). Ni si ni no: la recomendacion no venia al caso.
+    #  Se distingue de RECHAZO a proposito -- rechazar es decir 'no hagas
+    #  esto', y 'no aplicable' es decir 'esto no era una pregunta'. Medir
+    #  los dos juntos haria que una propuesta fuera de contexto contara
+    #  como un error de criterio del Supervisor, que es otra cosa.
+    NO_APLICABLE = "no_aplicable"
 
-    TODOS = (ACEPTO, RECHAZO, MODIFICO, POSPUSO, EXPIRO)
-    HUMANOS = (ACEPTO, RECHAZO, MODIFICO, POSPUSO)
+    TODOS = (ACEPTO, RECHAZO, MODIFICO, POSPUSO, EXPIRO,
+             NO_APLICABLE)
+    #  'no_aplicable' SI es humano --lo dice una persona-- pero NO entra en
+    #  la tasa de aceptacion: no es ni aceptar ni rechazar.
+    HUMANOS = (ACEPTO, RECHAZO, MODIFICO, POSPUSO, NO_APLICABLE)
+    #  Sobre estos se mide si el Supervisor acerto. 'pospuso' y
+    #  'no_aplicable' no son un veredicto sobre su criterio.
+    VEREDICTO = (ACEPTO, RECHAZO, MODIFICO)
     ETIQUETAS = tuple((t, t.capitalize()) for t in TODOS)
 
 
@@ -122,8 +134,30 @@ class DecisionSupervisor(BaseModel):
     situacion = models.ForeignKey(
         "operaciones.SituacionOperativa", on_delete=models.CASCADE,
         null=True, blank=True, related_name="decisiones")
+    #  PROTECT. Esta fila es HISTORIA y no se puede perder por un borrado.
+    #
+    #  COMO SE LLEGO AQUI, en tres pasos y con la medicion de cada uno:
+    #
+    #  1. Era SET_NULL. Borrar una propuesta revisada dejaba esta fila con las
+    #     dos referencias nulas y 'decision_con_objeto' reventaba el borrado con
+    #     CheckViolation. Latente hasta P8.2, porque nadie escribia decisiones.
+    #
+    #  2. Se intento aflojar la restriccion para aceptar la 'recomendacion'
+    #     copiada. 'test_28_una_decision_sin_objeto_se_rechaza' lo rechazo: P4
+    #     ya habia decidido que una recomendacion suelta no alcanza.
+    #
+    #  3. Se puso CASCADE --si sin objeto la fila no debe existir, que se vaya
+    #     con el objeto-- y eso resolvia la excepcion PERDIENDO la decision.
+    #     Para una tabla de auditoria y aprendizaje operacional, perder la fila
+    #     es peor que no poder borrar la propuesta.
+    #
+    #  PROTECT dice lo correcto: una propuesta con decision registrada NO se
+    #  borra. Y no estorba, porque en produccion las propuestas no se borran --
+    #  se aceptan, rechazan, modifican, expiran o cancelan, que son cambios de
+    #  estado. Medido: el UNICO lugar del repositorio que las borra es la
+    #  limpieza de una prueba con 'transaction=True'.
     propuesta = models.ForeignKey(
-        "operaciones.PropuestaSupervisor", on_delete=models.SET_NULL,
+        "operaciones.PropuestaSupervisor", on_delete=models.PROTECT,
         null=True, blank=True, related_name="decisiones_registradas")
 
     #  Que se habia recomendado, copiado en el momento de decidir. Se copia a
@@ -158,7 +192,16 @@ class DecisionSupervisor(BaseModel):
             models.Index(fields=["situacion", "-decidida_en"]),
         ]
         constraints = [
-            #  Una decision tiene que ser SOBRE algo.
+            #  La decision apunta a una situacion O a una propuesta. Las dos
+            #  nulas, no.
+            #
+            #  P8.2 intento aflojarla --aceptar tambien una 'recomendacion'
+            #  copiada-- y 'test_28_una_decision_sin_objeto_se_rechaza' la
+            #  defendio: ese test crea una fila con recomendacion='x' y las
+            #  dos referencias nulas, y exige IntegrityError. P4 ya habia
+            #  decidido que una recomendacion suelta NO alcanza, asi que se
+            #  revirtio y el problema real se arreglo donde estaba: el
+            #  'on_delete' de 'propuesta', que dejaba la fila huerfana.
             models.CheckConstraint(
                 condition=(models.Q(situacion__isnull=False)
                            | models.Q(propuesta__isnull=False)),
@@ -249,3 +292,205 @@ class NivelAutonomia(BaseModel):
 
     def __str__(self):
         return f"nivel {self.nivel} ({self.org_id})"
+
+
+# =============================================================================
+#  EL APRENDIZAJE  --  lo que se supo DESPUES, y quien lo supo
+# =============================================================================
+
+class TipoAprendizaje:
+    """
+    Que clase de leccion deja un caso. Lista cerrada.
+
+    Son las ocho que el bloque nombra, y cada una existe porque mide algo que
+    las otras no:
+
+      * RECOMENDACION_CONFIRMADA  se acepto Y despues se comprobo que servia.
+      * RECHAZO_ERRADO            se rechazo y el problema se confirmo igual.
+                                  Es la mas valiosa del conjunto: la unica que
+                                  dice que el Supervisor tenia razon y no se le
+                                  creyo.
+      * FALSO_POSITIVO            detecto una situacion y no habia problema.
+      * OMISION                   habia problema y NO habia situacion. El falso
+                                  negativo.
+      * CORRELACION_CORRECTA      agrupo bien.
+      * CORRELACION_INCORRECTA    agrupo cosas que no iban juntas.
+      * REINCIDENCIA              volvio a pasar en el mismo sitio.
+      * CORRECCION_HUMANA         una persona cambio la recomendacion.
+    """
+
+    RECOMENDACION_CONFIRMADA = "recomendacion_confirmada"
+    RECHAZO_ERRADO = "rechazo_errado"
+    FALSO_POSITIVO = "falso_positivo"
+    OMISION = "omision"
+    CORRELACION_CORRECTA = "correlacion_correcta"
+    CORRELACION_INCORRECTA = "correlacion_incorrecta"
+    REINCIDENCIA = "reincidencia"
+    CORRECCION_HUMANA = "correccion_humana"
+
+    TODOS = (RECOMENDACION_CONFIRMADA, RECHAZO_ERRADO, FALSO_POSITIVO,
+             OMISION, CORRELACION_CORRECTA, CORRELACION_INCORRECTA,
+             REINCIDENCIA, CORRECCION_HUMANA)
+    ETIQUETAS = tuple((t, t.replace("_", " ").capitalize()) for t in TODOS)
+
+    #  Los que cuentan CONTRA el Supervisor al medir precision.
+    EN_CONTRA = (FALSO_POSITIVO, OMISION, CORRELACION_INCORRECTA)
+    #  Los que cuentan A FAVOR.
+    A_FAVOR = (RECOMENDACION_CONFIRMADA, RECHAZO_ERRADO, CORRELACION_CORRECTA)
+
+
+class OrigenAprendizaje:
+    """
+    QUIEN concluyo. Y el Supervisor NO esta en la lista, a proposito.
+
+    Es la regla del bloque: no permitir que el Supervisor escriba su propio
+    resultado para declararse correcto. Si 'supervisor' fuera un origen valido,
+    esta seria una tabla donde el evaluado se pone la nota, y toda metrica
+    construida encima mediria su opinion de si mismo.
+
+    Los tres que si valen:
+
+      PERSONA              alguien lo dijo, y queda su nombre.
+      VERIFICACION         salio de una verificacion registrada de la situacion.
+      EVIDENCIA_OPERATIVA  salio de un hecho operativo comprobable: una ONT que
+                           volvio, un caso que se cerro con causa.
+    """
+
+    PERSONA = "persona"
+    VERIFICACION = "verificacion"
+    EVIDENCIA_OPERATIVA = "evidencia_operativa"
+
+    TODOS = (PERSONA, VERIFICACION, EVIDENCIA_OPERATIVA)
+    ETIQUETAS = tuple((o, o.replace("_", " ").capitalize()) for o in TODOS)
+
+
+class AprendizajeSupervisor(BaseModel):
+    """
+    Una leccion con su evidencia, su fecha y quien la saco. APPEND-ONLY.
+
+    POR QUE UNA TABLA Y NO CAMPOS EN LAS QUE YA HAY
+    -----------------------------------------------
+    Porque un aprendizaje no pertenece a una propuesta ni a una situacion: puede
+    nacer de las dos, de ninguna, o de una tercera cosa -- un ticket que
+    aparecio despues y mostro que no habia ninguna situacion abierta. Y porque
+    son MUCHOS por objeto: la misma situacion puede dejar una leccion de
+    correlacion, otra de reincidencia y otra de correccion humana. Como campos
+    serian columnas casi siempre vacias, y una sola por tipo.
+
+    No reemplaza nada. 'PropuestaSupervisor' sigue siendo la propuesta,
+    'DecisionSupervisor' sigue siendo la decision con su desenlace, y
+    'SituacionOperativa' sigue siendo la situacion. Esto apunta a ellas.
+
+    POR QUE APPEND-ONLY
+    -------------------
+    Mismo motivo que 'SituacionEvento': una leccion que se puede reescribir no
+    es historia, es una opinion actual. Si la conclusion cambia, se agrega otra
+    fila que lo diga -- y entonces se puede ver que alguien cambio de opinion,
+    que es justo el dato que se perderia.
+
+    LO QUE ESTA TABLA NO AFIRMA
+    ---------------------------
+    Que la conclusion sea verdad. Afirma que ALGUIEN concluyo eso, con esa
+    evidencia, ese dia. 'confianza' viaja para que una conclusion floja no se
+    lea igual que una firme: es lo que permite no presentar una conclusion
+    inferida como un hecho.
+    """
+
+    class NoSeReescribe(Exception):
+        """Un aprendizaje no se edita ni se borra. Se agrega otro."""
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE,
+                            related_name="aprendizajes_supervisor")
+    tipo = models.CharField(max_length=32, choices=TipoAprendizaje.ETIQUETAS)
+    origen = models.CharField(max_length=24,
+                              choices=OrigenAprendizaje.ETIQUETAS)
+
+    #  A QUE se refiere. Los tres son opcionales por separado y obligatorios en
+    #  conjunto: una leccion que no apunta a nada no se puede volver a leer.
+    situacion = models.ForeignKey(
+        "operaciones.SituacionOperativa", on_delete=models.CASCADE,
+        null=True, blank=True, related_name="aprendizajes")
+    #  PROTECT las dos, por el mismo motivo que en 'DecisionSupervisor': una
+    #  leccion es historia. Si se pudiera borrar la propuesta o la decision que
+    #  la originaron, el aprendizaje se iria con ellas -- y una tabla de
+    #  aprendizaje que se puede vaciar borrando otra cosa no mide nada.
+    #
+    #  La OMISION no se ve afectada: nace sin objeto a proposito y por eso esta
+    #  exenta en 'aprendizaje_con_objeto'. A esa no la arrastra ningun borrado.
+    propuesta = models.ForeignKey(
+        "operaciones.PropuestaSupervisor", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="aprendizajes")
+    decision = models.ForeignKey(
+        "operaciones.DecisionSupervisor", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="aprendizajes")
+
+    conclusion = models.TextField(
+        help_text="Que se aprendio, en una frase que se entienda sola.")
+    #  Obligatoria por restriccion de base. Sin evidencia, "aprendimos que..."
+    #  es una afirmacion sin respaldo y la tabla entera perderia sentido.
+    evidencia = models.TextField(
+        help_text="En que se basa. Sin esto la conclusion es una opinion.")
+    confianza = models.CharField(max_length=16, default="media")
+
+    #  Quien. Obligatorio cuando el origen es una persona: una leccion humana
+    #  sin autor no se puede repreguntar.
+    actor = models.ForeignKey(Profile, on_delete=models.PROTECT,
+                              null=True, blank=True,
+                              related_name="aprendizajes_registrados")
+    registrado_en = models.DateTimeField()
+
+    #  Los numeros que P8.3 va a necesitar y que no tienen columna propia:
+    #  {'afectados_propuestos': 12, 'afectados_confirmados': 10} para la calidad
+    #  de correlacion; {'situacion_anterior': '<uuid>'} para la reincidencia.
+    #  Van en JSON y no en columnas porque cada tipo necesita otros, y columnas
+    #  por tipo serian siete columnas vacias en cada fila.
+    datos = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "operaciones_aprendizaje_supervisor"
+        ordering = ["-registrado_en"]
+        indexes = [
+            models.Index(fields=["org", "tipo", "registrado_en"]),
+            models.Index(fields=["org", "situacion"]),
+        ]
+        constraints = [
+            #  Apunta a algo... SALVO una omision.
+            #
+            #  Esto lo corrigio una prueba: la primera version exigia
+            #  situacion, propuesta o decision SIEMPRE, y con eso el caso
+            #  principal de un falso negativo era imposible de registrar --
+            #  una omision existe JUSTAMENTE porque no habia situacion a la
+            #  que apuntar. Lo que la sostiene es su evidencia (obligatoria
+            #  por la restriccion de abajo) y lo que diga 'datos': el
+            #  ticket, el PON, la hora.
+            models.CheckConstraint(
+                condition=(models.Q(situacion__isnull=False)
+                           | models.Q(propuesta__isnull=False)
+                           | models.Q(decision__isnull=False)
+                           | models.Q(tipo="omision")),
+                name="aprendizaje_con_objeto"),
+            #  Evidencia obligatoria, en la BASE y no solo en el servicio: el
+            #  otro camino se puede saltear llamando al ORM directo.
+            models.CheckConstraint(
+                condition=~models.Q(evidencia=""),
+                name="aprendizaje_exige_evidencia"),
+            #  Una leccion de una persona lleva su nombre.
+            models.CheckConstraint(
+                condition=(~models.Q(origen="persona")
+                           | models.Q(actor__isnull=False)),
+                name="aprendizaje_humano_con_actor"),
+        ]
+
+    def __str__(self):
+        return f"[{self.tipo}] {self.conclusion[:60]}"
+
+    def save(self, *args, **kwargs):
+        if self.pk and not self._state.adding:
+            raise self.NoSeReescribe(
+                "un aprendizaje no se edita: si la conclusion cambio, se "
+                "agrega otro que lo diga, y asi queda el cambio de opinion")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise self.NoSeReescribe(
+            "un aprendizaje no se borra: lo que se aprendio, se aprendio")

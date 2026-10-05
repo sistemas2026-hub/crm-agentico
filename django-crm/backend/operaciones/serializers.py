@@ -640,3 +640,18 @@ class CoordinarSupervisorSerializer(serializers.Serializer):
                 raise serializers.ValidationError(
                     {c: "obligatorio para clase 'evidencia'" for c in faltan})
         return datos
+
+
+class ResultadoDecisionSerializer(serializers.Serializer):
+    """
+    El desenlace de una decision, registrado DESPUES y con evidencia.
+
+    'pendiente' no se acepta: es el estado en el que nace, no un desenlace.
+    'correccion' es opcional y es la senal mas valiosa de la tabla -- que la
+    persona explique que habria hecho distinto.
+    """
+
+    resultado = serializers.CharField(max_length=24)
+    evidencia = serializers.CharField(max_length=4000)
+    correccion = serializers.CharField(max_length=4000, required=False,
+                                       allow_blank=True, default="")
