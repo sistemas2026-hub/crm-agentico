@@ -76,7 +76,7 @@
              declare. Sin estos dos, `launchUrl` no encuentra el marcador ni el
              mapa aunque esten instalados, y falla con "no activity found": el
              boton se ve encendido y no pasa nada, que es peor que tenerlo gris.
-             No se nombra ninguna aplicacion --ni Waze ni Google Maps--: se
+             No se nombra ninguna aplicacion (ni Waze ni Google Maps): se
              declara el ESQUEMA, y elige el telefono con lo que tenga. -->
         <intent>
             <action android:name="android.intent.action.DIAL"/>

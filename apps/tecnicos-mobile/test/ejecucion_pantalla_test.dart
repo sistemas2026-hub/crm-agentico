@@ -395,6 +395,33 @@ void main() {
   });
 
   group('5b. La medicion se registra; el veredicto lo da la OLT', () {
+    testWidgets('La franja de arriba dice QUE falta, sin bajar el scroll',
+        (WidgetTester t) async {
+      // Con una mano, en una escalera, bajar hasta el checklist del fondo para
+      // saber que falta es un viaje -- y si no se baja, el tecnico se entera
+      // cuando toca «completar» y el boton no lo deja.
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa()));
+      await t.pumpAndSettle();
+
+      // Nombra QUE falta, no cuantos: «te faltan 2» obliga a bajar igual.
+      expect(find.textContaining('Falta: '), findsOneWidget);
+    });
+
+    testWidgets('Sin nada pendiente, la franja NO ocupa lugar',
+        (WidgetTester t) async {
+      // Una franja que dice «todo listo» permanentemente ocupa el lugar donde
+      // el tecnico mira cuando SI falta algo, y deja de leerse.
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa(
+        requisitos: const <Map<String, dynamic>>[],
+        campos: const <Map<String, dynamic>>[],
+      )));
+      await t.pumpAndSettle();
+
+      expect(find.textContaining('Falta: '), findsNothing);
+    });
+
     testWidgets('Una señal mala se puede registrar, no se bloquea',
         (WidgetTester t) async {
       // -27 dBm es una señal fuera de rango, medida bien, y suele ser el
@@ -410,7 +437,22 @@ void main() {
       await t.pumpAndSettle();
 
       expect(find.textContaining('Tiene que ser'), findsNothing);
-      expect(find.textContaining('Falta:'), findsNothing);
+      // Lo que esta linea quiere decir es que el CHECKLIST no marque el
+      // formulario como incompleto por esta lectura. Decia `'Falta:'` a secas y
+      // eso dejo de servir cuando entro la franja fija de «lo que falta», que
+      // nombra lo que de verdad falta en esta orden --las fotos-- y es
+      // correcto. Se nombra el campo, que es lo que la prueba mide.
+      expect(
+        find.textContaining('Potencia óptica en el equipo del cliente',
+            skipOffstage: false),
+        findsOneWidget,
+        reason: 'el campo se dibuja',
+      );
+      expect(
+        find.textContaining('Falta: Potencia óptica'),
+        findsNothing,
+        reason: 'una lectura mala no puede contar como campo sin llenar',
+      );
     });
 
     testWidgets('NINGUN valor se rechaza: es un registro, no una respuesta',

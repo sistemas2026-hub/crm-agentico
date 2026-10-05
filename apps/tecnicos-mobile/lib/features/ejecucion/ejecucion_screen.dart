@@ -1059,6 +1059,18 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
             OfflineSavedBanner(visible: _showSavedIndicator),
             _paraQuienYEnQuePaso(),
             _franjaDelFormulario(),
+            // LO QUE FALTA, ARRIBA Y FIJO
+            // ---------------------------
+            // El checklist de cierre vive al fondo de un scroll largo. Con una
+            // mano, en una escalera, llegar hasta ahi para saber que falta es
+            // un viaje -- y si no se llega, el tecnico se entera de lo que le
+            // falta cuando toca «completar» y el boton no lo deja.
+            //
+            // NO ES UNA SEGUNDA CUENTA: sale de `_cierre`, el mismo veredicto
+            // que decide si se puede cerrar. Una cuenta propia aca seria la
+            // forma mas rapida de que la misma pantalla diga dos cosas
+            // distintas del mismo trabajo.
+            _loQueFalta(),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(
@@ -1253,6 +1265,44 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           ],
         _avisoSinCobertura(),
       ],
+    );
+  }
+
+  /// Una franja fija con lo que todavia impide cerrar.
+  ///
+  /// Se esconde sola cuando no falta nada: una franja que dice «todo listo»
+  /// permanentemente ocupa el lugar donde el tecnico mira cuando SI falta algo,
+  /// y deja de leerse.
+  Widget _loQueFalta() {
+    final List<RequisitoDeCierre> faltan = _cierre.bloqueantes;
+    if (faltan.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      color: AppColors.errorContainer,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.margen,
+        vertical: AppSpacing.sm,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Icon(Icons.error_outline,
+              size: 18, color: AppColors.onErrorContainer),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              // Se nombra QUE falta, no cuantos. «Te faltan 2» obliga a bajar
+              // igual para saber cuales, que es justo lo que esto evita.
+              'Falta: ${faltan.map((RequisitoDeCierre r) => r.titulo).join(' · ')}',
+              style: AppTypography.cuerpoChico.copyWith(
+                color: AppColors.onErrorContainer,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
