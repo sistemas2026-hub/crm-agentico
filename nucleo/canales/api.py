@@ -5191,11 +5191,62 @@ def _enlaces_externos(config, conv: dict, tenant: str) -> dict:
 
 
 # Las herramientas que dan el estado del equipo. Se piden por NOMBRE y no por
-# endpoint: son las livianas (2-3 s cada una). Existe una tercera que trae
+# endpoint: son las livianas (2-3 s cada una). Existe una cuarta que trae
 # ademas la causa de la ultima caida, pero tarda ~10 s y el proveedor pide no
 # usarla en consultas repetidas -- diez segundos al abrir cada ticket se
 # sienten, y esa causa se puede ver entrando por el enlace.
-_HERRAMIENTAS_EQUIPO = ("consultar_estado_ont", "consultar_senal_ont")
+#
+# 'consultar_topologia_ont' entra el 05/10/2026, y lo que resuelve es una
+# llamada al NOC: "¿en que caja esta y en que puerto?". Para una averia de
+# señal lo primero que hace el tecnico es ir a la NAP, y la ficha le decia
+# "CAJA / CTO -- Sin caja cargada" y "PUERTO PON -- Dato no disponible".
+#
+# EL DATO YA LLEGABA HASTA EL ULTIMO PASO. La aplicacion lee 'odb_name',
+# 'board', 'port' y 'zone_name' desde hace semanas; el backend los conserva; y
+# el panel de optica ya los pedia por su cuenta. Lo unico que faltaba era que
+# el contexto tecnico --el que congela la orden de trabajo-- los pidiera. Es el
+# cuarto caso del mismo patron en este modulo, despues de 'localidad',
+# 'direccion' y 'telefono'.
+#
+# Es una llamada mas por ficha. Es de las livianas (verificado el 14/08/2026
+# contra la instancia de Rapilink), y se paga una vez al armar la orden, no en
+# cada apertura.
+#
+# Si la empresa no declara la herramienta, no se pide y no se rompe nada: el
+# bucle de abajo saltea las que no estan. O sea que esto se enciende por
+# configuracion del tenant, no por codigo.
+_HERRAMIENTAS_EQUIPO = (
+    "consultar_estado_ont",
+    "consultar_senal_ont",
+    "consultar_topologia_ont",
+)
+
+# LO QUE PUEDE SALIR DE UNA HERRAMIENTA DE EQUIPO. Fail-closed.
+#
+# POR QUE ESTO NO EXISTIA Y AHORA SI
+# ----------------------------------
+# Hasta hoy '_estado_equipo' dejaba pasar CUALQUIER campo escalar que
+# devolviera la herramienta. Con las dos livianas eso no hacia daño --devuelven
+# estado y niveles opticos-- pero el detalle que trae la topologia devuelve
+# tambien 'name': el NOMBRE COMPLETO del cliente en el registro de la ONU. Sin
+# esta lista, agregar la topologia habria metido ese nombre en el contexto que
+# se CONGELA en la orden y se sincroniza al telefono.
+#
+# El panel de optica ya tenia su lista por esta misma razon, escrita al lado del
+# mismo riesgo. Esto la pone donde faltaba.
+#
+# Los nombres son el contrato del motor con la pantalla: la aplicacion de campo
+# lee exactamente estas claves. Un proveedor que llame distinto a sus campos se
+# resuelve en el mapeo de SU herramienta, no abriendo la lista -- abrirla seria
+# dejar de tener lista.
+_CAMPOS_DE_EQUIPO = frozenset({
+    # Estado y niveles opticos (las dos livianas de siempre).
+    "onu_status", "onu_signal", "onu_signal_1310", "onu_signal_1490",
+    "onu_signal_1490_veredicto", "distance", "last_status_change",
+    # Topologia: donde esta conectado. Nada de esto identifica a una persona.
+    "olt_id", "olt_name", "board", "port", "onu",
+    "zone_name", "odb_name", "onu_type_name",
+})
 
 
 def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
@@ -5218,8 +5269,12 @@ def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
                 herr, {"sn_onu": sn_onu}, tenant,
                 variables_tenant=config.variables_tenant)
             if isinstance(datos, dict):
+                # FAIL-CLOSED: lo que no esta nombrado no sale, aunque el
+                # proveedor lo agregue mañana. Ver _CAMPOS_DE_EQUIPO.
                 salida.update({k: v for k, v in datos.items()
-                               if isinstance(v, (str, int, float, bool)) and v != ""})
+                               if k in _CAMPOS_DE_EQUIPO
+                               and isinstance(v, (str, int, float, bool))
+                               and v != ""})
         except Exception as e:
             registrar("enlaces", "la herramienta de equipo no respondio",
                       herramienta=nombre, error=e)
