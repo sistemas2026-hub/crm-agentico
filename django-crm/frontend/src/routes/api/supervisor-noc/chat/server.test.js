@@ -49,7 +49,8 @@ const { POST, GET } = await import('./+server.js');
 /** El `cookies` que SvelteKit entrega en un +server.js. */
 const cookies = { get: (n) => (n === 'jwt_access' ? TOKEN : undefined) };
 /** Lo que hooks.server.js deja en locals: user y org, NUNCA cookies. */
-const locals = { user: { id: 'u-7' }, org: { id: 'org-1' }, tenant: 'rapilink' };
+const locals = { user: { id: 'u-7' }, org: { id: 'org-1' }, tenant: 'rapilink',
+                 profile: { role: 'ADMIN' } };
 
 function evento(cuerpo = { mensaje: 'hola' }) {
   return {
@@ -89,16 +90,32 @@ describe('POST — la identidad llega autenticada', () => {
     }
   });
 
-  it('consulta el perfil para resolver profile_id del lado del servidor', async () => {
-    await POST(evento());
+  it('resuelve el nombre del lado del servidor, no del cuerpo', async () => {
+    //  Ya no se resuelve 'profile_id' -- la burbuja pide el rol por nombre.
+    //  Lo que sigue saliendo del servidor es quien firma.
+    const ev = evento({ mensaje: 'hola', nombre_colaborador: 'OTRO' });
+    await POST(ev);
     expect(apiRequest.mock.calls.some((c) => c[0] === '/profile/')).toBe(true);
+    const cuerpo = JSON.parse(ev.fetch.mock.calls.at(-1)[1].body);
+    expect(cuerpo.nombre_colaborador).toBe('Ana');
   });
 
-  it('manda al motor el profile_id resuelto, no uno del cuerpo', async () => {
-    const ev = evento({ mensaje: 'hola', profile_id: 'INTRUSO' });
+  it('le habla al rol supervisor_noc, no a los agentes del colaborador', async () => {
+    //  Lo que desbloquea el "no tienes ningun agente asignado": pedir el rol
+    //  por nombre no pasa por 'agentes_de_colaborador'.
+    const ev = evento();
     await POST(ev);
     const cuerpo = JSON.parse(ev.fetch.mock.calls.at(-1)[1].body);
-    expect(cuerpo.profile_id).toBe('p-9');
+    expect(cuerpo.rol).toBe('supervisor_noc');
+    expect(cuerpo.profile_id).toBeUndefined();
+  });
+
+  it('nada del cuerpo decide con que agente se habla', async () => {
+    const ev = evento({ mensaje: 'hola', rol: 'administracion', profile_id: 'INTRUSO' });
+    await POST(ev);
+    const cuerpo = JSON.parse(ev.fetch.mock.calls.at(-1)[1].body);
+    expect(cuerpo.rol).toBe('supervisor_noc');
+    expect(cuerpo.profile_id).toBeUndefined();
   });
 
   it('la clave de sesion lleva el prefijo del Supervisor', async () => {
@@ -117,12 +134,16 @@ describe('POST — fallos', () => {
     expect(apiRequest).not.toHaveBeenCalled();
   });
 
-  it('si el perfil falla no se le habla al motor', async () => {
-    apiRequest.mockRejectedValueOnce(new Error('Organization context is required.'));
+  it('si no se puede leer el nombre, la pregunta sale igual', async () => {
+    //  El nombre es una cortesia para firmar, no un control: quien decide el
+    //  acceso es la puerta por perfil, que ya corrio. Cortar aca dejaria el
+    //  chat caido por algo que no protege a nadie.
+    apiRequest.mockRejectedValue(new Error('502'));
     const ev = evento();
     const r = await POST(ev);
-    expect(r.status).toBe(502);
-    expect(ev.fetch).not.toHaveBeenCalled();
+    expect(r.status).toBe(200);
+    const cuerpo = JSON.parse(ev.fetch.mock.calls.at(-1)[1].body);
+    expect(cuerpo.nombre_colaborador).toBe('');
   });
 
   it('un mensaje vacio se rechaza antes de gastar un turno', async () => {
@@ -144,6 +165,41 @@ describe('POST — fallos', () => {
     const cuerpo = JSON.parse(ev.fetch.mock.calls.at(-1)[1].body);
     expect(cuerpo.mensaje).toBe('hola');
     expect(cuerpo.mensaje).not.toContain('Estado del Supervisor');
+  });
+});
+
+describe('la puerta por perfil — quien puede supervisar', () => {
+  //  Pedir el rol por nombre saltea 'agentes_de_colaborador', que era el
+  //  control que decidia quien accede. Si esta puerta no estuviera, cualquier
+  //  usuario autenticado de la empresa tendria el estado de la operacion.
+  for (const role of ['ADMIN', 'SUPERVISOR', 'OPERACIONES']) {
+    it(`${role} entra`, async () => {
+      const ev = evento();
+      ev.locals.profile = { role };
+      expect((await POST(ev)).status).toBe(200);
+    });
+  }
+
+  for (const role of ['USER', 'user', 'admin', '', undefined]) {
+    it(`${JSON.stringify(role)} NO entra`, async () => {
+      const ev = evento();
+      ev.locals.profile = { role };
+      const r = await POST(ev);
+      expect(r.status).toBe(403);
+      expect(ev.fetch).not.toHaveBeenCalled();
+    });
+  }
+
+  it('sin perfil tampoco: fail-closed', async () => {
+    const ev = evento();
+    delete ev.locals.profile;
+    expect((await POST(ev)).status).toBe(403);
+  });
+
+  it('la puerta vale tambien para leer el historial', async () => {
+    const ev = evento();
+    ev.locals.profile = { role: 'USER' };
+    expect((await GET(ev)).status).toBe(403);
   });
 });
 

@@ -54,6 +54,42 @@ import { claveDeSesion, bloqueDeContexto, mensajeParaElMotor } from '$lib/superv
 const LIMITE_HISTORIAL = 60;
 
 /**
+ * El agente con el que habla esta burbuja, por NOMBRE.
+ *
+ * POR QUE NO 'profile_id'
+ * -----------------------
+ * La primera version mandaba 'profile_id' y el motor resolvia los agentes
+ * asignados al colaborador. Dos problemas, los dos medidos el 05/10/2026
+ * contra produccion:
+ *
+ *   1. Sin asignaciones en 'asistente.tenant_users' el motor corta con
+ *      "Todavia no tienes ningun agente asignado" -- correcto y fail-closed,
+ *      pero convierte abrir un chat de supervision en un tramite de alta.
+ *   2. Aun con agentes asignados, esos agentes son 'soporte' o 'facturacion':
+ *      estan hechos para atender a UN cliente por vez y miran la operacion
+ *      por el agujero de un abonado.
+ *
+ * 'supervisor_noc' se declara en la config del tenant con su catalogo de
+ * solo lectura y sus listas blancas propias. '/chat' acepta 'rol' por nombre
+ * -- es el mismo camino que usa el simulador de WhatsApp.
+ */
+const ROL = 'supervisor_noc';
+
+/**
+ * Quien puede usar la burbuja.
+ *
+ * Pedir el rol por nombre saltea 'agentes_de_colaborador', que era el control
+ * que decidia quien accede. Sin reponerlo, cualquier usuario autenticado de
+ * la empresa tendria el estado de la operacion -- asi que la puerta se pone
+ * aca, explicita y con el vocabulario de roles que el CRM ya tiene
+ * (common/utils.py::ROLES).
+ *
+ * Fail-closed: un rol que no este en esta lista --incluido 'USER' y la
+ * ausencia de rol-- no pasa.
+ */
+const ROLES_QUE_SUPERVISAN = new Set(['ADMIN', 'SUPERVISOR', 'OPERACIONES']);
+
+/**
  * Lo que hace falta para hablarle al motor, resuelto del lado del servidor.
  * Devuelve { error, status } si algo falta -- quien llama lo propaga tal cual
  * en vez de continuar con una identidad a medias.
@@ -68,6 +104,14 @@ async function identidad(locals, fetch) {
   const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
     return { error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)', status: 500 };
+  }
+
+  if (!ROLES_QUE_SUPERVISAN.has(locals.profile?.role)) {
+    return {
+      error: 'El chat del Supervisor es para los perfiles de operacion '
+        + '(ADMIN, SUPERVISOR u OPERACIONES).',
+      status: 403
+    };
   }
 
   const sesion = claveDeSesion(locals.user);
@@ -152,20 +196,16 @@ export async function POST({ request, locals, cookies, fetch }) {
     return json({ error: 'Falta el mensaje' }, { status: 400 });
   }
 
-  /** @type {string | undefined} */
-  let profileId;
+  //  El nombre viaja para que el motor pueda firmar a nombre de quien
+  //  pregunta. Si no se puede resolver, NO se corta: el nombre es una
+  //  cortesia, no un control -- quien decide el acceso es la puerta de
+  //  arriba, y el perfil ya quedo comprobado ahi.
   let nombreColaborador = '';
   try {
     const perfil = await apiRequest('/profile/', {}, { cookies });
-    profileId = perfil?.user_obj?.id;
     nombreColaborador = (perfil?.user_obj?.name || perfil?.user_obj?.email || '').trim();
-  } catch (/** @type {any} */ err) {
-    return json({ error: err?.message || 'No se pudo identificar tu perfil' },
-      { status: 502 });
-  }
-  if (!profileId) {
-    return json({ error: 'No se pudo identificar tu perfil en esta organizacion' },
-      { status: 403 });
+  } catch {
+    /* sigue sin nombre */
   }
 
   const contexto = bloqueDeContexto(await estadoDelSupervisor(cookies));
@@ -176,7 +216,7 @@ export async function POST({ request, locals, cookies, fetch }) {
       headers: headersMotor({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         tenant: id.tenant,
-        profile_id: profileId,
+        rol: ROL,
         identificador_sesion: id.sesion,
         nombre_colaborador: nombreColaborador,
         mensaje: mensajeParaElMotor(String(mensaje), contexto)
