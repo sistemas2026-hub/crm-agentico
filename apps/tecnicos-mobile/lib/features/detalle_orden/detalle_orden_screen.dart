@@ -1522,12 +1522,21 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 color: AppColors.secondary,
               ),
               const SizedBox(width: 6),
-              Text(
-                // En un poste no hay cliente. Encabezar el bloque con la
-                // palabra deja al técnico buscando a quién preguntarle.
-                trabajo.esTrabajoDePlanta ? 'Ubicación' : 'Cliente & Ubicación',
-                style: AppTypography.etiqueta.copyWith(
-                  color: AppColors.onSurface,
+              // `Expanded` porque con la letra del sistema en 1.3 --lo primero
+              // que sube quien lee al sol-- «Cliente & Ubicación» desbordaba 21
+              // px a 360. Medido el 05/10/2026 con la guarda de ancho real.
+              // Un rótulo SÍ puede recortarse: lo que no puede es tapar la
+              // tarjeta con una banda amarilla.
+              Expanded(
+                child: Text(
+                  // En un poste no hay cliente. Encabezar el bloque con la
+                  // palabra deja al técnico buscando a quién preguntarle.
+                  trabajo.esTrabajoDePlanta ? 'Ubicación' : 'Cliente & Ubicación',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.etiqueta.copyWith(
+                    color: AppColors.onSurface,
+                  ),
                 ),
               ),
             ],
@@ -1562,7 +1571,20 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   color: AppColors.exito,
                 ),
                 const SizedBox(width: AppSpacing.sm),
-                Text(trabajo.telefono, style: AppTypography.etiquetaGrande),
+                // Un número de teléfono recortado no sirve para nada: hay que
+                // poder leerlo entero para dictarlo. Por eso se achica en vez
+                // de cortarse. Desbordaba 15 px a 360 con la letra en 1.3.
+                Expanded(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      trabajo.telefono,
+                      maxLines: 1,
+                      style: AppTypography.etiquetaGrande,
+                    ),
+                  ),
+                ),
               ],
             ),
           ],
@@ -1654,16 +1676,27 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                       color: ubicado ? AppColors.error : AppColors.outline,
                     ),
                     const SizedBox(width: 6),
-                    Text(
-                      ubicado
-                          ? '${trabajo.latitud!.toStringAsFixed(5)}, '
-                                '${trabajo.longitud!.toStringAsFixed(5)}'
-                          : 'Sin coordenadas en la orden',
-                      style: ubicado
-                          ? AppTypography.datoChico.copyWith(
-                              color: AppColors.onSurface,
-                            )
-                          : AppTypography.etiquetaChica,
+                    // `Flexible` porque la pastilla es `mainAxisSize.min` y el
+                    // texto no tenia techo: a 360 px desbordaba 24 px. Una
+                    // coordenada cortada manda a otro lado, asi que se achica
+                    // en vez de recortarse.
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          ubicado
+                              ? '${trabajo.latitud!.toStringAsFixed(5)}, '
+                                    '${trabajo.longitud!.toStringAsFixed(5)}'
+                              : 'Sin coordenadas en la orden',
+                          maxLines: 1,
+                          style: ubicado
+                              ? AppTypography.datoChico.copyWith(
+                                  color: AppColors.onSurface,
+                                )
+                              : AppTypography.etiquetaChica,
+                        ),
+                      ),
                     ),
                   ],
                 ),
