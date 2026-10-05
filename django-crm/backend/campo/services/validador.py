@@ -67,6 +67,26 @@ def validar_esquema_plantilla(esquema: dict) -> None:
                     f"Regla '{r}' en campo '{cid}' no reconocida. Permitidas: {list(REGLAS_PERMITIDAS)}"
                 )
 
+    # Los pasos del protocolo, para poder atar una evidencia a uno de ellos.
+    #
+    # POR QUE UNA EVIDENCIA PUEDE DECLARAR SU PASO (05/10/2026)
+    # ---------------------------------------------------------
+    # El tecnico trabaja siguiendo el protocolo. Hasta hoy el protocolo decia
+    # «3. Medicion optica con power meter» y la foto se llamaba «Fotografia de
+    # la medicion» -- son lo mismo, y vivian en dos pantallas distintas, sin
+    # nada que las relacionara. Habia que acordarse de cual foto correspondia a
+    # cual paso.
+    #
+    # Es OPCIONAL y compatible hacia atras: una plantilla que no lo declare
+    # sigue siendo valida y la aplicacion la dibuja como siempre, en una lista
+    # plana. Lo decide cada empresa en SU esquema, no el codigo.
+    pasos = esquema.get("pasos", [])
+    if not isinstance(pasos, list):
+        raise ValidationError("El atributo 'pasos' debe ser una lista.")
+    ids_de_paso = {
+        p.get("id") for p in pasos if isinstance(p, dict) and p.get("id")
+    }
+
     ids_evidencias = set()
     for ev in evidencias:
         eid = ev.get("id")
@@ -90,6 +110,18 @@ def validar_esquema_plantilla(esquema: dict) -> None:
                 f"Evidencia '{eid}' tiene tipo no permitido '{tipo}'. "
                 f"Permitidos: {sorted(TIPOS_DE_EVIDENCIA)}"
             )
+
+        # Un paso que no existe es peor que ninguno: la aplicacion agruparia esa
+        # foto bajo un titulo vacio, o la escondería. El tecnico no veria que le
+        # falta hasta que el boton de cerrar no lo deje, y no sabria por que.
+        paso = ev.get("paso")
+        if paso is not None:
+            if not isinstance(paso, str) or paso not in ids_de_paso:
+                raise ValidationError(
+                    f"La evidencia '{eid}' dice pertenecer al paso '{paso}', "
+                    f"que no existe en esta plantilla. Pasos declarados: "
+                    f"{sorted(ids_de_paso) or 'ninguno'}."
+                )
 
 
 def validar_campos_tecnicos(esquema: dict, nuevos_valores: dict) -> tuple[dict, dict]:

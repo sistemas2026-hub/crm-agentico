@@ -149,3 +149,79 @@ def test_g_los_contratos_conocidos_son_los_que_la_app_sabe_leer():
     Si alguna vez cambia, que cambie a proposito y rompiendo esta linea.
     """
     assert WorkTypeVersion.CONTRATOS_CONOCIDOS == frozenset({1})
+
+
+# --------------------------------------------------------------------------- #
+# F. Una evidencia puede decir a que paso del protocolo pertenece
+# --------------------------------------------------------------------------- #
+
+ESQUEMA_CON_PASOS = {
+    "pasos": [
+        {"id": "p1", "titulo": "Llegada al inmueble"},
+        {"id": "p3", "titulo": "Medición óptica"},
+    ],
+    "campos": [],
+    "evidencias": [
+        {"id": "foto_potencia", "titulo": "Fotografía de la medición",
+         "tipo": "foto", "paso": "p3"},
+    ],
+}
+
+
+def test_h_una_evidencia_puede_declarar_su_paso(tipo):
+    """El tecnico trabaja siguiendo el protocolo.
+
+    «3. Medicion optica con power meter» y «Fotografia de la medicion» son lo
+    mismo, y vivian en dos pantallas sin nada que las relacionara.
+    """
+    v = WorkTypeVersion.objects.create(
+        work_type=tipo, version=1, schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA, esquema=ESQUEMA_CON_PASOS,
+    )
+
+    assert v.esquema["evidencias"][0]["paso"] == "p3"
+
+
+def test_i_NO_declararlo_sigue_siendo_valido(tipo):
+    """Compatible hacia atras, y no es un detalle: NINGUNA de las plantillas
+    que existen hoy lo declara. Medido el 05/10/2026 sobre `ftth_correctivo`."""
+    sin_paso = {
+        **ESQUEMA_CON_PASOS,
+        "evidencias": [
+            {"id": "foto_potencia", "titulo": "Foto", "tipo": "foto"}
+        ],
+    }
+
+    v = WorkTypeVersion.objects.create(
+        work_type=tipo, version=1, schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA, esquema=sin_paso,
+    )
+
+    assert v.pk is not None
+
+
+def test_j_un_paso_QUE_NO_EXISTE_se_rechaza_al_publicar(tipo):
+    """Es peor que no declarar ninguno.
+
+    La aplicacion agruparia esa foto bajo un titulo vacio, o la escondería. El
+    tecnico no veria que le falta hasta que el boton de cerrar no lo deje, y no
+    sabria por que.
+    """
+    roto = {
+        **ESQUEMA_CON_PASOS,
+        "evidencias": [
+            {"id": "foto_potencia", "titulo": "Foto", "tipo": "foto",
+             "paso": "p99"}
+        ],
+    }
+
+    with pytest.raises(ValidationError) as e:
+        WorkTypeVersion.objects.create(
+            work_type=tipo, version=1, schema_version=1,
+            estado=WorkTypeVersion.PUBLICADA, esquema=roto,
+        )
+
+    # El mensaje nombra el paso y los que si existen: sin eso, quien corrige la
+    # plantilla tiene que ir a buscar los ids a otro lado.
+    assert "p99" in str(e.value)
+    assert "p1" in str(e.value)

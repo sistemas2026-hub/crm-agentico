@@ -170,6 +170,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     _profileId = datos.profileId;
     _campos = datos.campos;
     _evidenciasRequisitos = datos.requisitosDeEvidencia;
+    _pasosDelProtocolo = datos.pasos;
     _valoresFormulario = Map<String, dynamic>.from(datos.valores);
     _materialesUsados = datos.materialesUsados;
     _evidenciasCapturadas = datos.evidenciasCapturadas;
@@ -823,6 +824,17 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       if (campo.bloqueaCierre) campo.titulo,
   ];
 
+  /// Las evidencias agrupadas por el paso del protocolo que las pide.
+  ///
+  /// La decisión vive en `datos_de_ejecucion.dart`, que se prueba sin emulador.
+  /// Acá solo se dibuja lo que esa función ya resolvió.
+  List<GrupoDeEvidencias> get _gruposDeEvidencia => agruparPorPaso(
+        requisitos: _evidenciasRequisitos,
+        pasos: _pasosDelProtocolo,
+      );
+
+  List<dynamic> _pasosDelProtocolo = <dynamic>[];
+
   CierreDeOrden get _cierre => CierreDeOrden.evaluar(
     camposObligatoriosSinLlenar: _camposObligatoriosSinLlenar,
     requisitosDeFoto: <dynamic>[
@@ -1257,12 +1269,34 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
             style: AppTypography.cuerpoChico,
           )
         else
-          for (var i = 0; i < _evidenciasRequisitos.length; i++) ...[
-            if (i > 0) const SizedBox(height: AppSpacing.md),
-            _buildEvidenciaRequisito(
-              Map<String, dynamic>.from(_evidenciasRequisitos[i] as Map),
-            ),
-          ],
+          // CADA FOTO DEBAJO DEL PASO QUE LA PIDE.
+          //
+          // El tecnico trabaja siguiendo el protocolo: «3. Medicion optica con
+          // power meter» y «Fotografia de la medicion» son lo mismo, y vivian
+          // en dos pantallas sin nada que las relacionara. Ahora la foto se
+          // toma DESDE el paso.
+          //
+          // Cuando la plantilla no declara pasos en sus evidencias --el caso de
+          // todas las que existen hoy-- `agruparPorPaso` devuelve un solo grupo
+          // sin titulo y esto se dibuja exactamente como antes.
+          for (final (int i, GrupoDeEvidencias g) in _gruposDeEvidencia.indexed)
+            ...<Widget>[
+              if (i > 0) const SizedBox(height: AppSpacing.lg),
+              if (g.titulo.isNotEmpty) ...<Widget>[
+                Text(
+                  g.titulo.toUpperCase(),
+                  style: AppTypography.labelCaption
+                      .copyWith(color: AppColors.outline, letterSpacing: 0.8),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+              ],
+              for (var j = 0; j < g.requisitos.length; j++) ...<Widget>[
+                if (j > 0) const SizedBox(height: AppSpacing.md),
+                _buildEvidenciaRequisito(
+                  Map<String, dynamic>.from(g.requisitos[j] as Map),
+                ),
+              ],
+            ],
         _avisoSinCobertura(),
       ],
     );
