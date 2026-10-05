@@ -297,6 +297,20 @@ def test_e1_avisa_por_los_canales_de_la_empresa(user_client, conector):
     assert "20" in texto
 
 
+def test_e1b_el_aviso_dice_QUIEN_pide(user_client, conector):
+    """Bodega tiene que saber a quien entregarle. Sin nombre, el pedido es una
+    cantidad flotando -- y un f-string mal armado imprime «None pide material»,
+    que es peor que no decir nada porque parece un error del sistema."""
+    from campo.services import avisos
+
+    with mock.patch.object(avisos, "_despachar") as despachar:
+        _pedir(user_client, conector)
+
+    texto = despachar.call_args.kwargs["texto"]
+    assert "None" not in texto
+    assert "pide material" in texto
+
+
 def test_e2_el_aviso_NO_lleva_datos_del_cliente(user_client, conector, orden):
     """A bodega no le hace falta saber a quien se le instala para sacar veinte
     conectores de una caja, y este mensaje sale del sistema."""

@@ -474,7 +474,11 @@ def avisar_pedido_de_material(pedido) -> None:
     No puede romper el pedido. Si el chat esta caido, el pedido existe igual --y
     el tecnico lo ve en su lista-- porque el hecho es la fila, no el mensaje.
     """
-    lineas = [f"📦 {pedido.profile_id and _nombre_de(pedido.profile)} pide material"]
+    # `profile` es obligatorio en el modelo, asi que se nombra directo. La
+    # version anterior tenia un `and pedido.profile_id` que no protegia nada y
+    # si podia imprimir «None pide material»: un f-string con un `and` adentro
+    # no evita el caso, lo escribe.
+    lineas = [f"📦 {_nombre_de(pedido.profile)} pide material"]
     lineas.append(f"{_cantidad_legible(pedido.cantidad)} de {pedido.material.nombre}")
     if pedido.orden_id is not None:
         lineas.append(f"Para la OT #{pedido.orden.numero}")
