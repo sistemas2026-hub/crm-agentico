@@ -579,3 +579,64 @@ class ReporteSerializer(serializers.Serializer):
     hasta = serializers.DateTimeField(required=False, allow_null=True)
     dias = serializers.IntegerField(required=False, allow_null=True,
                                     min_value=0, max_value=90)
+
+
+class CoordinarSupervisorSerializer(serializers.Serializer):
+    """
+    Lo que el Supervisor puede PEDIR a M02 a partir de una situacion.
+
+    POR QUE DOS CLASES Y NO UN SOLO CUERPO LIBRE
+    --------------------------------------------
+    'actividad' y 'evidencia' exigen cosas distintas --una evidencia tiene clase
+    y detalle; una actividad tiene tipo y titulo-- y un cuerpo que acepte todo y
+    valide en la vista termina validando a medias. Aqui se declara cual es cual y
+    'validate' exige lo de cada una.
+
+    'situacion' es el CODIGO legible ('S-001'), no el uuid: es lo que una persona
+    ve en el tablero y lo que el chat nombra. La organizacion NO viaja en el
+    cuerpo -- sale de la sesion.
+    """
+
+    ACTIVIDAD = "actividad"
+    EVIDENCIA = "evidencia"
+    CLASES = ((ACTIVIDAD, "Actividad"), (EVIDENCIA, "Evidencia"))
+
+    situacion = serializers.CharField(max_length=32)
+    clase = serializers.ChoiceField(choices=CLASES)
+
+    #  Comunes a las dos.
+    condicion_exito = serializers.CharField(max_length=500)
+    responsable_id = serializers.UUIDField(required=False, allow_null=True)
+    area = serializers.CharField(max_length=120, required=False,
+                                 allow_blank=True, default="")
+    vence_en = serializers.DateTimeField(required=False, allow_null=True)
+
+    #  Solo 'actividad'.
+    tipo = serializers.CharField(max_length=32, required=False,
+                                 allow_blank=True, default="")
+    titulo = serializers.CharField(max_length=255, required=False,
+                                   allow_blank=True, default="")
+    objetivo = serializers.CharField(max_length=500, required=False,
+                                     allow_blank=True, default="")
+
+    #  Solo 'evidencia'.
+    clase_evidencia = serializers.CharField(max_length=32, required=False,
+                                            allow_blank=True, default="")
+    detalle = serializers.CharField(max_length=255, required=False,
+                                    allow_blank=True, default="")
+
+    def validate(self, datos):
+        clase = datos.get("clase")
+        if clase == self.ACTIVIDAD:
+            faltan = [c for c in ("titulo", "objetivo")
+                      if not (datos.get(c) or "").strip()]
+            if faltan:
+                raise serializers.ValidationError(
+                    {c: "obligatorio para clase 'actividad'" for c in faltan})
+        if clase == self.EVIDENCIA:
+            faltan = [c for c in ("clase_evidencia", "detalle")
+                      if not (datos.get(c) or "").strip()]
+            if faltan:
+                raise serializers.ValidationError(
+                    {c: "obligatorio para clase 'evidencia'" for c in faltan})
+        return datos

@@ -1650,3 +1650,118 @@ class ChatSupervisorView(APIView):
             "herramientas": [h.get("nombre") for h in (respuesta.herramientas or [])],
             "duracion_ms": respuesta.duracion_ms,
         })
+
+
+class CoordinarSupervisorView(APIView):
+    """
+    El Supervisor PIDE trabajo a M02 a partir de una situación. Con la puerta.
+
+    POR QUE ESTA RUTA EXISTE
+    ------------------------
+    P6 construyó la coordinación completa y no dejó ninguna forma de alcanzarla:
+    `operaciones/coordinacion.py` no tenía endpoint ni trabajo del scheduler, así
+    que lo único que la ejercitaba eran sus 42 pruebas. Es exactamente lo que
+    CLAUDE.md §6 llama «código construido no es código que corre»: no daba error,
+    no daba log, y no servía para nada.
+
+    POR QUE PIDE AUTONOMÍA SI LA APRIETA UNA PERSONA
+    ------------------------------------------------
+    Esta es la parte que hay que entender para no confundirla con un permiso.
+    Quien llama es una persona con rol de gestión; lo que actúa es el SUPERVISOR.
+    Una persona que quiere abrir una actividad a mano ya tiene su camino
+    (`POST actividades/`), que no consulta autonomía ninguna y es correcto que no
+    lo haga. Aquí la actividad la pide el Supervisor a partir de SU lectura de la
+    situación, así que la barrera que decide no es el rol de quien aprieta: es la
+    autonomía efectiva del agente.
+
+    Por eso un 'no' de autonomía NO es 403 --la persona sí tiene permiso-- sino
+    409: el estado del sistema impide la operación. Mismo criterio que
+    `TRANSICION_INVALIDA` y `ACTIVIDAD_DUPLICADA`, que ya usan 409 en este módulo.
+
+    LO QUE ESTA RUTA NO HACE
+    ------------------------
+    No toca M03: no reprograma, no resecuencia, no reasigna. No cierra la
+    situación ni le cambia el estado. No ejecuta la actividad que crea --crear no
+    es hacer, y hacer no es validar--. Y no eleva autonomía: `coordinacion.py` no
+    nombra `autonomia.cambiar` en ninguna parte, y hay una prueba que lo afirma
+    sobre el AST.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext, EsJefeDeOperaciones)
+
+    @manejar_idempotencia
+    def post(self, request):
+        from operaciones import coordinacion
+        from operaciones.serializers import CoordinarSupervisorSerializer
+
+        s = CoordinarSupervisorSerializer(data=request.data)
+        if not s.is_valid():
+            return Response({"error": "CUERPO_INVALIDO", "detalle": s.errors},
+                            status=status.HTTP_400_BAD_REQUEST)
+        d = s.validated_data
+
+        situacion = (SituacionOperativa.objects
+                     .filter(org=request.org,
+                             codigo=d["situacion"].strip()).first())
+        if situacion is None:
+            #  404 y no 403, igual que en el chat: decir «existe pero no es tuya»
+            #  ya confirmaría que existe.
+            return Response({"error": "SITUACION_NO_ENCONTRADA"},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        responsable = None
+        if d.get("responsable_id"):
+            responsable = (Profile.objects
+                           .filter(org=request.org,
+                                   id=d["responsable_id"]).first())
+            if responsable is None:
+                return Response({"error": "RESPONSABLE_NO_ENCONTRADO"},
+                                status=status.HTTP_404_NOT_FOUND)
+
+        comunes = dict(actor=request.profile, responsable=responsable,
+                       area=d.get("area", ""),
+                       condicion_exito=d["condicion_exito"],
+                       vence_en=d.get("vence_en"))
+        try:
+            if d["clase"] == CoordinarSupervisorSerializer.EVIDENCIA:
+                salida = coordinacion.solicitar_evidencia(
+                    situacion, clase=d["clase_evidencia"],
+                    detalle=d["detalle"], **comunes)
+            else:
+                salida = coordinacion.solicitar_actividad(
+                    situacion, tipo=(d.get("tipo")
+                                     or ActividadOperativa.TAREA),
+                    titulo=d["titulo"], objetivo=d["objetivo"], **comunes)
+        except coordinacion.CoordinacionNoPermitida as e:
+            #  El veredicto viaja COMPLETO: quien recibe el 409 tiene que poder
+            #  decir por qué no, y «no se pudo» no explica nada.
+            return Response({"error": "AUTONOMIA_INSUFICIENTE",
+                             "detalle": str(e),
+                             "veredicto": e.veredicto},
+                            status=status.HTTP_409_CONFLICT)
+        except coordinacion.CoordinacionInvalida as e:
+            return Response({"error": "COORDINACION_INVALIDA",
+                             "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+        except actividades.ErrorActividad as e:
+            #  'actividades.ErrorActividad' y NO el nombre suelto: ese nombre no
+            #  está importado en este archivo, y el resto lo nombra así (1164,
+            #  1282). Escrito suelto, este 'except' daba 'NameError' y la
+            #  respuesta un 500. Lo encontró 'ruff' con F821 antes que ninguna
+            #  prueba, porque ningún cuerpo válido llega hasta aquí.
+            return _error_actividad(e)
+
+        actividad = salida["actividad"]
+        return Response({
+            "actividad": ActividadOperativaSerializer(actividad).data,
+            "situacion": situacion.codigo,
+            #  'repetida' viaja a propósito: que M02 ya tuviera una viva para
+            #  esta situación y este tipo NO es un error, es la idempotencia de
+            #  dominio haciendo su trabajo. Quien llama tiene que poder
+            #  distinguir «abrí una» de «ya estaba abierta».
+            "repetida": salida["repetida"],
+            "evento": str(salida["evento"].id),
+            "nivel_efectivo": salida["veredicto"].get("efectivo"),
+            "server_time": timezone.now().isoformat(),
+        }, status=(status.HTTP_200_OK if salida["repetida"]
+                   else status.HTTP_201_CREATED))

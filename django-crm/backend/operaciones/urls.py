@@ -90,4 +90,11 @@ urlpatterns = [
     #  de escritura, asi que no hay por donde ejecutar algo.
     path("supervisor/chat/", views.ChatSupervisorView.as_view(),
          name="supervisor-chat"),
+
+    #  EL CALLER DE LA COORDINACION. Es la UNICA ruta del Supervisor que
+    #  ESCRIBE en la operacion, y por eso es la unica que consulta la
+    #  autonomia efectiva antes de hacer nada. Sin ella, 'coordinacion.py'
+    #  existia y no habia forma de alcanzarlo.
+    path("supervisor/coordinar/", views.CoordinarSupervisorView.as_view(),
+         name="supervisor-coordinar"),
 ]

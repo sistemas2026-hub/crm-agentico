@@ -926,7 +926,23 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        "asistente", "indicadores", "reportes",
                        "programaciones", "actividad-supervisor",
                        "supervisor-latido", "supervisor-sondeo",
-                       "supervisor-chat"}
+                       "supervisor-chat",
+                       #  Bloque A (05/10/2026). 'supervisor-coordinar' es la
+                       #  UNICA ruta del Supervisor que ESCRIBE en la
+                       #  operacion, y entra a esta lista con eso dicho.
+                       #
+                       #  ESCRIBE: una ActividadOperativa de M02 y el evento
+                       #  de coordinacion en el timeline de la situacion. Nada
+                       #  mas. NO toca M03 --'coordinacion.py' no nombra
+                       #  reprogramar_orden, actualizar_secuencia,
+                       #  secuenciar_jornada ni registrar_contingencia, y hay
+                       #  una prueba que lo afirma sobre el AST--, no cambia el
+                       #  estado de la situacion y no eleva autonomia.
+                       #
+                       #  Y NO ESCRIBE NADA si la autonomia efectiva no llega a
+                       #  2: devuelve 409 AUTONOMIA_INSUFICIENTE y deja el
+                       #  intento auditado en common.Activity con REJECTED.
+                       "supervisor-coordinar"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 
