@@ -416,50 +416,21 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
               ],
             ),
           ),
-          const SizedBox(height: AppSpacing.sm),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.margen),
-            child: _cintaDeArquitectura(),
-          ),
+          // LA CINTA DE «ARQUITECTURA DE CAMPO» SE FUE (05/10/2026)
+          // --------------------------------------------------------
+          // Decia «OT = Orden de Trabajo asignada para ejecucion fisica en
+          // terreno». Es un glosario, y el tecnico sabe que es una OT: lo lee
+          // una vez en su vida. A cambio ocupaba espacio FIJO en la pantalla
+          // que mas usa, todos los dias, empujando hacia abajo las tarjetas que
+          // si tiene que leer.
+          //
+          // Lo dijo el tecnico al revisar pantalla por pantalla. No se mueve a
+          // una ayuda ni se esconde detras de un icono: nadie lo iba a abrir.
         ],
       ),
     );
   }
 
-  /// Qué significa lo que se está mirando. Texto fijo, no un dato.
-  Widget _cintaDeArquitectura() {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceContainerLow,
-        borderRadius: AppRadius.brCampo,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const Icon(Icons.account_tree, size: 14, color: AppColors.secondary),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text.rich(
-              TextSpan(
-                children: <InlineSpan>[
-                  TextSpan(
-                    text: 'Arquitectura de Campo · ',
-                    style: AppTypography.etiquetaChica.copyWith(
-                      color: AppColors.onSurface,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  TextSpan(text: _segmento.explicacion),
-                ],
-              ),
-              style: AppTypography.etiquetaChica,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
 
   IconData get _iconoVacio => switch (_pestana) {

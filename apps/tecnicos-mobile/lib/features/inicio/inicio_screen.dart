@@ -202,6 +202,19 @@ class _InicioScreenState extends State<InicioScreen> {
               ],
               const SizedBox(height: AppSpacing.lg),
               _avanceDiario(resumen, trabajos),
+              // LAS HORAS DEL DIA, debajo del avance.
+              //
+              // «3 ASIGNADAS» no dice si la primera es a las 8 o a las 2, y eso
+              // es lo que decide el dia. Habia que abrir las tres fichas para
+              // saberlo.
+              //
+              // Se esconde sola cuando ninguna orden trae hora --el caso real
+              // hoy-- en vez de dibujar una fila de guiones en el lugar donde
+              // el tecnico mira cuando SI las hay.
+              if (resumen.horasDelDia.isNotEmpty) ...<Widget>[
+                const SizedBox(height: AppSpacing.sm),
+                _horasDelDia(resumen),
+              ],
               // Los avisos van arriba, pero **solo cuando existen**: cuando no
               // hay ninguno el bloque no se dibuja, así el día no empieza en
               // rojo por costumbre. Cuando aparece uno, aparece donde se ve,
@@ -223,6 +236,63 @@ class _InicioScreenState extends State<InicioScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  /// Las horas comprometidas del día, en una línea.
+  ///
+  /// Cada hora dice su estado con la forma, no solo con el color: la hecha
+  /// lleva un visto y la vencida un reloj. Al sol, con guantes y a un brazo de
+  /// distancia, un verde y un rojo del mismo tamaño se confunden.
+  Widget _horasDelDia(ResumenDeInicio resumen) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: <Widget>[
+          for (final HoraDelDia h in resumen.horasDelDia) ...<Widget>[
+            Container(
+              margin: const EdgeInsets.only(right: AppSpacing.xs),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: h.vencida
+                    ? AppColors.errorContainer
+                    : AppColors.surfaceContainerLowest,
+                borderRadius: AppRadius.brChico,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(
+                    h.hecha
+                        ? Icons.check_circle
+                        : (h.vencida ? Icons.schedule : Icons.circle_outlined),
+                    size: 13,
+                    color: h.hecha
+                        ? AppColors.exito
+                        : (h.vencida
+                            ? AppColors.onErrorContainer
+                            : AppColors.outline),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    h.hora,
+                    style: AppTypography.etiquetaGrande.copyWith(
+                      color: h.vencida
+                          ? AppColors.onErrorContainer
+                          : AppColors.onSurface,
+                      // La hecha se atenúa: ya no hay que decidir nada sobre
+                      // ella, y dejarla con el mismo peso que las que faltan
+                      // obliga a releer las tres cada vez.
+                      decoration:
+                          h.hecha ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -728,8 +798,14 @@ class _InicioScreenState extends State<InicioScreen> {
                   ),
                 ),
                 Text(
-                  'Recibido ${resumen.kitRecibido} · consumido '
-                  '${resumen.kitConsumido}',
+                  // Cuando el saldo no cierra se dice QUE PASA, no el numero
+                  // de la resta. «Recibido 0 · consumido 38.5» es cierto pero
+                  // deja al tecnico haciendo la cuenta; la frase la hace por el.
+                  resumen.consumidoSinEntrega == null
+                      ? 'Recibido ${resumen.kitRecibido} · consumido '
+                          '${resumen.kitConsumido}'
+                      : 'Consumiste ${resumen.consumidoSinEntrega} que no '
+                          'figuran entregados',
                   style: AppTypography.bodySm
                       .copyWith(color: AppColors.surfaceContainerLowest),
                   maxLines: 2,
@@ -739,16 +815,33 @@ class _InicioScreenState extends State<InicioScreen> {
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
+          // NO EXISTE TENER MENOS DE CERO EN LA MANO.
+          //
+          // Esta pastilla rotulaba `aDevolver` como «EN MANO», y con consumos
+          // sin entrega eso daba «EN MANO -38.5»: una resta presentada como si
+          // fuera un saldo, con cara de dato preciso. Medido el 05/10/2026 en
+          // el laboratorio -- dos consumos, cero entregas.
+          //
+          // Cuando el saldo no puede ser un saldo, la pastilla deja de afirmar
+          // uno y manda a mirar. El detalle ya esta en la linea de al lado y en
+          // la alerta de arriba; repetirlo en tres lugares no lo hace mas claro.
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: const BoxDecoration(
-              color: AppColors.tertiaryContainer,
+            decoration: BoxDecoration(
+              color: resumen.consumidoSinEntrega == null
+                  ? AppColors.tertiaryContainer
+                  : AppColors.errorContainer,
               borderRadius: AppRadius.brChico,
             ),
             child: Text(
-              'EN MANO ${resumen.kitDisponible}',
-              style: AppTypography.labelBadge
-                  .copyWith(color: AppColors.tertiaryFixed),
+              resumen.consumidoSinEntrega == null
+                  ? 'EN MANO ${resumen.kitDisponible}'
+                  : 'REVISAR',
+              style: AppTypography.labelBadge.copyWith(
+                color: resumen.consumidoSinEntrega == null
+                    ? AppColors.tertiaryFixed
+                    : AppColors.onErrorContainer,
+              ),
             ),
           ),
         ],

@@ -63,6 +63,8 @@ class ResumenDeInicio {
     required this.kitConsumido,
     required this.hayKit,
     required this.jornadaCerrada,
+    this.horasDelDia = const <HoraDelDia>[],
+    this.consumidoSinEntrega,
   });
 
   /// Los trabajos de la jornada.
@@ -86,6 +88,33 @@ class ResumenDeInicio {
 
   bool get hayProblemas => avisos.isNotEmpty;
   bool get terminoLaJornada => totalDeTrabajos > 0 && pendientes == 0;
+
+  /// Las horas comprometidas del día, en orden, con lo que hace falta para
+  /// leerlas de un vistazo.
+  ///
+  /// POR QUE ESTO ES LO PRIMERO QUE MIRA EL TECNICO
+  /// -----------------------------------------------
+  /// «3 ASIGNADAS» no dice si la primera es a las 8 o a las 2. Parado a las
+  /// siete de la mañana, lo que decide el día es el ORDEN y las HORAS, y eso
+  /// había que deducirlo abriendo las tres fichas.
+  ///
+  /// Vacía cuando ninguna orden trae hora —el caso real del laboratorio— y
+  /// entonces la pantalla no dibuja la línea. Una fila de guiones ocuparía el
+  /// lugar donde el técnico mira cuando SÍ hay horas.
+  final List<HoraDelDia> horasDelDia;
+
+  /// Cuánto material consumió de más respecto de lo que le entregaron.
+  ///
+  /// `null` cuando el saldo es posible. Cuando no lo es, trae el faltante en
+  /// positivo —38.5, no -38.5— porque lo que hay que decir es «consumiste 38,5
+  /// que no figuran entregados», no un saldo negativo.
+  ///
+  /// NO EXISTE TENER MENOS DE CERO EN LA MANO. La pantalla rotulaba
+  /// `aDevolver` como «EN MANO», y con los consumos sin entrega eso daba
+  /// «EN MANO -38.5»: una resta presentada como si fuera un saldo, con cara de
+  /// dato preciso. Medido el 05/10/2026 sobre el técnico del laboratorio: dos
+  /// consumos y cero entregas registradas.
+  final String? consumidoSinEntrega;
 
   /// Arma el resumen con lo que ya está en el teléfono.
   ///
@@ -179,6 +208,8 @@ class ResumenDeInicio {
         ...avisos.where((a) => a.gravedad == GravedadDeAviso.alta),
         ...avisos.where((a) => a.gravedad == GravedadDeAviso.media),
       ],
+      horasDelDia: _horasDe(trabajos, momento),
+      consumidoSinEntrega: _consumidoSinEntrega(jornada?.aDevolver),
       kitRecibido: jornada?.recibido ?? '0',
       kitDisponible: jornada?.aDevolver ?? '0',
       kitConsumido: jornada?.consumido ?? '0',
@@ -242,4 +273,78 @@ class ResumenDeInicio {
 
     return abiertos.first;
   }
+}
+
+/// Una de las horas comprometidas del día.
+///
+/// Lleva el estado ya decidido —hecha, vencida, o por hacer— porque quién
+/// decide eso es esta capa y no el widget: una segunda cuenta en la pantalla es
+/// la forma más rápida de que dos partes de la misma app digan cosas distintas
+/// del mismo día.
+class HoraDelDia {
+  const HoraDelDia({
+    required this.ordenId,
+    required this.hora,
+    required this.hecha,
+    required this.vencida,
+  });
+
+  final String ordenId;
+
+  /// `08:30`, en el huso del teléfono. El servidor manda UTC.
+  final String hora;
+
+  final bool hecha;
+
+  /// Pasó la hora y el trabajo sigue abierto. Nunca es `true` si [hecha] lo es:
+  /// un trabajo terminado tarde ya no es un problema que mirar a las siete de
+  /// la mañana.
+  final bool vencida;
+}
+
+/// Las horas del día, en orden, solo de los trabajos que traen una.
+///
+/// Se usa la ventana prometida al cliente si existe, y si no el compromiso.
+/// Son dos cosas distintas y la primera gana: al abonado se le dijo «entre 8 y
+/// 10», y esa es la hora que él está esperando en la puerta.
+List<HoraDelDia> _horasDe(List<TrabajoVista> trabajos, DateTime ahora) {
+  final List<(DateTime, HoraDelDia)> conHora = <(DateTime, HoraDelDia)>[];
+  for (final TrabajoVista t in trabajos) {
+    final DateTime? cuando = t.ventanaInicio ?? t.compromiso;
+    if (cuando == null) continue;
+    final bool hecha = ResumenDeInicio._estaTerminado(t);
+    conHora.add((
+      cuando,
+      HoraDelDia(
+        ordenId: t.id,
+        hora: _hhmm(cuando.toLocal()),
+        hecha: hecha,
+        vencida: !hecha && cuando.isBefore(ahora),
+      ),
+    ));
+  }
+  conHora.sort(((DateTime, HoraDelDia) a, (DateTime, HoraDelDia) b) =>
+      a.$1.compareTo(b.$1));
+  return <HoraDelDia>[for (final (DateTime, HoraDelDia) h in conHora) h.$2];
+}
+
+String _hhmm(DateTime f) =>
+    '${f.hour.toString().padLeft(2, '0')}:${f.minute.toString().padLeft(2, '0')}';
+
+/// Cuánto se consumió sin que figure una entrega, o `null` si el saldo cierra.
+///
+/// `aDevolver` lo calcula el dominio como `recibido − consumido`, y cuando da
+/// negativo no es un saldo: es la señal de que se consumió material que bodega
+/// nunca registró. Devolverlo en positivo es lo que permite decirlo en palabras
+/// en vez de mostrar un «-38.5» con cara de medición.
+String? _consumidoSinEntrega(String? aDevolver) {
+  final double? saldo = double.tryParse((aDevolver ?? '').trim());
+  if (saldo == null || saldo >= 0) return null;
+  final double faltante = -saldo;
+  // Sin ceros de relleno: `38.5`, no `38.500`. Mismo criterio que el historial
+  // del servicio, y por el mismo motivo —en Colombia el punto separa miles—.
+  final String texto = faltante.toStringAsFixed(3);
+  return texto.contains('.')
+      ? texto.replaceAll(RegExp(r'0+$'), '').replaceAll(RegExp(r'\.$'), '')
+      : texto;
 }

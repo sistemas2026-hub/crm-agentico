@@ -1639,15 +1639,25 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
 
   /// El recuadro de ubicación del diseño.
   ///
-  /// No hay proveedor de mapas ni permiso para abrir otra aplicación, pero las
-  /// coordenadas de la orden **sí** son reales (`cliente.lat/lng`): se dibuja
-  /// la retícula con el punto donde queda y se muestran los grados. Sin
-  /// coordenadas se dice que faltan, en vez de pintar un mapa de adorno que
-  /// haría creer que la ubicación está confirmada.
+  /// AHORA SE TOCA Y ABRE EL MAPA DE VERDAD (05/10/2026)
+  /// ---------------------------------------------------
+  /// El comentario que estaba acá decía «no hay proveedor de mapas ni permiso
+  /// para abrir otra aplicación», y dejó de ser cierto el 04/10 cuando entró
+  /// `url_launcher`. Quedaba un rectángulo con una retícula dibujada que
+  /// **parece un mapa y no lo es**: el técnico intenta arrastrarlo, no pasa
+  /// nada, y aprende a desconfiar del resto de la pantalla.
+  ///
+  /// La retícula se queda —no finge calles, es un fondo— pero el recuadro
+  /// entero pasa a ser el gesto grande para abrir el mapa. Sin coordenadas no
+  /// se toca, igual que el botón de arriba: no hay a dónde ir.
   Widget _ubicacion(TrabajoVista trabajo) {
-    final bool ubicado = trabajo.latitud != null && trabajo.longitud != null;
+    final bool ubicado = SalirDeLaApp.uriDeMapa(
+          latitud: trabajo.latitud,
+          longitud: trabajo.longitud,
+        ) !=
+        null;
 
-    return SizedBox(
+    final Widget recuadro = SizedBox(
       height: 96,
       child: ClipRRect(
         borderRadius: AppRadius.brTarjeta,
@@ -1724,6 +1734,23 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               ),
           ],
         ),
+      ),
+    );
+
+    if (!ubicado) return recuadro;
+    return Semantics(
+      // `container: true` crea un nodo propio en el árbol de accesibilidad. Sin
+      // él, `Semantics` se FUSIONA con el padre y el lector de pantalla lee el
+      // bloque entero en vez de anunciar un botón. Se vio al escribir la
+      // guarda: el widget estaba, era tocable, y no existía como botón.
+      container: true,
+      button: true,
+      label: 'Abrir el mapa en la ubicación del cliente',
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: () => _navegar(trabajo),
+        borderRadius: AppRadius.brTarjeta,
+        child: recuadro,
       ),
     );
   }

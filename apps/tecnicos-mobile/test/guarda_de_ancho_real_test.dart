@@ -175,7 +175,7 @@ void main() {
         final OrdenesJornada ordenes = armarOrdenes(t);
         await aEsteAncho(t, ancho, () => InicioScreen(
               ordenes: ordenes,
-              abrirTrabajo: (_, __) async {},
+              abrirTrabajo: (_, _) async {},
               nombreTecnico: 'Carlos Gómez',
               ahora: DateTime(2026, 10, 5, 14),
             ));
@@ -185,7 +185,7 @@ void main() {
         final OrdenesJornada ordenes = armarOrdenes(t);
         await aEsteAncho(t, ancho, () => TrabajoScreen(
               ordenes: ordenes,
-              abrirTrabajo: (_, __) async {},
+              abrirTrabajo: (_, _) async {},
             ));
       });
 

@@ -365,11 +365,22 @@ void main() {
       // Lo que está en el teléfono, que es lo que se puede abrir sin señal.
       expect(find.textContaining('2 OTs sincronizadas localmente'), findsOneWidget);
 
-      // La cinta explica la entidad del segmento elegido, y cambia con él.
-      expect(find.textContaining('OT = Orden de Trabajo'), findsOneWidget);
+      // LA CINTA DEL GLOSARIO SE FUE (05/10/2026), y con ella estas dos
+      // afirmaciones. Decia «OT = Orden de Trabajo asignada para ejecucion
+      // fisica en terreno»: un glosario que el tecnico lee una vez en su vida,
+      // ocupando espacio fijo en la pantalla que mas usa.
+      //
+      // Lo que SI hay que seguir cuidando es que el segmento filtre, que es
+      // para lo que esta. Eso es lo que se afirma ahora, y es mas fuerte: antes
+      // se comprobaba que cambiara un texto explicativo, no que cambiara la
+      // lista.
+      expect(find.textContaining('Arquitectura de Campo'), findsNothing);
+
       await tester.tap(find.textContaining('Tickets'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Ticket = reporte del cliente'), findsOneWidget);
+      expect(find.textContaining('Ticket de soporte'), findsWidgets);
+      expect(find.textContaining('Carlos Gomez'), findsNothing,
+          reason: 'la OT que no es ticket sale del listado');
 
       // Y el pie cierra la lista sin prometer que hay más.
       //
