@@ -1091,3 +1091,16 @@ from operaciones.situaciones_modelos import (                     # noqa: E402,F
     TipoEvento,
     TipoRelacion,
 )
+
+# =============================================================================
+#  GOBIERNO  --  decisiones humanas y nivel de autonomia
+# =============================================================================
+#  Mismo motivo que las dos capas anteriores: Django descubre un modelo cuando su
+#  modulo se importa. Los CINCO NIVELES no se redefinen alla -- son los de
+#  'PropuestaSupervisor.NIVELES', que ya estaban en uso.
+from operaciones.gobierno_modelos import (                        # noqa: E402,F401
+    DecisionSupervisor,
+    NivelAutonomia,
+    ResultadoDecision,
+    TipoDecision,
+)

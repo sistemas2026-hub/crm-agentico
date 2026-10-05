@@ -376,6 +376,104 @@ def indicadores_supervisor(org, desde=None, hasta=None, ahora=None) -> dict:
 
 
 # ==============================================================================
+#  B.0b  --  SITUACIONES OPERATIVAS Y DECISIONES  (paso P4)
+# ==============================================================================
+
+def indicadores_situaciones(org, desde=None, hasta=None, ahora=None) -> dict:
+    """
+    Como va el Supervisor con las situaciones, y si sus recomendaciones sirvieron.
+
+    POR QUE AQUI Y NO EN UN MODULO DE METRICAS NUEVO
+    ------------------------------------------------
+    Porque este archivo ya tiene las piezas: 'conteo' para un numero con su
+    fuente, 'derivada' para una proporcion que sabe decir NO_APLICA en vez de
+    inventar un 0%, y la ventana con su periodo. Un modulo paralelo habria
+    duplicado las cuatro, y despues dos tableros mostrarian numeros distintos.
+
+    LA METRICA QUE DE VERDAD IMPORTA ES LA ULTIMA
+    ---------------------------------------------
+    'recomendaciones_que_funcionaron' se calcula SOLO sobre las decisiones que ya
+    tienen desenlace registrado. Medir "aceptadas" sin el resultado mide
+    obediencia, no acierto -- y una tasa de aceptacion alta con resultados
+    desconocidos es exactamente la cifra que haria confiar en algo sin motivo.
+
+    Y ES LECTURA: no corre el ciclo, no evalua seguimiento y no crea nada.
+    Preguntar por un indicador no debe producir trabajo.
+    """
+    from operaciones.gobierno_modelos import (DecisionSupervisor,
+                                              ResultadoDecision, TipoDecision)
+    from operaciones.situaciones_modelos import SituacionOperativa
+
+    S = SituacionOperativa
+    desde, hasta, ahora = _ventana(desde, hasta, ahora)
+    per = _periodo(desde, hasta)
+    f_sit = "operaciones.SituacionOperativa"
+    f_dec = "operaciones.DecisionSupervisor"
+
+    sit = S.objects.filter(org=org)
+    en_ventana = sit.filter(detectada_en__gte=desde, detectada_en__lt=hasta)
+    por_estado = dict(sit.values_list("estado").annotate(n=Count("id"))
+                      .values_list("estado", "n"))
+    por_riesgo = dict(sit.filter(estado__in=S.VIVAS).values_list("riesgo")
+                      .annotate(n=Count("id")).values_list("riesgo", "n"))
+
+    salida = {
+        "situaciones_vivas": conteo(sit.filter(estado__in=S.VIVAS).count(),
+                                    f_sit),
+        "situaciones_detectadas_en_periodo": conteo(en_ventana.count(), f_sit,
+                                                    per),
+        "situaciones_por_riesgo_vivas": {
+            r: conteo(n, f_sit) for r, n in sorted(por_riesgo.items())},
+        #  Las que NADIE habia reportado todavia: situaciones vivas sin un solo
+        #  caso asociado. Es el numero que mide si el Supervisor esta viendo antes
+        #  que el cliente, que es su razon de ser.
+        "situaciones_vivas_sin_ticket": conteo(
+            sit.filter(estado__in=S.VIVAS)
+            .exclude(afectados__tipo="caso").distinct().count(), f_sit),
+    }
+    for estado, _e in S.ESTADOS:
+        salida[f"situaciones_{estado}"] = conteo(por_estado.get(estado, 0), f_sit)
+
+    #  --- decisiones humanas y su desenlace -------------------------------
+    dec = DecisionSupervisor.objects.filter(org=org)
+    dec_ventana = dec.filter(decidida_en__gte=desde, decidida_en__lt=hasta)
+    por_tipo = dict(dec_ventana.values_list("tipo").annotate(n=Count("id"))
+                    .values_list("tipo", "n"))
+    for tipo in TipoDecision.TODOS:
+        salida[f"decisiones_{tipo}"] = conteo(por_tipo.get(tipo, 0), f_dec, per)
+
+    #  La tasa de aceptacion se calcula solo sobre decisiones HUMANAS: una
+    #  propuesta que expiro no la rechazo nadie, y contarla como rechazo diria que
+    #  alguien dijo no.
+    humanas = dec_ventana.filter(tipo__in=TipoDecision.HUMANOS).count()
+    aceptadas = dec_ventana.filter(tipo=TipoDecision.ACEPTO).count()
+    salida["tasa_aceptacion"] = derivada(
+        round(aceptadas / humanas, 4) if humanas else None,
+        con_dato=humanas, denominador=humanas, unidad="proporcion",
+        fuente=f_dec, periodo=per)
+
+    #  EL ACIERTO. Solo sobre las que tienen desenlace: sin resultado no se puede
+    #  decir si la recomendacion servia.
+    con_desenlace = dec_ventana.filter(
+        resultado__in=ResultadoDecision.CERRADOS).count()
+    funcionaron = dec_ventana.filter(
+        resultado=ResultadoDecision.FUNCIONO).count()
+    salida["recomendaciones_que_funcionaron"] = derivada(
+        round(funcionaron / con_desenlace, 4) if con_desenlace else None,
+        con_dato=con_desenlace, denominador=con_desenlace, unidad="proporcion",
+        fuente=f_dec, periodo=per)
+    #  Y cuantas quedaron sin desenlace, que es la cifra que explica por que la de
+    #  arriba puede ser NO_APLICA.
+    salida["decisiones_sin_desenlace"] = conteo(
+        dec_ventana.filter(resultado=ResultadoDecision.PENDIENTE).count(),
+        f_dec, per)
+    salida["decisiones_corregidas"] = conteo(
+        dec_ventana.exclude(correccion="").count(), f_dec, per)
+
+    return salida
+
+
+# ==============================================================================
 #  B.1  --  CASOS  (se ENVUELVE cases/analytics, no se reescribe)
 # ==============================================================================
 
@@ -520,6 +618,7 @@ def indicadores(org, desde=None, hasta=None, ahora=None, dias=None) -> dict:
         "compromisos": indicadores_compromisos(org, ahora),
         "programacion": indicadores_programacion(org, ahora, dias),
         "supervisor": indicadores_supervisor(org, desde, hasta, ahora),
+        "situaciones": indicadores_situaciones(org, desde, hasta, ahora),
     }
 
 

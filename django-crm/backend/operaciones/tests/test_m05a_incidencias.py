@@ -476,7 +476,16 @@ def test_28_no_hay_ejecucion_externa_ni_modelos_nuevos(org_a, actor):
                        "NovedadOperativa", "PropuestaSupervisor",
                        "FuenteEstado", "FuenteSnapshot",
                        "SituacionOperativa", "SituacionAfectado",
-                       "SituacionEvento", "SituacionRelacion"}, modelos
+                       "SituacionEvento", "SituacionRelacion",
+                       #  02/10/2026, paso P4. 'DecisionSupervisor' guarda que
+                       #  decidio una persona y QUE RESULTADO tuvo -- lo segundo
+                       #  no existia en ninguna parte, y sin el las metricas de
+                       #  aceptacion miden obediencia y no acierto.
+                       #  'NivelAutonomia' hace del nivel 0-4 un dato POR EMPRESA
+                       #  con su historial, en vez de la constante
+                       #  'NIVEL_MAXIMO_ETAPA' del codigo. Los cinco niveles NO se
+                       #  redefinen: son los de 'PropuestaSupervisor.NIVELES'.
+                       "DecisionSupervisor", "NivelAutonomia"}, modelos
 
     #  el modulo de LECTURA no escribe
     nombres = set()

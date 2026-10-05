@@ -402,5 +402,17 @@ def correr(org, *, ahora=None) -> dict:
     informe["relaciones"] = relacionar_por_topologia(org, ahora=ahora)
     informe["tickets"] = asociar_tickets(org, ahora=ahora)
     informe.update(revisar_sin_senal(org, ahora=ahora))
+
+    #  EL SEGUIMIENTO, EN EL MISMO TURNO. Una situacion no termina porque termino
+    #  un ciclo: aqui se evalua como va cada una de las abiertas y, si amerita, se
+    #  deja una recomendacion para que la lea una persona.
+    #
+    #  El proponedor se le PASA al seguimiento en vez de que lo importe: el
+    #  seguimiento produce veredictos y no tiene por que conocer las propuestas.
+    from operaciones import situaciones_propuestas, situaciones_seguimiento
+
+    informe["seguimiento"] = situaciones_seguimiento.seguir(
+        org, ahora=ahora, proponer=situaciones_propuestas.proponer)
+
     informe["vivas"] = S.objects.filter(org=org, estado__in=S.VIVAS).count()
     return informe
