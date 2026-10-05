@@ -2052,10 +2052,22 @@ llm:
   # deje al tenant sin tarifa -- pasado real: el 05/09/2026 una carga las borro
   # y el gasto volvio a mostrarse en blanco.
   tarifas:
+    # Verificada contra la pagina oficial el 05/10/2026
+    # (api-docs.deepseek.com/quick_start/pricing). Estos son los precios de
+    # PICO; fuera de pico el proveedor cobra la mitad, y eso lo aplica
+    # 'descuento_fuera_pico' con las ventanas de abajo.
+    #
+    # Antes decia 0.44 / 0.014 / 1.32, que SOBREestimaba ~45%. No era una
+    # tarifa inventada: eran los precios de una lista anterior que nadie
+    # actualizo. Se corrigio el 05/10/2026, en la misma auditoria que
+    # encontro que el sistema calculaba $2.37 mientras el proveedor cobraba
+    # $6.78 -- o sea que la tarifa inflada estaba TAPANDO parte de la brecha
+    # de llamadas que no se contaban. Con la tarifa correcta, esa brecha se
+    # ve mas grande, que es lo que corresponde.
     deepseek:deepseek-v4-flash:
-      entrada: 0.44
-      entrada_cache: 0.014
-      salida: 1.32
+      entrada: 0.30
+      entrada_cache: 0.006
+      salida: 1.20
       descuento_fuera_pico: 0.5
       # 01:00-04:00 y 06:00-10:00 UTC, lunes a viernes. Verificado contra la
       # facturacion real: el 94% del trafico de Rapilink cae FUERA de pico --
@@ -2068,6 +2080,21 @@ llm:
         - dias: [1, 2, 3, 4, 5]
           desde_utc: 6
           hasta_utc: 10
+
+    # El modelo del rol 'supervisor' (llm.overrides). Hasta el 05/10/2026 se
+    # usaba SIN tarifa cargada: sus tokens se contaban y su costo quedaba en
+    # cero, asi que el gasto existia y no se veia. Verificada contra la
+    # pagina oficial ese dia (docs.claude.com/en/docs/about-claude/pricing).
+    #
+    # SIN ventanas de pico: Anthropic no cobra distinto por horario, y
+    # declarar un descuento sin ventanas no haria nada (sin ventanas se cobra
+    # todo como pico, ver la clase Tarifa).
+    #
+    # 'entrada_cache' es el precio de LECTURA de cache, el 10% del input.
+    anthropic:claude-sonnet-5:
+      entrada: 2.0
+      entrada_cache: 0.20
+      salida: 10.0
 
   # Donde preguntarle al proveedor cuanto saldo queda, para AUDITAR el calculo
   # de arriba contra lo que de verdad cobra. La resta entre el saldo de dos
