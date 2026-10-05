@@ -7,6 +7,7 @@ import '../../core/avisos/avisos_push.dart';
 import '../../core/estado/ordenes_jornada.dart';
 import '../../demo/field_mock_data.dart';
 import '../../core/storage/ciclo_de_vida_local.dart';
+import '../../core/storage/ubicacion_de_captura.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/sync/sync_presentacion.dart';
@@ -442,6 +443,16 @@ class _AppShellState extends State<AppShell> {
         SeccionCampo.trabajo => TrabajoScreen(
             ordenes: widget.dependencias.ordenes,
             abrirTrabajo: widget.dependencias.abrirTrabajo,
+            // La misma pieza que sella dónde se tomó cada foto. No se agrega un
+            // segundo camino al GPS: dos formas de preguntar lo mismo terminan
+            // pidiendo el permiso dos veces y contestando distinto.
+            dondeEstoy: () async {
+              final Map<String, dynamic> d = await UbicacionDeCaptura.tomar();
+              final Object? lat = d['lat'];
+              final Object? lng = d['lng'];
+              if (lat is! num || lng is! num) return null;
+              return (lat.toDouble(), lng.toDouble());
+            },
           ),
         SeccionCampo.materiales => MaterialesScreen(tecnico: _identidad?.nombre),
         // Perfil no es una sección del apilado: es una hoja. Está en la barra

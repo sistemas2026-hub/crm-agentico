@@ -1,3 +1,4 @@
+import 'cercania.dart';
 import '../../core/acciones/lector_de_codigo.dart';
 import 'package:flutter/material.dart';
 
@@ -20,7 +21,15 @@ class TrabajoScreen extends StatefulWidget {
     required this.ordenes,
     required this.abrirTrabajo,
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
+    this.dondeEstoy,
   });
+
+  /// Dónde está el técnico ahora, para ordenar por cercanía.
+  ///
+  /// Se inyecta en vez de llamar al GPS acá: una prueba no tiene GPS, y el
+  /// permiso de ubicación no se pide al abrir una lista. `null` —el valor por
+  /// omisión— deja la pantalla exactamente como estaba.
+  final Future<(double, double)?> Function()? dondeEstoy;
 
   final OrdenesJornada ordenes;
 
@@ -40,6 +49,36 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
   /// Lo que el técnico escribió en el buscador. Filtra de verdad, y sobre lo
   /// que ya está en el teléfono: sin señal también busca.
   final TextEditingController _busqueda = TextEditingController();
+
+  /// Dónde está el técnico. `null` mientras no se sepa, y eso es lo normal: sin
+  /// GPS, sin permiso, o sin haber contestado todavía.
+  double? _lat;
+  double? _lng;
+
+  /// Si la lista se ordena por cercanía. Apagado por omisión.
+  ///
+  /// POR QUE NO ES EL ORDEN POR OMISION
+  /// ----------------------------------
+  /// Una orden con ventana prometida se atiende **cuando se prometió**, aunque
+  /// quede lejos. Reordenar por distancia sin que el técnico lo pida le
+  /// cambiaría el día en silencio. La cercanía es una herramienta para decidir,
+  /// no una regla.
+  bool _porCercania = false;
+
+  Future<void> _ubicarme() async {
+    final buscar = widget.dondeEstoy;
+    if (buscar == null) return;
+    try {
+      final (double, double)? donde = await buscar();
+      if (!mounted || donde == null) return;
+      setState(() {
+        _lat = donde.$1;
+        _lng = donde.$2;
+      });
+    } catch (_) {
+      // Sin ubicación la lista queda como estaba. No puede tumbar la pantalla.
+    }
+  }
 
   @override
   void initState() {
@@ -78,12 +117,29 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
     final ahora = DateTime.now();
     final texto = _busqueda.text.trim().toLowerCase();
 
-    return widget.ordenes.trabajos
+    final List<TrabajoVista> visibles = widget.ordenes.trabajos
         .where(_segmento.incluye)
         .where((TrabajoVista t) =>
             perteneceA(_pestana, t.estado, t.compromiso, ahora: ahora))
         .where((TrabajoVista t) => texto.isEmpty || _coincide(t, texto))
         .toList();
+
+    // HOY ESTA GUARDA ES REDUNDANTE, Y SE DEJA A PROPOSITO.
+    //
+    // Medido al mutarla: quitarla no cambia nada, porque `_lat` solo se llena
+    // cuando el tecnico enciende el filtro, y sin ubicacion `ordenarPorCercania`
+    // devuelve la lista intacta. O sea que el orden ya depende de encenderlo.
+    //
+    // Se queda porque expresa la DECISION --no reordenar el dia de nadie sin que
+    // lo pida-- y la protege el dia que la ubicacion llegue por otro lado: un
+    // seguimiento continuo, o leerla al abrir la pantalla. Ese dia, sin esta
+    // linea, la lista se reordenaria sola y nadie sabria por que.
+    if (!_porCercania) return visibles;
+    return Cercania.ordenarPorCercania(
+      visibles,
+      latTecnico: _lat,
+      lngTecnico: _lng,
+    );
   }
 
   /// Busca por lo que el técnico tiene a mano para reconocer un trabajo: el
@@ -170,6 +226,11 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
                             return TarjetaTrabajo(
                               trabajo: trabajo,
                               mostrarDatosFuturos: widget.mostrarDatosFuturos,
+                              metrosHasta: Cercania.metrosHasta(
+                                trabajo,
+                                latTecnico: _lat,
+                                lngTecnico: _lng,
+                              ),
                               onTap: () async {
                                 await widget.abrirTrabajo(contexto, trabajo);
                                 // Al volver, los datos pueden haber cambiado;
@@ -402,6 +463,37 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.margen),
             child: Row(
               children: <Widget>[
+                // «CERCA MIO» VA PRIMERO, y no es un capricho de orden.
+                //
+                // Al final quedaba detras de cuatro filtros y fuera de la vista
+                // a cualquier ancho de telefono: medido al escribir la guarda,
+                // el toque ni siquiera llegaba. Una herramienta para decidir a
+                // donde ir que hay que deslizar para encontrar es una
+                // herramienta que no se usa.
+                //
+                // Y NO es el orden por omision: una orden con ventana prometida
+                // se atiende CUANDO SE PROMETIO, aunque quede lejos. Reordenar
+                // por distancia sin que el tecnico lo pida le cambiaria el dia
+                // en silencio.
+                //
+                // Solo aparece si alguien sabe buscar la ubicacion: una app
+                // compilada sin eso no ofrece un filtro que no va a funcionar.
+                if (widget.dondeEstoy != null) ...<Widget>[
+                  _ChipFiltro(
+                    texto: 'Cerca mío',
+                    activo: _porCercania,
+                    onTap: () async {
+                      final bool encender = !_porCercania;
+                      setState(() => _porCercania = encender);
+                      // Se pide la ubicacion al encenderlo, no al abrir la
+                      // pantalla: el permiso se pregunta cuando hace falta, no
+                      // «por las dudas». Una app que pide GPS al arrancar es
+                      // una app que la gente aprende a negar.
+                      if (encender && _lat == null) await _ubicarme();
+                    },
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                ],
                 for (final PestanaTrabajo filtro in PestanaTrabajo.values) ...<Widget>[
                   if (filtro != PestanaTrabajo.values.first)
                     const SizedBox(width: AppSpacing.sm),

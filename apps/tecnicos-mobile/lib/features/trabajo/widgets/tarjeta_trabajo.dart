@@ -1,3 +1,4 @@
+import '../cercania.dart';
 import 'package:flutter/material.dart';
 
 import '../../../demo/field_mock_data.dart';
@@ -23,11 +24,20 @@ class TarjetaTrabajo extends StatefulWidget {
     required this.trabajo,
     this.onTap,
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
+    this.metrosHasta,
   });
 
   final TrabajoVista trabajo;
   final VoidCallback? onTap;
   final bool mostrarDatosFuturos;
+
+  /// A qué distancia queda, en metros. `null` cuando no se puede saber.
+  ///
+  /// `null` y «0 m» son cosas distintas y por eso el tipo lo permite: sin GPS,
+  /// sin coordenadas en la orden, o con un `0,0` que significa «el backend no
+  /// sabe», no hay distancia que mostrar — y poner una inventada decidiría por
+  /// el técnico a cuál orden ir.
+  final double? metrosHasta;
 
   @override
   State<TarjetaTrabajo> createState() => _TarjetaTrabajoState();
@@ -40,6 +50,9 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
   bool _desplegado = false;
 
   TrabajoVista get trabajo => widget.trabajo;
+
+  /// A qué distancia queda, o `null` si no se puede saber.
+  double? get metrosHasta => widget.metrosHasta;
   VoidCallback? get onTap => widget.onTap;
   bool get mostrarDatosFuturos => widget.mostrarDatosFuturos;
 
@@ -271,11 +284,35 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text(
-                  trabajo.direccion,
-                  style: AppTypography.cuerpo,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        trabajo.direccion,
+                        style: AppTypography.cuerpo,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    // LA DISTANCIA, al lado de la direccion.
+                    //
+                    // No es una ruta ni un tiempo: es la linea recta. Un rio o
+                    // un sentido unico pueden hacer que lo mas cercano en el
+                    // mapa sea lo mas lejano en minutos, y por eso nunca dice
+                    // «12 min» -- eso seria una promesa que este numero no
+                    // puede cumplir.
+                    if (metrosHasta != null) ...<Widget>[
+                      const SizedBox(width: AppSpacing.sm),
+                      Text(
+                        Cercania.texto(metrosHasta!),
+                        style: AppTypography.etiquetaChica.copyWith(
+                          color: AppColors.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 // Cómo se entra al inmueble. Real cuando el despacho lo
                 // cargó; de ejemplo solo en la demostración (CAMPO-DATA-041).
@@ -421,6 +458,10 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
         icono: Icons.pin_drop,
         valor: trabajo.direccion,
         vacio: 'Sin direccion',
+        // La distancia va PEGADA a la direccion, no en una fila propia: es la
+        // misma pregunta --«donde queda»-- y separarlas hace que el tecnico
+        // tenga que leer dos renglones para contestarla.
+        sufijo: metrosHasta == null ? '' : Cercania.texto(metrosHasta!),
       ),
       // El diagnóstico sí es real: lo manda el backend.
       if (trabajo.diagnosticoPrevio.isNotEmpty) ...<Widget>[
@@ -535,6 +576,7 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
     required String valor,
     required String vacio,
     bool fuerte = false,
+    String sufijo = '',
   }) {
     final bool hay = valor.trim().isNotEmpty;
     return Row(
@@ -557,6 +599,16 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
             overflow: TextOverflow.ellipsis,
           ),
         ),
+        if (sufijo.isNotEmpty) ...<Widget>[
+          const SizedBox(width: AppSpacing.sm),
+          Text(
+            sufijo,
+            style: AppTypography.etiquetaChica.copyWith(
+              color: AppColors.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ],
     );
   }
