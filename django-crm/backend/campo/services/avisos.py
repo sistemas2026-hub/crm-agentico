@@ -35,6 +35,8 @@ from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from campo.services import push_fcm
+
 from campo.avisos import (
     AvisoEnviado,
     CanalDeAvisos,
@@ -67,6 +69,19 @@ def avisar_devolucion(orden, requisitos: list[str], observacion: str = "") -> No
 
     perfiles = _asignados(orden)
 
+    # El contenido del aviso, construido UNA vez. Lo escribe la notificacion de
+    # la plataforma y VIAJA TAMBIEN EN EL PUSH, y eso no es duplicacion: el
+    # telefono espeja la fila al recibirla, y una fila espejada a medias se
+    # queda a medias. `guardarNotificaciones` inserta sin pisar --para no
+    # perder un «leida» que todavia no subio--, asi que la sincronizacion
+    # posterior NO la completaria.
+    contenido = {
+        "vuelta": orden.vuelta,
+        "observacion": observacion,
+        "rehacer": titulos,
+        "orden_numero": orden.numero,
+    }
+
     # 1. LA NOTIFICACION, QUE ES EL HECHO
     # -----------------------------------
     # Va DENTRO de la transaccion, al reves que el envio de abajo. No es una
@@ -77,7 +92,7 @@ def avisar_devolucion(orden, requisitos: list[str], observacion: str = "") -> No
     #
     # Es la misma distincion que el proyecto ya tiene escrita para los mensajes:
     # `aceptado != entregado != leido`.
-    _notificar_en_la_app(orden, perfiles, titulos, observacion)
+    avisos_por_perfil = _notificar_en_la_app(orden, perfiles, contenido)
 
     # 2. LAS ENTREGAS, que son opcionales y van despues del commit.
     _despachar(
@@ -89,10 +104,17 @@ def avisar_devolucion(orden, requisitos: list[str], observacion: str = "") -> No
         texto="\n".join(lineas),
         enlace_a=orden.id,
         perfiles=perfiles,
+        # El push necesita DOS cosas que los canales externos no: el enlace
+        # relativo --el telefono no navega a un dominio-- y el id de la
+        # notificacion de cada persona, para que el aviso que llega por push sea
+        # LA MISMA fila que despues baja la sincronizacion y no una copia.
+        enlace_interno=f"/ot/{orden.id}",
+        avisos_por_perfil=avisos_por_perfil,
+        contenido=contenido,
     )
 
 
-def _notificar_en_la_app(orden, perfiles, titulos: list[str], observacion: str):
+def _notificar_en_la_app(orden, perfiles, contenido: dict):
     """Escribe una notificacion por persona, con el despachador que YA existe.
 
     POR QUE NO SE CONSTRUYO UNO NUEVO
@@ -112,11 +134,16 @@ def _notificar_en_la_app(orden, perfiles, titulos: list[str], observacion: str):
     escribio el supervisor. **Ni nombre, ni direccion, ni telefono del cliente**:
     una notificacion se sincroniza al telefono y se queda ahi, y el detalle del
     cliente ya vive en la ficha, detras de la sesion.
+
+    Devuelve `{profile_id: notificacion_id}`. Lo usa el push: sin el id, el
+    aviso que llega al telefono seria una fila nueva, y la sincronizacion
+    traeria la misma notificacion otra vez, sin leer.
     """
     from common import notifications
 
+    ids: dict = {}
     for perfil in perfiles:
-        notifications.create(
+        notificacion = notifications.create(
             perfil,
             "trabajo_devuelto",
             entity=orden,
@@ -125,13 +152,14 @@ def _notificar_en_la_app(orden, perfiles, titulos: list[str], observacion: str):
             # cada cliente. Un absoluto obligaria a que la notificacion sepa si
             # la lee la web o el telefono.
             link=f"/ot/{orden.id}",
-            data={
-                "vuelta": orden.vuelta,
-                "observacion": observacion,
-                "rehacer": titulos,
-                "orden_numero": orden.numero,
-            },
+            data=contenido,
         )
+        # Puede devolver None: a una persona desactivada no se le notifica. Ese
+        # caso no se filtra aca --el perfil sigue en la lista para los canales
+        # externos-- pero tampoco entra al push, porque no hay fila que espejar.
+        if notificacion is not None:
+            ids[perfil.id] = str(notificacion.id)
+    return ids
 
 
 def _titulos_de(orden, requisitos: list[str]) -> list[str]:
@@ -158,7 +186,18 @@ def _asignados(orden) -> list:
     return [a.profile for a in orden.asignaciones.select_related("profile").all()]
 
 
-def _despachar(*, org, clave: str, asunto: str, texto: str, enlace_a, perfiles):
+def _despachar(
+    *,
+    org,
+    clave: str,
+    asunto: str,
+    texto: str,
+    enlace_a,
+    perfiles,
+    enlace_interno: str = "",
+    avisos_por_perfil=None,
+    contenido=None,
+):
     """Programa el envio para DESPUES del commit. Nunca antes.
 
     Ver el encabezado: dentro de la transaccion esto bloquearia filas esperando a
@@ -172,11 +211,17 @@ def _despachar(*, org, clave: str, asunto: str, texto: str, enlace_a, perfiles):
             texto=texto,
             enlace_a=enlace_a,
             perfiles=perfiles,
+            enlace_interno=enlace_interno,
+            avisos_por_perfil=avisos_por_perfil or {},
+            contenido=contenido or {},
         )
     )
 
 
-def _enviar_ahora(*, org, clave, asunto, texto, enlace_a, perfiles):
+def _enviar_ahora(
+    *, org, clave, asunto, texto, enlace_a, perfiles,
+    enlace_interno="", avisos_por_perfil=None, contenido=None,
+):
     """El envio de verdad. Fuera de toda transaccion, y nunca lanza.
 
     Si algo aca explota, lo peor que puede pasar es que no llegue un aviso. Dejar
@@ -213,8 +258,17 @@ def _enviar_ahora(*, org, clave, asunto, texto, enlace_a, perfiles):
         for canal in canales:
             if enviar_por(canal, asunto=asunto, texto=cuerpo):
                 usados.append(canal.tipo)
+        # Al telefono va el enlace INTERNO, no el del dominio: la app abre
+        # `/ot/<id>` en su propia pantalla. Si le llegara el absoluto, tocar el
+        # aviso abriria el navegador --y pediria iniciar sesion en la web--.
         if _notificar_a_telefonos(
-            org=org, perfiles=perfiles, titulo=asunto, texto=texto, enlace=enlace
+            org=org,
+            perfiles=perfiles,
+            titulo=asunto,
+            texto=texto,
+            enlace=enlace_interno or enlace,
+            avisos_por_perfil=avisos_por_perfil or {},
+            contenido=contenido or {},
         ):
             usados.append("push")
 
@@ -311,45 +365,91 @@ def probar(canal) -> tuple[bool, str]:
     return ok, canal.ultimo_error
 
 
-def _notificar_a_telefonos(*, org, perfiles, titulo, texto, enlace) -> bool:
+def _notificar_a_telefonos(
+    *, org, perfiles, titulo, texto, enlace, avisos_por_perfil=None, contenido=None
+) -> bool:
     """Manda la notificacion a los telefonos registrados de esos perfiles.
 
-    QUE FALTA PARA QUE ESTO HAGA ALGO (04/10/2026)
-    ----------------------------------------------
-    El registro de dispositivos y el despacho estan construidos; lo que falta es
-    el PROVEEDOR. Hoy devuelve `False` siempre y lo dice en el log, en vez de
-    fingir que mando algo.
+    EL TOKEN QUE NO SIRVE SE DA DE BAJA ACA MISMO
+    ---------------------------------------------
+    FCM distingue «no llego» de «este telefono no existe mas», y la diferencia
+    importa: lo primero se puede reintentar, lo segundo no. Un token muerto que
+    se deja activo hace que cada aviso futuro pague un viaje a Google para que lo
+    rechacen, y deja a `AvisoEnviado` contando intentos que no podian funcionar.
+    Se desactiva, no se borra, por lo mismo que en `DispositivoDeCampoView`: que
+    dejo de servir y CUANDO es lo que permite contestar por que un aviso no
+    llego.
 
-    Encenderlo es escribir `_enviar_una(token, ...)` contra FCM y nada mas: el
-    resto --a quien, con que texto, sin datos del cliente, sin duplicar-- ya esta
-    resuelto aca.
-
-    Y hay una pregunta que se contesta ANTES de encenderlo, no despues: el token
-    del dispositivo viaja a un tercero. En este proyecto eso no se activa sin
-    resolver la autorizacion de tratamiento.
+    DEVUELVE SI LLEGO A ALGUNO, NO SI LLEGO A TODOS
+    -----------------------------------------------
+    Un tecnico puede tener dos telefonos registrados y uno apagado. Que el aviso
+    haya entrado por uno ya cumple el proposito; exigir los dos marcaria como
+    fallido un aviso que la persona recibio.
     """
     ids = [p.id for p in perfiles if p is not None]
     if not ids:
         return False
 
-    tokens = list(
+    telefonos = list(
         DispositivoDeTecnico.objects.filter(
             org=org, profile_id__in=ids, activo=True
-        ).values_list("token", flat=True)
+        ).values_list("token", "profile_id")
     )
-    if not tokens:
+    if not telefonos:
         return False
 
-    enviados = [t for t in tokens if _enviar_una(t, titulo, texto, enlace)]
-    return bool(enviados)
+    if not push_fcm.esta_configurado():
+        # Sin credencial no se intenta: un viaje a Google que va a fallar seguro
+        # solo demora el aviso por los canales que SI estan configurados.
+        log.info("push_sin_proveedor")
+        return False
+
+    por_perfil = avisos_por_perfil or {}
+    llego = False
+    muertos = []
+    for token, profile_id in telefonos:
+        resultado = _enviar_una(
+            token,
+            titulo,
+            texto,
+            enlace,
+            por_perfil.get(profile_id, ""),
+            contenido or {},
+        )
+        if resultado == push_fcm.ENTREGADO:
+            llego = True
+        elif resultado == push_fcm.TOKEN_MUERTO:
+            muertos.append(token)
+
+    if muertos:
+        DispositivoDeTecnico.objects.filter(org=org, token__in=muertos).update(
+            activo=False, updated_at=timezone.now()
+        )
+
+    return llego
 
 
-def _enviar_una(token: str, titulo: str, texto: str, enlace: str) -> bool:
-    """Un envio al proveedor de notificaciones. Todavia no hay proveedor.
+def _enviar_una(
+    token: str,
+    titulo: str,
+    texto: str,
+    enlace: str,
+    aviso_id: str = "",
+    contenido: dict | None = None,
+) -> str:
+    """Un envio al proveedor. Devuelve el resultado de `push_fcm`, sin traducir.
 
-    Devuelve `False` a proposito: decir que no se mando es la verdad, y el
-    registro de `AvisoEnviado` queda sin «push» en vez de afirmar un envio que no
-    ocurrio.
+    Sigue existiendo como funcion propia --y no una llamada directa-- porque es
+    el unico punto donde se sustituye el proveedor en una prueba. Traducir el
+    resultado a un booleano aca borraria justo la distincion que hace falta mas
+    arriba: un token muerto no es un envio fallido.
     """
-    log.info("push_sin_proveedor")
-    return False
+    return push_fcm.mandar_a_un_telefono(
+        token,
+        titulo,
+        texto,
+        enlace,
+        aviso_id=aviso_id,
+        verbo="trabajo_devuelto",
+        contenido=contenido or {},
+    )

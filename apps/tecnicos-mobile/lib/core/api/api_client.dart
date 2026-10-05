@@ -171,6 +171,23 @@ class ApiClient {
     );
   }
 
+  /// DELETE **con cuerpo**, que es lo que pide dar de baja un dispositivo: el
+  /// token identifica al telefono y no cabe en la ruta --son 160 caracteres y
+  /// cambian--. Dio lo permite; muchos clientes HTTP no, y por eso se declara.
+  Future<Response<T>> delete<T>(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+  }) async {
+    return await _dio.delete<T>(
+      path,
+      data: data,
+      queryParameters: queryParameters,
+      options: options,
+    );
+  }
+
   Future<Response<T>> request<T>(
     String path, {
     dynamic data,

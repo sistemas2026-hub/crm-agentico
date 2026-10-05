@@ -2,6 +2,10 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Android 13 en adelante el usuario la concede explicitamente. Sin
+         este permiso el telefono acepta el registro en FCM y descarta cada
+         aviso en silencio: no hay error, no hay log, simplemente no suena. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Donde se tomo cada evidencia. El backend espera `metadatos_captura`
          desde el principio y hasta ahora llegaba vacio: una foto sin lugar
          prueba que alguien subio una foto, no que estuvo ahi.
@@ -42,6 +46,16 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- A que canal van los avisos que llegan con la app cerrada. El
+             canal lo crea el codigo Dart al arrancar; si este valor no
+             coincide con ese id, Android inventa uno "Miscellaneous" sin
+             sonido y el aviso llega mudo. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="avisos_de_campo" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

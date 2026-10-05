@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+import 'core/avisos/avisos_push.dart';
 import 'core/api/api_endpoints.dart';
 import 'core/storage/secure_storage_service.dart';
 import 'core/theme/app_theme.dart';
@@ -21,7 +25,17 @@ void main() async {
 
   final hasSession = await storage.hasValidSession();
 
+  // EL PUSH SE ENCIENDE DESPUES DE RUNAPP, Y A PROPOSITO
+  // ----------------------------------------------------
+  // Registrar el telefono habla con Firebase y con el servidor. Esperarlo acá
+  // dejaría la pantalla en blanco mientras el técnico está parado frente a una
+  // casa, por algo que no necesita para trabajar. Sin sesión no se enciende: el
+  // registro es un pedido autenticado, y el token se ata a una persona.
   runApp(DexterCampoApp(hasValidSession: hasSession));
+
+  if (hasSession) {
+    unawaited(AvisosPush().arrancar());
+  }
 }
 
 class DexterCampoApp extends StatelessWidget {

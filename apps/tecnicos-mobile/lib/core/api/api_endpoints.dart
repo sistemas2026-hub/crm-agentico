@@ -34,6 +34,13 @@ class ApiEndpoints {
   /// Los campos los decide `WorkTypeVersion`, no la aplicacion: por eso una
   /// empresa puede cambiar lo que se pide sin que haya que publicar una version
   /// nueva de la app.
+  /// Este telefono, para poder recibir un aviso push.
+  ///
+  /// POST al entrar y cada vez que el token cambia --el proveedor lo rota solo--.
+  /// DELETE al cerrar sesion: un telefono de cuadrilla pasa de mano en mano, y
+  /// el que entra no tiene por que recibir los avisos del que salio.
+  static String get dispositivo => '$baseUrl/api/campo/dispositivo/';
+
   /// Las notificaciones de esta persona.
   ///
   /// NO es de campo: vive en `/api/notifications/`, que es el unico

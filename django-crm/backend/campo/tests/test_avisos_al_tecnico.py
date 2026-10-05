@@ -392,12 +392,18 @@ def test_o_cerrar_sesion_da_de_baja_sin_borrar(user_client, org_a, user_profile)
     assert fila.activo is False
 
 
-def test_p_push_todavia_no_tiene_proveedor_y_lo_dice(orden, tecnico, canal):
-    """HONESTIDAD SOBRE LO QUE FALTA.
+def test_p_sin_credencial_de_push_no_se_afirma_un_envio(orden, tecnico, canal):
+    """HONESTIDAD SOBRE LO QUE NO SALIO.
 
-    El registro y el despacho estan; el proveedor no. `canales` tiene que decir
-    `["chat"]` y NO `["chat", "push"]`: afirmar un envio que no ocurrio es
-    exactamente lo que el metodo del proyecto prohibe.
+    El proveedor ya existe --FCM, en `services/push_fcm.py`-- pero sin la
+    credencial de la plataforma no se intenta nada. `canales` tiene que decir
+    `["google_chat"]` y NO `["google_chat", "push"]`: afirmar un envio que no
+    ocurrio es exactamente lo que el metodo del proyecto prohibe.
+
+    Que una EMPRESA no tenga nada configurado es el estado normal; que la
+    PLATAFORMA no tenga credencial es un despliegue a medias, y se ve en el log
+    (`push_sin_proveedor`), no en una mentira en la base. El camino con
+    credencial se mide en `test_push_al_telefono.py`.
     """
     DispositivoDeTecnico.objects.create(
         org=orden.org, profile=tecnico[1], token="tok-1", activo=True

@@ -29,6 +29,14 @@ LAS TRES REGLAS QUE MANDAN SOBRE ESTE ARCHIVO
    que la regla multi-tenant prohibe: la empresa siguiente usa Teams, o Slack, o
    quiere un correo.
 
+   LO QUE ESTA REGLA NO PUEDE GARANTIZAR, Y HAY QUE DECIRLO: la `observacion`
+   del supervisor es TEXTO LIBRE. El sistema no pone datos del cliente ahi, pero
+   una persona puede escribirlos. No se filtra ni se redacta --un aviso recortado
+   a mitad de frase es peor que ninguno-- y vale lo mismo para el chat, para el
+   correo, para la notificacion de la plataforma y para el push: son el mismo
+   texto por cuatro caminos. Si alguna vez hace falta cerrarlo, se cierra en UN
+   lugar: aca.
+
 3. **Lo configura la empresa, no un programador.** La regla del proyecto dice
    «configuracion editable desde la interfaz y persistida por tenant: nunca un
    valor fijo en codigo, NI EN UN ARCHIVO QUE SOLO UN DESARROLLADOR SABE

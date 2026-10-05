@@ -9,6 +9,7 @@ import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_empty_state.dart';
 import '../materiales/estado_de_jornada.dart';
+import '../notificaciones/notificaciones_screen.dart';
 import '../trabajo/estado_trabajo.dart';
 import '../trabajo/seleccion_jornada.dart';
 import '../trabajo/trabajo_vista.dart';
@@ -48,6 +49,7 @@ class InicioScreen extends StatefulWidget {
     this.onVerTodos,
     this.jornada,
     this.ahora,
+    this.abrirOrdenDeUnAviso,
   });
 
   final OrdenesJornada ordenes;
@@ -63,6 +65,10 @@ class InicioScreen extends StatefulWidget {
 
   /// El reloj, para que una prueba no dependa de la hora en que se corre.
   final DateTime? ahora;
+
+  /// Qué pasa al tocar un aviso que apunta a una orden. Nulo deja la lista en
+  /// lectura, que es lo correcto cuando quien la monta no sabe navegar.
+  final void Function(String ordenId)? abrirOrdenDeUnAviso;
 
   @override
   State<InicioScreen> createState() => _InicioScreenState();
@@ -169,6 +175,18 @@ class _InicioScreenState extends State<InicioScreen> {
               ),
             ] else ...<Widget>[
               _saludo(sync),
+              // LOS AVISOS VAN PRIMERO, Y SOLO SI HAY ALGUNO
+              // -------------------------------------------
+              // Un trabajo devuelto es lo más urgente que puede haber en esta
+              // pantalla: hay que volver a una casa donde el técnico ya estuvo.
+              // Debajo del avance del día quedaría después de un scroll, que
+              // es como no estar. El bloque se esconde solo cuando no hay
+              // nada, así que no agrega ruido los días normales.
+              NotificacionesScreen(
+                ocultarSiVacio: true,
+                alAbrirOrden: widget.abrirOrdenDeUnAviso,
+                margenSuperior: AppSpacing.lg,
+              ),
               // Un solo ritmo entre bloques. Antes los tres primeros iban a
               // `md` y los de abajo a `lg`: la mitad superior se veia
               // apretada contra la inferior sin que nada lo justificara.

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/avisos/avisos_push.dart';
 import '../../core/estado/ordenes_jornada.dart';
 import '../../demo/field_mock_data.dart';
 import '../../core/storage/ciclo_de_vida_local.dart';
@@ -59,6 +60,8 @@ class ShellDependencias {
     required this.cargarIdentidad,
     required this.ordenes,
     required this.abrirTrabajo,
+    this.abrirOrdenPorId,
+    this.contarAvisosSinLeer,
     this.conectividad,
     this.cerrarSesion,
     this.cicloDeVida,
@@ -76,6 +79,23 @@ class ShellDependencias {
 
   /// Qué pasa al abrir un trabajo desde cualquiera de las dos pantallas.
   final Future<void> Function(BuildContext contexto, TrabajoVista trabajo) abrirTrabajo;
+
+  /// Abrir una orden de la que solo se tiene el identificador.
+  ///
+  /// Existe para el push: el aviso trae `/ot/<id>` y nada más. No se puede usar
+  /// [abrirTrabajo] porque ese pide un [TrabajoVista] completo, y cuando el
+  /// técnico toca la notificación con la app cerrada la lista de trabajos
+  /// todavía no se cargó. La ficha sabe cargarse sola desde el id.
+  ///
+  /// Nulo en pruebas que no navegan.
+  final Future<void> Function(BuildContext contexto, String ordenId)?
+      abrirOrdenPorId;
+
+  /// Cuántos avisos sin leer hay en este teléfono, para el número de la barra.
+  ///
+  /// Nulo en pruebas que no montan base: sin él no se dibuja número, en vez de
+  /// romperse.
+  final Future<int> Function()? contarAvisosSinLeer;
 
   /// `true` si el teléfono tiene alguna red. Nulo si no se puede saber.
   final Stream<bool>? conectividad;
@@ -121,10 +141,36 @@ class ShellDependencias {
           ),
         );
       },
+      // El push trae un id y nada más. La ficha se carga sola desde él, así
+      // que tocar el aviso abre el trabajo incluso con la app arrancando de
+      // cero y la lista de la jornada todavía vacía.
+      abrirOrdenPorId: (BuildContext contexto, String ordenId) async {
+        await Navigator.of(contexto).push(
+          MaterialPageRoute<void>(
+            builder: (_) => DetalleOrdenScreen(
+              ordenId: ordenId,
+              ordenes: ordenes,
+              acciones: acciones,
+              resumenes: sincronizacion.syncSummaryStream,
+              resumenInicial: sincronizacion.lastSummary,
+            ),
+          ),
+        );
+      },
+      contarAvisosSinLeer: () async {
+        final String? orgId = await almacenamiento.getOrgId();
+        final String? profileId = await almacenamiento.getProfileId();
+        if (orgId == null || profileId == null) return 0;
+        return LocalDatabase().contarNotificacionesSinLeer(
+          orgId: orgId,
+          profileId: profileId,
+        );
+      },
       cerrarSesion: almacenamiento.clearSession,
       cicloDeVida: CierreDeSesion(
         almacenamiento: almacenamiento,
         ciclo: CicloDeVidaLocal(LocalDatabase()),
+        darDeBajaElTelefono: AvisosPush().darDeBaja,
       ),
     );
   }
@@ -187,6 +233,11 @@ class _AppShellState extends State<AppShell> {
   /// es el mismo que usan las dos pantallas.
   int _trabajosActivos = 0;
 
+  /// Cuántos avisos sin leer, para el punto de la barra inferior.
+  int _avisosSinLeer = 0;
+
+  StreamSubscription<LocalDatabaseChangeEvent>? _suscripcionAvisos;
+
   @override
   void initState() {
     super.initState();
@@ -215,6 +266,43 @@ class _AppShellState extends State<AppShell> {
 
     widget.dependencias.ordenes.addListener(_alCambiarOrdenes);
     _cargarIdentidad();
+
+    // QUIEN ABRE LA ORDEN CUANDO EL TECNICO TOCA UN AVISO
+    // ---------------------------------------------------
+    // El servicio de push no sabe navegar --no tiene contexto-- y el shell sí.
+    // Se registra acá, y acá se consume lo que quedó pendiente: tocar el aviso
+    // con la app cerrada llega ANTES de que exista esta pantalla, así que el
+    // servicio lo guarda y el shell lo reclama al montarse. Sin esto, ese
+    // toque abría la aplicación en Inicio y el aviso se perdía.
+    final abrir = widget.dependencias.abrirOrdenPorId;
+    if (abrir != null) {
+      AvisosPush.alAbrirOrden = (String ordenId) {
+        if (!mounted) return;
+        abrir(context, ordenId);
+      };
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final String? pendiente = AvisosPush.tomarOrdenPendiente();
+        if (pendiente != null && mounted) abrir(context, pendiente);
+      });
+    }
+
+    _contarAvisos();
+    // El número tiene que moverse cuando llega un aviso por push y cuando la
+    // cola baja los de la plataforma: las dos cosas escriben la misma tabla.
+    _suscripcionAvisos = LocalDatabase.onDataChanged.listen((evento) {
+      if (evento.tabla == 'local_notificaciones') _contarAvisos();
+    });
+  }
+
+  Future<void> _contarAvisos() async {
+    final contar = widget.dependencias.contarAvisosSinLeer;
+    if (contar == null) return;
+    try {
+      final int cuantos = await contar();
+      if (mounted) setState(() => _avisosSinLeer = cuantos);
+    } catch (_) {
+      // Un problema leyendo la base no puede tumbar el contenedor.
+    }
   }
 
   void _alCambiarOrdenes() {
@@ -234,6 +322,8 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     _suscripcionResumen?.cancel();
     _suscripcionConexion?.cancel();
+    _suscripcionAvisos?.cancel();
+    AvisosPush.alAbrirOrden = null;
     widget.dependencias.ordenes.removeListener(_alCambiarOrdenes);
     super.dispose();
   }
@@ -340,6 +430,10 @@ class _AppShellState extends State<AppShell> {
             abrirTrabajo: widget.dependencias.abrirTrabajo,
             nombreTecnico: _identidad?.nombre ?? FieldMockData.tecnicoPorDefecto,
             resumenSincronizacion: _resumen,
+            abrirOrdenDeUnAviso: widget.dependencias.abrirOrdenPorId == null
+                ? null
+                : (String ordenId) =>
+                    widget.dependencias.abrirOrdenPorId!(context, ordenId),
             onVerTodos: () => setState(() {
               _seccion = SeccionCampo.trabajo;
               _visitadas.add(SeccionCampo.trabajo);
@@ -435,6 +529,10 @@ class _AppShellState extends State<AppShell> {
         seleccionada: _seccion,
         indicadores: <SeccionCampo, int>{
           if (_trabajosActivos > 0) SeccionCampo.trabajo: _trabajosActivos,
+          // Los avisos se leen en Inicio, así que el número va ahí. Es un dato
+          // real de la base, no de la demostración: un trabajo devuelto que
+          // nadie ve es exactamente el problema que esto vino a resolver.
+          if (_avisosSinLeer > 0) SeccionCampo.inicio: _avisosSinLeer,
         },
         // Los puntos de aviso del diseño. Academia y Más todavía no tienen de
         // dónde sacar un pendiente real, así que solo se ven en demostración.

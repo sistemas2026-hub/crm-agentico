@@ -61,6 +61,10 @@ services:
       MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
       MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
       MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      # Ver docker-compose.prod.yml: la cuenta de servicio de Firebase para
+      # el aviso push. Sin ella el aviso llega igual a la bandeja de la app
+      # y a los canales de la empresa; solo falta el golpecito en el hombro.
+      FCM_CUENTA_DE_SERVICIO: ${FCM_CUENTA_DE_SERVICIO:-}
       DBPORT: ${DBPORT:-5432}
       DBNAME: ${DBNAME:-crm_db}
       DBUSER: ${DBUSER:-crm_user}

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import '../../core/api/api_client.dart';
+import '../../core/avisos/avisos_push.dart';
 import '../../core/api/api_endpoints.dart';
 import '../../core/storage/ciclo_de_vida_local.dart';
 import '../../core/storage/local_database.dart';
@@ -126,6 +128,10 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _checkExistingSession() async {
     final hasSession = await _storage.hasValidSession();
     if (hasSession && mounted) {
+      // El token se ata a la persona que acaba de entrar. Si solo se registrara
+      // al arrancar la app, el primer día de un técnico nuevo no tendría avisos
+      // hasta que cerrara y volviera a abrir.
+      unawaited(AvisosPush().arrancar());
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => AppShell()),
       );
@@ -280,6 +286,7 @@ class _LoginScreenState extends State<LoginScreen> {
         await _syncService.procesarCola();
 
         if (mounted) {
+          unawaited(AvisosPush().arrancar());
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => AppShell()),
           );

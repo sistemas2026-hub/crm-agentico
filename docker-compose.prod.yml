@@ -73,6 +73,20 @@ services:
       MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
       MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
       MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      # La cuenta de servicio de Firebase, para el aviso push a la app de campo.
+      # Es el JSON COMPLETO pegado como valor, o la ruta a un archivo montado.
+      #
+      # ES DE LA PLATAFORMA, NO DE UNA EMPRESA, y eso no contradice la regla de
+      # "lo que varia por empresa es configuracion": esta credencial identifica
+      # al BINARIO de la app (com.dexter.campo), que es uno solo para todas las
+      # empresas. El aislamiento por empresa lo da campo_dispositivo_tecnico.org,
+      # que es una fila por telefono.
+      #
+      # Opcional a proposito, igual que MOTOR_SERVICE_TOKEN: sin ella el aviso
+      # sigue llegando a la bandeja de la app y a los canales que cada empresa
+      # haya configurado, y el log dice 'push_sin_proveedor'. Lo que NO hace es
+      # anotar en campo_aviso_enviado.canales un envio que no ocurrio.
+      FCM_CUENTA_DE_SERVICIO: ${FCM_CUENTA_DE_SERVICIO:-}
       # Se le agrega 'backend' al dominio publico, y no es opcional: el
       # frontend llama a Django POR DENTRO de la red, con
       # PRIVATE_DJANGO_API_URL=http://backend:8000, asi que esas peticiones

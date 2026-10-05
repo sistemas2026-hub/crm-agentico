@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -30,6 +31,8 @@ class NotificacionesScreen extends StatefulWidget {
     super.key,
     this.baseLocal,
     this.alAbrirOrden,
+    this.ocultarSiVacio = false,
+    this.margenSuperior = 0,
   });
 
   /// Inyectable para las pruebas: sin esto habría que montar una base real solo
@@ -39,6 +42,21 @@ class NotificacionesScreen extends StatefulWidget {
   /// Qué hacer al tocar una que apunta a una orden. `null` deja la lista en
   /// lectura, que es lo correcto cuando quien la monta no sabe navegar.
   final void Function(String ordenId)? alAbrirOrden;
+
+  /// Si no dibujar nada cuando no hay avisos.
+  ///
+  /// Embebida en Inicio va en `true`: un bloque que dice "No hay avisos" todos
+  /// los días enseña a no mirar esa parte de la pantalla, y ese aprendizaje
+  /// después se lleva puesto el aviso que sí importaba. Suelta va en `false`,
+  /// porque entonces la pantalla entera quedaría en blanco sin explicar nada.
+  final bool ocultarSiVacio;
+
+  /// El aire de arriba, que solo corresponde cuando el bloque se dibuja.
+  ///
+  /// Lo pone el bloque y no quien lo monta a propósito: desde afuera no se
+  /// puede saber si hay avisos sin volver a leer la base, y un `SizedBox`
+  /// puesto por si acaso deja un hueco los días sin nada.
+  final double margenSuperior;
 
   @override
   State<NotificacionesScreen> createState() => _NotificacionesScreenState();
@@ -52,10 +70,24 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
   String? _orgId;
   String? _profileId;
 
+  StreamSubscription<LocalDatabaseChangeEvent>? _suscripcion;
+
   @override
   void initState() {
     super.initState();
     _traer();
+    // Un aviso que llega por push mientras la pantalla está abierta tiene que
+    // aparecer sin que nadie la refresque. Lo mismo cuando la cola baja los de
+    // la plataforma: las dos cosas escriben `local_notificaciones`.
+    _suscripcion = LocalDatabase.onDataChanged.listen((evento) {
+      if (evento.tabla == 'local_notificaciones') _traer();
+    });
+  }
+
+  @override
+  void dispose() {
+    _suscripcion?.cancel();
+    super.dispose();
   }
 
   Future<void> _traer() async {
@@ -107,10 +139,21 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return DexterBloque(
+    // Mientras carga tampoco se dibuja: un bloque que aparece vacío y
+    // desaparece medio segundo después empuja todo lo de abajo.
+    if (widget.ocultarSiVacio && (_cargando || _filas.isEmpty)) {
+      return const SizedBox.shrink();
+    }
+
+    final Widget bloque = DexterBloque(
       titulo: 'Avisos',
       icono: Icons.notifications_none,
       children: _cuerpo(),
+    );
+    if (widget.margenSuperior <= 0) return bloque;
+    return Padding(
+      padding: EdgeInsets.only(top: widget.margenSuperior),
+      child: bloque,
     );
   }
 

@@ -41,12 +41,37 @@ class CierreDeSesion {
   final SecureStorageService _almacenamiento;
   final CicloDeVidaLocal _ciclo;
 
+  /// Qué hacer con el registro de push al salir. Nulo en pruebas.
+  final Future<void> Function()? _darDeBajaElTelefono;
+
   CierreDeSesion({
     required SecureStorageService almacenamiento,
     required CicloDeVidaLocal ciclo,
-  }) : this._(almacenamiento, ciclo);
+    Future<void> Function()? darDeBajaElTelefono,
+  }) : this._(almacenamiento, ciclo, darDeBajaElTelefono);
 
-  CierreDeSesion._(this._almacenamiento, this._ciclo);
+  CierreDeSesion._(
+    this._almacenamiento,
+    this._ciclo,
+    this._darDeBajaElTelefono,
+  );
+
+  /// Da de baja este teléfono ANTES de borrar las llaves.
+  ///
+  /// El orden no es un detalle: la baja es un pedido autenticado, y después de
+  /// `clearSession()` no hay con qué firmarlo. Si falla, se sigue saliendo: el
+  /// servidor da de baja el token solo cuando el proveedor lo rechace, así que
+  /// lo peor que pasa es que llegue un aviso de más a un teléfono que ya cambió
+  /// de manos. Quedarse adentro de la sesión por eso sería mucho peor.
+  Future<void> _soltarElPush() async {
+    final baja = _darDeBajaElTelefono;
+    if (baja == null) return;
+    try {
+      await baja();
+    } catch (_) {
+      // Ver el docstring: no puede impedir salir.
+    }
+  }
 
   /// Mira el estado antes de tocar nada. No borra.
   Future<ResultadoDeCierre> evaluar() async {
@@ -89,6 +114,7 @@ class CierreDeSesion {
       await _ciclo.purgarIdentidad(orgId: orgId, profileId: profileId);
     }
 
+    await _soltarElPush();
     await _almacenamiento.clearSession();
     return true;
   }
@@ -99,6 +125,7 @@ class CierreDeSesion {
   /// igual: sus datos quedan en el dispositivo, aislados por identidad, y los
   /// recupera cuando vuelva a entrar con la misma cuenta.
   Future<void> salirConservando() async {
+    await _soltarElPush();
     await _almacenamiento.clearSession();
   }
 }
