@@ -25,11 +25,29 @@ import { claveDeSesion, bloqueDeContexto, mensajeParaElMotor } from '$lib/superv
  * LA IDENTIDAD NO SE ACEPTA DEL NAVEGADOR, NUNCA
  * -----------------------------------------------
  * 'profile_id', el nombre y el tenant se resuelven aca, del lado del
- * servidor, igual que en /api/asistente y por el mismo motivo: son lo que
- * decide a que datos accede el turno. Si viajaran en el cuerpo, cualquiera
- * podria mandar el de otra persona y quedarse con sus agentes. La clave de
- * sesion se deriva de 'locals.user.id' por la misma razon -- aceptarla del
- * cliente seria poder leer la conversacion de otro.
+ * servidor: son lo que decide a que datos accede el turno. Si viajaran en el
+ * cuerpo, cualquiera podria mandar el de otra persona y quedarse con sus
+ * agentes. La clave de sesion se deriva de 'locals.user.id' por la misma
+ * razon -- aceptarla del cliente seria poder leer la conversacion de otro.
+ *
+ * 'apiRequest' RECIBE 'cookies', NO 'locals'
+ * -------------------------------------------
+ * Medido el 05/10/2026 contra produccion, con la burbuja ya desplegada: la
+ * primera pregunta devolvio
+ *
+ *     "Organization context is required. Please login again."
+ *
+ * 'apiRequest' saca el JWT con 'locals.cookies || locals' y despues
+ * 'cookies.get("jwt_access")'. En un '+server.js' el evento trae 'cookies'
+ * APARTE de 'locals', y 'hooks.server.js' solo deja ahi user/org/org_name/
+ * org_settings -- nunca 'cookies'. O sea que el fallback agarraba 'locals',
+ * '.get' no existia, no salia cabecera 'Authorization' y Django respondia
+ * 403. El sintoma ("volve a iniciar sesion") senala al login, que estaba
+ * perfecto.
+ *
+ * El patron correcto es el que ya usaba 'lib/server/v2/supervisor-noc.js':
+ * pasar '{ cookies }'. Esto NO sigue a '/api/asistente/+server.js', que pasa
+ * 'locals' y tiene el mismo defecto latente sin corregir.
  */
 
 /** Cuantos mensajes se recuperan al abrir la burbuja. */
@@ -69,13 +87,13 @@ async function identidad(locals, fetch) {
  * Usa los endpoints que YA existen, con los permisos y el tenant de quien
  * pregunta: no hay una segunda puerta a los datos del Supervisor.
  *
- * @param {any} locals
+ * @param {import('@sveltejs/kit').Cookies} cookies
  */
-async function estadoDelSupervisor(locals) {
+async function estadoDelSupervisor(cookies) {
   /** @type {{abiertas?: number, criticas?: number, indicadores?: Record<string, any>}} */
   const estado = {};
   try {
-    const propuestas = await apiRequest('/operaciones/propuestas/?estado=propuesta', {}, locals);
+    const propuestas = await apiRequest('/operaciones/propuestas/?estado=propuesta', {}, { cookies });
     const filas = Array.isArray(propuestas) ? propuestas : (propuestas?.results ?? []);
     if (Array.isArray(filas)) {
       estado.abiertas = filas.length;
@@ -86,7 +104,7 @@ async function estadoDelSupervisor(locals) {
     //  porque puede traer datos de la operacion.
   }
   try {
-    const ind = await apiRequest('/operaciones/indicadores/', {}, locals);
+    const ind = await apiRequest('/operaciones/indicadores/', {}, { cookies });
     if (ind && typeof ind === 'object') {
       const plano = {};
       for (const [k, v] of Object.entries(ind)) {
@@ -125,7 +143,7 @@ export async function GET({ locals, fetch }) {
 }
 
 /** @type {import('./$types').RequestHandler} */
-export async function POST({ request, locals, fetch }) {
+export async function POST({ request, locals, cookies, fetch }) {
   const id = await identidad(locals, fetch);
   if (id.error) return json({ error: id.error }, { status: id.status });
 
@@ -138,7 +156,7 @@ export async function POST({ request, locals, fetch }) {
   let profileId;
   let nombreColaborador = '';
   try {
-    const perfil = await apiRequest('/profile/', {}, locals);
+    const perfil = await apiRequest('/profile/', {}, { cookies });
     profileId = perfil?.user_obj?.id;
     nombreColaborador = (perfil?.user_obj?.name || perfil?.user_obj?.email || '').trim();
   } catch (/** @type {any} */ err) {
@@ -150,7 +168,7 @@ export async function POST({ request, locals, fetch }) {
       { status: 403 });
   }
 
-  const contexto = bloqueDeContexto(await estadoDelSupervisor(locals));
+  const contexto = bloqueDeContexto(await estadoDelSupervisor(cookies));
 
   try {
     const resp = await fetch(`${id.baseUrl}/chat`, {
