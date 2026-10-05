@@ -214,7 +214,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                   ],
                   Expanded(
                     child: Text(
-                      _queEs(fila['verbo']?.toString() ?? '', titulo),
+                      _queEs(fila['verbo']?.toString() ?? '', titulo, datos),
                       style: AppTypography.cuerpo,
                     ),
                   ),
@@ -246,9 +246,26 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
   /// `trabajo_devuelto` lo lee la web con sus palabras y el teléfono con las
   /// suyas. Un verbo que esta versión no conoce se muestra con el nombre de la
   /// entidad, en vez de esconderse.
-  static String _queEs(String verbo, String titulo) {
+  static String _queEs(
+    String verbo,
+    String titulo, [
+    Map<String, dynamic> datos = const <String, dynamic>{},
+  ]) {
     switch (verbo) {
       case 'trabajo_devuelto':
+        // SE ARMA CON EL NUMERO, NO CON EL TITULO QUE VINO.
+        //
+        // Los dos caminos traen titulos distintos: la sincronizacion manda
+        // `entity_name` («OT #1844») y el push manda el asunto del aviso («OT
+        // #1844 devuelta»). Pegarle «Te devolvieron la» delante al segundo
+        // produce «Te devolvieron la OT #1844 devuelta». Se vio en el emulador,
+        // no leyendo el codigo.
+        //
+        // Con `orden_numero` la frase sale igual por los dos caminos, porque
+        // depende del DATO y no de una cadena que alguien compuso para otra
+        // cosa.
+        final Object? numero = datos['orden_numero'];
+        if (numero != null) return 'Te devolvieron la OT #$numero';
         return 'Te devolvieron la $titulo';
       default:
         return titulo.isEmpty ? 'Aviso' : titulo;

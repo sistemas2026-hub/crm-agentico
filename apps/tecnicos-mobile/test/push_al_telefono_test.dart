@@ -427,6 +427,22 @@ void main() {
       expect(find.text('No hay avisos.'), findsOneWidget);
     });
 
+    testWidgets('d0 · la frase no repite la palabra del asunto', (tester) async {
+      // Los dos caminos traen títulos distintos: la sincronización manda
+      // `entity_name` («OT #9401») y el push manda el asunto («OT #9401
+      // devuelta»). Pegarle «Te devolvieron la» delante al segundo producía
+      // «Te devolvieron la OT #9401 devuelta». Se vio en el emulador, no
+      // leyendo el código.
+      await tester.runAsync(
+        () => push.espejar(mensajeDeDevolucion(titulo: 'OT #9401 devuelta')),
+      );
+
+      await montar(tester, ocultarSiVacio: true);
+
+      expect(find.text('Te devolvieron la OT #9401'), findsOneWidget);
+      expect(find.textContaining('devuelta'), findsNothing);
+    });
+
     testWidgets('d3 · con un aviso dice qué pasó y qué hay que rehacer',
         (tester) async {
       // `runAsync` por lo mismo que `montarConBaseReal`: escribir en SQLite es
