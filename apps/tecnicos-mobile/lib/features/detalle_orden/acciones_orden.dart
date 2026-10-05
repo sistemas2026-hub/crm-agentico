@@ -20,6 +20,7 @@ class AccionesOrden {
     required this.transicionar,
     required this.sincronizar,
     this.probarConexion,
+    this.medirSenal,
   });
 
   /// [tipoAccion] es el nombre que la cola le manda al backend
@@ -41,6 +42,13 @@ class AccionesOrden {
   /// de respuesta a lo que pregunto. Sin señal se dice que no se pudo, y ya.
   final Future<ResultadoPing> Function(String ordenId, int paquetes)?
       probarConexion;
+
+  /// Volver a medir la señal optica, AHORA.
+  ///
+  /// Mismo criterio que el ping, y por el mismo motivo: no pasa por la cola.
+  /// Una medicion que se ejecuta cuando el tecnico ya se fue mide un momento
+  /// que a nadie le importa, y llega con cara de respuesta a lo que pregunto.
+  final Future<MedicionDeSenal> Function(String ordenId)? medirSenal;
 
   factory AccionesOrden.reales() {
     final baseLocal = LocalDatabase();
@@ -72,6 +80,24 @@ class AccionesOrden {
         await sincronizacion.procesarCola();
       },
       sincronizar: sincronizacion.procesarCola,
+      medirSenal: (String ordenId) async {
+        try {
+          final Response<dynamic> r = await ApiClient().dio.post<dynamic>(
+                ApiEndpoints.trabajoMedirSenal(ordenId),
+              );
+          return MedicionDeSenal.desde(r.data as Map<String, dynamic>?);
+        } on DioException catch (e) {
+          if (e.response?.statusCode == 409) {
+            // La orden no tiene serial. No es un problema de red y no se
+            // reintenta: no hay a que equipo preguntarle.
+            return const MedicionDeSenal.noSePudo('sin_equipo');
+          }
+          final bool sinRed = e.type == DioExceptionType.connectionError ||
+              e.type == DioExceptionType.connectionTimeout ||
+              e.type == DioExceptionType.receiveTimeout;
+          return MedicionDeSenal.noSePudo(sinRed ? 'sin_conexion' : 'servidor');
+        }
+      },
       probarConexion: (String ordenId, int paquetes) async {
         try {
           final Response<dynamic> r = await ApiClient().dio.post<dynamic>(
@@ -168,4 +194,97 @@ class PaqueteDePing {
   /// Quién contestó. Es la IP del cliente, la misma en los diez -- y si
   /// alguna vez no lo fuera, eso sería justo lo que hay que ver.
   final String host;
+}
+
+/// Una medición de señal pedida desde el terreno, con la distinción que
+/// importa: **no se pudo medir** no es lo mismo que **se midió y está mal**.
+///
+/// La primera se reintenta; la segunda es un dato sobre el equipo del cliente, y
+/// manda al técnico a revisar la planta. Confundirlas le hace buscar una falla
+/// que no existe, que es exactamente lo que esta pantalla vino a evitar.
+///
+/// NO REEMPLAZA A LA LECTURA DE LA FICHA. La de la ficha es el registro de cómo
+/// estaba el servicio **antes** de la visita; ésta es cómo está **ahora**. Las
+/// dos juntas son lo que permite decir si la visita sirvió — y por eso viajan
+/// separadas y cada una con su hora.
+class MedicionDeSenal {
+  const MedicionDeSenal({
+    required this.medido,
+    this.motivo = '',
+    this.medidoEn,
+    this.senal1490,
+    this.senal1310,
+    this.veredicto = '',
+    this.estadoOnu = '',
+  });
+
+  const MedicionDeSenal.noSePudo(String motivo)
+      : this(medido: false, motivo: motivo);
+
+  /// Si se pudo preguntar y hubo respuesta.
+  final bool medido;
+
+  /// Por qué no se pudo. Vacío cuando sí se midió.
+  final String motivo;
+
+  final DateTime? medidoEn;
+  final double? senal1490;
+  final double? senal1310;
+  final String veredicto;
+  final String estadoOnu;
+
+  factory MedicionDeSenal.desde(Map<String, dynamic>? cuerpo) {
+    if (cuerpo == null) return const MedicionDeSenal.noSePudo('respuesta_vacia');
+    if (cuerpo['ok'] != true) {
+      return MedicionDeSenal.noSePudo(
+        (cuerpo['motivo'] ?? 'desconocido').toString(),
+      );
+    }
+    final Object? crudo = cuerpo['lectura'];
+    final Map<String, dynamic> lectura =
+        crudo is Map ? Map<String, dynamic>.from(crudo) : <String, dynamic>{};
+    return MedicionDeSenal(
+      medido: true,
+      medidoEn: DateTime.tryParse((cuerpo['medido_en'] ?? '').toString())
+          ?.toLocal(),
+      senal1490: _decimal(lectura['onu_signal_1490']),
+      senal1310: _decimal(lectura['onu_signal_1310']),
+      veredicto: (lectura['onu_signal_1490_veredicto'] ?? '').toString(),
+      estadoOnu: (lectura['onu_status'] ?? '').toString(),
+    );
+  }
+
+  /// SmartOLT manda la potencia como texto a veces (`'-21.19 dBm'`) y como
+  /// número otras. Medido sobre la orden 1849 de producción: llegó como texto.
+  /// Asumir una de las dos formas deja la tarjeta vacía la mitad de las veces.
+  static double? _decimal(Object? v) {
+    if (v is num) return v.toDouble();
+    if (v is! String || v.trim().isEmpty) return null;
+    return double.tryParse(
+      v.replaceAll(RegExp(r'[^0-9eE+\-.]'), ''),
+    );
+  }
+
+  /// Qué decirle al técnico cuando no se pudo.
+  ///
+  /// Cada motivo se arregla distinto: uno se reintenta más tarde, otro es
+  /// configuración de la empresa y otro no se arregla nunca. Un mensaje único
+  /// los mandaría a los tres al mismo lugar equivocado.
+  String get explicacion => switch (motivo) {
+        'sin_conexion' =>
+          'Sin señal no se puede medir. No queda pendiente: volvé a intentar '
+              'cuando tengas datos.',
+        'sin_equipo' =>
+          'Esta orden no tiene el serial del equipo cargado, así que no hay a '
+              'qué equipo preguntarle.',
+        'medicion_no_habilitada' =>
+          'La empresa todavía no habilitó la medición en vivo. No es el equipo '
+              'del cliente.',
+        'motor_no_responde' || 'motor_rechazo' =>
+          'El sistema no contestó. No dice nada del equipo del cliente: volvé '
+              'a intentar.',
+        'sin_lectura' || 'respuesta_vacia' =>
+          'Contestó, pero sin niveles. No se sabe cómo está la señal.',
+        _ => 'No se pudo medir.',
+      };
 }

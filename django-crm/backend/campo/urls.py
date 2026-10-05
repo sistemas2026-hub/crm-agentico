@@ -100,6 +100,9 @@ urlpatterns = [
     path("avisos/canales/<uid:pk>/probar/", avisos_views.ProbarCanalView.as_view(), name="avisos_probar"),
     path("trabajos/<uid:pk>/datos/", views.GuardarDatosTrabajoView.as_view(), name="trabajo_datos"),
     path("trabajos/<uid:pk>/probar-conexion/", views.ProbarConexionView.as_view(), name="trabajo_probar_conexion"),
+    # Volver a medir la señal AHORA. La de la ficha es de cuando se armo la
+    # orden, y despues de mover un conector eso ya no contesta nada.
+    path("trabajos/<uid:pk>/medir-senal/", views.MedirSenalView.as_view(), name="trabajo_medir_senal"),
 
     # RESTAURADAS  --  estas ocho desaparecieron en 59cf2a6 junto con sus vistas.
     # El frontend nunca dejo de llamar a 'programar' y 'reprogramar'

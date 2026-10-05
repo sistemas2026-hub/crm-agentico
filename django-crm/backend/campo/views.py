@@ -34,6 +34,7 @@ from campo.services import bloqueos
 from campo.services import historial_del_servicio
 from campo.services import salud_seguimiento
 from campo.services import seguimiento_campo as seguimiento
+from campo.services import telemetria
 from campo.services.telemetria import (
     TANDAS,
     SinServicioParaPing,
@@ -516,6 +517,39 @@ class MaterialesDeOrdenView(APIView):
         return Response(
             materiales_de_orden(orden, incluir_custodia=incluir)
         )
+
+
+class MedirSenalView(APIView):
+    """Volver a medir la señal optica del equipo, desde el terreno.
+
+    LA QUE TRAE LA FICHA ES DE CUANDO SE ARMO LA ORDEN. Si eso fue a las 08:10 y
+    el tecnico llego a las 14:00, esa lectura tiene seis horas -- y justo despues
+    de limpiar un conector o cambiar una roseta, lo unico que contesta «¿quedo
+    bien?» es volver a medir.
+
+    NO PISA LA LECTURA CONGELADA. `orden.contexto` es el registro de como estaba
+    el servicio ANTES de la visita, que es lo que permite decir despues si la
+    visita sirvio. Esta ruta devuelve una lectura nueva con SU hora; quien la
+    muestra la pone al lado de la vieja.
+
+    TRES RESPUESTAS, igual que el ping:
+      200 ok=true    se midio -- con los niveles y la hora
+      200 ok=false   no se pudo medir, con el motivo
+      409            la orden no tiene serial: no hay a que equipo preguntarle
+
+    «No se pudo medir» y «se midio y esta mal» son cosas distintas, y esa
+    diferencia es el punto entero: la primera se reintenta, la segunda es un dato
+    sobre el equipo del cliente.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        try:
+            return Response(telemetria.medir_senal(orden))
+        except telemetria.SinEquipoParaMedir as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
 
 
 class HistorialDelServicioView(APIView):

@@ -470,6 +470,12 @@ void main() {
       await montar(tester, ocultarSiVacio: true, alAbrirOrden: abiertas.add);
 
       await tester.tap(find.text('Te devolvieron la OT #9401'));
+      // DOS VECES, y no es por las dudas. `esperarLaBase` da tres vueltas de
+      // 40 ms de tiempo REAL; el toque dispara dos lecturas encadenadas --marcar
+      // leída y volver a traer la lista-- y con la suite completa corriendo en
+      // paralelo ese presupuesto se queda corto. Medido: pasa sola y parpadeó
+      // una vez en la corrida entera.
+      await esperarLaBase(tester);
       await esperarLaBase(tester);
 
       expect(abiertas, <String>[ordenA]);

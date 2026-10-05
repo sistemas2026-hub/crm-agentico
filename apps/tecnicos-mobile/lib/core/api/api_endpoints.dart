@@ -87,6 +87,13 @@ class ApiEndpoints {
       '$baseUrl/api/campo/trabajos/$id/datos/';
   static String trabajoProbarConexion(String id) =>
       '$baseUrl/api/campo/trabajos/$id/probar-conexion/';
+
+  /// Volver a medir la señal optica AHORA.
+  ///
+  /// La de la ficha es de cuando se armo la orden. Despues de limpiar un
+  /// conector o cambiar una roseta, esa lectura ya no contesta «¿quedo bien?».
+  static String trabajoMedirSenal(String id) =>
+      '$baseUrl/api/campo/trabajos/$id/medir-senal/';
   static String trabajoEvidencias(String id) =>
       '$baseUrl/api/campo/trabajos/$id/evidencias/';
   static String trabajoCompletar(String id) =>

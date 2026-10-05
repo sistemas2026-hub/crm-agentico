@@ -213,3 +213,112 @@ def _paquetes(resultado) -> list:
             "perdida": str(crudo.get("packet-loss") or ""),
         })
     return salida
+
+
+class SinEquipoParaMedir(Exception):
+    """La orden no tiene serial de ONU: no hay a que equipo preguntarle."""
+
+
+#: Lo que puede salir de una medicion de señal. Fail-closed, por el mismo
+#: motivo que `_CAMPOS_DE_EQUIPO` del motor: lo que no esta nombrado no sale
+#: aunque el proveedor lo agregue. La respuesta de señal hoy no trae datos
+#: personales, y esta lista es lo que impide que eso cambie en silencio.
+CAMPOS_DE_SENAL = (
+    "onu_signal",
+    "onu_signal_1310",
+    "onu_signal_1490",
+    "onu_signal_1490_veredicto",
+    "onu_status",
+)
+
+
+def serial_de(orden) -> str:
+    """
+    El serial de la ONU, sacado de la ficha que se congelo al despachar.
+
+    Mismo criterio que `servicio_de`, y por el mismo motivo: volver a
+    resolverlo ahora podria dar otro equipo --un cliente puede tener mas de
+    uno-- y el tecnico estaria midiendo el que no es sin enterarse.
+    """
+    contexto = orden.contexto or {}
+    return str(contexto.get("sn_onu") or "").strip()
+
+
+def medir_senal(orden, *, timeout: int = 30) -> dict:
+    """
+    Le pide al motor la señal optica del equipo AHORA.
+
+    POR QUE HACE FALTA, SI LA FICHA YA TRAE LA SEÑAL
+    ------------------------------------------------
+    La que trae la ficha es la del momento en que se armo la orden. Si eso fue
+    a las 08:10 y el tecnico llego a las 14:00, esa lectura tiene seis horas --
+    y justo despues de limpiar un conector o cambiar una roseta, lo unico que
+    contesta "¿quedo bien?" es volver a medir.
+
+    NO PISA LA LECTURA CONGELADA, Y ESO NO ES UN OLVIDO
+    ----------------------------------------------------
+    `orden.contexto` es el REGISTRO de lo que se veia cuando se despacho el
+    trabajo, no una cache de la señal. Sobrescribirlo borraria la unica
+    evidencia de como estaba el servicio ANTES de la visita -- que es
+    exactamente lo que permite decir despues si la visita sirvio. Esta funcion
+    devuelve una lectura nueva, con SU hora, y quien la muestre la pone al lado
+    de la vieja.
+
+    SIN SEÑAL SE RECHAZA, NUNCA SE ENCOLA. Igual que el ping: una medicion que
+    se ejecuta cuando el tecnico ya se fue mide un momento que a nadie le
+    importa, y llega con cara de respuesta a lo que se pregunto.
+    """
+    from django.utils import timezone
+
+    serial = serial_de(orden)
+    if not serial:
+        raise SinEquipoParaMedir(
+            "La orden no tiene el serial del equipo del cliente.")
+
+    base, tenant, cabeceras = _motor()
+    try:
+        r = requests.post(
+            f"{base}/interno/herramienta/consultar_senal_ont",
+            params={"tenant": tenant},
+            json={"sn_onu": serial},
+            headers=cabeceras,
+            timeout=timeout,
+        )
+    except Exception as e:                                   # noqa: BLE001
+        return {"ok": False, "motivo": "motor_no_responde",
+                "detalle": type(e).__name__}
+
+    if r.status_code == 403:
+        # La empresa no declaro la herramienta invocable por un servicio. Es
+        # configuracion, no el equipo del cliente -- y se dice asi para que
+        # nadie lo lea como "la ONU no contesta".
+        return {"ok": False, "motivo": "medicion_no_habilitada"}
+    if r.status_code != 200:
+        return {"ok": False, "motivo": "motor_rechazo",
+                "detalle": str(r.status_code)}
+
+    try:
+        resultado = (r.json() or {}).get("resultado")
+    except ValueError:
+        return {"ok": False, "motivo": "respuesta_ilegible"}
+    if not isinstance(resultado, dict) or not resultado:
+        return {"ok": False, "motivo": "respuesta_vacia"}
+
+    lectura = {
+        c: resultado[c]
+        for c in CAMPOS_DE_SENAL
+        if resultado.get(c) not in (None, "")
+    }
+    if not lectura:
+        # Contesto y no trajo ni un nivel. No se inventa un cero: eso seria
+        # afirmar que la señal esta en el piso, y lo que pasa es que no se sabe.
+        return {"ok": False, "motivo": "sin_lectura"}
+
+    return {
+        "ok": True,
+        # La hora es parte de la medicion, no un adorno: sin ella, en cinco
+        # minutos vuelve a ser una lectura vieja sin que nadie lo note. Es la
+        # misma leccion que dejo escrita `depurar_contexto`.
+        "medido_en": timezone.now().isoformat(),
+        "lectura": lectura,
+    }

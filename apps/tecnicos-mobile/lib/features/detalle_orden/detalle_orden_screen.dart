@@ -166,6 +166,14 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
 
   /// Las visitas anteriores al mismo servicio. `null` mientras no se bajó.
   Map<String, dynamic>? _historial;
+
+  /// La señal medida AHORA, si el técnico la pidió. `null` = no la pidió.
+  ///
+  /// No reemplaza a la de la ficha: ésa es el registro de cómo estaba el
+  /// servicio **antes** de la visita, y es lo que permite decir después si la
+  /// visita sirvió. Las dos conviven en pantalla, cada una con su hora.
+  MedicionDeSenal? _senalDeAhora;
+  bool _midiendoSenal = false;
   bool _cargandoSeguimiento = true;
   bool _seguimientoActualizado = true;
   int _reportesSinSubir = 0;
@@ -1886,8 +1894,105 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
           textoDelRangoOptico,
           style: AppTypography.etiquetaChica.copyWith(color: AppColors.outline),
         ),
+        // VOLVER A MEDIR. Lo de arriba es de cuando se armo la orden; si eso
+        // fue a las 08:10 y el tecnico llego a las 14:00, tiene seis horas.
+        // Justo despues de limpiar un conector, lo unico que contesta «¿quedo
+        // bien?» es medir de nuevo.
+        if (widget.acciones.medirSenal != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.sm),
+          _volverAMedir(),
+        ],
       ],
     );
+  }
+
+  Widget _volverAMedir() {
+    final MedicionDeSenal? m = _senalDeAhora;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: double.infinity,
+          height: AppSpacing.objetivoTactil,
+          child: OutlinedButton.icon(
+            onPressed: _midiendoSenal ? null : _medirSenalAhora,
+            icon: _midiendoSenal
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh, size: 18),
+            label: Text(_midiendoSenal ? 'Midiendo…' : 'Volver a medir'),
+          ),
+        ),
+        if (m != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          if (!m.medido)
+            // POR QUE SE DICE EL MOTIVO Y NO «no se pudo»: cada uno se arregla
+            // distinto. Uno se reintenta, otro es configuracion de la empresa y
+            // otro no se arregla nunca. Un mensaje unico los manda a los tres
+            // al mismo lugar equivocado.
+            Text(
+              m.explicacion,
+              style: AppTypography.cuerpoChico.copyWith(color: AppColors.error),
+            )
+          else
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceContainerLow,
+                borderRadius: AppRadius.brCampo,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'AHORA'
+                    '${m.medidoEn == null ? '' : ' · ${_hhmm(m.medidoEn!)}'}',
+                    style: AppTypography.etiquetaChica,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    <String>[
+                      if (m.senal1490 != null)
+                        'Rx ONU ${m.senal1490!.toStringAsFixed(2)} dBm',
+                      if (m.senal1310 != null)
+                        'Rx OLT ${m.senal1310!.toStringAsFixed(2)} dBm',
+                      if (m.estadoOnu.isNotEmpty) m.estadoOnu,
+                    ].join(' · '),
+                    style: AppTypography.cuerpo,
+                  ),
+                  if (m.veredicto.isNotEmpty)
+                    Text(m.veredicto, style: AppTypography.etiquetaChica),
+                ],
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _medirSenalAhora() async {
+    final medir = widget.acciones.medirSenal;
+    if (medir == null) return;
+    setState(() => _midiendoSenal = true);
+    try {
+      final MedicionDeSenal r = await medir(widget.ordenId);
+      if (!mounted) return;
+      setState(() {
+        _senalDeAhora = r;
+        _midiendoSenal = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _senalDeAhora = const MedicionDeSenal.noSePudo('servidor');
+        _midiendoSenal = false;
+      });
+    }
   }
 
   /// Un ping en vivo, que es lo único que la ficha congelada no puede
