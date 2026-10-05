@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 19,
+      version: 20,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -166,6 +166,15 @@ class LocalDatabase {
     // pueda leer sin señal.
     if (oldVersion < 19) {
       await _crearTablaDeNotificaciones(db);
+    }
+
+    // v20: las visitas anteriores al mismo servicio, espejadas.
+    //
+    // Se guarda PORQUE el técnico la necesita justo donde no hay señal: parado
+    // en la puerta, con el cliente diciéndole «ya llamé tres veces». Bajarla
+    // sólo en vivo la volvería inútil en el único momento en que se usa.
+    if (oldVersion < 20) {
+      await _crearTablaDeHistorialDeServicio(db);
     }
 
     // v18: la foto que pertenece a un reporte de la bitacora.
@@ -677,6 +686,24 @@ class LocalDatabase {
     ''');
   }
 
+  /// Las visitas anteriores al mismo servicio, tal como las devolvió el
+  /// servidor.
+  ///
+  /// Se guarda el JSON entero y no columnas: la app no decide nada sobre este
+  /// dato —lo dibuja— y partirlo en columnas obligaría a migrar la base cada vez
+  /// que el servidor agregue un campo al resumen de una visita.
+  static Future<void> _crearTablaDeHistorialDeServicio(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_historial_servicio (
+        orden_id TEXT NOT NULL,
+        org_id TEXT NOT NULL,
+        historial_json TEXT NOT NULL,
+        sincronizado_en INTEGER NOT NULL,
+        PRIMARY KEY (orden_id, org_id)
+      )
+    ''');
+  }
+
   static Future<void> _crearColaDeSeguimiento(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS cola_seguimiento (
@@ -855,6 +882,7 @@ class LocalDatabase {
     await _crearColaDeSeguimiento(db);
     await _crearTablaDeMaterialesDeOrden(db);
     await _crearTablaDeNotificaciones(db);
+    await _crearTablaDeHistorialDeServicio(db);
     await _crearTablaDeJornada(db);
     await _crearTablaDeIncidencias(db);
 
@@ -2077,6 +2105,50 @@ class LocalDatabase {
       'materiales_json': jsonEncode(materiales),
       'sincronizado_en': DateTime.now().millisecondsSinceEpoch,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Guarda las visitas anteriores que trajo el servidor.
+  Future<void> guardarHistorialDeServicio({
+    required String ordenId,
+    required String orgId,
+    required Map<String, dynamic> historial,
+  }) async {
+    final db = await database;
+    await db.insert('local_historial_servicio', <String, Object?>{
+      'orden_id': ordenId,
+      'org_id': orgId,
+      'historial_json': jsonEncode(historial),
+      'sincronizado_en': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// El historial de una orden, o `null` si nunca se trajo.
+  ///
+  /// La misma regla que el material y el seguimiento: `null` es «no se sabe» y
+  /// no «no hubo visitas». Dibujar una lista vacía ahí le diría al técnico que
+  /// es la primera vez que vienen, que es justo la respuesta equivocada frente a
+  /// un cliente que dice que ya llamó tres veces.
+  Future<Map<String, dynamic>?> leerHistorialDeServicio({
+    required String ordenId,
+    required String orgId,
+  }) async {
+    final db = await database;
+    final filas = await db.query(
+      'local_historial_servicio',
+      where: 'orden_id = ? AND org_id = ?',
+      whereArgs: [ordenId, orgId],
+      limit: 1,
+    );
+    if (filas.isEmpty) return null;
+    final Object? crudo = filas.first['historial_json'];
+    if (crudo is! String || crudo.isEmpty) return null;
+    try {
+      final Object? d = jsonDecode(crudo);
+      if (d is! Map) return null;
+      return Map<String, dynamic>.from(d);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// El material de una orden, o `null` si nunca se trajo.

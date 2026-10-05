@@ -60,6 +60,14 @@ class ApiEndpoints {
   static String materialesDeOrden(String ordenId) =>
       '$baseUrl/api/campo/trabajos/$ordenId/materiales/';
 
+  /// Las visitas anteriores al MISMO servicio.
+  ///
+  /// La llamada al NOC mas frecuente del tecnico: el cliente dice «ya llame
+  /// tres veces» y la ficha solo daba el numero de ticket, que sirve para
+  /// buscar el historial EN OTRO LADO.
+  static String historialDeOrden(String ordenId) =>
+      '$baseUrl/api/campo/trabajos/$ordenId/historial/';
+
   /// Destrabar un trabajo detenido.
   ///
   /// El estado al que vuelve lo guardo el bloqueo al abrirse: ni la app ni

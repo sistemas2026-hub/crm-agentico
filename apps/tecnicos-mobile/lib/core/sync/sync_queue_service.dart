@@ -934,6 +934,36 @@ class SyncQueueService {
     }
   }
 
+  /// Trae las visitas anteriores al mismo servicio y las guarda como espejo.
+  ///
+  /// POR QUE SE GUARDA Y NO SE PIDE EN VIVO
+  /// --------------------------------------
+  /// Se necesita justo donde no hay senal: parado en la puerta, con el cliente
+  /// diciendo «ya llame tres veces». Pedirla solo en vivo la volveria inutil en
+  /// el unico momento en que se usa.
+  Future<bool> descargarHistorialDeOrden({
+    required String ordenId,
+    required String orgId,
+  }) async {
+    try {
+      final respuesta = await _apiClient.get(
+        ApiEndpoints.historialDeOrden(ordenId),
+      );
+      final datos = respuesta.data;
+      if (datos is! Map) return false;
+      await _localDb.guardarHistorialDeServicio(
+        ordenId: ordenId,
+        orgId: orgId,
+        historial: Map<String, dynamic>.from(datos),
+      );
+      return true;
+    } catch (_) {
+      // Sin senal se queda con lo ultimo que bajo. No se encola: un historial
+      // que llega tres horas tarde ya no le sirve a quien estaba en la puerta.
+      return false;
+    }
+  }
+
   /// Trae el seguimiento de UNA orden y lo guarda como espejo.
   ///
   /// POR QUE NO SE DESCARGA EN `procesarCola`

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/acciones/salir_de_la_app.dart';
+import 'visitas_anteriores.dart';
 import '../../core/estado/ordenes_jornada.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
@@ -69,6 +70,7 @@ class DetalleOrdenScreen extends StatefulWidget {
     this.resumenInicial,
     this.abrirEjecucion,
     this.cargarSeguimiento,
+    this.cargarHistorial,
     this.encolarReporte,
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
     this.salir = const SalirDeLaApp(),
@@ -105,6 +107,10 @@ class DetalleOrdenScreen extends StatefulWidget {
   /// descargo en este telefono, que no es lo mismo que no tener reportes.
   final Future<(Map<String, dynamic>?, bool)> Function(String ordenId)?
   cargarSeguimiento;
+
+  /// Quién trae las visitas anteriores. Se inyecta en las pruebas para poder
+  /// dibujar los tres estados sin montar base ni red.
+  final Future<Map<String, dynamic>?> Function(String ordenId)? cargarHistorial;
 
   /// Donde va un reporte que el tecnico acaba de escribir.
   ///
@@ -157,6 +163,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   // distingue "cargando" de "nunca se descargo", porque son dos cosas distintas
   // y la segunda hay que decirla.
   Map<String, dynamic>? _seguimiento;
+
+  /// Las visitas anteriores al mismo servicio. `null` mientras no se bajó.
+  Map<String, dynamic>? _historial;
   bool _cargandoSeguimiento = true;
   bool _seguimientoActualizado = true;
   int _reportesSinSubir = 0;
@@ -179,6 +188,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       if (mounted) setState(() => _resumen = resumen);
     }, onError: (Object _) {});
     _traerSeguimiento();
+    _traerHistorial();
     _traerMateriales();
   }
 
@@ -245,6 +255,41 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         _seguimientoActualizado = false;
       });
     }
+  }
+
+  /// Trae las visitas anteriores al mismo servicio.
+  ///
+  /// Mismo criterio que el seguimiento: se pide al abrir ESTA orden y no en la
+  /// sincronizacion general. Y lo que ya estaba guardado se conserva si no se
+  /// pudo bajar: sin señal el historial viejo sigue siendo mas util que nada,
+  /// que es justo la situacion en que se usa.
+  Future<void> _traerHistorial() async {
+    final cargar = widget.cargarHistorial ?? _historialPorDefecto;
+    try {
+      final Map<String, dynamic>? datos = await cargar(widget.ordenId);
+      if (!mounted) return;
+      setState(() => _historial = datos);
+    } catch (_) {
+      // No puede dejar la ficha a medias: el bloque dice lo que sabe.
+    }
+  }
+
+  Future<Map<String, dynamic>?> _historialPorDefecto(String ordenId) async {
+    final String? orgId = await SecureStorageService().getOrgId();
+    if (orgId == null) return null;
+
+    final LocalDatabase base = LocalDatabase();
+    final Map<String, dynamic>? local = await base.leerHistorialDeServicio(
+      ordenId: ordenId,
+      orgId: orgId,
+    );
+    final bool actualizo = await SyncQueueService().descargarHistorialDeOrden(
+      ordenId: ordenId,
+      orgId: orgId,
+    );
+    if (!actualizo) return local;
+    return await base.leerHistorialDeServicio(ordenId: ordenId, orgId: orgId) ??
+        local;
   }
 
   /// Guarda lo que el tecnico escribio y lo manda a subir.
@@ -569,6 +614,18 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                         // reintentando. Prometer un reintento donde no lo hay
                         // deja a alguien esperando en la calle.
                         _porQueNoHayDatosDelEquipo(trabajo),
+                      // LO QUE YA SE HIZO EN ESTE SERVICIO
+                      // ----------------------------------
+                      // Va en el grupo de diagnóstico y arriba del triage: el
+                      // técnico lo lee ANTES de decidir qué hacer. «Ya le
+                      // cambiaron la ONT dos veces» cambia el plan de la visita,
+                      // no la confirma.
+                      //
+                      // En un trabajo de planta no se dibuja: no hay servicio
+                      // del que tener historia, y un bloque que dice «no se
+                      // puede saber» en cada poste enseña a no mirarlo.
+                      if (!trabajo.esTrabajoDePlanta)
+                        VisitasAnteriores(historial: _historial),
                       if (trabajo.hayEvaluacionDexter)
                         _loQueDexterAveriguo(trabajo),
                       if (trabajo.diagnosticoPrevio.isNotEmpty ||

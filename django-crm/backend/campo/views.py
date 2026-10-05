@@ -31,6 +31,7 @@ from campo.serializers import (
 from campo.services.idempotencia import manejar_idempotencia
 from campo.services.materiales_de_orden import materiales_de_orden
 from campo.services import bloqueos
+from campo.services import historial_del_servicio
 from campo.services import salud_seguimiento
 from campo.services import seguimiento_campo as seguimiento
 from campo.services.telemetria import (
@@ -514,6 +515,45 @@ class MaterialesDeOrdenView(APIView):
         )
         return Response(
             materiales_de_orden(orden, incluir_custodia=incluir)
+        )
+
+
+class HistorialDelServicioView(APIView):
+    """Las ultimas visitas al MISMO servicio, para quien esta en la puerta.
+
+    POR QUE EXISTE
+    --------------
+    El cliente dice «ya llame tres veces» y el tecnico no tiene con que
+    contestar: la ficha le da el numero de ticket y nada mas. Es la llamada al
+    NOC mas frecuente de la lista que armo el tecnico, y el dato ya estaba en la
+    base -- son ordenes del mismo abonado, y nadie se las mostraba.
+
+    SE AGRUPA POR EL IDENTIFICADOR DEL ABONADO, NUNCA POR NOMBRE
+    -----------------------------------------------------------
+    Agrupar por nombre o direccion devolveria visitas de otra persona, y el
+    tecnico decidiria sobre eso: le diria al cliente «ya le cambiamos la ONT dos
+    veces» cuando fue al vecino. Sin identificador se devuelve lista vacia y se
+    dice por que, en vez de adivinar.
+
+    EL AISLAMIENTO LO DA `_obtener_orden_o_404`, igual que el resto: una orden de
+    otra empresa responde 404 y un tecnico no asignado tampoco la ve. Y las
+    hermanas se filtran por `org` ademas del servicio -- dos empresas pueden usar
+    el mismo identificador de abonado, porque cada una lo toma de SU WispHub.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        servicio = historial_del_servicio.id_de_servicio(orden)
+        return Response(
+            {
+                # `hay_servicio: false` es distinto de `visitas: []`. El primero
+                # dice «no se puede saber»; el segundo, «es la primera vez». La
+                # app los dibuja distinto porque el tecnico actua distinto.
+                "hay_servicio": bool(servicio),
+                "visitas": historial_del_servicio.visitas_anteriores(orden),
+            }
         )
 
 
