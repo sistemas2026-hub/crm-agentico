@@ -237,7 +237,10 @@ def test_c_una_version_nueva_no_invalida_la_foto_de_un_reporte_viejo(
     v2 = WorkTypeVersion.objects.create(
         work_type=version.work_type,
         version=2,
-        schema_version=2,
+        # `version=2` es la REVISION; el contrato sigue siendo el 1. Decia
+        # `schema_version=2` y era la misma confusion que bloqueo una orden de
+        # verdad: un contrato 2 no existe, y la app lo rechaza.
+        schema_version=1,
         estado=WorkTypeVersion.PUBLICADA,
         esquema=ESQUEMA_V2,
         schema_hash="hash-evid-v2",

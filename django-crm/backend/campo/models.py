@@ -82,10 +82,19 @@ class WorkTypeVersion(BaseModel):
     work_type = models.ForeignKey(
         WorkType, on_delete=models.CASCADE, related_name="versions"
     )
+    #: Que REVISION de esta plantilla es. Sube cada vez que alguien publica un
+    #: cambio: v1, v2, v3... No tiene techo y no le importa a la aplicacion.
     version = models.PositiveIntegerField(default=1)
+
+    #: Que CONTRATO DE INTERFAZ habla el esquema. Es otra cosa, y confundirlas
+    #: cuesta caro -- ver `CONTRATOS_CONOCIDOS`.
     schema_version = models.PositiveIntegerField(
         default=1,
-        help_text="Versión del contrato de interfaz que entiende la aplicación móvil",
+        help_text=(
+            "Version del CONTRATO que entiende la aplicacion movil. NO es el "
+            "numero de revision de la plantilla: hoy el unico contrato que "
+            "existe es el 1, y una plantilla nueva sigue hablando el 1."
+        ),
     )
     estado = models.CharField(max_length=20, choices=ESTADOS, default=BORRADOR)
     esquema = models.JSONField(
@@ -96,6 +105,36 @@ class WorkTypeVersion(BaseModel):
     publicada_en = models.DateTimeField(null=True, blank=True)
 
     objects = WorkTypeVersionQuerySet.as_manager()
+
+    #: Los contratos de interfaz que esta plataforma sabe servir HOY.
+    #:
+    #: POR QUE ESTA GUARDA EXISTE (05/10/2026)
+    #: ---------------------------------------
+    #: `version` y `schema_version` son dos numeros distintos y se confunden
+    #: solos. Paso: alguien publico la **revision 6** de `ftth_correctivo` y le
+    #: puso `schema_version = 6`.
+    #:
+    #: Las consecuencias no se parecen a un numero mal:
+    #:
+    #: 1. La aplicacion de campo BLOQUEA toda orden con un contrato que no sabe
+    #:    ejecutar --fail-closed, y esta bien que lo haga--. El tecnico abre la
+    #:    orden y lee «necesita una version mas nueva de la aplicacion». No hay
+    #:    version mas nueva: el contrato 6 no existe en ningun lado.
+    #:
+    #: 2. Peor: `clean()` solo validaba la plantilla cuando `schema_version == 1`.
+    #:    Esa puerta, pensada para un contrato futuro, era tambien la unica forma
+    #:    de SALTEARSE la validacion. Medido en el caso real: esa plantilla
+    #:    habria pasado igual, asi que no entro nada malo -- esta vez.
+    #:
+    #: O sea que un numero mal escrito al publicar un cambio de formulario deja
+    #: a la cuadrilla sin poder trabajar, y de paso apaga la unica guarda que
+    #: habia. Por eso no se confia en que nadie se equivoque: se rechaza.
+    #:
+    #: El dia que de verdad exista un contrato 2 --cuando el vocabulario del
+    #: esquema cambie y la app aprenda a leerlo-- se agrega aca, junto con la
+    #: version de la app que lo entiende. Agregarlo ANTES es publicar para
+    #: telefonos que no existen.
+    CONTRATOS_CONOCIDOS = frozenset({1})
 
     class Meta:
         db_table = "campo_work_type_version"
@@ -113,6 +152,25 @@ class WorkTypeVersion(BaseModel):
     def clean(self):
         super().clean()
 
+        # EL CONTRATO TIENE QUE SER UNO QUE EXISTA.
+        #
+        # Se comprueba aca y no solo en un formulario porque `save()` llama a
+        # `clean()`, asi que esto cubre tambien `objects.create()` -- que es
+        # justo por donde entro la fila que rompio la OT #1843.
+        #
+        # El mensaje nombra la confusion, no el numero: quien se equivoca esta
+        # publicando la revision N de una plantilla, y el error tiene que
+        # decirle que ese no es el campo.
+        if self.schema_version not in self.CONTRATOS_CONOCIDOS:
+            conocidos = ", ".join(str(c) for c in sorted(self.CONTRATOS_CONOCIDOS))
+            raise ValidationError(
+                f"schema_version={self.schema_version} no existe. La aplicacion "
+                f"de campo solo sabe ejecutar el contrato {conocidos}, y una "
+                "orden con otro queda BLOQUEADA en el telefono del tecnico. "
+                "Si lo que subio es la revision de la plantilla, ese campo es "
+                "`version`, no `schema_version`."
+            )
+
         # Una plantilla se vuelve inmutable al publicarse, y a partir de ahi
         # viaja a los telefonos. Si su vocabulario no es el que la aplicacion
         # sabe ejecutar, el error no aparece aca: aparece en la calle, cuando
@@ -121,7 +179,12 @@ class WorkTypeVersion(BaseModel):
         # `validar_esquema_plantilla` existia desde el principio y no la
         # llamaba nadie (hallazgo del inventario del 22/09/2026). Se llama al
         # publicar, no en borrador: un borrador puede estar a medias.
-        if self.estado == self.PUBLICADA and self.schema_version == 1:
+        if self.estado == self.PUBLICADA:
+            # SIN el `and schema_version == 1` que tenia antes. Esa condicion
+            # convertia la puerta del contrato futuro en un bypass de la unica
+            # validacion que hay: poner un numero cualquiera saltaba las dos
+            # cosas. Ahora `save()` solo deja publicar contratos conocidos, asi
+            # que esto corre siempre.
             from campo.services.validador import validar_esquema_plantilla
 
             validar_esquema_plantilla(self.esquema or {})
