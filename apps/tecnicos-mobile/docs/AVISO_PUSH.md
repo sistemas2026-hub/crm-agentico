@@ -183,6 +183,58 @@ claves equivocadas — es lo que miden `a1` y `a2` de
 
 ---
 
+## 6.bis · Probarlo sin teléfono, de punta a punta
+
+Las cinco comprobaciones de arriba necesitan un teléfono. Hay una que no, y es la
+que contesta *«¿esto corre de verdad en la topología real, o solo en las
+pruebas?»* — la pregunta que `CLAUDE.md` §6 llama **código construido no es código
+que corre**.
+
+La idea: registrar un teléfono con un token deliberadamente falso y disparar el
+aviso. FCM contesta de verdad, el código interpreta esa respuesta de verdad, y el
+resultado correcto es que **el aviso no llegue y el teléfono quede dado de baja**.
+Eso recorre la cadena entera —búsqueda por empresa, credencial, llamada HTTPS a
+Google, lectura del error real, baja del token— sin inventar nada.
+
+```python
+from common.models import Profile
+from campo.avisos import DispositivoDeTecnico
+from campo.services import avisos
+
+perfil = Profile.objects.filter(is_active=True).select_related('org').first()
+TOKEN = 'TOKEN-DE-HUMO-QUE-NO-EXISTE-EN-NINGUN-TELEFONO'
+d = DispositivoDeTecnico.objects.create(
+    org=perfil.org, profile=perfil, token=TOKEN, activo=True)
+
+llego = avisos._notificar_a_telefonos(
+    org=perfil.org, perfiles=[perfil],
+    titulo='OT #9401 devuelta', texto='Prueba de puesta en marcha',
+    enlace='/ot/00000000-0000-0000-0000-000000000000',
+    avisos_por_perfil={perfil.id: 'aviso-de-humo'},
+    contenido={'vuelta': 2, 'rehacer': [], 'orden_numero': 9401})
+
+d.refresh_from_db()
+assert llego is False          # el token es falso
+assert d.activo is False       # FCM dijo que no existe, y se dio de baja
+d.delete()
+```
+
+Corrido el 04/10/2026 contra `dexter-app-d4b93`: **las dos afirmaciones se
+cumplen**. Si en cambio `d.activo` quedara en `True`, hay que mirar el log: o no
+hay credencial (`push_sin_proveedor`), o FCM contestó otra cosa (`fcm_rechazado`
+con su código) — y entonces el problema no es el teléfono.
+
+Montar el secreto en un contenedor de laboratorio se hace **por ruta**, nunca
+pegando el JSON: así su contenido no pasa por una consola ni por una
+transcripción.
+
+```
+-v C:/secretos/fcm.json:/etc/secrets/fcm.json:ro
+-e FCM_CUENTA_DE_SERVICIO=/etc/secrets/fcm.json
+```
+
+---
+
 ## 7 · Un token que deja de servir
 
 Un token muere al reinstalar la app, al limpiar datos o por decisión de Google.
