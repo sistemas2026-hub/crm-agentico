@@ -128,6 +128,7 @@ class KitDeJornada {
         categoria: (fila['categoria'] ?? '').toString(),
         nombre: (fila['nombre'] ?? codigo).toString(),
         detalle: codigo,
+        codigo: codigo,
         clase: _clase((fila['clase'] ?? '').toString()),
         recibidos: _numero(fila['recibido']).round(),
         usados: (consumidoServidor + pendientePropio).round(),

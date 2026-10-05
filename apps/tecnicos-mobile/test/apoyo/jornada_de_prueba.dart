@@ -85,6 +85,7 @@ class JornadaDePrueba {
       'local_jornada',
       'cola_incidencias',
       'cola_evidencias',
+      'cola_pedidos_material',
     ]) {
       try {
         await base.delete(t);

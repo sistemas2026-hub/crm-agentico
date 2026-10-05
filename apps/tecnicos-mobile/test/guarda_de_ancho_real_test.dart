@@ -11,6 +11,10 @@ import 'package:campo/features/inicio/inicio_screen.dart';
 import 'package:campo/features/trabajo/trabajo_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:campo/features/materiales/kit_de_jornada.dart';
+import 'package:campo/features/materiales/material_en_custodia.dart';
+import 'package:campo/features/materiales/materiales_screen.dart';
+import 'package:campo/features/materiales/pedir_a_bodega.dart';
 
 /// Que agregar algo no rompa lo que ya estaba.
 ///
@@ -228,6 +232,110 @@ void main() {
             ),
           ),
           escalaDeLetra: letraGrande,
+        );
+      });
+
+      testWidgets('La hoja para pedir a bodega entra', (WidgetTester t) async {
+        // Con el nombre de material MAS LARGO del catalogo real y una unidad
+        // escrita entera: es la linea que el dropdown tiene que meter en una
+        // sola fila junto al saldo.
+        await aEsteAncho(
+          t,
+          ancho,
+          () => Scaffold(
+            body: HojaDePedido(
+              materiales: const <MaterialEnCustodia>[
+                MaterialEnCustodia(
+                  categoria: 'Conectividad',
+                  nombre: 'Conector SC/APC rapido verde preensamblado',
+                  detalle: 'CON-SC-APC-V',
+                  codigo: 'CON-SC-APC-V',
+                  clase: ClaseMaterial.consumible,
+                  recibidos: 120,
+                  usados: 118,
+                  unidad: 'unidades',
+                ),
+              ],
+            ),
+          ),
+        );
+      });
+
+      testWidgets('La hoja entra tambien con la letra grande',
+          (WidgetTester t) async {
+        await aEsteAncho(
+          t,
+          ancho,
+          () => Scaffold(
+            body: HojaDePedido(
+              materiales: const <MaterialEnCustodia>[
+                MaterialEnCustodia(
+                  categoria: 'Conectividad',
+                  nombre: 'Cable drop fibra optica 1 hilo autosoportado',
+                  detalle: 'DROP-1H',
+                  codigo: 'DROP-1H',
+                  clase: ClaseMaterial.bobina,
+                  recibidos: 1000,
+                  usados: 957,
+                  unidad: 'm',
+                ),
+              ],
+            ),
+          ),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
+      testWidgets('Los pedidos en curso entran en la pantalla de materiales',
+          (WidgetTester t) async {
+        // El kit y los pedidos se inyectan: esta guarda corre con el reloj
+        // falso de la prueba y no puede esperar a SQLite.
+        //
+        // ESTE CASO ENCONTRO DOS DESBORDES QUE YA ESTABAN, y no los puso el
+        // pedido: el titulo «Materiales en Custodia» con su conteo desbordaba
+        // 153 px a 360, y el boton «Preparar Devolucion al Deposito» 190 px.
+        // La guarda no cubria esta pantalla, asi que nadie los habia medido --
+        // el boton que cierra la jornada se salia de un Galaxy A sin que nada
+        // avisara.
+        await aEsteAncho(
+          t,
+          ancho,
+          () => MaterialesScreen(
+            tecnico: 'Carlos Gomez',
+            mostrarDatosFuturos: false,
+            kit: const KitDeJornada(
+              materiales: <MaterialEnCustodia>[
+                MaterialEnCustodia(
+                  categoria: 'Conectividad',
+                  nombre: 'Conector SC/APC rapido verde preensamblado',
+                  detalle: 'CON-SC-APC-V',
+                  codigo: 'CON-SC-APC-V',
+                  clase: ClaseMaterial.consumible,
+                  recibidos: 120,
+                  usados: 118,
+                  unidad: 'unidades',
+                ),
+              ],
+              acta: 'Acta #K-2026-311',
+              sinSubir: 0,
+              conNovedad: <MovimientoConNovedad>[],
+            ),
+            pedidos: const <PedidoEnCola>[
+              PedidoEnCola(
+                id: 'p1',
+                material: 'Conector SC/APC rapido verde preensamblado',
+                cantidad: '20',
+                estado: 'pendiente',
+              ),
+              PedidoEnCola(
+                id: 'p2',
+                material: 'Cable drop fibra optica 1 hilo autosoportado',
+                cantidad: '250',
+                estado: 'fallido',
+                errorMensaje: 'Ese material no existe en esta empresa.',
+              ),
+            ],
+          ),
         );
       });
 

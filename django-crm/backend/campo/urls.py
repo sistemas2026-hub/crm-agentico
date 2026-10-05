@@ -9,6 +9,7 @@ from campo import (
     inventario_operacion_views,
     inventario_views,
     materiales_views,
+    pedidos_views,
     views,
 )
 
@@ -51,6 +52,9 @@ urlpatterns = [
     path("inventario/devoluciones/", inventario_views.DevolucionesView.as_view(), name="inv_devoluciones"),
     path("inventario/serie/<str:serie>/", inventario_views.HistoriaDeSerieView.as_view(), name="inv_serie"),
     # Fase 2: reservas, traslados y conteo fisico.
+    # Pedir material a bodega desde el terreno. NO es un movimiento: un
+    # movimiento es un hecho que ya ocurrio, y esto todavia no paso.
+    path("inventario/pedidos/", pedidos_views.PedidosDeMaterialView.as_view(), name="inv_pedidos"),
     path("inventario/libre/", inventario_operacion_views.LibreView.as_view(), name="inv_libre"),
     path("inventario/reservas/", inventario_operacion_views.ReservasView.as_view(), name="inv_reservas"),
     path("inventario/reservas/<uid:pk>/liberar/", inventario_operacion_views.LiberarReservaView.as_view(), name="inv_reserva_liberar"),

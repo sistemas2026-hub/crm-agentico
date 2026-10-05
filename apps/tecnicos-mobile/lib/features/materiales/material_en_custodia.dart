@@ -31,6 +31,7 @@ class MaterialEnCustodia {
     required this.categoria,
     required this.nombre,
     required this.detalle,
+    this.codigo = '',
     required this.clase,
     required this.recibidos,
     required this.usados,
@@ -44,6 +45,13 @@ class MaterialEnCustodia {
   final String categoria;
   final String nombre;
   final String detalle;
+
+  /// El código del catálogo. ES CON LO QUE SE LE HABLA AL SERVIDOR.
+  ///
+  /// El kit no trae el UUID del material: trae el código, y es lo que ya manda
+  /// la cola de movimientos. Vacío sólo en el catálogo de ejemplo, que no pide
+  /// nada a nadie.
+  final String codigo;
   final ClaseMaterial clase;
   final int recibidos;
   final int usados;

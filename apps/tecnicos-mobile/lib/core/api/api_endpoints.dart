@@ -28,6 +28,13 @@ class ApiEndpoints {
   static String get incidenciasMaterial =>
       '$baseUrl/api/campo/materiales/incidencias/';
 
+  /// Lo que el tecnico le pide a bodega desde el terreno.
+  ///
+  /// `GET` devuelve los SUYOS --esta pantalla contesta «¿pedi esto o no?»--.
+  /// `POST` crea uno, idempotente por la clave que genera el telefono.
+  static String get pedidosMaterial =>
+      '$baseUrl/api/campo/inventario/pedidos/';
+
   /// El seguimiento de una intervencion: la linea de tiempo y los formularios
   /// que ESE tipo de trabajo declara para cada momento.
   ///

@@ -10,6 +10,7 @@ import '../../core/storage/local_database.dart';
 import 'devolucion_screen.dart';
 import 'kit_de_jornada.dart';
 import 'material_en_custodia.dart';
+import 'pedir_a_bodega.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_empty_state.dart';
 
@@ -36,12 +37,16 @@ class MaterialesScreen extends StatefulWidget {
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
     this.tecnico,
     this.kit,
+    this.pedidos,
   });
 
   final bool mostrarDatosFuturos;
 
   /// El kit ya leido. Se inyecta en las pruebas; en la aplicacion se lee solo.
   final KitDeJornada? kit;
+
+  /// Los pedidos ya leidos. Igual que el kit: se inyectan en las pruebas.
+  final List<PedidoEnCola>? pedidos;
 
   /// Quién tiene el kit a cargo. Es la sesión real: el kit es de ejemplo, pero
   /// el nombre de quien firmaría la recepción no se inventa.
@@ -57,6 +62,9 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
   StreamSubscription<LocalDatabaseChangeEvent>? _suscripcion;
   KitDeJornada? _kit;
   bool _cargando = true;
+
+  /// Lo que ya le pidió a bodega y todavía no llegó.
+  List<PedidoEnCola> _pedidos = const <PedidoEnCola>[];
 
   @override
   void dispose() {
@@ -78,26 +86,48 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
     _suscripcion = LocalDatabase.onDataChanged.listen((evento) {
       if (!mounted) return;
       if (evento.tabla == 'local_kit' ||
-          evento.tabla == 'cola_movimientos_material') {
+          evento.tabla == 'cola_movimientos_material' ||
+          evento.tabla == 'cola_pedidos_material') {
         _cargar();
       }
     });
   }
 
   Future<void> _cargar() async {
+    // UN KIT INYECTADO SIGNIFICA «esta pantalla no lee la base».
+    //
+    // Y no es una comodidad de las pruebas: con el kit puesto desde afuera, ir
+    // a buscar los pedidos a SQLite deja la pantalla esperando un futuro que,
+    // bajo el reloj falso de una prueba de widget, nunca resuelve — la pantalla
+    // se queda en «cargando» y no dibuja nada. Pasó: rompió 18 casos de golpe,
+    // y ninguno decía «no hay base», decían «no encuentro ese texto».
     if (widget.kit != null) {
       setState(() {
         _kit = widget.kit;
+        _pedidos = widget.pedidos ?? const <PedidoEnCola>[];
         _cargando = false;
       });
       return;
     }
+    final List<PedidoEnCola> pedidos =
+        widget.pedidos ?? await leerPedidosDeMaterial();
     final kit = await KitDeJornada.leer();
     if (!mounted) return;
     setState(() {
       _kit = kit;
+      _pedidos = pedidos;
       _cargando = false;
     });
+  }
+
+  Future<void> _pedirABodega(List<MaterialEnCustodia> materiales) async {
+    final bool quedo = await abrirHojaDePedido(
+      context,
+      materiales: materiales,
+    );
+    if (!mounted || !quedo) return;
+    _decir('Pedido guardado. Sube cuando haya señal.');
+    await _cargar();
   }
 
   @override
@@ -163,13 +193,28 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
           ],
           const SizedBox(height: AppSpacing.md),
           _barraDeAcciones(todos),
+          if (_pedidos.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.md),
+            _pedidosEnCurso(_pedidos),
+          ],
           const SizedBox(height: AppSpacing.md),
           _filtros(todos),
           const SizedBox(height: AppSpacing.md),
           Row(
             children: <Widget>[
-              Text('Materiales en Custodia', style: AppTypography.tituloChico),
-              const Spacer(),
+              // `Expanded` y no un `Spacer` suelto: a 360 px —el Galaxy A que
+              // una empresa le compra a una cuadrilla— los dos textos juntos
+              // desbordaban 153 px, medido por la guarda de ancho real. El
+              // título es el que cede, porque el que importa de los dos es el
+              // conteo.
+              Expanded(
+                child: Text(
+                  'Materiales en Custodia',
+                  style: AppTypography.tituloChico,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xs),
               // Cuántos renglones hay, que es lo que sí se sabe. La fecha de
               // la jornada no viaja en el kit.
               Text(
@@ -638,11 +683,17 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
-        const Expanded(
+        Expanded(
+          // ESTE BOTON REEMPLAZA A «Transferir», que no hacia nada: estaba
+          // dibujado sin `alTocar` desde que la pantalla se replico del diseño.
+          // Un boton que no responde enseña a no confiar en la barra entera, y
+          // pedir material es lo que el tecnico necesita desde ahi --hasta hoy
+          // sacaba el otro telefono y escribia al grupo--.
           child: _BotonHerramienta(
-            icono: Icons.sync_alt,
-            texto: 'Transferir',
+            icono: Icons.local_shipping,
+            texto: 'Pedir',
             colorIcono: AppColors.secondary,
+            alTocar: () => _pedirABodega(materiales),
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
@@ -654,6 +705,65 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Lo que ya le pidió a bodega.
+  ///
+  /// SE MUESTRA PORQUE SIN ESTO NO SE SABE SI SE PIDIO. Un pedido que se encola
+  /// sin señal no produce ninguna señal visible, y el técnico vuelve a pedir lo
+  /// mismo —o peor: deja de pedir creyendo que ya pidió—. La idempotencia evita
+  /// el duplicado del lado del servidor; esta tira evita la duda del lado de la
+  /// persona, que es otro problema.
+  Widget _pedidosEnCurso(List<PedidoEnCola> pedidos) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.fondoHundido,
+        borderRadius: BorderRadius.circular(AppRadius.tarjeta),
+        border: Border.all(color: AppColors.borde),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(
+                Icons.local_shipping_outlined,
+                size: 16,
+                color: AppColors.textoSecundario,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Text('Pedidos a bodega', style: AppTypography.etiquetaChica),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          for (final PedidoEnCola p in pedidos)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      '${p.cantidad} · ${p.material}',
+                      style: AppTypography.cuerpoChico,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    p.comoVa,
+                    style: AppTypography.etiquetaChica.copyWith(
+                      color: p.esProblema
+                          ? AppColors.error
+                          : AppColors.textoSecundario,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -789,11 +899,20 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
               children: <Widget>[
                 const Icon(Icons.keyboard_return, size: 18, color: AppColors.primary),
                 const SizedBox(width: AppSpacing.sm),
-                Text(
-                  'Preparar Devolución al Depósito',
-                  style: AppTypography.etiquetaGrande.copyWith(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w700,
+                // El texto se achica antes que cortarse: es el botón que cierra
+                // la jornada y «Preparar Devolución al Depós…» no se entiende.
+                // A 360 px desbordaba 190 px, medido por la guarda de ancho
+                // real — el botón salía de la pantalla sin que nada avisara.
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      'Preparar Devolución al Depósito',
+                      style: AppTypography.etiquetaGrande.copyWith(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: AppSpacing.sm),

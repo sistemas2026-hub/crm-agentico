@@ -453,3 +453,65 @@ def _enviar_una(
         verbo="trabajo_devuelto",
         contenido=contenido or {},
     )
+
+
+def avisar_pedido_de_material(pedido) -> None:
+    """Le avisa a bodega que un tecnico esta pidiendo material.
+
+    POR QUE POR LOS MISMOS CANALES Y NO POR UNA BANDEJA NUEVA
+    ---------------------------------------------------------
+    Bodega ya recibe los avisos de esta empresa por donde los configuro --el
+    chat, el correo--. Construirle una pantalla aparte seria pedirle que mire
+    dos lugares, y la que mira menos es siempre la nueva.
+
+    QUE LLEVA, Y QUE NO
+    -------------------
+    El material, cuanto, quien lo pide y para que orden si la hay. **Ningun dato
+    del cliente**: a bodega no le hace falta saber a quien se le instala para
+    sacar veinte conectores de una caja, y este mensaje sale del sistema igual
+    que todos los demas.
+
+    No puede romper el pedido. Si el chat esta caido, el pedido existe igual --y
+    el tecnico lo ve en su lista-- porque el hecho es la fila, no el mensaje.
+    """
+    lineas = [f"📦 {pedido.profile_id and _nombre_de(pedido.profile)} pide material"]
+    lineas.append(f"{_cantidad_legible(pedido.cantidad)} de {pedido.material.nombre}")
+    if pedido.orden_id is not None:
+        lineas.append(f"Para la OT #{pedido.orden.numero}")
+    if pedido.motivo:
+        lineas.append(f"«{pedido.motivo}»")
+
+    _despachar(
+        org=pedido.org,
+        # La clave describe el HECHO: este pedido, una vez. Un reintento de la
+        # cola no vuelve a avisar.
+        clave=f"pedido_material|{pedido.id}",
+        asunto=f"Pedido de material: {pedido.material.nombre}",
+        texto="\n".join(lineas),
+        enlace_a=pedido.orden_id,
+        perfiles=[],
+    )
+
+
+def _nombre_de(profile) -> str:
+    """El nombre de quien pide. Es un COMPAÑERO, no un cliente, y por eso va.
+
+    Bodega tiene que saber a quien entregarle. Sin nombre, el pedido es una
+    cantidad flotando.
+    """
+    try:
+        return (profile.user.name or profile.user.email or "Un técnico").strip()
+    except AttributeError:
+        return "Un técnico"
+
+
+def _cantidad_legible(valor) -> str:
+    """Sin ceros de relleno: «20», no «20.000».
+
+    PostgreSQL devuelve el Decimal con la escala de la columna, y en Colombia el
+    punto separa MILES: «20.000 conectores» se lee como veinte mil.
+    """
+    texto = str(valor)
+    if "." not in texto:
+        return texto
+    return texto.rstrip("0").rstrip(".") or "0"

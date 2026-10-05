@@ -195,6 +195,10 @@ class SyncQueueService {
       // instante antes de volver a bajar.
       await _procesarMovimientosMaterial(orgId, profileId);
       await _procesarIncidencias(orgId, profileId);
+      // 5b-bis. Lo que le PIDIO a bodega. Despues de los movimientos: el saldo
+      // que bodega va a mirar para decidir si despacha tiene que ser el de
+      // ahora, no el de antes de la instalacion que acaba de hacer.
+      await _procesarPedidosDeMaterial(orgId, profileId);
       // 5d. Lo que la plataforma le aviso. Va al final: es lectura, y lo que el
       // tecnico ESCRIBIO siempre tiene prioridad para subir.
       await _procesarNotificaciones(orgId, profileId);
@@ -408,6 +412,78 @@ class SyncQueueService {
             errorMensaje: sanearError(e),
           );
         }
+      }
+    }
+  }
+
+  /// Sube lo que el tecnico le pidio a bodega.
+  ///
+  /// UNO POR UNO y no por lote: un pedido es un hecho suelto y chico, y un lote
+  /// de uno solo no compra nada. Lo que si hace falta es que el reenvio no
+  /// duplique, y de eso se encarga la clave: el `id` de la fila, generado en el
+  /// telefono al encolar. Una clave nueva por intento seria un identificador
+  /// unico, no una clave idempotente.
+  ///
+  /// EL 200 TAMBIEN ES EXITO. El servidor contesta 201 cuando lo creo y 200
+  /// cuando reconocio el reenvio; para la cola los dos cierran el pedido. Si el
+  /// reenvio llegara como error, se reintentaria para siempre.
+  Future<void> _procesarPedidosDeMaterial(
+    String orgId,
+    String profileId,
+  ) async {
+    final pendientes = await _localDb.pedidosPendientes(
+      orgId: orgId,
+      profileId: profileId,
+    );
+    if (pendientes.isEmpty) return;
+
+    for (final pedido in pendientes) {
+      final id = pedido['id'] as String;
+      final intentos = pedido['intentos'] as int? ?? 0;
+      try {
+        await _apiClient.post(
+          ApiEndpoints.pedidosMaterial,
+          data: <String, dynamic>{
+            'idempotency_key': id,
+            'material': pedido['material_id'],
+            'cantidad': pedido['cantidad'],
+            if ((pedido['motivo'] as String?)?.isNotEmpty ?? false)
+              'motivo': pedido['motivo'],
+            if (pedido['orden_id'] != null) 'orden': pedido['orden_id'],
+          },
+        );
+        await _localDb.marcarPedidoEnviado(
+          id: id,
+          orgId: orgId,
+          profileId: profileId,
+        );
+      } catch (e) {
+        final int? codigo = e is DioException ? e.response?.statusCode : null;
+        // 400 y 404 son definitivos: una cantidad que no es numero o un
+        // material que el catalogo no conoce dan el mismo resultado para
+        // siempre. Reintentarlos es ruido, y el pedido queda igual sin
+        // atenderse -- con la diferencia de que asi el tecnico lo VE fallado y
+        // puede volver a pedirlo bien, en vez de creer que esta en camino.
+        final bool definitivo = codigo == 400 || codigo == 404;
+        final retryAfter = e is DioException
+            ? _leerRetryAfter(e.response?.headers.value('retry-after'))
+            : null;
+        await _localDb.registrarFalloPedido(
+          id: id,
+          orgId: orgId,
+          profileId: profileId,
+          errorMensaje: sanearError(e),
+          intentos: intentos,
+          definitivo: definitivo,
+          nextAttemptAt: definitivo
+              ? null
+              : DateTime.now().millisecondsSinceEpoch +
+                    calcularBackoffMs(
+                      intentos,
+                      mutationId: id,
+                      retryAfterSeconds: retryAfter,
+                    ),
+        );
       }
     }
   }

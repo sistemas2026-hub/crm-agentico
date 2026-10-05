@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 21,
+      version: 22,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -166,6 +166,16 @@ class LocalDatabase {
     // pueda leer sin señal.
     if (oldVersion < 19) {
       await _crearTablaDeNotificaciones(db);
+    }
+
+    // v22: los pedidos de material a bodega, encolados.
+    //
+    // Tabla propia y no la cola de movimientos, por la misma razón por la que
+    // el backend tiene un modelo aparte: un movimiento ES UN HECHO QUE YA
+    // OCURRIO en la calle, y un pedido es que todavía no pasó nada. Compartir
+    // la cola le pediría al saldo contar material que nadie entregó.
+    if (oldVersion < 22) {
+      await _crearColaDePedidos(db);
     }
 
     // v21: a quién más llamar si el cliente no está.
@@ -725,6 +735,44 @@ class LocalDatabase {
     ''');
   }
 
+  /// Los pedidos de material que todavía no subieron.
+  ///
+  /// El `id` lo genera el teléfono y viaja como `idempotency_key`: así un
+  /// reenvío sin señal es el MISMO pedido. Una clave nueva por intento sería un
+  /// identificador único, no una clave idempotente — y bodega creería que hacen
+  /// falta cuarenta conectores cuando hacen falta veinte.
+  static Future<void> _crearColaDePedidos(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cola_pedidos_material (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        material_id TEXT NOT NULL,
+        -- El nombre se guarda ACA y no se resuelve del catálogo al dibujar: el
+        -- técnico tiene que poder ver qué pidió aunque el material se haya dado
+        -- de baja después.
+        material_nombre TEXT NOT NULL,
+        -- Texto y no REAL: «20» tiene que volver a salir «20». Un `double`
+        -- devuelve 20.0 y en Colombia el punto separa miles.
+        cantidad TEXT NOT NULL,
+        motivo TEXT,
+        orden_id TEXT,
+        -- pendiente | enviado | fallido
+        estado TEXT NOT NULL DEFAULT 'pendiente',
+        error_mensaje TEXT,
+        intentos INTEGER NOT NULL DEFAULT 0,
+        -- Espera con retroceso, igual que el resto de la cola: un pedido que el
+        -- servidor rechaza por red no puede machacarlo en cada ciclo.
+        next_attempt_at INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pedidos_pendientes '
+      'ON cola_pedidos_material (estado, next_attempt_at)',
+    );
+  }
+
   static Future<void> _crearColaDeSeguimiento(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS cola_seguimiento (
@@ -906,6 +954,7 @@ class LocalDatabase {
     await _crearTablaDeMaterialesDeOrden(db);
     await _crearTablaDeNotificaciones(db);
     await _crearTablaDeHistorialDeServicio(db);
+    await _crearColaDePedidos(db);
     await _crearTablaDeJornada(db);
     await _crearTablaDeIncidencias(db);
 
@@ -1991,6 +2040,137 @@ class LocalDatabase {
       },
       where: 'id = ?',
       whereArgs: [id],
+    );
+  }
+
+  /// Encola un pedido de material. Sube cuando haya señal.
+  ///
+  /// La clave de idempotencia es el `id` de la fila, generado ACÁ: así un
+  /// reenvío es el mismo pedido y no uno nuevo. Generarla al enviar sería un
+  /// identificador único por intento, que no es una clave idempotente.
+  Future<void> encolarPedidoDeMaterial({
+    required String orgId,
+    required String profileId,
+    required String id,
+    required String materialId,
+    required String materialNombre,
+    required String cantidad,
+    String motivo = '',
+    String? ordenId,
+  }) async {
+    final db = await database;
+    await db.insert('cola_pedidos_material', <String, Object?>{
+      'id': id,
+      'org_id': orgId,
+      'profile_id': profileId,
+      'material_id': materialId,
+      'material_nombre': materialNombre,
+      'cantidad': cantidad,
+      'motivo': motivo,
+      'orden_id': ordenId,
+      'estado': 'pendiente',
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'cola_pedidos_material',
+    );
+  }
+
+  /// Los pedidos de esta persona, lo más nuevo primero.
+  Future<List<Map<String, dynamic>>> leerPedidosDeMaterial({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    return await db.query(
+      'cola_pedidos_material',
+      where: 'org_id = ? AND profile_id = ?',
+      whereArgs: <Object?>[orgId, profileId],
+      orderBy: 'created_at DESC',
+      limit: 50,
+    );
+  }
+
+  /// Los que todavía no subieron **y a los que ya les toca**.
+  ///
+  /// Se filtra por `org` y `profile` igual que todo lo demás: un teléfono de
+  /// cuadrilla pasa de mano en mano, y el pedido del que salió no se manda con
+  /// la sesión del que entró.
+  Future<List<Map<String, dynamic>>> pedidosPendientes({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    return await db.query(
+      'cola_pedidos_material',
+      where:
+          "estado = 'pendiente' AND org_id = ? AND profile_id = ? "
+          'AND next_attempt_at <= ?',
+      whereArgs: <Object?>[
+        orgId,
+        profileId,
+        DateTime.now().millisecondsSinceEpoch,
+      ],
+      orderBy: 'created_at ASC',
+      limit: 50,
+    );
+  }
+
+  /// Subió. Queda a la vista como enviado, no se borra: el técnico tiene que
+  /// poder ver que pidió, y una fila que desaparece se lee como «no se mandó».
+  Future<void> marcarPedidoEnviado({
+    required String id,
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    await db.update(
+      'cola_pedidos_material',
+      <String, Object?>{'estado': 'enviado', 'error_mensaje': null},
+      where: 'id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: <Object?>[id, orgId, profileId],
+    );
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'cola_pedidos_material',
+    );
+  }
+
+  /// No subió.
+  ///
+  /// `definitivo` separa dos cosas que se ven iguales y no lo son: un 400 por
+  /// una cantidad que el servidor no acepta daría el mismo resultado para
+  /// siempre, y reintentarlo es ruido; un corte de red se reintenta. Un pedido
+  /// definitivo queda `fallido` CON su motivo a la vista — nunca se borra, que
+  /// es la única forma de que el técnico sepa que ese material no viene.
+  Future<void> registrarFalloPedido({
+    required String id,
+    required String orgId,
+    required String profileId,
+    required String errorMensaje,
+    required int intentos,
+    bool definitivo = false,
+    int? nextAttemptAt,
+  }) async {
+    final db = await database;
+    await db.update(
+      'cola_pedidos_material',
+      <String, Object?>{
+        'estado': definitivo ? 'fallido' : 'pendiente',
+        'error_mensaje': errorMensaje,
+        'intentos': intentos + 1,
+        'next_attempt_at': nextAttemptAt ?? 0,
+      },
+      where: 'id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: <Object?>[id, orgId, profileId],
+    );
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'cola_pedidos_material',
     );
   }
 
