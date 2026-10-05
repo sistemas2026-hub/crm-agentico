@@ -3107,6 +3107,98 @@ def chat():
     return jsonify(salida)
 
 
+@app.get("/chat/historial")
+def chat_historial():
+    """
+    El hilo que ya tiene esta sesion, para que una pantalla pueda retomarlo.
+
+    POR QUE HACIA FALTA, SI EL TURNO YA PERSISTIA
+    ---------------------------------------------
+    '/chat' guarda cada turno desde siempre --'atender_turno' llama a
+    'registrar_mensaje', que hace upsert sobre 'conversations' por
+    (organizacion, canal, usuario_externo)-- y el motor ademas REHIDRATA el
+    hilo al atender el mensaje siguiente. O sea que la continuidad del
+    CONTEXTO ya funcionaba: tras recargar la pagina, el modelo seguia sabiendo
+    de que se hablaba.
+
+    Lo que no existia era leerlo de vuelta. 'GET /conversaciones/<id>/mensajes'
+    pide el UUID, y una pantalla recien cargada no lo tiene: lo unico que sabe
+    es QUIEN es. El resultado era un panel vacio con un motor que recordaba
+    todo -- un olvido aparente, peor que uno real, porque la respuesta
+    siguiente contradice a la pantalla.
+
+    La consulta ya estaba ('estado_de_conversacion_abierta'); faltaba la
+    puerta.
+
+    NO ATIENDE CANALES REALES, Y FALLA CERRADO
+    -------------------------------------------
+    Mismo criterio que '/chat': por aca no se lee el hilo de WhatsApp de un
+    cliente. Esa lectura tiene su propia puerta en la bandeja, con sus
+    controles de control humano y de PII; abrir un segundo camino sin ellos
+    seria rodearlos. Un canal presente pero desconocido tampoco cae al
+    default: se rechaza.
+    """
+    tenant = request.args.get("tenant")
+    id_sesion = request.args.get("identificador_sesion")
+    if not tenant or not id_sesion:
+        return jsonify({"error": "Faltan 'tenant' e 'identificador_sesion'."}), 400
+
+    canal_pedido = request.args.get("canal") or canales.API
+    try:
+        canal = canales.normalizar_canal(canal_pedido)
+    except canales.CanalInvalido:
+        return jsonify({"error": "Canal desconocido."}), 400
+    if canal in canales.REALES:
+        registrar("chat", "rechazada una lectura de historial de un canal real",
+                  canal=canal, tenant=tenant)
+        return jsonify({"error": f"El canal '{canal}' no se lee por aca: su "
+                                 "hilo vive en la bandeja, con sus controles."}), 403
+
+    try:
+        limite = int(request.args.get("limite") or 60)
+    except (TypeError, ValueError):
+        return jsonify({"error": "'limite' tiene que ser un numero."}), 400
+    #  Un tope duro ademas del pedido: quien llama no decide cuanto trabajo
+    #  hace la base.
+    limite = max(1, min(limite, 200))
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    del config          # se pide solo para rechazar un tenant inexistente
+
+    try:
+        estado = persistencia.estado_de_conversacion_abierta(tenant, canal, id_sesion)
+    except Exception as e:                                        # noqa: BLE001
+        registrar("chat", "no se pudo resolver la conversacion de la sesion",
+                  tenant=tenant, sesion=ref_sesion(id_sesion), error=e)
+        return jsonify({"error": "No se pudo leer el historial."}), 500
+
+    #  Sin conversacion abierta no es un error: es alguien que todavia no
+    #  escribio nada. Un 404 obligaria a cada pantalla a tratar el estado
+    #  normal como una excepcion.
+    if not estado or not estado.get("conversation_id"):
+        return jsonify({"conversacion_id": None, "mensajes": []})
+
+    try:
+        hilo = persistencia.mensajes_de(tenant, estado["conversation_id"])
+    except Exception as e:                                        # noqa: BLE001
+        registrar("chat", "no se pudo leer el hilo de la sesion",
+                  tenant=tenant, sesion=ref_sesion(id_sesion), error=e)
+        return jsonify({"error": "No se pudo leer el historial."}), 500
+
+    #  Solo lo que una burbuja necesita pintar. El resto de lo que trae
+    #  'mensajes_de' --marcas de caso, metadatos de la bandeja-- es de otra
+    #  pantalla y no se filtra a esta por comodidad.
+    mensajes = [{"id": str(m["id"]), "rol": m["rol"],
+                 "contenido": m["contenido"],
+                 "creado_en": m["creado_en"].isoformat() if m.get("creado_en") else None}
+                for m in (hilo.get("mensajes") or [])][-limite:]
+    return jsonify({"conversacion_id": estado["conversation_id"],
+                    "mensajes": mensajes})
+
+
 @app.get("/agentes")
 def agentes():
     """

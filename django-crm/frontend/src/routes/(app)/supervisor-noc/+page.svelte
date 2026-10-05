@@ -1,4 +1,5 @@
 <script>
+  import ChatBurbuja from '$lib/supervisor/ChatBurbuja.svelte';
   import { resultadoDelCierre } from '$lib/v2/resultado-del-cierre.js';
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
@@ -1911,3 +1912,7 @@
     </div>
   {/if}
 </div>
+
+<!-- La burbuja del Supervisor. Fuera del contenedor a proposito:
+     es fija y pertenece a la pantalla, no a una seccion. -->
+<ChatBurbuja />
