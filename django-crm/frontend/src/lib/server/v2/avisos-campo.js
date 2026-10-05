@@ -24,7 +24,7 @@
  */
 import { apiRequest } from '$lib/api-helpers.js';
 
-/** @param {{cookies: any}} ctx */
+/** @param {App.Locals} ctx */
 export async function leerAvisos(ctx) {
   try {
     const d = await apiRequest('/campo/avisos/canales/', {}, ctx);
@@ -44,17 +44,21 @@ export async function leerAvisos(ctx) {
   }
 }
 
-/** @param {{cookies: any}} ctx */
+/** @param {App.Locals} ctx @param {Record<string, unknown>} cuerpo */
 export async function crearCanal(ctx, cuerpo) {
   return apiRequest('/campo/avisos/canales/', { method: 'POST', body: cuerpo }, ctx);
 }
 
-/** @param {{cookies: any}} ctx @param {string} id */
+/**
+ * @param {App.Locals} ctx
+ * @param {string} id
+ * @param {Record<string, unknown>} cuerpo
+ */
 export async function cambiarCanal(ctx, id, cuerpo) {
   return apiRequest(`/campo/avisos/canales/${id}/`, { method: 'PATCH', body: cuerpo }, ctx);
 }
 
-/** @param {{cookies: any}} ctx @param {string} id */
+/** @param {App.Locals} ctx @param {string} id */
 export async function borrarCanal(ctx, id) {
   return apiRequest(`/campo/avisos/canales/${id}/`, { method: 'DELETE' }, ctx);
 }
@@ -64,6 +68,9 @@ export async function borrarCanal(ctx, id) {
  *
  * Devuelve `{ llego, error }`. Un `llego: false` NO es un fallo de la página: es
  * el resultado de la prueba, y la pantalla lo muestra como tal.
+ *
+ * @param {App.Locals} ctx
+ * @param {string} id
  */
 export async function probarCanal(ctx, id) {
   return apiRequest(`/campo/avisos/canales/${id}/probar/`, { method: 'POST', body: {} }, ctx);
@@ -75,6 +82,10 @@ export async function probarCanal(ctx, id) {
  *
  * Van juntos en el mismo PUT porque son la misma fila. Mandarlos por separado
  * haría que guardar uno borre el otro.
+ *
+ * @param {App.Locals} ctx
+ * @param {string} urlBaseApp
+ * @param {string} [telefonoSoporte]
  */
 export async function guardarDominio(ctx, urlBaseApp, telefonoSoporte = '') {
   return apiRequest(
