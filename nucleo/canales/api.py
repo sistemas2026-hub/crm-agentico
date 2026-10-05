@@ -66,6 +66,7 @@ from nucleo.seguridad import interruptor
 from nucleo.seguridad import idempotencia
 from nucleo.modelo import motor
 from nucleo.observabilidad import consumo
+from nucleo.observabilidad import eventos_consumo
 from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
@@ -7062,6 +7063,28 @@ def consumo_resumen():
         },
         "herramientas": {"n": h.get("n") or 0, "p95_ms": h.get("p95")},
         "conversaciones": c.get("n") or 0,
+        # EL DESGLOSE QUE usage_daily NO PODIA DAR. Sale de
+        # asistente.consumo_eventos y responde las cuatro preguntas que antes
+        # no tenian respuesta: por origen (produccion / evaluacion / prueba),
+        # por servicio (conversacion / vision / transcripcion), por modelo, y
+        # que se gasto SIN saber cuanto costo.
+        #
+        # Va aparte de 'totales' a proposito: 'totales' sigue siendo lo de
+        # usage_daily, que es lo que el panel ya dibuja. Si esto viene vacio
+        # --porque la migracion todavia no corrio-- la pantalla de hoy no
+        # cambia en nada.
+        "desglose": eventos_consumo.resumen(tenant, dias),
+        # LO QUE CALCULAMOS CONTRA LO QUE COBRO EL PROVEEDOR.
+        #
+        # Esta comparacion ya se calculaba desde septiembre y no se mostraba
+        # en ninguna pantalla. El 05/10/2026 la auditoria la corrio a mano y
+        # encontro 2.86x de diferencia sostenida durante 23 dias: el dato
+        # estaba, faltaba que alguien lo viera. Por eso ahora viaja al panel.
+        #
+        # No bloquea nada: es una señal de auditoria. Frenar la atencion por
+        # una discrepancia contable seria cambiar un problema de dinero por
+        # uno de servicio.
+        "conciliacion": consumo.veredicto_conciliacion(config, tenant),
     })
 
 
@@ -8071,6 +8094,23 @@ def _transcribir_si_es_voz(config, tenant: str, entrante: dict) -> dict:
               tenant=tenant, media=ref_proveedor(media_id), estado=r.estado,
               segundos=round(r.segundos, 1), tokens=r.tokens,
               caracteres=len(r.texto), error=r.error or None)
+    #  EL CONSUMO DE LA TRANSCRIPCION. El Resultado ya traia 'tokens' desde
+    #  septiembre --lo que informa la API de OpenAI-- y se descartaba. Mismo
+    #  motivo que en vision para escribir un evento suelto: esto corre antes
+    #  del turno.
+    #
+    #  La referencia lleva el prefijo del proveedor para que la tarifa se
+    #  busque igual que las demas. Hoy NO hay tarifa cargada para este modelo,
+    #  asi que el evento queda con hay_tarifa=false y costo 0 -- que es
+    #  exactamente lo que hay que poder ver: hubo gasto y no se sabe cuanto.
+    if r.tokens:
+        costo_t, tarifa_t = consumo.costo_de(
+            config, f"openai:{transcripcion.MODELO}", r.tokens, 0)
+        eventos_consumo.anotar_evento(
+            tenant, eventos_consumo.TRANSCRIPCION, "openai", transcripcion.MODELO,
+            entrada=r.tokens, costo_usd=costo_t, hay_tarifa=tarifa_t,
+            metadatos={"segundos": round(r.segundos, 1), "estado": r.estado})
+
     return {"texto": r.texto, "estado": r.estado, "error": r.error,
             "crudo": crudo, "mime": mime}
 
@@ -8171,6 +8211,23 @@ def _analizar_si_es_imagen(config, tenant: str, entrante: dict) -> dict:
               segundos=round(r.segundos, 1), tokens=r.tokens,
               caracteres=len(r.texto), error=r.error or None)
 
+    #  EL CONSUMO DE VISION, que hasta el 05/10/2026 no se contaba en ningun
+    #  lado. Eran dos fallos a la vez: no se llamaba al contador, y esto corre
+    #  ANTES de atender_turno, asi que el acumulador del turno todavia no
+    #  existe. Por eso se escribe un evento suelto --que no necesita turno-- en
+    #  vez de mover el orden del flujo.
+    #
+    #  Los tokens llegan como total, sin desglose de cache: se cobran como
+    #  entrada nueva, que es lo conservador. El costo sale de la MISMA funcion
+    #  que usa la conversacion.
+    if r.tokens:
+        proveedor_v, modelo_v = consumo.partir_referencia(modelo)
+        costo_v, tarifa_v = consumo.costo_de(config, modelo, r.tokens, 0)
+        eventos_consumo.anotar_evento(
+            tenant, eventos_consumo.VISION, proveedor_v, modelo_v,
+            entrada=r.tokens, costo_usd=costo_v, hay_tarifa=tarifa_v,
+            metadatos={"segundos": round(r.segundos, 1), "estado": r.estado})
+
     return {"texto": vision.texto_para_el_agente(r, pie),
             "estado": r.estado, "error": r.error,
             #  Lo que se guarda es la DESCRIPCION, no el texto rotulado: el
@@ -8245,6 +8302,13 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
     del webhook (ver la nota de ACK abajo), asi que no puede devolver error a
     nadie: todo lo que falle se registra y se corta ahi.
     """
+    # TODO LO QUE SE GASTE DE ACA EN ADELANTE ES DE PRODUCCION, y se declara en
+    # la puerta y no dentro del turno: vision y la transcripcion corren ANTES
+    # de atender_turno, asi que si el origen se fijara alla esas dos quedarian
+    # como 'test' --el default conservador-- y no entrarian en el tope de la
+    # empresa, que es justo lo que esto viene a arreglar.
+    eventos_consumo.fijar_origen(eventos_consumo.PRODUCCION)
+
     de = entrante.get("de")
     wamid = entrante.get("wamid")
 
@@ -8293,8 +8357,31 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         #
         # Lo demas --video, documento-- sigue igual: el modelo lee lo que el
         # cliente ESCRIBIO al mandarlo, mas el hecho de que mando algo.
-        audio = _transcribir_si_es_voz(config, tenant, entrante)
-        imagen = _analizar_si_es_imagen(config, tenant, entrante)
+        # EL TOPE, ANTES DE GASTAR EN MIRAR Y ESCUCHAR.
+        #
+        # atender_turno tiene su propio gate, pero corre DESPUES de estas dos
+        # lineas: con el tope alcanzado se pagaba igual una llamada de vision
+        # y una de transcripcion por cada mensaje, justo cuando lo que se
+        # queria era dejar de gastar.
+        #
+        # Frenar aca NO deja a nadie sin respuesta: la foto y el audio se
+        # siguen bajando, guardando y mostrando, el turno sigue su camino y es
+        # atender_turno quien decide pasar la conversacion a una persona. Lo
+        # unico que no pasa es que se le pague al proveedor por analizarlos.
+        try:
+            frenar = consumo.estado_del_gasto(config, tenant)["accion"] == "frenar"
+        except Exception:
+            # Si no se puede saber, se sigue. Mismo criterio que gasto_del_mes:
+            # no dejar a nadie sin servicio por una consulta de estadisticas.
+            frenar = False
+
+        if frenar:
+            registrar("consumo", "tope alcanzado: no se analiza multimedia en este turno",
+                      tenant=tenant, remitente=ref_sesion(de))
+            audio, imagen = {}, {}
+        else:
+            audio = _transcribir_si_es_voz(config, tenant, entrante)
+            imagen = _analizar_si_es_imagen(config, tenant, entrante)
 
         if imagen.get("texto"):
             #  LA FOTO GANA SOBRE EL AVISO, Y NO PIERDE EL PIE. El texto que

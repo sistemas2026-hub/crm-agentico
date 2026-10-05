@@ -57,6 +57,7 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
+from nucleo.observabilidad import eventos_consumo as eventos
 from nucleo.observabilidad.registro import registrar
 from nucleo.persistencia.db import sesion
 
@@ -84,6 +85,9 @@ class Consumo:
     tokens_salida: int = 0
     costo_usd: float = 0.0
     n_llamadas: int = 0
+    # De donde viene este turno. Decide si el gasto vuelca a usage_daily y si
+    # cuenta para el tope; los eventos se escriben siempre, con su origen.
+    origen: str = eventos.PRODUCCION
     # Referencias de modelo que se usaron sin tarifa cargada. Es el dato que
     # convierte "el costo dio 0" en "el costo dio 0 PORQUE falta cargar la
     # tarifa de este modelo", que son dos cosas muy distintas.
@@ -117,21 +121,44 @@ def _costo(config, referencia: str, entrada: int, salida: int,
             + salida * p_salida) / POR_MILLON, True
 
 
+def costo_de(config, referencia: str, entrada: int, salida: int,
+             entrada_cache: int = 0, momento=None) -> tuple[float, bool]:
+    """
+    Lo mismo que _costo, con nombre publico.
+
+    Vision y la transcripcion calculan su costo con ESTA funcion y no con una
+    copia: si manana cambia como se cobra el cache o las ventanas de pico,
+    cambia en un solo lugar.
+    """
+    return _costo(config, referencia, entrada, salida, entrada_cache, momento)
+
+
 @contextmanager
-def abrir(config):
+def abrir(config, origen: str = eventos.PRODUCCION):
     """Abre el acumulador de un turno real. Al salir, lo vuelca a la base.
 
-    Lo abre SOLO el canal que atiende de verdad. Un corredor de pruebas que
-    llame al mismo motor no lo abre, asi que su consumo no entra en la
-    facturacion de nadie -- ver el encabezado.
+    'origen' decide DOS cosas distintas, y conviene no confundirlas:
+
+      production  vuelca a usage_daily (el agregado que lee el panel de hoy)
+                  Y escribe eventos. Es lo que cuenta para el tope.
+      evaluation  escribe eventos y NO vuelca a usage_daily: asi se puede
+      test        saber cuanto costo una corrida de casos dorados sin que el
+                  tope de una empresa salte por trabajo que nadie facturo.
+
+    Antes de octubre de 2026 esto se resolvia NO abriendo el acumulador en las
+    pruebas. Servia para el tope y dejaba un agujero que la auditoria del
+    05/10 midio: el saldo del proveedor bajo $6.78 mientras el sistema
+    calculaba $2.37, y parte de esa brecha era justamente ese gasto invisible.
+    Ahora se cuenta todo y se separa por origen, que es lo que hacia falta.
     """
-    ficha = Consumo(tenant=config.identidad.slug, config=config)
+    ficha = Consumo(tenant=config.identidad.slug, config=config, origen=origen)
     testigo = _actual.set(ficha)
-    try:
-        yield ficha
-    finally:
-        _actual.reset(testigo)
-        _volcar(ficha)
+    with eventos.origen(origen):
+        try:
+            yield ficha
+        finally:
+            _actual.reset(testigo)
+            _volcar(ficha)
 
 
 @contextmanager
@@ -164,7 +191,8 @@ def seguir_anotando(padre):
     acumulan en 'padre' para que el registro POR MENSAJE cuente el turno
     entero y no solo la mitad.
     """
-    hija = Consumo(tenant=padre.tenant, config=padre.config)
+    hija = Consumo(tenant=padre.tenant, config=padre.config,
+                   origen=padre.origen)
     testigo = _actual.set(hija)
     try:
         yield hija
@@ -179,8 +207,29 @@ def seguir_anotando(padre):
         padre.sin_tarifa |= hija.sin_tarifa
 
 
+def partir_referencia(referencia: str) -> tuple[str, str]:
+    """
+    'deepseek:deepseek-v4-flash' -> ('deepseek', 'deepseek-v4-flash').
+
+    Sin prefijo conocido se asume local, igual que cliente.py::resolver. No se
+    importa resolver() para no acoplar el contador al cliente del modelo: aca
+    solo hace falta ETIQUETAR el evento, y una etiqueta mal puesta no cambia
+    a quien se le llama.
+    """
+    if ":" in referencia:
+        proveedor, modelo = referencia.split(":", 1)
+        if proveedor and modelo:
+            return proveedor, modelo
+    return "ollama", referencia
+
+
 def anotar(referencia_modelo: str, respuesta) -> None:
-    """Suma una llamada al modelo al turno en curso. Sin turno, no hace nada."""
+    """Suma una llamada al modelo al turno en curso. Sin turno, no hace nada.
+
+    Ademas de sumar al acumulador --que es lo que termina en usage_daily--
+    escribe UN EVENTO por llamada. Los dos caminos salen de la misma llamada y
+    no se duplican entre si: el acumulador agrega por dia, el evento detalla.
+    """
     ficha = _actual.get()
     if ficha is None:
         return
@@ -198,10 +247,33 @@ def anotar(referencia_modelo: str, respuesta) -> None:
     if not hay_tarifa and (entrada or salida):
         ficha.sin_tarifa.add(referencia_modelo)
 
+    #  UN EVENTO POR LLAMADA, incluidos los reintentos de redaccion: un turno
+    #  que gasto tres redacciones en blanco costo tres llamadas, y contar solo
+    #  la que sirvio esconderia justo el caso caro.
+    proveedor, modelo = partir_referencia(referencia_modelo)
+    #  'razonamiento_chars' viene en caracteres (~4 por token); se devuelve a
+    #  tokens para que la columna signifique lo mismo que en el resto.
+    razonamiento = int(getattr(respuesta, "razonamiento_chars", 0) or 0) // 4
+    eventos.anotar_evento(
+        ficha.tenant, eventos.CONVERSACION, proveedor, modelo,
+        entrada=entrada, entrada_cache=cacheados, salida=salida,
+        razonamiento=razonamiento, costo_usd=costo, hay_tarifa=hay_tarifa,
+        metadatos={"segundos": round(float(getattr(respuesta, "segundos", 0) or 0), 2)})
+
 
 def _volcar(ficha: Consumo) -> None:
-    """Una fila por dia y por empresa, sumando. Nunca rompe el turno."""
+    """Una fila por dia y por empresa, sumando. Nunca rompe el turno.
+
+    SOLO 'production' escribe en usage_daily. Una evaluacion ya dejo sus
+    eventos --uno por llamada, con su origen-- y sumarla aca ademas haria que
+    el tope de la empresa saltara por una corrida de casos dorados.
+    """
     if not ficha.n_llamadas:
+        return
+    if ficha.origen != eventos.PRODUCCION:
+        if ficha.sin_tarifa:
+            registrar("consumo", "sin tarifa cargada en una corrida que no es de produccion",
+                      tenant=ficha.tenant, modelos=sorted(ficha.sin_tarifa))
         return
     if ficha.sin_tarifa:
         registrar("consumo", "sin tarifa cargada -- se cuentan tokens, el costo queda en 0. "
@@ -241,7 +313,11 @@ def gasto_del_mes(tenant: str) -> float:
     """
     try:
         with sesion(tenant) as (cur, org):
-            cur.execute("select asistente.gasto_del_mes(%s) as gasto", (org,))
+            # La funcion NUEVA: suma solo origen='production' y cae a
+            # usage_daily mientras no haya eventos del mes, para que el corte
+            # de la migracion no borre el gasto ya acumulado.
+            cur.execute(
+                "select asistente.gasto_produccion_del_mes(%s) as gasto", (org,))
             fila = cur.fetchone()
         return float((fila or {}).get("gasto") or 0.0)
     except Exception as fallo:      # noqa: BLE001
@@ -253,6 +329,13 @@ def gasto_del_mes(tenant: str) -> float:
 # que pasa de "todo normal" a "todo va a una persona" sin aviso previo es
 # inoperable: quien lo administra se entera cuando ya no hay margen.
 AVISO_DESDE = 0.8
+
+# A partir de que razon entre lo que cobro el proveedor y lo que calculamos se
+# considera que la diferencia ya no es ruido. 1.5x es holgado a proposito: el
+# saldo se fotografia una vez al dia y los turnos siguen ocurriendo, asi que
+# siempre hay algo de desfase. Lo que esto tiene que cazar es lo del
+# 05/10/2026 --2.86x, sostenido durante 23 dias-- no una diferencia de horas.
+RATIO_DIVERGENCIA = 1.5
 
 
 def tope_superado(config, tenant: str) -> tuple[bool, float, float]:
@@ -477,10 +560,36 @@ def veredicto_conciliacion(config, tenant: str, dias: int = 14) -> dict:
     tolerancia = getattr(getattr(getattr(config, "llm", None), "saldo", None),
                          "tolerancia", 0.15)
     desvio = abs(calc - real) / real if real else 0.0
+
+    #  EL RATIO, ademas del desvio. Son la misma diferencia vista de dos
+    #  maneras, y la segunda es la que se entiende sin pensar: "el proveedor
+    #  cobro 2.86 veces lo que calculamos" dice mas que "el desvio es 0.65".
+    #
+    #  Medido el 05/10/2026 sobre 23 dias de Rapilink: calculado $2.37 contra
+    #  $6.78 de bajada real del saldo, sin recargas. Ese dia esta funcion ya
+    #  existia y ya tenia los datos -- lo que faltaba era que alguien mirara.
+    ratio = (real / calc) if calc else None
+
+    #  'material' se cruza cuando la diferencia deja de ser ruido de medicion
+    #  y pasa a ser plata que no se esta contando. NO BLOQUEA NADA: es una
+    #  senal de auditoria. Frenar la atencion de los clientes por una
+    #  discrepancia contable seria cambiar un problema de dinero por uno de
+    #  servicio.
+    #  'estado' NO cambia de vocabulario: sigue siendo ok | desviado, que es
+    #  lo que ya consumia quien lo lee. La divergencia material viaja como un
+    #  campo APARTE. Meterla dentro de 'estado' habria sido mas prolijo y
+    #  habria roto el contrato de una API que ya existia -- y una alerta
+    #  nueva no justifica eso.
+    divergencia_material = ratio is not None and (
+        ratio >= RATIO_DIVERGENCIA or ratio <= 1 / RATIO_DIVERGENCIA)
+
     return {
         "comparables": len(filas),
         "calculado": round(calc, 4),
         "real": round(real, 4),
         "desvio": round(desvio, 3),
+        "diferencia": round(real - calc, 4),
+        "ratio": round(ratio, 2) if ratio is not None else None,
+        "divergencia_material": divergencia_material,
         "estado": "ok" if desvio <= tolerancia else "desviado",
     }

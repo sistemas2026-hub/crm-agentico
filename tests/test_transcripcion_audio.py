@@ -360,8 +360,20 @@ def test_1_y_11_el_orden_del_webhook_es_el_declarado():
     """
     fuente = (Path(__file__).resolve().parents[1]
               / "nucleo" / "canales" / "api.py").read_text(encoding="utf-8")
+    #  LA FUNCION ENTERA, no una ventana de tamano fijo.
+    #
+    #  Antes esto era `fuente[i:i + 6000]` y se rompio el 05/10/2026 al
+    #  agregar el gate de costo: la funcion paso a medir 8017 caracteres,
+    #  'atender_turno' quedo fuera de la ventana y find() devolvio -1. Daba
+    #  rojo con el orden INTACTO -- medido ese dia: transcribir en 4556,
+    #  atender_turno en 6340, guardar en 6735.
+    #
+    #  Una prueba que se cae porque la funcion crecio no esta midiendo el
+    #  orden: esta midiendo el largo del archivo, y enseña a ignorarla.
     i = fuente.index("def _procesar_mensaje_whatsapp")
-    bloque = fuente[i:i + 6000]
+    resto = fuente[i + 1:]
+    siguiente = resto.find("\ndef ")
+    bloque = resto[:siguiente] if siguiente != -1 else resto
 
     p_tr = bloque.find("_transcribir_si_es_voz(config")
     p_turno = bloque.find("atender_turno(config")
