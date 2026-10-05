@@ -50,14 +50,16 @@ from common.permissions import HasOrgContext
 from django.http import Http404
 from django.utils import timezone
 
-from operaciones import (actividades, asistentes, auditoria, contexto_propuesta,
-                         correlacion,
+from operaciones import (actividades, asistentes, auditoria, chat,
+                         contexto_propuesta, correlacion,
                          fuentes, indicadores,
                          supervisor)
 from operaciones.capacidad import capacidad_de_jornada
 from campo.services.idempotencia import manejar_idempotencia
+from operaciones.chat_modelos import ConversacionSupervisor, RolMensaje
 from operaciones.models import (ActividadOperativa, DisponibilidadTecnico, ProgramacionOrden,
                                 ProgramacionSemanal, PropuestaSupervisor)
+from operaciones.situaciones_modelos import SituacionOperativa
 from operaciones.programacion import (ErrorProgramacion, PlanIncoherente,
                                       PlanNoCerrable, PlanNoPublicable,
                                       cerrar_programacion, _lineas_vigentes,
@@ -1546,3 +1548,105 @@ class SondeoFuentesView(APIView):
         #  Sigue siendo UN solo scheduler y UN solo turno: esto no agenda nada.
         informe["situaciones"] = correlacion.correr(request.org, ahora=ahora)
         return Response(informe)
+
+
+class ChatSupervisorView(APIView):
+    """
+        POST /api/operaciones/supervisor/chat/
+
+    La conversación entre un responsable humano y el Supervisor NOC IA.
+
+    POR QUE ES UNA RUTA DEL SUPERVISOR Y NO UN CHAT GENERICO
+    -------------------------------------------------------
+    Lo que la hace del Supervisor no es el nombre: es que el contexto, las
+    herramientas y los límites salen de los datos del Supervisor. El modelo no
+    puede consultar nada que no sea una situación, una fuente, una propuesta o
+    una decisión de ESTA organización -- y el tenant lo pone el despachador de
+    herramientas, no el modelo.
+
+    POR QUE NO VA POR EL '/chat' DEL MOTOR
+    --------------------------------------
+    `/chat` atiende un turno de un agente del PRODUCTO (router, soporte,
+    facturación, ventas): resuelve rol o perfil, arma el catálogo del tenant y
+    escribe en las conversaciones de WhatsApp. CLAUDE.md §11.1 separa esa capa de
+    la operativa, y el Supervisor es operativo. El motor presta el modelo por
+    `/interno/supervisor/chat` y nada más.
+
+    LO QUE NO PUEDE HACER, Y HAY UNA PRUEBA POR CADA UNO
+    ---------------------------------------------------
+    No cambia el estado de una situación, no toca `Case.status`, no cierra ni
+    crea ni reasigna tickets, no escribe en M02 ni en M03, no activa fuentes, no
+    llama a SmartOLT ni a WispHub, y no puede subir su nivel de autonomía.
+    Ninguna de esas cosas tiene herramienta: no es que el prompt lo prohíba, es
+    que no hay por dónde.
+
+    PERMISO: el mismo que el resto del Supervisor. Ver el panorama operativo de
+    una empresa --qué está caído, qué técnicos tienen compromisos-- no es
+    información para cualquiera con una sesión.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext, EsJefeDeOperaciones)
+
+    def post(self, request):
+        datos = request.data if isinstance(request.data, dict) else {}
+        texto = str(datos.get("mensaje") or "").strip()
+        if not texto:
+            return Response({"error": "FALTA_MENSAJE"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if len(texto) > 4000:
+            return Response({"error": "MENSAJE_DEMASIADO_LARGO"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        #  La conversación se resuelve SIEMPRE dentro de la organización y del
+        #  actor. Un id de conversación de otra empresa --o de otra persona-- no
+        #  da 403: da 404, porque un 403 confirmaría que ese hilo existe.
+        conversacion = None
+        if datos.get("conversacion_id"):
+            conversacion = ConversacionSupervisor.objects.filter(
+                id=datos["conversacion_id"], org=request.org,
+                actor=request.profile).first()
+            if conversacion is None:
+                return Response({"error": "CONVERSACION_NO_ENCONTRADA"},
+                                status=status.HTTP_404_NOT_FOUND)
+
+        #  El contexto inicial, cuando el chat se abre desde una situación.
+        situacion = None
+        if datos.get("situacion"):
+            situacion = SituacionOperativa.objects.filter(
+                org=request.org, codigo=str(datos["situacion"]).strip()).first()
+            if situacion is None:
+                return Response({"error": "SITUACION_NO_ENCONTRADA"},
+                                status=status.HTTP_404_NOT_FOUND)
+
+        if conversacion is None:
+            conversacion = chat.abrir(
+                request.org, request.profile, situacion=situacion,
+                caso_id=str(datos.get("caso") or "")[:64])
+        elif situacion is not None and conversacion.situacion_id != situacion.id:
+            #  Cambiar de tema en un hilo que ya existe queda ESCRITO en el hilo:
+            #  sin eso, dos respuestas sobre situaciones distintas quedarían
+            #  seguidas sin nada que explique el salto.
+            chat.cambiar_contexto(conversacion, situacion=situacion)
+
+        try:
+            respuesta = chat.responder(conversacion, texto)
+        except chat.ErrorChat as e:
+            return Response({"error": "TURNO_NO_COMPLETADO",
+                             "detalle": str(e)},
+                            status=status.HTTP_502_BAD_GATEWAY)
+
+        return Response({
+            "conversacion_id": str(conversacion.id),
+            "contexto": {
+                "situacion": (conversacion.situacion.codigo
+                              if conversacion.situacion_id else None),
+                "caso": conversacion.caso_id or None,
+            },
+            "respuesta": respuesta.contenido,
+            "es_error": respuesta.rol == RolMensaje.ERROR,
+            #  Qué consultó para contestar. Va al cliente a propósito: una
+            #  respuesta del Supervisor sin poder ver de dónde salió es una
+            #  afirmación sin respaldo.
+            "herramientas": [h.get("nombre") for h in (respuesta.herramientas or [])],
+            "duracion_ms": respuesta.duracion_ms,
+        })

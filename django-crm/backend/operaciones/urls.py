@@ -83,4 +83,11 @@ urlpatterns = [
     #  'solo_lectura'; no escribe nada afuera.
     path("supervisor/sondeo/", views.SondeoFuentesView.as_view(),
          name="supervisor-sondeo"),
+
+    #  EL CHAT DEL SUPERVISOR  --  la unica ruta que habla con una
+    #  persona. Las otras dos las llama el scheduler. Escribe la
+    #  conversacion y nada mas: el modelo no tiene ninguna herramienta
+    #  de escritura, asi que no hay por donde ejecutar algo.
+    path("supervisor/chat/", views.ChatSupervisorView.as_view(),
+         name="supervisor-chat"),
 ]

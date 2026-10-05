@@ -499,7 +499,16 @@ def test_19_no_hay_segunda_cola_ni_tabla_de_kpi(org_a):
                        #  con su historial, en vez de la constante
                        #  'NIVEL_MAXIMO_ETAPA' del codigo. Los cinco niveles NO se
                        #  redefinen: son los de 'PropuestaSupervisor.NIVELES'.
-                       "DecisionSupervisor", "NivelAutonomia"}, modelos
+                       "DecisionSupervisor", "NivelAutonomia",
+                       #  05/10/2026, paso P5. El chat del Supervisor. NO
+                       #  reemplaza 'asistente.conversations' del motor: esa es
+                       #  la conversacion de WhatsApp con un CLIENTE FINAL, con
+                       #  su ventana de 24 h, su relevo IA-humano y su cierre por
+                       #  plazo. Esto es un colaborador hablando con el
+                       #  Supervisor, y referencia una SituacionOperativa -- que
+                       #  vive de este lado de la frontera, porque el motor no
+                       #  lee las tablas del CRM.
+                       "ConversacionSupervisor", "MensajeSupervisor"}, modelos
 
     import ast
     import inspect

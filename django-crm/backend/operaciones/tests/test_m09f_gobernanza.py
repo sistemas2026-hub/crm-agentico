@@ -876,6 +876,39 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
     OrdenTrabajo cambiaron de cuenta -- y la mutacion que hace que el sondeo
     llame al ciclo del Supervisor pone esa prueba en rojo.
 
+    'supervisor-chat' (POST /supervisor/chat/) entro el 05/10/2026, y es la
+    UNICA de esta lista que habla con una persona en tiempo real -- las otras dos
+    del Supervisor las llama el scheduler.
+
+    ESCRIBE: la conversacion y sus mensajes ('operaciones_conversacion_supervisor'
+    y '..._mensaje_supervisor'). Nada mas. Y NO EJECUTA, lo cual aqui hay que
+    argumentar con cuidado porque detras hay un modelo de lenguaje:
+
+      * El modelo solo puede llamar las diez herramientas de
+        'chat_herramientas.HERRAMIENTAS', que es un diccionario LITERAL. Un
+        nombre que no este ahi se rechaza; no hay 'getattr' sobre lo que el
+        modelo diga.
+      * Las diez son de LECTURA. 'test_20' lo afirma sobre el AST del modulo: ni
+        un create, ni un save, ni un update, ni un delete, ni 'requests'.
+      * El TENANT lo pone el despachador desde 'request.org'. NINGUNA herramienta
+        acepta la organizacion como argumento, asi que no hay donde ponerla --
+        'test_15' lo afirma sobre la lista blanca y 'test_18' lo intenta con una
+        inyeccion de prompt que dicta otra organizacion.
+      * Los argumentos pasan por lista blanca fail-closed: lo que no esta
+        declarado se descarta antes de llegar a la funcion.
+      * No puede subir su propio nivel de autonomia: 'mis_limites' es una
+        lectura, y cambiarlo exige una persona (P4).
+
+    Su propia suite lo afirma sobre el EFECTO
+    (operaciones/tests/test_p5_chat_supervisor.py, 41 pruebas): tras pedirle por
+    chat que cierre una situacion y un ticket, ni el estado de la situacion, ni
+    'Case.status', ni 'updated_at', ni PropuestaSupervisor, ni
+    DecisionSupervisor cambiaron.
+
+    El modelo lo presta el motor por 'POST /interno/supervisor/chat', que es un
+    envoltorio sobre 'cliente.chat()' y no ejecuta herramientas: las del
+    Supervisor leen tablas del CRM, y el motor no las lee.
+
     Que esta lista haya que tocarla para agregar una ruta es el punto: esta
     guarda no comprueba que las rutas de ejecucion esten ausentes por su
     nombre --eso lo hace el bucle de abajo, y un 'aplicar_propuesta' llamado
@@ -892,7 +925,8 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        "actividad-detalle", "actividad-transicion",
                        "asistente", "indicadores", "reportes",
                        "programaciones", "actividad-supervisor",
-                       "supervisor-latido", "supervisor-sondeo"}
+                       "supervisor-latido", "supervisor-sondeo",
+                       "supervisor-chat"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

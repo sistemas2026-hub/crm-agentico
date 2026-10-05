@@ -1092,6 +1092,7 @@ from operaciones.situaciones_modelos import (                     # noqa: E402,F
     TipoRelacion,
 )
 
+
 # =============================================================================
 #  GOBIERNO  --  decisiones humanas y nivel de autonomia
 # =============================================================================
@@ -1103,4 +1104,18 @@ from operaciones.gobierno_modelos import (                        # noqa: E402,F
     NivelAutonomia,
     ResultadoDecision,
     TipoDecision,
+)
+
+
+# =============================================================================
+#  EL CHAT DEL SUPERVISOR  --  vive en 'chat_modelos.py'
+# =============================================================================
+#  Mismo motivo que las capas anteriores: Django descubre un modelo cuando su
+#  modulo se importa. NO reemplaza 'asistente.conversations' del motor -- esa es
+#  la conversacion de WhatsApp con un cliente final, con su ventana de 24 h y su
+#  relevo; esto es un colaborador hablando con el Supervisor.
+from operaciones.chat_modelos import (                           # noqa: E402,F401
+    ConversacionSupervisor,
+    MensajeSupervisor,
+    RolMensaje,
 )

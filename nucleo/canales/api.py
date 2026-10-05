@@ -64,7 +64,7 @@ from nucleo.ingesta.docx import procesar
 from nucleo.seguimiento import cierre_por_propuesta
 from nucleo.seguridad import interruptor
 from nucleo.seguridad import idempotencia
-from nucleo.modelo import motor
+from nucleo.modelo import cliente, motor
 from nucleo.observabilidad import consumo
 from nucleo.observabilidad import eventos_consumo
 from nucleo.persistencia import db as persistencia
@@ -88,6 +88,19 @@ from nucleo.seguridad import secretos
 from nucleo.seguridad import verificacion
 from nucleo.seguridad.verificacion import Sesion
 from nucleo.observabilidad.registro import id_interno, ref_proveedor, ref_sesion, registrar
+
+#  EL CHAT DEL SUPERVISOR NOC  --  dos topes, y los dos tienen motivo.
+#
+#  El de mensajes: quien llama arma el historial, y sin tope una conversacion
+#  larga llegaria entera y se pagarian tokens por todo. Resumir es de Django; el
+#  limite vive donde se gasta.
+#
+#  El de tiempo: mas largo que un turno de WhatsApp porque aqui quien espera es
+#  un colaborador mirando una pantalla, no un cliente en una conversacion. Sigue
+#  siendo un tope -- ninguna llamada al modelo queda sin limite (ver TIMEOUTS en
+#  nucleo/modelo/cliente.py).
+TOPE_MENSAJES_SUPERVISOR = 40
+SEGUNDOS_TIMEOUT_SUPERVISOR = 120
 
 app = Flask(__name__)
 
@@ -4353,6 +4366,109 @@ def interno_ejecutar_herramienta(nombre: str):
                      componente="interno", e=e, estado_proveedor=estado_http_de(e))
 
     return jsonify({"resultado": salida})
+
+
+@app.post("/interno/supervisor/chat")
+def interno_supervisor_chat():
+    """
+    Le presta el MODELO al Supervisor NOC. No sabe de que esta hablando.
+
+    POR QUE ESTA RUTA EXISTE, Y POR QUE ES TAN FINA
+    ----------------------------------------------
+    El Supervisor NOC vive en Django: ahi estan las situaciones, los casos, la
+    programacion, el tenant y la RLS. El modelo vive aca: la credencial del
+    proveedor esta SOLO en el motor, igual que la de WispHub y la de SmartOLT, y
+    copiarla al CRM seria tener dos servicios con la misma clave -- lo que
+    despues se desincroniza sin que nadie sepa cual es la buena.
+
+    Asi que el reparto es: Django arma el contexto, elige las herramientas, corre
+    el bucle y persiste; el motor pone el modelo. Esta funcion no interpreta la
+    conversacion, no decide que herramienta llamar y no ejecuta ninguna -- las
+    del Supervisor leen tablas del CRM, y el motor NO lee las tablas del CRM
+    (ver el comentario de /chat).
+
+    POR QUE NO SE REUSA '/chat'
+    ---------------------------
+    '/chat' atiende un turno de un agente del PRODUCTO: resuelve rol o
+    profile_id, arma el catalogo del tenant, aplica listas blancas por rol y
+    escribe en 'asistente.conversations'. El Supervisor NOC no es uno de esos
+    roles: CLAUDE.md §11.1 separa los agentes del producto --que viven en
+    'tenant_config' y se editan en /agentes-- de los operativos. Meterlo ahi
+    habria mezclado las dos capas y exigido tocar la config de produccion.
+
+    LO QUE NO HACE, Y HAY UNA PRUEBA POR CADA UNO
+    ---------------------------------------------
+    No ejecuta herramientas, no escribe en la base, no toca conversaciones de
+    WhatsApp, no manda nada a ningun canal y no mira el interruptor de autonomia
+    -- porque no ejecuta nada que el interruptor deba frenar. Es una llamada al
+    modelo y nada mas.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="supervisor_chat", e=e)
+
+    cuerpo = request.get_json(silent=True) or {}
+    mensajes = cuerpo.get("mensajes")
+    if not isinstance(mensajes, list) or not mensajes:
+        return jsonify({"error": "Falta 'mensajes' (lista no vacia)."}), 400
+    #  Un tope de mensajes, no por estetica: quien llama arma el historial, y sin
+    #  limite una conversacion larga llegaria aqui entera y pagaria tokens por
+    #  todo. El resumen es responsabilidad de Django, pero el tope vive donde se
+    #  gasta.
+    if len(mensajes) > TOPE_MENSAJES_SUPERVISOR:
+        return jsonify({"error": f"Demasiados mensajes: el tope es "
+                                 f"{TOPE_MENSAJES_SUPERVISOR}."}), 400
+    for m in mensajes:
+        if not isinstance(m, dict) or "role" not in m:
+            return jsonify({"error": "Cada mensaje necesita 'role'."}), 400
+
+    herramientas = cuerpo.get("tools")
+    if herramientas is not None and not isinstance(herramientas, list):
+        return jsonify({"error": "'tools' tiene que ser una lista."}), 400
+
+    #  El modelo sale de la config del TENANT, no del cuerpo de la peticion.
+    #  Dejarselo elegir a quien llama permitiria pedir un modelo que la empresa
+    #  no paga, y el consumo se le cobra a ella.
+    referencia = (config.llm.modelo_seleccion or config.llm.modelo_por_defecto)
+
+    try:
+        respuesta = cliente.chat(
+            referencia, mensajes, tools=herramientas, temperatura=0.1,
+            timeout=SEGUNDOS_TIMEOUT_SUPERVISOR,
+            razonamiento=getattr(config.llm, "razonamiento", None))
+    except Exception as e:
+        #  502 y no 500: el que fallo es el proveedor, no esta ruta. Quien llama
+        #  tiene que poder distinguir "el motor esta mal" de "el modelo no
+        #  contesto", porque la reaccion no es la misma.
+        return fallo(502, "modelo_no_contesto",
+                     "El modelo no pudo contestar.",
+                     componente="supervisor_chat", e=e)
+
+    #  Las llamadas a herramienta se devuelven TAL CUAL las pidio el modelo.
+    #  Resolverlas aca seria ejecutar algo, y esta ruta no ejecuta.
+    llamadas = []
+    for ll in (respuesta.llamadas or []):
+        #  'Llamada' solo tiene nombre y argumentos -- este cliente no expone un
+        #  id de llamada, asi que no se inventa uno. Quien corre el bucle
+        #  empareja por POSICION, que es lo que de verdad hay.
+        llamadas.append({"nombre": ll.nombre, "argumentos": ll.argumentos})
+
+    proveedor, modelo = cliente.resolver(referencia)
+    registrar("supervisor_chat", "turno del Supervisor contestado",
+              tenant=tenant, herramientas=len(llamadas))
+    return jsonify({
+        "contenido": respuesta.contenido or "",
+        "llamadas": llamadas,
+        #  Para la trazabilidad del lado de Django. El modelo y el proveedor no
+        #  son secretos; la credencial nunca sale de aca.
+        "modelo": modelo,
+        "proveedor": proveedor,
+    })
 
 
 @app.post("/interno/propuesta/<propuesta_id>/cerrar-caso")

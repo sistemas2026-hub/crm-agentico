@@ -1,9 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { apiRequest } from '$lib/api-helpers.js';
-import { headersMotor } from '$lib/server/v2/motor-headers.js';
-import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
-import { claveDeSesion, bloqueDeContexto, mensajeParaElMotor } from '$lib/supervisor/chat-sesion.js';
+import { traducirError } from '$lib/server/v2/supervisor-noc.js';
 
 /**
  * EL CANAL DE LA BURBUJA DEL SUPERVISOR NOC
@@ -12,224 +9,185 @@ import { claveDeSesion, bloqueDeContexto, mensajeParaElMotor } from '$lib/superv
  * GET   recupera el hilo persistido de esta persona.
  * POST  manda un mensaje y devuelve la respuesta.
  *
- * MISMO PATRON QUE /api/asistente, Y DOS DIFERENCIAS DELIBERADAS
- * ---------------------------------------------------------------
- *  1. La clave de sesion lleva prefijo ('snoc:<user.id>'). Sin eso las dos
- *     pantallas escribirian en el mismo hilo del motor -- ver la nota en
- *     lib/supervisor/chat-sesion.js.
- *  2. Antes de preguntar se lee el estado del Supervisor y viaja con la
- *     pregunta. Dexter conoce WispHub y SmartOLT por su catalogo, pero no ve
- *     las propuestas ni los indicadores: eso es lo unico que esta pantalla
- *     sabe y el motor no.
+ * ESTE ARCHIVO ES EL RESULTADO DE RECONCILIAR DOS ARQUITECTURAS
+ * -------------------------------------------------------------
+ * Dos ramas construyeron esta misma ruta, y las dos funcionaban:
+ *
+ *   origin  burbuja -> motor `POST /chat` -- el agente GENERICO del tenant, con
+ *           un bloque de contexto en texto por delante. Persistia el hilo en el
+ *           motor y lo recuperaba con `GET /chat/historial`.
+ *   local   burbuja -> Django `POST /operaciones/supervisor/chat/` -- el
+ *           Supervisor DEDICADO, con sus 15 herramientas de lectura y el bucle
+ *           de tool calling en `operaciones/chat.py`.
+ *
+ * Se conserva la SEGUNDA, y el motivo no es preferencia: por el camino generico
+ * el Supervisor no puede consultar una situacion, ni una propuesta, ni el estado
+ * de las fuentes, porque esas herramientas no existen de ese lado. Un bloque de
+ * contexto en texto es una foto; las herramientas son poder preguntar.
+ *
+ * LO QUE SE CONSERVA DE `origin`, Y NO ES POCO
+ * --------------------------------------------
+ *  1. LA BURBUJA. `lib/supervisor/ChatBurbuja.svelte` y su `chat-sesion.js`
+ *     siguen siendo la interfaz, sin tocar.
+ *  2. EL HISTORIAL. La burbuja hace `GET` al abrir y espera `{mensajes}` con
+ *     roles `user`/`assistant`. Ese contrato se respeta tal cual -- la
+ *     traduccion desde los roles de Django vive en el `get()` de la vista, no
+ *     aca ni en el componente, asi que `chat-sesion.test.js` no se toca.
+ *  3. LA LECCION DE AUTENTICACION de `6d32108`, que se pago contra produccion:
+ *
+ *         "Organization context is required. Please login again."
+ *
+ *     `apiRequest` saca el JWT con `locals.cookies || locals` y despues
+ *     `cookies.get("jwt_access")`. En un `+server.js` el evento trae `cookies`
+ *     APARTE de `locals`, y `hooks.server.js` solo deja ahi user/org/...,
+ *     nunca `cookies`. El fallback agarraba `locals`, `.get` no existia, no
+ *     salia cabecera `Authorization` y Django contestaba 403 -- con un sintoma
+ *     que senalaba al login, que estaba perfecto. Por eso aca se pasa
+ *     `{ cookies }` SIEMPRE, en el GET y en el POST.
+ *
+ * LO QUE SE DEJO DE USAR, Y POR QUE
+ * ---------------------------------
+ * `claveDeSesion`, `bloqueDeContexto` y `mensajeParaElMotor` resolvian cosas que
+ * en la arquitectura dedicada ya estan resueltas en otro lado:
+ *
+ *   la clave de sesion   el hilo se separa por tabla: `ConversacionSupervisor`
+ *                        esta atada a (org, actor). No hay un hilo compartido
+ *                        con `/api/asistente` del que haya que distinguirse.
+ *   el contexto          lo arma `operaciones/chat.py::_instrucciones`, junto a
+ *                        la identidad y la autonomia. Mandarlo tambien desde
+ *                        aca dejaria DOS lugares decidiendo que sabe el
+ *                        Supervisor, y ninguno de los dos seria el verdadero.
+ *
+ * Siguen exportadas y probadas en `chat-sesion.js`: no se borran por si el
+ * camino generico vuelve a hacer falta, pero esta ruta ya no las llama.
+ *
+ * ES UN PROXY, Y ESO ES TODO LO QUE DEBE SER
+ * ------------------------------------------
+ * El navegador no habla con el modelo ni con ningun proveedor: habla con esta
+ * ruta, que habla con Django, que habla con el motor -- el unico que tiene la
+ * credencial. Aca NO hay logica del Supervisor: si esta ruta decidiera algo,
+ * habria dos lugares donde buscar por que contesto lo que contesto.
  *
  * LA IDENTIDAD NO SE ACEPTA DEL NAVEGADOR, NUNCA
- * -----------------------------------------------
- * 'profile_id', el nombre y el tenant se resuelven aca, del lado del
- * servidor: son lo que decide a que datos accede el turno. Si viajaran en el
- * cuerpo, cualquiera podria mandar el de otra persona y quedarse con sus
- * agentes. La clave de sesion se deriva de 'locals.user.id' por la misma
- * razon -- aceptarla del cliente seria poder leer la conversacion de otro.
+ * ----------------------------------------------
+ * No hace falta resolver `profile_id` ni el tenant aca: Django los saca de la
+ * credencial (`request.org`, `request.user`). Un `profile_id` que viajara en el
+ * cuerpo seria poder preguntar como otra persona.
  *
- * 'apiRequest' RECIBE 'cookies', NO 'locals'
- * -------------------------------------------
- * Medido el 05/10/2026 contra produccion, con la burbuja ya desplegada: la
- * primera pregunta devolvio
- *
- *     "Organization context is required. Please login again."
- *
- * 'apiRequest' saca el JWT con 'locals.cookies || locals' y despues
- * 'cookies.get("jwt_access")'. En un '+server.js' el evento trae 'cookies'
- * APARTE de 'locals', y 'hooks.server.js' solo deja ahi user/org/org_name/
- * org_settings -- nunca 'cookies'. O sea que el fallback agarraba 'locals',
- * '.get' no existia, no salia cabecera 'Authorization' y Django respondia
- * 403. El sintoma ("volve a iniciar sesion") senala al login, que estaba
- * perfecto.
- *
- * El patron correcto es el que ya usaba 'lib/server/v2/supervisor-noc.js':
- * pasar '{ cookies }'. Esto NO sigue a '/api/asistente/+server.js', que pasa
- * 'locals' y tiene el mismo defecto latente sin corregir.
+ * El rol se comprueba aca ADEMAS de en Django. Dos capas a proposito (PRD
+ * §7.4): esta da un mensaje util sin gastar un salto, la de Django es la que
+ * garantiza.
  */
+
+/** El mismo conjunto que operaciones/permissions.py::ROLES_GESTION. */
+const ROLES_GESTION = new Set(['ADMIN', 'SUPERVISOR', 'OPERACIONES']);
+
+/** Lo mismo que exige la vista de Django. */
+const TOPE_MENSAJE = 4000;
 
 /** Cuantos mensajes se recuperan al abrir la burbuja. */
 const LIMITE_HISTORIAL = 60;
 
 /**
- * El agente con el que habla esta burbuja, por NOMBRE.
+ * Quien pregunta, comprobado del lado del servidor.
  *
- * POR QUE NO 'profile_id'
- * -----------------------
- * La primera version mandaba 'profile_id' y el motor resolvia los agentes
- * asignados al colaborador. Dos problemas, los dos medidos el 05/10/2026
- * contra produccion:
- *
- *   1. Sin asignaciones en 'asistente.tenant_users' el motor corta con
- *      "Todavia no tienes ningun agente asignado" -- correcto y fail-closed,
- *      pero convierte abrir un chat de supervision en un tramite de alta.
- *   2. Aun con agentes asignados, esos agentes son 'soporte' o 'facturacion':
- *      estan hechos para atender a UN cliente por vez y miran la operacion
- *      por el agujero de un abonado.
- *
- * 'supervisor_noc' se declara en la config del tenant con su catalogo de
- * solo lectura y sus listas blancas propias. '/chat' acepta 'rol' por nombre
- * -- es el mismo camino que usa el simulador de WhatsApp.
- */
-const ROL = 'supervisor_noc';
-
-/**
- * Quien puede usar la burbuja.
- *
- * Pedir el rol por nombre saltea 'agentes_de_colaborador', que era el control
- * que decidia quien accede. Sin reponerlo, cualquier usuario autenticado de
- * la empresa tendria el estado de la operacion -- asi que la puerta se pone
- * aca, explicita y con el vocabulario de roles que el CRM ya tiene
- * (common/utils.py::ROLES).
- *
- * Fail-closed: un rol que no este en esta lista --incluido 'USER' y la
- * ausencia de rol-- no pasa.
- */
-const ROLES_QUE_SUPERVISAN = new Set(['ADMIN', 'SUPERVISOR', 'OPERACIONES']);
-
-/**
- * Lo que hace falta para hablarle al motor, resuelto del lado del servidor.
- * Devuelve { error, status } si algo falta -- quien llama lo propaga tal cual
- * en vez de continuar con una identidad a medias.
+ * Devuelve `{ error, status }` si algo falta: quien llama lo propaga tal cual
+ * en vez de seguir con una identidad a medias.
  *
  * @param {any} locals
- * @param {typeof globalThis.fetch} fetch
  */
-async function identidad(locals, fetch) {
-  if (!locals.user) return { error: 'No autenticado', status: 401 };
-
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = await tenantDeLaSesion(locals, fetch);
-  if (!baseUrl || !tenant) {
-    return { error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)', status: 500 };
+function quienPregunta(locals) {
+  if (!locals?.user) {
+    return { error: 'Tu sesión expiró. Volvé a iniciar sesión.', status: 401 };
   }
-
-  if (!ROLES_QUE_SUPERVISAN.has(locals.profile?.role)) {
+  if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
     return {
-      error: 'El chat del Supervisor es para los perfiles de operacion '
-        + '(ADMIN, SUPERVISOR u OPERACIONES).',
+      error: 'Solo el equipo de operaciones puede conversar con el Supervisor NOC.',
       status: 403
     };
   }
-
-  const sesion = claveDeSesion(locals.user);
-  if (!sesion) return { error: 'No se pudo identificar tu sesion', status: 403 };
-
-  return { baseUrl, tenant, sesion };
-}
-
-/**
- * El estado del Supervisor, para que la pregunta no llegue sin contexto.
- *
- * NUNCA LEVANTA Y NUNCA BLOQUEA. Si el CRM no contesta se devuelve null y la
- * pregunta viaja sola: una respuesta sin contexto sirve mas que un chat
- * caido porque una consulta de indicadores fallo. Se distingue de un cero --
- * ver 'bloqueDeContexto'.
- *
- * Usa los endpoints que YA existen, con los permisos y el tenant de quien
- * pregunta: no hay una segunda puerta a los datos del Supervisor.
- *
- * @param {import('@sveltejs/kit').Cookies} cookies
- */
-async function estadoDelSupervisor(cookies) {
-  /** @type {{abiertas?: number, criticas?: number, indicadores?: Record<string, any>}} */
-  const estado = {};
-  try {
-    const propuestas = await apiRequest('/operaciones/propuestas/?estado=propuesta', {}, { cookies });
-    const filas = Array.isArray(propuestas) ? propuestas : (propuestas?.results ?? []);
-    if (Array.isArray(filas)) {
-      estado.abiertas = filas.length;
-      estado.criticas = filas.filter((p) => Number(p?.prioridad ?? 0) >= 60).length;
-    }
-  } catch {
-    //  Silencio deliberado: ver la docstring. No se registra el detalle
-    //  porque puede traer datos de la operacion.
-  }
-  try {
-    const ind = await apiRequest('/operaciones/indicadores/', {}, { cookies });
-    if (ind && typeof ind === 'object') {
-      const plano = {};
-      for (const [k, v] of Object.entries(ind)) {
-        if (typeof v === 'number' || typeof v === 'string') plano[k] = v;
-      }
-      if (Object.keys(plano).length) estado.indicadores = plano;
-    }
-  } catch {
-    /* igual que arriba */
-  }
-  return Object.keys(estado).length ? estado : null;
+  return {};
 }
 
 /** @type {import('./$types').RequestHandler} */
-export async function GET({ locals, fetch }) {
-  const id = await identidad(locals, fetch);
-  if (id.error) return json({ error: id.error }, { status: id.status });
-
-  const url = new URL(`${id.baseUrl}/chat/historial`);
-  url.searchParams.set('tenant', id.tenant);
-  url.searchParams.set('identificador_sesion', id.sesion);
-  url.searchParams.set('limite', String(LIMITE_HISTORIAL));
+export async function GET({ locals, cookies }) {
+  const quien = quienPregunta(locals);
+  if (quien.error) return json({ error: quien.error }, { status: quien.status });
 
   try {
-    const resp = await fetch(url, { headers: headersMotor() });
-    const datos = await resp.json();
-    if (!resp.ok) {
-      return json({ error: datos.error || 'No se pudo leer el historial' },
-        { status: resp.status });
-    }
-    return json(datos);
-  } catch (/** @type {any} */ err) {
-    return json({ error: err?.message || 'No se pudo contactar al asistente' },
-      { status: 502 });
-  }
-}
-
-/** @type {import('./$types').RequestHandler} */
-export async function POST({ request, locals, cookies, fetch }) {
-  const id = await identidad(locals, fetch);
-  if (id.error) return json({ error: id.error }, { status: id.status });
-
-  const { mensaje } = await request.json();
-  if (!mensaje || !String(mensaje).trim()) {
-    return json({ error: 'Falta el mensaje' }, { status: 400 });
-  }
-
-  //  El nombre viaja para que el motor pueda firmar a nombre de quien
-  //  pregunta. Si no se puede resolver, NO se corta: el nombre es una
-  //  cortesia, no un control -- quien decide el acceso es la puerta de
-  //  arriba, y el perfil ya quedo comprobado ahi.
-  let nombreColaborador = '';
-  try {
-    const perfil = await apiRequest('/profile/', {}, { cookies });
-    nombreColaborador = (perfil?.user_obj?.name || perfil?.user_obj?.email || '').trim();
-  } catch {
-    /* sigue sin nombre */
-  }
-
-  const contexto = bloqueDeContexto(await estadoDelSupervisor(cookies));
-
-  try {
-    const resp = await fetch(`${id.baseUrl}/chat`, {
-      method: 'POST',
-      headers: headersMotor({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        tenant: id.tenant,
-        rol: ROL,
-        identificador_sesion: id.sesion,
-        nombre_colaborador: nombreColaborador,
-        mensaje: mensajeParaElMotor(String(mensaje), contexto)
-      })
+    const d = await apiRequest(
+      `/operaciones/supervisor/chat/?limite=${LIMITE_HISTORIAL}`,
+      {},
+      { cookies }
+    );
+    return json({
+      conversacion_id: d?.conversacion_id ?? null,
+      //  La forma que espera `aBurbujas`: rol `user`/`assistant` y `contenido`.
+      //  La traduccion la hace Django, no esta ruta -- ver la docstring.
+      mensajes: Array.isArray(d?.mensajes) ? d.mensajes : []
     });
-    const datos = await resp.json();
-    if (!resp.ok) {
-      return json({ error: datos.error || 'El Supervisor no respondio' },
-        { status: resp.status });
-    }
-    return json(datos);
   } catch (/** @type {any} */ err) {
-    return json({ error: err?.message || 'No se pudo contactar al asistente' },
-      { status: 502 });
+    const e = traducirError(err, 'el historial del Supervisor');
+    return json({ error: e.mensaje, codigo: e.codigo }, { status: e.status ?? 502 });
+  }
+}
+
+/** @type {import('./$types').RequestHandler} */
+export async function POST({ request, locals, cookies }) {
+  const quien = quienPregunta(locals);
+  if (quien.error) return json({ error: quien.error }, { status: quien.status });
+
+  /** @type {{ mensaje?: string, conversacion_id?: string, situacion?: string, caso?: string }} */
+  let cuerpo;
+  try {
+    cuerpo = await request.json();
+  } catch {
+    return json({ error: 'El cuerpo tiene que ser JSON.' }, { status: 400 });
+  }
+
+  const mensaje = (cuerpo?.mensaje ?? '').trim();
+  if (!mensaje) {
+    //  Antes de gastar un turno: un mensaje vacio no se le manda al modelo.
+    return json({ error: 'Escribí algo para preguntarle al Supervisor.' }, { status: 400 });
+  }
+  if (mensaje.length > TOPE_MENSAJE) {
+    return json(
+      { error: `El mensaje es muy largo (máximo ${TOPE_MENSAJE} caracteres).` },
+      { status: 400 }
+    );
+  }
+
+  //  Solo se reenvia lo que la vista entiende. Un campo de mas viajaria sin que
+  //  nada lo valide.
+  /** @type {Record<string, string>} */
+  const envio = { mensaje };
+  if (cuerpo?.conversacion_id) envio.conversacion_id = String(cuerpo.conversacion_id);
+  if (cuerpo?.situacion) envio.situacion = String(cuerpo.situacion);
+  if (cuerpo?.caso) envio.caso = String(cuerpo.caso);
+
+  try {
+    const d = await apiRequest(
+      '/operaciones/supervisor/chat/',
+      { method: 'POST', body: envio },
+      { cookies }
+    );
+    return json({
+      conversacion_id: d?.conversacion_id ?? null,
+      contexto: d?.contexto ?? null,
+      respuesta: d?.respuesta ?? '',
+      es_error: Boolean(d?.es_error),
+      //  Que consulto para contestar. Viaja a proposito: una respuesta del
+      //  Supervisor sin poder ver de donde salio es una afirmacion sin respaldo.
+      herramientas: d?.herramientas ?? [],
+      duracion_ms: d?.duracion_ms ?? null,
+      error: null
+    });
+  } catch (/** @type {any} */ err) {
+    //  `traducirError` es el mismo que usa el resto del Supervisor NOC: no se
+    //  escribe una segunda tabla de mensajes de error. El detalle tecnico se
+    //  queda del lado de Django, que es donde se depura -- puede traer el
+    //  nombre de un host interno.
+    const e = traducirError(err, 'el chat del Supervisor');
+    return json({ error: e.mensaje, codigo: e.codigo }, { status: e.status ?? 502 });
   }
 }

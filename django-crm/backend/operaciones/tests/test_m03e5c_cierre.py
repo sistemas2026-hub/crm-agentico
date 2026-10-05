@@ -498,6 +498,79 @@ def test_12_no_se_crearon_ni_ampliaron_roles():
 # ===========================================================================
 #  §17  --  deriva de arquitectura
 # ===========================================================================
+def _codigo_sin_prosa(fuente: str) -> str:
+    """
+    El CODIGO de un modulo, sin comentarios ni docstrings.
+
+    POR QUE existe, medido el 05/10/2026: 'test_17' se puso roja porque el
+    docstring de 'ChatSupervisorView' DICE "no llama a SmartOLT ni a WispHub"
+    -- justamente la propiedad que la guarda defiende. Un comentario no es una
+    llamada. Borrar la palabra del comentario para destrabar la guarda seria
+    fabricar la marca que destraba (CLAUDE.md §9), y encima perderia la
+    explicacion de por que esa vista no toca un sistema externo.
+
+    Lo que NO se debilita: un 'wisphub' que sea CODIGO --un import, un
+    atributo, una cadena pasada a 'requests'-- sobrevive a 'ast.unparse' y la
+    guarda lo sigue viendo. Eso se afirma en 'test_17b', que muta el fuente a
+    proposito en las dos direcciones.
+    """
+    import ast
+
+    arbol = ast.parse(fuente)
+    for n in ast.walk(arbol):
+        cuerpo = getattr(n, "body", None)
+        if not isinstance(cuerpo, list) or not cuerpo:
+            continue
+        if not isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                              ast.AsyncFunctionDef)):
+            continue
+        p = cuerpo[0]
+        if (isinstance(p, ast.Expr) and isinstance(p.value, ast.Constant)
+                and isinstance(p.value.value, str)):
+            #  Un cuerpo que era SOLO un docstring queda con un 'pass'.
+            cuerpo[:] = cuerpo[1:] or [ast.Pass()]
+    return ast.unparse(ast.fix_missing_locations(arbol))
+
+
+def test_17b_el_filtro_de_prosa_no_tapa_una_llamada_real():
+    """
+    La mutacion de 'test_17': que su filtro no se haya vuelto un colador.
+
+    Se le pasa un modulo de juguete con la palabra prohibida en los DOS
+    lugares --en un docstring y en una llamada de verdad-- y se afirma el
+    EFECTO de cada uno por separado: la prosa desaparece, el codigo queda.
+    Sin esta prueba, '_codigo_sin_prosa' podria devolver la cadena vacia y
+    'test_17' seguiria verde midiendo nada.
+    """
+    #  Se arma con 'chr(10)' y no con literales escapados a proposito: el
+    #  modulo de juguete tiene que leerse igual que un modulo real.
+    con_prosa_y_codigo = chr(10).join([
+        '"""Este modulo no habla con WispHub."""',
+        'import requests',
+        '',
+        '#  tampoco con smartolt',
+        'def f():',
+        '    """Ni con WhatsApp."""',
+        '    return requests.get("https://api.wisphub.io/api/clientes/")',
+    ])
+
+    limpio = _codigo_sin_prosa(con_prosa_y_codigo).lower()
+
+    #  La prosa se fue: las tres menciones que eran SOLO texto.
+    assert "no habla con" not in limpio
+    assert "tampoco con" not in limpio
+    assert "whatsapp" not in limpio
+
+    #  El codigo quedo: la llamada real sigue ahi, y con su dominio.
+    assert "requests.get" in limpio
+    assert "wisphub" in limpio
+    assert "import requests" in limpio
+
+    #  Y lo que 'test_17' busca de verdad lo encontraria en este fuente.
+    for externo in ("wisphub", "requests."):
+        assert externo in limpio, externo
+
+
 @pytest.mark.django_db
 def test_17_e5_no_trajo_ningun_sistema_paralelo():
     """
@@ -507,7 +580,8 @@ def test_17_e5_no_trajo_ningun_sistema_paralelo():
     import inspect
     from operaciones import programacion, views
 
-    fuente = inspect.getsource(programacion) + inspect.getsource(views)
+    fuente = (_codigo_sin_prosa(inspect.getsource(programacion))
+              + _codigo_sin_prosa(inspect.getsource(views)))
 
     #  Ninguna llamada directa a un sistema externo.
     for externo in ("wisphub", "smartolt", "whatsapp", "requests.",
@@ -562,7 +636,16 @@ def test_17_e5_no_trajo_ningun_sistema_paralelo():
                        #  con su historial, en vez de la constante
                        #  'NIVEL_MAXIMO_ETAPA' del codigo. Los cinco niveles NO se
                        #  redefinen: son los de 'PropuestaSupervisor.NIVELES'.
-                       "DecisionSupervisor", "NivelAutonomia"}, modelos
+                       "DecisionSupervisor", "NivelAutonomia",
+                       #  05/10/2026, paso P5. El chat del Supervisor. NO
+                       #  reemplaza 'asistente.conversations' del motor: esa es
+                       #  la conversacion de WhatsApp con un CLIENTE FINAL, con
+                       #  su ventana de 24 h, su relevo IA-humano y su cierre por
+                       #  plazo. Esto es un colaborador hablando con el
+                       #  Supervisor, y referencia una SituacionOperativa -- que
+                       #  vive de este lado de la frontera, porque el motor no
+                       #  lee las tablas del CRM.
+                       "ConversacionSupervisor", "MensajeSupervisor"}, modelos
 
 
 @pytest.mark.django_db
