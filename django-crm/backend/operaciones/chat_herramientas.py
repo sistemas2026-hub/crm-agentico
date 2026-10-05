@@ -43,6 +43,13 @@ from __future__ import annotations
 from django.utils import timezone
 
 from operaciones import autonomia as gob_autonomia
+#  P6: se importan LAS DOS FUNCIONES DE LECTURA, no el modulo. 'coordinacion'
+#  tambien tiene 'solicitar_actividad', que ESCRIBE; importar el modulo entero
+#  dejaria esa escritura alcanzable por un nombre ligado dentro de este archivo,
+#  y la guarda de P5 ('test_20_NINGUNA_herramienta_escribe') dejaria de medir lo
+#  que dice medir. Con el import puntual, aqui no hay forma de llegar a ella.
+from operaciones.coordinacion import (panorama_m03,
+                                      pendientes_de_la_situacion)
 from operaciones.fuentes_modelos import EstadoLectura, Fuente, FuenteEstado
 from operaciones.gobierno_modelos import DecisionSupervisor
 from operaciones.models import PropuestaSupervisor
@@ -370,6 +377,92 @@ def mis_limites(org) -> dict:
 #  Igual que el registro de trabajos del scheduler: un diccionario literal que se
 #  lee de un vistazo para auditar QUE puede consultar el Supervisor. No hay
 #  registro dinamico y no hay 'getattr' sobre un nombre que venga del modelo.
+# =============================================================================
+#  M02 / M03  --  lo que P6 sumo. TODO LECTURA.
+# =============================================================================
+
+def coordinaciones_de_situacion(org, *, codigo: str) -> dict:
+    """
+    Que trabajo se pidio a partir de esta situacion, y en que estado esta.
+
+    Contesta "¿que evidencia falta?" con contenido en vez de con una excusa: una
+    solicitud abierta es evidencia que todavia no llego.
+
+    'completadas_sin_validar' viaja APARTE a proposito. Una actividad terminada
+    cuya validacion nadie aprobo NO es una actividad resuelta, y presentarlas
+    juntas afirmaria que el problema se atendio.
+    """
+    s = _situacion(org, codigo)
+    salida = pendientes_de_la_situacion(s)
+    salida["codigo"] = s.codigo
+    return salida
+
+
+def pendientes_criticos(org, *, limite=TOPE) -> dict:
+    """
+    Los pendientes de M02 que necesitan a alguien: vencidos, sin responsable,
+    bloqueados o esperando una dependencia.
+
+    NO DEVUELVE NOMBRES de colaboradores, y no es un olvido: la autorizacion de
+    tratamiento que ampara mandar datos a un proveedor externo se razono para
+    datos de CLIENTE (PRD RNF-01), y un colaborador tambien es un titular. Se
+    devuelve el id del responsable y el conteo por responsable; resolver el
+    nombre es de la pantalla, que no sale del servidor.
+    """
+    from operaciones import actividades as m02
+    from operaciones.models import ActividadOperativa as _A
+
+    qs = m02.pendientes_relevantes(org, solo_abiertas=True)
+    filas, por_responsable = [], {}
+    for a in qs[:_acotar(limite)]:
+        clase = m02.clasificar_vencimiento(a)
+        critico = (clase in (m02.VENCIDA, m02.VENCE_PRONTO)
+                   or a.responsable_id is None
+                   or a.estado_operativo == _A.BLOQUEADA
+                   or bool(a.depende_de_id and a.bloqueada_por_dependencia))
+        if not critico:
+            continue
+        clave = str(a.responsable_id) if a.responsable_id else "(sin responsable)"
+        por_responsable[clave] = por_responsable.get(clave, 0) + 1
+        filas.append({
+            "id": str(a.id), "tipo": a.tipo, "titulo": a.titulo,
+            "estado": a.estado_operativo, "vencimiento": clase,
+            "responsable_id": str(a.responsable_id) if a.responsable_id else "",
+            "sin_responsable": a.responsable_id is None,
+            "bloqueada": a.estado_operativo == _A.BLOQUEADA,
+            "motivo_bloqueo": a.motivo_bloqueo,
+            "esperando_dependencia": bool(a.depende_de_id
+                                          and a.bloqueada_por_dependencia),
+        })
+    return {"pendientes": filas, "cuantos": len(filas),
+            "por_responsable": por_responsable,
+            "nota": "sin nombres de colaborador a proposito; el id sirve para "
+                    "que la pantalla lo resuelva"}
+
+
+def panorama_programacion(org, *, dia=None) -> dict:
+    """
+    La jornada de M03: cuanto hay programado, la capacidad y que esta en riesgo
+    de plazo.
+
+    El veredicto de capacidad viaja TAL CUAL lo da 'capacidad.py', incluido
+    'CAPACIDAD_NO_DETERMINABLE'. "No se puede determinar" NO es "no hay
+    sobrecarga", y colapsar los dos es el error que la capa de fuentes existe
+    para no repetir. Igual con 'ordenes_sin_plazo_medible', que se cuenta aparte
+    de las que estan a tiempo.
+    """
+    from datetime import date as _date
+
+    d = None
+    if dia:
+        try:
+            d = _date.fromisoformat(str(dia)[:10])
+        except ValueError:
+            return {"error": "la fecha tiene que ser AAAA-MM-DD",
+                    "recibido": str(dia)[:20]}
+    return panorama_m03(org, dia=d)
+
+
 HERRAMIENTAS = {
     "listar_situaciones": listar_situaciones,
     "detalle_situacion": detalle_situacion,
@@ -381,6 +474,10 @@ HERRAMIENTAS = {
     "propuestas_pendientes": propuestas_pendientes,
     "decisiones_recientes": decisiones_recientes,
     "mis_limites": mis_limites,
+    #  P6
+    "coordinaciones_de_situacion": coordinaciones_de_situacion,
+    "pendientes_criticos": pendientes_criticos,
+    "panorama_programacion": panorama_programacion,
 }
 
 #  Los argumentos que CADA herramienta acepta. Es una lista blanca: un argumento
@@ -397,6 +494,12 @@ ARGUMENTOS = {
     "propuestas_pendientes": {"limite"},
     "decisiones_recientes": {"limite"},
     "mis_limites": set(),
+    #  P6. 'panorama_programacion' acepta 'dia' y nada mas: ni un rango, ni un
+    #  responsable -- un rango abierto dejaria al modelo pedir la programacion
+    #  de un año entero y pagarla la empresa.
+    "coordinaciones_de_situacion": {"codigo"},
+    "pendientes_criticos": {"limite"},
+    "panorama_programacion": {"dia"},
 }
 
 
@@ -502,4 +605,23 @@ def esquema() -> list[dict]:
         h("mis_limites",
           "El nivel de autonomía configurado y el efectivo, con el motivo de "
           "cualquier recorte. Consultala antes de decir que puedes hacer algo."),
+
+        #  --- P6: M02 y M03. Las tres son de LECTURA. --------------------
+        h("coordinaciones_de_situacion",
+          "Qué trabajo se PIDIÓ a partir de una situación y en qué estado está. "
+          "Devuelve las completadas-sin-validar APARTE: terminada no es validada. "
+          "Úsala para contestar qué evidencia falta.", codigo, ["codigo"]),
+        h("pendientes_criticos",
+          "Los pendientes que necesitan a alguien: vencidos, sin responsable, "
+          "bloqueados o esperando una dependencia, con el conteo por responsable. "
+          "NO devuelve nombres de colaborador, solo su id: no los pidas ni los "
+          "inventes.", limite),
+        h("panorama_programacion",
+          "La jornada: cuántas órdenes hay programadas, el veredicto de capacidad "
+          "y cuáles están en riesgo de plazo. OJO: el veredicto puede ser "
+          "'CAPACIDAD_NO_DETERMINABLE', que NO significa que no haya "
+          "sobrecarga; y las órdenes sin plazo medible se cuentan aparte de las "
+          "que están a tiempo. No las sumes.",
+          {"dia": {"type": "string",
+                   "description": "Día en AAAA-MM-DD. Por defecto, hoy."}}),
     ]

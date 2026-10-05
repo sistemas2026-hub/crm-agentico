@@ -148,11 +148,17 @@ class TipoEvento:
     DESCARTE = "descarte"
     CIERRE = "cierre"
     RELACION = "relacion"
+    #  05/10/2026, paso P6. Se PIDIO trabajo a partir de esta situacion. No es
+    #  'RECOMENDACION': recomendar deja una PropuestaSupervisor que una persona
+    #  todavia tiene que decidir; coordinar ya creo una ActividadOperativa en
+    #  M02. Confundirlos haria que el timeline afirmara que alguien esta
+    #  trabajando cuando solo se sugirio que alguien trabajara.
+    COORDINACION = "coordinacion"
 
     TODOS = (DETECTADA, ACTUALIZADA, EVIDENCIA, AFECTADO_NUEVO,
              AFECTADO_RECUPERADO, TICKET_ASOCIADO, CAMBIO_ESTADO, CAMBIO_RIESGO,
              HIPOTESIS, RECOMENDACION, VERIFICACION, SENAL_AUSENTE, INCONCLUSA,
-             DESCARTE, CIERRE, RELACION)
+             DESCARTE, CIERRE, RELACION, COORDINACION)
     ETIQUETAS = tuple((t, t.replace("_", " ").capitalize()) for t in TODOS)
 
 

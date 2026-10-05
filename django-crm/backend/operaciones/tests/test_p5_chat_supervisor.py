@@ -510,6 +510,20 @@ def test_20_NINGUNA_herramienta_escribe(org_a):
                                                       & NOMBRES_PROHIBIDOS)
     assert not colados, sorted(colados)
 
+    #  05/10/2026, paso P6. 'operaciones.coordinacion' SI escribe: su
+    #  'solicitar_actividad' crea una ActividadOperativa. Este archivo importa
+    #  sus DOS funciones de lectura por nombre, no el modulo -- y eso hay que
+    #  afirmarlo, porque 'from operaciones import coordinacion' pasaria el
+    #  escaneo de arriba (no hay ningun '.create' escrito aqui) y aun asi
+    #  dejaria la escritura a un atributo de distancia.
+    assert "coordinacion" not in nombres, (
+        "coordinacion importado como modulo: solicitar_actividad queda "
+        "alcanzable desde las herramientas del chat")
+    import operaciones.chat_herramientas as _ch
+    assert not hasattr(_ch, "coordinacion")
+    assert hasattr(_ch, "panorama_m03")
+    assert hasattr(_ch, "pendientes_de_la_situacion")
+
 
 def test_21_el_catalogo_de_herramientas_es_cerrado_y_exacto(org_a):
     #  Un conjunto EXACTO: una herramienta nueva obliga a venir aquí y declararla.
@@ -517,7 +531,12 @@ def test_21_el_catalogo_de_herramientas_es_cerrado_y_exacto(org_a):
         "listar_situaciones", "detalle_situacion", "timeline_situacion",
         "afectados_situacion", "casos_de_situacion", "relaciones_situacion",
         "estado_fuentes", "propuestas_pendientes", "decisiones_recientes",
-        "mis_limites"}
+        "mis_limites",
+        #  05/10/2026, paso P6. Tres lecturas de M02/M03, para que el chat
+        #  pueda contestar que trabajo se pidio, que pendiente necesita a
+        #  alguien y como esta la jornada. Las tres LEEN.
+        "coordinaciones_de_situacion", "pendientes_criticos",
+        "panorama_programacion"}
     #  Y cada una declara sus argumentos: sin entrada en ARGUMENTOS, no pasa nada.
     assert set(chat_herramientas.ARGUMENTOS) == set(
         chat_herramientas.HERRAMIENTAS)

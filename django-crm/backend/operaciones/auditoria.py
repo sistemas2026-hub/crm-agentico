@@ -46,6 +46,9 @@ from common.models import Activity
 ENTIDAD_ACTIVIDAD = "ActividadOperativa"
 ENTIDAD_PROPUESTA = "PropuestaSupervisor"
 ENTIDAD_NOVEDAD = "NovedadOperativa"
+#  P6: para auditar una coordinacion rechazada, que por definicion no tiene
+#  actividad contra la que registrarse.
+ENTIDAD_SITUACION = "SituacionOperativa"
 
 
 def registrar(*, org, actor, accion: str, entidad: str, entidad_id,
@@ -95,12 +98,16 @@ def recientes(org, limite: int = 20):
     ninguna forma: 'historial' responde "qué le pasó a ESTA propuesta", y no
     hay manera de preguntar "qué pasó, en general, en la última hora".
 
-    Se acota a las tres entidades de este módulo a propósito. 'common.Activity'
-    es la auditoría del CRM entero -- sin el filtro, el feed del Supervisor se
+    Se acota a las entidades de este módulo a propósito. 'common.Activity' es
+    la auditoría del CRM entero -- sin el filtro, el feed del Supervisor se
     llenaría de contactos editados y correos enviados, que es cierto pero no es
     lo que esta pantalla pregunta.
+
+    P6 sumó la CUARTA: sin ella, una coordinación rechazada por la autonomía se
+    auditaba y no aparecía en el feed -- justo el hecho que hay que ver.
     """
     return Activity.objects.filter(
         org=org,
-        entity_type__in=[ENTIDAD_PROPUESTA, ENTIDAD_ACTIVIDAD, ENTIDAD_NOVEDAD],
+        entity_type__in=[ENTIDAD_PROPUESTA, ENTIDAD_ACTIVIDAD, ENTIDAD_NOVEDAD,
+                         ENTIDAD_SITUACION],
     ).select_related("user", "user__user").order_by("-created_at")[:limite]
