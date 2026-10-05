@@ -298,3 +298,92 @@ def test_s_un_dominio_sin_https_se_rechaza(admin_client):
         CANALES, {"url_base_app": "campo.rapilink.co"}, format="json"
     )
     assert r.status_code == 400
+
+
+# --------------------------------------------------------------------------- #
+# T. El telefono al que llama el tecnico
+# --------------------------------------------------------------------------- #
+
+def test_t1_el_telefono_de_soporte_se_guarda_y_se_lee(admin_client, org_a):
+    """Hasta hoy ese numero vivia en la agenda personal de cada tecnico: uno
+    nuevo no lo tenia, y el dia que cambiaba no se enteraba nadie."""
+    r = admin_client.put(
+        "/api/campo/avisos/canales/",
+        {"url_base_app": "https://campo.rapilink.co",
+         "telefono_soporte": "+57 300 111 2233"},
+        format="json",
+    )
+    assert r.status_code == 200, r.data
+    assert r.data["telefono_soporte"] == "+57 300 111 2233"
+
+    r = admin_client.get("/api/campo/avisos/canales/")
+    assert r.data["telefono_soporte"] == "+57 300 111 2233"
+
+
+def test_t2_vaciarlo_es_legitimo(admin_client, org_a):
+    """Sin numero la app no dibuja el boton, en vez de ofrecer una llamada que
+    no va a ningun lado."""
+    admin_client.put(
+        "/api/campo/avisos/canales/",
+        {"url_base_app": "", "telefono_soporte": "+57 300 111 2233"},
+        format="json",
+    )
+
+    r = admin_client.put(
+        "/api/campo/avisos/canales/",
+        {"url_base_app": "", "telefono_soporte": ""},
+        format="json",
+    )
+
+    assert r.status_code == 200
+    assert r.data["telefono_soporte"] == ""
+
+
+def test_t3_un_texto_SIN_NINGUN_DIGITO_se_rechaza(admin_client, org_a):
+    """No se valida la FORMA --un plan de numeracion no es igual en dos paises,
+    y rechazar un numero raro le quitaria al tecnico la unica forma de llamar--
+    pero «llamar a Juan» no es un telefono, es un renglon escrito por error."""
+    r = admin_client.put(
+        "/api/campo/avisos/canales/",
+        {"url_base_app": "", "telefono_soporte": "llamar a Juan"},
+        format="json",
+    )
+
+    assert r.status_code == 400
+
+
+def test_t4_guardar_el_dominio_NO_borra_el_telefono(admin_client, org_a):
+    """Son la misma fila. Mandarlos por separado haria que guardar uno borre el
+    otro, y el tecnico se quedaria sin el numero sin que nadie lo tocara."""
+    admin_client.put(
+        "/api/campo/avisos/canales/",
+        {"url_base_app": "https://a.co", "telefono_soporte": "+57 300 111 2233"},
+        format="json",
+    )
+
+    r = admin_client.put(
+        "/api/campo/avisos/canales/",
+        {"url_base_app": "https://b.co", "telefono_soporte": "+57 300 111 2233"},
+        format="json",
+    )
+
+    assert r.data["url_base_app"] == "https://b.co"
+    assert r.data["telefono_soporte"] == "+57 300 111 2233"
+
+
+def test_t5_el_bootstrap_lo_lleva_al_telefono(admin_client, user_client, org_a):
+    """Viaja SIEMPRE --aunque este vacio-- para que la app distinga «esta
+    empresa no lo configuro» de «el servidor viejo no lo manda»."""
+    r = user_client.get("/api/campo/bootstrap/")
+    assert r.status_code == 200
+    assert "telefono_soporte" in r.data["organizacion"]
+    assert r.data["organizacion"]["telefono_soporte"] == ""
+
+    admin_client.put(
+        "/api/campo/avisos/canales/",
+        {"url_base_app": "", "telefono_soporte": "+57 300 111 2233"},
+        format="json",
+    )
+
+    r = user_client.get("/api/campo/bootstrap/")
+    assert r.data["organizacion"]["telefono_soporte"] == "+57 300 111 2233"

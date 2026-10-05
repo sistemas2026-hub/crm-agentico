@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
+import 'package:package_info_plus/package_info_plus.dart';
+
 import '../../core/avisos/avisos_push.dart';
+import '../../core/acciones/salir_de_la_app.dart';
 import '../../core/estado/ordenes_jornada.dart';
 import '../../demo/field_mock_data.dart';
 import '../../core/storage/ciclo_de_vida_local.dart';
@@ -63,6 +66,8 @@ class ShellDependencias {
     required this.abrirTrabajo,
     this.abrirOrdenPorId,
     this.contarAvisosSinLeer,
+    this.datosDeSoporte,
+    this.salir = const SalirDeLaApp(),
     this.conectividad,
     this.cerrarSesion,
     this.cicloDeVida,
@@ -97,6 +102,15 @@ class ShellDependencias {
   /// Nulo en pruebas que no montan base: sin él no se dibuja número, en vez de
   /// romperse.
   final Future<int> Function()? contarAvisosSinLeer;
+
+  /// El número de soporte de la empresa y la versión de la app.
+  ///
+  /// Los dos pueden faltar: una empresa que no lo configuró, o un entorno sin
+  /// paquete. Nulo en pruebas que no los necesitan.
+  final Future<(String?, String)> Function()? datosDeSoporte;
+
+  /// Quién saca al técnico de la aplicación. Acá se usa para llamar a soporte.
+  final SalirDeLaApp salir;
 
   /// `true` si el teléfono tiene alguna red. Nulo si no se puede saber.
   final Stream<bool>? conectividad;
@@ -166,6 +180,17 @@ class ShellDependencias {
           orgId: orgId,
           profileId: profileId,
         );
+      },
+      datosDeSoporte: () async {
+        final String? tel = await almacenamiento.getTelefonoSoporte();
+        String version = '';
+        try {
+          final PackageInfo info = await PackageInfo.fromPlatform();
+          version = 'v${info.version} (${info.buildNumber})';
+        } catch (_) {
+          // Sin versión la hoja no la dibuja. No es un error.
+        }
+        return (tel, version);
       },
       cerrarSesion: almacenamiento.clearSession,
       cicloDeVida: CierreDeSesion(
@@ -239,6 +264,12 @@ class _AppShellState extends State<AppShell> {
 
   StreamSubscription<LocalDatabaseChangeEvent>? _suscripcionAvisos;
 
+  /// El número de soporte de la empresa. `null` si no lo configuró.
+  String? _telefonoSoporte;
+
+  /// La versión de la app, para dictarla cuando se llama a soporte.
+  String _version = '';
+
   @override
   void initState() {
     super.initState();
@@ -288,11 +319,32 @@ class _AppShellState extends State<AppShell> {
     }
 
     _contarAvisos();
+    _leerDatosDeSoporte();
     // El número tiene que moverse cuando llega un aviso por push y cuando la
     // cola baja los de la plataforma: las dos cosas escriben la misma tabla.
     _suscripcionAvisos = LocalDatabase.onDataChanged.listen((evento) {
       if (evento.tabla == 'local_notificaciones') _contarAvisos();
     });
+  }
+
+  /// El número de soporte y la versión, para la hoja de perfil.
+  ///
+  /// Los dos pueden faltar y eso no es un error: una empresa que no configuró
+  /// soporte, o un entorno donde el paquete no reporta versión. La hoja
+  /// simplemente no los dibuja.
+  Future<void> _leerDatosDeSoporte() async {
+    final leer = widget.dependencias.datosDeSoporte;
+    if (leer == null) return;
+    try {
+      final (String?, String) datos = await leer();
+      if (!mounted) return;
+      setState(() {
+        _telefonoSoporte = datos.$1;
+        _version = datos.$2;
+      });
+    } catch (_) {
+      // No puede tumbar el contenedor.
+    }
   }
 
   Future<void> _contarAvisos() async {
@@ -354,6 +406,47 @@ class _AppShellState extends State<AppShell> {
               title: Text(_identidad?.nombre ?? FieldMockData.tecnicoPorDefecto),
               subtitle: Text(_identidad?.empresa ?? FieldMockData.empresaPorDefecto),
             ),
+            // LLAMAR AL NOC.
+            //
+            // Hoy ese numero vive en la agenda personal del tecnico. Uno nuevo
+            // no lo tiene, y el dia que cambia no se entera nadie. Lo configura
+            // la EMPRESA --no esta en el codigo-- y se guarda en el telefono
+            // para que este cuando haga falta, que a veces es justo cuando no
+            // hay senal.
+            //
+            // Sin numero configurado no se dibuja: ofrecer una llamada que no
+            // va a ningun lado es peor que no ofrecerla.
+            if (_telefonoSoporte != null) ...<Widget>[
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.support_agent,
+                    color: AppColors.secondary),
+                title: Text(
+                  'Llamar a soporte',
+                  style: AppTypography.cuerpoGrande,
+                ),
+                subtitle: Text(_telefonoSoporte!),
+                onTap: () => widget.dependencias.salir.llamar(_telefonoSoporte!),
+              ),
+            ],
+            // LA VERSION, para cuando llama a soporte y se la preguntan.
+            //
+            // Va en chico y al final: no es una accion, es un dato que se dicta
+            // una vez cada tanto.
+            if (_version.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.margen,
+                  vertical: AppSpacing.xs,
+                ),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Dexter Campo $_version',
+                    style: AppTypography.etiquetaChica,
+                  ),
+                ),
+              ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout, color: AppColors.error),

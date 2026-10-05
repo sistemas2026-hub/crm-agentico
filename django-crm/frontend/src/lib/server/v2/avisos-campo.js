@@ -31,6 +31,7 @@ export async function leerAvisos(ctx) {
     return {
       canales: d?.canales ?? [],
       urlBaseApp: d?.url_base_app ?? '',
+      telefonoSoporte: d?.telefono_soporte ?? '',
       tipos: d?.tipos ?? [],
       puedeConfigurar: d?.puede_configurar === true,
       error: false
@@ -68,11 +69,20 @@ export async function probarCanal(ctx, id) {
   return apiRequest(`/campo/avisos/canales/${id}/probar/`, { method: 'POST', body: {} }, ctx);
 }
 
-/** El dominio de los enlaces. Es de la empresa, no de un canal. */
-export async function guardarDominio(ctx, urlBaseApp) {
+/**
+ * Lo que es de la EMPRESA y no de un canal: el dominio de los enlaces y el
+ * teléfono al que llama el técnico desde la app.
+ *
+ * Van juntos en el mismo PUT porque son la misma fila. Mandarlos por separado
+ * haría que guardar uno borre el otro.
+ */
+export async function guardarDominio(ctx, urlBaseApp, telefonoSoporte = '') {
   return apiRequest(
     '/campo/avisos/canales/',
-    { method: 'PUT', body: { url_base_app: urlBaseApp } },
+    {
+      method: 'PUT',
+      body: { url_base_app: urlBaseApp, telefono_soporte: telefonoSoporte }
+    },
     ctx
   );
 }

@@ -8,6 +8,7 @@ import 'package:campo/features/detalle_orden/acciones_orden.dart';
 import 'package:campo/features/detalle_orden/detalle_orden_screen.dart';
 import 'package:campo/features/inicio/inicio_screen.dart';
 import 'package:campo/features/inicio/resumen_de_inicio.dart';
+import 'package:campo/features/shell/app_shell.dart';
 import 'package:campo/features/trabajo/trabajo_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:campo/features/materiales/estado_de_jornada.dart';
@@ -348,6 +349,7 @@ void main() {
   });
 
   _contactoAlterno();
+  _perfil();
 
   group('1bis · la línea de horas en la pantalla', () {
     testWidgets('a · con horas se dibujan; sin horas no ocupa lugar',
@@ -506,6 +508,100 @@ void _contactoAlterno() {
       await montar(t, conContacto(telefono: '+57 300 111 2233'));
 
       expect(find.text('Contacto alterno'), findsOneWidget);
+    });
+  });
+}
+
+/// 8. Lo que el técnico necesita cuando algo se rompe.
+void _perfil() {
+  Future<List<Uri>> abrirPerfil(
+    WidgetTester t, {
+    String? telefono,
+    String version = 'v1.0.0 (1)',
+  }) async {
+    t.view.physicalSize = const Size(1000, 2400);
+    t.view.devicePixelRatio = 1.0;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+
+    final StreamController<SyncSummary> resumenes =
+        StreamController<SyncSummary>.broadcast();
+    addTearDown(resumenes.close);
+
+    final List<Uri> abiertos = <Uri>[];
+    final OrdenesJornada ordenes = OrdenesJornada(
+      leerOrdenes: () async => const <Map<String, dynamic>>[],
+      sincronizar: () async {},
+      avisosDeSincronizacion: const Stream<SyncStatus>.empty(),
+    );
+    addTearDown(ordenes.dispose);
+
+    await t.pumpWidget(MaterialApp(
+      theme: AppTheme.lightTheme,
+      home: AppShell(
+        dependencias: ShellDependencias(
+          resumenes: resumenes.stream,
+          resumenInicial: null,
+          sincronizarAhora: () async {},
+          cargarIdentidad: () async => const IdentidadTecnico(
+            nombre: 'Carlos Gómez',
+            empresa: 'Rapilink',
+          ),
+          ordenes: ordenes,
+          abrirTrabajo: (_, _) async {},
+          datosDeSoporte: () async => (telefono, version),
+          salir: SalirDeLaApp(abrir: (Uri u) async {
+            abiertos.add(u);
+            return true;
+          }),
+        ),
+      ),
+    ));
+    await t.pumpAndSettle();
+
+    // La hoja de perfil se abre desde la barra inferior.
+    await t.tap(find.text('Perfil'));
+    await t.pumpAndSettle();
+    return abiertos;
+  }
+
+  group('8 · la hoja de perfil', () {
+    testWidgets('a · con número configurado, se puede llamar a soporte',
+        (WidgetTester t) async {
+      // Ese número vivía en la agenda personal del técnico. Uno nuevo no lo
+      // tiene, y el día que cambia no se entera nadie.
+      final List<Uri> abiertos =
+          await abrirPerfil(t, telefono: '+57 300 111 2233');
+
+      expect(find.text('Llamar a soporte'), findsOneWidget);
+      await t.tap(find.text('Llamar a soporte'));
+      await t.pumpAndSettle();
+
+      expect(abiertos.single.path, '+573001112233');
+    });
+
+    testWidgets('b · SIN número, no se ofrece la llamada',
+        (WidgetTester t) async {
+      // Ofrecer una llamada que no va a ningún lado es peor que no ofrecerla.
+      await abrirPerfil(t);
+
+      expect(find.text('Llamar a soporte'), findsNothing);
+      // Y lo que ya estaba sigue: la hoja no se rompe sin configuración.
+      expect(find.text('Cerrar sesión'), findsOneWidget);
+    });
+
+    testWidgets('c · la versión está, para dictarla al llamar',
+        (WidgetTester t) async {
+      await abrirPerfil(t, telefono: '+57 300 111 2233');
+
+      expect(find.textContaining('v1.0.0 (1)'), findsOneWidget);
+    });
+
+    testWidgets('d · sin versión no se dibuja un renglón vacío',
+        (WidgetTester t) async {
+      await abrirPerfil(t, telefono: '+57 300 111 2233', version: '');
+
+      expect(find.textContaining('Dexter Campo'), findsNothing);
     });
   });
 }

@@ -79,6 +79,29 @@ class ConfiguracionDeAvisos(BaseModel):
         ),
     )
 
+    # EL NUMERO AL QUE LLAMA EL TECNICO CUANDO ALGO NO CUADRA.
+    #
+    # Lo pidio el tecnico al recorrer la app: ese numero hoy lo tiene en su
+    # AGENDA PERSONAL. Un tecnico nuevo no lo tiene, y el dia que cambia no se
+    # entera nadie.
+    #
+    # Vive en la configuracion de la EMPRESA y no en el codigo, por la regla de
+    # CLAUDE.md §3.3: la empresa siguiente tiene otro NOC, y cambiarlo no puede
+    # exigir una version nueva de la app. Se edita desde la misma pantalla que
+    # los canales de avisos.
+    #
+    # Vacio por omision: sin numero la aplicacion no dibuja el boton, en vez de
+    # ofrecer una llamada que no va a ningun lado.
+    telefono_soporte = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text=(
+            "A quién llama el técnico desde la app cuando algo no cuadra: "
+            "el NOC, la mesa de ayuda, el supervisor."
+        ),
+    )
+
     class Meta:
         db_table = "campo_configuracion_de_avisos"
 

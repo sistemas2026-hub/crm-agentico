@@ -230,6 +230,29 @@
             class="w-full h-10 px-3 bg-surface-container-lowest text-on-surface font-body-md text-body-md rounded shadow-sm"
           />
         </div>
+        <!--
+          EL NUMERO AL QUE LLAMA EL TECNICO desde la app cuando algo no cuadra.
+
+          Hasta hoy ese numero vivia en la agenda personal de cada uno: un
+          tecnico nuevo no lo tenia, y el dia que cambiaba no se enteraba nadie.
+          Se edita aca y no en el codigo porque la empresa siguiente tiene otro
+          NOC, y cambiarlo no puede exigir una version nueva de la app.
+
+          Va en el mismo formulario que el dominio porque son la misma fila:
+          mandarlos por separado haria que guardar uno borre el otro.
+        -->
+        <div class="flex flex-col gap-space-xs flex-1">
+          <label for="soporte" class="font-table-header text-table-header text-on-surface-variant uppercase tracking-wider">
+            Teléfono de soporte
+          </label>
+          <input
+            id="soporte"
+            name="telefono_soporte"
+            value={data.telefonoSoporte}
+            placeholder="+57 300 000 0000"
+            class="w-full h-10 px-3 bg-surface-container-lowest text-on-surface font-body-md text-body-md rounded shadow-sm"
+          />
+        </div>
         <button class="h-10 px-4 rounded bg-primary text-on-primary font-body-md text-body-md">
           Guardar
         </button>

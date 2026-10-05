@@ -21,6 +21,13 @@ class SecureStorageService implements SecureStorageLectura {
   static const _keyRefreshToken = 'dexter_refresh_token';
   static const _keyOrgId = 'dexter_current_org_id';
   static const _keyOrgName = 'dexter_current_org_name';
+
+  /// A quién llama el técnico cuando algo no cuadra. Lo configura la EMPRESA.
+  ///
+  /// Se guarda acá y no se pide cada vez porque hace falta justo cuando algo no
+  /// anda —y a veces eso incluye la red—. Un número de soporte que solo
+  /// aparece con señal no sirve de nada.
+  static const _keyTelefonoSoporte = 'dexter_telefono_soporte';
   static const _keyProfileId = 'dexter_profile_id';
   static const _keyUserEmail = 'dexter_user_email';
   static const _keyUserName = 'dexter_user_name';
@@ -63,6 +70,18 @@ class SecureStorageService implements SecureStorageLectura {
   @override
   Future<String?> getOrgId() async => await _storage.read(key: _keyOrgId);
   Future<String?> getOrgName() async => await _storage.read(key: _keyOrgName);
+
+  Future<String?> getTelefonoSoporte() async =>
+      await _storage.read(key: _keyTelefonoSoporte);
+
+  /// Guarda el número de soporte de la empresa. Vacío lo borra.
+  Future<void> setTelefonoSoporte(String telefono) async {
+    if (telefono.trim().isEmpty) {
+      await _storage.delete(key: _keyTelefonoSoporte);
+      return;
+    }
+    await _storage.write(key: _keyTelefonoSoporte, value: telefono.trim());
+  }
   @override
   Future<String?> getProfileId() async => await _storage.read(key: _keyProfileId);
   Future<String?> getUserEmail() async => await _storage.read(key: _keyUserEmail);

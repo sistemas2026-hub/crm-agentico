@@ -92,6 +92,10 @@ class BootstrapView(APIView):
             "organizacion": {
                 "id": str(org.id),
                 "nombre": org.name,
+                # A quien llama el tecnico cuando algo no cuadra. Viaja SIEMPRE
+                # --aunque este vacio-- para que la app distinga «esta empresa
+                # no lo configuro» de «el servidor viejo no lo manda».
+                "telefono_soporte": _telefono_de_soporte(org),
             },
             "capacidades": {
                 "trabajos": True,
@@ -550,6 +554,18 @@ class MedirSenalView(APIView):
             return Response(telemetria.medir_senal(orden))
         except telemetria.SinEquipoParaMedir as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+
+
+def _telefono_de_soporte(org) -> str:
+    """El numero del NOC de esta empresa, o vacio si no lo configuro.
+
+    Vacio no es un error: ninguna empresa nace con esto puesto, y la aplicacion
+    simplemente no dibuja el boton.
+    """
+    from campo.avisos import ConfiguracionDeAvisos
+
+    config = ConfiguracionDeAvisos.objects.filter(org=org).first()
+    return (config.telefono_soporte if config else "") or ""
 
 
 class HistorialDelServicioView(APIView):

@@ -224,6 +224,13 @@ class _LoginScreenState extends State<LoginScreen> {
             final u = bootData['usuario'] is Map ? bootData['usuario'] : {};
             if (u['id'] != null) profileId = u['id'].toString();
             if (u['nombre'] != null) name = u['nombre'].toString();
+            // El número al que llama el técnico cuando algo no cuadra. Lo
+            // configura la empresa; acá solo se guarda para tenerlo sin señal.
+            final o = bootData['organizacion'] is Map
+                ? bootData['organizacion'] as Map
+                : const <dynamic, dynamic>{};
+            await _storage
+                .setTelefonoSoporte((o['telefono_soporte'] ?? '').toString());
           }
         } catch (_) {}
 

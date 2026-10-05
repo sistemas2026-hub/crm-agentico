@@ -73,6 +73,7 @@ class CanalesDeAvisosView(APIView):
             {
                 "canales": [_como_se_ve(c) for c in canales],
                 "url_base_app": config.url_base_app if config else "",
+                "telefono_soporte": config.telefono_soporte if config else "",
                 # Que tipos existen lo dice el BACKEND, no una lista escrita en
                 # el frontend: el dia que se agregue Mattermost aparece solo.
                 "tipos": [
@@ -136,7 +137,7 @@ class CanalesDeAvisosView(APIView):
         return Response(_como_se_ve(canal), status=status.HTTP_201_CREATED)
 
     def put(self, request):
-        """El dominio de los enlaces, que es de la empresa y no de un canal."""
+        """Lo que es de la EMPRESA y no de un canal: el dominio y el soporte."""
         if not _puede_configurar(request):
             return Response(
                 {"detail": "Solo gestión puede configurar los avisos."},
@@ -150,10 +151,30 @@ class CanalesDeAvisosView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # EL NUMERO AL QUE LLAMA EL TECNICO. Se edita acá y no en el codigo
+        # porque la empresa siguiente tiene otro NOC, y cambiarlo no puede
+        # exigir una version nueva de la app.
+        #
+        # No se valida la FORMA: un plan de numeracion no es igual en dos
+        # paises, y rechazar un numero raro le quitaria al tecnico la unica
+        # forma de llamar que tiene. Si esta mal, el marcador se lo muestra.
+        # Lo unico que se exige es que tenga un digito -- sin eso no es un
+        # telefono, es un renglon escrito por error.
+        telefono = (request.data.get("telefono_soporte") or "").strip()
+        if telefono and not any(c.isdigit() for c in telefono):
+            return Response(
+                {"detail": "El teléfono de soporte no tiene ningún número."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         config, _ = ConfiguracionDeAvisos.objects.update_or_create(
-            org=request.org, defaults={"url_base_app": url}
+            org=request.org,
+            defaults={"url_base_app": url, "telefono_soporte": telefono},
         )
-        return Response({"url_base_app": config.url_base_app})
+        return Response({
+            "url_base_app": config.url_base_app,
+            "telefono_soporte": config.telefono_soporte,
+        })
 
 
 class CanalDeAvisosView(APIView):

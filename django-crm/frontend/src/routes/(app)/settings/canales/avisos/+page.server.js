@@ -117,9 +117,13 @@ export const actions = {
     const form = await request.formData();
     // Vaciarlo es legítimo: sin dominio el aviso sale igual, sin enlace.
     const url = (form.get('url_base_app') ?? '').toString().trim();
+    // A quién llama el técnico desde la app cuando algo no cuadra. Vaciarlo
+    // también es legítimo: sin número la app no dibuja el botón, en vez de
+    // ofrecer una llamada que no va a ningún lado.
+    const telefono = (form.get('telefono_soporte') ?? '').toString().trim();
 
     try {
-      await guardarDominio(locals, url);
+      await guardarDominio(locals, url, telefono);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) return fail(403, { error: SIN_PERMISO });
       return fail(400, { error: mensajeDe(err) });
