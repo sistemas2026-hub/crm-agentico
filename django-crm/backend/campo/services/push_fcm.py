@@ -249,10 +249,33 @@ def mandar_a_un_telefono(
 def _es_token_muerto(respuesta) -> bool:
     """Si FCM dice que este token no va a servir nunca mas.
 
-    Se mira el `errorCode` de los detalles y NO solo el 404, porque FCM devuelve
-    400 INVALID_ARGUMENT para un token con la forma mal --que tampoco hay que
-    reintentar-- y 404 NOT_FOUND tambien para un proyecto equivocado, que si hay
-    que arreglar en vez de dar de baja al telefono.
+    SE MIRA `errorCode`, NO `status`, Y ESTA MEDIDO CONTRA LA API REAL
+    ------------------------------------------------------------------
+    Los dos casos devuelven **400 con `status: INVALID_ARGUMENT`**, asi que mirar
+    el `status` daria de baja un telefono sano cada vez que el cuerpo del mensaje
+    tenga un error de programacion nuestro: un bug de una linea apagaria los
+    avisos de toda la cuadrilla, y nadie relacionaria las dos cosas.
+
+    Lo que SI los distingue, medido contra FCM el 04/10/2026 con la credencial de
+    `dexter-app-d4b93`:
+
+        token invalido      -> details trae FcmError con errorCode
+                               'INVALID_ARGUMENT', y fieldViolations ['message.token']
+        entero en `data`    -> SIN errorCode; fieldViolations ['message.data[0].value']
+        campo inexistente   -> SIN errorCode; fieldViolations ['message']
+        prioridad invalida  -> SIN errorCode; fieldViolations ['message.android.priority']
+
+    O sea: **un cuerpo mal armado no trae `errorCode` en absoluto**. Por eso esta
+    funcion solo contesta que si cuando ese campo esta, y por eso un error nuestro
+    cae en FALLO --reintentable-- y no en TOKEN_MUERTO.
+
+    La misma corrida confirmo lo otro que no se podia saber leyendo: el cuerpo que
+    arma `mandar_a_un_telefono` es valido para FCM. Con un token falso, la UNICA
+    violacion que devuelve es `message.token`.
+
+    Tambien se mira el `errorCode` y no el 404 a secas porque un 404 lo devuelve
+    igual un proyecto equivocado, y eso se arregla en la configuracion en vez de
+    dar de baja telefonos que estan bien.
     """
     try:
         error = (respuesta.json() or {}).get("error") or {}

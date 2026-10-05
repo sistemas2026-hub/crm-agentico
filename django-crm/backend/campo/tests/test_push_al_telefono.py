@@ -170,6 +170,64 @@ def _ok():
     return _Respuesta(200, {"name": "projects/x/messages/1"})
 
 
+def _token_invalido_real():
+    """La respuesta EXACTA de FCM a un token de dispositivo con la forma mal.
+
+    Copiada de una corrida en vivo contra `dexter-app-d4b93` el 04/10/2026. No es
+    la documentada ni una inventada: la documentacion de una API externa es una
+    hipotesis, y esta se midio.
+    """
+    return _Respuesta(
+        400,
+        {
+            "error": {
+                "code": 400,
+                "status": "INVALID_ARGUMENT",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.BadRequest",
+                        "fieldViolations": [{"field": "message.token"}],
+                    },
+                    {
+                        "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError",
+                        "errorCode": "INVALID_ARGUMENT",
+                    },
+                ],
+            }
+        },
+    )
+
+
+def _cuerpo_mal_armado_real():
+    """La respuesta EXACTA de FCM a un error de programacion NUESTRO.
+
+    Medida el mismo dia con tres cuerpos malos --un entero en `data`, un campo
+    inexistente y una prioridad invalida--: los tres devuelven 400 con
+    `status: INVALID_ARGUMENT` **y NINGUN `errorCode`**. Esa ausencia es lo unico
+    que separa «este telefono murio» de «la cague yo».
+    """
+    return _Respuesta(
+        400,
+        {
+            "error": {
+                "code": 400,
+                "status": "INVALID_ARGUMENT",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.BadRequest",
+                        "fieldViolations": [
+                            {
+                                "field": "message.data[0].value",
+                                "description": "Invalid value at 'message.data[0].value'",
+                            }
+                        ],
+                    }
+                ],
+            }
+        },
+    )
+
+
 def _unregistered():
     return _Respuesta(
         404,
@@ -398,6 +456,41 @@ def test_c4_un_500_NO_da_de_baja_el_telefono(orden, tecnico):
 
     telefono.refresh_from_db()
     assert telefono.activo is True
+
+
+def test_c7_un_CUERPO_MAL_ARMADO_no_da_de_baja_ningun_telefono(orden, tecnico):
+    """LA GUARDA MAS CARA DE ESTE ARCHIVO.
+
+    Un error de programacion nuestro --un entero donde iba una cadena-- devuelve
+    el MISMO 400 con el MISMO `status: INVALID_ARGUMENT` que un token muerto.
+    Si se mirara el `status`, una linea mal escrita daria de baja los telefonos de
+    TODA la cuadrilla de un saque, y el sintoma --«no me llegan los avisos»--
+    aparecería dias despues y no señalaria a la causa.
+
+    Lo unico que los separa, medido contra FCM el 04/10/2026: el cuerpo mal
+    armado **no trae `errorCode`**. Esta prueba usa la respuesta real de esa
+    corrida, no una inventada.
+    """
+    telefono = _telefono(orden.org, tecnico[1], "tok-sano")
+    _mandar(orden, tecnico, respuestas=_cuerpo_mal_armado_real())
+
+    telefono.refresh_from_db()
+    assert telefono.activo is True
+    # Y tampoco se afirma un envio: es un fallo, reintentable.
+    assert "push" not in AvisoEnviado.objects.get(org=orden.org).canales
+
+
+def test_c8_la_respuesta_REAL_a_un_token_invalido_si_da_de_baja(orden, tecnico):
+    """El otro lado de la misma moneda, con la respuesta real de la misma corrida.
+
+    Las dos juntas son lo que vale: cada una sola se puede satisfacer con una
+    implementacion que mire el `status` --y esa estaria rota--.
+    """
+    telefono = _telefono(orden.org, tecnico[1], "tok-con-forma-mala")
+    _mandar(orden, tecnico, respuestas=_token_invalido_real())
+
+    telefono.refresh_from_db()
+    assert telefono.activo is False
 
 
 def test_c5_un_404_sin_errorCode_no_da_de_baja(orden, tecnico):

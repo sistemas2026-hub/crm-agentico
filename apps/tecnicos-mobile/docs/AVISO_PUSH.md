@@ -190,6 +190,27 @@ FCM lo dice con `UNREGISTERED`, y entonces el teléfono se marca `activo = false
 **sin borrar la fila**: que dejó de servir y *cuándo* es lo que permite contestar
 por qué un aviso no llegó.
 
+**Cómo se reconoce uno, y por qué no alcanza con el código HTTP.** Medido contra
+FCM el 04/10/2026 con la credencial de `dexter-app-d4b93`: un token inválido y un
+cuerpo mal armado devuelven **el mismo 400 con el mismo `status: INVALID_ARGUMENT`**.
+Lo único que los separa es que el cuerpo mal armado **no trae `errorCode`**:
+
+| Qué se mandó | `errorCode` | `fieldViolations` |
+|---|---|---|
+| token inválido | `INVALID_ARGUMENT` | `message.token` |
+| un entero en `data` | *ninguno* | `message.data[0].value` |
+| un campo inexistente | *ninguno* | `message` |
+| una prioridad inválida | *ninguno* | `message.android.priority` |
+
+Por eso `_es_token_muerto` mira `errorCode` y no `status`. Si mirara el `status`,
+un error de programación nuestro daría de baja los teléfonos de toda la cuadrilla
+de un saque, y el síntoma aparecería días después sin señalar a la causa. Lo
+cuidan `test_c7` y `test_c8`, con las respuestas reales de esa corrida.
+
+La misma corrida confirmó lo otro que no se podía saber leyendo: **el cuerpo que
+arma el código es válido para FCM** — con un token falso, la única violación que
+devuelve es `message.token`.
+
 La distinción importa en las dos direcciones, y las dos están medidas:
 
 - dar de baja por un **500 de Google** dejaría al técnico sin avisos hasta que
