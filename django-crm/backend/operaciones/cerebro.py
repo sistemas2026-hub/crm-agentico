@@ -178,9 +178,23 @@ class Razonamiento:
 
 
 def razonar(org, *, instrucciones: str, entrada: str, historial=(),
-            tools=None, vueltas_maximas: int = VUELTAS_MAXIMAS) -> Razonamiento:
+            tools=None, vueltas_maximas: int = VUELTAS_MAXIMAS,
+            pedir=None) -> Razonamiento:
     """
     Una pasada completa: piensa, consulta lo que le falte, vuelve a pensar.
+
+    'pedir' ES LA PUERTA AL MODELO, Y SE PUEDE INYECTAR
+    --------------------------------------------------
+    Por defecto es '_pedirle_al_modelo' de este modulo, resuelto EN TIEMPO DE
+    LLAMADA -- asi un parche sobre 'cerebro._pedirle_al_modelo' se ve.
+    Quien llama puede pasar la suya, y el chat lo hace: pasa su propio alias,
+    para que las 41 pruebas que parchean 'chat._pedirle_al_modelo' sigan
+    interceptando.
+
+    Eso no es una concesion al andamio. Dejar la puerta fija habria roto esas
+    pruebas por una mudanza interna, y una guarda que se cae porque el codigo
+    se movio deja de medir lo que dice medir. Encima, el ciclo va a querer la
+    misma inyeccion para poder correr sin red.
 
     ES PURO RESPECTO DE LA BASE: no escribe una fila. Quien llama decide si lo
     persiste --el chat lo guarda como 'MensajeSupervisor', el ciclo como un
@@ -197,6 +211,9 @@ def razonar(org, *, instrucciones: str, entrada: str, historial=(),
     """
     arranque = time.monotonic()
     tools = chat_herramientas.esquema() if tools is None else tools
+    #  Resuelto aqui y no en la firma: en la firma se evaluaria al importar el
+    #  modulo y un parche posterior no se veria.
+    pedir = pedir or _pedirle_al_modelo
 
     mensajes: list[dict] = [{"role": "system", "content": instrucciones}]
     mensajes.extend(historial or [])
@@ -205,7 +222,7 @@ def razonar(org, *, instrucciones: str, entrada: str, historial=(),
     r = Razonamiento()
     for vuelta in range(vueltas_maximas):
         r.vueltas = vuelta + 1
-        cuerpo = _pedirle_al_modelo(mensajes, tools)
+        cuerpo = pedir(mensajes, tools)
         r.modelo = str(cuerpo.get("modelo") or "")
         r.proveedor = str(cuerpo.get("proveedor") or "")
         r.contenido = str(cuerpo.get("contenido") or "")
@@ -433,7 +450,8 @@ def validar(crudo, razonamiento: Razonamiento) -> Veredicto:
 
 
 def concluir(org, *, instrucciones: str, entrada: str, historial=(),
-             tools=None, vueltas_maximas: int = VUELTAS_MAXIMAS) -> Veredicto:
+             tools=None, vueltas_maximas: int = VUELTAS_MAXIMAS,
+             pedir=None) -> Veredicto:
     """
     Razona y devuelve un VEREDICTO validado. Es lo que el ciclo puede persistir.
 
@@ -447,7 +465,7 @@ def concluir(org, *, instrucciones: str, entrada: str, historial=(),
     """
     r = razonar(org, instrucciones=instrucciones + "\n\n" + CONTRATO,
                 entrada=entrada, historial=historial, tools=tools,
-                vueltas_maximas=vueltas_maximas)
+                vueltas_maximas=vueltas_maximas, pedir=pedir)
     return validar(_json_de(r.contenido), r)
 
 
@@ -481,3 +499,285 @@ def _json_de(texto: str):
             return json.loads(t[i:j + 1])
         except ValueError:
             return None
+
+
+# =============================================================================
+#  D2 · EL ARMADOR DE CONTEXTO  --  cuatro origenes, una entrada
+# =============================================================================
+#
+#  POR QUE DEVUELVE TEXTO
+#  ----------------------
+#  La entrada del cerebro es texto porque la entrada del modelo es texto. Lo que
+#  NO se hace es dejar que cada origen arme el suyo: entonces habria cuatro
+#  lugares decidiendo que sabe el Supervisor, y ninguno seria el verdadero.
+#
+#  CERO SQL NUEVO, Y NO ES UNA META DE ESTILO
+#  ------------------------------------------
+#  Todo sale de lecturas que ya existen y ya estan probadas:
+#  'turno.resumen_de_turno' (doce preguntas, cada una con su procedencia),
+#  'contexto_propuesta.contexto_de' y el propio catalogo. Una consulta nueva aqui
+#  seria una segunda definicion de "que esta pasando" que se desincroniza de la
+#  que mira el tablero.
+#
+#  LA LISTA DE CAMPOS ES BLANCA, Y ESE ES EL PUNTO
+#  -----------------------------------------------
+#  'contexto_de' devuelve 'cliente' y 'asunto'. El primero es el NOMBRE de una
+#  persona; el segundo lo trae pegado -- WispHub guarda el asunto como
+#  "Asunto - Cliente" (ver la skill 'wisphub-api'). Con lista negra, un campo
+#  nuevo del contexto entraria al prompt por defecto y nadie se enteraria. Con
+#  blanca, lo que no esta declarado no viaja.
+
+#: Lo unico de 'contexto_propuesta' que puede llegar al modelo. Topologia y
+#: plazos, nunca quien vive ahi.
+CAMPOS_DE_CONTEXTO = ("zona", "tecnico", "ticket_externo", "proveedor_externo",
+                      "orden_numero", "sla_estado", "sla_minutos",
+                      "origen_creado_en", "caso_cerrado")
+
+#: Lo que se excluye a proposito, nombrado para que el descarte sea revisable.
+CAMPOS_QUE_NO_VIAJAN = ("cliente", "asunto")
+
+
+def _bloque(titulo: str, cuerpo: str) -> str:
+    return f"\n== {titulo} ==\n{cuerpo.strip()}\n" if cuerpo.strip() else ""
+
+
+def contexto_para(org, *, conversacion=None, situacion=None, evento=None,
+                  propuesta=None, horas_turno=None) -> str:
+    """
+    El contexto operativo para una consulta, segun de donde venga.
+
+    CUATRO ORIGENES, Y LA DIFERENCIA ES SOLO LA ENTRADA. Eso es lo que hace que
+    el cerebro sea uno: no sabe si lo llamo una persona, el ciclo o un evento.
+
+    Se puede llamar sin ningun origen: devuelve el panorama del turno, que es el
+    contexto minimo honesto -- "esto es lo que hay" -- en vez de nada.
+
+    NO INVENTA Y NO COMPLETA. Si una fuente no informa, el resumen de turno lo
+    dice como DESCONOCIDO con su motivo, y eso viaja tal cual: que el modelo vea
+    "no se pudo saber" es el unico modo de que no concluya que todo esta bien.
+    """
+    from operaciones import turno as turno_mod
+
+    partes: list[str] = []
+
+    #  El panorama siempre. Trae las doce preguntas con su procedencia, y es la
+    #  unica lectura que ya distingue OBSERVADO de INFERIDO de DESCONOCIDO.
+    resumen = turno_mod.resumen_de_turno(org, horas=horas_turno)
+    partes.append(_bloque("PANORAMA DEL TURNO", _resumen_legible(resumen)))
+
+    if situacion is not None:
+        partes.append(_bloque("LA SITUACION", _situacion_legible(situacion)))
+
+    if propuesta is not None:
+        partes.append(_bloque("LA PROPUESTA",
+                              _propuesta_legible(org, propuesta)))
+
+    if conversacion is not None and conversacion.situacion_id:
+        partes.append(_bloque("LA SITUACION DE ESTA CONVERSACION",
+                              _situacion_legible(conversacion.situacion)))
+
+    if evento is not None:
+        #  Un evento es un dict suelto: lo escribe quien lo detecto. Se acota y
+        #  se marca como lo que es -- una senal, no un diagnostico.
+        partes.append(_bloque(
+            "EL EVENTO QUE DISPARO ESTA CONSULTA (es una senal, no un "
+            "diagnostico)",
+            json.dumps(evento, ensure_ascii=False, default=str)[:2000]))
+
+    partes.append(_bloque("APRENDIZAJE PREVIO", aprendizaje_relevante(org)))
+
+    return "".join(p for p in partes if p)
+
+
+def _resumen_legible(resumen: dict) -> str:
+    """
+    El resumen de turno en texto, CON la procedencia de cada bloque.
+
+    La procedencia no se pierde en la traduccion: es lo que impide que el modelo
+    lea un INFERIDO como una medicion. Un bloque DESCONOCIDO viaja con su
+    motivo, no como un cero.
+    """
+    lineas = []
+    t = resumen.get("turno") or {}
+    lineas.append(f"ventana: {t.get('horas')} h hasta {t.get('hasta')}")
+    for clave, valor in resumen.items():
+        if not isinstance(valor, dict) or "procedencia" not in valor:
+            continue
+        datos = valor.get("datos")
+        if datos is None:
+            lineas.append(f"[{valor['procedencia']}] {clave}: NO SE PUDO SABER"
+                          f" -- {valor.get('nota', '')}")
+            continue
+        resumido = {k: v for k, v in datos.items()
+                    if not isinstance(v, (list, dict))}
+        lineas.append(f"[{valor['procedencia']}] {clave}: "
+                      + json.dumps(resumido, ensure_ascii=False,
+                                   default=str)[:400])
+    return "\n".join(lineas)
+
+
+def _situacion_legible(s) -> str:
+    """
+    La ficha de una situacion. Sin datos de cliente -- la misma seleccion que
+    'turno._ficha', por el mismo motivo.
+    """
+    return (f"codigo: {s.codigo}\n"
+            f"titulo: {s.titulo}\n"
+            f"estado: {s.estado}   riesgo: {s.riesgo}\n"
+            f"detectada: {s.detectada_en.isoformat()}\n"
+            f"afectados contados: {s.afectados_contados}\n"
+            f"hipotesis: {s.hipotesis or '(ninguna)'}   "
+            f"confianza: {s.confianza}\n"
+            f"verificada: {'si' if s.verificacion else 'NO'}")
+
+
+def _propuesta_legible(org, p) -> str:
+    """
+    Una propuesta con su contexto operativo, por lista BLANCA de campos.
+
+    'contexto_de' trae 'cliente' y 'asunto' y los dos quedan afuera: ver
+    'CAMPOS_QUE_NO_VIAJAN'.
+    """
+    from operaciones import contexto_propuesta
+
+    ctx = (contexto_propuesta.contexto_de(org, [p]) or {}).get(str(p.id), {})
+    visible = {k: ctx.get(k) for k in CAMPOS_DE_CONTEXTO
+               if ctx.get(k) not in (None, "")}
+    return (f"accion propuesta: {p.accion_propuesta}\n"
+            f"motivo: {p.motivo}\n"
+            f"tipo de senal: {p.tipo_senal}   prioridad: {p.prioridad}\n"
+            f"estado: {p.estado}\n"
+            "contexto: " + json.dumps(visible, ensure_ascii=False,
+                                      default=str)[:600])
+
+
+# =============================================================================
+#  D4 · APRENDIZAJE  --  historia, nunca el estado de hoy
+# =============================================================================
+
+def aprendizaje_relevante(org, *, desde=None, hasta=None) -> str:
+    """
+    Lo que ya se supo de decisiones anteriores, para que el cerebro lo tenga.
+
+    ES LECTURA, Y DE HISTORIA. No hay aprendizaje autonomo en esta fase: el
+    cerebro no escribe una leccion ni se califica. Lo unico que cambia es que
+    deja de razonar como si nunca hubiera pasado nada antes.
+
+    POR QUE EL TEXTO LO DICE EXPLICITAMENTE
+    ---------------------------------------
+    Porque la memoria es justo donde un dato viejo se lee como actual. "Tres
+    falsos positivos en caidas de PON" es informacion util para dudar; NO es
+    informacion sobre si hay una caida ahora. El bloque lo aclara en la unica
+    forma que el modelo lee, que es texto, y la garantia de abajo es que aqui
+    NO se consulta ninguna fuente actual: solo 'AprendizajeSupervisor' y
+    'DecisionSupervisor', que son registros de lo que YA se concluyo.
+    """
+    from operaciones import gobierno
+
+    r = gobierno.resumen_de_aprendizaje(org, desde=desde, hasta=hasta)
+    if not r.get("aprendizajes") and not r.get("decisiones"):
+        return ("no hay aprendizaje registrado todavia: no se puede ponderar "
+                "nada por experiencia previa, y eso no es lo mismo que no "
+                "haber tenido errores")
+
+    por_tipo = {k: v for k, v in (r.get("por_tipo") or {}).items() if v}
+    return (
+        "ESTO ES HISTORIA, NO EL ESTADO DE HOY. Sirve para ponderar cuanto "
+        "confiar en una lectura parecida; NO dice nada sobre lo que esta "
+        "pasando ahora. Para lo que cambia, consulta la herramienta.\n"
+        f"lecciones a favor: {r.get('a_favor')}   "
+        f"en contra: {r.get('en_contra')}\n"
+        f"por tipo: {json.dumps(por_tipo, ensure_ascii=False)}\n"
+        f"decisiones: {r.get('decisiones')}   "
+        f"con desenlace: {r.get('decisiones_con_desenlace')}   "
+        f"sin desenlace: {r.get('decisiones_sin_desenlace')}")
+
+
+# =============================================================================
+#  D3 · VEREDICTO -> SENAL  --  para que el ciclo pueda persistirlo
+# =============================================================================
+#
+#  CUIDADO CON EL NOMBRE 'Veredicto', QUE EN ESTE PROYECTO SIGNIFICA DOS COSAS
+#  ---------------------------------------------------------------------------
+#    cerebro.Veredicto                  la conclusion estructurada del cerebro
+#                                       (hechos, inferencias, riesgos, ...)
+#    situaciones_seguimiento.Veredicto  como EVOLUCIONA una situacion
+#                                       (estable, empeora, mejora, ...)
+#
+#  No se cruzan en ninguna funcion y por eso no se renombra ninguno, pero quien
+#  lea 'veredicto' en este proyecto tiene que saber que hay dos. Es la misma
+#  advertencia que CLAUDE.md §11.1 hace sobre la palabra "agente".
+
+
+def senal_de_veredicto(veredicto, *, fuente: str, tipo_situacion: str,
+                       dimension: str, clave_dimension: str, afectados=None,
+                       ahora=None):
+    """
+    Convierte un veredicto del cerebro en una 'Senal' que el ciclo ya sabe
+    consumir. Devuelve None cuando no corresponde.
+
+    UN VEREDICTO NO CONCLUYENTE NO PRODUCE SENAL, y es la regla que importa.
+    Una lectura que no cierra --porque una fuente no contesto, porque se
+    agotaron las vueltas, o porque el propio modelo dijo que le falta un dato--
+    no puede abrir una situacion. Abrirla seria convertir "no se sabe" en "esta
+    pasando esto", que es exactamente lo que el resto del sistema esta armado
+    para que no ocurra.
+
+    TAMPOCO UN VEREDICTO SIN HECHOS. Sin un solo hecho con fuente consultada no
+    hay nada que afirmar, haya texto o no.
+
+    EL PAR (HIPOTESIS, CONFIANZA) YA ES VALIDO POR CONSTRUCCION
+    -----------------------------------------------------------
+    'validar()' lo garantiza y 'Senal.__init__' lo exige levantando un
+    ValueError. Son la MISMA regla escrita dos veces en dos capas, y por eso no
+    pueden contradecirse: lo que el cerebro produce es siempre algo que la senal
+    acepta, y lo que la senal acepta es siempre algo que la base acepta
+    (CheckConstraint 'situacion_hipotesis_con_confianza').
+
+    NO CREA NINGUNA ACCION EXTERNA. Devuelve un dato. Quien lo persista pasa por
+    'correlacion.agrupar' y, si amerita, por 'situaciones_propuestas.proponer' --
+    y de ahi para adelante manda la frontera, que esta funcion no conoce.
+    """
+    from django.utils import timezone
+
+    from operaciones.deteccion import Senal
+
+    if veredicto is None or not veredicto.concluyente or veredicto.vacio:
+        return None
+
+    #  El HECHO es lo que una fuente midio, y va con su procedencia pegada. Si
+    #  hubiera que elegir una sola frase de este modulo, es esta: un hecho nunca
+    #  viaja sin de donde salio.
+    hecho = "; ".join(f"{h['dato']} (fuente: {h['fuente']})"
+                      for h in veredicto.hechos)[:1000]
+
+    #  La evidencia conserva la traza de CADA hecho por separado, para que
+    #  despues se pueda discutir uno sin discutir todos.
+    momento = ahora or timezone.now()
+    evidencia = [{"fuente": h["fuente"], "dato": h["dato"],
+                  "observado_en": momento.isoformat()}
+                 for h in veredicto.hechos]
+
+    return Senal(
+        fuente=fuente,
+        tipo_situacion=tipo_situacion,
+        dimension=dimension,
+        clave_dimension=clave_dimension,
+        hecho=hecho,
+        relacion="",
+        #  Las inferencias del cerebro son INTERPRETACION, no hecho. Ese reparto
+        #  es el que hace que una sospecha no se lea como una medicion.
+        interpretacion="; ".join(veredicto.inferencias)[:1000],
+        riesgo=veredicto.riesgo,
+        hipotesis=veredicto.hipotesis,
+        confianza=veredicto.confianza,
+        recomendacion=veredicto.recomendacion,
+        afectados=afectados or [],
+        evidencia=evidencia,
+        observada_en=momento,
+        concluyente=True,
+        datos={"riesgos_previstos": veredicto.riesgos,
+               "falta": veredicto.falta,
+               "descartes": veredicto.descartes,
+               "origen": "cerebro"},
+    )
