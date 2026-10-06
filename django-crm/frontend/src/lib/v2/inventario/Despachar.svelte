@@ -384,7 +384,15 @@
     <span class="material-symbols-outlined text-[18px] text-secondary">history</span>
     <div class="flex flex-col">
       <span class="font-table-header text-table-header text-secondary uppercase">Último despacho</span>
-      <span class="font-label-code text-label-code text-on-surface">—</span>
+      <!--
+        El historial de despachos no esta en la API, asi que fuera de esta
+        sesion no hay nada que mostrar y el guion lo dice. Lo que SI se sabe es
+        el que acaba de hacerse, y era justo el que faltaba: despues de
+        despachar la pantalla no mostraba ninguna señal de que algo ocurrio.
+      -->
+      <span class="font-label-code text-label-code text-on-surface">
+        {form?.hecho ? String(form.hecho).replace('Despachado. Acta: ', '') : '—'}
+      </span>
     </div>
   </div>
 </div>
@@ -488,7 +496,29 @@
   </div>
 {/if}
 
-<form method="POST" action="?/despacho" use:enhance class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start">
+<!--
+  DESPUES DE UN DESPACHO, EL ACTA SE CIERRA.
+  Sin esto quedaban las lineas vacias en pantalla --`use:enhance` limpia los
+  campos del DOM pero no el estado-- y parecia un formulario a medio llenar
+  cuando el despacho YA habia ocurrido. Y el borrador seguia ofreciendose,
+  invitando a rearmar algo que ya salio de la bodega.
+-->
+<form
+  method="POST"
+  action="?/despacho"
+  use:enhance={() => {
+    return async ({ result, update }) => {
+      await update();
+      if (result.type === 'success') {
+        descartarBorrador();
+        pendiente = null;
+        seriesDe = {};
+        lineas = [{ n: siguiente++, material: '', cantidad: '', serie: '' }];
+      }
+    };
+  }}
+  class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start"
+>
   <!-- ============ COLUMNA IZQUIERDA ============ -->
   <div class="lg:col-span-8 flex flex-col gap-space-lg">
     <!-- Cabecera de la orden -->
