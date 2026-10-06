@@ -1539,6 +1539,115 @@ def _ya_propuesta(org, senal: Senal) -> bool:
     ).exists()
 
 
+#  =============================================================================
+#   FASE 2 · EL CICLO PUEDE RAZONAR  --  y por ahora no lo hace
+#  =============================================================================
+#
+#  LA BANDERA ARRANCA APAGADA, Y ESO ES EL ENTREGABLE
+#  --------------------------------------------------
+#  Apagada, 'enriquecer' devuelve el analisis TAL CUAL y el ciclo es byte por
+#  byte el de siempre. Eso se puede afirmar de la forma mas fuerte que hay:
+#  comparando la propuesta campo por campo contra la de referencia
+#  ('test_cerebro_ciclo::test_1').
+#
+#  POR QUE EN CODIGO Y NO EN 'tenant_config'
+#  -----------------------------------------
+#  Porque encender el razonamiento del ciclo no es una regla de negocio de una
+#  empresa: es una decision de operacion sobre cuanto se gasta y cuanto se
+#  confia. El proyecto ya tomo esa distincion para el interruptor de autonomia
+#  y para RELOJ_HABILITADO (CLAUDE.md §8): la config del tenant dice QUE hacer;
+#  si un proceso debe estar razonando es decision de operacion. Y asi
+#  encenderlo es un commit revisado, no un UPDATE.
+#
+#  LO QUE EL CEREBRO NO PUEDE MOVER, Y DONDE VIVE ESA GARANTIA
+#  ----------------------------------------------------------
+#  No vive aqui: vive en 'cerebro.analisis_de_veredicto', que arma la salida
+#  copiando el analisis y sobreescribiendo SOLO 'motivo' e 'impacto'. Esta
+#  funcion no decide que se puede tocar -- solo decide SI se llama.
+CEREBRO_EN_EL_CICLO = False
+
+
+def enriquecer(org, senal: "Senal", analisis: dict, *, ahora=None) -> dict:
+    """
+    Le pide al cerebro que aporte interpretacion sobre una señal ya detectada.
+
+    EL DETECTOR SIGUE DECIDIENDO QUE HAY. Esta funcion no detecta, no descarta
+    y no cambia la accion propuesta: recibe un analisis deterministico que ya
+    es correcto y le agrega lo que el cerebro vio. Si el cerebro no aporta
+    nada, el analisis sale igual.
+
+    NUNCA LEVANTA, Y ESA ES SU PROPIEDAD MAS IMPORTANTE
+    ---------------------------------------------------
+    El ciclo no puede depender del cerebro para registrar una propuesta. Un
+    modelo caido, un timeout, una respuesta que no es JSON o un veredicto que
+    no cierra terminan todos igual: se devuelve el analisis
+    deterministico. La propuesta sale igual, y sale correcta.
+
+    Por eso el 'except' es amplio a proposito. No es pereza: cualquier fallo
+    aqui tiene que degradar a "el ciclo de siempre", y un tipo de excepcion que
+    no se previo no puede ser la diferencia entre proponer y no proponer.
+    """
+    if not CEREBRO_EN_EL_CICLO:
+        return analisis
+
+    import json
+
+    from operaciones import cerebro
+
+    try:
+        contexto = cerebro.contexto_para(org)
+        veredicto = cerebro.concluir(
+            org,
+            instrucciones=_INSTRUCCIONES_DEL_CICLO,
+            entrada=(f"{contexto}\n\n== LA SEÑAL DETECTADA ==\n"
+                     f"tipo: {senal.tipo}\n"
+                     f"evidencia: {json.dumps(senal.evidencia, ensure_ascii=False, default=str)[:1500]}\n"
+                     f"lo que la regla concluyo: {analisis.get('motivo', '')}"))
+    except Exception:                                        # noqa: BLE001
+        #  SE DEGRADA EN SILENCIO, Y HAY QUE SER PRECISO CON POR QUE
+        #  --------------------------------------------------------
+        #  No se escribe una fila de auditoria: 'auditoria.registrar' deja un
+        #  'common.Activity', y un modelo que no contesto no es un hecho de la
+        #  operacion -- llenaria la auditoria de ruido que nadie decide. Y este
+        #  modulo no tiene logger: su convencion es fila de auditoria o nada.
+        #
+        #  Tampoco se cuenta en el resumen del ciclo TODAVIA, y es a proposito:
+        #  con la bandera apagada este camino es inalcanzable, y un contador
+        #  para un camino que no corre es exactamente el "codigo construido que
+        #  no se ejecuta" que §6 de CLAUDE.md señala. La observabilidad de este
+        #  fallo entra en la fase que ENCIENDE la bandera, junto con la
+        #  medicion del costo -- las dos cosas se necesitan al mismo tiempo.
+        #
+        #  Lo que SI esta garantizado hoy: la propuesta sale igual y sale
+        #  correcta. El ciclo no depende del cerebro.
+        return analisis
+
+    return cerebro.analisis_de_veredicto(veredicto, analisis)
+
+
+#  Lo que el ciclo le pide al cerebro. NO es la identidad del chat: alla hay una
+#  persona preguntando y aca hay una señal ya detectada, asi que lo que se pide
+#  es distinto -- interpretar, no conversar.
+_INSTRUCCIONES_DEL_CICLO = """\
+Sos el Supervisor NOC IA de un ISP. Una REGLA DETERMINISTICA ya detectó una
+señal y ya escribió una recomendación; vos no la reemplazás.
+
+Tu trabajo es lo que la regla no puede hacer: mirar el resto de la operación y
+decir si esta señal se entiende distinto en contexto. Correlacioná con lo que
+haya alrededor, estimá el riesgo, y si tenés una causa POSIBLE decila como
+hipótesis con su confianza.
+
+Consultá las herramientas antes de afirmar cualquier cosa. Un hecho que no salga
+de una herramienta no es un hecho, y se va a descartar.
+
+Si no tenés nada que agregar, decilo en "falta" y no inventes una
+interpretación para llenar el espacio. Una propuesta sin tu aporte ya es
+correcta; una con un aporte inventado es peor que sin él.
+
+No propongas ejecutar nada: no podés, y decir que lo hiciste sería mentir.
+"""
+
+
 def correr_ciclo(org, ahora=None) -> dict:
     """
     Una pasada completa de Shadow Mode. Devuelve el resumen de lo que pasó.
@@ -1607,6 +1716,15 @@ def _correr_ciclo(org, ahora) -> dict:
             detalle.append({**fila, "resultado": "sin_analisis",
                             "propuesta": None})
             continue
+
+        #  FASE 2. El cerebro puede aportar interpretacion sobre una señal que
+        #  la REGLA ya detecto. Va aqui y no antes porque aqui el contexto ya
+        #  esta completo y las decisiones de seguridad --prioridad, nivel--
+        #  YA ESTAN TOMADAS: el cerebro llega cuando no las puede mover.
+        #
+        #  Con 'CEREBRO_EN_EL_CICLO = False' esto devuelve 'analisis' tal cual y
+        #  el ciclo es el de siempre. Nunca levanta: ver 'enriquecer'.
+        analisis = enriquecer(org, senal, analisis, ahora=ahora)
 
         propuesta = registrar_propuesta(org, senal, analisis, ahora)
         resumen["propuestas"] += 1
