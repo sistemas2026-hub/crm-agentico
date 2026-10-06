@@ -176,6 +176,16 @@ export async function listTickets({ cookies }, params) {
 
   return {
     results: rows,
+    //  El desglose por responsable, calculado por la API sobre TODOS los
+    //  abiertos. Viaja CRUDO: traducir responsable -> area es trabajo de quien
+    //  conoce las areas (lib/v2/tickets-resumen.js), no de este modelador.
+    //
+    //  `null` cuando no vino, y no `[]`: una lista vacia diria "no hay
+    //  tickets" y lo que pasa es "no se pudo contar". Esa confusion es la que
+    //  hizo que la pantalla mostrara 25 de 47 el 06/10/2026.
+    openByAssignee: Array.isArray(response.open_by_assignee)
+      ? response.open_by_assignee
+      : null,
     totals: {
       // Counted over the whole filtered queue by the API, not over this page.
       count: response.cases_count ?? rows.length,
