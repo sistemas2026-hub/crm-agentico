@@ -43,6 +43,10 @@
   }}
 >
   <h3 class="titulo">¿En qué terminó?</h3>
+  <p class="instruccion">
+    Seleccione qué le pasaba al cliente: dónde estuvo la falla o, si no era una
+    falla, qué necesitaba. Con esto se cuenta dónde fallamos más.
+  </p>
   <p class="nota-guia">
     Se cierra la conversación. El próximo mensaje del cliente abre una nueva.
   </p>
@@ -106,6 +110,10 @@
     margin: 0 0 0.15rem;
     font-size: 0.9rem;
     font-weight: 600;
+  }
+  .instruccion {
+    margin: 0 0 0.2rem;
+    font-size: 0.82rem;
   }
   .nota-guia {
     margin: 0 0 0.6rem;
