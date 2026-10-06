@@ -42,31 +42,31 @@ organizacion. Hay una prueba que lo intenta.
 
 from __future__ import annotations
 
-import json
-import os
 import time
 
 from django.utils import timezone
 
 from operaciones import autonomia as gob_autonomia
+from operaciones import cerebro
 from operaciones import chat_herramientas
 from operaciones.chat_modelos import (ConversacionSupervisor, MensajeSupervisor,
                                       RolMensaje)
 
-#  Cuantas vueltas de herramienta puede dar un turno. Tres y no diez: con las
-#  herramientas que hay, tres alcanzan para "listar -> detalle -> timeline", que
-#  es la cadena mas larga util. Sin tope, un modelo que se confunde puede pedir la
-#  misma herramienta indefinidamente y la empresa paga cada vuelta.
-VUELTAS_MAXIMAS = 3
+VUELTAS_MAXIMAS = cerebro.VUELTAS_MAXIMAS
 
 #  Cuantos mensajes del historial viajan al modelo. El resto se resume. No es
 #  estetica: una conversacion de cien turnos enviada entera cuesta tokens por
 #  todo en cada mensaje nuevo.
 MENSAJES_EN_VIVO = 12
 
-VARIABLE_URL = "SUPERVISOR_CHAT_URL"
-URL_POR_DEFECTO = "http://motor:5000/interno/supervisor/chat"
-SEGUNDOS_TIMEOUT = 150
+#  RE-EXPORTADAS DEL CEREBRO, no duplicadas. Las lee
+#  'test_p5_chat_supervisor' y el arnes en vivo por 'chat.<nombre>', asi
+#  que los nombres se conservan -- pero el valor es UNO, el del cerebro.
+#  Duplicarlos dejaria al chat diciendo tres vueltas y al cerebro dando
+#  cinco, y la prueba que mide el gasto mediria otra cosa.
+VARIABLE_URL = cerebro.VARIABLE_URL
+URL_POR_DEFECTO = cerebro.URL_POR_DEFECTO
+SEGUNDOS_TIMEOUT = cerebro.SEGUNDOS_TIMEOUT
 
 
 class ErrorChat(Exception):
@@ -230,45 +230,23 @@ def _historial(conversacion) -> list[dict]:
 
 def _pedirle_al_modelo(mensajes: list[dict], tools: list) -> dict:
     """
-    Le pide al motor que llame al modelo. Devuelve contenido y llamadas.
+    Le pide al modelo. ES UN ALIAS: la implementacion vive en 'cerebro'.
 
-    FAIL-CLOSED CON EL TENANT, igual que en el sondeo de fuentes: sin
-    'MOTOR_TENANT' no se pregunta. Este parametro decide de QUE empresa es la
-    config --y por tanto el modelo y quien paga-- y suponerlo usaria la de otra.
+    POR QUE NO SE BORRA
+    -------------------
+    Porque 'tests/test_p5_chat_supervisor.py' y el arnes en vivo parchean ESTA
+    ruta por nombre ('operaciones.chat._pedirle_al_modelo'). Borrarla los
+    rompia sin que el cambio tuviera nada que ver con ellos, y una prueba que
+    se cae por una mudanza no esta midiendo lo que dice medir.
+
+    Queda delegando, no duplicando: hay UNA implementacion, la del cerebro.
+    'ErrorCerebro' se traduce a 'ErrorChat' para que quien atrapa el error del
+    chat siga atrapandolo.
     """
-    import requests
-
-    url = (os.environ.get(VARIABLE_URL, "") or URL_POR_DEFECTO).strip()
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
-    if not tenant:
-        raise ErrorChat(
-            "falta MOTOR_TENANT: sin saber de qué empresa es esta conversación "
-            "no se puede consultar el modelo")
-
-    cabeceras = {"Content-Type": "application/json"}
-    token = os.environ.get("MOTOR_SERVICE_TOKEN")
-    if token:
-        cabeceras["X-Servicio-Token"] = token
-
     try:
-        r = requests.post(url, params={"tenant": tenant},
-                          json={"mensajes": mensajes, "tools": tools},
-                          headers=cabeceras, timeout=SEGUNDOS_TIMEOUT)
-    except Exception as e:                                       # noqa: BLE001
-        #  Tipo y no texto: el texto de una excepcion de red trae la URL.
-        raise ErrorChat(f"no se pudo consultar el modelo: "
-                        f"{type(e).__name__}") from None
-
-    if r.status_code != 200:
-        #  El cuerpo no se incluye: un 500 puede traer una pagina entera.
-        raise ErrorChat(f"el modelo no contestó (HTTP {r.status_code})")
-    try:
-        cuerpo = r.json() or {}
-    except ValueError:
-        raise ErrorChat("la respuesta del modelo no es JSON") from None
-    if not isinstance(cuerpo, dict):
-        raise ErrorChat("la respuesta del modelo no es un objeto")
-    return cuerpo
+        return cerebro._pedirle_al_modelo(mensajes, tools)
+    except cerebro.ErrorCerebro as e:
+        raise ErrorChat(str(e)) from None
 
 
 # =============================================================================
@@ -308,71 +286,57 @@ def responder(conversacion, texto: str, *, ahora=None) -> MensajeSupervisor:
         conversacion.titulo = pregunta[:160]
     conversacion.save(update_fields=["ultimo_mensaje_en", "titulo"])
 
-    mensajes = [{"role": "system", "content": _instrucciones(org, conversacion)}]
-    mensajes.extend(_historial(conversacion))
+    instrucciones = _instrucciones(org, conversacion)
+    historial = _historial(conversacion)
 
-    tools = chat_herramientas.esquema()
-    consultadas: list[dict] = []
-    modelo = proveedor = ""
-    contenido = ""
-
+    #  EL BUCLE NO VIVE AQUI  --  Fase 1 de la integracion del cerebro
+    #  ---------------------------------------------------------------
+    #  Antes esta funcion tenia su propia copia: armaba los mensajes, llamaba al
+    #  modelo, ejecutaba las herramientas y volvia a llamar. El ciclo automatico
+    #  va a necesitar exactamente eso, y dos copias del mismo bucle se
+    #  desincronizan -- una aprende a manejar un caso y la otra no.
+    #
+    #  Ahora el bucle es 'cerebro.razonar()' y esta funcion hace lo que si es
+    #  suyo: persistir la pregunta, persistir la respuesta y mover la
+    #  conversacion. El chat es UNA ENTRADA del cerebro, no el cerebro.
+    #
+    #  LO QUE NO CAMBIA, y hay pruebas por cada cosa: el tope de vueltas, el
+    #  texto de "se agotaron", que un fallo se guarde como fallo, que la traza
+    #  no lleve el resultado de la herramienta, y que el tenant lo ponga el
+    #  despachador y no el modelo.
     try:
-        for _vuelta in range(VUELTAS_MAXIMAS):
-            cuerpo = _pedirle_al_modelo(mensajes, tools)
-            modelo = str(cuerpo.get("modelo") or "")
-            proveedor = str(cuerpo.get("proveedor") or "")
-            contenido = str(cuerpo.get("contenido") or "")
-            llamadas = cuerpo.get("llamadas") or []
-
-            if not llamadas:
-                break
-
-            #  La respuesta con las llamadas entra al historial del turno para
-            #  que el modelo vea lo que pidio; despues entran los resultados.
-            mensajes.append({"role": "assistant",
-                             "content": contenido or "(consultando)"})
-            for ll in llamadas:
-                nombre = str(ll.get("nombre") or "")
-                argumentos = ll.get("argumentos") or {}
-                try:
-                    resultado = chat_herramientas.ejecutar(org, nombre,
-                                                           argumentos)
-                except chat_herramientas.HerramientaDesconocida as e:
-                    #  Se le DICE al modelo que esa herramienta no existe, en vez
-                    #  de inventar un resultado o de abortar el turno. Puede
-                    #  corregirse en la vuelta siguiente.
-                    resultado = {"error": "herramienta_desconocida",
-                                 "detalle": str(e)}
-                except Exception as e:                           # noqa: BLE001
-                    resultado = {"error": "la_herramienta_fallo",
-                                 "detalle": type(e).__name__}
-
-                consultadas.append({"nombre": nombre,
-                                    "argumentos": argumentos,
-                                    #  El resultado NO se guarda en la traza:
-                                    #  puede traer datos operativos y la fila
-                                    #  quedaria con una copia vieja del mundo.
-                                    "hubo_error": "error" in resultado})
-                mensajes.append({
-                    "role": "user",
-                    "content": (f"Resultado de {nombre}: "
-                                + json.dumps(resultado, ensure_ascii=False,
-                                             default=str)[:6000]),
-                })
-        else:
-            #  Se agotaron las vueltas. Se contesta con lo que haya y se dice --
-            #  no se sigue pidiendo herramientas indefinidamente.
-            if not contenido:
-                contenido = ("Consulté varias veces y no logré cerrar una "
-                             "respuesta. Puedo intentarlo con una pregunta más "
-                             "concreta.")
-    except ErrorChat as e:
+        #  Se le PASA la puerta del chat, no la del cerebro. Dos motivos y
+        #  los dos importan: las 41 pruebas de este modulo parchean
+        #  'chat._pedirle_al_modelo' y tienen que seguir interceptando --una
+        #  guarda que se cae por una mudanza interna deja de medir lo que dice
+        #  medir--; y el error que levante se traduce a 'ErrorChat' en el alias,
+        #  asi que quien atrapaba el error del chat sigue atrapandolo.
+        r = cerebro.razonar(org, instrucciones=instrucciones,
+                            entrada=pregunta, historial=historial,
+                            pedir=_pedirle_al_modelo)
+    except (ErrorChat, cerebro.ErrorCerebro) as e:
+        #  LOS DOS, y no es redundancia. 'ErrorChat' lo levanta el alias de
+        #  arriba al traducir el del cerebro, y tambien lo inyectan las pruebas
+        #  que simulan un fallo. 'ErrorCerebro' llega si alguien llama al
+        #  cerebro con su propia puerta. Atrapar uno solo dejaba un camino por
+        #  el que el turno revienta SIN guardar el fallo -- justo el hueco
+        #  silencioso que este bloque existe para evitar.
         fin = timezone.now()
         return MensajeSupervisor.objects.create(
             conversacion=conversacion, org=org, rol=RolMensaje.ERROR,
             contenido="No pude responder en este momento.",
-            escrito_en=fin, error=str(e), herramientas=consultadas,
+            escrito_en=fin, error=str(e), herramientas=[],
             duracion_ms=int((time.monotonic() - arranque) * 1000))
+
+    consultadas = r.consultadas
+    modelo, proveedor = r.modelo, r.proveedor
+    contenido = r.contenido
+    if r.agotado and not contenido:
+        #  Se agotaron las vueltas. Se contesta con lo que haya y se dice -- no
+        #  se sigue pidiendo herramientas indefinidamente.
+        contenido = ("Consulté varias veces y no logré cerrar una "
+                     "respuesta. Puedo intentarlo con una pregunta más "
+                     "concreta.")
 
     fin = timezone.now()
     respuesta = MensajeSupervisor.objects.create(
@@ -383,8 +347,10 @@ def responder(conversacion, texto: str, *, ahora=None) -> MensajeSupervisor:
             "situacion": (conversacion.situacion.codigo
                           if conversacion.situacion_id else None),
             "caso": conversacion.caso_id or None,
-            "mensajes_enviados": len(mensajes),
-            "herramientas_disponibles": len(tools),
+            "mensajes_enviados": len(historial) + 2,
+            "herramientas_disponibles": len(chat_herramientas.esquema()),
+            "vueltas": r.vueltas,
+            "agotado": r.agotado,
         },
         modelo=modelo, proveedor=proveedor,
         duracion_ms=int((time.monotonic() - arranque) * 1000))
