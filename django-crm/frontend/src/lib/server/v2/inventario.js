@@ -76,6 +76,33 @@ export async function leerUbicaciones(ctx) {
 }
 
 /**
+ * Las series de un material que están HOY en una ubicación.
+ *
+ * Sale del índice `UbicacionDeActivo`, que guarda dónde está cada aparato, así
+ * que es una consulta y no un recorrido del libro. El error viaja declarado:
+ * una bodega sin ninguna de ese material devuelve lista vacía, y eso no es lo
+ * mismo que no haber podido preguntar.
+ *
+ * @param {{cookies: any}} ctx
+ * @param {string} ubicacion
+ * @param {string} material  id o código
+ * @returns {Promise<{ series: string[], error: boolean }>}
+ */
+export async function leerSeriesDisponibles(ctx, ubicacion, material) {
+  try {
+    const d = await apiRequest(
+      `/campo/inventario/series/?ubicacion=${encodeURIComponent(ubicacion)}`
+        + `&material=${encodeURIComponent(material)}`,
+      {},
+      ctx
+    );
+    return { series: d?.series ?? [], error: false };
+  } catch {
+    return { series: [], error: true };
+  }
+}
+
+/**
  * Da de alta una bodega o un vehículo.
  *
  * NO sirve para la custodia de un técnico, y el backend lo rechaza: esa nace

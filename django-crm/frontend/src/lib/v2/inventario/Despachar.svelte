@@ -45,6 +45,147 @@
   let lineas = $state([{ n: 1, material: '', cantidad: '', serie: '' }]);
   let siguiente = 2;
 
+  // ======================================================================
+  //  ELEGIR LA SERIE, NO ESCRIBIRLA
+  // ======================================================================
+  //  Despachar una ONT pedía teclear doce caracteres sin separadores leídos de
+  //  una etiqueta, teniendo la bodega el dato. Un error de tipeo no se nota
+  //  hasta que el aparato aparece «en otra custodia», que es el peor momento.
+  //
+  //  Se piden al cambiar de bodega o de material y se guardan por material: en
+  //  un acta con tres líneas del mismo equipo, una sola consulta.
+
+  /** @type {Record<string, string[]>} */
+  let seriesDe = $state({});
+  /** @type {Record<string, boolean>} */
+  let cargandoSeries = $state({});
+
+  /** @param {string} material */
+  async function traerSeries(material) {
+    if (!material || !origen) return;
+    const clave = `${origen}|${material}`;
+    if (seriesDe[clave] || cargandoSeries[clave]) return;
+    cargandoSeries = { ...cargandoSeries, [clave]: true };
+    try {
+      const r = await fetch(
+        `/api/inventario/series?ubicacion=${encodeURIComponent(origen)}`
+          + `&material=${encodeURIComponent(material)}`
+      );
+      const d = await r.json();
+      seriesDe = { ...seriesDe, [clave]: d?.series ?? [] };
+    } catch {
+      // Si no se pueden traer, el campo sigue aceptando texto: que falle la
+      // comodidad no puede impedir despachar.
+      seriesDe = { ...seriesDe, [clave]: [] };
+    } finally {
+      cargandoSeries = { ...cargandoSeries, [clave]: false };
+    }
+  }
+
+  /** Las que quedan para ESTA línea: sin las ya elegidas en las otras. */
+  function disponiblesPara(linea) {
+    const clave = `${origen}|${linea.material}`;
+    const todas = seriesDe[clave] ?? [];
+    const tomadas = new Set(
+      lineas.filter((l) => l.n !== linea.n && l.serie).map((l) => l.serie)
+    );
+    return todas.filter((x) => !tomadas.has(x));
+  }
+
+  // Al cambiar la bodega de origen, lo que había dejado de valer: las series de
+  // otra bodega no se pueden despachar desde ésta.
+  $effect(() => {
+    origen;
+    seriesDe = {};
+    lineas = lineas.map((l) => (l.serie ? { ...l, serie: '' } : l));
+  });
+
+  // ======================================================================
+  //  EL BORRADOR: UN ACTA A MEDIO ARMAR NO SE PIERDE
+  // ======================================================================
+  //  Armar un despacho no es un acto: se empieza, falta material, se va a
+  //  buscar, se vuelve. Cerrar la pestaña en el medio obligaba a rehacerlo
+  //  entero, y lo que se rehace a las apuradas se rehace mal.
+  //
+  //  VIVE EN ESTE NAVEGADOR, y eso es parte de lo que promete: no se comparte
+  //  con nadie, no se sigue desde otra máquina y no sobrevive a limpiar los
+  //  datos del sitio. Un borrador que pareciera compartido sin serlo haría que
+  //  dos personas creyeran estar armando la misma acta.
+  //
+  //  NO ES UN DESPACHO. Nada salió de la bodega hasta tocar «Despachar»: el
+  //  borrador es papel, no movimiento. Por eso no reserva ni compromete stock,
+  //  y la serie que anotaste puede habérsela llevado otro mientras tanto --el
+  //  envío lo valida contra el libro, que es donde vive la verdad.
+  const LLAVE = 'inventario:despacho:borrador';
+
+  let guardadoEn = $state('');
+
+  function hayAlgo() {
+    return lineas.some((l) => l.material || l.cantidad || l.serie);
+  }
+
+  function guardarBorrador() {
+    try {
+      localStorage.setItem(
+        LLAVE,
+        JSON.stringify({ origen, tecnico, lineas, cuando: new Date().toISOString() })
+      );
+      guardadoEn = new Date().toISOString();
+    } catch {
+      // Modo privado, almacenamiento lleno o bloqueado por el navegador. No se
+      // puede guardar y no se finge que sí: el aviso de abajo no aparece.
+      guardadoEn = '';
+    }
+  }
+
+  function descartarBorrador() {
+    try {
+      localStorage.removeItem(LLAVE);
+    } catch {
+      /* si no se puede borrar, tampoco se pudo guardar */
+    }
+    guardadoEn = '';
+  }
+
+  /** Lo que había guardado al abrir la pantalla, sin aplicarlo todavía. */
+  let pendiente = $state(/** @type {any} */ (null));
+
+  $effect(() => {
+    // Solo al montar: leer el borrador no debe rehacerse en cada repintado.
+    if (pendiente !== null) return;
+    try {
+      const crudo = localStorage.getItem(LLAVE);
+      if (!crudo) return;
+      const d = JSON.parse(crudo);
+      if (d?.lineas?.length) pendiente = d;
+    } catch {
+      /* un borrador ilegible se ignora: no vale romper la pantalla por él */
+    }
+  });
+
+  function retomar() {
+    if (!pendiente) return;
+    origen = pendiente.origen ?? origen;
+    tecnico = pendiente.tecnico ?? tecnico;
+    lineas = pendiente.lineas.map((l, i) => ({ ...l, n: siguiente + i }));
+    siguiente += pendiente.lineas.length;
+    pendiente = null;
+    // Las series del borrador pueden ya no estar: se vuelven a pedir y el
+    // selector muestra lo que HAY ahora, no lo que había cuando se guardó.
+    for (const l of lineas) traerSeries(l.material);
+  }
+
+  /** `hace 3 min`, para que el aviso diga algo verificable. */
+  function cuandoFue(iso) {
+    const ms = Date.now() - new Date(iso).getTime();
+    const min = Math.floor(ms / 60000);
+    if (min < 1) return 'recién';
+    if (min < 60) return `hace ${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `hace ${h} h`;
+    return `el ${new Date(iso).toLocaleDateString('es-CO')}`;
+  }
+
   function agregar() {
     lineas = [...lineas, { n: siguiente++, material: '', cantidad: '', serie: '' }];
   }
@@ -268,6 +409,50 @@
   </div>
 {/if}
 
+<!--
+  EL BORRADOR QUE QUEDO DE ANTES. Se ofrece, no se aplica solo: alguien pudo
+  haber empezado otra cosa, y pisarle lo que tiene en pantalla seria peor que
+  no haber guardado nada.
+-->
+{#if pendiente}
+  <div class="mb-space-lg flex items-start gap-space-md p-space-md rounded-xl bg-surface-container-lowest shadow-sm">
+    <div class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center shrink-0">
+      <span class="material-symbols-outlined text-primary text-[20px]">history</span>
+    </div>
+    <div class="flex flex-col gap-space-xs flex-1 min-w-0">
+      <span class="font-headline-sm text-body-md font-semibold text-on-surface">
+        Tenías un despacho a medio armar
+      </span>
+      <p class="font-body-sm text-body-sm text-secondary">
+        {pendiente.lineas.length}
+        {pendiente.lineas.length === 1 ? 'línea' : 'líneas'}, guardado
+        {cuandoFue(pendiente.cuando)} en este navegador. Nada salió de la bodega:
+        las series se vuelven a consultar al retomarlo, porque pueden habérselas
+        llevado mientras tanto.
+      </p>
+      <div class="flex items-center gap-space-sm mt-space-xs">
+        <button
+          type="button"
+          onclick={retomar}
+          class="h-9 px-space-md bg-primary-container text-on-primary-container rounded font-body-sm text-body-sm font-medium transition-colors"
+        >
+          Retomarlo
+        </button>
+        <button
+          type="button"
+          onclick={() => {
+            descartarBorrador();
+            pendiente = null;
+          }}
+          class="h-9 px-space-md text-secondary rounded font-body-sm text-body-sm transition-colors hover:bg-surface-container-low"
+        >
+          Descartarlo
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <form method="POST" action="?/despacho" use:enhance class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start">
   <!-- ============ COLUMNA IZQUIERDA ============ -->
   <div class="lg:col-span-8 flex flex-col gap-space-lg">
@@ -408,6 +593,12 @@
           <div class="flex items-center gap-space-xs font-label-numeric text-body-sm text-secondary">
             <span class="w-2 h-2 rounded-full bg-primary-container"></span>
             <span>{lineas.length} {lineas.length === 1 ? 'línea' : 'líneas'}</span>
+            {#if guardadoEn}
+              <span class="font-body-sm text-body-sm text-secondary flex items-center gap-1">
+                <span class="material-symbols-outlined text-[14px]">save</span>
+                Borrador guardado {cuandoFue(guardadoEn)}
+              </span>
+            {/if}
           </div>
         </div>
       </div>
@@ -463,6 +654,7 @@
                   <select
                     name="material"
                     bind:value={linea.material}
+                    onchange={() => traerSeries(linea.material)}
                     class="w-full h-9 px-2.5 bg-surface-container-lowest text-on-surface font-body-md text-body-md rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
                   >
                     <option value="">Elegí un material…</option>
@@ -483,21 +675,56 @@
 
                 <td class="py-3 px-space-md">
                   {#if m?.es_serializado}
+                    {@const libres = disponiblesPara(linea)}
+                    {@const clave = `${origen}|${linea.material}`}
                     <div class="flex flex-col gap-1">
-                      <div class="relative flex items-center">
-                        <input
-                          name="serie"
-                          required
-                          placeholder="HWTCA6FB5263"
-                          class="w-full h-9 pl-8 pr-2.5 font-label-code text-label-code text-on-surface bg-surface-container-lowest rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-primary uppercase"
-                        />
-                        <span class="material-symbols-outlined absolute left-2 text-secondary text-[16px]">
-                          barcode_scanner
+                      <!--
+                        SE ELIGE DE LA LISTA cuando la bodega tiene series
+                        cargadas; si no tiene ninguna --o no se pudieron
+                        traer-- queda el campo de texto. Que falle la comodidad
+                        no puede impedir despachar.
+                      -->
+                      {#if libres.length}
+                        <div class="relative flex items-center">
+                          <select
+                            name="serie"
+                            required
+                            bind:value={linea.serie}
+                            class="w-full h-9 pl-8 pr-2.5 font-label-code text-label-code text-on-surface bg-surface-container-lowest rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                          >
+                            <option value="" disabled>Elegí la serie…</option>
+                            {#each libres as x (x)}
+                              <option value={x}>{x}</option>
+                            {/each}
+                          </select>
+                          <span class="material-symbols-outlined absolute left-2 text-secondary text-[16px] pointer-events-none">
+                            barcode_scanner
+                          </span>
+                        </div>
+                        <span class="font-body-sm text-body-sm text-secondary italic">
+                          {libres.length}
+                          {libres.length === 1 ? 'disponible' : 'disponibles'} en origen ·
+                          1 unidad
                         </span>
-                      </div>
-                      <span class="font-body-sm text-body-sm text-secondary italic">
-                        Cantidad fija: 1 unidad
-                      </span>
+                      {:else}
+                        <div class="relative flex items-center">
+                          <input
+                            name="serie"
+                            required
+                            bind:value={linea.serie}
+                            placeholder="HWTCA6FB5263"
+                            class="w-full h-9 pl-8 pr-2.5 font-label-code text-label-code text-on-surface bg-surface-container-lowest rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-primary uppercase"
+                          />
+                          <span class="material-symbols-outlined absolute left-2 text-secondary text-[16px]">
+                            barcode_scanner
+                          </span>
+                        </div>
+                        <span class="font-body-sm text-body-sm text-secondary italic">
+                          {cargandoSeries[clave]
+                            ? 'Buscando las series de esta bodega…'
+                            : 'Cantidad fija: 1 unidad'}
+                        </span>
+                      {/if}
                       <input type="hidden" name="cantidad" value="1" />
                     </div>
                   {:else}
@@ -590,6 +817,19 @@
           Es el único acto que el sistema puede negar: el material todavía no salió.
         </span>
       </div>
+      <!--
+        GUARDAR NO ES DESPACHAR, y los dos botones tienen que verse distinto.
+        El borrador es papel: nada sale de la bodega hasta el de la derecha.
+      -->
+      <button
+        type="button"
+        onclick={guardarBorrador}
+        disabled={!hayAlgo()}
+        class="h-10 px-space-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-body-sm text-body-md rounded-lg shadow-sm transition-colors flex items-center gap-space-xs disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        <span class="material-symbols-outlined text-[20px]">save</span>
+        <span>Guardar borrador</span>
+      </button>
       <button
         type="submit"
         class="h-10 px-space-xl bg-primary-container hover:bg-primary text-on-primary font-headline-sm text-body-md font-medium rounded-lg shadow-sm transition-all flex items-center gap-space-xs"

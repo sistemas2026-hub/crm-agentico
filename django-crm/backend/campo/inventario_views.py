@@ -23,7 +23,11 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from campo.inventario import ActivoSerializado, UbicacionInventario
+from campo.inventario import (
+    ActivoSerializado,
+    UbicacionDeActivo,
+    UbicacionInventario,
+)
 from campo.models import MaterialCatalogo
 from campo.permissions import IsCampoAuthenticated, ROLES_GESTION
 from campo.services import catalogo as cat
@@ -167,6 +171,54 @@ class UbicacionesView(APIView):
         u = UbicacionInventario.objects.create(org=org, tipo=tipo, nombre=nombre)
         return Response({"id": str(u.id), "tipo": u.tipo, "nombre": u.nombre},
                         status=status.HTTP_201_CREATED)
+
+
+class SeriesDisponiblesView(APIView):
+    """``GET /api/campo/inventario/series/?ubicacion=<id>&material=<id|codigo>``
+
+    QUE SERIES HAY AHI, para poder ELEGIRLAS en vez de escribirlas.
+
+    Despachar una ONT pedia teclear su numero a mano teniendo la bodega el dato:
+    doce caracteres sin separadores, leidos de una etiqueta, y un error de tipeo
+    no se nota hasta que el aparato aparece "en otra custodia". La bodega sabe
+    cuales tiene; la pantalla no podia preguntarselo.
+
+    SALE DEL INDICE, NO DEL LIBRO. `UbicacionDeActivo` guarda donde esta cada
+    aparato hoy, asi que esto es una consulta y no un recorrido de movimientos.
+    El indice puede discrepar del libro --para eso existe
+    `posicion_recalculada`-- y aca se usa igual a proposito: lo que esta
+    pantalla necesita es "que deberia poder despachar", que es exactamente lo
+    que el indice contesta. Una discrepancia la caza el despacho mismo, que
+    valida contra el libro antes de mover nada.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = request.profile.org
+        u = _ubicacion(org, request.query_params.get("ubicacion"))
+        if u is None:
+            return Response({"detail": "Hace falta la ubicacion."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            material = _material(org, request.query_params.get("material"))
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if not material.es_serializado:
+            # No es un error: un consumible no tiene series y la pantalla puede
+            # preguntar igual. Devolver la lista vacia evita que tenga que saber
+            # de antemano que clase es.
+            return Response({"series": []})
+
+        filas = (
+            UbicacionDeActivo.objects
+            .filter(ubicacion=u, activo__org=org, activo__material=material)
+            .select_related("activo")
+            .order_by("activo__serie")
+        )
+        return Response({"series": [f.activo.serie for f in filas]})
 
 
 class ExistenciasView(APIView):
