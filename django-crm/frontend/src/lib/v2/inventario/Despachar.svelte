@@ -23,6 +23,7 @@
    * se pone: sería un botón que promete saltear la única validación que protege de
    * entregar dos veces el mismo aparato.
    */
+  import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import PlantillasDeKit from './PlantillasDeKit.svelte';
 
@@ -92,12 +93,39 @@
     return todas.filter((x) => !tomadas.has(x));
   }
 
-  // Al cambiar la bodega de origen, lo que había dejado de valer: las series de
-  // otra bodega no se pueden despachar desde ésta.
+  /**
+   * Al cambiar la bodega de origen, lo que había dejado de valer: las series de
+   * otra bodega no se pueden despachar desde ésta.
+   *
+   * CON `untrack` Y CON UN PREVIO, Y LOS DOS HACEN FALTA.
+   *
+   * La primera versión era `$effect(() => { origen; lineas = lineas.map(...) })`
+   * y se re-disparaba sola: el efecto LEÍA `lineas` dentro del `map` y además
+   * la escribía, y como `map` devuelve un array nuevo aunque no cambie nada, la
+   * referencia cambiaba en cada vuelta. Resultado medido en producción:
+   * «Agregar material» no agregaba nada —la línea nueva la pisaba el propio
+   * efecto— y la columna de disponible quedaba en `—`.
+   *
+   * `untrack` saca la lectura de `lineas` de las dependencias; el `previo` evita
+   * trabajar cuando el origen no cambió de verdad.
+   */
+  // svelte-ignore state_referenced_locally
+  // Es a propósito: se quiere el valor INICIAL, para comparar contra él cuando
+  // el origen cambie. Es el mismo criterio con el que ya se leen `origen` y
+  // `tecnico` arriba.
+  let origenPrevio = origen;
   $effect(() => {
-    origen;
-    seriesDe = {};
-    lineas = lineas.map((l) => (l.serie ? { ...l, serie: '' } : l));
+    const ahora = origen;
+    untrack(() => {
+      if (ahora === origenPrevio) return;
+      origenPrevio = ahora;
+      seriesDe = {};
+      // Solo si hay alguna serie puesta: si no, no se toca el array y no se
+      // repinta la tabla entera por nada.
+      if (lineas.some((l) => l.serie)) {
+        lineas = lineas.map((l) => (l.serie ? { ...l, serie: '' } : l));
+      }
+    });
   });
 
   // ======================================================================
@@ -150,17 +178,24 @@
   /** Lo que había guardado al abrir la pantalla, sin aplicarlo todavía. */
   let pendiente = $state(/** @type {any} */ (null));
 
+  let yaMire = false;
   $effect(() => {
-    // Solo al montar: leer el borrador no debe rehacerse en cada repintado.
-    if (pendiente !== null) return;
-    try {
-      const crudo = localStorage.getItem(LLAVE);
-      if (!crudo) return;
-      const d = JSON.parse(crudo);
-      if (d?.lineas?.length) pendiente = d;
-    } catch {
-      /* un borrador ilegible se ignora: no vale romper la pantalla por él */
-    }
+    // SOLO AL MONTAR, y con `untrack` por el mismo motivo que el efecto de
+    // arriba: este leía `pendiente` y lo escribía, así que se suscribía a lo
+    // que él mismo cambiaba. Sin borrador guardado volvía a leer
+    // `localStorage` en cada repintado de la tabla.
+    untrack(() => {
+      if (yaMire) return;
+      yaMire = true;
+      try {
+        const crudo = localStorage.getItem(LLAVE);
+        if (!crudo) return;
+        const d = JSON.parse(crudo);
+        if (d?.lineas?.length) pendiente = d;
+      } catch {
+        /* un borrador ilegible se ignora: no vale romper la pantalla por él */
+      }
+    });
   });
 
   function retomar() {
