@@ -218,6 +218,31 @@ en UTC, `23:0x`) y se dio por sentado que el reinicio había sido "horas
 antes". Eran **cinco minutos** antes. Con eso se descartó por error la
 causa real de un caso dorado en rojo, que era justamente la ONU recién
 reiniciada. Sumar 5 horas antes de comparar contra cualquier otra fuente.
+
+**Resuelto en el motor el 06/10/2026 — ya no hace falta sumar a mano.**
+`api.py::_con_zona_declarada` le pone el offset explícito a
+`last_status_change` antes de que salga del motor, así que lo que llega a una
+pantalla o a una orden de trabajo es un instante inequívoco. Dos cosas que
+importan de cómo quedó:
+
+- **La zona es configuración, no un valor fijo.** Sale de
+  `SMARTOLT_ZONA_HORARIA` en las variables del tenant y, si no está, de
+  `zona_horaria` de la empresa. Una instancia en otro país se resuelve desde
+  la interfaz. *(Es un supuesto declarado: la zona de la instancia del
+  proveedor se asume igual a la de la empresa salvo que la variable diga otra
+  cosa. No está medido contra la instancia de Rapilink — el valor que llega no
+  dice en qué zona está, que es precisamente el problema.)*
+- **Lo que NO hace: adivinar.** Sin zona resoluble, o con un formato
+  ilegible, el valor sale **crudo**. Un instante sin zona que se muestra como
+  tal es honesto; uno al que se le inventó la zona afirma un momento que puede
+  estar cinco horas corrido, y eso no lo nota nadie.
+
+Guarda: `tests/test_hora_del_proveedor_lleva_zona.py` (10 afirmaciones,
+verificada hacia atrás con dos mutaciones). Del lado de la app de campo,
+`core/tiempo/momento_leido.dart` sigue distinguiendo un instante con zona de
+uno sin ella — **las fichas congeladas antes de esta fecha siguen crudas**, así
+que las dos formas conviven y van a seguir conviviendo.
+
 | `authorization_date` | timestamp | 🟢 Sin riesgo |
 
 **`get_onu_signal/{sn}` es el candidato natural para `cliente_final`**: devuelve

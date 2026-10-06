@@ -269,7 +269,11 @@ void main() {
       await tester.pumpWidget(_app(base));
       await tester.pumpAndSettle();
 
-      expect(find.text('Triage Inteligente Dexter'), findsOneWidget);
+      // El rotulo dice de DONDE sale, no quien lo hizo: este bloque muestra
+      // `diagnostico_previo_ia`, un analisis hecho antes de despachar y sin
+      // ninguna prueba de campo. Se llamaba «Triage Inteligente Dexter», que
+      // no decia su procedencia y se confundia con el bloque del asistente.
+      expect(find.text('Análisis previo al despacho'), findsOneWidget);
       expect(find.text(texto), findsOneWidget);
       await base.cerrar();
     });
@@ -281,7 +285,7 @@ void main() {
       await tester.pumpWidget(_app(base));
       await tester.pumpAndSettle();
 
-      expect(find.text('Triage Inteligente Dexter'), findsNothing);
+      expect(find.text('Análisis previo al despacho'), findsNothing);
       await base.cerrar();
     });
 

@@ -1609,12 +1609,33 @@ class LocalDatabase {
     final dirtyCount =
         (dirtyList.isNotEmpty ? dirtyList.first['c'] as int? : 0) ?? 0;
 
+    // LA CUARTA COLA, QUE FALTABA.
+    //
+    // `cola_seguimiento` --los reportes de inicio, avance, bloqueo y cierre--
+    // se sincroniza igual que las otras (`sync_queue_service` la procesa y la
+    // marca subida), pero no entraba en esta cuenta. Resultado medido el
+    // 06/10/2026: la pastilla del encabezado podia decir «Sincronizado»
+    // mientras habia reportes esperando dentro de la orden, y el técnico veia
+    // las dos frases a la vez sin forma de saber cual creer.
+    //
+    // Una cola que se sube y no se cuenta es peor que una que no se sube: la
+    // segunda al menos se nota.
+    final segPendList = await db.rawQuery(
+      "SELECT COUNT(*) as c FROM cola_seguimiento "
+      "WHERE org_id = ? AND profile_id = ? AND estado = 'pendiente'",
+      [orgId, profileId],
+    );
+    final segPend =
+        (segPendList.isNotEmpty ? segPendList.first['c'] as int? : 0) ?? 0;
+
     return {
       'mutaciones_pendientes': mutPend,
       'mutaciones_conflicto': mutConf,
       'evidencias_pendientes': evPend,
+      'seguimientos_pendientes': segPend,
       'datos_dirty': dirtyCount,
-      'total_pendientes': mutPend + evPend + (dirtyCount > 0 ? 1 : 0),
+      'total_pendientes':
+          mutPend + evPend + segPend + (dirtyCount > 0 ? 1 : 0),
     };
   }
 
@@ -1960,15 +1981,28 @@ class LocalDatabase {
 
   /// Cuantos reportes de seguimiento esperan subir. Para el sello de
   /// sincronizacion, que es lo unico que le dice al tecnico que algo no salio.
+  /// Reportes de seguimiento que todavía no salieron del teléfono.
+  ///
+  /// [ordenId] ACOTA LA CUENTA A UNA ORDEN, y no es un lujo: sin él esta
+  /// función devolvía la cola **completa** del técnico mientras la pantalla
+  /// la rotulaba «reportes escritos acá». Un reporte pendiente de la orden
+  /// anterior aparecía como pendiente de la orden que se está mirando, donde
+  /// nadie escribió nada. Medido el 06/10/2026 leyendo los dos llamadores.
+  ///
+  /// Sin [ordenId] sigue devolviendo la cola entera, que es lo correcto para
+  /// la franja general — pero entonces el texto tiene que decir que es
+  /// general.
   Future<int> contarSeguimientosPendientes({
     required String orgId,
     required String profileId,
+    String? ordenId,
   }) async {
     final db = await database;
     final filas = await db.rawQuery(
       "SELECT COUNT(*) AS n FROM cola_seguimiento "
-      "WHERE org_id = ? AND profile_id = ? AND estado = 'pendiente'",
-      [orgId, profileId],
+      "WHERE org_id = ? AND profile_id = ? AND estado = 'pendiente'"
+      "${ordenId == null ? '' : ' AND orden_id = ?'}",
+      <Object?>[orgId, profileId, ?ordenId],
     );
     final Object? n = filas.isEmpty ? 0 : filas.first['n'];
     return n is int ? n : 0;

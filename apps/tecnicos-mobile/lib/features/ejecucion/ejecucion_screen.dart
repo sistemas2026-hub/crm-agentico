@@ -689,9 +689,13 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       // Con `await` y no devolviendo el Future: sin esperarlo, el `catch` de
       // abajo no lo atrapa y un fallo de la base rompe la pantalla en vez de
       // contar cero.
+      // CON ordenId: lo que esta pantalla dice es «escritos ACA», y sin
+      // acotar devolvia la cola entera del tecnico -- un reporte pendiente de
+      // la orden anterior se leia como pendiente de esta.
       return await LocalDatabase().contarSeguimientosPendientes(
         orgId: orgId,
         profileId: profileId,
+        ordenId: widget.ordenId,
       );
     } catch (_) {
       return 0;
@@ -1350,6 +1354,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   Widget _progresoDeFotos() {
     final int total = _evidenciasRequisitos.length;
     final int hechas = _fotosCapturadas;
+    final int enviadas = fotosEnviadas(capturadas: _evidenciasCapturadas);
     final int faltan = total - hechas;
     final int obligatoriasPendientes = requisitosPendientes(
       requisitos: _evidenciasRequisitos,
@@ -1370,9 +1375,16 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
               // desbordaba 28 px. Lo encontro la corrida de capturas, no una
               // prueba -- las capturas dibujan la pantalla al ancho de un
               // telefono de verdad.
+              // NO DICE «CARGADAS», Y ES EL PUNTO DE ESTE BLOQUE.
+              //
+              // Decía «Fotos cargadas: 2/2» mientras la línea de abajo decía
+              // «2 capturadas» — dos palabras para dos hechos distintos, y la
+              // de arriba era la equivocada. «Cargada» se lee como que el
+              // servidor ya la tiene; si el teléfono se rompe esa noche, no la
+              // tiene nadie. Lo que esta fila cuenta es lo que hay TOMADO.
               Flexible(
                 child: Text(
-                  'Fotos cargadas:',
+                  'Fotos de esta orden:',
                   style: AppTypography.labelTelemetry,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -1427,16 +1439,37 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           const SizedBox(height: AppSpacing.xs),
           Row(
             children: <Widget>[
-              const Icon(
-                Icons.check_circle,
+              // EL ICONO SIGUE AL SEGUNDO NUMERO, NO AL PRIMERO. Un tilde
+              // verde al lado de «0/2 enviadas» contradice al texto que tiene
+              // pegado, y de los dos el que se mira de reojo es el ícono.
+              Icon(
+                enviadas == hechas
+                    ? Icons.check_circle
+                    : Icons.cloud_upload_outlined,
                 size: 14,
-                color: AppColors.onTertiaryContainer,
+                color: enviadas == hechas
+                    ? AppColors.onTertiaryContainer
+                    : AppColors.outline,
               ),
               const SizedBox(width: 4),
-              Text(
-                '$hechas capturadas',
-                style: AppTypography.labelCaption.copyWith(
-                  color: AppColors.onTertiaryContainer,
+              // LOS DOS NUMEROS, SIEMPRE, Y NUNCA UNO SOLO.
+              //
+              // `0/2 enviadas` con `2/2 capturadas` es exactamente lo que el
+              // técnico necesita ver sin red: puede seguir trabajando
+              // tranquilo, y al cerrar jornada sabe qué falta salir del
+              // teléfono. Si solo se mostrara el total enviado cuando es
+              // mayor que cero, el caso importante —ninguna salió— sería
+              // justo el que se calla.
+              Flexible(
+                child: Text(
+                  '$hechas/$total capturadas · $enviadas/$total enviadas',
+                  style: AppTypography.labelCaption.copyWith(
+                    color: enviadas == hechas
+                        ? AppColors.onTertiaryContainer
+                        : AppColors.outline,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               const Spacer(),

@@ -522,11 +522,18 @@ class _SeguimientoDeLaIntervencionState
     return <Widget>[
       if (widget.pendientesDeSubir > 0) ...<Widget>[
         const SizedBox(height: AppSpacing.xs),
+        // «ESTA OT» AL PRINCIPIO, Y NO «ACA».
+        //
+        // Decía «escritos acá» mientras la cuenta era de TODA la cola del
+        // técnico (`contarSeguimientosPendientes` no filtraba por orden): un
+        // reporte pendiente de la orden anterior se leía como pendiente de
+        // esta. Ahora la cuenta es de esta orden, y el texto lo dice — para
+        // que no se pueda confundir con la pastilla del encabezado, que
+        // cuenta la cola general y ahora la rotula así.
         Text(
           widget.pendientesDeSubir == 1
-              ? '1 reporte escrito acá todavía no subió.'
-              : '${widget.pendientesDeSubir} reportes escritos acá todavía no '
-                    'subieron.',
+              ? 'Esta OT: 1 reporte sin enviar.'
+              : 'Esta OT: ${widget.pendientesDeSubir} reportes sin enviar.',
           style: AppTypography.etiquetaChica,
         ),
       ],

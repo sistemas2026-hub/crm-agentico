@@ -20,6 +20,14 @@ class SyncSummary {
   final int mutacionesPendientes;
   final int mutacionesConflicto;
   final int evidenciasPendientes;
+
+  /// Reportes de inicio, avance, bloqueo y cierre esperando su turno.
+  ///
+  /// FALTABA, y se notaba del peor modo: esta cola se sube igual que las
+  /// otras, pero no entraba en [totalPendientes]. La pastilla del encabezado
+  /// decia «Sincronizado» con reportes esperando adentro de la orden.
+  final int seguimientosPendientes;
+
   final int datosDirty;
 
   const SyncSummary({
@@ -29,11 +37,15 @@ class SyncSummary {
     required this.mutacionesPendientes,
     required this.mutacionesConflicto,
     required this.evidenciasPendientes,
+    this.seguimientosPendientes = 0,
     required this.datosDirty,
   });
 
   int get totalPendientes =>
-      mutacionesPendientes + evidenciasPendientes + (datosDirty > 0 ? 1 : 0);
+      mutacionesPendientes +
+      evidenciasPendientes +
+      seguimientosPendientes +
+      (datosDirty > 0 ? 1 : 0);
   bool get isClean => totalPendientes == 0 && mutacionesConflicto == 0;
 }
 
@@ -120,6 +132,7 @@ class SyncQueueService {
         mutacionesPendientes: 0,
         mutacionesConflicto: 0,
         evidenciasPendientes: 0,
+        seguimientosPendientes: 0,
         datosDirty: 0,
       );
       _lastSummary = empty;
@@ -139,6 +152,7 @@ class SyncQueueService {
       mutacionesPendientes: counts['mutaciones_pendientes'] ?? 0,
       mutacionesConflicto: counts['mutaciones_conflicto'] ?? 0,
       evidenciasPendientes: counts['evidencias_pendientes'] ?? 0,
+      seguimientosPendientes: counts['seguimientos_pendientes'] ?? 0,
       datosDirty: counts['datos_dirty'] ?? 0,
     );
     _lastSummary = summary;

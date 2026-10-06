@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../../core/tiempo/momento_leido.dart';
 import 'estado_trabajo.dart';
 import 'estado_validacion.dart';
 
@@ -418,6 +419,20 @@ class TrabajoVista {
   /// conclusión equivocada el 15/08/2026.
   String get ultimoCambioEquipo => _delEquipo('last_status_change');
 
+  /// El mismo dato, leído sin inventarle la zona.
+  ///
+  /// Este es el campo por el que existe [MomentoLeido]. Sale de
+  /// `get_onu_status`, el endpoint que lo manda **sin offset**; otro endpoint
+  /// del mismo proveedor manda el mismo instante **con** offset. Por eso no se
+  /// puede decidir acá si convertir: lo decide el texto que llegó, y
+  /// [MomentoLeido] lo deja declarado para que la pantalla no afirme una
+  /// antigüedad que no puede calcular.
+  ///
+  /// Estuvo escrito y sin dibujar en ninguna pantalla hasta el 06/10/2026,
+  /// justamente porque resolver la zona estaba pendiente.
+  MomentoLeido? get ultimoCambioEquipoLeido =>
+      MomentoLeido.desde(_delEquipo('last_status_change'));
+
   /// El puerto PON del que cuelga el equipo, como `0/10`.
   ///
   /// Es `board/port` y NADA MÁS: la tarjeta de la OLT y su puerto. Así lo
@@ -525,6 +540,15 @@ class TrabajoVista {
   /// de lo que se veía en un momento. Sin la hora al lado, un técnico parado
   /// en la casa la leería como la señal de ahora.
   DateTime? get fichaCapturadaEn => _fecha(contexto['capturado_en']);
+
+  /// Lo mismo, como instante que sabe de qué zona viene.
+  ///
+  /// Esta la pone el backend propio (`timezone.now().isoformat()`), así que
+  /// trae offset y se puede comparar contra el reloj del teléfono. Se expone
+  /// igual a través de [MomentoLeido] para que la pantalla no tenga que saber
+  /// cuál de los dos casos le tocó: el de la ficha o el del proveedor.
+  MomentoLeido? get fichaCapturadaLeida =>
+      MomentoLeido.desde(contexto['capturado_en']);
 
   /// La prioridad que le puso el operador en el sistema del ISP.
   ///

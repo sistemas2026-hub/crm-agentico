@@ -33,7 +33,11 @@ class SyncPresentacion {
       return '${resumen.mutacionesConflicto} sin resolver';
     }
     if (resumen.totalPendientes > 0) {
-      final pendientes = '${resumen.totalPendientes} sin enviar';
+      // DICE «COLA» A PROPOSITO: esta pastilla cuenta TODO lo que el tecnico
+      // tiene sin enviar, de cualquier orden, y adentro de una orden hay otra
+      // frase que cuenta solo la de ella. Sin decir cual es cual, las dos
+      // parecen significar lo mismo y una de las dos parece estar mintiendo.
+      final pendientes = 'cola: ${resumen.totalPendientes}';
       return resumen.hasConnectionError ? '$pendientes · sin conexión' : pendientes;
     }
     if (resumen.hasConnectionError) return 'Sin conexión';

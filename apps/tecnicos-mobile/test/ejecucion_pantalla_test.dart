@@ -624,9 +624,20 @@ void main() {
       await t.pumpAndSettle();
 
       // Sin ninguna foto tomada todavía: cero de las que pide la orden.
-      expect(find.textContaining('Fotos cargadas:'), findsOneWidget);
+      //
+      // NO DICE «CARGADAS». Decia «Fotos cargadas: 0/2» arriba y «0
+      // capturadas» abajo: dos palabras para dos hechos distintos, y
+      // «cargada» se lee como que el servidor ya la tiene. Ahora los dos
+      // numeros van juntos y separados.
+      expect(find.textContaining('Fotos de esta orden:'), findsOneWidget);
+      expect(find.textContaining('cargadas'), findsNothing);
       expect(find.text('0%'), findsOneWidget);
-      expect(find.text('0 capturadas'), findsOneWidget);
+      expect(
+        find.text('0/3 capturadas · 0/3 enviadas'),
+        findsOneWidget,
+        reason: 'las dos cuentas SIEMPRE, incluso en cero: el caso en que '
+            'ninguna salio del telefono es justo el que no puede callarse',
+      );
     });
 
     testWidgets('El aviso sin señal no promete un cifrado que no existe',

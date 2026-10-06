@@ -389,8 +389,12 @@ void main() {
         pendientes: 1,
       );
 
+      // «ESTA OT» AL PRINCIPIO: la cuenta ahora esta acotada a esta orden
+      // (`contarSeguimientosPendientes` no filtraba por orden_id y devolvia
+      // la cola entera del tecnico), y el texto lo dice para no confundirse
+      // con la pastilla del encabezado, que cuenta la cola general.
       expect(
-        find.textContaining('1 reporte escrito acá todavía no subió'),
+        find.textContaining('Esta OT: 1 reporte sin enviar'),
         findsOneWidget,
         reason:
             'Un reporte guardado y sin subir es un hecho que el técnico '
@@ -406,7 +410,10 @@ void main() {
         pendientes: 3,
       );
 
-      expect(find.textContaining('3 reportes escritos'), findsOneWidget);
+      expect(
+        find.textContaining('Esta OT: 3 reportes sin enviar'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('sin pendientes no dice nada', (WidgetTester tester) async {

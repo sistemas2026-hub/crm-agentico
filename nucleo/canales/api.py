@@ -5569,7 +5569,76 @@ def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
         except Exception as e:
             registrar("enlaces", "la herramienta de equipo no respondio",
                       herramienta=nombre, error=e)
-    return salida
+    return _con_zona_declarada(salida, config)
+
+
+# ---------------------------------------------------------------------------
+#  UNA HORA SIN ZONA ES UNA HORA QUE NO SE PUEDE COMPARAR
+# ---------------------------------------------------------------------------
+#  'last_status_change' sale de get_onu_status, que lo manda en hora LOCAL de
+#  la instancia del proveedor y SIN offset ('2026-08-15 18:00:25'). Otro
+#  endpoint del mismo proveedor manda el mismo instante CON offset. Son dos
+#  contratos distintos del mismo dato.
+#
+#  Eso ya costo una conclusion equivocada el 15/08/2026: se comparo un
+#  'last_status_change' de las 18:00 contra timestamps de la base --que van en
+#  UTC, 23:0x-- y se dio por sentado que el reinicio habia sido horas antes.
+#  Eran CINCO MINUTOS, y con eso se descarto por error la causa real de un
+#  caso dorado en rojo.
+#
+#  QUIEN NORMALIZA ES EL MOTOR, NO LA PANTALLA. El motor es el unico que sabe
+#  de que proveedor vino el dato y en que zona vive esa instancia. Si la
+#  aplicacion de campo aplicara un '-05:00' por su cuenta estaria codificando
+#  el pais de UNA empresa, que es justo lo que ARQUITECTURA prohibe.
+#
+#  POR ESO LA ZONA ES CONFIGURACION. 'SMARTOLT_ZONA_HORARIA' en las variables
+#  del tenant, y si no esta se cae en 'config.zona_horaria', que toda empresa
+#  declara. No se fija nada en codigo: la proxima empresa puede tener su
+#  instancia en otro pais y se resuelve desde la interfaz, sin un commit.
+#
+#  LO QUE ESTO NO HACE: inventar una zona cuando no se puede resolver. Si la
+#  zona no existe en el sistema, el valor sale TAL COMO VINO. Un instante sin
+#  zona que se muestra como tal es honesto; uno al que se le adivino la zona
+#  afirma un momento que puede estar cinco horas corrido, y nadie lo nota.
+_CAMPOS_DE_EQUIPO_CON_HORA = ("last_status_change",)
+
+
+def _con_zona_declarada(equipo: dict, config) -> dict:
+    """Los instantes del proveedor, con su offset explicito."""
+    if not equipo:
+        return equipo
+
+    v = config.variables_tenant or {}
+    nombre_zona = (v.get("SMARTOLT_ZONA_HORARIA") or "").strip() \
+        or getattr(config, "zona_horaria", "") or ""
+    if not nombre_zona:
+        return equipo
+
+    try:
+        from zoneinfo import ZoneInfo
+        zona = ZoneInfo(nombre_zona)
+    except Exception as e:
+        # Una zona mal escrita no puede romper el diagnostico del equipo: el
+        # dato crudo sigue sirviendo, y la pantalla ya sabe distinguirlo.
+        registrar("enlaces", "no se pudo resolver la zona del proveedor",
+                  error=e)
+        return equipo
+
+    for clave in _CAMPOS_DE_EQUIPO_CON_HORA:
+        crudo = equipo.get(clave)
+        if not isinstance(crudo, str) or not crudo.strip():
+            continue
+        try:
+            leido = datetime.fromisoformat(crudo.strip().replace(" ", "T"))
+        except ValueError:
+            # Un formato que no se entiende se deja como esta. Reescribirlo a
+            # medias seria peor: el valor seguiria ahi y ya no se sabria que
+            # no se pudo leer.
+            continue
+        if leido.tzinfo is None:
+            leido = leido.replace(tzinfo=zona)
+        equipo[clave] = leido.isoformat()
+    return equipo
 
 
 # Lo que la ficha del cliente aporta a la pantalla del ticket. Se nombra aca

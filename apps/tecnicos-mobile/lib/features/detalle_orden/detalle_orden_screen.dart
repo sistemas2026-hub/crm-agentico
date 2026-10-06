@@ -17,6 +17,8 @@ import '../../core/widgets/dexter_bloques.dart';
 import '../../core/widgets/dexter_card.dart';
 import '../../core/widgets/dexter_empty_state.dart';
 import '../../core/widgets/contenido_centrado.dart';
+import '../../core/tiempo/formato_de_momento.dart';
+import '../../core/tiempo/momento_leido.dart';
 import '../../core/widgets/dexter_sync_badge.dart';
 import '../ejecucion/ejecucion_screen.dart';
 import '../trabajo/estado_trabajo.dart';
@@ -391,9 +393,13 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       // Con `await` y no devolviendo el Future: sin esperarlo, el `catch` de
       // abajo no lo atrapa y un fallo de la base rompe la pantalla en vez de
       // contar cero.
+      // CON ordenId: lo que esta pantalla dice es «escritos ACA», y sin
+      // acotar devolvia la cola entera del tecnico -- un reporte pendiente de
+      // la orden anterior se leia como pendiente de esta.
       return await LocalDatabase().contarSeguimientosPendientes(
         orgId: orgId,
         profileId: profileId,
+        ordenId: widget.ordenId,
       );
     } catch (_) {
       return 0;
@@ -1863,8 +1869,43 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
 
   /// CAMPO-DATA-001, 011 y 012: telemetría de red. Ningún sistema la entrega
   /// para campo todavía; se ve solo en modo demostración.
-  static String _hhmm(DateTime f) =>
-      '${f.hour.toString().padLeft(2, '0')}:${f.minute.toString().padLeft(2, '0')}';
+  ///
+  /// EL DIA NO SE ESCONDE. Esto devolvía `HH:MM` a secas, y una ficha
+  /// congelada ayer se leía como de hoy — peor que no mostrar nada, porque
+  /// afirma actualidad. El formato vive en `core/tiempo`, que además distingue
+  /// un instante que sabe su zona de uno que no: ver `MomentoLeido`.
+  static String _cuando(DateTime f) => textoDelMomento(
+    MomentoLeido(cuando: f, zona: ZonaDelMomento.declarada),
+    ahora: DateTime.now(),
+  );
+
+  /// `Equipo Offline · último cambio 06 oct · 10:42`
+  ///
+  /// POR QUE JUNTOS. Un `Offline` solo no dice si el equipo se cayó hace diez
+  /// minutos o hace dos meses, y esas dos cosas se atienden distinto: la
+  /// primera puede ser la falla que se vino a resolver, la segunda es un
+  /// cliente que ya no está. El dato viajaba desde el motor
+  /// (`api.py::_CAMPOS_DE_EQUIPO`) hasta `TrabajoVista.ultimoCambioEquipo` y
+  /// no se dibujaba en ninguna pantalla.
+  ///
+  /// SE DICE «ULTIMO CAMBIO», NO «DESDE». `desde` afirma una duración, y
+  /// calcularla exige saber en qué zona está esa hora — y SmartOLT la manda
+  /// sin offset. `MomentoLeido` deja eso declarado y el texto se queda en lo
+  /// que sí se puede sostener: el sello, con el reloj del que salió.
+  static String _estadoConSuUltimoCambio(TrabajoVista trabajo) {
+    if (trabajo.estadoOnu.isEmpty) return 'Sin lectura';
+
+    final String estado = 'Equipo ${trabajo.estadoOnu}';
+    final MomentoLeido? cambio = trabajo.ultimoCambioEquipoLeido;
+    if (cambio == null) return estado;
+
+    final String cuando = textoDelMomento(
+      cambio,
+      ahora: DateTime.now(),
+      origen: 'la OLT',
+    );
+    return '$estado · último cambio $cuando';
+  }
 
   /// Por qué esta orden no trae datos del equipo.
   ///
@@ -2072,7 +2113,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 children: <Widget>[
                   Text(
                     'AHORA'
-                    '${m.medidoEn == null ? '' : ' · ${_hhmm(m.medidoEn!)}'}',
+                    '${m.medidoEn == null ? '' : ' · ${_cuando(m.medidoEn!)}'}',
                     style: AppTypography.etiquetaChica,
                   ),
                   const SizedBox(height: 2),
@@ -2374,6 +2415,27 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                           : AppColors.exitoTexto,
                     ),
                   ),
+                  // CON QUE SE CALCULO, Y DE CUANDO ES CADA COSA.
+                  //
+                  // Es el tercero de los bloques que opinan sobre la falla, y
+                  // el único que usa algo que el técnico acaba de producir. Sin
+                  // esta línea se lee igual que los otros dos.
+                  //
+                  // Y no son todos del mismo momento: el ping es de ahora, la
+                  // señal y el estado salen de la ficha congelada al despachar.
+                  // Decirlo importa porque mezcla presente y pasado — y porque
+                  // el ping, aunque sea de ahora, ya quedó medido como un
+                  // indicador que no dictamina (1/3, 2/3 y 3/3 en corridas
+                  // seguidas del mismo equipo sano).
+                  const SizedBox(height: 4),
+                  Text(
+                    _conQueSeCalculo(trabajo),
+                    style: AppTypography.etiquetaChica.copyWith(
+                      color: d.malo
+                          ? AppColors.onErrorContainer
+                          : AppColors.exitoTexto,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -2381,6 +2443,23 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         ),
       ),
     );
+  }
+
+  /// Los insumos que entraron al veredicto de arriba, nombrados y fechados.
+  ///
+  /// Se arma de lo que REALMENTE había, no de lo que el bloque podría usar: si
+  /// el técnico no corrió el ping, no se nombra. Un insumo listado que no
+  /// participó convierte esta línea en lo contrario de lo que es.
+  String _conQueSeCalculo(TrabajoVista trabajo) {
+    final List<String> insumos = <String>[
+      if (_ping != null) 'el ping de ahora',
+      if (trabajo.veredictoSenal.isNotEmpty) 'la señal de la ficha',
+      if (trabajo.estadoOnu.isNotEmpty) 'el estado de la ONU',
+    ];
+    if (insumos.isEmpty) return '';
+    if (insumos.length == 1) return 'Calculado con ${insumos.first}.';
+    final String ultimo = insumos.removeLast();
+    return 'Calculado con ${insumos.join(', ')} y $ultimo.';
   }
 
   Future<void> _lanzarPing() async {
@@ -2661,7 +2740,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        'Medido ${_hhmm(trabajo.fichaCapturadaEn!)}',
+                        'Medido ${_cuando(trabajo.fichaCapturadaEn!)}',
                         style: AppTypography.etiquetaChica,
                       ),
                     ],
@@ -2678,9 +2757,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
             valor: trabajo.serialOnu.isNotEmpty
                 ? trabajo.serialOnu
                 : (widget.mostrarDatosFuturos ? FieldMockData.serialOnt : '—'),
-            detalle: trabajo.estadoOnu.isNotEmpty
-                ? 'Equipo ${trabajo.estadoOnu}'
-                : 'Sin lectura',
+            detalle: _estadoConSuUltimoCambio(trabajo),
           ),
           const SizedBox(height: AppSpacing.sm),
           // CAMPO-DATA-011, ya no es de ejemplo: el puerto PON y la caja
@@ -2876,8 +2953,18 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
+                // EL ROTULO DICE DE DONDE SALIO, NO QUIEN LO HIZO.
+                //
+                // Esta pantalla tiene tres bloques que opinan sobre la misma
+                // falla —este, el análisis previo y «qué dice lo medido»— y
+                // los tres se veían igual. Un técnico no puede distinguir
+                // antecedente de cálculo si los tres dicen «Dexter».
+                //
+                // Lo que separa a ESTE de los otros dos es su fuente: salió de
+                // hablar con la persona antes de que existiera la orden. Eso
+                // es lo que no hay que volver a preguntar en la casa.
                 child: Text(
-                  'Lo que el asistente ya averiguó',
+                  'Lo que el cliente ya contó',
                   style: AppTypography.cuerpoGrande,
                 ),
               ),
@@ -2983,8 +3070,16 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
+                    // NO DICE «TRIAGE INTELIGENTE DEXTER».
+                    //
+                    // Ese nombre no decía de dónde salía el texto y además se
+                    // confundía con el bloque de arriba, que también decía
+                    // «Dexter». Lo que esto muestra es `diagnostico_previo_ia`
+                    // de la orden: un análisis hecho ANTES de despachar, sin
+                    // haber hablado con el cliente y sin ninguna prueba de
+                    // campo. Es un antecedente, no un veredicto.
                     Text(
-                      'Triage Inteligente Dexter',
+                      'Análisis previo al despacho',
                       style: AppTypography.cuerpoGrande,
                     ),
                     Text(
