@@ -3,6 +3,8 @@ import { readFilters, buildFilterQuery } from '$lib/server/v2/filter-params.js';
 import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
 import { getTags } from '$lib/server/v2/tags.js';
 import { leerAreas } from '$lib/server/v2/areas.js';
+import { resumenPorArea, responsablesSinArea, SIN_AREA }
+  from '$lib/v2/tickets-resumen.js';
 
 /**
  * Only filters the API actually applies are forwarded. A parameter that
@@ -34,7 +36,7 @@ export async function load({ cookies, url, locals, fetch }) {
     for (const open of OPEN_STATUSES) params.append('status', open);
   }
 
-  const [{ results, totals }, orgPeople, tagList] = await Promise.all([
+  const [{ results, totals, openByAssignee }, orgPeople, tagList] = await Promise.all([
     listTickets({ cookies }, params),
     getOrgPeopleAndTeams(cookies),
     // getTags has no fallback of its own: on /settings/tags a failed fetch is
@@ -58,7 +60,6 @@ export async function load({ cookies, url, locals, fetch }) {
   // arriba. Ver leerAreas().
   const { areas, areaPorPersona } = await leerAreas(locals, fetch);
 
-  const SIN_AREA = '__sin_area__';
   /**
    * El area de un caso: la de su responsable.
    *
@@ -72,27 +73,24 @@ export async function load({ cookies, url, locals, fetch }) {
   const areaDe = (/** @type {any} */ t) =>
     (t.assignee_id && areaPorPersona[t.assignee_id]) || SIN_AREA;
 
-  const URGENTES = new Set(['High', 'Urgent']);
   const conArea = results.map((/** @type {any} */ t) => ({ ...t, area: areaDe(t) }));
 
-  const resumen = [...areas.map((/** @type {any} */ a) => ({ ...a })),
-                   { nombre: SIN_AREA, etiqueta: 'Sin área asignada', agentes: [] }]
-    .map((/** @type {any} */ a) => {
-      const suyos = conArea.filter((/** @type {any} */ t) => t.area === a.nombre);
-      return {
-        ...a,
-        total: suyos.length,
-        urgentes: suyos.filter((/** @type {any} */ t) => URGENTES.has(t.priority)).length,
-        sin_respuesta: suyos.filter((/** @type {any} */ t) => !t.first_response_at).length,
-        sin_asignar: suyos.filter((/** @type {any} */ t) => !t.assignee_count).length,
-        en_progreso: suyos.filter(
-          (/** @type {any} */ t) => t.status === 'Assigned' || t.status === 'Pending').length
-      };
-    })
-    // Un area sin nada no se esconde -- que este vacia ES informacion -- pero
-    // "Sin área asignada" si, cuando no hay ninguno: es una categoria de
-    // excepcion, no un area del equipo.
-    .filter((/** @type {any} */ a) => a.nombre !== SIN_AREA || a.total > 0);
+  //  EL RESUMEN SALE DEL BACKEND, NO DE LAS FILAS VISIBLES  --  06/10/2026
+  //
+  //  Antes se contaba sobre 'conArea', que son las filas de ESTA pagina (25).
+  //  Con 47 abiertos la cabecera decia 47 y las areas sumaban 25, y parecia
+  //  que 22 tickets no tenian area: lo que pasaba es que no habian llegado.
+  //  'openByAssignee' lo calcula la API sobre TODOS los abiertos, en una
+  //  consulta agregada -- la paginacion de 25 no cambia.
+  //
+  //  'conArea' se conserva porque la TABLA sigue mostrando la pagina y
+  //  necesita el area de cada fila; lo que dejo de derivarse de ahi son los
+  //  totales.
+  const resumen = resumenPorArea(openByAssignee, areas, areaPorPersona);
+  //  Responsables con tickets abiertos y sin area configurada: sus tickets
+  //  caen en "Sin área asignada" y conviene decirlo, en vez de que la cola
+  //  del equipo parezca mas corta de lo que es.
+  const sinAreaConfigurada = responsablesSinArea(openByAssignee, areaPorPersona);
 
   // Se resuelve UNA vez y se reusa: 'Mis asignados' y el 'meId' que baja a la
   // barra de filtros tienen que ser la misma persona, o el corte y el filtro
@@ -157,7 +155,12 @@ export async function load({ cookies, url, locals, fetch }) {
     : vista === 'sin_asignar' ? deLaArea.filter(sinAsignar)
     : deLaArea;
 
-  const areasVisibles = sinAreaPropia
+  //  'resumen' es null cuando el backend no mando el desglose -- una version
+  //  vieja, o una respuesta que fallo. Se propaga como null hasta el return y
+  //  NO se colapsa en []: una lista vacia diria "ninguna area tiene tickets",
+  //  que es justo la afirmacion que no se puede hacer. La pantalla decide si
+  //  muestra ceros o un aviso, con 'resumenDisponible'.
+  const areasVisibles = sinAreaPropia || resumen === null
     ? []
     : soloMiArea
       ? resumen.filter((/** @type {any} */ a) => a.nombre === miArea)
@@ -165,6 +168,12 @@ export async function load({ cookies, url, locals, fetch }) {
 
   return {
     areas: areasVisibles,
+    //  false = el desglose no llego, asi que 'areas' esta vacio porque no se
+    //  pudo contar, no porque no haya tickets. Son dos pantallas distintas.
+    resumenDisponible: resumen !== null,
+    //  Responsables con tickets abiertos y sin area configurada: sus tickets
+    //  no aparecen en ninguna columna del equipo.
+    sinAreaConfigurada,
     areaElegida,
     // Distingue "esta persona no tiene area" de "no se pudieron leer las
     // areas". Las dos dejan 'areas' vacio y piden pantallas opuestas: la

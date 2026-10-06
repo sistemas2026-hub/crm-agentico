@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import Http404
 from django.utils import timezone
 from drf_spectacular.utils import (
@@ -242,6 +242,53 @@ class CaseListView(APIView, LimitOffsetPagination):
         context["awaiting_first_reply"] = open_cases.filter(
             first_response_at__isnull=True
         ).count()
+
+        #  EL DESGLOSE POR RESPONSABLE, Y POR QUE VIVE AQUI  --  06/10/2026
+        #  ----------------------------------------------------------------
+        #  La pantalla de tickets agrupa la cola por AREA, y el area de un
+        #  ticket es la de su responsable. Hasta hoy ese agrupamiento se hacia
+        #  en el navegador sobre 'results', que es UNA PAGINA: con 47 abiertos
+        #  y 'limit=25', la cabecera decia "Tickets 47" y la suma de las areas
+        #  daba 25. Parecia que 22 tickets no tenian area; lo que pasaba es que
+        #  no habian llegado.
+        #
+        #  Es el mismo principio que ya explican 'open_count' y 'urgent_count'
+        #  tres lineas mas arriba, aplicado al desglose: un total que se calcula
+        #  sobre la pagina no es un total.
+        #
+        #  SE AGRUPA POR RESPONSABLE, NO POR AREA, y es deliberado: el mapa
+        #  persona -> area no vive en este CRM sino en 'asistente.area_colaborador',
+        #  que lee el motor. Django cuenta lo que tiene --los casos por
+        #  responsable, en UNA consulta agregada-- y quien conoce las areas hace
+        #  la suma. Traer el mapa hasta aqui crearia una segunda copia de algo
+        #  que ya tiene dueño.
+        #
+        #  ESCALA: es un GROUP BY, no una lista. Con mil tickets devuelve tantas
+        #  filas como responsables haya, no mil.
+        #
+        #  'assigned_to' es M2M y la fila con responsable NULL es la cola sin
+        #  asignar. Un caso con DOS responsables aparece en los dos: eso no es
+        #  doble conteo, es que el ticket de verdad involucra a dos areas -- y
+        #  por eso 'open_count' sigue siendo la unica fuente del total.
+        URGENTES = ("High", "Urgent")
+        context["open_by_assignee"] = [
+            {
+                "assigned_to": str(f["assigned_to"]) if f["assigned_to"] else None,
+                "total": f["total"],
+                "urgentes": f["urgentes"],
+                "sin_respuesta": f["sin_respuesta"],
+                "en_progreso": f["en_progreso"],
+            }
+            for f in open_cases.values("assigned_to").annotate(
+                total=Count("id", distinct=True),
+                urgentes=Count("id", distinct=True,
+                               filter=Q(priority__in=URGENTES)),
+                sin_respuesta=Count("id", distinct=True,
+                                    filter=Q(first_response_at__isnull=True)),
+                en_progreso=Count("id", distinct=True,
+                                  filter=Q(status__in=("Assigned", "Pending"))),
+            ).order_by()
+        ]
 
         results_cases = self.paginate_queryset(queryset, self.request, view=self)
         cases = CaseSerializer(results_cases, many=True).data
