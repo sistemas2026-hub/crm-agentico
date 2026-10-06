@@ -463,6 +463,51 @@ def panorama_programacion(org, *, dia=None) -> dict:
     return panorama_m03(org, dia=d)
 
 
+# =============================================================================
+#  EL RELEVO DE TURNO  --  P11
+# =============================================================================
+
+def resumen_de_turno(org, *, horas=None) -> dict:
+    """
+    Las doce preguntas que alguien se hace al tomar el turno.
+
+    Vive en 'operaciones.turno' y aqui solo se expone: el modelo no arma el
+    resumen, lo LEE. Cada bloque viaja con su procedencia, y la procedencia es
+    parte del dato -- leer un INFERIDO como OBSERVADO es justo el error que la
+    descripcion de esta herramienta existe para que el modelo no cometa.
+    """
+    from operaciones import turno
+
+    return turno.resumen_de_turno(org, horas=_acotar_horas(horas))
+
+
+def evaluacion_shadow(org) -> dict:
+    """
+    Que habria hecho el Supervisor y que paso de verdad, lado a lado.
+
+    Los numeros salen de 'indicadores.indicadores_evaluacion': no hay una
+    segunda formula. Y vienen en su sobre, asi que un indicador puede decir
+    NO_APLICA o DATOS_INSUFICIENTES -- que NO es un cero.
+    """
+    from operaciones import turno
+
+    return turno.evaluacion_shadow(org)
+
+
+def _acotar_horas(horas) -> int:
+    """
+    Entre 1 y 72 horas. Sin tope, un "resumen de turno" de un año entero seria
+    una consulta de tabla completa pedida desde un mensaje de chat.
+    """
+    from operaciones import turno
+
+    try:
+        n = int(horas)
+    except (TypeError, ValueError):
+        return turno.HORAS_TURNO
+    return max(1, min(n, 72))
+
+
 HERRAMIENTAS = {
     "listar_situaciones": listar_situaciones,
     "detalle_situacion": detalle_situacion,
@@ -478,6 +523,9 @@ HERRAMIENTAS = {
     "coordinaciones_de_situacion": coordinaciones_de_situacion,
     "pendientes_criticos": pendientes_criticos,
     "panorama_programacion": panorama_programacion,
+    #  P11
+    "resumen_de_turno": resumen_de_turno,
+    "evaluacion_shadow": evaluacion_shadow,
 }
 
 #  Los argumentos que CADA herramienta acepta. Es una lista blanca: un argumento
@@ -500,6 +548,11 @@ ARGUMENTOS = {
     "coordinaciones_de_situacion": {"codigo"},
     "pendientes_criticos": {"limite"},
     "panorama_programacion": {"dia"},
+    #  P11. 'resumen_de_turno' acepta 'horas' y nada mas --acotado a 72 en
+    #  '_acotar_horas'--; 'evaluacion_shadow' no acepta ninguno: su periodo lo
+    #  fija el indicador, no el modelo.
+    "resumen_de_turno": {"horas"},
+    "evaluacion_shadow": set(),
 }
 
 
@@ -624,4 +677,24 @@ def esquema() -> list[dict]:
           "que están a tiempo. No las sumes.",
           {"dia": {"type": "string",
                    "description": "Día en AAAA-MM-DD. Por defecto, hoy."}}),
+
+        #  --- P11: el relevo de turno. Las dos son de LECTURA. -----------
+        h("resumen_de_turno",
+          "El relevo de turno: qué ocurrió, qué sigue abierto, qué empeoró, qué "
+          "se resolvió, qué sigue SIN VERIFICAR, qué tickets aparecieron, qué "
+          "SLA están en riesgo, qué evidencias y recomendaciones quedaron "
+          "pendientes, qué requiere a una persona, qué fuentes fallaron y qué "
+          "pasó de noche. CADA bloque trae su PROCEDENCIA (OBSERVADO, INFERIDO, "
+          "RECOMENDADO, CONFIRMADO, DESCONOCIDO): respetala al contestar y NUNCA "
+          "presentes un INFERIDO como un hecho. Un bloque DESCONOCIDO significa "
+          "que no se pudo saber, NO que no haya nada.",
+          {"horas": {"type": "integer",
+                     "description": "Cuántas horas atrás mirar; 12 por defecto, "
+                                    "72 como máximo."}}),
+        h("evaluacion_shadow",
+          "Qué habría hecho el Supervisor y qué pasó de verdad. Separa lo "
+          "OBSERVADO de lo INFERIDO, lo RECOMENDADO y lo CONFIRMADO. OJO: "
+          "'aceptada' NO es 'correcta' --el acierto sale solo de lo CONFIRMADO, "
+          "que exige evidencia-- y un indicador puede venir en NO_APLICA o "
+          "DATOS_INSUFICIENTES, que NO es un cero: no lo reportes como tal."),
     ]

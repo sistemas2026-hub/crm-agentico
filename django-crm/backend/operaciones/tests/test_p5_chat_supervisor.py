@@ -536,7 +536,18 @@ def test_21_el_catalogo_de_herramientas_es_cerrado_y_exacto(org_a):
         #  pueda contestar que trabajo se pidio, que pendiente necesita a
         #  alguien y como esta la jornada. Las tres LEEN.
         "coordinaciones_de_situacion", "pendientes_criticos",
-        "panorama_programacion"}
+        "panorama_programacion",
+        #  05/10/2026, LOTE 1 paso P11. El relevo de turno y la evaluacion del
+        #  Shadow Mode. Las dos LEEN, y las dos exponen 'operaciones.turno',
+        #  que a su vez no importa ningun modulo que escriba -- lo afirma
+        #  'test_lote1_evaluacion_turno::test_M11' sobre el EFECTO (el atributo
+        #  no existe), no sobre la lista de imports.
+        #
+        #  Lo que estas dos agregan al chat no es un dato nuevo: es la
+        #  PROCEDENCIA de cada dato. Su descripcion le dice al modelo que un
+        #  INFERIDO no es un hecho y que NO_APLICA no es un cero, que es lo
+        #  unico que el modelo lee.
+        "resumen_de_turno", "evaluacion_shadow"}
     #  Y cada una declara sus argumentos: sin entrada en ARGUMENTOS, no pasa nada.
     assert set(chat_herramientas.ARGUMENTOS) == set(
         chat_herramientas.HERRAMIENTAS)
@@ -844,7 +855,22 @@ def test_38_un_mensaje_vacio_o_enorme_se_rechaza(org_a, jefe_de_ops):
 
 
 def test_39_la_ruta_no_acepta_otros_verbos(org_a, jefe_de_ops):
-    for verbo in ("get", "put", "patch", "delete"):
+    """
+    DOS verbos y no uno, desde la reconciliacion del 05/10/2026.
+
+    'GET' se agrego para que la burbuja recupere el hilo al abrir: la
+    conversacion se guardaba desde P5 y no habia forma de leerla, asi que al
+    recargar la pantalla desaparecia de la vista aunque siguiera en la base. Es
+    LECTURA -- no abre conversaciones y no escribe ni una fila, lo afirma
+    'test_reconciliacion_historial::test_11' contando filas antes y despues.
+
+    Lo que sigue prohibido es lo que ESCRIBIRIA de otra forma: un PUT o un PATCH
+    sobre un mensaje seria reescribir lo que alguien dijo, y un DELETE seria
+    borrar un turno de la conversacion. Esta lista es la que impide que un verbo
+    nuevo entre sin que alguien venga a declararlo.
+    """
+    assert jefe_de_ops.get(RUTA).status_code == 200, "el historial SI se lee"
+    for verbo in ("put", "patch", "delete"):
         assert getattr(jefe_de_ops, verbo)(RUTA).status_code == 405, verbo
 
 

@@ -619,8 +619,274 @@ def indicadores(org, desde=None, hasta=None, ahora=None, dias=None) -> dict:
         "programacion": indicadores_programacion(org, ahora, dias),
         "supervisor": indicadores_supervisor(org, desde, hasta, ahora),
         "situaciones": indicadores_situaciones(org, desde, hasta, ahora),
+        "evaluacion": indicadores_evaluacion(org, desde, hasta, ahora),
     }
 
+
+
+
+# ==============================================================================
+#  B.8  --  EVALUACION DEL SUPERVISOR  (P8.3)
+# ==============================================================================
+#
+#  QUE MIDE ESTE BLOQUE Y QUE NO
+#  -----------------------------
+#  Mide si el Supervisor ACERTO, y eso solo se puede medir con resultados que
+#  alguien confirmo. Por eso la fuente de casi todo aqui es
+#  'AprendizajeSupervisor', donde cada fila lleva evidencia obligatoria por
+#  restriccion de base y un origen que NUNCA es el propio Supervisor.
+#
+#  Lo que NO se hace, y es la mitad del diseño:
+#
+#    * una propuesta ACEPTADA no cuenta como correcta;
+#    * una propuesta RECHAZADA no cuenta como incorrecta;
+#    * un denominador en cero NO devuelve 0, devuelve NO_APLICA;
+#    * una decision sin situacion NO tiene tiempo de deteccion, y se cuenta
+#      aparte en vez de entrar como cero.
+#
+#  UNA SOLA FORMULA POR METRICA, Y VIVE AQUI
+#  -----------------------------------------
+#  'gobierno.resumen_de_aprendizaje' devuelve CONTEOS crudos a proposito: no
+#  calcula tasas. Las formulas estan en este archivo y en ninguno mas, para que
+#  no haya dos definiciones de "precision" que se desincronicen calladas.
+
+#: Las lecciones que cuentan a favor y en contra. Se importan de donde se
+#: declaran: duplicar las listas aqui seria la primera divergencia.
+def _aprendizajes(org, desde, hasta):
+    from operaciones.gobierno_modelos import AprendizajeSupervisor
+
+    return AprendizajeSupervisor.objects.filter(
+        org=org, registrado_en__gte=desde, registrado_en__lte=hasta)
+
+
+def _mediana(valores):
+    """La mediana, o None si no hay con que. Nunca 0 por ausencia."""
+    if not valores:
+        return None
+    v = sorted(valores)
+    n = len(v)
+    return v[n // 2] if n % 2 else round((v[n // 2 - 1] + v[n // 2]) / 2.0, 2)
+
+
+def indicadores_evaluacion(org, desde=None, hasta=None, ahora=None) -> dict:
+    """
+    Si el Supervisor acierta, con que cobertura, y que no se puede saber.
+
+    PRECISION  (§5)
+    ---------------
+        numerador    lecciones a favor   (recomendacion confirmada,
+                                          rechazo errado, correlacion correcta)
+        denominador  a favor + en contra (falso positivo, omision,
+                                          correlacion incorrecta)
+        filtro       'AprendizajeSupervisor' del periodo, de esta organizacion
+        cero         NO_APLICA -- sin lecciones confirmadas no hay precision
+                     que reportar, y 0 se leeria como "nunca acierta"
+
+    Las lecciones son la unica fuente de verdad disponible: cada una exige
+    evidencia y la escribe una persona, una verificacion o un hecho operativo.
+    Una decision por si sola no entra en esta cuenta.
+    """
+    from operaciones.gobierno_modelos import (ResultadoDecision,
+                                              TipoAprendizaje)
+    from operaciones.models import DecisionSupervisor
+    from operaciones.situaciones_modelos import (SituacionAfectado,
+                                                 SituacionOperativa,
+                                                 SituacionRelacion,
+                                                 TipoAfectado, TipoRelacion)
+
+    desde, hasta, ahora = _ventana(desde, hasta, ahora)
+    p = _periodo(desde, hasta)
+    ap = _aprendizajes(org, desde, hasta)
+
+    #  --- A. PRECISION ------------------------------------------------------
+    por_tipo = {t: 0 for t in TipoAprendizaje.TODOS}
+    for fila in ap.values("tipo").annotate(n=Count("id")):
+        por_tipo[fila["tipo"]] = fila["n"]
+    a_favor = sum(por_tipo[t] for t in TipoAprendizaje.A_FAVOR)
+    en_contra = sum(por_tipo[t] for t in TipoAprendizaje.EN_CONTRA)
+    conocidas = a_favor + en_contra
+
+    salida = {
+        "precision": derivada(
+            round(a_favor / conocidas, 4) if conocidas else None,
+            con_dato=conocidas, denominador=conocidas, unidad="proporcion",
+            fuente="operaciones.AprendizajeSupervisor", periodo=p),
+        "lecciones_a_favor": conteo(a_favor, "AprendizajeSupervisor", p),
+        "lecciones_en_contra": conteo(en_contra, "AprendizajeSupervisor", p),
+
+        #  --- B / C.  Falsos positivos y omisiones -------------------------
+        #  Van como CONTEOS y no como tasas: una tasa de falsos positivos
+        #  necesitaria saber cuantas detecciones hubo en total CONFIRMADAS, y
+        #  de las que nadie reviso no se sabe nada. El conteo es honesto; la
+        #  tasa seria una invencion.
+        "falsos_positivos": conteo(
+            por_tipo[TipoAprendizaje.FALSO_POSITIVO],
+            "AprendizajeSupervisor", p),
+        "omisiones_conocidas": conteo(
+            por_tipo[TipoAprendizaje.OMISION], "AprendizajeSupervisor", p),
+        #  §7: los datos insuficientes NO son una omision. Se publican al lado
+        #  para que nadie los sume.
+        "situaciones_con_datos_insuficientes": conteo(
+            SituacionAfectado.objects.filter(
+                org=org, tipo=TipoAfectado.DATOS_INSUFICIENTES,
+                situacion__detectada_en__gte=desde,
+                situacion__detectada_en__lte=hasta)
+            .values("situacion").distinct().count(),
+            "operaciones.SituacionAfectado", p),
+
+        #  --- H. Correcciones humanas --------------------------------------
+        #  Se reutiliza el mismo criterio que 'indicadores_situaciones' ya
+        #  publicaba: la correccion vive en 'DecisionSupervisor.correccion'.
+        "correcciones_humanas": conteo(
+            DecisionSupervisor.objects
+            .filter(org=org, decidida_en__gte=desde, decidida_en__lte=hasta)
+            .exclude(correccion="").count(),
+            "operaciones.DecisionSupervisor", p),
+    }
+
+    #  --- D. CALIDAD DE CORRELACION ----------------------------------------
+    correctas = por_tipo[TipoAprendizaje.CORRELACION_CORRECTA]
+    incorrectas = por_tipo[TipoAprendizaje.CORRELACION_INCORRECTA]
+    evaluadas = correctas + incorrectas
+    propuestos = confirmados = 0
+    desvios = []
+    for fila in ap.filter(tipo__in=(TipoAprendizaje.CORRELACION_CORRECTA,
+                                    TipoAprendizaje.CORRELACION_INCORRECTA)):
+        d = fila.datos or {}
+        if "afectados_propuestos" in d and "afectados_confirmados" in d:
+            propuestos += int(d["afectados_propuestos"])
+            confirmados += int(d["afectados_confirmados"])
+            desvios.append(abs(int(d.get("diferencia", 0))))
+    salida["calidad_correlacion"] = derivada(
+        round(correctas / evaluadas, 4) if evaluadas else None,
+        con_dato=evaluadas, denominador=evaluadas, unidad="proporcion",
+        fuente="AprendizajeSupervisor.correlacion", periodo=p)
+    salida["afectados_propuestos"] = conteo(propuestos, "aprendizaje.datos", p)
+    salida["afectados_confirmados"] = conteo(confirmados, "aprendizaje.datos",
+                                             p)
+    #  El desvio medio en valor absoluto: 'propuso 12, eran 10' y 'propuso
+    #  10, eran 12' se equivocan lo mismo, y promediar con signo los
+    #  cancelaria.
+    salida["desvio_medio_afectados"] = derivada(
+        _mediana(desvios), con_dato=len(desvios), denominador=evaluadas,
+        unidad="afectados", fuente="aprendizaje.datos", periodo=p)
+
+    #  --- E. REINCIDENCIA ---------------------------------------------------
+    #  Solo las CONFIRMADAS. 'candidatas_de_reincidencia' propone y no escribe:
+    #  contar candidatas aqui convertiria una coincidencia en un diagnostico.
+    salida["reincidencias_confirmadas"] = conteo(
+        SituacionRelacion.objects.filter(
+            org=org, tipo=TipoRelacion.REINCIDENCIA,
+            creada_en__gte=desde, creada_en__lte=hasta).count(),
+        "operaciones.SituacionRelacion", p)
+
+    #  --- F / G.  RESULTADO POR TIPO DE SEÑAL Y POR HABILIDAD --------------
+    #  Conteos por categoria y no una tasa: con tres funciono y un fallo en una
+    #  señal, y cero en otra, una tasa unica las volveria incomparables.
+    decisiones = (DecisionSupervisor.objects
+                  .filter(org=org, decidida_en__gte=desde,
+                          decidida_en__lte=hasta)
+                  .select_related("propuesta"))
+    vacio = {r: 0 for r in ResultadoDecision.TODOS}
+    por_senal: dict = {}
+    por_habilidad: dict = {}
+    sin_propuesta = 0
+    for d in decisiones:
+        if d.propuesta_id is None:
+            sin_propuesta += 1
+            continue
+        senal = d.propuesta.tipo_senal
+        hab = d.propuesta.conocimiento_version or "(sin ficha)"
+        por_senal.setdefault(senal, dict(vacio))[d.resultado] += 1
+        por_habilidad.setdefault(hab, dict(vacio))[d.resultado] += 1
+    salida["resultado_por_tipo_senal"] = por_senal
+    salida["resultado_por_habilidad"] = por_habilidad
+    #  Las decisiones cuya propuesta ya no esta no se pueden clasificar por
+    #  señal. Se cuentan aparte en vez de caer en una categoria inventada.
+    salida["decisiones_sin_propuesta"] = conteo(
+        sin_propuesta, "operaciones.DecisionSupervisor", p)
+
+    #  --- I / J.  LOS DOS TIEMPOS -------------------------------------------
+    #  §4: una decision SIN situacion no tiene tiempo de deteccion. No se
+    #  imputa cero: se excluye del numerador y se publica cuantas fueron.
+    a_decision, sin_situacion = [], 0
+    for d in decisiones.select_related("situacion"):
+        if d.situacion_id is None or d.situacion.detectada_en is None:
+            sin_situacion += 1
+            continue
+        a_decision.append(
+            (d.decidida_en - d.situacion.detectada_en).total_seconds() / 60.0)
+    cerradas = [d for d in decisiones
+                if d.resultado in ResultadoDecision.CERRADOS
+                and d.resultado_en and d.decidida_en]
+    a_resultado = [(d.resultado_en - d.decidida_en).total_seconds() / 60.0
+                   for d in cerradas]
+    total_dec = decisiones.count()
+    salida["minutos_deteccion_a_decision"] = derivada(
+        _mediana(a_decision), con_dato=len(a_decision),
+        denominador=total_dec, unidad="minutos",
+        fuente="situacion.detectada_en -> decision.decidida_en", periodo=p)
+    salida["decisiones_sin_situacion"] = conteo(
+        sin_situacion, "operaciones.DecisionSupervisor", p)
+    salida["minutos_decision_a_resultado"] = derivada(
+        _mediana(a_resultado), con_dato=len(a_resultado),
+        denominador=total_dec, unidad="minutos",
+        fuente="decision.decidida_en -> decision.resultado_en", periodo=p)
+
+    #  --- K / L / M.  ANTICIPACION -----------------------------------------
+    #  La pregunta: ¿el Supervisor vio la situacion ANTES del primer ticket?
+    #
+    #  El dato sale de cruzar 'situacion.detectada_en' contra el 'created_at'
+    #  del primer caso asociado -- NO contra cuando el Supervisor lo asocio,
+    #  que es otra cosa y siempre es posterior.
+    #
+    #  Minutos POSITIVOS = anticipo. Negativos = llego tarde. Las situaciones
+    #  sin ningun caso NO entran en la cuenta: de esas no se puede saber si
+    #  anticipo o si nadie reclamo nunca, y mezclarlas inflaria el anticipo.
+    sits = list(SituacionOperativa.objects.filter(
+        org=org, detectada_en__gte=desde, detectada_en__lte=hasta))
+    anticipos, anticipadas, tardias = [], 0, 0
+    sin_caso = casos_irresolubles = 0
+    for s in sits:
+        ids = list(SituacionAfectado.objects
+                   .filter(situacion=s, tipo=TipoAfectado.CASO)
+                   .values_list("identificador", flat=True))
+        if not ids:
+            sin_caso += 1
+            continue
+        primero = (Case.objects.filter(org=org, id__in=ids)
+                   .order_by("created_at")
+                   .values_list("created_at", flat=True).first())
+        if primero is None:
+            #  El afectado nombra un caso que ya no existe o no se puede
+            #  resolver. No se inventa un instante.
+            casos_irresolubles += 1
+            continue
+        minutos = (primero - s.detectada_en).total_seconds() / 60.0
+        anticipos.append(minutos)
+        if minutos > 0:
+            anticipadas += 1
+        else:
+            tardias += 1
+
+    con_ticket = len(anticipos)
+    salida["situaciones_en_periodo"] = conteo(
+        len(sits), "operaciones.SituacionOperativa", p)
+    salida["situaciones_anticipadas"] = conteo(anticipadas, "anticipacion", p)
+    salida["situaciones_detectadas_tarde"] = conteo(tardias, "anticipacion", p)
+    salida["tasa_anticipacion"] = derivada(
+        round(anticipadas / con_ticket, 4) if con_ticket else None,
+        con_dato=con_ticket, denominador=con_ticket, unidad="proporcion",
+        fuente="situacion.detectada_en vs Case.created_at", periodo=p)
+    salida["minutos_anticipacion"] = derivada(
+        _mediana(anticipos), con_dato=con_ticket, denominador=con_ticket,
+        unidad="minutos",
+        fuente="situacion.detectada_en vs Case.created_at", periodo=p)
+    #  Los dos que NO se pueden medir, publicados y no escondidos.
+    salida["situaciones_sin_ticket"] = conteo(sin_caso, "anticipacion", p)
+    salida["situaciones_con_caso_irresoluble"] = conteo(
+        casos_irresolubles, "anticipacion", p)
+    return salida
 
 # ==============================================================================
 #  REPORTES
@@ -631,7 +897,9 @@ PENDIENTES = "pendientes"
 PROGRAMACION = "programacion"
 COMPROMISOS = "compromisos"
 SUPERVISOR = "supervisor"
-REPORTES = (DIARIO, PENDIENTES, PROGRAMACION, COMPROMISOS, SUPERVISOR)
+EVALUACION = "evaluacion"
+REPORTES = (DIARIO, PENDIENTES, PROGRAMACION, COMPROMISOS,
+            SUPERVISOR, EVALUACION)
 
 
 def _sobre(nombre, org, desde, hasta, ahora, fuentes, metricas,
@@ -680,6 +948,32 @@ def reporte(org, nombre: str, desde=None, hasta=None, ahora=None,
         raise ValueError(f"'{nombre}' no es un reporte. Hay {len(REPORTES)}: "
                          f"{', '.join(REPORTES)}.")
     desde, hasta, ahora = _ventana(desde, hasta, ahora)
+
+    if nombre == EVALUACION:
+        #  El reporte que contesta "¿acierta?". Lleva los dos bloques juntos a
+        #  proposito: 'situaciones' trae el QUE paso y 'evaluacion' el SI
+        #  SIRVIO, y leer el segundo sin el primero invita a interpretar una
+        #  precision sin saber sobre cuantas situaciones se calculo.
+        m = {"situaciones": indicadores_situaciones(org, desde, hasta, ahora),
+             "evaluacion": indicadores_evaluacion(org, desde, hasta, ahora)}
+        return _sobre(
+            nombre, org, desde, hasta, ahora,
+            ["operaciones.AprendizajeSupervisor",
+             "operaciones.DecisionSupervisor",
+             "operaciones.SituacionOperativa",
+             "operaciones.SituacionRelacion", "cases.Case"], m,
+            ["La precision se calcula SOLO sobre lecciones confirmadas: cada "
+             "una exige evidencia y la escribe una persona, una verificacion o "
+             "un hecho operativo. Una propuesta aceptada NO cuenta como "
+             "correcta, y una rechazada NO cuenta como incorrecta.",
+             "Un denominador en cero devuelve NO_APLICA, no 0: la ausencia de "
+             "resultados conocidos no es un rendimiento de cero.",
+             "La anticipacion se mide contra el 'created_at' del primer caso "
+             "asociado, no contra cuando el Supervisor lo asocio. Las "
+             "situaciones sin ningun caso quedan FUERA del calculo y se "
+             "cuentan aparte: de esas no se puede saber si anticipo o si nadie "
+             "reclamo nunca.",
+             "Los datos insuficientes NO se cuentan como omision."])
 
     if nombre == DIARIO:
         m = {"casos": indicadores_casos(org, desde, hasta, ahora),

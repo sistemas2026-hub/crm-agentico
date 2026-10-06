@@ -1471,6 +1471,76 @@ class LatidoSupervisorView(APIView):
         })
 
 
+class TurnoSupervisorView(APIView):
+    """
+        GET /api/operaciones/supervisor/turno/
+
+    El RELEVO DE TURNO: las doce preguntas que alguien se hace al llegar.
+
+    POR QUE EXISTE ESTA RUTA
+    ------------------------
+    Porque sin ella 'operaciones/turno.py' seria otro modulo probado y sin
+    llamador -- la falla que este repositorio ya pago dos veces (el reloj de
+    tareas colgado de un '__main__' que gunicorn no ejecuta, y la
+    reconciliacion sin quien la llamara). Es la misma razon por la que existe
+    'supervisor/coordinar/': codigo construido no es codigo que corre.
+
+    POR QUE 'EsJefeDeOperaciones' Y NO EL PATRON DEL SCHEDULER
+    ---------------------------------------------------------
+    Detras de esta puerta hay una PERSONA tomando el turno, no un proceso. El
+    'latido' y el 'sondeo' los llama el scheduler y por eso entran con
+    'IsAuthenticated + HasOrgContext'; esta devuelve el panorama operativo
+    completo --topologia, hipotesis, que falta verificar-- y va detras del
+    mismo permiso que el chat y los indicadores.
+
+    GET Y SOLO GET
+    --------------
+    No escribe nada, y por eso se puede pedir tantas veces como alguien quiera.
+    Lo afirma la suite contando filas antes y despues
+    ('test_lote1_evaluacion_turno.py::test_L3'), no este comentario.
+
+    LA PROCEDENCIA VIAJA CON EL DATO
+    --------------------------------
+    Cada bloque dice si lo que trae es OBSERVADO, INFERIDO, RECOMENDADO,
+    CONFIRMADO o DESCONOCIDO. No es decoracion: un INFERIDO leido como un hecho
+    tres pantallas mas abajo es la forma mas barata de que un relevo de turno
+    mienta. Y un DESCONOCIDO trae SIEMPRE su motivo -- 'no se sabe' no se
+    reporta como cero.
+
+    'shadow' ES OPCIONAL Y NO VIENE POR DEFECTO
+    -------------------------------------------
+    La evaluacion del Shadow Mode recorre decisiones y aprendizajes del
+    periodo; es mas caro que el resumen y no hace falta para tomar el turno.
+    Se pide con '?shadow=1'.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext, EsJefeDeOperaciones)
+
+    def get(self, request):
+        from operaciones import turno as turno_mod
+
+        horas = request.query_params.get("horas")
+        try:
+            horas = max(1, min(int(horas), 72)) if horas else None
+        except (TypeError, ValueError):
+            #  Un 'horas' ilegible no es un error del turno: se contesta la
+            #  ventana por defecto y se dice que se ignoro, en vez de un 400
+            #  que deja a quien llega sin su relevo.
+            horas = None
+
+        cuerpo = turno_mod.resumen_de_turno(request.org, horas=horas)
+        cuerpo["fuente"] = "operaciones.turno.resumen_de_turno"
+        #  Que la lectura no escribio viaja con la respuesta, igual que en el
+        #  latido, para que no haya que ir al codigo a comprobarlo.
+        cuerpo["escrituras"] = 0
+
+        if str(request.query_params.get("shadow") or "").strip() in ("1",
+                                                                     "true"):
+            cuerpo["shadow"] = turno_mod.evaluacion_shadow(request.org)
+
+        return Response(cuerpo)
+
+
 class SondeoFuentesView(APIView):
     """
         POST /api/operaciones/supervisor/sondeo/
@@ -1586,6 +1656,83 @@ class ChatSupervisorView(APIView):
     """
 
     permission_classes = (IsAuthenticated, HasOrgContext, EsJefeDeOperaciones)
+
+    #  Cuantos mensajes se devuelven al abrir la burbuja. El mismo numero que
+    #  manda la ruta del frontend; aca esta el TOPE, porque un limite que solo
+    #  vive del lado del navegador no es un limite.
+    TOPE_HISTORIAL = 200
+
+    def get(self, request):
+        """
+        El hilo persistido de esta persona, para que la burbuja no lo pierda.
+
+        POR QUE EXISTE ESTE GET
+        -----------------------
+        La conversacion ya se guardaba --'ConversacionSupervisor' y
+        'MensajeSupervisor' existen desde P5-- y no habia forma de leerla: al
+        recargar la pantalla el hilo desaparecia de la vista aunque siguiera en
+        la base. La rama que traia la burbuja SI recuperaba el historial, pero
+        contra el hilo del motor. Al adoptar el Supervisor dedicado habia que
+        conservar esa propiedad, y por eso se agrega aca.
+
+        LOS ROLES SE TRADUCEN AQUI, NO EN EL FRONTEND
+        ---------------------------------------------
+        'aBurbujas' (lib/supervisor/chat-sesion.js) espera 'user'/'assistant', y
+        esta tabla guarda 'humano'/'supervisor'/'herramienta'/'error'. La
+        traduccion vive de este lado para no tocar ese archivo ni sus pruebas:
+        el contrato del componente queda intacto.
+
+        QUE NO DEVUELVE, Y SE DICE EN VEZ DE ESCONDERLO
+        ----------------------------------------------
+        Los turnos de rol 'herramienta' y 'error' NO salen. Los de herramienta
+        son el detalle interno del bucle --el modelo los necesita, una persona
+        no-- y los de error no tienen traduccion honesta: mandarlos como
+        'assistant' los haria leer como una respuesta del Supervisor, que es
+        justo lo contrario de lo que son. Quedan GUARDADOS y visibles en la
+        auditoria; lo que no hacen es volver a la burbuja. Es una perdida
+        declarada, no un olvido.
+
+        ES LECTURA. No abre conversacion si no hay: devuelve la lista vacia.
+        Crear un hilo porque alguien abrio una pantalla dejaria conversaciones
+        sin un solo mensaje.
+        """
+        from operaciones.chat_modelos import (ConversacionSupervisor,
+                                              MensajeSupervisor, RolMensaje)
+
+        try:
+            limite = int(request.query_params.get("limite") or 60)
+        except (TypeError, ValueError):
+            limite = 60
+        limite = max(1, min(limite, self.TOPE_HISTORIAL))
+
+        #  El hilo de ESTA persona en ESTA empresa. Los dos filtros, siempre:
+        #  sin 'actor' se leeria la conversacion de un companero.
+        conversacion = (ConversacionSupervisor.objects
+                        .filter(org=request.org, actor=request.profile)
+                        .order_by("-ultimo_mensaje_en")
+                        .first())
+        if conversacion is None:
+            return Response({"conversacion_id": None, "mensajes": []})
+
+        #  Se piden los ULTIMOS 'limite' y se devuelven en orden cronologico:
+        #  un hilo que llega al reves no se puede pintar.
+        traduccion = {RolMensaje.HUMANO: "user",
+                      RolMensaje.SUPERVISOR: "assistant"}
+        filas = list(MensajeSupervisor.objects
+                     .filter(org=request.org, conversacion=conversacion,
+                             rol__in=tuple(traduccion))
+                     .order_by("-escrito_en", "-created_at")[:limite])
+        filas.reverse()
+
+        return Response({
+            "conversacion_id": str(conversacion.id),
+            "mensajes": [{"id": str(m.id),
+                          "rol": traduccion[m.rol],
+                          "contenido": m.contenido,
+                          "creado_en": m.escrito_en.isoformat()}
+                         for m in filas],
+            "fuente": "operaciones.chat_modelos.MensajeSupervisor",
+        })
 
     def post(self, request):
         datos = request.data if isinstance(request.data, dict) else {}

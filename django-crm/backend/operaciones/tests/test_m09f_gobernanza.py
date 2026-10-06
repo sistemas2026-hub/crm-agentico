@@ -968,7 +968,36 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  persona con rol de gestion, porque un agente que
                        #  escribe su propio resultado se declara correcto
                        #  solo. 'OrigenAprendizaje' no tiene 'supervisor'.
-                       "propuesta-resultado"}
+                       "propuesta-resultado",
+                       #  LOTE 1, paso P11 (05/10/2026). 'supervisor-turno' es
+                       #  el relevo de turno, y es de las faciles de declarar:
+                       #  es un **GET**.
+                       #
+                       #  NO ESCRIBE NI UNA FILA. Compone lo que ya esta
+                       #  escrito --situaciones y su timeline, propuestas,
+                       #  decisiones, fuentes, SLA, actividades-- y lo ordena
+                       #  en el orden en que una persona lo pregunta al llegar.
+                       #  No corre el ciclo, no detecta, no propone, no cierra
+                       #  una situacion, no coordina y no llama a ningun
+                       #  sistema externo: 'operaciones/turno.py' no importa un
+                       #  solo modulo que escriba --ni 'coordinacion', ni
+                       #  'programacion', ni 'supervisor'; trae los nombres
+                       #  sueltos que necesita-- asi que no tiene con que.
+                       #
+                       #  Y eso NO se declara, se mide, por los dos caminos:
+                       #  'test_lote1_evaluacion_turno::test_M11' afirma sobre
+                       #  el EFECTO que esos modulos no quedan expuestos como
+                       #  atributo de 'turno' --si lo estuvieran, su escritura
+                       #  quedaria a un atributo de distancia del modelo, que
+                       #  es lo mismo que 'test_p5::test_20' afirma sobre
+                       #  'coordinacion'--, y 'test_L3' cuenta las filas de
+                       #  siete tablas antes y despues de la lectura.
+                       #
+                       #  Lo que la ruta agrega no es un dato nuevo: es la
+                       #  PROCEDENCIA de cada dato (OBSERVADO, INFERIDO,
+                       #  RECOMENDADO, CONFIRMADO, DESCONOCIDO). Un bloque
+                       #  DESCONOCIDO viaja con su motivo y NO como un cero.
+                       "supervisor-turno"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

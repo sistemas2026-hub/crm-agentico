@@ -74,13 +74,10 @@ import { traducirError } from '$lib/server/v2/supervisor-noc.js';
  * credencial (`request.org`, `request.user`). Un `profile_id` que viajara en el
  * cuerpo seria poder preguntar como otra persona.
  *
- * El rol se comprueba aca ADEMAS de en Django. Dos capas a proposito (PRD
- * §7.4): esta da un mensaje util sin gastar un salto, la de Django es la que
- * garantiza.
+ * El rol NO se comprueba aca: lo decide Django. Ver `quienPregunta`, que
+ * explica por que la comprobacion que habia estaba rota y por que se quito en
+ * vez de arreglarse.
  */
-
-/** El mismo conjunto que operaciones/permissions.py::ROLES_GESTION. */
-const ROLES_GESTION = new Set(['ADMIN', 'SUPERVISOR', 'OPERACIONES']);
 
 /** Lo mismo que exige la vista de Django. */
 const TOPE_MENSAJE = 4000;
@@ -94,17 +91,34 @@ const LIMITE_HISTORIAL = 60;
  * Devuelve `{ error, status }` si algo falta: quien llama lo propaga tal cual
  * en vez de seguir con una identidad a medias.
  *
+ * SOLO COMPRUEBA LA SESION. EL ROL LO DECIDE DJANGO, Y HAY UN MOTIVO MEDIDO
+ * ------------------------------------------------------------------------
+ * La version local de esta ruta hacia ademas
+ *
+ *     ROLES_GESTION.has(locals.profile?.role)
+ *
+ * y eso estaba ROTO: `hooks.server.js` deja en `locals` user, org, org_name y
+ * org_settings -- nunca `profile` (medido el 05/10/2026 leyendo sus
+ * asignaciones). O sea que la expresion era `has(undefined)` y la ruta
+ * contestaba 403 a TODO EL MUNDO, siempre. No se habia notado porque esa rama
+ * nunca llego a desplegarse; el defecto salio al reconciliarla con la prueba
+ * que `origin` habia escrito despues de pagar el error analogo en produccion.
+ *
+ * Se quita en vez de arreglarse, y no es pereza: la justificacion que tenia
+ * --"da un mensaje util sin gastar un salto"-- era falsa. Resolver el rol exige
+ * consultar `/profile/`, que ES un salto. Quedaba una capa que no ahorraba nada
+ * y, encima, no funcionaba. `EsJefeDeOperaciones` del lado de Django es la
+ * garantia real, ya corre, y su 403 lo traduce `traducirError`.
+ *
+ * DOS CAPAS SOLO VALEN CUANDO LAS DOS FUNCIONAN. Una capa de verdad es mejor
+ * que dos donde una es decorativa -- que es, ademas, la forma en que un permiso
+ * parece comprobado dos veces y no lo esta ni una.
+ *
  * @param {any} locals
  */
 function quienPregunta(locals) {
   if (!locals?.user) {
     return { error: 'Tu sesión expiró. Volvé a iniciar sesión.', status: 401 };
-  }
-  if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
-    return {
-      error: 'Solo el equipo de operaciones puede conversar con el Supervisor NOC.',
-      status: 403
-    };
   }
   return {};
 }

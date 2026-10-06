@@ -102,4 +102,10 @@ urlpatterns = [
     #  existia y no habia forma de alcanzarlo.
     path("supervisor/coordinar/", views.CoordinarSupervisorView.as_view(),
          name="supervisor-coordinar"),
+
+    #  EL RELEVO DE TURNO. GET y de solo lectura: detras hay una persona
+    #  tomando el turno, no el scheduler. Existe para que 'operaciones/turno.py'
+    #  tenga llamador -- sin ella seria otro modulo probado al que nadie llega.
+    path("supervisor/turno/", views.TurnoSupervisorView.as_view(),
+         name="supervisor-turno"),
 ]
