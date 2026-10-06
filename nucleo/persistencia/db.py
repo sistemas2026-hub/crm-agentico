@@ -4536,6 +4536,92 @@ def autorizacion_herramienta(tenant: str, herramienta: str) -> dict | None:
         return cur.fetchone()
 
 
+def registrar_autorizacion_herramienta(tenant: str, herramienta: str,
+                                       estado: str, nivel_maximo: int,
+                                       autorizado_por: str,
+                                       motivo: str | None = None,
+                                       vigente_hasta=None,
+                                       limites: dict | None = None) -> dict:
+    """
+    Autoriza o revoca UNA herramienta en UNA empresa. Devuelve la fila escrita.
+
+    POR QUE ESTA FUNCION NO EXISTIA, Y QUE COSTO
+    ---------------------------------------------
+    La tabla se creo el 22/09/2026, el lector existe
+    ('autorizacion_herramienta') y la frontera la exige en cada accion
+    autonoma. Lo que nunca se escribio fue la forma de CONCEDER: ninguna linea
+    del repositorio insertaba una fila, y las pruebas sustituian el lector.
+
+    Resultado, medido en produccion el 06/10/2026: con la tabla en 0 filas,
+    toda accion autonoma moria con HERRAMIENTA_SIN_AUTORIZACION. El reloj
+    intento 2 importaciones, 177 reconciliaciones y 146 sincronizaciones de
+    hilo, y las 325 se bloquearon ahi. No era un permiso mal puesto: era una
+    puerta sin picaporte.
+
+    SOLO SE AGREGA
+    --------------
+    Revocar es escribir una fila con estado='revocada', nunca borrar la
+    anterior. 'estado_anterior' lo calcula quien llama leyendo lo vigente, por
+    el mismo motivo que en el interruptor: una auditoria no deberia tener que
+    reconstruir la transicion ordenando el historial.
+
+    BAJA A 'autonomia_operador', NO A 'app_backend'
+    -----------------------------------------------
+    Misma segregacion que 'registrar_transicion_autonomia', y aqui importa
+    todavia mas: si el runtime pudiera insertar, el motor podria autorizarse a
+    si mismo la herramienta que la frontera acaba de negarle. La base ya lo
+    impide --'app_backend' tiene SELECT y nada mas-- y esta funcion pide el rol
+    correcto para que el codigo diga lo mismo que los privilegios.
+
+    No atrapa excepciones: quien autoriza tiene que enterarse de que su orden
+    NO quedo registrada, en vez de creer que la herramienta quedo habilitada.
+    """
+    if estado not in ("autorizada", "revocada"):
+        raise ValueError(f"estado invalido: {estado!r}. Solo 'autorizada' o "
+                         f"'revocada'.")
+    if not isinstance(nivel_maximo, int) or isinstance(nivel_maximo, bool)             or not 0 <= nivel_maximo <= 4:
+        raise ValueError(f"nivel_maximo invalido: {nivel_maximo!r}. Entero 0..4.")
+    if not (autorizado_por or "").strip():
+        raise ValueError("una autorizacion sin autor no se registra: quien la "
+                         "encuentre tiene que poder saber quien la concedio.")
+
+    previo = autorizacion_herramienta(tenant, herramienta)
+    anterior = previo["estado"] if previo else None
+
+    with sesion(tenant, rol=ROL_OPERADOR_AUTONOMIA) as (cur, org):
+        cur.execute(
+            """insert into asistente.autorizacion_herramienta
+                 (organization_id, herramienta, estado, estado_anterior,
+                  nivel_maximo, vigente_hasta, autorizado_por, motivo, limites)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               returning id, herramienta, estado, estado_anterior, nivel_maximo,
+                         vigente_desde, vigente_hasta, autorizado_por, motivo,
+                         limites, creado_en""",
+            (org, herramienta, estado, anterior, nivel_maximo, vigente_hasta,
+             autorizado_por.strip(), (motivo or "").strip() or None,
+             json.dumps(limites or {}, ensure_ascii=False)))
+        return cur.fetchone()
+
+
+def autorizaciones_vigentes(tenant: str) -> list[dict]:
+    """
+    La autorizacion vigente de CADA herramienta que alguna vez se toco.
+
+    Una por herramienta -- la mas reciente-- incluidas las revocadas, que es
+    justo lo que hay que poder ver al revisar: "esta no esta autorizada" y
+    "esta se revoco el martes" no son lo mismo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select distinct on (herramienta)
+                      herramienta, estado, nivel_maximo, vigente_desde,
+                      vigente_hasta, autorizado_por, motivo, creado_en
+                 from asistente.autorizacion_herramienta
+                where organization_id = %s
+                order by herramienta, creado_en desc, id desc""", (org,))
+        return [dict(f) for f in cur.fetchall()]
+
+
 def secreto_jwt_en_base() -> str:
     """
     Si el GUC con el secreto de firma de JWT sigue puesto en esta base.
