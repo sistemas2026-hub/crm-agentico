@@ -22,11 +22,38 @@ construye nada: busca en un mapa y falla si no esta.
 
 Que hay hoy
 -----------
-Nada. P2 entrega el scheduler, no los trabajos. 'importacion_tickets' y
-'cerrar_vencidas' NO estan registrados a proposito -- cablearlos es P5, y
-'cerrar_vencidas' ademas esta bloqueado por no ser idempotente (ver
-nucleo/reloj.py: dos pasadas simultaneas dejan el texto de cierre dos veces en
-el ticket del proveedor).
+DOS, los dos del 02/10/2026 y los dos de LECTURA hacia afuera:
+
+  'supervisor_latido'   le pregunta al Supervisor que senales ve y guarda
+                        conteos. No escribe nada, en ninguna parte. Se cableo
+                        primero por eso -- demuestra el circuito completo del
+                        scheduler (tick, reclamo, ejecucion, 'job_run') sin que
+                        el peor caso sea otra cosa que no leer nada.
+
+  'supervisor_sondeo'   lo despierta para que consulte SUS fuentes y deje
+                        escrito el estado y la frescura de cada una. Escribe DOS
+                        TABLAS PROPIAS del Supervisor y nada afuera: a los
+                        sistemas externos se les consulta con herramientas
+                        'solo_lectura' por el camino que ya existia.
+
+                        CUALES son esas fuentes no se enumera aca: este archivo
+                        es el motor generico, y una lista de sistemas concretos
+                        se vuelve falsa el dia que entre otro. El catalogo vive
+                        en 'operaciones/fuentes_modelos.py::Fuente'.
+
+Hasta el 02/10/2026 el mapa estaba VACIO, y esta seccion decia "Nada". Si vuelve
+a quedar vacio, o si cambia la cuenta, decirlo aca: un archivo que afirma lo
+contrario de lo que hace es peor que uno sin docstring.
+
+'importacion_tickets' y 'cerrar_vencidas' siguen SIN registrar a proposito --
+cablear el primero es P5, y 'cerrar_vencidas' ademas esta bloqueado por no ser
+idempotente (ver nucleo/reloj.py: dos pasadas simultaneas dejan el texto de
+cierre dos veces en el ticket del proveedor).
+
+Y CABLEAR NO ES ENCENDER. Este mapa dice que el despliegue SABE hacer algo; lo
+que lo hace correr es una fila en 'asistente.job_catalogo', que sigue vacio (lo
+afirma tests/test_p2_inerte.py). Son dos interruptores a proposito: uno es
+codigo revisado, el otro es una decision de operacion.
 
 La consecuencia practica, y es la buscada: si alguien agrega
 'cerrar_vencidas' al catalogo de produccion hoy, el coordinador lo ve, no lo
@@ -48,6 +75,8 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import Callable, Mapping
 
+from nucleo.programador import trabajos
+
 # La firma de un trabajo: recibe el turno ya derivado de la base y devuelve un
 # diccionario con lo que hizo (o None). Si falla, levanta.
 Handler = Callable[["object"], "dict | None"]
@@ -60,9 +89,30 @@ class JobSinImplementacion(LookupError):
 
 
 # -----------------------------------------------------------------------------
-#  EL MAPA. Literal, revisable de un vistazo, vacio en P2.
+#  EL MAPA. Literal y revisable de un vistazo -- dos trabajos hoy, y
+#  tests/test_programador.py afirma el conjunto EXACTO, no "al menos uno".
 # -----------------------------------------------------------------------------
 _PRODUCCION: dict[str, Handler] = {
+    #  El unico cableado hoy. Es de LECTURA: pregunta al Supervisor que ve y
+    #  guarda conteos. No escribe, no toca casos, no llama a ningun proveedor.
+    #  Se cablea primero justamente por eso -- demuestra el circuito entero sin
+    #  que el peor caso sea otra cosa que no leer nada.
+    #
+    #  CABLEADO NO ES ENCENDIDO. Este mapa dice que el despliegue SABE hacerlo;
+    #  lo que lo hace correr es una fila en 'asistente.job_catalogo', y el
+    #  catalogo sigue vacio (lo afirma tests/test_p2_inerte.py). Son dos
+    #  interruptores a proposito: uno es codigo revisado, el otro es operacion.
+    "supervisor_latido": trabajos.latido_supervisor,
+    #  El segundo, desde el 02/10/2026. Despierta al Supervisor para que
+    #  consulte sus fuentes y deje escrito el estado de cada una. Escribe DOS
+    #  TABLAS PROPIAS del Supervisor --estado y captura por fuente-- y nada
+    #  afuera: a SmartOLT y WispHub se les consulta con herramientas
+    #  'solo_lectura' por el camino que ya existia.
+    #
+    #  UNO Y NO SEIS, a proposito: la frecuencia de cada fuente vive en una fila
+    #  editable del lado del Supervisor, no en este mapa. Asi este archivo
+    #  --que es el motor generico-- no nombra ningun sistema externo.
+    "supervisor_sondeo": trabajos.sondeo_de_fuentes,
     # "importacion_tickets": ...,   <- P5
     # "cerrar_vencidas": BLOQUEADO  <- no es idempotente; no se cablea
 }

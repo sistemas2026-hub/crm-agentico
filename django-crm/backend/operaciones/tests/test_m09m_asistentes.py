@@ -589,9 +589,57 @@ def test_17_18_no_hay_segunda_cola_ni_task(org_a, actor):
     """
     from django.apps import apps
     modelos = {m.__name__ for m in apps.get_app_config("operaciones").get_models()}
+    #  02/10/2026: entran 'FuenteEstado' y 'FuenteSnapshot' con la capa de
+    #  fuentes del Supervisor (bloque P2). NO son una cola nueva ni una segunda
+    #  nocion de caso: una guarda el ESTADO de la ultima consulta a cada fuente
+    #  --si se pudo preguntar, cuando, que tan viejo es el dato-- y la otra un
+    #  resumen acotado para poder comparar un ciclo con el anterior.
+    #
+    #  Existen porque hoy "no hay nada" y "no se pudo preguntar" terminan en el
+    #  mismo numero: de los 15 detectores del Supervisor, solo 2 habian disparado
+    #  en produccion y los otros 13 leen tablas vacias devolviendo [].
+    #
+    #  El conjunto sigue siendo EXACTO a proposito: un modelo nuevo obliga a
+    #  venir aqui y declararlo.
+    #  02/10/2026, bloque P3: entran las cuatro de Situacion Operativa. NO son
+    #  una cola nueva ni una segunda nocion de caso -- son la agrupacion
+    #  sostenida de señales, que hoy no existia en ninguna parte: una situacion
+    #  puede tener cero tickets y seguir siendo valida, que es el punto.
+    #
+    #  El conjunto sigue siendo EXACTO: un modelo nuevo obliga a venir aqui.
     assert modelos == {"ActividadOperativa", "DisponibilidadTecnico",
                        "ProgramacionSemanal", "ProgramacionOrden",
-                       "NovedadOperativa", "PropuestaSupervisor"}, modelos
+                       "NovedadOperativa", "PropuestaSupervisor",
+                       "FuenteEstado", "FuenteSnapshot",
+                       "SituacionOperativa", "SituacionAfectado",
+                       "SituacionEvento", "SituacionRelacion",
+                       #  02/10/2026, paso P4. 'DecisionSupervisor' guarda que
+                       #  decidio una persona y QUE RESULTADO tuvo -- lo segundo
+                       #  no existia en ninguna parte, y sin el las metricas de
+                       #  aceptacion miden obediencia y no acierto.
+                       #  'NivelAutonomia' hace del nivel 0-4 un dato POR EMPRESA
+                       #  con su historial, en vez de la constante
+                       #  'NIVEL_MAXIMO_ETAPA' del codigo. Los cinco niveles NO se
+                       #  redefinen: son los de 'PropuestaSupervisor.NIVELES'.
+                       "DecisionSupervisor", "NivelAutonomia",
+                       #  05/10/2026, paso P5. El chat del Supervisor. NO
+                       #  reemplaza 'asistente.conversations' del motor: esa es
+                       #  la conversacion de WhatsApp con un CLIENTE FINAL, con
+                       #  su ventana de 24 h, su relevo IA-humano y su cierre por
+                       #  plazo. Esto es un colaborador hablando con el
+                       #  Supervisor, y referencia una SituacionOperativa -- que
+                       #  vive de este lado de la frontera, porque el motor no
+                       #  lee las tablas del CRM.
+                       "ConversacionSupervisor", "MensajeSupervisor",
+                       #  05/10/2026, paso P8.2. 'AprendizajeSupervisor' guarda lo que se supo
+                       #  DESPUES, con su evidencia y quien lo concluyo. No es una segunda cola
+                       #  de propuestas ni una tabla de KPI: no se consulta para decidir nada,
+                       #  se escribe cuando alguien ya sabe que paso. Y es APPEND-ONLY, asi que
+                       #  tampoco es un estado que se pueda editar.
+                       #
+                       #  'OrigenAprendizaje' no tiene 'supervisor': el agente no puede concluir
+                       #  sobre su propio acierto, ni por el servicio ni por el ORM.
+                       "AprendizajeSupervisor"}
 
     #  Se miran los IDENTIFICADORES del código, no el texto del archivo: los
     #  docstrings nombran justamente lo que NO se creó, y un 'in fuente' los

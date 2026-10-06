@@ -195,6 +195,17 @@ def test_dos_hilos_reales_compitiendo_dejan_una_sola_decision(org_a):
     assert len(decisiones) == 1, f"quedaron {len(decisiones)} decisiones auditadas"
 
     # limpieza: 'transaction=True' no revierte solo
+    #
+    # El ORDEN importa desde P8.2: 'DecisionSupervisor.propuesta' es PROTECT
+    # --una propuesta con decision registrada NO se borra, porque esa fila es
+    # historia-- asi que hay que llevarse primero lo que cuelga. Antes bastaba
+    # con borrar las propuestas; ahora eso levanta ProtectedError, y es
+    # exactamente lo que tiene que pasar.
+    from operaciones.gobierno_modelos import (AprendizajeSupervisor,
+                                              DecisionSupervisor)
+
+    AprendizajeSupervisor.objects.filter(org=org).delete()
+    DecisionSupervisor.objects.filter(org=org).delete()
     PropuestaSupervisor.objects.filter(org=org).delete()
 
 
@@ -827,6 +838,88 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
     ciclo y no toca ninguna propuesta. Su propia vista no importa un solo
     servicio de escritura.
 
+    'supervisor-latido' (GET /supervisor/latido/) entro el 02/10/2026, y es la
+    unica de la lista que NO la llama una persona: es la puerta por donde el
+    scheduler de 'nucleo/programador/' despierta al Supervisor. Justamente por
+    eso no reusa 'ciclo' --que escribe propuestas y exige
+    'EsJefeDeOperaciones'--: un proceso no debe entrar por la puerta de alguien.
+
+    No ejecuta, y tampoco escribe: llama a 'supervisor.detectar()', que es la
+    misma lectura que ya reusa 'indicadores', y devuelve CONTEOS por tipo de
+    senal. No registra propuestas, no corre el ciclo, no toca un caso, no
+    reprograma y no llama a ningun sistema externo. Responde 405 a POST, PUT,
+    PATCH y DELETE.
+
+    Su propia suite lo afirma sobre el EFECTO
+    (tests/test_p1_latido_supervisor.py): tras DOS pasadas con una senal viva,
+    ni PropuestaSupervisor, ni common.Activity, ni Case cambiaron de cuenta --y
+    la mutacion que cambia 'detectar' por 'correr_ciclo' pone esa prueba en
+    rojo, medido el 02/10/2026, asi que el cero no es un cero de adorno.
+
+    El motivo por el que esta ruta acepta 'organization_id' es el turno, que lo
+    manda derivado de la base: NO elige la organizacion, la COMPRUEBA contra la
+    de la credencial y contesta 409 si no coinciden. La fuga que eso evitaria
+    --ignorar la comprobacion y leer con el parametro-- se probo como mutacion y
+    la suite la mata.
+
+    'supervisor-sondeo' (POST /supervisor/sondeo/) entro el 02/10/2026, junto
+    con la capa de fuentes, y es la segunda que NO llama una persona: la llama el
+    mismo scheduler que el latido.
+
+    ESCRIBE, y hay que ser preciso con QUE escribe: dos tablas PROPIAS de la capa
+    de fuentes -- 'operaciones_fuente_estado' (como salio la ultima consulta de
+    cada fuente) y 'operaciones_fuente_snapshot' (un resumen acotado para poder
+    comparar con el ciclo anterior). Eso ES el entregable del bloque: sin
+    escribirlo no hay forma de distinguir "no hay nada" de "no se pudo
+    preguntar", que es el error que la capa existe para hacer imposible.
+
+    Y NO EJECUTA. No crea propuestas, no crea Situaciones Operativas --no
+    existen todavia--, no corre 'supervisor.correr_ciclo', no toca un caso, no
+    reprograma, no asigna, no escala, no crea tickets y no modifica el
+    interruptor de autonomia. A los dos sistemas externos que consulta
+    (SmartOLT, WispHub) les llega por 'POST /interno/herramienta/<nombre>' del
+    motor, que solo ejecuta ahi lo declarado 'invocable_por_servicio', y las
+    herramientas que usa son 'solo_lectura: true'.
+
+    Su propia suite lo afirma sobre el EFECTO
+    (operaciones/tests/test_p2_fuentes.py): tras un sondeo completo, ni
+    PropuestaSupervisor, ni common.Activity, ni Case, ni ActividadOperativa, ni
+    OrdenTrabajo cambiaron de cuenta -- y la mutacion que hace que el sondeo
+    llame al ciclo del Supervisor pone esa prueba en rojo.
+
+    'supervisor-chat' (POST /supervisor/chat/) entro el 05/10/2026, y es la
+    UNICA de esta lista que habla con una persona en tiempo real -- las otras dos
+    del Supervisor las llama el scheduler.
+
+    ESCRIBE: la conversacion y sus mensajes ('operaciones_conversacion_supervisor'
+    y '..._mensaje_supervisor'). Nada mas. Y NO EJECUTA, lo cual aqui hay que
+    argumentar con cuidado porque detras hay un modelo de lenguaje:
+
+      * El modelo solo puede llamar las diez herramientas de
+        'chat_herramientas.HERRAMIENTAS', que es un diccionario LITERAL. Un
+        nombre que no este ahi se rechaza; no hay 'getattr' sobre lo que el
+        modelo diga.
+      * Las diez son de LECTURA. 'test_20' lo afirma sobre el AST del modulo: ni
+        un create, ni un save, ni un update, ni un delete, ni 'requests'.
+      * El TENANT lo pone el despachador desde 'request.org'. NINGUNA herramienta
+        acepta la organizacion como argumento, asi que no hay donde ponerla --
+        'test_15' lo afirma sobre la lista blanca y 'test_18' lo intenta con una
+        inyeccion de prompt que dicta otra organizacion.
+      * Los argumentos pasan por lista blanca fail-closed: lo que no esta
+        declarado se descarta antes de llegar a la funcion.
+      * No puede subir su propio nivel de autonomia: 'mis_limites' es una
+        lectura, y cambiarlo exige una persona (P4).
+
+    Su propia suite lo afirma sobre el EFECTO
+    (operaciones/tests/test_p5_chat_supervisor.py, 41 pruebas): tras pedirle por
+    chat que cierre una situacion y un ticket, ni el estado de la situacion, ni
+    'Case.status', ni 'updated_at', ni PropuestaSupervisor, ni
+    DecisionSupervisor cambiaron.
+
+    El modelo lo presta el motor por 'POST /interno/supervisor/chat', que es un
+    envoltorio sobre 'cliente.chat()' y no ejecuta herramientas: las del
+    Supervisor leen tablas del CRM, y el motor no las lee.
+
     Que esta lista haya que tocarla para agregar una ruta es el punto: esta
     guarda no comprueba que las rutas de ejecucion esten ausentes por su
     nombre --eso lo hace el bucle de abajo, y un 'aplicar_propuesta' llamado
@@ -842,7 +935,69 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        "capacidad-jornada", "actividades",
                        "actividad-detalle", "actividad-transicion",
                        "asistente", "indicadores", "reportes",
-                       "programaciones", "actividad-supervisor"}
+                       "programaciones", "actividad-supervisor",
+                       "supervisor-latido", "supervisor-sondeo",
+                       "supervisor-chat",
+                       #  Bloque A (05/10/2026). 'supervisor-coordinar' es la
+                       #  UNICA ruta del Supervisor que ESCRIBE en la
+                       #  operacion, y entra a esta lista con eso dicho.
+                       #
+                       #  ESCRIBE: una ActividadOperativa de M02 y el evento
+                       #  de coordinacion en el timeline de la situacion. Nada
+                       #  mas. NO toca M03 --'coordinacion.py' no nombra
+                       #  reprogramar_orden, actualizar_secuencia,
+                       #  secuenciar_jornada ni registrar_contingencia, y hay
+                       #  una prueba que lo afirma sobre el AST--, no cambia el
+                       #  estado de la situacion y no eleva autonomia.
+                       #
+                       #  Y NO ESCRIBE NADA si la autonomia efectiva no llega a
+                       #  2: devuelve 409 AUTONOMIA_INSUFICIENTE y deja el
+                       #  intento auditado en common.Activity con REJECTED.
+                       "supervisor-coordinar",
+                       #  P8.2 (05/10/2026). 'propuesta-resultado' registra
+                       #  QUE PASO con una decision ya tomada.
+                       #
+                       #  ESCRIBE: el desenlace en DecisionSupervisor
+                       #  (resultado, resultado_en, resultado_evidencia,
+                       #  correccion) y, cuando el desenlace deja una
+                       #  leccion, una fila de AprendizajeSupervisor. Nada
+                       #  mas: NO cambia el estado de la propuesta --ya fue
+                       #  revisada-- ni el de la situacion, y NO ejecuta.
+                       #
+                       #  Y NO la puede llamar el Supervisor: exige una
+                       #  persona con rol de gestion, porque un agente que
+                       #  escribe su propio resultado se declara correcto
+                       #  solo. 'OrigenAprendizaje' no tiene 'supervisor'.
+                       "propuesta-resultado",
+                       #  LOTE 1, paso P11 (05/10/2026). 'supervisor-turno' es
+                       #  el relevo de turno, y es de las faciles de declarar:
+                       #  es un **GET**.
+                       #
+                       #  NO ESCRIBE NI UNA FILA. Compone lo que ya esta
+                       #  escrito --situaciones y su timeline, propuestas,
+                       #  decisiones, fuentes, SLA, actividades-- y lo ordena
+                       #  en el orden en que una persona lo pregunta al llegar.
+                       #  No corre el ciclo, no detecta, no propone, no cierra
+                       #  una situacion, no coordina y no llama a ningun
+                       #  sistema externo: 'operaciones/turno.py' no importa un
+                       #  solo modulo que escriba --ni 'coordinacion', ni
+                       #  'programacion', ni 'supervisor'; trae los nombres
+                       #  sueltos que necesita-- asi que no tiene con que.
+                       #
+                       #  Y eso NO se declara, se mide, por los dos caminos:
+                       #  'test_lote1_evaluacion_turno::test_M11' afirma sobre
+                       #  el EFECTO que esos modulos no quedan expuestos como
+                       #  atributo de 'turno' --si lo estuvieran, su escritura
+                       #  quedaria a un atributo de distancia del modelo, que
+                       #  es lo mismo que 'test_p5::test_20' afirma sobre
+                       #  'coordinacion'--, y 'test_L3' cuenta las filas de
+                       #  siete tablas antes y despues de la lectura.
+                       #
+                       #  Lo que la ruta agrega no es un dato nuevo: es la
+                       #  PROCEDENCIA de cada dato (OBSERVADO, INFERIDO,
+                       #  RECOMENDADO, CONFIRMADO, DESCONOCIDO). Un bloque
+                       #  DESCONOCIDO viaja con su motivo y NO como un cero.
+                       "supervisor-turno"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

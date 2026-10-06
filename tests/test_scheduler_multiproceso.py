@@ -403,10 +403,27 @@ print(json.dumps({"registrados": sorted(registro.registrados()),
         capture_output=True, text=True,
         env=entorno(CAP_ARCHIVO=str(cap_solo)))
     out = json.loads(r2.stdout.strip()) if r2.stdout.strip() else {}
-    revisar(out.get("registrados") == [],
-            "un proceso nuevo arranca con el registro VACIO: no hereda nada "
-            "por memoria de otro proceso",
-            f"{out.get('registrados')}")
+    #  02/10/2026. Esto decia 'registrados() == []' y media bien mientras el
+    #  mapa de produccion estaba vacio. Ya no lo esta --se cableo
+    #  'supervisor_latido'-- y el proxy habia que cambiarlo, no la propiedad.
+    #
+    #  LO QUE IMPORTA NO ES QUE ESTE VACIO, es que un proceso nuevo tenga
+    #  EXACTAMENTE lo que declara el codigo y NADA que otro proceso le haya
+    #  registrado en memoria. Por eso se afirma el conjunto exacto Y, aparte,
+    #  que no se colo ningun 'prueba_*': esa segunda linea es la que de verdad
+    #  vigila la herencia entre procesos, y seguiria mordiendo el dia que el
+    #  mapa de produccion tenga diez entradas.
+    registrados = out.get("registrados")
+    revisar(registrados == ["supervisor_latido", "supervisor_sondeo"],
+            "un proceso nuevo arranca con SOLO lo que declara el codigo: no "
+            "hereda nada por memoria de otro proceso",
+            f"{registrados}")
+    from nucleo.programador import registro as _reg
+    revisar(isinstance(registrados, list)
+            and not [c for c in registrados
+                     if c.startswith(_reg.PREFIJO_PRUEBA)],
+            "y ningun handler de prueba cruzo la frontera del proceso",
+            f"{registrados}")
     revisar(out.get("r", {}).get("registrado") == "failed_terminal",
             "y el turno se cierra terminal, no reintentable: que este "
             "despliegue no sepa hacer el job no se arregla reintentando",

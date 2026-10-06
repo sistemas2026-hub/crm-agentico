@@ -65,6 +65,20 @@ services:
       # el aviso push. Sin ella el aviso llega igual a la bandeja de la app
       # y a los canales de la empresa; solo falta el golpecito en el hombro.
       FCM_CUENTA_DE_SERVICIO: ${FCM_CUENTA_DE_SERVICIO:-}
+      #  LA FUENTE DE FLOTA DEL SUPERVISOR NOC, y por que el default es VACIO.
+      #
+      #  Nombra la herramienta del catalogo que lee las caidas por PON de toda
+      #  la flota ('consultar_caidas_pon_flota', tipo interno). Con la variable
+      #  vacia, la fuente SmartOLT responde NO_DISPONIBLE y lo dice: 'el estado
+      #  de la red NO se conoce'. NUNCA responde 'sin caidas'.
+      #
+      #  El default vacio es deliberado y vale para los dos lados: encender la
+      #  fuente es una decision de operacion, no un efecto de desplegar. En
+      #  produccion se pone en las variables de Dokploy, no aqui.
+      #
+      #  Para probar la cadena en local:
+      #    SUPERVISOR_HERRAMIENTAS_CAIDAS_PON=consultar_caidas_pon_flota
+      SUPERVISOR_HERRAMIENTAS_CAIDAS_PON: ${SUPERVISOR_HERRAMIENTAS_CAIDAS_PON:-}
       DBPORT: ${DBPORT:-5432}
       DBNAME: ${DBNAME:-crm_db}
       DBUSER: ${DBUSER:-crm_user}

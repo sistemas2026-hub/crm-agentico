@@ -15,6 +15,7 @@
   import { TriangleAlert, RotateCcw, Paperclip, Lock, Check, CheckCheck, Clock } from '@lucide/svelte';
   import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
   import { autorDe, burbujaClase, extension, hora, ENTREGA_TEXTO } from '../formato.js';
+  import { partirMensaje, resumir } from './analisis-imagen.js';
 
   let {
     /** El hilo ya agrupado por día: {tipo:'dia'|'msg'} */
@@ -141,6 +142,12 @@
       <a class="adjunto" href="/api/media/{a.id}" target="_blank" rel="noreferrer">
         <img src="/api/media/{a.id}" alt={a.descripcion || 'Foto del cliente'} loading="lazy" />
       </a>
+      <!-- EL ANÁLISIS NO SE DIBUJA ACÁ, y es a propósito: ya está en la
+           burbuja, porque el motor lo guarda dentro del mensaje del cliente.
+           Dibujarlo también junto a la miniatura lo mostraría dos veces en la
+           misma pantalla, y quien lee no tendría forma de saber que es el
+           mismo texto. La columna `analisis_visual` sigue viajando en el
+           adjunto —la bandeja la recibe— pero la vista única es la de arriba. -->
     {:else if a.tipo === 'audio' || a.tipo === 'voice'}
       <!-- svelte-ignore a11y_media_has_caption -->
       <audio class="adjunto-audio" controls src="/api/media/{a.id}"></audio>
@@ -252,11 +259,43 @@
                  no representa. Decirlo es mejor que un hueco, que se lee como
                  un error de la aplicación. -->
             {#if item.m.contenido}
-              <!-- Los saltos de línea que respeta `pre-wrap` son los DEL
-                   MENSAJE, así que la regla va acá y no en la burbuja: en la
-                   burbuja, el salto y la sangría del propio marcado contaban
-                   como texto. -->
-              <div class="burbuja-texto">{item.m.contenido}</div>
+              {@const foto = partirMensaje(item.m.contenido)}
+              {#if foto}
+                <!-- UNA FOTO NO SE LEE COMO UN MENSAJE DE TEXTO.
+                     El motor guarda el análisis DENTRO del mensaje del cliente
+                     —es lo que el modelo necesita leer— y eso son 600
+                     caracteres por foto en una burbuja. Quien repasa un hilo
+                     para entender qué pasó tiene que saltearlos a mano.
+                     Acá se parte en dos niveles: lo que el cliente escribió y
+                     una línea de resumen arriba, el análisis entero a un clic.
+                     No se toca nada de lo guardado. -->
+                {#if foto.pie}
+                  <div class="burbuja-texto">{foto.pie}</div>
+                {/if}
+                <div class="analisis">
+                  <div class="analisis-titulo">👁️ Análisis de imagen</div>
+                  <!-- El resumen sale del MISMO texto de abajo, extraído, sin
+                       otra llamada al modelo. Si no se pudo extraer nada, cita
+                       el original en vez de inventar una frase. -->
+                  <p class="analisis-resumen">{resumir(foto.analisis)}</p>
+                  <details>
+                    <summary class="analisis-ver">
+                      <span class="analisis-abrir">Ver análisis completo</span>
+                      <span class="analisis-cerrar">Ocultar análisis completo</span>
+                    </summary>
+                    <!-- El análisis COMPLETO, carácter por carácter como lo
+                         escribió el modelo. Lo de arriba es un atajo; esto es
+                         la fuente. -->
+                    <p class="analisis-texto">{foto.analisis}</p>
+                  </details>
+                </div>
+              {:else}
+                <!-- Los saltos de línea que respeta `pre-wrap` son los DEL
+                     MENSAJE, así que la regla va acá y no en la burbuja: en la
+                     burbuja, el salto y la sangría del propio marcado contaban
+                     como texto. -->
+                <div class="burbuja-texto">{item.m.contenido}</div>
+              {/if}
             {:else if !(item.m.adjuntos ?? []).length}
               <div class="no-representable">
                 <TriangleAlert size={12} />
@@ -747,6 +786,59 @@
   }
   .adjunto-transcripcion-rotulo {
     font-weight: 600;
+  }
+
+  /* El análisis de una foto NO se ve como la transcripción de un audio, y la
+     diferencia es deliberada: una transcripción es lo que el cliente dijo;
+     un análisis es lo que una máquina cree ver. Por eso tiene su propio
+     marco dentro de la burbuja, y el detalle nace cerrado. */
+  .analisis {
+    margin: 6px 0 0;
+    padding: 8px 10px;
+    border: 1px solid var(--v2-line, #e2e8f0);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--v2-line, #e2e8f0) 22%, transparent);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+  .analisis-titulo {
+    font-weight: 600;
+    color: var(--v2-slate, #475569);
+  }
+  /* El resumen es lo único que se ve sin abrir, así que carga todo el peso:
+     va en el color del texto normal, no en el apagado de un metadato. */
+  .analisis-resumen {
+    margin: 3px 0 0;
+    color: var(--v2-slate, #475569);
+    overflow-wrap: anywhere;
+  }
+  .analisis-ver {
+    margin-top: 6px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--v2-muted, #64748b);
+    cursor: pointer;
+    list-style: none;
+  }
+  .analisis-ver::-webkit-details-marker { display: none; }
+  .analisis-ver::before {
+    content: '▸ ';
+    display: inline-block;
+  }
+  details[open] .analisis-ver::before { content: '▾ '; }
+  .analisis-ver:hover { color: var(--v2-slate, #475569); }
+  /* Abrir y cerrar sin una línea de JS ni estado: lo hace <details>. El texto
+     del control cambia con el mismo mecanismo. */
+  .analisis-cerrar { display: none; }
+  details[open] .analisis-abrir { display: none; }
+  details[open] .analisis-cerrar { display: inline; }
+  .analisis-texto {
+    margin: 6px 0 0;
+    padding-left: 8px;
+    border-left: 2px solid var(--v2-line, #e2e8f0);
+    color: var(--v2-slate, #475569);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .adjunto-doc {

@@ -1052,3 +1052,73 @@ class PropuestaSupervisor(BaseModel):
     def dentro_del_alcance(self) -> bool:
         """Si su nivel cabe en lo que esta etapa permite (observar/recomendar)."""
         return self.nivel_autonomia_requerido <= self.NIVEL_MAXIMO_ETAPA
+
+
+# =============================================================================
+#  LA CAPA DE FUENTES  --  vive en 'fuentes_modelos.py', se importa aqui
+# =============================================================================
+#  Django descubre un modelo cuando su modulo se importa, no por estar dentro
+#  del paquete de la app. Este import es lo que hace que 'FuenteEstado' y
+#  'FuenteSnapshot' existan para las migraciones y para el ORM.
+#
+#  Se dejan en su propio archivo --y no al final de este, que ya tiene 1.054
+#  lineas-- porque son una pieza aparte con un motivo propio, y porque este
+#  modulo es de los que concentran demasiado (CLAUDE.md §2: superficie de
+#  conflicto alta entre sesiones).
+from operaciones.fuentes_modelos import (                        # noqa: E402,F401
+    EstadoLectura,
+    Frescura,
+    Fuente,
+    FuenteEstado,
+    FuenteSnapshot,
+)
+
+
+# =============================================================================
+#  SITUACIONES OPERATIVAS  --  viven en 'situaciones_modelos.py'
+# =============================================================================
+#  Mismo motivo que la capa de fuentes: Django descubre un modelo cuando su
+#  modulo se importa. Y van aparte porque son una pieza con su propio motivo --
+#  la agrupacion sostenida de señales-- y este modulo ya concentra demasiado.
+from operaciones.situaciones_modelos import (                     # noqa: E402,F401
+    Confianza,
+    Riesgo,
+    SituacionAfectado,
+    SituacionEvento,
+    SituacionOperativa,
+    SituacionRelacion,
+    TipoAfectado,
+    TipoEvento,
+    TipoRelacion,
+)
+
+
+# =============================================================================
+#  GOBIERNO  --  decisiones humanas y nivel de autonomia
+# =============================================================================
+#  Mismo motivo que las dos capas anteriores: Django descubre un modelo cuando su
+#  modulo se importa. Los CINCO NIVELES no se redefinen alla -- son los de
+#  'PropuestaSupervisor.NIVELES', que ya estaban en uso.
+from operaciones.gobierno_modelos import (                        # noqa: E402,F401
+    AprendizajeSupervisor,
+    DecisionSupervisor,
+    NivelAutonomia,
+    OrigenAprendizaje,
+    ResultadoDecision,
+    TipoAprendizaje,
+    TipoDecision,
+)
+
+
+# =============================================================================
+#  EL CHAT DEL SUPERVISOR  --  vive en 'chat_modelos.py'
+# =============================================================================
+#  Mismo motivo que las capas anteriores: Django descubre un modelo cuando su
+#  modulo se importa. NO reemplaza 'asistente.conversations' del motor -- esa es
+#  la conversacion de WhatsApp con un cliente final, con su ventana de 24 h y su
+#  relevo; esto es un colaborador hablando con el Supervisor.
+from operaciones.chat_modelos import (                           # noqa: E402,F401
+    ConversacionSupervisor,
+    MensajeSupervisor,
+    RolMensaje,
+)

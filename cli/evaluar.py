@@ -100,6 +100,7 @@ from dotenv import load_dotenv
 # que es justo lo que hace falta al correrlo a mano en una maquina.
 load_dotenv(RAIZ / ".env", override=False)
 
+from nucleo.observabilidad import eventos_consumo
 from nucleo.config import cargar_config                      # noqa: E402
 from nucleo.modelo import motor                              # noqa: E402
 from nucleo.seguimiento import escalamiento                 # noqa: E402
@@ -433,6 +434,20 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
 
 
 def main() -> None:
+    #  LO QUE GASTA ESTE CORREDOR ES UNA EVALUACION, Y SE CUENTA COMO TAL.
+    #
+    #  Hasta el 05/10/2026 no se contaba en ningun lado: llama al modelo de
+    #  verdad y gasta saldo de verdad, pero como no abria el acumulador del
+    #  turno no quedaba registro. Medido ese dia, el saldo del proveedor bajo
+    #  $6.78 mientras el sistema calculaba $2.37, y parte de esa brecha era
+    #  esto.
+    #
+    #  Marcarlo como 'evaluation' hace que SI quede registrado --se puede
+    #  saber cuanto cuesta una corrida de casos dorados-- y que NO entre en
+    #  max_costo_usd_mes del tenant: el tope de una empresa no puede saltar
+    #  porque alguien corrio las pruebas.
+    eventos_consumo.fijar_origen(eventos_consumo.EVALUACION)
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("tenant")
     ap.add_argument("--caso", help="Corre solo los casos cuyo nombre contenga esto")

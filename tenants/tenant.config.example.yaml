@@ -297,6 +297,12 @@ limites:
   alerta_al_porcentaje: 80
   retencion_conversaciones_dias: 365
 
+# Si las fotos de esta empresa se miran con un modelo de vision. Apagado:
+# encenderlo manda imagenes de clientes a un tercero, y eso depende de la
+# autorizacion de tratamiento que firme cada empresa, no de que el codigo
+# este desplegado. Ver nucleo/canales/vision.py.
+vision_habilitada: false
+
 evaluacion:
   minimo_acierto_pct: 90.0
   # CERO, y no es negociable. Un sistema con 92% de acierto que inventa el 3%

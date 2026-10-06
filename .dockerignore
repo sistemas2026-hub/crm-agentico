@@ -8,3 +8,22 @@ __pycache__/
 venv/
 .pytest_cache/
 .claude/
+
+# Env files (injected at runtime)
+#
+# POR QUE, medido el 05/10/2026: el 'COPY . .' del Dockerfile metia el .env de
+# la maquina de build DENTRO de la imagen (3.611 bytes en
+# crm-agentico-motor:latest). Cualquiera que pueda correr esa imagen tiene las
+# credenciales, sin pasar por el env_file del compose.
+#
+# Y no era solo un archivo durmiendo ahi: 'Flask.run()' trae load_dotenv=True
+# por defecto, asi que al arrancar con 'python -m nucleo.canales.api' --el CMD
+# de esta imagen-- Flask cargaba ese .env al entorno del proceso. Eso explica
+# que el motor local contestara con una clave valida que no aparecia ni en
+# Config.Env ni en /proc/1/environ. En produccion no pasa, porque alla arranca
+# con gunicorn (que importa el modulo y nunca llama a run()) y cada secreto se
+# inyecta explicito con ${VAR:?}.
+#
+# Mismo patron que django-crm/.dockerignore, que ya lo hacia bien.
+.env
+.env.*

@@ -691,6 +691,12 @@ class Activity(BaseModel):
         #  M05-A. La incidencia tiene ciclo de vida propio, y sus transiciones
         #  se auditan aqui como las de cualquier otra entidad del CRM.
         ("NovedadOperativa", "Novedad / incidencia operativa"),
+        #  P6 (05/10/2026). Hace falta para auditar un intento de
+        #  coordinacion RECHAZADO por la autonomia: el rechazo ocurre ANTES de
+        #  crear la actividad, asi que no hay ActividadOperativa contra la que
+        #  registrarlo -- y dejarlo sin auditar seria que la unica forma de
+        #  saber que se intento fuera que alguien estuviera mirando.
+        ("SituacionOperativa", "Situación operativa del Supervisor NOC IA"),
     )
 
     user = models.ForeignKey(

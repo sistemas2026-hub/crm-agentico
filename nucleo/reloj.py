@@ -113,10 +113,11 @@ verdad ("¿este proceso puede resolverla?") sin exponer ningun valor, y
 
 QUE HACE Y QUE NO
 -----------------
-Tres trabajos: cerrar vencidas, importar tickets, y cerrar las inactivas que
-atendio solo el asistente. Un proceso que "corre cosas periodicas" es un cajon
-comodo, y lo que entre aca sin discutirse va a correr solo en produccion sin
-que nadie lo haya mirado -- asi que cada uno se anota con por que entro.
+Cuatro trabajos: cerrar vencidas, importar tickets, cerrar las inactivas que
+atendio solo el asistente, y mirar las alertas operativas. Un proceso que
+"corre cosas periodicas" es un cajon comodo, y lo que entre aca sin discutirse
+va a correr solo en produccion sin que nadie lo haya mirado -- asi que cada uno
+se anota con por que entro.
 
 El tercero se agrego el 22/09/2026, aprobado explicitamente. Es una politica
 nueva de ciclo de vida y por eso no entro solo: 'conversaciones_sin_respuesta'
@@ -124,6 +125,15 @@ exige 'escalada_a_humano', asi que las conversaciones que la IA resolvia sola
 NO las cerraba nadie nunca. Medido contra produccion ese dia: 151 abiertas en
 ese estado, 145 sin un mensaje en mas de una semana, y de las 4 creadas ese
 dia, las 4.
+
+El cuarto se agrego el 05/10/2026 y es de otra naturaleza: NO actua sobre
+nadie. Lee la foto del saldo que ya esta en la base y el veredicto de
+conciliacion que ya se calculaba, y deja escrito en
+'asistente.alertas_operativas' si alguno cruzo un umbral. No llama al modelo,
+no llama al proveedor, no manda mensajes y no frena nada. Entro aca porque la
+pregunta "¿queda saldo?" no tiene a quien hacersela en un sistema donde todo
+lo demas es reactivo: el 05/10/2026 el saldo estaba en 0.72 USD --unos tres
+dias-- y lo encontro una auditoria a mano. Ver nucleo/observabilidad/alertas.py.
 ================================================================================
 """
 
@@ -140,6 +150,7 @@ if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
 from nucleo.config import fuente
+from nucleo.observabilidad import alertas as alertas_operativas
 from nucleo.observabilidad.registro import registrar
 from nucleo.seguridad import interruptor
 from nucleo.seguimiento import importacion, importacion_io, operativo
@@ -275,6 +286,51 @@ def _inactivas_de_ia(config, tenant: str, seco: bool) -> dict:
     return operativo.cerrar_inactivas_de_ia(config, tenant, simular=seco)
 
 
+def _alertas(config, tenant: str, seco: bool) -> dict:
+    """
+    Mira el saldo del proveedor y la conciliacion, y deja escrito lo que cruzo
+    un umbral.
+
+    PASA POR EL INTERRUPTOR, COMO LOS OTROS TRES
+    ---------------------------------------------
+    La primera version del 05/10/2026 corria ANTES de la compuerta, con este
+    argumento: los otros tres cierran conversaciones, contestan tickets del
+    proveedor y crean casos en el CRM, y esto solo lee dos cifras ya guardadas
+    y escribe una fila interna -- observar no es actuar. Y el momento en que
+    alguien tira el interruptor parecia ser justo cuando mas hace falta saber
+    si queda saldo.
+
+    Se corrigio el mismo dia, por tres razones medidas:
+
+      1. EL CONTRATO DICE OTRA COSA, y lo dice en tres lugares que coinciden:
+         'nucleo/seguridad/interruptor.py' ("ningun trabajo del scheduler para
+         ese tenant"), la migracion 202609151710, y el 'comment on table' que
+         vive DENTRO de la base. No es una zona gris que una sesion de
+         implementacion pueda reinterpretar de paso.
+
+      2. EL LOG SE CONTRADECIA. Con el interruptor tirado salia
+         "autonomia detenida: no se ejecuta ningun trabajo" y en la linea
+         siguiente "trabajo omitido ... alertas={vigilado:True}". La traza de
+         la unica palanca de seguridad del sistema no puede desmentirse a si
+         misma en dos lineas.
+
+      3. NO SE PERDIA NADA REAL. La foto del saldo la toma el MOTOR en
+         'consumo._volcar', durante un turno normal, y el interruptor no
+         detiene los turnos: el dato se sigue acumulando con la palanca
+         tirada. Y 'GET /consumo' ya devuelve la conciliacion a pedido. Lo
+         unico que se ganaba corriendo antes era ~una hora de adelanto en un
+         aviso sobre un saldo que dura dias.
+
+    EL SECO NO REIMPLEMENTA NADA
+    ----------------------------
+    'alertas.evaluar(seco=True)' corre las MISMAS reglas y no escribe: el
+    'if seco' esta pegado a cada escritura, no antes de la decision. Dos
+    motores --uno que decide y otro que explica-- terminan discrepando justo
+    cuando hace falta confiar en el segundo.
+    """
+    return alertas_operativas.evaluar(config, tenant, seco=seco)
+
+
 def _importacion(config, tenant: str, seco: bool, ahora: datetime) -> dict:
     """
     El subsistema de importacion entero: descubrir e importar (B), y despues
@@ -311,13 +367,19 @@ def una_pasada(seco: bool = False) -> list[dict]:
     """
     Una vuelta completa por todos los tenants. Devuelve que paso en cada uno.
 
-    Cada trabajo de cada tenant va en su propio try/except. Son cuatro
-    aislamientos distintos y los cuatro hacen falta por separado:
+    Cada trabajo de cada tenant va en su propio try/except. Son cinco
+    aislamientos distintos y los cinco hacen falta por separado:
 
       una config rota          no puede dejar sin atender a los demas tenants
       la importacion rota      no puede dejar sin cerrar las vencidas
       las vencidas rotas       no pueden impedir la importacion
-      cualquiera de las dos    no puede matar el proceso
+      las alertas rotas        no pueden impedir nada -- corren ultimas y son
+                               el unico trabajo que no le hace falta a nadie
+      cualquiera de ellas      no puede matar el proceso
+
+    Los cuatro trabajos quedan DESPUES del interruptor de autonomia, sin
+    excepciones: su contrato nombra el trabajo del scheduler, no solo la
+    escritura externa. Ver la nota en '_alertas'.
 
     Una excepcion que mata el reloj deja de hacer TODO, para siempre, y nadie
     se entera hasta que alguien nota que nada se cierra solo -- que es
@@ -379,13 +441,26 @@ def una_pasada(seco: bool = False) -> list[dict]:
                       or r["autonomia"].get("error") or "sin motivo")
             registrar("reloj", "autonomia detenida: no se ejecuta ningun trabajo",
                       tenant=tenant, motivo=porque)
-            # Las dos claves se informan igual, diciendo que NO se hicieron.
+            # Las claves se informan igual, diciendo que NO se hicieron.
             # Omitirlas cambiaria la forma del informe del ciclo segun el
             # estado del interruptor, y quien lo lee (o lo prueba) tendria que
             # adivinar si falta la clave porque no se hizo o porque se rompio.
+            #
+            # 'alertas' esta en la lista, y eso se corrigio el 05/10/2026: la
+            # primera version la corria ANTES de esta compuerta, con el
+            # argumento de que observar no es actuar. El argumento no alcanza
+            # contra lo que el contrato del interruptor dice en tres lugares
+            # --interruptor.py, la migracion y el 'comment on table' que vive
+            # en la base--: "ningun trabajo del scheduler para ese tenant".
+            # Y el sintoma era medible: el log decia "no se ejecuta ningun
+            # trabajo" y en la linea siguiente reportaba las alertas corridas.
+            # Un log que se contradice en dos lineas sobre la unica palanca de
+            # seguridad del sistema vale menos que la hora de adelanto que
+            # daba el aviso.
             saltado = {"omitido": "autonomia detenida", "motivo": porque}
             r["vencimientos"] = dict(saltado)
             r["importacion"] = dict(saltado)
+            r["alertas"] = dict(saltado)
             registrar("reloj", "trabajo omitido por el interruptor", tenant=tenant)
             salida.append(r)
             continue
@@ -421,6 +496,19 @@ def una_pasada(seco: bool = False) -> list[dict]:
             r["importacion"] = {"error": f"{type(e).__name__}: {e}"}
             registrar("reloj", "la importacion fallo", tenant=tenant, error=e)
 
+        # LAS ALERTAS, DESPUES DE LA COMPUERTA Y CON LAS DEMAS.
+        #
+        # Van ultimas porque es el unico trabajo que no le hace falta a nadie
+        # para funcionar, y pasan por el interruptor como los otros tres: el
+        # contrato de esa palanca nombra el trabajo del scheduler, no solo la
+        # escritura externa. Ver _alertas.
+        try:
+            r["alertas"] = _alertas(config, tenant, seco)
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            r["alertas"] = {"error": f"{type(e).__name__}: {e}"}
+            registrar("reloj", "las alertas operativas fallaron",
+                      tenant=tenant, error=e)
+
         # El resumen del tenant, solo con lo que es seguro escribir: contadores
         # y banderas. El dict completo trae textos de error, ids de tickets del
         # ISP y frases armadas con datos -- sigue estando en lo que se devuelve.
@@ -428,7 +516,8 @@ def una_pasada(seco: bool = False) -> list[dict]:
                   credenciales=r.get("credenciales"),
                   vencimientos=_solo_contadores(r.get("vencimientos")),
                   inactivas_ia=_solo_contadores(r.get("inactivas_ia")),
-                  importacion=_solo_contadores(r.get("importacion")))
+                  importacion=_solo_contadores(r.get("importacion")),
+                  alertas=_solo_contadores(r.get("alertas")))
         salida.append(r)
     duro = (datetime.now(timezone.utc) - ahora).total_seconds()
     registrar("reloj", "ciclo fin", tenants=len(salida), segundos=round(duro, 1),

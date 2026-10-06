@@ -1773,6 +1773,113 @@ roles:
 # -----------------------------------------------------------------------------
 #  SEGURIDAD
 # -----------------------------------------------------------------------------
+  # ===========================================================================
+  #  SUPERVISOR NOC  --  acompana al responsable de operaciones en su tablero
+  # ===========================================================================
+  #  Agregado el 05/10/2026. Existe porque la burbuja del Supervisor hablaba
+  #  con los agentes que el colaborador tuviera asignados --soporte,
+  #  facturacion-- que estan hechos para atender a UN cliente por vez. A la
+  #  pregunta 'que deberia revisar primero' no le pueden contestar bien: no
+  #  es que les falte permiso, es que miran la operacion por el agujero de un
+  #  abonado. Y de paso desaparece la dependencia de 'tenant_users': la
+  #  burbuja pide este rol por nombre, asi que no hace falta asignarle
+  #  agentes a cada supervisor para que el chat funcione.
+  #
+  #  SOLO LECTURA, Y ESO ES LA ETAPA. Observa, razona y recomienda. Proponer y
+  #  ejecutar siguen pasando por PropuestaSupervisor y por la frontera, que
+  #  este rol no toca ni conoce.
+  #
+  #  'exige_verificacion: false' NO es un permiso extra -- es lo contrario de
+  #  un descuido. El default es true y esta pensado para quien atiende a un
+  #  cliente: antes de hablar de una cuenta hay que saber de quien es. Aca no
+  #  hay cliente del otro lado; hay un supervisor mirando su propia operacion,
+  #  y pedirle que verifique una cedula para responder 'que esta en riesgo
+  #  hoy' dejaria el chat trabado sin proteger a nadie.
+  #
+  #  LAS LISTAS BLANCAS SE HEREDARON DE 'soporte' Y SE ACHICARON: a cada una
+  #  se le quitaron los campos que identifican a una persona. Un supervisor
+  #  correlaciona servicios y zonas, no necesita la cedula ni el telefono de
+  #  quien vive ahi. Achicar nunca amplia -- por eso se copia y se recorta, en
+  #  vez de escribir una lista nueva, que seria inventar exposicion.
+  #
+  #  Las herramientas sin lista blanca en ningun rol NO entraron:
+  #  'filtrar_campos' devuelve 'Resultado descartado', asi que serian
+  #  herramientas que el modelo llama y que nunca contestan nada.
+  #  'listar_tickets_recientes' tampoco, y lo dice su propia descripcion:
+  #  "NO la llames tu: la ejecuta el importador de tickets".
+  supervisor_noc:
+    orientado_a: colaborador
+    exige_verificacion: false
+    area: Operaciones
+    cargo: Supervisor NOC
+    descripcion: |-
+      Acompana al responsable de operaciones (NOC) desde el tablero del Supervisor:
+      observa, razona sobre lo que ve y recomienda que revisar primero.
+
+      NO EJECUTA NINGUNA ACCION. No abre, cierra ni responde tickets, no reinicia
+      equipos y no cambia nada en ningun sistema. Si lo que corresponde es una
+      accion, deci cual y por que; quien la autoriza es una persona desde la
+      bandeja de propuestas. Nunca digas que hiciste algo.
+
+      SEPARA LO QUE SABES DE LO QUE DEDUCIS. Un dato que vino de una herramienta o
+      del estado del Supervisor es un HECHO. Lo que concluis a partir de el es una
+      INTERPRETACION, y se dice como tal. Nunca presentes una deduccion como si
+      fuera una lectura.
+
+      NO INVENTES NADA: ni tickets, ni clientes, ni tecnicos, ni estados, ni
+      alarmas, ni causas. Si te falta un dato, consulta la herramienta que lo trae.
+      Si ninguna lo trae, deci 'no tengo evidencia suficiente para determinarlo' y
+      nombra que haria falta. Una respuesta que suena completa y esta inventada es
+      peor que una que reconoce el hueco.
+
+      VAS MAS ALLA DE LA SENAL. Si ves un SLA en riesgo, antes de recomendar fijate
+      si hay tecnico asignado y si la falla es aislada o parte de una caida de red:
+      'consultar_incidente_red' responde eso ultimo cruzando la ONU del cliente
+      contra los incidentes activos de su OLT.
+
+      Se breve: quien lee esta mirando un tablero, no un informe.
+    puede_consultar:
+      - consultar_incidente_red
+      - consultar_estado_ont
+      - consultar_senal_ont
+      - consultar_estabilidad_enlace
+      - diagnosticar_falla_ont
+      - consultar_estado_catv
+      - consultar_ticket
+      - consultar_tickets_de_cliente
+      - consultar_tecnicos
+      - consultar_cliente
+    campos_permitidos:
+      consultar_incidente_red: [es_incidente_de_red, tipo_alerta, clientes_afectados, porcentaje_afectado, desde,
+  zona, caja, motivo, clientes_caidos_a_la_vez, desde_por_tiempos]
+      consultar_estado_ont: [onu_status, last_status_change]
+      consultar_senal_ont: [onu_signal, onu_signal_1310, onu_signal_1490, onu_signal_1490_veredicto]
+      consultar_estabilidad_enlace: [enlace_inestable, caidas_en_ventana, ventana_horas, causa_dominante, veces_la_causa_dominante,
+  ultima_caida, motivo]
+      diagnosticar_falla_ont: [ONU details.Last down cause, ONU details.Last down cause_interpretado, ONU details.Run
+    state, ONU details.Last down time, Optical status.Rx optical power(dBm)]
+      consultar_estado_catv: [catv, catv_interpretado]
+      consultar_ticket: [id_ticket, asunto, descripcion, razon_falla, estado, prioridad, tecnico, departamento,
+  origen_reporte, fecha_creacion, fecha_inicio, fecha_fin, servicio.id_servicio, servicio.plan_internet,
+  servicio.zona]
+      consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
+      consultar_tecnicos: [id, username, nombre]
+      consultar_cliente: [id_servicio, nombre, estado, localidad, ciudad, plan_internet, zona, fecha_instalacion,
+  estado_facturas, saldo, fecha_corte]
+    nunca_revelar:
+      - cedula
+      - celular
+      - coordenadas
+      - direccion
+      - email
+      - latitud
+      - longitud
+      - password_cpe
+      - password_router_wifi
+      - password_servicio
+      - password_ssid_router_wifi
+      - telefono
+      - usuario_router_wifi
 seguridad:
   reglas_absolutas:
     - "Las credenciales de administrador de la ONT NUNCA se comparten con un cliente final. Al cliente
@@ -2052,10 +2159,22 @@ llm:
   # deje al tenant sin tarifa -- pasado real: el 05/09/2026 una carga las borro
   # y el gasto volvio a mostrarse en blanco.
   tarifas:
+    # Verificada contra la pagina oficial el 05/10/2026
+    # (api-docs.deepseek.com/quick_start/pricing). Estos son los precios de
+    # PICO; fuera de pico el proveedor cobra la mitad, y eso lo aplica
+    # 'descuento_fuera_pico' con las ventanas de abajo.
+    #
+    # Antes decia 0.44 / 0.014 / 1.32, que SOBREestimaba ~45%. No era una
+    # tarifa inventada: eran los precios de una lista anterior que nadie
+    # actualizo. Se corrigio el 05/10/2026, en la misma auditoria que
+    # encontro que el sistema calculaba $2.37 mientras el proveedor cobraba
+    # $6.78 -- o sea que la tarifa inflada estaba TAPANDO parte de la brecha
+    # de llamadas que no se contaban. Con la tarifa correcta, esa brecha se
+    # ve mas grande, que es lo que corresponde.
     deepseek:deepseek-v4-flash:
-      entrada: 0.44
-      entrada_cache: 0.014
-      salida: 1.32
+      entrada: 0.30
+      entrada_cache: 0.006
+      salida: 1.20
       descuento_fuera_pico: 0.5
       # 01:00-04:00 y 06:00-10:00 UTC, lunes a viernes. Verificado contra la
       # facturacion real: el 94% del trafico de Rapilink cae FUERA de pico --
@@ -2068,6 +2187,21 @@ llm:
         - dias: [1, 2, 3, 4, 5]
           desde_utc: 6
           hasta_utc: 10
+
+    # El modelo del rol 'supervisor' (llm.overrides). Hasta el 05/10/2026 se
+    # usaba SIN tarifa cargada: sus tokens se contaban y su costo quedaba en
+    # cero, asi que el gasto existia y no se veia. Verificada contra la
+    # pagina oficial ese dia (docs.claude.com/en/docs/about-claude/pricing).
+    #
+    # SIN ventanas de pico: Anthropic no cobra distinto por horario, y
+    # declarar un descuento sin ventanas no haria nada (sin ventanas se cobra
+    # todo como pico, ver la clase Tarifa).
+    #
+    # 'entrada_cache' es el precio de LECTURA de cache, el 10% del input.
+    anthropic:claude-sonnet-5:
+      entrada: 2.0
+      entrada_cache: 0.20
+      salida: 10.0
 
   # Donde preguntarle al proveedor cuanto saldo queda, para AUDITAR el calculo
   # de arriba contra lo que de verdad cobra. La resta entre el saldo de dos
@@ -2619,6 +2753,12 @@ herramientas:
     tipo: http
     descripcion: Datos de un cliente por su ID de servicio.
     solo_lectura: true
+    #  05/10/2026. La pide el chat del Supervisor NOC por
+    #  'POST /interno/herramienta/<nombre>', con 'rol=supervisor_noc' para
+    #  que el motor aplique su politica de campos ANTES de contestar. Es de
+    #  LECTURA: declararla aqui no habilita ninguna escritura, y la ruta
+    #  interna sigue exponiendo solo lo declarado una por una.
+    invocable_por_servicio: true
     roles_permitidos: [soporte, facturacion, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
@@ -3579,6 +3719,12 @@ herramientas:
   - nombre: consultar_ticket
     tipo: http
     solo_lectura: true
+    #  05/10/2026. La pide el chat del Supervisor NOC por
+    #  'POST /interno/herramienta/<nombre>', con 'rol=supervisor_noc' para
+    #  que el motor aplique su politica de campos ANTES de contestar. Es de
+    #  LECTURA: declararla aqui no habilita ninguna escritura, y la ruta
+    #  interna sigue exponiendo solo lo declarado una por una.
+    invocable_por_servicio: true
     # 'administracion' agregado aca (estaba en su puede_consultar pero no
     # aca -- ver el comentario en ese rol. Documental/defensa en profundidad,
     # el motor autoriza por puede_consultar (editor.py), pero dejarlo asi
@@ -3603,6 +3749,12 @@ herramientas:
       todos ignorados). Se filtra por estado y se cruza por cliente en codigo,
       solo sobre los abiertos.
     solo_lectura: true
+    #  05/10/2026. La pide el chat del Supervisor NOC por
+    #  'POST /interno/herramienta/<nombre>', con 'rol=supervisor_noc' para
+    #  que el motor aplique su politica de campos ANTES de contestar. Es de
+    #  LECTURA: declararla aqui no habilita ninguna escritura, y la ruta
+    #  interna sigue exponiendo solo lo declarado una por una.
+    invocable_por_servicio: true
     roles_permitidos: [soporte, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/tickets/
@@ -5404,6 +5556,48 @@ herramientas:
     reintentar_identificador_como:
       sn_onu: gpon_hex
 
+  #  LA LECTURA DE FLOTA DEL SUPERVISOR NOC.
+  #
+  #  No la llama el modelo: la llama el BACKEND, en el sondeo periodico de
+  #  fuentes (ver 'invocable_por_servicio'). Por eso no esta en el
+  #  'puede_consultar' de ningun rol.
+  #
+  #  Es OTRA COSA que 'consultar_incidente_red', que esta justo debajo: aquella
+  #  parte de un cliente ('sn_onu') y contesta si SU falla es compartida; esta
+  #  no parte de nadie y contesta como esta la red. El Supervisor necesita la
+  #  segunda para ver una afectacion ANTES de que alguien abra un ticket.
+  #
+  #  Las OLTs se DESCUBREN con 'get_olts'. No hay lista fija de ids aqui, y no
+  #  es un olvido: se declaro una vez y se revirtio, porque una lista fija se
+  #  queda vieja sin que nadie lo note -- el dia que la empresa agrega una OLT,
+  #  el Supervisor dejaria de verla y no lo diria.
+  #
+  #  Para que el backend la use hay que nombrarla ADEMAS en la variable
+  #  SUPERVISOR_HERRAMIENTAS_CAIDAS_PON. Mientras esa variable este vacia, la
+  #  fuente responde NO_DISPONIBLE -- no 'sin caidas'.
+  - nombre: consultar_caidas_pon_flota
+    tipo: interno
+    detecta_caidas_flota: true
+    descripcion: >
+      Las caidas por puerto PON de TODA la flota, descubriendo las OLTs con
+      get_olts y consultando get_outage_pons de cada una. Devuelve, por puerto,
+      cuantos abonados hay, cuantos estan afectados, de que tipo (partial_los /
+      los / power / offline) y desde cuando. NO parte de ningun cliente y NO
+      devuelve datos de personas: el endpoint agrupa por puerto, y lo mas
+      identificable que trae es el nombre de la caja en la calle. Si una sola
+      OLT no contesta, la lectura entera falla a proposito: un resumen al que le
+      falta una OLT se leeria como 'en esa OLT no hay caidas', que es justo lo
+      que no se puede afirmar.
+    solo_lectura: true
+    invocable_por_servicio: true
+    #  Nadie la usa en conversacion. El catalogo de un rol se arma desde
+    #  'puede_consultar', asi que declararlo aqui no se la ofrece a ningun
+    #  modelo -- pero el esquema exige al menos uno.
+    roles_permitidos: [soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
   - nombre: consultar_incidente_red
     tipo: interno
     detecta_incidente: true
@@ -6695,6 +6889,19 @@ limites:
   # para depurar; una foto pesa y puede mostrar la casa, la cedula o una cara.
   # La foto sirve para resolver el caso, y un caso vive dias.
   retencion_multimedia_dias: 30
+
+# Si las fotos de esta empresa se miran con un modelo de vision.
+#
+# APAGADO. Encenderlo manda imagenes de clientes a un tercero, y eso depende
+# de la autorizacion de tratamiento que firma el cliente al contratar (Ley
+# 1581 art. 26, PRD RNF-01), no de que el codigo este desplegado. Una foto
+# puede mostrar una cara, el interior de la casa o un documento sobre la
+# mesa: a diferencia de un texto, el titular no eligio todo lo que salio en
+# el encuadre.
+#
+# Apagado, la foto se sigue guardando y mostrando en la bandeja igual que
+# siempre; lo unico que no pasa es que el agente la mire.
+vision_habilitada: false
 
 evaluacion:
   minimo_acierto_pct: 90.0

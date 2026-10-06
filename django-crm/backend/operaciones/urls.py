@@ -13,6 +13,11 @@ urlpatterns = [
          name="propuesta-detalle"),
     path("propuestas/<uuid:propuesta_id>/revisar/",
          views.RevisarPropuestaView.as_view(), name="propuesta-revisar"),
+    #  EL DESENLACE. Se registra DESPUES de revisar y con evidencia: una
+    #  decision aceptada no es una recomendacion exitosa, y medir las dos
+    #  juntas diria obediencia donde dice acierto.
+    path("propuestas/<uuid:propuesta_id>/resultado/",
+         views.ResultadoDecisionView.as_view(), name="propuesta-resultado"),
     path("propuestas/<uuid:propuesta_id>/cancelar/",
          views.CancelarPropuestaView.as_view(), name="propuesta-cancelar"),
     path("supervisor/ciclo/", views.CicloSupervisorView.as_view(), name="ciclo"),
@@ -68,4 +73,39 @@ urlpatterns = [
     #  declarada desde M03 y ninguna funcion la asignaba.
     path("programacion/<uuid:programacion_id>/cerrar/",
          views.CerrarProgramacionView.as_view(), name="programacion-cerrar"),
+
+    #  EL LATIDO  --  por donde el scheduler despierta al Supervisor.
+    #  GET y de solo lectura a proposito: 'supervisor/ciclo/' (POST) escribe
+    #  propuestas y lo aprieta una persona; este lo llama un proceso y no
+    #  escribe nada. Dos puertas porque son dos cosas distintas.
+    path("supervisor/latido/", views.LatidoSupervisorView.as_view(),
+         name="supervisor-latido"),
+
+    #  EL SONDEO DE FUENTES  --  la otra puerta del scheduler.
+    #  POST porque escribe DOS TABLAS PROPIAS (el estado de cada fuente y su
+    #  captura), que es el entregable: sin eso no hay con que comparar el ciclo
+    #  siguiente. A los sistemas externos se les consulta con herramientas
+    #  'solo_lectura'; no escribe nada afuera.
+    path("supervisor/sondeo/", views.SondeoFuentesView.as_view(),
+         name="supervisor-sondeo"),
+
+    #  EL CHAT DEL SUPERVISOR  --  la unica ruta que habla con una
+    #  persona. Las otras dos las llama el scheduler. Escribe la
+    #  conversacion y nada mas: el modelo no tiene ninguna herramienta
+    #  de escritura, asi que no hay por donde ejecutar algo.
+    path("supervisor/chat/", views.ChatSupervisorView.as_view(),
+         name="supervisor-chat"),
+
+    #  EL CALLER DE LA COORDINACION. Es la UNICA ruta del Supervisor que
+    #  ESCRIBE en la operacion, y por eso es la unica que consulta la
+    #  autonomia efectiva antes de hacer nada. Sin ella, 'coordinacion.py'
+    #  existia y no habia forma de alcanzarlo.
+    path("supervisor/coordinar/", views.CoordinarSupervisorView.as_view(),
+         name="supervisor-coordinar"),
+
+    #  EL RELEVO DE TURNO. GET y de solo lectura: detras hay una persona
+    #  tomando el turno, no el scheduler. Existe para que 'operaciones/turno.py'
+    #  tenga llamador -- sin ella seria otro modulo probado al que nadie llega.
+    path("supervisor/turno/", views.TurnoSupervisorView.as_view(),
+         name="supervisor-turno"),
 ]

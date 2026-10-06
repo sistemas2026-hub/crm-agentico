@@ -1858,6 +1858,27 @@ def revisar(propuesta: PropuestaSupervisor, *, actor, decision: str,
             motivo=comentario,
             extra=extra,
         )
+
+        #  LA DECISION SE CAPTURA AQUI  --  paso P8.2 (05/10/2026)
+        #
+        #  'DecisionSupervisor' existia desde P4 con sus tres restricciones
+        #  de base y NUNCA se escribia: la unica aparicion fuera de las
+        #  pruebas era la definicion de la clase. Por eso
+        #  'indicadores_situaciones' calculaba 'tasa_aceptacion' y
+        #  'recomendaciones_que_funcionaron' leyendo una tabla vacia, y
+        #  devolvia 0 / NO_APLICA para siempre.
+        #
+        #  Va DENTRO de esta transaccion a proposito: una propuesta revisada
+        #  sin su fila de decision es exactamente el estado que dejaba las
+        #  metricas en cero. Si esto falla, la revision entera se deshace.
+        #
+        #  El resultado nace PENDIENTE. 'aceptada' NO es 'funciono': eso se
+        #  sabe despues y lo registra 'gobierno.registrar_resultado' con su
+        #  evidencia. Medir las dos cosas juntas diria obediencia donde dice
+        #  acierto.
+        from operaciones import gobierno
+
+        gobierno.registrar_decision(fresca, actor=actor, ahora=ahora)
     return fresca
 
 

@@ -1277,6 +1277,22 @@ class Herramienta(Base):
     # nucleo/herramientas/incidentes.py y la skill smartolt-api (seccion
     # get_outage_pons) para el porque y la verificacion en vivo.
     detecta_incidente: bool = False
+
+    # LA LECTURA DE FLOTA, que es OTRA COSA que 'detecta_incidente'.
+    #
+    # 'detecta_incidente' PARTE DE UN CLIENTE: exige 'sn_onu' y contesta si
+    # la falla de esa persona es aislada o compartida. Esta no parte de
+    # nadie: descubre las OLTs con 'get_olts' y pregunta por los PON
+    # anormales de cada una. Es lo que necesita el Supervisor NOC para ver
+    # la red ANTES de que alguien abra un ticket.
+    #
+    # Las OLTs se DESCUBREN. No hay lista fija en la configuracion: se
+    # intento una vez y se revirtio, porque una lista fija se queda vieja
+    # sin que nadie lo note y el dia que la empresa agrega una OLT el
+    # Supervisor dejaria de verla y no lo diria.
+    #
+    # Ver nucleo/herramientas/flota.py.
+    detecta_caidas_flota: bool = False
     # Tipo 'interno' tambien: resume el historial de caidas del enlace en un
     # veredicto ya calculado en vez de entregar la lista cruda de eventos.
     # Ver nucleo/herramientas/estabilidad.py.
@@ -3034,6 +3050,22 @@ class TenantConfig(Base):
     # decisiones comerciales de cada empresa, no de la plataforma.
     promesas_pago: PromesasPago = Field(default_factory=PromesasPago)
     limites: Limites = Field(default_factory=Limites)
+    # SI LAS FOTOS DE ESTA EMPRESA SE MIRAN.
+    #
+    # Apagado por defecto, y no es prudencia de formulario: encenderlo manda
+    # imagenes de clientes a un tercero (ver nucleo/canales/vision.py), y eso
+    # depende de la autorizacion de tratamiento que firma cada empresa --
+    # Ley 1581 art. 26, PRD RNF-01--, no de que el codigo este desplegado.
+    # Una empresa puede tener transcripcion de audio y no querer vision.
+    #
+    # Es un campo de configuracion y no una bandera de entorno porque varia
+    # POR EMPRESA: la regla de CLAUDE.md 3.3. Lo contrario seria un 'if' por
+    # slug, que es exactamente lo que test_nucleo_sin_tenants.py caza.
+    #
+    # Apagado, el turno se comporta igual que antes de que esto existiera: la
+    # foto se guarda, se muestra en la bandeja, y al modelo le llega el aviso
+    # de siempre. No se descarga nada de mas ni se llama a ningun proveedor.
+    vision_habilitada: bool = False
     # El cierre de lo que atendio solo el asistente. Seccion propia y no un
     # campo mas de 'limites' porque tiene cuatro perillas que se mueven
     # juntas, y porque su interruptor tiene que poder apagarse sin tocar nada

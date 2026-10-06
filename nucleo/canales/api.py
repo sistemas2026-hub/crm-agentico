@@ -44,7 +44,7 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from nucleo.canales import canal as canales
-from nucleo.canales import media, transcripcion, whatsapp
+from nucleo.canales import media, transcripcion, vision, whatsapp
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.relevo import desenlaces
 from nucleo.relevo import historial as regla_historial
@@ -63,9 +63,11 @@ from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
 from nucleo.seguimiento import cierre_por_propuesta
 from nucleo.seguridad import interruptor
+from nucleo.seguridad import listas_blancas
 from nucleo.seguridad import idempotencia
-from nucleo.modelo import motor
+from nucleo.modelo import cliente, motor
 from nucleo.observabilidad import consumo
+from nucleo.observabilidad import eventos_consumo
 from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
@@ -87,6 +89,19 @@ from nucleo.seguridad import secretos
 from nucleo.seguridad import verificacion
 from nucleo.seguridad.verificacion import Sesion
 from nucleo.observabilidad.registro import id_interno, ref_proveedor, ref_sesion, registrar
+
+#  EL CHAT DEL SUPERVISOR NOC  --  dos topes, y los dos tienen motivo.
+#
+#  El de mensajes: quien llama arma el historial, y sin tope una conversacion
+#  larga llegaria entera y se pagarian tokens por todo. Resumir es de Django; el
+#  limite vive donde se gasta.
+#
+#  El de tiempo: mas largo que un turno de WhatsApp porque aqui quien espera es
+#  un colaborador mirando una pantalla, no un cliente en una conversacion. Sigue
+#  siendo un tope -- ninguna llamada al modelo queda sin limite (ver TIMEOUTS en
+#  nucleo/modelo/cliente.py).
+TOPE_MENSAJES_SUPERVISOR = 40
+SEGUNDOS_TIMEOUT_SUPERVISOR = 120
 
 app = Flask(__name__)
 
@@ -3106,6 +3121,98 @@ def chat():
     return jsonify(salida)
 
 
+@app.get("/chat/historial")
+def chat_historial():
+    """
+    El hilo que ya tiene esta sesion, para que una pantalla pueda retomarlo.
+
+    POR QUE HACIA FALTA, SI EL TURNO YA PERSISTIA
+    ---------------------------------------------
+    '/chat' guarda cada turno desde siempre --'atender_turno' llama a
+    'registrar_mensaje', que hace upsert sobre 'conversations' por
+    (organizacion, canal, usuario_externo)-- y el motor ademas REHIDRATA el
+    hilo al atender el mensaje siguiente. O sea que la continuidad del
+    CONTEXTO ya funcionaba: tras recargar la pagina, el modelo seguia sabiendo
+    de que se hablaba.
+
+    Lo que no existia era leerlo de vuelta. 'GET /conversaciones/<id>/mensajes'
+    pide el UUID, y una pantalla recien cargada no lo tiene: lo unico que sabe
+    es QUIEN es. El resultado era un panel vacio con un motor que recordaba
+    todo -- un olvido aparente, peor que uno real, porque la respuesta
+    siguiente contradice a la pantalla.
+
+    La consulta ya estaba ('estado_de_conversacion_abierta'); faltaba la
+    puerta.
+
+    NO ATIENDE CANALES REALES, Y FALLA CERRADO
+    -------------------------------------------
+    Mismo criterio que '/chat': por aca no se lee el hilo de WhatsApp de un
+    cliente. Esa lectura tiene su propia puerta en la bandeja, con sus
+    controles de control humano y de PII; abrir un segundo camino sin ellos
+    seria rodearlos. Un canal presente pero desconocido tampoco cae al
+    default: se rechaza.
+    """
+    tenant = request.args.get("tenant")
+    id_sesion = request.args.get("identificador_sesion")
+    if not tenant or not id_sesion:
+        return jsonify({"error": "Faltan 'tenant' e 'identificador_sesion'."}), 400
+
+    canal_pedido = request.args.get("canal") or canales.API
+    try:
+        canal = canales.normalizar_canal(canal_pedido)
+    except canales.CanalInvalido:
+        return jsonify({"error": "Canal desconocido."}), 400
+    if canal in canales.REALES:
+        registrar("chat", "rechazada una lectura de historial de un canal real",
+                  canal=canal, tenant=tenant)
+        return jsonify({"error": f"El canal '{canal}' no se lee por aca: su "
+                                 "hilo vive en la bandeja, con sus controles."}), 403
+
+    try:
+        limite = int(request.args.get("limite") or 60)
+    except (TypeError, ValueError):
+        return jsonify({"error": "'limite' tiene que ser un numero."}), 400
+    #  Un tope duro ademas del pedido: quien llama no decide cuanto trabajo
+    #  hace la base.
+    limite = max(1, min(limite, 200))
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    del config          # se pide solo para rechazar un tenant inexistente
+
+    try:
+        estado = persistencia.estado_de_conversacion_abierta(tenant, canal, id_sesion)
+    except Exception as e:                                        # noqa: BLE001
+        registrar("chat", "no se pudo resolver la conversacion de la sesion",
+                  tenant=tenant, sesion=ref_sesion(id_sesion), error=e)
+        return jsonify({"error": "No se pudo leer el historial."}), 500
+
+    #  Sin conversacion abierta no es un error: es alguien que todavia no
+    #  escribio nada. Un 404 obligaria a cada pantalla a tratar el estado
+    #  normal como una excepcion.
+    if not estado or not estado.get("conversation_id"):
+        return jsonify({"conversacion_id": None, "mensajes": []})
+
+    try:
+        hilo = persistencia.mensajes_de(tenant, estado["conversation_id"])
+    except Exception as e:                                        # noqa: BLE001
+        registrar("chat", "no se pudo leer el hilo de la sesion",
+                  tenant=tenant, sesion=ref_sesion(id_sesion), error=e)
+        return jsonify({"error": "No se pudo leer el historial."}), 500
+
+    #  Solo lo que una burbuja necesita pintar. El resto de lo que trae
+    #  'mensajes_de' --marcas de caso, metadatos de la bandeja-- es de otra
+    #  pantalla y no se filtra a esta por comodidad.
+    mensajes = [{"id": str(m["id"]), "rol": m["rol"],
+                 "contenido": m["contenido"],
+                 "creado_en": m["creado_en"].isoformat() if m.get("creado_en") else None}
+                for m in (hilo.get("mensajes") or [])][-limite:]
+    return jsonify({"conversacion_id": estado["conversation_id"],
+                    "mensajes": mensajes})
+
+
 @app.get("/agentes")
 def agentes():
     """
@@ -4175,6 +4282,63 @@ def configuracion_variable_borrar(nombre):
     return jsonify({"borrado": nombre})
 
 
+def _aplicar_politica_de_rol(config, rol_pedido: str, nombre: str, crudo):
+    """
+    Aplica la politica de campos de un ROL a la salida cruda de una herramienta.
+
+    POR QUE AQUI Y NO DEL LADO DE QUIEN LLAMA
+    -----------------------------------------
+    El filtro que protege de verdad es 'listas_blancas.filtrar_campos', y vive
+    aqui. Copiarlo al CRM habria dejado DOS implementaciones de la misma
+    garantia --con notacion con punto, tres formas de respuesta y fail-closed--
+    y la segunda se desincroniza sin que nadie lo note. Filtrando de este lado,
+    el campo no autorizado no sale del motor: no llega al CRM y mucho menos al
+    modelo.
+
+    FAIL-CLOSED EN LOS DOS HUECOS
+    -----------------------------
+      * un rol que no existe en la config  -> se levanta, NO se devuelve crudo.
+      * un rol sin lista blanca para esa herramienta -> 'filtrar_campos' ya
+        descarta el resultado entero.
+
+    'nunca_revelar' SE APLICA DE VERDAD EN ESTE CAMINO
+    --------------------------------------------------
+    En 'schema.py' ese campo esta declarado como "documental y de defensa en
+    profundidad": lo que protege es 'campos_permitidos'. Eso sigue siendo
+    cierto -- la lista blanca es la garantia-- pero por esta ruta la lista NEGRA
+    tambien se barre, porque es gratis y porque un campo que el tenant declaro
+    que nunca se revela no deberia depender de que la lista blanca este bien
+    escrita. Se aplica DESPUES de la blanca: achicar nunca amplia.
+    """
+    rol_cfg = (config.roles or {}).get(rol_pedido)
+    if rol_cfg is None:
+        raise ValueError(f"el rol '{rol_pedido}' no existe en la config")
+
+    filtrado = listas_blancas.filtrar_campos(rol_cfg, nombre, crudo)
+
+    prohibidos = {str(c) for c in (rol_cfg.nunca_revelar or [])}
+    if not prohibidos:
+        return filtrado
+    return _sin_prohibidos(filtrado, prohibidos)
+
+
+def _sin_prohibidos(dato, prohibidos: set[str]):
+    """
+    Quita las claves prohibidas, a cualquier profundidad.
+
+    Recorre dicts y listas: la salida de una herramienta puede venir como
+    objeto, como lista o como el '{total, resultados}' que arma
+    'listas_blancas'. Comparar solo el primer nivel dejaria pasar un campo
+    anidado, que es exactamente la forma en que se escapa uno.
+    """
+    if isinstance(dato, dict):
+        return {k: _sin_prohibidos(v, prohibidos) for k, v in dato.items()
+                if k not in prohibidos}
+    if isinstance(dato, list):
+        return [_sin_prohibidos(v, prohibidos) for v in dato]
+    return dato
+
+
 @app.post("/interno/herramienta/<nombre>")
 def interno_ejecutar_herramienta(nombre: str):
     """
@@ -4259,7 +4423,134 @@ def interno_ejecutar_herramienta(nombre: str):
         return fallo(502, "herramienta_fallo", "La herramienta no pudo completarse.",
                      componente="interno", e=e, estado_proveedor=estado_http_de(e))
 
+    #  LA POLITICA DE CAMPOS, SI QUIEN LLAMA PIDE UN ROL
+    #  -------------------------------------------------
+    #  Sin 'rol' la salida va cruda, como siempre: los llamadores que ya
+    #  existian --la capa de fuentes del Supervisor-- leen topologia de red, no
+    #  datos de un abonado, y cambiarles el contrato romperia lo que funciona.
+    #
+    #  CON 'rol', el resultado se filtra ANTES de salir del motor. Es lo que
+    #  permite que el chat del Supervisor use estas herramientas sin que la
+    #  ficha entera de WispHub --54 campos, cuatro contrasenas y el GPS del
+    #  domicilio-- llegue a un modelo.
+    rol_pedido = (request.args.get("rol") or "").strip()
+    if rol_pedido:
+        try:
+            salida = _aplicar_politica_de_rol(config, rol_pedido, nombre, salida)
+        except ValueError as e:
+            #  400 y no 500: el parametro es lo que esta mal. Y NO se devuelve
+            #  el dato crudo -- pedir una politica que no existe no puede
+            #  resultar en no tener ninguna.
+            registrar("interno", "rol desconocido en una herramienta interna",
+                      herramienta=nombre, error=e)
+            return jsonify({"error": "ROL_DESCONOCIDO",
+                            "detalle": "El rol pedido no existe en la "
+                                       "configuracion de esta empresa."}), 400
+
     return jsonify({"resultado": salida})
+
+
+@app.post("/interno/supervisor/chat")
+def interno_supervisor_chat():
+    """
+    Le presta el MODELO al Supervisor NOC. No sabe de que esta hablando.
+
+    POR QUE ESTA RUTA EXISTE, Y POR QUE ES TAN FINA
+    ----------------------------------------------
+    El Supervisor NOC vive en Django: ahi estan las situaciones, los casos, la
+    programacion, el tenant y la RLS. El modelo vive aca: la credencial del
+    proveedor esta SOLO en el motor, igual que la de WispHub y la de SmartOLT, y
+    copiarla al CRM seria tener dos servicios con la misma clave -- lo que
+    despues se desincroniza sin que nadie sepa cual es la buena.
+
+    Asi que el reparto es: Django arma el contexto, elige las herramientas, corre
+    el bucle y persiste; el motor pone el modelo. Esta funcion no interpreta la
+    conversacion, no decide que herramienta llamar y no ejecuta ninguna -- las
+    del Supervisor leen tablas del CRM, y el motor NO lee las tablas del CRM
+    (ver el comentario de /chat).
+
+    POR QUE NO SE REUSA '/chat'
+    ---------------------------
+    '/chat' atiende un turno de un agente del PRODUCTO: resuelve rol o
+    profile_id, arma el catalogo del tenant, aplica listas blancas por rol y
+    escribe en 'asistente.conversations'. El Supervisor NOC no es uno de esos
+    roles: CLAUDE.md §11.1 separa los agentes del producto --que viven en
+    'tenant_config' y se editan en /agentes-- de los operativos. Meterlo ahi
+    habria mezclado las dos capas y exigido tocar la config de produccion.
+
+    LO QUE NO HACE, Y HAY UNA PRUEBA POR CADA UNO
+    ---------------------------------------------
+    No ejecuta herramientas, no escribe en la base, no toca conversaciones de
+    WhatsApp, no manda nada a ningun canal y no mira el interruptor de autonomia
+    -- porque no ejecuta nada que el interruptor deba frenar. Es una llamada al
+    modelo y nada mas.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="supervisor_chat", e=e)
+
+    cuerpo = request.get_json(silent=True) or {}
+    mensajes = cuerpo.get("mensajes")
+    if not isinstance(mensajes, list) or not mensajes:
+        return jsonify({"error": "Falta 'mensajes' (lista no vacia)."}), 400
+    #  Un tope de mensajes, no por estetica: quien llama arma el historial, y sin
+    #  limite una conversacion larga llegaria aqui entera y pagaria tokens por
+    #  todo. El resumen es responsabilidad de Django, pero el tope vive donde se
+    #  gasta.
+    if len(mensajes) > TOPE_MENSAJES_SUPERVISOR:
+        return jsonify({"error": f"Demasiados mensajes: el tope es "
+                                 f"{TOPE_MENSAJES_SUPERVISOR}."}), 400
+    for m in mensajes:
+        if not isinstance(m, dict) or "role" not in m:
+            return jsonify({"error": "Cada mensaje necesita 'role'."}), 400
+
+    herramientas = cuerpo.get("tools")
+    if herramientas is not None and not isinstance(herramientas, list):
+        return jsonify({"error": "'tools' tiene que ser una lista."}), 400
+
+    #  El modelo sale de la config del TENANT, no del cuerpo de la peticion.
+    #  Dejarselo elegir a quien llama permitiria pedir un modelo que la empresa
+    #  no paga, y el consumo se le cobra a ella.
+    referencia = (config.llm.modelo_seleccion or config.llm.modelo_por_defecto)
+
+    try:
+        respuesta = cliente.chat(
+            referencia, mensajes, tools=herramientas, temperatura=0.1,
+            timeout=SEGUNDOS_TIMEOUT_SUPERVISOR,
+            razonamiento=getattr(config.llm, "razonamiento", None))
+    except Exception as e:
+        #  502 y no 500: el que fallo es el proveedor, no esta ruta. Quien llama
+        #  tiene que poder distinguir "el motor esta mal" de "el modelo no
+        #  contesto", porque la reaccion no es la misma.
+        return fallo(502, "modelo_no_contesto",
+                     "El modelo no pudo contestar.",
+                     componente="supervisor_chat", e=e)
+
+    #  Las llamadas a herramienta se devuelven TAL CUAL las pidio el modelo.
+    #  Resolverlas aca seria ejecutar algo, y esta ruta no ejecuta.
+    llamadas = []
+    for ll in (respuesta.llamadas or []):
+        #  'Llamada' solo tiene nombre y argumentos -- este cliente no expone un
+        #  id de llamada, asi que no se inventa uno. Quien corre el bucle
+        #  empareja por POSICION, que es lo que de verdad hay.
+        llamadas.append({"nombre": ll.nombre, "argumentos": ll.argumentos})
+
+    proveedor, modelo = cliente.resolver(referencia)
+    registrar("supervisor_chat", "turno del Supervisor contestado",
+              tenant=tenant, herramientas=len(llamadas))
+    return jsonify({
+        "contenido": respuesta.contenido or "",
+        "llamadas": llamadas,
+        #  Para la trazabilidad del lado de Django. El modelo y el proveedor no
+        #  son secretos; la credencial nunca sale de aca.
+        "modelo": modelo,
+        "proveedor": proveedor,
+    })
 
 
 @app.post("/interno/propuesta/<propuesta_id>/cerrar-caso")
@@ -7117,6 +7408,28 @@ def consumo_resumen():
         },
         "herramientas": {"n": h.get("n") or 0, "p95_ms": h.get("p95")},
         "conversaciones": c.get("n") or 0,
+        # EL DESGLOSE QUE usage_daily NO PODIA DAR. Sale de
+        # asistente.consumo_eventos y responde las cuatro preguntas que antes
+        # no tenian respuesta: por origen (produccion / evaluacion / prueba),
+        # por servicio (conversacion / vision / transcripcion), por modelo, y
+        # que se gasto SIN saber cuanto costo.
+        #
+        # Va aparte de 'totales' a proposito: 'totales' sigue siendo lo de
+        # usage_daily, que es lo que el panel ya dibuja. Si esto viene vacio
+        # --porque la migracion todavia no corrio-- la pantalla de hoy no
+        # cambia en nada.
+        "desglose": eventos_consumo.resumen(tenant, dias),
+        # LO QUE CALCULAMOS CONTRA LO QUE COBRO EL PROVEEDOR.
+        #
+        # Esta comparacion ya se calculaba desde septiembre y no se mostraba
+        # en ninguna pantalla. El 05/10/2026 la auditoria la corrio a mano y
+        # encontro 2.86x de diferencia sostenida durante 23 dias: el dato
+        # estaba, faltaba que alguien lo viera. Por eso ahora viaja al panel.
+        #
+        # No bloquea nada: es una señal de auditoria. Frenar la atencion por
+        # una discrepancia contable seria cambiar un problema de dinero por
+        # uno de servicio.
+        "conciliacion": consumo.veredicto_conciliacion(config, tenant),
     })
 
 
@@ -8126,14 +8439,156 @@ def _transcribir_si_es_voz(config, tenant: str, entrante: dict) -> dict:
               tenant=tenant, media=ref_proveedor(media_id), estado=r.estado,
               segundos=round(r.segundos, 1), tokens=r.tokens,
               caracteres=len(r.texto), error=r.error or None)
+    #  EL CONSUMO DE LA TRANSCRIPCION. El Resultado ya traia 'tokens' desde
+    #  septiembre --lo que informa la API de OpenAI-- y se descartaba. Mismo
+    #  motivo que en vision para escribir un evento suelto: esto corre antes
+    #  del turno.
+    #
+    #  La referencia lleva el prefijo del proveedor para que la tarifa se
+    #  busque igual que las demas. Hoy NO hay tarifa cargada para este modelo,
+    #  asi que el evento queda con hay_tarifa=false y costo 0 -- que es
+    #  exactamente lo que hay que poder ver: hubo gasto y no se sabe cuanto.
+    if r.tokens:
+        costo_t, tarifa_t = consumo.costo_de(
+            config, f"openai:{transcripcion.MODELO}", r.tokens, 0)
+        eventos_consumo.anotar_evento(
+            tenant, eventos_consumo.TRANSCRIPCION, "openai", transcripcion.MODELO,
+            entrada=r.tokens, costo_usd=costo_t, hay_tarifa=tarifa_t,
+            metadatos={"segundos": round(r.segundos, 1), "estado": r.estado})
+
     return {"texto": r.texto, "estado": r.estado, "error": r.error,
             "crudo": crudo, "mime": mime}
+
+
+def _analizar_si_es_imagen(config, tenant: str, entrante: dict) -> dict:
+    """
+    Mira la foto y la traduce al catalogo, ANTES del turno.
+
+    Espejo de _transcribir_si_es_voz y con el mismo contrato: siempre un dict
+    de la misma forma, para que quien llame no tenga que distinguir "no era
+    una imagen" de "no se pudo" de "esta apagado". Los tres dan texto vacio y
+    el turno sigue exactamente como seguia antes de que esto existiera.
+
+    SE APAGA PRIMERO Y SE PREGUNTA DESPUES. La bandera se mira antes que nada
+    --antes de consultar la base y antes de bajar el archivo-- porque con
+    vision apagada no hay nada que valga la pena averiguar: la foto se va a
+    guardar igual por el camino de siempre.
+
+    LOS BYTES VUELVEN EN EL DICT, igual que en el audio: el adjunto se guarda
+    despues del turno, cuando recien existe el conversation_id, y sin esto
+    habria que bajar la misma foto dos veces. Vuelven los dos juegos --el
+    original y el ya comprimido-- para que tampoco se comprima dos veces.
+
+    Nunca levanta.
+    """
+    vacio = {"texto": "", "estado": "", "error": "", "analisis": "",
+             "crudo": None, "mime": "", "listo": None, "mime_listo": ""}
+    tipo = entrante.get("tipo", "")
+    media_id = entrante.get("media_id")
+    if tipo not in vision.TIPOS_DE_IMAGEN_ENTRANTE or not media_id:
+        return vacio
+    if not getattr(config, "vision_habilitada", False):
+        return vacio
+
+    #  EL PIE SE RESUELVE UNA SOLA VEZ, ACA, y de un solo campo.
+    #
+    #  Por el webhook de WhatsApp el pie de una foto llega SIEMPRE en
+    #  'descripcion': 'texto' solo se llena cuando el mensaje es de tipo
+    #  'text' (ver whatsapp.py::entrantes). Pero este mismo turno lo usa
+    #  tambien el simulador, y ahi nada obliga a esa forma. Tomar el primero
+    #  que tenga algo cubre los dos casos sin poder duplicarlo: es UN valor,
+    #  no la suma de dos.
+    pie = (entrante.get("descripcion") or "").strip() \
+        or (entrante.get("texto") or "").strip()
+
+    #  IDEMPOTENCIA POR media_id. Si esta foto ya se analizo y salio bien, se
+    #  reusa: un reintento del webhook, o el mismo archivo reenviado, no se
+    #  paga dos veces. Solo se reusa 'procesado' -- un 'error' guardado dice
+    #  que AQUEL intento fallo, y el de ahora todavia puede salir bien.
+    #
+    #  La consulta va por (organization_id, media_id) dentro de sesion(tenant),
+    #  asi que no hay forma de leer el analisis de otra empresa.
+    try:
+        previo = persistencia.analisis_visual_de(tenant, media_id)
+    except Exception as e:
+        #  Que no se pueda consultar lo anterior no impide analizar: el costo
+        #  de mirarla de nuevo es chico y el de no contestar no lo es.
+        previo = None
+        registrar("vision", "no se pudo consultar el analisis previo",
+                  tenant=tenant, media=ref_proveedor(media_id), error=e)
+
+    if previo and previo.get("estado_analisis") == vision.PROCESADO:
+        guardado = (previo.get("analisis_visual") or "").strip()
+        if guardado:
+            r = vision.Resultado(texto=guardado, estado=vision.PROCESADO)
+            registrar("vision", "analisis reusado", tenant=tenant,
+                      media=ref_proveedor(media_id),
+                      caracteres=len(guardado))
+            return dict(vacio, estado=r.estado, analisis=guardado,
+                        texto=vision.texto_para_el_agente(r, pie))
+
+    try:
+        crudo, mime = whatsapp.descargar_media(config, tenant, media_id)
+    except Exception as e:
+        registrar("vision", "no se pudo bajar la imagen",
+                  tenant=tenant, media=ref_proveedor(media_id), error=e)
+        return dict(vacio, estado=vision.ERROR,
+                    error="no se pudo bajar la imagen")
+
+    #  Se analiza LO QUE SE GUARDA, no el original. Si el modelo mirara una
+    #  imagen distinta de la que queda en la bandeja, nadie podria auditar
+    #  despues por que dijo lo que dijo. Ademas pesa menos y cuesta menos.
+    listo, mime_listo = media.preparar(crudo, tipo, mime)
+
+    #  EL MODELO SALE DE LA CONFIG DEL TENANT, no de una constante: es un dato
+    #  que varia por empresa (CLAUDE.md 3.3). Es el MISMO que conversa, asi
+    #  que no hay un segundo proveedor ni una segunda clave.
+    modelo = getattr(getattr(config, "llm", None), "modelo_por_defecto", "")
+
+    r = vision.analizar(listo, modelo, pie)
+    #  EL EVENTO ES FIJO Y LO QUE VARIA SON CAMPOS. Lo mismo que ya corrigio
+    #  la transcripcion: un evento distinto por resultado no se puede agrupar
+    #  en el log, y cualquier variable interpolada ahi se escapa de la
+    #  redaccion de campos. Del contenido no va NADA -- ni que se vio ni lo
+    #  que decia la foto: solo cuanto texto salio y como termino.
+    registrar("vision", "imagen procesada", tenant=tenant,
+              media=ref_proveedor(media_id), estado=r.estado,
+              segundos=round(r.segundos, 1), tokens=r.tokens,
+              caracteres=len(r.texto), error=r.error or None)
+
+    #  EL CONSUMO DE VISION, que hasta el 05/10/2026 no se contaba en ningun
+    #  lado. Eran dos fallos a la vez: no se llamaba al contador, y esto corre
+    #  ANTES de atender_turno, asi que el acumulador del turno todavia no
+    #  existe. Por eso se escribe un evento suelto --que no necesita turno-- en
+    #  vez de mover el orden del flujo.
+    #
+    #  Los tokens llegan como total, sin desglose de cache: se cobran como
+    #  entrada nueva, que es lo conservador. El costo sale de la MISMA funcion
+    #  que usa la conversacion.
+    if r.tokens:
+        proveedor_v, modelo_v = consumo.partir_referencia(modelo)
+        costo_v, tarifa_v = consumo.costo_de(config, modelo, r.tokens, 0)
+        eventos_consumo.anotar_evento(
+            tenant, eventos_consumo.VISION, proveedor_v, modelo_v,
+            entrada=r.tokens, costo_usd=costo_v, hay_tarifa=tarifa_v,
+            metadatos={"segundos": round(r.segundos, 1), "estado": r.estado})
+
+    return {"texto": vision.texto_para_el_agente(r, pie),
+            "estado": r.estado, "error": r.error,
+            #  Lo que se guarda es la DESCRIPCION, no el texto rotulado: el
+            #  rotulo y el pie se vuelven a armar al reusarla, y guardarlos
+            #  dejaria el pie escrito dos veces el dia que el cliente mande
+            #  la misma foto con otro comentario.
+            "analisis": r.texto if r.ok else "",
+            "crudo": crudo, "mime": mime,
+            "listo": listo, "mime_listo": mime_listo}
 
 
 def _guardar_adjunto(config, tenant: str, entrante: dict,
                      conversacion_id: str | None,
                      mensaje_id: str | None = None,
-                     audio: dict | None = None) -> None:
+                     audio: dict | None = None,
+                     imagen: dict | None = None) -> None:
     """
     Baja el archivo, lo comprime y lo guarda colgado de la conversacion.
 
@@ -8142,24 +8597,41 @@ def _guardar_adjunto(config, tenant: str, entrante: dict,
     tenerla, pero muchisimo mejor que un turno caido.
 
     'audio' trae lo que ya se bajo para transcribir, si era una nota de voz.
-    Con eso el archivo se descarga UNA sola vez por mensaje.
+    'imagen' lo mismo para una foto que ya se miro, y ademas trae la copia ya
+    comprimida. Con los dos, el archivo se descarga UNA sola vez por mensaje
+    y la imagen se comprime una sola vez.
     """
     media_id = entrante.get("media_id")
     if not media_id or not conversacion_id:
         return
     try:
         audio = audio or {}
+        imagen = imagen or {}
         if audio.get("crudo") is not None:
             crudo, mime = audio["crudo"], audio.get("mime") or ""
+        elif imagen.get("crudo") is not None:
+            crudo, mime = imagen["crudo"], imagen.get("mime") or ""
         else:
             crudo, mime = whatsapp.descargar_media(config, tenant, media_id)
-        contenido, mime = media.preparar(crudo, entrante.get("tipo", ""), mime)
+
+        if imagen.get("listo") is not None:
+            #  Ya se comprimio para mirarla: se guarda EXACTAMENTE eso, que
+            #  es lo que el modelo vio. Comprimir de nuevo daria una tercera
+            #  version distinta de las dos que ya existen.
+            contenido, mime = imagen["listo"], imagen.get("mime_listo") or mime
+        else:
+            contenido, mime = media.preparar(
+                crudo, entrante.get("tipo", ""), mime)
+
         persistencia.guardar_media(
             tenant, conversacion_id, media_id, entrante.get("tipo", ""),
             contenido, mime, entrante.get("descripcion") or None, mensaje_id,
             transcripcion=audio.get("texto") or None,
             estado_transcripcion=audio.get("estado") or None,
-            error_transcripcion=audio.get("error") or None)
+            error_transcripcion=audio.get("error") or None,
+            analisis_visual=imagen.get("analisis") or None,
+            estado_analisis=imagen.get("estado") or None,
+            error_analisis=imagen.get("error") or None)
         registrar("whatsapp", "adjunto guardado", conversation_id=id_interno(conversacion_id),
                   media=ref_proveedor(media_id), kb_recibidos=len(crudo) // 1024,
                   kb_guardados=len(contenido) // 1024)
@@ -8175,6 +8647,13 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
     del webhook (ver la nota de ACK abajo), asi que no puede devolver error a
     nadie: todo lo que falle se registra y se corta ahi.
     """
+    # TODO LO QUE SE GASTE DE ACA EN ADELANTE ES DE PRODUCCION, y se declara en
+    # la puerta y no dentro del turno: vision y la transcripcion corren ANTES
+    # de atender_turno, asi que si el origen se fijara alla esas dos quedarian
+    # como 'test' --el default conservador-- y no entrarian en el tope de la
+    # empresa, que es justo lo que esto viene a arreglar.
+    eventos_consumo.fijar_origen(eventos_consumo.PRODUCCION)
+
     de = entrante.get("de")
     wamid = entrante.get("wamid")
 
@@ -8209,20 +8688,68 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         # dijo cuando piensa, no despues. Los bytes se reutilizan mas abajo
         # para guardar el adjunto, asi que el archivo se descarga UNA vez.
         #
-        # Lo demas --foto, video, documento-- sigue igual: el modelo lee lo que
-        # el cliente ESCRIBIO al mandarlo, mas el hecho de que mando algo. No
-        # se le pasa la imagen: no hay modelo de vision configurado, e inventar
-        # una descripcion seria exactamente lo que el PRD RF-07 prohibe.
-        audio = _transcribir_si_es_voz(config, tenant, entrante)
+        # LA FOTO SE MIRA ANTES DEL TURNO, por el mismo motivo que la voz se
+        # transcribe antes: el agente tiene que poder leer lo que el cliente
+        # mostro cuando piensa, no despues. Lo que vuelve NO es una
+        # descripcion libre de la imagen sino palabras de un catalogo cerrado
+        # (ver nucleo/canales/vision.py), y eso es lo que hace que esto no
+        # viole el PRD RF-07: el modelo no puede afirmar lo que no existe en
+        # el catalogo.
+        #
+        # Apagado por tenant (vision_habilitada), que nace en false. Con la
+        # bandera apagada esta llamada no baja nada ni llama a ningun
+        # proveedor, y el turno se comporta igual que siempre.
+        #
+        # Lo demas --video, documento-- sigue igual: el modelo lee lo que el
+        # cliente ESCRIBIO al mandarlo, mas el hecho de que mando algo.
+        # EL TOPE, ANTES DE GASTAR EN MIRAR Y ESCUCHAR.
+        #
+        # atender_turno tiene su propio gate, pero corre DESPUES de estas dos
+        # lineas: con el tope alcanzado se pagaba igual una llamada de vision
+        # y una de transcripcion por cada mensaje, justo cuando lo que se
+        # queria era dejar de gastar.
+        #
+        # Frenar aca NO deja a nadie sin respuesta: la foto y el audio se
+        # siguen bajando, guardando y mostrando, el turno sigue su camino y es
+        # atender_turno quien decide pasar la conversacion a una persona. Lo
+        # unico que no pasa es que se le pague al proveedor por analizarlos.
+        try:
+            frenar = consumo.estado_del_gasto(config, tenant)["accion"] == "frenar"
+        except Exception:
+            # Si no se puede saber, se sigue. Mismo criterio que gasto_del_mes:
+            # no dejar a nadie sin servicio por una consulta de estadisticas.
+            frenar = False
 
-        if not texto.strip():
+        if frenar:
+            registrar("consumo", "tope alcanzado: no se analiza multimedia en este turno",
+                      tenant=tenant, remitente=ref_sesion(de))
+            audio, imagen = {}, {}
+        else:
+            audio = _transcribir_si_es_voz(config, tenant, entrante)
+            imagen = _analizar_si_es_imagen(config, tenant, entrante)
+
+        if imagen.get("texto"):
+            #  LA FOTO GANA SOBRE EL AVISO, Y NO PIERDE EL PIE. El texto que
+            #  vuelve ya trae adentro lo que el cliente escribio al mandarla
+            #  --rotulado aparte y antes del analisis-- porque el pie se
+            #  resolvio una sola vez en _analizar_si_es_imagen. Por eso se
+            #  asigna entero y no se concatena con nada: concatenar seria la
+            #  unica forma de que el pie saliera dos veces.
+            #
+            #  Esta rama va PRIMERO y no dentro del 'if not texto.strip()':
+            #  por el webhook de WhatsApp una imagen nunca trae 'texto'
+            #  (whatsapp.py lo llena solo para tipo 'text'), pero el
+            #  simulador no esta obligado a esa forma, y ahi el analisis se
+            #  perdia entero -- se guardaba en la base y no llegaba al turno.
+            texto = imagen["texto"]
+        elif not texto.strip():
             if audio.get("texto"):
                 texto = transcripcion.texto_para_el_agente(
                     audio["texto"], descripcion)
             else:
-                # Una transcripcion que fallo NO inventa nada: se cae al mismo
-                # aviso de siempre y el cliente recibe la respuesta que ya
-                # recibia antes de que esto existiera.
+                # Una transcripcion o un analisis que fallaron NO inventan
+                # nada: se cae al mismo aviso de siempre y el cliente recibe
+                # la respuesta que ya recibia antes de que esto existiera.
                 texto = descripcion.strip() or _AVISO_ADJUNTO.get(tipo, "")
 
         if not texto:
@@ -8240,7 +8767,8 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         # aparte del turno y en su propio try porque una foto que no se pudo
         # bajar no puede dejar al cliente sin respuesta.
         _guardar_adjunto(config, tenant, entrante, salida.get("conversacion_id"),
-                         salida.get("mensaje_usuario_id"), audio=audio)
+                         salida.get("mensaje_usuario_id"), audio=audio,
+                         imagen=imagen)
 
         # Una respuesta VACIA significa "no hay nada que decir", y hay que
         # respetarlo: pasa cuando una persona del equipo esta atendiendo la

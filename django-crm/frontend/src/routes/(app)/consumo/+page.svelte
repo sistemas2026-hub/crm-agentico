@@ -40,6 +40,43 @@
   const hayMedidor = $derived(!sinTarifa && !sinTope);
 
   const dias = $derived(c?.dias_detalle ?? []);
+
+  /* El desglose de `asistente.consumo_eventos`, que llega vacío si la
+     migración todavía no corrió — y entonces esta sección no se dibuja y la
+     pantalla queda como estaba. */
+  const desglose = $derived(c?.desglose ?? {});
+  const porOrigen = $derived(desglose.por_origen ?? []);
+  const porServicio = $derived(desglose.por_servicio ?? []);
+  const porModelo = $derived(desglose.por_modelo ?? []);
+  const sinTarifaDetalle = $derived(desglose.sin_tarifa ?? []);
+  const hayDesglose = $derived(porOrigen.length > 0 || porServicio.length > 0);
+
+  /* Lo que de verdad se le factura a la empresa. El resto se gastó igual,
+     pero no cuenta para el tope. */
+  const costoProduccion = $derived(
+    porOrigen.find((o) => o.origen === 'production')?.costo ?? 0
+  );
+  const costoNoFacturable = $derived(
+    porOrigen.filter((o) => o.origen !== 'production')
+             .reduce((t, o) => t + (o.costo ?? 0), 0)
+  );
+
+  const ORIGEN_ES = {
+    production: 'Producción',
+    evaluation: 'Evaluaciones',
+    test: 'Pruebas'
+  };
+  const SERVICIO_ES = {
+    conversation: 'Conversación',
+    vision: 'Análisis de imágenes',
+    transcription: 'Transcripción de audios',
+    embeddings: 'Búsqueda (embeddings)',
+    tts: 'Voz (TTS)'
+  };
+  /* Cuatro decimales y no los dos de `usd`: el costo POR SERVICIO son
+     centavos --una llamada de visión cuesta ~$0.0007-- y redondear a dos los
+     dejaría a todos en $0.00, que se lee como "no gastó nada". */
+  const usdFino = (/** @type {number} */ n) => '$' + (Number(n) || 0).toFixed(4);
   const maxTokens = $derived(
     Math.max(1, ...dias.map((/** @type {any} */ d) => d.tokens_entrada + d.tokens_salida))
   );
@@ -218,6 +255,92 @@
         </div>
       </div>
     </div>
+
+    <!-- ===== desglose por origen, servicio y modelo ==================
+         Lo que `usage_daily` no podía dar: esa tabla agrega por (empresa,
+         día) y nada más, así que no sabía de qué servicio ni de qué modelo
+         venía el gasto.
+
+         La separación por ORIGEN es la que importa leer primero: sólo
+         producción cuenta para el tope. Una corrida de casos dorados gasta
+         dinero real y aparece acá, pero no puede frenar a la empresa.
+
+         Si la migración todavía no corrió, `desglose` llega vacío y esta
+         sección no se dibuja: la pantalla queda exactamente como estaba. -->
+    {#if hayDesglose}
+      <div class="v2-card" style="padding:16px 18px;margin-bottom:14px">
+        <div class="v2-label" style="margin-bottom:12px">
+          Desglose por origen y servicio
+        </div>
+
+        <div class="desglose-origen">
+          {#each porOrigen as o (o.origen)}
+            <div class="origen" class:facturable={o.origen === 'production'}>
+              <span class="origen-nombre">{ORIGEN_ES[o.origen] ?? o.origen}</span>
+              <span class="origen-costo">{usdFino(o.costo)}</span>
+              <span class="origen-n">{(o.n ?? 0).toLocaleString('es-CO')} llamadas</span>
+            </div>
+          {/each}
+        </div>
+        {#if costoNoFacturable > 0}
+          <p class="nota-origen">
+            De ese total, <b>{usdFino(costoProduccion)}</b> es lo que cuenta para el
+            tope. {usdFino(costoNoFacturable)} se gastaron en pruebas y evaluaciones:
+            son dinero real, pero no frenan la atención.
+          </p>
+        {/if}
+
+        {#if porServicio.length}
+          <table class="tabla-desglose">
+            <thead>
+              <tr><th>Servicio</th><th>Origen</th><th class="num">Llamadas</th><th class="num">Costo</th></tr>
+            </thead>
+            <tbody>
+              {#each porServicio as s (s.servicio + s.origen)}
+                <tr>
+                  <td>{SERVICIO_ES[s.servicio] ?? s.servicio}</td>
+                  <td class="tenue">{ORIGEN_ES[s.origen] ?? s.origen}</td>
+                  <td class="num">{(s.n ?? 0).toLocaleString('es-CO')}</td>
+                  <td class="num">{usdFino(s.costo)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+
+        {#if porModelo.length}
+          <table class="tabla-desglose">
+            <thead>
+              <tr><th>Proveedor</th><th>Modelo</th><th class="num">Llamadas</th><th class="num">Costo</th></tr>
+            </thead>
+            <tbody>
+              {#each porModelo as m (m.proveedor + m.modelo)}
+                <tr>
+                  <td>{m.proveedor}</td>
+                  <td>{m.modelo}</td>
+                  <td class="num">{(m.n ?? 0).toLocaleString('es-CO')}</td>
+                  <td class="num">
+                    {#if m.con_tarifa}{usdFino(m.costo)}{:else}<span class="aviso-tarifa">sin tarifa</span>{/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+
+        <!-- "Hubo gasto y no sabemos cuánto" NO es lo mismo que "no hubo
+             gasto", y antes las dos cosas se veían como un cero. -->
+        {#if sinTarifaDetalle.length}
+          <p class="nota-sin-tarifa">
+            Hay consumo sin tarifa cargada: su costo no se puede calcular y
+            queda fuera de todos los totales de arriba.
+            {#each sinTarifaDetalle as t (t.proveedor + t.modelo)}
+              <b>{t.proveedor}/{t.modelo}</b> ({(t.tokens ?? 0).toLocaleString('es-CO')} tokens).
+            {/each}
+          </p>
+        {/if}
+      </div>
+    {/if}
 
     <!-- ===== gráfico + medidor + panel de estado ===================== -->
     <div class="fila-media">
@@ -536,4 +659,37 @@
   }
   .tabla td { padding: 9px 16px; border-bottom: 1px solid var(--v2-line-soft); white-space: nowrap; }
   .tabla tr:last-child td { border-bottom: none; }
+
+  /* ===== desglose ===== */
+  .desglose-origen { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
+  .origen {
+    display:flex; flex-direction:column; gap:1px;
+    padding:8px 12px; border-radius:8px;
+    border:1px solid var(--v2-line, #e2e8f0);
+    min-width:140px;
+  }
+  /* Lo facturable se distingue del resto: es la única cifra que puede frenar
+     la atención, y mezclarla con las otras dos invita a leer el total como si
+     todo contara igual. */
+  .origen.facturable { border-color:var(--v2-slate, #475569); }
+  .origen-nombre { font-size:0.75rem; color:var(--v2-muted, #64748b); }
+  .origen-costo { font-size:1.05rem; font-weight:600; }
+  .origen-n { font-size:0.7rem; color:var(--v2-muted, #64748b); }
+  .nota-origen, .nota-sin-tarifa {
+    margin:0 0 12px; font-size:0.8125rem; line-height:1.5;
+    color:var(--v2-slate, #475569);
+  }
+  .nota-sin-tarifa { color:var(--v2-muted, #64748b); }
+  .tabla-desglose {
+    width:100%; border-collapse:collapse; margin:10px 0 0; font-size:0.8125rem;
+  }
+  .tabla-desglose th {
+    text-align:left; font-weight:600; font-size:0.7rem; padding:4px 8px;
+    color:var(--v2-muted, #64748b);
+    border-bottom:1px solid var(--v2-line, #e2e8f0);
+  }
+  .tabla-desglose td { padding:5px 8px; border-bottom:1px solid var(--v2-line, #f1f5f9); }
+  .tabla-desglose .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .tabla-desglose .tenue { color:var(--v2-muted, #64748b); }
+  .aviso-tarifa { color:var(--v2-muted, #64748b); font-style:italic; }
 </style>

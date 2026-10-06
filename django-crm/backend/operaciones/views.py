@@ -41,20 +41,25 @@ from django.db import transaction
 from django.db.utils import IntegrityError
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.models import Profile
+from common.permissions import HasOrgContext
 from django.http import Http404
 from django.utils import timezone
 
-from operaciones import (actividades, asistentes, auditoria, contexto_propuesta,
-                         indicadores,
+from operaciones import (actividades, asistentes, auditoria, chat,
+                         contexto_propuesta, correlacion,
+                         fuentes, indicadores,
                          supervisor)
 from operaciones.capacidad import capacidad_de_jornada
 from campo.services.idempotencia import manejar_idempotencia
+from operaciones.chat_modelos import ConversacionSupervisor, RolMensaje
 from operaciones.models import (ActividadOperativa, DisponibilidadTecnico, ProgramacionOrden,
                                 ProgramacionSemanal, PropuestaSupervisor)
+from operaciones.situaciones_modelos import SituacionOperativa
 from operaciones.programacion import (ErrorProgramacion, PlanIncoherente,
                                       PlanNoCerrable, PlanNoPublicable,
                                       cerrar_programacion, _lineas_vigentes,
@@ -1368,3 +1373,617 @@ class ReportesView(APIView):
         return Response(indicadores.reporte(
             request.org, d["reporte"], desde=d.get("desde"),
             hasta=d.get("hasta"), dias=d.get("dias")))
+
+
+class LatidoSupervisorView(APIView):
+    """
+        GET /api/operaciones/supervisor/latido/
+
+    El SCHEDULER despierta al Supervisor y le pregunta qué ve. No escribe nada.
+
+    POR QUE ESTA RUTA EXISTE, SI YA HAY UNA DE CICLO
+    -----------------------------------------------
+    `POST supervisor/ciclo/` ESCRIBE: registra propuestas, y su permiso es
+    `EsJefeDeOperaciones` porque detrás hay una persona. El scheduler no es una
+    persona y no debe entrar por la puerta de una: el proyecto ya tiene esa
+    distinción escrita en `nucleo/seguridad/frontera.py::puerta` -- con actor se
+    entra por la puerta humana, sin actor por la autónoma -- y reusar el permiso
+    del Jefe para un proceso la borraría.
+
+    Así que esta ruta hace UNA cosa, de solo lectura, con el mismo patrón de
+    servicio que ya usan los endpoints de importación que llama el motor:
+    `IsAuthenticated + HasOrgContext`, con la credencial acotada por scope
+    (`operaciones:read`) en `common.middleware.get_company`.
+
+    Y POR QUE NO SE REUSA `indicadores/`, QUE YA CALCULA ESTO MISMO
+    --------------------------------------------------------------
+    Porque `indicadores.py:346` tambien llama a `detectar()` y hasta publica
+    `senales_vigentes` y `senales_por_tipo` con esta misma cadena de fuente: lo
+    que devuelve este latido es un SUBCONJUNTO estricto de eso. La duplicacion
+    es real y esta aqui a proposito, por dos razones que no se arreglan
+    reusando:
+
+      * `IndicadoresView` esta detras de `EsJefeDeOperaciones`. Darle esa
+        credencial al scheduler seria darle a un proceso el rol de una persona,
+        que es justo lo que este bloque evita.
+      * devuelve el juego COMPLETO de indicadores operativos. Un turno que corre
+        cada hora no necesita --ni debe arrastrar al log del motor-- mas que
+        conteos.
+
+    Lo que NO se duplico es el calculo: las tres puertas (`ciclo`,
+    `indicadores`, este latido) llaman a la MISMA `supervisor.detectar()`, asi
+    que no hay una segunda definicion de "senal vigente" que se desincronice.
+
+    POR QUE `detectar()` Y NO `correr_ciclo()`
+    -----------------------------------------
+    `detectar()` es LECTURA pura -- lo dice su módulo y lo reusa
+    `indicadores.indicadores_supervisor`: «las señales VIGENTES se detectan sin
+    escribir nada». `correr_ciclo()` además registra propuestas, y este bloque
+    tiene que demostrar el circuito sin producir ningún efecto.
+
+    LO QUE DEVUELVE, Y LO QUE NO
+    ----------------------------
+    Conteos por tipo de señal y nada más. NO devuelve `origen_id`, ni evidencia,
+    ni datos: un latido que arrastre la identidad de un caso convierte la traza
+    de un turno --el informe del tick y la línea de log del motor-- en un
+    registro con datos de cliente, y ninguno de los dos es lugar para eso.
+
+    EL TENANT SE COMPRUEBA, NO SE SUPONE
+    ------------------------------------
+    La organización sale de la credencial (`request.org`). Si quien llama manda
+    `organization_id`, tiene que COINCIDIR: así un turno del scheduler que
+    apunte a otra empresa falla en vez de leer la de al lado con el token
+    equivocado. Es la misma regla que `frontera.exigir` aplica al permiso.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def get(self, request):
+        pedida = str(request.query_params.get("organization_id") or "").strip()
+        if pedida and pedida != str(request.org.id):
+            #  409 y no 403: la credencial es válida, lo que no coincide es a qué
+            #  empresa apunta el turno. Un 403 mandaría a revisar el token.
+            return Response(
+                {"error": "ORGANIZACION_DISTINTA",
+                 "detalle": "el turno apunta a una organización que no es la de "
+                            "esta credencial: no se lee nada"},
+                status=status.HTTP_409_CONFLICT)
+
+        leido_en = timezone.now()
+        senales = supervisor.detectar(request.org)
+
+        por_tipo: dict = {}
+        for s in senales:
+            por_tipo[s.tipo] = por_tipo.get(s.tipo, 0) + 1
+
+        return Response({
+            "organizacion": str(request.org.id),
+            "leido_en": leido_en.isoformat(),
+            "senales_vigentes": len(senales),
+            "senales_por_tipo": por_tipo,
+            #  Que el latido declare que no escribió viaja con la respuesta
+            #  para que quien lea el informe del tick --o la línea de log del
+            #  motor-- no tenga que ir al código a comprobarlo. No queda en una
+            #  tabla: 'job_run' no tiene columna de salida (medido el
+            #  02/10/2026, tests/test_latido_extremo_a_extremo.py).
+            "escrituras": 0,
+            "fuente": "operaciones.supervisor.detectar",
+        })
+
+
+class TurnoSupervisorView(APIView):
+    """
+        GET /api/operaciones/supervisor/turno/
+
+    El RELEVO DE TURNO: las doce preguntas que alguien se hace al llegar.
+
+    POR QUE EXISTE ESTA RUTA
+    ------------------------
+    Porque sin ella 'operaciones/turno.py' seria otro modulo probado y sin
+    llamador -- la falla que este repositorio ya pago dos veces (el reloj de
+    tareas colgado de un '__main__' que gunicorn no ejecuta, y la
+    reconciliacion sin quien la llamara). Es la misma razon por la que existe
+    'supervisor/coordinar/': codigo construido no es codigo que corre.
+
+    POR QUE 'EsJefeDeOperaciones' Y NO EL PATRON DEL SCHEDULER
+    ---------------------------------------------------------
+    Detras de esta puerta hay una PERSONA tomando el turno, no un proceso. El
+    'latido' y el 'sondeo' los llama el scheduler y por eso entran con
+    'IsAuthenticated + HasOrgContext'; esta devuelve el panorama operativo
+    completo --topologia, hipotesis, que falta verificar-- y va detras del
+    mismo permiso que el chat y los indicadores.
+
+    GET Y SOLO GET
+    --------------
+    No escribe nada, y por eso se puede pedir tantas veces como alguien quiera.
+    Lo afirma la suite contando filas antes y despues
+    ('test_lote1_evaluacion_turno.py::test_L3'), no este comentario.
+
+    LA PROCEDENCIA VIAJA CON EL DATO
+    --------------------------------
+    Cada bloque dice si lo que trae es OBSERVADO, INFERIDO, RECOMENDADO,
+    CONFIRMADO o DESCONOCIDO. No es decoracion: un INFERIDO leido como un hecho
+    tres pantallas mas abajo es la forma mas barata de que un relevo de turno
+    mienta. Y un DESCONOCIDO trae SIEMPRE su motivo -- 'no se sabe' no se
+    reporta como cero.
+
+    'shadow' ES OPCIONAL Y NO VIENE POR DEFECTO
+    -------------------------------------------
+    La evaluacion del Shadow Mode recorre decisiones y aprendizajes del
+    periodo; es mas caro que el resumen y no hace falta para tomar el turno.
+    Se pide con '?shadow=1'.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext, EsJefeDeOperaciones)
+
+    def get(self, request):
+        from operaciones import turno as turno_mod
+
+        horas = request.query_params.get("horas")
+        try:
+            horas = max(1, min(int(horas), 72)) if horas else None
+        except (TypeError, ValueError):
+            #  Un 'horas' ilegible no es un error del turno: se contesta la
+            #  ventana por defecto y se dice que se ignoro, en vez de un 400
+            #  que deja a quien llega sin su relevo.
+            horas = None
+
+        cuerpo = turno_mod.resumen_de_turno(request.org, horas=horas)
+        cuerpo["fuente"] = "operaciones.turno.resumen_de_turno"
+        #  Que la lectura no escribio viaja con la respuesta, igual que en el
+        #  latido, para que no haya que ir al codigo a comprobarlo.
+        cuerpo["escrituras"] = 0
+
+        if str(request.query_params.get("shadow") or "").strip() in ("1",
+                                                                     "true"):
+            cuerpo["shadow"] = turno_mod.evaluacion_shadow(request.org)
+
+        return Response(cuerpo)
+
+
+class SondeoFuentesView(APIView):
+    """
+        POST /api/operaciones/supervisor/sondeo/
+
+    El SCHEDULER despierta al Supervisor y este consulta las fuentes que ya
+    vencieron. Devuelve conteos y estados; no decide nada.
+
+    POR QUE ES POST SI EL BLOQUE ES "SOLO LECTURA"
+    ---------------------------------------------
+    Porque "solo lectura" es respecto de los sistemas EXTERNOS: a los de afuera
+    se les consulta con herramientas `solo_lectura: true` por el camino del
+    motor, y a las fuentes internas con consultas al ORM. Ninguna de las seis
+    escribe afuera.
+
+    CUALES son esas fuentes, y como se consulta cada una, vive en
+    `operaciones/fuentes_adaptadores.py` y no aqui: esta vista no habla con
+    ningun proveedor -- le pide el sondeo a la capa de fuentes. Por eso la guarda
+    de M03-E5 puede seguir exigiendo que este modulo no nombre un sistema
+    externo, y sigue siendo cierto.
+
+    Lo que SI escribe esta ruta son dos tablas PROPIAS -- el estado de cada
+    fuente y su captura-- y eso es el entregable del bloque, no un efecto
+    secundario: sin escribirlo no hay con que comparar el ciclo siguiente ni
+    forma de distinguir "no hay nada" de "no se pudo preguntar". Un GET que
+    escribe es peor que un POST honesto.
+
+    LO QUE NO HACE, Y SE AFIRMA EN LA SUITE CONTANDO FILAS
+    -----------------------------------------------------
+    No crea Situaciones Operativas (no existen todavia), no crea propuestas, no
+    corre `supervisor.correr_ciclo`, no toca un caso, no escala, no crea
+    tickets, no llama a nada que produzca un efecto afuera y no modifica el
+    interruptor de autonomia.
+
+    CORRERLA DOS VECES SEGUIDAS NO DUPLICA NADA
+    -------------------------------------------
+    No por una clave de idempotencia, sino por como esta armado: al registrar
+    una lectura se corre `proxima_consulta_en` hacia adelante, asi que el
+    segundo sondeo no encuentra ninguna fuente vencida y no consulta nada. Es
+    una propiedad del dato, no una promesa del codigo, y la suite la afirma
+    contando snapshots.
+
+    EL TENANT SE COMPRUEBA, NO SE SUPONE
+    ------------------------------------
+    Igual que el latido: la organizacion sale de la credencial, y si quien llama
+    manda `organization_id` tiene que COINCIDIR. Un turno del scheduler apuntando
+    a otra empresa falla con 409 en vez de sondear las fuentes de al lado.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def post(self, request):
+        pedida = str(request.query_params.get("organization_id") or "").strip()
+        if pedida and pedida != str(request.org.id):
+            return Response(
+                {"error": "ORGANIZACION_DISTINTA",
+                 "detalle": "el turno apunta a una organización que no es la de "
+                            "esta credencial: no se sondea nada"},
+                status=status.HTTP_409_CONFLICT)
+
+        #  Las filas de las seis fuentes se crean si faltan, y nacen APAGADAS.
+        #  Que el sondeo las cree no las enciende: sin 'activa=True' ninguna se
+        #  consulta, y encenderla es una decision de operacion.
+        creadas = fuentes.asegurar_fuentes(request.org)
+
+        ahora = timezone.now()
+        informe = fuentes.sondear(request.org, ahora=ahora)
+        informe["fuentes_creadas"] = len(creadas)
+        informe["fuente"] = "operaciones.fuentes.sondear"
+
+        #  Y en el MISMO turno, la deteccion y la correlacion sobre lo que acaba
+        #  de capturarse. Van juntas a proposito: si corrieran en turnos
+        #  distintos, una situacion se construiria sobre la foto anterior y el
+        #  conteo de afectados llegaria siempre un ciclo tarde.
+        #
+        #  Sigue siendo UN solo scheduler y UN solo turno: esto no agenda nada.
+        informe["situaciones"] = correlacion.correr(request.org, ahora=ahora)
+        return Response(informe)
+
+
+class ChatSupervisorView(APIView):
+    """
+        POST /api/operaciones/supervisor/chat/
+
+    La conversación entre un responsable humano y el Supervisor NOC IA.
+
+    POR QUE ES UNA RUTA DEL SUPERVISOR Y NO UN CHAT GENERICO
+    -------------------------------------------------------
+    Lo que la hace del Supervisor no es el nombre: es que el contexto, las
+    herramientas y los límites salen de los datos del Supervisor. El modelo no
+    puede consultar nada que no sea una situación, una fuente, una propuesta o
+    una decisión de ESTA organización -- y el tenant lo pone el despachador de
+    herramientas, no el modelo.
+
+    POR QUE NO VA POR EL '/chat' DEL MOTOR
+    --------------------------------------
+    `/chat` atiende un turno de un agente del PRODUCTO (router, soporte,
+    facturación, ventas): resuelve rol o perfil, arma el catálogo del tenant y
+    escribe en las conversaciones de WhatsApp. CLAUDE.md §11.1 separa esa capa de
+    la operativa, y el Supervisor es operativo. El motor presta el modelo por
+    `/interno/supervisor/chat` y nada más.
+
+    LO QUE NO PUEDE HACER, Y HAY UNA PRUEBA POR CADA UNO
+    ---------------------------------------------------
+    No cambia el estado de una situación, no toca `Case.status`, no cierra ni
+    crea ni reasigna tickets, no escribe en M02 ni en M03, no activa fuentes, no
+    llama a SmartOLT ni a WispHub, y no puede subir su nivel de autonomía.
+    Ninguna de esas cosas tiene herramienta: no es que el prompt lo prohíba, es
+    que no hay por dónde.
+
+    PERMISO: el mismo que el resto del Supervisor. Ver el panorama operativo de
+    una empresa --qué está caído, qué técnicos tienen compromisos-- no es
+    información para cualquiera con una sesión.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext, EsJefeDeOperaciones)
+
+    #  Cuantos mensajes se devuelven al abrir la burbuja. El mismo numero que
+    #  manda la ruta del frontend; aca esta el TOPE, porque un limite que solo
+    #  vive del lado del navegador no es un limite.
+    TOPE_HISTORIAL = 200
+
+    def get(self, request):
+        """
+        El hilo persistido de esta persona, para que la burbuja no lo pierda.
+
+        POR QUE EXISTE ESTE GET
+        -----------------------
+        La conversacion ya se guardaba --'ConversacionSupervisor' y
+        'MensajeSupervisor' existen desde P5-- y no habia forma de leerla: al
+        recargar la pantalla el hilo desaparecia de la vista aunque siguiera en
+        la base. La rama que traia la burbuja SI recuperaba el historial, pero
+        contra el hilo del motor. Al adoptar el Supervisor dedicado habia que
+        conservar esa propiedad, y por eso se agrega aca.
+
+        LOS ROLES SE TRADUCEN AQUI, NO EN EL FRONTEND
+        ---------------------------------------------
+        'aBurbujas' (lib/supervisor/chat-sesion.js) espera 'user'/'assistant', y
+        esta tabla guarda 'humano'/'supervisor'/'herramienta'/'error'. La
+        traduccion vive de este lado para no tocar ese archivo ni sus pruebas:
+        el contrato del componente queda intacto.
+
+        QUE NO DEVUELVE, Y SE DICE EN VEZ DE ESCONDERLO
+        ----------------------------------------------
+        Los turnos de rol 'herramienta' y 'error' NO salen. Los de herramienta
+        son el detalle interno del bucle --el modelo los necesita, una persona
+        no-- y los de error no tienen traduccion honesta: mandarlos como
+        'assistant' los haria leer como una respuesta del Supervisor, que es
+        justo lo contrario de lo que son. Quedan GUARDADOS y visibles en la
+        auditoria; lo que no hacen es volver a la burbuja. Es una perdida
+        declarada, no un olvido.
+
+        ES LECTURA. No abre conversacion si no hay: devuelve la lista vacia.
+        Crear un hilo porque alguien abrio una pantalla dejaria conversaciones
+        sin un solo mensaje.
+        """
+        from operaciones.chat_modelos import (ConversacionSupervisor,
+                                              MensajeSupervisor, RolMensaje)
+
+        try:
+            limite = int(request.query_params.get("limite") or 60)
+        except (TypeError, ValueError):
+            limite = 60
+        limite = max(1, min(limite, self.TOPE_HISTORIAL))
+
+        #  El hilo de ESTA persona en ESTA empresa. Los dos filtros, siempre:
+        #  sin 'actor' se leeria la conversacion de un companero.
+        conversacion = (ConversacionSupervisor.objects
+                        .filter(org=request.org, actor=request.profile)
+                        .order_by("-ultimo_mensaje_en")
+                        .first())
+        if conversacion is None:
+            return Response({"conversacion_id": None, "mensajes": []})
+
+        #  Se piden los ULTIMOS 'limite' y se devuelven en orden cronologico:
+        #  un hilo que llega al reves no se puede pintar.
+        traduccion = {RolMensaje.HUMANO: "user",
+                      RolMensaje.SUPERVISOR: "assistant"}
+        filas = list(MensajeSupervisor.objects
+                     .filter(org=request.org, conversacion=conversacion,
+                             rol__in=tuple(traduccion))
+                     .order_by("-escrito_en", "-created_at")[:limite])
+        filas.reverse()
+
+        return Response({
+            "conversacion_id": str(conversacion.id),
+            "mensajes": [{"id": str(m.id),
+                          "rol": traduccion[m.rol],
+                          "contenido": m.contenido,
+                          "creado_en": m.escrito_en.isoformat()}
+                         for m in filas],
+            "fuente": "operaciones.chat_modelos.MensajeSupervisor",
+        })
+
+    def post(self, request):
+        datos = request.data if isinstance(request.data, dict) else {}
+        texto = str(datos.get("mensaje") or "").strip()
+        if not texto:
+            return Response({"error": "FALTA_MENSAJE"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if len(texto) > 4000:
+            return Response({"error": "MENSAJE_DEMASIADO_LARGO"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        #  La conversación se resuelve SIEMPRE dentro de la organización y del
+        #  actor. Un id de conversación de otra empresa --o de otra persona-- no
+        #  da 403: da 404, porque un 403 confirmaría que ese hilo existe.
+        conversacion = None
+        if datos.get("conversacion_id"):
+            conversacion = ConversacionSupervisor.objects.filter(
+                id=datos["conversacion_id"], org=request.org,
+                actor=request.profile).first()
+            if conversacion is None:
+                return Response({"error": "CONVERSACION_NO_ENCONTRADA"},
+                                status=status.HTTP_404_NOT_FOUND)
+
+        #  El contexto inicial, cuando el chat se abre desde una situación.
+        situacion = None
+        if datos.get("situacion"):
+            situacion = SituacionOperativa.objects.filter(
+                org=request.org, codigo=str(datos["situacion"]).strip()).first()
+            if situacion is None:
+                return Response({"error": "SITUACION_NO_ENCONTRADA"},
+                                status=status.HTTP_404_NOT_FOUND)
+
+        if conversacion is None:
+            conversacion = chat.abrir(
+                request.org, request.profile, situacion=situacion,
+                caso_id=str(datos.get("caso") or "")[:64])
+        elif situacion is not None and conversacion.situacion_id != situacion.id:
+            #  Cambiar de tema en un hilo que ya existe queda ESCRITO en el hilo:
+            #  sin eso, dos respuestas sobre situaciones distintas quedarían
+            #  seguidas sin nada que explique el salto.
+            chat.cambiar_contexto(conversacion, situacion=situacion)
+
+        try:
+            respuesta = chat.responder(conversacion, texto)
+        except chat.ErrorChat as e:
+            return Response({"error": "TURNO_NO_COMPLETADO",
+                             "detalle": str(e)},
+                            status=status.HTTP_502_BAD_GATEWAY)
+
+        return Response({
+            "conversacion_id": str(conversacion.id),
+            "contexto": {
+                "situacion": (conversacion.situacion.codigo
+                              if conversacion.situacion_id else None),
+                "caso": conversacion.caso_id or None,
+            },
+            "respuesta": respuesta.contenido,
+            "es_error": respuesta.rol == RolMensaje.ERROR,
+            #  Qué consultó para contestar. Va al cliente a propósito: una
+            #  respuesta del Supervisor sin poder ver de dónde salió es una
+            #  afirmación sin respaldo.
+            "herramientas": [h.get("nombre") for h in (respuesta.herramientas or [])],
+            "duracion_ms": respuesta.duracion_ms,
+        })
+
+
+class CoordinarSupervisorView(APIView):
+    """
+    El Supervisor PIDE trabajo a M02 a partir de una situación. Con la puerta.
+
+    POR QUE ESTA RUTA EXISTE
+    ------------------------
+    P6 construyó la coordinación completa y no dejó ninguna forma de alcanzarla:
+    `operaciones/coordinacion.py` no tenía endpoint ni trabajo del scheduler, así
+    que lo único que la ejercitaba eran sus 42 pruebas. Es exactamente lo que
+    CLAUDE.md §6 llama «código construido no es código que corre»: no daba error,
+    no daba log, y no servía para nada.
+
+    POR QUE PIDE AUTONOMÍA SI LA APRIETA UNA PERSONA
+    ------------------------------------------------
+    Esta es la parte que hay que entender para no confundirla con un permiso.
+    Quien llama es una persona con rol de gestión; lo que actúa es el SUPERVISOR.
+    Una persona que quiere abrir una actividad a mano ya tiene su camino
+    (`POST actividades/`), que no consulta autonomía ninguna y es correcto que no
+    lo haga. Aquí la actividad la pide el Supervisor a partir de SU lectura de la
+    situación, así que la barrera que decide no es el rol de quien aprieta: es la
+    autonomía efectiva del agente.
+
+    Por eso un 'no' de autonomía NO es 403 --la persona sí tiene permiso-- sino
+    409: el estado del sistema impide la operación. Mismo criterio que
+    `TRANSICION_INVALIDA` y `ACTIVIDAD_DUPLICADA`, que ya usan 409 en este módulo.
+
+    LO QUE ESTA RUTA NO HACE
+    ------------------------
+    No toca M03: no reprograma, no resecuencia, no reasigna. No cierra la
+    situación ni le cambia el estado. No ejecuta la actividad que crea --crear no
+    es hacer, y hacer no es validar--. Y no eleva autonomía: `coordinacion.py` no
+    nombra `autonomia.cambiar` en ninguna parte, y hay una prueba que lo afirma
+    sobre el AST.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext, EsJefeDeOperaciones)
+
+    @manejar_idempotencia
+    def post(self, request):
+        from operaciones import coordinacion
+        from operaciones.serializers import CoordinarSupervisorSerializer
+
+        s = CoordinarSupervisorSerializer(data=request.data)
+        if not s.is_valid():
+            return Response({"error": "CUERPO_INVALIDO", "detalle": s.errors},
+                            status=status.HTTP_400_BAD_REQUEST)
+        d = s.validated_data
+
+        situacion = (SituacionOperativa.objects
+                     .filter(org=request.org,
+                             codigo=d["situacion"].strip()).first())
+        if situacion is None:
+            #  404 y no 403, igual que en el chat: decir «existe pero no es tuya»
+            #  ya confirmaría que existe.
+            return Response({"error": "SITUACION_NO_ENCONTRADA"},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        responsable = None
+        if d.get("responsable_id"):
+            responsable = (Profile.objects
+                           .filter(org=request.org,
+                                   id=d["responsable_id"]).first())
+            if responsable is None:
+                return Response({"error": "RESPONSABLE_NO_ENCONTRADO"},
+                                status=status.HTTP_404_NOT_FOUND)
+
+        comunes = dict(actor=request.profile, responsable=responsable,
+                       area=d.get("area", ""),
+                       condicion_exito=d["condicion_exito"],
+                       vence_en=d.get("vence_en"))
+        try:
+            if d["clase"] == CoordinarSupervisorSerializer.EVIDENCIA:
+                salida = coordinacion.solicitar_evidencia(
+                    situacion, clase=d["clase_evidencia"],
+                    detalle=d["detalle"], **comunes)
+            else:
+                salida = coordinacion.solicitar_actividad(
+                    situacion, tipo=(d.get("tipo")
+                                     or ActividadOperativa.TAREA),
+                    titulo=d["titulo"], objetivo=d["objetivo"], **comunes)
+        except coordinacion.CoordinacionNoPermitida as e:
+            #  El veredicto viaja COMPLETO: quien recibe el 409 tiene que poder
+            #  decir por qué no, y «no se pudo» no explica nada.
+            return Response({"error": "AUTONOMIA_INSUFICIENTE",
+                             "detalle": str(e),
+                             "veredicto": e.veredicto},
+                            status=status.HTTP_409_CONFLICT)
+        except coordinacion.CoordinacionInvalida as e:
+            return Response({"error": "COORDINACION_INVALIDA",
+                             "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+        except actividades.ErrorActividad as e:
+            #  'actividades.ErrorActividad' y NO el nombre suelto: ese nombre no
+            #  está importado en este archivo, y el resto lo nombra así (1164,
+            #  1282). Escrito suelto, este 'except' daba 'NameError' y la
+            #  respuesta un 500. Lo encontró 'ruff' con F821 antes que ninguna
+            #  prueba, porque ningún cuerpo válido llega hasta aquí.
+            return _error_actividad(e)
+
+        actividad = salida["actividad"]
+        return Response({
+            "actividad": ActividadOperativaSerializer(actividad).data,
+            "situacion": situacion.codigo,
+            #  'repetida' viaja a propósito: que M02 ya tuviera una viva para
+            #  esta situación y este tipo NO es un error, es la idempotencia de
+            #  dominio haciendo su trabajo. Quien llama tiene que poder
+            #  distinguir «abrí una» de «ya estaba abierta».
+            "repetida": salida["repetida"],
+            "evento": str(salida["evento"].id),
+            "nivel_efectivo": salida["veredicto"].get("efectivo"),
+            "server_time": timezone.now().isoformat(),
+        }, status=(status.HTTP_200_OK if salida["repetida"]
+                   else status.HTTP_201_CREATED))
+
+
+class ResultadoDecisionView(APIView):
+    """
+    Registra QUE PASO con una decision. La entrada es la PROPUESTA.
+
+    POR QUE LA RUTA CUELGA DE LA PROPUESTA Y NO DE LA DECISION
+    ----------------------------------------------------------
+    Porque la propuesta es el objeto que una persona ve y que el tablero ya
+    lista; la decisión es su consecuencia. Montar `decisiones/<id>/` obligaría a
+    la pantalla a conocer un id que hoy no muestra en ninguna parte, para no
+    ganar nada: cada propuesta revisada tiene exactamente una decisión.
+
+    LO QUE ESTA RUTA NO HACE
+    ------------------------
+    No cambia el estado de la propuesta --ya fue revisada-- ni el de la
+    situación. No convierte «aceptada» en «exitosa»: el resultado lo decide
+    quien aporta la evidencia, y sin evidencia no entra. Y no la puede llamar el
+    Supervisor: exige una persona autenticada con rol de gestión, porque un
+    agente que escribe su propio resultado se declara correcto solo.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext, EsJefeDeOperaciones)
+
+    @manejar_idempotencia
+    def post(self, request, propuesta_id):
+        from operaciones import gobierno
+        from operaciones.models import DecisionSupervisor
+        from operaciones.serializers import ResultadoDecisionSerializer
+
+        s = ResultadoDecisionSerializer(data=request.data)
+        if not s.is_valid():
+            return Response({"error": "CUERPO_INVALIDO", "detalle": s.errors},
+                            status=status.HTTP_400_BAD_REQUEST)
+        d = s.validated_data
+
+        #  La decisión se busca POR ORG además de por propuesta: el filtro de
+        #  tenant va en el queryset y no en una comprobación posterior.
+        decision = (DecisionSupervisor.objects
+                    .filter(org=request.org, propuesta_id=propuesta_id)
+                    .order_by("-decidida_en").first())
+        if decision is None:
+            return Response({"error": "DECISION_NO_ENCONTRADA",
+                             "detalle": "esta propuesta no tiene una decisión "
+                                        "registrada: primero hay que revisarla"},
+                            status=status.HTTP_404_NOT_FOUND)
+        try:
+            fresca = gobierno.registrar_resultado(
+                decision, actor=request.profile, resultado=d["resultado"],
+                evidencia=d["evidencia"], correccion=d.get("correccion", ""))
+        except gobierno.DesenlaceIncompatible as e:
+            #  409: el estado del sistema impide la operación. No es un cuerpo
+            #  inválido ni una falta de permiso.
+            return Response({"error": "DESENLACE_YA_REGISTRADO",
+                             "detalle": str(e)},
+                            status=status.HTTP_409_CONFLICT)
+        except gobierno.ErrorGobierno as e:
+            return Response({"error": "RESULTADO_INVALIDO",
+                             "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            "decision": str(fresca.id),
+            "propuesta": str(propuesta_id),
+            "tipo_decision": fresca.tipo,
+            "resultado": fresca.resultado,
+            "resultado_en": fresca.resultado_en.isoformat(),
+            "hubo_correccion": bool(fresca.correccion),
+            #  Qué lección dejó, si dejó alguna. Puede ser ninguna, y eso NO es
+            #  un error: 'aceptada + falló' no prueba que no hubiera problema.
+            "aprendizajes": [
+                {"tipo": a.tipo, "conclusion": a.conclusion}
+                for a in fresca.aprendizajes.all()],
+            "server_time": timezone.now().isoformat(),
+        })
