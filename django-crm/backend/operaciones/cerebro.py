@@ -781,3 +781,122 @@ def senal_de_veredicto(veredicto, *, fuente: str, tipo_situacion: str,
                "descartes": veredicto.descartes,
                "origen": "cerebro"},
     )
+
+
+# =============================================================================
+#  FASE 2 · VEREDICTO -> ANALISIS  --  enriquecer una propuesta, sin tocarla
+# =============================================================================
+#
+#  POR QUE HACE FALTA OTRA TRADUCCION SI YA HAY 'senal_de_veredicto'
+#  -----------------------------------------------------------------
+#  Porque hay DOS ciclos y DOS clases 'Senal', y no son la misma cosa:
+#
+#    correlacion.correr      -> deteccion.Senal   -> SituacionOperativa
+#    supervisor.correr_ciclo -> supervisor.Senal  -> PropuestaSupervisor
+#
+#  'senal_de_veredicto' sirve al primero. El segundo no consume una Senal del
+#  cerebro: consume el DICT que devuelve 'analizar()'. Son dos traducciones
+#  porque son dos destinos, no por duplicacion.
+#
+#  LO QUE EL CEREBRO PUEDE TOCAR, Y POR QUE ES TAN POCO
+#  ---------------------------------------------------
+#  Solo 'motivo' e 'impacto'. Lo demas lo decide el codigo:
+#
+#    prioridad      la calcula '_prioridad' sumando enteros. PRD §12.5: el
+#                   modelo traduce lenguaje a parametros y redacta; no suma.
+#    nivel          subirlo seria darse permiso. Y 'registrar_propuesta' lo
+#                   toma de aqui SIN acotarlo, asi que dejarlo pasar seria
+#                   dejar que el modelo pida nivel 3.
+#    accion_propuesta  es el texto que una persona acepta o rechaza. Si cambiara
+#                   por turno, la misma condicion se leeria distinta cada vez.
+#    huella, tipo_senal, origen_*   son la IDENTIDAD de la condicion. Tocarlos
+#                   rompe la deduplicacion: la misma condicion volveria a
+#                   proponerse mañana con la huella vieja.
+#
+#  POR QUE NO 'observaciones', QUE ERA LO ESPERABLE
+#  -----------------------------------------------
+#  Porque ese campo esta EXCLUIDO de
+#  'supervisor.CAMPOS_QUE_ESCRIBE_EL_SUPERVISOR' a proposito: M09-C prohibe que
+#  el Supervisor señale personas, y la unica forma de que no lo haga es que
+#  ninguna ruta suya escriba ahi. Hay una prueba viva que lo afirma
+#  ('test_m09f::test_la_ia_no_puede_sugerir_un_responsable'). 'impacto' SI esta
+#  declarado, y es el campo que responde "que pasa si esto no se atiende" --
+#  justo donde van los riesgos que el cerebro previo.
+#
+#  LA GARANTIA ES ESTRUCTURAL, NO DISCIPLINADA
+#  -------------------------------------------
+#  La salida se arma copiando el analisis original y sobreescribiendo SOLO las
+#  dos claves permitidas. Un campo protegido no puede cambiar porque no hay
+#  camino por donde: no depende de que quien escriba esto se acuerde.
+
+#: Lo unico que el cerebro puede enriquecer de una propuesta.
+CAMPOS_QUE_EL_CEREBRO_ENRIQUECE = ("motivo", "impacto")
+
+
+def analisis_de_veredicto(veredicto, analisis: dict) -> dict:
+    """
+    Devuelve una COPIA del analisis con lo que el cerebro aporto.
+
+    Si el veredicto no sirve --None, no concluyente, o sin hechos-- devuelve el
+    analisis TAL CUAL. "No se sabe" no mejora una propuesta: la propuesta
+    deterministica ya era correcta sin el cerebro, y agregarle una lectura que
+    no cierra solo la haria menos legible.
+
+    LA HIPOTESIS SE CONSERVA COMO HIPOTESIS. Va con su confianza pegada y
+    rotulada; nunca se convierte en una afirmacion. Lo mismo con los hechos:
+    cada uno viaja con la herramienta de la que salio, asi que en tres meses se
+    puede saber si una frase del motivo fue una medicion o una lectura.
+    """
+    base = dict(analisis or {})
+    if veredicto is None or not veredicto.concluyente or veredicto.vacio:
+        return base
+
+    #  --- el motivo: lo deterministico primero, lo del cerebro rotulado ----
+    partes = [str(base.get("motivo") or "").strip()]
+
+    hechos = "; ".join(f"{h['dato']} (fuente: {h['fuente']})"
+                       for h in veredicto.hechos)
+    if hechos:
+        partes.append(f"HECHOS OBSERVADOS: {hechos}")
+    if veredicto.inferencias:
+        partes.append("INTERPRETACION: " + "; ".join(veredicto.inferencias))
+    if veredicto.hipotesis:
+        #  Con su confianza, siempre. Las dos formas de separarlas son las dos
+        #  formas de presentar una sospecha como un hecho.
+        partes.append(f"HIPOTESIS (confianza {veredicto.confianza}): "
+                      f"{veredicto.hipotesis}")
+    if veredicto.falta:
+        #  Lo que NO se pudo saber va en el motivo, no en una nota al pie: es
+        #  lo que decide si quien lee puede confiar en el resto.
+        partes.append("FALTA POR SABER: " + "; ".join(veredicto.falta))
+    if veredicto.recomendacion:
+        #  Se ANOTA, no reemplaza 'accion_propuesta'. La accion que una persona
+        #  acepta sigue siendo la deterministica.
+        partes.append(f"EL SUPERVISOR SUGIERE ADEMAS: {veredicto.recomendacion}")
+
+    motivo = "\n".join(p for p in partes if p)[:4000]
+
+    #  --- el impacto: los riesgos previstos, detras de lo que ya habia ------
+    impacto = str(base.get("impacto") or "").strip()
+    if veredicto.riesgos:
+        previstos = "RIESGO PREVISTO: " + "; ".join(veredicto.riesgos)
+        impacto = f"{impacto}. {previstos}" if impacto else previstos
+
+    #  LA SOBREESCRITURA ES EXPLICITA Y ACOTADA. Se parte de 'base' --que ya es
+    #  una copia del analisis deterministico-- y se cambian SOLO estas dos
+    #  claves. Un campo protegido no puede moverse por una ruta que no existe.
+    enriquecido = dict(base)
+    enriquecido["motivo"] = motivo
+    enriquecido["impacto"] = impacto[:500]
+
+    #  Y se comprueba, aqui mismo, que nada mas cambio. No es paranoia: es la
+    #  diferencia entre una garantia y una intencion. Si alguna vez alguien
+    #  agrega una clave a la lista de arriba sin pensarlo, esto lo frena.
+    for clave, valor in base.items():
+        if clave in CAMPOS_QUE_EL_CEREBRO_ENRIQUECE:
+            continue
+        if enriquecido.get(clave) != valor:
+            raise AssertionError(
+                f"el cerebro modifico '{clave}', que no puede tocar")
+
+    return enriquecido
