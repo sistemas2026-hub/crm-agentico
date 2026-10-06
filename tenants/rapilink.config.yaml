@@ -3935,6 +3935,10 @@ herramientas:
         verificado_el: 2026-09-09
 
   - nombre: importar_caso_externo
+    # Escritura INTERNA: va a nuestro propio backend. No pasa por la
+    # etapa de autonomia; si por tenant, kill switch, techo, autorizacion
+    # granular, auditoria e idempotencia. Ver schema.py::efecto_externo.
+    efecto_externo: false
     tipo: http
     descripcion: >
       Crea el caso de un ticket externo, o devuelve el que ya existe. NO la
@@ -3964,6 +3968,10 @@ herramientas:
     auth_esquema: Bearer
 
   - nombre: reconciliar_caso_externo
+    # Escritura INTERNA: va a nuestro propio backend. No pasa por la
+    # etapa de autonomia; si por tenant, kill switch, techo, autorizacion
+    # granular, auditoria e idempotencia. Ver schema.py::efecto_externo.
+    efecto_externo: false
     tipo: http
     descripcion: >
       Actualiza en el caso lo que informa el proveedor. Nunca el estado de
@@ -3983,6 +3991,10 @@ herramientas:
         verificado_el: 2026-09-09
 
   - nombre: sincronizar_respuestas_externas
+    # Escritura INTERNA: va a nuestro propio backend. No pasa por la
+    # etapa de autonomia; si por tenant, kill switch, techo, autorizacion
+    # granular, auditoria e idempotencia. Ver schema.py::efecto_externo.
+    efecto_externo: false
     tipo: http
     descripcion: >
       Copia al caso el hilo de respuestas del ticket del proveedor. Hace upsert

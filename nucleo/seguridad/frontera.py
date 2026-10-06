@@ -170,13 +170,36 @@ def permiso_vigente() -> _Permiso | None:
 
 def escribe(herramienta) -> bool:
     """
-    Si ejecutar esta herramienta produce un efecto afuera.
+    Si ejecutar esta herramienta ESCRIBE.
 
     Se mira 'solo_lectura' -- el mismo campo que usa
     interruptor.es_accion_autonoma, para que las dos capas no puedan discrepar
     sobre que cuenta como escritura.
+
+    OJO: escribir no es lo mismo que salir del sistema. Para eso esta
+    'efecto_externo', aqui abajo.
     """
     return not getattr(herramienta, "solo_lectura", True)
+
+
+def efecto_externo(herramienta) -> bool:
+    """
+    Si ejecutar esto cambia algo FUERA de Dexter.
+
+    'escribe()' dice SI escribe; esta dice DONDE. La sincronizacion de tickets
+    escribe --crea el caso-- pero contra nuestro propio backend: nada sale del
+    sistema. Una respuesta a un ticket de WispHub, en cambio, cambia el estado
+    de un tercero.
+
+    Sale del CATALOGO ('Herramienta.efecto_externo'), nunca de quien llama ni
+    de los argumentos de la llamada -- mismo criterio que
+    'techo.nivel_requerido_de'.
+
+    FALLA CERRADO: lo que no lo declara cuenta como externo. Ese es el
+    comportamiento que habia antes de que el campo existiera, asi que una
+    herramienta que no lo declara no cambia en nada.
+    """
+    return bool(getattr(herramienta, "efecto_externo", True))
 
 
 def _tenant_valido(tenant) -> bool:
@@ -185,7 +208,8 @@ def _tenant_valido(tenant) -> bool:
 
 @contextmanager
 def autonoma(tenant: str, herramienta: str, *, origen: str = "",
-             actor: str = "motor", nivel_requerido: int | None = None):
+             actor: str = "motor", nivel_requerido: int | None = None,
+             efecto_externo: bool = True):
     """
     Abre permiso para una accion que NADIE pidio explicitamente.
 
@@ -195,6 +219,12 @@ def autonoma(tenant: str, herramienta: str, *, origen: str = "",
     'nivel_requerido' (M06-B) es el que declara la HERRAMIENTA en el catalogo
     (techo.nivel_requerido_de) -- nunca algo que venga de los argumentos de la
     llamada. Sin declarar, 2: lo mismo que se exigia antes.
+
+    'efecto_externo' (06/10/2026) sale del mismo lugar y de la misma forma:
+    'frontera.efecto_externo(herramienta)' leyendo el catalogo. Decide SOLO si
+    corresponde la compuerta de etapa de autonomia -- ver donde se usa, mas
+    abajo. Default True: lo que no lo declara se trata como externo, igual que
+    antes de que el campo existiera.
     """
     nivel_requerido = _nivel_de_escritura(nivel_requerido)
     if not _tenant_valido(tenant):
@@ -233,12 +263,35 @@ def autonoma(tenant: str, herramienta: str, *, origen: str = "",
     #  aprueba una accion concreta no es el sistema actuando solo, y exigirle
     #  una autorizacion de autonomia dejaria sin operar al panel el dia que se
     #  revoque una herramienta.
-    etapa = autonomia2.veredicto()
-    if not etapa.permitido:
-        _anotar(tenant, actor, herramienta, f"{etapa.codigo}: {etapa.motivo}")
-        _bitacora(tenant, herramienta, etapa.codigo, etapa.motivo, actor,
-                  origen)
-        raise AccionExternaNoAutorizada(herramienta, etapa.codigo, etapa.motivo)
+    #  Y SOLO SI LA HERRAMIENTA SALE DEL SISTEMA.
+    #
+    #  Autonomia 2 gobierna hasta donde puede llegar el agente ACTUANDO SOBRE
+    #  TERCEROS. Una escritura que se queda adentro --guardar en nuestra base
+    #  el ticket que acabamos de leer-- no es eso, y tratarla igual tuvo un
+    #  costo medido: entre el 21/09 y el 06/10/2026 el reloj no importo un
+    #  solo ticket, con 49 candidatos esperando y sin un aviso.
+    #
+    #  Lo que NO se afloja, y por eso esto no es un bypass: el tenant, el kill
+    #  switch y el techo ya corrieron arriba, y la autorizacion granular corre
+    #  abajo. Se acota UNA compuerta, la que no corresponde.
+    #
+    #  'critica()' tiene su propio 'autonomia2.veredicto()' y no pasa por aca:
+    #  las irreversibles conservan los nueve pasos enteros.
+    if efecto_externo:
+        etapa = autonomia2.veredicto()
+        if not etapa.permitido:
+            _anotar(tenant, actor, herramienta, f"{etapa.codigo}: {etapa.motivo}")
+            _bitacora(tenant, herramienta, etapa.codigo, etapa.motivo, actor,
+                      origen)
+            raise AccionExternaNoAutorizada(herramienta, etapa.codigo, etapa.motivo)
+    else:
+        #  La exencion se ANOTA. Un control que se saltea en silencio es
+        #  indistinguible de uno que no existe, y quien lea la bitacora tiene
+        #  que poder ver por que esta accion no paso por la etapa.
+        _bitacora(tenant, herramienta, "etapa_no_aplica",
+                  "escritura interna: no cambia nada fuera de Dexter, asi que "
+                  "no pasa por la etapa de autonomia (lo declara el catalogo)",
+                  actor, origen)
 
     permitida = autorizacion.veredicto(tenant, herramienta,
                                        nivel_requerido=nivel_requerido)
@@ -409,7 +462,8 @@ def critica(tenant: str, herramienta: str, *, argumentos: dict,
 
 
 def puerta(tenant: str, herramienta: str, actor: str = "",
-           evidencia: str = "", origen: str = ""):
+           evidencia: str = "", origen: str = "",
+           efecto_externo: bool = True):
     """
     La eleccion de puerta, en un solo lugar.
 
@@ -433,8 +487,12 @@ def puerta(tenant: str, herramienta: str, actor: str = "",
         return humana(tenant, herramienta, actor=actor.strip(),
                       evidencia=evidencia or "(sin referencia)",
                       origen=origen)
+    #  'efecto_externo' solo viaja por la puerta autonoma: 'humana()' no
+    #  consulta la etapa de autonomia de todos modos, asi que pasarselo seria
+    #  sugerir una influencia que no tiene.
     return autonoma(tenant, herramienta, origen=origen,
-                    actor=origen or "sistema")
+                    actor=origen or "sistema",
+                    efecto_externo=efecto_externo)
 
 
 def exigir(herramienta, tenant=None, argumentos=None) -> _Permiso:

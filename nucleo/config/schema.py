@@ -1045,6 +1045,34 @@ class Herramienta(Base):
     # edita un administrador). 0..3 porque 3 es el tope de politica global; una
     # escritura no puede exigir 0, que es "observar".
     nivel_autonomia: int | None = Field(default=None, ge=0, le=3)
+    # 'efecto_externo' (06/10/2026): si ejecutar esto cambia algo FUERA de
+    # Dexter.
+    #
+    # NO ES LO MISMO QUE 'solo_lectura', Y CONFUNDIRLAS COSTO 15 DIAS
+    # ---------------------------------------------------------------
+    # 'solo_lectura' dice si la herramienta ESCRIBE. Esta dice DONDE. Son dos
+    # preguntas distintas y hasta hoy habia una sola respuesta para las dos.
+    #
+    # La sincronizacion de tickets de WispHub escribe --crea el caso en el
+    # CRM-- pero escribe en NUESTRA propia base, por nuestro propio backend
+    # ('http://backend:8000/api' con IMPORTACION_API_TOKEN). Nada sale del
+    # sistema: ningun cliente recibe un mensaje, ningun estado de un tercero
+    # cambia. Es el espejo de una lectura -- guardar lo que ya se leyo.
+    #
+    # Aun asi caia en la compuerta de etapa de autonomia, que existe para
+    # efectos sobre terceros, y el reloj no importo un solo ticket entre el
+    # 21/09 y el 06/10: 49 candidatos esperando, cero avisos. Comparar con
+    # 'responder_ticket_operativo', que va a '/api/tickets/{id}/respuesta/'
+    # con WISPHUB_API_KEY -- ESA si le escribe a un tercero.
+    #
+    # EL DEFAULT ES True, Y ES FAIL-CLOSED. Una herramienta que no lo declara
+    # se trata como externa, o sea exactamente como se trataba antes. La
+    # exencion se pide; no se hereda.
+    #
+    # Lo lee 'nucleo/seguridad/frontera.py'. Acota UNA sola compuerta --la de
+    # autonomia 2-- y ninguna otra: tenant, kill switch, techo, autorizacion
+    # granular, auditoria e idempotencia siguen aplicando igual.
+    efecto_externo: bool = True
     # Solo tiene efecto con aprobacion_humana=True. Texto con marcadores
     # '{clave}' que se rellenan con los argumentos YA resueltos (los mismos
     # que se le mandarian a la API) -- para que quien aprueba lea "Crear
@@ -1801,6 +1829,25 @@ class Herramienta(Base):
                 f"'{self.nombre}' es irreversible y no declara "
                 f"aprobacion_humana: su efecto no se deshace, asi que exige "
                 f"que una persona apruebe cada operacion.")
+        #  LA EXENCION DE AUTONOMIA 2 NO SE PUEDE PEDIR PARA CUALQUIER COSA.
+        #
+        #  'efecto_externo: false' saca a la herramienta de la compuerta de
+        #  etapa de autonomia. Eso es correcto para una escritura interna --la
+        #  sincronizacion de tickets-- y seria un agujero para una accion que
+        #  toca a un tercero. Una irreversible, o una que exige que una
+        #  persona apruebe, es por definicion de las segundas: declararla
+        #  interna es una contradiccion, y se rechaza al CARGAR la config, no
+        #  en produccion con la accion ya saliendo.
+        #
+        #  Va en el schema y no en una prueba a proposito: una prueba hay que
+        #  acordarse de correrla; esto tumba el archivo entero.
+        if not self.efecto_externo and (self.irreversible or self.aprobacion_humana):
+            cual = "irreversible" if self.irreversible else "aprobacion_humana"
+            raise ValueError(
+                f"'{self.nombre}' declara 'efecto_externo: false' y tambien "
+                f"'{cual}': son incompatibles. La exencion de autonomia 2 es "
+                f"para escrituras que no salen de Dexter, y una accion que "
+                f"necesita aprobacion humana no es una de esas.")
         if (self.nivel_autonomia is not None and not self.solo_lectura
                 and self.nivel_autonomia < 1):
             raise ValueError(

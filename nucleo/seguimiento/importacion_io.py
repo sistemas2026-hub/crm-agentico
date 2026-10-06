@@ -81,8 +81,15 @@ def _puerta(tenant, herramienta, actor: str = ""):
     """
     from nucleo.seguridad import frontera
 
-    return frontera.puerta(tenant, herramienta, actor=actor,
-                           evidencia="importacion", origen="importacion")
+    #  'herramienta' puede llegar como objeto del catalogo o como nombre. Con
+    #  el objeto se puede leer 'efecto_externo'; con el nombre no, y entonces
+    #  se cae al default externo -- que es el lado conservador.
+    nombre = getattr(herramienta, "nombre", herramienta)
+    externo = (frontera.efecto_externo(herramienta)
+               if hasattr(herramienta, "nombre") else True)
+    return frontera.puerta(tenant, nombre, actor=actor,
+                           evidencia="importacion", origen="importacion",
+                           efecto_externo=externo)
 
 
 def _herramienta(config, nombre):
@@ -411,7 +418,7 @@ def aplicar(config, tenant, veredictos, actor: str = "") -> dict:
         if v.resultado != imp.CANDIDATO:
             continue
         try:
-            with _puerta(tenant, herr.nombre, actor):
+            with _puerta(tenant, herr, actor):
                 r = ejecutor_http.ejecutar(herr, _cuerpo_de(v, config), tenant,
                                            variables_tenant=config.variables_tenant)
             if isinstance(r, dict) and r.get("created"):
@@ -446,7 +453,7 @@ def fijar_nombre_cliente(config, tenant, servicio: str, nombre: str,
     if herr is None:
         raise SystemExit("falta 'fijar_nombre_cliente_externo' en el catalogo")
 
-    with _puerta(tenant, herr.nombre, actor):
+    with _puerta(tenant, herr, actor):
         r = ejecutor_http.ejecutar(
             herr, {"external_service_id": str(servicio),
                    "external_client_name": str(nombre)},
@@ -497,7 +504,7 @@ def aplicar_reconciliacion(config, tenant, cambios, actor: str = "") -> dict:
         cuerpo = {k: v for k, v in c.despues.items() if v is not None}
         cuerpo["id_caso"] = c.caso_id
         try:
-            with _puerta(tenant, herr.nombre, actor):
+            with _puerta(tenant, herr, actor):
                 r = ejecutor_http.ejecutar(herr, cuerpo, tenant,
                                            variables_tenant=config.variables_tenant)
             if isinstance(r, dict) and r.get("actualizados"):
@@ -542,7 +549,7 @@ def sincronizar_respuestas(config, tenant, cambios, actor: str = "") -> dict:
         resumen["hilos"] += 1
         resumen["respuestas"] += len(c.respuestas)
         try:
-            with _puerta(tenant, herr.nombre, actor):
+            with _puerta(tenant, herr, actor):
                 r = ejecutor_http.ejecutar(
                     herr, {"id_caso": c.caso_id, "provider": proveedor,
                            "respuestas": c.respuestas},
