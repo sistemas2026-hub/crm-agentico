@@ -1918,6 +1918,10 @@ def ejecutar_accion_irreversible(config, accion: dict, tenant: str
                                        config.variables_tenant))
 
     try:
+        #  'critica()' NO recibe 'efecto_externo', y es deliberado: una
+        #  herramienta irreversible no tiene exencion posible. El schema
+        #  ademas rechaza declarar 'efecto_externo: false' junto a
+        #  'irreversible' o 'aprobacion_humana'.
         with frontera.critica(tenant, herramienta.nombre, argumentos=argumentos,
                               aprobacion=aprobacion, origen=origen,
                               nivel_requerido=techos.nivel_requerido_de(herramienta)):
@@ -2091,7 +2095,8 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict,
         with frontera.autonoma(tenant_slug, herramienta.nombre,
                                origen=origen or "",
                                actor=origen or "servicio",
-                               nivel_requerido=techos.nivel_requerido_de(herramienta)):
+                               nivel_requerido=techos.nivel_requerido_de(herramienta),
+                               efecto_externo=frontera.efecto_externo(herramienta)):
             resultado = idempotencia.ejecutar(
                 tenant_slug, herramienta.nombre, argumentos,
                 origen or f"servicio:{uuid.uuid4()}", _llamar)
@@ -2532,7 +2537,8 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
         #  'argumentos_modelo': el modelo no puede bajarse la exigencia (M06-B).
         with frontera.autonoma(tenant, herramienta.nombre,
                                origen=origen or "", actor=origen or "motor",
-                               nivel_requerido=techos.nivel_requerido_de(herramienta)):
+                               nivel_requerido=techos.nivel_requerido_de(herramienta),
+                               efecto_externo=frontera.efecto_externo(herramienta)):
             resultado = idempotencia.ejecutar(
                 tenant, herramienta.nombre, argumentos,
                 origen or f"invocacion:{uuid.uuid4()}", _despachar)
