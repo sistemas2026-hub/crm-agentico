@@ -109,10 +109,21 @@ export async function listarPropuestas({ cookies }, filtros = {}) {
   const query = params.toString() ? `?${params}` : '';
   try {
     const datos = await apiRequest(`/operaciones/propuestas/${query}`, {}, { cookies });
-    return { count: datos?.count ?? 0, resultados: datos?.resultados ?? [], error: null };
+    //  'truncado' lo dice el backend cuando el tope recorto la lista. Viaja
+    //  para que la pantalla no muestre una lista parcial como si fuera
+    //  completa: eso es justo lo que escondio diez propuestas pendientes el
+    //  06/10/2026 -- llegaban 200 de 260 y las que faltaban eran las que
+    //  esperaban decision.
+    return {
+      count: datos?.count ?? 0,
+      truncado: datos?.truncado === true,
+      resultados: datos?.resultados ?? [],
+      error: null
+    };
   } catch (/** @type {any} */ err) {
     return {
       count: null,
+      truncado: false,
       resultados: [],
       error: traducirError(err, 'las propuestas del Supervisor NOC IA')
     };

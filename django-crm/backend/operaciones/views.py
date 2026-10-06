@@ -38,6 +38,8 @@ nivel habria requerido, que hizo el humano y con que resultado.
 from __future__ import annotations
 
 from django.db import transaction
+from django.db.models import Case as CuandoSQL
+from django.db.models import IntegerField, When
 from django.db.utils import IntegrityError
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
@@ -90,8 +92,17 @@ from operaciones.serializers import (ActividadOperativaSerializer,
 from operaciones.programacion import ESTADOS_DE_PLAN_QUE_ADMITEN_LINEAS
 
 
+#: Cuantas propuestas viajan en una respuesta. El tope existe para no mandar
+#: miles de filas a una pantalla; lo que NO puede hacer es esconder trabajo
+#: sin revisar, y por eso el orden pone primero lo que espera decision.
+LOTE_MAXIMO = 200
+
+
 class PropuestasView(APIView):
-    """Las propuestas de esta organización, las más urgentes primero."""
+    """
+    Las propuestas de esta organización: primero las que esperan una
+    decisión, y dentro de cada grupo las más urgentes.
+    """
 
     permission_classes = [EsJefeDeOperaciones]
 
@@ -105,13 +116,43 @@ class PropuestasView(APIView):
         tipo = request.query_params.get("tipo_senal")
         if tipo:
             qs = qs.filter(tipo_senal=tipo)
+        #  LO QUE ESPERA UNA DECISION VIAJA PRIMERO  --  06/10/2026
+        #  --------------------------------------------------------
+        #  El orden del modelo es ("prioridad", "-created_at") y el tope es de
+        #  200. Las dos cosas estaban bien por separado y juntas escondian
+        #  trabajo: medido en produccion ese dia, de 260 propuestas las 10 que
+        #  esperaban revision caian en las posiciones 211 a 225 --prioridad 32
+        #  a 40-- y NO llegaban al navegador. La pantalla decia "Pendientes
+        #  (0)" con diez casos abiertos esperando, y "Todas (200)" era el
+        #  unico rastro del corte.
+        #
+        #  Urgencia y pendiente son cosas distintas: una propuesta ya aceptada
+        #  puede tener prioridad 1 y una pendiente prioridad 40. Ordenar por
+        #  urgencia y despues cortar deja que lo ya decidido desplace a lo que
+        #  falta decidir.
+        #
+        #  Esto NO cambia que es pendiente ni esconde nada: dentro de cada
+        #  grupo sigue mandando la misma urgencia de siempre. Lo unico que
+        #  garantiza es que el tope solo pueda recortar lo YA revisado.
+        qs = qs.annotate(
+            _espera_decision=CuandoSQL(
+                When(estado=PropuestaSupervisor.PROPUESTA, then=0),
+                default=1, output_field=IntegerField(),
+            )
+        ).order_by("_espera_decision", "prioridad", "-created_at")
+
         # El lote se materializa UNA vez: el contexto se resuelve sobre las
         # mismas filas que se serializan, no sobre una segunda consulta que
         # podria devolver otras si algo se inserto en el medio.
-        lote = list(qs[:200])
+        total = qs.count()
+        lote = list(qs[:LOTE_MAXIMO])
         contexto = contexto_propuesta.contexto_de(request.org, lote)
         return Response({
-            "count": qs.count(),
+            "count": total,
+            #  Que el corte se SEPA. Una lista recortada en silencio es lo que
+            #  produjo este defecto: quien la lee no puede distinguir "no hay
+            #  mas" de "no te las mande".
+            "truncado": total > len(lote),
             "resultados": PropuestaListaSerializer(
                 lote, many=True, context={"contexto": contexto}
             ).data,
