@@ -12,10 +12,21 @@ de "está roto".
 Esta prueba afirma sobre lo que la aplicación necesita para que cada pantalla
 tenga sentido, y sobre todo sobre el caso que hasta ahora no se podía ver: una
 orden devuelta, con su lista de qué rehacer.
+
+QUÉ MODO DEL COMANDO SE MIDE ACÁ
+--------------------------------
+El modo `--completo`. Por defecto el comando siembra **una** orden, porque
+sembrar tres de una hacía imposible afirmar cuántas dejaba una corrida —dos
+corridas dejaban seis y ninguna prueba podía distinguir «sembró de más» de
+«sembró dos veces»—. Esa cuenta es lo que `test_seguridad_seed_y_admin` necesita
+para cerrar el incidente del 08/09/2026, y manda sobre esto.
+
+Lo que no cambió es lo que se afirma: que haya con qué llenar cada pantalla.
 """
 
 import pytest
 from django.core.management import call_command
+from django.test import override_settings
 
 from campo.models import OrdenTrabajo, WorkTypeVersion
 from campo.services.validador import devolucion_vigente
@@ -24,9 +35,29 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def sembrado():
-    call_command("seed_campo_demo", verbosity=0)
-    return OrdenTrabajo.objects.all()
+def sembrado(org_a):
+    """Lo que siembra el comando en su modo COMPLETO.
+
+    POR QUE `--completo`, Y POR QUE `--org`
+    ---------------------------------------
+    Hasta el 06/10/2026 esta fixture llamaba al comando sin argumentos, y eso
+    la ponia en contradiccion directa con `test_seguridad_seed_y_admin`: esa
+    exige que sin `--org` el comando NO corra --porque el 08/09/2026 corrio
+    contra produccion y se invento una empresa-- y que una corrida deje UNA
+    orden, contable.
+
+    Manda la de seguridad, por origen: nacio de un incidente con datos reales.
+    Lo que esta prueba afirma --que haya con que llenar cada pantalla-- no
+    cambia: es el modo en el que esa riqueza existe el que ahora se declara.
+    """
+    # `DEBUG=True` explicito: `crm.test_settings` corre con DEBUG apagado, y el
+    # comando se niega ahi -- como debe. Que esta prueba haya tenido que
+    # declararlo es la mejor evidencia de que esa guarda no es decorativa:
+    # bloqueo una llamada que no la esperaba.
+    with override_settings(DEBUG=True):
+        call_command("seed_campo_demo", "--org", str(org_a.id), "--completo",
+                     verbosity=0)
+    return OrdenTrabajo.objects.filter(org=org_a)
 
 
 def test_1_siembra_mas_de_una_orden_y_mas_de_un_tipo(sembrado):

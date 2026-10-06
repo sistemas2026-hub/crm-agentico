@@ -131,6 +131,42 @@ def test_dos_corridas_no_chocan_con_el_consecutivo(org_a):
     assert len(numeros) == 2 and numeros[0] != numeros[1]
 
 
+@override_settings(DEBUG=True)
+def test_si_falla_a_mitad_no_deja_NADA_escrito(org_a):
+    """EL TODO-O-NADA, MEDIDO Y NO SUPUESTO.
+
+    Esta prueba nacio el 06/10/2026 de una mutacion que sobrevivio: quitarle el
+    `transaction.atomic()` al comando dejaba las 15 en verde. Y no porque la
+    atomicidad no importara --el comentario de `test_con_debug_apagado...` ya
+    dice que "un comando que levanta DESPUES de escribir la mitad seria igual
+    de malo que no levantar"-- sino porque ninguna prueba la ejercitaba:
+    `pytest.mark.django_db` envuelve cada caso en su propia transaccion, asi
+    que el rollback ocurre igual y la diferencia no se ve.
+
+    Aca se provoca el fallo a mitad: el usuario y el perfil ya estan escritos
+    cuando la siembra de la orden revienta. Sin atomicidad queda un tecnico
+    creado para una orden que no existe -- y la siguiente corrida lo encuentra
+    "ya existente", asi que ni le pone clave.
+    """
+    from unittest import mock
+
+    from campo.management.commands import seed_campo_demo as modulo
+
+    antes = _conteos()
+
+    with mock.patch.object(
+        modulo.Command, "_orden_de_instalacion",
+        side_effect=RuntimeError("revienta despues de crear al tecnico"),
+    ):
+        with pytest.raises(RuntimeError):
+            call_command("seed_campo_demo", "--org", str(org_a.id))
+
+    assert _conteos() == antes, (
+        "quedo algo escrito tras el fallo: el comando no es todo-o-nada"
+    )
+    assert not User.objects.filter(email=EMAIL_DEMO).exists()
+
+
 # =============================================================================
 #  §3  La organizacion: se recibe, no se inventa
 # =============================================================================

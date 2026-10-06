@@ -50,6 +50,30 @@ class EventoTrabajoInline(admin.TabularInline):
 
 @admin.register(OrdenTrabajo)
 class OrdenTrabajoAdmin(admin.ModelAdmin):
+    """El admin de ordenes: se CONSULTA, no se crea desde aca.
+
+    EL SEGUNDO CAMINO DEL INCIDENTE DEL 08/09/2026.
+    -----------------------------------------------
+    Aquel dia una orden entro a produccion por un comando sin controles. Este
+    otro camino nunca llego a usarse, y estaba abierto: `/admin/` esta exento
+    del middleware de organizacion, asi que el desplegable de `org` lista
+    TODAS las empresas y un superusuario podia crear una orden para cualquiera
+    -- sin pasar por el despacho, o sea sin consecutivo, sin asignacion, sin
+    bitacora y sin nada que explique de donde salio.
+
+    Crear una orden es `campo.services.despacho.crear_orden`: ahi viven el
+    consecutivo por empresa, la cuadrilla y el evento que la deja rastreable.
+    Un formulario que escribe la fila directo no es un atajo, es otra
+    implementacion de la misma cosa -- y sin ninguna de esas garantias.
+
+    CONSULTAR SIGUE ABIERTO a proposito: la lista y el detalle son justo donde
+    alguien mira para entender que paso con una orden, y cerrar el alta no
+    puede costar la consulta.
+    """
+
+    def has_add_permission(self, request):
+        return False
+
     list_display = (
         "numero",
         "cliente_nombre",
@@ -162,7 +186,13 @@ class OrdenTrabajoAdmin(admin.ModelAdmin):
         tec = obj.tecnico_principal
         if tec and tec.user:
             return tec.user.name or tec.user.email
-        return format_html('<span style="color: #999;">Sin asignar</span>')
+        # El texto va como ARGUMENTO y no dentro del formato: desde Django 5,
+        # `format_html` con un solo literal levanta
+        # `TypeError: args or kwargs must be provided`. Con Django 6.0.7 eso
+        # dejaba el admin de ordenes devolviendo 500 en cuanto una orden no
+        # tenia tecnico asignado -- y la lista del admin es justo donde alguien
+        # mira para entender por que una orden quedo sin asignar.
+        return format_html('<span style="color: #999;">{}</span>', "Sin asignar")
 
     @admin.display(description="Estado Operativo")
     def estado_badge(self, obj: OrdenTrabajo):
