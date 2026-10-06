@@ -441,6 +441,13 @@ class SyncQueueService {
   /// EL 200 TAMBIEN ES EXITO. El servidor contesta 201 cuando lo creo y 200
   /// cuando reconocio el reenvio; para la cola los dos cierran el pedido. Si el
   /// reenvio llegara como error, se reintentaria para siempre.
+  /// Cuantas veces se reintenta un pedido antes de darlo por fallado.
+  ///
+  /// Diez con el backoff de esta cola --que topa en 60 s-- son mas de media
+  /// hora de reintentos: un corte de senal normal entra holgado. Lo que no
+  /// entra es un fallo que va a dar el mismo resultado siempre.
+  static const int _intentosDePedido = 10;
+
   Future<void> _procesarPedidosDeMaterial(
     String orgId,
     String profileId,
@@ -478,15 +485,35 @@ class SyncQueueService {
         // siempre. Reintentarlos es ruido, y el pedido queda igual sin
         // atenderse -- con la diferencia de que asi el tecnico lo VE fallado y
         // puede volver a pedirlo bien, en vez de creer que esta en camino.
-        final bool definitivo = codigo == 400 || codigo == 404;
+        // 400 y 404 son definitivos de entrada. Y CUALQUIER otro fallo lo
+        // es tras `_intentosDePedido`, que es el arreglo de un hueco real que
+        // encontro una auditoria independiente: un 500 --por ejemplo una
+        // cantidad que la columna no aguanta-- no estaba en esa lista, asi que
+        // quedaba `pendiente` y el backoff topa en 60 s. El pedido se reenviaba
+        // cada minuto PARA SIEMPRE, y el tecnico leia «Sube cuando haya senal»
+        // indefinidamente, esperando material que no venia.
+        //
+        // El techo va por intentos y no por codigo a proposito: enumerar
+        // codigos deja afuera el siguiente. Un corte de red de diez minutos
+        // entra holgado --el backoff llega a 60 s--, y lo que no entra es un
+        // fallo determinista, que es justo lo que hay que cerrar.
+        final bool definitivo =
+            codigo == 400 || codigo == 404 || intentos + 1 >= _intentosDePedido;
         final retryAfter = e is DioException
             ? _leerRetryAfter(e.response?.headers.value('retry-after'))
             : null;
+        final bool porTecho =
+            definitivo && codigo != 400 && codigo != 404;
         await _localDb.registrarFalloPedido(
           id: id,
           orgId: orgId,
           profileId: profileId,
-          errorMensaje: sanearError(e),
+          errorMensaje: porTecho
+              // Se dice que se dejo de intentar. Repetir «sin conexion» en un
+              // pedido ya cerrado le haria creer que todavia va a subir.
+              ? 'No se pudo enviar despues de $_intentosDePedido intentos: '
+                  '${sanearError(e)}'
+              : sanearError(e),
           intentos: intentos,
           definitivo: definitivo,
           nextAttemptAt: definitivo

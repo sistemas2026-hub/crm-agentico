@@ -89,6 +89,16 @@ class PedidoDeMaterial(BaseModel):
     #: El telefono reenvia sin señal, y dos pedidos iguales le harian pensar a
     #: bodega que hacen falta cuarenta conectores cuando hacen falta veinte.
     #: Por clave primaria, nunca por un `select` previo: ahi vive la carrera.
+    #:
+    #: ES UNICA POR PERSONA, NO POR EMPRESA, y eso lo corrigio una auditoria
+    #: independiente. Con la unicidad en `(org, clave)`, dos tecnicos que
+    #: emitieran la misma clave compartian fila: el segundo recibia el pedido
+    #: del primero --con su `motivo`, que es texto libre-- y el suyo no se
+    #: creaba nunca, mientras su aplicacion le decia «Bodega ya lo recibio».
+    #: Con `Uuid().v4()` eso no pasa por accidente, pero la clave la elige
+    #: quien llama y el servidor no la valida como UUID: la garantia no puede
+    #: depender de que el cliente se porte bien. Una clave identifica una
+    #: SOLICITUD, y dos personas distintas son dos solicitudes distintas.
     idempotency_key = models.CharField(max_length=128, db_index=True)
 
     class Meta:
@@ -96,8 +106,8 @@ class PedidoDeMaterial(BaseModel):
         ordering = ["-created_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["org", "idempotency_key"],
-                name="unique_pedido_idempotente_por_org",
+                fields=["org", "profile", "idempotency_key"],
+                name="unique_pedido_idempotente_por_persona",
             ),
         ]
 

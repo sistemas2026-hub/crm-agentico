@@ -180,6 +180,80 @@ empresa le compra a una cuadrilla—:
 Los dos arreglados. Es el corolario de §6: lo que no se mide no se ve, y acá no
 se veía porque nadie había montado esta pantalla a un ancho de verdad.
 
+---
+
+## Lo que encontró una auditoría independiente (06/10/2026)
+
+Cinco hallazgos, y **los cinco terminaban en el mismo síntoma**: el técnico
+espera material que no viene, leyendo en la pantalla que su pedido va en camino.
+Vale escribirlos porque ninguno se veía mirando la pantalla, y tres eran
+alcanzables desde ella.
+
+**El bucle infinito.** `definitivo` era `codigo == 400 || codigo == 404`, así
+que cualquier otro fallo quedaba `pendiente` — y el backoff topa en 60 s. Un
+pedido con un 500 se reenviaba **cada minuto, para siempre**, diciendo «Sube
+cuando haya señal». Ahora hay techo de **10 intentos** para cualquier causa: el
+techo va por intentos y no por código, porque enumerar códigos deja afuera el
+siguiente. Diez con ese backoff son más de media hora, así que un corte de señal
+normal entra holgado.
+
+**Una cantidad de diez dígitos era un 500.** `numeric(12,3)` admite nueve
+enteros, y diez se teclean con el dedo gordo en el teclado numérico. Combinado
+con lo anterior: dedo gordo → reintento eterno. Ahora se valida en los dos
+lados, y en la hoja además porque ahí hay alguien mirando: un 400 del servidor
+deja el pedido fallado y hay que escribirlo de nuevo, mientras el mensaje de la
+hoja se corrige en el acto.
+
+**`0,0001` se guardaba como cero.** Pasaba el «más que cero» porque la guarda
+corría *antes* de la cuantización a tres decimales, y el aviso a bodega decía
+literalmente **«0 de Conector SC/APC»** — la fila que no pide nada que esa
+guarda existe para evitar. Y el 201 devolvía `0.0001` mientras la base tenía
+`0.000`: la app mostraba una cosa y la base otra. Ahora se cuantiza **antes** de
+validar y se devuelve el valor cuantizado.
+
+**Una `orden` que no era UUID reventaba la consulta.** Es el mismo defecto que
+`test_a7` había arreglado para `material`, **un campo más allá**. El patrón vale
+más que el caso: cuando se arregla una validación de id, hay que barrer los
+demás ids del mismo endpoint.
+
+**La clave de idempotencia era única por empresa, no por persona.** Dos técnicos
+con la misma clave compartían fila: el segundo recibía el pedido del primero
+—con su `motivo`, que es texto libre— y el suyo no se creaba nunca, mientras su
+app le decía «Bodega ya lo recibió». Con `Uuid().v4()` no pasa por accidente,
+pero **la clave la elige quien llama** y el servidor no la valida como UUID: la
+garantía no puede depender de que el cliente se porte bien. La constraint pasó a
+`(org, profile, idempotency_key)` en la migración `0024`.
+
+### Y uno que no era del pedido: la purga de identidad
+
+El peor de todos, y el pedido solo lo destapó. `borrarDatosDeIdentidad`
+enumeraba **ocho tablas escritas a mano** y el esquema ya tenía **doce** con
+`(org_id, profile_id)`: faltaban la cola de seguimiento, las notificaciones, los
+materiales de la orden y la de pedidos.
+
+El escenario: el técnico A pide material sin señal, entrega el teléfono de
+cuadrilla, B entra, y la rutina que decide si purgar veía **cero pendientes** de
+A. Se purgaba su identidad, el pedido no subía nunca —solo se suben los de la
+sesión activa— y la fila, con el texto libre que A escribió, **quedaba en el
+disco de un teléfono que cambió de manos**, después de informar que sus datos se
+habían borrado.
+
+Lo grave era el patrón, no el nombre que faltaba: cada tabla nueva lo repetía, y
+la prueba de la purga afirmaba sobre **una** tabla, así que habría quedado en
+verde dejando siete intactas. Ahora la lista **se deriva del esquema**
+(`tablasPorIdentidad`): una tabla nueva entra sola el día que se crea, y la
+prueba afirma que ninguna queda con filas de esa identidad.
+
+### Lo que la auditoría atacó y aguantó
+
+Vale decirlo, porque también es el resultado: que un pedido no mueva el saldo
+—la afirmación que sostiene el inventario entero— se verificó por un camino
+independiente (`PedidoDeMaterial` no aparece en ningún `.py` del backend fuera
+de su propio módulo y sus pruebas). Y la idempotencia **no** depende de algo
+inestable: la clave es el `id` de la fila, escrito en SQLite *antes* del primer
+intento, así que sobrevive al reinicio del proceso y es la misma en cada
+reenvío.
+
 ### Lo que queda sin medir
 
 El ciclo **con el servidor real corriendo**: `subir_pedidos_test` intercepta el

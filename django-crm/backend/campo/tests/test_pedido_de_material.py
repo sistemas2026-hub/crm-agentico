@@ -255,6 +255,141 @@ def test_c3_un_material_de_OTRA_EMPRESA_responde_404(user_client, org_b):
 
 
 # --------------------------------------------------------------------------- #
+# C-bis. Lo que una auditoria independiente encontro (06/10/2026)
+#
+# LAS CINCO ERAN 500, Y UN 500 ES PEOR QUE UN 400 ACA. La cola de la aplicacion
+# cierra el pedido con un 400 --«No se pudo pedir», con su motivo a la vista-- y
+# REINTENTA un 500. El backoff topa en 60 s, asi que un 500 deja al pedido
+# diciendo «Sube cuando haya senal» cada minuto, para siempre, con el tecnico
+# esperando material que no viene.
+# --------------------------------------------------------------------------- #
+
+def test_f1_una_cantidad_de_DIEZ_DIGITOS_no_revienta_la_consulta(
+    user_client, conector
+):
+    """EL UNICO DE LOS CINCO QUE SE ALCANZA DESDE LA PANTALLA.
+
+    `numeric(12,3)` admite NUEVE digitos enteros. Con diez, el `insert`
+    reventaba con `numeric field overflow` -> 500 -> reintento infinito. Y diez
+    digitos se teclean con el dedo gordo en el teclado numerico.
+    """
+    r = _pedir(user_client, conector, cantidad="1000000000")
+
+    assert r.status_code == 400, r.data
+    assert PedidoDeMaterial.objects.count() == 0
+
+
+def test_f2_nueve_digitos_SI_se_aceptan(user_client, conector):
+    """El contrapeso: el tope no puede comerse lo que la columna si aguanta."""
+    r = _pedir(user_client, conector, cantidad="999999999")
+
+    assert r.status_code == 201, r.data
+
+
+def test_f3_NaN_e_Infinity_se_rechazan(user_client, conector):
+    """`Decimal("NaN")` se CONSTRUYE sin error: lo que lanzaba era la
+    comparacion `<= 0`, una linea despues del `try`."""
+    for malo in ("NaN", "Infinity", "-Infinity", "nan"):
+        r = _pedir(user_client, conector, cantidad=malo)
+        assert r.status_code == 400, f"{malo} -> {r.status_code}"
+    assert PedidoDeMaterial.objects.count() == 0
+
+
+def test_f4_una_cantidad_que_CUANTIZA_A_CERO_no_es_un_pedido(
+    user_client, conector
+):
+    """`0.0001` pasaba el «mayor que cero» y se guardaba `0.000`.
+
+    El aviso a bodega decia literalmente «0 de Conector SC/APC» -- la fila que
+    no pide nada que esa guarda existe para evitar. Y el 201 le devolvia al
+    telefono `0.0001` mientras la base tenia `0.000`: la aplicacion mostraba
+    una cosa y la base otra.
+    """
+    r = _pedir(user_client, conector, cantidad="0.0001")
+
+    assert r.status_code == 400, r.data
+    assert PedidoDeMaterial.objects.count() == 0
+
+
+def test_f5_lo_que_se_guarda_es_lo_que_la_respuesta_DICE(user_client, conector):
+    """Se cuantiza ANTES de crear, no al escribir: asi el cuerpo del 201 y la
+    fila no pueden diferir."""
+    r = _pedir(user_client, conector, cantidad="2.5009")
+
+    assert r.status_code == 201, r.data
+    guardado = PedidoDeMaterial.objects.get()
+    assert r.data["cantidad"] == _sin_ceros_de_prueba(guardado.cantidad)
+
+
+def _sin_ceros_de_prueba(valor):
+    texto = str(valor)
+    if "." not in texto:
+        return texto
+    return texto.rstrip("0").rstrip(".") or "0"
+
+
+def test_f6_una_ORDEN_que_no_es_UUID_responde_404_no_un_500(
+    user_client, conector
+):
+    """EL MISMO DEFECTO QUE `test_a7`, EL CAMPO DE AL LADO.
+
+    `material` ya tenia su `try/except` y `orden` habia quedado abierto: un
+    texto que no es UUID entraba al `filter(id=...)` y reventaba la consulta.
+    """
+    r = _pedir(user_client, conector, orden="no-es-un-uuid")
+
+    assert r.status_code == 404, r.data
+
+
+def test_f7_una_clave_mas_larga_que_la_columna_se_rechaza(user_client, conector):
+    """`varchar(128)`: una clave de 200 caracteres reventaba el `insert`."""
+    r = _pedir(user_client, conector, idempotency_key="x" * 200)
+
+    assert r.status_code == 400
+    assert PedidoDeMaterial.objects.count() == 0
+
+
+def test_f8_una_clave_de_128_SI_entra(user_client, conector):
+    """El contrapeso del largo: el limite es el de la columna, no uno inventado."""
+    r = _pedir(user_client, conector, idempotency_key="x" * 128)
+
+    assert r.status_code == 201, r.data
+
+
+def test_f9_la_MISMA_CLAVE_de_otra_persona_no_devuelve_su_pedido(
+    user_client, conector, org_a, django_user_model
+):
+    """LA CLAVE ES POR PERSONA, NO POR EMPRESA.
+
+    Con la unicidad en `(org, clave)`, dos tecnicos que emitieran la misma
+    clave compartian fila: el segundo recibia el pedido del primero --con su
+    `motivo`, que es texto libre-- y el suyo no se creaba nunca, mientras su
+    aplicacion le decia «Bodega ya lo recibio». Con `Uuid().v4()` no pasa por
+    accidente, pero la clave la elige quien llama: la garantia no puede
+    depender de que el cliente se porte bien.
+    """
+    from common.models import Profile
+
+    otro_user = django_user_model.objects.create_user(
+        email="pedro.tecnico@test.com", password="testpass123"
+    )
+    otro = Profile.objects.create(
+        user=otro_user, org=org_a, role="USER", is_active=True
+    )
+    PedidoDeMaterial.objects.create(
+        org=org_a, profile=otro, material=conector,
+        cantidad=Decimal("5"), motivo="lo mio es mio",
+        idempotency_key="clave-compartida",
+    )
+
+    r = _pedir(user_client, conector, idempotency_key="clave-compartida")
+
+    assert r.status_code == 201, "el pedido propio TIENE que crearse"
+    assert "lo mio es mio" not in str(r.data)
+    assert PedidoDeMaterial.objects.filter(org=org_a).count() == 2
+
+
+# --------------------------------------------------------------------------- #
 # D. Lo que un pedido NO hace
 # --------------------------------------------------------------------------- #
 

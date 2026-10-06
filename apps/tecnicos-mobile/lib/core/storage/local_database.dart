@@ -3275,17 +3275,9 @@ class LocalDatabase {
     required String profileId,
   }) async {
     final db = await database;
+    final List<String> tablas = await tablasPorIdentidad();
     await db.transaction((txn) async {
-      for (final tabla in const [
-        'local_ordenes',
-        'local_datos_dirty',
-        'cola_mutaciones',
-        'cola_evidencias',
-        'local_kit',
-        'cola_movimientos_material',
-        'local_jornada',
-        'cola_incidencias',
-      ]) {
+      for (final String tabla in tablas) {
         await txn.delete(
           tabla,
           where: 'org_id = ? AND profile_id = ?',
@@ -3294,6 +3286,45 @@ class LocalDatabase {
       }
     });
     _notifyChange(orgId: orgId, profileId: profileId, tabla: 'local_ordenes');
+  }
+
+  /// Todas las tablas que guardan algo de UNA PERSONA.
+  ///
+  /// SE DERIVAN DEL ESQUEMA, no de una lista escrita a mano.
+  ///
+  /// Hasta el 06/10/2026 la purga llevaba ocho nombres a mano, y el esquema ya
+  /// tenía doce tablas con `(org_id, profile_id)`: faltaban la cola de
+  /// seguimiento, las notificaciones, los materiales de la orden y —la que lo
+  /// destapó— la cola de pedidos a bodega. Lo encontró una auditoría
+  /// independiente, y el patrón es lo grave: cada tabla nueva lo repite, y el
+  /// síntoma es que una rutina que informa «borré tus datos» deja datos.
+  ///
+  /// Con la lista derivada, una tabla nueva entra sola el día que se crea. La
+  /// prueba de la purga puede entonces afirmar sobre TODAS —antes miraba una—.
+  Future<List<String>> tablasPorIdentidad() async {
+    final db = await database;
+    final List<Map<String, Object?>> filas = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' "
+      "AND name NOT LIKE 'sqlite_%'",
+    );
+    final List<String> conIdentidad = <String>[];
+    for (final Map<String, Object?> f in filas) {
+      final String tabla = (f['name'] ?? '').toString();
+      if (tabla.isEmpty) continue;
+      final List<Map<String, Object?>> info =
+          await db.rawQuery('PRAGMA table_info($tabla);');
+      final Set<String> cols = <String>{
+        for (final Map<String, Object?> c in info) (c['name'] ?? '').toString(),
+      };
+      // Las dos: `org_id` sola la tienen tablas que son de la EMPRESA y no de
+      // la persona (el historial del servicio, por ejemplo), y esas no se
+      // borran al cambiar de técnico.
+      if (cols.contains('org_id') && cols.contains('profile_id')) {
+        conIdentidad.add(tabla);
+      }
+    }
+    conIdentidad.sort();
+    return conIdentidad;
   }
 
   /// Borra solo las evidencias ya confirmadas de una identidad.

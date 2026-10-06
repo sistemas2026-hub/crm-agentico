@@ -87,6 +87,19 @@ services:
       # haya configurado, y el log dice 'push_sin_proveedor'. Lo que NO hace es
       # anotar en campo_aviso_enviado.canales un envio que no ocurrio.
       FCM_CUENTA_DE_SERVICIO: ${FCM_CUENTA_DE_SERVICIO:-}
+      #  LA FUENTE DE FLOTA DEL SUPERVISOR NOC.
+      #
+      #  Estaba en docker-compose.yml y NO aca, asi que en produccion la
+      #  variable no llegaba al contenedor ni poniendola en Dokploy: compose
+      #  solo inyecta lo que declara. La fuente respondia NO_DISPONIBLE para
+      #  siempre --falla al lado seguro, dice «el estado de la red NO se
+      #  conoce» y nunca «sin caidas»-- pero la funcion no se podia encender.
+      #  Lo encontro una auditoria independiente; la deriva venia de la rama de
+      #  despliegue, no del merge.
+      #
+      #  El default vacio se mantiene a proposito: encender la fuente es una
+      #  decision de operacion, y se pone en las variables de Dokploy.
+      SUPERVISOR_HERRAMIENTAS_CAIDAS_PON: ${SUPERVISOR_HERRAMIENTAS_CAIDAS_PON:-}
       # Se le agrega 'backend' al dominio publico, y no es opcional: el
       # frontend llama a Django POR DENTRO de la red, con
       # PRIVATE_DJANGO_API_URL=http://backend:8000, asi que esas peticiones

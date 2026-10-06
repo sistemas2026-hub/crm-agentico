@@ -82,6 +82,15 @@ class ResumenPendientes {
   /// inventario de la empresa diciendo que el material sigue en la camioneta.
   final int movimientosDeMaterial;
 
+  /// Pedidos de material a bodega que todavía no subieron.
+  ///
+  /// CUENTAN, Y FALTABAN. Lo encontró una auditoría independiente el
+  /// 06/10/2026: un técnico que pide material sin señal y entrega el teléfono
+  /// de cuadrilla dejaba a `prepararPara` viendo cero pendientes. La identidad
+  /// se purgaba, el pedido no subía nunca —solo se suben los de la sesión
+  /// activa— y el técnico esperaba material que nadie pidió.
+  final int pedidosABodega;
+
   /// Una línea por cosa pendiente, tal como va en pantalla.
   final List<String> detalle;
 
@@ -91,6 +100,7 @@ class ResumenPendientes {
     required this.ordenesConDatos,
     required this.movimientosDeMaterial,
     required this.detalle,
+    this.pedidosABodega = 0,
   });
 
   const ResumenPendientes.vacio()
@@ -98,10 +108,15 @@ class ResumenPendientes {
         evidencias = 0,
         ordenesConDatos = 0,
         movimientosDeMaterial = 0,
+        pedidosABodega = 0,
         detalle = const <String>[];
 
   int get total =>
-      mutaciones + evidencias + ordenesConDatos + movimientosDeMaterial;
+      mutaciones +
+      evidencias +
+      ordenesConDatos +
+      movimientosDeMaterial +
+      pedidosABodega;
 
   bool get hayPendientes => total > 0;
 
@@ -168,6 +183,17 @@ class CicloDeVidaLocal {
       orgId: orgId,
       profileId: profileId,
     );
+    // LOS PEDIDOS A BODEGA TAMBIÉN CUENTAN, y faltaban.
+    //
+    // Sin esto, un técnico que pide material sin señal y entrega el teléfono de
+    // cuadrilla deja a `prepararPara` viendo cero pendientes: la identidad se
+    // purga, el pedido nunca sube —`_procesarPedidosDeMaterial` solo lee los de
+    // la sesión activa— y el técnico espera material que nadie pidió. Lo
+    // encontró una auditoría independiente.
+    final pedidos = await _db.pedidosPendientes(
+      orgId: orgId,
+      profileId: profileId,
+    );
 
     final detalle = <String>[];
     for (final m in mutaciones) {
@@ -207,11 +233,22 @@ class CicloDeVidaLocal {
       detalle.add(numero == null ? cuerpo : 'OT #$numero · $cuerpo');
     }
 
+    // Con su nombre y cantidad, igual que el material: quien lo lee reconoce
+    // lo que pidió hace una hora, no un número de filas.
+    for (final p in pedidos) {
+      final String nombre = (p['material_nombre'] ?? '').toString().trim();
+      final String cantidad = (p['cantidad'] ?? '').toString();
+      detalle.add(
+        'Pedido a bodega · ${nombre.isEmpty ? 'Material' : nombre} x$cantidad',
+      );
+    }
+
     return ResumenPendientes(
       mutaciones: mutaciones.length,
       evidencias: evidencias,
       ordenesConDatos: datos.length,
       movimientosDeMaterial: movimientos.length,
+      pedidosABodega: pedidos.length,
       detalle: detalle,
     );
   }

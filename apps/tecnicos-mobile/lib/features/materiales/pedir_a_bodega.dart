@@ -95,12 +95,36 @@ class ReglasDelPedido {
   /// Se acepta coma decimal: en Colombia es la que se escribe, y «2,5» es lo
   /// que un técnico teclea para dos metros y medio de bobina. Rechazarlo sería
   /// rechazar la forma correcta de escribirlo.
+  /// Lo que el servidor puede guardar: `numeric(12,3)`, o sea nueve dígitos
+  /// enteros. Diez revientan el `insert` del otro lado.
+  static const double tope = 1000000000;
+
+  /// La escala de la columna. Lo que queda debajo se guarda como cero.
+  static const double minimo = 0.001;
+
   static String? queLeFaltaALaCantidad(String crudo) {
     final String texto = crudo.trim();
     if (texto.isEmpty) return 'Decí cuánto necesitás.';
     final double? valor = double.tryParse(texto.replaceAll(',', '.'));
-    if (valor == null) return 'Eso no es un número.';
+    if (valor == null || valor.isNaN || !valor.isFinite) {
+      return 'Eso no es un número.';
+    }
     if (valor <= 0) return 'Tiene que ser más que cero.';
+    // LAS DOS DE ABAJO LAS ENCONTRÓ UNA AUDITORÍA, midiendo contra el servidor
+    // real. Las dos terminaban en 500, y un 500 esta cola lo reintentaba: el
+    // pedido quedaba diciendo «Sube cuando haya señal» para siempre.
+    //
+    // Se validan ACÁ además de allá porque acá hay alguien mirando: un 400 del
+    // servidor deja el pedido «fallado» y hay que volver a escribirlo entero,
+    // mientras este mensaje se corrige en el acto, sin salir de la hoja.
+    if (valor >= tope) {
+      return 'Son demasiados. El máximo es 999.999.999.';
+    }
+    if (valor < minimo) {
+      // `0,0001` pasaba el «más que cero» y el servidor lo guardaba como 0: el
+      // aviso a bodega decía «0 de Conector», que es la fila que no pide nada.
+      return 'Es muy poco: el mínimo es 0,001.';
+    }
     return null;
   }
 

@@ -52,6 +52,19 @@ class PedidosDeMaterialView(APIView):
                 {"detail": "Falta la clave de idempotencia del pedido."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if len(clave) > LARGO_DE_CLAVE:
+            # La columna es `varchar(128)`: una clave mas larga revienta el
+            # `insert` con un 500, y un 500 la cola lo reintenta. Un 400 lo
+            # cierra, que es lo correcto -- esa clave no va a entrar nunca.
+            return Response(
+                {
+                    "detail": (
+                        "La clave de idempotencia no puede pasar de "
+                        "%d caracteres." % LARGO_DE_CLAVE
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         material = _material_de(request)
         if material is None:
@@ -63,27 +76,27 @@ class PedidosDeMaterialView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        try:
-            cantidad = Decimal(str(request.data.get("cantidad")))
-        except (InvalidOperation, TypeError):
+        cantidad, problema = _cantidad_de(request.data.get("cantidad"))
+        if problema is not None:
             return Response(
-                {"detail": "La cantidad no es un número."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if cantidad <= 0:
-            # Pedir cero o menos no es un pedido. Aceptarlo llenaria la lista de
-            # bodega de filas que no piden nada.
-            return Response(
-                {"detail": "La cantidad tiene que ser mayor que cero."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"detail": problema}, status=status.HTTP_400_BAD_REQUEST
             )
 
         orden = None
         orden_id = (request.data.get("orden") or "").strip()
         if orden_id:
-            orden = OrdenTrabajo.objects.filter(
-                org=request.org, id=orden_id
-            ).first()
+            # EL MISMO ARREGLO QUE `_material_de`, UN CAMPO MAS ALLA.
+            #
+            # Un texto que no es UUID entra al `filter(id=...)` y revienta la
+            # consulta con un 500. Para `material` ya estaba resuelto
+            # --`test_a7`-- y aca habia quedado abierto: el mismo defecto, el
+            # campo de al lado. Lo encontro una auditoria independiente.
+            try:
+                orden = OrdenTrabajo.objects.filter(
+                    org=request.org, id=orden_id
+                ).first()
+            except (ValueError, ValidationError):
+                orden = None
             if orden is None:
                 return Response(
                     {"detail": "Esa orden no existe en esta empresa."},
@@ -105,8 +118,18 @@ class PedidosDeMaterialView(APIView):
             # Ya estaba: el telefono reenvio. Se devuelve el que hay, no un
             # error -- para la cola de la app esto TIENE que verse como exito o
             # lo reintenta para siempre.
+            #
+            # SE BUSCA POR PERSONA, no solo por empresa. Antes el `get` era
+            # `(org, clave)` y la constraint tambien: dos tecnicos con la misma
+            # clave compartian fila, asi que el segundo recibia el pedido del
+            # primero --con su `motivo`, que es texto libre-- y su propio
+            # pedido no se creaba nunca, mientras su aplicacion le decia
+            # «Bodega ya lo recibio». La clave identifica la SOLICITUD, y dos
+            # personas distintas son dos solicitudes distintas.
             pedido = PedidoDeMaterial.objects.get(
-                org=request.org, idempotency_key=clave
+                org=request.org,
+                profile=request.profile,
+                idempotency_key=clave,
             )
             return Response(_como_se_ve(pedido), status=status.HTTP_200_OK)
 
@@ -114,6 +137,64 @@ class PedidosDeMaterialView(APIView):
         # el pedido se deshace, bodega no se entera de algo que no paso.
         avisar_pedido_de_material(pedido)
         return Response(_como_se_ve(pedido), status=status.HTTP_201_CREATED)
+
+
+#: Lo que aguanta la columna `idempotency_key`.
+LARGO_DE_CLAVE = 128
+
+#: `DecimalField(max_digits=12, decimal_places=3)` -> `numeric(12,3)`: tres
+#: decimales y **nueve** digitos para la parte entera.
+DECIMALES = Decimal("0.001")
+TOPE = Decimal(10) ** 9
+
+
+def _cantidad_de(crudo):
+    """La cantidad pedida, o el motivo por el que no sirve.
+
+    POR QUE NO ALCANZABA CON «MAYOR QUE CERO»
+    -----------------------------------------
+    Lo encontro una auditoria independiente, midiendo contra PostgreSQL real.
+    La version anterior construia el `Decimal` y comprobaba `> 0`, y eso dejaba
+    pasar tres cosas que terminaban en **500**:
+
+    * **Diez digitos.** `numeric(12,3)` admite nueve enteros, asi que
+      `1000000000` reventaba el `insert` con `numeric field overflow`. Y un 500
+      la cola lo reintenta: el pedido quedaba diciendo «Sube cuando haya senal»
+      para siempre, con el tecnico esperando material que no venia. Se teclea
+      con el dedo gordo en el teclado numerico.
+    * **`NaN` e `Infinity`.** `Decimal("NaN")` se construye sin error; es la
+      comparacion `<= 0` la que lanza `InvalidOperation`, una linea despues del
+      `try`.
+    * **`0.0001`.** Pasaba el «mayor que cero» y se guardaba como `0.000`:
+      bodega recibia un aviso que decia «0 de Conector SC/APC», que es
+      exactamente la fila que no pide nada que esa guarda existe para evitar.
+
+    Se cuantiza ANTES de validar, y se devuelve el valor cuantizado: asi lo que
+    se guarda es lo mismo que la respuesta le muestra al telefono. Antes el 201
+    devolvia `0.0001` mientras la fila tenia `0.000`.
+    """
+    try:
+        valor = Decimal(str(crudo))
+    except (InvalidOperation, TypeError, ValueError):
+        return None, "La cantidad no es un número."
+
+    if not valor.is_finite():
+        return None, "La cantidad no es un número."
+
+    # A tres decimales, que es lo que la columna guarda. Lo que se pierde aca
+    # se pierde igual al escribir; la diferencia es que aca se puede rechazar.
+    try:
+        valor = valor.quantize(DECIMALES)
+    except InvalidOperation:
+        # Mas digitos de los que el contexto puede cuantizar: es el mismo caso
+        # que el tope de abajo, atrapado antes.
+        return None, "La cantidad es demasiado grande."
+
+    if valor <= 0:
+        return None, "La cantidad tiene que ser mayor que cero."
+    if valor >= TOPE:
+        return None, "La cantidad es demasiado grande."
+    return valor, None
 
 
 def _material_de(request):
