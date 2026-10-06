@@ -39,6 +39,7 @@
   import Reportes from '$lib/v2/inventario/Reportes.svelte';
   import BuscarAparato from '$lib/v2/inventario/BuscarAparato.svelte';
   import Materiales from '$lib/v2/inventario/Materiales.svelte';
+  import Ubicaciones from '$lib/v2/inventario/Ubicaciones.svelte';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
@@ -81,7 +82,12 @@
     // El maestro del catálogo, al final: contesta «qué cosas maneja esta
     // empresa», que es otra pregunta que las nueve de arriba y se toca mucho
     // menos. Ponerla primero correría de lugar el trabajo de todos los días.
-    { id: 'materiales', texto: 'Materiales' }
+    { id: 'materiales', texto: 'Materiales' },
+    // DONDE puede estar el material, al lado del QUE maneja la empresa: las
+    // dos son maestros y las dos se tocan casi nunca. Faltaba, y sin una
+    // bodega «Registrar entrada» no tiene destino -- el modulo quedaba
+    // trabado antes de empezar, con el endpoint ya construido.
+    { id: 'ubicaciones', texto: 'Ubicaciones' }
   ];
 
   /**
@@ -299,6 +305,8 @@
           <BuscarAparato consulta={data.consulta} serieConsultada={data.serieConsultada} />
         {:else if pestana === 'materiales'}
           <Materiales catalogo={data.catalogo} {form} />
+        {:else if pestana === 'ubicaciones'}
+          <Ubicaciones ubicaciones={data.ubicaciones} {form} />
         {/if}
       </div>
     </div>

@@ -3,6 +3,7 @@ import {
   leerExistencias,
   leerCatalogo,
   leerUbicaciones,
+  crearUbicacion,
   leerSerie,
   leerPersonas,
   registrarEntrada,
@@ -420,6 +421,27 @@ export const actions = {
           ? `El material ${r?.codigo} quedó actualizado.`
           : `El material ${r?.codigo} quedó dado de alta.`
       };
+    } catch (e) {
+      return fail(409, { error: mensajeDe(e) });
+    }
+  },
+
+  // DONDE PUEDE ESTAR EL MATERIAL. Faltaba la pantalla, y sin una bodega no
+  // hay donde registrar una entrada: el inventario quedaba trabado antes de
+  // empezar. El endpoint existia desde el primer dia; lo que no existia era el
+  // boton.
+  //
+  // La custodia de un TECNICO no se crea aca --el backend la rechaza-- porque
+  // nace sola al despacharle material. Asi no puede quedar una custodia sin
+  // dueño ni dos para la misma persona.
+  ubicacion: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const nombre = String(f.get('nombre') ?? '').trim();
+    const tipo = String(f.get('tipo') ?? 'bodega').trim();
+    try {
+      const r = await crearUbicacion({ cookies }, { nombre, tipo });
+      const que = r?.tipo === 'vehiculo' ? 'El vehículo' : 'La bodega';
+      return { hecho: `${que} ${r?.nombre} quedó dada de alta.` };
     } catch (e) {
       return fail(409, { error: mensajeDe(e) });
     }

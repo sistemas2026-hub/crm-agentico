@@ -76,6 +76,20 @@ export async function leerUbicaciones(ctx) {
 }
 
 /**
+ * Da de alta una bodega o un vehículo.
+ *
+ * NO sirve para la custodia de un técnico, y el backend lo rechaza: esa nace
+ * sola la primera vez que se le despacha material, para que no pueda quedar
+ * una custodia sin dueño ni dos para la misma persona.
+ *
+ * @param {{cookies: any}} ctx
+ * @param {Record<string, any>} cuerpo
+ */
+export async function crearUbicacion(ctx, cuerpo) {
+  return apiRequest('/campo/inventario/ubicaciones/', { method: 'POST', body: cuerpo }, ctx);
+}
+
+/**
  * La historia de un aparato por su serie.
  *
  * @param {{cookies: any}} ctx
