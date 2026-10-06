@@ -110,7 +110,7 @@ void main() {
       expect(find.textContaining('Faltan'), findsNothing);
       expect(find.textContaining('Falta'), findsNothing,
           reason: 'no queda nada pendiente, y el kit nunca se tocó');
-      expect(find.text('Finalizar orden'), findsOneWidget);
+      expect(find.text('Finalizar'), findsOneWidget);
 
       // Hasta acá llega este escenario, a propósito.
       //

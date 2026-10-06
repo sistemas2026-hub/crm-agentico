@@ -37,7 +37,18 @@ class SyncPresentacion {
       // tiene sin enviar, de cualquier orden, y adentro de una orden hay otra
       // frase que cuenta solo la de ella. Sin decir cual es cual, las dos
       // parecen significar lo mismo y una de las dos parece estar mintiendo.
-      final pendientes = 'cola: ${resumen.totalPendientes}';
+      // EL NUMERO PRIMERO, Y NO ES ESTILO.
+      //
+      // Estuvo como «cola: 3» y la guarda de la matriz lo cazo: esta pastilla
+      // esta capada a 150 px, el corte caia ANTES del digito, y «Pendiente ·
+      // cola: 3» y «Pendiente · cola: 1 · sin conexion» se dibujaban iguales
+      // --«PENDIENTE · CO...»--. Dos estados distintos que se ven igual son
+      // peores que uno mal escrito.
+      //
+      // Con el numero adelante sobrevive al corte, y «en cola» sigue diciendo
+      // de QUE cola habla, que es lo que la distingue del «Esta OT: n» del
+      // bloque de la orden.
+      final pendientes = '${resumen.totalPendientes} en cola';
       return resumen.hasConnectionError ? '$pendientes · sin conexión' : pendientes;
     }
     if (resumen.hasConnectionError) return 'Sin conexión';

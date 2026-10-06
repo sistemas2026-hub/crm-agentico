@@ -301,7 +301,7 @@ void main() {
       );
 
       // …y el botón también, nombrando qué falta.
-      await t.tap(find.text('Finalizar orden'));
+      await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
 
       expect(fuente.transiciones, isEmpty, reason: 'no se cerró la orden');
@@ -331,7 +331,7 @@ void main() {
         reason: 'un valor que no sirve cuenta como faltante, no como hecho',
       );
 
-      await t.tap(find.text('Finalizar orden'));
+      await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
 
       expect(
@@ -353,7 +353,7 @@ void main() {
       expect(find.textContaining('Falta'), findsNothing,
           reason: 'el checklist no tiene nada que objetar');
 
-      await t.tap(find.text('Finalizar orden'));
+      await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
 
       expect(fuente.transiciones, hasLength(1));
@@ -384,7 +384,7 @@ void main() {
       await t.pumpWidget(app(fuente));
       await t.pumpAndSettle();
 
-      await t.tap(find.text('Finalizar orden'));
+      await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
 
       expect(fuente.transiciones, isEmpty);
@@ -629,11 +629,19 @@ void main() {
       // capturadas» abajo: dos palabras para dos hechos distintos, y
       // «cargada» se lee como que el servidor ya la tiene. Ahora los dos
       // numeros van juntos y separados.
-      expect(find.textContaining('Fotos de esta orden:'), findsOneWidget);
+      expect(find.textContaining('Fotos'), findsOneWidget);
       expect(find.textContaining('cargadas'), findsNothing);
       expect(find.text('0%'), findsOneWidget);
+      // UNA LINEA POR HECHO: juntas en un renglon necesitaban 359 px y a
+      // 360 px de pantalla hay 262 --se cortaba el numero de enviadas, que
+      // es el que importa. Ver `guarda_de_texto_entero_test.dart`.
       expect(
-        find.text('0/3 capturadas · 0/3 enviadas'),
+        find.text('0/3 capturadas'),
+        findsOneWidget,
+        reason: 'lo que el tecnico tomo',
+      );
+      expect(
+        find.text('0/3 enviadas'),
         findsOneWidget,
         reason: 'las dos cuentas SIEMPRE, incluso en cero: el caso en que '
             'ninguna salio del telefono es justo el que no puede callarse',

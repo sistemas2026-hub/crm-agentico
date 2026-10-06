@@ -70,7 +70,7 @@ void main() {
 
     test('Lo de hoy dice hoy', () {
       final String texto = textoDelMomentoCrudo(
-        DateTime(2026, 10, 6, 8, 17).toIso8601String() + 'Z',
+        '${DateTime(2026, 10, 6, 8, 17).toIso8601String()}Z',
         ahora: ahora,
       );
       // La hora exacta depende de la zona del dispositivo; lo que importa es

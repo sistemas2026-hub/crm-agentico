@@ -19,6 +19,9 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:campo/core/sync/sync_presentacion.dart';
+import 'package:campo/core/sync/sync_queue_service.dart';
+import 'package:campo/core/widgets/dexter_sync_badge.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -136,6 +139,50 @@ void main() {
           reason: 'una cola que se sube y no se cuenta hace que el '
               'encabezado diga «Sincronizado» con reportes esperando');
       expect(cuerpo, contains('seguimientos_pendientes'));
+    });
+  });
+
+  group('Y la pastilla del encabezado deja de decir «Sincronizado»', () {
+    // ESTE ES EL CASO QUE SE VE EN LA PANTALLA, y el que de verdad cerraba
+    // el defecto: `SyncSummary.totalPendientes` recalculaba el total por su
+    // cuenta e ignoraba la cola de seguimiento, asi que arreglar
+    // `getSyncCounts` solo no alcanzaba.
+    SyncSummary conSeguimientos(int n) => SyncSummary(
+          status: SyncStatus.idle,
+          isSyncing: false,
+          hasConnectionError: false,
+          mutacionesPendientes: 0,
+          mutacionesConflicto: 0,
+          evidenciasPendientes: 0,
+          seguimientosPendientes: n,
+          datosDirty: 0,
+        );
+
+    test('Con reportes esperando, NO dice sincronizado', () {
+      final SyncSummary r = conSeguimientos(2);
+
+      expect(r.totalPendientes, 2,
+          reason: 'la cola de seguimiento tiene que entrar en el total');
+      expect(r.isClean, isFalse);
+      expect(SyncPresentacion.estado(r), DexterSyncStatus.pendiente,
+          reason: 'decía «Sincronizado» con reportes adentro de la orden');
+      expect(SyncPresentacion.detalle(r), '2 en cola',
+          reason: 'y el detalle dice de QUE cola habla, para no confundirse '
+              'con el «Esta OT: n» del bloque de la orden');
+    });
+
+    test('Sin nada esperando, sí dice sincronizado', () {
+      final SyncSummary r = conSeguimientos(0);
+
+      expect(r.totalPendientes, 0);
+      expect(SyncPresentacion.estado(r), DexterSyncStatus.sincronizado);
+    });
+
+    test('El botón de sincronizar ahora se ofrece por esta cola también', () {
+      // Antes no: `puedeSincronizarAhora` mira `totalPendientes`, que no la
+      // contaba. Un técnico con reportes esperando no tenía cómo empujarlos.
+      expect(SyncPresentacion.puedeSincronizarAhora(conSeguimientos(1)), isTrue);
+      expect(SyncPresentacion.puedeSincronizarAhora(conSeguimientos(0)), isFalse);
     });
   });
 

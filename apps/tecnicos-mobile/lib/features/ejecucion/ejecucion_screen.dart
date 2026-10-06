@@ -1384,7 +1384,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
               // tiene nadie. Lo que esta fila cuenta es lo que hay TOMADO.
               Flexible(
                 child: Text(
-                  'Fotos de esta orden:',
+                  'Fotos',
                   style: AppTypography.labelTelemetry,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -1437,58 +1437,92 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.xs),
-          Row(
-            children: <Widget>[
-              // EL ICONO SIGUE AL SEGUNDO NUMERO, NO AL PRIMERO. Un tilde
-              // verde al lado de «0/2 enviadas» contradice al texto que tiene
-              // pegado, y de los dos el que se mira de reojo es el ícono.
-              Icon(
-                enviadas == hechas
-                    ? Icons.check_circle
-                    : Icons.cloud_upload_outlined,
-                size: 14,
-                color: enviadas == hechas
-                    ? AppColors.onTertiaryContainer
-                    : AppColors.outline,
-              ),
-              const SizedBox(width: 4),
-              // LOS DOS NUMEROS, SIEMPRE, Y NUNCA UNO SOLO.
-              //
-              // `0/2 enviadas` con `2/2 capturadas` es exactamente lo que el
-              // técnico necesita ver sin red: puede seguir trabajando
-              // tranquilo, y al cerrar jornada sabe qué falta salir del
-              // teléfono. Si solo se mostrara el total enviado cuando es
-              // mayor que cero, el caso importante —ninguna salió— sería
-              // justo el que se calla.
-              Flexible(
-                child: Text(
-                  '$hechas/$total capturadas · $enviadas/$total enviadas',
-                  style: AppTypography.labelCaption.copyWith(
-                    color: enviadas == hechas
-                        ? AppColors.onTertiaryContainer
-                        : AppColors.outline,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const Spacer(),
-              if (obligatoriasPendientes > 0) ...<Widget>[
+          // UNA LINEA POR HECHO, Y NUNCA LAS DOS EN UNA.
+          //
+          // Estuvieron en un renglon --«0/3 capturadas · 0/3 enviadas»-- y a
+          // 360 px ese texto necesita 359 px cuando hay 262: se cortaba 97 px
+          // y se perdia el numero de enviadas, que es el que importa. A 390 se
+          // perdian 67 px y a 412 otros 45, asi que no era el telefono chico:
+          // era el renglon.
+          //
+          // Partirlo en dos no es una concesion al ancho. Son DOS HECHOS
+          // distintos --la foto existe / la empresa la tiene-- y leerlos uno
+          // debajo del otro, cada uno con su icono y su color, dice eso mejor
+          // que un punto medio entre ambos.
+          _unaCuentaDeFotos(
+            icono: hechas == total ? Icons.check_circle : Icons.photo_camera,
+            texto: '$hechas/$total capturadas',
+            color: hechas == total
+                ? AppColors.onTertiaryContainer
+                : AppColors.outline,
+          ),
+          const SizedBox(height: 2),
+          _unaCuentaDeFotos(
+            // El icono sigue a ESTA cuenta, no a la de arriba: un tilde verde
+            // al lado de «0/3 enviadas» contradice al texto que tiene pegado,
+            // y de los dos el que se mira de reojo es el icono.
+            icono: enviadas == hechas && hechas > 0
+                ? Icons.cloud_done
+                : Icons.cloud_upload_outlined,
+            texto: '$enviadas/$total enviadas',
+            color: enviadas == hechas && hechas > 0
+                ? AppColors.onTertiaryContainer
+                : AppColors.outline,
+          ),
+          // LO QUE FALTA VA EN SU PROPIA FILA.
+          //
+          // Compartia renglon con las dos cuentas y le robaba el ancho. Son
+          // dos informaciones distintas --cuanto hay y que falta-- y cada una
+          // necesita su linea para leerse entera en un telefono.
+          if (obligatoriasPendientes > 0) ...<Widget>[
+            const SizedBox(height: AppSpacing.xs),
+            Row(
+              children: <Widget>[
                 const Icon(Icons.error, size: 14, color: AppColors.error),
                 const SizedBox(width: 4),
-                Text(
-                  obligatoriasPendientes == 1
-                      ? '1 requerida pendiente'
-                      : '$obligatoriasPendientes requeridas pendientes',
-                  style: AppTypography.labelCaption.copyWith(
-                    color: AppColors.error,
+                Expanded(
+                  child: Text(
+                    obligatoriasPendientes == 1
+                        ? '1 requerida pendiente'
+                        : '$obligatoriasPendientes requeridas pendientes',
+                    style: AppTypography.labelCaption.copyWith(
+                      color: AppColors.error,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
-            ],
-          ),
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  /// Una de las dos cuentas de fotos: icono, numero y palabra.
+  ///
+  /// Vive aparte para que las dos se dibujen igual: si una tuviera otro
+  /// tamaño o otra separacion, se leerian como cosas de distinta importancia,
+  /// y no lo son.
+  Widget _unaCuentaDeFotos({
+    required IconData icono,
+    required String texto,
+    required Color color,
+  }) {
+    return Row(
+      children: <Widget>[
+        Icon(icono, size: 14, color: color),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(
+            texto,
+            style: AppTypography.labelCaption.copyWith(color: color),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 
@@ -1550,9 +1584,25 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
             horizontal: AppSpacing.margen,
             vertical: AppSpacing.md,
           ),
+          // A 360 px ESTA FILA DESBORDABA 67 PIXELES, Y A 412 OTROS 15.
+          //
+          // El boton de borrador tomaba su ancho natural y «Finalizar orden»
+          // se quedaba con lo que sobraba: 175 px para un contenido de 242.
+          // O sea que el boton que CIERRA la orden aparecia cortado en el
+          // telefono mas comun de una cuadrilla, y con la letra en 1.3 --lo
+          // primero que sube quien trabaja al sol-- peor.
+          //
+          // No lo detectaba ninguna prueba porque la guarda de ancho real no
+          // cubria esta pantalla: cubria inicio, la lista, la ficha, bodega,
+          // materiales y visitas. Ahora la cubre.
+          //
+          // Los dos ceden, y el secundario cede PRIMERO (flex 1 contra 2):
+          // su texto es «Borrador»/«Guardado» y lo respalda un icono, asi que
+          // es el que se puede perder. El principal no.
           child: Row(
             children: [
-              Material(
+              Flexible(
+                child: Material(
                 color: AppColors.surfaceContainer,
                 borderRadius: AppRadius.brTarjeta,
                 child: InkWell(
@@ -1573,10 +1623,14 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                           color: AppColors.onSurface,
                         ),
                         const SizedBox(width: AppSpacing.xs),
-                        Text(
-                          _borradorConfirmado ? 'Guardado' : 'Borrador',
-                          style: AppTypography.etiqueta.copyWith(
-                            color: AppColors.onSurface,
+                        Flexible(
+                          child: Text(
+                            _borradorConfirmado ? 'Guardado' : 'Borrador',
+                            style: AppTypography.etiqueta.copyWith(
+                              color: AppColors.onSurface,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -1584,8 +1638,10 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                   ),
                 ),
               ),
+              ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
+                flex: 2,
                 child: Material(
                   color: AppColors.primary,
                   borderRadius: AppRadius.brTarjeta,
@@ -1598,10 +1654,19 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            'Finalizar orden',
-                            style: AppTypography.etiquetaGrande.copyWith(
-                              color: AppColors.onPrimary,
+                          // «FINALIZAR» Y NO «FINALIZAR ORDEN». El objeto se
+                          // entiende por donde esta parado el tecnico --dentro
+                          // de la orden, en su barra de abajo-- y la palabra
+                          // de mas era justo la que no entraba. Cortarla a
+                          // «Finalizar ord...» habria sido peor que sacarla.
+                          Flexible(
+                            child: Text(
+                              'Finalizar',
+                              style: AppTypography.etiquetaGrande.copyWith(
+                                color: AppColors.onPrimary,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           const SizedBox(width: AppSpacing.sm),

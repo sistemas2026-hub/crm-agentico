@@ -1879,32 +1879,37 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     ahora: DateTime.now(),
   );
 
-  /// `Equipo Offline · último cambio 06 oct · 10:42`
+  /// `último cambio 06 oct · 10:42 (hora de la OLT)`, o `''` si no hay.
   ///
-  /// POR QUE JUNTOS. Un `Offline` solo no dice si el equipo se cayó hace diez
-  /// minutos o hace dos meses, y esas dos cosas se atienden distinto: la
+  /// POR QUE SE MUESTRA. Un `Offline` solo no dice si el equipo se cayó hace
+  /// diez minutos o hace dos meses, y esas dos cosas se atienden distinto: la
   /// primera puede ser la falla que se vino a resolver, la segunda es un
   /// cliente que ya no está. El dato viajaba desde el motor
   /// (`api.py::_CAMPOS_DE_EQUIPO`) hasta `TrabajoVista.ultimoCambioEquipo` y
   /// no se dibujaba en ninguna pantalla.
   ///
+  /// VA EN SU PROPIO RENGLON, pegado al estado. Se intentó primero en la
+  /// misma línea —«Equipo Offline · último cambio 05 oct · 10:42 (hora de la
+  /// OLT)»— y se cortaba a 360, 390 y 412 px, incluso con dos líneas. Lo que
+  /// quedaba afuera era la hora, que es el dato nuevo.
+  ///
   /// SE DICE «ULTIMO CAMBIO», NO «DESDE». `desde` afirma una duración, y
   /// calcularla exige saber en qué zona está esa hora — y SmartOLT la manda
-  /// sin offset. `MomentoLeido` deja eso declarado y el texto se queda en lo
-  /// que sí se puede sostener: el sello, con el reloj del que salió.
-  static String _estadoConSuUltimoCambio(TrabajoVista trabajo) {
-    if (trabajo.estadoOnu.isEmpty) return 'Sin lectura';
+  /// sin offset en toda ficha anterior al 06/10/2026. `MomentoLeido` deja eso
+  /// declarado y el texto se queda en lo que sí se puede sostener: el sello,
+  /// con el reloj del que salió.
+  static String _ultimoCambioDelEquipo(TrabajoVista trabajo) {
+    if (trabajo.estadoOnu.isEmpty) return '';
 
-    final String estado = 'Equipo ${trabajo.estadoOnu}';
     final MomentoLeido? cambio = trabajo.ultimoCambioEquipoLeido;
-    if (cambio == null) return estado;
+    if (cambio == null) return '';
 
     final String cuando = textoDelMomento(
       cambio,
       ahora: DateTime.now(),
       origen: 'la OLT',
     );
-    return '$estado · último cambio $cuando';
+    return 'último cambio $cuando';
   }
 
   /// Por qué esta orden no trae datos del equipo.
@@ -2757,7 +2762,10 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
             valor: trabajo.serialOnu.isNotEmpty
                 ? trabajo.serialOnu
                 : (widget.mostrarDatosFuturos ? FieldMockData.serialOnt : '—'),
-            detalle: _estadoConSuUltimoCambio(trabajo),
+            detalle: trabajo.estadoOnu.isNotEmpty
+                ? 'Equipo ${trabajo.estadoOnu}'
+                : 'Sin lectura',
+            detalleSecundario: _ultimoCambioDelEquipo(trabajo),
           ),
           const SizedBox(height: AppSpacing.sm),
           // CAMPO-DATA-011, ya no es de ejemplo: el puerto PON y la caja
@@ -3406,11 +3414,20 @@ class _CajaDato extends StatelessWidget {
     required this.titulo,
     required this.valor,
     required this.detalle,
+    this.detalleSecundario = '',
   });
 
   final String titulo;
   final String valor;
   final String detalle;
+
+  /// Un segundo renglón, para lo que no entra pegado al primero.
+  ///
+  /// Vacío por omisión: las cajas que no lo pasan se dibujan exactamente como
+  /// antes. Existe porque el sello del último cambio del equipo no entra en
+  /// la misma línea que el estado en ningún ancho de teléfono medido, y
+  /// separarlo en otra caja los alejaría — se leen juntos o no sirven.
+  final String detalleSecundario;
 
   @override
   Widget build(BuildContext context) {
@@ -3440,6 +3457,15 @@ class _CajaDato extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
+          if (detalleSecundario.isNotEmpty)
+            Text(
+              detalleSecundario,
+              style: AppTypography.etiquetaChica,
+              // Dos líneas: el sello con su día, su hora y el reloj del que
+              // salió no entra en un renglón de media pantalla.
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
         ],
       ),
     );

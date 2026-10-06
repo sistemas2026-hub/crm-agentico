@@ -6,11 +6,14 @@ import 'package:campo/core/sync/sync_queue_service.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/detalle_orden/acciones_orden.dart';
 import 'package:campo/features/detalle_orden/detalle_orden_screen.dart';
+import 'package:campo/features/ejecucion/ejecucion_screen.dart';
 import 'package:campo/features/detalle_orden/visitas_anteriores.dart';
 import 'package:campo/features/inicio/inicio_screen.dart';
 import 'package:campo/features/trabajo/trabajo_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'apoyo/fuente_de_ejecucion_falsa.dart';
 import 'package:campo/features/materiales/kit_de_jornada.dart';
 import 'package:campo/features/materiales/material_en_custodia.dart';
 import 'package:campo/features/materiales/materiales_screen.dart';
@@ -90,7 +93,17 @@ void main() {
   /// gesto, el texto queda cortado y ya.
   const double alto = 800;
 
-  Map<String, dynamic> ordenDeEjemplo() => <String, dynamic>{
+  /// La orden de ejemplo, con los datos LARGOS y el sello del equipo.
+  ///
+  /// [ultimoCambio] es el valor de `last_status_change` tal como puede llegar:
+  /// con offset (las fichas nuevas, que el motor normaliza) o SIN offset (las
+  /// congeladas antes del 06/10/2026, y las de una instancia cuya zona no se
+  /// pudo resolver). Las dos formas conviven y las dos tienen que entrar --la
+  /// segunda ocupa MAS, porque lleva «(hora de la OLT)» pegado.
+  Map<String, dynamic> ordenDeEjemplo({
+    String ultimoCambio = '2026-10-05T10:42:00-05:00',
+    String estadoOnu = 'Online',
+  }) => <String, dynamic>{
         'id': 'ot-1',
         'numero': 1849,
         'estado': 'en_sitio',
@@ -111,7 +124,13 @@ void main() {
           'servicio': 'WH-1042',
           'sn_onu': 'ZTEGC0A1B2C3',
           'equipo': <String, dynamic>{
-            'onu_status': 'Online',
+            'onu_status': estadoOnu,
+            // EL SELLO DEL ULTIMO CAMBIO, que ahora se dibuja pegado al
+            // estado: es la fila que mas crecio en esta pantalla.
+            'last_status_change': ultimoCambio,
+            // Un modelo de ONU con nombre entero, no 'ZTE'. Es el dato que
+            // comparte fila con el serial de doce caracteres.
+            'onu_type_name': 'ZTE F660 V8.0 GPON ONU (2GE+2FE+WiFi+POTS)',
             'onu_signal_1490': '-21.19 dBm',
             'onu_signal_1310': '-23.98 dBm',
             'onu_signal_1490_veredicto': 'aceptable',
@@ -124,11 +143,12 @@ void main() {
         }),
       };
 
-  OrdenesJornada armarOrdenes(WidgetTester t) {
+  OrdenesJornada armarOrdenes(WidgetTester t, {Map<String, dynamic>? orden}) {
     final StreamController<SyncStatus> avisos =
         StreamController<SyncStatus>.broadcast();
     final OrdenesJornada ordenes = OrdenesJornada(
-      leerOrdenes: () async => <Map<String, dynamic>>[ordenDeEjemplo()],
+      leerOrdenes: () async =>
+          <Map<String, dynamic>>[orden ?? ordenDeEjemplo()],
       sincronizar: () async {},
       avisosDeSincronizacion: avisos.stream,
     );
@@ -229,6 +249,135 @@ void main() {
                 required int revisionBase,
               }) async {},
               sincronizar: () async {},
+            ),
+          ),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
+      // ====================================================================
+      //  LO QUE CRECIO EL 06/10/2026, MEDIDO AL ANCHO DE UN TELEFONO
+      // ====================================================================
+      //  Estos casos entraron porque un tecnico de red miro las capturas y
+      //  marco DOS riesgos de layout antes de que nadie los hubiera medido:
+      //  la fila de fotos (que ya desbordo 28 px una vez) y el bloque del
+      //  serial, que crecio al sumarle el sello del ultimo cambio.
+      //
+      //  No se verifican con una captura dorada a proposito: lo que importa
+      //  no es que los pixeles sean iguales, es que el numero importante no
+      //  se corte. Ver el encabezado de este archivo.
+
+      testWidgets('La ficha entra con el ultimo cambio SIN zona',
+          (WidgetTester t) async {
+        // El caso que ocupa MAS: una ficha congelada antes del 06/10/2026
+        // llega sin offset, y el texto lleva «(hora de la OLT)» pegado para
+        // no insinuar una antiguedad que no se puede calcular. Es mas largo
+        // que el caso normalizado, asi que si entra este, entra el otro.
+        final OrdenesJornada ordenes = armarOrdenes(
+          t,
+          orden: ordenDeEjemplo(
+            ultimoCambio: '2026-10-05 10:42:00',
+            estadoOnu: 'Offline',
+          ),
+        );
+        await aEsteAncho(t, ancho, () => DetalleOrdenScreen(
+              ordenId: 'ot-1',
+              ordenes: ordenes,
+              acciones: AccionesOrden(
+                transicionar: ({
+                  required String ordenId,
+                  required String nuevoEstadoLocal,
+                  required String tipoAccion,
+                  required int revisionBase,
+                }) async {},
+                sincronizar: () async {},
+              ),
+            ));
+      });
+
+      testWidgets('Y tambien con la letra grande, que es donde revienta',
+          (WidgetTester t) async {
+        final OrdenesJornada ordenes = armarOrdenes(
+          t,
+          orden: ordenDeEjemplo(
+            ultimoCambio: '2026-10-05 10:42:00',
+            estadoOnu: 'Offline',
+          ),
+        );
+        await aEsteAncho(
+          t,
+          ancho,
+          () => DetalleOrdenScreen(
+            ordenId: 'ot-1',
+            ordenes: ordenes,
+            acciones: AccionesOrden(
+              transicionar: ({
+                required String ordenId,
+                required String nuevoEstadoLocal,
+                required String tipoAccion,
+                required int revisionBase,
+              }) async {},
+              sincronizar: () async {},
+            ),
+          ),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
+      // La fila de fotos, en los TRES estados. El que mas ocupa no es el
+      // lleno: es cualquiera con dos numeros de dos digitos y la palabra
+      // entera, y el que mas importa es «nada enviada», que es el caso real
+      // de un tecnico sin señal.
+      for (final (String nombre, int enviadas) in <(String, int)>[
+        ('nada capturado', 0),
+        ('todo capturado, nada enviado', 0),
+        ('todo capturado y enviado', 3),
+      ]) {
+        testWidgets('La ejecucion entra con $nombre', (WidgetTester t) async {
+          final bool conFotos = nombre != 'nada capturado';
+          await aEsteAncho(
+            t,
+            ancho,
+            () => EjecucionScreen(
+              ordenId: 'ot-1',
+              fuente: FuenteDeEjecucionFalsa(
+                evidencias: !conFotos
+                    ? <Map<String, dynamic>>[]
+                    : <Map<String, dynamic>>[
+                        for (final String req in <String>[
+                          'foto_power_meter',
+                          'foto_roseta',
+                          'firma_cliente',
+                        ])
+                          FuenteDeEjecucionFalsa.evidencia(
+                            requisitoId: req,
+                            estado: enviadas == 3 ? 'confirmada' : 'pendiente',
+                          ),
+                      ],
+              ),
+            ),
+          );
+        });
+      }
+
+      testWidgets('La ejecucion entra con letra grande y las dos cuentas',
+          (WidgetTester t) async {
+        await aEsteAncho(
+          t,
+          ancho,
+          () => EjecucionScreen(
+            ordenId: 'ot-1',
+            fuente: FuenteDeEjecucionFalsa(
+              evidencias: <Map<String, dynamic>>[
+                FuenteDeEjecucionFalsa.evidencia(
+                  requisitoId: 'foto_power_meter',
+                  estado: 'confirmada',
+                ),
+                FuenteDeEjecucionFalsa.evidencia(
+                  requisitoId: 'foto_roseta',
+                  estado: 'pendiente',
+                ),
+              ],
             ),
           ),
           escalaDeLetra: letraGrande,
