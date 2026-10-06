@@ -215,13 +215,96 @@ function contar(existencias) {
 export const actions = {
   entrada: async ({ request, cookies }) => {
     const f = await request.formData();
+    const material = f.get('material');
+    const destino = f.get('ubicacion_destino');
+    const origenRef = String(f.get('origen_ref') ?? '').trim();
+
+    // VARIAS SERIES EN UNA SOLA RECEPCION
+    // -----------------------------------
+    // Un lote de 50 ONT eran 50 envios del formulario. El backend ya lo
+    // soportaba bien y nadie lo habia expuesto: la clave de idempotencia de una
+    // entrada incluye la SERIE --`_clave_de_hecho("entrada", origen_ref, org,
+    // material, serie or cantidad)`-- asi que 50 series distintas con la misma
+    // factura son 50 claves distintas, y repetir una serie ya cargada con esa
+    // misma factura queda bloqueada como duplicado. O sea: cargar de a muchas
+    // es seguro por diseño, de a una era solo la pantalla.
+    const lote = String(f.get('series') ?? '').trim();
+    if (lote) {
+      // Una por linea, o separadas por coma/punto y coma: de una factura se
+      // copia de las tres formas.
+      const crudas = lote
+        .split(/[\s,;]+/)
+        .map((x) => x.trim().toUpperCase())
+        .filter(Boolean);
+
+      // LOS REPETIDOS DE LA PROPIA LISTA SE AVISAN, NO SE MANDAN.
+      // Pegar dos veces la misma serie es el error mas comun al copiar de una
+      // factura, y mandarla dos veces produciria un rechazo del servidor que
+      // se lee como «ya esta en otra custodia» y asusta sin motivo.
+      const vistas = new Set();
+      const repetidas = [];
+      const series = [];
+      for (const x of crudas) {
+        if (vistas.has(x)) repetidas.push(x);
+        else {
+          vistas.add(x);
+          series.push(x);
+        }
+      }
+
+      if (series.length === 0) {
+        return fail(400, { error: 'No se leyó ninguna serie en la lista.' });
+      }
+      if (!origenRef) {
+        // En una carga de muchas deja de ser un detalle: sin referencia el
+        // sistema no puede distinguir un segundo registro del mismo hecho.
+        return fail(400, {
+          error: 'Para cargar varias series hace falta la referencia de origen: '
+            + 'es lo que evita duplicar la recepción entera si se envía dos veces.'
+        });
+      }
+
+      const entraron = [];
+      const fallaron = [];
+      for (const serie of series) {
+        try {
+          await registrarEntrada({ cookies }, {
+            material,
+            cantidad: 1,
+            serie,
+            ubicacion_destino: destino,
+            origen_ref: origenRef
+          });
+          entraron.push(serie);
+        } catch (e) {
+          // NO SE CORTA ANTE EL PRIMER ERROR. Si la septima serie ya esta en
+          // otra custodia, las otras 49 tienen que entrar igual: cortar
+          // obligaria a rehacer la lista a mano para reintentar.
+          fallaron.push({ serie, motivo: mensajeDe(e) });
+        }
+      }
+
+      return {
+        lote: {
+          entraron: entraron.length,
+          total: series.length,
+          repetidas,
+          fallaron
+        },
+        hecho:
+          fallaron.length === 0 && repetidas.length === 0
+            ? `Entraron las ${entraron.length} series.`
+            : undefined
+      };
+    }
+
     try {
       await registrarEntrada({ cookies }, {
-        material: f.get('material'),
+        material,
         cantidad: f.get('cantidad'),
         serie: f.get('serie') ?? '',
-        ubicacion_destino: f.get('ubicacion_destino'),
-        origen_ref: f.get('origen_ref') ?? '',
+        ubicacion_destino: destino,
+        origen_ref: origenRef,
       });
       return { hecho: 'La entrada quedó registrada.' };
     } catch (e) {

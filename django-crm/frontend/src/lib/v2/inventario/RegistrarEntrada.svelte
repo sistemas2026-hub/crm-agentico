@@ -61,6 +61,41 @@
   };
 
   let esSerializado = $derived(elegido?.es_serializado === true);
+
+  /**
+   * Si se cargan VARIAS series de una.
+   *
+   * Un lote de 50 ONT eran 50 envios del formulario. El backend ya lo soportaba
+   * --la clave de idempotencia de una entrada incluye la serie, asi que 50
+   * series con la misma factura son 50 claves distintas-- y lo unico que
+   * faltaba era ofrecerlo.
+   */
+  let varias = $state(false);
+  let series = $state('');
+
+  /** Cuantas series se leen de lo pegado, sin contar repetidas ni vacias. */
+  let cuantas = $derived(
+    new Set(
+      series
+        .split(/[\s,;]+/)
+        .map((x) => x.trim().toUpperCase())
+        .filter(Boolean)
+    ).size
+  );
+
+  /** Las que estan dos veces en la propia lista: el error mas comun al copiar. */
+  let repetidasAhora = $derived.by(() => {
+    const vistas = new Set();
+    const repes = new Set();
+    for (const x of series
+      .split(/[\s,;]+/)
+      .map((y) => y.trim().toUpperCase())
+      .filter(Boolean)) {
+      if (vistas.has(x)) repes.add(x);
+      vistas.add(x);
+    }
+    return [...repes];
+  });
   let clase = $derived(elegido?.clase ?? 'consumible');
 
   /** @param {any} m */
@@ -202,27 +237,101 @@
           </div>
 
           {#if esSerializado}
-            <div class="relative">
-              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-secondary">
-                <span class="material-symbols-outlined text-[18px]">barcode_scanner</span>
-              </div>
-              <input
-                name="serie"
-                required
-                placeholder="HWTCA6FB5263"
-                class="w-full h-10 pl-9 pr-3 bg-surface-container-lowest text-on-surface font-label-code text-label-code uppercase tracking-wider rounded shadow-sm focus:outline-none placeholder:text-secondary/60"
-              />
+            <!--
+              UNA O VARIAS. Una recepcion real no trae un equipo: trae una caja.
+              Cargarlos de a uno eran cincuenta envios de este formulario.
+            -->
+            <div class="flex items-center gap-space-sm">
+              <button
+                type="button"
+                onclick={() => (varias = false)}
+                class="h-8 px-space-md rounded font-body-sm text-body-sm transition-colors {!varias
+                  ? 'bg-primary-fixed text-on-primary-fixed'
+                  : 'bg-surface-container-low text-secondary hover:bg-surface-container'}"
+              >
+                Una serie
+              </button>
+              <button
+                type="button"
+                onclick={() => (varias = true)}
+                class="h-8 px-space-md rounded font-body-sm text-body-sm transition-colors {varias
+                  ? 'bg-primary-fixed text-on-primary-fixed'
+                  : 'bg-surface-container-low text-secondary hover:bg-surface-container'}"
+              >
+                Varias series
+              </button>
             </div>
+
+            {#if varias}
+              <textarea
+                name="series"
+                bind:value={series}
+                rows="8"
+                required
+                placeholder={`CDTC505AEA5F\nCDTC505AEA60\nCDTC505AEA61`}
+                class="w-full px-3 py-2 bg-surface-container-lowest text-on-surface font-label-code text-label-code uppercase tracking-wider rounded shadow-sm focus:outline-none placeholder:text-secondary/60"
+              ></textarea>
+              <div class="flex items-center justify-between gap-space-sm font-body-sm text-body-sm">
+                <span class="text-secondary">
+                  Una por línea. También sirve separadas por coma.
+                </span>
+                <span class="text-on-surface font-label-numeric">
+                  {cuantas}
+                  {cuantas === 1 ? 'serie' : 'series'}
+                </span>
+              </div>
+
+              {#if repetidasAhora.length}
+                <!--
+                  Se avisa ANTES de enviar: pegar dos veces la misma serie es el
+                  error mas comun al copiar de una factura, y el rechazo del
+                  servidor se lee como «ya esta en otra custodia», que asusta
+                  sin motivo.
+                -->
+                <div class="flex items-start gap-2 p-2 bg-error-container/40 rounded text-body-sm text-on-error-container">
+                  <span class="material-symbols-outlined text-[16px] shrink-0">content_copy</span>
+                  <span>
+                    {repetidasAhora.length === 1 ? 'Esta serie está' : 'Estas series están'}
+                    dos veces en la lista y se {repetidasAhora.length === 1
+                      ? 'va a cargar una sola vez'
+                      : 'van a cargar una sola vez'}:
+                    <span class="font-label-code">{repetidasAhora.join(', ')}</span>
+                  </span>
+                </div>
+              {/if}
+
+              <div class="flex items-start gap-2 p-2 bg-surface-container-low rounded text-body-sm text-secondary">
+                <span class="material-symbols-outlined text-primary text-[16px] shrink-0">info</span>
+                <span>
+                  Cada serie entra por separado. Si alguna ya figura en otra custodia, esa
+                  se informa y <strong>las demás entran igual</strong>. Con varias series la
+                  referencia de origen es obligatoria: es lo que evita duplicar la
+                  recepción entera si se envía dos veces.
+                </span>
+              </div>
+            {:else}
+              <div class="relative">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-secondary">
+                  <span class="material-symbols-outlined text-[18px]">barcode_scanner</span>
+                </div>
+                <input
+                  name="serie"
+                  required
+                  placeholder="HWTCA6FB5263"
+                  class="w-full h-10 pl-9 pr-3 bg-surface-container-lowest text-on-surface font-label-code text-label-code uppercase tracking-wider rounded shadow-sm focus:outline-none placeholder:text-secondary/60"
+                />
+              </div>
+              <div class="flex items-start gap-2 p-2 bg-surface-container-low rounded text-body-sm text-secondary">
+                <span class="material-symbols-outlined text-primary text-[16px] shrink-0">info</span>
+                <span>
+                  En un equipo serializado la cantidad es 1. Si esa serie ya figura en otra
+                  custodia, la entrada lo va a decir: un aparato no puede estar en dos
+                  lugares.
+                </span>
+              </div>
+            {/if}
             <!-- La cantidad no se pide: un aparato es uno. -->
             <input type="hidden" name="cantidad" value="1" />
-            <div class="flex items-start gap-2 p-2 bg-surface-container-low rounded text-body-sm text-secondary">
-              <span class="material-symbols-outlined text-primary text-[16px] shrink-0">info</span>
-              <span>
-                En un equipo serializado la cantidad es 1. Si esa serie ya figura en otra
-                custodia, la entrada lo va a decir: un aparato no puede estar en dos
-                lugares.
-              </span>
-            </div>
           {:else}
             <div class="relative">
               <input
@@ -319,6 +428,55 @@
           </button>
         </div>
       </form>
+
+      <!--
+        EL RESULTADO DE UN LOTE, LINEA POR LINEA.
+        No alcanza con «se registro»: en una recepcion de cincuenta importa
+        cuales NO entraron y por que, porque esas hay que buscarlas.
+      -->
+      {#if form?.lote}
+        {@const L = form.lote}
+        <div class="w-full flex flex-col gap-space-sm p-space-md rounded-xl bg-surface-container-lowest shadow-sm">
+          <div class="flex items-start gap-space-md">
+            <div class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-primary text-[20px]">
+                {L.fallaron.length ? 'rule' : 'check_circle'}
+              </span>
+            </div>
+            <div class="flex flex-col gap-0.5 flex-1 min-w-0">
+              <span class="font-headline-sm text-body-md font-semibold text-on-surface">
+                Entraron {L.entraron} de {L.total}
+              </span>
+              <p class="font-body-sm text-body-sm text-secondary">
+                La existencia de esa ubicación ya lo refleja: se calcula sumando el libro.
+              </p>
+            </div>
+          </div>
+
+          {#if L.repetidas.length}
+            <p class="font-body-sm text-body-sm text-secondary pl-11">
+              {L.repetidas.length === 1 ? 'Una serie venía' : `${L.repetidas.length} series venían`}
+              repetida{L.repetidas.length === 1 ? '' : 's'} en la lista y se cargó una sola
+              vez cada una:
+              <span class="font-label-code">{L.repetidas.join(', ')}</span>
+            </p>
+          {/if}
+
+          {#if L.fallaron.length}
+            <div class="pl-11 flex flex-col gap-1">
+              <span class="font-body-sm text-body-sm text-on-surface">
+                {L.fallaron.length === 1 ? 'Esta no entró' : `Estas ${L.fallaron.length} no entraron`}:
+              </span>
+              {#each L.fallaron as f (f.serie)}
+                <div class="flex items-start gap-2 font-body-sm text-body-sm">
+                  <span class="font-label-code text-on-surface shrink-0">{f.serie}</span>
+                  <span class="text-secondary">{f.motivo}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       <!-- El resultado, cuando hay uno -->
       {#if form?.hecho}
