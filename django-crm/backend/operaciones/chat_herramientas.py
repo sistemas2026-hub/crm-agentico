@@ -508,6 +508,129 @@ def _acotar_horas(horas) -> int:
     return max(1, min(n, 72))
 
 
+# =============================================================================
+#  LAS HERRAMIENTAS TECNICAS  --  WispHub, por el motor, con politica de campos
+# =============================================================================
+#
+#  DE DONDE SALEN
+#  --------------
+#  El rol 'supervisor_noc' de 'tenant_config' declaro diez herramientas tecnicas
+#  con su lista blanca de campos por herramienta. Ese trabajo se conserva: lo
+#  que cambia es QUIEN las llama. No se vuelven a escribir aqui --serian dos
+#  catalogos de lo mismo-- sino que se piden por el camino que ya existe,
+#  'POST /interno/herramienta/<nombre>' del motor, que es el unico que tiene la
+#  credencial de WispHub.
+#
+#  CUATRO DE LAS DIEZ, Y EL MOTIVO ES UNA GARANTIA, NO UN LIMITE TECNICO
+#  ---------------------------------------------------------------------
+#  Las seis de ONT/red ('consultar_estado_ont', 'consultar_senal_ont',
+#  'consultar_estabilidad_enlace', 'diagnosticar_falla_ont',
+#  'consultar_estado_catv', 'consultar_incidente_red') declaran
+#  'inyectados_obligatorios: [sn_onu]': su identificador sale de la SESION
+#  VERIFICADA, nunca de un argumento del modelo. Y la ruta interna pasa
+#  'sesion=None' a proposito. El motor explica por que, en
+#  'nucleo/modelo/motor.py:503':
+#
+#      "el id sale de la sesion verificada, nunca de un argumento del modelo.
+#       Si no, bastaria que el modelo consultara a otro cliente --por inyeccion
+#       de prompt o por un rol interno que si puede hacerlo-- para que la sesion
+#       se quedara con el serial ajeno y el siguiente reinicio remoto cayera
+#       sobre la casa equivocada."
+#
+#  "un rol interno que si puede hacerlo" es EXACTAMENTE lo que seria el
+#  Supervisor si se le dejara pasar el serial. Asi que esas seis no se cablean,
+#  y no por falta de ganas: hacerlo exige una decision sobre como se acredita un
+#  destinatario sin sesion, y esa decision no esta tomada.
+#
+#  LA POLITICA SE APLICA EN EL MOTOR, ANTES DE CONTESTAR
+#  ----------------------------------------------------
+#  Se pasa 'rol=supervisor_noc' y el motor corre su propio
+#  'listas_blancas.filtrar_campos' --fail-closed, con notacion con punto y las
+#  tres formas de respuesta-- mas el barrido de 'nunca_revelar'. El campo no
+#  autorizado NO sale del motor: no llega aqui y mucho menos al modelo. Copiar
+#  ese filtro a Django habria dejado dos implementaciones de la misma garantia.
+
+#: El rol de 'tenant_config' cuya politica de campos se aplica. Es el unico uso
+#: que le queda a ese rol: NO es el anfitrion de la conversacion.
+ROL_POLITICA = "supervisor_noc"
+
+
+def _del_motor(nombre: str, argumentos: dict | None = None) -> dict:
+    """
+    Llama una herramienta tecnica del catalogo del tenant, con politica aplicada.
+
+    UN SOLO LUGAR PASA EL ROL, y es para que no se pueda olvidar: una
+    herramienta tecnica nueva que se agregue abajo la hereda sola. Si cada
+    funcion lo pasara por su cuenta, la que se olvidara devolveria la ficha
+    cruda y nadie lo notaria hasta leer una cedula en una respuesta.
+    """
+    from operaciones.fuentes_adaptadores import (MotorNoDisponible,
+                                                 _NoDeclarada,
+                                                 _pedirle_al_motor)
+
+    try:
+        salida = _pedirle_al_motor(nombre, argumentos or {}, rol=ROL_POLITICA)
+    except _NoDeclarada as e:
+        #  No esta declarada para un servicio, o falta la politica. Es una
+        #  respuesta legible, no una excepcion que tumbe el turno: el modelo
+        #  tiene que poder decir "esto no lo puedo consultar" en vez de callarse.
+        return {"error": "HERRAMIENTA_NO_DISPONIBLE", "detalle": str(e)}
+    except MotorNoDisponible as e:
+        return {"error": "MOTOR_NO_DISPONIBLE", "detalle": str(e)}
+
+    if salida is None:
+        return {"error": "SIN_RESULTADO",
+                "detalle": "el motor contesto sin resultado"}
+    #  'filtrar_campos' puede devolver {"error": "...Resultado descartado."}
+    #  cuando el rol no tiene lista blanca para esa herramienta. Se deja pasar
+    #  tal cual: es la respuesta correcta y el modelo tiene que verla.
+    return salida if isinstance(salida, dict) else {"resultado": salida}
+
+
+def consultar_ticket(org, *, limite=TOPE) -> dict:
+    """
+    Los tickets de WispHub, con los campos que la politica permite.
+
+    NO acepta un id: esta herramienta del catalogo no declara
+    'filtros_verificados', asi que el motor ignora cualquier argumento que se le
+    proponga (fail-closed). Devuelve la lista que WispHub recorta por su cuenta.
+    """
+    return _del_motor("consultar_ticket")
+
+
+def consultar_tickets_de_cliente(org) -> dict:
+    """
+    La otra vista de los tickets, con su propia lista blanca -- mas corta.
+
+    La API de WispHub NO filtra por cliente (ocho nombres de parametro probados,
+    todos ignorados: ver la skill 'wisphub-api'), asi que esto no devuelve "los
+    de un cliente": devuelve la lista, y cruzarla es trabajo de quien lee.
+    """
+    return _del_motor("consultar_tickets_de_cliente")
+
+
+def consultar_tecnicos(org) -> dict:
+    """El personal de WispHub: id, usuario y nombre. Nada mas."""
+    return _del_motor("consultar_tecnicos")
+
+
+def consultar_cliente(org, *, id_servicio) -> dict:
+    """
+    La ficha de un servicio, filtrada.
+
+    'id_servicio' SI es un argumento legitimo del modelo: esta declarado en
+    'filtros_verificados' de la herramienta y el Supervisor lo conoce de los
+    afectados de una situacion. La ficha cruda trae 54 campos --cuatro
+    contrasenas y el GPS del domicilio-- y lo que vuelve es lo que la politica
+    de 'supervisor_noc' deja pasar.
+    """
+    ident = str(id_servicio or "").strip()
+    if not ident:
+        return {"error": "FALTA_ID_SERVICIO",
+                "detalle": "hace falta el id del servicio"}
+    return _del_motor("consultar_cliente", {"id_servicio": ident})
+
+
 HERRAMIENTAS = {
     "listar_situaciones": listar_situaciones,
     "detalle_situacion": detalle_situacion,
@@ -526,6 +649,12 @@ HERRAMIENTAS = {
     #  P11
     "resumen_de_turno": resumen_de_turno,
     "evaluacion_shadow": evaluacion_shadow,
+    #  Tecnicas, por el motor, con la politica de 'supervisor_noc' aplicada
+    #  antes de contestar.
+    "consultar_ticket": consultar_ticket,
+    "consultar_tickets_de_cliente": consultar_tickets_de_cliente,
+    "consultar_tecnicos": consultar_tecnicos,
+    "consultar_cliente": consultar_cliente,
 }
 
 #  Los argumentos que CADA herramienta acepta. Es una lista blanca: un argumento
@@ -553,6 +682,13 @@ ARGUMENTOS = {
     #  fija el indicador, no el modelo.
     "resumen_de_turno": {"horas"},
     "evaluacion_shadow": set(),
+    #  Tecnicas. 'consultar_cliente' acepta 'id_servicio' porque la herramienta
+    #  del catalogo lo declara en 'filtros_verificados'; las otras tres no
+    #  aceptan ninguno, y el motor ignoraria igual lo que se le propusiera.
+    "consultar_ticket": {"limite"},
+    "consultar_tickets_de_cliente": set(),
+    "consultar_tecnicos": set(),
+    "consultar_cliente": {"id_servicio"},
 }
 
 
@@ -697,4 +833,30 @@ def esquema() -> list[dict]:
           "'aceptada' NO es 'correcta' --el acierto sale solo de lo CONFIRMADO, "
           "que exige evidencia-- y un indicador puede venir en NO_APLICA o "
           "DATOS_INSUFICIENTES, que NO es un cero: no lo reportes como tal."),
+
+        #  --- Tecnicas: WispHub por el motor. Las cuatro LEEN. -----------
+        h("consultar_tecnicos",
+          "El personal técnico de WispHub: id, usuario y nombre. Úsala para "
+          "resolver a quién se refiere un nombre antes de nombrarlo -- NUNCA "
+          "inventes un id ni un técnico."),
+        h("consultar_ticket",
+          "Los tickets de WispHub con sus campos operativos: asunto, estado, "
+          "prioridad, técnico, fechas y la zona del servicio. NO devuelve "
+          "cédula, teléfono, dirección ni coordenadas. OJO: no acepta un id "
+          "ni un filtro -- devuelve la lista que el proveedor recorta, así que "
+          "no cuentes sobre ella como si fuera el total.", limite),
+        h("consultar_tickets_de_cliente",
+          "La vista corta de los tickets: id, asunto, estado, prioridad, "
+          "técnico y fecha. OJO: a pesar del nombre NO filtra por cliente -- la "
+          "API de WispHub ignora ese filtro (ocho parámetros probados). "
+          "Devuelve la lista; cruzarla es tu trabajo, y si no podés, decilo."),
+        h("consultar_cliente",
+          "La ficha operativa de UN servicio por su id: estado, plan, zona, "
+          "localidad, fecha de instalación, estado de facturas y saldo. NO "
+          "devuelve nombre de contacto, cédula, teléfono, dirección, "
+          "coordenadas ni contraseñas: no los pidas ni los supongas. El "
+          "'id_servicio' lo sacás de los afectados de una situación.",
+          {"id_servicio": {"type": "string",
+                           "description": "El id del servicio en WispHub."}},
+          ["id_servicio"]),
     ]

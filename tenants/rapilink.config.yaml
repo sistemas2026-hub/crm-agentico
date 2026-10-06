@@ -2753,6 +2753,12 @@ herramientas:
     tipo: http
     descripcion: Datos de un cliente por su ID de servicio.
     solo_lectura: true
+    #  05/10/2026. La pide el chat del Supervisor NOC por
+    #  'POST /interno/herramienta/<nombre>', con 'rol=supervisor_noc' para
+    #  que el motor aplique su politica de campos ANTES de contestar. Es de
+    #  LECTURA: declararla aqui no habilita ninguna escritura, y la ruta
+    #  interna sigue exponiendo solo lo declarado una por una.
+    invocable_por_servicio: true
     roles_permitidos: [soporte, facturacion, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
@@ -3713,6 +3719,12 @@ herramientas:
   - nombre: consultar_ticket
     tipo: http
     solo_lectura: true
+    #  05/10/2026. La pide el chat del Supervisor NOC por
+    #  'POST /interno/herramienta/<nombre>', con 'rol=supervisor_noc' para
+    #  que el motor aplique su politica de campos ANTES de contestar. Es de
+    #  LECTURA: declararla aqui no habilita ninguna escritura, y la ruta
+    #  interna sigue exponiendo solo lo declarado una por una.
+    invocable_por_servicio: true
     # 'administracion' agregado aca (estaba en su puede_consultar pero no
     # aca -- ver el comentario en ese rol. Documental/defensa en profundidad,
     # el motor autoriza por puede_consultar (editor.py), pero dejarlo asi
@@ -3737,6 +3749,12 @@ herramientas:
       todos ignorados). Se filtra por estado y se cruza por cliente en codigo,
       solo sobre los abiertos.
     solo_lectura: true
+    #  05/10/2026. La pide el chat del Supervisor NOC por
+    #  'POST /interno/herramienta/<nombre>', con 'rol=supervisor_noc' para
+    #  que el motor aplique su politica de campos ANTES de contestar. Es de
+    #  LECTURA: declararla aqui no habilita ninguna escritura, y la ruta
+    #  interna sigue exponiendo solo lo declarado una por una.
+    invocable_por_servicio: true
     roles_permitidos: [soporte, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/tickets/

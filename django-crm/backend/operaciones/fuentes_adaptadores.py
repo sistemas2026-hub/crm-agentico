@@ -138,9 +138,22 @@ class MotorNoDisponible(Exception):
 #  EL CAMINO HACIA UN SISTEMA EXTERNO
 # =============================================================================
 
-def _pedirle_al_motor(herramienta: str, argumentos: dict) -> dict:
+def _pedirle_al_motor(herramienta: str, argumentos: dict, *,
+                      rol: str = "") -> dict:
     """
     Ejecuta una herramienta de SOLO LECTURA del catalogo, por el motor.
+
+    'rol' PIDE QUE EL MOTOR APLIQUE LA POLITICA DE CAMPOS DE ESE ROL
+    ---------------------------------------------------------------
+    Sin 'rol' la salida viene cruda, que es lo que necesita la capa de fuentes:
+    lee topologia de red --PONs caidos, conteos-- y no datos de un abonado.
+    CON 'rol', el motor aplica 'listas_blancas.filtrar_campos' ANTES de
+    contestar, asi que el campo no autorizado no sale de alla.
+
+    Lo usa el chat del Supervisor para las herramientas de WispHub, donde la
+    ficha cruda trae 54 campos, cuatro contrasenas y el GPS del domicilio. El
+    filtro vive en el motor y no aqui a proposito: es UNA implementacion de esa
+    garantia, no dos que se desincronizan.
 
     POR QUE NO SE LLAMA DIRECTO AL PROVEEDOR
     ----------------------------------------
@@ -172,9 +185,12 @@ def _pedirle_al_motor(herramienta: str, argumentos: dict) -> dict:
         cabeceras["X-Servicio-Token"] = token
 
     try:
+        parametros = {"tenant": tenant}
+        if rol:
+            parametros["rol"] = rol
         r = requests.post(
             f"{base}/interno/herramienta/{herramienta}",
-            params={"tenant": tenant}, json=argumentos,
+            params=parametros, json=argumentos,
             headers=cabeceras, timeout=SEGUNDOS_TIMEOUT)
     except Exception as e:                                       # noqa: BLE001
         #  Tipo y no texto: el texto de una excepcion de red trae la URL, y la
@@ -198,6 +214,13 @@ def _pedirle_al_motor(herramienta: str, argumentos: dict) -> dict:
         raise _NoDeclarada(
             f"'{herramienta}' existe pero no esta declarada "
             f"'invocable_por_servicio: true'")
+    if r.status_code == 400 and cuerpo.get("error") == "ROL_DESCONOCIDO":
+        #  Se pidio una politica de campos que la config de esta empresa no
+        #  tiene. NO es un fallo del proveedor y no se reintenta: falta cargar
+        #  la config (la base manda, el YAML es semilla -- CLAUDE.md §3.2).
+        raise _NoDeclarada(
+            f"el rol '{rol}' no esta en la config de este tenant: la politica "
+            f"de campos no se puede aplicar, asi que no se consulta")
     if r.status_code != 200:
         #  El cuerpo NO se incluye: un 500 puede traer una pagina entera y esto
         #  termina en una columna de la base.

@@ -547,7 +547,25 @@ def test_21_el_catalogo_de_herramientas_es_cerrado_y_exacto(org_a):
         #  PROCEDENCIA de cada dato. Su descripcion le dice al modelo que un
         #  INFERIDO no es un hecho y que NO_APLICA no es un cero, que es lo
         #  unico que el modelo lee.
-        "resumen_de_turno", "evaluacion_shadow"}
+        "resumen_de_turno", "evaluacion_shadow",
+        #  05/10/2026, integracion A+B. Cuatro herramientas TECNICAS del
+        #  catalogo del tenant, pedidas por 'POST /interno/herramienta/<nombre>'
+        #  del motor -- el unico que tiene la credencial de WispHub. No se
+        #  reimplementan aqui: seria un segundo catalogo de lo mismo.
+        #
+        #  LAS CUATRO LEEN, y la politica de campos del rol 'supervisor_noc' se
+        #  aplica EN EL MOTOR antes de contestar, asi que el campo no autorizado
+        #  no sale de alla. Lo mide 'tests/test_politica_de_rol_ruta_interna.py'
+        #  sobre la salida, con una ficha cruda de WispHub con PII adentro --no
+        #  sobre lo que el YAML declara.
+        #
+        #  SON CUATRO Y NO DIEZ a proposito: las seis de ONT/red declaran
+        #  'inyectados_obligatorios: [sn_onu]' y su identificador sale de la
+        #  sesion verificada. Entrarian por 'argumentos_sobrescribibles' (ver
+        #  tests/test_ruta_de_servicio_identidad.py), y eso exige decidir primero
+        #  QUIEN resuelve el serial -- el codigo, nunca el modelo.
+        "consultar_ticket", "consultar_tickets_de_cliente",
+        "consultar_tecnicos", "consultar_cliente"}
     #  Y cada una declara sus argumentos: sin entrada en ARGUMENTOS, no pasa nada.
     assert set(chat_herramientas.ARGUMENTOS) == set(
         chat_herramientas.HERRAMIENTAS)

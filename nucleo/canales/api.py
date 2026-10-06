@@ -63,6 +63,7 @@ from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
 from nucleo.seguimiento import cierre_por_propuesta
 from nucleo.seguridad import interruptor
+from nucleo.seguridad import listas_blancas
 from nucleo.seguridad import idempotencia
 from nucleo.modelo import cliente, motor
 from nucleo.observabilidad import consumo
@@ -4281,6 +4282,63 @@ def configuracion_variable_borrar(nombre):
     return jsonify({"borrado": nombre})
 
 
+def _aplicar_politica_de_rol(config, rol_pedido: str, nombre: str, crudo):
+    """
+    Aplica la politica de campos de un ROL a la salida cruda de una herramienta.
+
+    POR QUE AQUI Y NO DEL LADO DE QUIEN LLAMA
+    -----------------------------------------
+    El filtro que protege de verdad es 'listas_blancas.filtrar_campos', y vive
+    aqui. Copiarlo al CRM habria dejado DOS implementaciones de la misma
+    garantia --con notacion con punto, tres formas de respuesta y fail-closed--
+    y la segunda se desincroniza sin que nadie lo note. Filtrando de este lado,
+    el campo no autorizado no sale del motor: no llega al CRM y mucho menos al
+    modelo.
+
+    FAIL-CLOSED EN LOS DOS HUECOS
+    -----------------------------
+      * un rol que no existe en la config  -> se levanta, NO se devuelve crudo.
+      * un rol sin lista blanca para esa herramienta -> 'filtrar_campos' ya
+        descarta el resultado entero.
+
+    'nunca_revelar' SE APLICA DE VERDAD EN ESTE CAMINO
+    --------------------------------------------------
+    En 'schema.py' ese campo esta declarado como "documental y de defensa en
+    profundidad": lo que protege es 'campos_permitidos'. Eso sigue siendo
+    cierto -- la lista blanca es la garantia-- pero por esta ruta la lista NEGRA
+    tambien se barre, porque es gratis y porque un campo que el tenant declaro
+    que nunca se revela no deberia depender de que la lista blanca este bien
+    escrita. Se aplica DESPUES de la blanca: achicar nunca amplia.
+    """
+    rol_cfg = (config.roles or {}).get(rol_pedido)
+    if rol_cfg is None:
+        raise ValueError(f"el rol '{rol_pedido}' no existe en la config")
+
+    filtrado = listas_blancas.filtrar_campos(rol_cfg, nombre, crudo)
+
+    prohibidos = {str(c) for c in (rol_cfg.nunca_revelar or [])}
+    if not prohibidos:
+        return filtrado
+    return _sin_prohibidos(filtrado, prohibidos)
+
+
+def _sin_prohibidos(dato, prohibidos: set[str]):
+    """
+    Quita las claves prohibidas, a cualquier profundidad.
+
+    Recorre dicts y listas: la salida de una herramienta puede venir como
+    objeto, como lista o como el '{total, resultados}' que arma
+    'listas_blancas'. Comparar solo el primer nivel dejaria pasar un campo
+    anidado, que es exactamente la forma en que se escapa uno.
+    """
+    if isinstance(dato, dict):
+        return {k: _sin_prohibidos(v, prohibidos) for k, v in dato.items()
+                if k not in prohibidos}
+    if isinstance(dato, list):
+        return [_sin_prohibidos(v, prohibidos) for v in dato]
+    return dato
+
+
 @app.post("/interno/herramienta/<nombre>")
 def interno_ejecutar_herramienta(nombre: str):
     """
@@ -4364,6 +4422,30 @@ def interno_ejecutar_herramienta(nombre: str):
     except Exception as e:
         return fallo(502, "herramienta_fallo", "La herramienta no pudo completarse.",
                      componente="interno", e=e, estado_proveedor=estado_http_de(e))
+
+    #  LA POLITICA DE CAMPOS, SI QUIEN LLAMA PIDE UN ROL
+    #  -------------------------------------------------
+    #  Sin 'rol' la salida va cruda, como siempre: los llamadores que ya
+    #  existian --la capa de fuentes del Supervisor-- leen topologia de red, no
+    #  datos de un abonado, y cambiarles el contrato romperia lo que funciona.
+    #
+    #  CON 'rol', el resultado se filtra ANTES de salir del motor. Es lo que
+    #  permite que el chat del Supervisor use estas herramientas sin que la
+    #  ficha entera de WispHub --54 campos, cuatro contrasenas y el GPS del
+    #  domicilio-- llegue a un modelo.
+    rol_pedido = (request.args.get("rol") or "").strip()
+    if rol_pedido:
+        try:
+            salida = _aplicar_politica_de_rol(config, rol_pedido, nombre, salida)
+        except ValueError as e:
+            #  400 y no 500: el parametro es lo que esta mal. Y NO se devuelve
+            #  el dato crudo -- pedir una politica que no existe no puede
+            #  resultar en no tener ninguna.
+            registrar("interno", "rol desconocido en una herramienta interna",
+                      herramienta=nombre, error=e)
+            return jsonify({"error": "ROL_DESCONOCIDO",
+                            "detalle": "El rol pedido no existe en la "
+                                       "configuracion de esta empresa."}), 400
 
     return jsonify({"resultado": salida})
 
