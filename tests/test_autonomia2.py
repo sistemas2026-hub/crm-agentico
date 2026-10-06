@@ -356,19 +356,26 @@ for f in fuentes:
     #  sueltas en el mismo archivo -- db.py inserta en la BITACORA, que es
     #  otra tabla, y la version gruesa lo marcaba como si se autorizara solo.
     plano = " ".join(texto.lower().split())
-    if "insert into asistente.autorizacion_herramienta" in plano:
-        escriben.append(str(f.relative_to(RAIZ)))
-    #  M06-B (21/09/2026): el techo SI se escribe desde el nucleo, pero como
-    #  'autonomia_operador' -- administracion, no runtime, igual que el
-    #  interruptor. Se admite SOLO dentro de una funcion que abre la sesion con
-    #  ese rol; cualquier otro INSERT sobre el techo sigue contando como que el
-    #  runtime se autoriza a si mismo.
-    if "insert into asistente.nivel_autonomia" in plano:
+    #  M06-B (21/09/2026) para el techo, y 06/10/2026 para la autorizacion: las
+    #  DOS se escriben desde el nucleo, pero como 'autonomia_operador' --
+    #  administracion, no runtime, igual que el interruptor. Se admite SOLO
+    #  dentro de una funcion que abre la sesion con ese rol; cualquier otro
+    #  INSERT sobre cualquiera de las dos sigue contando como que el runtime se
+    #  autoriza a si mismo.
+    #
+    #  La regla es UNA y se aplica a las dos tablas. Antes estaba escrita dos
+    #  veces --la del techo con su excepcion y la de la autorizacion sin
+    #  ninguna-- y el 06/10/2026 eso dejo a 'autorizacion_herramienta' con
+    #  lector, con compuerta y sin forma de conceder: la tabla se quedo en 0
+    #  filas y la frontera nego 325 acciones internas seguidas.
+    for tabla in ("asistente.autorizacion_herramienta", "asistente.nivel_autonomia"):
+        if f"insert into {tabla}" not in plano:
+            continue
         for fn in ast.walk(ast.parse(texto)):
             if not isinstance(fn, ast.FunctionDef):
                 continue
             cuerpo = " ".join(ast.get_source_segment(texto, fn).lower().split())
-            if "insert into asistente.nivel_autonomia" not in cuerpo:
+            if f"insert into {tabla}" not in cuerpo:
                 continue
             como_operador = any(
                 isinstance(n, ast.Call) and ast.unparse(n.func) == "sesion"
