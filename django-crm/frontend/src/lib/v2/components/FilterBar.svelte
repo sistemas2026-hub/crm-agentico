@@ -30,7 +30,6 @@
    */
   import { X, Plus, ChevronDown } from '@lucide/svelte';
   import { goto } from '$app/navigation';
-  import { untrack } from 'svelte';
   import { FILTERS, activeChips, activePresetKey, withParams } from '$lib/v2/filters.js';
   import { invoiceStatusLabel } from '$lib/v2/enums.js';
 
@@ -75,36 +74,31 @@
   //  El <form> de abajo NO se quita: si el JavaScript no cargo, el boton
   //  sigue haciendo el GET de siempre. Esto mejora el camino, no lo
   //  reemplaza.
+  //  SIN ESTADO PROPIO NI EFECTOS. La primera version guardaba el texto en un
+  //  '$state' y lo sincronizaba con la URL desde un '$effect' que LEIA y
+  //  ESCRIBIA la misma variable. Desplegado el 07/10/2026, el resultado fue
+  //  que el buscador solo andaba con el boton: un efecto que se muerde la
+  //  cola rompe la hidratacion del componente, y cuando eso pasa ningun
+  //  handler responde -- queda en pie el <form>, que es justo lo que se vio.
+  //
+  //  El valor sale del evento y el campo lo controla la URL, que es la fuente
+  //  de verdad de todas formas. El caso que el '$state' venia a evitar --que
+  //  una respuesta tardia pise lo que se esta escribiendo-- necesita que la
+  //  navegacion tarde MAS que la pausa de 300 ms y que se siga tecleando
+  //  justo en ese momento. Prevenirlo costaba el componente entero.
   const ESPERA_MS = 300;
   let reloj;
   let buscando = $state(false);
-  let campo = $state(null);
-  //  El texto es estado PROPIO y no se lee de la URL en cada render. Si el
-  //  'value' colgara de la URL, una navegacion que llega mientras se sigue
-  //  tecleando pisaria lo escrito: se tipea "edgardo", vuelve la respuesta de
-  //  "edgar" y la caja retrocede sola. Con esto la caja es de quien escribe.
-  //  'untrack' porque aqui SI se quiere solo el valor inicial: lo que venga
-  //  despues lo trae el efecto de abajo, y solo cuando nadie esta escribiendo.
-  let texto = $state(untrack(() => url.searchParams.get('search') ?? ''));
 
-  //  Pero la URL puede cambiar por fuera -- 'Limpiar', un enlace, el boton
-  //  Atras -- y entonces la caja tiene que seguirla. Solo cuando NO se esta
-  //  escribiendo en ella, para no volver a pisar nada.
-  $effect(() => {
-    const deLaUrl = url.searchParams.get('search') ?? '';
-    if (deLaUrl !== texto && campo && document.activeElement !== campo) {
-      texto = deLaUrl;
-    }
-  });
-
-  function alEscribir() {
+  function alEscribir(evento) {
+    const valor = evento.currentTarget.value;
     clearTimeout(reloj);
     buscando = true;
     reloj = setTimeout(() => {
       buscando = false;
       //  'offset' se cae a proposito: la pagina 7 de la lista anterior no
       //  tiene nada que ver con los resultados de esta busqueda.
-      goto(withParams(url, { search: texto.trim() || null, offset: null }), {
+      goto(withParams(url, { search: valor.trim() || null, offset: null }), {
         //  El cursor se queda donde esta -- sin esto, cada busqueda lo
         //  expulsa de la caja y hay que volver a hacer clic para seguir
         //  escribiendo.
@@ -204,8 +198,7 @@
         class="v2-buscador-campo"
         type="search"
         name="search"
-        bind:this={campo}
-        bind:value={texto}
+        value={consulta}
         placeholder={buscarEtiqueta}
         aria-label={buscarEtiqueta}
         oninput={alEscribir} />
