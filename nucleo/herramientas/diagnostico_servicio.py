@@ -244,6 +244,27 @@ def diagnosticar(herramienta, argumentos: dict, tenant: str | None = None,
                   "el proveedor optico no respondio", error=e)
         return _sin_resolver("el proveedor optico no respondio", id_servicio)
 
+    if r.status_code == 404 or r.status_code == 400:
+        #  400 EN ESTE ENDPOINT NO ES "la peticion esta mal", y decirlo asi
+        #  mandaba a buscar el problema al lado equivocado.
+        #
+        #  La skill de SmartOLT lo tiene verificado con el metodo del valor
+        #  imposible: un serial inexistente devuelve 400 "Invalid parameters".
+        #  Medido ademas en produccion el 07/10/2026 sobre cinco servicios
+        #  reales -- cuatro contestaron su estado optico y uno dio 400 con un
+        #  serial de formato perfecto (12 caracteres, alfanumerico, sin
+        #  guiones), asi que no era la forma del identificador: ese equipo no
+        #  esta dado de alta en SmartOLT.
+        #
+        #  Esto lo lee una persona en una propuesta para decidir si cierra el
+        #  caso de alguien. "contesto 400" la manda a revisar una integracion
+        #  que esta bien; "no esta registrado" le dice que ese equipo no se
+        #  puede diagnosticar, que es lo que de verdad pasa y lo que decide
+        #  que hacer.
+        return _sin_resolver(
+            "el equipo de este servicio no esta registrado en SmartOLT, asi "
+            "que no se puede diagnosticar su estado optico", id_servicio)
+
     if r.status_code != 200:
         return _sin_resolver(
             f"el proveedor optico contesto {r.status_code}", id_servicio)

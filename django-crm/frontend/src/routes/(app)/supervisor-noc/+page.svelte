@@ -1552,14 +1552,6 @@
                   </span>
                 </div>
                 <dl class="snoc-lista-datos">
-                  <div><dt>Tipo de señal</dt><dd>{detalle.tipo_senal_display}</dd></div>
-                  <div><dt>Clave técnica</dt><dd class="snoc-mono-sm">{detalle.tipo_senal}</dd></div>
-                  <div><dt>Estado actual</dt><dd>{estadoDe(detalle.estado).texto}</dd></div>
-                  <div>
-                    <dt>Nivel de autonomía</dt>
-                    <dd>{detalle.nivel_autonomia_requerido} · {NIVELES[detalle.nivel_autonomia_requerido] ?? '—'}</dd>
-                  </div>
-                  <div><dt>Fecha de creación</dt><dd class="snoc-mono-sm">{fecha(detalle.created_at)}</dd></div>
                   <div><dt>Fecha de expiración</dt><dd class="snoc-mono-sm">{fecha(detalle.expira_en)}</dd></div>
                   <div><dt>Tipo de origen</dt><dd>{detalle.origen_tipo}</dd></div>
                   <div><dt>Organización</dt><dd>{data.org ?? '—'}</dd></div>
@@ -1675,10 +1667,6 @@
               <h4 class="snoc-h4">¿Qué propone el Supervisor NOC IA?</h4>
               <p class="snoc-propuesta-accion">{detalle.accion_propuesta || AUSENTE}</p>
               <dl class="snoc-dl">
-                <div>
-                  <dt>Nivel de autonomía</dt>
-                  <dd>{detalle.nivel_autonomia_requerido} · {NIVELES[detalle.nivel_autonomia_requerido] ?? AUSENTE}</dd>
-                </div>
                 <div><dt>Confirmación humana</dt><dd>Obligatoria</dd></div>
                 <div><dt>Evidencia que la respalda</dt><dd>{analisis.hechos.length} observaciones</dd></div>
               </dl>
@@ -1714,45 +1702,6 @@
             <!-- ANÁLISIS TÉCNICO COMPLETO (el que ya existía, desplegable) -->
             <details class="snoc-detalle-tecnico">
               <summary class="snoc-label-sm">Ver análisis técnico completo</summary>
-            <section class="snoc-analisis-caja">
-              <div class="snoc-fila-sep" style="flex-wrap:wrap;">
-                <div class="snoc-fila" style="gap:var(--snoc-xs);">
-                  <span class="snoc-icono snoc-primario" style="font-size:18px;">psychology</span>
-                  <span class="snoc-label" style="text-transform:uppercase; letter-spacing:0.06em;">
-                    Análisis del Supervisor NOC IA
-                  </span>
-                </div>
-                <span class="snoc-mono-sm snoc-tenue">calculado en código, no por un modelo</span>
-              </div>
-
-              <div class="snoc-pila-xs">
-                <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Situación identificada</span>
-                <p class="snoc-body" style="margin:0;">{detalle.tipo_senal_display}</p>
-              </div>
-
-              <div class="snoc-pila-xs">
-                <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Evaluación</span>
-                <p class="snoc-body" style="margin:0;">{detalle.motivo || 'Sin motivo registrado.'}</p>
-              </div>
-
-              <div class="snoc-pila-xs">
-                <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Recomendación sugerida</span>
-                <p class="snoc-body-lg snoc-accion" style="margin:0;">{detalle.accion_propuesta}</p>
-                <span class="snoc-mono-sm snoc-tenue">No invasiva · requiere confirmación humana</span>
-              </div>
-
-              {#if fuentes.length}
-                <div class="snoc-pila-xs">
-                  <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Datos auditados</span>
-                  <div class="snoc-envuelve">
-                    {#each fuentes as f (f)}
-                      <span class="snoc-insignia snoc-insignia-neutra">{f}</span>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
-            </section>
-
             <!-- EVIDENCIA COMO TABLA -->
             <details class="snoc-detalles">
               <summary class="snoc-label-sm">

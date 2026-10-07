@@ -180,6 +180,61 @@ afirmar(diag._clasificar_senal(-8.0) == "buena"
 afirmar("senal" in forma and "estado_config" in forma,
         "'senal' y 'estado_config' son campos DISTINTOS del resultado")
 
+print("\n§4b UN 400 DE SMARTOLT ES 'NO ESTA REGISTRADO', NO 'LA PETICION ESTA MAL'")
+#  Verificado por la skill con el metodo del valor imposible --un serial
+#  inexistente devuelve 400 "Invalid parameters"-- y medido en produccion el
+#  07/10/2026: de cinco servicios reales, cuatro contestaron su estado y uno dio
+#  400 con un serial de formato perfecto. No era la forma del identificador.
+#
+#  Importa porque este texto lo lee una persona antes de cerrarle el caso a
+#  alguien: "contesto 400" la manda a revisar una integracion que esta bien.
+#
+#  SE MIDE HACIENDO QUE EL PROVEEDOR CONTESTE 400, no leyendo el fuente. La
+#  primera version de esta guarda buscaba la frase con 'inspect.getsource' y
+#  habria pasado en verde con el 'return' borrado, porque el COMENTARIO que
+#  explica el cambio contiene la misma frase. Esa trampa ya costo tiempo seis
+#  veces en este repositorio; van siete si se cuenta este intento.
+
+
+class _Respuesta400:
+    status_code = 400
+
+    @staticmethod
+    def json():
+        return {"status": False, "error": "Invalid parameters"}
+
+
+#  Los tres bordes externos de 'diagnosticar', y se parchean los TRES porque
+#  sin credenciales la funcion falla antes de llegar al 400 -- con otro motivo
+#  igual de valido, que es justamente lo que haria pasar esta guarda por el
+#  camino equivocado.
+_req_original = diag.requests.get
+_serial_original = diag._resolver_serial
+_base_original = diag.ejecutor_http.base_url_de
+_headers_original = diag.ejecutor_http.headers_de
+diag.requests.get = lambda *a, **k: _Respuesta400()
+diag._resolver_serial = lambda *a, **k: ("UNSERIALCUALQUIERA", "")
+diag.ejecutor_http.base_url_de = lambda *a, **k: "https://ejemplo.invalido"
+diag.ejecutor_http.headers_de = lambda *a, **k: {}
+try:
+    _resp = diag.diagnosticar(_herramienta(), {"id_servicio": 5832},
+                              tenant="t", variables_tenant={"X": "y"},
+                              catalogo=[])
+finally:
+    diag.requests.get = _req_original
+    diag._resolver_serial = _serial_original
+    diag.ejecutor_http.base_url_de = _base_original
+    diag.ejecutor_http.headers_de = _headers_original
+
+afirmar("no esta registrado" in (_resp.get("motivo") or ""),
+        f"un 400 se traduce a 'no esta registrado': {_resp.get('motivo')!r}")
+afirmar("400" not in (_resp.get("motivo") or ""),
+        "y NO le muestra el codigo HTTP crudo a quien decide")
+afirmar(_resp["estado"] == "desconocido",
+        "el estado queda en 'desconocido', nunca en linea ni caido")
+afirmar(_resp["senal"] == "sin_dato",
+        "y la señal queda 'sin_dato', que es lo que impide proponer un cierre")
+
 print("\n§5  LA CAUSA DE CAIDA SE TRADUCE A ALGO QUE DECIDE UNA ACCION")
 #  'dying-gasp' y 'LOSi' llevan a conversaciones distintas: una es un corte de
 #  luz en la casa, la otra es fibra. Si el modelo tuviera que interpretar el
