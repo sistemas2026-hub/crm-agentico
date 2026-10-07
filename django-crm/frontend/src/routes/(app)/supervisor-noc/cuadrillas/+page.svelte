@@ -44,6 +44,50 @@
   /** La ficha de cuadrilla abierta. `null` = ninguna. */
   let editando = $state(/** @type {any} */ (null));
 
+  /** Las zonas que cubre la cuadrilla que se está armando. */
+  let zonasDelDia = $state(/** @type {string[]} */ ([]));
+
+  /** La zona cuyo mapeo de barrios está abierto. `null` = ninguno. */
+  let mapeando = $state(/** @type {any} */ (null));
+  let barriosElegidos = $state(/** @type {string[]} */ ([]));
+  let buscaBarrio = $state('');
+
+  /** En qué OTRA zona está cada barrio, para no ofrecerlo dos veces. */
+  let barrioTomado = $derived.by(() => {
+    /** @type {Record<string, string>} */
+    const m = {};
+    for (const z of data.zonas ?? []) {
+      if (mapeando && z.id === mapeando.id) continue;
+      for (const l of z.localidades ?? []) m[l] = z.nombre;
+    }
+    return m;
+  });
+
+  /** Los barrios que se ofrecen: los sincronizados, filtrados por el buscador. */
+  let barriosOfrecidos = $derived(
+    (data.localidades ?? [])
+      .filter((l) =>
+        !buscaBarrio ||
+        String(l.localidad).toUpperCase().includes(buscaBarrio.toUpperCase())
+      )
+      // Los de más clientes primero: una zona se arma por peso, no por orden
+      // alfabético.
+      .slice()
+      .sort((a, b) => (b.n_clientes ?? 0) - (a.n_clientes ?? 0))
+  );
+
+  function abrirMapeo(z) {
+    mapeando = z;
+    barriosElegidos = [...(z.localidades ?? [])];
+    buscaBarrio = '';
+  }
+
+  function alternarBarrio(nombre) {
+    barriosElegidos = barriosElegidos.includes(nombre)
+      ? barriosElegidos.filter((x) => x !== nombre)
+      : [...barriosElegidos, nombre];
+  }
+
   /** La jornada ya armada de una cuadrilla, si la tiene. */
   function jornadaDe(cuadrillaId) {
     return (data.jornadas ?? []).find((j) => j.cuadrilla?.id === cuadrillaId) ?? null;
@@ -71,6 +115,7 @@
     armando = c;
     labor = ya?.labor ?? 'instalacion';
     lider = ya?.lider?.id ?? c.lider?.id ?? '';
+    zonasDelDia = ya ? (ya.zonas ?? []).map((z) => z.id) : [];
     integrantes = ya
       ? ya.integrantes.map((i) => ({ profile: i.id, rol: i.rol }))
       : [];
@@ -196,6 +241,13 @@
                 <td>
                   {#if j}
                     <span class="snoc-insignia snoc-insignia-primaria">{j.labor_nombre}</span>
+                    {#if j.zonas?.length}
+                      {#each j.zonas as z (z.id)}
+                        <span class="snoc-tag">{z.nombre}</span>
+                      {/each}
+                    {:else}
+                      <span class="snoc-sin-dato" style="display:block;">sin zona</span>
+                    {/if}
                   {:else}
                     <!-- SIN JORNADA NO ES «NO TRABAJA»: es que nadie se lo asignó
                          todavía. Decirlo distinto que «descansa» importa a las 6 am. -->
@@ -258,6 +310,43 @@
             </label>
           </div>
 
+          <div class="snoc-pila-xs">
+            <span class="snoc-label">Zonas que cubre hoy</span>
+            {#if (data.zonas ?? []).length === 0}
+              <p class="snoc-body-sm snoc-secundario">
+                Todavía no hay zonas. Se arman más abajo; sin ellas la cuadrilla queda sin
+                zona, que no es lo mismo que cubrir todas.
+              </p>
+            {:else}
+              <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                {#each data.zonas as z (z.id)}
+                  <label class="snoc-pildora" style="cursor:pointer;">
+                    <input
+                      type="checkbox"
+                      name="zona"
+                      value={z.id}
+                      checked={zonasDelDia.includes(z.id)}
+                      onchange={(e) => {
+                        zonasDelDia = e.currentTarget.checked
+                          ? [...zonasDelDia, z.id]
+                          : zonasDelDia.filter((x) => x !== z.id);
+                      }}
+                    />
+                    {z.nombre}
+                  </label>
+                {/each}
+              </div>
+              {#if zonasDelDia.length === 0}
+                <!-- Vacío NO es «cubre todas», y hay que decirlo: con zona dura
+                     una cuadrilla sin zona no recibe trabajo por zona. -->
+                <p class="snoc-body-sm snoc-secundario">
+                  Sin zona asignada. No significa que cubra todas: significa que no va a
+                  recibir trabajo por zona.
+                </p>
+              {/if}
+            {/if}
+          </div>
+
           <p class="snoc-body-sm snoc-secundario">
             El líder del día puede no ser el de la cuadrilla: si está de vacaciones, alguien
             la lleva igual, y quién respondía ese día no puede depender de quién la lidera
@@ -306,6 +395,147 @@
         </form>
       </section>
     {/if}
+
+    <!-- ============ LAS ZONAS ============ -->
+    <section class="snoc-panel" style="gap:var(--snoc-sm);">
+      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+        <div class="snoc-pila-xs">
+          <h2 class="snoc-h2">Zonas operativas</h2>
+          <p class="snoc-body-sm snoc-secundario">
+            Cómo divide la empresa su territorio. No son las zonas del proveedor —ésas son
+            de corte de facturación— y por eso se declaran acá.
+          </p>
+        </div>
+        <form method="POST" action="?/zona" use:enhance class="snoc-fila"
+              style="gap:var(--snoc-xs);">
+          <input class="snoc-campo" name="nombre" required placeholder="Norte" />
+          <button class="snoc-btn" type="submit">Crear zona</button>
+        </form>
+      </div>
+
+      {#if (data.zonas ?? []).length === 0}
+        <p class="snoc-body snoc-secundario">
+          Todavía no hay ninguna. Sin zonas, una cuadrilla no puede recibir trabajo por
+          zona.
+        </p>
+      {:else}
+        <table class="snoc-tabla">
+          <thead>
+            <tr>
+              <th>Zona</th>
+              <th>Barrios</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each data.zonas as z (z.id)}
+              <tr>
+                <td><strong>{z.nombre}</strong></td>
+                <td>
+                  {#if z.localidades?.length}
+                    {#each z.localidades as l (l)}
+                      <span class="snoc-tag">{l}</span>
+                    {/each}
+                  {:else}
+                    <span class="snoc-sin-dato">sin barrios asignados</span>
+                  {/if}
+                </td>
+                <td class="snoc-derecha">
+                  <button class="snoc-pildora" type="button" onclick={() => abrirMapeo(z)}>
+                    Elegir barrios
+                  </button>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
+
+      {#if mapeando}
+        <div class="snoc-pila" style="gap:var(--snoc-sm);">
+          <h3 class="snoc-h2">Barrios de {mapeando.nombre}</h3>
+          <!--
+            LOS BARRIOS SE ELIGEN, NO SE ESCRIBEN. La lista la arma el motor
+            recorriendo el catálogo del proveedor —«nunca la escribe una
+            persona»— y ya resolvió las variantes: un intento de «mejorar» el
+            nombre colapsando SOLEDAD ATLANTICO devolvió SOLEDA, un typo de
+            tres clientes. Teclearlos acá repetiría ese error.
+          -->
+          {#if data.localidadesError}
+            <p class="snoc-aviso snoc-error-txt">
+              No se pudieron leer las localidades. Sin ellas no se puede mapear: no están
+              vacías, no se saben.
+            </p>
+          {:else}
+            <p class="snoc-body-sm snoc-secundario">
+              {data.localidades.length} barrios sincronizados, con sus clientes.
+              {#if data.localidadesActualizadoEn}
+                Última sincronización: {data.localidadesActualizadoEn}.
+              {/if}
+              Se actualizan desde Configuración · Planes de venta.
+            </p>
+
+            <form method="POST" action="?/mapeo" use:enhance={() => {
+              return async ({ result, update }) => {
+                await update();
+                if (result.type === 'success') mapeando = null;
+              };
+            }} class="snoc-pila" style="gap:var(--snoc-sm);">
+              <input type="hidden" name="zona_id" value={mapeando.id} />
+
+              <input
+                class="snoc-campo"
+                bind:value={buscaBarrio}
+                placeholder="Buscar un barrio…"
+              />
+
+              <div style="max-height:320px; overflow:auto;" class="snoc-pila-xs">
+                {#each barriosOfrecidos as l (l.localidad)}
+                  {@const tomado = barrioTomado[l.localidad]}
+                  <label
+                    class="snoc-fila"
+                    style="gap:var(--snoc-xs); cursor:{tomado ? 'not-allowed' : 'pointer'};"
+                  >
+                    <input
+                      type="checkbox"
+                      name="localidad"
+                      value={l.localidad}
+                      checked={barriosElegidos.includes(l.localidad)}
+                      disabled={Boolean(tomado)}
+                      onchange={() => alternarBarrio(l.localidad)}
+                    />
+                    <span class={tomado ? 'snoc-secundario' : ''}>{l.localidad}</span>
+                    <span class="snoc-body-sm snoc-secundario">
+                      {l.n_clientes}
+                      {l.n_clientes === 1 ? 'cliente' : 'clientes'}
+                    </span>
+                    {#if tomado}
+                      <!-- Se dice EN CUÁL está: el servidor lo rechazaría igual,
+                           pero sin el nombre hay que salir a buscarlo. -->
+                      <span class="snoc-body-sm snoc-secundario">· ya está en {tomado}</span>
+                    {/if}
+                  </label>
+                {:else}
+                  <p class="snoc-body-sm snoc-secundario">
+                    Ningún barrio coincide con la búsqueda.
+                  </p>
+                {/each}
+              </div>
+
+              <div class="snoc-fila" style="gap:var(--snoc-sm);">
+                <button class="snoc-btn snoc-btn-primario" type="submit">
+                  Guardar {barriosElegidos.length}
+                  {barriosElegidos.length === 1 ? 'barrio' : 'barrios'}
+                </button>
+                <button class="snoc-pildora" type="button" onclick={() => (mapeando = null)}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          {/if}
+        </div>
+      {/if}
+    </section>
 
     <!-- ============ EL HISTORIAL ============ -->
     <section class="snoc-panel" style="gap:var(--snoc-sm);">

@@ -104,6 +104,10 @@ def _jornada_json(j) -> dict:
         # El lider del DIA, que puede no ser el de la cuadrilla: si esta de
         # vacaciones, alguien la lleva igual.
         "lider": _persona(j.lider) if j.lider else None,
+        # VACIO NO ES "CUBRE TODAS": con zona dura, una cuadrilla sin zona no
+        # recibe trabajo por zona, y eso tiene que notarse.
+        "zonas": [{"id": str(z.id), "nombre": z.nombre}
+                  for z in j.zonas.all()],
         "integrantes": [
             {**_persona(i.profile), "rol": i.rol}
             for i in j.integrantes.select_related("profile__user")
@@ -258,7 +262,7 @@ class JornadaDeCuadrillaView(APIView):
 
         qs = (
             qs.select_related("cuadrilla", "lider__user")
-            .prefetch_related("integrantes__profile__user")
+            .prefetch_related("integrantes__profile__user", "zonas")
             .distinct()
             .order_by("fecha", "cuadrilla__nombre")
         )
@@ -309,6 +313,18 @@ class JornadaDeCuadrillaView(APIView):
                         "notas": (request.data.get("notas") or "").strip(),
                     },
                 )
+                # Las zonas del dia, reescritas enteras por el mismo motivo
+                # que los integrantes. Solo las de esta empresa: un id de otra
+                # se ignora en silencio en vez de romper el armado, y lo que
+                # queda escrito es lo que de verdad se pudo asignar.
+                pedidas = request.data.get("zonas") or []
+                if isinstance(pedidas, list):
+                    jornada.zonas.set(
+                        ZonaOperativa.objects.filter(org=org, id__in=[
+                            x for x in pedidas if x
+                        ])
+                    )
+
                 # Se reescribe la lista entera: es lo que hace que armar el dia
                 # dos veces deje el mismo resultado que armarlo una.
                 jornada.integrantes.all().delete()
@@ -334,7 +350,7 @@ class JornadaDeCuadrillaView(APIView):
         jornada = (
             JornadaDeCuadrilla.objects
             .select_related("cuadrilla", "lider__user")
-            .prefetch_related("integrantes__profile__user")
+            .prefetch_related("integrantes__profile__user", "zonas")
             .get(pk=jornada.pk)
         )
         return Response(_jornada_json(jornada), status=status.HTTP_200_OK)

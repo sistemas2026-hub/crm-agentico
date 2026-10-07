@@ -282,3 +282,68 @@ def test_r_sin_fecha_ni_rango_lo_dice(admin_client):
 def test_s_hasta_anterior_a_desde_se_rechaza(admin_client):
     r = admin_client.get(JORNADA, {"desde": MIERCOLES, "hasta": LUNES})
     assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# D · la zona del dia
+# ---------------------------------------------------------------------------
+
+def test_t_la_jornada_guarda_las_zonas_que_cubre(admin_client, org_a, cuadrilla):
+    from campo.zonas import ZonaOperativa
+
+    norte = ZonaOperativa.objects.create(org=org_a, nombre="Norte")
+    sur = ZonaOperativa.objects.create(org=org_a, nombre="Sur")
+
+    r = admin_client.post(JORNADA, {
+        "cuadrilla": str(cuadrilla.id), "fecha": LUNES,
+        "labor": "instalacion", "integrantes": [],
+        "zonas": [str(norte.id), str(sur.id)],
+    }, format="json")
+    assert r.status_code == 200, r.content
+    assert {z["nombre"] for z in r.json()["zonas"]} == {"Norte", "Sur"}
+
+
+def test_u_cambiar_la_zona_el_martes_no_toca_el_lunes(
+    admin_client, org_a, cuadrilla
+):
+    """Igual que la labor: por eso vive en la jornada."""
+    from campo.zonas import ZonaOperativa
+
+    norte = ZonaOperativa.objects.create(org=org_a, nombre="Norte")
+    sur = ZonaOperativa.objects.create(org=org_a, nombre="Sur")
+
+    for fecha, zona in ((LUNES, norte), (MARTES, sur)):
+        admin_client.post(JORNADA, {
+            "cuadrilla": str(cuadrilla.id), "fecha": fecha,
+            "labor": "instalacion", "integrantes": [],
+            "zonas": [str(zona.id)],
+        }, format="json")
+
+    del_lunes = admin_client.get(JORNADA, {"fecha": LUNES}).json()["jornadas"][0]
+    del_martes = admin_client.get(JORNADA, {"fecha": MARTES}).json()["jornadas"][0]
+    assert [z["nombre"] for z in del_lunes["zonas"]] == ["Norte"]
+    assert [z["nombre"] for z in del_martes["zonas"]] == ["Sur"]
+
+
+def test_v_una_zona_de_OTRA_empresa_no_entra(
+    admin_client, org_b, cuadrilla
+):
+    """Se ignora en vez de romper el armado: lo que queda escrito es lo que
+    de verdad se pudo asignar."""
+    from campo.zonas import ZonaOperativa
+
+    ajena = ZonaOperativa.objects.create(org=org_b, nombre="Ajena")
+    r = admin_client.post(JORNADA, {
+        "cuadrilla": str(cuadrilla.id), "fecha": LUNES,
+        "labor": "instalacion", "integrantes": [],
+        "zonas": [str(ajena.id)],
+    }, format="json")
+    assert r.status_code == 200
+    assert r.json()["zonas"] == []
+
+
+def test_w_sin_zonas_la_jornada_se_arma_igual(admin_client, cuadrilla):
+    """Vacio es «sin zona asignada», y es un estado valido."""
+    r = _armar(admin_client, cuadrilla, LUNES, "instalacion")
+    assert r.status_code == 200
+    assert r.json()["zonas"] == []

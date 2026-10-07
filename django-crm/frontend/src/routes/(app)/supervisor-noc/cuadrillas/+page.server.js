@@ -5,7 +5,11 @@ import {
   editarCuadrilla,
   leerJornadaDeCuadrillas,
   leerHistorialDeCuadrillas,
-  armarJornada
+  armarJornada,
+  leerZonas,
+  crearZona,
+  mapearZona,
+  leerLocalidades
 } from '$lib/server/v2/cuadrillas.js';
 import { leerPersonas, leerUbicaciones } from '$lib/server/v2/inventario.js';
 
@@ -27,7 +31,7 @@ function hoy() {
 }
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ url, cookies }) {
+export async function load({ url, cookies, locals, fetch }) {
   const dia = (url.searchParams.get('dia') ?? '').trim() || hoy();
   const verBajas = url.searchParams.get('bajas') === '1';
 
@@ -43,7 +47,7 @@ export async function load({ url, cookies }) {
   // Las cuatro juntas: sin personas no se puede armar una cuadrilla, sin
   // vehículos no se le puede asignar uno, y sin la jornada no se sabe qué
   // hace hoy. Pedirlas en serie sumaría tres esperas que no hacen falta.
-  const [cuadrillas, jornada, personas, ubicaciones, historial] =
+  const [cuadrillas, jornada, personas, ubicaciones, historial, zonas, locs] =
     await Promise.all([
       leerCuadrillas({ cookies }, verBajas),
       leerJornadaDeCuadrillas({ cookies }, dia),
@@ -56,7 +60,13 @@ export async function load({ url, cookies }) {
             cuadrilla: verCual,
             profile: verQuien
           })
-        : Promise.resolve({ jornadas: [], error: false, motivo: '' })
+        : Promise.resolve({ jornadas: [], error: false, motivo: '' }),
+      leerZonas({ cookies }),
+      // Las localidades viven en el MOTOR, no acá: las arma
+      // `localidades.py::sincronizar()` recorriendo el catálogo del
+      // proveedor, y su documentación dice que «nunca la escribe una
+      // persona». Se ofrecen para elegir, no para teclear.
+      leerLocalidades(locals, fetch)
     ]);
 
   const vehiculos = (ubicaciones.ubicaciones ?? []).filter(
@@ -68,6 +78,10 @@ export async function load({ url, cookies }) {
     verBajas,
     cuadrillas: cuadrillas.cuadrillas,
     jornadas: jornada.jornadas,
+    zonas: zonas.zonas,
+    localidades: locs.localidades,
+    localidadesActualizadoEn: locs.actualizado_en,
+    localidadesError: locs.error,
     historial: {
       pedido: hayHistorial,
       desde,
@@ -136,6 +150,40 @@ export const actions = {
     }
   },
 
+  zona: async ({ request, cookies }) => {
+    const f = await request.formData();
+    try {
+      const r = await crearZona({ cookies }, { nombre: f.get('nombre') });
+      return { hecho: `La zona ${r?.nombre} quedó creada.` };
+    } catch (e) {
+      return fail(409, { error: mensajeDe(e) });
+    }
+  },
+
+  /**
+   * Reemplaza ENTERO el mapeo de una zona.
+   *
+   * Se manda la lista completa y no un delta: la pantalla tiene el estado
+   * entero, y mandar «agregá esta, sacá aquella» obligaría a las dos puntas a
+   * estar de acuerdo sobre qué había antes.
+   */
+  mapeo: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const id = String(f.get('zona_id') ?? '').trim();
+    const localidades = f.getAll('localidad').map((x) => String(x));
+    try {
+      const r = await mapearZona({ cookies }, id, localidades);
+      const n = r?.localidades?.length ?? 0;
+      return {
+        hecho: `${r?.nombre}: ${n} ${n === 1 ? 'barrio' : 'barrios'}.`
+      };
+    } catch (e) {
+      // 409 es «ese barrio ya está en otra zona», y el mensaje dice en cuál.
+      // Se pasa tal cual: sin el nombre hay que salir a buscarlo.
+      return fail(409, { error: mensajeDe(e) });
+    }
+  },
+
   /**
    * Arma el día de una cuadrilla.
    *
@@ -159,6 +207,7 @@ export const actions = {
         cuadrilla: f.get('cuadrilla'),
         fecha: f.get('fecha'),
         labor: f.get('labor'),
+        zonas: f.getAll('zona').map((x) => String(x)).filter(Boolean),
         lider: f.get('lider') || null,
         integrantes,
         notas: f.get('notas') ?? ''
