@@ -117,6 +117,29 @@ def validar(propuesta: PropuestaSupervisor, caso: Case, *, ahora=None) -> None:
     if propuesta.estado != PropuestaSupervisor.ACEPTADA:
         raise NoSeCerro(NO_ACEPTADA, f"esta en '{propuesta.estado}'")
 
+    condiciones_del_caso(propuesta, caso, ahora=ahora)
+
+
+def condiciones_del_caso(propuesta: PropuestaSupervisor, caso: Case, *,
+                         ahora=None) -> None:
+    """
+    Todas las condiciones MENOS la de que alguien haya aceptado. Levanta
+    NoSeCerro.
+
+    POR QUE ESTA PARTIDA EN DOS (07/10/2026)
+    ----------------------------------------
+    El piloto en sombra del cierre automatico necesita saber si un caso
+    CERRARIA, y lo necesita sobre una propuesta que todavia nadie acepto --
+    justamente porque en sombra nadie la acepta. Llamar a 'validar' ahi
+    devolveria siempre NO_ACEPTADA, que no dice nada del caso.
+
+    La alternativa era que la sombra reimplementara las comprobaciones. Eso es
+    exactamente lo que no se hace en este proyecto: dos copias de una garantia
+    se desincronizan, y la que se queda vieja es siempre la que no se mira.
+    Asi, la sombra mide lo MISMO que despues va a ejecutar.
+    """
+    ahora = ahora or timezone.now()
+
     # 4 y 5. el origen es ESTE caso
     if propuesta.origen_tipo != "case":
         raise NoSeCerro(ORIGEN_NO_ES_CASO, f"origen_tipo='{propuesta.origen_tipo}'")

@@ -2031,6 +2031,12 @@ def _correr_ciclo(org, ahora) -> dict:
     resumen["diagnostico_optico"] = diagnostico_optico.enriquecer(
         org, candidatas, ahora=ahora)
 
+    #  Y con el diagnostico ya escrito, si ese caso CERRARIA solo. En sombra
+    #  no cierra: deja anotado que habria hecho, y es lo que produce el dato
+    #  medido que hace falta para decidir si se enciende.
+    resumen["cierre_automatico"] = diagnostico_optico.evaluar_cierre_automatico(
+        org, candidatas, ahora=ahora)
+
     for senal in senales:
         resumen["senales"] += 1
         resumen["por_tipo"][senal.tipo] = resumen["por_tipo"].get(senal.tipo, 0) + 1

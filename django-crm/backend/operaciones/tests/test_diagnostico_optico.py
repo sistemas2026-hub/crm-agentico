@@ -381,6 +381,171 @@ def test_una_senal_YA_PROPUESTA_no_gasta_presupuesto(monkeypatch):
         "paga y se tira")
 
 
+# ===========================================================================
+#  6. EL PILOTO EN SOMBRA DEL CIERRE AUTOMATICO
+# ===========================================================================
+
+@pytest.mark.django_db
+def test_sin_equipo_registrado_lo_dice_con_todas_las_letras():
+    #  Lo pidio el usuario con esas palabras, y la diferencia es accionable:
+    #  "no se pudo diagnosticar" invita a reintentar; "no tiene equipo
+    #  registrado" dice que el dato falta en WispHub y hay que decidir sin el.
+    sin_onu = {"id_servicio": 5832, "equipo_registrado": False,
+               "estado": "desconocido", "senal": "sin_dato",
+               "motivo": "el servicio no tiene equipo registrado en el proveedor"}
+    veredicto, porque = dx.clasificar(sin_onu)
+    assert veredicto == dx.SIN_DIAGNOSTICO
+    assert "no tiene equipo registrado" in porque
+    #  Y no se lee como una falla del equipo.
+    assert "falta el dato" in porque
+
+
+@pytest.mark.django_db
+def test_en_sombra_NO_se_cierra_ningun_caso(monkeypatch):
+    """
+    La afirmacion que sostiene todo el piloto: con la bandera apagada, ningun
+    caso cambia de estado.
+
+    Se mide sobre el CASO en la base --no sobre la bandera ni sobre un conteo
+    del informe-- porque lo unico que importa es que el cliente siga con su
+    caso abierto. Una prueba que dijera 'CIERRE_AUTOMATICO is False' pasaria
+    en verde con el cierre ejecutandose igual.
+    """
+    from datetime import timedelta as td
+
+    from cases.models import Case
+    from common.models import Org
+    from operaciones import chat_herramientas, supervisor
+
+    org = Org.objects.create(name="Org de la sombra")
+    ahora = timezone.now()
+    caso = Case.objects.create(
+        org=org, name="Sin servicio de internet", status="New",
+        priority="Normal", external_status="Cerrado",
+        external_ticket_id="555001", provider="wisphub",
+        external_service_id="7001")
+    Case.objects.filter(pk=caso.pk).update(
+        created_at=ahora - td(days=12),
+        external_status_at=ahora - td(days=3),
+        external_fetched_at=ahora - td(hours=1))
+
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        lambda o, *, id_servicio: SANO)
+
+    supervisor.correr_ciclo(org)
+
+    caso.refresh_from_db()
+    assert caso.status == "New", "el caso NO puede haber cambiado de estado"
+    assert caso.resolved_at is None, "y no puede tener fecha de resolucion"
+
+
+@pytest.mark.django_db
+def test_la_sombra_deja_escrito_que_HABRIA_cerrado(monkeypatch):
+    from datetime import timedelta as td
+
+    from cases.models import Case
+    from common.models import Org
+    from operaciones import chat_herramientas, supervisor
+    from operaciones.models import PropuestaSupervisor as P
+
+    org = Org.objects.create(name="Org del habria")
+    ahora = timezone.now()
+    caso = Case.objects.create(
+        org=org, name="Sin servicio de internet", status="New",
+        priority="Normal", external_status="Cerrado",
+        external_ticket_id="555002", provider="wisphub",
+        external_service_id="7002")
+    Case.objects.filter(pk=caso.pk).update(
+        created_at=ahora - td(days=12),
+        external_status_at=ahora - td(days=3),
+        external_fetched_at=ahora - td(hours=1))
+
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        lambda o, *, id_servicio: SANO)
+    resumen = supervisor.correr_ciclo(org)
+
+    assert resumen["cierre_automatico"]["cerraria"] == 1
+    propuesta = PropuestaSupervisor.objects.get(
+        org=org, tipo_senal=P.CASO_DESINCRONIZADO)
+    escrito = str(propuesta.evidencia)
+    assert "cierre automatico" in escrito
+    #  Y dice explicitamente que NO se hizo, para que nadie lea la evidencia
+    #  como si el caso ya estuviera cerrado.
+    assert "modo sombra" in escrito
+
+
+@pytest.mark.django_db
+def test_un_diagnostico_que_NO_habilita_no_llega_a_evaluarse(monkeypatch):
+    #  Señal debil: el diagnostico no habilita, asi que el cierre automatico ni
+    #  se plantea. Si esto se rompiera, la sombra estaria midiendo como
+    #  "cerraria" casos que una persona tiene que mirar.
+    from datetime import timedelta as td
+
+    from cases.models import Case
+    from common.models import Org
+    from operaciones import chat_herramientas, supervisor
+
+    org = Org.objects.create(name="Org de la debil")
+    ahora = timezone.now()
+    caso = Case.objects.create(
+        org=org, name="Sin servicio de internet", status="New",
+        priority="Normal", external_status="Cerrado",
+        external_ticket_id="555003", provider="wisphub",
+        external_service_id="7003")
+    Case.objects.filter(pk=caso.pk).update(
+        created_at=ahora - td(days=12),
+        external_status_at=ahora - td(days=3),
+        external_fetched_at=ahora - td(hours=1))
+
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        lambda o, *, id_servicio: DEBIL)
+    resumen = supervisor.correr_ciclo(org)
+
+    assert resumen["cierre_automatico"]["cerraria"] == 0
+    assert resumen["cierre_automatico"]["no_aplica"] == 1
+
+
+@pytest.mark.django_db
+def test_la_sombra_corre_las_condiciones_REALES_del_cierre():
+    """
+    Si el caso ya no cumple, la sombra dice 'no cerraria' con el motivo que
+    daria el cierre de verdad.
+
+    Esto es lo que hace que la sombra sirva: mide lo MISMO que va a ejecutar.
+    Si reimplementara las condiciones, el dia que una cambie la sombra seguiria
+    prometiendo un cierre que ya no procede.
+    """
+    from datetime import timedelta as td
+
+    from cases.models import Case
+    from common.models import Org
+    from operaciones import cierre_de_caso
+
+    org = Org.objects.create(name="Org del reabierto")
+    ahora = timezone.now()
+    #  El proveedor REABRIO el ticket: cerrar aca seria sincronizar al reves.
+    caso = Case.objects.create(
+        org=org, name="Sin servicio", status="New", priority="Normal",
+        external_status="Abierto", external_ticket_id="555004",
+        provider="wisphub", external_service_id="7004")
+    Case.objects.filter(pk=caso.pk).update(
+        external_status_at=ahora - td(days=3),
+        external_fetched_at=ahora - td(hours=1))
+    caso.refresh_from_db()
+
+    senal = _senal(id_servicio="7004")
+    senal.origen_id = str(caso.id)
+    senal.datos["diagnostico_veredicto"] = dx.CIERRE_SEGURO
+
+    informe = dx.evaluar_cierre_automatico(org, [senal], ahora=ahora)
+
+    assert informe["no_cerraria"] == 1
+    assert informe["cerraria"] == 0
+    #  El motivo es el del cierre real, no uno inventado por la sombra.
+    assert cierre_de_caso.PROVEEDOR_NO_LO_CERRO in informe["motivos"]
+    assert "no cerraria" in senal.datos["cierre_automatico_porque"]
+
+
 @pytest.mark.django_db
 def test_el_informe_cuenta_cada_veredicto():
     senales = [_senal(id_servicio="1"), _senal(id_servicio="2"),

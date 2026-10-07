@@ -131,6 +131,24 @@ def clasificar(diagnostico: dict) -> tuple[str, str]:
     causa = str(diagnostico.get("causa_caida") or "")
     dbm = diagnostico.get("senal_dbm")
 
+    #  SIN EQUIPO REGISTRADO: su propio motivo, no "no se pudo".
+    #
+    #  Medido el 07/10/2026: de 19 casos desincronizados, DOS no tienen serial
+    #  de ONU cargado en WispHub. Eso no es una falla de nadie ni algo que se
+    #  reintente -- es un dato que el ISP no cargo, y la skill lo tiene medido
+    #  a escala: 1.299 de 4.163 clientes activos estan igual.
+    #
+    #  Se dice con todas las letras porque es ACCIONABLE de una forma distinta:
+    #  "no se pudo diagnosticar" invita a reintentar, y "este servicio no tiene
+    #  equipo registrado" le dice a quien lee que el dato falta en WispHub y
+    #  que decida sin el. Lo pidio el usuario con esas palabras.
+    if diagnostico.get("equipo_registrado") is False:
+        return SIN_DIAGNOSTICO, (
+            "este servicio no tiene equipo registrado en WispHub, asi que no "
+            "hay con que consultar la ONU: no se puede verificar su estado "
+            "optico. No es que el equipo este mal -- es que falta el dato para "
+            "preguntar.")
+
     if estado not in (EN_LINEA, CAIDO):
         return SIN_DIAGNOSTICO, (
             f"el estado del equipo volvio como '{estado or 'vacio'}'"
@@ -250,6 +268,113 @@ def enriquecer(org, senales, *, ahora=None, presupuesto_=None,
         veredicto, porque = clasificar(diagnostico)
         informe[veredicto] = informe.get(veredicto, 0) + 1
         _anotar(senal, veredicto, porque, diagnostico, ahora)
+
+    return informe
+
+
+#  EL PILOTO EN SOMBRA DEL CIERRE AUTOMATICO
+#  ==========================================
+#  ESTE MODULO NO CIERRA NINGUN CASO, Y NO HAY BANDERA QUE LO HAGA CERRAR.
+#
+#  La primera version de este bloque declaraba 'CIERRE_AUTOMATICO = False' y
+#  decia "en True, cierra". Era falso: el codigo que cierra no estaba escrito.
+#  Una bandera que promete una conducta inexistente es peor que no tenerla --
+#  la proxima sesion la enciende, no pasa nada, y se va a buscar el error a
+#  otro lado. Es la misma familia que "codigo construido no es codigo que
+#  corre", y por eso se saco en vez de dejarla "para despues".
+#
+#  Lo que SI hace: medir. Marca cada propuesta con si el sistema la habria
+#  cerrado solo y por que, corriendo las condiciones REALES del cierre. Ese
+#  registro es lo que produce el dato que el propio codigo exige para el paso
+#  siguiente: 'autonomia.cambiar()' pide criterios MEDIDOS, no una intuicion.
+#
+#  Para que el cierre ocurra de verdad faltan tres cosas, y ninguna es esta:
+#    1. el codigo que llame a 'cierre_de_caso.cerrar' desde el ciclo
+#    2. un actor de sistema ('ACTOR_AUTOMATICO') que la auditoria acepte
+#    3. el techo de autonomia de la empresa en NIVEL_EJECUTAR_REVERSIBLE,
+#       que hoy esta en NIVEL_RECOMENDAR (models.py, NIVEL_MAXIMO_ETAPA)
+EN_SOMBRA = True
+
+#  Quien figura en la auditoria cuando cierra el sistema. Decision del usuario
+#  el 07/10/2026 sobre la alternativa de usar su propio usuario: si lo
+#  automatico y lo humano quedan con el mismo nombre, el dia que algo salga mal
+#  no hay forma de separarlos, que es justo cuando hace falta.
+ACTOR_AUTOMATICO = "Supervisor NOC IA"
+
+
+def evaluar_cierre_automatico(org, senales, *, ahora=None) -> dict:
+    """
+    Si cada caso con 'cierre_seguro' CERRARIA hoy. En sombra no cierra.
+
+    Corre las condiciones REALES ('cierre_de_caso.condiciones_del_caso'), las
+    mismas doce que corren antes de un cierre de verdad. No las imita: una
+    sombra que midiera otra cosa que la ejecucion no serviria para decidir si
+    encenderla, que es su unico proposito.
+
+    Lo que deja escrito en la señal:
+        cierre_automatico   'cerraria' | 'no_cerraria' | 'no_aplica'
+        cierre_automatico_porque   el motivo, en el idioma de quien lee
+
+    NO CIERRA, y no hay forma de que cierre: el codigo que ejecuta un cierre
+    desde el ciclo todavia no existe. Ver la nota de 'EN_SOMBRA' arriba para
+    las tres cosas que faltan.
+    """
+    from cases.models import Case
+    from operaciones import cierre_de_caso
+
+    ahora = ahora or timezone.now()
+    informe = {"cerraria": 0, "no_cerraria": 0, "no_aplica": 0,
+               "cerrados": 0, "motivos": {}}
+
+    for senal in senales:
+        if senal.tipo != PropuestaSupervisor.CASO_DESINCRONIZADO:
+            continue
+        if senal.datos.get("diagnostico_veredicto") != CIERRE_SEGURO:
+            #  Sin un diagnostico que lo habilite no se evalua siquiera. El
+            #  'no_aplica' se escribe igual: el silencio en una señal que no
+            #  se miro es indistinguible del silencio en una que si.
+            informe["no_aplica"] += 1
+            senal.datos["cierre_automatico"] = "no_aplica"
+            senal.datos["cierre_automatico_porque"] = (
+                "el diagnostico no habilita un cierre automatico")
+            continue
+
+        caso = Case.objects.filter(id=senal.origen_id, org=org).first()
+        if caso is None:
+            informe["no_cerraria"] += 1
+            senal.datos["cierre_automatico"] = "no_cerraria"
+            senal.datos["cierre_automatico_porque"] = "el caso ya no existe"
+            continue
+
+        #  Se construye una propuesta EN MEMORIA, sin guardar: las condiciones
+        #  miran la organizacion y el origen, y eso ya se sabe sin ir a la
+        #  base. Guardar una propuesta falsa para poder validarla seria dejar
+        #  basura en una tabla que es registro de decisiones.
+        fantasma = PropuestaSupervisor(
+            org=org, tipo_senal=senal.tipo, origen_tipo=senal.origen_tipo,
+            origen_id=senal.origen_id,
+            estado=PropuestaSupervisor.ACEPTADA)
+        try:
+            cierre_de_caso.condiciones_del_caso(fantasma, caso, ahora=ahora)
+        except cierre_de_caso.NoSeCerro as no:
+            informe["no_cerraria"] += 1
+            informe["motivos"][no.motivo] = informe["motivos"].get(no.motivo, 0) + 1
+            senal.datos["cierre_automatico"] = "no_cerraria"
+            senal.datos["cierre_automatico_porque"] = (
+                f"no cerraria: {no.detalle or no.motivo}")
+            continue
+
+        informe["cerraria"] += 1
+        senal.datos["cierre_automatico"] = "cerraria"
+        senal.datos["cierre_automatico_porque"] = (
+            "el diagnostico habilita el cierre y las condiciones del caso se "
+            "siguen cumpliendo"
+            + (". No se cerro: el cierre automatico esta en modo sombra, asi "
+               "que esto es lo que el sistema HABRIA hecho." if EN_SOMBRA
+               else ""))
+        senal.evidencia.append(sup._observacion(
+            "cierre automatico", senal.origen_id,
+            senal.datos["cierre_automatico_porque"], ahora))
 
     return informe
 
