@@ -2078,6 +2078,38 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict,
     if herramienta.tipo == "interno" and herramienta.consulta_guias_tv:
         return _ejecutar_consulta_guia_tv(config, argumentos)
 
+    #  EL DIAGNOSTICO OPTICO, QUE ES POR DONDE ENTRA EL SUPERVISOR
+    #  -----------------------------------------------------------
+    #  Esta rama falto el 07/10/2026 y el sintoma no señalaba la causa: la
+    #  herramienta estaba completa, autorizada por rol, con
+    #  'invocable_por_servicio: true' en la base, y el chat del Supervisor
+    #  recibia HTTP 502. El 502 lo emitia el 'except Exception' de la ruta
+    #  interna al atrapar el ValueError del final de ESTA funcion -- "solo
+    #  'http'" -- porque aqui no habia rama para una 'interno' de diagnostico.
+    #
+    #  La leccion es que HAY DOS DESPACHOS, no uno: este, y
+    #  '_despacho_de_herramienta', que es el del modelo. Cablear una
+    #  herramienta nueva en uno la deja funcionando por un camino y muda por
+    #  el otro, sin error en el que se cableo. Al agregar una 'interno' que un
+    #  servicio deba poder pedir, se cablean LOS DOS -- y lo que lo comprueba
+    #  es tests/test_diagnostico_servicio.py, que llama por esta funcion y
+    #  afirma que llego al ejecutor, no que la rama este escrita.
+    if herramienta.tipo == "interno" and herramienta.diagnostica_servicio:
+        return ejecutor_diagnostico.diagnosticar(
+            herramienta, argumentos, tenant_slug, config.variables_tenant)
+
+    #  LA FLOTA, que tenia el MISMO hueco y lo encontro la medicion de arriba.
+    #  Estaba declarada 'invocable_por_servicio: true' en el catalogo y moria
+    #  con el ValueError del final igual que el diagnostico. No se habia visto
+    #  porque hoy nadie la pide: la variable que la activa del lado del CRM
+    #  ('SUPERVISOR_HERRAMIENTAS_CAIDAS_PON', en fuentes_adaptadores.py) esta
+    #  vacia. O sea, estaba cableada para fallar el dia que se active -- y el
+    #  sintoma habria sido un 502 que no señala a esto.
+    if herramienta.tipo == "interno" and herramienta.detecta_caidas_flota:
+        return ejecutor_flota.caidas_por_pon(herramienta, argumentos,
+                                            tenant_slug,
+                                            config.variables_tenant)
+
     if herramienta.tipo == "http":
         def _llamar():
             return (ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
