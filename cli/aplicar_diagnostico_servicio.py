@@ -81,7 +81,10 @@ HERRAMIENTA = {
         "'motivo' y tampoco se lee como sano."),
     "solo_lectura": True,
     "roles_permitidos": ["supervisor_noc", "soporte"],
-    "base_url_ref": "SMARTOLT_BASE_URL",
+    #  El MISMO que usan las otras de SmartOLT. Se equivoco una vez con
+    #  'SMARTOLT_BASE_URL', que no existe, y la herramienta quedo escrita
+    #  en la base sin poder resolver su URL.
+    "base_url_ref": "SMARTOLT_SUBDOMINIO",
     "auth_ref": "SMARTOLT_API_KEY",
     "auth_esquema": "",
     "auth_header": "X-Token",
@@ -105,8 +108,17 @@ CAMPOS = ["id_servicio", "equipo_registrado", "estado", "causa_caida",
 
 def _mutar(cfg: dict) -> None:
     """Agrega la herramienta y sus dos autorizaciones. Idempotente."""
+    #  REEMPLAZA si ya existe, no la saltea. La primera version se escribio con
+    #  un 'base_url_ref' que no existe ('SMARTOLT_BASE_URL' en vez de
+    #  'SMARTOLT_SUBDOMINIO') y quedo en la base sin poder resolver su URL. Un
+    #  script que solo agregue cuando falta no puede arreglar eso, y obligaria a
+    #  editar produccion a mano -- que es justo lo que este script evita.
     hs = cfg.setdefault("herramientas", [])
-    if not any(h.get("nombre") == HERRAMIENTA["nombre"] for h in hs):
+    for i, h in enumerate(hs):
+        if h.get("nombre") == HERRAMIENTA["nombre"]:
+            hs[i] = dict(HERRAMIENTA)
+            break
+    else:
         hs.append(dict(HERRAMIENTA))
 
     roles = cfg.setdefault("roles", {})
@@ -130,6 +142,12 @@ def _estado_actual(cfg: dict) -> dict:
     rol = (cfg.get("roles") or {}).get(ROL) or {}
     return {
         "herramienta": any(h.get("nombre") == HERRAMIENTA["nombre"] for h in hs),
+        #  No alcanza con que ESTE: puede estar mal. Se compara el campo que ya
+        #  fallo una vez, que es el que decide si la herramienta puede siquiera
+        #  armar su URL.
+        "ref_correcta": any(h.get("nombre") == HERRAMIENTA["nombre"]
+                            and h.get("base_url_ref") == HERRAMIENTA["base_url_ref"]
+                            for h in hs),
         "puede_consultar": HERRAMIENTA["nombre"] in (rol.get("puede_consultar") or []),
         "campos": (rol.get("campos_permitidos") or {}).get(HERRAMIENTA["nombre"]),
         "cuantas_herramientas": len(hs),
@@ -159,13 +177,20 @@ def main() -> int:
     print(f"    el rol puede consultarla ......... {'SI' if antes['puede_consultar'] else 'no'}")
     print(f"    campos permitidos del rol ........ {antes['campos'] or 'ninguno'}")
 
-    if antes["herramienta"] and antes["puede_consultar"] and antes["campos"]:
+    print(f"    base_url_ref correcta ............ "
+          f"{'SI' if antes['ref_correcta'] else 'NO'}")
+
+    if (antes["herramienta"] and antes["ref_correcta"]
+            and antes["puede_consultar"] and antes["campos"]):
         print("\n  Ya esta todo puesto. No hay nada que aplicar.\n")
         return 0
 
     print(f"\n  QUE CAMBIARIA:")
     if not antes["herramienta"]:
         print(f"    + herramienta '{HERRAMIENTA['nombre']}' (tipo interno, solo lectura)")
+    elif not antes["ref_correcta"]:
+        print(f"    ~ herramienta '{HERRAMIENTA['nombre']}' se REEMPLAZA "
+              f"(su base_url_ref estaba mal)")
     if not antes["puede_consultar"]:
         print(f"    + '{ROL}'.puede_consultar += {HERRAMIENTA['nombre']}")
     if antes["campos"] != CAMPOS:
@@ -183,10 +208,11 @@ def main() -> int:
     #  funcion no levanto. Una escritura que no se relee no esta comprobada.
     despues = _estado_actual(
         fuente.cargar(tenant).model_dump(mode="json", exclude_none=True))
-    ok = (despues["herramienta"] and despues["puede_consultar"]
-          and despues["campos"] == CAMPOS)
+    ok = (despues["herramienta"] and despues["ref_correcta"]
+          and despues["puede_consultar"] and despues["campos"] == CAMPOS)
     print(f"\n  APLICADO. Releido de la base: "
           f"herramienta={'SI' if despues['herramienta'] else 'NO'}, "
+          f"ref={'SI' if despues['ref_correcta'] else 'NO'}, "
           f"puede_consultar={'SI' if despues['puede_consultar'] else 'NO'}, "
           f"campos={'SI' if despues['campos'] == CAMPOS else 'NO'}")
     if not ok:

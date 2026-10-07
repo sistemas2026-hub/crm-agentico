@@ -191,8 +191,22 @@ def diagnosticar(herramienta, argumentos: dict, tenant: str | None = None,
     if not serial:
         return _sin_resolver(motivo, id_servicio)
 
-    base_url = ejecutor_http.base_url_de(herramienta, variables_tenant).rstrip("/")
-    headers = ejecutor_http.headers_de(herramienta, tenant)
+    #  RESOLVER LA URL Y LA CREDENCIAL TAMBIEN PUEDE FALLAR, y estaba fuera del
+    #  try. Esta funcion promete no levantar nunca, y 'base_url_de' levanta
+    #  'ErrorHerramientaHttp' si la variable del tenant no esta cargada -- que
+    #  es exactamente lo que paso en la primera prueba contra produccion, con
+    #  un nombre de variable equivocado. La promesa valia para el proveedor y
+    #  no para la configuracion, que es el error mas facil de cometer.
+    try:
+        base_url = ejecutor_http.base_url_de(
+            herramienta, variables_tenant).rstrip("/")
+        headers = ejecutor_http.headers_de(herramienta, tenant)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("diagnostico_servicio",
+                  "no se pudo resolver la URL o la credencial", error=e)
+        return _sin_resolver(
+            "falta configurar el acceso al proveedor optico para esta empresa",
+            id_servicio)
 
     try:
         r = requests.get(
