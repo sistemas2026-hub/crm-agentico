@@ -111,3 +111,72 @@ def test_j_normalizar_no_quita_tildes(org_a):
     Decidirlo por el sistema esconderia el caso en vez de resolverlo.
     """
     assert normalizar_localidad(" bogotá  centro ") == "BOGOTÁ CENTRO"
+
+
+# ---------------------------------------------------------------------------
+# La API: crear zonas y mapear localidades
+# ---------------------------------------------------------------------------
+
+ZONAS = "/api/campo/zonas/"
+
+
+def test_k_crear_una_zona_y_mapearle_barrios(admin_client):
+    r = admin_client.post(ZONAS, {"nombre": "Norte"}, format="json")
+    assert r.status_code == 201, r.content
+    zid = r.json()["id"]
+
+    m = admin_client.put(
+        f"{ZONAS}{zid}/localidades/",
+        {"localidades": ["martha gisela", "LA ESPERANZA"]},
+        format="json",
+    )
+    assert m.status_code == 200, m.content
+    # Se guardan normalizadas: asi el mismo barrio no entra dos veces.
+    assert sorted(m.json()["localidades"]) == ["LA ESPERANZA", "MARTHA GISELA"]
+
+
+def test_l_mapear_dos_veces_deja_lo_mismo(admin_client):
+    zid = admin_client.post(ZONAS, {"nombre": "Norte"},
+                            format="json").json()["id"]
+    cuerpo = {"localidades": ["MARTHA GISELA", "martha gisela"]}
+    admin_client.put(f"{ZONAS}{zid}/localidades/", cuerpo, format="json")
+    r = admin_client.put(f"{ZONAS}{zid}/localidades/", cuerpo, format="json")
+
+    assert r.json()["localidades"] == ["MARTHA GISELA"], "no se duplica"
+
+
+def test_m_un_barrio_de_otra_zona_se_rechaza_diciendo_cual(admin_client):
+    """Si estuviera en dos, el reparto dejaria de ser reproducible."""
+    norte = admin_client.post(ZONAS, {"nombre": "Norte"},
+                              format="json").json()["id"]
+    sur = admin_client.post(ZONAS, {"nombre": "Sur"},
+                            format="json").json()["id"]
+    admin_client.put(f"{ZONAS}{norte}/localidades/",
+                     {"localidades": ["MARTHA GISELA"]}, format="json")
+
+    r = admin_client.put(f"{ZONAS}{sur}/localidades/",
+                         {"localidades": ["MARTHA GISELA"]}, format="json")
+    assert r.status_code == 409
+    assert "Norte" in r.json()["detail"], "tiene que decir en cual esta"
+
+
+def test_n_quitar_un_barrio_es_mandar_la_lista_sin_el(admin_client):
+    zid = admin_client.post(ZONAS, {"nombre": "Norte"},
+                            format="json").json()["id"]
+    admin_client.put(f"{ZONAS}{zid}/localidades/",
+                     {"localidades": ["A", "B"]}, format="json")
+    r = admin_client.put(f"{ZONAS}{zid}/localidades/",
+                         {"localidades": ["A"]}, format="json")
+    assert r.json()["localidades"] == ["A"]
+
+
+def test_o_dos_zonas_no_se_llaman_igual(admin_client):
+    admin_client.post(ZONAS, {"nombre": "Norte"}, format="json")
+    r = admin_client.post(ZONAS, {"nombre": "Norte"}, format="json")
+    assert r.status_code == 409
+
+
+def test_p_un_tecnico_no_puede_tocar_zonas(user_client):
+    r = user_client.post(ZONAS, {"nombre": "La mia"}, format="json")
+    assert r.status_code == 403
+    assert user_client.get(ZONAS).status_code == 200, "pero SI puede mirarlas"

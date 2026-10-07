@@ -29,6 +29,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from campo.cuadrillas import Cuadrilla, IntegranteDeJornada, JornadaDeCuadrilla
+from campo.zonas import AliasDeZona, ZonaOperativa, normalizar_localidad
 from campo.inventario import UbicacionInventario
 from campo.permissions import IsCampoAuthenticated, ROLES_GESTION
 from common.models import Profile
@@ -360,3 +361,140 @@ def _vehiculo_de(org, valor):
         ).first()
     except (ValueError, ValidationError):
         return None
+
+
+# ===========================================================================
+#  ZONAS OPERATIVAS  --  como la empresa divide su territorio
+# ===========================================================================
+
+def _zona_json(z) -> dict:
+    return {
+        "id": str(z.id),
+        "nombre": z.nombre,
+        "activa": z.activa,
+        "localidades": [a.localidad for a in z.alias.all()],
+        "notas": z.notas,
+    }
+
+
+class ZonasView(APIView):
+    """``GET`` las zonas con sus localidades · ``POST`` una nueva."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = request.profile.org
+        qs = ZonaOperativa.objects.filter(org=org)
+        if request.query_params.get("todas") not in ("1", "true", "si"):
+            qs = qs.filter(activa=True)
+        qs = qs.prefetch_related("alias")
+        return Response({"zonas": [_zona_json(z) for z in qs]})
+
+    def post(self, request):
+        _exigir_gestion(request)
+        org = request.profile.org
+        nombre = (request.data.get("nombre") or "").strip()
+        if not nombre:
+            return Response({"detail": "Una zona necesita un nombre."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            z = ZonaOperativa.objects.create(
+                org=org, nombre=nombre,
+                notas=(request.data.get("notas") or "").strip(),
+            )
+        except IntegrityError:
+            return Response({"detail": f"Ya hay una zona llamada '{nombre}'."},
+                            status=status.HTTP_409_CONFLICT)
+        return Response(_zona_json(z), status=status.HTTP_201_CREATED)
+
+
+class ZonaView(APIView):
+    """``PATCH`` el nombre o la baja de una zona."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def patch(self, request, pk):
+        _exigir_gestion(request)
+        org = request.profile.org
+        z = ZonaOperativa.objects.filter(org=org, id=pk).first()
+        if z is None:
+            return Response({"detail": "No existe esa zona."},
+                            status=status.HTTP_404_NOT_FOUND)
+        if "nombre" in request.data:
+            nombre = (request.data.get("nombre") or "").strip()
+            if not nombre:
+                return Response({"detail": "El nombre no puede quedar vacio."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            z.nombre = nombre
+        if "activa" in request.data:
+            z.activa = bool(request.data.get("activa"))
+        if "notas" in request.data:
+            z.notas = (request.data.get("notas") or "").strip()
+        try:
+            z.save()
+        except IntegrityError:
+            return Response({"detail": "Ya hay otra zona con ese nombre."},
+                            status=status.HTTP_409_CONFLICT)
+        return Response(_zona_json(z))
+
+
+class LocalidadesDeZonaView(APIView):
+    """``PUT`` reemplaza ENTERO el mapeo de localidades de una zona.
+
+    Entero y no un delta: la pantalla tiene el estado completo, y mandar
+    "agrega esta, saca aquella" obligaria a las dos puntas a estar de acuerdo
+    sobre que habia antes. Mandarlo dos veces deja lo mismo que mandarlo una.
+
+    UNA LOCALIDAD EN DOS ZONAS SE RECHAZA, y el mensaje dice en cual esta: si
+    estuviera en las dos, una orden de ahi podria ir a cualquiera de las dos
+    cuadrillas y el reparto dejaria de ser reproducible.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def put(self, request, pk):
+        _exigir_gestion(request)
+        org = request.profile.org
+        z = ZonaOperativa.objects.filter(org=org, id=pk).first()
+        if z is None:
+            return Response({"detail": "No existe esa zona."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        crudas = request.data.get("localidades")
+        if not isinstance(crudas, list):
+            return Response({"detail": "'localidades' tiene que ser una lista."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Se normalizan ANTES de comparar: el mismo barrio escrito de dos
+        # formas no puede contarse dos veces ni chocar consigo mismo.
+        nuevas = []
+        vistas = set()
+        for cruda in crudas:
+            texto = normalizar_localidad(str(cruda or ""))
+            if texto and texto not in vistas:
+                vistas.add(texto)
+                nuevas.append(texto)
+
+        ajenas = (
+            AliasDeZona.objects
+            .filter(org=org, localidad__in=nuevas)
+            .exclude(zona=z)
+            .select_related("zona")
+        )
+        if ajenas.exists():
+            a = ajenas.first()
+            return Response(
+                {"detail": f"'{a.localidad}' ya esta en la zona "
+                           f"'{a.zona.nombre}'."},
+                status=status.HTTP_409_CONFLICT)
+
+        with transaction.atomic():
+            z.alias.all().delete()
+            AliasDeZona.objects.bulk_create([
+                AliasDeZona(org=org, zona=z, localidad=x) for x in nuevas
+            ])
+
+        z = (
+            ZonaOperativa.objects.prefetch_related("alias").get(pk=z.pk)
+        )
+        return Response(_zona_json(z))

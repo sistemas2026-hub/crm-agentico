@@ -111,3 +111,81 @@ export async function armarJornada(ctx, cuerpo) {
     '/campo/cuadrillas/jornada/', { method: 'POST', body: cuerpo }, ctx
   );
 }
+
+/**
+ * Las localidades REALES, para mapearlas a zonas sin escribirlas a mano.
+ *
+ * Vive en el motor —`TenantConfig.localidades`— y no en el CRM, porque la
+ * arma `nucleo/herramientas/localidades.py` recorriendo el catálogo completo
+ * de clientes del proveedor. Su propia documentación lo dice: «nunca la
+ * escribe una persona».
+ *
+ * POR QUÉ IMPORTA QUE NO SE ESCRIBAN
+ * El nombre de un barrio llega del proveedor con variantes, y ese módulo
+ * elige la más común. Un intento de «mejorarlo» colapsando `SOLEDAD
+ * ATLANTICO` devolvió `SOLEDA` —un typo de tres clientes— y la moda ya los
+ * descarta sola: 2.328 `SOLEDAD` contra un puñado de variantes. Ofrecer la
+ * lista en vez de un campo de texto es heredar esa lección en vez de
+ * repetir el error.
+ *
+ * Las `zonas` que trae cada localidad son de RED (corte de facturación), no
+ * operativas: sirven como referencia al mapear, nunca como la zona de una
+ * cuadrilla.
+ *
+ * @param {any} locals
+ * @param {typeof globalThis.fetch} fetch
+ * @returns {Promise<{ localidades: any[], actualizado_en: string | null, error: boolean }>}
+ */
+export async function leerLocalidades(locals, fetch) {
+  const { destinoDelAsistente } = await import('./tenant.js');
+  const { headersMotor } = await import('./motor-headers.js');
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return { localidades: [], actualizado_en: null, error: true };
+  try {
+    const resp = await fetch(
+      `${cfg.baseUrl}/configuracion/planes-venta?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor() }
+    );
+    if (!resp.ok) return { localidades: [], actualizado_en: null, error: true };
+    const d = await resp.json();
+    return {
+      localidades: d?.localidades ?? [],
+      actualizado_en: d?.localidades_actualizado_en ?? null,
+      error: false
+    };
+  } catch {
+    return { localidades: [], actualizado_en: null, error: true };
+  }
+}
+
+/** @param {{ cookies: any }} ctx */
+export async function leerZonas(ctx) {
+  try {
+    const d = await apiRequest('/campo/zonas/', {}, ctx);
+    return { zonas: d?.zonas ?? [], error: false };
+  } catch {
+    return { zonas: [], error: true };
+  }
+}
+
+/** @param {{ cookies: any }} ctx @param {Record<string, any>} cuerpo */
+export async function crearZona(ctx, cuerpo) {
+  return apiRequest('/campo/zonas/', { method: 'POST', body: cuerpo }, ctx);
+}
+
+/**
+ * Reemplaza ENTERO el mapeo de una zona.
+ *
+ * Se manda la lista completa de localidades, no un delta: la pantalla tiene
+ * el estado entero y mandar «agregá esta, sacá aquella» obligaría a las dos
+ * puntas a estar de acuerdo sobre qué había antes.
+ *
+ * @param {{ cookies: any }} ctx @param {string} id @param {string[]} localidades
+ */
+export async function mapearZona(ctx, id, localidades) {
+  return apiRequest(
+    `/campo/zonas/${id}/localidades/`,
+    { method: 'PUT', body: { localidades } },
+    ctx
+  );
+}

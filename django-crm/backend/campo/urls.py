@@ -43,6 +43,9 @@ urlpatterns = [
     path("inventario/ubicaciones/", inventario_views.UbicacionesView.as_view(), name="inv_ubicaciones"),
     # Las cuadrillas: quienes son, y que hacen cada dia.
     path("cuadrillas/", cuadrillas_views.CuadrillasView.as_view(), name="cuadrillas"),
+    path("zonas/", cuadrillas_views.ZonasView.as_view(), name="zonas"),
+    path("zonas/<uid:pk>/", cuadrillas_views.ZonaView.as_view(), name="zona"),
+    path("zonas/<uid:pk>/localidades/", cuadrillas_views.LocalidadesDeZonaView.as_view(), name="zona_localidades"),
     path("cuadrillas/jornada/", cuadrillas_views.JornadaDeCuadrillaView.as_view(), name="cuadrilla_jornada"),
     path("cuadrillas/<uid:pk>/", cuadrillas_views.CuadrillaView.as_view(), name="cuadrilla"),
     path("inventario/series/", inventario_views.SeriesDisponiblesView.as_view(), name="inv_series"),
