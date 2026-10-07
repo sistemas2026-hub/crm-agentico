@@ -396,6 +396,76 @@ para comparar nada. En facturas el recorte son ~2 ultimos meses de emision.
 Mas alla devuelve HTTP 400. Se valida ANTES de llamar, o el asesor ve un
 "fallo al llamar a WispHub" sin saber por que.
 
+### Escribir `sn_onu` en un cliente — verificado por OPTIONS el 28/09/2026
+
+```
+OPTIONS /api/clientes/<id>/          -> 200
+  actions declara UN metodo:          PUT     (NO PATCH)
+  actions.PUT.sn_onu                  {type: string, read_only: false,
+                                       required: false}
+```
+
+O sea: el campo es escribible y el metodo del detalle es **PUT**. Se midio con
+OPTIONS y un GET para tomar un id, sin escribir nada.
+
+⚠️ **LO QUE ESTO NO PRUEBA, y es el riesgo grave.** Un `PUT` normalmente espera el
+recurso COMPLETO. Si WispHub lo aplica asi, mandar solo `sn_onu` podria **vaciar
+los demas campos del cliente** -- direccion, telefono, plan --. En `/api/tickets/`
+ya se midio que el PUT acepta un cuerpo parcial (*"no exige el resto del recurso
+pese a ser PUT"*), pero **eso es otro endpoint** y esta API no es consistente:
+`sn_onu` mismo tiene la dualidad leer/escribir que esta skill documenta para
+`usuario_rb`.
+
+Y hay un antecedente exacto de que OPTIONS puede mentir en esta API: las fechas
+estimadas de un ticket **aparecen en `actions.POST` y hasta marcadas REQUERIDO**, y
+el POST las descarta en silencio (09/09/2026, ver
+`tenants/rapilink.config.yaml::crear_ticket_instalacion`).
+
+**MEDIDO EL 28/09/2026 con un PUT real contra el cliente de prueba 6555, y el
+riesgo NO se materializo:**
+
+```
+PUT {"sn_onu": "CANARIO-SN-1"}   -> 200, y al leer QUEDO ESCRITO
+PUT {"comentarios": "canario-2"} -> 200, y sn_onu SOBREVIVIO intacto
+```
+
+O sea: **el PUT de este endpoint es PARCIAL.** Escribe lo que se manda y no toca
+el resto. Mandar solo `sn_onu` es seguro, y la herramienta que lo hace se puede
+encender.
+
+### Tres trampas que aparecieron al medirlo, y ninguna estaba documentada
+
+**1 · Un PUT con campos que la API no acepta devuelve 200 y NO escribe nada.** El
+primer intento mando `nombre`, `direccion` y `telefono` a la vez: respondio `200`
+y al leer los tres seguian vacios. Es la misma trampa que esta skill describe para
+los filtros --*"la API ignora en silencio y devuelve como si nada"*-- ahora en una
+escritura. **Un 200 de esta API no prueba que se escribio: hay que leer despues.**
+
+Probablemente sea la dualidad leer/escribir que esta skill ya documenta para
+`usuario_rb` y para los tickets: los nombres que se LEEN de un cliente no son
+todos los que se ESCRIBEN. No se investigo cuales son los de escritura de esos
+tres, porque no hacian falta.
+
+**2 · `sn_onu` NO SE PUEDE VACIAR.**
+
+```
+PUT {"sn_onu": ""}     -> 200  y el valor anterior SIGUE AHI
+PUT {"sn_onu": " "}    -> 200  idem
+PUT {"sn_onu": null}   -> 400
+```
+
+Importa para el producto: si un equipo se retira de una casa, el campo no se puede
+limpiar. Lo unico que se puede es sobrescribirlo con otro valor. Una funcion de
+"desinstalar" que espere vaciarlo va a fallar en silencio.
+
+**3 · Por eso el cliente 6555 quedo con `sn_onu = "PRUEBA-BORRAR"`.** No se pudo
+dejar vacio como estaba. Es un cliente de prueba y el valor lo dice, pero queda
+anotado para que nadie lo tome por un serial real.
+
+*(El procedimiento fue el mismo con el que se verificaron los tickets: cliente de
+PRUEBA, canarios obviamente falsos, y la ficha completa guardada antes para poder
+restaurarla.)*
+
 **`sn_onu` solo lo tiene el 68% de los clientes activos.** Medido el 14/08/2026
 sobre los 4.163 activos (paginacion verificada: 4.163 filas, 4.163 ids
 distintos): 2.864 traen serial, **1.299 lo tienen vacio**. Una primera muestra
