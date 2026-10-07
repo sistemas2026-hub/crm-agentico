@@ -41,8 +41,22 @@
     meId = null,
     meta = null,
     onlyFields = undefined,
-    onlyPresets = undefined
+    onlyPresets = undefined,
+    //  El buscador se pide: no toda pantalla tiene algo que buscar, y uno
+    //  vacio ocupa lugar y promete una funcion que no esta.
+    buscar = false,
+    buscarEtiqueta = 'Buscar'
   } = $props();
+
+  //  Lo ya escrito vuelve en la caja: si la busqueda se borrara al recargar,
+  //  nadie sabria por que la lista esta recortada.
+  const consulta = $derived(url.searchParams.get('search') ?? '');
+
+  //  Los demas parametros viajan como campos ocultos. Un GET manda SOLO lo
+  //  que tiene el formulario: sin esto, buscar dentro de un area te sacaba a
+  //  la cola entera y el filtro desaparecia sin aviso.
+  const ocultos = $derived(
+    [...url.searchParams.entries()].filter(([k]) => k !== 'search' && k !== 'offset'));
 
   let descriptor = $derived(FILTERS[page] ?? { presets: [], fields: [] });
 
@@ -118,6 +132,31 @@
 </script>
 
 <div class="v2-filters">
+  {#if buscar}
+    <!-- Un GET normal: la busqueda queda en la URL, se puede compartir,
+         recargar y volver atras. Funciona sin JavaScript. -->
+    <form class="v2-buscador" method="GET" role="search">
+      {#each ocultos as [clave, valor]}
+        <input type="hidden" name={clave} value={valor} />
+      {/each}
+      <input
+        class="v2-buscador-campo"
+        type="search"
+        name="search"
+        value={consulta}
+        placeholder={buscarEtiqueta}
+        aria-label={buscarEtiqueta} />
+      <button class="v2-btn v2-btn-sm" type="submit">Buscar</button>
+      {#if consulta}
+        <!-- Volver a la lista completa tiene que ser un clic, no borrar a
+             mano y pulsar Enter. 'offset' se cae solo: la pagina 7 de una
+             busqueda no existe en la lista sin filtrar. -->
+        <a class="v2-btn v2-btn-sm" href={withParams(url, { search: null, offset: null })}>
+          Limpiar
+        </a>
+      {/if}
+    </form>
+  {/if}
   <details class="v2-view-menu">
     <summary class="v2-view">
       {activeLabel}

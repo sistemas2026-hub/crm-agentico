@@ -291,6 +291,8 @@
   people={data.people}
   tags={data.tags}
   meId={data.meId}
+  buscar
+  buscarEtiqueta="Buscar por cliente, asunto o n.º de ticket"
   meta="Los objetivos de primera respuesta vienen de las horas de SLA de cada ticket"
 />
 
@@ -350,11 +352,22 @@
                   </span>
                 {/if}
               </td>
-              <td class="v2-muted" style="font-size:12.5px">
-                {t.external_client_name || '—'}
+              <!-- Sin 'v2-muted': estas dos son DATOS y no texto secundario.
+                   Iban en gris por haber heredado el estilo de las celdas que
+                   reemplazaron (Tipo y Cuenta), que si eran accesorias. -->
+              <td style="font-size:13px">
+                {#if t.external_client_name}
+                  {t.external_client_name}
+                {:else}
+                  <span class="v2-muted">—</span>
+                {/if}
               </td>
-              <td class="v2-r v2-muted" style="font-size:12.5px;font-variant-numeric:tabular-nums">
-                {t.external_ticket_id ?? '—'}
+              <td class="v2-r" style="font-size:13px;font-variant-numeric:tabular-nums">
+                {#if t.external_ticket_id}
+                  {t.external_ticket_id}
+                {:else}
+                  <span class="v2-muted">—</span>
+                {/if}
               </td>
               <td><Pill tone={PRIORITY_TONE[t.priority]}>{CASE_PRIORITY_LABEL[t.priority] ?? t.priority}</Pill></td>
               <!-- EL ESTADO DEL PROVEEDOR, y la divergencia cuando la hay.

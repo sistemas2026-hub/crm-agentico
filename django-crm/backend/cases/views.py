@@ -124,8 +124,26 @@ def apply_case_list_filters(queryset, params):
         queryset = queryset.filter(tags__id__in=tags).distinct()
     if params.get("search"):
         search = params.get("search")
+        #  SE BUSCA TAMBIEN POR CLIENTE Y POR NUMERO DE TICKET  --  07/10/2026
+        #
+        #  Antes solo miraba 'name' y 'description'. En una cola de tickets
+        #  IMPORTADOS eso no alcanza: el asunto se repite 153 veces ("No Tiene
+        #  Internet") y lo que identifica una fila es de quien es y con que
+        #  numero se la busca del otro lado.
+        #
+        #  'external_client_name' no esta en la descripcion -- el importador
+        #  guarda ahi la referencia y quien abrio el ticket, no el cliente --
+        #  asi que sin este termino buscar por nombre no devolvia nada y el
+        #  buscador prometia algo que no hacia.
+        #
+        #  El numero va por 'iexact' y no por 'icontains': buscar '553' no
+        #  tiene por que traer el ticket 94553, y con 'contains' traeria ese y
+        #  todos los que lo lleven adentro.
         queryset = queryset.filter(
-            Q(name__icontains=search) | Q(description__icontains=search)
+            Q(name__icontains=search)
+            | Q(description__icontains=search)
+            | Q(external_client_name__icontains=search)
+            | Q(external_ticket_id__iexact=search)
         )
     created_at_gte = date_param(params, "created_at__gte")
     if created_at_gte:
