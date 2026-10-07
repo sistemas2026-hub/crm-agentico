@@ -102,8 +102,15 @@ ROL = "supervisor_noc"
 #  el diseno: si saliera, bastaria una conversacion para cosecharlos y la
 #  garantia de inyeccion se perderia por otra puerta.
 CAMPOS = ["id_servicio", "equipo_registrado", "estado", "causa_caida",
-          "senal_dbm", "senal_texto", "ultima_caida", "ultima_conexion",
-          "motivo"]
+          #  'senal' es la CLASIFICACION que calcula el codigo; 'senal_dbm' el
+          #  numero crudo. Los dos, porque el modelo no compara numeros y la
+          #  persona que lea la propuesta si quiere ver el valor.
+          "senal_dbm", "senal",
+          #  'estado_config' es el 'Match state' de la OLT y NO habla de la
+          #  señal. Estuvo mapeado a un campo llamado 'senal_texto' y la primera
+          #  corrida real devolvio 'mismatch' ahi con una señal buena.
+          "estado_config",
+          "ultima_caida", "ultima_conexion", "motivo"]
 
 
 def _mutar(cfg: dict) -> None:

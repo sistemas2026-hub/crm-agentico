@@ -636,7 +636,11 @@ def diagnosticar_servicio(org, *, id_servicio) -> dict:
     -----------------------------------------
         estado           en_linea | caido | desconocido
         causa_caida      sin_energia | fibra | otra   (solo si esta caido)
-        senal_dbm        la de bajada, que es la que recibe el equipo
+        senal_dbm        la de bajada en dBm, que es la que recibe el equipo
+        senal            buena | debil | sin_dato -- la CALCULA el codigo contra
+                         el rango de la guia, no la juzga el modelo
+        estado_config    el 'Match state' de la OLT. NO habla de la señal: dice
+                         si la configuracion del equipo coincide con su perfil
 
     'sin_energia' es la casa del cliente --se fue la luz, o lo desenchufaron--.
     'fibra' es un corte o una falla en la NAP, y eso es NUESTRO. Son opuestas:
@@ -901,7 +905,13 @@ def esquema() -> list[dict]:
 
         h("diagnosticar_servicio",
           "El estado ÓPTICO del equipo de un servicio: si está en línea o "
-          "caído, su señal de bajada en dBm y, si está caído, POR QUÉ. "
+          "caído, su señal de bajada y, si está caído, POR QUÉ. "
+          "La señal viene DOS veces: 'senal_dbm' es el número y 'senal' es su "
+          "clasificación ('buena', 'debil' o 'sin_dato'), que YA viene "
+          "calculada -- no la recalcules ni compares dBm vos. "
+          "'estado_config' NO habla de la señal: es si la configuración del "
+          "equipo coincide con su perfil en la OLT. Un 'mismatch' ahí con señal "
+          "buena no es un problema de señal; no los mezcles. "
           "La causa es lo que cambia la decisión y no se puede ignorar: "
           "'sin_energia' es la casa del cliente --se fue la luz o lo "
           "desenchufaron--, 'fibra' es un corte o una falla en la NAP y eso "
