@@ -189,6 +189,47 @@
           <p class="pv-ok" style="margin-top:10px"><Check size={12} /> Localidades actualizadas</p>
         {/if}
 
+        <!--
+          EL PRECIO DE CADA PLAN, en su propia acción y no como parte de la de
+          arriba: recorre otro catálogo y tarda distinto. Mezclarlas haría que
+          actualizar los barrios saliera a pedir 50 precios sin que nadie lo
+          pidiera.
+
+          Hace falta porque el listado de planes NO trae el precio —verificado
+          contra la API: devuelve id, nombre y tipo— y el precio vive en el
+          detalle, uno por uno.
+        -->
+        <div style="margin-top:14px;border-top:1px solid var(--v2-border);padding-top:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <div>
+              <strong style="font-size:13px">Precio de cada plan</strong>
+              <p style="font-size:12px;color:var(--v2-slate);margin:2px 0 0">
+                {#if (data.precios ?? []).length}
+                  {data.precios.length} planes con precio.
+                  {#if data.preciosActualizadoEn}
+                    Última actualización: {data.preciosActualizadoEn}.
+                  {/if}
+                {:else}
+                  Todavía no se sincronizó ninguno. Sin esto, un plan alto no pesa al
+                  repartir el trabajo del día.
+                {/if}
+              </p>
+            </div>
+            <form method="POST" action="?/precios" use:enhance style="flex:none">
+              <button class="v2-btn v2-btn-sm" type="submit" disabled={!data.can_edit}>
+                <RefreshCw size={13} /> Actualizar precios
+              </button>
+            </form>
+          </div>
+
+          {#if form?.error && form?.action === 'precios'}
+            <p class="v2-error" style="font-size:12px;margin-top:10px">{form.error}</p>
+          {/if}
+          {#if form?.preciosHecho}
+            <p class="pv-ok" style="margin-top:10px"><Check size={12} /> {form.preciosHecho}</p>
+          {/if}
+        </div>
+
         {#if (data.localidades ?? []).length}
           <div class="pv-filtro" style="margin-top:12px">
             <Search size={14} style="color:var(--v2-slate)" />

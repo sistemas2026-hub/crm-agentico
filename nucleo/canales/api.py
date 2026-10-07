@@ -4916,6 +4916,72 @@ def configuracion_localidades_sincronizar():
     })
 
 
+@app.post("/configuracion/precios/sincronizar")
+def configuracion_precios_sincronizar():
+    """
+    Recorre el catalogo de planes y guarda el PRECIO de cada uno.
+
+    Son DOS llamadas por plan --el listado da los ids, el detalle da el
+    precio-- porque el proveedor los separo asi: medido el 07/10/2026 contra
+    la instancia real, `/api/plan-internet/` devuelve 50 planes y ningun
+    precio. Con 50 planes eso son 50 consultas, asi que esto es una accion de
+    administrador bajo demanda y NUNCA parte de una conversacion -- el mismo
+    criterio que las localidades, y por el mismo incidente (20/08/2026,
+    'contar_clientes' agregaba 1-2s por mensaje).
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    listado = next((h for h in config.herramientas
+                    if h.sincroniza_precio_plan == "listado"), None)
+    detalle = next((h for h in config.herramientas
+                    if h.sincroniza_precio_plan == "detalle"), None)
+    if listado is None or detalle is None:
+        return jsonify({
+            "error": "Faltan las herramientas del precio. Hacen falta dos: una "
+                     "marcada 'listado' y otra 'detalle' en "
+                     "sincroniza_precio_plan."
+        }), 400
+
+    from nucleo.herramientas import planes_precio
+
+    try:
+        r = planes_precio.sincronizar(
+            listado, detalle, tenant, config.variables_tenant)
+    except Exception as e:
+        return fallo(502, "proveedor_no_sincronizo",
+                     "No se pudieron sincronizar los precios con el proveedor.",
+                     componente="precios", e=e, estado_proveedor=estado_http_de(e))
+
+    if r.get("error"):
+        return fallo(502, "proveedor_no_sincronizo",
+                     "No se pudo leer el catalogo de planes.",
+                     componente="precios")
+
+    filas = [{"plan_id": k, **v} for k, v in sorted(r["planes"].items())]
+    try:
+        nuevo = editor.guardar_precios(tenant, filas)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({
+        "precios": [p.model_dump(mode="json") for p in nuevo.precios_de_planes],
+        "precios_actualizado_en": nuevo.precios_actualizado_en,
+        # Se dice si se corto: un tope silencioso haria creer que se recorrio
+        # todo el catalogo.
+        "truncado": r.get("truncado", False),
+    })
+
+
 @app.put("/configuracion/planes-venta")
 def configuracion_planes_venta_guardar():
     """Reemplaza entera la lista curada -- ver editor.guardar_planes_venta:

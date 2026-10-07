@@ -18,6 +18,7 @@ import { destinoDelAsistente } from './tenant.js';
  * @typedef {{ id: number | string, nombre: string }} PlanCatalogo
  * @typedef {{ zona_id: number, zona_nombre: string, n_clientes: number }} ZonaConteo
  * @typedef {{ localidad: string, zonas: ZonaConteo[], n_clientes: number }} LocalidadZona
+ * @typedef {{ plan_id: string, nombre: string, precio: string | null, bajada: string, descripcion: string }} PrecioDePlan
  */
 
 /**
@@ -26,7 +27,7 @@ import { destinoDelAsistente } from './tenant.js';
  * guardada. Pega contra WispHub en cada llamada -- usar solo en la
  * pantalla dedicada, nunca en el hub de configuracion (ver
  * contarPlanesVenta() para eso).
- * @returns {Promise<{ catalogo: PlanCatalogo[], error_catalogo: string | null, planes_venta: PlanVenta[], localidades: LocalidadZona[], localidades_actualizado_en: string | null } | null>}
+ * @returns {Promise<{ catalogo: PlanCatalogo[], error_catalogo: string | null, planes_venta: PlanVenta[], localidades: LocalidadZona[], localidades_actualizado_en: string | null, precios_de_planes: PrecioDePlan[], precios_actualizado_en: string | null } | null>}
  */
 export async function leerPlanesVenta(locals, fetch) {
   const cfg = await destinoDelAsistente(locals, fetch);
@@ -93,6 +94,31 @@ export async function guardarPlanesVenta(locals, fetch, planes) {
  * del motor, solo deja a quien mira la pantalla sin saber si termino.
  * @returns {Promise<{ localidades: LocalidadZona[], localidades_actualizado_en: string | null }>}
  */
+/**
+ * Sincroniza el PRECIO de cada plan.
+ *
+ * Son dos llamadas por plan del lado del motor —el listado da los ids, el
+ * detalle da el precio— porque el proveedor los separó así: el listado
+ * devuelve 50 planes y ningún precio. Con 50 planes eso son 50 consultas, y
+ * por eso es una acción bajo demanda y nunca parte de una conversación.
+ *
+ * @param {any} locals
+ * @param {typeof globalThis.fetch} fetch
+ */
+export async function sincronizarPrecios(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+
+  const resp = await fetch(`${cfg.baseUrl}/configuracion/precios/sincronizar`, {
+    method: 'POST',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant })
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'No se pudieron sincronizar los precios.');
+  return datos;
+}
+
 export async function sincronizarLocalidades(locals, fetch) {
   const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');

@@ -1305,6 +1305,21 @@ def guardar_localidades(tenant: str, localidades: list[dict]) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_localidades(doc, localidades))
 
 
+def _mutar_precios(doc: dict, precios: list[dict]) -> None:
+    """
+    Reemplaza ENTERO el catalogo de precios -- ver TenantConfig.precios_de_planes.
+    Mismo criterio que _mutar_localidades: lo produce
+    nucleo/herramientas/planes_precio.py de punta a punta, nunca un merge.
+    """
+    from datetime import datetime, timezone
+    doc["precios_de_planes"] = precios
+    doc["precios_actualizado_en"] = datetime.now(timezone.utc).isoformat()
+
+
+def guardar_precios(tenant: str, precios: list[dict]) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_precios(doc, precios))
+
+
 def aprobar_herramienta_propuesta(tenant: str, herramienta_propuesta: dict) -> TenantConfig:
     """
     Agrega al catalogo real una herramienta que vino de una propuesta ya

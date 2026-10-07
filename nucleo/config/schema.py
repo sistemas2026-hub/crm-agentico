@@ -1245,6 +1245,14 @@ class Herramienta(Base):
     # base_url/endpoint/auth_ref que la herramienta ya declara, sin duplicar
     # esa config para un job aparte.
     sincroniza_localidades: bool = False
+    #: Marca las DOS herramientas del precio de un plan: el listado que da los
+    #: ids y el detalle que da el precio. Son dos porque el proveedor las
+    #: separo asi --medido el 07/10/2026: el listado no trae precio-- y una
+    #: sola no alcanza.
+    #:
+    #: 'listado' | 'detalle' | '' (no participa). Es texto y no un bool por eso
+    #: mismo: con dos banderas habria que recordar que nunca esten las dos.
+    sincroniza_precio_plan: str = ""
     # Las dos que mantienen al dia el ticket del sistema operativo del ISP: una
     # copia ahi lo que se le respondio al cliente, la otra lo cierra. Ver
     # nucleo/seguimiento/operativo.py.
@@ -2581,6 +2589,35 @@ class LocalidadZona(Base):
     n_clientes: int = 0                # total, suma de zonas[].n_clientes
 
 
+class PrecioDePlan(Base):
+    """
+    Lo que cuesta un plan, sincronizado del proveedor -- nunca escrito a mano.
+
+    POR QUE NO ALCANZA EL LISTADO DE PLANES
+    Medido el 07/10/2026 contra la instancia real: `/api/plan-internet/`
+    devuelve 50 planes con tres campos --id, nombre, tipo-- y NINGUN precio.
+    El precio vive en el detalle, uno por uno
+    (`/api/plan-internet/queue/{id}/`), asi que saberlos todos son 50
+    llamadas. Por eso se sincroniza y se guarda, igual que LocalidadZona:
+    preguntarlo cuando se usa repetiria el incidente del 20/08/2026, cuando
+    `contar_clientes` en el camino caliente de 'ventas' agregaba 1-2s por
+    mensaje.
+
+    EL PRECIO ES TEXTO A PROPOSITO. Llega asi del proveedor ("199900.00") y
+    se guarda asi para no perder decimales en el JSON. Quien ordena lo
+    convierte -- comparado como texto, "99900" queda POR ENCIMA de "199900"
+    porque '9' es mayor que '1'.
+
+    `precio: None` NO es cero: es un plan cuyo precio no se pudo leer, y
+    tratarlo como gratis lo mandaria al fondo de cualquier orden.
+    """
+    plan_id: str                       # el id del proveedor, como texto
+    nombre: str = ""
+    precio: str | None = None          # "199900.00", o None si no se pudo leer
+    bajada: str = ""                   # "700M"
+    descripcion: str = ""
+
+
 class PlanVenta(Base):
     """
     Un plan que se OFRECE a un prospecto nuevo -- lista curada por el
@@ -2969,7 +3006,8 @@ class TenantConfig(Base):
     # El criterio no es "se edita desde la pantalla" sino "lo produjo un
     # proceso y se reemplaza entero".
     SINCRONIZADOS: ClassVar[tuple[str, ...]] = (
-        "localidades", "localidades_actualizado_en", "parrilla_canales")
+        "localidades", "localidades_actualizado_en", "parrilla_canales",
+        "precios_de_planes", "precios_actualizado_en")
 
     version: int = 1
     identidad: Identidad
@@ -3106,6 +3144,10 @@ class TenantConfig(Base):
     # se edita a mano: se reemplaza entero cada vez que corre el sync.
     localidades: list[LocalidadZona] = Field(default_factory=list)
     localidades_actualizado_en: str | None = None  # ISO, ultima sincronizacion
+    # Que cuesta cada plan. Mismo criterio que 'localidades': lo produce un
+    # job entero, nunca una persona, y se reemplaza completo en cada corrida.
+    precios_de_planes: list[PrecioDePlan] = Field(default_factory=list)
+    precios_actualizado_en: str | None = None
     canales: Canales = Field(default_factory=Canales)
     escalamiento: Escalamiento = Field(default_factory=Escalamiento)
     # Opcional: sin esto, el asistente no intenta identificar a nadie en
