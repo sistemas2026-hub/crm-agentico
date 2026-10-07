@@ -40,6 +40,7 @@ from nucleo.config import cargar_config                              # noqa: E40
 from nucleo.config.editor import (ErrorEdicion, _mutar_ajustes_bandeja,  # noqa: E402
                                   _mutar_borrar,
                                   _mutar_crear, _mutar_editar,
+                                  _mutar_marcas_precio,
                                   _mutar_persona, _mutar_rol_de_entrada,
                                   _validar,
                                   _validar_nombre_rol,
@@ -603,6 +604,71 @@ def prueba_umbral_efectivo_de_la_banda() -> None:
               "sin umbral no hay banda, y acotar nada sigue siendo nada")
 
 
+def prueba_marcas_de_precio() -> None:
+    """
+    De que herramienta sale el listado de planes y de cual el precio.
+
+    Lo que esta guarda protege no es que el campo se escriba: es que no
+    queden DOS herramientas marcadas con el mismo papel. Si quedaran dos
+    'listado', cual gana la decide el orden de la lista en el JSONB, y un
+    cambio de configuracion pasaria a depender de donde quedo una fila.
+    """
+    print("\nmarcas de precio")
+    doc = documento_base()
+    nombres = [h["nombre"] for h in doc["herramientas"]]
+    if len(nombres) < 3:
+        comprobar(False, "hacen falta 3 herramientas para probar esto")
+        return
+    a, b, c = nombres[0], nombres[1], nombres[2]
+
+    _mutar_marcas_precio(doc, a, b)
+    por_nombre = {h["nombre"]: h for h in doc["herramientas"]}
+    comprobar(por_nombre[a].get("sincroniza_precio_plan") == "listado",
+              "la herramienta elegida para el listado queda marcada 'listado'")
+    comprobar(por_nombre[b].get("sincroniza_precio_plan") == "detalle",
+              "la elegida para el detalle queda marcada 'detalle'")
+    comprobar(
+        sum(1 for h in doc["herramientas"]
+            if h.get("sincroniza_precio_plan")) == 2,
+        "quedan exactamente DOS herramientas marcadas, no mas")
+
+    # El EFECTO que importa: elegir otra deja de marcar la anterior.
+    _mutar_marcas_precio(doc, c, b)
+    por_nombre = {h["nombre"]: h for h in doc["herramientas"]}
+    comprobar(not por_nombre[a].get("sincroniza_precio_plan"),
+              "cambiar de herramienta DESMARCA la que estaba antes")
+    comprobar(por_nombre[c].get("sincroniza_precio_plan") == "listado",
+              "y marca la nueva")
+    comprobar(
+        sum(1 for h in doc["herramientas"]
+            if h.get("sincroniza_precio_plan") == "listado") == 1,
+        "nunca hay dos 'listado' a la vez")
+
+    # El documento resultante tiene que seguir validando contra el mismo
+    # esquema con que el motor carga la configuracion -- una mutacion que
+    # muta bien y no valida no sirve.
+    cfg = _validar(TENANT, copy.deepcopy(doc))
+    comprobar(
+        next((h.nombre for h in cfg.herramientas
+              if h.sincroniza_precio_plan == "listado"), None) == c,
+        "el motor lee la marca del documento validado")
+    comprobar(
+        next((h.nombre for h in cfg.herramientas
+              if h.sincroniza_precio_plan == "detalle"), None) == b,
+        "y lee tambien la del detalle")
+
+    lanza("una herramienta que no existe no se puede marcar",
+          lambda: _mutar_marcas_precio(documento_base(), "no_existe_jamas", b))
+    lanza("ni como detalle",
+          lambda: _mutar_marcas_precio(documento_base(), a, "no_existe_jamas"))
+    lanza("la misma herramienta para los dos pasos se rechaza",
+          lambda: _mutar_marcas_precio(documento_base(), a, a))
+
+    sin_herramientas = documento_base()
+    sin_herramientas["herramientas"] = []
+    lanza("un catalogo vacio se rechaza en vez de guardar marcas que no apuntan a nada",
+          lambda: _mutar_marcas_precio(sin_herramientas, a, b))
+
 if __name__ == "__main__":
     print("=" * 70)
     print(" EDITOR DE ROLES  --  mutaciones sobre el documento de configuracion")
@@ -619,6 +685,7 @@ if __name__ == "__main__":
     prueba_banda_sin_gestion()
     prueba_origen_de_la_config()
     prueba_umbral_efectivo_de_la_banda()
+    prueba_marcas_de_precio()
 
     print("\n" + "=" * 70)
     if fallos:

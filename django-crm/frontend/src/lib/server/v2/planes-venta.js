@@ -19,6 +19,8 @@ import { destinoDelAsistente } from './tenant.js';
  * @typedef {{ zona_id: number, zona_nombre: string, n_clientes: number }} ZonaConteo
  * @typedef {{ localidad: string, zonas: ZonaConteo[], n_clientes: number }} LocalidadZona
  * @typedef {{ plan_id: string, nombre: string, precio: string | null, bajada: string, descripcion: string }} PrecioDePlan
+ * @typedef {{ nombre: string, descripcion: string }} HerramientaCandidata
+ * @typedef {{ listado: string | null, detalle: string | null }} MarcasPrecio
  */
 
 /**
@@ -27,7 +29,7 @@ import { destinoDelAsistente } from './tenant.js';
  * guardada. Pega contra WispHub en cada llamada -- usar solo en la
  * pantalla dedicada, nunca en el hub de configuracion (ver
  * contarPlanesVenta() para eso).
- * @returns {Promise<{ catalogo: PlanCatalogo[], error_catalogo: string | null, planes_venta: PlanVenta[], localidades: LocalidadZona[], localidades_actualizado_en: string | null, precios_de_planes: PrecioDePlan[], precios_actualizado_en: string | null } | null>}
+ * @returns {Promise<{ catalogo: PlanCatalogo[], error_catalogo: string | null, planes_venta: PlanVenta[], localidades: LocalidadZona[], localidades_actualizado_en: string | null, precios_de_planes: PrecioDePlan[], precios_actualizado_en: string | null, herramientas: HerramientaCandidata[], marcas_precio: MarcasPrecio } | null>}
  */
 export async function leerPlanesVenta(locals, fetch) {
   const cfg = await destinoDelAsistente(locals, fetch);
@@ -102,20 +104,45 @@ export async function guardarPlanesVenta(locals, fetch, planes) {
  * devuelve 50 planes y ningún precio. Con 50 planes eso son 50 consultas, y
  * por eso es una acción bajo demanda y nunca parte de una conversación.
  *
+ * De que herramienta sale el listado y de cual el detalle es
+ * configuracion por empresa, no un nombre fijo: se eligen en la pantalla y
+ * el motor las guarda en el primer uso. Hasta el 07/10/2026 la unica via era
+ * editar el YAML del tenant y cargarlo entero, y eso dejo el boton
+ * devolviendo 400 en produccion.
+ *
  * @param {any} locals
  * @param {typeof globalThis.fetch} fetch
+ * @param {{ listado?: string, detalle?: string }} [marcas]
  */
-export async function sincronizarPrecios(locals, fetch) {
+export async function sincronizarPrecios(locals, fetch, marcas) {
   const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+
+  const cuerpo = { tenant: cfg.tenant };
+  if (marcas?.listado && marcas?.detalle) {
+    cuerpo.listado = marcas.listado;
+    cuerpo.detalle = marcas.detalle;
+  }
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/precios/sincronizar`, {
     method: 'POST',
     headers: headersMotor({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ tenant: cfg.tenant })
+    body: JSON.stringify(cuerpo)
   });
   const datos = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(datos.error || 'No se pudieron sincronizar los precios.');
+  if (!resp.ok) {
+    // El 400 de "falta elegir" NO es un fallo del proveedor: es la pantalla
+    // que todavia no sabe de donde sacar los precios. Se distingue para que
+    // pueda pedir las dos herramientas en vez de solo mostrar texto rojo.
+    const e = /** @type {Error & { faltaElegir?: boolean, herramientas?: HerramientaCandidata[] }} */ (
+      new Error(datos.error || 'No se pudieron sincronizar los precios.')
+    );
+    if (datos.falta_elegir) {
+      e.faltaElegir = true;
+      e.herramientas = datos.herramientas ?? [];
+    }
+    throw e;
+  }
   return datos;
 }
 

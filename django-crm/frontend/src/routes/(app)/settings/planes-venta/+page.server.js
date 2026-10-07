@@ -19,6 +19,8 @@ export async function load({ fetch, locals }) {
     precios: datos?.precios_de_planes ?? [],
     preciosActualizadoEn: datos?.precios_actualizado_en ?? null,
     localidadesActualizadoEn: datos?.localidades_actualizado_en ?? null,
+    herramientas: datos?.herramientas ?? [],
+    marcasPrecio: datos?.marcas_precio ?? { listado: null, detalle: null },
     huboRespuesta: datos !== null,
     can_edit: locals.profile?.role === 'ADMIN'
   };
@@ -75,12 +77,20 @@ export const actions = {
    * catálogo distinto, tarda distinto, y mezclarlas haría que actualizar los
    * barrios saliera a pedir 50 precios sin que nadie lo pidiera.
    */
-  async precios({ locals }) {
+  async precios({ request, locals }) {
     if (locals.profile?.role !== 'ADMIN')
       return fail(403, { error: SOLO_ADMIN, action: 'precios' });
 
+    // De donde salen los precios es configuración por empresa: si la
+    // pantalla mandó las dos herramientas, el motor las guarda y ya no hay
+    // que volver a elegirlas. Un ISP nuevo con otro proveedor no necesita
+    // una sesión de código para esto.
+    const datos = await request.formData();
+    const listado = String(datos.get('listado') ?? '').trim();
+    const detalle = String(datos.get('detalle') ?? '').trim();
+
     try {
-      const r = await sincronizarPrecios(locals, fetch);
+      const r = await sincronizarPrecios(locals, fetch, { listado, detalle });
       const n = (r?.precios ?? []).length;
       return {
         preciosHecho:
@@ -91,7 +101,11 @@ export const actions = {
     } catch (/** @type {any} */ err) {
       return fail(400, {
         error: err?.message || 'No se pudieron sincronizar los precios.',
-        action: 'precios'
+        action: 'precios',
+        // La pantalla muestra los dos selectores cuando esto viene: el error
+        // dice qué falta, no solo que falló.
+        faltaElegir: err?.faltaElegir === true,
+        herramientas: err?.herramientas ?? []
       });
     }
   }

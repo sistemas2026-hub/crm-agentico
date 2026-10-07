@@ -4908,9 +4908,20 @@ def configuracion_planes_venta_listar():
     catalogo: list[dict] = []
     error_catalogo = None
     if request.args.get("catalogo") == "1":
-        herramienta = next((h for h in config.herramientas if h.nombre == "consultar_planes"), None)
+        # Por la MARCA primero, por el nombre despues. El nombre
+        # 'consultar_planes' estuvo fijo aca hasta el 07/10/2026, y es un dato
+        # del proveedor de UN tenant metido en el motor -- justo lo que
+        # CLAUDE.md 3.3 no permite. El fallback NO es cortesia: produccion
+        # todavia no tiene la marca puesta, y resolver solo por marca dejaria
+        # esta pantalla sin catalogo hasta que alguien la configure.
+        herramienta = next((h for h in config.herramientas
+                            if h.sincroniza_precio_plan == "listado"), None)
         if herramienta is None:
-            error_catalogo = "Este agente no tiene 'consultar_planes' en su catalogo."
+            herramienta = next((h for h in config.herramientas
+                                if h.nombre == "consultar_planes"), None)
+        if herramienta is None:
+            error_catalogo = ("Ninguna herramienta esta marcada como el "
+                              "listado de planes.")
         else:
             try:
                 crudo = ejecutor_http.ejecutar(herramienta, {}, tenant, config.variables_tenant)
@@ -4926,6 +4937,26 @@ def configuracion_planes_venta_listar():
         "planes_venta": [p.model_dump(mode="json") for p in config.planes_venta],
         "localidades": [l.model_dump(mode="json") for l in config.localidades],
         "localidades_actualizado_en": config.localidades_actualizado_en,
+        # La pantalla ya los leia ('precios_de_planes' en
+        # lib/server/v2/planes-venta.js) y este endpoint no los devolvia:
+        # mostraba "todavia no se sincronizo ninguno" incluso con el catalogo
+        # de precios cargado. Encontrado el 07/10/2026.
+        "precios_de_planes": [p.model_dump(mode="json")
+                              for p in config.precios_de_planes],
+        "precios_actualizado_en": config.precios_actualizado_en,
+        # Para que la pantalla pueda OFRECER cuales son las dos herramientas
+        # del precio en vez de que alguien las escriba en un YAML. Solo
+        # nombre y descripcion: el resto del catalogo (urls, auth_ref,
+        # whitelists) no tiene nada que hacer en una pantalla de precios.
+        "herramientas": [{"nombre": h.nombre,
+                          "descripcion": h.descripcion.strip()}
+                         for h in config.herramientas],
+        "marcas_precio": {
+            "listado": next((h.nombre for h in config.herramientas
+                             if h.sincroniza_precio_plan == "listado"), None),
+            "detalle": next((h.nombre for h in config.herramientas
+                             if h.sincroniza_precio_plan == "detalle"), None),
+        },
     })
 
 
@@ -5120,15 +5151,45 @@ def configuracion_precios_sincronizar():
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
 
+    # Si la pantalla manda las dos herramientas, se GUARDAN antes de usarlas:
+    # asi el primer uso configura y sincroniza en un gesto, y el segundo ya
+    # no tiene que elegir nada. Sin esto la unica via para poner la marca era
+    # editar el YAML y cargarlo entero (CLAUDE.md 3.3), y eso bloqueo el
+    # boton en produccion el 07/10/2026.
+    pedido_listado = (cuerpo.get("listado") or "").strip()
+    pedido_detalle = (cuerpo.get("detalle") or "").strip()
+    if pedido_listado and pedido_detalle:
+        try:
+            config = editor.guardar_marcas_precio(
+                tenant, pedido_listado, pedido_detalle)
+        except editor.ErrorEdicion as e:
+            return jsonify({"error": mensaje_publico(
+                e, "No se pudieron guardar las herramientas del precio.")}), 400
+        except Exception as e:
+            return _error_al_guardar(e)
+        olvidar_config(tenant)
+    elif pedido_listado or pedido_detalle:
+        # Una sola marca dejaria la configuracion a medias y el proximo
+        # intento fallaria por el otro paso, sin decir que falto este.
+        return jsonify({
+            "error": "Hacen falta las dos herramientas: la del listado de "
+                     "planes y la del detalle con el precio."
+        }), 400
+
     listado = next((h for h in config.herramientas
                     if h.sincroniza_precio_plan == "listado"), None)
     detalle = next((h for h in config.herramientas
                     if h.sincroniza_precio_plan == "detalle"), None)
     if listado is None or detalle is None:
         return jsonify({
-            "error": "Faltan las herramientas del precio. Hacen falta dos: una "
-                     "marcada 'listado' y otra 'detalle' en "
-                     "sincroniza_precio_plan."
+            "error": "Todavia no se eligio de que herramienta sale el listado "
+                     "de planes y de cual el detalle con el precio.",
+            # Para que la pantalla pueda pedirlas en vez de solo mostrar el
+            # error -- el 400 sin esto no le decia a nadie como salir de ahi.
+            "falta_elegir": True,
+            "herramientas": [{"nombre": h.nombre,
+                              "descripcion": h.descripcion.strip()}
+                             for h in config.herramientas],
         }), 400
 
     from nucleo.herramientas import planes_precio

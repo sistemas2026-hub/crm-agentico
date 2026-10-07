@@ -58,6 +58,28 @@
   let guardando = $state(false);
   let sincronizando = $state(false);
 
+  /**
+   * De que herramienta sale el listado de planes y de cual el precio.
+   * Viene del motor (`marcas_precio`), no de un nombre fijo en esta
+   * pantalla: es un dato del proveedor de CADA empresa.
+   */
+  const marcas = $derived(data.marcasPrecio ?? { listado: null, detalle: null });
+  const yaElegidas = $derived(Boolean(marcas.listado && marcas.detalle));
+
+  /**
+   * Las candidatas salen del catalogo del tenant. Cuando el motor rechaza
+   * por "falta elegir" manda la lista en el propio error, y esa gana: es la
+   * que el motor acaba de ver, no la de cuando se cargo la pantalla.
+   */
+  const candidatas = $derived(
+    form?.faltaElegir && (form?.herramientas ?? []).length
+      ? form.herramientas
+      : (data.herramientas ?? [])
+  );
+
+  /** Abre los dos selectores cuando ya hay marcas y alguien quiere cambiarlas. */
+  let eligiendo = $state(false);
+
   let visibles = $derived(
     filtro.trim()
       ? (data.catalogo ?? []).filter((/** @type {any} */ p) =>
@@ -215,12 +237,82 @@
                 {/if}
               </p>
             </div>
-            <form method="POST" action="?/precios" use:enhance style="flex:none">
-              <button class="v2-btn v2-btn-sm" type="submit" disabled={!data.can_edit}>
-                <RefreshCw size={13} /> Actualizar precios
-              </button>
-            </form>
+            {#if yaElegidas && !eligiendo}
+              <form method="POST" action="?/precios" use:enhance style="flex:none">
+                <input type="hidden" name="listado" value={marcas.listado} />
+                <input type="hidden" name="detalle" value={marcas.detalle} />
+                <button class="v2-btn v2-btn-sm" type="submit" disabled={!data.can_edit}>
+                  <RefreshCw size={13} /> Actualizar precios
+                </button>
+              </form>
+            {/if}
           </div>
+
+          {#if yaElegidas && !eligiendo}
+            <p style="font-size:11px;color:var(--v2-slate);margin:8px 0 0">
+              El listado sale de <code>{marcas.listado}</code> y el precio de
+              <code>{marcas.detalle}</code>.
+              {#if data.can_edit}
+                <button type="button" class="pv-enlace" onclick={() => (eligiendo = true)}>
+                  Cambiar
+                </button>
+              {/if}
+            </p>
+          {:else}
+            <!--
+              DE DONDE SALEN LOS PRECIOS SE ELIGE ACA, no en un YAML.
+
+              Son dos llamadas distintas al proveedor: una devuelve los ids de
+              los planes, la otra el precio de uno. Hasta el 07/10/2026 esto
+              solo se podia marcar editando `tenants/<slug>.config.yaml` y
+              cargandolo entero -- y cargarlo entero en produccion habria
+              apagado la vision y borrado configuracion creada desde esta
+              misma interfaz. Un ISP nuevo con otro proveedor lo configura
+              aca, sin una sesion de codigo (CLAUDE.md 3.3).
+            -->
+            <form method="POST" action="?/precios" use:enhance style="margin-top:10px">
+              <p style="font-size:12px;color:var(--v2-slate);margin:0 0 8px">
+                Elegí de qué herramienta sale cada cosa. Son dos llamadas
+                distintas: el listado da los planes, el detalle da el precio
+                de cada uno.
+              </p>
+              <div class="pv-elegir">
+                <label>
+                  <span>Listado de planes</span>
+                  <select name="listado" required>
+                    <option value="" disabled selected={!marcas.listado}>Elegí una…</option>
+                    {#each candidatas as h (h.nombre)}
+                      <option value={h.nombre} selected={h.nombre === marcas.listado}>
+                        {h.nombre}
+                      </option>
+                    {/each}
+                  </select>
+                </label>
+                <label>
+                  <span>Detalle con el precio</span>
+                  <select name="detalle" required>
+                    <option value="" disabled selected={!marcas.detalle}>Elegí una…</option>
+                    {#each candidatas as h (h.nombre)}
+                      <option value={h.nombre} selected={h.nombre === marcas.detalle}>
+                        {h.nombre}
+                      </option>
+                    {/each}
+                  </select>
+                </label>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+                <button class="v2-btn v2-btn-sm" type="submit" disabled={!data.can_edit}>
+                  <RefreshCw size={13} /> Guardar y actualizar precios
+                </button>
+                {#if yaElegidas}
+                  <button type="button" class="v2-btn v2-btn-sm v2-btn-ghost"
+                          onclick={() => (eligiendo = false)}>
+                    Cancelar
+                  </button>
+                {/if}
+              </div>
+            </form>
+          {/if}
 
           {#if form?.error && form?.action === 'precios'}
             <p class="v2-error" style="font-size:12px;margin-top:10px">{form.error}</p>
@@ -470,5 +562,44 @@
     to {
       transform: rotate(360deg);
     }
+  }
+  /* Los dos selectores del precio: en columna, para que a 390px cada
+     etiqueta siga arriba de su control y nada quede cortado. */
+  .pv-elegir {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 560px) {
+    .pv-elegir { grid-template-columns: 1fr 1fr; }
+  }
+  .pv-elegir label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .pv-elegir label span {
+    font-size: 11px;
+    color: var(--v2-slate);
+  }
+  .pv-elegir select {
+    font-size: 12px;
+    padding: 6px 8px;
+    border: 1px solid var(--v2-border);
+    border-radius: 6px;
+    background: var(--v2-card, #fff);
+    color: inherit;
+    width: 100%;
+    min-width: 0;
+  }
+  .pv-enlace {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: var(--v2-link, #2563eb);
+    cursor: pointer;
+    text-decoration: underline;
   }
 </style>

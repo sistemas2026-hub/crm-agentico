@@ -1320,6 +1320,56 @@ def guardar_precios(tenant: str, precios: list[dict]) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_precios(doc, precios))
 
 
+def _mutar_marcas_precio(doc: dict, listado: str, detalle: str) -> None:
+    """
+    Marca QUE herramienta trae el catalogo de planes y cual trae el detalle
+    con el precio -- `Herramienta.sincroniza_precio_plan` en schema.py.
+
+    Existe porque hasta hoy esa marca solo se podia poner editando
+    `tenants/<slug>.config.yaml` y cargandolo entero, que es exactamente lo
+    que CLAUDE.md 3.3 prohibe: un dato que varia por empresa viviendo en un
+    archivo que solo un desarrollador sabe editar. El costo real, medido el
+    07/10/2026: el boton de "Actualizar precios" devolvia 400 en produccion y
+    la unica salida era un `cargar_config` completo, que de paso habria
+    apagado la vision y borrado dos cosas creadas desde la interfaz
+    (`areas[ventas]`, `importacion_tickets`).
+
+    Se limpia la marca en TODAS las demas herramientas, no solo se escribe en
+    las dos nombradas: si quedaran dos marcadas 'listado', cual gana la
+    decide el orden de la lista, y eso convierte un cambio de configuracion
+    en un resultado que depende de donde quedo una fila.
+    """
+    herramientas = doc.get("herramientas")
+    if not isinstance(herramientas, list):
+        raise ErrorEdicion("Este agente no tiene catalogo de herramientas.")
+
+    por_nombre = {h.get("nombre"): h for h in herramientas if isinstance(h, dict)}
+    for papel, nombre in (("listado", listado), ("detalle", detalle)):
+        if nombre not in por_nombre:
+            raise ErrorEdicion(
+                f"No existe una herramienta llamada '{nombre}' para el "
+                f"paso '{papel}'."
+            )
+    if listado == detalle:
+        # Son dos llamadas distintas al proveedor (una devuelve los ids, la
+        # otra el precio de uno). La misma herramienta para las dos pediria
+        # el listado dos veces y no traeria ningun precio.
+        raise ErrorEdicion(
+            "El listado y el detalle tienen que ser dos herramientas "
+            "distintas."
+        )
+
+    for h in herramientas:
+        if isinstance(h, dict):
+            h.pop("sincroniza_precio_plan", None)
+    por_nombre[listado]["sincroniza_precio_plan"] = "listado"
+    por_nombre[detalle]["sincroniza_precio_plan"] = "detalle"
+
+
+def guardar_marcas_precio(tenant: str, listado: str, detalle: str) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_marcas_precio(doc, listado, detalle))
+
+
 def aprobar_herramienta_propuesta(tenant: str, herramienta_propuesta: dict) -> TenantConfig:
     """
     Agrega al catalogo real una herramienta que vino de una propuesta ya
