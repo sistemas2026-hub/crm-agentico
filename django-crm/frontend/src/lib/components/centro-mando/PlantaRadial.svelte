@@ -67,6 +67,10 @@
       : salas;
   });
   const areasPresentes = $derived(grupos.map((g) => g.area));
+  /* La recepcion ya se nombra en la banda de zonas. Listarla otra vez entre
+     las areas la hacia aparecer DOS VECES seguidas en el pie, con dos colores
+     distintos, como si fueran dos cosas. */
+  const areaPrincipal = $derived(grupos.find((g) => g.principal)?.area ?? null);
 
   /* Que cambio entre dos fotos: con sondeo cada 12 s no hay tiempo real que
      animar, y lo unico honesto es la diferencia entre dos lecturas. */
@@ -642,7 +646,7 @@
     <span class="zona"><i style="background:{ZONAS[z].color}"></i>{ZONAS[z].rotulo}</span>
   {/each}
   <span class="sep"></span>
-  {#each areasPresentes as a (a)}
+  {#each areasPresentes.filter((a) => a !== areaPrincipal) as a (a)}
     <span class="zona"><i style="background:{colorDeArea(a, areasPresentes)}"></i>{a}</span>
   {/each}
   <span class="crece"></span>
