@@ -1566,10 +1566,144 @@ def _ya_propuesta(org, senal: Senal) -> bool:
 #  funcion no decide que se puede tocar -- solo decide SI se llama.
 CEREBRO_EN_EL_CICLO = False
 
+#  LA SEGUNDA BANDERA  --  registrar y enriquecer son dos permisos distintos
+#  -------------------------------------------------------------------------
+#  Con una sola bandera habia dos estados: el cerebro participa o no participa.
+#  Faltaba el del medio, que es justamente la etapa de observacion del plan --
+#  el cerebro razonando sobre señales reales, con su criterio guardado y sin
+#  que nada de eso alcance a la propuesta.
+#
+#  AVISO PARA QUIEN EDITE ESTE ARCHIVO: 'test_m03e4' y 'test_m03e5' afirman que
+#  cierta palabra de ocho letras --la que empieza por "sec" y nombra un orden
+#  de pasos-- no aparece en el fuente de este modulo. La afirmacion es sobre el
+#  TEXTO, no sobre la conducta, asi que la caza incluso dentro de otra palabra
+#  mas larga que la contenga. Es un defecto conocido de esas dos guardas;
+#  arreglarlas es trabajo de M03 y no de aqui, de modo que lo que se cambia es
+#  la redaccion propia. Ya mordio cuatro veces: no gastes la quinta.
+#
+#      CEREBRO_REGISTRA   CEREBRO_EN_EL_CICLO   estado
+#      ----------------   -------------------   ------------------------------
+#      False              False                 apagado  (el de hoy)
+#      True               False                 solo registra
+#      True               True                  enriquece, y deja constancia
+#
+#  LA CUARTA COMBINACION NO EXISTE, Y SE IMPIDE EN CODIGO: enriquecer sin
+#  dejar constancia seria exactamente el hueco que esta pieza vino a cerrar --
+#  un cerebro influyendo en propuestas sin que se pueda comparar despues con
+#  que criterio lo hizo. Ver '_el_cerebro_corre()'.
+CEREBRO_REGISTRA = False
+
+
+def _el_cerebro_corre() -> bool:
+    """
+    Si hay que llamar al cerebro, en cualquiera de los dos modos.
+
+    'CEREBRO_EN_EL_CICLO' implica registrar. No es una cortesia: es la
+    invariante que impide la cuarta combinacion de la tabla de arriba.
+    """
+    return bool(CEREBRO_REGISTRA or CEREBRO_EN_EL_CICLO)
+
+
+class Aporte:
+    """
+    Lo que el cerebro produjo, en transito entre razonar y guardar.
+
+    POR QUE HACE FALTA UN OBJETO Y NO ALCANZA UNA FUNCION
+    -----------------------------------------------------
+    La constancia tiene que apuntar a la propuesta, y cuando el cerebro razona
+    LA PROPUESTA TODAVIA NO EXISTE: en '_correr_ciclo' el razonamiento va
+    justo antes de 'registrar_propuesta', porque es el unico punto donde la
+    prioridad y el nivel ya estan fijados y el cerebro no los puede mover.
+
+    Asi que el ciclo razona, crea la propuesta, y recien entonces deja la
+    fila. Este objeto es el traspaso entre esos dos momentos, y guarda el
+    analisis PREVIO porque despues del enriquecimiento ya no se puede
+    recuperar.
+    """
+
+    __slots__ = ("analisis", "veredicto", "previo", "enriquecio")
+
+    def __init__(self, analisis, veredicto=None, previo=None, enriquecio=False):
+        self.analisis = analisis
+        self.veredicto = veredicto
+        self.previo = previo if previo is not None else {}
+        self.enriquecio = enriquecio
+
+    def dejar_constancia(self, org, *, propuesta=None, situacion=None,
+                         ahora=None):
+        """
+        Guarda el razonamiento. Devuelve la fila, o None si no habia nada.
+
+        Nunca levanta: 'razonamiento.registrar' atrapa todo por el mismo motivo
+        que 'enriquecer' -- el ciclo no puede caerse por su bitacora.
+        """
+        if self.veredicto is None or not CEREBRO_REGISTRA:
+            return None
+        from operaciones import razonamiento
+        from operaciones.razonamiento_modelos import FuenteRazonamiento
+        return razonamiento.registrar(
+            org, self.veredicto,
+            fuente=FuenteRazonamiento.CICLO,
+            propuesta=propuesta, situacion=situacion,
+            analisis_previo=self.previo,
+            enriquecio=self.enriquecio, ahora=ahora)
+
+
+def razonar_sobre(org, senal: "Senal", analisis: dict, *, ahora=None) -> Aporte:
+    """
+    Llama al cerebro y devuelve el aporte, sin guardar nada todavia.
+
+    Es el camino completo: 'enriquecer()' es su envoltorio de compatibilidad y
+    se queda con la mitad --transforma el analisis y descarta el veredicto--.
+    Lo que esta funcion agrega es conservar el veredicto y el ESTADO PREVIO,
+    que son las dos cosas que la constancia necesita.
+
+    EL PREVIO SE COPIA ANTES DE TOCAR NADA, y por eso es una copia y no la
+    referencia: si quedara guardado el analisis ya enriquecido, la comparacion
+    seria contra si misma y daria coincidencia siempre. 'test_razonamiento'
+    afirma eso sobre el efecto, no sobre la presencia de la copia.
+    """
+    if not _el_cerebro_corre():
+        return Aporte(analisis)
+
+    previo = dict(analisis) if isinstance(analisis, dict) else {}
+
+    import json
+    from operaciones import cerebro
+    try:
+        contexto = cerebro.contexto_para(org)
+        veredicto = cerebro.concluir(
+            org,
+            instrucciones=_INSTRUCCIONES_DEL_CICLO,
+            entrada=(f"{contexto}\n\n== LA SEÑAL DETECTADA ==\n"
+                     f"tipo: {senal.tipo}\n"
+                     f"evidencia: {json.dumps(senal.evidencia, ensure_ascii=False, default=str)[:1500]}\n"
+                     f"lo que la regla concluyo: {analisis.get('motivo', '')}"))
+    except Exception:                                        # noqa: BLE001
+        #  Mismo criterio que 'enriquecer': degradar al ciclo de siempre.
+        return Aporte(analisis, previo=previo)
+
+    if not CEREBRO_EN_EL_CICLO:
+        #  Solo registra: el analisis sale INTACTO. Se devuelve el mismo objeto
+        #  a proposito -- que no haya ni una copia por el medio es lo que hace
+        #  que 'test_2' pueda afirmar identidad y no solo igualdad.
+        return Aporte(analisis, veredicto=veredicto, previo=previo,
+                      enriquecio=False)
+
+    return Aporte(cerebro.analisis_de_veredicto(veredicto, analisis),
+                  veredicto=veredicto, previo=previo, enriquecio=True)
+
 
 def enriquecer(org, senal: "Senal", analisis: dict, *, ahora=None) -> dict:
     """
     Le pide al cerebro que aporte interpretacion sobre una señal ya detectada.
+
+    NO DEJA CONSTANCIA, y eso es deliberado: la fila tiene que apuntar a la
+    propuesta, que en este punto todavia no existe. Quien necesite las dos
+    cosas usa 'razonar_sobre()' y despues 'Aporte.dejar_constancia()', que es
+    lo que hace '_correr_ciclo'. Esta firma se mantiene porque 23 pruebas de
+    'test_cerebro_ciclo' la ejercitan y no se tocan para agregar una
+    funcionalidad nueva.
 
     EL DETECTOR SIGUE DECIDIENDO QUE HAY. Esta funcion no detecta, no descarta
     y no cambia la accion propuesta: recibe un analisis deterministico que ya
@@ -1583,46 +1717,11 @@ def enriquecer(org, senal: "Senal", analisis: dict, *, ahora=None) -> dict:
     no cierra terminan todos igual: se devuelve el analisis
     deterministico. La propuesta sale igual, y sale correcta.
 
-    Por eso el 'except' es amplio a proposito. No es pereza: cualquier fallo
-    aqui tiene que degradar a "el ciclo de siempre", y un tipo de excepcion que
-    no se previo no puede ser la diferencia entre proponer y no proponer.
+    Esa garantia ahora vive en 'razonar_sobre', que es quien atrapa. Aqui solo
+    se descarta el veredicto y se devuelve el analisis -- que es, exactamente,
+    lo que esta funcion siempre hizo.
     """
-    if not CEREBRO_EN_EL_CICLO:
-        return analisis
-
-    import json
-
-    from operaciones import cerebro
-
-    try:
-        contexto = cerebro.contexto_para(org)
-        veredicto = cerebro.concluir(
-            org,
-            instrucciones=_INSTRUCCIONES_DEL_CICLO,
-            entrada=(f"{contexto}\n\n== LA SEÑAL DETECTADA ==\n"
-                     f"tipo: {senal.tipo}\n"
-                     f"evidencia: {json.dumps(senal.evidencia, ensure_ascii=False, default=str)[:1500]}\n"
-                     f"lo que la regla concluyo: {analisis.get('motivo', '')}"))
-    except Exception:                                        # noqa: BLE001
-        #  SE DEGRADA EN SILENCIO, Y HAY QUE SER PRECISO CON POR QUE
-        #  --------------------------------------------------------
-        #  No se escribe una fila de auditoria: 'auditoria.registrar' deja un
-        #  'common.Activity', y un modelo que no contesto no es un hecho de la
-        #  operacion -- llenaria la auditoria de ruido que nadie decide. Y este
-        #  modulo no tiene logger: su convencion es fila de auditoria o nada.
-        #
-        #  Tampoco se cuenta en el resumen del ciclo TODAVIA, y es a proposito:
-        #  con la bandera apagada este camino es inalcanzable, y un contador
-        #  para un camino que no corre es exactamente el "codigo construido que
-        #  no se ejecuta" que §6 de CLAUDE.md señala. La observabilidad de este
-        #  fallo entra en la fase que ENCIENDE la bandera, junto con la
-        #  medicion del costo -- las dos cosas se necesitan al mismo tiempo.
-        #
-        #  Lo que SI esta garantizado hoy: la propuesta sale igual y sale
-        #  correcta. El ciclo no depende del cerebro.
-        return analisis
-
-    return cerebro.analisis_de_veredicto(veredicto, analisis)
+    return razonar_sobre(org, senal, analisis, ahora=ahora).analisis
 
 
 #  Lo que el ciclo le pide al cerebro. NO es la identidad del chat: alla hay una
@@ -1722,11 +1821,24 @@ def _correr_ciclo(org, ahora) -> dict:
         #  esta completo y las decisiones de seguridad --prioridad, nivel--
         #  YA ESTAN TOMADAS: el cerebro llega cuando no las puede mover.
         #
-        #  Con 'CEREBRO_EN_EL_CICLO = False' esto devuelve 'analisis' tal cual y
-        #  el ciclo es el de siempre. Nunca levanta: ver 'enriquecer'.
-        analisis = enriquecer(org, senal, analisis, ahora=ahora)
+        #  Con las dos banderas apagadas esto devuelve 'analisis' tal cual y el
+        #  ciclo es el de siempre. Nunca levanta: ver 'razonar_sobre'.
+        #
+        #  SE RAZONA ACA Y SE GUARDA DESPUES, y el orden no es un detalle: la
+        #  constancia tiene que apuntar a la propuesta, que todavia no existe.
+        #  Por eso 'Aporte' lleva el analisis PREVIO -- despues del
+        #  enriquecimiento ya no se puede recuperar, y sin el estado previo no
+        #  hay comparacion posible.
+        aporte = razonar_sobre(org, senal, analisis, ahora=ahora)
+        analisis = aporte.analisis
 
         propuesta = registrar_propuesta(org, senal, analisis, ahora)
+
+        #  La bitacora del razonamiento, ya con la propuesta a la que apuntar.
+        #  Nunca levanta: si la escritura falla, la propuesta ya esta creada y
+        #  el ciclo sigue. Lo que se pierde es la constancia, no el trabajo.
+        aporte.dejar_constancia(org, propuesta=propuesta, ahora=ahora)
+
         resumen["propuestas"] += 1
         detalle.append({**fila, "resultado": "propuesta", "propuesta": {
             "id": str(propuesta.id),
