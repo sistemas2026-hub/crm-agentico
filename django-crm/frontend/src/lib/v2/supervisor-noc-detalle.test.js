@@ -506,3 +506,32 @@ describe('¿qué pasa si acepto?', () => {
     expect(siAcepto({ accion_propuesta: 'x' }).origenDecision).toBe(AUSENTE);
   });
 });
+
+describe('contrasteDeEstados · las dos redacciones de los detectores', () => {
+  //  07/10/2026. En una propuesta de desincronizacion la fila «Estado» salia
+  //  «No disponible en la fuente» en LAS DOS columnas, mientras el texto de
+  //  arriba en la misma pantalla decia que el caso seguia en 'New'. La causa:
+  //  esta funcion solo conocia «estado actual:», y ese detector escribe
+  //  «estado en el CRM:».
+  it('reconoce «estado en el CRM», que escribe el detector de desincronización', () => {
+    const r = contrasteDeEstados([
+      { dato: 'ticket en el proveedor: 94718' },
+      { dato: 'caso en el CRM: CS-4eb60a7d' },
+      { dato: 'estado en el proveedor: cerrado' },
+      { dato: 'estado en el CRM: New' }
+    ]);
+    expect(r).toEqual({ crm: 'New', proveedor: 'cerrado' });
+  });
+
+  it('sigue reconociendo «estado actual», que escribe el de caso antiguo', () => {
+    const r = contrasteDeEstados([
+      { dato: 'estado actual: Assigned' },
+      { dato: 'estado en el proveedor: abierto' }
+    ]);
+    expect(r).toEqual({ crm: 'Assigned', proveedor: 'abierto' });
+  });
+
+  it('sin el estado del proveedor no inventa la comparación', () => {
+    expect(contrasteDeEstados([{ dato: 'estado en el CRM: New' }])).toBeNull();
+  });
+});

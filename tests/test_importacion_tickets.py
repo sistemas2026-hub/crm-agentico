@@ -753,6 +753,124 @@ revisar(imp.SELLO_DE_LECTURA == "external_fetched_at",
         "el CLI lo tenia escrito a mano: dos lugares para el mismo concepto")
 
 
+
+# =============================================================================
+#  8.bis  EL MOMENTO DEL ESTADO EN 'con_diferencia'
+# =============================================================================
+#
+# EL DEFECTO, MEDIDO EN PRODUCCION EL 06/10/2026
+# -----------------------------------------------
+# Tres ciclos seguidos del reloj informaron 143, 143 y 142 "con diferencia"
+# sobre 183-184 alcanzados. El numero no bajaba, y eso es lo que no puede
+# pasar: una diferencia real desaparece en cuanto se escribe.
+#
+# La causa eran DOS, y cualquiera sola deja el defecto vivo:
+#
+#   1. 'antes' se armaba con cuatro claves y 'despues' trae seis. Para
+#      'external_status_at', 'antes.get' devolvia None contra la fecha real,
+#      asi que TODO ticket cerrado contaba diferencia para siempre. Medido:
+#      142 de 184 alcanzados, y los 'Cerrado' eran exactamente 142.
+#
+#   2. Los dos lados escriben la misma fecha distinto -- la base en UTC
+#      ('...T20:22:38+00:00') y el proveedor en la zona del ticket
+#      ('...T15:22:38-05:00'). Como texto nunca son iguales.
+#
+# Se afirma sobre el EFECTO (que el contador deje de contar lo que no cambio),
+# no sobre que las constantes existan.
+
+print()
+print()
+print("'con_diferencia' cuenta diferencias reales, no tickets cerrados")
+
+#  LA GUARDA ESTRUCTURAL, sobre lo que 'reconciliar' PRODUCE y no sobre un
+#  diccionario escrito a mano aca -- que es exactamente el descuido que dejo
+#  pasar el defecto: nadie comparaba las dos formas de verdad.
+_cerrado_real = {
+    **ticket("91288", estado="Cerrado", creado_por=CUENTA_API),
+    "fecha_fin": "09/05/2026 15:22:38",
+    "fecha_creacion": "2026-08-29T09:16:37.844072-05:00",
+}
+_c = imp.reconciliar(
+    cfg, [dict(CASO)], leer_ticket=lambda t: _cerrado_real,
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())[0]
+_comparadas = set(_c.despues) - {imp.SELLO_DE_LECTURA}
+revisar(_comparadas <= set(_c.antes),
+        "toda clave que 'hay_diferencia' compara viene tambien en 'antes'",
+        f"la que falte cuenta diferencia eterna. Sobran: "
+        f"{sorted(_comparadas - set(_c.antes))}")
+revisar(imp.MOMENTO_DEL_ESTADO in _c.antes,
+        "y 'external_status_at' en particular, que es la que faltaba")
+
+#  EL ESCENARIO DE LOS 142: un cerrado cuya fecha YA esta guardada, en UTC.
+#  15:22:38-05:00 y 20:22:38+00:00 son el mismo instante.
+_ya_guardado = {
+    **CASO, "external_status": "Cerrado",
+    "external_created_by": CUENTA_API,
+    "external_created_by_type": imp.EXTERNO_DESCONOCIDO,
+    "external_fetch_error": "",
+    "external_status_at": "2026-09-05T20:22:38+00:00",
+}
+_sin_novedad = imp.reconciliar(
+    cfg, [dict(_ya_guardado)], leer_ticket=lambda t: _cerrado_real,
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())[0]
+revisar(_sin_novedad.despues[imp.MOMENTO_DEL_ESTADO] == "2026-09-05T15:22:38-05:00",
+        "el proveedor sigue informando la fecha en la zona del ticket")
+revisar(_sin_novedad.hay_diferencia is False,
+        "EL EFECTO: un cerrado sin novedades NO cuenta como diferencia",
+        "es el caso de los 142: la fecha ya estaba guardada y el contador la "
+        "contaba igual, ciclo tras ciclo")
+
+#  LA OTRA DIRECCION, para no apagar el contador en vez de corregirlo.
+_movido = imp.reconciliar(
+    cfg, [{**_ya_guardado, "external_status_at": "2026-08-30T10:00:00+00:00"}],
+    leer_ticket=lambda t: _cerrado_real,
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())[0]
+revisar(_movido.hay_diferencia is True,
+        "un 'external_status_at' realmente distinto SI cuenta como diferencia")
+
+#  Un ticket ABIERTO: ni la base ni la lectura tienen momento de estado.
+_abierto = imp.reconciliar(
+    cfg, [{**CASO, "external_status": "Nuevo", "external_created_by": CUENTA_API,
+           "external_created_by_type": imp.EXTERNO_DESCONOCIDO,
+           "external_fetch_error": "", "external_status_at": None}],
+    leer_ticket=lambda t: ticket(t, creado_por=CUENTA_API),
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())[0]
+revisar(_abierto.despues[imp.MOMENTO_DEL_ESTADO] is None
+        and _abierto.hay_diferencia is False,
+        "un abierto sin fecha a los dos lados tampoco cuenta")
+
+#  Estrenar una fecha SI es novedad.
+_estrena = imp.reconciliar(
+    cfg, [{**_ya_guardado, "external_status_at": None}],
+    leer_ticket=lambda t: _cerrado_real,
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())[0]
+revisar(_estrena.hay_diferencia is True,
+        "pasar de sin fecha a con fecha SI es una diferencia")
+
+#  La comparacion de instantes, en sus bordes.
+revisar(imp._mismo_instante("2026-09-05T20:22:38+00:00",
+                            "2026-09-05T15:22:38-05:00"),
+        "el mismo instante en dos zonas se reconoce igual",
+        "compararlo como texto habria dejado el mismo 142 con otra causa")
+revisar(not imp._mismo_instante("2026-09-05T20:22:38+00:00", None),
+        "una fecha contra nada no es el mismo instante")
+revisar(not imp._mismo_instante("2026-09-05T20:22:38+00:00", "no es fecha"),
+        "y un sello ilegible no se declara igual por las dudas")
+revisar(imp._mismo_instante(None, None),
+        "dos ausencias si son iguales: un abierto no cambio nada")
+
+#  LA REPRODUCCION DEL DEFECTO: con 'antes' SIN la clave --el estado anterior
+#  del codigo-- el contador miente. La guarda de simetria lo impide.
+_como_antes = imp.Cambio(
+    caso_id="c9", external_ticket_id="9",
+    antes={"external_status": "Cerrado"},
+    despues={"external_status": "Cerrado",
+             imp.MOMENTO_DEL_ESTADO: "2026-09-05T15:22:38-05:00",
+             imp.SELLO_DE_LECTURA: "2026-10-06T20:00:00+00:00"})
+revisar(_como_antes.hay_diferencia is True,
+        "con 'antes' sin la clave el contador vuelve a mentir",
+        "la guarda de simetria de arriba es la que impide que eso regrese")
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es) no pasaron.")

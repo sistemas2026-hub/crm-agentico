@@ -150,22 +150,25 @@ class TestCaseListView:
         assert case.tags.count() == 1
         assert case.case_type == "Incident"
 
-    @patch("cases.views.send_email_to_assigned_user")
-    def test_create_case_duplicate_name_returns_400(
-        self, mock_email, admin_client, case_a
-    ):
-        """Creating a case with a duplicate name in the same org should fail."""
-        response = admin_client.post(
-            CASES_LIST_URL,
-            {
-                "name": "Bug in login page",
-                "status": "New",
-                "priority": "Normal",
-            },
-            format="json",
-        )
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.data["error"] is True
+    #  AQUI ESTABA 'test_create_case_duplicate_name_returns_400', quitada el
+    #  07/10/2026 junto con la regla que afirmaba.
+    #
+    #  Decia "creating a case with a duplicate name in the same org should
+    #  fail", sin mas motivo que esa frase. Es la regla de 'accounts' --donde
+    #  una cuenta SI es unica por nombre-- aplicada a un caso, que es un
+    #  INCIDENTE: "No Tiene Internet" le pasa a muchos clientes y cada uno es
+    #  un caso distinto.
+    #
+    #  Lo que costaba, medido en produccion ese dia: 308 casos imposibles de
+    #  editar desde la interfaz. Cambiarle el responsable a un ticket
+    #  importado contestaba "Case already exists with this name" por un campo
+    #  que el formulario ni habia tocado. Y nada mas sostenia la regla: el
+    #  modelo no declara 'name' unico y el importador crea repetidos sin pasar
+    #  por el serializer, asi que solo alcanzaba a quien editaba a mano.
+    #
+    #  Lo que se afirma ahora --que un nombre repetido se acepta, y que un
+    #  caso con nombre repetido se puede EDITAR-- vive en
+    #  cases/tests/test_nombre_repetido.py, con la medicion que lo motivo.
 
     def test_list_cases_filter_by_status(self, admin_client, admin_user, org_a):
         """Filter cases by status query param."""

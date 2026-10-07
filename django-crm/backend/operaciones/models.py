@@ -1138,3 +1138,19 @@ from operaciones.razonamiento_modelos import (                   # noqa: E402,F4
     FuenteRazonamiento,
     RazonamientoSupervisor,
 )
+
+
+# =============================================================================
+#  ESTILO DEL SUPERVISOR  --  vive en 'estilo_modelos.py'
+# =============================================================================
+#  Mismo motivo que las capas anteriores: Django descubre un modelo cuando su
+#  modulo se importa.
+#
+#  Es la MITAD EDITABLE del prompt. La otra mitad --el nucleo con las garantias--
+#  sigue en codigo, y el corte esta explicado en el encabezado del modulo: el
+#  chat no pasa por 'cerebro.validar()', asi que ahi el "jamas inventas" lo
+#  sostiene el texto y no puede quedar a merced de una pantalla.
+from operaciones.estilo_modelos import (                        # noqa: E402,F401
+    AmbitoEstilo,
+    EstiloSupervisor,
+)

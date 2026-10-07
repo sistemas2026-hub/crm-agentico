@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { resumenPorArea, responsablesSinArea, SIN_AREA } from './tickets-resumen.js';
+import { resumenPorArea, responsablesSinArea, responsablesDeArea, SIN_AREA }
+  from './tickets-resumen.js';
 
 /**
  * EL DEFECTO QUE ESTO FIJA  --  medido en produccion el 06/10/2026
@@ -162,5 +163,61 @@ describe('un ticket con dos responsables de areas distintas', () => {
     //  La suma da 2 para UN ticket: por eso el total de la cabecera sale de
     //  'open_count' y no de sumar las areas.
     expect(r.reduce((t, a) => t + a.total, 0)).toBe(2);
+  });
+});
+
+
+/**
+ * EL SEGUNDO DEFECTO, medido en produccion el 07/10/2026
+ * -------------------------------------------------------
+ * La cabecera de Soporte Tecnico decia «91 en total» y la tabla estaba
+ * VACIA. El total ya salia del servidor (lo arreglado el 06/10), pero las
+ * FILAS seguian siendo la pagina de 25 mas reciente de toda la cola, que el
+ * navegador recortaba por area despues. Ese dia: 138 abiertos, las 25 mas
+ * recientes TODAS de cartera, y Soporte Tecnico se quedaba sin ninguna.
+ *
+ * El area no es un campo del CRM: es una propiedad de la persona asignada.
+ * Por eso filtrar por area es filtrar por sus responsables.
+ */
+describe('los responsables de un area, para pedirle al servidor solo su cola', () => {
+  it('devuelve a todos los del area y a nadie mas', () => {
+    expect(responsablesDeArea('cartera', MAPA).sort())
+      .toEqual(['p-cartera-1', 'p-cartera-2']);
+    expect(responsablesDeArea('soporte_tecnico', MAPA)).toEqual(['p-soporte']);
+  });
+
+  it('un area sin gente devuelve vacio, y quien llama NO debe filtrar', () => {
+    //  Un 'assigned_to' vacio no filtra nada: traeria la cola entera, que es
+    //  exactamente el defecto que esto viene a cerrar.
+    expect(responsablesDeArea('administracion', MAPA)).toEqual([]);
+  });
+
+  it('"Sin área asignada" no se puede pedir por responsable', () => {
+    //  Son los casos SIN responsable, o con uno cuya area nadie configuro.
+    //  No hay id que mandar, asi que esa cola sigue recortandose del lado del
+    //  navegador -- limite conocido y declarado.
+    expect(responsablesDeArea(SIN_AREA, MAPA)).toEqual([]);
+    expect(responsablesDeArea('', MAPA)).toEqual([]);
+  });
+
+  it('sin mapa de areas no inventa responsables', () => {
+    expect(responsablesDeArea('cartera', {})).toEqual([]);
+    expect(responsablesDeArea('cartera')).toEqual([]);
+  });
+
+  it('EL EFECTO: con los responsables del area, la pagina que se pide es la suya', () => {
+    //  La reproduccion del 07/10: la cola tiene mucho mas que una pagina y lo
+    //  mas reciente es de OTRA area. Se afirma sobre lo que se le pediria al
+    //  servidor, que es lo unico que decide que filas llegan.
+    const pedido = new URLSearchParams();
+    for (const p of responsablesDeArea('soporte_tecnico', MAPA)) pedido.append('assigned_to', p);
+    expect(pedido.getAll('assigned_to')).toEqual(['p-soporte']);
+    //  y NO se le pide por los de cartera, que son los que llenaban la pagina
+    expect(pedido.getAll('assigned_to')).not.toContain('p-cartera-1');
+  });
+
+  it('una persona en dos areas no se duplica en el filtro', () => {
+    const r = responsablesDeArea('cartera', { ...MAPA, 'p-cartera-1': 'cartera' });
+    expect(r.filter((x) => x === 'p-cartera-1')).toHaveLength(1);
   });
 });

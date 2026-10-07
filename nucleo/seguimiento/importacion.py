@@ -262,6 +262,40 @@ class Veredicto:
 # en cada lectura aunque el proveedor conteste exactamente lo mismo.
 SELLO_DE_LECTURA = "external_fetched_at"
 
+# El momento en que el proveedor movio el estado. Se compara como INSTANTE y no
+# como texto, y tiene su propia constante por eso -- ver '_mismo_instante'.
+MOMENTO_DEL_ESTADO = "external_status_at"
+
+
+def _mismo_instante(uno, otro) -> bool:
+    """
+    Si dos sellos nombran el mismo momento, aunque esten escritos distinto.
+
+    HACE FALTA, Y SE MIDIO (06/10/2026). Los dos lados de esta comparacion
+    escriben la MISMA fecha de dos formas:
+
+        lo guardado     2026-09-22T20:39:30+00:00   la base es timestamptz y
+                                                    Django la sirve en UTC
+        lo que se leyo  2026-09-22T15:39:30-05:00   'momento_del_estado' usa la
+                                                    zona del propio ticket
+
+    Es el mismo instante y son textos distintos, asi que compararlos con '!='
+    da diferencia SIEMPRE. Comparar el texto habria dejado el defecto que esto
+    viene a arreglar, cambiandole la causa: en lugar de 'la clave no esta en
+    antes' seria 'la zona se escribe distinta', con el mismo 142 de salida.
+    """
+    if uno == otro:
+        return True
+    if not uno or not otro:
+        #  Uno con valor y el otro vacio SI es una diferencia real.
+        return False
+    try:
+        return (datetime.fromisoformat(str(uno))
+                == datetime.fromisoformat(str(otro)))
+    except (ValueError, TypeError):
+        #  Un sello que no se puede leer no se declara igual por las dudas.
+        return False
+
 
 @dataclass
 class Cambio:
@@ -289,9 +323,25 @@ class Cambio:
         dry-run del ciclo cableado: 34 alcanzados, 34 "con diferencia", que es
         un numero que no informa nada. Lo que se quiere contar es cuantos
         casos cambian de estado, de autoria o de error, y esos eran 16.
+
+        'external_status_at' se compara como instante (ver '_mismo_instante') y
+        exige que 'antes' lo traiga. Medido en produccion el 06/10/2026: no lo
+        traia, asi que 'antes.get' devolvia None contra la fecha real y TODO
+        ticket cerrado contaba diferencia para siempre. Eran 142 de 184
+        alcanzados -- exactamente los 142 'Cerrado'-- y el numero no bajaba
+        nunca entre ciclos, que es la firma de una diferencia que no existe:
+        una real desaparece en cuanto se escribe.
         """
-        return any(self.antes.get(k) != v for k, v in self.despues.items()
-                   if k != SELLO_DE_LECTURA)
+        for clave, valor in self.despues.items():
+            if clave == SELLO_DE_LECTURA:
+                continue
+            anterior = self.antes.get(clave)
+            if clave == MOMENTO_DEL_ESTADO:
+                if not _mismo_instante(anterior, valor):
+                    return True
+            elif anterior != valor:
+                return True
+        return False
 
 
 # =============================================================================
@@ -726,6 +776,12 @@ def reconciliar(config, casos: list[dict], *, leer_ticket,
                 "external_created_by": caso.get("external_created_by") or "",
                 "external_created_by_type": caso.get("external_created_by_type") or "",
                 "external_fetch_error": caso.get("external_fetch_error") or "",
+                #  Tiene que estar, y sin el 'or ""' de los demas: lo que se
+                #  compara es un instante, y una cadena vacia no es uno. Si
+                #  falta esta clave, 'antes.get' devuelve None contra la fecha
+                #  real y todo ticket cerrado cuenta diferencia para siempre
+                #  (142 de 184, medido en produccion el 06/10/2026).
+                MOMENTO_DEL_ESTADO: caso.get(MOMENTO_DEL_ESTADO),
             },
         )
         try:

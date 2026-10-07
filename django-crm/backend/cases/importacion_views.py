@@ -355,6 +355,12 @@ class CasosExternosView(APIView):
     CAMPOS = ("id", "external_ticket_id", "status", "closed_on",
               "external_status", "external_created_by",
               "external_created_by_type", "external_fetch_error",
+              #  Sin este campo, la reconciliacion no puede saber si el
+              #  momento del estado que acaba de leer ya estaba guardado: su
+              #  'antes' queda en None y cuenta una diferencia que no existe
+              #  en cada ticket cerrado. No es un dato personal -- es cuando
+              #  el proveedor movio el estado.
+              "external_status_at",
               #  El id del SERVICIO, que es con lo que el backfill le pregunta
               #  al proveedor por el nombre del cliente. Es un identificador,
               #  no un dato personal.

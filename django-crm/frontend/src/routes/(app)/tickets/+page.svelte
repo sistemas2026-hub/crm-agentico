@@ -414,20 +414,52 @@
         </tbody>
       </table>
     </div>
-    <p class="v2-sub v2-pad" style="font-size:12px;padding-bottom:24px">
-      Mostrando <span class="v2-num">{tickets.length}</span> de
-      <span class="v2-num">{count(totals.count)}</span>
-      {#if !data.showAll}
-        · <a href="/tickets?all=1" style="color:inherit">incluir cerrados</a>
-      {:else}
-        · <a href="/tickets" style="color:inherit">solo abiertos</a>
+    <!-- El pie dice QUE TRAMO se esta viendo y, si hay mas, como llegar.
+         Antes decia "Mostrando 25 de 47" y ahi terminaba: los otros 22 no
+         tenian camino. -->
+    <div class="pie-cola v2-pad">
+      <p class="v2-sub" style="font-size:12px;margin:0">
+        Mostrando <span class="v2-num">{data.paginacion.desde}</span>–<span
+          class="v2-num">{data.paginacion.hasta}</span>
+        de <span class="v2-num">{count(data.paginacion.total)}</span>
+        {#if !data.showAll}
+          · <a href="/tickets?all=1" style="color:inherit">incluir cerrados</a>
+        {:else}
+          · <a href="/tickets" style="color:inherit">solo abiertos</a>
+        {/if}
+      </p>
+      {#if data.paginacion.previa || data.paginacion.siguiente}
+        <nav class="paginas" aria-label="Paginación de la cola">
+          {#if data.paginacion.previa}
+            <a class="v2-btn v2-btn-sm" href={data.paginacion.previa}>← Anteriores</a>
+          {/if}
+          <span class="v2-sub" style="font-size:12px">
+            Página {data.paginacion.pagina} de {data.paginacion.paginas}
+          </span>
+          {#if data.paginacion.siguiente}
+            <a class="v2-btn v2-btn-sm" href={data.paginacion.siguiente}>Siguientes →</a>
+          {/if}
+        </nav>
       {/if}
-    </p>
+    </div>
   {/if}
 </div>
 {/if}
 
 <style>
+  .pie-cola {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 24px;
+  }
+  .paginas {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
   .asignado {
     display: inline-flex;
     align-items: center;

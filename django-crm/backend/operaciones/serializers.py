@@ -31,6 +31,7 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
     # ausente de verdad, no un fallo que haya que rellenar.
     zona = serializers.SerializerMethodField()
     tecnico = serializers.SerializerMethodField()
+    caso_id = serializers.SerializerMethodField()
     ticket_externo = serializers.SerializerMethodField()
     proveedor_externo = serializers.SerializerMethodField()
     orden_numero = serializers.SerializerMethodField()
@@ -48,7 +49,8 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
             "accion_propuesta", "prioridad", "estado",
             "nivel_autonomia_requerido", "dentro_del_alcance",
             "created_at", "expira_en",
-            "zona", "tecnico", "ticket_externo", "proveedor_externo",
+            "zona", "tecnico", "caso_id", "ticket_externo",
+            "proveedor_externo",
             "orden_numero", "sla_estado", "sla_minutos",
             "cliente", "asunto", "origen_creado_en", "caso_cerrado",
         ]
@@ -61,6 +63,17 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
 
     def get_tecnico(self, obj):
         return self._contexto(obj).get("tecnico", "")
+
+    def get_caso_id(self, obj):
+        """
+        El id del caso en el CRM, para poder ABRIRLO desde la bandeja.
+
+        No reemplaza a 'ticket_externo': ese es el numero del proveedor y sirve
+        para buscar alla. Mostrar solo aquel hacia que una propuesta que dice
+        "cerra el caso" no se pudiera verificar contra el caso del que hablaba,
+        porque aqui un caso no tiene numero visible -- se abre por su id.
+        """
+        return self._contexto(obj).get("caso_id", "")
 
     def get_ticket_externo(self, obj):
         return self._contexto(obj).get("ticket_externo", "")

@@ -1012,9 +1012,31 @@
                           <span class="snoc-celda-ausente">No disponible en la fuente</span>
                         {/if}
                       </td>
+                      <!--
+                        El numero del proveedor NO alcanza para encontrar el
+                        caso aqui: en el CRM un caso no tiene numero visible, se
+                        abre por su id. Mostrar solo el de WispHub hacia que una
+                        propuesta que dice "cerra el caso" no se pudiera
+                        verificar contra el caso del que hablaba.
+
+                        Por eso ahora van los dos: el enlace al caso de este
+                        lado, y debajo el numero del proveedor para buscarlo
+                        alla. Son dos sistemas y dos identificadores; colapsarlos
+                        en uno fue el error.
+                      -->
                       <td>
                         {#if p.orden_numero != null}
                           <span class="snoc-id">OT-{p.orden_numero}</span>
+                        {:else if p.caso_id}
+                          <a class="snoc-id" href="/tickets/{p.caso_id}"
+                             title="Abrir el caso en Dexter">
+                            Caso {String(p.caso_id).slice(0, 8)}
+                          </a>
+                          {#if p.ticket_externo}
+                            <div class="snoc-mono-sm snoc-tenue">
+                              {p.ticket_externo}{#if p.proveedor_externo} · {p.proveedor_externo}{/if}
+                            </div>
+                          {/if}
                         {:else if p.ticket_externo}
                           <span class="snoc-id">{p.ticket_externo}</span>
                           {#if p.proveedor_externo}

@@ -26,7 +26,14 @@
    * pulsar un puesto, y la planta la usa igual.
    */
   import { untrack } from 'svelte';
-  import PlantaOficina from './PlantaOficina.svelte';
+  /* LA PLANTA ES LA RADIAL. La puerta de entrada del tenant va al centro y
+     las areas cuelgan de ella en anillo, que es la topologia real del motor:
+     todo el que escribe por un canal publico entra por `rol_de_entrada` y de
+     ahi se deriva. La rejilla anterior (PlantaOficina) colocaba esa puerta en
+     una esquina, como una sala mas, y eso no se leia.
+     PlantaOficina SIGUE EN EL ARBOL y con sus 17 pruebas: es a lo que se
+     vuelve si esta no convence en la operacion real. */
+  import PlantaRadial from './PlantaRadial.svelte';
   import AgentDetail from './AgentDetail.svelte';
   import MetricsPanel from './MetricsPanel.svelte';
   import EventTimeline from './EventTimeline.svelte';
@@ -104,7 +111,7 @@
 
   <div class="cuerpo">
     <div class="mapa">
-      <PlantaOficina {panorama} {ms} alSeleccionar={(x) => (seleccionado = x)} />
+      <PlantaRadial {panorama} {ms} alSeleccionar={(x) => (seleccionado = x)} />
     </div>
 
     <div class="lateral">

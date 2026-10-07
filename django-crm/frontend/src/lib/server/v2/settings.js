@@ -138,29 +138,41 @@ export async function getSettingsHub(event) {
     getMacros(event),
     getTags(event),
     getCustomFields(event),
-    // No lanza nunca (ver asistente-config.js): el asistente es otro servicio
-    // y puede no estar desplegado. Si tirara, se caeria el hub entero y el
-    // sintoma seria "no puedo entrar a configuracion".
-    leerConfiguracionAsistente(),
-    leerCanalWhatsapp(),
-    leerSmartOlt(),
+    //  LAS OCHO RECIBEN 'event.locals, event.fetch', Y HACE FALTA  --  07/10/2026
+    //
+    //  Se las llamaba SIN argumentos. Sin 'locals' no hay tenant
+    //  ('tenantDeLaSesion' lo saca de locals.tenant o locals.org.id), sin
+    //  tenant no hay destino, y cada una devolvia null por su propio catch.
+    //
+    //  El resultado era una pantalla de Ajustes a la que le faltaban las
+    //  tarjetas que dependen del asistente: "Servicios y canales" (la parrilla
+    //  de TV) y "Planes de venta" (las localidades) ni se dibujaban, porque su
+    //  condicion es que el tenant tenga el rol 'ventas' y la lista de roles
+    //  llegaba vacia. El tenant TENIA ese rol.
+    //
+    //  El catch esta para que el motor caido no tumbe el hub entero, y eso
+    //  sigue valiendo. Lo que no puede hacer es tapar una llamada mal escrita:
+    //  el sintoma era identico --todo en null-- y por eso nadie lo vio.
+    leerConfiguracionAsistente(event.locals, event.fetch),
+    leerCanalWhatsapp(event.locals, event.fetch),
+    leerSmartOlt(event.locals, event.fetch),
     // Solo el conteo -- no pega contra WispHub (ver contarPlanesVenta()),
     // asi el hub no paga un viaje de red a una API externa en cada carga.
-    contarPlanesVenta(),
+    contarPlanesVenta(event.locals, event.fetch),
     // Tampoco pega contra terceros: las dos listas salen de la config
     // del tenant, que el motor ya tiene en memoria.
-    leerOferta(),
+    leerOferta(event.locals, event.fetch),
     // Tampoco sale a ningun tercero: el catalogo ya esta en la config que el
     // motor tiene en memoria.
-    leerGuiasTV(),
+    leerGuiasTV(event.locals, event.fetch),
     // Tampoco sale a ningun tercero: la lista de credenciales que hacen falta
     // la arma el motor con su propio catalogo, y de las cargadas solo trae
     // nombre y pista. Nunca un valor.
-    leerCredenciales(),
+    leerCredenciales(event.locals, event.fetch),
     // Dos enteros de la config del tenant. Mismo contrato que los de arriba:
     // devuelve null si el motor no contesta, y el hub muestra el destino sin
     // valor en vez de caerse entero.
-    leerAjustesBandeja(),
+    leerAjustesBandeja(event.locals, event.fetch),
     // Cuantos canales de aviso tiene cargados esta empresa. `leerAvisos` ya
     // atrapa su propio error y devuelve la lista vacia: el hub no se cae
     // porque un destino no conteste.

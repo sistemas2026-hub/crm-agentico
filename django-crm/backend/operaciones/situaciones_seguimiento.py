@@ -216,7 +216,7 @@ def _abonados_del_evento_anterior(situacion):
     return int(m.group(1)) if m else None
 
 
-def seguir(org, *, ahora=None, proponer=None) -> dict:
+def seguir(org, *, ahora=None, proponer=None, interpretar=None) -> dict:
     """
     Evalua todas las situaciones abiertas y deja el veredicto escrito.
 
@@ -224,6 +224,19 @@ def seguir(org, *, ahora=None, proponer=None) -> dict:
     por que conocer las propuestas --su trabajo termina en el veredicto-- y
     separarlo permite probar el seguimiento sin crear ni una propuesta. Quien lo
     pasa es el ciclo.
+
+    'interpretar' se inyecta por lo mismo, y es lo que le da al cerebro su lugar
+    aqui. ESTE MODULO SIGUE DECIDIENDO EL VEREDICTO: lo que el cerebro puede
+    aportar es el POR QUE, y solo si una bandera lo habilita. Si no se pasa, el
+    seguimiento es exactamente el de antes.
+
+    POR QUE IMPORTA QUE SEA AQUI Y NO SOLO EN LA DETECCION
+    -----------------------------------------------------
+    En el ciclo el cerebro ve una señal recien detectada. Aqui ve una SITUACION
+    con su historia -- cuantos afectados tenia, como cambio, cuantas veces se
+    reviso. Un sistema que razona sobre señales sueltas reacciona; uno que razona
+    sobre como evoluciona algo que ya conocia, sigue un hilo. Esa es la
+    diferencia entre un motor de ciclo y un agente, y vive en esta linea.
 
     Lo llama el mismo turno del scheduler que el sondeo y la correlacion,
     inmediatamente despues: asi el veredicto se calcula sobre la captura mas
@@ -246,6 +259,23 @@ def seguir(org, *, ahora=None, proponer=None) -> dict:
                        f"no se pudo evaluar el seguimiento: {type(e).__name__}",
                        ocurrido_en=ahora)
             continue
+
+        #  EL CEREBRO, ANTES DE ESCRIBIR. Va aqui y no despues porque lo unico
+        #  que puede aportar es el 'porque', y el 'porque' es lo que se anota.
+        #  Nunca cambia el veredicto, la proxima revision ni los conteos: eso lo
+        #  comprueba 'interpretar' en codigo y lo afirma 'test_12b'.
+        if interpretar is not None:
+            try:
+                salida = interpretar(situacion, salida, ahora=ahora) or salida
+            except Exception as e:                               # noqa: BLE001
+                #  Que el cerebro no pueda interpretar no invalida el veredicto,
+                #  que es correcto sin el. Se cuenta aparte para que el fallo se
+                #  vea en vez de desaparecer -- mismo criterio que el proponedor.
+                informe["errores_interpretacion"] = (
+                    informe.get("errores_interpretacion", 0) + 1)
+                svc.anotar(situacion, TipoEvento.EVIDENCIA,
+                           f"no se pudo interpretar el seguimiento: "
+                           f"{type(e).__name__}", ocurrido_en=ahora)
 
         _escribir(situacion, salida, ahora)
         informe["evaluadas"] += 1

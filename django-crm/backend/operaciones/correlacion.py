@@ -409,10 +409,32 @@ def correr(org, *, ahora=None) -> dict:
     #
     #  El proponedor se le PASA al seguimiento en vez de que lo importe: el
     #  seguimiento produce veredictos y no tiene por que conocer las propuestas.
-    from operaciones import situaciones_propuestas, situaciones_seguimiento
+    #  El interprete se pasa por el mismo motivo que el proponedor: el
+    #  seguimiento produce veredictos y no tiene por que conocer el cerebro. Con
+    #  las banderas apagadas 'interpretar_seguimiento' devuelve la salida tal
+    #  cual, y esto es exactamente el seguimiento de antes.
+    from operaciones import (situaciones_propuestas, situaciones_seguimiento,
+                             supervisor as sup)
+
+    #  EL PRESUPUESTO, o esto se cuelga. El seguimiento NO deduplica: corre
+    #  sobre CADA situacion abierta en cada corrida. Sin tope, con el cerebro
+    #  encendido, son tantas llamadas al modelo como situaciones vivas haya --
+    #  y esto se dispara desde un boton, con una persona esperando.
+    #
+    #  Se crea aqui y no dentro de 'interpretar_seguimiento' porque un
+    #  presupuesto por llamada no acota nada: tiene que ser uno para toda la
+    #  corrida.
+    presupuesto = sup.presupuesto(ahora=ahora)
+
+    def interpretar(situacion, salida, *, ahora=None):
+        return sup.interpretar_seguimiento(
+            situacion, salida, ahora=ahora, presupuesto=presupuesto)
 
     informe["seguimiento"] = situaciones_seguimiento.seguir(
-        org, ahora=ahora, proponer=situaciones_propuestas.proponer)
+        org, ahora=ahora, proponer=situaciones_propuestas.proponer,
+        interpretar=interpretar)
+    informe["razonamientos"] = presupuesto["usados"]
+    informe["razonamientos_omitidos"] = presupuesto["omitidos"]
 
     informe["vivas"] = S.objects.filter(org=org, estado__in=S.VIVAS).count()
     return informe

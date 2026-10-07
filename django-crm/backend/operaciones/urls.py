@@ -108,4 +108,11 @@ urlpatterns = [
     #  tenga llamador -- sin ella seria otro modulo probado al que nadie llega.
     path("supervisor/turno/", views.TurnoSupervisorView.as_view(),
          name="supervisor-turno"),
+
+    #  EL ESTILO DEL PROMPT. GET devuelve lo vigente, el por defecto y el
+    #  historial; PUT lo cambia exigiendo motivo. Solo alcanza la mitad
+    #  EDITABLE: el nucleo con las garantias sigue en codigo y por aqui se
+    #  devuelve para mostrarlo, nunca para escribirlo.
+    path("supervisor/estilo/", views.EstiloSupervisorView.as_view(),
+         name="supervisor-estilo"),
 ]

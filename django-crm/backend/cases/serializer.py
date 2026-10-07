@@ -250,19 +250,26 @@ class CaseCreateSerializer(serializers.ModelSerializer):
                 )
         return attrs
 
-    def validate_name(self, name):
-        if self.instance:
-            if (
-                Case.objects.filter(name__iexact=name, org=self.org)
-                .exclude(id=self.instance.id)
-                .exists()
-            ):
-                raise serializers.ValidationError("Case already exists with this name")
-
-        else:
-            if Case.objects.filter(name__iexact=name, org=self.org).exists():
-                raise serializers.ValidationError("Case already exists with this name")
-        return name
+    #  EL NOMBRE DE UN CASO NO ES UNICO, Y NO PUEDE SERLO  --  07/10/2026
+    #
+    #  Aca habia un 'validate_name' que rechazaba cualquier nombre ya usado en
+    #  la organizacion. Es la regla de 'accounts' --donde una cuenta SI es una
+    #  entidad unica por nombre-- copiada a un caso, que es un INCIDENTE: "No
+    #  Tiene Internet" le pasa a muchos clientes a la vez, y cada uno es un
+    #  caso distinto.
+    #
+    #  Lo que provocaba, medido en produccion ese dia: 308 casos imposibles de
+    #  editar desde la interfaz. Cambiarle el responsable a un ticket
+    #  importado contestaba "Case already exists with this name" por un campo
+    #  que el formulario ni habia tocado. Los repetidos eran 153 "No Tiene
+    #  Internet", 36 "Internet Intermitente/Niveles Altos", 24 "Recolección De
+    #  Equipos"...
+    #
+    #  La regla ademas no la sostenia nada mas: el modelo no declara 'name'
+    #  unico, el importador crea repetidos sin pasar por aqui, y ninguna
+    #  prueba esperaba el rechazo. Era una restriccion que solo alcanzaba a
+    #  quien editaba a mano, y justo sobre los casos que el sistema mismo
+    #  habia creado.
 
     def validate_parent(self, parent):
         """Cross-org link prevention only.

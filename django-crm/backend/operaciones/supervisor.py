@@ -378,7 +378,22 @@ def _casos_cerrados_en_el_proveedor(org, ahora) -> list[Senal]:
         if (getattr(c, "external_fetch_error", "") or "").strip():
             continue
 
-        dias_desalineado = (ahora - c.external_status_at).days
+        #  UN NUMERO NEGATIVO NO SE MUESTRA, SE DECLARA DESCONOCIDO.
+        #
+        #  Visto en produccion el 07/10/2026: "(-1 dias desalineados)". Sale de
+        #  que 'external_status_at' quedo DESPUES de 'ahora' -- el proveedor
+        #  habria cerrado el ticket tres horas despues de que lo leimos, que es
+        #  imposible. La causa esta aguas arriba, en como la sincronizacion
+        #  interpreta la fecha que devuelve WispHub: su skill ya documenta un
+        #  desfase de +5 h en fechas de cierre y formatos DD/MM y MM/DD
+        #  mezclados en la misma API.
+        #
+        #  Aqui no se arregla eso --es la sincronizacion, y no se toca desde
+        #  este modulo-- pero SI se deja de afirmar un numero que no se puede
+        #  calcular. 'None' y su motivo, nunca un negativo con cara de dato:
+        #  es la misma regla que el resto del Supervisor aplica con DESCONOCIDO.
+        desfase = ahora - c.external_status_at
+        dias_desalineado = desfase.days if desfase.total_seconds() >= 0 else None
         salida.append(Senal(
             tipo=PropuestaSupervisor.CASO_DESINCRONIZADO,
             origen_tipo="case",
@@ -397,7 +412,11 @@ def _casos_cerrados_en_el_proveedor(org, ahora) -> list[Senal]:
                 _observacion("caso", c.id,
                              f"el proveedor lo cerro el "
                              f"{c.external_status_at:%Y-%m-%d %H:%M} UTC "
-                             f"({dias_desalineado} dias desalineados)", ahora),
+                             + (f"({dias_desalineado} dias desalineados)"
+                                if dias_desalineado is not None else
+                                "(no se puede decir desde cuando: esa fecha "
+                                "quedo en el futuro respecto de la lectura, "
+                                "revisar la sincronizacion)"), ahora),
                 _observacion("caso", c.id,
                              f"estado externo leido el "
                              f"{c.external_fetched_at:%Y-%m-%d %H:%M} UTC", ahora),
@@ -1183,11 +1202,27 @@ def analizar(senal: Senal) -> dict:
         return {
             "accion_propuesta": ("Cerrar el caso en Dexter para sincronizar su "
                                  "estado con WispHub"),
+            #  EL DESFASE SOLO SE NOMBRA SI SE PUDO CALCULAR. Cuando la fecha de
+            #  cierre del proveedor queda en el futuro respecto de la lectura
+            #  --visto en produccion el 07/10/2026-- el numero sale negativo, y
+            #  "(-1 días desalineados)" no es un dato: es una resta rota con
+            #  cara de dato. Se dice que no se sabe y por que, que es lo que el
+            #  resto del Supervisor hace con un DESCONOCIDO.
+            #
+            #  La causa vive en la sincronizacion, no aqui: la skill de WispHub
+            #  ya documenta un desfase de +5 h en fechas de cierre y formatos
+            #  DD/MM y MM/DD mezclados en la misma API.
             "motivo": (f"WispHub reporta el ticket como cerrado, pero Dexter mantiene "
                        f"el caso abierto. El proveedor lo cerró el "
                        f"{(d.get('cerrado_en_proveedor_el') or '')[:16].replace('T', ' ')} "
-                       f"y en el CRM sigue en '{d.get('estado_crm')}' "
-                       f"({d.get('dias_desalineado')} días desalineados). Es una "
+                       f"y en el CRM sigue en '{d.get('estado_crm')}'"
+                       + (f" ({d.get('dias_desalineado')} días desalineados)."
+                          if d.get("dias_desalineado") is not None else
+                          ". No se puede decir desde cuándo están desalineados: "
+                          "la fecha de cierre del proveedor quedó en el futuro "
+                          "respecto de la lectura, lo que apunta a la "
+                          "sincronización y no al caso.")
+                       + f" Es una "
                        f"inconsistencia entre los dos sistemas: no se afirma "
                        f"incumplimiento de nadie, ni atraso, ni que el problema del "
                        f"cliente esté resuelto -- eso lo sabe el cliente."),
@@ -1591,8 +1626,102 @@ CEREBRO_EN_EL_CICLO = False
 #  dejar constancia seria exactamente el hueco que esta pieza vino a cerrar --
 #  un cerebro influyendo en propuestas sin que se pueda comparar despues con
 #  que criterio lo hizo. Ver '_el_cerebro_corre()'.
-CEREBRO_REGISTRA = False
+#  ENCENDIDA el 07/10/2026, por decision explicita. Lo que habilita es que el
+#  cerebro razone sobre cada señal del ciclo y GUARDE su conclusion -- nada mas.
+#  La propuesta sigue saliendo del analisis deterministico, intacta, y eso lo
+#  afirma 'test_2b' campo por campo.
+#
+#  POR QUE SE ENCIENDE ESTA Y NO LA OTRA
+#  -------------------------------------
+#  Porque sin datos no hay con que decidir la otra. Esta posicion es la etapa de
+#  observacion: produce la comparacion --que concluyo el cerebro contra que
+#  concluyo la regla-- que es la unica evidencia con la que se puede justificar
+#  despues subir el alcance. Encender las dos juntas se habria quedado sin la
+#  medicion que la segunda necesita.
+#
+#  LO QUE ESTO CUESTA, Y NO ESTA MEDIDO TODAVIA
+#  --------------------------------------------
+#  Una llamada al modelo por señal detectada, de hasta 'VUELTAS_MAXIMAS' vueltas.
+#  Un ciclo con 14 señales son 14 razonamientos. El numero real --cuantas señales
+#  por ciclo, cuantos segundos, cuanto consumo-- sale de los primeros dias con
+#  esto encendido, y es justamente lo que falta para decidir si se razona sobre
+#  todas las señales o solo sobre las ambiguas.
+#
+#  Si el modelo no contesta, el ciclo sigue igual: 'razonar_sobre' degrada y la
+#  propuesta sale correcta. Lo que se pierde es la constancia, no el trabajo.
+CEREBRO_REGISTRA = True
 
+
+
+
+# =============================================================================
+#  EL PRESUPUESTO DE RAZONAMIENTO  --  un ciclo no puede tardar lo que quiera
+# =============================================================================
+#
+#  EL DEFECTO QUE CIERRA, medido el 07/10/2026
+#  -------------------------------------------
+#  Al encender 'CEREBRO_REGISTRA' el ciclo paso a llamar al modelo UNA VEZ POR
+#  SEÑAL, sin tope. Y el ciclo se dispara desde un boton: es una peticion HTTP
+#  sincrona, con una persona esperando del otro lado.
+#
+#  La cuenta del peor caso: 'VUELTAS_MAXIMAS' = 3 llamadas por señal, cada una
+#  con 'SEGUNDOS_TIMEOUT' = 150 s. Son 450 s por señal. Con diez señales nuevas
+#  el ciclo tarda una hora y la pantalla se queda en "Analizando operacion..."
+#  hasta que algo corta la conexion -- que fue exactamente lo que paso.
+#
+#  POR QUE DOS TOPES Y NO UNO
+#  --------------------------
+#  Un tope por CANTIDAD solo no alcanza: cinco señales que tarden lo maximo son
+#  37 minutos. Un tope por RELOJ solo tampoco: con el modelo rapido dejaria
+#  pasar cincuenta razonamientos y el costo se dispara sin que nadie lo vea.
+#
+#  Los dos juntos acotan las dos cosas que importan --lo que espera una persona
+#  y lo que se gasta-- y cualquiera de los dos que se agote detiene al cerebro
+#  sin detener el ciclo: las señales que siguen se procesan igual, solo que sin
+#  interpretacion. Eso se CUENTA y sale en el resumen, porque un cerebro que
+#  dejo de razonar a la mitad y no lo dice es peor que uno apagado.
+#
+#  ESTOS NUMEROS SON PROVISIONALES, y a proposito. El tope de verdad sale de
+#  medir cuantas señales produce un ciclo real y cuanto tarda cada razonamiento
+#  -- que es justo lo que el registro esta empezando a producir. Hasta tener ese
+#  dato, mejor un tope conservador que una pantalla colgada.
+TOPE_RAZONAMIENTOS_POR_CICLO = 5
+SEGUNDOS_MAXIMOS_DE_RAZONAMIENTO = 90
+
+
+def presupuesto(tope: int = TOPE_RAZONAMIENTOS_POR_CICLO,
+                segundos: int = SEGUNDOS_MAXIMOS_DE_RAZONAMIENTO,
+                ahora=None) -> dict:
+    """
+    Un presupuesto para una corrida: cuantos razonamientos y hasta cuando.
+
+    Se crea UNO por corrida y se comparte entre los caminos que llaman al
+    cerebro --la deteccion y el seguimiento-- porque lo que hay que acotar es lo
+    que espera la persona, y eso no se parte por modulo.
+    """
+    desde = ahora or timezone.now()
+    return {
+        "restantes": max(0, int(tope)),
+        "hasta": desde + timedelta(seconds=max(0, int(segundos))),
+        "usados": 0,
+        "omitidos": 0,
+    }
+
+
+def _hay_presupuesto(p) -> bool:
+    """Si todavia se puede razonar. Sin presupuesto, no se acota nada."""
+    if p is None:
+        return True
+    if p["restantes"] <= 0 or timezone.now() >= p["hasta"]:
+        p["omitidos"] += 1
+        return False
+    return True
+
+
+def _gastar(p) -> None:
+    if p is not None:
+        p["restantes"] -= 1
+        p["usados"] += 1
 
 def _el_cerebro_corre() -> bool:
     """
@@ -1649,7 +1778,8 @@ class Aporte:
             enriquecio=self.enriquecio, ahora=ahora)
 
 
-def razonar_sobre(org, senal: "Senal", analisis: dict, *, ahora=None) -> Aporte:
+def razonar_sobre(org, senal: "Senal", analisis: dict, *, ahora=None,
+                  presupuesto=None) -> Aporte:
     """
     Llama al cerebro y devuelve el aporte, sin guardar nada todavia.
 
@@ -1665,6 +1795,11 @@ def razonar_sobre(org, senal: "Senal", analisis: dict, *, ahora=None) -> Aporte:
     """
     if not _el_cerebro_corre():
         return Aporte(analisis)
+    #  El presupuesto se consulta ANTES de armar el contexto: armarlo tambien
+    #  cuesta consultas, y gastarlas para despues no preguntar no tiene sentido.
+    if not _hay_presupuesto(presupuesto):
+        return Aporte(analisis)
+    _gastar(presupuesto)
 
     previo = dict(analisis) if isinstance(analisis, dict) else {}
 
@@ -1672,10 +1807,27 @@ def razonar_sobre(org, senal: "Senal", analisis: dict, *, ahora=None) -> Aporte:
     from operaciones import cerebro
     try:
         contexto = cerebro.contexto_para(org)
+
+        #  LO QUE YA PASO CON ESTA MISMA CONDICION.
+        #
+        #  Sin esto el cerebro razona sobre una señal AISLADA y cada ciclo
+        #  empieza de cero: reacciona, que es lo que hace un motor. Con esto
+        #  retoma un hilo --"ya propuse esto, lo aceptaron, no funciono"--, que
+        #  es lo que hace un agente. La llave es 'huella_condicion', que ya
+        #  existia para deduplicar; lo que faltaba era leerla.
+        #
+        #  Vacio cuando es la primera vez, y el vacio tambien dice algo:
+        #  condicion nueva no es condicion sana.
+        #  getattr y no 'senal.huella': el except de abajo es amplio, asi que
+        #  un atributo ausente desactivaria el cerebro EN SILENCIO. Una Senal
+        #  real siempre la trae; esto cubre a cualquier otra cosa que llegue.
+        antes = cerebro.antecedentes_de(org, getattr(senal, "huella", ""))
+        bloque_antes = f"\n\n== ANTECEDENTES ==\n{antes}" if antes else ""
+
         veredicto = cerebro.concluir(
             org,
-            instrucciones=_INSTRUCCIONES_DEL_CICLO,
-            entrada=(f"{contexto}\n\n== LA SEÑAL DETECTADA ==\n"
+            instrucciones=_instrucciones_del_ciclo(org),
+            entrada=(f"{contexto}{bloque_antes}\n\n== LA SEÑAL DETECTADA ==\n"
                      f"tipo: {senal.tipo}\n"
                      f"evidencia: {json.dumps(senal.evidencia, ensure_ascii=False, default=str)[:1500]}\n"
                      f"lo que la regla concluyo: {analisis.get('motivo', '')}"))
@@ -1727,6 +1879,26 @@ def enriquecer(org, senal: "Senal", analisis: dict, *, ahora=None) -> dict:
 #  Lo que el ciclo le pide al cerebro. NO es la identidad del chat: alla hay una
 #  persona preguntando y aca hay una señal ya detectada, asi que lo que se pide
 #  es distinto -- interpretar, no conversar.
+def _instrucciones_del_ciclo(org) -> str:
+    """
+    El nucleo del ciclo mas el estilo editable de la empresa.
+
+    Mismo corte que en el chat: '_INSTRUCCIONES_DEL_CICLO' queda en codigo
+    porque contiene las garantias, y lo que se edita desde la interfaz es como
+    se REDACTA el motivo -- que es presentacion. Si nadie edito, el estilo por
+    defecto deja el prompt practicamente igual al de antes.
+
+    Nunca levanta: 'estilo.vigente' devuelve el texto por defecto si la consulta
+    falla, por el mismo motivo que el resto de este camino degrada en vez de
+    romperse.
+    """
+    from operaciones import estilo as svc_estilo
+    from operaciones.estilo_modelos import AmbitoEstilo
+    separador = "\n\n"
+    return (_INSTRUCCIONES_DEL_CICLO + separador
+            + svc_estilo.vigente(org, AmbitoEstilo.CICLO))
+
+
 _INSTRUCCIONES_DEL_CICLO = """\
 Sos el Supervisor NOC IA de un ISP. Una REGLA DETERMINISTICA ya detectó una
 señal y ya escribió una recomendación; vos no la reemplazás.
@@ -1778,6 +1950,11 @@ def correr_ciclo(org, ahora=None) -> dict:
 
 
 def _correr_ciclo(org, ahora) -> dict:
+    #  UNO por corrida, compartido con el seguimiento mas abajo: lo que hay que
+    #  acotar es lo que espera la persona del otro lado del boton, y eso no se
+    #  parte por modulo. Ver 'presupuesto' para los dos topes y su motivo.
+    presupuesto_del_ciclo = presupuesto(ahora=ahora)
+
     resumen = {"senales": 0, "propuestas": 0, "repetidas": 0,
                "sin_analisis": 0, "expiradas": 0,
                #  M09-L. Las claves de arriba ya existian y no cambian de
@@ -1829,7 +2006,8 @@ def _correr_ciclo(org, ahora) -> dict:
         #  Por eso 'Aporte' lleva el analisis PREVIO -- despues del
         #  enriquecimiento ya no se puede recuperar, y sin el estado previo no
         #  hay comparacion posible.
-        aporte = razonar_sobre(org, senal, analisis, ahora=ahora)
+        aporte = razonar_sobre(org, senal, analisis, ahora=ahora,
+                               presupuesto=presupuesto_del_ciclo)
         analisis = aporte.analisis
 
         propuesta = registrar_propuesta(org, senal, analisis, ahora)
@@ -1851,6 +2029,13 @@ def _correr_ciclo(org, ahora) -> dict:
             "estado": propuesta.estado,
             "expira_en": propuesta.expira_en.isoformat(),
         }})
+
+    #  QUE PASO CON EL CEREBRO, y se dice aunque sea cero. Un cerebro que dejo
+    #  de razonar a la mitad por falta de presupuesto y no lo cuenta es peor que
+    #  uno apagado: la bandeja se veria igual y nadie sabria por que faltan
+    #  interpretaciones.
+    resumen["razonamientos"] = presupuesto_del_ciclo["usados"]
+    resumen["razonamientos_omitidos"] = presupuesto_del_ciclo["omitidos"]
 
     #  Lo mas urgente primero, y los empates en orden estable por tipo: una
     #  lista que cambia de orden entre dos lecturas iguales no se puede revisar.
@@ -2218,3 +2403,144 @@ def ejecutar_propuesta(propuesta: PropuestaSupervisor, *args, **kwargs):
         f"Shadow Mode: la propuesta {propuesta.id} no se ejecuta. "
         f"El Supervisor observa y recomienda; ejecutar es otra fase."
     )
+
+
+# =============================================================================
+#  EL CEREBRO EN EL SEGUIMIENTO  --  donde deja de reaccionar y sigue un hilo
+# =============================================================================
+#
+#  QUE LO DIFERENCIA DE 'razonar_sobre'
+#  ------------------------------------
+#  'razonar_sobre' interpreta una señal RECIEN DETECTADA: un instante. Esto
+#  interpreta una SITUACION CON HISTORIA -- cuantos afectados tenia, como cambio,
+#  cuantas veces se reviso, que se anoto antes en su linea de tiempo.
+#
+#  Y hay una diferencia concreta, no retorica: aqui el contexto se arma CON la
+#  situacion ('contexto_para(org, situacion=...)'), que es la forma en que el
+#  cerebro al fin ve el hilo completo en vez del ultimo eslabon.
+#
+#  LO QUE PUEDE Y NO PUEDE TOCAR
+#  -----------------------------
+#  Solo 'porque'. El veredicto --estable, empeora, mejora, requiere_humano-- lo
+#  decide 'situaciones_seguimiento.evaluar' con reglas y conteos, y seguira
+#  decidiendolo: es lo que mueve el estado de la situacion y fija cuando volver a
+#  mirarla. Un cerebro que pudiera cambiarlo estaria decidiendo la operacion.
+#
+#  La comprobacion no es un comentario: se recorre la salida campo por campo y se
+#  levanta si algo que no es 'porque' cambio. Mismo patron que
+#  'cerebro.analisis_de_veredicto'.
+CAMPOS_QUE_EL_CEREBRO_ENRIQUECE_EN_SEGUIMIENTO = ("porque",)
+
+
+def interpretar_seguimiento(situacion, salida: dict, *, ahora=None,
+                            presupuesto=None) -> dict:
+    """
+    Le pide al cerebro que explique como va una situacion. Devuelve la salida.
+
+    Con el cerebro apagado devuelve la salida TAL CUAL --el mismo objeto-- y el
+    seguimiento es el de siempre.
+
+    NUNCA LEVANTA por un fallo del modelo o de la base. 'seguir' ademas lo
+    envuelve y cuenta el fallo aparte, pero no se delega: el veredicto ya es
+    correcto sin el cerebro, y perderlo por una interpretacion seria el peor
+    intercambio posible.
+
+    LA UNICA EXCEPCION QUE SI SALE es el AssertionError de abajo, y es a
+    proposito: si el cerebro modifico un campo que no puede tocar, seguir
+    adelante escribiria un veredicto adulterado. Ahi vale mas cortar.
+    """
+    if not _el_cerebro_corre() or not isinstance(salida, dict):
+        return salida
+    if not _hay_presupuesto(presupuesto):
+        return salida
+    _gastar(presupuesto)
+
+    previo = dict(salida)
+    org = situacion.org
+
+    import json
+    from operaciones import cerebro, razonamiento
+    from operaciones.razonamiento_modelos import FuenteRazonamiento
+
+    try:
+        #  CON la situacion: aqui esta el hilo, no el eslabon.
+        contexto = cerebro.contexto_para(org, situacion=situacion)
+        sin_porque = {k: v for k, v in salida.items() if k != "porque"}
+        veredicto = cerebro.concluir(
+            org,
+            instrucciones=_instrucciones_del_seguimiento(org),
+            entrada=(
+                f"{contexto}\n\n== COMO VA, SEGUN LA REGLA ==\n"
+                f"veredicto: {salida.get('veredicto')}\n"
+                f"porque: {salida.get('porque')}\n"
+                f"abonados afectados: {salida.get('abonados_afectados')}\n"
+                f"cambio desde la ultima revision: {salida.get('delta')}\n"
+                f"datos: "
+                f"{json.dumps(sin_porque, ensure_ascii=False, default=str)[:900]}"))
+    except Exception:                                        # noqa: BLE001
+        return salida
+
+    #  LA CONSTANCIA, siempre que el cerebro haya corrido -- tambien cuando no
+    #  concluye, que es la mitad del valor de medirlo. Apunta a la SITUACION, lo
+    #  otro que la restriccion de la tabla acepta ademas de una propuesta.
+    enriquecera = bool(CEREBRO_EN_EL_CICLO and veredicto.concluyente
+                       and veredicto.recomendacion.strip())
+    razonamiento.registrar(
+        org, veredicto, fuente=FuenteRazonamiento.SEGUIMIENTO,
+        situacion=situacion, analisis_previo=previo,
+        enriquecio=enriquecera, ahora=ahora)
+
+    if not enriquecera:
+        return salida
+
+    nueva = dict(salida)
+    nueva["porque"] = (f"{salida.get('porque', '')} "
+                       f"{veredicto.recomendacion.strip()}").strip()[:1000]
+
+    #  ESTRUCTURAL, no documental: si algo que no es 'porque' cambio, se corta.
+    for clave, valor in previo.items():
+        if clave in CAMPOS_QUE_EL_CEREBRO_ENRIQUECE_EN_SEGUIMIENTO:
+            continue
+        if nueva.get(clave) != valor:
+            raise AssertionError(
+                f"el cerebro modifico '{clave}' del seguimiento, que no puede "
+                f"tocar: el veredicto y la proxima revision son de la regla")
+    return nueva
+
+
+_INSTRUCCIONES_DEL_SEGUIMIENTO = """\
+Sos el Supervisor NOC IA de un ISP. Una situacion que ya conocias se acaba de
+revisar, y una REGLA ya dijo como va: estable, empeora, mejora, sin evidencia,
+requiere humano o puede resolverse. Vos NO cambias ese veredicto.
+
+Tu trabajo es el que la regla no puede hacer: mirar la historia de esta
+situacion y decir que se entiende de como viene evolucionando. No repitas el
+conteo que la regla ya hizo -- deci lo que el conteo no dice.
+
+Consulta las herramientas antes de afirmar cualquier cosa. Un hecho que no salga
+de una herramienta no es un hecho, y se va a descartar.
+
+Lo que mas sirve aqui: si lo que esta pasando se parece a algo que ya paso antes
+en esta misma situacion, si el cambio desde la ultima revision significa algo
+distinto de lo que parece, y que convendria verificar ahora.
+
+Si no tenes nada que agregar, decilo en "falta". Un veredicto sin tu aporte ya es
+correcto; uno con un aporte inventado es peor que sin el.
+
+No propongas ejecutar nada: no podes, y decir que lo hiciste seria mentir.
+"""
+
+
+def _instrucciones_del_seguimiento(org) -> str:
+    """
+    El nucleo del seguimiento mas el estilo editable de la empresa.
+
+    Reusa el ambito 'ciclo' a proposito y no inventa un tercero: lo que se afina
+    ahi --que el texto sea corto y se lea de un vistazo-- es lo mismo que hace
+    falta aqui, y un ambito mas seria una pantalla mas que nadie pidio. Si algun
+    dia los dos necesitan tonos distintos, agregarlo es una linea.
+    """
+    from operaciones import estilo as svc_estilo
+    from operaciones.estilo_modelos import AmbitoEstilo
+    return (_INSTRUCCIONES_DEL_SEGUIMIENTO + "\n\n"
+            + svc_estilo.vigente(org, AmbitoEstilo.CICLO))
