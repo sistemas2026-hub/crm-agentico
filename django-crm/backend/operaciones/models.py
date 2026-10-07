@@ -1122,3 +1122,19 @@ from operaciones.chat_modelos import (                           # noqa: E402,F4
     MensajeSupervisor,
     RolMensaje,
 )
+
+
+# =============================================================================
+#  CONSTANCIA DEL RAZONAMIENTO  --  vive en 'razonamiento_modelos.py'
+# =============================================================================
+#  Mismo motivo que las capas anteriores: Django descubre un modelo cuando su
+#  modulo se importa.
+#
+#  POR QUE ES UNA TABLA Y NO UN CAMPO DE 'PropuestaSupervisor': un campo nuevo
+#  obligaria a agregarlo a 'supervisor.CAMPOS_QUE_ESCRIBE_EL_SUPERVISOR', que
+#  es la garantia de gobernanza que 'test_m09f' vigila. El detalle completo
+#  esta en el encabezado del modulo.
+from operaciones.razonamiento_modelos import (                   # noqa: E402,F401
+    FuenteRazonamiento,
+    RazonamientoSupervisor,
+)

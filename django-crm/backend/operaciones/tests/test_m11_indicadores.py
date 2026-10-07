@@ -517,7 +517,26 @@ def test_19_no_hay_segunda_cola_ni_tabla_de_kpi(org_a):
                        #
                        #  'OrigenAprendizaje' no tiene 'supervisor': el agente no puede concluir
                        #  sobre su propio acierto, ni por el servicio ni por el ORM.
-                       "AprendizajeSupervisor"}
+                       "AprendizajeSupervisor",
+                       #  07/10/2026. 'RazonamientoSupervisor' es la constancia de lo que el
+                       #  cerebro concluyo, y el ESTADO PREVIO contra el cual compararlo. NO es
+                       #  una cola: no se consulta para decidir nada, nadie la lee para proponer
+                       #  y ningun detector depende de ella -- si desapareciera, el ciclo
+                       #  produciria exactamente las mismas propuestas. Y NO es una tabla de KPI:
+                       #  no guarda ningun indicador calculado, guarda la lectura cruda de la que
+                       #  un indicador podria salir despues. Es APPEND-ONLY, como
+                       #  'AprendizajeSupervisor'.
+                       #
+                       #  POR QUE NO FUE UN CAMPO DE 'PropuestaSupervisor': un campo nuevo
+                       #  obligaria a agregarlo a 'CAMPOS_QUE_ESCRIBE_EL_SUPERVISOR', que es la
+                       #  garantia que 'test_m09f' vigila y la que mantiene fuera a
+                       #  'observaciones' y 'responsable_sugerido' desde M09-C. Una tabla aparte
+                       #  da lo mismo sin pagar con gobernanza.
+                       #
+                       #  Tampoco es una segunda nocion de caso: apunta a una propuesta o a una
+                       #  situacion que ya existen, y la restriccion
+                       #  'razonamiento_apunta_a_algo' impide que exista sin una de las dos.
+                       "RazonamientoSupervisor"}
 
     import ast
     import inspect
