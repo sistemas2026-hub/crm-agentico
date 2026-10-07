@@ -142,6 +142,26 @@ class CaseSerializer(serializers.ModelSerializer):
             # No agrega acceso a nada: quien ve el caso ya ve su ficha tecnica.
             "provider",
             "external_service_id",
+            #  LO QUE LA COLA NECESITA PARA SER LEGIBLE  --  07/10/2026
+            #
+            #  'external_ticket_id' es el numero con el que se busca el mismo
+            #  ticket en el panel del proveedor. Sin el, cruzar las dos
+            #  pantallas obliga a abrir el caso para sacarlo de la descripcion.
+            #
+            #  'external_status' es lo que dice el proveedor, que NO siempre
+            #  coincide con 'status': ahi vive la divergencia que este sistema
+            #  conserva a proposito -- el proveedor cierra, y en Dexter lo
+            #  cierra una persona.
+            #
+            #  'external_client_name' es UN DATO PERSONAL y entra por decision
+            #  explicita del cliente (07/10/2026), no de paso. El motivo: la
+            #  cola muestra 153 veces "No Tiene Internet" y sin el nombre no
+            #  hay forma de saber de quien es cada uno. No agrega acceso a
+            #  nada -- quien ve el caso ya lo ve adentro; lo que cambia es que
+            #  ahora tambien se ve en la lista.
+            "external_ticket_id",
+            "external_status",
+            "external_client_name",
         )
 
 

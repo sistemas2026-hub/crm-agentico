@@ -5,7 +5,8 @@ import { getTags } from '$lib/server/v2/tags.js';
 import { leerAreas } from '$lib/server/v2/areas.js';
 import { resumenPorArea, responsablesSinArea, responsablesDeArea, SIN_AREA }
   from '$lib/v2/tickets-resumen.js';
-import { calcularPaginacion } from '$lib/v2/paginacion.js';
+import { calcularPaginacion, numerosDePagina, enlaceAPagina }
+  from '$lib/v2/paginacion.js';
 
 /**
  * Only filters the API actually applies are forwarded. A parameter that
@@ -222,7 +223,15 @@ export async function load({ cookies, url, locals, fetch }) {
   //  Los enlaces se arman contra el total que da el SERVIDOR, no contra
   //  cuantas filas quedaron visibles: una pagina recortada no significa que
   //  sea la ultima.
-  const paginacion = calcularPaginacion(url, totals.count, desde, porPagina);
+  const base = calcularPaginacion(url, totals.count, desde, porPagina);
+  //  Los numeros se arman aca y viajan listos: la pantalla solo los dibuja.
+  //  Sin la barra numerada, llegar al final de una cola de 24 paginas son 23
+  //  clics en "Siguiente".
+  const paginacion = {
+    ...base,
+    numeros: numerosDePagina(base.pagina, base.paginas).map((n) =>
+      n === null ? null : { n, url: enlaceAPagina(url, n, porPagina), actual: n === base.pagina })
+  };
 
   return {
     areas: areasVisibles,

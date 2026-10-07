@@ -303,12 +303,37 @@ def test_revertir_no_borra_lo_que_leyo_un_importador(org_a, admin_user):
 
 # --- 11: la migracion no cambia nada de lo que ya funcionaba -------------
 
-# Los dos que la Fase 3 si expone, de solo lectura, y por que cada uno:
-# la pantalla de un ticket IMPORTADO no tiene conversacion de donde sacar el
-# identificador del servicio, asi que sin estos dos no puede pedirle al motor
-# la ficha tecnica del cliente. No abren acceso a nada nuevo -- quien ve el
-# caso ya ve esa ficha.
-LECTURA_PERMITIDA = {"provider", "external_service_id"}
+# Lo que el CaseSerializer SI expone, de solo lectura, y el motivo de cada uno.
+# La lista es cerrada a proposito: agregar uno obliga a pasar por aqui y
+# escribir por que, que es lo que hace que la decision sea explicita.
+#
+#   provider, external_service_id   (Fase 3)
+#       La pantalla de un ticket IMPORTADO no tiene conversacion de donde
+#       sacar el identificador del servicio, y sin estos dos no puede pedirle
+#       al motor la ficha tecnica.
+#
+#   external_ticket_id, external_status, external_client_name   (07/10/2026)
+#       Para que la COLA se pueda leer. Decidido por el cliente ese dia,
+#       mirando la pantalla:
+#         - el numero es con lo que se busca el mismo ticket en el panel del
+#           proveedor; sin el hay que abrir el caso para sacarlo de la
+#           descripcion;
+#         - el estado del proveedor es con el que trabaja el equipo, y ademas
+#           deja ver la divergencia con el de Dexter (12 casos ese dia);
+#         - el nombre del cliente ES UN DATO PERSONAL y entra por decision
+#           explicita, no de paso. El motivo medido: la cola repite 153 veces
+#           "No Tiene Internet" y sin el nombre no hay forma de saber de quien
+#           es cada fila.
+#
+# NO abren acceso a nada nuevo: quien ve la lista ya puede abrir cada caso y
+# ver los tres adentro. Lo que cambia es que ahora tambien se ven en la lista.
+#
+# Siguen SIN salir, y esa es la parte que esta prueba cuida:
+# 'external_fetch_error' (texto crudo del proveedor), 'external_created_by'
+# (el nombre de quien abrio el ticket del lado del ISP),
+# 'external_created_by_type', 'external_status_at' y 'external_fetched_at'.
+LECTURA_PERMITIDA = {"provider", "external_service_id", "external_ticket_id",
+                     "external_status", "external_client_name"}
 
 
 def test_los_campos_nuevos_no_llegan_a_la_interfaz(org_a, admin_user):
@@ -327,10 +352,13 @@ def test_los_campos_nuevos_no_llegan_a_la_interfaz(org_a, admin_user):
     """
     from cases.serializer import CaseCreateSerializer, CaseSerializer
 
+    #  'external_client_name' se suma el 07/10/2026: es el unico DATO
+    #  PERSONAL del grupo y no estaba vigilado -- nadie comprobaba si salia o
+    #  no. Que ahora este en la lista es lo que vuelve util esta prueba.
     nuevos = {"provider", "external_ticket_id", "external_service_id",
               "external_status", "external_status_at", "external_fetched_at",
               "external_fetch_error", "external_created_by",
-              "external_created_by_type"}
+              "external_created_by_type", "external_client_name"}
 
     # CaseCreateSerializer atiende creacion Y edicion: ni uno solo entra por ahi.
     escribibles = nuevos & set(CaseCreateSerializer.Meta.fields)

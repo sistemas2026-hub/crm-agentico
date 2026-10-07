@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { calcularPaginacion } from './paginacion.js';
+import { calcularPaginacion, numerosDePagina, enlaceAPagina }
+  from './paginacion.js';
 
 /**
  * EL DEFECTO, medido en produccion el 07/10/2026: la cola de Cartera tenia 47
@@ -94,5 +95,66 @@ describe('los bordes, que son donde una paginacion se rompe', () => {
     const p = calcularPaginacion(u('/tickets'), 50, 25, 25);
     expect(p.paginas).toBe(2);
     expect(p.siguiente).toBeNull();
+  });
+});
+
+/**
+ * LOS NUMEROS DE PAGINA  --  pedidos el 07/10/2026
+ * Con 35 paginas, llegar al final con "Siguiente" son 34 clics. La barra
+ * numerada existe para que la ULTIMA este siempre a un clic.
+ */
+describe('la barra de numeros', () => {
+  it('con pocas paginas las muestra todas', () => {
+    expect(numerosDePagina(1, 4)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('EL EFECTO: con muchas, la ultima SIEMPRE esta', () => {
+    //  Es el motivo de que esto exista.
+    for (const actual of [1, 5, 40, 86]) {
+      expect(numerosDePagina(actual, 86), `desde la pagina ${actual}`).toContain(86);
+    }
+  });
+
+  it('y la primera tambien, para volver al principio', () => {
+    expect(numerosDePagina(84, 86)).toContain(1);
+  });
+
+  it('en el medio, una ventana alrededor de la actual y huecos a los lados', () => {
+    expect(numerosDePagina(84, 86)).toEqual([1, null, 82, 83, 84, 85, 86]);
+  });
+
+  it('un hueco de UNA pagina se rellena en vez de abreviarse', () => {
+    //  '…' ocuparia lo mismo que el numero y encima no se podria pulsar.
+    const r = numerosDePagina(4, 10, 2);
+    expect(r.slice(0, 3)).toEqual([1, 2, 3]);
+  });
+
+  it('los bordes no inventan paginas', () => {
+    expect(numerosDePagina(1, 1)).toEqual([1]);
+    expect(numerosDePagina(99, 3)).toEqual([1, 2, 3]);   // actual fuera de rango
+    expect(numerosDePagina(0, 3)).toEqual([1, 2, 3]);
+    expect(numerosDePagina(1, 0)).toEqual([1]);
+  });
+});
+
+describe('el enlace a una pagina concreta', () => {
+  const u = (s) => new URL('https://x.test' + s);
+
+  it('la ultima pagina de la cola real', () => {
+    expect(enlaceAPagina(u('/tickets?area=cartera'), 24, 25))
+      .toBe('/tickets?area=cartera&offset=575');
+  });
+
+  it('la primera QUITA el offset', () => {
+    expect(enlaceAPagina(u('/tickets?area=cartera&offset=575'), 1, 25))
+      .toBe('/tickets?area=cartera');
+  });
+
+  it('conserva los demas parametros', () => {
+    const r = enlaceAPagina(u('/tickets?area=x&vista=mios&all=1'), 3, 25);
+    expect(r).toContain('area=x');
+    expect(r).toContain('vista=mios');
+    expect(r).toContain('all=1');
+    expect(r).toContain('offset=50');
   });
 });
