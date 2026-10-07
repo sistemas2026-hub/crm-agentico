@@ -7,7 +7,85 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **24/09/2026 ~16:30 Bogotá**. Esta versión es la
+Última actualización: **28/09/2026 18:56 Bogotá** — **DESPLEGADO A PRODUCCIÓN**: la
+custodia de materiales, sus tres fases y el lazo con el ISP.
+`b56da0c → ba86a2a`, 8 commits, por decisión explícita del usuario.
+
+```
+59cf2a6  la bodega existe: el material ya puede salir y volver
+772c457  la oficina puede despachar, recibir y preguntar dónde está cada aparato
+0fa109a  el inventario se ve en la web
+f9dcf61  el inventario está en el menú, y A4 se mide con bloqueo real
+cf0a73c  lo que falta al recibir se nombra; la existencia con su guarda
+5b68d58  Fase 2 y 3: reservas, conteo, traslados, compras y valorización
+b217a04  las dos fases en la pantalla
+ba86a2a  el serial que el técnico instala vuelve al ISP, apagado
+```
+
+**Esto fue, de hecho, la integración de Campo.** El módulo entero entró a
+producción con el inventario: la app de técnicos, sus 30 archivos de prueba y
+las 8 migraciones de la app `campo`. La ficha `objetivos/integracion-campo.md`
+queda **superada por los hechos** en su parte de «cómo traer el módulo», y hay
+que podarla: lo que describía como 190 archivos en conflicto no ocurrió, porque
+el worktree salió de producción y trajo sólo `campo/` en vez de fusionar la rama
+atrasada.
+
+Antes del push, verde y medido: `test_nucleo_sin_tenants`, la config validando
+contra el esquema (78 herramientas, 8 roles), y `campo/tests/` con **333 pasan ·
+6 skipped · 0 fallan** sobre el código ya rebaseado. G6 no aplicaba: cero
+migraciones SQL del asistente y cero menciones de `messages`, medido.
+
+⚠️ **LO QUE EL DESPLIEGUE TIENE QUE APLICAR, y no se puede comprobar desde una
+sesión:** las 8 migraciones de `campo` sobre la base de producción, que crean 13
+tablas nuevas. `estar en el repo ≠ estar aplicada` — se mide con el ledger
+contra producción, no con git.
+
+⚠️ **LO QUE SE SALTEÓ, dicho:** la pasada adversarial (`auditor-independiente`),
+`flutter test` en este árbol, y `cli/evaluar.py --humo`. El último con su
+fundamento medido: ningún rol tiene `actualizar_sn_onu` en `puede_consultar`,
+así que el catálogo que ve cada modelo no cambió y su resultado no puede haber
+cambiado por este deploy.
+
+La anterior fue el **28/09/2026 18:28 Bogotá** — la **custodia de materiales** queda
+construida en sus TRES FASES y vista en la pantalla. Rama
+`feat/inventario-custodia` (worktree `C:/tmp/dexter-inventario`), **sin
+pushear**:
+
+```
+8851b5e  la bodega existe: el material puede salir y volver
+4f70241  la API: despachar, recibir, historia de un aparato
+79ee0c8  la pantalla /inventario
+fe64c8c  la entrada del menú, y A4 medida con bloqueo real
+56fff80  la diferencia al recibir se nombra; la existencia con su guarda
+c3fdc10  Fase 2 y 3: reservas, conteo, traslados, compras y valorización
+b8f264e  las dos fases en la pantalla: lo libre, lo contado y lo que vale
+```
+
+La **Fase 3 se construyó por decisión explícita del usuario**, que levantó la
+restricción del brief (*«el modo de fallar de este trabajo es volverse un
+ERP»*). Esa advertencia queda escrita en `campo/inventario_operacion.py`.
+
+⚠️ Y una corrección de este mismo archivo: la actualización del 28/09 metió su
+sección en `TRABAJO ACTIVO` pero **no cambió esta línea** — el reemplazo buscaba
+un texto que otra sesión ya había editado y falló en silencio, así que la
+cabecera afirmó el 25/09 durante todo el día 28. Es la tercera vez que este
+archivo afirma algo que no verificó quien lo escribió. **Un reemplazo sobre un
+documento que otra sesión puede tocar se comprueba después de hacerlo.**
+
+La anterior fue el **25/09/2026 13:57 Bogotá** — la planta del centro de
+mando pasa a **salas por área** (`8d9a3d7`) y entra una **propuesta** de planta
+radial sin enchufar (`c660474`). Los dos **sin desplegar**. Se remide el mapa de
+ramas: producción ya no está donde decía este archivo hace tres horas.
+
+La anterior fue el **25/09/2026 13:44 Bogotá** — se abren dos fichas en
+`TRABAJO ACTIVO`: la custodia de materiales, con su diseño congelado, y la
+integración de Campo, que es su prerrequisito y está **bloqueada hasta cumplir su
+contrato**. Ninguna arrancada; nada de código tocado. El detalle de por qué la
+integración es el riesgo y no el diseño está en esa sección.
+
+La actualización anterior fue el **24/09/2026 ~22:05 Bogotá** — deploy de la planta
+de oficina (`0925a7e`), su ajuste tras verla (`0c98fa5`) y la remedición del
+mapa de ramas. Esa versión es la
 **FUSIÓN A MANO** de las dos copias que existían de este archivo — una en
 `integrar-centro-mando` y otra en `feature/bandeja-relevo`, editadas las dos
 el mismo día, divergidas 252 lineas. No se borró nada de ninguna: se importó
@@ -49,20 +127,256 @@ git rev-list --left-right --count origin/integrar-centro-mando...HEAD   -> 2  46
 último push es del 23/09 (`5cd47e6`). Por eso los 46 «sin pushear» y los 19
 «fuera de producción» no se contradicen — miden contra bases distintas.
 
-**Lo que está REALMENTE fuera de producción son 17 commits**, y son el trabajo
-de hoy: el sistema de trabajo con IA (CLAUDE.md, 9 agentes, 4 comandos,
-`pre-commit`, CI), la plataforma multi-ISP entera (70 -> 14 archivos), el
-entorno local aislado, y el arreglo de `DECLARACION_NO_ALCANZA` (`6207b9a`).
+~~**Lo que está REALMENTE fuera de producción son 17 commits.**~~
+~~Además hay **2 commits en producción que no están acá** (`790e185`,
+`b7cfa90`).~~
 
-Además hay **2 commits en producción que no están acá** (`790e185`, `b7cfa90`)
-— los mismos dos de arriba, rebasados por la otra sesión.
+**Ya no. Remedido el 24/09 21:30: son 3, y están listados abajo.** Los 17
+salieron esa misma tarde en dos tandas (`1a83886 → 8d1fbf4` y
+`8d1fbf4 → 0925a7e`).
+
+La medición de arriba queda tachada y no borrada a propósito: es la tercera
+vez en el mismo día que esta sección afirma un número que deja de ser cierto
+en cuestión de horas. **El número envejece; el método no.** Lo que hay que
+conservar de este bloque es cómo se mide —`git patch-id --stable` contra la
+rama de despliegue, nunca `merge-base --is-ancestor`, que no ve un commit
+rebaseado por otra sesión— y no cuántos commits había una tarde cualquiera.
 
 | Rama | Qué tiene | Estado medido |
 |---|---|---|
-| `integrar-centro-mando` | **Activa, es esta.** Centro de Mando, sistema de trabajo con IA, plataforma multi-ISP | 🔴 **17 commits fuera de producción**, 46 sin pushear a su propio remoto, 2 detrás |
+| `integrar-centro-mando` | **Activa, es esta.** Centro de Mando, sistema de trabajo con IA, plataforma multi-ISP | 🟡 **3 commits fuera de producción** (remedido 24/09 21:30) |
 | `feature/bandeja-relevo` | Bandeja Fase 1, batería de 41 flujos, validación de producción | 🟡 activa en `C:/tmp/dexter-bandeja`. **NO está congelada** pese a lo que dice la memoria: 3 commits hoy 16:12-16:14 |
 | `feat/campo-diseno-stitch` | **Dexter Campo.** 101 archivos de prueba, 551 pruebas | 🟡 activa en `C:/wisphub/_wt_campo`. Una tercera sesión implementa ahí «refrescar ficha» (`test_refrescar_ficha.py`, sin commitear) |
-| `fix/integracion-wisphub` | **Producción.** Push ahí ES deploy | Centro de Mando desde `ee4563f` (23/09 12:29) + los dos tableros de hoy |
+| `fix/integracion-wisphub` | **Producción.** Push ahí ES deploy | `0c98fa5` (24/09 22:0x) — la planta de oficina, ajustada tras verla |
+
+**Los 3 que siguen fuera, remedidos el 24/09 21:30.** No son deuda olvidada:
+son trabajo de otra sesión, sin pushear a ninguna parte, y tocan config del
+tenant y el motor. Por eso el deploy de la planta se hizo por **cherry-pick de
+un solo commit** y no por push de la rama: publicar `tenants/rapilink.config.
+yaml`, `cli/cargar_config.py` y `nucleo/modelo/motor.py` sin que nadie lo
+decidiera habría sido un deploy de tres cosas disfrazado de uno.
+
+```
+78d20b8  Una copia mas vieja que produccion ya no puede escribir la config
+f946d84  Un servicio puede decir de quien habla, y la sesion sigue mandando
+afd721a  D1 cierra su parte: el CI queda en verde en las dos ramas
+```
+
+**REMEDIDO el 25/09/2026 13:57 Bogotá, por contenido (`git patch-id --stable`)
+contra `origin/fix/integracion-wisphub`, que está en `8d37f70`.** De 16 commits
+locales, **10 ya están afuera con otro hash** y 6 no:
+
+```
+FUERA (6):
+   afd721a  D1 cierra su parte: el CI queda en verde en las dos ramas
+   e957e06  El estado dice que la planta salio, y corrige lo que ya no era cierto
+   c017bdb  Ver la pantalla encontro lo que las guardas no podian
+   109a550  La integracion de Campo tiene contrato antes de que alguien la fusione
+   8d9a3d7  Cada area es una oficina con paredes  (25/09 13:47)
+   c660474  Propuesta de planta radial, sin enchufar  (25/09 13:48)
+
+YA DESPLEGADOS, con otro hash (los publicó otra sesión):
+   78d20b8 → e1080a1     f946d84 → 6b096af     bea9a8b → 0925a7e
+   063d0fa → 0c98fa5     b8cbb85 → 2f14565     29fdb1e → 05ef873
+   7566e0b → fab796b     a4985f4 → 76e29bf     c3ec175 → a60cb85
+   ea483ed → 8d37f70
+```
+
+**Tres de los seis que faltan son documentación de este archivo**; los otros tres
+son el CI, el contrato de Campo y el trabajo de hoy.
+
+Es la **quinta** vez que esta sección envejece en dos días. Producción se movió
+otra vez: `a60cb85 → 61a7f74 → 8d37f70`, y los tres últimos saltos son de OTRA
+sesión (bandeja rediseñada, nombre del cliente, referencia de Stitch). Por quinta
+vez el método aguantó y el número no: lo que hay que conservar es la primera línea
+de este bloque, no la lista.
+
+### SIN DESPLEGAR — 25/09/2026 13:47 Bogotá — la planta pasa a salas por área
+
+`8d9a3d7`, tres archivos. **No está en producción**: producción sigue mostrando
+la planta de puestos sueltos de `a60cb85`.
+
+El agrupamiento por color de piso **no se leía**: en una rejilla diagonal, dos
+vecinos de la misma área se ven igual que dos de áreas distintas. Ahora cada área
+es una sala con paredes, puerta y cuadros, con los puestos de sus agentes dentro,
+y la puerta de entrada del tenant queda sola como principal.
+
+**Lo que costó cada pieza** — todas salieron de mirar la pantalla, no del código:
+
+```
+el nombre del área flotaba y no decía de quién era: "FACTURACION" aparecía
+  sobre la recepción. Va pintado en el SUELO de su oficina. Para que quepa,
+  cada sala reserva una franja libre al frente -- sin ella caía bajo los
+  escritorios y se leía "RECEP|ION" partido por un monitor
+el cuerpo de letra sale del ANCHO DE SU SALA: con un número fijo (26),
+  "ATENCION AL CLIENTE" cruzaba tres oficinas
+el cartel del agente recortaba a "SOPORTE TECNICO CLIE..." TENIENDO la pared
+  medio vacía al lado. La cuenta: zona útil 56, cuerpo 56/(23*0,72) = 3,4, por
+  debajo del mínimo. A 1,24 L la zona útil es 88 y entra a cuerpo 5,3. El sitio
+  lo dio mover la PUERTA a la pared izquierda
+paredes a 46 y no más: a 62 la pared de la oficina de delante se come a la de
+  atrás y "FACTURACION" quedaba en "ATURACION"
+el color de área se reparte por POSICIÓN, no por hash del nombre: por hash,
+  administración, ventas y atención al cliente salían del mismo gris azulado,
+  y entonces el color deja de agrupar, que es para lo único que está
+```
+
+**Un archivo se perdió durante el trabajo y hubo que reescribirlo.** Una expresión
+regular se comió 370 líneas de `planta.js`, que estaba sin commitear y sin copia.
+Se restauró desde la versión commiteada y se reescribió `rejillaDeSalas` a mano.
+Dos consecuencias reales, no cosméticas: `rejillaPorGrupos` desapareció (no la
+importaba nadie, pero se fue por esto y no por decisión), y `colorDeArea` se
+reescribió — de ahí el cambio de criterio del color. **Desde entonces se respalda
+fuera del repo antes de tocar un archivo sin commitear.**
+
+```
+93 pruebas de src/lib/centro-mando          verdes
+docker exec dexter-frontend-1 pnpm check    0 errores en los 3 archivos
+                                            (39 del total, todos preexistentes)
+que ningún nombre quede recortado           LEÍDO DEL DOM, no a ojo:
+                                            cero ocurrencias de "…"
+```
+
+### SIN DESPLEGAR — propuesta de planta radial, sin enchufar — `c660474`
+
+Dos archivos nuevos (`planta-radial.js`, `PlantaRadial.svelte`). **Nadie los
+monta**: no están en ninguna ruta. Existen para mirarlos al lado de la planta en
+uso y decidir.
+
+La puerta de entrada del tenant va al centro y las áreas en anillo alrededor, que
+es la topología real del motor: todo el que escribe por un canal público entra por
+`rol_de_entrada` y de ahí se deriva. El radio se deriva de que dos salas contiguas
+no se toquen, así que el anillo se adapta solo con tres áreas o con nueve.
+
+Nacen de una imagen de referencia que trajo el usuario. **De ella se toman cuatro
+cosas, y las cuatro con dato que el payload YA traía**: la ficha pegada a la
+oficina, el número grande en la pared, el gráfico en el monitor (los 15 cubos de 2
+minutos de `serie`, que no se dibujaban en ningún sitio) y el orquestador al
+centro.
+
+**Tres no se toman, y conviene que quede escrito por qué** — es el mismo criterio
+que gobierna la animación de esta pantalla:
+
+```
+"Calidad 98%"        no existe ninguna métrica de calidad
+"Conectado" en verde no hacemos healthcheck a ningún sistema externo. Lo que
+                     sabemos es la tasa de fallo de las llamadas que HICIMOS:
+                     un sistema caído al que no llamamos hace media hora se
+                     vería "Conectado"
+cintas de tráfico    el destino de cada derivación vive en tool_calls.parametros
+                     y NO sale en el payload. Los pasillos radiales dicen POR
+                     DÓNDE se deriva --estructura, que es cierta-- y no cuánto
+```
+
+Alguien recorre un pasillo **cuando el motor contó un evento** de un agente de esa
+área. No hay figurantes: si en una ventana no pasó nada, los pasillos están
+vacíos, y que estén vacíos ES la información.
+
+**Lo que queda pendiente si esta propuesta avanza:** la franja de sistemas
+externos no está montada en ella, y animar la derivación de verdad exige que el
+motor exponga el área de destino desde `tool_calls.parametros`.
+
+### DESPLEGADO el 24/09/2026 21:2x Bogotá — la planta de oficina
+
+`8d1fbf4 .. 0925a7e`. Un solo commit, siete archivos, 1.273 líneas, todas
+altas. Medido **por contenido y no por hash** (`git patch-id --stable`):
+`d62a4df6be5f` a los dos lados.
+
+El centro de mando gana una **segunda vista**: una planta isométrica donde
+cada agente es un puesto de trabajo. El anillo de discos sigue siendo el de
+por omisión y no se tocó — está medido en producción desde esta mañana, y
+estrenar la planta como única vista sería cambiar algo que funciona por algo
+que nadie miró todavía en la operación real.
+
+**Lo que la planta muestra y el anillo no:** la estructura del tenant, que ya
+viajaba en el panorama y no se pintaba en ningún lado — quién atiende al
+cliente, quién trabaja para adentro, y por dónde entran las conversaciones.
+Para lo último el motor ahora expone `rol_de_entrada`, que vivía en
+`config/schema.py:2897` y no salía. **Si un tenant no lo declara, la pantalla
+lo dice** en vez de deducirlo: tomar «el primer rol orientado al cliente» es
+el error que el 07/09 dejó a un suscriptor sin internet hablando con ventas.
+
+**Por qué se anima tan poco.** Los datos llegan por sondeo cada 12 s
+(`lib/centro-mando/eventos.js`), así que no hay tiempo real que animar: lo
+único honesto es la diferencia entre dos fotos. El color de estado vira en vez
+de saltar, la carga cuenta de un número al otro, y un puesto que ENTRA en
+alarma destella una vez — seguir en alarma no dispara nada, o el aviso se
+repetiría cada 12 s hasta dejar de avisar. Un sello dice hace cuántos segundos
+se leyó. Cero movimiento perpetuo: en un tablero, lo que se mueve siempre deja
+de significar.
+
+```
+planta.test.js + PlantaOficina.test.js   43 verdes. Render REAL con
+                                         svelte/server: no que el componente
+                                         exista, sino que dibuje
+motor local, reiniciado                  rol_de_entrada: 'cliente_final'
+suite del frontend                       979 pasan (936 antes + 43 nuevas).
+                                         63 rojos en los MISMOS 17 archivos
+                                         de siempre: cero regresiones
+docker exec pnpm check                   45 -> 40 errores; 0 de los archivos
+                                         nuevos
+test_nucleo_sin_tenants                  verde
+test_registro_sin_pii                    verde (lo pidió el pre-commit)
+test_timeouts_modelo · test_editor_config verde
+```
+
+**Dos defectos los encontraron las guardas, no mirar la pantalla.** Vale
+anotarlos porque son el argumento entero a favor de correrlas:
+
+```
+{@const} suelto en el marcado NO COMPILA en Svelte. El componente no se
+  habria renderizado nunca, y `pnpm check` lo caza; abrir la pantalla, no.
+el nombre del area se recortaba TENIENDO SITIO: cuerpoQueCabe() devuelve el
+  cuerpo exacto para que entre, y rehacer esa division en recortar() daba
+  14,999 en vez de 15. Lo caza la prueba de render, no la vista.
+```
+
+### AJUSTADA el 24/09 22:0x tras VERLA en producción — `0925a7e .. 0c98fa5`
+
+Se abrió la pantalla y salieron dos defectos que ninguna guarda podía cazar,
+porque las dos eran sobre lo que se VE y no sobre lo que el código afirma.
+Vale escribirlo así: el bloque de arriba dice que las guardas encontraron dos
+defectos que mirar no habría encontrado; este dice lo contrario, y los dos son
+ciertos. **Ninguna de las dos formas de verificar sustituye a la otra.**
+
+```
+la planta usaba el 57% DEL ANCHO, con el lado derecho vacio y los nombres
+  diminutos. No era el margen ni el reparto de columnas: un rombo isometrico
+  tiene SIEMPRE la relacion de su elevacion --1.48:1 a 34 grados-- y un
+  monitor ancho ronda 2:1. Ningun reparto lo arregla, porque el bounding box
+  depende de (cols-1)+(filas-1) y 4x2 mide lo mismo que 3x3.
+  -> la elevacion tambien se deriva del lienzo ahora. Medido sobre 1240x600
+     con 8 agentes:   fija a 34  escala 1.18 -> 57% del ancho
+                      derivada   escala 1.42 -> 74%  (elige 26 grados)
+     El piso son 26 aunque 22 diera 86%: mas plano, los puestos se ven desde
+     arriba y deja de leerse como una oficina.
+
+la leyenda del ANILLO se mostraba en la planta, describiendo un dibujo que no
+  estaba: "el grosor es la carga que pasa por esa via" y "punteada: sin
+  trafico ahora" sobre una pantalla sin una sola via.
+  -> solo sale con el anillo. La planta ya traia la suya: las zonas.
+```
+
+Verificado: 46 verdes en las pruebas de la planta (3 nuevas), 982 en la suite
+(979 + 3), 63 rojos en los MISMOS 17 archivos, `pnpm check` 40 errores en 29
+archivos y ninguno de los tocados.
+
+⚠️ **LO QUE NO SE VERIFICÓ EN EL PRIMER DEPLOY, y se cerró en el segundo:** el
+texto de abajo quedó obsoleto en una hora — la pantalla SÍ se vio, y de ahí
+salieron los dos defectos de este bloque. Se conserva porque describe un
+bloqueo que sigue vigente para la próxima pantalla que se construya.
+
+⚠️ **LO QUE NO SE VERIFICÓ, y hay que cerrarlo mirando:** ningún píxel de esta
+vista se vio renderizado en un navegador. El dev server redirige a `/login` y
+entrar exige un JWT del backend — el mismo bloqueo que este archivo ya
+registra como *QA visual 🔴 NO EJECUTABLE*. Se sustituyó por pruebas que
+afirman sobre el HTML producido, que es más que compilar y menos que mirarlo.
+Queda pendiente: abrir `/centro-mando` en producción y pulsar **Planta**.
+
+**Saltado, diciéndolo:** los casos dorados (`cli/evaluar.py`) no corrieron —
+este cambio no toca prompt, catálogo ni modelo. Tampoco pasó por
+`auditor-independiente` ni `revisor-de-pii` como agentes; se corrió la guarda
+de PII a mano en su lugar.
 
 ### DESPLEGADO el 24/09/2026 17:0x Bogotá — y verificado en la pantalla
 
@@ -116,7 +430,12 @@ proxies era síncrono llamando a `cfg()`, así que los dos cambiaron de firma.
 Por eso se hizo a mano archivo por archivo: una sustitución por regex ya
 rompió ocho archivos antes, exactamente por esto.
 
-**Esta versión NO está desplegada.** Producción sigue en `1a83886`.
+~~**Esta versión NO está desplegada.** Producción sigue en `1a83886`.~~
+**Corregido el 24/09 21:30: SÍ está desplegada.** Producción pasó por
+`1a83886 → 8d1fbf4 → 0925a7e` esa misma tarde. La frase tachada se quedó
+vieja en cuestión de horas, que es exactamente el riesgo que este archivo
+tiene por construcción — se deja tachada, y no borrada, porque la siguiente
+sesión merece ver que se midió mal y cuándo.
 
 ⚠️ Ruido esperado y ya explicado, para que la próxima sesión no lo investigue
 de nuevo: al reiniciar el frontend aparecen `Token refresh failed ... 401` en
@@ -162,17 +481,182 @@ Los tres se comprobaron **en los dos sentidos**: con la imagen y la historia
 presentes siguen verdes; sin ellas saltan nombrando lo que falta. Una guarda
 que solo se ve pasar no prueba que detecte nada.
 
-**Estado del CI, igual en las dos ramas y en local:**
+**CI EN VERDE, en las dos ramas.** `92 en verde · 0 en rojo · 54 sin correr`
+(local: 94 y 0 — la diferencia son dos que en el runner no se pueden medir).
+
+Los 2 rojos que quedaban tampoco eran bugs del producto: eran pruebas
+atrasadas respecto de mejoras reales.
 
 ```
-90 en verde · 2 en rojo · 54 sin correr
-  test_asignacion_escritores.py    lista de transiciones vieja   (18/09)
-  test_guarda_alineacion_git.py    le falta RAMA_DESPLIEGUE      (22/09)
+test_asignacion_escritores   exigia que 'resolver' escribiera la asignacion.
+                             Existe, pero desde 4251dfd es un envoltorio de
+                             una linea sobre cerrar(): ya no escribe. Exigirlo
+                             era exigir lo contrario de lo que la prueba
+                             defiende. Y marcaba un print de revision_g8 como
+                             escritura: falso positivo anotado ANCLADO AL
+                             TEXTO de la linea, no perdonado por ruta.
+
+test_guarda_alineacion_git   los 17 casos fallaban por UNA causa: la guarda
+                             gano una tercera condicion (avisar si falta
+                             RAMA_DESPLIEGUE) despues de que la prueba se
+                             escribiera con dos. Hasta "0 adelante y 0 atras
+                             -> sin problemas" salia rojo.
+                             Se aislo la logica Y se escribio el escenario que
+                             faltaba: arreglar los 17 sin cubrir esa condicion
+                             habria cambiado 17 falsos rojos por un verde que
+                             tampoco significaba nada.
+                             Siete casos mas exigian frases literales que
+                             habian cambiado; ahora afirman sobre el DATO
+                             --cuantos commits--, que es la regla de §6 que
+                             estaban incumpliendo.
 ```
 
-Los 2 rojos son deuda real y preexistente —el resto de D1—, no ruido. El CI
-dice la verdad; lo que falta es arreglarlos. Las 54 que no corren siguen
-pidiendo Postgres: falta un servicio de base en el workflow, tambien D1.
+**El patron del dia: cinco defectos encontrados, los cinco del andamiaje y
+ninguno del producto.** Tres eran «no se pudo medir» presentado como «fallo»;
+dos eran pruebas afirmando sobre la redaccion o sobre expectativas vencidas.
+Es lo que saca a la luz un CI recien encendido sobre un proyecto que corria
+sus guardas a mano: primero, el estado de las guardas.
+
+**Lo que sigue abierto de D1:** las 54 que piden Postgres no corren en CI.
+Falta un servicio de base en el workflow.
+
+### 25/09/2026 — el CI gana una tercera categoría: ROJO DECLARADO
+
+```
+MEDIDO el 25/09/2026 15:30 Bogotá, local, `--sin-base --sin-red`, 127s:
+   92 en verde · 2 en rojo · 1 en ROJO DECLARADO · 54 sin correr · exit 1
+```
+
+⚠️ **Los 2 en rojo NO son el declarado y no son de este trabajo.** Esta sección
+decía «CI EN VERDE, 0 en rojo» y con esta medición deja de ser cierto:
+
+```
+test_centro_mando.py         TypeError: '>' not supported between instances of
+                             'NoneType' and 'int'
+test_m06e_consolidacion.py   FaltaIdentidadEnSesion: 'ping_cliente' necesita
+                             ['id_servicio'] de la sesion verificada
+```
+
+### `test_centro_mando.py` — ROJO REAL, y el Centro de Mando está desplegado
+
+⚠️ La primera versión de este bloque dijo que era *probablemente «no se pudo
+medir» presentado como fallo, por estar mal clasificada*. **Esa hipótesis se
+midió y es falsa**, y se corrige acá en vez de borrarse porque el error de
+razonamiento vale más que la conclusión: la prueba **no toca la base** — define
+sus `totales` a mano (línea 113) y golpea el endpoint con el cliente de test. Que
+esté mal clasificada es cierto como hecho y **no** es la causa de su rojo.
+
+Lo que de verdad falla, corrido a mano:
+
+```
+[FALLA] el agente con error nombra la herramienta que fallo
+[FALLA] el que procesa nombra la herramienta en curso
+[FALLA] el disponible lo dice sin inventar actividad
+[FALLA] 'agentes con trabajo' cuenta los mismos que muestran las tarjetas
+        la franja dice None y hay 0: []
+TypeError: '>' not supported between 'NoneType' and 'int'   (linea 214)
+```
+
+`totales.get("agentes_activos")` llega **`None`**: el endpoint dejó de devolver
+ese campo. Y el comentario de la propia prueba dice que ese contador ya se rompió
+una vez, por lo mismo:
+
+> *"Nace de un error real: al renombrar los estados, este conteo se quedo
+> buscando 'procesando' y 'atendiendo'. Nadie lo vio hasta abrir la pantalla en
+> produccion y leer '0 agentes con trabajo' sobre tres tarjetas activas."*
+
+**El Centro de Mando está en producción, y el código que falla es EL MISMO que
+está afuera.** Medido contra la rama de despliegue:
+
+```
+tests/test_centro_mando.py     0 líneas de diff
+nucleo/canales/api.py          0 líneas de diff
+```
+
+No es una regresión de esta rama ni de nadie que trabajara hoy: es un defecto que
+ya estaba cuando esta sección declaró «CI EN VERDE, 0 en rojo». **Hay que mirarlo
+con la pantalla delante**, porque el síntoma que la prueba nació para cazar es
+justamente el que no se ve solo: un cero falso no obliga a investigar como lo
+haría un «no disponible».
+
+Lo que la prueba dice y **no** se terminó de diagnosticar: la respuesta llega sin
+`agentes` ni `totales` —de ahí el `None`—, o sea que la petición falla antes de
+armarlos. El endpoint SÍ calcula `agentes_activos` (`api.py:3666`), así que el
+problema está aguas arriba, en la resolución del pedido. Queda ahí a propósito:
+seguir era abrir otro frente, y este trabajo era otra cosa.
+
+`test_m06e_consolidacion.py` queda sin diagnosticar: no importa `db` y su
+`FaltaIdentidadEnSesion` no se investigó.
+
+**Y aparte, `clasificar()` sí tiene un defecto propio**, aunque no explique estos
+rojos: decide leyendo el texto del archivo, así que una prueba que llega a la
+base por un import (`test_centro_mando.py` importa `nucleo.persistencia.db`) se
+clasifica como aislada. Mirar los imports, no solo el texto.
+
+Ninguno de los dos se arregló acá: son de otra familia, y confundirlos con el
+rojo declarado es lo que esta sección existe para evitar.
+
+El exit 1 de la corrida viene de esos dos, **no** del rojo declarado: el
+declarado da exit 0 por sí solo, medido.
+
+Commit `29ddcf4`. `cli/correr_pruebas.py` distinguía **FALLO** de **NO SE PUDO
+CORRER**; sin esta tercera, una guarda que caza un defecto **abierto** entraba al
+resumen como rojo puro, indistinguible de una prueba que alguien olvidó
+actualizar — y un CI donde no se sabe cuál rojo es el conocido deja de ser una
+señal: la sesión siguiente aprende a ignorarlo entero.
+
+La regla de entrada es estrecha a propósito, para que no se vuelva un cajón:
+**solo entra un rojo que señala un defecto real con su ficha.** Una prueba
+atrasada respecto del código no entra — esa se arregla. Comprobada en las tres
+direcciones, y la tercera es la que importa: cuando un rojo declarado **pasa**, el
+corredor avisa que hay que sacarlo de la lista. Sin eso, la anotación envejece —
+que es exactamente el defecto que la prueba de abajo persigue, un nivel arriba.
+
+**El rojo declarado de hoy:** `tests/test_system_identidad_no_queda_obsoleto.py`.
+
+Los cuatro mensajes `system` que el motor arma dentro de `if not historial`
+(`nucleo/modelo/motor.py:3144`) se escriben **una vez, en el primer turno**, y
+nada los invalida cuando el estado que describen cambia. Medido: una conversación
+que arranca sin verificar y se verifica después arrastra para siempre *"Este
+cliente TODAVIA NO esta verificado: no sabes quien es, no tienes su cuenta
+ubicada y no conoces su servicio"* — con `sesion.verificado` ya en `True`. Dos
+conversaciones que desde afuera están las dos verificadas reciben instrucciones
+**opuestas**. Corre sin base y sin red.
+
+**Un `system` no es memoria: es una instrucción vigente.** Si afirma un estado
+que puede cambiar, en algún momento miente, y el modelo no tiene con qué saber
+cuál de los dos mundos es el de hoy.
+
+Lo que está **medido** y lo que está **reportado**, que no es lo mismo:
+
+```
+MEDIDO acá    la contradicción existe (exit 1, sin base ni red)
+              el patrón de invalidación YA existe en el código: api.py:1754
+              hace `pop` de INSTRUCCION_REENCAUZAR, y el comentario de al lado
+              describe el defecto general sin saberlo
+              inventario de los 14 puntos que inyectan un system, congelado en
+              la prueba: uno nuevo la hace fallar y obliga a declarar si
+              envejece
+REPORTADO     que este tipo de señal degrade el RUTEO. Viene de otra sesión de
+              la investigación y NO se midió acá. La contradicción de estado y
+              la degradación del router son dos fenómenos distintos
+```
+
+**Falta una sola medición para la ficha:** A/B/C contra el modelo con N≥5
+(`C:\tmp\abc_router_con_modelo.py`), sobre la traza y no la redacción. Hoy está
+probado que la contradicción **existe**; falta **cuánto mueve la decisión**.
+`B 3/5` sería efecto con muestra corta, no refutación.
+
+El diseño ya acordado y su restricción económica están en
+[briefs/restriccion-estado-vs-prefijo-cacheado.md](briefs/restriccion-estado-vs-prefijo-cacheado.md)
+(`493444e`, `ef26b32`, `cac3bdc`): instrucciones estables arriba y cacheables,
+estado operativo abajo y recalculado. **Regenerar el `system` en cada turno
+invalida el caché de prefijo**, y eso cuesta entre 4 y 8 veces la factura —
+ninguna guarda del proyecto mira el costo, así que ese cambio pasaría el CI
+entero en verde. Ese brief lleva también las **cuatro regresiones de producción**
+que el bloque de identidad evita (R1–R4, agosto y septiembre 2026), como
+criterios que la ficha hereda: el objetivo **no** es «eliminar los mensajes
+system de identidad» sino que dejen de afirmar un estado vencido.
 
 ### Qué hay en producción, con fecha
 
@@ -257,6 +741,211 @@ py -3.13 tests/test_escalada_forzada.py     -> exit 0
 
 ## TRABAJO ACTIVO
 
+### Abierto el 25/09/2026 — custodia de materiales, y su prerrequisito
+
+Dos fichas nuevas. El diseño está cerrado, y la primera **ya está construida**.
+
+```
+Custodia de materiales   🟢 CONSTRUIDA Y VISTA EN LA PANTALLA (28/09/2026).
+                            Rama feat/inventario-custodia, worktree
+                            C:/tmp/dexter-inventario. SIN PUSHEAR.
+                            8851b5e  la bodega existe
+                            4f70241  la API: despachar, recibir, historia
+                            79ee0c8  la pantalla /inventario
+                            fe64c8c  la entrada del menú y A4 en Postgres
+                            56fff80  la diferencia al recibir se nombra, y la
+                                     existencia queda defendida por su guarda
+                            Ficha: objetivos/custodia-de-materiales.md
+                            Brief del diseño (v3): briefs/inventario-de-bodega.md
+                            Lo que la motivó, medido: el módulo de materiales de
+                            Campo tenía 8 entidades y 5 endpoints y NO tenía
+                            bodega -- 0 entidades de existencia, 0 endpoints para
+                            crear una EntregaDeKit, 0 pantallas, 0 rol de
+                            bodeguero. Nadie podía despachar material.
+                            Ahora el ciclo cierra: entrada → bodega → técnico →
+                            devolución → bodega, con UN libro de movimientos que
+                            lleva origen y destino. La existencia de cualquier
+                            ubicación sale de la misma resta, así que el saldo de
+                            un técnico es un caso particular y no otro cálculo.
+                            EL BLOQUEO SE QUITÓ SIN TOCAR LA RAMA DE CAMPO: el
+                            worktree salió de producción al día y se trajo sólo el
+                            módulo `campo/`. La otra sesión siguió con su rama
+                            intacta. Ver la ficha de integración, abajo.
+
+                            LO QUE ENCONTRÓ AL CONSTRUIRSE, y ninguna prueba
+                            había cazado -- todos medidos, todos arreglados:
+                              el constraint de ItemDeKit hacía IMPOSIBLE
+                                re-despachar una serie devuelta. Estaba anotado
+                                como "inferido de leer el esquema"; ahora está
+                                EJECUTADO: IntegrityError reproducido por la
+                                prueba A3
+                              la clave idempotente no cabía en su varchar(128)
+                                --cuatro UUID, ~134 caracteres-- y las pruebas
+                                pasaban porque corren sobre SQLite, que no impone
+                                la longitud. PostgreSQL real: DataError
+                              A4 se comprobaba SECUENCIALMENTE, y depende de un
+                                select_for_update que SQLite no implementa: la
+                                suite podía estar verde con la carrera abierta
+                              tres defectos del frontend que sólo se vieron
+                                ABRIENDO la pantalla: endpoints con /api doble
+                                (404), `locals` en vez de `{cookies}` (token
+                                vacío, toda lectura fallaba en silencio), y el
+                                nombre de una custodia saliendo como UUID
+                            Dos veces el mismo patrón: EL MOTOR DE LA PRUEBA NO ES
+                            EL MOTOR DE PRODUCCIÓN. Por eso hay una prueba que
+                            afirma sobre el LÍMITE del campo y no sobre el motor,
+                            y otra que se SALTA nombrando el motivo cuando no hay
+                            Postgres.
+
+                            Verificado:
+                              34 pasan contra PostgreSQL real (ciclo 17 + api 12
+                                 + una-sola-verdad 4 + concurrencia 1), con
+                                 TEST_DATABASE_URL
+                              273 pasan · 6 skipped · 0 fallan, campo/tests/
+                                 entero sobre SQLite
+                              la pantalla, MIRADA con JWT contra el backend local:
+                                 Bodega Central   960 conectores · 6 ONT ·
+                                                  3700.75 m de fibra
+                                 Custodia de Marcador   40 · 0 · 300.25
+                                 Camioneta 1      sin movimientos
+                                 la ONT devuelta volvió a la bodega, y la consulta
+                                 de su serie da cuadra_con_el_libro: true
+                              la entrada en el menú: Instalaciones · INVENTARIO ·
+                                 Base de conocimiento
+
+                            FASE 2 Y 3, construidas el 28/09 (`c3fdc10`,
+                            `b8f264e`). La 3 por decisión explícita del
+                            usuario, que levantó la restricción del brief --
+                            «el modo de fallar de este trabajo es volverse un
+                            ERP»--; la advertencia queda en el módulo.
+                              Fase 2  reservas con plazo que se vence solo ·
+                                      traslados entre ubicaciones · conteo
+                                      físico que produce AJUSTES y no
+                                      reescribe el saldo · tres reportes
+                              Fase 3  proveedores · compras con costo ·
+                                      valorización por promedio PONDERADO,
+                                      declarado porque FIFO/LIFO/promedio dan
+                                      números distintos sobre los mismos datos
+                            Ninguna de las cuentas nuevas es una columna:
+                            reservado, libre y valorización salen de sumas.
+                            Y el total de la valorización DICE lo que no
+                            incluye: se vio en vivo pasar de 0.00 con «3
+                            material(es) sin costo conocido» a 1752000.00 con
+                            el aviso en 2, al registrar una compra con costo.
+                            LA GUARDA DE F2 CAZÓ A SU AUTOR dos horas después
+                            de escribirse: el servicio nuevo sumaba cantidades
+                            sin estar declarado. Se agregó a la lista CON SU
+                            MOTIVO, que es el procedimiento que la guarda pide.
+                              34 pasan contra PostgreSQL real
+                              318 pasan · 6 skipped · 0 fallan sobre SQLite
+                              svelte-check  0 errores en los archivos nuevos
+
+                            EL LAZO CON WISPHUB, CONSTRUIDO el 28/09 y
+                            APAGADO a propósito (`b487a84`).
+                            No hizo falta tocar `nucleo/`: el camino ya existía
+                            --`POST /interno/herramienta/<nombre>`, con token de
+                            servicio, `invocable_por_servicio` declarado una por
+                            una, sin sesión, con Idempotency-Key y el interruptor
+                            de autonomía devolviendo 409--. Así que la herramienta
+                            es CONFIGURACIÓN del tenant y el productor vive en el
+                            CRM (`campo/services/lazo_isp.py`).
+                            VERIFICADO contra la API real, solo lectura: OPTIONS
+                            sobre `/api/clientes/<id>/` declara UN método, PUT (no
+                            PATCH), y `sn_onu` como escribible. Anotado en la
+                            skill con su fecha.
+                            ⚠️ APAGADO hasta medir UNA cosa, y es grave: un PUT
+                            normalmente espera el recurso COMPLETO, así que mandar
+                            solo `sn_onu` podría VACIAR los demás campos del
+                            cliente. Y OPTIONS ya mintió en esta API. Se cierra
+                            con un PUT real contra un cliente de PRUEBA
+                            comprobando por GET que lo demás sigue ahí. Hasta
+                            entonces `CAMPO_AVISAR_SN_ONU_AL_ISP != '1'` y no sale
+                            a la red -- con su prueba, que no lo supone.
+
+                            ⚠️ DIFERENCIA DELIBERADA REPO ↔ BASE. La herramienta
+                            está en `tenants/rapilink.config.yaml` y **NO** en
+                            `tenant_config`. `cli/diferencias_config.py` la va a
+                            reportar como «el repo lo declara y la base no», que es
+                            la dirección que §6 marca como la que rompe -- acá es
+                            a propósito: cargarla activaría un efecto externo
+                            cuyo riesgo no se midió. **No cargarla por inercia.**
+                            Y el catálogo que ve cada modelo NO cambia: medido,
+                            ningún rol la tiene en `puede_consultar`, así que
+                            `evaluar.py` no la ejercita. Por eso ese paso se
+                            saltea, dicho.
+
+                            LO ÚNICO DE FASE 2 QUE NO SE CONSTRUYÓ: el lazo con
+                            WispHub --escribir `sn_onu` del equipo instalado--.
+                            Motivo: toca `nucleo/`, que es el motor DESPLEGADO,
+                            y pasa por la frontera de autorización de 8 pasos;
+                            y exige `verificador-de-api` contra WispHub real,
+                            que necesita credenciales de producción. Lo medido
+                            que lo justifica sigue en pie: `sn_onu` está vacío
+                            en 1.299 de 4.163 clientes activos, y es la llave
+                            contra SmartOLT. La cola donde va ya existe
+                            (`asistente.operaciones_externas`, reconciliador
+                            cerrado en código y APAGADO), y hace falta ampliar
+                            su `check` de tipos: hoy admite cuatro y ninguno es
+                            éste. `actualizar_sn_onu` sería el primer efecto
+                            externo de WispHub naturalmente idempotente --pone
+                            un valor, no crea nada-- y eso cambia su
+                            clasificación en el gate Q2.
+
+                            LO QUE FALTA, dicho: la pasada adversarial (F14 --
+                            los 9 agentes siguen sin cargarse), `flutter test`
+                            en este worktree (la app consume los 5 endpoints
+                            viejos y ninguno cambió de contrato, pero eso está
+                            INFERIDO), y el `revisor-de-pii` sobre qué se dibuja
+                            junto a un movimiento que trae `orden`: una orden
+                            arrastra nombre y dirección del cliente.
+
+                            LO QUE NO SE HIZO, dicho: Fase 2 (varias bodegas con
+                            traslados, conteo físico, reservas, reportes) y Fase 3
+                            (proveedores, compras, costos). Y el lazo con WispHub
+                            --escribir `sn_onu` del equipo instalado-- sigue en
+                            Fase 2: es una escritura a un sistema externo y pasa
+                            por la frontera de autorización del motor.
+
+Integración de Campo     🔴 SIGUE ABIERTA, y ya no bloquea al inventario.
+                            Ficha: objetivos/integracion-campo.md
+                            El 28/09 se resolvió de otra forma: en vez de esperar
+                            la rama, el inventario se construyó en un worktree
+                            desde PRODUCCIÓN al día, trayendo sólo `campo/`. Eso
+                            quitó el bloqueo sin tocar la rama que otra sesión
+                            edita, y de paso resolvió dos conflictos que la
+                            integración completa va a encontrar igual:
+                              las DOS migraciones 0003 de `campo`, unidas con un
+                                merge (0007). Se midió que era seguro antes de
+                                escribirlo: tocan modelos distintos
+                              las DOS migraciones 0039 de `common`. Las de campo
+                                dependían de la que NO está en producción; se
+                                apuntaron a 0038, que existe en las dos ramas, y
+                                la dependencia real son Org y Profile, que están
+                                desde 0001
+                            Lo que sigue siendo de esta ficha: los 190 archivos
+                            que difieren en los dos lados.
+                            feat/campo-diseno-stitch está 59 commits adelante del
+                            destino y 297 ATRÁS. 948 archivos difieren:
+                            548 faltan en Campo · 210 son solo de Campo ·
+                            190 difieren en los dos lados.
+                            El riesgo NO son los 548: son los 190, que es donde
+                            git pide decisiones. Entre ellos los CUATRO monolitos
+                            de §2, los cuatro documentos de autoridad,
+                            tenants/rapilink.config.yaml y cli/cargar_config.py
+                            --o sea la guarda que protege de esta misma rama--.
+                            Antecedente real: `452e6bb` frenó que la config de
+                            esta copia dejara al motor desplegado ejecutando
+                            acciones irreversibles sin la frontera. Ese commit
+                            declara el resto pendiente: "12 archivos en
+                            conflicto". Este objetivo es ese trabajo.
+                            NO INICIAR MERGE hasta: ficha leída · línea base de
+                            las guardas medida y pegada · los rojos clasificados.
+                            Y J1: otra sesión está editando esa rama ahora
+                            (12 archivos sin commitear, 3 en el camino).
+```
+
+---
+
 **Tres frentes avanzaron el 24/09**, cada uno en su propio árbol. Ninguno está
 bajo los pies de los otros.
 
@@ -311,11 +1000,21 @@ M  (3 registrants generados de macos/ y windows/)
 M  SPEC/CONTRATO_RELEVO_IA_HUMANO.md   arrastre ajeno sobre G9, sin destino propio
 ```
 
-**En este árbol** (`integrar-centro-mando`): 43 archivos, **todos sin seguimiento**,
-ninguno modificado ni en stage. 21 `.playwright-mcp/*.yml` y 7 PNG en la raíz
-(`disco-*`, `radial-*`, `proto-radial`) son artefactos de sesión — justo lo que
-el `pre-commit` bloquea; 10 en `documentos/command-center/` (avatares y
-prototipo radial); 5 en `apps/tecnicos-mobile/`, las copias de B2.
+**En este árbol** (`integrar-centro-mando`) — **remedido el 25/09 13:57**: el
+trabajo del centro de mando **ya está commiteado** (`8d9a3d7`, `c660474`); lo que
+queda no es suyo ni va al repositorio:
+
+```
+M  cli/revision_g8.py                 arrastre ajeno, sin destino propio
+?? apps/tecnicos-mobile/{docs,test}   copias de B2, 5 archivos
+?? django-crm/frontend/banco-tmp/     banco local de la sesión: NO se versiona
+?? documentos/command-center/*.png    ~30 capturas de trabajo, artefacto de sesión
+?? documentos/command-center/*.html   los dos prototipos sueltos
+?? documentos/command-center/avatares/  8 webp
+```
+
+El banco (`banco-tmp/`) monta las dos plantas con un conmutador y es la forma de
+compararlas; se levanta con vite y no depende de nada del repositorio.
 
 ⚠️ **Stage por rutas explícitas siempre, también para documentación**:
 prohibidos `git add .`, `git add -A`, `commit -a` y **`git add SPEC/`**. El

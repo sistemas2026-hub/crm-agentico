@@ -90,6 +90,29 @@ def tope_de(archivo: Path, por_defecto: int) -> int:
     return max(por_defecto, min(int(m.group(1)), _TOPE_MAXIMO))
 
 
+#: EN ROJO A PROPOSITO: la prueba esta bien y el producto todavia no.
+#:
+#: La tercera categoria que faltaba. El contrato del proyecto ya distinguia
+#: FALLO de NO SE PUDO CORRER; sin esta, una guarda que caza un defecto ABIERTO
+#: entra al resumen como rojo puro, indistinguible de una prueba que alguien
+#: olvido actualizar. Y un CI donde no se sabe cual rojo es el conocido deja de
+#: ser una senal: la sesion siguiente aprende a ignorarlo entero.
+#:
+#: La regla para entrar aca es estrecha, y es la que evita que esto se vuelva
+#: un cajon: el rojo tiene que senalar un defecto REAL, con su ficha abierta.
+#: No se anota una prueba atrasada respecto del codigo -- esa se arregla.
+#:
+#: Cada entrada se borra cuando el defecto se cierra. Si la prueba pasa a verde
+#: y sigue anotada aca, el resumen lo dice: una lista que no se poda miente en
+#: la otra direccion.
+_FALLO_ESPERADO = {
+    "test_system_identidad_no_queda_obsoleto.py":
+        "defecto abierto: los system del turno 1 no se invalidan cuando el "
+        "estado cambia. Medido el 25/09/2026. Ver SPEC/objetivos/ (ficha de "
+        "ciclo de vida de estado en el contexto)",
+}
+
+
 def clasificar(archivo: Path) -> str:
     """base | red | aislada. Se decide leyendo, no ejecutando."""
     texto = archivo.read_text(encoding="utf-8", errors="replace")
@@ -287,22 +310,38 @@ def main() -> int:
           f"{f', saltando {len(saltadas)}' if saltadas else ''}\n")
 
     fallaron: list[tuple[str, str]] = []
+    #: Rojos que ya estaban declarados, y verdes que ya no deberian estarlo.
+    esperados: list[tuple[str, str]] = []
+    curados: list[str] = []
     arranque = time.monotonic()
     for i, archivo in enumerate(a_correr, 1):
+        # Las dos cosas, que no se estorban: el tope sale de lo que la prueba
+        # declara para si, y `declarado` dice si su rojo ya es conocido.
         ok, motivo, tardo = correr(archivo, tope_de(archivo, args.timeout))
+        declarado = _FALLO_ESPERADO.get(archivo.name)
         marca = {True: "ok  ", False: "FALLA", None: "sin "}[ok]
+        if ok is False and declarado:
+            marca = "ROJO*"
         print(f"  [{i:3}/{len(a_correr)}] {marca} {archivo.name:52} {tardo:5.1f}s")
         if ok is None:
             saltadas.append((archivo.name, motivo))
         elif not ok:
-            print(f"            -> {motivo}")
-            fallaron.append((archivo.name, motivo))
+            if declarado:
+                esperados.append((archivo.name, declarado))
+            else:
+                print(f"            -> {motivo}")
+                fallaron.append((archivo.name, motivo))
+        elif declarado:
+            # Paso, y estaba anotada como rojo esperado: el defecto se cerro y
+            # la lista quedo vieja. Se dice, o la anotacion empieza a mentir.
+            curados.append(archivo.name)
 
     total = time.monotonic() - arranque
     print(f"\n{'=' * 78}")
-    verdes = len(a_correr) - len(fallaron) - sum(
+    verdes = len(a_correr) - len(fallaron) - len(esperados) - sum(
         1 for n, _ in saltadas if any(n == a.name for a in a_correr))
     print(f"  {verdes} en verde · {len(fallaron)} en rojo"
+          f"{f' · {len(esperados)} en rojo DECLARADO' if esperados else ''}"
           f" · {len(saltadas)} sin correr · {total:.0f}s")
 
     if saltadas:
@@ -313,6 +352,21 @@ def main() -> int:
             print(f"    {nombre:54} {motivo}")
         if len(saltadas) > 6:
             print(f"    ... y {len(saltadas) - 6} mas (--listar para verlas)")
+
+    if esperados:
+        # La prueba esta bien y el producto todavia no. Se nombra igual: un rojo
+        # declarado que no se ve deja de recordar que hay un defecto abierto.
+        print(f"\n  EN ROJO A PROPOSITO ({len(esperados)}) -- la prueba caza un "
+              "defecto ABIERTO, no esta atrasada:")
+        for nombre, motivo in esperados:
+            print(f"    {nombre}")
+            print(f"      {motivo}")
+
+    if curados:
+        print(f"\n  YA NO FALLAN, y siguen anotadas como rojo esperado "
+              f"({len(curados)}):")
+        for nombre in curados:
+            print(f"    {nombre}  -> sacarla de _FALLO_ESPERADO")
 
     if fallaron:
         print(f"\n  EN ROJO ({len(fallaron)}):")
