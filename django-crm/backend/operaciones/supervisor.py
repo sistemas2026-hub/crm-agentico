@@ -2007,10 +2007,29 @@ def _correr_ciclo(org, ahora) -> dict:
     #  equipos dejara sin razonamientos al resto de la corrida.
     #
     #  No levanta: 'enriquecer' atrapa por señal y deja escrito que no se pudo.
+    #
+    #  SOLO LAS QUE VAN A PRODUCIR UNA PROPUESTA NUEVA, y esto se aprendio
+    #  rompiendolo el 07/10/2026: la primera version enriquecia TODAS las
+    #  señales desincronizadas, y el loop de abajo recien despues descarta con
+    #  'continue' las que ya tienen una propuesta viva. Con 19 casos en
+    #  produccion y un presupuesto de 3, los tres diagnosticos se gastaban en
+    #  las primeras tres --ya propuestas, asi que el resultado se tiraba-- y
+    #  las que SI iban a generar una propuesta nueva se quedaban sin
+    #  presupuesto. El sintoma era que la propuesta no traia el diagnostico
+    #  nunca, sin ningun error.
+    #
+    #  '_ya_propuesta' se consulta dos veces por señal (aqui y en el loop). Es
+    #  una consulta barata y la corrida esta serializada por la fila de la
+    #  organizacion, asi que no puede cambiar entre las dos; cachearla seria
+    #  un mecanismo nuevo para ahorrar menos de lo que cuesta una llamada al
+    #  proveedor.
     from operaciones import diagnostico_optico
 
+    candidatas = [s for s in senales
+                  if s.tipo == PropuestaSupervisor.CASO_DESINCRONIZADO
+                  and not _ya_propuesta(org, s)]
     resumen["diagnostico_optico"] = diagnostico_optico.enriquecer(
-        org, senales, ahora=ahora)
+        org, candidatas, ahora=ahora)
 
     for senal in senales:
         resumen["senales"] += 1

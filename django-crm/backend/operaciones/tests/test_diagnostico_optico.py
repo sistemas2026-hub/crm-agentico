@@ -321,6 +321,67 @@ def test_el_ciclo_deja_el_diagnostico_ESCRITO_en_la_propuesta(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_una_senal_YA_PROPUESTA_no_gasta_presupuesto(monkeypatch):
+    """
+    El presupuesto es de tres por ciclo: no se gasta en señales cuyo resultado
+    el ciclo va a tirar.
+
+    LA CICATRIZ (07/10/2026): la primera version enriquecia todas las señales
+    desincronizadas, y el loop del ciclo recien despues descarta con 'continue'
+    las que ya tienen una propuesta viva. Con 19 casos en produccion, los tres
+    diagnosticos se gastaban en casos ya propuestos --se pagaban y se tiraban--
+    y la propuesta nueva no traia diagnostico NUNCA, sin ningun error a la
+    vista. Se descubrio mirando la pantalla, no el codigo.
+
+    Se mide CONTANDO a quien se le pregunto: con un caso ya propuesto y otro
+    sin proponer, la unica llamada tiene que ser la del segundo.
+    """
+    from datetime import timedelta as td
+
+    from cases.models import Case
+    from common.models import Org
+    from operaciones import chat_herramientas, supervisor
+
+    org = Org.objects.create(name="Org de la dedup")
+    ahora = timezone.now()
+
+    def _caso(ticket, servicio):
+        c = Case.objects.create(
+            org=org, name="Sin servicio de internet", status="New",
+            priority="Normal", external_status="Cerrado",
+            external_ticket_id=ticket, provider="wisphub",
+            external_service_id=servicio)
+        Case.objects.filter(pk=c.pk).update(
+            created_at=ahora - td(days=12),
+            external_status_at=ahora - td(days=3),
+            external_fetched_at=ahora - td(hours=1))
+        return c
+
+    _caso("111111", "6001")
+    pedidos = []
+
+    def falso(org_, *, id_servicio):
+        pedidos.append(id_servicio)
+        return SANO
+
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio", falso)
+
+    #  Primera corrida: el unico caso se propone, y se diagnostica.
+    supervisor.correr_ciclo(org)
+    assert pedidos == ["6001"]
+
+    #  Entra un caso nuevo. La segunda corrida NO puede volver a gastar en el
+    #  primero, que ya tiene propuesta viva.
+    _caso("222222", "6002")
+    pedidos.clear()
+    supervisor.correr_ciclo(org)
+
+    assert pedidos == ["6002"], (
+        "se diagnostico un caso que ya tenia propuesta: ese presupuesto se "
+        "paga y se tira")
+
+
+@pytest.mark.django_db
 def test_el_informe_cuenta_cada_veredicto():
     senales = [_senal(id_servicio="1"), _senal(id_servicio="2"),
                _senal(id_servicio="3")]
