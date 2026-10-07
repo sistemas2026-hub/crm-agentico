@@ -187,8 +187,14 @@ def main() -> int:
     print(f"    base_url_ref correcta ............ "
           f"{'SI' if antes['ref_correcta'] else 'NO'}")
 
+    #  SE COMPARA LA LISTA, NO SU EXISTENCIA. Decia 'and antes["campos"]' --que
+    #  es verdadero con CUALQUIER lista-- y por eso contesto "ya esta todo
+    #  puesto" cuando los campos de la base eran los viejos, con un
+    #  'senal_texto' que ya no existe. Es el mismo defecto que esta herramienta
+    #  ya tuvo con 'base_url_ref': comprobar que algo ESTA no comprueba que
+    #  este BIEN, y es la trampa que este proyecto documenta en §6.
     if (antes["herramienta"] and antes["ref_correcta"]
-            and antes["puede_consultar"] and antes["campos"]):
+            and antes["puede_consultar"] and antes["campos"] == CAMPOS):
         print("\n  Ya esta todo puesto. No hay nada que aplicar.\n")
         return 0
 
