@@ -5,6 +5,7 @@ import { getTags } from '$lib/server/v2/tags.js';
 import { leerAreas } from '$lib/server/v2/areas.js';
 import { resumenPorArea, responsablesSinArea, responsablesDeArea, SIN_AREA }
   from '$lib/v2/tickets-resumen.js';
+import { calcularPaginacion } from '$lib/v2/paginacion.js';
 
 /**
  * Only filters the API actually applies are forwarded. A parameter that
@@ -25,8 +26,24 @@ export async function load({ cookies, url, locals, fetch }) {
 
   const search = url.searchParams.get('search');
   if (search) params.set('search', search);
+  //  PAGINACION  --  07/10/2026
+  //
+  //  Hasta hoy la cola traia 25 filas y no habia forma de ver el resto: el pie
+  //  decia "Mostrando 25 de 47" y ahi terminaba. Con 47 abiertos en Cartera,
+  //  22 tickets eran invisibles para quien tiene que trabajarlos, y el numero
+  //  solo crece.
+  //
+  //  Se hace con enlaces y 'offset' en la URL, sin estado en el navegador: una
+  //  pagina concreta se puede compartir, recargar y volver atras, y funciona
+  //  igual si el JS no cargo.
+  const TAMANO = 25;
   const limit = url.searchParams.get('limit');
-  if (limit) params.set('limit', limit);
+  const porPagina = Math.min(Math.max(Number(limit) || TAMANO, 1), 200);
+  params.set('limit', String(porPagina));
+  //  Un 'offset' negativo o no numerico se trata como 0 en vez de rechazarse:
+  //  un enlace viejo o manoseado lleva al principio de la cola, no a un error.
+  const desde = Math.max(Number(url.searchParams.get('offset')) || 0, 0);
+  if (desde) params.set('offset', String(desde));
 
   const status = url.searchParams.get('status') ?? '';
   const showAll = url.searchParams.get('all') === '1';
@@ -202,8 +219,14 @@ export async function load({ cookies, url, locals, fetch }) {
       ? resumen.filter((/** @type {any} */ a) => a.nombre === miArea)
       : resumen;
 
+  //  Los enlaces se arman contra el total que da el SERVIDOR, no contra
+  //  cuantas filas quedaron visibles: una pagina recortada no significa que
+  //  sea la ultima.
+  const paginacion = calcularPaginacion(url, totals.count, desde, porPagina);
+
   return {
     areas: areasVisibles,
+    paginacion,
     //  false = el desglose no llego, asi que 'areas' esta vacio porque no se
     //  pudo contar, no porque no haya tickets. Son dos pantallas distintas.
     resumenDisponible: resumen !== null,
