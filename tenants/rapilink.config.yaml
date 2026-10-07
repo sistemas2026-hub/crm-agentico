@@ -5677,6 +5677,18 @@ herramientas:
       'estado: desconocido' siempre trae su 'motivo'. No lo leas como sano.
     solo_lectura: true
     roles_permitidos: [supervisor_noc, soporte]
+    # LA SEGUNDA PUERTA, y la olvide la primera vez.
+    #
+    # La ruta interna del motor exige 'invocable_por_servicio: true' y por
+    # defecto es False. Sin esto la herramienta existe, el rol la tiene
+    # autorizada, y aun asi el Supervisor recibe "no esta habilitada para
+    # invocarse desde un servicio" -- que es exactamente lo que contesto en la
+    # primera prueba real.
+    #
+    # Son DOS autorizaciones distintas y hay que tener las dos: 'roles_
+    # permitidos' dice QUIEN puede pedirla, 'invocable_por_servicio' dice que
+    # puede pedirse SIN una persona detras. El Supervisor entra por ahi.
+    invocable_por_servicio: true
     # El lado del DIAGNOSTICO. El otro lo aporta 'resolver_equipo_con'.
     # El MISMO que usan las otras de SmartOLT. Es el patron de §3.3: el
     # subdominio varia por empresa y vive en 'variables_tenant', editable
