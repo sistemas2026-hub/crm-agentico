@@ -385,3 +385,81 @@ def test_u_un_tecnico_puede_PROPONER_pero_no_publicar(
     r = user_client.post(REPARTO, {"asignaciones": [{"jornada": "x", "ordenes": []}]},
                          format="json")
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# F · el precio del plan, como desempate DESPUES del SLA
+# ---------------------------------------------------------------------------
+
+def _con_plan(org, version, numero, localidad, plan_id, precios=None):
+    o = _orden(org, version, numero, localidad)
+    o.contexto = {"cliente": {"plan_id": plan_id}}
+    o.save(update_fields=["contexto"])
+    return o
+
+
+PRECIOS = {
+    "197391": {"nombre": "PLAN ELITE", "precio": "199900.00"},
+    "100000": {"nombre": "PLAN HOGAR", "precio": "59900.00"},
+}
+
+
+def test_v_entre_dos_con_el_mismo_riesgo_pesa_el_plan_mas_caro(
+    org_a, version, norte
+):
+    _jornada(org_a, "Cuadrilla 1", [norte])
+    _con_plan(org_a, version, 10, "MARTHA GISELA", 100000)   # barato
+    _con_plan(org_a, version, 20, "MARTHA GISELA", 197391)   # caro
+
+    p = proponer(org_a, LUNES, precios_por_plan=PRECIOS,
+                 plazo_de=plazo_falso({10: 100, 20: 100}))
+    assert _de(p, "Cuadrilla 1") == [20, 10], "el caro primero"
+
+
+def test_w_pero_el_SLA_le_gana_al_precio(org_a, version, norte):
+    """Lo primero compromete la relacion; lo segundo ya se incumplio."""
+    _jornada(org_a, "Cuadrilla 1", [norte])
+    _con_plan(org_a, version, 10, "MARTHA GISELA", 100000)   # barato, vencido
+    _con_plan(org_a, version, 20, "MARTHA GISELA", 197391)   # caro, con tiempo
+
+    p = proponer(org_a, LUNES, precios_por_plan=PRECIOS,
+                 plazo_de=plazo_falso({10: -60, 20: 500}))
+    assert _de(p, "Cuadrilla 1") == [10, 20]
+
+
+def test_x_sin_precio_NO_se_supone_cero(org_a, version, norte):
+    """Un plan sin precio conocido no es el mas barato de todos."""
+    _jornada(org_a, "Cuadrilla 1", [norte])
+    _con_plan(org_a, version, 10, "MARTHA GISELA", 100000)   # barato conocido
+    _orden(org_a, version, 20, "MARTHA GISELA")              # sin plan
+
+    p = proponer(org_a, LUNES, precios_por_plan=PRECIOS,
+                 plazo_de=plazo_falso({10: 100, 20: 100}))
+    # El que tiene precio va primero; el desconocido queda despues, no al
+    # fondo por suponerlo gratis ni adelante por suponerlo caro.
+    assert _de(p, "Cuadrilla 1") == [10, 20]
+
+
+def test_y_el_precio_se_cruza_por_ID_y_no_por_nombre(org_a, version, norte):
+    """Renombrar el plan no puede romper el cruce en silencio."""
+    _jornada(org_a, "Cuadrilla 1", [norte])
+    o = _con_plan(org_a, version, 10, "MARTHA GISELA", 197391)
+    # El nombre guardado es viejo; el id sigue siendo el mismo.
+    o.contexto = {"cliente": {"plan": "PLAN ELITE 700", "plan_id": 197391}}
+    o.save(update_fields=["contexto"])
+    _con_plan(org_a, version, 20, "MARTHA GISELA", 100000)
+
+    p = proponer(org_a, LUNES, precios_por_plan=PRECIOS,
+                 plazo_de=plazo_falso({10: 100, 20: 100}))
+    assert _de(p, "Cuadrilla 1") == [10, 20], "cruza por id, no por nombre"
+
+
+def test_z_sin_tabla_de_precios_el_reparto_sigue_andando(
+    org_a, version, norte
+):
+    """El precio es un refinamiento: su ausencia no puede frenar el reparto."""
+    _jornada(org_a, "Cuadrilla 1", [norte])
+    _con_plan(org_a, version, 10, "MARTHA GISELA", 197391)
+
+    p = proponer(org_a, LUNES, plazo_de=plazo_falso({10: 100}))
+    assert _de(p, "Cuadrilla 1") == [10]

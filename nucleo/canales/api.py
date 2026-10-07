@@ -5797,11 +5797,23 @@ def _ficha_cliente(config, id_cliente, tenant: str) -> dict:
         if not isinstance(fila, dict):
             return {}
         ficha = {c: fila.get(c) for c in _CAMPOS_FICHA if fila.get(c)}
-        # El plan viene anidado ({"id":..., "nombre":...}); se guarda su
-        # nombre, que es lo unico que le dice algo a quien lee el ticket.
+        # El plan viene anidado ({"id":..., "nombre":...}): se guardan LOS DOS.
+        #
+        # El nombre es lo unico que le dice algo a quien lee el ticket, y por
+        # eso estaba solo el. El ID entra el 07/10/2026 porque el reparto
+        # necesita el PRECIO del plan, y el precio vive en
+        # /api/plan-internet/queue/{id}/ -- cruzar por nombre se rompe en
+        # silencio el dia que alguien renombre 'PLAN ELITE' a 'PLAN ELITE 700':
+        # esas ordenes dejarian de pesar en el orden sin error ni alerta.
+        #
+        # No es un dato personal ni un secreto: identifica un producto del
+        # catalogo, el mismo que la pantalla de planes de venta ya muestra.
         plan = fila.get("plan_internet")
-        if isinstance(plan, dict) and plan.get("nombre"):
-            ficha["plan"] = plan["nombre"]
+        if isinstance(plan, dict):
+            if plan.get("nombre"):
+                ficha["plan"] = plan["nombre"]
+            if plan.get("id"):
+                ficha["plan_id"] = plan["id"]
         return ficha
     except Exception as e:
         registrar("enlaces", "no se pudo leer la ficha del cliente", error=e)
