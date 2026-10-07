@@ -64,6 +64,25 @@ export default defineConfig({
     // de 'svelte/server', que devuelve HTML sin tocar el DOM. Un jsdom serviria
     // para probar clics; para afirmar QUE DIBUJA cada combinacion de props no
     // hace falta, y cuesta arranque en cada corrida.
+    //
+    // SE INTENTO, Y NO ARRANCA AQUI (07/10/2026). Se instalo jsdom 30.1.2 y se
+    // escribio un archivo con `// @vitest-environment jsdom`. El worker de
+    // vitest 4.1.10 muere con "Timeout waiting for worker to respond" a los
+    // 60 s, SIEMPRE: con pool forks, con threads, con --no-isolate, y tambien
+    // con una sonda trivial de tres lineas que no importa Svelte. O sea que no
+    // es el componente ni la prueba: es el entorno --contenedor efimero sobre
+    // un volumen de Windows, donde una corrida normal ya gasta 720 s solo en
+    // transformar--. Se revirtio la dependencia en vez de dejar una prueba que
+    // no corre: una prueba que no corre es peor que ninguna, porque enseña a
+    // ignorar el rojo.
+    //
+    // Lo que queda sin cubrir, y hay que decirlo en vez de fingir: pulsar un
+    // puesto, pasar por encima y arrastrar la camara. Por ese hueco se
+    // escaparon dos defectos reales --`setPointerCapture` robandose el click,
+    // y un `{@const}` suelto que no compilaba--. Hoy se verifica a mano con
+    // navegador contra un banco. Cerrarlo de verdad pide correr las pruebas
+    // FUERA del volumen montado, o un Playwright en CI; las dos cosas son otro
+    // trabajo, no un ajuste de esta linea.
     environment: 'node',
     include: ['src/**/*.test.js']
   },

@@ -1,9 +1,10 @@
 <script>
   /**
-   * PROPUESTA: el orquestador al centro y las areas en anillo.
+   * El orquestador al centro y las areas en anillo.
    *
-   * Vive en paralelo a PlantaOficina.svelte --que es la que esta en uso-- y
-   * no la reemplaza: esta pantalla se mira, se compara y despues se decide.
+   * Es LA planta del centro de mando desde el 07/10/2026. Nacio como
+   * propuesta en paralelo a una rejilla de salas, se compararon las dos en un
+   * banco y se descarto la otra.
    *
    * QUE TOMA DE LA REFERENCIA, Y QUE NO
    * De la ilustracion de referencia se toman cuatro cosas, y las cuatro se

@@ -26,13 +26,11 @@
    * pulsar un puesto, y la planta la usa igual.
    */
   import { untrack } from 'svelte';
-  /* LA PLANTA ES LA RADIAL. La puerta de entrada del tenant va al centro y
-     las areas cuelgan de ella en anillo, que es la topologia real del motor:
-     todo el que escribe por un canal publico entra por `rol_de_entrada` y de
-     ahi se deriva. La rejilla anterior (PlantaOficina) colocaba esa puerta en
-     una esquina, como una sala mas, y eso no se leia.
-     PlantaOficina SIGUE EN EL ARBOL y con sus 17 pruebas: es a lo que se
-     vuelve si esta no convence en la operacion real. */
+  /* LA PLANTA. La puerta de entrada del tenant va al centro y las areas
+     cuelgan de ella en anillo, que es la topologia real del motor: todo el
+     que escribe por un canal publico entra por `rol_de_entrada` y de ahi se
+     deriva. Hubo antes una rejilla que colocaba esa puerta en una esquina,
+     como una sala mas; se descarto el 07/10/2026 porque no se leia. */
   import PlantaRadial from './PlantaRadial.svelte';
   import AgentDetail from './AgentDetail.svelte';
   import MetricsPanel from './MetricsPanel.svelte';
