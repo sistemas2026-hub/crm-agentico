@@ -367,6 +367,15 @@ def _casos_cerrados_en_el_proveedor(org, ahora) -> list[Senal]:
         "id", "name", "status", "priority", "created_at",
         "external_status", "external_status_at", "external_fetched_at",
         "external_fetch_error", "external_ticket_id", "provider",
+        #  'external_service_id' VA EN EL .only() Y NO ES UN DETALLE: sin
+        #  nombrarlo aqui Django lo deja diferido y cada lectura dispara una
+        #  consulta propia. Medido en produccion el 07/10/2026: 19 casos
+        #  desincronizados, los 19 con este campo poblado, asi que serian 19
+        #  consultas extra por ciclo para un dato que entra en la misma fila.
+        #
+        #  Es la llave del diagnostico optico: el 'id_servicio' de WispHub, que
+        #  es lo unico con lo que se puede preguntar por el equipo del cliente.
+        "external_service_id",
     )
 
     salida = []
@@ -436,6 +445,15 @@ def _casos_cerrados_en_el_proveedor(org, ahora) -> list[Senal]:
                 "nombre": c.name,
                 "prioridad_caso": c.priority,
                 "clasificacion": OBSERVADO,
+                #  LA LLAVE DEL DIAGNOSTICO OPTICO, y va en 'datos' y no en la
+                #  evidencia: la evidencia es lo que una persona LEE, y el
+                #  'id_servicio' no le dice nada a quien decide. Lo necesita el
+                #  codigo, para poder preguntarle a SmartOLT por el equipo.
+                #
+                #  Cadena vacia cuando el caso no lo tiene, y eso NO se
+                #  completa ni se adivina: sin llave no hay diagnostico, y la
+                #  propuesta lo dice en vez de quedarse muda.
+                "id_servicio": (c.external_service_id or "").strip(),
             },
             #  La condicion, no su magnitud: si la huella llevara los dias, cada
             #  dia seria una condicion nueva y la deduplicacion no serviria de
@@ -1968,7 +1986,33 @@ def _correr_ciclo(org, ahora) -> dict:
 
     resumen["expiradas"] = expirar_vencidas(org, ahora)
 
-    for senal in detectar(org, ahora):
+    senales = detectar(org, ahora)
+
+    #  EL DIAGNOSTICO OPTICO DE LOS CASOS DESINCRONIZADOS
+    #  --------------------------------------------------
+    #  Le pregunta a SmartOLT por el equipo de cada cliente y deja el veredicto
+    #  ESCRITO en la señal, antes de que 'analizar' y 'registrar_propuesta' la
+    #  conviertan en una propuesta que una persona va a leer. Un diagnostico que
+    #  llegara despues no estaria en la evidencia sobre la que se decide.
+    #
+    #  AQUI Y NO DENTRO DE 'detectar': esa funcion corre dieciocho detectores y
+    #  promete no tener efectos. Con los 19 casos desincronizados medidos en
+    #  produccion el 07/10/2026, meterle las llamadas adentro le costaria ~190 s
+    #  --'get_onu_full_status_info' tarda ~10 s-- a una funcion que hoy tarda
+    #  milisegundos y que tambien la llaman el latido y los indicadores, que son
+    #  de solo lectura y no tienen por que pagar eso.
+    #
+    #  PRESUPUESTO PROPIO, no el del ciclo: ese acota llamadas al MODELO, este
+    #  acota llamadas a un PROVEEDOR. Compartirlo haria que diagnosticar tres
+    #  equipos dejara sin razonamientos al resto de la corrida.
+    #
+    #  No levanta: 'enriquecer' atrapa por señal y deja escrito que no se pudo.
+    from operaciones import diagnostico_optico
+
+    resumen["diagnostico_optico"] = diagnostico_optico.enriquecer(
+        org, senales, ahora=ahora)
+
+    for senal in senales:
         resumen["senales"] += 1
         resumen["por_tipo"][senal.tipo] = resumen["por_tipo"].get(senal.tipo, 0) + 1
         if senal.tipo == PropuestaSupervisor.DATO_INCOMPLETO:
