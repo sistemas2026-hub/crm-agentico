@@ -1672,10 +1672,27 @@ def razonar_sobre(org, senal: "Senal", analisis: dict, *, ahora=None) -> Aporte:
     from operaciones import cerebro
     try:
         contexto = cerebro.contexto_para(org)
+
+        #  LO QUE YA PASO CON ESTA MISMA CONDICION.
+        #
+        #  Sin esto el cerebro razona sobre una señal AISLADA y cada ciclo
+        #  empieza de cero: reacciona, que es lo que hace un motor. Con esto
+        #  retoma un hilo --"ya propuse esto, lo aceptaron, no funciono"--, que
+        #  es lo que hace un agente. La llave es 'huella_condicion', que ya
+        #  existia para deduplicar; lo que faltaba era leerla.
+        #
+        #  Vacio cuando es la primera vez, y el vacio tambien dice algo:
+        #  condicion nueva no es condicion sana.
+        #  getattr y no 'senal.huella': el except de abajo es amplio, asi que
+        #  un atributo ausente desactivaria el cerebro EN SILENCIO. Una Senal
+        #  real siempre la trae; esto cubre a cualquier otra cosa que llegue.
+        antes = cerebro.antecedentes_de(org, getattr(senal, "huella", ""))
+        bloque_antes = f"\n\n== ANTECEDENTES ==\n{antes}" if antes else ""
+
         veredicto = cerebro.concluir(
             org,
             instrucciones=_instrucciones_del_ciclo(org),
-            entrada=(f"{contexto}\n\n== LA SEÑAL DETECTADA ==\n"
+            entrada=(f"{contexto}{bloque_antes}\n\n== LA SEÑAL DETECTADA ==\n"
                      f"tipo: {senal.tipo}\n"
                      f"evidencia: {json.dumps(senal.evidencia, ensure_ascii=False, default=str)[:1500]}\n"
                      f"lo que la regla concluyo: {analisis.get('motivo', '')}"))

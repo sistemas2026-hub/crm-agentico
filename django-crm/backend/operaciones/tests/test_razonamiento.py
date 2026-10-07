@@ -82,8 +82,11 @@ ANALISIS = {
 
 
 class _SenalFalsa:
+    """Un doble con los mismos atributos que 'supervisor.Senal' usa de verdad."""
+
     tipo = PropuestaSupervisor.CASO_ANTIGUO
     evidencia = {"pon": "4/14", "casos": 4}
+    huella = ""
 
 
 def _propuesta(org):
@@ -466,3 +469,110 @@ def test_10_el_ciclo_completo_deja_constancia_por_propuesta(org_a, monkeypatch):
     assert filas == propuestas, (
         f"{propuestas} propuesta(s) y {filas} razonamiento(s): el ciclo no "
         f"esta dejando constancia por cada una")
+
+
+# =============================================================================
+#  11 · ANTECEDENTES  --  lo que separa un agente de un motor de ciclo
+# =============================================================================
+
+def test_11_sin_antecedentes_devuelve_vacio(org_a):
+    """
+    La primera vez no hay nada que contar, y el vacio tambien es informacion:
+    condicion nueva no es condicion sana.
+    """
+    from operaciones import cerebro
+    assert cerebro.antecedentes_de(org_a, "huella-que-nadie-vio") == ""
+    assert cerebro.antecedentes_de(org_a, "") == ""
+
+
+def test_11b_trae_lo_que_se_propuso_y_como_termino(org_a, user_profile):
+    """
+    La segunda vez que aparece la misma condicion, el cerebro tiene que saber
+    que paso la primera. Se afirma sobre el TEXTO que se le va a dar, no sobre
+    que la funcion exista.
+    """
+    from operaciones import cerebro
+
+    p = _propuesta(org_a)
+    huella = p.huella_condicion
+
+    from operaciones.gobierno_modelos import DecisionSupervisor
+    DecisionSupervisor.objects.create(
+        org=org_a, propuesta=p, recomendacion=p.accion_propuesta,
+        tipo="rechazo", actor=user_profile, decidida_en=timezone.now(),
+        motivo="no era la caja", resultado="no_funciono",
+        resultado_en=timezone.now(),
+        resultado_evidencia="la caja estaba bien, era el equipo del cliente")
+
+    texto = cerebro.antecedentes_de(org_a, huella)
+
+    assert "agrupar_casos" in texto, "no dice QUE se propuso"
+    assert "rechazo" in texto, "no dice QUE decidio la persona"
+    assert "no_funciono" in texto, "no dice COMO termino"
+    assert "la caja estaba bien" in texto, "no trae la evidencia del resultado"
+    #  Y la instruccion de que no repita lo que ya fallo:
+    assert "ya se rechazo o no funciono" in texto
+
+
+def test_11c_el_nombre_del_cliente_no_viaja(org_a, user_profile):
+    """
+    Misma regla que 'CAMPOS_QUE_NO_VIAJAN': lo que cambia el razonamiento es
+    que se propuso y como salio, no de quien era el servicio.
+    """
+    from operaciones import cerebro
+
+    p = _propuesta(org_a)
+    p.motivo = "el cliente Mario Sabanagrande reporto sin servicio"
+    p.save()
+
+    texto = cerebro.antecedentes_de(org_a, p.huella_condicion)
+    assert "Mario" not in texto
+    assert "Sabanagrande" not in texto
+
+
+def test_11d_un_fallo_al_consultarlos_no_rompe_el_razonamiento(org_a, monkeypatch):
+    """
+    Degradar, no romper: sin antecedentes el cerebro razona como razonaba antes
+    de que esto existiera.
+    """
+    from operaciones import cerebro
+    from operaciones.models import PropuestaSupervisor
+
+    def revienta(*a, **k):
+        raise RuntimeError("la base no responde")
+
+    monkeypatch.setattr(PropuestaSupervisor.objects, "filter", revienta)
+    assert cerebro.antecedentes_de(org_a, "cualquiera") == ""
+
+
+def test_11e_los_antecedentes_llegan_al_cerebro(org_a, monkeypatch):
+    """
+    CODIGO CONSTRUIDO NO ES CODIGO QUE CORRE.
+
+    Las tres de arriba prueban la funcion. Esta prueba que el CICLO se la pasa:
+    se intercepta 'concluir' y se afirma que la entrada trae el bloque. Es la
+    unica que caza el olvido de cablearla.
+    """
+    from operaciones import cerebro
+
+    p = _propuesta(org_a)
+    recibido = {}
+
+    def espiar(org, *, instrucciones, entrada, **k):
+        recibido["entrada"] = entrada
+        return _veredicto()
+
+    _con_banderas(monkeypatch, registra=True, enriquece=False)
+    monkeypatch.setattr(cerebro, "concluir", espiar)
+    monkeypatch.setattr(cerebro, "contexto_para", lambda *a, **k: "panorama")
+
+    senal = supervisor.Senal(
+        tipo=PropuestaSupervisor.CASO_ANTIGUO, origen_tipo="case",
+        origen_id=str(uuid.uuid4()), evidencia=[], datos={},
+        huella=p.huella_condicion)
+
+    supervisor.razonar_sobre(org_a, senal, dict(ANALISIS))
+
+    assert "== ANTECEDENTES ==" in recibido["entrada"], (
+        "el ciclo no le esta pasando los antecedentes al cerebro")
+    assert "agrupar_casos" in recibido["entrada"]

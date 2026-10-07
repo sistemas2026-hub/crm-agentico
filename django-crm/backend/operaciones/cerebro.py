@@ -693,6 +693,97 @@ def aprendizaje_relevante(org, *, desde=None, hasta=None) -> str:
         f"sin desenlace: {r.get('decisiones_sin_desenlace')}")
 
 
+
+
+# =============================================================================
+#  D2.b · ANTECEDENTES  --  que paso la ultima vez con ESTA misma condicion
+# =============================================================================
+#
+#  POR QUE ESTO ES LO QUE SEPARA UN AGENTE DE UN MOTOR DE CICLO
+#  ------------------------------------------------------------
+#  Hasta aqui el cerebro razonaba sobre una señal AISLADA: cada ciclo empezaba
+#  de cero. 'aprendizaje_relevante' le daba estadistica general --cuantas
+#  lecciones a favor, cuantas en contra-- pero nada sobre ESTE caso.
+#
+#  Un motor reacciona a lo que ve ahora. Un agente retoma un hilo: "ya propuse
+#  esto, la persona lo acepto, y no funciono". Eso es lo que hace que la
+#  segunda vez no sea igual a la primera, y es exactamente lo que falta para
+#  que el ciclo deje de ser un bucle sin memoria.
+#
+#  La llave es 'huella_condicion', que ya existe y ya se usa para deduplicar:
+#  dos propuestas con la misma huella son la MISMA condicion detectada otra
+#  vez. Nada nuevo que inventar -- lo que faltaba era leerlo.
+#
+#  LO QUE NO VIAJA, Y ES LA MISMA REGLA DE SIEMPRE
+#  -----------------------------------------------
+#  Ni el nombre del cliente ni el asunto del ticket, por 'CAMPOS_QUE_NO_VIAJAN'.
+#  Lo que viaja es QUE se propuso, QUE decidio una persona y COMO salio -- que
+#  es lo unico que cambia el razonamiento. La zona y el numero de orden sirven y
+#  no son datos personales; el nombre de quien decidio tampoco viaja, porque un
+#  antecedente no mejora por saber quien firmo.
+
+TOPE_ANTECEDENTES = 3
+
+
+def antecedentes_de(org, huella: str, *, limite: int = TOPE_ANTECEDENTES) -> str:
+    """
+    Lo que ya se propuso para esta misma condicion, y como termino.
+
+    Devuelve texto listo para el prompt, o "" si es la primera vez -- y el vacio
+    tambien es informacion: que no haya antecedentes significa condicion nueva,
+    no condicion sana.
+
+    NUNCA LEVANTA. Si la consulta falla se devuelve "" y el cerebro razona sin
+    antecedentes, que es como razonaba antes de que esto existiera. Mismo
+    criterio que el resto de este camino: degradar, no romper.
+    """
+    if not (huella or "").strip():
+        return ""
+    try:
+        from operaciones.gobierno_modelos import DecisionSupervisor
+        from operaciones.models import PropuestaSupervisor
+
+        previas = (PropuestaSupervisor.objects
+                   .filter(org=org, huella_condicion=huella)
+                   .order_by("-created_at")[:max(1, int(limite))])
+        previas = list(previas)
+        if not previas:
+            return ""
+
+        decisiones = {
+            str(d.propuesta_id): d for d in
+            DecisionSupervisor.objects.filter(
+                org=org, propuesta_id__in=[p.id for p in previas])
+        }
+    except Exception:                                        # noqa: BLE001
+        return ""
+
+    lineas = []
+    for p in previas:
+        d = decisiones.get(str(p.id))
+        cuando = p.created_at.strftime("%d/%m %H:%M") if p.created_at else "?"
+        if d is None:
+            cierre = f"estado: {p.estado}, sin decision registrada"
+        else:
+            cierre = f"una persona {d.tipo}"
+            if d.resultado and d.resultado != "pendiente":
+                cierre += f", y el resultado fue: {d.resultado}"
+                if d.resultado_evidencia:
+                    cierre += f" ({d.resultado_evidencia[:160]})"
+            else:
+                cierre += ", sin desenlace todavia"
+            if d.correccion:
+                cierre += f". Correccion anotada: {d.correccion[:200]}"
+        lineas.append(f"- {cuando}: se propuso '{p.accion_propuesta}'. {cierre}")
+
+    return (
+        "Esta MISMA condicion ya se detecto antes. Lo que paso:\n"
+        + "\n".join(lineas)
+        + "\n\nSi una propuesta igual ya se rechazo o no funciono, decilo y "
+          "proponé algo distinto o explicá por que insistis. Repetir lo que ya "
+          "fallo sin nombrarlo es el error que estos antecedentes existen para "
+          "evitar."
+    )
 # =============================================================================
 #  D3 · VEREDICTO -> SENAL  --  para que el ciclo pueda persistirlo
 # =============================================================================
