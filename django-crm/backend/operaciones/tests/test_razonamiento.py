@@ -337,15 +337,30 @@ def test_7_enriquecer_implica_registrar(monkeypatch):
     assert supervisor._el_cerebro_corre() is True
 
 
-def test_7b_las_dos_banderas_nacen_apagadas():
+def test_7b_el_enriquecimiento_sigue_apagado():
     """
-    Lo que llega a produccion llega inerte.
+    LA MITAD QUE IMPORTA DE ESTA GUARDA, y por que cambio.
 
-    Se lee el valor del modulo, no el parcheado: es el unico test del archivo
-    que mira la constante, y mira la que de verdad se despliega.
+    Nacio afirmando que las DOS banderas estaban apagadas, porque entonces lo
+    que se defendia era "llega inerte". El 07/10/2026 se encendio 'CEREBRO_
+    REGISTRA' por decision explicita: el cerebro razona y guarda, sin tocar la
+    propuesta.
+
+    Lo que esta guarda sigue defendiendo --y es la mitad valiosa-- es que
+    'CEREBRO_EN_EL_CICLO' NO se encienda sin que alguien lo note. Esa es la que
+    deja al cerebro modificando propuestas, y encenderla exige antes la medicion
+    que el registro esta produciendo.
+
+    Se leen los valores del modulo, no los parcheados: es el unico test del
+    archivo que mira las constantes, y mira las que de verdad se despliegan.
     """
-    assert supervisor.CEREBRO_EN_EL_CICLO is False
-    assert supervisor.CEREBRO_REGISTRA is False
+    assert supervisor.CEREBRO_EN_EL_CICLO is False, (
+        "el enriquecimiento se encendio sin pasar por aqui: eso deja al cerebro "
+        "modificando el motivo y el impacto de propuestas reales")
+    #  Y la invariante sigue valiendo: enriquecer implica registrar, nunca al
+    #  reves. Con el registro encendido esto es trivialmente cierto, y se afirma
+    #  igual para que siga siendo cierto si alguien lo apaga.
+    assert supervisor._el_cerebro_corre() is True
 
 
 # =============================================================================

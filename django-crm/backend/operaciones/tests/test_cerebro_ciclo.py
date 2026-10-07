@@ -184,9 +184,31 @@ def test_2_el_ciclo_completo_registra_lo_mismo_que_antes(org_a,
     assert p.impacto == esperado.get("impacto", "")
 
 
-def test_3_el_ciclo_no_llama_al_modelo_con_la_bandera_apagada(org_a,
-                                                              actividad_bloqueada):
-    """Lo que garantiza que esta fase no cuesta un peso: no hay llamada."""
+def test_3_el_ciclo_no_llama_al_modelo_con_las_banderas_apagadas(
+        org_a, actividad_bloqueada, monkeypatch):
+    """
+    Con el cerebro apagado no hay llamada al modelo, y por lo tanto no hay costo.
+
+    POR QUE ESTA PRUEBA CAMBIO EL 07/10/2026
+    ----------------------------------------
+    Nacio leyendo las constantes del modulo, cuando habia UNA bandera y estaba
+    apagada: entonces "no cuesta un peso" era una afirmacion sobre el estado
+    desplegado. Ese dia se encendio 'CEREBRO_REGISTRA' por decision explicita,
+    asi que el ciclo SI llama al modelo en produccion -- y eso es lo buscado, no
+    una regresion.
+
+    Lo que la prueba garantiza sigue siendo valioso y ahora se dice con su
+    precondicion: APAGAR el cerebro tiene que apagar el costo. Si alguien lo
+    apaga para contener un gasto y el modelo se siguiera llamando, el
+    interruptor seria decorativo.
+
+    Las banderas se apagan aqui en vez de leerse del modulo, y eso es lo que
+    convierte la afirmacion en condicional en vez de obsoleta. Que el estado
+    desplegado sea el correcto lo vigila 'test_razonamiento::test_7b'.
+    """
+    monkeypatch.setattr(sup, "CEREBRO_REGISTRA", False)
+    monkeypatch.setattr(sup, "CEREBRO_EN_EL_CICLO", False)
+
     with mock.patch(RUTA_MODELO) as m:
         sup.correr_ciclo(org_a)
 

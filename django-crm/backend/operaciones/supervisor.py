@@ -1591,7 +1591,30 @@ CEREBRO_EN_EL_CICLO = False
 #  dejar constancia seria exactamente el hueco que esta pieza vino a cerrar --
 #  un cerebro influyendo en propuestas sin que se pueda comparar despues con
 #  que criterio lo hizo. Ver '_el_cerebro_corre()'.
-CEREBRO_REGISTRA = False
+#  ENCENDIDA el 07/10/2026, por decision explicita. Lo que habilita es que el
+#  cerebro razone sobre cada señal del ciclo y GUARDE su conclusion -- nada mas.
+#  La propuesta sigue saliendo del analisis deterministico, intacta, y eso lo
+#  afirma 'test_2b' campo por campo.
+#
+#  POR QUE SE ENCIENDE ESTA Y NO LA OTRA
+#  -------------------------------------
+#  Porque sin datos no hay con que decidir la otra. Esta posicion es la etapa de
+#  observacion: produce la comparacion --que concluyo el cerebro contra que
+#  concluyo la regla-- que es la unica evidencia con la que se puede justificar
+#  despues subir el alcance. Encender las dos juntas se habria quedado sin la
+#  medicion que la segunda necesita.
+#
+#  LO QUE ESTO CUESTA, Y NO ESTA MEDIDO TODAVIA
+#  --------------------------------------------
+#  Una llamada al modelo por señal detectada, de hasta 'VUELTAS_MAXIMAS' vueltas.
+#  Un ciclo con 14 señales son 14 razonamientos. El numero real --cuantas señales
+#  por ciclo, cuantos segundos, cuanto consumo-- sale de los primeros dias con
+#  esto encendido, y es justamente lo que falta para decidir si se razona sobre
+#  todas las señales o solo sobre las ambiguas.
+#
+#  Si el modelo no contesta, el ciclo sigue igual: 'razonar_sobre' degrada y la
+#  propuesta sale correcta. Lo que se pierde es la constancia, no el trabajo.
+CEREBRO_REGISTRA = True
 
 
 def _el_cerebro_corre() -> bool:
