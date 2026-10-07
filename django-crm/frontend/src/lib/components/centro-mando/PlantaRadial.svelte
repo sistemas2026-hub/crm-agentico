@@ -30,12 +30,17 @@
   import { untrack, onDestroy } from 'svelte';
   import PuestoAgente from './PuestoAgente.svelte';
   import { anilloDeSalas } from '$lib/centro-mando/planta-radial.js';
-  import { zonaDe, cambios, colorDeArea, poli, iso, tono } from '$lib/centro-mando/planta.js';
-  import { colorDe, rotuloDe } from '$lib/centro-mando/estados.js';
+  import { zonaDe, ZONAS, cambios, colorDeArea, poli, iso, tono } from '$lib/centro-mando/planta.js';
+  import { colorDe, rotuloDe, normalizar } from '$lib/centro-mando/estados.js';
+  import SistemasExternos from './SistemasExternos.svelte';
   import { eventosNuevos } from '$lib/centro-mando/actividad.js';
 
-  /** @type {{ panorama: any, alSeleccionar?: (a:any)=>void }} */
-  let { panorama, alSeleccionar = () => {} } = $props();
+  /** @type {{ panorama: any, ms?: (v:any)=>string, alSeleccionar?: (a:any)=>void }} */
+  let {
+    panorama,
+    ms = (v) => (v == null ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${v} ms`),
+    alSeleccionar = () => {}
+  } = $props();
 
   const agentes = $derived(panorama?.agentes || []);
   const entrada = $derived(panorama?.rol_de_entrada || null);
@@ -77,6 +82,43 @@
     anteriores = ahora;
   });
 
+  /* El sello de frescura. Es lo menos vistoso de esta pantalla y lo mas
+     importante: deja dicho que lo que se ve es una lectura cada 12 s y no un
+     flujo continuo. Sin el, una planta que se mueve sugiere una continuidad
+     que no existe. */
+  let ahora = $state(new Date());
+  $effect(() => {
+    const t = setInterval(() => (ahora = new Date()), 1000);
+    return () => clearInterval(t);
+  });
+  const segundosDesdeLaLectura = $derived.by(() => {
+    if (!panorama?.generado_en) return null;
+    return Math.max(0, Math.round((ahora.getTime() - new Date(panorama.generado_en).getTime()) / 1000));
+  });
+
+  const zonasPresentes = $derived(
+    [...new Set(agentes.map((a) => zonaDe(a, entrada)))].sort((a, b) => ZONAS[a].orden - ZONAS[b].orden)
+  );
+
+  /* LOS FILTROS. Lo primero que se pide en una operacion real: "mostrame solo
+     los que tienen errores". Atenua en vez de esconder -- la planta no cambia
+     de forma al filtrar, asi que no hay que volver a ubicarse cada vez. */
+  let filtro = $state('todos');
+  const FILTROS = {
+    todos: { rotulo: 'Todos', test: () => true },
+    llaman: {
+      rotulo: 'Esperan a alguien',
+      test: (a) => (a.esperando_humano || 0) + (a.esperando_aprobacion || 0) > 0
+    },
+    error: { rotulo: 'Con errores', test: (a) => normalizar(a.estado) === 'error' },
+    trabajan: { rotulo: 'Trabajando', test: (a) => normalizar(a.estado) === 'working' },
+    libres: { rotulo: 'Disponibles', test: (a) => normalizar(a.estado) === 'idle' }
+  };
+  const cuentas = $derived(
+    Object.fromEntries(Object.entries(FILTROS).map(([k, f]) => [k, agentes.filter(f.test).length]))
+  );
+  const pasa = (a) => (FILTROS[filtro] || FILTROS.todos).test(a);
+
   let envoltura = $state(/** @type {any} */ (null));
   let caja = $state({ ancho: 0, alto: 0 });
 
@@ -93,6 +135,9 @@
   );
 
   const ALTO_PARED = 46;
+  /** Para comparar un area con el nombre de un rol: una lleva tildes, el otro no. */
+  const sinTildes = (t) => String(t).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replaceAll('_', ' ').trim().toUpperCase();
 
   /** Una sala lista para dibujar: paredes, puerta, cuadros, rotulos y puestos. */
   function vestir(sala, g, e) {
@@ -130,6 +175,11 @@
         matriz: `${e.ex} ${-e.ey} 0 1 ${iso(u0, v0 + 116, H * 0.26, e).join(' ')}`,
         cuerpo: H * 0.5
       },
+      /* En una sala de UN agente cuyo nombre coincide con el del area, el
+         suelo y el cartel decian lo mismo: "VENTAS" dos veces, una encima de
+         la otra. Lo mismo paso en la planta en rejilla y aqui se repitio --
+         por eso esta prueba existe en las dos. */
+      repiteNombre: g.miembros.length === 1 && sinTildes(g.area) === sinTildes(g.miembros[0].nombre),
       /* El nombre pintado en el suelo, en la franja libre del frente. El
          cuerpo sale del ANCHO DE SU SALA: con un numero fijo, "ATENCION AL
          CLIENTE" se desbordaba y cruzaba las oficinas vecinas. */
@@ -409,6 +459,7 @@
   });
 </script>
 
+<div class="planta">
 <div class="lienzo" bind:this={envoltura}
   onwheel={alaRueda} onpointerdown={alBajar} onpointermove={alMover}
   onpointerup={alSoltarGesto} onpointercancel={alSoltarGesto}
@@ -478,6 +529,7 @@
             </g>
 
             <!-- el nombre del area, pintado en su propio suelo -->
+            {#if !it.d.repiteNombre}
             <g transform="matrix({it.d.sueloTexto.matriz} {it.d.sueloTexto.centro[0]} {it.d.sueloTexto.centro[1]})">
               <text x="0" y="0" text-anchor="middle" fill={tono(it.d.color, -0.4)}
                 font-size={it.d.sueloTexto.cuerpo} font-weight="800"
@@ -485,9 +537,11 @@
                 {it.d.area.toUpperCase()}
               </text>
             </g>
+            {/if}
 
             {#each it.d.miembros as m (m.agente.nombre)}
-              <g class="celda" transform="translate({m.pos[0]}, {m.pos[1]})"
+              <g class="celda" class:apagado={!pasa(m.agente)}
+               transform="translate({m.pos[0]}, {m.pos[1]})"
                  onpointerenter={() => (mirando = m)}
                  role="presentation">
                 <PuestoAgente
@@ -561,11 +615,78 @@
   </div>
 </div>
 
+<div class="filtros">
+  {#each Object.entries(FILTROS) as [k, f] (k)}
+    <button class:activo={filtro === k} disabled={cuentas[k] === 0 && k !== 'todos'}
+      onclick={() => (filtro = k)}>
+      {f.rotulo}<span class="n">{cuentas[k]}</span>
+    </button>
+  {/each}
+</div>
+
+<!-- La salud de los sistemas externos va AQUI, al pie de la planta, y no en
+     otra columna: cuando uno se cae, el efecto son varios puestos en rojo, y
+     tener la causa lejos obliga a cruzar la pantalla para unir las dos. -->
+<SistemasExternos servicios={panorama?.servicios || []} {ms} />
+
+<div class="pieplanta">
+  {#if !entrada}
+    <!-- Se dice que falta en vez de adivinarlo: deducir la puerta de entrada
+         del "primer rol orientado al cliente" es el error que dejo a un
+         suscriptor sin internet hablando con el agente comercial. -->
+    <span class="falta" title="El motor no envió rol_de_entrada para este tenant">
+      Sin recepción declarada
+    </span>
+  {/if}
+  {#each zonasPresentes as z (z)}
+    <span class="zona"><i style="background:{ZONAS[z].color}"></i>{ZONAS[z].rotulo}</span>
+  {/each}
+  <span class="sep"></span>
+  {#each areasPresentes as a (a)}
+    <span class="zona"><i style="background:{colorDeArea(a, areasPresentes)}"></i>{a}</span>
+  {/each}
+  <span class="crece"></span>
+  {#if segundosDesdeLaLectura != null}
+    <span class="frescura" title="Los datos llegan por sondeo: lo que se ve es una lectura, no un flujo continuo">
+      leído hace {segundosDesdeLaLectura}s
+    </span>
+  {/if}
+</div>
+</div>
+
 <style>
-  .lienzo { position: relative; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  .planta { position: relative; width: 100%; height: 100%; min-height: 320px;
+            display: flex; flex-direction: column; }
+  .lienzo { position: relative; flex: 1; min-height: 0; touch-action: none; cursor: grab; overflow: hidden; }
   .lienzo:active { cursor: grabbing; }
   svg { width: 100%; height: 100%; display: block; }
-  .celda { cursor: pointer; }
+  /* El filtro ATENUA en vez de esconder: la planta no cambia de forma, asi
+     que no hay que volver a ubicarse en cada filtro. */
+  .celda { cursor: pointer; transition: opacity .2s ease; }
+  .celda.apagado { opacity: .14; pointer-events: none; }
+
+  .filtros { flex: 0 0 auto; display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 2px 0; }
+  .filtros button {
+    font: inherit; font-size: 11.5px; font-weight: 600; line-height: 1;
+    padding: 5px 10px; border: 1px solid #D9E0EA; border-radius: 999px;
+    background: #fff; color: #475569; cursor: pointer;
+  }
+  .filtros button.activo { background: #0F172A; color: #fff; border-color: #0F172A; }
+  .filtros button:disabled { opacity: .45; cursor: default; }
+  .filtros .n { margin-left: 6px; opacity: .7; font-variant-numeric: tabular-nums; }
+
+  .pieplanta {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 6px 4px 0;
+  }
+  .sep { width: 1px; align-self: stretch; background: #DCE3EC; }
+  .crece { flex: 1; }
+  .zona, .frescura, .falta {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: #64748B;
+  }
+  .zona i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+  .falta { color: #B45309; font-weight: 700; }
   /* El paseo dura menos que el intervalo entre lecturas: si no, el
      repintado lo cortaria por la mitad. */
   @keyframes andar {
