@@ -143,6 +143,13 @@ def test_devuelve_exactamente_los_campos_de_la_politica(admin_client, org_a,
     assert set(caso) == {"id", "external_ticket_id", "status", "closed_on",
                          "external_status", "external_created_by",
                          "external_created_by_type", "external_fetch_error",
+                         #  CUANDO el proveedor movio el estado. No dice nada
+                         #  de ninguna persona, y sin el la reconciliacion no
+                         #  puede saber si la fecha que acaba de leer ya estaba
+                         #  guardada: contaba una diferencia inexistente en
+                         #  cada ticket cerrado (142 de 184, medido en
+                         #  produccion el 06/10/2026).
+                         "external_status_at",
                          #  El id del servicio y un BOOLEANO de si falta el
                          #  nombre del cliente: con eso el backfill sabe a
                          #  quien le falta sin que le digan como se llama.
