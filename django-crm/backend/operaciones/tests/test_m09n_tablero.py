@@ -214,10 +214,21 @@ def test_el_contexto_no_devuelve_coordenadas_aunque_la_orden_las_tenga(org_a):
     # se agregue al contexto rompe esta prueba y obliga a mirarlo. Ya cazo los
     # tres de la bandeja -- cliente, asunto y origen_creado_en -- que se
     # declaran aqui despues de comprobar que ninguno trae coordenadas.
+    #
+    # 07/10/2026: entra 'caso_id', el UUID del caso en el CRM. Se declara
+    # despues de comprobar lo que esta prueba exige: un UUID no contiene
+    # coordenadas ni ningun dato del cliente -- es una llave opaca, y el bucle
+    # de prohibidos de arriba lo recorre igual que a los demas.
+    #
+    # Entra porque la bandeja mostraba solo el numero del PROVEEDOR mientras la
+    # propuesta decia "cerra el caso en el CRM": buscar ese numero aqui no
+    # encuentra nada, y quien revisaba no podia llegar al caso del que le
+    # hablaban. El sintoma reportado fue "las propuestas no coinciden con los
+    # tickets", y no era un error de deteccion.
     assert set(fila) == {
-        "zona", "tecnico", "ticket_externo", "proveedor_externo", "orden_numero",
-        "sla_estado", "sla_minutos", "cliente", "asunto", "origen_creado_en",
-        "caso_cerrado"}
+        "zona", "tecnico", "caso_id", "ticket_externo", "proveedor_externo",
+        "orden_numero", "sla_estado", "sla_minutos", "cliente", "asunto",
+        "origen_creado_en", "caso_cerrado"}
 
 
 # =============================================================================

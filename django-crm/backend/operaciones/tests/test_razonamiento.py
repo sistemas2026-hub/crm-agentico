@@ -799,3 +799,84 @@ def test_12h_correlacion_inyecta_el_interprete_de_verdad(org_a, monkeypatch):
 
     assert recibido.get("interpretar") is supervisor.interpretar_seguimiento, (
         "correlacion no le esta pasando el interprete al seguimiento")
+
+
+# =============================================================================
+#  13 · LA PROPUESTA TIENE QUE PODER ABRIRSE EN EL CRM
+# =============================================================================
+#
+#  EL DEFECTO QUE ESTO CIERRA, medido contra la pantalla real (07/10/2026)
+#  ----------------------------------------------------------------------
+#  La bandeja mostraba en "CASO / OT" el numero del PROVEEDOR --94718, con
+#  'wisphub' debajo-- y la propuesta decia "cerra el caso en el CRM para
+#  sincronizar su estado". Buscar 94718 en el CRM no encuentra nada: aqui un
+#  caso no tiene numero visible, se identifica por su asunto --que se repite:
+#  seis decian "No Tiene Internet"-- y se abre por su id.
+#
+#  Resultado: quien revisaba no podia llegar al caso del que le estaban
+#  hablando, y el sintoma que reporto fue "las propuestas no coinciden con los
+#  tickets". No era un error de deteccion: la propuesta apuntaba al caso
+#  correcto. Era que el identificador mostrado pertenecia al otro sistema.
+
+def test_13_una_propuesta_de_caso_trae_con_que_abrirlo(org_a):
+    """
+    Se afirma sobre lo que SALE del contexto, que es lo que la pantalla recibe.
+    """
+    from cases.models import Case
+    from operaciones import contexto_propuesta
+
+    caso = Case.objects.create(
+        org=org_a, name="No Tiene Internet",
+        external_ticket_id="94718", provider="wisphub")
+
+    p = _propuesta(org_a)
+    p.origen_tipo = "case"
+    p.origen_id = str(caso.id)
+    p.save(update_fields=["origen_tipo", "origen_id"])
+
+    ctx = contexto_propuesta.contexto_de(org_a, [p])[str(p.id)]
+
+    assert ctx["caso_id"] == str(caso.id), (
+        "la propuesta no trae el id del caso: no hay forma de abrirlo")
+    #  Y el del proveedor NO se pierde: sirve para buscar del otro lado.
+    assert ctx["ticket_externo"] == "94718"
+    assert ctx["proveedor_externo"] == "wisphub"
+
+
+def test_13b_el_serializer_lo_expone(org_a):
+    """
+    Que el contexto lo resuelva no alcanza: el serializer declara sus campos uno
+    por uno, asi que uno nuevo no llega a la pantalla hasta que se agrega. Esta
+    prueba es la que caza ese olvido.
+    """
+    from cases.models import Case
+    from operaciones import contexto_propuesta
+    from operaciones.serializers import PropuestaListaSerializer
+
+    caso = Case.objects.create(org=org_a, name="No Tiene Internet",
+                               external_ticket_id="94713", provider="wisphub")
+    p = _propuesta(org_a)
+    p.origen_tipo = "case"
+    p.origen_id = str(caso.id)
+    p.save(update_fields=["origen_tipo", "origen_id"])
+
+    ctx = contexto_propuesta.contexto_de(org_a, [p])
+    datos = PropuestaListaSerializer(p, context={"contexto": ctx}).data
+
+    assert datos["caso_id"] == str(caso.id)
+
+
+def test_13c_una_propuesta_que_no_es_de_un_caso_lo_deja_vacio(org_a):
+    """
+    Vacio es la respuesta correcta, no un fallo: una propuesta que nace de una
+    orden o de una actividad no tiene caso que abrir. La pantalla cae al
+    identificador que corresponda.
+    """
+    from operaciones import contexto_propuesta
+
+    p = _propuesta(org_a)
+    p.origen_tipo = "actividad"
+    p.save(update_fields=["origen_tipo"])
+
+    ctx = contexto_propuesta.contexto_de(org_a, [p])[str(p.id)]
+    assert ctx["caso_id"] == ""

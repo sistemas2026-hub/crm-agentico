@@ -53,6 +53,18 @@ VACIO = {
     "ticket_externo": "",
     "proveedor_externo": "",
     "orden_numero": None,
+    # EL IDENTIFICADOR DEL CASO EN EL CRM, y por que hizo falta agregarlo.
+    #
+    # La bandeja mostraba 'ticket_externo' --el numero del proveedor-- con el
+    # nombre del proveedor debajo, y la propuesta dice "cerra el caso en el
+    # CRM". Buscar ese numero en el CRM no encuentra nada: aca un caso no tiene
+    # numero visible, se identifica por su asunto y se abre por su id. Quien
+    # revisaba no tenia forma de llegar al caso del que le estaban hablando, y
+    # el sintoma era "las propuestas no coinciden con los tickets".
+    #
+    # No reemplaza a 'ticket_externo': los dos sirven, y para cosas distintas
+    # -- uno para buscar en el proveedor, el otro para abrir aqui.
+    "caso_id": "",
     # El plazo operativo. 'sla_estado' es el de 'operaciones/sla.py' tal cual
     # -- VENCIDA, VENCE_PRONTO, A_TIEMPO, SIN_PLAZO, NO_APLICA,
     # DATOS_INSUFICIENTES-- y cadena vacia cuando la propuesta no cuelga de una
@@ -292,6 +304,7 @@ def contexto_de(org, propuestas) -> dict:
         elif p.origen_tipo == ORIGEN_CASO and origen in casos:
             caso = casos[origen]
             salida[clave].update({
+                "caso_id": str(caso.id),
                 "ticket_externo": caso.external_ticket_id or "",
                 "proveedor_externo": caso.provider or "",
                 "cliente": _nombre_de_cliente(caso),
