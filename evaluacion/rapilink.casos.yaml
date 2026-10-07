@@ -1065,6 +1065,79 @@ casos:
       usa: [derivar_a_area, verificar_identidad_por_cedula]
       sin_errores: true
 
+  # --- pedir un servicio no es reportar una falla (06/10/2026) -------------
+  # Visto en produccion: "Buenas noches" -> "Necesito servicio Internet" fue a
+  # SOPORTE, que contesto "Con gusto te ayudo con tu internet. Para revisar tu
+  # cuenta, ¿me confirmas tu numero de cedula?". Era una persona nueva: la
+  # cedula no aparecio y se le pidio "confirmar o volver a escribir", un pedido
+  # sin salida para alguien que nunca va a estar en el sistema.
+  #
+  # Tres casos, uno por cada eslabon que fallo. La cedula de la conversacion
+  # real NO va aca (PII en un archivo versionado): 999999999 es el valor
+  # imposible que ya usa 'cedula que no existe no verifica ni entrega datos'.
+  #
+  # 1. La frase textual tiene que llegar a ventas, no a soporte.
+  - nombre: pedir servicio de internet sin nombrar una falla va a ventas
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      sn_onu: ""
+      identificador_canal: "573009993333"
+    mensajes: ["Buenas noches", "Necesito servicio Internet"]
+    espera:
+      deriva_a: ventas
+      # Ventas pregunta primero si ya es cliente: buscar una cedula antes de
+      # saberlo es el error de la conversacion real.
+      no_intenta: [verificar_identidad_por_cedula]
+      responde_sin: ["revisar tu cuenta", "cedula"]
+
+  # 2. Si igual cae en soporte y la cedula no aparece, soporte no la vuelve a
+  #    pedir: pregunta si ya es cliente, y a quien quiere contratar lo pasa a
+  #    ventas. Arranca en soporte A PROPOSITO, para probar esa red aunque el
+  #    enrutamiento del caso 1 funcione.
+  - nombre: una cedula que no aparece en soporte no se pide otra vez y termina en ventas
+    rol: soporte_tecnico_cliente
+    sesion:
+      verificado: false
+      nivel: 0
+      sn_onu: ""
+      identificador_canal: "573009994444"
+    mensajes:
+      - "Necesito servicio Internet"
+      - "999999999"
+      - "no tengo servicio con ustedes, quiero contratar"
+    espera:
+      deriva_a: ventas
+      no_usa: [registrar_solicitud_servicio, consultar_mi_servicio]
+      # La respuesta final es de ventas, a un prospecto: ni la cedula de
+      # nuevo, ni la frase medida en produccion.
+      responde_sin: ["cedula", "volver a escribir", "vuelve a escribir"]
+
+  # 3. El reverso: SI es cliente, quiere otro servicio, y escribe mal la cedula
+  #    dos veces. No se lo trata como nuevo (lo dijo el, una busqueda fallida no
+  #    lo desmiente), no se le registra una instalacion -- servicio duplicado y
+  #    un tecnico yendo a una casa ya conectada --, y al segundo fallo pasa a
+  #    una persona en vez de seguir pidiendo el numero.
+  - nombre: un cliente que escribe mal su cedula dos veces pasa a una persona, no a una venta nueva
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      sn_onu: ""
+      identificador_canal: "573009995555"
+    mensajes:
+      - "Necesito servicio Internet"
+      - "ya tengo servicio con ustedes, quiero otro para un local"
+      - "999999999"
+      - "999999998"
+    espera:
+      deriva_a: ventas
+      usa: [verificar_identidad_por_cedula]
+      no_usa: [registrar_solicitud_servicio]
+      responde_sin: ["formulario", "no eres cliente", "no tienes servicio"]
+      escala: true
+
   # 'planes_venta' (nucleo/config/schema.py) nace de un caso real: un
   # prospecto pregunto por "300 megas" y consultar_planes (el catalogo
   # TECNICO de WispHub) trajo tres resultados distintos -- variantes
