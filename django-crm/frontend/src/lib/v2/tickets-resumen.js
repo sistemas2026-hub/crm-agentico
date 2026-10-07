@@ -105,3 +105,39 @@ export function responsablesSinArea(desglose, areaPorPersona = {}) {
       .map((f) => f.assigned_to)
   )];
 }
+
+
+/**
+ * Los responsables de un area, para poder pedirle al servidor SOLO su cola.
+ *
+ * EL DEFECTO QUE ESTO FIJA  --  medido en produccion el 07/10/2026
+ * ----------------------------------------------------------------
+ * El area no es un campo del CRM: es una propiedad de la persona asignada.
+ * La pantalla pedia las 25 filas mas recientes de TODA la cola y recien
+ * despues descartaba en el navegador las que no eran del area. Con 138
+ * abiertos y las 25 mas recientes todas de cartera, Soporte Tecnico mostraba
+ * la tabla VACIA mientras su cabecera decia 91.
+ *
+ * Traducir el area a sus responsables permite mandar 'assigned_to' al API, y
+ * entonces la pagina que llega ya es la del area. Subir el limite no era la
+ * solucion: con mil tickets el problema vuelve, solo mas tarde.
+ *
+ * Devuelve lista vacia cuando el area no tiene gente, y quien llama NO debe
+ * mandar el filtro en ese caso: un 'assigned_to' vacio no filtra nada y
+ * traeria la cola entera, que es justo lo que se quiere evitar.
+ *
+ * @param {string} area  nombre interno del area, o '' / SIN_AREA
+ * @param {Record<string, string>} areaPorPersona  profile_id -> area
+ * @returns {string[]} ids de responsables, sin repetir
+ */
+export function responsablesDeArea(area, areaPorPersona = {}) {
+  //  SIN_AREA no se puede pedir por 'assigned_to': son los casos sin
+  //  responsable, o con uno cuya area nadie configuro. Esa cola se sigue
+  //  recortando del lado del navegador, y es su limite conocido.
+  if (!area || area === SIN_AREA) return [];
+  return [...new Set(
+    Object.entries(areaPorPersona)
+      .filter(([, suya]) => suya === area)
+      .map(([persona]) => persona)
+  )];
+}
