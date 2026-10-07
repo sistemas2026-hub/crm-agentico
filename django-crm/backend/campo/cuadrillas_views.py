@@ -514,3 +514,119 @@ class LocalidadesDeZonaView(APIView):
             ZonaOperativa.objects.prefetch_related("alias").get(pk=z.pk)
         )
         return Response(_zona_json(z))
+
+
+# ===========================================================================
+#  EL REPARTO  --  proponer es leer; publicar es escribir, y son dos rutas
+# ===========================================================================
+
+class RepartoView(APIView):
+    """``GET ?fecha=`` la propuesta · ``POST`` publicarla.
+
+    DOS VERBOS Y NO UNO CON BANDERA. Proponer no escribe nada y se puede
+    repetir todas las veces que haga falta; publicar crea asignaciones de
+    verdad. Un solo endpoint con `?simular=1` haria que olvidarse de la
+    bandera publicara sin querer.
+
+    EL POST NO RECALCULA: recibe las asignaciones que la pantalla mostro y
+    escribe ESAS. Si recalculara, entre mirar y publicar podrian aparecer
+    ordenes nuevas --a las 3 de la mañana entran tickets igual-- y se
+    publicaria algo que nadie reviso. Se publica lo que se vio.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = request.profile.org
+        fecha = (request.query_params.get("fecha") or "").strip()
+        if not fecha:
+            return Response({"detail": "Hace falta la fecha."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        from campo import reparto as rep
+
+        p = rep.proponer(org, fecha)
+        return Response({
+            "fecha": fecha,
+            "asignaciones": [
+                {
+                    "jornada": str(a["jornada"].id),
+                    "cuadrilla": {"id": str(a["cuadrilla"].id),
+                                  "nombre": a["cuadrilla"].nombre},
+                    "labor": a["jornada"].labor,
+                    "zonas": [z.nombre for z in a["jornada"].zonas.all()],
+                    "integrantes": a["jornada"].integrantes.count(),
+                    "ordenes": [_orden_json(o) for o in a["ordenes"]],
+                }
+                for a in p["asignaciones"]
+            ],
+            # Tres motivos distintos, nombrados por separado: se arreglan
+            # distinto y un solo "no se repartio" los volveria indistinguibles.
+            "sin_zona": [_orden_json(o) for o in p["sin_zona"]],
+            "sin_cuadrilla": [_orden_json(o) for o in p["sin_cuadrilla"]],
+            "sobrantes": [_orden_json(o) for o in p["sobrantes"]],
+        })
+
+    def post(self, request):
+        _exigir_gestion(request)
+        org = request.profile.org
+
+        crudas = request.data.get("asignaciones")
+        if not isinstance(crudas, list) or not crudas:
+            return Response({"detail": "No hay nada que publicar."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        from campo.models import AsignacionTrabajo, OrdenTrabajo
+
+        publicadas, ya_tenian = 0, []
+        with transaction.atomic():
+            for cruda in crudas:
+                jornada = JornadaDeCuadrilla.objects.filter(
+                    org=org, id=(cruda or {}).get("jornada")
+                ).prefetch_related("integrantes__profile").first()
+                if jornada is None:
+                    continue
+
+                integrantes = list(jornada.integrantes.all())
+                if not integrantes:
+                    # Una cuadrilla sin gente ese dia no puede recibir trabajo:
+                    # la orden quedaria asignada a nadie.
+                    continue
+
+                lider_id = jornada.lider_id or jornada.cuadrilla.lider_id
+                for oid in (cruda or {}).get("ordenes") or []:
+                    orden = OrdenTrabajo.objects.filter(org=org, id=oid).first()
+                    if orden is None:
+                        continue
+                    # NO SE PISA UNA ASIGNACION QUE YA EXISTE. Entre mirar y
+                    # publicar alguien pudo asignarla a mano, y esa decision
+                    # gana: la tomo una persona mirando el caso.
+                    if orden.asignaciones.exists():
+                        ya_tenian.append(orden.numero)
+                        continue
+                    for i in integrantes:
+                        AsignacionTrabajo.objects.create(
+                            orden=orden,
+                            profile=i.profile,
+                            rol=i.rol,
+                            es_principal=(i.profile_id == lider_id),
+                        )
+                    publicadas += 1
+
+        return Response({
+            "publicadas": publicadas,
+            # Se nombran: si no, la cuenta no cuadra con lo que se vio y nadie
+            # sabe cuales quedaron afuera.
+            "ya_tenian": ya_tenian,
+        })
+
+
+def _orden_json(o) -> dict:
+    return {
+        "id": str(o.id),
+        "numero": o.numero,
+        "cliente": o.cliente_nombre,
+        "direccion": o.cliente_direccion,
+        "zona": o.zona,
+        "prioridad": o.prioridad,
+    }

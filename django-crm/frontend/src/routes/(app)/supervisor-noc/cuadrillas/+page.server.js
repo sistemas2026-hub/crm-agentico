@@ -9,7 +9,9 @@ import {
   leerZonas,
   crearZona,
   mapearZona,
-  leerLocalidades
+  leerLocalidades,
+  proponerReparto,
+  publicarReparto
 } from '$lib/server/v2/cuadrillas.js';
 import { leerPersonas, leerUbicaciones } from '$lib/server/v2/inventario.js';
 
@@ -38,6 +40,10 @@ export async function load({ url, cookies, locals, fetch }) {
   // EL HISTORIAL SE PIDE, NO VIENE SIEMPRE. Es otra pregunta que «armar
   // mañana», y traerlo en cada visita costaría una consulta de hasta tres
   // meses para una pantalla que la mayoría de las veces se abre a asignar.
+  // EL REPARTO SE PIDE, NO SE CORRE SOLO. Mirar la pantalla no puede
+  // disparar un calculo sobre todas las órdenes pendientes.
+  const verReparto = url.searchParams.get('reparto') === '1';
+
   const verQuien = (url.searchParams.get('quien') ?? '').trim();
   const verCual = (url.searchParams.get('cual') ?? '').trim();
   const desde = (url.searchParams.get('desde') ?? '').trim();
@@ -47,7 +53,8 @@ export async function load({ url, cookies, locals, fetch }) {
   // Las cuatro juntas: sin personas no se puede armar una cuadrilla, sin
   // vehículos no se le puede asignar uno, y sin la jornada no se sabe qué
   // hace hoy. Pedirlas en serie sumaría tres esperas que no hacen falta.
-  const [cuadrillas, jornada, personas, ubicaciones, historial, zonas, locs] =
+  const [cuadrillas, jornada, personas, ubicaciones, historial, zonas, locs,
+         reparto] =
     await Promise.all([
       leerCuadrillas({ cookies }, verBajas),
       leerJornadaDeCuadrillas({ cookies }, dia),
@@ -66,7 +73,10 @@ export async function load({ url, cookies, locals, fetch }) {
       // `localidades.py::sincronizar()` recorriendo el catálogo del
       // proveedor, y su documentación dice que «nunca la escribe una
       // persona». Se ofrecen para elegir, no para teclear.
-      leerLocalidades(locals, fetch)
+      leerLocalidades(locals, fetch),
+      verReparto
+        ? proponerReparto({ cookies }, dia)
+        : Promise.resolve({ propuesta: null, error: false, motivo: '' })
     ]);
 
   const vehiculos = (ubicaciones.ubicaciones ?? []).filter(
@@ -79,6 +89,12 @@ export async function load({ url, cookies, locals, fetch }) {
     cuadrillas: cuadrillas.cuadrillas,
     jornadas: jornada.jornadas,
     zonas: zonas.zonas,
+    reparto: {
+      pedido: verReparto,
+      propuesta: reparto.propuesta,
+      error: reparto.error,
+      motivo: reparto.motivo
+    },
     localidades: locs.localidades,
     localidadesActualizadoEn: locs.actualizado_en,
     localidadesError: locs.error,
@@ -144,6 +160,39 @@ export const actions = {
         hecho: activa
           ? `${r?.nombre} vuelve a estar activa.`
           : `${r?.nombre} quedó dada de baja. Sus jornadas siguen enteras.`
+      };
+    } catch (e) {
+      return fail(409, { error: mensajeDe(e) });
+    }
+  },
+
+  /**
+   * Publica la propuesta.
+   *
+   * Recibe las asignaciones que la pantalla mostró, no una fecha: se publica
+   * lo que se vio, no lo que el reparto diría ahora.
+   */
+  publicar: async ({ request, cookies }) => {
+    const f = await request.formData();
+    /** @type {{ jornada: string, ordenes: string[] }[]} */
+    const asignaciones = [];
+    for (const par of f.getAll('asignacion')) {
+      const [jornada, ...ordenes] = String(par).split('|');
+      if (jornada && ordenes.length) asignaciones.push({ jornada, ordenes });
+    }
+    if (asignaciones.length === 0) {
+      return fail(400, { error: 'No hay nada que publicar.' });
+    }
+    try {
+      const r = await publicarReparto({ cookies }, asignaciones);
+      const n = r?.publicadas ?? 0;
+      const ya = r?.ya_tenian ?? [];
+      return {
+        hecho:
+          `${n} ${n === 1 ? 'orden asignada' : 'órdenes asignadas'}.` +
+          (ya.length
+            ? ` ${ya.length} ya tenía${ya.length === 1 ? '' : 'n'} a alguien y no se tocó: ${ya.join(', ')}.`
+            : '')
       };
     } catch (e) {
       return fail(409, { error: mensajeDe(e) });

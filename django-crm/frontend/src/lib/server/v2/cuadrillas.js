@@ -189,3 +189,41 @@ export async function mapearZona(ctx, id, localidades) {
     ctx
   );
 }
+
+/**
+ * La jornada PROPUESTA de un día. No escribe nada.
+ *
+ * @param {{ cookies: any }} ctx @param {string} dia
+ */
+export async function proponerReparto(ctx, dia) {
+  try {
+    const d = await apiRequest(
+      `/campo/cuadrillas/reparto/?fecha=${encodeURIComponent(dia)}`, {}, ctx
+    );
+    return { propuesta: d, error: false, motivo: '' };
+  } catch (e) {
+    return {
+      propuesta: null,
+      error: true,
+      motivo: e?.body?.detail || e?.detail || ''
+    };
+  }
+}
+
+/**
+ * Publica la propuesta: crea las asignaciones de verdad.
+ *
+ * Se manda lo que la pantalla MOSTRÓ, no una fecha para recalcular. Entre
+ * mirar y publicar pueden entrar órdenes nuevas —a las 3 de la mañana entran
+ * tickets igual— y se publicaría algo que nadie revisó.
+ *
+ * @param {{ cookies: any }} ctx
+ * @param {{ jornada: string, ordenes: string[] }[]} asignaciones
+ */
+export async function publicarReparto(ctx, asignaciones) {
+  return apiRequest(
+    '/campo/cuadrillas/reparto/',
+    { method: 'POST', body: { asignaciones } },
+    ctx
+  );
+}

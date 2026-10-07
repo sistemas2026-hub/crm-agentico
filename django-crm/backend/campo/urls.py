@@ -46,6 +46,7 @@ urlpatterns = [
     path("zonas/", cuadrillas_views.ZonasView.as_view(), name="zonas"),
     path("zonas/<uid:pk>/", cuadrillas_views.ZonaView.as_view(), name="zona"),
     path("zonas/<uid:pk>/localidades/", cuadrillas_views.LocalidadesDeZonaView.as_view(), name="zona_localidades"),
+    path("cuadrillas/reparto/", cuadrillas_views.RepartoView.as_view(), name="cuadrilla_reparto"),
     path("cuadrillas/jornada/", cuadrillas_views.JornadaDeCuadrillaView.as_view(), name="cuadrilla_jornada"),
     path("cuadrillas/<uid:pk>/", cuadrillas_views.CuadrillaView.as_view(), name="cuadrilla"),
     path("inventario/series/", inventario_views.SeriesDisponiblesView.as_view(), name="inv_series"),

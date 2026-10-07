@@ -278,3 +278,110 @@ def test_o_las_ordenes_de_OTRA_empresa_no_entran(
     p = proponer(org_a, LUNES, plazo_de=plazo_falso({10: 10}))
     assert _de(p, "Cuadrilla 1") == []
     assert p["sin_zona"] == []
+
+
+# ---------------------------------------------------------------------------
+# E · la API: proponer no escribe, publicar escribe lo que se vio
+# ---------------------------------------------------------------------------
+
+REPARTO = "/api/campo/cuadrillas/reparto/"
+
+
+def _con_gente(org, jornada, profile, rol="tecnico"):
+    from campo.cuadrillas import IntegranteDeJornada
+
+    IntegranteDeJornada.objects.create(
+        org=org, jornada=jornada, profile=profile, rol=rol
+    )
+    return jornada
+
+
+def test_p_proponer_devuelve_la_jornada_y_no_escribe(
+    admin_client, org_a, version, norte, admin_profile
+):
+    j = _con_gente(org_a, _jornada(org_a, "Cuadrilla 1", [norte]), admin_profile)
+    _orden(org_a, version, 10, "MARTHA GISELA")
+
+    antes = AsignacionTrabajo.objects.count()
+    r = admin_client.get(REPARTO, {"fecha": LUNES.isoformat()})
+
+    assert r.status_code == 200, r.content
+    d = r.json()
+    assert d["asignaciones"][0]["cuadrilla"]["nombre"] == "Cuadrilla 1"
+    assert [o["numero"] for o in d["asignaciones"][0]["ordenes"]] == [10]
+    assert AsignacionTrabajo.objects.count() == antes, "proponer no escribe"
+    assert j.id
+
+
+def test_q_lo_que_no_se_reparte_viaja_nombrado(
+    admin_client, org_a, version, norte, admin_profile
+):
+    _con_gente(org_a, _jornada(org_a, "Cuadrilla 1", [norte]), admin_profile)
+    _orden(org_a, version, 20, "VILLA NUEVA")
+
+    d = admin_client.get(REPARTO, {"fecha": LUNES.isoformat()}).json()
+    assert [o["numero"] for o in d["sin_zona"]] == [20]
+
+
+def test_r_publicar_crea_UNA_asignacion_por_integrante(
+    admin_client, org_a, version, norte, admin_profile, user_profile
+):
+    j = _jornada(org_a, "Cuadrilla 1", [norte])
+    _con_gente(org_a, j, admin_profile, "tecnico_lider")
+    _con_gente(org_a, j, user_profile, "ayudante")
+    o = _orden(org_a, version, 10, "MARTHA GISELA")
+
+    r = admin_client.post(REPARTO, {
+        "asignaciones": [{"jornada": str(j.id), "ordenes": [str(o.id)]}],
+    }, format="json")
+
+    assert r.status_code == 200, r.content
+    assert r.json()["publicadas"] == 1
+    assert o.asignaciones.count() == 2, "una por cada integrante del dia"
+    assert set(o.asignaciones.values_list("rol", flat=True)) == {
+        "tecnico_lider", "ayudante"
+    }
+
+
+def test_s_una_orden_YA_ASIGNADA_no_se_pisa_y_se_nombra(
+    admin_client, org_a, version, norte, admin_profile, user_profile
+):
+    """Entre mirar y publicar alguien pudo asignarla a mano, y esa decision gana."""
+    j = _con_gente(org_a, _jornada(org_a, "Cuadrilla 1", [norte]), admin_profile)
+    o = _orden(org_a, version, 10, "MARTHA GISELA")
+    AsignacionTrabajo.objects.create(
+        orden=o, profile=user_profile, rol="tecnico", es_principal=True
+    )
+
+    r = admin_client.post(REPARTO, {
+        "asignaciones": [{"jornada": str(j.id), "ordenes": [str(o.id)]}],
+    }, format="json")
+
+    assert r.json()["publicadas"] == 0
+    assert r.json()["ya_tenian"] == [10], "se nombra: si no, la cuenta no cuadra"
+    assert o.asignaciones.count() == 1, "la de antes queda intacta"
+
+
+def test_t_una_cuadrilla_sin_gente_no_recibe_trabajo(
+    admin_client, org_a, version, norte
+):
+    """La orden quedaria asignada a nadie."""
+    j = _jornada(org_a, "Cuadrilla 1", [norte])     # sin integrantes
+    o = _orden(org_a, version, 10, "MARTHA GISELA")
+
+    r = admin_client.post(REPARTO, {
+        "asignaciones": [{"jornada": str(j.id), "ordenes": [str(o.id)]}],
+    }, format="json")
+
+    assert r.json()["publicadas"] == 0
+    assert o.asignaciones.count() == 0
+
+
+def test_u_un_tecnico_puede_PROPONER_pero_no_publicar(
+    user_client, org_a, version, norte
+):
+    _jornada(org_a, "Cuadrilla 1", [norte])
+    assert user_client.get(REPARTO, {"fecha": LUNES.isoformat()}).status_code == 200
+    r = user_client.post(REPARTO, {"asignaciones": [{"jornada": "x", "ordenes": []}]},
+                         format="json")
+    assert r.status_code == 403

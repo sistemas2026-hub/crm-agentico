@@ -396,6 +396,102 @@
       </section>
     {/if}
 
+    <!-- ============ EL REPARTO ============ -->
+    <section class="snoc-panel" style="gap:var(--snoc-sm);">
+      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+        <div class="snoc-pila-xs">
+          <h2 class="snoc-h2">Armar la jornada</h2>
+          <p class="snoc-body-sm snoc-secundario">
+            Ordena lo pendiente por SLA y antigüedad, y lo reparte entre las cuadrillas que
+            trabajan el {data.dia}, respetando sus zonas. <strong>Propone: no asigna nada
+            hasta que vos publiques.</strong>
+          </p>
+        </div>
+        <a class="snoc-btn" href="?dia={data.dia}&reparto=1">Ver la propuesta</a>
+      </div>
+
+      {#if data.reparto.error}
+        <p class="snoc-aviso snoc-error-txt">
+          {data.reparto.motivo || 'No se pudo calcular la propuesta.'}
+        </p>
+      {:else if data.reparto.pedido && data.reparto.propuesta}
+        {@const p = data.reparto.propuesta}
+        {@const conOrdenes = p.asignaciones.filter((a) => a.ordenes.length)}
+
+        {#if conOrdenes.length === 0}
+          <p class="snoc-body snoc-secundario">
+            No hay nada para repartir. Puede ser que no queden órdenes pendientes, o que
+            ninguna caiga en las zonas que se cubren hoy — abajo se dice cuál de las dos.
+          </p>
+        {:else}
+          <form method="POST" action="?/publicar" use:enhance class="snoc-pila">
+            {#each conOrdenes as a (a.jornada)}
+              <!-- Se manda lo que se está MIRANDO, no la fecha: entre ver y
+                   publicar pueden entrar órdenes nuevas. -->
+              <input
+                type="hidden"
+                name="asignacion"
+                value={[a.jornada, ...a.ordenes.map((o) => o.id)].join('|')}
+              />
+              <div class="snoc-tarjeta">
+                <div class="snoc-fila-sep" style="flex-wrap:wrap;">
+                  <strong>{a.cuadrilla.nombre}</strong>
+                  <span class="snoc-body-sm snoc-secundario">
+                    {a.ordenes.length}
+                    {a.ordenes.length === 1 ? 'orden' : 'órdenes'} ·
+                    {a.integrantes}
+                    {a.integrantes === 1 ? 'persona' : 'personas'}
+                    {#if a.zonas.length}· {a.zonas.join(', ')}{/if}
+                  </span>
+                </div>
+                {#each a.ordenes as o (o.id)}
+                  <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                    <span class="snoc-mono">#{o.numero}</span>
+                    <span>{o.cliente || '—'}</span>
+                    <span class="snoc-body-sm snoc-secundario">{o.direccion}</span>
+                    {#if o.zona}<span class="snoc-tag">{o.zona}</span>{/if}
+                  </div>
+                {/each}
+              </div>
+            {/each}
+
+            <button class="snoc-btn snoc-btn-primario" type="submit">
+              Publicar esta jornada
+            </button>
+            <p class="snoc-body-sm snoc-secundario">
+              Recién ahí el técnico la ve en su teléfono. Una orden que alguien ya asignó a
+              mano no se pisa: esa decisión la tomó una persona mirando el caso.
+            </p>
+          </form>
+        {/if}
+
+        <!--
+          LOS TRES MOTIVOS, POR SEPARADO. Se arreglan distinto: una necesita
+          que alguien mapee su barrio, otra que alguien cubra esa zona hoy, y
+          la tercera que haya más gente o menos tope.
+        -->
+        {#each [['sin_zona', 'Sin zona: su barrio no está mapeado a ninguna zona'], ['sin_cuadrilla', 'Nadie cubre su zona hoy'], ['sobrantes', 'No entraron por el tope de la cuadrilla']] as [clave, titulo] (clave)}
+          {#if p[clave]?.length}
+            <div class="snoc-pila-xs">
+              <span class="snoc-label">{titulo} ({p[clave].length})</span>
+              {#each p[clave] as o (o.id)}
+                <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                  <span class="snoc-mono">#{o.numero}</span>
+                  <span>{o.cliente || '—'}</span>
+                  {#if o.zona}<span class="snoc-tag">{o.zona}</span>{/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        {/each}
+      {:else}
+        <p class="snoc-body-sm snoc-secundario">
+          No se calcula sola: mirar esta pantalla no puede disparar un recorrido de todas
+          las órdenes pendientes.
+        </p>
+      {/if}
+    </section>
+
     <!-- ============ LAS ZONAS ============ -->
     <section class="snoc-panel" style="gap:var(--snoc-sm);">
       <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
