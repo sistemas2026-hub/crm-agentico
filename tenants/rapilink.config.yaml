@@ -2830,6 +2830,13 @@ herramientas:
     inyectados_obligatorios: [id_servicio]
   - nombre: consultar_plan_tv
     tipo: http
+    # EL DETALLE del sync de precios. Ya existia para otra cosa --saber si un
+    # plan incluye TV-- y se reusa en vez de declarar una herramienta nueva
+    # contra el mismo endpoint: dos filas apuntando al mismo lugar se
+    # desincronizan el dia que una cambie.
+    #
+    # Devuelve precio ("199900.00"), bajada ("700M") y descripcion.
+    sincroniza_precio_plan: detalle
     descripcion: >
       Confirma si un plan de internet incluye TV, leyendo su descripcion
       real -- el NOMBRE del plan casi nunca lo dice ('PLAN HOGAR', 'PLAN
@@ -3112,6 +3119,12 @@ herramientas:
 
   - nombre: consultar_planes
     tipo: http
+    # EL LISTADO del sync de precios: da los ids, no el precio.
+    #
+    # Medido el 07/10/2026 contra la instancia real: este endpoint devuelve 50
+    # planes con tres campos --id, nombre, tipo-- y NINGUN precio. El precio
+    # vive en el detalle, uno por uno, y por eso hacen falta las dos.
+    sincroniza_precio_plan: listado
     descripcion: >
       Catalogo TECNICO completo de WispHub (nombre e ID) -- trae
       variantes duplicadas y nombres legacy pensados para facturar
