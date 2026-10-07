@@ -518,6 +518,7 @@
           <div class="snoc-envuelve snoc-pestanas" style="width:100%; order:3;">
             <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc">Pendientes por revisión</a>
             <a class="snoc-pildora" href="/supervisor-noc/programacion">Programación</a>
+          <a class="snoc-pildora" href="/supervisor-noc/cuadrillas">Cuadrillas</a>
           </div>
         </header>
 
