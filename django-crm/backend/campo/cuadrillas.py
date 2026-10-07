@@ -132,6 +132,24 @@ class JornadaDeCuadrilla(BaseModel):
     fecha = models.DateField()
     labor = models.CharField(max_length=20, choices=LABORES, default=INSTALACION)
 
+    #: QUE ZONAS CUBRE ESE DIA, y por eso vive en la jornada y no en la
+    #: cuadrilla: igual que la labor, hay dias que una cuadrilla se sale de su
+    #: territorio de siempre, y el martes nadie podria decir donde estuvo el
+    #: miercoles pasado si esto se pisara cada mañana.
+    #:
+    #: Son VARIAS porque una cuadrilla cubre mas de una zona en un dia flojo, y
+    #: obligar a una sola llevaria a inventar zonas combinadas ("Norte y
+    #: Centro") que despues nadie sabe mantener.
+    #:
+    #: Vacio significa "sin zona asignada", que NO es "cubre todas": con zona
+    #: dura, una cuadrilla sin zona no recibe trabajo por zona, y eso tiene que
+    #: notarse en vez de repartirle cualquier cosa.
+    zonas = models.ManyToManyField(
+        "campo.ZonaOperativa",
+        related_name="jornadas",
+        blank=True,
+    )
+
     #: El lider de ESE dia. Normalmente el de la cuadrilla, pero no siempre:
     #: si el lider esta de vacaciones, alguien la lleva igual. Se guarda aparte
     #: por el mismo motivo que la labor -- quien respondia ese martes no puede

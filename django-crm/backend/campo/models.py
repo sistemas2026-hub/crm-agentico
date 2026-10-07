@@ -1436,6 +1436,10 @@ from campo.inventario_operacion import (  # noqa: E402,F401
 # inventario: `models.py` ya concentra demasiado, y un equipo de campo es un
 # dominio con sus propias reglas. Se re-exportan para que Django las registre
 # y para que nadie tenga que saber en qué archivo quedó cada una.
+from campo.zonas import (  # noqa: E402,F401
+    AliasDeZona,
+    ZonaOperativa,
+)
 from campo.cuadrillas import (  # noqa: E402,F401
     Cuadrilla,
     IntegranteDeJornada,
