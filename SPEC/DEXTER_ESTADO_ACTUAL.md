@@ -7,7 +7,19 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **28/09/2026 18:56 Bogotá** — **DESPLEGADO A PRODUCCIÓN**: la
+Última actualización: **07/10/2026 16:59 Bogotá** — **DESPLEGADO A PRODUCCIÓN**:
+el centro de mando pasa a la **planta radial** (`8bc8af9`), y antes la planta de
+salas por área (`59edab1`). Y se **fusiona `integrar-centro-mando`** entera, que
+llevaba 34 commits sin salir: contra producción sólo cambiaba nueve archivos,
+casi todo documentación que se había escrito y nunca se publicó.
+
+Dos cosas que esta actualización corrige de sí misma, y conviene saber por qué:
+este archivo afirmaba que la planta estaba **SIN DESPLEGAR** en dos secciones, y
+que producción estaba en `8d37f70`. Las tres cosas eran falsas al medirlas. Es la
+misma falla de siempre —un número que envejece— y por eso el bloque viejo queda
+marcado como historia en vez de borrado.
+
+La anterior fue el **28/09/2026 18:56 Bogotá** — **DESPLEGADO A PRODUCCIÓN**: la
 custodia de materiales, sus tres fases y el lazo con el ISP.
 `b56da0c → ba86a2a`, 8 commits, por decisión explícita del usuario.
 
@@ -162,9 +174,14 @@ f946d84  Un servicio puede decir de quien habla, y la sesion sigue mandando
 afd721a  D1 cierra su parte: el CI queda en verde en las dos ramas
 ```
 
+> ⚠️ **ESTE BLOQUE ES HISTORIA, no el estado.** Quedó atrás el 07/10/2026: lo
+> que listaba como pendiente ya salió, y la rama `integrar-centro-mando` se
+> fusionó entera. El estado vigente está más abajo, en
+> `FUSIONADO el 07/10/2026`. Se conserva por el método, no por los números.
+
 **REMEDIDO el 25/09/2026 13:57 Bogotá, por contenido (`git patch-id --stable`)
-contra `origin/fix/integracion-wisphub`, que está en `8d37f70`.** De 16 commits
-locales, **10 ya están afuera con otro hash** y 6 no:
+contra `origin/fix/integracion-wisphub`, que entonces estaba en `8d37f70`.** De
+16 commits locales, **10 ya estaban afuera con otro hash** y 6 no:
 
 ```
 FUERA (6):
@@ -191,10 +208,10 @@ sesión (bandeja rediseñada, nombre del cliente, referencia de Stitch). Por qui
 vez el método aguantó y el número no: lo que hay que conservar es la primera línea
 de este bloque, no la lista.
 
-### SIN DESPLEGAR — 25/09/2026 13:47 Bogotá — la planta pasa a salas por área
+### DESPLEGADO el 07/10/2026 — la planta pasa a salas por área
 
-`8d9a3d7`, tres archivos. **No está en producción**: producción sigue mostrando
-la planta de puestos sueltos de `a60cb85`.
+`59edab1`. Estuvo doce días sin salir y el titular de esta sección decía «SIN
+DESPLEGAR»; ya no es cierto.
 
 El agrupamiento por color de piso **no se leía**: en una rejilla diagonal, dos
 vecinos de la misma área se ven igual que dos de áreas distintas. Ahora cada área
@@ -237,11 +254,35 @@ que ningún nombre quede recortado           LEÍDO DEL DOM, no a ojo:
                                             cero ocurrencias de "…"
 ```
 
-### SIN DESPLEGAR — propuesta de planta radial, sin enchufar — `c660474`
+### DESPLEGADO el 07/10/2026 — la planta radial ES el centro de mando — `8bc8af9`
 
-Dos archivos nuevos (`planta-radial.js`, `PlantaRadial.svelte`). **Nadie los
-monta**: no están en ninguna ruta. Existen para mirarlos al lado de la planta en
-uso y decidir.
+Dejó de ser una propuesta: `CommandCenter.svelte` monta `PlantaRadial`. El
+usuario la confirmó mirándola al lado de la otra, que es para lo que existía.
+Lo que sigue describe el diseño y por qué; el titular decía «sin enchufar» y
+dejó de ser cierto.
+
+**PlantaOficina NO se borró**, y conserva sus 17 pruebas: es a lo que se vuelve
+si la radial no convence en la operación real.
+
+Para poder reemplazarla hubo que darle lo que no tenía: la franja de **sistemas
+externos** al pie, los **filtros**, la banda de **zonas** —quién atiende al
+cliente y quién trabaja para adentro— y el **sello de frescura**. Más **16
+pruebas de render propias**, que no tenía ninguna.
+
+**Esas pruebas encontraron un defecto en su primera corrida**, y vale anotarlo
+porque es el argumento entero a favor de escribirlas: en una sala de un solo
+agente cuyo nombre coincide con el del área, el suelo y el cartel decían lo
+mismo —«VENTAS» sobre «VENTAS»—. Era **el mismo defecto que la rejilla había
+tenido una hora antes**, repetido porque el arreglo vivía en el otro
+componente. Por eso la prueba existe ahora en los dos.
+
+Y un segundo defecto no lo vio ninguna prueba, sólo montar la pantalla:
+**RECEPCIÓN aparecía dos veces en el pie**, como zona y como área, con dos
+colores, como si fueran dos cosas.
+
+Lo que las pruebas NO cubren, y está dicho en el propio archivo: no hay jsdom,
+así que **no hay interacción**. Pulsar un puesto se verificó con navegador
+—abre la ficha lateral— y eso se dice en vez de fingir que está cubierto.
 
 La puerta de entrada del tenant va al centro y las áreas en anillo alrededor, que
 es la topología real del motor: todo el que escribe por un canal público entra por
