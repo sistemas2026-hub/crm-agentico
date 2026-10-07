@@ -1306,6 +1306,33 @@ class Herramienta(Base):
     # get_outage_pons) para el porque y la verificacion en vivo.
     detecta_incidente: bool = False
 
+    # EL DIAGNOSTICO POR SERVICIO, que existe por una razon de SEGURIDAD y no
+    # de comodidad.
+    #
+    # Las herramientas de ONU exigen 'sn_onu' INYECTADO desde la sesion
+    # verificada: el modelo no puede elegir de que equipo pregunta. Esa garantia
+    # es correcta y no se toca. Pero deja fuera a todo llamador SIN sesion -- el
+    # Supervisor NOC entra por '/interno/herramienta/' con 'sesion=None' a
+    # proposito, asi que no puede diagnosticar ningun equipo.
+    #
+    # La salida facil habria sido dejar que el modelo pase el serial y
+    # mostrarselo en la ficha del cliente. Los dos cambios JUNTOS reconstruyen
+    # el ataque que la inyeccion evita: ver seriales + poder pasarlos =
+    # consultar el equipo de cualquiera.
+    #
+    # Esta herramienta recibe 'id_servicio' --que SI es un argumento legitimo y
+    # verificado del modelo-- y resuelve el equipo adentro, sin devolver nunca
+    # el serial. Ver nucleo/herramientas/diagnostico_servicio.py.
+    diagnostica_servicio: bool = False
+
+    # Con QUE herramienta del MISMO catalogo se resuelve el equipo de un
+    # servicio. Se nombra una herramienta en vez de escribir aqui el segundo
+    # proveedor: resolver el serial es WispHub y diagnosticar es SmartOLT, dos
+    # URLs y dos credenciales, y 'nucleo/' no conoce a ninguno (CLAUDE.md
+    # §3.1). Si el ISP cambia de proveedor de clientes, cambia este nombre en
+    # la configuracion y el codigo no se toca.
+    resolver_equipo_con: str = ""
+
     # LA LECTURA DE FLOTA, que es OTRA COSA que 'detecta_incidente'.
     #
     # 'detecta_incidente' PARTE DE UN CLIENTE: exige 'sn_onu' y contesta si

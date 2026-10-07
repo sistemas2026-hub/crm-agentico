@@ -565,7 +565,25 @@ def test_21_el_catalogo_de_herramientas_es_cerrado_y_exacto(org_a):
         #  tests/test_ruta_de_servicio_identidad.py), y eso exige decidir primero
         #  QUIEN resuelve el serial -- el codigo, nunca el modelo.
         "consultar_ticket", "consultar_tickets_de_cliente",
-        "consultar_tecnicos", "consultar_cliente"}
+        "consultar_tecnicos", "consultar_cliente",
+        #  07/10/2026. Esa pregunta de arriba ya tiene respuesta, y es la quinta
+        #  tecnica: 'diagnosticar_servicio'.
+        #
+        #  NO se abrio 'argumentos_sobrescribibles' para el serial. Habria hecho
+        #  falta ademas mostrarle seriales al modelo --hoy la lista blanca de
+        #  'consultar_cliente' los recorta-- y los dos cambios JUNTOS
+        #  reconstruyen el ataque que la inyeccion evita: ver seriales + poder
+        #  pasarlos = consultar el equipo de cualquiera.
+        #
+        #  En su lugar, el modelo pide por 'id_servicio' --argumento legitimo,
+        #  declarado y verificado contra la API-- y EL MOTOR resuelve el equipo
+        #  adentro, corriendo otra herramienta del mismo catalogo. El serial no
+        #  vuelve en la respuesta, y esa ausencia es el diseño: si saliera,
+        #  bastaria una conversacion para cosecharlos.
+        #
+        #  LEE, como las otras cuatro. Ver nucleo/herramientas/
+        #  diagnostico_servicio.py para el porque completo.
+        "diagnosticar_servicio"}
     #  Y cada una declara sus argumentos: sin entrada en ARGUMENTOS, no pasa nada.
     assert set(chat_herramientas.ARGUMENTOS) == set(
         chat_herramientas.HERRAMIENTAS)
