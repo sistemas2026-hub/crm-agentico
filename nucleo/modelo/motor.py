@@ -53,6 +53,7 @@ from nucleo.modelo import nota_vision
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import incidentes as ejecutor_incidentes
+from nucleo.herramientas import diagnostico_servicio as ejecutor_diagnostico
 from nucleo.herramientas import flota as ejecutor_flota
 from nucleo.herramientas import estabilidad as ejecutor_estabilidad
 from nucleo.herramientas import wifi as ejecutor_wifi
@@ -2564,6 +2565,20 @@ def _despacho_de_herramienta(herramienta, argumentos: dict,
     """
     if herramienta.tipo == "interno" and herramienta.detecta_incidente:
         return ejecutor_incidentes.detectar(herramienta, argumentos, tenant, variables_tenant)
+
+    #  EL DIAGNOSTICO POR SERVICIO. Va junto a la anterior porque las dos
+    #  hablan con SmartOLT, y separada porque entra por otra puerta: aquella
+    #  exige el serial inyectado de la sesion, esta recibe un 'id_servicio' y
+    #  resuelve el equipo adentro -- que es lo que la vuelve alcanzable desde
+    #  un llamador SIN sesion, como el Supervisor NOC.
+    #
+    #  Necesita el CATALOGO para correr otra herramienta y resolver el equipo
+    #  --el nombre esta en 'resolver_equipo_con'-- y esta funcion no lo tiene.
+    #  Lo carga el modulo por su cuenta en vez de agregarle un parametro a este
+    #  despacho y a todos sus llamadores: lo necesita UN ejecutor de nueve.
+    if herramienta.tipo == "interno" and herramienta.diagnostica_servicio:
+        return ejecutor_diagnostico.diagnosticar(
+            herramienta, argumentos, tenant, variables_tenant)
 
     #  La lectura de FLOTA. Va junto a la anterior porque las dos hablan con
     #  SmartOLT, y separadas porque contestan preguntas distintas: aquella

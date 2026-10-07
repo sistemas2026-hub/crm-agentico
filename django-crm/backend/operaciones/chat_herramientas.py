@@ -614,6 +614,43 @@ def consultar_tecnicos(org) -> dict:
     return _del_motor("consultar_tecnicos")
 
 
+def diagnosticar_servicio(org, *, id_servicio) -> dict:
+    """
+    El estado optico del equipo de un servicio. Por id de servicio, no por serial.
+
+    POR QUE ESTA Y NO LAS SEIS DE ONU
+    ---------------------------------
+    Las seis exigen 'sn_onu' INYECTADO desde la sesion verificada, para que el
+    modelo no elija de que equipo pregunta. El Supervisor entra por
+    la ruta interna de herramientas del motor, que pasa 'sesion=None'
+    a proposito: no tiene
+    sesion, asi que esas seis son inalcanzables para el -- estan autorizadas
+    para su rol, con su lista blanca lista, y no se pueden llamar.
+
+    Esta recibe 'id_servicio' --argumento legitimo, declarado y verificado, que
+    el Supervisor conoce de los afectados de una situacion-- y el motor resuelve
+    el equipo adentro. EL SERIAL NO VUELVE en la respuesta, y esa ausencia es el
+    diseño: si saliera, bastaria una conversacion para cosecharlos.
+
+    QUE DEVUELVE, Y LA DISTINCION QUE IMPORTA
+    -----------------------------------------
+        estado           en_linea | caido | desconocido
+        causa_caida      sin_energia | fibra | otra   (solo si esta caido)
+        senal_dbm        la de bajada, que es la que recibe el equipo
+
+    'sin_energia' es la casa del cliente --se fue la luz, o lo desenchufaron--.
+    'fibra' es un corte o una falla en la NAP, y eso es NUESTRO. Son opuestas:
+    tratarlas igual seria cerrar casos de gente que sigue sin servicio.
+
+    'desconocido' SIEMPRE trae su 'motivo', y no se lee como sano.
+    """
+    ident = str(id_servicio or "").strip()
+    if not ident:
+        return {"error": "FALTA_ID_SERVICIO",
+                "detalle": "hace falta el id del servicio"}
+    return _del_motor("diagnosticar_servicio", {"id_servicio": ident})
+
+
 def consultar_cliente(org, *, id_servicio) -> dict:
     """
     La ficha de un servicio, filtrada.
@@ -655,6 +692,7 @@ HERRAMIENTAS = {
     "consultar_tickets_de_cliente": consultar_tickets_de_cliente,
     "consultar_tecnicos": consultar_tecnicos,
     "consultar_cliente": consultar_cliente,
+    "diagnosticar_servicio": diagnosticar_servicio,
 }
 
 #  Los argumentos que CADA herramienta acepta. Es una lista blanca: un argumento
@@ -689,6 +727,7 @@ ARGUMENTOS = {
     "consultar_tickets_de_cliente": set(),
     "consultar_tecnicos": set(),
     "consultar_cliente": {"id_servicio"},
+    "diagnosticar_servicio": {"id_servicio"},
 }
 
 
@@ -856,6 +895,23 @@ def esquema() -> list[dict]:
           "devuelve nombre de contacto, cédula, teléfono, dirección, "
           "coordenadas ni contraseñas: no los pidas ni los supongas. El "
           "'id_servicio' lo sacás de los afectados de una situación.",
+          {"id_servicio": {"type": "string",
+                           "description": "El id del servicio en WispHub."}},
+          ["id_servicio"]),
+
+        h("diagnosticar_servicio",
+          "El estado ÓPTICO del equipo de un servicio: si está en línea o "
+          "caído, su señal de bajada en dBm y, si está caído, POR QUÉ. "
+          "La causa es lo que cambia la decisión y no se puede ignorar: "
+          "'sin_energia' es la casa del cliente --se fue la luz o lo "
+          "desenchufaron--, 'fibra' es un corte o una falla en la NAP y eso "
+          "SÍ es de la red. Son opuestas; no las trates igual. "
+          "Si 'equipo_registrado' es false, ese servicio no tiene equipo "
+          "cargado en el proveedor y no se puede afirmar NADA sobre él -- eso "
+          "no es 'está sano'. Si 'estado' es 'desconocido', viene con su "
+          "'motivo' y tampoco se lee como sano. "
+          "NO devuelve el serial del equipo: no lo pidas ni lo supongas. "
+          "El 'id_servicio' lo sacás de los afectados de una situación.",
           {"id_servicio": {"type": "string",
                            "description": "El id del servicio en WispHub."}},
           ["id_servicio"]),

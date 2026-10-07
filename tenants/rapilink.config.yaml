@@ -1839,6 +1839,11 @@ roles:
 
       Se breve: quien lee esta mirando un tablero, no un informe.
     puede_consultar:
+      # La UNICA de diagnostico optico que el Supervisor puede alcanzar de
+      # verdad: las demas exigen el serial inyectado de una sesion, y el
+      # Supervisor entra sin sesion. Esta pide 'id_servicio' y resuelve el
+      # equipo adentro, sin devolver el serial.
+      - diagnosticar_servicio
       - consultar_incidente_red
       - consultar_estado_ont
       - consultar_senal_ont
@@ -1850,6 +1855,11 @@ roles:
       - consultar_tecnicos
       - consultar_cliente
     campos_permitidos:
+      # Lo que el Supervisor ve del diagnostico. NO esta el serial, y esa
+      # ausencia es el diseño: si saliera, bastaria una conversacion para
+      # cosecharlos y la garantia de inyeccion se perderia por otra puerta.
+      diagnosticar_servicio: [id_servicio, equipo_registrado, estado, causa_caida,
+        senal_dbm, senal_texto, ultima_caida, ultima_conexion, motivo]
       consultar_incidente_red: [es_incidente_de_red, tipo_alerta, clientes_afectados, porcentaje_afectado, desde,
   zona, caja, motivo, clientes_caidos_a_la_vez, desde_por_tiempos]
       consultar_estado_ont: [onu_status, last_status_change]
@@ -5619,6 +5629,69 @@ herramientas:
     auth_ref: SMARTOLT_API_KEY
     auth_esquema: ""
     auth_header: X-Token
+  # ============================================================================
+  #  DIAGNOSTICO DE UN SERVICIO  --  por id de servicio, sin exponer el serial
+  # ============================================================================
+  #  POR QUE EXISTE, Y NO ES COMODIDAD: es seguridad.
+  #
+  #  Las seis herramientas de ONU exigen 'sn_onu' INYECTADO desde la sesion
+  #  verificada, para que el modelo no pueda elegir de que equipo pregunta.
+  #  Correcto, y no se toca. Pero deja fuera a todo llamador SIN sesion: el
+  #  Supervisor NOC entra por '/interno/herramienta/' con 'sesion=None' a
+  #  proposito, asi que no puede diagnosticar ningun equipo -- las seis estan
+  #  autorizadas para su rol, con su lista blanca lista, y son inalcanzables.
+  #
+  #  La salida facil era dejar que el modelo pase el serial y mostrarselo en la
+  #  ficha del cliente. Los dos cambios JUNTOS reconstruyen el ataque que la
+  #  inyeccion evita: ver seriales + poder pasarlos = consultar el equipo de
+  #  cualquiera.
+  #
+  #  Esta recibe 'id_servicio' --argumento legitimo, declarado y verificado-- y
+  #  resuelve el equipo ADENTRO. El serial no viaja en la respuesta.
+  - nombre: diagnosticar_servicio
+    tipo: interno
+    diagnostica_servicio: true
+    # Con QUE se resuelve el equipo. Se nombra una herramienta del MISMO
+    # catalogo en vez de escribir el segundo proveedor en el codigo: resolver
+    # el serial es WispHub y diagnosticar es SmartOLT, dos URLs y dos
+    # credenciales, y 'nucleo/' no conoce a ninguno. Si el ISP cambia de
+    # proveedor de clientes, cambia este nombre y el codigo no se toca.
+    resolver_equipo_con: consultar_cliente
+    descripcion: >
+      El estado optico del equipo de UN SERVICIO, pedido por su id. Devuelve si
+      el equipo esta en linea o caido, su señal de bajada en dBm, y --si esta
+      caido-- POR QUE se cayo, que es lo que de verdad cambia la decision:
+
+      'sin_energia' significa que el equipo aviso que se quedo sin luz justo
+      antes de apagarse. Es la casa del cliente: un corte de energia, o que lo
+      desenchufaron. No es una falla de la red.
+
+      'fibra' significa que perdio la señal optica. Eso es un corte o una falla
+      en la NAP, y es NUESTRO: el cliente va a volver a llamar.
+
+      Son cosas opuestas y no se pueden tratar igual. Si devuelve
+      'equipo_registrado: false', ese servicio no tiene equipo cargado en el
+      proveedor y NO se puede afirmar nada sobre el -- eso no es lo mismo que
+      "esta sano", y decirlo asi seria inventar.
+
+      'estado: desconocido' siempre trae su 'motivo'. No lo leas como sano.
+    solo_lectura: true
+    roles_permitidos: [supervisor_noc, soporte]
+    # El lado del DIAGNOSTICO. El otro lo aporta 'resolver_equipo_con'.
+    base_url_ref: SMARTOLT_BASE_URL
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    endpoint: /api/onu/get_onu_full_status_info/{sn_onu}
+    metodo: GET
+    # 'id_servicio' SI lo elige el modelo, y es legitimo: ya esta verificado
+    # como filtro de 'consultar_cliente' contra la API real, y el Supervisor lo
+    # conoce de los afectados de una situacion.
+    filtros_verificados:
+      id_servicio:
+        param: id_servicio
+        tipo: id
+        verificado_el: 2026-10-07
   - nombre: consultar_incidente_red
     tipo: interno
     detecta_incidente: true

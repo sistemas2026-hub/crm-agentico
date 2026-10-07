@@ -60,12 +60,18 @@ def test_1_las_cuatro_estan_registradas_con_su_lista_blanca(org_a):
             f"{nombre} no esta en el esquema que ve el modelo")
 
 
-def test_2_el_catalogo_son_19_y_las_dos_familias_conviven(org_a):
+def test_2_el_catalogo_son_20_y_las_dos_familias_conviven(org_a):
     """
-    Las 15 operativas leen las tablas del Supervisor; las 4 tecnicas leen
-    WispHub. La interseccion es cero y las dos tienen que estar.
+    Las 15 operativas leen las tablas del Supervisor; las tecnicas salen al
+    proveedor. La interseccion es cero y las dos tienen que estar.
+
+    07/10/2026: entra la 20a, 'diagnosticar_servicio'. Es tecnica, y existe por
+    una razon de SEGURIDAD: las seis herramientas de ONU exigen el serial
+    inyectado desde una sesion verificada, y el Supervisor entra SIN sesion --
+    asi que le eran inalcanzables. Esta pide 'id_servicio' y el motor resuelve
+    el equipo adentro, sin devolver el serial.
     """
-    assert len(ch.HERRAMIENTAS) == 19
+    assert len(ch.HERRAMIENTAS) == 20
     assert set(ch.ARGUMENTOS) == set(ch.HERRAMIENTAS)
     assert "listar_situaciones" in ch.HERRAMIENTAS
     assert "consultar_cliente" in ch.HERRAMIENTAS
@@ -117,7 +123,31 @@ def test_5_no_se_duplica_el_HTTP(org_a):
     nombres = {n.id for n in ast.walk(arbol) if isinstance(n, ast.Name)}
     assert "requests" not in nombres
     assert "httpx" not in nombres
-    fuente = inspect.getsource(ch)
+
+    #  SE MIDEN LOS LITERALES DEL CODIGO, NO EL TEXTO DEL ARCHIVO.
+    #
+    #  Esta guarda buscaba la ruta como subcadena del fuente, y eso incluye los
+    #  comentarios: el 07/10/2026 se puso en rojo porque un docstring EXPLICABA
+    #  por que el Supervisor no puede usar esa ruta. La explicacion era correcta
+    #  y la guarda la trato como una violacion.
+    #
+    #  Es el mismo defecto que 'test_m03e4' y 'test_m03e5' tienen con otra
+    #  palabra, y que ya mordio cinco veces en este proyecto. Aqui si se
+    #  arregla, porque esta prueba es nuestra: lo que hay que impedir es que el
+    #  modulo CONSTRUYA una llamada con esa ruta, y eso son cadenas usadas como
+    #  valor, no prosa.
+    literales = {n.value for n in ast.walk(arbol)
+                 if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    #  Los docstrings son literales tambien, asi que se descartan: son prosa.
+    docstrings = set()
+    for n in ast.walk(arbol):
+        if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                          ast.ClassDef)):
+            d = ast.get_docstring(n, clean=False)
+            if d:
+                docstrings.add(d)
+    salto = chr(10)
+    fuente = salto.join(sorted(literales - docstrings))
     assert "interno/herramienta" not in fuente.replace(
         "'POST /interno/herramienta/<nombre>'", "")
 
