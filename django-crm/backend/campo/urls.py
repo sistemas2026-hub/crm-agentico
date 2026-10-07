@@ -5,6 +5,7 @@ from django.urls import path
 
 from campo import (
     avisos_views,
+    cuadrillas_views,
     despacho_views,
     inventario_operacion_views,
     inventario_views,
@@ -40,6 +41,10 @@ urlpatterns = [
     # por que el bodeguero es un rol aparte y no hereda lo de un supervisor.
     path("inventario/personas/", inventario_views.PersonasView.as_view(), name="inv_personas"),
     path("inventario/ubicaciones/", inventario_views.UbicacionesView.as_view(), name="inv_ubicaciones"),
+    # Las cuadrillas: quienes son, y que hacen cada dia.
+    path("cuadrillas/", cuadrillas_views.CuadrillasView.as_view(), name="cuadrillas"),
+    path("cuadrillas/jornada/", cuadrillas_views.JornadaDeCuadrillaView.as_view(), name="cuadrilla_jornada"),
+    path("cuadrillas/<uid:pk>/", cuadrillas_views.CuadrillaView.as_view(), name="cuadrilla"),
     path("inventario/series/", inventario_views.SeriesDisponiblesView.as_view(), name="inv_series"),
     path("inventario/existencias/", inventario_views.ExistenciasView.as_view(), name="inv_existencias"),
     path("inventario/catalogo/", inventario_views.CatalogoView.as_view(), name="inv_catalogo"),
