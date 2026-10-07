@@ -781,24 +781,52 @@ def test_12g_el_seguimiento_real_llama_al_interprete(org_a):
 def test_12h_correlacion_inyecta_el_interprete_de_verdad(org_a, monkeypatch):
     """
     Cierra el circuito hasta el llamador real: 'correlacion.correr' es quien
-    arma el seguimiento, y tiene que pasarle el interprete del supervisor. Es la
-    unica que caza el olvido de inyectarlo ahi.
+    arma el seguimiento, y tiene que pasarle un interprete que LLEGUE al
+    cerebro. Es la unica que caza el olvido de inyectarlo ahi.
+
+    SE AFIRMA SOBRE EL EFECTO, NO SOBRE LA IDENTIDAD, y el cambio tiene una
+    razon medida: la version anterior comparaba con 'is' contra
+    'interpretar_seguimiento', y se rompio el dia que ese interprete paso a
+    viajar envuelto en un cierre para llevar el presupuesto. La envoltura es
+    correcta --el presupuesto tiene que ser uno por corrida-- y la prueba
+    estaba midiendo la forma en vez de la consecuencia.
+
+    Ahora se llama al interprete que correlacion armo y se verifica que por
+    dentro llegue al del supervisor. Eso sigue siendo cierto con o sin
+    envoltura, y seguiria siendo cierto si manana se envuelve de otra forma.
     """
     from operaciones import correlacion
     from operaciones import situaciones_seguimiento as seg
 
     recibido = {}
+    llego = {"veces": 0}
 
     def espiar(org, **k):
         recibido.update(k)
         return {"evaluadas": 0, "por_veredicto": {}, "errores": 0,
                 "piden_humano": 0}
 
+    def interprete_falso(situacion, salida, *, ahora=None, presupuesto=None):
+        llego["veces"] += 1
+        #  Y el presupuesto tiene que viajar: sin el, el seguimiento llama al
+        #  modelo una vez por situacion abierta y la pantalla se cuelga.
+        assert presupuesto is not None, (
+            "el interprete llego al cerebro SIN presupuesto: eso es lo que "
+            "dejaba el ciclo sin tope")
+        return salida
+
     monkeypatch.setattr(seg, "seguir", espiar)
+    monkeypatch.setattr(supervisor, "interpretar_seguimiento", interprete_falso)
     correlacion.correr(org_a)
 
-    assert recibido.get("interpretar") is supervisor.interpretar_seguimiento, (
-        "correlacion no le esta pasando el interprete al seguimiento")
+    interprete = recibido.get("interpretar")
+    assert callable(interprete), (
+        "correlacion no le esta pasando ningun interprete al seguimiento")
+
+    interprete(object(), {"veredicto": "estable"})
+    assert llego["veces"] == 1, (
+        "el interprete que arma correlacion no llega a "
+        "'supervisor.interpretar_seguimiento'")
 
 
 # =============================================================================
@@ -880,3 +908,106 @@ def test_13c_una_propuesta_que_no_es_de_un_caso_lo_deja_vacio(org_a):
 
     ctx = contexto_propuesta.contexto_de(org_a, [p])[str(p.id)]
     assert ctx["caso_id"] == ""
+
+
+# =============================================================================
+#  14 · EL PRESUPUESTO  --  un ciclo no puede tardar lo que quiera
+# =============================================================================
+#
+#  EL DEFECTO QUE CIERRA, visto en produccion el 07/10/2026
+#  --------------------------------------------------------
+#  Al encender 'CEREBRO_REGISTRA' el ciclo paso a llamar al modelo una vez por
+#  señal, sin tope, en una peticion HTTP sincrona disparada desde un boton. La
+#  pantalla se quedo en "Analizando operacion..." hasta que algo corto.
+#
+#  El peor caso: 3 vueltas x 150 s de timeout = 450 s POR SEÑAL. Y el
+#  seguimiento no deduplica: corre sobre cada situacion abierta, siempre.
+
+def test_14_el_tope_por_cantidad_detiene_al_cerebro(org_a, monkeypatch):
+    """Agotado el cupo, las señales siguientes se procesan SIN cerebro."""
+    _con_banderas(monkeypatch, registra=True, enriquece=False)
+    _concluye_con(monkeypatch, _veredicto())
+
+    p = supervisor.presupuesto(tope=2)
+    for _ in range(5):
+        supervisor.razonar_sobre(org_a, _SenalFalsa(), dict(ANALISIS),
+                                 presupuesto=p)
+
+    assert p["usados"] == 2, "el tope por cantidad no detuvo al cerebro"
+    assert p["omitidos"] == 3, "no se contaron las que quedaron sin razonar"
+
+
+def test_14b_el_tope_por_reloj_detiene_al_cerebro(org_a, monkeypatch):
+    """
+    El tope por cantidad solo no alcanza: cinco señales que tarden lo maximo son
+    37 minutos. Se agota el reloj con un presupuesto ya vencido.
+    """
+    _con_banderas(monkeypatch, registra=True, enriquece=False)
+    _concluye_con(monkeypatch, _veredicto())
+
+    p = supervisor.presupuesto(tope=99, segundos=0)
+    supervisor.razonar_sobre(org_a, _SenalFalsa(), dict(ANALISIS), presupuesto=p)
+
+    assert p["usados"] == 0, "con el reloj agotado no se puede razonar"
+    assert p["omitidos"] == 1
+
+
+def test_14c_sin_presupuesto_no_se_acota(org_a, monkeypatch):
+    """
+    Quien llame sin presupuesto --una prueba, un script-- no queda limitado. El
+    tope es del ciclo, no de la funcion.
+    """
+    _con_banderas(monkeypatch, registra=True, enriquece=False)
+    _concluye_con(monkeypatch, _veredicto())
+
+    aporte = supervisor.razonar_sobre(org_a, _SenalFalsa(), dict(ANALISIS))
+    assert aporte.veredicto is not None
+
+
+def test_14d_agotado_el_cupo_la_propuesta_sale_igual(org_a, monkeypatch):
+    """
+    LO QUE NO PUEDE PASAR: que quedarse sin presupuesto deje de producir la
+    propuesta. El cerebro es un agregado; el ciclo es el trabajo.
+    """
+    _con_banderas(monkeypatch, registra=True, enriquece=False)
+    _concluye_con(monkeypatch, _veredicto())
+
+    p = supervisor.presupuesto(tope=0)
+    entrada = dict(ANALISIS)
+    aporte = supervisor.razonar_sobre(org_a, _SenalFalsa(), entrada,
+                                      presupuesto=p)
+
+    assert aporte.analisis is entrada, "el analisis tiene que salir intacto"
+    assert aporte.veredicto is None, "no debio llamar al modelo"
+
+
+def test_14e_el_seguimiento_tambien_lo_respeta(org_a, monkeypatch):
+    """
+    El seguimiento es el camino mas peligroso de los dos: NO deduplica, asi que
+    sin tope llama al modelo una vez por situacion abierta, en cada corrida.
+    """
+    _con_banderas(monkeypatch, registra=True, enriquece=False)
+    _concluye_con(monkeypatch, _veredicto())
+
+    s = _situacion(org_a)
+    p = supervisor.presupuesto(tope=1)
+
+    supervisor.interpretar_seguimiento(s, dict(SALIDA), presupuesto=p)
+    supervisor.interpretar_seguimiento(s, dict(SALIDA), presupuesto=p)
+
+    assert p["usados"] == 1
+    assert p["omitidos"] == 1
+
+
+def test_14f_el_ciclo_reporta_cuanto_razono(org_a, monkeypatch):
+    """
+    Un cerebro que dejo de razonar a la mitad y no lo dice es peor que uno
+    apagado: la bandeja se ve igual y nadie sabe por que faltan
+    interpretaciones. El resumen del ciclo tiene que traerlo, aunque sea cero.
+    """
+    _con_banderas(monkeypatch, registra=False, enriquece=False)
+    resumen = supervisor._correr_ciclo(org_a, timezone.now())
+
+    assert "razonamientos" in resumen
+    assert "razonamientos_omitidos" in resumen
+    assert resumen["razonamientos"] == 0

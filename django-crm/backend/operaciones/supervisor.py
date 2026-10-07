@@ -378,7 +378,22 @@ def _casos_cerrados_en_el_proveedor(org, ahora) -> list[Senal]:
         if (getattr(c, "external_fetch_error", "") or "").strip():
             continue
 
-        dias_desalineado = (ahora - c.external_status_at).days
+        #  UN NUMERO NEGATIVO NO SE MUESTRA, SE DECLARA DESCONOCIDO.
+        #
+        #  Visto en produccion el 07/10/2026: "(-1 dias desalineados)". Sale de
+        #  que 'external_status_at' quedo DESPUES de 'ahora' -- el proveedor
+        #  habria cerrado el ticket tres horas despues de que lo leimos, que es
+        #  imposible. La causa esta aguas arriba, en como la sincronizacion
+        #  interpreta la fecha que devuelve WispHub: su skill ya documenta un
+        #  desfase de +5 h en fechas de cierre y formatos DD/MM y MM/DD
+        #  mezclados en la misma API.
+        #
+        #  Aqui no se arregla eso --es la sincronizacion, y no se toca desde
+        #  este modulo-- pero SI se deja de afirmar un numero que no se puede
+        #  calcular. 'None' y su motivo, nunca un negativo con cara de dato:
+        #  es la misma regla que el resto del Supervisor aplica con DESCONOCIDO.
+        desfase = ahora - c.external_status_at
+        dias_desalineado = desfase.days if desfase.total_seconds() >= 0 else None
         salida.append(Senal(
             tipo=PropuestaSupervisor.CASO_DESINCRONIZADO,
             origen_tipo="case",
@@ -397,7 +412,11 @@ def _casos_cerrados_en_el_proveedor(org, ahora) -> list[Senal]:
                 _observacion("caso", c.id,
                              f"el proveedor lo cerro el "
                              f"{c.external_status_at:%Y-%m-%d %H:%M} UTC "
-                             f"({dias_desalineado} dias desalineados)", ahora),
+                             + (f"({dias_desalineado} dias desalineados)"
+                                if dias_desalineado is not None else
+                                "(no se puede decir desde cuando: esa fecha "
+                                "quedo en el futuro respecto de la lectura, "
+                                "revisar la sincronizacion)"), ahora),
                 _observacion("caso", c.id,
                              f"estado externo leido el "
                              f"{c.external_fetched_at:%Y-%m-%d %H:%M} UTC", ahora),
@@ -1183,11 +1202,27 @@ def analizar(senal: Senal) -> dict:
         return {
             "accion_propuesta": ("Cerrar el caso en Dexter para sincronizar su "
                                  "estado con WispHub"),
+            #  EL DESFASE SOLO SE NOMBRA SI SE PUDO CALCULAR. Cuando la fecha de
+            #  cierre del proveedor queda en el futuro respecto de la lectura
+            #  --visto en produccion el 07/10/2026-- el numero sale negativo, y
+            #  "(-1 días desalineados)" no es un dato: es una resta rota con
+            #  cara de dato. Se dice que no se sabe y por que, que es lo que el
+            #  resto del Supervisor hace con un DESCONOCIDO.
+            #
+            #  La causa vive en la sincronizacion, no aqui: la skill de WispHub
+            #  ya documenta un desfase de +5 h en fechas de cierre y formatos
+            #  DD/MM y MM/DD mezclados en la misma API.
             "motivo": (f"WispHub reporta el ticket como cerrado, pero Dexter mantiene "
                        f"el caso abierto. El proveedor lo cerró el "
                        f"{(d.get('cerrado_en_proveedor_el') or '')[:16].replace('T', ' ')} "
-                       f"y en el CRM sigue en '{d.get('estado_crm')}' "
-                       f"({d.get('dias_desalineado')} días desalineados). Es una "
+                       f"y en el CRM sigue en '{d.get('estado_crm')}'"
+                       + (f" ({d.get('dias_desalineado')} días desalineados)."
+                          if d.get("dias_desalineado") is not None else
+                          ". No se puede decir desde cuándo están desalineados: "
+                          "la fecha de cierre del proveedor quedó en el futuro "
+                          "respecto de la lectura, lo que apunta a la "
+                          "sincronización y no al caso.")
+                       + f" Es una "
                        f"inconsistencia entre los dos sistemas: no se afirma "
                        f"incumplimiento de nadie, ni atraso, ni que el problema del "
                        f"cliente esté resuelto -- eso lo sabe el cliente."),
@@ -1617,6 +1652,77 @@ CEREBRO_EN_EL_CICLO = False
 CEREBRO_REGISTRA = True
 
 
+
+
+# =============================================================================
+#  EL PRESUPUESTO DE RAZONAMIENTO  --  un ciclo no puede tardar lo que quiera
+# =============================================================================
+#
+#  EL DEFECTO QUE CIERRA, medido el 07/10/2026
+#  -------------------------------------------
+#  Al encender 'CEREBRO_REGISTRA' el ciclo paso a llamar al modelo UNA VEZ POR
+#  SEÑAL, sin tope. Y el ciclo se dispara desde un boton: es una peticion HTTP
+#  sincrona, con una persona esperando del otro lado.
+#
+#  La cuenta del peor caso: 'VUELTAS_MAXIMAS' = 3 llamadas por señal, cada una
+#  con 'SEGUNDOS_TIMEOUT' = 150 s. Son 450 s por señal. Con diez señales nuevas
+#  el ciclo tarda una hora y la pantalla se queda en "Analizando operacion..."
+#  hasta que algo corta la conexion -- que fue exactamente lo que paso.
+#
+#  POR QUE DOS TOPES Y NO UNO
+#  --------------------------
+#  Un tope por CANTIDAD solo no alcanza: cinco señales que tarden lo maximo son
+#  37 minutos. Un tope por RELOJ solo tampoco: con el modelo rapido dejaria
+#  pasar cincuenta razonamientos y el costo se dispara sin que nadie lo vea.
+#
+#  Los dos juntos acotan las dos cosas que importan --lo que espera una persona
+#  y lo que se gasta-- y cualquiera de los dos que se agote detiene al cerebro
+#  sin detener el ciclo: las señales que siguen se procesan igual, solo que sin
+#  interpretacion. Eso se CUENTA y sale en el resumen, porque un cerebro que
+#  dejo de razonar a la mitad y no lo dice es peor que uno apagado.
+#
+#  ESTOS NUMEROS SON PROVISIONALES, y a proposito. El tope de verdad sale de
+#  medir cuantas señales produce un ciclo real y cuanto tarda cada razonamiento
+#  -- que es justo lo que el registro esta empezando a producir. Hasta tener ese
+#  dato, mejor un tope conservador que una pantalla colgada.
+TOPE_RAZONAMIENTOS_POR_CICLO = 5
+SEGUNDOS_MAXIMOS_DE_RAZONAMIENTO = 90
+
+
+def presupuesto(tope: int = TOPE_RAZONAMIENTOS_POR_CICLO,
+                segundos: int = SEGUNDOS_MAXIMOS_DE_RAZONAMIENTO,
+                ahora=None) -> dict:
+    """
+    Un presupuesto para una corrida: cuantos razonamientos y hasta cuando.
+
+    Se crea UNO por corrida y se comparte entre los caminos que llaman al
+    cerebro --la deteccion y el seguimiento-- porque lo que hay que acotar es lo
+    que espera la persona, y eso no se parte por modulo.
+    """
+    desde = ahora or timezone.now()
+    return {
+        "restantes": max(0, int(tope)),
+        "hasta": desde + timedelta(seconds=max(0, int(segundos))),
+        "usados": 0,
+        "omitidos": 0,
+    }
+
+
+def _hay_presupuesto(p) -> bool:
+    """Si todavia se puede razonar. Sin presupuesto, no se acota nada."""
+    if p is None:
+        return True
+    if p["restantes"] <= 0 or timezone.now() >= p["hasta"]:
+        p["omitidos"] += 1
+        return False
+    return True
+
+
+def _gastar(p) -> None:
+    if p is not None:
+        p["restantes"] -= 1
+        p["usados"] += 1
+
 def _el_cerebro_corre() -> bool:
     """
     Si hay que llamar al cerebro, en cualquiera de los dos modos.
@@ -1672,7 +1778,8 @@ class Aporte:
             enriquecio=self.enriquecio, ahora=ahora)
 
 
-def razonar_sobre(org, senal: "Senal", analisis: dict, *, ahora=None) -> Aporte:
+def razonar_sobre(org, senal: "Senal", analisis: dict, *, ahora=None,
+                  presupuesto=None) -> Aporte:
     """
     Llama al cerebro y devuelve el aporte, sin guardar nada todavia.
 
@@ -1688,6 +1795,11 @@ def razonar_sobre(org, senal: "Senal", analisis: dict, *, ahora=None) -> Aporte:
     """
     if not _el_cerebro_corre():
         return Aporte(analisis)
+    #  El presupuesto se consulta ANTES de armar el contexto: armarlo tambien
+    #  cuesta consultas, y gastarlas para despues no preguntar no tiene sentido.
+    if not _hay_presupuesto(presupuesto):
+        return Aporte(analisis)
+    _gastar(presupuesto)
 
     previo = dict(analisis) if isinstance(analisis, dict) else {}
 
@@ -1838,6 +1950,11 @@ def correr_ciclo(org, ahora=None) -> dict:
 
 
 def _correr_ciclo(org, ahora) -> dict:
+    #  UNO por corrida, compartido con el seguimiento mas abajo: lo que hay que
+    #  acotar es lo que espera la persona del otro lado del boton, y eso no se
+    #  parte por modulo. Ver 'presupuesto' para los dos topes y su motivo.
+    presupuesto_del_ciclo = presupuesto(ahora=ahora)
+
     resumen = {"senales": 0, "propuestas": 0, "repetidas": 0,
                "sin_analisis": 0, "expiradas": 0,
                #  M09-L. Las claves de arriba ya existian y no cambian de
@@ -1889,7 +2006,8 @@ def _correr_ciclo(org, ahora) -> dict:
         #  Por eso 'Aporte' lleva el analisis PREVIO -- despues del
         #  enriquecimiento ya no se puede recuperar, y sin el estado previo no
         #  hay comparacion posible.
-        aporte = razonar_sobre(org, senal, analisis, ahora=ahora)
+        aporte = razonar_sobre(org, senal, analisis, ahora=ahora,
+                               presupuesto=presupuesto_del_ciclo)
         analisis = aporte.analisis
 
         propuesta = registrar_propuesta(org, senal, analisis, ahora)
@@ -1911,6 +2029,13 @@ def _correr_ciclo(org, ahora) -> dict:
             "estado": propuesta.estado,
             "expira_en": propuesta.expira_en.isoformat(),
         }})
+
+    #  QUE PASO CON EL CEREBRO, y se dice aunque sea cero. Un cerebro que dejo
+    #  de razonar a la mitad por falta de presupuesto y no lo cuenta es peor que
+    #  uno apagado: la bandeja se veria igual y nadie sabria por que faltan
+    #  interpretaciones.
+    resumen["razonamientos"] = presupuesto_del_ciclo["usados"]
+    resumen["razonamientos_omitidos"] = presupuesto_del_ciclo["omitidos"]
 
     #  Lo mas urgente primero, y los empates en orden estable por tipo: una
     #  lista que cambia de orden entre dos lecturas iguales no se puede revisar.
@@ -2307,7 +2432,8 @@ def ejecutar_propuesta(propuesta: PropuestaSupervisor, *args, **kwargs):
 CAMPOS_QUE_EL_CEREBRO_ENRIQUECE_EN_SEGUIMIENTO = ("porque",)
 
 
-def interpretar_seguimiento(situacion, salida: dict, *, ahora=None) -> dict:
+def interpretar_seguimiento(situacion, salida: dict, *, ahora=None,
+                            presupuesto=None) -> dict:
     """
     Le pide al cerebro que explique como va una situacion. Devuelve la salida.
 
@@ -2325,6 +2451,9 @@ def interpretar_seguimiento(situacion, salida: dict, *, ahora=None) -> dict:
     """
     if not _el_cerebro_corre() or not isinstance(salida, dict):
         return salida
+    if not _hay_presupuesto(presupuesto):
+        return salida
+    _gastar(presupuesto)
 
     previo = dict(salida)
     org = situacion.org

@@ -77,7 +77,23 @@ export function contrasteDeEstados(evidencia) {
     const valor = String(hit.dato).split(':').slice(1).join(':').trim();
     return valor || null;
   };
-  const crm = buscar(/^estado actual\s*:/i);
+  //  DOS REDACCIONES, Y LAS DOS SON REALES.
+  //
+  //  Los detectores del Supervisor no escriben la misma frase: el de caso
+  //  antiguo deja «estado actual: …» y el de desincronización deja «estado en
+  //  el CRM: …», que ahí es más claro porque la fila de al lado dice «estado en
+  //  el proveedor». Esta función solo conocía la primera.
+  //
+  //  Efecto medido en producción el 07/10/2026: en una propuesta de
+  //  desincronización la fila «Estado» mostraba «No disponible en la fuente» en
+  //  LAS DOS columnas —porque el `&&` de abajo exige las dos— mientras el texto
+  //  de arriba, en la misma pantalla, decía que el caso seguía en 'New'. La
+  //  comparación que justifica la propuesta aparecía vacía.
+  //
+  //  Se acepta cualquiera de las dos en vez de uniformar el backend: el texto
+  //  de la evidencia lo lee una persona, y «estado en el CRM» frente a «estado
+  //  en el proveedor» se entiende mejor que dos «estado actual».
+  const crm = buscar(/^estado (actual|en el crm)\s*:/i);
   const proveedor = buscar(/^estado en el proveedor\s*:/i);
   return crm && proveedor ? { crm, proveedor } : null;
 }
