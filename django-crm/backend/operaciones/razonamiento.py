@@ -197,8 +197,14 @@ def registrar(org, veredicto, *, fuente=FuenteRazonamiento.CICLO,
 #  analisis gana una clave con un dato sensible, queda fuera por defecto en vez
 #  de entrar sin que nadie lo note.
 CLAVES_DEL_PREVIO = (
+    #  Del analisis de una señal del ciclo.
     "accion_propuesta", "prioridad", "nivel", "impacto", "motivo",
     "tipo_senal", "huella_condicion",
+    #  De la salida del seguimiento de una situacion. Sin estas, el estado
+    #  previo de un seguimiento quedaba VACIO y no habia con que comparar --
+    #  justo lo que esta tabla existe para permitir.
+    "veredicto", "porque", "afectados_registrados", "abonados_afectados",
+    "delta", "concluyente",
 )
 
 

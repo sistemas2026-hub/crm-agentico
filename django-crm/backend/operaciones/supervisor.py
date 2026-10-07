@@ -2278,3 +2278,140 @@ def ejecutar_propuesta(propuesta: PropuestaSupervisor, *args, **kwargs):
         f"Shadow Mode: la propuesta {propuesta.id} no se ejecuta. "
         f"El Supervisor observa y recomienda; ejecutar es otra fase."
     )
+
+
+# =============================================================================
+#  EL CEREBRO EN EL SEGUIMIENTO  --  donde deja de reaccionar y sigue un hilo
+# =============================================================================
+#
+#  QUE LO DIFERENCIA DE 'razonar_sobre'
+#  ------------------------------------
+#  'razonar_sobre' interpreta una señal RECIEN DETECTADA: un instante. Esto
+#  interpreta una SITUACION CON HISTORIA -- cuantos afectados tenia, como cambio,
+#  cuantas veces se reviso, que se anoto antes en su linea de tiempo.
+#
+#  Y hay una diferencia concreta, no retorica: aqui el contexto se arma CON la
+#  situacion ('contexto_para(org, situacion=...)'), que es la forma en que el
+#  cerebro al fin ve el hilo completo en vez del ultimo eslabon.
+#
+#  LO QUE PUEDE Y NO PUEDE TOCAR
+#  -----------------------------
+#  Solo 'porque'. El veredicto --estable, empeora, mejora, requiere_humano-- lo
+#  decide 'situaciones_seguimiento.evaluar' con reglas y conteos, y seguira
+#  decidiendolo: es lo que mueve el estado de la situacion y fija cuando volver a
+#  mirarla. Un cerebro que pudiera cambiarlo estaria decidiendo la operacion.
+#
+#  La comprobacion no es un comentario: se recorre la salida campo por campo y se
+#  levanta si algo que no es 'porque' cambio. Mismo patron que
+#  'cerebro.analisis_de_veredicto'.
+CAMPOS_QUE_EL_CEREBRO_ENRIQUECE_EN_SEGUIMIENTO = ("porque",)
+
+
+def interpretar_seguimiento(situacion, salida: dict, *, ahora=None) -> dict:
+    """
+    Le pide al cerebro que explique como va una situacion. Devuelve la salida.
+
+    Con el cerebro apagado devuelve la salida TAL CUAL --el mismo objeto-- y el
+    seguimiento es el de siempre.
+
+    NUNCA LEVANTA por un fallo del modelo o de la base. 'seguir' ademas lo
+    envuelve y cuenta el fallo aparte, pero no se delega: el veredicto ya es
+    correcto sin el cerebro, y perderlo por una interpretacion seria el peor
+    intercambio posible.
+
+    LA UNICA EXCEPCION QUE SI SALE es el AssertionError de abajo, y es a
+    proposito: si el cerebro modifico un campo que no puede tocar, seguir
+    adelante escribiria un veredicto adulterado. Ahi vale mas cortar.
+    """
+    if not _el_cerebro_corre() or not isinstance(salida, dict):
+        return salida
+
+    previo = dict(salida)
+    org = situacion.org
+
+    import json
+    from operaciones import cerebro, razonamiento
+    from operaciones.razonamiento_modelos import FuenteRazonamiento
+
+    try:
+        #  CON la situacion: aqui esta el hilo, no el eslabon.
+        contexto = cerebro.contexto_para(org, situacion=situacion)
+        sin_porque = {k: v for k, v in salida.items() if k != "porque"}
+        veredicto = cerebro.concluir(
+            org,
+            instrucciones=_instrucciones_del_seguimiento(org),
+            entrada=(
+                f"{contexto}\n\n== COMO VA, SEGUN LA REGLA ==\n"
+                f"veredicto: {salida.get('veredicto')}\n"
+                f"porque: {salida.get('porque')}\n"
+                f"abonados afectados: {salida.get('abonados_afectados')}\n"
+                f"cambio desde la ultima revision: {salida.get('delta')}\n"
+                f"datos: "
+                f"{json.dumps(sin_porque, ensure_ascii=False, default=str)[:900]}"))
+    except Exception:                                        # noqa: BLE001
+        return salida
+
+    #  LA CONSTANCIA, siempre que el cerebro haya corrido -- tambien cuando no
+    #  concluye, que es la mitad del valor de medirlo. Apunta a la SITUACION, lo
+    #  otro que la restriccion de la tabla acepta ademas de una propuesta.
+    enriquecera = bool(CEREBRO_EN_EL_CICLO and veredicto.concluyente
+                       and veredicto.recomendacion.strip())
+    razonamiento.registrar(
+        org, veredicto, fuente=FuenteRazonamiento.SEGUIMIENTO,
+        situacion=situacion, analisis_previo=previo,
+        enriquecio=enriquecera, ahora=ahora)
+
+    if not enriquecera:
+        return salida
+
+    nueva = dict(salida)
+    nueva["porque"] = (f"{salida.get('porque', '')} "
+                       f"{veredicto.recomendacion.strip()}").strip()[:1000]
+
+    #  ESTRUCTURAL, no documental: si algo que no es 'porque' cambio, se corta.
+    for clave, valor in previo.items():
+        if clave in CAMPOS_QUE_EL_CEREBRO_ENRIQUECE_EN_SEGUIMIENTO:
+            continue
+        if nueva.get(clave) != valor:
+            raise AssertionError(
+                f"el cerebro modifico '{clave}' del seguimiento, que no puede "
+                f"tocar: el veredicto y la proxima revision son de la regla")
+    return nueva
+
+
+_INSTRUCCIONES_DEL_SEGUIMIENTO = """\
+Sos el Supervisor NOC IA de un ISP. Una situacion que ya conocias se acaba de
+revisar, y una REGLA ya dijo como va: estable, empeora, mejora, sin evidencia,
+requiere humano o puede resolverse. Vos NO cambias ese veredicto.
+
+Tu trabajo es el que la regla no puede hacer: mirar la historia de esta
+situacion y decir que se entiende de como viene evolucionando. No repitas el
+conteo que la regla ya hizo -- deci lo que el conteo no dice.
+
+Consulta las herramientas antes de afirmar cualquier cosa. Un hecho que no salga
+de una herramienta no es un hecho, y se va a descartar.
+
+Lo que mas sirve aqui: si lo que esta pasando se parece a algo que ya paso antes
+en esta misma situacion, si el cambio desde la ultima revision significa algo
+distinto de lo que parece, y que convendria verificar ahora.
+
+Si no tenes nada que agregar, decilo en "falta". Un veredicto sin tu aporte ya es
+correcto; uno con un aporte inventado es peor que sin el.
+
+No propongas ejecutar nada: no podes, y decir que lo hiciste seria mentir.
+"""
+
+
+def _instrucciones_del_seguimiento(org) -> str:
+    """
+    El nucleo del seguimiento mas el estilo editable de la empresa.
+
+    Reusa el ambito 'ciclo' a proposito y no inventa un tercero: lo que se afina
+    ahi --que el texto sea corto y se lea de un vistazo-- es lo mismo que hace
+    falta aqui, y un ambito mas seria una pantalla mas que nadie pidio. Si algun
+    dia los dos necesitan tonos distintos, agregarlo es una linea.
+    """
+    from operaciones import estilo as svc_estilo
+    from operaciones.estilo_modelos import AmbitoEstilo
+    return (_INSTRUCCIONES_DEL_SEGUIMIENTO + "\n\n"
+            + svc_estilo.vigente(org, AmbitoEstilo.CICLO))

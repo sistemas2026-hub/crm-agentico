@@ -591,3 +591,211 @@ def test_11e_los_antecedentes_llegan_al_cerebro(org_a, monkeypatch):
     assert "== ANTECEDENTES ==" in recibido["entrada"], (
         "el ciclo no le esta pasando los antecedentes al cerebro")
     assert "agrupar_casos" in recibido["entrada"]
+
+
+# =============================================================================
+#  12 · EL CEREBRO EN EL SEGUIMIENTO  --  el hilo, no el eslabon
+# =============================================================================
+
+def _situacion(org, clave=None):
+    """
+    Una situacion abierta por el camino REAL.
+
+    Se usa 'situaciones.abrir' y no 'objects.create': la situacion la crea el
+    servicio, con su codigo, su huella y su evento de deteccion. Construirla a
+    mano produciria una fila que el seguimiento no reconoce como suya.
+    """
+    from operaciones import deteccion, situaciones as svc
+    from operaciones.fuentes_modelos import Fuente
+    from operaciones.situaciones_modelos import (Confianza, Riesgo,
+                                                 SituacionOperativa as S,
+                                                 TipoAfectado)
+
+    clave = clave or f"4/1/{uuid.uuid4().hex[:3]}"
+    senal = deteccion.Senal(
+        fuente=Fuente.SMARTOLT,
+        tipo_situacion=S.AFECTACION_PON,
+        dimension="pon", clave_dimension=clave,
+        hecho=f"7 ONT afectadas en el PON {clave}",
+        relacion=f"las 7 pertenecen al mismo puerto PON {clave}",
+        interpretacion="hay concentracion topologica",
+        riesgo=Riesgo.ALTO,
+        hipotesis=f"posible falla optica en el PON {clave}",
+        confianza=Confianza.MEDIA,
+        recomendacion="verificar el PON",
+        afectados=[{"tipo": TipoAfectado.PON, "identificador": clave,
+                    "etiqueta": "CTO 56", "datos": {"afectados": 7}}],
+        evidencia=[{"fuente": Fuente.SMARTOLT, "dato": "7 ONT",
+                    "observado_en": timezone.now().isoformat()}],
+        observada_en=timezone.now())
+    return svc.abrir(org, senal)
+
+
+SALIDA = {
+    "veredicto": "empeora",
+    "porque": "pasaron de 4 a 7 abonados afectados",
+    "afectados_registrados": 7,
+    "abonados_afectados": 7,
+    "delta": 3,
+    "concluyente": True,
+}
+
+
+def test_12_apagado_devuelve_la_salida_sin_tocarla(org_a, monkeypatch):
+    """El mismo objeto, no una copia igual: si hay copia por el medio, se nota."""
+    _con_banderas(monkeypatch, registra=False, enriquece=False)
+    s = _situacion(org_a)
+    entrada = dict(SALIDA)
+    assert supervisor.interpretar_seguimiento(s, entrada) is entrada
+
+
+def test_12b_solo_registra_deja_el_veredicto_intacto(org_a, monkeypatch):
+    """
+    El cerebro razona sobre la situacion y guarda, y el veredicto de la regla
+    sale campo por campo igual. El veredicto mueve el estado de la situacion y
+    fija cuando volver a mirarla: no es del cerebro.
+    """
+    from operaciones.razonamiento_modelos import (FuenteRazonamiento,
+                                                  RazonamientoSupervisor)
+    _con_banderas(monkeypatch, registra=True, enriquece=False)
+    _concluye_con(monkeypatch, _veredicto())
+
+    s = _situacion(org_a)
+    salida = supervisor.interpretar_seguimiento(s, dict(SALIDA))
+
+    for clave, valor in SALIDA.items():
+        assert salida[clave] == valor, f"cambio el campo {clave} en solo registra"
+
+    fila = RazonamientoSupervisor.objects.filter(org=org_a, situacion=s).first()
+    assert fila is not None, "no dejo constancia del seguimiento"
+    assert fila.fuente == FuenteRazonamiento.SEGUIMIENTO
+    assert fila.enriquecio is False
+
+
+def test_12c_guarda_el_veredicto_previo_de_la_regla(org_a, monkeypatch):
+    """
+    Sin el estado previo no hay comparacion. Para un seguimiento el previo es el
+    veredicto de la regla, que antes quedaba VACIO porque la lista blanca de
+    'CLAVES_DEL_PREVIO' solo conocia las claves de una propuesta.
+    """
+    from operaciones.razonamiento_modelos import RazonamientoSupervisor
+    _con_banderas(monkeypatch, registra=True, enriquece=False)
+    _concluye_con(monkeypatch, _veredicto())
+
+    s = _situacion(org_a)
+    supervisor.interpretar_seguimiento(s, dict(SALIDA))
+
+    previo = RazonamientoSupervisor.objects.get(org=org_a, situacion=s)
+    assert previo.analisis_deterministico.get("veredicto") == "empeora"
+    assert previo.analisis_deterministico.get("delta") == 3
+
+
+def test_12d_el_cerebro_ve_la_SITUACION_no_solo_el_ultimo_dato(org_a, monkeypatch):
+    """
+    LA PRUEBA QUE JUSTIFICA ESTE PASO.
+
+    En el ciclo el cerebro ve una señal recien detectada; aqui tiene que ver la
+    situacion con su historia. Se intercepta 'contexto_para' y se afirma que se
+    la pasan -- si se llamara sin ella, el cerebro seguiria razonando sobre un
+    eslabon y esto no seria distinto del ciclo.
+    """
+    from operaciones import cerebro
+    recibido = {}
+
+    def espiar_contexto(org, **k):
+        recibido.update(k)
+        return "panorama con la situacion"
+
+    _con_banderas(monkeypatch, registra=True, enriquece=False)
+    monkeypatch.setattr(cerebro, "contexto_para", espiar_contexto)
+    monkeypatch.setattr(cerebro, "concluir", lambda *a, **k: _veredicto())
+
+    s = _situacion(org_a)
+    supervisor.interpretar_seguimiento(s, dict(SALIDA))
+
+    assert recibido.get("situacion") is s, (
+        "el contexto se armo SIN la situacion: el cerebro sigue viendo un "
+        "eslabon y no el hilo")
+
+
+def test_12e_un_fallo_del_modelo_no_toca_el_veredicto(org_a, monkeypatch):
+    """Degradar, no romper: el veredicto ya es correcto sin el cerebro."""
+    from operaciones import cerebro
+
+    def revienta(*a, **k):
+        raise RuntimeError("el modelo no contesta")
+
+    _con_banderas(monkeypatch, registra=True, enriquece=False)
+    monkeypatch.setattr(cerebro, "contexto_para", lambda *a, **k: "x")
+    monkeypatch.setattr(cerebro, "concluir", revienta)
+
+    s = _situacion(org_a)
+    entrada = dict(SALIDA)
+    assert supervisor.interpretar_seguimiento(s, entrada) is entrada
+
+
+def test_12f_enriquece_solo_el_porque(org_a, monkeypatch):
+    """
+    Con el enriquecimiento encendido, el 'porque' crece y nada mas cambia. La
+    comprobacion estructural de 'interpretar_seguimiento' levantaria si no.
+    """
+    _con_banderas(monkeypatch, registra=True, enriquece=True)
+    _concluye_con(monkeypatch, _veredicto(
+        recomendacion="revisar la acometida antes de despachar visitas"))
+
+    s = _situacion(org_a)
+    salida = supervisor.interpretar_seguimiento(s, dict(SALIDA))
+
+    assert "revisar la acometida" in salida["porque"]
+    assert SALIDA["porque"] in salida["porque"], "borro el porque de la regla"
+    for clave, valor in SALIDA.items():
+        if clave == "porque":
+            continue
+        assert salida[clave] == valor, f"el cerebro toco el campo {clave}"
+
+
+def test_12g_el_seguimiento_real_llama_al_interprete(org_a):
+    """
+    CODIGO CONSTRUIDO NO ES CODIGO QUE CORRE.
+
+    Las de arriba prueban la funcion. Esta recorre 'seguir', que es lo que el
+    ciclo llama de verdad, y afirma que el interprete se invoca por cada
+    situacion evaluada.
+    """
+    from operaciones import situaciones_seguimiento as seg
+
+    _situacion(org_a)
+    llamado = {"veces": 0}
+
+    def interprete(situacion, salida, *, ahora=None):
+        llamado["veces"] += 1
+        return salida
+
+    informe = seg.seguir(org_a, interpretar=interprete)
+
+    assert informe["evaluadas"] >= 1
+    assert llamado["veces"] == informe["evaluadas"], (
+        "el seguimiento no esta llamando al interprete por cada situacion")
+
+
+def test_12h_correlacion_inyecta_el_interprete_de_verdad(org_a, monkeypatch):
+    """
+    Cierra el circuito hasta el llamador real: 'correlacion.correr' es quien
+    arma el seguimiento, y tiene que pasarle el interprete del supervisor. Es la
+    unica que caza el olvido de inyectarlo ahi.
+    """
+    from operaciones import correlacion
+    from operaciones import situaciones_seguimiento as seg
+
+    recibido = {}
+
+    def espiar(org, **k):
+        recibido.update(k)
+        return {"evaluadas": 0, "por_veredicto": {}, "errores": 0,
+                "piden_humano": 0}
+
+    monkeypatch.setattr(seg, "seguir", espiar)
+    correlacion.correr(org_a)
+
+    assert recibido.get("interpretar") is supervisor.interpretar_seguimiento, (
+        "correlacion no le esta pasando el interprete al seguimiento")

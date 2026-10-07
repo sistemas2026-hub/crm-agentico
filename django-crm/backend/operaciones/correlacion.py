@@ -409,10 +409,16 @@ def correr(org, *, ahora=None) -> dict:
     #
     #  El proponedor se le PASA al seguimiento en vez de que lo importe: el
     #  seguimiento produce veredictos y no tiene por que conocer las propuestas.
-    from operaciones import situaciones_propuestas, situaciones_seguimiento
+    #  El interprete se pasa por el mismo motivo que el proponedor: el
+    #  seguimiento produce veredictos y no tiene por que conocer el cerebro. Con
+    #  las banderas apagadas 'interpretar_seguimiento' devuelve la salida tal
+    #  cual, y esto es exactamente el seguimiento de antes.
+    from operaciones import (situaciones_propuestas, situaciones_seguimiento,
+                             supervisor as sup)
 
     informe["seguimiento"] = situaciones_seguimiento.seguir(
-        org, ahora=ahora, proponer=situaciones_propuestas.proponer)
+        org, ahora=ahora, proponer=situaciones_propuestas.proponer,
+        interpretar=sup.interpretar_seguimiento)
 
     informe["vivas"] = S.objects.filter(org=org, estado__in=S.VIVAS).count()
     return informe
