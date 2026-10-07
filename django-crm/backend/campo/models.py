@@ -1431,3 +1431,13 @@ from campo.inventario_operacion import (  # noqa: E402,F401
     Proveedor,
     ReservaDeMaterial,
 )
+
+# Las cuadrillas viven en su propio módulo por el mismo motivo que el
+# inventario: `models.py` ya concentra demasiado, y un equipo de campo es un
+# dominio con sus propias reglas. Se re-exportan para que Django las registre
+# y para que nadie tenga que saber en qué archivo quedó cada una.
+from campo.cuadrillas import (  # noqa: E402,F401
+    Cuadrilla,
+    IntegranteDeJornada,
+    JornadaDeCuadrilla,
+)
