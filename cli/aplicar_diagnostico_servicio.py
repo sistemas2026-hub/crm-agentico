@@ -46,6 +46,18 @@ lado donde el dato si estaba.
 """
 
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+if sys.stdout.encoding != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+from dotenv import load_dotenv          # noqa: E402
+# override=False: el entorno explicito gana, el archivo solo rellena. Mismo
+# criterio que el resto de cli/. Sin esto el script no encuentra la base y
+# fallaria con un error que no dice que falto la credencial.
+load_dotenv(override=False)
 
 #  Lo que se agrega. Es el MISMO contenido que la semilla declara: si los dos
 #  divergen, el que manda es este archivo, porque es el que se aplica.
