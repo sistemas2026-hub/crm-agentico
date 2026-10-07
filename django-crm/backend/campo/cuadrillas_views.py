@@ -34,6 +34,21 @@ from campo.permissions import IsCampoAuthenticated, ROLES_GESTION
 from common.models import Profile
 
 
+#: Cuanto historial se puede pedir de una vez.
+#:
+#: Sin tope, pedir un año entero devuelve todo y la pantalla se cuelga sin que
+#: nadie entienda por que. Tres meses cubren "el trimestre pasado", que es el
+#: horizonte con el que se mira de verdad una cuadrilla.
+MAX_DIAS_DE_HISTORIAL = 92
+
+
+def _fecha_de(texto: str):
+    """AAAA-MM-DD a fecha. Lanza ValueError si no lo es."""
+    import datetime as _dt
+
+    return _dt.date.fromisoformat(texto)
+
+
 def _exigir_gestion(request):
     """403 si quien pide no puede repartir trabajo."""
     rol = (getattr(request.profile, "role", "") or "").upper()
@@ -185,20 +200,73 @@ class JornadaDeCuadrillaView(APIView):
     permission_classes = [IsCampoAuthenticated]
 
     def get(self, request):
+        """Un dia, o un RANGO.
+
+        `?fecha=` sigue devolviendo un dia, que es con lo que se arma mañana.
+        `?desde=&hasta=` devuelve el historial, que contesta otra pregunta:
+        quien estuvo con quien, y que dia. El dato siempre estuvo completo --una
+        fila por persona y por jornada-- y lo unico que faltaba era poder
+        leerlo junto en vez de ir cambiando la fecha de a un dia.
+
+        Se puede acotar por `cuadrilla` o por `profile`. La segunda es la que
+        importa el dia que haya que responder "quien estaba en esa
+        instalacion": sin ella hay que abrir cuadrilla por cuadrilla.
+        """
         org = request.profile.org
         fecha = (request.query_params.get("fecha") or "").strip()
-        if not fecha:
-            return Response({"detail": "Hace falta la fecha."},
-                            status=status.HTTP_400_BAD_REQUEST)
+        desde = (request.query_params.get("desde") or "").strip()
+        hasta = (request.query_params.get("hasta") or "").strip()
+
+        if not fecha and not (desde and hasta):
+            return Response(
+                {"detail": "Hace falta 'fecha', o 'desde' y 'hasta'."},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        qs = JornadaDeCuadrilla.objects.filter(org=org)
+        if fecha:
+            qs = qs.filter(fecha=fecha)
+        else:
+            # UN TOPE, Y DICHO. Sin el, pedir un año entero devuelve todo y la
+            # pantalla se cuelga sin que nadie entienda por que. Tres meses
+            # cubren "el trimestre pasado", que es lo que se mira de verdad.
+            try:
+                dias = (_fecha_de(hasta) - _fecha_de(desde)).days
+            except ValueError:
+                return Response({"detail": "Las fechas van en AAAA-MM-DD."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if dias < 0:
+                return Response({"detail": "'hasta' es anterior a 'desde'."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if dias > MAX_DIAS_DE_HISTORIAL:
+                return Response(
+                    {"detail": f"El rango no puede pasar de "
+                               f"{MAX_DIAS_DE_HISTORIAL} dias."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            qs = qs.filter(fecha__gte=desde, fecha__lte=hasta)
+
+        cuadrilla = (request.query_params.get("cuadrilla") or "").strip()
+        if cuadrilla:
+            qs = qs.filter(cuadrilla_id=cuadrilla)
+
+        # POR PERSONA: las jornadas donde ESA persona estuvo, con la cuadrilla
+        # y el rol que tuvo cada dia. Es la vista que contesta "con quien
+        # trabajo Pedro el martes".
+        persona = (request.query_params.get("profile") or "").strip()
+        if persona:
+            qs = qs.filter(integrantes__profile_id=persona)
 
         qs = (
-            JornadaDeCuadrilla.objects
-            .filter(org=org, fecha=fecha)
-            .select_related("cuadrilla", "lider__user")
+            qs.select_related("cuadrilla", "lider__user")
             .prefetch_related("integrantes__profile__user")
+            .distinct()
+            .order_by("fecha", "cuadrilla__nombre")
         )
-        return Response({"fecha": fecha,
-                         "jornadas": [_jornada_json(j) for j in qs]})
+        return Response({
+            "fecha": fecha,
+            "desde": desde,
+            "hasta": hasta,
+            "jornadas": [_jornada_json(j) for j in qs],
+        })
 
     def post(self, request):
         _exigir_gestion(request)

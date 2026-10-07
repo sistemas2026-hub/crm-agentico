@@ -307,6 +307,102 @@
       </section>
     {/if}
 
+    <!-- ============ EL HISTORIAL ============ -->
+    <section class="snoc-panel" style="gap:var(--snoc-sm);">
+      <div class="snoc-pila-xs">
+        <h2 class="snoc-h2">Quién estuvo con quién</h2>
+        <p class="snoc-body-sm snoc-secundario">
+          El dato siempre estuvo completo —una fila por persona y por día—; esto lo lee
+          junto en vez de ir cambiando la fecha de a uno.
+        </p>
+      </div>
+
+      <!-- Va por GET: así un historial se comparte por enlace, igual que el día. -->
+      <form method="GET" class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+        <input type="hidden" name="dia" value={data.dia} />
+        <label class="snoc-campo-grupo">
+          <span class="snoc-label">Desde</span>
+          <input class="snoc-campo" type="date" name="desde" value={data.historial.desde} />
+        </label>
+        <label class="snoc-campo-grupo">
+          <span class="snoc-label">Hasta</span>
+          <input class="snoc-campo" type="date" name="hasta" value={data.historial.hasta} />
+        </label>
+        <label class="snoc-campo-grupo">
+          <span class="snoc-label">De una cuadrilla</span>
+          <select class="snoc-select" name="cual" value={data.historial.cual}>
+            <option value="">— todas —</option>
+            {#each data.cuadrillas as c (c.id)}
+              <option value={c.id}>{c.nombre}</option>
+            {/each}
+          </select>
+        </label>
+        <label class="snoc-campo-grupo">
+          <span class="snoc-label">O de una persona</span>
+          <select class="snoc-select" name="quien" value={data.historial.quien}>
+            <option value="">— nadie en particular —</option>
+            {#each data.personas as p (p.id)}
+              <option value={p.id}>{p.nombre}</option>
+            {/each}
+          </select>
+        </label>
+        <button class="snoc-btn" type="submit">Ver</button>
+      </form>
+
+      {#if data.historial.error}
+        <p class="snoc-aviso snoc-error-txt">
+          {data.historial.motivo || 'No se pudo leer el historial.'}
+        </p>
+      {:else if !data.historial.pedido}
+        <p class="snoc-body-sm snoc-secundario">
+          Elegí un rango y una cuadrilla o una persona. No se trae solo: es una consulta de
+          hasta tres meses y esta pantalla se abre casi siempre para asignar, no para mirar
+          atrás.
+        </p>
+      {:else if data.historial.jornadas.length === 0}
+        <p class="snoc-body-sm snoc-secundario">
+          No hay ninguna jornada en ese rango. Que no haya no es lo mismo que no haber
+          podido leerlas: esto es una respuesta, no un error.
+        </p>
+      {:else}
+        <table class="snoc-tabla">
+          <thead>
+            <tr>
+              <th>Día</th>
+              <th>Cuadrilla</th>
+              <th>Labor</th>
+              <th>Quiénes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each data.historial.jornadas as j (j.id)}
+              <tr>
+                <td class="snoc-mono">{j.fecha}</td>
+                <td>{j.cuadrilla?.nombre ?? '—'}</td>
+                <td>
+                  <span class="snoc-insignia snoc-insignia-neutra">{j.labor_nombre}</span>
+                </td>
+                <td>
+                  {#each j.integrantes as i (i.id)}
+                    <!-- La persona consultada se destaca: en una fila de cinco,
+                         encontrarla a ojo es justo lo que uno vino a evitar. -->
+                    <span
+                      class="snoc-tag"
+                      class:snoc-insignia-primaria={i.id === data.historial.quien}
+                    >
+                      {i.nombre} · {i.rol.replace('_', ' ')}
+                    </span>
+                  {:else}
+                    <span class="snoc-sin-dato">—</span>
+                  {/each}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
+    </section>
+
     <!-- ============ QUIÉNES SON ============ -->
     <section class="snoc-panel" style="gap:var(--snoc-sm);">
       <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">

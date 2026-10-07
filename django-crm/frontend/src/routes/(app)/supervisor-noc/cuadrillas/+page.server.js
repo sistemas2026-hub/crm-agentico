@@ -4,6 +4,7 @@ import {
   crearCuadrilla,
   editarCuadrilla,
   leerJornadaDeCuadrillas,
+  leerHistorialDeCuadrillas,
   armarJornada
 } from '$lib/server/v2/cuadrillas.js';
 import { leerPersonas, leerUbicaciones } from '$lib/server/v2/inventario.js';
@@ -30,15 +31,33 @@ export async function load({ url, cookies }) {
   const dia = (url.searchParams.get('dia') ?? '').trim() || hoy();
   const verBajas = url.searchParams.get('bajas') === '1';
 
+  // EL HISTORIAL SE PIDE, NO VIENE SIEMPRE. Es otra pregunta que «armar
+  // mañana», y traerlo en cada visita costaría una consulta de hasta tres
+  // meses para una pantalla que la mayoría de las veces se abre a asignar.
+  const verQuien = (url.searchParams.get('quien') ?? '').trim();
+  const verCual = (url.searchParams.get('cual') ?? '').trim();
+  const desde = (url.searchParams.get('desde') ?? '').trim();
+  const hasta = (url.searchParams.get('hasta') ?? '').trim();
+  const hayHistorial = Boolean((verQuien || verCual) && desde && hasta);
+
   // Las cuatro juntas: sin personas no se puede armar una cuadrilla, sin
   // vehículos no se le puede asignar uno, y sin la jornada no se sabe qué
   // hace hoy. Pedirlas en serie sumaría tres esperas que no hacen falta.
-  const [cuadrillas, jornada, personas, ubicaciones] = await Promise.all([
-    leerCuadrillas({ cookies }, verBajas),
-    leerJornadaDeCuadrillas({ cookies }, dia),
-    leerPersonas({ cookies }),
-    leerUbicaciones({ cookies })
-  ]);
+  const [cuadrillas, jornada, personas, ubicaciones, historial] =
+    await Promise.all([
+      leerCuadrillas({ cookies }, verBajas),
+      leerJornadaDeCuadrillas({ cookies }, dia),
+      leerPersonas({ cookies }),
+      leerUbicaciones({ cookies }),
+      hayHistorial
+        ? leerHistorialDeCuadrillas({ cookies }, {
+            desde,
+            hasta,
+            cuadrilla: verCual,
+            profile: verQuien
+          })
+        : Promise.resolve({ jornadas: [], error: false, motivo: '' })
+    ]);
 
   const vehiculos = (ubicaciones.ubicaciones ?? []).filter(
     (u) => u.tipo === 'vehiculo'
@@ -49,6 +68,16 @@ export async function load({ url, cookies }) {
     verBajas,
     cuadrillas: cuadrillas.cuadrillas,
     jornadas: jornada.jornadas,
+    historial: {
+      pedido: hayHistorial,
+      desde,
+      hasta,
+      quien: verQuien,
+      cual: verCual,
+      jornadas: historial.jornadas,
+      error: historial.error,
+      motivo: historial.motivo
+    },
     personas: personas.personas,
     vehiculos,
     // NO SE INVENTA UN CERO CUANDO LA LECTURA FALLÓ. Una empresa sin

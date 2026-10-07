@@ -65,6 +65,39 @@ export async function leerJornadaDeCuadrillas(ctx, dia) {
 }
 
 /**
+ * El historial: qué hizo cada cuadrilla —o cada persona— entre dos fechas.
+ *
+ * Contesta otra pregunta que `leerJornadaDeCuadrillas`, que devuelve un día
+ * para armar mañana. Esto contesta «quién estuvo con quién, y qué día»: el
+ * dato siempre estuvo completo y lo que faltaba era poder leerlo junto en vez
+ * de ir cambiando la fecha de a un día.
+ *
+ * `cuadrilla` y `profile` son opcionales y se excluyen en la pantalla, no acá:
+ * el backend acepta los dos a la vez y devuelve la intersección, que es un
+ * resultado válido aunque la pantalla no lo ofrezca.
+ *
+ * @param {{ cookies: any }} ctx
+ * @param {{ desde: string, hasta: string, cuadrilla?: string, profile?: string }} filtros
+ */
+export async function leerHistorialDeCuadrillas(ctx, filtros) {
+  const q = new URLSearchParams({ desde: filtros.desde, hasta: filtros.hasta });
+  if (filtros.cuadrilla) q.set('cuadrilla', filtros.cuadrilla);
+  if (filtros.profile) q.set('profile', filtros.profile);
+  try {
+    const d = await apiRequest(`/campo/cuadrillas/jornada/?${q}`, {}, ctx);
+    return { jornadas: d?.jornadas ?? [], error: false, motivo: '' };
+  } catch (e) {
+    // El motivo viaja: un rango demasiado largo se arregla acortándolo, y sin
+    // el mensaje la pantalla solo podría decir «no se pudo».
+    return {
+      jornadas: [],
+      error: true,
+      motivo: e?.body?.detail || e?.detail || ''
+    };
+  }
+}
+
+/**
  * Arma (o reescribe) el día de una cuadrilla.
  *
  * Es idempotente por cuadrilla y fecha: mandarlo dos veces deja lo mismo que

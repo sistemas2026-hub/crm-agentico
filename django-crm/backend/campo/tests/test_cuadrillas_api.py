@@ -176,3 +176,109 @@ def test_l_pero_SI_puede_mirar_quien_trabaja_hoy(user_client, cuadrilla):
     """Mirar no es repartir: el lider tiene que poder ver su propia jornada."""
     assert user_client.get(CUADRILLAS).status_code == 200
     assert user_client.get(JORNADA, {"fecha": LUNES}).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# C · el historial: quien estuvo con quien, y que dia
+# ---------------------------------------------------------------------------
+
+MIERCOLES = "2026-10-07"
+
+
+def test_m_un_rango_trae_los_dias_en_orden(
+    admin_client, cuadrilla, admin_profile
+):
+    """Lo que antes obligaba a cambiar la fecha de a un dia."""
+    gente = [{"profile": str(admin_profile.id), "rol": "tecnico"}]
+    _armar(admin_client, cuadrilla, LUNES, "instalacion", gente)
+    _armar(admin_client, cuadrilla, MARTES, "instalacion", gente)
+    _armar(admin_client, cuadrilla, MIERCOLES, "correctivo", gente)
+
+    r = admin_client.get(JORNADA, {"desde": LUNES, "hasta": MIERCOLES})
+    assert r.status_code == 200, r.content
+    dias = [(j["fecha"], j["labor"]) for j in r.json()["jornadas"]]
+    assert dias == [
+        (LUNES, "instalacion"),
+        (MARTES, "instalacion"),
+        (MIERCOLES, "correctivo"),
+    ]
+
+
+def test_n_el_historial_de_UNA_cuadrilla(
+    admin_client, org_a, cuadrilla, admin_profile, user_profile
+):
+    otra = Cuadrilla.objects.create(org=org_a, nombre="Cuadrilla 2")
+    _armar(admin_client, cuadrilla, LUNES, "instalacion",
+           [{"profile": str(admin_profile.id), "rol": "tecnico"}])
+    _armar(admin_client, otra, LUNES, "correctivo",
+           [{"profile": str(user_profile.id), "rol": "tecnico"}])
+
+    r = admin_client.get(JORNADA, {
+        "desde": LUNES, "hasta": MIERCOLES, "cuadrilla": str(cuadrilla.id),
+    })
+    jornadas = r.json()["jornadas"]
+    assert [j["cuadrilla"]["nombre"] for j in jornadas] == ["Cuadrilla 1"]
+
+
+def test_o_con_quien_trabajo_UNA_persona(
+    admin_client, org_a, cuadrilla, admin_profile, user_profile
+):
+    """La vista que contesta «quien estaba en esa instalacion».
+
+    El auxiliar cambia de cuadrilla entre el lunes y el miercoles, y las dos
+    cosas tienen que quedar escritas.
+    """
+    otra = Cuadrilla.objects.create(org=org_a, nombre="Cuadrilla 2")
+    _armar(admin_client, cuadrilla, LUNES, "instalacion", [
+        {"profile": str(admin_profile.id), "rol": "tecnico_lider"},
+        {"profile": str(user_profile.id), "rol": "ayudante"},
+    ])
+    _armar(admin_client, otra, MIERCOLES, "correctivo", [
+        {"profile": str(user_profile.id), "rol": "tecnico"},
+    ])
+
+    r = admin_client.get(JORNADA, {
+        "desde": LUNES, "hasta": MIERCOLES, "profile": str(user_profile.id),
+    })
+    jornadas = r.json()["jornadas"]
+    assert [(j["fecha"], j["cuadrilla"]["nombre"]) for j in jornadas] == [
+        (LUNES, "Cuadrilla 1"),
+        (MIERCOLES, "Cuadrilla 2"),
+    ]
+
+    # Y el rol que tuvo cada dia viaja: paso de ayudante a tecnico.
+    roles = []
+    for j in jornadas:
+        roles += [i["rol"] for i in j["integrantes"]
+                  if i["id"] == str(user_profile.id)]
+    assert roles == ["ayudante", "tecnico"]
+
+
+def test_p_una_jornada_donde_NO_estuvo_no_aparece(
+    admin_client, cuadrilla, admin_profile, user_profile
+):
+    """Si colara, el historial de una persona diria que estuvo donde no."""
+    _armar(admin_client, cuadrilla, LUNES, "instalacion",
+           [{"profile": str(admin_profile.id), "rol": "tecnico"}])
+
+    r = admin_client.get(JORNADA, {
+        "desde": LUNES, "hasta": MIERCOLES, "profile": str(user_profile.id),
+    })
+    assert r.json()["jornadas"] == []
+
+
+def test_q_un_rango_demasiado_largo_se_rechaza(admin_client):
+    r = admin_client.get(JORNADA, {"desde": "2026-01-01", "hasta": "2026-12-31"})
+    assert r.status_code == 400
+    assert "92" in r.json()["detail"], "dice cual es el tope"
+
+
+def test_r_sin_fecha_ni_rango_lo_dice(admin_client):
+    r = admin_client.get(JORNADA)
+    assert r.status_code == 400
+    assert "desde" in r.json()["detail"]
+
+
+def test_s_hasta_anterior_a_desde_se_rechaza(admin_client):
+    r = admin_client.get(JORNADA, {"desde": MIERCOLES, "hasta": LUNES})
+    assert r.status_code == 400
