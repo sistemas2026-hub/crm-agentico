@@ -153,6 +153,9 @@
      arriba; a 62 se leen como habitaciones. El techo lo pone lo que tapan:
      mas altas y la pared de una sala empieza a comerse la de atras. */
   const ALTO_PARED = 46;
+  /** Para comparar un area con el nombre de un rol: una lleva tildes, el otro no. */
+  const sinTildes = (t) => String(t).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replaceAll('_', ' ').trim().toUpperCase();
   const dibujo = $derived.by(() => {
     const e = rej.ejes, H = ALTO_PARED;
     return (rej.salas || []).map((sala, i) => {
@@ -184,7 +187,12 @@
           poli(e, [u0, v0 + 26, H * 0.66], [u0, v0 + 62, H * 0.66], [u0, v0 + 62, H * 0.26], [u0, v0 + 26, H * 0.26]),
           poli(e, [u0, v0 + 78, H * 0.60], [u0, v0 + 104, H * 0.60], [u0, v0 + 104, H * 0.30], [u0, v0 + 78, H * 0.30])
         ],
-        /* EL NOMBRE VA PINTADO EN EL SUELO, en la franja libre del frente.
+        /* En una sala de UN agente cuyo nombre coincide con el del area, el
+         suelo y el cartel decian lo mismo: "VENTAS" dos veces, una encima de
+         la otra. Se compara sin tildes porque el area las lleva y el nombre
+         del rol no. */
+      repiteNombre: g.miembros.length === 1 && sinTildes(g.area) === sinTildes(g.miembros[0].nombre),
+      /* EL NOMBRE VA PINTADO EN EL SUELO, en la franja libre del frente.
            Las placas flotantes que habia antes no decian de que oficina
            eran: "FACTURACION" aparecia sobre la recepcion y "VENTAS" entre
            dos salas. Pintado dentro no hay confusion posible.
@@ -430,12 +438,14 @@
             {/each}
 
             <!-- el nombre, pintado en el suelo de SU oficina -->
+            {#if !sala.repiteNombre}
             <g transform="matrix({sala.suelo_texto.matriz} {sala.suelo_texto.centro[0]} {sala.suelo_texto.centro[1]})">
               <text x="0" y="0" text-anchor="middle" fill={tono(sala.color, -0.4)}
                 font-size={sala.suelo_texto.cuerpo} font-weight="800"
                 letter-spacing={sala.suelo_texto.cuerpo * 0.1}
                 opacity=".8">{sala.area.toUpperCase()}</text>
             </g>
+            {/if}
 
             {#each sala.miembros as m (m.agente.nombre)}
               <g class="celda" class:apagado={!pasa(m.agente)}
@@ -493,6 +503,16 @@
         Sin recepción declarada
       </span>
     {/if}
+    <!-- QUIEN TRATA CON EL CLIENTE Y QUIEN NO. Esta banda se perdio al pasar
+         a salas por area --el pie quedo listando areas y nada mas-- y eso
+         borraba justo lo que esta pantalla muestra y el resto no: por donde
+         entra la gente y quien trabaja para adentro. Son dos cosas distintas
+         de las areas, y van las dos. Lo cazo PlantaOficina.test.js, no mirar
+         la pantalla: el rotulo seguia calculandose y solo dejo de pintarse. -->
+    {#each zonasPresentes as z (z)}
+      <span class="zona"><i style="background:{ZONAS[z].color}"></i>{ZONAS[z].rotulo}</span>
+    {/each}
+    <span class="sep"></span>
     {#each areasPresentes as a (a)}
       <span class="zona"><i style="background:{colorDeArea(a, areasPresentes)}"></i>{a}</span>
     {/each}
@@ -545,6 +565,7 @@
     flex: 0 0 auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     padding: 6px 4px 0;
   }
+  .sep { width: 1px; align-self: stretch; background: #DCE3EC; }
   .zona, .frescura, .falta {
     display: flex; align-items: center; gap: 5px;
     font-size: 9px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600;
