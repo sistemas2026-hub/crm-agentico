@@ -11,8 +11,7 @@
     PRIORITY_TONE,
     CASE_STATUS_TONE,
     CASE_PRIORITY_LABEL,
-    CASE_STATUS_LABEL,
-    CASE_TYPE_LABEL
+    CASE_STATUS_LABEL
   } from '$lib/v2/enums.js';
   import { LifeBuoy, Wrench, Receipt, Building2, Network, UserRound,
            PackageOpen } from '@lucide/svelte';
@@ -292,6 +291,8 @@
   people={data.people}
   tags={data.tags}
   meId={data.meId}
+  buscar
+  buscarEtiqueta="Buscar por cliente, asunto o n.º de ticket"
   meta="Los objetivos de primera respuesta vienen de las horas de SLA de cada ticket"
 />
 
@@ -318,10 +319,16 @@
         <thead>
           <tr>
             <th>Asunto</th>
+            <!-- Cliente y #Ticket reemplazan a Tipo y Cuenta (07/10/2026).
+                 'Tipo' es el enum del CRM generico (Question/Incident/Problem)
+                 y un ISP no lo usa: el asunto del proveedor dice mas. 'Cuenta'
+                 decia "Sin cuenta" en TODAS las filas, porque los clientes del
+                 ISP no existen como cuentas en Dexter. Dos columnas que no
+                 informaban nada ocupando el ancho que les hace falta a estas. -->
+            <th>Cliente</th>
+            <th class="v2-r" style="width:92px">#Ticket</th>
             <th>Prioridad</th>
             <th>Estado</th>
-            <th>Tipo</th>
-            <th>Cuenta</th>
             <th>Asignado a</th>
             <th class="v2-r">Antigüedad</th>
             <th style="width:130px">Primera respuesta</th>
@@ -345,23 +352,39 @@
                   </span>
                 {/if}
               </td>
-              <td><Pill tone={PRIORITY_TONE[t.priority]}>{CASE_PRIORITY_LABEL[t.priority] ?? t.priority}</Pill></td>
-              <td data-m="tag"><Pill tone={CASE_STATUS_TONE[t.status]}>{CASE_STATUS_LABEL[t.status] ?? t.status}</Pill></td>
-              <!-- Nullable on the model and null on plenty of rows, so it says
-                   so rather than printing an empty cell. -->
-              <!-- Traducido como el resto de la fila. El valor viaja en
-                   ingles porque es el enum del CRM ('Question' / 'Incident' /
-                   'Problem'); dejarlo crudo era la unica palabra en ingles de
-                   una pantalla en espanol. El mapa ya existia en enums.js y
-                   esta columna no lo usaba. -->
-              <td class="v2-muted" data-m="hide" style="font-size:12.5px">
-                {CASE_TYPE_LABEL[t.case_type] ?? t.case_type ?? '—'}
-              </td>
-              <td class="v2-muted" style="font-size:12.5px">
-                {#if t.account}
-                  <a class="v2-row-link" href="/accounts/{t.account.id}">{t.account.name}</a>
+              <!-- Sin 'v2-muted': estas dos son DATOS y no texto secundario.
+                   Iban en gris por haber heredado el estilo de las celdas que
+                   reemplazaron (Tipo y Cuenta), que si eran accesorias. -->
+              <td style="font-size:13px">
+                {#if t.external_client_name}
+                  {t.external_client_name}
                 {:else}
-                  Sin cuenta
+                  <span class="v2-muted">—</span>
+                {/if}
+              </td>
+              <td class="v2-r" style="font-size:13px;font-variant-numeric:tabular-nums">
+                {#if t.external_ticket_id}
+                  {t.external_ticket_id}
+                {:else}
+                  <span class="v2-muted">—</span>
+                {/if}
+              </td>
+              <td><Pill tone={PRIORITY_TONE[t.priority]}>{CASE_PRIORITY_LABEL[t.priority] ?? t.priority}</Pill></td>
+              <!-- EL ESTADO DEL PROVEEDOR, y la divergencia cuando la hay.
+                   El equipo trabaja con los estados de WispHub (Nuevo / En
+                   Progreso / Cerrado); los de Dexter son otros y mostrarlos
+                   solos obligaba a traducir de cabeza. Pero no se reemplaza a
+                   ciegas: cuando el proveedor ya cerro y en Dexter sigue
+                   abierto --12 casos el 07/10/2026-- esa diferencia es el
+                   dato, y se dice. -->
+              <td data-m="tag">
+                {#if t.external_status}
+                  <Pill tone={CASE_STATUS_TONE[t.status]}>{t.external_status}</Pill>
+                  {#if t.status !== 'Closed' && t.external_status === 'Cerrado'}
+                    <span class="divergencia">abierto en Dexter</span>
+                  {/if}
+                {:else}
+                  <Pill tone={CASE_STATUS_TONE[t.status]}>{CASE_STATUS_LABEL[t.status] ?? t.status}</Pill>
                 {/if}
               </td>
               <td data-m="hide">
@@ -430,14 +453,27 @@
       </p>
       {#if data.paginacion.previa || data.paginacion.siguiente}
         <nav class="paginas" aria-label="Paginación de la cola">
+          <!-- Numerada y no solo Anterior/Siguiente: con 24 paginas, llegar
+               al final a saltos de uno son 23 clics. La ultima SIEMPRE esta
+               a la vista. -->
           {#if data.paginacion.previa}
-            <a class="v2-btn v2-btn-sm" href={data.paginacion.previa}>← Anteriores</a>
+            <a class="v2-btn v2-btn-sm" href={data.paginacion.previa}>Anterior</a>
+          {:else}
+            <span class="v2-btn v2-btn-sm pag-off">Anterior</span>
           {/if}
-          <span class="v2-sub" style="font-size:12px">
-            Página {data.paginacion.pagina} de {data.paginacion.paginas}
-          </span>
+          {#each data.paginacion.numeros as p}
+            {#if p === null}
+              <span class="pag-hueco" aria-hidden="true">…</span>
+            {:else if p.actual}
+              <span class="v2-btn v2-btn-sm pag-actual" aria-current="page">{p.n}</span>
+            {:else}
+              <a class="v2-btn v2-btn-sm" href={p.url}>{p.n}</a>
+            {/if}
+          {/each}
           {#if data.paginacion.siguiente}
-            <a class="v2-btn v2-btn-sm" href={data.paginacion.siguiente}>Siguientes →</a>
+            <a class="v2-btn v2-btn-sm" href={data.paginacion.siguiente}>Siguiente</a>
+          {:else}
+            <span class="v2-btn v2-btn-sm pag-off">Siguiente</span>
           {/if}
         </nav>
       {/if}
@@ -457,8 +493,32 @@
   }
   .paginas {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
+    gap: 4px;
+  }
+  /* La actual no es un enlace: lleva a donde ya estas. Se marca y no se pulsa. */
+  .pag-actual {
+    font-weight: 600;
+    background: var(--v2-accent-soft, #eef2ff);
+    border-color: var(--v2-accent, #2f6fed);
+    cursor: default;
+  }
+  /* Los extremos se muestran apagados en vez de desaparecer: si el boton se
+     va, los numeros se corren y el siguiente clic cae en otro lado. */
+  .pag-off {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .pag-hueco {
+    padding: 0 2px;
+    color: var(--v2-muted, #6b7280);
+  }
+  .divergencia {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--v2-muted, #6b7280);
   }
   .asignado {
     display: inline-flex;

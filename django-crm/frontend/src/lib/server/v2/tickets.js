@@ -108,6 +108,17 @@ function toRow(row) {
     id: row.id,
     name: row.name ?? '',
     status: row.status,
+    //  El estado del PROVEEDOR, que no siempre es el de Dexter: alla lo
+    //  cierra el sistema, aca lo cierra una persona. La cola muestra el
+    //  externo --es con lo que trabaja el equipo-- y marca la divergencia
+    //  cuando existe, en vez de esconder uno de los dos.
+    external_status: row.external_status ?? null,
+    //  El numero con el que se busca el mismo ticket en el panel del
+    //  proveedor. Es lo que une las dos pantallas.
+    external_ticket_id: row.external_ticket_id ?? null,
+    //  Dato personal, en la lista por decision explicita del 07/10/2026: sin
+    //  el, 153 filas dicen "No Tiene Internet" y ninguna dice de quien es.
+    external_client_name: row.external_client_name ?? '',
     priority: row.priority,
     // Nullable on the model, and null in plenty of seeded rows.
     case_type: row.case_type ?? null,

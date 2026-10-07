@@ -1859,7 +1859,7 @@ roles:
       # ausencia es el diseño: si saliera, bastaria una conversacion para
       # cosecharlos y la garantia de inyeccion se perderia por otra puerta.
       diagnosticar_servicio: [id_servicio, equipo_registrado, estado, causa_caida,
-        senal_dbm, senal_texto, ultima_caida, ultima_conexion, motivo]
+        senal_dbm, senal, estado_config, ultima_caida, ultima_conexion, motivo]
       consultar_incidente_red: [es_incidente_de_red, tipo_alerta, clientes_afectados, porcentaje_afectado, desde,
   zona, caja, motivo, clientes_caidos_a_la_vez, desde_por_tiempos]
       consultar_estado_ont: [onu_status, last_status_change]
@@ -5678,7 +5678,10 @@ herramientas:
     solo_lectura: true
     roles_permitidos: [supervisor_noc, soporte]
     # El lado del DIAGNOSTICO. El otro lo aporta 'resolver_equipo_con'.
-    base_url_ref: SMARTOLT_BASE_URL
+    # El MISMO que usan las otras de SmartOLT. Es el patron de §3.3: el
+    # subdominio varia por empresa y vive en 'variables_tenant', editable
+    # desde /configuracion/variables, nunca fijo en codigo.
+    base_url_ref: SMARTOLT_SUBDOMINIO
     auth_ref: SMARTOLT_API_KEY
     auth_esquema: ""
     auth_header: X-Token

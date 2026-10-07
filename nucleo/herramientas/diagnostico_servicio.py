@@ -87,6 +87,32 @@ _CAUSAS = (
 )
 
 
+#  EL RANGO DE SENAL QUE RECIBE LA ONT, y de donde sale.
+#
+#  La guia de operaciones de un ISP de fibra fija el aceptable entre -8 y -25
+#  dBm para la senal de BAJADA, que es la que recibe el equipo del cliente. Un
+#  caso sano medido en vivo contra Rapilink dio -21.74 y SmartOLT lo clasificaba
+#  "Very good"; el que acaba de medirse dio -20.55.
+#
+#  LO QUE NO ESTA CONFIRMADO, y se dice: no se cruzo contra un caso de senal
+#  MALA real. El umbral de abajo es el de la guia, no uno medido contra una
+#  falla. Por eso 'debil' significa "fuera del rango declarado", no "esta roto",
+#  y la decision de que hacer con eso sigue siendo del lado del CRM.
+#
+#  SE CLASIFICA EN CODIGO Y NO EN EL PROMPT porque el modelo no compara numeros:
+#  es la regla del proyecto (el codigo calcula, el modelo redacta). Pedirle que
+#  decida si -20.55 es bueno es pedirle una cuenta, y ahi se equivoca.
+SENAL_MINIMA_DBM = -25.0
+SENAL_MAXIMA_DBM = -8.0
+
+
+def _clasificar_senal(dbm) -> str:
+    """'buena', 'debil' o 'sin_dato'. Nunca adivina: sin numero, sin juicio."""
+    if dbm is None:
+        return "sin_dato"
+    return "buena" if SENAL_MINIMA_DBM <= dbm <= SENAL_MAXIMA_DBM else "debil"
+
+
 def _clasificar_causa(crudo: str) -> str:
     """De la cadena del proveedor al grupo que importa para decidir."""
     texto = (crudo or "").strip().lower()
@@ -112,7 +138,8 @@ def _sin_resolver(motivo: str, id_servicio) -> dict:
         "estado": "desconocido",
         "causa_caida": "",
         "senal_dbm": None,
-        "senal_texto": "",
+        "senal": "sin_dato",
+        "estado_config": "",
         "motivo": motivo,
     }
 
@@ -191,8 +218,22 @@ def diagnosticar(herramienta, argumentos: dict, tenant: str | None = None,
     if not serial:
         return _sin_resolver(motivo, id_servicio)
 
-    base_url = ejecutor_http.base_url_de(herramienta, variables_tenant).rstrip("/")
-    headers = ejecutor_http.headers_de(herramienta, tenant)
+    #  RESOLVER LA URL Y LA CREDENCIAL TAMBIEN PUEDE FALLAR, y estaba fuera del
+    #  try. Esta funcion promete no levantar nunca, y 'base_url_de' levanta
+    #  'ErrorHerramientaHttp' si la variable del tenant no esta cargada -- que
+    #  es exactamente lo que paso en la primera prueba contra produccion, con
+    #  un nombre de variable equivocado. La promesa valia para el proveedor y
+    #  no para la configuracion, que es el error mas facil de cometer.
+    try:
+        base_url = ejecutor_http.base_url_de(
+            herramienta, variables_tenant).rstrip("/")
+        headers = ejecutor_http.headers_de(herramienta, tenant)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("diagnostico_servicio",
+                  "no se pudo resolver la URL o la credencial", error=e)
+        return _sin_resolver(
+            "falta configurar el acceso al proveedor optico para esta empresa",
+            id_servicio)
 
     try:
         r = requests.get(
@@ -236,7 +277,16 @@ def diagnosticar(herramienta, argumentos: dict, tenant: str | None = None,
         #  decir que esta caido cuando no lo esta.
         "causa_caida": causa if not en_linea else "",
         "senal_dbm": senal,
-        "senal_texto": str(detalles.get("Match state") or "").strip(),
+        #  La clasificacion la hace el codigo, no el modelo. Ver el comentario
+        #  de 'SENAL_MINIMA_DBM' para el rango y para lo que NO esta confirmado.
+        "senal": _clasificar_senal(senal),
+        #  'Match state' NO habla de la señal: dice si la configuracion del
+        #  equipo coincide con su perfil en la OLT. Estuvo mapeado a un campo
+        #  llamado 'senal_texto' y la primera corrida real devolvio 'mismatch'
+        #  ahi -- con una señal de -20.55 dBm, que es BUENA. Un dato con el
+        #  nombre equivocado se lee como un hecho, y ese hecho habria sido
+        #  falso. Va con su nombre.
+        "estado_config": str(detalles.get("Match state") or "").strip(),
         "ultima_caida": str(detalles.get("Last down time") or "").strip(),
         "ultima_conexion": str(detalles.get("Last up time") or "").strip(),
         "motivo": "",

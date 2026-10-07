@@ -27,7 +27,12 @@
   --v2-ember-soft: rgba(234, 88, 12, 0.09);
   --v2-ember-line: rgba(234, 88, 12, 0.28);
   --v2-ink: #1c1917; /* all primary text, bulk-action bar */
-  --v2-slate: #78716c; /* labels, secondary text, on-pace aging */
+  /* Era #78716c: 4.8:1 sobre blanco, el minimo justo de WCAG AA, y en las
+     celdas de 12.5px de la cola se leia palido -- reportado el 07/10/2026
+     mirando la pantalla. #57534e es el mismo tono dos pasos mas oscuro y da
+     7.6:1, sin cambiar el aspecto. El modo oscuro ya estaba en 6.3:1 y no se
+     toca. */
+  --v2-slate: #57534e; /* labels, secondary text, on-pace aging */
   --v2-paper: #fafaf9; /* app canvas */
   --v2-card: #ffffff; /* cards sit on paper in pure white */
   --v2-clay: #b45309; /* aging_status "yellow": past expected_days */
@@ -878,6 +883,34 @@ a.v2-setting:hover {
   align-items: center;
   padding: 13px var(--v2-pad) 11px;
   flex: none;
+}
+.v2-buscador {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.v2-buscador-campo {
+  min-width: 210px;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--v2-ink);
+  background: var(--v2-card);
+  border: 1px solid var(--v2-line, #e7e5e4);
+  border-radius: 6px;
+}
+.v2-buscador-campo::placeholder {
+  color: var(--v2-slate);
+}
+.v2-buscador-pista {
+  width: 10px;
+  color: var(--v2-slate);
+  font-size: 13px;
+}
+.v2-buscador-campo:focus-visible {
+  outline: 2px solid var(--v2-accent, #2f6fed);
+  outline-offset: 1px;
+  border-color: transparent;
 }
 .v2-view {
   display: inline-flex;

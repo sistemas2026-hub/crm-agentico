@@ -29,6 +29,8 @@
    * }}
    */
   import { X, Plus, ChevronDown } from '@lucide/svelte';
+  import { goto } from '$app/navigation';
+  import { untrack } from 'svelte';
   import { FILTERS, activeChips, activePresetKey, withParams } from '$lib/v2/filters.js';
   import { invoiceStatusLabel } from '$lib/v2/enums.js';
 
@@ -41,8 +43,81 @@
     meId = null,
     meta = null,
     onlyFields = undefined,
-    onlyPresets = undefined
+    onlyPresets = undefined,
+    //  El buscador se pide: no toda pantalla tiene algo que buscar, y uno
+    //  vacio ocupa lugar y promete una funcion que no esta.
+    buscar = false,
+    buscarEtiqueta = 'Buscar'
   } = $props();
+
+  //  Lo ya escrito vuelve en la caja: si la busqueda se borrara al recargar,
+  //  nadie sabria por que la lista esta recortada.
+  const consulta = $derived(url.searchParams.get('search') ?? '');
+
+  //  Los demas parametros viajan como campos ocultos. Un GET manda SOLO lo
+  //  que tiene el formulario: sin esto, buscar dentro de un area te sacaba a
+  //  la cola entera y el filtro desaparecia sin aviso.
+  const ocultos = $derived(
+    [...url.searchParams.entries()].filter(([k]) => k !== 'search' && k !== 'offset'));
+
+  //  BUSCA MIENTRAS SE ESCRIBE  --  07/10/2026
+  //
+  //  Tener que pulsar Enter o el boton para ver un resultado rompe el ritmo:
+  //  se escribe, se espera, se corrige, se vuelve a esperar. Aca cada pausa
+  //  en el tecleo dispara la busqueda sola.
+  //
+  //  PERO NO UNA POR TECLA. Con 874 tickets eso serian ocho consultas para
+  //  escribir "edgardo", siete de ellas desperdiciadas y llegando fuera de
+  //  orden -- la respuesta de "edgard" puede pisar a la de "edgardo". Se
+  //  espera a que pasen 300 ms sin teclear, que es la pausa natural entre
+  //  palabras y no se percibe como demora.
+  //
+  //  El <form> de abajo NO se quita: si el JavaScript no cargo, el boton
+  //  sigue haciendo el GET de siempre. Esto mejora el camino, no lo
+  //  reemplaza.
+  const ESPERA_MS = 300;
+  let reloj;
+  let buscando = $state(false);
+  let campo = $state(null);
+  //  El texto es estado PROPIO y no se lee de la URL en cada render. Si el
+  //  'value' colgara de la URL, una navegacion que llega mientras se sigue
+  //  tecleando pisaria lo escrito: se tipea "edgardo", vuelve la respuesta de
+  //  "edgar" y la caja retrocede sola. Con esto la caja es de quien escribe.
+  //  'untrack' porque aqui SI se quiere solo el valor inicial: lo que venga
+  //  despues lo trae el efecto de abajo, y solo cuando nadie esta escribiendo.
+  let texto = $state(untrack(() => url.searchParams.get('search') ?? ''));
+
+  //  Pero la URL puede cambiar por fuera -- 'Limpiar', un enlace, el boton
+  //  Atras -- y entonces la caja tiene que seguirla. Solo cuando NO se esta
+  //  escribiendo en ella, para no volver a pisar nada.
+  $effect(() => {
+    const deLaUrl = url.searchParams.get('search') ?? '';
+    if (deLaUrl !== texto && campo && document.activeElement !== campo) {
+      texto = deLaUrl;
+    }
+  });
+
+  function alEscribir() {
+    clearTimeout(reloj);
+    buscando = true;
+    reloj = setTimeout(() => {
+      buscando = false;
+      //  'offset' se cae a proposito: la pagina 7 de la lista anterior no
+      //  tiene nada que ver con los resultados de esta busqueda.
+      goto(withParams(url, { search: texto.trim() || null, offset: null }), {
+        //  El cursor se queda donde esta -- sin esto, cada busqueda lo
+        //  expulsa de la caja y hay que volver a hacer clic para seguir
+        //  escribiendo.
+        keepFocus: true,
+        //  Sin saltar al principio de la pagina en cada tecleo.
+        noScroll: true,
+        //  Una entrada en el historial por busqueda, no por letra: con
+        //  'push' el boton Atras del navegador obligaria a pulsar ocho veces
+        //  para salir de "edgardo".
+        replaceState: true
+      });
+    }, ESPERA_MS);
+  }
 
   let descriptor = $derived(FILTERS[page] ?? { presets: [], fields: [] });
 
@@ -118,6 +193,38 @@
 </script>
 
 <div class="v2-filters">
+  {#if buscar}
+    <!-- Un GET normal: la busqueda queda en la URL, se puede compartir,
+         recargar y volver atras. Funciona sin JavaScript. -->
+    <form class="v2-buscador" method="GET" role="search">
+      {#each ocultos as [clave, valor]}
+        <input type="hidden" name={clave} value={valor} />
+      {/each}
+      <input
+        class="v2-buscador-campo"
+        type="search"
+        name="search"
+        bind:this={campo}
+        bind:value={texto}
+        placeholder={buscarEtiqueta}
+        aria-label={buscarEtiqueta}
+        oninput={alEscribir} />
+      <!-- Queda para quien pulsa Enter por costumbre y para cuando no hay
+           JavaScript. Con el teclado en vivo andando, no hace falta tocarlo. -->
+      <button class="v2-btn v2-btn-sm" type="submit">Buscar</button>
+      <!-- Un punto mientras se espera la pausa del tecleo: que la lista
+           tarde un momento en cambiar no tiene que parecer que no pasa nada. -->
+      <span class="v2-buscador-pista" aria-live="polite">{buscando ? '…' : ''}</span>
+      {#if consulta}
+        <!-- Volver a la lista completa tiene que ser un clic, no borrar a
+             mano y pulsar Enter. 'offset' se cae solo: la pagina 7 de una
+             busqueda no existe en la lista sin filtrar. -->
+        <a class="v2-btn v2-btn-sm" href={withParams(url, { search: null, offset: null })}>
+          Limpiar
+        </a>
+      {/if}
+    </form>
+  {/if}
   <details class="v2-view-menu">
     <summary class="v2-view">
       {activeLabel}

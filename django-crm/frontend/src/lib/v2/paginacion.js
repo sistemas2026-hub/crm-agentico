@@ -59,3 +59,55 @@ export function calcularPaginacion(url, total, desde, porPagina) {
     siguiente: d + tam < t ? enlace(d + tam) : null
   };
 }
+
+/**
+ * Los numeros de pagina que se dibujan, con huecos donde se saltean.
+ *
+ * Con 35 paginas no se pueden poner las 35: la barra se vuelve ilegible y
+ * tapa la tabla. Se muestran la primera, la ultima, y una ventana alrededor
+ * de la actual; entre medio va null, que la pantalla dibuja como '…'.
+ *
+ *     [1, null, 82, 83, 84, 85, 86]
+ *
+ * La ULTIMA siempre esta, y es el motivo de que esto exista: sin ella, llegar
+ * al final de una cola de 35 paginas son 34 clics en "Siguiente".
+ *
+ * @param {number} actual   pagina que se esta viendo, 1-indexada
+ * @param {number} total    cuantas paginas hay
+ * @param {number} ventana  cuantas mostrar a cada lado de la actual
+ * @returns {(number|null)[]}
+ */
+export function numerosDePagina(actual, total, ventana = 2) {
+  const t = Math.max(Number(total) || 1, 1);
+  const a = Math.min(Math.max(Number(actual) || 1, 1), t);
+  const cerca = new Set([1, t]);
+  for (let i = a - ventana; i <= a + ventana; i++) if (i >= 1 && i <= t) cerca.add(i);
+
+  const ordenadas = [...cerca].sort((x, y) => x - y);
+  const salida = [];
+  let previa = 0;
+  for (const n of ordenadas) {
+    //  Un hueco de UNA sola pagina no se abrevia: '…' ocuparia lo mismo que
+    //  el numero y encima no se podria pulsar.
+    if (previa && n - previa > 1) salida.push(n - previa === 2 ? previa + 1 : null);
+    salida.push(n);
+    previa = n;
+  }
+  return salida;
+}
+
+/**
+ * El enlace a una pagina concreta, conservando todo lo demas de la URL.
+ *
+ * @param {URL} url
+ * @param {number} pagina  1-indexada
+ * @param {number} porPagina
+ */
+export function enlaceAPagina(url, pagina, porPagina) {
+  const tam = Math.max(Number(porPagina) || 25, 1);
+  const offset = Math.max((Math.max(Number(pagina) || 1, 1) - 1) * tam, 0);
+  const u = new URL(url);
+  if (offset > 0) u.searchParams.set('offset', String(offset));
+  else u.searchParams.delete('offset');
+  return u.pathname + (u.search || '');
+}
