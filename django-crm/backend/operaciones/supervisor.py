@@ -1674,7 +1674,7 @@ def razonar_sobre(org, senal: "Senal", analisis: dict, *, ahora=None) -> Aporte:
         contexto = cerebro.contexto_para(org)
         veredicto = cerebro.concluir(
             org,
-            instrucciones=_INSTRUCCIONES_DEL_CICLO,
+            instrucciones=_instrucciones_del_ciclo(org),
             entrada=(f"{contexto}\n\n== LA SEÑAL DETECTADA ==\n"
                      f"tipo: {senal.tipo}\n"
                      f"evidencia: {json.dumps(senal.evidencia, ensure_ascii=False, default=str)[:1500]}\n"
@@ -1727,6 +1727,26 @@ def enriquecer(org, senal: "Senal", analisis: dict, *, ahora=None) -> dict:
 #  Lo que el ciclo le pide al cerebro. NO es la identidad del chat: alla hay una
 #  persona preguntando y aca hay una señal ya detectada, asi que lo que se pide
 #  es distinto -- interpretar, no conversar.
+def _instrucciones_del_ciclo(org) -> str:
+    """
+    El nucleo del ciclo mas el estilo editable de la empresa.
+
+    Mismo corte que en el chat: '_INSTRUCCIONES_DEL_CICLO' queda en codigo
+    porque contiene las garantias, y lo que se edita desde la interfaz es como
+    se REDACTA el motivo -- que es presentacion. Si nadie edito, el estilo por
+    defecto deja el prompt practicamente igual al de antes.
+
+    Nunca levanta: 'estilo.vigente' devuelve el texto por defecto si la consulta
+    falla, por el mismo motivo que el resto de este camino degrada en vez de
+    romperse.
+    """
+    from operaciones import estilo as svc_estilo
+    from operaciones.estilo_modelos import AmbitoEstilo
+    separador = "\n\n"
+    return (_INSTRUCCIONES_DEL_CICLO + separador
+            + svc_estilo.vigente(org, AmbitoEstilo.CICLO))
+
+
 _INSTRUCCIONES_DEL_CICLO = """\
 Sos el Supervisor NOC IA de un ISP. Una REGLA DETERMINISTICA ya detectó una
 señal y ya escribió una recomendación; vos no la reemplazás.

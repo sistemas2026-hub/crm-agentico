@@ -536,7 +536,17 @@ def test_19_no_hay_segunda_cola_ni_tabla_de_kpi(org_a):
                        #  Tampoco es una segunda nocion de caso: apunta a una propuesta o a una
                        #  situacion que ya existen, y la restriccion
                        #  'razonamiento_apunta_a_algo' impide que exista sin una de las dos.
-                       "RazonamientoSupervisor"}
+                       "RazonamientoSupervisor",
+                       #  07/10/2026. 'EstiloSupervisor' es la MITAD EDITABLE del prompt del
+                       #  Supervisor: tono, largo y que mostrar, por empresa y con historial.
+                       #  NO es una cola ni una tabla de KPI: no se consulta para decidir nada,
+                       #  solo se lee al componer el prompt de un turno. Y NO guarda el nucleo
+                       #  --las garantias siguen en codigo-- porque el chat usa 'razonar' y no
+                       #  'concluir', asi que ahi el "jamas inventas" lo sostiene el texto.
+                       #
+                       #  Entra por §3.3 de CLAUDE.md: lo que varia por empresa es configuracion
+                       #  editable, no un valor fijo en codigo. Append-only, como las demas.
+                       "EstiloSupervisor"}
 
     import ast
     import inspect

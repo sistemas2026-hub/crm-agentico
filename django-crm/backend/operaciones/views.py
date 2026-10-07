@@ -2028,3 +2028,121 @@ class ResultadoDecisionView(APIView):
                 for a in fresca.aprendizajes.all()],
             "server_time": timezone.now().isoformat(),
         })
+
+
+class EstiloSupervisorView(APIView):
+    """
+        GET  /api/operaciones/supervisor/estilo/
+        PUT  /api/operaciones/supervisor/estilo/
+
+    EL ESTILO DEL PROMPT, editable por la empresa.
+
+    POR QUE EXISTE
+    --------------
+    Porque afinar el tono, el largo o que se muestra son cosas que se hacen
+    veinte veces hasta que quedan bien, y veinte commits con despliegue para eso
+    es desproporcionado. Y porque §3.3 de CLAUDE.md lo pide: lo que varia por
+    empresa es configuracion editable y persistida por tenant, nunca un valor
+    fijo en codigo.
+
+    QUE SE PUEDE EDITAR POR AQUI, Y QUE NO
+    --------------------------------------
+    Solo el bloque de ESTILO: como habla, cuanto escribe, que muestra. El
+    NUCLEO --la identidad, los limites, el "jamas inventas", el "nunca presentas
+    una hipotesis como un hecho"-- sigue en codigo y no se alcanza desde aqui.
+
+    El corte no es estetico: EL CHAT NO PASA POR 'cerebro.validar()'. Usa
+    'razonar' y no 'concluir', asi que las cinco garantias no corren en ese
+    camino y lo que sostiene el "jamas inventas" es el texto. Dejarlo editable
+    seria poner una garantia detras de un formulario.
+
+    'test_estilo' lo afirma sobre el EFECTO: compone el prompt con un estilo que
+    intenta contradecir el nucleo, y verifica que el nucleo siga completo.
+
+    MISMO PERMISO QUE EL CHAT Y LOS INDICADORES
+    -------------------------------------------
+    'EsJefeDeOperaciones'. Detras de esta puerta hay una persona cambiando como
+    habla el Supervisor de SU empresa.
+
+    EL PUT EXIGE MOTIVO, Y NO ES BUROCRACIA
+    ---------------------------------------
+    Un prompt que empeora las respuestas hay que poder discutirlo despues, y
+    para eso hace falta saber quien lo cambio y que buscaba. Sin eso la unica
+    salida es volver al por defecto a ciegas. Mismo criterio que
+    'autonomia.cambiar'.
+    """
+
+    permission_classes = [EsJefeDeOperaciones]
+
+    def get(self, request):
+        """El estilo vigente de cada ambito, el por defecto, y el historial."""
+        from operaciones import estilo as svc_estilo
+        from operaciones.estilo_modelos import AmbitoEstilo
+
+        return Response({
+            "ambitos": [{
+                "ambito": a,
+                "etiqueta": dict(AmbitoEstilo.ETIQUETAS)[a],
+                "vigente": svc_estilo.vigente(request.org, a),
+                "por_defecto": svc_estilo.POR_DEFECTO[a],
+                "es_el_por_defecto": svc_estilo.es_el_por_defecto(request.org, a),
+            } for a in AmbitoEstilo.TODOS],
+            "tope_caracteres": svc_estilo.TOPE_TEXTO,
+            "historial": svc_estilo.historial(request.org),
+            #  Se devuelve el nucleo para MOSTRARLO, no para editarlo: quien
+            #  ajusta el estilo necesita ver contra que esta escribiendo. La
+            #  pantalla lo presenta como solo lectura.
+            "nucleo_solo_lectura": _nucleo_de_ambito(),
+        })
+
+    def put(self, request):
+        """Cambia el estilo de un ambito. Exige texto y motivo."""
+        from operaciones import estilo as svc_estilo
+
+        ambito = str(request.data.get("ambito") or "").strip()
+        texto = request.data.get("texto")
+        motivo = str(request.data.get("motivo") or "").strip()
+        restablecer = bool(request.data.get("restablecer"))
+
+        actor = getattr(request, "profile", None) or getattr(
+            request.user, "profile", None)
+        if actor is None:
+            return Response(
+                {"detail": "no se pudo determinar quien hace el cambio"},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            if restablecer:
+                fila = svc_estilo.restablecer(
+                    request.org, ambito, actor=actor, motivo=motivo)
+            else:
+                fila = svc_estilo.cambiar(
+                    request.org, ambito, texto, actor=actor, motivo=motivo)
+        except svc_estilo.ErrorEstilo as e:
+            return Response({"detail": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            "ambito": fila.ambito,
+            "vigente": fila.texto,
+            "es_el_por_defecto": svc_estilo.es_el_por_defecto(
+                request.org, fila.ambito),
+            "cambiado_en": fila.cambiado_en.isoformat(),
+        })
+
+
+def _nucleo_de_ambito() -> dict:
+    """
+    Los dos nucleos, para que la pantalla los muestre como solo lectura.
+
+    Se importan tarde a proposito: 'views' no deberia arrastrar 'chat' ni
+    'supervisor' al cargarse, y aqui solo hacen falta cuando alguien abre la
+    pantalla de estilo.
+    """
+    from operaciones import supervisor as sup
+    from operaciones.chat import NUCLEO
+
+    return {
+        "chat": NUCLEO,
+        "ciclo": sup._INSTRUCCIONES_DEL_CICLO,
+    }

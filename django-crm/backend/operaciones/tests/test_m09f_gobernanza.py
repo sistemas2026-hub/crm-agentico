@@ -997,7 +997,19 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  PROCEDENCIA de cada dato (OBSERVADO, INFERIDO,
                        #  RECOMENDADO, CONFIRMADO, DESCONOCIDO). Un bloque
                        #  DESCONOCIDO viaja con su motivo y NO como un cero.
-                       "supervisor-turno"}
+                       "supervisor-turno",
+                       #  07/10/2026. 'supervisor-estilo' ESCRIBE, y por eso se declara
+                       #  con lo que escribe: una fila de 'EstiloSupervisor', que es el
+                       #  bloque de PRESENTACION del prompt (tono, largo, que mostrar).
+                       #
+                       #  NO escribe nada de la operacion: ni un caso, ni una orden, ni una
+                       #  propuesta, ni un nivel de autonomia. Y NO alcanza el nucleo del
+                       #  prompt --las garantias siguen en codigo-- porque el chat usa
+                       #  'razonar' y no 'concluir', asi que ahi el "jamas inventas" lo
+                       #  sostiene el texto y no puede quedar detras de un formulario.
+                       #
+                       #  Exige 'EsJefeDeOperaciones' y, en el PUT, actor y motivo.
+                       "supervisor-estilo"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

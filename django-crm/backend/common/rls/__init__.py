@@ -133,8 +133,8 @@ ORG_SCOPED_TABLES = [
     "approval_rule",
     "approval",
     # Operaciones: M02 actividades, M03 programacion y M09 propuestas del
-    # Supervisor NOC IA. Las SIETE llevan org_id directo. Se registran aca Y se
-    # estampan desde las migraciones operaciones/0002 y operaciones/0016, que
+    # Supervisor NOC IA. Las OCHO llevan org_id directo. Se registran aca Y se
+    # estampan desde las migraciones operaciones/0002, operaciones/0017 y operaciones/0019, que
     # es lo que hace que una base construida solo con migraciones tenga sus
     # politicas -- el hueco que common/0034 tuvo que venir a tapar para los
     # pipelines.
@@ -150,6 +150,8 @@ ORG_SCOPED_TABLES = [
     "operaciones_propuesta_supervisor",
     # La constancia del razonamiento del cerebro. Estampada en operaciones/0016.
     "operaciones_razonamiento_supervisor",
+    # El estilo editable del prompt. Estampada en operaciones/0019.
+    "operaciones_estilo_supervisor",
     # Programmatic API access
     # NOTE: personal_access_token is intentionally NOT RLS-protected. It is an
     # auth-bootstrap table (looked up by token_hash before any tenant context
