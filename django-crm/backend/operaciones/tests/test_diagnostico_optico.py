@@ -880,6 +880,104 @@ def test_una_propuesta_VIEJA_sin_diagnostico_se_completa_y_se_cierra(monkeypatch
 
 
 @pytest.mark.django_db
+def test_el_interruptor_se_consulta_UNA_vez_por_ciclo(monkeypatch):
+    """
+    Con muchas propuestas pendientes, el interruptor NO se pregunta por cada
+    una. Se cuentan las consultas, que es lo unico que lo prueba.
+
+    Desde que el interruptor se lee por HTTP, cada consulta es una llamada de
+    red. Preguntarla por propuesta son tantas llamadas como casos pendientes
+    --75 en produccion-- dentro de un ciclo que alguien espera mirando la
+    pantalla.
+    """
+    from common.models import Org, Profile, User
+    from operaciones import autonomia, chat_herramientas, fuentes_adaptadores
+    from operaciones import supervisor
+    from operaciones.models import PropuestaSupervisor as P
+
+    org = Org.objects.create(name="Org con muchas")
+    for n in range(6):
+        _caso_desincronizado(org, f"8000{n}", f"95{n}0")
+
+    #  Primer ciclo sin diagnostico: quedan 6 propuestas pendientes, como las 75.
+    monkeypatch.setattr(dx, "enriquecer", lambda *a, **k: {"diagnosticados": 0})
+    _interruptor_encendido(monkeypatch)
+    supervisor.correr_ciclo(org)
+    assert PropuestaSupervisor.objects.filter(
+        org=org, tipo_senal=P.CASO_DESINCRONIZADO).count() == 6
+
+    monkeypatch.undo()
+
+    #  Segundo ciclo: se cuentan las consultas al interruptor.
+    consultas = []
+
+    def falso_estado():
+        consultas.append(1)
+        return {"permitido": True, "estado": "activo", "motivo": ""}
+
+    monkeypatch.setattr(fuentes_adaptadores, "estado_de_autonomia", falso_estado)
+    _motor_que_cierra(monkeypatch)
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        lambda o, *, id_servicio: SANO)
+    usuario = User.objects.create(email="jefa6@ejemplo.test", name="Jefa")
+    perfil = Profile.objects.create(org=org, user=usuario, role="ADMIN",
+                                    is_active=True)
+    autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
+                      motivo="piloto", criterios="medido")
+    consultas.clear()
+
+    supervisor.correr_ciclo(org)
+
+    #  Con el defecto viejo serian seis o mas. El margen de 2 es para las que
+    #  el ciclo hace por otros caminos (el latido del resumen, por ejemplo):
+    #  lo que esta prueba mata es el crecimiento CON la cantidad de casos.
+    assert len(consultas) <= 2, (
+        f"el interruptor se consulto {len(consultas)} veces con 6 propuestas "
+        f"pendientes: se pregunta una vez por corrida, no una por caso")
+
+
+@pytest.mark.django_db
+def test_lo_que_no_se_le_pregunto_al_proveedor_no_se_marca_como_atendido(
+        monkeypatch):
+    """
+    Un caso que se quedo sin presupuesto NO queda escrito como diagnosticado.
+
+    Si se le anotara "no se diagnostico, se agoto el presupuesto" a la
+    propuesta, 'le_falta_diagnostico' la daria por atendida y ese caso no
+    volveria a intentarse NUNCA. El presupuesto dejaria de significar "mas
+    tarde" y pasaria a significar "nunca" -- con un tope de 3 y 75 casos, 72
+    quedarian fuera para siempre.
+    """
+    from common.models import Org
+    from operaciones import chat_herramientas, supervisor
+    from operaciones.models import PropuestaSupervisor as P
+
+    org = Org.objects.create(name="Org sin presupuesto")
+    for n in range(5):
+        _caso_desincronizado(org, f"8100{n}", f"96{n}0")
+
+    monkeypatch.setattr(dx, "enriquecer", lambda *a, **k: {"diagnosticados": 0})
+    _interruptor_encendido(monkeypatch)
+    supervisor.correr_ciclo(org)
+    monkeypatch.undo()
+
+    _interruptor_encendido(monkeypatch)
+    _motor_que_cierra(monkeypatch)
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        lambda o, *, id_servicio: SANO)
+    supervisor.correr_ciclo(org)
+
+    #  Se diagnosticaron 3 (el tope). Las otras 2 tienen que seguir esperando,
+    #  no quedar marcadas.
+    sin_diagnostico = [p for p in PropuestaSupervisor.objects.filter(
+        org=org, tipo_senal=P.CASO_DESINCRONIZADO)
+        if dx.le_falta_diagnostico(p)]
+    assert len(sin_diagnostico) == 2, (
+        "las que no se consultaron tienen que seguir pendientes de "
+        "diagnostico, para que el proximo ciclo las tome")
+
+
+@pytest.mark.django_db
 def test_una_propuesta_YA_DECIDIDA_no_se_vuelve_a_tocar(monkeypatch):
     #  Rechazar es una decision. Volver sobre ella --completarla y cerrarla--
     #  seria pisar lo que una persona dijo.

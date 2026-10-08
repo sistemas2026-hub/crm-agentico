@@ -413,7 +413,8 @@ def le_falta_diagnostico(propuesta) -> bool:
     return True
 
 
-def completar_propuesta_existente(org, senal, propuesta, *, ahora=None) -> dict:
+def completar_propuesta_existente(org, senal, propuesta, *, ahora=None,
+                                  autorizacion=None) -> dict:
     """
     Le agrega el diagnostico a una propuesta YA EMITIDA, y la cierra si procede.
 
@@ -446,6 +447,19 @@ def completar_propuesta_existente(org, senal, propuesta, *, ahora=None) -> dict:
         return {"intentado": False, "cerrado": False,
                 "motivo": "no se diagnostico en esta corrida"}
 
+    #  SI NO SE LE PREGUNTO AL PROVEEDOR, NO SE ESCRIBE NADA.
+    #
+    #  Con el presupuesto en 3 y 75 casos, 72 quedan sin consultar por corrida.
+    #  Anotarles "no se diagnostico: se agoto el presupuesto" serian 72
+    #  escrituras por ciclo que no dicen nada del equipo y que ensucian la
+    #  evidencia de la propuesta -- y encima harian que 'le_falta_diagnostico'
+    #  las diera por atendidas, asi que no volverian a intentarse NUNCA.
+    #  Ese ultimo efecto es el grave: el presupuesto dejaria de ser "mas tarde"
+    #  y pasaria a ser "nunca".
+    if not senal.datos.get("diagnostico_consultado"):
+        return {"intentado": False, "cerrado": False,
+                "motivo": "no se le pregunto al proveedor en esta corrida"}
+
     campos = ["evidencia", "updated_at"]
     propuesta.evidencia = list(propuesta.evidencia or []) + [
         sup._observacion("diagnostico", senal.origen_id,
@@ -457,10 +471,12 @@ def completar_propuesta_existente(org, senal, propuesta, *, ahora=None) -> dict:
     propuesta.updated_at = ahora
     propuesta.save(update_fields=campos)
 
-    return cerrar_si_corresponde(org, propuesta, ahora=ahora)
+    return cerrar_si_corresponde(org, propuesta, ahora=ahora,
+                                 autorizacion=autorizacion)
 
 
-def cerrar_si_corresponde(org, propuesta, *, ahora=None) -> dict:
+def cerrar_si_corresponde(org, propuesta, *, ahora=None,
+                          autorizacion=None) -> dict:
     """
     Cierra el caso de una propuesta recien creada, si las DOS puertas lo dejan.
 
@@ -503,7 +519,16 @@ def cerrar_si_corresponde(org, propuesta, *, ahora=None) -> dict:
     #  PUERTA 2  --  lo que la empresa autorizo. Se consulta aunque la puerta 1
     #  haya pasado: pasar una no exime de la siguiente, que es como funciona la
     #  frontera del motor y por el mismo motivo.
-    veredicto = autonomia.puede(org, NIVEL_PARA_CERRAR)
+    #  UNA SOLA CONSULTA POR CORRIDA cuando el llamador la pasa, y no es una
+    #  optimizacion cosmetica: desde que el interruptor se lee por HTTP,
+    #  'autonomia.puede' es una llamada de red. Preguntarla por propuesta
+    #  significaba 75 llamadas dentro de un ciclo que alguien esta esperando
+    #  con la pantalla abierta -- medido hoy, dos minutos sin terminar.
+    #
+    #  Se sigue consultando si no la pasan: un llamador que la olvide tiene que
+    #  obtener la respuesta correcta, no ninguna.
+    veredicto = autorizacion if autorizacion is not None else autonomia.puede(
+        org, NIVEL_PARA_CERRAR)
     if not veredicto.get("puede"):
         return {"intentado": False, "cerrado": False,
                 "motivo": f"la empresa no lo autoriza: "
@@ -583,6 +608,11 @@ def _anotar(senal, veredicto: str, porque: str, diagnostico, ahora) -> None:
 
     senal.datos["diagnostico_veredicto"] = veredicto
     senal.datos["diagnostico_porque"] = porque
+    #  SI SE LE PREGUNTO AL PROVEEDOR O NO. Se distingue de 'tiene veredicto'
+    #  porque un "no se diagnostico, se agoto el presupuesto" TAMBIEN tiene
+    #  veredicto, y confundirlos haria que un caso al que nadie le pregunto
+    #  quedara marcado como atendido.
+    senal.datos["diagnostico_consultado"] = isinstance(diagnostico, dict)
     if isinstance(diagnostico, dict):
         #  Las cinco claves que sostienen el veredicto, y solo esas. Guardar el
         #  diagnostico entero metería campos que nadie decidio guardar el dia

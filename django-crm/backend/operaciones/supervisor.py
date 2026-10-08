@@ -2039,7 +2039,7 @@ def _correr_ciclo(org, ahora) -> dict:
     #  organizacion, asi que no puede cambiar entre las dos; cachearla seria
     #  un mecanismo nuevo para ahorrar menos de lo que cuesta una llamada al
     #  proveedor.
-    from operaciones import diagnostico_optico
+    from operaciones import autonomia, diagnostico_optico
 
     #  LAS QUE YA TIENEN PROPUESTA TAMBIEN ENTRAN, si esa propuesta sigue sin
     #  decidir y nacio antes del diagnostico (08/10/2026).
@@ -2088,12 +2088,19 @@ def _correr_ciclo(org, ahora) -> dict:
     #  linea antes de que existiera y reventaba con KeyError. El orden tambien
     #  es el correcto por sentido -- primero se registra que HABRIA hecho, y
     #  despues se hace.
+    #  LA AUTORIZACION SE CONSULTA UNA VEZ, no por propuesta: desde que el
+    #  interruptor se lee por HTTP, preguntarla por caso serian tantas llamadas
+    #  de red como propuestas pendientes --75 medidas hoy-- dentro de un ciclo
+    #  que alguien espera con la pantalla abierta.
+    _autorizacion = (autonomia.puede(org, diagnostico_optico.NIVEL_PARA_CERRAR)
+                     if pendientes_por_senal else None)
+
     for s in candidatas:
         p = pendientes_por_senal.get(s.origen_id)
         if p is None:
             continue
         r = diagnostico_optico.completar_propuesta_existente(
-            org, s, p, ahora=ahora)
+            org, s, p, ahora=ahora, autorizacion=_autorizacion)
         _auto = resumen["cierre_automatico"]
         if r["cerrado"]:
             _auto["cerrados"] += 1
@@ -2158,8 +2165,8 @@ def _correr_ciclo(org, ahora) -> dict:
         #  cuando no cierra. Hoy devuelve "la empresa no lo autoriza" para
         #  todos, porque el nivel de autonomia de Rapilink esta en 1 -- y eso
         #  solo lo sube una persona desde la interfaz.
-        cierre = diagnostico_optico.cerrar_si_corresponde(org, propuesta,
-                                                          ahora=ahora)
+        cierre = diagnostico_optico.cerrar_si_corresponde(
+            org, propuesta, ahora=ahora, autorizacion=_autorizacion)
         _auto = resumen["cierre_automatico"]
         if cierre["cerrado"]:
             _auto["cerrados"] += 1
