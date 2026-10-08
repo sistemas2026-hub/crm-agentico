@@ -160,10 +160,28 @@ def alcanzables(desde: str) -> set[str]:
     return vistos
 
 
+#  LAS DOS CLIS QUE SI PUEDEN IMPORTAR EL PAQUETE, y por que cada una.
+#
+#  'salud_scheduler' es el termometro: entra con 'monitor_ro', que no puede
+#  leer ni una fila de 'job_*' -- solo llamar a 'job_salud()'.
+#
+#  'programar_job' entro el 08/10/2026 y ES DISTINTA: ESCRIBE el catalogo. Es
+#  el gesto de operacion que faltaba, y faltaba de verdad -- medido ese dia, el
+#  reloj llevaba encendido desde el 22/09 girando sin un solo trabajo, porque
+#  ninguna migracion los siembra (punto 4 de esta misma prueba) y ningun
+#  comando los insertaba.
+#
+#  QUE SIGA VALIENDO "INTEGRADO E INERTE": esta CLI no corre sola, no la
+#  alcanza ningun entrypoint, exige actor y motivo, y solo admite trabajos que
+#  el despliegue ya sabe hacer. Encender sigue siendo una decision de una
+#  persona, escrita -- que es exactamente lo que "inerte" queria proteger.
+#  Lo que NO protegia era que fuera imposible.
+_CLIS_DE_OPERACION = {"cli.salud_scheduler", "cli.programar_job"}
+
 entrypoints = [m for m in ("nucleo.canales.api", "nucleo.reloj") if m in fuentes]
 entrypoints += sorted(m for m, f in fuentes.items()
                       if m.startswith("cli.") and "__main__" in f.read_text(encoding="utf-8")
-                      and m != "cli.salud_scheduler")
+                      and m not in _CLIS_DE_OPERACION)
 revisar("nucleo.canales.api" in entrypoints and "nucleo.reloj" in entrypoints,
         "el motor y el reloj estan entre los entrypoints analizados", f"{entrypoints[:5]}")
 contaminados = {}
@@ -180,10 +198,23 @@ print(f"       analizados: {', '.join(entrypoints)}")
 
 sal = fuentes.get("cli.salud_scheduler")
 if sal:
-    usa = imports_de(sal, "cli.salud_scheduler")
     texto = sal.read_text(encoding="utf-8")
     revisar(not any(fn in texto for fn in FUNCIONES_QUE_ACTUAN) and "puerta.salud" in texto,
-            "la unica CLI que importa el paquete es el monitor, y solo lee job_salud")
+            "el monitor solo lee job_salud: no reclama, no ejecuta, no finaliza")
+
+#  LA CLI DE OPERACION ESCRIBE EL CATALOGO, y eso se afirma en vez de
+#  prohibirse: lo que no puede hacer es TOCAR TURNOS. Reclamar, ejecutar o
+#  finalizar desde una consola saltearia el coordinador entero -- el lease, el
+#  fencing, los reintentos-- y dejaria turnos huerfanos que nadie rescata.
+prog = fuentes.get("cli.programar_job")
+if prog:
+    texto = prog.read_text(encoding="utf-8")
+    revisar(not any(fn in texto for fn in FUNCIONES_QUE_ACTUAN),
+            "la CLI de operacion enciende y apaga trabajos, pero no toca turnos")
+    #  Y exige quien y por que. Sin eso seria una forma de encender un sistema
+    #  autonomo sin dejar rastro de quien lo decidio.
+    revisar("--actor" in texto and "--motivo" in texto,
+            "encender o apagar un trabajo exige actor y motivo")
 
 modulos_prog = [f for m, f in fuentes.items() if m.startswith(PAQUETE)]
 con_main = [f.name for f in modulos_prog if "__main__" in f.read_text(encoding="utf-8")]
