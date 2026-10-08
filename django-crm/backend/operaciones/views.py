@@ -2131,6 +2131,146 @@ class EstiloSupervisorView(APIView):
         })
 
 
+class AutonomiaSupervisorView(APIView):
+    """
+    Ver y cambiar cuanto puede hacer solo el Supervisor, desde la interfaz.
+
+    POR QUE EXISTE (08/10/2026)
+    ---------------------------
+    'autonomia.cambiar' existia desde hacia semanas y NO TENIA NINGUN LLAMADOR:
+    ni endpoint, ni boton. El nivel solo se podia tocar desde una consola del
+    servidor. Eso se descubrio al ir a encender el cierre automatico de casos,
+    cuando hubo que indicarle a una persona "anda a la pantalla de autonomia" y
+    esa pantalla no existia.
+
+    Un control que solo se opera por terminal no sirve en el momento en que mas
+    se necesita, que es cuando algo esta saliendo mal y hay que pararlo rapido.
+
+    DOS CONTROLES DISTINTOS, Y LA DIFERENCIA IMPORTA
+    ------------------------------------------------
+      EL NIVEL (0 a 3) vive en el CRM y dice QUE CLASE de cosas puede hacer el
+      Supervisor sin pedir permiso. Cambiarlo es una decision de alcance, y por
+      eso exige motivo y criterios: que se midio para decidirlo.
+
+      EL INTERRUPTOR vive en el MOTOR, es un si/no, y es el freno de mano: lo
+      tira quien ve algo raro, sin tener que explicar nada en ese momento. Vive
+      aparte del nivel a proposito -- la config del tenant falla ABIERTA por dos
+      caminos medidos, y un freno que se suelta solo cuando falla la base no es
+      un freno.
+
+    Tirar el interruptor NO baja el nivel, y volver a levantarlo NO lo sube: son
+    dos cosas, y mezclarlas haria que reactivar devolviera silenciosamente un
+    alcance que alguien habia decidido recortar.
+
+    SUBIR EL NIVEL NO LO PUEDE HACER EL SUPERVISOR, y eso lo impone
+    'autonomia.cambiar', que exige actor y lo vuelve a exigir una restriccion de
+    la base. Esta vista pone la cara humana de esa regla, no la reemplaza.
+    """
+
+    permission_classes = [EsJefeDeOperaciones]
+
+    def get(self, request):
+        """El nivel vigente, el interruptor, los niveles posibles y el historial."""
+        from operaciones import autonomia
+        from operaciones.models import PropuestaSupervisor as P
+
+        estado = autonomia.nivel_efectivo(request.org)
+        return Response({
+            "configurado": estado["configurado"],
+            "efectivo": estado["efectivo"],
+            "recortado": estado["recortado"],
+            "motivo": estado["motivo"],
+            "interruptor_permite": estado["interruptor_permite"],
+            #  El techo del CODIGO, que es distinto del de la empresa: una
+            #  pantalla que ofreciera subir a 4 estaria ofreciendo algo que el
+            #  sistema niega siempre.
+            "techo_de_la_etapa": P.NIVEL_MAXIMO_ETAPA,
+            "niveles": [{"nivel": n, "etiqueta": e}
+                        for n, e in P.NIVELES
+                        if n <= P.NIVEL_MAXIMO_ETAPA],
+            "historial": autonomia.historial(request.org, limite=20),
+        })
+
+    def put(self, request):
+        """Cambia el nivel. Exige motivo y criterios, como el servicio."""
+        from operaciones import autonomia
+
+        actor = getattr(request, "profile", None) or getattr(
+            request.user, "profile", None)
+        if actor is None:
+            return Response(
+                {"detail": "no se pudo determinar quien hace el cambio"},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            nivel = int(request.data.get("nivel"))
+        except (TypeError, ValueError):
+            return Response({"detail": "el nivel tiene que ser un numero"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            fila = autonomia.cambiar(
+                request.org, nivel, actor=actor,
+                motivo=str(request.data.get("motivo") or "").strip(),
+                criterios=str(request.data.get("criterios") or "").strip())
+        except autonomia.ErrorAutonomia as e:
+            #  El mensaje del servicio VIAJA TAL CUAL: ya explica cual de los
+            #  tres requisitos falta, y reescribirlo aqui seria mantener dos
+            #  textos que se desincronizan.
+            return Response({"detail": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        estado = autonomia.nivel_efectivo(request.org)
+        return Response({
+            "configurado": fila.nivel,
+            "efectivo": estado["efectivo"],
+            "recortado": estado["recortado"],
+            "motivo": estado["motivo"],
+            "interruptor_permite": estado["interruptor_permite"],
+        })
+
+    def post(self, request):
+        """
+        Tira o levanta el INTERRUPTOR. El freno de mano.
+
+        Va por el motor, que es el dueño de esa tabla: 'crm_user' no tiene
+        acceso a su schema, medido en produccion el 08/10/2026. Misma frontera
+        que usa la lectura.
+
+        NO PIDE CRITERIOS, solo un motivo, y la asimetria es deliberada: subir
+        el alcance exige demostrar que se midio algo; PARAR no tiene que exigir
+        nada, porque quien ve humo no deberia tener que redactar un informe
+        antes de apagar el fuego.
+        """
+        from operaciones import autonomia
+
+        actor = getattr(request, "profile", None) or getattr(
+            request.user, "profile", None)
+        if actor is None:
+            return Response(
+                {"detail": "no se pudo determinar quien hace el cambio"},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        detener = bool(request.data.get("detener"))
+        motivo = str(request.data.get("motivo") or "").strip()
+
+        try:
+            resultado = autonomia.mover_interruptor(
+                request.org, detener=detener, actor=actor, motivo=motivo)
+        except autonomia.ErrorAutonomia as e:
+            return Response({"detail": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        estado = autonomia.nivel_efectivo(request.org)
+        return Response({
+            "estado_interruptor": resultado.get("estado", ""),
+            "configurado": estado["configurado"],
+            "efectivo": estado["efectivo"],
+            "interruptor_permite": estado["interruptor_permite"],
+            "motivo": estado["motivo"],
+        })
+
+
 def _nucleo_de_ambito() -> dict:
     """
     Los dos nucleos, para que la pantalla los muestre como solo lectura.

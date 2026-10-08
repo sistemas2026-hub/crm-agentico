@@ -159,6 +159,39 @@ def _interruptor_de(org) -> tuple[bool, str]:
                       f"'{estado_motor['estado'] or 'desconocido'}'")
 
 
+def mover_interruptor(org, *, detener: bool, actor, motivo: str) -> dict:
+    """
+    Tira o levanta el freno de mano. Devuelve {estado}.
+
+    NO TOCA EL NIVEL, y no mezclarlos es el punto: el nivel dice QUE CLASE de
+    cosas puede hacer el Supervisor, y el interruptor dice si puede hacer
+    alguna. Si reactivar subiera el nivel, devolveria en silencio un alcance
+    que alguien habia decidido recortar.
+
+    EXIGE MOTIVO PERO NO CRITERIOS, al reves que 'cambiar'. La asimetria es
+    deliberada: ampliar el alcance tiene que demostrar que se midio algo; PARAR
+    no tiene que demostrar nada, porque quien ve humo no deberia tener que
+    redactar un informe antes de apagar el fuego.
+
+    El actor viaja como ID y nunca como nombre: esto termina en el log del
+    motor.
+    """
+    from operaciones import fuentes_adaptadores
+
+    if actor is None:
+        raise ErrorAutonomia(
+            "mover el interruptor necesita la persona que lo decide")
+    if not (motivo or "").strip():
+        raise ErrorAutonomia(
+            "mover el interruptor necesita su motivo: un freno sin explicacion "
+            "no se puede discutir despues")
+    try:
+        return fuentes_adaptadores.mover_interruptor_de_autonomia(
+            detener=detener, actor=str(actor.id), motivo=motivo.strip())
+    except Exception as e:                                       # noqa: BLE001
+        raise ErrorAutonomia(str(e)) from None
+
+
 def _interruptor_por_sql(org) -> tuple[bool, str]:
     """
     La lectura directa de la tabla. YA NO SE USA desde '_interruptor_de'.

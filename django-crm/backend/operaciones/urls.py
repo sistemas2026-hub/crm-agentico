@@ -115,4 +115,13 @@ urlpatterns = [
     #  devuelve para mostrarlo, nunca para escribirlo.
     path("supervisor/estilo/", views.EstiloSupervisorView.as_view(),
          name="supervisor-estilo"),
+    #  EL ALCANCE DEL SUPERVISOR, con cara humana. Hasta el 08/10/2026
+    #  'autonomia.cambiar' no tenia NINGUN llamador: el nivel solo se podia
+    #  tocar desde una consola del servidor, y un freno que solo se opera por
+    #  terminal no sirve en el momento en que mas se necesita.
+    #
+    #  GET lee, PUT cambia el nivel (exige motivo y criterios) y POST mueve el
+    #  interruptor (exige motivo, no criterios).
+    path("supervisor/autonomia/", views.AutonomiaSupervisorView.as_view(),
+         name="supervisor-autonomia"),
 ]

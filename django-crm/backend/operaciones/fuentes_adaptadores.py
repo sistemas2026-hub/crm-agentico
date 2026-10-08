@@ -134,6 +134,55 @@ class MotorNoDisponible(Exception):
     """No se pudo preguntarle al motor. No es 'no hay datos'."""
 
 
+def mover_interruptor_de_autonomia(*, detener: bool, actor: str,
+                                   motivo: str) -> dict:
+    """
+    Tira o levanta el interruptor general, por el motor. Devuelve {estado}.
+
+    El motor exige actor y motivo, y aqui no se rellenan: un freno sin dueño no
+    se puede discutir despues, y poner "sistema" por defecto haria exactamente
+    eso.
+
+    'actor' es el ID del perfil, nunca su nombre ni su correo. Esto termina en
+    una tabla de auditoria y en el log del motor, y el proyecto ya tiene escrito
+    que a una persona se la nombra por referencia.
+    """
+    import requests
+
+    base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
+    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    if not tenant:
+        raise MotorNoDisponible(
+            "falta MOTOR_TENANT: sin saber de que empresa es el interruptor no "
+            "se puede mover, y suponerlo tocaria el de otra")
+
+    cabeceras = {"Content-Type": "application/json"}
+    token = os.environ.get("MOTOR_SERVICE_TOKEN")
+    if token:
+        cabeceras["X-Servicio-Token"] = token
+
+    camino = "detener" if detener else "reactivar"
+    try:
+        r = requests.post(f"{base}/autonomia/{camino}",
+                          params={"tenant": tenant},
+                          json={"actor": actor, "motivo": motivo},
+                          headers=cabeceras, timeout=SEGUNDOS_TIMEOUT)
+    except Exception as e:                                       # noqa: BLE001
+        raise MotorNoDisponible(
+            f"no se pudo mover el interruptor: {type(e).__name__}") from None
+
+    try:
+        cuerpo = r.json() or {}
+    except ValueError:
+        cuerpo = {}
+    if r.status_code != 200:
+        #  El 400 del motor trae un texto util --que falta el actor o el
+        #  motivo-- y ese SI viaja: lo escribio para que lo lea una persona.
+        raise MotorNoDisponible(
+            str(cuerpo.get("error") or f"el motor contesto HTTP {r.status_code}"))
+    return {"estado": str(cuerpo.get("estado") or "")}
+
+
 def estado_de_autonomia() -> dict:
     """
     El interruptor general de autonomia, preguntado AL MOTOR por HTTP.
