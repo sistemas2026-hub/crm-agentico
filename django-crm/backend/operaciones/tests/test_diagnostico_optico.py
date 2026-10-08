@@ -546,6 +546,266 @@ def test_la_sombra_corre_las_condiciones_REALES_del_cierre():
     assert "no cerraria" in senal.datos["cierre_automatico_porque"]
 
 
+# ===========================================================================
+#  7. EL CIERRE AUTOMATICO  --  las dos puertas, medidas sobre el caso
+# ===========================================================================
+
+def _caso_desincronizado(org, ticket, servicio):
+    from datetime import timedelta as td
+
+    from cases.models import Case
+
+    ahora = timezone.now()
+    caso = Case.objects.create(
+        org=org, name="Sin servicio de internet", status="New",
+        priority="Normal", external_status="Cerrado",
+        external_ticket_id=ticket, provider="wisphub",
+        external_service_id=servicio)
+    Case.objects.filter(pk=caso.pk).update(
+        created_at=ahora - td(days=12),
+        external_status_at=ahora - td(days=3),
+        external_fetched_at=ahora - td(hours=1))
+    caso.refresh_from_db()
+    return caso
+
+
+def _motor_que_cierra(monkeypatch):
+    """
+    Parchea SOLO el borde HTTP, y emula lo que el motor hace del otro lado.
+
+    EL CASO LO CIERRA EL MOTOR, no este codigo, y por eso el doble tambien
+    escribe el estado. No es hacer trampa: la frontera entre los dos procesos
+    esta ahi a proposito --'app_backend' no tiene privilegios sobre la tabla
+    'case', medido el 25/09/2026-- y el motor cierra el caso llamando de vuelta
+    al CRM. Un doble que devolviera "cerrado" sin cerrar nada haria pasar una
+    prueba sobre un efecto que no ocurre.
+
+    Lo que SI prueba este modulo, y es lo que se afirma aparte: que se le pidio
+    el cierre, una sola vez, con la propuesta ya aceptada.
+    """
+    from cases.models import Case
+    from operaciones import cierre_de_caso
+
+    llamadas = []
+
+    def falso(propuesta_id, caso_id):
+        llamadas.append((propuesta_id, caso_id))
+        Case.objects.filter(id=caso_id).update(
+            status="Closed", resolved_at=timezone.now())
+        return {"cerrado": True, "referencia": "idem:prueba-1"}
+
+    monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor", falso)
+    return llamadas
+
+
+def _interruptor_encendido(monkeypatch):
+    """
+    El interruptor general de autonomia, que vive en el esquema del MOTOR.
+
+    Se parchea porque la base de pruebas no tiene ese esquema, y sin el
+    'autonomia.puede' falla CERRADO -- lo cual es correcto y esta probado en
+    'test_el_interruptor_ilegible_impide_cerrar', pero impide medir el camino
+    feliz. Es un borde externo mas, como el HTTP del motor.
+    """
+    from operaciones import autonomia
+
+    monkeypatch.setattr(autonomia, "_interruptor_de", lambda org: (True, ""))
+
+
+@pytest.mark.django_db
+def test_con_la_empresa_en_nivel_1_NO_se_cierra_ningun_caso(monkeypatch):
+    """
+    La segunda puerta, que es la que hoy esta cerrada en produccion.
+
+    Se mide sobre el CASO: que siga en 'New'. Afirmar que el nivel es 1 no
+    prueba que el nivel se respete.
+    """
+    from common.models import Org
+    from operaciones import chat_herramientas, supervisor
+
+    org = Org.objects.create(name="Org sin autorizar")
+    caso = _caso_desincronizado(org, "600001", "8001")
+    llamadas = _motor_que_cierra(monkeypatch)
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        lambda o, *, id_servicio: SANO)
+
+    supervisor.correr_ciclo(org)
+
+    caso.refresh_from_db()
+    assert caso.status == "New", "sin autorizacion de la empresa no se cierra"
+    assert caso.resolved_at is None
+    assert llamadas == [], "ni siquiera se le pidio al motor"
+
+
+@pytest.mark.django_db
+def test_con_la_empresa_en_nivel_3_el_caso_SI_se_cierra(monkeypatch):
+    """
+    La prueba que dice que todo esto SIRVE: el caso queda cerrado sin que
+    ninguna persona haya apretado nada.
+    """
+    from common.models import Org
+    from operaciones import autonomia, chat_herramientas, supervisor
+    from operaciones.models import PropuestaSupervisor as P
+
+    org = Org.objects.create(name="Org autorizada")
+    _interruptor_encendido(monkeypatch)
+    caso = _caso_desincronizado(org, "600002", "8002")
+    llamadas = _motor_que_cierra(monkeypatch)
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        lambda o, *, id_servicio: SANO)
+
+    #  Una persona sube el nivel, con nombre, motivo y criterios: es la unica
+    #  forma, y el codigo lo exige explicitamente.
+    from common.models import Profile, User
+
+    usuario = User.objects.create(email="jefa@ejemplo.test", name="Jefa")
+    perfil = Profile.objects.create(org=org, user=usuario, role="ADMIN",
+                                    is_active=True)
+    autonomia.cambiar(
+        org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
+        motivo="piloto de cierre automatico de casos desincronizados",
+        criterios="5 servicios reales medidos: 3 cierre seguro, 1 revisar, "
+                  "1 sin diagnostico")
+
+    resumen = supervisor.correr_ciclo(org)
+
+    caso.refresh_from_db()
+    #  El mensaje lleva TODO lo que decide, porque un "no se cerro" sin el
+    #  motivo manda a buscar el problema a las tres puertas a la vez.
+    prop = PropuestaSupervisor.objects.filter(
+        org=org, tipo_senal=P.CASO_DESINCRONIZADO).first()
+    contexto = {
+        "estado_caso": caso.status,
+        "nivel_que_pidio": getattr(prop, "nivel_autonomia_requerido", None),
+        "estado_propuesta": getattr(prop, "estado", None),
+        "autonomia": autonomia.puede(org, P.NIVEL_EJECUTAR_REVERSIBLE),
+        "cierre": resumen.get("cierre_automatico"),
+        "llamadas_al_motor": llamadas,
+    }
+    assert caso.status == "Closed", f"el caso no se cerro: {contexto}"
+    assert len(llamadas) == 1, "y se le pidio al motor exactamente una vez"
+
+    propuesta = PropuestaSupervisor.objects.get(org=org,
+                                                tipo_senal=P.CASO_DESINCRONIZADO)
+    assert propuesta.estado == P.ACEPTADA
+    #  LA AUDITORIA DISTINGUE lo automatico de lo humano: sin esto, dentro de
+    #  seis meses nadie puede separar lo que decidio una persona de lo que
+    #  decidio el sistema.
+    assert propuesta.revisado_por is None
+    assert "Supervisor NOC IA" in propuesta.resultado
+
+
+@pytest.mark.django_db
+def test_una_senal_debil_NO_se_cierra_aunque_la_empresa_autorice(monkeypatch):
+    """
+    La primera puerta sigue valiendo con la segunda abierta. Este es el caso
+    medido en produccion (servicio 4045): ticket cerrado en WispHub, equipo en
+    linea, pero con la señal debil. Ese cliente puede volver a caerse.
+    """
+    from common.models import Org, Profile, User
+    from operaciones import autonomia, chat_herramientas, supervisor
+    from operaciones.models import PropuestaSupervisor as P
+
+    org = Org.objects.create(name="Org con debil")
+    _interruptor_encendido(monkeypatch)
+    caso = _caso_desincronizado(org, "600003", "8003")
+    llamadas = _motor_que_cierra(monkeypatch)
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        lambda o, *, id_servicio: DEBIL)
+
+    usuario = User.objects.create(email="jefa2@ejemplo.test", name="Jefa")
+    perfil = Profile.objects.create(org=org, user=usuario, role="ADMIN",
+                                    is_active=True)
+    autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
+                      motivo="piloto", criterios="medido")
+
+    supervisor.correr_ciclo(org)
+
+    caso.refresh_from_db()
+    assert caso.status == "New", "una señal debil la mira una persona"
+    assert llamadas == []
+    propuesta = PropuestaSupervisor.objects.get(org=org,
+                                                tipo_senal=P.CASO_DESINCRONIZADO)
+    assert propuesta.estado == P.PROPUESTA, "queda esperando a una persona"
+    assert propuesta.nivel_autonomia_requerido == P.NIVEL_RECOMENDAR
+
+
+
+@pytest.mark.django_db
+def test_el_interruptor_ilegible_impide_cerrar(monkeypatch):
+    """
+    Si el interruptor general de autonomia no se puede LEER, no se cierra.
+
+    No es una hipotesis: salio midiendo. La primera corrida del camino feliz
+    fallo con "no se pudo leer el interruptor de autonomia (ProgrammingError):
+    no poder leer el control es lo mismo que no tenerlo" -- la base de pruebas
+    no tiene el esquema del motor, donde ese interruptor vive.
+
+    Eso es exactamente la conducta que se quiere: el interruptor vive fuera de
+    la config del tenant y falla CERRADO a proposito, porque la ruta de la
+    config falla ABIERTA por dos caminos medidos. Esta prueba lo deja fijado:
+    sin interruptor legible, el caso no se toca por mas que todo lo demas
+    autorice.
+    """
+    from common.models import Org, Profile, User
+    from operaciones import autonomia, chat_herramientas, supervisor
+    from operaciones.models import PropuestaSupervisor as P
+
+    org = Org.objects.create(name="Org sin interruptor")
+    caso = _caso_desincronizado(org, "600004", "8004")
+    llamadas = _motor_que_cierra(monkeypatch)
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        lambda o, *, id_servicio: SANO)
+
+    usuario = User.objects.create(email="jefa3@ejemplo.test", name="Jefa")
+    perfil = Profile.objects.create(org=org, user=usuario, role="ADMIN",
+                                    is_active=True)
+    autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
+                      motivo="piloto", criterios="medido")
+
+    #  NO SE PARCHEA NADA: la base de pruebas no tiene el esquema del motor,
+    #  donde vive el interruptor, asi que la lectura falla sola. Es la falla
+    #  REAL y no una imitacion -- de hecho asi aparecio, haciendo fallar el
+    #  camino feliz de la prueba de al lado.
+    #
+    #  Un intento anterior reemplazaba '_interruptor_de' entera por algo que
+    #  levantaba, y eso medía otra cosa: esa funcion TIENE su propio try, asi
+    #  que sustituirla completa rompia justamente la parte que se queria
+    #  comprobar.
+
+    supervisor.correr_ciclo(org)
+
+    caso.refresh_from_db()
+    assert caso.status == "New", (
+        "con el interruptor ilegible el caso NO se toca, aunque el nivel "
+        "configurado lo permita")
+    assert llamadas == []
+
+@pytest.mark.django_db
+def test_el_sistema_NO_puede_rechazar_ni_modificar_automaticamente():
+    #  Aceptar solo. Rechazar es una decision sobre algo que el sistema
+    #  propuso: dejarlo descartar sus propias recomendaciones le permitiria
+    #  borrar lo que una persona tenia que ver.
+    from common.models import Org
+    from operaciones import supervisor
+    from operaciones.models import PropuestaSupervisor as P
+
+    org = Org.objects.create(name="Org del rechazo")
+    propuesta = PropuestaSupervisor.objects.create(
+        org=org, tipo_senal=P.CASO_DESINCRONIZADO, origen_tipo="case",
+        origen_id="22222222-2222-4222-8222-222222222222",
+        accion_propuesta="x", motivo="y", prioridad=30,
+        evidencia=[{"fuente": "caso", "id": "1", "dato": "z",
+                    "observado_en": timezone.now().isoformat()}])
+
+    with pytest.raises(ValueError):
+        supervisor.revisar(propuesta, actor=None, automatico=True,
+                           decision=P.RECHAZADA)
+    #  Y sin 'automatico' sigue exigiendo persona, como siempre.
+    with pytest.raises(ValueError):
+        supervisor.revisar(propuesta, actor=None, decision=P.ACEPTADA)
+
+
 @pytest.mark.django_db
 def test_el_informe_cuenta_cada_veredicto():
     senales = [_senal(id_servicio="1"), _senal(id_servicio="2"),

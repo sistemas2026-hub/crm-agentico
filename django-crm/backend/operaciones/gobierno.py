@@ -121,7 +121,8 @@ def _situacion_de(propuesta):
                             id=propuesta.origen_id).first()
 
 
-def registrar_decision(propuesta, *, actor, ahora=None) -> DecisionSupervisor:
+def registrar_decision(propuesta, *, actor, ahora=None,
+                       automatico: bool = False) -> DecisionSupervisor:
     """
     Deja la decision que una persona acaba de tomar sobre una propuesta.
 
@@ -137,13 +138,18 @@ def registrar_decision(propuesta, *, actor, ahora=None) -> DecisionSupervisor:
     """
     ahora = ahora or timezone.now()
     tipo = ESTADO_A_DECISION.get(propuesta.estado)
+    #  Una aceptacion del SISTEMA no es una aceptacion humana, y el tipo lo
+    #  dice. Se decide aqui y no en el llamador para que no haya dos formas de
+    #  escribir la misma fila.
+    if automatico and tipo == TipoDecision.ACEPTO:
+        tipo = TipoDecision.CERRO_SOLO
     if tipo is None:
         raise ErrorGobierno(
             f"el estado '{propuesta.estado}' no es una decision: no se "
             f"registra un desenlace para algo que nadie decidio")
     #  'expiro' es lo unico que puede no tener actor (lo hace el reloj). Lo
     #  exige la restriccion 'decision_humana_con_actor' de la base.
-    if tipo != TipoDecision.EXPIRO and actor is None:
+    if tipo not in (TipoDecision.EXPIRO, TipoDecision.CERRO_SOLO) and actor is None:
         raise ErrorGobierno(
             "una decision humana necesita actor: sin nombre no se puede "
             "repreguntar por que se decidio eso")

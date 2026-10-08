@@ -1217,6 +1217,22 @@ def analizar(senal: Senal) -> dict:
         #  tres cerrojos medidos -- ver 'ejecutar_propuesta' y el informe de
         #  M09-R. Subir el nivel declara QUE se propone, no habilita nada.
         prioridad, comp = _prioridad(30, {})
+        #  EL NIVEL LO DECIDE EL DIAGNOSTICO, y por eso se lee de la señal.
+        #
+        #  Sin diagnostico que lo habilite, esto sigue siendo una
+        #  recomendacion: alguien tiene que mirarla. Con 'cierre_seguro' --el
+        #  equipo en linea con señal buena, o caido por falta de energia en la
+        #  casa del cliente-- la propuesta declara que pide EJECUTAR una accion
+        #  reversible, que es lo que de verdad va a pasar.
+        #
+        #  Declarar el nivel no concede el permiso: lo concede
+        #  'autonomia.puede(org, 3)', que depende de lo que una persona haya
+        #  autorizado para esta empresa. Lo que cambia aqui es que la propuesta
+        #  DICE lo que pide, en vez de pedir menos de lo que hace.
+        _diag = (senal.datos or {}).get("diagnostico_veredicto")
+        _nivel = (PropuestaSupervisor.NIVEL_EJECUTAR_REVERSIBLE
+                  if _diag == "cierre_seguro"
+                  else PropuestaSupervisor.NIVEL_RECOMENDAR)
         return {
             "accion_propuesta": ("Cerrar el caso en Dexter para sincronizar su "
                                  "estado con WispHub"),
@@ -1247,7 +1263,7 @@ def analizar(senal: Senal) -> dict:
             "prioridad": prioridad,
             "impacto": ("Un caso cerrado afuera y abierto acá infla la cola del CRM y "
                         "hace que los conteos de casos abiertos no describan la operación"),
-            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "nivel": _nivel,
             "componentes_prioridad": comp,
         }
 
@@ -2081,6 +2097,33 @@ def _correr_ciclo(org, ahora) -> dict:
 
         propuesta = registrar_propuesta(org, senal, analisis, ahora)
 
+        #  EL CIERRE AUTOMATICO, si las dos puertas lo dejan (08/10/2026).
+        #
+        #  Va DESPUES de registrar la propuesta y no en vez de ella: la
+        #  propuesta es el registro de por que se cerro, con sus ocho
+        #  observaciones y su diagnostico. Un cierre sin propuesta seria un caso
+        #  que cambia de estado sin que nadie pueda reconstruir el motivo.
+        #
+        #  'cerrar_si_corresponde' no levanta nunca y devuelve por que no cerro
+        #  cuando no cierra. Hoy devuelve "la empresa no lo autoriza" para
+        #  todos, porque el nivel de autonomia de Rapilink esta en 1 -- y eso
+        #  solo lo sube una persona desde la interfaz.
+        cierre = diagnostico_optico.cerrar_si_corresponde(org, propuesta,
+                                                          ahora=ahora)
+        _auto = resumen["cierre_automatico"]
+        if cierre["cerrado"]:
+            _auto["cerrados"] += 1
+        else:
+            #  EL MOTIVO SE CUENTA SIEMPRE que no se cierre, se haya intentado
+            #  o no. Sin esto el informe decia "cerraria: 1, cerrados: 0" y no
+            #  habia forma de saber cual de las puertas lo freno -- que es
+            #  exactamente lo que costo una corrida de pruebas averiguar.
+            _motivos = _auto.setdefault("motivos_de_no_cierre", {})
+            _m = cierre.get("motivo") or "sin motivo"
+            _motivos[_m] = _motivos.get(_m, 0) + 1
+            if cierre["intentado"]:
+                _auto["no_cerraria"] += 1
+
         #  La bitacora del razonamiento, ya con la propuesta a la que apuntar.
         #  Nunca levanta: si la escritura falla, la propuesta ya esta creada y
         #  el ciclo sigue. Lo que se pierde es la constancia, no el trabajo.
@@ -2246,7 +2289,7 @@ def _aplicar_cambios(propuesta, cambios: dict) -> dict:
 
 def revisar(propuesta: PropuestaSupervisor, *, actor, decision: str,
             comentario: str = "", cambios: dict | None = None,
-            ahora=None) -> PropuestaSupervisor:
+            ahora=None, automatico: bool = False) -> PropuestaSupervisor:
     """
     Aceptar, modificar o rechazar. Queda auditado quién, cuándo y con qué.
 
@@ -2272,8 +2315,25 @@ def revisar(propuesta: PropuestaSupervisor, *, actor, decision: str,
             f"Decisión desconocida: {decision!r}. "
             f"Solo {PropuestaSupervisor.ESTADOS_REVISADOS}."
         )
-    if actor is None:
+    #  'automatico' ES LA UNICA FORMA DE REVISAR SIN PERSONA, y tiene que
+    #  pedirse con todas las letras (08/10/2026).
+    #
+    #  La alternativa era permitir 'actor=None' a secas, y eso convertiria cada
+    #  olvido de pasar el actor en un cierre automatico silencioso. Asi, quien
+    #  no lo declara recibe el mismo error de siempre.
+    #
+    #  'revisado_por' queda en NULL, que es como la auditoria distingue lo
+    #  automatico de lo humano. Se eligio eso sobre crear un usuario "Supervisor
+    #  NOC IA" en la base: un usuario de sistema puede recibir permisos, puede
+    #  iniciar sesion si alguien le pone contraseña, y aparece en los selectores
+    #  de asignacion como si fuera una persona. Un NULL no hace ninguna de esas
+    #  cosas, y el 'resultado' dice quien fue.
+    if actor is None and not automatico:
         raise ValueError("Una revisión sin revisor no es una revisión.")
+    if automatico and decision != PropuestaSupervisor.ACEPTADA:
+        raise ValueError(
+            "El sistema solo acepta automáticamente: rechazar o modificar es "
+            "una decisión que necesita a una persona.")
 
     cambios = cambios or {}
     if cambios and decision != PropuestaSupervisor.MODIFICADA:
@@ -2330,7 +2390,9 @@ def revisar(propuesta: PropuestaSupervisor, *, actor, decision: str,
             PropuestaSupervisor.RECHAZADA: "REJECTED",
             PropuestaSupervisor.MODIFICADA: "UPDATE",
         }[decision]
-        extra = {"revisor": str(actor.id), "sin_ejecucion": True}
+        extra = {"revisor": str(actor.id) if actor else "sistema",
+                 "automatico": bool(automatico),
+                 "sin_ejecucion": True}
         if registro_cambios:
             extra["cambios"] = registro_cambios
         auditoria.registrar(
@@ -2362,7 +2424,8 @@ def revisar(propuesta: PropuestaSupervisor, *, actor, decision: str,
         #  acierto.
         from operaciones import gobierno
 
-        gobierno.registrar_decision(fresca, actor=actor, ahora=ahora)
+        gobierno.registrar_decision(fresca, actor=actor, ahora=ahora,
+                                    automatico=automatico)
     return fresca
 
 

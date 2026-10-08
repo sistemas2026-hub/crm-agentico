@@ -74,9 +74,19 @@ class TipoDecision:
     #  los dos juntos haria que una propuesta fuera de contexto contara
     #  como un error de criterio del Supervisor, que es otra cosa.
     NO_APLICABLE = "no_aplicable"
+    #  08/10/2026. La ejecuto el SISTEMA porque se cumplieron las condiciones
+    #  que una persona autorizo de antemano -- hoy, cerrar un caso que el
+    #  proveedor ya cerro y cuyo equipo el diagnostico optico encontro sano.
+    #
+    #  TIPO PROPIO Y NO 'ACEPTO', por el mismo motivo por el que 'EXPIRO' es
+    #  tipo propio: nadie la miro. Contarla como una aceptacion humana inflaria
+    #  la tasa de aceptacion del Supervisor con decisiones que el Supervisor se
+    #  tomo solo, y esa tasa existe justamente para medir si acierta cuando una
+    #  persona lo juzga.
+    CERRO_SOLO = "cerro_solo"
 
     TODOS = (ACEPTO, RECHAZO, MODIFICO, POSPUSO, EXPIRO,
-             NO_APLICABLE)
+             NO_APLICABLE, CERRO_SOLO)
     #  'no_aplicable' SI es humano --lo dice una persona-- pero NO entra en
     #  la tasa de aceptacion: no es ni aceptar ni rechazar.
     HUMANOS = (ACEPTO, RECHAZO, MODIFICO, POSPUSO, NO_APLICABLE)
@@ -210,7 +220,12 @@ class DecisionSupervisor(BaseModel):
             #  camino podria registrar decisiones sin dueño y las metricas de
             #  aceptacion dejarian de significar algo.
             models.CheckConstraint(
-                condition=(models.Q(tipo="expiro")
+                #  'expiro' y 'cerro_solo' son las dos decisiones del SISTEMA:
+                #  una por vencimiento y la otra por cumplirse condiciones que
+                #  una persona autorizo antes. Ninguna tiene actor, y las dos
+                #  quedan fuera de 'HUMANOS' para que no contaminen la tasa de
+                #  aceptacion. Cualquier otro tipo sin actor sigue prohibido.
+                condition=(models.Q(tipo__in=["expiro", "cerro_solo"])
                            | models.Q(actor__isnull=False)),
                 name="decision_humana_con_actor"),
             #  Un resultado cerrado necesita decir COMO se supo.

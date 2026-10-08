@@ -301,6 +301,12 @@ EN_SOMBRA = True
 #  no hay forma de separarlos, que es justo cuando hace falta.
 ACTOR_AUTOMATICO = "Supervisor NOC IA"
 
+#  El nivel que una propuesta tiene que pedir para que el ciclo la ejecute.
+#  Cerrar un caso en el CRM es reversible --se reabre-- y por eso es 3 y no 4:
+#  el 4 es "siempre lo aprueba una persona" y 'autonomia.puede' lo niega
+#  siempre, por configuracion que tenga la empresa.
+NIVEL_PARA_CERRAR = PropuestaSupervisor.NIVEL_EJECUTAR_REVERSIBLE
+
 
 def evaluar_cierre_automatico(org, senales, *, ahora=None) -> dict:
     """
@@ -377,6 +383,87 @@ def evaluar_cierre_automatico(org, senales, *, ahora=None) -> dict:
             senal.datos["cierre_automatico_porque"], ahora))
 
     return informe
+
+
+def cerrar_si_corresponde(org, propuesta, *, ahora=None) -> dict:
+    """
+    Cierra el caso de una propuesta recien creada, si las DOS puertas lo dejan.
+
+    Devuelve {intentado, cerrado, motivo}. Nunca levanta: un cierre que no
+    ocurre es un resultado posible del ciclo, no algo que deba tumbarlo.
+
+    LAS DOS PUERTAS, Y NINGUNA ES LA OTRA
+    -------------------------------------
+      1. LA PROPUESTA PIDE NIVEL 3. Solo lo pide si su diagnostico optico dio
+         'cierre_seguro' -- equipo en linea con señal buena, o caido por falta
+         de energia en la casa del cliente. Cualquier otra cosa se queda en
+         nivel 1 y ni llega aqui.
+      2. LA EMPRESA LO AUTORIZO. 'autonomia.puede(org, 3)' lee el nivel
+         configurado para ESTA empresa, que solo sube una persona con nombre,
+         motivo y criterios medidos. Con el techo del codigo en 3 y el de la
+         empresa en 1 --que es el estado al escribir esto-- no se cierra ni un
+         caso.
+
+    Y despues de las dos, 'cierre_de_caso.cerrar' vuelve a validar las once
+    condiciones sobre datos releidos con la fila bloqueada. Que el ciclo haya
+    decidido cerrarlo hace un segundo no exime de eso: entre el diagnostico y
+    el cierre el proveedor pudo reabrir el ticket.
+
+    QUIEN FIGURA EN LA AUDITORIA
+    ----------------------------
+    Nadie: 'revisado_por' queda en NULL y el resultado dice que lo cerro el
+    Supervisor NOC IA. Es como se distingue lo automatico de lo humano cuando
+    alguien pregunte, dentro de seis meses, por que se cerro este caso.
+    """
+    from operaciones import autonomia, cierre_de_caso
+    from operaciones import supervisor as sup_mod
+
+    ahora = ahora or timezone.now()
+
+    #  PUERTA 1  --  el diagnostico, via el nivel que la propuesta declara.
+    if propuesta.nivel_autonomia_requerido < NIVEL_PARA_CERRAR:
+        return {"intentado": False, "cerrado": False,
+                "motivo": "el diagnostico no habilita un cierre automatico"}
+
+    #  PUERTA 2  --  lo que la empresa autorizo. Se consulta aunque la puerta 1
+    #  haya pasado: pasar una no exime de la siguiente, que es como funciona la
+    #  frontera del motor y por el mismo motivo.
+    veredicto = autonomia.puede(org, NIVEL_PARA_CERRAR)
+    if not veredicto.get("puede"):
+        return {"intentado": False, "cerrado": False,
+                "motivo": f"la empresa no lo autoriza: "
+                          f"{veredicto.get('motivo') or 'sin motivo'}"}
+
+    #  La aceptacion se persiste ANTES de intentar el cierre, igual que en el
+    #  camino humano y por la misma razon medida alli: si la llamada al
+    #  proveedor falla, la decision igual quedo registrada y auditada. Al reves,
+    #  un fallo de red haria rollback de una decision que si se tomo.
+    try:
+        sup_mod.revisar(
+            propuesta, actor=None, automatico=True,
+            decision=PropuestaSupervisor.ACEPTADA,
+            comentario=(f"Aceptada automaticamente por {ACTOR_AUTOMATICO}: "
+                        f"{(propuesta.motivo or '')[:300]}"),
+            ahora=ahora)
+        propuesta.refresh_from_db()
+    except Exception as e:                                       # noqa: BLE001
+        #  El tipo y no el texto: lo mismo que el resto del modulo.
+        return {"intentado": False, "cerrado": False,
+                "motivo": f"no se pudo registrar la aceptacion "
+                          f"({type(e).__name__})"}
+
+    try:
+        resultado = cierre_de_caso.cerrar(propuesta, actor=None, ahora=ahora)
+    except Exception as e:                                       # noqa: BLE001
+        #  'cerrar' promete no levantar por un cierre que no ocurrio, pero una
+        #  excepcion inesperada aqui no puede tumbar el ciclo entero: quedan
+        #  otras señales por procesar y la propuesta YA esta aceptada.
+        return {"intentado": True, "cerrado": False,
+                "motivo": f"el cierre fallo ({type(e).__name__})"}
+
+    return {"intentado": True,
+            "cerrado": bool(resultado.get("cerrado")),
+            "motivo": resultado.get("motivo") or ""}
 
 
 def _anotar(senal, veredicto: str, porque: str, diagnostico, ahora) -> None:

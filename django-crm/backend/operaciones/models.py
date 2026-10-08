@@ -860,7 +860,21 @@ class PropuestaSupervisor(BaseModel):
     )
     # El techo de esta etapa. Una propuesta por encima se registra igual, pero
     # queda marcada como fuera del alcance vigente.
-    NIVEL_MAXIMO_ETAPA = NIVEL_RECOMENDAR
+    #
+    # SUBIO A 3 EL 08/10/2026, y lo que lo hace seguro esta MEDIDO: de los
+    # diecisiete analisis que hoy produce 'supervisor.analizar', dieciseis
+    # declaran NIVEL_RECOMENDAR y dos NIVEL_OBSERVAR. NINGUNO llega a 2 ni a 3.
+    # O sea que subir este techo no le abre la puerta a ninguna propuesta
+    # existente: la unica que puede alcanzarlo es el cierre de un caso
+    # desincronizado cuyo diagnostico optico lo habilite, que es justamente el
+    # caso para el que se subio.
+    #
+    # Y ESTE TECHO NO AUTORIZA NADA POR SI SOLO. Es el techo del CODIGO --"esta
+    # etapa ya construyo esto"--; el de la EMPRESA vive en
+    # 'operaciones/autonomia.py', se consulta con 'puede()' y solo lo sube una
+    # persona con nombre, motivo y criterios medidos. Con este en 3 y aquel en
+    # 1, no se cierra ni un caso. Son dos puertas y hay que pasar las dos.
+    NIVEL_MAXIMO_ETAPA = NIVEL_EJECUTAR_REVERSIBLE
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="propuestas_ia")
 
