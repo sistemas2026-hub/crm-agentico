@@ -134,6 +134,73 @@ class MotorNoDisponible(Exception):
     """No se pudo preguntarle al motor. No es 'no hay datos'."""
 
 
+def estado_de_autonomia() -> dict:
+    """
+    El interruptor general de autonomia, preguntado AL MOTOR por HTTP.
+
+    Devuelve {permitido, estado, motivo}. Levanta MotorNoDisponible si no se
+    pudo preguntar -- quien llama decide, y en este proyecto decide que no
+    poder leer el control es lo mismo que no tenerlo.
+
+    POR QUE POR HTTP Y NO LEYENDO LA TABLA (08/10/2026)
+    ---------------------------------------------------
+    Porque esa tabla es del MOTOR, y 'crm_user' no tiene acceso a su schema.
+    Medido en produccion: 'information_schema.schemata' devuelve 0 filas para
+    'asistente' con ese usuario, mientras la tabla existe. La lectura directa
+    fallaba con ProgrammingError y el interruptor quedaba permanentemente
+    ilegible -- o sea que el nivel efectivo de cualquier empresa era 0 pasara
+    lo que pasara, y el cierre automatico no podia funcionar nunca.
+
+    No se arregla con un GRANT, y no por pereza: la separacion de identidades
+    de base es una decision tomada despues del incidente del 18/08/2026, y este
+    mismo archivo ya documenta el sentido contrario -- el motor no lee ninguna
+    tabla del CRM, y cuando necesita una la pide por HTTP. Esta es la misma
+    frontera, cruzada en la otra direccion y de la misma forma.
+
+    La ruta '/autonomia' del motor existe desde antes y esta hecha justo para
+    esto: es de solo lectura y NO carga la configuracion del tenant, "porque el
+    interruptor tiene que poder consultarse aunque la config este rota, que es
+    justo uno de los momentos en que alguien querria tirarlo".
+    """
+    import requests
+
+    base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
+    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    if not tenant:
+        raise MotorNoDisponible(
+            "falta MOTOR_TENANT: sin saber de que empresa es el interruptor no "
+            "se puede consultar, y suponerlo leeria el de otra")
+
+    cabeceras = {}
+    token = os.environ.get("MOTOR_SERVICE_TOKEN")
+    if token:
+        cabeceras["X-Servicio-Token"] = token
+
+    try:
+        r = requests.get(f"{base}/autonomia", params={"tenant": tenant},
+                         headers=cabeceras, timeout=SEGUNDOS_TIMEOUT)
+    except Exception as e:                                       # noqa: BLE001
+        raise MotorNoDisponible(
+            f"no se pudo preguntar: {type(e).__name__}") from None
+
+    if r.status_code != 200:
+        raise MotorNoDisponible(f"el motor contesto HTTP {r.status_code}")
+    try:
+        cuerpo = r.json() or {}
+    except ValueError:
+        raise MotorNoDisponible("el motor no devolvio JSON") from None
+
+    #  'permitido' TIENE QUE VENIR, y no se asume. Un cuerpo sin esa clave es
+    #  una respuesta que no entendemos, y entenderla de menos seria asumir que
+    #  permite -- exactamente lo que el fail-closed existe para impedir.
+    if "permitido" not in cuerpo:
+        raise MotorNoDisponible("la respuesta no trae 'permitido'")
+
+    return {"permitido": bool(cuerpo.get("permitido")),
+            "estado": str(cuerpo.get("estado") or ""),
+            "motivo": str(cuerpo.get("motivo") or "")}
+
+
 # =============================================================================
 #  EL CAMINO HACIA UN SISTEMA EXTERNO
 # =============================================================================

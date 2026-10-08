@@ -117,11 +117,15 @@ def validar(propuesta: PropuestaSupervisor, caso: Case, *, ahora=None) -> None:
     if propuesta.estado != PropuestaSupervisor.ACEPTADA:
         raise NoSeCerro(NO_ACEPTADA, f"esta en '{propuesta.estado}'")
 
-    condiciones_del_caso(propuesta, caso, ahora=ahora)
+    #  SE DEVUELVE lo que calcula la otra mitad, y no es un detalle: 'cerrar'
+    #  usa ese contexto, y tres pruebas ajenas lo leen por nombre. La primera
+    #  version de este corte llamaba sin devolver, y 'validar' pasó a devolver
+    #  None en silencio -- el tipo de rotura que no da error donde se produce.
+    return condiciones_del_caso(propuesta, caso, ahora=ahora)
 
 
 def condiciones_del_caso(propuesta: PropuestaSupervisor, caso: Case, *,
-                         ahora=None) -> None:
+                         ahora=None):
     """
     Todas las condiciones MENOS la de que alguien haya aceptado. Levanta
     NoSeCerro.

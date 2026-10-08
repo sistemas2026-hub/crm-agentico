@@ -126,6 +126,57 @@ def _interruptor_de(org) -> tuple[bool, str]:
     #
     #  'transaction.atomic()' abre un savepoint: si la consulta falla, se vuelve
     #  solo hasta ahi y la transaccion de afuera sigue sirviendo.
+    #  SE LE PREGUNTA AL MOTOR, QUE ES EL DUEÑO DE ESA TABLA (08/10/2026)
+    #  -------------------------------------------------------------------
+    #  La lectura directa no funcionaba y no era un bug: 'crm_user' no tiene
+    #  acceso al schema del motor. Medido en produccion -- la tabla EXISTE
+    #  ('pg_tables' la ve) y el schema no es visible para ese usuario
+    #  ('information_schema.schemata' devuelve 0). Resultado: ProgrammingError
+    #  siempre, interruptor permanentemente ilegible, y nivel efectivo 0 para
+    #  cualquier empresa pasara lo que pasara. El fail-closed tapaba el
+    #  problema en vez de mostrarlo: todo "funcionaba", nada se ejecutaba.
+    #
+    #  No se arregla con un GRANT. La separacion de identidades de base se
+    #  tomo despues del incidente del 18/08/2026, y la frontera ya tiene su
+    #  forma de cruzarse: por HTTP. 'fuentes_adaptadores' documenta el sentido
+    #  contrario con las mismas palabras -- el motor no lee ninguna tabla del
+    #  CRM, y cuando necesita una la pide.
+    #  Import local: 'fuentes_adaptadores' importa modelos, y a nivel de modulo
+    #  esto seria un ciclo.
+    from operaciones import fuentes_adaptadores
+
+    try:
+        estado_motor = fuentes_adaptadores.estado_de_autonomia()
+    except Exception as e:                                       # noqa: BLE001
+        #  Tipo y no texto: el texto de un error de red trae la URL.
+        return False, (f"no se pudo leer el interruptor de autonomia "
+                       f"({type(e).__name__}): no poder leer el control es lo "
+                       f"mismo que no tenerlo")
+    if estado_motor["permitido"]:
+        return True, ""
+    return False, (estado_motor["motivo"]
+                   or f"el interruptor de autonomia esta en "
+                      f"'{estado_motor['estado'] or 'desconocido'}'")
+
+
+def _interruptor_por_sql(org) -> tuple[bool, str]:
+    """
+    La lectura directa de la tabla. YA NO SE USA desde '_interruptor_de'.
+
+    Se conserva porque sigue siendo valida el dia que el CRM y el motor
+    compartan identidad de base, y porque su comentario sobre el savepoint es
+    una cicatriz que no conviene perder.
+    """
+    #  EL 'atomic' ES UN SAVEPOINT, Y NO ES OPCIONAL (medido el 02/10/2026)
+    #  --------------------------------------------------------------------
+    #  Esta tabla vive en el schema del MOTOR, que Django no construye: puede no
+    #  existir. Y en PostgreSQL, una consulta que falla dentro de una transaccion
+    #  la deja ABORTADA -- todo lo que venga despues revienta con
+    #  'InFailedSqlTransaction', aunque no tenga nada que ver.
+    #
+    #  La primera version de esta funcion atrapaba la excepcion y devolvia
+    #  "no se pudo leer", creyendo que con eso alcanzaba. No alcanzaba: cinco
+    #  pruebas se cayeron DESPUES de llamar aqui, por una transaccion envenenada.
     try:
         with transaction.atomic():
             with connection.cursor() as cur:
