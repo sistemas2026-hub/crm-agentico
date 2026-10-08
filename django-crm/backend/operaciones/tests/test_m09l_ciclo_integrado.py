@@ -652,8 +652,9 @@ def test_api_el_ciclo_manual_devuelve_resumen_y_detalle(org_a, actor):
 
 
 #  LAS DOS PUERTAS CONOCIDAS DEL CICLO. Una tercera rompe la prueba de abajo a
+#  LAS PUERTAS CONOCIDAS DEL CICLO. Una nueva rompe la prueba de abajo a
 #  proposito: agregar una puerta es una decision, no un detalle.
-PUERTAS_DEL_CICLO = {"ciclo", "supervisor-ciclo-automatico"}
+PUERTAS_DEL_CICLO = {"ciclo"}
 
 
 @pytest.mark.django_db
@@ -676,52 +677,40 @@ def test_api_no_hay_segundo_ciclo(org_a, monkeypatch):
     detecte y proponga por su cuenta, que se desviaria de la primera sin que
     nadie lo note.
 
-    Asi que ahora se afirma el EFECTO, y es estrictamente mas fuerte: se
-    reemplaza 'supervisor.correr_ciclo' y se comprueba que LAS DOS puertas
-    aterrizan ahi. Una puerta con implementacion propia no llamaria al
-    reemplazo y esta prueba se pondria en rojo -- algo que contar nombres no
-    detectaba. Y una puerta nueva tambien, por el conjunto de arriba.
+    Asi que ahora se afirma el EFECTO: se reemplaza 'supervisor.correr_ciclo'
+    y se comprueba que la puerta aterrice ahi. Una puerta con implementacion
+    propia no llamaria al reemplazo y esta prueba se pondria en rojo -- algo
+    que contar nombres no detectaba. Y una puerta nueva tambien, por el
+    conjunto de arriba.
+
+    'supervisor-ciclo-automatico' se borro mas tarde ese mismo dia: el reloj
+    del motor para el que se escribio nunca pudo encenderse, el ciclo paso a
+    correr por 'celery-beat' dentro del CRM sin pasar por HTTP, y quedaba una
+    ruta sin dueño con un permiso mas flojo que el del boton para hacer lo
+    mismo. Hoy la corrida automatica NO entra por ninguna URL: llama a
+    'correr_ciclo' en proceso, y su guarda esta en 'test_ciclo_periodico.py'.
     """
     from operaciones import supervisor as sup
     from operaciones import urls as rutas
-    from operaciones import views
 
-    #  1. LAS PUERTAS SON LAS DECLARADAS. Una tercera exige pasar por aqui.
+    #  1. LAS PUERTAS SON LAS DECLARADAS. Una nueva exige pasar por aqui.
     con_ciclo = {p.name for p in rutas.urlpatterns
                  if p.name and "ciclo" in p.name}
     assert con_ciclo == PUERTAS_DEL_CICLO, (
         f"cambiaron las puertas del ciclo: {con_ciclo}. Agregar una es una "
         f"decision de diseño -- si es deliberada, se declara arriba")
 
-    #  2. LAS DOS LLEGAN A LA MISMA FUNCION. Se cuenta por puerta, no en total:
-    #     un total de 2 tambien lo daria una puerta llamando dos veces.
+    #  2. Y LLEGA A LA MISMA FUNCION, que es lo que de verdad se protege.
     llegadas = []
     monkeypatch.setattr(
         sup, "correr_ciclo",
         lambda org, *a, **k: llegadas.append(org.id) or {
             "senales": 0, "propuestas": 0,
-            "cierre_automatico": {"cerrados": 0, "motivos_de_no_cierre": {}}})
+            "cierre_automatico": {"cerrados": 0}})
 
-    #  LA PUERTA DE LA PERSONA
     u, perfil = _persona(org_a, "ADMIN")
     r = _cli(u, org_a, perfil).post(CICLO, {}, format="json")
     assert r.status_code == 200, r.data
     assert llegadas == [org_a.id], (
         "la ruta del boton no llego a supervisor.correr_ciclo: tiene "
         "implementacion propia, que es justo lo que §11 prohibe")
-
-    #  LA PUERTA DEL RELOJ. Se instancia la vista en vez de pegarle por HTTP
-    #  porque exige la credencial de servicio, y lo que se afirma aqui es a
-    #  donde DESPACHA, no a quien deja entrar -- eso lo cubren las pruebas de
-    #  permisos de 'test_tareas_delegadas'.
-    from operaciones import tareas_delegadas as td
-    td.delegar(org_a, td.CICLO_AUTOMATICO, actor=perfil)
-
-    class _Pedido:
-        data = {}
-        org = org_a
-
-    respuesta = views.CicloAutomaticoView().post(_Pedido())
-    assert respuesta.data["corrio"] is True, respuesta.data
-    assert llegadas == [org_a.id, org_a.id], (
-        "la ruta del reloj no llego a supervisor.correr_ciclo")

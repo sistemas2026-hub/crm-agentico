@@ -727,9 +727,27 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
     docstring dice lo que de verdad afirma hoy. Lo que cambió:
 
     Hasta ese día ninguna ruta ejecutaba nada, y §14 lo decía así. Ahora hay
-    UNA --'supervisor-ciclo-automatico'-- que puede producir un efecto: cerrar
-    un caso que el proveedor ya cerró y cuyo equipo el diagnóstico óptico
-    encontró sano.
+    UNA --'ciclo', la del botón-- que puede producir un efecto: cerrar un caso
+    que el proveedor ya cerró y cuyo equipo el diagnóstico óptico encontró
+    sano.
+
+    ESTO ESTUVO MAL DECLARADO UNAS HORAS, y conviene que quede escrito. La
+    primera versión de este párrafo señalaba a 'supervisor-ciclo-automatico'
+    como la única con efecto, y dejaba 'ciclo' en la lista de las que no
+    ejecutan nada. Era falso desde el momento en que el cierre entró: las dos
+    llamaban al MISMO 'supervisor.correr_ciclo'. Nadie lo noto porque esta
+    guarda compara NOMBRES de ruta, no qué hace cada una -- afirma que el
+    inventario esté completo, no que sea cierto. Lo que de verdad ata cada
+    puerta a una sola implementación es
+    'test_m09l_ciclo_integrado.py::test_api_no_hay_segundo_ciclo', que
+    reemplaza 'correr_ciclo' y comprueba que ahí aterrice.
+
+    'supervisor-ciclo-automatico' se borró el 08/10/2026: la construí para el
+    reloj del motor, ese reloj no se pudo encender nunca --falta un rol de
+    base que nadie puede conceder-- y el ciclo pasó a correr por 'celery-beat'
+    dentro del CRM, sin pasar por HTTP. Quedaba una ruta sin dueño que además
+    pedía solo 'IsAuthenticated', más flojo que el 'EsJefeDeOperaciones' del
+    botón para hacer exactamente lo mismo.
 
     LA REGLA NO SE AFLOJO, SE HIZO EXPLICITA. Esa ruta pasa por TRES puertas
     que no abre ella: una persona tiene que haber delegado la tarea desde el
@@ -952,7 +970,29 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
     from operaciones import urls as rutas_operaciones
     nombres = {p.name for p in rutas_operaciones.urlpatterns}
     assert nombres == {"propuestas", "propuesta-detalle", "propuesta-revisar",
-                       "propuesta-cancelar", "ciclo", "disponibilidad",
+                       "propuesta-cancelar",
+                       #  08/10/2026. LA UNICA RUTA QUE PUEDE EJECUTAR, y por
+                       #  eso se declara con mas detalle que ninguna. Estuvo
+                       #  listada aqui como una mas mientras el parrafo de
+                       #  arriba señalaba a otra -- ver el docstring.
+                       #
+                       #  Lo que puede llegar a hacer es cerrar un caso que el
+                       #  proveedor ya cerro y cuyo equipo el diagnostico
+                       #  optico encontro sano. NO reinicia equipos, no crea ni
+                       #  reasigna tickets, no toca WispHub y no cambia la
+                       #  programacion.
+                       #
+                       #  TRES PUERTAS QUE ESTA RUTA NO ABRE: la tarea delegada
+                       #  por una persona desde el chat, el nivel de autonomia
+                       #  de la empresa, y el diagnostico caso por caso. Con
+                       #  cualquiera cerrada deja la propuesta para que la lea
+                       #  una persona y no cierra nada.
+                       #
+                       #  Exige 'EsJefeDeOperaciones': del otro lado hay
+                       #  alguien mirando la pantalla, y es quien responde por
+                       #  haberlo pedido.
+                       "ciclo",
+                       "disponibilidad",
                        "programacion-publicar", "programacion-cerrar", "programacion-jornada",
                        "linea-secuencia", "jornada-secuenciar",
                        "capacidad-jornada", "actividades",
@@ -1060,30 +1100,7 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  Y el Supervisor NO puede llamarla: 'EsJefeDeOperaciones' pide
                        #  una persona, y 'autonomia.cambiar' se niega sin actor. Un
                        #  sistema que pudiera ampliarse el alcance no tendria alcance.
-                       "supervisor-autonomia",
-                       #  08/10/2026. LA UNICA RUTA QUE PUEDE EJECUTAR, y por
-                       #  eso se declara con mas detalle que ninguna: dispara
-                       #  el ciclo del Supervisor desde el RELOJ, no desde una
-                       #  persona.
-                       #
-                       #  Lo que puede llegar a hacer es cerrar un caso que el
-                       #  proveedor ya cerro y cuyo equipo el diagnostico
-                       #  optico encontro sano. NO reinicia equipos, no crea ni
-                       #  reasigna tickets, no toca WispHub y no cambia la
-                       #  programacion.
-                       #
-                       #  TRES PUERTAS QUE ESTA RUTA NO ABRE: la tarea delegada
-                       #  por una persona desde el chat, el nivel de autonomia
-                       #  de la empresa, y el diagnostico caso por caso. Con
-                       #  cualquiera cerrada contesta 'corrio: False' con su
-                       #  motivo -- y eso es un exito del turno, no un fallo:
-                       #  el trabajo hizo lo suyo, que es preguntar.
-                       #
-                       #  Ruta propia y no la del boton porque son dos permisos
-                       #  distintos: aquella exige a una persona mirando la
-                       #  pantalla, esta la credencial del scheduler con su
-                       #  organizacion comprobada contra la del turno.
-                       "supervisor-ciclo-automatico"}
+                       "supervisor-autonomia"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

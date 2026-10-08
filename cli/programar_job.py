@@ -5,9 +5,9 @@
 ================================================================================
 
     py -3.13 cli/programar_job.py --ver
-    py -3.13 cli/programar_job.py supervisor_ciclo --cada 60m \\
+    py -3.13 cli/programar_job.py supervisor_sondeo --cada 60m \\
         --actor "quien decide" --motivo "por que"
-    py -3.13 cli/programar_job.py supervisor_ciclo --apagar \\
+    py -3.13 cli/programar_job.py supervisor_sondeo --apagar \\
         --actor "quien decide" --motivo "por que"
 
 POR QUE EXISTE
@@ -24,10 +24,16 @@ operacion, no el permiso para saltearse la separacion.
 
 QUE NO HACE, Y ES LA MITAD DEL DISEÑO
 -------------------------------------
-No concede permisos. Encender 'supervisor_ciclo' significa "despertalo cada
-tanto", nunca "puede hacer lo que quiera": del otro lado siguen las tres
-puertas --la tarea delegada por una persona, el nivel de autonomia de la
-empresa, y el diagnostico caso por caso-- y ninguna se abre por esta fila.
+No concede permisos. Encender un trabajo significa "despertalo cada tanto",
+nunca "puede hacer lo que quiera": lo que ese trabajo pueda hacer lo siguen
+decidiendo las puertas de su propio lado, y ninguna se abre por esta fila.
+
+NINGUNO DE LOS DOS TRABAJOS CABLEADOS HOY PRODUCE UN EFECTO: el latido y el
+sondeo son de lectura. Hubo un tercero --el ciclo del Supervisor-- y se quito
+el 08/10/2026 sin haberse encendido nunca: este reloj no puede reclamar un
+turno porque le falta el rol 'scheduler_coordinator', y concederlo exige la
+opcion ADMIN que ninguna credencial del despliegue tiene. El ciclo corre hoy
+por 'celery-beat' del CRM, dentro del proceso, sin pasar por aqui.
 
 Tampoco construye el trabajo. Solo se pueden encender los que el despliegue YA
 sabe hacer ('nucleo/programador/registro.py'); una clave que no este ahi se

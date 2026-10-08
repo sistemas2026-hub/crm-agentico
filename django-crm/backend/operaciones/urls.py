@@ -124,10 +124,4 @@ urlpatterns = [
     #  interruptor (exige motivo, no criterios).
     path("supervisor/autonomia/", views.AutonomiaSupervisorView.as_view(),
          name="supervisor-autonomia"),
-    #  EL CICLO DISPARADO POR EL RELOJ, no por una persona. Ruta propia y no la
-    #  del boton porque son dos permisos distintos --aquella exige a alguien
-    #  mirando la pantalla, esta la credencial del scheduler-- y porque esta
-    #  tiene una puerta mas: corre solo si alguien delego que corra solo.
-    path("supervisor/ciclo-automatico/", views.CicloAutomaticoView.as_view(),
-         name="supervisor-ciclo-automatico"),
 ]

@@ -113,20 +113,18 @@ _PRODUCCION: dict[str, Handler] = {
     #  editable del lado del Supervisor, no en este mapa. Asi este archivo
     #  --que es el motor generico-- no nombra ningun sistema externo.
     "supervisor_sondeo": trabajos.sondeo_de_fuentes,
-    #  El tercero, desde el 08/10/2026, y EL PRIMERO QUE PUEDE PRODUCIR UN
-    #  EFECTO: despierta al Supervisor para que revise y haga lo que tenga
-    #  delegado. Hoy eso puede llegar a cerrar un caso que el proveedor ya
-    #  cerro y cuyo equipo el diagnostico encontro sano.
+    #  EL CICLO DEL SUPERVISOR ESTUVO AQUI y se quito el 08/10/2026. No por
+    #  inutil: nunca se pudo encender. Reclamar un turno exige el rol
+    #  'scheduler_coordinator', y concederlo exige la opcion ADMIN sobre el,
+    #  que no tiene ninguna credencial del despliegue. El ciclo paso a correr
+    #  por 'celery-beat' del CRM --que ya andaba, y cuyo usuario ya podia todo
+    #  lo necesario-- y este trabajo quedo sin llamador posible.
     #
-    #  ESTE MAPA NO CONCEDE NADA. Que el job este aqui significa que el
-    #  despliegue sabe pedir el ciclo; lo que el ciclo puede HACER lo deciden
-    #  tres puertas del otro lado --la tarea delegada por una persona, el nivel
-    #  de autonomia de la empresa, y el diagnostico caso por caso-- y ninguna
-    #  se abre por estar en esta linea.
-    #
-    #  Y sigue valiendo la separacion de arriba: cablear no es encender. Sin su
-    #  fila en 'asistente.job_catalogo' este job no corre nunca.
-    "supervisor_ciclo": trabajos.ciclo_del_supervisor,
+    #  No se deja "por si acaso": un camino que nadie usa y nadie corre se
+    #  pudre en silencio, y el proximo que lo encuentre no va a saber si falta
+    #  encenderlo o si sobra. Volver a ponerlo es facil si algun dia hay una
+    #  credencial con ADMIN -- pero entonces habria DOS relojes despertando lo
+    #  mismo, y lo que corresponde es elegir uno.
     # "importacion_tickets": ...,   <- P5
     # "cerrar_vencidas": BLOQUEADO  <- no es idempotente; no se cablea
 }

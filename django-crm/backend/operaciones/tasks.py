@@ -14,8 +14,8 @@ esperaba al lunes.
 POR QUE AQUI Y NO EN EL RELOJ DEL MOTOR  --  medido el 08/10/2026
 ------------------------------------------------------------------
 Primero se construyo del otro lado: un trabajo en 'nucleo/programador' que le
-pegara por HTTP a '/api/operaciones/supervisor/ciclo-automatico/'. Ese camino
-quedo completo y NO SE PUEDE ENCENDER, por una razon que no es de codigo:
+pegara por HTTP a una ruta propia del CRM. Ese camino quedo completo y NUNCA
+SE PUDO ENCENDER, por una razon que no es de codigo:
 
     el reloj reclama turnos en 'asistente.job_catalogo', y para tocar esa
     tabla hace falta el rol 'scheduler_coordinator'. Ese rol existe desde
@@ -34,7 +34,10 @@ quedo completo y NO SE PUEDE ENCENDER, por una razon que no es de codigo:
 
 Pero el ciclo no necesitaba nada de eso. Es codigo del CRM, sobre tablas del
 CRM, y 'crm_user' --con el que corre este worker-- ya puede todo lo que hace
-falta. El CRM ademas YA TIENE un reloj andando: 'celery-beat', con 12 tareas
+falta. El trabajo del motor y su ruta se BORRARON ese mismo dia: un camino que
+nadie usa y nadie corre se pudre en silencio, y la ruta ademas pedia solo
+'IsAuthenticated' --mas flojo que el 'EsJefeDeOperaciones' del boton-- para
+hacer exactamente lo mismo. El CRM ademas YA TIENE un reloj andando: 'celery-beat', con 12 tareas
 programadas desde antes, una de ellas cada 5 minutos. Pasar por el motor para
 volver a entrar al CRM era un rodeo que ademas pedia un permiso nuevo.
 

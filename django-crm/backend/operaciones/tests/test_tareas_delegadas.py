@@ -317,95 +317,12 @@ def test_el_catalogo_dice_que_NO_hace_cada_tarea(org_y_persona):
 #  5. EL CICLO QUE CORRE SOLO
 # ===========================================================================
 
-@pytest.mark.django_db
-def test_sin_delegar_el_ciclo_automatico_la_ruta_NO_corre_nada(org_y_persona,
-                                                               monkeypatch):
-    """
-    La puerta de la ruta del reloj, medida sobre el efecto: no se llama a
-    'correr_ciclo'.
-
-    Que el reloj SEPA pedir el ciclo no significa que alguien lo haya pedido.
-    Son dos interruptores a proposito --uno es codigo revisado, el otro es una
-    decision de operacion-- y es el mismo patron que el registro de jobs del
-    motor usa desde que existe.
-    """
-    from operaciones import supervisor, views
-
-    org, _perfil = org_y_persona
-    corridas = []
-    monkeypatch.setattr(supervisor, "correr_ciclo",
-                        lambda o, **kw: corridas.append(o) or {})
-
-    vista = views.CicloAutomaticoView()
-
-    class _Pedido:
-        data = {}
-
-    _Pedido.org = org
-    r = vista.post(_Pedido())
-
-    assert r.data["corrio"] is False
-    assert r.data["motivo"] == "NO_DELEGADO"
-    assert corridas == [], "no se delego: el ciclo no tiene que correr"
-
-
-@pytest.mark.django_db
-def test_con_el_ciclo_delegado_la_ruta_SI_corre(org_y_persona, monkeypatch):
-    from operaciones import supervisor, views
-
-    org, perfil = org_y_persona
-    td.delegar(org, td.CICLO_AUTOMATICO, actor=perfil,
-               pedido_textual="revisa solo con cada actualizacion")
-
-    corridas = []
-    monkeypatch.setattr(
-        supervisor, "correr_ciclo",
-        lambda o, **kw: corridas.append(o) or {
-            "senales": 7, "propuestas": 2,
-            "cierre_automatico": {"cerrados": 1,
-                                  "motivos_de_no_cierre": {"x": 3}}})
-
-    vista = views.CicloAutomaticoView()
-
-    class _Pedido:
-        data = {}
-
-    _Pedido.org = org
-    r = vista.post(_Pedido())
-
-    assert r.data["corrio"] is True
-    assert r.data["cerrados"] == 1
-    #  POR QUE NO CERRO LOS OTROS. Sin esto, un ciclo que corre cada hora sin
-    #  cerrar nada se ve igual que uno que no tiene nada que cerrar.
-    assert r.data["motivos_de_no_cierre"] == {"x": 3}
-    assert len(corridas) == 1
-
-
-@pytest.mark.django_db
-def test_un_turno_de_otra_empresa_no_dispara_este_ciclo(org_y_persona,
-                                                        monkeypatch):
-    #  El tenant viaja en el turno y se compara contra el de la credencial.
-    #  Un 409 y no un 403: la credencial es valida, lo que no coincide es a que
-    #  empresa apunta el turno.
-    from operaciones import supervisor, views
-
-    org, perfil = org_y_persona
-    td.delegar(org, td.CICLO_AUTOMATICO, actor=perfil)
-    corridas = []
-    monkeypatch.setattr(supervisor, "correr_ciclo",
-                        lambda o, **kw: corridas.append(o) or {})
-
-    vista = views.CicloAutomaticoView()
-
-    class _Pedido:
-        data = {"organization_id": "00000000-0000-4000-8000-000000000999"}
-
-    _Pedido.org = org
-    r = vista.post(_Pedido())
-
-    assert r.status_code == 409
-    assert corridas == []
-
+#  LAS TRES PRUEBAS DE LA RUTA DEL RELOJ ESTUVIERON AQUI, y se quitaron el
+#  08/10/2026 junto con la ruta. No se perdio cobertura: lo que afirmaban
+#  --que sin delegar no se llama a 'correr_ciclo', que con la tarea delegada
+#  si, y que no se corre la de otra empresa-- lo afirma hoy
+#  'test_ciclo_periodico.py' sobre el camino que de verdad corre, la tarea de
+#  Celery. Probar la puerta borrada seria cobertura de algo que ya no existe.
 
 @pytest.mark.django_db
 def test_el_ciclo_automatico_no_exige_nivel_de_autonomia(org_y_persona):
@@ -426,7 +343,7 @@ def test_el_ciclo_automatico_no_exige_nivel_de_autonomia(org_y_persona):
 
 
 # ===========================================================================
-#  5. AL DELEGAR, LA HERRAMIENTA DICE QUE MAS ESTA DELEGADO
+#  6. AL DELEGAR, LA HERRAMIENTA DICE QUE MAS ESTA DELEGADO
 # ===========================================================================
 #  Medido el 08/10/2026 en produccion: al delegar el ciclo automatico, el
 #  modelo cerro con "el cierre de desincronizados podria habilitarse si me lo
