@@ -205,6 +205,15 @@
           warn: false
         },
         {
+          href: '/settings/areas',
+          title: 'Areas de trabajo',
+          body: 'Como se agrupa el equipo. Un ticket hereda el area de su responsable.',
+          value: data.asistente?.areas ? `${count(data.asistente.areas.length)} areas` : null,
+          //  Sin areas, TODOS los tickets caen juntos y los tableros por area
+          //  quedan vacios. No es cosmetico: es el tablero apagado.
+          warn: !!data.asistente?.areas && data.asistente.areas.length === 0
+        },
+        {
           href: '/settings/asistente',
           title: 'Personalidad del asistente',
           body: 'Con que nombre se presenta, en que tono habla y cuanto se extiende.',

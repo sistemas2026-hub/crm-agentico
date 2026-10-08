@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import unicodedata
 from pathlib import Path
 import contextlib
 import threading
@@ -3408,6 +3410,181 @@ def agentes_areas():
                     "areas_por_persona": areas_por_persona})
 
 
+#  CREAR, RENOMBRAR Y BORRAR UN AREA  --  08/10/2026
+#  --------------------------------------------------
+#  Hasta hoy las areas solo se podian tocar con un script contra la base. Un
+#  ISP que arma una cuadrilla nueva tenia que pedirselo a quien opera el
+#  servidor, y eso es lo que la regla de este proyecto no quiere: lo que varia
+#  por empresa se configura desde la interfaz, no con una sesion de codigo por
+#  cliente.
+#
+#  Las tres escrituras pasan por 'editor._editar', que lee la config vigente,
+#  aplica SOLO esta mutacion, valida el documento entero y sube la version --
+#  en una transaccion con la fila bloqueada. Si la validacion falla no se
+#  escribe nada.
+
+ICONOS_DE_AREA = ("llave", "factura", "edificio", "red", "persona", "caja")
+
+
+def _nombre_interno(etiqueta: str) -> str:
+    """
+    El identificador estable que sale de una etiqueta escrita a mano.
+
+    Se genera UNA vez y no se vuelve a tocar: es lo que queda guardado en cada
+    persona ('asistente.area_colaborador'), asi que cambiarlo dejaria
+    huerfanas a las que ya lo tenian. Lo que se corrige despues es la
+    etiqueta, que es la que se ve.
+    """
+    base = unicodedata.normalize("NFKD", etiqueta or "")
+    base = "".join(c for c in base if not unicodedata.combining(c)).lower()
+    base = re.sub(r"[^a-z0-9]+", "_", base).strip("_")
+    return base[:40]
+
+
+@app.post("/agentes/areas")
+def agentes_crear_area():
+    """Agrega un area de trabajo. El nombre interno se deriva de la etiqueta."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    etiqueta = str(cuerpo.get("etiqueta") or "").strip()
+    if not etiqueta:
+        return jsonify({"error": "Hace falta un nombre para el area."}), 400
+    nombre = _nombre_interno(etiqueta)
+    if not nombre:
+        return jsonify({"error": (
+            "Ese nombre no deja ningun caracter utilizable. Usa al menos una "
+            "letra o un numero.")}), 400
+
+    icono = str(cuerpo.get("icono") or "edificio")
+    if icono not in ICONOS_DE_AREA:
+        return jsonify({"error": (
+            "Icono desconocido: " + icono + ". Disponibles: "
+            + ", ".join(ICONOS_DE_AREA) + ".")}), 400
+    color = str(cuerpo.get("color") or "#64748b")
+
+    from nucleo.config import editor
+
+    def mutar(doc):
+        areas = list(doc.get("areas") or [])
+        if any(a.get("nombre") == nombre for a in areas):
+            #  El choque se informa con el nombre INTERNO: dos etiquetas
+            #  distintas ("Cuadrilla Norte" y "cuadrilla norte") producen el
+            #  mismo identificador, y sin decirlo el rechazo no se entiende.
+            raise ValueError(
+                "Ya existe un area con el identificador '" + nombre + "'.")
+        #  Sin agentes: el schema lo permite a proposito -- un area sirve para
+        #  organizar a la gente aunque todavia no le de capacidades.
+        areas.append({"nombre": nombre, "etiqueta": etiqueta,
+                      "agentes": [], "color": color, "icono": icono})
+        doc["areas"] = areas
+
+    try:
+        editor._editar(tenant, mutar)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+    except Exception as e:                                   # noqa: BLE001
+        registrar("agentes", "fallo al crear un area", tenant=tenant, error=e)
+        return jsonify({"error": "No se pudo crear el area: "
+                                 + type(e).__name__}), 400
+
+    #  Se devuelve el nombre interno porque NO es el que se escribio. Quien
+    #  llama lo necesita para la fila nueva, y verlo una vez explica por que
+    #  renombrar despues no lo cambia.
+    return jsonify({"nombre": nombre, "etiqueta": etiqueta,
+                    "color": color, "icono": icono}), 201
+
+
+@app.put("/agentes/areas/<nombre>")
+def agentes_editar_area(nombre):
+    """Cambia la etiqueta, el color o el icono. NUNCA el nombre interno."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    if "icono" in cuerpo and cuerpo["icono"] not in ICONOS_DE_AREA:
+        return jsonify({"error": ("Icono desconocido. Disponibles: "
+                                  + ", ".join(ICONOS_DE_AREA) + ".")}), 400
+
+    from nucleo.config import editor
+
+    def mutar(doc):
+        areas = list(doc.get("areas") or [])
+        for a in areas:
+            if a.get("nombre") != nombre:
+                continue
+            if "etiqueta" in cuerpo:
+                nueva = str(cuerpo["etiqueta"] or "").strip()
+                if not nueva:
+                    raise ValueError("El area necesita un nombre visible.")
+                a["etiqueta"] = nueva
+            if "color" in cuerpo:
+                a["color"] = str(cuerpo["color"] or "")
+            if "icono" in cuerpo:
+                a["icono"] = str(cuerpo["icono"])
+            doc["areas"] = areas
+            return
+        raise ValueError("No existe el area '" + nombre + "'.")
+
+    try:
+        editor._editar(tenant, mutar)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:                                   # noqa: BLE001
+        registrar("agentes", "fallo al editar un area", tenant=tenant, error=e)
+        return jsonify({"error": "No se pudo guardar: " + type(e).__name__}), 400
+    return jsonify({"ok": True})
+
+
+@app.delete("/agentes/areas/<nombre>")
+def agentes_borrar_area(nombre):
+    """
+    Borra un area, y SOLO si no tiene gente.
+
+    Con personas adentro quedarian apuntando a un area que no existe: sus
+    tickets no caerian en ninguna columna y desapareceran de los tableros sin
+    que nadie lo note. Es la misma falla que tuvo 'administracion' el
+    07/10/2026 estando declarada y vacia -- ahi los tickets ni llegaban a
+    crearse.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'"}), 400
+
+    try:
+        ocupantes = [p for p, a in persistencia.areas_de_colaboradores(tenant).items()
+                     if a == nombre]
+    except Exception as e:                                   # noqa: BLE001
+        registrar("agentes", "fallo al contar ocupantes", tenant=tenant, error=e)
+        return jsonify({"error": "No se pudo comprobar quien tiene esta area."}), 500
+    if ocupantes:
+        return jsonify({"error": (
+            "Esta area todavia tiene " + str(len(ocupantes)) + " persona(s). "
+            "Movelas a otra area antes de borrarla, o sus tickets dejan de "
+            "aparecer en los tableros.")}), 409
+
+    from nucleo.config import editor
+
+    def mutar(doc):
+        areas = list(doc.get("areas") or [])
+        quedan = [a for a in areas if a.get("nombre") != nombre]
+        if len(quedan) == len(areas):
+            raise ValueError("No existe el area '" + nombre + "'.")
+        doc["areas"] = quedan
+
+    try:
+        editor._editar(tenant, mutar)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:                                   # noqa: BLE001
+        registrar("agentes", "fallo al borrar un area", tenant=tenant, error=e)
+        return jsonify({"error": "No se pudo borrar: " + type(e).__name__}), 400
+    return jsonify({"ok": True})
+
+
 @app.put("/agentes/asignaciones/<profile_id>")
 def agentes_asignar(profile_id):
     """
@@ -3916,6 +4093,11 @@ def configuracion():
         # merece verlos sin abrir otra pestana.
         "modelo": config.llm.modelo_por_defecto,
         "roles": sorted(config.roles),
+        #  Cuantas areas hay, para que el hub de ajustes pueda avisar cuando
+        #  son CERO: sin areas, todos los tickets caen juntos y los tableros
+        #  por area quedan vacios. Solo los nombres -- quien quiera editarlas
+        #  va a /settings/areas, que pide la lista completa.
+        "areas": [a.nombre for a in config.areas],
     })
 
 

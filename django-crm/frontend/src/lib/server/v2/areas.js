@@ -54,3 +54,60 @@ export async function leerAreas(locals, fetch) {
   }
   return { areas: [], areaPorPersona: {} };
 }
+
+/**
+ * Crear, renombrar y borrar un area.
+ *
+ * Las tres escriben en la configuracion del tenant a traves del motor, que
+ * valida el documento entero antes de guardar. A diferencia de `leerAreas`,
+ * estas NO degradan en silencio: si el motor no contesta hay que decirlo,
+ * porque quien pulso "Crear" tiene que saber si su area existe o no.
+ */
+
+/** @param {App.Locals} locals @param {typeof globalThis.fetch} fetch */
+async function escribirArea(locals, fetch, ruta, opciones) {
+  const base = env.PRIVATE_ASISTENTE_URL;
+  const tenant = await tenantDeLaSesion(locals, fetch);
+  if (!base || !tenant) throw new Error('El asistente no esta configurado.');
+
+  const r = await fetch(`${base}${ruta}`, {
+    ...opciones,
+    headers: { ...headersMotor(), 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(10000)
+  });
+  const datos = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    //  El motor explica el motivo --un area repetida, una con gente adentro--
+    //  y ese texto es mas util que "no se pudo guardar". Se propaga tal cual.
+    throw new Error(datos?.error || `El asistente respondio ${r.status}.`);
+  }
+  return datos;
+}
+
+/** @param {App.Locals} locals @param {typeof globalThis.fetch} fetch */
+export async function crearArea(locals, fetch, { etiqueta, color, icono }) {
+  const tenant = await tenantDeLaSesion(locals, fetch);
+  return escribirArea(locals, fetch, '/agentes/areas', {
+    method: 'POST',
+    body: JSON.stringify({ tenant, etiqueta, color, icono })
+  });
+}
+
+/** @param {App.Locals} locals @param {typeof globalThis.fetch} fetch */
+export async function editarArea(locals, fetch, nombre, cambios) {
+  const tenant = await tenantDeLaSesion(locals, fetch);
+  return escribirArea(locals, fetch, `/agentes/areas/${encodeURIComponent(nombre)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ tenant, ...cambios })
+  });
+}
+
+/** @param {App.Locals} locals @param {typeof globalThis.fetch} fetch */
+export async function borrarArea(locals, fetch, nombre) {
+  const tenant = await tenantDeLaSesion(locals, fetch);
+  const t = encodeURIComponent(tenant ?? '');
+  return escribirArea(
+    locals, fetch,
+    `/agentes/areas/${encodeURIComponent(nombre)}?tenant=${t}`,
+    { method: 'DELETE' });
+}
