@@ -128,7 +128,10 @@ def test_g_cambiar_el_auxiliar_reescribe_SOLO_ese_dia(
            [{"profile": str(user_profile.id), "rol": "ayudante"}])
 
     jornada = admin_client.get(JORNADA, {"fecha": LUNES}).json()["jornadas"][0]
-    assert [i["id"] for i in jornada["integrantes"]] == [str(user_profile.id)]
+    #  Se compara por CUENTA y no por el id del integrante: desde que el
+    #  integrante es una `PersonaDeCampo`, su id ya no es el del `Profile`.
+    assert ([i["profile"] for i in jornada["integrantes"]]
+            == [str(user_profile.id)])
 
 
 def test_h_una_persona_en_dos_cuadrillas_el_mismo_dia_se_rechaza(
@@ -250,7 +253,7 @@ def test_o_con_quien_trabajo_UNA_persona(
     roles = []
     for j in jornadas:
         roles += [i["rol"] for i in j["integrantes"]
-                  if i["id"] == str(user_profile.id)]
+                  if i["profile"] == str(user_profile.id)]
     assert roles == ["ayudante", "tecnico"]
 
 

@@ -15,6 +15,71 @@
 import { apiRequest } from '$lib/api-helpers.js';
 
 /**
+ * Quiénes trabajan en campo, tengan cuenta o no.
+ *
+ * NO ES LA LISTA DEL EQUIPO. `leerPersonas` (en inventario.js) devuelve
+ * `Profile`, o sea gente con correo y credenciales. Los auxiliares no tienen
+ * celular asignado y por lo tanto no tienen cuenta, así que ahí nunca
+ * aparecían — y el catálogo de roles ofrecía «ayudante» y «chofer» para gente
+ * que no se podía registrar. Ver `campo.cuadrillas.PersonaDeCampo`.
+ *
+ * Devuelve también las cuentas que todavía no son persona de campo, para que
+ * dar de alta al equipo que ya existe no sea cargarlo a mano una por una.
+ *
+ * @param {{ cookies: any }} ctx
+ * @param {boolean} todas  incluir las dadas de baja
+ */
+export async function leerPersonasDeCampo(ctx, todas = false) {
+  try {
+    const d = await apiRequest(
+      `/campo/personas-de-campo/${todas ? '?activas=0' : ''}`, {}, ctx
+    );
+    return {
+      personas: d?.personas ?? [],
+      cuentasSinPersona: d?.cuentas_sin_persona ?? [],
+      error: false
+    };
+  } catch {
+    // Forma vacía Y error aparte: una empresa que todavía no cargó a nadie y
+    // una lectura que no respondió se dibujan distinto.
+    return { personas: [], cuentasSinPersona: [], error: true };
+  }
+}
+
+/**
+ * Da de alta a alguien que trabaja en campo.
+ *
+ * Con `profile` se da de alta una cuenta del equipo y el nombre sale de ella;
+ * con `nombre` se carga a un auxiliar que no entra al sistema.
+ *
+ * @param {{ cookies: any }} ctx
+ * @param {{ nombre?: string, profile?: string, rol_habitual?: string }} cuerpo
+ */
+export async function crearPersonaDeCampo(ctx, cuerpo) {
+  return apiRequest('/campo/personas-de-campo/', {
+    method: 'POST',
+    body: cuerpo
+  }, ctx);
+}
+
+/**
+ * Cambia el nombre, el rol habitual, la cuenta enlazada o la baja.
+ *
+ * Enlazar una cuenta es el caso del auxiliar al que le asignan celular: se le
+ * engancha a la MISMA persona, así su historial no se parte en dos.
+ *
+ * @param {{ cookies: any }} ctx
+ * @param {string} id
+ * @param {Record<string, any>} cuerpo
+ */
+export async function editarPersonaDeCampo(ctx, id, cuerpo) {
+  return apiRequest(`/campo/personas-de-campo/${id}/`, {
+    method: 'PATCH',
+    body: cuerpo
+  }, ctx);
+}
+
+/**
  * Las cuadrillas de la empresa.
  *
  * El error viaja declarado y no como lista vacía: una empresa sin cuadrillas

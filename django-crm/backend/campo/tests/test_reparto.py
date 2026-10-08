@@ -288,10 +288,20 @@ REPARTO = "/api/campo/cuadrillas/reparto/"
 
 
 def _con_gente(org, jornada, profile, rol="tecnico"):
-    from campo.cuadrillas import IntegranteDeJornada
+    """Anota a alguien en la jornada.
 
+    Toma un `Profile` y resuelve su `PersonaDeCampo`, porque el integrante ya
+    no es una cuenta: un auxiliar sin celular tambien integra la cuadrilla.
+    Ver `campo.cuadrillas.PersonaDeCampo`.
+    """
+    from campo.cuadrillas import IntegranteDeJornada, PersonaDeCampo
+
+    persona, _ = PersonaDeCampo.objects.get_or_create(
+        org=org, profile=profile,
+        defaults={"nombre": getattr(profile.user, "name", "") or "Sin nombre"},
+    )
     IntegranteDeJornada.objects.create(
-        org=org, jornada=jornada, profile=profile, rol=rol
+        org=org, jornada=jornada, persona=persona, rol=rol
     )
     return jornada
 

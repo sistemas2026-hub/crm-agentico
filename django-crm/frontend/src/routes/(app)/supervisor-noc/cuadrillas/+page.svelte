@@ -38,7 +38,14 @@
   let armando = $state(/** @type {any} */ (null));
   let labor = $state('instalacion');
   let lider = $state('');
-  /** @type {{ profile: string, rol: string }[]} */
+  /**
+   * Quiénes van en la jornada que se está armando.
+   *
+   * `persona` es el id de una PERSONA DE CAMPO, no de una cuenta: un auxiliar
+   * sin celular no tiene `Profile` y aun así integra la cuadrilla.
+   *
+   * @type {{ persona: string, rol: string }[]}
+   */
   let integrantes = $state([]);
 
   /** La ficha de cuadrilla abierta. `null` = ninguna. */
@@ -100,10 +107,17 @@
    * la regla vive en el backend —y sigue viviendo ahí— pero mostrarla antes
    * evita el viaje de ida y vuelta para enterarse.
    */
-  function tomadaPorOtra(profileId, cuadrillaId) {
+  /**
+   * Si esa persona ya está en otra cuadrilla hoy.
+   *
+   * Compara ids de PERSONA DE CAMPO, no de cuenta: desde que el integrante es
+   * una persona, el aviso también alcanza a los auxiliares, que antes no
+   * podían estar anotados en ningún lado.
+   */
+  function tomadaPorOtra(personaId, cuadrillaId) {
     for (const j of data.jornadas ?? []) {
       if (j.cuadrilla?.id === cuadrillaId) continue;
-      if ((j.integrantes ?? []).some((i) => i.id === profileId)) {
+      if ((j.integrantes ?? []).some((i) => i.id === personaId)) {
         return j.cuadrilla?.nombre ?? 'otra cuadrilla';
       }
     }
@@ -117,13 +131,15 @@
     lider = ya?.lider?.id ?? c.lider?.id ?? '';
     zonasDelDia = ya ? (ya.zonas ?? []).map((z) => z.id) : [];
     integrantes = ya
-      ? ya.integrantes.map((i) => ({ profile: i.id, rol: i.rol }))
+      ? ya.integrantes.map((i) => ({ persona: i.id, rol: i.rol }))
       : [];
     if (integrantes.length === 0) agregarIntegrante();
   }
 
   function agregarIntegrante() {
-    integrantes = [...integrantes, { profile: '', rol: 'tecnico' }];
+    //  El rol arranca VACÍO: así el backend usa el habitual de la persona
+    //  que se elija, en vez de escribirle 'tecnico' encima.
+    integrantes = [...integrantes, { persona: '', rol: '' }];
   }
 
   function quitarIntegrante(i) {
@@ -136,6 +152,17 @@
       ? { ...c, lider_id: c.lider?.id ?? '', vehiculo_id: c.vehiculo?.id ?? '' }
       : { id: '', nombre: '', lider_id: '', vehiculo_id: '', notas: '' };
   }
+
+  /**
+   * Quiénes pueden ser LÍDER: solo quien entra al sistema.
+   *
+   * El líder de una cuadrilla es un `Profile`, no una persona de campo, y es
+   * correcto: lidera quien tiene el celular y usa la aplicación. Por eso este
+   * selector ofrece `profile` como valor y no el id de la persona.
+   */
+  let conCuenta = $derived(
+    (data.personas ?? []).filter((p) => p.tiene_cuenta && p.profile)
+  );
 
   /** Cuántas personas trabajan hoy, sin contar a nadie dos veces. */
   let gentePorJornada = $derived(
@@ -303,8 +330,8 @@
               <span class="snoc-label">Líder de hoy</span>
               <select class="snoc-select" name="lider" bind:value={lider}>
                 <option value="">— el de la cuadrilla —</option>
-                {#each data.personas as p (p.id)}
-                  <option value={p.id}>{p.nombre}</option>
+                {#each conCuenta as p (p.id)}
+                  <option value={p.profile}>{p.nombre}</option>
                 {/each}
               </select>
             </label>
@@ -356,12 +383,14 @@
           <div class="snoc-pila-xs">
             <span class="snoc-label">Quiénes van</span>
             {#each integrantes as ig, i (i)}
-              {@const ocupada = ig.profile ? tomadaPorOtra(ig.profile, armando.id) : ''}
+              {@const ocupada = ig.persona ? tomadaPorOtra(ig.persona, armando.id) : ''}
               <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-                <select class="snoc-select" name="integrante_profile" bind:value={ig.profile}>
+                <select class="snoc-select" name="integrante_persona" bind:value={ig.persona}>
                   <option value="">— elegí a alguien —</option>
                   {#each data.personas as p (p.id)}
-                    <option value={p.id}>{p.nombre}</option>
+                    <option value={p.id}>
+                      {p.nombre}{p.tiene_cuenta ? '' : ' · sin celular'}
+                    </option>
                   {/each}
                 </select>
                 <select class="snoc-select" name="integrante_rol" bind:value={ig.rol}>
@@ -488,6 +517,118 @@
         <p class="snoc-body-sm snoc-secundario">
           No se calcula sola: mirar esta pantalla no puede disparar un recorrido de todas
           las órdenes pendientes.
+        </p>
+      {/if}
+    </section>
+
+    <!-- ============ QUIÉNES TRABAJAN EN CAMPO ============ -->
+    <!--
+      Dos preguntas distintas que antes eran la misma:
+
+        quién ENTRA al sistema    una cuenta, con correo y contraseña
+        quién TRABAJÓ             con cuenta o sin ella
+
+      Los auxiliares no tienen celular asignado, así que no tienen cuenta — y
+      mientras el integrante de una jornada fue un `Profile`, anotarlos
+      obligaba a inventarles una que nadie iba a usar. Ver
+      `campo.cuadrillas.PersonaDeCampo`.
+    -->
+    <section class="snoc-panel" style="gap:var(--snoc-sm);">
+      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+        <div class="snoc-pila-xs">
+          <h2 class="snoc-h2">Quiénes trabajan en campo</h2>
+          <p class="snoc-body-sm snoc-secundario">
+            Incluye a quienes no tienen celular asignado: también integran la cuadrilla, y
+            así queda escrito quién estuvo cada día. Lo que no reciben es el trabajo en un
+            teléfono.
+          </p>
+        </div>
+      </div>
+
+      <form method="POST" action="?/persona_alta" use:enhance class="snoc-fila"
+            style="gap:var(--snoc-xs); flex-wrap:wrap; align-items:flex-end;">
+        <label class="snoc-campo-grupo" style="flex:1 1 180px; min-width:0;">
+          <span class="snoc-label">Nombre y apellido</span>
+          <input class="snoc-campo" name="nombre" placeholder="Pedro Ayudante" required />
+        </label>
+        <label class="snoc-campo-grupo">
+          <span class="snoc-label">Rol habitual</span>
+          <select class="snoc-select" name="rol_habitual">
+            {#each ROLES as r (r.id)}
+              <option value={r.id} selected={r.id === 'ayudante'}>{r.texto}</option>
+            {/each}
+          </select>
+        </label>
+        <button class="snoc-btn" type="submit">Dar de alta</button>
+      </form>
+
+      {#if (data.cuentasSinPersona ?? []).length}
+        <!-- El equipo que ya tiene cuenta se da de alta en un clic, en vez de
+             teclear el nombre de alguien que el sistema ya conoce. -->
+        <div class="snoc-pila-xs">
+          <span class="snoc-label">Del equipo, todavía sin dar de alta</span>
+          <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+            {#each data.cuentasSinPersona as c (c.profile)}
+              <form method="POST" action="?/persona_alta" use:enhance>
+                <input type="hidden" name="profile" value={c.profile} />
+                <input type="hidden" name="rol_habitual" value="tecnico" />
+                <button class="snoc-pildora" type="submit">+ {c.nombre}</button>
+              </form>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if (data.personas ?? []).length === 0}
+        <p class="snoc-body-sm snoc-secundario">
+          Todavía no hay nadie cargado. Sin esto no se puede armar una cuadrilla.
+        </p>
+      {:else}
+        <div class="snoc-pila-xs">
+          {#each data.personas as p (p.id)}
+            <div class="snoc-tarjeta snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs);">
+              <div class="snoc-pila-xs" style="min-width:0;">
+                <span class="snoc-body">{p.nombre}</span>
+                <span class="snoc-body-sm snoc-secundario">
+                  {ROLES.find((r) => r.id === p.rol_habitual)?.texto ?? p.rol_habitual}
+                  {#if p.tiene_cuenta}
+                    · entra al sistema
+                  {:else}
+                    · sin celular asignado
+                  {/if}
+                  {#if !p.activa} · dado de baja{/if}
+                </span>
+              </div>
+              <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                {#if !p.tiene_cuenta && (data.cuentasSinPersona ?? []).length}
+                  <!-- EL AUXILIAR AL QUE LE ASIGNAN CELULAR: se le engancha la
+                       cuenta a ESTA persona, así su historial sigue siendo uno
+                       en vez de empezar de cero. -->
+                  <form method="POST" action="?/persona_editar" use:enhance
+                        class="snoc-fila" style="gap:var(--snoc-xs);">
+                    <input type="hidden" name="id" value={p.id} />
+                    <select class="snoc-select" name="profile">
+                      <option value="">— enlazar una cuenta —</option>
+                      {#each data.cuentasSinPersona as c (c.profile)}
+                        <option value={c.profile}>{c.nombre}</option>
+                      {/each}
+                    </select>
+                    <button class="snoc-pildora" type="submit">Enlazar</button>
+                  </form>
+                {/if}
+                <form method="POST" action="?/persona_editar" use:enhance>
+                  <input type="hidden" name="id" value={p.id} />
+                  <input type="hidden" name="activa" value={p.activa ? '0' : '1'} />
+                  <button class="snoc-pildora" type="submit">
+                    {p.activa ? 'Dar de baja' : 'Reactivar'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          {/each}
+        </div>
+        <p class="snoc-body-sm snoc-secundario">
+          Dar de baja no borra nada: sus jornadas siguen explicando quién estuvo cada día.
         </p>
       {/if}
     </section>
@@ -668,7 +809,9 @@
           <select class="snoc-select" name="quien" value={data.historial.quien}>
             <option value="">— nadie en particular —</option>
             {#each data.personas as p (p.id)}
-              <option value={p.id}>{p.nombre}</option>
+              <option value={p.id}>
+                {p.nombre}{p.tiene_cuenta ? '' : ' · sin celular'}
+              </option>
             {/each}
           </select>
         </label>
@@ -775,8 +918,8 @@
               <span class="snoc-label">Líder</span>
               <select class="snoc-select" name="lider" bind:value={editando.lider_id}>
                 <option value="">— sin líder —</option>
-                {#each data.personas as p (p.id)}
-                  <option value={p.id}>{p.nombre}</option>
+                {#each conCuenta as p (p.id)}
+                  <option value={p.profile}>{p.nombre}</option>
                 {/each}
               </select>
             </label>

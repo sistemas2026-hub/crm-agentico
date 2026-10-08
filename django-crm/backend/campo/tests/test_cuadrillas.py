@@ -33,6 +33,21 @@ def _jornada(org, cuadrilla, fecha, labor):
     )
 
 
+def _persona(profile):
+    """La `PersonaDeCampo` de esa cuenta, creandola si hace falta.
+
+    El integrante de una jornada ya no es un `Profile`: un auxiliar sin
+    celular no puede tener cuenta y aun asi integra la cuadrilla. Ver
+    `campo.cuadrillas.PersonaDeCampo`.
+    """
+    from campo.cuadrillas import PersonaDeCampo
+    persona, _ = PersonaDeCampo.objects.get_or_create(
+        org=profile.org, profile=profile,
+        defaults={"nombre": getattr(profile.user, "name", "") or "Sin nombre"},
+    )
+    return persona
+
+
 def test_a_cambiar_de_labor_no_pisa_el_dia_anterior(org_a, cuadrilla):
     """El caso que motivo separar la jornada de la cuadrilla."""
     _jornada(org_a, cuadrilla, LUNES, JornadaDeCuadrilla.INSTALACION)
@@ -53,14 +68,16 @@ def test_b_cambiar_el_auxiliar_no_reescribe_quien_fue_ayer(
     martes = _jornada(org_a, cuadrilla, MARTES, JornadaDeCuadrilla.INSTALACION)
 
     IntegranteDeJornada.objects.create(
-        org=org_a, jornada=lunes, profile=admin_profile, rol="ayudante"
+        org=org_a, jornada=lunes, persona=_persona(admin_profile), rol="ayudante"
     )
     IntegranteDeJornada.objects.create(
-        org=org_a, jornada=martes, profile=user_profile, rol="ayudante"
+        org=org_a, jornada=martes, persona=_persona(user_profile), rol="ayudante"
     )
 
-    del_lunes = [i.profile_id for i in lunes.integrantes.all()]
-    del_martes = [i.profile_id for i in martes.integrantes.all()]
+    #  Por la CUENTA de la persona, no por el id del integrante: desde que el
+    #  integrante es una `PersonaDeCampo`, su id ya no es el del `Profile`.
+    del_lunes = [i.persona.profile_id for i in lunes.integrantes.all()]
+    del_martes = [i.persona.profile_id for i in martes.integrantes.all()]
     assert del_lunes == [admin_profile.id]
     assert del_martes == [user_profile.id]
 
@@ -87,11 +104,11 @@ def test_d_una_persona_no_puede_estar_en_dos_cuadrillas_el_mismo_dia(
     dos = _jornada(org_a, otra, LUNES, JornadaDeCuadrilla.CORRECTIVO)
 
     IntegranteDeJornada.objects.create(
-        org=org_a, jornada=uno, profile=admin_profile, rol="tecnico"
+        org=org_a, jornada=uno, persona=_persona(admin_profile), rol="tecnico"
     )
 
     repetido = IntegranteDeJornada(
-        org=org_a, jornada=dos, profile=admin_profile, rol="ayudante"
+        org=org_a, jornada=dos, persona=_persona(admin_profile), rol="ayudante"
     )
     with pytest.raises(ValidationError) as e:
         repetido.full_clean()
@@ -107,15 +124,15 @@ def test_e_la_misma_persona_SI_puede_estar_otro_dia(
     martes = _jornada(org_a, otra, MARTES, JornadaDeCuadrilla.CORRECTIVO)
 
     IntegranteDeJornada.objects.create(
-        org=org_a, jornada=lunes, profile=admin_profile, rol="tecnico"
+        org=org_a, jornada=lunes, persona=_persona(admin_profile), rol="tecnico"
     )
     cambio = IntegranteDeJornada(
-        org=org_a, jornada=martes, profile=admin_profile, rol="tecnico"
+        org=org_a, jornada=martes, persona=_persona(admin_profile), rol="tecnico"
     )
     cambio.full_clean()          # no levanta
     cambio.save()
 
-    assert IntegranteDeJornada.objects.filter(profile=admin_profile).count() == 2
+    assert IntegranteDeJornada.objects.filter(persona=_persona(admin_profile)).count() == 2
 
 
 def test_f_dos_cuadrillas_no_pueden_llamarse_igual(org_a, cuadrilla):

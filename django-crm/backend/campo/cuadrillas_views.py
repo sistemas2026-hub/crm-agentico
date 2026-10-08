@@ -28,7 +28,9 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from campo.cuadrillas import Cuadrilla, IntegranteDeJornada, JornadaDeCuadrilla
+from campo.models import AsignacionTrabajo
+from campo.cuadrillas import (Cuadrilla, IntegranteDeJornada,
+                              JornadaDeCuadrilla, PersonaDeCampo)
 from campo.zonas import AliasDeZona, ZonaOperativa, normalizar_localidad
 from campo.inventario import UbicacionInventario
 from campo.permissions import IsCampoAuthenticated, ROLES_GESTION
@@ -108,9 +110,17 @@ def _jornada_json(j) -> dict:
         # recibe trabajo por zona, y eso tiene que notarse.
         "zonas": [{"id": str(z.id), "nombre": z.nombre}
                   for z in j.zonas.all()],
+        # SE DICE SI TIENE CUENTA, y no es un detalle de formato: una orden
+        # asignada a quien no entra al sistema no la ve nadie en un telefono,
+        # asi que quien arma el dia necesita verlo antes de repartir.
         "integrantes": [
-            {**_persona(i.profile), "rol": i.rol}
-            for i in j.integrantes.select_related("profile__user")
+            {"id": str(i.persona_id), "nombre": i.persona.nombre,
+             "rol": i.rol, "tiene_cuenta": i.persona.tiene_cuenta,
+             # La cuenta, cuando la hay: con esto la pantalla sigue pudiendo
+             # enlazar a lo que ya mostraba por `Profile`.
+             "profile": (str(i.persona.profile_id)
+                         if i.persona.profile_id else None)}
+            for i in j.integrantes.select_related("persona")
         ],
         "notas": j.notas,
     }
@@ -256,13 +266,20 @@ class JornadaDeCuadrillaView(APIView):
         # POR PERSONA: las jornadas donde ESA persona estuvo, con la cuadrilla
         # y el rol que tuvo cada dia. Es la vista que contesta "con quien
         # trabajo Pedro el martes".
-        persona = (request.query_params.get("profile") or "").strip()
+        # Se acepta 'persona' (el id de PersonaDeCampo) y tambien el viejo
+        # 'profile': la pantalla que ya existia enlazaba por cuenta, y romper
+        # ese enlace dejaria los historiales guardados sin poder abrirse.
+        persona = (request.query_params.get("persona") or "").strip()
         if persona:
-            qs = qs.filter(integrantes__profile_id=persona)
+            qs = qs.filter(integrantes__persona_id=persona)
+        else:
+            por_cuenta = (request.query_params.get("profile") or "").strip()
+            if por_cuenta:
+                qs = qs.filter(integrantes__persona__profile_id=por_cuenta)
 
         qs = (
             qs.select_related("cuadrilla", "lider__user")
-            .prefetch_related("integrantes__profile__user", "zonas")
+            .prefetch_related("integrantes__persona", "zonas")
             .distinct()
             .order_by("fecha", "cuadrilla__nombre")
         )
@@ -329,14 +346,17 @@ class JornadaDeCuadrillaView(APIView):
                 # dos veces deje el mismo resultado que armarlo una.
                 jornada.integrantes.all().delete()
                 for crudo in crudos:
-                    profile = _perfil_de(org, (crudo or {}).get("profile"))
-                    if profile is None:
+                    persona = _persona_de_campo(
+                        org, (crudo or {}).get("persona")
+                              or (crudo or {}).get("profile"))
+                    if persona is None:
                         raise ValidationError(
                             "Hay un integrante que no es de esta empresa."
                         )
                     integrante = IntegranteDeJornada(
-                        org=org, jornada=jornada, profile=profile,
-                        rol=((crudo or {}).get("rol") or "tecnico").strip(),
+                        org=org, jornada=jornada, persona=persona,
+                        rol=((crudo or {}).get("rol")
+                             or persona.rol_habitual).strip(),
                     )
                     # `full_clean` y no `save` a secas: ahi vive la guarda de
                     # "esta persona ya esta en otra cuadrilla hoy", que es la
@@ -350,10 +370,208 @@ class JornadaDeCuadrillaView(APIView):
         jornada = (
             JornadaDeCuadrilla.objects
             .select_related("cuadrilla", "lider__user")
-            .prefetch_related("integrantes__profile__user", "zonas")
+            .prefetch_related("integrantes__persona", "zonas")
             .get(pk=jornada.pk)
         )
         return Response(_jornada_json(jornada), status=status.HTTP_200_OK)
+
+
+def _persona_de_campo(org, valor):
+    """La persona de campo de esta empresa, o None.
+
+    Acepta tambien el id de un `Profile`, porque la pantalla anterior enlazaba
+    por cuenta y los historiales guardados usan ese id.
+
+    CUANDO EL VALOR ES UNA CUENTA Y TODAVIA NO TIENE PERSONA, SE CREA. No es
+    una comodidad: sin esto, el dia que esto se despliegue nadie podria armar
+    una jornada hasta haber dado de alta a mano a todo el equipo que ya existe
+    --y el sintoma seria "ese integrante no es de esta empresa", que señala a
+    la causa equivocada.
+
+    Es seguro porque la clave es la CUENTA, y `unique_persona_de_campo_por_cuenta`
+    impide que dos filas la compartan. El riesgo de duplicados vive en los
+    NOMBRES, no aca: por eso un alta por nombre sigue siendo explicita y avisa
+    de los homonimos (ver `PersonasDeCampoView.post`).
+    """
+    if not valor:
+        return None
+    try:
+        directa = PersonaDeCampo.objects.filter(
+            org=org, id=valor, activa=True
+        ).first()
+        if directa is not None:
+            return directa
+
+        cuenta = Profile.objects.select_related("user").filter(
+            org=org, id=valor, is_active=True
+        ).first()
+        if cuenta is None:
+            return None
+        persona, _ = PersonaDeCampo.objects.get_or_create(
+            org=org, profile=cuenta,
+            defaults={"nombre": _nombre_de(cuenta) or "Sin nombre"},
+        )
+        # Una persona dada de BAJA no vuelve sola por llegar por su cuenta:
+        # darla de baja fue una decision, y reactivarla tiene su propio paso.
+        return persona if persona.activa else None
+    except (ValueError, ValidationError):
+        # Un id mal formado no es un 500: es "no existe".
+        return None
+
+
+def _persona_json(p) -> dict:
+    return {
+        "id": str(p.id),
+        "nombre": p.nombre,
+        "rol_habitual": p.rol_habitual,
+        "activa": p.activa,
+        # Si entra al sistema. Decide si puede RECIBIR trabajo en un telefono,
+        # asi que la pantalla lo necesita antes de repartir, no despues.
+        "tiene_cuenta": p.tiene_cuenta,
+        "profile": str(p.profile_id) if p.profile_id else None,
+    }
+
+
+class PersonasDeCampoView(APIView):
+    """``GET`` quienes trabajan en campo · ``POST`` una persona nueva.
+
+    POR QUE NO ALCANZABA LA LISTA DEL EQUIPO
+    ----------------------------------------
+    La pantalla ofrecia `Profile`, o sea gente con cuenta. Los auxiliares no
+    tienen celular asignado y por lo tanto no tienen cuenta, asi que no habia
+    forma de anotarlos -- y el catalogo de roles ofrecia 'ayudante' y 'chofer'
+    para gente que el modelo no podia registrar. Ver el docstring de
+    `campo.cuadrillas.PersonaDeCampo`.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = request.profile.org
+        qs = PersonaDeCampo.objects.filter(org=org).select_related("profile")
+        if (request.query_params.get("activas") or "1") == "1":
+            qs = qs.filter(activa=True)
+        personas = list(qs)
+
+        # LAS CUENTAS QUE TODAVIA NO SON PERSONA DE CAMPO, para que dar de
+        # alta al equipo que ya existe no sea cargarlo a mano uno por uno.
+        # Se excluyen contra TODAS las personas, no solo las activas: una
+        # cuenta de alguien dado de baja volveria a ofrecerse como pendiente y
+        # al alta chocaria con la unicidad.
+        ya = set(
+            PersonaDeCampo.objects.filter(
+                org=org, profile__isnull=False
+            ).values_list("profile_id", flat=True)
+        )
+        pendientes = [
+            {"profile": str(pr.id), "nombre": _nombre_de(pr)}
+            for pr in Profile.objects.select_related("user").filter(
+                org=org, is_active=True
+            ).exclude(id__in=ya)
+        ]
+        return Response({
+            "personas": [_persona_json(p) for p in personas],
+            "cuentas_sin_persona": pendientes,
+        })
+
+    def post(self, request):
+        org = request.profile.org
+        _exigir_gestion(request)
+
+        profile = _perfil_de(org, request.data.get("profile"))
+        nombre = (request.data.get("nombre") or "").strip()
+        if profile is not None and not nombre:
+            # Se da de alta una cuenta del equipo: el nombre sale de ella.
+            nombre = _nombre_de(profile)
+        if not nombre:
+            return Response({"detail": "Hace falta el nombre."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if profile is not None and PersonaDeCampo.objects.filter(
+            org=org, profile=profile
+        ).exists():
+            # Dos filas con la misma cuenta serian la misma persona dos veces,
+            # y su historial quedaria partido al medio.
+            return Response(
+                {"detail": "Esa cuenta ya esta dada de alta como persona de campo."},
+                status=status.HTTP_409_CONFLICT)
+
+        rol = (request.data.get("rol_habitual") or "").strip()
+        validos = dict(AsignacionTrabajo.ROLES_CUADRILLA)
+        if rol and rol not in validos:
+            return Response(
+                {"detail": f"'{rol}' no es un rol. Son: {', '.join(validos)}."},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        persona = PersonaDeCampo.objects.create(
+            org=org, nombre=nombre, profile=profile,
+            rol_habitual=rol or AsignacionTrabajo.AYUDANTE,
+        )
+        return Response({
+            **_persona_json(persona),
+            # EL NOMBRE NO ES UNICO A PROPOSITO --dos personas se pueden
+            # llamar igual de verdad-- asi que se avisa y decide quien carga,
+            # en vez de bloquear y obligarlo a deformar un nombre.
+            "homonimos": PersonaDeCampo.objects.filter(
+                org=org, nombre__iexact=nombre
+            ).exclude(id=persona.id).count(),
+        }, status=status.HTTP_201_CREATED)
+
+
+class PersonaDeCampoView(APIView):
+    """``PATCH`` el nombre, el rol habitual, la cuenta o la baja."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def patch(self, request, pk):
+        org = request.profile.org
+        _exigir_gestion(request)
+
+        persona = PersonaDeCampo.objects.filter(org=org, id=pk).first()
+        if persona is None:
+            return Response({"detail": "No existe."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        if "nombre" in request.data:
+            nombre = (request.data.get("nombre") or "").strip()
+            if not nombre:
+                return Response({"detail": "El nombre no puede quedar vacio."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            persona.nombre = nombre
+
+        if "rol_habitual" in request.data:
+            rol = (request.data.get("rol_habitual") or "").strip()
+            validos = dict(AsignacionTrabajo.ROLES_CUADRILLA)
+            if rol not in validos:
+                return Response(
+                    {"detail": f"'{rol}' no es un rol. Son: {', '.join(validos)}."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            persona.rol_habitual = rol
+
+        if "profile" in request.data:
+            # ENLAZAR UNA CUENTA A ALGUIEN QUE YA TRABAJABA es el caso del
+            # auxiliar al que le asignan celular: se le engancha la cuenta a
+            # ESTA fila y su historial sigue siendo uno, en vez de nacer una
+            # persona nueva que empieza de cero.
+            cuenta = _perfil_de(org, request.data.get("profile"))
+            if request.data.get("profile") and cuenta is None:
+                return Response({"detail": "Esa cuenta no es de esta empresa."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if cuenta is not None and PersonaDeCampo.objects.filter(
+                org=org, profile=cuenta
+            ).exclude(id=persona.id).exists():
+                return Response(
+                    {"detail": "Esa cuenta ya esta en otra persona de campo."},
+                    status=status.HTTP_409_CONFLICT)
+            persona.profile = cuenta
+
+        if "activa" in request.data:
+            # Se da de BAJA, no se borra: sus jornadas la referencian y son
+            # las que explican quien estuvo cada dia.
+            persona.activa = bool(request.data.get("activa"))
+
+        persona.save()
+        return Response(_persona_json(persona))
 
 
 def _perfil_de(org, valor):
@@ -578,12 +796,15 @@ class RepartoView(APIView):
 
         from campo.models import AsignacionTrabajo, OrdenTrabajo
 
-        publicadas, ya_tenian = 0, []
+        publicadas, ya_tenian, sin_cuenta = 0, [], []
+        #  Se acumula FUERA del ciclo: una variable por cuadrilla solo
+        #  guardaria la ultima, y con dos cuadrillas el numero mentiria.
+        auxiliares = 0
         with transaction.atomic():
             for cruda in crudas:
                 jornada = JornadaDeCuadrilla.objects.filter(
                     org=org, id=(cruda or {}).get("jornada")
-                ).prefetch_related("integrantes__profile").first()
+                ).prefetch_related("integrantes__persona").first()
                 if jornada is None:
                     continue
 
@@ -593,6 +814,22 @@ class RepartoView(APIView):
                     # la orden quedaria asignada a nadie.
                     continue
 
+                # SOLO QUIEN TIENE CUENTA RECIBE LA ASIGNACION, porque una
+                # orden asignada a quien no entra al sistema no aparece en
+                # ningun telefono. Los auxiliares sin celular integran la
+                # cuadrilla --y por eso quedan en la jornada, que es donde se
+                # lee quien estuvo-- pero no son a quien se le manda el
+                # trabajo.
+                con_cuenta = [i for i in integrantes if i.persona.tiene_cuenta]
+                if not con_cuenta:
+                    # Toda la cuadrilla sin cuenta: la orden quedaria sin una
+                    # sola asignacion y nadie la veria. Se SALTEA y se dice --
+                    # publicar cero asignaciones e informar exito seria peor
+                    # que no publicar.
+                    sin_cuenta.append(jornada.cuadrilla.nombre)
+                    continue
+
+                auxiliares += len(integrantes) - len(con_cuenta)
                 lider_id = jornada.lider_id or jornada.cuadrilla.lider_id
                 for oid in (cruda or {}).get("ordenes") or []:
                     orden = OrdenTrabajo.objects.filter(org=org, id=oid).first()
@@ -604,12 +841,12 @@ class RepartoView(APIView):
                     if orden.asignaciones.exists():
                         ya_tenian.append(orden.numero)
                         continue
-                    for i in integrantes:
+                    for i in con_cuenta:
                         AsignacionTrabajo.objects.create(
                             orden=orden,
-                            profile=i.profile,
+                            profile=i.persona.profile,
                             rol=i.rol,
-                            es_principal=(i.profile_id == lider_id),
+                            es_principal=(i.persona.profile_id == lider_id),
                         )
                     publicadas += 1
 
@@ -618,6 +855,14 @@ class RepartoView(APIView):
             # Se nombran: si no, la cuenta no cuadra con lo que se vio y nadie
             # sabe cuales quedaron afuera.
             "ya_tenian": ya_tenian,
+            # Las cuadrillas que no se pudieron publicar porque NADIE en ellas
+            # entra al sistema. Un silencio aca haria creer que se repartio
+            # todo.
+            "sin_nadie_con_cuenta": sin_cuenta,
+            # Cuantos auxiliares integran las cuadrillas publicadas sin recibir
+            # asignacion: es lo esperado, no un error, pero se dice para que
+            # nadie lo lea como gente perdida.
+            "auxiliares_sin_asignacion": auxiliares,
         })
 
 

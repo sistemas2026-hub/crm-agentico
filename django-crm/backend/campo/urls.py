@@ -46,6 +46,10 @@ urlpatterns = [
     path("zonas/", cuadrillas_views.ZonasView.as_view(), name="zonas"),
     path("zonas/<uid:pk>/", cuadrillas_views.ZonaView.as_view(), name="zona"),
     path("zonas/<uid:pk>/localidades/", cuadrillas_views.LocalidadesDeZonaView.as_view(), name="zona_localidades"),
+    #  Quien trabaja en campo, tenga cuenta o no: un auxiliar sin celular
+    #  no puede tener `Profile` y aun asi integra la cuadrilla.
+    path("personas-de-campo/", cuadrillas_views.PersonasDeCampoView.as_view(), name="personas_de_campo"),
+    path("personas-de-campo/<uid:pk>/", cuadrillas_views.PersonaDeCampoView.as_view(), name="persona_de_campo"),
     path("cuadrillas/reparto/", cuadrillas_views.RepartoView.as_view(), name="cuadrilla_reparto"),
     path("cuadrillas/jornada/", cuadrillas_views.JornadaDeCuadrillaView.as_view(), name="cuadrilla_jornada"),
     path("cuadrillas/<uid:pk>/", cuadrillas_views.CuadrillaView.as_view(), name="cuadrilla"),

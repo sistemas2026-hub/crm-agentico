@@ -11,9 +11,12 @@ import {
   mapearZona,
   leerLocalidades,
   proponerReparto,
-  publicarReparto
+  publicarReparto,
+  leerPersonasDeCampo,
+  crearPersonaDeCampo,
+  editarPersonaDeCampo
 } from '$lib/server/v2/cuadrillas.js';
-import { leerPersonas, leerUbicaciones } from '$lib/server/v2/inventario.js';
+import { leerUbicaciones } from '$lib/server/v2/inventario.js';
 
 /**
  * Cuadrillas — Supervisor NOC.
@@ -58,7 +61,10 @@ export async function load({ url, cookies, locals, fetch }) {
     await Promise.all([
       leerCuadrillas({ cookies }, verBajas),
       leerJornadaDeCuadrillas({ cookies }, dia),
-      leerPersonas({ cookies }),
+      //  PERSONAS DE CAMPO, no cuentas: un auxiliar sin celular no tiene
+      //  `Profile` y aun asi integra la cuadrilla. Ver
+      //  `campo.cuadrillas.PersonaDeCampo`.
+      leerPersonasDeCampo({ cookies }, verBajas),
       leerUbicaciones({ cookies }),
       hayHistorial
         ? leerHistorialDeCuadrillas({ cookies }, {
@@ -109,6 +115,10 @@ export async function load({ url, cookies, locals, fetch }) {
       motivo: historial.motivo
     },
     personas: personas.personas,
+    //  Las cuentas del equipo que todavia no son persona de campo: se
+    //  ofrecen para darlas de alta en un clic, en vez de teclear el nombre
+    //  de alguien que el sistema ya conoce.
+    cuentasSinPersona: personas.cuentasSinPersona,
     vehiculos,
     // NO SE INVENTA UN CERO CUANDO LA LECTURA FALLÓ. Una empresa sin
     // cuadrillas y una consulta que no respondió se dibujan distinto.
@@ -234,6 +244,75 @@ export const actions = {
   },
 
   /**
+   * Da de alta a alguien que trabaja en campo.
+   *
+   * Con `profile` se da de alta una cuenta del equipo; con `nombre`, a un
+   * auxiliar que no entra al sistema. Hasta ahora lo segundo no se podía: la
+   * lista ofrecía `Profile`, o sea gente con correo y credenciales, y los
+   * auxiliares no tienen celular asignado.
+   */
+  persona_alta: async ({ request, cookies }) => {
+    const f = await request.formData();
+    try {
+      const r = await crearPersonaDeCampo({ cookies }, {
+        nombre: String(f.get('nombre') ?? '').trim(),
+        profile: String(f.get('profile') ?? '') || undefined,
+        rol_habitual: String(f.get('rol_habitual') ?? '').trim() || undefined
+      });
+      return {
+        hecho:
+          `${r?.nombre} quedó dado de alta` +
+          (r?.tiene_cuenta ? '.' : ', sin cuenta de usuario.'),
+        // EL HOMÓNIMO SE AVISA, no se bloquea: dos personas se pueden llamar
+        // igual de verdad, y bloquear la segunda obligaría a deformarle el
+        // nombre. Quien cargó decide si era un duplicado.
+        aviso: r?.homonimos
+          ? `Ojo: ya había ${r.homonimos} con ese mismo nombre.`
+          : ''
+      };
+    } catch (e) {
+      return fail(400, { error: mensajeDe(e) });
+    }
+  },
+
+  /**
+   * Cambia el nombre, el rol habitual, la cuenta enlazada o la baja.
+   *
+   * ENLAZAR UNA CUENTA es el caso del auxiliar al que le asignan celular: se
+   * le engancha a la MISMA persona, así sus jornadas anteriores siguen siendo
+   * suyas. Si naciera una persona nueva, su historial empezaría de cero.
+   */
+  persona_editar: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const id = String(f.get('id') ?? '').trim();
+    if (!id) return fail(400, { error: 'Falta la persona.' });
+
+    /** @type {Record<string, any>} */
+    const cuerpo = {};
+    if (f.has('nombre')) cuerpo.nombre = String(f.get('nombre') ?? '').trim();
+    if (f.has('rol_habitual'))
+      cuerpo.rol_habitual = String(f.get('rol_habitual') ?? '').trim();
+    if (f.has('profile')) cuerpo.profile = String(f.get('profile') ?? '') || null;
+    // `has` y no el valor: un checkbox sin marcar no manda nada, así que
+    // «activa» tiene que llegar explícita para distinguir «dar de baja» de
+    // «no se tocó».
+    if (f.has('activa')) cuerpo.activa = f.get('activa') === '1';
+
+    try {
+      const r = await editarPersonaDeCampo({ cookies }, id, cuerpo);
+      return {
+        hecho: r?.activa
+          ? `${r?.nombre} actualizado.`
+          : `${r?.nombre} quedó dado de baja; lo que ya trabajó sigue escrito.`
+      };
+    } catch (e) {
+      // 409 es «esa cuenta ya está en otra persona de campo», y el mensaje lo
+      // dice: pasarlo tal cual evita salir a buscar cuál.
+      return fail(409, { error: mensajeDe(e) });
+    }
+  },
+
+  /**
    * Arma el día de una cuadrilla.
    *
    * Manda la jornada ENTERA —labor e integrantes— porque el backend es
@@ -245,11 +324,16 @@ export const actions = {
     const f = await request.formData();
 
     // Vienen como pares paralelos, igual que las líneas del despacho.
-    const perfiles = f.getAll('integrante_profile').map((x) => String(x).trim());
+    //
+    //  SE MANDA `persona`, NO `profile`: el integrante es una persona de
+    //  campo, que puede no tener cuenta. El rol se deja vacío cuando no se
+    //  elige para que el backend use el habitual de esa persona, en vez de
+    //  escribir 'tecnico' sobre lo que ya se sabe de ella.
+    const ids = f.getAll('integrante_persona').map((x) => String(x).trim());
     const roles = f.getAll('integrante_rol').map((x) => String(x).trim());
-    const integrantes = perfiles
-      .map((profile, i) => ({ profile, rol: roles[i] || 'tecnico' }))
-      .filter((x) => x.profile);
+    const integrantes = ids
+      .map((persona, i) => ({ persona, rol: roles[i] || '' }))
+      .filter((x) => x.persona);
 
     try {
       const r = await armarJornada({ cookies }, {
