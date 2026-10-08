@@ -467,11 +467,20 @@
   //  el backend la rechazo, la pantalla tiene que mostrar lo que el backend
   //  dice, no lo que la pantalla esperaba.
   // ---------------------------------------------------------------------
+  //  LO QUE EL CICLO CERRO SOLO, para poder verificarlo.
+  //
+  //  Un conteo --"cerró 3"-- no se puede comprobar: hay que poder abrir esos
+  //  tres y leer contra qué se cerraron. Hasta el 08/10/2026 el ciclo corría,
+  //  la pantalla se recargaba, y no había forma de saber qué había hecho.
+  let cerradosDelCiclo = $state(/** @type {any[]} */ ([]));
+
   const alCorrerCiclo = () => {
     corriendo = true;
-    return async (/** @type {any} */ { update }) => {
+    return async (/** @type {any} */ { update, result }) => {
       corriendo = false;
       modalCiclo = false;
+      const auto = result?.data?.resumen?.cierre_automatico;
+      cerradosDelCiclo = Array.isArray(auto?.cerrados_detalle) ? auto.cerrados_detalle : [];
       await update({ reset: false });
       await invalidateAll();
     };
@@ -1954,6 +1963,48 @@
 
 
   <!-- ============ MODAL DEL CICLO ============ -->
+  <!-- ============ LO QUE EL CICLO CERRO SOLO ============
+       Aparece una vez, al terminar el ciclo, y con los casos NOMBRADOS.
+       El objetivo es que se puedan abrir y comprobar, no que se confie en
+       un numero. -->
+  {#if cerradosDelCiclo.length}
+    <div
+      class="snoc-velo"
+      role="presentation"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) cerradosDelCiclo = [];
+      }}
+    >
+      <div class="snoc-modal" role="dialog" aria-modal="true" aria-labelledby="snoc-cerrados-titulo">
+        <div class="snoc-fila snoc-primario">
+          <span class="snoc-icono" style="font-size:28px;">task_alt</span>
+          <h4 class="snoc-h3" id="snoc-cerrados-titulo">
+            El Supervisor cerró {cerradosDelCiclo.length}
+            {cerradosDelCiclo.length === 1 ? 'caso' : 'casos'}
+          </h4>
+        </div>
+        <p class="snoc-body-sm snoc-secundario" style="margin:0;">
+          Los cerró sin intervención humana porque el diagnóstico del equipo lo habilitó. Abrilos y confirmá
+          que el motivo es correcto — si alguno está mal, se puede reabrir.
+        </p>
+        <div class="snoc-pila-xs">
+          {#each cerradosDelCiclo as c (c.caso_id)}
+            <div class="snoc-caja-datos" style="display:flex; flex-direction:column; gap:var(--snoc-xs);">
+              <a class="snoc-enlace-externo" href="/tickets/{c.caso_id}">
+                Caso CS-{String(c.caso_id).slice(0, 8)}
+                <span class="snoc-icono" style="font-size:13px;">open_in_new</span>
+              </a>
+              <span class="snoc-body-sm">{c.porque || 'Sin motivo registrado.'}</span>
+            </div>
+          {/each}
+        </div>
+        <div class="snoc-fila" style="justify-content:flex-end; padding-top:var(--snoc-xs);">
+          <button class="snoc-btn" type="button" onclick={() => (cerradosDelCiclo = [])}>Entendido</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <!-- ============ EL ALCANCE DEL SUPERVISOR ============
        Dos controles que NO son lo mismo, y la pantalla los separa:
        el NIVEL dice qué clase de cosas puede hacer solo, y el INTERRUPTOR

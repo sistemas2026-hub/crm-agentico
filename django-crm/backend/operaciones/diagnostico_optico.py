@@ -538,7 +538,28 @@ def cerrar_si_corresponde(org, propuesta, *, ahora=None) -> dict:
 
     return {"intentado": True,
             "cerrado": bool(resultado.get("cerrado")),
-            "motivo": resultado.get("motivo") or ""}
+            "motivo": resultado.get("motivo") or "",
+            #  QUE CASO FUE, para que quien corrio el ciclo pueda ir a verlo.
+            #  Un conteo --"cerro 3"-- no se puede verificar: hay que poder
+            #  abrir esos tres y leer contra que se cerraron. Esto es lo que
+            #  pidio el usuario al preguntar "¿como voy a saber cuales cerro?",
+            #  y la pregunta estaba bien: hasta ese momento no habia forma.
+            "caso_id": str(propuesta.origen_id),
+            "propuesta_id": str(propuesta.id),
+            "porque": porque_del_cierre(propuesta)}
+
+
+def porque_del_cierre(propuesta) -> str:
+    """
+    La razon escrita del diagnostico, sacada de la evidencia de la propuesta.
+
+    Se lee de la EVIDENCIA y no de un campo aparte: es lo que de verdad quedo
+    guardado, y lo que alguien va a leer dentro de seis meses.
+    """
+    for pieza in reversed(propuesta.evidencia or []):
+        if isinstance(pieza, dict) and pieza.get("fuente") == "diagnostico":
+            return str(pieza.get("dato") or "")
+    return ""
 
 
 def _anotar(senal, veredicto: str, porque: str, diagnostico, ahora) -> None:

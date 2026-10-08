@@ -21,6 +21,10 @@
   let { situacion = null, caso = null } = $props();
 
   let abierto = $state(false);
+  //  El chat a pantalla casi completa. Lo pidió el usuario y el motivo es
+  //  práctico: en la burbuja chica, una respuesta de varias líneas obliga a
+  //  leer por una ventanita, y las respuestas del Supervisor traen evidencia.
+  let expandido = $state(false);
   /** @type {Mensaje[]} */
   let mensajes = $state([]);
   let texto = $state('');
@@ -105,6 +109,26 @@
     if (hilo) hilo.scrollTop = hilo.scrollHeight;
   }
 
+  /**
+   * Vacía la conversación de la pantalla y empieza una nueva.
+   *
+   * SUELTA 'conversacionId' A PROPÓSITO. Si lo conservara, el backend seguiría
+   * enganchando los mensajes nuevos al hilo viejo y "limpiar" sería solo dejar
+   * de ver lo que el Supervisor sí sigue leyendo — el malentendido más caro
+   * posible en un botón que se llama así.
+   *
+   * NO BORRA NADA DEL SERVIDOR. Lo conversado queda guardado y auditado; lo que
+   * cambia es desde dónde se sigue. Un botón de la pantalla no es el lugar para
+   * destruir un registro.
+   */
+  function limpiar() {
+    if (enviando) return;
+    mensajes = [];
+    conversacionId = null;
+    contextoActual = null;
+    texto = '';
+  }
+
   /** @param {KeyboardEvent} e */
   function alTeclado(e) {
     //  Enter envía; Shift+Enter hace salto de línea. Es lo que espera cualquiera
@@ -128,9 +152,13 @@
     <span class="snoc-chat-burbuja-txt">Supervisor</span>
   </button>
 {:else}
-  <section class="snoc-chat-panel" aria-label="Chat del Supervisor NOC IA">
+  <section
+    class="snoc-chat-panel"
+    class:snoc-chat-expandido={expandido}
+    aria-label="Chat del Supervisor NOC IA"
+  >
     <header class="snoc-chat-cabecera">
-      <div>
+      <div style="min-width:0;">
         <strong>Supervisor NOC IA</strong>
         {#if contextoActual || contextoInicial}
           <div class="snoc-mono-sm">Contexto: {contextoActual ?? contextoInicial}</div>
@@ -138,14 +166,39 @@
           <div class="snoc-mono-sm">Sin situación como contexto</div>
         {/if}
       </div>
-      <button
-        class="snoc-btn"
-        type="button"
-        onclick={() => (abierto = false)}
-        aria-label="Cerrar el chat"
-      >
-        ✕
-      </button>
+      <div style="display:flex; gap:4px; flex-shrink:0;">
+        <!-- Solo aparece si hay algo que limpiar: un botón que no hace nada
+             enseña a desconfiar de los botones. -->
+        {#if mensajes.length}
+          <button
+            class="snoc-btn"
+            type="button"
+            onclick={limpiar}
+            disabled={enviando}
+            aria-label="Empezar una conversación nueva"
+            title="Empezar de cero. Lo conversado queda guardado; se sigue desde una conversación nueva."
+          >
+            ⟲
+          </button>
+        {/if}
+        <button
+          class="snoc-btn"
+          type="button"
+          onclick={() => (expandido = !expandido)}
+          aria-label={expandido ? 'Achicar el chat' : 'Expandir el chat'}
+          title={expandido ? 'Achicar' : 'Expandir'}
+        >
+          {expandido ? '⤡' : '⤢'}
+        </button>
+        <button
+          class="snoc-btn"
+          type="button"
+          onclick={() => (abierto = false)}
+          aria-label="Cerrar el chat"
+        >
+          ✕
+        </button>
+      </div>
     </header>
 
     <div class="snoc-chat-hilo" bind:this={hilo}>
@@ -258,6 +311,17 @@
     color: var(--snoc-on-surface);
     box-shadow: var(--snoc-sombra);
     overflow: hidden;
+  }
+  /*  EXPANDIDO: casi toda la ventana, con margen para no pegarse a los bordes.
+      En la burbuja chica una respuesta con evidencia se lee por una ventanita,
+      y las del Supervisor traen varias observaciones. Sigue siendo 'fixed' y
+      sigue teniendo tope: ocupa mucho, no todo, asi que el tablero de atras no
+      desaparece del todo y se ve que es un panel y no otra pantalla.  */
+  .snoc-chat-panel.snoc-chat-expandido {
+    width: min(1100px, calc(100vw - 2.5rem));
+    height: calc(100vh - 2.5rem);
+    right: 1.25rem;
+    bottom: 1.25rem;
   }
   .snoc-chat-cabecera {
     display: flex;

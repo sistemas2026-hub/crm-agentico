@@ -2097,6 +2097,7 @@ def _correr_ciclo(org, ahora) -> dict:
         _auto = resumen["cierre_automatico"]
         if r["cerrado"]:
             _auto["cerrados"] += 1
+            _auto.setdefault("cerrados_detalle", []).append(r)
         else:
             _m = r.get("motivo") or "sin motivo"
             _mot = _auto.setdefault("motivos_de_no_cierre", {})
@@ -2162,6 +2163,7 @@ def _correr_ciclo(org, ahora) -> dict:
         _auto = resumen["cierre_automatico"]
         if cierre["cerrado"]:
             _auto["cerrados"] += 1
+            _auto.setdefault("cerrados_detalle", []).append(cierre)
         else:
             #  EL MOTIVO SE CUENTA SIEMPRE que no se cierre, se haya intentado
             #  o no. Sin esto el informe decia "cerraria: 1, cerrados: 0" y no
