@@ -333,6 +333,27 @@ services:
       DBNAME: ${DBNAME:?}
       DBUSER: ${MOTOR_DBUSER:?}
       DBPASSWORD: ${MOTOR_DBPASSWORD:?}
+      # LA CREDENCIAL DEL MIGRADOR, solo para el ledger (08/10/2026).
+      #
+      # 'cli/migrar_asistente.py' vive en este contenedor y no podia aplicar ni
+      # CONSULTAR una migracion: 'motor_user' no puede leer
+      # 'asistente.migraciones_aplicadas' -- medido en produccion,
+      # 'permission denied for table migraciones_aplicadas'.
+      #
+      # El comando ya sabe preferir estas dos si estan --mismo patron que
+      # 'docker/backend/entrypoint.sh'-- pero no le llegaban: en compose un
+      # servicio solo recibe las variables que SU bloque declara, aunque esten
+      # todas en el mismo Environment del despliegue. El backend las declaraba
+      # y el motor no.
+      #
+      # EL OVERRIDE ES POR PROCESO: el motor sigue hablando con la base como
+      # 'motor_user' para todo lo demas. Solo el comando del ledger las toma, y
+      # anuncia en pantalla CUAL credencial uso -- nunca su valor.
+      #
+      # Con ':-' y no ':?': un despliegue sin migrador configurado levanta
+      # igual, y el comando cae a DBUSER como siempre.
+      MIGRATOR_DBUSER: ${MIGRATOR_DBUSER:-}
+      MIGRATOR_DBPASSWORD: ${MIGRATOR_DBPASSWORD:-}
       WISPHUB_API_KEY: ${WISPHUB_API_KEY:?}
       WISPHUB_BASE_URL: ${WISPHUB_BASE_URL:-https://api.wisphub.io}
       WISPHUB_MODO_REAL: ${WISPHUB_MODO_REAL:-true}
