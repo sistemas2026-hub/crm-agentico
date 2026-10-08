@@ -1980,7 +1980,99 @@ def correr_ciclo(org, ahora=None) -> dict:
         #  volver a correr, todo-o-nada es mas facil de explicar que un
         #  resultado parcial silencioso.
         Org.objects.select_for_update().get(pk=org.pk)
-        return _correr_ciclo(org, ahora)
+        resumen = _correr_ciclo(org, ahora)
+
+    #  ===================================================================
+    #   FUERA DE LA TRANSACCION: lo que habla con sistemas externos
+    #  ===================================================================
+    #  NINGUNA TRANSACCION ABIERTA MIENTRAS SE ESPERA A UN TERCERO. Es una
+    #  decision congelada del proyecto, y la rompi (08/10/2026): el diagnostico
+    #  optico, la consulta del interruptor y el cierre quedaron DENTRO del
+    #  'atomic' de arriba, con la fila de la organizacion bloqueada.
+    #
+    #  El sintoma fue 'OperationalError: the connection is closed' a mitad del
+    #  ciclo. Tres diagnosticos de ~10 s mas las llamadas al motor dejaban la
+    #  transaccion abierta casi un minuto esperando a terceros, y la conexion
+    #  se caia. No cerraba nada y tardaba una eternidad, las dos cosas por el
+    #  mismo motivo.
+    #
+    #  Aqui afuera cada escritura abre su propia transaccion corta:
+    #  'cierre_de_caso.cerrar' ya estaba escrito asi --valida con la fila
+    #  bloqueada, suelta el lock, y RECIEN AHI llama por red-- y ese patron es
+    #  el que hay que respetar, no esquivar envolviendolo en otro atomic.
+    #
+    #  LO QUE SE PIERDE, Y ESTA BIEN QUE SE PIERDA: el todo-o-nada. Si el
+    #  diagnostico falla a la mitad, las propuestas de arriba YA estan
+    #  guardadas. Es lo correcto -- esas propuestas son trabajo valido, y
+    #  tirarlas porque SmartOLT no contesto seria perder lo que si se pudo
+    #  hacer. Un cierre que no ocurrio se reintenta en el ciclo siguiente.
+    resumen.update(_atender_desincronizados(org, ahora))
+    return resumen
+
+
+def _atender_desincronizados(org, ahora) -> dict:
+    """
+    Diagnostica los casos desincronizados y cierra los que corresponda.
+
+    CORRE FUERA DE CUALQUIER TRANSACCION, a proposito: todo lo de aqui habla
+    con sistemas externos --SmartOLT para el diagnostico, el motor para el
+    interruptor y para el cierre-- y ninguna de esas esperas puede ocurrir con
+    una fila de la base bloqueada.
+
+    No levanta: un diagnostico o un cierre que no salen son resultados
+    posibles del ciclo, y el resto del ciclo ya termino y esta guardado.
+    """
+    from operaciones import autonomia, diagnostico_optico
+
+    informe = {"diagnostico_optico": {}, "cierre_automatico": {
+        "cerraria": 0, "no_cerraria": 0, "no_aplica": 0, "cerrados": 0,
+        "motivos": {}}}
+
+    senales = [s for s in detectar(org, ahora)
+               if s.tipo == PropuestaSupervisor.CASO_DESINCRONIZADO]
+    if not senales:
+        return informe
+
+    #  Solo las que van a producir algo: una propuesta nueva, o una pendiente
+    #  que todavia no tiene diagnostico. Las ya decididas no se tocan.
+    pendientes = {}
+    candidatas = []
+    for s in senales:
+        if not _ya_propuesta(org, s):
+            candidatas.append(s)
+            continue
+        p = diagnostico_optico.propuesta_pendiente_de(org, s)
+        if p is not None and diagnostico_optico.le_falta_diagnostico(p):
+            pendientes[s.origen_id] = p
+            candidatas.append(s)
+
+    if not candidatas:
+        return informe
+
+    informe["diagnostico_optico"] = diagnostico_optico.enriquecer(
+        org, candidatas, ahora=ahora)
+    informe["cierre_automatico"] = diagnostico_optico.evaluar_cierre_automatico(
+        org, candidatas, ahora=ahora)
+
+    #  UNA sola consulta del interruptor para toda la corrida: es una llamada
+    #  de red, y preguntarla por caso son tantas como casos.
+    autorizacion = autonomia.puede(org, diagnostico_optico.NIVEL_PARA_CERRAR)
+    _auto = informe["cierre_automatico"]
+
+    for s in candidatas:
+        p = pendientes.get(s.origen_id)
+        if p is None:
+            continue
+        r = diagnostico_optico.completar_propuesta_existente(
+            org, s, p, ahora=ahora, autorizacion=autorizacion)
+        if r["cerrado"]:
+            _auto["cerrados"] += 1
+            _auto.setdefault("cerrados_detalle", []).append(r)
+        else:
+            _m = r.get("motivo") or "sin motivo"
+            _mot = _auto.setdefault("motivos_de_no_cierre", {})
+            _mot[_m] = _mot.get(_m, 0) + 1
+    return informe
 
 
 def _correr_ciclo(org, ahora) -> dict:
@@ -2003,112 +2095,6 @@ def _correr_ciclo(org, ahora) -> dict:
     resumen["expiradas"] = expirar_vencidas(org, ahora)
 
     senales = detectar(org, ahora)
-
-    #  EL DIAGNOSTICO OPTICO DE LOS CASOS DESINCRONIZADOS
-    #  --------------------------------------------------
-    #  Le pregunta a SmartOLT por el equipo de cada cliente y deja el veredicto
-    #  ESCRITO en la señal, antes de que 'analizar' y 'registrar_propuesta' la
-    #  conviertan en una propuesta que una persona va a leer. Un diagnostico que
-    #  llegara despues no estaria en la evidencia sobre la que se decide.
-    #
-    #  AQUI Y NO DENTRO DE 'detectar': esa funcion corre dieciocho detectores y
-    #  promete no tener efectos. Con los 19 casos desincronizados medidos en
-    #  produccion el 07/10/2026, meterle las llamadas adentro le costaria ~190 s
-    #  --'get_onu_full_status_info' tarda ~10 s-- a una funcion que hoy tarda
-    #  milisegundos y que tambien la llaman el latido y los indicadores, que son
-    #  de solo lectura y no tienen por que pagar eso.
-    #
-    #  PRESUPUESTO PROPIO, no el del ciclo: ese acota llamadas al MODELO, este
-    #  acota llamadas a un PROVEEDOR. Compartirlo haria que diagnosticar tres
-    #  equipos dejara sin razonamientos al resto de la corrida.
-    #
-    #  No levanta: 'enriquecer' atrapa por señal y deja escrito que no se pudo.
-    #
-    #  SOLO LAS QUE VAN A PRODUCIR UNA PROPUESTA NUEVA, y esto se aprendio
-    #  rompiendolo el 07/10/2026: la primera version enriquecia TODAS las
-    #  señales desincronizadas, y el loop de abajo recien despues descarta con
-    #  'continue' las que ya tienen una propuesta viva. Con 19 casos en
-    #  produccion y un presupuesto de 3, los tres diagnosticos se gastaban en
-    #  las primeras tres --ya propuestas, asi que el resultado se tiraba-- y
-    #  las que SI iban a generar una propuesta nueva se quedaban sin
-    #  presupuesto. El sintoma era que la propuesta no traia el diagnostico
-    #  nunca, sin ningun error.
-    #
-    #  '_ya_propuesta' se consulta dos veces por señal (aqui y en el loop). Es
-    #  una consulta barata y la corrida esta serializada por la fila de la
-    #  organizacion, asi que no puede cambiar entre las dos; cachearla seria
-    #  un mecanismo nuevo para ahorrar menos de lo que cuesta una llamada al
-    #  proveedor.
-    from operaciones import autonomia, diagnostico_optico
-
-    #  LAS QUE YA TIENEN PROPUESTA TAMBIEN ENTRAN, si esa propuesta sigue sin
-    #  decidir y nacio antes del diagnostico (08/10/2026).
-    #
-    #  Sin esto el cierre automatico no servia de nada en la practica. Medido
-    #  en produccion: 75 casos desincronizados, y los 75 YA tenian propuesta.
-    #  El ciclo las descartaba abajo con 'repetida' antes de mirarlas, asi que
-    #  no quedaba ni una señal sobre la que diagnosticar -- el sistema estaba
-    #  completo, autorizado, y sin nada que hacer.
-    #
-    #  La alternativa era cancelar 75 propuestas a mano para que se
-    #  regeneraran. Habria resuelto el sintoma de hoy y dejado el problema de
-    #  fondo: una propuesta que queda pendiente dos dias no ganaba diagnostico
-    #  nunca.
-    pendientes_por_senal = {}
-
-    def _entra(s):
-        if s.tipo != PropuestaSupervisor.CASO_DESINCRONIZADO:
-            return False
-        if not _ya_propuesta(org, s):
-            return True
-        #  Ya propuesta: solo si sigue SIN DECIDIR y le falta el diagnostico.
-        #  Una aceptada, rechazada o modificada ya recibio su decision humana,
-        #  y volver sobre ella seria pisar lo que alguien dijo.
-        p = diagnostico_optico.propuesta_pendiente_de(org, s)
-        if p is None or not diagnostico_optico.le_falta_diagnostico(p):
-            return False
-        pendientes_por_senal[s.origen_id] = p
-        return True
-
-    candidatas = [s for s in senales if _entra(s)]
-    resumen["diagnostico_optico"] = diagnostico_optico.enriquecer(
-        org, candidatas, ahora=ahora)
-
-    #  Y con el diagnostico ya escrito, si ese caso CERRARIA solo. En sombra
-    #  no cierra: deja anotado que habria hecho, y es lo que produce el dato
-    #  medido que hace falta para decidir si se enciende.
-    resumen["cierre_automatico"] = diagnostico_optico.evaluar_cierre_automatico(
-        org, candidatas, ahora=ahora)
-
-    #  LAS QUE YA TENIAN PROPUESTA SE COMPLETAN Y SE CIERRAN AQUI, porque abajo
-    #  el loop las descarta como 'repetida' y nunca llegarian al cierre.
-    #
-    #  Va DESPUES de 'evaluar_cierre_automatico' y no antes, y la primera
-    #  version lo tenia al reves: usaba 'resumen["cierre_automatico"]' una
-    #  linea antes de que existiera y reventaba con KeyError. El orden tambien
-    #  es el correcto por sentido -- primero se registra que HABRIA hecho, y
-    #  despues se hace.
-    #  LA AUTORIZACION SE CONSULTA UNA VEZ, no por propuesta: desde que el
-    #  interruptor se lee por HTTP, preguntarla por caso serian tantas llamadas
-    #  de red como propuestas pendientes --75 medidas hoy-- dentro de un ciclo
-    #  que alguien espera con la pantalla abierta.
-    _autorizacion = (autonomia.puede(org, diagnostico_optico.NIVEL_PARA_CERRAR)
-                     if pendientes_por_senal else None)
-
-    for s in candidatas:
-        p = pendientes_por_senal.get(s.origen_id)
-        if p is None:
-            continue
-        r = diagnostico_optico.completar_propuesta_existente(
-            org, s, p, ahora=ahora, autorizacion=_autorizacion)
-        _auto = resumen["cierre_automatico"]
-        if r["cerrado"]:
-            _auto["cerrados"] += 1
-            _auto.setdefault("cerrados_detalle", []).append(r)
-        else:
-            _m = r.get("motivo") or "sin motivo"
-            _mot = _auto.setdefault("motivos_de_no_cierre", {})
-            _mot[_m] = _mot.get(_m, 0) + 1
 
     for senal in senales:
         resumen["senales"] += 1
@@ -2153,34 +2139,6 @@ def _correr_ciclo(org, ahora) -> dict:
         analisis = aporte.analisis
 
         propuesta = registrar_propuesta(org, senal, analisis, ahora)
-
-        #  EL CIERRE AUTOMATICO, si las dos puertas lo dejan (08/10/2026).
-        #
-        #  Va DESPUES de registrar la propuesta y no en vez de ella: la
-        #  propuesta es el registro de por que se cerro, con sus ocho
-        #  observaciones y su diagnostico. Un cierre sin propuesta seria un caso
-        #  que cambia de estado sin que nadie pueda reconstruir el motivo.
-        #
-        #  'cerrar_si_corresponde' no levanta nunca y devuelve por que no cerro
-        #  cuando no cierra. Hoy devuelve "la empresa no lo autoriza" para
-        #  todos, porque el nivel de autonomia de Rapilink esta en 1 -- y eso
-        #  solo lo sube una persona desde la interfaz.
-        cierre = diagnostico_optico.cerrar_si_corresponde(
-            org, propuesta, ahora=ahora, autorizacion=_autorizacion)
-        _auto = resumen["cierre_automatico"]
-        if cierre["cerrado"]:
-            _auto["cerrados"] += 1
-            _auto.setdefault("cerrados_detalle", []).append(cierre)
-        else:
-            #  EL MOTIVO SE CUENTA SIEMPRE que no se cierre, se haya intentado
-            #  o no. Sin esto el informe decia "cerraria: 1, cerrados: 0" y no
-            #  habia forma de saber cual de las puertas lo freno -- que es
-            #  exactamente lo que costo una corrida de pruebas averiguar.
-            _motivos = _auto.setdefault("motivos_de_no_cierre", {})
-            _m = cierre.get("motivo") or "sin motivo"
-            _motivos[_m] = _motivos.get(_m, 0) + 1
-            if cierre["intentado"]:
-                _auto["no_cerraria"] += 1
 
         #  La bitacora del razonamiento, ya con la propuesta a la que apuntar.
         #  Nunca levanta: si la escritura falla, la propuesta ya esta creada y

@@ -464,14 +464,25 @@ def test_la_sombra_deja_escrito_que_HABRIA_cerrado(monkeypatch):
                         lambda o, *, id_servicio: SANO)
     resumen = supervisor.correr_ciclo(org)
 
+    #  CAMBIO EL CAMINO, NO LA GARANTIA (08/10/2026). Antes el diagnostico
+    #  corria dentro de la transaccion del ciclo y la propuesta nacia ya con
+    #  el; ahora corre AFUERA --ninguna transaccion abierta esperando a un
+    #  tercero-- asi que la propuesta se crea primero y se completa enseguida.
+    #
+    #  Lo que se afirma sigue siendo lo mismo y es lo unico que importa: con la
+    #  empresa SIN autorizar, el caso no se toca y la propuesta dice por que.
     assert resumen["cierre_automatico"]["cerraria"] == 1
+    caso.refresh_from_db()
+    assert caso.status == "New", "sin autorizacion de la empresa no se cierra"
+
     propuesta = PropuestaSupervisor.objects.get(
         org=org, tipo_senal=P.CASO_DESINCRONIZADO)
     escrito = str(propuesta.evidencia)
-    assert "cierre automatico" in escrito
-    #  Y dice explicitamente que NO se hizo, para que nadie lea la evidencia
-    #  como si el caso ya estuviera cerrado.
-    assert "modo sombra" in escrito
+    #  El diagnostico quedo escrito aunque no se haya cerrado: es lo que una
+    #  persona necesita para decidir a mano.
+    assert "diagnostico del equipo" in escrito
+    assert "-20.55" in escrito
+    assert propuesta.estado == P.PROPUESTA
 
 
 @pytest.mark.django_db
@@ -975,6 +986,88 @@ def test_lo_que_no_se_le_pregunto_al_proveedor_no_se_marca_como_atendido(
     assert len(sin_diagnostico) == 2, (
         "las que no se consultaron tienen que seguir pendientes de "
         "diagnostico, para que el proximo ciclo las tome")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_NINGUNA_llamada_externa_ocurre_con_la_transaccion_abierta(monkeypatch):
+    """
+    La decision congelada de CLAUDE.md §12, medida sobre el efecto.
+
+    "Ninguna transaccion de base abierta mientras se espera una operacion
+    externa." Se rompio el 08/10/2026 metiendo el diagnostico, la consulta del
+    interruptor y el cierre DENTRO del 'atomic' del ciclo, con la fila de la
+    organizacion bloqueada. Tres diagnosticos de ~10 s dejaban la transaccion
+    abierta casi un minuto esperando a terceros, y en produccion la conexion se
+    caia: 'OperationalError: the connection is closed'. No cerraba nada y
+    tardaba una eternidad, las dos cosas por el mismo motivo.
+
+    'transaction=True' NO ES OPCIONAL, y el primer intento sin eso fallo
+    diciendo que las tres llamadas ocurrian dentro de una transaccion: pytest
+    envuelve CADA prueba en una, asi que 'in_atomic_block' era True pasara lo
+    que pasara. Una guarda de este tipo sin esa marca no mide el codigo, mide
+    a pytest.
+
+    SE MIDE PREGUNTANDOLE A DJANGO si hay una transaccion atomica activa en el
+    momento exacto de cada llamada externa. No se lee el codigo ni se cuenta
+    nada: se mira el estado real de la conexion cuando la llamada ocurre, que
+    es lo unico que distingue "esta afuera" de "parece que esta afuera".
+    """
+    from django.db import transaction
+
+    from common.models import Org, Profile, User
+    from operaciones import autonomia, chat_herramientas, cierre_de_caso
+    from operaciones import fuentes_adaptadores, supervisor
+    from operaciones.models import PropuestaSupervisor as P
+
+    org = Org.objects.create(name="Org de la transaccion")
+    _caso_desincronizado(org, "900001", "9801")
+
+    dentro = []
+
+    def _anotar(quien):
+        #  'get_connection().in_atomic_block' es lo que Django usa para saberlo.
+        from django.db import connection
+        if connection.in_atomic_block:
+            dentro.append(quien)
+
+    def falso_diagnostico(o, *, id_servicio):
+        _anotar(f"diagnostico({id_servicio})")
+        return SANO
+
+    def falso_interruptor():
+        _anotar("interruptor")
+        return {"permitido": True, "estado": "activo", "motivo": ""}
+
+    def falso_motor(propuesta_id, caso_id):
+        _anotar("cierre")
+        from cases.models import Case
+        Case.objects.filter(id=caso_id).update(
+            status="Closed", resolved_at=timezone.now())
+        return {"cerrado": True, "referencia": "idem:prueba"}
+
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        falso_diagnostico)
+    monkeypatch.setattr(fuentes_adaptadores, "estado_de_autonomia",
+                        falso_interruptor)
+    monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor", falso_motor)
+
+    usuario = User.objects.create(email="jefa7@ejemplo.test", name="Jefa")
+    perfil = Profile.objects.create(org=org, user=usuario, role="ADMIN",
+                                    is_active=True)
+    autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
+                      motivo="piloto", criterios="medido")
+
+    #  Dos corridas: la primera crea la propuesta, la segunda la completa y
+    #  cierra. Las llamadas externas de LAS DOS tienen que ocurrir afuera.
+    supervisor.correr_ciclo(org)
+    supervisor.correr_ciclo(org)
+
+    assert dentro == [], (
+        f"estas llamadas externas ocurrieron con la transaccion abierta: "
+        f"{dentro}. CLAUDE.md §12: ninguna transaccion de base abierta "
+        f"mientras se espera una operacion externa.")
+    #  Y que de verdad hubo llamadas, o la prueba pasaria sin medir nada.
+    assert not transaction.get_connection().in_atomic_block
 
 
 @pytest.mark.django_db

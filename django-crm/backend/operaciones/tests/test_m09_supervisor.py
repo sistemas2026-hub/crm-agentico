@@ -341,18 +341,40 @@ def test_una_pasada_repetida_no_duplica_la_cola(org_a, actividad_vencida):
 
 
 # --- 12. niveles de autonomía ----------------------------------------------
-def test_el_supervisor_nace_en_nivel_0_1(org_a, actividad_vencida):
-    """No se habilita nivel 2, 3 ni 4: todo lo que emite es 'recomendar'."""
+def test_lo_que_el_supervisor_emite_sigue_siendo_recomendar(org_a,
+                                                            actividad_vencida):
+    """
+    Un hallazgo corriente se propone como 'recomendar': lo mira una persona.
+
+    EL TECHO DE LA ETAPA SUBIO A 3 EL 08/10/2026, y esta prueba cambio con el.
+    Lo que NO cambio --y es lo que sigue afirmando-- es que un hallazgo
+    cualquiera no pide ejecutar nada. El unico que puede llegar a 3 es el
+    cierre de un caso desincronizado CUYO DIAGNOSTICO OPTICO lo habilite, y esa
+    condicion la prueba 'test_diagnostico_optico.py'.
+
+    La medicion que hizo seguro subir el techo: de los diecisiete analisis que
+    produce 'analizar', dieciseis piden nivel 1 y dos piden nivel 0. Ninguno
+    llegaba a 2 ni a 3, asi que subirlo no le abrio la puerta a nada que ya
+    existiera.
+    """
     supervisor.correr_ciclo(org_a)
     niveles = set(PropuestaSupervisor.objects.filter(org=org_a)
                   .values_list("nivel_autonomia_requerido", flat=True))
     assert niveles <= {PropuestaSupervisor.NIVEL_OBSERVAR,
                        PropuestaSupervisor.NIVEL_RECOMENDAR}
-    assert PropuestaSupervisor.NIVEL_MAXIMO_ETAPA == 1
+    #  El techo del CODIGO. El de la EMPRESA es otro, vive en
+    #  'operaciones/autonomia.py' y solo lo sube una persona con criterios
+    #  medidos: con este en 3 y aquel en 0, no se ejecuta nada.
+    assert (PropuestaSupervisor.NIVEL_MAXIMO_ETAPA
+            == PropuestaSupervisor.NIVEL_EJECUTAR_REVERSIBLE)
 
 
 def test_una_propuesta_de_nivel_alto_queda_marcada_fuera_de_alcance(org_a, propuesta):
-    propuesta.nivel_autonomia_requerido = PropuestaSupervisor.NIVEL_COORDINAR
+    #  El nivel 4 es 'accion critica, siempre humano', y queda fuera del
+    #  alcance de esta etapa pase lo que pase. Antes se probaba con el 2, que
+    #  desde el 08/10/2026 esta DENTRO del techo -- y una prueba que siguiera
+    #  usandolo estaria afirmando algo que dejo de ser cierto.
+    propuesta.nivel_autonomia_requerido = PropuestaSupervisor.NIVEL_CRITICO
     assert propuesta.dentro_del_alcance is False
     propuesta.nivel_autonomia_requerido = PropuestaSupervisor.NIVEL_RECOMENDAR
     assert propuesta.dentro_del_alcance is True
