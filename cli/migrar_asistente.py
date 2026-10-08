@@ -211,17 +211,53 @@ def nombre_de_aplicacion() -> str:
     return f"migrar_asistente pid={os.getpid()} host={socket.gethostname()}"[:63]
 
 
+def credencial() -> tuple[str, str, str]:
+    """
+    (usuario, clave, de_donde). Prefiere la del MIGRADOR si esta definida.
+
+    POR QUE (08/10/2026)
+    --------------------
+    Medido en produccion: el motor se conecta con 'motor_user', y ese usuario
+    NO puede leer 'asistente.migraciones_aplicadas' -- 'permission denied'. O
+    sea que desde el contenedor del motor no se podia aplicar ni consultar una
+    migracion, aunque el comando viva ahi.
+
+    El backend ya resolvia lo mismo asi: su 'entrypoint.sh' corre 'migrate' con
+    'MIGRATOR_DBUSER'/'MIGRATOR_DBPASSWORD' si estan, y con 'DBUSER' si no. Esto
+    es el mismo patron, para que el ledger del motor no necesite una regla
+    propia que alguien tenga que recordar.
+
+    EL OVERRIDE ES POR PROCESO, no un export: nada mas de este contenedor pasa
+    a hablar con la base como el migrador. Servir trafico con una credencial de
+    dueño seria saltearse la RLS de las tablas que posee.
+
+    Se devuelve DE DONDE salio para decirlo en pantalla. Que una migracion se
+    aplique con una credencial distinta de la habitual es justo lo que hay que
+    poder ver en el momento, no deducir despues de un error.
+    """
+    usuario = (os.environ.get("MIGRATOR_DBUSER", "") or "").strip()
+    clave = (os.environ.get("MIGRATOR_DBPASSWORD", "") or "").strip()
+    if usuario and clave:
+        return usuario, clave, "MIGRATOR_DBUSER"
+    return (os.environ.get("DBUSER", ""), os.environ.get("DBPASSWORD", ""),
+            "DBUSER")
+
+
 def conectar() -> psycopg.Connection:
-    faltan = [v for v in ("DBHOST", "DBPORT", "DBNAME", "DBUSER", "DBPASSWORD")
-              if not os.environ.get(v)]
+    usuario, clave, de_donde = credencial()
+    faltan = [v for v in ("DBHOST", "DBPORT", "DBNAME") if not os.environ.get(v)]
+    if not usuario or not clave:
+        faltan += ["DBUSER", "DBPASSWORD"]
     if faltan:
         raise SystemExit(f"[migrar] faltan {faltan} en el entorno.")
+    #  Se dice QUE credencial se usa, nunca su valor.
+    print(f"[migrar] conectando con la credencial de {de_donde}")
     opciones = (os.environ.get("PGOPTIONS", "")
                 + " -c client_connection_check_interval=2000").strip()
     return psycopg.connect(
         host=os.environ["DBHOST"], port=os.environ["DBPORT"],
-        dbname=os.environ["DBNAME"], user=os.environ["DBUSER"],
-        password=os.environ["DBPASSWORD"], sslmode="disable",
+        dbname=os.environ["DBNAME"], user=usuario,
+        password=clave, sslmode="disable",
         application_name=nombre_de_aplicacion(), options=opciones,
         autocommit=True)
 
