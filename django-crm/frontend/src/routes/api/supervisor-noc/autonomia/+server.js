@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
+
+import { apiRequest } from '$lib/api-helpers.js';
 
 /**
  * Ver y cambiar cuánto puede hacer solo el Supervisor.
@@ -9,18 +10,24 @@ import { env } from '$env/dynamic/private';
  * Hasta el 08/10/2026 el nivel de autonomía solo se podía tocar desde una
  * consola del servidor: `autonomia.cambiar` no tenía ningún llamador. La
  * pantalla mostraba el estado del interruptor en solo lectura, y su propio
- * archivo declaraba que mover el interruptor "no existe en este archivo", por
- * diseño.
+ * archivo declaraba que mover el interruptor "no existe en este archivo, por
+ * diseño".
  *
  * Esa decisión era correcta cuando el Supervisor solo observaba. Dejó de serlo
  * el día que pudo cerrar casos solo: un freno que nadie puede tocar desde la
  * pantalla no es un freno, y el momento en que hace falta es justo cuando
  * nadie quiere estar buscando cómo abrir una terminal.
  *
+ * TODO PASA POR 'apiRequest', como el resto del CRM. La primera versión de
+ * esta ruta armaba su propio fetch y leía la cookie 'access_token'; la que
+ * lleva el JWT se llama 'jwt_access', así que el backend recibía una petición
+ * sin identidad y contestaba "Organization context is required". El contexto
+ * de empresa viaja DENTRO del JWT, no como cabecera -- por eso un cliente
+ * propio que "casi" arma bien los headers falla de una forma que no señala la
+ * causa.
+ *
  * NO ES UN PROXY ABIERTO. Sabe hacer tres cosas y ninguna más: leer el estado,
- * cambiar el nivel y mover el interruptor. El JWT del colaborador viaja en la
- * cookie, así que el 403 de 'EsJefeDeOperaciones' lo sigue decidiendo el
- * backend.
+ * cambiar el nivel y mover el interruptor.
  *
  * EL GATE DE ROL SE REPITE ACA, como en el resto del CRM: dos capas. Una ruta
  * que solo dependiera de que el botón esté oculto no sería una barrera.
@@ -28,6 +35,8 @@ import { env } from '$env/dynamic/private';
 
 /** El mismo conjunto que campo/permissions.py::ROLES_GESTION. */
 const ROLES_GESTION = new Set(['ADMIN', 'SUPERVISOR', 'OPERACIONES']);
+
+const RUTA = '/operaciones/supervisor/autonomia/';
 
 const NO_AUTORIZADO =
   'Solo el Jefe de Operaciones (o un ADMIN/SUPERVISOR) puede cambiar el alcance del Supervisor.';
@@ -43,42 +52,21 @@ function puerta(locals) {
 }
 
 /**
- * @param {{ cookies: any, metodo: string, cuerpo?: any }} opciones
+ * Una llamada al backend, con el error traducido a algo que se pueda leer.
+ *
+ * El mensaje del backend viaja TAL CUAL cuando lo trae: ya explica cuál de los
+ * requisitos falta --motivo, criterios, persona-- y reescribirlo acá serían dos
+ * textos que se separan el día que uno cambie.
+ *
+ * @param {any} cookies
+ * @param {{ method?: string, body?: any }} opciones
  */
-async function alBackend({ cookies, metodo, cuerpo }) {
-  const base = env.PRIVATE_DJANGO_API_URL;
-  if (!base) {
-    return { datos: null, error: 'El backend no está configurado en este entorno.', status: 500 };
-  }
-  const token = cookies.get('access_token');
-  /** @type {Record<string, string>} */
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) headers.Authorization = `Bearer ${token}`;
-
+async function alBackend(cookies, opciones) {
   try {
-    const r = await fetch(`${base}/api/operaciones/supervisor/autonomia/`, {
-      method: metodo,
-      headers,
-      body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo)
-    });
-    const datos = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      //  El 'detail' del backend viaja TAL CUAL: ya explica cuál de los
-      //  requisitos falta --motivo, criterios, persona-- y reescribirlo acá
-      //  sería mantener dos textos que se desincronizan.
-      return {
-        datos: null,
-        error: datos?.detail || `El backend respondió ${r.status}.`,
-        status: r.status
-      };
-    }
-    return { datos, error: null, status: 200 };
+    return { datos: await apiRequest(RUTA, opciones, { cookies }), error: null, status: 200 };
   } catch (/** @type {any} */ err) {
-    return {
-      datos: null,
-      error: `No se pudo hablar con el backend: ${err?.message ?? err}`,
-      status: 502
-    };
+    const detalle = err?.data?.detail || err?.message || 'No se pudo hablar con el backend.';
+    return { datos: null, error: detalle, status: err?.status ?? 502 };
   }
 }
 
@@ -87,7 +75,7 @@ export async function GET({ cookies, locals }) {
   const cerrada = puerta(locals);
   if (cerrada) return json({ error: cerrada.error }, { status: cerrada.status });
 
-  const { datos, error, status } = await alBackend({ cookies, metodo: 'GET' });
+  const { datos, error, status } = await alBackend(cookies, {});
   if (error) return json({ error }, { status });
   return json(datos);
 }
@@ -98,7 +86,7 @@ export async function PUT({ cookies, locals, request }) {
   if (cerrada) return json({ error: cerrada.error }, { status: cerrada.status });
 
   const cuerpo = await request.json().catch(() => ({}));
-  const { datos, error, status } = await alBackend({ cookies, metodo: 'PUT', cuerpo });
+  const { datos, error, status } = await alBackend(cookies, { method: 'PUT', body: cuerpo });
   if (error) return json({ error }, { status });
   return json(datos);
 }
@@ -114,7 +102,7 @@ export async function POST({ cookies, locals, request }) {
   if (cerrada) return json({ error: cerrada.error }, { status: cerrada.status });
 
   const cuerpo = await request.json().catch(() => ({}));
-  const { datos, error, status } = await alBackend({ cookies, metodo: 'POST', cuerpo });
+  const { datos, error, status } = await alBackend(cookies, { method: 'POST', body: cuerpo });
   if (error) return json({ error }, { status });
   return json(datos);
 }

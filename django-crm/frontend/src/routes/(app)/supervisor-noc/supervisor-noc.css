@@ -247,6 +247,15 @@
   background: var(--snoc-surface-container-lowest); max-width: 28rem; width: 100%;
   border-radius: var(--snoc-r-xl); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
   padding: var(--snoc-lg); display: flex; flex-direction: column; gap: var(--snoc-md);
+  /* ALTO ACOTADO Y CON SCROLL PROPIO (08/10/2026).
+     Tenia ancho maximo y ninguna altura maxima, asi que un panel con varios
+     controles --el del alcance del Supervisor fue el primero-- crecia hasta
+     salirse de la ventana y lo de abajo quedaba inalcanzable: los botones de
+     guardar y de cerrar entre ellos.
+     Va en la clase general y no en una propia porque el problema no era de ese
+     panel: cualquier modal que crezca lo tenia. Uno que ya entraba no cambia;
+     uno que no entra ahora se desplaza en vez de desbordarse. */
+  max-height: min(85vh, 44rem); overflow-y: auto;
 }
 
 /* Utilidades chicas, para no repetir style="" en el marcado. */
