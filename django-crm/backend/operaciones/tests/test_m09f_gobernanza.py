@@ -1009,7 +1009,35 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  sostiene el texto y no puede quedar detras de un formulario.
                        #
                        #  Exige 'EsJefeDeOperaciones' y, en el PUT, actor y motivo.
-                       "supervisor-estilo"}
+                       "supervisor-estilo",
+                       #  08/10/2026. 'supervisor-autonomia' es la ruta mas delicada de
+                       #  esta lista, y por eso se declara con mas cuidado que ninguna:
+                       #  lo que escribe es CUANTO PUEDE HACER SOLO el Supervisor.
+                       #
+                       #  NO EJECUTA NADA, y la distincion es exactamente la que esta
+                       #  prueba existe para sostener. Cambiar el nivel no cierra un caso,
+                       #  no crea una orden y no llama a ningun sistema externo: habilita
+                       #  o deja de habilitar que OTRO camino --el ciclo-- lo haga, y ese
+                       #  camino tiene sus propias puertas, que siguen donde estaban.
+                       #
+                       #  Entro porque 'autonomia.cambiar' llevaba semanas sin ningun
+                       #  llamador: el nivel solo se podia tocar desde una consola del
+                       #  servidor. Mientras el Supervisor solo observaba eso daba igual;
+                       #  dejo de darlo el dia que pudo cerrar casos, porque un freno que
+                       #  nadie puede tocar desde la pantalla no es un freno.
+                       #
+                       #  LAS PUERTAS NO SE ABLANDAN POR TENER BOTON: el PUT exige
+                       #  persona, motivo y criterios medidos --lo impone
+                       #  'autonomia.cambiar' y lo vuelve a imponer una restriccion de
+                       #  base-- y el POST, que mueve el interruptor general, exige
+                       #  persona y motivo. El techo del codigo sigue siendo el de
+                       #  'NIVEL_MAXIMO_ETAPA', asi que la pantalla no puede ofrecer el
+                       #  nivel 4.
+                       #
+                       #  Y el Supervisor NO puede llamarla: 'EsJefeDeOperaciones' pide
+                       #  una persona, y 'autonomia.cambiar' se niega sin actor. Un
+                       #  sistema que pudiera ampliarse el alcance no tendria alcance.
+                       "supervisor-autonomia"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

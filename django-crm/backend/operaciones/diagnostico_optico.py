@@ -385,6 +385,81 @@ def evaluar_cierre_automatico(org, senales, *, ahora=None) -> dict:
     return informe
 
 
+def propuesta_pendiente_de(org, senal):
+    """
+    La propuesta VIVA y sin decidir de esta señal, o None.
+
+    Solo 'PROPUESTA': una aceptada, rechazada o modificada ya recibio su
+    decision humana, y volver sobre ella seria pisar lo que alguien dijo.
+    """
+    return PropuestaSupervisor.objects.filter(
+        org=org, tipo_senal=senal.tipo, origen_tipo=senal.origen_tipo,
+        origen_id=senal.origen_id, huella_condicion=senal.huella,
+        estado=PropuestaSupervisor.PROPUESTA,
+    ).order_by("-created_at").first()
+
+
+def le_falta_diagnostico(propuesta) -> bool:
+    """
+    Si esta propuesta se emitio ANTES de que existiera el diagnostico optico.
+
+    Se mira la evidencia --que es lo que de verdad tiene o no tiene-- y no una
+    marca aparte: una bandera podria quedar puesta sin que la evidencia este, y
+    entonces diria que ya se diagnostico un caso del que no se sabe nada.
+    """
+    for pieza in (propuesta.evidencia or []):
+        if isinstance(pieza, dict) and pieza.get("fuente") == "diagnostico":
+            return False
+    return True
+
+
+def completar_propuesta_existente(org, senal, propuesta, *, ahora=None) -> dict:
+    """
+    Le agrega el diagnostico a una propuesta YA EMITIDA, y la cierra si procede.
+
+    POR QUE HACE FALTA (08/10/2026)
+    -------------------------------
+    Porque sin esto el cierre automatico no servia para nada en la practica.
+    Medido en produccion: 75 casos desincronizados, y los 75 YA tenian
+    propuesta. El ciclo las descartaba con 'repetida' antes de mirarlas, asi
+    que no habia ni una sola señal nueva sobre la que diagnosticar -- el
+    sistema estaba completo, autorizado, y no tenia sobre que actuar.
+
+    La alternativa era cancelar 75 propuestas a mano para que se regeneraran.
+    Eso habria resuelto el sintoma de hoy y dejado el mismo problema para
+    siempre: una propuesta que queda pendiente dos dias no ganaba diagnostico
+    nunca.
+
+    LA EVIDENCIA SE AGREGA, NO SE REESCRIBE. Las siete observaciones originales
+    quedan donde estaban y el diagnostico se suma como octava. Una propuesta es
+    el registro de lo que se sabia al proponerla; aqui se sabe mas, y eso se
+    anota -- no se borra lo anterior.
+
+    EL NIVEL SUBE A 3 SOLO SI EL DIAGNOSTICO LO HABILITA, igual que en una
+    propuesta nueva. Sin eso la propuesta pedia nivel 1 --porque nacio sin
+    diagnostico-- y la primera puerta del cierre la rechazaria por una razon
+    que ya no es cierta.
+    """
+    ahora = ahora or timezone.now()
+    veredicto = senal.datos.get("diagnostico_veredicto")
+    if not veredicto:
+        return {"intentado": False, "cerrado": False,
+                "motivo": "no se diagnostico en esta corrida"}
+
+    campos = ["evidencia", "updated_at"]
+    propuesta.evidencia = list(propuesta.evidencia or []) + [
+        sup._observacion("diagnostico", senal.origen_id,
+                         f"diagnostico del equipo: "
+                         f"{senal.datos.get('diagnostico_porque', '')}", ahora)]
+    if veredicto == CIERRE_SEGURO:
+        propuesta.nivel_autonomia_requerido = NIVEL_PARA_CERRAR
+        campos.append("nivel_autonomia_requerido")
+    propuesta.updated_at = ahora
+    propuesta.save(update_fields=campos)
+
+    return cerrar_si_corresponde(org, propuesta, ahora=ahora)
+
+
 def cerrar_si_corresponde(org, propuesta, *, ahora=None) -> dict:
     """
     Cierra el caso de una propuesta recien creada, si las DOS puertas lo dejan.

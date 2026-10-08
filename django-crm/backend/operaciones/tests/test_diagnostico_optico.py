@@ -806,6 +806,113 @@ def test_el_sistema_NO_puede_rechazar_ni_modificar_automaticamente():
         supervisor.revisar(propuesta, actor=None, decision=P.ACEPTADA)
 
 
+# ===========================================================================
+#  8. LAS PROPUESTAS QUE YA EXISTIAN  --  el caso real de produccion
+# ===========================================================================
+
+@pytest.mark.django_db
+def test_una_propuesta_VIEJA_sin_diagnostico_se_completa_y_se_cierra(monkeypatch):
+    """
+    LA PRUEBA DEL CASO REAL, y la razon de que este bloque exista.
+
+    Medido en produccion el 08/10/2026: 75 casos desincronizados y los 75 YA
+    tenian propuesta. El ciclo las descartaba como 'repetida' antes de
+    mirarlas, asi que no quedaba ni una señal que diagnosticar -- el sistema
+    estaba completo, autorizado por una persona, y sin nada sobre que actuar.
+    La pantalla no mostraba ningun error: simplemente no pasaba nada.
+
+    Se simula exacto: primero un ciclo que crea la propuesta SIN diagnostico
+    (como las 75, que nacieron antes de que existiera), y despues el ciclo de
+    hoy, que tiene que completarla y cerrar el caso.
+    """
+    from common.models import Org, Profile, User
+    from operaciones import autonomia, chat_herramientas, supervisor
+    from operaciones.models import PropuestaSupervisor as P
+
+    org = Org.objects.create(name="Org con backlog")
+    caso = _caso_desincronizado(org, "700001", "9001")
+    llamadas = _motor_que_cierra(monkeypatch)
+    _interruptor_encendido(monkeypatch)
+
+    #  PRIMER CICLO, como los de antes: sin diagnostico disponible. Se apaga
+    #  el enriquecimiento para reproducir una propuesta nacida sin el.
+    monkeypatch.setattr(dx, "enriquecer", lambda *a, **k: {"diagnosticados": 0})
+    supervisor.correr_ciclo(org)
+
+    vieja = PropuestaSupervisor.objects.get(org=org,
+                                            tipo_senal=P.CASO_DESINCRONIZADO)
+    assert vieja.estado == P.PROPUESTA
+    assert dx.le_falta_diagnostico(vieja), "nacio sin diagnostico, como las 75"
+    assert vieja.nivel_autonomia_requerido == P.NIVEL_RECOMENDAR
+    caso.refresh_from_db()
+    assert caso.status == "New"
+    assert llamadas == []
+
+    #  SEGUNDO CICLO, el de hoy: el diagnostico vuelve, y una persona ya
+    #  autorizo el nivel 3.
+    monkeypatch.undo()
+    _interruptor_encendido(monkeypatch)
+    llamadas = _motor_que_cierra(monkeypatch)
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        lambda o, *, id_servicio: SANO)
+    usuario = User.objects.create(email="jefa4@ejemplo.test", name="Jefa")
+    perfil = Profile.objects.create(org=org, user=usuario, role="ADMIN",
+                                    is_active=True)
+    autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
+                      motivo="piloto", criterios="medido")
+
+    supervisor.correr_ciclo(org)
+
+    #  EL EFECTO: el caso quedo cerrado sin que nadie apretara nada.
+    caso.refresh_from_db()
+    assert caso.status == "Closed", "la propuesta vieja tiene que haber cerrado"
+    assert len(llamadas) == 1
+
+    vieja.refresh_from_db()
+    assert vieja.estado == P.ACEPTADA
+    assert vieja.revisado_por is None, "la cerro el sistema, no una persona"
+    assert vieja.nivel_autonomia_requerido == P.NIVEL_EJECUTAR_REVERSIBLE
+    #  Y LA EVIDENCIA SE AGREGO, no se reescribio: las observaciones
+    #  originales siguen ahi y el diagnostico es una mas.
+    fuentes = [p.get("fuente") for p in vieja.evidencia]
+    assert "diagnostico" in fuentes
+    assert fuentes.count("caso") >= 7, "no se perdio la evidencia original"
+
+
+@pytest.mark.django_db
+def test_una_propuesta_YA_DECIDIDA_no_se_vuelve_a_tocar(monkeypatch):
+    #  Rechazar es una decision. Volver sobre ella --completarla y cerrarla--
+    #  seria pisar lo que una persona dijo.
+    from common.models import Org, Profile, User
+    from operaciones import chat_herramientas, supervisor
+    from operaciones.models import PropuestaSupervisor as P
+
+    org = Org.objects.create(name="Org con rechazo")
+    caso = _caso_desincronizado(org, "700002", "9002")
+    _interruptor_encendido(monkeypatch)
+    monkeypatch.setattr(dx, "enriquecer", lambda *a, **k: {"diagnosticados": 0})
+    supervisor.correr_ciclo(org)
+
+    propuesta = PropuestaSupervisor.objects.get(
+        org=org, tipo_senal=P.CASO_DESINCRONIZADO)
+    usuario = User.objects.create(email="jefa5@ejemplo.test", name="Jefa")
+    perfil = Profile.objects.create(org=org, user=usuario, role="ADMIN",
+                                    is_active=True)
+    supervisor.revisar(propuesta, actor=perfil, decision=P.RECHAZADA,
+                       comentario="este no se cierra")
+
+    monkeypatch.undo()
+    _interruptor_encendido(monkeypatch)
+    llamadas = _motor_que_cierra(monkeypatch)
+    monkeypatch.setattr(chat_herramientas, "diagnosticar_servicio",
+                        lambda o, *, id_servicio: SANO)
+    supervisor.correr_ciclo(org)
+
+    caso.refresh_from_db()
+    assert caso.status == "New", "una propuesta rechazada no se reabre sola"
+    assert llamadas == []
+
+
 @pytest.mark.django_db
 def test_el_informe_cuenta_cada_veredicto():
     senales = [_senal(id_servicio="1"), _senal(id_servicio="2"),

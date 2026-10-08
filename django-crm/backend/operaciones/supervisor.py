@@ -2041,9 +2041,36 @@ def _correr_ciclo(org, ahora) -> dict:
     #  proveedor.
     from operaciones import diagnostico_optico
 
-    candidatas = [s for s in senales
-                  if s.tipo == PropuestaSupervisor.CASO_DESINCRONIZADO
-                  and not _ya_propuesta(org, s)]
+    #  LAS QUE YA TIENEN PROPUESTA TAMBIEN ENTRAN, si esa propuesta sigue sin
+    #  decidir y nacio antes del diagnostico (08/10/2026).
+    #
+    #  Sin esto el cierre automatico no servia de nada en la practica. Medido
+    #  en produccion: 75 casos desincronizados, y los 75 YA tenian propuesta.
+    #  El ciclo las descartaba abajo con 'repetida' antes de mirarlas, asi que
+    #  no quedaba ni una señal sobre la que diagnosticar -- el sistema estaba
+    #  completo, autorizado, y sin nada que hacer.
+    #
+    #  La alternativa era cancelar 75 propuestas a mano para que se
+    #  regeneraran. Habria resuelto el sintoma de hoy y dejado el problema de
+    #  fondo: una propuesta que queda pendiente dos dias no ganaba diagnostico
+    #  nunca.
+    pendientes_por_senal = {}
+
+    def _entra(s):
+        if s.tipo != PropuestaSupervisor.CASO_DESINCRONIZADO:
+            return False
+        if not _ya_propuesta(org, s):
+            return True
+        #  Ya propuesta: solo si sigue SIN DECIDIR y le falta el diagnostico.
+        #  Una aceptada, rechazada o modificada ya recibio su decision humana,
+        #  y volver sobre ella seria pisar lo que alguien dijo.
+        p = diagnostico_optico.propuesta_pendiente_de(org, s)
+        if p is None or not diagnostico_optico.le_falta_diagnostico(p):
+            return False
+        pendientes_por_senal[s.origen_id] = p
+        return True
+
+    candidatas = [s for s in senales if _entra(s)]
     resumen["diagnostico_optico"] = diagnostico_optico.enriquecer(
         org, candidatas, ahora=ahora)
 
@@ -2052,6 +2079,28 @@ def _correr_ciclo(org, ahora) -> dict:
     #  medido que hace falta para decidir si se enciende.
     resumen["cierre_automatico"] = diagnostico_optico.evaluar_cierre_automatico(
         org, candidatas, ahora=ahora)
+
+    #  LAS QUE YA TENIAN PROPUESTA SE COMPLETAN Y SE CIERRAN AQUI, porque abajo
+    #  el loop las descarta como 'repetida' y nunca llegarian al cierre.
+    #
+    #  Va DESPUES de 'evaluar_cierre_automatico' y no antes, y la primera
+    #  version lo tenia al reves: usaba 'resumen["cierre_automatico"]' una
+    #  linea antes de que existiera y reventaba con KeyError. El orden tambien
+    #  es el correcto por sentido -- primero se registra que HABRIA hecho, y
+    #  despues se hace.
+    for s in candidatas:
+        p = pendientes_por_senal.get(s.origen_id)
+        if p is None:
+            continue
+        r = diagnostico_optico.completar_propuesta_existente(
+            org, s, p, ahora=ahora)
+        _auto = resumen["cierre_automatico"]
+        if r["cerrado"]:
+            _auto["cerrados"] += 1
+        else:
+            _m = r.get("motivo") or "sin motivo"
+            _mot = _auto.setdefault("motivos_de_no_cierre", {})
+            _mot[_m] = _mot.get(_m, 0) + 1
 
     for senal in senales:
         resumen["senales"] += 1
