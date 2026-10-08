@@ -76,6 +76,36 @@ from operaciones.models import PropuestaSupervisor
 TOPE_DIAGNOSTICOS_POR_CICLO = 3
 SEGUNDOS_MAXIMOS_DE_DIAGNOSTICO = 60
 
+#  Y LOS MISMOS DOS NUMEROS CUANDO NADIE ESTA MIRANDO  --  08/10/2026
+#
+#  El parrafo de arriba nombra la restriccion con todas las letras: el costo
+#  "no es la cuota de SmartOLT --1.000/hora, holgadisimo-- sino el tiempo que
+#  una persona espera mirando la pantalla". En la corrida automatica de cada
+#  hora NO HAY nadie esperando, asi que esa restriccion simplemente no aplica,
+#  y aplicarla igual tenia un costo medido.
+#
+#  LO QUE SE MIDIO. La primera corrida automatica real, con 90 casos
+#  desincronizados en produccion, devolvio:
+#
+#      cerrados ......................................  1
+#      el diagnostico no habilita un cierre automatico   2   (señal debil/fibra)
+#      no se le pregunto al proveedor en esta corrida   12   <- el tope
+#
+#  O sea: funcionaba, y el unico freno era este numero. A tres por hora la cola
+#  de 90 tarda 30 horas; a quince, seis.
+#
+#  POR QUE QUINCE Y NO MAS. Quince diagnosticos son ~150 s de reloj, que entran
+#  holgados en los 240 de abajo, y 15 llamadas/hora contra un limite de 1.000
+#  es el 1,5%. El proveedor pide no hacer polling ni consultas masivas, y esto
+#  no es ninguna de las dos: cada diagnostico corresponde a UN ticket que un
+#  cliente reporto --el uso que SmartOLT autoriza explicitamente-- y quince
+#  tickets por hora es la carga de una mesa de soporte normal, no un barrido.
+#
+#  Y ES TRANSITORIO: los 90 son el atraso acumulado. En regimen aparecen unos
+#  pocos por hora y el tope no se toca nunca.
+TOPE_DIAGNOSTICOS_DESATENDIDO = 15
+SEGUNDOS_MAXIMOS_DESATENDIDO = 240
+
 #  Los veredictos de ESTA fase. No son el cierre: son la razon por la que un
 #  cierre seria seguro, que es lo que se escribe.
 CIERRE_SEGURO = "cierre_seguro"
@@ -94,8 +124,23 @@ CAUSA_SIN_ENERGIA = "sin_energia"
 CAUSA_FIBRA = "fibra"
 
 
-def presupuesto(ahora=None) -> dict:
-    """El presupuesto de esta fase. Mismo mecanismo que el del cerebro."""
+def presupuesto(ahora=None, *, desatendido: bool = False) -> dict:
+    """
+    El presupuesto de esta fase. Mismo mecanismo que el del cerebro.
+
+    'desatendido' es la corrida del reloj, donde no hay nadie esperando. NO es
+    un permiso: lo que el ciclo pueda hacer con los diagnosticos que consiga
+    sigue dependiendo de las tres puertas. Lo unico que cambia es cuantos
+    equipos alcanza a preguntar antes de cortar.
+
+    EL DEFECTO ES EL ATENDIDO, a proposito. Un llamador nuevo que se olvide de
+    declararse hereda el tope corto: tarda mas y no sorprende a nadie, que es
+    el lado seguro para equivocarse.
+    """
+    if desatendido:
+        return sup.presupuesto(tope=TOPE_DIAGNOSTICOS_DESATENDIDO,
+                               segundos=SEGUNDOS_MAXIMOS_DESATENDIDO,
+                               ahora=ahora)
     return sup.presupuesto(tope=TOPE_DIAGNOSTICOS_POR_CICLO,
                            segundos=SEGUNDOS_MAXIMOS_DE_DIAGNOSTICO,
                            ahora=ahora)

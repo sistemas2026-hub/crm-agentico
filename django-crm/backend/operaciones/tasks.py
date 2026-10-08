@@ -177,7 +177,13 @@ def ciclo_del_supervisor():
             #  casos" siendo que no pudo verlos.
             set_rls_context(org.id)
             try:
-                resumen = supervisor.correr_ciclo(org)
+                #  DESATENDIDO: nadie esta esperando esta corrida, asi que el
+                #  tope corto de diagnosticos --pensado para que un boton
+                #  conteste rapido-- no tiene sentido aqui. Medido el
+                #  08/10/2026: con el tope atendido, 12 casos por corrida
+                #  quedaban sin preguntarle al proveedor y la cola de 90
+                #  tardaba 30 horas. No cambia NINGUNA puerta del cierre.
+                resumen = supervisor.correr_ciclo(org, desatendido=True)
             except Exception:
                 #  'exception' y no 'error': hace falta el traceback para saber
                 #  donde fue, y el org id alcanza para ubicar la empresa sin

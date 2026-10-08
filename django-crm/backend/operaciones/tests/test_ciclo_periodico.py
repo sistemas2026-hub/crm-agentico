@@ -245,3 +245,73 @@ def test_los_motivos_de_no_cierre_llegan_al_resultado(dos_empresas,
     assert resultado["cerrados"] == 0
     assert resultado["no_evaluados_por"] == {"SENAL_DEBIL": 2}
     assert resultado["no_cerrados_por"] == {"NIVEL_INSUFICIENTE": 1}
+
+
+# ===========================================================================
+#  7. LA CORRIDA DEL RELOJ DIAGNOSTICA MAS, PORQUE NADIE ESPERA
+# ===========================================================================
+#  Medido el 08/10/2026 en la primera corrida automatica real: cerro 1, dejo 2
+#  para una persona, y DOCE quedaron con "no se le pregunto al proveedor en
+#  esta corrida" -- el tope de 3, elegido para que un boton conteste rapido.
+#  Con 90 casos en cola eso son 30 horas.
+#
+#  EL RIESGO QUE ESTAS GUARDAS CUBREN no es el numero: es que la bandera no
+#  viaje. 'desatendido' pasa por tres funciones antes de llegar al presupuesto,
+#  y si se pierde en el camino no falla nada -- el tope vuelve a 3 y el sintoma
+#  es "sigue lento", que no señala aqui.
+
+def test_los_dos_topes_son_los_declarados():
+    from operaciones import diagnostico_optico as diag
+
+    atendido = diag.presupuesto()
+    desatendido = diag.presupuesto(desatendido=True)
+    assert atendido["restantes"] == 3
+    assert desatendido["restantes"] == 15
+
+    #  Y EL RELOJ ALCANZA PARA ESE TOPE. Subir la cantidad sin subir el tiempo
+    #  deja un presupuesto que corta por reloj antes de gastarse: el sintoma
+    #  seria identico al de hoy --"no se le pregunto al proveedor"-- con el
+    #  numero ya corregido, que es la peor pista posible.
+    segundos = diag.SEGUNDOS_MAXIMOS_DESATENDIDO
+    assert segundos >= diag.TOPE_DIAGNOSTICOS_DESATENDIDO * 10, (
+        f"cada diagnostico paga ~10 s: {diag.TOPE_DIAGNOSTICOS_DESATENDIDO} "
+        f"no entran en {segundos} s y el tope nuevo no se usaria nunca")
+
+
+@pytest.mark.django_db
+def test_la_tarea_del_reloj_corre_desatendida(dos_empresas, monkeypatch):
+    """La bandera llega hasta donde se arma el presupuesto, o no sirve."""
+    from operaciones import supervisor as sup
+
+    recibido = {}
+    monkeypatch.setattr(
+        sup, "_atender_desincronizados",
+        lambda org, ahora, **kw: recibido.update(kw) or {})
+    monkeypatch.setattr(sup, "_correr_ciclo", lambda org, ahora: {})
+
+    tareas_periodicas.ciclo_del_supervisor()
+
+    assert recibido.get("desatendido") is True, (
+        "la corrida del reloj no se declara desatendida: hereda el tope corto "
+        "y vuelve a dejar casos sin preguntar, sin que nada falle")
+
+
+@pytest.mark.django_db
+def test_el_boton_sigue_atendido(dos_empresas, monkeypatch):
+    """
+    EL DEFECTO ES EL LADO SEGURO. Quien aprieta el boton espera mirando la
+    pantalla; si 'correr_ciclo' pasara a desatendido por omision, esa espera
+    se volveria de minutos sin que nadie lo pidiera.
+    """
+    from operaciones import supervisor as sup
+
+    con, _ = dos_empresas
+    recibido = {}
+    monkeypatch.setattr(
+        sup, "_atender_desincronizados",
+        lambda org, ahora, **kw: recibido.update(kw) or {})
+    monkeypatch.setattr(sup, "_correr_ciclo", lambda org, ahora: {})
+
+    sup.correr_ciclo(con)
+
+    assert recibido.get("desatendido") is False

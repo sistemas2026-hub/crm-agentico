@@ -1953,9 +1953,16 @@ No propongas ejecutar nada: no podés, y decir que lo hiciste sería mentir.
 """
 
 
-def correr_ciclo(org, ahora=None) -> dict:
+def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
     """
     Una pasada completa de Shadow Mode. Devuelve el resumen de lo que pasó.
+
+    'desatendido' lo pone la corrida del reloj ('operaciones/tasks.py'), donde
+    no hay nadie esperando una respuesta. Lo UNICO que cambia es cuantos
+    equipos alcanza a diagnosticar antes de cortar --ver los dos topes en
+    'diagnostico_optico'-- y NO es un permiso: las tres puertas del cierre
+    siguen iguales, y una corrida desatendida que diagnostica quince equipos
+    puede cerrar cero.
 
     NO EJECUTA NADA. Lo único que escribe son filas de PropuestaSupervisor y
     sus renglones de auditoría.
@@ -2006,11 +2013,12 @@ def correr_ciclo(org, ahora=None) -> dict:
     #  guardadas. Es lo correcto -- esas propuestas son trabajo valido, y
     #  tirarlas porque SmartOLT no contesto seria perder lo que si se pudo
     #  hacer. Un cierre que no ocurrio se reintenta en el ciclo siguiente.
-    resumen.update(_atender_desincronizados(org, ahora))
+    resumen.update(_atender_desincronizados(org, ahora,
+                                            desatendido=desatendido))
     return resumen
 
 
-def _atender_desincronizados(org, ahora) -> dict:
+def _atender_desincronizados(org, ahora, *, desatendido: bool = False) -> dict:
     """
     Diagnostica los casos desincronizados y cierra los que corresponda.
 
@@ -2068,8 +2076,13 @@ def _atender_desincronizados(org, ahora) -> dict:
         return informe
 
     if candidatas:
+        #  EL PRESUPUESTO SE CREA AQUI y se pasa, en vez de dejar que
+        #  'enriquecer' se arme el suyo: es el unico lugar que sabe si esta
+        #  corrida tiene a alguien esperando del otro lado.
         informe["diagnostico_optico"] = diagnostico_optico.enriquecer(
-            org, candidatas, ahora=ahora)
+            org, candidatas, ahora=ahora,
+            presupuesto_=diagnostico_optico.presupuesto(
+                ahora=ahora, desatendido=desatendido))
         informe["cierre_automatico"] = diagnostico_optico.evaluar_cierre_automatico(
             org, candidatas, ahora=ahora)
 
