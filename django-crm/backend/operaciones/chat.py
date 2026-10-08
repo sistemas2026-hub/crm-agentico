@@ -341,7 +341,14 @@ def responder(conversacion, texto: str, *, ahora=None) -> MensajeSupervisor:
         #  asi que quien atrapaba el error del chat sigue atrapandolo.
         r = cerebro.razonar(org, instrucciones=instrucciones,
                             entrada=pregunta, historial=historial,
-                            pedir=_pedirle_al_modelo)
+                            pedir=_pedirle_al_modelo,
+                            #  QUIEN esta conversando, sacado de la
+                            #  conversacion y no de lo que el modelo diga. Solo
+                            #  lo usan las herramientas que dejan algo
+                            #  delegado: sin el, una tarea quedaria encendida
+                            #  sin nombre, y encendida es justo lo que va a
+                            #  actuar cuando esa persona no este mirando.
+                            actor=conversacion.actor)
     except (ErrorChat, cerebro.ErrorCerebro) as e:
         #  LOS DOS, y no es redundancia. 'ErrorChat' lo levanta el alias de
         #  arriba al traducir el del cerebro, y tambien lo inyectan las pruebas

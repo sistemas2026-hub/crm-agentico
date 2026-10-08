@@ -2035,24 +2035,43 @@ def _atender_desincronizados(org, ahora) -> dict:
 
     #  Solo las que van a producir algo: una propuesta nueva, o una pendiente
     #  que todavia no tiene diagnostico. Las ya decididas no se tocan.
+    #  DOS GRUPOS, y separarlos es lo que impide que una propuesta se muera a
+    #  medio camino (08/10/2026):
+    #
+    #    pendientes      ya tienen propuesta y les FALTA el diagnostico. Hay que
+    #                    preguntarle al proveedor, y eso gasta presupuesto.
+    #    por_cerrar      ya fueron diagnosticadas como seguras y NO se cerraron
+    #                    --porque alguna puerta estaba cerrada ese dia-- y lo
+    #                    unico que les falta es reintentar el cierre.
+    #
+    #  Sin el segundo grupo, una propuesta diagnosticada el lunes con el nivel
+    #  en 1 no se cerraba nunca, por mas que el martes se autorizara todo: ya
+    #  tenia diagnostico, asi que dejaba de entrar. El sintoma seria "le subi el
+    #  nivel y no pasa nada", sin ningun error.
     pendientes = {}
+    por_cerrar = {}
     candidatas = []
     for s in senales:
         if not _ya_propuesta(org, s):
             candidatas.append(s)
             continue
         p = diagnostico_optico.propuesta_pendiente_de(org, s)
-        if p is not None and diagnostico_optico.le_falta_diagnostico(p):
+        if p is None:
+            continue
+        if diagnostico_optico.le_falta_diagnostico(p):
             pendientes[s.origen_id] = p
             candidatas.append(s)
+        elif p.nivel_autonomia_requerido >= diagnostico_optico.NIVEL_PARA_CERRAR:
+            por_cerrar[s.origen_id] = p
 
-    if not candidatas:
+    if not candidatas and not por_cerrar:
         return informe
 
-    informe["diagnostico_optico"] = diagnostico_optico.enriquecer(
-        org, candidatas, ahora=ahora)
-    informe["cierre_automatico"] = diagnostico_optico.evaluar_cierre_automatico(
-        org, candidatas, ahora=ahora)
+    if candidatas:
+        informe["diagnostico_optico"] = diagnostico_optico.enriquecer(
+            org, candidatas, ahora=ahora)
+        informe["cierre_automatico"] = diagnostico_optico.evaluar_cierre_automatico(
+            org, candidatas, ahora=ahora)
 
     #  UNA sola consulta del interruptor para toda la corrida: es una llamada
     #  de red, y preguntarla por caso son tantas como casos.
@@ -2065,6 +2084,21 @@ def _atender_desincronizados(org, ahora) -> dict:
             continue
         r = diagnostico_optico.completar_propuesta_existente(
             org, s, p, ahora=ahora, autorizacion=autorizacion)
+        if r["cerrado"]:
+            _auto["cerrados"] += 1
+            _auto.setdefault("cerrados_detalle", []).append(r)
+        else:
+            _m = r.get("motivo") or "sin motivo"
+            _mot = _auto.setdefault("motivos_de_no_cierre", {})
+            _mot[_m] = _mot.get(_m, 0) + 1
+
+    #  EL REINTENTO de las que ya estaban diagnosticadas y no se cerraron. No
+    #  se las vuelve a diagnosticar: ya tienen su veredicto escrito, y pedirle
+    #  otra vez al proveedor gastaria presupuesto para llegar al mismo numero.
+    #  'cerrar_si_corresponde' vuelve a pasar las tres puertas igual.
+    for p in por_cerrar.values():
+        r = diagnostico_optico.cerrar_si_corresponde(
+            org, p, ahora=ahora, autorizacion=autorizacion)
         if r["cerrado"]:
             _auto["cerrados"] += 1
             _auto.setdefault("cerrados_detalle", []).append(r)

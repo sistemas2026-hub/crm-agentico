@@ -561,6 +561,20 @@ def test_la_sombra_corre_las_condiciones_REALES_del_cierre():
 #  7. EL CIERRE AUTOMATICO  --  las dos puertas, medidas sobre el caso
 # ===========================================================================
 
+def _delegar(org, perfil):
+    """
+    La tarea delegada, que desde el 08/10/2026 es la segunda puerta del cierre.
+
+    Sin esto el caso no se cierra por mas que el nivel lo permita, y es lo
+    correcto: el nivel dice CUANTO puede hacer el Supervisor, la tarea dice QUE
+    le pidieron. Las pruebas que miden el cierre tienen que pasar las dos.
+    """
+    from operaciones import tareas_delegadas as td
+
+    return td.delegar(org, td.CERRAR_DESINCRONIZADOS, actor=perfil,
+                      pedido_textual="prueba")
+
+
 def _caso_desincronizado(org, ticket, servicio):
     from datetime import timedelta as td
 
@@ -677,6 +691,7 @@ def test_con_la_empresa_en_nivel_3_el_caso_SI_se_cierra(monkeypatch):
         motivo="piloto de cierre automatico de casos desincronizados",
         criterios="5 servicios reales medidos: 3 cierre seguro, 1 revisar, "
                   "1 sin diagnostico")
+    _delegar(org, perfil)
 
     resumen = supervisor.correr_ciclo(org)
 
@@ -729,6 +744,7 @@ def test_una_senal_debil_NO_se_cierra_aunque_la_empresa_autorice(monkeypatch):
                                     is_active=True)
     autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
                       motivo="piloto", criterios="medido")
+    _delegar(org, perfil)
 
     supervisor.correr_ciclo(org)
 
@@ -773,6 +789,7 @@ def test_el_interruptor_ilegible_impide_cerrar(monkeypatch):
                                     is_active=True)
     autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
                       motivo="piloto", criterios="medido")
+    _delegar(org, perfil)
 
     #  NO SE PARCHEA NADA: la base de pruebas no tiene el esquema del motor,
     #  donde vive el interruptor, asi que la lectura falla sola. Es la falla
@@ -871,6 +888,7 @@ def test_una_propuesta_VIEJA_sin_diagnostico_se_completa_y_se_cierra(monkeypatch
                                     is_active=True)
     autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
                       motivo="piloto", criterios="medido")
+    _delegar(org, perfil)
 
     supervisor.correr_ciclo(org)
 
@@ -935,6 +953,7 @@ def test_el_interruptor_se_consulta_UNA_vez_por_ciclo(monkeypatch):
                                     is_active=True)
     autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
                       motivo="piloto", criterios="medido")
+    _delegar(org, perfil)
     consultas.clear()
 
     supervisor.correr_ciclo(org)
@@ -1056,6 +1075,7 @@ def test_NINGUNA_llamada_externa_ocurre_con_la_transaccion_abierta(monkeypatch):
                                     is_active=True)
     autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
                       motivo="piloto", criterios="medido")
+    _delegar(org, perfil)
 
     #  Dos corridas: la primera crea la propuesta, la segunda la completa y
     #  cierra. Las llamadas externas de LAS DOS tienen que ocurrir afuera.

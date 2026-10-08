@@ -510,6 +510,39 @@ def test_20_NINGUNA_herramienta_escribe(org_a):
                                                       & NOMBRES_PROHIBIDOS)
     assert not colados, sorted(colados)
 
+    #  08/10/2026. DOS HERRAMIENTAS SI ESCRIBEN, y se nombran: 'delegar_tarea'
+    #  y 'quitar_tarea' encienden o apagan una tarea del catálogo.
+    #
+    #  El escaneo de arriba NO las detecta, y no es un descuido suyo: la
+    #  escritura vive en 'tareas_delegadas', a un módulo de distancia, igual
+    #  que pasaba con 'coordinacion'. Por eso se afirma aparte — un test que
+    #  pasara en verde mientras la regla que enuncia dejó de ser cierta es peor
+    #  que no tenerlo.
+    #
+    #  LO QUE SE AFIRMA es que son exactamente esas dos y ni una más: quien
+    #  agregue otra que escriba tiene que pasar por acá a declararla.
+    import operaciones.chat_herramientas as _ch
+    assert _ch.NECESITAN_ACTOR == {"delegar_tarea", "quitar_tarea"}, (
+        "cambió el conjunto de herramientas que escriben: declaralas acá")
+
+    #  Y lo que escriben NO decide qué se hace: encienden una tarea de un
+    #  catálogo cerrado que vive en código.
+    from operaciones import tareas_delegadas as _td
+    assert _td.CATALOGO, "el catálogo de tareas no puede estar vacío"
+
+    #  08/10/2026. DOS HERRAMIENTAS SI ESCRIBEN, y se nombran: 'delegar_tarea'
+    #  y 'quitar_tarea' encienden o apagan una tarea del catalogo.
+    #
+    #  El escaneo de arriba NO las detecta, y eso no es un descuido suyo: la
+    #  escritura vive en 'tareas_delegadas', a un modulo de distancia, igual
+    #  que pasaba con 'coordinacion'. Por eso se afirma aparte -- un test que
+    #  pasara en verde mientras la regla que enuncia dejo de ser cierta es peor
+    #  que no tenerlo.
+    #
+    #  LO QUE SE AFIRMA es que son exactamente esas dos, y ni una mas: si
+    #  alguien agrega otra que escriba, esta lista hay que actualizarla a mano
+    #  y pasar por aca a declarar que hace.
+
     #  05/10/2026, paso P6. 'operaciones.coordinacion' SI escribe: su
     #  'solicitar_actividad' crea una ActividadOperativa. Este archivo importa
     #  sus DOS funciones de lectura por nombre, no el modulo -- y eso hay que
@@ -519,7 +552,6 @@ def test_20_NINGUNA_herramienta_escribe(org_a):
     assert "coordinacion" not in nombres, (
         "coordinacion importado como modulo: solicitar_actividad queda "
         "alcanzable desde las herramientas del chat")
-    import operaciones.chat_herramientas as _ch
     assert not hasattr(_ch, "coordinacion")
     assert hasattr(_ch, "panorama_m03")
     assert hasattr(_ch, "pendientes_de_la_situacion")
@@ -532,6 +564,27 @@ def test_21_el_catalogo_de_herramientas_es_cerrado_y_exacto(org_a):
         "afectados_situacion", "casos_de_situacion", "relaciones_situacion",
         "estado_fuentes", "propuestas_pendientes", "decisiones_recientes",
         "mis_limites",
+        #  08/10/2026. LO QUE UNA PERSONA LE DELEGA AL SUPERVISOR.
+        #
+        #  Las dos primeras LEEN. Las dos ultimas ESCRIBEN --encienden o apagan
+        #  una tarea-- y son las unicas de todo este catalogo que lo hacen;
+        #  'test_20' las nombra aparte porque el escaneo de AST no las ve (la
+        #  escritura vive en 'tareas_delegadas', a un modulo de distancia).
+        #
+        #  EL CATALOGO DE TAREAS ES CERRADO, y esa es la decision de fondo: el
+        #  modelo entiende la frase --"cerra los que ya esten cerrados en
+        #  WispHub si el equipo esta bien"-- y elige de una lista que el codigo
+        #  ya sabe hacer. No construye la tarea. Si de la frase saliera la
+        #  accion, alguien escribiendola sin la parte del diagnostico haria que
+        #  el Supervisor cerrara casos sin mirar el equipo, y la garantia de un
+        #  cliente dependeria de como estaba redactada una frase.
+        #
+        #  Y DELEGAR NO AMPLIA EL ALCANCE: el nivel de autonomia sigue
+        #  exigiendo una persona en otra pantalla, con motivo y criterios
+        #  medidos. Delegar con el nivel bajo no hace nada, y la respuesta de
+        #  'delegar_tarea' lo dice con todas las letras en vez de callarlo.
+        "tareas_disponibles", "tareas_activas",
+        "delegar_tarea", "quitar_tarea",
         #  05/10/2026, paso P6. Tres lecturas de M02/M03, para que el chat
         #  pueda contestar que trabajo se pidio, que pendiente necesita a
         #  alguien y como esta la jornada. Las tres LEEN.

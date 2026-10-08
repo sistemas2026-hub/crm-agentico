@@ -11,9 +11,22 @@ conversacion. Devuelven datos ESTRUCTURADOS; interpretarlos es del modelo.
 
 LAS TRES REGLAS, Y LAS TRES ESTAN EN CODIGO
 -------------------------------------------
-  1. TODAS son de LECTURA. Ninguna escribe, ninguna cambia un estado, ninguna
-     llama a un sistema externo. No es una convencion: el despachador rechaza un
-     nombre que no este en este mapa, asi que no hay forma de alcanzar otra cosa.
+  1. TODAS son de LECTURA MENOS DOS, y las dos se nombran: 'delegar_tarea' y
+     'quitar_tarea' escriben una fila de 'TareaDelegada'. Ninguna otra escribe,
+     ninguna cambia el estado de un caso ni de una orden, y ninguna llama a un
+     sistema externo. No es una convencion: el despachador rechaza un nombre
+     que no este en este mapa, asi que no hay forma de alcanzar otra cosa.
+
+     LAS DOS QUE ESCRIBEN NO DECIDEN QUE SE HACE, solo si una tarea del
+     CATALOGO esta encendida. El catalogo vive en 'tareas_delegadas.py' y es
+     cerrado: el modelo elige de esa lista y no puede agregarle nada. Una clave
+     que no este ahi se rechaza con un error legible, y una que quedo en la
+     base pero ya no esta en el catalogo no habilita nada.
+
+     Y NINGUNA DE LAS DOS AMPLIA EL ALCANCE. Delegar una tarea no sube el nivel
+     de autonomia -- eso sigue exigiendo una persona en otra pantalla, con
+     motivo y criterios medidos. Delegar con el nivel bajo no hace nada, y la
+     respuesta lo dice con todas las letras.
 
   2. EL TENANT LO PONE EL DESPACHADOR, NO EL MODELO. Ninguna herramienta acepta
      'org' como argumento. Si lo aceptara, bastaria con que el modelo lo
@@ -672,6 +685,93 @@ def consultar_cliente(org, *, id_servicio) -> dict:
     return _del_motor("consultar_cliente", {"id_servicio": ident})
 
 
+# ===========================================================================
+#  LO QUE UNA PERSONA LE DELEGA AL SUPERVISOR
+# ===========================================================================
+#  EL CATALOGO ES CERRADO, y esa es toda la decision de seguridad de este
+#  bloque. El modelo ENTIENDE la frase --"cerra los que ya esten cerrados en
+#  WispHub si el equipo esta bien"-- y elige una tarea de una lista que el
+#  codigo ya sabe hacer. No construye la tarea.
+#
+#  La alternativa era que de la frase saliera la accion. Mas flexible, y con la
+#  garantia en el texto: alguien escribe la misma orden sin la parte del
+#  diagnostico y el Supervisor cerraria casos sin mirar el equipo. Lo que
+#  protege a un cliente dejaria de ser codigo y pasaria a ser como estaba
+#  redactada una frase.
+
+def tareas_disponibles(org) -> dict:
+    """
+    Que tareas se le pueden delegar al Supervisor, y que hace cada una.
+
+    Trae tambien 'que_no_hace' de cada una: el modelo tiene que poder decir que
+    NO va a pasar, y sin esa frase lo completaria por su cuenta.
+    """
+    from operaciones import tareas_delegadas as td
+
+    return {"tareas": td.catalogo_legible()}
+
+
+def tareas_activas(org) -> dict:
+    """Lo que esta delegado hoy, con cuando se delego y con que palabras."""
+    from operaciones import tareas_delegadas as td
+
+    return {"delegadas": td.delegadas(org)}
+
+
+def delegar_tarea(org, *, clave="", pedido="", actor=None) -> dict:
+    """
+    Deja delegada una tarea del catalogo. La pide una PERSONA, por el chat.
+
+    'actor' NO es un argumento del modelo: lo pone 'ejecutar' desde la
+    conversacion verificada (ver 'NECESITAN_ACTOR'). Si viajara como parametro,
+    alguien podria dictarlo en un mensaje y la tarea quedaria a nombre de quien
+    no la pidio.
+
+    DELEGAR NO AMPLIA EL ALCANCE. La respuesta dice si ademas falta subir el
+    nivel de autonomia, porque delegar con el nivel bajo no hace nada y el
+    silencio ahi seria el peor resultado: la persona se va creyendo que quedo
+    andando.
+    """
+    from operaciones import autonomia
+    from operaciones import tareas_delegadas as td
+
+    try:
+        fila = td.delegar(org, str(clave).strip(), actor=actor,
+                          pedido_textual=str(pedido or ""))
+    except td.ErrorTarea as e:
+        return {"error": "no_se_pudo_delegar", "detalle": str(e)}
+
+    ficha = td.CATALOGO.get(fila.clave, {})
+    nivel_que_exige = int(ficha.get("exige_nivel") or 0)
+    veredicto = autonomia.puede(org, nivel_que_exige) if nivel_que_exige else {
+        "puede": True, "motivo": ""}
+
+    return {
+        "delegada": fila.clave,
+        "nombre": ficha.get("nombre", fila.clave),
+        "ya_puede_actuar": bool(veredicto.get("puede")),
+        #  Lo que FALTA, dicho sin rodeos. Una tarea delegada que no puede
+        #  actuar no es una tarea delegada a medias: es una que no hace nada.
+        "que_falta": ("" if veredicto.get("puede") else
+                      f"la tarea quedó delegada, pero todavía no puede actuar: "
+                      f"{veredicto.get('motivo')}. Se habilita subiendo el "
+                      f"nivel de autonomía desde la pantalla del Supervisor, "
+                      f"y eso lo hace una persona."),
+    }
+
+
+def quitar_tarea(org, *, clave="", actor=None) -> dict:
+    """Deja de delegar una tarea. Queda el registro de que existio."""
+    from operaciones import tareas_delegadas as td
+
+    try:
+        fila = td.quitar(org, str(clave).strip(), actor=actor)
+    except td.ErrorTarea as e:
+        return {"error": "no_se_pudo_quitar", "detalle": str(e)}
+    return {"quitada": fila.clave,
+            "detalle": "el Supervisor deja de hacerla desde el próximo ciclo"}
+
+
 HERRAMIENTAS = {
     "listar_situaciones": listar_situaciones,
     "detalle_situacion": detalle_situacion,
@@ -683,6 +783,11 @@ HERRAMIENTAS = {
     "propuestas_pendientes": propuestas_pendientes,
     "decisiones_recientes": decisiones_recientes,
     "mis_limites": mis_limites,
+    #  P9 (08/10/2026). Lo que una persona le delega al Supervisor.
+    "tareas_disponibles": tareas_disponibles,
+    "tareas_activas": tareas_activas,
+    "delegar_tarea": delegar_tarea,
+    "quitar_tarea": quitar_tarea,
     #  P6
     "coordinaciones_de_situacion": coordinaciones_de_situacion,
     "pendientes_criticos": pendientes_criticos,
@@ -713,6 +818,11 @@ ARGUMENTOS = {
     "propuestas_pendientes": {"limite"},
     "decisiones_recientes": {"limite"},
     "mis_limites": set(),
+    "tareas_disponibles": set(),
+    "tareas_activas": set(),
+    #  'actor' NO esta aqui a proposito: no es un argumento del modelo.
+    "delegar_tarea": {"clave", "pedido"},
+    "quitar_tarea": {"clave"},
     #  P6. 'panorama_programacion' acepta 'dia' y nada mas: ni un rango, ni un
     #  responsable -- un rango abierto dejaria al modelo pedir la programacion
     #  de un año entero y pagarla la empresa.
@@ -735,7 +845,22 @@ ARGUMENTOS = {
 }
 
 
-def ejecutar(org, nombre: str, argumentos: dict) -> dict:
+#  LAS QUE NECESITAN SABER QUIEN LAS PIDIO (08/10/2026).
+#
+#  Casi ninguna: la enorme mayoria de las herramientas del chat solo leen, y a
+#  una lectura no le importa quien pregunta mas alla del tenant. Delegar una
+#  tarea SI es distinto -- deja algo encendido que va a actuar despues, cuando
+#  esa persona no este mirando-- asi que tiene que quedar a nombre de alguien.
+#
+#  EL ACTOR NO VIAJA COMO ARGUMENTO DEL MODELO, y por eso esta en un conjunto
+#  aparte y no en 'ARGUMENTOS'. Sale de la conversacion verificada; si fuera un
+#  parametro mas, el modelo podria proponerlo --o alguien dictarselo en un
+#  mensaje-- y la tarea quedaria delegada a nombre de quien no la pidio. Es la
+#  misma regla que 'inyectar_sesion' aplica en el motor.
+NECESITAN_ACTOR = {"delegar_tarea", "quitar_tarea"}
+
+
+def ejecutar(org, nombre: str, argumentos: dict, *, actor=None) -> dict:
     """
     Corre una herramienta. El tenant lo pone ESTA funcion, no el modelo.
 
@@ -743,6 +868,9 @@ def ejecutar(org, nombre: str, argumentos: dict) -> dict:
     funcion. Es fail-closed: lo que no esta declarado no pasa, asi que un
     argumento inventado --o dictado en un mensaje-- se descarta en silencio en vez
     de convertirse en un parametro de consulta.
+
+    'actor' lo pone quien llama desde la conversacion verificada, nunca el
+    modelo, y solo llega a las herramientas de 'NECESITAN_ACTOR'.
     """
     fn = HERRAMIENTAS.get(str(nombre))
     if fn is None:
@@ -752,6 +880,8 @@ def ejecutar(org, nombre: str, argumentos: dict) -> dict:
 
     permitidos = ARGUMENTOS.get(str(nombre), set())
     limpios = {k: v for k, v in (argumentos or {}).items() if k in permitidos}
+    if str(nombre) in NECESITAN_ACTOR:
+        limpios["actor"] = actor
     return fn(org, **limpios)
 
 
@@ -837,6 +967,35 @@ def esquema() -> list[dict]:
         h("mis_limites",
           "El nivel de autonomía configurado y el efectivo, con el motivo de "
           "cualquier recorte. Consultala antes de decir que puedes hacer algo."),
+
+        #  --- P9: lo que una persona delega. EL CATALOGO ES CERRADO. ------
+        #  Las descripciones le dicen al modelo que NO puede inventar una
+        #  tarea. Es lo unico que lo separa de intentar construir lo que le
+        #  pidan: si no dijeran que la lista manda, trataria de cumplir
+        #  cualquier frase con las herramientas que tenga a mano.
+        h("tareas_disponibles",
+          "Las tareas que se le pueden delegar al Supervisor, con qué hace y "
+          "qué NO hace cada una. La lista es cerrada: NO existe forma de "
+          "delegar algo que no esté acá. Consultala SIEMPRE antes de aceptar "
+          "un encargo, y si lo que te piden no está, decilo en vez de "
+          "intentar armarlo con otras herramientas."),
+        h("tareas_activas",
+          "Lo que ya está delegado hoy, con cuándo se delegó y con qué "
+          "palabras se pidió."),
+        h("delegar_tarea",
+          "Deja delegada UNA tarea del catálogo, para que el Supervisor la "
+          "haga siempre sin que nadie vuelva a pedirla. 'clave' tiene que ser "
+          "una de 'tareas_disponibles', exacta. En 'pedido' va la frase con la "
+          "que te lo pidieron, tal cual, para que quede registrada. La "
+          "respuesta puede decir que la tarea todavía NO puede actuar porque "
+          "falta subir el nivel de autonomía: si lo dice, repetilo, porque "
+          "delegar sin ese nivel no hace nada.",
+          {"clave": {"type": "string"}, "pedido": {"type": "string"}},
+          ["clave"]),
+        h("quitar_tarea",
+          "Deja de delegar una tarea. El Supervisor deja de hacerla desde el "
+          "próximo ciclo.",
+          {"clave": {"type": "string"}}, ["clave"]),
 
         #  --- P6: M02 y M03. Las tres son de LECTURA. --------------------
         h("coordinaciones_de_situacion",

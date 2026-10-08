@@ -483,19 +483,22 @@ def cerrar_si_corresponde(org, propuesta, *, ahora=None,
     Devuelve {intentado, cerrado, motivo}. Nunca levanta: un cierre que no
     ocurre es un resultado posible del ciclo, no algo que deba tumbarlo.
 
-    LAS DOS PUERTAS, Y NINGUNA ES LA OTRA
-    -------------------------------------
+    LAS TRES PUERTAS, Y NINGUNA ES LA OTRA
+    --------------------------------------
       1. LA PROPUESTA PIDE NIVEL 3. Solo lo pide si su diagnostico optico dio
          'cierre_seguro' -- equipo en linea con señal buena, o caido por falta
          de energia en la casa del cliente. Cualquier otra cosa se queda en
          nivel 1 y ni llega aqui.
-      2. LA EMPRESA LO AUTORIZO. 'autonomia.puede(org, 3)' lee el nivel
+      2. ALGUIEN SE LO PIDIO. La tarea tiene que estar delegada, y la delega
+         una persona desde el chat del Supervisor. El nivel dice CUANTO puede
+         hacer; esto dice QUE le pidieron que haga. Sin esta puerta, subir el
+         nivel para habilitar cualquier otra cosa encenderia tambien el cierre
+         de casos, en silencio.
+      3. LA EMPRESA LO AUTORIZO. 'autonomia.puede(org, 3)' lee el nivel
          configurado para ESTA empresa, que solo sube una persona con nombre,
-         motivo y criterios medidos. Con el techo del codigo en 3 y el de la
-         empresa en 1 --que es el estado al escribir esto-- no se cierra ni un
-         caso.
+         motivo y criterios medidos.
 
-    Y despues de las dos, 'cierre_de_caso.cerrar' vuelve a validar las once
+    Y despues de las tres, 'cierre_de_caso.cerrar' vuelve a validar las once
     condiciones sobre datos releidos con la fila bloqueada. Que el ciclo haya
     decidido cerrarlo hace un segundo no exime de eso: entre el diagnostico y
     el cierre el proveedor pudo reabrir el ticket.
@@ -506,7 +509,7 @@ def cerrar_si_corresponde(org, propuesta, *, ahora=None,
     Supervisor NOC IA. Es como se distingue lo automatico de lo humano cuando
     alguien pregunte, dentro de seis meses, por que se cerro este caso.
     """
-    from operaciones import autonomia, cierre_de_caso
+    from operaciones import autonomia, cierre_de_caso, tareas_delegadas
     from operaciones import supervisor as sup_mod
 
     ahora = ahora or timezone.now()
@@ -516,9 +519,24 @@ def cerrar_si_corresponde(org, propuesta, *, ahora=None,
         return {"intentado": False, "cerrado": False,
                 "motivo": "el diagnostico no habilita un cierre automatico"}
 
-    #  PUERTA 2  --  lo que la empresa autorizo. Se consulta aunque la puerta 1
-    #  haya pasado: pasar una no exime de la siguiente, que es como funciona la
-    #  frontera del motor y por el mismo motivo.
+    #  PUERTA 2  --  QUE ALGUIEN LO HAYA PEDIDO (08/10/2026).
+    #
+    #  El nivel de autonomia dice CUANTO puede hacer el Supervisor; esto dice
+    #  QUE le pidieron que haga. Son distintos y hacen falta los dos: un nivel
+    #  3 sin tarea delegada significa "podes ejecutar cosas reversibles", no
+    #  "cerra los casos desincronizados". Sin esta puerta, subir el nivel para
+    #  habilitar cualquier otra cosa encenderia tambien esta, en silencio.
+    #
+    #  La tarea la delega una persona desde el chat, y queda con su nombre y la
+    #  frase con la que la pidio.
+    if not tareas_delegadas.esta_delegada(org, tareas_delegadas.CERRAR_DESINCRONIZADOS):
+        return {"intentado": False, "cerrado": False,
+                "motivo": "nadie le delego al Supervisor que cierre estos "
+                          "casos: se le pide desde su chat"}
+
+    #  PUERTA 3  --  lo que la empresa autorizo. Se consulta aunque las dos
+    #  anteriores hayan pasado: pasar una no exime de la siguiente, que es como
+    #  funciona la frontera del motor y por el mismo motivo.
     #  UNA SOLA CONSULTA POR CORRIDA cuando el llamador la pasa, y no es una
     #  optimizacion cosmetica: desde que el interruptor se lee por HTTP,
     #  'autonomia.puede' es una llamada de red. Preguntarla por propuesta

@@ -1168,3 +1168,16 @@ from operaciones.estilo_modelos import (                        # noqa: E402,F40
     AmbitoEstilo,
     EstiloSupervisor,
 )
+
+# =============================================================================
+#  TAREAS DELEGADAS  --  vive en 'tareas_modelos.py'
+# =============================================================================
+#  Mismo motivo que las capas anteriores: Django descubre un modelo cuando su
+#  modulo se importa.
+#
+#  Guarda QUE le delego una persona al Supervisor, una sola vez, desde el chat.
+#  El catalogo de lo que se puede delegar vive en codigo
+#  ('operaciones/tareas_delegadas.py') y es CERRADO: el chat elige de esa lista,
+#  no inventa tareas. Si lo que se ejecutara saliera de interpretar una frase,
+#  la garantia de un cliente dependeria de como estaba redactada esa frase.
+from operaciones.tareas_modelos import TareaDelegada             # noqa: E402,F401
