@@ -2131,6 +2131,70 @@ class EstiloSupervisorView(APIView):
         })
 
 
+class CicloAutomaticoView(APIView):
+    """
+    El ciclo del Supervisor, disparado por el RELOJ y no por una persona.
+
+    POR QUE UNA RUTA PROPIA Y NO LA DEL BOTON
+    -----------------------------------------
+    Porque son dos cosas distintas y conviene que se note. La del botón exige
+    'EsJefeDeOperaciones' --hay alguien mirando la pantalla-- y esta exige la
+    credencial de servicio del reloj, con su organización comprobada. Reusar la
+    primera habría hecho que el turno del scheduler entrara con un permiso
+    pensado para una persona.
+
+    Y porque esta tiene UNA PUERTA MAS que aquella: corre solo si alguien
+    delegó que corra solo. Sin eso contesta que no hizo nada, con el motivo.
+
+    EL TENANT VIAJA Y SE COMPRUEBA, igual que en el latido: 'organization_id'
+    sale de la fila del turno, no del coordinador, y se compara contra la
+    organización de la credencial. Un turno de una empresa no dispara el ciclo
+    de la de al lado ni con el token equivocado.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def post(self, request):
+        from operaciones import tareas_delegadas as td
+
+        pedida = str(request.data.get("organization_id") or "").strip()
+        if pedida and pedida != str(request.org.id):
+            #  409 y no 403, por el mismo motivo que el latido: la credencial
+            #  es válida; lo que no coincide es a qué empresa apunta el turno.
+            return Response(
+                {"error": "ORGANIZACION_DISTINTA",
+                 "detalle": "el turno apunta a una organización que no es la "
+                            "de esta credencial: no se corre nada"},
+                status=status.HTTP_409_CONFLICT)
+
+        #  LA PUERTA DE ESTA RUTA. Correr el ciclo solo es una tarea que se
+        #  delega, igual que cerrar casos: que el reloj SEPA hacerlo no
+        #  significa que alguien lo haya pedido.
+        if not td.esta_delegada(request.org, td.CICLO_AUTOMATICO):
+            return Response({
+                "corrio": False,
+                "motivo": "NO_DELEGADO",
+                "detalle": "nadie delegó que el ciclo corra solo: se pide "
+                           "desde el chat del Supervisor",
+            })
+
+        resumen = supervisor.correr_ciclo(request.org)
+        auto = resumen.get("cierre_automatico") or {}
+        #  Se devuelve un RECORTE y no el resumen entero: esto viaja al motor,
+        #  termina en su log, y el detalle de cada caso no tiene por qué cruzar
+        #  esa frontera. Lo que hace falta del otro lado es saber si corrió,
+        #  cuánto hizo y qué lo frenó.
+        return Response({
+            "corrio": True,
+            "senales": resumen.get("senales", 0),
+            "propuestas": resumen.get("propuestas", 0),
+            "cerrados": auto.get("cerrados", 0),
+            #  Los motivos por los que NO cerró. Es lo que permite contestar
+            #  "corrió y no hizo nada" distinguiendo de "corrió y no pudo".
+            "motivos_de_no_cierre": auto.get("motivos_de_no_cierre", {}),
+        })
+
+
 class AutonomiaSupervisorView(APIView):
     """
     Ver y cambiar cuanto puede hacer solo el Supervisor, desde la interfaz.

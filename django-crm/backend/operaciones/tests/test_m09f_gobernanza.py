@@ -720,8 +720,31 @@ def test_operaciones_revisa_pero_no_administra(org_a):
 
 def test_no_existe_ninguna_ruta_de_ejecucion():
     """
-    §14: no hay transición automática a ejecución. Se comprueba sobre el
-    ruteador entero, no sobre la memoria de quien lo escribió.
+    El inventario EXACTO de rutas, y qué ejecuta cada una.
+
+    EL NOMBRE DE ESTA PRUEBA QUEDO VIEJO EL 08/10/2026 y se deja a proposito:
+    renombrarla rompería la referencia desde los informes de M09-F, y el
+    docstring dice lo que de verdad afirma hoy. Lo que cambió:
+
+    Hasta ese día ninguna ruta ejecutaba nada, y §14 lo decía así. Ahora hay
+    UNA --'supervisor-ciclo-automatico'-- que puede producir un efecto: cerrar
+    un caso que el proveedor ya cerró y cuyo equipo el diagnóstico óptico
+    encontró sano.
+
+    LA REGLA NO SE AFLOJO, SE HIZO EXPLICITA. Esa ruta pasa por TRES puertas
+    que no abre ella: una persona tiene que haber delegado la tarea desde el
+    chat, el nivel de autonomía de la empresa tiene que llegar a 3, y el
+    diagnóstico decide caso por caso. Con cualquiera cerrada, contesta que no
+    hizo nada y dice por qué. Lo miden
+    'test_tareas_delegadas.py' y 'test_diagnostico_optico.py' sobre el CASO en
+    la base, no sobre la existencia de las puertas.
+
+    Lo que esta prueba sigue sosteniendo es lo mismo de antes: que el
+    inventario sea EXACTO, para que una ruta nueva obligue a venir acá y
+    declarar qué hace.
+
+    Se comprueba sobre el ruteador entero, no sobre la memoria de quien lo
+    escribió.
 
     EL INVENTARIO ESTÁ FIJADO A PROPÓSITO
     -------------------------------------
@@ -1037,7 +1060,30 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  Y el Supervisor NO puede llamarla: 'EsJefeDeOperaciones' pide
                        #  una persona, y 'autonomia.cambiar' se niega sin actor. Un
                        #  sistema que pudiera ampliarse el alcance no tendria alcance.
-                       "supervisor-autonomia"}
+                       "supervisor-autonomia",
+                       #  08/10/2026. LA UNICA RUTA QUE PUEDE EJECUTAR, y por
+                       #  eso se declara con mas detalle que ninguna: dispara
+                       #  el ciclo del Supervisor desde el RELOJ, no desde una
+                       #  persona.
+                       #
+                       #  Lo que puede llegar a hacer es cerrar un caso que el
+                       #  proveedor ya cerro y cuyo equipo el diagnostico
+                       #  optico encontro sano. NO reinicia equipos, no crea ni
+                       #  reasigna tickets, no toca WispHub y no cambia la
+                       #  programacion.
+                       #
+                       #  TRES PUERTAS QUE ESTA RUTA NO ABRE: la tarea delegada
+                       #  por una persona desde el chat, el nivel de autonomia
+                       #  de la empresa, y el diagnostico caso por caso. Con
+                       #  cualquiera cerrada contesta 'corrio: False' con su
+                       #  motivo -- y eso es un exito del turno, no un fallo:
+                       #  el trabajo hizo lo suyo, que es preguntar.
+                       #
+                       #  Ruta propia y no la del boton porque son dos permisos
+                       #  distintos: aquella exige a una persona mirando la
+                       #  pantalla, esta la credencial del scheduler con su
+                       #  organizacion comprobada contra la del turno.
+                       "supervisor-ciclo-automatico"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

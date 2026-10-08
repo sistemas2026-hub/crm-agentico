@@ -56,6 +56,7 @@ from django.utils import timezone
 #  primero. Una clave sin implementacion seria una promesa que el chat podria
 #  aceptar y el ciclo no cumpliria.
 CERRAR_DESINCRONIZADOS = "cerrar_desincronizados_con_diagnostico"
+CICLO_AUTOMATICO = "revisar_solo_con_cada_actualizacion"
 
 CATALOGO = {
     CERRAR_DESINCRONIZADOS: {
@@ -70,6 +71,25 @@ CATALOGO = {
             "No toca WispHub, no reabre nada, y no cierra ningún caso cuyo "
             "equipo no haya podido diagnosticar."),
         "exige_nivel": 3,
+    },
+    CICLO_AUTOMATICO: {
+        "nombre": "Revisar solo, con cada actualización de tickets",
+        "que_hace": (
+            "Cada vez que el reloj trae los tickets actualizados del "
+            "proveedor, el Supervisor revisa la operación por su cuenta: "
+            "detecta lo que cambió, deja las propuestas que correspondan, y "
+            "ejecuta las tareas que ya estén delegadas. Sin que nadie apriete "
+            "nada."),
+        "que_no_hace": (
+            "No habilita ninguna acción por sí misma. Solo hace que el "
+            "Supervisor mire cada tanto en vez de esperar a que alguien lo "
+            "despierte: lo que puede hacer al mirar sigue siendo lo que esté "
+            "delegado aparte, con su propio nivel de autonomía."),
+        #  NO EXIGE NIVEL, y la diferencia importa: mirar no es ejecutar. Si
+        #  no hay ninguna tarea de accion delegada, esto solo produce
+        #  propuestas para que las lea una persona -- que es lo que el
+        #  Supervisor ya hacia cuando alguien apretaba el boton.
+        "exige_nivel": 0,
     },
 }
 

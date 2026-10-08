@@ -253,3 +253,96 @@ def sondeo_de_fuentes(turno) -> dict:
         "no_concluyentes": sum(1 for e in estados.values()
                                if not e["concluyente"]),
     }
+
+
+# =============================================================================
+#  EL CICLO DEL SUPERVISOR, CON CADA ACTUALIZACION
+# =============================================================================
+#: A donde se le pide. Misma clase de dato que las dos de arriba: topologia de
+#: despliegue, no regla de negocio de ninguna empresa.
+VARIABLE_URL_CICLO = "SUPERVISOR_CICLO_URL"
+URL_CICLO_POR_DEFECTO = (
+    "http://backend:8000/api/operaciones/supervisor/ciclo-automatico/")
+
+#: Mas largo que el del latido, y por una razon medida: este turno puede
+#: diagnosticar hasta tres equipos contra SmartOLT, y ese endpoint tarda ~10 s
+#: cada vez (9,9 s medidos). Con el timeout de 20 s del latido, un ciclo normal
+#: se cortaria a la mitad y el trabajo quedaria en fallo habiendo hecho su
+#: trabajo bien.
+SEGUNDOS_TIMEOUT_CICLO = 120
+
+
+class CicloFallido(Exception):
+    """El ciclo no corrio, o contesto algo que no se puede interpretar."""
+
+
+def ciclo_del_supervisor(turno) -> dict:
+    """
+    Despierta al Supervisor para que revise y haga lo que tenga delegado.
+
+    ES EL PRIMER TRABAJO DE ESTE ARCHIVO QUE PUEDE PRODUCIR UN EFECTO, y por
+    eso se cablea despues de los dos de lectura. Lo que puede llegar a hacer
+    --hoy, cerrar un caso que el proveedor ya cerro y cuyo equipo el
+    diagnostico encontro sano-- no lo decide este archivo ni el reloj: lo
+    decide lo que una persona haya delegado del otro lado, con el nivel de
+    autonomia de su empresa.
+
+    EL RELOJ NO CONCEDE PERMISOS. Que este trabajo corra significa "revisa
+    ahora", nunca "podes hacer lo que quieras". Del otro lado hay tres puertas
+    --la tarea delegada, el nivel, y el diagnostico caso por caso-- y ninguna
+    se abre por estar en este mapa.
+
+    SI NADIE DELEGO EL CICLO, el endpoint contesta que no corrio y por que, y
+    eso es un EXITO del turno: el trabajo hizo lo suyo --preguntar-- y la
+    respuesta fue "todavia no". Tratarlo como fallo llenaria el historial de
+    rojos por una decision de operacion que esta bien tomada.
+    """
+    import requests  # dentro: importar este modulo no debe traer la red
+
+    url = (os.environ.get(VARIABLE_URL_CICLO, "") or URL_CICLO_POR_DEFECTO).strip()
+    token = (os.environ.get(VARIABLE_TOKEN, "") or "").strip()
+    if not token:
+        raise CicloFallido(
+            f"falta {VARIABLE_TOKEN}: sin credencial no se le puede pedir el "
+            f"ciclo al Supervisor, y un ciclo que no se pidio no es un ciclo "
+            f"que no encontro nada")
+
+    try:
+        r = requests.post(
+            url,
+            json={"organization_id": str(turno.organization_id)},
+            headers={"Authorization": f"Bearer {token}",
+                     "Content-Type": "application/json",
+                     "Accept": "application/json"},
+            timeout=SEGUNDOS_TIMEOUT_CICLO)
+    except Exception as e:                                       # noqa: BLE001
+        #  Tipo y no texto: el texto de una excepcion de red trae la URL.
+        raise CicloFallido(f"no se pudo pedir: {type(e).__name__}") from None
+
+    if r.status_code != 200:
+        raise CicloFallido(f"el Supervisor contesto HTTP {r.status_code}")
+    try:
+        cuerpo = r.json()
+    except ValueError:
+        raise CicloFallido("la respuesta no es JSON") from None
+    if not isinstance(cuerpo, dict):
+        raise CicloFallido("la respuesta no es un objeto JSON")
+
+    if not cuerpo.get("corrio"):
+        #  No corrio, y NO es un fallo. Se devuelve el motivo para que quede en
+        #  el log del turno: "no delegado" es informacion util, no un error.
+        return {"corrio": False,
+                "motivo": str(cuerpo.get("motivo") or "SIN_MOTIVO")}
+
+    return {
+        "corrio": True,
+        "senales": int(cuerpo.get("senales") or 0),
+        "propuestas": int(cuerpo.get("propuestas") or 0),
+        "casos_cerrados": int(cuerpo.get("cerrados") or 0),
+        #  POR QUE NO CERRO, cuando no cerro. Sin esto, un ciclo que corre
+        #  todas las horas sin cerrar nada se ve igual que uno que no tiene
+        #  nada que cerrar -- y son cosas muy distintas.
+        "motivos_de_no_cierre": {
+            str(k): int(v) for k, v in
+            (cuerpo.get("motivos_de_no_cierre") or {}).items()},
+    }
