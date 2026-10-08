@@ -280,6 +280,26 @@ def ciclo_del_supervisor(turno) -> dict:
     """
     Despierta al Supervisor para que revise y haga lo que tenga delegado.
 
+    ATENCION  --  ESTE NO ES EL CAMINO QUE CORRE HOY  (08/10/2026)
+    ---------------------------------------------------------------
+    En produccion el ciclo lo despierta 'celery-beat' del CRM, con la tarea
+    'operaciones/tasks.py::ciclo_del_supervisor', cada hora en el minuto 7.
+    Este trabajo quedo completo y NO SE PUDO ENCENDER, y el motivo no es de
+    codigo: reclamar un turno exige el rol 'scheduler_coordinator', que existe
+    y no esta concedido a nadie, y conceder un rol exige la opcion ADMIN sobre
+    el -- que no tiene NINGUNA credencial de los tres contenedores ('motor_user'
+    y 'crm_migrator' las dos rechazadas, medido). La credencial dueña del
+    esquema 'asistente' no esta desplegada.
+
+    Como el ciclo es codigo del CRM sobre tablas del CRM, y 'crm_user' ya puede
+    todo lo que necesita, pasar por el motor para volver a entrar al CRM era un
+    rodeo que ademas pedia un permiso nuevo. Se dejo esta pieza porque el dia
+    que el scheduler tenga sus roles sigue siendo valida, pero QUIEN LA
+    ENCIENDA TIENE QUE SABER que entonces habria dos relojes despertando lo
+    mismo. No se duplicaria trabajo --'correr_ciclo' bloquea la fila de la
+    organizacion y '_ya_propuesta' deduplica-- pero no hay motivo para tener
+    los dos: lo que corresponde es apagar uno.
+
     ES EL PRIMER TRABAJO DE ESTE ARCHIVO QUE PUEDE PRODUCIR UN EFECTO, y por
     eso se cablea despues de los dos de lectura. Lo que puede llegar a hacer
     --hoy, cerrar un caso que el proveedor ya cerro y cuyo equipo el

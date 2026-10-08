@@ -73,13 +73,14 @@ CATALOGO = {
         "exige_nivel": 3,
     },
     CICLO_AUTOMATICO: {
-        "nombre": "Revisar solo, con cada actualización de tickets",
+        "nombre": "Revisar solo, una vez por hora",
         "que_hace": (
-            "Cada vez que el reloj trae los tickets actualizados del "
-            "proveedor, el Supervisor revisa la operación por su cuenta: "
-            "detecta lo que cambió, deja las propuestas que correspondan, y "
-            "ejecuta las tareas que ya estén delegadas. Sin que nadie apriete "
-            "nada."),
+            "Una vez por hora el Supervisor revisa la operación por su "
+            "cuenta: detecta lo que cambió, deja las propuestas que "
+            "correspondan, y ejecuta las tareas que ya estén delegadas. Sin "
+            "que nadie apriete nada. Cada hora y no más seguido porque los "
+            "tickets del proveedor también llegan cada hora: mirar más "
+            "seguido sería preguntar cuatro veces por el mismo dato."),
         "que_no_hace": (
             "No habilita ninguna acción por sí misma. Solo hace que el "
             "Supervisor mire cada tanto en vez de esperar a que alguien lo "

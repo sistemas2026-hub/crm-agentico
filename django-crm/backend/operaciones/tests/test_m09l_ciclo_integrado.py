@@ -651,10 +651,77 @@ def test_api_el_ciclo_manual_devuelve_resumen_y_detalle(org_a, actor):
     assert _cli(ut, org_a, t).post(CICLO, {}, format="json").status_code == 403
 
 
+#  LAS DOS PUERTAS CONOCIDAS DEL CICLO. Una tercera rompe la prueba de abajo a
+#  proposito: agregar una puerta es una decision, no un detalle.
+PUERTAS_DEL_CICLO = {"ciclo", "supervisor-ciclo-automatico"}
+
+
 @pytest.mark.django_db
-def test_api_no_hay_segundo_ciclo(org_a):
-    """§11: se reutiliza el ciclo que ya existía; no se creó otro."""
+def test_api_no_hay_segundo_ciclo(org_a, monkeypatch):
+    """
+    §11: hay UNA implementacion del ciclo, y toda puerta pasa por ella.
+
+    ESTA PRUEBA CAMBIO DE FORMA EL 08/10/2026, y conviene decir por que.
+
+    Antes contaba nombres de ruta: exigia que hubiera exactamente una llamada
+    'ciclo' y ninguna otra que contuviera esa palabra. El 07/10 se agrego
+    'supervisor-ciclo-automatico' --la misma implementacion detras de otra
+    credencial, la del reloj en vez de una persona-- y esta prueba quedo en
+    ROJO, en produccion, sin que nadie la corriera. Es el sintoma exacto que
+    §6 describe: una guarda que nadie ejecuta no es una guarda.
+
+    Contar nombres era afirmar sobre la PRESENCIA DE UN MECANISMO, que es
+    justo lo que el metodo del proyecto prohibe. Lo que §11 protege no es que
+    haya una sola URL: es que no haya un SEGUNDO CICLO -- otra funcion que
+    detecte y proponga por su cuenta, que se desviaria de la primera sin que
+    nadie lo note.
+
+    Asi que ahora se afirma el EFECTO, y es estrictamente mas fuerte: se
+    reemplaza 'supervisor.correr_ciclo' y se comprueba que LAS DOS puertas
+    aterrizan ahi. Una puerta con implementacion propia no llamaria al
+    reemplazo y esta prueba se pondria en rojo -- algo que contar nombres no
+    detectaba. Y una puerta nueva tambien, por el conjunto de arriba.
+    """
+    from operaciones import supervisor as sup
     from operaciones import urls as rutas
-    nombres = [p.name for p in rutas.urlpatterns]
-    assert nombres.count("ciclo") == 1
-    assert not [n for n in nombres if n and "ciclo" in n and n != "ciclo"]
+    from operaciones import views
+
+    #  1. LAS PUERTAS SON LAS DECLARADAS. Una tercera exige pasar por aqui.
+    con_ciclo = {p.name for p in rutas.urlpatterns
+                 if p.name and "ciclo" in p.name}
+    assert con_ciclo == PUERTAS_DEL_CICLO, (
+        f"cambiaron las puertas del ciclo: {con_ciclo}. Agregar una es una "
+        f"decision de diseño -- si es deliberada, se declara arriba")
+
+    #  2. LAS DOS LLEGAN A LA MISMA FUNCION. Se cuenta por puerta, no en total:
+    #     un total de 2 tambien lo daria una puerta llamando dos veces.
+    llegadas = []
+    monkeypatch.setattr(
+        sup, "correr_ciclo",
+        lambda org, *a, **k: llegadas.append(org.id) or {
+            "senales": 0, "propuestas": 0,
+            "cierre_automatico": {"cerrados": 0, "motivos_de_no_cierre": {}}})
+
+    #  LA PUERTA DE LA PERSONA
+    u, perfil = _persona(org_a, "ADMIN")
+    r = _cli(u, org_a, perfil).post(CICLO, {}, format="json")
+    assert r.status_code == 200, r.data
+    assert llegadas == [org_a.id], (
+        "la ruta del boton no llego a supervisor.correr_ciclo: tiene "
+        "implementacion propia, que es justo lo que §11 prohibe")
+
+    #  LA PUERTA DEL RELOJ. Se instancia la vista en vez de pegarle por HTTP
+    #  porque exige la credencial de servicio, y lo que se afirma aqui es a
+    #  donde DESPACHA, no a quien deja entrar -- eso lo cubren las pruebas de
+    #  permisos de 'test_tareas_delegadas'.
+    from operaciones import tareas_delegadas as td
+    td.delegar(org_a, td.CICLO_AUTOMATICO, actor=perfil)
+
+    class _Pedido:
+        data = {}
+        org = org_a
+
+    respuesta = views.CicloAutomaticoView().post(_Pedido())
+    assert respuesta.data["corrio"] is True, respuesta.data
+    assert llegadas == [org_a.id, org_a.id], (
+        "la ruta del reloj no llego a supervisor.correr_ciclo")

@@ -81,4 +81,27 @@ app.conf.beat_schedule = {
         "task": "common.tasks.purgar_retencion_asistente",
         "schedule": crontab(hour=4, minute=0),
     },
+    # El ciclo del Supervisor NOC: detecta lo que cambio, deja propuestas y
+    # cierra lo que este delegado. Cada hora, en el minuto 7.
+    #
+    # EL MINUTO 7 Y NO EL 0, a proposito: a la hora en punto ya arrancan
+    # 'scan-for-breached-cases' (cada 5 min cae en :00) y las cuatro diarias de
+    # medianoche. Un ciclo que puede tardar un minuto largo --tres diagnosticos
+    # de ~10 s contra SmartOLT, mas los cierres-- compitiendo con la rafaga de
+    # :00 en un worker de concurrencia modesta es latencia que no hace falta
+    # pagar. Siete minutos de corrimiento no le cambian nada a nadie.
+    #
+    # CADA HORA Y NO MAS SEGUIDO: el ciclo mira tickets que llegan de WispHub
+    # por la sincronizacion, que corre cada 60 minutos. Mirar cada 15 seria
+    # preguntarle cuatro veces por el mismo dato -- y cada pasada que encuentra
+    # un caso nuevo gasta presupuesto de diagnostico contra un tercero que pide
+    # explicitamente no hacer polling.
+    #
+    # NO HABILITA NADA. Solo corre para las empresas que delegaron el ciclo
+    # ('operaciones/tareas_delegadas.py::CICLO_AUTOMATICO'); sin esa fila, la
+    # tarea no recorre ninguna. Ver el encabezado de 'operaciones/tasks.py'.
+    "ciclo-del-supervisor": {
+        "task": "operaciones.tasks.ciclo_del_supervisor",
+        "schedule": crontab(minute=7),
+    },
 }

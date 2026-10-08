@@ -49,6 +49,35 @@
 --  Conceder el permiso y encender el trabajo son dos decisiones distintas, y
 --  esta migracion toma solo la primera.
 --
+--  NO SE PUDO APLICAR  --  medido el 08/10/2026, y la razon no es de codigo
+--  ------------------------------------------------------------------------
+--  Esta migracion esta correcta y probada contra un Postgres real (concede, es
+--  idempotente en la segunda corrida, y aborta nombrando el rol que falte).
+--  Lo que falta es QUIEN la aplique:
+--
+--    * el ledger ('cli/migrar_asistente.py') necesita leer
+--      'asistente.migraciones_aplicadas'. 'motor_user' no puede; 'crm_migrator'
+--      --que SI llega al contenedor desde el 08/10-- tampoco: es el migrador
+--      del CRM y no tiene permisos sobre el esquema 'asistente'.
+--
+--    * y el 'grant' en si tampoco sale por la puerta de al lado. Probado
+--      directo con 'crm_migrator':
+--
+--        permission denied to grant role "scheduler_coordinator"
+--        DETAIL: Only roles with the ADMIN option on role
+--                "scheduler_coordinator" may grant this role.
+--
+--      Conceder un rol exige la opcion ADMIN sobre el, que tiene su creador.
+--      La credencial que creo estos roles --la dueña del esquema 'asistente'--
+--      no esta en ningun contenedor del despliegue.
+--
+--  CONSECUENCIA PRACTICA: el scheduler del motor sigue sin poder arrancar, y
+--  eso dejo de bloquear al Supervisor. El ciclo automatico se resolvio del
+--  lado del CRM, con 'celery-beat', que ya corria y cuyo usuario ('crm_user')
+--  ya podia todo lo necesario -- ver 'django-crm/backend/operaciones/tasks.py'.
+--  Esta migracion queda pendiente para el dia que haya una credencial con
+--  ADMIN sobre esos roles; no bloquea nada mas.
+--
 --  DEPENDE DE 202609141200 (los roles) y es IDEMPOTENTE: 'grant' sobre un rol
 --  ya concedido no falla ni duplica nada.
 -- =============================================================================

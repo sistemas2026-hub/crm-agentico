@@ -212,6 +212,32 @@ services:
       # peor porque no se nota.
       ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
       ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
+      #  EL CICLO DEL SUPERVISOR CORRE AQUI, y necesita hablar con el motor:
+      #  el diagnostico optico de cada caso, el interruptor de autonomia y el
+      #  cierre pasan todos por 'POST /interno/herramienta/...'. Las
+      #  credenciales de SmartOLT y WispHub viven SOLO en el motor -- copiarlas
+      #  a este servicio seria tener la misma clave en dos lugares.
+      #
+      #  NO ALCANZABA CON LAS DOS DE ARRIBA: el codigo lee 'MOTOR_URL' y
+      #  'MOTOR_TENANT', que son OTRAS variables, no 'ASISTENTE_*'. Y compose
+      #  solo inyecta lo que el bloque declara, aunque todas existan en el
+      #  Environment del despliegue -- es el mismo error que ya se habia
+      #  cometido con SUPERVISOR_HERRAMIENTAS_CAIDAS_PON (ver el bloque de
+      #  'backend'), encontrado por una auditoria y no por un fallo.
+      #
+      #  'MOTOR_TENANT' FALLA CERRADO y ahi esta la diferencia que importa:
+      #  'fuentes_adaptadores' levanta 'MotorNoDisponible' si falta, en vez de
+      #  suponer una empresa y leerle los datos a otra. Sin esta linea el ciclo
+      #  no habria cerrado nada y cada caso habria quedado con un diagnostico
+      #  fallido -- un sintoma que señala a SmartOLT, no aqui.
+      MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
+      MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
+      MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      #  La fuente de flota del Supervisor, misma variable que en 'backend'.
+      #  Vacia por defecto: encenderla es una decision aparte, y vacia la
+      #  fuente contesta "el estado de la red NO se conoce", nunca "sin
+      #  caidas".
+      SUPERVISOR_HERRAMIENTAS_CAIDAS_PON: ${SUPERVISOR_HERRAMIENTAS_CAIDAS_PON:-}
     depends_on:
       redis:
         condition: service_healthy
