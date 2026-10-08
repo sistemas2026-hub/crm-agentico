@@ -355,6 +355,30 @@ def decisiones_recientes(org, *, limite=TOPE) -> dict:
 #  LIMITES
 # =============================================================================
 
+def _puede_cerrar(org, estado) -> dict:
+    """
+    Si el unico camino de ejecucion esta abierto, con sus tres condiciones.
+
+    Se devuelven las TRES por separado y no un booleano: cuando esta cerrado,
+    el modelo tiene que poder decir CUAL falta. "No puedo" sin el motivo manda
+    a la persona a adivinar.
+    """
+    from operaciones import tareas_delegadas as td
+
+    delegada = td.esta_delegada(org, td.CERRAR_DESINCRONIZADOS)
+    nivel_ok = int(estado.get("efectivo") or 0) >= 3
+    return {
+        "una_persona_lo_delego": delegada,
+        "el_nivel_alcanza": nivel_ok,
+        "el_diagnostico_decide_caso_por_caso": True,
+        "puede_hoy": bool(delegada and nivel_ok),
+        "que_falta": ("" if (delegada and nivel_ok) else
+                      ("nadie delegó esa tarea desde el chat"
+                       if not delegada else
+                       "el nivel de autonomía de la empresa no llega a 3")),
+    }
+
+
 def mis_limites(org) -> dict:
     """
     Hasta donde puede llegar el Supervisor AHORA, y por que.
@@ -377,10 +401,21 @@ def mis_limites(org) -> dict:
         "interruptor_de_autonomia_permite_ejecutar":
             estado["interruptor_permite"],
         "puede_ejecutar_acciones": estado["efectivo"] >= 3,
-        "nota": ("en esta etapa el Supervisor observa y recomienda. No tiene "
-                 "ningun camino de ejecucion: no reinicia equipos, no cierra "
-                 "casos, no crea ni reasigna tickets y no cambia la "
-                 "programacion."),
+        #  LA NOTA DECIA "no tiene ningun camino de ejecucion" y dejo de ser
+        #  cierto el 08/10/2026, cuando el cierre de casos desincronizados paso
+        #  a ejecutarse. El modelo la lee y la repite: con el texto viejo le
+        #  decia a una persona que no podia hacer algo que si hace, que es la
+        #  peor forma de equivocarse para un sistema que tiene que poder decir
+        #  "no puedo" con credito.
+        "nota": ("el Supervisor observa y recomienda. Tiene UN camino de "
+                 "ejecucion y uno solo: cerrar un caso que ya esta cerrado en "
+                 "WispHub y sigue abierto en Dexter, si una persona le delego "
+                 "esa tarea, el nivel llega a 3 y el diagnostico optico del "
+                 "equipo lo habilita. No reinicia equipos, no crea ni reasigna "
+                 "tickets y no cambia la programacion."),
+        #  Lo que de verdad decide si ese camino esta abierto HOY, calculado y
+        #  no narrado: el modelo no tiene que deducirlo del texto.
+        "puede_cerrar_casos_desincronizados": _puede_cerrar(org, estado),
     }
 
 

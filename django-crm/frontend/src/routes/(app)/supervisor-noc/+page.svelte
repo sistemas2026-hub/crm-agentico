@@ -594,10 +594,25 @@
             <div class="snoc-pila-xs">
               <div class="snoc-fila">
                 <h1 class="snoc-h1">Supervisor NOC IA</h1>
-                <span class="snoc-insignia snoc-insignia-neutra snoc-primario">Shadow Mode</span>
+                <!-- DECIA "Shadow Mode", y dejo de ser cierto el 08/10/2026:
+                     hay un caso en que ejecuta. Una etiqueta que miente sobre
+                     eso es peor que ninguna -- es la que alguien va a citar el
+                     dia que pregunte por que se cerro un caso sin que nadie lo
+                     aprobara.
+                     No se condiciona a un dato en vivo a proposito: el estado
+                     exacto esta a un clic, en el panel de Autonomia, y una
+                     insignia que dependiera de tres condiciones diria algo
+                     distinto cada vez que una cambie. -->
+                <span class="snoc-insignia snoc-insignia-neutra snoc-primario"
+                      title="Solo ejecuta el cierre de casos ya cerrados en WispHub, y solo si una persona se lo delegó y el diagnóstico del equipo lo habilita">
+                  Observa, propone y cierra sincronizados
+                </span>
               </div>
               <p class="snoc-body snoc-secundario">
-                Observa la operación, la analiza y propone. La decisión es humana.
+                Observa la operación, la analiza y propone. La decisión es humana
+                <strong>salvo en un caso</strong>: cierra los que ya están cerrados
+                en WispHub, si alguien le delegó esa tarea y el diagnóstico del
+                equipo lo habilita.
               </p>
             </div>
           </div>
