@@ -23,7 +23,12 @@ repositorio con otras tareas periodicas. Ninguna da error:
     sintoma es "el Supervisor no cierra nada" -- que manda a revisar el
     diagnostico, no el agendamiento.
 
-De ahi las cinco afirmaciones de abajo. Ninguna comprueba que algo EXISTE:
+    UNA CLAVE RENOMBRADA. La tarea lee 'motivos' y 'motivos_de_no_cierre' de
+    lo que devuelve el ciclo. Si alguna se renombra alla, la tarea informa un
+    mapa vacio -- "no hubo motivos"-- en vez de fallar. Por eso la septima
+    prueba no escribe esas claves a mano: las lee del productor real.
+
+De ahi las siete afirmaciones de abajo. Ninguna comprueba que algo EXISTE:
 cada una afirma un efecto, y cada una muere si se invierte la conducta que
 dice sostener.
 """
@@ -64,7 +69,8 @@ def test_sin_delegacion_el_ciclo_no_corre_para_nadie(db, monkeypatch):
 
     #  EL EFECTO: no se llamo al ciclo. No "devolvio cero" -- no se llamo.
     assert corridas == []
-    assert resultado == {"empresas": 0, "cerrados": 0}
+    assert resultado == {"empresas": 0, "cerrados": 0,
+                         "no_evaluados_por": {}, "no_cerrados_por": {}}
 
 
 # ===========================================================================
@@ -85,7 +91,8 @@ def test_corre_para_la_empresa_que_delego_y_no_para_la_otra(dos_empresas,
 
     assert corridas == [con.id]
     assert sin.id not in corridas
-    assert resultado == {"empresas": 1, "cerrados": 2}
+    assert resultado == {"empresas": 1, "cerrados": 2,
+                         "no_evaluados_por": {}, "no_cerrados_por": {}}
 
 
 # ===========================================================================
@@ -151,7 +158,8 @@ def test_un_fallo_no_detiene_al_resto_y_el_contexto_se_suelta(db, monkeypatch):
 
     #  LAS DOS se intentaron, y la segunda se conto.
     assert set(vistas) == {primera.id, segunda.id}
-    assert resultado == {"empresas": 1, "cerrados": 1}
+    assert resultado == {"empresas": 1, "cerrados": 1,
+                         "no_evaluados_por": {}, "no_cerrados_por": {}}
     #  Y se solto el contexto pese al fallo.
     assert limpiezas == [1]
 
@@ -184,3 +192,56 @@ def test_el_reloj_lo_despierta_cada_hora():
     assert len(horario.hour) == 24, (
         "el ciclo tiene que correr todas las horas: un caso que aparece a la "
         "noche no puede esperar al dia siguiente")
+
+
+# ===========================================================================
+#  6. LOS MOTIVOS LLEGAN, Y LAS CLAVES SON LAS QUE EL PRODUCTOR USA
+# ===========================================================================
+#  "Corrio y cerro 0" tiene dos lecturas incompatibles --no habia nada, o
+#  habia y no pudo-- y la primera corrida real en produccion (08/10/2026)
+#  devolvio justo eso sin forma de distinguirlas.
+#
+#  LA TRAMPA QUE ESTA PRUEBA EVITA, y que el proyecto ya pago una vez: un test
+#  que le pasa al codigo la clave que el codigo espera valida una invencion.
+#  Si manana 'motivos' pasa a llamarse distinto, un test asi sigue en verde y
+#  la tarea informa mapas vacios para siempre. Asi que las claves NO se
+#  escriben a mano: se leen del informe que produce
+#  'evaluar_cierre_automatico' de verdad -- con cero señales devuelve su
+#  esqueleto-- y un rename alla rompe aqui.
+
+@pytest.mark.django_db
+def test_los_motivos_de_no_cierre_llegan_al_resultado(dos_empresas,
+                                                      monkeypatch):
+    from operaciones import diagnostico_optico as diag
+
+    con, _ = dos_empresas
+
+    #  EL ESQUELETO REAL del productor, no uno escrito a mano.
+    esqueleto = diag.evaluar_cierre_automatico(con, [])
+    assert "motivos" in esqueleto, (
+        "'evaluar_cierre_automatico' ya no produce 'motivos': la tarea lee esa "
+        "clave y quedaria informando un mapa vacio para siempre")
+
+    #  'motivos_de_no_cierre' no esta en el esqueleto porque lo agrega
+    #  '_atender_desincronizados' solo cuando hubo un intento de cierre. Se
+    #  comprueba contra el codigo que lo escribe, por el mismo motivo.
+    import inspect
+
+    from operaciones import supervisor as sup
+    fuente = inspect.getsource(sup._atender_desincronizados)
+    assert '"motivos_de_no_cierre"' in fuente, (
+        "nadie escribe ya 'motivos_de_no_cierre': la tarea lo lee y quedaria "
+        "diciendo que no hubo motivos cuando los hubo")
+
+    informe = dict(esqueleto)
+    informe["cerrados"] = 0
+    informe["motivos"] = {"SENAL_DEBIL": 2}
+    informe["motivos_de_no_cierre"] = {"NIVEL_INSUFICIENTE": 1}
+    monkeypatch.setattr("operaciones.supervisor.correr_ciclo",
+                        lambda org, *a, **k: {"cierre_automatico": informe})
+
+    resultado = tareas_periodicas.ciclo_del_supervisor()
+
+    assert resultado["cerrados"] == 0
+    assert resultado["no_evaluados_por"] == {"SENAL_DEBIL": 2}
+    assert resultado["no_cerrados_por"] == {"NIVEL_INSUFICIENTE": 1}

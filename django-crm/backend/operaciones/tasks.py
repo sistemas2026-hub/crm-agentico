@@ -113,9 +113,23 @@ def ciclo_del_supervisor():
     cae entero porque SmartOLT no contesto para un cliente seria la clase de
     fallo que nadie nota hasta que alguien pregunta por que no se cerro nada.
 
-    Devuelve el conteo, que es lo que queda en el resultado de Celery: cuantas
-    empresas se recorrieron y cuantos casos se cerraron en total. Sin un solo
-    dato de cliente -- esto va a un log y a Redis.
+    Devuelve el conteo Y POR QUE NO CERRO, que no es lo mismo. "Corrio y
+    cerro 0" tiene dos lecturas incompatibles --no habia nada que cerrar, o
+    habia y no pudo-- y un numero solo no las distingue. Medido el 08/10/2026:
+    la primera corrida real en produccion devolvio 'cerrados: 0' y no hubo
+    forma de saber cual de las dos era sin abrir otra consulta.
+
+    Dos mapas, porque son dos cosas distintas y conviene no fundirlas:
+
+        no_evaluados_por   el diagnostico no habilito siquiera evaluar el
+                           cierre -- señal debil, caida por fibra, equipo sin
+                           registrar en SmartOLT. Viene de 'motivos'.
+        no_cerrados_por    el cierre SE INTENTO y no salio -- una de las tres
+                           puertas, o la validacion con la fila bloqueada.
+                           Viene de 'motivos_de_no_cierre'.
+
+    Los dos son claves tecnicas y conteos, nunca casos: sin un solo dato de
+    cliente, porque esto va a un log y al resultado en Redis.
     """
     from operaciones import supervisor, tareas_delegadas as td
     from operaciones.tareas_modelos import TareaDelegada
@@ -134,10 +148,19 @@ def ciclo_del_supervisor():
         #  Se registra, y la frase importa: "nadie lo delego" no es lo mismo
         #  que "no habia nada que hacer". La primera se arregla desde el chat.
         logger.info("Supervisor: ningun ciclo delegado, no se recorre nada")
-        return {"empresas": 0, "cerrados": 0}
+        #  MISMA FORMA que la salida normal, con los mapas vacios. Una salida
+        #  que a veces trae dos claves y a veces cuatro obliga a quien la lee
+        #  a adivinar cual recibio.
+        return {"empresas": 0, "cerrados": 0,
+                "no_evaluados_por": {}, "no_cerrados_por": {}}
 
     empresas = 0
     cerrados = 0
+    #  SE SUMAN ENTRE EMPRESAS. Un motivo es una clave tecnica compartida
+    #  ('NO_DELEGADO', 'NIVEL_INSUFICIENTE', ...), no algo de una empresa, asi
+    #  que el total agregado sigue siendo legible y no nombra a nadie.
+    no_evaluados: dict[str, int] = {}
+    no_cerrados: dict[str, int] = {}
     #  EL 'finally' NO ES PRECAUCION DE ADORNO: lo pide el docstring de
     #  'clear_rls_context' con esas palabras --"always paired with
     #  set_rls_context in a finally"-- y el hueco que cierra es estrecho pero
@@ -163,16 +186,27 @@ def ciclo_del_supervisor():
                     "Supervisor: el ciclo fallo para org=%s", org.id)
                 continue
             empresas += 1
-            n = (resumen.get("cierre_automatico") or {}).get("cerrados", 0)
+            auto = resumen.get("cierre_automatico") or {}
+            n = auto.get("cerrados", 0)
             cerrados += n
+            for mapa, destino in ((auto.get("motivos"), no_evaluados),
+                                  (auto.get("motivos_de_no_cierre"),
+                                   no_cerrados)):
+                for motivo, veces in (mapa or {}).items():
+                    destino[motivo] = destino.get(motivo, 0) + veces
             #  CONTEOS Y NUNCA CASOS. Que se cerro y por que ya quedo escrito
             #  en la propuesta y en su auditoria, que es donde una persona lo
             #  va a buscar; repetirlo aqui pondria el detalle de un cliente en
             #  el log del worker, que no es un lugar con control de acceso.
             logger.info(
                 "Supervisor: ciclo corrido org=%s senales=%s propuestas=%s "
-                "cerrados=%s", org.id, resumen.get("senales", 0),
-                resumen.get("propuestas", 0), n)
+                "cerrados=%s no_evaluados=%s no_cerrados=%s",
+                org.id, resumen.get("senales", 0),
+                resumen.get("propuestas", 0), n,
+                auto.get("motivos") or {},
+                auto.get("motivos_de_no_cierre") or {})
     finally:
         clear_rls_context()
-    return {"empresas": empresas, "cerrados": cerrados}
+    return {"empresas": empresas, "cerrados": cerrados,
+            "no_evaluados_por": no_evaluados,
+            "no_cerrados_por": no_cerrados}

@@ -766,6 +766,17 @@ def delegar_tarea(org, *, clave="", pedido="", actor=None) -> dict:
     nivel de autonomia, porque delegar con el nivel bajo no hace nada y el
     silencio ahi seria el peor resultado: la persona se va creyendo que quedo
     andando.
+
+    Y DEVUELVE QUE MAS ESTA DELEGADO, por una medicion del 08/10/2026. Al
+    delegar el ciclo automatico, el modelo cerro diciendo que el cierre de
+    desincronizados "podria habilitarse si me lo pedis" -- y ya estaba
+    delegado desde una hora antes. No mintio: no tenia el dato. Esta
+    herramienta le contaba lo que acababa de pasar y nada del estado, asi que
+    para hablar del resto solo podia suponer.
+
+    Es "el codigo calcula, el modelo redacta" aplicado a una frase: la
+    correccion no va en el prompt --pedirle que no suponga no le da el dato--
+    va en lo que la herramienta devuelve.
     """
     from operaciones import autonomia
     from operaciones import tareas_delegadas as td
@@ -781,10 +792,18 @@ def delegar_tarea(org, *, clave="", pedido="", actor=None) -> dict:
     veredicto = autonomia.puede(org, nivel_que_exige) if nivel_que_exige else {
         "puede": True, "motivo": ""}
 
+    #  EL RESTO DEL ESTADO, para que no haya que suponerlo. Solo clave y
+    #  nombre: 'delegadas' trae ademas quien y cuando, que no hace falta para
+    #  contestar "que mas esta andando" y es mas dato del necesario en una
+    #  respuesta que el modelo va a leer.
+    otras = [{"clave": d["clave"], "nombre": d["nombre"]}
+             for d in td.delegadas(org) if d["clave"] != fila.clave]
+
     return {
         "delegada": fila.clave,
         "nombre": ficha.get("nombre", fila.clave),
         "ya_puede_actuar": bool(veredicto.get("puede")),
+        "otras_tareas_ya_delegadas": otras,
         #  Lo que FALTA, dicho sin rodeos. Una tarea delegada que no puede
         #  actuar no es una tarea delegada a medias: es una que no hace nada.
         "que_falta": ("" if veredicto.get("puede") else

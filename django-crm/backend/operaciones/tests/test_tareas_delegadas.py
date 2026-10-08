@@ -423,3 +423,43 @@ def test_el_ciclo_automatico_no_exige_nivel_de_autonomia(org_y_persona):
     #  Se delega y queda listo, sin pedir que nadie suba nada.
     assert r["ya_puede_actuar"] is True
     assert r["que_falta"] == ""
+
+
+# ===========================================================================
+#  5. AL DELEGAR, LA HERRAMIENTA DICE QUE MAS ESTA DELEGADO
+# ===========================================================================
+#  Medido el 08/10/2026 en produccion: al delegar el ciclo automatico, el
+#  modelo cerro con "el cierre de desincronizados podria habilitarse si me lo
+#  pedis" -- y ya estaba delegado. No mintio: la herramienta no le devolvia el
+#  estado del resto, asi que para hablar de el solo podia suponer.
+#
+#  La guarda afirma el EFECTO: que el dato viaje. Un modelo con el dato puede
+#  equivocarse igual; uno sin el dato no tiene otra opcion que inventar.
+
+@pytest.mark.django_db
+def test_al_delegar_se_informa_que_otras_tareas_ya_estaban(org_y_persona):
+    from operaciones import chat_herramientas as ch
+
+    org, perfil = org_y_persona
+    td.delegar(org, td.CERRAR_DESINCRONIZADOS, actor=perfil)
+
+    r = ch.delegar_tarea(org, clave=td.CICLO_AUTOMATICO,
+                         pedido="revisá solo cada hora", actor=perfil)
+
+    assert r["delegada"] == td.CICLO_AUTOMATICO
+    claves = [o["clave"] for o in r["otras_tareas_ya_delegadas"]]
+    assert claves == [td.CERRAR_DESINCRONIZADOS], (
+        "la herramienta no informa que el cierre ya estaba delegado: el "
+        "modelo tiene que suponerlo, y ya supuso mal una vez")
+    #  Y NO SE INCLUYE A SI MISMA: "otras" son otras.
+    assert td.CICLO_AUTOMATICO not in claves
+
+
+@pytest.mark.django_db
+def test_sin_otras_tareas_la_lista_viene_vacia_y_no_ausente(org_y_persona):
+    """Vacia, no ausente: una clave que a veces no esta obliga a adivinar."""
+    from operaciones import chat_herramientas as ch
+
+    org, perfil = org_y_persona
+    r = ch.delegar_tarea(org, clave=td.CICLO_AUTOMATICO, actor=perfil)
+    assert r["otras_tareas_ya_delegadas"] == []
