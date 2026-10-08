@@ -19,6 +19,20 @@
   import { aBurbujas, esDuplicado } from './chat-sesion.js';
 
   let abierta = $state(false);
+  //  EL PANEL GRANDE. En la burbuja chica una respuesta con evidencia se lee
+  //  por una ventanita, y las del Supervisor traen varias observaciones.
+  let expandida = $state(false);
+  //  EL HILO AL QUE SE ENGANCHA CADA MENSAJE (08/10/2026).
+  //
+  //  Hasta hoy no se mandaba, y el backend ABRE UNA CONVERSACION NUEVA cuando
+  //  no lo recibe ('operaciones/chat.py::abrir' siempre crea). O sea que cada
+  //  pregunta empezaba de cero y el Supervisor no recordaba la anterior: en
+  //  pantalla el hilo se veia continuo porque las burbujas se acumulan en el
+  //  navegador, pero del otro lado no habia memoria. Se nota al pedir algo en
+  //  dos pasos -- "quiero delegarte una tarea" / "si, esa"-- que es justo como
+  //  se delega.
+  /** @type {string | null} */
+  let conversacionId = $state(null);
   /** @type {Array<{id: string, rol: 'usuario'|'supervisor', texto: string, cuando: string|null}>} */
   let burbujas = $state([]);
   let borrador = $state('');
@@ -35,6 +49,29 @@
 
   const hayHilo = $derived(burbujas.length > 0);
 
+  /**
+   * Empieza una conversacion nueva. Vacia lo que se ve Y suelta el hilo.
+   *
+   * SOLTAR EL HILO ES LA MITAD QUE IMPORTA. Si solo se vaciaran las burbujas,
+   * el proximo mensaje seguiria enganchado a la conversacion anterior y el
+   * Supervisor seguiria leyendo lo que la pantalla ya no muestra -- el
+   * malentendido mas caro posible en un boton que se llama "limpiar".
+   *
+   * NO BORRA NADA DEL SERVIDOR. Lo conversado queda guardado y auditado; lo
+   * que cambia es desde donde se sigue. Un boton de la pantalla no es el lugar
+   * para destruir un registro.
+   */
+  function limpiar() {
+    if (enviando) return;
+    burbujas = [];
+    conversacionId = null;
+    borrador = '';
+    error = '';
+    //  Se marca como ya pedido para que no reaparezca el hilo viejo si la
+    //  burbuja se cierra y se vuelve a abrir.
+    historialPedido = true;
+  }
+
   async function recuperarHistorial() {
     //  Una sola vez por carga de pagina. Abrir y cerrar la burbuja tres
     //  veces no son tres consultas: el hilo ya esta en memoria y lo que
@@ -48,6 +85,7 @@
       const datos = await resp.json();
       if (!resp.ok) throw new Error(datos.error || 'No se pudo recuperar la conversacion.');
       burbujas = aBurbujas(datos.mensajes);
+      conversacionId = datos.conversacion_id ?? null;
     } catch (/** @type {any} */ e) {
       //  Se permite reintentar: sin esto, un fallo de red al abrir dejaria
       //  la burbuja vacia para siempre, pareciendo que no hay conversacion.
@@ -90,10 +128,19 @@
       const resp = await fetch('/api/supervisor-noc/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mensaje: texto })
+        //  Con el id, el Supervisor sigue el MISMO hilo y ve lo anterior.
+        //  Sin el --cuando se acaba de limpiar-- el backend abre uno nuevo,
+        //  que es exactamente lo que "limpiar" tiene que significar.
+        body: JSON.stringify(conversacionId
+          ? { mensaje: texto, conversacion_id: conversacionId }
+          : { mensaje: texto })
       });
       const datos = await resp.json();
       if (!resp.ok) throw new Error(datos.error || 'El Supervisor no respondio.');
+
+      //  El id del hilo con el que contesto: si se acaba de limpiar, este es
+      //  el de la conversacion nueva que el backend abrio.
+      if (datos.conversacion_id) conversacionId = datos.conversacion_id;
 
       const respuesta = (datos.respuesta ?? '').trim();
       if (respuesta) {
@@ -134,14 +181,30 @@
 
 <div class="snoc-chat">
   {#if abierta}
-    <section class="snoc-chat-panel" aria-label="Chat con el Supervisor NOC">
+    <section class="snoc-chat-panel" class:snoc-chat-grande={expandida}
+             aria-label="Chat con el Supervisor NOC">
       <header class="snoc-chat-cabecera">
         <div>
           <p class="snoc-chat-titulo">Supervisor NOC</p>
           <p class="snoc-chat-sub">Pregunta sobre la operacion de hoy</p>
         </div>
-        <button type="button" class="snoc-chat-cerrar" onclick={alternar}
-                aria-label="Cerrar el chat">&times;</button>
+        <div style="display:flex; gap:2px; flex-shrink:0; align-items:center;">
+          <!-- Solo si hay algo que limpiar: un boton que no hace nada enseña
+               a desconfiar de los botones. -->
+          {#if hayHilo}
+            <button type="button" class="snoc-chat-cerrar" onclick={limpiar}
+                    disabled={enviando}
+                    title="Empezar una conversación nueva. Lo conversado queda guardado."
+                    aria-label="Empezar una conversación nueva">&#8635;</button>
+          {/if}
+          <button type="button" class="snoc-chat-cerrar"
+                  onclick={() => (expandida = !expandida)}
+                  title={expandida ? 'Achicar' : 'Expandir'}
+                  aria-label={expandida ? 'Achicar el chat' : 'Expandir el chat'}
+          >{expandida ? '⤡' : '⤢'}</button>
+          <button type="button" class="snoc-chat-cerrar" onclick={alternar}
+                  aria-label="Cerrar el chat">&times;</button>
+        </div>
       </header>
 
       <div class="snoc-chat-hilo" bind:this={hilo}>
@@ -240,6 +303,13 @@
     border-radius: var(--snoc-lg, 16px);
     box-shadow: 0 16px 48px rgb(0 0 0 / 26%);
     overflow: hidden;
+  }
+  /*  EXPANDIDA: casi toda la ventana, con margen para no pegarse a los bordes.
+      Sigue teniendo tope --ocupa mucho, no todo-- asi que se ve que es un
+      panel sobre el tablero y no otra pantalla.  */
+  .snoc-chat-panel.snoc-chat-grande {
+    width: min(68rem, calc(100vw - 2.5rem));
+    height: calc(100vh - 7rem);
   }
 
   .snoc-chat-cabecera {

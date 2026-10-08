@@ -2,6 +2,17 @@
   /**
    * La burbuja de chat del Supervisor NOC IA.
    *
+   * ESTE COMPONENTE NO ESTA MONTADO (nota del 08/10/2026). La burbuja que se
+   * ve en pantalla es 'lib/supervisor/ChatBurbuja.svelte', y es la que hay que
+   * tocar: dos ramas construyeron un chat del Supervisor y se eligio aquella
+   * --recupera el hilo al abrir y ya estaba desplegada--. El destino de este
+   * archivo es una decision pendiente, no un olvido.
+   *
+   * Se dice aqui porque ya costo una vez: los botones de limpiar y expandir se
+   * escribieron primero en ESTE archivo, se desplegaron, y en la pantalla no
+   * aparecia nada. Un componente sin montar no avisa de nada -- es la misma
+   * familia que "codigo construido no es codigo que corre".
+   *
    * POR QUE ES UN COMPONENTE APARTE
    * '+page.svelte' del Supervisor NOC tiene 1.913 líneas y es de los archivos
    * que CLAUDE.md §2 marca como superficie de conflicto alta. La burbuja entra
