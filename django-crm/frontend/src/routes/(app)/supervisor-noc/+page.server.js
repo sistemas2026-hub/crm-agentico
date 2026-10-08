@@ -26,9 +26,23 @@ import { leerCapacidad } from '$lib/server/v2/programacion-noc.js';
  * 'EsJefeDeOperaciones' en cada vista de operaciones, y sigue estando.
  *
  * LO QUE ESTA PANTALLA NO PUEDE HACER, POR DISENO
- * Mover el interruptor de autonomia, cambiar el techo, ejecutar una
- * herramienta o aplicar una propuesta. No hay accion para nada de eso: no es
- * que esten ocultas, es que no existen en este archivo.
+ * Ejecutar una herramienta o aplicar una propuesta por su cuenta. No hay
+ * accion para eso: no es que esten ocultas, es que no existen en este archivo.
+ *
+ * LO QUE SI PUEDE DESDE EL 08/10/2026, y por que cambio
+ * ----------------------------------------------------
+ * Ver y cambiar el ALCANCE del Supervisor --su nivel y el interruptor general--
+ * desde '/api/supervisor-noc/autonomia'. Hasta ese dia estaba escrito aqui que
+ * no podia, y era correcto: el Supervisor solo observaba.
+ *
+ * Dejo de serlo el dia que pudo cerrar casos solo. Un freno que nadie puede
+ * tocar desde la pantalla no es un freno, y el momento en que hace falta es
+ * justo cuando nadie quiere estar buscando como abrir una terminal en un
+ * servidor. La decision se reabrio con ese motivo, no por comodidad.
+ *
+ * Las puertas siguen donde estaban: subir el nivel exige persona, motivo y
+ * criterios medidos, y eso lo impone 'autonomia.cambiar' mas una restriccion
+ * de base. La pantalla le pone cara humana a esa regla; no la reemplaza.
  */
 
 /** El mismo conjunto que campo/permissions.py::ROLES_GESTION. */

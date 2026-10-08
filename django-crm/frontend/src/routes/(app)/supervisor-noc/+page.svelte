@@ -52,6 +52,102 @@
   //  autoridad y vuelve a comprobarlo en cada llamada. Aca solo vive lo que
   //  la pantalla necesita para no parpadear.
   // ---------------------------------------------------------------------
+  //  ===================================================================
+  //   EL ALCANCE DEL SUPERVISOR  --  nivel e interruptor, desde la pantalla
+  //  ===================================================================
+  //  Hasta el 08/10/2026 esto solo se podia tocar desde una consola del
+  //  servidor. Era deliberado y tenia sentido mientras el Supervisor solo
+  //  observaba; dejo de tenerlo el dia que pudo cerrar casos solo. Un freno que
+  //  nadie puede tocar desde la pantalla no es un freno, y el momento en que
+  //  hace falta es justo cuando nadie quiere estar buscando como abrir una
+  //  terminal.
+  let modalAlcance = $state(false);
+  let alcance = $state(/** @type {any} */ (null));
+  let alcanceCargando = $state(false);
+  let alcanceError = $state('');
+  let alcanceGuardando = $state(false);
+  let nivelElegido = $state(/** @type {number | null} */ (null));
+  let motivoAlcance = $state('');
+  let criteriosAlcance = $state('');
+  let motivoFreno = $state('');
+
+  async function abrirAlcance() {
+    modalAlcance = true;
+    alcanceError = '';
+    alcanceCargando = true;
+    try {
+      const r = await fetch('/api/supervisor-noc/autonomia');
+      const d = await r.json();
+      if (!r.ok) {
+        alcanceError = d?.error ?? 'No se pudo leer el alcance.';
+      } else {
+        alcance = d;
+        nivelElegido = d.configurado;
+      }
+    } catch (/** @type {any} */ e) {
+      alcanceError = `No se pudo leer el alcance: ${e?.message ?? e}`;
+    } finally {
+      alcanceCargando = false;
+    }
+  }
+
+  async function guardarNivel() {
+    alcanceGuardando = true;
+    alcanceError = '';
+    try {
+      const r = await fetch('/api/supervisor-noc/autonomia', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nivel: nivelElegido,
+          motivo: motivoAlcance,
+          criterios: criteriosAlcance
+        })
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        //  El mensaje del backend se muestra TAL CUAL: ya dice cual de los
+        //  tres requisitos falta. Reescribirlo aca serian dos textos que se
+        //  separan el dia que uno cambie.
+        alcanceError = d?.error ?? 'No se pudo cambiar el nivel.';
+      } else {
+        alcance = { ...alcance, ...d };
+        motivoAlcance = '';
+        criteriosAlcance = '';
+        await invalidateAll();
+      }
+    } catch (/** @type {any} */ e) {
+      alcanceError = `No se pudo cambiar el nivel: ${e?.message ?? e}`;
+    } finally {
+      alcanceGuardando = false;
+    }
+  }
+
+  /** @param {boolean} detener */
+  async function moverFreno(detener) {
+    alcanceGuardando = true;
+    alcanceError = '';
+    try {
+      const r = await fetch('/api/supervisor-noc/autonomia', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ detener, motivo: motivoFreno })
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        alcanceError = d?.error ?? 'No se pudo mover el interruptor.';
+      } else {
+        alcance = { ...alcance, ...d };
+        motivoFreno = '';
+        await invalidateAll();
+      }
+    } catch (/** @type {any} */ e) {
+      alcanceError = `No se pudo mover el interruptor: ${e?.message ?? e}`;
+    } finally {
+      alcanceGuardando = false;
+    }
+  }
+
   let modalCiclo = $state(false);
   let corriendo = $state(false);
   let asistenteCorriendo = $state(/** @type {string | null} */ (null));
@@ -539,7 +635,13 @@
               </span>
             </div>
             <div class="snoc-envuelve">
-              <span class="snoc-insignia snoc-insignia-neutra" title="Interruptor del motor, en solo lectura">
+              <button
+                type="button"
+                class="snoc-insignia snoc-insignia-neutra"
+                style="cursor:pointer; border:0; font:inherit;"
+                title="Ver y cambiar cuánto puede hacer solo el Supervisor"
+                onclick={abrirAlcance}
+              >
                 Autonomía:
                 {#if data.autonomia.estado == null}
                   <span class="snoc-tenue">no se pudo leer</span>
@@ -549,7 +651,8 @@
                   ></span>
                   {data.autonomia.estado}
                 {/if}
-              </span>
+                <span class="snoc-icono" style="font-size:14px;">tune</span>
+              </button>
               <span class="snoc-insignia snoc-insignia-neutra">Acciones ejecutadas: 0</span>
               {#if fueraDeAlcance > 0}
                 <span class="snoc-insignia snoc-insignia-error" title="Por encima del alcance de esta etapa">
@@ -1851,6 +1954,135 @@
 
 
   <!-- ============ MODAL DEL CICLO ============ -->
+  <!-- ============ EL ALCANCE DEL SUPERVISOR ============
+       Dos controles que NO son lo mismo, y la pantalla los separa:
+       el NIVEL dice qué clase de cosas puede hacer solo, y el INTERRUPTOR
+       es el freno de mano. Tirar el freno no baja el nivel. -->
+  {#if modalAlcance}
+    <div
+      class="snoc-velo"
+      role="presentation"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) modalAlcance = false;
+      }}
+    >
+      <div class="snoc-modal" role="dialog" aria-modal="true" aria-labelledby="snoc-alcance-titulo">
+        <div class="snoc-fila snoc-primario">
+          <span class="snoc-icono" style="font-size:28px;">tune</span>
+          <h4 class="snoc-h3" id="snoc-alcance-titulo">Alcance del Supervisor NOC IA</h4>
+        </div>
+
+        {#if alcanceCargando}
+          <p class="snoc-body snoc-secundario" style="margin:0;">Leyendo el estado…</p>
+        {:else if alcance}
+          <!-- QUÉ PUEDE HACER HOY, antes de ofrecer cambiarlo -->
+          <div class="snoc-mono-sm snoc-caja-datos">
+            <div>• Nivel autorizado: <strong>{alcance.configurado}</strong></div>
+            <div>
+              • Nivel que de verdad aplica: <strong>{alcance.efectivo}</strong>
+              {#if alcance.recortado}<span class="snoc-error-txt"> (recortado)</span>{/if}
+            </div>
+            <div>
+              • Interruptor:
+              {#if alcance.interruptor_permite}
+                <strong>permite actuar</strong>
+              {:else}
+                <strong class="snoc-error-txt">NO permite actuar</strong>
+              {/if}
+            </div>
+            {#if alcance.motivo}
+              <div class="snoc-tenue">• {alcance.motivo}</div>
+            {/if}
+          </div>
+
+          <!-- EL FRENO VA PRIMERO, y es a propósito: si alguien abre esta
+               pantalla con apuro es para parar, no para ampliar. -->
+          <section class="snoc-columna" style="gap:var(--snoc-xs);">
+            <span class="snoc-label-sm" style="text-transform:uppercase;">Freno de mano</span>
+            <p class="snoc-body-sm snoc-secundario" style="margin:0;">
+              Detiene <strong>todas</strong> las acciones automáticas de inmediato. No cambia el nivel: cuando
+              lo reactivés, el alcance vuelve a ser el que era.
+            </p>
+            <input
+              class="snoc-campo"
+              type="text"
+              bind:value={motivoFreno}
+              placeholder="Motivo (obligatorio) — ej: algo raro en la bandeja"
+              disabled={alcanceGuardando}
+            />
+            <div class="snoc-fila" style="gap:var(--snoc-xs);">
+              {#if alcance.interruptor_permite}
+                <button
+                  class="snoc-btn snoc-btn-error"
+                  type="button"
+                  disabled={alcanceGuardando || !motivoFreno.trim()}
+                  onclick={() => moverFreno(true)}
+                >
+                  Detener las acciones automáticas
+                </button>
+              {:else}
+                <button
+                  class="snoc-btn"
+                  type="button"
+                  disabled={alcanceGuardando || !motivoFreno.trim()}
+                  onclick={() => moverFreno(false)}
+                >
+                  Reactivar
+                </button>
+              {/if}
+            </div>
+          </section>
+
+          <!-- EL NIVEL: ampliar exige demostrar que se midió algo -->
+          <section class="snoc-columna" style="gap:var(--snoc-xs);">
+            <span class="snoc-label-sm" style="text-transform:uppercase;">Qué puede hacer sin preguntar</span>
+            <select class="snoc-select" bind:value={nivelElegido} disabled={alcanceGuardando}>
+              {#each alcance.niveles as n (n.nivel)}
+                <option value={n.nivel}>{n.etiqueta}</option>
+              {/each}
+            </select>
+            <input
+              class="snoc-campo"
+              type="text"
+              bind:value={motivoAlcance}
+              placeholder="Motivo del cambio (obligatorio)"
+              disabled={alcanceGuardando}
+            />
+            <input
+              class="snoc-campo"
+              type="text"
+              bind:value={criteriosAlcance}
+              placeholder="Qué mediste para decidirlo (obligatorio)"
+              disabled={alcanceGuardando}
+            />
+            <p class="snoc-body-sm snoc-tenue" style="margin:0;">
+              Los criterios no son burocracia: sin saber qué se midió, esta decisión se vuelve a discutir cada
+              vez que alguien la mire.
+            </p>
+            <div class="snoc-fila" style="justify-content:flex-end;">
+              <button
+                class="snoc-btn snoc-btn-primario"
+                type="button"
+                disabled={alcanceGuardando || nivelElegido === alcance.configurado}
+                onclick={guardarNivel}
+              >
+                {alcanceGuardando ? 'Guardando…' : 'Cambiar el nivel'}
+              </button>
+            </div>
+          </section>
+        {/if}
+
+        {#if alcanceError}
+          <p class="snoc-body-sm snoc-error-txt" style="margin:0;">{alcanceError}</p>
+        {/if}
+
+        <div class="snoc-fila" style="justify-content:flex-end; padding-top:var(--snoc-xs);">
+          <button class="snoc-btn" type="button" onclick={() => (modalAlcance = false)}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
   {#if modalCiclo}
     <div
       class="snoc-velo"
