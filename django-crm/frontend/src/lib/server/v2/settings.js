@@ -1,0 +1,244 @@
+/**
+ * Settings hub: the wiring behind `/settings`.
+ *
+ * Server-only. The hub summarises every settings destination, so it needs a
+ * number from each. Rather than a bespoke `/settings/summary/` endpoint, which
+ * would have to reproduce, in Python across eight apps, the per-destination
+ * rollups the pages already derive (escalation's "breaches going nowhere",
+ * inbound's "silently dropping"). This fans out to the same server layers each
+ * sub-page uses and assembles their totals. The calls run concurrently, so the
+ * hub costs one round of parallel requests, not a dozen sequential ones.
+ *
+ * People, API tokens and the reopen policy are admin-only: their endpoints 403
+ * a member. `listTeam` / `listOrgTokens` already fold that into a `forbidden`
+ * sentinel; the reopen fetch throws, so it is caught below. Either way the hub
+ * still lists those destinations for a member. It just omits the value and any
+ * warning it cannot compute, the same way the shell omits the team badge a
+ * member cannot count. Every other destination is readable by any member, so a
+ * throw from one of those is a real failure and is left to propagate.
+ */
+import { leerConfiguracionAsistente } from './asistente-config.js';
+import { leerAjustesBandeja } from './bandeja-config.js';
+import { leerCanalWhatsapp } from './canal-whatsapp.js';
+import { leerCredenciales } from './credenciales.js';
+import { leerSmartOlt } from './smartolt.js';
+import { leerAvisos } from './avisos-campo.js';
+import { contarPlanesVenta } from './planes-venta.js';
+import { leerOferta } from './oferta.js';
+import { leerGuiasTV } from './guias-tv.js';
+import { getBusinessHours } from './business-hours.js';
+import { getCustomFields } from './custom-fields.js';
+import { getEscalationPolicies } from './escalation.js';
+import { getMailboxes } from './inbound-email.js';
+import { getMacros } from './macros.js';
+import { getOrgSettings } from './organization.js';
+import { getReopenPolicy } from './reopen.js';
+import { getRoutingRules } from './routing.js';
+import { getTags } from './tags.js';
+import { listTeam } from './team.js';
+import { getApprovalRules } from './ticket-approvals.js';
+import { listOrgTokens } from './tokens.js';
+
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Escalation "breaches that went nowhere", counted exactly as the escalation
+ * page's `breachesGoingNowhere` does, so the hub's warning matches the page it
+ * links to. A half is dead when the policy is off, reassigns to nobody, or
+ * notifies nobody (no person and no team).
+ * @param {any[]} policies
+ */
+function escalationRollup(policies) {
+  let active = 0;
+  let breaches = 0;
+  for (const p of policies) {
+    if (p.is_active) active += 1;
+    /** @param {string} action @param {any} target */
+    const halfDead = (action, target) => {
+      if (!p.is_active) return true;
+      if (action === 'reassign' && !target) return true;
+      if (action === 'notify' && !target && !p.notify_team) return true;
+      return false;
+    };
+    if (halfDead(p.first_response_action, p.first_response_target)) {
+      breaches += p.breaches_last_30d?.first_response ?? 0;
+    }
+    if (halfDead(p.resolution_action, p.resolution_target)) {
+      breaches += p.breaches_last_30d?.resolution ?? 0;
+    }
+  }
+  return { active, count: policies.length, breaches_unhandled_30d: breaches };
+}
+
+/**
+ * Mailboxes switched off that are still receiving mail, a customer ignored,
+ * as opposed to an address deliberately retired. Matches the inbound page's
+ * reasoning about which "off" is worth a warning.
+ * @param {any[]} mailboxes @param {number} now
+ */
+function silentlyDropping(mailboxes, now) {
+  return mailboxes.filter(
+    (m) =>
+      !m.is_active &&
+      m.last_received_at &&
+      now - new Date(m.last_received_at).getTime() < THIRTY_DAYS_MS
+  ).length;
+}
+
+/**
+ * Reopen policy → its `policy`, or null when the caller is a member (the
+ * endpoint is admin-only and throws 403). Any other error still propagates.
+ * @param {Promise<any>} promise
+ */
+async function reopenOrNull(promise) {
+  try {
+    return (await promise).policy;
+  } catch (/** @type {any} */ err) {
+    if (err?.status === 403) return null;
+    throw err;
+  }
+}
+
+/**
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ */
+export async function getSettingsHub(event) {
+  const [
+    org,
+    calendar,
+    tokens,
+    team,
+    routing,
+    escalation,
+    mailbox,
+    reopenPolicy,
+    approval,
+    macro,
+    tag,
+    field,
+    asistente,
+    canalWhatsapp,
+    smartolt,
+    planesVenta,
+    oferta,
+    guiasTv,
+    credenciales,
+    ajustesBandeja,
+    avisosCampo
+  ] = await Promise.all([
+    getOrgSettings(event),
+    getBusinessHours(event),
+    listOrgTokens(event),
+    listTeam(event),
+    getRoutingRules(event),
+    getEscalationPolicies(event),
+    getMailboxes(event),
+    reopenOrNull(getReopenPolicy(event)),
+    getApprovalRules(event),
+    getMacros(event),
+    getTags(event),
+    getCustomFields(event),
+    //  LAS OCHO RECIBEN 'event.locals, event.fetch', Y HACE FALTA  --  07/10/2026
+    //
+    //  Se las llamaba SIN argumentos. Sin 'locals' no hay tenant
+    //  ('tenantDeLaSesion' lo saca de locals.tenant o locals.org.id), sin
+    //  tenant no hay destino, y cada una devolvia null por su propio catch.
+    //
+    //  El resultado era una pantalla de Ajustes a la que le faltaban las
+    //  tarjetas que dependen del asistente: "Servicios y canales" (la parrilla
+    //  de TV) y "Planes de venta" (las localidades) ni se dibujaban, porque su
+    //  condicion es que el tenant tenga el rol 'ventas' y la lista de roles
+    //  llegaba vacia. El tenant TENIA ese rol.
+    //
+    //  El catch esta para que el motor caido no tumbe el hub entero, y eso
+    //  sigue valiendo. Lo que no puede hacer es tapar una llamada mal escrita:
+    //  el sintoma era identico --todo en null-- y por eso nadie lo vio.
+    leerConfiguracionAsistente(event.locals, event.fetch),
+    leerCanalWhatsapp(event.locals, event.fetch),
+    leerSmartOlt(event.locals, event.fetch),
+    // Solo el conteo -- no pega contra WispHub (ver contarPlanesVenta()),
+    // asi el hub no paga un viaje de red a una API externa en cada carga.
+    contarPlanesVenta(event.locals, event.fetch),
+    // Tampoco pega contra terceros: las dos listas salen de la config
+    // del tenant, que el motor ya tiene en memoria.
+    leerOferta(event.locals, event.fetch),
+    // Tampoco sale a ningun tercero: el catalogo ya esta en la config que el
+    // motor tiene en memoria.
+    leerGuiasTV(event.locals, event.fetch),
+    // Tampoco sale a ningun tercero: la lista de credenciales que hacen falta
+    // la arma el motor con su propio catalogo, y de las cargadas solo trae
+    // nombre y pista. Nunca un valor.
+    leerCredenciales(event.locals, event.fetch),
+    // Dos enteros de la config del tenant. Mismo contrato que los de arriba:
+    // devuelve null si el motor no contesta, y el hub muestra el destino sin
+    // valor en vez de caerse entero.
+    leerAjustesBandeja(event.locals, event.fetch),
+    // Cuantos canales de aviso tiene cargados esta empresa. `leerAvisos` ya
+    // atrapa su propio error y devuelve la lista vacia: el hub no se cae
+    // porque un destino no conteste.
+    leerAvisos(event)
+  ]);
+
+  const now = Date.now();
+  return {
+    org: org.org,
+    calendar: calendar.calendar,
+    // Admin-only oversight: null for a member (endpoint 403'd), so the hub
+    // shows the destination without a value it is not allowed to compute.
+    tokenTotals: tokens.forbidden ? null : tokens.totals,
+    peopleTotals: team.forbidden ? null : team.totals,
+    routingTotals: routing.totals,
+    escalationTotals: escalationRollup(escalation.policies),
+    mailboxTotals: {
+      ...mailbox.totals,
+      silently_dropping: silentlyDropping(mailbox.mailboxes, now)
+    },
+    reopen: reopenPolicy,
+    approvalRules: approval.rules,
+    approvalTotals: approval.totals,
+    macroTotals: macro.totals,
+    tagTotals: tag.totals,
+    fieldTotals: field.totals,
+    // null = no hay asistente, o no contesta. El hub lista igual sus destinos,
+    // sin valor, como ya hace con lo que un miembro no puede contar.
+    asistente,
+    canalWhatsapp,
+    smartolt,
+    // Los dos numeros con los que la Bandeja emite un veredicto. Que esten
+    // sin definir NO lleva warn: es el default deliberado, no una falta.
+    ajustesBandeja,
+    // Cuantos canales hay. CERO no es un error --ninguna empresa nace con esto
+    // configurado-- pero la tarjeta lo avisa, porque hoy esos avisos los
+    // escribe alguien a mano.
+    avisosCampo: { cuantos: avisosCampo.canales.length },
+    // Cuantas pide el catalogo y cuantas estan cargadas. La fila del hub avisa
+    // cuando falta alguna: eso es una herramienta que va a fallar al usarse.
+    credencialesTotales: credenciales.disponible
+      ? {
+          cargadas: credenciales.credenciales.filter((c) => c.cargado).length,
+          faltan: credenciales.credenciales.filter((c) => c.declarado && !c.cargado).length
+        }
+      : null,
+    planesVenta,
+    oferta: oferta
+      ? { servicios: (oferta.servicios_ofrecidos ?? []).filter((s) => s.activo).length,
+          canales: (oferta.parrilla_canales ?? []).length }
+      : null,
+    // Se cuentan las ACTIVAS y, aparte, si estan las dos de respaldo. Sin la
+    // general, una marca sin guia propia deja al agente sin nada que
+    // entregar; sin la de TDT, tampoco puede orientar a quien tiene cajita.
+    // Eso no es un detalle cosmetico: es una funcionalidad apagada, y por eso
+    // el indice lo marca igual que la parrilla vacia.
+    guiasTv: guiasTv
+      ? {
+          activas: (guiasTv.guias_tv ?? []).filter((g) => g.activa).length,
+          tieneGeneral: (guiasTv.guias_tv ?? []).some(
+            (g) => g.activa && g.tipo_conexion === 'directo' && !(g.marca ?? '').trim()
+          ),
+          tieneTdt: (guiasTv.guias_tv ?? []).some(
+            (g) => g.activa && g.tipo_conexion === 'tdt'
+          )
+        }
+      : null
+  };
+}

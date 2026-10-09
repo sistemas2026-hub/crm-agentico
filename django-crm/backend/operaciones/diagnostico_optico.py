@@ -1,0 +1,871 @@
+# -*- coding: utf-8 -*-
+"""
+===============================================================================
+ EL DIAGNOSTICO OPTICO DE UN CASO DESINCRONIZADO  --  escrito, no ejecutado
+===============================================================================
+
+QUE HACE
+--------
+Toma las señales de casos cerrados en el proveedor y abiertos en el CRM, le
+pregunta a SmartOLT por el equipo de cada cliente, y deja el resultado ESCRITO
+en la señal: como evidencia que una persona lee, y como datos que el codigo de
+mas adelante puede usar.
+
+NO CIERRA NADA. El cierre es otra fase, otro techo de autonomia y otra puerta.
+Lo que esta fase produce es la razon por la cual un cierre seria seguro --o no
+lo seria-- y la deja por escrito antes de que nadie decida.
+
+LA REGLA, Y DE QUIEN ES
+-----------------------
+La definio el usuario el 07/10/2026, y se implementa en CODIGO porque es una
+decision, no una redaccion:
+
+    equipo caido por falta de energia  -> el cierre es seguro
+    equipo en linea con señal buena    -> el cierre es seguro
+    señal debil, o caida por fibra     -> NO: esto lo mira una persona
+    cualquier otra cosa                -> NO: no se afirma nada
+
+'sin_energia' es la casa del cliente; 'fibra' es un corte en la NAP, y eso es
+nuestro. Son opuestas, y tratarlas igual seria cerrarle el caso a gente que
+sigue sin servicio. Esa distincion es la unica razon por la que este modulo
+existe: sin ella, "el ticket esta cerrado alla" alcanzaba para cerrar aca.
+
+POR QUE NO VA DENTRO DEL DETECTOR
+---------------------------------
+'supervisor.detectar' corre DIECIOCHO detectores y promete no tener efectos.
+Meter una llamada a un proveedor ahi adentro le habria costado, con los 19
+casos medidos en produccion, unos 190 segundos --'get_onu_full_status_info'
+tarda ~10 s, medido 9,9 s en la skill-- a una funcion que hoy tarda
+milisegundos y que se dispara desde un boton con una persona esperando.
+
+Esa es la misma forma del incidente del 06/10/2026, cuando encender el cerebro
+dejo el ciclo colgado: llamadas sin tope dentro de una peticion sincrona.
+
+EL PRESUPUESTO ES DOBLE, Y POR ESO MISMO
+----------------------------------------
+Un tope de CANTIDAD solo no alcanza: tres llamadas que tardan 30 s cada una
+cuelgan el ciclo igual que treinta. Un tope de RELOJ solo tampoco: se gasta
+entero en una llamada que no vuelve. Se reusa 'supervisor.presupuesto', que ya
+tiene las dos cosas y ya esta probado, en vez de escribir un mecanismo nuevo
+con la misma forma.
+
+Lo que NO se diagnostico por falta de presupuesto queda dicho: "no se
+diagnostico" con su motivo. Nunca se parece a "esta sano" -- es la misma regla
+que el resto del Supervisor aplica con DESCONOCIDO, y la razon por la que el
+ejecutor del motor devuelve 'desconocido' con 'motivo' en vez de levantar.
+"""
+from __future__ import annotations
+
+from django.utils import timezone
+
+from operaciones import supervisor as sup
+from operaciones.models import PropuestaSupervisor
+
+#  Cuantos equipos se diagnostican por corrida, y cuanto reloj se les presta.
+#
+#  TRES Y SESENTA, y los dos numeros salen de una medicion, no de un gusto: son
+#  19 los casos desincronizados en produccion (07/10/2026) y cada diagnostico
+#  paga ~10 s de 'get_onu_full_status_info' MAS la llamada que resuelve el
+#  equipo. Tres por ciclo son ~60 s en el peor caso, que es lo que tolera un
+#  boton; los 19 se cubren en siete ciclos, y un caso cerrado afuera no se
+#  vuelve urgente por esperar un ciclo mas.
+#
+#  Subirlos es una decision de operacion con una medicion detras, no un ajuste:
+#  el costo no es la cuota de SmartOLT --1.000/hora, holgadisimo-- sino el
+#  tiempo que una persona espera mirando la pantalla.
+TOPE_DIAGNOSTICOS_POR_CICLO = 3
+SEGUNDOS_MAXIMOS_DE_DIAGNOSTICO = 60
+
+#  Y LOS MISMOS DOS NUMEROS CUANDO NADIE ESTA MIRANDO  --  08/10/2026
+#
+#  El parrafo de arriba nombra la restriccion con todas las letras: el costo
+#  "no es la cuota de SmartOLT --1.000/hora, holgadisimo-- sino el tiempo que
+#  una persona espera mirando la pantalla". En la corrida automatica de cada
+#  hora NO HAY nadie esperando, asi que esa restriccion simplemente no aplica,
+#  y aplicarla igual tenia un costo medido.
+#
+#  LO QUE SE MIDIO. La primera corrida automatica real, con 90 casos
+#  desincronizados en produccion, devolvio:
+#
+#      cerrados ......................................  1
+#      el diagnostico no habilita un cierre automatico   2   (señal debil/fibra)
+#      no se le pregunto al proveedor en esta corrida   12   <- el tope
+#
+#  O sea: funcionaba, y el unico freno era este numero. A tres por hora la cola
+#  de 90 tarda 30 horas; a quince, seis.
+#
+#  POR QUE QUINCE Y NO MAS. Quince diagnosticos son ~150 s de reloj, que entran
+#  holgados en los 240 de abajo, y 15 llamadas/hora contra un limite de 1.000
+#  es el 1,5%. El proveedor pide no hacer polling ni consultas masivas, y esto
+#  no es ninguna de las dos: cada diagnostico corresponde a UN ticket que un
+#  cliente reporto --el uso que SmartOLT autoriza explicitamente-- y quince
+#  tickets por hora es la carga de una mesa de soporte normal, no un barrido.
+#
+#  Y ES TRANSITORIO: los 90 son el atraso acumulado. En regimen aparecen unos
+#  pocos por hora y el tope no se toca nunca.
+TOPE_DIAGNOSTICOS_DESATENDIDO = 15
+SEGUNDOS_MAXIMOS_DESATENDIDO = 240
+
+#  Los veredictos de ESTA fase. No son el cierre: son la razon por la que un
+#  cierre seria seguro, que es lo que se escribe.
+CIERRE_SEGURO = "cierre_seguro"
+REVISAR_PERSONA = "revisar_persona"
+SIN_DIAGNOSTICO = "sin_diagnostico"
+
+#  Los valores que devuelve el ejecutor del motor
+#  ('nucleo/herramientas/diagnostico_servicio.py'). Se nombran aca para que un
+#  cambio alla rompa una prueba en vez de volver silenciosamente todo
+#  'sin_diagnostico' -- que es el modo de falla peligroso: parece prudencia.
+EN_LINEA = "en_linea"
+CAIDO = "caido"
+SENAL_BUENA = "buena"
+SENAL_DEBIL = "debil"
+CAUSA_SIN_ENERGIA = "sin_energia"
+CAUSA_FIBRA = "fibra"
+
+
+def presupuesto(ahora=None, *, desatendido: bool = False) -> dict:
+    """
+    El presupuesto de esta fase. Mismo mecanismo que el del cerebro.
+
+    'desatendido' es la corrida del reloj, donde no hay nadie esperando. NO es
+    un permiso: lo que el ciclo pueda hacer con los diagnosticos que consiga
+    sigue dependiendo de las tres puertas. Lo unico que cambia es cuantos
+    equipos alcanza a preguntar antes de cortar.
+
+    EL DEFECTO ES EL ATENDIDO, a proposito. Un llamador nuevo que se olvide de
+    declararse hereda el tope corto: tarda mas y no sorprende a nadie, que es
+    el lado seguro para equivocarse.
+    """
+    if desatendido:
+        return sup.presupuesto(tope=TOPE_DIAGNOSTICOS_DESATENDIDO,
+                               segundos=SEGUNDOS_MAXIMOS_DESATENDIDO,
+                               ahora=ahora)
+    return sup.presupuesto(tope=TOPE_DIAGNOSTICOS_POR_CICLO,
+                           segundos=SEGUNDOS_MAXIMOS_DE_DIAGNOSTICO,
+                           ahora=ahora)
+
+
+#  CUANTOS PAQUETES Y CUANTOS TIENEN QUE VOLVER  --  decision del cliente,
+#  09/10/2026, y se deja escrita con su contrapartida.
+#
+#  SE EXIGEN LOS TRES. Lo pidio asi el usuario, sabiendo el costo: esta medido
+#  en este proyecto que el MISMO equipo sano devuelve '1 de 3', '2 de 3' y
+#  '3 de 3' en corridas seguidas (15/08/2026). O sea que con este umbral van a
+#  quedar sin cerrar equipos que estan perfectos, y van a aparecer como "no
+#  respondio bien" sin que les pase nada.
+#
+#  Es el lado conservador para equivocarse --no cerrar algo que esta bien es
+#  mas barato que cerrar algo que esta mal-- y bajarlo despues es cambiar este
+#  numero. Lo que NO hay que hacer es bajarlo sin medir cuantos quedaron
+#  afuera: ese conteo sale del motivo escrito en cada propuesta.
+PINGS_POR_PRUEBA = 3
+PINGS_QUE_DEBEN_VOLVER = 3
+
+
+def _por_ping(ping) -> tuple[str, str]:
+    """
+    El veredicto cuando no hay ONU que consultar y solo queda el ping.
+
+    TRES RESULTADOS Y NO DOS, y la diferencia es la de siempre: "no se pudo
+    medir" no es "se midio y no respondio". El primero se reintenta solo en la
+    corrida siguiente; el segundo es un dato del equipo.
+    """
+    if not isinstance(ping, dict) or not ping.get("ok"):
+        motivo = (ping or {}).get("motivo") if isinstance(ping, dict) else ""
+        #  SE NOMBRAN LAS DOS COSAS QUE FALLARON, y la primera es la
+        #  accionable: que el servicio no tenga el equipo registrado es un
+        #  dato que el ISP no cargo en WispHub, y cargarlo arregla este caso y
+        #  todos los suyos. Que el ping no saliera es pasajero. Decir solo lo
+        #  segundo mandaria a reintentar algo que va a volver a fallar igual.
+        return SIN_DIAGNOSTICO, (
+            "este servicio no tiene equipo registrado en WispHub, asi que no "
+            "hay con que consultar la ONU -- falta el dato para preguntar, no "
+            "es que el equipo este mal. Se intento verificar con un ping y "
+            "tampoco se pudo"
+            + (f" ({motivo})" if motivo else "")
+            + ".")
+
+    #  El texto viene como lo manda WispHub ('3 de 3', '0 de 3') y se compara
+    #  contra lo esperado SIN convertirlo a numero. Convertirlo invita a
+    #  compararlo con '>', y entonces un '2 de 3' pasaria a ser "casi bien" --
+    #  que es justo la lectura que el umbral de arriba decidio no hacer.
+    respondieron = str(ping.get("respondieron") or "").strip()
+    esperado = f"{PINGS_QUE_DEBEN_VOLVER} de {PINGS_POR_PRUEBA}"
+
+    if respondieron == esperado:
+        return CIERRE_SEGURO, (
+            f"este servicio no tiene la ONU registrada, asi que no se pudo "
+            f"ver su señal optica. Se verifico con un ping y el equipo "
+            f"respondio los {PINGS_QUE_DEBEN_VOLVER} paquetes ({respondieron}): "
+            f"esta encendido y alcanzable. El ticket ya esta cerrado en el "
+            f"proveedor, asi que cerrarlo aca alinea el estado. OJO: el ping "
+            f"no dice nada de la calidad de la señal -- para eso haria falta "
+            f"cargar el serial del equipo en WispHub.")
+
+    return REVISAR_PERSONA, (
+        f"este servicio no tiene la ONU registrada y el ping no volvio "
+        f"completo ({respondieron or 'sin conteo'}, se exigen {esperado}). "
+        f"Puede ser un equipo con problemas o un ping con perdida pasajera, y "
+        f"sin la ONU no hay forma de distinguirlo: lo mira una persona.")
+
+
+def clasificar(diagnostico: dict) -> tuple[str, str]:
+    """
+    (veredicto, porque) a partir de un diagnostico. EL CODIGO DECIDE, no el
+    modelo.
+
+    Devuelve siempre un porque redactado para que lo lea una persona: quien
+    acepta la propuesta cambia el estado de un caso, y tiene que poder ver
+    contra que. El texto no es decorativo -- es lo que queda escrito cuando
+    alguien pregunte, semanas despues, por que se cerro.
+
+    FAIL-CLOSED EN LA FORMA QUE IMPORTA: cualquier cosa que no sea una de las
+    dos condiciones seguras cae en 'revisar_persona' o 'sin_diagnostico'.
+    Nunca al reves. Un diagnostico que no se entiende no es un diagnostico
+    bueno.
+    """
+    if not isinstance(diagnostico, dict) or diagnostico.get("error"):
+        motivo = ""
+        if isinstance(diagnostico, dict):
+            motivo = str(diagnostico.get("detalle") or
+                         diagnostico.get("error") or "")
+        return SIN_DIAGNOSTICO, (
+            "no se pudo diagnosticar el equipo"
+            + (f": {motivo}" if motivo else "")
+            + ". Eso no dice que este sano ni caido: dice que no hay dato.")
+
+    estado = str(diagnostico.get("estado") or "")
+    senal = str(diagnostico.get("senal") or "")
+    causa = str(diagnostico.get("causa_caida") or "")
+    dbm = diagnostico.get("senal_dbm")
+
+    #  SIN EQUIPO REGISTRADO: su propio motivo, no "no se pudo".
+    #
+    #  Medido el 07/10/2026: de 19 casos desincronizados, DOS no tienen serial
+    #  de ONU cargado en WispHub. Eso no es una falla de nadie ni algo que se
+    #  reintente -- es un dato que el ISP no cargo, y la skill lo tiene medido
+    #  a escala: 1.299 de 4.163 clientes activos estan igual.
+    #
+    #  Se dice con todas las letras porque es ACCIONABLE de una forma distinta:
+    #  "no se pudo diagnosticar" invita a reintentar, y "este servicio no tiene
+    #  equipo registrado" le dice a quien lee que el dato falta en WispHub y
+    #  que decida sin el. Lo pidio el usuario con esas palabras.
+    if diagnostico.get("equipo_registrado") is False:
+        return _por_ping(diagnostico.get("ping"))
+
+    if estado not in (EN_LINEA, CAIDO):
+        return SIN_DIAGNOSTICO, (
+            f"el estado del equipo volvio como '{estado or 'vacio'}'"
+            + (f" ({diagnostico.get('motivo')})" if diagnostico.get("motivo")
+               else "")
+            + ". Sin estado no se afirma nada.")
+
+    #  CAIDO POR FALTA DE ENERGIA  --  la casa del cliente, no la red.
+    if estado == CAIDO and causa == CAUSA_SIN_ENERGIA:
+        return CIERRE_SEGURO, (
+            "el equipo esta caido y el proveedor reporto falta de energia "
+            "(dying-gasp): es un corte de luz en el domicilio, no una falla "
+            "de la red. El ticket ya esta cerrado en el proveedor, asi que "
+            "cerrarlo aca alinea el estado, no resuelve nada por nadie.")
+
+    #  CAIDO POR FIBRA  --  esto es nuestro, y no se cierra.
+    if estado == CAIDO and causa == CAUSA_FIBRA:
+        return REVISAR_PERSONA, (
+            "el equipo esta caido por perdida de señal optica (LOS/LOF): esa "
+            "falla es de la red, no del cliente. No se propone cerrar aunque "
+            "el proveedor ya lo haya cerrado.")
+
+    if estado == CAIDO:
+        return REVISAR_PERSONA, (
+            f"el equipo esta caido y la causa que reporto el proveedor "
+            f"({causa or 'ninguna'}) no es una de las dos que este codigo sabe "
+            f"distinguir. No se decide por descarte.")
+
+    #  EN LINEA  --  solo la señal buena habilita el cierre.
+    #
+    #  El dBm se nombra cuando esta, y se omite cuando no: "señal buena" sin el
+    #  numero sigue siendo cierto, pero con el numero quien lee puede
+    #  comprobarlo por su cuenta en vez de creerle a esta clasificacion. Es la
+    #  misma razon por la que la evidencia de un caso nombra su fuente.
+    nivel = f" ({dbm} dBm)" if dbm is not None else ""
+
+    if senal == SENAL_BUENA:
+        return CIERRE_SEGURO, (
+            f"el equipo esta en linea y la señal de bajada es buena{nivel}, "
+            f"dentro del rango que la guia considera sano. El ticket ya esta "
+            f"cerrado en el proveedor y el equipo responde bien, asi que "
+            f"cerrarlo aca alinea el estado.")
+
+    if senal == SENAL_DEBIL:
+        return REVISAR_PERSONA, (
+            f"el equipo esta en linea pero la señal de bajada es debil"
+            f"{nivel}. Puede volver a fallar, asi que lo mira una persona.")
+
+    return SIN_DIAGNOSTICO, (
+        "el equipo esta en linea pero no hubo lectura de señal, asi que no se "
+        "puede decir si va a aguantar. No se propone cerrar sin ese dato.")
+
+
+def enriquecer(org, senales, *, ahora=None, presupuesto_=None,
+               diagnosticar=None, pinguear=None) -> dict:
+    """
+    Le agrega el diagnostico optico a las señales de casos desincronizados.
+
+    Muta las señales --'Senal' es mutable y su 'evidencia' y 'datos' son del
+    llamador-- y devuelve CONTEOS para el informe del ciclo.
+
+    'diagnosticar' SE INYECTA, igual que 'proponer' e 'interpretar' en el
+    seguimiento: este modulo decide QUE significa un diagnostico, y no tiene
+    por que saber que del otro lado hay un motor por HTTP. Tambien es lo que
+    permite probar la clasificacion sin red.
+    """
+    ahora = ahora or timezone.now()
+    p = presupuesto_ if presupuesto_ is not None else presupuesto(ahora=ahora)
+
+    if diagnosticar is None:
+        from operaciones import chat_herramientas
+
+        def diagnosticar(org_, id_servicio):
+            return chat_herramientas.diagnosticar_servicio(
+                org_, id_servicio=id_servicio)
+
+    #  SE INYECTA igual que 'diagnosticar', y por lo mismo: este modulo decide
+    #  QUE significa un ping, no como se hace uno. Del otro lado hay un motor
+    #  por HTTP, y la prueba no deberia necesitar red para ejercitar la regla.
+    if pinguear is None:
+        from campo.services import telemetria
+
+        def pinguear(id_servicio):
+            #  'telemetria.pinguear_servicio' ya existia para la app de campo
+            #  y ya interpreta la forma rara en que WispHub devuelve el
+            #  conteo. Reusarla en vez de escribir otro cliente evita tener
+            #  dos lecturas de '3 de 3' que puedan divergir -- eso ya costo un
+            #  bug real en agosto de 2026.
+            try:
+                return telemetria.pinguear_servicio(
+                    id_servicio, paquetes=PINGS_POR_PRUEBA)
+            except Exception as e:                           # noqa: BLE001
+                #  El tipo y no el texto: el texto de un error de red trae la
+                #  URL, y esa URL lleva el identificador del servicio.
+                return {"ok": False, "motivo": type(e).__name__}
+
+    informe = {"diagnosticados": 0, "cierre_seguro": 0, "revisar_persona": 0,
+               "sin_diagnostico": 0, "sin_llave": 0, "sin_presupuesto": 0,
+               "errores": 0}
+
+    for senal in senales:
+        if senal.tipo != PropuestaSupervisor.CASO_DESINCRONIZADO:
+            continue
+
+        id_servicio = str(senal.datos.get("id_servicio") or "").strip()
+        if not id_servicio:
+            informe["sin_llave"] += 1
+            _anotar(senal, SIN_DIAGNOSTICO,
+                    "el caso no tiene el id de servicio del proveedor, asi que "
+                    "no se puede preguntar por el equipo. No se diagnostico.",
+                    None, ahora)
+            continue
+
+        if not sup._hay_presupuesto(p):
+            informe["sin_presupuesto"] += 1
+            _anotar(senal, SIN_DIAGNOSTICO,
+                    "no se diagnostico en esta corrida: se agoto el "
+                    "presupuesto de diagnosticos del ciclo. Se intenta en el "
+                    "siguiente; esto NO dice nada del estado del equipo.",
+                    None, ahora)
+            continue
+
+        sup._gastar(p)
+        try:
+            diagnostico = diagnosticar(org, id_servicio)
+        except Exception as e:                                   # noqa: BLE001
+            #  El tipo y no el texto: el texto de una excepcion de red trae la
+            #  URL, y la URL de SmartOLT lleva el identificador del equipo de
+            #  un cliente. Misma regla que 'fuentes_adaptadores._pedirle_al_motor'.
+            informe["errores"] += 1
+            _anotar(senal, SIN_DIAGNOSTICO,
+                    f"no se pudo preguntar por el equipo "
+                    f"({type(e).__name__}). No se diagnostico.", None, ahora)
+            continue
+
+        #  EL RESPALDO POR PING  --  09/10/2026
+        #  -----------------------------------
+        #  Un tercio de los clientes no tiene el serial de la ONU cargado en
+        #  WispHub (1.299 de 4.163, medido). Para esos, SmartOLT no tiene a
+        #  que responder y el caso quedaba sin cerrar PARA SIEMPRE: no es que
+        #  el equipo este mal, es que falta el dato para preguntar. Se
+        #  acumulaban, y seguirian acumulandose con cada ticket nuevo.
+        #
+        #  Entonces se pregunta con lo que si hay. El ping no dice si la señal
+        #  optica esta bien --eso solo lo sabe la OLT-- pero si dice algo que
+        #  alcanza para esta decision: que el equipo esta encendido y
+        #  alcanzable. Para cerrar un ticket que el PROVEEDOR YA CERRO, eso es
+        #  verificacion suficiente; no se esta afirmando que el servicio sea
+        #  bueno, se esta comprobando que el equipo del cliente contesta.
+        #
+        #  NO REEMPLAZA AL DIAGNOSTICO OPTICO: corre solo cuando no hay con
+        #  que hacerlo. Un equipo que SI esta en SmartOLT se sigue juzgando
+        #  por su señal, que es mejor dato.
+        if diagnostico.get("equipo_registrado") is False:
+            diagnostico = dict(diagnostico)
+            diagnostico["ping"] = pinguear(id_servicio)
+
+        informe["diagnosticados"] += 1
+        veredicto, porque = clasificar(diagnostico)
+        informe[veredicto] = informe.get(veredicto, 0) + 1
+        _anotar(senal, veredicto, porque, diagnostico, ahora)
+
+    return informe
+
+
+#  EL PILOTO EN SOMBRA DEL CIERRE AUTOMATICO
+#  ==========================================
+#  ESTE MODULO NO CIERRA NINGUN CASO, Y NO HAY BANDERA QUE LO HAGA CERRAR.
+#
+#  La primera version de este bloque declaraba 'CIERRE_AUTOMATICO = False' y
+#  decia "en True, cierra". Era falso: el codigo que cierra no estaba escrito.
+#  Una bandera que promete una conducta inexistente es peor que no tenerla --
+#  la proxima sesion la enciende, no pasa nada, y se va a buscar el error a
+#  otro lado. Es la misma familia que "codigo construido no es codigo que
+#  corre", y por eso se saco en vez de dejarla "para despues".
+#
+#  Lo que SI hace: medir. Marca cada propuesta con si el sistema la habria
+#  cerrado solo y por que, corriendo las condiciones REALES del cierre. Ese
+#  registro es lo que produce el dato que el propio codigo exige para el paso
+#  siguiente: 'autonomia.cambiar()' pide criterios MEDIDOS, no una intuicion.
+#
+#  Para que el cierre ocurra de verdad faltan tres cosas, y ninguna es esta:
+#    1. el codigo que llame a 'cierre_de_caso.cerrar' desde el ciclo
+#    2. un actor de sistema ('ACTOR_AUTOMATICO') que la auditoria acepte
+#    3. el techo de autonomia de la empresa en NIVEL_EJECUTAR_REVERSIBLE,
+#       que hoy esta en NIVEL_RECOMENDAR (models.py, NIVEL_MAXIMO_ETAPA)
+EN_SOMBRA = True
+
+#  Quien figura en la auditoria cuando cierra el sistema. Decision del usuario
+#  el 07/10/2026 sobre la alternativa de usar su propio usuario: si lo
+#  automatico y lo humano quedan con el mismo nombre, el dia que algo salga mal
+#  no hay forma de separarlos, que es justo cuando hace falta.
+ACTOR_AUTOMATICO = "Supervisor NOC IA"
+
+#  El nivel que una propuesta tiene que pedir para que el ciclo la ejecute.
+#  Cerrar un caso en el CRM es reversible --se reabre-- y por eso es 3 y no 4:
+#  el 4 es "siempre lo aprueba una persona" y 'autonomia.puede' lo niega
+#  siempre, por configuracion que tenga la empresa.
+NIVEL_PARA_CERRAR = PropuestaSupervisor.NIVEL_EJECUTAR_REVERSIBLE
+
+
+def evaluar_cierre_automatico(org, senales, *, ahora=None) -> dict:
+    """
+    Si cada caso con 'cierre_seguro' CERRARIA hoy. En sombra no cierra.
+
+    Corre las condiciones REALES ('cierre_de_caso.condiciones_del_caso'), las
+    mismas doce que corren antes de un cierre de verdad. No las imita: una
+    sombra que midiera otra cosa que la ejecucion no serviria para decidir si
+    encenderla, que es su unico proposito.
+
+    Lo que deja escrito en la señal:
+        cierre_automatico   'cerraria' | 'no_cerraria' | 'no_aplica'
+        cierre_automatico_porque   el motivo, en el idioma de quien lee
+
+    NO CIERRA, y no hay forma de que cierre: el codigo que ejecuta un cierre
+    desde el ciclo todavia no existe. Ver la nota de 'EN_SOMBRA' arriba para
+    las tres cosas que faltan.
+    """
+    from cases.models import Case
+    from operaciones import cierre_de_caso
+
+    ahora = ahora or timezone.now()
+    informe = {"cerraria": 0, "no_cerraria": 0, "no_aplica": 0,
+               "cerrados": 0, "motivos": {}}
+
+    for senal in senales:
+        if senal.tipo != PropuestaSupervisor.CASO_DESINCRONIZADO:
+            continue
+        if senal.datos.get("diagnostico_veredicto") != CIERRE_SEGURO:
+            #  Sin un diagnostico que lo habilite no se evalua siquiera. El
+            #  'no_aplica' se escribe igual: el silencio en una señal que no
+            #  se miro es indistinguible del silencio en una que si.
+            informe["no_aplica"] += 1
+            senal.datos["cierre_automatico"] = "no_aplica"
+            senal.datos["cierre_automatico_porque"] = (
+                "el diagnostico no habilita un cierre automatico")
+            continue
+
+        caso = Case.objects.filter(id=senal.origen_id, org=org).first()
+        if caso is None:
+            informe["no_cerraria"] += 1
+            senal.datos["cierre_automatico"] = "no_cerraria"
+            senal.datos["cierre_automatico_porque"] = "el caso ya no existe"
+            continue
+
+        #  Se construye una propuesta EN MEMORIA, sin guardar: las condiciones
+        #  miran la organizacion y el origen, y eso ya se sabe sin ir a la
+        #  base. Guardar una propuesta falsa para poder validarla seria dejar
+        #  basura en una tabla que es registro de decisiones.
+        fantasma = PropuestaSupervisor(
+            org=org, tipo_senal=senal.tipo, origen_tipo=senal.origen_tipo,
+            origen_id=senal.origen_id,
+            estado=PropuestaSupervisor.ACEPTADA)
+        try:
+            cierre_de_caso.condiciones_del_caso(fantasma, caso, ahora=ahora)
+        except cierre_de_caso.NoSeCerro as no:
+            informe["no_cerraria"] += 1
+            informe["motivos"][no.motivo] = informe["motivos"].get(no.motivo, 0) + 1
+            senal.datos["cierre_automatico"] = "no_cerraria"
+            senal.datos["cierre_automatico_porque"] = (
+                f"no cerraria: {no.detalle or no.motivo}")
+            continue
+
+        informe["cerraria"] += 1
+        senal.datos["cierre_automatico"] = "cerraria"
+        senal.datos["cierre_automatico_porque"] = (
+            "el diagnostico habilita el cierre y las condiciones del caso se "
+            "siguen cumpliendo"
+            + (". No se cerro: el cierre automatico esta en modo sombra, asi "
+               "que esto es lo que el sistema HABRIA hecho." if EN_SOMBRA
+               else ""))
+        senal.evidencia.append(sup._observacion(
+            "cierre automatico", senal.origen_id,
+            senal.datos["cierre_automatico_porque"], ahora))
+
+    return informe
+
+
+def propuesta_pendiente_de(org, senal):
+    """
+    La propuesta VIVA y sin decidir de esta señal, o None.
+
+    Solo 'PROPUESTA': una aceptada, rechazada o modificada ya recibio su
+    decision humana, y volver sobre ella seria pisar lo que alguien dijo.
+    """
+    return PropuestaSupervisor.objects.filter(
+        org=org, tipo_senal=senal.tipo, origen_tipo=senal.origen_tipo,
+        origen_id=senal.origen_id, huella_condicion=senal.huella,
+        estado=PropuestaSupervisor.PROPUESTA,
+    ).order_by("-created_at").first()
+
+
+def le_falta_diagnostico(propuesta) -> bool:
+    """
+    Si esta propuesta se emitio ANTES de que existiera el diagnostico optico.
+
+    Se mira la evidencia --que es lo que de verdad tiene o no tiene-- y no una
+    marca aparte: una bandera podria quedar puesta sin que la evidencia este, y
+    entonces diria que ya se diagnostico un caso del que no se sabe nada.
+    """
+    for pieza in (propuesta.evidencia or []):
+        if isinstance(pieza, dict) and pieza.get("fuente") == "diagnostico":
+            return False
+    return True
+
+
+def hay_que_reintentar_diagnostico(propuesta) -> bool:
+    """
+    Si a esta propuesta vale la pena volver a preguntarle al proveedor.
+
+    EL AGUJERO QUE CIERRA  --  medido el 09/10/2026
+    -----------------------------------------------
+    Noventa y cinco casos quedaron atascados y seis corridas seguidas
+    devolvieron 'cerrados: 0' con los dos mapas VACIOS -- ni siquiera entraban
+    al circuito. Todos habian sido diagnosticados ANTES de que existiera el
+    respaldo por ping, con el veredicto "no hay equipo registrado, no se puede
+    verificar". Como ya tenian su linea de diagnostico, 'le_falta_diagnostico'
+    los daba por atendidos y no volvian a intentarse NUNCA -- aunque ahora
+    hubiera un instrumento nuevo que si los resolvia.
+
+    Es la misma familia que el comentario de 'por_cerrar' ya describia en
+    'supervisor.py': un diagnostico viejo que congela la decision para
+    siempre. Ahi el disparador era el nivel de autonomia; aca, un instrumento
+    que no existia.
+
+    QUE SE REINTENTA Y QUE NO, y la diferencia es la de todo este modulo:
+
+      SIN_DIAGNOSTICO   "no se pudo preguntar". Transitorio por definicion --
+                        falta el serial, el motor no contesto, el ping no
+                        salio. Se reintenta: manana puede haber respuesta.
+      REVISAR_PERSONA   "se pregunto y el equipo esta mal". NO se reintenta:
+                        no es una falta de datos, es un hallazgo, y volver a
+                        preguntar no lo va a cambiar.
+      CIERRE_SEGURO     ya esta resuelto.
+
+    SIN VEREDICTO = SE REINTENTA. Las propuestas diagnosticadas antes de hoy
+    no tienen la clave, y no hay forma de saber que decidieron sin leer su
+    texto -- que es justo lo que este modulo no hace. Reintentarlas una vez es
+    barato y correcto: si siguen sin resolverse quedan con su veredicto
+    puesto, y a partir de ahi la regla de arriba decide sola.
+    """
+    for pieza in (propuesta.evidencia or []):
+        if isinstance(pieza, dict) and pieza.get("fuente") == "diagnostico":
+            return pieza.get("veredicto", SIN_DIAGNOSTICO) == SIN_DIAGNOSTICO
+    return False
+
+
+def completar_propuesta_existente(org, senal, propuesta, *, ahora=None,
+                                  autorizacion=None) -> dict:
+    """
+    Le agrega el diagnostico a una propuesta YA EMITIDA, y la cierra si procede.
+
+    POR QUE HACE FALTA (08/10/2026)
+    -------------------------------
+    Porque sin esto el cierre automatico no servia para nada en la practica.
+    Medido en produccion: 75 casos desincronizados, y los 75 YA tenian
+    propuesta. El ciclo las descartaba con 'repetida' antes de mirarlas, asi
+    que no habia ni una sola señal nueva sobre la que diagnosticar -- el
+    sistema estaba completo, autorizado, y no tenia sobre que actuar.
+
+    La alternativa era cancelar 75 propuestas a mano para que se regeneraran.
+    Eso habria resuelto el sintoma de hoy y dejado el mismo problema para
+    siempre: una propuesta que queda pendiente dos dias no ganaba diagnostico
+    nunca.
+
+    LA EVIDENCIA SE AGREGA, NO SE REESCRIBE. Las siete observaciones originales
+    quedan donde estaban y el diagnostico se suma como octava. Una propuesta es
+    el registro de lo que se sabia al proponerla; aqui se sabe mas, y eso se
+    anota -- no se borra lo anterior.
+
+    EL NIVEL SUBE A 3 SOLO SI EL DIAGNOSTICO LO HABILITA, igual que en una
+    propuesta nueva. Sin eso la propuesta pedia nivel 1 --porque nacio sin
+    diagnostico-- y la primera puerta del cierre la rechazaria por una razon
+    que ya no es cierta.
+    """
+    ahora = ahora or timezone.now()
+    veredicto = senal.datos.get("diagnostico_veredicto")
+    if not veredicto:
+        return {"intentado": False, "cerrado": False,
+                "motivo": "no se diagnostico en esta corrida"}
+
+    #  SI NO SE LE PREGUNTO AL PROVEEDOR, NO SE ESCRIBE NADA.
+    #
+    #  Con el presupuesto en 3 y 75 casos, 72 quedan sin consultar por corrida.
+    #  Anotarles "no se diagnostico: se agoto el presupuesto" serian 72
+    #  escrituras por ciclo que no dicen nada del equipo y que ensucian la
+    #  evidencia de la propuesta -- y encima harian que 'le_falta_diagnostico'
+    #  las diera por atendidas, asi que no volverian a intentarse NUNCA.
+    #  Ese ultimo efecto es el grave: el presupuesto dejaria de ser "mas tarde"
+    #  y pasaria a ser "nunca".
+    if not senal.datos.get("diagnostico_consultado"):
+        return {"intentado": False, "cerrado": False,
+                "motivo": "no se le pregunto al proveedor en esta corrida"}
+
+    campos = ["evidencia", "updated_at"]
+    pieza = sup._observacion(
+        "diagnostico", senal.origen_id,
+        f"diagnostico del equipo: "
+        f"{senal.datos.get('diagnostico_porque', '')}", ahora)
+    pieza["veredicto"] = veredicto
+    #  SE REEMPLAZA la linea de diagnostico vieja en vez de apilar otra: una
+    #  propuesta reintentada acumularia una observacion por intento, y quien
+    #  la lea no sabria cual vale. Se conserva todo lo demas de la evidencia.
+    propuesta.evidencia = [
+        x for x in (propuesta.evidencia or [])
+        if not (isinstance(x, dict) and x.get("fuente") == "diagnostico")
+    ] + [pieza]
+    if veredicto == CIERRE_SEGURO:
+        propuesta.nivel_autonomia_requerido = NIVEL_PARA_CERRAR
+        campos.append("nivel_autonomia_requerido")
+    propuesta.updated_at = ahora
+    propuesta.save(update_fields=campos)
+
+    return cerrar_si_corresponde(org, propuesta, ahora=ahora,
+                                 autorizacion=autorizacion)
+
+
+def cerrar_si_corresponde(org, propuesta, *, ahora=None,
+                          autorizacion=None) -> dict:
+    """
+    Cierra el caso de una propuesta recien creada, si las DOS puertas lo dejan.
+
+    Devuelve {intentado, cerrado, motivo}. Nunca levanta: un cierre que no
+    ocurre es un resultado posible del ciclo, no algo que deba tumbarlo.
+
+    LAS TRES PUERTAS, Y NINGUNA ES LA OTRA
+    --------------------------------------
+      1. LA PROPUESTA PIDE NIVEL 3. Solo lo pide si su diagnostico optico dio
+         'cierre_seguro' -- equipo en linea con señal buena, o caido por falta
+         de energia en la casa del cliente. Cualquier otra cosa se queda en
+         nivel 1 y ni llega aqui.
+      2. ALGUIEN SE LO PIDIO. La tarea tiene que estar delegada, y la delega
+         una persona desde el chat del Supervisor. El nivel dice CUANTO puede
+         hacer; esto dice QUE le pidieron que haga. Sin esta puerta, subir el
+         nivel para habilitar cualquier otra cosa encenderia tambien el cierre
+         de casos, en silencio.
+      3. LA EMPRESA LO AUTORIZO. 'autonomia.puede(org, 3)' lee el nivel
+         configurado para ESTA empresa, que solo sube una persona con nombre,
+         motivo y criterios medidos.
+
+    Y despues de las tres, 'cierre_de_caso.cerrar' vuelve a validar las once
+    condiciones sobre datos releidos con la fila bloqueada. Que el ciclo haya
+    decidido cerrarlo hace un segundo no exime de eso: entre el diagnostico y
+    el cierre el proveedor pudo reabrir el ticket.
+
+    QUIEN FIGURA EN LA AUDITORIA
+    ----------------------------
+    Nadie: 'revisado_por' queda en NULL y el resultado dice que lo cerro el
+    Supervisor NOC IA. Es como se distingue lo automatico de lo humano cuando
+    alguien pregunte, dentro de seis meses, por que se cerro este caso.
+    """
+    from operaciones import autonomia, cierre_de_caso, tareas_delegadas
+    from operaciones import supervisor as sup_mod
+
+    ahora = ahora or timezone.now()
+
+    #  PUERTA 1  --  el diagnostico, via el nivel que la propuesta declara.
+    if propuesta.nivel_autonomia_requerido < NIVEL_PARA_CERRAR:
+        return {"intentado": False, "cerrado": False,
+                "motivo": "el diagnostico no habilita un cierre automatico"}
+
+    #  PUERTA 2  --  QUE ALGUIEN LO HAYA PEDIDO (08/10/2026).
+    #
+    #  El nivel de autonomia dice CUANTO puede hacer el Supervisor; esto dice
+    #  QUE le pidieron que haga. Son distintos y hacen falta los dos: un nivel
+    #  3 sin tarea delegada significa "podes ejecutar cosas reversibles", no
+    #  "cerra los casos desincronizados". Sin esta puerta, subir el nivel para
+    #  habilitar cualquier otra cosa encenderia tambien esta, en silencio.
+    #
+    #  La tarea la delega una persona desde el chat, y queda con su nombre y la
+    #  frase con la que la pidio.
+    if not tareas_delegadas.esta_delegada(org, tareas_delegadas.CERRAR_DESINCRONIZADOS):
+        return {"intentado": False, "cerrado": False,
+                "motivo": "nadie le delego al Supervisor que cierre estos "
+                          "casos: se le pide desde su chat"}
+
+    #  PUERTA 3  --  lo que la empresa autorizo. Se consulta aunque las dos
+    #  anteriores hayan pasado: pasar una no exime de la siguiente, que es como
+    #  funciona la frontera del motor y por el mismo motivo.
+    #  UNA SOLA CONSULTA POR CORRIDA cuando el llamador la pasa, y no es una
+    #  optimizacion cosmetica: desde que el interruptor se lee por HTTP,
+    #  'autonomia.puede' es una llamada de red. Preguntarla por propuesta
+    #  significaba 75 llamadas dentro de un ciclo que alguien esta esperando
+    #  con la pantalla abierta -- medido hoy, dos minutos sin terminar.
+    #
+    #  Se sigue consultando si no la pasan: un llamador que la olvide tiene que
+    #  obtener la respuesta correcta, no ninguna.
+    veredicto = autorizacion if autorizacion is not None else autonomia.puede(
+        org, NIVEL_PARA_CERRAR)
+    if not veredicto.get("puede"):
+        return {"intentado": False, "cerrado": False,
+                "motivo": f"la empresa no lo autoriza: "
+                          f"{veredicto.get('motivo') or 'sin motivo'}"}
+
+    #  La aceptacion se persiste ANTES de intentar el cierre, igual que en el
+    #  camino humano y por la misma razon medida alli: si la llamada al
+    #  proveedor falla, la decision igual quedo registrada y auditada. Al reves,
+    #  un fallo de red haria rollback de una decision que si se tomo.
+    try:
+        sup_mod.revisar(
+            propuesta, actor=None, automatico=True,
+            decision=PropuestaSupervisor.ACEPTADA,
+            comentario=(f"Aceptada automaticamente por {ACTOR_AUTOMATICO}: "
+                        f"{(propuesta.motivo or '')[:300]}"),
+            ahora=ahora)
+        propuesta.refresh_from_db()
+    except Exception as e:                                       # noqa: BLE001
+        #  El tipo y no el texto: lo mismo que el resto del modulo.
+        return {"intentado": False, "cerrado": False,
+                "motivo": f"no se pudo registrar la aceptacion "
+                          f"({type(e).__name__})"}
+
+    try:
+        resultado = cierre_de_caso.cerrar(propuesta, actor=None, ahora=ahora)
+    except Exception as e:                                       # noqa: BLE001
+        #  'cerrar' promete no levantar por un cierre que no ocurrio, pero una
+        #  excepcion inesperada aqui no puede tumbar el ciclo entero: quedan
+        #  otras señales por procesar y la propuesta YA esta aceptada.
+        return {"intentado": True, "cerrado": False,
+                "motivo": f"el cierre fallo ({type(e).__name__})"}
+
+    return {"intentado": True,
+            "cerrado": bool(resultado.get("cerrado")),
+            "motivo": resultado.get("motivo") or "",
+            #  QUE CASO FUE, para que quien corrio el ciclo pueda ir a verlo.
+            #  Un conteo --"cerro 3"-- no se puede verificar: hay que poder
+            #  abrir esos tres y leer contra que se cerraron. Esto es lo que
+            #  pidio el usuario al preguntar "¿como voy a saber cuales cerro?",
+            #  y la pregunta estaba bien: hasta ese momento no habia forma.
+            "caso_id": str(propuesta.origen_id),
+            "propuesta_id": str(propuesta.id),
+            #  LA REFERENCIA DEL PROVEEDOR, que es con lo que una persona
+            #  busca el ticket. 'caso_id' es un UUID: sirve para abrir el caso
+            #  desde un enlace y no sirve para nada si alguien lo lee en un
+            #  mensaje. Hasta el 09/10/2026 no viajaba, y el aviso del chat
+            #  habria dicho "caso sin referencia" en cada renglon.
+            "referencia": str(resultado.get("referencia") or ""),
+            #  EL NUMERO DE TICKET DEL PROVEEDOR, que es con lo que una
+            #  persona busca. 'referencia' la devuelve el motor y es su clave
+            #  de idempotencia --'propuesta:<uuid>'--: correcta para eso e
+            #  inutil para alguien que lee un aviso. Medido el 09/10/2026: el
+            #  primer mensaje que el Supervisor escribio en el chat decia
+            #  'propuesta:a9499ad3-...' y no se podia buscar con eso.
+            #
+            #  Una consulta mas, y solo cuando SE CERRO: no se paga por cada
+            #  caso evaluado, se paga por cada uno cerrado.
+            "ticket": _ticket_del_caso(propuesta),
+            "porque": porque_del_cierre(propuesta)}
+
+
+def _ticket_del_caso(propuesta) -> str:
+    """El id del ticket en el proveedor, o vacio si el caso ya no esta."""
+    from cases.models import Case
+
+    return str(Case.objects
+               .filter(id=propuesta.origen_id, org_id=propuesta.org_id)
+               .values_list("external_ticket_id", flat=True)
+               .first() or "")
+
+
+def porque_del_cierre(propuesta) -> str:
+    """
+    La razon escrita del diagnostico, sacada de la evidencia de la propuesta.
+
+    Se lee de la EVIDENCIA y no de un campo aparte: es lo que de verdad quedo
+    guardado, y lo que alguien va a leer dentro de seis meses.
+    """
+    for pieza in reversed(propuesta.evidencia or []):
+        if isinstance(pieza, dict) and pieza.get("fuente") == "diagnostico":
+            return str(pieza.get("dato") or "")
+    return ""
+
+
+def _anotar(senal, veredicto: str, porque: str, diagnostico, ahora) -> None:
+    """
+    Deja el veredicto en la señal: en la evidencia Y en los datos.
+
+    EN LOS DOS LADOS A PROPOSITO, porque sirven a lectores distintos. La
+    evidencia es lo que ve la persona que decide, en el mismo formato que las
+    otras siete observaciones del caso. Los datos son lo que lee el codigo de
+    la fase siguiente -- y leer un veredicto parseando el texto de una
+    evidencia seria exactamente el error que este proyecto llama "el modelo
+    compone, el codigo calcula".
+
+    LO QUE NO SE ESCRIBE: el serial del equipo (el ejecutor del motor no lo
+    devuelve) ni el nombre del cliente. Esto termina en una propuesta que
+    queda guardada, y una propuesta no es lugar para datos de un abonado.
+    """
+    pieza = sup._observacion(
+        "diagnostico", senal.origen_id, f"diagnostico del equipo: {porque}",
+        ahora)
+    #  EL VEREDICTO COMO DATO, no como texto a parsear  --  09/10/2026.
+    #  Sin esto, la unica forma de saber si un diagnostico fue concluyente era
+    #  leer su frase, que es exactamente el error que este modulo nombra mas
+    #  abajo. Con la clave puesta, 'hay_que_reintentar_diagnostico' decide
+    #  sobre un dato.
+    pieza["veredicto"] = veredicto
+    senal.evidencia.append(pieza)
+
+    senal.datos["diagnostico_veredicto"] = veredicto
+    senal.datos["diagnostico_porque"] = porque
+    #  SI SE LE PREGUNTO AL PROVEEDOR O NO. Se distingue de 'tiene veredicto'
+    #  porque un "no se diagnostico, se agoto el presupuesto" TAMBIEN tiene
+    #  veredicto, y confundirlos haria que un caso al que nadie le pregunto
+    #  quedara marcado como atendido.
+    senal.datos["diagnostico_consultado"] = isinstance(diagnostico, dict)
+    if isinstance(diagnostico, dict):
+        #  Las cinco claves que sostienen el veredicto, y solo esas. Guardar el
+        #  diagnostico entero metería campos que nadie decidio guardar el dia
+        #  que el ejecutor devuelva uno nuevo.
+        senal.datos["diagnostico"] = {
+            k: diagnostico.get(k) for k in
+            ("estado", "causa_caida", "senal", "senal_dbm", "estado_config")
+            if k in diagnostico
+        }

@@ -1,0 +1,533 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:campo/core/estado/ordenes_jornada.dart';
+import 'package:campo/core/sync/sync_queue_service.dart';
+import 'package:campo/core/theme/app_theme.dart';
+import 'package:campo/features/detalle_orden/acciones_orden.dart';
+import 'package:campo/features/detalle_orden/detalle_orden_screen.dart';
+import 'package:campo/features/ejecucion/ejecucion_screen.dart';
+import 'package:campo/features/detalle_orden/visitas_anteriores.dart';
+import 'package:campo/features/inicio/inicio_screen.dart';
+import 'package:campo/features/trabajo/trabajo_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'apoyo/fuente_de_ejecucion_falsa.dart';
+import 'package:campo/features/materiales/kit_de_jornada.dart';
+import 'package:campo/features/materiales/material_en_custodia.dart';
+import 'package:campo/features/materiales/materiales_screen.dart';
+import 'package:campo/features/materiales/pedir_a_bodega.dart';
+
+/// Que agregar algo no rompa lo que ya estaba.
+///
+/// EL PROBLEMA QUE RESUELVE
+/// -----------------------
+/// Todas las pruebas de pantalla de este proyecto montan a **1000 px de ancho**
+/// —`tester.view.physicalSize = Size(1000, 4200)`— porque así entra todo y se
+/// puede afirmar sobre el contenido sin pelear con el scroll. Mil píxeles es una
+/// tablet. **A ese ancho no desborda nada nunca.**
+///
+/// El teléfono del técnico tiene 360 o 412. Y el daño típico de agregar algo no
+/// es que deje de funcionar: es que una fila que entraba deje de entrar, y el
+/// texto se corte o aparezca la banda amarilla. Eso hoy **no lo detecta ninguna
+/// prueba**: lo encuentra alguien mirando una captura. El propio código lo dice
+/// en `ejecucion_screen.dart` —*«a 390 px esta fila desbordaba 28 px. Lo
+/// encontró la corrida de capturas, no una prueba»*— y las capturas están
+/// apagadas por omisión.
+///
+/// POR QUÉ ESTO Y NO MÁS CAPTURAS
+/// ------------------------------
+/// Una captura dorada falla cada vez que alguien cambia un píxel **a propósito**:
+/// un color, una tipografía, un espacio. Eso enseña a actualizarlas sin mirar, y
+/// entonces dejan de proteger. Esta guarda no compara píxeles: afirma que el
+/// contenido **cabe**. Un cambio de color no la toca; meter un widget de más en
+/// una fila, sí.
+///
+/// CÓMO FUNCIONA
+/// -------------
+/// Flutter reporta `A RenderFlex overflowed by N pixels` como un error del
+/// framework, y `flutter_test` convierte eso en un fallo. O sea que montar cada
+/// pantalla al ancho de un teléfono de verdad **ya es la afirmación**: si entra,
+/// pasa; si no, falla con el número de píxeles y el widget culpable.
+///
+/// LO QUE ESTA GUARDA NO HACE
+/// --------------------------
+/// No dice si el diseño es bonito, ni si algo quedó feo, ni si dos secciones se
+/// parecen demasiado. Eso lo ve una persona. Lo que cuida es lo único que se
+/// puede medir y es lo que más se rompe al agregar: **que lo que ya estaba siga
+/// entrando**.
+void main() {
+  /// Anchos de teléfonos reales, en píxeles lógicos.
+  ///
+  /// 360 es el piso práctico en Android (Galaxy A de gama baja, que es
+  /// exactamente el teléfono que una empresa le compra a una cuadrilla). 412 es
+  /// un Pixel. Si entra en 360, entra en todos.
+  const List<(String, double)> anchos = <(String, double)>[
+    ('360 (gama baja)', 360),
+    ('412 (Pixel)', 412),
+  ];
+
+  /// Cuánto agranda la letra el sistema.
+  ///
+  /// POR QUÉ ESTO NO ES UN CASO RARO
+  /// -------------------------------
+  /// Un técnico lee al sol, con casco, a un brazo de distancia. Subir el tamaño
+  /// de letra del teléfono es lo primero que hace cualquiera que trabaje así —y
+  /// 1.3 es un escalón medio, ni siquiera el máximo de Android (que llega a 2.0).
+  ///
+  /// Es, además, la forma más común de romper un diseño sin tocarlo: el texto
+  /// crece y la fila que entraba deja de entrar, en el teléfono de una persona
+  /// y no en el de quien programa.
+  const double letraGrande = 1.3;
+
+  /// El alto de un teléfono de verdad, no uno inventado.
+  ///
+  /// Se probó primero con 3000 px —para aislar el ancho— y eso producía un
+  /// desborde vertical de 197.289 px en la lista de trabajos que era artefacto
+  /// del montaje, no un defecto. Una pantalla alta falsa mide tan mal como una
+  /// ancha falsa.
+  ///
+  /// Lo que importa igual es el ancho: un desborde vertical en una pantalla que
+  /// scrollea se resuelve bajando; uno horizontal no se resuelve con ningún
+  /// gesto, el texto queda cortado y ya.
+  const double alto = 800;
+
+  /// La orden de ejemplo, con los datos LARGOS y el sello del equipo.
+  ///
+  /// [ultimoCambio] es el valor de `last_status_change` tal como puede llegar:
+  /// con offset (las fichas nuevas, que el motor normaliza) o SIN offset (las
+  /// congeladas antes del 06/10/2026, y las de una instancia cuya zona no se
+  /// pudo resolver). Las dos formas conviven y las dos tienen que entrar --la
+  /// segunda ocupa MAS, porque lleva «(hora de la OLT)» pegado.
+  Map<String, dynamic> ordenDeEjemplo({
+    String ultimoCambio = '2026-10-05T10:42:00-05:00',
+    String estadoOnu = 'Online',
+  }) => <String, dynamic>{
+        'id': 'ot-1',
+        'numero': 1849,
+        'estado': 'en_sitio',
+        // Nombres y direcciones LARGOS, que es donde revienta. Un dato corto
+        // entra siempre y no prueba nada.
+        'cliente_nombre': 'MARÍA FERNANDA SABANAGRANDE DE LA ESPRIELLA',
+        'direccion': 'CALLE 38 # 78-33 BARRIO LA ESPERANZA, TORRE 4 APTO 1202',
+        'telefono': '+57 312 455 8901',
+        'tipo_nombre': 'Reparación de Señal (FTTH) con reconectorización',
+        'tipo_codigo': 'ftth_correctivo',
+        'schema_version': 1,
+        'revision': 1,
+        'zona': 'CANDELARIA 2 — SECTOR NORORIENTAL',
+        'prioridad': 'alta',
+        'contexto_json': jsonEncode(<String, dynamic>{
+          'contexto_disponible': true,
+          'capturado_en': '2026-10-05T13:10:00+00:00',
+          'servicio': 'WH-1042',
+          'sn_onu': 'ZTEGC0A1B2C3',
+          'equipo': <String, dynamic>{
+            'onu_status': estadoOnu,
+            // EL SELLO DEL ULTIMO CAMBIO, que ahora se dibuja pegado al
+            // estado: es la fila que mas crecio en esta pantalla.
+            'last_status_change': ultimoCambio,
+            // Un modelo de ONU con nombre entero, no 'ZTE'. Es el dato que
+            // comparte fila con el serial de doce caracteres.
+            'onu_type_name': 'ZTE F660 V8.0 GPON ONU (2GE+2FE+WiFi+POTS)',
+            'onu_signal_1490': '-21.19 dBm',
+            'onu_signal_1310': '-23.98 dBm',
+            'onu_signal_1490_veredicto': 'aceptable',
+            'odb_name': 'CTO 56 — PARQUE PRINCIPAL',
+            'board': 4,
+            'port': 14,
+            'olt_name': 'OLT-RAPILINKSAS_X7',
+            'zone_name': 'CANDELARIA 2',
+          },
+        }),
+      };
+
+  OrdenesJornada armarOrdenes(WidgetTester t, {Map<String, dynamic>? orden}) {
+    final StreamController<SyncStatus> avisos =
+        StreamController<SyncStatus>.broadcast();
+    final OrdenesJornada ordenes = OrdenesJornada(
+      leerOrdenes: () async =>
+          <Map<String, dynamic>>[orden ?? ordenDeEjemplo()],
+      sincronizar: () async {},
+      avisosDeSincronizacion: avisos.stream,
+    );
+    addTearDown(() async {
+      await avisos.close();
+      ordenes.dispose();
+    });
+    return ordenes;
+  }
+
+  Future<void> aEsteAncho(
+    WidgetTester t,
+    double ancho,
+    Widget Function() construir, {
+    double escalaDeLetra = 1.0,
+  }) async {
+    t.view.physicalSize = Size(ancho, alto);
+    t.view.devicePixelRatio = 1.0;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+
+    final Widget pantalla = construir();
+    await t.pumpWidget(MaterialApp(
+      theme: AppTheme.lightTheme,
+      // Las pantallas que no traen `Scaffold` propio viven dentro del armazón,
+      // que sí lo tiene. Es el mismo criterio que usa `capturas_qa_test`, y no
+      // es cosmético: sin él, la lista de trabajos desborda 199.489 px hacia
+      // abajo —medido— porque su `Column` con `Expanded` queda sin una caja que
+      // le ponga el alto. Montarla sin armazón mide un montaje que no existe.
+      home: MediaQuery(
+        data: MediaQueryData(
+          size: Size(ancho, alto),
+          textScaler: TextScaler.linear(escalaDeLetra),
+        ),
+        child: pantalla is Scaffold ? pantalla : Scaffold(body: pantalla),
+      ),
+    ));
+    await t.pumpAndSettle();
+    // No hace falta `expect`: un desborde ya rompió la prueba acá arriba, con
+    // el widget y los píxeles en el mensaje. Esta línea existe para que quede
+    // dicho que el silencio ES el resultado.
+    expect(t.takeException(), isNull, reason: 'algo no entra a $ancho px');
+  }
+
+  for (final (String etiqueta, double ancho) in anchos) {
+    group('A $etiqueta px', () {
+      testWidgets('Inicio entra', (WidgetTester t) async {
+        final OrdenesJornada ordenes = armarOrdenes(t);
+        await aEsteAncho(t, ancho, () => InicioScreen(
+              ordenes: ordenes,
+              abrirTrabajo: (_, _) async {},
+              nombreTecnico: 'Carlos Gómez',
+              ahora: DateTime(2026, 10, 5, 14),
+            ));
+      });
+
+      testWidgets('La lista de trabajos entra', (WidgetTester t) async {
+        final OrdenesJornada ordenes = armarOrdenes(t);
+        await aEsteAncho(t, ancho, () => TrabajoScreen(
+              ordenes: ordenes,
+              abrirTrabajo: (_, _) async {},
+            ));
+      });
+
+      testWidgets('La ficha de la orden entra', (WidgetTester t) async {
+        final OrdenesJornada ordenes = armarOrdenes(t);
+        await aEsteAncho(t, ancho, () => DetalleOrdenScreen(
+              ordenId: 'ot-1',
+              ordenes: ordenes,
+              acciones: AccionesOrden(
+                transicionar: ({
+                  required String ordenId,
+                  required String nuevoEstadoLocal,
+                  required String tipoAccion,
+                  required int revisionBase,
+                }) async {},
+                sincronizar: () async {},
+                medirSenal: (_) async =>
+                    const MedicionDeSenal.noSePudo('sin_conexion'),
+              ),
+            ));
+      });
+
+      testWidgets('La ficha entra tambien con la letra grande',
+          (WidgetTester t) async {
+        final OrdenesJornada ordenes = armarOrdenes(t);
+        await aEsteAncho(
+          t,
+          ancho,
+          () => DetalleOrdenScreen(
+            ordenId: 'ot-1',
+            ordenes: ordenes,
+            acciones: AccionesOrden(
+              transicionar: ({
+                required String ordenId,
+                required String nuevoEstadoLocal,
+                required String tipoAccion,
+                required int revisionBase,
+              }) async {},
+              sincronizar: () async {},
+            ),
+          ),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
+      // ====================================================================
+      //  LO QUE CRECIO EL 06/10/2026, MEDIDO AL ANCHO DE UN TELEFONO
+      // ====================================================================
+      //  Estos casos entraron porque un tecnico de red miro las capturas y
+      //  marco DOS riesgos de layout antes de que nadie los hubiera medido:
+      //  la fila de fotos (que ya desbordo 28 px una vez) y el bloque del
+      //  serial, que crecio al sumarle el sello del ultimo cambio.
+      //
+      //  No se verifican con una captura dorada a proposito: lo que importa
+      //  no es que los pixeles sean iguales, es que el numero importante no
+      //  se corte. Ver el encabezado de este archivo.
+
+      testWidgets('La ficha entra con el ultimo cambio SIN zona',
+          (WidgetTester t) async {
+        // El caso que ocupa MAS: una ficha congelada antes del 06/10/2026
+        // llega sin offset, y el texto lleva «(hora de la OLT)» pegado para
+        // no insinuar una antiguedad que no se puede calcular. Es mas largo
+        // que el caso normalizado, asi que si entra este, entra el otro.
+        final OrdenesJornada ordenes = armarOrdenes(
+          t,
+          orden: ordenDeEjemplo(
+            ultimoCambio: '2026-10-05 10:42:00',
+            estadoOnu: 'Offline',
+          ),
+        );
+        await aEsteAncho(t, ancho, () => DetalleOrdenScreen(
+              ordenId: 'ot-1',
+              ordenes: ordenes,
+              acciones: AccionesOrden(
+                transicionar: ({
+                  required String ordenId,
+                  required String nuevoEstadoLocal,
+                  required String tipoAccion,
+                  required int revisionBase,
+                }) async {},
+                sincronizar: () async {},
+              ),
+            ));
+      });
+
+      testWidgets('Y tambien con la letra grande, que es donde revienta',
+          (WidgetTester t) async {
+        final OrdenesJornada ordenes = armarOrdenes(
+          t,
+          orden: ordenDeEjemplo(
+            ultimoCambio: '2026-10-05 10:42:00',
+            estadoOnu: 'Offline',
+          ),
+        );
+        await aEsteAncho(
+          t,
+          ancho,
+          () => DetalleOrdenScreen(
+            ordenId: 'ot-1',
+            ordenes: ordenes,
+            acciones: AccionesOrden(
+              transicionar: ({
+                required String ordenId,
+                required String nuevoEstadoLocal,
+                required String tipoAccion,
+                required int revisionBase,
+              }) async {},
+              sincronizar: () async {},
+            ),
+          ),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
+      // La fila de fotos, en los TRES estados. El que mas ocupa no es el
+      // lleno: es cualquiera con dos numeros de dos digitos y la palabra
+      // entera, y el que mas importa es «nada enviada», que es el caso real
+      // de un tecnico sin señal.
+      for (final (String nombre, int enviadas) in <(String, int)>[
+        ('nada capturado', 0),
+        ('todo capturado, nada enviado', 0),
+        ('todo capturado y enviado', 3),
+      ]) {
+        testWidgets('La ejecucion entra con $nombre', (WidgetTester t) async {
+          final bool conFotos = nombre != 'nada capturado';
+          await aEsteAncho(
+            t,
+            ancho,
+            () => EjecucionScreen(
+              ordenId: 'ot-1',
+              fuente: FuenteDeEjecucionFalsa(
+                evidencias: !conFotos
+                    ? <Map<String, dynamic>>[]
+                    : <Map<String, dynamic>>[
+                        for (final String req in <String>[
+                          'foto_power_meter',
+                          'foto_roseta',
+                          'firma_cliente',
+                        ])
+                          FuenteDeEjecucionFalsa.evidencia(
+                            requisitoId: req,
+                            estado: enviadas == 3 ? 'confirmada' : 'pendiente',
+                          ),
+                      ],
+              ),
+            ),
+          );
+        });
+      }
+
+      testWidgets('La ejecucion entra con letra grande y las dos cuentas',
+          (WidgetTester t) async {
+        await aEsteAncho(
+          t,
+          ancho,
+          () => EjecucionScreen(
+            ordenId: 'ot-1',
+            fuente: FuenteDeEjecucionFalsa(
+              evidencias: <Map<String, dynamic>>[
+                FuenteDeEjecucionFalsa.evidencia(
+                  requisitoId: 'foto_power_meter',
+                  estado: 'confirmada',
+                ),
+                FuenteDeEjecucionFalsa.evidencia(
+                  requisitoId: 'foto_roseta',
+                  estado: 'pendiente',
+                ),
+              ],
+            ),
+          ),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
+      testWidgets('La hoja para pedir a bodega entra', (WidgetTester t) async {
+        // Con el nombre de material MAS LARGO del catalogo real y una unidad
+        // escrita entera: es la linea que el dropdown tiene que meter en una
+        // sola fila junto al saldo.
+        await aEsteAncho(
+          t,
+          ancho,
+          () => Scaffold(
+            body: HojaDePedido(
+              materiales: const <MaterialEnCustodia>[
+                MaterialEnCustodia(
+                  categoria: 'Conectividad',
+                  nombre: 'Conector SC/APC rapido verde preensamblado',
+                  detalle: 'CON-SC-APC-V',
+                  codigo: 'CON-SC-APC-V',
+                  clase: ClaseMaterial.consumible,
+                  recibidos: 120,
+                  usados: 118,
+                  unidad: 'unidades',
+                ),
+              ],
+            ),
+          ),
+        );
+      });
+
+      testWidgets('La hoja entra tambien con la letra grande',
+          (WidgetTester t) async {
+        await aEsteAncho(
+          t,
+          ancho,
+          () => Scaffold(
+            body: HojaDePedido(
+              materiales: const <MaterialEnCustodia>[
+                MaterialEnCustodia(
+                  categoria: 'Conectividad',
+                  nombre: 'Cable drop fibra optica 1 hilo autosoportado',
+                  detalle: 'DROP-1H',
+                  codigo: 'DROP-1H',
+                  clase: ClaseMaterial.bobina,
+                  recibidos: 1000,
+                  usados: 957,
+                  unidad: 'm',
+                ),
+              ],
+            ),
+          ),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
+      testWidgets('Los pedidos en curso entran en la pantalla de materiales',
+          (WidgetTester t) async {
+        // El kit y los pedidos se inyectan: esta guarda corre con el reloj
+        // falso de la prueba y no puede esperar a SQLite.
+        //
+        // ESTE CASO ENCONTRO DOS DESBORDES QUE YA ESTABAN, y no los puso el
+        // pedido: el titulo «Materiales en Custodia» con su conteo desbordaba
+        // 153 px a 360, y el boton «Preparar Devolucion al Deposito» 190 px.
+        // La guarda no cubria esta pantalla, asi que nadie los habia medido --
+        // el boton que cierra la jornada se salia de un Galaxy A sin que nada
+        // avisara.
+        await aEsteAncho(
+          t,
+          ancho,
+          () => MaterialesScreen(
+            tecnico: 'Carlos Gomez',
+            mostrarDatosFuturos: false,
+            kit: const KitDeJornada(
+              materiales: <MaterialEnCustodia>[
+                MaterialEnCustodia(
+                  categoria: 'Conectividad',
+                  nombre: 'Conector SC/APC rapido verde preensamblado',
+                  detalle: 'CON-SC-APC-V',
+                  codigo: 'CON-SC-APC-V',
+                  clase: ClaseMaterial.consumible,
+                  recibidos: 120,
+                  usados: 118,
+                  unidad: 'unidades',
+                ),
+              ],
+              acta: 'Acta #K-2026-311',
+              sinSubir: 0,
+              conNovedad: <MovimientoConNovedad>[],
+            ),
+            pedidos: const <PedidoEnCola>[
+              PedidoEnCola(
+                id: 'p1',
+                material: 'Conector SC/APC rapido verde preensamblado',
+                cantidad: '20',
+                estado: 'pendiente',
+              ),
+              PedidoEnCola(
+                id: 'p2',
+                material: 'Cable drop fibra optica 1 hilo autosoportado',
+                cantidad: '250',
+                estado: 'fallido',
+                errorMensaje: 'Ese material no existe en esta empresa.',
+              ),
+            ],
+          ),
+        );
+      });
+
+      testWidgets('Las visitas anteriores entran', (WidgetTester t) async {
+        // Con los textos más largos que puede devolver el servidor: un tipo de
+        // trabajo con nombre completo, un técnico con nombre y apellido, y una
+        // lista de materiales.
+        await aEsteAncho(
+          t,
+          ancho,
+          () => Scaffold(
+            body: SingleChildScrollView(
+              child: VisitasAnteriores(
+                historial: <String, dynamic>{
+                  'hay_servicio': true,
+                  'visitas': <dynamic>[
+                    <String, dynamic>{
+                      'numero': 1842,
+                      'tipo': 'Reparación de Señal (FTTH) con reconectorización',
+                      'cuando': '2026-09-28T14:05:00+00:00',
+                      'como_termino': 'resuelto',
+                      'quien': 'Carlos Alberto Gómez Restrepo',
+                      'cambio_equipo': true,
+                      'materiales': <Map<String, dynamic>>[
+                        <String, dynamic>{
+                          'material': 'Cable drop fibra 1 hilo',
+                          'cantidad': '43.5',
+                          'unidad': 'm',
+                        },
+                        <String, dynamic>{
+                          'material': 'Conector SC/APC rápido verde',
+                          'cantidad': '2',
+                          'unidad': 'u',
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ),
+            ),
+          ),
+        );
+      });
+    });
+  }
+}

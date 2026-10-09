@@ -1,0 +1,113 @@
+import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
+
+/**
+ * Las áreas de la empresa y de qué área es cada persona.
+ *
+ * El CRM no tiene campo de área: el área vive en el asistente y es POR
+ * PERSONA, así que la de un caso se deriva de a quién está asignado. Esto lo
+ * usan la cola de tickets (para agrupar) y el detalle (para el panel
+ * lateral) -- una sola función porque las dos pantallas tienen que agrupar
+ * igual, o dirían cosas distintas del mismo ticket.
+ *
+ * Devuelve `{ areas: [], areaPorPersona: {} }` si el asistente no responde:
+ * ver los tickets no puede depender de que el motor esté arriba.
+ *
+ * @param {App.Locals} locals
+ * @param {typeof globalThis.fetch} fetch
+ * @returns {Promise<{ areas: any[], areaPorPersona: Record<string, string> }>}
+ */
+export async function leerAreas(locals, fetch) {
+  const base = env.PRIVATE_ASISTENTE_URL;
+  const tenant = await tenantDeLaSesion(locals, fetch);
+  if (!base || !tenant) return { areas: [], areaPorPersona: {} };
+
+  const t = encodeURIComponent(tenant);
+  // '/agentes/areas' es el liviano: sólo lecturas locales del asistente.
+  // '/agentes/asignaciones' devuelve lo mismo y además identidades, agentes y
+  // los candidatos del sistema externo -- una llamada HTTP afuera que estas
+  // pantallas no usan y que igual esperaban (segundos, con la pantalla
+  // quieta).
+  //
+  // Se prueba el liviano y se cae al viejo si todavía no existe: el motor y
+  // esta pantalla se despliegan por separado, así que hay una ventana en la
+  // que ya está el frontend nuevo y todavía no el motor nuevo. Sin esta
+  // caída, en esa ventana TODOS los tickets aparecerían sin área -- y a un
+  // colaborador, que sólo ve la suya, no le aparecería ninguno.
+  for (const ruta of ['/agentes/areas', '/agentes/asignaciones']) {
+    try {
+      const r = await fetch(`${base}${ruta}?tenant=${t}`, {
+        headers: headersMotor(),
+        // El plazo importa tanto como el endpoint: sin él, un motor lento
+        // deja la cola en blanco todo ese rato. La pantalla ya sabe seguir
+        // sin áreas; lo que no sabía era dejar de esperarlas.
+        signal: AbortSignal.timeout(5000)
+      });
+      if (r.status === 404) continue;
+      if (!r.ok) return { areas: [], areaPorPersona: {} };
+      const d = await r.json();
+      return { areas: d.areas ?? [], areaPorPersona: d.areas_por_persona ?? {} };
+    } catch {
+      return { areas: [], areaPorPersona: {} };
+    }
+  }
+  return { areas: [], areaPorPersona: {} };
+}
+
+/**
+ * Crear, renombrar y borrar un area.
+ *
+ * Las tres escriben en la configuracion del tenant a traves del motor, que
+ * valida el documento entero antes de guardar. A diferencia de `leerAreas`,
+ * estas NO degradan en silencio: si el motor no contesta hay que decirlo,
+ * porque quien pulso "Crear" tiene que saber si su area existe o no.
+ */
+
+/** @param {App.Locals} locals @param {typeof globalThis.fetch} fetch */
+async function escribirArea(locals, fetch, ruta, opciones) {
+  const base = env.PRIVATE_ASISTENTE_URL;
+  const tenant = await tenantDeLaSesion(locals, fetch);
+  if (!base || !tenant) throw new Error('El asistente no esta configurado.');
+
+  const r = await fetch(`${base}${ruta}`, {
+    ...opciones,
+    headers: { ...headersMotor(), 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(10000)
+  });
+  const datos = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    //  El motor explica el motivo --un area repetida, una con gente adentro--
+    //  y ese texto es mas util que "no se pudo guardar". Se propaga tal cual.
+    throw new Error(datos?.error || `El asistente respondio ${r.status}.`);
+  }
+  return datos;
+}
+
+/** @param {App.Locals} locals @param {typeof globalThis.fetch} fetch */
+export async function crearArea(locals, fetch, { etiqueta, color, icono }) {
+  const tenant = await tenantDeLaSesion(locals, fetch);
+  return escribirArea(locals, fetch, '/agentes/areas', {
+    method: 'POST',
+    body: JSON.stringify({ tenant, etiqueta, color, icono })
+  });
+}
+
+/** @param {App.Locals} locals @param {typeof globalThis.fetch} fetch */
+export async function editarArea(locals, fetch, nombre, cambios) {
+  const tenant = await tenantDeLaSesion(locals, fetch);
+  return escribirArea(locals, fetch, `/agentes/areas/${encodeURIComponent(nombre)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ tenant, ...cambios })
+  });
+}
+
+/** @param {App.Locals} locals @param {typeof globalThis.fetch} fetch */
+export async function borrarArea(locals, fetch, nombre) {
+  const tenant = await tenantDeLaSesion(locals, fetch);
+  const t = encodeURIComponent(tenant ?? '');
+  return escribirArea(
+    locals, fetch,
+    `/agentes/areas/${encodeURIComponent(nombre)}?tenant=${t}`,
+    { method: 'DELETE' });
+}

@@ -1,0 +1,78 @@
+- generic [ref=f9e4]:
+  - generic [ref=f9e5]:
+    - button "Abrir menú" [ref=f9e6] [cursor=pointer]
+    - generic [ref=f9e8]: Q
+    - heading "QA BANDEJA (datos de prueba)" [level=2] [ref=f9e9]
+    - button "Buscar" [ref=f9e10] [cursor=pointer]
+  - banner [ref=f9e14]:
+    - generic [ref=f9e15]:
+      - heading "Conversaciones" [level=1] [ref=f9e16]
+      - generic [ref=f9e17]: 1 por atender · 8 en total
+  - generic [ref=f9e19]:
+    - generic [ref=f9e20]:
+      - link "Volver a la lista" [ref=f9e21] [cursor=pointer]:
+        - /url: /conversaciones
+      - generic [aria-hidden] [ref=f9e24]: CQ
+      - generic [ref=f9e25]:
+        - heading "CLIENTE QA 2" [level=2] [ref=f9e26]
+        - generic [ref=f9e27]:
+          - generic [ref=f9e28]: Humano · sin asignar
+          - generic [ref=f9e30]: WhatsApp
+          - generic [ref=f9e31]: abierta
+      - button "Contexto" [ref=f9e32] [cursor=pointer]
+    - paragraph [ref=f9e35]:
+      - strong [ref=f9e38]: Escalada · IA no responde
+      - button "Tomar" [ref=f9e39] [cursor=pointer]
+      - button "Reasignar" [ref=f9e43] [cursor=pointer]
+      - generic [ref=f9e44]:
+        - button "Marcar como resuelta" [ref=f9e45] [cursor=pointer]
+        - tooltip "Usá esto si el caso se resolvió por teléfono, presencialmente o por otro canal. Abajo elegís en qué terminó y se cierra la conversación; el próximo mensaje del cliente abre una nueva."
+    - generic [ref=f9e46]:
+      - generic [ref=f9e47]:
+        - term [ref=f9e48]: Qué quiere
+        - definition [ref=f9e49]: Buenas tardes, les escribo porque desde el martes de la semana pasada vengo presentando intermitencias en el servicio, sobre todo entre las siete y las diez de la noche, que es justo cuando mi hija tiene clases virtuales y yo necesito conectarme al trabajo remoto. Ya reinicie el router como me indicaron la vez pasada, revise que los cables esten bien puestos y probe conectando directamente por cable sin el wifi, y el problema sigue igual. Tambien note que la luz roja del equipo se enciende cada tanto. Agradezco si pueden enviar un tecnico. QA — lo que escribió, sin resumir
+      - generic [ref=f9e50]:
+        - term [ref=f9e51]: Le prometimos
+        - definition [ref=f9e52]: No se encontró el mensaje con el que se le avisó.
+      - generic [ref=f9e53]:
+        - term [ref=f9e54]: Qué falta
+        - definition [ref=f9e55]:
+          - generic [ref=f9e56]: "Sin próximo paso anotado y sin caso abierto en el CRM: no está en ninguna cola."
+      - generic [ref=f9e59]:
+        - term [ref=f9e60]: Qué hizo la IA
+        - definition [ref=f9e61]: No consultó ningún sistema antes de derivar.
+    - generic [ref=f9e63]:
+      - generic [ref=f9e64]: Hoy
+      - generic [ref=f9e66]:
+        - generic [ref=f9e67]: Buenas tardes, les escribo porque desde el martes de la semana pasada vengo presentando intermitencias en el servicio, sobre todo entre las siete y las diez de la noche, que es justo cuando mi hija tiene clases virtuales y yo necesito conectarme al trabajo remoto. Ya reinicie el router como me indicaron la vez pasada, revise que los cables esten bien puestos y probe conectando directamente por cable sin el wifi, y el problema sigue igual. Tambien note que la luz roja del equipo se enciende cada tanto. Agradezco si pueden enviar un tecnico. QA
+        - generic [ref=f9e68]: 14:27
+      - generic [ref=f9e69]:
+        - generic [ref=f9e70]: Sistema
+        - generic [ref=f9e72]: Ya te estamos atendiendo, en un momento te responde una persona.
+        - generic [ref=f9e73]: 14:28
+        - button "☆ Marcar" [ref=f9e75] [cursor=pointer]
+    - generic [ref=f9e76]:
+      - group "Qué estás escribiendo" [ref=f9e77]:
+        - button "Responder al cliente" [pressed] [ref=f9e78] [cursor=pointer]
+        - button "Nota interna" [ref=f9e79] [cursor=pointer]
+        - button "Responder y devolver a IA" [ref=f9e80] [cursor=pointer]
+      - generic [ref=f9e81]:
+        - textbox "Escribí tu respuesta…" [ref=f9e82]
+        - generic [ref=f9e83]:
+          - generic [ref=f9e84]:
+            - button "Emoji" [ref=f9e86] [cursor=pointer]
+            - button "Adjuntar" [ref=f9e91] [cursor=pointer]
+            - button "Grabar una nota de voz" [ref=f9e94] [cursor=pointer]
+          - generic [ref=f9e98]:
+            - strong [ref=f9e99]: Se envía directo al cliente
+            - text: · no pasa por el asistente · Enter envía
+          - button "Enviar" [disabled] [ref=f9e100]
+  - navigation "Secciones" [ref=f9e104]:
+    - link "Hoy" [ref=f9e105] [cursor=pointer]:
+      - /url: /
+    - link "Negociaciones" [ref=f9e112] [cursor=pointer]:
+      - /url: /pipeline
+    - link "Tickets" [ref=f9e115] [cursor=pointer]:
+      - /url: /tickets
+    - link "Facturas" [ref=f9e123] [cursor=pointer]:
+      - /url: /invoices

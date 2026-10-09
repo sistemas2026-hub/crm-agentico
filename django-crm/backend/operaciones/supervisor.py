@@ -1,0 +1,2894 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ SUPERVISOR NOC IA  --  SHADOW MODE: observa, analiza, propone. No ejecuta.
+================================================================================
+
+EL CICLO, Y DONDE SE CORTA
+--------------------------
+    SEÑAL -> NORMALIZACION -> CLASIFICACION -> ANALISIS -> PROPUESTA
+          -> REGISTRO -> REVISION HUMANA
+                                    |
+                                    X  aqui se corta, en esta etapa
+
+Aceptar una propuesta significa "el Jefe de Operaciones esta de acuerdo", NO
+"se hizo". No existe ningun camino de ejecucion: 'ejecutar_propuesta' levanta
+siempre, y el estado 'ejecutada' ni siquiera esta entre los valores posibles
+del modelo. Las dos cosas juntas son lo que vuelve comprobable el Shadow Mode
+en vez de prometido.
+
+DE DONDE SALEN LAS SEÑALES
+--------------------------
+Solo de lo que los datos de hoy sostienen. Cada deteccion es una consulta de
+LECTURA sobre estructuras que ya existen -- ninguna escribe, ninguna llama a un
+sistema externo, ninguna toca WispHub ni SmartOLT.
+
+LA SEÑAL QUE NO ESTA, Y POR QUE
+-------------------------------
+No hay ninguna sobre incumplimiento de primera respuesta. 'first_response_at'
+esta poblado en 4 de 165 casos (medido el 15/09/2026), asi que su ausencia no
+prueba nada: un caso sin ese dato puede haber sido atendido en diez minutos.
+Afirmar un incumplimiento sobre eso seria acusar a alguien de algo que el dato
+no sostiene. Si alguna vez hace falta usarlo, se reporta como
+'dato insuficiente / medicion no disponible', nunca como incumplimiento.
+
+Y por el mismo motivo ninguna propuesta puede nombrar a una persona como causa:
+una demora puede ser un bloqueo, un material, una dependencia, una ausencia, un
+cambio de prioridad o un dato mal cargado. La lista de causas vive en
+NovedadOperativa.TIPOS y 'incumplimiento_de_persona' no esta en ella.
+
+LA PRIORIDAD NO ES UN NUMERO MAGICO
+-----------------------------------
+Se calcula sumando componentes con nombre, y cada componente que sumo queda
+escrito en la evidencia de la propuesta. Quien la lea puede reconstruir por que
+quedo donde quedo, en vez de confiar en un score.
+================================================================================
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import timedelta
+from typing import Any
+
+from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
+
+from campo.models import OrdenTrabajo
+from common.models import Org
+from cases.models import Case
+from operaciones import auditoria, capacidad, habilidades
+from operaciones.models import (
+    ActividadOperativa,
+    DisponibilidadTecnico,
+    ProgramacionOrden,
+    ProgramacionSemanal,
+    PropuestaSupervisor,
+)
+
+# =============================================================================
+#  EL INTERRUPTOR DE ESTA ETAPA
+# =============================================================================
+#  No es un segundo kill switch: el de autonomia vive en el motor
+#  (asistente.interruptor_autonomia, Fase 1) y gobierna las ESCRITURAS del
+#  motor contra sistemas externos. Esto es otra cosa -- la bandera de fase que
+#  declara que el Supervisor todavia no tiene ningun camino de ejecucion.
+#
+#  Esta en True y no hay codigo que lo apague. Ponerlo en False no habilitaria
+#  nada: 'ejecutar_propuesta' levanta igual. Existe para que la condicion se
+#  pueda AFIRMAR en una prueba en vez de deducirse de que no hay llamadas.
+SHADOW_MODE = True
+
+
+class EjecucionNoPermitida(RuntimeError):
+    """
+    El Supervisor intentó ejecutar algo. En esta etapa no puede, y punto.
+
+    Es una excepción y no un valor de retorno para que ningún camino pueda
+    ignorarla por descuido -- mismo criterio que FaltaIdentidadEnSesion en el
+    motor.
+    """
+
+
+# Ventanas de deteccion. Son de esta etapa y estan juntas a proposito: cambiar
+# una no obliga a leer el codigo de deteccion.
+DIAS_CASO_ANTIGUO = 7
+HORAS_COMPROMISO_POR_VENCER = 24
+DIAS_VIGENCIA_PROPUESTA = 7
+
+
+@dataclass
+class Senal:
+    """Un hecho observado, ya normalizado. Todavía no es una propuesta."""
+
+    tipo: str
+    origen_tipo: str
+    origen_id: str
+    evidencia: list[dict] = field(default_factory=list)
+    datos: dict[str, Any] = field(default_factory=dict)
+    #  LA IDENTIDAD DE LA CONDICION  --  paso M09-D
+    #  Lleva solo lo que, si cambia, convierte esto en otra situacion: el
+    #  motivo de un bloqueo, la fecha comprometida, la dependencia concreta.
+    #  NUNCA una magnitud que avanza sola (los dias que lleva abierto un caso),
+    #  porque entonces cada ciclo veria una condicion "nueva" y una propuesta
+    #  rechazada volveria al dia siguiente. Ver PropuestaSupervisor.huella_condicion.
+    huella: str = ""
+
+
+def _observacion(fuente: str, identificador, dato: str, observado_en=None) -> dict:
+    """
+    Una pieza de evidencia. Siempre las mismas cuatro claves.
+
+    'observado_en' es cuándo se LEYÓ el dato, no cuándo ocurrió el hecho: es lo
+    que permite saber, semanas después, si la propuesta se tomó con información
+    fresca o vieja.
+    """
+    return {
+        "fuente": fuente,
+        "id": str(identificador),
+        "dato": dato,
+        "observado_en": (observado_en or timezone.now()).isoformat(),
+    }
+
+
+# =============================================================================
+#  DETECCION  --  ocho señales, todas de solo lectura
+# =============================================================================
+
+
+#: Cuantos casos abiertos se diagnostican por ciclo.
+#:
+#: No es una preferencia: cada uno cuesta una llamada al motor, que a su
+#: vez habla con WispHub y SmartOLT. Sin tope, una empresa con doscientos
+#: casos abiertos convertiria cada ciclo en doscientos viajes de red.
+TOPE_CASOS_A_DIAGNOSTICAR = 15
+
+
+def detectar(org, ahora=None) -> list[Senal]:
+    """Todas las señales vigentes de una organización. No escribe nada."""
+    ahora = ahora or timezone.now()
+    señales: list[Senal] = []
+    for detector in (
+        _casos_abiertos_antiguos,
+        #  M09-R. Detector PROPIO, y no un camino de '_casos_abiertos_antiguos'
+        #  como hasta el 25/09/2026. El motivo esta medido: ahi dentro heredaba
+        #  el filtro de DIAS_CASO_ANTIGUO, y de 112 casos cerrados en el
+        #  proveedor y sin resolver en el CRM se detectaban 109 -- los 3 que
+        #  faltaban eran los que cerraron alla hace menos de una semana. Un caso
+        #  cerrado afuera ayer esta tan desincronizado como uno de hace dos
+        #  meses: el CRM esta igual de equivocado en los dos.
+        _casos_cerrados_en_el_proveedor,
+        #  M10. La unica señal que termina en una cuadrilla manejando hasta
+        #  una casa. Por eso solo propone lo que la MEDICION sostiene: una
+        #  labor que salio del texto queda fuera.
+        _casos_que_necesitan_visita,
+        _actividades_vencidas,
+        _actividades_sin_responsable,
+        _actividades_bloqueadas,
+        _compromisos_por_vencer,
+        _dependencias_pendientes,
+        _ordenes_sin_programar,
+        _ordenes_desincronizadas,
+        _programaciones_sin_publicar,
+        _ordenes_en_riesgo,
+        #  M09-L. Consume M03-G; no recalcula capacidad por su cuenta.
+        _capacidad_de_jornada,
+        #  M04-A. Consume operaciones/sla.py; no recalcula el plazo.
+        _ordenes_con_sla_vencido,
+        _ordenes_con_sla_por_vencer,
+        #  M05-A. Lee el lifecycle PERSISTENTE; no deduce nada del estado de
+        #  la actividad.
+        _incidencias_sin_resolver,
+        #  M05-B. Solo lo OBSERVABLE: que falte el destinatario.
+        _escalamientos_sin_destinatario,
+    ):
+        señales.extend(detector(org, ahora))
+    return señales
+
+
+#  M09-N (22/09/2026). LO QUE EL ESTADO EXTERNO CAMBIA, Y POR QUE.
+#
+#  Hasta hoy, "abierto en el CRM hace mas de 7 dias" alcanzaba para proponer
+#  revisar el caso. Medido en produccion (diagnostico del 22/09/2026, 100%
+#  lectura): de 96 casos antiguos, 78 figuraban CERRADOS en WispHub, 5 estaban
+#  en curso con respuestas registradas y 13 no tenian ninguna respuesta. O sea
+#  que 78 de 96 propuestas habrian mandado a revisar clientes ya atendidos, y
+#  el Supervisor habria nacido desacreditado.
+#
+#  El estado externo no se consulta al proveedor: se lee de la columna que la
+#  importacion ya dejo en el caso ('external_status', con 'external_fetched_at'
+#  diciendo cuando se leyo). Este detector NO llama a ningun sistema externo.
+#
+#  Los cuatro caminos, y lo que cada uno permite concluir:
+#
+#    cerrado afuera        -> INCONSISTENCIA DE SINCRONIZACION, tipo propio.
+#                             Ni abandono, ni desatencion, ni incumplimiento.
+#    en curso + respuestas -> NO se emite señal: la antiguedad sola no prueba
+#                             estancamiento, y hay actividad registrada.
+#    en curso sin respuestas -> señal de caso antiguo. La evidencia es
+#                             exactamente esa: no hay respuesta registrada.
+#    sin estado externo    -> señal de caso antiguo marcada DATOS_FALTANTES.
+#                             No se asume cerrado, ni en curso, ni atendido:
+#                             la ausencia de dato no se convierte en un dato.
+#
+#  Lo que NINGUN camino afirma: que el problema del cliente este resuelto. Eso
+#  no lo dice ninguna columna -- lo sabe el cliente.
+CERRADO_EN_PROVEEDOR = ("cerrado",)
+EN_CURSO_EN_PROVEEDOR = ("nuevo", "en progreso")
+
+#  CUANTO PUEDE TENER LA LECTURA PARA SOSTENER UNA PROPUESTA DE CIERRE
+#
+#  No es prudencia abstracta: proponer cerrar un caso es proponer un cambio de
+#  estado, y el unico dato que lo justifica es lo que el proveedor dijo. Si esa
+#  lectura tiene semanas, lo que se propone es sincronizar contra una foto que
+#  nadie sabe cuan vieja es -- y el ticket pudo reabrirse alla mientras tanto.
+#
+#  El numero sale de la cadencia real del importador, no de una intuicion: el
+#  reloj barre cada hora ('cada_horas: 1' en la config desplegada), asi que una
+#  lectura de mas de 3 dias significa que la sincronizacion lleva ~72 pasadas
+#  sin escribir. Medido el 25/09/2026, es exactamente lo que pasa: la ultima
+#  'external_fetched_at' era de 77,5 horas antes, porque las escrituras del
+#  reloj estan bloqueadas por Autonomia 2. Con este corte, esos casos NO
+#  generan propuesta de cierre -- que es la conducta correcta: primero se
+#  arregla la sincronizacion, despues se decide sobre sus datos.
+HORAS_LECTURA_FRESCA = 72
+
+#  Como se clasifica cada señal, para que quien la lee sepa que peso tiene.
+OBSERVADO = "OBSERVADO"
+DATOS_FALTANTES = "DATOS_FALTANTES"
+
+
+def _estado_externo(caso) -> str:
+    """El estado que el proveedor reporto, normalizado. '' si no se sabe."""
+    return (getattr(caso, "external_status", "") or "").strip().lower()
+
+
+def _casos_abiertos_antiguos(org, ahora) -> list[Senal]:
+    corte = ahora - timedelta(days=DIAS_CASO_ANTIGUO)
+    casos = Case.objects.filter(
+        org=org, resolved_at__isnull=True, created_at__lt=corte
+    ).only("id", "name", "created_at", "status", "priority",
+           "external_status", "external_fetched_at", "provider")
+    salida = []
+    for c in casos:
+        dias = (ahora - c.created_at).days
+        externo = _estado_externo(c)
+        respuestas = c.respuestas_externas.count()
+        base = [
+            _observacion("caso", c.id, f"abierto desde {c.created_at:%Y-%m-%d} ({dias} dias)", ahora),
+            _observacion("caso", c.id, f"estado actual: {c.status}", ahora),
+        ]
+        datos = {"dias": dias, "prioridad_caso": c.priority, "nombre": c.name,
+                 "estado_externo": getattr(c, "external_status", "") or "",
+                 "respuestas_externas": respuestas}
+
+        if externo in CERRADO_EN_PROVEEDOR:
+            #  Cerrado afuera: NO es un caso abandonado, y desde M09-R tampoco
+            #  se emite desde aqui. Lo atiende '_casos_cerrados_en_el_proveedor',
+            #  que es su detector propio y no hereda este filtro de antiguedad.
+            #  Este 'continue' es lo que impide que el mismo caso salga dos
+            #  veces: si se quita, cada desincronizacion vieja genera tambien
+            #  una señal de caso antiguo, que es justo la afirmacion falsa que
+            #  M09-N vino a corregir.
+            continue
+
+        if externo in EN_CURSO_EN_PROVEEDOR:
+            if respuestas:
+                #  En curso afuera y con actividad registrada: la antiguedad
+                #  sola no prueba estancamiento, y no hay otra evidencia. No se
+                #  inventa una causa: no se emite señal.
+                continue
+            salida.append(Senal(
+                tipo=PropuestaSupervisor.CASO_ANTIGUO,
+                origen_tipo="case",
+                origen_id=str(c.id),
+                evidencia=base + [
+                    _observacion("caso", c.id,
+                                 f"estado en el proveedor: {c.external_status}", ahora),
+                    _observacion("caso", c.id,
+                                 "sin ninguna respuesta registrada en el hilo", ahora),
+                ],
+                datos={**datos, "clasificacion": OBSERVADO},
+                huella="abierto_sin_respuesta_registrada",
+            ))
+            continue
+
+        #  Sin estado externo, o con uno que este detector no reconoce. Se
+        #  emite la señal --el caso sigue abierto hace mas de 7 dias, que es un
+        #  hecho-- y se dice que falta el dato, en vez de suponerlo.
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.CASO_ANTIGUO,
+            origen_tipo="case",
+            origen_id=str(c.id),
+            evidencia=base + [
+                _observacion("caso", c.id,
+                             f"estado en el proveedor: desconocido"
+                             f"{f' (valor no reconocido: {c.external_status})' if externo else ''}",
+                             ahora),
+                _observacion("caso", c.id,
+                             f"respuestas registradas en el hilo: {respuestas}", ahora),
+            ],
+            datos={**datos, "clasificacion": DATOS_FALTANTES},
+            #  "sigue abierto" es el hecho; los dias son la magnitud. Si la
+            #  huella llevara los dias, mañana seria otra condicion.
+            huella="abierto_sin_resolucion",
+        ))
+    return salida
+
+
+#  CERRADO EN EL PROVEEDOR, ABIERTO EN EL CRM  --  M09-R (25/09/2026)
+#  =================================================================
+#  ESTADOS QUE CUENTAN COMO ABIERTO EN DEXTER
+#
+#  Se compara contra 'Closed', que es el unico que 'cases/signals.py' trata
+#  como resuelto (RESOLVED_STATUSES). Y se mira ADEMAS 'resolved_at': los dos,
+#  porque son dos cosas distintas y la pantalla las usa distinto -- un caso con
+#  'status=Closed' y 'resolved_at' nulo existia como bug de sello y hoy no hay
+#  ninguno (medido: 0 de 237), pero volver a mirarlo cuesta nada.
+#
+#  Los estados reales de produccion son tres: New (156), Closed (69) y Assigned
+#  (12). 'Pending', 'Rejected' y 'Duplicate' estan declarados y no se usan; se
+#  tratan como abiertos porque no son 'Closed', que es lo unico afirmable.
+CERRADO_EN_DEXTER = "Closed"
+
+
+def _casos_que_necesitan_visita(org, ahora) -> list[Senal]:
+    """Casos abiertos cuyo EQUIPO dice que la falla es de la red.
+
+    POR QUE ESTA SEÑAL EXISTE
+    -------------------------
+    Nace el 09/10/2026 con la pantalla de despacho, y resuelve un problema
+    concreto: el despacho no puede salir de «todos los casos abiertos». Que un
+    caso merezca una visita depende de si ya se intento por telefono, si el
+    cliente esta, si hay repuesto -- cosas que no estan en ningun campo y que
+    este codigo no puede saber.
+
+    Lo que SI se puede medir es cuando el equipo dice que la falla es de la
+    red. Eso es lo que se propone; una persona lo acepta, y recien ahi el caso
+    aparece en Despacho.
+
+    NO LA CALCULA ESTE MODULO
+    -------------------------
+    El veredicto sale de `operaciones.clasificacion_de_trabajo`, que es el
+    mismo que usa el despacho. Reconstruir el criterio aqui lo pondria a vivir
+    en dos lados y uno de los dos se quedaria viejo -- es el defecto que la
+    fase C del seguimiento ya encontro en el frontend.
+
+    LO QUE NO PROPONE
+    -----------------
+    Un equipo SANO no genera señal: que no sea una falla de red no quiere decir
+    que no haya trabajo --el cliente puede pedir una reubicacion-- pero eso lo
+    decide una persona, no una medicion que no lo vio.
+
+    Y SIN ENERGIA TAMPOCO. Si el equipo esta caido por dying-gasp, el problema
+    es el corte de luz en la casa: mandar una cuadrilla es mandarla a mirar
+    como alguien espera que vuelva la luz.
+
+    EL TOPE NO ES UNA PREFERENCIA
+    -----------------------------
+    Cada caso cuesta una llamada al motor, que a su vez habla con WispHub y
+    SmartOLT. Sin tope, una empresa con doscientos casos abiertos convertiria
+    cada ciclo del Supervisor en doscientos viajes de red. Se dice cuantos
+    quedaron sin mirar en vez de cortar en silencio.
+    """
+    from campo.services.despacho import contexto_del_caso
+    from cases.models import Case
+    from operaciones import clasificacion_de_trabajo as clf
+
+    salida: list[Senal] = []
+    abiertos = list(
+        Case.objects
+        .filter(org=org, is_active=True, is_sample=False,
+                merged_into__isnull=True)
+        .exclude(status="Closed")
+        .exclude(external_service_id="")
+        .exclude(external_service_id__isnull=True)
+        .order_by("-created_at")[:TOPE_CASOS_A_DIAGNOSTICAR]
+    )
+
+    for caso in abiertos:
+        try:
+            contexto = contexto_del_caso(str(caso.id))
+        except Exception:                                    # noqa: BLE001
+            #  Un caso que no se pudo consultar no es un caso sano: es uno del
+            #  que no se sabe nada. No se propone, y tampoco se afirma que
+            #  este bien.
+            continue
+        if not (isinstance(contexto, dict)
+                and contexto.get("contexto_disponible")):
+            continue
+
+        veredicto = clf.clasificar(
+            contexto,
+            marcadores={
+                "id_servicio_instalaciones":
+                    contexto.get("id_servicio_instalaciones"),
+            },
+        )
+        labor = veredicto.get("labor") or ""
+
+        #  Solo lo que la MEDICION sostiene. Una labor que salio del texto
+        #  queda fuera: proponerle a alguien que mande una cuadrilla porque un
+        #  asunto decia cierta palabra seria pedirle que confie en lo que nadie
+        #  verifico.
+        if not veredicto.get("verificada"):
+            continue
+        if labor not in (clf.CORRECTIVO, clf.TRABAJOS, clf.INSTALACION):
+            continue
+
+        equipo = contexto.get("equipo") or {}
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.CASO_REQUIERE_VISITA,
+            origen_tipo="case",
+            origen_id=str(caso.id),
+            #  Lo que una persona necesita para decidir, cada dato con su
+            #  fuente. Quien acepta esto manda a alguien a manejar hasta una
+            #  casa: tiene que poder ver contra que.
+            evidencia=[
+                _observacion("caso", caso.id,
+                             f"caso en el CRM: {caso.name}", ahora),
+                _observacion("caso", caso.id,
+                             f"servicio en el proveedor: "
+                             f"{caso.external_service_id}", ahora),
+                _observacion("equipo", caso.id,
+                             f"estado del equipo: "
+                             f"{equipo.get('estado') or 'sin lectura'}", ahora),
+                _observacion("clasificacion", caso.id,
+                             veredicto.get("porque") or "", ahora),
+            ],
+            datos={
+                "labor_sugerida": labor,
+                "fuente_de_la_sugerencia": veredicto.get("fuente") or "",
+                #  Viaja la hora de la medicion: al congelarse, una medicion
+                #  deja de ser una medicion y pasa a ser un registro de lo que
+                #  se veia en un momento.
+                "medido_en": contexto.get("capturado_en"),
+            },
+        ))
+
+    return salida
+
+
+def _casos_cerrados_en_el_proveedor(org, ahora) -> list[Senal]:
+    """
+    El proveedor cerro el ticket y el CRM sigue con el caso abierto.
+
+    SIN FILTRO DE ANTIGUEDAD, y es el motivo de que este detector exista
+    aparte. Hasta el 25/09/2026 esta señal salia de '_casos_abiertos_antiguos'
+    y heredaba su corte de 7 dias: de 112 casos que cumplian la condicion se
+    detectaban 109, y los 3 que faltaban eran los mas recientes -- los unicos
+    donde actuar todavia sirve de algo.
+
+    LO QUE EXIGE, Y POR QUE CADA COSA
+    ---------------------------------
+    Proponer un cierre es proponer un cambio de estado, asi que el dato que lo
+    sostiene tiene que ser utilizable:
+
+      external_status = cerrado   la condicion misma
+      status != Closed            si ya esta cerrado no hay nada que sincronizar
+      external_status_at presente cuando cerro ALLA. Sin esto no se puede decir
+                                  desde cuando estan desalineados
+      external_fetched_at fresca  cuando se LEYO. Una lectura vieja describe un
+                                  ticket que pudo reabrirse despues
+      external_fetch_error vacio  una lectura que fallo no es una lectura
+
+    Cualquiera que falte deja al caso FUERA: no se emite una señal degradada ni
+    se supone el dato ausente. Un caso que no cumple no es un caso sano -- es
+    un caso sobre el que no se puede afirmar nada, y decirlo es distinto de
+    callarlo.
+
+    NO CIERRA NADA. Devuelve señales; el cierre es otra fase y otra puerta.
+    """
+    corte_lectura = ahora - timedelta(hours=HORAS_LECTURA_FRESCA)
+
+    casos = Case.objects.filter(
+        org=org, resolved_at__isnull=True,
+    ).exclude(
+        status=CERRADO_EN_DEXTER
+    ).exclude(
+        external_status_at__isnull=True
+    ).exclude(
+        external_fetched_at__isnull=True
+    ).filter(
+        external_fetched_at__gte=corte_lectura
+    ).only(
+        "id", "name", "status", "priority", "created_at",
+        "external_status", "external_status_at", "external_fetched_at",
+        "external_fetch_error", "external_ticket_id", "provider",
+        #  'external_service_id' VA EN EL .only() Y NO ES UN DETALLE: sin
+        #  nombrarlo aqui Django lo deja diferido y cada lectura dispara una
+        #  consulta propia. Medido en produccion el 07/10/2026: 19 casos
+        #  desincronizados, los 19 con este campo poblado, asi que serian 19
+        #  consultas extra por ciclo para un dato que entra en la misma fila.
+        #
+        #  Es la llave del diagnostico optico: el 'id_servicio' de WispHub, que
+        #  es lo unico con lo que se puede preguntar por el equipo del cliente.
+        "external_service_id",
+    )
+
+    salida = []
+    for c in casos:
+        if _estado_externo(c) not in CERRADO_EN_PROVEEDOR:
+            continue
+        #  Una lectura que dejo error anotado no sostiene nada, aunque haya
+        #  traido un estado: el estado puede ser el de la lectura anterior.
+        if (getattr(c, "external_fetch_error", "") or "").strip():
+            continue
+
+        #  UN NUMERO NEGATIVO NO SE MUESTRA, SE DECLARA DESCONOCIDO.
+        #
+        #  Visto en produccion el 07/10/2026: "(-1 dias desalineados)". Sale de
+        #  que 'external_status_at' quedo DESPUES de 'ahora' -- el proveedor
+        #  habria cerrado el ticket tres horas despues de que lo leimos, que es
+        #  imposible. La causa esta aguas arriba, en como la sincronizacion
+        #  interpreta la fecha que devuelve WispHub: su skill ya documenta un
+        #  desfase de +5 h en fechas de cierre y formatos DD/MM y MM/DD
+        #  mezclados en la misma API.
+        #
+        #  Aqui no se arregla eso --es la sincronizacion, y no se toca desde
+        #  este modulo-- pero SI se deja de afirmar un numero que no se puede
+        #  calcular. 'None' y su motivo, nunca un negativo con cara de dato:
+        #  es la misma regla que el resto del Supervisor aplica con DESCONOCIDO.
+        desfase = ahora - c.external_status_at
+        dias_desalineado = desfase.days if desfase.total_seconds() >= 0 else None
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.CASO_DESINCRONIZADO,
+            origen_tipo="case",
+            origen_id=str(c.id),
+            #  Los siete datos que una persona necesita para decidir, cada uno
+            #  nombrando su fuente. No se resume: quien acepta esto cambia el
+            #  estado de un caso, y tiene que poder ver contra que.
+            evidencia=[
+                _observacion("caso", c.id,
+                             f"ticket en el proveedor: {c.external_ticket_id or 'sin numero'}",
+                             ahora),
+                _observacion("caso", c.id, f"caso en el CRM: CS-{str(c.id)[:8]}", ahora),
+                _observacion("caso", c.id,
+                             f"estado en el proveedor: {c.external_status}", ahora),
+                _observacion("caso", c.id, f"estado en el CRM: {c.status}", ahora),
+                _observacion("caso", c.id,
+                             f"el proveedor lo cerro el "
+                             f"{c.external_status_at:%Y-%m-%d %H:%M} UTC "
+                             + (f"({dias_desalineado} dias desalineados)"
+                                if dias_desalineado is not None else
+                                "(no se puede decir desde cuando: esa fecha "
+                                "quedo en el futuro respecto de la lectura, "
+                                "revisar la sincronizacion)"), ahora),
+                _observacion("caso", c.id,
+                             f"estado externo leido el "
+                             f"{c.external_fetched_at:%Y-%m-%d %H:%M} UTC", ahora),
+                _observacion("caso", c.id,
+                             f"condicion: cerrado en el proveedor y abierto en "
+                             f"el CRM, con lectura de menos de "
+                             f"{HORAS_LECTURA_FRESCA} horas", ahora),
+            ],
+            datos={
+                "estado_externo": c.external_status,
+                "estado_crm": c.status,
+                "ticket_externo": c.external_ticket_id or "",
+                "proveedor": c.provider or "",
+                "cerrado_en_proveedor_el": c.external_status_at.isoformat(),
+                "leido_el": c.external_fetched_at.isoformat(),
+                "dias_desalineado": dias_desalineado,
+                "nombre": c.name,
+                "prioridad_caso": c.priority,
+                "clasificacion": OBSERVADO,
+                #  LA LLAVE DEL DIAGNOSTICO OPTICO, y va en 'datos' y no en la
+                #  evidencia: la evidencia es lo que una persona LEE, y el
+                #  'id_servicio' no le dice nada a quien decide. Lo necesita el
+                #  codigo, para poder preguntarle a SmartOLT por el equipo.
+                #
+                #  Cadena vacia cuando el caso no lo tiene, y eso NO se
+                #  completa ni se adivina: sin llave no hay diagnostico, y la
+                #  propuesta lo dice en vez de quedarse muda.
+                "id_servicio": (c.external_service_id or "").strip(),
+            },
+            #  La condicion, no su magnitud: si la huella llevara los dias, cada
+            #  dia seria una condicion nueva y la deduplicacion no serviria de
+            #  nada. Se conserva el mismo texto que usaba el camino anterior a
+            #  proposito: las propuestas ya emitidas siguen deduplicando contra
+            #  esta, y cambiar la huella habria generado 109 duplicados el
+            #  primer ciclo.
+            huella="cerrado_en_proveedor_abierto_en_crm",
+        ))
+    return salida
+
+
+def _actividades_vencidas(org, ahora) -> list[Senal]:
+    pendientes = ActividadOperativa.objects.filter(
+        org=org, vence_en__lt=ahora
+    ).exclude(estado_operativo__in=ActividadOperativa.ESTADOS_FINALES)
+    return [
+        Senal(
+            tipo=PropuestaSupervisor.ACTIVIDAD_VENCIDA,
+            origen_tipo="actividad",
+            origen_id=str(a.id),
+            evidencia=[
+                _observacion("actividad", a.id, f"vencia {a.vence_en:%Y-%m-%d %H:%M}", ahora),
+                _observacion("actividad", a.id, f"estado: {a.estado_operativo}", ahora),
+            ],
+            datos={"horas_vencida": int((ahora - a.vence_en).total_seconds() // 3600),
+                   "titulo": a.titulo, "tipo": a.tipo},
+            #  La fecha comprometida ES la condicion: si alguien la mueve,
+            #  el compromiso es otro y volver a proponer corresponde.
+            huella=f"vence:{a.vence_en:%Y-%m-%dT%H:%M}",
+        )
+        for a in pendientes
+    ]
+
+
+def _actividades_sin_responsable(org, ahora) -> list[Senal]:
+    huerfanas = ActividadOperativa.objects.filter(
+        org=org, responsable__isnull=True
+    ).exclude(estado_operativo__in=ActividadOperativa.ESTADOS_FINALES)
+    return [
+        Senal(
+            tipo=PropuestaSupervisor.ACTIVIDAD_SIN_RESPONSABLE,
+            origen_tipo="actividad",
+            origen_id=str(a.id),
+            evidencia=[
+                _observacion("actividad", a.id, "no tiene responsable asignado", ahora),
+                _observacion("actividad", a.id, f"estado: {a.estado_operativo}", ahora),
+            ],
+            datos={"titulo": a.titulo, "tipo": a.tipo},
+            huella="sin_responsable",
+        )
+        for a in huerfanas
+    ]
+
+
+def _actividades_bloqueadas(org, ahora) -> list[Senal]:
+    bloqueadas = ActividadOperativa.objects.filter(
+        org=org, estado_operativo=ActividadOperativa.BLOQUEADA
+    )
+    return [
+        Senal(
+            tipo=PropuestaSupervisor.ACTIVIDAD_BLOQUEADA,
+            origen_tipo="actividad",
+            origen_id=str(a.id),
+            evidencia=[
+                # El motivo es la evidencia. La restriccion de la tabla
+                # garantiza que exista, asi que esta señal nunca puede ser una
+                # acusacion vaga.
+                _observacion("actividad", a.id, f"bloqueada por: {a.motivo_bloqueo}", ahora),
+            ],
+            datos={"titulo": a.titulo, "motivo": a.motivo_bloqueo},
+            #  Otro motivo de bloqueo es otro bloqueo, aunque sea la misma
+            #  actividad: la decision anterior se tomo sobre otra causa.
+            huella=f"bloqueo:{(a.motivo_bloqueo or '')[:48]}",
+        )
+        for a in bloqueadas
+    ]
+
+
+def _compromisos_por_vencer(org, ahora) -> list[Senal]:
+    limite = ahora + timedelta(hours=HORAS_COMPROMISO_POR_VENCER)
+    proximos = ActividadOperativa.objects.filter(
+        org=org,
+        tipo=ActividadOperativa.COMPROMISO,
+        vence_en__gte=ahora,
+        vence_en__lte=limite,
+    ).exclude(estado_operativo__in=ActividadOperativa.ESTADOS_FINALES)
+    return [
+        Senal(
+            tipo=PropuestaSupervisor.COMPROMISO_POR_VENCER,
+            origen_tipo="actividad",
+            origen_id=str(a.id),
+            evidencia=[
+                _observacion("actividad", a.id, f"vence {a.vence_en:%Y-%m-%d %H:%M}", ahora),
+            ],
+            datos={"horas_restantes": int((a.vence_en - ahora).total_seconds() // 3600),
+                   "titulo": a.titulo},
+            huella=f"vence:{a.vence_en:%Y-%m-%dT%H:%M}",
+        )
+        for a in proximos
+    ]
+
+
+def _dependencias_pendientes(org, ahora) -> list[Senal]:
+    conDependencia = ActividadOperativa.objects.filter(
+        org=org, depende_de__isnull=False
+    ).exclude(
+        estado_operativo__in=ActividadOperativa.ESTADOS_FINALES
+    ).select_related("depende_de")
+    salida = []
+    for a in conDependencia:
+        previa = a.depende_de
+        if previa.estado_operativo in ActividadOperativa.ESTADOS_FINALES:
+            continue
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.DEPENDENCIA_PENDIENTE,
+            origen_tipo="actividad",
+            origen_id=str(a.id),
+            evidencia=[
+                _observacion("actividad", a.id, f"depende de la actividad {previa.id}", ahora),
+                _observacion("actividad", previa.id,
+                             f"esa actividad esta en '{previa.estado_operativo}'", ahora),
+            ],
+            datos={"titulo": a.titulo, "depende_de": str(previa.id),
+                   "estado_previa": previa.estado_operativo},
+            #  Si pasa a depender de OTRA actividad, es otra situacion.
+            huella=f"depende:{previa.id}",
+        ))
+    return salida
+
+
+# =============================================================================
+#  M09-L  --  CAPACIDAD DE LA JORNADA
+# =============================================================================
+#  El unico detector que este paso agrega. Entra ahora porque M03-G recien dejo
+#  la capacidad calculable; antes no habia con que sostener la senal.
+#
+#  NO REIMPLEMENTA EL CALCULO. Llama a 'operaciones.capacidad', que es la unica
+#  fuente: duplicarlo aca crearia dos verdades sobre el mismo numero, y la
+#  segunda quedaria vieja en cuanto cambiara cualquiera de las cinco cosas de
+#  las que depende.
+#
+#  DOS SENALES, Y LA SEGUNDA NO ES UN COMODIN
+#  ------------------------------------------
+#    sobrecarga          -> 'jornada_sobrecargada'. Solo cuando se PUEDE
+#                           afirmar: la carga conocida ya no cabe.
+#    falta duracion      -> 'dato_incompleto'. Nombra las ordenes concretas a
+#                           las que les falta el dato. No se emite una
+#                           sobrecarga sobre datos incompletos, porque con
+#                           datos parciales la ausencia de sobrecarga NO se
+#                           puede demostrar -- esa asimetria la fijo M03-G y
+#                           aca se respeta.
+
+
+def _jornadas_con_trabajo(org, ahora):
+    """
+    Los dias que tienen trabajo comprometido, dentro del horizonte que ya rige
+    para las propuestas. No se inventa una ventana: es 'DIAS_VIGENCIA_PROPUESTA',
+    la misma que decide cuanto vive una recomendacion.
+    """
+    hoy = timezone.localtime(ahora).date()
+    return sorted(set(
+        ProgramacionOrden.objects
+        .filter(org=org, dia__gte=hoy,
+                dia__lte=hoy + timedelta(days=DIAS_VIGENCIA_PROPUESTA),
+                estado__in=(ProgramacionOrden.PLANIFICADA,
+                            ProgramacionOrden.CONFIRMADA))
+        .values_list("dia", flat=True)))
+
+
+def _capacidad_de_jornada(org, ahora) -> list[Senal]:
+    """
+    Lo unico que este detector EMITE es 'dato_incompleto', y no por timidez.
+
+    POR QUE LA SOBRECARGA NO SE PROPONE TODAVIA
+    -------------------------------------------
+    H-05 --"Estimar riesgo operacional de una orden por capacidad"-- esta
+    declarada BLOQUEADA, y su propia ficha dice por que:
+
+        "BLOQUEADA POR D-4: no existe una definicion medible de capacidad
+         operativa, y M09-J decidio no inventarla."
+        "Sin definicion de capacidad, cualquier umbral seria arbitrario y la
+         senal no seria defendible ante quien la reciba."
+
+    M03-G levanto la MITAD de ese bloqueo: la capacidad ya es medible y
+    derivada, no inferida. La otra mitad sigue en pie -- ninguna habilidad
+    explica la senal de sobrecarga, y el guarda de M09-K exige que toda senal
+    tenga una ("Ninguna senal puede quedar sin habilidad que la explique").
+    Emitir una propuesta sin esa ficha seria darle al Jefe de Operaciones una
+    recomendacion que el sistema no puede justificar.
+
+    La sobrecarga NO se calla: viaja en el resumen del ciclo como OBSERVACION
+    (ver 'correr_ciclo' -> 'capacidad'). Se ve, no se propone.
+
+    LA FALTA DE DURACION SI SE PROPONE, y encaja sin forzar nada:
+    'dato_incompleto' es exactamente eso -- un objeto concreto (la jornada de
+    una persona) con un campo concreto que falta (la duracion de unas ordenes
+    que se pueden nombrar) -- y tiene su ficha desde M09-K.
+    """
+    salida = []
+    for dia in _jornadas_con_trabajo(org, ahora):
+        jornada = capacidad.capacidad_de_jornada(org, dia)
+        for fila in jornada["resultados"]:
+            faltan = fila["carga"]["numeros_sin_duracion"]
+            if not faltan:
+                continue
+            pid = fila["profile"]["id"]
+            origen_id = f"{dia}:{pid}"[:128]
+            numeros = ", ".join(f"#{n}" for n in faltan)
+            salida.append(Senal(
+                tipo=PropuestaSupervisor.DATO_INCOMPLETO,
+                origen_tipo="jornada",
+                origen_id=origen_id,
+                evidencia=[
+                    _observacion("jornada", origen_id,
+                                 f"sin duracion estimada: {numeros}", ahora),
+                    _observacion("jornada", origen_id,
+                                 f"carga conocida {fila['carga']['minutos_conocidos']} min "
+                                 f"de {fila['carga']['ordenes']} orden(es); es una cota "
+                                 f"inferior, no el total", ahora),
+                ],
+                datos={"dia": str(dia), "persona": fila["profile"]["nombre"],
+                       "profile_id": pid, "numeros_sin_duracion": faltan,
+                       "campo": "duracion_estimada_minutos",
+                       "estado_datos": fila["estado_datos"]},
+                #  Otra orden sin duracion es otro hecho.
+                huella=f"sin_duracion:{dia}:{','.join(str(n) for n in faltan)}"[:128],
+            ))
+    return salida
+
+
+def observar_capacidad(org, ahora) -> dict:
+    """
+    La foto de capacidad del horizonte, para el RESUMEN del ciclo. NO emite
+    senales ni propuestas: es una lectura.
+
+    Existe porque la sobrecarga se puede ver aunque todavia no se pueda
+    proponer (ver '_capacidad_de_jornada'). Callarla seria peor: el dato
+    existe, es defendible, y quien revisa el ciclo tiene que poder mirarlo.
+    """
+    sobrecargadas, no_determinables = [], []
+    for dia in _jornadas_con_trabajo(org, ahora):
+        jornada = capacidad.capacidad_de_jornada(org, dia)
+        for fila in jornada["resultados"]:
+            if fila["riesgo"] == capacidad.SOBRECARGA:
+                sobrecargadas.append({
+                    "dia": str(dia), "persona": fila["profile"]["nombre"],
+                    "profile_id": fila["profile"]["id"],
+                    "capacidad_minutos": fila["capacidad_minutos"],
+                    "carga_minutos": fila["carga"]["minutos_conocidos"],
+                    "exceso_minutos": fila["exceso_minutos"],
+                    "ordenes": fila["carga"]["ordenes"],
+                    "es_cota_inferior": fila["carga"]["es_cota_inferior"],
+                })
+            elif fila["resultado"] == capacidad.NO_DETERMINABLE:
+                no_determinables.append({
+                    "dia": str(dia), "persona": fila["profile"]["nombre"],
+                    "motivo": fila["jornada"]["motivo"],
+                })
+    return {
+        "jornadas_sobrecargadas": sobrecargadas,
+        "jornadas_no_determinables": no_determinables,
+        #  Se dice aqui, no en un comentario: quien lea el resumen tiene que
+        #  saber por que una sobrecarga visible no genero una recomendacion.
+        "nota": ("La sobrecarga se OBSERVA y no se propone: H-05 está "
+                 "BLOQUEADA y ninguna habilidad explica todavía esa señal. "
+                 "M03-G ya aportó la definición medible de capacidad que su "
+                 "ficha declaraba faltante; desbloquearla es una decisión "
+                 "pendiente."),
+    }
+
+
+def _programacion_vigente(org, orden):
+    """
+    La línea de plan que RIGE para esta orden, si existe.
+
+    'planificada' y 'confirmada' cuentan; 'reprogramada' y 'cancelada' no --
+    una línea reprogramada ya fue reemplazada y una cancelada no compromete
+    nada. Se devuelve la línea y no un booleano porque quien llama necesita
+    saber en qué estado está el plan semanal que la contiene.
+    """
+    return (
+        ProgramacionOrden.objects.filter(
+            org=org,
+            orden=orden,
+            estado__in=(ProgramacionOrden.PLANIFICADA,
+                        ProgramacionOrden.CONFIRMADA),
+        )
+        .select_related("programacion")
+        .first()
+    )
+
+
+def _ordenes_sin_programar(org, ahora) -> list[Senal]:
+    """
+    Órdenes que REQUIEREN programación y no tienen ninguna vigente.
+
+    POR QUE NO ALCANZA CON 'programada_para IS NULL'  --  paso M09-D
+    ---------------------------------------------------------------
+    ProgramacionOrden y OrdenTrabajo.programada_para son dos cosas distintas y
+    NADA las sincroniza -- lo dice el propio modelo: la primera es lo que se
+    planificó el viernes anterior, la segunda lo que rige ahora mismo. Una
+    orden puede estar en el plan semanal con 'programada_para' todavía en NULL.
+
+    Con la condición anterior esa orden disparaba la señal y el Supervisor
+    recomendaba programar algo que ya estaba programado. No era hipotético:
+    'programada_para' está en 0 de 3 órdenes de producción (medido el
+    17/09/2026), así que el primer plan que M03 cargue produce el falso
+    positivo.
+
+    'estado_operativo = asignada' YA implica que no arrancó: ninguna transición
+    vuelve a ese estado (campo/services/transiciones.py) y 'iniciada_en' sólo
+    se escribe al salir de él. Por eso no se comprueba aparte -- agregarlo
+    sugeriría una protección que la máquina de estados ya da. Y por lo mismo
+    quedan fuera cancelada, completada, cerrada y correccion_requerida.
+    """
+    candidatas = OrdenTrabajo.objects.filter(
+        org=org,
+        programada_para__isnull=True,
+        estado_operativo=OrdenTrabajo.ASIGNADA,
+    )
+    salida = []
+    for o in candidatas:
+        if _programacion_vigente(org, o) is not None:
+            # Está en un plan: no es un problema de programación. Si además le
+            # falta 'programada_para', lo dice _ordenes_desincronizadas.
+            continue
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.ORDEN_SIN_PROGRAMAR,
+            origen_tipo="orden_trabajo",
+            origen_id=str(o.id),
+            evidencia=[
+                _observacion("orden_trabajo", o.id, "sin 'programada_para'", ahora),
+                _observacion("orden_trabajo", o.id,
+                             f"estado: {o.estado_operativo}", ahora),
+                _observacion("programacion_orden", o.id,
+                             "sin linea de plan en 'planificada' ni 'confirmada'",
+                             ahora),
+            ],
+            datos={"numero": o.numero, "cliente": o.cliente_nombre},
+            huella=f"estado:{o.estado_operativo}",
+        ))
+    return salida
+
+
+def _ordenes_desincronizadas(org, ahora) -> list[Senal]:
+    """
+    La orden SÍ está en un plan publicado, pero 'programada_para' está vacío.
+
+    Es 'dato_incompleto' y no una propuesta de programación: volver a
+    programarla duplicaría lo que el plan ya dice. Lo que falta es la
+    sincronización entre el plan y el campo que rige -- un dato, no una
+    decisión operativa.
+
+    SOLO sobre planes PUBLICADOS. Un borrador todavía no compromete nada, así
+    que su falta de sincronización no es una inconsistencia: es un plan a medio
+    hacer, y de eso habla 'programacion_sin_publicar'.
+    """
+    candidatas = OrdenTrabajo.objects.filter(
+        org=org,
+        programada_para__isnull=True,
+        estado_operativo=OrdenTrabajo.ASIGNADA,
+    )
+    salida = []
+    for o in candidatas:
+        linea = _programacion_vigente(org, o)
+        if linea is None:
+            continue
+        if linea.programacion.estado != ProgramacionSemanal.PUBLICADA:
+            continue
+        publicada = linea.programacion.publicada_en
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.DATO_INCOMPLETO,
+            origen_tipo="orden_trabajo",
+            origen_id=str(o.id),
+            evidencia=[
+                _observacion("orden_trabajo", o.id,
+                             "campo faltante: 'programada_para' (NULL)", ahora),
+                _observacion("programacion_orden", linea.id,
+                             f"hay plan vigente para el {linea.dia} "
+                             f"(estado '{linea.estado}')", ahora),
+                _observacion(
+                    "programacion_semanal", linea.programacion_id,
+                    (f"plan publicado el {publicada:%Y-%m-%d %H:%M}"
+                     if publicada
+                     else "plan marcado publicado sin 'publicada_en'"),
+                    ahora),
+            ],
+            datos={"numero": o.numero, "campo": "programada_para",
+                   "dia_planificado": str(linea.dia)},
+            huella="campo:programada_para",
+        ))
+    return salida
+
+
+def _programaciones_sin_publicar(org, ahora) -> list[Senal]:
+    """
+    La semana ya empezó y su plan sigue en borrador.
+
+    Se demuestra con lo que el modelo ya guarda: 'estado', 'publicada_en' y
+    'publicada_por'. NO se infiere la publicación de que existan líneas de
+    plan -- un borrador también las tiene, y confundir las dos cosas es
+    exactamente lo que esta señal no debe hacer.
+    """
+    hoy = timezone.localtime(ahora).date()
+    borradores = ProgramacionSemanal.objects.filter(
+        org=org,
+        estado=ProgramacionSemanal.BORRADOR,
+        semana_inicio__lte=hoy,
+    )
+    return [
+        Senal(
+            tipo=PropuestaSupervisor.PROGRAMACION_SIN_PUBLICAR,
+            origen_tipo="programacion_semanal",
+            origen_id=str(pr.id),
+            evidencia=[
+                _observacion("programacion_semanal", pr.id,
+                             f"semana del {pr.semana_inicio}, "
+                             f"estado '{pr.estado}'", ahora),
+                _observacion("programacion_semanal", pr.id,
+                             "'publicada_en' vacio", ahora),
+                _observacion("programacion_semanal", pr.id,
+                             f"la semana empezo hace "
+                             f"{(hoy - pr.semana_inicio).days} dia(s)", ahora),
+            ],
+            datos={"semana": str(pr.semana_inicio),
+                   "dias_corridos": (hoy - pr.semana_inicio).days},
+            huella=f"semana:{pr.semana_inicio}",
+        )
+        for pr in borradores
+    ]
+
+
+def _ordenes_en_riesgo(org, ahora) -> list[Senal]:
+    """
+    Órdenes programadas cuyo técnico principal está declarado ausente ese día.
+
+    Es el único cruce entre M03 y M09, y es el que justifica que exista
+    DisponibilidadTecnico: sin esa tabla, esta señal no se puede emitir sin
+    inventar la ausencia.
+    """
+    programadas = OrdenTrabajo.objects.filter(
+        org=org, programada_para__isnull=False,
+        estado_operativo=OrdenTrabajo.ASIGNADA,
+    ).prefetch_related("asignaciones")
+    salida = []
+    for o in programadas:
+        principal = o.tecnico_principal
+        if principal is None:
+            continue
+        dia = timezone.localtime(o.programada_para).date()
+        ausencia = DisponibilidadTecnico.objects.filter(
+            org=org, profile=principal, fecha=dia, disponible=False
+        ).first()
+        if not ausencia:
+            continue
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.ORDEN_EN_RIESGO,
+            origen_tipo="orden_trabajo",
+            origen_id=str(o.id),
+            evidencia=[
+                _observacion("orden_trabajo", o.id,
+                             f"programada para {o.programada_para:%Y-%m-%d %H:%M}", ahora),
+                _observacion("disponibilidad", ausencia.id,
+                             f"el tecnico asignado esta ausente ese dia: {ausencia.motivo}",
+                             ahora),
+            ],
+            datos={"numero": o.numero, "motivo_ausencia": ausencia.motivo,
+                   "tecnico": str(principal.id)},
+            #  Otra fecha programada u otra ausencia es otro riesgo.
+            huella=f"prog:{o.programada_para:%Y-%m-%d}|aus:{ausencia.id}"[:64],
+        ))
+    return salida
+
+
+# =============================================================================
+#  ANALISIS  --  de una señal a una recomendación
+# =============================================================================
+#  Cada señal tiene UNA recomendacion y una forma de priorizar. Nada de esto lo
+#  decide un modelo: es codigo, y por eso se puede explicar.
+
+# ==============================================================================
+#  M04-A  --  RIESGO TEMPORAL DE UNA ORDEN
+# ==============================================================================
+#  Los dos detectores de abajo NO calculan nada: preguntan a 'operaciones.sla',
+#  que es la unica fuente del plazo. Si el calculo cambiara, cambia alli y aqui
+#  no hay que tocar una linea -- y, sobre todo, no puede empezar a decir algo
+#  distinto de lo que ven los asistentes.
+#
+#  Solo emiten sobre plazos CALCULABLES. SIN_PLAZO, NO_APLICA y
+#  DATOS_INSUFICIENTES no producen propuesta: una recomendacion apoyada en un
+#  plazo que nadie declaro seria inventar el compromiso y despues reclamarlo.
+
+def _ordenes_con_plazo(org, ahora):
+    """Las ordenes vivas de la organizacion, con su plazo ya resuelto."""
+    from campo.models import OrdenTrabajo
+    from operaciones import sla
+
+    ordenes = (OrdenTrabajo.objects
+               .filter(org=org)
+               .exclude(estado_operativo__in=sla.ESTADOS_TERMINADOS)
+               .select_related("tipo_trabajo_version"))
+    for o in ordenes:
+        yield o, sla.plazo_de(o, ahora)
+
+
+def _evidencia_de_plazo(orden, plazo, ahora) -> list[dict]:
+    """
+    Lo que hace explicable la senal. Son hechos leidos, no conclusiones: el
+    numero de orden, el plazo que declara su tipo de trabajo, desde cuando se
+    cuenta, hasta cuando y con que calendario.
+    """
+    return [
+        _observacion("orden_trabajo", orden.id,
+                     f"orden #{orden.numero}, estado '{orden.estado_operativo}'", ahora),
+        _observacion("tipo_trabajo", orden.tipo_trabajo_version_id,
+                     f"plazo declarado: {plazo['minutos_objetivo']} minuto(s)", ahora),
+        _observacion("orden_trabajo", orden.id,
+                     f"se cuenta desde {plazo['ancla']} (creacion de la orden)", ahora),
+        _observacion("orden_trabajo", orden.id,
+                     f"limite: {plazo['limite']}", ahora),
+        _observacion("calendario", plazo.get("calendario") or "24/7",
+                     f"calendario laboral usado: {plazo.get('calendario') or '24/7'}", ahora),
+    ]
+
+
+def _ordenes_con_sla_vencido(org, ahora) -> list[Senal]:
+    from operaciones import sla
+
+    salida = []
+    for o, plazo in _ordenes_con_plazo(org, ahora):
+        if plazo["estado"] != sla.VENCIDA:
+            continue
+        evidencia = _evidencia_de_plazo(o, plazo, ahora)
+        evidencia.append(_observacion(
+            "orden_trabajo", o.id,
+            f"atraso: {plazo['minutos_atraso']} minuto(s)", ahora))
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.ORDEN_SLA_VENCIDO,
+            origen_tipo="orden_trabajo",
+            origen_id=str(o.id),
+            evidencia=evidencia,
+            datos={"minutos_objetivo": plazo["minutos_objetivo"],
+                   "minutos_atraso": plazo["minutos_atraso"],
+                   "limite": plazo["limite"], "ancla": plazo["ancla"],
+                   "calendario": plazo.get("calendario"),
+                   "numero": o.numero},
+            #  La huella NO lleva los minutos de atraso: crecen solos, y una
+            #  propuesta rechazada volveria en el ciclo siguiente como si fuera
+            #  otra condicion. Lo que identifica la situacion es que ESTA orden
+            #  paso su plazo, no cuanto lleva pasado.
+            huella="sla_vencido",
+        ))
+    return salida
+
+
+def _ordenes_con_sla_por_vencer(org, ahora) -> list[Senal]:
+    from operaciones import sla
+
+    salida = []
+    for o, plazo in _ordenes_con_plazo(org, ahora):
+        if plazo["estado"] != sla.VENCE_PRONTO:
+            continue
+        evidencia = _evidencia_de_plazo(o, plazo, ahora)
+        evidencia.append(_observacion(
+            "orden_trabajo", o.id,
+            f"quedan {plazo['minutos_restantes']} minuto(s); "
+            f"la ventana de aviso es de {plazo['ventana_horas']:.2f} h "
+            f"({int(sla.FRACCION_VENTANA * 100)}% del plazo, tope "
+            f"{sla.TOPE_VENTANA_HORAS} h)", ahora))
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.ORDEN_SLA_POR_VENCER,
+            origen_tipo="orden_trabajo",
+            origen_id=str(o.id),
+            evidencia=evidencia,
+            datos={"minutos_objetivo": plazo["minutos_objetivo"],
+                   "minutos_restantes": plazo["minutos_restantes"],
+                   "limite": plazo["limite"], "ancla": plazo["ancla"],
+                   "ventana_horas": plazo["ventana_horas"],
+                   "ventana_fraccion": plazo["ventana_fraccion"],
+                   "calendario": plazo.get("calendario"),
+                   "numero": o.numero},
+            #  Mismo criterio: los minutos restantes bajan solos.
+            huella="sla_por_vencer",
+        ))
+    return salida
+
+
+def _escalamientos_sin_destinatario(org, ahora) -> list[Senal]:
+    """
+    Actividades en estado ESCALADA a las que les falta el destinatario.
+
+    LO QUE ESTE DETECTOR NO HACE, Y ES EL PUNTO
+    -------------------------------------------
+    No decide que una actividad "necesita escalamiento". No existe una politica
+    objetiva que lo determine: antiguedad, atraso o impacto NO son esa politica
+    --un compromiso viejo puede estar perfectamente atendido, y uno critico
+    puede no necesitar a nadie mas--. Inventarla seria convertir una medida de
+    tiempo en una decision de organigrama.
+
+    Lo que SI es observable es una contradiccion en el dato: algo figura como
+    escalado y no consta a quien. Eso es un dato faltante, y se dice como tal.
+    Puede ocurrir con actividades escaladas antes de M05-B, cuando el sistema
+    todavia no registraba destinatario.
+    """
+    escaladas = (ActividadOperativa.objects
+                 .filter(org=org, estado_operativo=ActividadOperativa.ESCALADA)
+                 .filter(Q(escalado_a__isnull=True) | Q(nivel_escalamiento=""))
+                 .select_related("escalado_a"))
+    salida = []
+    for a in escaladas:
+        faltan = []
+        if a.escalado_a_id is None:
+            faltan.append("destinatario")
+        if not a.nivel_escalamiento:
+            faltan.append("nivel")
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.ESCALAMIENTO_SIN_DESTINATARIO,
+            origen_tipo="actividad",
+            origen_id=str(a.id),
+            evidencia=[
+                _observacion("actividad", a.id,
+                             f"'{a.titulo}' figura en estado 'escalada'", ahora),
+                _observacion("actividad", a.id,
+                             f"destinatario: "
+                             f"{a.escalado_a_id or 'NO CONSTA'}", ahora),
+                _observacion("actividad", a.id,
+                             f"nivel: {a.nivel_escalamiento or 'NO CONSTA'}", ahora),
+                _observacion("actividad", a.id,
+                             f"escalada el: {a.escalado_en or 'NO CONSTA'}", ahora),
+            ],
+            datos={"titulo": a.titulo, "faltan": faltan,
+                   "escalado_a": str(a.escalado_a_id) if a.escalado_a_id else None,
+                   "nivel": a.nivel_escalamiento or None},
+            #  La huella lleva QUE falta, no cuanto lleva asi.
+            huella=f"faltan:{','.join(faltan)}",
+        ))
+    return salida
+
+
+def _incidencias_sin_resolver(org, ahora) -> list[Senal]:
+    """
+    Incidencias ABIERTA o EN_GESTION. Las RESUELTA se ignoran.
+
+    El filtro es sobre la COLUMNA 'estado'. No se mira si la actividad sigue
+    bloqueada: desbloquear no resuelve una incidencia, y un detector que lo
+    dedujera dejaria de ver causas que nadie atendio.
+    """
+    from operaciones import incidencias, novedades
+
+    salida = []
+    for n in novedades.sin_resolver(org, ahora):
+        f = incidencias.ficha(n, ahora)
+        evidencia = [
+            _observacion("novedad", n.id,
+                         f"incidencia {n.get_tipo_display()} en estado "
+                         f"'{n.get_estado_display()}'", ahora),
+            _observacion("novedad", n.id,
+                         f"registrada el {n.created_at:%Y-%m-%d %H:%M} "
+                         f"(hace {f['antiguedad_horas']} h)", ahora),
+            _observacion("novedad", n.id,
+                         f"impacto declarado: {f['impacto_etiqueta'] or 'ninguno'}",
+                         ahora),
+            _observacion("novedad", n.id,
+                         f"descripcion: {f['descripcion'] or '(vacia)'}", ahora),
+            _observacion("novedad", n.id,
+                         f"registrada por: {f['registrada_por'] or 'sin registrar'}",
+                         ahora),
+            _observacion("novedad", n.id,
+                         f"contexto observable: {f['contexto']['por_que']}", ahora),
+        ]
+        if n.orden_id:
+            evidencia.append(_observacion(
+                "orden_trabajo", n.orden_id,
+                f"orden relacionada #{n.orden.numero}", ahora))
+        if n.actividad_id:
+            evidencia.append(_observacion(
+                "actividad", n.actividad_id,
+                f"actividad relacionada: {n.actividad.titulo}", ahora))
+        for falta in f["datos_faltantes"]:
+            evidencia.append(_observacion(
+                "novedad", n.id, f"falta {falta['campo']}: {falta['por_que']}", ahora))
+
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.INCIDENCIA_SIN_RESOLVER,
+            origen_tipo="novedad",
+            origen_id=str(n.id),
+            evidencia=evidencia,
+            datos={"tipo": n.tipo, "estado": n.estado, "impacto": n.impacto,
+                   "antiguedad_horas": f["antiguedad_horas"],
+                   "orden": f["orden"], "actividad": f["actividad"],
+                   "datos_faltantes": [x["campo"] for x in f["datos_faltantes"]]},
+            #  La huella lleva el ESTADO, no la antiguedad: las horas crecen
+            #  solas y harian volver cada ciclo una propuesta ya rechazada.
+            #  Pasar de ABIERTA a EN_GESTION si es otra situacion.
+            huella=f"estado:{n.estado}",
+        ))
+    return salida
+
+
+def _prioridad(base: int, componentes: dict[str, int]) -> tuple[int, list[str]]:
+    """
+    Prioridad = base menos lo que la hace más urgente. Devuelve el número y la
+    lista de componentes, para que la propuesta pueda explicarlo.
+
+    Menor es más urgente, igual que en ProgramacionOrden.
+    """
+    valor = base
+    explicacion = [f"base {base}"]
+    for nombre, peso in componentes.items():
+        valor -= peso
+        explicacion.append(f"{nombre} -{peso}")
+    return max(0, min(99, valor)), explicacion
+
+
+def analizar(senal: Senal) -> dict:
+    """
+    Qué propone el Supervisor ante esta señal, y por qué.
+
+    Devuelve las piezas de la propuesta. NO la crea ni la guarda: separar el
+    juicio del registro permite probar el juicio sin base de datos.
+    """
+    d = senal.datos
+    if senal.tipo == PropuestaSupervisor.CASO_ANTIGUO:
+        prioridad, comp = _prioridad(50, {"antiguedad": min(d.get("dias", 0), 30)})
+        #  M09-N: el motivo dice QUE evidencia hay, y cual falta. Antes decia
+        #  siempre lo mismo -- "no hay fecha de resolucion" -- aunque el caso
+        #  estuviera cerrado del otro lado.
+        if d.get("clasificacion") == DATOS_FALTANTES:
+            motivo = (f"Lleva {d.get('dias')} días abierto sin resolución registrada, "
+                      f"y no consta el estado del caso en el sistema del proveedor. "
+                      f"No se afirma que nadie lo haya atendido ni que siga pendiente: "
+                      f"falta el dato para saberlo.")
+        else:
+            motivo = (f"Lleva {d.get('dias')} días abierto sin resolución registrada y "
+                      f"sin ninguna respuesta en el hilo, mientras el proveedor lo "
+                      f"reporta como '{d.get('estado_externo')}'. No se afirma quién "
+                      f"debía atenderlo.")
+        return {
+            "accion_propuesta": "Revisar y priorizar este caso, o cerrarlo si ya está resuelto",
+            "motivo": motivo,
+            "prioridad": prioridad,
+            "impacto": "Un caso abierto sin movimiento no aparece en ninguna cola de trabajo",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.CASO_DESINCRONIZADO:
+        #  Base mas baja que la de un caso antiguo: el cliente ya fue atendido
+        #  del lado del proveedor, asi que esto es deuda de registro, no riesgo
+        #  operativo.
+        #
+        #  NIVEL_RECOMENDAR y no OBSERVAR desde M09-R, y el cambio no es
+        #  cosmetico: hasta el 25/09/2026 la propuesta pedia "revisar la
+        #  sincronizacion", que no es una accion sobre nada -- nadie puede
+        #  aceptar "revisar". Ahora propone la accion concreta que corresponde,
+        #  que es cerrar el caso en el CRM.
+        #
+        #  LO QUE 'RECOMENDAR' NO SIGNIFICA: que se ejecute al aceptar. El
+        #  cierre necesita atravesar la frontera, y hoy la frontera dice NO por
+        #  tres cerrojos medidos -- ver 'ejecutar_propuesta' y el informe de
+        #  M09-R. Subir el nivel declara QUE se propone, no habilita nada.
+        prioridad, comp = _prioridad(30, {})
+        #  EL NIVEL LO DECIDE EL DIAGNOSTICO, y por eso se lee de la señal.
+        #
+        #  Sin diagnostico que lo habilite, esto sigue siendo una
+        #  recomendacion: alguien tiene que mirarla. Con 'cierre_seguro' --el
+        #  equipo en linea con señal buena, o caido por falta de energia en la
+        #  casa del cliente-- la propuesta declara que pide EJECUTAR una accion
+        #  reversible, que es lo que de verdad va a pasar.
+        #
+        #  Declarar el nivel no concede el permiso: lo concede
+        #  'autonomia.puede(org, 3)', que depende de lo que una persona haya
+        #  autorizado para esta empresa. Lo que cambia aqui es que la propuesta
+        #  DICE lo que pide, en vez de pedir menos de lo que hace.
+        _diag = (senal.datos or {}).get("diagnostico_veredicto")
+        _nivel = (PropuestaSupervisor.NIVEL_EJECUTAR_REVERSIBLE
+                  if _diag == "cierre_seguro"
+                  else PropuestaSupervisor.NIVEL_RECOMENDAR)
+        return {
+            "accion_propuesta": ("Cerrar el caso en Dexter para sincronizar su "
+                                 "estado con WispHub"),
+            #  EL DESFASE SOLO SE NOMBRA SI SE PUDO CALCULAR. Cuando la fecha de
+            #  cierre del proveedor queda en el futuro respecto de la lectura
+            #  --visto en produccion el 07/10/2026-- el numero sale negativo, y
+            #  "(-1 días desalineados)" no es un dato: es una resta rota con
+            #  cara de dato. Se dice que no se sabe y por que, que es lo que el
+            #  resto del Supervisor hace con un DESCONOCIDO.
+            #
+            #  La causa vive en la sincronizacion, no aqui: la skill de WispHub
+            #  ya documenta un desfase de +5 h en fechas de cierre y formatos
+            #  DD/MM y MM/DD mezclados en la misma API.
+            "motivo": (f"WispHub reporta el ticket como cerrado, pero Dexter mantiene "
+                       f"el caso abierto. El proveedor lo cerró el "
+                       f"{(d.get('cerrado_en_proveedor_el') or '')[:16].replace('T', ' ')} "
+                       f"y en el CRM sigue en '{d.get('estado_crm')}'"
+                       + (f" ({d.get('dias_desalineado')} días desalineados)."
+                          if d.get("dias_desalineado") is not None else
+                          ". No se puede decir desde cuándo están desalineados: "
+                          "la fecha de cierre del proveedor quedó en el futuro "
+                          "respecto de la lectura, lo que apunta a la "
+                          "sincronización y no al caso.")
+                       + f" Es una "
+                       f"inconsistencia entre los dos sistemas: no se afirma "
+                       f"incumplimiento de nadie, ni atraso, ni que el problema del "
+                       f"cliente esté resuelto -- eso lo sabe el cliente."),
+            "prioridad": prioridad,
+            "impacto": ("Un caso cerrado afuera y abierto acá infla la cola del CRM y "
+                        "hace que los conteos de casos abiertos no describan la operación"),
+            "nivel": _nivel,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.ESCALAMIENTO_SIN_DESTINATARIO:
+        faltan = d.get("faltan") or []
+        prioridad, comp = _prioridad(50, {})
+        return {
+            "accion_propuesta": "Completar el registro del escalamiento: "
+                                "declarar a quién se escaló y con qué nivel",
+            #  NO se propone UN destinatario. El Supervisor no tiene politica
+            #  que le permita elegirlo, y elegirlo igual seria inventar la
+            #  decision que este bloque decidio no automatizar.
+            "motivo": (
+                f"La actividad figura como escalada pero no consta "
+                f"{' ni '.join(faltan)}. Un escalamiento sin destinatario no "
+                f"llega a nadie. No se sugiere a quién escalarla: no existe "
+                f"todavía una política operativa que lo determine, y elegirlo "
+                f"sin ella sería inventar la decisión."),
+            "prioridad": prioridad,
+            "impacto": "Un escalamiento que no consta a quién fue no se puede seguir",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.INCIDENCIA_SIN_RESOLVER:
+        horas = d.get("antiguedad_horas") or 0
+        #  El impacto declarado pesa; su AUSENCIA no se castiga ni se premia.
+        peso = {"critico": 25, "alto": 15, "medio": 8, "bajo": 3}.get(d.get("impacto"), 0)
+        prioridad, comp = _prioridad(
+            45, {"antiguedad": min(horas // 24, 15), "impacto": peso})
+        falta = d.get("datos_faltantes") or []
+        return {
+            "accion_propuesta": "Atender esta incidencia, o registrar cómo se resolvió",
+            "motivo": (
+                f"Sigue en '{d.get('estado')}' desde hace {horas} h. Una "
+                f"incidencia solo se resuelve declarándolo: que la actividad "
+                f"se haya desbloqueado no significa que la causa se haya "
+                f"atendido."
+                + (f" No se declaró: {', '.join(falta)}." if falta else "")),
+            "prioridad": prioridad,
+            "impacto": "Una causa operativa sin resolver se repite en la siguiente orden",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.ORDEN_SLA_VENCIDO:
+        atraso = d.get("minutos_atraso", 0)
+        prioridad, comp = _prioridad(40, {"atraso": min(atraso // 30, 30)})
+        return {
+            "accion_propuesta": "Revisar esta orden: su plazo operativo ya pasó",
+            #  El texto describe TIEMPO, no conducta. No dice "nadie la
+            #  atendió" ni "se incumplió": dice cuánto plazo había, desde
+            #  cuándo se cuenta y cuánto lleva pasado. Si hay una causa --una
+            #  ausencia, una falta de material-- vive en las novedades, y este
+            #  detector no la conoce.
+            "motivo": (f"El tipo de trabajo declara {d.get('minutos_objetivo')} "
+                       f"minuto(s) de plazo. Contado desde que se creó la orden y "
+                       f"sobre el calendario laboral, el límite era "
+                       f"{d.get('limite')}; lleva {atraso} minuto(s) pasado. "
+                       f"Esto mide tiempo transcurrido, no responsabilidad: la "
+                       f"causa, si la hay, está en las novedades de la orden."),
+            "prioridad": prioridad,
+            "impacto": "Una orden fuera de su plazo no aparece como tal en ninguna cola",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.ORDEN_SLA_POR_VENCER:
+        restantes = d.get("minutos_restantes", 0)
+        prioridad, comp = _prioridad(55, {"cercania": min(30 - restantes // 30, 20)})
+        return {
+            "accion_propuesta": "Confirmar que esta orden alcanza su plazo, o reprogramarla",
+            "motivo": (f"Quedan {restantes} minuto(s) para el límite "
+                       f"({d.get('limite')}), dentro de la ventana de aviso de "
+                       f"{d.get('ventana_horas'):.2f} h. La ventana es "
+                       f"proporcional al plazo, no fija: un trabajo de dos horas "
+                       f"no se avisa con la misma antelación que uno de tres días."),
+            "prioridad": prioridad,
+            "impacto": "Avisar antes del límite es lo único que permite reprogramar a tiempo",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.ACTIVIDAD_VENCIDA:
+        horas = d.get("horas_vencida", 0)
+        prioridad, comp = _prioridad(40, {"horas_vencida": min(horas // 4, 30)})
+        return {
+            "accion_propuesta": "Reprogramar la fecha objetivo o reasignar la actividad",
+            "motivo": (f"Pasó su fecha objetivo hace {horas} h y sigue sin cerrarse. "
+                       f"La causa no está registrada: puede ser un bloqueo, una "
+                       f"dependencia o una reprogramación que nadie anotó."),
+            "prioridad": prioridad,
+            "impacto": "Un compromiso vencido sin causa registrada no se puede explicar al cliente",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.ACTIVIDAD_SIN_RESPONSABLE:
+        prioridad, comp = _prioridad(45, {})
+        return {
+            "accion_propuesta": "Asignar un responsable",
+            "motivo": "Nadie figura como responsable, así que no está en la cola de ninguna persona.",
+            "prioridad": prioridad,
+            "impacto": "Trabajo que existe y que nadie ve",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.ACTIVIDAD_BLOQUEADA:
+        prioridad, comp = _prioridad(35, {"bloqueo_declarado": 10})
+        return {
+            "accion_propuesta": "Resolver el bloqueo declarado o escalar",
+            "motivo": f"Está bloqueada por: {d.get('motivo')}.",
+            "prioridad": prioridad,
+            "impacto": "Todo lo que dependa de esta actividad queda detenido",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.COMPROMISO_POR_VENCER:
+        restantes = d.get("horas_restantes", 24)
+        prioridad, comp = _prioridad(45, {"cercania": max(0, 24 - restantes)})
+        return {
+            "accion_propuesta": "Confirmar que el compromiso se va a cumplir, o avisar antes",
+            "motivo": f"Vence en {restantes} h y todavía no está cerrado.",
+            "prioridad": prioridad,
+            "impacto": "Avisar tarde de un incumplimiento cuesta más que avisar antes",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.DEPENDENCIA_PENDIENTE:
+        prioridad, comp = _prioridad(55, {"dependencia": 5})
+        return {
+            "accion_propuesta": "Atender primero la actividad de la que esta depende",
+            "motivo": (f"No puede avanzar: la actividad {d.get('depende_de')} sigue "
+                       f"en '{d.get('estado_previa')}'."),
+            "prioridad": prioridad,
+            "impacto": "Trabajar sobre esta antes que sobre la otra no la desbloquea",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.ORDEN_SIN_PROGRAMAR:
+        prioridad, comp = _prioridad(40, {"sin_fecha": 10})
+        return {
+            "accion_propuesta": "Programar la orden dentro del plan de la semana",
+            "motivo": (f"La OT #{d.get('numero')} está asignada, no tiene fecha "
+                       f"programada y no aparece en ninguna línea vigente del "
+                       f"plan semanal. No se afirma que esté atrasada: sin fecha "
+                       f"comprometida no hay atraso que medir."),
+            "prioridad": prioridad,
+            "impacto": "Una orden sin fecha no se despacha y no aparece en la ruta de nadie",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.PROGRAMACION_SIN_PUBLICAR:
+        prioridad, comp = _prioridad(
+            35, {"dias_corridos": min(d.get("dias_corridos", 0) * 3, 20)})
+        return {
+            "accion_propuesta": "Revisar y publicar el plan de la semana",
+            "motivo": (f"La semana del {d.get('semana')} ya empezó y su plan sigue "
+                       f"en borrador. No se afirma que esté incompleto ni que "
+                       f"alguien lo haya olvidado: sólo que no está publicado."),
+            "prioridad": prioridad,
+            "impacto": "Un plan en borrador no compromete a nadie: las cuadrillas no lo ven",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.DATO_INCOMPLETO:
+        #  NIVEL 0: informa, no recomienda. No tiene revisor ni prioridad
+        #  operativa -- no es una decisión que alguien deba tomar, es un dato
+        #  que falta. Se le da la prioridad más baja a propósito.
+        prioridad, comp = _prioridad(90, {})
+
+        #  M09-L: el mismo tipo de señal cubre dos hechos concretos distintos.
+        #  El texto los distingue en vez de fundirlos en una frase genérica:
+        #  "falta un dato" no le sirve a nadie si no dice cuál y dónde.
+        if d.get("numeros_sin_duracion"):
+            numeros = ", ".join(f"#{n}" for n in d["numeros_sin_duracion"])
+            return {
+                "accion_propuesta": (f"Declarar la duración estimada de "
+                                     f"{numeros}"),
+                "motivo": (f"La jornada del {d.get('dia')} de "
+                           f"{d.get('persona')} no se puede evaluar: "
+                           f"{numeros} no tienen duración estimada. La carga "
+                           f"calculada es una COTA INFERIOR, no el total, así "
+                           f"que no se puede afirmar que la jornada quepa. No "
+                           f"se supone ninguna duración."),
+                "prioridad": prioridad,
+                "impacto": ("Sin duración no hay capacidad calculable: la "
+                            "sobrecarga de ese día no se puede descartar"),
+                "nivel": PropuestaSupervisor.NIVEL_OBSERVAR,
+                "componentes_prioridad": comp,
+            }
+
+        return {
+            "accion_propuesta": (f"Dato faltante: '{d.get('campo')}' en la OT "
+                                 f"#{d.get('numero')}"),
+            "motivo": (f"La orden está en el plan publicado para el "
+                       f"{d.get('dia_planificado')}, pero su campo "
+                       f"'{d.get('campo')}' está vacío. El plan y el campo que "
+                       f"rige no coinciden. No se infiere por qué ni de quién "
+                       f"es: sólo que el dato falta."),
+            "prioridad": prioridad,
+            "impacto": "Lo que el plan dice y lo que rige no coinciden",
+            "nivel": PropuestaSupervisor.NIVEL_OBSERVAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.ORDEN_EN_RIESGO:
+        prioridad, comp = _prioridad(30, {"tecnico_ausente": 15})
+        return {
+            "accion_propuesta": "Reprogramar la orden o reasignarla a otra cuadrilla",
+            "motivo": (f"La OT #{d.get('numero')} está programada para un día en que "
+                       f"su técnico principal está declarado ausente "
+                       f"({d.get('motivo_ausencia')})."),
+            "prioridad": prioridad,
+            "impacto": "La visita no se va a poder hacer, y el cliente se entera el mismo día",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    # Una señal sin analisis declarado no produce propuesta. Es fail-closed:
+    # antes que inventar una recomendacion, no se hace ninguna.
+    return {}
+
+
+# =============================================================================
+#  REGISTRO  --  crear la propuesta, con su evidencia
+# =============================================================================
+
+
+def registrar_propuesta(org, senal: Senal, analisis: dict, ahora=None) -> PropuestaSupervisor:
+    """
+    Crea la propuesta. Levanta si no hay evidencia o si no hay análisis.
+
+    La validación va antes del INSERT y además está en la base (ver la
+    restricción 'propuesta_exige_evidencia'): las dos, porque una sola se
+    puede saltear llamando por el otro camino.
+    """
+    ahora = ahora or timezone.now()
+    if not senal.evidencia:
+        raise ValueError(
+            f"Señal '{senal.tipo}' sin evidencia: no se registra ninguna propuesta."
+        )
+    if not analisis:
+        raise ValueError(
+            f"Señal '{senal.tipo}' sin análisis declarado: el Supervisor no inventa "
+            f"una recomendación para una señal que no sabe interpretar."
+        )
+
+    # Los componentes de la prioridad viajan COMO EVIDENCIA. Asi la propuesta
+    # puede explicar por que quedo donde quedo, en vez de mostrar un numero.
+    evidencia = list(senal.evidencia)
+    evidencia.append(_observacion(
+        "calculo_prioridad", senal.origen_id,
+        " · ".join(analisis.get("componentes_prioridad", [])), ahora))
+
+    propuesta = PropuestaSupervisor(
+        org=org,
+        tipo_senal=senal.tipo,
+        origen_tipo=senal.origen_tipo,
+        origen_id=senal.origen_id,
+        huella_condicion=senal.huella,
+        accion_propuesta=analisis["accion_propuesta"],
+        motivo=analisis["motivo"],
+        evidencia=evidencia,
+        prioridad=analisis["prioridad"],
+        impacto=analisis.get("impacto", ""),
+        nivel_autonomia_requerido=analisis.get(
+            "nivel", PropuestaSupervisor.NIVEL_RECOMENDAR),
+        #  QUE HABILIDAD, Y EN QUE VERSION  --  paso M09-K
+        #  ----------------------------------------------
+        #  Hasta aca el campo quedaba vacio en todas las propuestas (52 de 52,
+        #  medido en M09-E), asi que no habia forma de saber con que definicion
+        #  se habia emitido una recomendacion de hace seis meses.
+        #
+        #  Guarda SOLO la version de la habilidad, con el prefijo 'habilidad:'
+        #  puesto a proposito: el campo se llama 'conocimiento_version' y todavia
+        #  no existe ningun documento de conocimiento versionado. Poner ahi algo
+        #  que pareciera una version de conocimiento seria inventar una precision
+        #  que no tenemos. Ver operaciones/habilidades.py::referencia_de.
+        #
+        #  Una señal sin ficha devuelve "" -- el mismo valor que tenia antes.
+        conocimiento_version=habilidades.referencia_de(senal.tipo),
+        expira_en=ahora + timedelta(days=DIAS_VIGENCIA_PROPUESTA),
+    )
+    propuesta.full_clean(exclude=["created_by", "updated_by"])
+    propuesta.save()
+
+    # El autor es la IA: 'actor=None' a proposito. Inventar un usuario de
+    # sistema haria que despues se confunda con una persona en la bitacora.
+    auditoria.registrar(
+        org=org, actor=None, accion="CREATE",
+        entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=propuesta.id,
+        nombre=propuesta.accion_propuesta,
+        descripcion=f"Supervisor NOC IA (Shadow Mode) detectó: {senal.tipo}",
+        estado_nuevo=propuesta.estado,
+        extra={"tipo_senal": senal.tipo, "origen": f"{senal.origen_tipo}:{senal.origen_id}",
+               "nivel_requerido": propuesta.nivel_autonomia_requerido},
+    )
+    return propuesta
+
+
+def _ya_propuesta(org, senal: Senal) -> bool:
+    """
+    Si esta misma condición ya fue propuesta y alguien ya decidió sobre ella.
+
+    QUE CAMBIO EN EL PASO M09-D, Y POR QUE
+    --------------------------------------
+    Antes miraba solo 'estado=propuesta'. El efecto, reportado en M09-C.1: el
+    Jefe de Operaciones rechazaba una recomendacion y al ciclo siguiente volvia
+    identica. Rechazar es una decision; repetir la pregunta la ignora -- y es
+    exactamente el mecanismo que dejo la cola de 'acciones_propuestas' con 36
+    pendientes sin revisar.
+
+    Ahora bloquean los cuatro estados de ESTADOS_QUE_BLOQUEAN: pendiente de
+    revision, o ya revisada de las tres formas. 'expirada' y 'cancelada' NO
+    bloquean, y es deliberado: expirar significa que nadie la miro, asi que
+    volver a preguntar es lo correcto.
+
+    LA HUELLA ES LO QUE PERMITE QUE VUELVA CUANDO DEBE
+    --------------------------------------------------
+    Si la condicion cambia --otro motivo de bloqueo, otra fecha comprometida,
+    otra dependencia-- la huella cambia y la propuesta nueva SI se crea, aunque
+    la anterior este rechazada. Una decision se toma sobre unos hechos; con
+    hechos distintos, la pregunta es otra.
+
+    Lo que NO hace volver a preguntar es que avance una magnitud: un caso no
+    deja de ser el mismo caso porque hoy lleve nueve dias en vez de ocho.
+    """
+    return PropuestaSupervisor.objects.filter(
+        org=org,
+        tipo_senal=senal.tipo,
+        origen_tipo=senal.origen_tipo,
+        origen_id=senal.origen_id,
+        huella_condicion=senal.huella,
+        estado__in=PropuestaSupervisor.ESTADOS_QUE_BLOQUEAN,
+    ).exists()
+
+
+#  =============================================================================
+#   FASE 2 · EL CICLO PUEDE RAZONAR  --  y por ahora no lo hace
+#  =============================================================================
+#
+#  LA BANDERA ARRANCA APAGADA, Y ESO ES EL ENTREGABLE
+#  --------------------------------------------------
+#  Apagada, 'enriquecer' devuelve el analisis TAL CUAL y el ciclo es byte por
+#  byte el de siempre. Eso se puede afirmar de la forma mas fuerte que hay:
+#  comparando la propuesta campo por campo contra la de referencia
+#  ('test_cerebro_ciclo::test_1').
+#
+#  POR QUE EN CODIGO Y NO EN 'tenant_config'
+#  -----------------------------------------
+#  Porque encender el razonamiento del ciclo no es una regla de negocio de una
+#  empresa: es una decision de operacion sobre cuanto se gasta y cuanto se
+#  confia. El proyecto ya tomo esa distincion para el interruptor de autonomia
+#  y para RELOJ_HABILITADO (CLAUDE.md §8): la config del tenant dice QUE hacer;
+#  si un proceso debe estar razonando es decision de operacion. Y asi
+#  encenderlo es un commit revisado, no un UPDATE.
+#
+#  LO QUE EL CEREBRO NO PUEDE MOVER, Y DONDE VIVE ESA GARANTIA
+#  ----------------------------------------------------------
+#  No vive aqui: vive en 'cerebro.analisis_de_veredicto', que arma la salida
+#  copiando el analisis y sobreescribiendo SOLO 'motivo' e 'impacto'. Esta
+#  funcion no decide que se puede tocar -- solo decide SI se llama.
+CEREBRO_EN_EL_CICLO = False
+
+#  LA SEGUNDA BANDERA  --  registrar y enriquecer son dos permisos distintos
+#  -------------------------------------------------------------------------
+#  Con una sola bandera habia dos estados: el cerebro participa o no participa.
+#  Faltaba el del medio, que es justamente la etapa de observacion del plan --
+#  el cerebro razonando sobre señales reales, con su criterio guardado y sin
+#  que nada de eso alcance a la propuesta.
+#
+#  AVISO PARA QUIEN EDITE ESTE ARCHIVO: 'test_m03e4' y 'test_m03e5' afirman que
+#  cierta palabra de ocho letras --la que empieza por "sec" y nombra un orden
+#  de pasos-- no aparece en el fuente de este modulo. La afirmacion es sobre el
+#  TEXTO, no sobre la conducta, asi que la caza incluso dentro de otra palabra
+#  mas larga que la contenga. Es un defecto conocido de esas dos guardas;
+#  arreglarlas es trabajo de M03 y no de aqui, de modo que lo que se cambia es
+#  la redaccion propia. Ya mordio cuatro veces: no gastes la quinta.
+#
+#      CEREBRO_REGISTRA   CEREBRO_EN_EL_CICLO   estado
+#      ----------------   -------------------   ------------------------------
+#      False              False                 apagado  (el de hoy)
+#      True               False                 solo registra
+#      True               True                  enriquece, y deja constancia
+#
+#  LA CUARTA COMBINACION NO EXISTE, Y SE IMPIDE EN CODIGO: enriquecer sin
+#  dejar constancia seria exactamente el hueco que esta pieza vino a cerrar --
+#  un cerebro influyendo en propuestas sin que se pueda comparar despues con
+#  que criterio lo hizo. Ver '_el_cerebro_corre()'.
+#  ENCENDIDA el 07/10/2026, por decision explicita. Lo que habilita es que el
+#  cerebro razone sobre cada señal del ciclo y GUARDE su conclusion -- nada mas.
+#  La propuesta sigue saliendo del analisis deterministico, intacta, y eso lo
+#  afirma 'test_2b' campo por campo.
+#
+#  POR QUE SE ENCIENDE ESTA Y NO LA OTRA
+#  -------------------------------------
+#  Porque sin datos no hay con que decidir la otra. Esta posicion es la etapa de
+#  observacion: produce la comparacion --que concluyo el cerebro contra que
+#  concluyo la regla-- que es la unica evidencia con la que se puede justificar
+#  despues subir el alcance. Encender las dos juntas se habria quedado sin la
+#  medicion que la segunda necesita.
+#
+#  LO QUE ESTO CUESTA, Y NO ESTA MEDIDO TODAVIA
+#  --------------------------------------------
+#  Una llamada al modelo por señal detectada, de hasta 'VUELTAS_MAXIMAS' vueltas.
+#  Un ciclo con 14 señales son 14 razonamientos. El numero real --cuantas señales
+#  por ciclo, cuantos segundos, cuanto consumo-- sale de los primeros dias con
+#  esto encendido, y es justamente lo que falta para decidir si se razona sobre
+#  todas las señales o solo sobre las ambiguas.
+#
+#  Si el modelo no contesta, el ciclo sigue igual: 'razonar_sobre' degrada y la
+#  propuesta sale correcta. Lo que se pierde es la constancia, no el trabajo.
+CEREBRO_REGISTRA = True
+
+
+
+
+# =============================================================================
+#  EL PRESUPUESTO DE RAZONAMIENTO  --  un ciclo no puede tardar lo que quiera
+# =============================================================================
+#
+#  EL DEFECTO QUE CIERRA, medido el 07/10/2026
+#  -------------------------------------------
+#  Al encender 'CEREBRO_REGISTRA' el ciclo paso a llamar al modelo UNA VEZ POR
+#  SEÑAL, sin tope. Y el ciclo se dispara desde un boton: es una peticion HTTP
+#  sincrona, con una persona esperando del otro lado.
+#
+#  La cuenta del peor caso: 'VUELTAS_MAXIMAS' = 3 llamadas por señal, cada una
+#  con 'SEGUNDOS_TIMEOUT' = 150 s. Son 450 s por señal. Con diez señales nuevas
+#  el ciclo tarda una hora y la pantalla se queda en "Analizando operacion..."
+#  hasta que algo corta la conexion -- que fue exactamente lo que paso.
+#
+#  POR QUE DOS TOPES Y NO UNO
+#  --------------------------
+#  Un tope por CANTIDAD solo no alcanza: cinco señales que tarden lo maximo son
+#  37 minutos. Un tope por RELOJ solo tampoco: con el modelo rapido dejaria
+#  pasar cincuenta razonamientos y el costo se dispara sin que nadie lo vea.
+#
+#  Los dos juntos acotan las dos cosas que importan --lo que espera una persona
+#  y lo que se gasta-- y cualquiera de los dos que se agote detiene al cerebro
+#  sin detener el ciclo: las señales que siguen se procesan igual, solo que sin
+#  interpretacion. Eso se CUENTA y sale en el resumen, porque un cerebro que
+#  dejo de razonar a la mitad y no lo dice es peor que uno apagado.
+#
+#  ESTOS NUMEROS SON PROVISIONALES, y a proposito. El tope de verdad sale de
+#  medir cuantas señales produce un ciclo real y cuanto tarda cada razonamiento
+#  -- que es justo lo que el registro esta empezando a producir. Hasta tener ese
+#  dato, mejor un tope conservador que una pantalla colgada.
+TOPE_RAZONAMIENTOS_POR_CICLO = 5
+SEGUNDOS_MAXIMOS_DE_RAZONAMIENTO = 90
+
+
+def presupuesto(tope: int = TOPE_RAZONAMIENTOS_POR_CICLO,
+                segundos: int = SEGUNDOS_MAXIMOS_DE_RAZONAMIENTO,
+                ahora=None) -> dict:
+    """
+    Un presupuesto para una corrida: cuantos razonamientos y hasta cuando.
+
+    Se crea UNO por corrida y se comparte entre los caminos que llaman al
+    cerebro --la deteccion y el seguimiento-- porque lo que hay que acotar es lo
+    que espera la persona, y eso no se parte por modulo.
+    """
+    desde = ahora or timezone.now()
+    return {
+        "restantes": max(0, int(tope)),
+        "hasta": desde + timedelta(seconds=max(0, int(segundos))),
+        "usados": 0,
+        "omitidos": 0,
+    }
+
+
+def _hay_presupuesto(p) -> bool:
+    """Si todavia se puede razonar. Sin presupuesto, no se acota nada."""
+    if p is None:
+        return True
+    if p["restantes"] <= 0 or timezone.now() >= p["hasta"]:
+        p["omitidos"] += 1
+        return False
+    return True
+
+
+def _gastar(p) -> None:
+    if p is not None:
+        p["restantes"] -= 1
+        p["usados"] += 1
+
+def _el_cerebro_corre() -> bool:
+    """
+    Si hay que llamar al cerebro, en cualquiera de los dos modos.
+
+    'CEREBRO_EN_EL_CICLO' implica registrar. No es una cortesia: es la
+    invariante que impide la cuarta combinacion de la tabla de arriba.
+    """
+    return bool(CEREBRO_REGISTRA or CEREBRO_EN_EL_CICLO)
+
+
+class Aporte:
+    """
+    Lo que el cerebro produjo, en transito entre razonar y guardar.
+
+    POR QUE HACE FALTA UN OBJETO Y NO ALCANZA UNA FUNCION
+    -----------------------------------------------------
+    La constancia tiene que apuntar a la propuesta, y cuando el cerebro razona
+    LA PROPUESTA TODAVIA NO EXISTE: en '_correr_ciclo' el razonamiento va
+    justo antes de 'registrar_propuesta', porque es el unico punto donde la
+    prioridad y el nivel ya estan fijados y el cerebro no los puede mover.
+
+    Asi que el ciclo razona, crea la propuesta, y recien entonces deja la
+    fila. Este objeto es el traspaso entre esos dos momentos, y guarda el
+    analisis PREVIO porque despues del enriquecimiento ya no se puede
+    recuperar.
+    """
+
+    __slots__ = ("analisis", "veredicto", "previo", "enriquecio")
+
+    def __init__(self, analisis, veredicto=None, previo=None, enriquecio=False):
+        self.analisis = analisis
+        self.veredicto = veredicto
+        self.previo = previo if previo is not None else {}
+        self.enriquecio = enriquecio
+
+    def dejar_constancia(self, org, *, propuesta=None, situacion=None,
+                         ahora=None):
+        """
+        Guarda el razonamiento. Devuelve la fila, o None si no habia nada.
+
+        Nunca levanta: 'razonamiento.registrar' atrapa todo por el mismo motivo
+        que 'enriquecer' -- el ciclo no puede caerse por su bitacora.
+        """
+        if self.veredicto is None or not CEREBRO_REGISTRA:
+            return None
+        from operaciones import razonamiento
+        from operaciones.razonamiento_modelos import FuenteRazonamiento
+        return razonamiento.registrar(
+            org, self.veredicto,
+            fuente=FuenteRazonamiento.CICLO,
+            propuesta=propuesta, situacion=situacion,
+            analisis_previo=self.previo,
+            enriquecio=self.enriquecio, ahora=ahora)
+
+
+def razonar_sobre(org, senal: "Senal", analisis: dict, *, ahora=None,
+                  presupuesto=None) -> Aporte:
+    """
+    Llama al cerebro y devuelve el aporte, sin guardar nada todavia.
+
+    Es el camino completo: 'enriquecer()' es su envoltorio de compatibilidad y
+    se queda con la mitad --transforma el analisis y descarta el veredicto--.
+    Lo que esta funcion agrega es conservar el veredicto y el ESTADO PREVIO,
+    que son las dos cosas que la constancia necesita.
+
+    EL PREVIO SE COPIA ANTES DE TOCAR NADA, y por eso es una copia y no la
+    referencia: si quedara guardado el analisis ya enriquecido, la comparacion
+    seria contra si misma y daria coincidencia siempre. 'test_razonamiento'
+    afirma eso sobre el efecto, no sobre la presencia de la copia.
+    """
+    if not _el_cerebro_corre():
+        return Aporte(analisis)
+    #  El presupuesto se consulta ANTES de armar el contexto: armarlo tambien
+    #  cuesta consultas, y gastarlas para despues no preguntar no tiene sentido.
+    if not _hay_presupuesto(presupuesto):
+        return Aporte(analisis)
+    _gastar(presupuesto)
+
+    previo = dict(analisis) if isinstance(analisis, dict) else {}
+
+    import json
+    from operaciones import cerebro
+    try:
+        contexto = cerebro.contexto_para(org)
+
+        #  LO QUE YA PASO CON ESTA MISMA CONDICION.
+        #
+        #  Sin esto el cerebro razona sobre una señal AISLADA y cada ciclo
+        #  empieza de cero: reacciona, que es lo que hace un motor. Con esto
+        #  retoma un hilo --"ya propuse esto, lo aceptaron, no funciono"--, que
+        #  es lo que hace un agente. La llave es 'huella_condicion', que ya
+        #  existia para deduplicar; lo que faltaba era leerla.
+        #
+        #  Vacio cuando es la primera vez, y el vacio tambien dice algo:
+        #  condicion nueva no es condicion sana.
+        #  getattr y no 'senal.huella': el except de abajo es amplio, asi que
+        #  un atributo ausente desactivaria el cerebro EN SILENCIO. Una Senal
+        #  real siempre la trae; esto cubre a cualquier otra cosa que llegue.
+        antes = cerebro.antecedentes_de(org, getattr(senal, "huella", ""))
+        bloque_antes = f"\n\n== ANTECEDENTES ==\n{antes}" if antes else ""
+
+        veredicto = cerebro.concluir(
+            org,
+            instrucciones=_instrucciones_del_ciclo(org),
+            entrada=(f"{contexto}{bloque_antes}\n\n== LA SEÑAL DETECTADA ==\n"
+                     f"tipo: {senal.tipo}\n"
+                     f"evidencia: {json.dumps(senal.evidencia, ensure_ascii=False, default=str)[:1500]}\n"
+                     f"lo que la regla concluyo: {analisis.get('motivo', '')}"))
+    except Exception:                                        # noqa: BLE001
+        #  Mismo criterio que 'enriquecer': degradar al ciclo de siempre.
+        return Aporte(analisis, previo=previo)
+
+    if not CEREBRO_EN_EL_CICLO:
+        #  Solo registra: el analisis sale INTACTO. Se devuelve el mismo objeto
+        #  a proposito -- que no haya ni una copia por el medio es lo que hace
+        #  que 'test_2' pueda afirmar identidad y no solo igualdad.
+        return Aporte(analisis, veredicto=veredicto, previo=previo,
+                      enriquecio=False)
+
+    return Aporte(cerebro.analisis_de_veredicto(veredicto, analisis),
+                  veredicto=veredicto, previo=previo, enriquecio=True)
+
+
+def enriquecer(org, senal: "Senal", analisis: dict, *, ahora=None) -> dict:
+    """
+    Le pide al cerebro que aporte interpretacion sobre una señal ya detectada.
+
+    NO DEJA CONSTANCIA, y eso es deliberado: la fila tiene que apuntar a la
+    propuesta, que en este punto todavia no existe. Quien necesite las dos
+    cosas usa 'razonar_sobre()' y despues 'Aporte.dejar_constancia()', que es
+    lo que hace '_correr_ciclo'. Esta firma se mantiene porque 23 pruebas de
+    'test_cerebro_ciclo' la ejercitan y no se tocan para agregar una
+    funcionalidad nueva.
+
+    EL DETECTOR SIGUE DECIDIENDO QUE HAY. Esta funcion no detecta, no descarta
+    y no cambia la accion propuesta: recibe un analisis deterministico que ya
+    es correcto y le agrega lo que el cerebro vio. Si el cerebro no aporta
+    nada, el analisis sale igual.
+
+    NUNCA LEVANTA, Y ESA ES SU PROPIEDAD MAS IMPORTANTE
+    ---------------------------------------------------
+    El ciclo no puede depender del cerebro para registrar una propuesta. Un
+    modelo caido, un timeout, una respuesta que no es JSON o un veredicto que
+    no cierra terminan todos igual: se devuelve el analisis
+    deterministico. La propuesta sale igual, y sale correcta.
+
+    Esa garantia ahora vive en 'razonar_sobre', que es quien atrapa. Aqui solo
+    se descarta el veredicto y se devuelve el analisis -- que es, exactamente,
+    lo que esta funcion siempre hizo.
+    """
+    return razonar_sobre(org, senal, analisis, ahora=ahora).analisis
+
+
+#  Lo que el ciclo le pide al cerebro. NO es la identidad del chat: alla hay una
+#  persona preguntando y aca hay una señal ya detectada, asi que lo que se pide
+#  es distinto -- interpretar, no conversar.
+def _instrucciones_del_ciclo(org) -> str:
+    """
+    El nucleo del ciclo mas el estilo editable de la empresa.
+
+    Mismo corte que en el chat: '_INSTRUCCIONES_DEL_CICLO' queda en codigo
+    porque contiene las garantias, y lo que se edita desde la interfaz es como
+    se REDACTA el motivo -- que es presentacion. Si nadie edito, el estilo por
+    defecto deja el prompt practicamente igual al de antes.
+
+    Nunca levanta: 'estilo.vigente' devuelve el texto por defecto si la consulta
+    falla, por el mismo motivo que el resto de este camino degrada en vez de
+    romperse.
+    """
+    from operaciones import estilo as svc_estilo
+    from operaciones.estilo_modelos import AmbitoEstilo
+    separador = "\n\n"
+    return (_INSTRUCCIONES_DEL_CICLO + separador
+            + svc_estilo.vigente(org, AmbitoEstilo.CICLO))
+
+
+_INSTRUCCIONES_DEL_CICLO = """\
+Sos el Supervisor NOC IA de un ISP. Una REGLA DETERMINISTICA ya detectó una
+señal y ya escribió una recomendación; vos no la reemplazás.
+
+Tu trabajo es lo que la regla no puede hacer: mirar el resto de la operación y
+decir si esta señal se entiende distinto en contexto. Correlacioná con lo que
+haya alrededor, estimá el riesgo, y si tenés una causa POSIBLE decila como
+hipótesis con su confianza.
+
+Consultá las herramientas antes de afirmar cualquier cosa. Un hecho que no salga
+de una herramienta no es un hecho, y se va a descartar.
+
+Si no tenés nada que agregar, decilo en "falta" y no inventes una
+interpretación para llenar el espacio. Una propuesta sin tu aporte ya es
+correcta; una con un aporte inventado es peor que sin él.
+
+No propongas ejecutar nada: no podés, y decir que lo hiciste sería mentir.
+"""
+
+
+def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
+    """
+    Una pasada completa de Shadow Mode. Devuelve el resumen de lo que pasó.
+
+    'desatendido' lo pone la corrida del reloj ('operaciones/tasks.py'), donde
+    no hay nadie esperando una respuesta. Lo UNICO que cambia es cuantos
+    equipos alcanza a diagnosticar antes de cortar --ver los dos topes en
+    'diagnostico_optico'-- y NO es un permiso: las tres puertas del cierre
+    siguen iguales, y una corrida desatendida que diagnostica quince equipos
+    puede cerrar cero.
+
+    NO EJECUTA NADA. Lo único que escribe son filas de PropuestaSupervisor y
+    sus renglones de auditoría.
+    """
+    ahora = ahora or timezone.now()
+    with transaction.atomic():
+        #  UN CICLO A LA VEZ POR ORGANIZACION  --  paso M09-L
+        #  --------------------------------------------------
+        #  La deduplicacion es leer ('_ya_propuesta') y despues escribir, y
+        #  entre las dos cosas cabe otro ciclo entero. MEDIDO: dos ciclos
+        #  simultaneos sobre la misma organizacion dejaban DOS propuestas para
+        #  el mismo hecho, con la misma huella. El indice 'idx_propuesta_dedup'
+        #  acelera la consulta pero no es unico, asi que la base no lo impedia.
+        #
+        #  Se bloquea la fila de la ORGANIZACION, que ya existe: no hace falta
+        #  un mecanismo nuevo ni una tabla de locks. Es el mismo patron que usa
+        #  M03 ('programar_orden' bloquea la orden antes de leer su estado).
+        #
+        #  CONSECUENCIA QUE HAY QUE SABER: el ciclo pasa a ser UNA transaccion.
+        #  Si falla a la mitad no quedan propuestas a medias -- antes quedaban
+        #  las de las senales ya procesadas. Para un ciclo manual que se puede
+        #  volver a correr, todo-o-nada es mas facil de explicar que un
+        #  resultado parcial silencioso.
+        Org.objects.select_for_update().get(pk=org.pk)
+        resumen = _correr_ciclo(org, ahora)
+
+    #  ===================================================================
+    #   FUERA DE LA TRANSACCION: lo que habla con sistemas externos
+    #  ===================================================================
+    #  NINGUNA TRANSACCION ABIERTA MIENTRAS SE ESPERA A UN TERCERO. Es una
+    #  decision congelada del proyecto, y la rompi (08/10/2026): el diagnostico
+    #  optico, la consulta del interruptor y el cierre quedaron DENTRO del
+    #  'atomic' de arriba, con la fila de la organizacion bloqueada.
+    #
+    #  El sintoma fue 'OperationalError: the connection is closed' a mitad del
+    #  ciclo. Tres diagnosticos de ~10 s mas las llamadas al motor dejaban la
+    #  transaccion abierta casi un minuto esperando a terceros, y la conexion
+    #  se caia. No cerraba nada y tardaba una eternidad, las dos cosas por el
+    #  mismo motivo.
+    #
+    #  Aqui afuera cada escritura abre su propia transaccion corta:
+    #  'cierre_de_caso.cerrar' ya estaba escrito asi --valida con la fila
+    #  bloqueada, suelta el lock, y RECIEN AHI llama por red-- y ese patron es
+    #  el que hay que respetar, no esquivar envolviendolo en otro atomic.
+    #
+    #  LO QUE SE PIERDE, Y ESTA BIEN QUE SE PIERDA: el todo-o-nada. Si el
+    #  diagnostico falla a la mitad, las propuestas de arriba YA estan
+    #  guardadas. Es lo correcto -- esas propuestas son trabajo valido, y
+    #  tirarlas porque SmartOLT no contesto seria perder lo que si se pudo
+    #  hacer. Un cierre que no ocurrio se reintenta en el ciclo siguiente.
+    resumen.update(_atender_desincronizados(org, ahora,
+                                            desatendido=desatendido))
+    return resumen
+
+
+def _atender_desincronizados(org, ahora, *, desatendido: bool = False) -> dict:
+    """
+    Diagnostica los casos desincronizados y cierra los que corresponda.
+
+    CORRE FUERA DE CUALQUIER TRANSACCION, a proposito: todo lo de aqui habla
+    con sistemas externos --SmartOLT para el diagnostico, el motor para el
+    interruptor y para el cierre-- y ninguna de esas esperas puede ocurrir con
+    una fila de la base bloqueada.
+
+    No levanta: un diagnostico o un cierre que no salen son resultados
+    posibles del ciclo, y el resto del ciclo ya termino y esta guardado.
+    """
+    from operaciones import autonomia, diagnostico_optico
+
+    informe = {"diagnostico_optico": {}, "cierre_automatico": {
+        "cerraria": 0, "no_cerraria": 0, "no_aplica": 0, "cerrados": 0,
+        "motivos": {}}}
+
+    senales = [s for s in detectar(org, ahora)
+               if s.tipo == PropuestaSupervisor.CASO_DESINCRONIZADO]
+    if not senales:
+        return informe
+
+    #  Solo las que van a producir algo: una propuesta nueva, o una pendiente
+    #  que todavia no tiene diagnostico. Las ya decididas no se tocan.
+    #  DOS GRUPOS, y separarlos es lo que impide que una propuesta se muera a
+    #  medio camino (08/10/2026):
+    #
+    #    pendientes      ya tienen propuesta y les FALTA el diagnostico. Hay que
+    #                    preguntarle al proveedor, y eso gasta presupuesto.
+    #    por_cerrar      ya fueron diagnosticadas como seguras y NO se cerraron
+    #                    --porque alguna puerta estaba cerrada ese dia-- y lo
+    #                    unico que les falta es reintentar el cierre.
+    #
+    #  Sin el segundo grupo, una propuesta diagnosticada el lunes con el nivel
+    #  en 1 no se cerraba nunca, por mas que el martes se autorizara todo: ya
+    #  tenia diagnostico, asi que dejaba de entrar. El sintoma seria "le subi el
+    #  nivel y no pasa nada", sin ningun error.
+    pendientes = {}
+    por_cerrar = {}
+    candidatas = []
+    for s in senales:
+        if not _ya_propuesta(org, s):
+            candidatas.append(s)
+            continue
+        p = diagnostico_optico.propuesta_pendiente_de(org, s)
+        if p is None:
+            continue
+        #  SIN DIAGNOSTICO, o CON UNO INCONCLUYENTE. Los dos casos van al
+        #  mismo lugar porque piden lo mismo: preguntarle al proveedor.
+        #
+        #  El segundo se agrego el 09/10/2026, y sin el noventa y cinco casos
+        #  quedaron atascados para siempre: diagnosticados antes de que
+        #  existiera el respaldo por ping, con "no hay equipo registrado", y
+        #  por tener ya su linea de diagnostico nunca volvian a intentarse.
+        #  Seis corridas seguidas devolvieron cero con los dos mapas vacios --
+        #  ni siquiera entraban. Ver 'hay_que_reintentar_diagnostico'.
+        if (diagnostico_optico.le_falta_diagnostico(p)
+                or diagnostico_optico.hay_que_reintentar_diagnostico(p)):
+            pendientes[s.origen_id] = p
+            candidatas.append(s)
+        elif p.nivel_autonomia_requerido >= diagnostico_optico.NIVEL_PARA_CERRAR:
+            por_cerrar[s.origen_id] = p
+
+    if not candidatas and not por_cerrar:
+        return informe
+
+    if candidatas:
+        #  EL PRESUPUESTO SE CREA AQUI y se pasa, en vez de dejar que
+        #  'enriquecer' se arme el suyo: es el unico lugar que sabe si esta
+        #  corrida tiene a alguien esperando del otro lado.
+        informe["diagnostico_optico"] = diagnostico_optico.enriquecer(
+            org, candidatas, ahora=ahora,
+            presupuesto_=diagnostico_optico.presupuesto(
+                ahora=ahora, desatendido=desatendido))
+        informe["cierre_automatico"] = diagnostico_optico.evaluar_cierre_automatico(
+            org, candidatas, ahora=ahora)
+
+    #  UNA sola consulta del interruptor para toda la corrida: es una llamada
+    #  de red, y preguntarla por caso son tantas como casos.
+    autorizacion = autonomia.puede(org, diagnostico_optico.NIVEL_PARA_CERRAR)
+    _auto = informe["cierre_automatico"]
+
+    for s in candidatas:
+        p = pendientes.get(s.origen_id)
+        if p is None:
+            continue
+        r = diagnostico_optico.completar_propuesta_existente(
+            org, s, p, ahora=ahora, autorizacion=autorizacion)
+        if r["cerrado"]:
+            _auto["cerrados"] += 1
+            _auto.setdefault("cerrados_detalle", []).append(r)
+        else:
+            _m = r.get("motivo") or "sin motivo"
+            _mot = _auto.setdefault("motivos_de_no_cierre", {})
+            _mot[_m] = _mot.get(_m, 0) + 1
+
+    #  EL REINTENTO de las que ya estaban diagnosticadas y no se cerraron. No
+    #  se las vuelve a diagnosticar: ya tienen su veredicto escrito, y pedirle
+    #  otra vez al proveedor gastaria presupuesto para llegar al mismo numero.
+    #  'cerrar_si_corresponde' vuelve a pasar las tres puertas igual.
+    for p in por_cerrar.values():
+        r = diagnostico_optico.cerrar_si_corresponde(
+            org, p, ahora=ahora, autorizacion=autorizacion)
+        if r["cerrado"]:
+            _auto["cerrados"] += 1
+            _auto.setdefault("cerrados_detalle", []).append(r)
+        else:
+            _m = r.get("motivo") or "sin motivo"
+            _mot = _auto.setdefault("motivos_de_no_cierre", {})
+            _mot[_m] = _mot.get(_m, 0) + 1
+
+    #  EL AVISO, Y VA ULTIMO A PROPOSITO. Los casos ya estan cerrados y
+    #  guardados; contarlo es lo menos importante de esta funcion, y no puede
+    #  tumbarla. 'avisar_cierres' no levanta nunca -- lo registra y devuelve
+    #  False-- asi que un chat caido no deshace un cierre correcto.
+    #
+    #  SOLO CUANDO HUBO CIERRES: un aviso por hora diciendo "no cerre nada"
+    #  llenaria la conversacion de ruido y, peor, entraria en el historial que
+    #  el modelo lee en el turno siguiente, empujando afuera lo que importa.
+    cerrados_detalle = _auto.get("cerrados_detalle") or []
+    if cerrados_detalle:
+        from operaciones import aviso_al_chat
+        _auto["avisado_en_el_chat"] = aviso_al_chat.avisar_cierres(
+            org, cerrados_detalle, ahora=ahora)
+    return informe
+
+
+def _correr_ciclo(org, ahora) -> dict:
+    #  UNO por corrida, compartido con el seguimiento mas abajo: lo que hay que
+    #  acotar es lo que espera la persona del otro lado del boton, y eso no se
+    #  parte por modulo. Ver 'presupuesto' para los dos topes y su motivo.
+    presupuesto_del_ciclo = presupuesto(ahora=ahora)
+
+    resumen = {"senales": 0, "propuestas": 0, "repetidas": 0,
+               "sin_analisis": 0, "expiradas": 0,
+               #  M09-L. Las claves de arriba ya existian y no cambian de
+               #  significado: las de abajo se AGREGAN para que el ciclo pueda
+               #  responder que paso, no solo cuantas cosas pasaron.
+               "datos_insuficientes": 0,
+               "por_tipo": {},
+               "organizacion": {"id": str(org.id), "nombre": org.name},
+               "ahora": ahora.isoformat()}
+    detalle = []
+
+    resumen["expiradas"] = expirar_vencidas(org, ahora)
+
+    senales = detectar(org, ahora)
+
+    for senal in senales:
+        resumen["senales"] += 1
+        resumen["por_tipo"][senal.tipo] = resumen["por_tipo"].get(senal.tipo, 0) + 1
+        if senal.tipo == PropuestaSupervisor.DATO_INCOMPLETO:
+            resumen["datos_insuficientes"] += 1
+
+        fila = {"tipo": senal.tipo, "origen_tipo": senal.origen_tipo,
+                "origen_id": senal.origen_id, "huella": senal.huella,
+                "evidencia": senal.evidencia, "datos": senal.datos}
+
+        if _ya_propuesta(org, senal):
+            resumen["repetidas"] += 1
+            #  Una repetida NO desaparece del detalle: la situacion sigue
+            #  ocurriendo y quien mira tiene que verla. Lo que no se repite es
+            #  la PROPUESTA, no el hecho.
+            detalle.append({**fila, "resultado": "repetida", "propuesta": None})
+            continue
+
+        analisis = analizar(senal)
+        if not analisis:
+            resumen["sin_analisis"] += 1
+            detalle.append({**fila, "resultado": "sin_analisis",
+                            "propuesta": None})
+            continue
+
+        #  FASE 2. El cerebro puede aportar interpretacion sobre una señal que
+        #  la REGLA ya detecto. Va aqui y no antes porque aqui el contexto ya
+        #  esta completo y las decisiones de seguridad --prioridad, nivel--
+        #  YA ESTAN TOMADAS: el cerebro llega cuando no las puede mover.
+        #
+        #  Con las dos banderas apagadas esto devuelve 'analisis' tal cual y el
+        #  ciclo es el de siempre. Nunca levanta: ver 'razonar_sobre'.
+        #
+        #  SE RAZONA ACA Y SE GUARDA DESPUES, y el orden no es un detalle: la
+        #  constancia tiene que apuntar a la propuesta, que todavia no existe.
+        #  Por eso 'Aporte' lleva el analisis PREVIO -- despues del
+        #  enriquecimiento ya no se puede recuperar, y sin el estado previo no
+        #  hay comparacion posible.
+        aporte = razonar_sobre(org, senal, analisis, ahora=ahora,
+                               presupuesto=presupuesto_del_ciclo)
+        analisis = aporte.analisis
+
+        propuesta = registrar_propuesta(org, senal, analisis, ahora)
+
+        #  La bitacora del razonamiento, ya con la propuesta a la que apuntar.
+        #  Nunca levanta: si la escritura falla, la propuesta ya esta creada y
+        #  el ciclo sigue. Lo que se pierde es la constancia, no el trabajo.
+        aporte.dejar_constancia(org, propuesta=propuesta, ahora=ahora)
+
+        resumen["propuestas"] += 1
+        detalle.append({**fila, "resultado": "propuesta", "propuesta": {
+            "id": str(propuesta.id),
+            "accion_propuesta": propuesta.accion_propuesta,
+            "motivo": propuesta.motivo,
+            "prioridad": propuesta.prioridad,
+            "impacto": propuesta.impacto,
+            "nivel_autonomia_requerido": propuesta.nivel_autonomia_requerido,
+            "conocimiento_version": propuesta.conocimiento_version,
+            "estado": propuesta.estado,
+            "expira_en": propuesta.expira_en.isoformat(),
+        }})
+
+    #  QUE PASO CON EL CEREBRO, y se dice aunque sea cero. Un cerebro que dejo
+    #  de razonar a la mitad por falta de presupuesto y no lo cuenta es peor que
+    #  uno apagado: la bandeja se veria igual y nadie sabria por que faltan
+    #  interpretaciones.
+    resumen["razonamientos"] = presupuesto_del_ciclo["usados"]
+    resumen["razonamientos_omitidos"] = presupuesto_del_ciclo["omitidos"]
+
+    #  Lo mas urgente primero, y los empates en orden estable por tipo: una
+    #  lista que cambia de orden entre dos lecturas iguales no se puede revisar.
+    detalle.sort(key=lambda f: (
+        (f["propuesta"] or {}).get("prioridad", 99), f["tipo"], f["origen_id"]))
+    resumen["detalle"] = detalle
+    #  M09-L. La capacidad se OBSERVA en el resumen. No produce propuestas
+    #  mientras H-05 siga bloqueada -- ver '_capacidad_de_jornada'.
+    resumen["capacidad"] = observar_capacidad(org, ahora)
+    return resumen
+
+
+def expirar_vencidas(org, ahora=None) -> int:
+    """
+    Marca como expiradas las propuestas que nadie revisó a tiempo.
+
+    Una recomendación de hace tres semanas sobre un caso ya cerrado es ruido, y
+    la cola de propuestas que ya existe en el motor (36 pendientes, la más
+    vieja del 19/08) es la demostración de a dónde lleva no tener esto.
+    """
+    ahora = ahora or timezone.now()
+    vencidas = PropuestaSupervisor.objects.filter(
+        org=org, estado=PropuestaSupervisor.PROPUESTA, expira_en__lt=ahora
+    )
+    n = 0
+    for p in vencidas:
+        anterior = p.estado
+        p.estado = PropuestaSupervisor.EXPIRADA
+        p.save(update_fields=["estado", "updated_at"])
+        auditoria.registrar(
+            org=org, actor=None, accion="STATUS_CHANGED",
+            entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=p.id,
+            nombre=p.accion_propuesta,
+            descripcion="Expiró sin revisión humana",
+            estado_anterior=anterior, estado_nuevo=p.estado,
+        )
+        n += 1
+    return n
+
+
+# =============================================================================
+#  REVISION HUMANA  --  el Jefe de Operaciones decide
+# =============================================================================
+
+
+#  QUE PUEDE CAMBIAR UN REVISOR, Y QUE NO  --  paso M09-F
+#  ------------------------------------------------------
+#  La lista es BLANCA, no negra, por el mismo motivo por el que lo es la de
+#  campos de WispHub: con lista negra, un campo nuevo del modelo queda editable
+#  por defecto, y el dia que alguien agregue 'ejecutar_ahora' nadie se entera.
+#
+#  Lo que NO esta y no debe estar:
+#    - 'evidencia'        el hecho observado. Un revisor que pudiera editarla
+#                         podria fabricar el hecho que justifica su decision.
+#    - 'tipo_senal', 'origen_*', 'huella_condicion'   la IDENTIDAD de la
+#                         condicion. Cambiarla convierte la propuesta en otra y
+#                         rompe la deduplicacion: la misma condicion volveria a
+#                         proponerse mañana con la huella vieja.
+#    - 'estado'           lo decide la decision, no un campo suelto.
+#    - 'accion_propuesta_ref'  el puente a la ejecucion. Lo escribe el cierre
+#                         controlado con la clave de la operacion idempotente,
+#                         nunca un revisor: editarlo a mano seria inventar una
+#                         ejecucion que no ocurrio.
+#    - 'nivel_autonomia_requerido'  subirlo a mano seria darse permiso.
+CAMPOS_MODIFICABLES = frozenset({
+    "accion_propuesta",
+    "motivo",
+    "prioridad",
+    "impacto",
+    "responsable_sugerido",
+    "observaciones",
+})
+
+#  Lo que escribe la IA al crear una propuesta. 'responsable_sugerido' y
+#  'observaciones' NO estan aca a proposito: M09-C prohibe que el Supervisor
+#  señale personas, y la unica forma de que no lo haga es que ninguna ruta suya
+#  escriba ese campo. Ver registrar_propuesta.
+CAMPOS_QUE_ESCRIBE_EL_SUPERVISOR = frozenset({
+    "org", "tipo_senal", "origen_tipo", "origen_id", "accion_propuesta",
+    "motivo", "evidencia", "prioridad", "impacto",
+    "nivel_autonomia_requerido", "huella_condicion", "conocimiento_version",
+    "expira_en", "estado",
+})
+
+
+class YaRevisada(ValueError):
+    """
+    Alguien llegó primero.
+
+    Hereda de ValueError a proposito: la vista ya contesta 400 ante un
+    ValueError, y este caso ES una peticion invalida --no un error del
+    servidor--. Que sea una clase propia permite distinguirla sin leer el texto
+    del mensaje, que es lo que hace la prueba de concurrencia.
+    """
+
+
+def _aplicar_cambios(propuesta, cambios: dict) -> dict:
+    """
+    Valida y aplica la edicion humana. Devuelve el antes/despues para auditar.
+
+    Se valida TODO antes de escribir nada: una modificacion a medias dejaria la
+    propuesta en un estado que el revisor no pidio.
+    """
+    prohibidos = sorted(set(cambios) - CAMPOS_MODIFICABLES)
+    if prohibidos:
+        raise ValueError(
+            f"Estos campos no los cambia un revisor: {', '.join(prohibidos)}. "
+            f"Modificables: {', '.join(sorted(CAMPOS_MODIFICABLES))}. "
+            f"La evidencia y la identidad de la condición no se editan: son el "
+            f"hecho observado, no una opinión sobre él."
+        )
+
+    # El responsable sugerido tiene que ser de la MISMA organizacion. Sin esta
+    # comprobacion, un id de otro tenant entraria por la puerta de la edicion.
+    responsable = cambios.get("responsable_sugerido")
+    if responsable is not None and getattr(responsable, "org_id", None) != propuesta.org_id:
+        raise ValueError(
+            "El responsable sugerido pertenece a otra organización.")
+
+    if cambios.get("prioridad") is not None:
+        p = cambios["prioridad"]
+        if not isinstance(p, int) or not (0 <= p <= 100):
+            raise ValueError("La prioridad va de 0 a 100.")
+
+    registro = {}
+    for campo, nuevo in cambios.items():
+        anterior = getattr(propuesta, campo)
+        if campo == "responsable_sugerido":
+            anterior = str(anterior.id) if anterior else None
+            nuevo_serializable = str(nuevo.id) if nuevo else None
+        else:
+            nuevo_serializable = nuevo
+        if anterior == nuevo_serializable:
+            continue                      # no se audita lo que no cambio
+        setattr(propuesta, campo, nuevo)
+        registro[campo] = {"antes": anterior, "despues": nuevo_serializable}
+    return registro
+
+
+def revisar(propuesta: PropuestaSupervisor, *, actor, decision: str,
+            comentario: str = "", cambios: dict | None = None,
+            ahora=None, automatico: bool = False) -> PropuestaSupervisor:
+    """
+    Aceptar, modificar o rechazar. Queda auditado quién, cuándo y con qué.
+
+    ACEPTAR NO EJECUTA NADA en esta etapa, y es deliberado: sirve para validar
+    si el Supervisor recomienda bien antes de darle ninguna capacidad.
+
+    LA FILA SE BLOQUEA ANTES DE MIRARLE EL ESTADO  --  paso M09-F
+    ------------------------------------------------------------
+    Hasta M09-D esta funcion comprobaba 'propuesta.estado' sobre el objeto que
+    ya tenia en memoria. Dos peticiones HTTP cargan cada una SU copia con
+    'get_object_or_404', asi que las dos veian 'propuesta' y las dos escribian:
+    quedaban dos renglones de auditoria contradictorios y ganaba el ultimo.
+    Reproducido el 17/09/2026 --A acepto, B rechazo encima, estado final
+    'rechazada', 2 decisiones auditadas-- antes de cerrarlo.
+
+    El 'select_for_update' hace que la segunda peticion espere a que la primera
+    termine y LUEGO lea el estado ya cambiado. El bloqueo es de la base, no del
+    proceso: dos contenedores del backend detras de un balanceador no comparten
+    memoria, pero si comparten Postgres.
+    """
+    if decision not in PropuestaSupervisor.ESTADOS_REVISADOS:
+        raise ValueError(
+            f"Decisión desconocida: {decision!r}. "
+            f"Solo {PropuestaSupervisor.ESTADOS_REVISADOS}."
+        )
+    #  'automatico' ES LA UNICA FORMA DE REVISAR SIN PERSONA, y tiene que
+    #  pedirse con todas las letras (08/10/2026).
+    #
+    #  La alternativa era permitir 'actor=None' a secas, y eso convertiria cada
+    #  olvido de pasar el actor en un cierre automatico silencioso. Asi, quien
+    #  no lo declara recibe el mismo error de siempre.
+    #
+    #  'revisado_por' queda en NULL, que es como la auditoria distingue lo
+    #  automatico de lo humano. Se eligio eso sobre crear un usuario "Supervisor
+    #  NOC IA" en la base: un usuario de sistema puede recibir permisos, puede
+    #  iniciar sesion si alguien le pone contraseña, y aparece en los selectores
+    #  de asignacion como si fuera una persona. Un NULL no hace ninguna de esas
+    #  cosas, y el 'resultado' dice quien fue.
+    if actor is None and not automatico:
+        raise ValueError("Una revisión sin revisor no es una revisión.")
+    if automatico and decision != PropuestaSupervisor.ACEPTADA:
+        raise ValueError(
+            "El sistema solo acepta automáticamente: rechazar o modificar es "
+            "una decisión que necesita a una persona.")
+
+    cambios = cambios or {}
+    if cambios and decision != PropuestaSupervisor.MODIFICADA:
+        raise ValueError(
+            f"Para cambiar campos la decisión es 'modificar', no '{decision}'. "
+            f"Aceptar con una edición encubierta no es aceptar."
+        )
+
+    with transaction.atomic():
+        fresca = (PropuestaSupervisor.objects
+                  .select_for_update()
+                  .get(pk=propuesta.pk))
+
+        if fresca.estado != PropuestaSupervisor.PROPUESTA:
+            raise YaRevisada(
+                f"Esta propuesta ya está en '{fresca.estado}': una decisión no "
+                f"se revisa dos veces."
+            )
+
+        anterior = fresca.estado
+        campos = ["estado", "revisado_por", "revisado_en", "resultado",
+                  "updated_at"]
+        registro_cambios = {}
+
+        if cambios:
+            #  El hecho historico se copia ANTES de tocar nada, y una sola vez:
+            #  si el revisor modificara dos veces, la "original" seguiria siendo
+            #  la de la IA y no la de su primera edicion. Hoy no puede --una
+            #  propuesta modificada ya no vuelve a 'propuesta'-- pero la guarda
+            #  no depende de eso.
+            if not fresca.propuesta_original:
+                fresca.propuesta_original = {
+                    "accion_propuesta": fresca.accion_propuesta,
+                    "motivo": fresca.motivo,
+                    "prioridad": fresca.prioridad,
+                    "impacto": fresca.impacto,
+                    "nivel_autonomia_requerido": fresca.nivel_autonomia_requerido,
+                    "modificada_por": str(actor.id),
+                    "modificada_en": (ahora or timezone.now()).isoformat(),
+                }
+            registro_cambios = _aplicar_cambios(fresca, cambios)
+            campos += sorted(set(cambios) | {"propuesta_original"})
+
+        fresca.estado = decision
+        fresca.revisado_por = actor
+        fresca.revisado_en = ahora or timezone.now()
+        fresca.resultado = comentario
+        fresca.save(update_fields=campos)
+
+        # APPROVED y REJECTED ya existian en el registro de verbos de Activity:
+        # no se invento ninguno.
+        verbo = {
+            PropuestaSupervisor.ACEPTADA: "APPROVED",
+            PropuestaSupervisor.RECHAZADA: "REJECTED",
+            PropuestaSupervisor.MODIFICADA: "UPDATE",
+        }[decision]
+        extra = {"revisor": str(actor.id) if actor else "sistema",
+                 "automatico": bool(automatico),
+                 "sin_ejecucion": True}
+        if registro_cambios:
+            extra["cambios"] = registro_cambios
+        auditoria.registrar(
+            org=fresca.org, actor=actor, accion=verbo,
+            entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=fresca.id,
+            nombre=fresca.accion_propuesta,
+            descripcion=comentario,
+            estado_anterior=anterior, estado_nuevo=fresca.estado,
+            motivo=comentario,
+            extra=extra,
+        )
+
+        #  LA DECISION SE CAPTURA AQUI  --  paso P8.2 (05/10/2026)
+        #
+        #  'DecisionSupervisor' existia desde P4 con sus tres restricciones
+        #  de base y NUNCA se escribia: la unica aparicion fuera de las
+        #  pruebas era la definicion de la clase. Por eso
+        #  'indicadores_situaciones' calculaba 'tasa_aceptacion' y
+        #  'recomendaciones_que_funcionaron' leyendo una tabla vacia, y
+        #  devolvia 0 / NO_APLICA para siempre.
+        #
+        #  Va DENTRO de esta transaccion a proposito: una propuesta revisada
+        #  sin su fila de decision es exactamente el estado que dejaba las
+        #  metricas en cero. Si esto falla, la revision entera se deshace.
+        #
+        #  El resultado nace PENDIENTE. 'aceptada' NO es 'funciono': eso se
+        #  sabe despues y lo registra 'gobierno.registrar_resultado' con su
+        #  evidencia. Medir las dos cosas juntas diria obediencia donde dice
+        #  acierto.
+        from operaciones import gobierno
+
+        gobierno.registrar_decision(fresca, actor=actor, ahora=ahora,
+                                    automatico=automatico)
+    return fresca
+
+
+def cancelar(propuesta: PropuestaSupervisor, *, motivo: str) -> PropuestaSupervisor:
+    """
+    La condición desapareció antes de que nadie la mirara.
+
+    POR QUE NO ALCANZABA CON RECHAZAR Y EXPIRAR  --  paso M09-F
+    ----------------------------------------------------------
+    'cancelada' estaba declarada en ESTADOS desde M09-C y NINGUNA funcion la
+    escribia: era un estado inalcanzable, y la metrica "canceladas" del diseño
+    habria contado cero para siempre sin que ese cero significara nada.
+
+    Los tres finales dicen cosas distintas y no son intercambiables:
+
+        RECHAZADA  un humano la miro y dijo que no.  -> hay revisor y motivo
+        EXPIRADA   nadie la miro a tiempo.           -> no hay revisor
+        CANCELADA  dejo de tener sentido mirarla.    -> no hay revisor, y la
+                   razon es un hecho del mundo (el caso se cerro por otra via),
+                   no una opinion.
+
+    Por eso NO escribe 'revisado_por': cancelar no es una decision humana sobre
+    el fondo del asunto, y firmar con el nombre de alguien seria atribuirle una
+    opinion que no dio. El motivo si es obligatorio -- una cancelacion sin
+    motivo es indistinguible de una fila perdida.
+
+    Una propuesta cancelada SI puede volver a proponerse: 'cancelada' no esta
+    en ESTADOS_QUE_BLOQUEAN, porque si la condicion reaparece es una condicion
+    nueva que nadie ha juzgado.
+    """
+    if not (motivo or "").strip():
+        raise ValueError(
+            "Cancelar sin motivo deja una propuesta muerta sin explicación.")
+
+    with transaction.atomic():
+        fresca = (PropuestaSupervisor.objects
+                  .select_for_update()
+                  .get(pk=propuesta.pk))
+        if fresca.estado != PropuestaSupervisor.PROPUESTA:
+            raise YaRevisada(
+                f"Esta propuesta ya está en '{fresca.estado}': cancelar no pisa "
+                f"una decisión que ya se tomó."
+            )
+
+        anterior = fresca.estado
+        fresca.estado = PropuestaSupervisor.CANCELADA
+        fresca.save(update_fields=["estado", "updated_at"])
+
+        auditoria.registrar(
+            org=fresca.org, actor=None, accion="STATUS_CHANGED",
+            entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=fresca.id,
+            nombre=fresca.accion_propuesta,
+            descripcion="La condición dejó de existir antes de ser revisada",
+            estado_anterior=anterior, estado_nuevo=fresca.estado,
+            motivo=motivo,
+        )
+    return fresca
+
+
+# =============================================================================
+#  LA PUERTA QUE NO SE ABRE
+# =============================================================================
+
+
+def ejecutar_propuesta(propuesta: PropuestaSupervisor, *args, **kwargs):
+    """
+    NO EJECUTA. Levanta siempre, y está aquí para que eso sea afirmable.
+
+    Es la diferencia entre "no encontramos ninguna llamada a un sistema
+    externo" --que es una afirmación sobre lo que alguien no vio-- y "el único
+    camino declarado hacia la ejecución levanta una excepción", que es una
+    afirmación sobre lo que el código hace.
+
+    Cuando la ejecución llegue, no va a pasar por aquí: va a pasar por el
+    motor, donde Fase 1 ya dejó el interruptor de autonomía y el registro de
+    operaciones idempotentes. Este módulo no le habla a WispHub ni a SmartOLT,
+    y no debería empezar a hacerlo.
+
+    QUE FALTA PARA CERRAR UN CASO AL ACEPTAR  --  M09-R (25/09/2026)
+    ---------------------------------------------------------------
+    La pregunta se hizo explícita al pedir que aceptar una propuesta de
+    `caso_desincronizado` cierre el caso. La herramienta existe
+    (`cerrar_caso_crm`: PATCH /api/cases/{id}/ con status=Closed y closed_on
+    automático) y la puerta existe (`nucleo/seguridad/frontera.py`). Lo que
+    falta son TRES autorizaciones, todas medidas contra producción, y ninguna
+    se puede dar desde este archivo:
+
+      1. `AUTONOMIA_2_ACTIVA` está apagada. 18.630 filas en
+         `asistente.ejecucion_autonoma`, todas 'bloqueada'.
+      2. El prerequisito B-7 sigue abierto: el GUC `app.settings.jwt_secret`
+         está PRESENTE en la base, así que `autonomia2.veredicto_b7()` responde
+         B7_REQUERIDO. Encender (1) sin cerrar esto solo cambia el código del
+         bloqueo, no lo levanta.
+      3. `asistente.autorizacion_herramienta` está vacía (0 filas), así que
+         cada herramienta responde HERRAMIENTA_SIN_AUTORIZACION incluso con las
+         dos anteriores resueltas.
+
+    Hay una cuarta vía que NO está bloqueada y que por eso hay que nombrar:
+    `frontera.humana()` no consulta el kill switch ni Autonomía 2 -- exige
+    `actor` + `evidencia`, y el id de una propuesta aprobada es exactamente la
+    evidencia que pide. Es la puerta conceptualmente correcta para una decisión
+    humana. NO se usa todavía, y no por olvido: abrirla desde aquí sería el
+    bypass que este módulo existe para no tener. Cuando se decida, el cambio va
+    en el motor y con su propio bloque.
+    """
+    raise EjecucionNoPermitida(
+        f"Shadow Mode: la propuesta {propuesta.id} no se ejecuta. "
+        f"El Supervisor observa y recomienda; ejecutar es otra fase."
+    )
+
+
+# =============================================================================
+#  EL CEREBRO EN EL SEGUIMIENTO  --  donde deja de reaccionar y sigue un hilo
+# =============================================================================
+#
+#  QUE LO DIFERENCIA DE 'razonar_sobre'
+#  ------------------------------------
+#  'razonar_sobre' interpreta una señal RECIEN DETECTADA: un instante. Esto
+#  interpreta una SITUACION CON HISTORIA -- cuantos afectados tenia, como cambio,
+#  cuantas veces se reviso, que se anoto antes en su linea de tiempo.
+#
+#  Y hay una diferencia concreta, no retorica: aqui el contexto se arma CON la
+#  situacion ('contexto_para(org, situacion=...)'), que es la forma en que el
+#  cerebro al fin ve el hilo completo en vez del ultimo eslabon.
+#
+#  LO QUE PUEDE Y NO PUEDE TOCAR
+#  -----------------------------
+#  Solo 'porque'. El veredicto --estable, empeora, mejora, requiere_humano-- lo
+#  decide 'situaciones_seguimiento.evaluar' con reglas y conteos, y seguira
+#  decidiendolo: es lo que mueve el estado de la situacion y fija cuando volver a
+#  mirarla. Un cerebro que pudiera cambiarlo estaria decidiendo la operacion.
+#
+#  La comprobacion no es un comentario: se recorre la salida campo por campo y se
+#  levanta si algo que no es 'porque' cambio. Mismo patron que
+#  'cerebro.analisis_de_veredicto'.
+CAMPOS_QUE_EL_CEREBRO_ENRIQUECE_EN_SEGUIMIENTO = ("porque",)
+
+
+def interpretar_seguimiento(situacion, salida: dict, *, ahora=None,
+                            presupuesto=None) -> dict:
+    """
+    Le pide al cerebro que explique como va una situacion. Devuelve la salida.
+
+    Con el cerebro apagado devuelve la salida TAL CUAL --el mismo objeto-- y el
+    seguimiento es el de siempre.
+
+    NUNCA LEVANTA por un fallo del modelo o de la base. 'seguir' ademas lo
+    envuelve y cuenta el fallo aparte, pero no se delega: el veredicto ya es
+    correcto sin el cerebro, y perderlo por una interpretacion seria el peor
+    intercambio posible.
+
+    LA UNICA EXCEPCION QUE SI SALE es el AssertionError de abajo, y es a
+    proposito: si el cerebro modifico un campo que no puede tocar, seguir
+    adelante escribiria un veredicto adulterado. Ahi vale mas cortar.
+    """
+    if not _el_cerebro_corre() or not isinstance(salida, dict):
+        return salida
+    if not _hay_presupuesto(presupuesto):
+        return salida
+    _gastar(presupuesto)
+
+    previo = dict(salida)
+    org = situacion.org
+
+    import json
+    from operaciones import cerebro, razonamiento
+    from operaciones.razonamiento_modelos import FuenteRazonamiento
+
+    try:
+        #  CON la situacion: aqui esta el hilo, no el eslabon.
+        contexto = cerebro.contexto_para(org, situacion=situacion)
+        sin_porque = {k: v for k, v in salida.items() if k != "porque"}
+        veredicto = cerebro.concluir(
+            org,
+            instrucciones=_instrucciones_del_seguimiento(org),
+            entrada=(
+                f"{contexto}\n\n== COMO VA, SEGUN LA REGLA ==\n"
+                f"veredicto: {salida.get('veredicto')}\n"
+                f"porque: {salida.get('porque')}\n"
+                f"abonados afectados: {salida.get('abonados_afectados')}\n"
+                f"cambio desde la ultima revision: {salida.get('delta')}\n"
+                f"datos: "
+                f"{json.dumps(sin_porque, ensure_ascii=False, default=str)[:900]}"))
+    except Exception:                                        # noqa: BLE001
+        return salida
+
+    #  LA CONSTANCIA, siempre que el cerebro haya corrido -- tambien cuando no
+    #  concluye, que es la mitad del valor de medirlo. Apunta a la SITUACION, lo
+    #  otro que la restriccion de la tabla acepta ademas de una propuesta.
+    enriquecera = bool(CEREBRO_EN_EL_CICLO and veredicto.concluyente
+                       and veredicto.recomendacion.strip())
+    razonamiento.registrar(
+        org, veredicto, fuente=FuenteRazonamiento.SEGUIMIENTO,
+        situacion=situacion, analisis_previo=previo,
+        enriquecio=enriquecera, ahora=ahora)
+
+    if not enriquecera:
+        return salida
+
+    nueva = dict(salida)
+    nueva["porque"] = (f"{salida.get('porque', '')} "
+                       f"{veredicto.recomendacion.strip()}").strip()[:1000]
+
+    #  ESTRUCTURAL, no documental: si algo que no es 'porque' cambio, se corta.
+    for clave, valor in previo.items():
+        if clave in CAMPOS_QUE_EL_CEREBRO_ENRIQUECE_EN_SEGUIMIENTO:
+            continue
+        if nueva.get(clave) != valor:
+            raise AssertionError(
+                f"el cerebro modifico '{clave}' del seguimiento, que no puede "
+                f"tocar: el veredicto y la proxima revision son de la regla")
+    return nueva
+
+
+_INSTRUCCIONES_DEL_SEGUIMIENTO = """\
+Sos el Supervisor NOC IA de un ISP. Una situacion que ya conocias se acaba de
+revisar, y una REGLA ya dijo como va: estable, empeora, mejora, sin evidencia,
+requiere humano o puede resolverse. Vos NO cambias ese veredicto.
+
+Tu trabajo es el que la regla no puede hacer: mirar la historia de esta
+situacion y decir que se entiende de como viene evolucionando. No repitas el
+conteo que la regla ya hizo -- deci lo que el conteo no dice.
+
+Consulta las herramientas antes de afirmar cualquier cosa. Un hecho que no salga
+de una herramienta no es un hecho, y se va a descartar.
+
+Lo que mas sirve aqui: si lo que esta pasando se parece a algo que ya paso antes
+en esta misma situacion, si el cambio desde la ultima revision significa algo
+distinto de lo que parece, y que convendria verificar ahora.
+
+Si no tenes nada que agregar, decilo en "falta". Un veredicto sin tu aporte ya es
+correcto; uno con un aporte inventado es peor que sin el.
+
+No propongas ejecutar nada: no podes, y decir que lo hiciste seria mentir.
+"""
+
+
+def _instrucciones_del_seguimiento(org) -> str:
+    """
+    El nucleo del seguimiento mas el estilo editable de la empresa.
+
+    Reusa el ambito 'ciclo' a proposito y no inventa un tercero: lo que se afina
+    ahi --que el texto sea corto y se lea de un vistazo-- es lo mismo que hace
+    falta aqui, y un ambito mas seria una pantalla mas que nadie pidio. Si algun
+    dia los dos necesitan tonos distintos, agregarlo es una linea.
+    """
+    from operaciones import estilo as svc_estilo
+    from operaciones.estilo_modelos import AmbitoEstilo
+    return (_INSTRUCCIONES_DEL_SEGUIMIENTO + "\n\n"
+            + svc_estilo.vigente(org, AmbitoEstilo.CICLO))

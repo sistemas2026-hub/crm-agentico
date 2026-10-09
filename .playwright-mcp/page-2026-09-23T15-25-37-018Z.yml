@@ -1,0 +1,150 @@
+- generic [active] [ref=f12e1]:
+  - generic [ref=f12e2]:
+    - generic [ref=f12e3]:
+      - text: DEXTER
+      - generic [ref=f12e5]: · COMMAND CENTER
+    - generic [ref=f12e6]:
+      - generic [ref=f12e7]: RAPILINK S.A.S.
+      - text: · ISP CORE
+    - generic [ref=f12e8]: OFICINA VIRTUAL · 6 AGENTES EN LÍNEA
+    - generic [ref=f12e9]:
+      - text: 10:43:27
+      - generic [ref=f12e10]: (America/Bogotá)
+    - generic [ref=f12e11]: ● MODO DEMOSTRACIÓN · DATOS SIMULADOS
+  - generic [ref=f12e12]:
+    - generic [ref=f12e13]:
+      - generic [ref=f12e14]: "27"
+      - generic [ref=f12e15]: Conversaciones activas
+    - generic [ref=f12e16]:
+      - generic [ref=f12e17]: "18"
+      - generic [ref=f12e18]: Agentes IA trabajando
+    - generic [ref=f12e19]:
+      - generic [ref=f12e20]: "1.240"
+      - generic [ref=f12e21]: Clientes atendidos hoy
+    - generic [ref=f12e22]:
+      - generic [ref=f12e23]: 1,2 s
+      - generic [ref=f12e24]: Latencia IA promedio
+    - generic [ref=f12e25]:
+      - generic [ref=f12e26]: "3.812"
+      - generic [ref=f12e27]: Herramientas ejecutadas
+    - generic [ref=f12e28]:
+      - generic [ref=f12e29]: "2"
+      - generic [ref=f12e30]: Alertas activas
+  - generic [ref=f12e31]:
+    - generic [ref=f12e34]:
+      - img "Supervisor IA" [ref=f12e80] [cursor=pointer]
+      - generic [ref=f12e82] [cursor=pointer]:
+        - generic [ref=f12e83]:
+          - generic [ref=f12e84]: Supervisor IA
+          - generic [ref=f12e85]: SUPERVISANDO
+        - generic [ref=f12e87]: Supervisión
+        - generic [ref=f12e88]: "\"Auditando 27 conversaciones en curso\""
+        - generic [ref=f12e89]:
+          - generic [ref=f12e90]: "Escaladas: 2"
+          - generic [ref=f12e91]: "Errores: 0"
+      - img "Facturación" [ref=f12e94] [cursor=pointer]
+      - generic [ref=f12e96] [cursor=pointer]:
+        - generic [ref=f12e97]:
+          - generic [ref=f12e98]: Facturación
+          - generic [ref=f12e99]: DISPONIBLE
+        - generic [ref=f12e101]: Facturación y cartera
+        - generic [ref=f12e102]: "\"Sin tareas pendientes · Cartera al día\""
+        - generic [ref=f12e103]:
+          - generic [ref=f12e104]: "Cola: 0"
+          - generic [ref=f12e105]: "Resueltas: 96%"
+      - img "Ventas" [ref=f12e108] [cursor=pointer]
+      - generic [ref=f12e110] [cursor=pointer]:
+        - generic [ref=f12e111]:
+          - generic [ref=f12e112]: Ventas
+          - generic [ref=f12e113]: PROCESANDO
+        - generic [ref=f12e115]: Ventas y contratación
+        - generic [ref=f12e116]: "\"Cotizando plan 300 Mbps en Sabanalarga\""
+        - generic [ref=f12e117]:
+          - generic [ref=f12e118]: "Conv: 5"
+          - generic [ref=f12e119]: "Cotiz: 3"
+      - img "Router IA" [ref=f12e122] [cursor=pointer]
+      - generic [ref=f12e124] [cursor=pointer]:
+        - generic [ref=f12e125]:
+          - generic [ref=f12e126]: Router IA
+          - generic [ref=f12e127]: PROCESANDO
+        - generic [ref=f12e129]: Recepción y triaje
+        - generic [ref=f12e130]: "\"Clasificando mensaje entrante de WhatsApp\""
+        - generic [ref=f12e131]:
+          - generic [ref=f12e132]: "Conv: 24"
+          - generic [ref=f12e133]: "Resp: 0,8 s"
+      - img "Agente Campo" [ref=f12e136] [cursor=pointer]
+      - generic [ref=f12e138] [cursor=pointer]:
+        - generic [ref=f12e139]:
+          - generic [ref=f12e140]: Agente Campo
+          - generic [ref=f12e141]: ESPERANDO
+        - generic [ref=f12e143]: Despacho de campo
+        - generic [ref=f12e144]: "\"Esperando checklist del técnico en sitio\""
+        - generic [ref=f12e145]:
+          - generic [ref=f12e146]: "Órdenes: 4"
+          - generic [ref=f12e147]: "Zona: Norte"
+      - img "Soporte Fibra" [ref=f12e150] [cursor=pointer]
+      - generic [ref=f12e152] [cursor=pointer]:
+        - generic [ref=f12e153]:
+          - generic [ref=f12e154]: Soporte Fibra
+          - generic [ref=f12e155]: CONSULTANDO
+        - generic [ref=f12e157]: Soporte técnico FTTH
+        - generic [ref=f12e158]: "\"Analizando potencia óptica de la ONU\""
+        - generic [ref=f12e159]:
+          - generic [ref=f12e160]: "Conv: 12"
+          - generic [ref=f12e161]: "Tool: consultar_olt"
+      - generic:
+        - generic: NÚCLEO DE ORQUESTACIÓN
+        - generic: "27"
+        - generic: Conversaciones en curso
+        - generic: ● sinapsis 14 ms
+      - generic [ref=f12e162]:
+        - generic [ref=f12e163]: "● CANAL: WHATSAPP API"
+        - generic [ref=f12e164]: Webhook activo · 18 ms
+      - generic [ref=f12e165]:
+        - generic [ref=f12e166]: "● TOOL: SMARTOLT"
+        - generic [ref=f12e167]: consultar_olt · 342 ms
+      - generic [ref=f12e168]:
+        - generic [ref=f12e169]: ● WISPHUB CRM
+        - generic [ref=f12e170]: sincronizado · 2 min
+    - complementary [ref=f12e171]:
+      - generic [ref=f12e172]:
+        - generic [ref=f12e173]: EVENTOS EN TIEMPO REAL
+        - generic [ref=f12e175]: EN VIVO
+      - generic [ref=f12e176]:
+        - generic [ref=f12e177]:
+          - generic [ref=f12e178]: 10:43:02
+          - generic [ref=f12e179]: SOPORTE FIBRA
+          - generic [ref=f12e180]: Respuesta generada y enviada a WhatsApp
+        - generic [ref=f12e181]:
+          - generic [ref=f12e182]: 10:43:00
+          - generic [ref=f12e183]: SMARTOLT
+          - generic [ref=f12e184]: Consulta de ONU completada (−19.2 dBm OK)
+        - generic [ref=f12e185]:
+          - generic [ref=f12e186]: 10:42:51
+          - generic [ref=f12e187]: IDENTIDAD
+          - generic [ref=f12e188]: Cliente verificado por cédula en CRM
+        - generic [ref=f12e189]:
+          - generic [ref=f12e190]: 10:42:47
+          - generic [ref=f12e191]: ROUTER IA
+          - generic [ref=f12e192]: "Derivado a Soporte Fibra (intención: falla LOS)"
+        - generic [ref=f12e193]:
+          - generic [ref=f12e194]: 10:42:44
+          - generic [ref=f12e195]: ROUTER IA
+          - generic [ref=f12e196]: Nueva conversación de WhatsApp entrante
+        - generic [ref=f12e197]:
+          - generic [ref=f12e198]: 10:42:31
+          - generic [ref=f12e199]: SUPERVISOR IA
+          - generic [ref=f12e200]: Conversación escalada a operador humano
+        - generic [ref=f12e201]:
+          - generic [ref=f12e202]: 10:41:58
+          - generic [ref=f12e203]: FACTURACIÓN
+          - generic [ref=f12e204]: Acuerdo de pago registrado y servicio activo
+  - generic [ref=f12e205]:
+    - generic [ref=f12e206]: "SEGURIDAD: E2E cifrado · TLS 1.3 · Ley 1581 (Habeas Data)"
+    - generic [ref=f12e207]:
+      - generic [ref=f12e208]: DISPONIBLE
+      - generic [ref=f12e210]: PROCESANDO
+      - generic [ref=f12e212]: ESPERANDO
+      - generic [ref=f12e214]: SUPERVISANDO
+      - generic [ref=f12e216]: ERROR
+  - complementary [aria-hidden] [ref=f12e218]
