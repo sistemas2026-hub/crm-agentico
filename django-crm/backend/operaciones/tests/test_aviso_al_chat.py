@@ -19,6 +19,8 @@ Las cuatro cosas que se afirman, y ninguna comprueba que algo EXISTA:
 3. Si no hay conversacion, no se le escribe a cualquiera.
 4. Un fallo al avisar NO deshace el cierre ni tumba la corrida.
 """
+from datetime import timedelta
+
 import pytest
 from django.utils import timezone
 
@@ -99,13 +101,71 @@ def test_una_corrida_sin_cierres_no_deja_mensaje(org_persona_y_chat):
 # ===========================================================================
 
 @pytest.mark.django_db
-def test_sin_conversacion_no_se_elige_otra(org_persona_y_chat):
+def test_sin_conversacion_guardada_usa_la_de_quien_delego(org_persona_y_chat):
     """
-    Escribirle a quien no lo pidio es peor que callarse: esa persona veria
-    aparecer en SU conversacion cierres que no autorizo.
+    EL RESPALDO, y por que no es un atajo.
+
+    'conversacion_id' empezo a guardarse el 09/10/2026. Las tareas delegadas
+    antes lo tienen vacio, y sin esto no recibirian aviso NUNCA. El arreglo
+    obvio --volver a delegarlas-- no funciona: el chat ve que ya estan activas
+    y contesta "no hace falta", que es lo correcto de su parte. Medido en vivo
+    ese mismo dia.
+
+    Se le escribe a QUIEN DELEGO, que es quien autorizo estos cierres.
     """
     org, perfil, conv = org_persona_y_chat
-    #  Delegada sin conversacion -- por ejemplo, desde fuera del chat.
+    td.delegar(org, td.CERRAR_DESINCRONIZADOS, actor=perfil)
+
+    assert aviso_al_chat.avisar_cierres(org, CIERRES) is True
+    assert MensajeSupervisor.objects.filter(conversacion=conv).count() == 1
+
+    #  Y QUEDA GUARDADA: el respaldo corre una vez por tarea, no cada hora.
+    #  Sin esto el aviso saltaria a la conversacion mas reciente en cada
+    #  corrida, y el hilo quedaria partido en pedazos.
+    from operaciones.tareas_modelos import TareaDelegada
+    fila = TareaDelegada.objects.get(org=org, clave=td.CERRAR_DESINCRONIZADOS)
+    assert fila.conversacion_id == conv.id
+
+
+@pytest.mark.django_db
+def test_no_se_le_escribe_a_quien_no_delego(db):
+    """
+    LA LINEA QUE EL RESPALDO NO CRUZA. Buscar "la ultima conversacion" a secas
+    le mostraria a otra persona cierres que no autorizo. El filtro es por
+    quien delego, no por fecha -- y esta guarda muere si alguien lo cambia.
+    """
+    org = Org.objects.create(name="Org de dos personas")
+    ahora = timezone.now()
+
+    jefa = Profile.objects.create(
+        org=org, role="ADMIN", is_active=True,
+        user=User.objects.create(email="jefa2@aviso.test", name="Jefa"))
+    otro = Profile.objects.create(
+        org=org, role="ADMIN", is_active=True,
+        user=User.objects.create(email="otro@aviso.test", name="Otro"))
+
+    #  La conversacion MAS RECIENTE es la del otro, a proposito.
+    ConversacionSupervisor.objects.create(
+        org=org, actor=jefa, abierta_en=ahora,
+        ultimo_mensaje_en=ahora - timedelta(hours=2))
+    del_otro = ConversacionSupervisor.objects.create(
+        org=org, actor=otro, abierta_en=ahora, ultimo_mensaje_en=ahora)
+
+    td.delegar(org, td.CERRAR_DESINCRONIZADOS, actor=jefa)
+    aviso_al_chat.avisar_cierres(org, CIERRES)
+
+    assert MensajeSupervisor.objects.filter(conversacion=del_otro).count() == 0, (
+        "se le escribio a quien no delego la tarea: veria cierres que no "
+        "autorizo")
+
+
+@pytest.mark.django_db
+def test_sin_ninguna_conversacion_no_se_inventa_una(db):
+    """Quien delego nunca abrio el chat: no hay donde avisar, y se calla."""
+    org = Org.objects.create(name="Org sin chat")
+    perfil = Profile.objects.create(
+        org=org, role="ADMIN", is_active=True,
+        user=User.objects.create(email="sinchat@aviso.test", name="Sin chat"))
     td.delegar(org, td.CERRAR_DESINCRONIZADOS, actor=perfil)
 
     assert aviso_al_chat.avisar_cierres(org, CIERRES) is False
