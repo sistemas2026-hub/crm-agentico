@@ -74,15 +74,34 @@ logger = logging.getLogger(__name__)
 TOPE_DETALLADOS = 10
 
 
+#  La evidencia guarda el veredicto como "diagnostico del equipo: <razon>",
+#  que tiene sentido en una lista de ocho observaciones donde hay que saber
+#  cual es cual. En un aviso que YA dice que son cierres por diagnostico, ese
+#  prefijo se repite en cada renglon y no agrega nada.
+_PREFIJO_EVIDENCIA = "diagnostico del equipo:"
+
+
 def _linea(cierre: dict) -> str:
-    """Un renglon por caso: el ticket y por que se cerro."""
-    ref = str(cierre.get("referencia") or cierre.get("caso") or "").strip()
+    """
+    Un renglon por caso: el ticket del proveedor y por que se cerro.
+
+    SE PREFIERE EL TICKET y no la 'referencia': esa la devuelve el motor y es
+    su clave de idempotencia ('propuesta:<uuid>'), que no sirve para buscar
+    nada. Medido el 09/10/2026 leyendo el primer aviso que se escribio de
+    verdad -- decia 'propuesta:a9499ad3-cb67-4c23-a85e-ac05fa3d1b24' y era
+    ilegible.
+    """
+    ref = str(cierre.get("ticket") or cierre.get("referencia") or "").strip()
     porque = str(cierre.get("porque") or "").strip()
+    if porque.lower().startswith(_PREFIJO_EVIDENCIA):
+        porque = porque[len(_PREFIJO_EVIDENCIA):].strip()
     #  El porque viene redactado desde 'diagnostico_optico.porque_del_cierre',
     #  que es quien sabe si fue por señal optica o por ping. Aqui no se
     #  reinterpreta: repetirlo con otras palabras seria una segunda version de
     #  la misma afirmacion, y tarde o temprano dirian cosas distintas.
-    return f"- {ref or 'caso sin referencia'}: {porque}" if porque else f"- {ref}"
+    if not ref:
+        return f"- {porque}" if porque else "- (caso sin referencia)"
+    return f"- ticket {ref}: {porque}" if porque else f"- ticket {ref}"
 
 
 def redactar(cerrados: list[dict]) -> str:

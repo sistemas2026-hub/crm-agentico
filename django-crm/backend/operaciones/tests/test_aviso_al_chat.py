@@ -45,9 +45,14 @@ def org_persona_y_chat(db):
     return org, perfil, conv
 
 
+#  LA FORMA REAL de lo que devuelve 'cerrar_si_corresponde', incluido el
+#  'referencia' del motor --que es su clave de idempotencia y NO se muestra--
+#  para que estas pruebas no se escriban contra una version idealizada.
 CIERRES = [
-    {"referencia": "94595", "porque": "el equipo esta en linea con señal buena"},
-    {"referencia": "94376", "porque": "respondio los 3 paquetes del ping"},
+    {"ticket": "94595", "referencia": "propuesta:aaaa-1111",
+     "porque": "diagnostico del equipo: el equipo esta en linea con señal buena"},
+    {"ticket": "94376", "referencia": "propuesta:bbbb-2222",
+     "porque": "diagnostico del equipo: respondio los 3 paquetes del ping"},
 ]
 
 
@@ -71,6 +76,12 @@ def test_avisa_en_la_conversacion_donde_se_delego(org_persona_y_chat):
     #  Y DICE QUE CERRO, con el ticket que una persona usa para buscarlo.
     assert "2" in m.contenido
     assert "94595" in m.contenido and "94376" in m.contenido
+    #  NUNCA LA CLAVE INTERNA DEL MOTOR. El primer aviso real decia
+    #  'propuesta:a9499ad3-...' y era ilegible: no se puede buscar un ticket
+    #  con eso. Esta guarda muere si alguien vuelve a preferir 'referencia'.
+    assert "propuesta:" not in m.contenido
+    #  Y SIN EL PREFIJO de la evidencia repetido en cada renglon.
+    assert "diagnostico del equipo:" not in m.contenido
     #  Y CON QUE LO VERIFICO: cerrar por señal optica y cerrar por ping no son
     #  la misma afirmacion, y el aviso no las puede fundir.
     assert "ping" in m.contenido
@@ -218,7 +229,7 @@ def test_con_muchos_cierres_se_resume():
     casos-- una lista completa seria un muro que nadie lee y que ademas entra
     en el historial del modelo. El TOTAL siempre se dice.
     """
-    muchos = [{"referencia": str(90000 + i), "porque": "ping completo"}
+    muchos = [{"ticket": str(90000 + i), "porque": "ping completo"}
               for i in range(25)]
     texto = aviso_al_chat.redactar(muchos)
 
@@ -279,7 +290,7 @@ def test_el_cierre_produce_las_claves_que_el_aviso_lee(org_persona_y_chat,
     monkeypatch.setattr(
         cierre_de_caso, "cerrar",
         lambda p, **k: {"cerrado": True, "motivo": "",
-                        "referencia": "94595", "detalle": ""})
+                        "referencia": "propuesta:xyz", "detalle": ""})
     monkeypatch.setattr(diag, "_puede_cerrar_hoy",
                         lambda *a, **k: {"puede": True, "motivo": ""},
                         raising=False)
@@ -294,8 +305,10 @@ def test_el_cierre_produce_las_claves_que_el_aviso_lee(org_persona_y_chat,
         f"el cierre no ocurrio y la guarda no pudo mirar las claves: "
         f"{r.get('motivo')}")
 
-    for clave in ("referencia", "porque"):
+    for clave in ("ticket", "porque"):
         assert clave in r, (
             f"'{clave}' no viaja en el resultado del cierre, y el aviso del "
             f"chat la lee: cada renglon quedaria incompleto sin que nada falle")
-    assert r["referencia"] == "94595"
+    #  'referencia' sigue viajando para la auditoria, pero NO es lo que se
+    #  muestra: es la clave de idempotencia del motor.
+    assert r["referencia"] == "propuesta:xyz"

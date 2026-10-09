@@ -742,7 +742,27 @@ def cerrar_si_corresponde(org, propuesta, *, ahora=None,
             #  mensaje. Hasta el 09/10/2026 no viajaba, y el aviso del chat
             #  habria dicho "caso sin referencia" en cada renglon.
             "referencia": str(resultado.get("referencia") or ""),
+            #  EL NUMERO DE TICKET DEL PROVEEDOR, que es con lo que una
+            #  persona busca. 'referencia' la devuelve el motor y es su clave
+            #  de idempotencia --'propuesta:<uuid>'--: correcta para eso e
+            #  inutil para alguien que lee un aviso. Medido el 09/10/2026: el
+            #  primer mensaje que el Supervisor escribio en el chat decia
+            #  'propuesta:a9499ad3-...' y no se podia buscar con eso.
+            #
+            #  Una consulta mas, y solo cuando SE CERRO: no se paga por cada
+            #  caso evaluado, se paga por cada uno cerrado.
+            "ticket": _ticket_del_caso(propuesta),
             "porque": porque_del_cierre(propuesta)}
+
+
+def _ticket_del_caso(propuesta) -> str:
+    """El id del ticket en el proveedor, o vacio si el caso ya no esta."""
+    from cases.models import Case
+
+    return str(Case.objects
+               .filter(id=propuesta.origen_id, org_id=propuesta.org_id)
+               .values_list("external_ticket_id", flat=True)
+               .first() or "")
 
 
 def porque_del_cierre(propuesta) -> str:
