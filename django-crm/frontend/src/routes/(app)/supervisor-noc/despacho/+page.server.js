@@ -35,6 +35,7 @@ export async function load({ url, cookies }) {
     plantillasSinClasificar: plantillas.sinClasificar,
     casos: casos.casos,
     tope: casos.tope,
+    sinAprobados: casos.sinAprobados,
     // NO SE INVENTA UNA LISTA VACÍA CUANDO LA LECTURA FALLÓ. Una empresa sin
     // casos abiertos y una consulta que no respondió se dibujan distinto.
     error: plantillas.error || casos.error

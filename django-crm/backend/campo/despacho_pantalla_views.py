@@ -118,10 +118,19 @@ def _orden_activa_de(org, case_id: str):
 class CasosDespachablesView(APIView):
     """``GET`` los casos abiertos que podrian ir a campo, con su evidencia.
 
-    NO decide cuales merecen visita. Eso depende de si ya se intento por
-    telefono, de si el cliente esta, de si hay repuesto -- cosas que no estan
-    en ningun campo. Lo que hace es juntar lo que hay que mirar para decidir,
-    en un solo lugar, en vez de obligar a abrir tres pantallas por caso.
+    SOLO LOS QUE UNA PERSONA YA APROBO. El Supervisor detecta que un caso
+    necesita visita --`CASO_REQUIERE_VISITA`, y solo cuando la MEDICION lo
+    sostiene-- alguien acepta esa propuesta en «Pendientes por revision», y
+    recien ahi el caso llega aca.
+
+    Hasta el 09/10/2026 se listaban todos los casos abiertos, y eso dejaba al
+    Supervisor de decorado: proponia, pero cualquier caso se podia despachar
+    igual. Ahora nada sale a campo sin el visto de alguien.
+
+    Y SIGUE SIN DECIDIR cual se despacha: que un caso aprobado se mande hoy o
+    mañana, con que plantilla y con que prioridad, lo elige quien mira. Lo que
+    hace esto es juntar lo que hay que ver para decidirlo, en vez de obligar a
+    abrir tres pantallas por caso.
     """
 
     permission_classes = [IsCampoAuthenticated]
@@ -138,10 +147,40 @@ class CasosDespachablesView(APIView):
         org = request.profile.org
         con_ficha = request.query_params.get("ficha") == "1"
 
+        #  SOLO LO QUE UNA PERSONA YA APROBO.
+        #
+        #  Hasta el 09/10/2026 esta pantalla listaba TODOS los casos abiertos, y
+        #  eso convertia al Supervisor en decorado: proponia, pero cualquier
+        #  caso se podia despachar igual. Ahora el flujo es uno solo --el
+        #  Supervisor detecta que un caso necesita visita, una persona lo
+        #  acepta, y recien ahi llega aca-- asi que nada sale a campo sin pasar
+        #  por el visto de alguien.
+        #
+        #  ACEPTADA y MODIFICADA, no RECHAZADA: modificar es aceptar cambiando
+        #  algo, rechazar es decir que no. Tratar las tres como "revisadas"
+        #  --que es como `ESTADOS_REVISADOS` las agrupa para OTRA pregunta--
+        #  traeria justo las que alguien decidio que no van.
+        from operaciones.models import PropuestaSupervisor
+
+        aprobados = set(
+            PropuestaSupervisor.objects
+            .filter(org=org,
+                    tipo_senal=PropuestaSupervisor.CASO_REQUIERE_VISITA,
+                    estado__in=(PropuestaSupervisor.ACEPTADA,
+                                PropuestaSupervisor.MODIFICADA),
+                    origen_tipo="case")
+            .values_list("origen_id", flat=True)
+        )
+        if not aprobados:
+            #  Vacio NO es un error, y se distingue: "todavia nadie aprobo
+            #  ninguno" y "no se pudo leer" se dibujan distinto.
+            return Response({"casos": [], "tope": self.TOPE,
+                             "sin_aprobados": True})
+
         qs = (
             Case.objects
             .filter(org=org, is_active=True, is_sample=False,
-                    merged_into__isnull=True)
+                    merged_into__isnull=True, id__in=aprobados)
             .exclude(status="Closed")
             .order_by("-created_at")[:self.TOPE]
         )
@@ -177,7 +216,8 @@ class CasosDespachablesView(APIView):
                     fila["sugerencia"] = None
             casos.append(fila)
 
-        return Response({"casos": casos, "tope": self.TOPE})
+        return Response({"casos": casos, "tope": self.TOPE,
+                         "sin_aprobados": False})
 
     def _sugerencia_de(self, caso) -> dict | None:
         """Que dice la evidencia de este caso. Nunca rompe la lista."""

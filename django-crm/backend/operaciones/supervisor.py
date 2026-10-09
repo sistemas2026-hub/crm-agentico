@@ -137,6 +137,14 @@ def _observacion(fuente: str, identificador, dato: str, observado_en=None) -> di
 # =============================================================================
 
 
+#: Cuantos casos abiertos se diagnostican por ciclo.
+#:
+#: No es una preferencia: cada uno cuesta una llamada al motor, que a su
+#: vez habla con WispHub y SmartOLT. Sin tope, una empresa con doscientos
+#: casos abiertos convertiria cada ciclo en doscientos viajes de red.
+TOPE_CASOS_A_DIAGNOSTICAR = 15
+
+
 def detectar(org, ahora=None) -> list[Senal]:
     """Todas las señales vigentes de una organización. No escribe nada."""
     ahora = ahora or timezone.now()
@@ -151,6 +159,10 @@ def detectar(org, ahora=None) -> list[Senal]:
         #  cerrado afuera ayer esta tan desincronizado como uno de hace dos
         #  meses: el CRM esta igual de equivocado en los dos.
         _casos_cerrados_en_el_proveedor,
+        #  M10. La unica señal que termina en una cuadrilla manejando hasta
+        #  una casa. Por eso solo propone lo que la MEDICION sostiene: una
+        #  labor que salio del texto queda fuera.
+        _casos_que_necesitan_visita,
         _actividades_vencidas,
         _actividades_sin_responsable,
         _actividades_bloqueadas,
@@ -319,6 +331,123 @@ def _casos_abiertos_antiguos(org, ahora) -> list[Senal]:
 #  (12). 'Pending', 'Rejected' y 'Duplicate' estan declarados y no se usan; se
 #  tratan como abiertos porque no son 'Closed', que es lo unico afirmable.
 CERRADO_EN_DEXTER = "Closed"
+
+
+def _casos_que_necesitan_visita(org, ahora) -> list[Senal]:
+    """Casos abiertos cuyo EQUIPO dice que la falla es de la red.
+
+    POR QUE ESTA SEÑAL EXISTE
+    -------------------------
+    Nace el 09/10/2026 con la pantalla de despacho, y resuelve un problema
+    concreto: el despacho no puede salir de «todos los casos abiertos». Que un
+    caso merezca una visita depende de si ya se intento por telefono, si el
+    cliente esta, si hay repuesto -- cosas que no estan en ningun campo y que
+    este codigo no puede saber.
+
+    Lo que SI se puede medir es cuando el equipo dice que la falla es de la
+    red. Eso es lo que se propone; una persona lo acepta, y recien ahi el caso
+    aparece en Despacho.
+
+    NO LA CALCULA ESTE MODULO
+    -------------------------
+    El veredicto sale de `operaciones.clasificacion_de_trabajo`, que es el
+    mismo que usa el despacho. Reconstruir el criterio aqui lo pondria a vivir
+    en dos lados y uno de los dos se quedaria viejo -- es el defecto que la
+    fase C del seguimiento ya encontro en el frontend.
+
+    LO QUE NO PROPONE
+    -----------------
+    Un equipo SANO no genera señal: que no sea una falla de red no quiere decir
+    que no haya trabajo --el cliente puede pedir una reubicacion-- pero eso lo
+    decide una persona, no una medicion que no lo vio.
+
+    Y SIN ENERGIA TAMPOCO. Si el equipo esta caido por dying-gasp, el problema
+    es el corte de luz en la casa: mandar una cuadrilla es mandarla a mirar
+    como alguien espera que vuelva la luz.
+
+    EL TOPE NO ES UNA PREFERENCIA
+    -----------------------------
+    Cada caso cuesta una llamada al motor, que a su vez habla con WispHub y
+    SmartOLT. Sin tope, una empresa con doscientos casos abiertos convertiria
+    cada ciclo del Supervisor en doscientos viajes de red. Se dice cuantos
+    quedaron sin mirar en vez de cortar en silencio.
+    """
+    from campo.services.despacho import contexto_del_caso
+    from cases.models import Case
+    from operaciones import clasificacion_de_trabajo as clf
+
+    salida: list[Senal] = []
+    abiertos = list(
+        Case.objects
+        .filter(org=org, is_active=True, is_sample=False,
+                merged_into__isnull=True)
+        .exclude(status="Closed")
+        .exclude(external_service_id="")
+        .exclude(external_service_id__isnull=True)
+        .order_by("-created_at")[:TOPE_CASOS_A_DIAGNOSTICAR]
+    )
+
+    for caso in abiertos:
+        try:
+            contexto = contexto_del_caso(str(caso.id))
+        except Exception:                                    # noqa: BLE001
+            #  Un caso que no se pudo consultar no es un caso sano: es uno del
+            #  que no se sabe nada. No se propone, y tampoco se afirma que
+            #  este bien.
+            continue
+        if not (isinstance(contexto, dict)
+                and contexto.get("contexto_disponible")):
+            continue
+
+        veredicto = clf.clasificar(
+            contexto,
+            marcadores={
+                "id_servicio_instalaciones":
+                    contexto.get("id_servicio_instalaciones"),
+            },
+        )
+        labor = veredicto.get("labor") or ""
+
+        #  Solo lo que la MEDICION sostiene. Una labor que salio del texto
+        #  queda fuera: proponerle a alguien que mande una cuadrilla porque un
+        #  asunto decia cierta palabra seria pedirle que confie en lo que nadie
+        #  verifico.
+        if not veredicto.get("verificada"):
+            continue
+        if labor not in (clf.CORRECTIVO, clf.TRABAJOS, clf.INSTALACION):
+            continue
+
+        equipo = contexto.get("equipo") or {}
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.CASO_REQUIERE_VISITA,
+            origen_tipo="case",
+            origen_id=str(caso.id),
+            #  Lo que una persona necesita para decidir, cada dato con su
+            #  fuente. Quien acepta esto manda a alguien a manejar hasta una
+            #  casa: tiene que poder ver contra que.
+            evidencia=[
+                _observacion("caso", caso.id,
+                             f"caso en el CRM: {caso.name}", ahora),
+                _observacion("caso", caso.id,
+                             f"servicio en el proveedor: "
+                             f"{caso.external_service_id}", ahora),
+                _observacion("equipo", caso.id,
+                             f"estado del equipo: "
+                             f"{equipo.get('estado') or 'sin lectura'}", ahora),
+                _observacion("clasificacion", caso.id,
+                             veredicto.get("porque") or "", ahora),
+            ],
+            datos={
+                "labor_sugerida": labor,
+                "fuente_de_la_sugerencia": veredicto.get("fuente") or "",
+                #  Viaja la hora de la medicion: al congelarse, una medicion
+                #  deja de ser una medicion y pasa a ser un registro de lo que
+                #  se veia en un momento.
+                "medido_en": contexto.get("capturado_en"),
+            },
+        ))
+
+    return salida
 
 
 def _casos_cerrados_en_el_proveedor(org, ahora) -> list[Senal]:

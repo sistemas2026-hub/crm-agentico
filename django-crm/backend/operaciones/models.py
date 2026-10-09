@@ -789,6 +789,20 @@ class PropuestaSupervisor(BaseModel):
     #  afirma incumplimiento de nadie, ni que el problema del cliente este
     #  resuelto: solo que los dos sistemas no dicen lo mismo.
     CASO_DESINCRONIZADO = "caso_desincronizado"
+
+    #: Este caso necesita que alguien vaya.
+    #
+    #  Nace el 09/10/2026 con la pantalla de despacho. Las demas señales dicen
+    #  que algo esta ATRASADO o DESALINEADO; esta dice que hay trabajo fisico
+    #  que hacer, y es la unica que termina en una orden y una cuadrilla.
+    #
+    #  Existe porque el despacho no puede salir de "todos los casos abiertos":
+    #  que un caso merezca visita depende de si ya se intento por telefono, si
+    #  el cliente esta, si hay repuesto -- cosas que no estan en ningun campo.
+    #  Lo que SI se puede medir es cuando el equipo dice que la falla es de la
+    #  red, y eso es lo que esta señal propone. Una persona la acepta, y recien
+    #  ahi el caso aparece en Despacho.
+    CASO_REQUIERE_VISITA = "caso_requiere_visita"
     TIPOS_SENAL = (
         (CASO_ANTIGUO, "Caso abierto antiguo"),
         (ACTIVIDAD_VENCIDA, "Actividad vencida"),
@@ -805,6 +819,7 @@ class PropuestaSupervisor(BaseModel):
         (INCIDENCIA_SIN_RESOLVER, "Incidencia operativa sin resolver"),
         (ESCALAMIENTO_SIN_DESTINATARIO, "Escalamiento sin destinatario registrado"),
         (CASO_DESINCRONIZADO, "Caso cerrado en el proveedor y abierto en el CRM"),
+        (CASO_REQUIERE_VISITA, "Caso que necesita una visita a campo"),
     )
 
     PROPUESTA = "propuesta"

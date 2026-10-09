@@ -121,20 +121,43 @@ def _caso(org, nombre="Sin internet", **extra):
     return Case.objects.create(**campos)
 
 
+def _aprobado(org, nombre="Sin internet", **extra):
+    """Un caso que el Supervisor propuso y una persona acepto.
+
+    Desde el 09/10/2026 la pantalla SOLO lista esos. Las pruebas que miran
+    otra cosa --que un cerrado no entre, que uno de muestra no entre-- tienen
+    que partir de un caso aprobado, o pasarian por el motivo equivocado: la
+    lista estaria vacia porque nadie lo aprobo, no por lo que se quiere probar.
+    """
+    from operaciones.models import PropuestaSupervisor
+
+    caso = _caso(org, nombre, **extra)
+    PropuestaSupervisor.objects.create(
+        org=org, tipo_senal=PropuestaSupervisor.CASO_REQUIERE_VISITA,
+        origen_tipo="case", origen_id=str(caso.id),
+        estado=PropuestaSupervisor.ACEPTADA,
+        #  `propuesta_exige_evidencia` lo prohibe vacio, y con razon: una
+        #  recomendacion que no se puede discutir no deberia existir.
+        evidencia=[{"fuente": "equipo", "dato": "caido por fibra",
+                      "momento": "2026-10-09T03:00:00Z"}],
+    )
+    return caso
+
+
 def test_g_los_casos_abiertos_se_listan(admin_client, org_a):
-    _caso(org_a, "Sin internet")
+    _aprobado(org_a, "Sin internet")
     cuerpo = admin_client.get(CASOS).json()
     assert [c["nombre"] for c in cuerpo["casos"]] == ["Sin internet"]
 
 
 def test_h_un_caso_CERRADO_no_entra(admin_client, org_a):
-    _caso(org_a, "Ya resuelto", status="Closed")
+    _aprobado(org_a, "Ya resuelto", status="Closed")
     assert admin_client.get(CASOS).json()["casos"] == []
 
 
 def test_i_un_caso_de_EJEMPLO_no_entra(admin_client, org_a):
     """Los de muestra son del seed y despacharlos manda a nadie a ningún lado."""
-    _caso(org_a, "De muestra", is_sample=True)
+    _aprobado(org_a, "De muestra", is_sample=True)
     assert admin_client.get(CASOS).json()["casos"] == []
 
 
@@ -162,7 +185,7 @@ def test_k_un_caso_con_orden_VIVA_lo_dice_y_no_se_bloquea(
     duplicado accidental es la `Idempotency-Key`; esto es para que quien
     despacha lo VEA antes, que es distinto de que el sistema decida por él.
     """
-    caso = _caso(org_a, "Con orden")
+    caso = _aprobado(org_a, "Con orden")
     version = _version(_tipo(org_a, "ftth", "instalacion"))
     OrdenTrabajo.objects.create(
         org=org_a, numero=77, tipo_trabajo_version=version,
@@ -175,7 +198,7 @@ def test_k_un_caso_con_orden_VIVA_lo_dice_y_no_se_bloquea(
 
 
 def test_l_una_orden_CERRADA_ya_no_cuenta_como_viva(admin_client, org_a):
-    caso = _caso(org_a, "Con orden cerrada")
+    caso = _aprobado(org_a, "Con orden cerrada")
     version = _version(_tipo(org_a, "ftth", "instalacion"))
     OrdenTrabajo.objects.create(
         org=org_a, numero=78, tipo_trabajo_version=version,
@@ -196,7 +219,7 @@ def test_m_la_ficha_SE_PIDE_no_viene_sola(admin_client, org_a, monkeypatch):
         vistas.CasosDespachablesView, "_sugerencia_de",
         lambda self, caso: pedidas.append(caso.id) or {"labor": "correctivo"},
     )
-    _caso(org_a, "Sin internet")
+    _aprobado(org_a, "Sin internet")
 
     sin = admin_client.get(CASOS).json()["casos"][0]
     assert sin["sugerencia"] is None
@@ -216,8 +239,8 @@ def test_n_un_caso_que_no_se_pudo_evaluar_no_deja_sin_lista_a_los_otros(
         raise RuntimeError("el motor no responde")
 
     monkeypatch.setattr(vistas.CasosDespachablesView, "_sugerencia_de", explota)
-    _caso(org_a, "Uno")
-    _caso(org_a, "Dos")
+    _aprobado(org_a, "Uno")
+    _aprobado(org_a, "Dos")
 
     #  La excepcion se rompe A PROPOSITO desde fuera de `_sugerencia_de`, que
     #  es donde su propio try no llega: un import roto o un cambio de firma
@@ -230,9 +253,102 @@ def test_n_un_caso_que_no_se_pudo_evaluar_no_deja_sin_lista_a_los_otros(
 def test_o_NADA_de_esto_escribe(admin_client, org_a):
     """Son dos lecturas. El despacho sigue siendo `trabajos/crear/`."""
     _version(_tipo(org_a, "ftth", "instalacion"))
-    _caso(org_a, "Sin internet")
+    _aprobado(org_a, "Sin internet")
 
     antes = OrdenTrabajo.objects.count()
     admin_client.get(PLANTILLAS)
     admin_client.get(CASOS)
     assert OrdenTrabajo.objects.count() == antes
+
+
+# ---------------------------------------------------------------------------
+# C · solo lo que una persona ya aprobó
+# ---------------------------------------------------------------------------
+#
+# Hasta el 09/10/2026 esta pantalla listaba TODOS los casos abiertos, y eso
+# dejaba al Supervisor de decorado: proponía, pero cualquier caso se podía
+# despachar igual. El flujo ahora es uno solo.
+
+def _propuesta(org, caso, estado, tipo=None):
+    from operaciones.models import PropuestaSupervisor
+
+    return PropuestaSupervisor.objects.create(
+        org=org,
+        tipo_senal=tipo or PropuestaSupervisor.CASO_REQUIERE_VISITA,
+        origen_tipo="case",
+        origen_id=str(caso.id),
+        estado=estado,
+        evidencia=[{"fuente": "equipo", "dato": "caido por fibra",
+                      "momento": "2026-10-09T03:00:00Z"}],
+    )
+
+
+def test_p_sin_ninguna_aprobada_la_lista_llega_VACIA_y_lo_dice(
+    admin_client, org_a
+):
+    """Y no por error: «todavía nadie aprobó ninguno» se distingue de «no se
+    pudo leer»."""
+    _caso(org_a, "Sin aprobar")
+
+    cuerpo = admin_client.get(CASOS).json()
+    assert cuerpo["casos"] == []
+    assert cuerpo["sin_aprobados"] is True
+
+
+def test_q_un_caso_APROBADO_si_aparece(admin_client, org_a):
+    from operaciones.models import PropuestaSupervisor
+
+    caso = _caso(org_a, "Equipo caído por fibra")
+    _propuesta(org_a, caso, PropuestaSupervisor.ACEPTADA)
+
+    cuerpo = admin_client.get(CASOS).json()
+    assert [c["nombre"] for c in cuerpo["casos"]] == ["Equipo caído por fibra"]
+    assert cuerpo["sin_aprobados"] is False
+
+
+def test_r_MODIFICADA_tambien_cuenta_como_aprobada(admin_client, org_a):
+    """Modificar es aceptar cambiando algo, no decir que no."""
+    from operaciones.models import PropuestaSupervisor
+
+    caso = _caso(org_a, "Con cambios")
+    _propuesta(org_a, caso, PropuestaSupervisor.MODIFICADA)
+
+    assert len(admin_client.get(CASOS).json()["casos"]) == 1
+
+
+def test_s_una_RECHAZADA_no_aparece(admin_client, org_a):
+    """Alguien ya decidió que ese no va. Tratar las tres como «revisadas»
+    traería justo las que se descartaron."""
+    from operaciones.models import PropuestaSupervisor
+
+    caso = _caso(org_a, "Descartado")
+    _propuesta(org_a, caso, PropuestaSupervisor.RECHAZADA)
+
+    assert admin_client.get(CASOS).json()["casos"] == []
+
+
+def test_t_una_propuesta_SIN_REVISAR_todavia_no_aparece(admin_client, org_a):
+    """El Supervisor propuso, pero nadie la miró: no sale a campo."""
+    from operaciones.models import PropuestaSupervisor
+
+    caso = _caso(org_a, "Propuesto nomás")
+    _propuesta(org_a, caso, PropuestaSupervisor.PROPUESTA)
+
+    assert admin_client.get(CASOS).json()["casos"] == []
+
+
+def test_u_una_propuesta_de_OTRO_TIPO_no_habilita_el_despacho(
+    admin_client, org_a
+):
+    """«Revisé este SLA vencido» no es «esto va a campo».
+
+    Si cualquier propuesta aceptada sirviera, un caso revisado por un motivo
+    administrativo terminaría mandando una cuadrilla.
+    """
+    from operaciones.models import PropuestaSupervisor
+
+    caso = _caso(org_a, "Revisado por otra cosa")
+    _propuesta(org_a, caso, PropuestaSupervisor.ACEPTADA,
+               tipo=PropuestaSupervisor.CASO_ANTIGUO)
+
+    assert admin_client.get(CASOS).json()["casos"] == []

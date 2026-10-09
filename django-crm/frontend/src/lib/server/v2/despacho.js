@@ -51,9 +51,16 @@ export async function leerCasosDespachables(ctx, conFicha = false) {
     const d = await apiRequest(
       `/campo/casos-despachables/${conFicha ? '?ficha=1' : ''}`, {}, ctx
     );
-    return { casos: d?.casos ?? [], tope: d?.tope ?? 0, error: false };
+    return {
+      casos: d?.casos ?? [],
+      tope: d?.tope ?? 0,
+      // «Todavía nadie aprobó ninguno» y «no se pudo leer» se dibujan
+      // distinto: la primera dice qué hacer, la segunda que algo falló.
+      sinAprobados: d?.sin_aprobados === true,
+      error: false
+    };
   } catch {
-    return { casos: [], tope: 0, error: true };
+    return { casos: [], tope: 0, sinAprobados: false, error: true };
   }
 }
 

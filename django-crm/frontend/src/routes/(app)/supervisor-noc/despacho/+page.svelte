@@ -107,8 +107,8 @@
           <div class="snoc-pila-xs">
             <h2 class="snoc-h2">Casos abiertos</h2>
             <p class="snoc-body-sm snoc-secundario">
-              Los últimos {data.tope}. Que un caso merezca visita no lo decide el sistema:
-              depende de si ya se intentó por teléfono, si el cliente está, si hay repuesto.
+              Solo los que ya aprobaste en <a href="/supervisor-noc">Pendientes por
+              revisión</a>. Nada sale a campo sin pasar por ahí.
             </p>
           </div>
           {#if !data.conFicha}
@@ -119,15 +119,32 @@
         </div>
 
         {#if (data.casos ?? []).length === 0}
-          <p class="snoc-body-sm snoc-secundario">
-            No hay casos abiertos. Nada que despachar.
-          </p>
+          <!-- VACÍO NO ES UN ERROR, y las dos razones de estar vacío se
+               dibujan distinto: una dice qué hacer, la otra que algo falló. -->
+          {#if data.sinAprobados}
+            <p class="snoc-body-sm snoc-secundario">
+              Todavía no aprobaste ningún caso para visita. El Supervisor propone los que
+              su diagnóstico sostiene —equipo caído por fibra, señal débil, varios del
+              mismo puerto— y aparecen en
+              <a href="/supervisor-noc">Pendientes por revisión</a>. Lo que aceptes ahí
+              llega acá.
+            </p>
+          {:else}
+            <p class="snoc-body-sm snoc-secundario">
+              No hay casos abiertos entre los aprobados. Nada que despachar.
+            </p>
+          {/if}
         {:else}
           <div class="snoc-pila-xs">
             {#each data.casos as c (c.id)}
-              <div class="snoc-tarjeta snoc-fila-sep"
-                   style="flex-wrap:wrap; gap:var(--snoc-xs);">
-                <div class="snoc-pila-xs" style="min-width:0; flex:1 1 260px;">
+              <!-- `snoc-tarjeta` YA es flex en columna con space-between, asi
+                   que encimarle `snoc-fila-sep` no la pone en fila: la deja en
+                   columna separando el contenido del boton al maximo, y la
+                   tarjeta crece hasta ocupar media pantalla. La fila va
+                   ADENTRO. -->
+              <div class="snoc-tarjeta">
+                <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+                  <div class="snoc-pila-xs" style="min-width:0; flex:1 1 260px;">
                   <span class="snoc-body">{c.nombre}</span>
                   <span class="snoc-body-sm snoc-secundario">
                     {c.estado}{c.prioridad ? ` · ${c.prioridad}` : ''}
@@ -156,11 +173,12 @@
                       <span class="snoc-secundario">{c.sugerencia.porque}</span>
                     </p>
                   {/if}
-                </div>
+                  </div>
 
-                <button class="snoc-btn" type="button" onclick={() => abrir(c)}>
-                  Despachar
-                </button>
+                  <button class="snoc-btn" type="button" onclick={() => abrir(c)}>
+                    Despachar
+                  </button>
+                </div>
               </div>
             {/each}
           </div>
