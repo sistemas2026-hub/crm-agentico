@@ -146,6 +146,70 @@ def presupuesto(ahora=None, *, desatendido: bool = False) -> dict:
                            ahora=ahora)
 
 
+#  CUANTOS PAQUETES Y CUANTOS TIENEN QUE VOLVER  --  decision del cliente,
+#  09/10/2026, y se deja escrita con su contrapartida.
+#
+#  SE EXIGEN LOS TRES. Lo pidio asi el usuario, sabiendo el costo: esta medido
+#  en este proyecto que el MISMO equipo sano devuelve '1 de 3', '2 de 3' y
+#  '3 de 3' en corridas seguidas (15/08/2026). O sea que con este umbral van a
+#  quedar sin cerrar equipos que estan perfectos, y van a aparecer como "no
+#  respondio bien" sin que les pase nada.
+#
+#  Es el lado conservador para equivocarse --no cerrar algo que esta bien es
+#  mas barato que cerrar algo que esta mal-- y bajarlo despues es cambiar este
+#  numero. Lo que NO hay que hacer es bajarlo sin medir cuantos quedaron
+#  afuera: ese conteo sale del motivo escrito en cada propuesta.
+PINGS_POR_PRUEBA = 3
+PINGS_QUE_DEBEN_VOLVER = 3
+
+
+def _por_ping(ping) -> tuple[str, str]:
+    """
+    El veredicto cuando no hay ONU que consultar y solo queda el ping.
+
+    TRES RESULTADOS Y NO DOS, y la diferencia es la de siempre: "no se pudo
+    medir" no es "se midio y no respondio". El primero se reintenta solo en la
+    corrida siguiente; el segundo es un dato del equipo.
+    """
+    if not isinstance(ping, dict) or not ping.get("ok"):
+        motivo = (ping or {}).get("motivo") if isinstance(ping, dict) else ""
+        #  SE NOMBRAN LAS DOS COSAS QUE FALLARON, y la primera es la
+        #  accionable: que el servicio no tenga el equipo registrado es un
+        #  dato que el ISP no cargo en WispHub, y cargarlo arregla este caso y
+        #  todos los suyos. Que el ping no saliera es pasajero. Decir solo lo
+        #  segundo mandaria a reintentar algo que va a volver a fallar igual.
+        return SIN_DIAGNOSTICO, (
+            "este servicio no tiene equipo registrado en WispHub, asi que no "
+            "hay con que consultar la ONU -- falta el dato para preguntar, no "
+            "es que el equipo este mal. Se intento verificar con un ping y "
+            "tampoco se pudo"
+            + (f" ({motivo})" if motivo else "")
+            + ".")
+
+    #  El texto viene como lo manda WispHub ('3 de 3', '0 de 3') y se compara
+    #  contra lo esperado SIN convertirlo a numero. Convertirlo invita a
+    #  compararlo con '>', y entonces un '2 de 3' pasaria a ser "casi bien" --
+    #  que es justo la lectura que el umbral de arriba decidio no hacer.
+    respondieron = str(ping.get("respondieron") or "").strip()
+    esperado = f"{PINGS_QUE_DEBEN_VOLVER} de {PINGS_POR_PRUEBA}"
+
+    if respondieron == esperado:
+        return CIERRE_SEGURO, (
+            f"este servicio no tiene la ONU registrada, asi que no se pudo "
+            f"ver su señal optica. Se verifico con un ping y el equipo "
+            f"respondio los {PINGS_QUE_DEBEN_VOLVER} paquetes ({respondieron}): "
+            f"esta encendido y alcanzable. El ticket ya esta cerrado en el "
+            f"proveedor, asi que cerrarlo aca alinea el estado. OJO: el ping "
+            f"no dice nada de la calidad de la señal -- para eso haria falta "
+            f"cargar el serial del equipo en WispHub.")
+
+    return REVISAR_PERSONA, (
+        f"este servicio no tiene la ONU registrada y el ping no volvio "
+        f"completo ({respondieron or 'sin conteo'}, se exigen {esperado}). "
+        f"Puede ser un equipo con problemas o un ping con perdida pasajera, y "
+        f"sin la ONU no hay forma de distinguirlo: lo mira una persona.")
+
+
 def clasificar(diagnostico: dict) -> tuple[str, str]:
     """
     (veredicto, porque) a partir de un diagnostico. EL CODIGO DECIDE, no el
@@ -188,11 +252,7 @@ def clasificar(diagnostico: dict) -> tuple[str, str]:
     #  equipo registrado" le dice a quien lee que el dato falta en WispHub y
     #  que decida sin el. Lo pidio el usuario con esas palabras.
     if diagnostico.get("equipo_registrado") is False:
-        return SIN_DIAGNOSTICO, (
-            "este servicio no tiene equipo registrado en WispHub, asi que no "
-            "hay con que consultar la ONU: no se puede verificar su estado "
-            "optico. No es que el equipo este mal -- es que falta el dato para "
-            "preguntar.")
+        return _por_ping(diagnostico.get("ping"))
 
     if estado not in (EN_LINEA, CAIDO):
         return SIN_DIAGNOSTICO, (
@@ -248,7 +308,7 @@ def clasificar(diagnostico: dict) -> tuple[str, str]:
 
 
 def enriquecer(org, senales, *, ahora=None, presupuesto_=None,
-               diagnosticar=None) -> dict:
+               diagnosticar=None, pinguear=None) -> dict:
     """
     Le agrega el diagnostico optico a las señales de casos desincronizados.
 
@@ -269,6 +329,26 @@ def enriquecer(org, senales, *, ahora=None, presupuesto_=None,
         def diagnosticar(org_, id_servicio):
             return chat_herramientas.diagnosticar_servicio(
                 org_, id_servicio=id_servicio)
+
+    #  SE INYECTA igual que 'diagnosticar', y por lo mismo: este modulo decide
+    #  QUE significa un ping, no como se hace uno. Del otro lado hay un motor
+    #  por HTTP, y la prueba no deberia necesitar red para ejercitar la regla.
+    if pinguear is None:
+        from campo.services import telemetria
+
+        def pinguear(id_servicio):
+            #  'telemetria.pinguear_servicio' ya existia para la app de campo
+            #  y ya interpreta la forma rara en que WispHub devuelve el
+            #  conteo. Reusarla en vez de escribir otro cliente evita tener
+            #  dos lecturas de '3 de 3' que puedan divergir -- eso ya costo un
+            #  bug real en agosto de 2026.
+            try:
+                return telemetria.pinguear_servicio(
+                    id_servicio, paquetes=PINGS_POR_PRUEBA)
+            except Exception as e:                           # noqa: BLE001
+                #  El tipo y no el texto: el texto de un error de red trae la
+                #  URL, y esa URL lleva el identificador del servicio.
+                return {"ok": False, "motivo": type(e).__name__}
 
     informe = {"diagnosticados": 0, "cierre_seguro": 0, "revisar_persona": 0,
                "sin_diagnostico": 0, "sin_llave": 0, "sin_presupuesto": 0,
@@ -308,6 +388,28 @@ def enriquecer(org, senales, *, ahora=None, presupuesto_=None,
                     f"no se pudo preguntar por el equipo "
                     f"({type(e).__name__}). No se diagnostico.", None, ahora)
             continue
+
+        #  EL RESPALDO POR PING  --  09/10/2026
+        #  -----------------------------------
+        #  Un tercio de los clientes no tiene el serial de la ONU cargado en
+        #  WispHub (1.299 de 4.163, medido). Para esos, SmartOLT no tiene a
+        #  que responder y el caso quedaba sin cerrar PARA SIEMPRE: no es que
+        #  el equipo este mal, es que falta el dato para preguntar. Se
+        #  acumulaban, y seguirian acumulandose con cada ticket nuevo.
+        #
+        #  Entonces se pregunta con lo que si hay. El ping no dice si la señal
+        #  optica esta bien --eso solo lo sabe la OLT-- pero si dice algo que
+        #  alcanza para esta decision: que el equipo esta encendido y
+        #  alcanzable. Para cerrar un ticket que el PROVEEDOR YA CERRO, eso es
+        #  verificacion suficiente; no se esta afirmando que el servicio sea
+        #  bueno, se esta comprobando que el equipo del cliente contesta.
+        #
+        #  NO REEMPLAZA AL DIAGNOSTICO OPTICO: corre solo cuando no hay con
+        #  que hacerlo. Un equipo que SI esta en SmartOLT se sigue juzgando
+        #  por su señal, que es mejor dato.
+        if diagnostico.get("equipo_registrado") is False:
+            diagnostico = dict(diagnostico)
+            diagnostico["ping"] = pinguear(id_servicio)
 
         informe["diagnosticados"] += 1
         veredicto, porque = clasificar(diagnostico)
@@ -634,6 +736,12 @@ def cerrar_si_corresponde(org, propuesta, *, ahora=None,
             #  y la pregunta estaba bien: hasta ese momento no habia forma.
             "caso_id": str(propuesta.origen_id),
             "propuesta_id": str(propuesta.id),
+            #  LA REFERENCIA DEL PROVEEDOR, que es con lo que una persona
+            #  busca el ticket. 'caso_id' es un UUID: sirve para abrir el caso
+            #  desde un enlace y no sirve para nada si alguien lo lee en un
+            #  mensaje. Hasta el 09/10/2026 no viajaba, y el aviso del chat
+            #  habria dicho "caso sin referencia" en cada renglon.
+            "referencia": str(resultado.get("referencia") or ""),
             "porque": porque_del_cierre(propuesta)}
 
 

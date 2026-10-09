@@ -2119,6 +2119,20 @@ def _atender_desincronizados(org, ahora, *, desatendido: bool = False) -> dict:
             _m = r.get("motivo") or "sin motivo"
             _mot = _auto.setdefault("motivos_de_no_cierre", {})
             _mot[_m] = _mot.get(_m, 0) + 1
+
+    #  EL AVISO, Y VA ULTIMO A PROPOSITO. Los casos ya estan cerrados y
+    #  guardados; contarlo es lo menos importante de esta funcion, y no puede
+    #  tumbarla. 'avisar_cierres' no levanta nunca -- lo registra y devuelve
+    #  False-- asi que un chat caido no deshace un cierre correcto.
+    #
+    #  SOLO CUANDO HUBO CIERRES: un aviso por hora diciendo "no cerre nada"
+    #  llenaria la conversacion de ruido y, peor, entraria en el historial que
+    #  el modelo lee en el turno siguiente, empujando afuera lo que importa.
+    cerrados_detalle = _auto.get("cerrados_detalle") or []
+    if cerrados_detalle:
+        from operaciones import aviso_al_chat
+        _auto["avisado_en_el_chat"] = aviso_al_chat.avisar_cierres(
+            org, cerrados_detalle, ahora=ahora)
     return informe
 
 

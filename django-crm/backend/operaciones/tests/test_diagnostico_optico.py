@@ -1135,3 +1135,92 @@ def test_el_informe_cuenta_cada_veredicto():
     assert informe["diagnosticados"] == 3
     assert informe["cierre_seguro"] == 2        # sano + sin luz
     assert informe["revisar_persona"] == 1      # fibra
+
+
+# ===========================================================================
+#  EL RESPALDO POR PING  --  cuando no hay ONU que consultar
+# ===========================================================================
+#  POR QUE EXISTE. Un tercio de los clientes no tiene el serial de la ONU
+#  cargado en WispHub (1.299 de 4.163, medido en la skill). Para esos, SmartOLT
+#  no tiene a que responder, y hasta el 09/10/2026 el caso quedaba sin cerrar
+#  PARA SIEMPRE -- no por una falla, sino porque faltaba el dato para
+#  preguntar. Se acumulaban, y cada ticket nuevo sumaba otro.
+#
+#  LA REGLA, decidida por el cliente: los TRES paquetes tienen que volver.
+#  Sabiendo el costo, que esta medido y escrito junto a la constante.
+
+from operaciones.diagnostico_optico import (CIERRE_SEGURO, REVISAR_PERSONA,  # noqa: E402
+                                            SIN_DIAGNOSTICO, clasificar)
+
+
+def _sin_onu(ping):
+    """Lo que devuelve el motor cuando el servicio no tiene ONU registrada."""
+    return {"id_servicio": "5832", "equipo_registrado": False,
+            "estado": "desconocido", "ping": ping}
+
+
+def test_sin_onu_con_los_tres_pings_se_cierra():
+    v, porque = clasificar(_sin_onu({"ok": True, "respondieron": "3 de 3"}))
+    assert v == CIERRE_SEGURO
+    #  Y EL MOTIVO DICE CON QUE SE VERIFICO. Un cierre por ping y uno por
+    #  señal optica no son la misma afirmacion, y meses despues hay que poder
+    #  distinguirlos leyendo la propuesta.
+    assert "ping" in porque.lower()
+    assert "3 de 3" in porque
+
+
+def test_sin_onu_con_dos_de_tres_NO_se_cierra():
+    """
+    '2 de 3' no es "casi bien". El umbral lo fijo una persona y la guarda
+    existe para que nadie lo afloje sin decirlo: convertir el texto a numero y
+    comparar con '>' pasaria esta prueba a verde sin que nadie lo note.
+    """
+    v, _ = clasificar(_sin_onu({"ok": True, "respondieron": "2 de 3"}))
+    assert v == REVISAR_PERSONA
+
+
+def test_sin_onu_sin_respuesta_va_a_una_persona():
+    v, _ = clasificar(_sin_onu({"ok": True, "respondieron": "0 de 3"}))
+    assert v == REVISAR_PERSONA
+
+
+def test_un_ping_que_no_se_pudo_hacer_no_es_un_ping_fallido():
+    """
+    LA DISTINCION QUE SOSTIENE TODO ESTE MODULO: "no se pudo medir" no es
+    "se midio y no respondio". El primero se reintenta en la corrida
+    siguiente; el segundo es un dato del equipo. Si los dos cayeran en
+    'REVISAR_PERSONA', un corte de red del motor mandaria a mano casos que
+    solo habia que volver a preguntar.
+    """
+    v, porque = clasificar(_sin_onu({"ok": False, "motivo": "motor_no_responde"}))
+    assert v == SIN_DIAGNOSTICO
+    #  EL MENSAJE NOMBRA LAS DOS COSAS, y la primera es la accionable: que
+    #  falte el serial se arregla cargandolo en WispHub y sirve para
+    #  siempre; que el ping no saliera es pasajero. Decir solo lo segundo
+    #  mandaria a reintentar algo que va a fallar igual.
+    assert "falta el dato" in porque
+    assert "tampoco se pudo" in porque
+    assert "motor_no_responde" in porque
+
+
+def test_sin_onu_y_sin_ping_tampoco_inventa_un_cierre():
+    """Un diagnostico viejo, anterior al respaldo, no cierra por omision."""
+    v, _ = clasificar({"id_servicio": "1", "equipo_registrado": False,
+                       "estado": "desconocido"})
+    assert v == SIN_DIAGNOSTICO
+
+
+def test_con_onu_registrada_el_ping_no_se_usa():
+    """
+    EL PING ES RESPALDO, NO ATAJO. Un equipo que SI esta en SmartOLT se juzga
+    por su señal, que es mejor dato. Si esta prueba se pone en rojo, el ping
+    empezo a decidir sobre equipos que se podian diagnosticar de verdad.
+    """
+    con_senal_mala = {"id_servicio": "1", "equipo_registrado": True,
+                      "estado": "en_linea", "causa_caida": "",
+                      "senal": "debil", "senal_dbm": -29.0,
+                      "ping": {"ok": True, "respondieron": "3 de 3"}}
+    v, _ = clasificar(con_senal_mala)
+    assert v == REVISAR_PERSONA, (
+        "un equipo con señal debil se cerro porque el ping respondio: el "
+        "respaldo esta pisando al diagnostico optico")

@@ -44,6 +44,17 @@ class TareaDelegada(BaseModel):
     #  notarlo.
     pedido_textual = models.CharField(max_length=500, blank=True, default="")
 
+    #  DONDE SE PIDIO, para poder contestar ahi mismo. Se guarda el id y no
+    #  una relacion: una conversacion se puede borrar --la retencion las vence
+    #  al año-- y eso no puede arrastrar la tarea delegada ni ponerla en
+    #  cascada. Si la conversacion ya no esta, el aviso no sale y la tarea
+    #  sigue andando, que es el orden correcto de prioridades.
+    #
+    #  VACIO cuando se delego por otro camino que no sea el chat. No es un
+    #  error: significa "no hay donde avisar", y el ciclo lo trata asi en vez
+    #  de buscarse una conversacion cualquiera para escribir.
+    conversacion_id = models.UUIDField(null=True, blank=True)
+
     delegada_por = models.ForeignKey(
         Profile, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="tareas_que_delego")

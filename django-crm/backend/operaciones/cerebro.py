@@ -179,7 +179,7 @@ class Razonamiento:
 
 def razonar(org, *, instrucciones: str, entrada: str, historial=(),
             tools=None, vueltas_maximas: int = VUELTAS_MAXIMAS,
-            pedir=None, actor=None) -> Razonamiento:
+            pedir=None, actor=None, conversacion_id=None) -> Razonamiento:
     """
     Una pasada completa: piensa, consulta lo que le falte, vuelve a pensar.
 
@@ -245,7 +245,8 @@ def razonar(org, *, instrucciones: str, entrada: str, historial=(),
                 #  quitar una tarea-- y es lo que impide que algo quede
                 #  delegado a nombre de quien no lo pidio.
                 resultado = chat_herramientas.ejecutar(
-                    org, nombre, argumentos, actor=actor)
+                    org, nombre, argumentos, actor=actor,
+                    conversacion_id=conversacion_id)
             except chat_herramientas.HerramientaDesconocida as e:
                 #  Se le DICE que no existe, en vez de inventar un resultado o
                 #  de abortar. Puede corregirse en la vuelta siguiente.

@@ -139,7 +139,7 @@ class ErrorTarea(Exception):
 
 
 def delegar(org, clave: str, *, actor, pedido_textual: str = "",
-            ahora=None):
+            conversacion_id=None, ahora=None):
     """
     Deja delegada una tarea del catálogo. Exige persona.
 
@@ -165,6 +165,7 @@ def delegar(org, clave: str, *, actor, pedido_textual: str = "",
         org=org, clave=clave,
         defaults={"activa": True, "delegada_por": actor,
                   "pedido_textual": (pedido_textual or "")[:500],
+                  "conversacion_id": conversacion_id,
                   "delegada_en": ahora})
     if not creada:
         #  Volver a delegar una que ya estaba es REACTIVARLA, y queda a nombre
@@ -175,8 +176,15 @@ def delegar(org, clave: str, *, actor, pedido_textual: str = "",
         fila.delegada_en = ahora
         if pedido_textual:
             fila.pedido_textual = pedido_textual[:500]
+        #  LA CONVERSACION SE MUEVE A LA ULTIMA, igual que el actor: el aviso
+        #  tiene que llegar donde se pidio esta vez, no donde se pidio hace
+        #  meses. Y solo si viene una: volver a delegar desde fuera del chat
+        #  no deberia dejar la tarea sin donde avisar.
+        if conversacion_id:
+            fila.conversacion_id = conversacion_id
         fila.save(update_fields=["activa", "delegada_por", "delegada_en",
-                                 "pedido_textual", "updated_at"])
+                                 "pedido_textual", "conversacion_id",
+                                 "updated_at"])
     return fila
 
 

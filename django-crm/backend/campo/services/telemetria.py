@@ -99,7 +99,25 @@ def probar_conexion(orden, *, paquetes: int = PAQUETES,
     if not servicio:
         raise SinServicioParaPing(
             "La orden no tiene identificado el servicio del cliente.")
+    return pinguear_servicio(servicio, paquetes=paquetes, timeout=timeout)
 
+
+def pinguear_servicio(servicio: str, *, paquetes: int = PAQUETES,
+                      timeout: int = 120) -> dict:
+    """
+    El mismo ping, a partir de un id de servicio en vez de una orden.
+
+    SE EXTRAJO EL 09/10/2026 y no se reescribio aparte, a proposito. El
+    Supervisor NOC necesita pinguear un cliente que no tiene orden de trabajo
+    --un caso que el proveedor ya cerro y cuyo equipo no esta en SmartOLT-- y
+    escribir un segundo cliente de ping habria dejado dos lugares donde
+    interpretar '3 de 3'. Ya costo un bug real en agosto de 2026 tener esa
+    lectura duplicada.
+
+    'probar_conexion' queda igual para la app de campo: resuelve el servicio
+    de la orden y llama aqui. Lo unico que cambio de lugar es de donde sale
+    el identificador.
+    """
     base, tenant, cabeceras = _motor()
     try:
         r = requests.post(

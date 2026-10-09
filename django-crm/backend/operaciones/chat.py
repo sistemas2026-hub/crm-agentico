@@ -373,7 +373,14 @@ def responder(conversacion, texto: str, *, ahora=None) -> MensajeSupervisor:
                             #  delegado: sin el, una tarea quedaria encendida
                             #  sin nombre, y encendida es justo lo que va a
                             #  actuar cuando esa persona no este mirando.
-                            actor=conversacion.actor)
+                            actor=conversacion.actor,
+                            #  DONDE se esta conversando, por el mismo camino
+                            #  verificado que el actor y por el mismo motivo:
+                            #  es a donde el Supervisor va a escribir despues,
+                            #  solo, cuando cierre algo. Si viniera del modelo,
+                            #  un mensaje podria dictar en que conversacion
+                            #  aparecen los avisos de otra persona.
+                            conversacion_id=conversacion.id)
     except (ErrorChat, cerebro.ErrorCerebro) as e:
         #  LOS DOS, y no es redundancia. 'ErrorChat' lo levanta el alias de
         #  arriba al traducir el del cerebro, y tambien lo inyectan las pruebas

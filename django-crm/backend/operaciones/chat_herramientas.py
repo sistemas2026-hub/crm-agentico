@@ -753,7 +753,8 @@ def tareas_activas(org) -> dict:
     return {"delegadas": td.delegadas(org)}
 
 
-def delegar_tarea(org, *, clave="", pedido="", actor=None) -> dict:
+def delegar_tarea(org, *, clave="", pedido="", actor=None,
+                  conversacion_id=None) -> dict:
     """
     Deja delegada una tarea del catalogo. La pide una PERSONA, por el chat.
 
@@ -783,7 +784,8 @@ def delegar_tarea(org, *, clave="", pedido="", actor=None) -> dict:
 
     try:
         fila = td.delegar(org, str(clave).strip(), actor=actor,
-                          pedido_textual=str(pedido or ""))
+                          pedido_textual=str(pedido or ""),
+                          conversacion_id=conversacion_id)
     except td.ErrorTarea as e:
         return {"error": "no_se_pudo_delegar", "detalle": str(e)}
 
@@ -914,7 +916,14 @@ ARGUMENTOS = {
 NECESITAN_ACTOR = {"delegar_tarea", "quitar_tarea"}
 
 
-def ejecutar(org, nombre: str, argumentos: dict, *, actor=None) -> dict:
+#  Las que ademas necesitan saber DONDE se las pidio, para que el Supervisor
+#  pueda volver a escribir ahi por su cuenta. Mismo mecanismo y mismo motivo
+#  que 'NECESITAN_ACTOR': no es un argumento del modelo.
+NECESITAN_CONVERSACION = {"delegar_tarea"}
+
+
+def ejecutar(org, nombre: str, argumentos: dict, *, actor=None,
+             conversacion_id=None) -> dict:
     """
     Corre una herramienta. El tenant lo pone ESTA funcion, no el modelo.
 
@@ -936,6 +945,8 @@ def ejecutar(org, nombre: str, argumentos: dict, *, actor=None) -> dict:
     limpios = {k: v for k, v in (argumentos or {}).items() if k in permitidos}
     if str(nombre) in NECESITAN_ACTOR:
         limpios["actor"] = actor
+    if str(nombre) in NECESITAN_CONVERSACION:
+        limpios["conversacion_id"] = conversacion_id
     return fn(org, **limpios)
 
 
