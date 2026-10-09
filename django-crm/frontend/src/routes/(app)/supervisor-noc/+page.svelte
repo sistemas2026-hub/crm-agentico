@@ -642,14 +642,44 @@
   const antiguedad = $derived(antiguedadDelCaso(detalle?.evidencia));
   const lectura = $derived(lecturaExterna(detalle?.evidencia));
 
+  /**
+   * DECIDIR TARDA, Y HAY QUE DECIRLO  --  09/10/2026
+   *
+   * Reportado y reproducido: "le doy click en aceptar propuesta y se queda
+   * como si no hubiera dado click; ya despues de una espera espabila la
+   * pantalla". No era lentitud de la plataforma: aceptar una propuesta de
+   * caso desincronizado EJECUTA el cierre --va al motor, que llama a
+   * WispHub-- y despues recarga el tablero entero y vuelve a abrir la ficha.
+   * Son varios segundos, y durante todos la interfaz no cambiaba en nada.
+   *
+   * Un boton que no reacciona invita a apretarlo otra vez, y eso manda una
+   * segunda decision sobre la misma propuesta. No rompe nada --la segunda
+   * encuentra la propuesta ya revisada y la frontera la rechaza-- pero la
+   * persona ve un error por haber hecho lo unico razonable.
+   *
+   * El patron ya existia en esta pantalla para el boton del ciclo
+   * ('Analizando…'); esto lo aplica donde faltaba.
+   */
+  let decidiendo = $state('');
+
   const alDecidir = () => async (/** @type {any} */ { update }) => {
     revisando = null;
     comentario = '';
-    await update({ reset: false });
-    await invalidateAll();
-    // La ficha abierta quedo vieja: su estado acaba de cambiar.
-    if (abierta) await abrirDetalle(abierta);
+    try {
+      await update({ reset: false });
+      await invalidateAll();
+      // La ficha abierta quedo vieja: su estado acaba de cambiar.
+      if (abierta) await abrirDetalle(abierta);
+    } finally {
+      //  SIEMPRE se suelta, aunque algo falle: un boton que queda
+      //  deshabilitado para siempre despues de un error de red obliga a
+      //  recargar la pagina para volver a intentar.
+      decidiendo = '';
+    }
   };
+
+  /** Marca que se empezo, ANTES de que el formulario salga. */
+  const alEmpezar = (/** @type {string} */ que) => () => { decidiendo = que; };
 </script>
 
 <svelte:window onkeydown={alTeclado} />
@@ -2073,19 +2103,41 @@
             {#if detalle.estado === 'propuesta'}
               <div class="snoc-pie-acciones">
                 <input class="snoc-campo" bind:value={comentario} placeholder="Motivo (para rechazar o cancelar)" />
+                <!--
+                  Los tres botones se deshabilitan mientras una decision esta
+                  en curso, no solo el que se apreto: las tres actuan sobre la
+                  MISMA propuesta, y mandar "rechazar" mientras "aceptar"
+                  viaja es pedir dos cosas contrarias sobre lo mismo.
+                -->
                 <form method="POST" action="?/cancelar" use:enhance={alDecidir} style="display:contents;">
                   <input type="hidden" name="id" value={detalle.id} />
                   <input type="hidden" name="motivo" value={comentario} />
-                  <button class="snoc-btn" type="submit">Cancelar</button>
+                  <button class="snoc-btn" type="submit" disabled={!!decidiendo}
+                          onclick={alEmpezar('Cancelando…')}>
+                    {decidiendo === 'Cancelando…' ? 'Cancelando…' : 'Cancelar'}
+                  </button>
                 </form>
                 <form method="POST" action="?/revisar" use:enhance={alDecidir} style="display:contents;">
                   <input type="hidden" name="id" value={detalle.id} />
                   <input type="hidden" name="comentario" value={comentario} />
-                  <button class="snoc-btn snoc-btn-error" name="decision" value="rechazada" type="submit">
-                    Rechazar
+                  <button class="snoc-btn snoc-btn-error" name="decision" value="rechazada"
+                          type="submit" disabled={!!decidiendo}
+                          onclick={alEmpezar('Rechazando…')}>
+                    {decidiendo === 'Rechazando…' ? 'Rechazando…' : 'Rechazar'}
                   </button>
-                  <button class="snoc-btn snoc-btn-primario" name="decision" value="aceptada" type="submit">
-                    Aceptar propuesta
+                  <!--
+                    DICE "Cerrando el caso…" y no "Guardando…": en una
+                    desincronizacion, aceptar no guarda una decision, ejecuta
+                    un cierre contra el proveedor. El texto de espera tiene
+                    que decir lo que de verdad esta pasando, que ademas
+                    explica por que tarda.
+                  -->
+                  <button class="snoc-btn snoc-btn-primario" name="decision" value="aceptada"
+                          type="submit" disabled={!!decidiendo}
+                          onclick={alEmpezar(aceptar.ejecuta ? 'Cerrando el caso…' : 'Guardando…')}>
+                    {decidiendo === 'Cerrando el caso…' || decidiendo === 'Guardando…'
+                      ? decidiendo
+                      : 'Aceptar propuesta'}
                   </button>
                 </form>
               </div>
