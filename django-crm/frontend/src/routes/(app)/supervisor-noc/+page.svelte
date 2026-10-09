@@ -274,6 +274,10 @@
    * persona acaba de provocar.
    */
   let eventosVivos = $state(/** @type {any[] | null} */ (null));
+  //  Fuera de '$state' a proposito: es memoria del sondeo, no algo que la
+  //  pantalla muestre. Si fuera reactiva, cambiarla provocaria el mismo
+  //  re-render que esta variable existe para evitar.
+  let huellaVista = '';
   let ultimoSondeo = $state(/** @type {Date | null} */ (null));
   let sondeoVivo = $state(false);
 
@@ -338,6 +342,7 @@
     //  sondeo para no pisar con datos mas viejos lo que la persona provoco.
     void data.actividad;
     eventosVivos = null;
+    huellaVista = '';
   });
 
   $effect(() => {
@@ -358,7 +363,25 @@
           sondeoVivo = false;
           return;
         }
-        eventosVivos = Array.isArray(cuerpo?.eventos) ? cuerpo.eventos : [];
+        const llegados = Array.isArray(cuerpo?.eventos) ? cuerpo.eventos : [];
+
+        //  SOLO SE ESCRIBE SI CAMBIO ALGO  --  09/10/2026
+        //  ---------------------------------------------
+        //  Reemplazar el estado en cada sondeo re-renderiza la pagina entera:
+        //  ciento ocho propuestas, los graficos y las tablas. Cada diez
+        //  segundos. La plataforma se sentia lenta --"doy un click y al rato
+        //  reacciona"-- y era el hilo principal ocupado redibujando algo que
+        //  casi nunca cambia: el ciclo corre UNA VEZ POR HORA, asi que de 360
+        //  sondeos por hora, 359 traen exactamente lo mismo.
+        //
+        //  Se comparan los IDS y no los objetos: el backend serializa fechas
+        //  y textos que pueden variar en forma sin ser un hecho nuevo, y
+        //  comparar JSON completo volveria a disparar el re-render por nada.
+        const huella = llegados.map((e) => e?.id).join(',');
+        if (huella !== huellaVista) {
+          huellaVista = huella;
+          eventosVivos = llegados;
+        }
         ultimoSondeo = new Date();
         sondeoVivo = true;
       } catch {
@@ -367,7 +390,11 @@
     }
 
     sondear();
-    const intervalo = setInterval(sondear, 10000);
+    //  TREINTA SEGUNDOS Y NO DIEZ. El ciclo del Supervisor corre una vez por
+    //  hora: sondear cada diez segundos pedia 360 veces por hora un dato que
+    //  cambia una. Treinta sigue siendo "en vivo" para quien mira --media
+    //  vuelta de reloj-- y cuesta un tercio.
+    const intervalo = setInterval(sondear, 30000);
     document.addEventListener('visibilitychange', sondear);
     window.addEventListener('focus', sondear);
     return () => {
