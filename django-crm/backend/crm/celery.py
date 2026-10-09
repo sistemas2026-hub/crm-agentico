@@ -2,7 +2,7 @@ from __future__ import absolute_import, unicode_literals
 
 import os
 
-from celery import Celery
+from celery import Celery, signals
 from celery.schedules import crontab
 
 # set the default Django settings module for the 'celery' program.
@@ -11,6 +11,62 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "crm.settings")
 # os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'crm.server_settings')
 
 app = Celery("crm")
+
+
+# =============================================================================
+#  UNA CONEXION FRESCA POR TAREA  --  08/10/2026
+# =============================================================================
+#  LO QUE PASO, medido en produccion. El worker arranco a las 00:06:23 UTC tras
+#  un despliegue y a las 00:07:00 --treinta y siete segundos despues-- el ciclo
+#  del Supervisor murio en su PRIMERA consulta:
+#
+#      psycopg.errors.AdminShutdown:
+#      terminating connection due to administrator command
+#
+#  La base estaba sana: 'scan_for_breached_cases' corrio bien tres minutos mas
+#  tarde. Lo que estaba muerto era ESA conexion, cortada del lado del servidor
+#  durante el reinicio, y el worker se la quedo sin enterarse.
+#
+#  POR QUE PASA, y por que le pasa a las TRECE tareas y no a una
+#  --------------------------------------------------------------
+#  Django cierra la conexion al terminar cada peticion HTTP, y con
+#  'CONN_MAX_AGE: 0' esa es justo la politica configurada aqui. Pero un worker
+#  de Celery NO pasa por el ciclo de peticion: no hay 'request_finished' que
+#  dispare el cierre, asi que la misma conexion viaja de una tarea a la
+#  siguiente durante horas. Si algo la mata del otro lado --un despliegue, un
+#  reinicio de la base, un 'pg_terminate_backend'-- la proxima tarea que la
+#  tome revienta. No es un problema del ciclo del Supervisor: fue la primera
+#  en tocarla, nada mas.
+#
+#  'close_old_connections' es exactamente lo que Django hace entre peticiones,
+#  y es el remedio documentado para esto. Con 'CONN_MAX_AGE: 0' descarta la
+#  conexion siempre, asi que cada tarea abre la suya y ninguna hereda una
+#  rota.
+#
+#  LAS DOS SEÑALES Y NO UNA: 'prerun' resuelve el caso medido --arrancar con
+#  una conexion heredada-- y 'postrun' evita dejar abierta la propia al
+#  terminar, que es la otra mitad de la misma politica.
+#
+#  NO REEMPLAZA AL MANEJO DE ERRORES DE CADA TAREA: una conexion puede morir a
+#  mitad de camino, y eso lo tiene que atrapar quien hace el trabajo. Esto
+#  solo garantiza el punto de partida.
+#  EL IMPORT VA ADENTRO, y no arriba: 'crm/__init__.py' importa este modulo al
+#  cargar el paquete, o sea en pleno arranque de Django y antes de que las
+#  aplicaciones esten listas. Traer 'django.db' en ese momento es el tipo de
+#  import circular que funciona en una maquina y falla en otra segun el orden
+#  de carga. Adentro corre cuando ya hay tarea, que es cuando hace falta.
+@signals.task_prerun.connect
+def _conexion_fresca(**_):
+    from django.db import close_old_connections
+
+    close_old_connections()
+
+
+@signals.task_postrun.connect
+def _soltar_conexion(**_):
+    from django.db import close_old_connections
+
+    close_old_connections()
 
 # Using a string here means the worker don't have to serialize
 # the configuration object to child processes.

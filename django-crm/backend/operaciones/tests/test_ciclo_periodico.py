@@ -315,3 +315,46 @@ def test_el_boton_sigue_atendido(dos_empresas, monkeypatch):
     sup.correr_ciclo(con)
 
     assert recibido.get("desatendido") is False
+
+
+# ===========================================================================
+#  8. CADA TAREA ARRANCA CON UNA CONEXION FRESCA
+# ===========================================================================
+#  MEDIDO EN PRODUCCION el 08/10/2026. El worker arranco tras un despliegue y
+#  37 segundos despues la primera corrida automatica del ciclo murio en su
+#  primera consulta:
+#
+#      psycopg.errors.AdminShutdown:
+#      terminating connection due to administrator command
+#
+#  La base estaba sana --otra tarea corrio bien tres minutos despues-- y lo
+#  que estaba muerto era la conexion que el worker heredo del arranque. Un
+#  worker de Celery no pasa por el ciclo de peticion de Django, asi que
+#  'CONN_MAX_AGE: 0' no se aplica nunca y la misma conexion viaja de tarea en
+#  tarea durante horas.
+#
+#  SE AFIRMA EL EFECTO Y NO LA SEÑAL. Comprobar que 'task_prerun' tiene un
+#  receptor conectado diria que el mecanismo existe, que es justo lo que el
+#  metodo del proyecto prohibe: un receptor que no cierre nada pasaria igual.
+#  Se abre una conexion, se dispara la señal, y se comprueba que SE SOLTO.
+#
+#  'transaction=True' NO ES DETALLE: con el 'django_db' normal la prueba corre
+#  dentro de una transaccion y Django no cierra una conexion con transaccion
+#  abierta -- la prueba pasaria sin que el cierre ocurriera nunca. Es la misma
+#  trampa del 'in_atomic_block' que ya costo una guarda falsa este mismo dia.
+
+@pytest.mark.django_db(transaction=True)
+def test_cada_tarea_arranca_con_una_conexion_fresca():
+    from celery.signals import task_prerun
+    from django.db import connection
+
+    connection.ensure_connection()
+    assert connection.connection is not None, "no se pudo abrir la conexion"
+
+    task_prerun.send(sender=None, task_id="prueba", task=None,
+                     args=(), kwargs={})
+
+    assert connection.connection is None, (
+        "la conexion sigue abierta al arrancar una tarea: si la base la mato "
+        "mientras tanto, la tarea revienta en su primera consulta -- que es "
+        "exactamente lo que paso el 08/10/2026")
