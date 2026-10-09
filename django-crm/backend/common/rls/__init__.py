@@ -245,17 +245,43 @@ def get_enable_policy_sql(table):
 
         -- Create isolation policy (SELECT, UPDATE, DELETE)
         -- Uses NULLIF to return no rows when context is not set (fail-safe)
+        --
+        -- UUID AGAINST UUID, NOT text AGAINST text  --  2026-10-09
+        -- -------------------------------------------------------
+        -- This used to read `org_id::text = (select ...)`. Casting the column
+        -- makes every index on org_id unusable: Postgres has to read the whole
+        -- table and cast each row. Since the policy applies to EVERY query on
+        -- all 65 org-scoped tables, that turned each one into a sequential
+        -- scan.
+        --
+        -- Measured on 200k rows (2026-10-09):
+        --     org_id::text = text   ->  Parallel Seq Scan   70.4 ms
+        --     org_id = uuid         ->  Index Only Scan      6.7 ms
+        --
+        -- The symptom was a 22-second load of the Supervisor NOC page, which
+        -- fires dozens of queries over `case` and `activity`. Every other
+        -- request in that session took under 500 ms.
+        --
+        -- The cast moves to the SETTING, where it is evaluated ONCE: the
+        -- `(select ...)` wrapper already makes it an InitPlan.
+        --
+        -- ONE BEHAVIOUR CHANGES, and for the better: a malformed non-empty
+        -- context value used to compare false and silently return zero rows.
+        -- Now it raises. Zero rows without an error is indistinguishable from
+        -- "there is no data" -- the exact failure mode this codebase keeps
+        -- paying for. An empty value still returns no rows: NULLIF turns it
+        -- into NULL, and `org_id = NULL` matches nothing.
         CREATE POLICY {ISOLATION_POLICY} ON "{table}"
             FOR ALL
             USING (
-                org_id::text = (select NULLIF(current_setting('{CONTEXT_VARIABLE}', true), ''))
+                org_id = (select NULLIF(current_setting('{CONTEXT_VARIABLE}', true), '')::uuid)
             );
 
         -- Create insert check policy
         CREATE POLICY {INSERT_POLICY} ON "{table}"
             FOR INSERT
             WITH CHECK (
-                org_id::text = (select NULLIF(current_setting('{CONTEXT_VARIABLE}', true), ''))
+                org_id = (select NULLIF(current_setting('{CONTEXT_VARIABLE}', true), '')::uuid)
             );
     """
 
