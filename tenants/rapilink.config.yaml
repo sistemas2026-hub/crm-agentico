@@ -3474,6 +3474,10 @@ herramientas:
 
   - nombre: agendar_visita_tecnica
     tipo: http
+    # 'asunto' es texto libre pese a parecer un enum: 356 distintos sobre
+    # 3.418 tickets reales, y 126 traen nombre y barrio del prospecto.
+    # Medido el 08/10/2026. Ver la herramienta 'consultar_ticket'.
+    campos_texto_libre: [asunto]
     multipart: true
     descripcion: >
       Agenda una visita tecnica real en WispHub (crea un ticket) -- se
@@ -3574,6 +3578,10 @@ herramientas:
   # despues no se puede filtrar.
   - nombre: agendar_visita_internet
     tipo: http
+    # 'asunto' es texto libre pese a parecer un enum: 356 distintos sobre
+    # 3.418 tickets reales, y 126 traen nombre y barrio del prospecto.
+    # Medido el 08/10/2026. Ver la herramienta 'consultar_ticket'.
+    campos_texto_libre: [asunto]
     multipart: true
     descripcion: >
       Agenda una visita tecnica real en WispHub por una falla de INTERNET
@@ -3745,6 +3753,10 @@ herramientas:
 
   - nombre: crear_ticket_caso
     tipo: http
+    # 'asunto' es texto libre pese a parecer un enum: 356 distintos sobre
+    # 3.418 tickets reales, y 126 traen nombre y barrio del prospecto.
+    # Medido el 08/10/2026. Ver la herramienta 'consultar_ticket'.
+    campos_texto_libre: [asunto]
     # Capacidad de la cola (B4): el ticket que respalda una escalada. El
     # reconciliador le embebe un DEXTER_REF en la descripcion.
     crea_ticket_operativo: true
@@ -3808,10 +3820,23 @@ herramientas:
     # direccion, GPS, cedula y un enlace, todo en un solo campo). La lista
     # blanca de abajo decide que campos pasan; esto decide que se les saca
     # ANTES de que lleguen al modelo. Ver nucleo/seguridad/redaccion.py.
-    campos_texto_libre: [descripcion]
+    #
+    # 'asunto' SE AGREGO el 08/10/2026, y no es precaucion: es texto libre
+    # tambien, aunque parezca un enum. Medido sobre 3.418 tickets reales
+    # (01/09-08/10/2026): el catalogo /api/tickets/asuntos-tickets/ declara
+    # 142 asuntos y hay 356 DISTINTOS; 277 no estan en el catalogo. Y 126 de
+    # ellos traen el NOMBRE y el BARRIO del prospecto
+    # ('Andrea Del Castillo | Villa Maria Soledad |'), porque los tickets de
+    # instalacion usan ese campo como rotulo. Estaba en la lista blanca de
+    # 'soporte', 'administracion' y 'supervisor_noc' sin redaccion.
+    campos_texto_libre: [descripcion, asunto]
 
   - nombre: consultar_tickets_de_cliente
     tipo: http
+    # 'asunto' es texto libre pese a parecer un enum: 356 distintos sobre
+    # 3.418 tickets reales, y 126 traen nombre y barrio del prospecto.
+    # Medido el 08/10/2026. Ver la herramienta 'consultar_ticket'.
+    campos_texto_libre: [asunto]
     descripcion: >
       La API de tickets NO filtra por cliente (probados 8 nombres de parametro,
       todos ignorados). Se filtra por estado y se cruza por cliente en codigo,
@@ -3869,7 +3894,10 @@ herramientas:
     # (PRD 7.4). El importador no la usa para decidir nada -- las heuristicas
     # sobre este campo estan descartadas a proposito-- pero si termina en la
     # descripcion de un caso, tiene que pasar por el redactor primero.
-    campos_texto_libre: [descripcion]
+    # 'asunto' es texto libre pese a parecer un enum: 356 distintos sobre
+    # 3.418 tickets reales, y 126 traen nombre y barrio del prospecto.
+    # Medido el 08/10/2026. Ver la herramienta 'consultar_ticket'.
+    campos_texto_libre: [descripcion, asunto]
     filtros_verificados:
       fecha_creacion_0:
         param: fecha_creacion_0
@@ -4106,7 +4134,10 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
     invocable_por_servicio: true
-    campos_texto_libre: [descripcion]
+    # 'asunto' es texto libre pese a parecer un enum: 356 distintos sobre
+    # 3.418 tickets reales, y 126 traen nombre y barrio del prospecto.
+    # Medido el 08/10/2026. Ver la herramienta 'consultar_ticket'.
+    campos_texto_libre: [descripcion, asunto]
     filtros_verificados:
       id_ticket:
         param: id_ticket

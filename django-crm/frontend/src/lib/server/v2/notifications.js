@@ -21,7 +21,14 @@ import { apiRequest } from '$lib/api-helpers.js';
 
 /** Verbs the backend actually dispatches. Everything else has no copy and is
  *  flagged on the page as "no producer" rather than shown as a raw identifier. */
-export const PRODUCED_VERBS = ['case.mentioned', 'case.commented'];
+export const PRODUCED_VERBS = [
+  'case.mentioned',
+  'case.commented',
+  // El ciclo de la madrugada de campo: deja la jornada armada y avisa qué
+  // quedó sin resolver. Sin el verbo acá, la fila se marca como "no producer"
+  // y se muestra como un identificador crudo.
+  'reparto_de_la_madrugada'
+];
 
 /**
  * A stored notification link → a safe internal ticket path, or '' if it is not
@@ -33,8 +40,18 @@ export const PRODUCED_VERBS = ['case.mentioned', 'case.commented'];
  */
 export function resolvedLink(link) {
   if (typeof link !== 'string') return '';
+
   const m = link.match(/^\/(?:cases|tickets)\/([^/?#]+)\/?$/);
-  return m ? `/tickets/${encodeURIComponent(m[1])}` : '';
+  if (m) return `/tickets/${encodeURIComponent(m[1])}`;
+
+  // LA JORNADA DE UN DÍA. Se RECONSTRUYE a partir de la fecha, no se pasa la
+  // query guardada: el valor de la columna no puede convertirse en un href
+  // arbitrario, que es la garantía que esta función existe para dar. Solo una
+  // fecha `AAAA-MM-DD` entra; cualquier otra cosa devuelve ''.
+  const j = link.match(/^\/supervisor-noc\/cuadrillas\?dia=(\d{4}-\d{2}-\d{2})(?:&|$)/);
+  if (j) return `/supervisor-noc/cuadrillas?dia=${j[1]}&reparto=1`;
+
+  return '';
 }
 
 /** One API notification → the row shape the page renders. */

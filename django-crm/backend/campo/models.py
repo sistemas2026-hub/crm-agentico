@@ -21,6 +21,35 @@ class WorkType(BaseModel):
     nombre = models.CharField(max_length=128)
     activo = models.BooleanField(default=True)
 
+    #: A QUE LABOR PERTENECE ESTE TIPO DE TRABAJO.
+    #
+    # Una cuadrilla se pone cada dia en una labor --instalacion, correctivo o
+    # trabajos-- y hasta el 08/10/2026 el reparto la IGNORABA: la palabra
+    # `labor` no aparecia ni una vez en `reparto.py`, asi que una cuadrilla
+    # puesta en correctivo podia recibir instalaciones. La zona si era dura;
+    # esto no existia.
+    #
+    # El cruce no se puede adivinar desde plataforma: cada empresa nombra sus
+    # tipos ('ftth', 'soporte', 'retiro'...) y ningun codigo dice a que labor
+    # corresponde. Por eso se DECLARA, igual que los barrios se mapean a zonas.
+    #
+    # VACIO SIGNIFICA SIN CLASIFICAR, Y NO SE REPARTE. Es el mismo criterio que
+    # la zona: lo que no se puede rutear bien no se rutea, y aparece nombrado
+    # en el aviso de la madrugada. Repartirlo igual lo mandaria a cualquier
+    # cuadrilla; esconderlo lo dejaria sin hacer sin que nadie lo note.
+    INSTALACION = "instalacion"
+    CORRECTIVO = "correctivo"
+    TRABAJOS = "trabajos"
+    LABORES = (
+        (INSTALACION, "Instalacion"),
+        (CORRECTIVO, "Correctivo"),
+        (TRABAJOS, "Trabajos"),
+    )
+    labor = models.CharField(
+        max_length=20, choices=LABORES, blank=True, default="",
+        help_text="Que cuadrillas pueden tomarlo. Vacio = sin clasificar.",
+    )
+
     class Meta:
         db_table = "campo_work_type"
         ordering = ["codigo"]

@@ -50,6 +50,15 @@ urlpatterns = [
     #  no puede tener `Profile` y aun asi integra la cuadrilla.
     path("personas-de-campo/", cuadrillas_views.PersonasDeCampoView.as_view(), name="personas_de_campo"),
     path("personas-de-campo/<uid:pk>/", cuadrillas_views.PersonaDeCampoView.as_view(), name="persona_de_campo"),
+    #  Como y a que hora reparte esta empresa. Es configuracion, no
+    #  constantes: el tope vivia fijo en el codigo y la hora habria vivido
+    #  fija en Celery beat, y las dos varian por empresa.
+    #  Que labor tiene cada tipo de trabajo. Define que cuadrillas pueden
+    #  tomarlo; lo que no se clasifica NO se reparte, asi que sin esta
+    #  pantalla el reparto no tendria como arrancar.
+    path("tipos-de-trabajo/", cuadrillas_views.TiposDeTrabajoView.as_view(), name="tipos_de_trabajo"),
+    path("tipos-de-trabajo/<uid:pk>/", cuadrillas_views.TiposDeTrabajoView.as_view(), name="tipo_de_trabajo"),
+    path("cuadrillas/configuracion/", cuadrillas_views.ConfiguracionDeRepartoView.as_view(), name="reparto_configuracion"),
     path("cuadrillas/reparto/", cuadrillas_views.RepartoView.as_view(), name="cuadrilla_reparto"),
     path("cuadrillas/jornada/", cuadrillas_views.JornadaDeCuadrillaView.as_view(), name="cuadrilla_jornada"),
     path("cuadrillas/<uid:pk>/", cuadrillas_views.CuadrillaView.as_view(), name="cuadrilla"),

@@ -28,9 +28,10 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from campo.models import AsignacionTrabajo
-from campo.cuadrillas import (Cuadrilla, IntegranteDeJornada,
-                              JornadaDeCuadrilla, PersonaDeCampo)
+from campo.models import AsignacionTrabajo, WorkType
+from campo.cuadrillas import (ConfiguracionDeReparto, Cuadrilla,
+                              IntegranteDeJornada, JornadaDeCuadrilla,
+                              PersonaDeCampo, configuracion_de_reparto)
 from campo.zonas import AliasDeZona, ZonaOperativa, normalizar_localidad
 from campo.inventario import UbicacionInventario
 from campo.permissions import IsCampoAuthenticated, ROLES_GESTION
@@ -93,6 +94,14 @@ def _cuadrilla_json(c) -> dict:
             if c.vehiculo_id else None
         ),
         "notas": c.notas,
+        # LO HABITUAL: de aqui sale la jornada cuando no hay ninguna anterior
+        # que copiar -- el arranque en frio del ciclo de la madrugada.
+        "labor_habitual": c.labor_habitual,
+        "zonas_habituales": [{"id": str(z.id), "nombre": z.nombre}
+                             for z in c.zonas_habituales.all()],
+        # Vacio = el de la empresa. Una cuadrilla de dos no rinde lo mismo que
+        # una de cuatro.
+        "tope_diario": c.tope_diario,
     }
 
 
@@ -192,6 +201,38 @@ class CuadrillaView(APIView):
             c.vehiculo = _vehiculo_de(org, request.data.get("vehiculo"))
         if "activa" in request.data:
             c.activa = bool(request.data.get("activa"))
+        if "labor_habitual" in request.data:
+            labor = (request.data.get("labor_habitual") or "").strip()
+            validas = dict(JornadaDeCuadrilla.LABORES)
+            if labor not in validas:
+                return Response(
+                    {"detail": f"'{labor}' no es una labor. Son: "
+                               f"{', '.join(validas)}."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            c.labor_habitual = labor
+        if "tope_diario" in request.data:
+            # Vacio vuelve al tope de la empresa. Un cero NO es "sin tope":
+            # seria una cuadrilla que no recibe nada, y eso se dice dandola de
+            # baja, no poniendole cero.
+            crudo = request.data.get("tope_diario")
+            if crudo in (None, "", 0, "0"):
+                c.tope_diario = None
+            else:
+                try:
+                    c.tope_diario = max(1, int(crudo))
+                except (TypeError, ValueError):
+                    return Response({"detail": "El tope tiene que ser un numero."},
+                                    status=status.HTTP_400_BAD_REQUEST)
+        if "zonas_habituales" in request.data:
+            # Se reemplaza la lista ENTERA, igual que las zonas del dia: la
+            # pantalla manda el estado completo de los checkboxes y un merge
+            # incremental haria que desmarcar no desmarcara.
+            pedidas = request.data.get("zonas_habituales") or []
+            if isinstance(pedidas, list):
+                c.zonas_habituales.set(
+                    ZonaOperativa.objects.filter(
+                        org=org, id__in=[x for x in pedidas if x])
+                )
         if "notas" in request.data:
             c.notas = (request.data.get("notas") or "").strip()
 
@@ -738,6 +779,143 @@ class LocalidadesDeZonaView(APIView):
 #  EL REPARTO  --  proponer es leer; publicar es escribir, y son dos rutas
 # ===========================================================================
 
+class TiposDeTrabajoView(APIView):
+    """``GET`` los tipos de trabajo y su labor · ``PATCH`` clasificar uno.
+
+    POR QUE EXISTE
+    --------------
+    `WorkType` no tenia ninguna pantalla: los tipos se crean por seed o por el
+    admin de Django. Mientras la labor no se usaba para nada eso alcanzaba,
+    pero desde que el reparto NO reparte lo que no esta clasificado, no tener
+    donde clasificarlo dejaria todas las ordenes en `sin_clasificar` para
+    siempre -- y el sintoma, «no se asigno nada», no señalaria aqui.
+
+    SOLO SE TOCA LA LABOR. El codigo y el nombre de un tipo de trabajo son del
+    catalogo de la empresa y los cambia quien lo administra; esto es la
+    pregunta operativa de «¿que cuadrillas pueden tomarlo?», que es otra cosa
+    y la contesta quien arma el dia.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = request.profile.org
+        qs = WorkType.objects.filter(org=org, activo=True).order_by("codigo")
+        return Response({
+            "tipos": [
+                {"id": str(t.id), "codigo": t.codigo, "nombre": t.nombre,
+                 "labor": t.labor}
+                for t in qs
+            ],
+            "labores": [{"id": v, "texto": n} for v, n in WorkType.LABORES],
+            # Cuantos quedan sin clasificar: es el numero que explica por que
+            # el reparto deja ordenes afuera, y tenerlo aqui evita cruzarlo a
+            # mano contra la lista.
+            "sin_clasificar": qs.filter(labor="").count(),
+        })
+
+    def patch(self, request, pk):
+        org = request.profile.org
+        _exigir_gestion(request)
+
+        tipo = WorkType.objects.filter(org=org, id=pk).first()
+        if tipo is None:
+            return Response({"detail": "No existe."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        labor = (request.data.get("labor") or "").strip()
+        validas = dict(WorkType.LABORES)
+        # Vacio es valido: es «volver a sin clasificar», y hace falta para
+        # poder deshacer una clasificacion equivocada sin tocar la base.
+        if labor and labor not in validas:
+            return Response(
+                {"detail": f"'{labor}' no es una labor. Son: "
+                           f"{', '.join(validas)}."},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        tipo.labor = labor
+        tipo.save(update_fields=["labor"])
+        return Response({"id": str(tipo.id), "codigo": tipo.codigo,
+                         "nombre": tipo.nombre, "labor": tipo.labor})
+
+
+class ConfiguracionDeRepartoView(APIView):
+    """``GET`` como reparte esta empresa · ``PUT`` cambiarlo.
+
+    POR QUE ES CONFIGURACION Y NO CONSTANTES
+    ----------------------------------------
+    El tope por cuadrilla vivia fijo en `reparto.TOPE_POR_CUADRILLA = 8`, y la
+    hora del ciclo habria vivido fija en la entrada de Celery beat. Las dos
+    cosas varian por empresa --una operacion de cinco cuadrillas no reparte
+    como una de veinte, y un ISP en otro huso no madruga a la misma hora UTC--
+    asi que van donde se pueden cambiar sin una sesion de codigo.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = request.profile.org
+        c = configuracion_de_reparto(org)
+        return Response({
+            "activo": c.activo,
+            "hora_local": c.hora_local,
+            "tope_por_cuadrilla": c.tope_por_cuadrilla,
+            "copia_la_jornada": c.copia_la_jornada,
+            "ultima_corrida": (c.ultima_corrida.isoformat()
+                               if c.ultima_corrida else None),
+            # La zona de la empresa, para que la pantalla pueda decir «3 de la
+            # mañana en Bogota» y no un numero suelto que no se sabe de donde
+            # es.
+            "zona_horaria": getattr(org, "timezone", "") or "UTC",
+            # Que vale mientras nadie cree la fila. Sin esto la pantalla no
+            # puede distinguir «esta en 8 porque alguien lo puso» de «esta en 8
+            # porque nadie lo toco».
+            "configurado": ConfiguracionDeReparto.objects.filter(org=org).exists(),
+        })
+
+    def put(self, request):
+        org = request.profile.org
+        _exigir_gestion(request)
+
+        datos = request.data or {}
+        hora = datos.get("hora_local", ConfiguracionDeReparto.HORA_DE_FABRICA)
+        tope = datos.get("tope_por_cuadrilla",
+                         ConfiguracionDeReparto.TOPE_DE_FABRICA)
+        try:
+            hora = int(hora)
+            tope = int(tope)
+        except (TypeError, ValueError):
+            return Response({"detail": "La hora y el tope son numeros."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if not 0 <= hora <= 23:
+            return Response({"detail": "La hora va de 0 a 23."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if tope < 1:
+            # Cero no es «sin tope»: seria un reparto que no reparte nada, y
+            # el sintoma --cuadrillas vacias cada mañana-- no señalaria aqui.
+            return Response({"detail": "El tope tiene que ser 1 o mas."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        fila, _ = ConfiguracionDeReparto.objects.update_or_create(
+            org=org,
+            defaults={
+                "activo": bool(datos.get("activo")),
+                "hora_local": hora,
+                "tope_por_cuadrilla": tope,
+                "copia_la_jornada": bool(datos.get("copia_la_jornada", True)),
+            },
+        )
+        return Response({
+            "activo": fila.activo,
+            "hora_local": fila.hora_local,
+            "tope_por_cuadrilla": fila.tope_por_cuadrilla,
+            "copia_la_jornada": fila.copia_la_jornada,
+            "ultima_corrida": (fila.ultima_corrida.isoformat()
+                               if fila.ultima_corrida else None),
+            "configurado": True,
+        })
+
+
 class RepartoView(APIView):
     """``GET ?fecha=`` la propuesta · ``POST`` publicarla.
 
@@ -783,6 +961,9 @@ class RepartoView(APIView):
             "sin_zona": [_orden_json(o) for o in p["sin_zona"]],
             "sin_cuadrilla": [_orden_json(o) for o in p["sin_cuadrilla"]],
             "sobrantes": [_orden_json(o) for o in p["sobrantes"]],
+            # Ni siquiera se pudieron evaluar: su tipo de trabajo no dice a
+            # que labor pertenece. Se arregla clasificando el TIPO una vez.
+            "sin_clasificar": [_orden_json(o) for o in p["sin_clasificar"]],
         })
 
     def post(self, request):

@@ -450,6 +450,13 @@ def depurar_contexto(crudo: dict, *, conversacion: dict | None = None,
         }
     if crudo.get("equipo_no_disponible"):
         snapshot["equipo_no_disponible"] = crudo["equipo_no_disponible"]
+    #  El id del cliente de instalaciones del proveedor, que manda el motor.
+    #  Con el, `operaciones.clasificacion_de_trabajo` puede decir si esto es
+    #  una instalacion ANTES de preguntarle nada a SmartOLT -- una instalacion
+    #  no tiene ONT, asi que no hay nada que medir. Medido: 220 de 220 por
+    #  este camino, contra 23 de 220 por el asunto del ticket.
+    if crudo.get("id_servicio_instalaciones"):
+        snapshot["id_servicio_instalaciones"] = crudo["id_servicio_instalaciones"]
     if crudo.get("identidad_en_conflicto"):
         snapshot["identidad_en_conflicto"] = crudo["identidad_en_conflicto"]
 

@@ -5588,6 +5588,27 @@ def conversacion_por_caso(caso_id):
     identidad = identidad_del_contexto(datos, request.args.get("servicio") or "")
     contexto = contexto_tecnico(config, tenant, identidad) if config else {}
 
+    #  SI ESTO ES UNA INSTALACION, y por que se puede afirmar.
+    #
+    #  Lo resuelve el MOTOR y no la plataforma por dos razones: el id del
+    #  cliente de instalaciones es un dato del proveedor de CADA empresa
+    #  --vive en `variables_tenant`, nunca fijo en codigo-- y Django no lee la
+    #  configuracion del tenant ni habla con WispHub a proposito.
+    #
+    #  Medido el 08/10/2026 sobre 3.418 tickets reales: los tickets de
+    #  instalacion cuelgan de ese cliente ficticio, 220 de 220. Por el ASUNTO
+    #  se capturan 23 de 220 --el 10%-- porque los otros usan el nombre y el
+    #  barrio del prospecto como rotulo. El texto parecia el camino obvio y es
+    #  el peor discriminador disponible justo para este tipo.
+    #
+    #  Se manda el id, no un booleano ya resuelto: quien clasifica compara, y
+    #  asi la comparacion queda escrita donde se puede leer y probar.
+    if config and contexto:
+        ficticio = (config.variables_tenant or {}).get(
+            "WISPHUB_ID_SERVICIO_INSTALACIONES")
+        if ficticio:
+            contexto["id_servicio_instalaciones"] = str(ficticio).strip()
+
     # Dos cosas distintas en dos claves distintas. 'conversacion' es DE DONDE
     # VINO el caso -- canal, etiqueta, motivo de la escalada -- y puede ser
     # None; 'contexto' es QUE HAY DEL OTRO LADO -- cliente, equipo, enlaces --

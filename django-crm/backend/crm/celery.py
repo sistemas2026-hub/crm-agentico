@@ -115,6 +115,17 @@ app.conf.beat_schedule = {
         "task": "cases.tasks.scan_for_breached_cases",
         "schedule": crontab(minute="*/5"),
     },
+    # Deja armada la jornada de campo del dia y avisa que hay que mirar.
+    #
+    # CADA HORA Y NO A UNA HORA FIJA: beat corre en UTC y cada empresa lleva su
+    # propia `Org.timezone`, asi que `crontab(hour=3)` serian las 3 UTC --las
+    # 10 de la noche anterior en Bogota-- y otra hora para la siguiente
+    # empresa. La tarea se dispara seguido y cada una decide si ya es SU hora;
+    # `ConfiguracionDeReparto.ultima_corrida` evita que corra dos veces.
+    "ciclo-de-la-madrugada-de-campo": {
+        "task": "campo.tasks.ciclo_de_la_madrugada",
+        "schedule": crontab(minute=5),
+    },
     # Purge already-read in-app notifications older than 90 days - daily at 3 AM
     "purge-read-notifications": {
         "task": "common.tasks.purge_read_notifications",

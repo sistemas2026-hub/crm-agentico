@@ -53,6 +53,20 @@ Corporativo y antiguedad del cliente siguen sin entrar: esos datos no estan en
 el CRM --la tabla `accounts` esta vacia, 237 de 237 casos medidos el
 25/09/2026-- y un criterio que no se puede calcular no es un criterio.
 
+LA LABOR TAMBIEN FILTRA, Y TAMBIEN ES DURA
+------------------------------------------
+Una cuadrilla se pone cada dia en una labor --instalacion, correctivo,
+trabajos-- y solo recibe ordenes de tipos de trabajo clasificados en ESA
+labor. Hasta el 08/10/2026 el reparto ignoraba ese campo por completo: la
+palabra `labor` no aparecia ni una vez en este archivo, asi que una cuadrilla
+puesta en correctivo podia recibir instalaciones y nadie lo veia hasta que el
+tecnico abria la orden.
+
+Un tipo de trabajo SIN clasificar no se reparte: queda en `sin_clasificar`.
+Ningun codigo ('ftth', 'soporte', 'retiro') dice a que labor corresponde
+--cada empresa nombra los suyos-- asi que mandarlo a cualquier cuadrilla seria
+adivinar. Se clasifica una vez, en el catalogo, no orden por orden.
+
 LA ZONA ES DURA
 ---------------
 Una cuadrilla solo recibe ordenes de las zonas que cubre ese dia. Una orden
@@ -66,7 +80,14 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 
 from campo.cuadrillas import JornadaDeCuadrilla
-from campo.models import AsignacionTrabajo, OrdenTrabajo
+from campo.models import AsignacionTrabajo, EventoTrabajo, OrdenTrabajo
+
+#: El evento que dice que alguien YA fue al sitio.
+#:
+#: `EventoTrabajo.tipo` es texto libre --cada tenant puede escribir los suyos--
+#: asi que el valor vive aca, nombrado, y no repetido como cadena suelta en
+#: medio de una consulta.
+EVENTO_INICIO = "trabajo_iniciado"
 from campo.zonas import normalizar_localidad
 
 #: Estados en los que una orden todavia espera que alguien la haga.
@@ -106,6 +127,18 @@ def _localidad_de(orden) -> str:
         if isinstance(cliente, dict):
             return normalizar_localidad(cliente.get("localidad") or "")
     return ""
+
+
+def _labor_de(orden) -> str:
+    """A que labor pertenece este trabajo, o "" si nadie lo clasifico.
+
+    Sale del `WorkType`, no de la orden: el tipo de trabajo es el catalogo de
+    la empresa y es ahi donde se declara una vez, en vez de repetirlo en cada
+    orden.
+    """
+    version = getattr(orden, "tipo_trabajo_version", None)
+    tipo = getattr(version, "work_type", None)
+    return (getattr(tipo, "labor", "") or "").strip()
 
 
 def _precio_de(orden, precios: dict):
@@ -152,7 +185,7 @@ def _riesgo_de(orden, plazo: dict) -> tuple:
     return (2, 0)
 
 
-def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=TOPE_POR_CUADRILLA,
+def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
              precios_por_plan=None):
     """La jornada propuesta de un dia. No escribe nada.
 
@@ -163,14 +196,23 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=TOPE_POR_CUADRILLA,
     Devuelve:
         {
           "asignaciones": [{"cuadrilla": c, "ordenes": [...]}],
-          "sin_zona":     [ordenes cuya localidad no esta mapeada],
-          "sin_cuadrilla":[ordenes de zonas que nadie cubre hoy],
-          "sobrantes":    [ordenes que no entraron por el tope],
+          "sin_zona":      [ordenes cuya localidad no esta mapeada],
+          "sin_cuadrilla": [ordenes de zonas que nadie cubre hoy CON SU LABOR],
+          "sobrantes":     [ordenes que no entraron por el tope],
+          "sin_clasificar":[ordenes cuyo tipo no declara a que labor va],
         }
     """
     if plazo_de is None:                      # import tardio: evita el ciclo
         from operaciones.sla import plazo_de as _plazo
         plazo_de = _plazo
+
+    #  El tope de la empresa cuando no se pide uno. Se resuelve aca y no en el
+    #  default del parametro: un default se evalua al IMPORTAR el modulo, asi
+    #  que leeria la configuracion una sola vez en la vida del proceso y no se
+    #  enteraria de un cambio hecho desde la pantalla.
+    if tope is None:
+        from campo.cuadrillas import configuracion_de_reparto
+        tope = configuracion_de_reparto(org).tope_por_cuadrilla
 
     jornadas = list(
         JornadaDeCuadrilla.objects
@@ -179,12 +221,16 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=TOPE_POR_CUADRILLA,
         .prefetch_related("zonas")
     )
 
-    # Que zonas cubre cada cuadrilla hoy. Una cuadrilla SIN zonas no entra:
-    # vacio es "sin zona asignada", nunca "cubre todas".
+    # Que zonas cubre cada cuadrilla hoy, Y CON QUE LABOR. Una cuadrilla SIN
+    # zonas no entra: vacio es "sin zona asignada", nunca "cubre todas".
+    #
+    # La clave lleva la labor porque una cuadrilla puesta en correctivo no
+    # puede recibir instalaciones -- hasta el 08/10/2026 el reparto ignoraba
+    # ese campo y se las daba igual.
     por_zona: dict = {}
     for j in jornadas:
         for z in j.zonas.all():
-            por_zona.setdefault(str(z.id), []).append(j)
+            por_zona.setdefault((str(z.id), j.labor), []).append(j)
 
     # De que zona es cada barrio. Se arma una vez: preguntarlo por orden seria
     # una consulta por fila.
@@ -195,11 +241,27 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=TOPE_POR_CUADRILLA,
         for a in AliasDeZona.objects.filter(org=org, zona__activa=True)
     }
 
+    #  QUIEN EMPEZO UN TRABAJO LO TERMINA, y lo que nadie toco vuelve a
+    #  repartirse.
+    #
+    #  Antes se excluia TODA orden con asignacion, asi que una de ayer que
+    #  nadie visito se quedaba pegada a su cuadrilla aunque esa cuadrilla hoy
+    #  no cubriera su zona. El SLA no podia moverla y nadie veia por que.
+    #
+    #  La linea se corre a donde de verdad esta: `trabajo_iniciado` en la
+    #  bitacora. Si alguien ya fue al sitio y hablo con el cliente, sabe algo
+    #  que el reparto no; si no fue nadie, la orden es tan libre como una
+    #  nueva.
+    ya_empezadas = set(
+        EventoTrabajo.objects
+        .filter(org=org, tipo=EVENTO_INICIO)
+        .values_list("orden_id", flat=True)
+    )
     pendientes = (
         OrdenTrabajo.objects
         .filter(org=org, estado_operativo__in=ESTADOS_QUE_ESPERAN)
-        .exclude(asignaciones__isnull=False)
-        .select_related("tipo_trabajo_version")
+        .exclude(id__in=ya_empezadas)
+        .select_related("tipo_trabajo_version__work_type")
     )
 
     # El orden, con su desempate estable por numero.
@@ -214,25 +276,50 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=TOPE_POR_CUADRILLA,
 
     ordenadas = sorted(pendientes, key=clave)
 
+    #  EL TOPE ES POR CUADRILLA, no uno solo para todas.
+    #
+    #  Una cuadrilla de dos personas no rinde lo mismo que una de cuatro, y un
+    #  numero unico obliga a elegir entre sobrecargar a la chica o
+    #  desaprovechar a la grande. `Cuadrilla.tope_diario` manda; si no lo
+    #  declara, vale el de la empresa, y si la empresa no tiene fila, el de
+    #  fabrica. Ninguno de los tres es capacidad calculada: es un freno.
+    topes = {
+        j.id: (j.cuadrilla.tope_diario or tope)
+        for j in jornadas
+    }
+
     carga = {j.id: 0 for j in jornadas}
     asignadas: dict = {j.id: [] for j in jornadas}
-    sin_zona, sin_cuadrilla, sobrantes = [], [], []
+    sin_zona, sin_cuadrilla, sobrantes, sin_clasificar = [], [], [], []
 
     for orden in ordenadas:
+        # LA LABOR PRIMERO. Una orden sin clasificar no se reparte: ningun
+        # codigo de tipo de trabajo dice a que labor pertenece --cada empresa
+        # nombra los suyos-- y mandarla a cualquier cuadrilla seria adivinar.
+        # Mismo criterio que la zona, y se nombra igual.
+        labor = _labor_de(orden)
+        if not labor:
+            sin_clasificar.append(orden)
+            continue
+
         barrio = _localidad_de(orden)
         zona_id = zona_de_barrio.get(barrio) if barrio else None
         if not zona_id:
             sin_zona.append(orden)
             continue
 
-        candidatas = por_zona.get(zona_id) or []
+        candidatas = por_zona.get((zona_id, labor)) or []
         if not candidatas:
+            # Nadie cubre esa zona HOY con esa labor. Puede ser que nadie la
+            # cubra, o que quien la cubre hoy este haciendo otra cosa: las dos
+            # se arreglan igual --poniendo una cuadrilla-- y por eso van
+            # juntas.
             sin_cuadrilla.append(orden)
             continue
 
         # La menos cargada de las que cubren esa zona, con desempate estable
         # por nombre: sin el, dos corridas pueden repartir distinto.
-        con_lugar = [j for j in candidatas if carga[j.id] < tope]
+        con_lugar = [j for j in candidatas if carga[j.id] < topes[j.id]]
         if not con_lugar:
             sobrantes.append(orden)
             continue
@@ -248,4 +335,8 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=TOPE_POR_CUADRILLA,
         "sin_zona": sin_zona,
         "sin_cuadrilla": sin_cuadrilla,
         "sobrantes": sobrantes,
+        # Las que ni siquiera se pudieron evaluar: su tipo de trabajo no dice
+        # a que labor pertenece. Se arregla clasificando el tipo UNA vez, no
+        # orden por orden.
+        "sin_clasificar": sin_clasificar,
     }

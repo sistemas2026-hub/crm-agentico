@@ -304,6 +304,69 @@ menos no da error: responde 200 y no cambia lo que falta.
 
 ## Trampas que ya costaron tiempo
 
+**`estado_instalacion` y `costo_instalacion` NO sirven para detectar una
+instalacion desde `/api/clientes/`.** Esta misma skill documentaba que
+`?instalacion` "habilita" esos campos, y eso vale para ESCRIBIR, no para LEER.
+Medido el 08/10/2026:
+
+- `estado_instalacion` **no viene en ninguna respuesta de `/api/clientes/`**:
+  ni en la lista (54 campos) ni en el detalle (34 campos).
+- `costo_instalacion` **si viene en la lista** (ausente en el detalle, otra vez
+  la dualidad lista/detalle de esta API) pero esta **poblado en clientes
+  activos normales** (`'25000'`, `'50000'`): no distingue nada.
+- Como filtro de `/api/clientes/`, `estado_instalacion` se **IGNORA**: 7451
+  para `=999999999`, `=NO_EXISTE` y `=1..8`, identico a
+  `?campo_que_no_existe=1`.
+
+La via real es `/api/instalaciones/` (ver la tabla de catalogos).
+
+**Los TICKETS de instalacion no apuntan al registro de `/api/instalaciones/`:
+cuelgan del cliente ficticio `id_servicio=3545` "INSTALACIONES NUEVAS"**, que
+es un cliente NORMAL y activo en `/api/clientes/`. Medido sobre 3.418 tickets
+(01/09-08/10/2026): **220 cuelgan de 3545**, y los **23** con asunto
+"instalacion nueva" estan **todos** ahi (0 fuera). Pero solo **18 de los 220**
+tienen el asunto canonico: los otros 202 usan **200 asuntos distintos** que son
+el NOMBRE y el BARRIO del prospecto. Clasificar por asunto captura el **10%**;
+por `id_servicio`, el 100%. El id vive en la config del tenant
+(`WISPHUB_ID_SERVICIO_INSTALACIONES`), nunca fijo en codigo.
+
+> ⚠️ **Y por eso `asunto` es un campo con PII.** 126 asuntos distintos (127
+> tickets) traen `nombre | barrio` -- por ejemplo
+> `'Graciano Rojas Morantes / via el Tamarindo ... SABANAGRANDE'`. Si entra a
+> una lista blanca, va **tambien** a `campos_texto_libre` (CLAUDE.md §5, capa
+> 2). Es exactamente el caso de los 136 de 300 tickets con documento embebido,
+> en otro campo.
+
+**El campo `asunto` de los tickets es TEXTO LIBRE, no el enum del catalogo.**
+`/api/tickets/asuntos-tickets/` declara 142 asuntos; sobre 3.418 tickets reales
+hay **356 distintos**, y **277 (13% de los tickets) no estan en el catalogo**.
+Cobertura acumulada: top-15 = 70,9%, top-30 = 83,9%, top-50 = 89,0%,
+top-200 = 95,4%. Un mapa asunto->tipo se mantiene con el top-30 y un default
+explicito; **nunca con match exacto** (`Instalacion Nueva` exacto captura 18 de
+23; normalizado sin tildes y por prefijo, 23 de 23).
+
+**`?asunto=` es un filtro IGNORADO** (3418 con `NO_EXISTE_XYZ`, igual que sin
+filtro), lo mismo que `servicio`, `id_servicio`, `cliente` y
+`servicio__id_servicio` con `=3545` y con `=999999999`. Se trae la ventana y se
+cruza en codigo.
+
+**El rango de fechas de TICKETS no se llama `__range_0/_1` -- se llama
+`fecha_creacion_0`/`fecha_creacion_1`.** Verificado el 08/10/2026. El nombre
+con `__range` se IGNORA en silencio (mismo count que un parametro inventado).
+El real se delata con un 400 que nombra el problema:
+
+    ?fecha_creacion__range_0=...&__range_1=...  -> 566  (= base, IGNORADO)
+    ?fecha_creacion_0=2030-01-01                -> 400 "ingrese ambos valores del rango"
+    ?fecha_creacion_0=2030-01-01&_1=2030-02-01  -> 0    (imposible: SE APLICA)
+    ?fecha_creacion_0=2026-09-01&_1=2026-10-08  -> 3418
+    ?fecha_creacion_0=2026-01-01&_1=2026-10-08  -> 400 "no mayor a 2 meses"
+    ?fecha_creacion_0=26/09/2026&...            -> 400 "Use YYYY-MM-DD o YYYY-MM-DD HH:MM:SS"
+
+Importa el factor: SIN el filtro, `/api/tickets/` devuelve **566**; solo
+septiembre son **3.418**. El recorte propio descarta ~85%, y con el nombre
+equivocado nadie se enteraba porque la respuesta no da error. Ojo que el tope
+aca es de **2 meses**, no los 3 que vale para facturas.
+
 **El campo `usuario` SOLO viene en el listado, nunca en el detalle** (verificado
 25/08/2026). Es el identificador interno del cliente
 (`mario-sabanagrande@rapilink-sas`) y es el que arman las URLs del panel web:
@@ -629,7 +692,7 @@ confirmados contra produccion `.io` con un `GET` real:
 | `/api/categorias-gastos/` | 40 | Relevante si algun dia se puebla `/api/gastos/` |
 | `/api/planes-adicionales/` | 1 | |
 | `/api/servicios-adicionales/` | 3704 | |
-| `/api/instalaciones/` | 1 | Trae un registro con forma de cliente completo (nombre, cedula, direccion, email). Parece ser instalaciones PENDIENTES actuales, no historico — sin confirmar del todo |
+| `/api/instalaciones/` | 2 | **Las instalaciones son un universo DISJUNTO de `/api/clientes/`.** Verificado 08/10/2026: sus registros traen `estado: "Instalacion"` --un quinto valor de TEXTO que ningun codigo numerico 0-12 alcanza en `/api/clientes/`-- y **no existen** en clientes: `?id_servicio=7764` da `count: 0` y `GET /api/clientes/7764/` da **404**. Los 4 estados de cliente (3952+1157+2253+89) suman **exacto** 7451, sin solapamiento. Filtros: `estado_instalacion` **SE APLICA aqui** (imposible -> 0; `=1` -> 1, `=8` -> 1, suma exacta), `id_servicio` se aplica, `zona` se IGNORA. `GET /api/instalaciones/{id}/` da 404: solo coleccion |
 | `/api/fichas/` | 0 | Sistema de fichas/hotspot; Rapilink no lo usa |
 | `/api/tarjeta-cobranza/` | 0 | Sin uso en esta instancia |
 | `/api/tickets/asuntos-tickets/` | — | Catalogo completo de ~140 asuntos. Confirma el hallazgo de otro proyecto: `"Instalacion Nueva"` y `"Instatalacion Nueva"` (typo) conviven como valores DISTINTOS del catalogo de origen |

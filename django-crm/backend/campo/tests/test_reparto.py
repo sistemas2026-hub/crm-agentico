@@ -40,7 +40,12 @@ def plazo_falso(minutos_por_numero):
 
 @pytest.fixture
 def version(org_a):
-    wt = WorkType.objects.create(org=org_a, codigo="ftth", nombre="FTTH")
+    #  CON SU LABOR, la misma que `_jornada` le pone a la cuadrilla: desde el
+    #  08/10/2026 el reparto filtra por labor, y un tipo sin clasificar queda
+    #  en `sin_clasificar` sin llegar a ninguna cuadrilla. Sin esto, todas las
+    #  pruebas de abajo fallarian por un motivo que no es el que prueban.
+    wt = WorkType.objects.create(org=org_a, codigo="ftth", nombre="FTTH",
+                                 labor=JornadaDeCuadrilla.INSTALACION)
     return WorkTypeVersion.objects.create(
         work_type=wt, version=1, estado=WorkTypeVersion.PUBLICADA,
         esquema={"campos": []},
@@ -208,14 +213,43 @@ def test_i_lo_que_pasa_el_tope_queda_nombrado(org_a, version, norte):
     assert [o.numero for o in p["sobrantes"]] == [30]
 
 
-def test_j_una_orden_YA_ASIGNADA_no_se_vuelve_a_repartir(
+def test_j_una_orden_asignada_pero_que_NADIE_EMPEZO_vuelve_al_reparto(
     org_a, version, norte, admin_profile
 ):
+    """CAMBIO DE CRITERIO del 08/10/2026.
+
+    Antes se excluia TODA orden con asignacion, asi que una de ayer que nadie
+    visito se quedaba pegada a su cuadrilla aunque esa cuadrilla hoy no
+    cubriera su zona ni su labor. El SLA no podia moverla y nadie veia por que.
+
+    La linea se corre a donde de verdad esta --`trabajo_iniciado` en la
+    bitacora-- y el caso contrario lo cubre la prueba siguiente.
+    """
     _jornada(org_a, "Cuadrilla 1", [norte])
     ya = _orden(org_a, version, 10, "MARTHA GISELA")
     AsignacionTrabajo.objects.create(
         orden=ya, profile=admin_profile, rol="tecnico", es_principal=True
     )
+    _orden(org_a, version, 20, "MARTHA GISELA")
+
+    p = proponer(org_a, LUNES, plazo_de=plazo_falso({10: 10, 20: 999}))
+    #  La 10 vence antes, asi que vuelve Y entra primero.
+    assert _de(p, "Cuadrilla 1") == [10, 20]
+
+
+def test_j2_pero_la_que_YA_SE_EMPEZO_no_cambia_de_manos(
+    org_a, version, norte, admin_profile
+):
+    """Quien fue al sitio y hablo con el cliente sabe algo que el reparto no."""
+    from campo.models import EventoTrabajo
+    from campo.reparto import EVENTO_INICIO
+
+    _jornada(org_a, "Cuadrilla 1", [norte])
+    empezada = _orden(org_a, version, 10, "MARTHA GISELA")
+    AsignacionTrabajo.objects.create(
+        orden=empezada, profile=admin_profile, rol="tecnico", es_principal=True
+    )
+    EventoTrabajo.objects.create(org=org_a, orden=empezada, tipo=EVENTO_INICIO)
     _orden(org_a, version, 20, "MARTHA GISELA")
 
     p = proponer(org_a, LUNES, plazo_de=plazo_falso({10: 10, 20: 999}))

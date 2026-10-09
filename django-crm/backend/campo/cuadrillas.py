@@ -100,6 +100,45 @@ class Cuadrilla(BaseModel):
     activa = models.BooleanField(default=True)
     notas = models.TextField(blank=True, default="")
 
+    # --- LO HABITUAL, para que la primera jornada no haya que armarla a mano --
+    #
+    # La composicion sigue siendo DEL DIA (ver `JornadaDeCuadrilla`): esto no
+    # la reemplaza. Es de donde sale la jornada cuando todavia no hay ninguna
+    # anterior que copiar -- el arranque en frio.
+    #
+    # Sin esto, una empresa que acaba de dar de alta sus cuadrillas tendria
+    # que armar un dia entero a mano antes de que el reparto automatico
+    # pudiera hacer algo, y el sintoma seria "no se asigno nada" sin decir por
+    # que.
+
+    #: Que hace normalmente. Mismo catalogo que la jornada.
+    labor_habitual = models.CharField(
+        max_length=20,
+        choices=(("instalacion", "Instalacion"),
+                 ("correctivo", "Correctivo"),
+                 ("trabajos", "Trabajos")),
+        default="instalacion",
+    )
+
+    #: Que zonas cubre normalmente.
+    #:
+    #: Vacio significa "sin zona", igual que en la jornada: una cuadrilla sin
+    #: zona NO recibe trabajo por zona, y eso tiene que notarse en vez de
+    #: repartirle cualquier cosa.
+    zonas_habituales = models.ManyToManyField(
+        "campo.ZonaOperativa",
+        related_name="cuadrillas_habituales",
+        blank=True,
+    )
+
+    #: Cuantas ordenes acepta por dia, si tiene un numero propio.
+    #:
+    #: Vacio = el de la empresa (`ConfiguracionDeReparto.tope_por_cuadrilla`).
+    #: Existe porque una cuadrilla de dos personas no rinde lo mismo que una
+    #: de cuatro, y un solo numero para todas obliga a elegir entre
+    #: sobrecargar a la chica o desaprovechar a la grande.
+    tope_diario = models.PositiveSmallIntegerField(null=True, blank=True)
+
     class Meta:
         db_table = "campo_cuadrilla"
         ordering = ["nombre"]
@@ -183,6 +222,99 @@ class JornadaDeCuadrilla(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.cuadrilla.nombre} · {self.fecha} · {self.get_labor_display()}"
+
+
+class ConfiguracionDeReparto(BaseModel):
+    """Como reparte el trabajo esta empresa, y a que hora.
+
+    MISMO PATRON QUE `ConfiguracionDeSeguimiento` Y `ConfiguracionDeAvisos`:
+    una fila por empresa, y si no existe valen los valores de fabrica. La fila
+    NO se crea al leer -- una lectura que escribe convierte cualquier consulta
+    en una escritura, y con `--workers 1` eso se nota.
+
+    POR QUE LA HORA ES UN NUMERO Y NO UNA ENTRADA DE CELERY BEAT
+    ------------------------------------------------------------
+    Beat corre en UTC (`TIME_ZONE = "UTC"` en settings) y cada empresa lleva su
+    propia `Org.timezone`. Una entrada `crontab(hour=3)` serian las 3 de la
+    mañana UTC, o sea las 10 de la noche ANTERIOR en Bogota -- y para la
+    siguiente empresa, otra hora distinta.
+
+    Por eso la tarea corre seguido y cada empresa decide si ya es SU hora. El
+    dia que entre un ISP en otro huso, funciona sin tocar codigo.
+    """
+
+    #: Valores de fabrica. Son los que valen mientras nadie cree la fila.
+    TOPE_DE_FABRICA = 8
+    HORA_DE_FABRICA = 3
+
+    org = models.OneToOneField(
+        Org, on_delete=models.CASCADE, related_name="configuracion_de_reparto"
+    )
+
+    #: Si el reparto de la madrugada corre solo.
+    #:
+    #: Apagado de fabrica, y a proposito: encender un proceso que arma jornadas
+    #: todas las noches es una decision de operacion, no algo que deba pasar
+    #: porque alguien desplego una version. Mismo criterio que
+    #: `RELOJ_HABILITADO` en el motor.
+    activo = models.BooleanField(default=False)
+
+    #: A que hora LOCAL de la empresa corre. 0-23.
+    hora_local = models.PositiveSmallIntegerField(default=HORA_DE_FABRICA)
+
+    #: Cuantas ordenes se le proponen a una cuadrilla en un dia.
+    #:
+    #: NO es una capacidad calculada --eso depende de la duracion de cada tipo
+    #: de trabajo, de la disponibilidad y de los bloqueos-- sino un TOPE para
+    #: que el reparto no le vuelque treinta ordenes a la primera cuadrilla.
+    #: Una cuadrilla puede tener el suyo (`Cuadrilla.tope_diario`); esto es el
+    #: de la empresa para las que no lo declaren.
+    tope_por_cuadrilla = models.PositiveSmallIntegerField(default=TOPE_DE_FABRICA)
+
+    #: Si la jornada del dia se arma copiando la del ultimo dia trabajado.
+    #:
+    #: Apagarlo deja el reparto corriendo solo sobre lo que alguien armo a
+    #: mano, que es como funcionaba antes de esto.
+    copia_la_jornada = models.BooleanField(default=True)
+
+    #: El ULTIMO DIA LOCAL en que esto corrio. Es lo que evita que corra dos
+    #: veces.
+    #:
+    #: La tarea se dispara seguido --cada empresa tiene su hora local y beat
+    #: corre en UTC-- asi que sin esta marca, todas las corridas posteriores a
+    #: la hora del dia volverian a notificar. `asegurar_jornadas` es
+    #: idempotente y no duplicaria nada, pero la notificacion si: el
+    #: supervisor abriria la plataforma con el mismo aviso repetido veinte
+    #: veces y dejaria de leerlos.
+    #:
+    #: Es una FECHA y no una marca de tiempo a proposito: la pregunta que hay
+    #: que contestar es "¿ya corrio HOY?", y un timestamp obligaria a
+    #: recalcular el dia local en cada comparacion.
+    ultima_corrida = models.DateField(null=True, blank=True)
+
+    class Meta:
+        db_table = "campo_configuracion_reparto"
+
+    def __str__(self) -> str:
+        return f"Reparto de {self.org_id}"
+
+
+def configuracion_de_reparto(org):
+    """Los ajustes de esta empresa, o los de fabrica.
+
+    Devuelve siempre un objeto con los mismos atributos, exista la fila o no,
+    para que quien lo use no tenga que preguntar cual de los dos casos es.
+    """
+    fila = ConfiguracionDeReparto.objects.filter(org=org).first()
+    if fila is not None:
+        return fila
+    return ConfiguracionDeReparto(
+        org=org,
+        activo=False,
+        hora_local=ConfiguracionDeReparto.HORA_DE_FABRICA,
+        tope_por_cuadrilla=ConfiguracionDeReparto.TOPE_DE_FABRICA,
+        copia_la_jornada=True,
+    )
 
 
 class PersonaDeCampo(BaseModel):

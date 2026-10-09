@@ -521,6 +521,168 @@
       {/if}
     </section>
 
+    <!-- ============ EL CICLO DE LA MADRUGADA ============ -->
+    <!--
+      Deja armada la jornada de cada cuadrilla y avisa qué hay que mirar. NO
+      publica: `reparto.proponer()` no escribe nada y se recalcula al abrir
+      esta pantalla, así que guardar una propuesta de las 3 de la mañana solo
+      lograría servirla vieja a las 7. Una persona sigue publicando.
+
+      Viene APAGADO de fábrica: encender un proceso que corre todas las noches
+      es una decisión de operación, no algo que pase porque alguien desplegó
+      una versión. Mismo criterio que `RELOJ_HABILITADO` en el motor.
+    -->
+    <section class="snoc-panel" style="gap:var(--snoc-sm);">
+      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+        <div class="snoc-pila-xs">
+          <h2 class="snoc-h2">El ciclo de la madrugada</h2>
+          <p class="snoc-body-sm snoc-secundario">
+            Cada día, a la hora que elijas, deja armada la jornada de cada cuadrilla
+            —copiada del último día que trabajó— y te avisa qué quedó sin resolver. El
+            reparto lo seguís publicando vos.
+          </p>
+        </div>
+        {#if data.reparto_config}
+          <span class="snoc-tag">
+            {data.reparto_config.activo ? 'Encendido' : 'Apagado'}
+          </span>
+        {/if}
+      </div>
+
+      {#if data.repartoConfigError}
+        <p class="snoc-aviso snoc-error-txt">
+          No se pudo leer la configuración del ciclo.
+        </p>
+      {:else if data.reparto_config}
+        <form method="POST" action="?/reparto_config" use:enhance
+              class="snoc-pila-xs">
+          <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap; align-items:flex-end;">
+            <label class="snoc-campo-grupo">
+              <span class="snoc-label">Hora</span>
+              <select class="snoc-select" name="hora_local">
+                {#each Array.from({ length: 24 }, (_, h) => h) as h (h)}
+                  <option value={h} selected={h === data.reparto_config.hora_local}>
+                    {String(h).padStart(2, '0')}:00
+                  </option>
+                {/each}
+              </select>
+            </label>
+            <label class="snoc-campo-grupo">
+              <span class="snoc-label">Órdenes por cuadrilla</span>
+              <input
+                class="snoc-campo"
+                type="number"
+                name="tope_por_cuadrilla"
+                min="1"
+                max="99"
+                value={data.reparto_config.tope_por_cuadrilla}
+                style="width:90px"
+              />
+            </label>
+          </div>
+
+          <!-- La hora es LOCAL de la empresa, no la del servidor: el servidor
+               corre en UTC y una hora suelta no dice de dónde es. -->
+          <p class="snoc-body-sm snoc-secundario">
+            Hora de <strong>{data.reparto_config.zona_horaria}</strong>.
+            {#if data.reparto_config.ultima_corrida}
+              Última corrida: {data.reparto_config.ultima_corrida}.
+            {:else}
+              Todavía no corrió ninguna vez.
+            {/if}
+          </p>
+
+          <label class="snoc-fila" style="gap:var(--snoc-xs); align-items:center;">
+            <input type="checkbox" name="copia_la_jornada" value="1"
+                   checked={data.reparto_config.copia_la_jornada} />
+            <span class="snoc-body-sm">
+              Armar la jornada copiando la del último día trabajado
+            </span>
+          </label>
+
+          <label class="snoc-fila" style="gap:var(--snoc-xs); align-items:center;">
+            <input type="checkbox" name="activo" value="1"
+                   checked={data.reparto_config.activo} />
+            <span class="snoc-body-sm">
+              <strong>Encendido</strong> — corre solo todas las noches
+            </span>
+          </label>
+
+          <p class="snoc-body-sm snoc-secundario">
+            El tope no es capacidad calculada: es un freno para que no le caigan treinta
+            órdenes a la primera cuadrilla. Una cuadrilla puede tener el suyo propio, y
+            ese le gana a este.
+          </p>
+
+          <div>
+            <!-- Sin `disabled`: el permiso lo exige el backend
+                 (`_exigir_gestion`), y esta pantalla no recibe el rol. Un
+                 `disabled` por una variable que no existe se evalua como
+                 "deshabilitado siempre" y nadie podria guardar. -->
+            <button class="snoc-btn" type="submit">Guardar</button>
+          </div>
+        </form>
+
+      <!-- LOS TIPOS DE TRABAJO Y SU LABOR.
+           Una cuadrilla puesta en correctivo no puede recibir instalaciones, y
+           ningún código ('ftth', 'soporte') dice a cuál pertenece: cada empresa
+           nombra los suyos. Lo que no está clasificado NO se reparte, así que
+           esto no es cosmético. -->
+      <div style="margin-top:14px;border-top:1px solid var(--snoc-borde,#e5e7eb);padding-top:14px">
+        <div class="snoc-pila-xs">
+          <strong class="snoc-body-sm">Qué labor tiene cada tipo de trabajo</strong>
+          <p class="snoc-body-sm snoc-secundario">
+            Define qué cuadrillas pueden tomarlo. Lo que quede sin clasificar no se
+            reparte: aparece aparte, nombrado, en vez de ir a parar a cualquier cuadrilla.
+          </p>
+        </div>
+
+        {#if (data.tipos ?? []).length === 0}
+          <p class="snoc-body-sm snoc-secundario" style="margin-top:8px">
+            Todavía no hay tipos de trabajo cargados.
+          </p>
+        {:else}
+          {#if data.tiposSinClasificar}
+            <p class="snoc-aviso" style="margin-top:8px">
+              {data.tiposSinClasificar}
+              {data.tiposSinClasificar === 1 ? 'tipo sin clasificar' : 'tipos sin clasificar'}.
+              Sus órdenes no se están repartiendo.
+            </p>
+          {/if}
+
+          <div class="snoc-pila-xs" style="margin-top:8px">
+            {#each data.tipos as t (t.id)}
+              <form method="POST" action="?/tipo_labor" use:enhance
+                    class="snoc-fila-sep" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                <input type="hidden" name="id" value={t.id} />
+                <div class="snoc-pila-xs" style="min-width:0">
+                  <span class="snoc-body-sm">{t.nombre}</span>
+                  <span class="snoc-body-sm snoc-secundario snoc-mono">{t.codigo}</span>
+                </div>
+                <div class="snoc-fila" style="gap:var(--snoc-xs)">
+                  <select class="snoc-select" name="labor">
+                    <option value="" selected={!t.labor}>— sin clasificar —</option>
+                    {#each LABORES as l (l.id)}
+                      <option value={l.id} selected={l.id === t.labor}>{l.texto}</option>
+                    {/each}
+                  </select>
+                  <button class="snoc-pildora" type="submit">Guardar</button>
+                </div>
+              </form>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+        {#if form?.error}
+          <p class="snoc-aviso snoc-error-txt">{form.error}</p>
+        {/if}
+        {#if form?.hecho}
+          <p class="snoc-aviso">{form.hecho}</p>
+        {/if}
+      {/if}
+    </section>
+
     <!-- ============ QUIÉNES TRABAJAN EN CAMPO ============ -->
     <!--
       Dos preguntas distintas que antes eran la misma:

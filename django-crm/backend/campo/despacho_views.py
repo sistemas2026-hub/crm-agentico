@@ -89,6 +89,11 @@ def _orden_o_404(request, pk) -> OrdenTrabajo:
     return orden
 
 
+class _SinFicha(Exception):
+    """No hay contexto que clasificar. No es un error: es el caso en que
+    el motor no respondio y la orden nace sin snapshot, a proposito."""
+
+
 class CrearOrdenView(APIView):
     """Alta de orden de trabajo, desde un caso del CRM o a mano."""
 
@@ -152,6 +157,47 @@ class CrearOrdenView(APIView):
             "sla_vence_en": d.get("sla_vence_en"),
             "requisitos_seguridad": d.get("requisitos_seguridad"),
         }
+
+        #  DE QUE TIPO ES ESTE TRABAJO, SEGUN LO QUE SE PUDO MEDIR.
+        #
+        #  NO elige la plantilla --eso ya lo decidio quien despacha, y su
+        #  decision gana-- pero deja ESCRITO que decia la evidencia en ese
+        #  momento. Sirve para dos cosas: comparar despues cuantas veces la
+        #  medicion y la eleccion coincidieron, y tener el porque a mano
+        #  cuando una orden salga con la plantilla equivocada.
+        #
+        #  Va dentro del contexto, que es lo que se CONGELA en la orden: una
+        #  clasificacion sin la hora al lado deja de ser una medicion y pasa a
+        #  ser una afirmacion sobre el presente que nadie puede verificar.
+        #  SOLO SI HAY FICHA. Sin contexto no hay nada que clasificar, y una
+        #  'labor_sugerida' vacia dentro de un contexto que ya dice "no se
+        #  pudo traer la ficha" es ruido: repite la misma ausencia en otra
+        #  clave. El contexto sin ficha tiene que quedar con su motivo y nada
+        #  mas -- lo verifica `test_la_ficha_no_rompe_la_creacion`.
+        try:
+            from operaciones import clasificacion_de_trabajo as clf
+
+            if not (isinstance(contexto, dict)
+                    and contexto.get("contexto_disponible")):
+                raise _SinFicha
+
+            sugerida = clf.clasificar(
+                contexto,
+                texto=(d.get("resumen") or "").strip(),
+                marcadores={
+                    "id_servicio_instalaciones":
+                        contexto.get("id_servicio_instalaciones"),
+                },
+            )
+            if isinstance(contexto, dict):
+                contexto["labor_sugerida"] = sugerida
+        except _SinFicha:
+            pass
+        except Exception:                                    # noqa: BLE001
+            #  Nunca rompe el despacho. Una sugerencia que no se pudo calcular
+            #  es una orden sin esa nota; un supervisor que no puede despachar
+            #  porque una clasificacion fallo, no.
+            pass
 
         try:
             orden = crear_orden(

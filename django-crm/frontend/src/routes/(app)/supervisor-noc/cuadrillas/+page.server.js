@@ -14,7 +14,11 @@ import {
   publicarReparto,
   leerPersonasDeCampo,
   crearPersonaDeCampo,
-  editarPersonaDeCampo
+  editarPersonaDeCampo,
+  leerConfiguracionDeReparto,
+  guardarConfiguracionDeReparto,
+  leerTiposDeTrabajo,
+  clasificarTipoDeTrabajo
 } from '$lib/server/v2/cuadrillas.js';
 import { leerUbicaciones } from '$lib/server/v2/inventario.js';
 
@@ -57,7 +61,7 @@ export async function load({ url, cookies, locals, fetch }) {
   // vehículos no se le puede asignar uno, y sin la jornada no se sabe qué
   // hace hoy. Pedirlas en serie sumaría tres esperas que no hacen falta.
   const [cuadrillas, jornada, personas, ubicaciones, historial, zonas, locs,
-         reparto] =
+         reparto, configuracion, tipos] =
     await Promise.all([
       leerCuadrillas({ cookies }, verBajas),
       leerJornadaDeCuadrillas({ cookies }, dia),
@@ -82,7 +86,13 @@ export async function load({ url, cookies, locals, fetch }) {
       leerLocalidades(locals, fetch),
       verReparto
         ? proponerReparto({ cookies }, dia)
-        : Promise.resolve({ propuesta: null, error: false, motivo: '' })
+        : Promise.resolve({ propuesta: null, error: false, motivo: '' }),
+      //  Cómo y a qué hora reparte la empresa. Va en el mismo viaje: sale de
+      //  una fila que ya está en la base y no justifica una espera propia.
+      leerConfiguracionDeReparto({ cookies }),
+      //  Qué labor tiene cada tipo de trabajo. Sin esto no se puede clasificar
+      //  nada, y lo que no está clasificado no se reparte.
+      leerTiposDeTrabajo({ cookies })
     ]);
 
   const vehiculos = (ubicaciones.ubicaciones ?? []).filter(
@@ -114,6 +124,13 @@ export async function load({ url, cookies, locals, fetch }) {
       error: historial.error,
       motivo: historial.motivo
     },
+    tipos: tipos.tipos,
+    //  `labores` NO se pasa: la pantalla ya tiene el catálogo y pasarlo
+    //  además lo dejaría como dato muerto. El backend lo sigue devolviendo
+    //  para quien lo necesite.
+    tiposSinClasificar: tipos.sinClasificar,
+    reparto_config: configuracion.configuracion,
+    repartoConfigError: configuracion.error,
     personas: personas.personas,
     //  Las cuentas del equipo que todavia no son persona de campo: se
     //  ofrecen para darlas de alta en un clic, en vez de teclear el nombre
@@ -240,6 +257,57 @@ export const actions = {
       // 409 es «ese barrio ya está en otra zona», y el mensaje dice en cuál.
       // Se pasa tal cual: sin el nombre hay que salir a buscarlo.
       return fail(409, { error: mensajeDe(e) });
+    }
+  },
+
+  /**
+   * Clasifica un tipo de trabajo.
+   *
+   * Define qué cuadrillas pueden tomarlo. Vacío es válido: es «volver a sin
+   * clasificar», y hace falta para deshacer una clasificación equivocada.
+   */
+  tipo_labor: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const id = String(f.get('id') ?? '').trim();
+    if (!id) return fail(400, { error: 'Falta el tipo de trabajo.' });
+    try {
+      const r = await clasificarTipoDeTrabajo(
+        { cookies }, id, String(f.get('labor') ?? '')
+      );
+      return {
+        hecho: r?.labor
+          ? `${r.nombre}: ${r.labor}.`
+          : `${r?.nombre} quedó sin clasificar; sus órdenes no se reparten.`
+      };
+    } catch (e) {
+      return fail(400, { error: mensajeDe(e) });
+    }
+  },
+
+  /**
+   * Cómo y a qué hora reparte la empresa.
+   *
+   * ENCENDERLO ES UNA DECISIÓN DE OPERACIÓN, no algo que deba pasar porque
+   * alguien desplegó una versión — mismo criterio que `RELOJ_HABILITADO` en el
+   * motor. Por eso viene apagado de fábrica y se enciende acá.
+   */
+  reparto_config: async ({ request, cookies }) => {
+    const f = await request.formData();
+    try {
+      const r = await guardarConfiguracionDeReparto({ cookies }, {
+        activo: f.get('activo') === '1',
+        hora_local: String(f.get('hora_local') ?? '3'),
+        tope_por_cuadrilla: String(f.get('tope_por_cuadrilla') ?? '8'),
+        copia_la_jornada: f.get('copia_la_jornada') === '1'
+      });
+      return {
+        hecho: r?.activo
+          ? `El ciclo corre todos los días a las ${r.hora_local}:00, ` +
+            `con hasta ${r.tope_por_cuadrilla} órdenes por cuadrilla.`
+          : 'El ciclo quedó apagado. Las jornadas se arman a mano.'
+      };
+    } catch (e) {
+      return fail(400, { error: mensajeDe(e) });
     }
   },
 

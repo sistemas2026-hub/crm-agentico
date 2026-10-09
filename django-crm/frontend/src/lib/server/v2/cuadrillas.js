@@ -224,6 +224,63 @@ export async function leerLocalidades(locals, fetch) {
 }
 
 /** @param {{ cookies: any }} ctx */
+/**
+ * Cómo y a qué hora reparte esta empresa.
+ *
+ * El tope por cuadrilla vivía fijo en el código (`TOPE_POR_CUADRILLA = 8`) y la
+ * hora habría vivido fija en Celery beat. Las dos varían por empresa —una
+ * operación de cinco cuadrillas no reparte como una de veinte, y un ISP en otro
+ * huso no madruga a la misma hora UTC— así que se editan acá.
+ *
+ * @param {{ cookies: any }} ctx
+ */
+export async function leerConfiguracionDeReparto(ctx) {
+  try {
+    const d = await apiRequest('/campo/cuadrillas/configuracion/', {}, ctx);
+    return { configuracion: d, error: false };
+  } catch {
+    // Forma vacía Y error aparte: «todavía no se configuró» y «no se pudo
+    // leer» se dibujan distinto.
+    return { configuracion: null, error: true };
+  }
+}
+
+/** @param {{ cookies: any }} ctx @param {Record<string, any>} cuerpo */
+export async function guardarConfiguracionDeReparto(ctx, cuerpo) {
+  return apiRequest('/campo/cuadrillas/configuracion/',
+    { method: 'PUT', body: cuerpo }, ctx);
+}
+
+/**
+ * Qué labor tiene cada tipo de trabajo.
+ *
+ * Define qué cuadrillas pueden tomarlo: una puesta en correctivo no recibe
+ * instalaciones. Ningún código ('ftth', 'soporte') dice a cuál pertenece —cada
+ * empresa nombra los suyos— así que se declara, y lo que queda sin clasificar
+ * NO se reparte.
+ *
+ * @param {{ cookies: any }} ctx
+ */
+export async function leerTiposDeTrabajo(ctx) {
+  try {
+    const d = await apiRequest('/campo/tipos-de-trabajo/', {}, ctx);
+    return {
+      tipos: d?.tipos ?? [],
+      labores: d?.labores ?? [],
+      sinClasificar: d?.sin_clasificar ?? 0,
+      error: false
+    };
+  } catch {
+    return { tipos: [], labores: [], sinClasificar: 0, error: true };
+  }
+}
+
+/** @param {{ cookies: any }} ctx @param {string} id @param {string} labor */
+export async function clasificarTipoDeTrabajo(ctx, id, labor) {
+  return apiRequest(`/campo/tipos-de-trabajo/${id}/`,
+    { method: 'PATCH', body: { labor } }, ctx);
+}
+
 export async function leerZonas(ctx) {
   try {
     const d = await apiRequest('/campo/zonas/', {}, ctx);
