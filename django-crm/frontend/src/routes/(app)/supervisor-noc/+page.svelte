@@ -665,11 +665,35 @@
   const alDecidir = () => async (/** @type {any} */ { update }) => {
     revisando = null;
     comentario = '';
+    //  CUAL ERA LA SIGUIENTE, antes de que la lista se recalcule. Despues de
+    //  decidir, la propuesta actual sale de la bandeja de pendientes y los
+    //  indices se corren: preguntarlo despues devolveria otra.
+    const siguiente = pagina[posicion.indice + 1]?.id ?? null;
     try {
       await update({ reset: false });
-      await invalidateAll();
-      // La ficha abierta quedo vieja: su estado acaba de cambiar.
-      if (abierta) await abrirDetalle(abierta);
+
+      //  SE AVANZA PRIMERO Y SE REFRESCA DESPUES  --  09/10/2026
+      //  ------------------------------------------------------
+      //  Reportado: "demora mucho cerrando un caso y no deja adelantar otro".
+      //  Eran DOS esperas encadenadas: el cierre contra WispHub --que es
+      //  inevitable-- y despues recargar el tablero entero y volver a abrir
+      //  LA MISMA ficha, que es justo la que la persona ya termino de mirar.
+      //
+      //  Ahora se salta a la siguiente apenas el cierre volvio, y el tablero
+      //  se refresca por detras SIN ESPERARLO. Lo unico que queda viejo por
+      //  unos segundos son los contadores de arriba; la ficha que se esta
+      //  mirando es la que se acaba de pedir, asi que esta fresca.
+      if (siguiente) {
+        await abrirDetalle(siguiente);
+      } else if (abierta) {
+        //  Era la ultima: se queda, con su estado ya actualizado.
+        await abrirDetalle(abierta);
+      }
+
+      //  SIN 'await' a proposito. Si se espera, se vuelve a pagar la recarga
+      //  completa --cinco consultas, ciento ocho propuestas-- antes de que la
+      //  persona pueda hacer nada.
+      invalidateAll();
     } finally {
       //  SIEMPRE se suelta, aunque algo falle: un boton que queda
       //  deshabilitado para siempre despues de un error de red obliga a
