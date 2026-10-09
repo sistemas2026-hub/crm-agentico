@@ -387,10 +387,19 @@ def test_r_publicar_crea_UNA_asignacion_por_integrante(
     }
 
 
-def test_s_una_orden_YA_ASIGNADA_no_se_pisa_y_se_nombra(
+def test_s_una_orden_ASIGNADA_pero_que_nadie_empezo_SE_REASIGNA(
     admin_client, org_a, version, norte, admin_profile, user_profile
 ):
-    """Entre mirar y publicar alguien pudo asignarla a mano, y esa decision gana."""
+    """CAMBIO DE CRITERIO del 09/10/2026.
+
+    Antes se salteaba toda orden con asignacion. Eso quedo desalineado con el
+    reparto el dia que `proponer()` empezo a devolver las de ayer que nadie
+    visito: el reparto las ofrecia, publicar no hacia nada, y la unica señal
+    era un numero en `ya_tenian` que nadie relacionaba con eso.
+
+    La linea esta donde el reparto la puso: `trabajo_iniciado`. El caso
+    contrario lo cubre la prueba siguiente.
+    """
     j = _con_gente(org_a, _jornada(org_a, "Cuadrilla 1", [norte]), admin_profile)
     o = _orden(org_a, version, 10, "MARTHA GISELA")
     AsignacionTrabajo.objects.create(
@@ -401,9 +410,32 @@ def test_s_una_orden_YA_ASIGNADA_no_se_pisa_y_se_nombra(
         "asignaciones": [{"jornada": str(j.id), "ordenes": [str(o.id)]}],
     }, format="json")
 
+    assert r.json()["publicadas"] == 1
+    assert r.json()["reasignadas"] == [10], "se nombra: alguien puede estar esperandola"
+    assert [a.profile_id for a in o.asignaciones.all()] == [admin_profile.id]
+
+
+def test_s2_pero_la_que_YA_SE_EMPEZO_no_se_pisa(
+    admin_client, org_a, version, norte, admin_profile, user_profile
+):
+    """Quien fue al sitio y hablo con el cliente sabe algo que el reparto no."""
+    from campo.models import EventoTrabajo
+    from campo.reparto import EVENTO_INICIO
+
+    j = _con_gente(org_a, _jornada(org_a, "Cuadrilla 1", [norte]), admin_profile)
+    o = _orden(org_a, version, 10, "MARTHA GISELA")
+    AsignacionTrabajo.objects.create(
+        orden=o, profile=user_profile, rol="tecnico", es_principal=True
+    )
+    EventoTrabajo.objects.create(org=org_a, orden=o, tipo=EVENTO_INICIO)
+
+    r = admin_client.post(REPARTO, {
+        "asignaciones": [{"jornada": str(j.id), "ordenes": [str(o.id)]}],
+    }, format="json")
+
     assert r.json()["publicadas"] == 0
-    assert r.json()["ya_tenian"] == [10], "se nombra: si no, la cuenta no cuadra"
-    assert o.asignaciones.count() == 1, "la de antes queda intacta"
+    assert r.json()["ya_tenian"] == [10]
+    assert [a.profile_id for a in o.asignaciones.all()] == [user_profile.id]
 
 
 def test_t_una_cuadrilla_sin_gente_no_recibe_trabajo(

@@ -5,6 +5,12 @@ import {
   leerCasosDespachables,
   despacharACampo
 } from '$lib/server/v2/despacho.js';
+import { correrCiclo } from '$lib/server/v2/supervisor-noc.js';
+
+/** El mismo conjunto que `campo/permissions.py::ROLES_GESTION` y que la
+ *  pantalla de Pendientes. Inventar uno propio acá los separaría en silencio
+ *  el día que alguno cambie. */
+const ROLES_GESTION = new Set(['ADMIN', 'SUPERVISOR', 'OPERACIONES']);
 
 /**
  * CUÁNTOS TÉCNICOS VAN A CADA COSA  --  13/10/2026
@@ -114,6 +120,37 @@ function mensajeDe(e) {
 /** @type {import('./$types').Actions} */
 export const actions = {
   /**
+   * Hace que el Supervisor mire AHORA.
+   *
+   * El ciclo corre solo una vez por hora, pero SOLO si la empresa le delegó
+   * «Revisar solo, una vez por hora». Sin esa delegación el Supervisor espera
+   * a que alguien lo despierte — y sin propuestas aceptadas, esta pantalla
+   * queda vacía sin que nada explique por qué.
+   *
+   * Esto lo despierta. No ejecuta nada: `correr_ciclo` solo escribe filas de
+   * `PropuestaSupervisor`, que una persona después acepta o rechaza.
+   */
+  ciclo: async ({ cookies, locals }) => {
+    if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
+      return fail(403, {
+        error: 'Solo el Jefe de Operaciones puede hacer que el Supervisor mire.'
+      });
+    }
+    try {
+      const r = await correrCiclo({ cookies });
+      const nuevas = r?.resumen?.propuestas_nuevas ?? r?.resumen?.nuevas ?? null;
+      return {
+        hecho: nuevas === null
+          ? 'El Supervisor revisó la operación. Mirá Pendientes por revisión.'
+          : `El Supervisor dejó ${nuevas} ${nuevas === 1 ? 'propuesta' : 'propuestas'}. ` +
+            'Las que aceptes aparecen acá.'
+      };
+    } catch (e) {
+      return fail(502, { error: mensajeDe(e) });
+    }
+  },
+
+  /**
    * Manda el caso a campo.
    *
    * La plantilla la elige quien despacha: la sugerencia viene marcada pero no
@@ -142,6 +179,10 @@ export const actions = {
         cliente_telefono: String(f.get('cliente_telefono') ?? '').trim(),
         cliente_direccion: String(f.get('cliente_direccion') ?? '').trim(),
         cliente_detalle_acceso: String(f.get('detalle_acceso') ?? '').trim(),
+        //  DE DÓNDE ES EL TRABAJO. Sin esto la orden nace sin zona y el
+        //  reparto la deja en `sin_zona` para siempre: nunca llega a una
+        //  cuadrilla, y el síntoma —«no se asignó»— no señala acá.
+        zona: String(f.get('zona') ?? '').trim() || undefined,
         prioridad: String(f.get('prioridad') ?? '').trim() || undefined,
         resumen: String(f.get('resumen') ?? '').trim() || undefined,
         programada_para: programada || undefined

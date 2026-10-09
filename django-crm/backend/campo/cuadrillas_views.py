@@ -975,9 +975,11 @@ class RepartoView(APIView):
             return Response({"detail": "No hay nada que publicar."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        from campo.models import AsignacionTrabajo, OrdenTrabajo
+        from campo.models import (AsignacionTrabajo, EventoTrabajo,
+                                  OrdenTrabajo)
+        from campo.reparto import EVENTO_INICIO
 
-        publicadas, ya_tenian, sin_cuenta = 0, [], []
+        publicadas, ya_tenian, sin_cuenta, reasignadas = 0, [], [], []
         #  Se acumula FUERA del ciclo: una variable por cuadrilla solo
         #  guardaria la ultima, y con dos cuadrillas el numero mentiria.
         auxiliares = 0
@@ -1016,12 +1018,42 @@ class RepartoView(APIView):
                     orden = OrdenTrabajo.objects.filter(org=org, id=oid).first()
                     if orden is None:
                         continue
-                    # NO SE PISA UNA ASIGNACION QUE YA EXISTE. Entre mirar y
-                    # publicar alguien pudo asignarla a mano, y esa decision
-                    # gana: la tomo una persona mirando el caso.
-                    if orden.asignaciones.exists():
+                    #  LO QUE YA SE EMPEZO NO SE PISA; LO QUE NADIE TOCO, SI.
+                    #
+                    #  Hasta el 09/10/2026 se salteaba TODA orden con
+                    #  asignacion, y eso quedo desalineado con el reparto el
+                    #  dia que `proponer()` empezo a devolver las de ayer que
+                    #  nadie visito: el reparto las ofrecia, publicar no hacia
+                    #  nada, y la unica señal era un numero en `ya_tenian` que
+                    #  nadie relacionaba con eso. El reparto prometia algo que
+                    #  esta mitad no cumplia.
+                    #
+                    #  La linea esta donde el reparto la puso: `trabajo_iniciado`
+                    #  en la bitacora. Quien fue al sitio y hablo con el cliente
+                    #  sabe algo que el reparto no; quien no fue, no.
+                    empezada = EventoTrabajo.objects.filter(
+                        org=org, orden=orden, tipo=EVENTO_INICIO
+                    ).exists()
+                    if empezada:
                         ya_tenian.append(orden.numero)
                         continue
+
+                    viejas = list(orden.asignaciones.all())
+                    if viejas:
+                        #  Se REEMPLAZA, y queda escrito quien la tenia. Borrar
+                        #  sin registro seria perder el unico dato que explica
+                        #  por que un trabajo cambio de manos.
+                        EventoTrabajo.objects.create(
+                            org=org, orden=orden, tipo="reasignada_por_reparto",
+                            datos={
+                                "de": [str(a.profile_id) for a in viejas],
+                                "a_cuadrilla": jornada.cuadrilla.nombre,
+                                "motivo": ("nadie la habia empezado y el "
+                                           "reparto del dia la movio"),
+                            },
+                        )
+                        orden.asignaciones.all().delete()
+                        reasignadas.append(orden.numero)
                     for i in con_cuenta:
                         AsignacionTrabajo.objects.create(
                             orden=orden,
@@ -1044,6 +1076,10 @@ class RepartoView(APIView):
             # asignacion: es lo esperado, no un error, pero se dice para que
             # nadie lo lea como gente perdida.
             "auxiliares_sin_asignacion": auxiliares,
+            #  Las que cambiaron de cuadrilla: nadie las habia empezado, asi
+            #  que el reparto del dia las movio. Se nombran porque alguien
+            #  puede estar esperandolas donde estaban.
+            "reasignadas": reasignadas,
         })
 
 

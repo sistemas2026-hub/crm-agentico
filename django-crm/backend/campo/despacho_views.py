@@ -135,10 +135,20 @@ class CrearOrdenView(APIView):
                                                OrdenTrabajo.CANCELADA])
                 .values_list("numero", flat=True))
 
+        #  LO QUE EL PROVEEDOR YA SABE DEL CLIENTE, cuando quien despacha no lo
+        #  escribio. Hasta el 09/10/2026 solo el NOMBRE caia al contexto: el
+        #  telefono y la direccion quedaban vacios aunque la ficha los
+        #  trajera, y el tecnico recibia la orden sin con que llamar ni a donde
+        #  ir. Nadie lo veia porque la orden se creaba igual, sin error.
+        _ficha = (contexto.get("cliente") or {}) if isinstance(contexto, dict) else {}
+
         cliente = {
-            "nombre": d.get("cliente_nombre") or (contexto.get("cliente") or {}).get("nombre") or "",
-            "telefono": d.get("cliente_telefono") or "",
-            "direccion": d.get("cliente_direccion") or "",
+            "nombre": d.get("cliente_nombre") or _ficha.get("nombre") or "",
+            #  El telefono del proveedor puede traer varios separados por coma
+            #  --ver la skill de WispHub-- y se pasa tal cual: recortarlo aca
+            #  elegiria por el tecnico cual llamar.
+            "telefono": d.get("cliente_telefono") or _ficha.get("telefono") or "",
+            "direccion": d.get("cliente_direccion") or _ficha.get("direccion") or "",
             # Como se entra al inmueble: con la direccion sola el tecnico llega
             # al edificio y no al apartamento.
             "detalle_acceso": d.get("cliente_detalle_acceso") or "",

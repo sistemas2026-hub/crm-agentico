@@ -213,6 +213,12 @@ class CasosDespachablesView(APIView):
                 #  segunda orden del mismo caso.
                 "orden_activa": _orden_activa_de(org, caso.id),
                 "sugerencia": None,
+                #  DE DONDE ES EL TRABAJO. Sin esto la orden nace sin zona, y
+                #  el reparto la deja en `sin_zona` para siempre: nunca llega
+                #  a una cuadrilla, y el sintoma --«no se asigno»-- no señala
+                #  aca. Solo se sabe con la ficha; sin ella viaja vacia y la
+                #  carga quien despacha.
+                "localidad": "",
             }
 
             #  LA FICHA SE PIDE, NO VIENE SIEMPRE. Es una llamada al motor por
@@ -220,6 +226,7 @@ class CasosDespachablesView(APIView):
             #  lista no puede costar veinticinco viajes de red. Quien quiere la
             #  sugerencia la pide para el caso que esta mirando.
             if con_ficha:
+                fila["localidad"] = self._localidad_de(caso)
                 #  El try tambien ACA, no solo dentro de `_sugerencia_de`.
                 #  Una excepcion que escape de ahi --un import roto, un
                 #  cambio de firma-- tiraria la lista entera, y quien mira se
@@ -232,6 +239,23 @@ class CasosDespachablesView(APIView):
 
         return Response({"casos": casos, "tope": self.TOPE,
                          "sin_aprobados": False})
+
+    def _localidad_de(self, caso) -> str:
+        """El barrio del cliente, que es lo que el reparto mapea a una zona.
+
+        Sale del contexto que el motor ya trajo. Se lee aparte de la
+        sugerencia porque son dos preguntas distintas: una puede fallar sin la
+        otra, y la orden sin localidad no se reparte aunque el diagnostico
+        haya salido perfecto.
+        """
+        from campo.services.despacho import contexto_del_caso
+
+        try:
+            contexto = contexto_del_caso(str(caso.id))
+            cliente = (contexto or {}).get("cliente") or {}
+            return str(cliente.get("localidad") or "").strip()
+        except Exception:                                    # noqa: BLE001
+            return ""
 
     def _sugerencia_de(self, caso) -> dict | None:
         """Que dice la evidencia de este caso. Nunca rompe la lista."""

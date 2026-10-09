@@ -184,11 +184,23 @@
               revisión</a>. Nada sale a campo sin pasar por ahí.
             </p>
           </div>
-          {#if !data.conFicha}
-            <!-- La ficha cuesta una llamada al motor POR CASO, que a su vez
-                 habla con WispHub y SmartOLT. Se pide, no viene sola. -->
-            <a class="snoc-btn" href="?ficha=1">Traer el diagnóstico de cada uno</a>
-          {/if}
+          <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+            {#if !data.conFicha && (data.casos ?? []).length}
+              <!-- La ficha cuesta una llamada al motor POR CASO, que a su vez
+                   habla con WispHub y SmartOLT. Se pide, no viene sola. -->
+              <a class="snoc-btn" href="?ficha=1">Traer el diagnóstico de cada uno</a>
+            {/if}
+            <!-- EL SUPERVISOR MIRA UNA VEZ POR HORA, pero solo si la empresa le
+                 delegó «Revisar solo». Sin esa delegación espera a que alguien
+                 lo despierte, y esta pantalla queda vacía sin que nada lo
+                 explique. Esto lo despierta: no ejecuta nada, solo deja
+                 propuestas para que una persona las lea. -->
+            <form method="POST" action="?/ciclo" use:enhance>
+              <button class="snoc-btn" type="submit">
+                Buscar casos que necesiten visita
+              </button>
+            </form>
+          </div>
         </div>
 
         {#if (data.casos ?? []).length === 0}
@@ -201,6 +213,10 @@
               mismo puerto— y aparecen en
               <a href="/supervisor-noc">Pendientes por revisión</a>. Lo que aceptes ahí
               llega acá.
+            </p>
+            <p class="snoc-body-sm snoc-secundario">
+              Con <strong>Buscar casos que necesiten visita</strong> lo hacés mirar ahora,
+              sin esperar a su ronda de cada hora.
             </p>
           {:else}
             <p class="snoc-body-sm snoc-secundario">
@@ -308,6 +324,17 @@
               <input class="snoc-campo" type="date" name="programada_para" />
             </label>
           </div>
+
+          <!-- LA LOCALIDAD DECIDE QUÉ CUADRILLA LO RECIBE: el reparto mapea
+               el barrio a una zona operativa, y una orden sin barrio queda
+               en `sin_zona` para siempre. Viene cargada si se trajo el
+               diagnóstico; si no, la pone quien despacha. -->
+          <label class="snoc-campo-grupo">
+            <span class="snoc-label">Barrio o localidad</span>
+            <input class="snoc-campo" name="zona" required
+                   value={despachando.localidad ?? ''}
+                   placeholder="El que figura en el proveedor" />
+          </label>
 
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Cómo se entra al inmueble</span>

@@ -42,6 +42,8 @@ from campo.zonas import AliasDeZona, ZonaOperativa
 
 pytestmark = pytest.mark.django_db
 
+REPARTO = "/api/campo/cuadrillas/reparto/"
+
 LUNES = dt.date(2026, 10, 5)
 MARTES = dt.date(2026, 10, 6)
 
@@ -644,3 +646,80 @@ def test_z3_el_aviso_nombra_los_TIPOS_sin_clasificar(org_a, cuadrilla, norte):
 
     assert r["reparto"]["tipos_sin_clasificar"] == ["retiro"]
     assert sorted(r["reparto"]["sin_clasificar"]) == [1, 2]
+
+
+def test_z4_publicar_REEMPLAZA_la_asignacion_de_una_orden_que_nadie_empezo(
+    admin_client, org_a, cuadrilla, norte, version, admin_profile, user_profile
+):
+    """Las dos mitades del mismo criterio tienen que decir lo mismo.
+
+    El reparto devuelve al ruedo las ordenes de ayer que nadie visito. Hasta
+    el 09/10/2026 publicar las salteaba igual --`ya_tenian`-- asi que el
+    reparto prometia algo que esta mitad no cumplia, y la unica señal era un
+    numero que nadie relacionaba con eso.
+    """
+    from campo.models import AsignacionTrabajo, EventoTrabajo
+
+    _jornada(org_a, cuadrilla, MARTES, zonas=[norte])
+    orden = _orden(org_a, version, 1)
+    #  Ayer la tenia otra persona, y nadie fue.
+    AsignacionTrabajo.objects.create(
+        orden=orden, profile=user_profile, rol="tecnico", es_principal=True
+    )
+    jornada = JornadaDeCuadrilla.objects.get(cuadrilla=cuadrilla, fecha=MARTES)
+    IntegranteDeJornada.objects.create(
+        org=org_a, jornada=jornada,
+        persona=PersonaDeCampo.objects.create(
+            org=org_a, nombre="La Lider", profile=admin_profile),
+        rol="tecnico_lider",
+    )
+
+    r = admin_client.post(REPARTO, {"asignaciones": [
+        {"jornada": str(jornada.id), "ordenes": [str(orden.id)]},
+    ]}, format="json")
+
+    assert r.status_code == 200, r.content
+    assert r.json()["publicadas"] == 1
+    assert r.json()["reasignadas"] == [1]
+    #  Quedo con la cuadrilla nueva, no con la de ayer.
+    assert [a.profile_id for a in AsignacionTrabajo.objects.filter(orden=orden)] \
+        == [admin_profile.id]
+    #  Y QUEDO ESCRITO quien la tenia: borrar sin registro perderia el unico
+    #  dato que explica por que un trabajo cambio de manos.
+    evento = EventoTrabajo.objects.get(orden=orden,
+                                       tipo="reasignada_por_reparto")
+    assert str(user_profile.id) in evento.datos["de"]
+    assert evento.datos["a_cuadrilla"] == "Cuadrilla 1"
+
+
+def test_z5_pero_la_que_YA_SE_EMPEZO_no_se_pisa(
+    admin_client, org_a, cuadrilla, norte, version, admin_profile, user_profile
+):
+    """Quien fue al sitio y habló con el cliente sabe algo que el reparto no."""
+    from campo.models import AsignacionTrabajo, EventoTrabajo
+    from campo.reparto import EVENTO_INICIO
+
+    _jornada(org_a, cuadrilla, MARTES, zonas=[norte])
+    orden = _orden(org_a, version, 1)
+    AsignacionTrabajo.objects.create(
+        orden=orden, profile=user_profile, rol="tecnico", es_principal=True
+    )
+    EventoTrabajo.objects.create(org=org_a, orden=orden, tipo=EVENTO_INICIO)
+
+    jornada = JornadaDeCuadrilla.objects.get(cuadrilla=cuadrilla, fecha=MARTES)
+    IntegranteDeJornada.objects.create(
+        org=org_a, jornada=jornada,
+        persona=PersonaDeCampo.objects.create(
+            org=org_a, nombre="La Lider", profile=admin_profile),
+        rol="tecnico_lider",
+    )
+
+    r = admin_client.post(REPARTO, {"asignaciones": [
+        {"jornada": str(jornada.id), "ordenes": [str(orden.id)]},
+    ]}, format="json")
+
+    assert r.json()["ya_tenian"] == [1]
+    assert r.json()["reasignadas"] == []
+    #  Sigue con quien la empezo.
+    assert [a.profile_id for a in AsignacionTrabajo.objects.filter(orden=orden)] \
+        == [user_profile.id]
