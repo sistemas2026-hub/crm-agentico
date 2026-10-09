@@ -656,6 +656,7 @@
           <a class="snoc-pildora" href="/supervisor-noc">Pendientes por revisión</a>
           <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc/programacion">Programación</a>
           <a class="snoc-pildora" href="/supervisor-noc/cuadrillas">Cuadrillas</a>
+          <a class="snoc-pildora" href="/supervisor-noc/despacho">Despacho</a>
         </div>
       </section>
 

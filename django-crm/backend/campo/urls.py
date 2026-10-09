@@ -7,6 +7,7 @@ from campo import (
     avisos_views,
     cuadrillas_views,
     despacho_views,
+    despacho_pantalla_views,
     inventario_operacion_views,
     inventario_views,
     materiales_views,
@@ -93,6 +94,11 @@ urlpatterns = [
     path("inventario/valorizacion/", inventario_operacion_views.ValorizacionView.as_view(), name="inv_valorizacion"),
     path("inventario/reportes/", inventario_operacion_views.ReportesView.as_view(), name="inv_reportes"),
     # Despacho: lo que hace la oficina, no el tecnico.
+    #  Lo que la pantalla de despacho necesita para existir. `trabajos/crear/`
+    #  existia y NADIE lo llamaba: sin estas dos lecturas no hay por donde
+    #  decir "este caso va a campo".
+    path("plantillas-de-trabajo/", despacho_pantalla_views.PlantillasDeTrabajoView.as_view(), name="plantillas_de_trabajo"),
+    path("casos-despachables/", despacho_pantalla_views.CasosDespachablesView.as_view(), name="casos_despachables"),
     path("trabajos/crear/", despacho_views.CrearOrdenView.as_view(), name="trabajo_crear"),
     path("trabajos/<uid:pk>/asignar/", despacho_views.AsignarTrabajoView.as_view(), name="trabajo_asignar"),
     path("trabajos/<uid:pk>/validar/", despacho_views.ValidarTrabajoView.as_view(), name="trabajo_validar"),
