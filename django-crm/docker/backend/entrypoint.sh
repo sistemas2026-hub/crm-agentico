@@ -84,9 +84,43 @@ python manage.py collectstatic --noinput
 # que no hace falta un servidor aparte para ellos.
 if [ "$ENV_TYPE" = "prod" ]; then
     echo "Starting gunicorn..."
+    # HILOS, Y NO ES AFINACION: ES UN RIESGO DE BLOQUEO  --  09/10/2026
+    # -----------------------------------------------------------------
+    # Cerrar un caso desde el Supervisor VUELVE A ENTRAR a este mismo
+    # servidor. La cadena medida es:
+    #
+    #   navegador -> backend            (worker 1 ocupado)
+    #                  -> motor
+    #                       -> backend  PATCH /api/cases/<id>/   (worker 2)
+    #
+    # La herramienta 'cerrar_caso_crm' del tenant apunta a
+    # 'http://backend:8000/api/cases/{id_caso}/', asi que el motor le pega
+    # de vuelta a Django. UN solo cierre ocupa DOS workers, y el primero
+    # esta bloqueado esperando al segundo.
+    #
+    # Con tres workers sincronos --un worker, una peticion a la vez-- dos
+    # cierres simultaneos necesitan cuatro y hay tres: se traban entre
+    # ellos hasta que vence el timeout de 60 s que el CRM le da al motor.
+    # El sintoma reportado fue exactamente ese: 'le doy click en aceptar y
+    # se queda; ya despues de una espera espabila la pantalla'.
+    #
+    # Con '--threads', gunicorn usa el worker 'gthread': un worker que
+    # espera una respuesta de red suelta el hilo y atiende otra peticion.
+    # La llamada re-entrante deja de competir por un proceso entero.
+    #
+    # POR QUE ES SEGURO CON DJANGO: 'django.db.connection' es local al
+    # hilo, asi que cada uno abre la suya y fija su propio
+    # 'app.current_org'. El aislamiento por empresa no se comparte entre
+    # hilos -- que era lo unico que habia que comprobar antes de tocar
+    # esto.
+    #
+    # NO REEMPLAZA LA CORRECCION DE FONDO, que es que el cierre no tenga
+    # que salir al motor para volver a entrar aqui. Esto quita el bloqueo;
+    # el rodeo sigue.
     exec gunicorn crm.wsgi:application \
         --bind 0.0.0.0:8000 \
         --workers "${GUNICORN_WORKERS:-3}" \
+        --threads "${GUNICORN_THREADS:-4}" \
         --timeout "${GUNICORN_TIMEOUT:-120}" \
         --access-logfile - \
         --error-logfile -
