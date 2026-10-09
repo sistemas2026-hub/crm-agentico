@@ -254,12 +254,50 @@
   //  sin montar el componente.
   // ---------------------------------------------------------------------
   const leidas = $derived(data.hallazgos?.error ? null : (data.hallazgos?.resultados ?? null));
-  const kpis = $derived(kpisDelTablero(data.indicadores, leidas));
+  /**
+   * LO QUE TODAVIA NO LLEGO  --  09/10/2026
+   *
+   * Tres de las cinco consultas de la carga viajan como PROMESA: los
+   * indicadores, la autonomia y la capacidad. La pantalla se pinta con la
+   * bandeja --que es a lo que la persona viene-- y estas entran despues.
+   *
+   * MEDIDO: '/supervisor-noc/__data.json' tardaba 22 segundos en dos
+   * grabaciones distintas, mientras TODAS las demas peticiones de la misma
+   * sesion estaban por debajo de 600 ms. Las cuatro consultas rapidas
+   * esperaban a la lenta.
+   *
+   * Arrancan en 'null', que es lo que las funciones de abajo ya trataban como
+   * "sin dato" -- por eso el cambio no toca ningun bloque de la pantalla.
+   */
+  let indicadoresVivos = $state(/** @type {any} */ (null));
+  let autonomiaViva = $state(/** @type {any} */ (null));
+  let capacidadViva = $state(/** @type {any} */ (null));
+
+  $effect(() => {
+    //  Se vuelven a enganchar cuando la carga del servidor corre de nuevo.
+    //  'vigente' evita que una respuesta vieja pise una nueva si la persona
+    //  recarga antes de que la anterior termine.
+    let vigente = true;
+    indicadoresVivos = null;
+    autonomiaViva = null;
+    capacidadViva = null;
+    Promise.resolve(data.indicadores).then((v) => { if (vigente) indicadoresVivos = v; });
+    Promise.resolve(data.autonomia).then((v) => { if (vigente) autonomiaViva = v; });
+    Promise.resolve(data.capacidad).then((v) => { if (vigente) capacidadViva = v; });
+    return () => { vigente = false; };
+  });
+
+  //  'esperando' distingue "todavia no llego" de "llego vacio". Sin eso, los
+  //  bloques dirian "Sin dato" durante la espera, que es una afirmacion
+  //  distinta y falsa.
+  const esperandoIndicadores = $derived(indicadoresVivos === null);
+
+  const kpis = $derived(kpisDelTablero(indicadoresVivos?.datos, leidas));
   const donut = $derived(hallazgosPorTipo(leidas));
-  const barras = $derived(estadoDeCasos(data.indicadores));
-  const ordenes = $derived(ordenesDeTrabajo(data.indicadores));
-  const tecnicos = $derived(cargaPorTecnico(data.capacidad?.personas));
-  const origen = $derived(ticketsPorOrigen(data.indicadores));
+  const barras = $derived(estadoDeCasos(indicadoresVivos?.datos));
+  const ordenes = $derived(ordenesDeTrabajo(indicadoresVivos?.datos));
+  const tecnicos = $derived(cargaPorTecnico(capacidadViva?.personas));
+  const origen = $derived(ticketsPorOrigen(indicadoresVivos?.datos));
   /**
    * LA ACTIVIDAD, EN VIVO  --  08/10/2026
    *
@@ -832,13 +870,22 @@
                 onclick={abrirAlcance}
               >
                 Autonomía:
-                {#if data.autonomia.estado == null}
+                <!--
+                  TRES ESTADOS, NO DOS. 'autonomiaViva === null' es "todavia
+                  no llego" y es distinto de "llego y no se pudo leer":
+                  mostrarlos igual le diria a una persona que el motor fallo
+                  cuando lo unico que pasa es que la respuesta viene en
+                  camino.
+                -->
+                {#if autonomiaViva === null}
+                  <span class="snoc-tenue">leyendo…</span>
+                {:else if autonomiaViva.estado == null}
                   <span class="snoc-tenue">no se pudo leer</span>
                 {:else}
                   <span
-                    class="snoc-punto {data.autonomia.permitido ? 'snoc-punto-secundario' : 'snoc-punto-error'}"
+                    class="snoc-punto {autonomiaViva.permitido ? 'snoc-punto-secundario' : 'snoc-punto-error'}"
                   ></span>
-                  {data.autonomia.estado}
+                  {autonomiaViva.estado}
                 {/if}
                 <span class="snoc-icono" style="font-size:14px;">tune</span>
               </button>
@@ -854,10 +901,10 @@
 
 
         <!-- ============ LOS SEIS KPI ============ -->
-        {#if data.errorIndicadores}
+        {#if indicadoresVivos?.error}
           <div class="snoc-aviso">
             <span class="snoc-icono snoc-error-txt" style="font-size:20px;">error</span>
-            <p class="snoc-body" style="margin:0;">{data.errorIndicadores.mensaje}</p>
+            <p class="snoc-body" style="margin:0;">{indicadoresVivos.error.mensaje}</p>
           </div>
         {/if}
 
@@ -1451,10 +1498,10 @@
               </h2>
               <a class="snoc-pildora" href="/supervisor-noc/programacion">Ver todos</a>
             </div>
-            {#if data.capacidad.error}
+            {#if capacidadViva?.error}
               <div class="snoc-hueco">
                 <span class="snoc-hueco-rotulo">Sin dato</span>
-                <p class="snoc-hueco-motivo">{data.capacidad.error.mensaje}</p>
+                <p class="snoc-hueco-motivo">{capacidadViva.error.mensaje}</p>
               </div>
             {:else if !tecnicos.disponible}
               <div class="snoc-hueco">

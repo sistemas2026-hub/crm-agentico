@@ -326,6 +326,42 @@ def indicadores_programacion(org, ahora=None, dias=None) -> dict:
 #  B.5  --  SUPERVISOR IA  (M09)
 # ==============================================================================
 
+#:  Cuanto puede tener de viejo el conteo de señales vigentes. Cinco minutos
+#:  contra un detector que el ciclo corre cada SESENTA: el numero sigue siendo
+#:  mas fresco que la fuente que lo alimenta.
+SEGUNDOS_DE_VENTANA_DE_DETECCION = 300
+
+
+def _senales_con_ventana(org, ahora):
+    """
+    Las señales vigentes, recalculadas como mucho cada cinco minutos.
+
+    SE DEVUELVE LA LISTA y no los conteos, para que quien llama siga
+    agrupandola como quiera -- cambiar la forma aqui obligaria a tocar el
+    llamador y a que las dos versiones coincidan.
+
+    SI LA CACHE FALLA, SE CALCULA. Un indicador que desaparece porque el
+    almacen de cache no esta disponible seria peor que uno lento: el tablero
+    diria "cero hallazgos", que es una afirmacion, no un hueco.
+    """
+    from django.core.cache import cache
+
+    clave = f"senales_vigentes:{org.id}"
+    try:
+        guardadas = cache.get(clave)
+        if guardadas is not None:
+            return guardadas
+    except Exception:                                        # noqa: BLE001
+        return m09.detectar(org, ahora)
+
+    senales = m09.detectar(org, ahora)
+    try:
+        cache.set(clave, senales, SEGUNDOS_DE_VENTANA_DE_DETECCION)
+    except Exception:                                        # noqa: BLE001
+        pass
+    return senales
+
+
 def indicadores_supervisor(org, desde=None, hasta=None, ahora=None) -> dict:
     """
     Lo que el Supervisor detecto y propuso. Es LECTURA: no corre el ciclo ni
@@ -342,8 +378,33 @@ def indicadores_supervisor(org, desde=None, hasta=None, ahora=None) -> dict:
     por_senal = dict(en_ventana.values_list("tipo_senal").annotate(n=Count("id"))
                      .values_list("tipo_senal", "n"))
 
-    #  Las senales VIGENTES se detectan sin escribir nada.
-    senales = m09.detectar(org, ahora)
+    #  LAS SEÑALES VIGENTES, CON UNA VENTANA  --  09/10/2026
+    #  ------------------------------------------------------
+    #  'detectar' recorre casos, actividades, ordenes y SLA: es la MISMA
+    #  pasada que hace el ciclo del Supervisor, y hasta hoy se ejecutaba
+    #  ENTERA en cada carga del tablero.
+    #
+    #  MEDIDO en tres grabaciones distintas: '/supervisor-noc/__data.json'
+    #  tardo 22.214 ms, 22.044 ms y 50.252 ms. En las mismas sesiones TODAS
+    #  las demas peticiones estaban por debajo de 600 ms --incluida
+    #  '/conversaciones', que devuelve 573 KB-- asi que no era la red, ni el
+    #  tamaño, ni la base en general: era esta linea. Y el numero EMPEORA solo,
+    #  porque crece con los casos y las propuestas acumuladas.
+    #
+    #  Un indicador no justifica rehacer la deteccion completa cada vez que
+    #  alguien abre una pantalla. El ciclo ya la corre cada hora; aqui alcanza
+    #  con que el numero sea reciente, no instantaneo.
+    #
+    #  POR QUE UNA VENTANA Y NO QUITARLO: 'senales_vigentes' no es lo mismo que
+    #  las propuestas guardadas --puede haber una señal detectada que todavia
+    #  no produjo propuesta-- y ese hueco es justo lo que el recuadro sirve
+    #  para ver. Lo que se cambia es cada cuanto se calcula, no que se muestra.
+    #
+    #  LA CACHE ES POR PROCESO (Django sin CACHES configurado usa la de
+    #  memoria). Con tres workers son como mucho tres detecciones por ventana
+    #  en vez de una por carga. No es compartida y no hace falta que lo sea:
+    #  lo que se evita es el recalculo por cada click, no el primero.
+    senales = _senales_con_ventana(org, ahora)
     vivas = {}
     for s in senales:
         vivas[s.tipo] = vivas.get(s.tipo, 0) + 1

@@ -76,22 +76,62 @@ export async function load({ cookies, locals, url, fetch }) {
   // bloque de tecnicos necesita quien trabaja hoy y cuanto tiene encima.
   const hoy = new Date().toISOString().slice(0, 10);
 
-  const [indicadores, todas, autonomia, capacidad, actividad] = await Promise.all([
-    leerIndicadores({ cookies }, dias ?? undefined),
+  //  LA PANTALLA NO ESPERA A LA CONSULTA MAS LENTA  --  09/10/2026
+  //  --------------------------------------------------------------
+  //  MEDIDO en dos grabaciones distintas: '/supervisor-noc/__data.json'
+  //  tardaba 22.044 ms y 22.214 ms. En las mismas sesiones, TODAS las demas
+  //  peticiones --incluido '/centro-mando', que devuelve 70 KB-- estaban por
+  //  debajo de 600 ms. O sea que no era la red, ni el frontend, ni la base en
+  //  general: era UNA de las cinco consultas de aqui, y las otras cuatro
+  //  esperaban por ella.
+  //
+  //  Esperarlas a las cinco significa que la pantalla tarda lo que tarde la
+  //  peor. Y la peor candidata es 'leerAutonomia', que le pregunta AL MOTOR y
+  //  no tiene tiempo limite: si el motor esta ocupado --el ciclo diagnostica
+  //  hasta quince equipos de ~10 s cada uno-- esta espera no termina.
+  //
+  //  Ahora se espera SOLO lo que hace falta para que la pantalla sirva:
+  //
+  //    propuestas   la bandeja. Es a lo que la persona viene.
+  //    actividad    medida en 208 ms, y es barata.
+  //
+  //  Lo demas --los ocho bloques de indicadores, la autonomia y la
+  //  capacidad-- viaja como PROMESA. SvelteKit la transmite cuando resuelve,
+  //  y la pantalla ya se pinto. Los bloques que las usan muestran mientras
+  //  tanto su estado de carga, que ya existia para cuando un dato no llega.
+  //
+  //  NO SE PIERDE NINGUN DATO: llegan todos, solo que despues. Y si uno falla,
+  //  falla solo: hoy un fallo de la autonomia se llevaba la pantalla entera.
+  const [todas, actividad] = await Promise.all([
     listarPropuestas({ cookies }),
-    leerAutonomia(locals, fetch),
-    leerCapacidad({ cookies }, hoy),
     leerActividad({ cookies })
   ]);
+
+  //  SIN 'await'. Cada una lleva su propio '.catch' porque una promesa
+  //  rechazada que nadie atrapa tumba la respuesta entera -- y el contrato de
+  //  estas tres funciones es devolver su error adentro, no levantarlo.
+  const indicadores = leerIndicadores({ cookies }, dias ?? undefined)
+    .catch((e) => ({ datos: null, error: { mensaje: String(e?.message ?? e) } }));
+  const autonomia = leerAutonomia(locals, fetch)
+    .catch((e) => ({ estado: null, permitido: null, historial: [],
+                     motivo: `No se pudo consultar el motor: ${e?.message ?? e}` }));
+  const capacidad = leerCapacidad({ cookies }, hoy)
+    .catch((e) => ({ personas: [], error: { mensaje: String(e?.message ?? e) } }));
 
   return {
     puedeVer: true,
     rol,
     org: locals.org?.name ?? null,
     usuario: locals.user?.email ?? null,
-    indicadores: indicadores.datos,
-    errorIndicadores: indicadores.error,
-    resumen: resumenOperativo(indicadores.datos),
+    //  LAS TRES LENTAS VIAJAN COMO PROMESA, y la pagina las espera adentro.
+    //  'indicadores' se resuelve a la forma que la pantalla ya esperaba
+    //  --{datos, error, resumen}-- para que el componente no tenga que saber
+    //  que antes venia resuelta.
+    indicadores: indicadores.then((i) => ({
+      datos: i?.datos ?? null,
+      error: i?.error ?? null,
+      resumen: resumenOperativo(i?.datos)
+    })),
     hallazgos: todas,
     autonomia,
     dia: hoy,
