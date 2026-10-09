@@ -235,7 +235,19 @@ def test_el_veredicto_queda_en_la_evidencia_Y_en_los_datos():
     #  En la evidencia, para la persona que decide, con la forma de las otras.
     assert len(senal.evidencia) == 1
     obs = senal.evidencia[0]
-    assert set(obs) == {"fuente", "id", "dato", "observado_en"}
+    #  CINCO CLAVES, NO CUATRO, desde el 09/10/2026, y el conjunto sigue
+    #  siendo EXACTO a proposito: una sexta vuelve a romper esta prueba, que
+    #  es lo que se le pide -- lo que se guarda en una propuesta tiene que
+    #  pasar por aca.
+    #
+    #  'veredicto' se agrego porque sin el la unica forma de saber si un
+    #  diagnostico fue concluyente era leer su frase, y eso congelo noventa y
+    #  cinco casos: diagnosticados con un instrumento viejo, dados por
+    #  atendidos, sin reintento posible. Es un dato de TRES valores fijos --
+    #  ningun texto libre, ningun dato de cliente-- y el frontend lee claves
+    #  nombradas, asi que no aparece en pantalla.
+    assert set(obs) == {"fuente", "id", "dato", "observado_en", "veredicto"}
+    assert obs["veredicto"] == dx.CIERRE_SEGURO
     assert "-20.55" in obs["dato"]
 
 
@@ -1224,3 +1236,100 @@ def test_con_onu_registrada_el_ping_no_se_usa():
     assert v == REVISAR_PERSONA, (
         "un equipo con señal debil se cerro porque el ping respondio: el "
         "respaldo esta pisando al diagnostico optico")
+
+
+# ===========================================================================
+#  UN DIAGNOSTICO INCONCLUYENTE SE VUELVE A INTENTAR
+# ===========================================================================
+#  EL AGUJERO QUE CERRARON, medido el 09/10/2026 en produccion: noventa y
+#  cinco casos atascados y seis corridas seguidas devolviendo 'cerrados: 0'
+#  con los dos mapas VACIOS -- ni siquiera entraban al circuito. Todos habian
+#  sido diagnosticados antes de que existiera el respaldo por ping, con "no
+#  hay equipo registrado". Como ya tenian su linea de diagnostico, el ciclo
+#  los daba por atendidos y no volvian a intentarse nunca.
+#
+#  Lo peor no fue el atasco: fue que NO SE VEIA. Un cero con los motivos
+#  vacios se lee igual que "no habia nada que hacer".
+
+from operaciones.diagnostico_optico import (  # noqa: E402
+    hay_que_reintentar_diagnostico as reintentar)
+
+
+class _Prop:
+    """Una propuesta, reducida a lo unico que esta regla mira."""
+
+    def __init__(self, evidencia):
+        self.evidencia = evidencia
+
+
+def _diag(veredicto=None):
+    pieza = {"fuente": "diagnostico", "id": "1",
+             "dato": "diagnostico del equipo: lo que sea",
+             "observado_en": "2026-10-09T00:00:00+00:00"}
+    if veredicto is not None:
+        pieza["veredicto"] = veredicto
+    return pieza
+
+
+def test_un_diagnostico_que_no_se_pudo_hacer_se_reintenta():
+    """'No se pudo preguntar' es transitorio: mañana puede haber respuesta."""
+    assert reintentar(_Prop([_diag(SIN_DIAGNOSTICO)])) is True
+
+
+def test_un_equipo_con_problema_NO_se_reintenta():
+    """
+    'Se pregunto y el equipo esta mal' es un HALLAZGO, no una falta de datos.
+    Volver a preguntar no lo cambia, y reintentarlo cada hora gastaria el
+    presupuesto en casos ya resueltos -- ademas de tapar a los que si pueden
+    avanzar.
+    """
+    assert reintentar(_Prop([_diag(REVISAR_PERSONA)])) is False
+
+
+def test_uno_ya_cerrable_no_se_reintenta():
+    assert reintentar(_Prop([_diag(CIERRE_SEGURO)])) is False
+
+
+def test_una_propuesta_VIEJA_sin_veredicto_se_reintenta():
+    """
+    LA QUE DESTRABA LOS NOVENTA Y CINCO. Las diagnosticadas antes del
+    09/10/2026 no tienen la clave 'veredicto', y no hay forma de saber que
+    decidieron sin leer su texto -- que es justo lo que este modulo no hace.
+    Se reintentan una vez; despues quedan con su veredicto puesto y la regla
+    normal decide sola.
+    """
+    assert reintentar(_Prop([_diag()])) is True
+
+
+def test_sin_linea_de_diagnostico_no_es_un_reintento():
+    """
+    Esa es otra cosa y la atiende 'le_falta_diagnostico'. Si esta devolviera
+    True, las dos reglas se pisarian y un caso entraria dos veces.
+    """
+    assert reintentar(_Prop([])) is False
+    assert reintentar(_Prop([{"fuente": "caso", "dato": "x"}])) is False
+
+
+@pytest.mark.django_db
+def test_el_veredicto_queda_guardado_como_dato_y_no_como_texto(db):
+    """
+    SE AFIRMA CONTRA EL PRODUCTOR REAL. Si '_anotar' dejara de escribir la
+    clave, todas las pruebas de arriba seguirian en verde --usan piezas
+    escritas a mano-- y en produccion cada propuesta se reintentaria para
+    siempre, porque 'sin veredicto' significa reintentar.
+    """
+    from operaciones import diagnostico_optico as dx
+
+    class _Senal:
+        tipo = PropuestaSupervisor.CASO_DESINCRONIZADO
+        origen_id = "1"
+        evidencia = []
+        datos = {}
+
+    senal = _Senal()
+    dx._anotar(senal, dx.REVISAR_PERSONA, "señal debil", {}, timezone.now())
+
+    pieza = senal.evidencia[0]
+    assert pieza["veredicto"] == dx.REVISAR_PERSONA, (
+        "el veredicto no quedo como dato: la unica forma de saberlo seria "
+        "parsear la frase, y entonces un cambio de redaccion rompe la logica")

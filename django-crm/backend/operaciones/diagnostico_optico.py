@@ -560,6 +560,47 @@ def le_falta_diagnostico(propuesta) -> bool:
     return True
 
 
+def hay_que_reintentar_diagnostico(propuesta) -> bool:
+    """
+    Si a esta propuesta vale la pena volver a preguntarle al proveedor.
+
+    EL AGUJERO QUE CIERRA  --  medido el 09/10/2026
+    -----------------------------------------------
+    Noventa y cinco casos quedaron atascados y seis corridas seguidas
+    devolvieron 'cerrados: 0' con los dos mapas VACIOS -- ni siquiera entraban
+    al circuito. Todos habian sido diagnosticados ANTES de que existiera el
+    respaldo por ping, con el veredicto "no hay equipo registrado, no se puede
+    verificar". Como ya tenian su linea de diagnostico, 'le_falta_diagnostico'
+    los daba por atendidos y no volvian a intentarse NUNCA -- aunque ahora
+    hubiera un instrumento nuevo que si los resolvia.
+
+    Es la misma familia que el comentario de 'por_cerrar' ya describia en
+    'supervisor.py': un diagnostico viejo que congela la decision para
+    siempre. Ahi el disparador era el nivel de autonomia; aca, un instrumento
+    que no existia.
+
+    QUE SE REINTENTA Y QUE NO, y la diferencia es la de todo este modulo:
+
+      SIN_DIAGNOSTICO   "no se pudo preguntar". Transitorio por definicion --
+                        falta el serial, el motor no contesto, el ping no
+                        salio. Se reintenta: manana puede haber respuesta.
+      REVISAR_PERSONA   "se pregunto y el equipo esta mal". NO se reintenta:
+                        no es una falta de datos, es un hallazgo, y volver a
+                        preguntar no lo va a cambiar.
+      CIERRE_SEGURO     ya esta resuelto.
+
+    SIN VEREDICTO = SE REINTENTA. Las propuestas diagnosticadas antes de hoy
+    no tienen la clave, y no hay forma de saber que decidieron sin leer su
+    texto -- que es justo lo que este modulo no hace. Reintentarlas una vez es
+    barato y correcto: si siguen sin resolverse quedan con su veredicto
+    puesto, y a partir de ahi la regla de arriba decide sola.
+    """
+    for pieza in (propuesta.evidencia or []):
+        if isinstance(pieza, dict) and pieza.get("fuente") == "diagnostico":
+            return pieza.get("veredicto", SIN_DIAGNOSTICO) == SIN_DIAGNOSTICO
+    return False
+
+
 def completar_propuesta_existente(org, senal, propuesta, *, ahora=None,
                                   autorizacion=None) -> dict:
     """
@@ -608,10 +649,18 @@ def completar_propuesta_existente(org, senal, propuesta, *, ahora=None,
                 "motivo": "no se le pregunto al proveedor en esta corrida"}
 
     campos = ["evidencia", "updated_at"]
-    propuesta.evidencia = list(propuesta.evidencia or []) + [
-        sup._observacion("diagnostico", senal.origen_id,
-                         f"diagnostico del equipo: "
-                         f"{senal.datos.get('diagnostico_porque', '')}", ahora)]
+    pieza = sup._observacion(
+        "diagnostico", senal.origen_id,
+        f"diagnostico del equipo: "
+        f"{senal.datos.get('diagnostico_porque', '')}", ahora)
+    pieza["veredicto"] = veredicto
+    #  SE REEMPLAZA la linea de diagnostico vieja en vez de apilar otra: una
+    #  propuesta reintentada acumularia una observacion por intento, y quien
+    #  la lea no sabria cual vale. Se conserva todo lo demas de la evidencia.
+    propuesta.evidencia = [
+        x for x in (propuesta.evidencia or [])
+        if not (isinstance(x, dict) and x.get("fuente") == "diagnostico")
+    ] + [pieza]
     if veredicto == CIERRE_SEGURO:
         propuesta.nivel_autonomia_requerido = NIVEL_PARA_CERRAR
         campos.append("nivel_autonomia_requerido")
@@ -793,9 +842,16 @@ def _anotar(senal, veredicto: str, porque: str, diagnostico, ahora) -> None:
     devuelve) ni el nombre del cliente. Esto termina en una propuesta que
     queda guardada, y una propuesta no es lugar para datos de un abonado.
     """
-    senal.evidencia.append(sup._observacion(
+    pieza = sup._observacion(
         "diagnostico", senal.origen_id, f"diagnostico del equipo: {porque}",
-        ahora))
+        ahora)
+    #  EL VEREDICTO COMO DATO, no como texto a parsear  --  09/10/2026.
+    #  Sin esto, la unica forma de saber si un diagnostico fue concluyente era
+    #  leer su frase, que es exactamente el error que este modulo nombra mas
+    #  abajo. Con la clave puesta, 'hay_que_reintentar_diagnostico' decide
+    #  sobre un dato.
+    pieza["veredicto"] = veredicto
+    senal.evidencia.append(pieza)
 
     senal.datos["diagnostico_veredicto"] = veredicto
     senal.datos["diagnostico_porque"] = porque

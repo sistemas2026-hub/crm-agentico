@@ -2066,7 +2066,17 @@ def _atender_desincronizados(org, ahora, *, desatendido: bool = False) -> dict:
         p = diagnostico_optico.propuesta_pendiente_de(org, s)
         if p is None:
             continue
-        if diagnostico_optico.le_falta_diagnostico(p):
+        #  SIN DIAGNOSTICO, o CON UNO INCONCLUYENTE. Los dos casos van al
+        #  mismo lugar porque piden lo mismo: preguntarle al proveedor.
+        #
+        #  El segundo se agrego el 09/10/2026, y sin el noventa y cinco casos
+        #  quedaron atascados para siempre: diagnosticados antes de que
+        #  existiera el respaldo por ping, con "no hay equipo registrado", y
+        #  por tener ya su linea de diagnostico nunca volvian a intentarse.
+        #  Seis corridas seguidas devolvieron cero con los dos mapas vacios --
+        #  ni siquiera entraban. Ver 'hay_que_reintentar_diagnostico'.
+        if (diagnostico_optico.le_falta_diagnostico(p)
+                or diagnostico_optico.hay_que_reintentar_diagnostico(p)):
             pendientes[s.origen_id] = p
             candidatas.append(s)
         elif p.nivel_autonomia_requerido >= diagnostico_optico.NIVEL_PARA_CERRAR:
