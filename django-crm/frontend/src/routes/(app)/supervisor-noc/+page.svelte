@@ -260,7 +260,25 @@
   const ordenes = $derived(ordenesDeTrabajo(data.indicadores));
   const tecnicos = $derived(cargaPorTecnico(data.capacidad?.personas));
   const origen = $derived(ticketsPorOrigen(data.indicadores));
-  const actividad = $derived(actividadReciente(data.actividad?.eventos));
+  /**
+   * LA ACTIVIDAD, EN VIVO  --  08/10/2026
+   *
+   * El Supervisor ahora actua solo: cada hora revisa, diagnostica y cierra lo
+   * que tenga delegado. Un panel que solo se refresca al recargar la pagina
+   * esconde justo eso -- lo que hizo cuando nadie estaba mirando.
+   *
+   * 'eventosVivos' pisa a lo que trajo el servidor mientras el sondeo este
+   * andando. Cuando la carga del servidor vuelve a correr --al aceptar una
+   * propuesta, al cambiar un filtro-- se suelta, y manda otra vez el load: dos
+   * fuentes para lo mismo necesitan una que gane, y la que gana es la que la
+   * persona acaba de provocar.
+   */
+  let eventosVivos = $state(/** @type {any[] | null} */ (null));
+  let ultimoSondeo = $state(/** @type {Date | null} */ (null));
+  let sondeoVivo = $state(false);
+
+  const actividad = $derived(
+    actividadReciente(eventosVivos ?? data.actividad?.eventos));
 
   /**
    * La bandeja: filtrada, ordenada y numerada. La logica vive en
@@ -293,6 +311,71 @@
   $effect(() => {
     void [filtroEstado, filtroNivel, filtro, filtroPropuesta, busqueda];
     nPagina = 1;
+  });
+
+  /**
+   * EL SONDEO DEL PANEL DE ACTIVIDAD
+   *
+   * Cada 10 s se pide SOLO la actividad --'/supervisor-noc/actividad', que lee
+   * y nada mas-- en vez de invalidar la pagina entera: el load del servidor
+   * son cinco consultas, una de ellas la bandeja completa, y recargarlo para
+   * ver si aparecio un renglon ademas te mueve el scroll y los filtros que
+   * tenias puestos.
+   *
+   * SOLO CON LA PESTAÑA VISIBLE. Una de fondo no gasta pedidos, y ademas los
+   * navegadores frenan sus timers -- por eso el intervalo no alcanza solo y se
+   * escuchan tambien 'visibilitychange' y 'focus', que sondean AL INSTANTE al
+   * volver. Las dos señales y no una: hay navegadores donde la primera no
+   * dispara de forma confiable segun como se cambie de ventana. Es el mismo
+   * patron, y por los mismos motivos medidos, que 'conversaciones/+layout'.
+   *
+   * UN FALLO NO APAGA EL SONDEO NI BORRA LA TABLA: se deja lo ultimo que se
+   * vio y se marca que no esta en vivo. Vaciar el panel porque un pedido no
+   * salio diria "no hay actividad", que es una afirmacion distinta y falsa.
+   */
+  $effect(() => {
+    //  La carga del servidor manda: cuando vuelve a correr, se suelta lo del
+    //  sondeo para no pisar con datos mas viejos lo que la persona provoco.
+    void data.actividad;
+    eventosVivos = null;
+  });
+
+  $effect(() => {
+    let vigente = true;
+
+    async function sondear() {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const r = await fetch('/supervisor-noc/actividad', {
+          headers: { accept: 'application/json' }
+        });
+        if (!r.ok) throw new Error(String(r.status));
+        const cuerpo = await r.json();
+        if (!vigente) return;
+        //  'error' puesto con 'eventos' vacio NO es un feed vacio. Se respeta
+        //  lo ultimo bueno en vez de blanquear la tabla.
+        if (cuerpo?.error) {
+          sondeoVivo = false;
+          return;
+        }
+        eventosVivos = Array.isArray(cuerpo?.eventos) ? cuerpo.eventos : [];
+        ultimoSondeo = new Date();
+        sondeoVivo = true;
+      } catch {
+        if (vigente) sondeoVivo = false;
+      }
+    }
+
+    sondear();
+    const intervalo = setInterval(sondear, 10000);
+    document.addEventListener('visibilitychange', sondear);
+    window.addEventListener('focus', sondear);
+    return () => {
+      vigente = false;
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', sondear);
+      window.removeEventListener('focus', sondear);
+    };
   });
 
   /**
@@ -1358,6 +1441,23 @@
             <h2 class="snoc-grafico-titulo">
               <span class="snoc-icono snoc-primario" style="font-size:15px;">history</span>
               Actividad reciente del Supervisor
+              <!--
+                SE DICE SI ESTA EN VIVO O NO, y no se asume. Un panel que se
+                refresca solo es indistinguible de uno congelado hasta que algo
+                cambia -- y si el sondeo se cae, quedaria mostrando datos viejos
+                con cara de actuales. El punto verde afirma "esto se esta
+                actualizando"; sin el, el rotulo dice la hora de lo ultimo que
+                se pudo leer.
+              -->
+              {#if sondeoVivo}
+                <span class="snoc-vivo" title="Se actualiza solo cada 10 segundos{ultimoSondeo ? ` · última lectura ${hora(ultimoSondeo.toISOString())}` : ''}">
+                  <span class="snoc-vivo-punto"></span>En vivo
+                </span>
+              {:else}
+                <span class="snoc-vivo snoc-vivo-frio" title="No se pudo leer la actividad en el último intento. Se muestra lo último que llegó.">
+                  Sin actualizar
+                </span>
+              {/if}
             </h2>
             {#if data.actividad.error}
               <div class="snoc-hueco">

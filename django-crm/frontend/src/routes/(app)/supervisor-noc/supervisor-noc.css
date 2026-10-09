@@ -710,6 +710,33 @@
 }
 .snoc-grafico-cuerpo { display: flex; align-items: center; gap: var(--snoc-md); min-height: 122px; }
 
+/* --- "En vivo": el panel de actividad se refresca solo ---------------------
+   Va al final del titulo (margin-left:auto) y no al lado del texto: es estado
+   del panel, no parte del nombre. El punto late para que se note sin leerlo,
+   y el latido se apaga con 'prefers-reduced-motion' -- el color y el rotulo
+   siguen diciendo lo mismo sin moverse, asi que no se pierde informacion.
+   'Sin actualizar' usa gris y NO rojo a proposito: no es un error del
+   sistema, es que la ultima lectura no salio y se muestra lo anterior. */
+.snoc-vivo {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 0.625rem; font-weight: 600; letter-spacing: 0.04em;
+  /* El azul del sistema y no un verde inventado: la paleta no tiene uno, y
+     meter un color fuera de los tokens se rompe solo al cambiar de tema. */
+  text-transform: uppercase; color: var(--snoc-primary);
+}
+.snoc-vivo-punto {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; animation: snoc-latido 2s ease-in-out infinite;
+}
+.snoc-vivo-frio { color: var(--snoc-on-surface-variant); }
+@keyframes snoc-latido {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .snoc-vivo-punto { animation: none; }
+}
+
 /* --- El donut --- */
 .snoc-donut { flex-shrink: 0; transform: rotate(-90deg); }
 .snoc-donut-centro { position: relative; width: 110px; height: 110px; flex-shrink: 0; }
