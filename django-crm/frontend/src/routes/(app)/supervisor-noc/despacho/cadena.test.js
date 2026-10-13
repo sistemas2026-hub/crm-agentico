@@ -318,6 +318,51 @@ describe('despachar', () => {
     expect(r.numero).toBe(1042);
   });
 
+  it('si el caso YA tenía una orden abierta, la confirmación lo dice', async () => {
+    //  `CrearOrdenView` devuelve `ordenes_activas_del_caso` --las que existían
+    //  ANTES de esta-- y el comentario del backend nombra a su consumidor:
+    //  «Que la UI pueda avisar "este caso ya tiene una orden activa"». No lo
+    //  usaba nadie: la confirmación decía «Orden #1042 despachada.» y punto.
+    apiRequest.mockResolvedValue({
+      orden: { numero: 1042 },
+      ordenes_activas_del_caso: [988, 1001],
+      server_time: '2026-10-13T20:00:00+00:00'
+    });
+
+    const r = await actions.despachar(submit(DESPACHO_OK));
+    expect(r.hecho).toContain('Orden #1042 despachada.');
+    expect(r.hecho).toContain('2 órdenes abiertas');
+    expect(r.hecho).toContain('#988');
+    expect(r.hecho).toContain('#1001');
+  });
+
+  it('una sola se dice en singular', async () => {
+    apiRequest.mockResolvedValue({
+      orden: { numero: 1042 }, ordenes_activas_del_caso: [988]
+    });
+    const r = await actions.despachar(submit(DESPACHO_OK));
+    expect(r.hecho).toContain('una orden abierta');
+    expect(r.hecho).toContain('#988');
+  });
+
+  it('la orden que se acaba de crear NO se cuenta como «ya había»', async () => {
+    //  `activas` se calcula antes del create, pero si alguna vez incluyera la
+    //  nueva, el mensaje diria que ya habia una orden siendo que es esta.
+    apiRequest.mockResolvedValue({
+      orden: { numero: 1042 }, ordenes_activas_del_caso: [1042]
+    });
+    const r = await actions.despachar(submit(DESPACHO_OK));
+    expect(r.hecho).toBe('Orden #1042 despachada.');
+  });
+
+  it('sin órdenes previas la confirmación no agrega ruido', async () => {
+    apiRequest.mockResolvedValue({
+      orden: { numero: 1042 }, ordenes_activas_del_caso: []
+    });
+    const r = await actions.despachar(submit(DESPACHO_OK));
+    expect(r.hecho).toBe('Orden #1042 despachada.');
+  });
+
   it('un campo vacío viaja como ausente, no como cadena vacía', async () => {
     await actions.despachar(submit({ ...DESPACHO_OK, zona: '', prioridad: '' }));
     const [, opciones] = apiRequest.mock.calls[0];

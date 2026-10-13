@@ -248,13 +248,36 @@ export const actions = {
       const numero = r?.orden?.numero;
       const quien = r?.orden?.tecnico_principal?.nombre;
       const conCuadrilla = Boolean(String(f.get('jornada_id') ?? '').trim());
+      //  ESTE CASO YA TENIA UNA ORDEN ABIERTA, y hay que decirlo.
+      //
+      //  `CrearOrdenView` devuelve `ordenes_activas_del_caso` --las que ya
+      //  existian ANTES de esta, calculadas en `despacho_views.py:131`-- y el
+      //  comentario del backend nombra textualmente a su consumidor: «Que la
+      //  UI pueda avisar "este caso ya tiene una orden activa"». La UI no lo
+      //  usaba: confirmaba «Orden #1042 despachada.» y quien despacho se
+      //  enteraba de la otra cuando el tecnico llamaba preguntando cual hace.
+      //
+      //  SE SUMA a lo que ya decia el mensaje --a quien quedo asignada y si el
+      //  reparto la va a mover--, no lo reemplaza: son tres hechos distintos y
+      //  los tres importan antes de que alguien salga a manejar.
+      //
+      //  NO se bloquea --una segunda visita al mismo caso es legitima, y el
+      //  duplicado accidental lo evita la Idempotency-Key--: se NOMBRA.
+      const yaHabia = Array.isArray(r?.ordenes_activas_del_caso)
+        ? r.ordenes_activas_del_caso.filter((n) => n !== numero)
+        : [];
       return {
         hecho: (numero ? `Orden #${numero} despachada` : 'Orden despachada') +
           (String(f.get('tecnico_profile_id') ?? '').trim() && quien
             ? `, asignada a ${quien}. El reparto no la va a mover.`
             : conCuadrilla
               ? `, asignada a la cuadrilla elegida${quien ? ` (a cargo: ${quien})` : ''}. El reparto no la va a mover.`
-              : '. Queda SIN ASIGNAR hasta que se publique el reparto.'),
+              : '. Queda SIN ASIGNAR hasta que se publique el reparto.') +
+          (yaHabia.length
+            ? ` Atención: este caso ya tenía ` +
+              `${yaHabia.length === 1 ? 'una orden abierta' : `${yaHabia.length} órdenes abiertas`}` +
+              ` (${yaHabia.map((n) => `#${n}`).join(', ')}).`
+            : ''),
         numero
       };
     } catch (e) {
