@@ -86,13 +86,35 @@ def _le_toca(config, ahora_local) -> bool:
 
 
 def _avisar(org, resumen) -> int:
-    """Una notificacion por cada administrador. Devuelve cuantas se crearon.
+    """Una notificacion por cada persona que PUEDE publicar. Devuelve cuantas.
 
-    A los ADMIN y no a un rol "supervisor": `Profile.role` solo tiene
-    ADMIN/USER, asi que inventar un destinatario por nombre seria adivinar.
+    A `ROLES_GESTION`, NO solo a los ADMIN  --  13/10/2026
+    -----------------------------------------------------
+    Esta funcion avisaba unicamente a `role="ADMIN"`, y lo justificaba
+    diciendo que «`Profile.role` solo tiene ADMIN/USER, asi que inventar un
+    destinatario por nombre seria adivinar». **Eso dejo de ser cierto en
+    M09-D**: `common/utils.py::ROLES` tiene CUATRO
+    --ADMIN, SUPERVISOR, OPERACIONES, USER-- y el propio paso M09-D existe
+    para que alguien pueda *revisar sin administrar*
+    (`Profile.save()` deja a un OPERACIONES con `is_organization_admin=False`
+    a proposito).
+
+    La consecuencia era silenciosa y exacta: la empresa que le da el rol
+    OPERACIONES a su Jefe de Operaciones --la persona cuyo trabajo es mirar y
+    publicar el reparto-- no recibia NINGUN aviso de que la jornada estaba
+    lista. El ciclo corria, armaba todo, y nadie se enteraba.
+
+    El conjunto no se escribe de nuevo aca: se importa el MISMO que decide
+    quien puede publicar (`campo/permissions.py::ROLES_GESTION`, el que ya usa
+    `operaciones/permissions.py` y la pantalla de cuadrillas). Dos listas con
+    el mismo proposito se separan en silencio el dia que alguna cambie --y es
+    justo lo que acababa de pasar.
     """
+    from campo.permissions import ROLES_GESTION
+
     destinatarios = list(
-        Profile.objects.filter(org=org, role="ADMIN", is_active=True)
+        Profile.objects.filter(org=org, role__in=sorted(ROLES_GESTION),
+                               is_active=True)
     )
     if not destinatarios:
         return 0

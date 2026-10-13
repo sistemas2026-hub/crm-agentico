@@ -483,6 +483,85 @@ def test_t_el_ciclo_deja_la_jornada_y_avisa(
     assert avisos.first().data["reparto"]["repartibles"] == 1
 
 
+def test_t2_el_aviso_llega_a_TODOS_los_que_pueden_publicar(
+    org_a, cuadrilla, norte, version, admin_profile
+):
+    """El aviso va a ROLES_GESTION, no solo a los ADMIN.
+
+    POR QUE ESTA PRUEBA EXISTE, Y POR QUE LA DE ARRIBA NO ALCANZABA
+    `test_t` afirma `avisos.count() == 1` con un solo perfil en la base: pasa
+    con el codigo roto Y con el arreglado, porque ese unico perfil es ADMIN.
+    Es exactamente lo que CLAUDE.md §6 llama una prueba que dice que algo
+    EXISTE sin probar que funcione.
+
+    El defecto que mata: `_avisar` filtraba `role="ADMIN"` y se justificaba
+    diciendo que `Profile.role` solo tiene ADMIN/USER. Desde M09-D tiene
+    cuatro, y un OPERACIONES --la persona cuyo trabajo es publicar el
+    reparto-- no recibia NINGUN aviso de que la jornada estaba lista.
+    """
+    from django.contrib.auth import get_user_model
+    from common.models import Notification, Profile
+    from campo import tasks
+
+    U = get_user_model()
+    #  Uno de cada rol que PUEDE publicar, mas un USER que no puede.
+    sup = Profile.objects.create(
+        user=U.objects.create_user(email="sup@t.com", password="x"),
+        org=org_a, role="SUPERVISOR", is_active=True)
+    ops = Profile.objects.create(
+        user=U.objects.create_user(email="ops@t.com", password="x"),
+        org=org_a, role="OPERACIONES", is_active=True)
+    raso = Profile.objects.create(
+        user=U.objects.create_user(email="raso@t.com", password="x"),
+        org=org_a, role="USER", is_active=True)
+    #  Y un OPERACIONES DE BAJA: tener el rol no alcanza si ya no trabaja aca.
+    Profile.objects.create(
+        user=U.objects.create_user(email="exops@t.com", password="x"),
+        org=org_a, role="OPERACIONES", is_active=False)
+
+    _config(org_a)
+    _jornada(org_a, cuadrilla, LUNES, zonas=[norte])
+    _orden(org_a, version, 1)
+
+    tasks.correr_para(
+        org_a, ahora_local=dt.datetime(2026, 10, 6, 3, 5, tzinfo=dt.timezone.utc))
+
+    destinatarios = set(
+        Notification.objects
+        .filter(org=org_a, verb="reparto_de_la_madrugada")
+        .values_list("recipient_id", flat=True)
+    )
+    assert destinatarios == {admin_profile.id, sup.id, ops.id}
+    #  Las dos exclusiones, afirmadas por separado: un USER no publica, y
+    #  alguien de baja tampoco --aunque le quede el rol--.
+    assert raso.id not in destinatarios
+
+
+def test_t3_el_aviso_apunta_al_dia_que_se_armo(
+    org_a, cuadrilla, norte, version, admin_profile
+):
+    """El enlace lleva a la jornada de ESE dia, no a la pantalla pelada.
+
+    Un aviso que abre `/supervisor-noc/cuadrillas` sin fecha obliga a quien lo
+    recibe a adivinar cual dia mirar, y a las 6 de la manana el dia que el
+    ciclo armo ya no es "hoy" para todos los husos.
+    """
+    from common.models import Notification
+    from campo import tasks
+
+    _config(org_a)
+    _jornada(org_a, cuadrilla, LUNES, zonas=[norte])
+    _orden(org_a, version, 1)
+
+    tasks.correr_para(
+        org_a, ahora_local=dt.datetime(2026, 10, 6, 3, 5, tzinfo=dt.timezone.utc))
+
+    aviso = Notification.objects.filter(
+        org=org_a, verb="reparto_de_la_madrugada").first()
+    assert MARTES.isoformat() in aviso.link
+    assert MARTES.isoformat() in aviso.entity_name
+
+
 def test_u_el_ciclo_NO_publica_ninguna_asignacion(
     org_a, cuadrilla, norte, version
 ):
