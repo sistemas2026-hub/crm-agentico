@@ -211,11 +211,10 @@ class TestCerrarLaJornada:
         devolver(user_client)
         user_client.post(CERRAR, {}, format="json")
 
-        # Algo pasa después del cierre.
-        user_client.post(MOVIMIENTOS, {
-            "clave": "tardio", "material": "CON-SC-APC", "tipo": "ajuste",
-            "cantidad": "5",
-        }, format="json")
+        # Algo pasa después del cierre. Era un `ajuste`, y desde el 13/10/2026
+        # el teléfono ya no puede mandarlos (ver MovimientoEntradaSerializer);
+        # lo que la prueba necesita es CUALQUIER movimiento tardío.
+        consumir(user_client, orden, cantidad="1", clave="tardio")
 
         r = user_client.get(JORNADA)
 

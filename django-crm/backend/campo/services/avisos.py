@@ -483,7 +483,18 @@ def avisar_pedido_de_material(pedido) -> None:
     if pedido.orden_id is not None:
         lineas.append(f"Para la OT #{pedido.orden.numero}")
     if pedido.motivo:
-        lineas.append(f"«{pedido.motivo}»")
+        #  El motivo es TEXTO LIBRE que escribe el tecnico, y este mensaje sale
+        #  del sistema. «Para la casa de doña Marta, 3001234567» se escribe
+        #  rapido parado en una escalera. Se tapa lo que un patron puede ver
+        #  --celular, documento, correo--, con la MISMA funcion que tapa la
+        #  descripcion de los tickets antes de ir al modelo. Un nombre en prosa
+        #  no lo ve ningun patron: es un limite declarado, no una promesa
+        #  (revision de PII de custodia, 13/10/2026).
+        from operaciones.lectura_de_ticket import tapar
+
+        motivo = tapar(pedido.motivo)
+        if motivo:
+            lineas.append(f"«{motivo}»")
 
     _despachar(
         org=pedido.org,

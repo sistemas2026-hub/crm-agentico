@@ -459,6 +459,23 @@ def test_e2_el_aviso_NO_lleva_datos_del_cliente(user_client, conector, orden):
         assert dato not in entero, dato
 
 
+def test_e2b_lo_que_el_tecnico_ESCRIBE_sale_tapado(user_client, conector):
+    """El motivo es texto libre y el aviso sale del sistema. e2 cubria los
+    datos ESTRUCTURADOS de la orden; esto es lo que el tecnico teclea, que es
+    por donde se colaba (revision de PII, 13/10/2026)."""
+    from campo.services import avisos
+
+    with mock.patch.object(avisos, "_despachar") as despachar:
+        _pedir(user_client, conector,
+               motivo="casa de la señora, llamar 300 123 4567, cc 1045678901")
+
+    texto = despachar.call_args.kwargs["texto"]
+    for dato in ("300 123 4567", "1045678901"):
+        assert dato not in texto, dato
+    #  Lo que NO identifica a nadie llega igual: tapar no es borrar el motivo.
+    assert "casa de la señora" in texto
+
+
 def test_e3_un_REENVIO_no_vuelve_a_avisar(user_client, conector):
     """Bodega no tiene por que enterarse dos veces del mismo pedido."""
     from campo.services import avisos

@@ -83,8 +83,16 @@ class MovimientoEntradaSerializer(serializers.Serializer):
     material = serializers.CharField(
         max_length=64, help_text="El código del material, no su id interno."
     )
+    #  SOLO LO QUE EL TELEFONO HACE. Aceptaba los siete tipos del libro, y con
+    #  eso un tecnico podia mandar un `ajuste` de +50 a su propia custodia --sin
+    #  orden, sin rol, ACEPTADO-- y tapar un descuadre; o un `ajuste` con serie
+    #  que movia el indice de CUALQUIER aparato a su nombre, y despues el
+    #  despacho legitimo de bodega se rechazaba diciendo que estaba en su
+    #  custodia. Medido el 13/10/2026 (auditoria de custodia, F12/F14). La app
+    #  manda dos tipos (`consumo_de_material.dart`, `devolucion_screen.dart`);
+    #  ajustar, entrar, despachar o trasladar son de la bodega, por sus rutas.
     tipo = serializers.ChoiceField(
-        choices=[t[0] for t in MovimientoDeMaterial.TIPOS],
+        choices=[MovimientoDeMaterial.CONSUMO, MovimientoDeMaterial.DEVOLUCION],
         default=MovimientoDeMaterial.CONSUMO,
     )
     cantidad = serializers.DecimalField(max_digits=12, decimal_places=3)

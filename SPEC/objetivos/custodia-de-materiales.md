@@ -1,9 +1,18 @@
 # Objetivo · Custodia de materiales — cerrar el ciclo bodega ↔ técnico
 
+> **Estado: CERRADO EN SUS CRITERIOS — 13/10/2026**, con un hallazgo ALTO que
+> sigue vivo en producción y pasa a su propia ficha:
+> [devolucion-desde-la-app.md](devolucion-desde-la-app.md). Cerrarla sin
+> sacarlo afuera lo habría escondido.
+>
+> Ese día corrieron las tres pasadas que faltaban (adversarial, frontera, PII),
+> registradas en `SPEC/auditorias/2026-10-13-custodia-de-materiales.md`. Cuatro
+> hallazgos se arreglaron con su prueba y su mutación muerta; los demás quedan
+> anotados con su motivo. El lazo con WispHub está construido y **apagado**, y
+> no se enciende hasta resolver D3 de esa auditoría.
+>
 > Abierto el 25/09/2026. **Las tres fases construidas el 28/09/2026** y vistas
-> en la pantalla. Estado: **abierto** — falta el cierre formal (la pasada
-> adversarial) y el lazo con WispHub, que es lo único de Fase 2 que no se
-> construyó y tiene su motivo al final.
+> en la pantalla.
 >
 > **La Fase 3 se construyó por decisión explícita del usuario**, que levantó la
 > restricción del brief. Esa restricción decía: *«es el modo de fallar de este
@@ -104,11 +113,11 @@ sesión principal, diciéndolo.
 |---|---|---|
 | `arquitecto-dexter` | ¿Dónde vive cada pieza? ¿Qué es configuración? | a mano por la sesión principal |
 | `verificador-de-api` | Solo si el lazo con WispHub entra antes de lo previsto | se saltea: `sn_onu` es Fase 2 |
-| `revisor-de-pii` | El inventario no toca datos de cliente… salvo que `orden` los arrastre al mostrar un movimiento | **pendiente** — mirar qué se dibuja junto a un consumo |
-| `auditor-de-frontera` | El despacho es una acción con efecto, y el rol nuevo es una autorización | **pendiente**, es F12 |
+| `revisor-de-pii` | El inventario no toca datos de cliente… salvo que `orden` los arrastre al mostrar un movimiento | ✅ 13/10/2026: ninguna respuesta ni pantalla saca un campo de cliente de la orden, solo su número. El motivo libre de un pedido salía sin tapar al canal de bodega: arreglado (P1) |
+| `auditor-de-frontera` | El despacho es una acción con efecto, y el rol nuevo es una autorización | ✅ 13/10/2026, ver la auditoría. El rol `BODEGA` no es asignable (D2) |
 | `corredor-de-evaluacion` | — | se saltea: no toca prompt, catálogo ni modelo |
 | `guardia-de-config` | — | se saltea: no toca `tenant_config` |
-| `auditor-independiente` | El hueco que quien construyó no puede ver | **pendiente**, es F12 |
+| `auditor-independiente` | El hueco que quien construyó no puede ver | ✅ 13/10/2026, ver la auditoría |
 
 ## Bloqueos
 
@@ -241,9 +250,9 @@ módulo `campo/`. La rama de Campo no se tocó, así que J1 dejó de bloquear.
 | F9 | El bodeguero despacha y NO valida órdenes | ✅ las **dos** direcciones: despacho 201, `validar/` 403 |
 | F10 | Aislamiento por organización | ✅ dos orgs, cero filas cruzadas, en servicio y en API |
 | F11 | La historia de una serie se lee | ✅ `entrada → despacho → devolución` en orden, con sus ubicaciones |
-| F12 | El despacho imposible se rechaza antes | ✅ 409 con el mensaje que dice **dónde** está el aparato. Y la contraparte se mantiene: las 21 pruebas de custodia siguen verdes, así que un consumo que descuadra sigue entrando como `descuadre` |
+| F12 | El despacho imposible se rechaza antes | ✅ 409 con el mensaje que dice **dónde** está el aparato. Y la contraparte se mantiene: las 21 pruebas de custodia siguen verdes, así que un consumo que descuadra sigue entrando como `descuadre`. **Corregido el 13/10/2026** tras la auditoría de frontera: una serie INSTALADA se despachaba como libre (C), y el técnico podía falsear el índice con un `ajuste` por API (A). Los dos cerrados con prueba |
 | F13 | Sin regresiones | 🟡 `campo/tests/` **266 pasan · 5 skipped · 0 fallan**. Pero la **línea base no se midió antes** de empezar — el worktree salió de producción, que no tenía el módulo, así que la base era "no existe". `flutter test` no se corrió |
-| F14 | Pasada adversarial | ❌ **el `auditor-independiente` no corrió.** Los 9 agentes siguen sin cargarse en la sesión |
+| F14 | Pasada adversarial | ✅ **13/10/2026.** Corrió como subagente de solo lectura con el procedimiento de `auditor-independiente.md` (los agentes siguen sin cargarse como tipo). Hallazgos en `SPEC/auditorias/2026-10-13-custodia-de-materiales.md`: A, B, C y P1 arreglados con prueba; D1–D9 y P2–P3 anotados con motivo. **D1 (devolución contada dos veces) es ALTO y sigue vivo**: ficha propia |
 | F15 | El estado lo refleja | ✅ escrito por la sesión dueña (`integrar-centro-mando`) |
 
 ### Lo que queda

@@ -285,6 +285,32 @@ def clasificar(*, org, profile, material, tipo, cantidad, serie="") -> tuple[str
     nada a esa persona.
     """
     if serie and tipo == MovimientoDeMaterial.CONSUMO:
+        #  LA SERIE TIENE QUE ESTAR EN SU CUSTODIA. Antes solo se miraba el
+        #  saldo POR MATERIAL: con tener una ONT cualquiera, el consumo de la
+        #  serie de OTRA -- en bodega, con otro tecnico, tipeada mal -- entraba
+        #  ACEPTADO, movia el indice y, con el lazo encendido, mandaba ese serial
+        #  a la ficha del cliente en el ISP. Un reinicio aprobado despues
+        #  apagaria el equipo de otra casa (auditoria de custodia, 13/10/2026).
+        #
+        #  Una serie que NUNCA se vio sigue entrando: es como llega el aparato
+        #  que nadie dio de alta, y rechazarla dejaria la instalacion sin
+        #  registrar. Lo que se frena es la que el sistema SI sabe donde esta.
+        from campo.services.inventario import activo_de, ubicacion_de_tecnico
+        from campo.models import UbicacionDeActivo
+
+        activo = activo_de(org, material, serie, crear=False)
+        pos = (UbicacionDeActivo.objects.select_related("ubicacion")
+               .filter(activo=activo).first() if activo else None)
+        if pos is not None and pos.ubicacion is not None:
+            custodia = ubicacion_de_tecnico(profile, org, crear=False)
+            if custodia is None or pos.ubicacion_id != custodia.id:
+                return (
+                    MovimientoDeMaterial.CONFLICTO,
+                    f"La serie {serie} figura en '{pos.ubicacion.nombre}', no en "
+                    f"la custodia de quien la instala. Puede ser un numero mal "
+                    f"tipeado o un aparato que cambio de manos sin registrarse: "
+                    f"hay que revisarlo antes de que cuente como instalado.",
+                )
         if _serie_ya_consumida(org, material, serie):
             return (
                 MovimientoDeMaterial.CONFLICTO,

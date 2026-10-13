@@ -354,7 +354,23 @@ def _comprobar_serie_libre(org, material, serie, ubicacion_origen) -> None:
         # despacharla, que es como llega el material que nadie registro antes.
         return
     pos = UbicacionDeActivo.objects.select_for_update().filter(activo=activo).first()
-    if pos is None or pos.ubicacion is None:
+    if pos is None:
+        return
+    if pos.ubicacion is None:
+        #  INSTALADO NO ES LIBRE. Un consumo deja el indice en «ninguna
+        #  ubicacion», y esto lo leia como «libre»: una ONT puesta en la casa
+        #  de un cliente volvia a salir de bodega sin rechazo -- la letra misma
+        #  de A4 (auditoria de frontera, 13/10/2026). Si el aparato volvio del
+        #  cliente, primero se registra su entrada, que lo pone en bodega.
+        ultimo = pos.movimiento
+        if (ultimo is not None
+                and ultimo.tipo == MovimientoDeMaterial.CONSUMO
+                and ultimo.estado == MovimientoDeMaterial.ACEPTADO):
+            orden = f" (OT #{ultimo.orden.numero})" if ultimo.orden_id else ""
+            raise DespachoInvalido(
+                "La serie " + serie + " figura instalada" + orden + ". Si volvio "
+                "del cliente, primero hay que registrar su entrada a bodega."
+            )
         return
     if ubicacion_origen is not None and pos.ubicacion_id == ubicacion_origen.id:
         return

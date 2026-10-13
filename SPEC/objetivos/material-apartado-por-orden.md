@@ -1,7 +1,19 @@
 # Material apartado para una orden
 
-**Estado:** construido el 02/10/2026, **sin desplegar**. Queda una decisión de
-producto abierta, abajo.
+**Estado: CERRADO — 13/10/2026.** En producción desde el 02/10/2026
+(`5029e48` es ancestro de `fix/integracion-wisphub`), y la decisión de producto
+se cerró ese mismo día (abajo). Esta cabecera decía «sin desplegar» y «decisión
+abierta» once días después de que las dos cosas dejaran de ser ciertas.
+
+Verificado al cerrarla, el 13/10/2026:
+
+```
+los 7 archivos del commit             identicos a produccion (git diff vacio)
+test_reservas_por_orden.py            15 pasan, contra PostgreSQL real,
+                                      sobre el arbol de produccion
+svelte-check (lo que quedaba          0 errores en Reservas.svelte y en
+pendiente desde el 02/10)             inventario/+page.server.js
+```
 
 ## De dónde sale
 
@@ -113,9 +125,9 @@ Nada de esto rompe la decisión congelada de que `EntregaDeKit` **no tiene FK a 
 orden**: el kit sigue siendo a la custodia del técnico. Lo apartado para una OT es
 otra cosa, vive en `ReservaDeMaterial`, y un despacho de kit ya no la toca.
 
-## Lo que queda por hacer
+## Lo que quedaba por hacer — hecho el 13/10/2026
 
-- **Correr `pnpm check`** sobre el frontend cuando haya un entorno donde se pueda
-  (ver arriba por qué no se hizo).
-- **Nada bloquea el despliegue** del lado del backend: sin reservas por orden,
-  todo se comporta exactamente como antes.
+- ~~Correr `pnpm check` sobre el frontend~~ → `svelte-check` en un contenedor
+  efímero (`node:22`, nunca en Windows con Docker arriba): **0 errores** en los
+  dos archivos de este trabajo.
+- ~~Desplegar~~ → salió el 02/10/2026.
