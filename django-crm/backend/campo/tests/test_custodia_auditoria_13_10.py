@@ -209,3 +209,145 @@ def test_c2_si_volvio_del_cliente_y_entro_a_bodega_si(
                   lineas=[{"material": ont, "serie": "MIA-1"}])
     otra = inv.ubicacion_de_tecnico(otro_profile, org_a, crear=False)
     assert inv.existencia(otra, ont) == Decimal("1")
+
+
+# ---------------------------------------------------------------------------
+# D1 · una devolucion se cuenta UNA vez
+# ---------------------------------------------------------------------------
+
+def _con_conectores(org, bodega, conector, profile, n=18):
+    inv.registrar_entrada(org=org, material=conector, cantidad=100,
+                          ubicacion_destino=bodega)
+    inv.despachar(org=org, ubicacion_origen=bodega, profile_destino=profile,
+                  lineas=[{"material": conector, "cantidad": n}])
+    return inv.ubicacion_de_tecnico(profile, org, crear=False)
+
+
+def _devolver_por_app(cliente, cantidad, clave="dv1", serie=None, material="CON-SC-APC"):
+    cuerpo = {"clave": clave, "material": material, "tipo": "devolucion",
+              "cantidad": str(cantidad)}
+    if serie:
+        cuerpo["serie"] = serie
+    r = cliente.post(MOVIMIENTOS, cuerpo, format="json")
+    assert r.status_code in (200, 201), r.content
+
+
+def test_d1_app_y_web_dejan_la_custodia_en_cero_y_la_bodega_UNA_vez(
+        user_client, org_a, bodega, conector, user_profile):
+    custodia = _con_conectores(org_a, bodega, conector, user_profile)
+    antes = inv.existencia(bodega, conector)
+
+    _devolver_por_app(user_client, 18)
+    inv.recibir_devolucion(org=org_a, profile_origen=user_profile,
+                           ubicacion_destino=bodega,
+                           lineas=[{"material": conector, "cantidad": 18}])
+
+    assert inv.existencia(custodia, conector) == Decimal("0")          # antes: -18
+    assert inv.existencia(bodega, conector) == antes + Decimal("18")
+    from campo.services.materiales import movido_por
+    assert movido_por(user_profile, conector,
+                      MovimientoDeMaterial.DEVOLUCION) == Decimal("18")  # antes: 36
+
+
+def test_d1b_lo_declarado_y_no_recibido_queda_A_LA_VISTA(
+        user_client, org_a, bodega, conector, user_profile):
+    custodia = _con_conectores(org_a, bodega, conector, user_profile)
+    _devolver_por_app(user_client, 18)
+    assert inv.existencia(custodia, conector) == Decimal("0")
+    assert inv._declarado_sin_recibir(org_a, user_profile, conector,
+                                      custodia) == Decimal("18")
+
+
+def test_d1c_parte_declarada_y_parte_no(
+        user_client, org_a, bodega, conector, user_profile):
+    """Declaro 10 por la app y llegaron 18 a la bodega: 10 se consumen de lo
+    declarado y solo 8 salen de la custodia."""
+    custodia = _con_conectores(org_a, bodega, conector, user_profile)
+    antes = inv.existencia(bodega, conector)
+    _devolver_por_app(user_client, 10)
+    movs, _ = inv.recibir_devolucion(
+        org=org_a, profile_origen=user_profile, ubicacion_destino=bodega,
+        lineas=[{"material": conector, "cantidad": 18}])
+    assert sorted(m.cantidad for m in movs) == [Decimal("8"), Decimal("10")]
+    assert inv.existencia(custodia, conector) == Decimal("0")
+    assert inv.existencia(bodega, conector) == antes + Decimal("18")
+
+
+def test_d1d_una_serie_devuelta_por_la_app_y_recibida_queda_en_bodega(
+        user_client, org_a, bodega, ont, user_profile):
+    _dar_onts(org_a, bodega, ont, user_profile, "ONT-DV")
+    custodia = inv.ubicacion_de_tecnico(user_profile, org_a, crear=False)
+    _devolver_por_app(user_client, 1, serie="ONT-DV", material="ONT-HG8145")
+    inv.recibir_devolucion(org=org_a, profile_origen=user_profile,
+                           ubicacion_destino=bodega,
+                           lineas=[{"material": ont, "serie": "ONT-DV"}])
+    assert inv.existencia(custodia, ont) == Decimal("0")
+    assert UbicacionDeActivo.objects.get(activo__serie="ONT-DV").ubicacion_id == bodega.id
+
+
+def test_d1e_sin_declaracion_todo_sale_de_la_custodia_como_antes(
+        org_a, bodega, conector, user_profile):
+    custodia = _con_conectores(org_a, bodega, conector, user_profile)
+    inv.recibir_devolucion(org=org_a, profile_origen=user_profile,
+                           ubicacion_destino=bodega,
+                           lineas=[{"material": conector, "cantidad": 5}])
+    assert inv.existencia(custodia, conector) == Decimal("13")
+
+
+def test_d1f_un_reintento_con_referencia_no_escribe_otra_vez(
+        user_client, org_a, bodega, conector, user_profile):
+    """Antes chocaba contra el unique y terminaba en un 500."""
+    _con_conectores(org_a, bodega, conector, user_profile)
+    _devolver_por_app(user_client, 10)
+    kw = dict(org=org_a, profile_origen=user_profile, ubicacion_destino=bodega,
+              lineas=[{"material": conector, "cantidad": 18}], referencia="ACTA-9")
+    primera, _ = inv.recibir_devolucion(**kw)
+    total = MovimientoDeMaterial.objects.count()
+    segunda, _ = inv.recibir_devolucion(**kw)
+    assert MovimientoDeMaterial.objects.count() == total
+    assert {m.id for m in segunda} == {m.id for m in primera}
+
+
+# ---------------------------------------------------------------------------
+# D3 · el aviso al ISP no sale por una orden ajena
+# ---------------------------------------------------------------------------
+
+def test_d3_un_consumo_atado_a_una_orden_ajena_no_avisa_al_isp(
+        org_a, bodega, ont, otro_profile, orden, monkeypatch):
+    """`orden` esta asignada a user_profile; consume otro_profile."""
+    from campo.services import lazo_isp
+    from campo.services.materiales import registrar_movimiento
+
+    monkeypatch.setenv(lazo_isp.BANDERA, "1")
+    orden.cliente_id_abonado = "5832"
+    orden.save(update_fields=["cliente_id_abonado"])
+    _dar_onts(org_a, bodega, ont, otro_profile, "AJENA-1")
+    mov, _ = registrar_movimiento(
+        org=org_a, profile=otro_profile, material=ont,
+        tipo=MovimientoDeMaterial.CONSUMO, cantidad=Decimal("1"),
+        idempotency_key="aj-1", serie="AJENA-1", orden=orden)
+    assert mov.estado == MovimientoDeMaterial.ACEPTADO
+
+    import requests
+    llamado = []
+    monkeypatch.setattr(requests, "post", lambda *a, **k: llamado.append(1))
+    r = lazo_isp.intentar_avisar(mov)
+    assert r.estado == lazo_isp.ResultadoAviso.NO_CORRESPONDE
+    assert "no esta asignado" in r.detalle
+    assert llamado == []
+
+
+# ---------------------------------------------------------------------------
+# D2 · el rol BODEGA se puede asignar, y no es admin
+# ---------------------------------------------------------------------------
+
+def test_d2_bodega_es_un_rol_asignable_y_no_da_admin(user_profile):
+    from common.serializer import CreateProfileSerializer
+
+    s = CreateProfileSerializer(data={"role": "BODEGA"}, instance=user_profile,
+                                can_grant_privileges=True, partial=True)
+    assert s.is_valid(), s.errors
+    perfil = s.save()
+    perfil.refresh_from_db()
+    assert perfil.role == "BODEGA"
+    assert perfil.is_organization_admin is False

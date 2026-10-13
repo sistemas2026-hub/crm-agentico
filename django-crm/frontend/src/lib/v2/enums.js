@@ -368,8 +368,8 @@ export const PAYMENT_TERMS_LABEL = {
  * Role is server-derived from the profile; nothing the browser sends decides
  * it. This map exists to label a value the API gave us, never to offer one.
  */
-export const ROLE_LABEL = { ADMIN: 'Administrador', USER: 'Miembro' };
-export const ROLE_TONE = { ADMIN: 'clay', USER: 'slate' };
+export const ROLE_LABEL = { ADMIN: 'Administrador', USER: 'Miembro', BODEGA: 'Bodega' };
+export const ROLE_TONE = { ADMIN: 'clay', USER: 'slate', BODEGA: 'slate' };
 
 /* ── ticket handling configuration ──────────────────────────────────────── */
 

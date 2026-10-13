@@ -199,6 +199,20 @@ def intentar_avisar(movimiento) -> ResultadoAviso:
         return ResultadoAviso(ResultadoAviso.NO_CORRESPONDE,
                               "el consumo no lleva serie: no hay aparato que avisar.")
 
+    #  QUIEN INSTALA TIENE QUE ESTAR EN ESA ORDEN. La vista busca la orden solo
+    #  por id y empresa, asi que un tecnico podia atar un consumo a CUALQUIER
+    #  orden de la empresa -- y el aviso escribiria el serial en la ficha de ese
+    #  cliente. Con `reiniciar_ont` leyendo el serial de la ficha, un reinicio
+    #  aprobado despues apagaria el equipo de otra casa (auditoria de frontera,
+    #  13/10/2026, D3). El consumo entra igual: lo que no sale es el aviso.
+    from campo.models import AsignacionTrabajo
+
+    if movimiento.orden_id is None or not AsignacionTrabajo.objects.filter(
+            orden_id=movimiento.orden_id, profile_id=movimiento.profile_id).exists():
+        return ResultadoAviso(
+            ResultadoAviso.NO_CORRESPONDE,
+            "quien registro el consumo no esta asignado a esa orden: no se le "
+            "escribe al cliente de una orden ajena.")
     id_servicio = _id_servicio_de(movimiento.orden)
     if not id_servicio:
         # Se NOMBRA en vez de adivinar. Sin el id del cliente en el ISP no hay a

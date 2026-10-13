@@ -84,14 +84,16 @@ def recibido_por_transferencia(profile, material) -> Decimal:
 
 
 def _movido(profile, material, tipo) -> Decimal:
-    total = (
-        MovimientoDeMaterial.objects.filter(
-            profile=profile, material=material, tipo=tipo
-        )
-        .exclude(estado=MovimientoDeMaterial.CONFLICTO)
-        .aggregate(total=Sum("cantidad"))["total"]
-    )
-    return a_decimal(total)
+    qs = MovimientoDeMaterial.objects.filter(
+        profile=profile, material=material, tipo=tipo
+    ).exclude(estado=MovimientoDeMaterial.CONFLICTO)
+    #  La recepcion de algo YA DECLARADO por la app (`(ninguna) -> bodega`,
+    #  ver inventario.recibir_devolucion) es la firma de la bodega sobre una
+    #  devolucion que ya se conto cuando el tecnico la declaro. Contarla aca la
+    #  sumaria dos veces como devuelta (auditoria de custodia, D1, 13/10/2026).
+    if tipo == MovimientoDeMaterial.DEVOLUCION:
+        qs = qs.exclude(ubicacion_origen__isnull=True)
+    return a_decimal(qs.aggregate(total=Sum("cantidad"))["total"])
 
 
 def esperado_devolver(profile, material) -> Decimal:

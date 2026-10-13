@@ -482,6 +482,30 @@ def despachar(*, org, ubicacion_origen, profile_destino, lineas,
 
 
 @transaction.atomic
+def _declarado_sin_recibir(org, profile, material, custodia, serie="") -> Decimal:
+    """Lo que el tecnico devolvio POR LA APP y la bodega todavia no firmo.
+
+    Declarado = DEVOLUCION `custodia -> (ninguna)`, que es lo que escribe el
+    telefono. Recibido de lo declarado = DEVOLUCION `(ninguna) -> bodega`, que
+    es lo que escribe `recibir_devolucion` al consumirlo. La resta se calcula y
+    no se guarda: un contador guardado diria «pendiente 0» el dia que alguien
+    corrija una fila a mano.
+    """
+    base = (MovimientoDeMaterial.objects
+            .filter(org=org, profile=profile, material=material,
+                    tipo=MovimientoDeMaterial.DEVOLUCION)
+            .exclude(estado=MovimientoDeMaterial.CONFLICTO))
+    if serie:
+        base = base.filter(serie=serie)
+    declarado = Decimal(str(base.filter(
+        ubicacion_origen=custodia, ubicacion_destino__isnull=True,
+    ).aggregate(t=Sum("cantidad"))["t"] or 0))
+    recibido = Decimal(str(base.filter(
+        ubicacion_origen__isnull=True, ubicacion_destino__isnull=False,
+    ).aggregate(t=Sum("cantidad"))["t"] or 0))
+    return max(CERO, declarado - recibido)
+
+
 def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
                        recibida_por=None, notas="", referencia=""):
     """Tecnico -> bodega. El material vuelve a existir en la bodega.
@@ -524,23 +548,57 @@ def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
         material = linea["material"]
         serie = (linea.get("serie") or "").strip()
         cantidad = Decimal("1") if serie else Decimal(str(linea.get("cantidad") or 0))
-        mov = MovimientoDeMaterial.objects.create(
-            org=org,
-            profile=profile_origen,
-            material=material,
-            tipo=MovimientoDeMaterial.DEVOLUCION,
-            cantidad=cantidad,
-            serie=serie,
-            ubicacion_origen=origen,
-            ubicacion_destino=ubicacion_destino,
-            idempotency_key=_clave_de_hecho("devolucion", referencia, org.id,
-                                            origen.id, i, material.id,
-                                            serie or cantidad),
-            motivo=notas,
-        )
-        movimientos.append(mov)
-        if serie:
-            _mover_activo(activo_de(org, material, serie), ubicacion_destino, mov)
+        partes = (org.id, origen.id, i, material.id, serie or cantidad)
+
+        #  UN REINTENTO DEVUELVE LO YA REGISTRADO. Con referencia, la clave es
+        #  estable; antes un segundo envio chocaba contra el unique y terminaba
+        #  en un 500. Ahora, ademas, la linea puede haberse escrito de DOS formas
+        #  (abajo), y un reintento tiene que reconocer las dos.
+        if referencia:
+            previos = list(MovimientoDeMaterial.objects.filter(
+                org=org, idempotency_key__in=[
+                    _clave("devolucion", referencia, *partes),
+                    _clave("devolucion-declarada", referencia, *partes)]))
+            if previos:
+                movimientos.extend(previos)
+                continue
+
+        #  LA RECEPCION CONSUME LO QUE EL TECNICO YA DECLARO (13/10/2026).
+        #
+        #  Hay dos caminos para devolver y no se conocian. La app declara
+        #  `custodia -> (ninguna)`: el telefono no sabe si llego, y suponerlo
+        #  seria inventar una recepcion que nadie firmo. Esta funcion restaba
+        #  OTRA VEZ de la custodia. Sin recepcion, el material salia del
+        #  sistema; con recepcion, se restaba dos veces y el tecnico no podia
+        #  cerrar su jornada (auditoria de custodia, D1).
+        #
+        #  Ahora lo que ya estaba declarado entra a bodega DESDE «ninguna», y
+        #  solo lo que no se habia declarado sale de la custodia. Cada parte con
+        #  su propia fila: son dos hechos y los dos se explican despues.
+        declarado = _declarado_sin_recibir(org, profile_origen, material, origen,
+                                           serie)
+        cubierto = min(cantidad, declarado)
+        directo = cantidad - cubierto
+        for parte, desde, prefijo in ((cubierto, None, "devolucion-declarada"),
+                                      (directo, origen, "devolucion")):
+            if parte <= CERO:
+                continue
+            mov = MovimientoDeMaterial.objects.create(
+                org=org,
+                profile=profile_origen,
+                material=material,
+                tipo=MovimientoDeMaterial.DEVOLUCION,
+                cantidad=parte,
+                serie=serie,
+                ubicacion_origen=desde,
+                ubicacion_destino=ubicacion_destino,
+                idempotency_key=_clave_de_hecho(prefijo, referencia, *partes),
+                motivo=notas,
+                datos=({"recibe_lo_declarado": True} if desde is None else {}),
+            )
+            movimientos.append(mov)
+            if serie:
+                _mover_activo(activo_de(org, material, serie), ubicacion_destino, mov)
 
         # Lo que falta se NOMBRA. La devolucion registra lo que llego; la
         # diferencia es un hecho aparte, con su motivo, y NO se absorbe en un

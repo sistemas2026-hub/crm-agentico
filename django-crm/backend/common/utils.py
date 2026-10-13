@@ -65,6 +65,13 @@ ROLES = (
     ("SUPERVISOR", "SUPERVISOR"),
     ("OPERACIONES", "OPERACIONES"),
     ("USER", "USER"),
+    #  BODEGA, 13/10/2026: el mismo defecto que M09-D, otra vez. El inventario
+    #  ya lo reconocia (`campo/inventario_views.py::_exigir_inventario`) y nada
+    #  podia emitirlo: mover material exigia un rol de gestion, que ademas
+    #  valida y cierra ordenes y reparte trabajo -- mas permiso del necesario
+    #  (auditoria de frontera de custodia, D2). No es admin: Profile.save()
+    #  deriva is_organization_admin solo de ADMIN.
+    ("BODEGA", "BODEGA"),
 )
 
 LEAD_STATUS = (

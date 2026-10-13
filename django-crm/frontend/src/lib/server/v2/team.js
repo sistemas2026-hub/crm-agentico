@@ -43,7 +43,9 @@ import { apiRequest } from '$lib/api-helpers.js';
  * no MANAGER despite ApprovalRule offering it; a picker offering a value the
  * server rejects is worse than not offering it.
  */
-export const ROLES = ['ADMIN', 'USER'];
+//  BODEGA desde el 13/10/2026: el inventario lo reconocía y nadie podía
+//  asignarlo (auditoría de custodia, D2). No es admin.
+export const ROLES = ['ADMIN', 'USER', 'BODEGA'];
 
 /**
  * The signed-in user's id, read from the `user_id` claim of the access token.

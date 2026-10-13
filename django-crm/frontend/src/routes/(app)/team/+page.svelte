@@ -303,6 +303,7 @@
             <select id="invite-role" name="role" class="v2-input" style="width:130px">
               <option value="USER">Miembro</option>
               <option value="ADMIN">Administrador</option>
+              <option value="BODEGA">Bodega</option>
             </select>
           </div>
           <!--
@@ -683,6 +684,7 @@
                     >
                       <option value="USER">Miembro</option>
                       <option value="ADMIN">Administrador</option>
+              <option value="BODEGA">Bodega</option>
                     </select>
                   {:else}
                     <Pill tone={m.is_active ? ROLE_TONE[m.role] : 'slate'}>
