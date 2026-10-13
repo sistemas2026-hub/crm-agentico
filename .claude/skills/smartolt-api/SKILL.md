@@ -588,6 +588,117 @@ responder. Una herramienta que no mira esa precondición falla para el 99,92%
 de los clientes, y el modelo recibe un `HTTPError 400` crudo que no le dice
 por qué.
 
+## Historial: de ESTADO sí, de SEÑAL no — verificado en vivo (13/10/2026)
+
+Tres endpoints que esta skill no listaba. Se sondearon contra la instancia real
+de Rapilink con la ONU de prueba (`CDTC505AE4AB`, descripción "PRUEBA"), con
+autorización explícita del usuario y **solo GET**.
+
+El inventario salió de un **OpenAPI 3.0.3 con 120 endpoints** que el proveedor
+publica en `https://www.smartolt.com/openapi.json` — machine-readable, y mejor
+que el truco del `collectionId` de Postman. Barrido sobre los 120 buscando
+`histor|graph|series|trend|dBm`: aparecen solo estos tres.
+
+| Endpoint | Devuelve | ¿Sirve para «la señal viene empeorando»? |
+|---|---|---|
+| `/api/onu/get_onu_status_history/{sn}` | JSON con segundos por estado | No es señal, pero es lo más cercano útil |
+| `/api/onu/get_onu_signal_graph/{sn}/{tipo}` | **un PNG** | **NO** — ver abajo |
+| `/api/onu/get_onu_traffic_graph/{sn}/{tipo}` | **un PNG** | No aplica (tráfico) |
+
+### ⚠️ `online_percent` NO cuenta el tiempo que SmartOLT no sabe
+
+**El hallazgo más importante de este sondeo, y no estaba en la documentación
+del proveedor.** Medido sobre 30 días reales de la ONU de prueba:
+
+```
+summary.online_percent : 99.99          <- "estuvo perfecto"
+summary.known_seconds  : 771.108        <- 8,9 dias
+seconds.unknown        : 1.879.558      <- 21,7 dias SIN DATOS
+seconds.online         : 771.039
+interruptions          : 1
+```
+
+De 30 días, SmartOLT tenía datos de **9**. El porcentaje se calcula sobre
+`known_seconds`, no sobre el período pedido — así que un equipo del que no se
+sabe casi nada reporta **99,99 % online**, con cara de medición.
+
+**Nunca usar `online_percent` sin mirar `seconds.unknown` al lado.** Un
+`unknown` alto es «no sé», no «estuvo bien», y es justo la clase de respuesta
+confiadamente falsa que el método del valor imposible existe para cazar. Si una
+regla de código decide algo con este número, tiene que exigir que
+`known_seconds` cubra una fracción razonable del período — o declararse sin
+dato, que es lo honesto.
+
+### `get_onu_status_history` — lo que sí se puede prometer
+
+Verificado en vivo, con sus números:
+
+| Prueba | Resultado |
+|---|---|
+| Sin `from`/`to` | HTTP 200, **694 ms**, últimas 24 h, `detail: "transitions"` |
+| Rango real de 30 días | HTTP 200, **512 ms**, `detail: "daily"`, **31 filas** en `days[]` |
+| Valor imposible `from=2000-01-01&to=2000-01-02` | **HTTP 400** `invalid_date_range` — **el filtro SE RESPETA**, no lo ignora en silencio |
+| Serial imposible `ZZZZ00000000` | **HTTP 400** `specify_valid_field` — valida el identificador |
+
+- `from`/`to` como `YYYY-MM-DD`, juntos, hasta **365 días** atrás. El propio
+  error lo dice: *"Use from and to together as YYYY-MM-DD, from not after to,
+  within the last 365 days."*
+- `detail: "transitions"` cuando el período arranca en los últimos 7 días
+  (`periods[]`, cada estado con `from`/`to`/`seconds`/`cause`); `detail: "daily"`
+  cuando arranca antes (`days[]`, segundos por estado por día).
+- `summary.seconds` reparte en `online|los|power_fail|offline|login|unknown`,
+  más `interruptions` (cuántas veces pasó de Online a otro estado).
+  `periods[].cause` es `olt_reboot` o `null`.
+- **Es ~15 veces más rápido que `get_onu_full_status_info`** (694 ms contra los
+  ~10 s medidos en agosto): el contrato dice que sale de la base de SmartOLT y
+  no manda comandos a la OLT. Medido, no supuesto.
+- `timezone` **viene en la respuesta** (`America/Bogota` en esta cuenta) y hay
+  que leerlo, no asumirlo — misma trampa de `-05:00` vs UTC que ya costó una
+  conclusión equivocada el 15/08/2026.
+
+### El gráfico de señal existe y aun así no sirve para diagnosticar
+
+`get_onu_signal_graph/{sn}/{hourly|daily|weekly|monthly|yearly}` devolvió
+**HTTP 200, `image/png`, 9.223 bytes**. O sea: SmartOLT **sí guarda la serie
+temporal de la señal** —por algo puede dibujar un gráfico anual— pero la expone
+**únicamente como imagen renderizada**. No hay endpoint que devuelva los puntos
+en números; se recorrieron los 120 del OpenAPI.
+
+⚠️ **Trampa medida**: con un `graph_type` inventado devuelve
+**HTTP 200, `image/png`, 0 bytes**. Un éxito aparente con el cuerpo vacío —
+quien chequee solo el código de estado concluye que funcionó.
+
+Por qué NO entra al catálogo del asistente, y son dos razones independientes:
+
+1. **Leerlo exigiría visión**, o sea un tercero nuevo. CLAUDE.md §5: la
+   autorización de tratamiento que firma el cliente **nombra al proveedor del
+   modelo**, y un servicio de visión no está cubierto. Se resuelve antes, no
+   después.
+2. **Pedirle a un modelo que estime una pendiente mirando un dibujo es lo que
+   PRD §12.5 prohíbe** ("el modelo compone, el código calcula"). Un vistazo
+   sobre un PNG no es una medición, y erraría con el mismo tono seguro con el
+   que acertaría.
+
+Para lo que sí sirve: **mostrárselo a una persona** en la pantalla de un
+colaborador, igual que el link al panel de SmartOLT que esta skill ya documenta.
+Es material de interfaz, no de herramienta.
+
+### Un 403 de SmartOLT NO prueba que una ruta exista
+
+Medido el 13/10/2026 contra la instancia real, **sin** credencial: la
+autenticación se evalúa ANTES del enrutamiento. Nueve rutas distintas —incluida
+`get_onus_by_pon_port`, que esta skill ya probó que **no existe**, y dos nombres
+inventados (`get_onu_signal_history`, `get_onu_signal_series`)— devolvieron
+todas, byte por byte, el mismo:
+
+```
+HTTP 403  {"status":false,"error":"Invalid API key "}
+```
+
+Es el hermano de la trampa del 405 que ya está documentada arriba: **sondear sin
+clave no distingue nada**. Para saber si una ruta existe hace falta una clave
+válida, o el OpenAPI del proveedor.
+
 ## No verificado todavía (fuera del alcance del sondeo de hoy)
 
 - Si hay dirección/contacto poblados en algún registro real (el que se leyó
