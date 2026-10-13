@@ -2303,10 +2303,14 @@
               </p>
             </section>
 
-            <!-- ANÁLISIS TÉCNICO COMPLETO (el que ya existía, desplegable) -->
-            <details class="snoc-detalle-tecnico">
-              <summary class="snoc-label-sm">Ver análisis técnico completo</summary>
-            <!-- EVIDENCIA COMO TABLA -->
+            <!-- ============ EL REGISTRO DE AUDITORIA ============
+                 Para que esta: si manana hay que revisar por que se mando una
+                 cuadrilla a una casa, esta tabla dice que sabia el sistema, de
+                 donde lo saco y cuando. Es lo unico que lo dice.
+
+                 ESTABA DOS VECES: un desplegable adentro de otro, los dos con
+                 el mismo titulo. Para abrirlo habia que hacer dos clics en la
+                 misma frase. -->
             <details class="snoc-detalles">
               <summary class="snoc-label-sm">
                 Ver análisis técnico completo ({(detalle.evidencia ?? []).length} observaciones registradas)
@@ -2316,14 +2320,16 @@
                   <div class="snoc-tabla-caja">
                     <table class="snoc-tabla">
                       <thead>
-                        <tr><th>Fuente</th><th>Observación</th><th>Referencia</th><th>Leído</th></tr>
+                        <!-- SIN «Referencia»: era el id del caso, el MISMO en
+                             las ocho filas, ocupando un tercio del ancho. El
+                             id ya esta abajo, en «Información técnica». -->
+                        <tr><th>Fuente</th><th>Observación</th><th>Leído</th></tr>
                       </thead>
                       <tbody>
                         {#each detalle.evidencia as e, i (i)}
                           <tr>
                             <td class="snoc-mono-sm">{e.fuente ?? '—'}</td>
                             <td class="snoc-body-sm">{e.dato}</td>
-                            <td class="snoc-mono-sm snoc-tenue">{e.id ?? '—'}</td>
                             <td class="snoc-mono-sm snoc-tenue">{fecha(e.observado_en)}</td>
                           </tr>
                         {/each}
@@ -2335,7 +2341,6 @@
                 {/if}
               </div>
             </details>
-
             <!-- INFORMACIÓN TÉCNICA -->
             <details class="snoc-detalles">
               <summary class="snoc-label-sm">Información técnica</summary>
@@ -2349,12 +2354,12 @@
                 <div><span>Clave técnica:</span><span class="snoc-mono-sm">{detalle.tipo_senal}</span></div>
                 <div><span>Actualizada:</span><span class="snoc-mono-sm">{fecha(detalle.updated_at)}</span></div>
               </div>
-              {#if detalle.propuesta_original}
+              <!-- Un objeto VACIO tambien es "truthy": se pintaba un «{}»
+                   suelto debajo de los ids, que no es un dato, es basura. -->
+              {#if detalle.propuesta_original
+                   && Object.keys(detalle.propuesta_original).length > 0}
                 <pre class="snoc-pre">{JSON.stringify(detalle.propuesta_original, null, 2)}</pre>
               {/if}
-            </details>
-
-            <!-- CICLO: revisión humana ➔ ejecución -->
             </details>
 
             <!--

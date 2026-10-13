@@ -93,12 +93,17 @@ teléfono, no los vas a recibir.
 Lo que se espera de vos:
 - Una HIPÓTESIS de qué le pasa, con su confianza. Si el texto no alcanza para
   tener una, decilo y no inventes.
+- Una RECOMENDACIÓN concreta: QUÉ hay que hacer y A QUIÉN le toca. No "revisar
+  el ticket" ni "decidir qué hacer" -- eso no le dice nada a quien lo lee. Si
+  el reclamo es de pago, decí que va a cartera y qué hay que confirmar; si es
+  una falla de señal, decí que va a correctivo; si el equipo está sano y el
+  reclamo es técnico, decí que hay que llamar al cliente y qué preguntarle.
 - Lo que te FALTA para estar seguro, nombrado.
 - El RIESGO de que esto siga así.
 
-No propongas mandar una cuadrilla ni cerrar el ticket: eso lo decide una
-persona con lo que vos escribas, y proponerlo invitaría a tratarlo como algo
-ya resuelto.
+Tu recomendación es una PROPUESTA, no una orden: una persona la autoriza antes
+de que pase nada. Por eso podés decir a qué área va y qué hay que hacer -- lo
+que no podés es darlo por hecho, ni escribir como si ya estuviera resuelto.
 """
 
 
@@ -297,6 +302,22 @@ def _anotar(senal, veredicto, labor, ahora) -> None:
                else " (surge del texto del reclamo, no de una medición)"),
             ahora))
 
+    #  LA PROPUESTA DEL MODELO, que es lo que la pantalla muestra en grande.
+    #
+    #  NO VIAJABA hasta el 13/10/2026, y el efecto se vio mirando la pantalla:
+    #  "¿Qué propone el Supervisor NOC IA? -- Decidir qué se hace con este
+    #  ticket, que sigue abierto". Eso no es una propuesta, es devolverle la
+    #  pregunta a quien la hizo. Y el Supervisor ya tenia la respuesta escrita
+    #  dos bloques mas abajo: "está frenado en la validación del pago, no en
+    #  una falla técnica".
+    #
+    #  'cerebro.validar' ya la protege: una recomendacion sin NINGUN hecho
+    #  obtenido de una herramienta se descarta sola --"recomendar sobre nada es
+    #  la forma mas limpia de inventar"--. O sea que para proponer algo hay que
+    #  haber ido a buscar informacion primero, que es exactamente la regla que
+    #  se quiere.
+    senal.datos["accion_sugerida"] = (
+        getattr(veredicto, "recomendacion", "") or "").strip()
     senal.datos["diagnostico_leido"] = True
     senal.datos["diagnostico_hipotesis"] = hipotesis
     senal.datos["diagnostico_confianza"] = confianza
@@ -376,6 +397,31 @@ def guardar_en_propuesta(propuesta, senal, ahora=None) -> None:
 
     Lo que para un diagnostico de equipo seria ruido, para el seguimiento de un
     reclamo es la historia.
+
+    SE INTENTO FILTRAR LAS REPETIDAS Y NO SE PUEDE ASI  --  13/10/2026
+    -------------------------------------------------------------------
+    Un ticket de reconexion quedo con DOS lecturas de la misma tarde diciendo
+    lo mismo con otras palabras ("solicita la reconexion pagando el costo" /
+    "solicita la reconexion abonando el costo"), y se probo descartar la
+    segunda comparando cuanto se parecian los textos.
+
+    MEDIDO sobre los textos reales, y el resultado cierra esa puerta:
+
+        las dos lecturas REPETIDAS      0.576
+        una lectura vs un CAMBIO REAL   0.565
+        dos "falta para estar seguro"
+          que dicen lo mismo            0.339
+
+    Son el mismo numero. NO existe un umbral que separe "repite" de "paso algo
+    nuevo": el que tapara la repeticion taparia tambien la noticia --que el
+    cliente pago y el servicio sigue caido--, que es justo lo que el historial
+    existe para mostrar. Y dos listas de "lo que falta" que dicen lo mismo se
+    parecen MENOS entre si que una lectura y un cambio real.
+
+    Por eso se agrega siempre, como pedia el cliente. La duplicacion que se vio
+    venia de una RELECTURA --no de leer dos veces porque si-- y esa se dispara
+    una sola vez por propuesta: el criterio que la pide se apaga en cuanto el
+    resumen cita la lectura. Lo que quedo duplicado de antes se limpia aparte.
     """
     nuevas = [p for p in (senal.evidencia or [])
               if isinstance(p, dict) and p.get("fuente") == FUENTE]

@@ -547,7 +547,11 @@ export function filasComparables(filas) {
  * Pide las tres claves que usa, no el objeto entero de 'siAcepto': una
  * función que exige campos que no mira obliga a construirlos para probarla.
  *
- * @param {{estadoActual?: string, origenDecision?: string, tipo?: string}} aceptar
+ * 'accion' se declara aunque NO se use: llega en el objeto y se descarta a
+ * proposito, y dejarla fuera del tipo obligaba a construir un objeto que no
+ * se parece al real para probar justamente que se descarta.
+ *
+ * @param {{estadoActual?: string, origenDecision?: string, tipo?: string, accion?: string}} aceptar
  */
 export function filasDeAceptar(aceptar) {
   const filas = [

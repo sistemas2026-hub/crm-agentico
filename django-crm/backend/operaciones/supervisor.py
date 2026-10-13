@@ -1632,11 +1632,18 @@ def analizar(senal: Senal) -> dict:
         labor = (d.get("labor") or "").strip()
         verificada = bool(d.get("labor_verificada"))
 
-        #  LO QUE SE PROPONE ES MIRARLO, no resolverlo. El Supervisor leyo un
-        #  texto; de ahi no sale una accion sobre nadie. Nombrar la accion como
-        #  "revisar" seria lo que M09-R ya corrigio --nadie puede aceptar
-        #  "revisar"-- asi que se nombra la decision concreta: a que labor va.
-        if labor:
+        #  LO QUE EL SUPERVISOR PROPONE, con sus palabras, y recien despues
+        #  los respaldos. Hasta el 13/10/2026 esta rama solo sabia nombrar la
+        #  LABOR --y cuando no habia labor caia en "Decidir qué se hace con
+        #  este ticket", que es devolverle la pregunta a quien la hizo--.
+        #
+        #  La recomendacion del modelo no es palabra suelta: 'cerebro.validar'
+        #  descarta la que no tenga ningun hecho detras, asi que para llegar
+        #  aca hubo que consultar algo.
+        sugerida = (d.get("accion_sugerida") or "").strip()
+        if sugerida:
+            accion = sugerida
+        elif labor:
             accion = (f"Confirmar que este ticket corresponde a {labor} "
                       f"y despacharlo" if verificada else
                       f"Decidir si este ticket corresponde a {labor}: lo dice "
