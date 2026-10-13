@@ -63,6 +63,11 @@ from operaciones.models import PropuestaSupervisor
 
 logger = logging.getLogger(__name__)
 
+#:  Con que empieza la observacion que guarda lo leido. Esta en una constante
+#:  porque la escribe '_anotar' y la reconoce 'el_juicio_ignora_la_lectura':
+#:  dos sitios con la misma cadena escrita a mano se separan sin avisar.
+ETIQUETA_LECTURA = "lectura del reclamo: "
+
 #:  La fuente con la que queda marcada la evidencia del diagnostico, para que
 #:  quien la lea sepa de donde salio sin tener que interpretar la frase.
 FUENTE = "diagnostico_del_ticket"
@@ -245,7 +250,8 @@ def _anotar(senal, veredicto, labor, ahora) -> None:
     if hipotesis:
         senal.evidencia.append(sup._observacion(
             FUENTE, senal.origen_id,
-            f"lectura del reclamo: {hipotesis} (confianza {confianza or 'sin declarar'})",
+            f"{ETIQUETA_LECTURA}{hipotesis} "
+            f"(confianza {confianza or 'sin declarar'})",
             ahora))
     else:
         #  SE ANOTA IGUAL. "Se leyó y no alcanzó" es un resultado, y callarlo
@@ -294,6 +300,49 @@ def le_falta_lectura(propuesta) -> bool:
         if isinstance(pieza, dict) and pieza.get("fuente") == FUENTE:
             return False
     return True
+
+
+#:  Cuanto de la hipotesis tiene que aparecer en el motivo para dar por hecho
+#:  que el juicio la incorporo. No se compara entero: el motivo la envuelve en
+#:  una frase y puede recortarla.
+TROZO_PARA_RECONOCERLA = 40
+
+
+def el_juicio_ignora_la_lectura(propuesta) -> bool:
+    """
+    Si esta propuesta ya fue leida pero su resumen no lo dice.
+
+    DE DONDE SALE, Y POR QUE HACE FALTA UN SEGUNDO CRITERIO
+    -------------------------------------------------------
+    'le_falta_lectura' pregunta si hay evidencia de lectura. Las 52 propuestas
+    que estaban vivas el 13/10/2026 SI la tienen -- y su resumen igual decia
+    "se leyo el reclamo y no alcanza para una hipotesis", porque se escribio
+    antes de leer y hasta ese dia nadie lo volvia a tocar.
+
+    Para esas, 'le_falta_lectura' dice que no falta nada y quedarian con el
+    texto viejo para siempre. Este criterio las encuentra.
+
+    SE COMPARAN DOS TEXTOS QUE YA ESTAN, no se parsea un veredicto desde la
+    evidencia: eso es justo lo que '_anotar' advierte que no se haga, y por eso
+    el veredicto viaja aparte en los datos de la señal. Lo unico que se
+    pregunta aca es si el resumen menciona lo que la lectura encontro.
+
+    SE APAGA SOLA: en cuanto la propuesta se rejuzga, el motivo pasa a contener
+    la hipotesis y deja de cumplirse.
+    """
+    motivo = (getattr(propuesta, "motivo", "") or "")
+    for pieza in (propuesta.evidencia or []):
+        if not isinstance(pieza, dict) or pieza.get("fuente") != FUENTE:
+            continue
+        dato = str(pieza.get("dato") or "")
+        if not dato.startswith(ETIQUETA_LECTURA):
+            #  "falta para estar seguro" y "no alcanza" tambien se anotan con
+            #  esta fuente, y no son una hipotesis que el motivo deba citar.
+            continue
+        hipotesis = dato[len(ETIQUETA_LECTURA):].strip()
+        if hipotesis[:TROZO_PARA_RECONOCERLA] not in motivo:
+            return True
+    return False
 
 
 def guardar_en_propuesta(propuesta, senal, ahora=None) -> None:

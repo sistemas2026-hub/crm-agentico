@@ -1609,14 +1609,25 @@ def analizar(senal: Senal) -> dict:
 
         return {
             "accion_propuesta": accion,
+            #  LO LEIDO VA PRIMERO, LA ANTIGÜEDAD DESPUES  --  13/10/2026
+            #  ----------------------------------------------------------
+            #  Estaba al reves, y el efecto lo dijo el cliente mirando la
+            #  pantalla: "no esta analizando la descripcion del ticket, solo
+            #  esta tomando el tiempo de creacion". El diagnostico estaba --se
+            #  veia tres bloques mas abajo, con los dBm y todo-- pero el
+            #  titular abria con los dias, y un titular que habla de fechas
+            #  dice que se miro una fecha.
+            #
+            #  Los dias siguen estando: son el motivo de que esto sea urgente.
+            #  Lo que cambia es cual de las dos cosas se lee primero.
             "motivo": (
-                f"El ticket sigue abierto en WispHub hace {dias} días"
+                (f"Leyendo el reclamo: {hipotesis}"
+                 + (f" (confianza {confianza})." if confianza else ".")
+                 if hipotesis else
+                 "Se leyó el reclamo y no alcanza para una hipótesis.")
+                + f" El ticket sigue abierto en WispHub hace {dias} días"
                 + (" y pasó el límite de 5 días sin movimiento."
                    if d.get("sin_movimiento") else ".")
-                + (f" Leyendo el reclamo: {hipotesis}"
-                   + (f" (confianza {confianza})." if confianza else ".")
-                   if hipotesis else
-                   " Se leyó el reclamo y no alcanza para una hipótesis.")
                 + " Esto sale de LEER el texto, no de medir el equipo: por eso"
                   " lo decide una persona."),
             "prioridad": prioridad,
@@ -2411,22 +2422,46 @@ def _leer_tickets_abiertos(org, ahora) -> dict:
     #  diagnostico no se vuelve a pagar: fue lo primero que se pidio -- "debe
     #  guardar un registro de que ya reviso tales ticket para que no le corra
     #  nuevamente el diagnostico".
+    #  TRES COLAS, Y EL ORDEN IMPORTA porque el tope de la vuelta corta donde
+    #  llegue. Lo primero es lo que nadie miro nunca; lo ultimo, lo que ya se
+    #  miro y solo necesita que el resumen se ponga al dia.
     pendientes = {}
-    candidatas = []
+    sin_leer = []        # 1 · ningun diagnostico todavia
+    al_dia = []          # 2 · el resumen no refleja lo que ya se leyo
     for s in senales:
         if not _ya_propuesta(org, s):
             #  Sin propuesta todavia. Se diagnostica ANTES de registrarla, asi
             #  la propuesta nace con el diagnostico adentro en vez de aparecer
             #  vacia y completarse una hora despues.
-            candidatas.append(s)
+            sin_leer.append(s)
             continue
         p = _propuesta_vigente_de(org, s)
         if p is None:
             continue
         if dxt.le_falta_lectura(p):
             pendientes[s.origen_id] = p
-            candidatas.append(s)
+            sin_leer.append(s)
+        elif dxt.el_juicio_ignora_la_lectura(p):
+            #  YA SE LEYO Y EL RESUMEN NO LO DICE  --  13/10/2026
+            #  --------------------------------------------------
+            #  Las 52 propuestas vivas ese dia tenian la lectura guardada como
+            #  evidencia y el resumen escrito ANTES de leerla, diciendo que no
+            #  alcanzaba para una hipotesis con la hipotesis tres bloques mas
+            #  abajo. 'le_falta_lectura' dice que no les falta nada, asi que
+            #  sin esta rama se quedaban con el texto viejo para siempre.
+            #
+            #  Se relee en vez de recomponer el texto desde la evidencia: el
+            #  veredicto viaja en los datos de la señal a proposito, y sacarlo
+            #  del texto seria lo que '_anotar' advierte que no se haga. La
+            #  relectura ademas AGREGA una observacion, que es lo que se pidio
+            #  --ver el flujo del seguimiento-- en vez de tapar la anterior.
+            #
+            #  VA ULTIMO: ninguna de estas se queda sin atender por esperar,
+            #  pero un ticket que nadie miro nunca va primero.
+            pendientes[s.origen_id] = p
+            al_dia.append(s)
 
+    candidatas = sin_leer + al_dia
     if not candidatas:
         return informe
 

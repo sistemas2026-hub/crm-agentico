@@ -217,3 +217,113 @@ def test_la_lectura_reescribe_el_resumen_y_no_lo_deja_contradiciendo_la_evidenci
         "el resumen no nombra lo que se leyo: quien no baje hasta la "
         "evidencia no se entera de que el sistema si averiguo algo")
     assert "motivo" in p.guardados[0], "el motivo no se persistio"
+
+
+# ===========================================================================
+#  5. UN RESUMEN QUE NO DICE LO QUE SE LEYO SE VUELVE A HACER
+# ===========================================================================
+#  Lo vio el cliente mirando la pantalla el 13/10/2026: "no esta analizando la
+#  descripcion del ticket, solo esta tomando el tiempo de creacion". Y tenia
+#  razon en lo que veia -- el diagnostico estaba, con los dBm, pero tres
+#  bloques mas abajo; el titular abria con los dias y decia que no alcanzaba
+#  para una hipotesis.
+#
+#  Dos cosas distintas, y las dos se arreglan aca:
+#    · el ORDEN: lo leido primero, la antiguedad despues.
+#    · las que YA estaban guardadas con el texto viejo. 'le_falta_lectura' dice
+#      que no les falta nada --la evidencia esta-- asi que sin un segundo
+#      criterio se quedaban asi para siempre.
+
+def _propuesta_con(motivo, evidencia):
+    p = _PropuestaFalsa()
+    p.motivo = motivo
+    p.evidencia = evidencia
+    return p
+
+
+HIPOTESIS = ("Degradación del enlace óptico del servicio 3614 "
+             "(señal débil, -26.19 dBm) que provoca intermitencia")
+
+
+def _lectura(texto=HIPOTESIS):
+    from operaciones import diagnostico_de_ticket as dxt
+    return {"fuente": dxt.FUENTE, "entidad_id": "1",
+            "dato": f"{dxt.ETIQUETA_LECTURA}{texto} (confianza media)"}
+
+
+def test_una_propuesta_leida_con_resumen_viejo_se_detecta():
+    from operaciones import diagnostico_de_ticket as dxt
+
+    vieja = _propuesta_con(
+        "El ticket sigue abierto en WispHub hace 7 días. Se leyó el reclamo "
+        "y no alcanza para una hipótesis.",
+        [_lectura()])
+
+    assert not dxt.le_falta_lectura(vieja), (
+        "la evidencia esta: el criterio viejo no la ve como pendiente, que es "
+        "justo por lo que hacia falta uno nuevo")
+    assert dxt.el_juicio_ignora_la_lectura(vieja), (
+        "el resumen dice que no hay hipotesis y la evidencia trae una: si esto "
+        "no se detecta, la propuesta se queda contradiciendose para siempre")
+
+
+def test_una_propuesta_cuyo_resumen_ya_cita_la_lectura_no_se_vuelve_a_leer():
+    #  SE APAGA SOLA: si no, cada vuelta del ciclo pagaria una llamada al
+    #  modelo por cada propuesta viva, para siempre.
+    from operaciones import diagnostico_de_ticket as dxt
+
+    aldia = _propuesta_con(f"Leyendo el reclamo: {HIPOTESIS} (confianza media). "
+                           "El ticket sigue abierto hace 7 días.",
+                           [_lectura()])
+
+    assert not dxt.el_juicio_ignora_la_lectura(aldia)
+
+
+def test_una_propuesta_sin_lectura_no_se_confunde_con_una_desactualizada():
+    from operaciones import diagnostico_de_ticket as dxt
+
+    sin_leer = _propuesta_con("El ticket sigue abierto hace 7 días.", [])
+    assert dxt.le_falta_lectura(sin_leer)
+    assert not dxt.el_juicio_ignora_la_lectura(sin_leer), (
+        "una que nunca se leyo entraria por los dos caminos y se "
+        "diagnosticaria dos veces")
+
+
+def test_la_anotacion_de_que_falta_algo_no_cuenta_como_hipotesis():
+    #  '_anotar' escribe con la misma fuente lo que FALTA para estar seguro.
+    #  Exigirle al resumen que cite eso dispararia una relectura eterna.
+    from operaciones import diagnostico_de_ticket as dxt
+
+    p = _propuesta_con(
+        "Leyendo el reclamo: algo. El ticket sigue abierto hace 7 días.",
+        [{"fuente": dxt.FUENTE, "entidad_id": "1",
+          "dato": "falta para estar seguro: historial de señal del servicio"}])
+
+    assert not dxt.el_juicio_ignora_la_lectura(p)
+
+
+def test_el_resumen_abre_por_lo_que_se_leyo_y_no_por_los_dias():
+    """
+    EL ORDEN ES EL HALLAZGO, no un detalle de redaccion.
+
+    Un titular que empieza por una fecha dice que se miro una fecha. Fue
+    exactamente la lectura que hizo el cliente de la pantalla, con el
+    diagnostico completo visible mas abajo.
+    """
+    from operaciones.models import PropuestaSupervisor as P
+    from operaciones.supervisor import Senal, analizar
+
+    juicio = analizar(Senal(
+        tipo=P.TICKET_SIN_DIAGNOSTICO, origen_tipo="case", origen_id="1",
+        evidencia=[],
+        datos={"dias_abierto": 7, "sin_movimiento": True,
+               "diagnostico_leido": True,
+               "diagnostico_hipotesis": HIPOTESIS,
+               "diagnostico_confianza": "media"}))
+
+    motivo = juicio["motivo"]
+    assert motivo.startswith("Leyendo el reclamo:"), (
+        f"el resumen sigue abriendo por otra cosa: {motivo[:60]!r}")
+    assert motivo.index(HIPOTESIS[:30]) < motivo.index("7 días"), (
+        "la antiguedad aparece antes que lo leido, que es lo que hacia pensar "
+        "que solo se miraba la fecha de creacion")
