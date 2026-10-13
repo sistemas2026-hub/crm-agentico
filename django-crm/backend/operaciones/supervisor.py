@@ -2187,29 +2187,52 @@ def _atender_desincronizados(org, ahora, *, desatendido: bool = False) -> dict:
     #  nivel y no pasa nada", sin ningun error.
     pendientes = {}
     por_cerrar = {}
-    candidatas = []
+    #  TRES COLAS, Y EL ORDEN ENTRE ELLAS ES EL ARREGLO  --  13/10/2026
+    #  ----------------------------------------------------------------
+    #  El presupuesto es de quince diagnosticos por vuelta, y se gasta en el
+    #  orden en que llegan las señales. 'Case' se consulta SIN 'order_by', asi
+    #  que Postgres las devuelve en orden fisico: las mas viejas primero.
+    #
+    #  El 09/10 se agrego el reintento de los diagnosticos inconcluyentes, y
+    #  eso destrabo noventa y cinco casos. Pero creo un problema nuevo: un caso
+    #  que NUNCA se va a poder diagnosticar --sin serial en WispHub Y sin
+    #  respuesta al ping-- vuelve a entrar en cada vuelta, es de los mas
+    #  viejos, y se lleva el presupuesto. Los casos NUEVOS nunca llegaban a
+    #  mirarse.
+    #
+    #  Sintoma reportado dos dias despues: "los casos desincronizados siguen
+    #  creciendo y no se cierran solos". Crecian porque los nuevos no se
+    #  tocaban, y no se cerraban porque los que si se tocaban eran
+    #  precisamente los irresolubles.
+    #
+    #  SIN DIAGNOSTICAR PRIMERO, REINTENTOS DESPUES. Un caso nuevo siempre
+    #  entra; un reintento usa lo que sobre. Es la diferencia entre "todavia no
+    #  se pregunto" y "ya se pregunto y no alcanzo", y la primera es la que
+    #  puede cambiar algo hoy.
+    sin_diagnosticar = []
+    reintentos = []
     for s in senales:
         if not _ya_propuesta(org, s):
-            candidatas.append(s)
+            #  Ni siquiera tiene propuesta: lo mas nuevo que hay.
+            sin_diagnosticar.append(s)
             continue
         p = diagnostico_optico.propuesta_pendiente_de(org, s)
         if p is None:
             continue
-        #  SIN DIAGNOSTICO, o CON UNO INCONCLUYENTE. Los dos casos van al
-        #  mismo lugar porque piden lo mismo: preguntarle al proveedor.
-        #
-        #  El segundo se agrego el 09/10/2026, y sin el noventa y cinco casos
-        #  quedaron atascados para siempre: diagnosticados antes de que
-        #  existiera el respaldo por ping, con "no hay equipo registrado", y
-        #  por tener ya su linea de diagnostico nunca volvian a intentarse.
-        #  Seis corridas seguidas devolvieron cero con los dos mapas vacios --
-        #  ni siquiera entraban. Ver 'hay_que_reintentar_diagnostico'.
-        if (diagnostico_optico.le_falta_diagnostico(p)
-                or diagnostico_optico.hay_que_reintentar_diagnostico(p)):
+        if diagnostico_optico.le_falta_diagnostico(p):
+            #  Tiene propuesta y nunca se le pregunto al proveedor.
             pendientes[s.origen_id] = p
-            candidatas.append(s)
+            sin_diagnosticar.append(s)
+        elif diagnostico_optico.hay_que_reintentar_diagnostico(p):
+            #  Se le pregunto y no se pudo concluir. Vale reintentar --puede
+            #  haberse cargado el serial, puede responder el ping-- pero
+            #  DESPUES de los que nunca se preguntaron.
+            pendientes[s.origen_id] = p
+            reintentos.append(s)
         elif p.nivel_autonomia_requerido >= diagnostico_optico.NIVEL_PARA_CERRAR:
             por_cerrar[s.origen_id] = p
+
+    candidatas = sin_diagnosticar + reintentos
 
     if not candidatas and not por_cerrar:
         return informe

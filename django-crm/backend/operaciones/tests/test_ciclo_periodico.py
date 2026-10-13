@@ -358,3 +358,94 @@ def test_cada_tarea_arranca_con_una_conexion_fresca():
         "la conexion sigue abierta al arrancar una tarea: si la base la mato "
         "mientras tanto, la tarea revienta en su primera consulta -- que es "
         "exactamente lo que paso el 08/10/2026")
+
+
+# ===========================================================================
+#  9. UN CASO NUEVO NUNCA SE QUEDA ESPERANDO DETRAS DE LOS IRRESOLUBLES
+# ===========================================================================
+#  LO QUE PASO, reportado el 13/10/2026: "los casos desincronizados siguen
+#  creciendo y no se cierran solos", dos dias despues de que el ciclo
+#  funcionara.
+#
+#  El presupuesto es de quince diagnosticos por vuelta y se gasta en el orden
+#  en que llegan las señales. 'Case' se consulta sin 'order_by', asi que
+#  Postgres las devuelve en orden fisico: las mas viejas primero.
+#
+#  El 09/10 se habia agregado el reintento de los diagnosticos inconcluyentes
+#  --sin eso, noventa y cinco casos quedaban trabados para siempre-- pero un
+#  caso que NUNCA se va a poder diagnosticar (sin serial en WispHub y sin
+#  respuesta al ping) vuelve a entrar en cada vuelta, es de los mas viejos, y
+#  se lleva el presupuesto entero. Los nuevos no se tocaban nunca.
+#
+#  Crecian porque los nuevos no se miraban, y no se cerraban porque los que si
+#  se miraban eran precisamente los irresolubles. Las dos mitades del sintoma,
+#  de la misma causa.
+#
+#  NINGUNA GUARDA LO VEIA: las del 09/10 afirmaban que un inconcluyente SE
+#  REINTENTA, que era cierto. Ninguna afirmaba que un caso nuevo llegue a
+#  mirarse, que es la otra mitad del trato.
+
+@pytest.mark.django_db
+def test_lo_nunca_diagnosticado_va_antes_que_los_reintentos(db, monkeypatch):
+    from operaciones import diagnostico_optico as diag
+    from operaciones import supervisor as sup
+    from operaciones.models import PropuestaSupervisor as P
+
+    org = Org.objects.create(name="Org de la cola")
+
+    class _Senal:
+        def __init__(self, oid):
+            self.tipo = P.CASO_DESINCRONIZADO
+            self.origen_id = oid
+            self.datos = {"id_servicio": "1"}
+            self.evidencia = []
+
+    #  EL ORDEN DE ENTRADA ES EL PEOR POSIBLE, a proposito: los irresolubles
+    #  primero, como los devuelve Postgres por ser los mas viejos.
+    viejos = [_Senal(f"viejo-{i}") for i in range(20)]
+    nuevo = _Senal("recien-llegado")
+    monkeypatch.setattr(sup, "detectar", lambda o, a=None: viejos + [nuevo])
+
+    #  Todos tienen propuesta; los viejos con diagnostico inconcluyente, el
+    #  nuevo sin ninguno.
+    monkeypatch.setattr(sup, "_ya_propuesta", lambda o, s: True)
+    monkeypatch.setattr(diag, "propuesta_pendiente_de",
+                        lambda o, s: object())
+    monkeypatch.setattr(diag, "le_falta_diagnostico",
+                        lambda p: False)
+    monkeypatch.setattr(diag, "hay_que_reintentar_diagnostico",
+                        lambda p: True)
+
+    vistas = []
+    monkeypatch.setattr(
+        diag, "enriquecer",
+        lambda o, cands, **kw: vistas.extend(s.origen_id for s in cands) or {})
+    monkeypatch.setattr(diag, "evaluar_cierre_automatico",
+                        lambda o, c, **kw: {"cerrados": 0, "motivos": {}})
+
+    sup._atender_desincronizados(org, None)
+
+    #  Con TODO en reintento el orden no cambia -- pero el que importa es el
+    #  caso de abajo, donde hay uno sin diagnosticar.
+    assert len(vistas) == 21
+
+    #  AHORA EL CASO REAL: el nuevo no tiene diagnostico y los viejos si.
+    vistas.clear()
+    monkeypatch.setattr(
+        diag, "le_falta_diagnostico",
+        lambda p: getattr(p, "_es_el_nuevo", False))
+
+    def pendiente(o, s):
+        marcador = type("P", (), {"nivel_autonomia_requerido": 0})()
+        marcador._es_el_nuevo = (s.origen_id == "recien-llegado")
+        return marcador
+
+    monkeypatch.setattr(diag, "propuesta_pendiente_de", pendiente)
+
+    sup._atender_desincronizados(org, None)
+
+    assert vistas[0] == "recien-llegado", (
+        f"el caso sin diagnosticar quedo en la posicion {vistas.index('recien-llegado')} "
+        f"detras de los reintentos. Con un presupuesto de 15 por vuelta y mas "
+        f"de 15 irresolubles por delante, un caso nuevo NO SE MIRA NUNCA -- y "
+        f"los desincronizados crecen sin que nada falle")
