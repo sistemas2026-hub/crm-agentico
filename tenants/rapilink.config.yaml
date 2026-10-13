@@ -5536,6 +5536,18 @@ herramientas:
     inyectar_sesion:
       sn_onu: sn_onu
     inyectados_obligatorios: [sn_onu]
+    # EL PASE PARA EL SUPERVISOR  --  13/10/2026
+    # ------------------------------------------
+    # Mismo patron que 'ping_cliente': el Supervisor NOC no esta en ninguna
+    # conversacion, asi que no hay sesion de la cual sacar el equipo -- tiene
+    # que poder indicarlo. 'sobrescribir' lo arma el llamador EN CODIGO y no
+    # llega por ningun camino del modelo.
+    #
+    # NO afloja nada para el cliente: 'inyectados_obligatorios' sigue puesto, y
+    # una sesion CON valor sigue ganando. Medido contra la config viva el mismo
+    # dia -- el modelo pidio el equipo de otro cliente y salio el de la sesion.
+    invocable_por_servicio: true
+    argumentos_sobrescribibles: [sn_onu]
     # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
     # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
     # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
@@ -5596,6 +5608,18 @@ herramientas:
     inyectar_sesion:
       sn_onu: sn_onu
     inyectados_obligatorios: [sn_onu]
+    # EL PASE PARA EL SUPERVISOR  --  13/10/2026
+    # ------------------------------------------
+    # Mismo patron que 'ping_cliente': el Supervisor NOC no esta en ninguna
+    # conversacion, asi que no hay sesion de la cual sacar el equipo -- tiene
+    # que poder indicarlo. 'sobrescribir' lo arma el llamador EN CODIGO y no
+    # llega por ningun camino del modelo.
+    #
+    # NO afloja nada para el cliente: 'inyectados_obligatorios' sigue puesto, y
+    # una sesion CON valor sigue ganando. Medido contra la config viva el mismo
+    # dia -- el modelo pidio el equipo de otro cliente y salio el de la sesion.
+    invocable_por_servicio: true
+    argumentos_sobrescribibles: [sn_onu]
     # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
     # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
     # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
