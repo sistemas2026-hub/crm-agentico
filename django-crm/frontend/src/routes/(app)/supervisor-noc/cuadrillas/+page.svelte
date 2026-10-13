@@ -170,6 +170,50 @@
       (data.jornadas ?? []).flatMap((j) => (j.integrantes ?? []).map((i) => i.id))
     ).size
   );
+
+  // =====================================================================
+  //  MOVER UNA ORDEN DE CUADRILLA ANTES DE PUBLICAR  --  13/10/2026
+  // =====================================================================
+  //  El reparto propone con un criterio declarado --lo que vence primero,
+  //  despues lo mas viejo, respetando zonas-- y ese criterio es bueno. Pero
+  //  quien conoce el terreno puede saber algo que el criterio no ve: que esa
+  //  casa queda de paso, que ese cliente ya conoce a ese tecnico.
+  //
+  //  Hasta hoy la unica salida era publicar y reasignar despues, y eso deja al
+  //  tecnico viendo en su telefono un trabajo que termina no siendo suyo.
+  //
+  //  NO SE TOCA EL REPARTO NI SE GUARDA NADA. Las mudanzas viven en la
+  //  pantalla hasta que alguien publica; si se recarga, vuelve la propuesta
+  //  del motor. Es coherente con lo que ya hacia: 'proponer()' no escribe.
+  //
+  //  Y el backend NO necesita nada nuevo: 'POST /campo/cuadrillas/reparto/'
+  //  ya publica las asignaciones que le mandan, no las que el calculo dio.
+
+  /** De qué jornada quedó cada orden movida. Vacío = como lo propuso el motor. */
+  let mudanzas = $state(/** @type {Record<string, string>} */ ({}));
+
+  /** Las órdenes que le tocan a una jornada, ya con las mudanzas aplicadas. */
+  function repartoDe(jornada) {
+    const p = data.reparto?.propuesta;
+    if (!p) return [];
+    const salida = [];
+    for (const a of p.asignaciones ?? []) {
+      for (const o of a.ordenes ?? []) {
+        if ((mudanzas[o.id] ?? a.jornada) === jornada) salida.push(o);
+      }
+    }
+    return salida;
+  }
+
+  function mover(ordenId, desde, hacia) {
+    //  Volver a su jornada original BORRA la marca en vez de guardarla igual:
+    //  así "no hay mudanzas" es un objeto vacío y no uno lleno de valores que
+    //  no cambian nada.
+    if (hacia === desde) delete mudanzas[ordenId];
+    else mudanzas[ordenId] = hacia;
+  }
+
+  const hayMudanzas = $derived(Object.keys(mudanzas).length > 0);
 </script>
 
 <svelte:head>
@@ -457,11 +501,13 @@
           <form method="POST" action="?/publicar" use:enhance class="snoc-pila">
             {#each conOrdenes as a (a.jornada)}
               <!-- Se manda lo que se está MIRANDO, no la fecha: entre ver y
-                   publicar pueden entrar órdenes nuevas. -->
+                   publicar pueden entrar órdenes nuevas.
+                   Y se manda lo que quedó después de los cambios: 'repartoDe'
+                   devuelve la propuesta con las mudanzas aplicadas. -->
               <input
                 type="hidden"
                 name="asignacion"
-                value={[a.jornada, ...a.ordenes.map((o) => o.id)].join('|')}
+                value={[a.jornada, ...repartoDe(a.jornada).map((o) => o.id)].join('|')}
               />
               <div class="snoc-tarjeta">
                 <div class="snoc-fila-sep" style="flex-wrap:wrap;">
@@ -474,17 +520,57 @@
                     {#if a.zonas.length}· {a.zonas.join(', ')}{/if}
                   </span>
                 </div>
-                {#each a.ordenes as o (o.id)}
+                {#each repartoDe(a.jornada) as o (o.id)}
                   <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
                     <span class="snoc-mono">#{o.numero}</span>
                     <span>{o.cliente || '—'}</span>
                     <span class="snoc-body-sm snoc-secundario">{o.direccion}</span>
                     {#if o.zona}<span class="snoc-tag">{o.zona}</span>{/if}
+                    <!--
+                      MOVERLA ANTES DE PUBLICAR  --  13/10/2026
+                      El reparto propone con un criterio declarado, pero quien
+                      conoce el terreno puede saber algo que el criterio no
+                      ve: que esa casa queda de paso, que ese cliente ya
+                      conoce a ese técnico. Hasta hoy la única salida era
+                      publicar y reasignar después, que deja al técnico viendo
+                      en su teléfono un trabajo que no era suyo.
+                      Es un <select> y no arrastrar: funciona con teclado, en
+                      un teléfono, y no hay forma de soltar una orden en el
+                      vacío.
+                    -->
+                    <select
+                      class="snoc-campo"
+                      style="margin-left:auto; max-width:14rem;"
+                      aria-label="Mover la orden {o.numero} a otra cuadrilla"
+                      onchange={(e) => mover(o.id, a.jornada, e.currentTarget.value)}
+                    >
+                      {#each conOrdenes as destino (destino.jornada)}
+                        <option value={destino.jornada} selected={destino.jornada === a.jornada}>
+                          {destino.cuadrilla.nombre}
+                        </option>
+                      {/each}
+                    </select>
                   </div>
                 {/each}
               </div>
             {/each}
 
+            {#if hayMudanzas}
+              <!--
+                SE DICE QUE LA PROPUESTA YA NO ES LA DEL MOTOR. Publicar una
+                jornada creyendo que es la calculada cuando tiene cambios a
+                mano haría que, el día que algo salga mal, se revisara el
+                criterio en vez de la decisión.
+              -->
+              <p class="snoc-body-sm">
+                Moviste {Object.keys(mudanzas).length}
+                {Object.keys(mudanzas).length === 1 ? 'orden' : 'órdenes'}.
+                Se publica como quedó acá, no como lo propuso el reparto.
+                <button class="snoc-enlace" type="button" onclick={() => (mudanzas = {})}>
+                  Volver a la propuesta
+                </button>
+              </p>
+            {/if}
             <button class="snoc-btn snoc-btn-primario" type="submit">
               Publicar esta jornada
             </button>

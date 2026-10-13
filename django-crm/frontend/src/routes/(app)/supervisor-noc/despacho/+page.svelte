@@ -102,6 +102,79 @@
         </section>
       {/if}
 
+      <!--
+        COMO QUEDARIA LA JORNADA  --  13/10/2026
+        ========================================
+        El reparto ya existia y nadie lo veia desde aca. Ordena por lo que
+        VENCE primero, despues por lo mas viejo, y respeta las zonas de cada
+        cuadrilla. No publica nada: lo que se ve es una propuesta, y una
+        persona decide.
+
+        LO QUE NO ENTRO SE MUESTRA JUNTO A LO QUE SI, y no escondido: una
+        jornada que reparte veinte ordenes y deja ocho afuera sin decirlo
+        parece completa. El motivo de cada grupo es distinto y lleva a
+        acciones distintas -- una zona sin mapear se arregla en Cuadrillas, un
+        sobrante se arregla subiendo el tope o agregando gente.
+      -->
+      <section class="snoc-panel" style="gap:var(--snoc-sm);">
+        <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+          <div class="snoc-pila-xs">
+            <h2 class="snoc-h2">Cómo quedaría la jornada</h2>
+            <p class="snoc-body-sm snoc-secundario">
+              Del {data.dia}. Primero lo que está por vencer, después lo más
+              viejo, respetando las zonas de cada cuadrilla.
+              <strong>Es una propuesta: no se publica sola.</strong>
+            </p>
+          </div>
+          <a class="snoc-btn" href="/supervisor-noc/cuadrillas?dia={data.dia}&reparto=1">
+            Ver el detalle y publicar
+          </a>
+        </div>
+
+        {#if data.repartoError}
+          <div class="snoc-hueco">
+            <span class="snoc-hueco-rotulo">Sin dato</span>
+            <p class="snoc-hueco-motivo">{data.repartoError}</p>
+          </div>
+        {:else if !data.conteos || data.conteos.ordenes === 0}
+          <p class="snoc-body-sm snoc-secundario">
+            No hay órdenes para repartir en este día. Se crean desde acá
+            abajo, despachando un caso aprobado.
+          </p>
+        {:else}
+          <div class="snoc-fila" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+            {#each data.conteos.porLabor as l (l.labor)}
+              <div class="snoc-kpi" style="min-width:9rem;">
+                <span class="snoc-kpi-n">{l.cuadrillas}</span>
+                <span class="snoc-kpi-titulo">
+                  {l.cuadrillas === 1 ? 'cuadrilla' : 'cuadrillas'} a {l.labor}
+                </span>
+                <span class="snoc-kpi-sub">
+                  {l.ordenes} {l.ordenes === 1 ? 'orden' : 'órdenes'}
+                </span>
+              </div>
+            {/each}
+          </div>
+
+          {#if data.conteos.sinZona || data.conteos.sinCuadrilla || data.conteos.sobrantes || data.conteos.sinClasificar}
+            <ul class="snoc-lote-fallos">
+              {#if data.conteos.sinZona}
+                <li>{data.conteos.sinZona} sin zona mapeada — se arregla en Cuadrillas.</li>
+              {/if}
+              {#if data.conteos.sinCuadrilla}
+                <li>{data.conteos.sinCuadrilla} en zonas que hoy no cubre nadie.</li>
+              {/if}
+              {#if data.conteos.sobrantes}
+                <li>{data.conteos.sobrantes} no entraron por el tope por cuadrilla.</li>
+              {/if}
+              {#if data.conteos.sinClasificar}
+                <li>{data.conteos.sinClasificar} sin tipo de trabajo declarado.</li>
+              {/if}
+            </ul>
+          {/if}
+        {/if}
+      </section>
+
       <section class="snoc-panel" style="gap:var(--snoc-sm);">
         <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
           <div class="snoc-pila-xs">

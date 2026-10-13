@@ -68,6 +68,12 @@ P = PropuestaSupervisor
 PROGRAMACION = "programacion"
 COMPROMISOS = "compromiso"
 
+#  13/10/2026. El tercero, y el unico cuyo dominio es un TEXTO. Los otros dos
+#  leen filas --ordenes, actividades-- y este lee la descripcion que escribio
+#  quien tomo el reclamo. Por eso su recomendacion nunca sale sola: queda para
+#  que una persona la autorice.
+SOPORTE = "soporte"
+
 #  El reparto es por DOMINIO DE DATOS, no por gusto: cada senal la produce un
 #  detector que lee una fuente concreta. 'caso_abierto_antiguo' no esta en
 #  ninguno de los dos -- es del dominio de Casos, y este paso no lo cubre.
@@ -85,6 +91,12 @@ SENALES = {
         P.ORDEN_SLA_POR_VENCER,
         #  M05-A. Incidencia con lifecycle persistente.
         P.INCIDENCIA_SIN_RESOLVER,
+    ),
+    SOPORTE: (
+        #  Uno solo, y es a proposito: este dominio no agrupa fuentes, agrupa
+        #  una forma de saber. Meterle una señal que salga de medir volveria a
+        #  mezclar lo leido con lo medido, que es justo lo que separa.
+        P.TICKET_SIN_DIAGNOSTICO,
     ),
     COMPROMISOS: (
         P.ACTIVIDAD_VENCIDA,

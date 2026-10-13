@@ -648,7 +648,21 @@ export function bandejaDe(p) {
  * regla que el backend ya aplica con `ordering = ["prioridad", "-created_at"]`.
  *
  * @param {any[]} propuestas
- * @param {{ nivel?: string, tipo?: string, estado?: string, conPropuesta?: string, texto?: string }} filtros
+ * LOS DESINCRONIZADOS NO ESTAN POR DEFECTO  --  13/10/2026
+ * --------------------------------------------------------
+ * Esta bandeja es para lo que necesita criterio humano. Un caso que el
+ * Supervisor cierra solo --porque el equipo esta sano y el proveedor ya lo
+ * cerro-- no lo necesita: solo ocupa lugar y esconde lo que si hay que
+ * decidir. Lo dijo el cliente con esas palabras: "pendientes por revision no
+ * se hizo para los desincronizados".
+ *
+ * No desaparecen: tienen su propio lugar, al que se llega desde el recuadro
+ * de Desincronizaciones. Por eso el filtro tiene TRES valores y no dos --
+ * 'ocultar' (lo normal), 'solo' (su lugar) e 'incluir' (ver todo junto, que
+ * sirve para auditar).
+ *
+ * @param {any[]} propuestas
+ * @param {{ nivel?: string, tipo?: string, estado?: string, conPropuesta?: string, texto?: string, desincronizados?: 'ocultar'|'solo'|'incluir' }} filtros
  * @param {Date} [ahora]
  */
 export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) {
@@ -683,6 +697,12 @@ export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) 
     if (!filtros.estado && p.bandeja === null) return false;
     if (filtros.nivel && p.nivel.texto !== filtros.nivel) return false;
     if (filtros.tipo && p.tipo_senal !== filtros.tipo) return false;
+    //  El valor por defecto es OCULTAR, no incluir: quien agregue una llamada
+    //  nueva sin pensarlo obtiene la bandeja limpia, que es lo correcto.
+    const desinc = p.tipo_senal === 'caso_desincronizado';
+    const modo = filtros.desincronizados ?? 'ocultar';
+    if (modo === 'ocultar' && desinc) return false;
+    if (modo === 'solo' && !desinc) return false;
     if (filtros.conPropuesta === 'si' && !p.tienePropuesta) return false;
     if (filtros.conPropuesta === 'no' && p.tienePropuesta) return false;
     return true;

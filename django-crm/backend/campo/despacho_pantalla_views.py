@@ -162,10 +162,24 @@ class CasosDespachablesView(APIView):
         #  traeria justo las que alguien decidio que no van.
         from operaciones.models import PropuestaSupervisor
 
+        #  DOS CAMINOS LLEGAN A CAMPO, y los dos exigen que alguien acepte:
+        #
+        #    CASO_REQUIERE_VISITA     lo sostiene una MEDICION del equipo. El
+        #                             Supervisor lo detecta solo.
+        #    TICKET_SIN_DIAGNOSTICO   sale de LEER el reclamo (13/10/2026). El
+        #                             Supervisor dice que le pasa al cliente y
+        #                             a que labor corresponde, y una persona lo
+        #                             autoriza.
+        #
+        #  El segundo NO entra por tener labor: entra por estar ACEPTADO. Un
+        #  diagnostico leido que nadie miro no manda a nadie a manejar hasta
+        #  una casa -- es la regla que este modulo ya tenia y que no cambia.
         aprobados = set(
             PropuestaSupervisor.objects
             .filter(org=org,
-                    tipo_senal=PropuestaSupervisor.CASO_REQUIERE_VISITA,
+                    tipo_senal__in=(
+                        PropuestaSupervisor.CASO_REQUIERE_VISITA,
+                        PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO),
                     estado__in=(PropuestaSupervisor.ACEPTADA,
                                 PropuestaSupervisor.MODIFICADA),
                     origen_tipo="case")

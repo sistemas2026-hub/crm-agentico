@@ -47,6 +47,7 @@ quedo donde quedo, en vez de confiar en un score.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
@@ -59,6 +60,8 @@ from campo.models import OrdenTrabajo
 from common.models import Org
 from cases.models import Case
 from operaciones import auditoria, capacidad, habilidades
+
+logger = logging.getLogger(__name__)
 from operaciones.models import (
     ActividadOperativa,
     DisponibilidadTecnico,
@@ -163,6 +166,10 @@ def detectar(org, ahora=None) -> list[Senal]:
         #  una casa. Por eso solo propone lo que la MEDICION sostiene: una
         #  labor que salio del texto queda fuera.
         _casos_que_necesitan_visita,
+        #  13/10/2026. La UNICA señal que sale de LEER y no de medir. No
+        #  conduce a ninguna accion automatica: produce una hipotesis con su
+        #  evidencia para que una persona la autorice.
+        _tickets_abiertos_con_tecnico,
         _actividades_vencidas,
         _actividades_sin_responsable,
         _actividades_bloqueadas,
@@ -447,6 +454,111 @@ def _casos_que_necesitan_visita(org, ahora) -> list[Senal]:
             },
         ))
 
+    return salida
+
+
+#:  Cuantos tickets se leen por corrida. Cada diagnostico es una consulta al
+#:  modelo MAS las herramientas que consulte: no es gratis, y una corrida que
+#:  lee doscientos deja al resto del ciclo esperando. El tope corta; lo que no
+#:  entro se lee en la vuelta siguiente, que es dentro de una hora.
+TOPE_TICKETS_POR_CORRIDA = 10
+
+#:  Cuanto puede estar un ticket sin movimiento antes de que el Supervisor
+#:  pregunte que paso. Lo fijo el cliente el 13/10/2026 con esas palabras: "un
+#:  ticket no puede estar dos semanas, maximo 5 dias".
+DIAS_SIN_MOVIMIENTO = 5
+
+
+def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
+    """
+    Tickets que siguen ABIERTOS en el proveedor y ya tienen tecnico asignado.
+
+    QUE LOS DISTINGUE DE TODO LO DEMAS DE ESTE ARCHIVO
+    --------------------------------------------------
+    Las otras señales salen de MEDIR: un plazo que vencio, un equipo que no
+    responde, un estado que no coincide. Esta sale de LEER la descripcion que
+    escribio quien tomo el reclamo, y por eso no conduce a ninguna accion
+    automatica -- produce una hipotesis para que una persona la autorice.
+
+    POR QUE "CON TECNICO ASIGNADO", que fue lo que se pidio: un ticket que ya
+    tiene a alguien encima es uno donde el diagnostico sirve para decidir si
+    esta bien encaminado. Uno sin asignar es un problema distinto --nadie lo
+    tomo-- y tiene su propia señal.
+
+    NO HACE FALTA FILTRAR POR AREA. La importacion ya lo hace: el tenant
+    declara que departamentos trae ('Soporte Tecnico') y con que asuntos, asi
+    que todo caso que llego a Dexter por ese camino ya es de soporte.
+
+    LO QUE EXIGE, Y POR QUE CADA COSA
+      external_status en curso    si el proveedor lo cerro, es otra señal
+      resolved_at vacio           si ya se resolvio aqui, no hay nada que leer
+      tiene tecnico asignado      lo que se pidio
+      lectura fresca              un estado de hace una semana describe un
+                                  ticket que pudo cambiar tres veces
+      descripcion con texto       sin texto no hay nada que diagnosticar, y
+                                  decirlo es distinto de callarlo
+
+    NO DIAGNOSTICA. Devuelve las señales; leer el texto es otra fase, con su
+    tope y su tapado de datos personales. Ver 'diagnostico_de_ticket.py'.
+    """
+    corte_lectura = ahora - timedelta(hours=HORAS_LECTURA_FRESCA)
+
+    casos = (Case.objects
+             .filter(org=org, resolved_at__isnull=True)
+             .exclude(status=CERRADO_EN_DEXTER)
+             .exclude(external_fetched_at__isnull=True)
+             .filter(external_fetched_at__gte=corte_lectura)
+             #  'assigned_to' es muchos-a-muchos: sin el 'distinct' un caso con
+             #  dos tecnicos saldria dos veces, y se diagnosticaria dos veces.
+             .filter(assigned_to__isnull=False)
+             .distinct()
+             .only("id", "name", "status", "description", "created_at",
+                   "external_status", "external_status_at",
+                   "external_fetched_at", "external_ticket_id",
+                   "external_service_id")
+             .order_by("created_at"))
+
+    salida = []
+    for caso in casos:
+        if _estado_externo(caso) not in EN_CURSO_EN_PROVEEDOR:
+            continue
+
+        texto = (caso.description or "").strip()
+        if not texto:
+            #  SE DICE, no se calla: un ticket sin descripcion no es un ticket
+            #  sano, es uno sobre el que no se puede afirmar nada. Pero no
+            #  genera señal: no hay nada que leer, y una propuesta vacia solo
+            #  ocuparia lugar en la bandeja.
+            continue
+
+        dias = max(0, (ahora - caso.created_at).days) if caso.created_at else 0
+
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO,
+            origen_tipo="case",
+            origen_id=str(caso.id),
+            evidencia=[
+                _observacion("caso", caso.id,
+                             f"caso en el CRM: {caso.name}", ahora),
+                _observacion("proveedor", caso.id,
+                             f"ticket {caso.external_ticket_id or 'sin numero'} "
+                             f"en estado '{caso.external_status}'", ahora),
+                _observacion("antiguedad", caso.id,
+                             f"abierto hace {dias} dias", ahora),
+            ],
+            datos={
+                "id_servicio": str(caso.external_service_id or ""),
+                "ticket": str(caso.external_ticket_id or ""),
+                "dias_abierto": dias,
+                #  LA DESCRIPCION NO VIAJA EN LA SEÑAL. Una señal termina
+                #  guardada en una propuesta, y el texto de un ticket trae
+                #  cedulas escritas a mano -- 136 de cada 300, medido. Quien
+                #  la necesita la lee del caso, tapada, en el momento de
+                #  diagnosticar.
+                "tiene_descripcion": True,
+                "sin_movimiento": dias >= DIAS_SIN_MOVIMIENTO,
+            },
+        ))
     return salida
 
 
@@ -2144,7 +2256,84 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
     #  hacer. Un cierre que no ocurrio se reintenta en el ciclo siguiente.
     resumen.update(_atender_desincronizados(org, ahora,
                                             desatendido=desatendido))
+    #  LA LECTURA DE LOS TICKETS ABIERTOS, tambien fuera de la transaccion y
+    #  por el mismo motivo: habla con el modelo y con las herramientas. Va
+    #  DESPUES del cierre a proposito -- cerrar lo que ya esta resuelto es mas
+    #  barato y mas seguro que leer lo que sigue abierto, y si el presupuesto
+    #  de la vuelta se agota, que se agote en lo segundo.
+    resumen.update(_leer_tickets_abiertos(org, ahora))
     return resumen
+
+
+def _leer_tickets_abiertos(org, ahora) -> dict:
+    """
+    Lee los tickets que siguen abiertos y deja el diagnostico en su propuesta.
+
+    MISMA FORMA QUE '_atender_desincronizados', y no por simetria: las dos
+    fases hacen lo mismo --tomar señales ya propuestas, preguntarle a algo de
+    afuera, y escribir el resultado en la propuesta-- y resolverlo distinto
+    daria dos lugares donde buscar el mismo error.
+
+    NO LEVANTA: un ticket que no se pudo leer es un resultado posible del
+    ciclo, y el resto ya termino y esta guardado.
+    """
+    from operaciones import diagnostico_de_ticket as dxt
+
+    informe = {"tickets": {}}
+
+    senales = [s for s in detectar(org, ahora)
+               if s.tipo == PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO]
+    if not senales:
+        return informe
+
+    #  SOLO LAS QUE TODAVIA NO SE LEYERON. Una propuesta que ya tiene su
+    #  diagnostico no se vuelve a pagar: fue lo primero que se pidio -- "debe
+    #  guardar un registro de que ya reviso tales ticket para que no le corra
+    #  nuevamente el diagnostico".
+    pendientes = {}
+    candidatas = []
+    for s in senales:
+        if not _ya_propuesta(org, s):
+            #  Sin propuesta todavia. Se diagnostica ANTES de registrarla, asi
+            #  la propuesta nace con el diagnostico adentro en vez de aparecer
+            #  vacia y completarse una hora despues.
+            candidatas.append(s)
+            continue
+        p = _propuesta_vigente_de(org, s)
+        if p is None:
+            continue
+        if dxt.le_falta_lectura(p):
+            pendientes[s.origen_id] = p
+            candidatas.append(s)
+
+    if not candidatas:
+        return informe
+
+    informe["tickets"] = dxt.diagnosticar(org, candidatas, ahora=ahora)
+
+    #  LAS QUE YA TENIAN PROPUESTA: se les agrega el diagnostico recien
+    #  escrito. Las que no la tenian las registra el ciclo en su pasada
+    #  normal, con la evidencia ya puesta.
+    for s in candidatas:
+        p = pendientes.get(s.origen_id)
+        if p is None or not s.datos.get("diagnostico_leido"):
+            continue
+        try:
+            dxt.guardar_en_propuesta(p, s, ahora)
+        except Exception as e:                                   # noqa: BLE001
+            logger.info("Supervisor: no se pudo guardar la lectura (%s)",
+                        type(e).__name__)
+    return informe
+
+
+def _propuesta_vigente_de(org, senal):
+    """La propuesta pendiente de esta señal, si la hay."""
+    return (PropuestaSupervisor.objects
+            .filter(org=org, tipo_senal=senal.tipo,
+                    origen_id=str(senal.origen_id),
+                    estado=PropuestaSupervisor.PROPUESTA)
+            .order_by("-created_at")
+            .first())
 
 
 def _atender_desincronizados(org, ahora, *, desatendido: bool = False) -> dict:

@@ -639,7 +639,20 @@ def test_17_18_no_hay_segunda_cola_ni_task(org_a, actor):
                        #
                        #  'OrigenAprendizaje' no tiene 'supervisor': el agente no puede concluir
                        #  sobre su propio acierto, ni por el servicio ni por el ORM.
-                       "AprendizajeSupervisor"}
+                       "AprendizajeSupervisor",
+                       #  09/10/2026. 'TareaDelegada' NO es una cola de
+                       #  recomendaciones: es un ESTADO --una fila por empresa
+                       #  y tarea, que se enciende y se apaga-- y no guarda
+                       #  nada que haya que revisar. Lo que el Supervisor
+                       #  propone sigue siendo 'PropuestaSupervisor'; esto dice
+                       #  QUE tiene permitido hacer solo, que es otra pregunta.
+                       "TareaDelegada",
+                       #  Las dos del Supervisor que hablan de COMO dice las
+                       #  cosas y de COMO llego a decirlas. Tampoco son colas:
+                       #  'EstiloSupervisor' es el tono que una persona edita,
+                       #  y 'RazonamientoSupervisor' es la traza de un turno.
+                       #  Ninguna se consulta para decidir nada.
+                       "EstiloSupervisor", "RazonamientoSupervisor"}
 
     #  Se miran los IDENTIFICADORES del código, no el texto del archivo: los
     #  docstrings nombran justamente lo que NO se creó, y un 'in fuente' los

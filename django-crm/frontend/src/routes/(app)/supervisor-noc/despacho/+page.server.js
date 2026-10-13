@@ -1,9 +1,56 @@
 import { fail } from '@sveltejs/kit';
+import { proponerReparto } from '$lib/server/v2/cuadrillas.js';
 import {
   leerPlantillasDeTrabajo,
   leerCasosDespachables,
   despacharACampo
 } from '$lib/server/v2/despacho.js';
+
+/**
+ * CUÁNTOS TÉCNICOS VAN A CADA COSA  --  13/10/2026
+ *
+ * El reparto ya decide a quién le toca qué. Lo que faltaba era poder verlo
+ * antes de autorizar: cuántas cuadrillas salen a correctivos y cuántas a
+ * instalaciones, y cuánto trabajo no entró en ninguna.
+ *
+ * SE CUENTA ACÁ Y NO EN EL BACKEND a propósito: es una lectura de la misma
+ * propuesta que ya viaja, no un dato nuevo. Pedirle al backend que además
+ * cuente sería una segunda versión del mismo número, y el día que difieran
+ * nadie sabría cuál mirar.
+ */
+function conteosDel(propuesta) {
+  if (!propuesta) return null;
+  const porLabor = {};
+  let ordenes = 0;
+  const cuadrillasPorLabor = {};
+
+  for (const a of propuesta.asignaciones ?? []) {
+    for (const o of a.ordenes ?? []) {
+      const labor = o?.labor || 'sin clasificar';
+      porLabor[labor] = (porLabor[labor] ?? 0) + 1;
+      ordenes += 1;
+      (cuadrillasPorLabor[labor] ??= new Set()).add(a?.cuadrilla?.id ?? a?.cuadrilla);
+    }
+  }
+
+  return {
+    ordenes,
+    cuadrillas: (propuesta.asignaciones ?? []).length,
+    porLabor: Object.entries(porLabor)
+      .map(([labor, n]) => ({
+        labor,
+        ordenes: n,
+        cuadrillas: cuadrillasPorLabor[labor]?.size ?? 0
+      }))
+      .sort((a, b) => b.ordenes - a.ordenes),
+    //  LO QUE NO ENTRÓ, nombrado por su motivo. Un total que no cuadra con la
+    //  suma es exactamente lo que una persona tiene que ver antes de aprobar.
+    sinZona: (propuesta.sin_zona ?? []).length,
+    sinCuadrilla: (propuesta.sin_cuadrilla ?? []).length,
+    sobrantes: (propuesta.sobrantes ?? []).length,
+    sinClasificar: (propuesta.sin_clasificar ?? []).length
+  };
+}
 
 /**
  * Despacho a campo — Supervisor NOC.
@@ -23,13 +70,27 @@ import {
 export async function load({ url, cookies }) {
   const conFicha = url.searchParams.get('ficha') === '1';
 
-  const [plantillas, casos] = await Promise.all([
+  //  El día del reparto. Hoy por defecto: es el que una persona mira cuando
+  //  abre la pantalla, y pedir una fecha antes de mostrar nada sería un paso
+  //  que casi siempre termina en el mismo valor.
+  const dia = url.searchParams.get('dia') || new Date().toISOString().slice(0, 10);
+
+  const [plantillas, casos, reparto] = await Promise.all([
     leerPlantillasDeTrabajo({ cookies }),
-    leerCasosDespachables({ cookies }, conFicha)
+    leerCasosDespachables({ cookies }, conFicha),
+    proponerReparto({ cookies }, dia)
   ]);
 
   return {
     conFicha,
+    dia,
+    //  LA PROPUESTA DEL REPARTO, tal como la calcula el motor que ya existe.
+    //  No se recalcula aquí ni se reordena: el criterio --lo que vence
+    //  primero, después lo más viejo, respetando las zonas de cada cuadrilla--
+    //  vive en 'campo/reparto.py' y una segunda copia se desincronizaría.
+    reparto: reparto.propuesta,
+    repartoError: reparto.error ? (reparto.motivo || 'No se pudo calcular la propuesta.') : null,
+    conteos: conteosDel(reparto.propuesta),
     plantillas: plantillas.plantillas,
     labores: plantillas.labores,
     plantillasSinClasificar: plantillas.sinClasificar,

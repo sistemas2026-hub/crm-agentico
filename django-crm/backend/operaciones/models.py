@@ -803,6 +803,24 @@ class PropuestaSupervisor(BaseModel):
     #  red, y eso es lo que esta señal propone. Una persona la acepta, y recien
     #  ahi el caso aparece en Despacho.
     CASO_REQUIERE_VISITA = "caso_requiere_visita"
+
+    #  UN TICKET ABIERTO EN EL PROVEEDOR QUE NADIE LEYO TODAVIA  --  13/10/2026
+    #
+    #  Las demas señales salen de MEDIR algo: un plazo vencido, un equipo
+    #  caido, un estado que no coincide. Esta sale de LEER: la descripcion que
+    #  escribio quien tomo el reclamo.
+    #
+    #  Por eso NO conduce a ninguna accion automatica, y la diferencia esta
+    #  escrita en 'CASO_REQUIERE_VISITA' unas lineas mas arriba: una labor que
+    #  salio del texto queda fuera del reparto, porque mandar una cuadrilla a
+    #  manejar hasta una casa por lo que decia una frase es pedirle a alguien
+    #  que confie en lo que nadie verifico.
+    #
+    #  Lo que esta señal produce es una HIPOTESIS con su evidencia, para que
+    #  una persona la autorice. Esa persona es la que convierte una lectura en
+    #  una decision -- y el texto queda a la vista para que pueda discutirla.
+    TICKET_SIN_DIAGNOSTICO = "ticket_sin_diagnostico"
+
     TIPOS_SENAL = (
         (CASO_ANTIGUO, "Caso abierto antiguo"),
         (ACTIVIDAD_VENCIDA, "Actividad vencida"),
@@ -820,6 +838,7 @@ class PropuestaSupervisor(BaseModel):
         (ESCALAMIENTO_SIN_DESTINATARIO, "Escalamiento sin destinatario registrado"),
         (CASO_DESINCRONIZADO, "Caso cerrado en el proveedor y abierto en el CRM"),
         (CASO_REQUIERE_VISITA, "Caso que necesita una visita a campo"),
+        (TICKET_SIN_DIAGNOSTICO, "Ticket abierto en el proveedor, sin diagnóstico"),
     )
 
     PROPUESTA = "propuesta"

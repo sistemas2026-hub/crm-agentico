@@ -189,6 +189,7 @@
     filtroEstado = 'pendientes';
     filtroNivel = null;
     filtroPropuesta = '';
+    verDesincronizados = 'ocultar';
     filtro = null;
     busqueda = '';
   }
@@ -328,13 +329,26 @@
    * numeracion tienen casos borde (prioridad ausente, sin fecha de origen)
    * que dentro del .svelte no se pueden ejercitar sin montarlo.
    */
+  /**
+   * QUE SE VE EN LA BANDEJA  --  13/10/2026
+   *
+   * 'ocultar' por defecto: esta bandeja es para lo que necesita criterio
+   * humano, y un caso que el Supervisor cierra solo no lo necesita. Lo pidio
+   * el cliente asi: "pendientes por revision no se hizo para los
+   * desincronizados".
+   *
+   * No desaparecen: el recuadro de Desincronizaciones los trae con 'solo'.
+   */
+  let verDesincronizados = $state(/** @type {'ocultar'|'solo'} */ ('ocultar'));
+
   const bandeja = $derived(
     bandejaDeRevision(propuestas, {
       estado: filtroEstado,
       nivel: filtroNivel,
       tipo: filtro,
       conPropuesta: filtroPropuesta,
-      texto: busqueda
+      texto: busqueda,
+      desincronizados: verDesincronizados
     })
   );
 
@@ -1008,7 +1022,43 @@
 
         <section class="snoc-rejilla snoc-rejilla-2 snoc-rejilla-6">
           {#each kpis as k (k.clave)}
-            {#if k.clave === 'propuestas'}
+            {#if k.clave === 'desinc'}
+              <!--
+                13/10/2026. Los desincronizados salieron de la bandeja --no
+                necesitan criterio humano, el Supervisor los cierra solo-- y
+                este recuadro pasó a ser SU LUGAR. Es un <button> y no un
+                <div>: antes era un número y ahora es una acción, y el teclado
+                tiene que llegar.
+              -->
+              <button
+                class="snoc-kpi snoc-kpi-enlace snoc-tono-{k.tono}"
+                type="button"
+                title="Ver los casos desincronizados en la bandeja"
+                onclick={() => {
+                  //  EL ORDEN IMPORTA: 'irAPendientes' deja la vista en
+                  //  'ocultar' --es lo correcto para el resto de la pantalla--
+                  //  asi que el modo se fija DESPUES, o este boton se
+                  //  desharia a si mismo.
+                  const prender = verDesincronizados !== 'solo';
+                  irAPendientes();
+                  verDesincronizados = prender ? 'solo' : 'ocultar';
+                  nPagina = 1;
+                }}
+              >
+                <div class="snoc-kpi-icono">
+                  <span class="snoc-icono" style="font-size:15px;">{ICONO_KPI[k.clave]}</span>
+                </div>
+                {#if k.n == null}
+                  <span class="snoc-kpi-n snoc-sin-dato" style="font-size:1rem;">Sin dato</span>
+                {:else}
+                  <span class="snoc-kpi-n">{k.n}</span>
+                {/if}
+                <span class="snoc-kpi-titulo">{k.titulo}</span>
+                <span class="snoc-kpi-sub">
+                  {verDesincronizados === 'solo' ? 'Viéndolos · tocá para volver' : k.sub}
+                </span>
+              </button>
+            {:else if k.clave === 'propuestas'}
               <!--
                 El unico KPI que lleva a algun lado, porque es el unico que
                 tiene un destino: la bandeja de arriba. Es un <a> de verdad y
