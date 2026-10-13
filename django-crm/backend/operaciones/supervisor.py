@@ -463,6 +463,21 @@ def _casos_que_necesitan_visita(org, ahora) -> list[Senal]:
 #:  entro se lee en la vuelta siguiente, que es dentro de una hora.
 TOPE_TICKETS_POR_CORRIDA = 10
 
+#:  CUANTOS SE DETECTAN, que es otra cosa y hace falta aparte  --  13/10/2026
+#:
+#:  Medido en produccion el mismo dia que esto salio: sin tope, el detector
+#:  emitio 750 señales de una vez --todos los tickets abiertos con tecnico-- y
+#:  el tablero paso de 5 hallazgos a 755. Un numero asi no informa: nadie mira
+#:  una lista de setecientos, y ademas cada señal viaja por el ciclo entero.
+#:
+#:  SE DETECTAN LOS MAS VIEJOS, que es el orden en que conviene atenderlos, y
+#:  un poco mas que los que se leen por vuelta: asi la fase de lectura siempre
+#:  tiene de donde elegir aunque algunos ya esten diagnosticados.
+#:
+#:  No se pierde ninguno: el que no entro hoy entra cuando los de adelante
+#:  dejen de estar abiertos, que es lo que se busca que pase.
+TOPE_TICKETS_DETECTADOS = 40
+
 #:  Cuanto puede estar un ticket sin movimiento antes de que el Supervisor
 #:  pregunte que paso. Lo fijo el cliente el 13/10/2026 con esas palabras: "un
 #:  ticket no puede estar dos semanas, maximo 5 dias".
@@ -516,7 +531,7 @@ def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
                    "external_status", "external_status_at",
                    "external_fetched_at", "external_ticket_id",
                    "external_service_id")
-             .order_by("created_at"))
+             .order_by("created_at")[:TOPE_TICKETS_DETECTADOS])
 
     salida = []
     for caso in casos:
@@ -1505,6 +1520,112 @@ def analizar(senal: Senal) -> dict:
             "impacto": ("Un caso cerrado afuera y abierto acá infla la cola del CRM y "
                         "hace que los conteos de casos abiertos no describan la operación"),
             "nivel": _nivel,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.CASO_REQUIERE_VISITA:
+        #  SIN ESTA RAMA NO HAY PROPUESTA, y es por esto que la pantalla de
+        #  Despacho estuvo vacia: el detector venia emitiendo la señal desde
+        #  que se escribio, 'analizar' no la conocia, y el ciclo la contaba
+        #  como "datos insuficientes" sin crear nada. No hubo error, log ni
+        #  aviso -- devolver None es una respuesta legitima para otros tipos,
+        #  asi que el hueco se veia igual que el funcionamiento normal.
+        #
+        #  Lo encontro la guarda que recorre TODOS los tipos de señal
+        #  (test_lectura_de_ticket.py, 13/10/2026), no una prueba de este
+        #  bloque: una prueba por tipo solo cubre los tipos que alguien se
+        #  acordo de escribir, y el que falta es justamente el que nadie vio.
+        labor = (d.get("labor_sugerida") or "").strip()
+        fuente = (d.get("fuente_de_la_sugerencia") or "").strip()
+
+        #  La labor que llega aca YA ESTA MEDIDA: el detector solo emite la
+        #  señal cuando 'veredicto["verificada"]' es verdadero, y descarta las
+        #  que salieron del texto del asunto. Por eso la accion puede nombrar
+        #  la labor en vez de preguntar cual es.
+        #
+        #  La prioridad sale de a QUIEN deja esperando cada labor, no de la
+        #  antiguedad: un correctivo es un cliente que hoy no tiene servicio;
+        #  una instalacion es alguien que todavia no lo tiene y lo sabe.
+        #
+        #  Se importa aca y no arriba por lo mismo que en el detector: el
+        #  modulo de clasificacion arrastra el lazo con WispHub, y 'analizar'
+        #  tiene que poder juzgar sin base de datos ni red.
+        from operaciones import clasificacion_de_trabajo as clf
+
+        base = {clf.CORRECTIVO: 60, clf.TRABAJOS: 45}.get(labor, 35)
+        prioridad, comp = _prioridad(base, {})
+
+        return {
+            "accion_propuesta": (f"Despachar una visita de {labor}"
+                                 if labor else "Despachar una visita"),
+            "motivo": (
+                f"El caso sigue abierto y la clasificación medida dice que se "
+                f"resuelve con una visita de {labor or 'campo'}"
+                + (f" (lo determinó {fuente})." if fuente else ".")
+                + " La labor está verificada contra el dato del proveedor, no"
+                  " deducida del asunto del ticket. Lo que no se decide acá es"
+                  " cuándo ni con quién: eso lo arma el reparto del día."),
+            "prioridad": prioridad,
+            "impacto": ("Un caso que necesita visita y no entró a ninguna"
+                        " programación espera sin que nadie lo esté mirando"),
+            #  RECOMENDAR, nunca mas: aceptar esto manda a una persona a
+            #  manejar hasta una casa. Es la frontera que el propio detector
+            #  dejo escrita cuando descarto las labores no verificadas.
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO:
+        #  SIN ESTA RAMA NO HAY PROPUESTA. Medido el 13/10/2026, el dia que
+        #  esto salio: el detector emitio 750 señales y no se creo NI UNA
+        #  propuesta. 'analizar' devuelve None para un tipo que no conoce, y el
+        #  ciclo lo cuenta como "datos insuficientes" sin crear nada -- en
+        #  silencio, porque es una respuesta legitima para otros casos.
+        #
+        #  La prioridad sube con los dias abiertos y da un salto a los 5, que
+        #  es el limite que fijo el cliente: "un ticket no puede estar dos
+        #  semanas, maximo 5 dias".
+        dias = int(d.get("dias_abierto") or 0)
+        prioridad, comp = _prioridad(
+            40, {"antiguedad": min(dias, 30),
+                 "sin_movimiento": 20 if d.get("sin_movimiento") else 0})
+
+        hipotesis = (d.get("diagnostico_hipotesis") or "").strip()
+        confianza = (d.get("diagnostico_confianza") or "").strip()
+        labor = (d.get("labor") or "").strip()
+        verificada = bool(d.get("labor_verificada"))
+
+        #  LO QUE SE PROPONE ES MIRARLO, no resolverlo. El Supervisor leyo un
+        #  texto; de ahi no sale una accion sobre nadie. Nombrar la accion como
+        #  "revisar" seria lo que M09-R ya corrigio --nadie puede aceptar
+        #  "revisar"-- asi que se nombra la decision concreta: a que labor va.
+        if labor:
+            accion = (f"Confirmar que este ticket corresponde a {labor} "
+                      f"y despacharlo" if verificada else
+                      f"Decidir si este ticket corresponde a {labor}: lo dice "
+                      f"el texto del reclamo, no una medición")
+        else:
+            accion = "Decidir qué se hace con este ticket, que sigue abierto"
+
+        return {
+            "accion_propuesta": accion,
+            "motivo": (
+                f"El ticket sigue abierto en WispHub hace {dias} días"
+                + (" y pasó el límite de 5 días sin movimiento."
+                   if d.get("sin_movimiento") else ".")
+                + (f" Leyendo el reclamo: {hipotesis}"
+                   + (f" (confianza {confianza})." if confianza else ".")
+                   if hipotesis else
+                   " Se leyó el reclamo y no alcanza para una hipótesis.")
+                + " Esto sale de LEER el texto, no de medir el equipo: por eso"
+                  " lo decide una persona."),
+            "prioridad": prioridad,
+            "impacto": ("Un ticket que lleva días abierto sin que nadie diga qué"
+                        " le pasa al cliente es tiempo que corre sin decisión"),
+            #  RECOMENDAR, nunca mas. Lo que sale de un texto no ejecuta nada:
+            #  es la regla que 'CASO_REQUIERE_VISITA' ya dejo escrita para el
+            #  mismo riesgo -- mandar una cuadrilla por lo que decia una frase.
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
             "componentes_prioridad": comp,
         }
 

@@ -99,3 +99,53 @@ def test_una_labor_sacada_del_texto_no_queda_verificada():
     assert v.get("verificada") is not True, (
         "una labor deducida del texto quedo marcada como verificada: con eso "
         "el reparto mandaria una cuadrilla por lo que decia una frase")
+
+
+# ===========================================================================
+#  3. TODA SEÑAL TIENE QUE PRODUCIR UNA PROPUESTA
+# ===========================================================================
+#  MEDIDO EN PRODUCCION el 13/10/2026, el dia que esto salio: el detector
+#  emitio 750 señales y NO SE CREO NI UNA PROPUESTA. 'analizar' devuelve None
+#  para un tipo que no conoce, y el ciclo lo cuenta como "datos insuficientes"
+#  sin crear nada. En silencio, porque devolver None es una respuesta legitima
+#  para otros casos.
+#
+#  El sintoma fue "755 hallazgos y 5 pendientes": la deteccion funcionaba, el
+#  juicio no, y los dos numeros juntos lo decian sin que nadie los leyera asi.
+#
+#  POR ESO LA GUARDA ES SOBRE TODOS LOS TIPOS y no sobre el nuevo: el proximo
+#  que alguien agregue va a tener el mismo agujero, y esta prueba lo va a
+#  encontrar el dia que lo escriba y no un mes despues.
+
+def test_todo_tipo_de_senal_sabe_producir_una_propuesta():
+    from operaciones import supervisor as sup
+    from operaciones.models import PropuestaSupervisor as P
+
+    class _Senal:
+        def __init__(self, tipo):
+            self.tipo = tipo
+            self.origen_id = "1"
+            self.origen_tipo = "case"
+            self.evidencia = []
+            #  Datos vacios A PROPOSITO: lo que se mide es que 'analizar'
+            #  RECONOZCA el tipo, no que arme una frase bonita. Un tipo
+            #  conocido con datos pobres devuelve algo; uno desconocido
+            #  devuelve None, que es el agujero.
+            self.datos = {}
+
+    sin_juicio = []
+    for tipo, _etiqueta in P.TIPOS_SENAL:
+        try:
+            r = sup.analizar(_Senal(tipo))
+        except Exception:                                    # noqa: BLE001
+            #  Levantar es otra cosa y la cubren las pruebas de cada tipo: lo
+            #  que esta guarda busca es el silencio.
+            continue
+        if not r:
+            sin_juicio.append(tipo)
+
+    assert not sin_juicio, (
+        f"estos tipos de señal se detectan y NO producen propuesta: "
+        f"{sin_juicio}. El ciclo los cuenta como 'datos insuficientes' y no "
+        f"crea nada, sin error y sin aviso -- asi 750 tickets detectados "
+        f"dieron cero propuestas el 13/10/2026")
