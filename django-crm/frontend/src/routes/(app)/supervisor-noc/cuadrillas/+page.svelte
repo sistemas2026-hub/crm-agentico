@@ -245,6 +245,7 @@
             Cuadrillas
           </a>
           <a class="snoc-pildora" href="/supervisor-noc/despacho">Despacho</a>
+          <a class="snoc-pildora" href="/supervisor-noc/plantillas">Plantillas</a>
         </div>
       </div>
 

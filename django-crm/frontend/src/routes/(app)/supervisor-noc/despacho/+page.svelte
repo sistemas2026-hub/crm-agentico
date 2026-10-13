@@ -77,6 +77,7 @@
           <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc/despacho">
             Despacho
           </a>
+          <a class="snoc-pildora" href="/supervisor-noc/plantillas">Plantillas</a>
         </div>
       </div>
     </section>
@@ -310,6 +311,17 @@
                 </option>
               {/each}
             </select>
+            <!-- Sin esta línea la pregunta no se entendía (13/10/2026: «¿por
+                 qué me pregunta con qué plantilla va?»). La plantilla define
+                 el formulario que llena el técnico Y qué cuadrilla la recibe. -->
+            <span class="snoc-body-sm snoc-secundario">
+              Define qué anota y qué fotos saca el técnico, y por su labor, qué cuadrilla
+              la recibe.
+              {#if !despachando.sugerencia}
+                Viene elegida sola si traés el diagnóstico y hay una sola de esa labor.
+              {/if}
+              Se crean y se editan en <a href="/supervisor-noc/plantillas">Plantillas</a>.
+            </span>
           </label>
 
           <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">

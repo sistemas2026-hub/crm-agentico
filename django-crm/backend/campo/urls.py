@@ -12,6 +12,7 @@ from campo import (
     inventario_views,
     materiales_views,
     pedidos_views,
+    plantillas_views,
     views,
 )
 
@@ -57,6 +58,11 @@ urlpatterns = [
     #  Que labor tiene cada tipo de trabajo. Define que cuadrillas pueden
     #  tomarlo; lo que no se clasifica NO se reparte, asi que sin esta
     #  pantalla el reparto no tendria como arrancar.
+    #  Las plantillas de trabajo, editables desde la plataforma: sin esto solo
+    #  se creaban por el admin de Django escribiendo JSON. Ver campo/plantillas.py.
+    path("plantillas/", plantillas_views.PlantillasView.as_view(), name="plantillas"),
+    path("plantillas/<uid:pk>/", plantillas_views.PlantillaView.as_view(), name="plantilla"),
+    path("plantillas/<uid:pk>/publicar/", plantillas_views.PublicarPlantillaView.as_view(), name="plantilla_publicar"),
     path("tipos-de-trabajo/", cuadrillas_views.TiposDeTrabajoView.as_view(), name="tipos_de_trabajo"),
     path("tipos-de-trabajo/<uid:pk>/", cuadrillas_views.TiposDeTrabajoView.as_view(), name="tipo_de_trabajo"),
     path("cuadrillas/configuracion/", cuadrillas_views.ConfiguracionDeRepartoView.as_view(), name="reparto_configuracion"),
