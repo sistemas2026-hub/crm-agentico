@@ -143,7 +143,8 @@ def _labor_de(org, senal, texto_tapado):
         return {}
 
 
-def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None) -> dict:
+def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None,
+                 propuestas=None) -> dict:
     """
     Lee los tickets y deja el diagnostico en la evidencia de cada señal.
 
@@ -154,6 +155,18 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None) -> dict:
     'concluir' SE INYECTA, por lo mismo que 'diagnosticar' en el modulo
     optico: este archivo decide QUE significa un diagnostico, no como se le
     habla a un modelo. Y una prueba puede ejercitar la regla sin red.
+
+    'propuestas' ({origen_id: PropuestaSupervisor}) es para DEJAR RASTRO de
+    cada lectura: que herramientas pidio el modelo, cuantas vueltas dio, si se
+    quedo sin ellas. Sin eso no se puede contestar la pregunta que el 13/10/2026
+    nadie pudo contestar -- "¿MIDE el equipo, o solo lee el texto?" -- porque
+    'asistente.tool_calls' NO ve este camino: una medicion real hecha ese dia
+    desde el chat del Supervisor no quedo ahi, y con ese registro se afirmo
+    "nunca se llamo", que era falso.
+
+    Es opcional y no cambia el diagnostico: una señal sin propuesta todavia se
+    lee igual, solo que esa lectura no deja fila. En el ciclo real casi todas
+    la tienen -- se registran antes de leer.
     """
     ahora = ahora or timezone.now()
     tope = sup.TOPE_TICKETS_POR_CORRIDA if tope is None else tope
@@ -170,7 +183,11 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None) -> dict:
                 org_, instrucciones=INSTRUCCIONES, entrada=entrada)
 
     informe = {"leidos": 0, "con_hipotesis": 0, "sin_hipotesis": 0,
-               "sin_texto": 0, "errores": 0, "fuera_de_tope": 0}
+               "sin_texto": 0, "errores": 0, "fuera_de_tope": 0,
+               #  CUANTAS DE LAS LEIDAS MIDIERON EL EQUIPO. Va en el informe
+               #  del ciclo --no solo en la tabla-- para que el numero este a
+               #  la vista en cada corrida y no haya que ir a buscarlo.
+               "midieron": 0, "sin_medir": 0}
 
     for senal in senales:
         if senal.tipo != PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO:
@@ -208,6 +225,7 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None) -> dict:
 
         labor = _labor_de(org, senal, tapado)
         _anotar(senal, v, labor, ahora)
+        _dejar_rastro(org, v, senal, propuestas, ahora, informe)
         if getattr(v, "hipotesis", ""):
             informe["con_hipotesis"] += 1
         else:
@@ -403,3 +421,64 @@ def guardar_en_propuesta(propuesta, senal, ahora=None) -> None:
         campos += ["motivo", "accion_propuesta", "prioridad", "impacto"]
 
     propuesta.save(update_fields=campos)
+
+
+#:  Las herramientas que MIDEN el equipo, y no las que solo lo describen. Es
+#:  lista BLANCA a proposito: una herramienta nueva no cuenta como medicion
+#:  hasta que alguien decida que lo es. Al reves --lista negra-- cualquier
+#:  herramienta agregada despues inflaria el numero sin que nadie lo note.
+HERRAMIENTAS_QUE_MIDEN = frozenset({
+    "diagnosticar_servicio",      # estado optico + señal + causa de caida
+    "ping_cliente",               # responde o no responde
+    "consultar_senal_ont",
+    "consultar_estado_ont",
+    "diagnosticar_falla_ont",
+    "consultar_estabilidad_enlace",
+})
+
+
+def midio_el_equipo(herramientas) -> bool:
+    """
+    Si en esta lectura se fue a BUSCAR el dato en vez de leerlo del texto.
+
+    LA DISTINCION QUE MOTIVO TODO ESTO (13/10/2026): una hipotesis puede
+    nombrar '-26.19 dBm' porque lo midio o porque ese numero venia escrito en
+    la descripcion del ticket --WispHub embebe un panel con la señal en el
+    cuerpo del reclamo--. Las dos frases se leen igual y valen cosas muy
+    distintas: la primera es una medicion, la segunda es una cita.
+    """
+    return bool(HERRAMIENTAS_QUE_MIDEN & set(herramientas or ()))
+
+
+def _dejar_rastro(org, veredicto, senal, propuestas, ahora, informe) -> None:
+    """
+    Deja la fila de ESTA lectura: que pidio el modelo y cuanto le costo.
+
+    NO PUEDE TUMBAR EL DIAGNOSTICO. Una bitacora que rompe el trabajo que
+    estaba registrando es peor que no tenerla -- mismo criterio que
+    'razonamiento.registrar', que ya se traga sus propios errores.
+    """
+    r = getattr(veredicto, "razonamiento", None)
+    usadas = list(getattr(r, "herramientas_usadas", ()) or ()) if r else []
+
+    if midio_el_equipo(usadas):
+        informe["midieron"] = informe.get("midieron", 0) + 1
+    else:
+        informe["sin_medir"] = informe.get("sin_medir", 0) + 1
+
+    propuesta = (propuestas or {}).get(str(senal.origen_id))
+    if propuesta is None:
+        #  Sin propuesta no hay a que colgar la fila: la base lo rechaza y
+        #  'registrar' devuelve None. El contador de arriba ya conto igual.
+        return
+    try:
+        from operaciones import razonamiento
+        from operaciones.razonamiento_modelos import FuenteRazonamiento
+
+        razonamiento.registrar(
+            org, veredicto,
+            fuente=FuenteRazonamiento.LECTURA_TICKET,
+            propuesta=propuesta, ahora=ahora)
+    except Exception as e:                                   # noqa: BLE001
+        logger.info("Supervisor: no se pudo registrar la lectura (%s)",
+                    type(e).__name__)

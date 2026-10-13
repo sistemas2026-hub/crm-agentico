@@ -81,7 +81,21 @@ class FuenteRazonamiento:
     CICLO = "ciclo"
     CHAT = "chat"
     SEGUIMIENTO = "seguimiento"
-    TODAS = (CICLO, CHAT, SEGUIMIENTO)
+    #  13/10/2026. La lectura de un ticket abierto es una poblacion propia y
+    #  mezclarla con el ciclo esconderia justo lo que hay que vigilar.
+    #
+    #  POR QUE SE AGREGO: el 13/10/2026 nadie podia contestar "¿el Supervisor
+    #  MIDE el equipo, o solo lee el texto del ticket?". La herramienta existe,
+    #  el prompt se lo pide y el modelo la tiene disponible -- y el unico
+    #  registro que habia ('asistente.tool_calls') no ve este camino: una
+    #  medicion real hecha ese mismo dia desde el chat del Supervisor no
+    #  aparecio ahi. Se afirmo "nunca se llamo" con un instrumento que no
+    #  recorria el camino, que es el error que el metodo del proyecto nombra.
+    #  'lectura_ticket' y no 'lectura_de_ticket': el campo es CharField(16) y
+    #  el valor largo entraba en 17. Un valor que no cabe no avisa bien --
+    #  truncado o rechazado, las dos formas aparecen lejos de aqui.
+    LECTURA_TICKET = "lectura_ticket"
+    TODAS = (CICLO, CHAT, SEGUIMIENTO, LECTURA_TICKET)
     ETIQUETAS = tuple((f, f.capitalize()) for f in TODAS)
 
 

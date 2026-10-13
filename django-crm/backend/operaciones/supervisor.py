@@ -2465,7 +2465,12 @@ def _leer_tickets_abiertos(org, ahora) -> dict:
     if not candidatas:
         return informe
 
-    informe["tickets"] = dxt.diagnosticar(org, candidatas, ahora=ahora)
+    #  'pendientes' viaja para que cada lectura DEJE RASTRO: que herramientas
+    #  pidio el modelo y si alguna midio el equipo. Sin eso, la pregunta "¿mide
+    #  o solo lee?" solo se podia contestar deduciendo, y el 13/10/2026 se
+    #  dedujo mal con un registro que no ve este camino.
+    informe["tickets"] = dxt.diagnosticar(org, candidatas, ahora=ahora,
+                                          propuestas=pendientes)
 
     #  LAS QUE YA TENIAN PROPUESTA: se les agrega el diagnostico recien
     #  escrito. Las que no la tenian las registra el ciclo en su pasada
