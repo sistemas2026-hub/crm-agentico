@@ -710,6 +710,25 @@
 }
 .snoc-grafico-cuerpo { display: flex; align-items: center; gap: var(--snoc-md); min-height: 122px; }
 
+/* --- La barra de seleccion multiple -----------------------------------
+   Aparece sobre la bandeja cuando hay algo tildado. Usa el contenedor del
+   acento y no un color propio: es una barra de estado, no una alarma. */
+.snoc-lote {
+  display: flex; align-items: center; gap: var(--snoc-sm);
+  padding: var(--snoc-sm) var(--snoc-md);
+  margin-bottom: var(--snoc-sm);
+  border-radius: var(--snoc-r);
+  background: var(--snoc-primary-container);
+  color: var(--snoc-on-primary-container);
+}
+.snoc-lote-texto { font-size: 0.8125rem; margin-right: auto; }
+/* Los fallos van en lista y no en una sola linea: con cinco entradas, una
+   linea se corta y la persona no puede leer cual fallo. */
+.snoc-lote-fallos {
+  margin: 0 0 var(--snoc-sm); padding-left: var(--snoc-lg);
+  font-size: 0.75rem; color: var(--snoc-on-surface-variant);
+}
+
 /* --- "En vivo": el panel de actividad se refresca solo ---------------------
    Va al final del titulo (margin-left:auto) y no al lado del texto: es estado
    del panel, no parte del nombre. El punto late para que se note sin leerlo,

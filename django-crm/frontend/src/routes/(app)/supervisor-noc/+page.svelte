@@ -4,7 +4,7 @@
   //  La burbuja del chat del Supervisor. Vive en su propio componente: este
   //  archivo ya tiene 1.900 lineas y es de los que CLAUDE.md marca como
   //  superficie de conflicto alta.
-  import { enhance } from '$app/forms';
+  import { deserialize, enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import {
     AUSENTE,
@@ -742,6 +742,104 @@
 
   /** Marca que se empezo, ANTES de que el formulario salga. */
   const alEmpezar = (/** @type {string} */ que) => () => { decidiendo = que; };
+
+  // =====================================================================
+  //  ACEPTAR VARIAS PROPUESTAS DE UNA VEZ
+  // =====================================================================
+  //  POR QUE DE A UNA Y NO EN UN SOLO PEDIDO
+  //  ---------------------------------------
+  //  Aceptar EJECUTA el cierre: va al motor y vuelve al backend. Son varios
+  //  segundos cada una. Mandar veinte en un solo pedido daria un minuto largo
+  //  sin señal de vida, y si se corta a la mitad nadie sabria cuales se
+  //  cerraron.
+  //
+  //  De a una, en orden, se ve el avance ("8 de 20"), se puede detener, y
+  //  cada una usa EXACTAMENTE el mismo camino que el boton de siempre: la
+  //  accion '?/revisar', con su rol, su frontera y su validacion con el caso
+  //  bloqueado. No se abre ninguna puerta nueva en el servidor -- y eso es
+  //  deliberado: una accion masiva propia seria una segunda forma de cerrar
+  //  casos, con sus propios permisos que mantener en sincronia.
+
+  /** Los ids tildados. Objeto y no Set: '$state' lo hace reactivo al vuelo. */
+  let seleccion = $state(/** @type {Record<string, boolean>} */ ({}));
+
+  const seleccionadas = $derived(
+    Object.keys(seleccion).filter((id) => seleccion[id]));
+
+  //  SOLO LAS PENDIENTES se pueden tildar: una ya decidida no se vuelve a
+  //  decidir, y ofrecerla seria prometer algo que el backend rechaza.
+  const seleccionables = $derived(pagina.filter((/** @type {any} */ p) => p.revision.pendiente));
+
+  const todasTildadas = $derived(
+    seleccionables.length > 0 &&
+    seleccionables.every((/** @type {any} */ p) => seleccion[p.id]));
+
+  function tildarTodas() {
+    const poner = !todasTildadas;
+    for (const p of seleccionables) seleccion[p.id] = poner;
+  }
+
+  function limpiarSeleccion() {
+    seleccion = {};
+  }
+
+  //  EL AVANCE, para que la espera no sea un hueco.
+  let enLote = $state(false);
+  let loteHechas = $state(0);
+  let loteTotal = $state(0);
+  let loteDetener = $state(false);
+  let loteResultado = $state(/** @type {null | {ok: number, fallaron: number, detalle: string[]}} */ (null));
+
+  async function aceptarSeleccionadas() {
+    const ids = seleccionadas.slice();
+    if (ids.length === 0 || enLote) return;
+
+    enLote = true;
+    loteDetener = false;
+    loteHechas = 0;
+    loteTotal = ids.length;
+    loteResultado = null;
+    let ok = 0;
+    const fallos = [];
+
+    try {
+      for (const id of ids) {
+        //  SE CONSULTA ANTES DE CADA UNA, no una vez al principio: si la
+        //  persona aprieta "Detener", se detiene en la siguiente en vez de
+        //  terminar las veinte.
+        if (loteDetener) break;
+
+        const cuerpo = new FormData();
+        cuerpo.set('id', id);
+        cuerpo.set('decision', 'aceptada');
+        cuerpo.set('comentario', '');
+
+        try {
+          const r = await fetch('?/revisar', { method: 'POST', body: cuerpo });
+          const res = deserialize(await r.text());
+          if (res.type === 'success') {
+            ok += 1;
+            //  Se destilda la que SI salio. Las que fallaron quedan tildadas,
+            //  asi que reintentar es volver a apretar el boton.
+            seleccion[id] = false;
+          } else {
+            const d = /** @type {any} */ (res).data;
+            fallos.push(`${id.slice(0, 8)}: ${d?.error ?? 'no se pudo'}`);
+          }
+        } catch (/** @type {any} */ e) {
+          fallos.push(`${id.slice(0, 8)}: ${e?.message ?? 'error de red'}`);
+        }
+        loteHechas += 1;
+      }
+    } finally {
+      enLote = false;
+      loteResultado = { ok, fallaron: fallos.length, detalle: fallos.slice(0, 5) };
+      //  UNA SOLA RECARGA AL FINAL. Recargar despues de cada cierre serian
+      //  veinte recargas del tablero entero mientras la persona espera.
+      await invalidateAll();
+      if (abierta) await abrirDetalle(abierta);
+    }
+  }
 </script>
 
 <svelte:window onkeydown={alTeclado} />
@@ -1305,10 +1403,83 @@
               <button class="snoc-enlace" type="button" onclick={limpiarFiltros}>Limpiar filtros</button>
             </p>
           {:else}
+            <!--
+              LA BARRA DE SELECCION. Aparece solo con algo tildado: una barra
+              permanente que dice "0 seleccionadas" ocupa lugar y no informa.
+            -->
+            {#if seleccionadas.length > 0 || enLote || loteResultado}
+              <div class="snoc-lote">
+                {#if enLote}
+                  <span class="snoc-lote-texto">
+                    Cerrando <strong>{loteHechas}</strong> de {loteTotal}…
+                  </span>
+                  <!--
+                    DETENER, Y NO CANCELAR: lo ya cerrado no se deshace. La
+                    palabra importa -- "cancelar" invitaria a creer que vuelve
+                    atras lo que ya salio.
+                  -->
+                  <button class="snoc-btn" type="button" onclick={() => (loteDetener = true)}>
+                    {loteDetener ? 'Deteniendo…' : 'Detener'}
+                  </button>
+                {:else if loteResultado}
+                  <span class="snoc-lote-texto">
+                    Se cerraron <strong>{loteResultado.ok}</strong>.
+                    {#if loteResultado.fallaron > 0}
+                      {loteResultado.fallaron} no se pudieron y siguen tildadas.
+                    {/if}
+                  </span>
+                  <button class="snoc-btn" type="button" onclick={() => (loteResultado = null)}>
+                    Entendido
+                  </button>
+                {:else}
+                  <span class="snoc-lote-texto">
+                    <strong>{seleccionadas.length}</strong>
+                    {seleccionadas.length === 1 ? 'propuesta seleccionada' : 'propuestas seleccionadas'}
+                  </span>
+                  <button class="snoc-btn" type="button" onclick={limpiarSeleccion}>
+                    Limpiar
+                  </button>
+                  <!--
+                    DICE CUANTAS Y QUE HACE. "Aceptar" a secas no deja ver que
+                    esto cierra casos de verdad, uno por uno, contra el
+                    proveedor.
+                  -->
+                  <button
+                    class="snoc-btn snoc-btn-primario"
+                    type="button"
+                    onclick={aceptarSeleccionadas}
+                  >
+                    Aceptar y cerrar {seleccionadas.length}
+                  </button>
+                {/if}
+              </div>
+              {#if loteResultado && loteResultado.detalle.length > 0}
+                <ul class="snoc-lote-fallos">
+                  {#each loteResultado.detalle as f}
+                    <li>{f}</li>
+                  {/each}
+                </ul>
+              {/if}
+            {/if}
             <div class="snoc-tabla-caja">
               <table class="snoc-tabla snoc-tabla-bandeja">
                 <thead>
                   <tr>
+                    <!--
+                      TILDA SOLO LAS PENDIENTES de esta pagina, no las 108:
+                      "seleccionar todo" sobre algo que no se ve es la forma
+                      mas facil de aceptar algo que nadie miro.
+                    -->
+                    <th style="width:2.2rem;">
+                      <input
+                        type="checkbox"
+                        aria-label="Seleccionar las pendientes de esta página"
+                        title="Seleccionar las {seleccionables.length} pendientes de esta página"
+                        checked={todasTildadas}
+                        disabled={enLote || seleccionables.length === 0}
+                        onchange={tildarTodas}
+                      />
+                    </th>
                     <th style="width:2.5rem;">N.º</th>
                     <th>Prioridad</th>
                     <th>Cliente</th>
@@ -1325,6 +1496,17 @@
                   {#each pagina as p (p.id)}
                     {@const sla = celdaDeSla(p.sla_estado, p.sla_minutos)}
                     <tr class={abierta === p.id ? 'snoc-fila-activa' : ''}>
+                      <td>
+                        {#if p.revision.pendiente}
+                          <input
+                            type="checkbox"
+                            aria-label="Seleccionar esta propuesta"
+                            checked={!!seleccion[p.id]}
+                            disabled={enLote}
+                            onchange={() => (seleccion[p.id] = !seleccion[p.id])}
+                          />
+                        {/if}
+                      </td>
                       <!-- La posición dentro de los resultados, no el id: con
                            un filtro puesto, numerar por id dejaría huecos. -->
                       <td class="snoc-mono-sm snoc-tenue">{p.n}</td>
