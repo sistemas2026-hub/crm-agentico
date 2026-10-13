@@ -317,4 +317,40 @@ def guardar_en_propuesta(propuesta, senal, ahora=None) -> None:
 
     propuesta.evidencia = list(propuesta.evidencia or []) + nuevas
     propuesta.updated_at = ahora or timezone.now()
-    propuesta.save(update_fields=["evidencia", "updated_at"])
+    campos = ["evidencia", "updated_at"]
+
+    #  Y SE REESCRIBE EL JUICIO, que es lo que faltaba  --  13/10/2026
+    #  ---------------------------------------------------------------
+    #  El ciclo registra la propuesta ANTES de leer el ticket: primero cierra
+    #  lo que ya esta resuelto, despues lee lo que sigue abierto. Asi que el
+    #  motivo nace escrito sin la lectura, y hasta hoy nadie lo volvia a tocar.
+    #
+    #  MEDIDO EN PRODUCCION, en la primera propuesta que alguien abrio: el
+    #  texto de arriba decia "se leyo el reclamo y no alcanza para una
+    #  hipotesis" mientras la evidencia de abajo traia la hipotesis entera
+    #  --degradacion del enlace optico, -26.19 dBm--. Las dos cosas en la misma
+    #  pantalla, contradiciendose.
+    #
+    #  Eso es peor que no haber leido: quien lee el resumen y no baja hasta la
+    #  evidencia decide sobre lo contrario de lo que el sistema averiguo. Por
+    #  eso se vuelve a juzgar con la señal YA enriquecida, en vez de dejar el
+    #  texto viejo al lado del dato nuevo.
+    from operaciones import supervisor as sup
+
+    try:
+        juicio = sup.analizar(senal)
+    except Exception as e:                                       # noqa: BLE001
+        #  Un juicio que no se pudo rehacer deja el anterior, que es viejo pero
+        #  no inventado. La evidencia nueva se guarda igual.
+        logger.info("Supervisor: no se pudo rejuzgar el ticket (%s)",
+                    type(e).__name__)
+        juicio = None
+
+    if juicio:
+        propuesta.motivo = juicio["motivo"]
+        propuesta.accion_propuesta = juicio["accion_propuesta"]
+        propuesta.prioridad = juicio["prioridad"]
+        propuesta.impacto = juicio.get("impacto", propuesta.impacto)
+        campos += ["motivo", "accion_propuesta", "prioridad", "impacto"]
+
+    propuesta.save(update_fields=campos)

@@ -207,6 +207,46 @@ export function aceptarEjecuta(d) {
 }
 
 /**
+ * Qué promete el botón de aceptar varias a la vez.
+ *
+ * EL BOTÓN DECÍA «ACEPTAR Y CERRAR» SIEMPRE, Y CASI NUNCA CERRABA
+ * ---------------------------------------------------------------
+ * Nació cuando la bandeja solo tenía desincronizaciones, donde aceptar sí
+ * cierra el caso. Desde el 13/10/2026 hay tipos donde aceptar registra un
+ * acuerdo y nada más -- y el botón seguía ofreciendo «Aceptar y cerrar 6»
+ * sobre seis propuestas que no cierran ninguna.
+ *
+ * Prometer un cierre que no ocurre es el malentendido más caro de esta
+ * pantalla: quien lo aprieta se va creyendo que esos seis casos quedaron
+ * resueltos. El detalle ya tenía una sección entera dedicada a evitarlo; el
+ * botón masivo la contradecía.
+ *
+ * MEZCLADAS: se promete lo chico y se dice el reparto. Un botón que anuncia
+ * «cerrar» porque dos de seis cierran deja creer que cerraron las seis.
+ *
+ * @param {any[]} filas  las propuestas de la página
+ * @param {string[]} ids  las tildadas
+ */
+export function loteDeSeleccion(filas, ids) {
+  const tildadas = (filas ?? []).filter((f) => (ids ?? []).includes(String(f?.id)));
+  const cierran = tildadas.filter(aceptarEjecuta).length;
+  const n = tildadas.length;
+  return {
+    n,
+    cierran,
+    soloRegistran: n - cierran,
+    //  El rótulo nunca promete más de lo que el backend va a hacer.
+    etiqueta: cierran === n && n > 0 ? `Aceptar y cerrar ${n}` : `Aceptar ${n}`,
+    //  La aclaración solo cuando hay dos conductas mezcladas: repetirla
+    //  siempre la vuelve parte del decorado y deja de leerse.
+    aclaracion:
+      cierran > 0 && cierran < n
+        ? `${cierran} cierran el caso en Dexter; ${n - cierran} solo quedan registradas.`
+        : ''
+  };
+}
+
+/**
  * Las etapas del ciclo, y en cuál está la propuesta.
  *
  * DOS CICLOS, PORQUE SON DOS CONDUCTAS DISTINTAS
@@ -435,15 +475,68 @@ export function comparacionFuentes(d, contexto) {
 export function analisisSeparado(d) {
   const evidencia = Array.isArray(d?.evidencia) ? d.evidencia : [];
   return {
+    //  UN DATO APARECE EN UN SOLO SITIO. Hasta el 13/10/2026 las
+    //  observaciones que hablan de lo que FALTA salían dos veces: como hecho
+    //  observado y otra vez abajo, con el mismo texto completo. Quien lee cree
+    //  que son dos cosas distintas y las cuenta dos veces.
     hechos: evidencia
       .filter((e) => e?.fuente !== 'calculo_prioridad')
+      .filter((e) => !esFaltante(e?.dato))
       .map((e) => ({ dato: e?.dato ?? '', fuente: e?.fuente ?? '', cuando: e?.observado_en ?? null })),
+    //  Se conserva la clave por compatibilidad con quien ya la lee; la
+    //  pantalla NO la pinta, porque es el mismo texto que «¿Qué está
+    //  pasando?» ya muestra arriba.
     interpretacion: d?.motivo || AUSENTE,
     impacto: d?.impacto || AUSENTE,
-    faltantes: evidencia
-      .map((e) => String(e?.dato ?? ''))
-      .filter((t) => /falta|no consta|no se pudo|sin registrar|no dice/i.test(t))
+    faltantes: evidencia.map((e) => String(e?.dato ?? '')).filter(esFaltante)
   };
+}
+
+/** Una observación que habla de lo que NO se sabe, no de lo que se midió. */
+function esFaltante(t) {
+  return /falta|no consta|no se pudo|sin registrar|no dice/i.test(String(t ?? ''));
+}
+
+/**
+ * ¿La tabla Dexter ↔ WispHub tiene algo que comparar?
+ *
+ * SE PREGUNTA PORQUE LA TABLA NO ES PARA TODOS. Nació para las
+ * desincronizaciones, donde el punto ES el desacuerdo entre las dos fuentes.
+ * Para un ticket que se leyó, tres de sus cuatro filas dicen «No disponible en
+ * la fuente» y la cuarta repite un identificador que ya está arriba: una tabla
+ * así no informa, ocupa y hace dudar de si falló algo.
+ *
+ * El identificador no cuenta: Dexter siempre lo tiene, así que contarlo haría
+ * que la tabla «aporte» siempre.
+ *
+ * @param {{campo:string, dexter:string, wisphub:string}[]} filas
+ */
+export function comparacionAporta(filas) {
+  return (filas ?? []).some(
+    (f) => f.campo !== 'Identificador' && (f.dexter !== AUSENTE || f.wisphub !== AUSENTE)
+  );
+}
+
+/**
+ * Las filas de «Si aceptas esta propuesta» que de verdad dicen algo.
+ *
+ * NO incluye la acción propuesta: es palabra por palabra la frase que la
+ * sección de arriba muestra en grande. Y las filas sin dato se van en vez de
+ * repetir «No disponible en la fuente» tres veces seguidas, que es ruido que
+ * se lee como un error del sistema.
+ *
+ * Pide las tres claves que usa, no el objeto entero de 'siAcepto': una
+ * función que exige campos que no mira obliga a construirlos para probarla.
+ *
+ * @param {{estadoActual?: string, origenDecision?: string, tipo?: string}} aceptar
+ */
+export function filasDeAceptar(aceptar) {
+  const filas = [
+    { rotulo: 'Estado actual en Dexter', valor: aceptar?.estadoActual },
+    { rotulo: 'Origen de la decisión', valor: aceptar?.origenDecision },
+    { rotulo: 'Tipo', valor: aceptar?.tipo }
+  ];
+  return filas.filter((f) => f.valor && f.valor !== AUSENTE);
 }
 
 /**

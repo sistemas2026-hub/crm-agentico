@@ -243,7 +243,11 @@ def test_resolver_el_lote_no_cuesta_una_consulta_por_caso(org_a, django_assert_n
     """
     with rls_org(org_a):
         uno = [_propuesta_de(org_a, _caso(org_a, external_client_name="A B"))]
-        with django_assert_num_queries(1) as captura:
+        #  DOS: la de los casos y la de sus tecnicos asignados (muchos-a-
+        #  muchos, precargado para todo el lote el 13/10/2026). Lo que esta
+        #  prueba afirma de verdad esta tres lineas mas abajo -- que con DIEZ
+        #  cuesta lo mismo que con uno-- y eso no cambio.
+        with django_assert_num_queries(2) as captura:
             contexto_propuesta.contexto_de(org_a, uno)
         consultas_con_uno = len(captura.captured_queries)
 

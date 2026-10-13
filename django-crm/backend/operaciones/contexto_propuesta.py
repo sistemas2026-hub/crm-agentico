@@ -259,6 +259,9 @@ def contexto_de(org, propuestas) -> dict:
             #  'status' y 'resolved_at' NO agregan una consulta: la fila del
             #  caso ya se estaba trayendo para el cliente y el asunto. Lo unico
             #  que cambia es cuantas columnas vienen en ella.
+            #  'assigned_to' se precarga: es muchos-a-muchos, y leerlo caso
+            #  por caso serian doscientas consultas mas en la misma pantalla.
+            .prefetch_related("assigned_to")
             .only("id", "provider", "external_ticket_id", "name", "created_at",
                   "account__name", "external_client_name",
                   "status", "resolved_at")
@@ -309,9 +312,55 @@ def contexto_de(org, propuestas) -> dict:
                 "proveedor_externo": caso.provider or "",
                 "cliente": _nombre_de_cliente(caso),
                 "asunto": caso.name or "",
+                #  EL TECNICO DEL CASO, que hasta el 13/10/2026 no viajaba
+                #  ----------------------------------------------------------
+                #  'tecnico' solo se llenaba para las propuestas que salen de
+                #  una ORDEN. Para las que salen de un caso quedaba vacio, y la
+                #  pantalla lo dibuja como "Sin técnico asignado" -- que es una
+                #  afirmacion, no un hueco.
+                #
+                #  Se vio cuando entraron los tickets leidos: el detector solo
+                #  emite esa señal para casos que YA tienen tecnico
+                #  ('assigned_to__isnull=False', que fue lo que se pidio), y la
+                #  bandeja mostraba las seis filas diciendo que ninguno lo
+                #  tenia. La pantalla contradecia a la condicion que las puso
+                #  ahi.
+                "tecnico": _nombre_de_asignado(caso),
                 "origen_creado_en": (caso.created_at.isoformat()
                                      if caso.created_at else None),
                 "caso_cerrado": _esta_cerrado(caso),
             })
 
     return salida
+
+
+def _nombre_de_asignado(caso) -> str:
+    """
+    Quien tiene el caso, para mostrarlo en una celda.
+
+    MAS DE UNO ES POSIBLE: 'assigned_to' es muchos-a-muchos. Se nombra al
+    primero y se dice cuantos mas hay, en vez de elegir uno en silencio --
+    quien lee la bandeja tiene que poder notar que hay mas gente involucrada.
+
+    Devuelve cadena vacia cuando no hay nadie, que es lo que la pantalla ya
+    sabe dibujar como ausencia.
+    """
+    gente = list(caso.assigned_to.all())
+    if not gente:
+        return ""
+    primero = _nombra_a(gente[0])
+    return primero if len(gente) == 1 else f"{primero} +{len(gente) - 1}"
+
+
+def _nombra_a(perfil) -> str:
+    """
+    El nombre de un perfil, con el correo como respaldo.
+
+    'common.User' guarda el nombre en UN campo, 'name' -- no tiene
+    'first_name'/'last_name' ni 'get_full_name()', que es lo que uno escribiria
+    de memoria pensando en el usuario estandar de Django. Verificado en el
+    modelo, despues de que la primera version de esto fallara justo ahi.
+    """
+    usuario = getattr(perfil, "user", None)
+    nombre = (getattr(usuario, "name", "") or "").strip()
+    return nombre or getattr(usuario, "email", "") or str(perfil)

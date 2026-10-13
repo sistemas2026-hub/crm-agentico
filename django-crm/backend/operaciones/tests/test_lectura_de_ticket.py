@@ -149,3 +149,71 @@ def test_todo_tipo_de_senal_sabe_producir_una_propuesta():
         f"{sin_juicio}. El ciclo los cuenta como 'datos insuficientes' y no "
         f"crea nada, sin error y sin aviso -- asi 750 tickets detectados "
         f"dieron cero propuestas el 13/10/2026")
+
+
+# ===========================================================================
+#  4. LA LECTURA REESCRIBE EL TEXTO, NO SOLO AGREGA EVIDENCIA
+# ===========================================================================
+#  MEDIDO EN PRODUCCION el 13/10/2026, en la primera propuesta que alguien
+#  abrio: el resumen decia "se leyo el reclamo y no alcanza para una hipotesis"
+#  mientras la evidencia de mas abajo traia la hipotesis completa --degradacion
+#  del enlace optico, -26.19 dBm--. Las dos cosas en la misma pantalla.
+#
+#  El motivo nace cuando se registra la propuesta, que es ANTES de leer el
+#  ticket; la lectura agregaba evidencia y no volvia a tocar el texto.
+#
+#  Quien lee el resumen y no baja hasta la evidencia decide sobre lo contrario
+#  de lo que el sistema averiguo. Por eso la guarda afirma el EFECTO --que el
+#  texto cambio y nombra lo que se leyo-- y no que se haya llamado a nada.
+
+class _PropuestaFalsa:
+    """Lo minimo que 'guardar_en_propuesta' toca, para medir sin base."""
+
+    def __init__(self):
+        self.evidencia = []
+        self.motivo = ("El ticket sigue abierto en WispHub hace 7 días. Se "
+                       "leyó el reclamo y no alcanza para una hipótesis.")
+        self.accion_propuesta = "Decidir qué se hace con este ticket"
+        self.prioridad = 13
+        self.impacto = ""
+        self.updated_at = None
+        self.guardados = []
+
+    def save(self, update_fields=None):
+        self.guardados.append(list(update_fields or []))
+
+
+def test_la_lectura_reescribe_el_resumen_y_no_lo_deja_contradiciendo_la_evidencia():
+    from operaciones import diagnostico_de_ticket as dxt
+    from operaciones.models import PropuestaSupervisor as P
+    from operaciones.supervisor import Senal
+
+    hipotesis = ("Degradación del enlace óptico del servicio 3614 "
+                 "(señal débil, -26.19 dBm)")
+    senal = Senal(
+        tipo=P.TICKET_SIN_DIAGNOSTICO,
+        origen_tipo="case",
+        origen_id="12c0bd1c",
+        evidencia=[{"fuente": dxt.FUENTE,
+                    "dato": f"lectura del reclamo: {hipotesis}",
+                    "entidad_id": "12c0bd1c"}],
+        datos={"dias_abierto": 7, "sin_movimiento": True,
+               "diagnostico_leido": True,
+               "diagnostico_hipotesis": hipotesis,
+               "diagnostico_confianza": "media"},
+    )
+
+    p = _PropuestaFalsa()
+    viejo = p.motivo
+    dxt.guardar_en_propuesta(p, senal)
+
+    assert p.motivo != viejo, (
+        "la lectura no reescribio el resumen: el texto viejo queda arriba "
+        "diciendo que no hay hipotesis, con la hipotesis justo abajo")
+    assert "no alcanza para una hipótesis" not in p.motivo, (
+        "el resumen sigue afirmando que no se pudo concluir nada, y la "
+        "evidencia de la misma propuesta dice lo contrario")
+    assert "Degradación del enlace óptico" in p.motivo, (
+        "el resumen no nombra lo que se leyo: quien no baje hasta la "
+        "evidencia no se entera de que el sistema si averiguo algo")
+    assert "motivo" in p.guardados[0], "el motivo no se persistio"

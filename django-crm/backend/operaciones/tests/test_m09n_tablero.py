@@ -786,15 +786,22 @@ def test_el_estado_del_caso_NO_agrega_consultas(org_a, django_assert_num_queries
             propuestas.append(_propuesta(org_a, origen_tipo="case",
                                          origen_id=str(caso.id)))
 
-        #  UNA consulta para los cinco casos, y es la unica: las de ordenes,
-        #  asignaciones y zonas ni se lanzan porque ninguna propuesta cuelga
-        #  de una orden de trabajo.
+        #  DOS consultas para los cinco casos: la de los casos, y la de sus
+        #  tecnicos asignados. Las de ordenes y zonas ni se lanzan porque
+        #  ninguna propuesta cuelga de una orden de trabajo.
         #
-        #  El numero se midio, no se supuso: la primera version de esta
-        #  prueba esperaba 4 --las cuatro que el contexto puede hacer-- y el
-        #  rojo dijo que era 1. Afirmar 4 habria dejado pasar tres consultas
-        #  nuevas sin que nadie se enterara.
-        with django_assert_num_queries(1):
+        #  El numero se midio, no se supuso: la primera version de esta prueba
+        #  esperaba 4 --las cuatro que el contexto puede hacer-- y el rojo dijo
+        #  que era 1. Afirmar 4 habria dejado pasar tres consultas nuevas sin
+        #  que nadie se enterara.
+        #
+        #  SUBIO A 2 EL 13/10/2026, y la que se agrego es FIJA, no por caso:
+        #  'assigned_to' es muchos-a-muchos y se precarga para todo el lote.
+        #  Lo que esta prueba protege --que el costo no crezca con la cantidad
+        #  de propuestas-- lo afirma la de 'test_m09p_nombre_cliente', que
+        #  compara una contra diez. Si alguna vez este numero sube sin que esa
+        #  otra siga en verde, lo que entro es un N+1.
+        with django_assert_num_queries(2):
             contexto_propuesta.contexto_de(org_a, propuestas)
 
 

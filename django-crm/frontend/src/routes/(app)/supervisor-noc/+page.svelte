@@ -24,7 +24,10 @@
     antiguedadDelCaso,
     lecturaExterna,
     CONTEXTO_AUSENTE,
-    pasosDelCiclo
+    pasosDelCiclo,
+    comparacionAporta,
+    filasDeAceptar,
+    loteDeSeleccion
   } from '$lib/v2/supervisor-noc-detalle.js';
   import {
     kpisDelTablero,
@@ -689,6 +692,7 @@
   const comparacion = $derived(comparacionFuentes(detalle, contextoFila));
   const analisis = $derived(analisisSeparado(detalle));
   const aceptar = $derived(siAcepto(detalle, contraste));
+  const filasAceptar = $derived(filasDeAceptar(aceptar));
   const fuentes = $derived(fuentesDeEvidencia(detalle?.evidencia));
   const basePrioridad = $derived(baseDePrioridad(detalle?.evidencia));
   const antiguedad = $derived(antiguedadDelCaso(detalle?.evidencia));
@@ -783,6 +787,8 @@
   //  SOLO LAS PENDIENTES se pueden tildar: una ya decidida no se vuelve a
   //  decidir, y ofrecerla seria prometer algo que el backend rechaza.
   const seleccionables = $derived(pagina.filter((/** @type {any} */ p) => p.revision.pendiente));
+  //  Qué promete el botón, calculado sobre lo que está tildado AHORA.
+  const lote = $derived(loteDeSeleccion(pagina, seleccionadas));
 
   const todasTildadas = $derived(
     seleccionables.length > 0 &&
@@ -1490,16 +1496,24 @@
                     Limpiar
                   </button>
                   <!--
-                    DICE CUANTAS Y QUE HACE. "Aceptar" a secas no deja ver que
-                    esto cierra casos de verdad, uno por uno, contra el
-                    proveedor.
+                    EL ROTULO LO DECIDE LO TILDADO, no el botón. Decía
+                    "Aceptar y cerrar" siempre, también sobre seis propuestas
+                    que no cierran ninguna: quien lo apretaba se iba creyendo
+                    que esos seis casos quedaron resueltos.
+
+                    (El comentario anterior además decía que el cierre es
+                    "contra el proveedor", y es al revés: cierra en Dexter y
+                    NUNCA toca WispHub.)
                   -->
+                  {#if lote.aclaracion}
+                    <span class="snoc-mono-sm snoc-tenue">{lote.aclaracion}</span>
+                  {/if}
                   <button
                     class="snoc-btn snoc-btn-primario"
                     type="button"
                     onclick={aceptarSeleccionadas}
                   >
-                    Aceptar y cerrar {seleccionadas.length}
+                    {lote.etiqueta}
                   </button>
                 {/if}
               </div>
@@ -2016,9 +2030,13 @@
                     <span class="snoc-h4">{contraste.proveedor}</span>
                   </div>
                 </div>
-              {:else}
-                <p class="snoc-body" style="margin:0;">{detalle.motivo || 'Sin motivo registrado.'}</p>
               {/if}
+              <!--
+                NO VA EL MOTIVO ACA. Lo pinta «¿Qué está pasando?», que está
+                tres centímetros más abajo. Hasta el 13/10/2026 el mismo
+                párrafo salía cuatro veces en esta pantalla: aquí, ahí, al pie
+                de «¿Qué detectó?» y otra vez como «Interpretación».
+              -->
             </div>
 
             <!-- TIRA DE CINCO -->
@@ -2078,6 +2096,12 @@
             </section>
 
             <!-- ============ 3 · DEXTER vs WISPHUB ============ -->
+            <!--
+              SOLO SI HAY DOS FUENTES QUE COMPARAR. Para un ticket leído, tres
+              de las cuatro filas decían «No disponible en la fuente» y la
+              cuarta repetía el identificador de arriba.
+            -->
+            {#if comparacionAporta(comparacion)}
             <section class="snoc-columna">
               <div class="snoc-columna-titulo">
                 <span class="snoc-icono snoc-primario" style="font-size:15px;">compare_arrows</span>
@@ -2098,32 +2122,15 @@
                 </tbody>
               </table>
             </section>
+            {/if}
 
-            <!-- ============ 4 · ¿QUÉ DETECTÓ EL SUPERVISOR? ============ -->
-            <section class="snoc-columna">
-              <div class="snoc-columna-titulo">
-                <span class="snoc-icono snoc-primario" style="font-size:15px;">radar</span>
-                <span class="snoc-label-sm" style="text-transform:uppercase;">¿Qué detectó el Supervisor NOC IA?</span>
-              </div>
-              <dl class="snoc-dl">
-                <div><dt>Hallazgo</dt><dd>{titulo}</dd></div>
-                <div><dt>Clave técnica</dt><dd class="snoc-mono-sm">{detalle.tipo_senal}</dd></div>
-                <div><dt>Detectado</dt><dd class="snoc-mono-sm">{fecha(detalle.created_at)}</dd></div>
-                <div>
-                  <dt>Fuente</dt>
-                  <dd class="snoc-mono-sm">{detalle.conocimiento_version || AUSENTE}</dd>
-                </div>
-                {#if antiguedad}
-                  <div>
-                    <dt>Antigüedad</dt>
-                    <dd>{antiguedad.dias != null ? `${antiguedad.dias} días` : `desde ${antiguedad.desde}`}</dd>
-                  </div>
-                {/if}
-              </dl>
-              <p class="snoc-body-sm snoc-secundario" style="margin:var(--snoc-xs) 0 0;">
-                {detalle.motivo || AUSENTE}
-              </p>
-            </section>
+            <!-- ============ 4 · ¿QUÉ DETECTÓ EL SUPERVISOR? — RETIRADA ============
+                 Sus cinco casillas estaban todas en otro lado: «Hallazgo» era
+                 el título de la pantalla, «Detectado» es la tira de arriba,
+                 «Antigüedad» está en el bloque técnico, «Fuente» venía vacía
+                 siempre, y al pie repetía el motivo por tercera vez. Lo único
+                 que no estaba en ningún otro sitio --la clave técnica-- bajó
+                 al desplegable de abajo, que es donde se busca algo así. -->
 
             <!-- ============ 10 · INFORMACIÓN TÉCNICA (se conserva entera) ============
                  Baja de sitio, no se pierde: primero lo que hace falta para
@@ -2140,6 +2147,8 @@
                   </span>
                 </div>
                 <dl class="snoc-lista-datos">
+                  <!-- La clave técnica ya está en «Información técnica», más abajo. -->
+                  <div><dt>Detectado</dt><dd class="snoc-mono-sm">{fecha(detalle.created_at)}</dd></div>
                   <div><dt>Fecha de expiración</dt><dd class="snoc-mono-sm">{fecha(detalle.expira_en)}</dd></div>
                   <div><dt>Tipo de origen</dt><dd>{detalle.origen_tipo}</dd></div>
                   <div><dt>Organización</dt><dd>{data.org ?? '—'}</dd></div>
@@ -2230,11 +2239,12 @@
                 </ul>
               {/if}
 
-              <p class="snoc-etiqueta-analisis">Interpretación del Supervisor</p>
-              <p class="snoc-body-sm" class:snoc-sin-fuente={analisis.interpretacion === AUSENTE}>
-                {analisis.interpretacion}
-              </p>
-
+              <!--
+                NO VA «INTERPRETACIÓN DEL SUPERVISOR». Era 'detalle.motivo',
+                palabra por palabra lo que «¿Qué está pasando?» ya dice arriba.
+                Lo que esta sección aporta y nadie más tiene son los HECHOS con
+                su fuente, el impacto, y lo que falta para estar seguro.
+              -->
               <p class="snoc-etiqueta-analisis">Impacto operativo</p>
               <p class="snoc-body-sm" class:snoc-sin-fuente={analisis.impacto === AUSENTE}>
                 {analisis.impacto}
@@ -2269,18 +2279,20 @@
             -->
             <section class="snoc-si-acepto">
               <h4 class="snoc-h4">Si aceptas esta propuesta</h4>
-              <dl class="snoc-dl">
-                <div>
-                  <dt>Estado actual en Dexter</dt>
-                  <dd class:snoc-sin-fuente={aceptar.estadoActual === AUSENTE}>{aceptar.estadoActual}</dd>
-                </div>
-                <div><dt>Acción propuesta</dt><dd>{aceptar.accion}</dd></div>
-                <div>
-                  <dt>Origen de la decisión</dt>
-                  <dd class:snoc-sin-fuente={aceptar.origenDecision === AUSENTE}>{aceptar.origenDecision}</dd>
-                </div>
-                <div><dt>Tipo</dt><dd>{aceptar.tipo}</dd></div>
-              </dl>
+              <!--
+                SOLO LAS FILAS CON DATO. «Acción propuesta» repetía en chico la
+                frase que está justo arriba en grande, y las otras dos decían
+                «No disponible en la fuente» para todo lo que no es una
+                desincronización -- tres renglones vacíos que se leen como si
+                algo hubiera fallado.
+              -->
+              {#if filasAceptar.length}
+                <dl class="snoc-dl">
+                  {#each filasAceptar as f (f.rotulo)}
+                    <div><dt>{f.rotulo}</dt><dd>{f.valor}</dd></div>
+                  {/each}
+                </dl>
+              {/if}
               <p class="snoc-aviso-shadow">
                 <span class="snoc-icono" style="font-size:16px;">info</span>
                 {aceptar.efecto}
@@ -2341,6 +2353,15 @@
             <!-- CICLO: revisión humana ➔ ejecución -->
             </details>
 
+            <!--
+              EL CICLO, SOLO DONDE ES UN CICLO. Para todo lo que no ejecuta
+              nada al aceptar, este bloque pintaba seis etapas y después
+              aclaraba que tres «no existen para este tipo de señal». Un
+              diagrama que necesita desmentirse a sí mismo no está informando;
+              lo que sí hace falta saber --que aceptar registra un acuerdo y
+              nada más-- ya lo dice «Si aceptas esta propuesta», justo arriba.
+            -->
+            {#if aceptar.ejecuta}
             <section class="snoc-ciclo">
               <div class="snoc-fila-sep" style="flex-wrap:wrap;">
                 <span class="snoc-label" style="text-transform:uppercase; letter-spacing:0.06em;">
@@ -2369,6 +2390,7 @@
                 {/if}
               </span>
             </section>
+            {/if}
 
             {#if Array.isArray(detalle.historial) && detalle.historial.length}
               <details class="snoc-detalles">
