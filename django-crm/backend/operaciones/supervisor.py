@@ -470,12 +470,23 @@ TOPE_TICKETS_POR_CORRIDA = 10
 #:  el tablero paso de 5 hallazgos a 755. Un numero asi no informa: nadie mira
 #:  una lista de setecientos, y ademas cada señal viaja por el ciclo entero.
 #:
-#:  SE DETECTAN LOS MAS VIEJOS, que es el orden en que conviene atenderlos, y
-#:  un poco mas que los que se leen por vuelta: asi la fase de lectura siempre
-#:  tiene de donde elegir aunque algunos ya esten diagnosticados.
+#:  SE DETECTAN LOS MAS VIEJOS QUE TODAVIA NO SE LEYERON, y esa segunda mitad
+#:  se agrego el mismo dia, unas horas despues, porque sin ella el tope
+#:  ATASCABA el sistema entero.
 #:
-#:  No se pierde ninguno: el que no entro hoy entra cuando los de adelante
-#:  dejen de estar abiertos, que es lo que se busca que pase.
+#:  LO QUE DECIA ACA, Y ERA FALSO: "no se pierde ninguno: el que no entro hoy
+#:  entra cuando los de adelante dejen de estar abiertos". Los de adelante son
+#:  justamente los que llevan MAS tiempo abiertos -- no se cierran. MEDIDO esa
+#:  misma tarde: 771 tickets cumplian las condiciones, el detector miraba
+#:  siempre los mismos 40, y 38 de esos 40 ya estaban leidos. El ciclo corria,
+#:  no leia nada, y los otros 731 no iban a mirarse NUNCA.
+#:
+#:  El sintoma no se parecia a la causa: "el Supervisor no registra lecturas"
+#:  se lee como un registro roto, y lo que estaba roto era a QUIEN miraba.
+#:
+#:  Ahora cada vuelta trae 40 que FALTAN, asi que avanza de verdad. Sigue
+#:  habiendo tope --cada lectura cuesta una consulta al modelo-- y los mas
+#:  viejos siguen yendo primero dentro de los que faltan.
 TOPE_TICKETS_DETECTADOS = 40
 
 #:  Cuanto puede estar un ticket sin movimiento antes de que el Supervisor
@@ -518,6 +529,31 @@ def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
     """
     corte_lectura = ahora - timedelta(hours=HORAS_LECTURA_FRESCA)
 
+    #  Perezoso: 'diagnostico_de_ticket' importa este modulo.
+    from operaciones.diagnostico_de_ticket import FUENTE as dxt_FUENTE
+
+    #  LOS QUE YA TIENEN SU LECTURA SALEN DE LA COLA. Sin esto el tope de mas
+    #  abajo ATASCA el sistema: se miran siempre los mismos 40 --los mas
+    #  viejos-- y como ya estan leidos, la vuelta no hace nada y el resto no
+    #  entra jamas. Medido el 13/10/2026: 38 de esos 40 ya leidos, 731
+    #  esperando detras.
+    #
+    #  Se pregunta por la EVIDENCIA y no por una bandera: es lo que de verdad
+    #  tiene o no tiene la propuesta, el mismo criterio que usa
+    #  'diagnostico_de_ticket.le_falta_lectura'. Una bandera puede quedar
+    #  puesta sobre una propuesta donde no quedo escrito nada.
+    #
+    #  NO se mira el ESTADO de la propuesta: una ACEPTADA tambien esta leida, y
+    #  volver a leerla gastaria la vuelta en algo que ya se decidio.
+    ya_leidos = [
+        i for i in (PropuestaSupervisor.objects
+                    .filter(org=org,
+                            tipo_senal=PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO,
+                            evidencia__icontains=dxt_FUENTE)
+                    .values_list("origen_id", flat=True))
+        if i
+    ]
+
     casos = (Case.objects
              .filter(org=org, resolved_at__isnull=True)
              .exclude(status=CERRADO_EN_DEXTER)
@@ -526,6 +562,7 @@ def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
              #  'assigned_to' es muchos-a-muchos: sin el 'distinct' un caso con
              #  dos tecnicos saldria dos veces, y se diagnosticaria dos veces.
              .filter(assigned_to__isnull=False)
+             .exclude(id__in=ya_leidos)
              .distinct()
              .only("id", "name", "status", "description", "created_at",
                    "external_status", "external_status_at",

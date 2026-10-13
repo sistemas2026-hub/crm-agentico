@@ -26,6 +26,7 @@
     CONTEXTO_AUSENTE,
     pasosDelCiclo,
     comparacionAporta,
+    filasComparables,
     filasDeAceptar,
     loteDeSeleccion
   } from '$lib/v2/supervisor-noc-detalle.js';
@@ -690,6 +691,9 @@
   const prioridad = $derived(prioridadHumana(detalle));
   const identidad = $derived(identificacion(detalle, contextoFila));
   const comparacion = $derived(comparacionFuentes(detalle, contextoFila));
+  //  Solo lo que de verdad compara: una fila con un lado vacio no dice nada y
+  //  la columna en blanco se lee como si algo hubiera fallado.
+  const comparables = $derived(filasComparables(comparacion));
   const analisis = $derived(analisisSeparado(detalle));
   const aceptar = $derived(siAcepto(detalle, contraste));
   const filasAceptar = $derived(filasDeAceptar(aceptar));
@@ -2112,7 +2116,7 @@
                   <tr><th>Información</th><th>Dexter</th><th>WispHub</th></tr>
                 </thead>
                 <tbody>
-                  {#each comparacion as fila (fila.campo)}
+                  {#each comparables as fila (fila.campo)}
                     <tr>
                       <th scope="row">{fila.campo}</th>
                       <td class:snoc-sin-fuente={fila.dexter === AUSENTE}>{fila.dexter}</td>

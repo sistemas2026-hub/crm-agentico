@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   comparacionAporta,
+  filasComparables,
   filasDeAceptar,
   analisisSeparado,
   loteDeSeleccion,
@@ -71,6 +72,30 @@ describe('no se pinta lo que no tiene dato', () => {
       { campo: 'Responsable', dexter: AUSENTE, wisphub: AUSENTE }
     ];
     expect(comparacionAporta(filas)).toBe(false);
+  });
+
+  it('un dato que solo tiene UNA fuente no hace aparecer la tabla', () => {
+    //  Medido en pantalla el 13/10/2026: al hacer que el técnico del caso
+    //  viajara, «Responsable» paso a tener dato en Dexter y la tabla volvio a
+    //  salir -- con tres filas enteras diciendo «No disponible en la fuente».
+    //  Una fila con un solo lado no compara: es un dato suelto en una tabla de
+    //  dos columnas.
+    const filas = [
+      { campo: 'Estado', dexter: AUSENTE, wisphub: AUSENTE },
+      { campo: 'Identificador', dexter: 'CS-46a1de31', wisphub: '94660' },
+      { campo: 'Última lectura', dexter: AUSENTE, wisphub: AUSENTE },
+      { campo: 'Responsable', dexter: 'Mario Vasquez', wisphub: AUSENTE }
+    ];
+    expect(comparacionAporta(filas)).toBe(false);
+  });
+
+  it('las filas que se pintan son solo las que tienen las dos fuentes', () => {
+    const filas = [
+      { campo: 'Estado', dexter: 'Assigned', wisphub: 'Cerrado' },
+      { campo: 'Responsable', dexter: 'Mario Vasquez', wisphub: AUSENTE },
+      { campo: 'Última lectura', dexter: AUSENTE, wisphub: AUSENTE }
+    ];
+    expect(filasComparables(filas).map((f) => f.campo)).toEqual(['Estado']);
   });
 
   it('pero sí sale cuando las dos fuentes dicen cosas distintas', () => {

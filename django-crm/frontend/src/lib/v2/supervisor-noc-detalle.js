@@ -512,9 +512,28 @@ function esFaltante(t) {
  * @param {{campo:string, dexter:string, wisphub:string}[]} filas
  */
 export function comparacionAporta(filas) {
-  return (filas ?? []).some(
-    (f) => f.campo !== 'Identificador' && (f.dexter !== AUSENTE || f.wisphub !== AUSENTE)
-  );
+  return filasComparables(filas).some((f) => f.campo !== 'Identificador');
+}
+
+/**
+ * Las filas que de verdad COMPARAN algo: las dos fuentes dijeron.
+ *
+ * SE AFINO EL 13/10/2026, el mismo dia, mirando la pantalla otra vez. El
+ * criterio anterior era «alguna fila tiene algun dato», y bastaba con que UN
+ * lado lo tuviera. Al hacer que el tecnico del caso viajara --un arreglo de
+ * esa misma tarde-- la fila «Responsable» paso a tener dato en Dexter, la
+ * tabla volvio a aparecer, y adentro seguian tres filas enteras diciendo «No
+ * disponible en la fuente».
+ *
+ * Una fila con un solo lado no es una comparacion: es un dato suelto puesto en
+ * una tabla de dos columnas, y la columna vacia se lee como si algo hubiera
+ * fallado. Si lo que queda es solo el identificador, no hay nada que comparar
+ * y la tabla entera se va.
+ *
+ * @param {{campo:string, dexter:string, wisphub:string}[]} filas
+ */
+export function filasComparables(filas) {
+  return (filas ?? []).filter((f) => f.dexter !== AUSENTE && f.wisphub !== AUSENTE);
 }
 
 /**
