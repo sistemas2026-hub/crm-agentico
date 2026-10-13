@@ -322,7 +322,11 @@
               <div class="snoc-kpi" style="min-width:9rem;">
                 <span class="snoc-kpi-n">{l.cuadrillas}</span>
                 <span class="snoc-kpi-titulo">
-                  {l.cuadrillas === 1 ? 'cuadrilla' : 'cuadrillas'} a {l.labor}
+                  <!-- `nombreDeLabor`, no el id crudo: el resto de la
+                       pantalla ya lo traduce (lineas 255, 292, 308) y aca
+                       decia 'correctivo' donde todo lo demas dice
+                       'Correctivo'. -->
+                  {l.cuadrillas === 1 ? 'cuadrilla' : 'cuadrillas'} a {nombreDeLabor(l.labor)}
                 </span>
                 <span class="snoc-kpi-sub">
                   {l.ordenes} {l.ordenes === 1 ? 'orden' : 'órdenes'}

@@ -6,6 +6,7 @@ import {
   despacharACampo
 } from '$lib/server/v2/despacho.js';
 import { correrCiclo } from '$lib/server/v2/supervisor-noc.js';
+import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 
 /** El mismo conjunto que `campo/permissions.py::ROLES_GESTION` y que la
  *  pantalla de Pendientes. Inventar uno propio acá los separaría en silencio
@@ -31,8 +32,27 @@ function conteosDel(propuesta) {
   const cuadrillasPorLabor = {};
 
   for (const a of propuesta.asignaciones ?? []) {
-    for (const o of a.ordenes ?? []) {
-      const labor = o?.labor || 'sin clasificar';
+    //  LA LABOR ES DE LA ASIGNACION, NO DE LA ORDEN  --  13/10/2026
+    //
+    //  Estaba leyendo `o.labor` de cada orden, y `_orden_json`
+    //  (`campo/cuadrillas_views.py:1086`) devuelve `id, numero, cliente,
+    //  direccion, zona, prioridad` y NADA MAS. O sea: `o.labor` era
+    //  `undefined` SIEMPRE, el `||` lo mandaba a 'sin clasificar', y este
+    //  panel --que existe justo para ver cuantas cuadrillas van a correctivos
+    //  y cuantas a instalaciones-- mostraba una sola fila diciendo
+    //  «N cuadrillas a sin clasificar». Con el backend en verde: ninguna
+    //  prueba suya podia verlo (CLAUDE.md §6).
+    //
+    //  La asignacion SI la trae (`"labor": a["jornada"].labor`, linea 952), y
+    //  es el lugar correcto: el reparto agrupa por `(zona, labor)`, asi que
+    //  todas las ordenes de una asignacion tienen la labor de esa jornada. No
+    //  se agrega `labor` a cada orden a proposito -- seria una segunda copia
+    //  del mismo dato, y el dia que difieran nadie sabria cual mirar.
+    //
+    //  El `||` se queda, y ahora SI significa algo: una jornada sin labor
+    //  declarada es una anomalia que hay que ver, no un campo que falta.
+    const labor = a?.labor || 'sin clasificar';
+    for (const _o of a.ordenes ?? []) {
       porLabor[labor] = (porLabor[labor] ?? 0) + 1;
       ordenes += 1;
       (cuadrillasPorLabor[labor] ??= new Set()).add(a?.cuadrilla?.id ?? a?.cuadrilla);
@@ -132,15 +152,20 @@ export async function load({ url, cookies }) {
 /**
  * Traduce lo que devuelve el backend a una frase, sin inventar una.
  *
- * El error de `apiRequest` trae `status` y `body`, no `data`: leyendo `e.data`
- * la frase del backend nunca llegaba y se veía «HTTP 500: Internal Server
- * Error» crudo (13/10/2026).
+ * DOS SESIONES ENCONTRARON ESTO EL MISMO DIA, por caminos independientes, y
+ * coincidieron en la causa: el error de `apiRequest` trae `status` y **`body`**,
+ * no `data`, asi que leer `e.data.detalle` daba `undefined` siempre y la frase
+ * del backend no llegaba nunca.
+ *
+ * Se conserva la version que delega en `mensaje-de-error.js`, que es la misma
+ * correccion mas tres cosas: lee tambien `detail` (DRF) --que es la clave que
+ * usan los endpoints que NO son de campo--, deja el codigo (`error`) como
+ * ultimo recurso en vez de como primero, y unifica las TRES copias que habia
+ * de esta funcion (despacho, cuadrillas, inventario), que leian de tres
+ * lugares distintos.
  */
 function mensajeDe(e) {
-  const detalle = e?.body?.detalle || e?.message;
-  return typeof detalle === 'string' && detalle.trim()
-    ? detalle.trim()
-    : 'No se pudo despachar.';
+  return mensajeDeError(e, 'No se pudo despachar.');
 }
 
 /** @type {import('./$types').Actions} */

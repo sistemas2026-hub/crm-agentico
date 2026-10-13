@@ -21,6 +21,7 @@ import {
   clasificarTipoDeTrabajo
 } from '$lib/server/v2/cuadrillas.js';
 import { leerUbicaciones } from '$lib/server/v2/inventario.js';
+import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 
 /**
  * Cuadrillas — Supervisor NOC.
@@ -145,12 +146,9 @@ export async function load({ url, cookies, locals, fetch }) {
 
 /** Traduce lo que devuelve el backend a una frase, sin inventar una. */
 function mensajeDe(e) {
-  return (
-    e?.body?.detail ||
-    e?.detail ||
-    e?.message ||
-    'No se pudo completar la operación.'
-  );
+  //  Buscaba `detail` (DRF) y se perdía `detalle`, que es la clave que usan
+  //  los endpoints de campo. El detalle está en `mensaje-de-error.js`.
+  return mensajeDeError(e);
 }
 
 /**
@@ -254,13 +252,60 @@ export const actions = {
       const r = await publicarReparto({ cookies }, asignaciones);
       const n = r?.publicadas ?? 0;
       const ya = r?.ya_tenian ?? [];
-      return {
-        hecho:
-          `${n} ${n === 1 ? 'orden asignada' : 'órdenes asignadas'}.` +
-          (ya.length
-            ? ` ${ya.length} ya tenía${ya.length === 1 ? '' : 'n'} a alguien y no se tocó: ${ya.join(', ')}.`
-            : '')
-      };
+      //  LAS TRES QUE SE ESTABAN CAYENDO ACÁ  --  13/10/2026
+      //
+      //  `RepartoView.post` nombra cinco cosas y esta capa leía DOS. Las otras
+      //  tres se perdían en silencio, y el backend dice por qué las nombra:
+      //
+      //    sin_nadie_con_cuenta  «Un silencio aca haria creer que se repartio
+      //                           todo» -- y era exactamente el silencio que
+      //                           producía esta función.
+      //    reasignadas           «se nombran porque alguien puede estar
+      //                           esperandolas donde estaban»
+      //    auxiliares_...        es lo esperado, pero se dice para que nadie
+      //                           lo lea como gente perdida
+      //
+      //  O sea: con dos cuadrillas sin publicar y tres órdenes movidas de
+      //  cuadrilla, el mensaje decía «12 órdenes asignadas.» y nada más. Es la
+      //  misma falla que `requiere_noc` el 29/09 (CLAUDE.md §6): el backend lo
+      //  manda, su prueba pasa, y la capa servidor lo deja caer.
+      const sinCuenta = r?.sin_nadie_con_cuenta ?? [];
+      const movidas = r?.reasignadas ?? [];
+      const auxiliares = r?.auxiliares_sin_asignacion ?? 0;
+
+      const partes = [`${n} ${n === 1 ? 'orden asignada' : 'órdenes asignadas'}.`];
+      if (ya.length) {
+        partes.push(
+          `${ya.length} ya tenía${ya.length === 1 ? '' : 'n'} a alguien y no se tocó: ` +
+          `${ya.map((n) => `#${n}`).join(', ')}.`
+        );
+      }
+      if (movidas.length) {
+        partes.push(
+          //  'cambió' + 'n' da «cambión». El plural es 'cambiaron'.
+          `${movidas.length} ${movidas.length === 1 ? 'cambió' : 'cambiaron'} de cuadrilla: ` +
+          //  `reasignadas` y `ya_tenian` son NUMEROS de orden (`orden.numero`,
+          //  `cuadrillas_views.py:1038` y `:1056`), no textos. Sin el '#' el
+          //  mensaje queda «3 cambiaron de cuadrilla: 1001, 1002, 1003.», que
+          //  se lee como una cantidad y no como tres identificadores.
+          `${movidas.map((n) => `#${n}`).join(', ')}.`
+        );
+      }
+      if (sinCuenta.length) {
+        //  Lo más importante del mensaje y lo que faltaba: una cuadrilla en la
+        //  que nadie entra al sistema NO recibió nada, y el total de arriba no
+        //  lo dice.
+        partes.push(
+          `Sin publicar por no tener nadie con cuenta: ${sinCuenta.join(', ')}.`
+        );
+      }
+      if (auxiliares) {
+        partes.push(
+          `${auxiliares} ${auxiliares === 1 ? 'auxiliar' : 'auxiliares'} ` +
+          `${auxiliares === 1 ? 'integra' : 'integran'} la cuadrilla sin recibir asignación.`
+        );
+      }
+      return { hecho: partes.join(' ') };
     } catch (e) {
       return fail(409, { error: mensajeDe(e) });
     }

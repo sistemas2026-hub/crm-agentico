@@ -1,4 +1,5 @@
 import { fail } from '@sveltejs/kit';
+import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 import {
   leerExistencias,
   leerCatalogo,
@@ -650,7 +651,7 @@ export const actions = {
  * @param {any} e
  */
 function mensajeDe(e) {
-  const crudo = String(e?.body?.detail ?? e?.message ?? e ?? '');
-  const limpio = crudo.replace(/^Error \d+:\s*/, '').trim();
-  return limpio || 'No se pudo completar la operación.';
+  //  Buscaba `detail` (DRF) y se perdía `detalle`, que es la clave que usan
+  //  los endpoints de campo. El detalle está en `mensaje-de-error.js`.
+  return mensajeDeError(e);
 }
