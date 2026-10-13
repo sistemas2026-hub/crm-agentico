@@ -244,6 +244,198 @@ def test_del_ticket_a_la_cuadrilla(
     )
 
 
+def test_del_TEXTO_del_reclamo_a_la_cuadrilla(
+    admin_client, org_a, admin_profile, plantilla, zona,
+    contexto_del_equipo_caido,
+):
+    """El OTRO camino a Despacho: el que sale de LEER el reclamo.
+
+    POR QUE HACIA FALTA ESTA PRUEBA
+    -------------------------------
+    `CasosDespachablesView` acepta DOS tipos de senal, y lo dice con todas las
+    letras (`despacho_pantalla_views.py:180-183`):
+
+        CASO_REQUIERE_VISITA     lo sostiene una MEDICION del equipo
+        TICKET_SIN_DIAGNOSTICO   sale de LEER el reclamo (13/10/2026)
+
+    La prueba de arriba recorre el primero entero. **Del segundo no habia
+    ninguna que llegara a Despacho** -- medido el 13/10/2026: buscar
+    TICKET_SIN_DIAGNOSTICO en las pruebas de `campo/` daba cero. O sea que el
+    camino que el cliente pidio --"que la clasificacion salga del resultado de
+    esa prueba o del texto que tiene el ticket, ambas sirven"-- estaba
+    construido y nadie habia comprobado que desembocara donde tiene que
+    desembocar.
+
+    Lo que se rompe sin esto, y no se nota: si `_tickets_abiertos_con_tecnico`
+    guardara otro `origen_tipo`, o la propuesta naciera con otro `tipo_senal`,
+    los tickets leidos NUNCA aparecerian en Despacho, y el sintoma --"la
+    pantalla esta vacia"-- no senala ahi. Es la misma forma de fallar que ya se
+    pago dos veces (CLAUDE.md §6).
+
+    EL MODELO NO SE LLAMA. `diagnosticar` recibe `concluir` inyectado, a
+    proposito: este eslabon prueba que el dato ATRAVIESE las capas, no que el
+    modelo acierte.
+    """
+    from cases.models import Case
+    from campo import jornada_automatica, reparto
+    from operaciones import diagnostico_de_ticket, supervisor
+
+    ahora = _ahora()
+
+    # --- 1 - un ticket ABIERTO en el proveedor, con tecnico y con texto ----
+    #  Las cuatro precondiciones de `_tickets_abiertos_con_tecnico`, puestas a
+    #  proposito y no por casualidad: estado en curso alla, lectura fresca,
+    #  alguien asignado, y descripcion con texto.
+    caso = Case.objects.create(
+        org=org_a, name="Internet intermitente", status="New",
+        priority="Normal", is_active=True,
+        description="Dice que se le cae el internet cada rato desde el lunes.",
+        external_service_id="6580", external_ticket_id="95048",
+        provider="wisphub", external_status="En progreso",
+        external_fetched_at=ahora - dt.timedelta(hours=1),
+    )
+    caso.assigned_to.add(admin_profile)
+
+    # --- 2 - el Supervisor lo detecta --------------------------------------
+    senales = supervisor._tickets_abiertos_con_tecnico(org_a, ahora)
+    assert [s.origen_id for s in senales] == [str(caso.id)], (
+        "el Supervisor no detecto el ticket abierto con tecnico"
+    )
+    senal = senales[0]
+    assert senal.tipo == PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO
+    #  LA DESCRIPCION NO VIAJA EN LA SENAL, y es una decision de privacidad,
+    #  no un olvido: 136 de cada 300 tickets traen una cedula escrita a mano,
+    #  y una senal termina guardada en una propuesta.
+    assert "description" not in senal.datos
+    assert senal.datos["tiene_descripcion"] is True
+
+    # --- 3 - se LEE el reclamo y queda la labor ----------------------------
+    class _Veredicto:
+        hipotesis = "Enlace optico degradado; intermitencia compatible."
+        confianza = "media"
+        riesgo = "bajo"
+        falta = []
+
+    informe = diagnostico_de_ticket.diagnosticar(
+        org_a, senales, ahora=ahora,
+        concluir=lambda org_, entrada: _Veredicto())
+    assert informe["leidos"] == 1, informe
+    assert informe["con_hipotesis"] == 1, informe
+    assert senal.datos["diagnostico_leido"] is True
+    #  La labor sale del clasificador REAL corriendo sobre el snapshot del
+    #  equipo (fibra -> correctivo), y queda marcada como verificada porque la
+    #  sostiene una medicion y no solo el texto.
+    assert senal.datos["labor"] == "correctivo", senal.datos
+    assert senal.datos["labor_verificada"] is True
+
+    # --- 4 - una persona la acepta -----------------------------------------
+    PropuestaSupervisor.objects.create(
+        org=org_a, tipo_senal=senal.tipo, origen_tipo="case",
+        origen_id=senal.origen_id, estado=PropuestaSupervisor.ACEPTADA,
+        evidencia=senal.evidencia,
+    )
+
+    # --- 5 - aparece en Despacho -------------------------------------------
+    cuerpo = admin_client.get(f"{CASOS}?ficha=1").json()
+    assert [c["id"] for c in cuerpo["casos"]] == [str(caso.id)], (
+        "un ticket LEIDO y aprobado no llego a Despacho: el camino del texto "
+        "no desemboca donde tiene que desembocar"
+    )
+    assert cuerpo["sin_aprobados"] is False
+
+    # --- 6 - se despacha ---------------------------------------------------
+    r = admin_client.post(CREAR, {
+        "work_type_version_id": str(plantilla.id),
+        "case_id": str(caso.id),
+        "zona": LOCALIDAD,
+    }, format="json", HTTP_IDEMPOTENCY_KEY="circuito-texto-1")
+    assert r.status_code == 201, r.content
+    orden = OrdenTrabajo.objects.get(pk=r.data["orden"]["id"])
+    assert (orden.zona or "").strip() == LOCALIDAD
+
+    # --- 7 - el reparto se la da a la cuadrilla de ESA labor ---------------
+    cuadrilla = Cuadrilla.objects.create(
+        org=org_a, nombre="Cuadrilla 1", lider=admin_profile,
+        labor_habitual="correctivo")
+    cuadrilla.zonas_habituales.set([zona])
+    jornada_automatica.asegurar_jornadas(org_a, HOY)
+    jornada = JornadaDeCuadrilla.objects.get(cuadrilla=cuadrilla, fecha=HOY)
+    IntegranteDeJornada.objects.create(
+        org=org_a, jornada=jornada,
+        persona=PersonaDeCampo.objects.create(
+            org=org_a, nombre="La Lider", profile=admin_profile),
+        rol="tecnico_lider")
+
+    propuesta = reparto.proponer(org_a, HOY)
+    asignadas = {a["cuadrilla"].nombre: [o.numero for o in a["ordenes"]]
+                 for a in propuesta["asignaciones"]}
+    assert asignadas.get("Cuadrilla 1") == [orden.numero], (
+        f"el reparto no le dio la orden a la cuadrilla. "
+        f"sin_zona={[o.numero for o in propuesta['sin_zona']]} "
+        f"sin_cuadrilla={[o.numero for o in propuesta['sin_cuadrilla']]} "
+        f"sin_clasificar={[o.numero for o in propuesta['sin_clasificar']]}"
+    )
+
+    # --- 8 - se publica y el tecnico lo ve ---------------------------------
+    r = admin_client.post("/api/campo/cuadrillas/reparto/", {
+        "asignaciones": [{"jornada": str(jornada.id),
+                          "ordenes": [str(orden.id)]}],
+    }, format="json")
+    assert r.status_code == 200, r.content
+    assert r.json()["publicadas"] == 1
+    suyos = admin_client.get(f"{TRABAJOS}?solo_mios=1").json()
+    numeros = [t["numero"] for t in (suyos.get("results") or [])]
+    assert orden.numero in numeros, (
+        f"la orden publicada no aparece en los trabajos del tecnico: {suyos}"
+    )
+
+
+def test_un_ticket_RECHAZADO_no_llega_a_despacho(
+    admin_client, org_a, admin_profile, plantilla, zona,
+    contexto_del_equipo_caido,
+):
+    """Rechazar es decir que NO, y tiene que seguir significando eso.
+
+    `ESTADOS_REVISADOS` agrupa aceptada/modificada/RECHAZADA para OTRA
+    pregunta: "ya la miro alguien?". Si Despacho filtrara por ese conjunto
+    traeria justo las que una persona decidio que no van, y nadie lo notaria:
+    la pantalla se veria MAS llena, no vacia. Un falso verde con esa forma no
+    lo caza ninguna prueba que solo mire el camino feliz.
+    """
+    from cases.models import Case
+
+    caso = Case.objects.create(
+        org=org_a, name="No tiene internet", status="New", priority="Normal",
+        is_active=True, external_service_id="6580",
+        external_ticket_id="95049", provider="wisphub",
+    )
+    #  LOS DOS TIPOS, rechazados. Con uno solo, esta prueba se tapa con la de
+    #  arriba: si alguien saca `TICKET_SIN_DIAGNOSTICO` del filtro de TIPO, el
+    #  caso desaparece por el tipo y no por el estado, y la mutacion del
+    #  ESTADO pasaria sin que nada se ponga rojo. Medido el 13/10/2026,
+    #  aplicando las dos mutaciones juntas: solo una se cazaba.
+    for tipo in (PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO,
+                 PropuestaSupervisor.CASO_REQUIERE_VISITA):
+        PropuestaSupervisor.objects.create(
+            org=org_a, tipo_senal=tipo,
+            origen_tipo="case", origen_id=str(caso.id),
+            estado=PropuestaSupervisor.RECHAZADA,
+        #  La evidencia NO es decorativa: `propuesta_exige_evidencia` es una
+        #  restriccion de la BASE, asi que una propuesta sin ella no se puede
+        #  ni insertar. Es el diseno --una propuesta sin con que sostenerla no
+        #  es una propuesta-- y por eso se respeta en vez de saltearla.
+            evidencia=[{"fuente": "prueba", "entidad": str(caso.id),
+                        "dato": "el cliente dijo que ya se arreglo solo",
+                        "visto_en": "2026-10-13T20:00:00+00:00"}],
+        )
+
+    cuerpo = admin_client.get(CASOS).json()
+    assert cuerpo["casos"] == []
+    #  Y se distingue de un error: "todavia nadie aprobo ninguno" dice que
+    #  hacer, "no se pudo leer" dice que algo esta roto.
+    assert cuerpo["sin_aprobados"] is True
+
+
 def test_un_eslabon_cortado_se_nota(
     admin_client, org_a, admin_profile, plantilla, zona,
     contexto_del_equipo_caido,
