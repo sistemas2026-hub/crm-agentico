@@ -81,11 +81,35 @@ def orden_sin_cliente(org_a):
     )
 
 
+def _tecnico(org):
+    from django.contrib.auth import get_user_model
+    from common.models import Profile
+
+    user, _ = get_user_model().objects.get_or_create(email="tec-lazo@test.com")
+    profile, _ = Profile.objects.get_or_create(
+        user=user, org=org, defaults={"role": "USER", "is_active": True})
+    return profile
+
+
 def _consumo(org, material, orden, *, serie="HWT-INST-1",
              estado=MovimientoDeMaterial.ACEPTADO,
              tipo=MovimientoDeMaterial.CONSUMO):
+    """Como lo registra la app: CON el tecnico, y el tecnico EN la orden.
+
+    Hasta el 13/10/2026 el movimiento nacia sin perfil y sin asignacion. Desde
+    que el aviso exige que quien instala este asignado a la orden (auditoria de
+    custodia, D3), ese atajo hacia que todas estas pruebas se cortaran antes de
+    llegar a lo que cada una mide.
+    """
+    from campo.models import AsignacionTrabajo
+
+    tecnico = _tecnico(org)
+    if orden is not None:
+        AsignacionTrabajo.objects.get_or_create(
+            orden=orden, profile=tecnico,
+            defaults={"rol": "tecnico", "es_principal": True})
     return MovimientoDeMaterial.objects.create(
-        org=org, material=material, orden=orden, tipo=tipo,
+        org=org, material=material, orden=orden, tipo=tipo, profile=tecnico,
         cantidad=Decimal("1"), serie=serie, estado=estado,
         idempotency_key=f"prueba-{serie}-{tipo}-{estado}",
     )

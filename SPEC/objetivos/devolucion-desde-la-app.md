@@ -1,6 +1,20 @@
 # Objetivo · Una devolución se cuenta una sola vez
 
-> Abierto el 13/10/2026. Estado: **abierto**, sin implementar. **Vivo en
+> **Actualizado el 13/10/2026, el mismo día: ARREGLADO EN CÓDIGO** (`421eaf2`,
+> sin desplegar) con la **opción 2** de abajo —la recepción consume lo
+> declarado—, elegida porque no agrega ubicaciones ni migraciones de esquema y
+> conserva la idea del diseño: el teléfono declara, la bodega firma. Seis
+> pruebas contra Postgres real (`test_custodia_auditoria_13_10::test_d1*`) y
+> tres mutaciones muertas.
+>
+> **Lo que sigue abierto, y por eso la ficha no se cierra:** los datos que ya
+> existen en producción. Toda devolución por la app que después se recibió en
+> la web dejó una custodia en negativo. Eso se **mide en producción** —cuántas
+> devoluciones `custodia -> (ninguna)` tienen una recepción `custodia -> bodega`
+> posterior del mismo técnico y material— y se corrige con una migración de
+> datos probada en una base aparte. Desde una sesión no se puede medir.
+>
+> Abierto el 13/10/2026. Estado original: **abierto**, sin implementar. **Vivo en
 > producción.** Sale de la auditoría de custodia
 > (`SPEC/auditorias/2026-10-13-custodia-de-materiales.md`, hallazgo D1), donde
 > lo encontraron por separado la pasada adversarial y, desde el cierre de
