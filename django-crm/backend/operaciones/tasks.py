@@ -261,10 +261,22 @@ def ciclo_a_pedido(org_id: str) -> dict:
     #  con ella puesta.
     set_rls_context(org.id)
     try:
-        #  'desatendido=False': alguien SI esta esperando el resultado en la
-        #  pantalla, aunque ya no por la misma conexion. El tope corto de
-        #  diagnosticos es el que corresponde.
-        resumen = supervisor.correr_ciclo(org)
+        #  'desatendido=True'  --  corregido el 14/10/2026
+        #  ------------------------------------------------
+        #  Decia False, razonando que "alguien SI esta esperando en la
+        #  pantalla". Es falso desde que esta tarea existe: el boton se
+        #  responde en el acto con el acuse y la persona se va a hacer otra
+        #  cosa. Nadie espera esta corrida.
+        #
+        #  Y el tope corto existe SOLO por esa espera: tres diagnosticos
+        #  contra quince. MEDIDO: diez propuestas de desincronizados llevaban
+        #  un dia sin diagnosticar, y por lo tanto sin poder cerrarse, mientras
+        #  cada vuelta a pedido miraba tres equipos y se iba.
+        #
+        #  NO ES UN PERMISO: las tres puertas del cierre --delegacion, techo de
+        #  autonomia y diagnostico del equipo-- siguen exactamente iguales. Lo
+        #  unico que cambia es cuantos equipos alcanza a mirar antes de cortar.
+        resumen = supervisor.correr_ciclo(org, desatendido=True)
     except Exception:
         logger.exception("Supervisor: el ciclo a pedido fallo para org=%s",
                          org.id)

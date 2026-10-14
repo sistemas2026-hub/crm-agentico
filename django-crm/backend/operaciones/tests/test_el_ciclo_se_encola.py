@@ -69,6 +69,43 @@ class _Tarea:
     id = "una-tarea"
 
 
+def test_el_ciclo_encolado_corre_DESATENDIDO(monkeypatch):
+    """
+    EL PRESUPUESTO LARGO, porque ya nadie espera esta corrida.
+
+    El tope corto --tres diagnosticos contra quince-- existe por una sola
+    razon: que el boton conteste rapido. Desde que la corrida se encola, el
+    boton contesta en el acto con el acuse y la persona se va a hacer otra
+    cosa.
+
+    MEDIDO el 14/10/2026: diez propuestas de desincronizados llevaban un dia
+    sin diagnosticar --y por lo tanto sin poder cerrarse-- mientras cada vuelta
+    a pedido miraba tres equipos y se iba.
+
+    NO AFLOJA NINGUNA PUERTA: delegacion, techo de autonomia y diagnostico del
+    equipo siguen iguales. Solo cambia cuantos equipos alcanza a mirar.
+    """
+    from common.models import Org
+    from operaciones import supervisor, tasks
+
+    visto = {}
+
+    def _correr(org, ahora=None, *, desatendido=False):
+        visto["desatendido"] = desatendido
+        return {"senales": 0}
+
+    monkeypatch.setattr(supervisor, "correr_ciclo", _correr)
+    monkeypatch.setattr(tasks, "set_rls_context", lambda *a, **k: None)
+    monkeypatch.setattr(tasks, "clear_rls_context", lambda *a, **k: None)
+
+    org = Org.objects.create(name="Una empresa")
+    tasks.ciclo_a_pedido(str(org.id))
+
+    assert visto.get("desatendido") is True, (
+        "la corrida encolada usa el presupuesto corto: mira tres equipos y se "
+        "va, dejando sin diagnosticar lo que no alcanza a cerrar")
+
+
 def test_si_la_cola_no_esta_se_dice_en_voz_alta(admin_client, monkeypatch):
     """
     FAIL-CLOSED. Callar un encolado que fallo deja a la persona esperando
