@@ -482,15 +482,31 @@ def evaluar_cierre_automatico(org, senales, *, ahora=None) -> dict:
     for senal in senales:
         if senal.tipo != PropuestaSupervisor.CASO_DESINCRONIZADO:
             continue
-        if senal.datos.get("diagnostico_veredicto") != CIERRE_SEGURO:
-            #  Sin un diagnostico que lo habilite no se evalua siquiera. El
-            #  'no_aplica' se escribe igual: el silencio en una señal que no
-            #  se miro es indistinguible del silencio en una que si.
-            informe["no_aplica"] += 1
-            senal.datos["cierre_automatico"] = "no_aplica"
-            senal.datos["cierre_automatico_porque"] = (
-                "el diagnostico no habilita un cierre automatico")
-            continue
+        #  EL DIAGNOSTICO INFORMA, YA NO BLOQUEA  --  decidido el 14/10/2026
+        #  -----------------------------------------------------------------
+        #  Hasta hoy, un diagnostico que no dijera CIERRE_SEGURO frenaba el
+        #  cierre. La consecuencia, medida: 25 casos acumulados sin cerrar, 11
+        #  de ellos de clientes SIN ONU REGISTRADA en WispHub -- que nunca van
+        #  a poder diagnosticarse, asi que se iban a acumular para siempre.
+        #
+        #  LO DECIDIO EL CLIENTE, con estas palabras: "si estan cerrados en
+        #  wisphub automaticamente se cierren en dexter sin validar". Y la
+        #  razon se sostiene sola: cerrar aqui un caso que el proveedor YA
+        #  cerro no es decidir que el problema del cliente se resolvio -- es
+        #  SINCRONIZAR un estado. Quien decidio fue el proveedor; esto solo
+        #  deja de contradecirlo.
+        #
+        #  LO QUE NO SE AFLOJA, y sigue siendo codigo antes del efecto:
+        #    · que el proveedor lo reporte cerrado (dato externo, verificado)
+        #    · que esa lectura tenga menos de 72 horas
+        #    · que alguien haya delegado la tarea
+        #    · el techo de autonomia
+        #  Y el cierre sigue siendo SOLO en Dexter: no toca WispHub.
+        #
+        #  EL DIAGNOSTICO NO SE TIRA. Cuando se pudo hacer, viaja al cierre y
+        #  queda escrito en el caso: si el equipo estaba caido, eso se lee
+        #  despues. Lo que cambia es que ya no impide sincronizar.
+        veredicto_del_equipo = senal.datos.get("diagnostico_veredicto")
 
         caso = Case.objects.filter(id=senal.origen_id, org=org).first()
         if caso is None:
@@ -519,9 +535,29 @@ def evaluar_cierre_automatico(org, senales, *, ahora=None) -> dict:
 
         informe["cerraria"] += 1
         senal.datos["cierre_automatico"] = "cerraria"
+
+        #  QUE DIJO EL EQUIPO, aunque ya no decida. Si estaba caido o no se
+        #  pudo medir, eso queda escrito EN EL CASO que se cierra: sincronizar
+        #  el estado no es lo mismo que afirmar que el cliente esta bien, y la
+        #  diferencia tiene que poder leerse despues.
+        if veredicto_del_equipo == CIERRE_SEGURO:
+            del_equipo = "el diagnostico del equipo lo respalda"
+        elif veredicto_del_equipo:
+            del_equipo = (f"OJO: el diagnostico del equipo NO lo respaldaba "
+                          f"({veredicto_del_equipo}). Se sincroniza igual "
+                          f"porque el proveedor ya cerro el ticket")
+            informe["cerrados_sin_respaldo"] = (
+                informe.get("cerrados_sin_respaldo", 0) + 1)
+        else:
+            del_equipo = ("sin diagnostico del equipo: no se pudo medir. Se "
+                          "sincroniza igual porque el proveedor ya cerro el "
+                          "ticket")
+            informe["cerrados_sin_medir"] = (
+                informe.get("cerrados_sin_medir", 0) + 1)
+
         senal.datos["cierre_automatico_porque"] = (
-            "el diagnostico habilita el cierre y las condiciones del caso se "
-            "siguen cumpliendo"
+            "el proveedor ya cerro el ticket y las condiciones del caso se "
+            f"siguen cumpliendo; {del_equipo}"
             + (". No se cerro: el cierre automatico esta en modo sombra, asi "
                "que esto es lo que el sistema HABRIA hecho." if EN_SOMBRA
                else ""))

@@ -498,10 +498,29 @@ def test_la_sombra_deja_escrito_que_HABRIA_cerrado(monkeypatch):
 
 
 @pytest.mark.django_db
-def test_un_diagnostico_que_NO_habilita_no_llega_a_evaluarse(monkeypatch):
-    #  Señal debil: el diagnostico no habilita, asi que el cierre automatico ni
-    #  se plantea. Si esto se rompiera, la sombra estaria midiendo como
-    #  "cerraria" casos que una persona tiene que mirar.
+def test_un_diagnostico_que_NO_habilita_YA_NO_FRENA_el_cierre(monkeypatch):
+    """
+    ESTA PRUEBA AFIRMABA LO CONTRARIO HASTA EL 14/10/2026.
+
+    Decia: "señal debil: el diagnostico no habilita, asi que el cierre
+    automatico ni se plantea". Era la regla correcta mientras cerrar se
+    entendio como AFIRMAR que el cliente esta bien.
+
+    El cliente la cambio, con estas palabras: "si estan cerrados en wisphub
+    automaticamente se cierren en dexter sin validar y ya se acaba eso". Y el
+    numero que lo motivo: 25 casos acumulados sin cerrar, 11 de ellos de
+    clientes SIN ONU REGISTRADA -- que no tienen equipo que medir, asi que
+    ningun diagnostico los iba a habilitar jamas.
+
+    EL RAZONAMIENTO QUE LO SOSTIENE: cerrar en Dexter un caso que el proveedor
+    YA cerro no es decidir que el problema se resolvio. Es dejar de
+    contradecir a quien ya decidio. El estado del ticket lo manda WispHub.
+
+    NO SE BORRA LA PRUEBA, SE DA VUELTA CON SU HISTORIA: el dia que alguien se
+    pregunte por que una señal debil cierra igual, esto se lo contesta. Lo que
+    sigue frenando --proveedor cerrado, lectura fresca, delegacion, techo de
+    autonomia-- tiene sus propias guardas en 'test_el_cierre_sincroniza.py'.
+    """
     from datetime import timedelta as td
 
     from cases.models import Case
@@ -524,8 +543,15 @@ def test_un_diagnostico_que_NO_habilita_no_llega_a_evaluarse(monkeypatch):
                         lambda o, *, id_servicio: DEBIL)
     resumen = supervisor.correr_ciclo(org)
 
-    assert resumen["cierre_automatico"]["cerraria"] == 0
-    assert resumen["cierre_automatico"]["no_aplica"] == 1
+    assert resumen["cierre_automatico"]["cerraria"] == 1, (
+        "una señal debil ya no frena la sincronizacion: el proveedor cerro el "
+        "ticket y eso es lo que se esta copiando")
+    assert resumen["cierre_automatico"]["no_aplica"] == 0
+
+    #  Y QUEDA ESCRITO que el equipo no lo respaldaba. Sincronizar un estado no
+    #  es afirmar que el cliente esta bien, y esa diferencia tiene que poder
+    #  leerse despues.
+    assert resumen["cierre_automatico"].get("cerrados_sin_respaldo") == 1
 
 
 @pytest.mark.django_db
