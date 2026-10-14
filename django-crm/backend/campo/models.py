@@ -425,12 +425,16 @@ class OrdenTrabajo(BaseModel):
         help_text="Zona operativa del trabajo. Agrupa la jornada por cercanía.",
     )
 
-    resumen = models.CharField(
-        max_length=255,
+    #  TEXTO, no varchar(255) (13/10/2026). Desde que Despacho precarga la
+    #  lectura del Supervisor, «que hay que hacer» es un parrafo: el primer
+    #  despacho real paso de 300 caracteres y Postgres rechazo el guardado
+    #  entero -- un 500 al crear la orden. El tope razonable lo pone el
+    #  serializer, con un mensaje, no la base con un error.
+    resumen = models.TextField(
         blank=True,
         default="",
-        help_text="Qué hay que hacer, en una línea. El tipo de trabajo dice la "
-                  "categoría; esto dice el caso.",
+        help_text="Qué hay que hacer. El tipo de trabajo dice la categoría; "
+                  "esto dice el caso.",
     )
 
     # La franja que se le prometio al cliente.

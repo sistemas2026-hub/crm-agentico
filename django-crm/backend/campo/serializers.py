@@ -346,9 +346,12 @@ class CrearOrdenSerializer(serializers.Serializer):
     # Vacio = orden manual (preventivo, inspeccion, obra). Con valor = nace de
     # un caso del CRM y hereda su ficha tecnica congelada.
     case_id = serializers.CharField(required=False, allow_blank=True, default="")
-    cliente_nombre = serializers.CharField(required=False, allow_blank=True, default="")
-    cliente_telefono = serializers.CharField(required=False, allow_blank=True, default="")
-    cliente_direccion = serializers.CharField(required=False, allow_blank=True, default="")
+    cliente_nombre = serializers.CharField(required=False, allow_blank=True, default="",
+                                        max_length=255)
+    cliente_telefono = serializers.CharField(required=False, allow_blank=True, default="",
+                                          max_length=64)
+    cliente_direccion = serializers.CharField(required=False, allow_blank=True, default="",
+                                           max_length=255)
     gps_lat = serializers.FloatField(required=False, allow_null=True)
     gps_lng = serializers.FloatField(required=False, allow_null=True)
     programada_para = serializers.DateTimeField(required=False, allow_null=True)
@@ -361,10 +364,16 @@ class CrearOrdenSerializer(serializers.Serializer):
         required=False,
         default=OrdenTrabajo.PRIORIDAD_MEDIA,
     )
-    zona = serializers.CharField(required=False, allow_blank=True, default="")
-    resumen = serializers.CharField(required=False, allow_blank=True, default="")
+    #  LOS LARGOS SE VALIDAN ACA, con un mensaje, y no en la base con un 500.
+    #  Antes ningun campo de texto tenia `max_length` y un texto largo llegaba
+    #  a Postgres, que rechazaba el guardado entero (13/10/2026). Los topes son
+    #  los de las columnas; `resumen` es texto y se acota por sentido comun.
+    zona = serializers.CharField(required=False, allow_blank=True, default="",
+                                 max_length=128)
+    resumen = serializers.CharField(required=False, allow_blank=True, default="",
+                                    max_length=2000)
     cliente_detalle_acceso = serializers.CharField(
-        required=False, allow_blank=True, default=""
+        required=False, allow_blank=True, default="", max_length=255
     )
     cliente_id_abonado = serializers.CharField(
         required=False, allow_blank=True, default=""

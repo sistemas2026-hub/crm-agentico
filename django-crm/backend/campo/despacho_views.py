@@ -142,13 +142,20 @@ class CrearOrdenView(APIView):
         #  ir. Nadie lo veia porque la orden se creaba igual, sin error.
         _ficha = (contexto.get("cliente") or {}) if isinstance(contexto, dict) else {}
 
+        #  Lo que viene de la ficha del ISP se RECORTA al largo de la columna:
+        #  el serializer valida lo que escribe la persona, pero un telefono con
+        #  cinco numeros separados por coma o una direccion larga del proveedor
+        #  llegarian intactos a Postgres, que rechazaria la orden entera.
+        def _de_ficha(clave, largo):
+            return str(_ficha.get(clave) or "")[:largo]
+
         cliente = {
-            "nombre": d.get("cliente_nombre") or _ficha.get("nombre") or "",
+            "nombre": d.get("cliente_nombre") or _de_ficha("nombre", 255) or "",
             #  El telefono del proveedor puede traer varios separados por coma
             #  --ver la skill de WispHub-- y se pasa tal cual: recortarlo aca
             #  elegiria por el tecnico cual llamar.
-            "telefono": d.get("cliente_telefono") or _ficha.get("telefono") or "",
-            "direccion": d.get("cliente_direccion") or _ficha.get("direccion") or "",
+            "telefono": d.get("cliente_telefono") or _de_ficha("telefono", 64) or "",
+            "direccion": d.get("cliente_direccion") or _de_ficha("direccion", 255) or "",
             # Como se entra al inmueble: con la direccion sola el tecnico llega
             # al edificio y no al apartamento.
             "detalle_acceso": d.get("cliente_detalle_acceso") or "",

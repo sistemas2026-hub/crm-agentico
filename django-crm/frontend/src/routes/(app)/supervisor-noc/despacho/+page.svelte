@@ -90,7 +90,9 @@
     const partes = [];
     if (lectura.hipotesis) partes.push(`Según el Supervisor: ${lectura.hipotesis}`);
     if (lectura.recomendacion) partes.push(`Recomienda: ${lectura.recomendacion}`);
-    return partes.join('. ');
+    //  El mismo tope que el backend (2000). Un texto mas largo volveria como
+    //  error al crear la orden.
+    return partes.join('. ').slice(0, 2000);
   }
 
   const nombreDeLabor = (id) =>
@@ -398,14 +400,14 @@
                quien despacha. -->
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Barrio o localidad</span>
-            <input class="snoc-campo" name="zona" required
+            <input class="snoc-campo" name="zona" required maxlength="128"
                    value={despachando.localidad ?? ''}
                    placeholder="El que figura en el proveedor" />
           </label>
 
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Cómo se entra al inmueble (opcional)</span>
-            <input class="snoc-campo" name="detalle_acceso"
+            <input class="snoc-campo" name="detalle_acceso" maxlength="255"
                    placeholder="Apto 302, portería pide cédula" />
           </label>
           <!-- Con la dirección sola el técnico llega al edificio, no al
@@ -425,7 +427,7 @@
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Qué hay que hacer</span>
             {#key despachando.lectura}
-              <textarea class="snoc-campo" name="resumen" rows="3"
+              <textarea class="snoc-campo" name="resumen" rows="3" maxlength="2000"
                         placeholder="Lo que el técnico no puede deducir">{textoDeLectura(despachando.lectura)}</textarea>
             {/key}
             {#if despachando.lectura?.hipotesis || despachando.lectura?.recomendacion}
