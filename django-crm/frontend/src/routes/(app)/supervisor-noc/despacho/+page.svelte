@@ -35,13 +35,62 @@
     return (data.plantillas ?? []).filter((p) => p.labor === labor);
   }
 
-  function abrir(caso) {
-    despachando = caso;
-    const coinciden = sugeridas(caso?.sugerencia?.labor);
+  /** Mientras se trae la ficha del caso abierto. */
+  let cargandoFicha = $state(false);
+
+  /** @param {string | undefined} labor */
+  function preelegir(labor) {
+    const coinciden = sugeridas(labor);
     //  Si hay UNA sola de esa labor, viene elegida. Con dos o más no se elige
     //  por el usuario: entre dos plantillas de la misma labor la diferencia la
     //  sabe él, no nosotros.
-    plantillaElegida = coinciden.length === 1 ? coinciden[0].id : '';
+    if (coinciden.length === 1) plantillaElegida = coinciden[0].id;
+  }
+
+  /**
+   * Abre el caso y TRAE SU FICHA (13/10/2026): el barrio del ISP, la lectura
+   * del Supervisor y la descripción del ticket tapada. Antes había que
+   * escribir a mano lo que el sistema ya sabía, o apretar «Traer el
+   * diagnóstico» para los veinticinco casos. Si la ficha no llega, el
+   * formulario queda como antes y se llena a mano.
+   */
+  async function abrir(caso) {
+    despachando = caso;
+    plantillaElegida = '';
+    preelegir(caso?.sugerencia?.labor);
+    cargandoFicha = true;
+    try {
+      const r = await fetch(`/supervisor-noc/despacho/ficha/${encodeURIComponent(caso.id)}`);
+      //  Si mientras tanto se abrió OTRO caso, esta ficha ya no le corresponde.
+      if (!r.ok || despachando?.id !== caso.id) return;
+      const ficha = await r.json();
+      despachando = {
+        ...despachando,
+        localidad: ficha.localidad || despachando.localidad || '',
+        sugerencia: despachando.sugerencia ?? ficha.sugerencia ?? null,
+        lectura: ficha.lectura ?? null,
+        descripcion: ficha.descripcion ?? ''
+      };
+      if (!plantillaElegida) preelegir(despachando.sugerencia?.labor);
+    } catch {
+      //  Sin ficha se despacha igual, escribiendo lo que falte.
+    } finally {
+      if (despachando?.id === caso.id) cargandoFicha = false;
+    }
+  }
+
+  /**
+   * Lo que el Supervisor leyó del reclamo y recomienda, como punto de partida
+   * de «Qué hay que hacer». Es una LECTURA: viene escrita para que la persona
+   * la confirme o la corrija, no como un dato.
+   * @param {any} lectura
+   */
+  function textoDeLectura(lectura) {
+    if (!lectura) return '';
+    const partes = [];
+    if (lectura.hipotesis) partes.push(`Según el Supervisor: ${lectura.hipotesis}`);
+    if (lectura.recomendacion) partes.push(`Recomienda: ${lectura.recomendacion}`);
+    return partes.join('. ');
   }
 
   const nombreDeLabor = (id) =>
@@ -321,8 +370,9 @@
             <span class="snoc-body-sm snoc-secundario">
               Define qué anota y qué fotos saca el técnico, y por su labor, qué cuadrilla
               la recibe.
-              {#if !despachando.sugerencia}
-                Viene elegida sola si traés el diagnóstico y hay una sola de esa labor.
+              {#if !despachando.sugerencia && !cargandoFicha}
+                Viene elegida sola cuando el diagnóstico sugiere una labor y hay una sola
+                plantilla de esa labor.
               {/if}
               Se crean y se editan en <a href="/supervisor-noc/plantillas">Plantillas</a>.
             </span>
@@ -343,8 +393,9 @@
 
           <!-- LA LOCALIDAD DECIDE QUÉ CUADRILLA LO RECIBE: el reparto mapea
                el barrio a una zona operativa, y una orden sin barrio queda
-               en `sin_zona` para siempre. Viene cargada si se trajo el
-               diagnóstico; si no, la pone quien despacha. -->
+               en `sin_zona` para siempre. Viene cargada de la
+               ficha del caso, que se trae sola al abrirlo; si el ISP no la tiene, la pone
+               quien despacha. -->
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Barrio o localidad</span>
             <input class="snoc-campo" name="zona" required
@@ -353,18 +404,39 @@
           </label>
 
           <label class="snoc-campo-grupo">
-            <span class="snoc-label">Cómo se entra al inmueble</span>
+            <span class="snoc-label">Cómo se entra al inmueble (opcional)</span>
             <input class="snoc-campo" name="detalle_acceso"
                    placeholder="Apto 302, portería pide cédula" />
           </label>
           <!-- Con la dirección sola el técnico llega al edificio, no al
-               apartamento. -->
+               apartamento. NO se llena solo: suele estar escrito a mano en el
+               ticket, y sacarlo de ahí sería que un modelo adivine en un campo
+               que el técnico lee como dato. Se muestra el ticket para copiarlo. -->
+          {#if despachando.descripcion}
+            <details class="snoc-tarjeta" open>
+              <summary class="snoc-body-sm"><strong>Lo que dice el ticket</strong>
+                <span class="snoc-secundario">· datos personales tapados</span></summary>
+              <p class="snoc-body-sm" style="white-space:pre-wrap; margin-top:var(--snoc-xs);">
+                {despachando.descripcion}
+              </p>
+            </details>
+          {/if}
 
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Qué hay que hacer</span>
-            <input class="snoc-campo" name="resumen"
-                   placeholder="Lo que el técnico no puede deducir" />
+            {#key despachando.lectura}
+              <textarea class="snoc-campo" name="resumen" rows="3"
+                        placeholder="Lo que el técnico no puede deducir">{textoDeLectura(despachando.lectura)}</textarea>
+            {/key}
+            {#if despachando.lectura?.hipotesis || despachando.lectura?.recomendacion}
+              <span class="snoc-body-sm snoc-secundario">
+                Viene de la lectura del Supervisor que se aceptó: confirmala o corregila.
+              </span>
+            {/if}
           </label>
+          {#if cargandoFicha}
+            <p class="snoc-body-sm snoc-secundario">Trayendo la ficha del caso…</p>
+          {/if}
 
           <div>
             <button class="snoc-btn" type="submit">Crear la orden</button>

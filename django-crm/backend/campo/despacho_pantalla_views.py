@@ -287,3 +287,94 @@ class CasosDespachablesView(APIView):
             #  Un caso que no se pudo evaluar no puede dejar sin lista a los
             #  otros veinticuatro.
             return None
+
+
+class FichaDespachableView(CasosDespachablesView):
+    """``GET`` lo que hace falta para despachar UN caso, ya cargado.
+
+    POR QUE EXISTE (13/10/2026)
+    ---------------------------
+    Al despachar habia que escribir a mano el barrio, como se entra y que hay
+    que hacer -- con el barrio en la ficha del ISP y la lectura del Supervisor
+    ya hecha. La ficha venia solo con «Traer el diagnostico de cada uno», que
+    consulta TODOS los casos; esto la trae para el que se esta mirando: una
+    consulta, no veinticinco.
+
+    QUE TRAE, Y DE DONDE
+      localidad      la ficha del cliente en el ISP. Es lo que el reparto mapea
+                     a una zona: sin ella la orden no llega a ninguna cuadrilla.
+      sugerencia     la misma de la lista.
+      lectura        lo que el Supervisor leyo del reclamo y recomienda, de la
+                     propuesta que una persona ACEPTO. Es una lectura, no un
+                     dato: la pantalla la ofrece para confirmar o corregir.
+      descripcion    el texto del ticket, TAPADO (celular, documento, correo).
+                     Como se entra al inmueble suele estar escrito ahi a mano;
+                     no se extrae solo -- seria que un modelo adivine en un campo
+                     que el tecnico lee como dato -- se muestra para copiarlo.
+
+    Solo para un caso APROBADO de la empresa: los demas dan 404, igual que si
+    no existieran.
+    """
+
+    def get(self, request, pk):
+        from cases.models import Case
+        from operaciones.models import PropuestaSupervisor
+
+        org = request.profile.org
+        propuesta = (
+            PropuestaSupervisor.objects
+            .filter(org=org, origen_tipo="case", origen_id=str(pk),
+                    tipo_senal__in=(PropuestaSupervisor.CASO_REQUIERE_VISITA,
+                                    PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO),
+                    estado__in=(PropuestaSupervisor.ACEPTADA,
+                                PropuestaSupervisor.MODIFICADA))
+            .order_by("-revisado_en", "-created_at").first())
+        caso = (Case.objects.filter(org=org, id=pk, is_active=True).first()
+                if propuesta else None)
+        if caso is None:
+            return Response({"detail": "No existe."}, status=404)
+
+        try:
+            sugerencia = self._sugerencia_de(caso)
+        except Exception:                                    # noqa: BLE001
+            sugerencia = None
+        return Response({
+            "id": str(caso.id),
+            "localidad": self._localidad_de(caso),
+            "sugerencia": sugerencia,
+            "lectura": _lectura_de(propuesta),
+            "descripcion": _descripcion_tapada(caso),
+        })
+
+
+#: Lo que se muestra del ticket. Es para copiar una indicacion, no para leer el
+#: historial entero.
+MAX_DESCRIPCION = 1500
+
+
+def _descripcion_tapada(caso) -> str:
+    from operaciones.lectura_de_ticket import tapar
+
+    texto = " ".join(str(caso.description or "").split())
+    texto = tapar(texto)
+    return texto if len(texto) <= MAX_DESCRIPCION else texto[:MAX_DESCRIPCION] + "…"
+
+
+def _lectura_de(propuesta) -> dict:
+    """La hipotesis y la recomendacion del Supervisor, de la propuesta ACEPTADA.
+
+    La hipotesis vive en la evidencia, como una observacion con la etiqueta de
+    `diagnostico_de_ticket` -- se lee por esa etiqueta y no parseando el motivo.
+    La recomendacion es `accion_propuesta` (la primera frase); el texto entero
+    esta en `motivo`.
+    """
+    from operaciones.diagnostico_de_ticket import ETIQUETA_LECTURA
+
+    hipotesis = ""
+    for obs in propuesta.evidencia or []:
+        dato = str((obs or {}).get("dato") or "") if isinstance(obs, dict) else ""
+        if dato.startswith(ETIQUETA_LECTURA):
+            hipotesis = dato[len(ETIQUETA_LECTURA):].strip()
+    return {"hipotesis": hipotesis,
+            "recomendacion": (propuesta.accion_propuesta or "").strip(),
+            "motivo": (propuesta.motivo or "").strip()}

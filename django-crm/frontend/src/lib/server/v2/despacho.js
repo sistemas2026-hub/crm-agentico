@@ -65,6 +65,25 @@ export async function leerCasosDespachables(ctx, conFicha = false) {
 }
 
 /**
+ * Lo que hace falta para despachar UN caso, ya cargado: el barrio de la ficha
+ * del ISP, la lectura del Supervisor y la descripción del ticket TAPADA.
+ *
+ * Una consulta para el caso que se está mirando, en vez de «Traer el
+ * diagnóstico de cada uno» para los veinticinco. `null` si no se pudo: el
+ * formulario se llena a mano como antes, no se rompe.
+ *
+ * @param {{ cookies: any }} ctx
+ * @param {string} id
+ */
+export async function leerFichaDespachable(ctx, id) {
+  try {
+    return await apiRequest(`/campo/casos-despachables/${encodeURIComponent(id)}/ficha/`, {}, ctx);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Crea la orden de trabajo.
  *
  * La `Idempotency-Key` la exige el backend y es lo que evita que un doble clic
