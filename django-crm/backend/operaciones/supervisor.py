@@ -2718,6 +2718,19 @@ def _atender_desincronizados(org, ahora, *, desatendido: bool = False) -> dict:
     #  puede cambiar algo hoy.
     sin_diagnosticar = []
     reintentos = []
+    #  LA CUARTA COLA  --  14/10/2026
+    #  ------------------------------
+    #  Las que YA tienen un diagnostico concluyente y cuyo nivel no alcanza
+    #  para cerrar. Hasta hoy no entraban en ninguna cola: no les faltaba
+    #  diagnostico, no habia nada que reintentar, y el nivel las dejaba afuera
+    #  de 'por_cerrar'. Se caian por el 'continue' sin error, sin log y sin
+    #  propuesta nueva -- 24 de 27 el dia que se midio.
+    #
+    #  Son precisamente las que la decision de ese dia queria destrabar: el
+    #  equipo caido, y los clientes sin ONU registrada que no se van a poder
+    #  diagnosticar nunca. Lo que decide si se cierran es si el PROVEEDOR ya
+    #  cerro el ticket, y eso se evalua mas abajo.
+    ya_diagnosticadas = {}
     for s in senales:
         if not _ya_propuesta(org, s):
             #  Ni siquiera tiene propuesta: lo mas nuevo que hay.
@@ -2738,10 +2751,12 @@ def _atender_desincronizados(org, ahora, *, desatendido: bool = False) -> dict:
             reintentos.append(s)
         elif p.nivel_autonomia_requerido >= diagnostico_optico.NIVEL_PARA_CERRAR:
             por_cerrar[s.origen_id] = p
+        else:
+            ya_diagnosticadas[s.origen_id] = (s, p)
 
     candidatas = sin_diagnosticar + reintentos
 
-    if not candidatas and not por_cerrar:
+    if not candidatas and not por_cerrar and not ya_diagnosticadas:
         return informe
 
     if candidatas:
@@ -2754,6 +2769,26 @@ def _atender_desincronizados(org, ahora, *, desatendido: bool = False) -> dict:
                 ahora=ahora, desatendido=desatendido))
         informe["cierre_automatico"] = diagnostico_optico.evaluar_cierre_automatico(
             org, candidatas, ahora=ahora)
+
+    #  LAS QUE EL DIAGNOSTICO DEJABA AFUERA. No se les vuelve a preguntar al
+    #  proveedor por el equipo --ya tienen su veredicto escrito y eso gastaria
+    #  presupuesto para llegar al mismo numero--: se corren las condiciones
+    #  REALES del caso, que son de base y no de red, y la que decide es si el
+    #  ticket figura cerrado del otro lado.
+    if ya_diagnosticadas:
+        evaluadas = diagnostico_optico.evaluar_cierre_automatico(
+            org, [s for s, _ in ya_diagnosticadas.values()], ahora=ahora)
+        for clave, valor in evaluadas.items():
+            if isinstance(valor, int):
+                informe["cierre_automatico"][clave] = (
+                    informe["cierre_automatico"].get(clave, 0) + valor)
+        for senal_, propuesta_ in ya_diagnosticadas.values():
+            if diagnostico_optico.habilitar_cierre_si_el_proveedor_cerro(
+                    propuesta_, senal_, ahora=ahora):
+                por_cerrar[senal_.origen_id] = propuesta_
+        informe["cierre_automatico"]["destrabadas_por_el_proveedor"] = len(
+            [1 for s_, _ in ya_diagnosticadas.values()
+             if s_.datos.get("cierre_automatico") == "cerraria"])
 
     #  UNA sola consulta del interruptor para toda la corrida: es una llamada
     #  de red, y preguntarla por caso son tantas como casos.

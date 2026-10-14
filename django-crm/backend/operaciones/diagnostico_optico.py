@@ -419,9 +419,22 @@ def enriquecer(org, senales, *, ahora=None, presupuesto_=None,
     return informe
 
 
-#  EL PILOTO EN SOMBRA DEL CIERRE AUTOMATICO
-#  ==========================================
-#  ESTE MODULO NO CIERRA NINGUN CASO, Y NO HAY BANDERA QUE LO HAGA CERRAR.
+#  EL CIERRE AUTOMATICO  --  YA NO ES UNA SOMBRA
+#  ==============================================
+#  ESTE BLOQUE DECIA "ESTE MODULO NO CIERRA NINGUN CASO" Y ERA CIERTO HASTA EL
+#  08/10/2026. Hoy si cierra: 'cerrar_si_corresponde' llama a
+#  'cierre_de_caso.cerrar' desde el ciclo, y las tres cosas que la nota de
+#  abajo listaba como faltantes estan las tres. Se corrige aqui porque una
+#  nota que afirma lo contrario de lo que hace el codigo manda a la proxima
+#  sesion a buscar el error a otro lado -- que es el mismo daño que esa misma
+#  nota le reprochaba a la bandera 'CIERRE_AUTOMATICO' que reemplazo.
+#
+#  'EN_SOMBRA' sobrevive como una sola cosa, y conviene no confundirla con un
+#  interruptor: agrega una frase al texto de la propuesta. No decide nada. Lo
+#  que decide si un caso se cierra son las tres puertas de
+#  'cerrar_si_corresponde' y las doce condiciones de 'cierre_de_caso'.
+#
+#  LO QUE SIGUE, de cuando esto era un piloto, porque explica el diseño:
 #
 #  La primera version de este bloque declaraba 'CIERRE_AUTOMATICO = False' y
 #  decia "en True, cierra". Era falso: el codigo que cierra no estaba escrito.
@@ -697,14 +710,105 @@ def completar_propuesta_existente(org, senal, propuesta, *, ahora=None,
         x for x in (propuesta.evidencia or [])
         if not (isinstance(x, dict) and x.get("fuente") == "diagnostico")
     ] + [pieza]
-    if veredicto == CIERRE_SEGURO:
+    #  DOS COSAS DISTINTAS PUEDEN HABILITAR EL NIVEL, y hacen falta las dos:
+    #    · el equipo sano o caido por falta de energia ('cierre_seguro'), que
+    #      es lo que vale para cualquier propuesta; y
+    #    · que el PROVEEDOR ya haya cerrado el ticket (14/10/2026), que es lo
+    #      unico que decide en un desincronizado -- ahi cerrar es sincronizar
+    #      un estado ajeno, no afirmar que el cliente quedo bien.
+    #  'evaluar_cierre_automatico' ya corrio sobre esta señal cuando se llega
+    #  aqui, asi que el campo esta escrito.
+    if (veredicto == CIERRE_SEGURO
+            or senal.datos.get("cierre_automatico") == "cerraria"):
         propuesta.nivel_autonomia_requerido = NIVEL_PARA_CERRAR
         campos.append("nivel_autonomia_requerido")
+    #  Y LA CONSTANCIA DEL CIERRE, por el mismo motivo que el diagnostico:
+    #  esta propuesta es lo que queda cuando el ciclo termina.
+    if anotar_el_cierre(propuesta, senal, ahora):
+        if "evidencia" not in campos:
+            campos.append("evidencia")
+
     propuesta.updated_at = ahora
     propuesta.save(update_fields=campos)
 
     return cerrar_si_corresponde(org, propuesta, ahora=ahora,
                                  autorizacion=autorizacion)
+
+
+def habilitar_cierre_si_el_proveedor_cerro(propuesta, senal, *, ahora=None) -> bool:
+    """
+    Sube el nivel de la propuesta cuando el proveedor ya cerro el ticket.
+
+    POR QUE EXISTE  --  14/10/2026
+    ------------------------------
+    Ese dia se decidio que el diagnostico del equipo informa pero ya no frena
+    un cierre de desincronizado, y se cambio 'evaluar_cierre_automatico' para
+    reflejarlo. No alcanzo: ahi solo se escribe un campo y un informe. El
+    cierre de verdad lo decide 'cerrar_si_corresponde', y su primera puerta
+    mira el NIVEL que la propuesta pide -- un nivel que hasta entonces subia
+    unicamente con 'cierre_seguro'.
+
+    Resultado medido el mismo dia: de 27 propuestas pendientes se cerraron 3,
+    justo las que el equipo si respaldaba. Las otras 24 no entraban en ninguna
+    cola del ciclo y se caian sin dejar rastro. El sintoma reportado fue "ya
+    ejecute el ciclo y nada".
+
+    Es la leccion de siempre, cometida de nuevo: se afirmo sobre el MECANISMO
+    --el campo 'cierre_automatico' en 'cerraria'-- y no sobre el EFECTO, que
+    es el caso cerrado. Los ocho tests de ese cambio median el informe, asi
+    que estaban en verde con el sintoma vivo.
+
+    LO QUE HABILITA EL NIVEL, AHORA
+    -------------------------------
+    Que 'evaluar_cierre_automatico' haya dado 'cerraria', que significa: el
+    proveedor reporta el ticket cerrado Y las doce condiciones reales del caso
+    se cumplen. No lo que midio el equipo.
+
+    LO QUE NO SE TOCA: las otras dos puertas de 'cerrar_si_corresponde' --la
+    tarea delegada y el techo de autonomia-- ni las doce condiciones que
+    'cierre_de_caso.cerrar' vuelve a validar con la fila bloqueada.
+    """
+    if senal.datos.get("cierre_automatico") != "cerraria":
+        return False
+    if propuesta.nivel_autonomia_requerido >= NIVEL_PARA_CERRAR:
+        return True
+
+    ahora = ahora or timezone.now()
+    propuesta.nivel_autonomia_requerido = NIVEL_PARA_CERRAR
+    anotar_el_cierre(propuesta, senal, ahora)
+    propuesta.updated_at = ahora
+    propuesta.save(update_fields=["nivel_autonomia_requerido", "evidencia",
+                                  "updated_at"])
+    return True
+
+
+def anotar_el_cierre(propuesta, senal, ahora) -> bool:
+    """
+    Copia a la PROPUESTA el porque del cierre automatico. No guarda.
+
+    POR QUE HACE FALTA  --  14/10/2026
+    ----------------------------------
+    'evaluar_cierre_automatico' escribe ese texto en 'senal.evidencia', y la
+    señal se muere con el ciclo. La propuesta es lo que queda, y es lo que
+    alguien va a leer dentro de seis meses preguntando por que se cerro este
+    caso. Sin esto, la frase "OJO: el diagnostico del equipo NO lo respaldaba"
+    --que es toda la diferencia entre sincronizar un estado y afirmar que el
+    cliente quedo bien-- no sobrevivia al ciclo que la produjo.
+
+    Lo encontro una prueba que afirmaba sobre la evidencia de la propuesta, no
+    sobre el contador: el cierre ocurria y la constancia se perdia.
+
+    SE REEMPLAZA la linea anterior en vez de apilar otra, igual que con el
+    diagnostico: dos lineas de cierre no dicen cual vale.
+    """
+    porque = senal.datos.get("cierre_automatico_porque")
+    if not porque:
+        return False
+    propuesta.evidencia = [
+        x for x in (propuesta.evidencia or [])
+        if not (isinstance(x, dict) and x.get("fuente") == "cierre automatico")
+    ] + [sup._observacion("cierre automatico", senal.origen_id, porque, ahora)]
+    return True
 
 
 def cerrar_si_corresponde(org, propuesta, *, ahora=None,

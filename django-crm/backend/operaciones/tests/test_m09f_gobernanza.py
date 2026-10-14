@@ -1383,12 +1383,31 @@ def test_cancelar_no_llama_a_nadie(org_a, espia_requests):
 
 def test_el_ciclo_completo_por_http_no_llama_a_nadie(org_a, admin_client,
                                                      espia_requests):
-    """La ruta entera, con espía puesto: detectar, proponer, auditar."""
+    """
+    La ruta entera, con espía puesto: detectar, proponer, auditar.
+
+    SE MOVIO EL BLANCO EL 13/10/2026, y sin eso la guarda se volvia hueca.
+    Desde que la ruta ENCOLA el ciclo en vez de correrlo, el request no
+    detecta nada: "cero llamadas salientes" seria cierto porque no corrio
+    nada, no porque el ciclo no llame a nadie. Un verde que no mide es peor
+    que un rojo.
+
+    Asi que se afirman las dos cosas: que la ruta no llama a nadie Y que la
+    TAREA --donde el ciclo corre ahora, completo-- tampoco.
+    """
+    import operaciones.tasks as _tasks
+
     r = admin_client.post("/api/operaciones/supervisor/ciclo/", {}, format="json")
-    assert r.status_code == 200
+    assert r.status_code == 202, r.json()
     assert r.json()["acciones_ejecutadas"] == 0
     assert r.json()["shadow_mode"] is True
-    assert espia_requests == []
+    assert espia_requests == [], (
+        f"la ruta llamo a alguien: {espia_requests}")
+
+    #  Y EL CICLO DE VERDAD, el que corre en el worker.
+    _tasks.ciclo_a_pedido(str(org_a.id))
+    assert espia_requests == [], (
+        f"el ciclo completo llamo a alguien: {espia_requests}")
 
 
 def test_el_espia_si_detecta_una_llamada(espia_requests):

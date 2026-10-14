@@ -760,11 +760,28 @@ def test_con_la_empresa_en_nivel_3_el_caso_SI_se_cierra(monkeypatch):
 
 
 @pytest.mark.django_db
-def test_una_senal_debil_NO_se_cierra_aunque_la_empresa_autorice(monkeypatch):
+def test_una_senal_debil_SE_SINCRONIZA_IGUAL(monkeypatch):
     """
-    La primera puerta sigue valiendo con la segunda abierta. Este es el caso
-    medido en produccion (servicio 4045): ticket cerrado en WispHub, equipo en
-    linea, pero con la señal debil. Ese cliente puede volver a caerse.
+    ESTA PRUEBA AFIRMABA LO CONTRARIO HASTA EL 14/10/2026.
+
+    Decia: "la primera puerta sigue valiendo con la segunda abierta -- una
+    señal debil la mira una persona", sobre el caso medido en produccion
+    (servicio 4045: ticket cerrado en WispHub, equipo en linea, señal debil).
+    Era la regla correcta mientras cerrar en Dexter se entendio como AFIRMAR
+    que el cliente quedo bien.
+
+    EL CLIENTE LA CAMBIO, con estas palabras: "si estan cerrados en wisphub
+    automaticamente se cierren en dexter sin validar y ya se acaba eso". Y el
+    numero: 24 propuestas acumuladas que no se movian, 23 de ellas con el
+    ticket cerrado del lado del proveedor.
+
+    LO QUE SOSTIENE EL CAMBIO: cerrar aqui un ticket que el proveedor YA cerro
+    no decide nada sobre el cliente -- deja de contradecir a quien ya decidio.
+    Que la señal este debil no desaparece: queda ESCRITO en la propuesta, y
+    esta prueba lo exige.
+
+    NO SE BORRA, SE DA VUELTA CON SU HISTORIA: el dia que alguien pregunte por
+    que un cliente con señal debil se cerro solo, esto se lo contesta.
     """
     from common.models import Org, Profile, User
     from operaciones import autonomia, chat_herramientas, supervisor
@@ -786,13 +803,23 @@ def test_una_senal_debil_NO_se_cierra_aunque_la_empresa_autorice(monkeypatch):
 
     supervisor.correr_ciclo(org)
 
-    caso.refresh_from_db()
-    assert caso.status == "New", "una señal debil la mira una persona"
-    assert llamadas == []
     propuesta = PropuestaSupervisor.objects.get(org=org,
                                                 tipo_senal=P.CASO_DESINCRONIZADO)
-    assert propuesta.estado == P.PROPUESTA, "queda esperando a una persona"
-    assert propuesta.nivel_autonomia_requerido == P.NIVEL_RECOMENDAR
+    #  EL EFECTO: se le pidio al motor cerrar ESTE caso. No se afirma sobre
+    #  'caso.status' porque esa columna la escribe el motor, que es justo lo
+    #  que '_motor_que_cierra' sustituye -- ver la nota de §4 en
+    #  'test_el_cierre_sincroniza.py'.
+    assert llamadas == [(str(propuesta.id), str(caso.id))], (
+        f"no se sincronizo un ticket que el proveedor ya cerro: {llamadas}")
+    assert propuesta.estado == P.ACEPTADA
+    assert propuesta.nivel_autonomia_requerido == P.NIVEL_EJECUTAR_REVERSIBLE
+
+    #  Y LA SEÑAL DEBIL NO SE PIERDE. Sincronizar un estado no es afirmar que
+    #  el cliente quedo bien, y la diferencia tiene que poder leerse despues.
+    escrito = str(propuesta.evidencia)
+    assert "OJO" in escrito and "revisar_persona" in escrito, (
+        f"se cerro sin dejar constancia de que el equipo no lo respaldaba: "
+        f"{escrito}")
 
 
 

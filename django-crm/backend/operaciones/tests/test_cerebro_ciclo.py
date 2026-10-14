@@ -500,18 +500,51 @@ def test_19_SEGURIDAD_shadow_mode_intacto(org_a):
         sup.ejecutar_propuesta(None)
 
 
-def test_20_SEGURIDAD_el_techo_de_la_etapa_sigue_en_1(org_a):
-    assert P.NIVEL_MAXIMO_ETAPA == P.NIVEL_RECOMENDAR == 1
+def test_20_SEGURIDAD_el_techo_de_la_etapa_es_3_Y_NO_MAS(org_a):
+    """
+    ESTA PRUEBA DECIA "sigue en 1" Y QUEDO EN ROJO SIN QUE NADIE LA CORRIERA.
+
+    El techo se subio a 3 a proposito, con su motivo escrito en 'models.py'
+    (NIVEL_MAXIMO_ETAPA): la unica propuesta que puede alcanzarlo es el cierre
+    de un caso desincronizado, que es justo para lo que se subio. La guarda se
+    quedo afirmando el numero viejo, y el rojo se descubrio el 14/10/2026 al
+    correrla por otro motivo.
+
+    LO QUE PROTEGE SIGUE SIENDO LO MISMO, y por eso no se borra: que el techo
+    del CODIGO no suba a 4. El 4 es "siempre lo aprueba una persona" y
+    'autonomia.puede' lo niega siempre -- subir este techo hasta ahi seria
+    construir una puerta que la configuracion no puede cerrar.
+
+    Y ESTE TECHO NO AUTORIZA NADA POR SI SOLO: el de la EMPRESA vive en
+    'autonomia.py' y solo lo sube una persona con nombre, motivo y criterios
+    medidos. Son dos puertas y hay que pasar las dos.
+    """
+    assert P.NIVEL_MAXIMO_ETAPA == P.NIVEL_EJECUTAR_REVERSIBLE == 3
+    assert P.NIVEL_MAXIMO_ETAPA < P.NIVEL_CRITICO, (
+        "el techo del codigo llego al nivel critico: ese es el que ninguna "
+        "configuracion puede autorizar, y por eso no puede ser el techo")
 
 
-@pytest.mark.parametrize("nivel", [P.NIVEL_COORDINAR,
-                                   P.NIVEL_EJECUTAR_REVERSIBLE,
-                                   P.NIVEL_CRITICO])
-def test_21_SEGURIDAD_una_propuesta_enriquecida_de_nivel_2_3_4_no_ejecuta(
+@pytest.mark.parametrize("nivel", [P.NIVEL_CRITICO])
+def test_21_SEGURIDAD_una_propuesta_enriquecida_de_nivel_CRITICO_no_ejecuta(
         org_a, nivel):
     """
     Aunque el enriquecimiento pase por ahí, el nivel lo sigue poniendo el
     código y la propuesta queda fuera de alcance.
+
+    LOS NIVELES 2 Y 3 SALIERON DE ESTA LISTA EL 14/10/2026, y no es un
+    aflojamiento: desde que el techo de la etapa es 3, una propuesta de nivel
+    2 o 3 SI esta dentro del alcance del codigo -- que es lo que hace posible
+    el cierre automatico de un desincronizado. Afirmar lo contrario era
+    afirmar el techo viejo.
+
+    Lo que esta prueba protege es el 4: el nivel que ninguna configuracion
+    puede autorizar. Que siga fuera de alcance es lo que no se negocia.
+
+    Que un nivel 3 este "dentro del alcance" NO significa que se ejecute solo:
+    lo que ejecuta es 'frontera'/'cerrar_si_corresponde', con la tarea
+    delegada y el techo de la empresa. Sus guardas estan en
+    'test_el_cierre_sincroniza.py' y 'test_tareas_delegadas.py'.
     """
     senal = _senal(f"nivel-{nivel}")
     base = dict(_analisis_determinista(senal))

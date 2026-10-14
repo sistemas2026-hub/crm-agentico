@@ -405,11 +405,26 @@ def test_14_15_16_aislamiento(org_a, org_b, actor):
     for f in ra["detalle"]:
         assert str(pb.id) not in f["origen_id"]
 
-    #  y por HTTP, cada quien ve el suyo
-    ug, g = _persona(org_a, "OPERACIONES")
-    r = _cli(ug, org_a, g).post(CICLO, {}, format="json")
-    assert r.status_code == 200
-    assert r.data["resumen"]["organizacion"]["id"] == str(org_a.id)
+    #  Y POR HTTP, CADA QUIEN ENCOLA EL SUYO. Desde que el ciclo se encola
+    #  (13/10/2026) el resumen no vuelve en la respuesta, asi que el
+    #  aislamiento se afirma sobre el argumento con el que se encola: si ahi
+    #  viajara el id de otra organizacion, el ciclo correria sobre el otro
+    #  tenant con el permiso de este.
+    encolados = []
+    import operaciones.tasks as _tasks
+    original = _tasks.ciclo_a_pedido.delay
+    try:
+        _tasks.ciclo_a_pedido.delay = (
+            lambda org_id: encolados.append(org_id) or type(
+                "T", (), {"id": "tarea-de-prueba"})())
+        ug, g = _persona(org_a, "OPERACIONES")
+        r = _cli(ug, org_a, g).post(CICLO, {}, format="json")
+    finally:
+        _tasks.ciclo_a_pedido.delay = original
+
+    assert r.status_code == 202, r.data
+    assert encolados == [str(org_a.id)], (
+        f"se encolo el ciclo con otra organizacion: {encolados}")
 
 
 # ==================================================== 17. revisión humana
@@ -628,9 +643,21 @@ def test_api_el_ciclo_manual_devuelve_resumen_y_detalle(org_a, actor):
     ug, g = _persona(org_a, "OPERACIONES")
     cli = _cli(ug, org_a, g)
 
+    #  EL RESUMEN YA NO VIENE POR HTTP  --  13/10/2026
+    #  -----------------------------------------------
+    #  La vista encola el ciclo en Celery y contesta 202 con 'resumen: None',
+    #  porque una pasada completa tardaba mas que el tope del navegador y el
+    #  boton quedaba colgado. Lo que esta prueba protege --que el resumen
+    #  traiga todas sus claves-- sigue valiendo, pero se le pregunta a
+    #  'correr_ciclo', que es donde el resumen se arma.
     r = cli.post(CICLO, {}, format="json")
-    assert r.status_code == 200
-    res = r.data["resumen"]
+    assert r.status_code == 202, r.data
+    assert r.data["encolado"] is True and r.data["tarea"], r.data
+    assert r.data["resumen"] is None, (
+        "la vista volvio a devolver el resumen: si el ciclo se corre otra vez "
+        "dentro del request, vuelve el boton colgado")
+
+    res = supervisor.correr_ciclo(org_a)
     for k in ("senales", "propuestas", "repetidas", "sin_analisis",
               "expiradas", "datos_insuficientes", "por_tipo", "organizacion",
               "ahora", "detalle", "capacidad"):
@@ -701,16 +728,38 @@ def test_api_no_hay_segundo_ciclo(org_a, monkeypatch):
         f"decision de diseño -- si es deliberada, se declara arriba")
 
     #  2. Y LLEGA A LA MISMA FUNCION, que es lo que de verdad se protege.
+    #
+    #  AHORA SON DOS ESLABONES, desde que el boton encola en vez de correr
+    #  (13/10/2026). Se verifican los dos y SIN Celery: lo que §11 prohibe es
+    #  un segundo ciclo, y un segundo ciclo puede esconderse igual de bien en
+    #  la vista que en la tarea.
+    import operaciones.tasks as _tasks
+
+    #  2a. LA VISTA ENCOLA, Y NO DETECTA NADA POR SU CUENTA.
+    encolados = []
+    original = _tasks.ciclo_a_pedido.delay
+    try:
+        _tasks.ciclo_a_pedido.delay = (
+            lambda org_id: encolados.append(org_id) or type(
+                "T", (), {"id": "tarea-de-prueba"})())
+        u, perfil = _persona(org_a, "ADMIN")
+        r = _cli(u, org_a, perfil).post(CICLO, {}, format="json")
+    finally:
+        _tasks.ciclo_a_pedido.delay = original
+
+    assert r.status_code == 202, r.data
+    assert encolados == [str(org_a.id)], (
+        "la ruta del boton no encolo el ciclo: tiene implementacion propia, "
+        "que es justo lo que §11 prohibe")
+
+    #  2b. Y LA TAREA ATERRIZA EN 'correr_ciclo'. Sin esto, 2a pasaria con una
+    #  tarea que detecta por su cuenta -- el segundo ciclo, movido de lugar.
     llegadas = []
     monkeypatch.setattr(
         sup, "correr_ciclo",
         lambda org, *a, **k: llegadas.append(org.id) or {
             "senales": 0, "propuestas": 0,
             "cierre_automatico": {"cerrados": 0}})
-
-    u, perfil = _persona(org_a, "ADMIN")
-    r = _cli(u, org_a, perfil).post(CICLO, {}, format="json")
-    assert r.status_code == 200, r.data
+    _tasks.ciclo_a_pedido(str(org_a.id))
     assert llegadas == [org_a.id], (
-        "la ruta del boton no llego a supervisor.correr_ciclo: tiene "
-        "implementacion propia, que es justo lo que §11 prohibe")
+        "la tarea del ciclo no llego a supervisor.correr_ciclo")
