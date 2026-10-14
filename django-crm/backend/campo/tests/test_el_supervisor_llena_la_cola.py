@@ -59,6 +59,11 @@ class _Senal:
             "labor_verificada": verificada,
             "labor_porque": porque,
             "diagnostico_confianza": confianza,
+            #  LA QUE DECIDE desde el 14/10/2026: la del GRUPO. Se pone igual
+            #  a la otra en este andamio porque lo que estas pruebas miden es
+            #  el efecto, no la diferencia entre las dos -- esa tiene su propia
+            #  guarda en 'test_las_cinco_reglas.py'.
+            "confianza_del_grupo": confianza,
         }
 
 

@@ -112,7 +112,41 @@ CAMPO_PARA_EL_MODELO = {
             "Si el texto no alcanza para elegir, dejalo VACIO: eso lo manda a "
             "una persona, que es mejor que adivinar"),
     },
+    "confianza_del_grupo": {
+        "valores": ("alta", "media", "baja"),
+        "ayuda": (
+            "que tan seguro estas DEL GRUPO que elegiste arriba. OJO: no es "
+            "lo mismo que 'confianza', que habla de tu hipotesis sobre la "
+            "CAUSA. Aca la pregunta es mas simple: ¿el reclamo dice con "
+            "claridad que es lo que se pide? Un texto que dice 'solicita "
+            "cambio de domicilio' es 'alta' aunque no tengas ninguna "
+            "hipotesis de que le pasa al equipo; un texto confuso o que "
+            "mezcla dos pedidos es 'baja'"),
+    },
 }
+
+#:  POR QUE HAY DOS CONFIANZAS, Y NO ES REDUNDANCIA  --  14/10/2026
+#:
+#:  La primera version de este modulo uso 'cerebro.Confianza', la de la
+#:  hipotesis, como puerta de los grupos que pasan sin medicion. MEDIDO sobre
+#:  las 142 lecturas que existian ese dia, el umbral resulto inalcanzable:
+#:
+#:      media           84   59.2%
+#:      baja            29   20.4%
+#:      sin_hipotesis   24   16.9%
+#:      alta             5    3.5%   <- lo que la regla exigia
+#:
+#:  De los 40 tickets de 'trabajo_pedido' y 'obra_de_red' habrian pasado uno o
+#:  dos. Fue poner un umbral sin medir si el modelo lo alcanza.
+#:
+#:  Y el numero ademas señala el error conceptual: esa confianza acompaña a una
+#:  HIPOTESIS SOBRE LA CAUSA, y en un trabajo pedido no hay causa que
+#:  hipotetizar -- el cliente pide algo. Exigirle seguridad sobre una hipotesis
+#:  que no existe es pedir lo imposible, y el 16.9% de 'sin_hipotesis' es
+#:  exactamente eso ocurriendo.
+#:
+#:  Asi que se le pregunta lo que si corresponde: que tan claro esta el PEDIDO.
+CONFIANZA_DEL_GRUPO = "confianza_del_grupo"
 
 
 # =============================================================================
@@ -314,7 +348,9 @@ def de_la_senal(senal) -> Decision:
         {"labor": datos.get("labor") or "",
          "porque": datos.get("labor_porque") or "",
          "verificada": bool(datos.get("labor_verificada"))},
-        confianza=str(datos.get("diagnostico_confianza") or ""))
+        #  LA CONFIANZA DEL GRUPO, no la de la hipotesis -- ver la nota de
+        #  CONFIANZA_DEL_GRUPO arriba, con la medicion que lo motivo.
+        confianza=str(datos.get(CONFIANZA_DEL_GRUPO) or ""))
 
 
 def de_la_propuesta(propuesta) -> Decision:
@@ -364,7 +400,7 @@ def de_la_propuesta(propuesta) -> Decision:
         {"labor": ultima.get("labor") or "",
          "porque": ultima.get("labor_porque") or "",
          "verificada": bool(ultima.get("labor_verificada"))},
-        confianza=str(ultima.get("confianza") or ""))
+        confianza=str(ultima.get(CONFIANZA_DEL_GRUPO) or ""))
 
 
 def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,

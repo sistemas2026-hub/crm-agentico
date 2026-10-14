@@ -2664,8 +2664,19 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, candidatas, pendientes,
     """
     from operaciones import autonomia, paso_a_despacho as pad
 
+    #  'por_confianza' SE CUENTA PARA PODER CALIBRAR  --  14/10/2026
+    #
+    #  La primera version de la regla exigio confianza 'alta' y resulto
+    #  inalcanzable: 5 de 142 lecturas, el 3.5%. El umbral se habia fijado sin
+    #  medir si el modelo lo alcanza, y el sintoma habria sido "las reglas no
+    #  dejan pasar nada" sin ningun error.
+    #
+    #  Ahora la confianza que decide es otra --la del GRUPO, no la de la
+    #  hipotesis-- y su distribucion todavia no se conoce. Contarla aca hace
+    #  que UNA corrida alcance para saberla, en vez de salir a consultar la
+    #  base propuesta por propuesta.
     reporte = {"pasaron": 0, "se_quedaron": 0, "fallaron": 0,
-               "por_grupo": {}, "motivos": {}}
+               "por_grupo": {}, "por_confianza": {}, "motivos": {}}
     if not candidatas:
         return reporte
 
@@ -2714,6 +2725,10 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, candidatas, pendientes,
 
         grupo = r.get("grupo") or "sin grupo"
         reporte["por_grupo"][grupo] = reporte["por_grupo"].get(grupo, 0) + 1
+        conf = (s.datos.get("confianza_del_grupo")
+                or _de_la_lectura_guardada(p, "confianza_del_grupo")
+                or "sin declarar")
+        reporte["por_confianza"][conf] = reporte["por_confianza"].get(conf, 0) + 1
         if r.get("paso"):
             reporte["pasaron"] += 1
         else:
@@ -2725,10 +2740,29 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, candidatas, pendientes,
             reporte["motivos"][m] = reporte["motivos"].get(m, 0) + 1
 
     logger.info("Supervisor: paso a Despacho · pasaron=%s · se quedaron=%s · "
-                "fallaron=%s · por grupo=%s",
+                "fallaron=%s · por grupo=%s · por confianza del grupo=%s",
                 reporte["pasaron"], reporte["se_quedaron"],
-                reporte["fallaron"], reporte["por_grupo"])
+                reporte["fallaron"], reporte["por_grupo"],
+                reporte["por_confianza"])
     return reporte
+
+
+def _de_la_lectura_guardada(propuesta, clave: str) -> str:
+    """Una clave de la ultima lectura escrita en la propuesta, o cadena vacia.
+
+    Existe solo para CONTAR: cuando el ciclo no leyo este ticket en esta
+    vuelta, el dato esta en la propuesta y no en la señal. Lo que DECIDE sigue
+    siendo 'paso_a_despacho', que hace su propia lectura -- esto no decide
+    nada, y por eso puede devolver vacio sin consecuencias.
+    """
+    from operaciones import paso_a_despacho as pad
+
+    for pieza in reversed(getattr(propuesta, "evidencia", None) or []):
+        if (isinstance(pieza, dict)
+                and pieza.get("fuente") == pad.FUENTE_DE_LA_LECTURA
+                and clave in pieza):
+            return str(pieza.get(clave) or "")
+    return ""
 
 
 def _propuesta_vigente_de(org, senal):

@@ -294,6 +294,9 @@ def _anotar(senal, veredicto, labor, ahora) -> None:
         pieza["labor_verificada"] = bool((labor or {}).get("verificada"))
         pieza["labor_porque"] = str((labor or {}).get("porque") or "")
         pieza["confianza"] = confianza
+        pieza["confianza_del_grupo"] = str(
+            (getattr(veredicto, "extras", None) or {}).get(
+                "confianza_del_grupo") or "")
         return pieza
 
     if hipotesis:
@@ -362,8 +365,13 @@ def _anotar(senal, veredicto, labor, ahora) -> None:
     #
     #  La AUSENCIA es un valor con significado: "el modelo no supo", y manda
     #  el ticket a una persona. No se completa con un default.
-    senal.datos["grupo"] = str(
-        (getattr(veredicto, "extras", None) or {}).get("grupo") or "")
+    _extras = getattr(veredicto, "extras", None) or {}
+    senal.datos["grupo"] = str(_extras.get("grupo") or "")
+    #  LA CONFIANZA DEL GRUPO, que NO es 'diagnostico_confianza'. Esa habla de
+    #  la hipotesis sobre la causa; esta, de que tan claro esta el pedido. La
+    #  medicion que separo las dos esta en 'paso_a_despacho'.
+    senal.datos["confianza_del_grupo"] = str(
+        _extras.get("confianza_del_grupo") or "")
 
 
 def le_falta_lectura(propuesta) -> bool:

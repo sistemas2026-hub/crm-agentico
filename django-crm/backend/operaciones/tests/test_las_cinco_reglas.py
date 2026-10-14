@@ -350,15 +350,47 @@ def test_la_tarea_que_habilita_esto_es_PROPIA():
     assert pad.TAREA != td.CICLO_AUTOMATICO
 
 
-def test_la_confianza_exigida_es_un_valor_del_enum_del_cerebro():
+def test_la_confianza_que_decide_es_la_DEL_GRUPO_y_no_la_de_la_hipotesis():
     """
-    Si 'alta' deja de ser un valor valido de 'Confianza', esta regla dejaria
-    de poder cumplirse NUNCA -- y el sintoma seria "ningun trabajo pedido pasa",
-    sin ningun error.
+    LA MEDICION QUE SEPARO LAS DOS  --  14/10/2026
+    ----------------------------------------------
+    La primera version uso 'cerebro.Confianza', la de la hipotesis sobre la
+    causa, como puerta. Medido sobre las 142 lecturas que existian:
+
+        media           84   59.2%
+        baja            29   20.4%
+        sin_hipotesis   24   16.9%
+        alta             5    3.5%   <- lo que la regla exigia
+
+    De los 40 tickets de 'trabajo_pedido' y 'obra_de_red' habrian pasado uno o
+    dos. Y el 16.9% de 'sin_hipotesis' señala el error de fondo: en un trabajo
+    pedido no hay causa que hipotetizar, asi que no hay nada sobre lo que estar
+    seguro. Se le pregunta lo que si corresponde: que tan claro esta el pedido.
+
+    Esta prueba fija que el valor exigido pertenece al enum NUEVO y no al de
+    'cerebro' -- si alguien los vuelve a unir, el umbral se vuelve
+    inalcanzable otra vez y el sintoma seria "no pasa nada", sin un error.
     """
+    valores = pad.CAMPO_PARA_EL_MODELO[pad.CONFIANZA_DEL_GRUPO]["valores"]
+
+    assert pad.CONFIANZA_EXIGIDA_SIN_MEDICION in valores
+    #  Y NO es un valor del enum de la hipotesis, que trae 'sin_hipotesis':
+    #  esa palabra no tiene sentido cuando se pregunta por un pedido.
     from operaciones.cerebro import Confianza
 
-    assert pad.CONFIANZA_EXIGIDA_SIN_MEDICION == Confianza.ALTA
+    assert Confianza.SIN_HIPOTESIS not in valores
+
+
+def test_el_campo_de_la_confianza_del_grupo_le_dice_al_modelo_que_NO_es_la_otra():
+    """
+    Las dos se llaman 'confianza' y el modelo contesta las dos en el mismo
+    JSON. Si la ayuda no marca la diferencia, va a repetir el mismo valor --y
+    entonces el campo nuevo no mide nada nuevo.
+    """
+    ayuda = pad.CAMPO_PARA_EL_MODELO[pad.CONFIANZA_DEL_GRUPO]["ayuda"]
+
+    assert "no es lo mismo" in ayuda.lower()
+    assert "causa" in ayuda.lower()
 
 
 # =============================================================================
@@ -382,6 +414,8 @@ class _Propuesta:
 
 
 def _lectura_guardada(**claves):
+    #  'confianza_del_grupo' es la que decide desde el 14/10/2026 -- ver la
+    #  nota de CONFIANZA_DEL_GRUPO en 'paso_a_despacho'.
     pieza = {"fuente": pad.FUENTE_DE_LA_LECTURA,
              "dato": "lectura del reclamo: no tiene servicio",
              "observado_en": "2026-10-14T18:00:00Z"}
@@ -393,7 +427,7 @@ def test_la_lectura_guardada_alcanza_para_decidir():
     p = _Propuesta([_lectura_guardada(
         grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
         labor_verificada=True, labor_porque="caido por fibra",
-        confianza="alta")])
+        confianza_del_grupo="alta")])
 
     d = pad.de_la_propuesta(p)
 
@@ -409,9 +443,11 @@ def test_la_lectura_MAS_NUEVA_es_la_que_vale():
     """
     p = _Propuesta([
         _lectura_guardada(grupo=pad.NADA_LO_MIDE, labor="",
-                          labor_verificada=False, confianza="alta"),
+                          labor_verificada=False,
+                          confianza_del_grupo="alta"),
         _lectura_guardada(grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
-                          labor_verificada=True, confianza="alta"),
+                          labor_verificada=True,
+                          confianza_del_grupo="alta"),
     ])
 
     assert pad.de_la_propuesta(p).pasa is True
