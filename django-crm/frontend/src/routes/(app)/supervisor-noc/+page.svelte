@@ -681,8 +681,22 @@
       modalCiclo = false;
       const auto = result?.data?.resumen?.cierre_automatico;
       cerradosDelCiclo = Array.isArray(auto?.cerrados_detalle) ? auto.cerrados_detalle : [];
+      //  SOLO 'update', y NUNCA las dos  --  14/10/2026
+      //  ----------------------------------------------
+      //  'update()' ya recarga los datos de la pagina; 'invalidateAll()' los
+      //  recargaba OTRA VEZ. Medido en una grabacion del cliente: dos
+      //  peticiones a '__data.json' en paralelo, de 20,3 s y 19,9 s, mas la
+      //  recarga de la pagina en 18,6 s.
+      //
+      //  Y ninguna de las dos servia para nada: el ciclo se ENCOLA y tarda
+      //  seis minutos, asi que lo que traian era la misma bandeja de antes.
+      //  Pedir dos veces lo mismo, para no enterarse de nada, mientras la
+      //  persona mira una pantalla que no responde.
+      //
+      //  Los resultados los trae 'traerLoDelCiclo', que espera a que el ciclo
+      //  haya terminado de verdad.
       await update({ reset: false });
-      await invalidateAll();
+
       //  EL CICLO SE ENCOLO: lo que acaba de llegar es el acuse, no el
       //  resultado. Sin esto la bandeja se queda como estaba y parece que el
       //  ciclo no hizo nada.
@@ -694,8 +708,9 @@
     asistenteCorriendo = dominio;
     return async (/** @type {any} */ { update }) => {
       asistenteCorriendo = null;
+      //  Sin 'invalidateAll' detras: 'update()' ya recarga, y pedir lo mismo
+      //  dos veces cuesta dos consultas de 20 segundos (ver 'alCorrerCiclo').
       await update({ reset: false });
-      await invalidateAll();
     };
   };
 
