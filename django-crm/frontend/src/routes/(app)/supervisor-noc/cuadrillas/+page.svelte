@@ -227,7 +227,11 @@
 </svelte:head>
 
 <div class="snoc">
-  <div class="snoc-lienzo">
+  <!-- v2-scroll: el UNICO contenedor que se desplaza. El marco de (app) es
+       `overflow:hidden`; sin esto lo que no entra en la ventana queda
+       recortado y no hay forma de llegar (ver supervisor-noc/+page.svelte). -->
+  <div class="v2-scroll">
+    <div class="snoc-lienzo">
     <!-- ============ CABECERA ============ -->
     <section class="snoc-panel" style="gap:var(--snoc-md);">
       <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
@@ -1240,5 +1244,6 @@
         </table>
       {/if}
     </section>
+    </div>
   </div>
 </div>

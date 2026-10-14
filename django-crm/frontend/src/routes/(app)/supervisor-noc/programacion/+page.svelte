@@ -594,7 +594,11 @@
 </svelte:head>
 
 <div class="snoc">
-  <div class="snoc-lienzo">
+  <!-- v2-scroll: el UNICO contenedor que se desplaza. El marco de (app) es
+       `overflow:hidden`; sin esto lo que no entra en la ventana queda
+       recortado y no hay forma de llegar (ver supervisor-noc/+page.svelte). -->
+  <div class="v2-scroll">
+    <div class="snoc-lienzo">
     {#if !data.puedeVer}
       <section class="snoc-panel">
         <div class="snoc-fila">
@@ -1142,6 +1146,7 @@
         </div>
       </div>
     {/if}
+    </div>
   </div>
 
   <!-- ============ CONFIRMACIÓN DE SECUENCIACIÓN ============ -->
