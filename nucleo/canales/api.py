@@ -64,6 +64,7 @@ from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
 from nucleo.seguimiento import cierre_por_propuesta
+from nucleo.seguimiento import cierre_por_validacion
 from nucleo.seguridad import interruptor
 from nucleo.seguridad import listas_blancas
 from nucleo.seguridad import idempotencia
@@ -4801,6 +4802,52 @@ def interno_cerrar_caso_de_propuesta(propuesta_id: str):
     #  "no se hizo a proposito", porque lo que le dice a la persona no es lo
     #  mismo -- y porque de eso depende si conviene reintentar.
     codigo_http = 200 if resultado.cerrado else 409
+    return jsonify(resultado.como_dict()), codigo_http
+
+
+@app.post("/interno/orden/<orden_id>/cerrar-ticket")
+def interno_cerrar_ticket_de_orden(orden_id: str):
+    """
+    Cierra en el ISP el ticket de una orden de campo que una persona VALIDO.
+
+    Ruta propia por el mismo motivo que `/interno/propuesta/<id>/cerrar-caso`:
+    la puerta humana se abre con UNA evidencia concreta -- la orden validada --
+    y no desde la ruta generica, donde cualquier actor inventado entraria. Ver
+    nucleo/seguimiento/cierre_por_validacion.py.
+
+    El contrato es angosto: el ticket, el texto que queda escrito y QUIEN
+    valido. El estado de cierre no se acepta: lo fija la herramienta.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+    permitidos = {"ticket", "texto", "actor"}
+    sobra = sorted(set(cuerpo) - permitidos)
+    if sobra:
+        return jsonify({
+            "error": f"esta ruta solo acepta {sorted(permitidos)}. No acepta "
+                     f"{sobra}: el estado de cierre lo fija la herramienta."}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = cierre_por_validacion.cerrar_ticket_de_orden(
+        config, tenant, orden_id=orden_id,
+        ticket=str(cuerpo.get("ticket") or ""),
+        texto=str(cuerpo.get("texto") or ""),
+        actor=str(cuerpo.get("actor") or ""))
+    #  409 y no 500 cuando no se cerro: la peticion estaba bien y el sistema
+    #  decidio no ejecutarla. 502 solo si el ISP fallo de verdad.
+    if resultado.cerrado:
+        codigo_http = 200
+    elif resultado.codigo == cierre_por_validacion.FALLO:
+        codigo_http = 502
+    else:
+        codigo_http = 409
     return jsonify(resultado.como_dict()), codigo_http
 
 

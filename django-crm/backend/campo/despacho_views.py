@@ -307,8 +307,18 @@ class ValidarTrabajoView(APIView):
             return Response({"error": "VALIDACION_INVALIDA", "detalle": str(e)},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        #  VALIDADA, EL TICKET DEL ISP SE CIERRA (13/10/2026). Despues de la
+        #  transaccion de `aprobar`, y sin poder deshacerla: la orden ya esta
+        #  validada aunque el ISP no responda. Ver campo/services/cierre_en_isp.py.
+        ticket_isp = None
+        if d["decision"] == "aprobar":
+            from campo.services.cierre_en_isp import cerrar_ticket_al_validar
+
+            ticket_isp = cerrar_ticket_al_validar(orden, request.profile)
+
         orden.refresh_from_db()
         return Response({"orden": OrdenTrabajoDetailSerializer(orden).data,
+                         "ticket_isp": ticket_isp,
                          "server_time": timezone.now().isoformat()})
 
 
