@@ -648,9 +648,17 @@
   //  refresca a los dos y despues cada minuto: traer de mas es barato, y la
   //  alternativa --no refrescar-- deja a la persona mirando una bandeja vieja
   //  sin saber que ya hay resultados.
-  const ESPERA_INICIAL_MS = 120_000;
-  const REINTENTO_MS = 60_000;
-  const VECES_QUE_SE_REFRESCA = 4;
+  //  SE ESPERA MAS DE LO QUE DURA EL CICLO, no menos. Medido mirando la
+  //  pantalla el 14/10/2026: refrescar MIENTRAS el ciclo corre deja los
+  //  recuadros en «Sin dato» --la consulta que los calcula es pesada y expira
+  //  compitiendo con la corrida-- asi que el refresco que venia a mostrar los
+  //  resultados terminaba BORRANDO los que ya estaban.
+  //
+  //  Fue la frase del cliente la que lo ubico: "los datos salen al rato y
+  //  despues que presiono ejecutar ciclo se van".
+  const ESPERA_INICIAL_MS = 240_000;
+  const REINTENTO_MS = 120_000;
+  const VECES_QUE_SE_REFRESCA = 3;
   let relojesDelCiclo = /** @type {any[]} */ ([]);
 
   const traerLoDelCiclo = () => {

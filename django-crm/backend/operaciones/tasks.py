@@ -272,4 +272,21 @@ def ciclo_a_pedido(org_id: str) -> dict:
     finally:
         clear_rls_context()
 
+    #  EL RESULTADO, EN EL LOG  --  14/10/2026
+    #  ---------------------------------------
+    #  Desde que el ciclo se encola, el resumen ya no vuelve a la pantalla:
+    #  nadie lo ve. Y la primera corrida asi dejo 38 propuestas creadas y CERO
+    #  lecturas, sin ninguna pista de por que -- el unico lugar donde podia
+    #  estar la respuesta era un log que no decia nada.
+    #
+    #  Son numeros, no contenido: cuantas se leyeron, cuantas midieron el
+    #  equipo, cuantas fallaron. Ni una descripcion de ticket ni un nombre.
+    t = resumen.get("tickets") or {}
+    logger.info(
+        "Supervisor: ciclo a pedido · propuestas=%s · tickets leidos=%s "
+        "midieron=%s sin_medir=%s errores=%s fuera_de_tope=%s · fases_caidas=%s",
+        resumen.get("propuestas"), t.get("leidos"), t.get("midieron"),
+        t.get("sin_medir"), t.get("errores"), t.get("fuera_de_tope"),
+        [f.get("fase") for f in (resumen.get("fases_que_fallaron") or [])])
+
     return {"corrio": True, "resumen": resumen}

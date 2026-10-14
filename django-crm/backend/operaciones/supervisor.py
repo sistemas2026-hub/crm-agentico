@@ -2430,14 +2430,37 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
     #  guardadas. Es lo correcto -- esas propuestas son trabajo valido, y
     #  tirarlas porque SmartOLT no contesto seria perder lo que si se pudo
     #  hacer. Un cierre que no ocurrio se reintenta en el ciclo siguiente.
-    resumen.update(_atender_desincronizados(org, ahora,
-                                            desatendido=desatendido))
-    #  LA LECTURA DE LOS TICKETS ABIERTOS, tambien fuera de la transaccion y
-    #  por el mismo motivo: habla con el modelo y con las herramientas. Va
-    #  DESPUES del cierre a proposito -- cerrar lo que ya esta resuelto es mas
-    #  barato y mas seguro que leer lo que sigue abierto, y si el presupuesto
-    #  de la vuelta se agota, que se agote en lo segundo.
-    resumen.update(_leer_tickets_abiertos(org, ahora))
+    #  CADA FASE EN SU PROPIO 'try'  --  14/10/2026
+    #  --------------------------------------------
+    #  Estaban encadenadas: si la primera levantaba, la segunda NO CORRIA. Y el
+    #  sintoma no se parecia a la causa -- lo que se veia era "se crearon 38
+    #  propuestas y no se leyo ninguna", que apunta a la lectura, no al cierre
+    #  de desincronizados que fue el que se cayo.
+    #
+    #  Son fases INDEPENDIENTES: cerrar lo que el proveedor ya cerro no tiene
+    #  nada que ver con leer lo que sigue abierto. Que una se caiga no es
+    #  motivo para no hacer la otra, y las propuestas de arriba ya estan
+    #  guardadas igual.
+    #
+    #  SE REGISTRA EL FALLO CON SU FASE. Desde que el ciclo se encola, el
+    #  resumen ya no vuelve a la pantalla: si una fase se cae en silencio, no
+    #  queda rastro en ningun lado y solo se ve el hueco que dejo.
+    for nombre, fase in (
+        ("cierre de desincronizados",
+         lambda: _atender_desincronizados(org, ahora, desatendido=desatendido)),
+        #  LA LECTURA VA SEGUNDA a proposito: cerrar lo que ya esta resuelto es
+        #  mas barato y mas seguro que leer lo que sigue abierto, y si el
+        #  presupuesto de la vuelta se agota, que se agote en lo segundo.
+        ("lectura de tickets abiertos",
+         lambda: _leer_tickets_abiertos(org, ahora)),
+    ):
+        try:
+            resumen.update(fase())
+        except Exception as e:                               # noqa: BLE001
+            logger.exception("Supervisor: fallo la fase '%s'", nombre)
+            resumen.setdefault("fases_que_fallaron", []).append(
+                {"fase": nombre, "error": type(e).__name__})
+
     return resumen
 
 
