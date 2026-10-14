@@ -42,10 +42,22 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-#:  El area que le toca al Supervisor NOC. En la configuracion de Rapilink los
-#:  departamentos 'Soporte Tecnico' Y 'Operativo' apuntan los dos a esta misma
-#:  area, asi que un solo nombre cubre las dos cosas que se pidieron.
-AREA_DEL_SUPERVISOR = "soporte_tecnico"
+#:  LAS AREAS que le tocan al Supervisor NOC, que son DOS y no una.
+#:
+#:  Se escribio con una sola --'soporte_tecnico'-- razonando que
+#:  'importacion_tickets.destinos' manda el departamento "Operativo" a esa
+#:  area. Eso es cierto para a donde va el TICKET, y no tiene nada que ver con
+#:  a que area pertenece una PERSONA, que es lo que se consulta aqui.
+#:
+#:  MEDIDO el 14/10/2026 contra 'asistente.area_colaborador': 'operativo' es un
+#:  area propia con cuatro personas. Con un solo nombre, los tickets de esas
+#:  cuatro quedaban afuera -- y el cliente pidio expresamente "soporte tecnico
+#:  y operativo".
+AREAS_DEL_SUPERVISOR = ("soporte_tecnico", "operativo")
+
+#:  Se conserva el nombre viejo apuntando a la primera, por si algo quedo
+#:  leyendolo. No se usa en este modulo.
+AREA_DEL_SUPERVISOR = AREAS_DEL_SUPERVISOR[0]
 
 #:  Cuanto vale la lectura antes de volver a preguntar. Las areas cambian
 #:  cuando entra o sale alguien del equipo -- no en minutos.
@@ -122,16 +134,17 @@ def area_por_persona() -> dict:
     return {}
 
 
-def responsables_de(area: str, mapa: dict | None = None) -> list:
+def responsables_de(areas, mapa: dict | None = None) -> list:
     """
-    Los perfiles que pertenecen a esa area.
+    Los perfiles que pertenecen a esas areas. Acepta un nombre o varios.
 
-    Lista vacia significa "no hay nadie de esa area" O "no se pudo preguntar".
-    Quien llama no puede tratar las dos igual: filtrar por una lista vacia no
-    filtra nada y traeria la cola entera -- que es exactamente lo que este
-    modulo vino a evitar.
+    Lista vacia significa "no hay nadie de esas areas" O "no se pudo
+    preguntar". Quien llama no puede tratar las dos igual: filtrar por una
+    lista vacia no filtra nada y traeria la cola entera -- que es exactamente
+    lo que este modulo vino a evitar.
     """
     m = area_por_persona() if mapa is None else mapa
-    objetivo = str(area or "").strip().lower()
+    nombres = [areas] if isinstance(areas, str) else list(areas or [])
+    objetivo = {str(a or "").strip().lower() for a in nombres}
     return [pid for pid, suya in (m or {}).items()
-            if str(suya or "").strip().lower() == objetivo]
+            if str(suya or "").strip().lower() in objetivo]

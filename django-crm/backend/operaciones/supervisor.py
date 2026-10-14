@@ -575,14 +575,14 @@ def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
 
     from operaciones import areas_del_tenant as areas
 
-    de_soporte = areas.responsables_de(areas.AREA_DEL_SUPERVISOR)
+    de_soporte = areas.responsables_de(areas.AREAS_DEL_SUPERVISOR)
     if not de_soporte:
         #  VACIO ES AMBIGUO Y SE TRATA COMO "NO SE PUDO": puede ser que nadie
         #  sea de soporte o que el motor no haya contestado. Filtrar por una
         #  lista vacia no filtra NADA y traeria la cola entera -- justo lo que
         #  esto vino a evitar.
-        logger.info("Supervisor: sin responsables de '%s', no se leen tickets "
-                    "esta vuelta", areas.AREA_DEL_SUPERVISOR)
+        logger.info("Supervisor: sin responsables de %s, no se leen tickets "
+                    "esta vuelta", list(areas.AREAS_DEL_SUPERVISOR))
         return []
 
     casos = (Case.objects

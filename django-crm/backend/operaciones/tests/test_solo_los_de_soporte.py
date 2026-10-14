@@ -89,6 +89,29 @@ def test_un_area_sin_gente_devuelve_vacio():
     assert areas.responsables_de("soporte_tecnico", {"p1": "cartera"}) == []
 
 
+def test_OPERATIVO_tambien_es_del_Supervisor():
+    """
+    SON DOS AREAS Y NO UNA, y la primera version lo tuvo mal.
+
+    Se razono que 'importacion_tickets.destinos' manda el departamento
+    "Operativo" a 'soporte_tecnico', y es cierto -- pero eso dice a donde va el
+    TICKET, no a que area pertenece una PERSONA, que es lo que se consulta.
+
+    Medido el 14/10/2026 contra 'asistente.area_colaborador': 'operativo' es un
+    area propia con CUATRO personas. Con un solo nombre, los tickets de esas
+    cuatro quedaban afuera -- y se habian pedido las dos.
+    """
+    assert "operativo" in areas.AREAS_DEL_SUPERVISOR
+    mapa = {"p-sop": "soporte_tecnico", "p-ope": "operativo",
+            "p-car": "cartera", "p-ven": "ventas"}
+    assert sorted(areas.responsables_de(areas.AREAS_DEL_SUPERVISOR, mapa)) ==         ["p-ope", "p-sop"]
+
+
+def test_un_solo_nombre_sigue_funcionando():
+    #  Acepta texto o lista: quien pase un nombre suelto no tiene que saberlo.
+    assert areas.responsables_de("cartera", {"p1": "cartera"}) == ["p1"]
+
+
 # =============================================================================
 #  §2  EL EFECTO SOBRE LO QUE EL SUPERVISOR LEE
 # =============================================================================
