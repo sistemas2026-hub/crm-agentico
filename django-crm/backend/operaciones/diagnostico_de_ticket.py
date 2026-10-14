@@ -272,18 +272,42 @@ def _anotar(senal, veredicto, labor, ahora) -> None:
     falta = list(getattr(veredicto, "falta", []) or [])
     riesgo = (getattr(veredicto, "riesgo", "") or "").strip()
 
+    #  EL JUICIO VIAJA COMO CLAVES, NO SOLO COMO TEXTO  --  14/10/2026
+    #  ---------------------------------------------------------------
+    #  La observacion lleva el grupo, la labor y la confianza en claves
+    #  propias, ademas de la frase que lee una persona. Es el mismo patron que
+    #  'diagnostico_optico' ya usa con 'pieza["veredicto"]'.
+    #
+    #  POR QUE HACE FALTA: lo que decide el paso a Despacho vive en
+    #  'senal.datos', y la señal se muere con el ciclo. Sin esto, un ticket que
+    #  no pudo pasar hoy --porque una puerta estaba cerrada-- necesita que el
+    #  modelo lo lea OTRA VEZ para poder reintentar, y el tope son diez
+    #  lecturas por vuelta. Es la misma forma del bug que tenia atascados a los
+    #  desincronizados: un dato que solo existia durante la corrida que lo
+    #  produjo.
+    #
+    #  Y se escribe aunque no haya hipotesis: el grupo no depende de ella.
+    def _con_el_juicio(pieza: dict) -> dict:
+        pieza["grupo"] = str(
+            (getattr(veredicto, "extras", None) or {}).get("grupo") or "")
+        pieza["labor"] = (labor or {}).get("labor") or ""
+        pieza["labor_verificada"] = bool((labor or {}).get("verificada"))
+        pieza["labor_porque"] = str((labor or {}).get("porque") or "")
+        pieza["confianza"] = confianza
+        return pieza
+
     if hipotesis:
-        senal.evidencia.append(sup._observacion(
+        senal.evidencia.append(_con_el_juicio(sup._observacion(
             FUENTE, senal.origen_id,
             f"{ETIQUETA_LECTURA}{hipotesis} "
             f"(confianza {confianza or 'sin declarar'})",
-            ahora))
+            ahora)))
     else:
         #  SE ANOTA IGUAL. "Se leyó y no alcanzó" es un resultado, y callarlo
         #  dejaría al ticket con cara de no haber sido mirado nunca.
-        senal.evidencia.append(sup._observacion(
+        senal.evidencia.append(_con_el_juicio(sup._observacion(
             FUENTE, senal.origen_id,
-            "se leyó el reclamo y no alcanza para una hipótesis", ahora))
+            "se leyó el reclamo y no alcanza para una hipótesis", ahora)))
 
     if falta:
         senal.evidencia.append(sup._observacion(

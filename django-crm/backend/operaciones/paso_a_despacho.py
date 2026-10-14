@@ -294,6 +294,13 @@ TAREA = "pasar_a_despacho_segun_las_reglas"
 NIVEL_PARA_PASAR = 3
 
 
+#:  La fuente con la que 'diagnostico_de_ticket' marca sus observaciones. Se
+#:  repite aca a proposito en vez de importarla: ese modulo arrastra el ciclo
+#:  entero, y lo unico que hace falta es la cadena. La guarda que verifica que
+#:  siguen siendo la misma vive en las pruebas.
+FUENTE_DE_LA_LECTURA = "diagnostico_del_ticket"
+
+
 def de_la_senal(senal) -> Decision:
     """La decision para esta señal, leyendo lo que 'diagnosticar' dejo escrito.
 
@@ -308,6 +315,56 @@ def de_la_senal(senal) -> Decision:
          "porque": datos.get("labor_porque") or "",
          "verificada": bool(datos.get("labor_verificada"))},
         confianza=str(datos.get("diagnostico_confianza") or ""))
+
+
+def de_la_propuesta(propuesta) -> Decision:
+    """
+    La decision usando la lectura que YA esta guardada, sin volver a leer.
+
+    POR QUE EXISTE  --  14/10/2026
+    ------------------------------
+    El paso a Despacho se decide con lo que 'diagnosticar' deja en
+    'senal.datos', y la señal se muere con el ciclo. Sin esta funcion, un
+    ticket que no pudo pasar hoy --porque una puerta estaba cerrada ese dia--
+    necesita que el modelo lo LEA OTRA VEZ para reintentar, y el tope son diez
+    lecturas por vuelta.
+
+    Es la misma forma del bug que tenia atascados a los desincronizados: una
+    propuesta diagnosticada el lunes no volvia a entrar nunca, por mas que el
+    martes se autorizara todo. Ahi el disparador era el nivel de autonomia;
+    aca, un dato que solo vivia durante la corrida que lo produjo.
+
+    SE LEEN CLAVES, NO TEXTO. La observacion de la lectura trae 'grupo',
+    'labor', 'labor_verificada' y 'confianza' como claves propias --mismo
+    patron que 'pieza["veredicto"]' en el modulo optico-- asi que esto no
+    interpreta ninguna frase.
+
+    LA MAS RECIENTE GANA: la evidencia de un ticket se ACUMULA a proposito (es
+    el historial del reclamo, no un diagnostico que se corrige), asi que la
+    ultima lectura es la que describe la situacion de hoy.
+    """
+    ultima = None
+    for pieza in (getattr(propuesta, "evidencia", None) or []):
+        if not isinstance(pieza, dict):
+            continue
+        if pieza.get("fuente") != FUENTE_DE_LA_LECTURA:
+            continue
+        if "grupo" not in pieza:
+            #  Una lectura anterior al 14/10/2026: tiene la frase pero no las
+            #  claves. No sirve para decidir, y tratarla como "sin grupo" es
+            #  justo lo correcto -- va a una persona hasta que se relea.
+            continue
+        ultima = pieza
+    if ultima is None:
+        return Decision(False, "la lectura guardada no trae el grupo: hay que "
+                               "volver a leer el reclamo antes de poder "
+                               "decidir")
+    return decidir(
+        str(ultima.get("grupo") or ""),
+        {"labor": ultima.get("labor") or "",
+         "porque": ultima.get("labor_porque") or "",
+         "verificada": bool(ultima.get("labor_verificada"))},
+        confianza=str(ultima.get("confianza") or ""))
 
 
 def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
@@ -345,7 +402,15 @@ def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
     from operaciones.models import PropuestaSupervisor
 
     ahora = ahora or timezone.now()
+
+    #  LA SEÑAL PRIMERO, LA PROPUESTA DESPUES. Si este ciclo acaba de leer el
+    #  ticket, la señal trae el juicio mas nuevo; si no lo leyo --el tope son
+    #  diez por vuelta-- se usa la lectura que ya estaba guardada, en vez de
+    #  dejar el ticket esperando una relectura que cuesta una llamada al
+    #  modelo.
     d = de_la_senal(senal)
+    if not d.grupo:
+        d = de_la_propuesta(propuesta)
 
     #  PUERTA 1 · LAS REGLAS.
     if not d.pasa:

@@ -359,3 +359,103 @@ def test_la_confianza_exigida_es_un_valor_del_enum_del_cerebro():
     from operaciones.cerebro import Confianza
 
     assert pad.CONFIANZA_EXIGIDA_SIN_MEDICION == Confianza.ALTA
+
+
+# =============================================================================
+#  DECIDIR SIN VOLVER A PAGAR EL MODELO
+# =============================================================================
+#
+#  EL AGUJERO QUE CIERRA, medido el 14/10/2026 con la puerta ya delegada:
+#  76 propuestas de ticket esperando y un tope de DIEZ lecturas por vuelta. Lo
+#  que decide el paso vivia solo en 'senal.datos', que muere con el ciclo, asi
+#  que las 66 restantes no podian pasar -- y un ticket frenado por una puerta
+#  cerrada necesitaba que el modelo lo leyera otra vez para reintentar.
+#
+#  Es la misma forma del bug que tenia atascados a los desincronizados.
+
+
+class _Propuesta:
+    """Solo lo que 'de_la_propuesta' mira."""
+
+    def __init__(self, evidencia):
+        self.evidencia = evidencia
+
+
+def _lectura_guardada(**claves):
+    pieza = {"fuente": pad.FUENTE_DE_LA_LECTURA,
+             "dato": "lectura del reclamo: no tiene servicio",
+             "observado_en": "2026-10-14T18:00:00Z"}
+    pieza.update(claves)
+    return pieza
+
+
+def test_la_lectura_guardada_alcanza_para_decidir():
+    p = _Propuesta([_lectura_guardada(
+        grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
+        labor_verificada=True, labor_porque="caido por fibra",
+        confianza="alta")])
+
+    d = pad.de_la_propuesta(p)
+
+    assert d.pasa is True, d.porque
+    assert "caido por fibra" in d.porque
+
+
+def test_la_lectura_MAS_NUEVA_es_la_que_vale():
+    """
+    La evidencia de un ticket se ACUMULA a proposito --es el historial del
+    reclamo-- asi que la ultima lectura es la que describe la situacion de hoy.
+    Tomar la primera decidiria con lo que pasaba la semana pasada.
+    """
+    p = _Propuesta([
+        _lectura_guardada(grupo=pad.NADA_LO_MIDE, labor="",
+                          labor_verificada=False, confianza="alta"),
+        _lectura_guardada(grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
+                          labor_verificada=True, confianza="alta"),
+    ])
+
+    assert pad.de_la_propuesta(p).pasa is True
+
+
+def test_una_lectura_VIEJA_sin_grupo_no_decide_nada():
+    """
+    Las 76 propuestas que existian el 14/10 se leyeron antes de que el grupo se
+    guardara: tienen la frase pero no la clave. Eso NO se interpreta leyendo el
+    texto -- se queda esperando una relectura, y lo dice.
+    """
+    p = _Propuesta([{"fuente": pad.FUENTE_DE_LA_LECTURA,
+                     "dato": "lectura del reclamo: no tiene servicio desde ayer",
+                     "observado_en": "2026-10-13T20:00:00Z"}])
+
+    d = pad.de_la_propuesta(p)
+
+    assert d.pasa is False
+    assert "volver a leer" in d.porque
+
+
+def test_sin_ninguna_lectura_guardada_tampoco():
+    assert pad.de_la_propuesta(_Propuesta([])).pasa is False
+    assert pad.de_la_propuesta(_Propuesta(None)).pasa is False
+
+
+def test_la_evidencia_de_OTRA_fuente_no_se_confunde_con_una_lectura():
+    """
+    Un caso trae observaciones de varias fuentes --el caso, el calculo de
+    prioridad, el diagnostico optico--. Tomar cualquiera como lectura del
+    reclamo decidiria con un dato que no es el que se busca.
+    """
+    p = _Propuesta([{"fuente": "diagnostico", "grupo": pad.FALLA_DE_SERVICIO,
+                     "labor_verificada": True, "dato": "otra cosa"}])
+
+    assert pad.de_la_propuesta(p).pasa is False
+
+
+def test_la_fuente_que_se_repite_es_la_misma_de_las_dos_puntas():
+    """
+    'paso_a_despacho' repite la cadena en vez de importar el modulo de lectura,
+    que arrastra el ciclo entero. Una cadena copiada sin guarda se desincroniza
+    en silencio, y el sintoma seria "ningun ticket pasa" sin un solo error.
+    """
+    from operaciones import diagnostico_de_ticket as dxt
+
+    assert pad.FUENTE_DE_LA_LECTURA == dxt.FUENTE

@@ -2684,9 +2684,22 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, candidatas, pendientes,
         reporte["se_quedaron"] = len(candidatas)
         return reporte
 
+    #  NO SE EXIGE QUE SE HAYA LEIDO EN ESTA VUELTA  --  14/10/2026
+    #  ------------------------------------------------------------
+    #  La primera version pedia 'diagnostico_leido', que 'diagnosticar' pone
+    #  solo en los tickets que lee en la corrida. Con el tope en diez por
+    #  vuelta y 76 propuestas esperando, eso dejaba fuera a las 66 restantes
+    #  por vuelta -- y peor: un ticket que no pudo pasar hoy porque una puerta
+    #  estaba cerrada necesitaba que el modelo lo leyera OTRA VEZ.
+    #
+    #  Es la misma forma del bug que tenia atascados a los desincronizados. Se
+    #  corrige del mismo modo: 'pasar_si_corresponde' usa la lectura guardada
+    #  en la propuesta cuando la señal no trae una nueva. Una propuesta sin
+    #  grupo guardado --leida antes de que esto existiera-- se queda, y eso lo
+    #  dice su motivo.
     for s in candidatas:
         p = pendientes.get(str(s.origen_id))
-        if p is None or not s.datos.get("diagnostico_leido"):
+        if p is None:
             continue
         try:
             r = pad.pasar_si_corresponde(org, s, p, ahora=ahora,
