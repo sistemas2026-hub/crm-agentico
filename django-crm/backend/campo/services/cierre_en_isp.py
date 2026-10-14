@@ -68,8 +68,9 @@ def resumen_de(orden, nombre_de_quien_valida: str) -> str:
     tipo = version.work_type.nombre if version else "trabajo de campo"
     datos = orden.datos or {}
 
-    lineas = [f"Trabajo de campo OT #{orden.numero} ({tipo}) validado en Dexter "
-              f"por {nombre_de_quien_valida}."]
+    #  Quien valido NO va aca: el motor antepone su nombre al texto
+    #  (`operativo._firmado`), y ponerlo dos veces solo lo repite.
+    lineas = [f"Trabajo de campo OT #{orden.numero} ({tipo}) validado en Dexter."]
     for campo in esquema.get("campos") or []:
         if not isinstance(campo, dict):
             continue
@@ -102,13 +103,21 @@ def _anotar(orden, profile, tipo, datos):
 
 
 def cerrar_ticket_al_validar(orden, profile) -> dict:
-    """Cierra en el ISP el ticket de una orden recien validada. Nunca lanza.
+    """Cierra en el ISP el ticket de una orden recien validada. NUNCA lanza.
 
     Devuelve `{"estado": ..., "detalle": ...}` para que la respuesta de la
-    validacion pueda decir que paso con el ticket.
+    validacion pueda decir que paso con el ticket. Todo va envuelto: la orden
+    ya esta validada, y un fallo al anotar en la bitacora no puede convertir
+    esa validacion en un 500 (auditoria de frontera, 13/10/2026).
     """
-    from campo.services.inventario import nombre_de
+    try:
+        return _cerrar(orden, profile)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("cierre en el ISP: fallo inesperado (%s)", type(e).__name__)
+        return {"estado": "no_cerrado", "detalle": type(e).__name__}
 
+
+def _cerrar(orden, profile) -> dict:
     if not _habilitado():
         return {"estado": "apagado", "detalle": f"{BANDERA}=0"}
     ticket = str((orden.contexto or {}).get("ticket") or "").strip()
@@ -127,7 +136,10 @@ def cerrar_ticket_al_validar(orden, profile) -> dict:
 
     import requests
 
-    quien = nombre_de(profile)
+    #  El NOMBRE, nunca el email: `nombre_de` cae al correo cuando no hay
+    #  nombre, y ese correo terminaria escrito en el ticket del cliente.
+    user = getattr(profile, "user", None)
+    quien = (getattr(user, "name", "") or "").strip() or "Oficina de operaciones"
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
@@ -141,6 +153,8 @@ def cerrar_ticket_al_validar(orden, profile) -> dict:
                   "actor": quien},
             headers=cabeceras, timeout=45)
         cuerpo = r.json() if r.content else {}
+        if not isinstance(cuerpo, dict):
+            cuerpo = {}
     except Exception as e:  # noqa: BLE001
         logger.warning("cierre en el ISP: no se pudo hablar con el motor (%s)",
                        type(e).__name__)

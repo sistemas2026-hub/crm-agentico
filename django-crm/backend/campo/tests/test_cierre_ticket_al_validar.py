@@ -102,6 +102,9 @@ def test_a_aprobar_pide_el_cierre_con_ticket_quien_y_resumen_tapado(
     assert cuerpo["ticket"] == "94721"
     assert cuerpo["actor"]                                   # quien valido
     assert set(cuerpo) == {"ticket", "texto", "actor"}       # ni un campo mas
+    #  El ticket del cliente NUNCA recibe el correo del colaborador.
+    assert admin_user.email not in str(cuerpo)
+    assert "@" not in cuerpo["actor"]
     texto = cuerpo["texto"]
     assert "OT #7001" in texto and "Correctivo de fibra" in texto
     assert "Potencia al salir: -19.5 dBm" in texto
@@ -156,6 +159,16 @@ def test_e_si_el_motor_no_cierra_la_validacion_queda_y_se_anota(
         orden=orden, tipo=cierre_en_isp.EVENTO_NO_CERRADO).exists()
     assert not EventoTrabajo.objects.filter(
         orden=orden, tipo=cierre_en_isp.EVENTO_CERRADO).exists()
+
+
+def test_g_sin_nombre_firma_la_oficina_y_no_el_correo(orden, admin_profile):
+    admin_profile.user.name = ""
+    admin_profile.user.save(update_fields=["name"])
+    with mock.patch("requests.post", return_value=_Respuesta()) as post:
+        cierre_en_isp.cerrar_ticket_al_validar(orden, admin_profile)
+    cuerpo = post.call_args.kwargs["json"]
+    assert cuerpo["actor"] == "Oficina de operaciones"
+    assert admin_profile.user.email not in str(cuerpo)
 
 
 def test_f_se_apaga_con_la_bandera(orden, admin_profile, monkeypatch):

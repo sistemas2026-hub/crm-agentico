@@ -129,8 +129,14 @@ def cerrar_ticket_de_orden(config, tenant: str, *, orden_id: str, ticket: str,
     try:
         with frontera.humana(tenant, herr.nombre, actor=actor,
                              evidencia=origen, origen=origen):
+            #  CLAVE FIJA POR ORDEN. La clave por defecto incluye el hash de los
+            #  argumentos, y el texto entra en ellos: si cambiaba entre dos
+            #  intentos -- una foto mas, otro nombre -- era OTRA operacion y el
+            #  ticket recibia el texto dos veces (auditoria de frontera,
+            #  13/10/2026, H2). Fija, una huella distinta se RECHAZA.
             resultado = idempotencia.ejecutar(
-                tenant, herr.nombre, argumentos, origen, _hacer)
+                tenant, herr.nombre, argumentos, origen, _hacer,
+                clave=f"{origen}|{herr.nombre}")
     except Exception as e:                                   # noqa: BLE001
         registrar("cierre_validacion", "el cierre del ticket fallo", error=e)
         return ResultadoCierreTicket(FALLO, type(e).__name__, referencia=origen)

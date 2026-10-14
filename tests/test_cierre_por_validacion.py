@@ -164,6 +164,19 @@ with escenario(registro, proveedor):
 afirmar(r2.cerrado, "responde cerrado ('ya se habia cerrado antes')")
 afirmar(len(proveedor.llamadas) == 1, "y el proveedor sigue con UNA sola llamada")
 
+seccion("2b. un segundo intento con OTRO texto tampoco vuelve a publicar")
+#  Auditoria de frontera del 13/10/2026 (H2): la clave por defecto hashea los
+#  argumentos y el texto va en ellos -- un texto distinto era otra operacion y
+#  el ticket lo recibia dos veces. La clave es fija por orden.
+with escenario(registro, proveedor):
+    r3 = cierre.cerrar_ticket_de_orden(
+        Config(), TENANT, orden_id=ORDEN, ticket=TICKET,
+        texto="Otro texto: llego una foto mas.", actor="Laura Gomez")
+afirmar(len(proveedor.llamadas) == 1,
+        f"el proveedor sigue con UNA sola llamada (codigo={r3.codigo})")
+afirmar(list(registro.filas) == [f"orden_validada:{ORDEN}|cerrar_ticket_operativo"],
+        "y la clave es la orden, no el texto")
+
 seccion("3. sin quien valido, no sale")
 registro, proveedor = Registro(), Proveedor()
 with escenario(registro, proveedor):
