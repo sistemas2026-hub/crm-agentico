@@ -346,6 +346,42 @@ def le_falta_lectura(propuesta) -> bool:
 #:  una frase y puede recortarla.
 TROZO_PARA_RECONOCERLA = 40
 
+#:  Cuantas veces se relee una propuesta antes de dejarla como esta. Tres es
+#:  suficiente para absorber un fallo puntual --el modelo cortado, una
+#:  herramienta caida-- y corta el bucle antes de que cueste.
+#:
+#:  NO ES UN NUMERO PRUDENTE AL AZAR: medido el 14/10/2026, sin tope fueron 43
+#:  lecturas sobre 11 propuestas en una madrugada, cada una con su consulta al
+#:  modelo.
+MAXIMAS_RELECTURAS = 3
+
+
+def _cuantas_veces_se_leyo(propuesta) -> int:
+    """
+    Cuantas veces se LEYO esta propuesta, se haya guardado o no el resultado.
+
+    SE CUENTAN LOS RAZONAMIENTOS Y NO LA EVIDENCIA, y la diferencia es la que
+    hace que el tope sirva: el bucle del 14/10/2026 existia JUSTAMENTE porque
+    la lectura no llegaba a la evidencia --43 razonamientos y solo 8 propuestas
+    con su pieza--. Un contador que mire la evidencia se queda en cero en ese
+    caso y no corta nada.
+
+    El razonamiento, en cambio, queda siempre: es lo primero que se escribe
+    despues de preguntarle al modelo.
+    """
+    try:
+        from operaciones.razonamiento_modelos import (FuenteRazonamiento,
+                                                      RazonamientoSupervisor)
+
+        return RazonamientoSupervisor.objects.filter(
+            propuesta=propuesta,
+            fuente=FuenteRazonamiento.LECTURA_TICKET).count()
+    except Exception:                                        # noqa: BLE001
+        #  Si no se puede contar, se deja pasar: el tope es una proteccion
+        #  contra el gasto, no una puerta de seguridad. Negar la lectura por no
+        #  poder contar seria peor que leer una vez de mas.
+        return 0
+
 
 def el_juicio_ignora_la_lectura(propuesta) -> bool:
     """
@@ -366,9 +402,24 @@ def el_juicio_ignora_la_lectura(propuesta) -> bool:
     el veredicto viaja aparte en los datos de la señal. Lo unico que se
     pregunta aca es si el resumen menciona lo que la lectura encontro.
 
-    SE APAGA SOLA: en cuanto la propuesta se rejuzga, el motivo pasa a contener
-    la hipotesis y deja de cumplirse.
+    NO SE APAGA SOLA, Y ESO COSTO UN BUCLE  --  14/10/2026
+    -------------------------------------------------------
+    Se escribio creyendo que si: "en cuanto la propuesta se rejuzga, el motivo
+    pasa a contener la hipotesis y deja de cumplirse". Falso cuando la relectura
+    NO encuentra nada -- ahi el motivo no la menciona nunca, y la propuesta
+    vuelve a la cola en cada vuelta.
+
+    MEDIDO esa madrugada: 43 lecturas sobre 11 propuestas. Las mismas, cuatro
+    veces cada una, con su consulta al modelo y sus herramientas cada vez. Nadie
+    lo noto porque el sintoma era "no avanza", no "gasta".
+
+    Por eso el tope: despues de 'MAXIMAS_RELECTURAS' intentos se deja como esta.
+    Una propuesta con el resumen viejo es un problema; una que se relee para
+    siempre es peor, y ademas desplaza de la cola a los tickets que nadie miro.
     """
+    if _cuantas_veces_se_leyo(propuesta) >= MAXIMAS_RELECTURAS:
+        return False
+
     motivo = (getattr(propuesta, "motivo", "") or "")
     for pieza in (propuesta.evidencia or []):
         if not isinstance(pieza, dict) or pieza.get("fuente") != FUENTE:

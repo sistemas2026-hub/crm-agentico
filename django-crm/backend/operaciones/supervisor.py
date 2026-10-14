@@ -2496,17 +2496,43 @@ def _leer_tickets_abiertos(org, ahora) -> dict:
     sin_leer = []        # 1 · ningun diagnostico todavia
     al_dia = []          # 2 · el resumen no refleja lo que ya se leyo
     for s in senales:
-        if not _ya_propuesta(org, s):
-            #  Sin propuesta todavia. Se diagnostica ANTES de registrarla, asi
-            #  la propuesta nace con el diagnostico adentro en vez de aparecer
-            #  vacia y completarse una hora despues.
-            sin_leer.append(s)
-            continue
+        #  SE BUSCA POR CASO, NO POR HUELLA  --  14/10/2026
+        #  ------------------------------------------------
+        #  '_ya_propuesta' pregunta "¿ya propuse esta MISMA CONDICION?" y usa la
+        #  huella, que incluye datos que cambian --los dias abiertos, entre
+        #  otros--. Para no repetir una pregunta ya decidida esta perfecto.
+        #
+        #  Para GUARDAR la lectura es la pregunta equivocada: lo que hace falta
+        #  es "¿que propuesta viva tiene ESTE CASO?", y eso lo contesta
+        #  '_propuesta_vigente_de', que busca por origen.
+        #
+        #  EL AGUJERO QUE DEJO, medido en produccion esa madrugada: cuando la
+        #  huella cambiaba, la señal se iba por la rama de "sin propuesta", se
+        #  diagnosticaba igual --pagando la consulta al modelo-- y despues el
+        #  guardado no la encontraba en 'pendientes' y tiraba el resultado.
+        #
+        #      50  lecturas registradas
+        #       3  propuestas que de verdad quedaron con su lectura
+        #       0  propuestas cuya accion cambio
+        #
+        #  Y encima se repetia en cada vuelta: sin evidencia guardada,
+        #  'le_falta_lectura' seguia diciendo que si, y la misma propuesta se
+        #  leia una y otra vez.
         p = _propuesta_vigente_de(org, s)
         if p is None:
+            if not _ya_propuesta(org, s):
+                #  Ninguna propuesta viva y ninguna decidida: nace ahora. La
+                #  registra el ciclo en su pasada normal.
+                sin_leer.append(s)
+            #  Si hay una DECIDIDA (aceptada, rechazada), no se toca: una
+            #  persona ya resolvio, y releerla gastaria la vuelta.
             continue
         if dxt.le_falta_lectura(p):
-            pendientes[s.origen_id] = p
+            #  'str()' en los dos lados: 'diagnostico_de_ticket' busca con
+            #  'str(senal.origen_id)' y aca se guardaba crudo. Si alguna vez
+            #  'origen_id' deja de ser texto, uno encuentra y el otro no --
+            #  y el sintoma seria este mismo: la lectura se hace y se pierde.
+            pendientes[str(s.origen_id)] = p
             sin_leer.append(s)
         elif dxt.el_juicio_ignora_la_lectura(p):
             #  YA SE LEYO Y EL RESUMEN NO LO DICE  --  13/10/2026
@@ -2525,7 +2551,7 @@ def _leer_tickets_abiertos(org, ahora) -> dict:
             #
             #  VA ULTIMO: ninguna de estas se queda sin atender por esperar,
             #  pero un ticket que nadie miro nunca va primero.
-            pendientes[s.origen_id] = p
+            pendientes[str(s.origen_id)] = p
             al_dia.append(s)
 
     candidatas = sin_leer + al_dia
@@ -2542,15 +2568,32 @@ def _leer_tickets_abiertos(org, ahora) -> dict:
     #  LAS QUE YA TENIAN PROPUESTA: se les agrega el diagnostico recien
     #  escrito. Las que no la tenian las registra el ciclo en su pasada
     #  normal, con la evidencia ya puesta.
+    #  SE CUENTA CADA SALIDA, y no es celo: el 14/10/2026 hubo 43 lecturas
+    #  registradas y solo 8 propuestas con su pieza. El trabajo se hacia, se
+    #  pagaba la consulta al modelo, y se perdia en este paso -- sin una sola
+    #  linea que dijera cual de los tres caminos se tomo.
+    guardadas = sin_propuesta = sin_leer_de_verdad = fallaron = 0
     for s in candidatas:
-        p = pendientes.get(s.origen_id)
-        if p is None or not s.datos.get("diagnostico_leido"):
+        p = pendientes.get(str(s.origen_id))
+        if p is None:
+            sin_propuesta += 1
+            continue
+        if not s.datos.get("diagnostico_leido"):
+            sin_leer_de_verdad += 1
             continue
         try:
             dxt.guardar_en_propuesta(p, s, ahora)
+            guardadas += 1
         except Exception as e:                                   # noqa: BLE001
-            logger.info("Supervisor: no se pudo guardar la lectura (%s)",
-                        type(e).__name__)
+            fallaron += 1
+            logger.exception("Supervisor: no se pudo guardar la lectura (%s)",
+                             type(e).__name__)
+
+    informe["guardadas"] = guardadas
+    logger.info("Supervisor: lecturas guardadas=%s · sin propuesta=%s · "
+                "no se leyeron=%s · fallaron=%s (de %s candidatas)",
+                guardadas, sin_propuesta, sin_leer_de_verdad, fallaron,
+                len(candidatas))
     return informe
 
 
