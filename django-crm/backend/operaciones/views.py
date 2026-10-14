@@ -37,6 +37,8 @@ nivel habria requerido, que hizo el humano y con que resultado.
 
 from __future__ import annotations
 
+import logging
+
 from django.db import transaction
 from django.db.models import Case as CuandoSQL
 from django.db.models import IntegerField, When
@@ -90,6 +92,9 @@ from operaciones.serializers import (ActividadOperativaSerializer,
     RevisionSerializer,
 )
 from operaciones.programacion import ESTADOS_DE_PLAN_QUE_ADMITEN_LINEAS
+
+
+logger = logging.getLogger(__name__)
 
 
 #: Cuantas propuestas viajan en una respuesta. El tope existe para no mandar
@@ -392,12 +397,41 @@ class CicloSupervisorView(APIView):
     permission_classes = [EsJefeDeOperaciones]
 
     def post(self, request):
-        resumen = supervisor.correr_ciclo(request.org)
+        #  SE ENCOLA, NO SE ESPERA  --  13/10/2026
+        #  ---------------------------------------
+        #  Esperarlo aca funcionaba cuando el ciclo no hacia casi nada. Ese dia
+        #  paso a LEER tickets --cada lectura es una consulta al modelo mas sus
+        #  herramientas-- y la corrida se fue a varios minutos.
+        #
+        #  MEDIDO esa noche: el ciclo termino a las 23:58:38 y dejo sus cuatro
+        #  lecturas; a las 00:02 el boton seguia diciendo "Analizando
+        #  operacion...". La conexion se habia cortado mucho antes. El trabajo
+        #  salia bien y la pantalla giraba para siempre, que es el peor de los
+        #  dos mundos: invita a apretar de nuevo algo que ya esta corriendo.
+        from operaciones.tasks import ciclo_a_pedido
+
+        try:
+            tarea = ciclo_a_pedido.delay(str(request.org.id))
+        except Exception as e:                               # noqa: BLE001
+            #  FAIL-CLOSED Y EN VOZ ALTA. Si la cola no esta, decirlo: callarlo
+            #  dejaria a la persona esperando resultados de un ciclo que nunca
+            #  arranco, que es exactamente el sintoma que esto vino a arreglar.
+            logger.exception("Supervisor: no se pudo encolar el ciclo")
+            return Response(
+                {"error": "No se pudo poner el ciclo en cola "
+                          f"({type(e).__name__}). No corrió nada."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
         return Response({
-            "resumen": resumen,
+            "encolado": True,
+            "tarea": getattr(tarea, "id", "") or "",
+            #  'resumen' viaja en null a proposito y no se omite: quien lee la
+            #  respuesta ya lo esperaba, y sacarlo del contrato romperia a
+            #  cualquiera que lo lea sin preguntar si existe.
+            "resumen": None,
             "shadow_mode": supervisor.SHADOW_MODE,
             "acciones_ejecutadas": 0,
-        })
+        }, status=status.HTTP_202_ACCEPTED)
 
 
 class DisponibilidadView(APIView):

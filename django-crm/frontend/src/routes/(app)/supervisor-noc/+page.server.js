@@ -161,6 +161,11 @@ export const actions = {
       return {
         ok: true,
         tipo: 'ciclo',
+        //  EL CICLO SE ENCOLA, no se espera (13/10/2026). Antes esta llamada
+        //  aguantaba hasta que terminara; desde que el Supervisor LEE tickets
+        //  la corrida se fue a varios minutos y la conexion se cortaba primero:
+        //  el trabajo salia bien y el boton giraba para siempre.
+        encolado: Boolean(r?.encolado),
         resumen: r?.resumen ?? null,
         shadow_mode: r?.shadow_mode ?? null,
         acciones_ejecutadas: r?.acciones_ejecutadas ?? 0

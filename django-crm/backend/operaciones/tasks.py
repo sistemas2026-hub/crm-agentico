@@ -219,3 +219,57 @@ def ciclo_del_supervisor():
     return {"empresas": empresas, "cerrados": cerrados,
             "no_evaluados_por": no_evaluados,
             "no_cerrados_por": no_cerrados}
+
+
+@shared_task(name="operaciones.tasks.ciclo_a_pedido")
+def ciclo_a_pedido(org_id: str) -> dict:
+    """
+    El ciclo de UNA empresa, lanzado desde el boton de la pantalla.
+
+    POR QUE EXISTE, Y POR QUE ES OTRA TAREA
+    ---------------------------------------
+    Hasta el 13/10/2026 el boton corria el ciclo DENTRO de la peticion HTTP y
+    esperaba. Eso funcionaba cuando el ciclo no hacia casi nada; ese mismo dia
+    paso a LEER tickets --cada lectura es una consulta al modelo mas las
+    herramientas que use-- y la corrida se fue a varios minutos.
+
+    MEDIDO esa noche: el ciclo termino a las 23:58:38 y dejo sus cuatro
+    lecturas; a las 00:02 el boton seguia diciendo "Analizando operacion...".
+    La conexion se habia cortado mucho antes. El trabajo salia bien y la
+    pantalla se quedaba girando para siempre -- el peor de los dos mundos,
+    porque invita a apretar de nuevo algo que ya esta corriendo.
+
+    NO ES 'ciclo_del_supervisor' CON UN PARAMETRO. Aquella recorre las empresas
+    que DELEGARON el ciclo y corre desatendida; esta la pide una persona para
+    SU empresa, aunque no haya delegacion. Mezclarlas haria que el boton
+    dependiera de una delegacion que no tiene nada que ver.
+
+    NO AFLOJA NINGUNA PUERTA: 'correr_ciclo' solo escribe propuestas y su
+    auditoria, igual que antes. Lo unico que cambia es quien espera.
+    """
+    from operaciones import supervisor
+
+    try:
+        org = Org.objects.get(id=org_id)
+    except Org.DoesNotExist:
+        logger.info("Supervisor: el ciclo a pedido no encontro la empresa")
+        return {"corrio": False, "motivo": "empresa inexistente"}
+
+    #  EL CONTEXTO, antes de tocar nada: sin esto la RLS devuelve cero filas y
+    #  el ciclo informaria "sin casos" siendo que no pudo verlos. Y el 'finally'
+    #  no es de adorno -- la variable es de SESION y la conexion vuelve al pool
+    #  con ella puesta.
+    set_rls_context(org.id)
+    try:
+        #  'desatendido=False': alguien SI esta esperando el resultado en la
+        #  pantalla, aunque ya no por la misma conexion. El tope corto de
+        #  diagnosticos es el que corresponde.
+        resumen = supervisor.correr_ciclo(org)
+    except Exception:
+        logger.exception("Supervisor: el ciclo a pedido fallo para org=%s",
+                         org.id)
+        return {"corrio": False, "motivo": "el ciclo falló"}
+    finally:
+        clear_rls_context()
+
+    return {"corrio": True, "resumen": resumen}

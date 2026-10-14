@@ -1,4 +1,6 @@
 <script>
+  import { onDestroy } from 'svelte';
+
   import ChatBurbuja from '$lib/supervisor/ChatBurbuja.svelte';
   import { resultadoDelCierre } from '$lib/v2/resultado-del-cierre.js';
   //  La burbuja del chat del Supervisor. Vive en su propio componente: este
@@ -640,6 +642,30 @@
   //  la pantalla se recargaba, y no había forma de saber qué había hecho.
   let cerradosDelCiclo = $state(/** @type {any[]} */ ([]));
 
+  //  Cuanto se espera antes de traer los resultados de un ciclo encolado.
+  //  Medido el 13/10/2026: una corrida que lee diez tickets --cada uno con su
+  //  consulta al modelo y sus herramientas-- tardo cerca de cuatro minutos. Se
+  //  refresca a los dos y despues cada minuto: traer de mas es barato, y la
+  //  alternativa --no refrescar-- deja a la persona mirando una bandeja vieja
+  //  sin saber que ya hay resultados.
+  const ESPERA_INICIAL_MS = 120_000;
+  const REINTENTO_MS = 60_000;
+  const VECES_QUE_SE_REFRESCA = 4;
+  let relojesDelCiclo = /** @type {any[]} */ ([]);
+
+  const traerLoDelCiclo = () => {
+    for (const t of relojesDelCiclo) clearTimeout(t);
+    relojesDelCiclo = [];
+    for (let i = 0; i < VECES_QUE_SE_REFRESCA; i++) {
+      relojesDelCiclo.push(
+        setTimeout(() => invalidateAll(), ESPERA_INICIAL_MS + i * REINTENTO_MS));
+    }
+  };
+
+  onDestroy(() => {
+    for (const t of relojesDelCiclo) clearTimeout(t);
+  });
+
   const alCorrerCiclo = () => {
     corriendo = true;
     return async (/** @type {any} */ { update, result }) => {
@@ -649,6 +675,10 @@
       cerradosDelCiclo = Array.isArray(auto?.cerrados_detalle) ? auto.cerrados_detalle : [];
       await update({ reset: false });
       await invalidateAll();
+      //  EL CICLO SE ENCOLO: lo que acaba de llegar es el acuse, no el
+      //  resultado. Sin esto la bandeja se queda como estaba y parece que el
+      //  ciclo no hizo nada.
+      if (result?.data?.encolado) traerLoDelCiclo();
     };
   };
 
@@ -1920,7 +1950,26 @@
                 <span class="snoc-body-sm snoc-secundario">El asistente no encontró señales de su dominio.</span>
               {/each}
             </div>
-          {:else if form?.ok && form.tipo === 'ciclo'}
+          {:else if form?.ok && form.tipo === 'ciclo' && form.encolado}
+            <!--
+              EL CICLO SE ENCOLA Y NO SE ESPERA (13/10/2026). Mostrar aqui el
+              resumen con ceros seria PEOR que no mostrar nada: diria "cero
+              propuestas nuevas" sobre un ciclo que todavia no empezo, y eso se
+              lee como "no encontro nada".
+            -->
+            <div class="snoc-resultado">
+              <span class="snoc-label-sm" style="text-transform:uppercase;">Ciclo en marcha</span>
+              <span class="snoc-body-sm">
+                El Supervisor está analizando la operación. Lee los tickets uno
+                por uno y consulta el equipo de cada cliente, así que tarda unos
+                minutos.
+              </span>
+              <span class="snoc-mono-sm snoc-tenue">
+                Podés cerrar esto y seguir trabajando: los resultados aparecen
+                en la bandeja cuando termine.
+              </span>
+            </div>
+          {:else if form?.ok && form.tipo === 'ciclo' && form.resumen}
             <div class="snoc-resultado">
               <span class="snoc-label-sm" style="text-transform:uppercase;">Último ciclo</span>
               <div class="snoc-mono-sm snoc-pila-xs">
