@@ -88,6 +88,25 @@ def _perfil(org):
     return Profile.objects.create(user=u, org=org, role="USER", is_active=True)
 
 
+@pytest.fixture(autouse=True)
+def _tecnicos_de_soporte(monkeypatch):
+    """
+    Todo perfil de estas pruebas es de SOPORTE TECNICO.
+
+    Desde el 14/10/2026 el detector solo mira los tickets del area del
+    Supervisor, y el area sale de la persona asignada. Sin esto, estas pruebas
+    --que hablan del GUARDADO de la lectura, no de las areas-- quedarian en
+    cero por una razon que no es la suya.
+    """
+    from common.models import Profile
+    from operaciones import areas_del_tenant as areas
+
+    monkeypatch.setattr(
+        areas, "area_por_persona",
+        lambda: {str(p.id): areas.AREA_DEL_SUPERVISOR
+                 for p in Profile.objects.all()})
+
+
 def _caso_con_tecnico(org):
     from cases.models import Case
 

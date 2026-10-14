@@ -511,9 +511,28 @@ def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
     esta bien encaminado. Uno sin asignar es un problema distinto --nadie lo
     tomo-- y tiene su propia señal.
 
-    NO HACE FALTA FILTRAR POR AREA. La importacion ya lo hace: el tenant
-    declara que departamentos trae ('Soporte Tecnico') y con que asuntos, asi
-    que todo caso que llego a Dexter por ese camino ya es de soporte.
+    SI HACE FALTA FILTRAR POR AREA  --  corregido el 14/10/2026
+    -----------------------------------------------------------
+    Aqui decia lo contrario: "no hace falta, la importacion ya lo hace, el
+    tenant declara que departamentos trae ('Soporte Tecnico')". Era cierto
+    cuando se escribio y dejo de serlo: la configuracion viva trae Ventas,
+    Finanzas, Operativo y Administrativo ademas de Soporte.
+
+    El cliente lo vio en la bandeja: "revise la lista de soporte tecnico en los
+    ticket y no salen los ticket de descuentos programados, esos son de
+    cartera". Medido: de los tickets abiertos, una sola persona concentraba 563
+    --509 de cartera-- mientras la de soporte tenia 76, exactamente los 76 que
+    la pantalla de Tickets muestra para esa area.
+
+    EL AREA SALE DE LA PERSONA ASIGNADA, no del ticket: el caso no la guarda, y
+    asi es como la empresa la configura. Es la misma via que usa la pantalla de
+    Tickets para separarlas bien, y la encontro el cliente preguntando lo
+    obvio: "¿no puede el supervisor extraer de esa area los ticket sin tanto
+    rodeo?".
+
+    SI NO SE PUEDE SABER, NO SE LEE NADA. Leer un ticket cuesta una consulta al
+    modelo: gastarla en uno de cartera es peor que no leer esta vuelta, y
+    ademas produce una propuesta que no le toca a nadie de este equipo.
 
     LO QUE EXIGE, Y POR QUE CADA COSA
       external_status en curso    si el proveedor lo cerro, es otra señal
@@ -554,8 +573,24 @@ def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
         if i
     ]
 
+    from operaciones import areas_del_tenant as areas
+
+    de_soporte = areas.responsables_de(areas.AREA_DEL_SUPERVISOR)
+    if not de_soporte:
+        #  VACIO ES AMBIGUO Y SE TRATA COMO "NO SE PUDO": puede ser que nadie
+        #  sea de soporte o que el motor no haya contestado. Filtrar por una
+        #  lista vacia no filtra NADA y traeria la cola entera -- justo lo que
+        #  esto vino a evitar.
+        logger.info("Supervisor: sin responsables de '%s', no se leen tickets "
+                    "esta vuelta", areas.AREA_DEL_SUPERVISOR)
+        return []
+
     casos = (Case.objects
              .filter(org=org, resolved_at__isnull=True)
+             #  SOLO LOS DE SOPORTE. Va antes que todo lo demas porque es lo
+             #  que mas recorta: de 771 abiertos con tecnico, los de esta area
+             #  eran 76.
+             .filter(assigned_to__in=de_soporte)
              .exclude(status=CERRADO_EN_DEXTER)
              .exclude(external_fetched_at__isnull=True)
              .filter(external_fetched_at__gte=corte_lectura)

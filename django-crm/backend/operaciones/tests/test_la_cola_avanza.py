@@ -68,6 +68,25 @@ def _perfil(org, correo="tec@isp.test"):
     return Profile.objects.create(user=u, org=org, role="USER", is_active=True)
 
 
+@pytest.fixture(autouse=True)
+def _tecnicos_de_soporte(monkeypatch):
+    """
+    Todo perfil de estas pruebas es de SOPORTE TECNICO.
+
+    Desde el 14/10/2026 el detector solo mira los tickets del area del
+    Supervisor, y el area sale de la persona asignada. Sin esto, estas pruebas
+    --que hablan de la COLA, no de las areas-- quedarian en cero por una razon
+    que no es la suya, y el mensaje de error apuntaria al lugar equivocado.
+    """
+    from operaciones import areas_del_tenant as areas
+    from common.models import Profile
+
+    monkeypatch.setattr(
+        areas, "area_por_persona",
+        lambda: {str(p.id): areas.AREA_DEL_SUPERVISOR
+                 for p in Profile.objects.all()})
+
+
 def _propuesta_leida(org, caso):
     """Una propuesta que YA tiene su lectura, como las de produccion."""
     from operaciones.diagnostico_de_ticket import ETIQUETA_LECTURA, FUENTE
