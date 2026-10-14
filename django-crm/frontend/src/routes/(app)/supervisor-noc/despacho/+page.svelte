@@ -38,6 +38,27 @@
   /** Mientras se trae la ficha del caso abierto. */
   let cargandoFicha = $state(false);
 
+  /** El barrio del formulario, y lo que el backend dice de él. */
+  let barrio = $state('');
+  let barrioRevisado = $state(/** @type {any} */ (null));
+
+  /**
+   * ¿Está mapeado? Si no, ¿a cuál se parece? (13/10/2026). Una letra de más o
+   * de menos dejaba la orden en «sin zona» sin ninguna pista. SE SUGIERE, no
+   * se corrige: dos barrios reales pueden diferir en una letra.
+   */
+  async function revisarBarrio() {
+    const q = barrio.trim();
+    barrioRevisado = null;
+    if (!q) return;
+    try {
+      const r = await fetch(`/supervisor-noc/despacho/barrio?q=${encodeURIComponent(q)}`);
+      if (r.ok && barrio.trim() === q) barrioRevisado = await r.json();
+    } catch {
+      //  Sin respuesta no se sugiere nada: se despacha con lo escrito.
+    }
+  }
+
   /** @param {string | undefined} labor */
   function preelegir(labor) {
     const coinciden = sugeridas(labor);
@@ -56,6 +77,8 @@
    */
   async function abrir(caso) {
     despachando = caso;
+    barrio = caso?.localidad || '';
+    barrioRevisado = null;
     plantillaElegida = '';
     preelegir(caso?.sugerencia?.labor);
     cargandoFicha = true;
@@ -72,6 +95,8 @@
         descripcion: ficha.descripcion ?? ''
       };
       if (!plantillaElegida) preelegir(despachando.sugerencia?.labor);
+      if (!barrio && despachando.localidad) barrio = despachando.localidad;
+      revisarBarrio();
     } catch {
       //  Sin ficha se despacha igual, escribiendo lo que falte.
     } finally {
@@ -427,8 +452,29 @@
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Barrio o localidad</span>
             <input class="snoc-campo" name="zona" required maxlength="128"
-                   value={despachando.localidad ?? ''}
-                   placeholder="El que figura en el proveedor" />
+                   bind:value={barrio} list="barrios-conocidos" autocomplete="off"
+                   onchange={revisarBarrio}
+                   placeholder="Empezá a escribir y elegí de la lista" />
+            <datalist id="barrios-conocidos">
+              {#each data.barriosConocidos ?? [] as b (b.localidad)}
+                <option value={b.localidad}>{b.zona}</option>
+              {/each}
+            </datalist>
+            {#if barrioRevisado?.parecidas?.length}
+              <span class="snoc-body-sm">
+                No está mapeado a ninguna zona. ¿Quisiste decir
+                {#each barrioRevisado.parecidas as p, i (p.localidad)}
+                  {i ? ' o ' : ''}<button type="button" class="snoc-btn"
+                    onclick={() => { barrio = p.localidad; barrioRevisado = { exacta: true, parecidas: [] }; }}>
+                    {p.localidad}</button> <span class="snoc-secundario">({p.zona})</span>
+                {/each}?
+              </span>
+            {:else if barrioRevisado && barrioRevisado.exacta === false}
+              <span class="snoc-body-sm snoc-secundario">
+                Ese barrio no está mapeado a ninguna zona: la orden se crea, pero no se
+                reparte hasta que alguien lo mapee en Cuadrillas.
+              </span>
+            {/if}
           </label>
 
           <label class="snoc-campo-grupo">

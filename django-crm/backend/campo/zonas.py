@@ -134,3 +134,40 @@ def zona_de(org, localidad: str):
         .first()
     )
     return alias.zona if alias else None
+
+
+#: Que tan parecido tiene que ser un barrio para SUGERIRLO. 0.85 deja pasar una
+#: letra cambiada, faltante o de mas en nombres de barrio tipicos («CACARMOA»
+#: contra «CACARAMOA») y no junta barrios distintos de nombre corto.
+PARECIDO_MINIMO = 0.85
+
+
+def parecidas(org, texto: str, n: int = 3) -> list[dict]:
+    """Barrios YA MAPEADOS que se parecen a `texto`, para SUGERIR. Nunca corrige.
+
+    13/10/2026: un barrio escrito con una letra de mas o de menos no coincide
+    con ningun alias y la orden queda en `sin_zona`. Corregirlo solo seria
+    peor: dos barrios reales pueden diferir en una letra («SAN JOSE» y «SAN
+    JOSUE») y la orden se iria callada a la cuadrilla equivocada -- que es
+    peor que `sin_zona`, donde al menos se ve. Esto devuelve candidatos; decide
+    una persona.
+
+    Si `texto` YA esta mapeado no hay nada que sugerir: devuelve [].
+    Las tildes NO se igualan, por la misma razon que `normalizar_localidad`.
+    """
+    import difflib
+
+    buscado = normalizar_localidad(texto)
+    if not buscado:
+        return []
+    mapeados = {
+        a.localidad: a.zona
+        for a in AliasDeZona.objects.filter(org=org, zona__activa=True)
+        .select_related("zona")
+    }
+    if buscado in mapeados:
+        return []
+    cercanos = difflib.get_close_matches(buscado, list(mapeados), n=n,
+                                         cutoff=PARECIDO_MINIMO)
+    return [{"localidad": c, "zona_id": str(mapeados[c].id),
+             "zona": mapeados[c].nombre} for c in cercanos]

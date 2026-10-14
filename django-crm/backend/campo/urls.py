@@ -46,6 +46,7 @@ urlpatterns = [
     # Las cuadrillas: quienes son, y que hacen cada dia.
     path("cuadrillas/", cuadrillas_views.CuadrillasView.as_view(), name="cuadrillas"),
     path("zonas/", cuadrillas_views.ZonasView.as_view(), name="zonas"),
+    path("zonas/conocidas/", cuadrillas_views.ZonasConocidasView.as_view(), name="zonas_conocidas"),
     path("zonas/<uid:pk>/", cuadrillas_views.ZonaView.as_view(), name="zona"),
     path("zonas/<uid:pk>/localidades/", cuadrillas_views.LocalidadesDeZonaView.as_view(), name="zona_localidades"),
     #  Quien trabaja en campo, tenga cuenta o no: un auxiliar sin celular

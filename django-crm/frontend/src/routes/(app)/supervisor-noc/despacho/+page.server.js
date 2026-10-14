@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { proponerReparto, leerPersonasDeCampo } from '$lib/server/v2/cuadrillas.js';
+import { proponerReparto, leerPersonasDeCampo, leerZonasConocidas } from '$lib/server/v2/cuadrillas.js';
 import {
   leerPlantillasDeTrabajo,
   leerCasosDespachables,
@@ -83,11 +83,12 @@ export async function load({ url, cookies }) {
   //  que casi siempre termina en el mismo valor.
   const dia = url.searchParams.get('dia') || new Date().toISOString().slice(0, 10);
 
-  const [plantillas, casos, reparto, personas] = await Promise.all([
+  const [plantillas, casos, reparto, personas, barrios] = await Promise.all([
     leerPlantillasDeTrabajo({ cookies }),
     leerCasosDespachables({ cookies }, conFicha),
     proponerReparto({ cookies }, dia),
-    leerPersonasDeCampo({ cookies })
+    leerPersonasDeCampo({ cookies }),
+    leerZonasConocidas({ cookies })
   ]);
 
   return {
@@ -106,6 +107,8 @@ export async function load({ url, cookies }) {
     casos: casos.casos,
     tope: casos.tope,
     sinAprobados: casos.sinAprobados,
+    //  Los barrios ya mapeados, para ofrecerlos mientras se escribe.
+    barriosConocidos: barrios.localidades,
     //  A quien se le puede asignar A MANO: solo quien tiene cuenta, porque es
     //  quien recibe la orden en un telefono. Un auxiliar sin celular integra
     //  la cuadrilla pero no puede ser el responsable de una orden.

@@ -600,6 +600,30 @@
                   <span class="snoc-mono">#{o.numero}</span>
                   <span>{o.cliente || '—'}</span>
                   {#if o.zona}<span class="snoc-tag">{o.zona}</span>{/if}
+                  <!-- ¿UNA LETRA DE MÁS O DE MENOS? (13/10/2026). Si el barrio
+                       se parece a uno ya mapeado, se SUGIERE: decide una
+                       persona. Aceptar agrega lo escrito como un alias más de
+                       esa zona, así que arregla esta orden y las que lleguen
+                       escritas igual. No se corrige solo: dos barrios reales
+                       pueden diferir en una letra. -->
+                  {#if clave === 'sin_zona' && o.parecida && o.zona}
+                    {@const zona = (data.zonas ?? []).find((z) => z.id === o.parecida.zona_id)}
+                    <span class="snoc-body-sm snoc-secundario">
+                      ¿Es <strong>{o.parecida.localidad}</strong> ({o.parecida.zona})?
+                    </span>
+                    {#if zona}
+                      <form method="POST" action="?/mapeo" use:enhance>
+                        <input type="hidden" name="zona_id" value={zona.id} />
+                        {#each zona.localidades as l (l)}
+                          <input type="hidden" name="localidad" value={l} />
+                        {/each}
+                        <input type="hidden" name="localidad" value={o.zona} />
+                        <button class="snoc-btn" type="submit">
+                          Sí: «{o.zona}» es de {zona.nombre}
+                        </button>
+                      </form>
+                    {/if}
+                  {/if}
                 </div>
               {/each}
             </div>

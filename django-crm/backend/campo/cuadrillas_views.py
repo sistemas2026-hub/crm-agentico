@@ -713,6 +713,46 @@ class ZonaView(APIView):
         return Response(_zona_json(z))
 
 
+def _con_parecida(org, orden) -> dict:
+    """La orden sin zona, con el barrio mapeado que mas se le parece (o None)."""
+    from campo.zonas import parecidas
+
+    fila = _orden_json(orden)
+    cercanas = parecidas(org, getattr(orden, "zona", "") or "", n=1)
+    fila["parecida"] = cercanas[0] if cercanas else None
+    return fila
+
+
+class ZonasConocidasView(APIView):
+    """``GET`` los barrios YA MAPEADOS a una zona, y si `?q=` coincide o se parece.
+
+    Para que al despachar no haga falta escribir el barrio de memoria
+    (13/10/2026): la pantalla los ofrece mientras se escribe, y si lo escrito no
+    esta mapeado pero se parece a uno que si, pregunta «¿quisiste decir...?».
+    Sugerir y no corregir: ver `zonas.parecidas`.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        from campo.zonas import parecidas
+
+        org = request.profile.org
+        conocidas = [
+            {"localidad": a.localidad, "zona": a.zona.nombre}
+            for a in AliasDeZona.objects.filter(org=org, zona__activa=True)
+            .select_related("zona").order_by("localidad")
+        ]
+        q = (request.query_params.get("q") or "").strip()
+        respuesta = {"localidades": conocidas}
+        if q:
+            buscado = normalizar_localidad(q)
+            respuesta["buscado"] = buscado
+            respuesta["exacta"] = any(c["localidad"] == buscado for c in conocidas)
+            respuesta["parecidas"] = [] if respuesta["exacta"] else parecidas(org, q)
+        return Response(respuesta)
+
+
 class LocalidadesDeZonaView(APIView):
     """``PUT`` reemplaza ENTERO el mapeo de localidades de una zona.
 
@@ -958,7 +998,9 @@ class RepartoView(APIView):
             ],
             # Tres motivos distintos, nombrados por separado: se arreglan
             # distinto y un solo "no se repartio" los volveria indistinguibles.
-            "sin_zona": [_orden_json(o) for o in p["sin_zona"]],
+            #  Cada una con el barrio YA MAPEADO que mas se le parece, si hay:
+            #  una letra de mas o de menos la dejaba aca sin pista de por que.
+            "sin_zona": [_con_parecida(org, o) for o in p["sin_zona"]],
             #  Asignadas a mano por una persona: el reparto no las toca.
             "a_mano": [_orden_json(o) for o in p.get("a_mano", [])],
             "sin_cuadrilla": [_orden_json(o) for o in p["sin_cuadrilla"]],

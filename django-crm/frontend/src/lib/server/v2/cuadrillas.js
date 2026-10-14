@@ -349,3 +349,28 @@ export async function publicarReparto(ctx, asignaciones) {
     ctx
   );
 }
+
+
+/**
+ * Los barrios YA MAPEADOS a una zona, y con `q`, si ese texto coincide o a cuál
+ * se parece (13/10/2026). Para no escribir el barrio de memoria al despachar.
+ * Sugiere, nunca corrige: ver `campo/zonas.py::parecidas`.
+ *
+ * @param {{ cookies: any }} ctx
+ * @param {string} [q]
+ */
+export async function leerZonasConocidas(ctx, q = '') {
+  try {
+    const d = await apiRequest(
+      `/campo/zonas/conocidas/${q ? `?q=${encodeURIComponent(q)}` : ''}`, {}, ctx
+    );
+    return {
+      localidades: d?.localidades ?? [],
+      exacta: d?.exacta ?? null,
+      parecidas: d?.parecidas ?? [],
+      error: false
+    };
+  } catch {
+    return { localidades: [], exacta: null, parecidas: [], error: true };
+  }
+}
