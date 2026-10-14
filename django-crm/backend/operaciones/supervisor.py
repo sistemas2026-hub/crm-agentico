@@ -2641,7 +2641,81 @@ def _leer_tickets_abiertos(org, ahora) -> dict:
                 "no se leyeron=%s · fallaron=%s (de %s candidatas)",
                 guardadas, sin_propuesta, sin_leer_de_verdad, fallaron,
                 len(candidatas))
+
+    informe["despacho"] = _pasar_a_despacho_los_que_las_reglas_habiliten(
+        org, candidatas, pendientes, ahora)
     return informe
+
+
+def _pasar_a_despacho_los_que_las_reglas_habiliten(org, candidatas, pendientes,
+                                                   ahora) -> dict:
+    """
+    Las cinco reglas, aplicadas a los tickets que ya se leyeron en esta vuelta.
+
+    VA DESPUES DE GUARDAR LA LECTURA, y el orden no es casual: lo que decide
+    el paso sale de 'senal.datos', que 'diagnosticar' acaba de escribir, y la
+    propuesta tiene que tener su evidencia ANTES de aceptarse -- si no, el caso
+    llegaria a la cola de Despacho sin el porque a la vista de quien despacha.
+
+    Es la regla de persistencia de §12 aplicada aca: guardar primero, producir
+    el efecto despues.
+
+    NO LEVANTA. Un paso que no ocurre es un resultado posible del ciclo.
+    """
+    from operaciones import autonomia, paso_a_despacho as pad
+
+    reporte = {"pasaron": 0, "se_quedaron": 0, "fallaron": 0,
+               "por_grupo": {}, "motivos": {}}
+    if not candidatas:
+        return reporte
+
+    #  UNA sola consulta del techo para toda la corrida: es una llamada de red,
+    #  y preguntarla por caso son tantas como casos. Mismo criterio que el
+    #  cierre de desincronizados.
+    try:
+        autorizacion = autonomia.puede(org, pad.NIVEL_PARA_PASAR)
+    except Exception as e:                                       # noqa: BLE001
+        #  No poder LEER el techo es lo mismo que no tenerlo: nada pasa.
+        logger.info("Supervisor: no se pudo leer el techo de autonomia para "
+                    "el paso a Despacho (%s): no pasa ninguno",
+                    type(e).__name__)
+        reporte["motivos"]["no se pudo leer el techo de autonomia"] = len(
+            candidatas)
+        reporte["se_quedaron"] = len(candidatas)
+        return reporte
+
+    for s in candidatas:
+        p = pendientes.get(str(s.origen_id))
+        if p is None or not s.datos.get("diagnostico_leido"):
+            continue
+        try:
+            r = pad.pasar_si_corresponde(org, s, p, ahora=ahora,
+                                         autorizacion=autorizacion)
+        except Exception as e:                                   # noqa: BLE001
+            #  'pasar_si_corresponde' promete no levantar, pero una excepcion
+            #  inesperada aqui no puede tumbar el resto de la vuelta.
+            reporte["fallaron"] += 1
+            logger.exception("Supervisor: el paso a Despacho fallo (%s)",
+                             type(e).__name__)
+            continue
+
+        grupo = r.get("grupo") or "sin grupo"
+        reporte["por_grupo"][grupo] = reporte["por_grupo"].get(grupo, 0) + 1
+        if r.get("paso"):
+            reporte["pasaron"] += 1
+        else:
+            reporte["se_quedaron"] += 1
+            #  EL MOTIVO AGRUPADO, no el detalle por caso: el detalle ya quedo
+            #  en la propuesta. Esto es para poder leer de una corrida por que
+            #  no paso nada, que el 14/10 costo varias mediciones a mano.
+            m = _en_una_linea(r.get("porque") or "sin motivo")[:120]
+            reporte["motivos"][m] = reporte["motivos"].get(m, 0) + 1
+
+    logger.info("Supervisor: paso a Despacho · pasaron=%s · se quedaron=%s · "
+                "fallaron=%s · por grupo=%s",
+                reporte["pasaron"], reporte["se_quedaron"],
+                reporte["fallaron"], reporte["por_grupo"])
+    return reporte
 
 
 def _propuesta_vigente_de(org, senal):

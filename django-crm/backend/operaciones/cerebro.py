@@ -332,6 +332,19 @@ class Veredicto:
     concluyente: bool = True
     descartes: list[str] = field(default_factory=list)
     razonamiento: Razonamiento | None = None
+    #:  LO QUE DECLARA QUIEN LLAMA, con su enum cerrado  --  14/10/2026
+    #:
+    #:  Un camino del Supervisor puede necesitar que el modelo elija de una
+    #:  lista que SOLO ese camino conoce --en que grupo cae un ticket, por
+    #:  ejemplo-- y meterla en 'CONTRATO' se la impondria a todos los caminos,
+    #:  incluidos los que no clasifican nada.
+    #:
+    #:  El generico sigue sin saber QUE son esos valores: solo garantiza que lo
+    #:  que llegue este EN la lista que le pasaron. Un valor inventado no
+    #:  entra, y su ausencia se lee como "no lo dijo" -- nunca como un valor
+    #:  por omision. Mismo espiritu que 'variables_tenant': el motor provee el
+    #:  mecanismo, quien llama declara el dato.
+    extras: dict = field(default_factory=dict)
 
     @property
     def vacio(self) -> bool:
@@ -355,7 +368,51 @@ def _lista_de_texto(v, tope: int = 12) -> list[str]:
     return [_texto(x) for x in v if _texto(x)][:tope]
 
 
-def validar(crudo, razonamiento: Razonamiento) -> Veredicto:
+#:  Los envoltorios del pedido de campos extra. Viven como constantes y no
+#:  inline para que el texto que ve el modelo se pueda leer de un tiron.
+CHR_NL = chr(10)
+CORTE_EXTRAS = '\n\nY ADEMAS estos campos, en el MISMO objeto JSON:\n\n'
+CIERRE_EXTRAS = '\n\nCada uno admite SOLO los valores listados. Uno que no este en la lista se descarta en codigo, y entonces es como si no lo hubieras dicho. Si ninguno aplica, dejalo en cadena vacia: eso es una respuesta valida y es mejor que forzar el que mas se parezca.\n'
+
+
+def _pedir_los_extras(campos_extra) -> str:
+    """Las lineas que se agregan al JSON que se le pide al modelo."""
+    if not isinstance(campos_extra, dict) or not campos_extra:
+        return ""
+    lineas = []
+    for nombre, spec in campos_extra.items():
+        valores = "|".join(str(x) for x in (spec or {}).get("valores") or ())
+        ayuda = str((spec or {}).get("ayuda") or "").strip()
+        lineas.append(f'  "{nombre}": "{valores}"'
+                      + (f"   <- {ayuda}" if ayuda else ""))
+    return (CORTE_EXTRAS + CHR_NL.join(lineas) + CIERRE_EXTRAS)
+
+
+def _validar_los_extras(crudo: dict, campos_extra, v: Veredicto) -> None:
+    """
+    Deja en 'v.extras' solo los valores que estan en la lista declarada.
+
+    FAIL-CLOSED, y la diferencia importa: un valor inventado no se corrige al
+    mas parecido ni se reemplaza por un default -- se descarta y se anota. Lo
+    que decide despues decide sobre la AUSENCIA del dato, que es la lectura
+    correcta de "el modelo no supo".
+    """
+    if not isinstance(campos_extra, dict):
+        return
+    for nombre, spec in campos_extra.items():
+        permitidos = {str(x) for x in (spec or {}).get("valores") or ()}
+        dicho = _texto(crudo.get(nombre), 80)
+        if not dicho:
+            continue
+        if dicho in permitidos:
+            v.extras[nombre] = dicho
+        else:
+            v.descartes.append(
+                f"'{nombre}' con un valor que no esta declarado "
+                f"(dijo '{dicho}'): se descarta, no se elige el mas parecido")
+
+
+def validar(crudo, razonamiento: Razonamiento, *, campos_extra=None) -> Veredicto:
     """
     Convierte lo que dijo el modelo en un veredicto, descartando lo que no se
     sostiene. Es la funcion que hace que "no inventar" sea una garantia.
@@ -427,6 +484,8 @@ def validar(crudo, razonamiento: Razonamiento) -> Veredicto:
         v.descartes.append(
             f"confianza '{confianza}' sin hipótesis que la sostenga")
 
+    _validar_los_extras(crudo, campos_extra, v)
+
     #  --- GARANTIA 2: una recomendacion sin hechos se cae ------------------
     recomendacion = _texto(crudo.get("recomendacion"), 1000)
     if recomendacion and v.hechos:
@@ -458,7 +517,7 @@ def validar(crudo, razonamiento: Razonamiento) -> Veredicto:
 
 def concluir(org, *, instrucciones: str, entrada: str, historial=(),
              tools=None, vueltas_maximas: int = VUELTAS_MAXIMAS,
-             pedir=None) -> Veredicto:
+             pedir=None, campos_extra=None) -> Veredicto:
     """
     Razona y devuelve un VEREDICTO validado. Es lo que el ciclo puede persistir.
 
@@ -470,10 +529,12 @@ def concluir(org, *, instrucciones: str, entrada: str, historial=(),
     Un fallo del modelo NO se traduce en un veredicto vacio y concluyente -- que
     seria "no hay nada que reportar", la peor lectura posible. Levanta.
     """
-    r = razonar(org, instrucciones=instrucciones + "\n\n" + CONTRATO,
+    r = razonar(org,
+                instrucciones=(instrucciones + "\n\n" + CONTRATO
+                               + _pedir_los_extras(campos_extra)),
                 entrada=entrada, historial=historial, tools=tools,
                 vueltas_maximas=vueltas_maximas, pedir=pedir)
-    return validar(_json_de(r.contenido), r)
+    return validar(_json_de(r.contenido), r, campos_extra=campos_extra)
 
 
 def _json_de(texto: str):

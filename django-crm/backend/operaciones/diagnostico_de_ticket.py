@@ -180,12 +180,14 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None,
         from operaciones import cerebro
 
         def concluir(org_, entrada):
+            from operaciones import paso_a_despacho as pad
             #  SIN 'tools': 'razonar' usa 'chat_herramientas.esquema()' por
             #  defecto, que es el catalogo de solo lectura del Supervisor.
             #  Pasarle una lista propia seria una segunda version del catalogo
             #  que mantener en sincronia con la primera.
             return cerebro.concluir(
-                org_, instrucciones=INSTRUCCIONES, entrada=entrada)
+                org_, instrucciones=INSTRUCCIONES, entrada=entrada,
+                campos_extra=pad.CAMPO_PARA_EL_MODELO)
 
     informe = {"leidos": 0, "con_hipotesis": 0, "sin_hipotesis": 0,
                "sin_texto": 0, "errores": 0, "fuera_de_tope": 0,
@@ -324,6 +326,20 @@ def _anotar(senal, veredicto, labor, ahora) -> None:
     senal.datos["diagnostico_riesgo"] = riesgo
     senal.datos["labor"] = etiqueta
     senal.datos["labor_verificada"] = bool((labor or {}).get("verificada"))
+    senal.datos["labor_porque"] = str((labor or {}).get("porque") or "")
+
+    #  EN QUE GRUPO CAE, segun el modelo  --  14/10/2026
+    #
+    #  Viene de 'veredicto.extras' y no de un campo propio del veredicto
+    #  porque el grupo lo conoce ESTE camino, no el cerebro generico. Y pasa
+    #  por la lista cerrada de 'paso_a_despacho.GRUPOS': un valor inventado ya
+    #  fue descartado en 'cerebro', asi que lo que llega aca esta en la lista
+    #  o no esta -- nunca es "el que mas se parecia".
+    #
+    #  La AUSENCIA es un valor con significado: "el modelo no supo", y manda
+    #  el ticket a una persona. No se completa con un default.
+    senal.datos["grupo"] = str(
+        (getattr(veredicto, "extras", None) or {}).get("grupo") or "")
 
 
 def le_falta_lectura(propuesta) -> bool:

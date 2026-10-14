@@ -57,6 +57,7 @@ from django.utils import timezone
 #  aceptar y el ciclo no cumpliria.
 CERRAR_DESINCRONIZADOS = "cerrar_desincronizados_con_diagnostico"
 CICLO_AUTOMATICO = "revisar_solo_con_cada_actualizacion"
+PASAR_A_DESPACHO = "pasar_a_despacho_segun_las_reglas"
 
 CATALOGO = {
     CERRAR_DESINCRONIZADOS: {
@@ -70,6 +71,25 @@ CATALOGO = {
         "que_no_hace": (
             "No toca WispHub, no reabre nada, y no cierra ningún caso cuyo "
             "equipo no haya podido diagnosticar."),
+        "exige_nivel": 3,
+    },
+    PASAR_A_DESPACHO: {
+        "nombre": "Pasar casos a Despacho solo, según las cinco reglas",
+        "que_hace": (
+            "Después de leer un ticket, lo deja en la cola de Despacho sin "
+            "esperar que alguien acepte la propuesta, cuando una de las cinco "
+            "reglas lo habilita. Si el cliente reporta una falla, exige que la "
+            "medición del equipo la confirme. Si pide un trabajo en su casa, o "
+            "si es una obra de red, el equipo sano es lo normal y pasa igual, "
+            "pero solo con una lectura del reclamo de confianza alta."),
+        "que_no_hace": (
+            "NO crea la orden de trabajo, no elige la plantilla y no asigna "
+            "técnico ni fecha: eso lo sigue haciendo quien despacha. Y nunca "
+            "pasa solo un reclamo que ninguna herramienta puede comprobar "
+            "—una página bloqueada—, ni algo que no sea de un cliente ni de la "
+            "red: esos los mira una persona siempre."),
+        #  PROPIA, y no la del cierre: habilitar una cosa no puede habilitar la
+        #  otra de rebote. Son dos efectos distintos y cada uno se pide aparte.
         "exige_nivel": 3,
     },
     CICLO_AUTOMATICO: {
