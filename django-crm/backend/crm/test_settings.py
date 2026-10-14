@@ -69,3 +69,18 @@ PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 import tempfile  # noqa: E402
 
 MEDIA_ROOT = tempfile.mkdtemp(prefix="bottlecrm-test-media-")
+
+
+#  LA CACHE, EN MEMORIA Y SOLO AQUI  --  14/10/2026
+#  ------------------------------------------------
+#  Produccion usa Redis para que la cache sea COMPARTIDA entre los procesos del
+#  backend y el worker (ver el bloque de 'crm/settings.py' y lo que costo
+#  descubrirlo). Las pruebas no tienen Redis y no deberian necesitarlo: se
+#  colgaban treinta segundos intentando conectarse a localhost:6379 para
+#  terminar fallando por el entorno, no por el codigo.
+#
+#  Que aqui sea local NO afloja nada: lo que hay que garantizar de produccion
+#  --que NO sea local-- se afirma leyendo 'crm/settings.py', no esta variable.
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
+}

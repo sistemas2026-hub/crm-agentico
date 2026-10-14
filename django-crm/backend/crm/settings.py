@@ -267,6 +267,47 @@ CELERY_RESULT_BACKEND = os.environ.get(
 )
 
 
+#  LA CACHE, EN REDIS Y NO EN LA MEMORIA DE CADA PROCESO  --  14/10/2026
+#  ---------------------------------------------------------------------
+#  Sin este bloque Django usa 'LocMemCache', que es memoria LOCAL de cada
+#  proceso. El efecto en produccion no se parecia a una cache mal configurada:
+#  se parecia a una pantalla que anda a veces.
+#
+#  Los indicadores del Supervisor vuelven a analizar la operacion entera para
+#  pintarse --771 tickets, 18 tipos de hallazgo-- y eso se midio en 22 segundos
+#  el 13/10/2026. Se le puso una ventana de cinco minutos... en la memoria de
+#  UN proceso. El backend corre con varios y el worker con otro, asi que cada
+#  uno guardaba la suya: segun a quien le tocara atender, la pagina salia al
+#  instante o pagaba los 22 segundos y se rendia antes, dejando los recuadros
+#  en "Sin dato".
+#
+#  Lo dijo el cliente con la frase que lo ubico: "sin ejecutar ciclo recargo la
+#  pagina y los datos no salen dentro de un tiempo". O sea que no competia con
+#  el ciclo: era loteria de proceso.
+#
+#  Redis YA EXISTE --lo usa Celery-- y no se estaba aprovechando. Se usa la
+#  base 1 para no mezclar con la cola, que vive en la 0.
+#
+#  SI REDIS NO ESTA, la cache falla y el codigo que la usa ya cae a calcular
+#  (ver 'indicadores._senales_con_ventana'): mas lento, nunca vacio.
+_REDIS_PARA_CACHE = os.environ.get(
+    "CACHE_URL",
+    (os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+     .rsplit("/", 1)[0] + "/1"),
+)
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": _REDIS_PARA_CACHE,
+        "KEY_PREFIX": "crm",
+        #  Que un Redis caido no cuelgue una pagina: se prefiere fallar rapido
+        #  y calcular, que es el camino que el codigo ya sabe tomar.
+        "OPTIONS": {"socket_connect_timeout": 2, "socket_timeout": 2},
+    }
+}
+
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

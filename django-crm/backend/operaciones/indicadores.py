@@ -326,10 +326,40 @@ def indicadores_programacion(org, ahora=None, dias=None) -> dict:
 #  B.5  --  SUPERVISOR IA  (M09)
 # ==============================================================================
 
-#:  Cuanto puede tener de viejo el conteo de señales vigentes. Cinco minutos
-#:  contra un detector que el ciclo corre cada SESENTA: el numero sigue siendo
-#:  mas fresco que la fuente que lo alimenta.
-SEGUNDOS_DE_VENTANA_DE_DETECCION = 300
+#:  Cuanto puede tener de viejo el conteo de señales vigentes.
+#:
+#:  SUBIO DE 5 A 75 MINUTOS EL 14/10/2026, y no es aflojar: el ciclo lo
+#:  REFRESCA cada vez que corre --cada hora, y cada vez que alguien aprieta el
+#:  boton-- asi que el numero se renueva igual de seguido que antes. Lo que
+#:  cambia es quien paga el recalculo.
+#:
+#:  Con cinco minutos, la ventana vencia entre ciclo y ciclo y el recalculo le
+#:  tocaba a QUIEN ABRIA LA PANTALLA: 22 segundos medidos, y la pagina se
+#:  rendia antes dejando los recuadros en "Sin dato". Setenta y cinco cubren la
+#:  hora entre ciclos con margen, asi que al abrir la pantalla siempre hay algo
+#:  calculado esperando.
+SEGUNDOS_DE_VENTANA_DE_DETECCION = 75 * 60
+
+
+def refrescar_senales(org, senales, ahora=None) -> None:
+    """
+    Deja en la cache las señales que el ciclo ACABA de calcular.
+
+    POR QUE LO LLAMA EL CICLO Y NO LA PANTALLA: el ciclo ya corrio 'detectar()'
+    --es lo primero que hace-- y tirar ese resultado para que despues lo
+    recalcule quien abra la pantalla es pagar dos veces lo mismo, y la segunda
+    la paga la persona que esta esperando.
+
+    NO LEVANTA: si la cache no esta, el ciclo sigue. Lo unico que se pierde es
+    la ventaja.
+    """
+    from django.core.cache import cache
+
+    try:
+        cache.set(f"senales_vigentes:{org.id}", list(senales or []),
+                  SEGUNDOS_DE_VENTANA_DE_DETECCION)
+    except Exception:                                        # noqa: BLE001
+        pass
 
 
 def _senales_con_ventana(org, ahora):

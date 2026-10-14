@@ -1642,7 +1642,18 @@ def analizar(senal: Senal) -> dict:
         #  aca hubo que consultar algo.
         sugerida = (d.get("accion_sugerida") or "").strip()
         if sugerida:
-            accion = sugerida
+            #  RECORTADA A UNA LINEA, que es lo que el campo es:
+            #  'accion_propuesta' es CharField(255) --"Qué recomienda, en una
+            #  línea legible"-- y el modelo escribe parrafos.
+            #
+            #  MEDIDO EN PRODUCCION el 14/10/2026: ocho de treinta y ocho
+            #  lecturas se perdieron con "value too long for type character
+            #  varying(255)", y como la base rechaza el guardado ENTERO, con la
+            #  accion se iba tambien la evidencia. El trabajo se hacia, se
+            #  pagaba el modelo, y no quedaba nada.
+            #
+            #  El texto completo NO se pierde: va al motivo, que es TextField.
+            accion = _en_una_linea(sugerida)
         elif labor:
             accion = (f"Confirmar que este ticket corresponde a {labor} "
                       f"y despacharlo" if verificada else
@@ -1672,6 +1683,7 @@ def analizar(senal: Senal) -> dict:
                 + f" El ticket sigue abierto en WispHub hace {dias} días"
                 + (" y pasó el límite de 5 días sin movimiento."
                    if d.get("sin_movimiento") else ".")
+                + (f" PROPONE: {sugerida}" if sugerida else "")
                 + " Esto sale de LEER el texto, no de medir el equipo: por eso"
                   " lo decide una persona."),
             "prioridad": prioridad,
@@ -2779,6 +2791,16 @@ def _correr_ciclo(org, ahora) -> dict:
 
     senales = detectar(org, ahora)
 
+    #  LA PANTALLA NO TIENE QUE VOLVER A CALCULAR ESTO  --  14/10/2026
+    #  ---------------------------------------------------------------
+    #  Los indicadores del tablero corren el MISMO 'detectar()' para pintarse,
+    #  y se midio en 22 segundos. Tirar el resultado que acabamos de calcular
+    #  para que lo rehaga quien abra la pantalla es pagar dos veces lo mismo --
+    #  y la segunda la paga una persona esperando frente a la pagina.
+    from operaciones import indicadores
+
+    indicadores.refrescar_senales(org, senales, ahora)
+
     for senal in senales:
         resumen["senales"] += 1
         resumen["por_tipo"][senal.tipo] = resumen["por_tipo"].get(senal.tipo, 0) + 1
@@ -3375,3 +3397,47 @@ def _instrucciones_del_seguimiento(org) -> str:
     from operaciones.estilo_modelos import AmbitoEstilo
     return (_INSTRUCCIONES_DEL_SEGUIMIENTO + "\n\n"
             + svc_estilo.vigente(org, AmbitoEstilo.CICLO))
+
+
+#:  Cuanto entra en 'PropuestaSupervisor.accion_propuesta'. Es CharField(255) y
+#:  su ayuda lo dice: "Qué recomienda, en una línea legible". No es un limite
+#:  arbitrario -- es una COLUMNA de una tabla que se lee de un vistazo.
+LARGO_DE_UNA_LINEA = 255
+
+
+def _en_una_linea(texto: str) -> str:
+    """
+    La propuesta del modelo, recortada a lo que el campo aguanta.
+
+    POR QUE HACE FALTA: el modelo escribe parrafos --"Separar el ticket en dos
+    gestiones: (1) el cambio de domicilio va al area comercial..."-- y la
+    columna admite 255. Medido el 14/10/2026: ocho de treinta y ocho lecturas
+    se perdieron con 'value too long for type character varying(255)', y como
+    la base rechaza el guardado ENTERO, con la accion se iba tambien la
+    evidencia que ya estaba escrita.
+
+    SE CORTA EN LA PRIMERA FRASE, no a los 255 caracteres secos: una frase
+    entera dice algo ("Derivar el ticket a Cartera") y un corte a ciegas deja
+    la mitad de una palabra. Si la primera frase tampoco entra, se corta en el
+    ultimo espacio y se marca con puntos suspensivos para que se vea que sigue.
+
+    EL TEXTO COMPLETO NO SE PIERDE: va al motivo, que es TextField.
+    """
+    t = " ".join(str(texto or "").split())
+    if not t:
+        return ""
+    if len(t) <= LARGO_DE_UNA_LINEA:
+        return t
+
+    #  La primera frase, si alcanza. El punto de un "(1)" o de "Ej." no corta:
+    #  se exige un espacio o el final detras.
+    import re
+
+    corte = re.search(r"\.(?=\s|$)", t[:LARGO_DE_UNA_LINEA])
+    if corte and corte.start() > 40:
+        return t[:corte.start() + 1]
+
+    recorte = t[:LARGO_DE_UNA_LINEA - 1]
+    if " " in recorte:
+        recorte = recorte.rsplit(" ", 1)[0]
+    return recorte + "…"
