@@ -385,6 +385,9 @@ class CrearOrdenSerializer(serializers.Serializer):
     # asignar esperando que alguien la tome, y esa es una columna util en la
     # bandeja del supervisor.
     tecnico_profile_id = serializers.UUIDField(required=False, allow_null=True)
+    #  La cuadrilla del dia elegida al despachar (13/10/2026). Le llega a sus
+    #  integrantes con cuenta, como al publicar el reparto.
+    jornada_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 class AsignarSerializer(serializers.Serializer):

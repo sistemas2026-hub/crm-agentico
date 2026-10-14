@@ -102,3 +102,21 @@ export async function despacharACampo(ctx, cuerpo, idempotencia) {
     headers: { 'Idempotency-Key': idempotencia }
   }, ctx);
 }
+
+
+/**
+ * A qué ZONA va un barrio y qué CUADRILLA la cubre ese día con esa labor
+ * (13/10/2026). Es lo que el supervisor tiene que ver al despachar. La regla
+ * es la del reparto (`campo/reparto.py::cobertura`): acá no se recalcula nada.
+ *
+ * @param {{ cookies: any }} ctx
+ * @param {{ barrio: string, fecha?: string, labor?: string }} q
+ */
+export async function leerCobertura(ctx, { barrio, fecha = '', labor = '' }) {
+  const p = new URLSearchParams({ barrio, fecha, labor });
+  try {
+    return await apiRequest(`/campo/despacho/cobertura/?${p}`, {}, ctx);
+  } catch {
+    return null;
+  }
+}

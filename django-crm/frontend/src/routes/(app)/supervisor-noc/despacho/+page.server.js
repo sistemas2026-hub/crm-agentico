@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { proponerReparto, leerPersonasDeCampo, leerZonasConocidas } from '$lib/server/v2/cuadrillas.js';
+import { proponerReparto, leerZonasConocidas } from '$lib/server/v2/cuadrillas.js';
 import {
   leerPlantillasDeTrabajo,
   leerCasosDespachables,
@@ -83,11 +83,10 @@ export async function load({ url, cookies }) {
   //  que casi siempre termina en el mismo valor.
   const dia = url.searchParams.get('dia') || new Date().toISOString().slice(0, 10);
 
-  const [plantillas, casos, reparto, personas, barrios] = await Promise.all([
+  const [plantillas, casos, reparto, barrios] = await Promise.all([
     leerPlantillasDeTrabajo({ cookies }),
     leerCasosDespachables({ cookies }, conFicha),
     proponerReparto({ cookies }, dia),
-    leerPersonasDeCampo({ cookies }),
     leerZonasConocidas({ cookies })
   ]);
 
@@ -109,12 +108,6 @@ export async function load({ url, cookies }) {
     sinAprobados: casos.sinAprobados,
     //  Los barrios ya mapeados, para ofrecerlos mientras se escribe.
     barriosConocidos: barrios.localidades,
-    //  A quien se le puede asignar A MANO: solo quien tiene cuenta, porque es
-    //  quien recibe la orden en un telefono. Un auxiliar sin celular integra
-    //  la cuadrilla pero no puede ser el responsable de una orden.
-    tecnicos: (personas.personas ?? [])
-      .filter((p) => p.activa && p.tiene_cuenta && p.profile)
-      .map((p) => ({ profile: p.profile, nombre: p.nombre })),
     // NO SE INVENTA UNA LISTA VACÍA CUANDO LA LECTURA FALLÓ. Una empresa sin
     // casos abiertos y una consulta que no respondió se dibujan distinto.
     error: plantillas.error || casos.error
@@ -206,16 +199,22 @@ export const actions = {
         programada_para: programada || undefined,
         //  ASIGNAR A MANO (opcional). Vacío = la reparte el sistema. Con valor,
         //  el reparto la respeta y no la mueve (campo/reparto.py).
-        tecnico_profile_id: String(f.get('tecnico_profile_id') ?? '').trim() || undefined
+        tecnico_profile_id: String(f.get('tecnico_profile_id') ?? '').trim() || undefined,
+        //  LA CUADRILLA DEL DÍA que cubre esa zona (13/10/2026). Le llega a su
+        //  gente con cuenta, como al publicar el reparto, y el reparto la respeta.
+        jornada_id: String(f.get('jornada_id') ?? '').trim() || undefined
       }, clave);
 
       const numero = r?.orden?.numero;
       const quien = r?.orden?.tecnico_principal?.nombre;
+      const conCuadrilla = Boolean(String(f.get('jornada_id') ?? '').trim());
       return {
         hecho: (numero ? `Orden #${numero} despachada` : 'Orden despachada') +
-          (quien
+          (String(f.get('tecnico_profile_id') ?? '').trim() && quien
             ? `, asignada a ${quien}. El reparto no la va a mover.`
-            : '. Queda SIN ASIGNAR hasta que se publique el reparto.'),
+            : conCuadrilla
+              ? `, asignada a la cuadrilla elegida${quien ? ` (a cargo: ${quien})` : ''}. El reparto no la va a mover.`
+              : '. Queda SIN ASIGNAR hasta que se publique el reparto.'),
         numero
       };
     } catch (e) {

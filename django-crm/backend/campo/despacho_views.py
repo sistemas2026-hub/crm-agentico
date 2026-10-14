@@ -42,7 +42,7 @@ from campo.serializers import (
 )
 from campo.services.despacho import (
     ConflictoDeCuadrilla, ErrorDespacho, RequiereSucesor, agregar_integrante,
-    asignar, cambiar_principal, contexto_del_caso, crear_orden, desasignar,
+    asignar, asignar_a_jornada, cambiar_principal, contexto_del_caso, crear_orden, desasignar,
     retirar_integrante,
 )
 from campo.services.idempotencia import manejar_idempotencia
@@ -216,6 +216,34 @@ class CrearOrdenView(APIView):
             #  porque una clasificacion fallo, no.
             pass
 
+        #  A QUIEN VA, VALIDADO ANTES DE CREAR. Antes el tecnico se buscaba
+        #  DESPUES de crear la orden: si no existia la respuesta era 404 con la
+        #  orden ya hecha, y un reintento creaba otra. Lo mismo valdria para una
+        #  cuadrilla sin nadie con cuenta.
+        tecnico = None
+        if d.get("tecnico_profile_id"):
+            tecnico = Profile.objects.filter(
+                pk=d["tecnico_profile_id"], org=org).first()
+            if tecnico is None:
+                raise Http404("No existe esa persona.")
+        jornada = None
+        if d.get("jornada_id") and tecnico is None:
+            from campo.cuadrillas import JornadaDeCuadrilla
+
+            jornada = (JornadaDeCuadrilla.objects
+                       .filter(org=org, id=d["jornada_id"])
+                       .select_related("cuadrilla").first())
+            if jornada is None:
+                raise Http404("No existe esa cuadrilla para ese dia.")
+            if not any(i.persona.tiene_cuenta for i in
+                       jornada.integrantes.select_related("persona")):
+                return Response(
+                    {"error": "NO_SE_PUDO_ASIGNAR",
+                     "detalle": f"La cuadrilla {jornada.cuadrilla.nombre} no tiene a "
+                                f"nadie con cuenta ese dia: la orden no la veria "
+                                f"nadie en un telefono."},
+                    status=status.HTTP_400_BAD_REQUEST)
+
         try:
             orden = crear_orden(
                 org=org,
@@ -233,17 +261,18 @@ class CrearOrdenView(APIView):
             return Response({"error": "NO_SE_PUDO_CREAR", "detalle": str(e)},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        if d.get("tecnico_profile_id"):
-            tecnico = Profile.objects.filter(
-                pk=d["tecnico_profile_id"], org=org).first()
-            if tecnico is None:
-                raise Http404("No existe esa persona.")
-            try:
+        #  Un tecnico puntual gana sobre la cuadrilla: es la decision mas
+        #  precisa. Con cuadrilla, le llega a sus integrantes con cuenta, como
+        #  al publicar el reparto, y el reparto la respeta despues.
+        try:
+            if tecnico is not None:
                 asignar(orden, tecnico, request.profile)
-            except ErrorDespacho as e:
-                return Response({"error": "NO_SE_PUDO_ASIGNAR", "detalle": str(e)},
-                                status=status.HTTP_400_BAD_REQUEST)
-            orden.refresh_from_db()
+            elif jornada is not None:
+                asignar_a_jornada(orden, jornada, request.profile)
+        except ErrorDespacho as e:
+            return Response({"error": "NO_SE_PUDO_ASIGNAR", "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+        orden.refresh_from_db()
 
         return Response(
             {"orden": OrdenTrabajoDetailSerializer(orden).data,

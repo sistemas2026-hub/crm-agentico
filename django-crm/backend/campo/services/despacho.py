@@ -233,6 +233,50 @@ def asignar(orden: OrdenTrabajo, profile_tecnico, profile_actor,
     return asignacion
 
 
+@transaction.atomic
+def asignar_a_jornada(orden: OrdenTrabajo, jornada, profile_actor) -> dict:
+    """La orden a una CUADRILLA del dia, elegida por una persona al despachar.
+
+    13/10/2026: en esta operacion se asigna a la cuadrilla que cubre la zona,
+    no a una persona suelta. Hace lo MISMO que publicar el reparto
+    (`RepartoView.post`) -- una asignacion por integrante con cuenta, el lider
+    como principal -- y ademas deja el evento `asignacion`, que es lo que hace
+    que el reparto la RESPETE despues en vez de moverla (`reparto.
+    _asignadas_a_mano`).
+
+    Quien no tiene cuenta va en la cuadrilla pero no recibe la orden: no hay
+    telefono donde verla. Una cuadrilla sin nadie con cuenta se rechaza, porque
+    asignarle seria dejar la orden sin nadie que la vea.
+    """
+    from campo.models import AsignacionTrabajo
+
+    if jornada.org_id != orden.org_id:
+        raise ErrorDespacho("Esa cuadrilla es de otra empresa.")
+    integrantes = list(jornada.integrantes.select_related("persona").all())
+    con_cuenta = [i for i in integrantes if i.persona.tiene_cuenta]
+    if not con_cuenta:
+        raise ErrorDespacho(
+            f"La cuadrilla {jornada.cuadrilla.nombre} no tiene a nadie con cuenta "
+            f"ese dia: la orden no la veria nadie en un telefono.")
+    lider_id = jornada.lider_id or jornada.cuadrilla.lider_id
+    orden.asignaciones.all().delete()
+    for i in con_cuenta:
+        AsignacionTrabajo.objects.create(
+            orden=orden, profile=i.persona.profile, rol=i.rol,
+            es_principal=(i.persona.profile_id == lider_id))
+    orden.revision += 1
+    orden.save(update_fields=["revision", "updated_at"])
+    EventoTrabajo.objects.create(
+        org=orden.org, orden=orden, tipo="asignacion", profile=profile_actor,
+        datos={"a_cuadrilla": jornada.cuadrilla.nombre,
+               "jornada": str(jornada.id),
+               "fecha": jornada.fecha.isoformat(),
+               "personas": [str(i.persona.profile_id) for i in con_cuenta],
+               "motivo": "elegida al despachar"})
+    return {"cuadrilla": jornada.cuadrilla.nombre, "personas": len(con_cuenta),
+            "sin_cuenta": len(integrantes) - len(con_cuenta)}
+
+
 def contexto_del_caso(case_id: str) -> dict:
     """
     Le pide al motor la ficha tecnica de un caso, para congelarla en la orden.

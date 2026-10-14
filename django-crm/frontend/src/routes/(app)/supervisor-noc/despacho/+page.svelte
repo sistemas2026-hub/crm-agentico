@@ -38,26 +38,50 @@
   /** Mientras se trae la ficha del caso abierto. */
   let cargandoFicha = $state(false);
 
-  /** El barrio del formulario, y lo que el backend dice de él. */
+  /** El barrio del formulario y el día: con eso se sabe a qué zona va. */
   let barrio = $state('');
-  let barrioRevisado = $state(/** @type {any} */ (null));
+  let fecha = $state('');
+  /** Lo que dice el backend: la zona, qué cuadrillas la cubren ese día. */
+  let cobertura = $state(/** @type {any} */ (null));
+  let jornadaElegida = $state('');
+  let tecnicoElegido = $state('');
+
+  /** La labor de la plantilla elegida: decide qué cuadrilla puede tomarla. */
+  const laborElegida = $derived(
+    (data.plantillas ?? []).find((p) => p.id === plantillaElegida)?.labor ?? ''
+  );
 
   /**
-   * ¿Está mapeado? Si no, ¿a cuál se parece? (13/10/2026). Una letra de más o
-   * de menos dejaba la orden en «sin zona» sin ninguna pista. SE SUGIERE, no
-   * se corrige: dos barrios reales pueden diferir en una letra.
+   * A QUÉ ZONA VA Y QUIÉN LA CUBRE (13/10/2026). El supervisor tiene que verlo
+   * al despachar, no enterarse en el reparto. La regla es la del reparto, en el
+   * backend: barrio -> zona -> las cuadrillas de ese día con esa labor.
+   * Si el barrio no está en ninguna zona, trae los parecidos para sugerir.
    */
-  async function revisarBarrio() {
+  async function revisarCobertura() {
     const q = barrio.trim();
-    barrioRevisado = null;
-    if (!q) return;
+    const pedido = `${q}|${fecha}|${laborElegida}`;
+    if (!q) { cobertura = null; jornadaElegida = ''; return; }
     try {
-      const r = await fetch(`/supervisor-noc/despacho/barrio?q=${encodeURIComponent(q)}`);
-      if (r.ok && barrio.trim() === q) barrioRevisado = await r.json();
+      const p = new URLSearchParams({ barrio: q, fecha, labor: laborElegida });
+      const r = await fetch(`/supervisor-noc/despacho/cobertura?${p}`);
+      //  Si mientras tanto cambió el barrio, la plantilla o el día, esta
+      //  respuesta ya no corresponde.
+      if (!r.ok || pedido !== `${barrio.trim()}|${fecha}|${laborElegida}`) return;
+      cobertura = await r.json();
+      //  Viene elegida SOLO si hay UNA cuadrilla de esa zona con esa labor:
+      //  entre dos, la diferencia la sabe quien despacha.
+      const sirven = (cobertura.jornadas ?? []).filter((j) => j.coincide_labor);
+      jornadaElegida = sirven.length === 1 ? sirven[0].jornada : '';
+      tecnicoElegido = '';
     } catch {
-      //  Sin respuesta no se sugiere nada: se despacha con lo escrito.
+      cobertura = null;
     }
   }
+
+  /** La cuadrilla elegida, para ofrecer su gente. */
+  const jornada = $derived(
+    (cobertura?.jornadas ?? []).find((j) => j.jornada === jornadaElegida) ?? null
+  );
 
   /** @param {string | undefined} labor */
   function preelegir(labor) {
@@ -78,7 +102,9 @@
   async function abrir(caso) {
     despachando = caso;
     barrio = caso?.localidad || '';
-    barrioRevisado = null;
+    cobertura = null;
+    jornadaElegida = '';
+    tecnicoElegido = '';
     plantillaElegida = '';
     preelegir(caso?.sugerencia?.labor);
     cargandoFicha = true;
@@ -96,7 +122,7 @@
       };
       if (!plantillaElegida) preelegir(despachando.sugerencia?.labor);
       if (!barrio && despachando.localidad) barrio = despachando.localidad;
-      revisarBarrio();
+      revisarCobertura();
     } catch {
       //  Sin ficha se despacha igual, escribiendo lo que falte.
     } finally {
@@ -389,7 +415,7 @@
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Con qué plantilla va</span>
             <select class="snoc-select" name="work_type_version_id"
-                    bind:value={plantillaElegida} required>
+                    bind:value={plantillaElegida} onchange={revisarCobertura} required>
               <option value="">— elegí una —</option>
               {#each data.plantillas as p (p.id)}
                 <option value={p.id}>
@@ -421,61 +447,112 @@
             </label>
             <label class="snoc-campo-grupo">
               <span class="snoc-label">Para cuándo</span>
-              <input class="snoc-campo" type="date" name="programada_para" />
+              <input class="snoc-campo" type="date" name="programada_para"
+                     bind:value={fecha} onchange={revisarCobertura} />
             </label>
           </div>
 
-          <!-- ASIGNAR A MANO (13/10/2026). Vacío = la reparte el sistema por
-               zona y labor. Con alguien elegido, la orden le llega directo y
-               el reparto la respeta: no la mueve a otra cuadrilla. Solo
-               aparece quien tiene cuenta, porque es quien la recibe en el
-               teléfono. -->
+          <!-- EL BARRIO DECIDE LA ZONA, Y LA ZONA DECIDE LA CUADRILLA. Viene
+               de la ficha del cliente en el ISP; si hay que escribirlo, se
+               elige de los barrios que ya están en alguna zona. -->
           <label class="snoc-campo-grupo">
-            <span class="snoc-label">Asignar a (opcional)</span>
-            <select class="snoc-select" name="tecnico_profile_id">
-              <option value="">— que la reparta el sistema por zona y labor —</option>
-              {#each data.tecnicos ?? [] as t (t.profile)}
-                <option value={t.profile}>{t.nombre}</option>
-              {/each}
-            </select>
-            <span class="snoc-body-sm snoc-secundario">
-              Para urgencias o cuando el cliente ya lo atiende alguien. Si la elegís, el
-              reparto no la mueve.
-            </span>
-          </label>
-
-          <!-- LA LOCALIDAD DECIDE QUÉ CUADRILLA LO RECIBE: el reparto mapea
-               el barrio a una zona operativa, y una orden sin barrio queda
-               en `sin_zona` para siempre. Viene cargada de la
-               ficha del caso, que se trae sola al abrirlo; si el ISP no la tiene, la pone
-               quien despacha. -->
-          <label class="snoc-campo-grupo">
-            <span class="snoc-label">Barrio o localidad</span>
+            <span class="snoc-label">Barrio</span>
             <input class="snoc-campo" name="zona" required maxlength="128"
                    bind:value={barrio} list="barrios-conocidos" autocomplete="off"
-                   onchange={revisarBarrio}
+                   onchange={revisarCobertura}
                    placeholder="Empezá a escribir y elegí de la lista" />
             <datalist id="barrios-conocidos">
               {#each data.barriosConocidos ?? [] as b (b.localidad)}
                 <option value={b.localidad}>{b.zona}</option>
               {/each}
             </datalist>
-            {#if barrioRevisado?.parecidas?.length}
-              <span class="snoc-body-sm">
-                No está mapeado a ninguna zona. ¿Quisiste decir
-                {#each barrioRevisado.parecidas as p, i (p.localidad)}
-                  {i ? ' o ' : ''}<button type="button" class="snoc-btn"
-                    onclick={() => { barrio = p.localidad; barrioRevisado = { exacta: true, parecidas: [] }; }}>
-                    {p.localidad}</button> <span class="snoc-secundario">({p.zona})</span>
-                {/each}?
-              </span>
-            {:else if barrioRevisado && barrioRevisado.exacta === false}
-              <span class="snoc-body-sm snoc-secundario">
-                Ese barrio no está mapeado a ninguna zona: la orden se crea, pero no se
-                reparte hasta que alguien lo mapee en Cuadrillas.
-              </span>
-            {/if}
           </label>
+
+          <!-- ZONA Y CUADRILLA (13/10/2026). Lo que el supervisor tiene que
+               tener claro al despachar: a qué zona va este trabajo y qué
+               cuadrilla la cubre ese día con esta labor. Misma regla que el
+               reparto, calculada en el backend. -->
+          {#if cobertura}
+            <div class="snoc-tarjeta snoc-pila-xs">
+              {#if cobertura.motivo === 'sin_zona'}
+                <span class="snoc-body-sm"><strong>Este barrio no está en ninguna zona.</strong>
+                  La orden se crea, pero no se reparte hasta que alguien lo agregue a una
+                  zona en Cuadrillas.</span>
+                {#if cobertura.parecidas?.length}
+                  <span class="snoc-body-sm">¿Quisiste decir
+                    {#each cobertura.parecidas as p, i (p.localidad)}
+                      {i ? ' o ' : ''}<button type="button" class="snoc-btn"
+                        onclick={() => { barrio = p.localidad; revisarCobertura(); }}>
+                        {p.localidad}</button> <span class="snoc-secundario">({p.zona})</span>
+                    {/each}?</span>
+                {/if}
+              {:else if cobertura.zona}
+                <span class="snoc-body">Zona: <strong>{cobertura.zona.nombre}</strong>
+                  <span class="snoc-secundario">· {cobertura.fecha}</span></span>
+                {#if cobertura.motivo === 'cubierta'}
+                  <span class="snoc-body-sm snoc-secundario">
+                    La cubre{(cobertura.jornadas.filter((j) => j.coincide_labor).length > 1) ? 'n' : ''}:
+                    {cobertura.jornadas.filter((j) => j.coincide_labor).map((j) => j.cuadrilla).join(', ')}
+                  </span>
+                {:else if cobertura.motivo === 'otra_labor'}
+                  <span class="snoc-body-sm"><strong>Ese día la cubre
+                    {cobertura.jornadas.map((j) => `${j.cuadrilla} (${nombreDeLabor(j.labor)})`).join(', ')},
+                    pero no en {laborElegida ? nombreDeLabor(laborElegida) : 'esta labor'}.</strong>
+                    El reparto no se la va a dar: o se cambia la labor de esa jornada en
+                    Cuadrillas, o se asigna a mano.</span>
+                {:else}
+                  <span class="snoc-body-sm"><strong>Ese día ninguna cuadrilla cubre
+                    {cobertura.zona.nombre}.</strong>
+                    {#if cobertura.habituales?.length}
+                      La trabaja{cobertura.habituales.length > 1 ? 'n' : ''} habitualmente
+                      {cobertura.habituales.map((c) => c.cuadrilla).join(', ')}: hay que armarle
+                      la jornada en Cuadrillas.
+                    {:else}
+                      Ninguna cuadrilla la tiene entre sus zonas.
+                    {/if}
+                  </span>
+                {/if}
+              {/if}
+            </div>
+          {/if}
+
+          <!-- A QUÉ CUADRILLA (opcional). Vacío = la reparte el sistema. Con
+               una cuadrilla, le llega a su gente con cuenta como al publicar el
+               reparto, y el reparto la respeta después. Se ofrecen las que
+               cubren esa zona ese día; un técnico puntual, dentro de ella. -->
+          {#if cobertura?.jornadas?.length}
+            <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+              <label class="snoc-campo-grupo">
+                <span class="snoc-label">Cuadrilla</span>
+                <select class="snoc-select" name="jornada_id" bind:value={jornadaElegida}
+                        onchange={() => (tecnicoElegido = '')}>
+                  <option value="">— que la reparta el sistema —</option>
+                  {#each cobertura.jornadas as j (j.jornada)}
+                    <option value={j.jornada}>
+                      {j.cuadrilla} · {nombreDeLabor(j.labor)}{j.coincide_labor ? '' : ' (otra labor)'}
+                    </option>
+                  {/each}
+                </select>
+              </label>
+              {#if jornada}
+                <label class="snoc-campo-grupo">
+                  <span class="snoc-label">Técnico (opcional)</span>
+                  <select class="snoc-select" name="tecnico_profile_id" bind:value={tecnicoElegido}>
+                    <option value="">— toda la cuadrilla —</option>
+                    {#each jornada.con_cuenta as t (t.profile)}
+                      <option value={t.profile}>{t.nombre}</option>
+                    {/each}
+                  </select>
+                </label>
+              {/if}
+            </div>
+            {#if jornada && !jornada.con_cuenta.length}
+              <p class="snoc-aviso snoc-error-txt">
+                {jornada.cuadrilla} no tiene a nadie con cuenta ese día: nadie la vería en un
+                teléfono.
+              </p>
+            {/if}
+          {/if}
 
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Cómo se entra al inmueble (opcional)</span>

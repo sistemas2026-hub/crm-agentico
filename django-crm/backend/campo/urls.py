@@ -106,6 +106,7 @@ urlpatterns = [
     #  decir "este caso va a campo".
     path("plantillas-de-trabajo/", despacho_pantalla_views.PlantillasDeTrabajoView.as_view(), name="plantillas_de_trabajo"),
     path("casos-despachables/", despacho_pantalla_views.CasosDespachablesView.as_view(), name="casos_despachables"),
+    path("despacho/cobertura/", despacho_pantalla_views.CoberturaView.as_view(), name="despacho_cobertura"),
     path("casos-despachables/<uid:pk>/ficha/", despacho_pantalla_views.FichaDespachableView.as_view(), name="caso_despachable_ficha"),
     path("trabajos/crear/", despacho_views.CrearOrdenView.as_view(), name="trabajo_crear"),
     path("trabajos/<uid:pk>/asignar/", despacho_views.AsignarTrabajoView.as_view(), name="trabajo_asignar"),

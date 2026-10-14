@@ -403,3 +403,36 @@ def _lectura_de(propuesta) -> dict:
     return {"hipotesis": hipotesis,
             "recomendacion": (propuesta.accion_propuesta or "").strip(),
             "motivo": (propuesta.motivo or "").strip()}
+
+
+class CoberturaView(APIView):
+    """``GET ?barrio=&fecha=&labor=`` a que zona va y que cuadrilla la cubre.
+
+    Lo que el supervisor tiene que ver AL DESPACHAR (13/10/2026): no el barrio
+    solo, sino la zona a la que pertenece y que cuadrilla la cubre ese dia con
+    esa labor. Misma regla que el reparto: ver `campo.reparto.cobertura`.
+    `fecha` vacia = hoy en la hora de la empresa.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        import datetime as dt
+
+        from campo.reparto import cobertura
+
+        org = request.profile.org
+        texto = (request.query_params.get("fecha") or "").strip()
+        try:
+            fecha = dt.date.fromisoformat(texto) if texto else None
+        except ValueError:
+            return Response({"detail": "La fecha va como AAAA-MM-DD."}, status=400)
+        if fecha is None:
+            from campo.tasks import _ahora_local
+
+            fecha = _ahora_local(org).date()
+        return Response({
+            "fecha": fecha.isoformat(),
+            **cobertura(org, request.query_params.get("barrio") or "", fecha,
+                        (request.query_params.get("labor") or "").strip()),
+        })

@@ -380,3 +380,78 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
         # orden por orden.
         "sin_clasificar": sin_clasificar,
     }
+
+
+# ---------------------------------------------------------------------------
+#  COBERTURA  --  lo que el supervisor tiene que ver AL DESPACHAR (13/10/2026)
+# ---------------------------------------------------------------------------
+#
+#  Al despachar se veia el barrio pero no a que ZONA pertenece ni que CUADRILLA
+#  la cubre ese dia -- justo lo que decide a quien le llega el trabajo. Se
+#  enteraba despues, en el reparto, si quedo «sin zona» o «nadie cubre».
+#
+#  Es la MISMA regla que `proponer()`: barrio -> alias -> zona -> las jornadas
+#  del dia que cubren esa zona, y de esas, las que estan en esa labor. Una
+#  segunda version de la regla, en la pantalla, se desincronizaria el primer
+#  dia que alguien la toque aca.
+
+def cobertura(org, barrio: str, fecha, labor: str = "") -> dict:
+    """Para un barrio y un dia: la zona, y que cuadrillas la cubren. No escribe.
+
+    `motivo` resume lo que la persona tiene que saber:
+        "cubierta"          hay al menos una jornada de esa zona y esa labor
+        "otra_labor"        la zona la cubre alguien, pero hoy con otra labor
+        "sin_jornada"       nadie cubre esa zona ese dia (o no se armo el dia)
+        "sin_zona"          el barrio no esta en ninguna zona
+        "sin_barrio"        no hay barrio
+    """
+    from campo.zonas import AliasDeZona, parecidas
+
+    texto = normalizar_localidad(barrio)
+    if not texto:
+        return {"barrio": "", "zona": None, "jornadas": [], "habituales": [],
+                "motivo": "sin_barrio"}
+    alias = (AliasDeZona.objects
+             .filter(org=org, localidad=texto, zona__activa=True)
+             .select_related("zona").first())
+    if alias is None:
+        return {"barrio": texto, "zona": None, "jornadas": [], "habituales": [],
+                "parecidas": parecidas(org, texto), "motivo": "sin_zona"}
+    zona = alias.zona
+
+    jornadas = []
+    for j in (JornadaDeCuadrilla.objects
+              .filter(org=org, fecha=fecha, zonas=zona)
+              .select_related("cuadrilla")
+              .prefetch_related("integrantes__persona__profile__user")
+              .order_by("cuadrilla__nombre")):
+        integrantes = list(j.integrantes.all())
+        jornadas.append({
+            "jornada": str(j.id),
+            "cuadrilla": j.cuadrilla.nombre,
+            "labor": j.labor,
+            "coincide_labor": (not labor) or j.labor == labor,
+            #  Solo quien tiene cuenta RECIBE la orden en un telefono; los demas
+            #  van en la cuadrilla pero no son destinatarios.
+            "con_cuenta": [
+                {"profile": str(i.persona.profile_id), "nombre": i.persona.nombre}
+                for i in integrantes if i.persona.tiene_cuenta
+            ],
+            "sin_cuenta": sum(1 for i in integrantes if not i.persona.tiene_cuenta),
+        })
+
+    #  Si ese dia nadie la cubre, quien la trabaja HABITUALMENTE: es la pista de
+    #  a quien hay que armarle la jornada.
+    habituales = [
+        {"cuadrilla": c.nombre, "labor": c.labor_habitual}
+        for c in zona.cuadrillas_habituales.filter(activa=True).order_by("nombre")
+    ]
+
+    if any(j["coincide_labor"] for j in jornadas):
+        motivo = "cubierta"
+    elif jornadas:
+        motivo = "otra_labor"
+    else:
+        motivo = "sin_jornada"
+    return {"barrio": texto, "zona": {"id": str(zona.id), "nombre": zona.nombre},
+            "jornadas": jornadas, "habituales": habituales, "motivo": motivo}
