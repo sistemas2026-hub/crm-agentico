@@ -212,6 +212,12 @@
             {/each}
           </div>
 
+          {#if data.conteos.aMano}
+            <p class="snoc-body-sm snoc-secundario">
+              {data.conteos.aMano} {data.conteos.aMano === 1 ? 'orden asignada' : 'órdenes asignadas'}
+              a mano: el reparto no las mueve.
+            </p>
+          {/if}
           {#if data.conteos.sinZona || data.conteos.sinCuadrilla || data.conteos.sobrantes || data.conteos.sinClasificar}
             <ul class="snoc-lote-fallos">
               {#if data.conteos.sinZona}
@@ -300,7 +306,8 @@
                   {#if c.orden_activa}
                     <!-- No bloquea: una segunda visita al mismo caso es
                          legítima. Pero tiene que verse ANTES. -->
-                    <span class="snoc-tag">Ya tiene la orden #{c.orden_activa} abierta</span>
+                    <span class="snoc-tag">Ya tiene la orden #{c.orden_activa} abierta ·
+                      {c.orden_activa_tecnico ? `asignada a ${c.orden_activa_tecnico}` : 'SIN ASIGNAR'}</span>
                   {/if}
 
                   {#if c.sugerencia}
@@ -392,6 +399,25 @@
               <input class="snoc-campo" type="date" name="programada_para" />
             </label>
           </div>
+
+          <!-- ASIGNAR A MANO (13/10/2026). Vacío = la reparte el sistema por
+               zona y labor. Con alguien elegido, la orden le llega directo y
+               el reparto la respeta: no la mueve a otra cuadrilla. Solo
+               aparece quien tiene cuenta, porque es quien la recibe en el
+               teléfono. -->
+          <label class="snoc-campo-grupo">
+            <span class="snoc-label">Asignar a (opcional)</span>
+            <select class="snoc-select" name="tecnico_profile_id">
+              <option value="">— que la reparta el sistema por zona y labor —</option>
+              {#each data.tecnicos ?? [] as t (t.profile)}
+                <option value={t.profile}>{t.nombre}</option>
+              {/each}
+            </select>
+            <span class="snoc-body-sm snoc-secundario">
+              Para urgencias o cuando el cliente ya lo atiende alguien. Si la elegís, el
+              reparto no la mueve.
+            </span>
+          </label>
 
           <!-- LA LOCALIDAD DECIDE QUÉ CUADRILLA LO RECIBE: el reparto mapea
                el barrio a una zona operativa, y una orden sin barrio queda

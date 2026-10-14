@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { proponerReparto } from '$lib/server/v2/cuadrillas.js';
+import { proponerReparto, leerPersonasDeCampo } from '$lib/server/v2/cuadrillas.js';
 import {
   leerPlantillasDeTrabajo,
   leerCasosDespachables,
@@ -54,7 +54,9 @@ function conteosDel(propuesta) {
     sinZona: (propuesta.sin_zona ?? []).length,
     sinCuadrilla: (propuesta.sin_cuadrilla ?? []).length,
     sobrantes: (propuesta.sobrantes ?? []).length,
-    sinClasificar: (propuesta.sin_clasificar ?? []).length
+    sinClasificar: (propuesta.sin_clasificar ?? []).length,
+    //  Asignadas a mano por una persona: el reparto no las toca.
+    aMano: (propuesta.a_mano ?? []).length
   };
 }
 
@@ -81,10 +83,11 @@ export async function load({ url, cookies }) {
   //  que casi siempre termina en el mismo valor.
   const dia = url.searchParams.get('dia') || new Date().toISOString().slice(0, 10);
 
-  const [plantillas, casos, reparto] = await Promise.all([
+  const [plantillas, casos, reparto, personas] = await Promise.all([
     leerPlantillasDeTrabajo({ cookies }),
     leerCasosDespachables({ cookies }, conFicha),
-    proponerReparto({ cookies }, dia)
+    proponerReparto({ cookies }, dia),
+    leerPersonasDeCampo({ cookies })
   ]);
 
   return {
@@ -103,15 +106,27 @@ export async function load({ url, cookies }) {
     casos: casos.casos,
     tope: casos.tope,
     sinAprobados: casos.sinAprobados,
+    //  A quien se le puede asignar A MANO: solo quien tiene cuenta, porque es
+    //  quien recibe la orden en un telefono. Un auxiliar sin celular integra
+    //  la cuadrilla pero no puede ser el responsable de una orden.
+    tecnicos: (personas.personas ?? [])
+      .filter((p) => p.activa && p.tiene_cuenta && p.profile)
+      .map((p) => ({ profile: p.profile, nombre: p.nombre })),
     // NO SE INVENTA UNA LISTA VACÍA CUANDO LA LECTURA FALLÓ. Una empresa sin
     // casos abiertos y una consulta que no respondió se dibujan distinto.
     error: plantillas.error || casos.error
   };
 }
 
-/** Traduce lo que devuelve el backend a una frase, sin inventar una. */
+/**
+ * Traduce lo que devuelve el backend a una frase, sin inventar una.
+ *
+ * El error de `apiRequest` trae `status` y `body`, no `data`: leyendo `e.data`
+ * la frase del backend nunca llegaba y se veía «HTTP 500: Internal Server
+ * Error» crudo (13/10/2026).
+ */
 function mensajeDe(e) {
-  const detalle = e?.data?.detalle || e?.data?.error || e?.message;
+  const detalle = e?.body?.detalle || e?.message;
   return typeof detalle === 'string' && detalle.trim()
     ? detalle.trim()
     : 'No se pudo despachar.';
@@ -185,18 +200,23 @@ export const actions = {
         zona: String(f.get('zona') ?? '').trim() || undefined,
         prioridad: String(f.get('prioridad') ?? '').trim() || undefined,
         resumen: String(f.get('resumen') ?? '').trim() || undefined,
-        programada_para: programada || undefined
+        programada_para: programada || undefined,
+        //  ASIGNAR A MANO (opcional). Vacío = la reparte el sistema. Con valor,
+        //  el reparto la respeta y no la mueve (campo/reparto.py).
+        tecnico_profile_id: String(f.get('tecnico_profile_id') ?? '').trim() || undefined
       }, clave);
 
       const numero = r?.orden?.numero;
+      const quien = r?.orden?.tecnico_principal?.nombre;
       return {
-        hecho: numero
-          ? `Orden #${numero} despachada.`
-          : 'Orden despachada.',
+        hecho: (numero ? `Orden #${numero} despachada` : 'Orden despachada') +
+          (quien
+            ? `, asignada a ${quien}. El reparto no la va a mover.`
+            : '. Queda SIN ASIGNAR hasta que se publique el reparto.'),
         numero
       };
     } catch (e) {
-      return fail(400, { error: mensajeDe(e) });
+      return fail(e?.status && e.status < 500 ? e.status : 502, { error: mensajeDe(e) });
     }
   }
 };

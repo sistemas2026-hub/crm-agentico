@@ -139,6 +139,7 @@ def correr_para(org, *, ahora_local=None, avisar=True) -> dict:
         # Las tres formas de NO repartir, separadas: cada una se arregla de
         # una manera distinta y juntarlas en un numero las vuelve inaccionables.
         "sin_zona": [o.numero for o in propuesta["sin_zona"]],
+        "a_mano": [o.numero for o in propuesta.get("a_mano", [])],
         "sin_cuadrilla": [o.numero for o in propuesta["sin_cuadrilla"]],
         "sobrantes": [o.numero for o in propuesta["sobrantes"]],
         # El tipo de trabajo sin labor declarada. Va en el aviso porque se

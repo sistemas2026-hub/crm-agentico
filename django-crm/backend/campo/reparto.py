@@ -185,6 +185,30 @@ def _riesgo_de(orden, plazo: dict) -> tuple:
     return (2, 0)
 
 
+#: Los eventos que dicen QUIEN decidio el ultimo cambio de manos de una orden.
+EVENTOS_MANUALES = ("asignacion", "reasignacion")
+EVENTOS_QUE_LIBERAN = ("reasignada_por_reparto", "cuadrilla_desasignada")
+
+
+def _asignadas_a_mano(org) -> set:
+    """Ordenes cuya ULTIMA decision de asignacion la tomo una persona."""
+    ultimo: dict = {}
+    for orden_id, tipo in (
+        EventoTrabajo.objects
+        .filter(org=org, tipo__in=EVENTOS_MANUALES + EVENTOS_QUE_LIBERAN)
+        .order_by("created_at")
+        .values_list("orden_id", "tipo")
+    ):
+        ultimo[orden_id] = tipo
+    candidatas = {o for o, t in ultimo.items() if t in EVENTOS_MANUALES}
+    #  Y que hoy tenga a alguien: una manual que despues quedo sin nadie
+    #  (desasignada por otro camino) no tiene a quien respetar.
+    con_alguien = set(AsignacionTrabajo.objects
+                      .filter(orden_id__in=candidatas)
+                      .values_list("orden_id", flat=True))
+    return candidatas & con_alguien
+
+
 def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
              precios_por_plan=None):
     """La jornada propuesta de un dia. No escribe nada.
@@ -257,12 +281,25 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
         .filter(org=org, tipo=EVENTO_INICIO)
         .values_list("orden_id", flat=True)
     )
+    #  LO QUE UNA PERSONA ASIGNO A MANO NO SE REPARTE (13/10/2026). Desde que
+    #  se puede elegir el tecnico al despachar, el reparto -- que reasigna lo
+    #  que nadie empezo -- movia esa decision a otra cuadrilla en la siguiente
+    #  publicacion, sin que nadie lo decidiera. La ultima palabra sobre quien
+    #  tiene la orden esta en la bitacora: si fue una asignacion manual, se
+    #  respeta; si despues el reparto la movio o se desasigno, vuelve a ser
+    #  libre.
+    a_mano_ids = _asignadas_a_mano(org)
     pendientes = (
         OrdenTrabajo.objects
         .filter(org=org, estado_operativo__in=ESTADOS_QUE_ESPERAN)
         .exclude(id__in=ya_empezadas)
+        .exclude(id__in=a_mano_ids)
         .select_related("tipo_trabajo_version__work_type")
     )
+    a_mano = list(OrdenTrabajo.objects
+                  .filter(org=org, id__in=a_mano_ids,
+                          estado_operativo__in=ESTADOS_QUE_ESPERAN)
+                  .exclude(id__in=ya_empezadas))
 
     # El orden, con su desempate estable por numero.
     precios = precios_por_plan or {}
@@ -333,6 +370,9 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
             for j in jornadas
         ],
         "sin_zona": sin_zona,
+        #  Las que una persona asigno a mano: no se tocan, y se nombran para
+        #  que nadie las busque entre las «perdidas».
+        "a_mano": a_mano,
         "sin_cuadrilla": sin_cuadrilla,
         "sobrantes": sobrantes,
         # Las que ni siquiera se pudieron evaluar: su tipo de trabajo no dice

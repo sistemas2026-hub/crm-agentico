@@ -959,6 +959,8 @@ class RepartoView(APIView):
             # Tres motivos distintos, nombrados por separado: se arreglan
             # distinto y un solo "no se repartio" los volveria indistinguibles.
             "sin_zona": [_orden_json(o) for o in p["sin_zona"]],
+            #  Asignadas a mano por una persona: el reparto no las toca.
+            "a_mano": [_orden_json(o) for o in p.get("a_mano", [])],
             "sin_cuadrilla": [_orden_json(o) for o in p["sin_cuadrilla"]],
             "sobrantes": [_orden_json(o) for o in p["sobrantes"]],
             # Ni siquiera se pudieron evaluar: su tipo de trabajo no dice a

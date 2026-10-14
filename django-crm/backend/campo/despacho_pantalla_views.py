@@ -115,6 +115,29 @@ def _orden_activa_de(org, case_id: str):
     )
 
 
+def _quien_tiene(org, case_id: str) -> str | None:
+    """A quien esta asignada la orden viva de ese caso, o None si a nadie.
+
+    El estado con que nace una orden se llama «Asignada» aunque no tenga a
+    nadie (13/10/2026) -- y eso hacia creer que ya le habia llegado a alguien.
+    Esto dice la verdad: el nombre del principal, o None = SIN ASIGNAR.
+    """
+    orden = (OrdenTrabajo.objects
+             .filter(org=org, origen_sistema="crm", origen_ref=str(case_id))
+             .exclude(estado_operativo__in=[OrdenTrabajo.CERRADA,
+                                            OrdenTrabajo.CANCELADA])
+             .first())
+    if orden is None:
+        return None
+    a = (orden.asignaciones.select_related("profile__user")
+         .order_by("-es_principal").first())
+    if a is None:
+        return None
+    from campo.services.inventario import nombre_de
+
+    return nombre_de(a.profile)
+
+
 class CasosDespachablesView(APIView):
     """``GET`` los casos abiertos que podrian ir a campo, con su evidencia.
 
@@ -212,6 +235,8 @@ class CasosDespachablesView(APIView):
                 #  Para que se vea ANTES de despachar, no despues de crear la
                 #  segunda orden del mismo caso.
                 "orden_activa": _orden_activa_de(org, caso.id),
+                #  None = la orden existe pero NADIE la tiene todavia.
+                "orden_activa_tecnico": _quien_tiene(org, caso.id),
                 "sugerencia": None,
                 #  DE DONDE ES EL TRABAJO. Sin esto la orden nace sin zona, y
                 #  el reparto la deja en `sin_zona` para siempre: nunca llega
