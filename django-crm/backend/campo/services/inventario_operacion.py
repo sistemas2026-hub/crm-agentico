@@ -660,6 +660,12 @@ def consumo_por_tecnico(org, *, desde=None, hasta=None) -> list[dict]:
     return sorted(salida, key=lambda e: e["nombre"])
 
 
+def _tapar(texto):
+    from operaciones.lectura_de_ticket import tapar
+
+    return tapar(texto or "")
+
+
 def descuadres_abiertos(org) -> list[dict]:
     """Los movimientos que quedaron en descuadre o conflicto.
 
@@ -683,7 +689,10 @@ def descuadres_abiertos(org) -> list[dict]:
         "serie": m.serie,
         "persona": nombre_de(m.profile) if m.profile_id else None,
         "motivo": m.motivo,
-        "motivo_tecnico": m.motivo_tecnico,
+        #  Texto libre del tecnico: viaja TAPADO (celular, documento, correo).
+        #  Le sirve a quien resuelve el descuadre, y antes llegaba crudo al
+        #  navegador de cualquier sesion de campo (auditoria de custodia, P2).
+        "motivo_tecnico": _tapar(m.motivo_tecnico),
     } for m in qs]
 
 

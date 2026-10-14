@@ -221,17 +221,31 @@ def series_sin_devolver(profile, org):
     una casa, o volvió a bodega, o alguien tiene que decir qué pasó. Por eso
     se listan uno por uno y no como una cantidad.
     """
-    entregadas = set(
+    #  CUANDO se entrego cada una por ULTIMA vez. Una serie devuelta puede
+    #  volver a despacharse (F3), y antes cualquier devolucion de su historia la
+    #  daba por resuelta: una ONT devuelta en septiembre y re-entregada hoy
+    #  dejaba de figurar pendiente y el tecnico cerraba la jornada con ella
+    #  encima (auditoria de custodia, D8, 13/10/2026). Solo cuenta lo que paso
+    #  DESPUES de la ultima entrega.
+    ultima_entrega: dict[str, object] = {}
+    for serie, cuando in (
         ItemDeKit.objects.filter(
             entrega__profile=profile,
             entrega__org=org,
             material__clase="serializado",
         )
         .exclude(serie="")
-        .values_list("serie", flat=True)
-    )
+        .values_list("serie", "entrega__created_at")
+    ):
+        if serie not in ultima_entrega or cuando > ultima_entrega[serie]:
+            ultima_entrega[serie] = cuando
+    entregadas = set(ultima_entrega)
     if not entregadas:
         return []
+
+    def _despues(filas):
+        return {serie for serie, cuando in filas if cuando >= ultima_entrega[serie]}
+
 
     # SOLO LOS MOVIMIENTOS QUE SACAN EL EQUIPO DE LA CUSTODIA RESUELVEN ALGO.
     #
@@ -250,12 +264,13 @@ def series_sin_devolver(profile, org):
             ),
         )
         .exclude(estado=MovimientoDeMaterial.CONFLICTO)
-        .values_list("serie", flat=True)
+        .values_list("serie", "created_at")
     )
-    justificadas = set(
+    resueltas = _despues(resueltas)
+    justificadas = _despues(
         IncidenciaDeMaterial.objects.filter(
             profile=profile, org=org, serie__in=entregadas
-        ).values_list("serie", flat=True)
+        ).values_list("serie", "created_at")
     )
     transferidas = set(
         TransferenciaDeMaterial.objects.filter(

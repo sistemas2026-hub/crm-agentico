@@ -351,3 +351,95 @@ def test_d2_bodega_es_un_rol_asignable_y_no_da_admin(user_profile):
     perfil.refresh_from_db()
     assert perfil.role == "BODEGA"
     assert perfil.is_organization_admin is False
+
+
+# ---------------------------------------------------------------------------
+# D9 · una entrada o una devolucion no resta
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cantidad", [0, -50, "NaN"])
+def test_d9_una_entrada_no_positiva_se_rechaza(org_a, bodega, conector, cantidad):
+    with pytest.raises(DespachoInvalido, match="mayor que cero|no es un numero"):
+        inv.registrar_entrada(org=org_a, material=conector, cantidad=cantidad,
+                              ubicacion_destino=bodega)
+    assert not MovimientoDeMaterial.objects.filter(org=org_a).exists()
+
+
+def test_d9b_una_devolucion_negativa_no_escribe_NINGUNA_linea(
+        org_a, bodega, conector, ont, user_profile):
+    """Atomica: la linea buena tampoco queda escrita si otra no lo es."""
+    _con_conectores(org_a, bodega, conector, user_profile)
+    antes = MovimientoDeMaterial.objects.count()
+    with pytest.raises(DespachoInvalido):
+        inv.recibir_devolucion(
+            org=org_a, profile_origen=user_profile, ubicacion_destino=bodega,
+            lineas=[{"material": conector, "cantidad": 5},
+                    {"material": conector, "cantidad": -5}])
+    assert MovimientoDeMaterial.objects.count() == antes
+
+
+# ---------------------------------------------------------------------------
+# P2 · el motivo del tecnico llega tapado al reporte
+# ---------------------------------------------------------------------------
+
+def test_p2_el_reporte_de_descuadres_no_trae_el_celular(
+        org_a, conector, user_profile, orden):
+    from campo.services.inventario_operacion import descuadres_abiertos
+    from campo.services.materiales import registrar_movimiento
+
+    mov, _ = registrar_movimiento(
+        org=org_a, profile=user_profile, material=conector,
+        tipo=MovimientoDeMaterial.CONSUMO, cantidad=Decimal("3"),
+        idempotency_key="p2-1", orden=orden,
+        motivo_tecnico="use de mas, el cliente 3001234567 pidio otro punto")
+    assert mov.estado == MovimientoDeMaterial.DESCUADRE
+    fila = next(f for f in descuadres_abiertos(org_a) if f["id"] == str(mov.id))
+    assert "3001234567" not in fila["motivo_tecnico"]
+    assert "pidio otro punto" in fila["motivo_tecnico"]
+
+
+# ---------------------------------------------------------------------------
+# D8 · una serie re-entregada vuelve a estar pendiente
+# ---------------------------------------------------------------------------
+
+def test_d8_devuelta_y_re_entregada_vuelve_a_figurar_pendiente(
+        user_client, org_a, bodega, ont, user_profile):
+    from campo.services.cierre_jornada import series_sin_devolver
+
+    _dar_onts(org_a, bodega, ont, user_profile, "IDA-Y-VUELTA")
+    inv.recibir_devolucion(org=org_a, profile_origen=user_profile,
+                           ubicacion_destino=bodega,
+                           lineas=[{"material": ont, "serie": "IDA-Y-VUELTA"}])
+    assert "IDA-Y-VUELTA" not in [s["serie"] if isinstance(s, dict) else s
+                                  for s in series_sin_devolver(user_profile, org_a)]
+
+    inv.despachar(org=org_a, ubicacion_origen=bodega, profile_destino=user_profile,
+                  lineas=[{"material": ont, "serie": "IDA-Y-VUELTA"}])
+    pendientes = [s["serie"] if isinstance(s, dict) else s
+                  for s in series_sin_devolver(user_profile, org_a)]
+    assert "IDA-Y-VUELTA" in pendientes
+
+
+def test_d9c_si_una_linea_falla_a_mitad_de_camino_no_queda_media_devolucion(
+        org_a, bodega, conector, user_profile, monkeypatch):
+    """La validacion previa no cubre todo lo que puede fallar al escribir. Si la
+    segunda linea revienta, la primera no puede quedar: seria media
+    devolucion, y un reintento duplicaria la mitad que si entro."""
+    _con_conectores(org_a, bodega, conector, user_profile)
+    antes = MovimientoDeMaterial.objects.count()
+    real = inv._declarado_sin_recibir
+    llamadas = []
+
+    def falla_en_la_segunda(*a, **k):
+        llamadas.append(1)
+        if len(llamadas) == 2:
+            raise RuntimeError("se cayo la base a mitad de camino")
+        return real(*a, **k)
+
+    monkeypatch.setattr(inv, "_declarado_sin_recibir", falla_en_la_segunda)
+    with pytest.raises(RuntimeError):
+        inv.recibir_devolucion(
+            org=org_a, profile_origen=user_profile, ubicacion_destino=bodega,
+            lineas=[{"material": conector, "cantidad": 5},
+                    {"material": conector, "cantidad": 3}])
+    assert MovimientoDeMaterial.objects.count() == antes

@@ -303,6 +303,24 @@ def _clave_de_hecho(prefijo: str, referencia, *partes) -> str:
 
 
 @transaction.atomic
+def _exigir_cantidad_positiva(cantidad, que: str) -> None:
+    """Una cantidad cero o negativa no es una entrada ni una devolucion.
+
+    Se aceptaban (auditoria de custodia, D9, 13/10/2026): una ENTRADA de -50 le
+    restaba 50 a la bodega con la etiqueta «entrada» -- un ajuste sin conteo ni
+    motivo --, y una devolucion negativa movia material de la bodega al tecnico
+    disfrazada de devolucion. Restar existe, y tiene su nombre: un conteo.
+    """
+    try:
+        valor = Decimal(str(cantidad))
+    except Exception:  # noqa: BLE001
+        raise DespachoInvalido(f"La cantidad de {que} no es un numero.")
+    if not valor.is_finite() or valor <= CERO:
+        raise DespachoInvalido(
+            f"La cantidad de {que} tiene que ser mayor que cero. Para descontar "
+            f"material de una ubicacion se usa un conteo, que deja su motivo.")
+
+
 def registrar_entrada(*, org, material, cantidad, ubicacion_destino,
                       serie="", origen_ref="", profile=None, orden=None,
                       ocurrido_en=None):
@@ -315,6 +333,8 @@ def registrar_entrada(*, org, material, cantidad, ubicacion_destino,
         raise DespachoInvalido("Una entrada necesita decir a que ubicacion entra.")
 
     serie = (serie or "").strip()
+    if not serie:
+        _exigir_cantidad_positiva(cantidad, "una entrada")
     activo = activo_de(org, material, serie) if serie else None
 
     datos = {"origen_ref": origen_ref} if origen_ref else {}
@@ -506,6 +526,9 @@ def _declarado_sin_recibir(org, profile, material, custodia, serie="") -> Decima
     return max(CERO, declarado - recibido)
 
 
+#  ATOMICA desde el 13/10/2026: si la tercera linea fallaba, las dos primeras
+#  quedaban escritas -- media devolucion, y un reintento duplicaba esas dos.
+@transaction.atomic
 def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
                        recibida_por=None, notas="", referencia=""):
     """Tecnico -> bodega. El material vuelve a existir en la bodega.
@@ -541,6 +564,11 @@ def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
         raise DespachoInvalido(
             "Esta persona no tiene custodia abierta: no hay nada que devolver."
         )
+
+    #  Todas las lineas se validan ANTES de escribir la primera.
+    for linea in lineas:
+        if not (linea.get("serie") or "").strip():
+            _exigir_cantidad_positiva(linea.get("cantidad"), "una devolucion")
 
     movimientos = []
     incidencias = []

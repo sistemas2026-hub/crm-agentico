@@ -27,6 +27,9 @@ opinión.
 | D1 | La devolución por la app salía de la custodia hacia «ninguna» y la recepción en la web la volvía a restar de la custodia: sin recepción el material desaparecía; con recepción se restaba dos veces y la jornada no cerraba | ALTA | `recibir_devolucion` consume primero lo que el técnico declaró (entra a bodega desde «ninguna») y solo lo no declarado sale de la custodia; las sumas de «devuelto» no cuentan esa firma. Un reintento con referencia devuelve lo registrado en vez de un 500. **Los datos que ya existen en producción NO se corrigen acá** | `test_d1*` |
 | D2 | El rol `BODEGA` no se podía asignar | MEDIA | agregado a `ROLES` (migración `common/0044`) y a la pantalla de equipo; no es admin | `test_d2` |
 | D3 | El aviso del serial al ISP salía aunque el técnico no estuviera asignado a la orden | ALTA si se enciende | `lazo_isp.intentar_avisar` exige la asignación; el consumo entra igual | `test_d3` |
+| D8 | `series_sin_devolver` contaba cualquier devolución de la historia de la serie: una ONT devuelta y re-entregada dejaba de figurar pendiente | MEDIA | solo cuenta lo resuelto DESPUÉS de la última entrega de esa serie | `test_d8` |
+| D9 | Entradas y devoluciones aceptaban cantidades cero, negativas o `NaN` (una entrada de −50 restaba con la etiqueta «entrada»); y la recepción no era atómica: si fallaba la tercera línea, las dos primeras quedaban | BAJA → MEDIA | se rechazan antes de escribir; `recibir_devolucion` es `@transaction.atomic` | `test_d9`, `test_d9b`, `test_d9c` |
+| P2 | `motivo_tecnico` llegaba crudo en el reporte de descuadres | BAJA | viaja tapado con `tapar()`: le sirve a quien resuelve, sin celular ni documento | `test_p2` |
 
 Verificado contra PostgreSQL real el 13/10/2026:
 
@@ -49,6 +52,15 @@ mutaciones, una por arreglo:
   MUERTA  el reintento no reconoce lo escrito   test_d1f
   MUERTA  el aviso no mira la asignacion        test_d3
   MUERTA  BODEGA fuera de ROLES                 test_d2
+  -- tercera tanda, D8/D9/P2 --
+  MUERTA  la entrada acepta no positivas        test_d9
+  MUERTA  la devolucion no es atomica           test_d9c  (sobrevivio a la
+                                                primera prueba, que validaba
+                                                antes de escribir y no llegaba
+                                                a la transaccion)
+  MUERTA  motivo_tecnico sin tapar              test_p2
+  MUERTA  cuenta cualquier devolucion historica test_d8
+pytest campo/ completo tras la tercera tanda:   952 pasan, 0 fallan
 ```
 
 ## Abierto, con su motivo
@@ -60,9 +72,6 @@ mutaciones, una por arreglo:
 | D5 | El cierre de jornada calcula la existencia con otra aritmética (ignora ajustes), y la guarda de «una sola verdad» lo tiene en su lista de permitidos | MEDIA | Unificarlo con `existencia()` cambia lo que ve el técnico al cerrar; necesita su propia prueba de punta a punta |
 | D6 | Sin acta, un doble envío del despacho despacha dos veces; con un acta repetida, se traga un despacho distinto | MEDIA | Hace falta decidir la clave del hecho del despacho (hoy es el acta, opcional) |
 | D7 | `vencer_reservas` no tiene llamador: una reserva con plazo nunca vence | MEDIA | Agregarla al reloj es una decisión de operación (CLAUDE.md §8) |
-| D8 | `series_sin_devolver` cuenta cualquier devolución histórica, no solo las posteriores al último despacho | MEDIA | — |
-| D9 | Entradas, devoluciones y conteos aceptan cantidades cero o negativas | BAJA | — |
-| P2 | `motivo_tecnico` viaja en el JSON de Reportes aunque no se dibuja | BAJA | — |
 | P3 | `/interno/herramienta` devuelve la respuesta cruda de WispHub al CRM sin política de rol; hoy se descarta sin leerla | BAJA, latente | Arreglo barato (`?rol=`) pero toca `nucleo/canales/api.py` |
 
 ## Lo que se atacó y aguantó
