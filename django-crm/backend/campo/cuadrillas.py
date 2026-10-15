@@ -473,3 +473,79 @@ class IntegranteDeJornada(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.persona_id} · {self.rol}"
+
+
+def _nombre_de_cuenta(profile) -> str:
+    user = getattr(profile, "user", None)
+    return (getattr(user, "name", "") or getattr(user, "email", "") or "").strip()
+
+
+def destinatarios(jornada) -> dict:
+    """A quien le llega una orden asignada a esta jornada. UNA sola regla.
+
+    Correccion del usuario (15/10/2026): «una cuadrilla esta compuesta por un
+    tecnico (lider responsable) y un auxiliar (ayudante). El tecnico es el
+    unico que tiene celular de la operacion; el auxiliar no tiene telefono ni
+    cuenta de acceso».
+
+    Hasta ahi la orden se le entregaba solo a los INTEGRANTES con cuenta, y el
+    lider se elige en otro campo («Lider del dia»): armada la jornada como
+    corresponde --lider arriba, auxiliar como integrante-- el sistema veia
+    solo gente sin cuenta y decia «no tiene a nadie con cuenta». Los tres
+    caminos (despacho a mano, publicar el reparto y el recuadro de la zona)
+    tenian el mismo hueco, cada uno con su copia de la regla.
+
+    Ahora:
+      - el LIDER DEL DIA (o, si no se eligio, el de la cuadrilla) la recibe
+        siempre, como principal, este o no anotado entre los integrantes;
+      - un integrante que ademas tenga cuenta tambien la recibe;
+      - quien no tiene cuenta va con la cuadrilla y queda en la jornada, pero
+        no recibe nada.
+
+    Un lider con la cuenta dada de baja NO recibe: su telefono ya no entra.
+    `motivo` dice por que nadie la recibiria, para que el aviso nombre la
+    causa en vez de un generico.
+    """
+    lider = jornada.lider or jornada.cuadrilla.lider
+    integrantes = list(jornada.integrantes.select_related("persona__profile__user"))
+
+    reciben, vistos = [], set()
+    if lider is not None and lider.is_active:
+        propio = next((i for i in integrantes
+                       if i.persona.profile_id == lider.id), None)
+        reciben.append({"profile": lider,
+                        "nombre": _nombre_de_cuenta(lider) or (
+                            propio.persona.nombre if propio else ""),
+                        "rol": propio.rol if propio else AsignacionTrabajo.TECNICO_LIDER,
+                        "es_principal": True})
+        vistos.add(lider.id)
+    for i in integrantes:
+        p = i.persona.profile
+        if p is None or p.id in vistos or not p.is_active:
+            continue
+        reciben.append({"profile": p, "nombre": i.persona.nombre,
+                        "rol": i.rol, "es_principal": False})
+        vistos.add(p.id)
+
+    van_sin_cuenta = [i.persona.nombre for i in integrantes
+                      if i.persona.profile_id is None]
+
+    if reciben:
+        motivo = "ok"
+    elif lider is None:
+        motivo = "sin_lider"
+    else:
+        motivo = "lider_inactivo"
+    return {"reciben": reciben, "van_sin_cuenta": van_sin_cuenta,
+            "lider": lider, "motivo": motivo}
+
+
+def por_que_nadie_recibe(jornada, d: dict) -> str:
+    """El aviso cuando `destinatarios` no deja a nadie: nombra la causa."""
+    nombre = jornada.cuadrilla.nombre
+    if d["motivo"] == "sin_lider":
+        return (f"La cuadrilla {nombre} no tiene líder ese día: la orden no la "
+                f"vería nadie en un teléfono. Elegí el líder en «El día».")
+    return (f"El líder de la cuadrilla {nombre} ({_nombre_de_cuenta(d['lider'])}) "
+            f"tiene la cuenta dada de baja: la orden no la vería nadie en un "
+            f"teléfono.")

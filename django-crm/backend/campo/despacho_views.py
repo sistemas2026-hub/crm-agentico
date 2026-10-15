@@ -235,13 +235,13 @@ class CrearOrdenView(APIView):
                        .select_related("cuadrilla").first())
             if jornada is None:
                 raise Http404("No existe esa cuadrilla para ese dia.")
-            if not any(i.persona.tiene_cuenta for i in
-                       jornada.integrantes.select_related("persona")):
+            from campo.cuadrillas import destinatarios, por_que_nadie_recibe
+
+            quienes = destinatarios(jornada)
+            if not quienes["reciben"]:
                 return Response(
                     {"error": "NO_SE_PUDO_ASIGNAR",
-                     "detalle": f"La cuadrilla {jornada.cuadrilla.nombre} no tiene a "
-                                f"nadie con cuenta ese dia: la orden no la veria "
-                                f"nadie en un telefono."},
+                     "detalle": por_que_nadie_recibe(jornada, quienes)},
                     status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -262,8 +262,8 @@ class CrearOrdenView(APIView):
                             status=status.HTTP_400_BAD_REQUEST)
 
         #  Un tecnico puntual gana sobre la cuadrilla: es la decision mas
-        #  precisa. Con cuadrilla, le llega a sus integrantes con cuenta, como
-        #  al publicar el reparto, y el reparto la respeta despues.
+        #  precisa. Con cuadrilla, le llega a su lider (y a quien mas tenga
+        #  cuenta), como al publicar el reparto, y el reparto la respeta despues.
         try:
             if tecnico is not None:
                 asignar(orden, tecnico, request.profile)

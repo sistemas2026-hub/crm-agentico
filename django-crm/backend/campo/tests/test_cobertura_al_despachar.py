@@ -15,9 +15,12 @@ toda la empresa.
   C  un barrio fuera de toda zona trae los parecidos
   D  crear la orden con la cuadrilla la asigna a su gente CON CUENTA, el lider
      como principal, y el reparto la respeta despues
-  E  una cuadrilla sin nadie con cuenta, o un tecnico que no existe, se
+  E  una cuadrilla sin lider, o un tecnico que no existe, se
      rechazan ANTES de crear: antes la orden quedaba creada y la respuesta
      decia error, y un reintento creaba otra
+  F  la cuadrilla real -- un lider con celular y un auxiliar sin el --: la
+     recibe el lider del dia (o el de la cuadrilla) aunque no este anotado
+     entre los integrantes (correccion del usuario, 15/10/2026)
 
     pytest campo/tests/test_cobertura_al_despachar.py
 ================================================================================
@@ -128,14 +131,68 @@ def test_d_crear_con_la_cuadrilla_la_asigna_a_su_gente_y_el_reparto_la_respeta(
     assert orden in reparto.proponer(org_a, HOY)["a_mano"]
 
 
-def test_e_cuadrilla_sin_nadie_con_cuenta_se_rechaza_antes_de_crear(
+def test_e_cuadrilla_sin_lider_se_rechaza_antes_de_crear(
         admin_client, org_a, norte, cuadrilla, version):
+    cuadrilla.lider = None
+    cuadrilla.save(update_fields=["lider"])
     j = _jornada(org_a, cuadrilla, norte, "correctivo")       # solo el ayudante
     r = admin_client.post(CREAR, {"work_type_version_id": str(version.id),
                                   "zona": "CACARAMOA", "jornada_id": str(j.id)},
                           format="json")
     assert r.status_code == 400, r.content
-    assert "nadie con cuenta" in r.json()["detalle"]
+    assert "no tiene líder" in r.json()["detalle"]
+    assert not OrdenTrabajo.objects.filter(org=org_a).exists()
+
+
+def test_f_el_lider_del_dia_recibe_aunque_solo_el_auxiliar_este_anotado(
+        admin_client, org_a, norte, cuadrilla, admin_profile, version):
+    """La cuadrilla real (15/10/2026): el lider con celular, elegido en «Lider
+    del dia», y el auxiliar sin cuenta como unico integrante. Antes: «no tiene
+    a nadie con cuenta» y la orden no se creaba."""
+    j = _jornada(org_a, cuadrilla, norte, "correctivo")       # solo el ayudante
+    j.lider = admin_profile
+    j.save(update_fields=["lider"])
+
+    c = reparto.cobertura(org_a, "CACARAMOA", HOY, "correctivo")
+    cj = c["jornadas"][0]
+    assert [p["profile"] for p in cj["con_cuenta"]] == [str(admin_profile.id)]
+    assert cj["con_cuenta"][0]["lider"] is True
+    assert cj["van_con_el"] == ["Pedro Ayudante"] and cj["aviso"] is None
+
+    r = admin_client.post(CREAR, {"work_type_version_id": str(version.id),
+                                  "zona": "CACARAMOA", "jornada_id": str(j.id)},
+                          format="json")
+    assert r.status_code == 201, r.content
+    orden = OrdenTrabajo.objects.get(org=org_a)
+    assert list(orden.asignaciones.values_list("profile_id", "es_principal", "rol"))         == [(admin_profile.id, True, "tecnico_lider")]
+
+
+def test_f2_sin_lider_del_dia_vale_el_de_la_cuadrilla(
+        admin_client, org_a, norte, cuadrilla, admin_profile, version):
+    j = _jornada(org_a, cuadrilla, norte, "correctivo")       # jornada.lider vacio
+    assert j.lider_id is None and cuadrilla.lider_id == admin_profile.id
+    r = admin_client.post(CREAR, {"work_type_version_id": str(version.id),
+                                  "zona": "CACARAMOA", "jornada_id": str(j.id)},
+                          format="json")
+    assert r.status_code == 201, r.content
+    assert list(OrdenTrabajo.objects.get(org=org_a).asignaciones
+                .values_list("profile_id", flat=True)) == [admin_profile.id]
+
+
+def test_f3_un_lider_con_la_cuenta_de_baja_no_recibe_y_se_dice(
+        admin_client, org_a, norte, cuadrilla, user_profile, version):
+    user_profile.is_active = False
+    user_profile.save(update_fields=["is_active"])
+    j = _jornada(org_a, cuadrilla, norte, "correctivo")
+    j.lider = user_profile
+    j.save(update_fields=["lider"])
+
+    cj = reparto.cobertura(org_a, "CACARAMOA", HOY, "correctivo")["jornadas"][0]
+    assert cj["con_cuenta"] == [] and "dada de baja" in cj["aviso"]
+    r = admin_client.post(CREAR, {"work_type_version_id": str(version.id),
+                                  "zona": "CACARAMOA", "jornada_id": str(j.id)},
+                          format="json")
+    assert r.status_code == 400 and "dada de baja" in r.json()["detalle"]
     assert not OrdenTrabajo.objects.filter(org=org_a).exists()
 
 

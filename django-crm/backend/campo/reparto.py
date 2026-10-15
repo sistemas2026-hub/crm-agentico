@@ -79,7 +79,8 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
-from campo.cuadrillas import JornadaDeCuadrilla
+from campo.cuadrillas import (JornadaDeCuadrilla, destinatarios,
+                              por_que_nadie_recibe)
 from campo.models import AsignacionTrabajo, EventoTrabajo, OrdenTrabajo
 
 #: El evento que dice que alguien YA fue al sitio.
@@ -422,22 +423,28 @@ def cobertura(org, barrio: str, fecha, labor: str = "") -> dict:
     jornadas = []
     for j in (JornadaDeCuadrilla.objects
               .filter(org=org, fecha=fecha, zonas=zona)
-              .select_related("cuadrilla")
-              .prefetch_related("integrantes__persona__profile__user")
+              .select_related("cuadrilla__lider__user", "lider__user")
               .order_by("cuadrilla__nombre")):
-        integrantes = list(j.integrantes.all())
+        quienes = destinatarios(j)
         jornadas.append({
             "jornada": str(j.id),
             "cuadrilla": j.cuadrilla.nombre,
             "labor": j.labor,
             "coincide_labor": (not labor) or j.labor == labor,
-            #  Solo quien tiene cuenta RECIBE la orden en un telefono; los demas
-            #  van en la cuadrilla pero no son destinatarios.
+            #  QUIEN LA RECIBE en un telefono: el lider del dia primero, aunque
+            #  no este anotado entre los integrantes (`cuadrillas.destinatarios`,
+            #  la misma regla del despacho y del reparto). Los demas van con
+            #  la cuadrilla pero no son destinatarios.
             "con_cuenta": [
-                {"profile": str(i.persona.profile_id), "nombre": i.persona.nombre}
-                for i in integrantes if i.persona.tiene_cuenta
+                {"profile": str(r["profile"].id), "nombre": r["nombre"],
+                 "lider": r["es_principal"]}
+                for r in quienes["reciben"]
             ],
-            "sin_cuenta": sum(1 for i in integrantes if not i.persona.tiene_cuenta),
+            "sin_cuenta": len(quienes["van_sin_cuenta"]),
+            "van_con_el": quienes["van_sin_cuenta"],
+            #  Por que nadie la recibiria, para que la pantalla lo diga.
+            "aviso": (None if quienes["reciben"]
+                      else por_que_nadie_recibe(j, quienes)),
         })
 
     #  Si ese dia nadie la cubre, quien la trabaja HABITUALMENTE: es la pista de

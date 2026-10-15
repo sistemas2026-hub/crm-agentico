@@ -31,7 +31,8 @@ from rest_framework.views import APIView
 from campo.models import AsignacionTrabajo, WorkType
 from campo.cuadrillas import (ConfiguracionDeReparto, Cuadrilla,
                               IntegranteDeJornada, JornadaDeCuadrilla,
-                              PersonaDeCampo, configuracion_de_reparto)
+                              PersonaDeCampo, configuracion_de_reparto,
+                              destinatarios)
 from campo.zonas import AliasDeZona, ZonaOperativa, normalizar_localidad
 from campo.inventario import UbicacionInventario
 from campo.permissions import IsCampoAuthenticated, ROLES_GESTION
@@ -1035,29 +1036,23 @@ class RepartoView(APIView):
                 if jornada is None:
                     continue
 
-                integrantes = list(jornada.integrantes.all())
-                if not integrantes:
-                    # Una cuadrilla sin gente ese dia no puede recibir trabajo:
-                    # la orden quedaria asignada a nadie.
-                    continue
-
-                # SOLO QUIEN TIENE CUENTA RECIBE LA ASIGNACION, porque una
-                # orden asignada a quien no entra al sistema no aparece en
-                # ningun telefono. Los auxiliares sin celular integran la
-                # cuadrilla --y por eso quedan en la jornada, que es donde se
-                # lee quien estuvo-- pero no son a quien se le manda el
-                # trabajo.
-                con_cuenta = [i for i in integrantes if i.persona.tiene_cuenta]
-                if not con_cuenta:
-                    # Toda la cuadrilla sin cuenta: la orden quedaria sin una
-                    # sola asignacion y nadie la veria. Se SALTEA y se dice --
-                    # publicar cero asignaciones e informar exito seria peor
-                    # que no publicar.
+                # QUIEN RECIBE LA ORDEN: el lider del dia siempre, aunque no
+                # este anotado entre los integrantes, y quien mas tenga cuenta.
+                # El auxiliar sin celular integra la cuadrilla --y por eso
+                # queda en la jornada, que es donde se lee quien estuvo-- pero
+                # no es a quien se le manda el trabajo. La regla vive en
+                # `cuadrillas.destinatarios`, la misma del despacho a mano y
+                # del recuadro de la zona (15/10/2026: hasta ahi cada camino
+                # tenia su copia, y las tres ignoraban al lider).
+                quienes = destinatarios(jornada)
+                if not quienes["reciben"]:
+                    # Nadie que la vea en un telefono: la orden quedaria sin
+                    # una sola asignacion. Se SALTEA y se dice -- publicar cero
+                    # asignaciones e informar exito seria peor que no publicar.
                     sin_cuenta.append(jornada.cuadrilla.nombre)
                     continue
 
-                auxiliares += len(integrantes) - len(con_cuenta)
-                lider_id = jornada.lider_id or jornada.cuadrilla.lider_id
+                auxiliares += len(quienes["van_sin_cuenta"])
                 for oid in (cruda or {}).get("ordenes") or []:
                     orden = OrdenTrabajo.objects.filter(org=org, id=oid).first()
                     if orden is None:
@@ -1098,12 +1093,12 @@ class RepartoView(APIView):
                         )
                         orden.asignaciones.all().delete()
                         reasignadas.append(orden.numero)
-                    for i in con_cuenta:
+                    for r in quienes["reciben"]:
                         AsignacionTrabajo.objects.create(
                             orden=orden,
-                            profile=i.persona.profile,
-                            rol=i.rol,
-                            es_principal=(i.persona.profile_id == lider_id),
+                            profile=r["profile"],
+                            rol=r["rol"],
+                            es_principal=r["es_principal"],
                         )
                     publicadas += 1
 
