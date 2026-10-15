@@ -72,6 +72,7 @@ CATALOGO = {
             "No toca WispHub, no reabre nada, y no cierra ningún caso cuyo "
             "equipo no haya podido diagnosticar."),
         "exige_nivel": 3,
+        "necesita_que_mire": True,
     },
     PASAR_A_DESPACHO: {
         "nombre": "Pasar casos a Despacho solo, según las cinco reglas",
@@ -91,6 +92,7 @@ CATALOGO = {
         #  PROPIA, y no la del cierre: habilitar una cosa no puede habilitar la
         #  otra de rebote. Son dos efectos distintos y cada uno se pide aparte.
         "exige_nivel": 3,
+        "necesita_que_mire": True,
     },
     CICLO_AUTOMATICO: {
         "nombre": "Revisar solo, una vez por hora",
@@ -111,6 +113,9 @@ CATALOGO = {
         #  propuestas para que las lea una persona -- que es lo que el
         #  Supervisor ya hacia cuando alguien apretaba el boton.
         "exige_nivel": 0,
+        #  ES LA QUE PROVEE EL MIRAR, no una que lo necesite. Sin esta fila
+        #  ninguna de las otras corre sola: ver 'algo_la_va_a_correr'.
+        "necesita_que_mire": False,
     },
 }
 
@@ -134,6 +139,60 @@ def esta_delegada(org, clave: str) -> bool:
         return False
     return TareaDelegada.objects.filter(
         org=org, clave=clave, activa=True).exists()
+
+
+def algo_la_va_a_correr(org, clave: str) -> dict:
+    """
+    Si esta tarea delegada va a correr sola, o solo cuando alguien la despierte.
+
+    LA SEGUNDA PRECONDICION, Y ESTABA EN SILENCIO  --  15/10/2026
+    -------------------------------------------------------------
+    Una tarea de accion necesita DOS cosas para andar sola, no una:
+
+        EL NIVEL   cuanto puede hacer el Supervisor por su cuenta.
+        EL MIRAR   que algo lo despierte. Lo da 'CICLO_AUTOMATICO'; sin esa
+                   fila el Supervisor solo corre cuando una persona aprieta
+                   el boton de la pantalla.
+
+    'delegar_tarea' ya avisaba de la primera y callaba la segunda. Medido ese
+    dia en el entorno local: 'pasar_a_despacho_segun_las_reglas' delegada y
+    activa, el nivel en 3, y el ciclo horario devolviendo 'empresas: 0' en las
+    cinco corridas de 16:07 a 21:11 UTC con el mensaje "ningun ciclo delegado,
+    no se recorre nada". El panel se quedo clavado en el ultimo hecho de las
+    11:10 y nada en la pantalla ni en el chat decia por que.
+
+    Es el mismo razonamiento que el docstring de 'delegar_tarea' ya escribia
+    para el nivel --"el silencio ahi seria el peor resultado: la persona se va
+    creyendo que quedo andando"-- aplicado a la precondicion que faltaba.
+
+    POR QUE NO SE ARREGLA ENSANCHANDO LA PUERTA DEL CICLO. La tentacion es que
+    'tasks.py' admita tambien a quien delego solo la accion. Seria exactamente
+    lo que este catalogo prohibe dos lineas mas arriba: "habilitar una cosa no
+    puede habilitar la otra de rebote". Delegar que pase casos a Despacho no
+    autoriza al Supervisor a despertarse cada hora -- eso es 'CICLO_AUTOMATICO'
+    y se pide aparte. Lo que faltaba no era permiso: era decirlo.
+
+    FALLA DICIENDO QUE NO, no al reves: una clave fuera del catalogo devuelve
+    'si=False'. Esta funcion la lee el chat para avisar, y un falso "ya quedo
+    andando" es el resultado que esto existe para evitar.
+    """
+    ficha = CATALOGO.get(clave)
+    if ficha is None:
+        return {"si": False, "por_que": "esa tarea no está en el catálogo"}
+    if not ficha.get("necesita_que_mire"):
+        #  La tarea se corre a si misma -- es el caso de 'CICLO_AUTOMATICO'.
+        return {"si": True, "por_que": ""}
+    if esta_delegada(org, CICLO_AUTOMATICO):
+        return {"si": True, "por_que": ""}
+    return {
+        "si": False,
+        "por_que": (
+            "nada la va a correr sola todavía: el Supervisor solo revisa por "
+            "su cuenta si está delegada «"
+            + CATALOGO[CICLO_AUTOMATICO]["nombre"]
+            + "». Hasta entonces esta tarea corre únicamente cuando una "
+              "persona aprieta el botón de revisar en la pantalla"),
+    }
 
 
 def delegadas(org) -> list[dict]:

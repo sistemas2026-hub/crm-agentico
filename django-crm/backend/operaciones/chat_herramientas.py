@@ -768,6 +768,19 @@ def delegar_tarea(org, *, clave="", pedido="", actor=None,
     silencio ahi seria el peor resultado: la persona se va creyendo que quedo
     andando.
 
+    Y DICE QUIEN LA VA A CORRER, por el mismo motivo  --  15/10/2026. Son DOS
+    precondiciones, no una: el nivel, y que algo despierte al Supervisor. Lo
+    segundo lo da 'CICLO_AUTOMATICO'; sin esa fila el ciclo horario ni recorre
+    a la empresa. Esta herramienta avisaba de la primera y callaba la segunda,
+    asi que con el nivel en 3 contestaba 'ya_puede_actuar: true' y la persona
+    se iba creyendo que quedaba andando -- el peor resultado, otra vez.
+
+    Medido ese dia en el entorno local: 'pasar_a_despacho_segun_las_reglas'
+    delegada y activa, nivel 3, y el ciclo horario devolviendo 'empresas: 0'
+    en las cinco corridas de 16:07 a 21:11 UTC ("ningun ciclo delegado, no se
+    recorre nada"). El panel del Supervisor clavado en las 11:10, sin que nada
+    dijera por que.
+
     Y DEVUELVE QUE MAS ESTA DELEGADO, por una medicion del 08/10/2026. Al
     delegar el ciclo automatico, el modelo cerro diciendo que el cierre de
     desincronizados "podria habilitarse si me lo pedis" -- y ya estaba
@@ -801,18 +814,39 @@ def delegar_tarea(org, *, clave="", pedido="", actor=None,
     otras = [{"clave": d["clave"], "nombre": d["nombre"]}
              for d in td.delegadas(org) if d["clave"] != fila.clave]
 
+    #  QUIEN LA VA A CORRER. Se calcula DESPUES de delegar, a proposito: si la
+    #  tarea delegada recien es el ciclo, lo que acaba de pasar cambia la
+    #  respuesta -- y lo que la persona necesita saber es el estado en que
+    #  queda, no el de antes.
+    corre = td.algo_la_va_a_correr(org, fila.clave)
+
+    #  LOS DOS FALTANTES, Y NINGUNO TAPA AL OTRO. Se arman como lista y se
+    #  juntan al final: con un 'if/elif' el segundo no se veria nunca cuando
+    #  faltan los dos, que es justo el caso de una empresa que recien empieza.
+    faltan = []
+    if not veredicto.get("puede"):
+        faltan.append(
+            f"todavía no puede actuar: {veredicto.get('motivo')}. Se habilita "
+            f"subiendo el nivel de autonomía desde la pantalla del "
+            f"Supervisor, y eso lo hace una persona")
+    if not corre.get("si"):
+        faltan.append(corre.get("por_que", ""))
+
     return {
         "delegada": fila.clave,
         "nombre": ficha.get("nombre", fila.clave),
         "ya_puede_actuar": bool(veredicto.get("puede")),
+        #  SEPARADO DE 'ya_puede_actuar', porque son dos preguntas distintas:
+        #  una es si tiene permiso, la otra si algo la va a invocar. Una tarea
+        #  con permiso que nadie invoca no hace nada, y fundirlas en un solo
+        #  booleano obligaria al modelo a adivinar cual de las dos falta.
+        "algo_la_va_a_correr": bool(corre.get("si")),
         "otras_tareas_ya_delegadas": otras,
         #  Lo que FALTA, dicho sin rodeos. Una tarea delegada que no puede
         #  actuar no es una tarea delegada a medias: es una que no hace nada.
-        "que_falta": ("" if veredicto.get("puede") else
-                      f"la tarea quedó delegada, pero todavía no puede actuar: "
-                      f"{veredicto.get('motivo')}. Se habilita subiendo el "
-                      f"nivel de autonomía desde la pantalla del Supervisor, "
-                      f"y eso lo hace una persona."),
+        "que_falta": ("" if not faltan else
+                      "la tarea quedó delegada, pero " + "; y ".join(faltan)
+                      + "."),
     }
 
 
