@@ -666,8 +666,42 @@
           minute: '2-digit'
         })
       : '—';
+  //  RELOJ DE 24 HORAS, Y NO DE 12  --  15/10/2026
+  //
+  //  'es-CO' por omision da formato de doce horas, y eso hizo ilegible el panel
+  //  de actividad: medianoche salia "12:03 a. m." y mediodia "12:03 p. m.", que
+  //  de un vistazo son lo mismo. Se reporto leyendo el final de la lista como
+  //  si fuera lo mas reciente -- "las horas estan revueltas"-- cuando el orden
+  //  estaba bien y lo ambiguo era el reloj.
+  //
+  //  En 24 horas, 00:03 y 12:03 no se confunden nunca.
   const hora = (/** @type {string|null} */ iso) =>
-    iso ? new Date(iso).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : '—';
+    iso
+      ? new Date(iso).toLocaleTimeString('es-CO', {
+          hour: '2-digit', minute: '2-digit', hour12: false
+        })
+      : '—';
+
+  /**
+   * La hora, con el DIA cuando el hecho no es de hoy.
+   *
+   * La columna mostraba solo la hora, y con doscientos cincuenta y ocho hechos
+   * de varios dias eso no alcanza para ubicar ninguno: dos renglones seguidos
+   * pueden decir 11:10 y ser de dias distintos. El dia solo aparece cuando hace
+   * falta -- repetir "15 oct" en cada fila de hoy es ruido.
+   */
+  const cuando = (/** @type {string|null} */ iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    const hoy = new Date();
+    const mismoDia =
+      d.getFullYear() === hoy.getFullYear() &&
+      d.getMonth() === hoy.getMonth() &&
+      d.getDate() === hoy.getDate();
+    return mismoDia
+      ? hora(iso)
+      : `${d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })} ${hora(iso)}`;
+  };
   const fechaCorta = (/** @type {string|null} */ iso) =>
     iso
       ? new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -2048,7 +2082,7 @@
                   <tbody>
                     {#each actividadVisible as f (f.id)}
                       <tr>
-                        <td class="snoc-mono-sm snoc-tenue" title={fecha(f.cuando)}>{hora(f.cuando)}</td>
+                        <td class="snoc-mono-sm snoc-tenue" title={fecha(f.cuando)}>{cuando(f.cuando)}</td>
                         <td class="snoc-body-sm">
                           {f.evento}
                           {#if f.esIa}
