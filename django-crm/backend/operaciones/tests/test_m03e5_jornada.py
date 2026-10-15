@@ -784,7 +784,10 @@ def test_e5_no_toca_m09(cliente_a, org_a, plan_a, gestor_a):
     import inspect
     from operaciones import supervisor
     from operaciones.models import PropuestaSupervisor
-    assert "secuencia" not in inspect.getsource(supervisor)
+    #  SOBRE EL CODIGO, NO SOBRE LOS COMENTARIOS -- ver el ayudante al
+    #  final del archivo. Se puso en rojo el 14/10/2026 por la palabra
+    #  "consecuencias" en un comentario del Supervisor.
+    assert "secuencia" not in _codigo_sin_comentarios(supervisor)
 
     l1 = _linea(org_a, plan_a, 9740, MIER, gestor_a[1])
     cliente_a.post(URL, _cuerpo(plan_a, MIER.date(), [_item(l1, 1)]),
@@ -821,3 +824,49 @@ def test_ninguna_conexion_saliente(cliente_a, org_a, plan_a, gestor_a):
     assert disparo, "el instrumento no dispara: el 0 de abajo no probaría nada"
     assert [d for d in durante
             if not (isinstance(d, tuple) and len(d) >= 2 and d[1] == 5432)] == []
+
+
+def _codigo_sin_comentarios(modulo) -> str:
+    """El codigo de un modulo, sin comentarios y sin docstrings.
+
+    POR QUE HACE FALTA  --  14/10/2026
+    ----------------------------------
+    Las guardas de este archivo buscan una palabra en 'inspect.getsource'
+    para afirmar que el Supervisor no consume cierto modulo. Ese dia se
+    pusieron en rojo por un COMENTARIO que decia 'sin consecuencias': la
+    palabra contiene la que se busca, y la guarda no distingue.
+
+    No es la primera vez aca. Una guarda de cache fallo contra el propio
+    comentario que explicaba por que esa cache no se usaba. Lo que la
+    guarda protege es que el CODIGO no toque ese modulo, y un comentario
+    que lo menciona para decir que NO lo usa es lo contrario de la falla.
+
+    SE USA EL AST Y NO UN FILTRO DE LINEAS. La primera version de esto
+    recorria lineas llevando un estado de 'estoy dentro de un docstring', y
+    ese estado se desbalanceo: una linea de docstring sobrevivio y la
+    guarda siguio en rojo. Un parser a mano de triple-comilla es
+    exactamente el tipo de cosa que no hay que escribir cuando la libreria
+    estandar ya lo hace bien.
+
+    'ast.unparse' devuelve el codigo SIN comentarios por construccion --no
+    estan en el arbol-- y los docstrings se quitan antes, nodo por nodo.
+    Lo que queda es lo que se ejecuta."""
+    import ast
+    import inspect
+
+    arbol = ast.parse(inspect.getsource(modulo))
+    for nodo in ast.walk(arbol):
+        if not isinstance(nodo, (ast.Module, ast.ClassDef,
+                                 ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        cuerpo = getattr(nodo, 'body', None)
+        if not cuerpo:
+            continue
+        primero = cuerpo[0]
+        if (isinstance(primero, ast.Expr)
+                and isinstance(primero.value, ast.Constant)
+                and isinstance(primero.value.value, str)):
+            #  Se reemplaza por 'pass' en vez de borrarlo: un cuerpo vacio
+            #  no es codigo valido y 'unparse' se caeria.
+            cuerpo[0] = ast.Pass()
+    return ast.unparse(arbol)

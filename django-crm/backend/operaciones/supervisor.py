@@ -2500,6 +2500,31 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         #  presupuesto de la vuelta se agota, que se agote en lo segundo.
         ("lectura de tickets abiertos",
          lambda: _leer_tickets_abiertos(org, ahora)),
+        #  EL PASO A DESPACHO ES SU PROPIA FASE  --  14/10/2026, por la tarde
+        #  ------------------------------------------------------------------
+        #  Nacio DENTRO de la fase de lectura, y ahi estaba muerto: esa fase
+        #  arranca con "if not candidatas: return informe", y una propuesta que
+        #  YA tiene su lectura no es candidata a leerse. Con las 80 propuestas
+        #  del dia ya leidas, el ciclo salia por ese return y el paso no corria
+        #  nunca.
+        #
+        #  MEDIDO: tras el despliegue de las 21:55 UTC el ciclo registro 5
+        #  razonamientos y CERO lecturas de ticket, y ninguna propuesta paso.
+        #  El sintoma que vio el cliente fue "ejecute el ciclo y no hizo nada",
+        #  sin un solo error en ningun log.
+        #
+        #  Es la tercera vez en el dia que el mismo error aparece con otra
+        #  cara: poner la decision en una rama a la que los casos que importan
+        #  no llegan. Antes fue la cola de los desincronizados ya
+        #  diagnosticados, y despues la exigencia de "diagnostico_leido" en
+        #  esta misma vuelta. La forma de cerrarlo no es mover el "if": es que
+        #  el paso NO DEPENDA de que se haya leido algo, y consulte las
+        #  propuestas pendientes por su cuenta.
+        #
+        #  VA TERCERA porque usa lo que las dos anteriores escribieron: una
+        #  lectura hecha en esta vuelta ya esta guardada cuando esto corre.
+        ("paso a Despacho",
+         lambda: _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora)),
     ):
         try:
             resumen.update(fase())
@@ -2574,7 +2599,10 @@ def _leer_tickets_abiertos(org, ahora) -> dict:
             #  Si hay una DECIDIDA (aceptada, rechazada), no se toca: una
             #  persona ya resolvio, y releerla gastaria la vuelta.
             continue
-        if dxt.le_falta_lectura(p):
+        #  O LE FALTA EL GRUPO, que es una lectura incompleta para el paso
+        #  a Despacho. Son dos criterios y no uno: ver la nota de
+        #  'le_falta_lectura', que distingue los tres casos.
+        if dxt.le_falta_lectura(p) or dxt.le_falta_el_grupo(p):
             #  'str()' en los dos lados: 'diagnostico_de_ticket' busca con
             #  'str(senal.origen_id)' y aca se guardaba crudo. Si alguna vez
             #  'origen_id' deja de ser texto, uno encuentra y el otro no --
@@ -2642,27 +2670,68 @@ def _leer_tickets_abiertos(org, ahora) -> dict:
                 guardadas, sin_propuesta, sin_leer_de_verdad, fallaron,
                 len(candidatas))
 
-    informe["despacho"] = _pasar_a_despacho_los_que_las_reglas_habiliten(
-        org, candidatas, pendientes, ahora)
     return informe
 
 
-def _pasar_a_despacho_los_que_las_reglas_habiliten(org, candidatas, pendientes,
-                                                   ahora) -> dict:
+#:  Cuantas propuestas pendientes se miran por vuelta. NO es el tope de
+#:  lecturas: mirar una propuesta ya leida no cuesta una llamada al modelo,
+#:  solo las puertas y una escritura. Se acota igual para que una vuelta no se
+#:  haga eterna si hay cientos esperando.
+TOPE_PASO_A_DESPACHO = 60
+
+
+class _SinSenal:
     """
-    Las cinco reglas, aplicadas a los tickets que ya se leyeron en esta vuelta.
+    Una señal minima armada desde la propuesta, para los que no se leyeron hoy.
 
-    VA DESPUES DE GUARDAR LA LECTURA, y el orden no es casual: lo que decide
-    el paso sale de 'senal.datos', que 'diagnosticar' acaba de escribir, y la
-    propuesta tiene que tener su evidencia ANTES de aceptarse -- si no, el caso
-    llegaria a la cola de Despacho sin el porque a la vista de quien despacha.
+    'pasar_si_corresponde' acepta una señal porque en el camino normal la hay
+    --el ciclo acaba de leer el ticket-- y de ahi saca el juicio mas nuevo.
+    Esta no trae 'datos', asi que ese camino da vacio y cae al de la propuesta,
+    que es justo lo que corresponde cuando la lectura es de otra vuelta.
 
-    Es la regla de persistencia de §12 aplicada aca: guardar primero, producir
-    el efecto despues.
+    NO se inventa un 'datos' con valores por omision: un grupo puesto por
+    defecto seria una clasificacion que nadie hizo.
+    """
+
+    __slots__ = ("tipo", "origen_tipo", "origen_id", "evidencia", "datos")
+
+    def __init__(self, propuesta):
+        self.tipo = propuesta.tipo_senal
+        self.origen_tipo = propuesta.origen_tipo
+        self.origen_id = str(propuesta.origen_id)
+        self.evidencia = []
+        self.datos = {}
+
+
+def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
+    """
+    Las cinco reglas, aplicadas a TODAS las propuestas de ticket sin decidir.
+
+    CONSULTA LA BASE, no recibe las señales de la vuelta. Es lo que la vuelve
+    independiente de la fase de lectura: con el tope en diez lecturas por
+    corrida y 80 propuestas esperando, depender de lo recien leido dejaba
+    fuera a 70 -- y cuando ya no quedaba nada por leer, dejaba fuera a todas.
+
+    Lo que decide sale de la evidencia GUARDADA en cada propuesta, que
+    'diagnostico_de_ticket' escribe con sus claves propias. Una lectura hecha
+    en esta misma vuelta ya esta ahi: esta fase va tercera a proposito.
+
+    Y la propuesta tiene su evidencia ANTES de aceptarse, que es la regla de
+    persistencia de §12 -- guardar primero, producir el efecto despues. Un caso
+    que llegara a la cola sin el porque a la vista seria peor que uno que no
+    llega: quien despacha no tendria con que discutirlo.
 
     NO LEVANTA. Un paso que no ocurre es un resultado posible del ciclo.
     """
     from operaciones import autonomia, paso_a_despacho as pad
+
+    #  LAS PENDIENTES, las mas viejas primero: una propuesta que lleva dias
+    #  esperando es la que mas necesita moverse.
+    sin_decidir = list(
+        PropuestaSupervisor.objects
+        .filter(org=org, tipo_senal=PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO,
+                estado=PropuestaSupervisor.PROPUESTA, origen_tipo="case")
+        .order_by("created_at")[:TOPE_PASO_A_DESPACHO])
 
     #  'por_confianza' SE CUENTA PARA PODER CALIBRAR  --  14/10/2026
     #
@@ -2676,9 +2745,11 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, candidatas, pendientes,
     #  que UNA corrida alcance para saberla, en vez de salir a consultar la
     #  base propuesta por propuesta.
     reporte = {"pasaron": 0, "se_quedaron": 0, "fallaron": 0,
-               "por_grupo": {}, "por_confianza": {}, "motivos": {}}
-    if not candidatas:
-        return reporte
+               "por_grupo": {}, "por_confianza": {}, "motivos": {},
+               "pendientes_miradas": 0}
+    reporte["pendientes_miradas"] = len(sin_decidir)
+    if not sin_decidir:
+        return {"despacho": reporte}
 
     #  UNA sola consulta del techo para toda la corrida: es una llamada de red,
     #  y preguntarla por caso son tantas como casos. Mismo criterio que el
@@ -2691,30 +2762,15 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, candidatas, pendientes,
                     "el paso a Despacho (%s): no pasa ninguno",
                     type(e).__name__)
         reporte["motivos"]["no se pudo leer el techo de autonomia"] = len(
-            candidatas)
-        reporte["se_quedaron"] = len(candidatas)
-        return reporte
+            sin_decidir)
+        reporte["se_quedaron"] = len(sin_decidir)
+        return {"despacho": reporte}
 
-    #  NO SE EXIGE QUE SE HAYA LEIDO EN ESTA VUELTA  --  14/10/2026
-    #  ------------------------------------------------------------
-    #  La primera version pedia 'diagnostico_leido', que 'diagnosticar' pone
-    #  solo en los tickets que lee en la corrida. Con el tope en diez por
-    #  vuelta y 76 propuestas esperando, eso dejaba fuera a las 66 restantes
-    #  por vuelta -- y peor: un ticket que no pudo pasar hoy porque una puerta
-    #  estaba cerrada necesitaba que el modelo lo leyera OTRA VEZ.
-    #
-    #  Es la misma forma del bug que tenia atascados a los desincronizados. Se
-    #  corrige del mismo modo: 'pasar_si_corresponde' usa la lectura guardada
-    #  en la propuesta cuando la señal no trae una nueva. Una propuesta sin
-    #  grupo guardado --leida antes de que esto existiera-- se queda, y eso lo
-    #  dice su motivo.
-    for s in candidatas:
-        p = pendientes.get(str(s.origen_id))
-        if p is None:
-            continue
+    for p in sin_decidir:
         try:
-            r = pad.pasar_si_corresponde(org, s, p, ahora=ahora,
-                                         autorizacion=autorizacion)
+            r = pad.pasar_si_corresponde(
+                org, _SinSenal(p), p, ahora=ahora,
+                autorizacion=autorizacion)
         except Exception as e:                                   # noqa: BLE001
             #  'pasar_si_corresponde' promete no levantar, pero una excepcion
             #  inesperada aqui no puede tumbar el resto de la vuelta.
@@ -2725,8 +2781,7 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, candidatas, pendientes,
 
         grupo = r.get("grupo") or "sin grupo"
         reporte["por_grupo"][grupo] = reporte["por_grupo"].get(grupo, 0) + 1
-        conf = (s.datos.get("confianza_del_grupo")
-                or _de_la_lectura_guardada(p, "confianza_del_grupo")
+        conf = (_de_la_lectura_guardada(p, "confianza_del_grupo")
                 or "sin declarar")
         reporte["por_confianza"][conf] = reporte["por_confianza"].get(conf, 0) + 1
         if r.get("paso"):
@@ -2744,7 +2799,7 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, candidatas, pendientes,
                 reporte["pasaron"], reporte["se_quedaron"],
                 reporte["fallaron"], reporte["por_grupo"],
                 reporte["por_confianza"])
-    return reporte
+    return {"despacho": reporte}
 
 
 def _de_la_lectura_guardada(propuesta, clave: str) -> str:

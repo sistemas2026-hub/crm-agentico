@@ -382,11 +382,62 @@ def le_falta_lectura(propuesta) -> bool:
     bandera aparte podria quedar puesta sin que la evidencia este, y entonces
     diria que ya se leyo un ticket del que no quedo escrito nada -- el mismo
     criterio que usa 'diagnostico_optico.le_falta_diagnostico'.
+
+    NO MIRA SI LA LECTURA ESTA COMPLETA, y eso es deliberado. Hay dos
+    preguntas parecidas y cada una tiene su funcion, porque mezclarlas borra
+    los casos que hay que distinguir:
+
+        le_falta_lectura            no hay NINGUNA evidencia de lectura
+        el_juicio_ignora_la_lectura la lectura esta, y el resumen la contradice
+        le_falta_el_grupo           la lectura esta, y es de antes de que se
+                                    guardara el grupo (14/10/2026)
+
+    La primera version del tercer caso se metio DENTRO de esta funcion y una
+    guarda lo encontro: su mensaje decia "el criterio viejo no la ve como
+    pendiente, que es justo por lo que hacia falta uno nuevo". Tenia razon.
     """
     for pieza in (propuesta.evidencia or []):
         if isinstance(pieza, dict) and pieza.get("fuente") == FUENTE:
             return False
     return True
+
+
+def le_falta_el_grupo(propuesta) -> bool:
+    """
+    Si la lectura que esta guardada es de ANTES de que se guardara el grupo.
+
+    EL LIMBO QUE CIERRA  --  14/10/2026
+    -----------------------------------
+    Ese dia la lectura empezo a guardar el GRUPO del ticket, que es lo que el
+    paso a Despacho necesita para decidir. Las 80 propuestas que ya existian se
+    habian leido antes, asi que tenian la frase y no la clave -- y quedaban con
+    las dos puertas cerradas:
+
+        tienen lectura          ->  no eran candidatas a leerse de nuevo
+        su lectura no da grupo  ->  el paso no podia decidirlas
+
+    El sintoma seria el de siempre --"ejecute el ciclo y no se movio nada"--
+    sin un error en ningun log, y para siempre.
+
+    EL COSTO ES REAL y conviene saberlo: volver a leer cuesta una consulta al
+    modelo por ticket, con el tope de 'TOPE_TICKETS_POR_CORRIDA' por vuelta. Se
+    paga una vez; de los tickets nuevos en adelante el grupo ya viene.
+
+    LO QUE NO SE HACE, y es deliberado: deducir el grupo del texto de la frase
+    vieja. Es texto libre escrito para que lo lea una persona, y clasificar un
+    ticket interpretandolo es exactamente lo que este modulo existe para
+    evitar. Mejor pagar la relectura que inventar una clasificacion.
+
+    SIN NINGUNA LECTURA devuelve False: ese caso es de 'le_falta_lectura', y
+    contestar las dos cosas desde aca es lo que ya salio mal una vez.
+    """
+    hay_lectura = False
+    for pieza in (propuesta.evidencia or []):
+        if isinstance(pieza, dict) and pieza.get("fuente") == FUENTE:
+            hay_lectura = True
+            if "grupo" in pieza:
+                return False
+    return hay_lectura
 
 
 #:  Cuanto de la hipotesis tiene que aparecer en el motivo para dar por hecho
