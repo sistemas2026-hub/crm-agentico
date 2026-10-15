@@ -329,6 +329,85 @@
   const actividad = $derived(
     actividadReciente(eventosVivos ?? data.actividad?.eventos));
 
+  //  EL FILTRO Y LA PAGINACION DE LA ACTIVIDAD  --  15/10/2026
+  //
+  //  POR QUE HACE FALTA: el panel trae los ultimos eventos de CUALQUIER tipo,
+  //  y cada vuelta del ciclo genera propuestas nuevas. Medido ese dia: de los
+  //  ultimos 20 eventos, 13 eran pases a Despacho y 7 propuestas creadas --
+  //  pero a medida que el ciclo sigue, los pases se diluyen hasta desaparecer
+  //  del panel aunque sigan guardados enteros en la base. Subir el limite no lo
+  //  arregla: lo retrasa.
+  //
+  //  EL FILTRO LO RESUELVE EL BACKEND, no un 'filter' aqui: filtrando sobre los
+  //  doce hechos que llegaron, el numero del boton diria cuantos entraron en
+  //  esa tanda y no cuantos hay. "Cierres de caso (28)" tiene que ser 28.
+  let grupo = $state('');
+  //  Lo que se trajo hacia atras con "Ver mas". Vive aparte de lo que trae el
+  //  sondeo, y la razon es concreta: el sondeo REEMPLAZA su lista cada diez
+  //  segundos, asi que si las paginas viejas vivieran ahi, cargar tres y
+  //  esperar diez segundos las borraria.
+  let paginasViejas = $state(/** @type {any[]} */ ([]));
+  let siguiente = $state(/** @type {string | null} */ (null));
+  let cargandoMas = $state(false);
+  let porGrupo = $state(/** @type {Record<string, number>} */ (data.actividad?.porGrupo ?? {}));
+
+  //  Los grupos, con el rotulo que lee una persona. Las claves son las del
+  //  backend ('auditoria.GRUPOS') y no se traducen aqui de vuelta: lo que viaja
+  //  es la clave cruda, para que una redaccion nueva no rompa el filtro.
+  const GRUPOS_VISIBLES = [
+    { clave: '', rotulo: 'Todo' },
+    { clave: 'pasa_a_despacho', rotulo: 'Pasados a Despacho' },
+    { clave: 'cierra_caso', rotulo: 'Cierres de caso' },
+    { clave: 'propone', rotulo: 'Propuestas' },
+    { clave: 'otros', rotulo: 'Otros' }
+  ];
+
+  const actividadVisible = $derived([...actividad.filas, ...paginasViejas]);
+
+  //  La declara el $effect del sondeo; se nombra aqui para que 'elegirGrupo'
+  //  pueda llamarla. Svelte 5 permite esto porque el efecto corre al montar,
+  //  antes de que haya ningun click.
+  let traerActividad = async () => {};
+
+  /** Cambia de grupo: se vuelve a pedir desde arriba, sin las paginas viejas. */
+  async function elegirGrupo(nueva) {
+    if (nueva === grupo) return;
+    grupo = nueva;
+    paginasViejas = [];
+    siguiente = null;
+    //  Se fuerza una lectura ya, sin esperar los diez segundos del sondeo: un
+    //  filtro que tarda en responder se siente roto.
+    await traerActividad();
+  }
+
+  /** Trae la pagina siguiente y la SUMA abajo, sin tocar lo de arriba. */
+  async function verMas() {
+    if (!siguiente || cargandoMas) return;
+    cargandoMas = true;
+    try {
+      const q = new URLSearchParams({ antes_de: siguiente, limite: '20' });
+      if (grupo) q.set('grupo', grupo);
+      const r = await fetch(`/supervisor-noc/actividad?${q}`, {
+        headers: { accept: 'application/json' }
+      });
+      if (!r.ok) return;
+      const cuerpo = await r.json();
+      if (cuerpo?.error) return;
+      const llegados = Array.isArray(cuerpo?.eventos) ? cuerpo.eventos : [];
+      //  SE DESCARTA LO QUE YA ESTA. El sondeo y esto piden rangos distintos y
+      //  pueden solaparse en el borde; sin esto, un hecho saldria dos veces y
+      //  la lista {#each} con clave duplicada rompe el render.
+      const vistos = new Set(actividadVisible.map((f) => f.id));
+      paginasViejas = [
+        ...paginasViejas,
+        ...actividadReciente(llegados).filas.filter((f) => !vistos.has(f.id))
+      ];
+      siguiente = cuerpo?.siguiente ?? null;
+    } finally {
+      cargandoMas = false;
+    }
+  }
+
   /**
    * La bandeja: filtrada, ordenada y numerada. La logica vive en
    * $lib/v2/supervisor-noc-tablero.js y esta probada aparte -- el orden y la
@@ -408,8 +487,18 @@
 
     async function sondear() {
       if (document.visibilityState !== 'visible') return;
+      await traerActividad();
+    }
+
+    //  LA LECTURA, SOLA. Se separa del sondeo para que cambiar de filtro pueda
+    //  provocarla sin esperar los diez segundos -- un filtro que tarda en
+    //  responder se siente roto -- y para que las dos usen el mismo camino: dos
+    //  formas de leer lo mismo es tener dos lugares donde arreglar un error.
+    traerActividad = async function () {
       try {
-        const r = await fetch('/supervisor-noc/actividad', {
+        const q = new URLSearchParams();
+        if (grupo) q.set('grupo', grupo);
+        const r = await fetch(`/supervisor-noc/actividad${q.size ? `?${q}` : ''}`, {
           headers: { accept: 'application/json' }
         });
         if (!r.ok) throw new Error(String(r.status));
@@ -422,6 +511,14 @@
           return;
         }
         const llegados = Array.isArray(cuerpo?.eventos) ? cuerpo.eventos : [];
+        //  LOS CONTEOS VIENEN DEL BACKEND y se guardan siempre, cambie o no la
+        //  lista: son de TODO el historial, no de esta tanda, asi que suben
+        //  aunque los hechos nuevos no entren en la pagina que se muestra.
+        porGrupo = cuerpo?.porGrupo ?? porGrupo;
+        //  Solo se toma el cursor cuando NO hay paginas cargadas: si la persona
+        //  ya fue hacia atras, el cursor que vale es el de su ultima pagina, no
+        //  el de la primera -- pisarlo la haria volver a empezar sola.
+        if (paginasViejas.length === 0) siguiente = cuerpo?.siguiente ?? null;
 
         //  SOLO SE ESCRIBE SI CAMBIO ALGO  --  09/10/2026
         //  ---------------------------------------------
@@ -1891,11 +1988,49 @@
                   Sin actualizar
                 </span>
               {/if}
+
+              <!--
+                EL FILTRO, y dice cuantos hay de cada cosa. Un selector que no
+                dice cuanto deja afuera obliga a probarlo para saber si sirve.
+              -->
+              <span class="snoc-filtro-actividad">
+                {#each GRUPOS_VISIBLES as g (g.clave)}
+                  <button
+                    type="button"
+                    class="snoc-filtro-btn {grupo === g.clave ? 'snoc-filtro-btn-activo' : ''}"
+                    onclick={() => elegirGrupo(g.clave)}>
+                    {g.rotulo}
+                    <!--
+                      EL NUMERO ES DE TODO EL HISTORIAL, no de lo que se ve: lo
+                      cuenta el backend. Un selector que no dice cuantos hay
+                      obliga a apretarlo para saber si sirve, y con un panel que
+                      se refresca solo eso significa no poder distinguir "no
+                      hay" de "todavia no llego".
+                    -->
+                    {#if porGrupo[g.clave || 'todo'] !== undefined}
+                      <span class="snoc-filtro-n">{porGrupo[g.clave || 'todo']}</span>
+                    {/if}
+                  </button>
+                {/each}
+              </span>
             </h2>
             {#if data.actividad.error}
               <div class="snoc-hueco">
                 <span class="snoc-hueco-rotulo">Sin dato</span>
                 <p class="snoc-hueco-motivo">{data.actividad.error.mensaje}</p>
+              </div>
+            {:else if actividad.disponible && grupo && actividadVisible.length === 0}
+              <!--
+                "El filtro no deja nada" NO es "no hay actividad": decir lo
+                segundo cuando pasa lo primero manda a buscar el problema al
+                lado equivocado.
+              -->
+              <div class="snoc-hueco">
+                <span class="snoc-hueco-rotulo">Nada de este tipo todavía</span>
+                <p class="snoc-hueco-motivo">
+                  Hay actividad en el módulo, pero ninguna de
+                  «{GRUPOS_VISIBLES.find((g) => g.clave === grupo)?.rotulo ?? grupo}».
+                </p>
               </div>
             {:else if !actividad.disponible}
               <div class="snoc-hueco">
@@ -1911,7 +2046,7 @@
                     <tr><th>Hora</th><th>Evento</th><th>Detalle</th></tr>
                   </thead>
                   <tbody>
-                    {#each actividad.filas as f (f.id)}
+                    {#each actividadVisible as f (f.id)}
                       <tr>
                         <td class="snoc-mono-sm snoc-tenue" title={fecha(f.cuando)}>{hora(f.cuando)}</td>
                         <td class="snoc-body-sm">
@@ -1925,6 +2060,21 @@
                     {/each}
                   </tbody>
                 </table>
+
+                <!--
+                  VER MAS: trae hechos mas viejos y los SUMA abajo, sin tocar lo
+                  de arriba. El cursor va por fecha y no por posicion: con el
+                  ciclo auditando cada hora entran filas arriba todo el tiempo, y
+                  un desplazamiento por numero repetiria lo que ya se mostro.
+                -->
+                {#if siguiente}
+                  <button class="snoc-ver-mas" type="button"
+                          onclick={verMas} disabled={cargandoMas}>
+                    {cargandoMas ? 'Trayendo…' : 'Ver más atrás'}
+                  </button>
+                {:else if actividadVisible.length > 0}
+                  <p class="snoc-fin-historial">No hay nada más atrás.</p>
+                {/if}
               </div>
             {/if}
           </div>

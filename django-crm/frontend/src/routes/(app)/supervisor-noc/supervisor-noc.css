@@ -1193,3 +1193,72 @@
 /* El mismo punto, también en las pastillas del filtro. */
 .snoc-pildora .snoc-punto-nivel { margin-right: 1px; }
 .snoc-pildora-activa .snoc-punto-nivel { background: currentColor; }
+
+/* --- El filtro de la actividad  --  15/10/2026 -----------------------------
+   POR QUE EXISTE: el panel trae los ultimos eventos de CUALQUIER tipo, y cada
+   vuelta del ciclo genera propuestas nuevas. Medido ese dia: de los ultimos 20
+   eventos, 13 eran pases a Despacho y 7 propuestas creadas -- y a medida que el
+   ciclo sigue, los pases se diluyen hasta desaparecer del panel aunque sigan
+   guardados enteros en la base. Subir el limite lo retrasa; poder preguntar por
+   ellos lo resuelve.
+
+   CADA BOTON DICE CUANTOS HAY. Un selector que no dice lo que deja afuera
+   obliga a probarlo para saber si sirve.
+
+   Va despues de "En vivo", que ya lleva 'margin-left:auto': los dos quedan
+   juntos a la derecha del titulo, que es donde vive el estado del panel. */
+.snoc-filtro-actividad {
+  display: inline-flex; gap: 2px; margin-left: var(--snoc-sm);
+  padding: 2px; border-radius: var(--snoc-r-full);
+  background: var(--snoc-surface-variant);
+}
+.snoc-filtro-btn {
+  border: 0; cursor: pointer; border-radius: var(--snoc-r-full);
+  padding: 3px 10px; font: inherit;
+  font-size: 0.625rem; font-weight: 600; letter-spacing: 0.02em;
+  background: transparent; color: var(--snoc-on-surface-variant);
+}
+.snoc-filtro-btn:hover { color: var(--snoc-on-surface); }
+/* El foco se ve: se navega con teclado y un boton sin anillo deja a quien lo
+   usa sin saber donde esta parado. */
+.snoc-filtro-btn:focus-visible {
+  outline: 2px solid var(--snoc-primary); outline-offset: 1px;
+}
+.snoc-filtro-btn-activo {
+  background: var(--snoc-surface); color: var(--snoc-primary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+/* En pantalla angosta el titulo ya se apila; el filtro no debe empujar el
+   ancho ni obligar a scroll horizontal. */
+@media (max-width: 640px) {
+  .snoc-filtro-actividad { margin-left: 0; flex-wrap: wrap; }
+}
+
+/* El numero de cada grupo, al lado de su rotulo. Tono mas tenue que el texto:
+   es un dato de apoyo, no el nombre del boton. */
+.snoc-filtro-n {
+  margin-left: 4px; opacity: 0.7; font-variant-numeric: tabular-nums;
+}
+
+/* --- Ver mas atras ---------------------------------------------------------
+   Trae hechos mas viejos y los suma abajo. Ocupa el ancho para que se lea como
+   "sigue" y no como una accion suelta al costado. */
+.snoc-ver-mas {
+  width: 100%; margin-top: var(--snoc-xs);
+  border: 1px dashed var(--snoc-outline); border-radius: var(--snoc-r-lg);
+  background: transparent; cursor: pointer;
+  padding: var(--snoc-xs); font: inherit; font-size: 0.75rem;
+  color: var(--snoc-primary);
+}
+.snoc-ver-mas:hover:not(:disabled) { background: var(--snoc-surface-variant); }
+.snoc-ver-mas:disabled { cursor: default; color: var(--snoc-on-surface-variant); }
+.snoc-ver-mas:focus-visible {
+  outline: 2px solid var(--snoc-primary); outline-offset: 1px;
+}
+
+/* "No hay nada mas atras" es una afirmacion, no un hueco: se dice en tono
+   tenue y sin caja, porque no hay nada que arreglar. */
+.snoc-fin-historial {
+  margin: var(--snoc-xs) 0 0; text-align: center;
+  font-size: 0.6875rem; color: var(--snoc-on-surface-variant);
+}

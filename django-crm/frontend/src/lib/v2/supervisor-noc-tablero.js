@@ -343,6 +343,16 @@ export function cargaPorTecnico(personas) {
  *
  * @param {any[]} eventos
  */
+/**
+ * La accion que registra un paso a Despacho.
+ *
+ * Una propuesta ACEPTADA es, literalmente, un caso que entro a la cola de
+ * Despacho: 'campo/casos-despachables' lista los casos cuya propuesta esta en
+ * ACEPTADA o MODIFICADA. Por eso el filtro es por esta accion y no por un
+ * campo aparte que habria que mantener en sincronia.
+ */
+export const ACCION_PASO_A_DESPACHO = 'APPROVED';
+
 export function actividadReciente(eventos) {
   if (!Array.isArray(eventos) || eventos.length === 0) {
     return { disponible: false, filas: [] };
@@ -362,6 +372,13 @@ export function actividadReciente(eventos) {
     disponible: true,
     filas: eventos.map((e) => ({
       id: e?.id ?? '',
+      //  LA ACCION CRUDA VIAJA ADEMAS DEL VERBO  --  15/10/2026
+      //
+      //  'evento' es para leer; esto es para FILTRAR. Filtrar por el texto
+      //  traducido ataria el filtro al idioma: el dia que 'Propuesta aceptada'
+      //  cambie de redaccion, el filtro dejaria de encontrar nada y nadie se
+      //  enteraria -- la pantalla se veria igual, solo vacia.
+      accion: e?.accion ?? '',
       evento: VERBO[e?.accion] ?? e?.accion ?? '',
       detalle: e?.nombre || e?.descripcion || '',
       cuando: e?.cuando ?? null,

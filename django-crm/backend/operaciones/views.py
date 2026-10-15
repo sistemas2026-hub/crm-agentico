@@ -182,9 +182,46 @@ class ActividadSupervisorView(APIView):
             limite = 20
         limite = max(1, min(limite, 100))
 
-        filas = auditoria.recientes(request.org, limite)
+        #  EL GRUPO Y LA PAGINA  --  15/10/2026
+        #
+        #  'grupo' filtra por lo que el Supervisor hizo; vacio trae todo. Uno
+        #  que no existe devuelve VACIO y no "todo" -- lo resuelve 'recientes',
+        #  y la razon esta escrita alla: tratar lo que no se entiende como "sin
+        #  filtro" mostraria MAS de lo que se pidio, que en auditoria es la peor
+        #  direccion del error.
+        #
+        #  'antes_de' es la pagina siguiente, y va por FECHA y no por 'offset':
+        #  con el ciclo auditando cada hora entran filas arriba todo el tiempo,
+        #  y un offset repetiria lo que la pagina anterior ya mostro.
+        grupo = (request.query_params.get("grupo") or "").strip()
+        antes_de = None
+        crudo = (request.query_params.get("antes_de") or "").strip()
+        if crudo:
+            from django.utils.dateparse import parse_datetime
+
+            antes_de = parse_datetime(crudo)
+            if antes_de is None:
+                #  Una fecha ilegible NO se ignora: ignorarla devolveria la
+                #  primera pagina otra vez, y quien hojea veria repetirse lo que
+                #  ya leyo sin entender por que.
+                return Response(
+                    {"error": "El parámetro 'antes_de' no es una fecha válida.",
+                     "recibido": crudo[:60]},
+                    status=status.HTTP_400_BAD_REQUEST)
+
+        filas = auditoria.recientes(request.org, limite, grupo=grupo,
+                                    antes_de=antes_de)
         return Response({
             "count": len(filas),
+            #  CUANTOS HAY DE CADA GRUPO, sobre TODO el historial y no sobre
+            #  esta pagina: el numero al lado de "Cierres de caso" tiene que
+            #  decir cuantos cierres hubo, no cuantos entraron en los ultimos
+            #  veinte hechos.
+            "por_grupo": auditoria.cuantos_por_grupo(request.org),
+            #  Con que seguir hacia atras. 'null' significa "no hay mas", y el
+            #  frontend no tiene que deducirlo contando.
+            "siguiente": (filas[len(filas) - 1].created_at.isoformat()
+                          if len(filas) == limite else None),
             "resultados": [
                 {
                     "id": str(f.id),

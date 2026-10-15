@@ -39,7 +39,14 @@ export async function GET({ cookies, url }) {
   const pedido = Number(url.searchParams.get('limite'));
   const limite = Number.isFinite(pedido) ? Math.max(1, Math.min(pedido, 100)) : 12;
 
-  const actividad = await leerActividad({ cookies }, limite);
+  //  EL GRUPO Y LA PAGINA pasan tal cual: esta ruta no decide nada sobre
+  //  ellos, solo los lleva. Un grupo que no existe lo resuelve el backend
+  //  devolviendo vacio --nunca "todo"--, y repetir esa regla aqui seria tener
+  //  dos lugares donde arreglarla el dia que cambie.
+  const grupo = url.searchParams.get('grupo') ?? '';
+  const antesDe = url.searchParams.get('antes_de') ?? '';
+
+  const actividad = await leerActividad({ cookies }, limite, { grupo, antesDe });
 
   //  SE DEVUELVE LA MISMA FORMA que pone el load --{ eventos, error }-- para
   //  que la pantalla no tenga dos maneras de leer lo mismo. 'error' puesto con

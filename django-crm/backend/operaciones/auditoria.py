@@ -36,6 +36,8 @@ cliente esperando, y una decision humana sin rastro no sirve para nada.
 
 from __future__ import annotations
 
+from django.db.models import Q
+
 from common.models import Activity
 
 # Los dos tipos de entidad que este modulo audita. Se declaran en
@@ -49,6 +51,63 @@ ENTIDAD_NOVEDAD = "NovedadOperativa"
 #  P6: para auditar una coordinacion rechazada, que por definicion no tiene
 #  actividad contra la que registrarse.
 ENTIDAD_SITUACION = "SituacionOperativa"
+
+#  EL CASO, Y POR QUE FALTABA  --  15/10/2026
+#
+#  Cuando el Supervisor CIERRA un caso desincronizado, esa auditoria se escribe
+#  sobre el CASO: 'cierre_de_caso.py' hace entity_type="Case",
+#  action="STATUS_CHANGED'. Como 'Case' no estaba en esta lista, el feed no lo
+#  mostraba -- y esa es la accion con mas efecto que el Supervisor hace hoy:
+#  veintiocho casos cerrados solo el 14/10/2026 en produccion, ninguno visible
+#  en su propio panel de actividad.
+#
+#  Medido el 15/10 sobre el local, con la auditoria entera a la vista:
+#      PropuestaSupervisor CREATE    100   llegaba
+#      PropuestaSupervisor APPROVED   20   llegaba
+#      Case                CREATE     69   NO llegaba
+#      Case                ASSIGN     69   NO llegaba
+#
+#  'Case' SI esta declarado en 'Activity.ENTITY_TYPE_CHOICES', asi que esto no
+#  agrega un valor que el modelo no conozca.
+ENTIDAD_CASO = "Case"
+
+#:  Las entidades que este modulo mira. NO es toda 'common.Activity' y no debe
+#:  serlo: sin este filtro el feed se llenaria de contactos editados y correos
+#:  enviados, que es cierto pero no es lo que esta pantalla pregunta.
+ENTIDADES_DEL_SUPERVISOR = (ENTIDAD_PROPUESTA, ENTIDAD_ACTIVIDAD,
+                            ENTIDAD_NOVEDAD, ENTIDAD_SITUACION, ENTIDAD_CASO)
+
+#:  LOS GRUPOS DEL FILTRO, por lo que una persona quiere preguntar.
+#:
+#:  Se agrupa por ACCION CRUDA y no por el texto que se muestra: atar el filtro
+#:  al idioma hace que una redaccion nueva lo deje sin encontrar nada, y la
+#:  pantalla se ve igual, solo vacia. Es la clase de falla que no da error.
+#:
+#:  'pasa_a_despacho' es APPROVED porque una propuesta aceptada ES un caso que
+#:  entro a la cola: 'campo/casos-despachables' lista los casos cuya propuesta
+#:  esta en ACEPTADA o MODIFICADA.
+#:  CADA GRUPO ES (entidad, accion), NO solo la accion.
+#:
+#:  La primera version agrupaba por accion sola, y el conteo la delato: dijo
+#:  "propone: 169" cuando el Supervisor habia generado 100 propuestas. Los otros
+#:  69 eran 'Case CREATE' --casos creados por otra via-- contados como si el
+#:  Supervisor los hubiera propuesto. Un panel de auditoria que le atribuye a
+#:  alguien lo que no hizo es peor que uno incompleto.
+GRUPOS = {
+    "pasa_a_despacho": ((ENTIDAD_PROPUESTA, "APPROVED"),),
+    "cierra_caso": ((ENTIDAD_CASO, "STATUS_CHANGED"),),
+    "propone": ((ENTIDAD_PROPUESTA, "CREATE"),
+                (ENTIDAD_PROPUESTA, "CREATED")),
+    "descarta": ((ENTIDAD_PROPUESTA, "REJECTED"),
+                 (ENTIDAD_PROPUESTA, "DELETE"),
+                 (ENTIDAD_PROPUESTA, "DELETED")),
+    "otros": (),          # lo que no cae en ninguno de los anteriores
+}
+
+#:  Los pares que YA tienen grupo. Sirve para resolver "otros" sin enumerarlo:
+#:  lo que no esta aqui, es otro -- y asi un hecho NUEVO aparece en 'otros' en
+#:  vez de desaparecer del panel sin que nadie lo note.
+_CON_GRUPO = tuple(par for pares in GRUPOS.values() for par in pares)
 
 
 def registrar(*, org, actor, accion: str, entidad: str, entidad_id,
@@ -90,7 +149,7 @@ def historial(org, entidad: str, entidad_id):
     ).order_by("-created_at")
 
 
-def recientes(org, limite: int = 20):
+def recientes(org, limite: int = 20, *, grupo: str = "", antes_de=None):
     """
     Los últimos hechos registrados por este módulo, lo más reciente primero.
 
@@ -105,9 +164,79 @@ def recientes(org, limite: int = 20):
 
     P6 sumó la CUARTA: sin ella, una coordinación rechazada por la autonomía se
     auditaba y no aparecía en el feed -- justo el hecho que hay que ver.
+
+    'grupo' FILTRA POR LO QUE EL SUPERVISOR HIZO  --  15/10/2026
+    -----------------------------------------------------------
+    Vacío trae todo. Con un grupo de 'GRUPOS' trae solo esas acciones, y
+    'otros' trae lo que no cae en ningún grupo -- que es distinto de "nada": un
+    hecho nuevo aparece ahí en vez de desaparecer del panel sin que nadie lo
+    note.
+
+    Un grupo que no existe devuelve VACÍO y no "todo": tratar lo que no se
+    entiende como "sin filtro" mostraría más de lo que se pidió, y en un panel
+    de auditoría eso es la peor dirección del error.
+
+    'antes_de' ES LA PAGINACIÓN, y va por fecha y no por 'offset'
+    ------------------------------------------------------------
+    Con 'offset' y filas entrando arriba todo el tiempo --el ciclo audita cada
+    hora-- la página 2 repetiría lo que la 1 ya mostró y saltearía otras. Un
+    corte por 'created_at' no se mueve: lo que ya pasó no cambia de lugar.
     """
-    return Activity.objects.filter(
-        org=org,
-        entity_type__in=[ENTIDAD_PROPUESTA, ENTIDAD_ACTIVIDAD, ENTIDAD_NOVEDAD,
-                         ENTIDAD_SITUACION],
-    ).select_related("user", "user__user").order_by("-created_at")[:limite]
+    qs = Activity.objects.filter(
+        org=org, entity_type__in=list(ENTIDADES_DEL_SUPERVISOR))
+
+    pedido = (grupo or "").strip()
+    if pedido:
+        if pedido not in GRUPOS:
+            return Activity.objects.none()
+        pares = GRUPOS[pedido]
+        if pares:
+            cond = Q()
+            for entidad, accion in pares:
+                cond |= Q(entity_type=entidad, action=accion)
+            qs = qs.filter(cond)
+        else:
+            #  'otros': todo lo que no cae en ningun grupo declarado.
+            fuera = Q()
+            for entidad, accion in _CON_GRUPO:
+                fuera |= Q(entity_type=entidad, action=accion)
+            qs = qs.exclude(fuera)
+
+    if antes_de is not None:
+        qs = qs.filter(created_at__lt=antes_de)
+
+    return (qs.select_related("user", "user__user")
+              .order_by("-created_at", "-id")[:limite])
+
+
+def cuantos_por_grupo(org) -> dict:
+    """
+    Cuántos hechos hay de cada grupo. Para que el filtro diga lo que deja fuera.
+
+    Un selector que no dice cuántos hay obliga a probarlo para saber si sirve, y
+    con un panel que se refresca solo eso significa apretarlo y no saber si lo
+    que se ve es "no hay" o "todavía no llegó".
+
+    Cuenta sobre TODO el historial, no sobre la página: el número de al lado de
+    "Cierres de caso" tiene que decir cuántos cierres hubo, no cuántos entraron
+    en los últimos veinte hechos.
+    """
+    from django.db.models import Count
+
+    crudo = (Activity.objects
+             .filter(org=org, entity_type__in=list(ENTIDADES_DEL_SUPERVISOR))
+             .values_list("entity_type", "action")
+             .annotate(n=Count("id")))
+    por_par = {(e, a): n for e, a, n in crudo}
+
+    salida, con_grupo = {}, 0
+    for nombre, pares in GRUPOS.items():
+        if not pares:
+            continue
+        n = sum(por_par.get(par, 0) for par in pares)
+        salida[nombre] = n
+        con_grupo += n
+    total = sum(por_par.values())
+    salida["otros"] = total - con_grupo
+    salida["todo"] = total
+    return salida

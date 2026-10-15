@@ -224,19 +224,42 @@ export async function cancelarPropuesta({ cookies }, id, motivo) {
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  * @param {number} [limite]
  */
-export async function leerActividad({ cookies }, limite = 12) {
+export async function leerActividad({ cookies }, limite = 12, opciones = {}) {
+  //  'grupo' y 'antesDe' viajan al backend  --  15/10/2026
+  //
+  //  El filtro y la paginacion se resuelven ALLA y no aqui: filtrar en el
+  //  navegador sobre los ultimos doce hechos daria un numero que depende de
+  //  cuantos entraron en esa pagina, no de cuantos hay. El panel tiene que
+  //  decir "Cierres de caso (28)", no "los que entraron en esta tanda".
+  const q = new URLSearchParams({ limite: String(limite) });
+  if (opciones.grupo) q.set('grupo', opciones.grupo);
+  if (opciones.antesDe) q.set('antes_de', opciones.antesDe);
+
   try {
     const d = await apiRequest(
-      `/operaciones/actividad-supervisor/?limite=${limite}`,
+      `/operaciones/actividad-supervisor/?${q}`,
       {},
       { cookies }
     );
-    return { eventos: d?.resultados ?? [], error: null };
+    return {
+      eventos: d?.resultados ?? [],
+      //  Cuantos hay de cada grupo, sobre TODO el historial. Lo cuenta el
+      //  backend por lo de arriba.
+      porGrupo: d?.por_grupo ?? {},
+      //  Con que seguir hacia atras, o null si no queda nada. Que lo diga el
+      //  backend saca la ambiguedad del borde: una pagina llena puede ser la
+      //  ultima, y contarla aqui daria mal.
+      siguiente: d?.siguiente ?? null,
+      error: null
+    };
   } catch (/** @type {any} */ err) {
     // 'eventos' vacio con 'error' puesto NO es lo mismo que un feed vacio: la
     // pantalla mira el error primero, y solo dice "sin actividad" cuando la
     // lectura salio bien y no habia nada.
-    return { eventos: [], error: traducirError(err, 'la actividad reciente') };
+    return {
+      eventos: [], porGrupo: {}, siguiente: null,
+      error: traducirError(err, 'la actividad reciente')
+    };
   }
 }
 
