@@ -333,3 +333,56 @@ def test_sin_NINGUNA_lectura_no_es_lo_mismo_que_una_incompleta(org_a):
     assert dxt.le_falta_el_grupo(sin_nada) is False, (
         "sin ninguna lectura no hay grupo que falte: ese caso es del otro "
         "criterio")
+
+
+# =============================================================================
+#  §N  EL LOG DICE POR QUE SE QUEDARON
+# =============================================================================
+#  LO QUE ESTO MIDE, Y POR QUE NO ALCANZA CON EL CONTADOR  --  15/10/2026
+#
+#  'reporte["motivos"]' se calculaba desde el 14/10 y la linea de log --el
+#  unico lugar donde una persona lo lee-- lo dejaba afuera. El dato se juntaba
+#  y se tiraba. Una prueba que afirmara que el contador EXISTE habria estado en
+#  verde todo ese tiempo con el sintoma vivo, que es exactamente lo que
+#  CLAUDE.md §6 llama afirmar sobre el mecanismo en vez del efecto.
+#
+#  Por eso esto afirma sobre lo que se EMITE: el texto del registro.
+
+def test_el_log_del_paso_DICE_por_que_se_quedaron(org_a, monkeypatch, caplog):
+    import logging
+
+    caso = _caso(org_a)
+    #  Un grupo que siempre va a una persona: se queda, con motivo.
+    _propuesta_ya_leida(org_a, caso, grupo=pad.NADA_LO_MIDE)
+    _las_puertas_abiertas(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger="operaciones.supervisor"):
+        reporte = _correr_la_fase(org_a)
+
+    assert reporte["se_quedaron"] == 1
+    assert reporte["motivos"], "el contador tiene que traer el motivo"
+
+    linea = next((r.getMessage() for r in caplog.records
+                  if "paso a Despacho" in r.getMessage()), "")
+    assert linea, "la fase no registro su linea"
+    assert "por que se quedaron=" in linea, (
+        "la linea no nombra el motivo: con 'pasaron=0' y sin causa, quien la "
+        "lee tiene que salir a medir a mano -- que es lo que costo horas")
+    #  Y trae el motivo DE VERDAD, no la etiqueta vacia.
+    motivo = next(iter(reporte["motivos"]))
+    assert motivo[:40] in linea, (
+        "la etiqueta esta pero el motivo no viaja: un 'por que se quedaron={}' "
+        "es tan mudo como no tenerlo")
+
+
+def test_cuando_SI_pasan_el_log_no_inventa_un_motivo(org_a, monkeypatch):
+    """El contador vacio no es un motivo: 'pasaron=1' no deja residuo."""
+    caso = _caso(org_a)
+    _propuesta_ya_leida(org_a, caso, grupo=pad.FALLA_DE_SERVICIO)
+    _las_puertas_abiertas(monkeypatch)
+
+    reporte = _correr_la_fase(org_a)
+
+    assert reporte["pasaron"] == 1
+    assert reporte["motivos"] == {}, (
+        "un motivo contado cuando el caso SI paso haria creer que algo falló")

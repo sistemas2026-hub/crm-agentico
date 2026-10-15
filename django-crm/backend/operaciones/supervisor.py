@@ -2794,11 +2794,29 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
             m = _en_una_linea(r.get("porque") or "sin motivo")[:120]
             reporte["motivos"][m] = reporte["motivos"].get(m, 0) + 1
 
+    #  EL MOTIVO VA EN EL LOG, Y NO ES ADORNO  --  15/10/2026
+    #  ------------------------------------------------------
+    #  'reporte["motivos"]' se venia calculando desde el 14/10 --con el
+    #  comentario de arriba diciendo que existe para "poder leer de una corrida
+    #  por que no paso nada"-- y esta linea, que es el unico lugar donde una
+    #  persona lo lee, lo dejaba afuera. El dato se juntaba y se tiraba.
+    #
+    #  LO QUE COSTO: una corrida informaba 'pasaron=0 · se quedaron=44' con el
+    #  desglose por grupo y por confianza, y ninguno de los dos decia la causa
+    #  real --'no se pudo leer el equipo (onu_no_vinculada)' en 13 de ellos--.
+    #  Con el grupo y la confianza a la vista, la pista apuntaba a la
+    #  calibracion del modelo; el motivo apuntaba al dato que faltaba. Se
+    #  persiguio la pista equivocada durante horas.
+    #
+    #  SON CLAVES Y CONTEOS, nunca un caso: el detalle de cada uno ya quedo en
+    #  su propuesta, que es donde una persona lo va a buscar y donde hay
+    #  control de acceso. Esto va a un log, que no lo tiene.
     logger.info("Supervisor: paso a Despacho · pasaron=%s · se quedaron=%s · "
-                "fallaron=%s · por grupo=%s · por confianza del grupo=%s",
+                "fallaron=%s · por grupo=%s · por confianza del grupo=%s · "
+                "por que se quedaron=%s",
                 reporte["pasaron"], reporte["se_quedaron"],
                 reporte["fallaron"], reporte["por_grupo"],
-                reporte["por_confianza"])
+                reporte["por_confianza"], reporte["motivos"])
     return {"despacho": reporte}
 
 
