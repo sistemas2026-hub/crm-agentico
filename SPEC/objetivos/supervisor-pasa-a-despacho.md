@@ -106,7 +106,14 @@ a la cola no es mandar a nadie.
 | 14/10 | Las cinco reglas, y el límite: entra a la cola, nadie asigna | Ver arriba |
 | 14/10 | Sin medición (grupos 2 y 3) se exige confianza **alta** en la lectura | Lo único entre el caso y una frase ambigua |
 | 16/10 | **La falla con el equipo en línea y sano sigue yendo a una persona** (33 de 40 fallas ese día) | Decidido por el usuario con el número a la vista. La red no es el problema; puede ser el WiFi, el router, o que ya se resolvió. No se manda a nadie sin confirmar |
-| 16/10, tarde | **Lo que cae es el número, no la decisión.** El clasificador lee `estado`, `senal` y `causa_caida`, y el motor manda `onu_status` y `onu_signal*`. Con cualquier dato de SmartOLT, aun `LOS` o `Power fail`, la lectura dice "en línea y sano" sin verificar. Los 33 son "SmartOLT contestó algo", y ninguna falla puede pasar sola por la regla 1 | Lo halló `revisor-de-pii` y se verificó por efecto con el clasificador real (salida en `SPEC/auditorias/PASO-A-DESPACHO.md`). La decisión sigue en pie para un equipo sano de verdad. El motivo escrito ya no copia esa frase. Arreglar el clasificador cambia qué pasa solo: es la Fase 3, y la decide el usuario |
+| 16/10, tarde | **Lo que cae es el número, no la decisión.** El clasificador lee `estado`, `senal` y `causa_caida`, y el motor manda `onu_status` y `onu_signal*`. Con cualquier dato de SmartOLT, aun un equipo `Offline`, la lectura dice "en línea y sano" sin verificar (el endpoint liviano solo dice `Online` u `Offline`; `LOS` y `Power fail`, que usó la prueba del clasificador, no salen de ahí: lo corrigió el `orquestador` al encuadrar la Fase 3). Los 33 son "SmartOLT contestó algo", y ninguna falla puede pasar sola por la regla 1 | Lo halló `revisor-de-pii` y se verificó por efecto con el clasificador real (salida en `SPEC/auditorias/PASO-A-DESPACHO.md`). La decisión sigue en pie para un equipo sano de verdad. El motivo escrito ya no copia esa frase. Arreglar el clasificador cambia qué pasa solo: es la Fase 3, y la decide el usuario |
+| 16/10, tarde | **Fase 3: alcance.** Entran el caso abierto y las fallas medidas, con re-medición. Quedan fuera deshacer un pase, los textos de la pantalla, la privacidad del camino y la relectura | Decidido por el usuario al encuadrar la Fase 3 |
+| 16/10, tarde | **Un caso cerrado no pasa, y su propuesta se queda con el motivo escrito.** No se cancela sola | Decidido por el usuario. Cancelarla sería un efecto automático nuevo |
+| 16/10, tarde | **Las fallas pendientes se vuelven a medir**, con `diagnosticar` y tope por vuelta | Decidido por el usuario. Se leyeron con el clasificador roto y la lectura no guarda el equipo: sin volver a medir, no cambian |
+| 16/10, tarde | **Una caída por `LOS` o `LOF` va a una persona**, con el motivo "falta preguntarle al cliente si el equipo está enchufado y tiene luz". **Cambia la regla 1 del 14/10:** pasa sola solo la señal fuera de rango con el equipo en línea | Decidido por el usuario. La skill `smartolt-api` registra que la operación de Rapilink vio `LOS` seguido en equipos desenchufados, y desde la OLT eso no se distingue de una fibra cortada. Lo trajo el `orquestador` |
+| 16/10, tarde | **El rango de señal es el del motor: de -25 a -8 dBm** (guía G-GO-04). Una señal más fuerte que -8 también está fuera de rango | Decidido por el usuario. Ya está escrito en `nucleo/herramientas/diagnostico_servicio.py`; no se agrega una tercera copia. Nunca se probó contra una señal mala real |
+| 16/10, tarde | **Se enciende en sombra:** se despliega con la tarea delegada quitada, una vuelta cuenta cuántas pasarían, y con ese número se vuelve a delegar | Decidido por el usuario. Medir antes de decidir: es la primera vez que la regla 1 va a tener efecto |
+| 16/10, tarde | **Una copia de WispHub más vieja que `HORAS_LECTURA_FRESCA` (72 h), o sin fecha, no deja pasar** | Derivada del principio fail-closed, no preguntada: con la copia vieja no se sabe si el ticket sigue abierto. Esta vez el 72 mide justo lo que hace falta, la frescura de la copia de WispHub. Se cambia si el usuario lo pide |
 | 16/10 | **La confianza exigida sigue en alta** (9 se quedaron por media o baja) | Decidido por el usuario. Bajarla haría pasar entre 4 y 8 casos más ese día |
 | 16/10 | **El tope acota cuántas pasan por vuelta, no cuántas se miran** | Tomada al encuadrar. Evaluar es barato (lee evidencia guardada, sin red); lo que hay que acotar es el efecto: si una regla se equivoca, que el daño de una vuelta tenga techo |
 | 16/10 | **Sin límite de antigüedad para la medición.** Se propuso exigir menos de 72 h y se **descartó** el mismo día, al preguntar el usuario por qué 72 | El 72 de `HORAS_LECTURA_FRESCA` mide otra cosa: cuán vieja puede ser la copia del ticket que trae WispHub (el importador corre cada hora; 72 h sin sincronizar es una sincronización rota). No dice cuánto vale una medición del equipo. Además: las fallas que hacen pasar un caso —fibra cortada, señal débil— no se curan solas; con el tope arreglado una falla confirmada pasa dentro de la hora de su lectura; y si ya se resolvió, el ticket se cierra y el caso sale de la cola, que excluye los cerrados (`despacho_pantalla_views.py`). Medido el 16/10: ninguna lectura de más de 3 días. Se reabre con un caso real de una medición vieja que haya pasado. **Anotado el mismo día por `auditor-de-frontera`:** la última razón es parcial. La cola excluye los casos cerrados en Dexter, no los cerrados en WispHub, y el paso no mira ninguno de los dos. Eso no reabre la antigüedad: es otra condición, y va primera en la Fase 3 |
@@ -151,29 +158,82 @@ correr mutaciones en serie).
 | 2.7 | La bitácora tiene la fila del día con el hash, y `git diff --cached --name-only` pegado antes del commit | |
 | 2.8 | **En producción, por una persona, fuera del `/goal`:** tras el deploy, la línea `paso a Despacho` del worker a la :07 dice `miradas=` igual al total de lecturas pendientes (el 16/10: 65, no 60), `miradas` igual a `pasaron + esperan el tope + se quedaron + fallaron` (sin esa suma, `miradas` se cuenta antes del bucle y no ve si el bucle dejó de evaluar), y `anotaciones fallidas=0`; y una propuesta pendiente muestra su motivo en `/supervisor-noc`, en el detalle, bajo "Hechos observados" | Log y captura de la persona |
 
-### Fase 3 · Propuesta, no decidida
+### Fase 3 · Que pasen solas las fallas medidas, y nunca un caso cerrado
 
-Sale de las tres auditorías del 16/10. El orden importa: la primera **acota**
-lo que pasa solo, y la segunda lo **amplía**.
+Encuadrada el 16/10/2026 por la tarde, con `/objetivo`. Siete decisiones, en la
+tabla de Decisiones. **Terminado** quiere decir:
 
-1. **El paso mira que el caso siga abierto**, en Dexter y en WispHub, antes de
-   aceptar. Hoy acepta casos ya cerrados y los deja en la cola.
-2. **El clasificador lee las claves del motor** (`onu_status`,
-   `onu_signal_1490`). Así la regla 1 funciona y una falla con `LOS` pasa sola.
-   Pide antes los valores reales de SmartOLT (`verificador-de-api`), el umbral
-   de "señal débil" (es parte de la regla 1: lo decide el usuario) y volver a
-   medir los 33.
-3. **Una propuesta aceptada puede salir de la cola.** Hoy no hay cómo deshacer
-   un pase, y el nivel 3 se justificó con que se podía.
-4. **La pantalla deja de decir que todo lo aprobó una persona.** Es frontend.
-5. **Privacidad del camino:** el texto del modelo en `Activity.entity_name`, la
-   ruta interna del motor sin redacción de texto libre, `tapar` incompleto, y
-   `nombre` en la lista blanca de `supervisor_noc`. El detalle de cada uno está
-   en `SPEC/auditorias/PASO-A-DESPACHO.md`.
-6. **La relectura no deja atrás a las nuevas.** Todavía corta en las 60 más
-   viejas: una lectura nueva que vino sin grupo no se relee mientras haya más
-   pendientes, y sin grupo nunca pasa. Es la forma del defecto que cerró la
-   Fase 2, una fase antes.
+- Una falla de servicio con el equipo **en línea y la señal fuera del rango de
+  -25 a -8 dBm** pasa sola a Despacho.
+- Toda otra falla se queda con una persona, con un motivo que dice qué hacer:
+  - sin energía (`dying-gasp`): preguntarle al cliente si tiene luz;
+  - pérdida de señal (`LOS`, `LOF`): preguntarle si el equipo está enchufado y
+    tiene luz, porque desde la OLT no se distingue de una fibra cortada;
+  - en línea y en rango: el reclamo y la medición se contradicen;
+  - sin medición posible: por qué no se pudo medir.
+- Las fallas pendientes que se leyeron con el clasificador roto se vuelven a
+  medir con datos frescos, en la fase de lectura y con tope por vuelta.
+- Ningún caso cerrado en Dexter o en WispHub pasa a Despacho. Su propuesta se
+  queda, con el motivo escrito.
+
+**De dónde sale la medición.** De `diagnosticar`, la herramienta del motor que
+ya usa el cierre de desincronizados (`operaciones/diagnostico_optico.py`), con
+un presupuesto por vuelta. Trae la causa de la caída y el nivel en dBm, con el
+vocabulario que `clasificacion_de_trabajo._de_la_prueba` ya espera: no hace
+falta una tabla de traducción nueva ni una tercera copia del rango. El endpoint
+liviano de `contexto_del_caso` no sirve para esto: solo dice `Online` u
+`Offline`, sin causa.
+
+**Qué no cambia.** Los otros llamadores de `clasificar` (la sugerencia de la
+pantalla de Despacho, la labor al crear la orden, y `CASO_REQUIERE_VISITA` con
+su prioridad) siguen recibiendo lo que reciben hoy. También tienen H-1: quedan
+anotados para otra fase.
+
+| # | Evidencia | Cómo se comprueba |
+|---|---|---|
+| 3.1 | Un archivo nuevo de pruebas en `operaciones/tests/` → `N passed, 0 failed` | Salida pegada con la línea de comando y `TEST_DATABASE_URL`. Cada caso con su control. **(a)** Caso cerrado: con `status="Closed"` en Dexter no pasa; con `external_status` cerrado en WispHub (la lista que ya usa `fuentes_adaptadores`) no pasa; con la copia de WispHub más vieja que `HORAS_LECTURA_FRESCA`, o sin fecha, no pasa; abierto y fresco pasa. En los tres primeros queda el motivo escrito. **(b)** Medición, con la salida de `diagnosticar` en su forma real: en línea con -26 dBm pasa, y con -7 dBm también; en línea con -21 dBm no pasa; `dying-gasp` no pasa; `LOS` no pasa; un diagnóstico con error no pasa; cada uno con su motivo. **(c)** Re-medición: una falla pendiente medida con el clasificador roto se vuelve a medir sin llamar al modelo; como mucho el tope por vuelta; una ya medida con `diagnosticar` no se vuelve a medir. **(d)** La fase de paso no llama al motor ni a SmartOLT. **(e)** El valor inventado `onu_status: "LOS"` de `test_f` y `test_k` se reemplaza por la forma real del endpoint liviano, `Offline` |
+| 3.2 | Mutaciones, cada una con al menos una prueba en rojo | Salida pegada por mutación, restaurando después: sin la comprobación de cerrado; la copia vieja de WispHub cuenta como abierta; `LOS` pasa solo; `dying-gasp` pasa solo; el rango invertido; las pendientes viejas no se vuelven a medir; la re-medición sin tope; la re-medición llama al modelo |
+| 3.3 | Regresión en verde | La lista de 2.3, más `test_el_paso_mira_todas_y_dice_por_que.py`, las pruebas de `diagnostico_optico` y `campo/tests/test_despacho_api.py` → `N passed`, salida pegada. El rojo conocido de `test_j` se explica con una corrida bajo un rol sin superusuario |
+| 3.4 | `ruff` sin avisos nuevos respecto de origin | Conteo por archivo pegado |
+| 3.5 | Después de `git fetch`, `git diff --name-only origin/fix/integracion-wisphub...HEAD` muestra solo `django-crm/backend/operaciones/`, esta ficha y `SPEC/auditorias/` | Salida pegada. Nada en `nucleo/`, `campo/`, el frontend ni `tenants/` |
+| 3.6 | `arquitecto-dexter` antes de implementar; `auditor-de-frontera` y `revisor-de-pii` en paralelo; después `auditor-independiente`. Hallazgos cerrados o anotados en `SPEC/auditorias/PASO-A-DESPACHO-FASE3.md` | Sus informes en la conversación |
+| 3.7 | La bitácora tiene la fila con el hash, y `git diff --cached --name-only` pegado antes de cada commit | |
+| 3.8 | **En producción, por una persona, fuera del `/goal`.** Antes del deploy se quita la tarea delegada `pasar_a_despacho_segun_las_reglas` desde el chat del Supervisor. Después, la línea `paso a Despacho` de las :07 dice cuántas pasarían, bajo el motivo de la tarea no delegada, y cuántas fallas se volvieron a medir. Con ese número se decide volver a delegarla | Log de la persona |
+
+**Restricciones propias de la Fase 3:**
+
+- No tocar `nucleo/`, `campo/`, el frontend ni `tenants/`.
+- No cambiar lo que reciben los otros llamadores de `clasificar`.
+- La medición se pide en la fase de lectura, con tope por vuelta: nunca en la
+  fase de paso, y nunca con el modelo.
+- No agregar una tercera copia del rango de señal.
+- No cancelar propuestas de casos cerrados.
+- Siguen las de la Fase 2: no crear órdenes ni asignar técnico o fecha, solo
+  `TICKET_SIN_DIAGNOSTICO`, no cambiar la confianza exigida.
+
+**Agentes de la Fase 3**, según el `orquestador`:
+
+| Agente | Para qué | Estado |
+|---|---|---|
+| `arquitecto-dexter` | Dónde se pide `diagnosticar` y con qué presupuesto; cómo se marcan las lecturas a volver a medir; la regla de "cerrado" reusada | pendiente, antes de implementar |
+| `verificador-de-api` | — | se saltea: no entra ningún endpoint, filtro ni parámetro nuevo de SmartOLT. `diagnosticar` ya corre en producción y la skill tiene verificadas sus causas |
+| `auditor-de-frontera` | Que el caso cerrado falle cerrado en el único punto del efecto; el tope de la primera vuelta; que `CASO_REQUIERE_VISITA` no gane un camino para aceptarse sola | pendiente |
+| `revisor-de-pii` | Qué copia el nuevo motivo (dBm, causa) al comentario de la aceptación, la evidencia y el log | pendiente |
+| `auditor-independiente` | El camino entero | pendiente |
+| `corredor-de-evaluacion` | — | se saltea: no cambian el prompt, el catálogo ni el modelo |
+| `guardia-de-config` | — | se saltea: no se lee configuración nueva |
+| `guardia-de-release` | Antes del deploy, si el diseño agrega un campo y una migración | pendiente |
+
+**Bloqueos de la Fase 3:** ninguno impide arrancar. Lo que solo se mide en
+producción, y lo hace una persona: si el caso que pasó a las 15:07 del 16/10
+sigue abierto, y cuántas propuestas pendientes o aceptadas tienen el caso
+cerrado. Sirve como línea de base, no frena el trabajo.
+
+**Queda para después, decidido el 16/10:** deshacer un pase (A-2), los textos de
+la pantalla que dicen que todo lo aprobó una persona (A-3), la privacidad del
+camino (A-4 a A-7), la relectura que corta en las 60 más viejas (A-8), y H-1 en
+los otros llamadores de `clasificar`. El detalle está en
+`SPEC/auditorias/PASO-A-DESPACHO.md`.
 
 ## Restricciones
 
@@ -268,3 +328,4 @@ Ninguno impide arrancar.
 | 14 y 15/10/2026 | Fase 0 atacada y Fase 1 construida y desplegada, sin actualizar esta ficha | — | `ae4488ba`, `b3e4abf2`…`e0663595` |
 | 16/10/2026 | Retomada con `/objetivo`. Medido en producción: corre solo, las tres puertas abiertas, 0 pasaron de 65 y era correcto por las reglas. Dos defectos encontrados (tope que tapa, motivo no escrito). Decisiones del usuario: equipo sano a persona, confianza alta. Descartada la guarda de 72 h que se había propuesto: el número medía la sincronización con WispHub, no el equipo | Fase 2 entera | — |
 | 16/10/2026, tarde | Fase 2 cerrada en código: la fase mira todas las pendientes, el tope acota los pases, y la que se queda lleva escrito por qué y desde cuándo. 23 pruebas en Postgres real, 16 mutaciones muertas, regresión 201 de 202 (el rojo es el rol superusuario: bajo `crm_t` pasan las 44), ruff sin avisos nuevos. Cuatro agentes: 13 hallazgos cerrados y 15 anotados. H-1: el clasificador no entiende el equipo que manda el motor, así que ninguna falla pasa sola, y los "33 sanos" no eran una medición | Push (es deploy: lo decide una persona). El control 2.8 en producción. Decidir la Fase 3. Entregar el hash a `integrar-centro-mando` | `849cd6a5` |
+| 16/10/2026, tarde | Fase 2 desplegada a las 14:53 y medida por el usuario en la vuelta de las 15:07: miradas=65, la suma cierra, 0 anotaciones fallidas, pasó 1 (un trabajo pedido con confianza alta). Fase 3 encuadrada con `/objetivo`: siete decisiones, y el `orquestador` corrigió la premisa de `LOS` (el endpoint liviano no trae causa) | Fase 3 entera. El caso que pasó a las 15:07: confirmar que sigue abierto | — |

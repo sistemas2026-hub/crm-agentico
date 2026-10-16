@@ -73,6 +73,12 @@ clave coincide, así que `_de_la_prueba` devuelve `None` con cualquier equipo, y
 contestado algo. Viene de `ac6180d4` (09/10); las pruebas del clasificador usan
 su propia forma, no la del motor.
 
+**Corrección del mismo día.** `LOS` y `Power fail` no son valores del endpoint
+liviano que usa `contexto_del_caso`: ese solo dice `Online` u `Offline`, sin
+causa (skill `smartolt-api`). La salida de arriba muestra el mecanismo, que es
+el mismo con cualquier valor. Lo corrigió el `orquestador` al encuadrar la
+Fase 3.
+
 **Lo que significa:**
 
 - La regla 1 no puede dejar pasar nada: ninguna lectura sale verificada.
