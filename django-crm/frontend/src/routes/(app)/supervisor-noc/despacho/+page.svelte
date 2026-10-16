@@ -517,8 +517,8 @@
           {/if}
 
           <!-- A QUÉ CUADRILLA (opcional). Vacío = la reparte el sistema. Con
-               una cuadrilla, le llega a su gente con cuenta como al publicar el
-               reparto, y el reparto la respeta después. Se ofrecen las que
+               una cuadrilla, le llega a su líder (el único con celular) como al
+               publicar el reparto, y el reparto la respeta después. Se ofrecen las que
                cubren esa zona ese día; un técnico puntual, dentro de ella. -->
           {#if cobertura?.jornadas?.length}
             <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
@@ -534,7 +534,10 @@
                   {/each}
                 </select>
               </label>
-              {#if jornada}
+              <!-- Elegir técnico solo tiene sentido si hay MÁS DE UNO con cuenta:
+                   en la cuadrilla normal (un líder con celular y un auxiliar
+                   sin él) la recibe el líder y no hay nada que elegir. -->
+              {#if jornada && jornada.con_cuenta.length > 1}
                 <label class="snoc-campo-grupo">
                   <span class="snoc-label">Técnico (opcional)</span>
                   <select class="snoc-select" name="tecnico_profile_id" bind:value={tecnicoElegido}>
@@ -546,10 +549,16 @@
                 </label>
               {/if}
             </div>
-            {#if jornada && !jornada.con_cuenta.length}
+            {#if jornada && jornada.con_cuenta.length}
+              <p class="snoc-body-sm snoc-secundario">
+                La recibe: <strong>{jornada.con_cuenta.map((t) => t.nombre).join(', ')}</strong>
+                {#if jornada.van_con_el?.length}
+                  · va con: {jornada.van_con_el.join(', ')}
+                {/if}
+              </p>
+            {:else if jornada}
               <p class="snoc-aviso snoc-error-txt">
-                {jornada.cuadrilla} no tiene a nadie con cuenta ese día: nadie la vería en un
-                teléfono.
+                {jornada.aviso ?? `${jornada.cuadrilla}: nadie la vería en un teléfono.`}
               </p>
             {/if}
           {/if}

@@ -421,9 +421,14 @@ def test_r_una_cuadrilla_donde_NADIE_tiene_cuenta_no_recibe_trabajo(
 
     Publicar cero asignaciones e informar exito seria peor que no publicar:
     la orden parece repartida y no esta en ningun telefono.
+
+    15/10/2026: «nadie con cuenta» ahora es SIN LIDER. Una cuadrilla con lider
+    y solo auxiliares SI recibe -- ver `test_r2`.
     """
     from campo.models import AsignacionTrabajo
 
+    cuadrilla.lider = None
+    cuadrilla.save(update_fields=["lider"])
     aux = admin_client.post(PERSONAS, {"nombre": "Pedro Ayudante"},
                             format="json").json()
     _armar(admin_client, cuadrilla, LUNES, [{"persona": aux["id"]}])
@@ -438,6 +443,34 @@ def test_r_una_cuadrilla_donde_NADIE_tiene_cuenta_no_recibe_trabajo(
     # Y se NOMBRA cual quedo afuera: la cuenta no cuadraria con lo que se vio.
     assert r.json()["sin_nadie_con_cuenta"] == ["Cuadrilla 1"]
     assert AsignacionTrabajo.objects.filter(orden=orden).count() == 0
+
+
+def test_r2_el_lider_recibe_aunque_solo_el_auxiliar_este_anotado(
+    admin_client, org_a, cuadrilla, admin_profile, version
+):
+    """La cuadrilla real: un tecnico lider con celular y un auxiliar sin el.
+
+    Correccion del usuario (15/10/2026). El lider se elige en «Lider del dia»,
+    no en la lista de integrantes; armada asi, publicar decia «sin nadie con
+    cuenta» y la orden no le llegaba a nadie.
+    """
+    from campo.models import AsignacionTrabajo
+
+    aux = admin_client.post(PERSONAS, {"nombre": "Pedro Ayudante"},
+                            format="json").json()
+    _armar(admin_client, cuadrilla, LUNES, [{"persona": aux["id"], "rol": "ayudante"}])
+    jornada = JornadaDeCuadrilla.objects.get(cuadrilla=cuadrilla, fecha=LUNES)
+    orden = _orden(org_a, version)
+
+    r = admin_client.post(REPARTO, {"asignaciones": [
+        {"jornada": str(jornada.id), "ordenes": [str(orden.id)]},
+    ]}, format="json")
+    assert r.json()["publicadas"] == 1, r.content
+    assert r.json()["sin_nadie_con_cuenta"] == []
+    asignadas = list(AsignacionTrabajo.objects.filter(orden=orden)
+                     .values_list("profile_id", "es_principal", "rol"))
+    assert asignadas == [(admin_profile.id, True, "tecnico_lider")]
+    assert r.json()["auxiliares_sin_asignacion"] == 1
 
 
 def test_s_el_lider_queda_como_principal_aunque_haya_auxiliares(

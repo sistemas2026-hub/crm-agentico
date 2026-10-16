@@ -244,26 +244,26 @@ def asignar_a_jornada(orden: OrdenTrabajo, jornada, profile_actor) -> dict:
     que el reparto la RESPETE despues en vez de moverla (`reparto.
     _asignadas_a_mano`).
 
-    Quien no tiene cuenta va en la cuadrilla pero no recibe la orden: no hay
-    telefono donde verla. Una cuadrilla sin nadie con cuenta se rechaza, porque
-    asignarle seria dejar la orden sin nadie que la vea.
+    QUIEN LA RECIBE lo decide `cuadrillas.destinatarios`, la misma regla que
+    usan publicar el reparto y el recuadro de la zona: el lider del dia
+    siempre, aunque no este anotado entre los integrantes; el auxiliar sin
+    cuenta va con la cuadrilla pero no recibe nada. Sin nadie que la reciba se
+    rechaza, porque asignarle seria dejar la orden sin nadie que la vea.
     """
     from campo.models import AsignacionTrabajo
 
     if jornada.org_id != orden.org_id:
         raise ErrorDespacho("Esa cuadrilla es de otra empresa.")
-    integrantes = list(jornada.integrantes.select_related("persona").all())
-    con_cuenta = [i for i in integrantes if i.persona.tiene_cuenta]
-    if not con_cuenta:
-        raise ErrorDespacho(
-            f"La cuadrilla {jornada.cuadrilla.nombre} no tiene a nadie con cuenta "
-            f"ese dia: la orden no la veria nadie en un telefono.")
-    lider_id = jornada.lider_id or jornada.cuadrilla.lider_id
+    from campo.cuadrillas import destinatarios, por_que_nadie_recibe
+
+    d = destinatarios(jornada)
+    if not d["reciben"]:
+        raise ErrorDespacho(por_que_nadie_recibe(jornada, d))
     orden.asignaciones.all().delete()
-    for i in con_cuenta:
+    for r in d["reciben"]:
         AsignacionTrabajo.objects.create(
-            orden=orden, profile=i.persona.profile, rol=i.rol,
-            es_principal=(i.persona.profile_id == lider_id))
+            orden=orden, profile=r["profile"], rol=r["rol"],
+            es_principal=r["es_principal"])
     orden.revision += 1
     orden.save(update_fields=["revision", "updated_at"])
     EventoTrabajo.objects.create(
@@ -271,10 +271,10 @@ def asignar_a_jornada(orden: OrdenTrabajo, jornada, profile_actor) -> dict:
         datos={"a_cuadrilla": jornada.cuadrilla.nombre,
                "jornada": str(jornada.id),
                "fecha": jornada.fecha.isoformat(),
-               "personas": [str(i.persona.profile_id) for i in con_cuenta],
+               "personas": [str(r["profile"].id) for r in d["reciben"]],
                "motivo": "elegida al despachar"})
-    return {"cuadrilla": jornada.cuadrilla.nombre, "personas": len(con_cuenta),
-            "sin_cuenta": len(integrantes) - len(con_cuenta)}
+    return {"cuadrilla": jornada.cuadrilla.nombre, "personas": len(d["reciben"]),
+            "sin_cuenta": len(d["van_sin_cuenta"])}
 
 
 def contexto_del_caso(case_id: str) -> dict:
