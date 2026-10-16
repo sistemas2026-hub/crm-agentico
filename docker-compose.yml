@@ -123,6 +123,20 @@ services:
       # bytes (comparte /app/media con el backend) y el motor no.
       ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
       ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      # Y TAMBIEN LAS DEL MOTOR, que estaban solo en 'backend'  --  15/10/2026
+      # ----------------------------------------------------------------------
+      # El ciclo del Supervisor corre ACA, no en el backend: lo despierta
+      # celery-beat cada hora y lo ejecuta este worker. Leer un ticket es una
+      # llamada al motor, y sin estas tres el worker no tiene a quien
+      # preguntarle.
+      #
+      # MEDIDO ese dia: el ciclo del boton termino en 1,37 s con
+      # 'tickets leidos=10 errores=10' -- diez fallos instantaneos, sin una
+      # sola llamada al modelo. El sintoma en la pantalla era el de siempre,
+      # "ejecute el ciclo y no se movio nada", y el log no nombraba la causa.
+      MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
+      MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
     volumes:
       - ./django-crm/backend:/app
     depends_on:
