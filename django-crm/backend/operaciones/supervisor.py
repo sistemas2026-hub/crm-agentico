@@ -48,6 +48,7 @@ quedo donde quedo, en vez de confiar en un score.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
@@ -252,9 +253,20 @@ def _estado_externo(caso) -> str:
 
 
 def _casos_abiertos_antiguos(org, ahora) -> list[Senal]:
+    from operaciones import areas_del_tenant as areas
+
     corte = ahora - timedelta(days=DIAS_CASO_ANTIGUO)
-    casos = Case.objects.filter(
-        org=org, resolved_at__isnull=True, created_at__lt=corte
+    #  SIN LOS AJENOS  --  16/10/2026. Esta señal proponia tickets de cartera
+    #  y de ventas que el Supervisor no tiene por que mirar, y cada hora
+    #  volvia a proponer lo que el retiro acababa de cancelar. Se quita lo
+    #  que se SABE de otra area; sin el mapa del motor, tambien lo que solo
+    #  el mapa puede decidir (sin area escrita y con alguien encima). Ver
+    #  'areas_del_tenant.criterio_de_area' y 'sin_ajenos'.
+    casos = areas.sin_ajenos(
+        Case.objects.filter(
+            org=org, resolved_at__isnull=True, created_at__lt=corte
+        ),
+        areas.criterio_de_area(),
     ).only("id", "name", "created_at", "status", "priority",
            "external_status", "external_fetched_at", "provider")
     salida = []
@@ -381,16 +393,24 @@ def _casos_que_necesitan_visita(org, ahora) -> list[Senal]:
     """
     from campo.services.despacho import contexto_del_caso
     from cases.models import Case
+    from operaciones import areas_del_tenant as areas
     from operaciones import clasificacion_de_trabajo as clf
 
     salida: list[Senal] = []
+    #  SIN LOS AJENOS  --  16/10/2026. Un ticket de cartera asignado a un
+    #  tecnico llegaba hasta aca y costaba una llamada al motor para proponer
+    #  una visita que no le toca a este equipo. Se quita lo que se SABE de
+    #  otra area, antes del tope: ver 'areas_del_tenant.criterio_de_area'.
     abiertos = list(
-        Case.objects
-        .filter(org=org, is_active=True, is_sample=False,
-                merged_into__isnull=True)
-        .exclude(status="Closed")
-        .exclude(external_service_id="")
-        .exclude(external_service_id__isnull=True)
+        areas.sin_ajenos(
+            Case.objects
+            .filter(org=org, is_active=True, is_sample=False,
+                    merged_into__isnull=True)
+            .exclude(status="Closed")
+            .exclude(external_service_id="")
+            .exclude(external_service_id__isnull=True),
+            areas.criterio_de_area(),
+        )
         .order_by("-created_at")[:TOPE_CASOS_A_DIAGNOSTICAR]
     )
 
@@ -559,11 +579,13 @@ def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
     --509 de cartera-- mientras la de soporte tenia 76, exactamente los 76 que
     la pantalla de Tickets muestra para esa area.
 
-    EL AREA SALE DE LA PERSONA ASIGNADA, no del ticket: el caso no la guarda, y
-    asi es como la empresa la configura. Es la misma via que usa la pantalla de
-    Tickets para separarlas bien, y la encontro el cliente preguntando lo
-    obvio: "¿no puede el supervisor extraer de esa area los ticket sin tanto
-    rodeo?".
+    EL AREA ES DEL CASO desde cdaa9b27 ('Case.area', escrita por la
+    importacion); la de la PERSONA asignada solo decide mientras el caso no la
+    tenga. Cuando se escribio esto el caso no la guardaba y salia de la
+    persona, que es como la empresa la configura -- y la encontro el cliente
+    preguntando lo obvio: "¿no puede el supervisor extraer de esa area los
+    ticket sin tanto rodeo?". La regla vive en
+    'areas_del_tenant.criterio_de_area', compartida con las otras señales.
 
     SI NO SE PUEDE SABER, NO SE LEE NADA. Leer un ticket cuesta una consulta al
     modelo: gastarla en uno de cartera es peor que no leer esta vuelta, y
@@ -610,14 +632,16 @@ def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
 
     from operaciones import areas_del_tenant as areas
 
-    de_soporte = areas.responsables_de(areas.AREAS_DEL_SUPERVISOR)
-    if not de_soporte:
-        #  VACIO ES AMBIGUO Y SE TRATA COMO "NO SE PUDO": puede ser que nadie
-        #  sea de soporte o que el motor no haya contestado. Filtrar por una
-        #  lista vacia no filtra NADA y traeria la cola entera -- justo lo que
-        #  esto vino a evitar.
-        logger.info("Supervisor: sin responsables de %s, no se leen tickets "
-                    "esta vuelta", list(areas.AREAS_DEL_SUPERVISOR))
+    criterio = areas.criterio_de_area()
+    if not criterio.se_sabe:
+        #  SIN EL MAPA NO SE LEE NADA. Un mapa vacio es ambiguo --nadie tiene
+        #  area, o el motor no contesto-- y se trata como "no se pudo": leer
+        #  cuesta una llamada al modelo por ticket. Desde el 16/10/2026 la
+        #  condicion es el mapa y no "nadie es de soporte": con gente en el
+        #  mapa y nadie de soporte, lo que trae el area ESCRITA propia se lee
+        #  igual, porque el area escrita manda.
+        logger.info("Supervisor: sin mapa de areas, no se leen tickets "
+                    "esta vuelta")
         return []
 
     casos = (Case.objects
@@ -648,8 +672,12 @@ def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
              #  no puede ocurrir es que un caso CON area ajena entre por tener
              #  un tecnico encima, y eso es justo lo que la primera mitad
              #  impide.
-             .filter(Q(area__in=areas.AREAS_DEL_SUPERVISOR)
-                     | (Q(area="") & Q(assigned_to__in=de_soporte)))
+             #
+             #  Desde el 16/10/2026 el criterio vive en
+             #  'areas_del_tenant.criterio_de_area', compartido con las otras
+             #  señales de tickets y con el retiro de propuestas ajenas: la
+             #  misma pregunta, una sola respuesta.
+             .filter(criterio.propio)
              .exclude(status=CERRADO_EN_DEXTER)
              .exclude(external_fetched_at__isnull=True)
              .filter(external_fetched_at__gte=corte_lectura)
@@ -3159,7 +3187,7 @@ def _correr_ciclo(org, ahora) -> dict:
     presupuesto_del_ciclo = presupuesto(ahora=ahora)
 
     resumen = {"senales": 0, "propuestas": 0, "repetidas": 0,
-               "sin_analisis": 0, "expiradas": 0,
+               "sin_analisis": 0, "expiradas": 0, "retiradas_por_area": 0,
                #  M09-L. Las claves de arriba ya existian y no cambian de
                #  significado: las de abajo se AGREGAN para que el ciclo pueda
                #  responder que paso, no solo cuantas cosas pasaron.
@@ -3170,6 +3198,10 @@ def _correr_ciclo(org, ahora) -> dict:
     detalle = []
 
     resumen["expiradas"] = expirar_vencidas(org, ahora)
+    #  ANTES de detectar, a proposito: lo que se retira aca no vuelve a
+    #  proponerse en esta misma vuelta, y el panel que la persona abre
+    #  despues del boton "Correr ciclo" ya esta limpio.
+    resumen["retiradas_por_area"] = retirar_propuestas_fuera_de_area(org, ahora)
 
     senales = detectar(org, ahora)
 
@@ -3261,6 +3293,165 @@ def _correr_ciclo(org, ahora) -> dict:
     #  mientras H-05 siga bloqueada -- ver '_capacidad_de_jornada'.
     resumen["capacidad"] = observar_capacidad(org, ahora)
     return resumen
+
+
+FUERA_DE_AREA = "Fuera del área del Supervisor NOC"
+
+#  SOLO LO QUE PROPONEN LAS SEÑALES QUE FILTRAN POR AREA. 'CASO_DESINCRONIZADO'
+#  (el proveedor cerro y el CRM no) sigue para TODAS las areas por decision del
+#  usuario del 16/10/2026: es la unica señal que cierra en el CRM un ticket
+#  que WispHub ya cerro, y hoy nadie mas lo hace. Retirar esas propuestas seria
+#  deshacer cada hora lo que la señal permitida propone, y el cierre de un
+#  ticket de cartera nunca llegaria a una persona.
+TIPOS_RETIRABLES_POR_AREA = (
+    PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO,
+    PropuestaSupervisor.CASO_ANTIGUO,
+    PropuestaSupervisor.CASO_REQUIERE_VISITA,
+)
+
+
+def propuestas_retirables_por_area(org):
+    """
+    Las candidatas al retiro: pendientes, sobre un caso, de una señal que
+    filtra por area. Una sola consulta para el ciclo y para el comando que
+    cuenta: si fueran dos, '--contar' mediria otra cosa que la que se retira.
+    """
+    return PropuestaSupervisor.objects.filter(
+        org=org, estado=PropuestaSupervisor.PROPUESTA, origen_tipo="case",
+        tipo_senal__in=TIPOS_RETIRABLES_POR_AREA,
+    )
+
+
+def retirar_propuestas_fuera_de_area(org, ahora=None) -> int:
+    """
+    Cancela las propuestas pendientes sobre tickets que SE SABE de otra área.
+
+    EL DEFECTO  --  16/10/2026
+    --------------------------
+    Desde cdaa9b27 el Supervisor lee solo tickets de soporte técnico y
+    operativo. Pero las propuestas hechas ANTES de ese filtro --sobre cartera,
+    ventas, administrativo-- seguían en la pestaña Pendientes hasta que una
+    persona las revisara o expiraran a los 7 días. El 15/10 "Pendientes" decía
+    76 mientras Soporte Técnico tenía 64 tickets. Nada las retiraba por
+    alcance: 'expirar_vencidas' solo mira el tiempo.
+
+    QUÉ HACE, Y QUÉ NO
+    ------------------
+    Toma las propuestas en PROPUESTA con origen "case" de las señales que
+    filtran por área (TIPOS_RETIRABLES_POR_AREA: la de cierre queda afuera por
+    decisión del usuario), pregunta por el área de cada caso con el MISMO
+    criterio que usan las señales ('areas_del_tenant.criterio_de_area') y
+    cancela las que se sabe ajenas:
+    área escrita de otra, o sin área escrita y con gente cuya área el motor
+    conoce y es otra. Lo que NO se sabe --sin área escrita y sin nadie, o con
+    alguien que el motor no conoce-- se queda: cancelar sin saber sería
+    inventarle un área.
+
+    Es CANCELADA y no EXPIRADA: "dejó de tener sentido mirarla, y la razón es
+    un hecho del mundo", que es exactamente la semántica escrita en
+    'cancelar'. No escribe 'revisado_por'. Una cancelada puede volver a
+    proponerse por CASO_ANTIGUO o CASO_REQUIERE_VISITA si la reconciliación le
+    escribe al caso un área propia: la condición reaparece y es nueva. La
+    lectura con diagnóstico NO: '_tickets_abiertos_con_tecnico' excluye lo ya
+    leído sin mirar el estado de la propuesta, así que una lectura cancelada
+    por área se queda en su fila cancelada (auditoría independiente,
+    16/10/2026; decisión abierta en la ficha).
+
+    FAIL-CLOSED: sin el mapa del motor no se cancela nada. Escribir un estado
+    por una lectura que no llegó es peor que esperar la próxima vuelta.
+
+    Corre dentro de 'correr_ciclo' (a las :07 y con el botón "Correr ciclo")
+    y a demanda con 'manage.py propuestas_fuera_de_area'.
+    """
+    from operaciones import areas_del_tenant as areas
+
+    criterio = areas.criterio_de_area()
+    if not criterio.se_sabe:
+        logger.info("Supervisor: sin mapa de areas, no se retira ninguna "
+                    "propuesta esta vuelta")
+        return 0
+
+    pendientes = list(
+        propuestas_retirables_por_area(org)
+        .only("id", "origen_id", "estado", "accion_propuesta")
+    )
+    if not pendientes:
+        return 0
+
+    ajenos = areas_de_los_ajenos(
+        org, {p.origen_id for p in pendientes}, criterio)
+    retiradas = 0
+    for propuesta in pendientes:
+        area = ajenos.get(propuesta.origen_id)
+        if area is None:
+            continue
+        try:
+            cancelar(
+                propuesta,
+                motivo=f"{FUERA_DE_AREA}: el caso {propuesta.origen_id} es "
+                       f"del área '{area}'.",
+                descripcion=FUERA_DE_AREA,
+                #  Nombre fijo y no la accion propuesta: esa la redacto el
+                #  modelo leyendo el ticket, y el feed no tiene por que
+                #  repetirla una vez mas por cada cancelacion.
+                nombre=FUERA_DE_AREA,
+            )
+        except YaRevisada:
+            #  Alguien la decidio entre que se listo y se intento cancelar.
+            #  La decision humana gana, y no es un error.
+            continue
+        retiradas += 1
+    if retiradas:
+        logger.info("Supervisor: %s propuestas retiradas por estar fuera del "
+                    "area", retiradas)
+    return retiradas
+
+
+def _uuids(ids) -> list:
+    """Los que parsean como UUID; un 'origen_id' raro no se cancela ni se cuenta."""
+    validos = []
+    for i in ids:
+        try:
+            validos.append(uuid.UUID(str(i)))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    return validos
+
+
+def propios_entre(org, ids_de_caso, criterio) -> set:
+    """
+    Los ids (str) de 'ids_de_caso' que se saben del Supervisor. Para contar
+    lo que no se sabe: ni propio ni ajeno.
+    """
+    validos = _uuids(ids_de_caso)
+    if not validos:
+        return set()
+    return {str(pk) for pk in Case.objects.filter(org=org, pk__in=validos)
+            .filter(criterio.propio).values_list("pk", flat=True)}
+
+
+def areas_de_los_ajenos(org, ids_de_caso, criterio) -> dict:
+    """
+    {id de caso (str): area} de los casos de 'ids_de_caso' que se saben
+    ajenos. El area es la escrita; si el caso no la tiene, la de su primer
+    responsable con area conocida, que es por lo que se lo supo ajeno.
+    """
+    from operaciones import areas_del_tenant as areas
+
+    validos = _uuids(ids_de_caso)
+    if not validos:
+        return {}
+    casos = Case.objects.filter(org=org, pk__in=validos)
+    salida = {}
+    for caso in areas.ajenos_entre(casos, criterio).prefetch_related("assigned_to"):
+        area = caso.area
+        if not area:
+            for persona in caso.assigned_to.all():
+                area = criterio.mapa.get(str(persona.id)) or ""
+                if area:
+                    break
+        salida[str(caso.id)] = area or "otra área"
+    return salida
 
 
 def expirar_vencidas(org, ahora=None) -> int:
@@ -3549,9 +3740,18 @@ def revisar(propuesta: PropuestaSupervisor, *, actor, decision: str,
     return fresca
 
 
-def cancelar(propuesta: PropuestaSupervisor, *, motivo: str) -> PropuestaSupervisor:
+def cancelar(propuesta: PropuestaSupervisor, *, motivo: str,
+             descripcion: str = "La condición dejó de existir antes de ser revisada",
+             nombre: str | None = None,
+             ) -> PropuestaSupervisor:
     """
-    La condición desapareció antes de que nadie la mirara.
+    La condición desapareció antes de que nadie la mirara -- o dejó de ser
+    de este equipo ('descripcion' lo dice; ver retirar_propuestas_fuera_de_area).
+
+    'nombre' es lo que el feed de actividad muestra como título del renglón.
+    Por defecto es la acción propuesta, como siempre; el retiro por área pasa
+    un texto fijo, porque para la lectura con diagnóstico esa acción la
+    redactó el modelo leyendo el ticket y puede traer lo que el ticket traía.
 
     POR QUE NO ALCANZABA CON RECHAZAR Y EXPIRAR  --  paso M09-F
     ----------------------------------------------------------
@@ -3597,8 +3797,8 @@ def cancelar(propuesta: PropuestaSupervisor, *, motivo: str) -> PropuestaSupervi
         auditoria.registrar(
             org=fresca.org, actor=None, accion="STATUS_CHANGED",
             entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=fresca.id,
-            nombre=fresca.accion_propuesta,
-            descripcion="La condición dejó de existir antes de ser revisada",
+            nombre=nombre if nombre is not None else fresca.accion_propuesta,
+            descripcion=descripcion,
             estado_anterior=anterior, estado_nuevo=fresca.estado,
             motivo=motivo,
         )

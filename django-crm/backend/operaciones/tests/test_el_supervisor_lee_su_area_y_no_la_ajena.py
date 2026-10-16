@@ -79,6 +79,10 @@ def equipo(org_a, monkeypatch):
         return [pid for pid, a in por_persona.items() if a in pedidas]
 
     monkeypatch.setattr(areas, "responsables_de", _responsables)
+    #  Desde el 16/10/2026 el criterio de area se arma en
+    #  'areas.criterio_de_area' a partir del mapa completo persona -> area, no
+    #  de la lista de soporte: es el mismo mapa, servido entero.
+    monkeypatch.setattr(areas, "area_por_persona", lambda: dict(por_persona))
     return tecnico, cartera
 
 

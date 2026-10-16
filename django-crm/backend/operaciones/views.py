@@ -423,12 +423,14 @@ class CancelarPropuestaView(APIView):
 
 class CicloSupervisorView(APIView):
     """
-    Corre una pasada de detección. Solo lee y propone.
+    Corre una pasada de detección a pedido. Solo lee y propone.
 
-    Se expone como ruta y no como trabajo del scheduler a propósito: engancharlo
-    al scheduler sería darle al Supervisor la capacidad de correr solo, y esta
-    etapa es explícitamente la que no se la da. Cuando se decida automatizarlo,
-    el registro de trabajos del motor ya existe y está vacío.
+    Cuando se escribió esto era la única vía: engancharlo al scheduler era
+    darle al Supervisor la capacidad de correr solo, y esa etapa no la tenía.
+    Desde el 08/10/2026 el ciclo también corre solo a las :07 para las
+    empresas que lo delegaron ('CICLO_AUTOMATICO', ver crm/celery.py y
+    operaciones/tasks.py); esta ruta sigue siendo el camino a demanda, y
+    encola la misma tarea (ver 'ciclo_a_pedido').
     """
 
     permission_classes = [EsJefeDeOperaciones]

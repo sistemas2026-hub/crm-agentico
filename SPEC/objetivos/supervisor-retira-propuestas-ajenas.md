@@ -5,10 +5,15 @@
 ## Qué significa terminado
 
 La pestaña **Pendientes** de `/supervisor-noc` solo contiene propuestas sobre
-tickets de `soporte_tecnico` y `operativo`; las que ya existían sobre otras
-áreas se cancelaron solas, con motivo, sin esperar a que expiren a los 7 días;
-y ninguna de las señales de ruido vuelve a proponer un ticket ajeno a la hora
-siguiente.
+tickets de `soporte_tecnico` y `operativo` —con dos excepciones dichas: las
+propuestas de **cierre** (`CASO_DESINCRONIZADO`) siguen para todas las áreas
+por decisión, y lo que **no se sabe** de qué área es (sin área escrita, y sin
+nadie o con alguien que el motor no conoce) no se toca porque no se adivina—;
+las demás que ya existían sobre otras áreas se cancelaron solas, con motivo,
+sin esperar a que expiren a los 7 días; y ninguna de las señales de ruido
+vuelve a proponer un ticket que se sabe ajeno a la hora siguiente. El comando
+cuenta las dos excepciones aparte, para que un `fuera de área: 0` no se lea
+como "limpio".
 
 ## De dónde viene, y qué NO duplica
 
@@ -37,10 +42,14 @@ siguiente.
 | Decisión | Qué se decidió | Por qué |
 |---|---|---|
 | ¿Cancelar o expirar? | **`CANCELADA`**, con motivo | Su semántica escrita (`supervisor.py:3530-3548`): "dejó de tener sentido mirarla; la razón es un hecho del mundo". `EXPIRADA` significa "nadie la miró a tiempo", que sería falso |
-| ¿La señal de cierre (`CASO_DESINCRONIZADO`) se filtra por área? | **No.** Sigue para todas las áreas | Lo decidió el usuario: es la única que cierra en el CRM un ticket que WispHub ya cerró, y hoy nadie más lo hace. Sus propuestas de otras áreas pueden seguir apareciendo |
+| ¿La señal de cierre (`CASO_DESINCRONIZADO`) se filtra por área? | **No.** Sigue para todas las áreas, y sus propuestas pendientes **tampoco se retiran** | Lo decidió el usuario: es la única que cierra en el CRM un ticket que WispHub ya cerró, y hoy nadie más lo hace. Retirarlas sería deshacer cada hora lo que la señal permitida propone. Sus propuestas de otras áreas pueden seguir apareciendo |
 | Área vacía y sin asignado, o asignado a alguien que no figura en el mapa del motor | **No se cancela**: es "no se sabe" | Misma regla que la ficha hermana: vacío no es un área, y no se inventa |
 | Propuestas ya `ACEPTADA` / `MODIFICADA` / `RECHAZADA` sobre tickets ajenos | **Se dejan** | Una persona ya decidió; `cancelar` las rechaza con `YaRevisada` y está bien que lo haga |
 | Texto del motivo | Fijo: área del caso + id del caso | Va a `auditoria.registrar` y a transcripciones: sin nombre de responsable ni texto del ticket |
+| Las señales de ruido (`CASO_ANTIGUO`, `CASO_REQUIERE_VISITA`) con el mapa vacío | **Proponen solo lo que no depende de la persona**: área escrita propia, o sin área y sin nadie. Un área escrita ajena se excluye sin mapa; lo que tiene gente encima espera a la vuelta en que el motor conteste (`sin_ajenos`) | Primera versión (16/10, al construir): proponían también lo asignado sin mapa, "igual que ayer". La auditoría de frontera midió que eso oscilaba **caso por caso** con el motor caído una vuelta: retirar, re-proponer, retirar, con cota del orden de los ~500 tickets de cartera importados antes del campo, más llamadas al modelo gastadas en ajenos por `CASO_REQUIERE_VISITA`. Costo de la regla final: con el motor caído una vuelta, un caso sin área con un técnico encima espera una hora. Ninguna prueba existente siembra casos asignados sin mapa (medido con grep) |
+| Qué propuestas retira | Solo las de las señales filtradas: `TIPOS_RETIRABLES_POR_AREA` (lectura con diagnóstico, caso antiguo, requiere visita) | Las de cierre (`CASO_DESINCRONIZADO`) no: la señal sigue para todas las áreas y retirarlas sería deshacer cada hora lo que propone |
+| Grafía del área escrita | Se compara **sin mayúsculas ni espacios alrededor** (`Soporte_Tecnico` y `soporte_tecnico ` son soporte). Acentos y guiones no se tocan | Auditoría independiente (16/10): `Case.area` se escribe tal cual viene de `destinos`, el núcleo lo valida normalizado, y compararlo exacto cancelaba cada hora lo propio con otra grafía. Normalizar al escribir es trabajo de la importación: deuda compartida con la ficha hermana |
+| Una lectura con diagnóstico cancelada por área | **No vuelve a proponerse** aunque el caso reciba después un área propia: `_tickets_abiertos_con_tecnico` excluye lo ya leído sin mirar el estado. La lectura queda en la fila cancelada, visible en "Ya decididas" | Auditoría independiente (16/10). Se deja así: cambiar `ya_leidos` para que ignore canceladas es otra decisión (volvería a pagar modelo también por lo expirado), y el caso real exige un mapa equivocado. **Decisión abierta para el dueño** |
 
 ## Criterios de aceptación
 
@@ -52,7 +61,7 @@ contenedor de un solo uso con el worktree montado.
 
 | # | Evidencia | Cómo se comprueba |
 |---|---|---|
-| 1 | `pytest operaciones/tests/test_el_supervisor_retira_lo_ajeno.py operaciones/tests/test_el_supervisor_lee_su_area_y_no_la_ajena.py --no-cov -v` con `TEST_DATABASE_URL` → `N passed`, 0 failed | Salida pegada **incluyendo la línea de comando** con `TEST_DATABASE_URL`. El archivo nuevo cubre, con un caso de control adentro por cada caso afuera: (a) `PROPUESTA` sobre caso `area='ventas'` asignado a un técnico → `CANCELADA`, motivo con área e id; (b) sobre caso `soporte_tecnico` → sigue `PROPUESTA`; (c) `area=''` + responsable de cartera según el mapa → `CANCELADA`; (d) `area=''` + técnico → sigue; (e) `area=''` + sin asignado → sigue; (f) `area=''` + asignado fuera del mapa → sigue; (g) mapa vacío → 0 cancelaciones; (h) `ACEPTADA`/`RECHAZADA`/`MODIFICADA` sobre ticket ajeno → intactas; (i) `correr_ciclo(org)` cancela y lo cuenta en `resumen["retiradas_por_area"]`; (j) `CASO_ANTIGUO` y `CASO_REQUIERE_VISITA` no se proponen para un caso `ventas` asignado a técnico y sí para el de control; (k) `CASO_DESINCRONIZADO` **sí** se sigue proponiendo para un caso de cartera cerrado en el proveedor; (l) el comando `manage.py propuestas_fuera_de_area --tenant <org> --contar` imprime el mismo número que el ORM bajo contexto RLS, e imprime ids y conteos, nunca `name` ni `description` |
+| 1 | `pytest operaciones/tests/test_el_supervisor_retira_lo_ajeno.py operaciones/tests/test_el_supervisor_lee_su_area_y_no_la_ajena.py --no-cov -v` con `TEST_DATABASE_URL` → `N passed`, 0 failed | Salida pegada **incluyendo la línea de comando** con `TEST_DATABASE_URL`. El archivo nuevo cubre, con un caso de control adentro por cada caso afuera: (a) `PROPUESTA` sobre caso `area='ventas'` asignado a un técnico → `CANCELADA`, motivo con área e id; (b) sobre caso `soporte_tecnico` → sigue `PROPUESTA`; (c) `area=''` + responsable de cartera según el mapa → `CANCELADA`; (d) `area=''` + técnico → sigue; (e) `area=''` + sin asignado → sigue; (f) `area=''` + asignado fuera del mapa → sigue; (g) mapa vacío → 0 cancelaciones; (h) `ACEPTADA`/`RECHAZADA`/`MODIFICADA` sobre ticket ajeno → intactas; (i) `correr_ciclo(org)` cancela y lo cuenta en `resumen["retiradas_por_area"]`; (j) `CASO_ANTIGUO` y `CASO_REQUIERE_VISITA` no se proponen para un caso `ventas` asignado a técnico y sí para el de control; (k) `CASO_DESINCRONIZADO` **sí** se sigue proponiendo para un caso de cartera cerrado en el proveedor, y (k2) una propuesta pendiente de ese tipo sobre un caso ajeno **no** se retira, mientras una de lectura sobre el mismo caso sí; (l) el comando `manage.py propuestas_fuera_de_area --org <id> --contar` imprime el mismo número que el ORM bajo contexto RLS, e imprime ids y conteos, nunca `name` ni `description` |
 | 2 | Cuatro mutaciones, cada una deja al menos una prueba en rojo | Salida pegada por mutación (la línea `N failed`): quitar el fail-closed del mapa vacío; retirar también `ACEPTADA`; quitar el filtro de área de `_casos_abiertos_antiguos`; escribir `EXPIRADA` en vez de `CANCELADA`. Restaurar después de cada una y decirlo |
 | 3 | `ruff check operaciones/` y `ruff format --check operaciones/` → exit 0 | Son pasos duros del CI del backend |
 | 4 | `git diff --name-only origin/fix/integracion-wisphub` solo muestra rutas bajo `django-crm/backend/operaciones/`, esta ficha y, si hubo, `SPEC/auditorias/*` | Nada en `nucleo/`, nada en `django-crm/frontend/` |
@@ -79,8 +88,10 @@ Las propias de este objetivo:
   `AREAS_DEL_SUPERVISOR` (es decisión del tenant, no del código).
 - `_casos_cerrados_en_el_proveedor` **no** se filtra por área (decisión del
   16/10, arriba).
-- El retiro solo toca `estado = PROPUESTA` con `origen_tipo = "case"`. Nunca
-  escribe `revisado_por`.
+- El retiro solo toca `estado = PROPUESTA` con `origen_tipo = "case"` y de
+  los tipos que proponen las señales filtradas (`TIPOS_RETIRABLES_POR_AREA`:
+  lectura con diagnóstico, caso antiguo, requiere visita). Nunca escribe
+  `revisado_por`.
 - Con el mapa del motor vacío o inalcanzable: **0 cancelaciones** y una línea
   de log sin datos de cliente. Fail-closed, igual que la lectura.
 - `area=''` sin asignado, o con asignado fuera del mapa: no se cancela.
@@ -121,12 +132,12 @@ de señales cambia qué candidatos ve el cierre automático.
 
 | Agente | Para qué | Estado |
 |---|---|---|
-| `arquitecto-dexter` | Una sola función de criterio de área para las señales y el retiro; dónde va el retiro en el ciclo; estructura de `operaciones/management/` (no existe; patrón en `common/management/commands/`) | pendiente |
-| implementación | Sesión principal, con pruebas en `operaciones/tests/` siguiendo `test_el_supervisor_lee_su_area_y_no_la_ajena.py` (monkeypatch de `areas.responsables_de`) | pendiente |
-| `auditor-de-frontera` | Afirmar por efecto: solo `PROPUESTA` + `origen_tipo="case"`; mapa vacío → 0; sin cierre, sin aviso al chat, sin `gobierno.registrar_decision`; que ninguna señal sin filtro re-proponga lo que acaba de cancelar (`CANCELADA` no está en `ESTADOS_QUE_BLOQUEAN`, `models.py:870`); tenant respetado | pendiente |
-| `revisor-de-pii` | El motivo va a auditoría y la salida del comando a transcripciones: sin nombres ni texto del ticket; `logger.info` sin datos de cliente | pendiente, en paralelo con el anterior |
+| `arquitecto-dexter` | Una sola función de criterio de área para las señales y el retiro; dónde va el retiro en el ciclo; estructura de `operaciones/management/` (no existe; patrón en `common/management/commands/`) | corrió: confirmó la ubicación, `--org` UUID, y advirtió que un fail-closed en las señales de ruido rompía 14 archivos de pruebas |
+| implementación | Sesión principal, con pruebas en `operaciones/tests/` siguiendo `test_el_supervisor_lee_su_area_y_no_la_ajena.py` (la fixture pasó a monkeypatchear `area_por_persona`) | hecha: 31 pruebas en verde sobre Postgres real, 6 mutaciones muertas |
+| `auditor-de-frontera` | Afirmar por efecto: solo `PROPUESTA` + `origen_tipo="case"`; mapa vacío → 0; sin cierre, sin aviso al chat, sin `gobierno.registrar_decision`; que ninguna señal sin filtro re-proponga lo que acaba de cancelar (`CANCELADA` no está en `ESTADOS_QUE_BLOQUEAN`, `models.py:870`); tenant respetado | corrió, con 7 pruebas propias: 5 hallazgos, 4 cerrados y 1 anotado como deuda (`SPEC/auditorias/RETIRO-PROPUESTAS-AJENAS.md`) |
+| `revisor-de-pii` | El motivo va a auditoría y la salida del comando a transcripciones: sin nombres ni texto del ticket; `logger.info` sin datos de cliente | corrió: 2 hallazgos, los dos cerrados (título fijo en la fila de auditoría; pruebas con cliente, teléfono y correos sembrados) |
 | `auditor-independiente` | El hueco probable: área vacía sin asignado, y la oscilación cancelar/re-proponer | pendiente |
-| `guardia-de-release` | Reducido: sin migración ni variable nueva; `core.hooksPath`, stage por rutas, `git patch-id` contra origin, evidencia post-deploy | pendiente |
+| `guardia-de-release` | Reducido: sin migración ni variable nueva; `core.hooksPath`, stage por rutas, `git patch-id` contra origin, evidencia post-deploy | corrió: sin bloqueos; nada automático (hook ni CI) ve un push de `django-crm/backend/` |
 | `verificador-de-api` | — | se saltea: no toca ninguna API externa; `/agentes/areas` ya existe y su cliente corre en producción desde `cdaa9b27` |
 | `corredor-de-evaluacion` | — | se saltea: no cambia prompt, catálogo ni modelo |
 | `guardia-de-config` | — | se saltea: no toca `tenants/*.yaml` ni `tenant_config` |
@@ -146,7 +157,8 @@ Ninguno impide construir. Dos impiden **afirmar que funciona en producción**:
    y el síntoma es **indistinguible** de "no hay propuestas ajenas". Evidencia
    a buscar, por quien tenga acceso: en el panel, propuestas
    `TICKET_SIN_DIAGNOSTICO` creadas después del 15/10 22:01; o en el log del
-   worker, la ausencia de `Supervisor: sin responsables de [...]`.
+   worker, la ausencia de `Supervisor: sin mapa de areas` (texto desde el
+   16/10; antes decía `sin responsables de [...]`).
 2. **Quien revisa necesita `EsJefeDeOperaciones`** para pulsar "Correr
    ciclo"; si no, el único camino es esperar las :07, y las :07 exigen
    `CICLO_AUTOMATICO` activa para Rapilink (probable: el ciclo corre en
@@ -166,7 +178,20 @@ Coordinación con la otra sesión (`wt-cerebro-prod`), sin bloquear:
   el stage.
 
 Y uno que no es de nadie: el mapa de áreas se cachea 15 minutos en el worker
-(`areas_del_tenant.py:72`). Un cambio de áreas tarda hasta eso en llegar.
+(`areas_del_tenant.py`). Un cambio de áreas tarda hasta eso en llegar. Desde
+el 16/10 también se recuerda **un minuto** que el motor no contestó
+(`SEGUNDOS_SIN_RESPUESTA`): un ciclo lee el mapa diez veces (tres señales, el
+retiro y `detectar` tres veces) y sin eso eran diez esperas de hasta 5 s,
+cuatro con la organización bloqueada, y lecturas distintas en la misma vuelta.
+
+**Deuda anotada, no resuelta acá (auditoría de frontera, H3):** el mapa es
+del `MOTOR_TENANT` del proceso y `AREAS_DEL_SUPERVISOR` es constante de
+código. Con una segunda empresa cuya área de soporte se llame distinto, la
+rama "área escrita ajena" cancelaría cada hora todas sus propuestas con área
+escrita. Preexistente para la lectura desde `cdaa9b27`; el retiro lo vuelve
+escritura. Hoy un solo tenant: sin efecto. Es el mismo D5 de CLAUDE.md §13
+(el frontend y el backend del CRM saben de un solo tenant), y se resuelve
+con ese objetivo, no con un parche acá.
 
 ## Bitácora
 

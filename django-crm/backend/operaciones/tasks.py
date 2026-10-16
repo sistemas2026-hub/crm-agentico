@@ -209,9 +209,11 @@ def ciclo_del_supervisor():
             #  el log del worker, que no es un lugar con control de acceso.
             logger.info(
                 "Supervisor: ciclo corrido org=%s senales=%s propuestas=%s "
-                "cerrados=%s no_evaluados=%s no_cerrados=%s",
+                "retiradas_por_area=%s cerrados=%s no_evaluados=%s "
+                "no_cerrados=%s",
                 org.id, resumen.get("senales", 0),
-                resumen.get("propuestas", 0), n,
+                resumen.get("propuestas", 0),
+                resumen.get("retiradas_por_area", 0), n,
                 auto.get("motivos") or {},
                 auto.get("motivos_de_no_cierre") or {})
     finally:
@@ -295,9 +297,11 @@ def ciclo_a_pedido(org_id: str) -> dict:
     #  equipo, cuantas fallaron. Ni una descripcion de ticket ni un nombre.
     t = resumen.get("tickets") or {}
     logger.info(
-        "Supervisor: ciclo a pedido · propuestas=%s · tickets leidos=%s "
-        "midieron=%s sin_medir=%s errores=%s fuera_de_tope=%s · fases_caidas=%s",
-        resumen.get("propuestas"), t.get("leidos"), t.get("midieron"),
+        "Supervisor: ciclo a pedido · propuestas=%s · retiradas_por_area=%s · "
+        "tickets leidos=%s midieron=%s sin_medir=%s errores=%s fuera_de_tope=%s "
+        "· fases_caidas=%s",
+        resumen.get("propuestas"), resumen.get("retiradas_por_area"),
+        t.get("leidos"), t.get("midieron"),
         t.get("sin_medir"), t.get("errores"), t.get("fuera_de_tope"),
         [f.get("fase") for f in (resumen.get("fases_que_fallaron") or [])])
 
