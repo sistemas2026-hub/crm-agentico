@@ -1098,17 +1098,6 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    FormularioDeCampo(
-                      // Una sola lectura del esquema para toda la pantalla: la
-                      // misma que usa el checklist de cierre.
-                      campos: _camposNormalizados,
-                      valores: _valoresFormulario,
-                      controladores: _controllers,
-                      alCambiar: _onFieldChanged,
-                      mostrarDatosFuturos: widget.mostrarDatosFuturos,
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-
                     // REPORTAR, DONDE OCURRE LO QUE SE REPORTA
                     // ----------------------------------------
                     // Sin la historia y sin el bloqueo abierto: los dos viven en
@@ -1143,6 +1132,30 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                           },
                     ),
                     const SizedBox(height: AppSpacing.lg),
+                    // LOS DATOS DEL TRABAJO, CON SU NOMBRE. Antes empezaban sin
+                    // titulo, arriba de todo, y se confundian con el avance: el
+                    // tecnico los llenaba creyendo que estaba reportando
+                    // (pedido del usuario, 15/10/2026). Reportar va ARRIBA,
+                    // porque es lo que se hace varias veces en una visita; esto
+                    // se completa una vez para cerrar.
+                    if (_camposNormalizados.isNotEmpty) ...<Widget>[
+                      const EncabezadoDeBloque(
+                        titulo: 'Datos del trabajo',
+                        icono: Icons.fact_check_outlined,
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                    ],
+                    FormularioDeCampo(
+                      // Una sola lectura del esquema para toda la pantalla: la
+                      // misma que usa el checklist de cierre.
+                      campos: _camposNormalizados,
+                      valores: _valoresFormulario,
+                      controladores: _controllers,
+                      alCambiar: _onFieldChanged,
+                      mostrarDatosFuturos: widget.mostrarDatosFuturos,
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+
 
                     _bloqueDeMateriales(),
                     _evidencias(),

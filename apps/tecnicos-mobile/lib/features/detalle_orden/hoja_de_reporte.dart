@@ -38,6 +38,8 @@ class HojaDeReporte extends StatefulWidget {
     this.fotosTomadas = const <String, int>{},
     this.erroresDelServidor = const <String, String>{},
     this.guardando = false,
+    this.enHojaModal = false,
+    this.alCambiarContenido,
   });
 
   /// `inicio`, `avance`, `bloqueo` o `cierre`.
@@ -81,6 +83,20 @@ class HojaDeReporte extends StatefulWidget {
 
   final bool guardando;
 
+  /// Dibujarse como hoja que sube desde abajo: los campos se desplazan y
+  /// «Guardar el reporte» queda FIJO al pie, siempre a la vista.
+  ///
+  /// Pedido del usuario (15/10/2026): «¿por qué los botones de avance están
+  /// arriba y abajo es donde se pone la información?». La hoja se abría como
+  /// otra tarjeta debajo de los botones, fuera de la vista --y con el teclado
+  /// abierto, más lejos todavía--: tocar «Registrar avance» parecía no hacer
+  /// nada. Ahora el formulario aparece donde está el dedo.
+  final bool enHojaModal;
+
+  /// Avisa si hay algo escrito, para que cerrar la hoja pregunte antes de
+  /// tirarlo. Las fotos las cuenta quien captura (`fotosTomadas`).
+  final ValueChanged<bool>? alCambiarContenido;
+
   @override
   State<HojaDeReporte> createState() => _HojaDeReporteState();
 }
@@ -114,7 +130,14 @@ class _HojaDeReporteState extends State<HojaDeReporte> {
       // que parezca que sigue mal.
       _faltantes = Map<String, String>.from(_faltantes)..remove(id);
     });
+    widget.alCambiarContenido?.call(_hayAlgoEscrito);
   }
+
+  /// Si hay algo que se perdería al cerrar. Un booleano tocado cuenta: es una
+  /// respuesta que la persona dio.
+  bool get _hayAlgoEscrito => _valores.values.any(
+    (dynamic v) => v != null && (v is! String || v.trim().isNotEmpty),
+  );
 
   void _guardar() {
     final Map<String, String> faltan = <String, String>{};
@@ -150,10 +173,7 @@ class _HojaDeReporteState extends State<HojaDeReporte> {
       ..._faltantes,
     };
 
-    return DexterBloque(
-      titulo: widget.titulo,
-      icono: Icons.edit_note,
-      children: <Widget>[
+    final List<Widget> contenido = <Widget>[
         if (widget.campos.isEmpty)
           Text(
             'Este tipo de trabajo no declara campos para este momento. '
@@ -200,16 +220,72 @@ class _HojaDeReporteState extends State<HojaDeReporte> {
           ),
         ],
 
-        const SizedBox(height: AppSpacing.sm),
-        DexterAccionDominante(
-          texto: widget.guardando ? 'Guardando…' : 'Guardar el reporte',
-          icono: Icons.save_outlined,
-          alTocar: widget.guardando ? null : _guardar,
+    ];
+
+    final List<Widget> pie = <Widget>[
+      DexterAccionDominante(
+        texto: widget.guardando ? 'Guardando…' : 'Guardar el reporte',
+        icono: Icons.save_outlined,
+        alTocar: widget.guardando ? null : _guardar,
+      ),
+      const SizedBox(height: AppSpacing.xs),
+      Text(
+        'Se guarda en el teléfono y sube cuando haya señal.',
+        style: AppTypography.etiquetaChica,
+      ),
+    ];
+
+    if (!widget.enHojaModal) {
+      return DexterBloque(
+        titulo: widget.titulo,
+        icono: Icons.edit_note,
+        children: <Widget>[
+          ...contenido,
+          const SizedBox(height: AppSpacing.sm),
+          ...pie,
+        ],
+      );
+    }
+
+    // EN LA HOJA: lo que se escribe se desplaza; guardar NO. Así el botón
+    // sigue a la vista aunque el formulario sea largo o el teclado esté
+    // abierto, que es justo cuando antes quedaba fuera de la pantalla.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Flexible(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.margen,
+              AppSpacing.sm,
+              AppSpacing.margen,
+              AppSpacing.md,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: contenido,
+            ),
+          ),
         ),
-        const SizedBox(height: AppSpacing.xs),
-        Text(
-          'Se guarda en el teléfono y sube cuando haya señal.',
-          style: AppTypography.etiquetaChica,
+        Container(
+          decoration: const BoxDecoration(
+            color: AppColors.surfaceContainerLowest,
+            boxShadow: AppTheme.sombraNivel2,
+          ),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.margen,
+            AppSpacing.sm,
+            AppSpacing.margen,
+            AppSpacing.sm,
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: pie,
+            ),
+          ),
         ),
       ],
     );

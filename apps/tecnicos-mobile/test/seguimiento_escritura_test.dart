@@ -30,6 +30,8 @@ void main() {
     })?
     alReportar,
     int pendientes = 0,
+    Map<String, int> fotos = const <String, int>{},
+    void Function(String momento)? alDescartar,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -40,6 +42,8 @@ void main() {
               cargando: false,
               alReportar: alReportar,
               pendientesDeSubir: pendientes,
+              fotosTomadas: fotos,
+              alDescartarBorrador: alDescartar,
             ),
           ),
         ),
@@ -116,7 +120,7 @@ void main() {
       expect(find.text('Registrar inicio'), findsOneWidget);
       expect(find.text('Registrar avance'), findsOneWidget);
       expect(find.text('Reportar bloqueo'), findsOneWidget);
-      expect(find.text('Cerrar intervención'), findsOneWidget);
+      expect(find.text('Reporte de cierre'), findsOneWidget);
     });
 
     testWidgets('un momento que el tipo de trabajo NO declara no se ofrece', (
@@ -216,22 +220,150 @@ void main() {
       );
     });
 
-    testWidgets('volver a tocar el mismo botón cierra la hoja', (
+    // LA HOJA SUBE DESDE ABAJO (15/10/2026). Antes se abría como tarjeta
+    // debajo de los botones, fuera de la vista, y cerrarla tiraba lo escrito
+    // sin preguntar. Estas pruebas sostienen las tres cosas que cambiaron.
+    testWidgets('guardar queda FIJO: no vive dentro de lo que se desplaza', (
+      WidgetTester tester,
+    ) async {
+      await montar(
+        tester,
+        seguimiento: conFormularios(
+          momentos: <String>['avance'],
+          // Un formulario más alto que la pantalla de prueba.
+          campos: <Map<String, dynamic>>[
+            for (int i = 0; i < 14; i++)
+              <String, dynamic>{
+                'id': 'campo_$i',
+                'titulo': 'Campo $i',
+                'tipo': 'texto',
+              },
+          ],
+        ),
+        alReportar: (_, _, {bool requiereNoc = false, bool detener = true}) {},
+      );
+
+      await tester.tap(find.text('Registrar avance'));
+      await tester.pumpAndSettle();
+
+      final Finder boton = find.text(guardar);
+      expect(boton, findsOneWidget);
+      // Visible sin desplazar: dentro de la pantalla...
+      final Rect r = tester.getRect(boton);
+      final Size pantalla =
+          tester.view.physicalSize / tester.view.devicePixelRatio;
+      expect(r.bottom <= pantalla.height, isTrue);
+      // ...y fuera de la zona que se desplaza, que es lo que lo mantiene ahí.
+      expect(
+        find.ancestor(of: boton, matching: find.byType(SingleChildScrollView)),
+        findsNothing,
+      );
+    });
+
+    testWidgets('cerrar SIN nada escrito cierra sin preguntar', (
+      WidgetTester tester,
+    ) async {
+      String? descartado;
+      await montar(
+        tester,
+        seguimiento: conFormularios(momentos: <String>['avance']),
+        alReportar: (_, _, {bool requiereNoc = false, bool detener = true}) {},
+        alDescartar: (String m) => descartado = m,
+      );
+
+      await tester.tap(find.text('Registrar avance'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Cerrar'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(guardar), findsNothing);
+      expect(find.text('¿Descartar este reporte?'), findsNothing);
+      expect(descartado, 'avance');
+    });
+
+    testWidgets('cerrar CON algo escrito pregunta, y «seguir» no pierde nada', (
+      WidgetTester tester,
+    ) async {
+      String? descartado;
+      await montar(
+        tester,
+        seguimiento: conFormularios(momentos: <String>['avance']),
+        alReportar: (_, _, {bool requiereNoc = false, bool detener = true}) {},
+        alDescartar: (String m) => descartado = m,
+      );
+
+      await tester.tap(find.text('Registrar avance'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'empalme hecho');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Cerrar'));
+      await tester.pumpAndSettle();
+      expect(find.text('¿Descartar este reporte?'), findsOneWidget);
+
+      await tester.tap(find.text('Seguir escribiendo'));
+      await tester.pumpAndSettle();
+      expect(find.text(guardar), findsOneWidget);
+      expect(find.text('empalme hecho'), findsOneWidget);
+      expect(descartado, isNull);
+
+      await tester.tap(find.byTooltip('Cerrar'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Descartar'));
+      await tester.pumpAndSettle();
+      expect(find.text(guardar), findsNothing);
+      expect(descartado, 'avance');
+    });
+
+    testWidgets('una foto sacada también se pregunta antes de tirarla', (
       WidgetTester tester,
     ) async {
       await montar(
         tester,
         seguimiento: conFormularios(momentos: <String>['avance']),
         alReportar: (_, _, {bool requiereNoc = false, bool detener = true}) {},
+        fotos: const <String, int>{'foto_avance': 1},
       );
 
       await tester.tap(find.text('Registrar avance'));
       await tester.pumpAndSettle();
-      expect(find.text(guardar), findsOneWidget);
+      await tester.tap(find.byTooltip('Cerrar'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('¿Descartar este reporte?'), findsOneWidget);
+    });
+
+    testWidgets('guardar cierra la hoja, lo confirma, y NO descarta', (
+      WidgetTester tester,
+    ) async {
+      String? descartado;
+      String? reportado;
+      await montar(
+        tester,
+        seguimiento: conFormularios(momentos: <String>['avance']),
+        alReportar:
+            (
+              String m,
+              Map<String, dynamic> _, {
+              bool requiereNoc = false,
+              bool detener = true,
+            }) => reportado = m,
+        alDescartar: (String m) => descartado = m,
+      );
 
       await tester.tap(find.text('Registrar avance'));
       await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'empalme hecho');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(guardar));
+      await tester.pumpAndSettle();
+
+      expect(reportado, 'avance');
       expect(find.text(guardar), findsNothing);
+      expect(find.textContaining('Avance guardado'), findsOneWidget);
+      // Las fotos del borrador ahora son del reporte: descartarlas aca las
+      // borraria justo cuando se entregaron.
+      expect(descartado, isNull);
     });
   });
 
@@ -455,9 +587,15 @@ void main() {
       await tester.enterText(find.byType(TextField).first, 'La casa cerrada');
       await tester.pumpAndSettle();
 
-      // Se cambia de hoja SIN guardar.
-      await tester.tap(find.text('Cerrar intervención'));
+      // Se cambia de hoja SIN guardar. Desde el 15/10/2026 la hoja tapa la
+      // pantalla, asi que cambiar es cerrarla (descartando) y abrir la otra.
+      await tester.tap(find.byTooltip('Cerrar'));
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Descartar'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Reporte de cierre'));
+      await tester.pumpAndSettle();
+      expect(find.text(guardar), findsOneWidget);
 
       expect(find.text('La casa cerrada'), findsNothing);
     });

@@ -141,6 +141,20 @@ class _SeguimientoDeLaIntervencionState
   /// El momento cuya hoja está abierta, o `null` si no hay ninguna.
   String? _abierto;
 
+  /// Las fotos del borrador, para la hoja. La hoja vive en OTRA ruta (sube
+  /// desde abajo), así que no se redibuja cuando quien captura actualiza la
+  /// cuenta: este aviso es lo que le llega.
+  late final ValueNotifier<Map<String, int>> _fotos =
+      ValueNotifier<Map<String, int>>(widget.fotosTomadas);
+
+  @override
+  void didUpdateWidget(SeguimientoDeLaIntervencion anterior) {
+    super.didUpdateWidget(anterior);
+    if (!identical(anterior.fotosTomadas, widget.fotosTomadas)) {
+      _fotos.value = widget.fotosTomadas;
+    }
+  }
+
   // La salida del bloqueo.
   bool _resolviendo = false;
   String? _avisoResolver;
@@ -149,6 +163,7 @@ class _SeguimientoDeLaIntervencionState
   @override
   void dispose() {
     _queSeHizo.dispose();
+    _fotos.dispose();
     super.dispose();
   }
 
@@ -159,8 +174,13 @@ class _SeguimientoDeLaIntervencionState
   @override
   Widget build(BuildContext context) {
     return DexterBloque(
-      titulo: 'Seguimiento de la intervención',
-      icono: Icons.timeline,
+      // En la pantalla de ejecución esta tarjeta es para REPORTAR, y se llama
+      // así: separada a la vista de «los datos del trabajo» que pide la
+      // plantilla, que antes se confundían con el avance.
+      titulo: widget.mostrarHistoria
+          ? 'Seguimiento de la intervención'
+          : 'Reportar',
+      icono: widget.mostrarHistoria ? Icons.timeline : Icons.campaign_outlined,
       children: _cuerpo(),
     );
   }
@@ -483,7 +503,10 @@ class _SeguimientoDeLaIntervencionState
       ('inicio', 'Registrar inicio'),
       ('avance', 'Registrar avance'),
       ('bloqueo', 'Reportar bloqueo'),
-      ('cierre', 'Cerrar intervención'),
+      // «Reporte de cierre» y no «Cerrar intervención»: al lado de «Finalizar
+      // orden» los dos sonaban a lo mismo. Este es un REPORTE; cerrar el
+      // trabajo sigue siendo el botón de abajo.
+      ('cierre', 'Reporte de cierre'),
     ]) {
       final String momento = opcion.$1;
       // El tipo de trabajo tiene que declarar ese momento.
@@ -498,23 +521,9 @@ class _SeguimientoDeLaIntervencionState
         DexterAccionRapida(
           texto: opcion.$2,
           icono: _icono(momento),
-          alTocar: () =>
-              setState(() {
-                // Cerrar o cambiar de momento descarta lo del anterior: la foto
-                // se sacó para el reporte que se estaba escribiendo, no para el
-                // siguiente.
-                final String? previo = _abierto;
-                if (previo != null && previo != momento) {
-                  widget.alDescartarBorrador?.call(previo);
-                }
-                if (previo == momento) {
-                  widget.alDescartarBorrador?.call(momento);
-                  _abierto = null;
-                } else {
-                  _abierto = momento;
-                  widget.alAbrirHoja?.call(momento);
-                }
-              }),
+          alTocar: _abierto != null
+              ? null
+              : () => _abrirHoja(momento, formularios),
         ),
       );
     }
@@ -539,51 +548,113 @@ class _SeguimientoDeLaIntervencionState
       ],
       if (botones.isNotEmpty) ...<Widget>[
         const SizedBox(height: AppSpacing.sm),
-        Wrap(
-          spacing: AppSpacing.xs,
-          runSpacing: AppSpacing.xs,
-          children: botones,
-        ),
-      ],
-      if (_abierto != null) ...<Widget>[
-        const SizedBox(height: AppSpacing.sm),
-        HojaDeReporte(
-          // La clave por momento NO es decorativa: sin ella, Flutter reusa el
-          // mismo estado al cambiar de hoja y los campos se arrastran. Medido en
-          // el emulador el 02/10/2026: se escribió un BLOQUEO, se tocó «Cerrar
-          // intervención» sin guardar, y el motivo del bloqueo apareció dentro
-          // de «¿Qué se hizo para resolverlo?» — listo para mandarse como si
-          // fuera la respuesta a otra pregunta. Los dos formularios declaran un
-          // campo con el mismo id, así que para el framework eran el mismo.
-          key: ValueKey<String>(_abierto!),
-          momento: _abierto!,
-          titulo: _tituloDelMomento(_abierto!),
-          campos: _camposDe(formularios, _abierto!),
-          evidencias: _evidenciasDe(formularios, _abierto!),
-          alTomarFoto: widget.alTomarFoto == null
-              ? null
-              : (String requisitoId) async {
-                  await widget.alTomarFoto!(_abierto!, requisitoId);
-                  if (mounted) setState(() {});
-                },
-          fotosTomadas: widget.fotosTomadas,
-          alGuardar:
-              (
-                Map<String, dynamic> respuestas, {
-                bool requiereNoc = false,
-                bool detener = true,
-              }) {
-                widget.alReportar!(
-                  _abierto!,
-                  respuestas,
-                  requiereNoc: requiereNoc,
-                  detener: detener,
-                );
-                setState(() => _abierto = null);
-              },
-        ),
+        // DE A DOS, TODOS DEL MISMO ANCHO. En un `Wrap` cada uno tomaba su
+        // ancho natural y quedaban como chips desparejos; en dos columnas se
+        // leen como lo que son: las cosas que se pueden reportar.
+        for (int i = 0; i < botones.length; i += 2) ...<Widget>[
+          if (i > 0) const SizedBox(height: AppSpacing.xs),
+          Row(
+            children: <Widget>[
+              Expanded(child: botones[i]),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: i + 1 < botones.length
+                    ? botones[i + 1]
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
+        ],
       ],
     ];
+  }
+
+  /// Abre la hoja del reporte, que SUBE DESDE ABAJO y tapa la pantalla.
+  ///
+  /// Pedido del usuario (15/10/2026): «¿por qué los botones de avance están
+  /// arriba y abajo es donde se pone la información?». La hoja se abría como
+  /// otra tarjeta debajo de los botones: fuera de la vista, y con el teclado
+  /// abierto más lejos todavía. Y cerrar --o tocar otro botón-- tiraba lo
+  /// escrito y las fotos sin preguntar. Ahora:
+  ///   - guardar cierra la hoja y lo confirma con un aviso corto;
+  ///   - cerrar con algo escrito o una foto sacada PREGUNTA antes de tirarlo;
+  ///   - mientras una hoja está abierta, no se puede abrir otra.
+  Future<void> _abrirHoja(
+    String momento,
+    Map<String, dynamic> formularios,
+  ) async {
+    setState(() => _abierto = momento);
+    widget.alAbrirHoja?.call(momento);
+
+    final bool? guardado = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      // Ni arrastrar ni tocar afuera la cierran: los dos la cerraban sin pasar
+      // por la pregunta, y un roce no puede costar un reporte escrito en la
+      // calle. Se cierra con la ✕ o con «atrás», y los dos preguntan.
+      enableDrag: false,
+      isDismissible: false,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadius.hoja),
+        ),
+      ),
+      builder: (BuildContext hoja) => _HojaDelReporte(
+        momento: momento,
+        titulo: _tituloDelMomento(momento),
+        campos: _camposDe(formularios, momento),
+        evidencias: _evidenciasDe(formularios, momento),
+        fotos: _fotos,
+        alTomarFoto: widget.alTomarFoto == null
+            ? null
+            : (String requisitoId) =>
+                  widget.alTomarFoto!(momento, requisitoId),
+        alGuardar:
+            (
+              Map<String, dynamic> respuestas, {
+              bool requiereNoc = false,
+              bool detener = true,
+            }) {
+              widget.alReportar!(
+                momento,
+                respuestas,
+                requiereNoc: requiereNoc,
+                detener: detener,
+              );
+            },
+      ),
+    );
+
+    if (!mounted) return;
+    setState(() => _abierto = null);
+    if (guardado == true) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${_nombreDelReporte(momento)} guardado · sube cuando haya señal',
+          ),
+        ),
+      );
+    } else {
+      // Cerrada sin guardar: las fotos sacadas para este reporte no son de
+      // ningún otro. La hoja ya preguntó, si había algo que perder.
+      widget.alDescartarBorrador?.call(momento);
+    }
+  }
+
+  static String _nombreDelReporte(String momento) {
+    switch (momento) {
+      case 'inicio':
+        return 'Inicio';
+      case 'bloqueo':
+        return 'Bloqueo';
+      case 'cierre':
+        return 'Reporte de cierre';
+      default:
+        return 'Avance';
+    }
   }
 
   /// Los campos crudos que el backend declaró para ese momento.
@@ -626,7 +697,7 @@ class _SeguimientoDeLaIntervencionState
       case 'bloqueo':
         return 'Reportar un bloqueo';
       case 'cierre':
-        return 'Cerrar la intervención';
+        return 'Reporte de cierre';
       default:
         return 'Registrar un avance';
     }
@@ -862,5 +933,152 @@ class _SeguimientoDeLaIntervencionState
       return clave;
     }
     return conEspacios[0].toUpperCase() + conEspacios.substring(1);
+  }
+}
+
+
+/// La hoja del reporte, como ruta propia que sube desde abajo.
+///
+/// Sabe una sola cosa además de dibujar el formulario: si cerrarla tiraría
+/// algo. Con algo escrito o una foto sacada, pregunta; sin nada, se cierra.
+class _HojaDelReporte extends StatefulWidget {
+  const _HojaDelReporte({
+    required this.momento,
+    required this.titulo,
+    required this.campos,
+    required this.evidencias,
+    required this.fotos,
+    required this.alTomarFoto,
+    required this.alGuardar,
+  });
+
+  final String momento;
+  final String titulo;
+  final List<Map<String, dynamic>> campos;
+  final List<Map<String, dynamic>> evidencias;
+  final ValueNotifier<Map<String, int>> fotos;
+  final Future<void> Function(String requisitoId)? alTomarFoto;
+  final void Function(
+    Map<String, dynamic> respuestas, {
+    bool requiereNoc,
+    bool detener,
+  })
+  alGuardar;
+
+  @override
+  State<_HojaDelReporte> createState() => _HojaDelReporteState();
+}
+
+class _HojaDelReporteState extends State<_HojaDelReporte> {
+  bool _hayAlgoEscrito = false;
+
+  bool get _hayAlgoQuePerder =>
+      _hayAlgoEscrito || widget.fotos.value.values.any((int n) => n > 0);
+
+  Future<void> _intentarCerrar() async {
+    if (!_hayAlgoQuePerder) {
+      Navigator.of(context).pop(false);
+      return;
+    }
+    final bool? descartar = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogo) => AlertDialog(
+        title: const Text('¿Descartar este reporte?'),
+        content: const Text(
+          'Se pierde lo que escribiste y las fotos que sacaste para él.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogo).pop(false),
+            child: const Text('Seguir escribiendo'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogo).pop(true),
+            child: const Text('Descartar'),
+          ),
+        ],
+      ),
+    );
+    if (descartar == true && mounted) {
+      Navigator.of(context).pop(false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Casi toda la pantalla, y por encima del teclado: sin el `viewInsets`, el
+    // teclado tapaba justo el botón de guardar.
+    final MediaQueryData medidas = MediaQuery.of(context);
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool yaSalio, Object? _) {
+        if (!yaSalio) _intentarCerrar();
+      },
+      child: Padding(
+        padding: EdgeInsets.only(bottom: medidas.viewInsets.bottom),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: medidas.size.height * 0.92),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.margen,
+                  AppSpacing.md,
+                  AppSpacing.xs,
+                  0,
+                ),
+                child: Row(
+                  children: <Widget>[
+                    const Icon(Icons.edit_note, color: AppColors.secondary),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        widget.titulo,
+                        style: AppTypography.cuerpoGrande,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Cerrar',
+                      icon: const Icon(Icons.close),
+                      onPressed: _intentarCerrar,
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: ValueListenableBuilder<Map<String, int>>(
+                  valueListenable: widget.fotos,
+                  builder: (_, Map<String, int> fotos, _) => HojaDeReporte(
+                    momento: widget.momento,
+                    titulo: widget.titulo,
+                    campos: widget.campos,
+                    evidencias: widget.evidencias,
+                    alTomarFoto: widget.alTomarFoto,
+                    fotosTomadas: fotos,
+                    enHojaModal: true,
+                    alCambiarContenido: (bool hay) => _hayAlgoEscrito = hay,
+                    alGuardar:
+                        (
+                          Map<String, dynamic> respuestas, {
+                          bool requiereNoc = false,
+                          bool detener = true,
+                        }) {
+                          widget.alGuardar(
+                            respuestas,
+                            requiereNoc: requiereNoc,
+                            detener: detener,
+                          );
+                          Navigator.of(context).pop(true);
+                        },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
