@@ -90,9 +90,24 @@ La descripción viene con los datos personales tapados (███). Eso es norma
 no es un dato faltante: no lo reportes como tal y no pidas el documento ni el
 teléfono, no los vas a recibir.
 
+EL GRUPO NO DEPENDE DE LA HIPÓTESIS, y son dos preguntas distintas:
+
+    LA HIPÓTESIS   qué le está pasando al equipo. Necesita medirlo. Si no
+                   podés leer el equipo, no la tenés, y está bien decirlo.
+    EL GRUPO       qué está PIDIENDO el reclamo. Sale del TEXTO solo, y lo
+                   podés contestar siempre que el texto diga qué se pide.
+
+Un ticket que dice "No tiene internet, LOS en rojo" es 'falla_de_servicio'
+aunque no hayas podido consultar ni una herramienta. Uno que dice "Instalación
+TDT" es 'trabajo_pedido' aunque el equipo sea inalcanzable. Uno que dice
+"Intervención de la CTO 11-43" es 'obra_de_red' igual.
+
+Que no se haya podido leer el equipo NO es motivo para dejar el grupo vacío.
+El único motivo es que el texto no diga qué se pide.
+
 Lo que se espera de vos:
 - Una HIPÓTESIS de qué le pasa, con su confianza. Si el texto no alcanza para
-  tener una, decilo y no inventes.
+  tener una, decilo y no inventes. Eso no te exime del grupo.
 - Una RECOMENDACIÓN concreta: QUÉ hay que hacer y A QUIÉN le toca. No "revisar
   el ticket" ni "decidir qué hacer" -- eso no le dice nada a quien lo lee. Si
   el reclamo es de pago, decí que va a cartera y qué hay que confirmar; si es
@@ -432,11 +447,41 @@ def le_falta_el_grupo(propuesta) -> bool:
     contestar las dos cosas desde aca es lo que ya salio mal una vez.
     """
     hay_lectura = False
+    ultima_con_clave = None
     for pieza in (propuesta.evidencia or []):
         if isinstance(pieza, dict) and pieza.get("fuente") == FUENTE:
             hay_lectura = True
             if "grupo" in pieza:
-                return False
+                #  LA MAS RECIENTE GANA, igual que en 'de_la_propuesta': la
+                #  evidencia se acumula y la ultima describe la situacion de
+                #  hoy. Antes esto cortaba en la PRIMERA que tuviera la clave.
+                ultima_con_clave = pieza
+
+    if ultima_con_clave is not None:
+        if str(ultima_con_clave.get("grupo") or "").strip():
+            return False
+        #  LA CLAVE ESTA PERO VINO VACIA  --  15/10/2026
+        #  ---------------------------------------------
+        #  Ese dia se midio que 15 de 44 propuestas tenian 'grupo' en blanco y
+        #  quedaban en el mismo limbo que este modulo ya habia cerrado una vez,
+        #  solo que una capa mas adentro:
+        #
+        #      la clave esta        ->  no eran candidatas a releerse
+        #      su valor esta vacio  ->  el paso las mandaba a una persona
+        #
+        #  La causa de los 15 no era el texto --decian "No tiene internet, LOS
+        #  en rojo"-- sino que el modelo, al no poder leer el equipo
+        #  ('onu_no_vinculada'), se callaba tambien el grupo. Corregidas las
+        #  instrucciones, releerlas devolvio grupo en 14 de 15.
+        #
+        #  CON EL TOPE PUESTO, y no es precaucion de adorno: un ticket cuyo
+        #  texto de verdad no diga que se pide va a volver vacio siempre, y sin
+        #  tope volveria a la cola en cada vuelta para siempre. Es exactamente
+        #  el bucle de 43 lecturas sobre 11 propuestas que 'MAXIMAS_RELECTURAS'
+        #  ya mide. Despues de tres intentos se deja como esta y la mira una
+        #  persona, que es la respuesta correcta para un texto que no dice nada.
+        return _cuantas_veces_se_leyo(propuesta) < MAXIMAS_RELECTURAS
+
     return hay_lectura
 
 

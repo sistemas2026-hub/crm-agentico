@@ -2536,6 +2536,58 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
     return resumen
 
 
+#:  Cuantas propuestas sin señal se traen por vuelta para releer. El tope real
+#:  del gasto lo sigue poniendo 'diagnosticar', que corta en sus propias
+#:  lecturas por corrida; esto solo evita construir una lista enorme.
+TOPE_RELECTURA_SIN_SENAL = 60
+
+
+def _las_que_esperan_relectura(org, senales):
+    """
+    Propuestas que necesitan releerse y que HOY no produjeron señal.
+
+    LA CUARTA VEZ DEL MISMO ERROR  --  15/10/2026
+    ---------------------------------------------
+    '_leer_tickets_abiertos' recorre 'for s in senales', asi que solo pregunta
+    por los tickets que 'detectar' trajo en ESTA vuelta. Una propuesta cuya
+    lectura quedo incompleta --el grupo vino vacio-- necesita releerse, pero si
+    el ticket no vuelve a generar señal, nadie le hace la pregunta nunca.
+
+    MEDIDO ese dia: 15 de 44 propuestas con el grupo en blanco, corregidas las
+    instrucciones del modelo, y el ciclo del boton terminando en 1,1 segundos
+    con 'tickets leidos=None'. Las 35 señales de la vuelta eran todas
+    'caso_abierto_antiguo'; ninguna tocaba a esas 15.
+
+    Es la misma forma que ya costo tres veces --la decision puesta en una rama
+    a la que los casos que importan no llegan-- y se cierra igual que la
+    tercera: que la fase CONSULTE las propuestas pendientes por su cuenta en
+    vez de esperar que una señal se las traiga.
+
+    NO SE DUPLICA lo que ya vino por señal: se excluye por 'origen_id', que es
+    la misma llave con la que 'diagnosticar' busca.
+    """
+    from operaciones import diagnostico_de_ticket as dxt
+
+    ya = {str(getattr(s, "origen_id", "")) for s in senales}
+    pendientes = (PropuestaSupervisor.objects
+                  .filter(org=org,
+                          tipo_senal=PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO,
+                          estado=PropuestaSupervisor.PROPUESTA,
+                          origen_tipo="case")
+                  .order_by("created_at")[:TOPE_RELECTURA_SIN_SENAL])
+
+    extra = []
+    for p in pendientes:
+        if str(p.origen_id) in ya:
+            continue
+        #  Los mismos dos criterios que el bucle de abajo, y a proposito: si
+        #  alguna vez se agrega un tercero, que falle en los dos lugares a la
+        #  vez en vez de divergir en silencio.
+        if dxt.le_falta_lectura(p) or dxt.le_falta_el_grupo(p):
+            extra.append(_SinSenal(p))
+    return extra
+
+
 def _leer_tickets_abiertos(org, ahora) -> dict:
     """
     Lee los tickets que siguen abiertos y deja el diagnostico en su propuesta.
@@ -2554,6 +2606,10 @@ def _leer_tickets_abiertos(org, ahora) -> dict:
 
     senales = [s for s in detectar(org, ahora)
                if s.tipo == PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO]
+    #  Y LAS QUE NO PRODUJERON SEÑAL HOY pero esperan relectura: ver
+    #  '_las_que_esperan_relectura'. Va ANTES del return temprano, que es
+    #  justo por donde se escapaban.
+    senales = senales + _las_que_esperan_relectura(org, senales)
     if not senales:
         return informe
 
