@@ -44,11 +44,19 @@ pytestmark = pytest.mark.django_db
 #  andamio
 # =============================================================================
 
-def _hecho(org, entidad, accion, nombre="algo", cuando=None):
-    """Una fila de auditoria, como la escribe quien la escribe."""
+def _hecho(org, entidad, accion, nombre="algo", cuando=None, tarea=None):
+    """
+    Una fila de auditoria, como la escribe quien la escribe.
+
+    'tarea' se agrego el 16/10/2026: un 'APPROVED' pelado ya no cuenta como
+    pase a Despacho --puede ser la aceptacion de un cierre-- y lo que los
+    distingue es esta clave. Sin ella la fila cae en 'acepta', que es donde
+    caen las 597 que produccion ya tenia escritas.
+    """
     a = Activity.objects.create(
         org=org, user=None, action=accion, entity_type=entidad,
-        entity_id=uuid.uuid4(), entity_name=nombre, description=nombre)
+        entity_id=uuid.uuid4(), entity_name=nombre, description=nombre,
+        metadata={"tarea": tarea} if tarea else {})
     if cuando is not None:
         Activity.objects.filter(pk=a.pk).update(created_at=cuando)
         a.refresh_from_db()
@@ -97,7 +105,8 @@ def test_y_tambien_filtrando_por_cierres(org_a):
 # =============================================================================
 
 def test_cada_grupo_trae_lo_suyo_y_nada_mas(org_a):
-    paso = _hecho(org_a, "PropuestaSupervisor", "APPROVED", "pasa a despacho")
+    paso = _hecho(org_a, "PropuestaSupervisor", "APPROVED", "pasa a despacho",
+                  tarea=auditoria.TAREA_PASO_A_DESPACHO)
     propuso = _hecho(org_a, "PropuestaSupervisor", "CREATE", "propone")
     cerro = _un_cierre_de_caso(org_a)
 
@@ -113,7 +122,8 @@ def test_el_conteo_dice_cuantos_hay_de_cada_uno(org_a):
     distinguir "no hay" de "todavia no llego".
     """
     for _ in range(3):
-        _hecho(org_a, "PropuestaSupervisor", "APPROVED")
+        _hecho(org_a, "PropuestaSupervisor", "APPROVED",
+               tarea=auditoria.TAREA_PASO_A_DESPACHO)
     for _ in range(5):
         _hecho(org_a, "PropuestaSupervisor", "CREATE")
     _un_cierre_de_caso(org_a)
@@ -252,7 +262,8 @@ def test_paginar_respeta_el_filtro(org_a):
     ahora = timezone.now()
     for i in range(6):
         _hecho(org_a, "PropuestaSupervisor", "APPROVED", f"paso{i}",
-               cuando=ahora - timedelta(minutes=i * 2))
+               cuando=ahora - timedelta(minutes=i * 2),
+               tarea=auditoria.TAREA_PASO_A_DESPACHO)
         _hecho(org_a, "PropuestaSupervisor", "CREATE", f"propuso{i}",
                cuando=ahora - timedelta(minutes=i * 2 + 1))
 
@@ -294,7 +305,8 @@ def test_la_vista_devuelve_los_conteos_y_con_que_seguir(admin_client, org_a):
     si queda mas hacia atras. Deducirlas contando la pagina da mal en el borde
     --una pagina llena puede ser la ultima-- y 'siguiente' lo dice sin ambiguedad.
     """
-    _hecho(org_a, "PropuestaSupervisor", "APPROVED")
+    _hecho(org_a, "PropuestaSupervisor", "APPROVED",
+           tarea=auditoria.TAREA_PASO_A_DESPACHO)
     _un_cierre_de_caso(org_a)
 
     cuerpo = admin_client.get(ACTIVIDAD).json()

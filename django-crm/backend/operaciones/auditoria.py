@@ -93,8 +93,25 @@ ENTIDADES_DEL_SUPERVISOR = (ENTIDAD_PROPUESTA, ENTIDAD_ACTIVIDAD,
 #:  69 eran 'Case CREATE' --casos creados por otra via-- contados como si el
 #:  Supervisor los hubiera propuesto. Un panel de auditoria que le atribuye a
 #:  alguien lo que no hizo es peor que uno incompleto.
+#:  La tarea que marca un pase a Despacho. Se declara aca --y no se importa de
+#:  'paso_a_despacho'-- para no crear un ciclo de imports; una prueba la fija
+#:  contra la del catalogo para que no diverjan en silencio.
+TAREA_PASO_A_DESPACHO = "pasar_a_despacho_segun_las_reglas"
+
+#  UNA ENTRADA PUEDE EXIGIR ADEMAS UNA TAREA  --  16/10/2026
+#  ----------------------------------------------------------
+#  Aceptar una propuesta de CIERRE y pasar un ticket a DESPACHO escribian la
+#  misma fila: 'PropuestaSupervisor APPROVED'. Medido en produccion: el filtro
+#  "Pasados a Despacho" marcaba 597 y el detalle de esas filas decia "Cerrar el
+#  caso en Dexter". El numero contaba las dos cosas.
+#
+#  Desde hoy 'revisar' escribe 'metadata["tarea"]' cuando quien acepta declara
+#  cual fue. Las filas anteriores NO la tienen y caen en "acepta", que es lo
+#  honesto: inventarles una tarea seria afirmar algo que nadie registro.
 GRUPOS = {
-    "pasa_a_despacho": ((ENTIDAD_PROPUESTA, "APPROVED"),),
+    "pasa_a_despacho": ((ENTIDAD_PROPUESTA, "APPROVED",
+                         TAREA_PASO_A_DESPACHO),),
+    "acepta": ((ENTIDAD_PROPUESTA, "APPROVED", None),),
     "cierra_caso": ((ENTIDAD_CASO, "STATUS_CHANGED"),),
     "propone": ((ENTIDAD_PROPUESTA, "CREATE"),
                 (ENTIDAD_PROPUESTA, "CREATED")),
@@ -107,7 +124,43 @@ GRUPOS = {
 #:  Los pares que YA tienen grupo. Sirve para resolver "otros" sin enumerarlo:
 #:  lo que no esta aqui, es otro -- y asi un hecho NUEVO aparece en 'otros' en
 #:  vez de desaparecer del panel sin que nadie lo note.
-_CON_GRUPO = tuple(par for pares in GRUPOS.values() for par in pares)
+def _condicion(entrada) -> Q:
+    """
+    La condicion de UNA entrada del catalogo.
+
+    Dos formas, y la tercera posicion es la que decide:
+
+        (entidad, accion)                 cualquier fila de ese par
+        (entidad, accion, "la_tarea")     solo las que declararon esa tarea
+        (entidad, accion, None)           solo las que NO declararon ninguna
+
+    El tercer caso es el que recoge lo historico: 'metadata__tarea' ausente.
+    """
+    entidad, accion = entrada[0], entrada[1]
+    base = Q(entity_type=entidad, action=accion)
+    if len(entrada) < 3:
+        return base
+    tarea = entrada[2]
+    if tarea is None:
+        #  LA TRAMPA DEL NULL, medida el 16/10/2026 con la prueba del contador.
+        #  '~Q(metadata__tarea=X)' se traduce a NOT (metadata->>'tarea' = X).
+        #  Para una fila SIN esa clave el lado izquierdo es NULL, la
+        #  comparacion da NULL y NOT NULL sigue siendo NULL: la fila queda
+        #  AFUERA. O sea que lo historico --que es justo lo que esta rama
+        #  existe para recoger-- desaparecia.
+        #
+        #  El sintoma no era un error: el filtro devolvia cero y el contador,
+        #  que cuenta en Python y no sufre el NULL, devolvia tres. La guarda
+        #  que compara los dos numeros es la que lo encontro.
+        return base & (Q(metadata__tarea__isnull=True)
+                       | ~Q(metadata__tarea=TAREA_PASO_A_DESPACHO))
+    return base & Q(metadata__tarea=tarea)
+
+
+#  PARA 'otros' SE MIRA EL PAR Y NUNCA LA TAREA: una fila de un par ya
+#  declarado tiene grupo aunque su tarea no coincida con ninguno -- si no,
+#  caeria en "otros" Y en "acepta" a la vez, y los conteos no sumarian.
+_CON_GRUPO = tuple((p[0], p[1]) for pares in GRUPOS.values() for p in pares)
 
 
 def registrar(*, org, actor, accion: str, entidad: str, entidad_id,
@@ -192,8 +245,8 @@ def recientes(org, limite: int = 20, *, grupo: str = "", antes_de=None):
         pares = GRUPOS[pedido]
         if pares:
             cond = Q()
-            for entidad, accion in pares:
-                cond |= Q(entity_type=entidad, action=accion)
+            for entrada in pares:
+                cond |= _condicion(entrada)
             qs = qs.filter(cond)
         else:
             #  'otros': todo lo que no cae en ningun grupo declarado.
@@ -223,20 +276,43 @@ def cuantos_por_grupo(org) -> dict:
     """
     from django.db.models import Count
 
+    #  SE AGREGA TAMBIEN POR TAREA  --  16/10/2026
+    #  --------------------------------------------
+    #  Agrupar solo por (entidad, accion) devolvia un numero para
+    #  'PropuestaSupervisor APPROVED' que mezclaba los pases a Despacho con las
+    #  aceptaciones de cierres. 'metadata__tarea' entra en el 'values_list' para
+    #  que el conteo se parta igual que el filtro -- si uno mira la tarea y el
+    #  otro no, el boton dice un numero y la lista muestra otro.
     crudo = (Activity.objects
              .filter(org=org, entity_type__in=list(ENTIDADES_DEL_SUPERVISOR))
-             .values_list("entity_type", "action")
+             .values_list("entity_type", "action", "metadata__tarea")
              .annotate(n=Count("id")))
-    por_par = {(e, a): n for e, a, n in crudo}
+    #  Las filas historicas no tienen la clave: vienen con 'None', que es
+    #  exactamente lo que la entrada '(…, None)' recoge.
+    por_terna = {}
+    for e, a, t, n in crudo:
+        por_terna[(e, a, t)] = por_terna.get((e, a, t), 0) + n
+
+    def _cuantos(entrada) -> int:
+        entidad, accion = entrada[0], entrada[1]
+        if len(entrada) < 3:
+            return sum(n for (e, a, _t), n in por_terna.items()
+                       if (e, a) == (entidad, accion))
+        tarea = entrada[2]
+        if tarea is None:
+            return sum(n for (e, a, t), n in por_terna.items()
+                       if (e, a) == (entidad, accion)
+                       and t != TAREA_PASO_A_DESPACHO)
+        return por_terna.get((entidad, accion, tarea), 0)
 
     salida, con_grupo = {}, 0
     for nombre, pares in GRUPOS.items():
         if not pares:
             continue
-        n = sum(por_par.get(par, 0) for par in pares)
+        n = sum(_cuantos(entrada) for entrada in pares)
         salida[nombre] = n
         con_grupo += n
-    total = sum(por_par.values())
+    total = sum(por_terna.values())
     salida["otros"] = total - con_grupo
     salida["todo"] = total
     return salida

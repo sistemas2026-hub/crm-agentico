@@ -481,6 +481,10 @@ def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
             decision=PropuestaSupervisor.ACEPTADA,
             comentario=f"Aceptada automaticamente por el Supervisor NOC IA. "
                        f"{d.porque}"[:1000],
+            #  LA TAREA QUEDA EN LA AUDITORIA, y sin esto el panel no puede
+            #  separar un pase a Despacho de la aceptacion de un cierre: las
+            #  dos escriben 'PropuestaSupervisor APPROVED'.
+            tarea=TAREA,
             ahora=ahora)
     except Exception as e:                                       # noqa: BLE001
         #  El tipo y no el texto: el mensaje podria traer de vuelta la

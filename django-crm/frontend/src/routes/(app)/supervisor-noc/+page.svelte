@@ -357,6 +357,12 @@
   const GRUPOS_VISIBLES = [
     { clave: '', rotulo: 'Todo' },
     { clave: 'pasa_a_despacho', rotulo: 'Pasados a Despacho' },
+    //  SEPARADO DE 'pasa_a_despacho' DESDE EL 16/10/2026. Las dos cosas
+    //  escriben 'PropuestaSupervisor APPROVED'; lo que las distingue es la
+    //  tarea que ahora queda en la auditoria. Las filas anteriores a esa fecha
+    //  no la traen y caen aca -- en produccion eran 597, y mostrarlas como
+    //  pases a Despacho era contar cierres de caso dos veces.
+    { clave: 'acepta', rotulo: 'Propuestas aceptadas' },
     { clave: 'cierra_caso', rotulo: 'Cierres de caso' },
     { clave: 'propone', rotulo: 'Propuestas' },
     { clave: 'otros', rotulo: 'Otros' }

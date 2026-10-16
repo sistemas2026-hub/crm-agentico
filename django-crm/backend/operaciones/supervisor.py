@@ -476,13 +476,27 @@ TOPE_TICKETS_POR_CORRIDA = 10
 #:  10 tickets en 186 segundos -- unos 18,6 por ticket-- asi que 30 son unos
 #:  9 minutos de worker, y drena ese atraso en dos vueltas.
 #:
-#:  ES TRANSITORIO, igual que el del optico: los 50 son atraso acumulado. En
+#:  SUBIDO DE 30 A 60 ESA MISMA NOCHE, con la medicion de tres corridas de
+#:  produccion. La prediccion de "baja 10 por vuelta" fue FALSA: bajo 2. El
+#:  motivo es que son dos conjuntos distintos y se los habia tratado como uno
+#:  --la lectura toma 10 de las 161 pendientes, y el paso a Despacho solo mira
+#:  las 60 mas viejas ('TOPE_PASO_A_DESPACHO')--, asi que de los 10 releidos
+#:  solo algunos caian en la ventana que se estaba midiendo.
+#:
+#:      161 pendientes / 10 por hora  =  16 horas
+#:      161 pendientes / 60 por hora  =  2,5 horas
+#:
+#:  A ~18,6 segundos por ticket, 60 son unos 19 minutos de worker por corrida.
+#:  Es mucho para una corrida atendida y es nada para una que corre sola a las
+#:  tres de la manana.
+#:
+#:  ES TRANSITORIO, igual que el del optico: los 161 son atraso acumulado. En
 #:  regimen aparecen unos pocos por hora y este tope no se toca nunca.
 #:
 #:  EL DEFECTO SIGUE SIENDO EL ATENDIDO, a proposito: un llamador nuevo que se
 #:  olvide de declararse hereda el tope corto -- tarda mas y no sorprende a
 #:  nadie, que es el lado seguro para equivocarse.
-TOPE_TICKETS_DESATENDIDO = 30
+TOPE_TICKETS_DESATENDIDO = 60
 
 #:  CUANTOS SE DETECTAN, que es otra cosa y hace falta aparte  --  13/10/2026
 #:
@@ -3354,7 +3368,8 @@ def _aplicar_cambios(propuesta, cambios: dict) -> dict:
 
 def revisar(propuesta: PropuestaSupervisor, *, actor, decision: str,
             comentario: str = "", cambios: dict | None = None,
-            ahora=None, automatico: bool = False) -> PropuestaSupervisor:
+            ahora=None, automatico: bool = False,
+            tarea: str = "") -> PropuestaSupervisor:
     """
     Aceptar, modificar o rechazar. Queda auditado quién, cuándo y con qué.
 
@@ -3458,6 +3473,22 @@ def revisar(propuesta: PropuestaSupervisor, *, actor, decision: str,
         extra = {"revisor": str(actor.id) if actor else "sistema",
                  "automatico": bool(automatico),
                  "sin_ejecucion": True}
+        #  QUE TAREA PRODUJO ESTA ACEPTACION  --  16/10/2026
+        #  -------------------------------------------------
+        #  Sin esto, aceptar una propuesta de CIERRE y pasar un ticket a
+        #  DESPACHO escriben exactamente la misma fila --misma entidad, misma
+        #  accion, mismo 'extra'-- y el panel no las puede separar.
+        #
+        #  MEDIDO en produccion: el filtro "Pasados a Despacho" mostraba 597 y
+        #  el detalle de esas filas decia "Cerrar el caso en Dexter para
+        #  sincronizar su estado". El numero contaba las dos cosas.
+        #
+        #  LO HISTORICO NO SE RECUPERA: las filas escritas antes de hoy no
+        #  tienen esta clave y caen en "propuestas aceptadas", que es lo
+        #  honesto -- inventarles una tarea seria afirmar algo que nadie
+        #  registro.
+        if tarea:
+            extra["tarea"] = str(tarea)
         if registro_cambios:
             extra["cambios"] = registro_cambios
         auditoria.registrar(
