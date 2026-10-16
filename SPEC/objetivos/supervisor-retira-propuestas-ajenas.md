@@ -1,6 +1,6 @@
 # Objetivo · El Supervisor retira solo lo que no es suyo
 
-> Abierto el 16/10/2026. Estado: **abierto**.
+> Abierto el 16/10/2026. Estado: **abierto** — cerrado en código, pendiente de deploy y de la evidencia en producción.
 
 ## Qué significa terminado
 
@@ -198,3 +198,4 @@ con ese objetivo, no con un parche acá.
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 16/10/2026 | Ficha abierta tras `/objetivo`. Decisión del usuario: la señal de cierre no se filtra por área. Nada construido | Todo lo de arriba | — |
+| 16/10/2026 | Construido y auditado: criterio de área en un solo lugar, retiro en el ciclo y a demanda, tres señales de ruido filtradas, comando que mide. 37 pruebas en Postgres real, 7 mutaciones muertas, 15 hallazgos de auditoría (11 cerrados; detalle en `SPEC/auditorias/RETIRO-PROPUESTAS-AJENAS.md`) | Push (= deploy, lo decide una persona); evidencia en producción (criterio 7); dos decisiones abiertas: la lectura cancelada que no vuelve y el multi-tenant de `AREAS_DEL_SUPERVISOR` | `eac5715c` |
