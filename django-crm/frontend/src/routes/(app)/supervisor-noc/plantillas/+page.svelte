@@ -53,6 +53,19 @@
     borrador.evidencias.push({ titulo: '', obligatorio: true, paso: '', instrucciones: '' });
   }
 
+  /** Los cuatro reportes que el técnico manda mientras trabaja. */
+  const REPORTES = [
+    { id: 'inicio', texto: 'Al llegar' },
+    { id: 'avance', texto: 'Avance' },
+    { id: 'bloqueo', texto: 'Bloqueo' },
+    { id: 'cierre', texto: 'Cierre' }
+  ];
+  /** @param {string} momento */
+  function agregarFotoDeReporte(momento) {
+    borrador.fotos_de_reportes ??= {};
+    (borrador.fotos_de_reportes[momento] ??= []).push({ titulo: '' });
+  }
+
   /** Las opciones de una selección se escriben una por renglón. */
   const opcionesTexto = (c) => (c.opciones ?? []).join('\n');
   function ponerOpciones(c, texto) {
@@ -324,6 +337,40 @@
                     {/each}
                     <button type="button" class="snoc-btn" onclick={agregarFoto}>+ Agregar foto</button>
                   </div>
+
+                  <!-- LAS FOTOS DE CADA REPORTE. Son otra cosa que las de arriba:
+                       aquellas se exigen para cerrar; estas se ofrecen mientras
+                       el técnico reporta, y nunca retienen el reporte. -->
+                  {#if borrador.fotos_de_reportes}
+                    <div class="snoc-pila" style="gap:var(--snoc-xs);">
+                      <h3 class="snoc-h3">Fotos en los reportes</h3>
+                      <p class="snoc-body-sm snoc-secundario">
+                        Las que el técnico puede adjuntar al reportar. Son opcionales: si
+                        no la saca, el reporte se guarda igual.
+                      </p>
+                      {#each REPORTES as r (r.id)}
+                        <div class="snoc-tarjeta snoc-pila" style="gap:var(--snoc-xs);">
+                          <span class="snoc-label">{r.texto}</span>
+                          {#each borrador.fotos_de_reportes[r.id] ?? [] as e, i (e)}
+                            <div class="snoc-fila" style="gap:var(--snoc-xs);">
+                              <input class="snoc-campo" style="flex:1; min-width:12rem;"
+                                     placeholder="De qué es la foto" bind:value={e.titulo}
+                                     aria-label="Foto {i + 1} del reporte {r.texto}" maxlength="120" />
+                              <button type="button" class="snoc-btn snoc-btn-error"
+                                      onclick={() => borrador.fotos_de_reportes[r.id].splice(i, 1)}
+                                      aria-label="Quitar">✕</button>
+                            </div>
+                          {:else}
+                            <span class="snoc-body-sm snoc-secundario">Este reporte no pide foto.</span>
+                          {/each}
+                          {#if (borrador.fotos_de_reportes[r.id] ?? []).length < 5}
+                            <button type="button" class="snoc-btn" style="align-self:flex-start;"
+                                    onclick={() => agregarFotoDeReporte(r.id)}>+ Foto</button>
+                          {/if}
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
                 </div>
 
                 <!-- ---- cómo lo ve el técnico ---- -->
@@ -349,6 +396,21 @@
                       {/each}
                     </div>
                   {/each}
+                  {#if borrador.fotos_de_reportes}
+                    <div class="snoc-pila-xs">
+                      <span class="snoc-label">Al reportar puede adjuntar</span>
+                      {#each REPORTES as r (r.id)}
+                        {#if (borrador.fotos_de_reportes[r.id] ?? []).length}
+                          <span class="snoc-body-sm">
+                            {r.texto}:
+                            <span class="snoc-secundario">
+                              {borrador.fotos_de_reportes[r.id].map((e) => e.titulo || '(sin nombre)').join(', ')}
+                            </span>
+                          </span>
+                        {/if}
+                      {/each}
+                    </div>
+                  {/if}
                   <span class="snoc-body-sm snoc-secundario">* obligatorio para cerrar la orden.</span>
                 </aside>
               </div>

@@ -196,10 +196,15 @@ def test_a_el_reporte_congela_la_evidencia_que_se_le_pedia(orden, tecnico):
     assert [e["id"] for e in declaradas] == ["foto_del_obstaculo"]
 
 
-def test_b_sin_declaracion_la_lista_queda_vacia_y_no_falta_la_clave(
+def test_b_sin_declaracion_va_la_foto_por_defecto_y_declarada_vacia_no_va(
     org_a, tecnico, version
 ):
-    """Vacia no es ausente: quien lee tiene que poder distinguirlas."""
+    """Vacia no es ausente, y desde el 15/10/2026 eso decide algo.
+
+    Sin declarar, el avance ofrece la foto opcional por defecto (pedido del
+    usuario: «en los avances, ¿por que no se puede adjuntar imagen?»). Una
+    lista declarada vacia es la decision de la empresa de no pedir ninguna.
+    """
     wt = WorkType.objects.create(org=org_a, codigo="pelado", nombre="Pelado")
     v = WorkTypeVersion.objects.create(
         work_type=wt,
@@ -209,12 +214,25 @@ def test_b_sin_declaracion_la_lista_queda_vacia_y_no_falta_la_clave(
         esquema={"pasos": [], "campos": [], "evidencias": []},
     )
     o = _orden(org_a, v, tecnico[1], numero=7102)
-
     evento = seg.registrar(
         o, profile=tecnico[1], momento=seg.AVANCE, respuestas={"nota": "sigo"}
     )
+    assert [e["id"] for e in (evento.datos or {}).get("evidencias")] == ["foto_avance"]
+    assert evento.datos["evidencias"][0]["obligatorio"] is False
 
-    assert (evento.datos or {}).get("evidencias") == []
+    v2 = WorkTypeVersion.objects.create(
+        work_type=wt,
+        version=2,
+        schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA,
+        esquema={"pasos": [], "campos": [], "evidencias": [],
+                 "seguimiento": {"avance": {"evidencias": []}}},
+    )
+    o2 = _orden(org_a, v2, tecnico[1], numero=7105)
+    evento2 = seg.registrar(
+        o2, profile=tecnico[1], momento=seg.AVANCE, respuestas={"nota": "sigo"}
+    )
+    assert (evento2.datos or {}).get("evidencias") == []
 
 
 # --------------------------------------------------------------------------- #

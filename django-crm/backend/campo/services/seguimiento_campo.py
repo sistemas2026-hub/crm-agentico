@@ -187,6 +187,25 @@ MINIMO = {
 }
 
 
+#: Las fotos que se ofrecen cuando la plantilla no dice nada para ese momento.
+#:
+#: Pedido del usuario (15/10/2026): «en los avances, ¿por que no se puede
+#: adjuntar imagen?». La app, la cola y el servidor ya sabian llevar la foto de
+#: un reporte, pero solo aparecia el boton si la plantilla la pedia -- y
+#: ninguna la pedia, ni habia donde configurarlo. Una foto del avance o de lo
+#: que impide seguir es lo que mas le sirve a quien lee desde la oficina.
+#:
+#: OPCIONALES: una foto que falta no retiene el reporte (ver
+#: `HojaDeReporte._bloqueDeFotos` en la app). La plantilla que declare su
+#: propia lista -- aunque sea vacia -- manda sobre esto.
+MINIMO_EVIDENCIAS = {
+    AVANCE: [{"id": "foto_avance", "titulo": "Foto del avance",
+              "tipo": "foto", "obligatorio": False}],
+    BLOQUEO: [{"id": "foto_bloqueo", "titulo": "Foto de lo que impide seguir",
+               "tipo": "foto", "obligatorio": False}],
+}
+
+
 def _esquema_de(orden) -> dict:
     version = getattr(orden, "tipo_trabajo_version", None)
     return (getattr(version, "esquema", None) or {}) if version else {}
@@ -215,7 +234,11 @@ def formulario_de(orden, momento: str) -> dict:
         "momento": momento,
         "tipo_evento": TIPOS[momento],
         "campos": campos,
-        "evidencias": declarado.get("evidencias") or [],
+        #: Una lista declarada --aunque sea vacia-- es la decision de la
+        #: empresa; sin declarar, la foto opcional de `MINIMO_EVIDENCIAS`.
+        "evidencias": (declarado["evidencias"]
+                       if isinstance(declarado.get("evidencias"), list)
+                       else list(MINIMO_EVIDENCIAS.get(momento, []))),
         #: Que la empresa no haya declarado nada no es un error, pero la pantalla
         #: puede decirlo: "se esta usando el minimo generico".
         "declarado_por_el_tipo_de_trabajo": del_tenant,

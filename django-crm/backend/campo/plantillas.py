@@ -107,8 +107,12 @@ MAX_OPCIONES = 20
 MAX_TITULO = 120
 MAX_TEXTO_LARGO = 400
 
-CLAVES_RAIZ_CONOCIDAS = {"pasos", "campos", "evidencias",
+CLAVES_RAIZ_CONOCIDAS = {"pasos", "campos", "evidencias", "seguimiento",
                          "duracion_estimada_minutos"}
+
+#: Fotos por reporte (inicio, avance, bloqueo, cierre). Pocas: se sacan con
+#: el trabajo andando, no son el checklist.
+MAX_FOTOS_POR_REPORTE = 5
 
 
 # ---------------------------------------------------------------------------
@@ -501,6 +505,48 @@ def componer(definicion: dict) -> dict:
 
     esquema = {"pasos": pasos, "campos": campos, "evidencias": evidencias}
 
+    #  LAS FOTOS DE CADA REPORTE (15/10/2026). Van en `seguimiento.<momento>.
+    #  evidencias`, que es donde las lee `seguimiento_campo.formulario_de`.
+    #  Se escriben las de los cuatro momentos, AUNQUE ESTEN VACIAS: una lista
+    #  vacia es «este reporte no pide foto», y sin escribirla volveria a valer
+    #  la foto por defecto -- lo que el editor mostro no seria lo que la app
+    #  pide. Sin la clave en la definicion, no se toca nada.
+    fotos_rep = definicion.get("fotos_de_reportes")
+    if fotos_rep is not None:
+        from campo.services.seguimiento_campo import MOMENTOS
+        if not isinstance(fotos_rep, dict):
+            raise ErrorPlantilla("DEFINICION_INVALIDA",
+                                 "Las fotos de los reportes no se entienden.")
+        raros = set(fotos_rep) - set(MOMENTOS)
+        if raros:
+            raise ErrorPlantilla("DEFINICION_INVALIDA",
+                                 f"No existe el reporte '{sorted(raros)[0]}'.")
+        seguimiento = {}
+        for momento in MOMENTOS:
+            lista = fotos_rep.get(momento) or []
+            if not isinstance(lista, list):
+                raise ErrorPlantilla("DEFINICION_INVALIDA",
+                                     "Las fotos de un reporte tienen que ser una lista.")
+            if len(lista) > MAX_FOTOS_POR_REPORTE:
+                raise ErrorPlantilla(
+                    "DEMASIADOS",
+                    f"Mas de {MAX_FOTOS_POR_REPORTE} fotos en el reporte de {momento}.")
+            salida_m = []
+            for i, e in enumerate(lista, 1):
+                if not isinstance(e, dict):
+                    raise ErrorPlantilla("DEFINICION_INVALIDA",
+                                         f"La foto {i} del reporte de {momento} no se entiende.")
+                titulo = _texto(e.get("titulo"),
+                                f"el nombre de la foto {i} del reporte de {momento}")
+                #  Siempre opcional: una foto que falta no retiene un reporte
+                #  (la app lo guarda igual), asi que «obligatoria» prometeria
+                #  algo que nadie hace cumplir.
+                salida_m.append({"id": ids.dar(e.get("id"), titulo),
+                                 "titulo": titulo, "tipo": "foto",
+                                 "obligatorio": False})
+            seguimiento[momento] = {"evidencias": salida_m}
+        esquema["seguimiento"] = seguimiento
+
     duracion = definicion.get("duracion_estimada_minutos")
     if duracion not in (None, ""):
         if isinstance(duracion, bool):
@@ -586,9 +632,37 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
                            "instrucciones": e.get("instrucciones", ""),
                            "paso": titulos_paso.get(e.get("paso"), "")})
 
+    #  Las fotos de cada reporte. Un momento sin declarar se muestra con la
+    #  foto por defecto, que es la que la app ofrece: el editor ensena lo que
+    #  pasa, no lo que esta escrito.
+    from campo.services.seguimiento_campo import MINIMO_EVIDENCIAS, MOMENTOS
+    seguimiento = esquema.get("seguimiento") or {}
+    fotos_de_reportes = {}
+    if not isinstance(seguimiento, dict):
+        motivos.append("tiene un seguimiento que no se entiende")
+        seguimiento = {}
+    for raro in sorted(set(seguimiento) - set(MOMENTOS)):
+        motivos.append(f"declara un reporte '{raro}' que no existe")
+    for momento in MOMENTOS:
+        declarado = seguimiento.get(momento) or {}
+        if not isinstance(declarado, dict):
+            motivos.append(f"el reporte de {momento} no se entiende")
+            continue
+        if declarado.get("campos"):
+            motivos.append(f"el reporte de {momento} pide datos propios, "
+                           "que el editor no maneja")
+        lista = declarado.get("evidencias")
+        if not isinstance(lista, list):
+            lista = MINIMO_EVIDENCIAS.get(momento, [])
+        fotos_de_reportes[momento] = [
+            {"id": e.get("id"),
+             "titulo": e.get("titulo") or e.get("id") or ""}
+            for e in lista if isinstance(e, dict)]
+
     if motivos:
         return None, motivos
-    definicion = {"campos": campos, "evidencias": evidencias}
+    definicion = {"campos": campos, "evidencias": evidencias,
+                  "fotos_de_reportes": fotos_de_reportes}
     if esquema.get("duracion_estimada_minutos"):
         definicion["duracion_estimada_minutos"] = esquema["duracion_estimada_minutos"]
     return definicion, []
@@ -596,7 +670,12 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
 
 def definicion_de_base(base: dict) -> dict:
     """Copia de la definicion de una plantilla del catalogo, lista para editar."""
-    return json.loads(json.dumps(base["definicion"]))
+    d = json.loads(json.dumps(base["definicion"]))
+    #  Con las fotos de los reportes ya puestas, las mismas que tendria sin
+    #  declararlas: quien adopta ve lo que la app va a pedir.
+    if "fotos_de_reportes" not in d:
+        d["fotos_de_reportes"] = leer_definicion({})[0]["fotos_de_reportes"]
+    return d
 
 
 # ---------------------------------------------------------------------------

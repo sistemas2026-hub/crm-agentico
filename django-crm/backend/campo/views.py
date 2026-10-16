@@ -1060,26 +1060,88 @@ class SubirEvidenciaDirectoView(APIView):
 
 
 class ObtenerUrlEvidenciaView(APIView):
-    """Genera URL segura de descarga o visualización de una evidencia."""
+    """Donde se puede ver una evidencia.
+
+    15/10/2026: devolvia `/media/<key>`, una ruta que Django solo sirve con
+    DEBUG -- en produccion ninguna foto se podia abrir. Ahora apunta a
+    `ArchivoDeEvidenciaView`, que la entrega con los mismos permisos que la
+    orden. Y ya no la entrega a cualquiera de la empresa: un tecnico solo ve
+    las de sus ordenes, igual que las ordenes mismas.
+    """
 
     permission_classes = [IsCampoAuthenticated]
 
     def get(self, request, pk):
-        org = getattr(request, "org", None)
-        if not org:
-            raise Http404
-
-        evidencia = EvidenciaTrabajo.objects.filter(pk=pk, org=org).first()
-        if not evidencia:
-            raise Http404
-
-        url_descarga = CampoStorage.create_download_url(evidencia.storage_key)
+        evidencia = _evidencia_visible_o_404(request, pk)
         return Response({
             "evidencia_id": str(evidencia.id),
-            "storage_key": evidencia.storage_key,
-            "download_url": url_descarga,
+            "download_url": f"/api/campo/evidencias/{evidencia.id}/archivo/",
             "estado_archivo": evidencia.estado_archivo,
         })
+
+
+def _evidencia_visible_o_404(request, pk) -> EvidenciaTrabajo:
+    """La evidencia, si quien pregunta puede ver SU orden. Si no, 404.
+
+    El permiso es el de la orden (`_obtener_orden_o_404`): otra empresa o un
+    tecnico que no esta asignado reciben 404, nunca 403, para no confirmar que
+    el id existe.
+    """
+    org = getattr(request, "org", None)
+    if not org:
+        raise Http404
+    evidencia = EvidenciaTrabajo.objects.filter(pk=pk, org=org).first()
+    if not evidencia:
+        raise Http404
+    _obtener_orden_o_404(request, evidencia.orden_trabajo_id)
+    return evidencia
+
+
+class ArchivoDeEvidenciaView(APIView):
+    """El binario de una foto, para mirarla.
+
+    Hasta el 15/10/2026 no habia forma de ver una foto en produccion: la unica
+    URL que se emitia era `/media/...`, que solo existe con DEBUG. Las fotos
+    llegaban, se guardaban y nadie podia abrirlas.
+
+    Se sirve por Django y no por un `/media` publico A PROPOSITO: son fotos
+    de la casa de un cliente. Con la ruta publica, quien tuviera el enlace la
+    veria sin sesion y para siempre. Aca cada pedido pasa por la sesion y por
+    el permiso de la orden, y la respuesta no se guarda en caches compartidas.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        from django.http import FileResponse
+
+        from campo.services.storage import CampoStorage
+
+        evidencia = _evidencia_visible_o_404(request, pk)
+        if evidencia.estado_archivo not in (EvidenciaTrabajo.RECIBIDO,
+                                            EvidenciaTrabajo.VERIFICADO):
+            raise Http404
+        ruta = CampoStorage.ruta_absoluta(evidencia.storage_key)
+        if not ruta:
+            raise Http404
+        try:
+            archivo = open(ruta, "rb")
+        except OSError:
+            raise Http404
+        #  Solo imagenes y PDF se muestran en linea; cualquier otra cosa se
+        #  descarga. Un mime declarado por el telefono no puede convertir el
+        #  archivo en una pagina que el navegador ejecute.
+        mime = (evidencia.mime_type or "").lower()
+        en_linea = mime.startswith("image/") or mime == "application/pdf"
+        respuesta = FileResponse(
+            archivo,
+            content_type=mime if en_linea else "application/octet-stream",
+            as_attachment=not en_linea,
+            filename=evidencia.nombre_original or "evidencia",
+        )
+        respuesta["Cache-Control"] = "private, no-store"
+        respuesta["X-Content-Type-Options"] = "nosniff"
+        return respuesta
 
 
 class CompletarTrabajoView(APIView):

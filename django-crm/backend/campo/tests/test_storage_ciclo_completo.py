@@ -114,8 +114,20 @@ def test_circuito_completo_evidencias_y_aislamiento(user_client, org_b_client, o
     assert res_tenant_a.status_code == 200
     data_url = res_tenant_a.json()
     assert data_url["evidencia_id"] == evidencia_id
-    assert ev_obj.storage_key in data_url["download_url"]
+    # 15/10/2026: la URL ya no es `/media/<key>` -- esa ruta solo existe con
+    # DEBUG y en produccion ninguna foto se podia abrir. Apunta al archivo
+    # servido con la sesion y el permiso de la orden.
+    assert data_url["download_url"] == f"/api/campo/evidencias/{evidencia_id}/archivo/"
     assert data_url["estado_archivo"] == EvidenciaTrabajo.RECIBIDO
+
+    # 7. Y esa URL de verdad entrega la foto -- con su tipo, sin cache compartida.
+    r = user_client.get(data_url["download_url"])
+    assert r.status_code == 200
+    assert b"".join(r.streaming_content) == b"CONTENIDO BINARIO FOTOGRAFIA ONT"
+    assert r["Content-Type"] == "image/jpeg"
+    assert "no-store" in r["Cache-Control"]
+    # Otra empresa no la ve, ni sabe que existe.
+    assert org_b_client.get(data_url["download_url"]).status_code == 404
 
 
 def test_reintentos_evidencias_idempotencia_y_unicidad(user_client, orden_evidencias):
