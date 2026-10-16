@@ -173,4 +173,5 @@ urlpatterns = [
     path("evidencias/<uid:pk>/subir/", views.SubirEvidenciaDirectoView.as_view(), name="evidencia_subir"),
     path("evidencias/<uid:pk>/confirmar/", views.ConfirmarEvidenciaView.as_view(), name="evidencia_confirmar"),
     path("evidencias/<uid:pk>/url/", views.ObtenerUrlEvidenciaView.as_view(), name="evidencia_url"),
+    path("evidencias/<uid:pk>/archivo/", views.ArchivoDeEvidenciaView.as_view(), name="evidencia_archivo"),
 ]

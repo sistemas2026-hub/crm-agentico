@@ -1678,6 +1678,26 @@
                               {/if}
                             </div>
                           {/each}
+                          <!-- LAS FOTOS DEL REPORTE (15/10/2026). El backend ya las
+                               mandaba y nadie las dibujaba. La que todavía no
+                               llegó se dice; no se dibuja un hueco roto. -->
+                          {#if (ev.evidencias ?? []).length}
+                            <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                              {#each ev.evidencias as f (f.id)}
+                                {#if f.disponible}
+                                  <a href={`/api/supervisor-noc/evidencias/${f.id}/archivo`} target="_blank"
+                                     rel="noopener" title="Abrir la foto">
+                                    <img src={`/api/supervisor-noc/evidencias/${f.id}/archivo`}
+                                         alt={(ev.evidencias_declaradas ?? []).find((d) => d.id === f.requisito_id)?.titulo ?? 'Foto del reporte'}
+                                         loading="lazy"
+                                         style="width:96px; height:96px; object-fit:cover; border-radius:6px; border:1px solid var(--snoc-outline-variant);" />
+                                  </a>
+                                {:else}
+                                  <span class="snoc-body-sm snoc-tenue">Una foto todavía se está subiendo.</span>
+                                {/if}
+                              {/each}
+                            </div>
+                          {/if}
                           {#if ev.capturado_en_dispositivo}
                             <span class="snoc-body-sm snoc-tenue">
                               Escrito en el teléfono a las {fecha(ev.capturado_en_dispositivo)}
