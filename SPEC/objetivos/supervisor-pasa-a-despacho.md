@@ -12,8 +12,7 @@ habilita — y los casos que ninguna regla habilita siguen esperando a una
 persona, **con el motivo escrito en la propuesta**, visible para quien la abre.
 
 Agregado el 16/10/2026, por lo que midió ese día: **ninguna propuesta se queda
-sin evaluar** porque otras más viejas ocupan su lugar, y **una falla de servicio
-no pasa con una medición vieja**.
+sin evaluar** porque otras más viejas ocupan su lugar.
 
 **Hasta dónde llega, decidido el 14/10/2026:** el Supervisor acepta su propia
 propuesta y el caso entra a la cola de Despacho. **No crea la orden de trabajo
@@ -104,7 +103,7 @@ a la cola no es mandar a nadie.
 | 16/10 | **La falla con el equipo en línea y sano sigue yendo a una persona** (33 de 40 fallas ese día) | Decidido por el usuario con el número a la vista. La red no es el problema; puede ser el WiFi, el router, o que ya se resolvió. No se manda a nadie sin confirmar |
 | 16/10 | **La confianza exigida sigue en alta** (9 se quedaron por media o baja) | Decidido por el usuario. Bajarla haría pasar entre 4 y 8 casos más ese día |
 | 16/10 | **El tope acota cuántas pasan por vuelta, no cuántas se miran** | Tomada al encuadrar. Evaluar es barato (lee evidencia guardada, sin red); lo que hay que acotar es el efecto: si una regla se equivoca, que el daño de una vuelta tenga techo |
-| 16/10 | **Una falla de servicio pasa solo con una medición de menos de 72 h** (`HORAS_LECTURA_FRESCA`, la misma que exige el cierre) | Tomada al encuadrar, y es fail-closed: hoy `de_la_propuesta` decide con la última lectura guardada sin mirar su hora, y la fase mira primero las más viejas. Achica la autonomía, no la agranda. Si el usuario la objeta, se saca |
+| 16/10 | **Sin límite de antigüedad para la medición.** Se propuso exigir menos de 72 h y se **descartó** el mismo día, al preguntar el usuario por qué 72 | El 72 de `HORAS_LECTURA_FRESCA` mide otra cosa: cuán vieja puede ser la copia del ticket que trae WispHub (el importador corre cada hora; 72 h sin sincronizar es una sincronización rota). No dice cuánto vale una medición del equipo. Además: las fallas que hacen pasar un caso —fibra cortada, señal débil— no se curan solas; con el tope arreglado una falla confirmada pasa dentro de la hora de su lectura; y si ya se resolvió, el ticket se cierra y el caso sale de la cola, que excluye los cerrados (`despacho_pantalla_views.py`). Medido el 16/10: ninguna lectura de más de 3 días. Se reabre con un caso real de una medición vieja que haya pasado |
 
 ## Criterios de aceptación
 
@@ -137,8 +136,8 @@ correr mutaciones en serie).
 
 | # | Evidencia | Cómo se comprueba |
 |---|---|---|
-| 2.1 | Un archivo nuevo de pruebas en `operaciones/tests/` → `N passed, 0 failed` | Salida pegada **con la línea de comando** y `TEST_DATABASE_URL`. Cubre, con un caso de control por cada caso afuera: **(a)** con `TOPE_PASO_A_DESPACHO + 5` lecturas pendientes que no califican y **una nueva** con falla confirmada por la medición y fresca, la fase **acepta la nueva** (estado `ACEPTADA`, `revisado_por` nulo, auditoría con `tarea=pasar_a_despacho_segun_las_reglas`); **(b)** si califican más que el tope, pasan como mucho el tope en una vuelta y el resto en la siguiente; **(c)** una lectura que se queda lleva escrito el motivo de la última revisión y cuándo, y `GET` del detalle de la propuesta lo devuelve; **(d)** una segunda vuelta con el mismo veredicto no escribe nada nuevo; **(e)** una falla confirmada con medición de más de 72 h no pasa, y el motivo lo dice; **(f)** los contrafácticos de las decisiones: equipo en línea y sano no pasa, confianza media en obra de red o trabajo pedido no pasa, grupos 4 y 5 no pasan |
-| 2.2 | Cinco mutaciones, cada una con al menos una prueba en rojo | Salida pegada por mutación, y restaurar después de cada una: volver a evaluar solo las del tope más viejas → (a); quitar el tope de pases → (b); no escribir el motivo → (c); escribirlo siempre → (d); quitar el control de las 72 h → (e) |
+| 2.1 | Un archivo nuevo de pruebas en `operaciones/tests/` → `N passed, 0 failed` | Salida pegada **con la línea de comando** y `TEST_DATABASE_URL`. Cubre, con un caso de control por cada caso afuera: **(a)** con `TOPE_PASO_A_DESPACHO + 5` lecturas pendientes que no califican y **una nueva** con falla confirmada por la medición y fresca, la fase **acepta la nueva** (estado `ACEPTADA`, `revisado_por` nulo, auditoría con `tarea=pasar_a_despacho_segun_las_reglas`); **(b)** si califican más que el tope, pasan como mucho el tope en una vuelta y el resto en la siguiente; **(c)** una lectura que se queda lleva escrito el motivo de la última revisión y cuándo, y `GET` del detalle de la propuesta lo devuelve; **(d)** una segunda vuelta con el mismo veredicto no escribe nada nuevo; **(e)** los contrafácticos de las decisiones: equipo en línea y sano no pasa, confianza media en obra de red o trabajo pedido no pasa, grupos 4 y 5 no pasan |
+| 2.2 | Cuatro mutaciones, cada una con al menos una prueba en rojo | Salida pegada por mutación, y restaurar después de cada una: volver a evaluar solo las del tope más viejas → (a); quitar el tope de pases → (b); no escribir el motivo → (c); escribirlo siempre → (d) |
 | 2.3 | Regresión de la zona en verde | `pytest` sobre `operaciones/tests/test_las_cinco_reglas.py test_el_paso_es_su_propia_fase.py test_el_pase_no_se_confunde_con_un_cierre.py test_tareas_delegadas.py test_ciclo_periodico.py test_el_supervisor_retira_lo_ajeno.py test_el_supervisor_lee_su_area_y_no_la_ajena.py` y `campo/tests/test_el_supervisor_llena_la_cola.py test_despacho_pantalla.py test_ficha_despachable.py` → `N passed, 0 failed`, salida pegada |
 | 2.4 | `ruff check` sobre los archivos tocados no suma avisos respecto de origin | Conteo por archivo pegado, base contra cambio. `ruff check operaciones/` entero tiene 218 avisos preexistentes: no es el criterio |
 | 2.5 | `git diff --name-only origin/fix/integracion-wisphub` solo muestra `django-crm/backend/operaciones/`, esta ficha y `SPEC/auditorias/` | Salida pegada |
@@ -237,4 +236,4 @@ Ninguno impide arrancar.
 |---|---|---|---|
 | 14/10/2026 | Ficha abierta. Las cinco reglas decididas y medidas contra la cola real (71 tickets). Alcance acotado: aparece en Despacho, nadie asigna. Fase 0 declarada bloqueante | Todo. Arranca por la causa del 1-de-27 | — |
 | 14 y 15/10/2026 | Fase 0 atacada y Fase 1 construida y desplegada, sin actualizar esta ficha | — | `ae4488ba`, `b3e4abf2`…`e0663595` |
-| 16/10/2026 | Retomada con `/objetivo`. Medido en producción: corre solo, las tres puertas abiertas, 0 pasaron de 65 y era correcto por las reglas. Dos defectos encontrados (tope que tapa, motivo no escrito). Decisiones del usuario: equipo sano a persona, confianza alta | Fase 2 entera | — |
+| 16/10/2026 | Retomada con `/objetivo`. Medido en producción: corre solo, las tres puertas abiertas, 0 pasaron de 65 y era correcto por las reglas. Dos defectos encontrados (tope que tapa, motivo no escrito). Decisiones del usuario: equipo sano a persona, confianza alta. Descartada la guarda de 72 h que se había propuesto: el número medía la sincronización con WispHub, no el equipo | Fase 2 entera | — |
