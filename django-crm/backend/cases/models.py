@@ -325,6 +325,40 @@ class Case(AssignableMixin, BaseModel):
         ),
     )
 
+    #  EL AREA DEL CASO, ESCRITA EN LA FILA  --  16/10/2026
+    #  -----------------------------------------------------
+    #  Hasta hoy el area de un caso no existia como dato: se deducia del area
+    #  de la PERSONA asignada. 'DestinoTicket' lo documentaba en su propio
+    #  docstring -- "el area viaja de la config a la pantalla dando la vuelta
+    #  por el responsable, y en ningun punto queda escrita en la fila".
+    #
+    #  LO QUE ESA VUELTA ROMPE: un ticket de cartera o de ventas asignado a un
+    #  tecnico hereda el area de soporte, y el Supervisor NOC termina leyendo y
+    #  proponiendo sobre trabajo que no es suyo. Medido en produccion esa
+    #  noche, sobre los ~1.300 casos importados antes de que la lista blanca
+    #  de departamentos existiera.
+    #
+    #  EL DATO YA SE CALCULA: 'importacion_tickets.destinos' mapea
+    #  'departamento|asunto' a un area, y el motor la usa para elegir
+    #  responsable. Lo unico que faltaba era persistirla.
+    #
+    #  VACIO ES "NO SE SABE", y no un area: el filtro del Supervisor es
+    #  fail-closed, asi que un caso sin area no entra. Preferible a inventarle
+    #  una y que alguien actue sobre un caso ajeno.
+    area = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text=(
+            "Area of the company this case belongs to, as decided by the "
+            "tenant's ticket-import routing ('destinos'). Matches "
+            "AreaDeTrabajo.nombre. Empty means unknown -- never guessed from "
+            "the assignee, which is exactly the indirection this field "
+            "replaces."
+        ),
+    )
+
     class Meta:
         verbose_name = "Case"
         verbose_name_plural = "Cases"

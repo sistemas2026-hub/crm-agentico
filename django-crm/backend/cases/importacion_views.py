@@ -54,6 +54,11 @@ CAMPOS_DESCUBRIMIENTO = frozenset({
     "external_status", "external_status_at", "external_created_by",
     "external_created_by_type", "external_fetched_at",
     "external_client_name",
+    #  EL AREA, que el motor ya decide con 'destinos' y hasta hoy no mandaba.
+    #  Ver el comentario del campo en 'cases/models.py': el area se deducia de
+    #  la persona asignada, y por eso un ticket de ventas asignado a un tecnico
+    #  entraba al Supervisor NOC como si fuera suyo.
+    "area",
     "assigned_to", "priority", "status", "name", "description",
 })
 
@@ -69,6 +74,17 @@ CAMPOS_DESCUBRIMIENTO = frozenset({
 CAMPOS_RECONCILIACION = frozenset({
     "external_status", "external_status_at", "external_fetched_at",
     "external_fetch_error", "external_created_by", "external_created_by_type",
+    #  'area' SI entra aca, al reves que 'status' y 'assigned_to'.
+    #
+    #  POR QUE NO ROMPE EL INVARIANTE: lo que esta fase no puede tocar es lo
+    #  que una PERSONA decide aca adentro -- el estado del caso, a quien se lo
+    #  asignaron. El area no es eso: la decide la regla de importacion del
+    #  tenant a partir del departamento del ticket, que vive del otro lado.
+    #
+    #  Y ES LO QUE RELLENA LOS VIEJOS: los ~1.300 casos importados antes de que
+    #  este campo existiera se van completando solos a medida que la
+    #  reconciliacion los vuelve a leer, sin una migracion de datos que adivine.
+    "area",
 })
 
 # Con que estado puede NACER un caso importado. No es la lista completa de

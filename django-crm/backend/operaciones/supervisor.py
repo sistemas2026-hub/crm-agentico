@@ -625,7 +625,31 @@ def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
              #  SOLO LOS DE SOPORTE. Va antes que todo lo demas porque es lo
              #  que mas recorta: de 771 abiertos con tecnico, los de esta area
              #  eran 76.
-             .filter(assigned_to__in=de_soporte)
+             #
+             #  DOS CRITERIOS, Y EL ORDEN DE LA FRASE IMPORTA  --  16/10/2026
+             #  -------------------------------------------------------------
+             #  El area del CASO manda cuando esta escrita; la de la PERSONA
+             #  solo decide mientras no lo este.
+             #
+             #  Hasta hoy el area se deducia del responsable, y esa deduccion
+             #  es falsa en cuanto un ticket se asigna a alguien de otra area:
+             #  en produccion el Supervisor NOC leia y proponia sobre tickets
+             #  de cartera y de ventas asignados a tecnicos. 'Case.area' nacio
+             #  para cortar eso, con el valor que 'destinos' ya calculaba.
+             #
+             #  LOS VIEJOS TODAVIA NO LA TIENEN: los ~1.300 importados antes
+             #  del campo tienen 'area' vacia y se siguen filtrando por
+             #  persona, igual que ayer. La reconciliacion los va completando
+             #  a medida que relee cada ticket, y el dia que no quede ninguno
+             #  vacio esta segunda mitad deja de hacer falta.
+             #
+             #  NO ES FAIL-OPEN: un caso con area vacia no pasa por no tener
+             #  area -- pasa por el mismo filtro de persona de siempre. Lo que
+             #  no puede ocurrir es que un caso CON area ajena entre por tener
+             #  un tecnico encima, y eso es justo lo que la primera mitad
+             #  impide.
+             .filter(Q(area__in=areas.AREAS_DEL_SUPERVISOR)
+                     | (Q(area="") & Q(assigned_to__in=de_soporte)))
              .exclude(status=CERRADO_EN_DEXTER)
              .exclude(external_fetched_at__isnull=True)
              .filter(external_fetched_at__gte=corte_lectura)

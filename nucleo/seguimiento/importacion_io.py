@@ -391,6 +391,18 @@ def _cuerpo_de(v, config) -> dict:
         # compartida); esto es la persona del servicio.
         "external_client_name": v.cliente_nombre,
         "external_fetched_at": datetime.now(timezone.utc).isoformat(),
+        #  EL AREA, Y NO SOLO EL RESPONSABLE  --  16/10/2026
+        #  --------------------------------------------------
+        #  'v.area' sale de 'destinos[departamento|asunto].area' y hasta hoy
+        #  solo servia para ELEGIR a quien se le asigna. El caso del otro lado
+        #  guardaba la persona y no el area, asi que el area habia que
+        #  deducirla de vuelta desde el responsable -- y esa deduccion es falsa
+        #  en cuanto un ticket se asigna a alguien de otra area.
+        #
+        #  MEDIDO en produccion: el Supervisor NOC leia y proponia sobre
+        #  tickets de cartera y de ventas, porque estaban asignados a tecnicos.
+        #  El dato correcto siempre estuvo aca; faltaba mandarlo.
+        "area": v.area,
         "assigned_to": v.responsable,
         "priority": v.prioridad or "Normal",
         # El estado que le corresponde por el que tiene alla, no un fijo.
