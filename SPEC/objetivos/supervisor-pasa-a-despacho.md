@@ -14,6 +14,11 @@ persona, **con el motivo escrito en la propuesta**, visible para quien la abre.
 Agregado el 16/10/2026, por lo que midió ese día: **ninguna propuesta se queda
 sin evaluar** porque otras más viejas ocupan su lugar.
 
+**Medido el 16/10/2026 por la tarde:** hoy solo los grupos 2 y 3 (trabajo pedido
+y obra de red, con confianza alta) pueden pasar solos. La regla 1 no habilita
+nada, porque el clasificador no entiende el equipo que manda el motor y nunca
+confirma una falla. Ver la Fase 3.
+
 **Hasta dónde llega, decidido el 14/10/2026:** el Supervisor acepta su propia
 propuesta y el caso entra a la cola de Despacho. **No crea la orden de trabajo
 y no asigna técnico ni fecha**: eso lo sigue haciendo el despachador. Nadie sale
@@ -43,7 +48,7 @@ lecturas pendientes, ninguna califica:
 
 | Grupo y medición | n | Lo que dice la regla |
 |---|---|---|
-| Falla de servicio, equipo **en línea y sano** | 33 | Contradice el reclamo: persona |
+| Falla de servicio que la lectura marcó **en línea y sano** (medido esa misma tarde: la etiqueta **no sale de una medición**, ver Decisiones y Fase 3) | 33 | Contradice el reclamo: persona |
 | Falla de servicio que no se pudo medir (`onu_no_vinculada` 4, `serial_desactualizado` 3) | 7 | Sin dato no es sano: persona |
 | Sin grupo: el modelo no supo clasificar | 10 | Persona |
 | Obra de red o trabajo pedido, confianza media o baja | 9 | Sin medición se exige alta: persona |
@@ -101,9 +106,10 @@ a la cola no es mandar a nadie.
 | 14/10 | Las cinco reglas, y el límite: entra a la cola, nadie asigna | Ver arriba |
 | 14/10 | Sin medición (grupos 2 y 3) se exige confianza **alta** en la lectura | Lo único entre el caso y una frase ambigua |
 | 16/10 | **La falla con el equipo en línea y sano sigue yendo a una persona** (33 de 40 fallas ese día) | Decidido por el usuario con el número a la vista. La red no es el problema; puede ser el WiFi, el router, o que ya se resolvió. No se manda a nadie sin confirmar |
+| 16/10, tarde | **Lo que cae es el número, no la decisión.** El clasificador lee `estado`, `senal` y `causa_caida`, y el motor manda `onu_status` y `onu_signal*`. Con cualquier dato de SmartOLT, aun `LOS` o `Power fail`, la lectura dice "en línea y sano" sin verificar. Los 33 son "SmartOLT contestó algo", y ninguna falla puede pasar sola por la regla 1 | Lo halló `revisor-de-pii` y se verificó por efecto con el clasificador real (salida en `SPEC/auditorias/PASO-A-DESPACHO.md`). La decisión sigue en pie para un equipo sano de verdad. El motivo escrito ya no copia esa frase. Arreglar el clasificador cambia qué pasa solo: es la Fase 3, y la decide el usuario |
 | 16/10 | **La confianza exigida sigue en alta** (9 se quedaron por media o baja) | Decidido por el usuario. Bajarla haría pasar entre 4 y 8 casos más ese día |
 | 16/10 | **El tope acota cuántas pasan por vuelta, no cuántas se miran** | Tomada al encuadrar. Evaluar es barato (lee evidencia guardada, sin red); lo que hay que acotar es el efecto: si una regla se equivoca, que el daño de una vuelta tenga techo |
-| 16/10 | **Sin límite de antigüedad para la medición.** Se propuso exigir menos de 72 h y se **descartó** el mismo día, al preguntar el usuario por qué 72 | El 72 de `HORAS_LECTURA_FRESCA` mide otra cosa: cuán vieja puede ser la copia del ticket que trae WispHub (el importador corre cada hora; 72 h sin sincronizar es una sincronización rota). No dice cuánto vale una medición del equipo. Además: las fallas que hacen pasar un caso —fibra cortada, señal débil— no se curan solas; con el tope arreglado una falla confirmada pasa dentro de la hora de su lectura; y si ya se resolvió, el ticket se cierra y el caso sale de la cola, que excluye los cerrados (`despacho_pantalla_views.py`). Medido el 16/10: ninguna lectura de más de 3 días. Se reabre con un caso real de una medición vieja que haya pasado |
+| 16/10 | **Sin límite de antigüedad para la medición.** Se propuso exigir menos de 72 h y se **descartó** el mismo día, al preguntar el usuario por qué 72 | El 72 de `HORAS_LECTURA_FRESCA` mide otra cosa: cuán vieja puede ser la copia del ticket que trae WispHub (el importador corre cada hora; 72 h sin sincronizar es una sincronización rota). No dice cuánto vale una medición del equipo. Además: las fallas que hacen pasar un caso —fibra cortada, señal débil— no se curan solas; con el tope arreglado una falla confirmada pasa dentro de la hora de su lectura; y si ya se resolvió, el ticket se cierra y el caso sale de la cola, que excluye los cerrados (`despacho_pantalla_views.py`). Medido el 16/10: ninguna lectura de más de 3 días. Se reabre con un caso real de una medición vieja que haya pasado. **Anotado el mismo día por `auditor-de-frontera`:** la última razón es parcial. La cola excluye los casos cerrados en Dexter, no los cerrados en WispHub, y el paso no mira ninguno de los dos. Eso no reabre la antigüedad: es otra condición, y va primera en la Fase 3 |
 
 ## Criterios de aceptación
 
@@ -136,14 +142,38 @@ correr mutaciones en serie).
 
 | # | Evidencia | Cómo se comprueba |
 |---|---|---|
-| 2.1 | Un archivo nuevo de pruebas en `operaciones/tests/` → `N passed, 0 failed` | Salida pegada **con la línea de comando** y `TEST_DATABASE_URL`. Cubre, con un caso de control por cada caso afuera: **(a)** con `TOPE_PASO_A_DESPACHO + 5` lecturas pendientes que no califican y **una nueva** con falla confirmada por la medición y fresca, la fase **acepta la nueva** (estado `ACEPTADA`, `revisado_por` nulo, auditoría con `tarea=pasar_a_despacho_segun_las_reglas`); **(b)** si califican más que el tope, pasan como mucho el tope en una vuelta y el resto en la siguiente; **(c)** una lectura que se queda lleva escrito el motivo de la última revisión y cuándo, y `GET` del detalle de la propuesta lo devuelve; **(d)** una segunda vuelta con el mismo veredicto no escribe nada nuevo; **(e)** los contrafácticos de las decisiones: equipo en línea y sano no pasa, confianza media en obra de red o trabajo pedido no pasa, grupos 4 y 5 no pasan |
-| 2.2 | Cuatro mutaciones, cada una con al menos una prueba en rojo | Salida pegada por mutación, y restaurar después de cada una: volver a evaluar solo las del tope más viejas → (a); quitar el tope de pases → (b); no escribir el motivo → (c); escribirlo siempre → (d) |
-| 2.3 | Regresión de la zona en verde | `pytest` sobre `operaciones/tests/test_las_cinco_reglas.py test_el_paso_es_su_propia_fase.py test_el_pase_no_se_confunde_con_un_cierre.py test_tareas_delegadas.py test_ciclo_periodico.py test_el_supervisor_retira_lo_ajeno.py test_el_supervisor_lee_su_area_y_no_la_ajena.py` y `campo/tests/test_el_supervisor_llena_la_cola.py test_despacho_pantalla.py test_ficha_despachable.py` → `N passed, 0 failed`, salida pegada |
+| 2.1 | Un archivo nuevo de pruebas en `operaciones/tests/` → `N passed, 0 failed` | Salida pegada **con la línea de comando** y `TEST_DATABASE_URL`. Cubre, con un caso de control por cada caso afuera: **(a)** con `TOPE_PASO_A_DESPACHO + 5` lecturas pendientes que no califican y **una nueva** con falla confirmada por la medición y fresca, la fase **acepta la nueva** (estado `ACEPTADA`, `revisado_por` nulo, auditoría con `tarea=pasar_a_despacho_segun_las_reglas`), y lo mismo con un trabajo pedido de confianza alta, que es lo único que hoy puede pasar en producción; **(b)** si califican más que el tope, pasan como mucho el tope en una vuelta y el resto en la siguiente; **(c)** una lectura que se queda lleva escrito el motivo de la última revisión y cuándo, y `GET` del detalle de la propuesta lo devuelve; **(d)** una segunda vuelta con el mismo veredicto no escribe nada nuevo; **(e)** los contrafácticos de las decisiones: equipo en línea y sano no pasa, confianza media en obra de red o trabajo pedido no pasa, grupos 4 y 5 no pasan |
+| 2.2 | Cuatro mutaciones, cada una con al menos una prueba en rojo | Salida pegada por mutación, y restaurar después de cada una: volver a evaluar solo las del tope más viejas → (a); quitar el tope de pases → (b); no escribir el motivo → (c); escribirlo siempre → (d). Se corrieron nueve: estas cuatro y una por cada hallazgo de las auditorías que se cerró |
+| 2.3 | Regresión de la zona en verde | `pytest` sobre `operaciones/tests/test_las_cinco_reglas.py test_el_paso_es_su_propia_fase.py test_el_pase_no_se_confunde_con_un_cierre.py test_tareas_delegadas.py test_ciclo_periodico.py test_el_supervisor_retira_lo_ajeno.py test_el_supervisor_lee_su_area_y_no_la_ajena.py test_clasificacion_de_trabajo.py` (este último porque se tocó el clasificador) y `campo/tests/test_el_supervisor_llena_la_cola.py test_despacho_pantalla.py test_ficha_despachable.py` → `N passed, 0 failed`, salida pegada |
 | 2.4 | `ruff check` sobre los archivos tocados no suma avisos respecto de origin | Conteo por archivo pegado, base contra cambio. `ruff check operaciones/` entero tiene 218 avisos preexistentes: no es el criterio |
 | 2.5 | `git diff --name-only origin/fix/integracion-wisphub` solo muestra `django-crm/backend/operaciones/`, esta ficha y `SPEC/auditorias/` | Salida pegada |
 | 2.6 | `auditor-de-frontera` y `revisor-de-pii` en paralelo, después `auditor-independiente`, sobre **todo el camino del paso**: lo desplegado (`b3e4abf2`…`e0663595`) más lo nuevo. Hallazgos cerrados o anotados con motivo en `SPEC/auditorias/PASO-A-DESPACHO.md` | Sus informes en la conversación. Cierra el B2 de esta ficha |
 | 2.7 | La bitácora tiene la fila del día con el hash, y `git diff --cached --name-only` pegado antes del commit | |
-| 2.8 | **En producción, por una persona, fuera del `/goal`:** tras el deploy, la línea `paso a Despacho` del worker a la :07 dice `se quedaron=` igual al total de lecturas pendientes (el 16/10: 65, no 60), y una propuesta pendiente muestra su motivo en `/supervisor-noc` | Log y captura de la persona |
+| 2.8 | **En producción, por una persona, fuera del `/goal`:** tras el deploy, la línea `paso a Despacho` del worker a la :07 dice `miradas=` igual al total de lecturas pendientes (el 16/10: 65, no 60), `miradas` igual a `pasaron + esperan el tope + se quedaron + fallaron` (sin esa suma, `miradas` se cuenta antes del bucle y no ve si el bucle dejó de evaluar), y `anotaciones fallidas=0`; y una propuesta pendiente muestra su motivo en `/supervisor-noc`, en el detalle, bajo "Hechos observados" | Log y captura de la persona |
+
+### Fase 3 · Propuesta, no decidida
+
+Sale de las tres auditorías del 16/10. El orden importa: la primera **acota**
+lo que pasa solo, y la segunda lo **amplía**.
+
+1. **El paso mira que el caso siga abierto**, en Dexter y en WispHub, antes de
+   aceptar. Hoy acepta casos ya cerrados y los deja en la cola.
+2. **El clasificador lee las claves del motor** (`onu_status`,
+   `onu_signal_1490`). Así la regla 1 funciona y una falla con `LOS` pasa sola.
+   Pide antes los valores reales de SmartOLT (`verificador-de-api`), el umbral
+   de "señal débil" (es parte de la regla 1: lo decide el usuario) y volver a
+   medir los 33.
+3. **Una propuesta aceptada puede salir de la cola.** Hoy no hay cómo deshacer
+   un pase, y el nivel 3 se justificó con que se podía.
+4. **La pantalla deja de decir que todo lo aprobó una persona.** Es frontend.
+5. **Privacidad del camino:** el texto del modelo en `Activity.entity_name`, la
+   ruta interna del motor sin redacción de texto libre, `tapar` incompleto, y
+   `nombre` en la lista blanca de `supervisor_noc`. El detalle de cada uno está
+   en `SPEC/auditorias/PASO-A-DESPACHO.md`.
+6. **La relectura no deja atrás a las nuevas.** Todavía corta en las 60 más
+   viejas: una lectura nueva que vino sin grupo no se relee mientras haya más
+   pendientes, y sin grupo nunca pasa. Es la forma del defecto que cerró la
+   Fase 2, una fase antes.
 
 ## Restricciones
 
@@ -225,8 +255,8 @@ Ninguno impide arrancar.
 - **B2** (los agentes no cargaban el 14/10): el 16/10 cargaron el
   `orquestador` y, en el objetivo hermano, `arquitecto-dexter`,
   `auditor-de-frontera`, `revisor-de-pii`, `auditor-independiente` y
-  `guardia-de-release`. Lo que queda de B2 es que esos tres auditores **nunca
-  miraron el paso ya desplegado**, y eso es el criterio 2.6.
+  `guardia-de-release`. El resto de B2 se cerró el 16/10: los tres auditores
+  miraron el paso entero, lo desplegado y lo nuevo (criterio 2.6).
 - **B3** (`SPEC/DEXTER_ESTADO_ACTUAL.md` viejo): sigue. Un solo escritor,
   `integrar-centro-mando`: se le entrega hash y una línea.
 

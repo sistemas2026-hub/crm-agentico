@@ -334,6 +334,24 @@ NIVEL_PARA_PASAR = 3
 #:  siguen siendo la misma vive en las pruebas.
 FUENTE_DE_LA_LECTURA = "diagnostico_del_ticket"
 
+#:  Que puerta freno el paso. Viaja en lo que devuelve 'pasar_si_corresponde'
+#:  para que quien anota el motivo sepa si es el de las REGLAS --propio de
+#:  este caso, y lo que una persona necesita leer-- o el de una puerta de la
+#:  empresa, que es igual para todos y puede traer texto que escribio alguien.
+PUERTA_REGLAS = "reglas"
+PUERTA_TAREA = "tarea"
+PUERTA_EMPRESA = "empresa"
+PUERTA_REGISTRO = "registro"
+
+#:  La fuente con la que el paso deja escrito, en la propuesta, por que una
+#:  lectura se queda con una persona.
+#:
+#:  NO PUEDE CONTENER "diagnostico_del_ticket": '_tickets_abiertos_con_tecnico'
+#:  busca esa cadena con 'evidencia__icontains' sobre TODO el JSON para saber
+#:  que tickets ya se leyeron, y una propuesta sin lectura que solo tuviera
+#:  esta pieza dejaria de leerse. Una prueba lo fija.
+FUENTE_REVISION = "revision_del_paso_a_despacho"
+
 
 def de_la_senal(senal) -> Decision:
     """La decision para esta señal, leyendo lo que 'diagnosticar' dejo escrito.
@@ -379,6 +397,28 @@ def de_la_propuesta(propuesta) -> Decision:
     el historial del reclamo, no un diagnostico que se corrige), asi que la
     ultima lectura es la que describe la situacion de hoy.
     """
+    ultima = _ultima_lectura_con_grupo(propuesta)
+    if ultima is None:
+        return Decision(False, "la lectura guardada no trae el grupo: hay que "
+                               "volver a leer el reclamo antes de poder "
+                               "decidir")
+    return decidir(
+        str(ultima.get("grupo") or ""),
+        {"labor": ultima.get("labor") or "",
+         "porque": ultima.get("labor_porque") or "",
+         "verificada": bool(ultima.get("labor_verificada"))},
+        confianza=str(ultima.get(CONFIANZA_DEL_GRUPO) or ""))
+
+
+def _ultima_lectura_con_grupo(propuesta) -> dict | None:
+    """
+    La ultima pieza de lectura que trae la clave 'grupo', o None.
+
+    Es el recorrido que 'de_la_propuesta' hacia en linea, sacado para que la
+    anotacion del motivo lea EXACTAMENTE la misma lectura que decidio: si cada
+    una tuviera su propio recorrido, el dia que uno cambie el motivo escrito
+    hablaria de otra lectura que la que fallo.
+    """
     ultima = None
     for pieza in (getattr(propuesta, "evidencia", None) or []):
         if not isinstance(pieza, dict):
@@ -391,16 +431,7 @@ def de_la_propuesta(propuesta) -> Decision:
             #  justo lo correcto -- va a una persona hasta que se relea.
             continue
         ultima = pieza
-    if ultima is None:
-        return Decision(False, "la lectura guardada no trae el grupo: hay que "
-                               "volver a leer el reclamo antes de poder "
-                               "decidir")
-    return decidir(
-        str(ultima.get("grupo") or ""),
-        {"labor": ultima.get("labor") or "",
-         "porque": ultima.get("labor_porque") or "",
-         "verificada": bool(ultima.get("labor_verificada"))},
-        confianza=str(ultima.get(CONFIANZA_DEL_GRUPO) or ""))
+    return ultima
 
 
 def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
@@ -450,18 +481,19 @@ def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
 
     #  PUERTA 1 · LAS REGLAS.
     if not d.pasa:
-        return {"paso": False, "porque": d.porque, "grupo": d.grupo}
+        return {"paso": False, "porque": d.porque, "grupo": d.grupo,
+                "puerta": PUERTA_REGLAS}
 
     #  PUERTA 2 · QUE ALGUIEN LO HAYA PEDIDO.
     try:
         delegada = tareas_delegadas.esta_delegada(org, TAREA)
     except Exception as e:                                       # noqa: BLE001
         #  No poder COMPROBAR el permiso es lo mismo que no tenerlo.
-        return {"paso": False, "grupo": d.grupo,
+        return {"paso": False, "grupo": d.grupo, "puerta": PUERTA_TAREA,
                 "porque": f"no se pudo comprobar si la tarea esta delegada "
                           f"({type(e).__name__}): sin eso no se pasa"}
     if not delegada:
-        return {"paso": False, "grupo": d.grupo,
+        return {"paso": False, "grupo": d.grupo, "puerta": PUERTA_TAREA,
                 "porque": "nadie le delego al Supervisor que pase casos a "
                           "Despacho: se le pide desde su chat"}
 
@@ -469,7 +501,7 @@ def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
     veredicto = autorizacion if autorizacion is not None else autonomia.puede(
         org, NIVEL_PARA_PASAR)
     if not (veredicto or {}).get("puede"):
-        return {"paso": False, "grupo": d.grupo,
+        return {"paso": False, "grupo": d.grupo, "puerta": PUERTA_EMPRESA,
                 "porque": f"la empresa no lo autoriza: "
                           f"{(veredicto or {}).get('motivo') or 'sin motivo'}"}
 
@@ -491,9 +523,245 @@ def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
         #  descripcion del ticket, que lleva datos del cliente.
         logger.info("Supervisor: no se pudo pasar a Despacho (%s)",
                     type(e).__name__)
-        return {"paso": False, "grupo": d.grupo,
+        return {"paso": False, "grupo": d.grupo, "puerta": PUERTA_REGISTRO,
                 "porque": f"no se pudo registrar la aceptacion "
                           f"({type(e).__name__})"}
 
     return {"paso": True, "porque": d.porque, "grupo": d.grupo,
             "labor": d.labor}
+
+
+# =============================================================================
+#  EL MOTIVO ESCRITO EN LA PROPUESTA
+# =============================================================================
+#
+#  POR QUE EXISTE  --  16/10/2026
+#  -----------------------------
+#  La definicion de terminado del objetivo lo pedia desde el 14/10 --"los casos
+#  que ninguna regla habilita siguen esperando a una persona, con el motivo
+#  escrito"-- y el motivo solo salia sumado en el log del worker. En el panel,
+#  una propuesta que el Supervisor revisaba cada hora se veia igual que una que
+#  nadie habia mirado, y por eso parecia que no revisaba.
+#
+#  UNA PIEZA QUE SE REEMPLAZA, NO SE APILA. Es el patron del modulo optico
+#  ('diagnostico_optico.anotar_el_cierre'): el panel dibuja cada pieza en
+#  "Hechos observados" sin su hora, y dos motivos juntos se leerian como dos
+#  cosas que pasan a la vez. La lectura del reclamo, en cambio, se apila: es
+#  la historia del ticket. Esto es el estado de la ultima revision.
+#
+#  SOLO CUANDO CAMBIA. Con el mismo motivo no se toca nada: sesenta escrituras
+#  por hora diciendo lo mismo no informan. Por eso 'observado_en' dice DESDE
+#  CUANDO vale ese motivo, no cuando fue la ultima vuelta.
+
+#:  Lo que se escribe cuando las reglas dejan pasar el caso y lo frena una
+#:  puerta de la empresa. TEXTO FIJO a proposito: el motivo de la puerta 3
+#:  arrastra lo que una persona escribio al mover el interruptor del motor, y
+#:  copiarlo a cada propuesta seria repartir texto libre por toda la cola.
+_POR_QUE_LAS_PUERTAS = {
+    PUERTA_TAREA: (
+        "Las reglas lo dejan pasar, pero el paso automatico a Despacho no esta "
+        "delegado al Supervisor, o no se pudo comprobar. Lo mira una persona"),
+    PUERTA_EMPRESA: (
+        "Las reglas lo dejan pasar, pero la empresa no tiene autorizado ahora "
+        "que el Supervisor lo pase solo. Lo mira una persona"),
+}
+
+
+#:  Una falla sin confirmar cuya lectura dijo "el equipo esta en linea y sano".
+#:  Medido el 16/10/2026: esa frase hoy no sale de una medicion (ver
+#:  'clasificacion_de_trabajo.EQUIPO_SANO'), y el 'porque' de las reglas
+#:  --"puede estar sano, o no se pudo medir"-- tampoco es cierto: SmartOLT
+#:  contesto. Con una fibra cortada, ese texto empujaba a llamar al cliente en
+#:  vez de mandar a alguien (auditor independiente, 16/10). Lleva "Falta" a
+#:  proposito: el panel lo pone en "Informacion que falta", que es lo que es.
+_FALLA_SIN_INTERPRETAR = (
+    "falla de servicio sin confirmar: SmartOLT contesto, pero la lectura "
+    "todavia no interpreta el estado del equipo, asi que no se sabe si esta "
+    "sano o caido. Falta mirarlo en SmartOLT antes de llamar al cliente; lo "
+    "mira una persona")
+
+#:  Una propuesta que todavia no tiene lectura del reclamo. El 'porque' de
+#:  'de_la_propuesta' dice "la lectura guardada no trae el grupo", y en una
+#:  que nunca se leyo eso afirma una lectura que no existe.
+_SIN_LECTURA = (
+    "falta la lectura del reclamo: las reglas todavia no tienen con que "
+    "decidir. Se decide en la vuelta en que el Supervisor lo lea")
+
+
+def ultima_revision(propuesta) -> dict | None:
+    """La pieza que el paso dejo escrita en la propuesta, o None."""
+    for pieza in reversed(getattr(propuesta, "evidencia", None) or []):
+        if isinstance(pieza, dict) and pieza.get("fuente") == FUENTE_REVISION:
+            return pieza
+    return None
+
+
+def motivo_para_anotar(propuesta, resultado: dict) -> str | None:
+    """
+    El texto que se escribe en la propuesta, o None si no hay que escribir.
+
+    'propuesta' es LA COPIA CON LA QUE SE DECIDIO, no la que se vuelve a leer
+    bloqueada para escribir. Si entre una y otra llego una lectura nueva, el
+    motivo explica la decision que se tomo, sin mezclar su 'porque' con la
+    explicacion de otra lectura. La vuelta que viene decide con la nueva y, si
+    el motivo cambia, lo reemplaza.
+
+    LAS REGLAS: su 'porque'. Y para una falla de servicio que la medicion no
+    confirmo, ademas por que no se pudo medir --"no se pudo leer el equipo
+    (onu_no_vinculada)"--, que es lo que una persona necesita para saber que
+    hacer. Es texto fijo de 'clasificacion_de_trabajo', sin datos del cliente.
+
+    LO QUE NO SE COPIA: "el equipo esta en linea y sano". Medido el 16/10/2026,
+    esa frase hoy no sale de una medicion (ver 'clasificacion_de_trabajo.
+    EQUIPO_SANO'): el clasificador la dice con cualquier dato del equipo, aun
+    con la fibra cortada. Copiarla aca convertiria un defecto de la lectura en
+    una afirmacion escrita en la propuesta, que es donde una persona decide si
+    manda a alguien. Tampoco sirve el 'porque' de las reglas solo: "puede estar
+    sano, o no se pudo medir" es falso las dos veces cuando SmartOLT contesto.
+    Va '_FALLA_SIN_INTERPRETAR'. El dia que el clasificador lea las claves del
+    motor y separe "sano" de "no lo entendi", esta excepcion se quita: la
+    prueba 'test_k' avisa ese dia.
+
+    SIN LECTURA TODAVIA: '_SIN_LECTURA', no el texto de 'de_la_propuesta', que
+    supone una lectura guardada.
+
+    UNA PUERTA DE LA EMPRESA: texto fijo, ver '_POR_QUE_LAS_PUERTAS'.
+
+    NO PODER REGISTRAR LA ACEPTACION: nada. Es transitorio y la vuelta que
+    viene lo reintenta; escribir "se queda para una persona" seria falso.
+    """
+    from operaciones import clasificacion_de_trabajo as clf
+
+    puerta = resultado.get("puerta") or PUERTA_REGLAS
+    if puerta in _POR_QUE_LAS_PUERTAS:
+        return _POR_QUE_LAS_PUERTAS[puerta]
+    if puerta != PUERTA_REGLAS:
+        return None
+    from operaciones import diagnostico_de_ticket as dxt
+
+    if dxt.le_falta_lectura(propuesta):
+        return _SIN_LECTURA
+    porque = str(resultado.get("porque") or "sin motivo")
+    lectura = _ultima_lectura_con_grupo(propuesta) or {}
+    explicacion = str(lectura.get("labor_porque") or "")
+    sin_confirmar = (resultado.get("grupo") == FALLA_DE_SERVICIO
+                     and not lectura.get("labor_verificada"))
+    if sin_confirmar and explicacion.startswith(clf.EQUIPO_SANO):
+        return _FALLA_SIN_INTERPRETAR
+    if sin_confirmar and explicacion:
+        porque = f"{porque}. Lo que dijo la medicion: {explicacion}"
+    return porque
+
+
+def motivo_para_el_registro(resultado: dict) -> str:
+    """
+    La clave con que el motivo se suma en la linea de log de la fase.
+
+    Es el 'porque' tal cual, MENOS el de la puerta de la empresa: ese arrastra
+    lo que una persona escribio al mover el interruptor, y ni el log ni el
+    resultado de la tarea que guarda Celery tienen control de acceso. Va el
+    mismo texto fijo que se escribe en la propuesta; el motivo libre se lee en
+    /autonomia, que es donde se escribio. Las demas puertas llevan texto fijo
+    y, a lo sumo, el tipo de una excepcion.
+    """
+    if (resultado.get("puerta") or PUERTA_REGLAS) == PUERTA_EMPRESA:
+        return _POR_QUE_LAS_PUERTAS[PUERTA_EMPRESA]
+    return str(resultado.get("porque") or "sin motivo")
+
+
+def anotar_por_que_se_queda(propuesta, resultado: dict, ahora) -> bool:
+    """
+    Deja escrito en la propuesta por que se queda con una persona, y desde
+    cuando. Devuelve si escribio.
+
+    LA FILA SE BLOQUEA Y SE VUELVE A MIRAR. Entre que el ciclo listo las
+    pendientes y llega aca, una persona pudo aceptarla o rechazarla, y otra
+    vuelta pudo anotarle algo. Sin el bloqueo, una propuesta ya decidida
+    ganaria una pieza que dice que se queda; sin releer la evidencia, se
+    pisaria lo que otra escritura acaba de dejar. Es el patron de 'revisar' y
+    'cancelar'.
+
+    EL MOTIVO SALE DE LA COPIA QUE DECIDIO ('propuesta'), y la evidencia que
+    se reescribe es la de la fila bloqueada ('fresca'): asi no se pierde una
+    lectura que llego en el medio, y el motivo no mezcla dos lecturas.
+
+    LO QUE NO CUBRE, dicho: 'diagnostico_de_ticket.guardar_en_propuesta'
+    escribe la lectura sin bloqueo y sin mirar el estado, desde una copia
+    cargada antes de leer. Si dos ciclos se solapan --basta apretar el boton
+    durante la fase de lectura, que tarda unos 19 minutos--, esa escritura
+    puede borrar la pieza de aca o DEVOLVER la anterior. Si la propuesta sigue
+    pendiente, se repara sola en la vuelta siguiente, pero el "desde cuando"
+    empieza de nuevo. Si ya paso, la pieza devuelta se queda: ninguna vuelta
+    vuelve a mirar una aceptada. Es anterior a este cambio: ver
+    SPEC/auditorias/PASO-A-DESPACHO.md (A-10 y A-11).
+    """
+    from django.db import transaction
+
+    from operaciones import supervisor as sup
+    from operaciones.models import PropuestaSupervisor
+
+    with transaction.atomic():
+        fresca = (PropuestaSupervisor.objects
+                  .select_for_update()
+                  .filter(pk=propuesta.pk,
+                          estado=PropuestaSupervisor.PROPUESTA)
+                  .first())
+        if fresca is None:
+            return False
+        porque = motivo_para_anotar(propuesta, resultado)
+        if porque is None:
+            return False
+        porque = " ".join(porque.split())[:600]
+        ultima = ultima_revision(fresca)
+        if ultima is not None and ultima.get("porque") == porque:
+            return False
+        pieza = sup._observacion(
+            FUENTE_REVISION, fresca.origen_id,
+            f"Revisada por el Supervisor NOC IA: se queda para una persona. "
+            f"{porque}",
+            ahora)
+        pieza["porque"] = porque
+        pieza["grupo"] = str(resultado.get("grupo") or "")
+        resto = [x for x in (fresca.evidencia or [])
+                 if not (isinstance(x, dict)
+                         and x.get("fuente") == FUENTE_REVISION)]
+        fresca.evidencia = [*resto, pieza]
+        fresca.save(update_fields=["evidencia", "updated_at"])
+    return True
+
+
+def quitar_por_que_se_quedaba(propuesta) -> bool:
+    """
+    Cuando la propuesta PASA, la pieza que decia "se queda para una persona"
+    deja de ser cierta, y se quita. Devuelve si quito algo.
+
+    El caso tipico: el interruptor estuvo apagado, se escribio "la empresa no
+    tiene autorizado ahora...", y en la vuelta siguiente paso. Sin esto queda
+    una propuesta ACEPTADA cuya evidencia dice que se quedo con una persona, y
+    el panel la dibuja sin hora. El pase ya queda dicho donde corresponde: en
+    'resultado' y en la auditoria.
+
+    Mismo cuidado que al escribir: la fila bloqueada, y solo si ya no esta
+    pendiente.
+
+    NADIE LO REINTENTA: la vuelta siguiente solo mira pendientes. Si esto
+    falla, la aceptada conserva el motivo viejo (A-11 en
+    SPEC/auditorias/PASO-A-DESPACHO.md).
+    """
+    from django.db import transaction
+
+    from operaciones.models import PropuestaSupervisor
+
+    with transaction.atomic():
+        fresca = (PropuestaSupervisor.objects
+                  .select_for_update()
+                  .filter(pk=propuesta.pk)
+                  .exclude(estado=PropuestaSupervisor.PROPUESTA)
+                  .first())
+        if fresca is None or ultima_revision(fresca) is None:
+            return False
+        fresca.evidencia = [x for x in (fresca.evidencia or [])
+                            if not (isinstance(x, dict)
+                                    and x.get("fuente") == FUENTE_REVISION)]
+        fresca.save(update_fields=["evidencia", "updated_at"])
+    return True

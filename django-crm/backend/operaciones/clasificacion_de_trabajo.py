@@ -273,6 +273,21 @@ def _del_texto(texto: str, mapa: dict | None) -> dict | None:
         POR_TEXTO, verificada=False)
 
 
+#:  EL COMIENZO DEL TEXTO con que 'clasificar' dice que el equipo esta sano.
+#:  Tiene nombre porque 'paso_a_despacho' lo reconoce para NO copiarlo como si
+#:  fuera una medicion, y un texto repetido en dos modulos se separa el dia que
+#:  uno de los dos cambie.
+#:
+#:  MEDIDO EL 16/10/2026: hoy esa frase no sale de medir. '_de_la_prueba' lee
+#:  'estado', 'senal' y 'causa_caida', y el equipo que arma el motor
+#:  ('_CAMPOS_DE_EQUIPO' en nucleo/canales/api.py) trae 'onu_status' y
+#:  'onu_signal*'. Ninguna clave coincide, asi que '_de_la_prueba' devuelve
+#:  None con cualquier equipo y se llega a esta frase con solo que SmartOLT
+#:  haya contestado algo, aunque sea 'LOS'. Arreglarlo cambia que pasa solo a
+#:  Despacho, y es otra decision: ver SPEC/auditorias/PASO-A-DESPACHO.md.
+EQUIPO_SANO = "el equipo esta en linea y sano"
+
+
 def clasificar(contexto: dict, *, texto: str = "", mapa_de_texto=None,
                situacion=None, marcadores=None) -> dict:
     """De que tipo es este trabajo, y por que.
@@ -318,7 +333,7 @@ def clasificar(contexto: dict, *, texto: str = "", mapa_de_texto=None,
     elif sin_equipo:
         motivo = f"no se pudo leer el equipo ({sin_equipo})"
     elif contexto.get("equipo"):
-        motivo = ("el equipo esta en linea y sano, asi que esto NO es una "
+        motivo = (f"{EQUIPO_SANO}, asi que esto NO es una "
                   "falla de red. Que tipo de trabajo es lo decide quien "
                   "despacha")
     else:

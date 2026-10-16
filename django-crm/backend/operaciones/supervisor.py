@@ -499,9 +499,10 @@ TOPE_TICKETS_POR_CORRIDA = 10
 #:  SUBIDO DE 30 A 60 ESA MISMA NOCHE, con la medicion de tres corridas de
 #:  produccion. La prediccion de "baja 10 por vuelta" fue FALSA: bajo 2. El
 #:  motivo es que son dos conjuntos distintos y se los habia tratado como uno
-#:  --la lectura toma 10 de las 161 pendientes, y el paso a Despacho solo mira
-#:  las 60 mas viejas ('TOPE_PASO_A_DESPACHO')--, asi que de los 10 releidos
-#:  solo algunos caian en la ventana que se estaba midiendo.
+#:  --la lectura toma 10 de las 161 pendientes, y el paso a Despacho solo
+#:  miraba las 60 mas viejas ('TOPE_PASO_A_DESPACHO')--, asi que de los 10
+#:  releidos solo algunos caian en la ventana que se estaba midiendo. Desde el
+#:  16/10/2026 el paso las mira todas y el tope acota cuantas PASAN.
 #:
 #:      161 pendientes / 10 por hora  =  16 horas
 #:      161 pendientes / 60 por hora  =  2,5 horas
@@ -2819,11 +2820,23 @@ def _leer_tickets_abiertos(org, ahora, *,
     return informe
 
 
-#:  Cuantas propuestas pendientes se miran por vuelta. NO es el tope de
-#:  lecturas: mirar una propuesta ya leida no cuesta una llamada al modelo,
-#:  solo las puertas y una escritura. Se acota igual para que una vuelta no se
-#:  haga eterna si hay cientos esperando.
+#:  Cuantas propuestas pueden PASAR a Despacho en una vuelta. No cuantas se
+#:  MIRAN: esas son todas.
+#:
+#:  HASTA EL 16/10/2026 ERA AL REVES, y era el defecto. La consulta cortaba en
+#:  las 60 mas viejas, y las que nunca califican --una falla con el equipo
+#:  sano, un reclamo que nada mide-- ocupaban la ventana cada hora. Medido en
+#:  produccion ese dia: 65 pendientes, la fase miraba 60. Una falla NUEVA
+#:  confirmada por la medicion, que es justo la que tiene que pasar sola,
+#:  entraba ultima y no se evaluaba hasta que salieran otras: dias, por la
+#:  vigencia de siete.
+#:
+#:  Mirar es barato: se lee la evidencia guardada, sin red y sin modelo. Lo que
+#:  hay que acotar es el EFECTO. Si una regla se equivoca, que el daño de una
+#:  vuelta tenga techo; las que califican despues del tope pasan en la
+#:  siguiente, sin escribir nada mientras esperan.
 TOPE_PASO_A_DESPACHO = 60
+
 
 
 class _SinSenal:
@@ -2873,11 +2886,15 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
 
     #  LAS PENDIENTES, las mas viejas primero: una propuesta que lleva dias
     #  esperando es la que mas necesita moverse.
+    #
+    #  TODAS, sin cortar en el tope: ver TOPE_PASO_A_DESPACHO. El orden sigue
+    #  importando, pero para otra cosa: decide quien pasa primero cuando
+    #  califican mas que el tope, no quien se mira.
     sin_decidir = list(
         PropuestaSupervisor.objects
         .filter(org=org, tipo_senal=PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO,
                 estado=PropuestaSupervisor.PROPUESTA, origen_tipo="case")
-        .order_by("created_at")[:TOPE_PASO_A_DESPACHO])
+        .order_by("created_at"))
 
     #  'por_confianza' SE CUENTA PARA PODER CALIBRAR  --  14/10/2026
     #
@@ -2892,7 +2909,19 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
     #  base propuesta por propuesta.
     reporte = {"pasaron": 0, "se_quedaron": 0, "fallaron": 0,
                "por_grupo": {}, "por_confianza": {}, "motivos": {},
-               "pendientes_miradas": 0}
+               "pendientes_miradas": 0,
+               #  Las que calificaron despues del tope: pasan la vuelta que
+               #  viene. Se cuentan aparte porque NO se quedaron con una
+               #  persona, y mezclarlas con 'se_quedaron' diria lo contrario.
+               "esperan_el_tope": 0,
+               #  Cuantas propuestas cambiaron de motivo en esta vuelta. Con
+               #  la misma cola y las mismas lecturas tiene que dar cero.
+               "motivos_escritos": 0,
+               #  Anotar o quitar el motivo fallo. Anotar se reintenta solo,
+               #  porque la propuesta sigue pendiente; quitar no, porque ya
+               #  paso y ninguna vuelta la vuelve a mirar. Si no da cero,
+               #  mirar el log.
+               "anotaciones_fallidas": 0}
     reporte["pendientes_miradas"] = len(sin_decidir)
     if not sin_decidir:
         return {"despacho": reporte}
@@ -2913,17 +2942,32 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
         return {"despacho": reporte}
 
     for p in sin_decidir:
-        try:
-            r = pad.pasar_si_corresponde(
-                org, _SinSenal(p), p, ahora=ahora,
-                autorizacion=autorizacion)
-        except Exception as e:                                   # noqa: BLE001
-            #  'pasar_si_corresponde' promete no levantar, pero una excepcion
-            #  inesperada aqui no puede tumbar el resto de la vuelta.
-            reporte["fallaron"] += 1
-            logger.exception("Supervisor: el paso a Despacho fallo (%s)",
-                             type(e).__name__)
-            continue
+        if reporte["pasaron"] >= TOPE_PASO_A_DESPACHO:
+            #  EL TOPE DE LA VUELTA YA SE ALCANZO. Se sigue MIRANDO --por eso
+            #  esta rama existe--, pero sin aceptar nada: se decide solo con
+            #  las reglas, que no escriben. La que califica espera a la vuelta
+            #  que viene sin anotar nada, porque no se quedo con una persona.
+            #  La que no califica se anota igual que en la otra rama: el
+            #  motivo es de las reglas, y las puertas no lo cambian.
+            d = pad.de_la_propuesta(p)
+            if d.pasa:
+                reporte["esperan_el_tope"] += 1
+                continue
+            r = {"paso": False, "porque": d.porque, "grupo": d.grupo,
+                 "puerta": pad.PUERTA_REGLAS}
+        else:
+            try:
+                r = pad.pasar_si_corresponde(
+                    org, _SinSenal(p), p, ahora=ahora,
+                    autorizacion=autorizacion)
+            except Exception as e:                               # noqa: BLE001
+                #  'pasar_si_corresponde' promete no levantar, pero una
+                #  excepcion inesperada aqui no puede tumbar el resto de la
+                #  vuelta.
+                reporte["fallaron"] += 1
+                logger.exception("Supervisor: el paso a Despacho fallo (%s)",
+                                 type(e).__name__)
+                continue
 
         grupo = r.get("grupo") or "sin grupo"
         reporte["por_grupo"][grupo] = reporte["por_grupo"].get(grupo, 0) + 1
@@ -2934,11 +2978,36 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
             reporte["pasaron"] += 1
         else:
             reporte["se_quedaron"] += 1
-            #  EL MOTIVO AGRUPADO, no el detalle por caso: el detalle ya quedo
-            #  en la propuesta. Esto es para poder leer de una corrida por que
-            #  no paso nada, que el 14/10 costo varias mediciones a mano.
-            m = _en_una_linea(r.get("porque") or "sin motivo")[:120]
+            #  EL MOTIVO AGRUPADO, no el detalle por caso: el detalle queda en
+            #  la propuesta, abajo. Esto es para poder leer de una corrida por
+            #  que no paso nada, que el 14/10 costo varias mediciones a mano.
+            #
+            #  Este comentario decia "el detalle ya quedo en la propuesta"
+            #  desde el 14/10, y no era cierto: el motivo solo vivia sumado en
+            #  esta linea de log. Medido el 16/10: una propuesta revisada cada
+            #  hora se veia en el panel igual que una que nadie miro.
+            #
+            #  La clave sale de 'motivo_para_el_registro' y no del 'porque'
+            #  crudo: el de la puerta de la empresa trae lo que una persona
+            #  escribio al mover el interruptor, y esto va a un log.
+            m = _en_una_linea(pad.motivo_para_el_registro(r))[:120]
             reporte["motivos"][m] = reporte["motivos"].get(m, 0) + 1
+
+        #  ANOTAR NO PUEDE TUMBAR LA VUELTA. Es informativo: si falla --un
+        #  bloqueo, la conexion--, la propuesta sigue igual. Fuera de un try,
+        #  una falla al anotar la mas vieja dejaba sin mirar a todas las que
+        #  venian detras: el mismo defecto que esta fase vino a cerrar
+        #  (auditor de frontera, 16/10). Lo que no se reintenta es QUITAR: la
+        #  aceptada ya no vuelve a esta lista (A-11 en la nota de auditoria).
+        try:
+            if r.get("paso"):
+                pad.quitar_por_que_se_quedaba(p)
+            elif pad.anotar_por_que_se_queda(p, r, ahora):
+                reporte["motivos_escritos"] += 1
+        except Exception as e:                                   # noqa: BLE001
+            reporte["anotaciones_fallidas"] += 1
+            logger.warning("Supervisor: no se pudo anotar el motivo del paso "
+                           "a Despacho (%s)", type(e).__name__)
 
     #  EL MOTIVO VA EN EL LOG, Y NO ES ADORNO  --  15/10/2026
     #  ------------------------------------------------------
@@ -2957,10 +3026,13 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
     #  SON CLAVES Y CONTEOS, nunca un caso: el detalle de cada uno ya quedo en
     #  su propuesta, que es donde una persona lo va a buscar y donde hay
     #  control de acceso. Esto va a un log, que no lo tiene.
-    logger.info("Supervisor: paso a Despacho · pasaron=%s · se quedaron=%s · "
-                "fallaron=%s · por grupo=%s · por confianza del grupo=%s · "
-                "por que se quedaron=%s",
-                reporte["pasaron"], reporte["se_quedaron"],
+    logger.info("Supervisor: paso a Despacho · miradas=%s · pasaron=%s · "
+                "esperan el tope=%s · se quedaron=%s · motivos escritos=%s · "
+                "anotaciones fallidas=%s · fallaron=%s · por grupo=%s · "
+                "por confianza del grupo=%s · por que se quedaron=%s",
+                reporte["pendientes_miradas"], reporte["pasaron"],
+                reporte["esperan_el_tope"], reporte["se_quedaron"],
+                reporte["motivos_escritos"], reporte["anotaciones_fallidas"],
                 reporte["fallaron"], reporte["por_grupo"],
                 reporte["por_confianza"], reporte["motivos"])
     return {"despacho": reporte}
