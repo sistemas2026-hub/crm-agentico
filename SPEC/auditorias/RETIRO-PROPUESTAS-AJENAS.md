@@ -3,9 +3,10 @@
 ```
 BASE       origin/fix/integracion-wisphub = 1482523d, más c0954bec (la ficha)
            y el cambio en django-crm/backend/operaciones/, auditado SIN commitear
-VEREDICTO  CERRADO EN CÓDIGO. Verde en Postgres real; siete mutaciones muertas.
-           NO verificado en producción: el worker tiene que recibir el mapa
-           de áreas del motor, y eso solo se mide después del deploy.
+VEREDICTO  CERRADO EN CÓDIGO Y VERIFICADO EN PRODUCCIÓN (16/10, 11:00
+           Bogotá, por una persona con el comando): 662 pendientes sobre
+           tickets → 96; 566 canceladas; fuera de área 0. Falta ver en el
+           log del worker la línea del ciclo de las :07.
 FECHA      16/10/2026
 ALCANCE    operaciones/{areas_del_tenant,supervisor,tasks}.py, el comando
            propuestas_fuera_de_area y sus pruebas. Nada en nucleo/, nada en
@@ -134,11 +135,11 @@ quedó sin llamador en código de producción (lo usan las pruebas).
 
 ## Lo que queda
 
-- **Producción**: que el worker de Celery reciba el mapa (`MOTOR_*` están
-  declaradas en `docker-compose.prod.yml` para `celery-worker`; el valor no se
-  ve desde acá). Si no lo recibe, el retiro no retira nada y el síntoma es
-  idéntico a "no hay ajenos": la línea `sin mapa de areas, no se retira
-  ninguna propuesta esta vuelta` en el log del worker lo dice.
+- **Producción, medido**: el backend recibe el mapa (el comando contó y
+  retiró). El worker comparte las variables en `docker-compose.prod.yml`; la
+  confirmación es la línea `ciclo corrido … retiradas_por_area=` en su log
+  a partir de las 11:07. Si dijera `sin mapa de areas`, el retiro horario no
+  retira nada y el síntoma es idéntico a "no hay ajenos".
 - **H3** (multi-tenant), como deuda.
 - Las propuestas de cierre sobre otras áreas siguen en Pendientes por
   decisión: el comando las cuenta aparte.

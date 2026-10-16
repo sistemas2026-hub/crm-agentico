@@ -1,6 +1,6 @@
 # Objetivo · El Supervisor retira solo lo que no es suyo
 
-> Abierto el 16/10/2026. Estado: **abierto** — cerrado en código, pendiente de deploy y de la evidencia en producción.
+> Abierto el 16/10/2026. Estado: **cerrado en código y verificado en producción** (16/10, 11:00 Bogotá). Falta que `SPEC/DEXTER_ESTADO_ACTUAL.md` lo refleje.
 
 ## Qué significa terminado
 
@@ -199,3 +199,4 @@ con ese objetivo, no con un parche acá.
 |---|---|---|---|
 | 16/10/2026 | Ficha abierta tras `/objetivo`. Decisión del usuario: la señal de cierre no se filtra por área. Nada construido | Todo lo de arriba | — |
 | 16/10/2026 | Construido y auditado: criterio de área en un solo lugar, retiro en el ciclo y a demanda, tres señales de ruido filtradas, comando que mide. 37 pruebas en Postgres real, 7 mutaciones muertas, 15 hallazgos de auditoría (11 cerrados; detalle en `SPEC/auditorias/RETIRO-PROPUESTAS-AJENAS.md`) | Push (= deploy, lo decide una persona); evidencia en producción (criterio 7); dos decisiones abiertas: la lectura cancelada que no vuelve y el multi-tenant de `AREAS_DEL_SUPERVISOR` | `eac5715c` |
+| 16/10/2026 | **Desplegado** (`8fe34f0e`, push 10:33 Bogotá) y medido en producción por una persona, org `8a0a07ac…` ("Rapilink"; la otra, "Rapilink Telecomunicaciones", no tiene propuestas): `--contar` antes: 662 pendientes sobre tickets, 566 fuera de área (cartera 540, ventas 25, administración 1). Retiro a demanda con el comando. `--contar` después: 96 pendientes, 0 fuera de área, 0 sin saber, 0 cierres ajenos. El backend recibe el mapa del motor (sin él, el comando falla y no contó) | Que `DEXTER_ESTADO_ACTUAL.md` lo refleje; confirmar en el log del worker la línea `retiradas_por_area=` del ciclo de las :07; las dos decisiones abiertas | — |
