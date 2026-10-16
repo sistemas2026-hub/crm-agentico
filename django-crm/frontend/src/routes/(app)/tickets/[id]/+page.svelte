@@ -942,10 +942,10 @@
       <dd><Pill tone={CASE_STATUS_TONE[ticket.status]}>{CASE_STATUS_LABEL[ticket.status] ?? ticket.status}</Pill></dd>
       <dt>Tipo</dt>
       <dd>{ticket.case_type ? (CASE_TYPE_LABEL[ticket.case_type] ?? ticket.case_type) : 'Sin definir'}</dd>
-      <!-- El area sale de a quien esta asignado, igual que en la cola: el CRM
-           no tiene campo de area, la tiene el asistente y es por persona. Un
-           caso sin dueño no tiene area, y decirlo es mas util que dejar el
-           renglon en blanco. -->
+      <!-- El area es la escrita en el caso ('Case.area'); la de la persona
+           asignada solo decide mientras el caso no la tenga -- misma regla
+           que la cola (areaDelCaso). Un caso sin ninguna de las dos no tiene
+           area, y decirlo es mas util que dejar el renglon en blanco. -->
       <dt>Área</dt>
       <dd>
         {#if data.area}

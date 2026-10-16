@@ -21,24 +21,61 @@
  * ----------
  * El desglose ya no se deriva de las filas visibles. El backend devuelve
  * `open_by_assignee` --un GROUP BY sobre TODOS los abiertos-- y aqui se
- * traduce de responsable a area. La paginacion de 25 no se toca: la pantalla
- * sigue trayendo una pagina, y los totales dejan de depender de cual.
+ * traduce a areas. La paginacion de 25 no se toca: la pantalla sigue trayendo
+ * una pagina, y los totales dejan de depender de cual.
  *
- * POR QUE LA TRADUCCION VIVE ACA Y NO EN EL BACKEND
- * -------------------------------------------------
+ * DE QUIEN ES EL AREA DE UN CASO  --  16/10/2026
+ * ----------------------------------------------
+ * Hasta hoy, de la PERSONA asignada: el CRM no tenia campo de area. Medido
+ * en local ese dia: 65 casos con area `soporte_tecnico`, 64 en la pantalla.
+ * El que faltaba estaba asignado a alguien sin area en el motor y caia en
+ * "Sin área asignada". Y la consecuencia grave es la inversa: un ticket de
+ * ventas asignado a un tecnico aparecia como Soporte Tecnico -- el mismo
+ * defecto que el Supervisor NOC ya no tiene (cdaa9b27), vivo en esta
+ * pantalla.
+ *
+ * Desde ese commit el caso trae su area escrita (`Case.area`, la que decide
+ * `importacion_tickets.destinos`). `areaDelCaso` la lee PRIMERO y cae a la de
+ * la persona solo cuando no esta escrita: los ~1.300 importados antes del
+ * campo, que la reconciliacion va completando, y los casos cargados a mano
+ * en el CRM. Es la misma asimetria del Supervisor: un caso CON area ajena no
+ * es de soporte aunque lo tenga un tecnico; un caso SIN area sigue con el
+ * criterio de ayer.
+ *
+ * POR QUE LA TRADUCCION PERSONA -> AREA SIGUE VIVIENDO ACA
+ * --------------------------------------------------------
  * El mapa persona -> area no esta en el CRM: vive en
  * `asistente.area_colaborador` y lo sirve el motor (`/agentes/areas`). Django
- * cuenta lo que tiene; quien conoce las areas suma. Copiar el mapa al CRM
- * crearia una segunda verdad sobre el mismo dato.
+ * cuenta lo que tiene --por area del caso y por responsable-- y quien conoce
+ * las areas termina de sumar. Copiar el mapa al CRM crearia una segunda
+ * verdad sobre el mismo dato.
  */
 
 /** La categoria de los que no caen en ningun area del equipo. */
 export const SIN_AREA = '__sin_area__';
 
-/** @typedef {{assigned_to: string|null, total: number, urgentes: number,
- *             sin_respuesta: number, en_progreso: number}} FilaDesglose */
+/** @typedef {{area?: string, assigned_to: string|null, total: number,
+ *             urgentes: number, sin_respuesta: number, en_progreso: number}} FilaDesglose */
 
 const VACIO = { total: 0, urgentes: 0, sin_respuesta: 0, sin_asignar: 0, en_progreso: 0 };
+
+/**
+ * El area de un caso: la escrita en el caso; si no la tiene, la de su
+ * responsable; si tampoco, SIN_AREA.
+ *
+ * UNA sola funcion para la cola, las tarjetas y el detalle: las tres tienen
+ * que decir lo mismo del mismo ticket, o un caso contaria en una tarjeta y
+ * no apareceria al abrirla.
+ *
+ * @param {string|null|undefined} area  `Case.area`; vacia cuando no se sabe
+ * @param {string|null|undefined} responsable  profile_id del asignado
+ * @param {Record<string, string>} areaPorPersona  profile_id -> nombre de area
+ * @returns {string}
+ */
+export function areaDelCaso(area, responsable, areaPorPersona = {}) {
+  if (area) return area;
+  return (responsable && areaPorPersona[responsable]) || SIN_AREA;
+}
 
 /**
  * La cola por area, sobre el conjunto COMPLETO.
@@ -69,15 +106,28 @@ export function resumenPorArea(desglose, areas, areaPorPersona = {}) {
 
   for (const fila of desglose) {
     const persona = fila?.assigned_to ?? null;
-    //  Sin responsable, o con uno que no pertenece a ningun area: los dos van
-    //  a la misma categoria de excepcion, pero solo el primero cuenta como
-    //  'sin_asignar' -- tener responsable y que su area no este configurada es
-    //  otro problema, y confundirlos esconde el que haya que arreglar.
-    const area = persona ? (areaPorPersona[persona] || SIN_AREA) : SIN_AREA;
+    //  El area escrita en el caso manda. Sin ella: sin responsable, o con uno
+    //  que no pertenece a ningun area, los dos van a la misma categoria de
+    //  excepcion, pero solo el primero cuenta como 'sin_asignar' -- tener
+    //  responsable y que su area no este configurada es otro problema, y
+    //  confundirlos esconde el que haya que arreglar.
+    const area = areaDelCaso(fila?.area, persona, areaPorPersona);
     sumar(area, fila, persona === null);
   }
 
+  //  Un area escrita en los casos que la configuracion no declara --la
+  //  empresa la borro, o 'destinos' apunta a una que todavia no existe en
+  //  /settings/areas-- se muestra con su nombre crudo en vez de esconderse:
+  //  esos tickets existen y alguien los tiene que ver. Medido en local el
+  //  16/10/2026: 3 casos con area 'ventas' y ninguna area 'ventas' declarada.
+  const declaradas = new Set(areas.map((a) => a.nombre));
+  const noDeclaradas = Object.keys(acumulado)
+    .filter((n) => n !== SIN_AREA && !declaradas.has(n))
+    .sort()
+    .map((nombre) => ({ nombre, etiqueta: nombre, agentes: [] }));
+
   const filas = [...areas.map((a) => ({ ...a })),
+                 ...noDeclaradas,
                  { nombre: SIN_AREA, etiqueta: 'Sin área asignada', agentes: [] }]
     .map((a) => ({ ...a, ...VACIO, ...(acumulado[a.nombre] ?? {}) }));
 
@@ -88,11 +138,13 @@ export function resumenPorArea(desglose, areas, areaPorPersona = {}) {
 }
 
 /**
- * Lo que el desglose deja afuera de las areas conocidas.
+ * Responsables cuyos tickets abiertos caen en "Sin área asignada".
  *
- * Sirve para avisar: si hay responsables sin area configurada, sus tickets
- * desaparecen de las columnas del equipo y conviene que alguien lo sepa, en
- * vez de que la cola parezca mas corta de lo que es.
+ * Solo cuentan las filas SIN area escrita en el caso: si el caso la trae, ya
+ * esta en su tarjeta, y que la persona no tenga area configurada no esconde
+ * nada. Sirve para avisar: esos tickets desaparecen de las columnas del
+ * equipo y conviene que alguien lo sepa, en vez de que la cola parezca mas
+ * corta de lo que es.
  *
  * @param {FilaDesglose[] | null | undefined} desglose
  * @param {Record<string, string>} areaPorPersona
@@ -101,39 +153,37 @@ export function responsablesSinArea(desglose, areaPorPersona = {}) {
   if (!Array.isArray(desglose)) return [];
   return [...new Set(
     desglose
-      .filter((f) => f?.assigned_to && !areaPorPersona[f.assigned_to])
+      .filter((f) => f?.assigned_to && !f.area && !areaPorPersona[f.assigned_to])
       .map((f) => f.assigned_to)
   )];
 }
 
 
 /**
- * Los responsables de un area, para poder pedirle al servidor SOLO su cola.
+ * Los responsables de un area, para pedirle al servidor su cola completa.
  *
  * EL DEFECTO QUE ESTO FIJA  --  medido en produccion el 07/10/2026
  * ----------------------------------------------------------------
- * El area no es un campo del CRM: es una propiedad de la persona asignada.
  * La pantalla pedia las 25 filas mas recientes de TODA la cola y recien
  * despues descartaba en el navegador las que no eran del area. Con 138
  * abiertos y las 25 mas recientes todas de cartera, Soporte Tecnico mostraba
  * la tabla VACIA mientras su cabecera decia 91.
  *
- * Traducir el area a sus responsables permite mandar 'assigned_to' al API, y
- * entonces la pagina que llega ya es la del area. Subir el limite no era la
- * solucion: con mil tickets el problema vuelve, solo mas tarde.
- *
- * Devuelve lista vacia cuando el area no tiene gente, y quien llama NO debe
- * mandar el filtro en ese caso: un 'assigned_to' vacio no filtra nada y
- * traeria la cola entera, que es justo lo que se quiere evitar.
+ * Hasta el 16/10/2026 esta lista viajaba como 'assigned_to', porque el area
+ * se deducia de la persona. Hoy el API filtra por el area escrita en el caso
+ * ('area') y esta lista viaja aparte ('area_responsables'), SOLO para los
+ * casos que todavia no la tienen escrita: la mitad vieja del filtro, ver
+ * areaDelCaso(). Una lista vacia significa que esa mitad no aplica, y el
+ * filtro por area escrita sigue valiendo igual.
  *
  * @param {string} area  nombre interno del area, o '' / SIN_AREA
  * @param {Record<string, string>} areaPorPersona  profile_id -> area
  * @returns {string[]} ids de responsables, sin repetir
  */
 export function responsablesDeArea(area, areaPorPersona = {}) {
-  //  SIN_AREA no se puede pedir por 'assigned_to': son los casos sin
-  //  responsable, o con uno cuya area nadie configuro. Esa cola se sigue
-  //  recortando del lado del navegador, y es su limite conocido.
+  //  SIN_AREA no se puede pedir al servidor: son los casos sin area escrita
+  //  y sin responsable, o con uno cuya area nadie configuro. Esa cola se
+  //  sigue recortando del lado del navegador, y es su limite conocido.
   if (!area || area === SIN_AREA) return [];
   return [...new Set(
     Object.entries(areaPorPersona)

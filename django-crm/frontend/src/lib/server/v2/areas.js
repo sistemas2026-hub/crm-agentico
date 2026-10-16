@@ -5,11 +5,13 @@ import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 /**
  * Las áreas de la empresa y de qué área es cada persona.
  *
- * El CRM no tiene campo de área: el área vive en el asistente y es POR
- * PERSONA, así que la de un caso se deriva de a quién está asignado. Esto lo
- * usan la cola de tickets (para agrupar) y el detalle (para el panel
- * lateral) -- una sola función porque las dos pantallas tienen que agrupar
- * igual, o dirían cosas distintas del mismo ticket.
+ * El área de un caso es la escrita en el caso (`Case.area`, desde el
+ * 16/10/2026); este mapa persona -> área del asistente decide solo para los
+ * casos que todavía no la tienen, y dice de qué área es quien mira. Lo usan
+ * la cola de tickets (para agrupar) y el detalle (para el panel lateral) --
+ * una sola función porque las dos pantallas tienen que agrupar igual, o
+ * dirían cosas distintas del mismo ticket. La regla está en una sola
+ * función: `areaDelCaso` en `lib/v2/tickets-resumen.js`.
  *
  * Devuelve `{ areas: [], areaPorPersona: {} }` si el asistente no responde:
  * ver los tickets no puede depender de que el motor esté arriba.

@@ -3,7 +3,7 @@ import { readFilters, buildFilterQuery } from '$lib/server/v2/filter-params.js';
 import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
 import { getTags } from '$lib/server/v2/tags.js';
 import { leerAreas } from '$lib/server/v2/areas.js';
-import { resumenPorArea, responsablesSinArea, responsablesDeArea, SIN_AREA }
+import { areaDelCaso, resumenPorArea, responsablesSinArea, responsablesDeArea, SIN_AREA }
   from '$lib/v2/tickets-resumen.js';
 import { calcularPaginacion, numerosDePagina, enlaceAPagina }
   from '$lib/v2/paginacion.js';
@@ -67,11 +67,14 @@ export async function load({ cookies, url, locals, fetch }) {
   //  la pagina que llega ya es la del area. Subir el limite no servia: con
   //  mil tickets el problema vuelve, solo mas tarde.
   const [{ areas, areaPorPersona }, orgPeople, tagList] = await Promise.all([
-    // El CRM no tiene campo de area: vive en el asistente y es POR PERSONA,
-    // asi que la de un caso se deriva de a quien esta asignado. Si el
-    // asistente no responde, 'areas' queda vacio y la pantalla cae a la lista
-    // de siempre: ver los tickets no puede depender de que el motor este
-    // arriba. Ver leerAreas().
+    // Las areas del equipo y el mapa persona -> area del asistente. Desde el
+    // 16/10/2026 el area de un caso es la ESCRITA en el caso ('Case.area');
+    // el mapa decide solo para los casos que todavia no la tienen, y dice de
+    // que area es quien mira (ver areaDelCaso). Si el asistente no responde,
+    // 'areas' y el mapa quedan vacios: las tarjetas salen igual, con el
+    // nombre interno de cada area escrita en los casos, y los casos sin area
+    // escrita caen a "Sin área asignada". Ver los tickets no puede depender
+    // de que el motor este arriba. Ver leerAreas().
     leerAreas(locals, fetch),
     getOrgPeopleAndTeams(cookies),
     // getTags has no fallback of its own: on /settings/tags a failed fetch is
@@ -83,9 +86,10 @@ export async function load({ cookies, url, locals, fetch }) {
   ]);
 
   // ---- AREAS -------------------------------------------------------------
-  // Un caso sin asignar no tiene area y aparece como "Sin área asignada" --
-  // que es exactamente lo que hay que ver, porque un caso sin dueño es un
-  // caso que nadie esta mirando.
+  // Un caso sin area escrita y sin asignar aparece como "Sin área asignada"
+  // -- que es exactamente lo que hay que ver, porque un caso sin dueño y sin
+  // area es un caso que nadie esta mirando. Uno sin asignar pero CON area
+  // escrita cuenta en su area, como "sin asignar" de esa cola.
 
   // Se resuelve UNA vez y se reusa: 'Mis asignados' y el 'meId' que baja a la
   // barra de filtros tienen que ser la misma persona, o el corte y el filtro
@@ -121,33 +125,42 @@ export async function load({ cookies, url, locals, fetch }) {
     else if (areaElegida && areaElegida !== miArea) areaElegida = miArea;
   }
 
-  //  EL FILTRO DE AREA VIAJA AL SERVIDOR  --  07/10/2026
-  //
-  //  El area no es un campo del CRM: es una propiedad de la PERSONA asignada.
-  //  Asi que filtrar por area es filtrar por sus responsables, y eso el API ya
-  //  lo sabe hacer ('assigned_to', lista de ids). Traducir aca y mandarlo es
-  //  lo que hace que la pagina de 25 que llega sea la del area.
+  //  EL FILTRO DE AREA VIAJA AL SERVIDOR  --  07/10/2026, reescrito el 16/10/2026
   //
   //  Sin esto la tabla mostraba las 25 filas mas recientes de TODA la cola y
   //  despues descartaba en el navegador las que no eran del area: con 138
   //  abiertos y las 25 primeras todas de cartera, Soporte Tecnico salia vacio
   //  con la cabecera diciendo 91.
   //
-  //  NO se pisa un filtro que la persona ya puso: si eligio un responsable en
-  //  la barra, ese manda -- es mas especifico que el area, y sobreescribirlo
-  //  haria que el filtro visible no fuera el aplicado.
+  //  Hasta el 16/10 "filtrar por area" era mandar 'assigned_to' con la gente
+  //  del area, porque el area se deducia de la persona. Eso escondia en "Sin
+  //  área asignada" un ticket de soporte asignado a alguien sin area, y
+  //  mostraba como Soporte Tecnico un ticket de ventas asignado a un tecnico.
+  //  Hoy el caso trae su area escrita y el API filtra por ella ('area'); la
+  //  gente del area viaja aparte ('area_responsables') SOLO para los casos
+  //  que todavia no la tienen escrita -- la mitad vieja, ver areaDelCaso().
+  //
+  //  Ya no hay que cuidar el filtro de responsable de la barra: 'area' y
+  //  'assigned_to' son parametros distintos y el API los cruza, asi que
+  //  elegir una persona dentro de un area muestra sus tickets DE ESA AREA,
+  //  que es lo que el filtro visible dice.
+  //
+  //  "Sin área asignada" no se puede pedir al servidor: esa cola se sigue
+  //  recortando aca abajo, sobre la pagina que llego. Limite conocido.
   const areaEfectiva = soloMiArea ? miArea : areaElegida;
-  const deEsaArea = responsablesDeArea(areaEfectiva, areaPorPersona);
-  //  Sin gente en el area no se manda el filtro: un 'assigned_to' vacio no
-  //  filtra nada y traeria la cola entera, que es lo contrario de lo buscado.
-  if (deEsaArea.length && !params.has('assigned_to')) {
-    for (const persona of deEsaArea) params.append('assigned_to', persona);
+  if (areaEfectiva && areaEfectiva !== SIN_AREA) {
+    params.set('area', areaEfectiva);
+    for (const persona of responsablesDeArea(areaEfectiva, areaPorPersona)) {
+      params.append('area_responsables', persona);
+    }
   }
 
   const { results, totals, openByAssignee } = await listTickets({ cookies }, params);
 
   /**
-   * El area de un caso: la de su responsable.
+   * El area de un caso: la escrita en el caso, y si no la tiene, la de su
+   * responsable (areaDelCaso, la misma regla que usan las tarjetas y el
+   * detalle).
    *
    * Se lee 'assignee_id', NO 'assigned_to': las filas que llegan hasta aca ya
    * pasaron por el modelador de tickets.js, que colapsa la lista de asignados
@@ -156,8 +169,7 @@ export async function load({ cookies, url, locals, fetch }) {
    * TODOS los tickets en "Sin área asignada" -- un tablero que se ve plausible
    * y esta enteramente mal.
    */
-  const areaDe = (/** @type {any} */ t) =>
-    (t.assignee_id && areaPorPersona[t.assignee_id]) || SIN_AREA;
+  const areaDe = (/** @type {any} */ t) => areaDelCaso(t.area, t.assignee_id, areaPorPersona);
 
   const conArea = results.map((/** @type {any} */ t) => ({ ...t, area: areaDe(t) }));
 
@@ -167,17 +179,19 @@ export async function load({ cookies, url, locals, fetch }) {
   //  consulta agregada. Antes esto se contaba sobre las filas de la pagina y
   //  la cabecera decia 47 mientras las areas sumaban 25.
   //
-  //  OJO: cuando hay un area elegida, esta consulta YA viene filtrada por sus
-  //  responsables, asi que 'openByAssignee' trae solo esa area y las demas dan
+  //  OJO: cuando hay un area elegida, esta consulta YA viene filtrada por esa
+  //  area (y por sus responsables, para los casos sin area escrita), asi que
+  //  'openByAssignee' trae solo esa area y las demas dan
   //  cero. No es un problema donde se usa: la pantalla de TARJETAS (las que
   //  comparan areas entre si) es la que NO tiene area elegida, y ahi no hay
   //  filtro. Dentro de un area solo se lee su propio total, que si es el
   //  completo. Si algun dia hiciera falta comparar areas desde adentro, el
   //  desglose tendria que pedirse aparte, sin el filtro.
   const resumen = resumenPorArea(openByAssignee, areas, areaPorPersona);
-  //  Responsables con tickets abiertos y sin area configurada: sus tickets
-  //  caen en "Sin área asignada" y conviene decirlo, en vez de que la cola
-  //  del equipo parezca mas corta de lo que es.
+  //  Responsables sin area configurada con tickets abiertos SIN area escrita:
+  //  esos tickets caen en "Sin área asignada" y conviene decirlo, en vez de
+  //  que la cola del equipo parezca mas corta de lo que es. Los que ya traen
+  //  area escrita cuentan en su tarjeta y no se avisan.
   const sinAreaConfigurada = responsablesSinArea(openByAssignee, areaPorPersona);
 
   // El universo de tickets se recorta ANTES de armar la respuesta, no solo al

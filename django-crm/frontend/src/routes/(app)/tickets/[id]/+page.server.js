@@ -3,6 +3,7 @@ import { getTicket, replyToTicket, updateTicket } from '$lib/server/v2/tickets.j
 import { readableError } from '$lib/server/v2/form-errors.js';
 import { leerResumenDelAgente } from '$lib/server/v2/resumen-agente.js';
 import { leerAreas } from '$lib/server/v2/areas.js';
+import { areaDelCaso, SIN_AREA } from '$lib/v2/tickets-resumen.js';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
@@ -12,17 +13,27 @@ import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 export async function load({ locals, cookies, params, fetch }) {
   const datos = await getTicket({ cookies }, params.id);
 
-  // El area del caso, para el panel lateral. Misma derivacion que la cola: el
-  // CRM no tiene campo de area, la tiene el asistente y es por persona.
+  // El area del caso, para el panel lateral. Misma regla que la cola
+  // (areaDelCaso): la escrita en el caso manda, y la de la persona asignada
+  // solo decide mientras el caso no la tenga. Hasta el 16/10/2026 se deducia
+  // siempre del responsable, y un ticket de ventas asignado a un tecnico
+  // decia "Soporte Técnico" aca tambien.
   //
   // Se pide a '/agentes/areas', no a '/agentes/asignaciones': aquella sale
   // ademas al sistema externo a buscar candidatos, que esta pantalla no usa.
   let area = null;
+  const escrita = datos.ticket?.area;
   const responsable = datos.ticket?.assignee_id;
-  if (responsable) {
+  if (escrita || responsable) {
     const { areas, areaPorPersona } = await leerAreas(locals, fetch);
-    const nombre = areaPorPersona[responsable];
-    area = areas.find((/** @type {any} */ a) => a.nombre === nombre) ?? null;
+    const nombre = areaDelCaso(escrita, responsable, areaPorPersona);
+    if (nombre !== SIN_AREA) {
+      // Un area escrita que la configuracion no declara se muestra con su
+      // nombre crudo, igual que en la cola: esconderla diria "sin area" de
+      // un caso que si la tiene.
+      area = areas.find((/** @type {any} */ a) => a.nombre === nombre)
+        ?? { nombre, etiqueta: nombre };
+    }
   }
 
   // Una sola llamada al motor que devuelve DOS cosas distintas:

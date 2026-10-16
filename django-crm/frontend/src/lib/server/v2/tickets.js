@@ -119,6 +119,11 @@ function toRow(row) {
     //  Dato personal, en la lista por decision explicita del 07/10/2026: sin
     //  el, 153 filas dicen "No Tiene Internet" y ninguna dice de quien es.
     external_client_name: row.external_client_name ?? '',
+    //  El area del caso, escrita por la importacion ('Case.area'). Vacia en
+    //  los importados antes del 16/10/2026 y en los cargados a mano: para esos
+    //  la pantalla cae al area de la persona asignada, ver areaDelCaso() en
+    //  lib/v2/tickets-resumen.js.
+    area: row.area ?? '',
     priority: row.priority,
     // Nullable on the model, and null in plenty of seeded rows.
     case_type: row.case_type ?? null,

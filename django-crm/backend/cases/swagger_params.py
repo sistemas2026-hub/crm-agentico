@@ -14,4 +14,11 @@ cases_list_get_params = [
     OpenApiParameter("status", OpenApiTypes.STR, OpenApiParameter.QUERY),
     OpenApiParameter("priority", OpenApiTypes.STR, OpenApiParameter.QUERY),
     OpenApiParameter("account", OpenApiTypes.STR, OpenApiParameter.QUERY),
+    # El area del caso ('Case.area'). Con 'area_responsables' (repetible,
+    # ids de perfil) entran ademas los casos SIN area escrita asignados a
+    # esa gente: ver apply_case_list_filters en views.py.
+    OpenApiParameter("area", OpenApiTypes.STR, OpenApiParameter.QUERY),
+    OpenApiParameter(
+        "area_responsables", OpenApiTypes.UUID, OpenApiParameter.QUERY, many=True
+    ),
 ]

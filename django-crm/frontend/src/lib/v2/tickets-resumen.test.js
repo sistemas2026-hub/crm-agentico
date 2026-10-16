@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resumenPorArea, responsablesSinArea, responsablesDeArea, SIN_AREA }
+import { areaDelCaso, resumenPorArea, responsablesSinArea, responsablesDeArea, SIN_AREA }
   from './tickets-resumen.js';
 
 /**
@@ -176,8 +176,11 @@ describe('un ticket con dos responsables de areas distintas', () => {
  * navegador recortaba por area despues. Ese dia: 138 abiertos, las 25 mas
  * recientes TODAS de cartera, y Soporte Tecnico se quedaba sin ninguna.
  *
- * El area no es un campo del CRM: es una propiedad de la persona asignada.
- * Por eso filtrar por area es filtrar por sus responsables.
+ * Ese dia el area no era un campo del CRM: era una propiedad de la persona
+ * asignada, y filtrar por area era filtrar por sus responsables. Desde el
+ * 16/10/2026 el caso trae su area escrita y el API filtra por ella ('area');
+ * esta lista viaja aparte, como 'area_responsables', solo para los casos que
+ * todavia no la tienen escrita -- ver el tercer defecto, mas abajo.
  */
 describe('los responsables de un area, para pedirle al servidor solo su cola', () => {
   it('devuelve a todos los del area y a nadie mas', () => {
@@ -186,9 +189,10 @@ describe('los responsables de un area, para pedirle al servidor solo su cola', (
     expect(responsablesDeArea('soporte_tecnico', MAPA)).toEqual(['p-soporte']);
   });
 
-  it('un area sin gente devuelve vacio, y quien llama NO debe filtrar', () => {
-    //  Un 'assigned_to' vacio no filtra nada: traeria la cola entera, que es
-    //  exactamente el defecto que esto viene a cerrar.
+  it('un area sin gente devuelve vacio: la mitad vieja no aplica, y la escrita sigue', () => {
+    //  Sin 'area_responsables' el API igual filtra por el area escrita en el
+    //  caso. Lo que no puede pasar es que una lista vacia se mande como
+    //  'assigned_to': eso no filtraba nada y traia la cola entera.
     expect(responsablesDeArea('administracion', MAPA)).toEqual([]);
   });
 
@@ -208,16 +212,120 @@ describe('los responsables de un area, para pedirle al servidor solo su cola', (
   it('EL EFECTO: con los responsables del area, la pagina que se pide es la suya', () => {
     //  La reproduccion del 07/10: la cola tiene mucho mas que una pagina y lo
     //  mas reciente es de OTRA area. Se afirma sobre lo que se le pediria al
-    //  servidor, que es lo unico que decide que filas llegan.
+    //  servidor, que es lo unico que decide que filas llegan. Lo que la
+    //  pantalla manda de verdad lo fija routes/(app)/tickets/page-server.test.js.
     const pedido = new URLSearchParams();
-    for (const p of responsablesDeArea('soporte_tecnico', MAPA)) pedido.append('assigned_to', p);
-    expect(pedido.getAll('assigned_to')).toEqual(['p-soporte']);
+    for (const p of responsablesDeArea('soporte_tecnico', MAPA)) pedido.append('area_responsables', p);
+    expect(pedido.getAll('area_responsables')).toEqual(['p-soporte']);
     //  y NO se le pide por los de cartera, que son los que llenaban la pagina
-    expect(pedido.getAll('assigned_to')).not.toContain('p-cartera-1');
+    expect(pedido.getAll('area_responsables')).not.toContain('p-cartera-1');
   });
 
   it('una persona en dos areas no se duplica en el filtro', () => {
     const r = responsablesDeArea('cartera', { ...MAPA, 'p-cartera-1': 'cartera' });
     expect(r.filter((x) => x === 'p-cartera-1')).toHaveLength(1);
+  });
+});
+
+
+/**
+ * EL TERCER DEFECTO, medido en local el 16/10/2026
+ * -------------------------------------------------
+ * La pantalla deducia el area de cada caso de la PERSONA asignada:
+ *
+ *     Case.area = soporte_tecnico       65
+ *     pantalla "Soporte Técnico"        64
+ *     pantalla "Sin área asignada"       6
+ *
+ * El que faltaba tenia area 'soporte_tecnico' y estaba asignado a alguien sin
+ * area en el motor. Y al reves, lo grave: un ticket de ventas asignado a un
+ * tecnico salia como Soporte Tecnico. El caso trae su area escrita desde
+ * cdaa9b27 ('Case.area'); lo que faltaba era leerla.
+ *
+ * Se afirma con el mismo par de mitades del Supervisor: el area ESCRITA
+ * manda; la de la persona solo decide cuando no la hay.
+ */
+describe('el area de un caso es la escrita en el caso', () => {
+  it('con area escrita, esa manda aunque la persona sea de otra', () => {
+    expect(areaDelCaso('ventas', 'p-soporte', MAPA)).toBe('ventas');
+    expect(areaDelCaso('soporte_tecnico', 'p-cartera-1', MAPA)).toBe('soporte_tecnico');
+  });
+
+  it('con area escrita y responsable sin area configurada: la escrita', () => {
+    //  El ticket que faltaba: 'LOS en rojo', soporte, asignado a alguien
+    //  que el motor no conoce.
+    expect(areaDelCaso('soporte_tecnico', 'p-desconocido', MAPA)).toBe('soporte_tecnico');
+  });
+
+  it('sin area escrita, la de la persona (el criterio de ayer)', () => {
+    expect(areaDelCaso('', 'p-cartera-1', MAPA)).toBe('cartera');
+    expect(areaDelCaso(undefined, 'p-soporte', MAPA)).toBe('soporte_tecnico');
+    expect(areaDelCaso(null, 'p-soporte', MAPA)).toBe('soporte_tecnico');
+  });
+
+  it('sin ninguna de las dos, "Sin área asignada"', () => {
+    expect(areaDelCaso('', null, MAPA)).toBe(SIN_AREA);
+    expect(areaDelCaso('', 'p-desconocido', MAPA)).toBe(SIN_AREA);
+    expect(areaDelCaso('', 'p-soporte', {})).toBe(SIN_AREA);
+  });
+});
+
+describe('las tarjetas suman por el area escrita en el caso', () => {
+  //  La reproduccion del 16/10: el tecnico con 64 de soporte, el caso de
+  //  soporte asignado a alguien sin area, 3 de ventas asignados a alguien de
+  //  ventas (area que la config no declara) y 2 viejos sin area del tecnico.
+  const desglose = [
+    fila('p-soporte', 64, { area: 'soporte_tecnico' }),
+    fila('p-desconocido', 1, { area: 'soporte_tecnico' }),
+    fila('p-soporte', 2, { area: '' }),
+    fila('p-soporte', 3, { area: 'ventas' }),
+    fila(null, 2, { area: 'soporte_tecnico' })
+  ];
+  const r = resumenPorArea(desglose, AREAS, MAPA);
+
+  it('Soporte Técnico dice 69: los 64, el del responsable sin area, los 2 viejos y los 2 sueltos', () => {
+    expect(de(r, 'soporte_tecnico').total).toBe(69);
+  });
+
+  it('un caso de ventas asignado al tecnico NO cuenta como soporte', () => {
+    expect(de(r, 'ventas').total).toBe(3);
+  });
+
+  it('un area escrita que la config no declara se muestra con su nombre, no se esconde', () => {
+    expect(de(r, 'ventas')).toMatchObject({ nombre: 'ventas', etiqueta: 'ventas' });
+    //  y despues de las declaradas, que conservan su orden
+    expect(r.map((a) => a.nombre)).toEqual(
+      ['cartera', 'soporte_tecnico', 'administracion', 'ventas']);
+  });
+
+  it('"Sin área asignada" no aparece: todos tienen de donde sacar el area', () => {
+    expect(de(r, SIN_AREA)).toBeUndefined();
+  });
+
+  it('los sueltos CON area escrita son "sin asignar" de su area, no de "Sin área"', () => {
+    expect(de(r, 'soporte_tecnico').sin_asignar).toBe(2);
+  });
+
+  it('un desglose viejo, sin el campo area, sigue sumando por responsable', () => {
+    //  El frontend nuevo contra un backend viejo: la mitad vieja a secas.
+    const viejo = [fila('p-soporte', 47), fila('p-cartera-1', 5)];
+    const v = resumenPorArea(viejo, AREAS, MAPA);
+    expect(de(v, 'soporte_tecnico').total).toBe(47);
+    expect(de(v, 'cartera').total).toBe(5);
+  });
+});
+
+describe('el aviso de responsables sin area mira solo los casos sin area escrita', () => {
+  it('quien tiene casos con area escrita no se avisa: ya cuentan en su tarjeta', () => {
+    const desglose = [fila('p-desconocido', 1, { area: 'soporte_tecnico' })];
+    expect(responsablesSinArea(desglose, MAPA)).toEqual([]);
+  });
+
+  it('quien tiene casos SIN area escrita y sin area configurada, si', () => {
+    const desglose = [
+      fila('p-desconocido', 1, { area: 'soporte_tecnico' }),
+      fila('p-desconocido', 4, { area: '' })
+    ];
+    expect(responsablesSinArea(desglose, MAPA)).toEqual(['p-desconocido']);
   });
 });

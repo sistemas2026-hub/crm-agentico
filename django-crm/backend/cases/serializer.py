@@ -162,6 +162,15 @@ class CaseSerializer(serializers.ModelSerializer):
             "external_ticket_id",
             "external_status",
             "external_client_name",
+            #  EL AREA DEL CASO  --  16/10/2026
+            #
+            #  Hasta hoy la cola deducia el area de cada fila de la persona
+            #  asignada, y un ticket de ventas asignado a un tecnico salia como
+            #  Soporte Tecnico. 'Case.area' es la que escribe la importacion
+            #  (ver el campo en models.py); vacia significa "no se sabe", y la
+            #  pantalla cae entonces al criterio de ayer. No es un dato
+            #  personal: es el nombre interno de un area de la empresa.
+            "area",
         )
 
 

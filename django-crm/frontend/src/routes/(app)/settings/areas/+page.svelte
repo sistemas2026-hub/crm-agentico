@@ -28,7 +28,7 @@
 <div class="v2-page">
   <PageHeader title="Áreas de trabajo">
     {#snippet sub()}
-      Un ticket no tiene área propia: hereda la de su responsable.
+      Un ticket importado trae el área de su departamento; uno sin área hereda la de su responsable.
     {/snippet}
     {#snippet actions()}
       {#if !creando}

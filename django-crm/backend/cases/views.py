@@ -119,6 +119,47 @@ def apply_case_list_filters(queryset, params):
     assigned_to = uuid_list_param(params, "assigned_to")
     if assigned_to:
         queryset = queryset.filter(assigned_to__id__in=assigned_to).distinct()
+    #  EL AREA DEL CASO, Y LA MITAD VIEJA PARA LOS QUE NO LA TIENEN  --  16/10/2026
+    #  ---------------------------------------------------------------------
+    #  La pantalla de Tickets agrupa la cola por area, y hasta hoy el area de
+    #  un caso se DEDUCIA de la persona asignada: filtrar "Soporte Tecnico"
+    #  era mandar 'assigned_to' con la gente de soporte. Dos cosas salian mal,
+    #  y la segunda es la grave: un ticket de soporte asignado a alguien sin
+    #  area se escondia en "Sin area asignada", y un ticket de ventas asignado
+    #  a un tecnico aparecia como Soporte Tecnico. Medido en local el
+    #  16/10/2026: 65 casos con 'area = soporte_tecnico', 64 en la pantalla.
+    #
+    #  'Case.area' existe desde esa fecha (ver el campo en models.py) y este
+    #  filtro la lee PRIMERO. La segunda mitad es para los casos que todavia
+    #  no la tienen escrita --los ~1.300 importados antes del campo, que la
+    #  reconciliacion va completando, y los cargados a mano en el CRM--: para
+    #  esos vale el criterio de ayer, la persona asignada, y quien llama manda
+    #  en 'area_responsables' la gente del area. Es el mismo par de mitades
+    #  que usa el Supervisor NOC (operaciones/supervisor.py), y la asimetria
+    #  es el arreglo: un caso CON area ajena no entra aunque lo tenga un
+    #  tecnico; un caso SIN area entra por su responsable.
+    #
+    #  'area_responsables' sin 'area' no filtra nada: solo tiene sentido como
+    #  la mitad vieja de un area concreta. Y es un parametro aparte de
+    #  'assigned_to' a proposito: aquel sigue siendo el filtro de la barra
+    #  ("los tickets de esta persona") y se cruza con este, asi que elegir a
+    #  alguien dentro de un area muestra sus tickets DE ESA AREA.
+    #
+    #  La mitad vieja va por SUBCONSULTA y no por un join al M2M: un join
+    #  dentro del OR duplicaba la fila de un caso con dos responsables (y con
+    #  'assigned_to' puesto en la barra, el desglose de abajo agrupaba por el
+    #  join equivocado). Lo midio la auditoria del 16/10/2026 quitando el
+    #  '.distinct()' que lo tapaba: las once pruebas seguian verdes.
+    area = (params.get("area") or "").strip()
+    if area:
+        del_area = Q(area=area)
+        sin_area_de = uuid_list_param(params, "area_responsables")
+        if sin_area_de:
+            de_esa_gente = Case.objects.filter(
+                assigned_to__id__in=sin_area_de
+            ).values("pk")
+            del_area |= Q(area="") & Q(pk__in=de_esa_gente)
+        queryset = queryset.filter(del_area)
     tags = uuid_list_param(params, "tags")
     if tags:
         queryset = queryset.filter(tags__id__in=tags).distinct()
@@ -264,7 +305,8 @@ class CaseListView(APIView, LimitOffsetPagination):
         #  EL DESGLOSE POR RESPONSABLE, Y POR QUE VIVE AQUI  --  06/10/2026
         #  ----------------------------------------------------------------
         #  La pantalla de tickets agrupa la cola por AREA, y el area de un
-        #  ticket es la de su responsable. Hasta hoy ese agrupamiento se hacia
+        #  ticket ERA la de su responsable (hasta el 16/10/2026, ver mas
+        #  abajo). Hasta hoy ese agrupamiento se hacia
         #  en el navegador sobre 'results', que es UNA PAGINA: con 47 abiertos
         #  y 'limit=25', la cabecera decia "Tickets 47" y la suma de las areas
         #  daba 25. Parecia que 22 tickets no tenian area; lo que pasaba es que
@@ -274,15 +316,23 @@ class CaseListView(APIView, LimitOffsetPagination):
         #  tres lineas mas arriba, aplicado al desglose: un total que se calcula
         #  sobre la pagina no es un total.
         #
-        #  SE AGRUPA POR RESPONSABLE, NO POR AREA, y es deliberado: el mapa
-        #  persona -> area no vive en este CRM sino en 'asistente.area_colaborador',
-        #  que lee el motor. Django cuenta lo que tiene --los casos por
-        #  responsable, en UNA consulta agregada-- y quien conoce las areas hace
-        #  la suma. Traer el mapa hasta aqui crearia una segunda copia de algo
-        #  que ya tiene dueño.
+        #  SE AGRUPA POR RESPONSABLE Y, DESDE EL 16/10/2026, TAMBIEN POR EL
+        #  AREA DEL CASO. El mapa persona -> area no vive en este CRM sino en
+        #  'asistente.area_colaborador', que lee el motor; Django cuenta lo que
+        #  tiene --los casos por (area, responsable), en UNA consulta
+        #  agregada-- y quien conoce las areas termina la suma. Traer el mapa
+        #  hasta aqui crearia una segunda copia de algo que ya tiene dueño.
+        #
+        #  POR QUE EL AREA ENTRA AL GROUP BY: hasta hoy el area de cada fila se
+        #  deducia de su responsable, y esa deduccion es falsa en cuanto un
+        #  ticket se asigna a alguien de otra area (ver el filtro 'area' en
+        #  apply_case_list_filters). Con 'area' en la fila, quien suma lee la
+        #  escrita cuando esta y cae a la del responsable cuando no. Un
+        #  frontend que no sepa de 'area' sigue sumando por responsable igual
+        #  que antes: las filas de una misma persona se suman.
         #
         #  ESCALA: es un GROUP BY, no una lista. Con mil tickets devuelve tantas
-        #  filas como responsables haya, no mil.
+        #  filas como pares (area, responsable) haya, no mil.
         #
         #  'assigned_to' es M2M y la fila con responsable NULL es la cola sin
         #  asignar. Un caso con DOS responsables aparece en los dos: eso no es
@@ -291,13 +341,14 @@ class CaseListView(APIView, LimitOffsetPagination):
         URGENTES = ("High", "Urgent")
         context["open_by_assignee"] = [
             {
+                "area": f["area"] or "",
                 "assigned_to": str(f["assigned_to"]) if f["assigned_to"] else None,
                 "total": f["total"],
                 "urgentes": f["urgentes"],
                 "sin_respuesta": f["sin_respuesta"],
                 "en_progreso": f["en_progreso"],
             }
-            for f in open_cases.values("assigned_to").annotate(
+            for f in open_cases.values("area", "assigned_to").annotate(
                 total=Count("id", distinct=True),
                 urgentes=Count("id", distinct=True,
                                filter=Q(priority__in=URGENTES)),

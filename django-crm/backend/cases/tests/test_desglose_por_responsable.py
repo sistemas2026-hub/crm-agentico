@@ -21,10 +21,14 @@ Sobre el EFECTO: que con MÁS casos que el tamaño de página, el desglose siga
 dando el total. Por eso cada prueba crea más casos que ``limit`` -- mirar el
 ``annotate`` no probaría nada el día que alguien cambie la paginación.
 
-Se agrupa por RESPONSABLE y no por área a propósito: el mapa persona -> área
-no vive en este CRM sino en ``asistente.area_colaborador``, que sirve el
-motor. Aquí se cuenta lo que hay; la traducción a áreas la hace el frontend
-(``lib/v2/tickets-resumen.js``), que sí conoce ese mapa.
+Se agrupa por RESPONSABLE y, desde el 16/10/2026, también por el ÁREA DEL
+CASO (``Case.area``). El mapa persona -> área no vive en este CRM sino en
+``asistente.area_colaborador``, que sirve el motor. Aquí se cuenta lo que hay;
+la suma por áreas la termina el frontend (``lib/v2/tickets-resumen.js``), que
+lee el área escrita en la fila y cae a la del responsable cuando no la hay.
+Los casos de este archivo nacen todos sin área, así que ``_por_responsable``
+sigue teniendo una fila por persona; el área escrita se prueba en
+``test_la_cola_lee_el_area_del_caso.py``.
 """
 
 import pytest

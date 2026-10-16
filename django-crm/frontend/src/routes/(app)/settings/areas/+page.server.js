@@ -9,10 +9,11 @@ import { leerAreas, crearArea, editarArea, borrarArea } from '$lib/server/v2/are
  * tickets que estaban esperando-- la creó quien opera el servidor, no el
  * administrador del ISP. Esta pantalla cierra eso.
  *
- * El área manda más de lo que parece: un caso no tiene campo de área, la
- * hereda de su responsable. Así que crear un área, asignarle gente y mapearle
- * un departamento del proveedor es lo que decide en qué columna cae cada
- * ticket, y si llega a crearse siquiera.
+ * El área manda más de lo que parece: un caso importado trae el área que
+ * decide el mapeo de departamentos (`Case.area`, desde el 16/10/2026), y uno
+ * sin área escrita hereda la de su responsable. Así que crear un área,
+ * asignarle gente y mapearle un departamento del proveedor es lo que decide
+ * en qué columna cae cada ticket, y si llega a crearse siquiera.
  */
 
 /** @type {import('./$types').PageServerLoad} */
