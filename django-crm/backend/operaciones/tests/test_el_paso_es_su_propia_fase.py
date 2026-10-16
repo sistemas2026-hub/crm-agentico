@@ -141,7 +141,7 @@ def test_la_fase_NO_depende_de_que_la_lectura_haya_corrido(org_a, monkeypatch):
                             verificada=False)
     _las_puertas_abiertas(monkeypatch)
     monkeypatch.setattr(sup, "_leer_tickets_abiertos",
-                        lambda org, ahora: {"tickets": {}})
+                        lambda org, ahora, **_: {"tickets": {}})
 
     sup.correr_ciclo(org_a)
 
@@ -160,7 +160,7 @@ def test_el_ciclo_reporta_la_fase_y_cuenta_lo_que_miro(org_a, monkeypatch):
     _propuesta_ya_leida(org_a, caso, grupo=pad.FALLA_DE_SERVICIO)
     _las_puertas_abiertas(monkeypatch)
     monkeypatch.setattr(sup, "_leer_tickets_abiertos",
-                        lambda org, ahora: {"tickets": {}})
+                        lambda org, ahora, **_: {"tickets": {}})
 
     resumen = sup.correr_ciclo(org_a)
 

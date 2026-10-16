@@ -463,6 +463,27 @@ def _casos_que_necesitan_visita(org, ahora) -> list[Senal]:
 #:  entro se lee en la vuelta siguiente, que es dentro de una hora.
 TOPE_TICKETS_POR_CORRIDA = 10
 
+#:  Y EL DE LA CORRIDA DEL RELOJ, donde no hay nadie esperando  --  16/10/2026
+#:
+#:  Mismo criterio que 'TOPE_DIAGNOSTICOS_DESATENDIDO' del modulo optico, que
+#:  ya habia pagado esta leccion el 08/10: el tope corto esta pensado para que
+#:  un boton conteste rapido, y aplicarlo tambien a la corrida desatendida hace
+#:  que una cola grande tarde horas sin que nadie gane nada.
+#:
+#:  MEDIDO en produccion esa noche: 161 propuestas pendientes, ~50 de ellas
+#:  esperando relectura porque su lectura es anterior al grupo. Con el tope en
+#:  10 bajaban de 50 a 44 por vuelta: cinco horas para drenar. La corrida leyo
+#:  10 tickets en 186 segundos -- unos 18,6 por ticket-- asi que 30 son unos
+#:  9 minutos de worker, y drena ese atraso en dos vueltas.
+#:
+#:  ES TRANSITORIO, igual que el del optico: los 50 son atraso acumulado. En
+#:  regimen aparecen unos pocos por hora y este tope no se toca nunca.
+#:
+#:  EL DEFECTO SIGUE SIENDO EL ATENDIDO, a proposito: un llamador nuevo que se
+#:  olvide de declararse hereda el tope corto -- tarda mas y no sorprende a
+#:  nadie, que es el lado seguro para equivocarse.
+TOPE_TICKETS_DESATENDIDO = 30
+
 #:  CUANTOS SE DETECTAN, que es otra cosa y hace falta aparte  --  13/10/2026
 #:
 #:  Medido en produccion el mismo dia que esto salio: sin tope, el detector
@@ -2499,7 +2520,8 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         #  mas barato y mas seguro que leer lo que sigue abierto, y si el
         #  presupuesto de la vuelta se agota, que se agote en lo segundo.
         ("lectura de tickets abiertos",
-         lambda: _leer_tickets_abiertos(org, ahora)),
+         lambda: _leer_tickets_abiertos(org, ahora,
+                                        desatendido=desatendido)),
         #  EL PASO A DESPACHO ES SU PROPIA FASE  --  14/10/2026, por la tarde
         #  ------------------------------------------------------------------
         #  Nacio DENTRO de la fase de lectura, y ahi estaba muerto: esa fase
@@ -2588,7 +2610,8 @@ def _las_que_esperan_relectura(org, senales):
     return extra
 
 
-def _leer_tickets_abiertos(org, ahora) -> dict:
+def _leer_tickets_abiertos(org, ahora, *,
+                           desatendido: bool = False) -> dict:
     """
     Lee los tickets que siguen abiertos y deja el diagnostico en su propuesta.
 
@@ -2693,8 +2716,9 @@ def _leer_tickets_abiertos(org, ahora) -> dict:
     #  pidio el modelo y si alguna midio el equipo. Sin eso, la pregunta "¿mide
     #  o solo lee?" solo se podia contestar deduciendo, y el 13/10/2026 se
     #  dedujo mal con un registro que no ve este camino.
-    informe["tickets"] = dxt.diagnosticar(org, candidatas, ahora=ahora,
-                                          propuestas=pendientes)
+    informe["tickets"] = dxt.diagnosticar(
+        org, candidatas, ahora=ahora, propuestas=pendientes,
+        tope=TOPE_TICKETS_DESATENDIDO if desatendido else None)
 
     #  LAS QUE YA TENIAN PROPUESTA: se les agrega el diagnostico recien
     #  escrito. Las que no la tenian las registra el ciclo en su pasada

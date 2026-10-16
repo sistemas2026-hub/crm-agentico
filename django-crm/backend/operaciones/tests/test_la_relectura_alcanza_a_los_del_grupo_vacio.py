@@ -262,3 +262,75 @@ def test_la_FASE_no_manda_a_leer_la_que_ya_tiene_grupo(org_a, monkeypatch):
     vistos = _fase_con_lectura_espiada(org_a, monkeypatch)
 
     assert str(caso.id) not in vistos
+
+
+# =============================================================================
+#  §4  LA CORRIDA DEL RELOJ LEE MAS QUE EL BOTON
+# =============================================================================
+#  POR QUE  --  16/10/2026. 'desatendido' se le pasaba solo a la fase de
+#  cierres; la de lectura usaba siempre el tope corto. Medido en produccion esa
+#  noche: 161 pendientes, ~50 esperando relectura, bajando de 50 a 44 por
+#  vuelta. Cinco horas para drenar algo que no tiene a nadie esperando.
+#
+#  SE AFIRMA SOBRE EL TOPE QUE LLEGA A 'diagnosticar', no sobre la constante:
+#  una prueba que comparara los dos numeros entre si seguiria en verde aunque
+#  la fase no se los pasara -- que es exactamente como se descubrio esto.
+
+def _tope_que_recibe(org, monkeypatch, *, desatendido):
+    from django.utils import timezone
+
+    visto = {}
+
+    def _espia(org_, senales, *, ahora=None, tope=None, concluir=None,
+               propuestas=None):
+        visto["tope"] = tope
+        return {}
+
+    monkeypatch.setattr(dxt, "diagnosticar", _espia)
+    sup._leer_tickets_abiertos(org, timezone.now(), desatendido=desatendido)
+    return visto.get("tope", "NO SE LLAMO")
+
+
+def test_la_corrida_del_reloj_lee_MAS(org_a, monkeypatch):
+    caso = _caso(org_a)
+    _propuesta(org_a, caso, grupo="")
+
+    tope = _tope_que_recibe(org_a, monkeypatch, desatendido=True)
+
+    assert tope == sup.TOPE_TICKETS_DESATENDIDO
+    assert tope > sup.TOPE_TICKETS_POR_CORRIDA, (
+        "si no lee más que el botón, una cola grande tarda horas sin que "
+        "nadie gane nada")
+
+
+def test_el_boton_SIGUE_con_el_tope_corto(org_a, monkeypatch):
+    """Ahí sí hay alguien mirando la pantalla, y una corrida larga se siente."""
+    caso = _caso(org_a)
+    _propuesta(org_a, caso, grupo="")
+
+    tope = _tope_que_recibe(org_a, monkeypatch, desatendido=False)
+
+    assert tope is None, (
+        "pasar None deja que 'diagnosticar' aplique TOPE_TICKETS_POR_CORRIDA, "
+        "que es la fuente única de ese número")
+
+
+def test_el_que_NO_se_declara_hereda_el_tope_corto(org_a, monkeypatch):
+    """El defecto es el atendido: equivocarse por lento, no por caro."""
+    from django.utils import timezone
+
+    caso = _caso(org_a)
+    _propuesta(org_a, caso, grupo="")
+
+    visto = {}
+
+    def _espia(org_, senales, *, ahora=None, tope=None, concluir=None,
+               propuestas=None):
+        visto["tope"] = tope
+        return {}
+
+    monkeypatch.setattr(dxt, "diagnosticar", _espia)
+    #  SIN declarar 'desatendido', como lo haría un llamador nuevo.
+    sup._leer_tickets_abiertos(org_a, timezone.now())
+
+    assert visto.get("tope") is None
