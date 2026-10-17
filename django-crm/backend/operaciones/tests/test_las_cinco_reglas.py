@@ -83,14 +83,16 @@ def _sin_concluir():
 #  desenchufado. Las pruebas de abajo fijaban la regla vieja y se reescribieron
 #  con la nueva, sin borrar ninguna.
 
-def test_r1_caido_por_fibra_YA_NO_pasa_solo():
-    """Hasta el 16/10 pasaba. LOS/LOF es ambiguo: falta preguntarle al cliente."""
+def test_r1_caido_por_fibra_PASA_y_dice_su_duda():
+    """
+    Hasta la Fase 3 iba a una persona, por la ambiguedad de LOS. Desde la Fase
+    4 (17/10/2026) pasa, y el motivo deja escrita la duda para quien despacha.
+    """
     d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO),
                     medicion=_medicion("caido", causa="fibra"))
 
-    assert d.pasa is False, d.porque
-    assert "enchufado" in d.porque
-
+    assert d.pasa is True, d.porque
+    assert "desenchufado" in d.porque
 
 def test_r1_senal_debil_pasa_solo():
     d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO),
@@ -112,17 +114,15 @@ def test_r1_CONTRAFACTICO_el_equipo_sano_NO_pasa():
     assert "preguntarle al cliente" in d.porque
 
 
-def test_r1_CONTRAFACTICO_sin_poder_medir_NO_pasa():
+def test_r1_sin_poder_medir_PASA_porque_nada_contradice_el_reclamo():
+    """Decidido el 17/10/2026: solo se queda la falla que la medicion contradice."""
     d = pad.decidir(pad.FALLA_DE_SERVICIO, _sin_concluir(),
                     medicion=_medicion("desconocido",
                                        motivo="el proveedor optico no respondio"))
 
-    assert d.pasa is False
+    assert d.pasa is True, d.porque
     assert "no se pudo medir" in d.porque
-    assert "contradicen" not in d.porque, (
-        "'no se pudo medir' se esta leyendo como 'esta sano', que es la peor "
-        "lectura posible de una ausencia de dato")
-
+    assert "Nada contradice" in d.porque
 
 def test_r1_falta_de_energia_NO_pasa_aunque_este_medido():
     """
@@ -137,17 +137,17 @@ def test_r1_falta_de_energia_NO_pasa_aunque_este_medido():
     assert "preguntarle" in d.porque
 
 
-def test_r1_debil_sin_el_numero_no_pasa():
+def test_r1_debil_sin_el_numero_pasa_pero_no_se_afirma_confirmada():
     """
-    El unico pase de la regla 1 exige el nivel medido. 'medicion_de_fallas'
-    ya guarda una debil sin numero como 'sin_dato'; esta guarda es para una
-    pieza que llegue por otro camino.
+    Sin el nivel medido no hay contra que afirmar "confirmada"; pero tampoco
+    hay contradiccion, asi que pasa como "en linea sin nivel" (Fase 4).
     """
     d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO),
                     medicion=_medicion("en_linea", senal="debil", dbm=None))
 
-    assert d.pasa is False, d.porque
-
+    assert d.pasa is True, d.porque
+    assert "CONFIRMADA" not in d.porque
+    assert "no trajo el nivel" in d.porque
 
 def test_r1_sin_medicion_no_pasa_aunque_la_labor_este_verificada():
     """La regla vieja dejaba pasar una labor verificada. Sin medicion, espera."""
@@ -183,26 +183,22 @@ def test_r2_pasa_solo_aunque_NO_se_haya_podido_medir():
         f"no es condicion. {d.porque}")
 
 
-def test_r2_CONTRAFACTICO_con_confianza_media_NO_pasa():
+def test_r2_con_confianza_media_TAMBIEN_pasa():
     """
-    LA UNICA PUERTA QUE QUEDA CUANDO NO HAY MEDICION.
-
-    Sin esto, una lectura dudosa manda un caso a la cola -- que es justo lo
-    que el comentario de 'models.py' sobre TICKET_SIN_DIAGNOSTICO advertia.
+    Hasta la Fase 3 se exigia 'alta'. El 17/10/2026 eso dejaba afuera cuatro
+    obras y dos trabajos con la hipotesis clara, y el usuario decidio que un
+    pedido de trabajo es una visita: pasan siempre, y la confianza se escribe.
     """
-    d = pad.decidir(pad.TRABAJO_PEDIDO, _leido(clf.TRABAJOS),
-                    confianza="media")
+    d = pad.decidir(pad.TRABAJO_PEDIDO, _sin_concluir(), confianza="media")
 
-    assert d.pasa is False
-    assert "se exige confianza 'alta'" in d.porque
+    assert d.pasa is True, d.porque
+    assert "confianza media" in d.porque
 
+def test_r2_sin_confianza_tambien_pasa():
+    """El modelo a veces omite la confianza del grupo (medido el 17/10): no frena."""
+    d = pad.decidir(pad.TRABAJO_PEDIDO, _sin_concluir(), confianza="")
 
-def test_r2_CONTRAFACTICO_sin_confianza_NO_pasa():
-    d = pad.decidir(pad.TRABAJO_PEDIDO, _leido(clf.TRABAJOS))
-
-    assert d.pasa is False
-    assert "ninguna" in d.porque
-
+    assert d.pasa is True, d.porque
 
 # =============================================================================
 #  REGLA 3 · OBRA DE RED  (24 tickets el 14/10)
@@ -217,12 +213,10 @@ def test_r3_una_obra_de_red_pasa_sola_sin_medir():
     assert "obra de red" in d.porque
 
 
-def test_r3_CONTRAFACTICO_con_confianza_baja_NO_pasa():
+def test_r3_con_confianza_baja_tambien_pasa():
     d = pad.decidir(pad.OBRA_DE_RED, _sin_concluir(), confianza="baja")
 
-    assert d.pasa is False
-    assert "se exige confianza 'alta'" in d.porque
-
+    assert d.pasa is True, d.porque
 
 # =============================================================================
 #  REGLA 4 · RECLAMO QUE NADA MIDE  (2 tickets el 14/10: paginas bloqueadas)
@@ -410,7 +404,9 @@ def test_la_confianza_que_decide_es_la_DEL_GRUPO_y_no_la_de_la_hipotesis():
     """
     valores = pad.CAMPO_PARA_EL_MODELO[pad.CONFIANZA_DEL_GRUPO]["valores"]
 
-    assert pad.CONFIANZA_EXIGIDA_SIN_MEDICION in valores
+    #  Desde la Fase 4 (17/10/2026) la confianza no decide, pero sigue
+    #  pidiendose y escribiendose: el enum tiene que seguir siendo el nuevo.
+    assert set(valores) == {"alta", "media", "baja"}
     #  Y NO es un valor del enum de la hipotesis, que trae 'sin_hipotesis':
     #  esa palabra no tiene sentido cuando se pregunta por un pedido.
     from operaciones.cerebro import Confianza

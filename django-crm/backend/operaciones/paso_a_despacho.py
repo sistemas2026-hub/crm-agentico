@@ -171,13 +171,13 @@ SIEMPRE_UNA_PERSONA = frozenset({NADA_LO_MIDE, NI_CLIENTE_NI_RED})
 #:  caja no tiene equipo de abonado que medir.
 SIN_CONDICION_DE_MEDICION = frozenset({TRABAJO_PEDIDO, OBRA_DE_RED})
 
-#:  La confianza que se exige CUANDO NO HAY MEDICION que respalde. Con
-#:  medicion, la medicion manda y la confianza del modelo no decide nada.
-#:
-#:  Existe porque sin esto los dos grupos de arriba pasarian con una lectura
-#:  dudosa, y eso es justo lo que el comentario de 'models.py' advertia. El
-#:  valor sale del enum cerrado de 'cerebro.Confianza'.
-CONFIANZA_EXIGIDA_SIN_MEDICION = "alta"
+#:  LA CONFIANZA YA NO DECIDE  --  17/10/2026, Fase 4. Hasta entonces se
+#:  exigia 'alta' en la lectura para estos dos grupos ('CONFIANZA_EXIGIDA_SIN_
+#:  MEDICION'), y el 17/10 eso dejaba afuera 6 de los 27 pendientes abiertos:
+#:  cuatro obras de red con la hipotesis clara --una CTO, una caja, una NAP--
+#:  y dos trabajos pedidos. Decidido por el usuario con esos tickets a la
+#:  vista: un pedido de trabajo es una visita, y quien despacha lee el ticket.
+#:  La confianza se escribe en el motivo, para quien lo lea.
 
 
 class Decision:
@@ -209,10 +209,19 @@ def decidir(grupo: str, labor_veredicto: dict | None,
     falla de servicio NO se decide con 'verificada' sino con 'medicion', la
     pieza que guarda 'medicion_de_fallas' con lo que midio el motor.
 
-    FAIL-CLOSED EN TODAS LAS SALIDAS: sin grupo, con un grupo que no esta en la
-    lista, sin veredicto de labor, o con un dato que no se entiende, la
-    respuesta es NO pasa. Que el default sea "lo mira una persona" es lo que
-    hace que un camino no previsto degrade hacia lo seguro.
+    LO QUE SIGUE FALLANDO CERRADO: sin grupo, con un grupo que no esta en la
+    lista, con una falla sin medicion todavia, o con una medicion que no se
+    entiende, la respuesta es NO pasa.
+
+    LO QUE CAMBIO EL 17/10/2026 (FASE 4): con la medicion hecha, una falla
+    PASA salvo que la medicion la contradiga. Se queda con una persona solo la
+    falla con el equipo en linea y la señal en rango --"no tiene la falla que
+    dice"-- y la que se apago por falta de luz en la casa, que una visita no
+    arregla. Un trabajo pedido o una obra de red pasan siempre. Lo decidio el
+    usuario con los 64 pendientes del 17/10 a la vista, despues de medir que
+    la regla de la Fase 3 no alcanzaba a ningun ticket y que el ISP resolvia
+    las fallas de fibra por su flujo normal, en 1 a 3 dias, mientras el
+    Supervisor esperaba.
     """
     lv = labor_veredicto if isinstance(labor_veredicto, dict) else {}
     labor = str(lv.get("labor") or "")
@@ -231,40 +240,35 @@ def decidir(grupo: str, labor_veredicto: dict | None,
         return Decision(False, _POR_QUE_NUNCA[grupo], grupo=grupo, labor=labor)
 
     if grupo in SIN_CONDICION_DE_MEDICION:
-        #  EL EQUIPO SANO ES NORMAL ACA, asi que no se le pide a la medicion
-        #  que confirme nada. Lo que SI se pide es que la lectura del reclamo
-        #  sea firme: sin medicion que respalde, la confianza del modelo es lo
-        #  unico que hay entre esto y mandar un caso por una frase ambigua.
-        if confianza == CONFIANZA_EXIGIDA_SIN_MEDICION:
-            return Decision(
-                True,
-                f"{_NOMBRE[grupo]}: el equipo sano es lo normal en este caso, "
-                f"asi que la medicion no es condicion. La lectura del reclamo "
-                f"es de confianza {confianza}",
-                grupo=grupo, labor=labor)
+        #  PASAN SIEMPRE desde la Fase 4: ver la nota sobre la confianza, arriba.
         return Decision(
-            False,
-            f"{_NOMBRE[grupo]}: sin medicion que lo respalde se exige "
-            f"confianza '{CONFIANZA_EXIGIDA_SIN_MEDICION}' en la lectura del "
-            f"reclamo, y la que hay es '{confianza or 'ninguna'}'",
+            True,
+            f"{_NOMBRE[grupo]}: el equipo sano es lo normal en este caso, asi "
+            f"que la medicion no es condicion"
+            + (f". La lectura del reclamo es de confianza {confianza}"
+               if confianza else ""),
             grupo=grupo, labor=labor)
 
-    #  FALLA DE SERVICIO: LA MEDICION DEL EQUIPO MANDA  --  16/10/2026, Fase 3
+    #  FALLA DE SERVICIO: PASA SALVO QUE LA MEDICION LA CONTRADIGA  --  Fase 4
     #  ----------------------------------------------------------------------
-    #  Hasta la Fase 3 decidia la labor de la lectura ('verificada'). Medido el
-    #  16/10: esa labor no salia verificada nunca, porque el clasificador
-    #  recibia el equipo del endpoint liviano --Online u Offline, sin causa--
-    #  con claves que no lee. Ahora decide la MEDICION: la pieza que deja
-    #  'medicion_de_fallas' con lo que devolvio 'diagnosticar_servicio' del
-    #  motor. Trae el estado, la causa de la caida y la señal YA CLASIFICADA
-    #  contra el rango de la guia: este modulo no copia el rango, lee 'senal'.
+    #  La medicion es la pieza que deja 'medicion_de_fallas' con lo que midio
+    #  el motor ('diagnosticar_servicio'): estado, causa de la caida y la señal
+    #  ya clasificada contra el rango de la guia. Este modulo no copia el
+    #  rango, lee 'senal'.
     #
-    #  UNA SOLA SALIDA PASA: el equipo en linea con la señal fuera de rango.
-    #  Decidido por el usuario el 16/10/2026, y cambia la regla 1 del 14/10:
-    #  una caida por LOS o LOF va a una persona, porque desde la OLT no se
-    #  distingue una fibra cortada de un equipo desenchufado (la skill
-    #  smartolt-api registra que la operacion lo vio seguido). Un equipo EN
-    #  LINEA con la señal fuera de rango no puede ser un desenchufe.
+    #  DE LO QUE SE MIDIO, SOLO DOS SALIDAS FRENAN: en linea con la señal en
+    #  rango --el reclamo y la medicion se contradicen, hay que preguntarle al
+    #  cliente-- y caido por falta de energia en la casa, que una visita no
+    #  arregla. Lo demas pasa, incluido lo que el proveedor no pudo medir: nada
+    #  contradice el reclamo, y el despachador confirma con el cliente antes de
+    #  mandar a alguien. Una caida por LOS/LOF pasa aunque pueda ser un equipo
+    #  desenchufado: desde la OLT no se distingue, y el 17/10 esos tickets
+    #  llevaban dias esperando.
+    #
+    #  SIN MEDICION TODAVIA, no pasa: la fase de medicion la pide en la misma
+    #  vuelta, y decidir antes seria decidir sin el dato. Tampoco pasa un
+    #  estado que no se reconoce, ni un error del motor guardado antes del
+    #  17/10 como si fuera una medicion: ninguno dice nada del equipo.
     from operaciones import diagnostico_optico as optico
 
     m = medicion if isinstance(medicion, dict) else {}
@@ -275,10 +279,9 @@ def decidir(grupo: str, labor_veredicto: dict | None,
     senal = str(m.get("senal") or "")
     causa = str(m.get("causa_caida") or "")
     if estado == optico.EN_LINEA:
-        #  EL UNICO 'True' DE LA REGLA 1 EXIGE EL NUMERO. El motor clasifica
-        #  como 'debil' cualquier cosa fuera del rango, un NaN incluido; sin un
-        #  nivel medido no hay contra que haberlo decidido (auditor de
-        #  frontera, 16/10).
+        if senal == optico.SENAL_BUENA and _hay_nivel(m):
+            return Decision(False, _EN_RANGO.format(nivel=_nivel(m)),
+                            grupo=grupo, labor=labor)
         if senal == optico.SENAL_DEBIL and _hay_nivel(m):
             return Decision(
                 True,
@@ -286,24 +289,23 @@ def decidir(grupo: str, labor_veredicto: dict | None,
                 f"esta en linea con la señal fuera del rango de la guia"
                 f"{_nivel(m)}",
                 grupo=grupo, labor=labor)
-        if senal == optico.SENAL_BUENA:
-            return Decision(False, _EN_RANGO.format(nivel=_nivel(m)),
-                            grupo=grupo, labor=labor)
-        return Decision(False, _EN_LINEA_SIN_SENAL, grupo=grupo, labor=labor)
+        return Decision(True, _EN_LINEA_SIN_SENAL, grupo=grupo, labor=labor)
     if estado == optico.CAIDO:
         if causa == optico.CAUSA_SIN_ENERGIA:
             return Decision(False, _SIN_ENERGIA, grupo=grupo, labor=labor)
         if causa == optico.CAUSA_FIBRA:
-            return Decision(False, _SIN_SENAL_OPTICA, grupo=grupo, labor=labor)
+            return Decision(True, _SIN_SENAL_OPTICA, grupo=grupo, labor=labor)
         if causa:
-            return Decision(False, _CAIDO_SIN_CAUSA, grupo=grupo, labor=labor)
-        return Decision(False, _CAIDO_SIN_DATOS, grupo=grupo, labor=labor)
+            return Decision(True, _CAIDO_SIN_CAUSA, grupo=grupo, labor=labor)
+        return Decision(True, _CAIDO_SIN_DATOS, grupo=grupo, labor=labor)
+    if estado != ESTADO_DESCONOCIDO:
+        return Decision(False, _MEDICION_NO_ENTENDIDA, grupo=grupo, labor=labor)
+    if es_un_error_guardado(m):
+        return Decision(False, _FALTA_MEDIR, grupo=grupo, labor=labor)
     motivo = str(m.get("motivo") or "").strip()
     return Decision(
-        False,
-        "no se pudo medir el equipo con el proveedor optico"
-        + (f" ({motivo[:120]})" if motivo else "")
-        + ". Lo mira una persona",
+        True,
+        _NO_SE_PUDO_MEDIR.format(motivo=f" ({motivo[:120]})" if motivo else ""),
         grupo=grupo, labor=labor)
 
 
@@ -324,8 +326,10 @@ def _nivel(medicion: dict) -> str:
     return f" ({dbm} dBm)" if isinstance(dbm, (int, float)) else ""
 
 
-#  LO QUE DICE CADA MEDICION QUE NO PASA. Texto fijo y tecnico, sin datos del
-#  cliente: es lo que una persona lee en la propuesta para saber que hacer.
+#  LO QUE DICE CADA MEDICION. Texto fijo y tecnico, sin datos del cliente: es
+#  lo que una persona lee en la propuesta, o en la aceptacion, para saber que
+#  hacer. Desde la Fase 4 (17/10/2026) solo '_EN_RANGO' y '_SIN_ENERGIA'
+#  frenan; el resto explica por que paso.
 _FALTA_MEDIR = (
     "falla de servicio sin medir todavia: falta la medicion del equipo, que el "
     "Supervisor pide en las proximas vueltas. Hasta entonces la mira una "
@@ -334,26 +338,32 @@ _EN_RANGO = (
     "la medicion dice que el equipo esta en linea con la señal dentro del "
     "rango de la guia{nivel}: el reclamo y la medicion se contradicen. Hay que "
     "preguntarle al cliente que le pasa")
-_EN_LINEA_SIN_SENAL = (
-    "la medicion dice que el equipo esta en linea, pero no trajo el nivel de "
-    "señal: no confirma la falla. Se vuelve a medir al dia; mientras tanto lo "
-    "mira una persona")
 _SIN_ENERGIA = (
     "la medicion dice que el equipo se quedo sin energia (dying-gasp): es la "
     "casa del cliente. Hay que preguntarle si tiene luz; una visita no resuelve "
     "eso")
+_EN_LINEA_SIN_SENAL = (
+    "la medicion dice que el equipo esta en linea, pero no trajo el nivel de "
+    "señal: no confirma la falla ni la contradice. Pasa a Despacho; el "
+    "despachador lo confirma con el cliente")
 _SIN_SENAL_OPTICA = (
-    "la medicion dice que el equipo perdio la señal optica (LOS/LOF). Puede ser "
-    "la fibra o un equipo desenchufado, y desde la OLT no se distingue: falta "
-    "preguntarle al cliente si el equipo esta enchufado y tiene luz")
+    "falla de servicio CONFIRMADA por la medicion del equipo: perdio la señal "
+    "optica (LOS/LOF). Puede ser la fibra o un equipo desenchufado, y desde la "
+    "OLT no se distingue: el despachador lo confirma con el cliente antes de "
+    "mandar a alguien")
 _CAIDO_SIN_CAUSA = (
-    "la medicion dice que el equipo esta caido por una causa que no se sabe "
-    "distinguir. Lo mira una persona")
-#  Un caido sin causa ni señal puede ser un 200 del proveedor sin datos: no se
-#  afirma la caida (auditor independiente, 16/10).
+    "falla de servicio CONFIRMADA por la medicion del equipo: esta caido, y la "
+    "causa no es falta de energia ni perdida de señal optica")
 _CAIDO_SIN_DATOS = (
     "la medicion volvio como caido, pero sin causa ni señal: puede ser una "
-    "respuesta incompleta del proveedor. Se vuelve a medir al dia; mientras "
+    "respuesta incompleta del proveedor. Nada contradice el reclamo: pasa a "
+    "Despacho")
+_NO_SE_PUDO_MEDIR = (
+    "no se pudo medir el equipo con el proveedor optico{motivo}. Nada "
+    "contradice el reclamo: pasa a Despacho")
+_MEDICION_NO_ENTENDIDA = (
+    "la medicion volvio con un estado del equipo que este sistema no reconoce: "
+    "no se decide con un dato que no se entiende. Se vuelve a medir; mientras "
     "tanto lo mira una persona")
 
 
@@ -388,8 +398,11 @@ _POR_QUE_NUNCA = {
 TAREA = "pasar_a_despacho_segun_las_reglas"
 
 #:  El nivel que la propuesta pide para pasar. Es 3 --ejecutar algo
-#:  reversible-- y no 4, porque sacar un caso de la cola de Despacho es
-#:  deshacerlo: no se le prometio nada al cliente y no salio nadie a la calle.
+#:  reversible-- y no 4, porque pasar un caso a la cola de Despacho no tiene
+#:  efecto afuera: no se le prometio nada al cliente y no sale nadie a la
+#:  calle hasta que el despachador lo decide. LO QUE NO HAY TODAVIA es una
+#:  accion para sacarlo de la cola: hoy sale cerrando el caso (A-2 de
+#:  SPEC/auditorias/PASO-A-DESPACHO.md, abierto; auditor de frontera, 17/10).
 #:  El 4 es "siempre lo aprueba una persona" y 'autonomia.puede' lo niega
 #:  siempre, por configuracion que tenga la empresa.
 #  Se escribe el 3 y NO se importa el enum, por lo mismo que arriba. Que este
@@ -430,6 +443,18 @@ FUENTE_REVISION = "revision_del_paso_a_despacho"
 FUENTE_MEDICION = "medicion_del_equipo"
 #:  De donde salio la medicion. Una pieza sin esta marca no decide nada.
 MEDIDO_CON = "diagnosticar_servicio"
+#:  Lo que el motor contesta cuando no pudo medir ('_sin_resolver'): siempre
+#:  lo escribe, con su motivo. Desde la Fase 4 es el UNICO estado que pasa sin
+#:  una medicion firme, porque "no se pudo medir" no contradice el reclamo.
+ESTADO_DESCONOCIDO = "desconocido"
+#:  Lo que guarda 'medicion_de_fallas' cuando el motor contesto un estado que
+#:  este modulo no reconoce. No es "no se pudo medir": es "no se entiende", y
+#:  no pasa. Sin esto, un cambio de vocabulario en el motor haria pasar todas
+#:  las fallas, las sanas incluidas (auditor de frontera, 17/10/2026).
+ESTADO_NO_RECONOCIDO = "no_reconocido"
+#:  Como empezaba el motivo de un ERROR del motor guardado como medicion,
+#:  antes del 17/10/2026. Ya no se escribe: ver 'es_un_error_guardado'.
+_MOTIVO_DE_UN_ERROR = "el motor contesto "
 
 #:  Como figura el pase automatico en la auditoria que ve toda la empresa.
 #:  TEXTO FIJO a proposito: la 'accion_propuesta' la redacto el modelo leyendo
@@ -844,6 +869,20 @@ def quitar_por_que_se_quedaba(propuesta) -> bool:
 # =============================================================================
 #  LA MEDICION Y EL CASO  --  16/10/2026, Fase 3
 # =============================================================================
+
+def es_un_error_guardado(medicion) -> bool:
+    """
+    Si la pieza es un error del motor guardado como medicion, que es lo que
+    hacia la Fase 3: "el motor contesto MOTOR_NO_DISPONIBLE" quedaba como "no
+    se pudo medir". Desde el 17/10/2026 un error no se escribe, pero las
+    piezas de antes siguen en las propuestas vivas, y con la regla de la Fase
+    4 pasarian sin que nadie haya medido nada. Se tratan como falta de
+    medicion, y la fase de medicion las vuelve a pedir en la vuelta siguiente.
+    """
+    m = medicion if isinstance(medicion, dict) else {}
+    return (m.get("estado") == ESTADO_DESCONOCIDO
+            and str(m.get("motivo") or "").startswith(_MOTIVO_DE_UN_ERROR))
+
 
 def ultima_medicion(propuesta) -> dict | None:
     """La pieza de medicion del equipo guardada en la propuesta, o None."""

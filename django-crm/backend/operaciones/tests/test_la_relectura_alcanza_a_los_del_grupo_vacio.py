@@ -152,6 +152,61 @@ def test_despues_de_TRES_lecturas_se_deja_como_esta(org_a):
 #  §2  LA FASE LA ENCUENTRA AUNQUE NO HAYA SEÑAL
 # =============================================================================
 
+def test_una_lectura_que_el_modelo_no_contesto_no_gasta_el_tope(org_a):
+    """
+    Medido el 17/10/2026: nueve propuestas con tres relecturas que 'validar'
+    descarto enteras. El modelo nunca contesto; contarlas como lecturas las
+    dejaba sin grupo para siempre. Con el doble del tope, si se deja.
+    """
+    from operaciones import cerebro, razonamiento
+    from operaciones.razonamiento_modelos import FuenteRazonamiento
+
+    #  Por el camino real: 'validar' produce el descarte y 'registrar' lo
+    #  guarda con su saneo, como en la lectura. Si alla cambia el texto o el
+    #  saneo, esta prueba tiene que enterarse (auditor independiente, 17/10).
+    def _una_lectura_rota(p):
+        v = cerebro.validar(cerebro._json_de("pidio otra herramienta"),
+                            cerebro.Razonamiento())
+        fila = razonamiento.registrar(
+            org_a, v, fuente=FuenteRazonamiento.LECTURA_TICKET, propuesta=p)
+        assert fila is not None, "no se pudo registrar la lectura de prueba"
+
+    caso = _caso(org_a)
+    p = _propuesta(org_a, caso, grupo="")
+    for _ in range(dxt.MAXIMAS_RELECTURAS):
+        _una_lectura_rota(p)
+    assert dxt.le_falta_el_grupo(p) is True, (
+        "tres respuestas que no se pudieron leer no son tres lecturas")
+
+    for _ in range(dxt.MAXIMAS_RELECTURAS):
+        _una_lectura_rota(p)
+    assert dxt.le_falta_el_grupo(p) is False, "con el doble, se deja como esta"
+
+
+def test_una_lectura_con_otro_descarte_SI_cuenta(org_a):
+    """
+    Una lectura que contesto pero tuvo algo descartado --un hecho sin fuente,
+    un campo fuera de lista-- es una lectura: cuenta para el tope. Si no
+    contara, un ticket se leeria hasta seis veces (auditor independiente).
+    """
+    from django.utils import timezone
+
+    from operaciones.razonamiento_modelos import (
+        FuenteRazonamiento,
+        RazonamientoSupervisor,
+    )
+
+    caso = _caso(org_a)
+    p = _propuesta(org_a, caso, grupo="")
+    for _ in range(dxt.MAXIMAS_RELECTURAS):
+        RazonamientoSupervisor.objects.create(
+            org=org_a, propuesta=p, registrado_en=timezone.now(),
+            fuente=FuenteRazonamiento.LECTURA_TICKET,
+            descartes=["un hecho cita una herramienta que no se consulto"])
+
+    assert dxt.le_falta_el_grupo(p) is False
+
+
 def test_la_fase_recoge_la_que_NO_produjo_senal(org_a):
     """
     El síntoma medido: el ciclo del botón terminó en 1,1 s con

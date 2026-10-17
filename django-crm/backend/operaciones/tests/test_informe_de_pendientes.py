@@ -75,7 +75,7 @@ def _fila(salida, ticket):
     return re.split(r"\s{2,}", linea.strip())
 
 
-def test_dice_por_ticket_que_pasaria_con_cada_regla(org_a):
+def test_dice_por_ticket_por_que_se_queda(org_a):
     los = _pendiente(org_a, grupo=pad.FALLA_DE_SERVICIO,
                      medida=_medida("caido", causa="fibra"))
     en_rango = _pendiente(org_a, grupo=pad.FALLA_DE_SERVICIO,
@@ -88,15 +88,14 @@ def test_dice_por_ticket_que_pasaria_con_cada_regla(org_a):
 
     salida = _correr(org_a)
 
-    #  columnas: ticket edad grupo conf caso medicion por_que con_LOS con_media
-    assert _fila(salida, los)[6:9] == ["LOS", "SI", "-"]
-    assert _fila(salida, en_rango)[6:9] == ["en rango", "-", "-"]
-    assert _fila(salida, trabajo)[6:9] == ["confianza", "-", "SI"]
+    #  columnas: ticket edad grupo conf caso medicion por_que leidas descarte
+    assert _fila(salida, los)[6] == "PASA"
+    assert _fila(salida, en_rango)[6] == "en rango"
+    assert _fila(salida, trabajo)[6] == "PASA"
     assert _fila(salida, cerrado)[4].startswith("cerrado Dexter")
-    assert _fila(salida, cerrado)[6:9] == ["caso", "-", "-"]
+    assert _fila(salida, cerrado)[6] == "caso"
     assert _fila(salida, sin_grupo)[6] == "sin grupo"
-    assert ("pendientes=5 · pasan hoy=0 · pasarian con LOS=1 · "
-            "pasarian con confianza media=1") in salida
+    assert "pendientes=5 · pasan hoy=2" in salida
 
 
 def test_no_deja_salir_datos_del_cliente(org_a):
@@ -131,14 +130,14 @@ def test_dice_cuantas_veces_se_leyo_y_que_descarto_el_modelo(org_a):
 
     salida = _correr(org_a)
 
-    assert _fila(salida, ticket)[9:11] == ["2", "grupo='Obra_de_red'"]
+    assert _fila(salida, ticket)[7:9] == ["2", "grupo='Obra_de_red'"]
 
 
-def test_una_que_ya_pasa_cuenta_en_las_tres(org_a):
+def test_una_que_ya_pasa_lo_dice(org_a):
     debil = _pendiente(org_a, grupo=pad.FALLA_DE_SERVICIO,
                        medida=_medida("en_linea", dbm=-27.0))
 
     salida = _correr(org_a)
 
-    assert _fila(salida, debil)[6:9] == ["PASA", "SI", "SI"]
+    assert _fila(salida, debil)[6] == "PASA"
     assert "pasan hoy=1" in salida

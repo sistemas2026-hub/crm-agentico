@@ -365,7 +365,7 @@ def test_d2_si_el_motivo_cambia_se_REEMPLAZA(org_a, puertas_abiertas):
     fila.evidencia = [
         *fila.evidencia,
         _lectura(
-            grupo=pad.OBRA_DE_RED,
+            grupo=pad.NADA_LO_MIDE,
             verificada=False,
             labor_porque=SIN_ONU,
             confianza_del_grupo="media",
@@ -376,8 +376,9 @@ def test_d2_si_el_motivo_cambia_se_REEMPLAZA(org_a, puertas_abiertas):
     _vuelta(org_a)
 
     (vigente,) = _revisiones(p)
-    assert "confianza" in vigente["porque"] and vigente["grupo"] == pad.OBRA_DE_RED
-    assert "sin que la medicion la confirme" not in vigente["porque"]
+    assert "ninguna herramienta" in vigente["porque"]
+    assert vigente["grupo"] == pad.NADA_LO_MIDE
+    assert "se contradicen" not in vigente["porque"]
 
 
 def test_una_decidida_por_una_persona_mientras_tanto_no_se_anota(org_a):
@@ -445,24 +446,6 @@ def test_la_fuente_de_la_revision_no_se_confunde_con_una_lectura(org_a):
         pytest.param(
             dict(grupo=pad.FALLA_DE_SERVICIO, verificada=False, labor_porque=SANO),
             id="equipo_sano",
-        ),
-        pytest.param(
-            dict(
-                grupo=pad.OBRA_DE_RED,
-                verificada=False,
-                labor_porque=SIN_ONU,
-                confianza_del_grupo="media",
-            ),
-            id="obra_de_red_confianza_media",
-        ),
-        pytest.param(
-            dict(
-                grupo=pad.TRABAJO_PEDIDO,
-                verificada=False,
-                labor_porque=SANO,
-                confianza_del_grupo="media",
-            ),
-            id="trabajo_pedido_confianza_media",
         ),
         pytest.param(
             dict(grupo=pad.NADA_LO_MIDE, verificada=True, labor_porque=CAIDO_POR_FIBRA),
@@ -818,3 +801,22 @@ def test_n_la_que_todavia_no_se_leyo_no_dice_que_hay_una_lectura(
     assert "la lectura guardada" not in pieza["porque"]
     assert "falta la lectura del reclamo" in pieza["porque"]
     assert dxt.le_falta_lectura(P.objects.get(pk=p.pk)), "la pieza no es una lectura"
+
+
+def test_e2_obra_de_red_y_trabajo_pedido_pasan_con_confianza_media(
+    org_a, puertas_abiertas
+):
+    """Decidido el 17/10/2026 (Fase 4): la confianza se escribe, no decide."""
+    obra = _pendiente(
+        org_a, hace_min=20, grupo=pad.OBRA_DE_RED, verificada=False,
+        labor_porque=SIN_ONU, confianza_del_grupo="media",
+    )
+    trabajo = _pendiente(
+        org_a, hace_min=10, grupo=pad.TRABAJO_PEDIDO, verificada=False,
+        labor_porque=SANO, confianza_del_grupo="",
+    )
+
+    _vuelta(org_a)
+
+    assert _estado(obra) == P.ACEPTADA and _estado(trabajo) == P.ACEPTADA
+    assert "confianza media" in (P.objects.get(pk=obra.pk).resultado or "")

@@ -34,6 +34,9 @@ LO QUE NO HACE
   copia fresca de WispHub.
 - No escribe 'str(e)' ni el detalle de un error: el texto de una excepcion de
   red trae la URL, y la URL lleva el identificador del equipo.
+- No guarda un error como medicion (17/10/2026): el motor caido no dice nada
+  del equipo, y con la regla de la Fase 4 una falla "sin poder medir" pasa.
+  La falla espera, y la vuelta siguiente lo intenta de nuevo.
 ================================================================================
 """
 
@@ -60,19 +63,17 @@ _ESTADOS = ("en_linea", "caido")
 _CAUSAS = ("sin_energia", "fibra", "otra")
 _SENALES = ("buena", "debil", "sin_dato")
 
-#  EL MOTIVO Y EL CODIGO DEL MOTOR, CON FORMA CERRADA  --  revisor de PII,
-#  16/10/2026. Hoy el motor manda frases fijas ("el proveedor optico no
-#  respondio") y codigos ("MOTOR_NO_DISPONIBLE"). Nada lo garantizaba de este
-#  lado: si un dia el motor pusiera 'str(e)' en el motivo, la URL con el
-#  serial terminaria en la propuesta y en el log. Se acepta solo lo que tiene
-#  la forma de una frase o de un codigo; lo demas se guarda generico. No es
-#  una copia de la lista del motor: un motivo nuevo con la misma forma pasa.
+#  EL MOTIVO DEL MOTOR, CON FORMA CERRADA  --  revisor de PII, 16/10/2026.
+#  Hoy el motor manda frases fijas ("el proveedor optico no respondio"). Nada
+#  lo garantizaba de este lado: si un dia pusiera 'str(e)' en el motivo, la
+#  URL con el serial terminaria en la propuesta y en el log. Se acepta solo lo
+#  que tiene la forma de una frase; lo demas se guarda generico. No es una
+#  copia de la lista del motor: un motivo nuevo con la misma forma pasa.
 #  Coma y punto SI (la frase mas comun del motor, "no esta registrado en
 #  SmartOLT, asi que...", lleva coma: auditor de frontera, 16/10); lo que
 #  arman una URL o una excepcion --dos puntos, barra, igual, parentesis,
 #  signo de pregunta, arroba-- NO.
 _FORMA_DE_MOTIVO = re.compile(r"^[a-z0-9áéíóúñü ,.;_'-]{1,160}$", re.IGNORECASE)
-_FORMA_DE_CODIGO = re.compile(r"^[A-Za-z][A-Za-z_]{2,39}$")
 _MOTIVO_GENERICO = "el motor no dijo por que en una forma conocida"
 #  Y aunque tenga forma de frase, un serial de ONU suelto no entra: cuatro
 #  letras del fabricante y ocho hexadecimales (auditor independiente, 16/10).
@@ -106,22 +107,23 @@ def es_concluyente(medicion) -> bool:
     return False
 
 
-def de_la_respuesta(respuesta) -> dict:
+def de_la_respuesta(respuesta) -> dict | None:
     """
     Lo que se guarda de una respuesta del motor: claves fijas y vocabulario
     cerrado. Ni el serial, ni el detalle de un error, ni nada que no se use.
+
+    UN ERROR NO ES UNA MEDICION, y devuelve None  --  17/10/2026. Hasta la
+    Fase 3 se guardaba como "no se pudo medir", y con la regla de la Fase 4
+    eso pasa: con el motor caido una vuelta, las fallas pasaban en la
+    siguiente sin volver a medirse, con el equipo en rango inclusive (auditor
+    de frontera: 5 de 5 asi). Lo que el PROVEEDOR no pudo medir no es un
+    error: el motor lo contesta con estado 'desconocido' y su motivo.
     """
     from operaciones import paso_a_despacho as pad
 
-    r = respuesta if isinstance(respuesta, dict) else {}
-    if r.get("error"):
-        #  El CODIGO del error, que es fijo. Nunca 'detalle', que es 'str(e)'.
-        codigo = str(r.get("error"))
-        if not _FORMA_DE_CODIGO.match(codigo):
-            codigo = "un error"
-        return {"medido_con": pad.MEDIDO_CON, "estado": "desconocido",
-                "causa_caida": "", "senal": "sin_dato", "senal_dbm": None,
-                "motivo": f"el motor contesto {codigo}"}
+    if not isinstance(respuesta, dict) or not respuesta or respuesta.get("error"):
+        return None
+    r = respuesta
     estado = str(r.get("estado") or "")
     causa = str(r.get("causa_caida") or "")
     senal = str(r.get("senal") or "")
@@ -135,7 +137,12 @@ def de_la_respuesta(respuesta) -> dict:
             senal = "sin_dato"
     return {
         "medido_con": pad.MEDIDO_CON,
-        "estado": estado if estado in _ESTADOS else "desconocido",
+        #  'desconocido' es lo que el motor dice cuando no pudo medir, y
+        #  siempre lo escribe. Cualquier otra cosa --vacio incluido-- es un
+        #  estado que no se entiende, y el paso no decide con el.
+        "estado": (estado if estado in _ESTADOS
+                   else pad.ESTADO_DESCONOCIDO if estado == pad.ESTADO_DESCONOCIDO
+                   else pad.ESTADO_NO_RECONOCIDO),
         "causa_caida": causa if causa in _CAUSAS else "",
         "senal": senal if senal in _SENALES else "sin_dato",
         #  Un numero de verdad, o nada (arriba). Un NaN haria fallar el
@@ -174,6 +181,10 @@ def _dato(m: dict, ahora=None) -> str:
 
 
 def _lo_que_dice(m: dict) -> str:
+    from operaciones import paso_a_despacho as pad
+
+    if m.get("estado") == pad.ESTADO_NO_RECONOCIDO:
+        return "volvio con un estado que no se reconoce; se vuelve a medir"
     nivel = (f" ({m['senal_dbm']} dBm)"
              if isinstance(m.get("senal_dbm"), (int, float)) else "")
     if m.get("estado") == "en_linea":
@@ -181,14 +192,14 @@ def _lo_que_dice(m: dict) -> str:
             return f"en linea, señal fuera del rango de la guia{nivel}"
         if m.get("senal") == "buena":
             return f"en linea, señal dentro del rango{nivel}"
-        return "en linea, sin dato de señal; se vuelve a medir"
+        return "en linea, sin dato de señal"
     if m.get("estado") == "caido":
         if not m.get("causa_caida"):
-            return "caido, sin causa ni señal; se vuelve a medir"
+            return "caido, sin causa ni señal"
         return {
             "sin_energia": "caido, sin energia (dying-gasp)",
             "fibra": "caido, perdio la señal optica (LOS/LOF)",
-        }.get(m.get("causa_caida"), "caido, por una causa que no se distingue")
+        }.get(m.get("causa_caida"), "caido, por otra causa")
     return "no se pudo medir"
 
 
@@ -231,6 +242,10 @@ def candidatas(org, ahora) -> list:
         if not lectura or lectura.get("grupo") != pad.FALLA_DE_SERVICIO:
             continue
         medicion = pad.ultima_medicion(p)
+        if pad.es_un_error_guardado(medicion):
+            #  Un error guardado antes del 17/10 no es una medicion: se pide
+            #  como si nunca se hubiera medido, en esta misma vuelta.
+            medicion = None
         if medicion is not None and es_concluyente(medicion):
             continue
         if medicion is not None and not _vieja(medicion, ahora):
@@ -324,9 +339,13 @@ def medir_fallas_pendientes(org, *, desatendido: bool = False, medir=None,
             try:
                 respuesta = medir(org, id_servicio)
             except Exception as e:                               # noqa: BLE001
-                informe["errores"] += 1
                 respuesta = {"error": type(e).__name__}
             medicion = de_la_respuesta(respuesta)
+            if medicion is None:
+                #  Un error no deja pieza: la falla espera, sin pasar, y la
+                #  vuelta siguiente lo intenta de nuevo ('de_la_respuesta').
+                informe["errores"] += 1
+                continue
             if escribir(propuesta, medicion, timezone.now()):
                 informe["medidas"] += 1
                 informe["concluyentes" if es_concluyente(medicion)

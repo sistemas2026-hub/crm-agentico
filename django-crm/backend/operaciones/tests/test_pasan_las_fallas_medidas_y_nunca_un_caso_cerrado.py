@@ -265,21 +265,13 @@ def test_b_en_linea_con_la_senal_fuera_de_rango_pasa(org_a, puertas_abiertas, db
     [
         pytest.param(_respuesta("en_linea", dbm=-21.0), "se contradicen",
                      id="en_linea_en_rango"),
-        pytest.param(_respuesta("en_linea"), "no trajo el nivel",
-                     id="en_linea_sin_senal"),
         pytest.param(_respuesta("caido", causa="sin_energia"), "si tiene luz",
                      id="dying_gasp"),
-        pytest.param(_respuesta("caido", causa="fibra"), "enchufado",
-                     id="los_lof"),
-        pytest.param(_respuesta("caido", causa="otra"), "no se sabe distinguir",
-                     id="caido_otra_causa"),
-        pytest.param(_sin_resolver("el servicio no tiene equipo registrado en "
-                                   "el proveedor"), "no se pudo medir",
-                     id="sin_medicion"),
     ],
 )
-def test_b2_toda_otra_falla_se_queda_con_un_motivo_que_dice_que_hacer(
+def test_b2_la_falla_que_la_medicion_contradice_se_queda_y_dice_que_hacer(
         org_a, puertas_abiertas, respuesta, dice):
+    """Las dos unicas salidas que frenan desde la Fase 4 (17/10/2026)."""
     queda = _pendiente(org_a, hace_min=20, medida=respuesta)
     control = _pendiente(org_a, hace_min=10,
                          medida=_respuesta("en_linea", dbm=-27.0))
@@ -290,6 +282,40 @@ def test_b2_toda_otra_falla_se_queda_con_un_motivo_que_dice_que_hacer(
     assert _estado(queda) == P.PROPUESTA
     pieza = _revision(queda)
     assert pieza is not None and dice in pieza["porque"], pieza
+
+
+@pytest.mark.parametrize(
+    "respuesta, dice",
+    [
+        pytest.param(_respuesta("en_linea"), "no trajo el nivel",
+                     id="en_linea_sin_senal"),
+        pytest.param(_respuesta("caido", causa="fibra"), "desenchufado",
+                     id="los_lof"),
+        pytest.param(_respuesta("caido", causa="otra"), "no es falta de energia",
+                     id="caido_otra_causa"),
+        pytest.param(_respuesta("caido"), "respuesta incompleta",
+                     id="caido_sin_datos"),
+        pytest.param(_sin_resolver("el servicio no tiene equipo registrado en "
+                                   "el proveedor"), "no se pudo medir",
+                     id="sin_medicion"),
+    ],
+)
+def test_b2b_toda_otra_falla_PASA_y_la_aceptacion_dice_por_que(
+        org_a, puertas_abiertas, respuesta, dice):
+    """
+    Decidido el 17/10/2026 con los 64 pendientes a la vista: nada contradice
+    el reclamo, asi que pasa, y el despachador confirma con el cliente.
+    """
+    control = _pendiente(org_a, hace_min=20,
+                         medida=_respuesta("en_linea", dbm=-21.0))
+    pasa = _pendiente(org_a, hace_min=10, medida=respuesta)
+
+    _vuelta(org_a)
+
+    assert _estado(control) == P.PROPUESTA, "el equipo en rango sigue quedandose"
+    assert _estado(pasa) == P.ACEPTADA
+    assert dice in (P.objects.get(pk=pasa.pk).resultado or "")
+    assert _revision(pasa) is None
 
 
 def test_b3_una_lectura_vieja_verificada_y_sin_medicion_no_pasa(
@@ -429,9 +455,10 @@ def test_c7_el_presupuesto_nace_con_la_hora_de_la_fase(org_a, monkeypatch):
 
 def test_c8_lo_que_se_guarda_es_vocabulario_cerrado(org_a):
     """
-    De la respuesta se guardan claves fijas: ni el serial, ni el detalle de un
-    error --que es 'str(e)' y trae la URL con el identificador del equipo--,
-    ni nada que el paso no use.
+    De la respuesta se guardan claves fijas: ni el serial, ni nada que el paso
+    no use. Y un error del motor --cuyo detalle es 'str(e)' y trae la URL con
+    el identificador del equipo-- no se guarda: desde el 17/10/2026 no es una
+    medicion.
     """
     sucia = dict(_respuesta("caido", causa="fibra"))
     sucia["sn_onu"] = "ZTEG12345678"
@@ -446,9 +473,10 @@ def test_c8_lo_que_se_guarda_es_vocabulario_cerrado(org_a):
     _medir(org_a, _Motor(con_error))
 
     for p in (uno, dos):
-        texto = json.dumps(_medicion(p), ensure_ascii=False)
+        texto = json.dumps(P.objects.get(pk=p.pk).evidencia, ensure_ascii=False)
         assert "ZTEG12345678" not in texto and "motor:5000" not in texto, texto
-    assert "MOTOR_NO_DISPONIBLE" in _medicion(uno)["motivo"]
+    assert _medicion(dos)["causa_caida"] == "fibra"
+    assert _medicion(uno) is None, "un error del motor no es una medicion"
 
 
 # =============================================================================
@@ -593,26 +621,29 @@ def test_e2_la_pieza_lleva_solo_sus_claves(org_a):
 
 def test_e3_un_motivo_o_un_error_con_forma_rara_no_se_guarda_tal_cual(org_a):
     """
-    Hoy el motor manda frases fijas y codigos. Si un dia mandara 'str(e)',
-    la URL con el serial no puede terminar en la propuesta.
+    Hoy el motor manda frases fijas. Si un dia mandara 'str(e)', la URL con el
+    serial no puede terminar en la propuesta. Y un error, desde el 17/10/2026,
+    no se guarda en absoluto.
     """
-    con_url = _pendiente(org_a, hace_min=40)
-    con_excepcion = _pendiente(org_a, hace_min=30)
-    con_codigo_raro = _pendiente(org_a, hace_min=20)
-    normal = _pendiente(org_a, hace_min=10)
+    con_url = _pendiente(org_a, hace_min=30)
+    normal = _pendiente(org_a, hace_min=20)
 
     #  Se mide primero la mas nueva: una por vuelta, en ese orden.
     _medir(org_a, _Motor(_sin_resolver("el proveedor optico no respondio")), tope=1)
-    _medir(org_a, _Motor({"error": _URL, "detalle": _URL}), tope=1)
-    _medir(org_a, _Motor(RuntimeError(_URL)), tope=1)
     _medir(org_a, _Motor(_sin_resolver(f"fallo: {_URL}")), tope=1)
+    #  Un error no deja pieza: la que lo recibe sigue primera en la cola.
+    con_error = _pendiente(org_a, hace_min=10)
+    errores = [_medir(org_a, _Motor({"error": _URL, "detalle": _URL}), tope=1),
+               _medir(org_a, _Motor(RuntimeError(_URL)), tope=1)]
 
-    for p in (con_url, con_excepcion, con_codigo_raro, normal):
-        texto = json.dumps(_medicion(p), ensure_ascii=False)
+    for p in (con_url, normal, con_error):
+        texto = json.dumps(P.objects.get(pk=p.pk).evidencia, ensure_ascii=False)
         assert SERIAL not in texto and "motor:5000" not in texto, texto
     assert _medicion(normal)["motivo"] == "el proveedor optico no respondio", (
         "un motivo fijo del motor tiene que pasar tal cual")
-    assert _medicion(con_excepcion)["motivo"] == "el motor contesto RuntimeError"
+    assert _medicion(con_url)["motivo"] == mdf._MOTIVO_GENERICO
+    assert _medicion(con_error) is None
+    assert [e["errores"] for e in errores] == [1, 1]
 
 
 def test_e4_el_motivo_de_un_caso_cerrado_no_lleva_datos_del_cliente(
@@ -676,16 +707,16 @@ def test_f_pasado_el_tope_un_caso_cerrado_no_espera_se_queda_con_su_motivo(
     assert pieza is not None and "cerrado en Dexter" in pieza["porque"], pieza
 
 
-def test_f2_debil_sin_el_numero_no_pasa(org_a, puertas_abiertas):
+def test_f2_debil_sin_el_numero_pasa_sin_afirmar_confirmada(org_a, puertas_abiertas):
     sin_numero = dict(_respuesta("en_linea", dbm=-27.0))
     sin_numero["senal_dbm"] = None
     p = _pendiente(org_a, medida=sin_numero)
 
     _vuelta(org_a)
 
-    assert _estado(p) == P.PROPUESTA
-    assert "no trajo el nivel" in _revision(p)["porque"]
-
+    assert _estado(p) == P.ACEPTADA
+    resultado = P.objects.get(pk=p.pk).resultado or ""
+    assert "no trajo el nivel" in resultado and "CONFIRMADA" not in resultado
 
 def test_f3_un_nan_no_vuelve_a_pedir_la_medicion_cada_vuelta(org_a):
     """El motor clasifica un NaN como 'debil'. Se guarda sin numero, y no pasa."""
@@ -712,8 +743,7 @@ def test_f4_la_frase_mas_comun_del_motor_se_guarda_tal_cual(org_a, puertas_abier
     _vuelta(org_a)
 
     assert _medicion(p)["motivo"] == frase
-    assert "no esta registrado en SmartOLT" in _revision(p)["porque"]
-
+    assert "no esta registrado en SmartOLT" in (P.objects.get(pk=p.pk).resultado or "")
 
 # =============================================================================
 #  LO QUE ENCONTRO EL AUDITOR INDEPENDIENTE EL 16/10
@@ -727,23 +757,24 @@ def _envejecer_medicion(p, horas):
     fila.save(update_fields=["evidencia"])
 
 
-def test_g_caido_sin_causa_ni_senal_no_se_afirma_y_se_vuelve_a_medir(
+def test_g_caido_sin_causa_ni_senal_pasa_y_no_se_vuelve_a_medir(
         org_a, puertas_abiertas):
     """
     Un 200 del proveedor sin datos sale del motor como 'caido' sin causa ni
-    señal. No se afirma la caida, y se vuelve a medir al dia.
+    señal. No contradice el reclamo: pasa (Fase 4), y una aceptada no se mide
+    de nuevo.
     """
     p = _pendiente(org_a, medida=_respuesta("caido"))
 
     _vuelta(org_a)
-    assert "respuesta incompleta" in _revision(p)["porque"]
+    assert _estado(p) == P.ACEPTADA
+    assert "respuesta incompleta" in (P.objects.get(pk=p.pk).resultado or "")
 
     _envejecer_medicion(p, mdf.HORAS_PARA_REINTENTAR + 1)
     motor = _Motor()
     _medir(org_a, motor)
 
-    assert len(motor.llamadas) == 1, "un caido sin datos quedo fijo"
-
+    assert motor.llamadas == [], "una aceptada no se vuelve a medir"
 
 def test_g2_una_concluyente_no_se_vuelve_a_medir_aunque_sea_vieja(org_a):
     p = _pendiente(org_a, medida=_respuesta("en_linea", dbm=-21.0))
@@ -844,3 +875,85 @@ def test_g9_un_serial_suelto_no_entra_al_motivo(org_a):
     _medir(org_a, _Motor(_sin_resolver("no se encontro la ONU ZTEGC1234567 en SmartOLT")))
 
     assert "ZTEGC1234567" not in json.dumps(_medicion(p), ensure_ascii=False)
+
+
+# =============================================================================
+#  LO QUE ENCONTRO EL AUDITOR DE FRONTERA EL 17/10/2026 (FASE 4)
+# =============================================================================
+
+def test_h_un_estado_que_no_se_entiende_no_pasa_y_se_vuelve_a_medir(
+        org_a, puertas_abiertas):
+    """
+    Si el motor cambiara su vocabulario ("online" en vez de "en_linea"), o
+    dejara de escribir el estado, cada falla pasaria como "no se pudo medir",
+    con el equipo en rango inclusive. Un estado que no se entiende no decide
+    nada, y se vuelve a medir.
+    """
+    raro = dict(_respuesta("en_linea", dbm=-21.0))
+    raro["estado"] = "online"
+    sin_estado = dict(_respuesta("en_linea", dbm=-21.0))
+    del sin_estado["estado"]
+    p = _pendiente(org_a, hace_min=20, medida=raro)
+    q = _pendiente(org_a, hace_min=10, medida=sin_estado)
+
+    _vuelta(org_a)
+
+    for x in (p, q):
+        assert _estado(x) == P.PROPUESTA, "paso con un estado que no se entiende"
+        assert "no reconoce" in _revision(x)["porque"]
+    _envejecer_medicion(p, mdf.HORAS_PARA_REINTENTAR + 1)
+    motor = _Motor()
+    _medir(org_a, motor)
+    assert len(motor.llamadas) == 1, "un estado no reconocido no se volvio a medir"
+
+
+def test_h2_un_error_del_motor_no_deja_medicion_y_la_falla_espera(
+        org_a, puertas_abiertas):
+    """
+    Con el motor caido, "no se pudo medir" quedaba guardado y la falla pasaba
+    en la vuelta siguiente sin volver a medirse, con el equipo en rango
+    inclusive. Un error de infraestructura no es una medicion: no se escribe,
+    y la falla espera a que se pueda medir.
+    """
+    p = _pendiente(org_a)
+    caido = _Motor({"error": "MOTOR_NO_DISPONIBLE",
+                    "detalle": "http://motor:5000/x"})
+
+    informe = _medir(org_a, caido)
+    assert informe["errores"] == 1 and _medicion(p) is None
+    _vuelta(org_a)
+    assert _estado(p) == P.PROPUESTA
+    assert "falta la medicion" in _revision(p)["porque"]
+
+    sano = _Motor(_respuesta("en_linea", dbm=-21.0))
+    _medir(org_a, sano)
+    _vuelta(org_a)
+
+    assert sano.llamadas == ["3614"], "con el motor sano se tiene que medir"
+    assert _estado(p) == P.PROPUESTA, "el equipo en rango paso tras el motor caido"
+    assert "se contradicen" in _revision(p)["porque"]
+
+
+def test_h3_un_error_guardado_por_la_fase_3_no_pasa_y_se_mide_ya(
+        org_a, puertas_abiertas):
+    """
+    Hasta el 17/10 un error del motor se guardaba como "no se pudo medir", y
+    esas piezas siguen en las propuestas vivas. Con la regla de la Fase 4
+    pasarian sin que nadie haya medido nada: se tratan como falta de medicion,
+    y se piden en la vuelta siguiente, no a las 24 horas.
+    """
+    p = _pendiente(org_a)
+    mdf.escribir(p, {"medido_con": pad.MEDIDO_CON, "estado": "desconocido",
+                     "causa_caida": "", "senal": "sin_dato", "senal_dbm": None,
+                     "motivo": "el motor contesto MOTOR_NO_DISPONIBLE"},
+                 timezone.now())
+
+    _vuelta(org_a)
+    assert _estado(p) == P.PROPUESTA, "paso con un error guardado como medicion"
+    assert "falta la medicion" in _revision(p)["porque"]
+
+    motor = _Motor(_respuesta("caido", causa="fibra"))
+    _medir(org_a, motor)
+    assert motor.llamadas == ["3614"], "un error guardado se vuelve a medir ya"
+    _vuelta(org_a)
+    assert _estado(p) == P.ACEPTADA

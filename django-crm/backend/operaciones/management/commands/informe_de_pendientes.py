@@ -1,7 +1,7 @@
 """
 Lista, sin escribir nada, las lecturas de ticket pendientes del Supervisor
 NOC: en qué grupo cayó cada una, qué midió el equipo, cómo está el caso, por
-qué se queda, y qué pasaría con cada cambio de regla que está sobre la mesa.
+qué se queda, cuántas veces se leyó y qué descartó el modelo.
 
     python manage.py informe_de_pendientes --org <id>
 
@@ -110,6 +110,10 @@ def _medicion_corta(m):
         return f"en linea/{m.get('senal') or 'sin_dato'}{nivel}"
     if estado == "caido":
         return f"caido/{m.get('causa_caida') or 'sin causa'}"
+    if estado == pad.ESTADO_NO_RECONOCIDO:
+        return "no entendida"
+    if pad.es_un_error_guardado(m):
+        return "error del motor"
     return "no se pudo medir"
 
 
@@ -122,10 +126,12 @@ def _por_que_corto(d, grupo, medicion):
         return "sin grupo"
     if grupo in (pad.NADA_LO_MIDE, pad.NI_CLIENTE_NI_RED):
         return "siempre persona"
-    if grupo in pad.SIN_CONDICION_DE_MEDICION:
-        return "confianza"
     if not medicion:
         return "sin medir"
+    if pad.es_un_error_guardado(medicion):
+        return "error del motor"
+    if medicion.get("estado") == pad.ESTADO_NO_RECONOCIDO:
+        return "no entendida"
     if medicion.get("estado") == "en_linea":
         return "en rango" if medicion.get("senal") == "buena" else "sin nivel"
     if medicion.get("estado") == "caido":
@@ -170,7 +176,7 @@ class Command(BaseCommand):
                       .order_by("created_at"))
 
         filas, motivos, casos = [], Counter(), Counter()
-        pasan = con_los = con_media = 0
+        pasan = 0
         for p in pendientes:
             caso = pad.caso_de(p)
             lectura = pad._ultima_lectura_con_grupo(p) or {}
@@ -181,13 +187,7 @@ class Command(BaseCommand):
             por_que = _por_que_corto(d, grupo, medicion)
             caso_corto = _caso_corto(
                 pad.por_que_el_caso_no_puede_pasar(caso, ahora), caso)
-            reglas = d.puerta == pad.PUERTA_REGLAS and not d.pasa
-            si_los = d.pasa or (reglas and por_que == "LOS")
-            si_media = d.pasa or (reglas and por_que == "confianza"
-                                  and conf == "media")
             pasan += d.pasa
-            con_los += si_los
-            con_media += si_media
             motivos[por_que] += 1
             casos[caso_corto.split(" ")[0] + (" Dexter" if "Dexter" in caso_corto else "")] += 1
             edad = (ahora - p.created_at).days
@@ -196,12 +196,11 @@ class Command(BaseCommand):
                 getattr(caso, "external_ticket_id", "") or "?",
                 f"{edad}d", _GRUPO.get(grupo, "sin grupo"), conf,
                 caso_corto, _medicion_corta(medicion), por_que,
-                "SI" if si_los else "-", "SI" if si_media else "-",
                 str(leidas), descarte, _hipotesis(p)))
 
         cab = ("ticket", "edad", "grupo", "conf", "caso", "medicion",
-               "por que se queda", "con LOS", "con media", "leidas",
-               "descarte del modelo", "hipotesis (tapada)")
+               "por que se queda", "leidas", "descarte del modelo",
+               "hipotesis (tapada)")
         anchos = [max(len(str(f[i])) for f in [cab, *filas]) for i in range(len(cab))]
         linea = lambda f: "  ".join(str(v).ljust(a) for v, a in zip(f, anchos))  # noqa: E731
         self.stdout.write(linea(cab))
@@ -209,8 +208,6 @@ class Command(BaseCommand):
         for f in filas:
             self.stdout.write(linea(f))
         self.stdout.write("")
-        self.stdout.write(
-            f"pendientes={len(filas)} · pasan hoy={pasan} · pasarian con LOS={con_los} "
-            f"· pasarian con confianza media={con_media}")
+        self.stdout.write(f"pendientes={len(filas)} · pasan hoy={pasan}")
         self.stdout.write(f"por que se quedan: {dict(motivos)}")
         self.stdout.write(f"casos: {dict(casos)}")

@@ -365,6 +365,64 @@ def test_22_si_se_agotan_las_vueltas_se_DICE(org_a):
     assert len(r.consultadas) == 2
 
 
+def test_22b_agotadas_las_vueltas_se_le_pide_el_cierre_sin_herramientas(org_a):
+    """
+    Medido el 17/10/2026: nueve lecturas pendientes con sus tres relecturas
+    gastadas en "no es un objeto JSON", porque el modelo pedia herramientas
+    en todas sus vueltas y el bucle devolvia ese pedido como contenido. Ahora
+    se le pide que cierre con lo que tiene, sin herramientas, y 'agotado'
+    sigue diciendo que se quedo corto.
+    """
+    pide = {"contenido": "", "llamadas": [{"nombre": "estado_fuentes",
+                                           "argumentos": {}}]}
+    cierre = {"contenido": '{"hechos": [], "hipotesis": "x"}', "llamadas": []}
+    with mock.patch(RUTA_MODELO, side_effect=[pide, pide, cierre]) as m:
+        r = cerebro.razonar(org_a, instrucciones="x", entrada="y",
+                            vueltas_maximas=2,
+                            cierre=cerebro.CIERRE_SIN_HERRAMIENTAS)
+
+    assert r.agotado is True and r.vueltas == 2
+    assert r.contenido == cierre["contenido"]
+    assert m.call_args_list[-1].args[1] == [], "el cierre tiene que ir sin herramientas"
+    assert cerebro.CIERRE_SIN_HERRAMIENTAS in m.call_args_list[-1].args[0][-1]["content"]
+    assert cerebro._json_de(r.contenido)["hipotesis"] == "x"
+
+
+def test_22c_sin_cierre_no_hay_llamada_extra(org_a):
+    """
+    El chat no pide cierre: no tiene contrato JSON, y la persona veria el
+    objeto crudo en vez del aviso de que no se pudo cerrar.
+    """
+    pide = {"contenido": "", "llamadas": [{"nombre": "estado_fuentes",
+                                           "argumentos": {}}]}
+    with mock.patch(RUTA_MODELO, side_effect=[pide, pide, pide]) as m:
+        r = cerebro.razonar(org_a, instrucciones="x", entrada="y",
+                            vueltas_maximas=2)
+
+    assert r.agotado is True and m.call_count == 2
+
+
+def test_22d_si_el_cierre_falla_queda_lo_de_antes(org_a):
+    """
+    Un cierre que falla no puede llevarse la lectura entera: sin fila, el
+    tope de relecturas no la ve y el ticket se relee sin techo (auditor
+    independiente, 17/10/2026). Queda lo de antes: agotado, y el contenido
+    de la ultima vuelta, que 'validar' descarta y el tope cuenta.
+    """
+    pide = {"contenido": "", "llamadas": [{"nombre": "estado_fuentes",
+                                           "argumentos": {}}]}
+    with mock.patch(RUTA_MODELO,
+                    side_effect=[pide, pide, RuntimeError("timeout")]) as m:
+        r = cerebro.razonar(org_a, instrucciones="x", entrada="y",
+                            vueltas_maximas=2,
+                            cierre=cerebro.CIERRE_SIN_HERRAMIENTAS)
+
+    assert m.call_count == 3 and r.agotado is True
+    assert r.contenido == ""
+    v = cerebro.validar(cerebro._json_de(r.contenido), r)
+    assert cerebro.DESCARTE_SIN_OBJETO in v.descartes
+
+
 def test_23_una_herramienta_desconocida_se_le_DICE_al_modelo(org_a):
     """No se inventa un resultado ni se aborta: puede corregirse en la vuelta
     siguiente."""

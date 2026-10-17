@@ -208,3 +208,51 @@ def test_el_informe_dice_cuantas_se_guardaron(org_a, monkeypatch):
 
     assert informe.get("guardadas", 0) >= 1, (
         f"el informe no cuenta las guardadas: {informe}")
+
+
+def test_si_el_modelo_agota_sus_vueltas_la_lectura_igual_cierra(org_a,
+                                                                monkeypatch):
+    """
+    EL CAMINO COMPLETO DEL 17/10/2026: el modelo pide herramientas en todas
+    sus vueltas. Antes la lectura terminaba sin grupo -- 9 de 64 pendientes,
+    tres relecturas cada una. Ahora se le pide el cierre sin herramientas, y
+    lo que conteste llega a la propuesta.
+
+    Se reemplaza SOLO el modelo: la lectura, 'concluir', el bucle y 'validar'
+    corren de verdad. La herramienta pedida no existe en el catalogo, asi que
+    no sale nada a la red.
+    """
+    import json
+
+    from operaciones import cerebro
+    from operaciones import paso_a_despacho as pad
+
+    caso = _caso_con_tecnico(org_a)
+    p = _propuesta_sin_leer(org_a, caso)
+    cierre = {"contenido": json.dumps({
+        "hechos": [], "inferencias": [], "riesgos": [], "falta": [],
+        "riesgo": "informativo", "confianza": "media",
+        "hipotesis": HIPOTESIS, "recomendacion": RECOMENDACION,
+        "grupo": "trabajo_pedido", "confianza_del_grupo": "alta"})}
+    llamadas = []
+
+    def _modelo(mensajes, tools):
+        llamadas.append(list(tools))
+        if tools:
+            return {"contenido": "", "llamadas": [{"nombre": "no_existe",
+                                                   "argumentos": {}}]}
+        return cierre
+
+    monkeypatch.setattr(cerebro, "_pedirle_al_modelo", _modelo)
+
+    sup._leer_tickets_abiertos(org_a, timezone.now())
+
+    assert llamadas and llamadas[-1] == [], "no se pidio el cierre sin herramientas"
+    p.refresh_from_db()
+    #  El grupo se busca como lo busca el paso: la lectura deja varias piezas
+    #  (la hipotesis, lo que falta) y el grupo no va necesariamente en la ultima.
+    lectura = pad._ultima_lectura_con_grupo(p)
+    assert lectura and lectura.get("grupo") == "trabajo_pedido", (
+        "el modelo cerro con un grupo y la propuesta no lo tiene")
+    assert HIPOTESIS[:30] in str(lectura.get("dato")), (
+        "la hipotesis del cierre no llego a la propuesta")

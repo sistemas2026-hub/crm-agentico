@@ -66,12 +66,15 @@ que esten juntos en un parrafo es como una sospecha se lee como una medicion.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass, field
 
 from operaciones import chat_herramientas
 from operaciones.situaciones_modelos import Confianza, Riesgo
+
+logger = logging.getLogger(__name__)
 
 #  La puerta al modelo. Es la MISMA que usa el chat desde P5: un envoltorio del
 #  motor sobre 'cliente.chat()' que NO ejecuta herramientas -- las ejecuta este
@@ -179,7 +182,8 @@ class Razonamiento:
 
 def razonar(org, *, instrucciones: str, entrada: str, historial=(),
             tools=None, vueltas_maximas: int = VUELTAS_MAXIMAS,
-            pedir=None, actor=None, conversacion_id=None) -> Razonamiento:
+            pedir=None, actor=None, conversacion_id=None,
+            cierre: str | None = None) -> Razonamiento:
     """
     Una pasada completa: piensa, consulta lo que le falte, vuelve a pensar.
 
@@ -206,8 +210,17 @@ def razonar(org, *, instrucciones: str, entrada: str, historial=(),
     el prompt lo prohiba: porque no hay donde poner esa organizacion.
 
     SI SE AGOTAN LAS VUELTAS SE DICE. Devuelve 'agotado=True' con lo que haya,
-    en vez de seguir pidiendo herramientas o de inventar un cierre. Quien llama
-    tiene que poder distinguir "contesto" de "se quedo sin vueltas".
+    en vez de seguir pidiendo herramientas. Quien llama tiene que poder
+    distinguir "contesto" de "se quedo sin vueltas".
+
+    'cierre' PIDE UNA LLAMADA MAS, SIN HERRAMIENTAS  --  17/10/2026. Si quien
+    llama lo pasa y las vueltas se agotan, se le manda ese texto al modelo y se
+    toma lo que conteste; 'agotado' sigue en True. Lo pide 'concluir' cuando su
+    llamador lo quiere, porque espera un objeto JSON. El chat NO: no tiene ese
+    contrato, y la persona veria el JSON crudo en vez del aviso honesto de que
+    no se pudo cerrar (auditor independiente, 17/10). 'vueltas' cuenta las
+    vueltas con herramientas: el cierre no es una. Si el cierre falla, queda lo
+    de antes.
     """
     arranque = time.monotonic()
     tools = chat_herramientas.esquema() if tools is None else tools
@@ -266,7 +279,39 @@ def razonar(org, *, instrucciones: str, entrada: str, historial=(),
             })
     else:
         r.agotado = True
-
+    if r.agotado and cierre:
+        #  UNA VUELTA DE CIERRE, SIN HERRAMIENTAS  --  17/10/2026
+        #  ----------------------------------------------------
+        #  Cuando el modelo pide herramientas en TODAS sus vueltas, el bucle
+        #  terminaba con el contenido de la ultima respuesta, que era el pedido
+        #  de la herramienta y no una conclusion. 'validar' lo descartaba como
+        #  "la respuesta del modelo no es un objeto JSON", y el ticket quedaba
+        #  sin grupo, sin hipotesis y sin nada que decidir.
+        #
+        #  MEDIDO el 17/10/2026 en produccion: 9 de 64 lecturas pendientes con
+        #  ese mismo descarte en sus tres relecturas, todas de tickets
+        #  complejos --obras de red, un ramal con 28 afectados-- en los que el
+        #  modelo seguia consultando. Eran los tickets que mas valia la pena
+        #  leer, y eran justo los que nunca cerraban.
+        #
+        #  Se le pide que cierre con lo que YA tiene, sin herramientas: la
+        #  lista vacia llega al motor y 'cliente.py' la convierte en "sin
+        #  tools". No es inventar un cierre: 'validar' sigue exigiendo que
+        #  cada hecho cite una herramienta consultada, y 'agotado' sigue en
+        #  True para que quien lea sepa que se quedo corto.
+        try:
+            cuerpo = pedir([*mensajes, {"role": "user", "content": cierre}], [])
+        except Exception as e:                                   # noqa: BLE001
+            #  SI EL CIERRE FALLA --un timeout, el tope de mensajes del motor--
+            #  QUEDA LO DE ANTES: el contenido de la ultima vuelta, que
+            #  'validar' descarta y el tope de relecturas cuenta. Si se dejara
+            #  subir, la lectura se perdia entera sin dejar fila, y el ticket
+            #  se releia en cada vuelta sin techo (auditor independiente).
+            logger.warning("cerebro: no se pudo pedir el cierre (%s)",
+                           type(e).__name__)
+        else:
+            r.modelo = str(cuerpo.get("modelo") or r.modelo)
+            r.contenido = str(cuerpo.get("contenido") or "")
     r.duracion_ms = int((time.monotonic() - arranque) * 1000)
     return r
 
@@ -279,6 +324,14 @@ def razonar(org, *, instrucciones: str, entrada: str, historial=(),
 #  'correlacion.agrupar' y 'situaciones.abrir' saben consumir. Inventar otro
 #  habria obligado a traducir en el medio, y una traduccion es donde se pierde
 #  la diferencia entre un hecho y una sospecha.
+#:  Lo que se le dice al modelo cuando se le acabaron las consultas. Habla del
+#:  contrato JSON: solo lo usa 'concluir', que lo tiene.
+CIERRE_SIN_HERRAMIENTAS = (
+    "Se terminaron las consultas a herramientas. Contesta AHORA con el objeto "
+    "JSON del contrato, usando SOLO lo que ya obtuviste: cada hecho con la "
+    "herramienta de la que salio, y en 'falta' lo que no pudiste consultar. "
+    "No inventes nada.")
+
 CAMPOS_VEREDICTO = ("hechos", "inferencias", "riesgos", "riesgo", "hipotesis",
                     "confianza", "recomendacion", "falta")
 
@@ -412,6 +465,12 @@ def _validar_los_extras(crudo: dict, campos_extra, v: Veredicto) -> None:
                 f"(dijo '{dicho}'): se descarta, no se elige el mas parecido")
 
 
+#:  El descarte de una respuesta que no es un objeto. Lo lee tambien
+#:  'diagnostico_de_ticket', que no cuenta esas lecturas para su tope: por eso
+#:  es una constante y no un texto suelto.
+DESCARTE_SIN_OBJETO = "la respuesta del modelo no es un objeto JSON"
+
+
 def validar(crudo, razonamiento: Razonamiento, *, campos_extra=None) -> Veredicto:
     """
     Convierte lo que dijo el modelo en un veredicto, descartando lo que no se
@@ -428,7 +487,7 @@ def validar(crudo, razonamiento: Razonamiento, *, campos_extra=None) -> Veredict
     v = Veredicto(razonamiento=razonamiento)
     if not isinstance(crudo, dict):
         v.concluyente = False
-        v.descartes.append("la respuesta del modelo no es un objeto JSON")
+        v.descartes.append(DESCARTE_SIN_OBJETO)
         return v
 
     usadas = razonamiento.herramientas_usadas if razonamiento else set()
@@ -517,7 +576,7 @@ def validar(crudo, razonamiento: Razonamiento, *, campos_extra=None) -> Veredict
 
 def concluir(org, *, instrucciones: str, entrada: str, historial=(),
              tools=None, vueltas_maximas: int = VUELTAS_MAXIMAS,
-             pedir=None, campos_extra=None) -> Veredicto:
+             pedir=None, campos_extra=None, cierre: bool = False) -> Veredicto:
     """
     Razona y devuelve un VEREDICTO validado. Es lo que el ciclo puede persistir.
 
@@ -533,7 +592,8 @@ def concluir(org, *, instrucciones: str, entrada: str, historial=(),
                 instrucciones=(instrucciones + "\n\n" + CONTRATO
                                + _pedir_los_extras(campos_extra)),
                 entrada=entrada, historial=historial, tools=tools,
-                vueltas_maximas=vueltas_maximas, pedir=pedir)
+                vueltas_maximas=vueltas_maximas, pedir=pedir,
+                cierre=CIERRE_SIN_HERRAMIENTAS if cierre else None)
     return validar(_json_de(r.contenido), r, campos_extra=campos_extra)
 
 

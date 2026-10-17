@@ -200,9 +200,12 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None,
             #  defecto, que es el catalogo de solo lectura del Supervisor.
             #  Pasarle una lista propia seria una segunda version del catalogo
             #  que mantener en sincronia con la primera.
+            #  'cierre': si el modelo agota sus vueltas consultando, se le
+            #  pide que cierre con lo que tiene. Medido el 17/10/2026: 9 de 64
+            #  lecturas gastaban sus tres relecturas sin llegar a contestar.
             return cerebro.concluir(
                 org_, instrucciones=INSTRUCCIONES, entrada=entrada,
-                campos_extra=pad.CAMPO_PARA_EL_MODELO)
+                campos_extra=pad.CAMPO_PARA_EL_MODELO, cierre=True)
 
     informe = {"leidos": 0, "con_hipotesis": 0, "sin_hipotesis": 0,
                "sin_texto": 0, "errores": 0, "fuera_de_tope": 0,
@@ -508,23 +511,43 @@ def _cuantas_veces_se_leyo(propuesta) -> int:
     hace que el tope sirva: el bucle del 14/10/2026 existia JUSTAMENTE porque
     la lectura no llegaba a la evidencia --43 razonamientos y solo 8 propuestas
     con su pieza--. Un contador que mire la evidencia se queda en cero en ese
-    caso y no corta nada.
+    caso y no corta nada. El razonamiento, en cambio, queda siempre.
 
-    El razonamiento, en cambio, queda siempre: es lo primero que se escribe
-    despues de preguntarle al modelo.
+    UNA RESPUESTA QUE NO SE PUDO LEER NO ES UNA LECTURA  --  17/10/2026. Nueve
+    propuestas tenian sus tres relecturas gastadas en respuestas que 'validar'
+    descarto enteras ("no es un objeto JSON"): el modelo nunca llego a
+    contestar, y el tope las dejaba para siempre sin grupo. Esas no cuentan.
+    CON UN TOPE ABSOLUTO del doble, para que un modelo que nunca conteste no
+    vuelva al bucle de las 43 lecturas: ahi si se deja como esta.
     """
     try:
         from operaciones.razonamiento_modelos import (FuenteRazonamiento,
                                                       RazonamientoSupervisor)
 
-        return RazonamientoSupervisor.objects.filter(
+        descartes = list(RazonamientoSupervisor.objects.filter(
             propuesta=propuesta,
-            fuente=FuenteRazonamiento.LECTURA_TICKET).count()
+            fuente=FuenteRazonamiento.LECTURA_TICKET,
+        ).values_list("descartes", flat=True))
     except Exception:                                        # noqa: BLE001
-        #  Si no se puede contar, se deja pasar: el tope es una proteccion
-        #  contra el gasto, no una puerta de seguridad. Negar la lectura por no
-        #  poder contar seria peor que leer una vez de mas.
+        #  Sin poder contar se cuenta cero, como antes de esta fase: las
+        #  pruebas sin base pasan propuestas falsas. El tope absoluto de arriba
+        #  NO alcanza a este camino: con la tabla caida se releeria en cada
+        #  vuelta, igual que antes (auditor de frontera, 17/10/2026).
         return 0
+    if len(descartes) >= MAXIMAS_RELECTURAS * 2:
+        return len(descartes)
+    return sum(1 for d in descartes if not _respuesta_rota(d))
+
+
+def _respuesta_rota(descartes) -> bool:
+    """
+    Si en esa lectura el modelo no llego a contestar con un objeto: el
+    descarte es el de 'cerebro.validar', leido de su constante. Cualquier otro
+    descarte es una lectura que si contesto, y cuenta.
+    """
+    from operaciones import cerebro
+
+    return any(cerebro.DESCARTE_SIN_OBJETO in str(d) for d in (descartes or []))
 
 
 def el_juicio_ignora_la_lectura(propuesta) -> bool:

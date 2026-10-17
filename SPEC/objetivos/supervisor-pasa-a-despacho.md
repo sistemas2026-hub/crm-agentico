@@ -14,10 +14,12 @@ persona, **con el motivo escrito en la propuesta**, visible para quien la abre.
 Agregado el 16/10/2026, por lo que midió ese día: **ninguna propuesta se queda
 sin evaluar** porque otras más viejas ocupan su lugar.
 
-**Medido el 16/10/2026 por la tarde:** hoy solo los grupos 2 y 3 (trabajo pedido
-y obra de red, con confianza alta) pueden pasar solos. La regla 1 no habilita
-nada, porque el clasificador no entiende el equipo que manda el motor y nunca
-confirma una falla. Ver la Fase 3.
+**Desde la Fase 4 (17/10/2026):** se queda para una persona solo la falla que la
+medición contradice, con el equipo en línea y la señal en rango, o apagado por
+falta de luz en la casa. Un trabajo pedido o una obra de red pasan siempre.
+Lo que ninguna herramienta mide, lo que no es de red ni de un cliente, y lo que
+el Supervisor no supo clasificar, siguen con una persona. Un caso cerrado
+nunca pasa.
 
 **Hasta dónde llega, decidido el 14/10/2026:** el Supervisor acepta su propia
 propuesta y el caso entra a la cola de Despacho. **No crea la orden de trabajo
@@ -120,6 +122,12 @@ a la cola no es mandar a nadie.
 | 16/10, tarde | **"Cerrado" usa el vocabulario del cierre:** en Dexter `Closed` o `resolved_at`; en WispHub, fuera de la lista blanca `EN_CURSO_EN_PROVEEDOR`. Tampoco pasan un caso inactivo, fusionado o con la última lectura de WispHub con error | Derivada del fail-closed y del vocabulario que ya comparten el cierre y los detectores, para que el paso y el cierre no discrepen sobre el mismo caso. Corrige esta ficha, que decía "la lista de `fuentes_adaptadores`": esa es un literal para contar |
 | 16/10, tarde | **Una medición sin causa ni señal, o en línea sin nivel, no es concluyente**: se vuelve a medir al día y su motivo no afirma la caída | Derivada del hallazgo del `auditor-independiente`: un 200 del proveedor sin datos sale del motor como "caído", y quedaba fijo los siete días de la propuesta |
 | 16/10, tarde | **La pieza de medición dice cuándo se midió**, en la hora del servidor (UTC) y con su etiqueta | Derivada: el panel no muestra la hora de cada pieza, y una medición vieja se leía como la de hoy. Mostrarla en la hora de cada empresa es del panel, que esta fase no toca |
+| 17/10 | **Fase 4: una falla pasa salvo que la medición la contradiga.** Se queda solo la falla con el equipo en línea y la señal en rango, y la que se apagó por falta de luz. Pasan LOS/LOF, caído sin causa, y lo que no se pudo medir | Decidido por el usuario con los 64 pendientes del 17/10 a la vista, ticket por ticket: la regla de la Fase 3 no alcanzaba a ninguno, y el ISP resolvía las fallas de fibra por su flujo normal en 1 a 3 días mientras el Supervisor esperaba. De 27 abiertos, con la regla nueva pasan 10 y quedan 17. **Revierte la decisión del 16/10 sobre LOS**: el despachador confirma con el cliente antes de mandar a alguien |
+| 17/10 | **Un trabajo pedido o una obra de red pasan siempre**, sin exigir confianza ni hipótesis | Decidido por el usuario. El 17/10 la exigencia de confianza alta dejaba afuera cuatro obras con la hipótesis clara y dos trabajos. **Revierte la decisión del 14/10 y del 16/10 sobre la confianza**: se escribe en el motivo, no decide |
+| 17/10 | **Lo que ninguna herramienta mide y lo que no es de red ni de un cliente siguen con una persona** | Confirmado por el usuario: un bloqueo de DNS o una orden interna no es una visita |
+| 17/10 | **Cuando el modelo agota sus vueltas de herramientas, se le pide el cierre sin herramientas**, y una respuesta que no se pudo leer no cuenta como lectura para el tope de relecturas (con un tope absoluto del doble) | Medido el 17/10 con el informe de pendientes: 9 de 64 lecturas tenían sus tres relecturas gastadas en "la respuesta del modelo no es un objeto", todas de tickets complejos en los que el modelo seguía consultando. Nunca llegaban a cerrar, y eran los que más valía la pena leer: tres obras de red, una con 28 afectados |
+| 17/10 | **Un error del motor no es una medición**: no se guarda, y la falla espera a que se pueda medir. Un estado que el motor no usa hoy, o uno vacío, tampoco pasa. "No se pudo medir" es lo que contesta el PROVEEDOR (equipo no registrado, SmartOLT sin responder), y eso sí pasa | Auditor de frontera, medido con pruebas propias: con el motor caído una vuelta, 5 fallas con el equipo en rango pasaban en la siguiente sin volver a medirse; y un cambio de vocabulario del motor ("online") las hacía pasar todas. En ninguno de los dos casos alguien midió algo, que es lo que la regla del usuario pide para dejar pasar. Las piezas de error que la Fase 3 ya guardó se tratan igual y se miden en la vuelta siguiente |
+| 17/10 | **El cierre sin herramientas lo pide solo la lectura de tickets**, y si falla queda lo de antes | Auditor independiente: en el chat, que no tiene contrato JSON, la persona habría visto el objeto crudo en vez del aviso de que no se pudo cerrar; y un cierre que fallaba se llevaba la lectura entera, sin fila, y el ticket se releía sin techo |
 | 16/10 | **La confianza exigida sigue en alta** (9 se quedaron por media o baja) | Decidido por el usuario. Bajarla haría pasar entre 4 y 8 casos más ese día |
 | 16/10 | **El tope acota cuántas pasan por vuelta, no cuántas se miran** | Tomada al encuadrar. Evaluar es barato (lee evidencia guardada, sin red); lo que hay que acotar es el efecto: si una regla se equivoca, que el daño de una vuelta tenga techo |
 | 16/10 | **Sin límite de antigüedad para la medición.** Se propuso exigir menos de 72 h y se **descartó** el mismo día, al preguntar el usuario por qué 72 | El 72 de `HORAS_LECTURA_FRESCA` mide otra cosa: cuán vieja puede ser la copia del ticket que trae WispHub (el importador corre cada hora; 72 h sin sincronizar es una sincronización rota). No dice cuánto vale una medición del equipo. Además: las fallas que hacen pasar un caso —fibra cortada, señal débil— no se curan solas; con el tope arreglado una falla confirmada pasa dentro de la hora de su lectura; y si ya se resolvió, el ticket se cierra y el caso sale de la cola, que excluye los cerrados (`despacho_pantalla_views.py`). Medido el 16/10: ninguna lectura de más de 3 días. Se reabre con un caso real de una medición vieja que haya pasado. **Anotado el mismo día por `auditor-de-frontera`:** la última razón es parcial. La cola excluye los casos cerrados en Dexter, no los cerrados en WispHub, y el paso no mira ninguno de los dos. Eso no reabre la antigüedad: es otra condición, y va primera en la Fase 3 |
@@ -243,6 +251,30 @@ camino (A-4 a A-7), la relectura que corta en las 60 más viejas (A-8), y H-1 en
 los otros llamadores de `clasificar`. El detalle está en
 `SPEC/auditorias/PASO-A-DESPACHO.md`.
 
+### Fase 4 · Pasa salvo que la medición lo contradiga
+
+Decidida el 17/10/2026 con el informe `informe_de_pendientes` sobre los 64
+pendientes reales (comando de solo lectura que esta fase agrega). Las reglas
+quedan así:
+
+| Grupo | Pasa solo | Se queda con una persona |
+|---|---|---|
+| Falla de servicio | con medición: LOS/LOF, caído sin causa, en línea sin nivel, o el proveedor no pudo medir | en línea con la señal en rango; apagado por falta de luz; sin medición todavía, que incluye un error del motor y un estado que no se reconoce (se vuelven a medir) |
+| Trabajo pedido, obra de red | siempre | — |
+| Nada lo mide, ni cliente ni red | — | siempre |
+| Sin grupo | — | hasta que una relectura lo clasifique |
+| Cualquiera con el caso cerrado | — | siempre |
+
+**Lo que se mide en esta fase, y cómo:**
+
+| # | Evidencia | Cómo se comprueba |
+|---|---|---|
+| 4.1 | Las pruebas de las reglas y del paso en verde sobre Postgres real: `test_las_cinco_reglas.py`, `test_pasan_las_fallas_medidas_y_nunca_un_caso_cerrado.py`, `test_el_paso_mira_todas_y_dice_por_que.py`, más las de `cerebro` y de la relectura | Salida pegada |
+| 4.2 | Mutaciones, cada una en rojo: en rango pasa; sin energía pasa; LOS no pasa; trabajo con confianza media no pasa; sin la vuelta de cierre; una lectura rota cuenta para el tope; un estado no reconocido pasa; un error del motor se guarda como medición; un error guardado por la Fase 3 pasa; la lectura no pide el cierre; un cierre que falla se lleva la lectura; el chat también pide cierre; `validar` cambia el texto del descarte; toda lectura con descartes deja de contar | Salida pegada, restaurando |
+| 4.3 | Regresión de la zona, ruff sin avisos nuevos, `git diff --cached --name-only` antes del commit | Salida pegada |
+| 4.4 | `auditor-de-frontera` y `auditor-independiente` sobre la regla nueva y la vuelta de cierre | Informes en la conversación y en `SPEC/auditorias/PASO-A-DESPACHO-FASE4.md` |
+| 4.5 | **En producción, por una persona:** después del deploy y antes de la vuelta de las :07, correr `informe_de_pendientes` y anotar los tickets que marca `PASA`. Después de la vuelta, cada uno de esos tickets ya no está pendiente y aparece en la cola de Despacho. Con el informe del 17/10 serían 95218, 95486, 95530, 94668, 60409, 86528, 90441, 77986, 95395 y 65210, si siguen abiertos. En las vueltas siguientes, los sin grupo (71357, 84000, 90491 y los otros) se releen y aparecen con grupo. Es una señal por ticket, no un conteo: `pasaron=` depende de cuántos pendientes haya ese día (auditor independiente, 17/10) | El informe de pendientes, antes y después, y la cola de Despacho |
+
 ## Restricciones
 
 Las permanentes del repositorio:
@@ -260,11 +292,13 @@ Las propias de este objetivo:
 
 - **NO crear la orden de trabajo ni asignar técnico o fecha.**
 - **NO tocar las cinco reglas ni sus umbrales** (`decidir`,
-  `CONFIANZA_EXIGIDA_SIN_MEDICION`, `SIEMPRE_UNA_PERSONA`,
-  `SIN_CONDICION_DE_MEDICION`): decisiones del 14 y del 16/10. La regla 1
-  cambió en la Fase 3 por decisión del usuario del 16/10: decide la medición
-  del equipo, y una caída por LOS/LOF va a una persona. Las otras cuatro
-  siguen iguales.
+  `SIEMPRE_UNA_PERSONA`, `SIN_CONDICION_DE_MEDICION`) sin una medición nueva
+  sobre los pendientes reales. Decisiones del 14, del 16 y del 17/10. La regla
+  1 cambió en la Fase 3 (16/10: decide la medición del equipo, y LOS iba a una
+  persona) y otra vez en la Fase 4 (17/10, el usuario con los 64 pendientes a
+  la vista: la falla pasa salvo que la medición la contradiga, LOS incluido).
+  También el 17/10, trabajos y obras dejaron de exigir confianza:
+  `CONFIANZA_EXIGIDA_SIN_MEDICION` ya no existe.
 - **NO sumar tipos de propuesta al paso automático**: sigue siendo solo
   `TICKET_SIN_DIAGNOSTICO`.
 - **NO volver a medir equipos desde la fase de paso**: ninguna llamada nueva al
@@ -285,8 +319,10 @@ Las propias de este objetivo:
 ## Qué NO hacer
 
 - **No asignar cuadrilla ni fecha.** El despachador reparte.
-- **No mandar a Despacho la falla con el equipo sano**, ni bajar la confianza
-  exigida: decididos el 16/10 con el número a la vista.
+- **No mandar a Despacho la falla con el equipo sano** (en línea y en rango):
+  decidido el 16/10 y sostenido el 17/10 con los tickets a la vista. La
+  confianza exigida a trabajos y obras, en cambio, se quitó el 17/10 por
+  decisión del usuario: ver Decisiones.
 - **No vincular ONUs ni corregir seriales desde acá.** Las 13 lecturas que no
   se pudieron medir (`onu_no_vinculada`, `serial_desactualizado`) son un dato
   que falta en WispHub o SmartOLT; el motor ya tiene `cli/proponer_sn_onu.py` y
