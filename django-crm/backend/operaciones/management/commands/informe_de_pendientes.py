@@ -21,6 +21,7 @@ EL CONTEXTO RLS SE FIJA ACÁ, como en 'propuestas_fuera_de_area': un comando
 no pasa por el middleware, y sin él las tablas devuelven 0 filas sin error.
 """
 
+import re
 from collections import Counter
 
 from django.core.exceptions import ValidationError
@@ -33,6 +34,35 @@ from operaciones import diagnostico_de_ticket as dxt
 from operaciones import lectura_de_ticket
 from operaciones import paso_a_despacho as pad
 from operaciones.models import PropuestaSupervisor
+from operaciones.razonamiento_modelos import FuenteRazonamiento, RazonamientoSupervisor
+
+_DIJO = re.compile(r"'(\w+)' con un valor que no esta declarado \(dijo '([^']*)'\)")
+
+
+def _lecturas(propuesta):
+    """
+    Cuántas veces el modelo leyó este ticket, y qué descartó la última vez.
+
+    El descarte es lo que 'cerebro.validar' tiró por no estar en la lista
+    (por ejemplo "grupo='Obra_de_red'"): es la diferencia entre "el modelo no
+    supo" y "el modelo lo dijo con otra forma", y la segunda se arregla sin
+    tocar las reglas. El texto ya viene sin identificadores, lo sanea
+    'razonamiento.registrar'.
+    """
+    filas = (RazonamientoSupervisor.objects
+             .filter(propuesta=propuesta,
+                     fuente=FuenteRazonamiento.LECTURA_TICKET)
+             .order_by("-registrado_en", "-created_at"))
+    cuantas = filas.count()
+    ultima = filas.first()
+    if ultima is None or not ultima.descartes:
+        return cuantas, "-"
+    partes = []
+    for d in ultima.descartes[:3]:
+        m = _DIJO.search(str(d))
+        partes.append(f"{m.group(1)}='{m.group(2)}'" if m else str(d)[:40])
+    return cuantas, "; ".join(partes)[:70]
+
 
 _GRUPO = {
     pad.FALLA_DE_SERVICIO: "falla",
@@ -161,15 +191,17 @@ class Command(BaseCommand):
             motivos[por_que] += 1
             casos[caso_corto.split(" ")[0] + (" Dexter" if "Dexter" in caso_corto else "")] += 1
             edad = (ahora - p.created_at).days
+            leidas, descarte = _lecturas(p)
             filas.append((
                 getattr(caso, "external_ticket_id", "") or "?",
                 f"{edad}d", _GRUPO.get(grupo, "sin grupo"), conf,
                 caso_corto, _medicion_corta(medicion), por_que,
                 "SI" if si_los else "-", "SI" if si_media else "-",
-                _hipotesis(p)))
+                str(leidas), descarte, _hipotesis(p)))
 
         cab = ("ticket", "edad", "grupo", "conf", "caso", "medicion",
-               "por que se queda", "con LOS", "con media", "hipotesis (tapada)")
+               "por que se queda", "con LOS", "con media", "leidas",
+               "descarte del modelo", "hipotesis (tapada)")
         anchos = [max(len(str(f[i])) for f in [cab, *filas]) for i in range(len(cab))]
         linea = lambda f: "  ".join(str(v).ljust(a) for v, a in zip(f, anchos))  # noqa: E731
         self.stdout.write(linea(cab))

@@ -110,6 +110,30 @@ def test_no_deja_salir_datos_del_cliente(org_a):
         assert dato not in salida, f"el informe escribio {dato!r}"
 
 
+def test_dice_cuantas_veces_se_leyo_y_que_descarto_el_modelo(org_a):
+    """
+    La diferencia entre "el modelo no supo" y "lo dijo con otra forma": la
+    segunda se arregla sin tocar las reglas, y solo se ve en los descartes.
+    """
+    from operaciones.razonamiento_modelos import (
+        FuenteRazonamiento,
+        RazonamientoSupervisor,
+    )
+
+    ticket = _pendiente(org_a, grupo="")
+    p = P.objects.get(org=org_a)
+    for _ in range(2):
+        RazonamientoSupervisor.objects.create(
+            org=org_a, propuesta=p, fuente=FuenteRazonamiento.LECTURA_TICKET,
+            registrado_en=timezone.now(),
+            descartes=["'grupo' con un valor que no esta declarado (dijo "
+                       "'Obra_de_red'): se descarta, no se elige el mas parecido"])
+
+    salida = _correr(org_a)
+
+    assert _fila(salida, ticket)[9:11] == ["2", "grupo='Obra_de_red'"]
+
+
 def test_una_que_ya_pasa_cuenta_en_las_tres(org_a):
     debil = _pendiente(org_a, grupo=pad.FALLA_DE_SERVICIO,
                        medida=_medida("en_linea", dbm=-27.0))
