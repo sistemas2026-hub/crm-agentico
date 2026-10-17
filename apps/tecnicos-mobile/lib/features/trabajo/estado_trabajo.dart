@@ -110,13 +110,21 @@ enum EstadoTrabajo {
 
 /// Las cuatro pestañas de la pantalla Trabajo.
 /// Los filtros de estado del Hub de Trabajo, en el orden del diseño.
-enum PestanaTrabajo { todos, pendientes, enProceso, finalizadas, conNovedad }
+enum PestanaTrabajo {
+  todos,
+  pendientes,
+  enProceso,
+  detenidas,
+  finalizadas,
+  conNovedad,
+}
 
 extension EtiquetaPestana on PestanaTrabajo {
   String get etiqueta => switch (this) {
         PestanaTrabajo.todos => 'Todos',
         PestanaTrabajo.pendientes => 'Pendientes',
         PestanaTrabajo.enProceso => 'En Proceso',
+        PestanaTrabajo.detenidas => 'Detenidas',
         PestanaTrabajo.finalizadas => 'Finalizadas',
         PestanaTrabajo.conNovedad => 'Con Novedad',
       };
@@ -127,6 +135,9 @@ extension EtiquetaPestana on PestanaTrabajo {
 /// - **Todos**: el universo del segmento elegido, sin filtrar por estado.
 /// - **Pendientes**: asignada y todavía sin arrancar.
 /// - **En proceso**: en camino o en sitio.
+/// - **Detenidas**: con un bloqueo abierto. Hasta el 17/10/2026 no entraban
+///   en ningún filtro salvo «Todos», y un trabajo parado quedaba escondido
+///   justo cuando alguien tenía que destrabarlo.
 /// - **Finalizadas**: terminada, enviada o no, y cerrada.
 /// - **Con novedad**: lo que se salió del camino —devuelta para corregir,
 ///   cancelada o con un estado que esta versión no conoce—. El diseño lo separa
@@ -145,6 +156,7 @@ bool perteneceA(
     PestanaTrabajo.todos => true,
     PestanaTrabajo.pendientes => estado == EstadoTrabajo.asignada,
     PestanaTrabajo.enProceso => estado.enMarcha,
+    PestanaTrabajo.detenidas => estado == EstadoTrabajo.bloqueada,
     PestanaTrabajo.finalizadas => estado.terminada && estado != EstadoTrabajo.cancelada,
     PestanaTrabajo.conNovedad => estado == EstadoTrabajo.correccionRequerida ||
         estado == EstadoTrabajo.cancelada ||

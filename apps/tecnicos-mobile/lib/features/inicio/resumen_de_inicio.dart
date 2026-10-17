@@ -25,7 +25,7 @@
 library;
 
 import '../materiales/estado_de_jornada.dart';
-import '../trabajo/estado_trabajo.dart';
+import '../trabajo/orden_operativo.dart';
 import '../trabajo/trabajo_vista.dart';
 
 /// Algo que alguien tiene que mirar.
@@ -65,6 +65,7 @@ class ResumenDeInicio {
     required this.jornadaCerrada,
     this.horasDelDia = const <HoraDelDia>[],
     this.consumidoSinEntrega,
+    this.enManoPorUnidad,
   });
 
   /// Los trabajos de la jornada.
@@ -115,6 +116,16 @@ class ResumenDeInicio {
   /// dato preciso. Medido el 05/10/2026 sobre el técnico del laboratorio: dos
   /// consumos y cero entregas registradas.
   final String? consumidoSinEntrega;
+
+  /// Lo que el técnico tiene encima, separado por unidad: «5 unidades · 320
+  /// metros». Nulo cuando el kit es de una sola unidad, o cuando el servidor
+  /// no mandó el detalle por material.
+  ///
+  /// POR QUÉ (17/10/2026): «Recibido 24 · consumido 14 · EN MANO 10» suma
+  /// ONTs con metros de cable, porque el servidor resume la jornada en un solo
+  /// número. Una ONT y un metro de drop no son la misma cosa, y el total no
+  /// le dice al técnico cuánto tiene de ninguna de las dos.
+  final String? enManoPorUnidad;
 
   /// Arma el resumen con lo que ya está en el teléfono.
   ///
@@ -210,6 +221,7 @@ class ResumenDeInicio {
       ],
       horasDelDia: _horasDe(trabajos, momento),
       consumidoSinEntrega: _consumidoSinEntrega(jornada?.aDevolver),
+      enManoPorUnidad: _enManoPorUnidad(jornada),
       kitRecibido: jornada?.recibido ?? '0',
       kitDisponible: jornada?.aDevolver ?? '0',
       kitConsumido: jornada?.consumido ?? '0',
@@ -222,11 +234,21 @@ class ResumenDeInicio {
   ///
   /// La correccion requerida NO entra: el supervisor la devolvio y hay que
   /// rehacer algo, asi que sigue siendo trabajo del dia.
-  static bool _estaTerminado(TrabajoVista t) =>
-      t.estado == EstadoTrabajo.completadaCampo ||
-      t.estado == EstadoTrabajo.completadaSinEnviar ||
-      t.estado == EstadoTrabajo.cerrada ||
-      t.estado == EstadoTrabajo.cancelada;
+  static bool _estaTerminado(TrabajoVista t) => OrdenOperativo.terminado(t);
+
+  static String? _enManoPorUnidad(EstadoDeJornada? jornada) {
+    if (jornada == null || jornada.materiales.isEmpty) return null;
+    final Map<String, double> porUnidad = <String, double>{};
+    for (final MaterialDeJornada m in jornada.materiales) {
+      porUnidad[m.unidad] = (porUnidad[m.unidad] ?? 0) + m.porDevolver;
+    }
+    if (porUnidad.length < 2) return null;
+    String n(double v) =>
+        v == v.roundToDouble() ? v.round().toString() : v.toString();
+    return porUnidad.entries
+        .map((MapEntry<String, double> e) => '${n(e.value)} ${e.key}')
+        .join(' · ');
+  }
 
   /// Cuál es el próximo trabajo.
   ///
@@ -243,36 +265,15 @@ class ResumenDeInicio {
   /// Sin ninguna señal —ni empezado, ni vencimiento, ni prioridad— se devuelve
   /// el primero de la lista tal como vino del servidor, que ya llega ordenado.
   /// No se inventa un criterio propio para desempatar.
+  ///
+  /// Desde el 17/10/2026 la regla vive en `OrdenOperativo`, que es también el
+  /// orden de la lista de Órdenes: el próximo trabajo es el primero de esa
+  /// lista, y las dos pantallas no pueden contradecirse sobre el mismo día.
   static TrabajoVista? _elegirSiguiente(
     List<TrabajoVista> trabajos,
     DateTime ahora,
-  ) {
-    final abiertos = trabajos.where((t) => !_estaTerminado(t)).toList();
-    if (abiertos.isEmpty) return null;
-
-    final empezado =
-        abiertos.where((t) => t.estado == EstadoTrabajo.enSitio).toList();
-    if (empezado.isNotEmpty) return empezado.first;
-
-    final enCamino =
-        abiertos.where((t) => t.estado == EstadoTrabajo.enCamino).toList();
-    if (enCamino.isNotEmpty) return enCamino.first;
-
-    final conVencimiento = abiertos
-        .where((t) => t.minutosParaVencer(ahora: ahora) != null)
-        .toList()
-      ..sort((a, b) => a
-          .minutosParaVencer(ahora: ahora)!
-          .compareTo(b.minutosParaVencer(ahora: ahora)!));
-    if (conVencimiento.isNotEmpty) return conVencimiento.first;
-
-    const orden = <String, int>{'alta': 0, 'media': 1, 'baja': 2};
-    final porPrioridad = abiertos.where((t) => t.prioridad.isNotEmpty).toList()
-      ..sort((a, b) => (orden[a.prioridad] ?? 9).compareTo(orden[b.prioridad] ?? 9));
-    if (porPrioridad.isNotEmpty) return porPrioridad.first;
-
-    return abiertos.first;
-  }
+  ) =>
+      OrdenOperativo.siguiente(trabajos, ahora: ahora);
 }
 
 /// Una de las horas comprometidas del día.

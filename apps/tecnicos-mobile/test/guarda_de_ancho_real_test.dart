@@ -213,6 +213,53 @@ void main() {
             ));
       });
 
+      // TANDA 1 (17/10/2026): la lista ganó un filtro («Detenidas») y una
+      // línea que dice en qué orden está, y la tarjeta en curso dos íconos que
+      // ahora responden. La orden de ejemplo está en sitio: es la que los
+      // dibuja. Sin esta prueba, la letra grande solo se medía en la ficha y en
+      // la ejecución.
+      testWidgets('La lista entra con letra grande y una orden en curso',
+          (WidgetTester t) async {
+        final OrdenesJornada ordenes = armarOrdenes(t);
+        await aEsteAncho(
+          t,
+          ancho,
+          () => TrabajoScreen(ordenes: ordenes, abrirTrabajo: (_, _) async {}),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
+      testWidgets('Inicio entra con letra grande', (WidgetTester t) async {
+        final OrdenesJornada ordenes = armarOrdenes(t);
+        await aEsteAncho(
+          t,
+          ancho,
+          () => InicioScreen(
+                ordenes: ordenes,
+                abrirTrabajo: (_, _) async {},
+                nombreTecnico: 'Carlos Gómez',
+                ahora: DateTime(2026, 10, 5, 14),
+              ),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
+      // Materiales perdió seis botones que no hacían nada: la fila de
+      // herramientas pasó de tres a dos, y las tarjetas de material cambiaron
+      // de forma. El kit de demostración trae las cuatro clases.
+      testWidgets('Materiales entra con el kit completo y letra grande',
+          (WidgetTester t) async {
+        await aEsteAncho(
+          t,
+          ancho,
+          () => const MaterialesScreen(
+                mostrarDatosFuturos: true,
+                kit: KitDeJornada.vacio(),
+              ),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
       testWidgets('La ficha de la orden entra', (WidgetTester t) async {
         final OrdenesJornada ordenes = armarOrdenes(t);
         await aEsteAncho(t, ancho, () => DetalleOrdenScreen(

@@ -519,14 +519,20 @@ class _InicioScreenState extends State<InicioScreen> {
         // y sale de las órdenes reales, así que la barra se queda, debajo de
         // la rejilla en vez de en lugar de ella.
         const SizedBox(height: AppSpacing.sm),
+        // A 360 px con la letra en 1.3 esta fila desbordaba 3.8 px: los dos
+        // textos tenían su ancho natural y ninguno cedía (medido el 17/10/2026
+        // por la guarda de ancho real). El rótulo cede y baja de renglón; el
+        // número, que es el dato, no se corta nunca.
         Row(
           children: <Widget>[
-            Text(
-              'Avance del día',
-              style: AppTypography.labelCaption
-                  .copyWith(color: AppColors.onSurface),
+            Expanded(
+              child: Text(
+                'Avance del día',
+                style: AppTypography.labelCaption
+                    .copyWith(color: AppColors.onSurface),
+              ),
             ),
-            const Spacer(),
+            const SizedBox(width: AppSpacing.sm),
             // "1 / 4 OT" en monoespaciada se lee "1 / 4 0T": la O y el cero
             // se confunden. "de" no tiene ese problema y se entiende igual.
             Text(
@@ -801,11 +807,15 @@ class _InicioScreenState extends State<InicioScreen> {
                   // Cuando el saldo no cierra se dice QUE PASA, no el numero
                   // de la resta. «Recibido 0 · consumido 38.5» es cierto pero
                   // deja al tecnico haciendo la cuenta; la frase la hace por el.
-                  resumen.consumidoSinEntrega == null
-                      ? 'Recibido ${resumen.kitRecibido} · consumido '
-                          '${resumen.kitConsumido}'
-                      : 'Consumiste ${resumen.consumidoSinEntrega} que no '
-                          'figuran entregados',
+                  resumen.consumidoSinEntrega != null
+                      ? 'Consumiste ${resumen.consumidoSinEntrega} que no '
+                          'figuran entregados'
+                      // Con más de una unidad, el total mezcla ONTs con metros
+                      // de cable: se dice por unidad (17/10/2026).
+                      : resumen.enManoPorUnidad != null
+                      ? resumen.enManoPorUnidad!
+                      : 'Recibido ${resumen.kitRecibido} · consumido '
+                          '${resumen.kitConsumido}',
                   style: AppTypography.bodySm
                       .copyWith(color: AppColors.surfaceContainerLowest),
                   maxLines: 2,
@@ -834,9 +844,13 @@ class _InicioScreenState extends State<InicioScreen> {
               borderRadius: AppRadius.brChico,
             ),
             child: Text(
-              resumen.consumidoSinEntrega == null
-                  ? 'EN MANO ${resumen.kitDisponible}'
-                  : 'REVISAR',
+              resumen.consumidoSinEntrega != null
+                  ? 'REVISAR'
+                  // Un solo número de «en mano» solo tiene sentido con una
+                  // sola unidad; con varias, la línea de al lado ya las dice.
+                  : resumen.enManoPorUnidad != null
+                  ? 'EN MANO'
+                  : 'EN MANO ${resumen.kitDisponible}',
               style: AppTypography.labelBadge.copyWith(
                 color: resumen.consumidoSinEntrega == null
                     ? AppColors.tertiaryFixed

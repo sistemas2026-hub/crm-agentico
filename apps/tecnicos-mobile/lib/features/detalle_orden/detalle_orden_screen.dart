@@ -2037,7 +2037,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   // El veredicto del motor es sobre 1490: es la de bajada, la
                   // única que habla de lo que llega a la casa.
                   etiqueta: trabajo.veredictoSenal,
-                  buena: aceptable,
+                  // Sin veredicto del motor no se pinta de rojo: «no lo juzgó
+                  // nadie» no es «está mal».
+                  buena: trabajo.veredictoSenal.isEmpty ? null : aceptable,
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
@@ -2050,7 +2052,8 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   // Sin etiqueta: el motor no emite veredicto para la de
                   // subida, y ponerle uno acá sería inventarlo.
                   etiqueta: '',
-                  buena: aceptable,
+                  // Y sin color de juicio: antes heredaba el de la bajada.
+                  buena: null,
                 ),
               ),
             ],
@@ -2641,8 +2644,11 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     final (IconData icono, String texto) = switch (trabajo.sinEquipo) {
       SinEquipo.serialNoCargado => (
         Icons.link_off,
+        // Decía «No es una falla de red». No se sabe: sin el equipo cargado no
+        // hay nada que consultar, y eso no prueba que la red esté bien
+        // (corregido el 17/10/2026).
         'Este cliente no tiene el equipo cargado en el sistema, así que no '
-            'hay señal que consultar. No es una falla de red.',
+            'se puede consultar su señal. Eso no dice si la red está bien o mal.',
       ),
       SinEquipo.serialDesactualizado => (
         Icons.sync_problem,
@@ -3630,7 +3636,14 @@ class _MedidaOptica extends StatelessWidget {
 
   /// El veredicto del motor, o vacío si no emitió ninguno para esta medida.
   final String etiqueta;
-  final bool buena;
+
+  /// El veredicto del motor sobre ESTA lectura, o `null` si no hay ninguno.
+  ///
+  /// `null` no es «mala»: es «nadie la juzgó». Hasta el 17/10/2026 la tarjeta
+  /// de Rx OLT recibía el veredicto de la Rx ONU y se pintaba verde o roja
+  /// según la bajada, con un rango (-8 a -25) que es el de la bajada. Ahora la
+  /// subida se muestra como número, sin color de juicio ni barra.
+  final bool? buena;
 
   /// Los bordes de la zona aceptable, en dBm. Son los de G-GO-04, y no los
   /// de la maqueta.
@@ -3702,7 +3715,10 @@ class _MedidaOptica extends StatelessWidget {
   Widget build(BuildContext context) {
     final double? dbm = _numero;
     final bool hay = dbm != null;
-    final Color acento = buena
+    final bool? veredicto = buena;
+    final Color acento = veredicto == null
+        ? AppColors.onSurface
+        : veredicto
         ? AppColors.onTertiaryContainer
         : AppColors.error;
 
@@ -3734,18 +3750,18 @@ class _MedidaOptica extends StatelessWidget {
               ),
             ],
           ),
-          if (etiqueta.isNotEmpty) ...<Widget>[
+          if (etiqueta.isNotEmpty && veredicto != null) ...<Widget>[
             const SizedBox(height: 4),
             Align(
               alignment: Alignment.centerLeft,
-              child: buena
+              child: veredicto
                   ? DexterPastilla.enRegla(texto: etiqueta.replaceAll('_', ' '))
                   : DexterPastilla.critica(
                       texto: etiqueta.replaceAll('_', ' '),
                     ),
             ),
           ],
-          if (hay) ...<Widget>[
+          if (hay && veredicto != null) ...<Widget>[
             const SizedBox(height: AppSpacing.sm),
             // Sin los rotulos de los extremos: el rango completo ya se
             // escribe una sola vez debajo de las dos tarjetas ("Aceptable
@@ -3754,7 +3770,7 @@ class _MedidaOptica extends StatelessWidget {
             // Sigue estando para el lector de pantalla, que no tiene esa
             // linea a la vista.
             DexterBarraSegmentada(
-              celdas: coloresDe(dbm, buena: buena),
+              celdas: coloresDe(dbm, buena: veredicto),
               descripcionAccesible:
                   '$titulo, $detalle: ${dbm.toStringAsFixed(2)} dBm. '
                   'Aceptable entre ${_max.toStringAsFixed(0)} y '

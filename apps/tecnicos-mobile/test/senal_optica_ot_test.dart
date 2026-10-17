@@ -284,7 +284,7 @@ void main() {
   });
 
   group('3. Sin lectura se dice POR QUÉ, no se deja un hueco', () {
-    testWidgets('Serial no cargado: no es una falla de red',
+    testWidgets('Serial no cargado: se dice que no se puede consultar, sin absolver a la red',
         (WidgetTester t) async {
       // Le pasa a 1.299 de 4.163 clientes activos, medido. Una tarjeta vacía
       // manda a buscar una falla donde solo falta cargar un dato.
@@ -295,7 +295,11 @@ void main() {
       ));
 
       expect(find.textContaining('no tiene el equipo cargado'), findsOneWidget);
-      expect(find.textContaining('No es una falla de red'), findsOneWidget);
+      // Decía «No es una falla de red», y eso no se sabe: sin equipo cargado
+      // no hay nada que consultar (17/10/2026).
+      expect(find.textContaining('No es una falla de red'), findsNothing);
+      expect(find.textContaining('no dice si la red está bien o mal'),
+          findsOneWidget);
     });
 
     testWidgets('Serial desactualizado se distingue del anterior',
@@ -733,6 +737,35 @@ void main() {
 
       expect(find.textContaining('pierde paquetes'), findsOneWidget);
       expect(find.textContaining('caja NAP'), findsOneWidget);
+    });
+  });
+
+  group('8. La subida no hereda el veredicto de la bajada (17/10/2026)', () {
+    Color colorDe(WidgetTester t, String texto) =>
+        t.widget<Text>(find.text(texto)).style!.color!;
+
+    testWidgets('Con la bajada mala, la Rx OLT no se pinta de rojo',
+        (WidgetTester t) async {
+      // Hasta acá las dos tarjetas recibían el mismo `buena`: la de subida
+      // salía roja o verde según la Rx ONU, con un rango que es de la bajada.
+      pantallaAlta(t);
+      await montar(t, orden(potencia: '-27.40 dBm', veredicto: 'atenuacion_alta'));
+
+      expect(colorDe(t, '-27.40'), AppColors.error, reason: 'la bajada sí');
+      expect(colorDe(t, '-26.99'), AppColors.onSurface,
+          reason: 'la subida no tiene veredicto: va en color neutro');
+      // Una sola barra con el rango -8 a -25: la de la bajada.
+      expect(find.byType(DexterBarraSegmentada), findsOneWidget);
+    });
+
+    testWidgets('Sin veredicto del motor, la Rx ONU tampoco se pinta de rojo',
+        (WidgetTester t) async {
+      // «Nadie la juzgó» no es «está mal».
+      pantallaAlta(t);
+      await montar(t, orden(veredicto: ''));
+
+      expect(colorDe(t, '-21.19'), isNot(AppColors.error));
+      expect(find.byType(DexterBarraSegmentada), findsNothing);
     });
   });
 }

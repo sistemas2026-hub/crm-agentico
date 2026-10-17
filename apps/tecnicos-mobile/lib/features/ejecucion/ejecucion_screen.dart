@@ -111,6 +111,11 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// El botón "Borrador" no guarda nada nuevo —cada respuesta ya se escribió
   /// en SQLite al tocarla—: confirma que lo escrito está a salvo.
   bool _borradorConfirmado = false;
+
+  /// Si ya se intentó finalizar con algo pendiente. Hasta entonces la franja
+  /// «Falta» es gris: durante el trabajo siempre falta algo, y pintarlo de rojo
+  /// desde el primer minuto hacía que toda la visita pareciera una emergencia.
+  bool _intentoFinalizar = false;
   Timer? _borradorTimer;
 
   List<dynamic> _campos = [];
@@ -310,6 +315,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     // decidía de verdad.
     final CierreDeOrden veredicto = _cierre;
     if (!veredicto.puedeCerrar) {
+      setState(() => _intentoFinalizar = true);
       final RequisitoDeCierre primero = veredicto.bloqueantes.first;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -346,14 +352,20 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
+          // «¡Trabajo Finalizado con Éxito!» se leía como «la oficina ya lo
+          // tiene» aunque estuviera sin señal, y además falta la revisión.
+          // Ahora dice las tres cosas que son verdad en ese momento
+          // (17/10/2026). El verde se guarda para lo que el servidor aceptó.
           icon: const Icon(
-            Icons.check_circle,
-            color: AppTheme.successGreen,
+            Icons.task_alt,
+            color: AppColors.secondary,
             size: 48,
           ),
-          title: const Text('¡Trabajo Finalizado con Éxito!'),
+          title: const Text('Trabajo terminado en campo'),
           content: const Text(
-            'La orden ha quedado guardada de forma segura en este dispositivo. Si no hay conexión, se enviará al servidor automáticamente al reconectar.',
+            'Quedó guardado en este teléfono. Se envía solo cuando haya '
+            'señal, y después la oficina lo revisa: todavía puede volver '
+            'con observaciones.',
           ),
           actions: [
             ElevatedButton(
@@ -1328,9 +1340,17 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     final List<RequisitoDeCierre> faltan = _cierre.bloqueantes;
     if (faltan.isEmpty) return const SizedBox.shrink();
 
+    // GRIS MIENTRAS SE TRABAJA, ROJA AL INTENTAR CERRAR (17/10/2026). Sigue
+    // fija arriba y con los nombres de lo que falta: lo que cambia es el
+    // tono, para que el rojo signifique «esto te impide cerrar ahora».
+    final bool rojo = _intentoFinalizar;
+    final Color fondo =
+        rojo ? AppColors.errorContainer : AppColors.surfaceContainerHigh;
+    final Color tinta =
+        rojo ? AppColors.onErrorContainer : AppColors.onSurfaceVariant;
     return Container(
       width: double.infinity,
-      color: AppColors.errorContainer,
+      color: fondo,
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.margen,
         vertical: AppSpacing.sm,
@@ -1338,8 +1358,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const Icon(Icons.error_outline,
-              size: 18, color: AppColors.onErrorContainer),
+          Icon(rojo ? Icons.error_outline : Icons.checklist,
+              size: 18, color: tinta),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
@@ -1347,7 +1367,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
               // igual para saber cuales, que es justo lo que esto evita.
               'Falta: ${faltan.map((RequisitoDeCierre r) => r.titulo).join(' · ')}',
               style: AppTypography.cuerpoChico.copyWith(
-                color: AppColors.onErrorContainer,
+                color: tinta,
                 fontWeight: FontWeight.w600,
               ),
             ),

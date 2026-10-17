@@ -696,14 +696,10 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
             alTocar: () => _pedirABodega(materiales),
           ),
         ),
-        const SizedBox(width: AppSpacing.sm),
-        const Expanded(
-          child: _BotonHerramienta(
-            icono: Icons.report_problem,
-            texto: 'Incidencia',
-            colorIcono: AppColors.error,
-          ),
-        ),
+        // SIN ACCION NO HAY BOTON (17/10/2026): «Incidencia» estaba dibujado sin
+        // `alTocar` porque el modulo que lo respaldaria no existe. Un boton
+        // que no responde enseña a no confiar en los demas.
+        // Lo que no cuadra se explica en el cierre de jornada, uno por uno.
       ],
     );
   }
@@ -1334,7 +1330,9 @@ class _TarjetaMaterial extends StatelessWidget {
                     ),
                   ),
                 ),
-                const _AccionChica(texto: 'Ver OTs', icono: Icons.chevron_right),
+                // SIN ACCION NO HAY BOTON (17/10/2026): «Ver OTs» estaba dibujado sin
+                // `alTocar` porque el modulo que lo respaldaria no existe. Un boton
+                // que no responde enseña a no confiar en los demas.
               ],
             ),
           ),
@@ -1381,7 +1379,9 @@ class _TarjetaMaterial extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const _AccionChica(texto: 'Ajustar Metros', icono: Icons.straighten),
+            // SIN ACCION NO HAY BOTON (17/10/2026): «Ajustar Metros» estaba dibujado sin
+            // `alTocar` porque el modulo que lo respaldaria no existe. Un boton
+            // que no responde enseña a no confiar en los demas.
           ],
         ),
       ],
@@ -1418,14 +1418,9 @@ class _TarjetaMaterial extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const Icon(Icons.verified, size: 13, color: AppColors.exitoFuerte),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Validado',
-                    style: AppTypography.etiquetaChica.copyWith(
-                      color: AppColors.exitoFuerte,
-                    ),
-                  ),
+                  // «Validado» estaba fijo en el codigo: lo decia de todo
+                  // equipo, aunque nadie lo hubiera comprobado. Lo que si
+                  // comprueba es «Verificar MAC/SN», abajo.
                 ],
               ),
               const SizedBox(height: AppSpacing.sm),
@@ -1509,14 +1504,9 @@ class _TarjetaMaterial extends StatelessWidget {
                     : () => alVerificar!(material),
               ),
             ),
-            const SizedBox(width: AppSpacing.sm),
-            const Expanded(
-              child: _AccionChica(
-                texto: 'Log Trazabilidad',
-                icono: Icons.history_edu,
-                color: AppColors.secondary,
-              ),
-            ),
+            // SIN ACCION NO HAY BOTON (17/10/2026): «Log Trazabilidad» estaba dibujado sin
+            // `alTocar` porque el modulo que lo respaldaria no existe. Un boton
+            // que no responde enseña a no confiar en los demas.
           ],
         ),
       ],
@@ -1534,10 +1524,9 @@ class _TarjetaMaterial extends StatelessWidget {
             style: AppTypography.etiquetaChica,
           ),
         ),
-        _AccionChica(
-          texto: material.clase == ClaseMaterial.terminal ? 'Asignar' : 'Ajustar',
-          icono: material.clase == ClaseMaterial.terminal ? Icons.add : Icons.tune,
-        ),
+        // SIN ACCION NO HAY BOTON (17/10/2026): «Asignar» / «Ajustar» estaba dibujado sin
+        // `alTocar` porque el modulo que lo respaldaria no existe. Un boton
+        // que no responde enseña a no confiar en los demas.
       ],
     );
   }
@@ -1567,20 +1556,19 @@ class _ColumnaMetraje extends StatelessWidget {
   }
 }
 
-/// Acción de una tarjeta de material. Todavía no hace nada: el módulo de
-/// inventario no existe, y un botón que descuenta material sin backend sería
-/// una mentira con consecuencias.
+/// Acción de una tarjeta de material. Hoy la única es «Verificar MAC/SN»: las
+/// que no tenían un módulo detrás se quitaron el 17/10/2026 en vez de quedar
+/// dibujadas sin hacer nada.
 class _AccionChica extends StatelessWidget {
   const _AccionChica({
     required this.texto,
     required this.icono,
-    this.color = AppColors.primary,
     this.alTocar,
   });
 
   final String texto;
   final IconData icono;
-  final Color color;
+  Color get color => AppColors.primary;
   final VoidCallback? alTocar;
 
   @override

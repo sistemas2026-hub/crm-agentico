@@ -5,6 +5,7 @@ import '../../../demo/field_mock_data.dart';
 import '../../../core/theme/app_theme.dart';
 import '../estado_trabajo.dart';
 import '../trabajo_vista.dart';
+import '../../../core/acciones/salir_de_la_app.dart';
 
 /// Un trabajo en la lista, con las variantes del diseño de Stitch.
 ///
@@ -25,9 +26,13 @@ class TarjetaTrabajo extends StatefulWidget {
     this.onTap,
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
     this.metrosHasta,
+    this.salir = const SalirDeLaApp(),
   });
 
   final TrabajoVista trabajo;
+
+  /// Con qué se abren el mapa y el marcador. Se recibe para poder probarlo.
+  final SalirDeLaApp salir;
   final VoidCallback? onTap;
   final bool mostrarDatosFuturos;
 
@@ -57,6 +62,38 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
   bool get mostrarDatosFuturos => widget.mostrarDatosFuturos;
 
   bool get _enCurso => trabajo.estado.enMarcha;
+
+  /// Hay algo que abrir: una latitud sin longitud, o un 0,0, son dato y no
+  /// son ubicación. La misma regla que usa Inicio (`SalirDeLaApp`).
+  bool get _hayUbicacion =>
+      SalirDeLaApp.uriDeMapa(
+        latitud: trabajo.latitud,
+        longitud: trabajo.longitud,
+      ) !=
+      null;
+  bool get _hayTelefono => SalirDeLaApp.uriDeTelefono(trabajo.telefono) != null;
+
+  Future<void> _navegar() async {
+    final bool abrio = await widget.salir.navegar(
+      latitud: trabajo.latitud,
+      longitud: trabajo.longitud,
+      etiqueta: trabajo.clienteNombre,
+    );
+    if (!abrio && mounted) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+        content: Text('No se pudo abrir el mapa. ¿Hay alguno instalado?'),
+      ));
+    }
+  }
+
+  Future<void> _llamar() async {
+    final bool abrio = await widget.salir.llamar(trabajo.telefono);
+    if (!abrio && mounted) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+        content: Text('No se pudo abrir el marcador de este equipo.'),
+      ));
+    }
+  }
   bool get _terminado => trabajo.estado.terminada;
   bool get _incidencia => trabajo.familia == FamiliaTrabajo.incidencia;
 
@@ -960,9 +997,17 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
-          _BotonIcono(icono: Icons.near_me, activo: trabajo.latitud != null),
+          _BotonIcono(
+            icono: Icons.near_me,
+            etiqueta: _hayUbicacion ? 'Navegar' : 'Sin ubicación en la orden',
+            alTocar: _hayUbicacion ? _navegar : null,
+          ),
           const SizedBox(width: AppSpacing.sm),
-          _BotonIcono(icono: Icons.call, activo: trabajo.telefono.isNotEmpty),
+          _BotonIcono(
+            icono: Icons.call,
+            etiqueta: _hayTelefono ? 'Llamar al cliente' : 'Sin teléfono en la orden',
+            alTocar: _hayTelefono ? _llamar : null,
+          ),
         ],
       );
     }
@@ -999,13 +1044,18 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
+        // «Iniciar ruta de viaje» abría la ficha, como «Detalles»: decía una
+        // cosa y hacía otra (17/10/2026). Ahora abre el mapa, y sin ubicación
+        // en la orden se apaga y lo dice.
         Expanded(
           child: _BotonAccion(
-            texto: 'Iniciar ruta de viaje',
+            texto: _hayUbicacion ? 'Navegar' : 'Sin ubicación',
             icono: Icons.navigation,
-            fondo: AppColors.secondary,
-            color: AppColors.onSecondary,
-            onTap: onTap,
+            fondo: _hayUbicacion
+                ? AppColors.secondary
+                : AppColors.surfaceContainerHigh,
+            color: _hayUbicacion ? AppColors.onSecondary : AppColors.outline,
+            onTap: _hayUbicacion ? _navegar : null,
           ),
         ),
       ],
@@ -1113,27 +1163,50 @@ class _BotonAccion extends StatelessWidget {
   }
 }
 
-/// Los dos botones cuadrados del pie: navegar y llamar. Todavía no abren nada
-/// —falta decidir la dependencia— y se ven apagados si el dato no existe.
+/// Los dos botones cuadrados del pie: navegar y llamar.
+///
+/// Hasta el 17/10/2026 eran un dibujo: se veían encendidos con el dato y no
+/// abrían nada. Ahora abren el mapa y el marcador, y sin el dato se apagan con
+/// la razón en el lector de pantalla y en el texto de ayuda al mantener
+/// apretado.
 class _BotonIcono extends StatelessWidget {
-  const _BotonIcono({required this.icono, required this.activo});
+  const _BotonIcono({
+    required this.icono,
+    required this.etiqueta,
+    required this.alTocar,
+  });
 
   final IconData icono;
-  final bool activo;
+  final String etiqueta;
+  final VoidCallback? alTocar;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 52,
-      height: 52,
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceContainer,
-        borderRadius: AppRadius.brTarjeta,
-      ),
-      child: Icon(
-        icono,
-        size: 20,
-        color: activo ? AppColors.primary : AppColors.outline,
+    final bool activo = alTocar != null;
+    return Tooltip(
+      message: etiqueta,
+      child: Semantics(
+        button: true,
+        enabled: activo,
+        label: etiqueta,
+        excludeSemantics: true,
+        child: Material(
+          color: AppColors.surfaceContainer,
+          borderRadius: AppRadius.brTarjeta,
+          child: InkWell(
+            onTap: alTocar,
+            borderRadius: AppRadius.brTarjeta,
+            child: SizedBox(
+              width: 52,
+              height: 52,
+              child: Icon(
+                icono,
+                size: 20,
+                color: activo ? AppColors.primary : AppColors.outline,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

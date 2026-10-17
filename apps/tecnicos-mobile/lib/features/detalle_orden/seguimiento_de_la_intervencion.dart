@@ -585,6 +585,7 @@ class _SeguimientoDeLaIntervencionState
   ) async {
     setState(() => _abierto = momento);
     widget.alAbrirHoja?.call(momento);
+    bool pidioNoc = false;
 
     final bool? guardado = await showModalBottomSheet<bool>(
       context: context,
@@ -617,6 +618,7 @@ class _SeguimientoDeLaIntervencionState
               bool requiereNoc = false,
               bool detener = true,
             }) {
+              pidioNoc = requiereNoc;
               widget.alReportar!(
                 momento,
                 respuestas,
@@ -632,8 +634,14 @@ class _SeguimientoDeLaIntervencionState
     if (guardado == true) {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         SnackBar(
+          // Un bloqueo para el NOC lo dice con todas las letras: guardarlo
+          // en el teléfono no es avisarle a nadie (17/10/2026).
           content: Text(
-            '${_nombreDelReporte(momento)} guardado · sube cuando haya señal',
+            momento == 'bloqueo' && pidioNoc
+                ? 'Bloqueo guardado en el teléfono · el NOC se entera cuando '
+                      'suba, al haber señal'
+                : '${_nombreDelReporte(momento)} guardado · sube cuando haya '
+                      'señal',
           ),
         ),
       );

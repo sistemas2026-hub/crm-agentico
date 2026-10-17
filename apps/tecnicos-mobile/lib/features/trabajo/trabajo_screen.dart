@@ -1,4 +1,5 @@
 import 'cercania.dart';
+import 'orden_operativo.dart';
 import '../../core/acciones/lector_de_codigo.dart';
 import 'package:flutter/material.dart';
 
@@ -117,7 +118,13 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
     final ahora = DateTime.now();
     final texto = _busqueda.text.trim().toLowerCase();
 
-    final List<TrabajoVista> visibles = widget.ordenes.trabajos
+    // EL ORDEN ES EL DE INICIO (`OrdenOperativo`): lo empezado, lo que vence
+    // antes, la prioridad. Antes era el número de OT, que no dice qué hacer
+    // primero, y la lista podía contradecir al «Próximo trabajo».
+    final List<TrabajoVista> visibles = OrdenOperativo.ordenar(
+          widget.ordenes.trabajos,
+          ahora: ahora,
+        )
         .where(_segmento.incluye)
         .where((TrabajoVista t) =>
             perteneceA(_pestana, t.estado, t.compromiso, ahora: ahora))
@@ -336,6 +343,16 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
                 : '$total órdenes asignadas para la jornada de hoy',
             style: AppTypography.cuerpoChico,
           ),
+          // Se dice en qué orden están: si no, el técnico no sabe si el primero
+          // es el más urgente o el de número más bajo.
+          Text(
+            _porCercania
+                ? 'Ordenadas por distancia en línea recta, no por tiempo de viaje'
+                : 'Primero lo empezado, después lo que vence antes y la prioridad',
+            style: AppTypography.etiquetaChica.copyWith(
+              color: AppColors.onSurfaceVariant,
+            ),
+          ),
         ],
       ),
     );
@@ -529,6 +546,7 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
         PestanaTrabajo.todos => Icons.inbox_outlined,
         PestanaTrabajo.pendientes => Icons.inbox_outlined,
         PestanaTrabajo.enProceso => Icons.play_circle_outline,
+        PestanaTrabajo.detenidas => Icons.pause_circle_outline,
         PestanaTrabajo.finalizadas => Icons.done_all,
         PestanaTrabajo.conNovedad => Icons.report_outlined,
       };
@@ -543,6 +561,7 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
           : 'No hay ${_segmento.etiqueta.toLowerCase()} en tu jornada',
       PestanaTrabajo.pendientes => 'No tenés trabajos pendientes',
       PestanaTrabajo.enProceso => 'No tenés ningún trabajo empezado',
+      PestanaTrabajo.detenidas => 'Ninguno detenido',
       PestanaTrabajo.finalizadas => 'Todavía no terminaste ninguno',
       PestanaTrabajo.conNovedad => 'Ninguno con novedad',
     };
@@ -550,14 +569,17 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
 
   String? get _mensajeVacio {
     if (_busqueda.text.trim().isNotEmpty) {
-      return 'Se busca por cliente, dirección, tipo y número de OT, sobre lo '
-          'que ya está en el teléfono.';
+      return 'Se busca por cliente, dirección, tipo, número de OT y serial '
+          'del equipo, sobre lo que ya está en el teléfono.';
     }
     return switch (_pestana) {
       PestanaTrabajo.todos => 'Deslizá hacia abajo para actualizar.',
       PestanaTrabajo.pendientes => 'Deslizá hacia abajo para actualizar.',
       PestanaTrabajo.enProceso =>
         'Cuando marques que vas en camino, el trabajo aparece acá.',
+      PestanaTrabajo.detenidas =>
+        'Acá aparece un trabajo detenido por un bloqueo. Si no hace falta el '
+            'NOC, lo destrabás desde su ficha.',
       PestanaTrabajo.finalizadas => null,
       PestanaTrabajo.conNovedad =>
         'Acá aparece lo devuelto para corregir o cancelado.',
