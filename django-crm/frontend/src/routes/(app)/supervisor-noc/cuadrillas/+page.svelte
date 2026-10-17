@@ -149,8 +149,22 @@
 
   function abrirFicha(c) {
     editando = c
-      ? { ...c, lider_id: c.lider?.id ?? '', vehiculo_id: c.vehiculo?.id ?? '' }
-      : { id: '', nombre: '', lider_id: '', vehiculo_id: '', notas: '' };
+      ? {
+          ...c,
+          lider_id: c.lider?.id ?? '',
+          vehiculo_id: c.vehiculo?.id ?? '',
+          labor_habitual: c.labor_habitual || 'instalacion',
+          zonas_habituales: (c.zonas_habituales ?? []).map((/** @type {any} */ z) => z.id)
+        }
+      : {
+          id: '',
+          nombre: '',
+          lider_id: '',
+          vehiculo_id: '',
+          notas: '',
+          labor_habitual: 'instalacion',
+          zonas_habituales: []
+        };
   }
 
   /**
@@ -1216,6 +1230,52 @@
             la camioneta y no en la mochila de una persona, y eso cambia a quién se le pide
             cuenta.
           </p>
+
+          <!-- LO HABITUAL (17/10/2026). De acá arma el Supervisor la jornada de
+               cada día: las zonas adónde va la cuadrilla y la labor cuando no
+               hay casos que digan otra. Una cuadrilla sin zona no recibe
+               trabajo del reparto. -->
+          <div class="snoc-fila" style="gap:var(--snoc-md); flex-wrap:wrap; align-items:flex-start;">
+            <label class="snoc-campo-grupo">
+              <span class="snoc-label">Labor habitual</span>
+              <select class="snoc-select" name="labor_habitual" bind:value={editando.labor_habitual}>
+                {#each LABORES as l (l.id)}
+                  <option value={l.id}>{l.texto}</option>
+                {/each}
+              </select>
+            </label>
+            <div class="snoc-pila-xs">
+              <span class="snoc-label">Zonas habituales</span>
+              {#if (data.zonas ?? []).filter((z) => z.activa !== false).length === 0}
+                <p class="snoc-body-sm snoc-secundario">
+                  Todavía no hay zonas: se arman más abajo, en «Zonas operativas».
+                </p>
+              {:else}
+                <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                  {#each (data.zonas ?? []).filter((z) => z.activa !== false) as z (z.id)}
+                    <label class="snoc-pildora" style="cursor:pointer;">
+                      <input
+                        type="checkbox"
+                        name="zona_habitual"
+                        value={z.id}
+                        checked={editando.zonas_habituales.includes(z.id)}
+                        onchange={(e) => {
+                          editando.zonas_habituales = e.currentTarget.checked
+                            ? [...editando.zonas_habituales, z.id]
+                            : editando.zonas_habituales.filter((/** @type {string} */ x) => x !== z.id);
+                        }}
+                      />
+                      {z.nombre}
+                    </label>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </div>
+          <p class="snoc-body-sm snoc-secundario">
+            De acá arma el Supervisor la jornada de cada día: las zonas adónde va y la labor
+            cuando no hay casos que digan otra. Sin zonas, la cuadrilla no recibe trabajo.
+          </p>
           <div class="snoc-fila" style="gap:var(--snoc-sm);">
             <button class="snoc-btn snoc-btn-primario" type="submit">Guardar</button>
             <button class="snoc-pildora" type="button" onclick={() => (editando = null)}>
@@ -1234,6 +1294,8 @@
               <th>Nombre</th>
               <th>Líder</th>
               <th>Vehículo</th>
+              <th>Labor habitual</th>
+              <th>Zonas habituales</th>
               <th></th>
             </tr>
           </thead>
@@ -1248,6 +1310,14 @@
                 </td>
                 <td>{c.lider?.nombre ?? '—'}</td>
                 <td>{c.vehiculo?.nombre ?? '—'}</td>
+                <td>{LABORES.find((l) => l.id === c.labor_habitual)?.texto ?? '—'}</td>
+                <td>
+                  {#if (c.zonas_habituales ?? []).length}
+                    {c.zonas_habituales.map((/** @type {any} */ z) => z.nombre).join(', ')}
+                  {:else}
+                    <span class="snoc-insignia snoc-insignia-neutra">Sin zona</span>
+                  {/if}
+                </td>
                 <td class="snoc-derecha">
                   <div class="snoc-fila" style="gap:var(--snoc-xs); justify-content:flex-end;">
                     <button class="snoc-pildora" type="button" onclick={() => abrirFicha(c)}>

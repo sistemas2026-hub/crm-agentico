@@ -161,10 +161,18 @@ class CuadrillasView(APIView):
 
         lider = _perfil_de(org, request.data.get("lider"))
         vehiculo = _vehiculo_de(org, request.data.get("vehiculo"))
+        #  LO HABITUAL TAMBIEN AL DAR DE ALTA  --  17/10/2026. De ahi arma el
+        #  Supervisor la jornada de cada dia; una cuadrilla nueva sin zonas no
+        #  recibiria trabajo hasta que alguien la editara. Se valida ANTES de
+        #  crear: una labor que no existe no deja una cuadrilla a medias.
+        labor, error = _labor_habitual_pedida(request.data)
+        if error is not None:
+            return error
         try:
             c = Cuadrilla.objects.create(
                 org=org, nombre=nombre, lider=lider, vehiculo=vehiculo,
                 notas=(request.data.get("notas") or "").strip(),
+                **({"labor_habitual": labor} if labor else {}),
             )
         except IntegrityError:
             # 409 y no 400: el dato esta bien escrito; lo que no se puede es
@@ -174,7 +182,39 @@ class CuadrillasView(APIView):
                 {"detail": f"Ya hay una cuadrilla llamada '{nombre}'."},
                 status=status.HTTP_409_CONFLICT,
             )
+        _fijar_zonas_habituales(org, c, request.data)
         return Response(_cuadrilla_json(c), status=status.HTTP_201_CREATED)
+
+
+def _labor_habitual_pedida(data):
+    """
+    (labor, None) con la labor habitual pedida, o (None, respuesta 400) si no
+    es una labor. ("", None) si no vino: no se toca. Una sola validacion para
+    el alta y la edicion.
+    """
+    if "labor_habitual" not in data:
+        return "", None
+    labor = (data.get("labor_habitual") or "").strip()
+    validas = dict(JornadaDeCuadrilla.LABORES)
+    if labor not in validas:
+        return None, Response(
+            {"detail": f"'{labor}' no es una labor. Son: {', '.join(validas)}."},
+            status=status.HTTP_400_BAD_REQUEST)
+    return labor, None
+
+
+def _fijar_zonas_habituales(org, cuadrilla, data) -> None:
+    """
+    Reemplaza la lista ENTERA de zonas habituales, igual que las zonas del dia:
+    la pantalla manda el estado completo de los checkboxes y un merge
+    incremental haria que desmarcar no desmarcara. Solo zonas de esta empresa.
+    """
+    if "zonas_habituales" not in data:
+        return
+    pedidas = data.get("zonas_habituales") or []
+    if isinstance(pedidas, list):
+        cuadrilla.zonas_habituales.set(
+            ZonaOperativa.objects.filter(org=org, id__in=[x for x in pedidas if x]))
 
 
 class CuadrillaView(APIView):
@@ -202,14 +242,10 @@ class CuadrillaView(APIView):
             c.vehiculo = _vehiculo_de(org, request.data.get("vehiculo"))
         if "activa" in request.data:
             c.activa = bool(request.data.get("activa"))
-        if "labor_habitual" in request.data:
-            labor = (request.data.get("labor_habitual") or "").strip()
-            validas = dict(JornadaDeCuadrilla.LABORES)
-            if labor not in validas:
-                return Response(
-                    {"detail": f"'{labor}' no es una labor. Son: "
-                               f"{', '.join(validas)}."},
-                    status=status.HTTP_400_BAD_REQUEST)
+        labor, error = _labor_habitual_pedida(request.data)
+        if error is not None:
+            return error
+        if labor:
             c.labor_habitual = labor
         if "tope_diario" in request.data:
             # Vacio vuelve al tope de la empresa. Un cero NO es "sin tope":
@@ -224,16 +260,7 @@ class CuadrillaView(APIView):
                 except (TypeError, ValueError):
                     return Response({"detail": "El tope tiene que ser un numero."},
                                     status=status.HTTP_400_BAD_REQUEST)
-        if "zonas_habituales" in request.data:
-            # Se reemplaza la lista ENTERA, igual que las zonas del dia: la
-            # pantalla manda el estado completo de los checkboxes y un merge
-            # incremental haria que desmarcar no desmarcara.
-            pedidas = request.data.get("zonas_habituales") or []
-            if isinstance(pedidas, list):
-                c.zonas_habituales.set(
-                    ZonaOperativa.objects.filter(
-                        org=org, id__in=[x for x in pedidas if x])
-                )
+        _fijar_zonas_habituales(org, c, request.data)
         if "notas" in request.data:
             c.notas = (request.data.get("notas") or "").strip()
 

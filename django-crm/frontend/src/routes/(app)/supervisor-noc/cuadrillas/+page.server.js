@@ -157,12 +157,18 @@ export const actions = {
   cuadrilla: async ({ request, cookies }) => {
     const f = await request.formData();
     const id = String(f.get('cuadrilla_id') ?? '').trim();
+    /** @type {Record<string, any>} */
     const cuerpo = {
       nombre: f.get('nombre'),
       lider: f.get('lider') || null,
       vehiculo: f.get('vehiculo') || null,
-      notas: f.get('notas') ?? ''
+      notas: f.get('notas') ?? '',
+      // LO HABITUAL (17/10/2026): la lista ENTERA de zonas marcadas, como en
+      // la jornada del día; desmarcarlas todas manda una lista vacía.
+      zonas_habituales: f.getAll('zona_habitual').map((x) => String(x)).filter(Boolean)
     };
+    const labor = String(f.get('labor_habitual') ?? '').trim();
+    if (labor) cuerpo.labor_habitual = labor;
     try {
       const r = id
         ? await editarCuadrilla({ cookies }, id, cuerpo)

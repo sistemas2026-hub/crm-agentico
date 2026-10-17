@@ -28,6 +28,9 @@ Despacho.
 | 17/10 | **Salen todas las cuadrillas activas, todos los días, cada una con su pareja de siempre** | Decidido por el usuario con el informe a la vista: lo que se repite es la pareja de cada cuadrilla (la #1 y la #2 repiten la gente en todos los días seguidos medidos) |
 | 17/10 | **Cada cuadrilla cubre sus zonas habituales, marcadas en Cuadrillas** | Decidido por el usuario: es configuración que una persona marca una vez, no algo que el Supervisor adivine del historial (4 días en 60 no alcanzan) |
 | 17/10 | **La labor de la jornada es la de la mayoría de los casos de sus zonas ese día**; si una zona tiene de las dos, la segunda cuadrilla de esa zona toma la otra | Decidido por el usuario: la labor es lo que menos se repite (la #1 en 1 de 3 días, la #2 en 0 de 2), y el reparto solo le da a una cuadrilla órdenes de su labor |
+| 17/10 | **De grupo a labor: falla de servicio → Correctivo, obra de red → Trabajos, trabajo pedido → Instalación**, como configuración por empresa | Decidido por el usuario (trabajo pedido); los otros dos ya los implica `clasificacion_de_trabajo`. Configuración y no código: en otro ISP un trabajo pedido puede ir a otra labor (CLAUDE.md §3.3) |
+| 17/10 | **El Supervisor reajusta la labor de una jornada que armó él mientras no tenga órdenes**; una armada por una persona no la toca nunca | Decidido por el usuario: lo que entra a la tarde con otra labor sale ese día |
+| 17/10 | **Una sola regla de armado**: si se enciende el ciclo de la madrugada, usa el mismo constructor; **no se arma con gente ausente** (`DisponibilidadTecnico`); **una cuadrilla sin zonas habituales no se arma**, queda un aviso; **el barrio de cada caso** se pide al motor una sola vez por caso, guardado y con tope por vuelta; **el día es el de la empresa** (`campo.tasks._ahora_local`) | Decisiones técnicas por el informe del `arquitecto-dexter` del 17/10: dos constructores serían dos reglas; el armado actual no mira ausencias; ningún dato guardado tiene el barrio de un caso de Despacho; con la hora del servidor, desde las 19:00 de Bogotá se armaría el día siguiente |
 | 17/10 | **La regla para cubrir una zona sale de cómo se arman hoy las jornadas**, no de una regla inventada | El usuario pidió "analiza bien esa ventana de cuadrilla y dime qué se repite" antes de escribir la regla. Para eso, el comando de solo lectura `informe_de_jornadas` (Fase 0) |
 
 ## Lo que ya existe, medido en el código el 17/10
@@ -119,7 +122,11 @@ activa sin jornada (lo que armó una persona no se toca):
 
 - **B1**: ~~falta el análisis de qué se repite~~ hecho el 17/10 (0.2).
 - **B2**: **ninguna cuadrilla tiene zonas habituales**, y la regla decidida las
-  necesita. Las marca una persona en Cuadrillas: por lo medido, SOLEDAD en la
+  necesita. **Y la pantalla no deja marcarlas** (arquitecto, 17/10: 0 apariciones
+  en el frontend; la API las acepta). Primer paso: agregarlas al editor de cada
+  cuadrilla. **Hecho en código el 17/10** (el editor trae labor y zonas
+  habituales, la tabla avisa "Sin zona"); falta que una persona las marque
+  después del deploy. Las marca una persona en Cuadrillas: por lo medido, SOLEDAD en la
   #1 y la #2, y SABANAGRANDE en la #5. Sin eso la Fase 1 arma cuadrillas "sin
   zona", que el reparto no usa.
 
