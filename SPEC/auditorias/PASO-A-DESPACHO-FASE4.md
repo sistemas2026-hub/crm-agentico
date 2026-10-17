@@ -6,7 +6,7 @@ BASE       origin/fix/integracion-wisphub = bd8def5c (la Fase 3 y el informe
 VEREDICTO  CERRADO EN CÓDIGO. Las reglas que el usuario decidió el 16/10,
            más los arreglos de dos auditorías. Dos hallazgos quedan para el
            usuario (no se pudo medir por falla de la cadena; Despacho sin
-           el porqué del pase). NO verificado en producción: criterio 4.5.
+           el porqué del pase). Medido en producción el 17/10 a las 00:07: pasaron 15.
 FECHA      16/10/2026
 ALCANCE    operaciones/{paso_a_despacho,medicion_de_fallas,cerebro,
            diagnostico_de_ticket}.py, el comando informe_de_pendientes y sus
@@ -234,4 +234,6 @@ causas reales de caída caen en "otra".
   restaurada: el despachador confirma con el cliente antes de mandar a
   alguien. Conviene anotar las primeras semanas cuántos LOS resultaron
   desenchufados.
-- **Producción no se midió.** El control 4.5 de la ficha lo hace una persona.
+- **Medido en producción** el 17/10 a las 00:07 (criterio 4.5): pasaron 15,
+  los 10 que el informe marcaba PASA y 5 obras de red que estaban trabadas
+  sin grupo. Ver la bitácora de la ficha.

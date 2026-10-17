@@ -3,7 +3,8 @@
 ```
 BASE       origin/fix/integracion-wisphub = a9aa3d36 (la Fase 4 del paso a
            Despacho, desplegada el 16/10 a las 23:35). Se auditó sin commitear.
-VEREDICTO  CERRADO EN CÓDIGO. NO verificado en producción.
+VEREDICTO  CERRADO Y MEDIDO EN PRODUCCIÓN el 17/10/2026 (vuelta de las
+           11:07): 21 alertas retiradas, Pendientes de 44 a 22.
 FECHA      17/10/2026, madrugada (hora de Bogotá)
 ALCANCE    operaciones/{paso_a_despacho,supervisor}.py,
            campo/despacho_pantalla_views.py y una prueba nueva. Ninguna
@@ -119,9 +120,10 @@ camino cancela algo ajeno: filtra por empresa, tipo, estado y origen, y
 
 ## Límites declarados
 
-- **Producción no se midió.** Lo esperado en la primera vuelta después del
-  deploy: una línea de log "N alertas de caso antiguo retiradas", y en
-  Pendientes dejan de aparecer las alertas de caso antiguo de los casos que
-  pasaron a Despacho en los últimos 7 días.
+- **Medido en producción el 17/10** (deploy a las 10:23, vuelta de las
+  11:07): `Supervisor: 21 alertas de caso antiguo retiradas: el caso ya
+  esta en Despacho`, y las señales del detector bajaron de 30 a 17. El
+  usuario vio Pendientes bajar de 44 a 22. En la misma vuelta el cierre de
+  desincronizados cerró 8 casos, que también salen de Pendientes.
 - **Las alertas de "requiere visita" de un caso en Despacho no se tocan.** Se
   acordó solo caso antiguo; extenderlo es otra decisión.
