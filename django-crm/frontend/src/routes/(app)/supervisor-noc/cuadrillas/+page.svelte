@@ -16,6 +16,7 @@
    * que es justo lo que la idempotencia evita.
    */
   import { enhance } from '$app/forms';
+  import { opcionesDeLider } from '$lib/supervisor/lider-de-cuadrilla.js';
   import '../supervisor-noc.css';
 
   /** @type {{ data: any, form: any }} */
@@ -38,6 +39,8 @@
   let armando = $state(/** @type {any} */ (null));
   let labor = $state('instalacion');
   let lider = $state('');
+  /** El líder que la jornada ya tiene (o el de la cuadrilla): se ofrece siempre. */
+  let liderActual = $state(/** @type {any} */ (null));
   /**
    * Quiénes van en la jornada que se está armando.
    *
@@ -129,6 +132,7 @@
     armando = c;
     labor = ya?.labor ?? 'instalacion';
     lider = ya?.lider?.id ?? c.lider?.id ?? '';
+    liderActual = ya?.lider ?? c.lider ?? null;
     zonasDelDia = ya ? (ya.zonas ?? []).map((z) => z.id) : [];
     integrantes = ya
       ? ya.integrantes.map((i) => ({ persona: i.id, rol: i.rol }))
@@ -168,14 +172,16 @@
   }
 
   /**
-   * Quiénes pueden ser LÍDER: solo quien entra al sistema.
-   *
-   * El líder de una cuadrilla es un `Profile`, no una persona de campo, y es
-   * correcto: lidera quien tiene el celular y usa la aplicación. Por eso este
-   * selector ofrece `profile` como valor y no el id de la persona.
+   * Quiénes pueden ser LÍDER, en los dos selectores: la ficha de la cuadrilla
+   * y «Líder de hoy». Ver `$lib/supervisor/lider-de-cuadrilla.js`: hasta el
+   * 17/10/2026 se ofrecían solo las personas de campo con cuenta, la lista
+   * salía vacía y guardar la ficha borraba al líder.
    */
-  let conCuenta = $derived(
-    (data.personas ?? []).filter((p) => p.tiene_cuenta && p.profile)
+  let lideresDeLaFicha = $derived(
+    opcionesDeLider(data.personas, data.cuentasSinPersona, editando?.lider)
+  );
+  let lideresDeHoy = $derived(
+    opcionesDeLider(data.personas, data.cuentasSinPersona, liderActual)
   );
 
   /** Cuántas personas trabajan hoy, sin contar a nadie dos veces. */
@@ -394,9 +400,23 @@
               <span class="snoc-label">Líder de hoy</span>
               <select class="snoc-select" name="lider" bind:value={lider}>
                 <option value="">— el de la cuadrilla —</option>
-                {#each conCuenta as p (p.id)}
-                  <option value={p.profile}>{p.nombre}</option>
-                {/each}
+                {#if lideresDeHoy.actual}
+                  <option value={lideresDeHoy.actual.profile}>{lideresDeHoy.actual.nombre}</option>
+                {/if}
+                {#if lideresDeHoy.deCampo.length}
+                  <optgroup label="Personas de campo">
+                    {#each lideresDeHoy.deCampo as p (p.profile)}
+                      <option value={p.profile}>{p.nombre}</option>
+                    {/each}
+                  </optgroup>
+                {/if}
+                {#if lideresDeHoy.cuentas.length}
+                  <optgroup label="Otras cuentas del equipo">
+                    {#each lideresDeHoy.cuentas as p (p.profile)}
+                      <option value={p.profile}>{p.nombre}</option>
+                    {/each}
+                  </optgroup>
+                {/if}
               </select>
             </label>
           </div>
@@ -1210,10 +1230,27 @@
               <span class="snoc-label">Líder</span>
               <select class="snoc-select" name="lider" bind:value={editando.lider_id}>
                 <option value="">— sin líder —</option>
-                {#each conCuenta as p (p.id)}
-                  <option value={p.profile}>{p.nombre}</option>
-                {/each}
+                {#if lideresDeLaFicha.actual}
+                  <option value={lideresDeLaFicha.actual.profile}>{lideresDeLaFicha.actual.nombre}</option>
+                {/if}
+                {#if lideresDeLaFicha.deCampo.length}
+                  <optgroup label="Personas de campo">
+                    {#each lideresDeLaFicha.deCampo as p (p.profile)}
+                      <option value={p.profile}>{p.nombre}</option>
+                    {/each}
+                  </optgroup>
+                {/if}
+                {#if lideresDeLaFicha.cuentas.length}
+                  <optgroup label="Otras cuentas del equipo">
+                    {#each lideresDeLaFicha.cuentas as p (p.profile)}
+                      <option value={p.profile}>{p.nombre}</option>
+                    {/each}
+                  </optgroup>
+                {/if}
               </select>
+              <!-- Lo que ya tenía, para que guardar mande solo lo que la
+                   persona cambió (`cambioDe` en +page.server.js). -->
+              <input type="hidden" name="lider_antes" value={editando.lider?.id ?? ''} />
             </label>
             <label class="snoc-campo-grupo">
               <span class="snoc-label">Vehículo</span>
@@ -1223,6 +1260,7 @@
                   <option value={v.id}>{v.nombre}</option>
                 {/each}
               </select>
+              <input type="hidden" name="vehiculo_antes" value={editando.vehiculo?.id ?? ''} />
             </label>
           </div>
           <p class="snoc-body-sm snoc-secundario">

@@ -129,9 +129,18 @@ activa sin jornada (lo que armó una persona no se toca):
   después del deploy. Las marca una persona en Cuadrillas: por lo medido, SOLEDAD en la
   #1 y la #2, y SABANAGRANDE en la #5. Sin eso la Fase 1 arma cuadrillas "sin
   zona", que el reparto no usa.
+- **B3**: **una cuadrilla quedó sin líder** (17/10, tarde). Al marcarle las
+  zonas, guardar la ficha le borró el líder: el selector ofrecía solo personas
+  de campo con la cuenta enlazada —en Rapilink ninguna la tiene—, el líder que
+  ya tenía no estaba entre las opciones y volvía como «sin líder». Arreglado en
+  código: el selector ofrece también las cuentas del equipo y siempre el líder
+  actual, y guardar manda solo lo que se cambió. **Falta volver a ponérselo
+  después del deploy**: sin líder, una orden publicada no le llega a nadie
+  (`cuadrillas.destinatarios`), así que la Fase 3 lo necesita.
 
 ## Bitácora
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 17/10/2026, tarde | Ficha abierta con las decisiones del usuario. `informe_de_jornadas` construido: 7 pruebas en verde con superusuario y con un rol que el RLS ata, 3 mutaciones muertas (no filtrar por empresa, comerse un día del rango, contar mal la repetición de zonas), ruff sin avisos (0.1) | Que el usuario lo corra y analizarlo (0.2) | `cf4c0855` |
+| 17/10/2026, 15:40 | Guardar la ficha de una cuadrilla ya no borra el líder, el vehículo ni las notas que no se tocaron, y el selector de líder ofrece las cuentas del equipo y siempre el líder actual (B3). 13 pruebas nuevas en verde y 6 mutaciones muertas, entre ellas la que devuelve el defecto; `svelte-check` sin avisos nuevos (86/27, los mismos de antes) | Volver a ponerle el líder a la cuadrilla, y marcar las zonas habituales (B2) | este commit |

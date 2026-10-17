@@ -153,6 +153,35 @@ function mensajeDe(e) {
   );
 }
 
+/**
+ * Lo que la persona eligió en un campo del formulario, o `undefined` si no lo
+ * tocó y por lo tanto no hay que mandarlo.
+ *
+ * LO QUE NO SE TOCÓ NO SE MANDA (17/10/2026). El backend escribe cada campo
+ * que le llega, y la ficha de cuadrilla mandaba el líder, el vehículo y las
+ * notas siempre. Un líder que el selector no ofrecía dejaba el `<select>` sin
+ * opción elegida —y un select así no viaja en el formulario—, de modo que
+ * volvía como «sin líder» y lo borraba: así perdió el suyo una cuadrilla de
+ * Rapilink al marcarle las zonas habituales.
+ *
+ * Tres casos:
+ *   - el campo no vino                      → `undefined`, no se manda;
+ *   - vino igual que `<campo>_antes`        → `undefined`, no se manda;
+ *   - vino distinto                         → el valor, y vacío es `null`:
+ *     «— sin líder —» elegido a propósito sí quita al líder.
+ *
+ * @param {FormData} f
+ * @param {string} campo
+ * @returns {string | null | undefined}
+ */
+function cambioDe(f, campo) {
+  if (!f.has(campo)) return undefined;
+  const ahora = String(f.get(campo) ?? '').trim();
+  const antes = f.get(`${campo}_antes`);
+  if (antes !== null && ahora === String(antes).trim()) return undefined;
+  return ahora || null;
+}
+
 export const actions = {
   cuadrilla: async ({ request, cookies }) => {
     const f = await request.formData();
@@ -160,15 +189,20 @@ export const actions = {
     /** @type {Record<string, any>} */
     const cuerpo = {
       nombre: f.get('nombre'),
-      lider: f.get('lider') || null,
-      vehiculo: f.get('vehiculo') || null,
-      notas: f.get('notas') ?? '',
       // LO HABITUAL (17/10/2026): la lista ENTERA de zonas marcadas, como en
       // la jornada del día; desmarcarlas todas manda una lista vacía.
       zonas_habituales: f.getAll('zona_habitual').map((x) => String(x)).filter(Boolean)
     };
     const labor = String(f.get('labor_habitual') ?? '').trim();
     if (labor) cuerpo.labor_habitual = labor;
+    // El líder y el vehículo, SOLO si la persona los cambió. Ver `cambioDe`.
+    for (const campo of ['lider', 'vehiculo']) {
+      const elegido = cambioDe(f, campo);
+      if (elegido !== undefined) cuerpo[campo] = elegido;
+    }
+    // Las notas, solo si el formulario las trae: la ficha no tiene ese campo,
+    // y mandarlas vacías las borraba en cada guardado.
+    if (f.has('notas')) cuerpo.notas = String(f.get('notas') ?? '');
     try {
       const r = id
         ? await editarCuadrilla({ cookies }, id, cuerpo)
