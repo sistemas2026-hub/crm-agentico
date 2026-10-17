@@ -26,6 +26,7 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
     Map<String, dynamic>? valores,
     List<Map<String, dynamic>>? evidencias,
     List<Map<String, dynamic>>? materiales,
+    this.pasos = const <Map<String, dynamic>>[],
     this.sinIdentidad = false,
     this.sinOrden = false,
     this.sinContexto = false,
@@ -41,6 +42,9 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
   /// cliente no tiene serial cargado, o SmartOLT no contestó al despachar--.
   /// La pantalla tiene que seguir siendo usable, no llenarse de guiones.
   final bool sinContexto;
+
+  /// Los pasos del protocolo de la plantilla. Vacío es una plantilla sin pasos.
+  final List<Map<String, dynamic>> pasos;
 
   final String orgId;
   final String profileId;
@@ -210,6 +214,7 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
       valores: valores,
       evidenciasCapturadas: evidencias,
       materialesUsados: materiales,
+      pasos: pasos,
     );
   }
 
@@ -294,4 +299,42 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
 
   @override
   void procesarCola() => colasProcesadas++;
+
+  /// Los reportes encolados, en orden: el cierre que sale de «Finalizar» se
+  /// afirma acá.
+  final List<Map<String, dynamic>> reportes = <Map<String, dynamic>>[];
+
+  @override
+  Future<String> encolarReporte({
+    required String orgId,
+    required String profileId,
+    required String ordenId,
+    required String momento,
+    required Map<String, dynamic> respuestas,
+    required String borradorId,
+    bool requiereNoc = false,
+    bool detener = true,
+    String? idFijo,
+  }) async {
+    final String id = idFijo ?? 'seg-$ordenId-$momento-${reportes.length}';
+    if (reportes.any((Map<String, dynamic> r) => r['id'] == id)) return id;
+    reportes.add(<String, dynamic>{
+      'id': id,
+      'momento': momento,
+      'respuestas': respuestas,
+      'borrador': borradorId,
+    });
+    return id;
+  }
+
+  /// Lo que devuelve `seguimiento`. Nulo es «nunca se descargó».
+  Map<String, dynamic>? seguimientoDado;
+
+  @override
+  Future<Map<String, dynamic>?> seguimiento(String ordenId) async =>
+      seguimientoDado;
+
+  @override
+  Future<bool> existeReporte(String id) async =>
+      reportes.any((Map<String, dynamic> r) => r['id'] == id);
 }

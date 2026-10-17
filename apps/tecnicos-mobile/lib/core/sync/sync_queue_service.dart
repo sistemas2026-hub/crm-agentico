@@ -714,6 +714,39 @@ class SyncQueueService {
   /// La misma en todos los reintentos. Si la respuesta se perdio pero el servidor
   /// lo habia guardado, el siguiente intento se reconoce como repetido y no
   /// duplica el hecho. Generar una clave nueva por intento es lo que duplica.
+  /// El cuerpo que se manda por un reporte de seguimiento. Puro: se prueba
+  /// sin red.
+  ///
+  /// DATOS DE PLATAFORMA. No son campos de la plantilla —el servidor rechaza
+  /// una respuesta que la plantilla no declara—, así que viajan aparte, igual
+  /// que `requiere_noc`. La cola no tiene columna para ellos: se guardan dentro
+  /// de las respuestas bajo la clave reservada `__plataforma` y se sacan acá.
+  /// Hoy el único es «no usé materiales», del cierre que sale de «Finalizar»
+  /// (17/10/2026); cualquier otra clave adentro se descarta.
+  static Map<String, dynamic> cuerpoDelReporte({
+    required String momento,
+    required Map<String, dynamic> respuestas,
+    Object? capturadoEnDispositivo,
+    bool requiereNoc = false,
+    bool detener = true,
+  }) {
+    final Map<String, dynamic> limpias = Map<String, dynamic>.from(respuestas);
+    final Object? plataforma = limpias.remove('__plataforma');
+    return <String, dynamic>{
+      if (momento == 'cierre' &&
+          plataforma is Map &&
+          plataforma['sin_material_confirmado'] == true)
+        'sin_material_confirmado': true,
+      'momento': momento,
+      'respuestas': limpias,
+      'capturado_en_dispositivo': capturadoEnDispositivo,
+      if (momento == 'bloqueo') ...<String, dynamic>{
+        'requiere_noc': requiereNoc,
+        'detener': detener,
+      },
+    };
+  }
+
   Future<void> _procesarSeguimiento(String orgId, String profileId) async {
     final List<Map<String, dynamic>> pendientes = await _localDb
         .seguimientosPendientes(orgId: orgId, profileId: profileId);
@@ -763,17 +796,13 @@ class SyncQueueService {
         continue;
       }
 
-      final Map<String, dynamic> cuerpo = <String, dynamic>{
-        'momento': momento,
-        'respuestas': respuestas,
-        // La hora en que el tecnico lo escribio. Viaja para la historia; lo que
-        // gobierna el seguimiento operativo es la llegada al servidor.
-        'capturado_en_dispositivo': fila['capturado_en_dispositivo'],
-        if (momento == 'bloqueo') ...<String, dynamic>{
-          'requiere_noc': fila['requiere_noc'] == 1,
-          'detener': fila['detener'] == 1,
-        },
-      };
+      final Map<String, dynamic> cuerpo = cuerpoDelReporte(
+        momento: momento,
+        respuestas: respuestas,
+        capturadoEnDispositivo: fila['capturado_en_dispositivo'],
+        requiereNoc: fila['requiere_noc'] == 1,
+        detener: fila['detener'] == 1,
+      );
 
       try {
         final respuesta = await _apiClient.post(

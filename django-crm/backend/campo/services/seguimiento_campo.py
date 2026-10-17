@@ -254,6 +254,7 @@ def registrar(
     momento: str,
     respuestas: dict | None = None,
     capturado_en_dispositivo=None,
+    sin_material_confirmado: bool = False,
 ):
     """Escribe un reporte en la bitacora de la orden. Devuelve el `EventoTrabajo`.
 
@@ -286,7 +287,8 @@ def registrar(
     # 3. El orden de los hechos. Un cierre sin inicio es un reporte al que le
     #    falta la mitad de la historia, y quien lo lea no va a poder reconstruir
     #    cuanto duro la intervencion.
-    if momento == CIERRE and not _hubo(orden, TIPOS[INICIO]):
+    if momento == CIERRE and not (_hubo(orden, TIPOS[INICIO])
+                                  or _llego_al_sitio(orden)):
         raise SeguimientoInvalido(
             "No se puede cerrar una intervención que nunca se inició: registrá "
             "primero el INICIO."
@@ -332,6 +334,12 @@ def registrar(
         ),
         "recibido_en_servidor": ahora.isoformat(),
     }
+    # DATO DE PLATAFORMA, como `requiere_noc` en el bloqueo: no es un campo de
+    # la plantilla, lo agrega la app cuando el técnico finaliza sin material
+    # registrado y confirma que no usó ninguno (17/10/2026). Solo en el
+    # cierre, y solo cuando es verdad: ausente no quiere decir «sí usó».
+    if momento == CIERRE and sin_material_confirmado:
+        datos["sin_material_confirmado"] = True
 
     return EventoTrabajo.objects.create(
         org=orden.org, orden=orden, tipo=TIPOS[momento], profile=profile, datos=datos
@@ -436,6 +444,8 @@ def linea_de_tiempo(orden) -> dict:
             # leen igual.
             fila["evidencias"] = _evidencias_de(e)
             fila["evidencias_declaradas"] = datos.get("evidencias") or []
+            if datos.get("sin_material_confirmado"):
+                fila["sin_material_confirmado"] = True
         elif e.tipo in CAMPOS_EXPUESTOS:
             # Hechos del sistema que si tienen algo que contar. Se exponen las
             # claves nombradas y NADA MAS: volcar el JSON entero dejaria salir lo
@@ -550,6 +560,22 @@ def _ultimo_reporte(eventos, tipos_seguimiento) -> dict | None:
         "capturado_en_dispositivo": datos.get("capturado_en_dispositivo"),
         "minutos_desde_que_lo_recibimos": minutos,
     }
+
+
+#: Los estados que prueban que alguien estuvo en el sitio.
+#:
+#: Desde el 17/10/2026 el reporte de cierre sale del mismo botón que finaliza
+#: el trabajo (decisión del usuario: «una única acción de cierre»). Exigir un
+#: INICIO escrito antes dejaba sin reporte de cierre a quien no lo tocó, aunque
+#: la máquina de estados ya sabe que llegó: pasó por `en_sitio`. Un cierre de
+#: una orden que nunca llegó al sitio sigue rechazándose.
+ESTADOS_DESDE_EL_SITIO = ("en_sitio", "bloqueada", "completada_campo",
+                          "correccion_requerida", "cerrada")
+
+
+def _llego_al_sitio(orden) -> bool:
+    return (orden.estado_operativo in ESTADOS_DESDE_EL_SITIO
+            or _hubo(orden, "accion_iniciar"))
 
 
 def _hubo(orden, tipo: str) -> bool:

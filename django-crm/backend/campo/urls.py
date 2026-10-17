@@ -122,6 +122,7 @@ urlpatterns = [
     # La bitacora de la intervencion: INICIO, AVANCE, BLOQUEO y CIERRE. No
     # mueve el estado operativo; eso sigue siendo cosa de las transiciones.
     path("trabajos/<uid:pk>/seguimiento/", views.SeguimientoDeOrdenView.as_view(), name="trabajo_seguimiento"),
+    path("trabajos/<uid:pk>/ficha/refrescar/", views.RefrescarFichaView.as_view(), name="trabajo_ficha_refrescar"),
     # Destrabar un trabajo detenido. El estado al que vuelve lo guardo el
     # bloqueo al abrirse, y la maquina de transiciones lo valida.
     path("trabajos/<uid:pk>/bloqueo/resolver/", views.ResolverBloqueoView.as_view(), name="trabajo_bloqueo_resolver"),

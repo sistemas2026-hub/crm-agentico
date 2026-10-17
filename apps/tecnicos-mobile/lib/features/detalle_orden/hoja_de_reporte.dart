@@ -40,6 +40,7 @@ class HojaDeReporte extends StatefulWidget {
     this.guardando = false,
     this.enHojaModal = false,
     this.alCambiarContenido,
+    this.textoDelBoton = 'Guardar el reporte',
   });
 
   /// `inicio`, `avance`, `bloqueo` o `cierre`.
@@ -96,6 +97,10 @@ class HojaDeReporte extends StatefulWidget {
   /// Avisa si hay algo escrito, para que cerrar la hoja pregunte antes de
   /// tirarlo. Las fotos las cuenta quien captura (`fotosTomadas`).
   final ValueChanged<bool>? alCambiarContenido;
+
+  /// El rótulo del botón. El cierre que sale de «Finalizar» dice «Guardar y
+  /// finalizar», porque hace las dos cosas.
+  final String textoDelBoton;
 
   @override
   State<HojaDeReporte> createState() => _HojaDeReporteState();
@@ -224,7 +229,7 @@ class _HojaDeReporteState extends State<HojaDeReporte> {
 
     final List<Widget> pie = <Widget>[
       DexterAccionDominante(
-        texto: widget.guardando ? 'Guardando…' : 'Guardar el reporte',
+        texto: widget.guardando ? 'Guardando…' : widget.textoDelBoton,
         icono: Icons.save_outlined,
         alTocar: widget.guardando ? null : _guardar,
       ),

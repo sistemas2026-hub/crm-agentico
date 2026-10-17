@@ -373,6 +373,8 @@ class SeguimientoDeOrdenView(APIView):
                     momento=momento,
                     respuestas=respuestas,
                     capturado_en_dispositivo=request.data.get("capturado_en_dispositivo"),
+                    sin_material_confirmado=(
+                        request.data.get("sin_material_confirmado") is True),
                 )
         except bloqueos.BloqueoInvalido as e:
             return Response(
@@ -521,6 +523,41 @@ class MaterialesDeOrdenView(APIView):
         return Response(
             materiales_de_orden(orden, incluir_custodia=incluir)
         )
+
+
+class RefrescarFichaView(APIView):
+    """Volver a pedir la ficha del equipo de una orden, desde el terreno.
+
+    POR QUE EXISTE (17/10/2026)
+    ---------------------------
+    La ficha se pide UNA vez, al crear la orden. Si en ese momento el motor no
+    contestaba, la orden quedaba sin niveles, sin estado del equipo y SIN
+    SERIAL -- y sin serial tampoco se puede «Volver a medir». La app le decia
+    al técnico «Se reintenta al sincronizar», y no se reintentaba nunca:
+    `despacho.refrescar_contexto` existía, probado, y no tenía ningún llamador.
+
+    Es el mismo refresco: si falla, la ficha anterior queda EXACTAMENTE como
+    estaba; si anda, la anterior queda guardada en la bitácora. Manual a
+    propósito: cada pedido le pega al sistema del ISP, que tiene límite de
+    tasa.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        from campo.serializers import OrdenTrabajoDetailSerializer
+        from campo.services.despacho import ErrorDespacho, refrescar_contexto
+
+        orden = _obtener_orden_o_404(request, pk)
+        try:
+            resultado = refrescar_contexto(orden, profile=request.profile)
+        except ErrorDespacho as e:
+            return Response({"ok": False, "motivo": "no_admite", "detalle": str(e)},
+                            status=status.HTTP_409_CONFLICT)
+        if resultado.get("ok"):
+            orden.refresh_from_db()
+            resultado["orden"] = OrdenTrabajoDetailSerializer(orden).data
+        return Response(resultado)
 
 
 class MedirSenalView(APIView):

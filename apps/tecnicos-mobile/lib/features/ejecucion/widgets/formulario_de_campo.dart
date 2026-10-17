@@ -24,6 +24,7 @@ class FormularioDeCampo extends StatelessWidget {
     required this.controladores,
     required this.alCambiar,
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
+    this.conEncabezado = true,
   });
 
   /// Los campos **ya interpretados**.
@@ -48,8 +49,21 @@ class FormularioDeCampo extends StatelessWidget {
 
   final bool mostrarDatosFuturos;
 
+  /// Sin la tarjeta ni el rótulo «Formulario de Validación»: solo los campos.
+  ///
+  /// Lo usa la ejecución por pasos (17/10/2026), donde cada paso ya tiene su
+  /// título y su tarjeta. Repetir el rótulo dentro de cada paso hacía que tres
+  /// pasos parecieran tres formularios distintos.
+  final bool conEncabezado;
+
   @override
   Widget build(BuildContext context) {
+    if (!conEncabezado) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: _camposNumerados(context),
+      );
+    }
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(

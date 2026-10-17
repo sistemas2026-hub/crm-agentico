@@ -222,6 +222,30 @@ abstract class FuenteDeEjecucion {
 
   /// Intentar enviar ahora, sin bloquear a nadie si no hay señal.
   void procesarCola();
+
+  /// Deja un reporte de seguimiento esperando turno, con las fotos de su
+  /// borrador. Devuelve el id con el que quedó.
+  ///
+  /// `idFijo` es para el reporte que no puede repetirse —el cierre que sale de
+  /// «Finalizar»—: con el mismo id no se escribe otro (17/10/2026).
+  Future<String> encolarReporte({
+    required String orgId,
+    required String profileId,
+    required String ordenId,
+    required String momento,
+    required Map<String, dynamic> respuestas,
+    required String borradorId,
+    bool requiereNoc = false,
+    bool detener = true,
+    String? idFijo,
+  });
+
+  /// Si ya hay un reporte con ese id en el teléfono.
+  Future<bool> existeReporte(String id);
+
+  /// El seguimiento de la orden —sobre todo sus `formularios`, que dicen qué
+  /// pide cada reporte—: primero el espejo del teléfono, después la red.
+  Future<Map<String, dynamic>?> seguimiento(String ordenId);
 }
 
 /// La fuente de verdad: la base del teléfono y la sesión guardada.
@@ -389,6 +413,57 @@ class FuenteLocalDeEjecucion implements FuenteDeEjecucion {
 
   @override
   void procesarCola() => _cola.procesarCola();
+
+  @override
+  Future<String> encolarReporte({
+    required String orgId,
+    required String profileId,
+    required String ordenId,
+    required String momento,
+    required Map<String, dynamic> respuestas,
+    required String borradorId,
+    bool requiereNoc = false,
+    bool detener = true,
+    String? idFijo,
+  }) async {
+    final String reporteId = await _db.encolarSeguimiento(
+      ordenId: ordenId,
+      orgId: orgId,
+      profileId: profileId,
+      momento: momento,
+      respuestas: respuestas,
+      requiereNoc: requiereNoc,
+      detener: detener,
+      idFijo: idFijo,
+    );
+    // Las fotos del borrador pasan a ser de este reporte: es lo que permite que
+    // la sincronización las encuentre cuando el servidor devuelva el evento.
+    await _db.reasignarEvidenciasDeBorrador(
+      borradorId: borradorId,
+      reporteLocalId: reporteId,
+      orgId: orgId,
+      profileId: profileId,
+    );
+    return reporteId;
+  }
+
+  @override
+  Future<bool> existeReporte(String id) => _db.existeSeguimiento(id);
+
+  /// Espejo primero, red después: si se pidiera la red primero, un técnico sin
+  /// señal esperaría el timeout completo mirando una pantalla sin botones,
+  /// teniendo el dato guardado en el teléfono. Movido tal cual de la pantalla.
+  @override
+  Future<Map<String, dynamic>?> seguimiento(String ordenId) async {
+    final String? orgId = await _storage.getOrgId();
+    if (orgId == null) return null;
+    final Map<String, dynamic>? local =
+        await _db.leerSeguimiento(ordenId: ordenId, orgId: orgId);
+    final bool actualizo =
+        await _cola.descargarSeguimientoDeOrden(ordenId: ordenId, orgId: orgId);
+    if (!actualizo) return local;
+    return await _db.leerSeguimiento(ordenId: ordenId, orgId: orgId) ?? local;
+  }
 }
 
 /// Las fotos de un paso del protocolo.
@@ -463,4 +538,105 @@ List<GrupoDeEvidencias> agruparPorPaso({
     grupos.add(GrupoDeEvidencias(titulo: '', requisitos: sueltas));
   }
   return grupos;
+}
+
+
+/// Un paso de la intervención, con lo que se registra en él.
+class PasoDeEjecucion {
+  const PasoDeEjecucion({
+    required this.id,
+    required this.titulo,
+    required this.campos,
+    required this.evidencias,
+    this.descripcion = '',
+  });
+
+  /// El id del paso en la plantilla, o vacío para «Otros datos».
+  final String id;
+  final String titulo;
+  final String descripcion;
+
+  /// Los campos CRUDOS de este paso, tal como los mandó la plantilla. Quien los
+  /// dibuja los normaliza con el mismo lector que el resto de la pantalla.
+  final List<dynamic> campos;
+
+  /// Las fotos que este paso pide. La firma no entra: es del cierre.
+  final List<dynamic> evidencias;
+}
+
+/// Reparte los campos y las fotos de la plantilla en sus pasos.
+///
+/// POR QUÉ (17/10/2026)
+/// --------------------
+/// La pantalla de ejecución estaba ordenada por tipo de registro —todos los
+/// datos, después todas las fotos, después el material—, que es el orden de la
+/// base y no el del trabajo. La plantilla ya dice en qué paso va cada cosa
+/// («Correctivo» trae «Diagnóstico» y «Solución»): con eso, el técnico tiene en
+/// un mismo lugar la instrucción, el dato y la foto de lo que está haciendo.
+///
+/// LAS REGLAS
+/// ----------
+/// * Los pasos salen en el orden del protocolo. Los pasos son los de la
+///   plantilla real: la app no trae ningún protocolo propio.
+/// * Un paso sin campos ni fotos no aparece: sería un título sin nada que hacer.
+/// * Lo que no declara paso va a un último paso, «Otros datos». Mezclarlo con un
+///   paso diría que pertenece a él.
+/// * Si NINGÚN campo ni foto declara un paso que exista, devuelve una lista
+///   vacía: la plantilla no está organizada por pasos y la pantalla se dibuja
+///   como siempre. Las plantillas sin pasos no cambian.
+List<PasoDeEjecucion> pasosDeEjecucion({
+  required List<dynamic> campos,
+  required List<dynamic> requisitos,
+  required List<dynamic> pasos,
+}) {
+  bool esFirma(dynamic r) => r is Map && (r['tipo'] ?? '').toString() == 'firma';
+  String pasoDe(dynamic x) => x is Map ? (x['paso'] ?? '').toString() : '';
+  final List<dynamic> fotos = <dynamic>[
+    for (final dynamic r in requisitos)
+      if (!esFirma(r)) r,
+  ];
+
+  final List<PasoDeEjecucion> salida = <PasoDeEjecucion>[];
+  final Set<String> usados = <String>{};
+  for (final dynamic paso in pasos) {
+    if (paso is! Map) continue;
+    final String id = (paso['id'] ?? '').toString();
+    if (id.isEmpty) continue;
+    final List<dynamic> susCampos = <dynamic>[
+      for (final dynamic c in campos)
+        if (pasoDe(c) == id) c,
+    ];
+    final List<dynamic> susFotos = <dynamic>[
+      for (final dynamic r in fotos)
+        if (pasoDe(r) == id) r,
+    ];
+    if (susCampos.isEmpty && susFotos.isEmpty) continue;
+    usados.add(id);
+    salida.add(PasoDeEjecucion(
+      id: id,
+      titulo: (paso['titulo'] ?? '').toString(),
+      descripcion: (paso['descripcion'] ?? paso['instrucciones'] ?? '').toString(),
+      campos: susCampos,
+      evidencias: susFotos,
+    ));
+  }
+  if (salida.isEmpty) return const <PasoDeEjecucion>[];
+
+  final List<dynamic> camposSueltos = <dynamic>[
+    for (final dynamic c in campos)
+      if (!usados.contains(pasoDe(c))) c,
+  ];
+  final List<dynamic> fotosSueltas = <dynamic>[
+    for (final dynamic r in fotos)
+      if (!usados.contains(pasoDe(r))) r,
+  ];
+  if (camposSueltos.isNotEmpty || fotosSueltas.isNotEmpty) {
+    salida.add(PasoDeEjecucion(
+      id: '',
+      titulo: 'Otros datos',
+      campos: camposSueltos,
+      evidencias: fotosSueltas,
+    ));
+  }
+  return salida;
 }

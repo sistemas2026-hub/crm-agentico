@@ -24,6 +24,7 @@ import '../ejecucion/ejecucion_screen.dart';
 import '../trabajo/estado_trabajo.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'acciones_orden.dart';
+import 'comprobar_conexion.dart';
 import 'diagnostico_de_campo.dart';
 import 'materiales_de_esta_orden.dart';
 import 'pasos_orden.dart';
@@ -483,7 +484,8 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   ) async {
     await Navigator.of(contexto).push(
       MaterialPageRoute<void>(
-        builder: (_) => EjecucionScreen(ordenId: trabajo.id),
+        builder: (_) =>
+            EjecucionScreen(ordenId: trabajo.id, acciones: widget.acciones),
       ),
     );
   }
@@ -628,6 +630,22 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                         // reintentando. Prometer un reintento donde no lo hay
                         // deja a alguien esperando en la calle.
                         _porQueNoHayDatosDelEquipo(trabajo),
+                      // SIN NIVELES, CON SALIDA (17/10/2026). Cuando la ficha
+                      // no trajo la lectura —o no llegó—, acá se vuelve a
+                      // consultar el equipo y se mide en vivo. Antes no había
+                      // forma: «Volver a medir» solo existía con una lectura
+                      // congelada, y la ficha se pedía una sola vez, al crear
+                      // la orden.
+                      if (!trabajo.hayLecturaDeEquipo &&
+                          !trabajo.esTrabajoDePlanta &&
+                          trabajo.sinFicha != SinFicha.casoSinServicio)
+                        ComprobarConexion(
+                          ordenId: trabajo.id,
+                          trabajo: trabajo,
+                          acciones: widget.acciones,
+                          alActualizarFicha: widget.ordenes.recargar,
+                          mostrarFicha: false,
+                        ),
                       // LO QUE YA SE HIZO EN ESTE SERVICIO
                       // ----------------------------------
                       // Va en el grupo de diagnóstico y arriba del triage: el
@@ -1936,7 +1954,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       SinFicha.noSePudoConsultar => (
         Icons.cloud_off,
         'No se pudo consultar el equipo',
-        'Se reintenta al sincronizar. Bajá la ficha con señal antes de salir.',
+        // Decía «Se reintenta al sincronizar», y no se reintentaba nunca: la
+        // ficha se pedía una sola vez (17/10/2026). Ahora hay un botón.
+        'Con señal, tocá «Volver a consultar el equipo» acá abajo.',
       ),
       SinFicha.clienteNoIdentificado => (
         Icons.person_off,
@@ -2657,8 +2677,8 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       ),
       _ => (
         Icons.cloud_off,
-        'La señal del equipo no se alcanzó a leer. Se vuelve a intentar al '
-            'refrescar la ficha.',
+        'La señal del equipo no se alcanzó a leer. Con señal, se puede volver '
+            'a consultar acá abajo.',
       ),
     };
 

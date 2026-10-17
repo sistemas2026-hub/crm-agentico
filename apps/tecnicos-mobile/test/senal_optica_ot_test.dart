@@ -106,6 +106,8 @@ void main() {
             }) async {},
             sincronizar: () async {},
             probarConexion: probarConexion,
+            refrescarFicha: (String _) async =>
+                const ResultadoRefresco(ok: false, motivo: 'sin_conexion'),
           ),
         ),
       );
@@ -313,12 +315,15 @@ void main() {
       expect(find.textContaining('no existe en la OLT'), findsOneWidget);
     });
 
-    testWidgets('Sin motivo declarado se ofrece reintentar',
+    testWidgets('Sin motivo declarado se ofrece volver a consultar, de verdad',
         (WidgetTester t) async {
+      // Decía «se vuelve a intentar al refrescar la ficha», y nada la
+      // refrescaba. Ahora el texto manda a un botón que existe (17/10/2026).
       pantallaAlta(t);
       await montar(t, orden(conEquipo: false));
 
-      expect(find.textContaining('refrescar la ficha'), findsOneWidget);
+      expect(find.textContaining('se puede volver a consultar'), findsOneWidget);
+      expect(find.text('Volver a consultar el equipo'), findsOneWidget);
     });
   });
   group('4. El ping contesta otra pregunta, y no dictamina', () {

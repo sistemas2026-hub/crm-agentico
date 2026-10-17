@@ -686,7 +686,7 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
     final (IconData icono, String texto) = switch (caso) {
       SinFicha.noSePudoConsultar => (
           Icons.cloud_off,
-          'Sin ficha: no se pudo consultar. Se reintenta al sincronizar'
+          'Sin ficha: no se pudo consultar. Se vuelve a consultar desde la orden'
         ),
       SinFicha.clienteNoIdentificado => (
           Icons.person_off,

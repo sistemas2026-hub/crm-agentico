@@ -431,6 +431,67 @@ void main() {
         );
       });
 
+      // TANDA 2 (17/10/2026): la ejecución por pasos y «Comprobar conexión»
+      // con sus tres botones. Los pasos llevan los nombres largos de una
+      // plantilla real y la letra va en 1.3, que es donde revienta.
+      testWidgets('La ejecucion por pasos entra con letra grande y la conexion',
+          (WidgetTester t) async {
+        await aEsteAncho(
+          t,
+          ancho,
+          () => EjecucionScreen(
+            ordenId: 'ot-1',
+            fuente: FuenteDeEjecucionFalsa(
+              campos: <Map<String, dynamic>>[
+                for (final (String id, String paso) in <(String, String)>[
+                  ('medicion', 'paso_1'),
+                  ('solucion', 'paso_2'),
+                ])
+                  <String, dynamic>{
+                    'id': id,
+                    'titulo': 'Medición óptica en la roseta del cliente con power meter',
+                    'tipo': 'texto',
+                    'paso': paso,
+                    'reglas': <String, dynamic>{'required': true},
+                  },
+              ],
+              requisitos: <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': 'foto_caja',
+                  'titulo': 'Foto de la caja NAP abierta con los conectores',
+                  'tipo': 'foto',
+                  'paso': 'paso_1',
+                  'obligatorio': true,
+                },
+              ],
+              pasos: const <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': 'paso_1',
+                  'titulo': 'Diagnóstico del tramo de fibra desde la caja NAP',
+                },
+                <String, dynamic>{'id': 'paso_2', 'titulo': 'Solución'},
+              ],
+            ),
+            acciones: AccionesOrden(
+              transicionar: ({
+                required String ordenId,
+                required String nuevoEstadoLocal,
+                required String tipoAccion,
+                required int revisionBase,
+              }) async {},
+              sincronizar: () async {},
+              medirSenal: (_) async =>
+                  const MedicionDeSenal.noSePudo('sin_conexion'),
+              probarConexion: (_, _) async =>
+                  ResultadoPing.noSePudo('sin_conexion'),
+              refrescarFicha: (_) async =>
+                  const ResultadoRefresco(ok: false, motivo: 'sin_conexion'),
+            ),
+          ),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
       testWidgets('La hoja para pedir a bodega entra', (WidgetTester t) async {
         // Con el nombre de material MAS LARGO del catalogo real y una unidad
         // escrita entera: es la linea que el dropdown tiene que meter en una

@@ -8,8 +8,9 @@ import 'package:uuid/uuid.dart';
 import '../../demo/field_mock_data.dart';
 import '../../core/storage/evidencia_storage_service.dart';
 import '../../core/storage/local_database.dart';
-import '../../core/storage/secure_storage_service.dart';
 import '../../core/storage/ubicacion_de_captura.dart';
+import '../detalle_orden/acciones_orden.dart';
+import '../detalle_orden/comprobar_conexion.dart';
 import '../detalle_orden/pasos_orden.dart';
 import '../detalle_orden/seguimiento_de_la_intervencion.dart';
 import '../trabajo/estado_trabajo.dart';
@@ -57,7 +58,13 @@ class EjecucionScreen extends StatefulWidget {
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
     this.fuente,
     this.resumenDeSync,
+    this.acciones,
   });
+
+  /// Medir la señal, el ping y volver a pedir la ficha, para el bloque
+  /// «Comprobar conexión» (17/10/2026). Nulo en una prueba que no los usa: el
+  /// bloque no se dibuja.
+  final AccionesOrden? acciones;
 
   @override
   State<EjecucionScreen> createState() => _EjecucionScreenState();
@@ -116,6 +123,15 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// «Falta» es gris: durante el trabajo siempre falta algo, y pintarlo de rojo
   /// desde el primer minuto hacía que toda la visita pareciera una emergencia.
   bool _intentoFinalizar = false;
+
+  /// En qué paso de la plantilla está el técnico, cuando la plantilla tiene
+  /// pasos. Ver `pasosDeEjecucion`.
+  int _pasoActual = 0;
+
+  /// Las fotos del borrador para la hoja del cierre, que vive en otra ruta y
+  /// no se redibuja sola.
+  final ValueNotifier<Map<String, int>> _fotosDeHoja =
+      ValueNotifier<Map<String, int>>(<String, int>{});
   Timer? _borradorTimer;
 
   List<dynamic> _campos = [];
@@ -134,6 +150,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
 
   @override
   void dispose() {
+    _fotosDeHoja.dispose();
     _savedIndicatorTimer?.cancel();
     _borradorTimer?.cancel();
     for (final controller in _controllers.values) {
@@ -188,8 +205,11 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       _campos,
       _valoresFormulario,
     )) {
-      _controllers[campo.id] = TextEditingController(
-        text: campo.valor?.toString() ?? '',
+      // `putIfAbsent`: al volver a leer la orden —después de pedir la ficha
+      // otra vez— el campo conserva su controlador y lo que se está escribiendo.
+      _controllers.putIfAbsent(
+        campo.id,
+        () => TextEditingController(text: campo.valor?.toString() ?? ''),
       );
     }
 
@@ -332,6 +352,49 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
 
     // Todo satisfecho: transicionar localmente a completada_pendiente_sync.
     final revisionBase = _orden!['revision'] as int? ?? 0;
+
+    // 1. SIN MATERIAL REGISTRADO SE PREGUNTA, UNA VEZ (decisión del usuario,
+    //    17/10/2026). Sin pantalla nueva y sin bloquear un trabajo que de
+    //    verdad no usa material, como cambiar una clave.
+    bool sinMaterialConfirmado = false;
+    if (_materialesUsados.isEmpty) {
+      final String? eleccion = await _confirmarSinMaterial();
+      if (!mounted) return;
+      if (eleccion == 'registrar') {
+        await _abrirConsumoDeMaterial();
+        return;
+      }
+      if (eleccion != 'si') return;
+      sinMaterialConfirmado = true;
+    }
+
+    // 2. EL REPORTE DE CIERRE SALE DE ACÁ, Y ES UNO POR VUELTA (decisión del
+    //    usuario, 17/10/2026: «una única acción de cierre»). El id es fijo por
+    //    revisión: un reintento de «Finalizar» no escribe un segundo reporte,
+    //    y una orden devuelta —revisión nueva— sí lleva el suyo.
+    final String idCierre = 'seg-${widget.ordenId}-cierre-r$revisionBase';
+    if (!await _fuente.existeReporte(idCierre)) {
+      final Map<String, dynamic>? formulario = _formularioDe('cierre');
+      if (formulario != null) {
+        final Map<String, dynamic>? respuestas = await _pedirCierre(formulario);
+        if (!mounted) return;
+        if (respuestas == null) return;
+        await _encolarPorDefecto(
+          widget.ordenId,
+          'cierre',
+          <String, dynamic>{
+            ...respuestas,
+            // Dato de plataforma: viaja aparte de las respuestas (ver la
+            // cola). La plantilla no lo declara y el servidor lo rechazaría
+            // como respuesta.
+            if (sinMaterialConfirmado)
+              '__plataforma': <String, dynamic>{'sin_material_confirmado': true},
+          },
+          idFijo: idCierre,
+        );
+        if (!mounted) return;
+      }
+    }
     final idempotencyKey = const Uuid().v4();
 
     await _fuente.transicionar(
@@ -379,6 +442,73 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         ),
       );
     }
+  }
+
+  /// El formulario de un reporte, de lo que el servidor declaró. Nulo cuando
+  /// el seguimiento nunca bajó al teléfono: sin él no se sabe qué pide el
+  /// cierre, y se finaliza igual —el trabajo no puede quedar trabado por eso—.
+  Map<String, dynamic>? _formularioDe(String momento) {
+    final Object? formularios = _seguimiento?['formularios'];
+    if (formularios is! Map) return null;
+    final Object? f = formularios[momento];
+    return f is Map ? Map<String, dynamic>.from(f) : null;
+  }
+
+  List<Map<String, dynamic>> _listaDe(Map<String, dynamic> f, String clave) =>
+      <Map<String, dynamic>>[
+        for (final dynamic x in (f[clave] as List<dynamic>? ?? const <dynamic>[]))
+          if (x is Map) Map<String, dynamic>.from(x),
+      ];
+
+  /// La hoja del cierre: la misma de los reportes, con «Guardar y finalizar».
+  Future<Map<String, dynamic>?> _pedirCierre(Map<String, dynamic> formulario) async {
+    await _contarFotos('cierre');
+    _fotosDeHoja.value = _fotosDelBorrador;
+    Map<String, dynamic>? respuestas;
+    if (!mounted) return null;
+    final bool? guardado = await abrirHojaDeReporte(
+      context,
+      momento: 'cierre',
+      titulo: 'Cierre del trabajo',
+      campos: _listaDe(formulario, 'campos'),
+      evidencias: _listaDe(formulario, 'evidencias'),
+      fotos: _fotosDeHoja,
+      alTomarFoto: (String requisitoId) async {
+        await _tomarFotoDelReporte('cierre', requisitoId);
+        _fotosDeHoja.value = _fotosDelBorrador;
+      },
+      alGuardar: (Map<String, dynamic> r, {bool requiereNoc = false, bool detener = true}) {
+        respuestas = r;
+      },
+      textoGuardar: 'Guardar y finalizar',
+    );
+    if (guardado != true) {
+      await _descartarBorrador('cierre');
+      return null;
+    }
+    return respuestas;
+  }
+
+  /// «No hay materiales registrados en esta orden.» Devuelve `si`,
+  /// `registrar` o nulo si se cerró sin elegir.
+  Future<String?> _confirmarSinMaterial() {
+    return showDialog<String>(
+      context: context,
+      builder: (BuildContext c) => AlertDialog(
+        title: const Text('No hay materiales registrados en esta orden'),
+        content: const Text('¿Confirmás que no utilizaste materiales?'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(c).pop('registrar'),
+            child: const Text('Volver a registrar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(c).pop('si'),
+            child: const Text('Sí, no utilicé materiales'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _confirmarBorrador() {
@@ -491,25 +621,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// motivo. Si se pidiera la red primero, un tecnico sin señal esperaria el
   /// timeout completo mirando una pantalla sin botones, teniendo el dato
   /// guardado en el telefono.
-  Future<Map<String, dynamic>?> _seguimientoDelTelefono() async {
-    final String? orgId = _orgId ?? await SecureStorageService().getOrgId();
-    if (orgId == null) return null;
-
-    final LocalDatabase base = LocalDatabase();
-    final Map<String, dynamic>? local = await base.leerSeguimiento(
-      ordenId: widget.ordenId,
-      orgId: orgId,
-    );
-    final bool actualizo = await SyncQueueService().descargarSeguimientoDeOrden(
-      ordenId: widget.ordenId,
-      orgId: orgId,
-    );
-    if (!actualizo) {
-      return local;
-    }
-    return await base.leerSeguimiento(ordenId: widget.ordenId, orgId: orgId) ??
-        local;
-  }
+  Future<Map<String, dynamic>?> _seguimientoDelTelefono() =>
+      _fuente.seguimiento(widget.ordenId);
 
   /// Guarda un reporte y lo manda a subir.
   ///
@@ -642,6 +755,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     Map<String, dynamic> respuestas, {
     bool requiereNoc = false,
     bool detener = true,
+    String? idFijo,
   }) async {
     final String? orgId = _orgId;
     final String? profileId = _profileId;
@@ -649,27 +763,19 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       return;
     }
 
-    final String reporteId = await LocalDatabase().encolarSeguimiento(
-      ordenId: ordenId,
+    // LAS FOTOS DEL BORRADOR PASAN A SER DE ESTE REPORTE: antes de esto
+    // estaban atadas a un id que solo existe en esta pantalla. Lo hace la
+    // fuente, junto con encolar, para que no puedan separarse.
+    await _fuente.encolarReporte(
       orgId: orgId,
       profileId: profileId,
+      ordenId: ordenId,
       momento: momento,
       respuestas: respuestas,
+      borradorId: _borradorDe(momento),
       requiereNoc: requiereNoc,
       detener: detener,
-    );
-
-    // LAS FOTOS DEL BORRADOR PASAN A SER DE ESTE REPORTE
-    // --------------------------------------------------
-    // Antes de esta linea las fotos estaban atadas a un id que solo existe en
-    // esta pantalla; despues, al reporte que acaba de encolarse. Es lo que
-    // permite que la sincronizacion las encuentre cuando el servidor devuelva el
-    // id del evento. El borrador se renueva para la hoja siguiente.
-    await LocalDatabase().reasignarEvidenciasDeBorrador(
-      borradorId: _borradorDe(momento),
-      reporteLocalId: reporteId,
-      orgId: orgId,
-      profileId: profileId,
+      idFijo: idFijo,
     );
     if (mounted) {
       setState(() => _fotosDelBorrador = <String, int>{});
@@ -677,7 +783,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
 
     // Se intenta ahora. Si no hay señal, la cola lo reintenta sola: esto no
     // espera ni bloquea la pantalla.
-    await SyncQueueService().procesarCola();
+    _fuente.procesarCola();
   }
 
   /// El camino real: primero el espejo local --que funciona sin señal-- y
@@ -1122,6 +1228,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                       mostrarHistoria: false,
                       mostrarBloqueoAbierto: false,
                       pendientesDeSubir: _reportesSinSubir,
+                      // El cierre sale de «Finalizar» (17/10/2026).
+                      cierreEnFinalizar: true,
                       alTomarFoto: _tomarFotoDelReporte,
                       fotosTomadas: _fotosDelBorrador,
                       alAbrirHoja: _contarFotos,
@@ -1144,33 +1252,45 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                           },
                     ),
                     const SizedBox(height: AppSpacing.lg),
-                    // LOS DATOS DEL TRABAJO, CON SU NOMBRE. Antes empezaban sin
-                    // titulo, arriba de todo, y se confundian con el avance: el
-                    // tecnico los llenaba creyendo que estaba reportando
-                    // (pedido del usuario, 15/10/2026). Reportar va ARRIBA,
-                    // porque es lo que se hace varias veces en una visita; esto
-                    // se completa una vez para cerrar.
-                    if (_camposNormalizados.isNotEmpty) ...<Widget>[
-                      const EncabezadoDeBloque(
-                        titulo: 'Datos del trabajo',
-                        icono: Icons.fact_check_outlined,
-                      ),
+                    // POR PASOS, CUANDO LA PLANTILLA LOS TIENE (17/10/2026).
+                    // Cada paso junta su instrucción, sus datos y sus fotos: el
+                    // técnico registra lo que está haciendo donde lo está
+                    // haciendo. Sin pasos, la pantalla es la de siempre.
+                    if (_pasos.isNotEmpty) ...<Widget>[
+                      _selectorDePasos(),
                       const SizedBox(height: AppSpacing.sm),
+                      _pasoEnCurso(),
+                      const SizedBox(height: AppSpacing.lg),
+                    ] else ...<Widget>[
+                      // LOS DATOS DEL TRABAJO, CON SU NOMBRE. Antes empezaban
+                      // sin titulo y se confundian con el avance (pedido del
+                      // usuario, 15/10/2026).
+                      if (_camposNormalizados.isNotEmpty) ...<Widget>[
+                        const EncabezadoDeBloque(
+                          titulo: 'Datos del trabajo',
+                          icono: Icons.fact_check_outlined,
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                      ],
+                      FormularioDeCampo(
+                        // Una sola lectura del esquema para toda la pantalla:
+                        // la misma que usa el checklist de cierre.
+                        campos: _camposNormalizados,
+                        valores: _valoresFormulario,
+                        controladores: _controllers,
+                        alCambiar: _onFieldChanged,
+                        mostrarDatosFuturos: widget.mostrarDatosFuturos,
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
                     ],
-                    FormularioDeCampo(
-                      // Una sola lectura del esquema para toda la pantalla: la
-                      // misma que usa el checklist de cierre.
-                      campos: _camposNormalizados,
-                      valores: _valoresFormulario,
-                      controladores: _controllers,
-                      alCambiar: _onFieldChanged,
-                      mostrarDatosFuturos: widget.mostrarDatosFuturos,
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-
-
+                    // COMPROBAR CONEXION, SIN SALIR DE LA INTERVENCION. Antes
+                    // vivia solo en la ficha.
+                    if (_conexion() case final Widget bloque) ...<Widget>[
+                      bloque,
+                      const SizedBox(height: AppSpacing.lg),
+                    ],
                     _bloqueDeMateriales(),
-                    _evidencias(),
+                    if (_pasos.isEmpty) _evidencias(),
                     _checklistDeCierre(),
                     if (widget.mostrarDatosFuturos) ...[
                       const SizedBox(height: AppSpacing.lg),
@@ -1184,6 +1304,154 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Los pasos de la plantilla, con lo que se registra en cada uno. Vacío
+  /// cuando la plantilla no está organizada por pasos.
+  List<PasoDeEjecucion> get _pasos => pasosDeEjecucion(
+        campos: _campos,
+        requisitos: _evidenciasRequisitos,
+        pasos: _pasosDelProtocolo,
+      );
+
+  /// Si a un paso no le falta nada de lo obligatorio.
+  bool _pasoCompleto(PasoDeEjecucion paso) {
+    final bool faltaDato = CampoDelFormulario.normalizar(
+      paso.campos,
+      _valoresFormulario,
+    ).any((CampoDelFormulario c) => c.bloqueaCierre);
+    final bool faltaFoto = requisitosPendientes(
+      requisitos: paso.evidencias,
+      capturadas: _evidenciasCapturadas,
+    ).any((Map<String, dynamic> r) => r['obligatorio'] == true);
+    return !faltaDato && !faltaFoto;
+  }
+
+  /// Los pasos, de a uno por fila: el que se está haciendo, resaltado; los
+  /// completos, con su tilde. Tocar uno lo abre.
+  Widget _selectorDePasos() {
+    final List<PasoDeEjecucion> pasos = _pasos;
+    final int actual = _pasoActual.clamp(0, pasos.length - 1);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          'PASOS DEL TRABAJO',
+          style: AppTypography.labelCaption.copyWith(color: AppColors.outline),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        for (int i = 0; i < pasos.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+            child: Material(
+              color: i == actual
+                  ? AppColors.primary
+                  : AppColors.surfaceContainerLowest,
+              borderRadius: AppRadius.brTarjeta,
+              child: InkWell(
+                borderRadius: AppRadius.brTarjeta,
+                onTap: () => setState(() => _pasoActual = i),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minHeight: AppSpacing.objetivoTactil,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.xs,
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        Icon(
+                          _pasoCompleto(pasos[i])
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          size: 20,
+                          color: i == actual
+                              ? AppColors.onPrimary
+                              : (_pasoCompleto(pasos[i])
+                                  ? AppColors.secondary
+                                  : AppColors.outline),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: Text(
+                            '${i + 1}. ${pasos[i].titulo}',
+                            style: AppTypography.cuerpo.copyWith(
+                              color: i == actual
+                                  ? AppColors.onPrimary
+                                  : AppColors.onSurface,
+                              fontWeight: i == actual
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// El paso que se está haciendo: su instrucción, sus datos, sus fotos y el
+  /// material, en un mismo lugar.
+  Widget _pasoEnCurso() {
+    final List<PasoDeEjecucion> pasos = _pasos;
+    final int actual = _pasoActual.clamp(0, pasos.length - 1);
+    final PasoDeEjecucion paso = pasos[actual];
+    final List<CampoDelFormulario> campos = CampoDelFormulario.normalizar(
+      paso.campos,
+      _valoresFormulario,
+    );
+    return DexterBloque(
+      titulo: paso.titulo,
+      icono: Icons.construction,
+      insignia: DexterPastilla.neutra(
+        texto: 'Paso ${actual + 1} de ${pasos.length}',
+      ),
+      separacion: AppSpacing.md,
+      children: <Widget>[
+        if (paso.descripcion.isNotEmpty)
+          Text(paso.descripcion, style: AppTypography.cuerpo),
+        if (campos.isNotEmpty)
+          FormularioDeCampo(
+            campos: campos,
+            valores: _valoresFormulario,
+            controladores: _controllers,
+            alCambiar: _onFieldChanged,
+            mostrarDatosFuturos: widget.mostrarDatosFuturos,
+            conEncabezado: false,
+          ),
+        for (final dynamic r in paso.evidencias)
+          if (r is Map) _buildEvidenciaRequisito(Map<String, dynamic>.from(r)),
+        DexterAccionRapida(
+          texto: 'Registrar material usado',
+          icono: Icons.inventory_2_outlined,
+          alTocar: _abrirConsumoDeMaterial,
+        ),
+      ],
+    );
+  }
+
+  /// «Comprobar conexión», o nulo cuando no corresponde: sin acciones de red
+  /// —una prueba— o en un trabajo de planta, donde no hay equipo de cliente.
+  Widget? _conexion() {
+    final AccionesOrden? acciones = widget.acciones;
+    final Map<String, dynamic>? orden = _orden;
+    if (acciones == null || orden == null) return null;
+    final TrabajoVista trabajo = TrabajoVista.desdeOrden(orden);
+    if (trabajo.esTrabajoDePlanta) return null;
+    return ComprobarConexion(
+      ordenId: widget.ordenId,
+      trabajo: trabajo,
+      acciones: acciones,
+      alActualizarFicha: _loadOrdenData,
     );
   }
 
@@ -1604,6 +1872,10 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// derecha. El diseño dice "Registrar Materiales"; ese módulo todavía no
   /// existe, así que el botón hace lo que la aplicación sí sabe hacer: cerrar
   /// la orden con lo registrado.
+  bool get _hayPasoAnterior => _pasos.isNotEmpty && _pasoActual > 0;
+  bool get _hayPasoSiguiente =>
+      _pasos.isNotEmpty && _pasoActual < _pasos.length - 1;
+
   Widget _barraDeAcciones() {
     return Container(
       decoration: const BoxDecoration(
@@ -1640,7 +1912,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                 borderRadius: AppRadius.brTarjeta,
                 child: InkWell(
                   borderRadius: AppRadius.brTarjeta,
-                  onTap: _confirmarBorrador,
+                  onTap: _hayPasoAnterior
+                      ? () => setState(() => _pasoActual--)
+                      : _confirmarBorrador,
                   child: Container(
                     height: AppSpacing.objetivoTactilAmplio,
                     padding: const EdgeInsets.symmetric(
@@ -1651,14 +1925,18 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          _borradorConfirmado ? Icons.check : Icons.save,
+                          _hayPasoAnterior
+                              ? Icons.arrow_back
+                              : (_borradorConfirmado ? Icons.check : Icons.save),
                           size: 18,
                           color: AppColors.onSurface,
                         ),
                         const SizedBox(width: AppSpacing.xs),
                         Flexible(
                           child: Text(
-                            _borradorConfirmado ? 'Guardado' : 'Borrador',
+                            _hayPasoAnterior
+                                ? 'Anterior'
+                                : (_borradorConfirmado ? 'Guardado' : 'Borrador'),
                             style: AppTypography.etiqueta.copyWith(
                               color: AppColors.onSurface,
                             ),
@@ -1680,7 +1958,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                   borderRadius: AppRadius.brTarjeta,
                   child: InkWell(
                     borderRadius: AppRadius.brTarjeta,
-                    onTap: _completarOrden,
+                    onTap: _hayPasoSiguiente
+                        ? () => setState(() => _pasoActual++)
+                        : _completarOrden,
                     child: Container(
                       height: AppSpacing.objetivoTactilAmplio,
                       alignment: Alignment.center,
@@ -1694,7 +1974,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                           // «Finalizar ord...» habria sido peor que sacarla.
                           Flexible(
                             child: Text(
-                              'Finalizar',
+                              _hayPasoSiguiente ? 'Siguiente paso' : 'Finalizar',
                               style: AppTypography.etiquetaGrande.copyWith(
                                 color: AppColors.onPrimary,
                               ),

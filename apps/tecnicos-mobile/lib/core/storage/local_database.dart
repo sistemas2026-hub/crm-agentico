@@ -1935,12 +1935,29 @@ class LocalDatabase {
     bool requiereNoc = false,
     bool detener = true,
     DateTime? capturadoEn,
+    String? idFijo,
   }) async {
     final db = await database;
     final DateTime cuando = capturadoEn ?? DateTime.now();
     // El id lleva la orden y el momento para que sea legible en un volcado, y un
     // sufijo de reloj para que dos reportes del mismo momento no choquen.
-    final String id = 'seg-$ordenId-$momento-${cuando.millisecondsSinceEpoch}';
+    //
+    // `idFijo` es para el reporte que NO puede repetirse: el de cierre que sale
+    // del botón «Finalizar» (17/10/2026). Un reintento de finalizar trae el
+    // mismo id, la fila ya está y no se escribe otra; y como el id viaja como
+    // `Idempotency-Key`, el servidor tampoco registra dos.
+    final String id =
+        idFijo ?? 'seg-$ordenId-$momento-${cuando.millisecondsSinceEpoch}';
+    if (idFijo != null) {
+      final List<Map<String, Object?>> ya = await db.query(
+        'cola_seguimiento',
+        columns: <String>['id'],
+        where: 'id = ?',
+        whereArgs: <Object?>[idFijo],
+        limit: 1,
+      );
+      if (ya.isNotEmpty) return idFijo;
+    }
 
     await db.insert('cola_seguimiento', <String, Object?>{
       'id': id,
@@ -1958,6 +1975,19 @@ class LocalDatabase {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
 
     return id;
+  }
+
+  /// Si ya hay un reporte con ese id en el teléfono, subido o no.
+  Future<bool> existeSeguimiento(String id) async {
+    final db = await database;
+    final List<Map<String, Object?>> filas = await db.query(
+      'cola_seguimiento',
+      columns: <String>['id'],
+      where: 'id = ?',
+      whereArgs: <Object?>[id],
+      limit: 1,
+    );
+    return filas.isNotEmpty;
   }
 
   /// Los reportes que todavia tienen que subir, en el orden en que se escribieron.

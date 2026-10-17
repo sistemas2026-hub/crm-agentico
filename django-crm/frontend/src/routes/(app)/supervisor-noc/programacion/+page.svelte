@@ -1698,6 +1698,12 @@
                               {/each}
                             </div>
                           {/if}
+                          <!-- Lo afirmó el técnico al finalizar sin material
+                               registrado (17/10/2026). Sin esta línea, «no
+                               cargó material» y «no usó» se leen igual. -->
+                          {#if ev.sin_material_confirmado}
+                            <span class="snoc-body-sm">Confirmó que no usó materiales</span>
+                          {/if}
                           {#if ev.capturado_en_dispositivo}
                             <span class="snoc-body-sm snoc-tenue">
                               Escrito en el teléfono a las {fecha(ev.capturado_en_dispositivo)}

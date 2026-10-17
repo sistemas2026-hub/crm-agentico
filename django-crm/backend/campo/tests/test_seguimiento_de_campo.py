@@ -341,13 +341,27 @@ def test_g_una_regla_del_tipo_de_trabajo_se_aplica(orden, tecnico):
     assert "nivel_inicial_1550" in e.value.errores
 
 
-def test_h_no_se_cierra_lo_que_nunca_se_inicio(orden, tecnico):
+def test_h_no_se_cierra_lo_que_nunca_se_inicio(org_a, version_con_seguimiento, tecnico):
+    """Una orden que nunca llegó al sitio no tiene intervención que cerrar."""
+    asignada = _orden(org_a, version_con_seguimiento, tecnico[1], numero=9091,
+                      estado=OrdenTrabajo.ASIGNADA)
     with pytest.raises(seg.SeguimientoInvalido) as e:
         seg.registrar(
-            orden, profile=tecnico[1], momento=seg.CIERRE,
+            asignada, profile=tecnico[1], momento=seg.CIERRE,
             respuestas={"falla_encontrada": "empalme roto", "servicio_validado": True},
         )
     assert "nunca se inició" in str(e.value)
+
+
+def test_h2_si_llego_al_sitio_se_cierra_aunque_no_haya_escrito_el_inicio(orden, tecnico):
+    """Desde el 17/10/2026 el cierre sale del mismo botón que finaliza: llegar
+    al sitio --la máquina de estados ya lo sabe-- alcanza como inicio. Antes, el
+    técnico que no tocó «Registrar inicio» perdía su reporte de cierre."""
+    evento = seg.registrar(
+        orden, profile=tecnico[1], momento=seg.CIERRE,
+        respuestas={"falla_encontrada": "empalme roto", "servicio_validado": True},
+    )
+    assert evento.tipo == seg.TIPOS[seg.CIERRE]
 
 
 def test_i_no_hay_dos_inicios(orden, tecnico):

@@ -21,6 +21,7 @@ class AccionesOrden {
     required this.sincronizar,
     this.probarConexion,
     this.medirSenal,
+    this.refrescarFicha,
   });
 
   /// [tipoAccion] es el nombre que la cola le manda al backend
@@ -49,6 +50,15 @@ class AccionesOrden {
   /// Una medicion que se ejecuta cuando el tecnico ya se fue mide un momento
   /// que a nadie le importa, y llega con cara de respuesta a lo que pregunto.
   final Future<MedicionDeSenal> Function(String ordenId)? medirSenal;
+
+  /// Volver a pedir la ficha del equipo (niveles, estado, serial).
+  ///
+  /// Existe porque la ficha se pide UNA vez, al crear la orden: si en ese
+  /// momento el motor no contestaba, la orden quedaba sin niveles y sin
+  /// serial, y sin serial tampoco se puede volver a medir. La app decía «Se
+  /// reintenta al sincronizar» y no se reintentaba (17/10/2026). Con éxito, la
+  /// orden nueva queda guardada en el teléfono antes de devolver.
+  final Future<ResultadoRefresco> Function(String ordenId)? refrescarFicha;
 
   factory AccionesOrden.reales() {
     final baseLocal = LocalDatabase();
@@ -98,6 +108,42 @@ class AccionesOrden {
           return MedicionDeSenal.noSePudo(sinRed ? 'sin_conexion' : 'servidor');
         }
       },
+      refrescarFicha: (String ordenId) async {
+        try {
+          final Response<dynamic> r = await ApiClient().dio.post<dynamic>(
+                ApiEndpoints.trabajoRefrescarFicha(ordenId),
+              );
+          final Map<String, dynamic> d = r.data is Map
+              ? Map<String, dynamic>.from(r.data as Map)
+              : <String, dynamic>{};
+          if (d['ok'] == true && d['orden'] is Map) {
+            final orgId = await almacenamiento.getOrgId();
+            final profileId = await almacenamiento.getProfileId();
+            if (orgId != null && profileId != null) {
+              await baseLocal.upsertOrden(
+                orgId: orgId,
+                profileId: profileId,
+                ordenData: Map<String, dynamic>.from(d['orden'] as Map),
+              );
+            }
+            return const ResultadoRefresco(ok: true);
+          }
+          return ResultadoRefresco(
+            ok: false,
+            motivo: (d['motivo'] ?? '').toString(),
+            motorAlcanzado: d['motor_alcanzado'] == true,
+          );
+        } on DioException catch (e) {
+          if (e.response?.statusCode == 409) {
+            return const ResultadoRefresco(ok: false, motivo: 'no_admite');
+          }
+          final bool sinRed = e.type == DioExceptionType.connectionError ||
+              e.type == DioExceptionType.connectionTimeout ||
+              e.type == DioExceptionType.receiveTimeout;
+          return ResultadoRefresco(
+              ok: false, motivo: sinRed ? 'sin_conexion' : 'servidor');
+        }
+      },
       probarConexion: (String ordenId, int paquetes) async {
         try {
           final Response<dynamic> r = await ApiClient().dio.post<dynamic>(
@@ -123,6 +169,39 @@ class AccionesOrden {
 /// Lo que devuelve un ping, con la distincion que importa: **no se pudo
 /// medir** no es lo mismo que **se midio y no respondio**. La primera se
 /// reintenta; la segunda es un dato sobre el equipo del cliente.
+/// Lo que pasó al volver a pedir la ficha del equipo.
+class ResultadoRefresco {
+  const ResultadoRefresco({
+    required this.ok,
+    this.motivo = '',
+    this.motorAlcanzado = false,
+  });
+
+  final bool ok;
+
+  /// `sin_conexion`, `servidor`, `no_admite`, o el motivo del motor
+  /// (`sin_identidad_resoluble`, `caso_sin_servicio`, un error de red).
+  final String motivo;
+  final bool motorAlcanzado;
+
+  /// La frase para el técnico. No promete un reintento que no ocurre.
+  String get texto {
+    if (ok) return 'Ficha actualizada.';
+    return switch (motivo) {
+      'sin_conexion' =>
+        'Sin señal no se puede consultar. Probá de nuevo cuando tengas.',
+      'no_admite' => 'Esta orden no admite volver a consultar la ficha.',
+      'sin_identidad_resoluble' =>
+        'El sistema del ISP no encontró el servicio de este cliente.',
+      'caso_sin_servicio' =>
+        'Este caso no tiene servicio asociado: no hay equipo que consultar.',
+      _ => motorAlcanzado
+          ? 'Se consultó, pero no llegó la ficha del equipo.'
+          : 'El sistema no contestó. Probá de nuevo en un rato.',
+    };
+  }
+}
+
 class ResultadoPing {
   const ResultadoPing({
     required this.medido,

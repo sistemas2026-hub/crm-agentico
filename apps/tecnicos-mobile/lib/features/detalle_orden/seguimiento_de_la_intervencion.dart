@@ -41,6 +41,7 @@ class SeguimientoDeLaIntervencion extends StatefulWidget {
     this.mostrarHistoria = true,
     this.mostrarBloqueoAbierto = true,
     this.pendientesDeSubir = 0,
+    this.cierreEnFinalizar = false,
   });
 
   /// Lo que devolvió el backend, o `null` si **nunca se descargó** en este
@@ -130,6 +131,14 @@ class SeguimientoDeLaIntervencion extends StatefulWidget {
   /// guardado y sin subir es un hecho que el técnico tiene que poder ver: si no,
   /// no sabe si el NOC se enteró.
   final int pendientesDeSubir;
+
+  /// El reporte de cierre sale del botón «Finalizar», no de acá.
+  ///
+  /// Decisión del usuario (17/10/2026): «una única acción de cierre». Tener
+  /// «Reporte de cierre» al lado de «Finalizar» eran dos procedimientos para
+  /// terminar lo mismo. Con esto encendido el botón no se ofrece, y bloquear
+  /// —lo que hay que poder hacer siempre— va primero.
+  final bool cierreEnFinalizar;
 
   @override
   State<SeguimientoDeLaIntervencion> createState() =>
@@ -499,15 +508,21 @@ class _SeguimientoDeLaIntervencionState
     final bool huboInicio = yaOcurrio.contains('inicio_campo');
 
     final List<Widget> botones = <Widget>[];
-    for (final (String momento, String texto) opcion in <(String, String)>[
-      ('inicio', 'Registrar inicio'),
-      ('avance', 'Registrar avance'),
-      ('bloqueo', 'Reportar bloqueo'),
-      // «Reporte de cierre» y no «Cerrar intervención»: al lado de «Finalizar
-      // orden» los dos sonaban a lo mismo. Este es un REPORTE; cerrar el
-      // trabajo sigue siendo el botón de abajo.
-      ('cierre', 'Reporte de cierre'),
-    ]) {
+    final List<(String, String)> opciones = widget.cierreEnFinalizar
+        ? const <(String, String)>[
+            ('bloqueo', 'Reportar bloqueo'),
+            ('avance', 'Registrar avance'),
+            ('inicio', 'Registrar inicio'),
+          ]
+        : const <(String, String)>[
+            ('inicio', 'Registrar inicio'),
+            ('avance', 'Registrar avance'),
+            ('bloqueo', 'Reportar bloqueo'),
+            // «Reporte de cierre» y no «Cerrar intervención»: al lado de
+            // «Finalizar orden» los dos sonaban a lo mismo.
+            ('cierre', 'Reporte de cierre'),
+          ];
+    for (final (String momento, String texto) opcion in opciones) {
       final String momento = opcion.$1;
       // El tipo de trabajo tiene que declarar ese momento.
       if (!formularios.containsKey(momento)) {
@@ -587,46 +602,30 @@ class _SeguimientoDeLaIntervencionState
     widget.alAbrirHoja?.call(momento);
     bool pidioNoc = false;
 
-    final bool? guardado = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      // Ni arrastrar ni tocar afuera la cierran: los dos la cerraban sin pasar
-      // por la pregunta, y un roce no puede costar un reporte escrito en la
-      // calle. Se cierra con la ✕ o con «atrás», y los dos preguntan.
-      enableDrag: false,
-      isDismissible: false,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(AppRadius.hoja),
-        ),
-      ),
-      builder: (BuildContext hoja) => _HojaDelReporte(
-        momento: momento,
-        titulo: _tituloDelMomento(momento),
-        campos: _camposDe(formularios, momento),
-        evidencias: _evidenciasDe(formularios, momento),
-        fotos: _fotos,
-        alTomarFoto: widget.alTomarFoto == null
-            ? null
-            : (String requisitoId) =>
-                  widget.alTomarFoto!(momento, requisitoId),
-        alGuardar:
-            (
-              Map<String, dynamic> respuestas, {
-              bool requiereNoc = false,
-              bool detener = true,
-            }) {
-              pidioNoc = requiereNoc;
-              widget.alReportar!(
-                momento,
-                respuestas,
-                requiereNoc: requiereNoc,
-                detener: detener,
-              );
-            },
-      ),
+    final bool? guardado = await abrirHojaDeReporte(
+      context,
+      momento: momento,
+      titulo: _tituloDelMomento(momento),
+      campos: _camposDe(formularios, momento),
+      evidencias: _evidenciasDe(formularios, momento),
+      fotos: _fotos,
+      alTomarFoto: widget.alTomarFoto == null
+          ? null
+          : (String requisitoId) => widget.alTomarFoto!(momento, requisitoId),
+      alGuardar:
+          (
+            Map<String, dynamic> respuestas, {
+            bool requiereNoc = false,
+            bool detener = true,
+          }) {
+            pidioNoc = requiereNoc;
+            widget.alReportar!(
+              momento,
+              respuestas,
+              requiereNoc: requiereNoc,
+              detener: detener,
+            );
+          },
     );
 
     if (!mounted) return;
@@ -945,6 +944,53 @@ class _SeguimientoDeLaIntervencionState
 }
 
 
+/// Abre la hoja de un reporte desde abajo. Devuelve `true` si se guardó.
+///
+/// Es la misma para los reportes de la sección «Reportar» y para el cierre que
+/// sale de «Finalizar» (17/10/2026): una sola forma de escribir un reporte,
+/// con la misma pregunta antes de descartar.
+Future<bool?> abrirHojaDeReporte(
+  BuildContext context, {
+  required String momento,
+  required String titulo,
+  required List<Map<String, dynamic>> campos,
+  required List<Map<String, dynamic>> evidencias,
+  required ValueNotifier<Map<String, int>> fotos,
+  required Future<void> Function(String requisitoId)? alTomarFoto,
+  required void Function(
+    Map<String, dynamic> respuestas, {
+    bool requiereNoc,
+    bool detener,
+  })
+  alGuardar,
+  String textoGuardar = 'Guardar el reporte',
+}) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    // Ni arrastrar ni tocar afuera la cierran: los dos la cerraban sin pasar
+    // por la pregunta, y un roce no puede costar un reporte escrito en la
+    // calle. Se cierra con la ✕ o con «atrás», y los dos preguntan.
+    enableDrag: false,
+    isDismissible: false,
+    backgroundColor: AppColors.surface,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.hoja)),
+    ),
+    builder: (BuildContext hoja) => _HojaDelReporte(
+      momento: momento,
+      titulo: titulo,
+      campos: campos,
+      evidencias: evidencias,
+      fotos: fotos,
+      alTomarFoto: alTomarFoto,
+      alGuardar: alGuardar,
+      textoGuardar: textoGuardar,
+    ),
+  );
+}
+
 /// La hoja del reporte, como ruta propia que sube desde abajo.
 ///
 /// Sabe una sola cosa además de dibujar el formulario: si cerrarla tiraría
@@ -958,8 +1004,10 @@ class _HojaDelReporte extends StatefulWidget {
     required this.fotos,
     required this.alTomarFoto,
     required this.alGuardar,
+    this.textoGuardar = 'Guardar el reporte',
   });
 
+  final String textoGuardar;
   final String momento;
   final String titulo;
   final List<Map<String, dynamic>> campos;
@@ -1066,6 +1114,7 @@ class _HojaDelReporteState extends State<_HojaDelReporte> {
                     alTomarFoto: widget.alTomarFoto,
                     fotosTomadas: fotos,
                     enHojaModal: true,
+                    textoDelBoton: widget.textoGuardar,
                     alCambiarContenido: (bool hay) => _hayAlgoEscrito = hay,
                     alGuardar:
                         (

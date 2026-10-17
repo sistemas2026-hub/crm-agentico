@@ -101,6 +101,10 @@ class ApiEndpoints {
   /// conector o cambiar una roseta, esa lectura ya no contesta «¿quedo bien?».
   static String trabajoMedirSenal(String id) =>
       '$baseUrl/api/campo/trabajos/$id/medir-senal/';
+
+  /// Volver a pedir la ficha del equipo cuando al crear la orden no llegó.
+  static String trabajoRefrescarFicha(String id) =>
+      '$baseUrl/api/campo/trabajos/$id/ficha/refrescar/';
   static String trabajoEvidencias(String id) =>
       '$baseUrl/api/campo/trabajos/$id/evidencias/';
   static String trabajoCompletar(String id) =>
