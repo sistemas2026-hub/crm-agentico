@@ -1019,3 +1019,21 @@ def test_m3_la_cuenta_es_de_vueltas_SEGUIDAS(org_a):
     assert _medicion(p)["intentos_sin_medir"] == 1
     mdf.escribir(p, mdf.de_la_respuesta(_sin_resolver("x")), timezone.now())
     assert _medicion(p)["intentos_sin_medir"] == 2
+
+
+def test_n_la_pantalla_de_despacho_dice_por_que_paso_solo(org_a, puertas_abiertas):
+    """
+    De punta a punta: el pase real escribe su motivo, y la ficha de Despacho
+    lo muestra. Una caida por LOS puede ser un equipo desenchufado, y quien
+    despacha lo tiene que leer antes de mandar a alguien (17/10/2026).
+    """
+    from campo.despacho_pantalla_views import _lectura_de
+
+    p = _pendiente(org_a, medida=_respuesta("caido", causa="fibra"))
+
+    _vuelta(org_a)
+
+    assert _estado(p) == P.ACEPTADA
+    por_que = _lectura_de(P.objects.get(pk=p.pk))["por_que_paso"]
+    assert "desenchufado" in por_que
+    assert not por_que.startswith("Aceptada"), "el prefijo del pase no se muestra"

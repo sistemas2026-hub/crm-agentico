@@ -582,6 +582,17 @@
             </details>
           {/if}
 
+          <!-- POR QUÉ PASÓ SOLO (17/10/2026). Si el Supervisor lo pasó sin que
+               nadie lo mirara, quien despacha tiene que saber con qué dato:
+               una caída por LOS puede ser un equipo desenchufado, y "no se
+               pudo medir" no confirma nada. Se confirma con el cliente antes
+               de mandar a alguien. Vacío si lo aceptó una persona. -->
+          {#if despachando.lectura?.por_que_paso}
+            <p class="snoc-aviso snoc-body-sm">
+              <strong>Pasó solo a Despacho:</strong> {despachando.lectura.por_que_paso}
+            </p>
+          {/if}
+
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Qué hay que hacer</span>
             {#key despachando.lectura}

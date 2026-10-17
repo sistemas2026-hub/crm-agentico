@@ -118,3 +118,50 @@ def test_e_si_el_motor_no_responde_la_ficha_sale_igual_sin_barrio(
     assert r.status_code == 200, r.content
     assert r.json()["localidad"] == ""
     assert r.json()["lectura"]["recomendacion"]       # lo que vive en el CRM llega
+
+
+# =============================================================================
+#  POR QUE PASO SOLO  --  17/10/2026
+# =============================================================================
+#  Desde la Fase 4 pasan solas fallas que la medicion no confirma del todo, y
+#  el aviso para quien despacha no llegaba a esta pantalla (auditor
+#  independiente de la Fase 4, hallazgo 2).
+
+def test_f_si_paso_solo_la_ficha_dice_por_que(admin_client, org_a,
+                                               ficha_del_motor):
+    from operaciones import paso_a_despacho as pad
+    from operaciones import supervisor as sup
+    from operaciones.models import PropuestaSupervisor
+
+    caso = _caso(org_a)
+    p = _propuesta(org_a, caso, estado=PropuestaSupervisor.PROPUESTA)
+    porque = ("falla de servicio CONFIRMADA por la medicion del equipo: perdio "
+              "la señal optica (LOS/LOF). Puede ser la fibra o un equipo "
+              "desenchufado: el despachador lo confirma con el cliente")
+    sup.revisar(p, actor=None, automatico=True,
+                decision=PropuestaSupervisor.ACEPTADA,
+                comentario=f"{pad.PREFIJO_DEL_PASE}{porque}")
+
+    r = admin_client.get(_ruta(caso))
+
+    assert r.status_code == 200, r.content
+    assert r.json()["lectura"]["por_que_paso"] == porque
+
+
+def test_g_si_la_acepto_una_persona_no_dice_que_paso_solo(
+        admin_client, admin_profile, org_a, ficha_del_motor):
+    from operaciones import paso_a_despacho as pad
+    from operaciones import supervisor as sup
+    from operaciones.models import PropuestaSupervisor
+
+    caso = _caso(org_a)
+    p = _propuesta(org_a, caso, estado=PropuestaSupervisor.PROPUESTA)
+    #  Aunque la nota empiece igual que la del pase: lo que decide es QUIEN
+    #  acepto, no como empieza el texto.
+    sup.revisar(p, actor=admin_profile, decision=PropuestaSupervisor.ACEPTADA,
+                comentario=f"{pad.PREFIJO_DEL_PASE}lo revise yo: hay que ir")
+
+    r = admin_client.get(_ruta(caso))
+
+    assert r.status_code == 200, r.content
+    assert r.json()["lectura"]["por_que_paso"] == ""

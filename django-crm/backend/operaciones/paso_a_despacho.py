@@ -476,6 +476,10 @@ _MOTIVO_DE_UN_ERROR = "el motor contesto "
 #:  el ticket, y puede traer el nombre del cliente (revisor de PII, 16/10). La
 #:  recomendacion sigue en el detalle de la propuesta, para quien la puede ver.
 NOMBRE_DEL_PASE = "Pase automatico a Despacho"
+#:  Como empieza el 'resultado' de una propuesta que el Supervisor paso solo.
+#:  Lo que sigue es el porque de 'decidir', y la pantalla de Despacho lo
+#:  muestra sin el prefijo ('campo.despacho_pantalla_views').
+PREFIJO_DEL_PASE = "Aceptada automaticamente por el Supervisor NOC IA. "
 
 #:  LOS ESTADOS DE DEXTER CON LOS QUE UN CASO PUEDE PASAR SOLO. Lista blanca:
 #:  para un efecto que ocurre sin persona, falla cerrado. 'supervisor' trata
@@ -651,8 +655,7 @@ def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
         sup.revisar(
             propuesta, actor=None, automatico=True,
             decision=PropuestaSupervisor.ACEPTADA,
-            comentario=f"Aceptada automaticamente por el Supervisor NOC IA. "
-                       f"{d.porque}"[:1000],
+            comentario=f"{PREFIJO_DEL_PASE}{d.porque}"[:1000],
             #  LA TAREA QUEDA EN LA AUDITORIA, y sin esto el panel no puede
             #  separar un pase a Despacho de la aceptacion de un cierre: las
             #  dos escriben 'PropuestaSupervisor APPROVED'.

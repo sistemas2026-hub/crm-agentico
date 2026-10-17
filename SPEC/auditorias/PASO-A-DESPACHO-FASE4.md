@@ -197,7 +197,7 @@ esos arreglos:
 | # | Hallazgo | Qué se hizo |
 |---|---|---|
 | 1 | "No se pudo medir" pasa también cuando lo que falla es la cadena: SmartOLT sin responder, WispHub caído, la empresa sin SmartOLT configurado, la config que no carga. Pasa en la misma vuelta, con el equipo sano inclusive, y una empresa sin SmartOLT haría pasar todas sus fallas. El log no separa los pases por motivo. VERIFICADO con cinco frases del motor | **Corregido el 17/10, por decisión del usuario:** "no se pudo medir" tiene que repetirse en dos vueltas seguidas para pasar; la primera vez la falla espera y se vuelve a medir en la vuelta siguiente. `test_m1`, `test_m2`, `test_m3` y `test_r1`; cinco mutaciones muertas (bitácora de la ficha) |
-| 2 | El aviso que justifica pasar un LOS ("el despachador lo confirma con el cliente") no llega a la pantalla de Despacho: la API manda hipótesis y recomendación, no el porqué del pase. VERIFICADO en la API | **Decide el usuario.** Es trabajo de pantalla (`campo/` y el frontend), fuera de esta fase |
+| 2 | El aviso que justifica pasar un LOS ("el despachador lo confirma con el cliente") no llega a la pantalla de Despacho: la API manda hipótesis y recomendación, no el porqué del pase. VERIFICADO en la API | **Corregido el 17/10, por decisión del usuario:** la ficha de Despacho trae `por_que_paso` (el motivo del pase, sin el prefijo, solo si lo aceptó el Supervisor) y la pantalla lo muestra antes de "Qué hay que hacer". `test_f`, `test_g` de la ficha y `test_n` de punta a punta; cuatro mutaciones muertas |
 | 3 | La vuelta de cierre corría también en el chat, que no tiene contrato JSON: la persona habría visto el objeto crudo; y si fallaba, el turno perdía la traza de sus vueltas. Las dos pruebas ajustadas a +1 estaban verdes con el síntoma | **Corregido.** El cierre es opcional y lo pide solo la lectura; el chat vuelve a ser el de antes, y sus dos pruebas a su versión de origin. `test_22c`; R21 |
 | 4 | Si la llamada de cierre fallaba, la lectura se perdía sin dejar fila, y el ticket se releía en cada vuelta sin techo | **Corregido.** Un cierre que falla deja lo de antes: el contenido de la última vuelta, que `validar` descarta y el tope cuenta. `test_22d`; R19 |
 | 5 | Dos mutaciones vivas: cambiar el texto del descarte en `validar` (la prueba lo escribía a mano), y contar como rota toda lectura con descartes | **Corregido.** El texto es una constante de `cerebro` que lee el contador, y la prueba lo produce con `validar` y `registrar` de verdad. Otra prueba afirma que una lectura con otro descarte cuenta. R22, R23 |
@@ -224,10 +224,9 @@ causas reales de caída caen en "otra".
   configurado haría pasar todas sus fallas. Lo que no pasa es un error del
   motor ni un estado que no se reconoce. Hallazgo 1 del auditor
   independiente: se le plantea al usuario.
-- **Despacho no ve por qué pasó un caso.** El motivo queda en la propuesta
-  aceptada, pero la pantalla muestra la hipótesis y la recomendación de la
-  lectura. La advertencia de un LOS ("puede ser un equipo desenchufado") no
-  llega a quien despacha. Hallazgo 2: se le plantea al usuario.
+- **Despacho ve por qué pasó un caso** desde el 17/10: la ficha muestra
+  "Pasó solo a Despacho: <motivo>", con el aviso de un LOS incluido. Antes
+  ese motivo quedaba en la propuesta y no llegaba a quien despacha.
 - **No hay acción para sacar un caso de la cola de Despacho** (A-2). Un pase
   equivocado hoy se corrige cerrando el caso. Si la cola se llena de pases que
   no correspondían, es lo primero que conviene construir.

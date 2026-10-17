@@ -388,7 +388,34 @@ def _lectura_de(propuesta) -> dict:
             hipotesis = dato[len(ETIQUETA_LECTURA):].strip()
     return {"hipotesis": hipotesis,
             "recomendacion": (propuesta.accion_propuesta or "").strip(),
-            "motivo": (propuesta.motivo or "").strip()}
+            "motivo": (propuesta.motivo or "").strip(),
+            "por_que_paso": _por_que_paso_solo(propuesta)}
+
+
+def _por_que_paso_solo(propuesta) -> str:
+    """
+    Si la propuesta la acepto el Supervisor solo, por que: el motivo que dejo
+    el paso a Despacho, sin el prefijo. Vacio si la acepto una persona: quien
+    despacha ya sabe que alguien la miro.
+
+    POR QUE  --  17/10/2026. Desde la Fase 4 pasan solas fallas que la
+    medicion no confirma del todo: una caida por LOS puede ser un equipo
+    desenchufado, y "no se pudo medir" no confirma nada. El aviso para quien
+    despacha --confirmarlo con el cliente antes de mandar a alguien-- quedaba
+    en la propuesta y no llegaba a esta pantalla (auditor independiente de la
+    Fase 4, hallazgo 2). Es texto fijo de 'paso_a_despacho.decidir', sin datos
+    del cliente.
+    """
+    from operaciones import paso_a_despacho as pad
+    from operaciones.models import PropuestaSupervisor
+
+    if (propuesta.estado != PropuestaSupervisor.ACEPTADA
+            or propuesta.revisado_por_id is not None):
+        return ""
+    texto = (propuesta.resultado or "").strip()
+    if not texto.startswith(pad.PREFIJO_DEL_PASE.strip()):
+        return ""
+    return texto[len(pad.PREFIJO_DEL_PASE.strip()):].strip()
 
 
 class CoberturaView(APIView):
