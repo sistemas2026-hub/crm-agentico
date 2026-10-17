@@ -25,6 +25,9 @@ Despacho.
 |---|---|---|
 | 17/10 | **El Supervisor publica el reparto solo**, sin que una persona lo mire | Decidido por el usuario. Cambia la decisión "No asignar cuadrilla ni fecha. El despachador reparte" de `supervisor-pasa-a-despacho`. Por eso va detrás de una tarea delegada propia y primero en sombra |
 | 17/10 | **En cada vuelta, para el mismo día** | Decidido por el usuario: lo que entra a Despacho a la tarde puede salir ese mismo día |
+| 17/10 | **Salen todas las cuadrillas activas, todos los días, cada una con su pareja de siempre** | Decidido por el usuario con el informe a la vista: lo que se repite es la pareja de cada cuadrilla (la #1 y la #2 repiten la gente en todos los días seguidos medidos) |
+| 17/10 | **Cada cuadrilla cubre sus zonas habituales, marcadas en Cuadrillas** | Decidido por el usuario: es configuración que una persona marca una vez, no algo que el Supervisor adivine del historial (4 días en 60 no alcanzan) |
+| 17/10 | **La labor de la jornada es la de la mayoría de los casos de sus zonas ese día**; si una zona tiene de las dos, la segunda cuadrilla de esa zona toma la otra | Decidido por el usuario: la labor es lo que menos se repite (la #1 en 1 de 3 días, la #2 en 0 de 2), y el reparto solo le da a una cuadrilla órdenes de su labor |
 | 17/10 | **La regla para cubrir una zona sale de cómo se arman hoy las jornadas**, no de una regla inventada | El usuario pidió "analiza bien esa ventana de cuadrilla y dime qué se repite" antes de escribir la regla. Para eso, el comando de solo lectura `informe_de_jornadas` (Fase 0) |
 
 ## Lo que ya existe, medido en el código el 17/10
@@ -52,10 +55,41 @@ Despacho.
 | 0.1 | `informe_de_jornadas` con sus pruebas en verde, con superusuario y con un rol que el RLS ata, y tres mutaciones muertas | Salida pegada |
 | 0.2 | El usuario lo corre en producción (`python manage.py informe_de_jornadas --org <uuid> --dias 60`, desde `/app`) y el análisis queda escrito acá: qué cuadrillas, qué parejas, qué zonas, cuánto se repite el día | La salida y el análisis, en esta ficha |
 
+**0.2 · Medido el 17/10 a las 13:30** (`informe_de_jornadas --dias 60` en
+producción): 10 jornadas en 4 días de 60, todos miércoles o jueves.
+
+- **Se repite la pareja**: #1 JAVIER OLIVERA + DORIAN (3 días), #2 JEIDER
+  AMELL + ISAIAS MORENO (3), #3 JULIO MORENO + JESUS DAVID (1), #4 TOMAS
+  MCAUSLAND + MANUEL GUERRERO (1). Días seguidos con la misma gente: #1 2 de
+  3, #2 2 de 2.
+- **No se repiten zonas ni labor**: zonas #1 2 de 3, #2 1 de 2; labor #1 1
+  de 3, #2 0 de 2.
+- **5 de las 10 jornadas no tienen zona**: el reparto no les habría dado
+  nada. **Ninguna cuadrilla tiene zonas habituales.** Solo existen dos
+  zonas: SOLEDAD (la cubrieron la #1 y la #2, dos días cada una) y
+  SABANAGRANDE (la #5, un día).
+- **La #5 figura como "Mario + Mario Vasquez"**: parece la misma persona
+  cargada dos veces.
+
+### Fase 1 · La jornada del día, sin publicar
+
+En cada vuelta del Supervisor, para el día en curso y por cada cuadrilla
+activa sin jornada (lo que armó una persona no se toca):
+
+| # | Evidencia | Cómo se comprueba |
+|---|---|---|
+| 1.1 | Arma la jornada con la gente de su última jornada (la pareja) y sus zonas habituales | Prueba en Postgres real |
+| 1.2 | La labor es la de la mayoría de los casos de Despacho en sus zonas ese día; sin casos, su labor habitual; dos cuadrillas en una zona con las dos labores se reparten una cada una | Prueba |
+| 1.3 | Una cuadrilla sin zonas habituales no se arma a ciegas: queda anotada como "sin zona" para una persona | Prueba |
+| 1.4 | Corre dentro de `correr_ciclo` y detrás de su propia tarea delegada; primero en sombra | Prueba de ciclo |
+| 1.5 | Mutaciones, regresión, RLS y `auditor-independiente` | Salida pegada |
+
 ### Fases siguientes
 
-Se escriben con el análisis de la Fase 0, comando por comando, antes de
-construir.
+- **Fase 2 · Las órdenes**: crear la orden de cada caso de la cola de
+  Despacho (plantilla por labor, prioridad, fecha de hoy, barrio).
+- **Fase 3 · Publicar**: el reparto por el mismo camino que el botón, con
+  `auditor-de-frontera`: le llega al técnico.
 
 ## Restricciones
 
@@ -83,9 +117,11 @@ construir.
 
 ## Bloqueos
 
-- **B1**: falta el análisis de qué se repite (Fase 0.2).
-- **B2**: SOLEDAD no está entre las zonas de ninguna cuadrilla, y el armado
-  automático está apagado. Los dos se ven en la pestaña Cuadrillas.
+- **B1**: ~~falta el análisis de qué se repite~~ hecho el 17/10 (0.2).
+- **B2**: **ninguna cuadrilla tiene zonas habituales**, y la regla decidida las
+  necesita. Las marca una persona en Cuadrillas: por lo medido, SOLEDAD en la
+  #1 y la #2, y SABANAGRANDE en la #5. Sin eso la Fase 1 arma cuadrillas "sin
+  zona", que el reparto no usa.
 
 ## Bitácora
 
