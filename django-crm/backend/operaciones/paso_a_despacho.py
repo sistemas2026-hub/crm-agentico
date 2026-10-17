@@ -33,8 +33,8 @@ EL REPARTO, Y ES LO QUE LO HACE AUDITABLE
     el MODELO    dice en que grupo cae, leyendo la DESCRIPCION del reclamo
     el CODIGO    verifica la medicion del equipo y decide el paso
 
-El modelo no juzga si -27 dBm es debil: eso lo calcula
-'clasificacion_de_trabajo._de_la_prueba' contra el rango de la guia. Y el
+El modelo no juzga si -27 dBm es debil: eso lo calcula el motor
+('diagnosticar_servicio') contra el rango de la guia, desde la Fase 3. Y el
 modelo tampoco decide si pasa: devuelve un grupo de una lista cerrada, y la
 tabla de abajo --que es codigo-- resuelve el resto. Es PRD §12.5: el modelo
 compone, el codigo calcula.
@@ -64,6 +64,8 @@ que sin medicion se exige CONFIANZA ALTA del modelo, no cualquier lectura.
 from __future__ import annotations
 
 import logging
+import math
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -181,38 +183,39 @@ CONFIANZA_EXIGIDA_SIN_MEDICION = "alta"
 class Decision:
     """Lo que sale de evaluar un ticket. Siempre trae el POR QUE."""
 
-    __slots__ = ("pasa", "porque", "grupo", "labor")
+    __slots__ = ("pasa", "porque", "grupo", "labor", "puerta")
 
     def __init__(self, pasa: bool, porque: str, grupo: str = "",
-                 labor: str = ""):
+                 labor: str = "", puerta: str = ""):
         self.pasa = pasa
         self.porque = porque
         self.grupo = grupo
         self.labor = labor
+        #  Que la freno. Las reglas, salvo que diga otra cosa: desde la Fase 3
+        #  tambien puede ser el caso, que ya no esta abierto (PUERTA_CASO).
+        self.puerta = puerta or PUERTA_REGLAS
 
     def __repr__(self) -> str:                              # pragma: no cover
         return f"<Decision pasa={self.pasa} grupo={self.grupo!r}>"
 
 
 def decidir(grupo: str, labor_veredicto: dict | None,
-            confianza: str = "") -> Decision:
+            confianza: str = "", medicion: dict | None = None) -> Decision:
     """
     Si este ticket puede entrar a la cola de Despacho sin que alguien lo acepte.
 
     'labor_veredicto' es lo que devuelve 'clasificacion_de_trabajo.clasificar':
-    trae 'labor', 'porque' y --lo que decide aca-- 'verificada', que distingue
-    "lo dice una medicion" de "lo dice el texto".
+    trae 'labor', 'porque' y 'verificada'. Desde la Fase 3 (16/10/2026) una
+    falla de servicio NO se decide con 'verificada' sino con 'medicion', la
+    pieza que guarda 'medicion_de_fallas' con lo que midio el motor.
 
     FAIL-CLOSED EN TODAS LAS SALIDAS: sin grupo, con un grupo que no esta en la
     lista, sin veredicto de labor, o con un dato que no se entiende, la
     respuesta es NO pasa. Que el default sea "lo mira una persona" es lo que
     hace que un camino no previsto degrade hacia lo seguro.
     """
-    from operaciones import clasificacion_de_trabajo as clf
-
     lv = labor_veredicto if isinstance(labor_veredicto, dict) else {}
     labor = str(lv.get("labor") or "")
-    verificada = bool(lv.get("verificada"))
 
     if not grupo:
         return Decision(False, "el modelo no pudo decir en que grupo cae este "
@@ -246,45 +249,112 @@ def decidir(grupo: str, labor_veredicto: dict | None,
             f"reclamo, y la que hay es '{confianza or 'ninguna'}'",
             grupo=grupo, labor=labor)
 
-    #  FALLA DE SERVICIO: LA MEDICION MANDA.
+    #  FALLA DE SERVICIO: LA MEDICION DEL EQUIPO MANDA  --  16/10/2026, Fase 3
+    #  ----------------------------------------------------------------------
+    #  Hasta la Fase 3 decidia la labor de la lectura ('verificada'). Medido el
+    #  16/10: esa labor no salia verificada nunca, porque el clasificador
+    #  recibia el equipo del endpoint liviano --Online u Offline, sin causa--
+    #  con claves que no lee. Ahora decide la MEDICION: la pieza que deja
+    #  'medicion_de_fallas' con lo que devolvio 'diagnosticar_servicio' del
+    #  motor. Trae el estado, la causa de la caida y la señal YA CLASIFICADA
+    #  contra el rango de la guia: este modulo no copia el rango, lee 'senal'.
     #
-    #  'verificada' en True significa que la labor salio de MEDIR el equipo y
-    #  no de leer el texto -- y 'clasificacion_de_trabajo._de_la_prueba' solo
-    #  la pone en True cuando el equipo esta caido o la señal es debil. Un
-    #  equipo en linea y sano NO produce un veredicto verificado: esa funcion
-    #  devuelve None, el caso cae al texto, y llega aca con 'verificada' en
-    #  False.
-    #
-    #  Asi que esta sola condicion cubre las cinco salidas que el cliente
-    #  definio, sin repetir en dos lugares la tabla de estados del equipo. Si
-    #  algun dia hay que distinguirlas por separado, se distinguen ALLA, que es
-    #  donde esta el vocabulario.
-    if not verificada:
-        return Decision(
-            False,
-            "falla de servicio sin que la medicion la confirme: puede ser que "
-            "el equipo este sano --y entonces el reclamo y la medicion se "
-            "contradicen, hay que preguntarle al cliente-- o que no se haya "
-            "podido medir, que no es lo mismo que estar sano. En los dos casos "
-            "lo mira una persona",
-            grupo=grupo, labor=labor)
+    #  UNA SOLA SALIDA PASA: el equipo en linea con la señal fuera de rango.
+    #  Decidido por el usuario el 16/10/2026, y cambia la regla 1 del 14/10:
+    #  una caida por LOS o LOF va a una persona, porque desde la OLT no se
+    #  distingue una fibra cortada de un equipo desenchufado (la skill
+    #  smartolt-api registra que la operacion lo vio seguido). Un equipo EN
+    #  LINEA con la señal fuera de rango no puede ser un desenchufe.
+    from operaciones import diagnostico_optico as optico
 
-    if labor == clf.NO_REQUIERE_VISITA:
-        #  Caido por falta de energia en el domicilio. Esta MEDIDO y es firme,
-        #  pero lo que prueba es que una visita NO resuelve nada: hay que
-        #  preguntarle al cliente si se le fue la luz.
-        return Decision(
-            False,
-            "la medicion dice que el equipo esta caido por falta de energia en "
-            "el domicilio: una visita no resuelve eso. Hay que preguntarle al "
-            "cliente",
-            grupo=grupo, labor=labor)
+    m = medicion if isinstance(medicion, dict) else {}
+    if m.get("medido_con") != MEDIDO_CON:
+        return Decision(False, _FALTA_MEDIR, grupo=grupo, labor=labor)
 
+    estado = str(m.get("estado") or "")
+    senal = str(m.get("senal") or "")
+    causa = str(m.get("causa_caida") or "")
+    if estado == optico.EN_LINEA:
+        #  EL UNICO 'True' DE LA REGLA 1 EXIGE EL NUMERO. El motor clasifica
+        #  como 'debil' cualquier cosa fuera del rango, un NaN incluido; sin un
+        #  nivel medido no hay contra que haberlo decidido (auditor de
+        #  frontera, 16/10).
+        if senal == optico.SENAL_DEBIL and _hay_nivel(m):
+            return Decision(
+                True,
+                f"falla de servicio CONFIRMADA por la medicion del equipo: "
+                f"esta en linea con la señal fuera del rango de la guia"
+                f"{_nivel(m)}",
+                grupo=grupo, labor=labor)
+        if senal == optico.SENAL_BUENA:
+            return Decision(False, _EN_RANGO.format(nivel=_nivel(m)),
+                            grupo=grupo, labor=labor)
+        return Decision(False, _EN_LINEA_SIN_SENAL, grupo=grupo, labor=labor)
+    if estado == optico.CAIDO:
+        if causa == optico.CAUSA_SIN_ENERGIA:
+            return Decision(False, _SIN_ENERGIA, grupo=grupo, labor=labor)
+        if causa == optico.CAUSA_FIBRA:
+            return Decision(False, _SIN_SENAL_OPTICA, grupo=grupo, labor=labor)
+        if causa:
+            return Decision(False, _CAIDO_SIN_CAUSA, grupo=grupo, labor=labor)
+        return Decision(False, _CAIDO_SIN_DATOS, grupo=grupo, labor=labor)
+    motivo = str(m.get("motivo") or "").strip()
     return Decision(
-        True,
-        f"falla de servicio CONFIRMADA por la medicion del equipo: "
-        f"{lv.get('porque') or 'sin detalle'}",
+        False,
+        "no se pudo medir el equipo con el proveedor optico"
+        + (f" ({motivo[:120]})" if motivo else "")
+        + ". Lo mira una persona",
         grupo=grupo, labor=labor)
+
+
+#  Lo que '_nivel' agrega a un motivo, para sacarlo de la clave del log.
+_SIN_NIVEL = re.compile(r" \(-?[0-9.]+ dBm\)")
+
+
+def _hay_nivel(medicion: dict) -> bool:
+    """Si la medicion trae un nivel en dBm de verdad: un numero finito."""
+    dbm = (medicion or {}).get("senal_dbm")
+    return (isinstance(dbm, (int, float)) and not isinstance(dbm, bool)
+            and math.isfinite(dbm))
+
+
+def _nivel(medicion: dict) -> str:
+    """El nivel medido, para que quien lea sepa contra que se decidio."""
+    dbm = (medicion or {}).get("senal_dbm")
+    return f" ({dbm} dBm)" if isinstance(dbm, (int, float)) else ""
+
+
+#  LO QUE DICE CADA MEDICION QUE NO PASA. Texto fijo y tecnico, sin datos del
+#  cliente: es lo que una persona lee en la propuesta para saber que hacer.
+_FALTA_MEDIR = (
+    "falla de servicio sin medir todavia: falta la medicion del equipo, que el "
+    "Supervisor pide en las proximas vueltas. Hasta entonces la mira una "
+    "persona")
+_EN_RANGO = (
+    "la medicion dice que el equipo esta en linea con la señal dentro del "
+    "rango de la guia{nivel}: el reclamo y la medicion se contradicen. Hay que "
+    "preguntarle al cliente que le pasa")
+_EN_LINEA_SIN_SENAL = (
+    "la medicion dice que el equipo esta en linea, pero no trajo el nivel de "
+    "señal: no confirma la falla. Se vuelve a medir al dia; mientras tanto lo "
+    "mira una persona")
+_SIN_ENERGIA = (
+    "la medicion dice que el equipo se quedo sin energia (dying-gasp): es la "
+    "casa del cliente. Hay que preguntarle si tiene luz; una visita no resuelve "
+    "eso")
+_SIN_SENAL_OPTICA = (
+    "la medicion dice que el equipo perdio la señal optica (LOS/LOF). Puede ser "
+    "la fibra o un equipo desenchufado, y desde la OLT no se distingue: falta "
+    "preguntarle al cliente si el equipo esta enchufado y tiene luz")
+_CAIDO_SIN_CAUSA = (
+    "la medicion dice que el equipo esta caido por una causa que no se sabe "
+    "distinguir. Lo mira una persona")
+#  Un caido sin causa ni señal puede ser un 200 del proveedor sin datos: no se
+#  afirma la caida (auditor independiente, 16/10).
+_CAIDO_SIN_DATOS = (
+    "la medicion volvio como caido, pero sin causa ni señal: puede ser una "
+    "respuesta incompleta del proveedor. Se vuelve a medir al dia; mientras "
+    "tanto lo mira una persona")
 
 
 _NOMBRE = {
@@ -352,6 +422,33 @@ PUERTA_REGISTRO = "registro"
 #:  esta pieza dejaria de leerse. Una prueba lo fija.
 FUENTE_REVISION = "revision_del_paso_a_despacho"
 
+#:  LA MEDICION DEL EQUIPO DE UNA FALLA  --  16/10/2026, Fase 3. La escribe
+#:  'medicion_de_fallas' y la lee 'decidir'. Su propia fuente, y NO
+#:  'diagnostico_del_ticket': esa la buscan con 'icontains' para saber si un
+#:  ticket ya se leyo, y una medicion no es una lectura. Tampoco 'diagnostico',
+#:  que es la del modulo optico.
+FUENTE_MEDICION = "medicion_del_equipo"
+#:  De donde salio la medicion. Una pieza sin esta marca no decide nada.
+MEDIDO_CON = "diagnosticar_servicio"
+
+#:  Como figura el pase automatico en la auditoria que ve toda la empresa.
+#:  TEXTO FIJO a proposito: la 'accion_propuesta' la redacto el modelo leyendo
+#:  el ticket, y puede traer el nombre del cliente (revisor de PII, 16/10). La
+#:  recomendacion sigue en el detalle de la propuesta, para quien la puede ver.
+NOMBRE_DEL_PASE = "Pase automatico a Despacho"
+
+#:  LOS ESTADOS DE DEXTER CON LOS QUE UN CASO PUEDE PASAR SOLO. Lista blanca:
+#:  para un efecto que ocurre sin persona, falla cerrado. 'supervisor' trata
+#:  'Rejected' y 'Duplicate' como abiertos para decidir si PROPONER cerrar un
+#:  caso --'Closed' es lo unico afirmable--; aca la pregunta es otra, si se
+#:  DESPACHA solo, y un caso rechazado o duplicado no (auditor de frontera,
+#:  16/10). En produccion no habia ninguno el 25/09.
+ABIERTOS_EN_DEXTER = ("New", "Assigned", "Pending")
+
+#:  La puerta que frena un caso que ya no esta abierto. Va primera: un caso
+#:  cerrado no tiene nada que despachar, digan lo que digan las reglas.
+PUERTA_CASO = "caso"
+
 
 def de_la_senal(senal) -> Decision:
     """La decision para esta señal, leyendo lo que 'diagnosticar' dejo escrito.
@@ -369,6 +466,9 @@ def de_la_senal(senal) -> Decision:
         #  LA CONFIANZA DEL GRUPO, no la de la hipotesis -- ver la nota de
         #  CONFIANZA_DEL_GRUPO arriba, con la medicion que lo motivo.
         confianza=str(datos.get(CONFIANZA_DEL_GRUPO) or ""))
+        #  SIN MEDICION, a proposito: la medicion vive en la propuesta, no en
+        #  la señal. Desde la Fase 3 el paso decide solo con lo guardado
+        #  ('evaluar'); una falla que llegue por aca no pasa.
 
 
 def de_la_propuesta(propuesta) -> Decision:
@@ -407,7 +507,8 @@ def de_la_propuesta(propuesta) -> Decision:
         {"labor": ultima.get("labor") or "",
          "porque": ultima.get("labor_porque") or "",
          "verificada": bool(ultima.get("labor_verificada"))},
-        confianza=str(ultima.get(CONFIANZA_DEL_GRUPO) or ""))
+        confianza=str(ultima.get(CONFIANZA_DEL_GRUPO) or ""),
+        medicion=ultima_medicion(propuesta))
 
 
 def _ultima_lectura_con_grupo(propuesta) -> dict | None:
@@ -470,19 +571,18 @@ def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
 
     ahora = ahora or timezone.now()
 
-    #  LA SEÑAL PRIMERO, LA PROPUESTA DESPUES. Si este ciclo acaba de leer el
-    #  ticket, la señal trae el juicio mas nuevo; si no lo leyo --el tope son
-    #  diez por vuelta-- se usa la lectura que ya estaba guardada, en vez de
-    #  dejar el ticket esperando una relectura que cuesta una llamada al
-    #  modelo.
-    d = de_la_senal(senal)
-    if not d.grupo:
-        d = de_la_propuesta(propuesta)
+    #  SE DECIDE CON LO GUARDADO  --  16/10/2026, Fase 3. Antes se probaba
+    #  primero la señal; en produccion la fase le pasa siempre una vacia
+    #  ('_SinSenal'), y la medicion que decide la regla 1 vive en la
+    #  propuesta. Un segundo camino de decision que solo usaban las pruebas es
+    #  una forma de tener verde lo que no corre. 'senal' queda en la firma
+    #  porque el llamador la pasa; no se usa.
+    d = evaluar(propuesta, ahora)
 
-    #  PUERTA 1 · LAS REGLAS.
+    #  PUERTA 0 · EL CASO SIGUE ABIERTO, y PUERTA 1 · LAS REGLAS.
     if not d.pasa:
         return {"paso": False, "porque": d.porque, "grupo": d.grupo,
-                "puerta": PUERTA_REGLAS}
+                "puerta": d.puerta}
 
     #  PUERTA 2 · QUE ALGUIEN LO HAYA PEDIDO.
     try:
@@ -517,6 +617,7 @@ def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
             #  separar un pase a Despacho de la aceptacion de un cierre: las
             #  dos escriben 'PropuestaSupervisor APPROVED'.
             tarea=TAREA,
+            nombre=NOMBRE_DEL_PASE,
             ahora=ahora)
     except Exception as e:                                       # noqa: BLE001
         #  El tipo y no el texto: el mensaje podria traer de vuelta la
@@ -567,19 +668,6 @@ _POR_QUE_LAS_PUERTAS = {
 }
 
 
-#:  Una falla sin confirmar cuya lectura dijo "el equipo esta en linea y sano".
-#:  Medido el 16/10/2026: esa frase hoy no sale de una medicion (ver
-#:  'clasificacion_de_trabajo.EQUIPO_SANO'), y el 'porque' de las reglas
-#:  --"puede estar sano, o no se pudo medir"-- tampoco es cierto: SmartOLT
-#:  contesto. Con una fibra cortada, ese texto empujaba a llamar al cliente en
-#:  vez de mandar a alguien (auditor independiente, 16/10). Lleva "Falta" a
-#:  proposito: el panel lo pone en "Informacion que falta", que es lo que es.
-_FALLA_SIN_INTERPRETAR = (
-    "falla de servicio sin confirmar: SmartOLT contesto, pero la lectura "
-    "todavia no interpreta el estado del equipo, asi que no se sabe si esta "
-    "sano o caido. Falta mirarlo en SmartOLT antes de llamar al cliente; lo "
-    "mira una persona")
-
 #:  Una propuesta que todavia no tiene lectura del reclamo. El 'porque' de
 #:  'de_la_propuesta' dice "la lectura guardada no trae el grupo", y en una
 #:  que nunca se leyo eso afirma una lectura que no existe.
@@ -601,26 +689,17 @@ def motivo_para_anotar(propuesta, resultado: dict) -> str | None:
     El texto que se escribe en la propuesta, o None si no hay que escribir.
 
     'propuesta' es LA COPIA CON LA QUE SE DECIDIO, no la que se vuelve a leer
-    bloqueada para escribir. Si entre una y otra llego una lectura nueva, el
-    motivo explica la decision que se tomo, sin mezclar su 'porque' con la
-    explicacion de otra lectura. La vuelta que viene decide con la nueva y, si
-    el motivo cambia, lo reemplaza.
+    bloqueada para escribir.
 
-    LAS REGLAS: su 'porque'. Y para una falla de servicio que la medicion no
-    confirmo, ademas por que no se pudo medir --"no se pudo leer el equipo
-    (onu_no_vinculada)"--, que es lo que una persona necesita para saber que
-    hacer. Es texto fijo de 'clasificacion_de_trabajo', sin datos del cliente.
+    LAS REGLAS: su 'porque', que es texto fijo. Para una falla, desde la Fase 3
+    ese 'porque' sale de la MEDICION del equipo y ya dice que hacer: preguntar
+    si hay luz, si el equipo esta enchufado, o que el reclamo y la medicion se
+    contradicen. Lo que se hacia hasta entonces --sumar la explicacion de la
+    lectura, y cambiar "equipo sano" por '_FALLA_SIN_INTERPRETAR'-- se saco: la
+    lectura vieja trae 'labor_verificada' en falso y la frase de equipo sano,
+    y ese bloque habria tapado con texto viejo cada motivo medido.
 
-    LO QUE NO SE COPIA: "el equipo esta en linea y sano". Medido el 16/10/2026,
-    esa frase hoy no sale de una medicion (ver 'clasificacion_de_trabajo.
-    EQUIPO_SANO'): el clasificador la dice con cualquier dato del equipo, aun
-    con la fibra cortada. Copiarla aca convertiria un defecto de la lectura en
-    una afirmacion escrita en la propuesta, que es donde una persona decide si
-    manda a alguien. Tampoco sirve el 'porque' de las reglas solo: "puede estar
-    sano, o no se pudo medir" es falso las dos veces cuando SmartOLT contesto.
-    Va '_FALLA_SIN_INTERPRETAR'. El dia que el clasificador lea las claves del
-    motor y separe "sano" de "no lo entendi", esta excepcion se quita: la
-    prueba 'test_k' avisa ese dia.
+    EL CASO NO ESTA ABIERTO: su 'porque', tambien texto fijo.
 
     SIN LECTURA TODAVIA: '_SIN_LECTURA', no el texto de 'de_la_propuesta', que
     supone una lectura guardada.
@@ -630,27 +709,18 @@ def motivo_para_anotar(propuesta, resultado: dict) -> str | None:
     NO PODER REGISTRAR LA ACEPTACION: nada. Es transitorio y la vuelta que
     viene lo reintenta; escribir "se queda para una persona" seria falso.
     """
-    from operaciones import clasificacion_de_trabajo as clf
-
     puerta = resultado.get("puerta") or PUERTA_REGLAS
     if puerta in _POR_QUE_LAS_PUERTAS:
         return _POR_QUE_LAS_PUERTAS[puerta]
+    if puerta == PUERTA_CASO:
+        return str(resultado.get("porque") or "el caso no esta abierto")
     if puerta != PUERTA_REGLAS:
         return None
     from operaciones import diagnostico_de_ticket as dxt
 
     if dxt.le_falta_lectura(propuesta):
         return _SIN_LECTURA
-    porque = str(resultado.get("porque") or "sin motivo")
-    lectura = _ultima_lectura_con_grupo(propuesta) or {}
-    explicacion = str(lectura.get("labor_porque") or "")
-    sin_confirmar = (resultado.get("grupo") == FALLA_DE_SERVICIO
-                     and not lectura.get("labor_verificada"))
-    if sin_confirmar and explicacion.startswith(clf.EQUIPO_SANO):
-        return _FALLA_SIN_INTERPRETAR
-    if sin_confirmar and explicacion:
-        porque = f"{porque}. Lo que dijo la medicion: {explicacion}"
-    return porque
+    return str(resultado.get("porque") or "sin motivo")
 
 
 def motivo_para_el_registro(resultado: dict) -> str:
@@ -662,11 +732,15 @@ def motivo_para_el_registro(resultado: dict) -> str:
     resultado de la tarea que guarda Celery tienen control de acceso. Va el
     mismo texto fijo que se escribe en la propuesta; el motivo libre se lee en
     /autonomia, que es donde se escribio. Las demas puertas llevan texto fijo
-    y, a lo sumo, el tipo de una excepcion.
+    y, a lo sumo, el tipo de una excepcion. Al de las reglas se le quita el
+    nivel medido en dBm, que cambia de caso en caso.
     """
     if (resultado.get("puerta") or PUERTA_REGLAS) == PUERTA_EMPRESA:
         return _POR_QUE_LAS_PUERTAS[PUERTA_EMPRESA]
-    return str(resultado.get("porque") or "sin motivo")
+    #  SIN EL NIVEL MEDIDO  --  16/10/2026, Fase 3: con el dBm adentro, cada
+    #  falla en rango abria su propia clave, y la linea dejaria de ser "claves
+    #  y conteos". El nivel sigue en la propuesta, que es donde se lee un caso.
+    return _SIN_NIVEL.sub("", str(resultado.get("porque") or "sin motivo"))
 
 
 def anotar_por_que_se_queda(propuesta, resultado: dict, ahora) -> bool:
@@ -765,3 +839,94 @@ def quitar_por_que_se_quedaba(propuesta) -> bool:
                                     and x.get("fuente") == FUENTE_REVISION)]
         fresca.save(update_fields=["evidencia", "updated_at"])
     return True
+
+
+# =============================================================================
+#  LA MEDICION Y EL CASO  --  16/10/2026, Fase 3
+# =============================================================================
+
+def ultima_medicion(propuesta) -> dict | None:
+    """La pieza de medicion del equipo guardada en la propuesta, o None."""
+    for pieza in reversed(getattr(propuesta, "evidencia", None) or []):
+        if isinstance(pieza, dict) and pieza.get("fuente") == FUENTE_MEDICION:
+            return pieza
+    return None
+
+
+def por_que_el_caso_no_puede_pasar(caso, ahora) -> str | None:
+    """
+    Por que este caso no puede entrar a la cola de Despacho, o None si puede.
+
+    Medido por el auditor de frontera el 16/10/2026: el paso aceptaba casos
+    ya cerrados, en WispHub o en Dexter, y quedaban en la cola. Decidido por el
+    usuario ese dia: un caso cerrado no pasa, y su propuesta se queda con el
+    motivo escrito.
+
+    MISMO VOCABULARIO QUE EL CIERRE Y LOS DETECTORES, para que el paso y el
+    cierre no discrepen sobre el mismo caso: cerrado en Dexter es 'Closed' o
+    'resolved_at' puesto ('cierre_de_caso'); en curso en WispHub es la LISTA
+    BLANCA 'EN_CURSO_EN_PROVEEDOR', la misma que exige el detector para crear
+    la señal; y la copia de WispHub vale mientras no pase 'HORAS_LECTURA_FRESCA'.
+
+    FALLA CERRADO: una copia vieja, sin fecha o con error no dice que el
+    ticket siga abierto, y entonces no pasa. Ese 72 mide justo esto, cuan
+    fresca es la copia de WispHub. Texto fijo y sin numeros que cambien solos:
+    un motivo que cambia cada hora se reescribiria cada vuelta.
+    """
+    from operaciones import supervisor as sup
+
+    if caso is None:
+        return "no se encontro el caso de esta propuesta: no se pasa"
+    if not getattr(caso, "is_active", True) or getattr(caso, "merged_into_id", None):
+        return "el caso esta inactivo o fusionado con otro: no se pasa"
+    if caso.status == sup.CERRADO_EN_DEXTER or caso.resolved_at is not None:
+        return "el caso ya esta cerrado en Dexter: no hay nada que despachar"
+    if caso.status not in ABIERTOS_EN_DEXTER:
+        return ("el caso no esta abierto en Dexter (rechazado o duplicado): "
+                "no se pasa")
+    if (getattr(caso, "external_fetch_error", "") or "").strip():
+        return ("la ultima lectura del ticket en WispHub fallo: no se sabe si "
+                "sigue abierto, asi que no se pasa")
+    if caso.external_fetched_at is None:
+        return ("no consta cuando se leyo el ticket en WispHub: no se sabe si "
+                "sigue abierto, asi que no se pasa")
+    horas = (ahora - caso.external_fetched_at).total_seconds() / 3600
+    if horas > sup.HORAS_LECTURA_FRESCA:
+        return (f"la copia del ticket de WispHub tiene mas de "
+                f"{sup.HORAS_LECTURA_FRESCA} h sin actualizarse: no se sabe si "
+                f"sigue abierto, asi que no se pasa")
+    externo = sup._estado_externo(caso)
+    if externo in sup.CERRADO_EN_PROVEEDOR:
+        return "el ticket ya esta cerrado en WispHub: no hay nada que despachar"
+    if externo not in sup.EN_CURSO_EN_PROVEEDOR:
+        return ("el ticket no figura en curso en WispHub: no se sabe si sigue "
+                "abierto, asi que no se pasa")
+    return None
+
+
+def caso_de(propuesta):
+    """El caso de la propuesta, de la misma empresa, o None."""
+    from cases.models import Case
+
+    try:
+        return (Case.objects
+                .filter(pk=propuesta.origen_id, org_id=propuesta.org_id)
+                .first())
+    except Exception:                                            # noqa: BLE001
+        #  Un 'origen_id' que no es un id valido no es un caso.
+        return None
+
+
+def evaluar(propuesta, ahora) -> Decision:
+    """
+    La decision completa con lo guardado: primero el caso, despues las reglas.
+
+    No llama a nada por red ni escribe: la usan la fase de paso y la rama del
+    tope, que solo decide. Un caso cerrado no cuenta como "espera el tope".
+    """
+    porque = por_que_el_caso_no_puede_pasar(caso_de(propuesta), ahora)
+    if porque:
+        lectura = _ultima_lectura_con_grupo(propuesta) or {}
+        return Decision(False, porque, grupo=str(lectura.get("grupo") or ""),
+                        puerta=PUERTA_CASO)
+    return de_la_propuesta(propuesta)

@@ -2610,8 +2610,17 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         #  el paso NO DEPENDA de que se haya leido algo, y consulte las
         #  propuestas pendientes por su cuenta.
         #
-        #  VA TERCERA porque usa lo que las dos anteriores escribieron: una
-        #  lectura hecha en esta vuelta ya esta guardada cuando esto corre.
+        #  LA MEDICION DE LAS FALLAS ES SU PROPIA FASE  --  16/10/2026, Fase 3
+        #  -----------------------------------------------------------------
+        #  Y no el final de la lectura: '_leer_tickets_abiertos' sale temprano
+        #  cuando no hay nada nuevo que leer, que es justo cuando las fallas
+        #  viejas, ya leidas, necesitan medirse. Va antes del paso porque el
+        #  paso decide la regla 1 con lo que esta fase escribe.
+        ("medicion de fallas",
+         lambda: _medir_fallas_pendientes(org, desatendido=desatendido)),
+        #  VA ULTIMA porque usa lo que las anteriores escribieron: una lectura
+        #  y una medicion hechas en esta vuelta ya estan guardadas cuando esto
+        #  corre.
         ("paso a Despacho",
          lambda: _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora)),
     ):
@@ -2843,10 +2852,9 @@ class _SinSenal:
     """
     Una señal minima armada desde la propuesta, para los que no se leyeron hoy.
 
-    'pasar_si_corresponde' acepta una señal porque en el camino normal la hay
-    --el ciclo acaba de leer el ticket-- y de ahi saca el juicio mas nuevo.
-    Esta no trae 'datos', asi que ese camino da vacio y cae al de la propuesta,
-    que es justo lo que corresponde cuando la lectura es de otra vuelta.
+    Desde la Fase 3 (16/10/2026) 'pasar_si_corresponde' decide SOLO con lo
+    guardado en la propuesta --la lectura y la medicion--, y esta señal vacia
+    queda porque su firma la pide. No aporta nada a la decision.
 
     NO se inventa un 'datos' con valores por omision: un grupo puesto por
     defecto seria una clasificacion que nadie hizo.
@@ -2860,6 +2868,27 @@ class _SinSenal:
         self.origen_id = str(propuesta.origen_id)
         self.evidencia = []
         self.datos = {}
+
+
+def _medir_fallas_pendientes(org, *, desatendido: bool = False) -> dict:
+    """
+    La medicion de las fallas pendientes, como fase del ciclo. El detalle, y
+    por que es una fase propia, en 'medicion_de_fallas'.
+
+    SON CONTEOS, nunca un caso: el detalle queda en cada propuesta.
+    """
+    from operaciones import medicion_de_fallas
+
+    informe = medicion_de_fallas.medir_fallas_pendientes(
+        org, desatendido=desatendido)
+    logger.info("Supervisor: medicion de fallas · candidatas=%s · medidas=%s · "
+                "concluyentes=%s · sin medicion=%s · sin id de servicio=%s · "
+                "sin presupuesto=%s · errores=%s",
+                informe["candidatas"], informe["medidas"],
+                informe["concluyentes"], informe["sin_medicion"],
+                informe["sin_id_de_servicio"], informe["sin_presupuesto"],
+                informe["errores"])
+    return {"medicion": informe}
 
 
 def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
@@ -2921,7 +2950,10 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
                #  porque la propuesta sigue pendiente; quitar no, porque ya
                #  paso y ninguna vuelta la vuelve a mirar. Si no da cero,
                #  mirar el log.
-               "anotaciones_fallidas": 0}
+               "anotaciones_fallidas": 0,
+               #  Las que las reglas dejan pasar y frena una puerta de la
+               #  empresa, por grupo. Ver LA SOMBRA, abajo.
+               "pasarian_por_grupo": {}}
     reporte["pendientes_miradas"] = len(sin_decidir)
     if not sin_decidir:
         return {"despacho": reporte}
@@ -2949,12 +2981,14 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
             #  que viene sin anotar nada, porque no se quedo con una persona.
             #  La que no califica se anota igual que en la otra rama: el
             #  motivo es de las reglas, y las puertas no lo cambian.
-            d = pad.de_la_propuesta(p)
+            #  'evaluar' y no solo las reglas  --  16/10/2026, Fase 3: un caso
+            #  cerrado no "espera el tope", se queda con su motivo.
+            d = pad.evaluar(p, ahora)
             if d.pasa:
                 reporte["esperan_el_tope"] += 1
                 continue
             r = {"paso": False, "porque": d.porque, "grupo": d.grupo,
-                 "puerta": pad.PUERTA_REGLAS}
+                 "puerta": d.puerta}
         else:
             try:
                 r = pad.pasar_si_corresponde(
@@ -2974,6 +3008,15 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
         conf = (_de_la_lectura_guardada(p, "confianza_del_grupo")
                 or "sin declarar")
         reporte["por_confianza"][conf] = reporte["por_confianza"].get(conf, 0) + 1
+        #  LA SOMBRA  --  16/10/2026, Fase 3. Con la tarea sin delegar, o la
+        #  empresa sin autorizar, las que las reglas dejan pasar se cuentan POR
+        #  GRUPO. Es la medicion que el usuario pidio antes de encender la regla
+        #  1 nueva, y sumadas no responderian la pregunta: con la tarea quitada
+        #  se frenan tambien los trabajos pedidos.
+        if (not r.get("paso")
+                and r.get("puerta") in (pad.PUERTA_TAREA, pad.PUERTA_EMPRESA)):
+            reporte["pasarian_por_grupo"][grupo] = (
+                reporte["pasarian_por_grupo"].get(grupo, 0) + 1)
         if r.get("paso"):
             reporte["pasaron"] += 1
         else:
@@ -3029,12 +3072,14 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
     logger.info("Supervisor: paso a Despacho · miradas=%s · pasaron=%s · "
                 "esperan el tope=%s · se quedaron=%s · motivos escritos=%s · "
                 "anotaciones fallidas=%s · fallaron=%s · por grupo=%s · "
-                "por confianza del grupo=%s · por que se quedaron=%s",
+                "por confianza del grupo=%s · por que se quedaron=%s · "
+                "pasarian por grupo=%s",
                 reporte["pendientes_miradas"], reporte["pasaron"],
                 reporte["esperan_el_tope"], reporte["se_quedaron"],
                 reporte["motivos_escritos"], reporte["anotaciones_fallidas"],
                 reporte["fallaron"], reporte["por_grupo"],
-                reporte["por_confianza"], reporte["motivos"])
+                reporte["por_confianza"], reporte["motivos"],
+                reporte["pasarian_por_grupo"])
     return {"despacho": reporte}
 
 
@@ -3656,7 +3701,7 @@ def _aplicar_cambios(propuesta, cambios: dict) -> dict:
 def revisar(propuesta: PropuestaSupervisor, *, actor, decision: str,
             comentario: str = "", cambios: dict | None = None,
             ahora=None, automatico: bool = False,
-            tarea: str = "") -> PropuestaSupervisor:
+            tarea: str = "", nombre: str | None = None) -> PropuestaSupervisor:
     """
     Aceptar, modificar o rechazar. Queda auditado quién, cuándo y con qué.
 
@@ -3781,7 +3826,11 @@ def revisar(propuesta: PropuestaSupervisor, *, actor, decision: str,
         auditoria.registrar(
             org=fresca.org, actor=actor, accion=verbo,
             entidad=auditoria.ENTIDAD_PROPUESTA, entidad_id=fresca.id,
-            nombre=fresca.accion_propuesta,
+            #  'nombre' FIJO cuando lo pide quien llama, como en 'cancelar':
+            #  'accion_propuesta' la redacto el modelo leyendo el ticket, y
+            #  'Activity' la ve cualquier usuario de la empresa. El pase
+            #  automatico a Despacho lo pide desde el 16/10/2026 (Fase 3).
+            nombre=nombre if nombre is not None else fresca.accion_propuesta,
             descripcion=comentario,
             estado_anterior=anterior, estado_nuevo=fresca.estado,
             motivo=comentario,

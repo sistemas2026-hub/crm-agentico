@@ -37,6 +37,13 @@ LO QUE SE MIDIO DESPUES, EL MISMO DIA
 claves que el motor no manda, y la dice con cualquier dato del equipo (ver
 test_f). Por eso el motivo no la copia, y por eso test_a prueba tambien lo que
 HOY puede pasar en produccion: un trabajo pedido con confianza alta.
+
+DESDE LA FASE 3 (16/10/2026)
+----------------------------
+Una falla se decide con la MEDICION de 'diagnosticar_servicio', y el caso
+necesita una copia fresca de WispHub. En este archivo una falla "confirmada"
+es un equipo en linea con la señal fuera de rango, y una "sana", uno en linea
+con la señal en rango. Las afirmaciones sobre el tope y el motivo no cambian.
 ================================================================================
 """
 
@@ -52,6 +59,7 @@ from django.utils import timezone
 from common.models import Activity, Profile, User
 from operaciones import clasificacion_de_trabajo as clf
 from operaciones import diagnostico_de_ticket as dxt
+from operaciones import medicion_de_fallas as mdf
 from operaciones import paso_a_despacho as pad
 from operaciones import supervisor as sup
 from operaciones.models import PropuestaSupervisor as P
@@ -76,6 +84,12 @@ SANO = (
 SIN_ONU = "no se pudo leer el equipo (onu_no_vinculada)"
 SIN_FICHA = "no se pudo traer la ficha tecnica del caso, asi que no hubo nada que medir"
 
+#  Lo que deja guardado 'medicion_de_fallas' con una respuesta del motor.
+_DEBIL = {"estado": "en_linea", "senal": "debil", "senal_dbm": -27.4,
+          "causa_caida": "", "motivo": ""}
+_EN_RANGO = {"estado": "en_linea", "senal": "buena", "senal_dbm": -21.0,
+             "causa_caida": "", "motivo": ""}
+
 TOPE = 3
 
 
@@ -91,6 +105,9 @@ def _caso(org):
         provider="wisphub",
         external_ticket_id=f"t{uuid.uuid4().hex[:8]}",
         external_service_id="3614",
+        #  La copia fresca y en curso de WispHub: sin ella no pasa (Fase 3).
+        external_status="Nuevo",
+        external_fetched_at=timezone.now(),
         description=DESCRIPCION,
         external_client_name=CLIENTE,
     )
@@ -114,8 +131,11 @@ def _lectura(
     }
 
 
-def _pendiente(org, *, hace_min, **lectura):
-    """Una lectura pendiente, creada hace 'hace_min' minutos (manda el orden)."""
+def _pendiente(org, *, hace_min, medida=None, **lectura):
+    """
+    Una lectura pendiente, creada hace 'hace_min' minutos (manda el orden). Con
+    'medida', ademas la medicion del equipo, guardada por el camino real.
+    """
     p = P.objects.create(
         org=org,
         tipo_senal=P.TICKET_SIN_DIAGNOSTICO,
@@ -130,6 +150,9 @@ def _pendiente(org, *, hace_min, **lectura):
     P.objects.filter(pk=p.pk).update(
         created_at=timezone.now() - timedelta(minutes=hace_min)
     )
+    if medida is not None:
+        mdf.escribir(p, mdf.de_la_respuesta(medida), timezone.now())
+    p.refresh_from_db()
     return p
 
 
@@ -140,6 +163,7 @@ def _confirmada(org, hace_min):
         grupo=pad.FALLA_DE_SERVICIO,
         verificada=True,
         labor_porque=CAIDO_POR_FIBRA,
+        medida=_DEBIL,
     )
 
 
@@ -150,6 +174,7 @@ def _sana(org, hace_min):
         grupo=pad.FALLA_DE_SERVICIO,
         verificada=False,
         labor_porque=SANO,
+        medida=_EN_RANGO,
     )
 
 
@@ -242,6 +267,10 @@ def test_a_una_NUEVA_que_califica_pasa_aunque_haya_mas_viejas_que_el_tope(
     assert Activity.objects.filter(
         entity_id=nueva.pk, metadata__tarea=pad.TAREA
     ).exists(), "la auditoria tiene que decir que fue un pase a Despacho"
+    #  Y no copia al feed de toda la empresa lo que redacto el modelo: la
+    #  'accion_propuesta' de esta prueba lleva el nombre y el telefono.
+    actividad = Activity.objects.get(entity_id=nueva.pk, metadata__tarea=pad.TAREA)
+    assert actividad.entity_name == pad.NOMBRE_DEL_PASE, actividad.entity_name
     #  Y el control: las viejas siguen esperando a una persona.
     assert all(_estado(p) == P.PROPUESTA for p in viejas)
 
@@ -288,7 +317,7 @@ def test_c_la_que_se_queda_lleva_el_motivo_y_la_api_lo_devuelve(
         "sin el control, una vuelta vacia tambien seria verde"
     )
     (pieza,) = _revisiones(queda)
-    assert "sin confirmar" in pieza["porque"]
+    assert "se contradicen" in pieza["porque"]
     assert pieza["grupo"] == pad.FALLA_DE_SERVICIO
     assert pieza["observado_en"], "tiene que decir desde cuando"
     _sin_datos_del_cliente(pieza)
@@ -480,20 +509,19 @@ def _lo_que_leeria(contexto):
     )
 
 
-def test_f_el_motivo_dice_por_que_no_se_midio_y_no_afirma_un_equipo_sano(
-    org_a, puertas_abiertas
-):
+def test_f_sin_medir_el_motivo_no_afirma_un_equipo_sano(org_a, puertas_abiertas):
     """
-    Las reglas dan el mismo 'porque' a toda falla sin confirmar. Cuando no se
-    pudo medir, el motivo dice por que --la ONU no esta vinculada--, que es lo
-    que una persona necesita para saber que hacer.
+    Las lecturas salen del clasificador REAL con la forma REAL del endpoint
+    liviano del motor (la de campo/tests/test_despacho_api.py): 'Online' u
+    'Offline', sin causa. Con las dos el clasificador dice "el equipo esta en
+    linea y sano" sin haber medido nada (H-1). Hasta la Fase 2 esta prueba
+    usaba un 'LOS' inventado, que ese endpoint no devuelve.
 
-    Y NO COPIA "el equipo esta en linea y sano". Medido el 16/10/2026: el
-    clasificador lee 'estado', 'senal' y 'causa_caida', el motor manda
-    'onu_status' y 'onu_signal*', y la frase sale con cualquier dato del
-    equipo, aun con la fibra cortada. Por eso las lecturas salen del
-    clasificador REAL con la forma REAL del motor (la de
-    campo/tests/test_despacho_api.py), y no de una constante.
+    Desde la Fase 3 una falla se decide con la medicion de
+    'diagnosticar_servicio', y mientras no la tenga el motivo dice que falta
+    medirla. La frase de equipo sano no llega nunca a la propuesta, y el
+    "onu_no_vinculada" de la lectura tampoco: el por que ahora lo dice la
+    medicion misma.
     """
     en_linea = _pendiente(
         org_a,
@@ -505,11 +533,11 @@ def test_f_el_motivo_dice_por_que_no_se_midio_y_no_afirma_un_equipo_sano(
             }
         ),
     )
-    fibra_cortada = _pendiente(
+    offline = _pendiente(
         org_a,
         hace_min=20,
         **_lo_que_leeria(
-            {"contexto_disponible": True, "equipo": {"onu_status": "LOS"}}
+            {"contexto_disponible": True, "equipo": {"onu_status": "Offline"}}
         ),
     )
     sin_onu = _pendiente(
@@ -522,25 +550,14 @@ def test_f_el_motivo_dice_por_que_no_se_midio_y_no_afirma_un_equipo_sano(
 
     _vuelta(org_a)
 
-    (de_en_linea,) = _revisiones(en_linea)
-    (de_sin_onu,) = _revisiones(sin_onu)
-    assert "onu_no_vinculada" in de_sin_onu["porque"]
-    assert de_en_linea["porque"] != de_sin_onu["porque"]
-    for p in (en_linea, fibra_cortada, sin_onu):
-        for pieza in _revisiones(p):
-            assert clf.EQUIPO_SANO not in json.dumps(pieza, ensure_ascii=False), (
-                "el motivo afirma un equipo sano que nadie midio"
-            )
-            _sin_datos_del_cliente(pieza)
-    #  Tampoco queda "puede estar sano, o no se pudo medir": las dos cosas son
-    #  falsas cuando SmartOLT contesto, y con la fibra cortada empujaban a
-    #  llamar al cliente. Y el panel lo pone en "Informacion que falta", no en
-    #  "Hechos observados" (auditor independiente, 16/10).
-    for p in (en_linea, fibra_cortada):
-        for pieza in _revisiones(p):
-            assert "puede ser que el equipo este sano" not in pieza["porque"]
-            assert "no se sabe si esta sano o caido" in pieza["porque"]
-            assert _el_panel_lo_pone_en_lo_que_falta(pieza["dato"])
+    for p in (en_linea, offline, sin_onu):
+        (pieza,) = _revisiones(p)
+        assert "falta la medicion" in pieza["porque"], pieza["porque"]
+        assert clf.EQUIPO_SANO not in json.dumps(pieza, ensure_ascii=False), (
+            "el motivo afirma un equipo sano que nadie midio"
+        )
+        _sin_datos_del_cliente(pieza)
+        assert _el_panel_lo_pone_en_lo_que_falta(pieza["dato"])
 
 
 def test_g_una_puerta_cerrada_escribe_texto_fijo_y_no_el_motivo_libre(
@@ -651,19 +668,24 @@ def test_i_cuando_pasa_se_quita_el_motivo_que_decia_que_se_quedaba(
     assert _revisiones(p) == [], "la aceptada sigue diciendo que se quedo"
 
 
-def test_j_el_motivo_explica_la_lectura_que_DECIDIO_aunque_llegue_otra(org_a):
+def test_j_el_motivo_explica_la_decision_aunque_llegue_una_lectura(org_a):
     """
     Entre que la fase decide y escribe puede llegar una lectura nueva (dos
-    ciclos solapados). El motivo explica la decision que se tomo: mezclar su
-    'porque' con la explicacion de otra lectura diria algo que nadie decidio.
-    Y la lectura nueva no se pierde: la vuelta que viene decide con ella.
+    ciclos solapados). El motivo explica la decision que se tomo con la copia
+    que se tenia --sin lectura: "falta la lectura del reclamo"--, no lo que
+    dice la fila recargada. Y la lectura que llego no se pierde: la vuelta que
+    viene decide con ella.
     """
-    p = _pendiente(
-        org_a,
-        hace_min=10,
-        grupo=pad.FALLA_DE_SERVICIO,
-        verificada=False,
-        labor_porque=SIN_ONU,
+    p = P.objects.create(
+        org=org_a,
+        tipo_senal=P.TICKET_SIN_DIAGNOSTICO,
+        origen_tipo="case",
+        origen_id=str(_caso(org_a).id),
+        estado=P.PROPUESTA,
+        accion_propuesta="x",
+        motivo="x",
+        prioridad=30,
+        evidencia=[sup._observacion("caso", "x", "caso en el CRM", timezone.now())],
     )
     decidida = P.objects.get(pk=p.pk)
     d = pad.de_la_propuesta(decidida)
@@ -682,12 +704,11 @@ def test_j_el_motivo_explica_la_lectura_que_DECIDIO_aunque_llegue_otra(org_a):
 
     assert escribio
     (pieza,) = _revisiones(p)
-    assert "onu_no_vinculada" in pieza["porque"]
-    assert SIN_FICHA not in pieza["porque"], "el motivo mezclo dos lecturas"
+    assert "falta la lectura del reclamo" in pieza["porque"], pieza["porque"]
     lecturas = [
         x for x in P.objects.get(pk=p.pk).evidencia if x.get("fuente") == dxt.FUENTE
     ]
-    assert len(lecturas) == 2, "anotar perdio la lectura que llego en el medio"
+    assert len(lecturas) == 1, "anotar perdio la lectura que llego en el medio"
 
 
 # =============================================================================
@@ -697,17 +718,18 @@ def test_j_el_motivo_explica_la_lectura_que_DECIDIO_aunque_llegue_otra(org_a):
 
 def test_k_el_dia_que_el_clasificador_entienda_al_motor_esta_prueba_avisa():
     """
-    NO describe lo que deberia pasar: es un aviso. Hoy el clasificador no
-    entiende el equipo que manda el motor (H-1 en
-    SPEC/auditorias/PASO-A-DESPACHO.md), y por eso 'motivo_para_anotar'
-    reemplaza la frase de equipo sano por '_FALLA_SIN_INTERPRETAR'. El dia que
-    el clasificador lea 'onu_status', esto falla: hay que quitar esa
-    excepcion, porque desde entonces "sano" va a querer decir sano.
+    NO describe lo que deberia pasar: es un aviso. El clasificador no entiende
+    el equipo que manda el endpoint liviano del motor ('Online' u 'Offline',
+    sin causa), y los otros llamadores de 'clasificar' --la pantalla de
+    Despacho, la orden, CASO_REQUIERE_VISITA-- siguen recibiendo ese equipo
+    (H-1). El paso a Despacho ya no depende de esto desde la Fase 3. El dia que
+    el clasificador lea 'onu_status', esto falla: hay que revisar esos
+    llamadores, porque desde entonces "sano" va a querer decir sano.
     """
-    v = clf.clasificar({"contexto_disponible": True, "equipo": {"onu_status": "LOS"}})
+    v = clf.clasificar({"contexto_disponible": True, "equipo": {"onu_status": "Offline"}})
     assert v["verificada"] is False, (
-        "el clasificador ya confirma una caida con la forma del motor: quitar la "
-        "excepcion de EQUIPO_SANO en paso_a_despacho.motivo_para_anotar"
+        "el clasificador ya confirma una caida con la forma del motor: revisar "
+        "los otros llamadores de clasificar y la nota de EQUIPO_SANO"
     )
 
 

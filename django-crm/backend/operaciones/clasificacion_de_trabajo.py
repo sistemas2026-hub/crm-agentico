@@ -274,17 +274,19 @@ def _del_texto(texto: str, mapa: dict | None) -> dict | None:
 
 
 #:  EL COMIENZO DEL TEXTO con que 'clasificar' dice que el equipo esta sano.
-#:  Tiene nombre porque 'paso_a_despacho' lo reconoce para NO copiarlo como si
-#:  fuera una medicion, y un texto repetido en dos modulos se separa el dia que
-#:  uno de los dos cambie.
+#:  Tiene nombre para que las pruebas lo puedan buscar. Desde la Fase 3
+#:  (16/10/2026) el paso a Despacho decide una falla con la medicion de
+#:  'diagnosticar_servicio' y ya no lee esta frase; los otros llamadores de
+#:  'clasificar' (la pantalla de Despacho, la orden, CASO_REQUIERE_VISITA)
+#:  siguen recibiendo el equipo liviano, y para ellos sigue siendo lo de abajo.
 #:
 #:  MEDIDO EL 16/10/2026: hoy esa frase no sale de medir. '_de_la_prueba' lee
 #:  'estado', 'senal' y 'causa_caida', y el equipo que arma el motor
 #:  ('_CAMPOS_DE_EQUIPO' en nucleo/canales/api.py) trae 'onu_status' y
 #:  'onu_signal*'. Ninguna clave coincide, asi que '_de_la_prueba' devuelve
 #:  None con cualquier equipo y se llega a esta frase con solo que SmartOLT
-#:  haya contestado algo, aunque sea 'LOS'. Arreglarlo cambia que pasa solo a
-#:  Despacho, y es otra decision: ver SPEC/auditorias/PASO-A-DESPACHO.md.
+#:  haya contestado algo, aunque sea 'Offline'. Arreglarlo para esos
+#:  llamadores es otra decision: ver SPEC/auditorias/PASO-A-DESPACHO.md.
 EQUIPO_SANO = "el equipo esta en linea y sano"
 
 

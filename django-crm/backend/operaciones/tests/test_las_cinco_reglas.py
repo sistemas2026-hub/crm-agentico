@@ -46,6 +46,17 @@ def _medido(labor, porque="el equipo esta caido por perdida de señal optica"):
             "verificada": True}
 
 
+def _medicion(estado, *, senal="sin_dato", causa="", dbm=None, motivo=""):
+    """
+    Una medicion de 'diagnosticar_servicio' como la guarda
+    'medicion_de_fallas'. Desde la Fase 3 (16/10/2026) es lo que decide una
+    falla, no la labor de la lectura.
+    """
+    return {"fuente": pad.FUENTE_MEDICION, "medido_con": pad.MEDIDO_CON,
+            "estado": estado, "senal": senal, "causa_caida": causa,
+            "senal_dbm": dbm, "motivo": motivo}
+
+
 def _leido(labor=clf.CORRECTIVO):
     """Uno que salio de leer el TEXTO. Es la diferencia que decide todo."""
     return {"labor": labor, "porque": "lo dice el texto del caso",
@@ -65,18 +76,25 @@ def _sin_concluir():
 #  La medicion tiene que CONFIRMAR la falla.
 # =============================================================================
 
-def test_r1_caido_por_fibra_pasa_solo():
-    #  LOS/LOF: la falla es de la red, y es nuestra.
-    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO))
+#  DESDE EL 16/10/2026 (FASE 3) DECIDE LA MEDICION DEL EQUIPO, no la labor de
+#  la lectura, y pasa sola UNA salida: en linea con la señal fuera de rango.
+#  Decidido por el usuario ese dia: una caida por LOS/LOF va a una persona,
+#  porque desde la OLT no se distingue una fibra cortada de un equipo
+#  desenchufado. Las pruebas de abajo fijaban la regla vieja y se reescribieron
+#  con la nueva, sin borrar ninguna.
 
-    assert d.pasa is True, d.porque
-    assert "CONFIRMADA por la medicion" in d.porque
+def test_r1_caido_por_fibra_YA_NO_pasa_solo():
+    """Hasta el 16/10 pasaba. LOS/LOF es ambiguo: falta preguntarle al cliente."""
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO),
+                    medicion=_medicion("caido", causa="fibra"))
+
+    assert d.pasa is False, d.porque
+    assert "enchufado" in d.porque
 
 
 def test_r1_senal_debil_pasa_solo():
-    d = pad.decidir(pad.FALLA_DE_SERVICIO,
-                    _medido(clf.CORRECTIVO,
-                            "la señal de bajada es debil (-27.4 dBm)"))
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO),
+                    medicion=_medicion("en_linea", senal="debil", dbm=-27.4))
 
     assert d.pasa is True, d.porque
     assert "-27.4 dBm" in d.porque, (
@@ -85,14 +103,9 @@ def test_r1_senal_debil_pasa_solo():
 
 
 def test_r1_CONTRAFACTICO_el_equipo_sano_NO_pasa():
-    """
-    El reclamo dice que no hay internet y el equipo esta sano: se CONTRADICEN.
-
-    Un equipo en linea con señal buena no produce veredicto verificado
-    --'_de_la_prueba' devuelve None y el caso cae al texto-- asi que llega aca
-    con 'verificada' en False.
-    """
-    d = pad.decidir(pad.FALLA_DE_SERVICIO, _leido())
+    """El reclamo dice que no hay internet y el equipo esta sano: se CONTRADICEN."""
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _leido(),
+                    medicion=_medicion("en_linea", senal="buena", dbm=-21.0))
 
     assert d.pasa is False
     assert "contradicen" in d.porque
@@ -100,10 +113,13 @@ def test_r1_CONTRAFACTICO_el_equipo_sano_NO_pasa():
 
 
 def test_r1_CONTRAFACTICO_sin_poder_medir_NO_pasa():
-    d = pad.decidir(pad.FALLA_DE_SERVICIO, _sin_concluir())
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _sin_concluir(),
+                    medicion=_medicion("desconocido",
+                                       motivo="el proveedor optico no respondio"))
 
     assert d.pasa is False
-    assert "no es lo mismo que estar sano" in d.porque, (
+    assert "no se pudo medir" in d.porque
+    assert "contradicen" not in d.porque, (
         "'no se pudo medir' se esta leyendo como 'esta sano', que es la peor "
         "lectura posible de una ausencia de dato")
 
@@ -113,11 +129,32 @@ def test_r1_falta_de_energia_NO_pasa_aunque_este_medido():
     Esta MEDIDO y es firme. Lo que prueba es que una visita no sirve: el corte
     de luz es en la casa del cliente.
     """
-    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.NO_REQUIERE_VISITA))
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.NO_REQUIERE_VISITA),
+                    medicion=_medicion("caido", causa="sin_energia"))
 
     assert d.pasa is False
-    assert "falta de energia" in d.porque
-    assert "preguntarle al cliente" in d.porque
+    assert "sin energia" in d.porque
+    assert "preguntarle" in d.porque
+
+
+def test_r1_debil_sin_el_numero_no_pasa():
+    """
+    El unico pase de la regla 1 exige el nivel medido. 'medicion_de_fallas'
+    ya guarda una debil sin numero como 'sin_dato'; esta guarda es para una
+    pieza que llegue por otro camino.
+    """
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO),
+                    medicion=_medicion("en_linea", senal="debil", dbm=None))
+
+    assert d.pasa is False, d.porque
+
+
+def test_r1_sin_medicion_no_pasa_aunque_la_labor_este_verificada():
+    """La regla vieja dejaba pasar una labor verificada. Sin medicion, espera."""
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO))
+
+    assert d.pasa is False
+    assert "falta la medicion" in d.porque
 
 
 # =============================================================================
@@ -427,12 +464,14 @@ def test_la_lectura_guardada_alcanza_para_decidir():
     p = _Propuesta([_lectura_guardada(
         grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
         labor_verificada=True, labor_porque="caido por fibra",
-        confianza_del_grupo="alta")])
+        confianza_del_grupo="alta"),
+        #  Desde la Fase 3 decide la medicion guardada, no la labor.
+        _medicion("en_linea", senal="debil", dbm=-27.4)])
 
     d = pad.de_la_propuesta(p)
 
     assert d.pasa is True, d.porque
-    assert "caido por fibra" in d.porque
+    assert "-27.4 dBm" in d.porque
 
 
 def test_la_lectura_MAS_NUEVA_es_la_que_vale():
@@ -448,6 +487,7 @@ def test_la_lectura_MAS_NUEVA_es_la_que_vale():
         _lectura_guardada(grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
                           labor_verificada=True,
                           confianza_del_grupo="alta"),
+        _medicion("en_linea", senal="debil", dbm=-27.4),
     ])
 
     assert pad.de_la_propuesta(p).pasa is True

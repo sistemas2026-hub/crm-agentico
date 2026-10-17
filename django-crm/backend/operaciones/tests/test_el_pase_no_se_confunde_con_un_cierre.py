@@ -164,6 +164,8 @@ def test_la_tarea_declarada_aca_es_la_MISMA_del_catalogo(org_a):
 def _caso(org):
     import uuid as _uuid
 
+    from django.utils import timezone
+
     from cases.models import Case
 
     return Case.objects.create(
@@ -171,6 +173,9 @@ def _caso(org):
         is_active=True, provider="wisphub",
         external_ticket_id=f"t{_uuid.uuid4().hex[:8]}",
         external_service_id="3614",
+        #  Desde la Fase 3 (16/10/2026) un caso sin copia fresca de WispHub
+        #  no pasa a Despacho.
+        external_status="Nuevo", external_fetched_at=timezone.now(),
         description="Intervencion de la CTO 11-43 de villa maria.")
 
 

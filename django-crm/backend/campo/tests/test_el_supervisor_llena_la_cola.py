@@ -25,6 +25,16 @@ Que el caso aparezca en la COLA y nada mas: sin orden de trabajo creada, sin
 tecnico y sin fecha. Decidido por el cliente el 14/10/2026, y es lo que hace
 reversible todo esto -- un caso mal pasado ensucia una cola y se saca; una
 cuadrilla mal mandada son dos horas de alguien. Hay una prueba propia para eso.
+
+EDITADO EL 16/10/2026 (FASE 3), CON AUTORIZACION DEL USUARIO
+------------------------------------------------------------
+Este archivo fijaba la regla 1 vieja: una falla pasaba con la labor
+'verificada' que traia la señal. Desde la Fase 3 el paso decide SOLO con lo
+guardado en la propuesta, una falla pasa solo con una MEDICION del equipo en
+linea con la señal fuera de rango, y un caso sin una copia fresca de WispHub
+no pasa. Se ajusto el andamio --lo que la señal decia queda escrito en la
+propuesta, y el caso trae su copia de WispHub--. Las afirmaciones son las
+mismas.
 ================================================================================
 """
 
@@ -85,6 +95,8 @@ def _caso_con_ticket(org, nombre="No tiene internet"):
         org=org, name=nombre, status="New", priority="Normal", is_active=True,
         provider="wisphub", external_ticket_id=str(next(_TICKET)),
         external_service_id="3614",
+        #  La copia fresca y en curso de WispHub: sin ella, el caso no pasa.
+        external_status="Nuevo", external_fetched_at=timezone.now(),
         description="El cliente dice que no tiene internet desde anoche.")
 
 
@@ -99,6 +111,35 @@ def _propuesta_sin_decidir(org, caso):
         evidencia=[{"fuente": "diagnostico_del_ticket",
                     "dato": "lectura del reclamo: no tiene servicio",
                     "momento": "2026-10-14T18:00:00Z"}])
+
+
+def _guardar_lo_leido(p, s):
+    """
+    Lo que la señal trae, escrito en la propuesta: desde la Fase 3 el paso
+    decide con lo guardado. Una falla 'verificada' lleva una MEDICION del
+    equipo en linea con la señal fuera de rango (-27.4 dBm); una sin
+    verificar, una medicion en rango, que contradice el reclamo.
+    """
+    from operaciones import medicion_de_fallas as mdf
+
+    d = s.datos
+    lectura = {"fuente": "diagnostico_del_ticket",
+               "dato": "lectura del reclamo: no tiene servicio",
+               "observado_en": timezone.now().isoformat(),
+               "grupo": d["grupo"], "labor": d["labor"],
+               "labor_verificada": d["labor_verificada"],
+               "labor_porque": d["labor_porque"],
+               "confianza": d["diagnostico_confianza"],
+               "confianza_del_grupo": d["confianza_del_grupo"]}
+    p.evidencia = [*(p.evidencia or []), lectura]
+    p.save(update_fields=["evidencia"])
+    if d["grupo"] == pad.FALLA_DE_SERVICIO:
+        verificada = d["labor_verificada"]
+        mdf.escribir(p, mdf.de_la_respuesta({
+            "estado": "en_linea", "causa_caida": "", "motivo": "",
+            "senal_dbm": -27.4 if verificada else -21.0,
+            "senal": "debil" if verificada else "buena"}), timezone.now())
+    p.refresh_from_db()
 
 
 def _las_puertas_abiertas(monkeypatch):
@@ -133,6 +174,7 @@ def test_una_falla_CONFIRMADA_entra_a_la_cola_sin_que_nadie_la_acepte(
     p = _propuesta_sin_decidir(org_a, caso)
     s = _Senal(caso.id, grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
                verificada=True, confianza="alta")
+    _guardar_lo_leido(p, s)
     _las_puertas_abiertas(monkeypatch)
 
     #  CONTROL: antes de pasar, la pantalla NO lo tiene. Sin esto, un "aparece"
@@ -161,6 +203,7 @@ def test_el_porque_queda_a_la_vista_de_quien_despacha(admin_client, org_a,
     s = _Senal(caso.id, grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
                verificada=True, confianza="alta",
                porque="la señal de bajada es debil (-27.4 dBm)")
+    _guardar_lo_leido(p, s)
     _las_puertas_abiertas(monkeypatch)
 
     pad.pasar_si_corresponde(org_a, s, p, ahora=timezone.now())
@@ -184,6 +227,7 @@ def test_un_trabajo_PEDIDO_entra_aunque_el_equipo_este_sano(admin_client,
     p = _propuesta_sin_decidir(org_a, caso)
     s = _Senal(caso.id, grupo=pad.TRABAJO_PEDIDO, labor=clf.TRABAJOS,
                verificada=False, confianza="alta")
+    _guardar_lo_leido(p, s)
     _las_puertas_abiertas(monkeypatch)
 
     r = pad.pasar_si_corresponde(org_a, s, p, ahora=timezone.now())
@@ -204,6 +248,7 @@ def test_una_pagina_bloqueada_NO_entra_a_la_cola(admin_client, org_a,
     p = _propuesta_sin_decidir(org_a, caso)
     s = _Senal(caso.id, grupo=pad.NADA_LO_MIDE, labor=clf.CORRECTIVO,
                verificada=True, confianza="alta")
+    _guardar_lo_leido(p, s)
     _las_puertas_abiertas(monkeypatch)
 
     r = pad.pasar_si_corresponde(org_a, s, p, ahora=timezone.now())
@@ -226,6 +271,7 @@ def test_un_equipo_SANO_con_reclamo_de_falla_NO_entra(admin_client, org_a,
     p = _propuesta_sin_decidir(org_a, caso)
     s = _Senal(caso.id, grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
                verificada=False, confianza="alta")
+    _guardar_lo_leido(p, s)
     _las_puertas_abiertas(monkeypatch)
 
     assert pad.pasar_si_corresponde(
@@ -247,6 +293,7 @@ def test_sin_la_tarea_delegada_NO_entra_aunque_la_regla_lo_habilite(
     p = _propuesta_sin_decidir(org_a, caso)
     s = _Senal(caso.id, grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
                verificada=True, confianza="alta")
+    _guardar_lo_leido(p, s)
     monkeypatch.setattr(tareas_delegadas, "esta_delegada",
                         lambda o, clave: False)
     monkeypatch.setattr(autonomia, "puede",
@@ -267,6 +314,7 @@ def test_sin_el_techo_de_la_empresa_NO_entra(admin_client, org_a, monkeypatch):
     p = _propuesta_sin_decidir(org_a, caso)
     s = _Senal(caso.id, grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
                verificada=True, confianza="alta")
+    _guardar_lo_leido(p, s)
     monkeypatch.setattr(tareas_delegadas, "esta_delegada",
                         lambda o, clave: True)
     monkeypatch.setattr(autonomia, "puede",
@@ -297,6 +345,7 @@ def test_si_NO_SE_PUEDE_LEER_el_techo_tampoco_entra(admin_client, org_a,
     p = _propuesta_sin_decidir(org_a, caso)
     s = _Senal(caso.id, grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
                verificada=True, confianza="alta")
+    _guardar_lo_leido(p, s)
     monkeypatch.setattr(tareas_delegadas, "esta_delegada",
                         lambda o, clave: True)
     monkeypatch.setattr(autonomia, "puede", _se_cayo)
@@ -333,6 +382,7 @@ def test_pasar_a_la_cola_NO_crea_la_orden_ni_asigna_a_nadie(admin_client,
     p = _propuesta_sin_decidir(org_a, caso)
     s = _Senal(caso.id, grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
                verificada=True, confianza="alta")
+    _guardar_lo_leido(p, s)
     _las_puertas_abiertas(monkeypatch)
     antes = OrdenTrabajo.objects.count()
 

@@ -49,6 +49,9 @@ def _caso(org, nombre="No tiene internet"):
         org=org, name=nombre, status="New", priority="Normal", is_active=True,
         provider="wisphub", external_ticket_id=f"t{uuid.uuid4().hex[:8]}",
         external_service_id="3614",
+        #  Desde la Fase 3 (16/10/2026) un caso sin copia fresca de WispHub
+        #  no pasa a Despacho.
+        external_status="Nuevo", external_fetched_at=timezone.now(),
         description="El cliente dice que no tiene internet.")
 
 
@@ -60,8 +63,9 @@ def _propuesta_ya_leida(org, caso, *, grupo, verificada=True,
     """
     from operaciones import clasificacion_de_trabajo as clf
     from operaciones import diagnostico_de_ticket as dxt
+    from operaciones import medicion_de_fallas as mdf
 
-    return PropuestaSupervisor.objects.create(
+    p = PropuestaSupervisor.objects.create(
         org=org, tipo_senal=PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO,
         origen_tipo="case", origen_id=str(caso.id),
         estado=PropuestaSupervisor.PROPUESTA,
@@ -72,10 +76,19 @@ def _propuesta_ya_leida(org, caso, *, grupo, verificada=True,
             "grupo": grupo,
             "labor": clf.CORRECTIVO,
             "labor_verificada": verificada,
-            "labor_porque": "el equipo esta caido por perdida de señal optica",
+            "labor_porque": "la señal de bajada es debil (-27.4 dBm)",
             "confianza": "media",
             "confianza_del_grupo": confianza_del_grupo,
         }])
+    #  DESDE LA FASE 3 (16/10/2026) una falla pasa con la MEDICION del equipo,
+    #  no con la labor de la lectura: una "verificada" lleva la medicion de un
+    #  equipo en linea con la señal fuera de rango.
+    if grupo == pad.FALLA_DE_SERVICIO and verificada:
+        mdf.escribir(p, mdf.de_la_respuesta({
+            "estado": "en_linea", "senal": "debil", "senal_dbm": -27.4,
+            "causa_caida": "", "motivo": ""}), timezone.now())
+        p.refresh_from_db()
+    return p
 
 
 def _correr_la_fase(org, ahora=None):
