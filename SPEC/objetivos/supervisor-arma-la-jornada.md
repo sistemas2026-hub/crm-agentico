@@ -91,4 +91,4 @@ construir.
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
-| 17/10/2026, tarde | Ficha abierta con las decisiones del usuario. `informe_de_jornadas` construido | Que el usuario lo corra y analizarlo (0.2) | — |
+| 17/10/2026, tarde | Ficha abierta con las decisiones del usuario. `informe_de_jornadas` construido: 7 pruebas en verde con superusuario y con un rol que el RLS ata, 3 mutaciones muertas (no filtrar por empresa, comerse un día del rango, contar mal la repetición de zonas), ruff sin avisos (0.1) | Que el usuario lo corra y analizarlo (0.2) | `cf4c0855` |
