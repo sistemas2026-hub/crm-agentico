@@ -1,0 +1,184 @@
+"""
+Lista, sin escribir nada, las lecturas de ticket pendientes del Supervisor
+NOC: en qué grupo cayó cada una, qué midió el equipo, cómo está el caso, por
+qué se queda, y qué pasaría con cada cambio de regla que está sobre la mesa.
+
+    python manage.py informe_de_pendientes --org <id>
+
+POR QUÉ EXISTE
+--------------
+El 17/10/2026 la vuelta de las :07 no pasó ninguno de 64 pendientes, y el log
+solo dice cuántos por motivo. Para decidir si una regla es demasiado estricta
+hace falta ver los tickets uno por uno. ESO LO CALCULA EL CÓDIGO, con las
+reglas reales de 'paso_a_despacho': el informe es para que una persona
+decida, no para que adivine sumando a mano.
+
+SIN DATOS DEL CLIENTE. Va el número del ticket y lo que el Supervisor
+escribió, tapado: nunca el asunto, la descripción, el nombre ni el teléfono.
+Es una salida pensada para pegarse en una conversación.
+
+EL CONTEXTO RLS SE FIJA ACÁ, como en 'propuestas_fuera_de_area': un comando
+no pasa por el middleware, y sin él las tablas devuelven 0 filas sin error.
+"""
+
+from collections import Counter
+
+from django.core.exceptions import ValidationError
+from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
+
+from common.models import Org
+from common.tasks import set_rls_context
+from operaciones import diagnostico_de_ticket as dxt
+from operaciones import lectura_de_ticket
+from operaciones import paso_a_despacho as pad
+from operaciones.models import PropuestaSupervisor
+
+_GRUPO = {
+    pad.FALLA_DE_SERVICIO: "falla",
+    pad.TRABAJO_PEDIDO: "trabajo",
+    pad.OBRA_DE_RED: "obra",
+    pad.NADA_LO_MIDE: "nada_mide",
+    pad.NI_CLIENTE_NI_RED: "ni_cli_red",
+}
+
+#  De qué frase del motivo del caso sale cada etiqueta corta.
+_CASO = (
+    ("cerrado en Dexter", "cerrado Dexter"),
+    ("no esta abierto en Dexter", "rechazado/duplicado"),
+    ("cerrado en WispHub", "cerrado WispHub"),
+    ("no figura en curso", "no en curso WispHub"),
+    ("no consta cuando", "sin copia WispHub"),
+    ("sin actualizarse", "copia vieja"),
+    ("fallo", "lectura fallida"),
+    ("inactivo", "inactivo/fusionado"),
+)
+
+
+def _caso_corto(porque, caso):
+    if porque is None:
+        return "abierto"
+    for frase, etiqueta in _CASO:
+        if frase in porque:
+            if etiqueta == "cerrado Dexter":
+                cuando = getattr(caso, "resolved_at", None) or getattr(
+                    caso, "closed_on", None)
+                if cuando:
+                    dias = (timezone.now().date() - cuando.date()).days
+                    return f"cerrado Dexter {dias}d"
+            return etiqueta
+    return "no pasa"
+
+
+def _medicion_corta(m):
+    if not m:
+        return "sin medir"
+    estado = m.get("estado") or "?"
+    if estado == "en_linea":
+        dbm = m.get("senal_dbm")
+        nivel = f" {dbm}dBm" if isinstance(dbm, (int, float)) else ""
+        return f"en linea/{m.get('senal') or 'sin_dato'}{nivel}"
+    if estado == "caido":
+        return f"caido/{m.get('causa_caida') or 'sin causa'}"
+    return "no se pudo medir"
+
+
+def _por_que_corto(d, grupo, medicion):
+    if d.pasa:
+        return "PASA"
+    if d.puerta == pad.PUERTA_CASO:
+        return "caso"
+    if not grupo:
+        return "sin grupo"
+    if grupo in (pad.NADA_LO_MIDE, pad.NI_CLIENTE_NI_RED):
+        return "siempre persona"
+    if grupo in pad.SIN_CONDICION_DE_MEDICION:
+        return "confianza"
+    if not medicion:
+        return "sin medir"
+    if medicion.get("estado") == "en_linea":
+        return "en rango" if medicion.get("senal") == "buena" else "sin nivel"
+    if medicion.get("estado") == "caido":
+        causa = medicion.get("causa_caida")
+        return {"fibra": "LOS", "sin_energia": "sin energia",
+                "otra": "caido otra causa"}.get(causa, "caido sin datos")
+    return "no se pudo medir"
+
+
+def _hipotesis(propuesta):
+    for pieza in reversed(propuesta.evidencia or []):
+        if not isinstance(pieza, dict) or pieza.get("fuente") != dxt.FUENTE:
+            continue
+        dato = str(pieza.get("dato") or "")
+        if dato.startswith(dxt.ETIQUETA_LECTURA):
+            texto = dato[len(dxt.ETIQUETA_LECTURA):]
+            texto = texto.split(" (confianza ")[0]
+            return lectura_de_ticket.tapar(texto)[:70]
+    return "(sin hipotesis)"
+
+
+class Command(BaseCommand):
+    help = ("Lista las lecturas de ticket pendientes del Supervisor NOC y qué "
+            "pasaría con cada cambio de regla. No escribe nada.")
+
+    def add_arguments(self, parser):
+        parser.add_argument("--org", required=True,
+                            help="id (UUID) de la organización")
+
+    def handle(self, *args, **options):
+        try:
+            org = Org.objects.get(pk=options["org"])
+        except (Org.DoesNotExist, ValueError, ValidationError):
+            raise CommandError("No existe una organización con ese id.")
+        set_rls_context(org.id)
+        ahora = timezone.now()
+
+        pendientes = (PropuestaSupervisor.objects
+                      .filter(org=org, estado=PropuestaSupervisor.PROPUESTA,
+                              tipo_senal=PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO,
+                              origen_tipo="case")
+                      .order_by("created_at"))
+
+        filas, motivos, casos = [], Counter(), Counter()
+        pasan = con_los = con_media = 0
+        for p in pendientes:
+            caso = pad.caso_de(p)
+            lectura = pad._ultima_lectura_con_grupo(p) or {}
+            grupo = str(lectura.get("grupo") or "")
+            conf = str(lectura.get(pad.CONFIANZA_DEL_GRUPO) or "-")
+            medicion = pad.ultima_medicion(p)
+            d = pad.evaluar(p, ahora)
+            por_que = _por_que_corto(d, grupo, medicion)
+            caso_corto = _caso_corto(
+                pad.por_que_el_caso_no_puede_pasar(caso, ahora), caso)
+            reglas = d.puerta == pad.PUERTA_REGLAS and not d.pasa
+            si_los = d.pasa or (reglas and por_que == "LOS")
+            si_media = d.pasa or (reglas and por_que == "confianza"
+                                  and conf == "media")
+            pasan += d.pasa
+            con_los += si_los
+            con_media += si_media
+            motivos[por_que] += 1
+            casos[caso_corto.split(" ")[0] + (" Dexter" if "Dexter" in caso_corto else "")] += 1
+            edad = (ahora - p.created_at).days
+            filas.append((
+                getattr(caso, "external_ticket_id", "") or "?",
+                f"{edad}d", _GRUPO.get(grupo, "sin grupo"), conf,
+                caso_corto, _medicion_corta(medicion), por_que,
+                "SI" if si_los else "-", "SI" if si_media else "-",
+                _hipotesis(p)))
+
+        cab = ("ticket", "edad", "grupo", "conf", "caso", "medicion",
+               "por que se queda", "con LOS", "con media", "hipotesis (tapada)")
+        anchos = [max(len(str(f[i])) for f in [cab, *filas]) for i in range(len(cab))]
+        linea = lambda f: "  ".join(str(v).ljust(a) for v, a in zip(f, anchos))  # noqa: E731
+        self.stdout.write(linea(cab))
+        self.stdout.write("-" * (sum(anchos) + 2 * (len(cab) - 1)))
+        for f in filas:
+            self.stdout.write(linea(f))
+        self.stdout.write("")
+        self.stdout.write(
+            f"pendientes={len(filas)} · pasan hoy={pasan} · pasarian con LOS={con_los} "
+            f"· pasarian con confianza media={con_media}")
+        self.stdout.write(f"por que se quedan: {dict(motivos)}")
+        self.stdout.write(f"casos: {dict(casos)}")
