@@ -46,15 +46,20 @@ def _medido(labor, porque="el equipo esta caido por perdida de señal optica"):
             "verificada": True}
 
 
-def _medicion(estado, *, senal="sin_dato", causa="", dbm=None, motivo=""):
+def _medicion(estado, *, senal="sin_dato", causa="", dbm=None, motivo="",
+              intentos=None):
     """
     Una medicion de 'diagnosticar_servicio' como la guarda
     'medicion_de_fallas'. Desde la Fase 3 (16/10/2026) es lo que decide una
-    falla, no la labor de la lectura.
+    falla, no la labor de la lectura. 'intentos' es el contador de vueltas
+    seguidas sin poder medir (17/10/2026).
     """
-    return {"fuente": pad.FUENTE_MEDICION, "medido_con": pad.MEDIDO_CON,
-            "estado": estado, "senal": senal, "causa_caida": causa,
-            "senal_dbm": dbm, "motivo": motivo}
+    m = {"fuente": pad.FUENTE_MEDICION, "medido_con": pad.MEDIDO_CON,
+         "estado": estado, "senal": senal, "causa_caida": causa,
+         "senal_dbm": dbm, "motivo": motivo}
+    if intentos is not None:
+        m["intentos_sin_medir"] = intentos
+    return m
 
 
 def _leido(labor=clf.CORRECTIVO):
@@ -114,15 +119,31 @@ def test_r1_CONTRAFACTICO_el_equipo_sano_NO_pasa():
     assert "preguntarle al cliente" in d.porque
 
 
-def test_r1_sin_poder_medir_PASA_porque_nada_contradice_el_reclamo():
+def test_r1_sin_poder_medir_UNA_vuelta_espera_la_siguiente():
+    """
+    Decidido el 17/10/2026: con una sola vuelta, una caida del proveedor
+    mandaba a Despacho el equipo sano. Una pieza de antes del contador cuenta
+    como una vuelta.
+    """
+    for intentos in (1, None):
+        d = pad.decidir(pad.FALLA_DE_SERVICIO, _sin_concluir(),
+                        medicion=_medicion("desconocido", intentos=intentos,
+                                           motivo="el proveedor optico no respondio"))
+
+        assert d.pasa is False, d.porque
+        assert "vuelve a intentar" in d.porque
+
+
+def test_r1_sin_poder_medir_DOS_vueltas_seguidas_PASA():
     """Decidido el 16/10/2026: solo se queda la falla que la medicion contradice."""
     d = pad.decidir(pad.FALLA_DE_SERVICIO, _sin_concluir(),
-                    medicion=_medicion("desconocido",
+                    medicion=_medicion("desconocido", intentos=2,
                                        motivo="el proveedor optico no respondio"))
 
     assert d.pasa is True, d.porque
-    assert "no se pudo medir" in d.porque
+    assert "dos vueltas seguidas" in d.porque
     assert "Nada contradice" in d.porque
+
 
 def test_r1_falta_de_energia_NO_pasa_aunque_este_medido():
     """

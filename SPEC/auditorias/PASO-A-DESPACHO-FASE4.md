@@ -196,7 +196,7 @@ esos arreglos:
 
 | # | Hallazgo | Qué se hizo |
 |---|---|---|
-| 1 | "No se pudo medir" pasa también cuando lo que falla es la cadena: SmartOLT sin responder, WispHub caído, la empresa sin SmartOLT configurado, la config que no carga. Pasa en la misma vuelta, con el equipo sano inclusive, y una empresa sin SmartOLT haría pasar todas sus fallas. El log no separa los pases por motivo. VERIFICADO con cinco frases del motor | **Decide el usuario.** Es la regla que eligió ("sin medir, pasa"), pero ninguno de los 10 tickets con los que la decidió era de este tipo. Se le plantea con una opción concreta |
+| 1 | "No se pudo medir" pasa también cuando lo que falla es la cadena: SmartOLT sin responder, WispHub caído, la empresa sin SmartOLT configurado, la config que no carga. Pasa en la misma vuelta, con el equipo sano inclusive, y una empresa sin SmartOLT haría pasar todas sus fallas. El log no separa los pases por motivo. VERIFICADO con cinco frases del motor | **Corregido el 17/10, por decisión del usuario:** "no se pudo medir" tiene que repetirse en dos vueltas seguidas para pasar; la primera vez la falla espera y se vuelve a medir en la vuelta siguiente. `test_m1`, `test_m2`, `test_m3` y `test_r1`; cinco mutaciones muertas (bitácora de la ficha) |
 | 2 | El aviso que justifica pasar un LOS ("el despachador lo confirma con el cliente") no llega a la pantalla de Despacho: la API manda hipótesis y recomendación, no el porqué del pase. VERIFICADO en la API | **Decide el usuario.** Es trabajo de pantalla (`campo/` y el frontend), fuera de esta fase |
 | 3 | La vuelta de cierre corría también en el chat, que no tiene contrato JSON: la persona habría visto el objeto crudo; y si fallaba, el turno perdía la traza de sus vueltas. Las dos pruebas ajustadas a +1 estaban verdes con el síntoma | **Corregido.** El cierre es opcional y lo pide solo la lectura; el chat vuelve a ser el de antes, y sus dos pruebas a su versión de origin. `test_22c`; R21 |
 | 4 | Si la llamada de cierre fallaba, la lectura se perdía sin dejar fila, y el ticket se releía en cada vuelta sin techo | **Corregido.** Un cierre que falla deja lo de antes: el contenido de la última vuelta, que `validar` descarta y el tope cuenta. `test_22d`; R19 |
@@ -216,7 +216,8 @@ causas reales de caída caen en "otra".
 
 ## Límites declarados
 
-- **"No se pudo medir" pasa, por decisión del usuario**, y eso incluye un
+- **"No se pudo medir" pasa recién en la segunda vuelta seguida** (desde el
+  17/10). Antes de ese cambio, la regla era esta, y valía también para un
   SmartOLT o un WispHub que no responde: las fallas medidas en esa vuelta
   pasan, hasta el presupuesto de medición (15 por vuelta desatendida) y el
   tope de 60 pases, con el equipo sano inclusive. Una empresa sin SmartOLT

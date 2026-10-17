@@ -57,6 +57,15 @@ logger = logging.getLogger(__name__)
 #:  una medicion: se cambia si el usuario lo pide.
 HORAS_PARA_REINTENTAR = 24
 
+#:  Cuanto se espera para volver a medir lo que no se pudo medir UNA vez  --
+#:  17/10/2026. De esa segunda medicion depende que la falla pase
+#:  ('paso_a_despacho.VUELTAS_SIN_MEDIR_PARA_PASAR'), asi que se pide en la
+#:  vuelta siguiente y no al dia. 30 minutos: menos que lo que separan dos
+#:  vueltas del reloj --una por hora, y la lectura de la primera puede tardar
+#:  hasta veinte minutos--, y mas que lo que separan dos clics seguidos en
+#:  "Correr ciclo", que no tienen que contar como dos vueltas.
+MINUTOS_PARA_REINTENTAR_SIN_MEDIR = 30
+
 #  El vocabulario cerrado de lo que se guarda. Lo que devuelva el motor fuera
 #  de estas listas se guarda como "no se sabe", nunca tal cual.
 _ESTADOS = ("en_linea", "caido")
@@ -200,6 +209,11 @@ def _lo_que_dice(m: dict) -> str:
             "sin_energia": "caido, sin energia (dying-gasp)",
             "fibra": "caido, perdio la señal optica (LOS/LOF)",
         }.get(m.get("causa_caida"), "caido, por otra causa")
+    n = pad.intentos_sin_medir(m)
+    if 0 < n < pad.VUELTAS_SIN_MEDIR_PARA_PASAR:
+        return "no se pudo medir; se vuelve a intentar en la vuelta siguiente"
+    if n:
+        return f"no se pudo medir en {n} vueltas seguidas"
     return "no se pudo medir"
 
 
@@ -212,10 +226,16 @@ def _sin_id_de_servicio() -> dict:
 
 
 def _vieja(medicion: dict, ahora) -> bool:
+    from operaciones import paso_a_despacho as pad
+
     cuando = parse_datetime(str(medicion.get("observado_en") or ""))
     if cuando is None:
         return True
-    return (ahora - cuando).total_seconds() >= HORAS_PARA_REINTENTAR * 3600
+    if 0 < pad.intentos_sin_medir(medicion) < pad.VUELTAS_SIN_MEDIR_PARA_PASAR:
+        espera = MINUTOS_PARA_REINTENTAR_SIN_MEDIR * 60
+    else:
+        espera = HORAS_PARA_REINTENTAR * 3600
+    return (ahora - cuando).total_seconds() >= espera
 
 
 def candidatas(org, ahora) -> list:
@@ -279,6 +299,14 @@ def escribir(propuesta, medicion: dict, ahora) -> bool:
                   .filter(pk=propuesta.pk, estado=P.PROPUESTA).first())
         if fresca is None:
             return False
+        medicion = dict(medicion)
+        if medicion.get("estado") == pad.ESTADO_DESCONOCIDO:
+            #  LAS VUELTAS SEGUIDAS SIN PODER MEDIR  --  17/10/2026. Se cuentan
+            #  aca, con la fila bloqueada, mirando la medicion que se reemplaza:
+            #  si tambien era un "no se pudo medir", suma; si no, empieza de
+            #  nuevo. El paso deja pasar recien a la segunda.
+            medicion["intentos_sin_medir"] = (
+                pad.intentos_sin_medir(pad.ultima_medicion(fresca)) + 1)
         pieza = sup._observacion(pad.FUENTE_MEDICION, fresca.origen_id,
                                  _dato(medicion, ahora), ahora)
         pieza.update(medicion)

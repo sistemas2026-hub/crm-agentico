@@ -138,7 +138,7 @@ def _por_que_corto(d, grupo, medicion):
         causa = medicion.get("causa_caida")
         return {"fibra": "LOS", "sin_energia": "sin energia",
                 "otra": "caido otra causa"}.get(causa, "caido sin datos")
-    return "no se pudo medir"
+    return "no se pudo medir, reintenta"
 
 
 def _hipotesis(propuesta):

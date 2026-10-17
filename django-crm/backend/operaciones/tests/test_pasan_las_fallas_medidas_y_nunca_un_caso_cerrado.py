@@ -295,9 +295,6 @@ def test_b2_la_falla_que_la_medicion_contradice_se_queda_y_dice_que_hacer(
                      id="caido_otra_causa"),
         pytest.param(_respuesta("caido"), "respuesta incompleta",
                      id="caido_sin_datos"),
-        pytest.param(_sin_resolver("el servicio no tiene equipo registrado en "
-                                   "el proveedor"), "no se pudo medir",
-                     id="sin_medicion"),
     ],
 )
 def test_b2b_toda_otra_falla_PASA_y_la_aceptacion_dice_por_que(
@@ -743,7 +740,9 @@ def test_f4_la_frase_mas_comun_del_motor_se_guarda_tal_cual(org_a, puertas_abier
     _vuelta(org_a)
 
     assert _medicion(p)["motivo"] == frase
-    assert "no esta registrado en SmartOLT" in (P.objects.get(pk=p.pk).resultado or "")
+    #  La primera vuelta sin medir espera (17/10/2026): la frase llega a
+    #  quien lee por que se queda.
+    assert "no esta registrado en SmartOLT" in _revision(p)["porque"]
 
 # =============================================================================
 #  LO QUE ENCONTRO EL AUDITOR INDEPENDIENTE EL 16/10
@@ -957,3 +956,66 @@ def test_h3_un_error_guardado_por_la_fase_3_no_pasa_y_se_mide_ya(
     assert motor.llamadas == ["3614"], "un error guardado se vuelve a medir ya"
     _vuelta(org_a)
     assert _estado(p) == P.ACEPTADA
+
+
+# =============================================================================
+#  "NO SE PUDO MEDIR" TIENE QUE REPETIRSE EN DOS VUELTAS SEGUIDAS  --  17/10/2026
+# =============================================================================
+#  Con una sola vuelta, una caida de SmartOLT o de WispHub mandaba a Despacho
+#  todas las fallas de esa vuelta, las del equipo sano incluidas (auditor
+#  independiente, hallazgo 1 de la Fase 4). Lo decidio el usuario.
+
+def _hasta_la_vuelta_siguiente(p):
+    _envejecer_medicion(p, mdf.MINUTOS_PARA_REINTENTAR_SIN_MEDIR / 60 + 0.1)
+
+
+def test_m1_la_primera_vez_espera_y_la_segunda_vuelta_seguida_pasa(
+        org_a, puertas_abiertas):
+    p = _pendiente(org_a)
+    caido = _Motor(_sin_resolver("el proveedor optico no respondio"))
+
+    _medir(org_a, caido)
+    assert _medicion(p)["intentos_sin_medir"] == 1
+    _vuelta(org_a)
+    assert _estado(p) == P.PROPUESTA, "paso con una sola vuelta sin medir"
+    assert "vuelve a intentar" in _revision(p)["porque"]
+
+    _medir(org_a, caido)
+    assert caido.llamadas == ["3614"], (
+        "un segundo clic en Correr ciclo no es la vuelta siguiente")
+
+    _hasta_la_vuelta_siguiente(p)
+    _medir(org_a, caido)
+    assert caido.llamadas == ["3614", "3614"], "no se reintento en la vuelta siguiente"
+    assert _medicion(p)["intentos_sin_medir"] == 2
+    _vuelta(org_a)
+    assert _estado(p) == P.ACEPTADA
+    assert "dos vueltas seguidas" in (P.objects.get(pk=p.pk).resultado or "")
+
+
+def test_m2_si_en_la_segunda_vuelta_se_puede_medir_decide_la_medicion(
+        org_a, puertas_abiertas):
+    """El caso que motivo esto: el proveedor caido una vuelta y el equipo sano."""
+    p = _pendiente(org_a)
+    _medir(org_a, _Motor(_sin_resolver("el proveedor optico no respondio")))
+    _hasta_la_vuelta_siguiente(p)
+
+    _medir(org_a, _Motor(_respuesta("en_linea", dbm=-21.0)))
+    _vuelta(org_a)
+
+    assert _estado(p) == P.PROPUESTA, "el equipo sano paso a Despacho"
+    assert "se contradicen" in _revision(p)["porque"]
+
+
+def test_m3_la_cuenta_es_de_vueltas_SEGUIDAS(org_a):
+    """Otro resultado en el medio empieza la cuenta de nuevo."""
+    p = _pendiente(org_a)
+    raro = dict(_respuesta("en_linea", dbm=-21.0))
+    raro["estado"] = "online"
+
+    for respuesta in (_sin_resolver("x"), raro, _sin_resolver("x")):
+        mdf.escribir(p, mdf.de_la_respuesta(respuesta), timezone.now())
+
+    assert _medicion(p)["intentos_sin_medir"] == 1
+    mdf.escribir(p, mdf.de_la_respuesta(_sin_resolver("x")), timezone.now())
+    assert _medicion(p)["intentos_sin_medir"] == 2

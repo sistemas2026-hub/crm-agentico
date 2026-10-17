@@ -259,9 +259,10 @@ def decidir(grupo: str, labor_veredicto: dict | None,
     #  DE LO QUE SE MIDIO, SOLO DOS SALIDAS FRENAN: en linea con la señal en
     #  rango --el reclamo y la medicion se contradicen, hay que preguntarle al
     #  cliente-- y caido por falta de energia en la casa, que una visita no
-    #  arregla. Lo demas pasa, incluido lo que el proveedor no pudo medir: nada
-    #  contradice el reclamo, y el despachador confirma con el cliente antes de
-    #  mandar a alguien. Una caida por LOS/LOF pasa aunque pueda ser un equipo
+    #  arregla. Lo demas pasa, incluido lo que el proveedor no pudo medir en
+    #  DOS VUELTAS SEGUIDAS (17/10/2026: con una, una caida del proveedor
+    #  hacia pasar el equipo sano): nada contradice el reclamo, y el
+    #  despachador confirma con el cliente antes de mandar a alguien. Una caida por LOS/LOF pasa aunque pueda ser un equipo
     #  desenchufado: desde la OLT no se distingue, y el 16/10 esos tickets
     #  llevaban dias esperando.
     #
@@ -303,10 +304,12 @@ def decidir(grupo: str, labor_veredicto: dict | None,
     if es_un_error_guardado(m):
         return Decision(False, _FALTA_MEDIR, grupo=grupo, labor=labor)
     motivo = str(m.get("motivo") or "").strip()
-    return Decision(
-        True,
-        _NO_SE_PUDO_MEDIR.format(motivo=f" ({motivo[:120]})" if motivo else ""),
-        grupo=grupo, labor=labor)
+    motivo = f" ({motivo[:120]})" if motivo else ""
+    if intentos_sin_medir(m) < VUELTAS_SIN_MEDIR_PARA_PASAR:
+        return Decision(False, _SIN_MEDIR_UNA_VUELTA.format(motivo=motivo),
+                        grupo=grupo, labor=labor)
+    return Decision(True, _NO_SE_PUDO_MEDIR.format(motivo=motivo),
+                    grupo=grupo, labor=labor)
 
 
 #  Lo que '_nivel' agrega a un motivo, para sacarlo de la clave del log.
@@ -359,8 +362,13 @@ _CAIDO_SIN_DATOS = (
     "respuesta incompleta del proveedor. Nada contradice el reclamo: pasa a "
     "Despacho")
 _NO_SE_PUDO_MEDIR = (
-    "no se pudo medir el equipo con el proveedor optico{motivo}. Nada "
-    "contradice el reclamo: pasa a Despacho")
+    "no se pudo medir el equipo con el proveedor optico en dos vueltas "
+    "seguidas{motivo}. Nada contradice el reclamo: pasa a Despacho")
+_SIN_MEDIR_UNA_VUELTA = (
+    "no se pudo medir el equipo con el proveedor optico en esta vuelta"
+    "{motivo}. Se vuelve a intentar en la siguiente: si el proveedor estaba "
+    "caido, una falla con el equipo sano no tiene que pasar. Si tampoco se "
+    "puede, pasa a Despacho")
 _MEDICION_NO_ENTENDIDA = (
     "la medicion volvio con un estado del equipo que este sistema no reconoce: "
     "no se decide con un dato que no se entiende. Se vuelve a medir; mientras "
@@ -452,6 +460,13 @@ ESTADO_DESCONOCIDO = "desconocido"
 #:  no pasa. Sin esto, un cambio de vocabulario en el motor haria pasar todas
 #:  las fallas, las sanas incluidas (auditor de frontera, 16/10/2026).
 ESTADO_NO_RECONOCIDO = "no_reconocido"
+#:  Cuantas vueltas SEGUIDAS sin poder medir hacen falta para pasar  --
+#:  17/10/2026. Con una sola, una caida de SmartOLT o de WispHub mandaba a
+#:  Despacho todas las fallas medidas en esa vuelta, las del equipo sano
+#:  incluidas (auditor independiente, hallazgo 1 de la Fase 4). Con dos, lo
+#:  que no se puede medir nunca --un equipo sin registrar-- pasa una vuelta
+#:  despues, y una caida corta no manda a nadie. Lo decidio el usuario.
+VUELTAS_SIN_MEDIR_PARA_PASAR = 2
 #:  Como empezaba el motivo de un ERROR del motor guardado como medicion,
 #:  antes del 16/10/2026. Ya no se escribe: ver 'es_un_error_guardado'.
 _MOTIVO_DE_UN_ERROR = "el motor contesto "
@@ -882,6 +897,19 @@ def es_un_error_guardado(medicion) -> bool:
     m = medicion if isinstance(medicion, dict) else {}
     return (m.get("estado") == ESTADO_DESCONOCIDO
             and str(m.get("motivo") or "").startswith(_MOTIVO_DE_UN_ERROR))
+
+
+def intentos_sin_medir(medicion) -> int:
+    """
+    Cuantas vueltas SEGUIDAS lleva la falla sin poder medirse: lo cuenta
+    'medicion_de_fallas.escribir' en la pieza. Cero si la pieza no es un "no
+    se pudo medir". Una pieza de antes del contador cuenta como una vuelta.
+    """
+    m = medicion if isinstance(medicion, dict) else {}
+    if m.get("estado") != ESTADO_DESCONOCIDO or es_un_error_guardado(m):
+        return 0
+    n = m.get("intentos_sin_medir")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 1 else 1
 
 
 def ultima_medicion(propuesta) -> dict | None:
