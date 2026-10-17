@@ -201,7 +201,7 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None,
             #  Pasarle una lista propia seria una segunda version del catalogo
             #  que mantener en sincronia con la primera.
             #  'cierre': si el modelo agota sus vueltas consultando, se le
-            #  pide que cierre con lo que tiene. Medido el 17/10/2026: 9 de 64
+            #  pide que cierre con lo que tiene. Medido el 16/10/2026: 9 de 64
             #  lecturas gastaban sus tres relecturas sin llegar a contestar.
             return cerebro.concluir(
                 org_, instrucciones=INSTRUCCIONES, entrada=entrada,
@@ -513,7 +513,7 @@ def _cuantas_veces_se_leyo(propuesta) -> int:
     con su pieza--. Un contador que mire la evidencia se queda en cero en ese
     caso y no corta nada. El razonamiento, en cambio, queda siempre.
 
-    UNA RESPUESTA QUE NO SE PUDO LEER NO ES UNA LECTURA  --  17/10/2026. Nueve
+    UNA RESPUESTA QUE NO SE PUDO LEER NO ES UNA LECTURA  --  16/10/2026. Nueve
     propuestas tenian sus tres relecturas gastadas en respuestas que 'validar'
     descarto enteras ("no es un objeto JSON"): el modelo nunca llego a
     contestar, y el tope las dejaba para siempre sin grupo. Esas no cuentan.
@@ -532,7 +532,7 @@ def _cuantas_veces_se_leyo(propuesta) -> int:
         #  Sin poder contar se cuenta cero, como antes de esta fase: las
         #  pruebas sin base pasan propuestas falsas. El tope absoluto de arriba
         #  NO alcanza a este camino: con la tabla caida se releeria en cada
-        #  vuelta, igual que antes (auditor de frontera, 17/10/2026).
+        #  vuelta, igual que antes (auditor de frontera, 16/10/2026).
         return 0
     if len(descartes) >= MAXIMAS_RELECTURAS * 2:
         return len(descartes)

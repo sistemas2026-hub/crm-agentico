@@ -213,12 +213,12 @@ def razonar(org, *, instrucciones: str, entrada: str, historial=(),
     en vez de seguir pidiendo herramientas. Quien llama tiene que poder
     distinguir "contesto" de "se quedo sin vueltas".
 
-    'cierre' PIDE UNA LLAMADA MAS, SIN HERRAMIENTAS  --  17/10/2026. Si quien
+    'cierre' PIDE UNA LLAMADA MAS, SIN HERRAMIENTAS  --  16/10/2026. Si quien
     llama lo pasa y las vueltas se agotan, se le manda ese texto al modelo y se
     toma lo que conteste; 'agotado' sigue en True. Lo pide 'concluir' cuando su
     llamador lo quiere, porque espera un objeto JSON. El chat NO: no tiene ese
     contrato, y la persona veria el JSON crudo en vez del aviso honesto de que
-    no se pudo cerrar (auditor independiente, 17/10). 'vueltas' cuenta las
+    no se pudo cerrar (auditor independiente, 16/10). 'vueltas' cuenta las
     vueltas con herramientas: el cierre no es una. Si el cierre falla, queda lo
     de antes.
     """
@@ -280,7 +280,7 @@ def razonar(org, *, instrucciones: str, entrada: str, historial=(),
     else:
         r.agotado = True
     if r.agotado and cierre:
-        #  UNA VUELTA DE CIERRE, SIN HERRAMIENTAS  --  17/10/2026
+        #  UNA VUELTA DE CIERRE, SIN HERRAMIENTAS  --  16/10/2026
         #  ----------------------------------------------------
         #  Cuando el modelo pide herramientas en TODAS sus vueltas, el bucle
         #  terminaba con el contenido de la ultima respuesta, que era el pedido
@@ -288,7 +288,7 @@ def razonar(org, *, instrucciones: str, entrada: str, historial=(),
         #  "la respuesta del modelo no es un objeto JSON", y el ticket quedaba
         #  sin grupo, sin hipotesis y sin nada que decidir.
         #
-        #  MEDIDO el 17/10/2026 en produccion: 9 de 64 lecturas pendientes con
+        #  MEDIDO el 16/10/2026 en produccion: 9 de 64 lecturas pendientes con
         #  ese mismo descarte en sus tres relecturas, todas de tickets
         #  complejos --obras de red, un ramal con 28 afectados-- en los que el
         #  modelo seguia consultando. Eran los tickets que mas valia la pena

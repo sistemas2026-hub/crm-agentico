@@ -171,9 +171,9 @@ SIEMPRE_UNA_PERSONA = frozenset({NADA_LO_MIDE, NI_CLIENTE_NI_RED})
 #:  caja no tiene equipo de abonado que medir.
 SIN_CONDICION_DE_MEDICION = frozenset({TRABAJO_PEDIDO, OBRA_DE_RED})
 
-#:  LA CONFIANZA YA NO DECIDE  --  17/10/2026, Fase 4. Hasta entonces se
+#:  LA CONFIANZA YA NO DECIDE  --  16/10/2026, Fase 4. Hasta entonces se
 #:  exigia 'alta' en la lectura para estos dos grupos ('CONFIANZA_EXIGIDA_SIN_
-#:  MEDICION'), y el 17/10 eso dejaba afuera 6 de los 27 pendientes abiertos:
+#:  MEDICION'), y el 16/10 eso dejaba afuera 6 de los 27 pendientes abiertos:
 #:  cuatro obras de red con la hipotesis clara --una CTO, una caja, una NAP--
 #:  y dos trabajos pedidos. Decidido por el usuario con esos tickets a la
 #:  vista: un pedido de trabajo es una visita, y quien despacha lee el ticket.
@@ -213,12 +213,12 @@ def decidir(grupo: str, labor_veredicto: dict | None,
     lista, con una falla sin medicion todavia, o con una medicion que no se
     entiende, la respuesta es NO pasa.
 
-    LO QUE CAMBIO EL 17/10/2026 (FASE 4): con la medicion hecha, una falla
+    LO QUE CAMBIO EL 16/10/2026 (FASE 4): con la medicion hecha, una falla
     PASA salvo que la medicion la contradiga. Se queda con una persona solo la
     falla con el equipo en linea y la señal en rango --"no tiene la falla que
     dice"-- y la que se apago por falta de luz en la casa, que una visita no
     arregla. Un trabajo pedido o una obra de red pasan siempre. Lo decidio el
-    usuario con los 64 pendientes del 17/10 a la vista, despues de medir que
+    usuario con los 64 pendientes del 16/10 a la vista, despues de medir que
     la regla de la Fase 3 no alcanzaba a ningun ticket y que el ISP resolvia
     las fallas de fibra por su flujo normal, en 1 a 3 dias, mientras el
     Supervisor esperaba.
@@ -262,13 +262,13 @@ def decidir(grupo: str, labor_veredicto: dict | None,
     #  arregla. Lo demas pasa, incluido lo que el proveedor no pudo medir: nada
     #  contradice el reclamo, y el despachador confirma con el cliente antes de
     #  mandar a alguien. Una caida por LOS/LOF pasa aunque pueda ser un equipo
-    #  desenchufado: desde la OLT no se distingue, y el 17/10 esos tickets
+    #  desenchufado: desde la OLT no se distingue, y el 16/10 esos tickets
     #  llevaban dias esperando.
     #
     #  SIN MEDICION TODAVIA, no pasa: la fase de medicion la pide en la misma
     #  vuelta, y decidir antes seria decidir sin el dato. Tampoco pasa un
     #  estado que no se reconoce, ni un error del motor guardado antes del
-    #  17/10 como si fuera una medicion: ninguno dice nada del equipo.
+    #  16/10 como si fuera una medicion: ninguno dice nada del equipo.
     from operaciones import diagnostico_optico as optico
 
     m = medicion if isinstance(medicion, dict) else {}
@@ -328,7 +328,7 @@ def _nivel(medicion: dict) -> str:
 
 #  LO QUE DICE CADA MEDICION. Texto fijo y tecnico, sin datos del cliente: es
 #  lo que una persona lee en la propuesta, o en la aceptacion, para saber que
-#  hacer. Desde la Fase 4 (17/10/2026) solo '_EN_RANGO' y '_SIN_ENERGIA'
+#  hacer. Desde la Fase 4 (16/10/2026) solo '_EN_RANGO' y '_SIN_ENERGIA'
 #  frenan; el resto explica por que paso.
 _FALTA_MEDIR = (
     "falla de servicio sin medir todavia: falta la medicion del equipo, que el "
@@ -402,7 +402,7 @@ TAREA = "pasar_a_despacho_segun_las_reglas"
 #:  efecto afuera: no se le prometio nada al cliente y no sale nadie a la
 #:  calle hasta que el despachador lo decide. LO QUE NO HAY TODAVIA es una
 #:  accion para sacarlo de la cola: hoy sale cerrando el caso (A-2 de
-#:  SPEC/auditorias/PASO-A-DESPACHO.md, abierto; auditor de frontera, 17/10).
+#:  SPEC/auditorias/PASO-A-DESPACHO.md, abierto; auditor de frontera, 16/10).
 #:  El 4 es "siempre lo aprueba una persona" y 'autonomia.puede' lo niega
 #:  siempre, por configuracion que tenga la empresa.
 #  Se escribe el 3 y NO se importa el enum, por lo mismo que arriba. Que este
@@ -450,10 +450,10 @@ ESTADO_DESCONOCIDO = "desconocido"
 #:  Lo que guarda 'medicion_de_fallas' cuando el motor contesto un estado que
 #:  este modulo no reconoce. No es "no se pudo medir": es "no se entiende", y
 #:  no pasa. Sin esto, un cambio de vocabulario en el motor haria pasar todas
-#:  las fallas, las sanas incluidas (auditor de frontera, 17/10/2026).
+#:  las fallas, las sanas incluidas (auditor de frontera, 16/10/2026).
 ESTADO_NO_RECONOCIDO = "no_reconocido"
 #:  Como empezaba el motivo de un ERROR del motor guardado como medicion,
-#:  antes del 17/10/2026. Ya no se escribe: ver 'es_un_error_guardado'.
+#:  antes del 16/10/2026. Ya no se escribe: ver 'es_un_error_guardado'.
 _MOTIVO_DE_UN_ERROR = "el motor contesto "
 
 #:  Como figura el pase automatico en la auditoria que ve toda la empresa.
@@ -874,7 +874,7 @@ def es_un_error_guardado(medicion) -> bool:
     """
     Si la pieza es un error del motor guardado como medicion, que es lo que
     hacia la Fase 3: "el motor contesto MOTOR_NO_DISPONIBLE" quedaba como "no
-    se pudo medir". Desde el 17/10/2026 un error no se escribe, pero las
+    se pudo medir". Desde el 16/10/2026 un error no se escribe, pero las
     piezas de antes siguen en las propuestas vivas, y con la regla de la Fase
     4 pasarian sin que nadie haya medido nada. Se tratan como falta de
     medicion, y la fase de medicion las vuelve a pedir en la vuelta siguiente.
@@ -969,3 +969,76 @@ def evaluar(propuesta, ahora) -> Decision:
         return Decision(False, porque, grupo=str(lectura.get("grupo") or ""),
                         puerta=PUERTA_CASO)
     return de_la_propuesta(propuesta)
+
+
+# =============================================================================
+#  LA COLA DE DESPACHO  --  una sola definicion, 17/10/2026
+# =============================================================================
+#  Que casos estan en la cola de Despacho. Vivia escrita solo en la pantalla
+#  de Despacho ('campo.despacho_pantalla_views'). Desde el 17/10 tambien la usa
+#  el Supervisor, para dejar de pedir que alguien mire un caso que ya esta
+#  ahi, y dos copias de una regla se desincronizan: vive aca y la pantalla la
+#  importa.
+#
+#  DOS CAMINOS LLEGAN A CAMPO, y los dos exigen la propuesta aceptada:
+#  CASO_REQUIERE_VISITA y TICKET_SIN_DIAGNOSTICO. ACEPTADA y MODIFICADA, no
+#  RECHAZADA: modificar es aceptar cambiando algo, rechazar es decir que no.
+
+def propuestas_que_llevan_a_despacho(org):
+    """Las propuestas aceptadas que ponen su caso en la cola de Despacho."""
+    from operaciones.models import PropuestaSupervisor as P
+
+    return P.objects.filter(
+        org=org, origen_tipo="case",
+        tipo_senal__in=(P.CASO_REQUIERE_VISITA, P.TICKET_SIN_DIAGNOSTICO),
+        estado__in=(P.ACEPTADA, P.MODIFICADA))
+
+
+def aprobados_para_despacho(org) -> set:
+    """Los ids (texto) de los casos con una propuesta que lleva a Despacho."""
+    return set(propuestas_que_llevan_a_despacho(org)
+               .values_list("origen_id", flat=True))
+
+
+def casos_en_despacho(org, aprobados=None):
+    """
+    Los casos de la cola de Despacho: aprobados y todavia abiertos. Sin orden
+    ni tope: eso lo decide quien los muestra.
+
+    Un 'origen_id' que no es un id de caso se ignora en vez de romper la
+    consulta: una fila rara no puede tirar la pantalla ni el ciclo. Lo filtra
+    'supervisor._uuids', el mismo que usa el retiro por area: una sola copia.
+    """
+    from cases.models import Case
+    from operaciones import supervisor as sup
+
+    if aprobados is None:
+        aprobados = aprobados_para_despacho(org)
+    return (Case.objects
+            .filter(org=org, is_active=True, is_sample=False,
+                    merged_into__isnull=True, id__in=sup._uuids(aprobados))
+            .exclude(status="Closed"))
+
+
+def ids_en_despacho(org) -> set:
+    """Los ids (texto) de los casos que estan hoy en la cola de Despacho."""
+    return {str(i) for i in casos_en_despacho(org).values_list("id", flat=True)}
+
+
+def casos_despachados_desde(org, desde):
+    """
+    Los casos de la cola de Despacho que ENTRARON despues de 'desde': los que
+    tienen aceptada desde entonces una propuesta que lleva a Despacho.
+    'revisado_en' lo escribe 'supervisor.revisar' siempre, a mano o en
+    automatico; una aceptada sin esa fecha no cuenta, que es el lado seguro.
+    """
+    recientes = set(propuestas_que_llevan_a_despacho(org)
+                    .filter(revisado_en__gte=desde)
+                    .values_list("origen_id", flat=True))
+    return casos_en_despacho(org, recientes)
+
+
+def ids_despachados_desde(org, desde) -> set:
+    """Los ids (texto) de 'casos_despachados_desde'."""
+    return {str(i) for i in casos_despachados_desde(org, desde)
+            .values_list("id", flat=True)}

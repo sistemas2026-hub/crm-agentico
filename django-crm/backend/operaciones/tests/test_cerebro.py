@@ -367,7 +367,7 @@ def test_22_si_se_agotan_las_vueltas_se_DICE(org_a):
 
 def test_22b_agotadas_las_vueltas_se_le_pide_el_cierre_sin_herramientas(org_a):
     """
-    Medido el 17/10/2026: nueve lecturas pendientes con sus tres relecturas
+    Medido el 16/10/2026: nueve lecturas pendientes con sus tres relecturas
     gastadas en "no es un objeto JSON", porque el modelo pedia herramientas
     en todas sus vueltas y el bucle devolvia ese pedido como contenido. Ahora
     se le pide que cierre con lo que tiene, sin herramientas, y 'agotado'
@@ -406,7 +406,7 @@ def test_22d_si_el_cierre_falla_queda_lo_de_antes(org_a):
     """
     Un cierre que falla no puede llevarse la lectura entera: sin fila, el
     tope de relecturas no la ve y el ticket se relee sin techo (auditor
-    independiente, 17/10/2026). Queda lo de antes: agotado, y el contenido
+    independiente, 16/10/2026). Queda lo de antes: agotado, y el contenido
     de la ultima vuelta, que 'validar' descarta y el tope cuenta.
     """
     pide = {"contenido": "", "llamadas": [{"nombre": "estado_fuentes",

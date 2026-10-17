@@ -34,7 +34,7 @@ LO QUE NO HACE
   copia fresca de WispHub.
 - No escribe 'str(e)' ni el detalle de un error: el texto de una excepcion de
   red trae la URL, y la URL lleva el identificador del equipo.
-- No guarda un error como medicion (17/10/2026): el motor caido no dice nada
+- No guarda un error como medicion (16/10/2026): el motor caido no dice nada
   del equipo, y con la regla de la Fase 4 una falla "sin poder medir" pasa.
   La falla espera, y la vuelta siguiente lo intenta de nuevo.
 ================================================================================
@@ -112,7 +112,7 @@ def de_la_respuesta(respuesta) -> dict | None:
     Lo que se guarda de una respuesta del motor: claves fijas y vocabulario
     cerrado. Ni el serial, ni el detalle de un error, ni nada que no se use.
 
-    UN ERROR NO ES UNA MEDICION, y devuelve None  --  17/10/2026. Hasta la
+    UN ERROR NO ES UNA MEDICION, y devuelve None  --  16/10/2026. Hasta la
     Fase 3 se guardaba como "no se pudo medir", y con la regla de la Fase 4
     eso pasa: con el motor caido una vuelta, las fallas pasaban en la
     siguiente sin volver a medirse, con el equipo en rango inclusive (auditor
@@ -243,7 +243,7 @@ def candidatas(org, ahora) -> list:
             continue
         medicion = pad.ultima_medicion(p)
         if pad.es_un_error_guardado(medicion):
-            #  Un error guardado antes del 17/10 no es una medicion: se pide
+            #  Un error guardado antes del 16/10 no es una medicion: se pide
             #  como si nunca se hubiera medido, en esta misma vuelta.
             medicion = None
         if medicion is not None and es_concluyente(medicion):

@@ -806,7 +806,7 @@ def test_n_la_que_todavia_no_se_leyo_no_dice_que_hay_una_lectura(
 def test_e2_obra_de_red_y_trabajo_pedido_pasan_con_confianza_media(
     org_a, puertas_abiertas
 ):
-    """Decidido el 17/10/2026 (Fase 4): la confianza se escribe, no decide."""
+    """Decidido el 16/10/2026 (Fase 4): la confianza se escribe, no decide."""
     obra = _pendiente(
         org_a, hace_min=20, grupo=pad.OBRA_DE_RED, verificada=False,
         labor_porque=SIN_ONU, confianza_del_grupo="media",

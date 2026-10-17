@@ -86,7 +86,7 @@ def _sin_concluir():
 def test_r1_caido_por_fibra_PASA_y_dice_su_duda():
     """
     Hasta la Fase 3 iba a una persona, por la ambiguedad de LOS. Desde la Fase
-    4 (17/10/2026) pasa, y el motivo deja escrita la duda para quien despacha.
+    4 (16/10/2026) pasa, y el motivo deja escrita la duda para quien despacha.
     """
     d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO),
                     medicion=_medicion("caido", causa="fibra"))
@@ -115,7 +115,7 @@ def test_r1_CONTRAFACTICO_el_equipo_sano_NO_pasa():
 
 
 def test_r1_sin_poder_medir_PASA_porque_nada_contradice_el_reclamo():
-    """Decidido el 17/10/2026: solo se queda la falla que la medicion contradice."""
+    """Decidido el 16/10/2026: solo se queda la falla que la medicion contradice."""
     d = pad.decidir(pad.FALLA_DE_SERVICIO, _sin_concluir(),
                     medicion=_medicion("desconocido",
                                        motivo="el proveedor optico no respondio"))
@@ -185,7 +185,7 @@ def test_r2_pasa_solo_aunque_NO_se_haya_podido_medir():
 
 def test_r2_con_confianza_media_TAMBIEN_pasa():
     """
-    Hasta la Fase 3 se exigia 'alta'. El 17/10/2026 eso dejaba afuera cuatro
+    Hasta la Fase 3 se exigia 'alta'. El 16/10/2026 eso dejaba afuera cuatro
     obras y dos trabajos con la hipotesis clara, y el usuario decidio que un
     pedido de trabajo es una visita: pasan siempre, y la confianza se escribe.
     """
@@ -195,7 +195,7 @@ def test_r2_con_confianza_media_TAMBIEN_pasa():
     assert "confianza media" in d.porque
 
 def test_r2_sin_confianza_tambien_pasa():
-    """El modelo a veces omite la confianza del grupo (medido el 17/10): no frena."""
+    """El modelo a veces omite la confianza del grupo (medido el 16/10): no frena."""
     d = pad.decidir(pad.TRABAJO_PEDIDO, _sin_concluir(), confianza="")
 
     assert d.pasa is True, d.porque
@@ -404,7 +404,7 @@ def test_la_confianza_que_decide_es_la_DEL_GRUPO_y_no_la_de_la_hipotesis():
     """
     valores = pad.CAMPO_PARA_EL_MODELO[pad.CONFIANZA_DEL_GRUPO]["valores"]
 
-    #  Desde la Fase 4 (17/10/2026) la confianza no decide, pero sigue
+    #  Desde la Fase 4 (16/10/2026) la confianza no decide, pero sigue
     #  pidiendose y escribiendose: el enum tiene que seguir siendo el nuevo.
     assert set(valores) == {"alta", "media", "baja"}
     #  Y NO es un valor del enum de la hipotesis, que trae 'sin_hipotesis':

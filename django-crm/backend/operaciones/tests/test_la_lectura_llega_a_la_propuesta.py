@@ -213,7 +213,7 @@ def test_el_informe_dice_cuantas_se_guardaron(org_a, monkeypatch):
 def test_si_el_modelo_agota_sus_vueltas_la_lectura_igual_cierra(org_a,
                                                                 monkeypatch):
     """
-    EL CAMINO COMPLETO DEL 17/10/2026: el modelo pide herramientas en todas
+    EL CAMINO COMPLETO DEL 16/10/2026: el modelo pide herramientas en todas
     sus vueltas. Antes la lectura terminaba sin grupo -- 9 de 64 pendientes,
     tres relecturas cada una. Ahora se le pide el cierre sin herramientas, y
     lo que conteste llega a la propuesta.

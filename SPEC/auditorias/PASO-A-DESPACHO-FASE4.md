@@ -3,11 +3,11 @@
 ```
 BASE       origin/fix/integracion-wisphub = bd8def5c (la Fase 3 y el informe
            de pendientes ya desplegados). Se auditó sin commitear.
-VEREDICTO  CERRADO EN CÓDIGO. Las reglas que el usuario decidió el 17/10,
+VEREDICTO  CERRADO EN CÓDIGO. Las reglas que el usuario decidió el 16/10,
            más los arreglos de dos auditorías. Dos hallazgos quedan para el
            usuario (no se pudo medir por falla de la cadena; Despacho sin
            el porqué del pase). NO verificado en producción: criterio 4.5.
-FECHA      17/10/2026
+FECHA      16/10/2026
 ALCANCE    operaciones/{paso_a_despacho,medicion_de_fallas,cerebro,
            diagnostico_de_ticket}.py, el comando informe_de_pendientes y sus
            pruebas. Nada en nucleo/, en campo/, en el frontend ni en tenants/.

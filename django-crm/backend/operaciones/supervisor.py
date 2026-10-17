@@ -254,6 +254,7 @@ def _estado_externo(caso) -> str:
 
 def _casos_abiertos_antiguos(org, ahora) -> list[Senal]:
     from operaciones import areas_del_tenant as areas
+    from operaciones import paso_a_despacho as pad
 
     corte = ahora - timedelta(days=DIAS_CASO_ANTIGUO)
     #  SIN LOS AJENOS  --  16/10/2026. Esta señal proponia tickets de cartera
@@ -262,10 +263,20 @@ def _casos_abiertos_antiguos(org, ahora) -> list[Senal]:
     #  que se SABE de otra area; sin el mapa del motor, tambien lo que solo
     #  el mapa puede decidir (sin area escrita y con alguien encima). Ver
     #  'areas_del_tenant.criterio_de_area' y 'sin_ajenos'.
+    #
+    #  NI LOS QUE ENTRARON A DESPACHO DESPUES DEL CORTE  --  17/10/2026. La
+    #  alerta pide "revisar y priorizar"; un caso que esta en la cola de
+    #  Despacho ya tiene ese paso dado. Es el mismo problema que el de arriba:
+    #  sin esto, la alerta que retira 'retirar_alertas_de_casos_en_despacho'
+    #  volveria en la vuelta siguiente, porque 'cancelada' no bloquea repetir.
+    #  Y CON EL MISMO CORTE: un caso que lleva mas de DIAS_CASO_ANTIGUO dias en
+    #  Despacho sin cerrarse es un caso antiguo otra vez, y la alerta vuelve.
+    #  Sin ese limite se apagaria para siempre, porque la cola no tiene otra
+    #  salida que cerrar el caso (auditor independiente, 17/10/2026).
     casos = areas.sin_ajenos(
         Case.objects.filter(
             org=org, resolved_at__isnull=True, created_at__lt=corte
-        ),
+        ).exclude(id__in=pad.casos_despachados_desde(org, corte).values("id")),
         areas.criterio_de_area(),
     ).only("id", "name", "created_at", "status", "priority",
            "external_status", "external_fetched_at", "provider")
@@ -2623,6 +2634,11 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         #  corre.
         ("paso a Despacho",
          lambda: _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora)),
+        #  DESPUES del paso: un caso que paso en esta vuelta no espera a la
+        #  siguiente para que su alerta de caso antiguo se retire.
+        ("retiro de alertas de casos en Despacho",
+         lambda: {"alertas_retiradas_en_despacho":
+                  retirar_alertas_de_casos_en_despacho(org, ahora)}),
     ):
         try:
             resumen.update(fase())
@@ -3521,6 +3537,83 @@ def retirar_propuestas_fuera_de_area(org, ahora=None) -> int:
     if retiradas:
         logger.info("Supervisor: %s propuestas retiradas por estar fuera del "
                     "area", retiradas)
+    return retiradas
+
+
+#:  Por que se retira la alerta de un caso que ya esta en Despacho. Texto fijo:
+#:  ni el asunto del ticket ni el nombre del cliente.
+YA_EN_DESPACHO = "El caso ya está en la cola de Despacho"
+
+
+def retirar_alertas_de_casos_en_despacho(org, ahora=None) -> int:
+    """
+    Cancela las alertas de CASO ABIERTO ANTIGUO de los casos que ya estan en
+    la cola de Despacho.
+
+    EL DEFECTO  --  17/10/2026
+    --------------------------
+    La alerta pide "revisar y priorizar este caso, o cerrarlo si ya esta
+    resuelto". La noche del 16/10 pasaron 15 casos a Despacho solos, y la
+    bandeja seguia pidiendo eso de al menos tres: el caso ya estaba en la cola
+    y Pendientes lo seguia mostrando como si no. Lo vio el usuario en la
+    pantalla.
+
+    QUE HACE, Y QUE NO
+    ------------------
+    Solo CASO_ANTIGUO y solo en PROPUESTA: lo que una persona ya decidio queda
+    como esta, y las otras alertas del caso (visita, ordenes) no se tocan. 'En
+    Despacho' es la definicion de la pantalla
+    ('paso_a_despacho.casos_en_despacho'), no una copia: un caso cerrado no
+    esta en la cola, y su alerta tampoco se retira -- la pantalla ya la
+    oculta. Es CANCELADA, como el retiro por area: dejo de tener sentido
+    mirarla, y la razon es un hecho del mundo.
+
+    SOLO LOS QUE ENTRARON EN LOS ULTIMOS DIAS_CASO_ANTIGUO DIAS, con el mismo
+    corte que el detector ('_casos_abiertos_antiguos'): mientras tanto no la
+    vuelve a proponer, y despues el caso es antiguo otra vez y la alerta
+    vuelve. Sin el corte, un caso despachado que nadie cierra no avisaria
+    nunca mas: la cola no tiene otra salida que cerrar el caso.
+
+    Corre dentro de 'correr_ciclo', despues del paso a Despacho. Una
+    aceptacion a mano retira su alerta en la vuelta siguiente, no en el acto.
+    El tablero y el latido, que comparten el detector, cuentan menos casos
+    antiguos: los que estan en Despacho no lo son.
+    """
+    from operaciones import paso_a_despacho as pad
+
+    ahora = ahora or timezone.now()
+    en_despacho = pad.ids_despachados_desde(
+        org, ahora - timedelta(days=DIAS_CASO_ANTIGUO))
+    if not en_despacho:
+        return 0
+    pendientes = list(
+        PropuestaSupervisor.objects
+        .filter(org=org, tipo_senal=PropuestaSupervisor.CASO_ANTIGUO,
+                estado=PropuestaSupervisor.PROPUESTA, origen_tipo="case",
+                origen_id__in=en_despacho)
+        .only("id", "origen_id", "estado", "accion_propuesta"))
+    retiradas = 0
+    for propuesta in pendientes:
+        try:
+            cancelar(
+                propuesta,
+                motivo=f"{YA_EN_DESPACHO}: la alerta de caso abierto antiguo "
+                       f"pedia revisarlo y priorizarlo, y ya esta en la cola "
+                       f"(caso {propuesta.origen_id}). Si sigue abierto "
+                       f"{DIAS_CASO_ANTIGUO} dias despues de entrar, vuelve.",
+                descripcion=YA_EN_DESPACHO,
+                #  Nombre fijo, como el retiro por area: el feed no tiene por
+                #  que repetir la accion propuesta en cada cancelacion.
+                nombre=YA_EN_DESPACHO,
+            )
+        except YaRevisada:
+            #  Alguien la decidio entre que se listo y se intento cancelar.
+            #  La decision humana gana, y no es un error.
+            continue
+        retiradas += 1
+    if retiradas:
+        logger.info("Supervisor: %s alertas de caso antiguo retiradas: el caso "
+                    "ya esta en Despacho", retiradas)
     return retiradas
 
 

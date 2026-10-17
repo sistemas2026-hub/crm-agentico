@@ -271,7 +271,7 @@ def test_b_en_linea_con_la_senal_fuera_de_rango_pasa(org_a, puertas_abiertas, db
 )
 def test_b2_la_falla_que_la_medicion_contradice_se_queda_y_dice_que_hacer(
         org_a, puertas_abiertas, respuesta, dice):
-    """Las dos unicas salidas que frenan desde la Fase 4 (17/10/2026)."""
+    """Las dos unicas salidas que frenan desde la Fase 4 (16/10/2026)."""
     queda = _pendiente(org_a, hace_min=20, medida=respuesta)
     control = _pendiente(org_a, hace_min=10,
                          medida=_respuesta("en_linea", dbm=-27.0))
@@ -303,7 +303,7 @@ def test_b2_la_falla_que_la_medicion_contradice_se_queda_y_dice_que_hacer(
 def test_b2b_toda_otra_falla_PASA_y_la_aceptacion_dice_por_que(
         org_a, puertas_abiertas, respuesta, dice):
     """
-    Decidido el 17/10/2026 con los 64 pendientes a la vista: nada contradice
+    Decidido el 16/10/2026 con los 64 pendientes a la vista: nada contradice
     el reclamo, asi que pasa, y el despachador confirma con el cliente.
     """
     control = _pendiente(org_a, hace_min=20,
@@ -457,7 +457,7 @@ def test_c8_lo_que_se_guarda_es_vocabulario_cerrado(org_a):
     """
     De la respuesta se guardan claves fijas: ni el serial, ni nada que el paso
     no use. Y un error del motor --cuyo detalle es 'str(e)' y trae la URL con
-    el identificador del equipo-- no se guarda: desde el 17/10/2026 no es una
+    el identificador del equipo-- no se guarda: desde el 16/10/2026 no es una
     medicion.
     """
     sucia = dict(_respuesta("caido", causa="fibra"))
@@ -622,7 +622,7 @@ def test_e2_la_pieza_lleva_solo_sus_claves(org_a):
 def test_e3_un_motivo_o_un_error_con_forma_rara_no_se_guarda_tal_cual(org_a):
     """
     Hoy el motor manda frases fijas. Si un dia mandara 'str(e)', la URL con el
-    serial no puede terminar en la propuesta. Y un error, desde el 17/10/2026,
+    serial no puede terminar en la propuesta. Y un error, desde el 16/10/2026,
     no se guarda en absoluto.
     """
     con_url = _pendiente(org_a, hace_min=30)
@@ -878,7 +878,7 @@ def test_g9_un_serial_suelto_no_entra_al_motivo(org_a):
 
 
 # =============================================================================
-#  LO QUE ENCONTRO EL AUDITOR DE FRONTERA EL 17/10/2026 (FASE 4)
+#  LO QUE ENCONTRO EL AUDITOR DE FRONTERA EL 16/10/2026 (FASE 4)
 # =============================================================================
 
 def test_h_un_estado_que_no_se_entiende_no_pasa_y_se_vuelve_a_medir(
@@ -937,7 +937,7 @@ def test_h2_un_error_del_motor_no_deja_medicion_y_la_falla_espera(
 def test_h3_un_error_guardado_por_la_fase_3_no_pasa_y_se_mide_ya(
         org_a, puertas_abiertas):
     """
-    Hasta el 17/10 un error del motor se guardaba como "no se pudo medir", y
+    Hasta el 16/10 un error del motor se guardaba como "no se pudo medir", y
     esas piezas siguen en las propuestas vivas. Con la regla de la Fase 4
     pasarian sin que nadie haya medido nada: se tratan como falta de medicion,
     y se piden en la vuelta siguiente, no a las 24 horas.

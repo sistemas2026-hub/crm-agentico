@@ -154,7 +154,7 @@ def test_despues_de_TRES_lecturas_se_deja_como_esta(org_a):
 
 def test_una_lectura_que_el_modelo_no_contesto_no_gasta_el_tope(org_a):
     """
-    Medido el 17/10/2026: nueve propuestas con tres relecturas que 'validar'
+    Medido el 16/10/2026: nueve propuestas con tres relecturas que 'validar'
     descarto enteras. El modelo nunca contesto; contarlas como lecturas las
     dejaba sin grupo para siempre. Con el doble del tope, si se deja.
     """
@@ -163,7 +163,7 @@ def test_una_lectura_que_el_modelo_no_contesto_no_gasta_el_tope(org_a):
 
     #  Por el camino real: 'validar' produce el descarte y 'registrar' lo
     #  guarda con su saneo, como en la lectura. Si alla cambia el texto o el
-    #  saneo, esta prueba tiene que enterarse (auditor independiente, 17/10).
+    #  saneo, esta prueba tiene que enterarse (auditor independiente, 16/10).
     def _una_lectura_rota(p):
         v = cerebro.validar(cerebro._json_de("pidio otra herramienta"),
                             cerebro.Razonamiento())

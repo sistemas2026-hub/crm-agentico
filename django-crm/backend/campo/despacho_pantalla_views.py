@@ -165,7 +165,6 @@ class CasosDespachablesView(APIView):
     TOPE = 25
 
     def get(self, request):
-        from cases.models import Case
 
         org = request.profile.org
         con_ficha = request.query_params.get("ficha") == "1"
@@ -183,7 +182,6 @@ class CasosDespachablesView(APIView):
         #  algo, rechazar es decir que no. Tratar las tres como "revisadas"
         #  --que es como `ESTADOS_REVISADOS` las agrupa para OTRA pregunta--
         #  traeria justo las que alguien decidio que no van.
-        from operaciones.models import PropuestaSupervisor
 
         #  DOS CAMINOS LLEGAN A CAMPO, y los dos exigen que alguien acepte:
         #
@@ -197,30 +195,20 @@ class CasosDespachablesView(APIView):
         #  El segundo NO entra por tener labor: entra por estar ACEPTADO. Un
         #  diagnostico leido que nadie miro no manda a nadie a manejar hasta
         #  una casa -- es la regla que este modulo ya tenia y que no cambia.
-        aprobados = set(
-            PropuestaSupervisor.objects
-            .filter(org=org,
-                    tipo_senal__in=(
-                        PropuestaSupervisor.CASO_REQUIERE_VISITA,
-                        PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO),
-                    estado__in=(PropuestaSupervisor.ACEPTADA,
-                                PropuestaSupervisor.MODIFICADA),
-                    origen_tipo="case")
-            .values_list("origen_id", flat=True)
-        )
+        #  LA REGLA VIVE EN 'paso_a_despacho' desde el 17/10/2026: el
+        #  Supervisor la usa para no pedir que alguien mire un caso que ya
+        #  esta aca, y dos copias de una regla se desincronizan.
+        from operaciones import paso_a_despacho as pad
+
+        aprobados = pad.aprobados_para_despacho(org)
         if not aprobados:
             #  Vacio NO es un error, y se distingue: "todavia nadie aprobo
             #  ninguno" y "no se pudo leer" se dibujan distinto.
             return Response({"casos": [], "tope": self.TOPE,
                              "sin_aprobados": True})
 
-        qs = (
-            Case.objects
-            .filter(org=org, is_active=True, is_sample=False,
-                    merged_into__isnull=True, id__in=aprobados)
-            .exclude(status="Closed")
-            .order_by("-created_at")[:self.TOPE]
-        )
+        qs = (pad.casos_en_despacho(org, aprobados)
+              .order_by("-created_at")[:self.TOPE])
 
         casos = []
         for caso in qs:
@@ -343,16 +331,14 @@ class FichaDespachableView(CasosDespachablesView):
 
     def get(self, request, pk):
         from cases.models import Case
-        from operaciones.models import PropuestaSupervisor
 
         org = request.profile.org
+        from operaciones import paso_a_despacho as pad
+
+        #  La misma regla que la lista: 'paso_a_despacho'.
         propuesta = (
-            PropuestaSupervisor.objects
-            .filter(org=org, origen_tipo="case", origen_id=str(pk),
-                    tipo_senal__in=(PropuestaSupervisor.CASO_REQUIERE_VISITA,
-                                    PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO),
-                    estado__in=(PropuestaSupervisor.ACEPTADA,
-                                PropuestaSupervisor.MODIFICADA))
+            pad.propuestas_que_llevan_a_despacho(org)
+            .filter(origen_id=str(pk))
             .order_by("-revisado_en", "-created_at").first())
         caso = (Case.objects.filter(org=org, id=pk, is_active=True).first()
                 if propuesta else None)
