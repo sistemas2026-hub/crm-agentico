@@ -1,0 +1,341 @@
+import 'package:campo/demo/kit_mock_data.dart';
+import 'package:campo/features/materiales/kit_de_jornada.dart';
+import 'package:campo/features/materiales/material_en_custodia.dart';
+import 'package:campo/core/theme/app_theme.dart';
+import 'package:campo/features/materiales/materiales_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// Materiales ya tiene todo detrás: modelo, API y cola offline. Estas pruebas
+/// montan la pantalla con un kit inyectado --`kit:`-- porque lo que se mide acá
+/// es el DIBUJO, no la lectura: la lectura tiene sus propias pruebas contra la
+/// base en `materiales_offline_test.dart`.
+///
+/// El kit vacío ya no dice "falta construir el módulo": dice que todavía no
+/// hay material a tu nombre, que es la verdad desde que el módulo existe.
+void _pantallaAlta(WidgetTester tester) {
+  tester.view.physicalSize = const Size(1000, 4200);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+Widget _enApp(Widget hijo) => MaterialApp(
+      theme: AppTheme.lightTheme,
+      home: Scaffold(body: hijo),
+    );
+
+const MaterialEnCustodia _conectorSuelto = MaterialEnCustodia(
+  categoria: 'Consumibles',
+  nombre: 'Conector SC/APC',
+  detalle: 'Reconectorización',
+  clase: ClaseMaterial.consumible,
+  recibidos: 10,
+  usados: 3,
+  unidad: 'unidades',
+);
+
+void main() {
+  group('Materiales', () {
+    testWidgets('1. Fuera de la demostración dice la verdad: falta el módulo',
+        (WidgetTester tester) async {
+      await tester.pumpWidget(
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: false,
+          kit: KitDeJornada.vacio(),
+        )),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Mi kit y custodia'), findsOneWidget);
+      expect(
+        find.textContaining('no hay material entregado a tu nombre'),
+        findsOneWidget,
+      );
+      // Ni una cifra de inventario inventada.
+      expect(find.text('Mi Kit Diario'), findsNothing);
+      expect(find.textContaining('Disp.'), findsNothing);
+    });
+
+    testWidgets('2. En demostración reproduce el kit completo del diseño',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      await tester.pumpWidget(
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
+        )),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Mi Kit'), findsOneWidget);
+      expect(find.text('Mi Kit Diario'), findsOneWidget);
+      // El acta, el depósito de origen y quién despachó ya no se dibujan: no
+      // viajan en el kit, y con un kit real quedaban indistinguibles de él.
+      expect(find.text(KitMockData.acta), findsNothing);
+      expect(find.textContaining(KitMockData.despachadoPor), findsNothing);
+      expect(find.textContaining(KitMockData.deposito), findsNothing);
+      // Las cifras cuentan RENGLONES, no cantidades: sumar unidades con
+      // metros daba un total sin sentido fisico ("161 recibidos" entre una
+      // ONT, diez conectores y ciento cincuenta metros de fibra).
+      // Los rotulos van en mayusculas, como los escribe el diseño.
+      expect(find.text('MATERIALES'), findsOneWidget);
+      expect(find.text('USADOS'), findsOneWidget);
+      expect(find.text('SIN TOCAR'), findsOneWidget);
+      expect(find.text('RECIBIDOS'), findsNothing);
+      expect(find.text('ESTADO DE CUSTODIA'), findsOneWidget);
+      expect(find.text('Escanear QR'), findsOneWidget);
+      expect(find.text('Materiales en Custodia'), findsOneWidget);
+      expect(find.text('¿Finalizaste tu turno?'), findsOneWidget);
+    });
+
+    testWidgets('3. Cada clase de material se muestra con su forma propia',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      await tester.pumpWidget(
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
+        )),
+      );
+      await tester.pumpAndSettle();
+
+      // Consumible: barra de consumo y razón.
+      expect(find.textContaining('Consumo: 3 de 10'), findsOneWidget);
+      // Bobina: metraje inicial, tendido y restante.
+      expect(find.text('Tendido Hoy'), findsOneWidget);
+      expect(find.text('85 m'), findsOneWidget);
+      // Serializado: su número de serie, que es lo que hay que poder rastrear.
+      expect(find.textContaining('48575443-A190C'), findsOneWidget);
+      expect(find.text('SERIAL NUMBER (SN) · CÓDIGO BARRAS'), findsOneWidget);
+      // La MAC no viene con el material: una MAC de ejemplo junto a una serie
+      // real es lo que alguien copia para dar de alta un equipo.
+      expect(find.textContaining(KitMockData.macEquipo), findsNothing);
+    });
+
+    testWidgets('4. El filtro por categoría muestra solo esa clase',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      await tester.pumpWidget(
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
+        )),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.textContaining('Activos ONT'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ONT Huawei EchoLife HG8145V5'), findsOneWidget);
+      expect(find.text('Conector SC/APC Rápido Verde'), findsNothing);
+    });
+
+    testWidgets('6. Las categorías agrupan como el diseño: tres, no una por clase',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      await tester.pumpWidget(
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
+        )),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Todos (5)'), findsOneWidget);
+      expect(find.text('Activos ONT (1)'), findsOneWidget);
+      // Bobinas y terminales cuentan como consumibles: se gastan, no se rastrean.
+      expect(find.text('Consumibles (4)'), findsOneWidget);
+      expect(find.textContaining('Bobinas ('), findsNothing);
+
+      // Lo que hay que rastrear uno por uno se anuncia como tal.
+      expect(find.text('Trazable'), findsOneWidget);
+    });
+
+    testWidgets('7. Quien recibió el kit es la sesión real, no un nombre inventado',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      await tester.pumpWidget(
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
+          tecnico: 'Ana Restrepo',
+        )),
+      );
+      await tester.pumpAndSettle();
+
+      // Sin hora de acuse inventada al lado: el kit no dice cuándo se confirmó.
+      expect(find.textContaining('A cargo de Ana Restrepo'), findsOneWidget);
+      expect(find.textContaining('Confirmado'), findsNothing);
+    });
+
+    testWidgets('8. Sin sesión leída no se le atribuye el kit a nadie',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      await tester.pumpWidget(
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
+        )),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('A cargo de'), findsNothing);
+      expect(find.text('Mi Kit Diario'), findsOneWidget,
+          reason: 'la pantalla se ve igual; lo que falta es la atribución');
+    });
+
+
+    testWidgets('9. El cierre de jornada se puede alcanzar desde el kit',
+        (WidgetTester tester) async {
+      // El boton "Preparar Devolucion al Deposito" era un Container sin
+      // accion, y era el unico camino a una pantalla que existia, estaba
+      // probada y nadie podia abrir. Un boton que no hace nada es peor que
+      // no tenerlo: la persona cree que ya dio el paso.
+      _pantallaAlta(tester);
+      await tester.pumpWidget(
+        _enApp(const MaterialesScreen(
+          tecnico: 'Carlos Gomez',
+          kit: KitDeJornada(
+            materiales: <MaterialEnCustodia>[
+              MaterialEnCustodia(
+                categoria: 'Consumibles',
+                nombre: 'Conector SC/APC',
+                detalle: 'Reconectorizacion',
+                clase: ClaseMaterial.consumible,
+                recibidos: 10,
+                usados: 3,
+                unidad: 'unidades',
+              ),
+            ],
+            acta: 'Acta #K-2026-311',
+            sinSubir: 0,
+            conNovedad: <MovimientoConNovedad>[],
+          ),
+        )),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Preparar Devolución al Depósito'));
+      await tester.pumpAndSettle();
+
+      // Llega a la pantalla de cierre. Sin jornada cargada dice eso, que es
+      // la verdad: lo que se prueba aca es que el camino existe.
+      expect(find.text('Cierre de jornada'), findsOneWidget);
+    });
+
+
+    testWidgets('10. Una diferencia de cantidad dice cuánto y qué hacer',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      await tester.pumpWidget(_enApp(MaterialesScreen(
+        tecnico: 'Carlos Gomez',
+        mostrarDatosFuturos: false,
+        kit: KitDeJornada(
+          materiales: const <MaterialEnCustodia>[_conectorSuelto],
+          acta: 'Acta #K-2026-311',
+          sinSubir: 0,
+          conNovedad: const <MovimientoConNovedad>[
+            MovimientoConNovedad(
+              material: 'Conector SC/APC',
+              cantidad: '2',
+              resultado: 'descuadre',
+              motivo: 'El saldo no coincide con lo que registró bodega.',
+              ordenNumero: 4832,
+            ),
+          ],
+        ),
+      )));
+      await tester.pumpAndSettle();
+
+      expect(find.text('No cuadra con el kit'), findsOneWidget);
+      expect(find.textContaining('Cantidad registrada: 2'), findsOneWidget);
+      expect(find.textContaining('OT #4832'), findsOneWidget);
+      // Lo resuelve el tecnico: explica y cierra.
+      expect(find.textContaining('Explicá qué pasó'), findsOneWidget);
+      expect(find.textContaining('supervisor'), findsNothing);
+    });
+
+    testWidgets('11. Un conflicto de serial dice cuál equipo y a quién acudir',
+        (WidgetTester tester) async {
+      // No es un faltante: el equipo figura instalado en otra orden. Eso no
+      // se resuelve desde la vereda, y confundirlo con un descuadre hace que
+      // el tecnico dude del serial que tiene en la mano.
+      _pantallaAlta(tester);
+      await tester.pumpWidget(_enApp(MaterialesScreen(
+        tecnico: 'Carlos Gomez',
+        mostrarDatosFuturos: false,
+        kit: KitDeJornada(
+          materiales: const <MaterialEnCustodia>[_conectorSuelto],
+          acta: 'Acta #K-2026-311',
+          sinSubir: 0,
+          conNovedad: const <MovimientoConNovedad>[
+            MovimientoConNovedad(
+              material: 'ONT Huawei HG8145V5',
+              cantidad: '1',
+              resultado: 'conflicto',
+              motivo: 'Ya figura instalada en la OT #4720.',
+              serie: '48575443-A190C',
+            ),
+          ],
+        ),
+      )));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ese equipo ya figura instalado'), findsOneWidget);
+      expect(find.textContaining('48575443-A190C'), findsOneWidget);
+      expect(find.textContaining('Revisalo con tu supervisor'), findsOneWidget);
+      // No se mezclan los mensajes: este no se arregla explicando.
+      expect(find.textContaining('Explicá qué pasó'), findsNothing);
+      expect(find.textContaining('No cuadra con el kit'), findsNothing);
+    });
+
+    testWidgets('12. Los dos tipos conviven sin mezclarse',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      await tester.pumpWidget(_enApp(MaterialesScreen(
+        tecnico: 'Carlos Gomez',
+        mostrarDatosFuturos: false,
+        kit: KitDeJornada(
+          materiales: const <MaterialEnCustodia>[_conectorSuelto],
+          acta: 'Acta #K-2026-311',
+          sinSubir: 2,
+          conNovedad: const <MovimientoConNovedad>[
+            MovimientoConNovedad(
+              material: 'Conector SC/APC',
+              cantidad: '2',
+              resultado: 'descuadre',
+              motivo: 'El saldo no coincide.',
+            ),
+            MovimientoConNovedad(
+              material: 'ONT Huawei HG8145V5',
+              cantidad: '1',
+              resultado: 'conflicto',
+              motivo: 'Ya figura instalada en la OT #4720.',
+              serie: '48575443-A190C',
+            ),
+          ],
+        ),
+      )));
+      await tester.pumpAndSettle();
+
+      expect(find.text('2 novedades'), findsOneWidget);
+      expect(find.text('No cuadra con el kit'), findsOneWidget);
+      expect(find.text('Ese equipo ya figura instalado'), findsOneWidget);
+      // Y lo que espera senal se sigue diciendo aparte: es otro problema.
+      expect(find.textContaining('2 movimientos esperando señal'),
+          findsOneWidget);
+    });
+
+    test('5. Las cuentas del kit cierran: recibido menos usado es disponible', () {
+      for (final MaterialEnCustodia m in KitMockData.items) {
+        expect(
+          m.disponibles,
+          m.recibidos - m.usados,
+          reason: '${m.nombre} no cuadra',
+        );
+        expect(m.usados, lessThanOrEqualTo(m.recibidos), reason: m.nombre);
+      }
+    });
+  });
+}

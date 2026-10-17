@@ -1,0 +1,418 @@
+# -*- coding: utf-8 -*-
+"""
+La custodia de materiales: lo que el técnico tiene, gasta y debe.
+
+QUÉ CUIDAN ESTAS PRUEBAS
+------------------------
+Una sola idea, y es contraintuitiva: **un movimiento de material no se
+rechaza**. Es un hecho que ya ocurrió en la calle. Lo que el servidor decide
+no es si permitirlo, sino cómo clasificarlo para que alguien lo mire después.
+
+Eso hace que las pruebas importantes sean las de los casos "malos": un consumo
+sin saldo tiene que ENTRAR (y quedar marcado), no fallar. Una implementación
+que devuelva 400 ahí parece más estricta y en realidad es peor, porque borra
+el único registro de que el material se usó.
+
+La excepción es la serie repetida: dos técnicos no instalaron la misma ONT.
+"""
+
+from decimal import Decimal
+
+import pytest
+
+from campo.inventario import UbicacionInventario
+from campo.services import inventario as inv
+
+from campo.models import (
+    EntregaDeKit,
+    ItemDeKit,
+    MaterialCatalogo,
+    MovimientoDeMaterial,
+    OrdenTrabajo,
+    WorkType,
+    WorkTypeVersion,
+)
+from campo.services.materiales import (
+    kit_de,
+    materiales_sin_cuadrar,
+    registrar_movimiento,
+    saldo_de,
+)
+
+pytestmark = pytest.mark.django_db
+
+
+def movimientos_del_telefono() -> int:
+    """Los movimientos que escribio la APP, sin los del inventario.
+
+    POR QUE NO SE CUENTA LA TABLA ENTERA (28/09/2026)
+    -------------------------------------------------
+    Estos asserts decian `MovimientoDeMaterial.objects.count()`, y valia mientras
+    la app fuera lo unico que escribia en esa tabla. Desde que el kit se entrega
+    con un despacho de verdad --entrada a bodega y salida al tecnico-- la tabla
+    trae tambien esos hechos, que son reales y que la prueba no esta midiendo.
+    Contar por tipo dice lo que la prueba siempre quiso decir: "no se registro el
+    consumo", en vez de "la tabla esta vacia".
+    """
+    return MovimientoDeMaterial.objects.filter(
+        tipo__in=(
+            MovimientoDeMaterial.CONSUMO,
+            MovimientoDeMaterial.DEVOLUCION,
+            MovimientoDeMaterial.AJUSTE,
+        )
+    ).count()
+
+
+@pytest.fixture
+def conector(org_a):
+    return MaterialCatalogo.objects.create(
+        org=org_a, codigo="CON-SC-APC", nombre="Conector SC/APC",
+        categoria="Conectividad", clase=MaterialCatalogo.CONSUMIBLE,
+        unidad="unidades",
+    )
+
+
+@pytest.fixture
+def fibra(org_a):
+    return MaterialCatalogo.objects.create(
+        org=org_a, codigo="FIB-DROP", nombre="Fibra drop",
+        categoria="Cableado", clase=MaterialCatalogo.BOBINA, unidad="m",
+    )
+
+
+@pytest.fixture
+def ont(org_a):
+    return MaterialCatalogo.objects.create(
+        org=org_a, codigo="ONT-HG8145", nombre="ONT Huawei HG8145V5",
+        categoria="Equipos", clase=MaterialCatalogo.SERIALIZADO, unidad="unidades",
+    )
+
+
+@pytest.fixture
+def orden(org_a):
+    """El trabajo en el que se gasta el material.
+
+    Desde esta fase un consumo no existe sin su orden: es la unica forma de
+    saber despues en que se fue el material. Sin eso el inventario cuadra pero
+    no explica nada.
+    """
+    wt = WorkType.objects.create(org=org_a, codigo="ftth", nombre="Instalacion")
+    version = WorkTypeVersion.objects.create(
+        work_type=wt, version=1, schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA,
+        esquema={"pasos": [], "campos": [], "evidencias": []},
+    )
+    return OrdenTrabajo.objects.create(
+        org=org_a, numero=4832, tipo_trabajo_version=version,
+        estado_operativo=OrdenTrabajo.ASIGNADA,
+    )
+
+
+@pytest.fixture
+def bodega(org_a):
+    """De donde sale el material. Las entregas de kit nacen de un despacho real.
+
+    POR QUE ESTA FIXTURE APARECIO EL 28/09/2026
+    -------------------------------------------
+    Antes el kit se insertaba a mano --EntregaDeKit + ItemDeKit-- y `saldo_de`
+    sumaba esos items. Desde que el saldo de un tecnico ES la existencia de su
+    custodia (un solo libro para todo el inventario), un acta sin movimientos
+    detras es un papel que describe algo que no ocurrio: no hay bodega de la que
+    haya salido nada. Ademas `inventario.despachar` es el UNICO camino que existe
+    en produccion para entregar un kit, asi que pasar por el hace que estas
+    pruebas cubran el camino real en vez de un atajo que nadie usa.
+    """
+    return UbicacionInventario.objects.create(
+        org=org_a, tipo=UbicacionInventario.BODEGA, nombre="Bodega Central"
+    )
+
+
+def _despachar(org, bodega, profile, acta, lineas):
+    """Entra a la bodega y sale al tecnico, como en la calle."""
+    for linea in lineas:
+        inv.registrar_entrada(
+            org=org, material=linea["material"],
+            cantidad=linea.get("cantidad") or 1,
+            ubicacion_destino=bodega, serie=linea.get("serie", ""),
+        )
+    entrega, _ = inv.despachar(
+        org=org, ubicacion_origen=bodega, profile_destino=profile,
+        acta=acta, lineas=lineas,
+    )
+    return entrega
+
+
+@pytest.fixture
+def kit(org_a, bodega, user_profile, conector, fibra, ont):
+    """Lo que la bodega le entregó al técnico esta mañana."""
+    return _despachar(org_a, bodega, user_profile, "K-2024-094", [
+        {"material": conector, "cantidad": 24},
+        {"material": fibra, "cantidad": 300},
+        {"material": ont, "serie": "48575448A9B0C1"},
+    ])
+
+
+#: La orden del test en curso, para no repetirla en cada llamada.
+#:
+#: Desde esta fase un consumo no existe sin su trabajo, asi que TODOS los
+#: consumos de este archivo ocurren dentro de uno. Pasarlo a mano veinte veces
+#: solo agregaria ruido; lo que importa de cada prueba es otra cosa. El test
+#: que necesite una orden distinta la pasa explicitamente.
+_orden_en_curso: dict = {}
+
+
+@pytest.fixture(autouse=True)
+def _orden_por_defecto(request):
+    if "orden" in request.fixturenames:
+        _orden_en_curso["actual"] = request.getfixturevalue("orden")
+    yield
+    _orden_en_curso.clear()
+
+
+def consumir(org, profile, material, cantidad, clave, orden=None, **extra):
+    """Un consumo, siempre atado a su trabajo."""
+    return registrar_movimiento(
+        org=org, profile=profile, material=material,
+        tipo=MovimientoDeMaterial.CONSUMO, cantidad=cantidad,
+        idempotency_key=clave,
+        orden=orden if orden is not None else _orden_en_curso.get("actual"),
+        **extra,
+    )
+
+
+class TestElSaldoSeCalcula:
+    def test_1_recien_entregado_el_saldo_es_lo_entregado(
+        self, org_a, user_profile, conector, kit
+    ):
+        assert saldo_de(user_profile, conector) == Decimal("24")
+
+    def test_2_un_consumo_descuenta(self, org_a, user_profile, conector, kit, orden):
+        consumir(org_a, user_profile, conector, 4, "mov-1", orden=orden)
+
+        assert saldo_de(user_profile, conector) == Decimal("20")
+
+    def test_3_una_devolucion_tambien_descuenta_de_lo_que_lleva_encima(
+        self, org_a, user_profile, conector, kit
+    ):
+        """Devolver a bodega saca el material de la camioneta, igual que usarlo."""
+        registrar_movimiento(
+            org=org_a, profile=user_profile, material=conector,
+            tipo=MovimientoDeMaterial.DEVOLUCION, cantidad=10,
+            idempotency_key="dev-1",
+        )
+
+        assert saldo_de(user_profile, conector) == Decimal("14")
+
+    def test_4_la_bobina_se_consume_con_decimales(
+        self, org_a, user_profile, fibra, kit, orden
+    ):
+        consumir(org_a, user_profile, fibra, "42.5", "mov-fibra")
+
+        assert saldo_de(user_profile, fibra) == Decimal("257.5")
+
+    def test_5_un_consumible_no_admite_fracciones(
+        self, org_a, user_profile, conector, kit, orden
+    ):
+        """Un conector y medio no existe. Se trunca hacia abajo: inventar media
+        unidad de más es peor que perderla."""
+        movimiento, _ = consumir(org_a, user_profile, conector, "2.7", "mov-frac")
+
+        assert movimiento.cantidad == Decimal("2")
+        assert saldo_de(user_profile, conector) == Decimal("22")
+
+
+class TestUnConsumoNuncaSeRechaza:
+    def test_6_sin_saldo_el_consumo_ENTRA_y_queda_marcado(
+        self, org_a, user_profile, conector, kit, orden
+    ):
+        """La prueba que define el diseño.
+
+        El técnico usó 30 conectores y el acta decía 24. Rechazarlo no
+        devuelve los 6 a la camioneta: solo borra el registro de que se
+        usaron.
+        """
+        movimiento, era_nuevo = consumir(org_a, user_profile, conector, 30, "mov-más")
+
+        assert era_nuevo is True
+        assert movimiento.pk is not None, "el movimiento se guarda igual"
+        assert movimiento.estado == MovimientoDeMaterial.DESCUADRE
+        assert movimiento.cantidad == Decimal("30")
+
+    def test_7_el_descuadre_se_explica_en_palabras(
+        self, org_a, user_profile, conector, kit, orden
+    ):
+        """Alguien en la oficina lo va a leer para decidir qué hacer."""
+        movimiento, _ = consumir(org_a, user_profile, conector, 30, "mov-más")
+
+        assert "30" in movimiento.motivo
+        assert "24" in movimiento.motivo
+        assert movimiento.motivo.strip()
+
+    def test_8_y_el_saldo_queda_en_negativo_a_proposito(
+        self, org_a, user_profile, conector, kit, orden
+    ):
+        """Taparlo con un max(0, ...) haría desaparecer el descuadre de la
+        pantalla sin haberlo resuelto."""
+        consumir(org_a, user_profile, conector, 30, "mov-más")
+
+        assert saldo_de(user_profile, conector) == Decimal("-6")
+
+    def test_9_un_material_sin_kit_tambien_entra_como_descuadre(
+        self, org_a, user_profile, conector, orden
+    ):
+        """Pasa de verdad: material que se entregó sin acta."""
+        movimiento, _ = consumir(org_a, user_profile, conector, 3, "mov-sin-kit")
+
+        assert movimiento.estado == MovimientoDeMaterial.DESCUADRE
+        assert movimiento.cantidad == Decimal("3")
+
+
+class TestElSerializadoSeInstalaUnaSolaVez:
+    def test_10_la_primera_instalacion_entra_normal(
+        self, org_a, user_profile, ont, kit, orden
+    ):
+        movimiento, _ = consumir(
+            org_a, user_profile, ont, 1, "mov-ont", serie="48575448A9B0C1"
+        )
+
+        assert movimiento.estado == MovimientoDeMaterial.ACEPTADO
+
+    def test_11_la_segunda_entra_como_conflicto_y_no_se_pierde(
+        self, org_a, user_profile, ont, kit, orden
+    ):
+        """Dos técnicos no instalaron la misma ONT: alguien se equivocó de
+        serie, y hay que poder ver las dos versiones para saber cuál es."""
+        consumir(org_a, user_profile, ont, 1, "mov-ont", serie="48575448A9B0C1")
+
+        segundo, era_nuevo = consumir(
+            org_a, user_profile, ont, 1, "mov-ont-2", serie="48575448A9B0C1"
+        )
+
+        assert era_nuevo is True
+        assert segundo.pk is not None
+        assert segundo.estado == MovimientoDeMaterial.CONFLICTO
+        assert "48575448A9B0C1" in segundo.motivo
+
+    def test_12_un_conflicto_no_descuenta_del_saldo(
+        self, org_a, user_profile, ont, kit, orden
+    ):
+        """No ocurrió: descontarlo castigaría a quien no hizo nada malo."""
+        consumir(org_a, user_profile, ont, 1, "mov-ont", serie="48575448A9B0C1")
+        consumir(org_a, user_profile, ont, 1, "mov-ont-2", serie="48575448A9B0C1")
+
+        assert saldo_de(user_profile, ont) == Decimal("0")
+
+
+class TestLaColaOfflinePuedeReintentar:
+    def test_13_la_misma_clave_no_descuenta_dos_veces(
+        self, org_a, user_profile, conector, kit, orden
+    ):
+        """Un reintento de la cola no es un consumo nuevo."""
+        primero, era_nuevo_1 = consumir(org_a, user_profile, conector, 4, "mov-1")
+        segundo, era_nuevo_2 = consumir(org_a, user_profile, conector, 4, "mov-1")
+
+        assert era_nuevo_1 is True
+        assert era_nuevo_2 is False
+        assert primero.pk == segundo.pk
+        assert saldo_de(user_profile, conector) == Decimal("20")
+        assert movimientos_del_telefono() == 1
+
+    def test_14_dos_consumos_distintos_del_mismo_material_si_suman(
+        self, org_a, user_profile, conector, kit, orden
+    ):
+        """Dos trabajos seguidos gastan conectores dos veces. Solo la clave
+        distingue un reintento de un consumo nuevo, y la pone el teléfono."""
+        consumir(org_a, user_profile, conector, 4, "mov-1")
+        consumir(org_a, user_profile, conector, 4, "mov-2")
+
+        assert saldo_de(user_profile, conector) == Decimal("16")
+
+    def test_15_un_movimiento_que_llega_tarde_se_guarda_con_su_hora_de_campo(
+        self, org_a, user_profile, conector, kit, orden
+    ):
+        """Media jornada sin señal: lo que importa es cuándo pasó, no cuándo
+        llegó."""
+        from django.utils import timezone
+        from datetime import timedelta
+
+        hace_ocho_horas = timezone.now() - timedelta(hours=8)
+        movimiento, _ = consumir(
+            org_a, user_profile, conector, 4, "mov-viejo",
+            ocurrido_en=hace_ocho_horas,
+        )
+
+        assert movimiento.ocurrido_en == hace_ocho_horas
+        assert movimiento.created_at > movimiento.ocurrido_en
+
+
+class TestLoQueVeLaPantalla:
+    def test_16_el_kit_trae_una_fila_por_material_con_su_saldo(
+        self, org_a, user_profile, conector, fibra, ont, kit, orden
+    ):
+        consumir(org_a, user_profile, conector, 8, "mov-1")
+
+        filas = kit_de(user_profile, org_a)
+        por_codigo = {f["material"].codigo: f for f in filas}
+
+        assert len(filas) == 3
+        assert por_codigo["CON-SC-APC"]["recibido"] == Decimal("24")
+        assert por_codigo["CON-SC-APC"]["consumido"] == Decimal("8")
+        assert por_codigo["CON-SC-APC"]["disponible"] == Decimal("16")
+        assert por_codigo["ONT-HG8145"]["series"] == ["48575448A9B0C1"]
+
+    def test_17_el_kit_trae_el_acta_de_donde_salio(
+        self, org_a, user_profile, conector, kit
+    ):
+        filas = kit_de(user_profile, org_a)
+
+        assert filas[0]["acta"] == "K-2024-094"
+
+    def test_18_lo_que_no_cuadra_se_puede_listar(
+        self, org_a, user_profile, conector, ont, kit, orden
+    ):
+        """Aceptar sin dejar rastro sería peor que rechazar."""
+        consumir(org_a, user_profile, conector, 4, "mov-ok")
+        consumir(org_a, user_profile, conector, 90, "mov-descuadre")
+        consumir(org_a, user_profile, ont, 1, "mov-ont", serie="48575448A9B0C1")
+        consumir(org_a, user_profile, ont, 1, "mov-ont-2", serie="48575448A9B0C1")
+
+        pendientes = list(materiales_sin_cuadrar(user_profile, org_a))
+        estados = {m.estado for m in pendientes}
+
+        assert len(pendientes) == 2
+        assert estados == {
+            MovimientoDeMaterial.DESCUADRE,
+            MovimientoDeMaterial.CONFLICTO,
+        }
+
+    def test_19_el_kit_de_uno_no_es_el_del_otro(
+        self, org_a, user_profile, admin_profile, conector, kit
+    ):
+        """El aislamiento vale también acá: la custodia es de una persona."""
+        assert kit_de(user_profile, org_a) != []
+        assert kit_de(admin_profile, org_a) == []
+        assert saldo_de(admin_profile, conector) == Decimal("0")
+
+
+class TestElConsumoSeAtaAlTrabajo:
+    def test_20_un_consumo_puede_decir_en_que_orden_se_uso(
+        self, org_a, user_profile, conector, kit, orden
+    ):
+        movimiento, _ = consumir(
+            org_a, user_profile, conector, 4, "mov-ot", orden=orden
+        )
+
+        assert movimiento.orden_id == orden.id
+        assert orden.movimientos_material.count() == 1
+
+    def test_21_una_devolucion_de_jornada_no_necesita_orden(
+        self, org_a, user_profile, conector, kit
+    ):
+        movimiento, _ = registrar_movimiento(
+            org=org_a, profile=user_profile, material=conector,
+            tipo=MovimientoDeMaterial.DEVOLUCION, cantidad=12,
+            idempotency_key="dev-jornada",
+        )
+
+        assert movimiento.orden_id is None
+        assert movimiento.estado == MovimientoDeMaterial.ACEPTADO

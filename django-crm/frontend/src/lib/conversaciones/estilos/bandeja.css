@@ -1,0 +1,337 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   BANDEJA — sistema visual (Fase 1.1)
+
+   Los tokens del diseño congelado en SPEC/BANDEJA_STITCH_REFERENCIAS.md,
+   acotados a la Bandeja.
+
+   POR QUÉ ESTE ARCHIVO EXISTE Y NO SE TOCA v2.css
+   ------------------------------------------------
+   v2.css es el sistema del CRM entero y ya está scoped bajo `.v2-root` — su
+   propia cabecera explica que ningún selector puede filtrar fuera. Este
+   archivo hace lo mismo un nivel más adentro: TODO cuelga de `.bandeja`, que
+   es la clase del `<div class="mesa">` de `conversaciones/+layout.svelte`.
+   Esa mesa envuelve las tres columnas Y el `{@render children()}` de la
+   conversación abierta, así que la Bandeja entera queda cubierta y ninguna
+   otra ruta del CRM puede verse afectada.
+
+   El encabezado de página (`PageHeader`) queda FUERA a propósito: está sobre
+   la mesa, es cromo del CRM, y su rediseño es de una fase posterior.
+
+   EL REMAPEO, QUE ES LA DECISIÓN IMPORTANTE
+   ------------------------------------------
+   La Bandeja consume hoy ~190 variables `--v2-*` repartidas en ocho
+   componentes. Migrarlas una por una tomaría todas las fases, y mientras
+   tanto la pantalla quedaría mitad paleta vieja y mitad nueva.
+
+   Como las custom properties heredan, redefinir un `--v2-*` acá lo cambia
+   para todo el subárbol sin tocar un solo componente. Así que los NEUTROS
+   ESTRUCTURALES se remapean abajo, y los componentes siguen escribiendo
+   `var(--v2-line)` hasta que su fase los migre a un token propio.
+
+   Lo que NO se remapea: ember, clay, rust y moss. Esos no son superficie,
+   son SIGNIFICADO -- ember marca lo que pide una acción, clay lo que está en
+   curso, rust lo vencido, moss lo resuelto. Cambiarles el valor sin decidir
+   antes su equivalente en el lenguaje nuevo sería mover semántica de
+   contrabando dentro de un cambio de pintura. Cada uno se resuelve en la fase
+   de su pantalla.
+
+   MODO OSCURO
+   -----------
+   El remapeo corre sólo en claro (`html:not(.dark)`). El diseño congelado no
+   tiene referencia oscura, y v2 sí tiene su propia paleta para `.dark`:
+   inventar una aquí sería adivinar. En oscuro la Bandeja sigue con los tokens
+   de v2 hasta que exista una referencia.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.bandeja {
+  /* ── superficies ─────────────────────────────────────────────────────── */
+  --bandeja-canvas: #f8fafc;
+  --bandeja-superficie: #ffffff;
+  --bandeja-superficie-suave: #f1f5f9;
+
+  /* ── líneas ──────────────────────────────────────────────────────────── */
+  --bandeja-borde: #e2e8f0;
+  --bandeja-borde-fuerte: #cbd5e1;
+
+  /* ── texto ───────────────────────────────────────────────────────────── */
+  --bandeja-texto: #0f172a;
+  --bandeja-texto-2: #64748b;
+  --bandeja-texto-3: #94a3b8;
+
+  /* ── quién actúa ─────────────────────────────────────────────────────── */
+  /* La distinción estructural del lenguaje visual. OJO: el color NO puede ser
+     la única señal -- hace falta además rótulo, texto o icono, porque un 8%
+     de la gente no distingue estos dos tonos y porque un punto de color sin
+     palabra no dice QUÉ pasó. Los consumidores llegan en las fases 1.3 y
+     siguientes; acá sólo quedan definidos. */
+  --bandeja-ia: #7c3aed;
+  --bandeja-humano: #2563eb;
+  --bandeja-navy: #1e3a8a;
+
+  /* Fondos y filetes de los dos, para los badges. Salen del `tailwind.config`
+     del diseño canónico (aiLight / aiBorder), no elegidos a ojo. */
+  --bandeja-ia-fondo: #f5f3ff;
+  --bandeja-ia-borde: #ddd6fe;
+  --bandeja-humano-fondo: #eff6ff;
+  --bandeja-humano-borde: #bfdbfe;
+
+  /* ── estados ─────────────────────────────────────────────────────────── */
+  /* CORREGIDOS EN 1.2 contra el `tailwind.config` de las pantallas canónicas.
+     En 1.1 el ámbar se eligió por familia (#d97706) sin tener el HTML a mano;
+     el diseño fija #92400E, que es bastante más oscuro. Los otros tres ya
+     coincidían. */
+  --bandeja-ok: #059669;
+  --bandeja-aviso: #92400e;
+  --bandeja-aviso-fondo: #fffbeb;
+  --bandeja-aviso-borde: #fde68a;
+  --bandeja-error: #dc2626;
+  --bandeja-error-fondo: #fef2f2;
+  --bandeja-error-borde: #fecaca;
+  --bandeja-nota: #92400e;
+  --bandeja-nota-fondo: #fef3c7;
+
+  /* ── forma ───────────────────────────────────────────────────────────── */
+  /* Radios chicos y sin sombra: lo que separa es el borde, la superficie y el
+     espacio, no una tarjeta flotando. */
+  --bandeja-radio-sm: 4px;
+  --bandeja-radio: 6px;
+  --bandeja-esp: 4px;
+
+  /* ── tipografía ──────────────────────────────────────────────────────── */
+  /* Geist y JetBrains Mono YA se cargan en app.html -- no hace falta ninguna
+     dependencia ni link nuevo. Mono queda para lo que se lee como dato:
+     números, ids, contadores. */
+  --bandeja-sans: Geist, Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --bandeja-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* Los neutros de v2, redefinidos para el subárbol de la Bandeja. Ver arriba
+   por qué sólo estos cuatro pares y por qué sólo en claro. */
+html:not(.dark) .bandeja {
+  --v2-paper: var(--bandeja-canvas);
+  --v2-card: var(--bandeja-superficie);
+  --v2-ink: var(--bandeja-texto);
+  --v2-slate: var(--bandeja-texto-2);
+  --v2-line: var(--bandeja-borde);
+  --v2-line-soft: var(--bandeja-superficie-suave);
+  --v2-hover: rgba(15, 23, 42, 0.03);
+
+  --v2-sans: var(--bandeja-sans);
+  --v2-mono: var(--bandeja-mono);
+}
+
+/* La mesa pinta su propio fondo y su tipografía. El resto de la Bandeja los
+   hereda, igual que hace `.v2-root` con los del CRM. */
+.bandeja {
+  background: var(--bandeja-canvas);
+  color: var(--bandeja-texto);
+  font-family: var(--bandeja-sans);
+}
+
+/* ── los paneles de contexto ────────────────────────────────────────────────
+   Case, Customer, Network y Activity comparten cuatro piezas, y hasta el
+   cierre de la Fase 1 cada uno tenía su propia copia. Idénticas tres de ellas
+   -- y la cuarta NO, que es el motivo real de unificarlas:
+
+     .mono   CasePanel llevaba overflow-wrap y no tabular-nums
+             CustomerPanel tabular-nums y no overflow-wrap
+             NetworkPanel las dos
+
+   O sea que el MISMO tipo de dato --un identificador técnico-- se veía
+   distinto en tres paneles apilados en la misma columna. Con el CSS scopeado
+   de Svelte eso no lo detecta ninguna herramienta: hay que mirar los tres
+   juntos, que es lo que un cierre visual existe para hacer.
+
+   Llevan prefijo `panel-` y no nombres genéricos a propósito: `.dato` y
+   `.mono` ya existen en componentes del CRM fuera de la mesa, y aunque este
+   archivo esté scopeado a `.bandeja`, un nombre que se repite invita a que
+   alguien los cruce más adelante. */
+.bandeja .panel-titulo {
+  margin: 0;
+  font-family: var(--bandeja-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bandeja-texto-2);
+}
+
+.bandeja .panel-dato {
+  font-size: 13px;
+  color: var(--bandeja-texto);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Cifras tabulares porque estos valores se comparan contra otro sistema
+   carácter por carácter, y quiebre en cualquier punto porque el largo de un
+   serial o de un id del ISP no está garantizado. */
+.bandeja .panel-mono {
+  font-family: var(--bandeja-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* Lo que el panel NO trae, y por qué. Discreta pero presente: es lo que
+   distingue un estado vacío honesto de una sección que parece rota. */
+.bandeja .panel-nota {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--bandeja-texto-2);
+}
+
+/* ── LA FILA ETIQUETA/VALOR ───────────────────────────────────────────────
+   Añadido el 21/09/2026 para la paridad con la referencia.
+
+   Los paneles de contexto apilaban cada campo en dos renglones --rótulo
+   arriba, valor abajo-- y la referencia los pone en UNO: rótulo a la
+   izquierda, valor pegado a la derecha. No es una preferencia estética. En
+   una columna de 350px, dos renglones por campo hacen que una sección de seis
+   datos mida el doble y deje de entrar sin desplazar; y con el valor alineado
+   a la derecha, la columna de valores se escanea en vertical --que es como se
+   busca un identificador-- en vez de leerse como prosa.
+
+   Vive acá y no en cada panel por lo mismo que `.panel-dato`: el CSS scopeado
+   de Svelte no deja ver que cinco paneles de la misma columna dibujaron la
+   misma fila de cinco maneras.
+
+   El valor puede envolver; el rótulo no (`white-space: nowrap`), porque un
+   rótulo partido en dos líneas rompe la alineación de toda la sección. */
+.bandeja .panel-fila {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 19px;
+}
+
+.bandeja .panel-fila > .panel-etiqueta {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--bandeja-texto-2);
+  white-space: nowrap;
+}
+
+/* El valor manda a la derecha y se le permite romper: un serial GPON o una
+   dirección no tienen largo garantizado. */
+.bandeja .panel-fila > .panel-valor {
+  min-width: 0;
+  text-align: right;
+  font-size: 12px;
+  color: var(--bandeja-texto);
+  overflow-wrap: anywhere;
+}
+
+/* Separador dentro de una sección, para el campo que cierra un bloque (el
+   dueño, en la referencia). Más liviano que el borde entre secciones. */
+.bandeja .panel-fila-sep {
+  margin-top: 3px;
+  padding-top: 7px;
+  border-top: 1px solid var(--bandeja-borde);
+}
+
+/* ── EL CHIP DE IDENTIFICADOR ─────────────────────────────────────────────
+   Un id que se compara contra otro sistema va en mono, con fondo y borde: el
+   recuadro marca dónde empieza y dónde termina el valor exacto, que es justo
+   lo que hace falta cuando alguien lo está copiando a mano o leyéndoselo a
+   otra persona por teléfono. */
+.bandeja .panel-chip {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--bandeja-borde);
+  border-radius: 3px;
+  background: var(--bandeja-superficie-suave);
+  font-family: var(--bandeja-mono);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--bandeja-texto);
+  overflow-wrap: anywhere;
+}
+
+/* ── EL ROTULO DE SECCION DENTRO DE UNA PESTAÑA ───────────────────────────
+   La referencia separa las secciones con un borde y un rótulo en versalita.
+   `.panel-titulo` ya da la tipografía; esto agrega la separación, para no
+   repetir el mismo par de reglas en cinco paneles. */
+.bandeja .panel-seccion {
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid var(--bandeja-borde);
+}
+
+/* ── EL BOTON DE ACCION, EN AZUL ──────────────────────────────────────────
+   `.v2-btn-primary` es del CRM y viene en ámbar (`--v2-ember`, medido:
+   rgb(234,88,12)). Dentro de la Bandeja tiene que ser azul, y no por gusto:
+   `--bandeja-humano` YA es `#2563eb`, el mismo valor que el sistema de la
+   referencia declara a la vez como «azul de acción» y como la firma de las
+   personas. Enviar una respuesta es exactamente las dos cosas -- una acción,
+   hecha por una persona.
+
+   Va acotado a `.bandeja` y no se toca la clase global: el resto del CRM
+   conserva su ámbar. Hoy son los cuatro botones del compositor.
+
+   El ámbar ademas ya tiene un trabajo acá: `--bandeja-aviso` marca lo que
+   necesita atención. Un botón permanentemente ámbar al lado de un aviso
+   ámbar le quita el sentido a los dos. */
+.bandeja .v2-btn-primary {
+  background: var(--bandeja-humano);
+  border-color: var(--bandeja-humano);
+}
+
+.bandeja .v2-btn-primary:hover:not(:disabled) {
+  background: var(--bandeja-navy);
+  border-color: var(--bandeja-navy);
+}
+
+/* ── LA TARJETA DE UNA SECCIÓN DE CONTEXTO ────────────────────────────────
+   Añadida el 22/09/2026 al llevar Equipo, Caso y Herramientas a la forma de
+   las pantallas de referencia. Las tres las dibujan igual: filete, rótulo en
+   versalita a la izquierda y una marca discreta a la derecha.
+
+   Vive acá y no en cada panel por el mismo motivo que `.panel-fila`: nació
+   como `.eq-seccion` dentro de NetworkPanel, y en cuanto la segunda pestaña
+   necesitó lo mismo habría empezado la divergencia que este archivo ya
+   documenta -- cinco paneles de la misma columna dibujando la misma caja de
+   cinco maneras, sin que ninguna herramienta lo detecte porque el CSS de
+   Svelte está acotado a su componente. */
+.bandeja .panel-tarjeta {
+  border: 1px solid var(--bandeja-borde);
+  border-radius: var(--bandeja-radio-sm);
+  background: var(--bandeja-superficie);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.bandeja .panel-tarjeta-cabeza {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--bandeja-borde);
+}
+
+/* La marca de la derecha del encabezado: GPON, la zona, la hora de lectura,
+   el conteo de pasos. Es contexto de la sección, no un dato de una fila --
+   por eso va apagada y en mono, como un sello. */
+.bandeja .panel-marca {
+  flex: none;
+  font-family: var(--bandeja-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--bandeja-texto-3);
+}
+
+/* Lo que no se sabe: el guion apagado. Se ve que la fila existe y que está
+   vacía, sin competir con un valor. */
+.bandeja .panel-sin {
+  color: var(--bandeja-texto-3);
+}

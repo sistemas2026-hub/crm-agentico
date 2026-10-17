@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+
+<html class="h-full bg-[#030712] text-slate-100 antialiased" lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=1920, height=1080, initial-scale=1.0" name="viewport"/>
+<title>DEXTER COMMAND CENTER — Sala de Operaciones IA</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=Inter:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            space: ['Space Grotesk', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            cyan: {
+              300: '#67e8f9',
+              400: '#22d3ee',
+              500: '#06b6d4',
+              glow: '#00e5ff',
+            }
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    /* Custom glow & scanline effects */
+    .glow-cyan {
+      box-shadow: 0 0 25px -4px rgba(6, 182, 212, 0.45), 0 0 10px -2px rgba(6, 182, 212, 0.3);
+    }
+    .glow-purple {
+      box-shadow: 0 0 30px -4px rgba(139, 92, 246, 0.5), 0 0 12px -2px rgba(139, 92, 246, 0.35);
+    }
+    .glow-amber {
+      box-shadow: 0 0 25px -4px rgba(245, 158, 11, 0.45);
+    }
+    .glow-green {
+      box-shadow: 0 0 20px -4px rgba(34, 197, 94, 0.4);
+    }
+    .circuit-grid {
+      background-size: 40px 40px;
+      background-image: 
+        linear-gradient(to right, rgba(6, 182, 212, 0.07) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(6, 182, 212, 0.07) 1px, transparent 1px);
+    }
+    .floor-reflection {
+      background: radial-gradient(circle at 50% 120%, rgba(6, 182, 212, 0.16) 0%, rgba(15, 23, 42, 0) 70%),
+                  linear-gradient(to top, rgba(3, 7, 18, 0.95), rgba(5, 11, 24, 0.8));
+    }
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 0.9; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(1.08); }
+    }
+    @keyframes particleFlow {
+      0% { transform: translateY(0px) scale(0.8); opacity: 0; }
+      50% { opacity: 0.8; }
+      100% { transform: translateY(-40px) scale(1.2); opacity: 0; }
+    }
+    @keyframes circuitPulse {
+      0% { stroke-dashoffset: 100; }
+      100% { stroke-dashoffset: 0; }
+    }
+    .anim-pulse-subtle {
+      animation: pulseGlow 2.4s ease-in-out infinite;
+    }
+    .particle-1 { animation: particleFlow 2.8s ease-in-out infinite; }
+    .particle-2 { animation: particleFlow 3.2s ease-in-out infinite 0.6s; }
+    .particle-3 { animation: particleFlow 2.5s ease-in-out infinite 1.2s; }
+    .live-stream-pulse {
+      animation: pulseGlow 1.5s ease-in-out infinite;
+    }
+    /* Hexagonal mask clip */
+    .hex-clip {
+      clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+    }
+  </style>
+</head>
+<body class="w-[1920px] h-[1080px] overflow-hidden bg-[#030712] font-sans flex flex-col justify-between select-none">
+<!-- ========================================================================= -->
+<!-- BARRA SUPERIOR (56px, fondo #050B18, borde inferior cian tenue)           -->
+<!-- ========================================================================= -->
+<header class="h-[56px] min-h-[56px] bg-[#050B18] border-b border-cyan-500/20 px-6 flex items-center justify-between z-30">
+<!-- Logotipo & Tenant -->
+<div class="flex items-center space-x-4">
+<div class="flex items-center space-x-3">
+<div class="w-8 h-8 rounded border border-cyan-400/40 bg-cyan-950/40 flex items-center justify-center relative shadow-[0_0_12px_rgba(6,182,212,0.4)]">
+<svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2.2" viewbox="0 0 24 24">
+<polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+<polyline points="2 17 12 22 22 17"></polyline>
+<polyline points="2 12 12 17 22 12"></polyline>
+</svg>
+<span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-cyan-400 anim-pulse-subtle"></span>
+</div>
+<div class="flex items-baseline space-x-2">
+<span class="font-space font-bold text-lg tracking-wider text-white">DEXTER</span>
+<span class="text-cyan-400 font-black">·</span>
+<span class="font-space text-xs font-semibold tracking-[0.22em] text-cyan-300/90 uppercase">COMMAND CENTER</span>
+</div>
+</div>
+<div class="h-4 w-[1px] bg-cyan-500/30"></div>
+<!-- Pastilla Tenant -->
+<div class="flex items-center space-x-2 px-2.5 py-1 rounded bg-slate-900/90 border border-slate-700/60 shadow-inner">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>
+<span class="text-[11px] font-mono tracking-wider font-semibold text-slate-200">RAPILINK S.A.S.</span>
+<span class="text-[9px] px-1 py-0.5 rounded bg-cyan-950 text-cyan-300 font-mono border border-cyan-800/40">ISP CORE</span>
+</div>
+</div>
+<!-- Centro: Etiqueta Monoespaciada -->
+<div class="flex items-center space-x-3 px-4 py-1.5 rounded-full bg-[#081226] border border-cyan-500/30 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
+<span class="w-2 h-2 rounded-full bg-cyan-400 anim-pulse-subtle"></span>
+<span class="font-mono text-xs font-semibold tracking-widest text-cyan-200 uppercase">
+        SISTEMA OPERATIVO · 6 AGENTES EN LÍNEA
+      </span>
+<span class="text-[10px] font-mono text-cyan-400/60">| SWARM v4.9.2</span>
+</div>
+<!-- Derecha: Reloj, Selector de Turno, Modo Demostración -->
+<div class="flex items-center space-x-4">
+<!-- Selector Turno -->
+<div class="flex items-center space-x-1.5 text-xs text-slate-400 font-mono bg-slate-900/80 px-2.5 py-1 rounded border border-slate-800">
+<span class="text-slate-500 text-[10px] uppercase tracking-wider">TURNO:</span>
+<span class="text-slate-200 font-medium">Alfa (NOC Principal)</span>
+</div>
+<!-- Reloj -->
+<div class="flex items-center space-x-2 px-3 py-1 rounded bg-[#09152e] border border-cyan-500/20 font-mono text-xs">
+<svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<circle cx="12" cy="12" r="10" stroke-width="2"></circle>
+<polyline points="12 6 12 12 16 14" stroke-width="2"></polyline>
+</svg>
+<span class="text-cyan-300 font-bold tracking-wider">10:43:27</span>
+<span class="text-[10px] text-slate-400">(America/Bogotá)</span>
+</div>
+<!-- Insignia Demostración -->
+<div class="px-3 py-1 rounded border border-dashed border-amber-400/80 bg-amber-500/10 text-amber-300 text-[11px] font-mono font-semibold tracking-wider flex items-center space-x-1.5 shadow-[0_0_10px_rgba(245,158,11,0.2)]">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+<span>MODO DEMOSTRACIÓN · DATOS SIMULADOS</span>
+</div>
+</div>
+</header>
+<!-- ========================================================================= -->
+<!-- FRANJA DE MÉTRICAS (6 bloques separados por líneas cian de 1px)           -->
+<!-- ========================================================================= -->
+<section class="h-[76px] min-h-[76px] bg-[#070e1e]/90 border-b border-cyan-500/20 grid grid-cols-6 divide-x divide-cyan-500/20 px-4 items-center z-20">
+<!-- Bloque 1: Conversaciones Activas -->
+<div class="px-5 flex flex-col justify-center">
+<div class="flex items-baseline justify-between">
+<span class="font-mono text-2xl font-bold text-white tracking-tight">27</span>
+<span class="text-[10px] font-mono text-cyan-400 font-medium">+14% pico</span>
+</div>
+<span class="text-[10px] font-sans font-semibold tracking-wider text-slate-400 uppercase mt-0.5">CONVERSACIONES ACTIVAS</span>
+<!-- Sparkline cian -->
+<div class="h-2 w-full mt-1.5 flex items-end">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 100 12">
+<polyline fill="none" points="0,9 15,7 30,10 45,5 60,6 75,3 85,7 100,2" stroke="#22d3ee" stroke-linecap="round" stroke-width="1.8"></polyline>
+</svg>
+</div>
+</div>
+<!-- Bloque 2: Agentes IA Trabajando -->
+<div class="px-5 flex flex-col justify-center">
+<div class="flex items-baseline justify-between">
+<span class="font-mono text-2xl font-bold text-cyan-300 tracking-tight">18</span>
+<span class="text-[10px] font-mono text-emerald-400 font-medium">100% DISP</span>
+</div>
+<span class="text-[10px] font-sans font-semibold tracking-wider text-slate-400 uppercase mt-0.5">AGENTES IA TRABAJANDO</span>
+<div class="h-2 w-full mt-1.5 flex items-end">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 100 12">
+<polyline fill="none" points="0,8 20,8 35,4 50,4 70,3 85,2 100,2" stroke="#22d3ee" stroke-linecap="round" stroke-width="1.8"></polyline>
+</svg>
+</div>
+</div>
+<!-- Bloque 3: Clientes Atendidos Hoy -->
+<div class="px-5 flex flex-col justify-center">
+<div class="flex items-baseline justify-between">
+<span class="font-mono text-2xl font-bold text-white tracking-tight">1.240</span>
+<span class="text-[10px] font-mono text-cyan-400 font-medium">Meta: 1.500</span>
+</div>
+<span class="text-[10px] font-sans font-semibold tracking-wider text-slate-400 uppercase mt-0.5">CLIENTES ATENDIDOS HOY</span>
+<div class="h-2 w-full mt-1.5 flex items-end">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 100 12">
+<polyline fill="none" points="0,11 15,9 35,8 55,6 70,4 85,3 100,1" stroke="#22d3ee" stroke-linecap="round" stroke-width="1.8"></polyline>
+</svg>
+</div>
+</div>
+<!-- Bloque 4: Latencia IA Promedio -->
+<div class="px-5 flex flex-col justify-center">
+<div class="flex items-baseline justify-between">
+<span class="font-mono text-2xl font-bold text-emerald-400 tracking-tight">1,2 <span class="text-sm font-normal text-emerald-300">s</span></span>
+<span class="text-[10px] font-mono text-emerald-400 font-medium">ÓPTIMO</span>
+</div>
+<span class="text-[10px] font-sans font-semibold tracking-wider text-slate-400 uppercase mt-0.5">LATENCIA IA PROMEDIO</span>
+<div class="h-2 w-full mt-1.5 flex items-end">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 100 12">
+<polyline fill="none" points="0,6 20,7 40,5 60,8 75,4 90,5 100,4" stroke="#22d3ee" stroke-linecap="round" stroke-width="1.8"></polyline>
+</svg>
+</div>
+</div>
+<!-- Bloque 5: Herramientas Ejecutadas -->
+<div class="px-5 flex flex-col justify-center">
+<div class="flex items-baseline justify-between">
+<span class="font-mono text-2xl font-bold text-white tracking-tight">3.812</span>
+<span class="text-[10px] font-mono text-cyan-400 font-medium">SmartOLT/WA</span>
+</div>
+<span class="text-[10px] font-sans font-semibold tracking-wider text-slate-400 uppercase mt-0.5">HERRAMIENTAS EJECUTADAS</span>
+<div class="h-2 w-full mt-1.5 flex items-end">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 100 12">
+<polyline fill="none" points="0,10 18,9 38,7 52,6 72,4 88,3 100,2" stroke="#22d3ee" stroke-linecap="round" stroke-width="1.8"></polyline>
+</svg>
+</div>
+</div>
+<!-- Bloque 6: Alertas (en rojo #EF4444) -->
+<div class="px-5 flex flex-col justify-center bg-red-950/20">
+<div class="flex items-baseline justify-between">
+<span class="font-mono text-2xl font-bold text-[#EF4444] tracking-tight">2</span>
+<span class="text-[10px] font-mono text-red-400 font-medium">Baja severidad</span>
+</div>
+<span class="text-[10px] font-sans font-semibold tracking-wider text-red-300 uppercase mt-0.5">ALERTAS ACTIVAS</span>
+<!-- Sparkline roja -->
+<div class="h-2 w-full mt-1.5 flex items-end">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 100 12">
+<polyline fill="none" points="0,11 25,11 50,7 65,11 80,4 90,8 100,4" stroke="#EF4444" stroke-linecap="round" stroke-width="1.8"></polyline>
+</svg>
+</div>
+</div>
+</section>
+<!-- ========================================================================= -->
+<!-- ÁREA PRINCIPAL: ZONA CENTRAL (60% ancho) + PANEL DERECHO (360px fijo)     -->
+<!-- ========================================================================= -->
+<main class="flex-1 flex overflow-hidden relative">
+<!-- ZONA CENTRAL — "OFICINA VIRTUAL DE AGENTES IA" (ocupa el 60% del ancho) -->
+<div class="flex-1 relative flex flex-col bg-[#02050f] overflow-hidden border-r border-cyan-500/20">
+<!-- Fondo: Retícula de 40px en perspectiva con suelo reflectante y pantallas holográficas -->
+<div class="absolute inset-0 circuit-grid opacity-60 pointer-events-none"></div>
+<div class="absolute inset-0 floor-reflection pointer-events-none"></div>
+<!-- Pantallas holográficas al fondo (wall telemetry) -->
+<div class="absolute top-2 left-6 right-6 h-28 border border-cyan-500/20 bg-cyan-950/10 rounded-lg backdrop-blur-[2px] flex items-center justify-between px-6 pointer-events-none z-0">
+<!-- Hologram 1: Mapa GPON / Topología -->
+<div class="flex items-center space-x-4 opacity-75">
+<div class="w-20 h-16 border border-cyan-400/30 rounded bg-cyan-950/40 p-1 flex flex-col justify-between">
+<span class="text-[8px] font-mono text-cyan-300">TOPOLOGÍA OLT</span>
+<div class="grid grid-cols-4 gap-1">
+<span class="w-2 h-2 rounded bg-cyan-400"></span>
+<span class="w-2 h-2 rounded bg-cyan-400"></span>
+<span class="w-2 h-2 rounded bg-emerald-400"></span>
+<span class="w-2 h-2 rounded bg-cyan-400"></span>
+<span class="w-2 h-2 rounded bg-cyan-400"></span>
+<span class="w-2 h-2 rounded bg-amber-400"></span>
+<span class="w-2 h-2 rounded bg-cyan-400"></span>
+<span class="w-2 h-2 rounded bg-cyan-400"></span>
+</div>
+<span class="text-[7px] font-mono text-slate-400">12 PON ACT</span>
+</div>
+<div>
+<div class="text-[11px] font-mono text-cyan-300 font-semibold tracking-wider">ANILLO METROPOLITANO SUR</div>
+<div class="text-[9px] font-mono text-slate-400">Trafico agregado: 48.2 Gbps · BER &lt; 10⁻¹²</div>
+</div>
+</div>
+<!-- Hologram Center: Estado del Enjambre -->
+<div class="text-center opacity-85">
+<div class="text-[10px] font-mono text-cyan-400 tracking-[0.3em] uppercase">SALA DE OPERACIONES DE AGENTES SINTÉTICOS</div>
+<div class="text-[8px] font-mono text-slate-400 mt-0.5">ORQUESTACIÓN NEURAL EN TIEMPO REAL · LATENCIA SINAPSIS: 14ms</div>
+</div>
+<!-- Hologram 3: Curvas de Tráfico en vivo -->
+<div class="flex items-center space-x-3 opacity-75">
+<div class="text-right">
+<div class="text-[11px] font-mono text-cyan-300 font-semibold">CAPACIDAD CORE</div>
+<div class="text-[9px] font-mono text-slate-400">TX: 38.4 Gbps | RX: 12.1 Gbps</div>
+</div>
+<div class="w-24 h-14 border border-cyan-400/30 rounded bg-cyan-950/40 p-1 flex items-center">
+<svg class="w-full h-8" preserveaspectratio="none" viewbox="0 0 100 30">
+<path d="M0,25 Q20,5 40,18 T80,8 T100,14" fill="none" stroke="#06b6d4" stroke-width="1.8"></path>
+<path d="M0,25 Q20,5 40,18 T80,8 T100,14 L100,30 L0,30 Z" fill="rgba(6,182,212,0.15)"></path>
+</svg>
+</div>
+</div>
+</div>
+<!-- SVG INTERACTIVO PARA LÍNEAS DE CIRCUITO Y HERRAMIENTAS EJECUTÁNDOSE -->
+<svg class="absolute inset-0 w-full h-full pointer-events-none z-10">
+<defs>
+<lineargradient id="cyanLine" x1="0%" x2="100%" y1="0%" y2="0%">
+<stop offset="0%" stop-color="#06b6d4" stop-opacity="0.8"></stop>
+<stop offset="100%" stop-color="#22d3ee" stop-opacity="1"></stop>
+</lineargradient>
+<lineargradient id="amberLine" x1="0%" x2="100%" y1="0%" y2="100%">
+<stop offset="0%" stop-color="#f59e0b" stop-opacity="0.9"></stop>
+<stop offset="100%" stop-color="#fbbf24" stop-opacity="1"></stop>
+</lineargradient>
+</defs>
+<!-- Línea desde SOPORTE FIBRA (Estación 2) hacia cápsula SmartOLT -->
+<!-- Estación 2 aprox: x=490, y=285 -> SmartOLT en borde superior derecho x=1050, y=75 -->
+<path class="anim-pulse-subtle" d="M 520 280 L 520 180 L 880 180 L 880 100" fill="none" stroke="#f59e0b" stroke-dasharray="6,4" stroke-width="2.5"></path>
+<circle cx="520" cy="280" fill="#f59e0b" r="4"></circle>
+<circle cx="880" cy="100" fill="#fbbf24" r="4"></circle>
+<!-- Línea tenue desde ROUTER IA (Estación 1) hacia cápsula WhatsApp -->
+<!-- Estación 1 aprox: x=190, y=280 -> WhatsApp en borde superior izquierdo x=110, y=100 -->
+<path d="M 220 280 L 220 170 L 150 170 L 150 105" fill="none" opacity="0.75" stroke="#06b6d4" stroke-dasharray="4,4" stroke-width="1.8"></path>
+<circle cx="220" cy="280" fill="#06b6d4" r="3.5"></circle>
+<circle cx="150" cy="105" fill="#22d3ee" r="3.5"></circle>
+</svg>
+<!-- Cápsula SMARTOLT (parpadeando - ejecutando herramienta) -->
+<div class="absolute top-[82px] right-24 z-20 flex items-center space-x-2 px-3 py-1.5 rounded-md bg-[#131109] border border-amber-500/80 shadow-[0_0_15px_rgba(245,158,11,0.4)] anim-pulse-subtle">
+<span class="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_#f59e0b]"></span>
+<div class="flex flex-col">
+<span class="text-[10px] font-mono font-bold text-amber-300 tracking-wider">TOOL: SmartOLT</span>
+<span class="text-[8px] font-mono text-amber-400/80">consultar_olt (342ms)</span>
+</div>
+</div>
+<!-- Cápsula WHATSAPP (comunicación entrante) -->
+<div class="absolute top-[82px] left-24 z-20 flex items-center space-x-2 px-3 py-1.5 rounded-md bg-[#04151f] border border-cyan-500/60 shadow-[0_0_12px_rgba(6,182,212,0.3)]">
+<span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+<div class="flex flex-col">
+<span class="text-[10px] font-mono font-bold text-cyan-300 tracking-wider">CANAL: WhatsApp API</span>
+<span class="text-[8px] font-mono text-cyan-400/70">Webhook activo · 18ms</span>
+</div>
+</div>
+<!-- CONTENEDOR DE LAS 6 ESTACIONES DE TRABAJO (2 FILAS DE 3) -->
+<div class="relative z-10 flex-1 px-8 pt-32 pb-4 flex flex-col justify-around">
+<!-- =================== FILA 1 (ESTACIONES 1, 2, 3) =================== -->
+<div class="grid grid-cols-3 gap-6">
+<!-- 1) ROUTER IA -->
+<div class="group relative rounded-xl bg-[#091124]/90 border border-cyan-500/40 p-3.5 backdrop-blur-md glow-cyan transition-all">
+<!-- Partículas ascendentes -->
+<div class="absolute -top-3 left-1/2 w-1.5 h-1.5 rounded-full bg-cyan-400 particle-1"></div>
+<div class="absolute -top-5 left-1/3 w-1 h-1 rounded-full bg-cyan-300 particle-2"></div>
+<div class="flex items-center space-x-3.5">
+<!-- Retrato Hexagonal con Anillo Cian (PROCESANDO) -->
+<div class="relative w-20 h-20 flex-shrink-0 flex items-center justify-center">
+<div class="absolute inset-0 rounded-full border-2 border-cyan-400 shadow-[0_0_15px_#06b6d4] anim-pulse-subtle"></div>
+<div class="w-[72px] h-[72px] hex-clip bg-slate-900 overflow-hidden border border-cyan-300/40">
+<img alt="ROUTER IA" class="w-full h-full object-cover" src="avatares/router.png"/>
+</div>
+<!-- Badge estado icono -->
+<span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-cyan-950 border border-cyan-400 flex items-center justify-center text-[10px] text-cyan-300">
+                  ⚡
+                </span>
+</div>
+<!-- Información del Agente -->
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<h3 class="font-space font-bold text-sm tracking-wider text-white uppercase">ROUTER IA</h3>
+<!-- Chip de Estado -->
+<span class="px-2 py-0.5 rounded text-[9px] font-mono font-semibold tracking-wider bg-cyan-950/90 text-cyan-300 border border-cyan-500/50 flex items-center space-x-1">
+<span class="w-1.5 h-1.5 rounded-full bg-cyan-400 anim-pulse-subtle"></span>
+<span>PROCESANDO</span>
+</span>
+</div>
+<p class="text-[10px] text-slate-400 mt-0.5">Clasificación y enrutamiento</p>
+<div class="mt-1.5 px-2 py-1 rounded bg-[#040814] border border-cyan-500/20 text-[10.5px] font-mono text-cyan-200 truncate">
+                  "Clasificando mensaje de WhatsApp"
+                </div>
+<div class="flex items-center space-x-3 mt-2 text-[10px] font-mono text-slate-300">
+<span>Conv: <strong class="text-white">24</strong></span>
+<span class="text-cyan-500/50">|</span>
+<span>Resp: <strong class="text-cyan-300">0,8 s</strong></span>
+</div>
+</div>
+</div>
+</div>
+<!-- 2) SOPORTE FIBRA -->
+<div class="group relative rounded-xl bg-[#1a1408] border-2 border-amber-400 p-3.5 backdrop-blur-md shadow-[0_0_35px_rgba(245,158,11,0.65)] ring-2 ring-amber-400/40 z-30 transition-all">
+<!-- Partículas ascendentes reforzadas -->
+<div class="absolute -top-3 left-1/2 w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_#f59e0b] particle-1"></div>
+<div class="absolute -top-4 right-1/3 w-1.5 h-1.5 rounded-full bg-amber-300 particle-3"></div>
+<div class="flex items-center space-x-3.5">
+<!-- Retrato Hexagonal con Anillo Ámbar Ultra Brillante -->
+<div class="relative w-20 h-20 flex-shrink-0 flex items-center justify-center">
+<div class="absolute inset-0 rounded-full border-2 border-amber-400 shadow-[0_0_22px_#f59e0b] anim-pulse-subtle"></div>
+<div class="w-[72px] h-[72px] hex-clip bg-slate-900 overflow-hidden border-2 border-amber-300">
+<img alt="SOPORTE FIBRA" class="w-full h-full object-cover" src="avatares/soporte.png"/>
+</div>
+<span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-amber-950 border border-amber-400 flex items-center justify-center text-[10px] text-amber-300 shadow-[0_0_8px_#f59e0b]">
+        🔍
+      </span>
+</div>
+<!-- Información del Agente -->
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<h3 class="font-space font-bold text-sm tracking-wider text-amber-200 uppercase">SOPORTE FIBRA</h3>
+<span class="px-2 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider bg-amber-950 text-amber-300 border border-amber-400 flex items-center space-x-1 shadow-[0_0_10px_rgba(245,158,11,0.5)]">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-400 anim-pulse-subtle"></span>
+<span>CONSULTANDO</span>
+</span>
+</div>
+<p class="text-[10px] text-slate-300 mt-0.5">Diagnóstico técnico FTTH</p>
+<div class="mt-1.5 px-2 py-1 rounded bg-[#0d0902] border border-amber-400/50 text-[10.5px] font-mono text-amber-300 font-semibold truncate shadow-inner">
+        "Analizando potencia óptica de la ONU"
+      </div>
+<div class="flex items-center space-x-3 mt-2 text-[10px] font-mono text-slate-300">
+<span class="text-amber-300 font-medium">Tool: <strong class="underline font-bold">consultar_olt</strong></span>
+<span class="text-amber-500/50">|</span>
+<span>Conv: <strong class="text-white font-bold">12</strong></span>
+</div>
+</div>
+</div>
+</div>
+<!-- 3) FACTURACIÓN -->
+<div class="group relative rounded-xl bg-[#081510]/85 border border-emerald-500/35 p-3.5 backdrop-blur-md glow-green transition-all">
+<div class="flex items-center space-x-3.5">
+<!-- Retrato Hexagonal con Anillo Verde (DISPONIBLE - iluminación estable) -->
+<div class="relative w-20 h-20 flex-shrink-0 flex items-center justify-center">
+<div class="absolute inset-0 rounded-full border-2 border-emerald-400/80 shadow-[0_0_10px_#22c55e]"></div>
+<div class="w-[72px] h-[72px] hex-clip bg-slate-900 overflow-hidden border border-emerald-400/30">
+<img alt="FACTURACIÓN" class="w-full h-full object-cover" src="avatares/facturacion.png"/>
+</div>
+<span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-950 border border-emerald-400 flex items-center justify-center text-[10px] text-emerald-300">
+                  ✓
+                </span>
+</div>
+<!-- Información del Agente -->
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<h3 class="font-space font-bold text-sm tracking-wider text-white uppercase">FACTURACIÓN</h3>
+<span class="px-2 py-0.5 rounded text-[9px] font-mono font-semibold tracking-wider bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 flex items-center space-x-1">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+<span>DISPONIBLE</span>
+</span>
+</div>
+<p class="text-[10px] text-slate-400 mt-0.5">Cartera y pagos</p>
+<div class="mt-1.5 px-2 py-1 rounded bg-[#030d07] border border-emerald-500/20 text-[10.5px] font-mono text-emerald-200 truncate">
+                  "Sin tareas pendientes"
+                </div>
+<div class="flex items-center space-x-3 mt-2 text-[10px] font-mono text-slate-300">
+<span>Cola: <strong class="text-white">0</strong></span>
+<span class="text-emerald-500/50">|</span>
+<span>Resueltas: <strong class="text-emerald-300">96%</strong></span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- =================== FILA 2 (ESTACIONES 4, 5-SUPERVISOR, 6) =================== -->
+<div class="grid grid-cols-3 gap-6 items-end">
+<!-- 4) VENTAS -->
+<div class="group relative rounded-xl bg-[#091124]/90 border border-cyan-500/40 p-3.5 backdrop-blur-md glow-cyan transition-all">
+<div class="absolute -top-3 right-1/2 w-1.5 h-1.5 rounded-full bg-cyan-400 particle-3"></div>
+<div class="flex items-center space-x-3.5">
+<!-- Retrato Hexagonal con Anillo Cian (PROCESANDO) -->
+<div class="relative w-20 h-20 flex-shrink-0 flex items-center justify-center">
+<div class="absolute inset-0 rounded-full border-2 border-cyan-400 shadow-[0_0_15px_#06b6d4] anim-pulse-subtle"></div>
+<div class="w-[72px] h-[72px] hex-clip bg-slate-900 overflow-hidden border border-cyan-300/40">
+<img alt="VENTAS" class="w-full h-full object-cover" src="avatares/ventas.png"/>
+</div>
+<span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-cyan-950 border border-cyan-400 flex items-center justify-center text-[10px] text-cyan-300">
+                  📈
+                </span>
+</div>
+<!-- Información del Agente -->
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<h3 class="font-space font-bold text-sm tracking-wider text-white uppercase">VENTAS</h3>
+<span class="px-2 py-0.5 rounded text-[9px] font-mono font-semibold tracking-wider bg-cyan-950/90 text-cyan-300 border border-cyan-500/50 flex items-center space-x-1">
+<span class="w-1.5 h-1.5 rounded-full bg-cyan-400 anim-pulse-subtle"></span>
+<span>PROCESANDO</span>
+</span>
+</div>
+<p class="text-[10px] text-slate-400 mt-0.5">Planes y contratación</p>
+<div class="mt-1.5 px-2 py-1 rounded bg-[#040814] border border-cyan-500/20 text-[10.5px] font-mono text-cyan-200 truncate">
+                  "Cotizando plan 300 Mbps en Sabanalarga"
+                </div>
+<div class="flex items-center space-x-3 mt-2 text-[10px] font-mono text-slate-300">
+<span>Conv: <strong class="text-white">5</strong></span>
+<span class="text-cyan-500/50">|</span>
+<span>Cotiz. hoy: <strong class="text-cyan-300">3</strong></span>
+</div>
+</div>
+</div>
+</div>
+<!-- 5) SUPERVISOR IA (ESTACIÓN CENTRAL MÁS GRANDE Y ELEVADA CON VISIÓN) -->
+<div class="group relative rounded-2xl bg-[#140b2b]/95 border-2 border-purple-500/70 p-4 backdrop-blur-lg glow-purple transform -translate-y-3 shadow-2xl z-20 transition-all">
+<!-- Partículas púrpuras ascendentes -->
+<div class="absolute -top-4 left-1/2 w-2 h-2 rounded-full bg-purple-400 particle-1"></div>
+<div class="absolute -top-6 left-1/4 w-1.5 h-1.5 rounded-full bg-indigo-300 particle-2"></div>
+<div class="absolute -top-5 right-1/3 w-1.5 h-1.5 rounded-full bg-purple-300 particle-3"></div>
+<div class="flex items-center space-x-4">
+<!-- Retrato Hexagonal Grande con Anillo Violeta #8B5CF6 -->
+<div class="relative w-24 h-24 flex-shrink-0 flex items-center justify-center">
+<div class="absolute inset-0 rounded-full border-2 border-purple-400 shadow-[0_0_25px_#8b5cf6] anim-pulse-subtle"></div>
+<div class="w-[84px] h-[84px] hex-clip bg-slate-900 overflow-hidden border border-purple-300/60">
+<img alt="SUPERVISOR IA" class="w-full h-full object-cover" src="avatares/supervisor.png"/>
+</div>
+<!-- Master Core Badge -->
+<span class="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-purple-950 border-2 border-purple-400 flex items-center justify-center text-xs text-purple-200">
+                  👁️
+                </span>
+</div>
+<!-- Información de Master Supervisor -->
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<div class="flex items-center space-x-2">
+<h3 class="font-space font-bold text-base tracking-wider text-purple-100 uppercase">SUPERVISOR IA</h3>
+<span class="text-[9px] px-1.5 py-0.5 rounded bg-purple-900/60 text-purple-300 border border-purple-400/40 font-mono">SWARM MASTER</span>
+</div>
+<span class="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold tracking-wider bg-purple-950 text-purple-300 border border-purple-500/70 flex items-center space-x-1.5 shadow-[0_0_10px_rgba(139,92,246,0.3)]">
+<span class="w-2 h-2 rounded-full bg-purple-400 anim-pulse-subtle"></span>
+<span>SUPERVISANDO</span>
+</span>
+</div>
+<p class="text-[11px] text-purple-200/70 mt-0.5">Orquestación y auditoría de enjambre</p>
+<div class="mt-1.5 px-2.5 py-1.5 rounded-lg bg-[#0b041a] border border-purple-500/40 text-[11px] font-mono text-purple-200 font-medium truncate shadow-inner">
+                  "Auditando 27 conversaciones en curso"
+                </div>
+<div class="flex items-center space-x-4 mt-2 text-[10.5px] font-mono">
+<span class="text-slate-300">Escaladas: <strong class="text-purple-300">2 a humano</strong></span>
+<span class="text-purple-500/50">|</span>
+<span class="text-slate-300">Errores: <strong class="text-emerald-400 font-bold">0 errores</strong></span>
+</div>
+</div>
+</div>
+</div>
+<!-- 6) AGENTE CAMPO -->
+<div class="group relative rounded-xl bg-[#141208]/90 border border-amber-500/50 p-3.5 backdrop-blur-md glow-amber transition-all">
+<div class="flex items-center space-x-3.5">
+<!-- Retrato Hexagonal con Anillo Ámbar (ESPERANDO) -->
+<div class="relative w-20 h-20 flex-shrink-0 flex items-center justify-center">
+<div class="absolute inset-0 rounded-full border-2 border-amber-400/90 shadow-[0_0_12px_#f59e0b] anim-pulse-subtle"></div>
+<div class="w-[72px] h-[72px] hex-clip bg-slate-900 overflow-hidden border border-amber-400/40">
+<img alt="AGENTE CAMPO" class="w-full h-full object-cover" src="avatares/campo.png"/>
+</div>
+<span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-amber-950 border border-amber-400 flex items-center justify-center text-[10px] text-amber-300">
+                  ⏱️
+                </span>
+</div>
+<!-- Información del Agente -->
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<h3 class="font-space font-bold text-sm tracking-wider text-white uppercase">AGENTE CAMPO</h3>
+<span class="px-2 py-0.5 rounded text-[9px] font-mono font-semibold tracking-wider bg-amber-950/90 text-amber-300 border border-amber-500/60 flex items-center space-x-1">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+<span>ESPERANDO</span>
+</span>
+</div>
+<p class="text-[10px] text-slate-400 mt-0.5">Instalaciones y visitas</p>
+<div class="mt-1.5 px-2 py-1 rounded bg-[#0d0902] border border-amber-500/30 text-[10.5px] font-mono text-amber-200 truncate">
+                  "Esperando checklist del técnico"
+                </div>
+<div class="flex items-center space-x-3 mt-2 text-[10px] font-mono text-slate-300">
+<span>Órdenes abiertas: <strong class="text-amber-300">4</strong></span>
+<span class="text-amber-500/50">|</span>
+<span>Zona: <strong class="text-white">Norte</strong></span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- PANEL DERECHO — "EVENTOS EN TIEMPO REAL" (360px de ancho, fondo #0F172A, alto completo) -->
+<aside class="w-[360px] min-w-[360px] bg-[#0F172A] border-l border-cyan-500/20 flex flex-col z-20">
+<!-- Encabezado con punto rojo y rótulo "EN VIVO" -->
+<div class="h-12 px-4 border-b border-cyan-500/20 flex items-center justify-between bg-[#0b1326]">
+<div class="flex items-center space-x-2.5">
+<span class="w-2.5 h-2.5 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444] live-stream-pulse"></span>
+<span class="font-space font-bold text-xs tracking-widest text-white uppercase">EVENTOS EN TIEMPO REAL</span>
+</div>
+<span class="px-2 py-0.5 rounded bg-red-950/80 border border-red-500/40 text-red-300 font-mono text-[9px] font-bold tracking-wider">
+          EN VIVO
+        </span>
+</div>
+<!-- Feed Forense: Línea de tiempo vertical con línea cian de 1px y nodos luminosos -->
+<div class="flex-1 overflow-y-auto px-4 py-3.5 space-y-3 relative">
+<!-- Línea cian vertical de 1px -->
+<div class="absolute top-4 bottom-4 left-[27px] w-[1px] bg-cyan-500/30"></div>
+<!-- Evento 1: Recién llegado (Resaltado) -->
+<div class="relative flex items-start space-x-3 pl-1 bg-cyan-950/30 border border-cyan-500/50 p-2 rounded-lg shadow-[0_0_12px_rgba(6,182,212,0.15)]">
+<div class="w-3.5 h-3.5 rounded-full bg-cyan-400 border-2 border-slate-900 shadow-[0_0_8px_#06b6d4] mt-0.5 z-10 flex-shrink-0"></div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<span class="font-mono text-[10px] text-cyan-300 font-bold">10:43:02</span>
+<span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-900/60 text-cyan-200">NUEVO</span>
+</div>
+<div class="text-[11px] font-semibold text-white mt-0.5">SOPORTE FIBRA</div>
+<p class="text-[10px] text-cyan-100/90 leading-tight">Respuesta generada y enviada a WhatsApp</p>
+</div>
+</div>
+<!-- Evento 2 -->
+<div class="relative flex items-start space-x-3 pl-1">
+<div class="w-3.5 h-3.5 rounded-full bg-amber-400 border-2 border-slate-900 shadow-[0_0_6px_#f59e0b] mt-0.5 z-10 flex-shrink-0"></div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<span class="font-mono text-[10px] text-slate-400">10:43:00</span>
+<span class="text-[9px] font-mono text-amber-400">342 ms</span>
+</div>
+<div class="text-[11px] font-semibold text-slate-200">SMARTOLT</div>
+<p class="text-[10px] text-slate-400 leading-tight">Consulta de ONU completada (-19.2 dBm OK)</p>
+</div>
+</div>
+<!-- Evento 3 -->
+<div class="relative flex items-start space-x-3 pl-1">
+<div class="w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-slate-900 mt-0.5 z-10 flex-shrink-0"></div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<span class="font-mono text-[10px] text-slate-400">10:42:51</span>
+<span class="text-[9px] font-mono text-emerald-400">CC# 1042***</span>
+</div>
+<div class="text-[11px] font-semibold text-slate-200">IDENTIDAD</div>
+<p class="text-[10px] text-slate-400 leading-tight">Cliente verificado por cédula en CRM</p>
+</div>
+</div>
+<!-- Evento 4 -->
+<div class="relative flex items-start space-x-3 pl-1">
+<div class="w-3.5 h-3.5 rounded-full bg-cyan-400 border-2 border-slate-900 mt-0.5 z-10 flex-shrink-0"></div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<span class="font-mono text-[10px] text-slate-400">10:42:47</span>
+<span class="text-[9px] font-mono text-cyan-400">Triaje</span>
+</div>
+<div class="text-[11px] font-semibold text-slate-200">ROUTER IA</div>
+<p class="text-[10px] text-slate-400 leading-tight">Derivado a Soporte Fibra (intención: falla LOS)</p>
+</div>
+</div>
+<!-- Evento 5 -->
+<div class="relative flex items-start space-x-3 pl-1">
+<div class="w-3.5 h-3.5 rounded-full bg-cyan-400 border-2 border-slate-900 mt-0.5 z-10 flex-shrink-0"></div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<span class="font-mono text-[10px] text-slate-400">10:42:44</span>
+<span class="text-[9px] font-mono text-slate-400">+57 312***</span>
+</div>
+<div class="text-[11px] font-semibold text-slate-200">ROUTER IA</div>
+<p class="text-[10px] text-slate-400 leading-tight">Nueva conversación de WhatsApp entrante</p>
+</div>
+</div>
+<!-- Evento 6 -->
+<div class="relative flex items-start space-x-3 pl-1">
+<div class="w-3.5 h-3.5 rounded-full bg-purple-400 border-2 border-slate-900 shadow-[0_0_6px_#8b5cf6] mt-0.5 z-10 flex-shrink-0"></div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<span class="font-mono text-[10px] text-slate-400">10:42:31</span>
+<span class="text-[9px] font-mono text-purple-300">Escalado L3</span>
+</div>
+<div class="text-[11px] font-semibold text-purple-200">SUPERVISOR IA</div>
+<p class="text-[10px] text-slate-400 leading-tight">Conversación escalada a operador humano</p>
+</div>
+</div>
+<!-- Evento 7 -->
+<div class="relative flex items-start space-x-3 pl-1">
+<div class="w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-slate-900 mt-0.5 z-10 flex-shrink-0"></div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between">
+<span class="font-mono text-[10px] text-slate-400">10:41:58</span>
+<span class="text-[9px] font-mono text-emerald-400">Pago OK</span>
+</div>
+<div class="text-[11px] font-semibold text-slate-200">FACTURACIÓN</div>
+<p class="text-[10px] text-slate-400 leading-tight">Acuerdo de pago registrado y servicio activo</p>
+</div>
+</div>
+</div>
+<!-- Pie del Panel Derecho: Buffer & Socket Telemetría -->
+<div class="h-10 px-4 border-t border-cyan-500/20 flex items-center justify-between text-[10px] font-mono text-slate-400 bg-[#0b1326]">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+<span>WSS://DEXTER.STREAM</span>
+</div>
+<span class="text-cyan-400">0 DROPS</span>
+</div>
+</aside>
+</main>
+<!-- ========================================================================= -->
+<!-- FRANJA INFERIOR — "TRAZA DE CONVERSACIÓN" (altura 200px, ancho completo)   -->
+<!-- ========================================================================= -->
+<footer class="h-[200px] min-h-[200px] bg-[#050c1c] border-t border-cyan-500/30 px-6 py-3 flex flex-col justify-between z-30">
+<!-- Título de la Franja & Estado del Incidente -->
+<div class="flex items-center justify-between">
+<div class="flex items-center space-x-3">
+<div class="flex items-center space-x-2">
+<svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<circle cx="18" cy="5" r="3"></circle>
+<circle cx="6" cy="12" r="3"></circle>
+<circle cx="18" cy="19" r="3"></circle>
+<line x1="8.59" x2="15.42" y1="13.51" y2="17.49"></line>
+<line x1="15.41" x2="8.59" y1="6.51" y2="10.49"></line>
+</svg>
+<span class="font-space font-bold text-xs tracking-wider text-white uppercase">TRAZA DE CONVERSACIÓN EN VIVO</span>
+</div>
+<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-500/30">
+          FLUJO ACTIVO EN TIEMPO REAL
+        </span>
+</div>
+<!-- Resumen derecho de la franja -->
+<div class="flex items-center space-x-6 text-xs font-mono bg-slate-900/80 px-4 py-1.5 rounded-lg border border-cyan-500/20">
+<div>
+<span class="text-slate-500 text-[10px] uppercase">ID CONVERSACIÓN:</span>
+<span class="text-cyan-300 font-bold ml-1.5">#TRZ-9842-CO</span>
+</div>
+<div class="h-3 w-[1px] bg-slate-700"></div>
+<div>
+<span class="text-slate-500 text-[10px] uppercase">CLIENTE:</span>
+<span class="text-white font-medium ml-1.5">Carlos E. Mendoza (Sabanalarga)</span>
+</div>
+<div class="h-3 w-[1px] bg-slate-700"></div>
+<div>
+<span class="text-slate-500 text-[10px] uppercase">TIEMPO TOTAL:</span>
+<span class="text-emerald-400 font-bold ml-1.5">4,2 s</span>
+</div>
+<div class="h-3 w-[1px] bg-slate-700"></div>
+<div>
+<span class="text-slate-500 text-[10px] uppercase">HERRAMIENTAS:</span>
+<span class="text-cyan-300 font-bold ml-1.5">3 EJECUTADAS</span>
+</div>
+</div>
+</div>
+<!-- PIPELINE HORIZONTAL: SEIS NODOS UNIDOS POR LÍNEAS TIPO CIRCUITO Y FLECHAS ANIMADAS -->
+<div class="relative flex items-center justify-between px-8 py-2">
+<!-- Línea base horizontal tipo circuito -->
+<div class="absolute left-16 right-16 top-1/2 -translate-y-4 h-[2px] bg-cyan-500/25 z-0"></div>
+<!-- NODO 1: Cliente WhatsApp (Completado - cian sólido) -->
+<div class="relative z-10 flex flex-col items-center">
+<div class="w-11 h-11 rounded-lg bg-[#08152e] border-2 border-cyan-400 flex items-center justify-center text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.5)]">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<span class="text-[11px] font-space font-semibold text-white mt-1.5">Cliente WhatsApp</span>
+<span class="text-[10px] font-mono text-cyan-400 font-bold">0 ms</span>
+<span class="text-[8px] font-mono text-emerald-400 uppercase mt-0.5">COMPLETADO</span>
+</div>
+<!-- Flecha conector 1->2 -->
+<div class="text-cyan-400 font-mono text-xs z-10">➔</div>
+<!-- NODO 2: Router IA (Completado - cian sólido) -->
+<div class="relative z-10 flex flex-col items-center">
+<div class="w-11 h-11 rounded-lg bg-[#08152e] border-2 border-cyan-400 flex items-center justify-center text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.5)]">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<span class="text-[11px] font-space font-semibold text-white mt-1.5">Router IA</span>
+<span class="text-[10px] font-mono text-cyan-400 font-bold">810 ms</span>
+<span class="text-[8px] font-mono text-emerald-400 uppercase mt-0.5">COMPLETADO</span>
+</div>
+<!-- Flecha conector 2->3 -->
+<div class="text-cyan-400 font-mono text-xs z-10">➔</div>
+<!-- NODO 3: Verificación Identidad (Completado - cian sólido) -->
+<div class="relative z-10 flex flex-col items-center">
+<div class="w-11 h-11 rounded-lg bg-[#08152e] border-2 border-cyan-400 flex items-center justify-center text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.5)]">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<span class="text-[11px] font-space font-semibold text-white mt-1.5">Verificación ID</span>
+<span class="text-[10px] font-mono text-cyan-400 font-bold">420 ms</span>
+<span class="text-[8px] font-mono text-emerald-400 uppercase mt-0.5">COMPLETADO</span>
+</div>
+<!-- Flecha conector 3->4 -->
+<div class="text-cyan-400 font-mono text-xs z-10">➔</div>
+<!-- NODO 4: Soporte Fibra (Completado - cian sólido) -->
+<div class="relative z-10 flex flex-col items-center">
+<div class="w-11 h-11 rounded-lg bg-[#08152e] border-2 border-cyan-400 flex items-center justify-center text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.5)]">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<span class="text-[11px] font-space font-semibold text-white mt-1.5">Soporte Fibra</span>
+<span class="text-[10px] font-mono text-cyan-400 font-bold">1.100 ms</span>
+<span class="text-[8px] font-mono text-emerald-400 uppercase mt-0.5">COMPLETADO</span>
+</div>
+<!-- Flecha conector 4->5 (Pulsando) -->
+<div class="text-amber-400 font-mono text-xs z-10 anim-pulse-subtle">➔</div>
+<!-- NODO 5: SmartOLT (consultar_olt) (ACTUAL PULSANDO - ámbar) -->
+<div class="relative z-10 flex flex-col items-center">
+<div class="w-12 h-12 rounded-lg bg-[#1a1405] border-2 border-amber-400 flex items-center justify-center text-amber-300 shadow-[0_0_18px_#f59e0b] anim-pulse-subtle">
+<svg class="w-6 h-6" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<span class="text-[11px] font-space font-bold text-amber-300 mt-1.5">SmartOLT (consultar_olt)</span>
+<span class="text-[10px] font-mono text-amber-300 font-bold">342 ms (en curso)</span>
+<span class="text-[8px] font-mono text-amber-400 uppercase mt-0.5 font-bold">EJECUTANDO...</span>
+</div>
+<!-- Flecha conector 5->6 (Gris) -->
+<div class="text-slate-600 font-mono text-xs z-10">➔</div>
+<!-- NODO 6: Respuesta Enviada (PENDIENTE - gris) -->
+<div class="relative z-10 flex flex-col items-center opacity-65">
+<div class="w-11 h-11 rounded-lg bg-[#0b1220] border-2 border-slate-700 flex items-center justify-center text-slate-500">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<span class="text-[11px] font-space font-semibold text-slate-400 mt-1.5">Respuesta Enviada</span>
+<span class="text-[10px] font-mono text-slate-500 font-bold">Estim. 350 ms</span>
+<span class="text-[8px] font-mono text-slate-500 uppercase mt-0.5">EN COLA</span>
+</div>
+</div>
+<!-- Ticker final status -->
+<div class="flex items-center justify-between text-[10px] font-mono text-slate-500 pt-1 border-t border-cyan-500/10">
+<div class="flex items-center space-x-2">
+<span class="text-cyan-400 font-semibold">SEGURIDAD:</span>
+<span>E2E Encriptado SSL · TLS 1.3 · Cumplimiento Ley 1581 (Habeas Data)</span>
+</div>
+<div>
+<span>DEXTER COMMAND CENTER · EDICIÓN TELECOM B2B</span>
+</div>
+</div>
+</footer>
+<!-- CAPA SEMITRANSPARENTE OSCURA CON DESENFOQUE SUAVE (Foco interactivo) -->
+<div class="fixed inset-0 bg-[#030712]/50 backdrop-blur-[2px] z-40 pointer-events-none"></div>
+<!-- CONECTOR ÓPTICO / LÍNEA TELEMÉTRICA DE SOPORTE FIBRA HACIA EL PANEL DERECHO -->
+<svg class="fixed inset-0 w-[1920px] h-[1080px] pointer-events-none z-45">
+<defs>
+<lineargradient id="beamGradient" x1="0%" x2="100%" y1="0%" y2="0%">
+<stop offset="0%" stop-color="#f59e0b" stop-opacity="0.9"></stop>
+<stop offset="70%" stop-color="#fbbf24" stop-opacity="0.8"></stop>
+<stop offset="100%" stop-color="#00e5ff" stop-opacity="1"></stop>
+</lineargradient>
+</defs>
+<!-- Línea saliendo de la estación Soporte Fibra (~(890, 360)) hacia el panel derecho en x=1440 -->
+<path class="anim-pulse-subtle" d="M 880 340 H 1220 V 220 H 1440" fill="none" stroke="url(#beamGradient)" stroke-dasharray="6 4" stroke-width="2.5"></path>
+<circle class="anim-pulse-subtle" cx="880" cy="340" fill="#f59e0b" r="5"></circle>
+<circle class="anim-pulse-subtle" cx="1440" cy="220" fill="#00daf3" r="5"></circle>
+</svg>
+<!-- PANEL LATERAL DERECHO: DETALLE DE AGENTE (480px) -->
+<aside class="fixed top-0 right-0 w-[480px] h-full bg-[#0F172A] border-l border-cyan-500/40 shadow-[-20px_0_50px_rgba(0,0,0,0.85)] z-50 flex flex-col overflow-hidden select-none">
+<!-- Top Banner / Header con Retrato Grande & Botón Cerrar -->
+<div class="relative bg-[#081226] border-b border-cyan-500/30 p-5 flex flex-col justify-between">
+<div class="absolute top-3 right-3 flex items-center space-x-2">
+<span class="px-2 py-0.5 rounded text-[9px] font-mono tracking-wider bg-cyan-950 text-cyan-300 border border-cyan-800/60 uppercase">AGENTE #02</span>
+<!-- Botón de Cerrar (X) -->
+<button class="w-7 h-7 rounded border border-slate-700/80 bg-slate-900/90 text-slate-400 hover:text-white hover:border-cyan-400 flex items-center justify-center transition-all group" type="button">
+<svg class="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+</div>
+<div class="flex items-center space-x-4 mt-1">
+<!-- Retrato Cuadrado Grande 120x120 con Marco Hexagonal y Anillo Ámbar -->
+<div class="relative w-[120px] h-[120px] flex-shrink-0 flex items-center justify-center">
+<div class="absolute inset-0 rounded-full border-2 border-amber-400 shadow-[0_0_25px_#f59e0b] anim-pulse-subtle"></div>
+<div class="w-[108px] h-[108px] hex-clip bg-slate-900 overflow-hidden border-2 border-amber-300/80">
+<img alt="SOPORTE FIBRA - Sintética" class="w-full h-full object-cover" src="avatares/soporte.png"/>
+</div>
+<span class="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-amber-950 border-2 border-amber-400 flex items-center justify-center text-xs text-amber-300 shadow-[0_0_10px_#f59e0b]">
+          🔍
+        </span>
+</div>
+<!-- Títulos y Chip de Estado -->
+<div class="flex-1 min-w-0 pr-6">
+<div class="flex items-center space-x-2">
+<h2 class="font-space font-bold text-xl tracking-wider text-white uppercase">SOPORTE FIBRA</h2>
+</div>
+<p class="text-xs text-slate-300 font-mono mt-0.5">Diagnóstico técnico FTTH &amp; GPON</p>
+<p class="text-[10px] text-cyan-400/80 font-mono mt-0.5">Modelo: <span class="text-cyan-300">DeepSeek-V3 · FTTH Fine-Tuned</span></p>
+<div class="mt-2.5 flex items-center space-x-2">
+<span class="px-2.5 py-1 rounded text-[10px] font-mono font-bold tracking-wider bg-amber-950/90 text-amber-300 border border-amber-400 flex items-center space-x-1.5 shadow-[0_0_12px_rgba(245,158,11,0.4)]">
+<span class="w-2 h-2 rounded-full bg-amber-400 anim-pulse-subtle"></span>
+<span>CONSULTANDO</span>
+</span>
+<span class="text-[10px] font-mono text-slate-400">PID: #AGT-002-SF</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Fila de Métricas Principales (Monoespaciadas con divisores de 1px) -->
+<div class="grid grid-cols-4 divide-x divide-cyan-500/20 bg-[#070e1e] border-b border-cyan-500/20 py-2.5 px-2 text-center">
+<div class="px-1 flex flex-col justify-center">
+<span class="text-[9px] font-mono text-slate-400 uppercase tracking-wider">CONVERSACIONES</span>
+<span class="text-sm font-mono font-bold text-white mt-0.5">12 ACT</span>
+</div>
+<div class="px-1 flex flex-col justify-center">
+<span class="text-[9px] font-mono text-slate-400 uppercase tracking-wider">RESP. MEDIA</span>
+<span class="text-sm font-mono font-bold text-cyan-300 mt-0.5">1,4 s</span>
+</div>
+<div class="px-1 flex flex-col justify-center">
+<span class="text-[9px] font-mono text-slate-400 uppercase tracking-wider">ERRORES</span>
+<span class="text-sm font-mono font-bold text-emerald-400 mt-0.5">0 ERR</span>
+</div>
+<div class="px-1 flex flex-col justify-center">
+<span class="text-[9px] font-mono text-slate-400 uppercase tracking-wider">RESOLUCIÓN</span>
+<span class="text-sm font-mono font-bold text-cyan-200 mt-0.5">98%</span>
+</div>
+</div>
+<!-- Cuerpo Scrollable de Telemetría Detallada -->
+<div class="flex-1 overflow-y-auto p-4 space-y-4 font-sans text-slate-200">
+<!-- 1. TAREA EN CURSO -->
+<div class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3.5 relative overflow-hidden shadow-[0_0_15px_rgba(245,158,11,0.15)]">
+<div class="flex items-center justify-between mb-1.5">
+<span class="text-[10px] font-mono font-bold text-amber-300 uppercase tracking-widest flex items-center space-x-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-400 anim-pulse-subtle"></span>
+<span>TAREA EN CURSO</span>
+</span>
+<span class="text-[9px] font-mono text-amber-400/90 font-semibold">EN EJECUCIÓN (60%)</span>
+</div>
+<p class="text-xs font-mono font-medium text-amber-100 leading-snug">
+        "Analizando potencia óptica de la ONU del cliente #1042"
+      </p>
+<!-- Barra de Progreso Cian Animada -->
+<div class="w-full h-1.5 bg-slate-900 rounded-full mt-2.5 overflow-hidden border border-cyan-500/30">
+<div class="h-full bg-gradient-to-r from-cyan-400 to-amber-400 rounded-full w-[60%] shadow-[0_0_10px_#22d3ee]"></div>
+</div>
+<div class="flex items-center justify-between mt-2 pt-2 border-t border-amber-500/20 text-[10px] font-mono text-slate-300">
+<span class="text-amber-300 font-semibold">consultar_olt(serial=ALCLF8A2B1C9)</span>
+<span class="text-cyan-300 font-bold">342 ms</span>
+</div>
+</div>
+<!-- 2. HERRAMIENTAS AUTORIZADAS -->
+<div class="rounded-lg border border-cyan-500/20 bg-[#091124]/90 p-3">
+<div class="flex items-center justify-between mb-2">
+<span class="text-[10px] font-mono font-bold text-cyan-300 uppercase tracking-widest">HERRAMIENTAS AUTORIZADAS</span>
+<span class="text-[9px] font-mono text-slate-400">4 ACTIVAS</span>
+</div>
+<div class="space-y-1.5">
+<!-- Tool 1 -->
+<div class="flex items-center justify-between px-2.5 py-1.5 rounded bg-slate-900/80 border border-slate-800 text-[11px] font-mono">
+<div class="flex items-center space-x-2">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>
+<span class="text-white font-medium">SmartOLT</span>
+<span class="text-slate-400">(consultar_olt)</span>
+</div>
+<span class="text-[10px] text-cyan-300 font-semibold">128 usos</span>
+</div>
+<!-- Tool 2 -->
+<div class="flex items-center justify-between px-2.5 py-1.5 rounded bg-slate-900/80 border border-slate-800 text-[11px] font-mono">
+<div class="flex items-center space-x-2">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>
+<span class="text-white font-medium">WispHub CRM</span>
+<span class="text-slate-400">(buscar_cliente)</span>
+</div>
+<span class="text-[10px] text-cyan-300 font-semibold">94 usos</span>
+</div>
+<!-- Tool 3 -->
+<div class="flex items-center justify-between px-2.5 py-1.5 rounded bg-slate-900/80 border border-slate-800 text-[11px] font-mono">
+<div class="flex items-center space-x-2">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>
+<span class="text-white font-medium">Tickets</span>
+<span class="text-slate-400">(crear_ticket)</span>
+</div>
+<span class="text-[10px] text-cyan-300 font-semibold">31 usos</span>
+</div>
+<!-- Tool 4 -->
+<div class="flex items-center justify-between px-2.5 py-1.5 rounded bg-purple-950/20 border border-purple-500/30 text-[11px] font-mono">
+<div class="flex items-center space-x-2">
+<span class="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_6px_#8b5cf6]"></span>
+<span class="text-white font-medium">SmartOLT</span>
+<span class="text-slate-400">(reiniciar_ont)</span>
+</div>
+<div class="flex items-center space-x-1.5">
+<span class="text-[10px] text-slate-400">7 usos</span>
+<span class="text-[8px] px-1 py-0.2 rounded bg-purple-900/60 text-purple-200 border border-purple-400/50">REQ. CONFIRMACIÓN</span>
+</div>
+</div>
+</div>
+</div>
+<!-- 3. ÚLTIMAS ACCIONES (Timeline vertical forense) -->
+<div class="rounded-lg border border-cyan-500/20 bg-[#091124]/90 p-3">
+<div class="flex items-center justify-between mb-2">
+<span class="text-[10px] font-mono font-bold text-cyan-300 uppercase tracking-widest">ÚLTIMAS ACCIONES</span>
+<span class="text-[9px] font-mono text-cyan-400/70">EN VIVO</span>
+</div>
+<div class="relative pl-4 space-y-2.5 border-l border-cyan-500/30 ml-2">
+<!-- Acción 1 -->
+<div class="relative flex flex-col">
+<span class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-cyan-400 border border-slate-900 shadow-[0_0_6px_#06b6d4]"></span>
+<div class="flex items-center space-x-2">
+<span class="text-[10px] font-mono text-cyan-300 font-bold">10:43:02</span>
+<span class="text-[11px] text-white font-medium">Respuesta generada y enviada a WhatsApp</span>
+</div>
+</div>
+<!-- Acción 2 -->
+<div class="relative flex flex-col">
+<span class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-amber-400 border border-slate-900"></span>
+<div class="flex items-center space-x-2">
+<span class="text-[10px] font-mono text-slate-400">10:43:00</span>
+<span class="text-[11px] text-slate-200">Consulta de ONU completada (−19.2 dBm, OK)</span>
+</div>
+</div>
+<!-- Acción 3 -->
+<div class="relative flex flex-col">
+<span class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-amber-400/80 border border-slate-900"></span>
+<div class="flex items-center space-x-2">
+<span class="text-[10px] font-mono text-slate-400">10:42:58</span>
+<span class="text-[11px] text-slate-300">Herramienta <code class="text-amber-300 font-mono text-[10px]">consultar_olt</code> invocada</span>
+</div>
+</div>
+<!-- Acción 4 -->
+<div class="relative flex flex-col">
+<span class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border border-slate-900"></span>
+<div class="flex items-center space-x-2">
+<span class="text-[10px] font-mono text-slate-400">10:42:51</span>
+<span class="text-[11px] text-slate-300">Cliente verificado por cédula en CRM</span>
+</div>
+</div>
+<!-- Acción 5 -->
+<div class="relative flex flex-col">
+<span class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-cyan-400 border border-slate-900"></span>
+<div class="flex items-center space-x-2">
+<span class="text-[10px] font-mono text-slate-400">10:42:47</span>
+<span class="text-[11px] text-slate-300">Conversación recibida desde Router IA</span>
+</div>
+</div>
+</div>
+</div>
+<!-- 4. CONVERSACIONES ACTIVAS -->
+<div class="rounded-lg border border-cyan-500/20 bg-[#091124]/90 p-3">
+<div class="flex items-center justify-between mb-2">
+<span class="text-[10px] font-mono font-bold text-cyan-300 uppercase tracking-widest">CONVERSACIONES ACTIVAS</span>
+<span class="text-[9px] font-mono text-emerald-400 font-semibold">3 EN CURSO</span>
+</div>
+<div class="space-y-2">
+<!-- Cliente 1 -->
+<div class="p-2 rounded bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+<div class="flex items-center space-x-2.5 min-w-0">
+<div class="w-7 h-7 rounded-full bg-cyan-950 border border-cyan-400 flex items-center justify-center text-[10px] font-mono font-bold text-cyan-300 flex-shrink-0">
+              CM
+            </div>
+<div class="min-w-0">
+<div class="text-[11px] font-semibold text-white truncate">Carlos M. Mendoza</div>
+<p class="text-[10px] font-mono text-amber-300 truncate">"Falla LOS luz roja en módem"</p>
+</div>
+</div>
+<div class="flex items-center space-x-2 flex-shrink-0 pl-2">
+<span class="text-[10px] font-mono text-cyan-400">42s</span>
+<button class="px-2 py-0.5 rounded text-[9px] font-mono bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-900 transition-colors">
+              Ver traza
+            </button>
+</div>
+</div>
+<!-- Cliente 2 -->
+<div class="p-2 rounded bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+<div class="flex items-center space-x-2.5 min-w-0">
+<div class="w-7 h-7 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center text-[10px] font-mono font-bold text-slate-300 flex-shrink-0">
+              LR
+            </div>
+<div class="min-w-0">
+<div class="text-[11px] font-semibold text-white truncate">Lucía Ramírez</div>
+<p class="text-[10px] font-mono text-slate-400 truncate">"Lentitud en horario pico"</p>
+</div>
+</div>
+<div class="flex items-center space-x-2 flex-shrink-0 pl-2">
+<span class="text-[10px] font-mono text-slate-400">1m 15s</span>
+<button class="px-2 py-0.5 rounded text-[9px] font-mono bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-900 transition-colors">
+              Ver traza
+            </button>
+</div>
+</div>
+<!-- Cliente 3 -->
+<div class="p-2 rounded bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+<div class="flex items-center space-x-2.5 min-w-0">
+<div class="w-7 h-7 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center text-[10px] font-mono font-bold text-slate-300 flex-shrink-0">
+              JA
+            </div>
+<div class="min-w-0">
+<div class="text-[11px] font-semibold text-white truncate">Jorge Arbeláez</div>
+<p class="text-[10px] font-mono text-slate-400 truncate">"Reubicación de fibra óptica"</p>
+</div>
+</div>
+<div class="flex items-center space-x-2 flex-shrink-0 pl-2">
+<span class="text-[10px] font-mono text-slate-400">2m 04s</span>
+<button class="px-2 py-0.5 rounded text-[9px] font-mono bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-900 transition-colors">
+              Ver traza
+            </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Pie del Panel Fijo: Botones de Acción Operativa y Sincronización -->
+<div class="p-4 bg-[#081226] border-t border-cyan-500/30 flex flex-col space-y-2.5">
+<div class="grid grid-cols-2 gap-3">
+<button class="py-2 px-3 rounded bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-space font-bold text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-[0_0_15px_rgba(6,182,212,0.4)] transition-colors" type="button">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span>Ver conversaciones</span>
+</button>
+<button class="py-2 px-3 rounded border border-amber-400/60 bg-amber-950/30 hover:bg-amber-950/60 text-amber-300 font-space font-semibold text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 transition-colors" type="button">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewbox="0 0 24 24">
+<rect height="16" rx="1" width="4" x="6" y="4"></rect>
+<rect height="16" rx="1" width="4" x="14" y="4"></rect>
+</svg>
+<span>Pausar agente</span>
+</button>
+</div>
+<div class="flex items-center justify-between text-[9px] font-mono text-slate-500 pt-1">
+<span>SWARM HEARTBEAT: OK</span>
+<span>Última sincronización 10:43:27 · America/Bogotá</span>
+</div>
+</div>
+</aside></body>
+</html>

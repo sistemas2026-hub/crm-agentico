@@ -1,0 +1,554 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ LAS CINCO REGLAS DEL PASO A DESPACHO
+================================================================================
+
+QUE AFIRMAN ESTAS PRUEBAS
+-------------------------
+La TABLA: dado un grupo, un veredicto de labor y una confianza, si el ticket
+puede entrar solo a la cola de Despacho. Corre SIN modelo y SIN red, asi que
+cada regla se afirma sobre el RESULTADO y no sobre la existencia de un 'if'.
+
+Lo que estas pruebas NO cubren, y se dice para que nadie lo lea como cubierto:
+que el caso APAREZCA en 'GET /campo/casos-despachables/'. Eso es el efecto del
+otro lado del limite y tiene su propia prueba, con la base de datos puesta.
+
+LAS REGLAS, Y QUIEN LAS DECIDIO
+-------------------------------
+El cliente, el 14/10/2026, sobre la cola real de ese dia (71 tickets abiertos
+de 'soporte_tecnico' y 'operativo'). Cada bloque de abajo nombra su grupo y
+cuantos tickets tenia ese dia, porque una regla sin el caso que la motivo se
+reabre sola en la sesion siguiente.
+
+POR QUE CADA REGLA TIENE SU CONTRAFACTICO
+-----------------------------------------
+Una prueba que solo verifica que algo PASA no distingue "la regla funciona" de
+"todo pasa". El 14/10 ocho pruebas de este repositorio estuvieron en verde con
+el sintoma vivo por afirmar de menos. Asi que por cada "pasa" hay un "y esto
+NO pasa" al lado.
+================================================================================
+"""
+
+import pytest
+
+from operaciones import clasificacion_de_trabajo as clf
+from operaciones import paso_a_despacho as pad
+
+
+# =============================================================================
+#  andamio
+# =============================================================================
+
+def _medido(labor, porque="el equipo esta caido por perdida de señal optica"):
+    """Un veredicto de labor que salio de MEDIR el equipo."""
+    return {"labor": labor, "porque": porque, "fuente": "por_prueba",
+            "verificada": True}
+
+
+def _medicion(estado, *, senal="sin_dato", causa="", dbm=None, motivo="",
+              intentos=None):
+    """
+    Una medicion de 'diagnosticar_servicio' como la guarda
+    'medicion_de_fallas'. Desde la Fase 3 (16/10/2026) es lo que decide una
+    falla, no la labor de la lectura. 'intentos' es el contador de vueltas
+    seguidas sin poder medir (17/10/2026).
+    """
+    m = {"fuente": pad.FUENTE_MEDICION, "medido_con": pad.MEDIDO_CON,
+         "estado": estado, "senal": senal, "causa_caida": causa,
+         "senal_dbm": dbm, "motivo": motivo}
+    if intentos is not None:
+        m["intentos_sin_medir"] = intentos
+    return m
+
+
+def _leido(labor=clf.CORRECTIVO):
+    """Uno que salio de leer el TEXTO. Es la diferencia que decide todo."""
+    return {"labor": labor, "porque": "lo dice el texto del caso",
+            "fuente": "por_texto", "verificada": False}
+
+
+def _sin_concluir():
+    """No se pudo medir. NO es lo mismo que "el equipo esta sano"."""
+    return {"labor": clf.SIN_CONCLUIR,
+            "porque": "no se pudo traer la ficha tecnica del caso",
+            "fuente": "", "verificada": False}
+
+
+# =============================================================================
+#  REGLA 1 · FALLA DE SERVICIO  (24 tickets el 14/10)
+#  "no tiene internet" 20 · "intermitente/niveles altos" 3 · "lento" 1
+#  La medicion tiene que CONFIRMAR la falla.
+# =============================================================================
+
+#  DESDE EL 16/10/2026 (FASE 3) DECIDE LA MEDICION DEL EQUIPO, no la labor de
+#  la lectura, y pasa sola UNA salida: en linea con la señal fuera de rango.
+#  Decidido por el usuario ese dia: una caida por LOS/LOF va a una persona,
+#  porque desde la OLT no se distingue una fibra cortada de un equipo
+#  desenchufado. Las pruebas de abajo fijaban la regla vieja y se reescribieron
+#  con la nueva, sin borrar ninguna.
+
+def test_r1_caido_por_fibra_PASA_y_dice_su_duda():
+    """
+    Hasta la Fase 3 iba a una persona, por la ambiguedad de LOS. Desde la Fase
+    4 (16/10/2026) pasa, y el motivo deja escrita la duda para quien despacha.
+    """
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO),
+                    medicion=_medicion("caido", causa="fibra"))
+
+    assert d.pasa is True, d.porque
+    assert "desenchufado" in d.porque
+
+def test_r1_senal_debil_pasa_solo():
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO),
+                    medicion=_medicion("en_linea", senal="debil", dbm=-27.4))
+
+    assert d.pasa is True, d.porque
+    assert "-27.4 dBm" in d.porque, (
+        "el numero medido no viaja al porque: quien lea la decision despues "
+        "no puede saber contra que se decidio")
+
+
+def test_r1_CONTRAFACTICO_el_equipo_sano_NO_pasa():
+    """El reclamo dice que no hay internet y el equipo esta sano: se CONTRADICEN."""
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _leido(),
+                    medicion=_medicion("en_linea", senal="buena", dbm=-21.0))
+
+    assert d.pasa is False
+    assert "contradicen" in d.porque
+    assert "preguntarle al cliente" in d.porque
+
+
+def test_r1_sin_poder_medir_UNA_vuelta_espera_la_siguiente():
+    """
+    Decidido el 17/10/2026: con una sola vuelta, una caida del proveedor
+    mandaba a Despacho el equipo sano. Una pieza de antes del contador cuenta
+    como una vuelta.
+    """
+    for intentos in (1, None):
+        d = pad.decidir(pad.FALLA_DE_SERVICIO, _sin_concluir(),
+                        medicion=_medicion("desconocido", intentos=intentos,
+                                           motivo="el proveedor optico no respondio"))
+
+        assert d.pasa is False, d.porque
+        assert "vuelve a intentar" in d.porque
+
+
+def test_r1_sin_poder_medir_DOS_vueltas_seguidas_PASA():
+    """Decidido el 16/10/2026: solo se queda la falla que la medicion contradice."""
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _sin_concluir(),
+                    medicion=_medicion("desconocido", intentos=2,
+                                       motivo="el proveedor optico no respondio"))
+
+    assert d.pasa is True, d.porque
+    assert "dos vueltas seguidas" in d.porque
+    assert "Nada contradice" in d.porque
+
+
+def test_r1_falta_de_energia_NO_pasa_aunque_este_medido():
+    """
+    Esta MEDIDO y es firme. Lo que prueba es que una visita no sirve: el corte
+    de luz es en la casa del cliente.
+    """
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.NO_REQUIERE_VISITA),
+                    medicion=_medicion("caido", causa="sin_energia"))
+
+    assert d.pasa is False
+    assert "sin energia" in d.porque
+    assert "preguntarle" in d.porque
+
+
+def test_r1_debil_sin_el_numero_pasa_pero_no_se_afirma_confirmada():
+    """
+    Sin el nivel medido no hay contra que afirmar "confirmada"; pero tampoco
+    hay contradiccion, asi que pasa como "en linea sin nivel" (Fase 4).
+    """
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO),
+                    medicion=_medicion("en_linea", senal="debil", dbm=None))
+
+    assert d.pasa is True, d.porque
+    assert "CONFIRMADA" not in d.porque
+    assert "no trajo el nivel" in d.porque
+
+def test_r1_sin_medicion_no_pasa_aunque_la_labor_este_verificada():
+    """La regla vieja dejaba pasar una labor verificada. Sin medicion, espera."""
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO))
+
+    assert d.pasa is False
+    assert "falta la medicion" in d.porque
+
+
+# =============================================================================
+#  REGLA 2 · TRABAJO PEDIDO POR EL CLIENTE  (16 tickets el 14/10)
+#  domicilio 5 · TDT 4 · punto de TV 2 · retiro de equipos 2 · clave wifi 1 ·
+#  camara 1 · reconexion 1
+#  El equipo sano es NORMAL: la medicion no es condicion.
+# =============================================================================
+
+def test_r2_pasa_solo_con_el_equipo_SANO():
+    """
+    Cambiar la clave del wifi igual necesita que alguien vaya. Exigirle a la
+    medicion que confirme una falla dejaria afuera todos estos.
+    """
+    d = pad.decidir(pad.TRABAJO_PEDIDO, _leido(clf.TRABAJOS), confianza="alta")
+
+    assert d.pasa is True, d.porque
+    assert "el equipo sano es lo normal" in d.porque
+
+
+def test_r2_pasa_solo_aunque_NO_se_haya_podido_medir():
+    d = pad.decidir(pad.TRABAJO_PEDIDO, _sin_concluir(), confianza="alta")
+
+    assert d.pasa is True, (
+        "no se pudo medir y eso lo freno: para un trabajo pedido la medicion "
+        f"no es condicion. {d.porque}")
+
+
+def test_r2_con_confianza_media_TAMBIEN_pasa():
+    """
+    Hasta la Fase 3 se exigia 'alta'. El 16/10/2026 eso dejaba afuera cuatro
+    obras y dos trabajos con la hipotesis clara, y el usuario decidio que un
+    pedido de trabajo es una visita: pasan siempre, y la confianza se escribe.
+    """
+    d = pad.decidir(pad.TRABAJO_PEDIDO, _sin_concluir(), confianza="media")
+
+    assert d.pasa is True, d.porque
+    assert "confianza media" in d.porque
+
+def test_r2_sin_confianza_tambien_pasa():
+    """El modelo a veces omite la confianza del grupo (medido el 16/10): no frena."""
+    d = pad.decidir(pad.TRABAJO_PEDIDO, _sin_concluir(), confianza="")
+
+    assert d.pasa is True, d.porque
+
+# =============================================================================
+#  REGLA 3 · OBRA DE RED  (24 tickets el 14/10)
+#  CTO / caja / splitter 16 · ampliaciones de sector 6 · proyectos 2
+#  Medir al abonado del que cuelga el ticket no dice nada de una caja.
+# =============================================================================
+
+def test_r3_una_obra_de_red_pasa_sola_sin_medir():
+    d = pad.decidir(pad.OBRA_DE_RED, _sin_concluir(), confianza="alta")
+
+    assert d.pasa is True, d.porque
+    assert "obra de red" in d.porque
+
+
+def test_r3_con_confianza_baja_tambien_pasa():
+    d = pad.decidir(pad.OBRA_DE_RED, _sin_concluir(), confianza="baja")
+
+    assert d.pasa is True, d.porque
+
+# =============================================================================
+#  REGLA 4 · RECLAMO QUE NADA MIDE  (2 tickets el 14/10: paginas bloqueadas)
+#  Ni el ping ni los niveles opticos lo ven.
+# =============================================================================
+
+def test_r4_nunca_pasa_solo():
+    d = pad.decidir(pad.NADA_LO_MIDE, _leido(), confianza="alta")
+
+    assert d.pasa is False, (
+        "una pagina bloqueada no la ve ninguna herramienta de red: no hay "
+        "forma de que el Supervisor la respalde")
+    assert "ninguna herramienta de red puede comprobar" in d.porque
+
+
+def test_r4_tampoco_con_el_equipo_caido_y_medido():
+    """
+    EL ATAJO QUE ESTA PRUEBA CIERRA.
+
+    Que el equipo este caido y medido no convierte un reclamo de paginas
+    bloqueadas en una falla de servicio: son dos cosas distintas, y pasar por
+    la medicion de una para despachar la otra seria usar una garantia para
+    sostener algo que no garantiza.
+    """
+    d = pad.decidir(pad.NADA_LO_MIDE, _medido(clf.CORRECTIVO),
+                    confianza="alta")
+
+    assert d.pasa is False
+
+
+# =============================================================================
+#  REGLA 5 · NI CLIENTE NI RED  (5 tickets el 14/10)
+#  cambio de aceite · entrega de guantes · 3 que solo traen un nombre
+# =============================================================================
+
+def test_r5_nunca_pasa_solo():
+    d = pad.decidir(pad.NI_CLIENTE_NI_RED, _leido(), confianza="alta")
+
+    assert d.pasa is False
+    assert "no hay nada que diagnosticar" in d.porque
+
+
+def test_r5_tampoco_con_una_medicion_que_confirma():
+    d = pad.decidir(pad.NI_CLIENTE_NI_RED, _medido(clf.CORRECTIVO),
+                    confianza="alta")
+
+    assert d.pasa is False
+
+
+# =============================================================================
+#  LO QUE PASA CUANDO ALGO NO SE ENTIENDE  --  fail-closed
+# =============================================================================
+
+def test_sin_grupo_lo_mira_una_persona():
+    """
+    El modelo no supo clasificar, o dijo un valor que 'cerebro' descarto. La
+    ausencia del dato NO se completa con el grupo que mas se parezca.
+    """
+    d = pad.decidir("", _medido(clf.CORRECTIVO), confianza="alta")
+
+    assert d.pasa is False
+    assert "no pudo decir en que grupo" in d.porque
+
+
+def test_un_grupo_inventado_lo_mira_una_persona():
+    d = pad.decidir("urgente_de_verdad", _medido(clf.CORRECTIVO),
+                    confianza="alta")
+
+    assert d.pasa is False
+    assert "no declarado" in d.porque
+
+
+@pytest.mark.parametrize("basura", [None, "", 0, [], "un texto", {"otra": 1}])
+def test_un_veredicto_de_labor_que_no_se_entiende_no_pasa(basura):
+    """
+    FAIL-CLOSED ante cualquier forma inesperada. Un camino no previsto tiene
+    que degradar hacia "lo mira una persona", nunca hacia "pasa".
+    """
+    d = pad.decidir(pad.FALLA_DE_SERVICIO, basura, confianza="alta")
+
+    assert d.pasa is False
+
+
+def test_ninguna_decision_sale_sin_porque():
+    """
+    Una decision sin motivo es indistinguible de un bug, y es lo que alguien
+    va a leer dentro de seis meses para entender por que este caso se despacho
+    solo.
+    """
+    casos = [
+        (pad.FALLA_DE_SERVICIO, _medido(clf.CORRECTIVO), "alta"),
+        (pad.FALLA_DE_SERVICIO, _leido(), "alta"),
+        (pad.TRABAJO_PEDIDO, _sin_concluir(), "alta"),
+        (pad.TRABAJO_PEDIDO, _sin_concluir(), "baja"),
+        (pad.OBRA_DE_RED, _sin_concluir(), "alta"),
+        (pad.NADA_LO_MIDE, _medido(clf.CORRECTIVO), "alta"),
+        (pad.NI_CLIENTE_NI_RED, _leido(), "alta"),
+        ("", None, ""),
+    ]
+    for grupo, lv, conf in casos:
+        d = pad.decidir(grupo, lv, confianza=conf)
+        assert d.porque and len(d.porque) > 20, (grupo, d.porque)
+
+
+# =============================================================================
+#  EL REPARTO: 40 DE 71 PASAN SIN MEDICION, Y ESO ES DELIBERADO
+# =============================================================================
+
+def test_los_dos_grupos_que_pasan_sin_medicion_son_exactamente_dos():
+    """
+    Esta prueba existe para que agregar un tercero sea una DECISION y no un
+    descuido. El 14/10 el cliente decidio que 'trabajo_pedido' y 'obra_de_red'
+    --40 de los 71 tickets de ese dia-- pasen sin que ninguna medicion los
+    respalde, revirtiendo a proposito lo que 'models.py' advertia sobre mandar
+    gente por lo que dice un texto.
+
+    Sumar un grupo mas a ese conjunto amplia eso. Si es deliberado, se cambia
+    aca y se dice por que.
+    """
+    assert pad.SIN_CONDICION_DE_MEDICION == {pad.TRABAJO_PEDIDO,
+                                             pad.OBRA_DE_RED}
+    assert pad.SIEMPRE_UNA_PERSONA == {pad.NADA_LO_MIDE,
+                                       pad.NI_CLIENTE_NI_RED}
+    #  Y el quinto no esta en ninguno de los dos: lo decide la medicion.
+    assert pad.FALLA_DE_SERVICIO not in pad.SIN_CONDICION_DE_MEDICION
+    assert pad.FALLA_DE_SERVICIO not in pad.SIEMPRE_UNA_PERSONA
+
+
+# =============================================================================
+#  LAS DOS CONSTANTES COPIADAS, Y SU GUARDA
+# =============================================================================
+
+@pytest.mark.django_db
+def test_el_nivel_que_se_pide_es_el_reversible_y_no_el_critico():
+    """
+    'paso_a_despacho' escribe el 3 a mano en vez de importar el enum, para no
+    arrastrar 'models' y con el medio paquete (ver la nota de imports de ese
+    modulo). Una constante copiada sin guarda se desincroniza en silencio, y
+    esta prueba es la guarda.
+
+    Y afirma las DOS cosas: que es el reversible, y que NO es el critico. El 4
+    es "siempre lo aprueba una persona" y 'autonomia.puede' lo niega siempre:
+    pedir 4 seria pedir algo que ninguna configuracion puede conceder, o sea
+    apagar esto sin que el log lo diga.
+    """
+    from operaciones.models import PropuestaSupervisor as P
+
+    assert pad.NIVEL_PARA_PASAR == P.NIVEL_EJECUTAR_REVERSIBLE
+    assert pad.NIVEL_PARA_PASAR < P.NIVEL_CRITICO
+
+
+@pytest.mark.django_db
+def test_la_tarea_que_habilita_esto_es_PROPIA():
+    """
+    No puede ser la del cierre de desincronizados: habilitar una cosa no puede
+    habilitar la otra de rebote. Son dos efectos distintos y cada uno se pide
+    aparte.
+    """
+    from operaciones import tareas_delegadas as td
+
+    assert pad.TAREA != td.CERRAR_DESINCRONIZADOS
+    assert pad.TAREA != td.CICLO_AUTOMATICO
+
+
+def test_la_confianza_que_decide_es_la_DEL_GRUPO_y_no_la_de_la_hipotesis():
+    """
+    LA MEDICION QUE SEPARO LAS DOS  --  14/10/2026
+    ----------------------------------------------
+    La primera version uso 'cerebro.Confianza', la de la hipotesis sobre la
+    causa, como puerta. Medido sobre las 142 lecturas que existian:
+
+        media           84   59.2%
+        baja            29   20.4%
+        sin_hipotesis   24   16.9%
+        alta             5    3.5%   <- lo que la regla exigia
+
+    De los 40 tickets de 'trabajo_pedido' y 'obra_de_red' habrian pasado uno o
+    dos. Y el 16.9% de 'sin_hipotesis' señala el error de fondo: en un trabajo
+    pedido no hay causa que hipotetizar, asi que no hay nada sobre lo que estar
+    seguro. Se le pregunta lo que si corresponde: que tan claro esta el pedido.
+
+    Esta prueba fija que el valor exigido pertenece al enum NUEVO y no al de
+    'cerebro' -- si alguien los vuelve a unir, el umbral se vuelve
+    inalcanzable otra vez y el sintoma seria "no pasa nada", sin un error.
+    """
+    valores = pad.CAMPO_PARA_EL_MODELO[pad.CONFIANZA_DEL_GRUPO]["valores"]
+
+    #  Desde la Fase 4 (16/10/2026) la confianza no decide, pero sigue
+    #  pidiendose y escribiendose: el enum tiene que seguir siendo el nuevo.
+    assert set(valores) == {"alta", "media", "baja"}
+    #  Y NO es un valor del enum de la hipotesis, que trae 'sin_hipotesis':
+    #  esa palabra no tiene sentido cuando se pregunta por un pedido.
+    from operaciones.cerebro import Confianza
+
+    assert Confianza.SIN_HIPOTESIS not in valores
+
+
+def test_el_campo_de_la_confianza_del_grupo_le_dice_al_modelo_que_NO_es_la_otra():
+    """
+    Las dos se llaman 'confianza' y el modelo contesta las dos en el mismo
+    JSON. Si la ayuda no marca la diferencia, va a repetir el mismo valor --y
+    entonces el campo nuevo no mide nada nuevo.
+    """
+    ayuda = pad.CAMPO_PARA_EL_MODELO[pad.CONFIANZA_DEL_GRUPO]["ayuda"]
+
+    assert "no es lo mismo" in ayuda.lower()
+    assert "causa" in ayuda.lower()
+
+
+# =============================================================================
+#  DECIDIR SIN VOLVER A PAGAR EL MODELO
+# =============================================================================
+#
+#  EL AGUJERO QUE CIERRA, medido el 14/10/2026 con la puerta ya delegada:
+#  76 propuestas de ticket esperando y un tope de DIEZ lecturas por vuelta. Lo
+#  que decide el paso vivia solo en 'senal.datos', que muere con el ciclo, asi
+#  que las 66 restantes no podian pasar -- y un ticket frenado por una puerta
+#  cerrada necesitaba que el modelo lo leyera otra vez para reintentar.
+#
+#  Es la misma forma del bug que tenia atascados a los desincronizados.
+
+
+class _Propuesta:
+    """Solo lo que 'de_la_propuesta' mira."""
+
+    def __init__(self, evidencia):
+        self.evidencia = evidencia
+
+
+def _lectura_guardada(**claves):
+    #  'confianza_del_grupo' es la que decide desde el 14/10/2026 -- ver la
+    #  nota de CONFIANZA_DEL_GRUPO en 'paso_a_despacho'.
+    pieza = {"fuente": pad.FUENTE_DE_LA_LECTURA,
+             "dato": "lectura del reclamo: no tiene servicio",
+             "observado_en": "2026-10-14T18:00:00Z"}
+    pieza.update(claves)
+    return pieza
+
+
+def test_la_lectura_guardada_alcanza_para_decidir():
+    p = _Propuesta([_lectura_guardada(
+        grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
+        labor_verificada=True, labor_porque="caido por fibra",
+        confianza_del_grupo="alta"),
+        #  Desde la Fase 3 decide la medicion guardada, no la labor.
+        _medicion("en_linea", senal="debil", dbm=-27.4)])
+
+    d = pad.de_la_propuesta(p)
+
+    assert d.pasa is True, d.porque
+    assert "-27.4 dBm" in d.porque
+
+
+def test_la_lectura_MAS_NUEVA_es_la_que_vale():
+    """
+    La evidencia de un ticket se ACUMULA a proposito --es el historial del
+    reclamo-- asi que la ultima lectura es la que describe la situacion de hoy.
+    Tomar la primera decidiria con lo que pasaba la semana pasada.
+    """
+    p = _Propuesta([
+        _lectura_guardada(grupo=pad.NADA_LO_MIDE, labor="",
+                          labor_verificada=False,
+                          confianza_del_grupo="alta"),
+        _lectura_guardada(grupo=pad.FALLA_DE_SERVICIO, labor=clf.CORRECTIVO,
+                          labor_verificada=True,
+                          confianza_del_grupo="alta"),
+        _medicion("en_linea", senal="debil", dbm=-27.4),
+    ])
+
+    assert pad.de_la_propuesta(p).pasa is True
+
+
+def test_una_lectura_VIEJA_sin_grupo_no_decide_nada():
+    """
+    Las 76 propuestas que existian el 14/10 se leyeron antes de que el grupo se
+    guardara: tienen la frase pero no la clave. Eso NO se interpreta leyendo el
+    texto -- se queda esperando una relectura, y lo dice.
+    """
+    p = _Propuesta([{"fuente": pad.FUENTE_DE_LA_LECTURA,
+                     "dato": "lectura del reclamo: no tiene servicio desde ayer",
+                     "observado_en": "2026-10-13T20:00:00Z"}])
+
+    d = pad.de_la_propuesta(p)
+
+    assert d.pasa is False
+    assert "volver a leer" in d.porque
+
+
+def test_sin_ninguna_lectura_guardada_tampoco():
+    assert pad.de_la_propuesta(_Propuesta([])).pasa is False
+    assert pad.de_la_propuesta(_Propuesta(None)).pasa is False
+
+
+def test_la_evidencia_de_OTRA_fuente_no_se_confunde_con_una_lectura():
+    """
+    Un caso trae observaciones de varias fuentes --el caso, el calculo de
+    prioridad, el diagnostico optico--. Tomar cualquiera como lectura del
+    reclamo decidiria con un dato que no es el que se busca.
+    """
+    p = _Propuesta([{"fuente": "diagnostico", "grupo": pad.FALLA_DE_SERVICIO,
+                     "labor_verificada": True, "dato": "otra cosa"}])
+
+    assert pad.de_la_propuesta(p).pasa is False
+
+
+def test_la_fuente_que_se_repite_es_la_misma_de_las_dos_puntas():
+    """
+    'paso_a_despacho' repite la cadena en vez de importar el modulo de lectura,
+    que arrastra el ciclo entero. Una cadena copiada sin guarda se desincroniza
+    en silencio, y el sintoma seria "ningun ticket pasa" sin un solo error.
+    """
+    from operaciones import diagnostico_de_ticket as dxt
+
+    assert pad.FUENTE_DE_LA_LECTURA == dxt.FUENTE

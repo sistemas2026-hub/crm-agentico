@@ -1,0 +1,381 @@
+import { sequence } from '@sveltejs/kit/hooks';
+import { comoParametro } from '$lib/destino.js';
+import * as Sentry from '@sentry/sveltekit';
+/**
+ * SvelteKit Server Hooks with JWT Authentication
+ *
+ * Authentication Flow:
+ * 1. JWT tokens stored in cookies (httpOnly for security)
+ * 2. Decode JWT locally to check org context (no API call needed)
+ * 3. Only call switch-org if token doesn't have correct org
+ * 4. Routes protected based on authentication and org membership
+ */
+
+import { redirect } from '@sveltejs/kit';
+import axios from 'axios';
+import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
+import { describeError } from '$lib/server/log-safe.js';
+import { verificarToken, leerSinVerificar } from '$lib/server/v2/verificar-jwt.js';
+
+// Server-side (this file runs per-request on the server), so PRIVATE_ over
+// PUBLIC_ -- see the comment in lib/api-helpers.js for why.
+const API_BASE_URL = `${env.PRIVATE_DJANGO_API_URL || publicEnv.PUBLIC_DJANGO_API_URL}/api`;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * @typedef {{ default_currency?: string, currency_symbol?: string, default_country?: string|null }} OrgSettingsPayload
+ * @typedef {{ org_id?: string, org_name?: string, role?: string, user_id?: string, user_name?: string, user_email?: string, user_profile_pic?: string, exp?: number, iat?: number, org_settings?: OrgSettingsPayload }} JWTPayload
+ * @typedef {{ id: string, name: string }} OrgInfo
+ * @typedef {{ org: OrgInfo, role?: string }} ProfileInfo
+ * @typedef {{ id?: string, organizations?: Array<{ id: string, name: string }> }} UserInfo
+ * @typedef {{ access_token: string, refresh_token: string, current_org?: OrgInfo }} SwitchOrgResult
+ */
+
+/**
+ * Check if JWT token has the specified org_id in its payload
+ * @param {string} token - JWT token
+ * @param {string} orgId - Organization UUID to check
+ * @returns {boolean} True if token has the org context
+ */
+function tokenHasOrgContext(token, orgId) {
+  // Lee claims sin verificar, y puede: esta funcion solo se llama DESPUES de
+  // que verificarToken() haya confirmado la firma con el backend. Sobre un
+  // token verificado, los claims son del backend y valen.
+  const payload = leerSinVerificar(token)?.payload ?? null;
+  return Boolean(payload && payload.org_id === orgId);
+}
+
+/**
+ * Pregunta si el token es autentico. NO lo verifica acá: delega.
+ *
+ * La firma decía `@returns {JWTPayload|null}` de cuando esto decodificaba y
+ * miraba `exp`. Desde que es `async` devuelve una promesa, y svelte-check lo
+ * marcaba como error -- la anotación mentía justo sobre lo que hay que
+ * esperar: sin `await`, el resultado es una promesa, que es SIEMPRE verdadera,
+ * y la guarda de ruta dejaría pasar cualquier cookie.
+ *
+ * @param {string} accessToken - JWT access token
+ * @returns {Promise<JWTPayload|null>} los claims verificados, o null
+ */
+async function verifyTokenLocally(accessToken) {
+  // El nombre se conserva para no tocar los cinco puntos que lo llaman, pero
+  // ya NO verifica local: delega en el backend, que es el unico que tiene la
+  // clave. Ver $lib/server/v2/verificar-jwt.js sobre por que no se verifica
+  // aca --HS256 con la SECRET_KEY de Django-- y por que se cachea.
+  //
+  // Antes de este cambio, esta funcion decodificaba el token y miraba 'exp'.
+  // Un JWT fabricado a mano, sin ninguna clave, producia una sesion valida y
+  // con ella la IDENTIDAD que el motor guarda como autor de cada accion del
+  // relevo (autorDeSesion). El motor no podia detectarlo: autentica al
+  // servicio, no al usuario.
+  return await verificarToken(accessToken);
+}
+
+/**
+ * Refreshes currently in flight, keyed by the refresh token being spent.
+ * Entries are removed as soon as the request settles, so this holds at most one
+ * entry per user mid-refresh.
+ * @type {Map<string, Promise<{access: string, refresh?: string}|null>>}
+ */
+const refreshesInFlight = new Map();
+
+/**
+ * Refresh access token using refresh token.
+ *
+ * The backend rotates refresh tokens: the one we send is blacklisted server-side
+ * and a replacement comes back in `refresh`. Callers MUST persist that
+ * replacement, reusing the old token on the next refresh gets a 401 and logs
+ * the user out.
+ *
+ * Concurrent requests arriving with the same expired access token would
+ * otherwise each spend the same refresh token, and every one but the winner
+ * would 401. Requests sharing a refresh token therefore share one round-trip.
+ *
+ * @param {string} refreshToken - JWT refresh token
+ * @returns {Promise<{access: string, refresh?: string}|null>} New tokens or null if refresh failed
+ */
+function refreshAccessToken(refreshToken) {
+  const existing = refreshesInFlight.get(refreshToken);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = performTokenRefresh(refreshToken).finally(() => {
+    refreshesInFlight.delete(refreshToken);
+  });
+  refreshesInFlight.set(refreshToken, pending);
+
+  return pending;
+}
+
+/**
+ * Perform the actual refresh round-trip. Use refreshAccessToken() instead.
+ * It deduplicates concurrent callers.
+ *
+ * @param {string} refreshToken - JWT refresh token
+ * @returns {Promise<{access: string, refresh?: string}|null>} New tokens or null if refresh failed
+ */
+async function performTokenRefresh(refreshToken) {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/auth/refresh-token/`, {
+      refresh: refreshToken
+    });
+
+    if (!response.data?.access) {
+      return null;
+    }
+
+    return { access: response.data.access, refresh: response.data.refresh };
+  } catch (error) {
+    // Never log the raw error: its axios `config.data` is the refresh token.
+    console.error('Token refresh failed:', describeError(error));
+    return null;
+  }
+}
+
+// Profile info is now embedded in JWT - no API call needed
+
+/**
+ * Switch organization and get new tokens with org context.
+ *
+ * Passes the outgoing refresh token so the backend can blacklist it. Otherwise
+ * it stays valid against the previous org for the rest of its lifetime even
+ * though we replace it in the cookie below.
+ *
+ * @param {string} accessToken - Current JWT access token
+ * @param {string} orgId - Organization UUID to switch to
+ * @param {string} [refreshToken] - Refresh token being replaced, to be retired
+ * @returns {Promise<SwitchOrgResult|null>} New tokens and org data or null if failed
+ */
+async function switchOrg(accessToken, orgId, refreshToken) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}/auth/switch-org/`,
+      refreshToken ? { org_id: orgId, refresh: refreshToken } : { org_id: orgId },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return response.data;
+  } catch (error) {
+    // Never log the raw error: its axios `config.headers` carries the JWT.
+    console.error('Org switch failed:', describeError(error));
+    return null;
+  }
+}
+
+export const handleError = Sentry.handleErrorWithSentry();
+
+export const handle = sequence(Sentry.sentryHandle(), async function _handle({ event, resolve }) {
+  // Get tokens from cookies
+  /** @type {string | undefined} */
+  let accessToken = event.cookies.get('jwt_access');
+  // Reassigned if we rotate below, so later calls hand on the live token rather
+  // than the one we just spent.
+  let refreshToken = event.cookies.get('jwt_refresh');
+  const orgId = event.cookies.get('org');
+
+  /** @type {JWTPayload | null} */
+  let jwtPayload = null;
+
+  // Try to authenticate user (LOCAL JWT DECODE - no API call!)
+  if (accessToken) {
+    jwtPayload = await verifyTokenLocally(accessToken);
+
+    // If access token expired, try to refresh
+    if (!jwtPayload && refreshToken) {
+      const refreshed = await refreshAccessToken(refreshToken);
+      if (refreshed) {
+        // Update cookie with new access token
+        event.cookies.set('jwt_access', refreshed.access, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production',
+          maxAge: 60 * 60 * 24 // 1 day
+        });
+        // Persist the rotated refresh token. The one we just spent is
+        // blacklisted server-side, so keeping it would 401 the next refresh
+        // and bounce the user to /login an hour later.
+        if (refreshed.refresh) {
+          event.cookies.set('jwt_refresh', refreshed.refresh, {
+            path: '/',
+            httpOnly: true,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 60 * 60 * 24 * 365 // 1 year
+          });
+          refreshToken = refreshed.refresh;
+        }
+        accessToken = refreshed.access;
+        jwtPayload = await verifyTokenLocally(refreshed.access);
+      } else {
+        // Refresh failed, clear cookies
+        event.cookies.delete('jwt_access', { path: '/' });
+        event.cookies.delete('jwt_refresh', { path: '/' });
+        event.cookies.delete('org', { path: '/' });
+      }
+    }
+  }
+
+  // Set user in locals from JWT payload (no API call needed!)
+  if (jwtPayload) {
+    // Build user object from JWT claims
+    event.locals.user = {
+      id: jwtPayload.user_id,
+      name: jwtPayload.user_name || '',
+      email: jwtPayload.user_email || '',
+      profilePhoto: jwtPayload.user_profile_pic || ''
+    };
+
+    // Check if org cookie is set and token has org context
+    if (orgId && !UUID_RE.test(orgId)) {
+      // Invalid org cookie value, clear it
+      event.cookies.delete('org', { path: '/' });
+    } else if (orgId) {
+      const token = /** @type {string} */ (accessToken);
+
+      if (tokenHasOrgContext(token, orgId)) {
+        // Token has org context - extract org info from JWT (no API call!)
+        event.locals.org = {
+          id: jwtPayload.org_id || orgId,
+          name: jwtPayload.org_name || 'Organization'
+        };
+        /** @type {any} */ (event.locals).profile = {
+          org: event.locals.org,
+          role: jwtPayload.role || 'USER'
+        };
+        event.locals.org_name = jwtPayload.org_name || 'Organization';
+        // Extract org settings for currency/locale
+        event.locals.org_settings = jwtPayload.org_settings || {
+          default_currency: 'USD',
+          currency_symbol: '$',
+          default_country: null
+        };
+      } else {
+        // Token doesn't have org context, need to switch (1 API call)
+        const switchResult = await switchOrg(token, orgId, refreshToken);
+
+        if (switchResult) {
+          // Update cookies with new tokens that have org context
+          event.cookies.set('jwt_access', switchResult.access_token, {
+            path: '/',
+            httpOnly: true,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 60 * 60 * 24 // 1 day
+          });
+          event.cookies.set('jwt_refresh', switchResult.refresh_token, {
+            path: '/',
+            httpOnly: true,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 60 * 60 * 24 * 365 // 1 year
+          });
+
+          // Extract org info from switch result (no additional API call!)
+          event.locals.org = switchResult.current_org;
+          // The freshly-issued token carries this org's role and settings, so
+          // read both from it. Assuming 'USER' here would drop an admin's
+          // admin-only nav for the one navigation right after an org switch.
+          // Token recien EMITIDO por el backend en esta misma respuesta:
+          // su procedencia es la respuesta, no la cookie del navegador.
+          const newPayload = leerSinVerificar(switchResult.access_token)?.payload ?? null;
+          /** @type {any} */ (event.locals).profile = {
+            org: switchResult.current_org,
+            role: newPayload?.role || 'USER'
+          };
+          event.locals.org_name = switchResult.current_org?.name || 'Organization';
+          event.locals.org_settings = newPayload?.org_settings || {
+            default_currency: 'USD',
+            currency_symbol: '$',
+            default_country: null
+          };
+        } else {
+          // Org switch failed, clear org cookie and redirect
+          //
+          // Tambien conserva el destino: este camino se toma cuando la cookie
+          // de organizacion ya no vale, y quien venia de un enlace profundo
+          // tiene tanto derecho a volver ahi como el que fue rebotado por no
+          // tener sesion. Lo encontro la prueba, no yo: la busca por patron
+          // justamente porque una redireccion desnuda no falla en ningun lado
+          // -- solo pierde el enlace en silencio.
+          event.cookies.delete('org', { path: '/' });
+          throw redirect(
+            303,
+            `/org${comoParametro(event.url.pathname + (event.url.search || ''))}`);
+        }
+      }
+    }
+  }
+
+  // Route protection
+  const pathname = event.url.pathname;
+
+  // Define public routes (no auth required).
+  //
+  // `/portal` and `/csat` are the customer-facing pages reached from an emailed
+  // link, the invoice/estimate portals and the CSAT survey. They are anonymous
+  // by design: the only credential is the token in the URL, and the pages read
+  // nothing from the session or org (only the token-scoped public Django
+  // endpoints). Without them here the guard redirects every customer who clicks
+  // a link to /login, so the portal is unreachable. Server-side token→org
+  // resolution + RLS is what actually protects the data (see docs/PORTAL_RLS.md).
+  // `/solicitud` es el formulario de contratacion que abre un prospecto desde
+  // el link que le pasa el asistente por WhatsApp. Mismo caso que los de
+  // arriba, y con un motivo mas fuerte todavia: quien lo abre TODAVIA NO ES
+  // CLIENTE, asi que no tiene ni podria tener con que iniciar sesion.
+  //
+  // Sin esta linea la guarda lo mandaba a /login y el formulario era
+  // inalcanzable -- medido el 28/08/2026 contra produccion: /solicitud/<token>
+  // servia la pagina de login, byte por byte igual que una ruta inexistente.
+  // Es exactamente lo que este comentario ya advertia para /portal y /csat.
+  const PUBLIC_ROUTES = ['/login', '/logout', '/bounce', '/portal', '/csat', '/solicitud'];
+
+  // Define semi-protected routes (auth required, but no org)
+  const AUTH_ONLY_ROUTES = ['/org'];
+
+  // Check if public route
+  const isPublicRoute = PUBLIC_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(route + '/')
+  );
+
+  // Check if auth-only route
+  const isAuthOnlyRoute = AUTH_ONLY_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(route + '/')
+  );
+
+  // A DONDE QUERIA IR, para poder devolverlo ahi.
+  //
+  // Sin esto, cualquier enlace profundo abierto sin sesion se perdia: rebote
+  // a /login, de ahi a /org, y al elegir organizacion la persona terminaba en
+  // '/' sin saber por que. Reportado el 09/09/2026 con el expediente de una
+  // solicitud abierto desde un ticket del ISP -- pero le pasaba a cualquier
+  // enlace compartido.
+  //
+  // Se valida en destinoSeguro(): el valor viaja en la URL y sin filtro
+  // convertiria el login en un trampolin a otro sitio. Ver ese archivo.
+  const volverA = comoParametro(pathname + (event.url.search || ''));
+
+  if (isAuthOnlyRoute) {
+    // Auth-only route - require user
+    if (!jwtPayload) {
+      throw redirect(307, `/login${volverA}`);
+    }
+  } else if (!isPublicRoute) {
+    // Protected route - require user + org
+    if (!jwtPayload) {
+      throw redirect(307, `/login${volverA}`);
+    }
+    if (!event.locals.org) {
+      throw redirect(307, `/org${volverA}`);
+    }
+  }
+
+  return resolve(event);
+});
