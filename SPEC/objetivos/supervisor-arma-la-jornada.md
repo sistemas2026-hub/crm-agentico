@@ -87,6 +87,108 @@ activa sin jornada (lo que armó una persona no se toca):
 | 1.4 | Corre dentro de `correr_ciclo` y detrás de su propia tarea delegada; primero en sombra | Prueba de ciclo |
 | 1.5 | Mutaciones, regresión, RLS y `auditor-independiente` | Salida pegada |
 
+**Construida en código el 17/10, sin desplegar.** Pasó por
+`revisor-de-pii`, `auditor-de-frontera` y `auditor-independiente`; lo que
+encontraron está corregido abajo, salvo lo que se lista como pendiente. Lo que
+se decidió al construirla, cada cosa con su motivo:
+
+- **La sombra es la tarea sin delegar**, como en el paso a Despacho: el ciclo
+  calcula igual y deja en el log del worker `Supervisor: jornadas del dia ·
+  sombra (...)` con lo que armaría. Para encenderla: delegar
+  `armar_la_jornada_del_dia` desde el chat del Supervisor. **Rapilink ya
+  tiene el nivel 3** (lo usa el paso a Despacho): la tarea es la única puerta
+  que la mantiene en sombra, y `test_a2` lo fija.
+- **Tres puertas**: la tarea (propia), el nivel 3 de la empresa (sale del
+  catálogo, no es una copia) y que la empresa esté trabajando. Cualquiera que
+  no se pueda leer cuenta como cerrada.
+- **El horario se mira todo en el reloj del calendario** (`BusinessCalendar`):
+  no arma antes de la apertura ni después del cierre, y si a esa hora el
+  calendario ya está en otro día que la empresa, tampoco. La primera versión
+  mezclaba los dos relojes y armaba de noche un día terminado (frontera); la
+  segunda armaba a las 00:07, y una ausencia cargada esa mañana ya no sacaba
+  al líder (independiente). Si las zonas difieren, o las dos son UTC, el
+  resumen y el log lo avisan.
+- **El barrio de cada caso** va como pieza `localidad_del_cliente` en la
+  evidencia de la propuesta aceptada: se pide al motor una vez, con tope de 8
+  por vuelta (cada pedido son hasta 30 s). Sin conexión con el motor se deja
+  de preguntar en esa vuelta; un caso que falla solo se salta, para no dejar
+  a la cola entera detrás de uno roto. Si el motor contesta sin ficha del
+  cliente (se tragó un error del ISP), se vuelve a pedir; si el ISP no tiene
+  barrio, se guarda vacío y se pide a las 24 h. El motivo guardado es de un
+  conjunto cerrado.
+- **La labor** sale de la tabla grupo → labor de la empresa (editable en
+  Cuadrillas, sección del ciclo de la madrugada). Las visitas que pidió una
+  medición (`CASO_REQUIERE_VISITA`, sin lectura del reclamo) cuentan con la
+  labor del clasificador medido. **Lo ya despachado no cuenta**: un caso cuya
+  orden viva ya tiene a alguien, o ya se completó, no pide cuadrilla.
+  Empate: la que ya tiene, después la habitual, después correctivo,
+  instalación, trabajos.
+- **Dos cuadrillas en una zona**: cada una mira lo que queda sin cubrir. La
+  que tiene su habitual sin cubrir se queda con ella solo si lo que deja lo
+  puede tomar una que viene detrás; si no, toma la de más casos.
+- **Con el líder ausente no se arma**: sin líder no hay a quién entregarle la
+  orden (`destinatarios`). Un integrante con ausencia de día completo queda
+  afuera; una de media mañana no lo saca.
+- **"Tiene órdenes"** = alguien de la jornada tiene una orden ABIERTA
+  asignada, se le haya asignado cuando sea. Se vuelve a mirar justo antes de
+  escribir el reajuste.
+- **`armada_por`** en la jornada, de fábrica PERSONA. Corregirla a mano la
+  vuelve de una persona y el Supervisor deja de tocarla, también si la
+  corrige mientras él escribe. La tabla de Cuadrillas marca las otras como
+  "Armada sola".
+- **Auditoría**: armar y reajustar escriben una fila en `Activity`
+  (`JornadaDeCuadrilla`, actor vacío = el sistema, con la labor anterior y la
+  nueva) en la misma transacción que la jornada.
+- **La madrugada usa el mismo constructor**, cuenta con los barrios ya
+  guardados sin preguntarle al ISP, y fija el contexto RLS de cada empresa
+  (sin él no veía ausencias ni la cola, y su aviso fallaba: pre-existente).
+  Cambió su regla: antes copiaba zonas y labor del último día.
+
+**Cómo leer la sombra**: la línea comparable es **la primera después de la
+apertura**, que es cuando el modo real arma. Las siguientes vuelven a planear
+desde cero, como si nada estuviera armado, y no muestran el congelamiento por
+órdenes ni el reajuste (independiente, hallazgo 5).
+
+**B4 · Antes de encender, mirar en producción** (no se puede medir desde acá;
+lo corre el usuario, de solo lectura):
+
+- **La zona de la empresa y su calendario.** D-4 midió el 28/09 el calendario
+  en UTC, de 09 a 17, con 0 festivos. Así la fase correría de 04:07 a 11:07
+  de Bogotá y armaría los festivos. Si `Org.timezone` quedó en UTC, el aviso
+  "la empresa y su calendario están en UTC" lo va a decir en cada línea.
+- **Que los barrios de la cola tengan zona** (el mapeo de cada zona en
+  Cuadrillas): un barrio sin mapear cuenta como "barrio sin zona".
+- **Que esté delegada "Revisar solo, una vez por hora"**: sin ella no hay
+  vueltas solas, y por lo tanto tampoco línea de sombra.
+- **Las órdenes abiertas de cada líder**: si un líder carga órdenes viejas sin
+  cerrar, su labor queda congelada desde que se arma.
+
+**Para decidir el usuario** (no se cambió):
+
+- **La madrugada arma con su propio interruptor** (`ConfiguracionDeReparto.
+  activo`), sin la tarea ni el nivel. Ya era así antes y hoy está apagada en
+  Rapilink. Opciones: que deje de armar (la fase horaria ya lo hace), o que
+  pase por las mismas tres puertas.
+- **¿La sombra en la pantalla?** Hoy es una línea de log. Mostrar en
+  Cuadrillas "lo que armaría el Supervisor hoy" al lado de lo armado haría la
+  comparación sin leer logs.
+
+**Límites conocidos**:
+
+- **D5**: `contexto_del_caso` y el interruptor del motor usan `MOTOR_TENANT`
+  (rapilink por defecto). Con una segunda empresa, el barrio de sus casos se
+  buscaría en el ISP equivocado y su freno sería el de Rapilink.
+- **Una jornada ya armada no se desarma** si el líder declara la ausencia
+  después de la apertura: importa en la Fase 3.
+- **Dos clasificaciones**: la demanda usa el barrio del ISP y la tabla grupo →
+  labor; el reparto usa `orden.zona` y la labor del tipo de trabajo. Para la
+  Fase 3 tienen que coincidir.
+- **El panel de actividad del Supervisor no muestra todavía** las filas de
+  jornada (la entidad no está en `ENTIDADES_DEL_SUPERVISOR`).
+- **Fuera de este bloque, anterior**: el botón del ciclo (`ciclo_a_pedido`)
+  devuelve el resumen entero, que Celery guarda en Redis y escribe en el log
+  del worker con datos de cliente de las señales (`revisor-de-pii`, F1).
+
 ### Fases siguientes
 
 - **Fase 2 · Las órdenes**: crear la orden de cada caso de la cola de
@@ -137,10 +239,15 @@ activa sin jornada (lo que armó una persona no se toca):
   actual, y guardar manda solo lo que se cambió. **Falta volver a ponérselo
   después del deploy**: sin líder, una orden publicada no le llega a nadie
   (`cuadrillas.destinatarios`), así que la Fase 3 lo necesita.
+- **B4**: antes de encender la Fase 1, mirar en producción la zona de la
+  empresa y la de su calendario (con festivos), el mapeo de barrios a
+  zonas, que esté delegada la revisión horaria, y las órdenes abiertas de
+  cada líder. Detalle y motivo en la Fase 1, "B4 · Antes de encender".
 
 ## Bitácora
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 17/10/2026, tarde | Ficha abierta con las decisiones del usuario. `informe_de_jornadas` construido: 7 pruebas en verde con superusuario y con un rol que el RLS ata, 3 mutaciones muertas (no filtrar por empresa, comerse un día del rango, contar mal la repetición de zonas), ruff sin avisos (0.1) | Que el usuario lo corra y analizarlo (0.2) | `cf4c0855` |
-| 17/10/2026, 15:40 | Guardar la ficha de una cuadrilla ya no borra el líder, el vehículo ni las notas que no se tocaron, y el selector de líder ofrece las cuentas del equipo y siempre el líder actual (B3). 13 pruebas nuevas en verde y 6 mutaciones muertas, entre ellas la que devuelve el defecto; `svelte-check` sin avisos nuevos (86/27, los mismos de antes) | Volver a ponerle el líder a la cuadrilla, y marcar las zonas habituales (B2) | este commit |
+| 17/10/2026, 15:40 | Guardar la ficha de una cuadrilla ya no borra el líder, el vehículo ni las notas que no se tocaron, y el selector de líder ofrece las cuentas del equipo y siempre el líder actual (B3). 13 pruebas nuevas en verde y 6 mutaciones muertas, entre ellas la que devuelve el defecto; `svelte-check` sin avisos nuevos (86/27, los mismos de antes) | Volver a ponerle el líder a la cuadrilla, y marcar las zonas habituales (B2) | `e88255db` |
+| 17/10/2026, 18:20 | Fase 1 en código, sin desplegar: el Supervisor arma la jornada del día (la pareja de siempre, sus zonas habituales, la labor de la mayoría de los casos de Despacho de esas zonas), en sombra hasta que se delegue la tarea. Pasó por `revisor-de-pii`, `auditor-de-frontera` y `auditor-independiente`, con lo que encontraron corregido. 98 pruebas en verde con el rol de pruebas y con uno que el RLS ata; 40 mutaciones, 38 muertas a la primera y las 2 que sobrevivieron cubiertas con pruebas nuevas; regresión de `campo` y 31 archivos de `operaciones`: 1982 en verde y los mismos 12 rojos previos de origin. Migraciones `campo 0031` (dos columnas con valor de fábrica) y `common 0045` (solo opciones: no toca la base) | B2, B3 y B4 en producción; decidir la madrugada y si la sombra va a la pantalla; Fase 2 | este commit |

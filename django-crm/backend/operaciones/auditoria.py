@@ -71,6 +71,12 @@ ENTIDAD_SITUACION = "SituacionOperativa"
 #  agrega un valor que el modelo no conozca.
 ENTIDAD_CASO = "Case"
 
+#  LA JORNADA QUE ARMA SOLO  --  17/10/2026. El armado automatico escribe
+#  jornadas de cuadrilla, y el nivel 3 pide que se pueda ver que hizo
+#  (auditor de frontera). Declarada en 'Activity.ENTITY_TYPE_CHOICES' como las
+#  demas.
+ENTIDAD_JORNADA = "JornadaDeCuadrilla"
+
 #:  Las entidades que este modulo mira. NO es toda 'common.Activity' y no debe
 #:  serlo: sin este filtro el feed se llenaria de contactos editados y correos
 #:  enviados, que es cierto pero no es lo que esta pantalla pregunta.

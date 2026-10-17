@@ -41,6 +41,7 @@ el mismo aviso veinte veces y dejaria de leerlos.
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from celery import shared_task
@@ -48,6 +49,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from common.models import Notification, Org, Profile
+
+logger = logging.getLogger(__name__)
 
 
 def _ahora_local(org):
@@ -127,7 +130,20 @@ def correr_para(org, *, ahora_local=None, avisar=True) -> dict:
                "reparto": None, "pendientes": None}
 
     if config.copia_la_jornada:
-        resumen["jornadas"] = jornada_automatica.asegurar_jornadas(org, fecha)
+        #  LA MISMA REGLA QUE EL SUPERVISOR  --  17/10/2026: la labor sale de
+        #  los casos de Despacho de cada zona. Con los barrios ya guardados y
+        #  sin pedir ninguno: a esta hora no se le pregunta al ISP. Si contar
+        #  falla, cada cuadrilla sale con su labor habitual.
+        try:
+            from operaciones import armado_de_jornadas as adj
+            demanda = adj.demanda_de_despacho(
+                org, adj.propuestas_en_despacho(org))["por_zona"]
+        except Exception as e:                                   # noqa: BLE001
+            logger.warning("Ciclo de la madrugada: no se pudo contar la "
+                           "demanda de Despacho (%s)", type(e).__name__)
+            demanda = {}
+        resumen["jornadas"] = jornada_automatica.asegurar_jornadas(
+            org, fecha, demanda=demanda)
 
     #  SE CALCULA PARA CONTAR, NO PARA GUARDAR. La propuesta se recalcula sola
     #  cuando alguien abre la pantalla; esto es para que el aviso pueda decir
@@ -183,22 +199,34 @@ def ciclo_de_la_madrugada() -> dict:
     sin log y sin sintoma.
     """
     from campo.cuadrillas import configuracion_de_reparto
+    from common.tasks import clear_rls_context, set_rls_context
 
     salida = {"corridas": [], "salteadas": 0, "errores": []}
-    for org in Org.objects.filter(is_active=True):
-        try:
-            config = configuracion_de_reparto(org)
-            ahora_local = _ahora_local(org)
-            if not _le_toca(config, ahora_local):
-                salida["salteadas"] += 1
-                continue
-            salida["corridas"].append({
-                "org": str(org.id),
-                **correr_para(org, ahora_local=ahora_local),
-            })
-        except Exception as e:                                   # noqa: BLE001
-            # El tipo y no el texto: un mensaje de excepcion puede arrastrar
-            # datos de cliente, y esto queda en el log del worker.
-            salida["errores"].append({"org": str(org.id),
-                                      "error": type(e).__name__})
+    #  EL CONTEXTO DE CADA EMPRESA  --  auditor de frontera, 17/10/2026. Esta
+    #  tarea nunca lo fijaba: las tablas de Cuadrillas no tienen RLS y por eso
+    #  la jornada se armaba igual, pero las ausencias, los casos de Despacho y
+    #  las notificaciones si la tienen, y sin contexto devuelven cero filas sin
+    #  error. Armaba con el lider ausente y el aviso fallaba. Mismo patron que
+    #  `operaciones.tasks.ciclo_del_supervisor`, con el `finally` por el mismo
+    #  motivo: la variable es de sesion y la conexion vuelve al pool.
+    try:
+        for org in Org.objects.filter(is_active=True):
+            set_rls_context(org.id)
+            try:
+                config = configuracion_de_reparto(org)
+                ahora_local = _ahora_local(org)
+                if not _le_toca(config, ahora_local):
+                    salida["salteadas"] += 1
+                    continue
+                salida["corridas"].append({
+                    "org": str(org.id),
+                    **correr_para(org, ahora_local=ahora_local),
+                })
+            except Exception as e:                               # noqa: BLE001
+                # El tipo y no el texto: un mensaje de excepcion puede
+                # arrastrar datos de cliente, y esto queda en el log del worker.
+                salida["errores"].append({"org": str(org.id),
+                                          "error": type(e).__name__})
+    finally:
+        clear_rls_context()
     return salida

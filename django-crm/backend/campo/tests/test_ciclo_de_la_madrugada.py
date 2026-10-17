@@ -13,7 +13,8 @@ mirar. El shadow mode queda intacto: una persona sigue publicando.
 
 Se afirma sobre el EFECTO, no sobre la presencia del mecanismo:
 
-  - la jornada del dia aparece sola, copiada del ultimo dia trabajado
+  - la jornada del dia aparece sola: la gente del ultimo dia trabajado,
+    en sus zonas habituales (la regla del 17/10/2026)
   - correrlo dos veces deja lo mismo que correrlo una
   - una jornada armada a mano NO se pisa
   - quien esta de baja no se copia, y se dice cuantos quedaron afuera
@@ -66,6 +67,20 @@ def _persona(org, nombre, activa=True):
     return PersonaDeCampo.objects.create(org=org, nombre=nombre, activa=activa)
 
 
+def _habitual(cuadrilla, zonas, labor="correctivo"):
+    """Lo habitual de la cuadrilla.
+
+    DESDE EL 17/10/2026 LA JORNADA SALE DE ACA: las zonas habituales, y la
+    labor cuando no hay casos de Despacho que digan otra. Antes se copiaban
+    las zonas y la labor del ultimo dia, y estas pruebas sembraban solo eso;
+    sin lo habitual, la cuadrilla ahora no se arma, y una prueba como la `u`
+    seguiria en verde sin probar nada.
+    """
+    cuadrilla.labor_habitual = labor
+    cuadrilla.save(update_fields=["labor_habitual"])
+    cuadrilla.zonas_habituales.set(zonas)
+
+
 def _jornada(org, cuadrilla, fecha, zonas=(), gente=()):
     j = JornadaDeCuadrilla.objects.create(
         org=org, cuadrilla=cuadrilla, fecha=fecha, labor="correctivo"
@@ -89,6 +104,7 @@ def test_a_la_jornada_del_dia_se_copia_del_ultimo_dia_trabajado(
     from campo import jornada_automatica
 
     pedro = _persona(org_a, "Pedro Ayudante")
+    _habitual(cuadrilla, [norte])
     _jornada(org_a, cuadrilla, LUNES, zonas=[norte], gente=[(pedro, "ayudante")])
 
     r = jornada_automatica.asegurar_jornadas(org_a, MARTES)
@@ -111,6 +127,7 @@ def test_b_correrlo_dos_veces_deja_lo_mismo_que_correrlo_una(
     from campo import jornada_automatica
 
     pedro = _persona(org_a, "Pedro")
+    _habitual(cuadrilla, [norte])
     _jornada(org_a, cuadrilla, LUNES, zonas=[norte], gente=[(pedro, "ayudante")])
 
     jornada_automatica.asegurar_jornadas(org_a, MARTES)
@@ -126,6 +143,7 @@ def test_c_una_jornada_armada_a_mano_no_se_pisa(org_a, cuadrilla, norte):
     """La decision de una persona gana sobre un proceso de las 3 de la mañana."""
     from campo import jornada_automatica
 
+    _habitual(cuadrilla, [norte])
     _jornada(org_a, cuadrilla, LUNES, zonas=[norte])
     a_mano = _jornada(org_a, cuadrilla, MARTES, zonas=[norte])
     a_mano.labor = "trabajos"
@@ -145,6 +163,7 @@ def test_d_quien_esta_de_baja_NO_se_copia_y_se_dice_cuantos(
 
     activo = _persona(org_a, "Sigue Trabajando")
     de_baja = _persona(org_a, "Ya No Esta", activa=False)
+    _habitual(cuadrilla, [norte])
     _jornada(org_a, cuadrilla, LUNES, zonas=[norte],
              gente=[(activo, "tecnico"), (de_baja, "ayudante")])
 
@@ -180,23 +199,31 @@ def test_e_una_cuadrilla_que_nunca_trabajo_arranca_con_lo_habitual(
     assert [z.nombre for z in nueva.zonas.all()] == ["Norte"]
 
 
-def test_f_una_cuadrilla_sin_zona_queda_armada_pero_se_NOMBRA(
-    org_a, cuadrilla
+def test_f_una_cuadrilla_sin_zonas_habituales_NO_se_arma_y_se_NOMBRA(
+    org_a, cuadrilla, norte
 ):
-    """Vacio no es «cubre todas»: no va a recibir trabajo, y hay que saberlo."""
+    """Vacio no es «cubre todas»: no va a recibir trabajo, y hay que saberlo.
+
+    HASTA EL 17/10/2026 SE ARMABA IGUAL, sin zona, y se nombraba. Con la regla
+    nueva las zonas salen de lo habitual, y armar una jornada sin zona seria
+    una fila que parece trabajo hecho y no recibe nada. Que el ultimo dia
+    haya tenido zona no cambia eso: lo que no se repetia era justamente la
+    zona.
+    """
     from campo import jornada_automatica
 
-    _jornada(org_a, cuadrilla, LUNES, zonas=[])
+    _jornada(org_a, cuadrilla, LUNES, zonas=[norte])
 
     r = jornada_automatica.asegurar_jornadas(org_a, MARTES)
 
     assert r["sin_zona"] == ["Cuadrilla 1"]
-    assert JornadaDeCuadrilla.objects.filter(fecha=MARTES).exists()
+    assert not JornadaDeCuadrilla.objects.filter(fecha=MARTES).exists()
 
 
 def test_g_una_cuadrilla_dada_de_baja_no_entra(org_a, cuadrilla, norte):
     from campo import jornada_automatica
 
+    _habitual(cuadrilla, [norte])
     _jornada(org_a, cuadrilla, LUNES, zonas=[norte])
     cuadrilla.activa = False
     cuadrilla.save()
@@ -437,6 +464,7 @@ def test_t_el_ciclo_deja_la_jornada_y_avisa(
     from campo import tasks
 
     _config(org_a)
+    _habitual(cuadrilla, [norte])
     _jornada(org_a, cuadrilla, LUNES, zonas=[norte])
     _orden(org_a, version, 1)
 
@@ -467,6 +495,7 @@ def test_u_el_ciclo_NO_publica_ninguna_asignacion(
     from campo import tasks
 
     _config(org_a)
+    _habitual(cuadrilla, [norte])
     _jornada(org_a, cuadrilla, LUNES, zonas=[norte])
     _orden(org_a, version, 1)
 
@@ -480,6 +509,7 @@ def test_v_el_ciclo_marca_que_ya_corrio(org_a, cuadrilla, norte):
     from campo import tasks
 
     config = _config(org_a)
+    _habitual(cuadrilla, [norte])
     _jornada(org_a, cuadrilla, LUNES, zonas=[norte])
 
     ahora = dt.datetime(2026, 10, 6, 3, 5, tzinfo=dt.timezone.utc)
@@ -501,6 +531,7 @@ def test_w_una_empresa_rota_no_deja_sin_jornada_a_las_demas(
 
     _config(org_a)
     _config(org_b)
+    _habitual(cuadrilla, [norte])
     _jornada(org_a, cuadrilla, LUNES, zonas=[norte])
 
     original = tasks.correr_para
@@ -636,6 +667,7 @@ def test_z3_el_aviso_nombra_los_TIPOS_sin_clasificar(org_a, cuadrilla, norte):
     from campo import tasks
 
     _config(org_a)
+    _habitual(cuadrilla, [norte])
     _jornada(org_a, cuadrilla, LUNES, zonas=[norte])
     retiro = _tipo(org_a, "retiro", labor="")
     _orden(org_a, retiro, 1)

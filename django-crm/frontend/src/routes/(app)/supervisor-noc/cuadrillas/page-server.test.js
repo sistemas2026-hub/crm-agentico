@@ -25,6 +25,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const editarCuadrilla = vi.fn();
 const crearCuadrilla = vi.fn();
+const guardarConfiguracionDeReparto = vi.fn();
 
 vi.mock('$lib/server/v2/cuadrillas.js', () => {
   const nada = async () => ({});
@@ -45,7 +46,7 @@ vi.mock('$lib/server/v2/cuadrillas.js', () => {
     crearPersonaDeCampo: nada,
     editarPersonaDeCampo: nada,
     leerConfiguracionDeReparto: nada,
-    guardarConfiguracionDeReparto: nada,
+    guardarConfiguracionDeReparto: (...a) => guardarConfiguracionDeReparto(...a),
     leerTiposDeTrabajo: nada,
     clasificarTipoDeTrabajo: nada
   };
@@ -157,5 +158,37 @@ describe('la ficha de cuadrilla manda solo lo que la persona cambió', () => {
     const [, cuerpo] = crearCuadrilla.mock.calls[0];
     expect(cuerpo.lider).toBe('pr-jeider');
     expect(cuerpo).not.toHaveProperty('vehiculo');
+  });
+});
+
+describe('la configuración del reparto manda la labor de cada caso solo si viene', () => {
+  const LO_DE_SIEMPRE = { hora_local: '3', tope_por_cuadrilla: '8', copia_la_jornada: '1' };
+
+  beforeEach(() => {
+    guardarConfiguracionDeReparto.mockReset().mockResolvedValue({
+      activo: false, hora_local: 3, tope_por_cuadrilla: 8
+    });
+  });
+
+  it('con los tres selectores, viaja la tabla entera y «no cuenta» va vacío', async () => {
+    await actions.reparto_config(envio({
+      ...LO_DE_SIEMPRE,
+      labor_de_falla_de_servicio: 'correctivo',
+      labor_de_trabajo_pedido: 'instalacion',
+      labor_de_obra_de_red: ''
+    }));
+    const [, cuerpo] = guardarConfiguracionDeReparto.mock.calls[0];
+    expect(cuerpo.labor_por_grupo).toEqual({
+      falla_de_servicio: 'correctivo',
+      trabajo_pedido: 'instalacion',
+      obra_de_red: ''
+    });
+  });
+
+  it('una pantalla vieja, sin los selectores, no manda la tabla y no la borra', async () => {
+    await actions.reparto_config(envio(LO_DE_SIEMPRE));
+    const [, cuerpo] = guardarConfiguracionDeReparto.mock.calls[0];
+    expect(cuerpo).not.toHaveProperty('labor_por_grupo');
+    expect(cuerpo.tope_por_cuadrilla).toBe('8');
   });
 });

@@ -170,6 +170,14 @@ class JornadaDeCuadrilla(BaseModel):
         (TRABAJOS, "Trabajos"),
     )
 
+    #: Quien la armo. Ver `armada_por`.
+    PERSONA = "persona"
+    AUTOMATICA = "automatica"
+    ARMADAS_POR = (
+        (PERSONA, "Una persona"),
+        (AUTOMATICA, "El sistema"),
+    )
+
     org = models.ForeignKey(
         Org, on_delete=models.CASCADE, related_name="jornadas_de_cuadrilla"
     )
@@ -210,6 +218,16 @@ class JornadaDeCuadrilla(BaseModel):
     )
     notas = models.TextField(blank=True, default="")
 
+    #: QUIEN LA ARMO  --  17/10/2026. Decide si el armado automatico la puede
+    #: tocar: una jornada armada por una persona no se toca nunca (decidido por
+    #: el usuario), y una armada sola se reajusta de labor mientras no tenga
+    #: ordenes. De fabrica es PERSONA, y a proposito: las que ya existian las
+    #: armo alguien, y ante la duda ganan las manos. Armarla o corregirla desde
+    #: la pantalla la vuelve de PERSONA (`JornadaDeCuadrillaView.post`).
+    armada_por = models.CharField(
+        max_length=20, choices=ARMADAS_POR, default=PERSONA
+    )
+
     class Meta:
         db_table = "campo_jornada_cuadrilla"
         ordering = ["-fecha", "cuadrilla__nombre"]
@@ -247,6 +265,19 @@ class ConfiguracionDeReparto(BaseModel):
     TOPE_DE_FABRICA = 8
     HORA_DE_FABRICA = 3
 
+    #: De que labor es cada grupo de caso de Despacho, si la empresa no dice
+    #: otra cosa. Las claves son los grupos de `operaciones.paso_a_despacho`
+    #: (`GRUPOS`); los dos que nunca pasan solos a Despacho --'nada_lo_mide' y
+    #: 'ni_cliente_ni_red'-- no tienen labor, y un caso suyo no inclina la
+    #: labor de ninguna jornada. Trabajo pedido -> instalacion lo decidio el
+    #: usuario el 17/10/2026; los otros dos ya los implicaba
+    #: `clasificacion_de_trabajo`.
+    LABOR_POR_GRUPO_DE_FABRICA = {
+        "falla_de_servicio": "correctivo",
+        "obra_de_red": "trabajos",
+        "trabajo_pedido": "instalacion",
+    }
+
     org = models.OneToOneField(
         Org, on_delete=models.CASCADE, related_name="configuracion_de_reparto"
     )
@@ -277,6 +308,13 @@ class ConfiguracionDeReparto(BaseModel):
     #: mano, que es como funcionaba antes de esto.
     copia_la_jornada = models.BooleanField(default=True)
 
+    #: DE QUE LABOR ES CADA GRUPO DE CASO  --  17/10/2026. Con esto se elige la
+    #: labor de una jornada armada sola: la de la mayoria de los casos de
+    #: Despacho de sus zonas. Por empresa y no en codigo: en otro ISP un
+    #: trabajo pedido puede ir a otra labor (CLAUDE.md §3.3). Vacio = los de
+    #: fabrica; una clave guardada pisa solo la suya. Ver `labor_de_cada_grupo`.
+    labor_por_grupo = models.JSONField(default=dict, blank=True)
+
     #: El ULTIMO DIA LOCAL en que esto corrio. Es lo que evita que corra dos
     #: veces.
     #:
@@ -297,6 +335,28 @@ class ConfiguracionDeReparto(BaseModel):
 
     def __str__(self) -> str:
         return f"Reparto de {self.org_id}"
+
+
+def labor_de_cada_grupo(org) -> dict:
+    """grupo -> labor para esta empresa: los de fabrica, pisados por lo suyo.
+
+    Solo se toman las labores que existen: una clave guardada con una labor
+    que no esta en `JornadaDeCuadrilla.LABORES` --una que se dio de baja, un
+    error de tipeo-- vuelve al valor de fabrica en vez de inclinar jornadas
+    hacia una labor que el reparto no conoce. Lo que no tiene labor --un grupo
+    sin entrada-- no aparece: quien llama lo cuenta aparte.
+    """
+    validas = dict(JornadaDeCuadrilla.LABORES)
+    efectivo = dict(ConfiguracionDeReparto.LABOR_POR_GRUPO_DE_FABRICA)
+    propio = getattr(configuracion_de_reparto(org), "labor_por_grupo", None)
+    for grupo, labor in (propio if isinstance(propio, dict) else {}).items():
+        if labor in validas:
+            efectivo[str(grupo)] = labor
+        elif labor in (None, ""):
+            #  Vacio a proposito: la empresa dice que ese grupo no inclina
+            #  ninguna jornada.
+            efectivo.pop(str(grupo), None)
+    return efectivo
 
 
 def configuracion_de_reparto(org):
