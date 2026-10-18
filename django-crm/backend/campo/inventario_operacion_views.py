@@ -477,10 +477,12 @@ class ValorizacionView(APIView):
 # ---------------------------------------------------------------------------
 
 class ReportesView(APIView):
-    """``GET /inventario/reportes/?de=consumo|tecnicos|descuadres``
+    """``GET /inventario/reportes/?de=consumo|tecnicos|descuadres|pedidos|faltantes|cierres``
 
-    Leer un reporte no mueve nada, asi que no exige rol de inventario: cualquiera
-    con sesion de campo puede saber en que se fue el material.
+    Leer un reporte no mueve nada, asi que los tres primeros no exigen rol de
+    inventario: cualquiera con sesion de campo puede saber en que se fue el
+    material. Los otros tres son lo que escribio otra persona, y piden rol de
+    gestion o de bodega.
     """
 
     permission_classes = [IsCampoAuthenticated]
@@ -505,9 +507,23 @@ class ReportesView(APIView):
         if cual == "descuadres":
             return Response({"de": cual, "filas": op.descuadres_abiertos(org)})
 
+        #  Lo que escribio OTRA persona (18/10/2026): su pedido, su explicacion
+        #  de un faltante, su acta. Esto no es para cualquier sesion de campo
+        #  --un tecnico no tiene por que leer lo que escribio otro--, sino para
+        #  quien gestiona o atiende la bodega.
+        de_otros = {
+            "pedidos": op.pedidos_a_bodega,
+            "faltantes": op.faltantes_explicados,
+            "cierres": op.cierres_de_jornada,
+        }
+        if cual in de_otros:
+            _exigir_inventario(request)
+            return Response({"de": cual,
+                             "filas": de_otros[cual](org, desde=desde, hasta=hasta)})
+
         return Response(
             {"detail": f"No hay un reporte '{cual}'. Los que hay: consumo, "
-                       f"tecnicos, descuadres."},
+                       f"tecnicos, descuadres, pedidos, faltantes, cierres."},
             status=status.HTTP_400_BAD_REQUEST)
 
 

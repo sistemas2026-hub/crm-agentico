@@ -29,8 +29,23 @@
   const REPORTES = [
     { id: 'consumo', texto: 'En qué se fue', icono: 'summarize' },
     { id: 'tecnicos', texto: 'Por técnico', icono: 'engineering' },
-    { id: 'descuadres', texto: 'Descuadres abiertos', icono: 'report_problem' }
+    { id: 'descuadres', texto: 'Descuadres abiertos', icono: 'report_problem' },
+    // Lo que escribe el técnico y la oficina no veía (18/10/2026). Los pide
+    // gestión o bodega: un técnico recibe 403 y la lista sale vacía.
+    { id: 'pedidos', texto: 'Pedidos a bodega', icono: 'local_shipping' },
+    { id: 'faltantes', texto: 'Faltantes explicados', icono: 'help' },
+    { id: 'cierres', texto: 'Cierres de jornada', icono: 'task_alt' }
   ];
+
+  /** @type {Record<string, string>} */
+  const VACIO = {
+    pedidos: 'Nadie pidió material a bodega',
+    faltantes: 'Ningún técnico explicó un faltante',
+    cierres: 'No hay jornadas cerradas'
+  };
+
+  /** @type {Record<string, string>} */
+  const ESTADO_PEDIDO = { pendiente: 'Pendiente', atendido: 'Atendido', rechazado: 'Rechazado' };
 
   /** @param {string} id */
   function enlaceReporte(id) {
@@ -145,6 +160,8 @@
     <p class="font-body-md text-body-md text-secondary">
       {#if cual === 'descuadres'}
         No hay descuadres abiertos: todos los movimientos entraron como aceptados.
+      {:else if VACIO[cual]}
+        {VACIO[cual]}{reporte?.desde || reporte?.hasta ? ' en ese rango de fechas' : ''}.
       {:else}
         Nada que mostrar todavía en este reporte{reporte?.desde || reporte?.hasta
           ? ' para ese rango de fechas'
@@ -234,6 +251,157 @@
         </p>
       </div>
     </div>
+  </section>
+{:else if cual === 'pedidos'}
+  <section class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+    <div class="p-space-lg">
+      <h2 class="font-headline-sm text-headline-sm text-on-surface">Pedidos a bodega</h2>
+      <p class="font-body-sm text-body-sm text-secondary mt-0.5">
+        Lo que los técnicos pidieron desde la app, el más nuevo primero. Antes solo llegaba
+        si la empresa tenía un canal de avisos configurado.
+      </p>
+    </div>
+    <div class="w-full overflow-x-auto">
+      <table class="w-full text-left">
+        <thead>
+          <tr class="bg-surface-container-low text-secondary font-table-header text-table-header uppercase">
+            <th class="py-2.5 px-space-lg w-44">Cuándo</th>
+            <th class="py-2.5 px-space-lg w-28">Estado</th>
+            <th class="py-2.5 px-space-lg">Material</th>
+            <th class="py-2.5 px-space-lg text-right w-32">Cantidad</th>
+            <th class="py-2.5 px-space-lg w-48">Quién</th>
+            <th class="py-2.5 px-space-lg w-24">Orden</th>
+            <th class="py-2.5 px-space-lg">Motivo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each filas as f (f.id)}
+            <tr class="hover:bg-surface-container-low/40 transition-colors">
+              <td class="py-space-md px-space-lg font-label-numeric text-body-sm text-secondary">{fecha(f.en)}</td>
+              <td class="py-space-md px-space-lg font-body-sm text-body-sm text-on-surface">
+                {ESTADO_PEDIDO[f.estado] ?? f.estado}
+              </td>
+              <td class="py-space-md px-space-lg font-body-md text-body-md text-on-surface">
+                {f.material_nombre}
+                <span class="font-label-code text-label-code text-secondary">{f.material}</span>
+              </td>
+              <td class="py-space-md px-space-lg text-right font-label-numeric text-body-md tabular-nums text-on-surface">
+                {f.cantidad} {f.unidad}
+              </td>
+              <td class="py-space-md px-space-lg font-body-md text-body-md text-on-surface">{f.persona ?? '—'}</td>
+              <td class="py-space-md px-space-lg font-label-numeric text-body-sm text-secondary">
+                {f.orden_numero ? `#${f.orden_numero}` : '—'}
+              </td>
+              <td class="py-space-md px-space-lg font-body-sm text-body-sm text-secondary">{f.motivo || '—'}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{:else if cual === 'faltantes'}
+  <section class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+    <div class="p-space-lg">
+      <h2 class="font-headline-sm text-headline-sm text-on-surface">Faltantes explicados</h2>
+      <p class="font-body-sm text-body-sm text-secondary mt-0.5">
+        Lo que el técnico dijo que no tenía al cerrar la jornada, y por qué. «Faltan 3» y «se
+        dañaron 3 al retirarlos» son hechos distintos: acá se lee cuál de los dos fue.
+      </p>
+    </div>
+    <div class="w-full overflow-x-auto">
+      <table class="w-full text-left">
+        <thead>
+          <tr class="bg-surface-container-low text-secondary font-table-header text-table-header uppercase">
+            <th class="py-2.5 px-space-lg w-44">Cuándo</th>
+            <th class="py-2.5 px-space-lg w-48">Quién</th>
+            <th class="py-2.5 px-space-lg">Material</th>
+            <th class="py-2.5 px-space-lg text-right w-32">Cantidad</th>
+            <th class="py-2.5 px-space-lg w-40">Qué pasó</th>
+            <th class="py-2.5 px-space-lg">Explicación</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each filas as f (f.id)}
+            <tr class="hover:bg-surface-container-low/40 transition-colors">
+              <td class="py-space-md px-space-lg font-label-numeric text-body-sm text-secondary">{fecha(f.en)}</td>
+              <td class="py-space-md px-space-lg font-body-md text-body-md text-on-surface">{f.persona ?? '—'}</td>
+              <td class="py-space-md px-space-lg font-body-md text-body-md text-on-surface">
+                {f.material_nombre}
+                {#if f.serie}<span class="font-label-code text-label-code text-secondary">· {f.serie}</span>{/if}
+              </td>
+              <td class="py-space-md px-space-lg text-right font-label-numeric text-body-md tabular-nums text-on-surface">
+                {f.cantidad} {f.unidad}
+              </td>
+              <td class="py-space-md px-space-lg font-body-sm text-body-sm text-on-surface">{f.tipo_texto}</td>
+              <td class="py-space-md px-space-lg font-body-sm text-body-sm text-secondary">
+                {f.motivo || 'Sin explicación'}
+                {#if f.jornada}<span class="text-outline">· jornada del {f.jornada}</span>{/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{:else if cual === 'cierres'}
+  <section class="flex flex-col gap-space-md">
+    <div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-lg">
+      <h2 class="font-headline-sm text-headline-sm text-on-surface">Cierres de jornada</h2>
+      <p class="font-body-sm text-body-sm text-secondary mt-0.5">
+        Las actas firmadas, con los números que quedaron congelados ese día. No se recalculan:
+        el acta es lo que se acordó, aunque algo cambie después.
+      </p>
+    </div>
+    {#each filas as f (f.id)}
+      <div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-lg flex flex-col gap-space-sm">
+        <div class="flex flex-wrap items-baseline justify-between gap-space-sm">
+          <h3 class="font-headline-sm text-body-md text-on-surface font-semibold">
+            {f.persona ?? '—'} · jornada del {f.jornada}
+          </h3>
+          <span class="font-label-numeric text-body-sm text-secondary">
+            Cerrada {fecha(f.confirmada_en)}{f.recibida_por ? ` · recibió ${f.recibida_por}` : ''}
+          </span>
+        </div>
+        {#if f.ordenes?.asignadas != null}
+          <p class="font-body-sm text-body-sm text-secondary">
+            Órdenes: {f.ordenes.completadas ?? 0} de {f.ordenes.asignadas} completadas
+          </p>
+        {/if}
+        {#if (f.materiales ?? []).length}
+          <div class="w-full overflow-x-auto">
+            <table class="w-full text-left">
+              <thead>
+                <tr class="bg-surface-container-low text-secondary font-table-header text-table-header uppercase">
+                  <th class="py-2 px-space-md">Material</th>
+                  <th class="py-2 px-space-md text-right">Recibido</th>
+                  <th class="py-2 px-space-md text-right">Consumido</th>
+                  <th class="py-2 px-space-md text-right">A devolver</th>
+                  <th class="py-2 px-space-md text-right">Devuelto</th>
+                  <th class="py-2 px-space-md text-right">Diferencia</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each f.materiales as m, j (j)}
+                  <tr>
+                    <td class="py-2 px-space-md font-body-sm text-body-sm text-on-surface">{m.nombre}</td>
+                    <td class="py-2 px-space-md text-right font-label-numeric text-body-sm tabular-nums">{m.entregado} {m.unidad}</td>
+                    <td class="py-2 px-space-md text-right font-label-numeric text-body-sm tabular-nums">{m.consumido} {m.unidad}</td>
+                    <td class="py-2 px-space-md text-right font-label-numeric text-body-sm tabular-nums">{m.esperado_devolver} {m.unidad}</td>
+                    <td class="py-2 px-space-md text-right font-label-numeric text-body-sm tabular-nums">{m.devuelto} {m.unidad}</td>
+                    <td class="py-2 px-space-md text-right font-label-numeric text-body-sm tabular-nums {m.diferencia && m.diferencia !== '0' ? 'text-error font-semibold' : 'text-secondary'}">
+                      {m.diferencia}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+        {#if f.notas}
+          <p class="font-body-sm text-body-sm text-secondary">Notas: {f.notas}</p>
+        {/if}
+      </div>
+    {/each}
   </section>
 {:else}
   <section class="flex flex-col gap-space-md">

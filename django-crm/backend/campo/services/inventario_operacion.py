@@ -697,6 +697,127 @@ def descuadres_abiertos(org) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Lo que el tecnico escribe y la oficina no veia (18/10/2026)
+# ---------------------------------------------------------------------------
+#
+# Los pedidos a bodega, las explicaciones de un faltante y el acta del cierre
+# de jornada se guardaban y ninguna pantalla de la web los mostraba: el pedido
+# llegaba solo si la empresa tenia un canal de avisos configurado, y la
+# explicacion de por que faltaban tres conectores quedaba escrita sin que
+# nadie en la oficina pudiera leerla. El texto libre viaja TAPADO, como el de
+# los descuadres.
+
+#: Cuantas filas devuelve cada uno. Es una lista para revisar, no un archivo.
+LIMITE_DE_FILAS = 200
+
+
+def _rango(qs, campo, desde, hasta):
+    """`hasta` sin hora cuenta el dia entero.
+
+    «Hasta el 18» es hasta el final del 18. Leido como las 00:00 dejaba ese
+    dia afuera, que es justo el que alguien acaba de pedir.
+    """
+    from datetime import timedelta
+
+    if desde:
+        qs = qs.filter(**{f"{campo}__gte": desde})
+    if hasta:
+        if (hasta.hour, hasta.minute, hasta.second, hasta.microsecond) == (0, 0, 0, 0):
+            qs = qs.filter(**{f"{campo}__lt": hasta + timedelta(days=1)})
+        else:
+            qs = qs.filter(**{f"{campo}__lte": hasta})
+    return qs
+
+
+def _numero(valor) -> str:
+    return format(Decimal(str(valor)).normalize(), "f") if valor is not None else "0"
+
+
+def pedidos_a_bodega(org, *, desde=None, hasta=None) -> list[dict]:
+    """Lo que los tecnicos pidieron a bodega, el mas nuevo primero."""
+    from campo.models import PedidoDeMaterial
+    from campo.services.inventario import nombre_de
+
+    qs = _rango(PedidoDeMaterial.objects.filter(org=org), "created_at", desde, hasta)
+    return [{
+        "id": str(p.id),
+        "en": p.created_at.isoformat() if p.created_at else None,
+        "estado": p.estado,
+        "material": p.material.codigo,
+        "material_nombre": p.material.nombre,
+        "cantidad": _numero(p.cantidad),
+        "unidad": p.material.unidad,
+        "persona": nombre_de(p.profile) if p.profile_id else None,
+        "orden_numero": p.orden.numero if p.orden_id else None,
+        "motivo": _tapar(p.motivo),
+    } for p in qs.select_related("material", "profile__user", "orden")
+                 .order_by("-created_at")[:LIMITE_DE_FILAS]]
+
+
+def faltantes_explicados(org, *, desde=None, hasta=None) -> list[dict]:
+    """Lo que el tecnico dijo que no tenia, y por que."""
+    from campo.models import IncidenciaDeMaterial
+    from campo.services.inventario import nombre_de
+
+    tipos = dict(IncidenciaDeMaterial.TIPOS)
+    qs = _rango(IncidenciaDeMaterial.objects.filter(org=org), "ocurrido_en", desde, hasta)
+    return [{
+        "id": str(i.id),
+        "en": i.ocurrido_en.isoformat() if i.ocurrido_en else None,
+        "tipo": i.tipo,
+        "tipo_texto": tipos.get(i.tipo, i.tipo),
+        "material": i.material.codigo,
+        "material_nombre": i.material.nombre,
+        "cantidad": _numero(i.cantidad),
+        "unidad": i.material.unidad,
+        "serie": i.serie,
+        "persona": nombre_de(i.profile) if i.profile_id else None,
+        "motivo": _tapar(i.motivo),
+        #  La jornada que cerro con esta explicacion, si ya cerro.
+        "jornada": i.acta.jornada.isoformat() if i.acta_id else None,
+    } for i in qs.select_related("material", "profile__user", "acta")
+                 .order_by("-ocurrido_en")[:LIMITE_DE_FILAS]]
+
+
+def cierres_de_jornada(org, *, desde=None, hasta=None) -> list[dict]:
+    """Las actas firmadas, con los numeros que se congelaron ese dia.
+
+    Se muestra el resumen GUARDADO, no uno recalculado: el acta es lo que se
+    acordo ese dia, y recalcularla contaria otra historia si algo cambio
+    despues.
+    """
+    from campo.models import ActaDeDevolucion
+    from campo.services.inventario import nombre_de
+
+    qs = ActaDeDevolucion.objects.filter(org=org, estado=ActaDeDevolucion.CONFIRMADA)
+    if desde:
+        qs = qs.filter(jornada__gte=desde.date())
+    if hasta:
+        qs = qs.filter(jornada__lte=hasta.date())
+    salida = []
+    for a in (qs.select_related("profile__user", "recibida_por__user")
+                .order_by("-jornada", "-confirmada_en")[:LIMITE_DE_FILAS]):
+        resumen = a.resumen or {}
+        salida.append({
+            "id": str(a.id),
+            "jornada": a.jornada.isoformat(),
+            "persona": nombre_de(a.profile) if a.profile_id else None,
+            "confirmada_en": a.confirmada_en.isoformat() if a.confirmada_en else None,
+            "recibida_por": nombre_de(a.recibida_por) if a.recibida_por_id else None,
+            "ordenes": resumen.get("ordenes") or {},
+            "por_unidad": (resumen.get("material") or {}).get("por_unidad") or [],
+            "materiales": [
+                {k: d.get(k) for k in ("codigo", "nombre", "unidad", "entregado",
+                                       "consumido", "esperado_devolver", "devuelto",
+                                       "diferencia")}
+                for d in resumen.get("detalle") or [] if isinstance(d, dict)
+            ],
+            "notas": _tapar(a.notas),
+        })
+    return salida
+
+
+# ---------------------------------------------------------------------------
 # Plantillas de kit
 # ---------------------------------------------------------------------------
 
