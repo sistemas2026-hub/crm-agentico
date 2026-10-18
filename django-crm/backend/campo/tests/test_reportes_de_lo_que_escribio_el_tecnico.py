@@ -125,3 +125,21 @@ def test_8_otra_empresa_no_ve_las_actas_ni_los_faltantes(org_b_client, org_a, us
         estado=ActaDeDevolucion.CONFIRMADA)
     assert _filas(org_b_client, "faltantes") == []
     assert _filas(org_b_client, "cierres") == []
+
+
+def test_9_en_los_reportes_de_consumo_hasta_tambien_cuenta_el_dia_entero(
+        admin_client, org_a, user_profile, conector):
+    """Antes «hasta hoy» se leia como las 00:00 de hoy y dejaba afuera lo de hoy."""
+    from campo.models import MovimientoDeMaterial
+
+    MovimientoDeMaterial.objects.create(
+        org=org_a, profile=user_profile, material=conector,
+        tipo=MovimientoDeMaterial.CONSUMO, cantidad=2, idempotency_key="c-hoy",
+        ocurrido_en=timezone.now())
+    hoy = timezone.localdate().isoformat()
+
+    por_material = _filas(admin_client, "consumo", desde=hoy, hasta=hoy)
+    por_tecnico = _filas(admin_client, "tecnicos", desde=hoy, hasta=hoy)
+
+    assert [f["codigo"] for f in por_material] == ["CON-SC-APC"]
+    assert len(por_tecnico) == 1

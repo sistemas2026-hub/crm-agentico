@@ -598,10 +598,9 @@ def consumo_por_material(org, *, desde=None, hasta=None) -> list[dict]:
     qs = MovimientoDeMaterial.objects.filter(
         org=org, tipo=MovimientoDeMaterial.CONSUMO
     ).exclude(estado=MovimientoDeMaterial.CONFLICTO)
-    if desde:
-        qs = qs.filter(ocurrido_en__gte=desde)
-    if hasta:
-        qs = qs.filter(ocurrido_en__lte=hasta)
+    #  «Hasta el 18» incluye el 18 (18/10/2026): leido como las 00:00 dejaba
+    #  afuera justo el ultimo dia del rango.
+    qs = _rango(qs, "ocurrido_en", desde, hasta)
 
     filas = (
         qs.values("material__codigo", "material__nombre", "material__unidad")
@@ -631,10 +630,9 @@ def consumo_por_tecnico(org, *, desde=None, hasta=None) -> list[dict]:
     qs = MovimientoDeMaterial.objects.filter(
         org=org, tipo=MovimientoDeMaterial.CONSUMO, profile__isnull=False
     ).exclude(estado=MovimientoDeMaterial.CONFLICTO)
-    if desde:
-        qs = qs.filter(ocurrido_en__gte=desde)
-    if hasta:
-        qs = qs.filter(ocurrido_en__lte=hasta)
+    #  «Hasta el 18» incluye el 18 (18/10/2026): leido como las 00:00 dejaba
+    #  afuera justo el ultimo dia del rango.
+    qs = _rango(qs, "ocurrido_en", desde, hasta)
 
     por_persona = {}
     for mov in qs.select_related("profile__user", "material"):
