@@ -75,16 +75,20 @@ void main() {
       expect(find.text(KitMockData.acta), findsNothing);
       expect(find.textContaining(KitMockData.despachadoPor), findsNothing);
       expect(find.textContaining(KitMockData.deposito), findsNothing);
-      // Las cifras cuentan RENGLONES, no cantidades: sumar unidades con
-      // metros daba un total sin sentido fisico ("161 recibidos" entre una
-      // ONT, diez conectores y ciento cincuenta metros de fibra).
-      // Los rotulos van en mayusculas, como los escribe el diseño.
-      expect(find.text('MATERIALES'), findsOneWidget);
-      expect(find.text('USADOS'), findsOneWidget);
-      expect(find.text('SIN TOCAR'), findsOneWidget);
-      expect(find.text('RECIBIDOS'), findsNothing);
+      // Lo que hay EN LA MANO, por clase y con su unidad (18/10/2026): una
+      // ONT, un metro de cable y un conector no se suman entre sí, y contar
+      // tipos de material («Materiales 5») no decía cuánto había.
+      expect(find.text('EN TU MANO'), findsOneWidget);
+      expect(find.text('EQUIPOS'), findsOneWidget);
+      expect(find.text('CABLE'), findsOneWidget);
+      expect(find.text('CONSUMIBLES'), findsOneWidget);
+      // Arriba en el resumen, y en la tarjeta del cable.
+      expect(find.text('85 m'), findsWidgets);
+      expect(find.text('35 m usados'), findsOneWidget);
+      expect(find.text('42 unidades'), findsOneWidget);
+      expect(find.text('MATERIALES'), findsNothing);
       expect(find.text('ESTADO DE CUSTODIA'), findsOneWidget);
-      expect(find.text('Escanear QR'), findsOneWidget);
+      expect(find.text('Escanear'), findsOneWidget);
       expect(find.text('Materiales en Custodia'), findsOneWidget);
       expect(find.text('¿Finalizaste tu turno?'), findsOneWidget);
     });
@@ -100,14 +104,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Consumible: barra de consumo y razón.
-      expect(find.textContaining('Consumo: 3 de 10'), findsOneWidget);
-      // Bobina: metraje inicial, tendido y restante.
-      expect(find.text('Tendido Hoy'), findsOneWidget);
-      expect(find.text('85 m'), findsOneWidget);
-      // Serializado: su número de serie, que es lo que hay que poder rastrear.
-      expect(find.textContaining('48575443-A190C'), findsOneWidget);
-      expect(find.text('SERIAL NUMBER (SN) · CÓDIGO BARRAS'), findsOneWidget);
+      // Cada material dice primero lo que hay en la mano, y debajo lo
+      // recibido y lo usado (18/10/2026).
+      expect(find.text('Recibido 10 · usado 3'), findsOneWidget);
+      expect(find.text('Recibido 120 · usado 35'), findsOneWidget);
+      // Serializado: su serie y dónde está.
+      expect(find.text('48575443-A190C'), findsOneWidget);
+      expect(find.text('EN TU PODER'), findsOneWidget);
       // La MAC no viene con el material: una MAC de ejemplo junto a una serie
       // real es lo que alguien copia para dar de alta un equipo.
       expect(find.textContaining(KitMockData.macEquipo), findsNothing);
@@ -124,7 +127,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.textContaining('Activos ONT'));
+      await tester.tap(find.textContaining('Equipos ('));
       await tester.pumpAndSettle();
 
       expect(find.text('ONT Huawei EchoLife HG8145V5'), findsOneWidget);
@@ -142,14 +145,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      // Por clase (18/10/2026): el cable tiene su filtro, porque se cuenta
+      // en metros; antes quedaba mezclado con los consumibles.
       expect(find.text('Todos (5)'), findsOneWidget);
-      expect(find.text('Activos ONT (1)'), findsOneWidget);
-      // Bobinas y terminales cuentan como consumibles: se gastan, no se rastrean.
-      expect(find.text('Consumibles (4)'), findsOneWidget);
-      expect(find.textContaining('Bobinas ('), findsNothing);
-
-      // Lo que hay que rastrear uno por uno se anuncia como tal.
-      expect(find.text('Trazable'), findsOneWidget);
+      expect(find.text('Equipos (1)'), findsOneWidget);
+      expect(find.text('Cable (1)'), findsOneWidget);
+      expect(find.text('Consumibles (3)'), findsOneWidget);
     });
 
     testWidgets('7. Quien recibió el kit es la sesión real, no un nombre inventado',
@@ -337,5 +338,45 @@ void main() {
         expect(m.usados, lessThanOrEqualTo(m.recibidos), reason: m.nombre);
       }
     });
-  });
+  
+    testWidgets('8. Todas las series del equipo, y dónde está cada una (18/10/2026)',
+        (WidgetTester tester) async {
+      // Antes se mostraba solo la primera: con tres ONT iguales se veía una.
+      _pantallaAlta(tester);
+      await tester.pumpWidget(_enApp(const MaterialesScreen(
+        kit: KitDeJornada(
+          materiales: <MaterialEnCustodia>[
+            MaterialEnCustodia(
+              categoria: 'Equipos',
+              nombre: 'ONT Huawei',
+              detalle: 'ONT-HG8145',
+              codigo: 'ONT-HG8145',
+              clase: ClaseMaterial.serializado,
+              recibidos: 3,
+              usados: 2,
+              unidad: 'unidades',
+              series: <String>['SN-A', 'SN-B', 'SN-C'],
+              instaladas: <String, SerieInstalada>{
+                'SN-A': SerieInstalada(ordenNumero: 1849),
+                'SN-B': SerieInstalada(ordenNumero: 1850, sinSubir: true),
+              },
+              enManoExacto: 1,
+            ),
+          ],
+          acta: '',
+          sinSubir: 1,
+          conNovedad: <MovimientoConNovedad>[],
+        ),
+      )));
+      await tester.pumpAndSettle();
+
+      expect(find.text('SN-A'), findsOneWidget);
+      expect(find.text('SN-B'), findsOneWidget);
+      expect(find.text('SN-C'), findsOneWidget);
+      expect(find.text('INSTALADO EN OT #1849'), findsOneWidget);
+      expect(find.text('INSTALADO EN OT #1850 · SIN SUBIR'), findsOneWidget);
+      expect(find.text('EN TU PODER'), findsOneWidget);
+      expect(find.text('2 instalados'), findsOneWidget);
+    });
+});
 }

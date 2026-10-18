@@ -227,6 +227,72 @@ void main() {
       );
     });
   });
+
+  group('5. Lo que hay en la mano, y dónde quedó cada serie (18/10/2026)', () {
+    Future<void> darOnts({List<dynamic> instaladas = const <dynamic>[]}) async {
+      await db.reemplazarKit(
+        orgId: orgA,
+        profileId: perfilA,
+        materiales: <Map<String, dynamic>>[
+          {
+            'codigo': 'ONT-HG8145', 'nombre': 'ONT Huawei', 'categoria': 'Equipos',
+            'clase': 'serializado', 'unidad': 'unidades',
+            'recibido': '3', 'consumido': '1', 'devuelto': '0', 'disponible': '2',
+            'series': <String>['SN-A', 'SN-B', 'SN-C'],
+            'series_instaladas': instaladas,
+            'acta': 'K-1',
+          },
+          {
+            'codigo': 'DROP', 'nombre': 'Drop', 'categoria': 'Cable',
+            'clase': 'bobina', 'unidad': 'm',
+            'recibido': '300', 'consumido': '120.5', 'devuelto': '0',
+            'disponible': '179.5', 'series': <String>[], 'acta': 'K-1',
+          },
+        ],
+      );
+    }
+
+    Future<KitDeJornada> leer() => KitDeJornada.leer(
+          baseLocal: db,
+          almacenamiento: _SesionFalsa(orgA, perfilA),
+        );
+
+    test('todas las series, no solo la primera, y dónde está cada una', () async {
+      await darOnts(instaladas: <dynamic>[
+        <String, dynamic>{'serie': 'SN-A', 'orden_numero': 1849},
+      ]);
+      // Otra instalada en el teléfono, sin subir todavía.
+      await db.encolarMovimientoMaterial(
+        id: 'm-ont', orgId: orgA, profileId: perfilA,
+        materialCodigo: 'ONT-HG8145', materialNombre: 'ONT Huawei',
+        tipo: 'consumo', cantidad: '1', serie: 'SN-B',
+        ordenId: 'ot-2', ordenNumero: 1850,
+      );
+
+      final MaterialEnCustodia ont =
+          (await leer()).materiales.firstWhere((m) => m.codigo == 'ONT-HG8145');
+      expect(ont.todasLasSeries, <String>['SN-A', 'SN-B', 'SN-C']);
+      expect(ont.instaladas['SN-A']!.ordenNumero, 1849);
+      expect(ont.instaladas['SN-A']!.sinSubir, isFalse);
+      expect(ont.instaladas['SN-B']!.ordenNumero, 1850);
+      expect(ont.instaladas['SN-B']!.sinSubir, isTrue);
+      expect(ont.instaladas.containsKey('SN-C'), isFalse);
+      expect(ont.enMano, 1, reason: '2 en el servidor, menos la que no subió');
+    });
+
+    test('una devolución sin subir saca de la mano pero NO es «usado»', () async {
+      await darOnts();
+      await db.encolarMovimientoMaterial(
+        id: 'm-dev', orgId: orgA, profileId: perfilA,
+        materialCodigo: 'DROP', materialNombre: 'Drop',
+        tipo: 'devolucion', cantidad: '50',
+      );
+      final MaterialEnCustodia drop =
+          (await leer()).materiales.firstWhere((m) => m.codigo == 'DROP');
+      expect(drop.usado, 120.5, reason: 'antes contaba la devolución como gastada');
+      expect(drop.enMano, 129.5);
+    });
+  });
 }
 
 /// Una sesión de mentira, para no depender del canal del almacenamiento seguro.

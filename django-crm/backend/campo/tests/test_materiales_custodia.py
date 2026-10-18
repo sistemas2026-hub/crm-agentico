@@ -416,3 +416,46 @@ class TestElConsumoSeAtaAlTrabajo:
 
         assert movimiento.orden_id is None
         assert movimiento.estado == MovimientoDeMaterial.ACEPTADO
+
+
+class TestDondeQuedoCadaSerie:
+    """18/10/2026: el kit dice qué serie ya se instaló y en qué orden. Antes
+    mandaba solo las entregadas, y la app no podía decir cuál de las ONT
+    iguales del baúl seguía en la camioneta."""
+
+    def test_1_la_serie_instalada_dice_su_orden(self, org_a, user_profile, ont, kit, orden):
+        from campo.services.materiales import kit_de
+
+        serie = next(f for f in kit_de(user_profile, org_a)
+                     if f["material"].pk == ont.pk)["series"][0]
+        consumir(org_a, user_profile, ont, 1, "mov-ont-1", orden=orden, serie=serie)
+
+        fila = next(f for f in kit_de(user_profile, org_a) if f["material"].pk == ont.pk)
+        assert fila["series_instaladas"] == [{"serie": serie, "orden_numero": orden.numero}]
+
+    def test_2_sin_consumos_no_hay_instaladas(self, org_a, user_profile, ont, kit):
+        from campo.services.materiales import kit_de
+
+        fila = next(f for f in kit_de(user_profile, org_a) if f["material"].pk == ont.pk)
+        assert fila["series_instaladas"] == []
+
+    def test_3_un_conflicto_no_es_una_instalacion(self, org_a, user_profile, ont, kit, orden):
+        """La segunda vez que se consume la misma serie entra en CONFLICTO: no
+        ocurrió, y la app no puede mostrar la serie instalada dos veces."""
+        from campo.services.materiales import kit_de
+
+        serie = next(f for f in kit_de(user_profile, org_a)
+                     if f["material"].pk == ont.pk)["series"][0]
+        consumir(org_a, user_profile, ont, 1, "mov-ont-1", orden=orden, serie=serie)
+        segundo, _ = consumir(org_a, user_profile, ont, 1, "mov-ont-2", orden=orden, serie=serie)
+        assert segundo.estado == MovimientoDeMaterial.CONFLICTO
+
+        fila = next(f for f in kit_de(user_profile, org_a) if f["material"].pk == ont.pk)
+        assert [s["serie"] for s in fila["series_instaladas"]] == [serie]
+
+    def test_4_un_consumo_sin_serie_no_figura(self, org_a, user_profile, conector, kit, orden):
+        from campo.services.materiales import kit_de
+
+        consumir(org_a, user_profile, conector, 3, "mov-con-1", orden=orden)
+        fila = next(f for f in kit_de(user_profile, org_a) if f["material"].pk == conector.pk)
+        assert fila["series_instaladas"] == []

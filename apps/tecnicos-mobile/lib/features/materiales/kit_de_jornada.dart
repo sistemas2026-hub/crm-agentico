@@ -99,16 +99,32 @@ class KitDeJornada {
       // Lo consumido incluye lo que todavía no subió: para quien está en la
       // calle, un conector que ya puso es un conector que ya no tiene.
       final consumidoServidor = _numero(fila['consumido']);
-      final pendientePropio = sinConfirmar
-          .where((m) => (m['material_codigo'] ?? '').toString() == codigo)
-          .fold<double>(0, (suma, m) {
+      // Lo registrado en el teléfono que todavía no subió, separado por tipo.
+      // Antes una devolución pendiente se contaba como «usado»: el material
+      // que el técnico devolvió aparecía como gastado (18/10/2026).
+      double pendienteConsumo = 0;
+      double pendienteDevolucion = 0;
+      double pendienteAjuste = 0;
+      final Map<String, SerieInstalada> instaladas = <String, SerieInstalada>{};
+      for (final m in sinConfirmar) {
+        if ((m['material_codigo'] ?? '').toString() != codigo) continue;
         final tipo = (m['tipo'] ?? '').toString();
         final cantidad = _numero(m['cantidad']);
-        // Consumir y devolver sacan material de la camioneta; un ajuste lo
-        // suma. Es la misma cuenta que hace `saldoLocalDe`.
-        if (tipo == 'consumo' || tipo == 'devolucion') return suma + cantidad;
-        return suma - cantidad;
-      });
+        if (tipo == 'consumo') {
+          pendienteConsumo += cantidad;
+          final serie = (m['serie'] ?? '').toString();
+          if (serie.isNotEmpty) {
+            instaladas[serie] = SerieInstalada(
+              ordenNumero: m['orden_numero'] as int?,
+              sinSubir: true,
+            );
+          }
+        } else if (tipo == 'devolucion') {
+          pendienteDevolucion += cantidad;
+        } else {
+          pendienteAjuste += cantidad;
+        }
+      }
 
       final series = <String>[];
       final crudo = fila['series_json'];
@@ -119,10 +135,35 @@ class KitDeJornada {
             series.addAll(lista.map((s) => s.toString()));
           }
         } catch (_) {
-          // Una lista ilegible no puede tumbar la pantalla: se muestra el
-          // material sin sus números, que es mejor que no mostrarlo.
+          // Un espejo ilegible se trata como sin series.
         }
       }
+      // Las que el servidor ya sabe instaladas. Lo pendiente del teléfono
+      // manda sobre esto: es lo más nuevo.
+      final crudoInst = fila['series_instaladas_json'];
+      if (crudoInst is String && crudoInst.isNotEmpty) {
+        try {
+          final lista = jsonDecode(crudoInst);
+          if (lista is List) {
+            for (final dynamic x in lista) {
+              if (x is! Map) continue;
+              final serie = (x['serie'] ?? '').toString();
+              if (serie.isEmpty || instaladas.containsKey(serie)) continue;
+              instaladas[serie] = SerieInstalada(
+                ordenNumero: x['orden_numero'] as int?,
+              );
+            }
+          }
+        } catch (_) {
+          // Igual que arriba.
+        }
+      }
+
+      final double usado = consumidoServidor + pendienteConsumo;
+      final double enMano = _numero(fila['disponible']) -
+          pendienteConsumo -
+          pendienteDevolucion +
+          pendienteAjuste;
 
       materiales.add(MaterialEnCustodia(
         categoria: (fila['categoria'] ?? '').toString(),
@@ -131,9 +172,14 @@ class KitDeJornada {
         codigo: codigo,
         clase: _clase((fila['clase'] ?? '').toString()),
         recibidos: _numero(fila['recibido']).round(),
-        usados: (consumidoServidor + pendientePropio).round(),
+        usados: usado.round(),
         unidad: unidad,
         serie: series.isEmpty ? null : series.first,
+        series: series,
+        instaladas: instaladas,
+        enManoExacto: enMano,
+        usadoExacto: usado,
+        recibidoExacto: _numero(fila['recibido']),
       ));
     }
 

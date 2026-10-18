@@ -146,6 +146,11 @@ class JornadaDePrueba {
             'recibido': recibido,
             'consumido': consumido,
             'devuelto': '0',
+            // El servidor siempre manda el saldo: la pantalla lo usa en vez de
+            // restar, porque el saldo ya cuenta ajustes y transferencias.
+            'disponible': ((double.tryParse(recibido) ?? 0) -
+                    (double.tryParse(consumido) ?? 0))
+                .toString(),
             'acta': 'Acta #K-2026-311',
           },
         ],

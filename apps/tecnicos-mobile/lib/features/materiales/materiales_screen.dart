@@ -4,6 +4,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/widgets/dexter_bloques.dart';
+
 import '../../demo/field_mock_data.dart';
 import '../../demo/kit_mock_data.dart';
 import '../../core/storage/local_database.dart';
@@ -375,19 +377,74 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
     );
   }
 
+  /// «12» o «12,5»: sin ceros de relleno, con coma.
+  static String numero(double v) => v == v.roundToDouble()
+      ? v.round().toString()
+      : v.toStringAsFixed(1).replaceAll('.', ',');
+
+  /// Suma por unidad: «320 m» o «38 unidades · 2 rollos».
+  static String porUnidad(Iterable<MaterialEnCustodia> ms,
+      double Function(MaterialEnCustodia) cuanto) {
+    final Map<String, double> suma = <String, double>{};
+    for (final MaterialEnCustodia m in ms) {
+      suma[m.unidad] = (suma[m.unidad] ?? 0) + cuanto(m);
+    }
+    return suma.entries
+        .map((MapEntry<String, double> e) => '${numero(e.value)} ${e.key}')
+        .join(' · ');
+  }
+
+  Widget _resumenPorClase(List<MaterialEnCustodia> materiales) {
+    Iterable<MaterialEnCustodia> de(ClaseDeResumen c) =>
+        materiales.where((MaterialEnCustodia m) => m.claseDeResumen == c);
+    final List<Widget> celdas = <Widget>[];
+    final Iterable<MaterialEnCustodia> equipos = de(ClaseDeResumen.equipos);
+    if (equipos.isNotEmpty) {
+      final int instalados = equipos.fold<int>(
+          0, (int n, MaterialEnCustodia m) => n + m.instaladas.length);
+      celdas.add(_CeldaDeResumen(
+        rotulo: 'EQUIPOS',
+        valor: numero(equipos.fold<double>(
+            0, (double n, MaterialEnCustodia m) => n + m.enMano)),
+        detalle: instalados == 1 ? '1 instalado' : '$instalados instalados',
+      ));
+    }
+    final Iterable<MaterialEnCustodia> cable = de(ClaseDeResumen.cable);
+    if (cable.isNotEmpty) {
+      celdas.add(_CeldaDeResumen(
+        rotulo: 'CABLE',
+        valor: porUnidad(cable, (MaterialEnCustodia m) => m.enMano),
+        detalle: '${porUnidad(cable, (MaterialEnCustodia m) => m.usado)} usados',
+      ));
+    }
+    final Iterable<MaterialEnCustodia> otros = de(ClaseDeResumen.consumibles);
+    if (otros.isNotEmpty) {
+      celdas.add(_CeldaDeResumen(
+        rotulo: 'CONSUMIBLES',
+        valor: porUnidad(otros, (MaterialEnCustodia m) => m.enMano),
+        detalle: '${porUnidad(otros, (MaterialEnCustodia m) => m.usado)} usados',
+      ));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text('EN TU MANO',
+            style: AppTypography.labelCaption.copyWith(color: AppColors.outline)),
+        const SizedBox(height: AppSpacing.xs),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            for (int i = 0; i < celdas.length; i++) ...<Widget>[
+              if (i > 0) const SizedBox(width: AppSpacing.sm),
+              Expanded(child: celdas[i]),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
   Widget _recepcionDelKit(List<MaterialEnCustodia> materiales) {
-    // Se cuentan RENGLONES, no cantidades.
-    //
-    // Sumar las cantidades daba un numero sin sentido fisico: una ONT, diez
-    // conectores y ciento cincuenta metros de fibra se sumaban en "161
-    // recibidos". Es peor que la constante falsa que habia antes, porque este
-    // numero sale de datos reales y por eso se cree.
-    //
-    // Cuanto hay de cada cosa vive en su renglon, con su unidad al lado, que
-    // es el unico lugar donde esa cifra significa algo.
-    final int conConsumo = materiales.where((m) => m.usados > 0).length;
-    final int sinTocar = materiales.where((m) => m.usados == 0).length;
-    final int novedades = _kit?.conNovedad.length ?? 0;
     final int pendientes = _kit?.sinSubir ?? 0;
     final String acta = _kit?.acta ?? '';
 
@@ -479,112 +536,17 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
               ),
             ],
           ),
+          // POR CLASE, CON SU UNIDAD (18/10/2026). Las cifras de antes
+          // contaban TIPOS de material («Materiales 5 · Usados 3»), no cuánto
+          // tiene el técnico; y sumar cantidades mezclaría ONTs con metros de
+          // cable. Acá cada clase dice lo que hay en la mano, en lo suyo.
           const SizedBox(height: AppSpacing.md),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: _Cifra(
-                  valor: '${materiales.length}',
-                  etiqueta: 'Materiales',
-                  destacada: true,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: _Cifra(
-                  valor: '$conConsumo',
-                  // "Con consumo" no entra con cuatro cifras a 390 px: se
-                  // cortaba en "Con consu...".
-                  etiqueta: 'Usados',
-                  color: AppColors.secondary,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: _Cifra(valor: '$sinTocar', etiqueta: 'Sin tocar'),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: _Cifra(
-                  valor: '$novedades',
-                  etiqueta: 'Novedades',
-                  color: novedades == 0 ? AppColors.exito : AppColors.error,
-                ),
-              ),
-            ],
-          ),
-          if (materiales.isNotEmpty) ...<Widget>[
-            const SizedBox(height: AppSpacing.md),
-            _consumoDeLaJornada(conConsumo, materiales.length),
-          ],
+          _resumenPorClase(materiales),
         ],
       ),
     );
   }
 
-  /// El medidor de consumo del diseño.
-  ///
-  /// Cuenta RENGLONES tocados sobre renglones del kit, por la misma razón que
-  /// la cabecera: sumar unidades con metros da un total sin sentido físico.
-  /// Por eso el rótulo dice "materiales tocados" y no "20% consumido" como la
-  /// maqueta — ese porcentaje, aplicado a un kit con ONTs y fibra, no
-  /// significaría nada.
-  Widget _consumoDeLaJornada(int tocados, int total) {
-    final double parte = total == 0 ? 0 : tocados / total;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Flexible(
-              child: Text(
-                'Consumo de la jornada',
-                style: AppTypography.labelCaption,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            // Sin la palabra "materiales": la fila desbordaba 1,7 px a 390,
-            // y a un "3 de 8" al lado de "Consumo de la jornada" no le hace
-            // falta repetir de que habla.
-            Text('$tocados de $total', style: AppTypography.labelBadge),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadius.circulo),
-          child: SizedBox(
-            height: 12,
-            child: Row(
-              children: <Widget>[
-                if (tocados > 0)
-                  Expanded(
-                    flex: tocados,
-                    child: const ColoredBox(color: AppColors.secondary),
-                  ),
-                if (total - tocados > 0)
-                  Expanded(
-                    flex: total - tocados,
-                    child: const ColoredBox(
-                        color: AppColors.surfaceContainerHigh),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        if (parte >= 1) ...<Widget>[
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Todos los materiales del kit tienen consumo registrado.',
-            style: AppTypography.labelCaption,
-          ),
-        ],
-      ],
-    );
-  }
 
   /// Cuantos renglones quedan por devolver.
   ///
@@ -623,11 +585,16 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
     if (leido == null || !mounted) return;
 
     MaterialEnCustodia? encontrado;
+    String serieEncontrada = '';
     for (final MaterialEnCustodia m in materiales) {
-      if (mismoSerial(m.serie ?? '', leido)) {
-        encontrado = m;
-        break;
+      for (final String s in m.todasLasSeries) {
+        if (mismoSerial(s, leido)) {
+          encontrado = m;
+          serieEncontrada = s;
+          break;
+        }
       }
+      if (encontrado != null) break;
     }
 
     if (!mounted) return;
@@ -638,7 +605,12 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
       );
       return;
     }
-    _decir('${encontrado.nombre} · ${encontrado.serie}');
+    // Dice dónde está: en la camioneta o ya instalado en una orden.
+    final SerieInstalada? inst = encontrado.instaladas[serieEncontrada];
+    _decir(
+      '${encontrado.nombre} · $serieEncontrada\n'
+      '${inst == null ? 'En tu poder' : textoDeInstalada(inst)}',
+    );
   }
 
   /// Compara lo escaneado contra el serial de ESTA tarjeta.
@@ -650,12 +622,16 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
     );
     if (leido == null || !mounted) return;
 
-    final bool coincide = mismoSerial(material.serie ?? '', leido);
+    final List<String> series = material.todasLasSeries;
+    final String coincide = series.firstWhere(
+      (String s) => mismoSerial(s, leido),
+      orElse: () => '',
+    );
     _decir(
-      coincide
-          ? 'Coincide: ${material.serie}'
-          : 'NO coincide.\nLa tarjeta dice ${material.serie} y leíste $leido',
-      esProblema: !coincide,
+      coincide.isNotEmpty
+          ? 'Coincide: $coincide'
+          : 'NO coincide con ninguna serie de ${material.nombre}.\nLeíste $leido',
+      esProblema: coincide.isEmpty,
     );
   }
 
@@ -672,34 +648,26 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
   }
 
   Widget _barraDeAcciones(List<MaterialEnCustodia> materiales) {
+    // Ícono y una palabra, como en Ejecutar (18/10/2026).
     return Row(
       children: <Widget>[
         Expanded(
-          child: _BotonHerramienta(
+          child: DexterAccionCompacta(
             icono: Icons.qr_code_scanner,
-            texto: 'Escanear QR',
-            principal: true,
+            texto: 'Escanear',
+            descripcion: 'Escanear un equipo para ver si está a tu nombre',
             alTocar: () => _buscarPorSerial(materiales),
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
-          // ESTE BOTON REEMPLAZA A «Transferir», que no hacia nada: estaba
-          // dibujado sin `alTocar` desde que la pantalla se replico del diseño.
-          // Un boton que no responde enseña a no confiar en la barra entera, y
-          // pedir material es lo que el tecnico necesita desde ahi --hasta hoy
-          // sacaba el otro telefono y escribia al grupo--.
-          child: _BotonHerramienta(
+          child: DexterAccionCompacta(
             icono: Icons.local_shipping,
             texto: 'Pedir',
-            colorIcono: AppColors.secondary,
+            descripcion: 'Pedir material a bodega',
             alTocar: () => _pedirABodega(materiales),
           ),
         ),
-        // SIN ACCION NO HAY BOTON (17/10/2026): «Incidencia» estaba dibujado sin
-        // `alTocar` porque el modulo que lo respaldaria no existe. Un boton
-        // que no responde enseña a no confiar en los demas.
-        // Lo que no cuadra se explica en el cierre de jornada, uno por uno.
       ],
     );
   }
@@ -942,118 +910,7 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
   }
 }
 
-class _Cifra extends StatelessWidget {
-  const _Cifra({
-    required this.valor,
-    required this.etiqueta,
-    this.destacada = false,
-    this.color,
-  });
 
-  final String valor;
-  final String etiqueta;
-  final bool destacada;
-
-  /// Con qué color se lee la cifra. El diseño distingue lo consumido de lo
-  /// disponible y de las incidencias: son tres lecturas distintas.
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    // La celda de la rejilla de métricas del diseño: el rótulo arriba, el
-    // número debajo en monoespaciada, sobre la superficie hundida.
-    final Color tinta =
-        color ?? (destacada ? AppColors.primary : AppColors.onSurface);
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: destacada
-            ? AppColors.surfaceContainerHigh
-            : AppColors.surfaceContainerLow,
-        borderRadius: AppRadius.brTarjeta,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Text(
-            etiqueta.toUpperCase(),
-            style: AppTypography.labelCaption.copyWith(
-              color: color ?? AppColors.outline,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          Text(
-            valor,
-            style: AppTypography.labelTelemetry.copyWith(color: tinta),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BotonHerramienta extends StatelessWidget {
-  const _BotonHerramienta({
-    required this.icono,
-    required this.texto,
-    this.principal = false,
-    this.colorIcono,
-    this.alTocar,
-  });
-
-  final IconData icono;
-  final String texto;
-  final bool principal;
-  final Color? colorIcono;
-  final VoidCallback? alTocar;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = principal ? AppColors.onPrimary : AppColors.onSurface;
-    final Widget cuerpo = Container(
-      constraints: const BoxConstraints(minHeight: 52),
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: principal ? AppColors.primary : AppColors.surfaceContainerLowest,
-        borderRadius: AppRadius.brTarjeta,
-        boxShadow: AppTheme.sombraNivel1,
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: <Widget>[
-          Icon(icono, size: 20, color: principal ? color : (colorIcono ?? color)),
-          const SizedBox(height: 2),
-          Text(
-            texto,
-            style: AppTypography.etiquetaChica.copyWith(color: color),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-
-    // Era un `Container` a secas: dibujado y sin recibir el toque. Sin `alTocar`
-    // se deja igual que antes, para que un boton que todavia no hace nada no
-    // simule que si.
-    if (alTocar == null) return cuerpo;
-    return Semantics(
-      button: true,
-      label: texto,
-      excludeSemantics: true,
-      child: InkWell(
-        onTap: alTocar,
-        borderRadius: AppRadius.brTarjeta,
-        child: cuerpo,
-      ),
-    );
-  }
-}
 
 class _ChipCategoria extends StatelessWidget {
   const _ChipCategoria({
@@ -1108,167 +965,61 @@ class _ChipCategoria extends StatelessWidget {
 }
 
 /// Una tarjeta de material, con la forma que le corresponde a su clase.
-class _TarjetaMaterial extends StatelessWidget {
-  const _TarjetaMaterial({required this.material, this.alVerificar});
+/// «Instalado en OT #1849», o «Instalado · sin subir» si no llegó todavía.
+String textoDeInstalada(SerieInstalada inst) {
+  final String donde =
+      inst.ordenNumero == null ? 'Instalado' : 'Instalado en OT #${inst.ordenNumero}';
+  return inst.sinSubir ? '$donde · sin subir' : donde;
+}
 
-  /// Qué pasa al tocar «Verificar MAC/SN». Nulo deja el botón como estaba:
-  /// dibujado y sin acción, que es lo honesto cuando quien monta la tarjeta no
-  /// sabe escanear.
-  final void Function(MaterialEnCustodia)? alVerificar;
+/// Una celda del resumen de arriba: la clase, lo que hay en la mano y un
+/// detalle chico.
+class _CeldaDeResumen extends StatelessWidget {
+  const _CeldaDeResumen({
+    required this.rotulo,
+    required this.valor,
+    required this.detalle,
+  });
 
-  final MaterialEnCustodia material;
-
-  /// El diseño colorea la categoría según de qué se trate: verde lo que se
-  /// consume, azul lo que se mide y se fracciona.
-  Color get _colorDeClase => switch (material.clase) {
-        ClaseMaterial.consumible => AppColors.exito,
-        ClaseMaterial.bobina => AppColors.secondary,
-        ClaseMaterial.terminal => AppColors.onSurfaceVariant,
-        ClaseMaterial.serializado => AppColors.secondary,
-      };
+  final String rotulo;
+  final String valor;
+  final String detalle;
 
   @override
   Widget build(BuildContext context) {
-    final serializado = material.clase == ClaseMaterial.serializado;
-
     return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceContainerLowest,
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceContainer,
         borderRadius: AppRadius.brTarjeta,
-        boxShadow: AppTheme.sombraNivel1,
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Container(
-        decoration: serializado
-            ? const BoxDecoration(
-                border: Border(
-                  left: BorderSide(color: AppColors.secondary, width: 4),
-                ),
-              )
-            : null,
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: serializado
-                        ? AppColors.secondaryFixed
-                        : AppColors.surfaceContainer,
-                    borderRadius: AppRadius.brCampo,
-                  ),
-                  child: Icon(_icono, size: 20, color: AppColors.primary),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Row(
-                        children: <Widget>[
-                          Flexible(
-                            child: serializado
-                                ? Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 2,
-                                    ),
-                                    decoration: const BoxDecoration(
-                                      color: AppColors.secondary,
-                                      borderRadius: AppRadius.brChico,
-                                    ),
-                                    child: Text(
-                                      material.categoria.toUpperCase(),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: AppTypography.etiquetaChica.copyWith(
-                                        color: AppColors.onSecondary,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  )
-                                : Text(
-                                    material.categoria.toUpperCase(),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: AppTypography.etiquetaChica.copyWith(
-                                      color: _colorDeClase,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                          ),
-                          // Lo que hay que poder rastrear uno por uno se
-                          // anuncia acá: es lo que cambia cómo se cierra.
-                          if (serializado) ...<Widget>[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: const BoxDecoration(
-                                color: AppColors.exitoFondo,
-                                borderRadius: AppRadius.brChico,
-                              ),
-                              child: Text(
-                                'Trazable',
-                                style: AppTypography.etiquetaChica.copyWith(
-                                  color: AppColors.exitoTexto,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      Text(
-                        material.nombre,
-                        style: AppTypography.cuerpoGrande.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(material.detalle, style: AppTypography.cuerpoChico),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: serializado
-                        ? AppColors.secondaryContainer
-                        : AppColors.surfaceContainerHigh,
-                    borderRadius: AppRadius.brChico,
-                  ),
-                  child: Text(
-                    '${material.disponibles}${material.unidad == 'm' ? 'm' : ''} Disp.',
-                    style: AppTypography.etiquetaChica.copyWith(
-                      color: serializado
-                          ? AppColors.onSecondaryContainer
-                          : AppColors.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            if (material.clase == ClaseMaterial.consumible)
-              material.razon == null ? _accionSimple() : _consumo(),
-            if (material.clase == ClaseMaterial.bobina) _metraje(),
-            if (serializado) _serie(context),
-            if (material.clase == ClaseMaterial.terminal) _accionSimple(),
-          ],
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(rotulo,
+              style: AppTypography.labelCaption.copyWith(color: AppColors.outline)),
+          const SizedBox(height: 2),
+          Text(valor,
+              style: AppTypography.tituloChico.copyWith(color: AppColors.onSurface)),
+          Text(detalle, style: AppTypography.etiquetaChica),
+        ],
       ),
     );
   }
+}
+
+/// Un material del kit.
+///
+/// LO PRIMERO ES LO QUE TIENE EN LA MANO (18/10/2026): en grande y con su
+/// unidad. Lo recibido y lo usado van en chico, debajo. Un equipo con serie
+/// muestra TODAS sus series —antes, solo la primera— y dónde está cada una:
+/// en la camioneta o instalada en una orden.
+class _TarjetaMaterial extends StatelessWidget {
+  const _TarjetaMaterial({required this.material, this.alVerificar});
+
+  final void Function(MaterialEnCustodia)? alVerificar;
+
+  final MaterialEnCustodia material;
 
   IconData get _icono => switch (material.clase) {
         ClaseMaterial.consumible => Icons.electrical_services,
@@ -1277,348 +1028,149 @@ class _TarjetaMaterial extends StatelessWidget {
         ClaseMaterial.terminal => Icons.home_repair_service,
       };
 
-  Widget _consumo() {
-    final porcentaje = (material.consumo * 100).round();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: Text(
-                'Consumo: ${material.usados} de ${material.recibidos} '
-                '${material.unidad} ($porcentaje%)',
-                style: AppTypography.etiquetaChica,
-              ),
-            ),
-            if (material.ordenesRelacionadas.isNotEmpty)
-              Text(
-                material.ordenesRelacionadas.join(', '),
-                style: AppTypography.etiquetaChica.copyWith(
-                  color: AppColors.secondary,
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadius.circulo),
-          child: LinearProgressIndicator(
-            value: material.consumo,
-            minHeight: 8,
-            backgroundColor: AppColors.surfaceContainer,
-            valueColor: const AlwaysStoppedAnimation<Color>(AppColors.secondary),
-          ),
-        ),
-        if (material.razon != null) ...<Widget>[
-          const SizedBox(height: AppSpacing.sm),
-          Container(
-            padding: const EdgeInsets.all(AppSpacing.sm),
-            decoration: const BoxDecoration(
-              color: AppColors.surfaceContainerLow,
-              borderRadius: AppRadius.brCampo,
-            ),
-            child: Row(
-              children: <Widget>[
-                Text('Razón OTs: ', style: AppTypography.etiquetaChica),
-                Expanded(
-                  child: Text(
-                    material.razon!,
-                    style: AppTypography.etiquetaChica.copyWith(
-                      color: AppColors.onSurface,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                // SIN ACCION NO HAY BOTON (17/10/2026): «Ver OTs» estaba dibujado sin
-                // `alTocar` porque el modulo que lo respaldaria no existe. Un boton
-                // que no responde enseña a no confiar en los demas.
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
+  @override
+  Widget build(BuildContext context) {
+    final bool conSeries = material.clase == ClaseMaterial.serializado &&
+        material.todasLasSeries.isNotEmpty;
+    final String unidad = material.unidad;
 
-  Widget _metraje() {
-    return Column(
-      children: <Widget>[
-        Container(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-          decoration: const BoxDecoration(
-            color: AppColors.surfaceContainerLow,
-            borderRadius: AppRadius.brCampo,
-          ),
-          child: Row(
-            children: <Widget>[
-              Expanded(child: _ColumnaMetraje('Inicial', '${material.recibidos} m')),
-              Expanded(
-                child: _ColumnaMetraje(
-                  'Tendido Hoy',
-                  '${material.usados} m',
-                  color: AppColors.secondary,
-                ),
-              ),
-              Expanded(
-                child: _ColumnaMetraje('Restante', '${material.disponibles} m'),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Row(
-          children: <Widget>[
-            const Icon(Icons.history, size: 13, color: AppColors.outline),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Text(
-                material.ultimoMovimiento ?? '',
-                style: AppTypography.etiquetaChica,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            // SIN ACCION NO HAY BOTON (17/10/2026): «Ajustar Metros» estaba dibujado sin
-            // `alTocar` porque el modulo que lo respaldaria no existe. Un boton
-            // que no responde enseña a no confiar en los demas.
-          ],
-        ),
-      ],
-    );
-  }
-
-  /// El último movimiento del equipo trae dos datos: de dónde vino y a dónde
-  /// fue. El diseño los pone en los dos extremos de la misma línea.
-  List<String> get _partesDelMovimiento {
-    final partes = (material.ultimoMovimiento ?? '').split(' · ');
-    return partes.length >= 2 ? partes : <String>[partes.first];
-  }
-
-  Widget _serie(BuildContext contexto) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Container(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          decoration: const BoxDecoration(
-            color: AppColors.inverseSurface,
-            borderRadius: AppRadius.brCampo,
-          ),
-          child: Column(
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: AppRadius.brTarjeta,
+        boxShadow: AppTheme.sombraNivel1,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      'SERIAL NUMBER (SN) · CÓDIGO BARRAS',
-                      style: AppTypography.etiquetaChica.copyWith(
-                        color: AppColors.surfaceDim,
-                      ),
-                    ),
-                  ),
-                  // «Validado» estaba fijo en el codigo: lo decia de todo
-                  // equipo, aunque nadie lo hubiera comprobado. Lo que si
-                  // comprueba es «Verificar MAC/SN», abajo.
-                ],
+              Container(
+                width: 40,
+                height: 40,
+                decoration: const BoxDecoration(
+                  color: AppColors.surfaceContainer,
+                  borderRadius: AppRadius.brCampo,
+                ),
+                child: Icon(_icono, size: 20, color: AppColors.primary),
               ),
-              const SizedBox(height: AppSpacing.sm),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      'SN: ${material.serie}',
-                      style: AppTypography.dato.copyWith(
-                        color: AppColors.inverseOnSurface,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  Material(
-                    color: AppColors.surfaceVariant.withValues(alpha: 0.2),
-                    borderRadius: AppRadius.brCampo,
-                    child: InkWell(
-                      borderRadius: AppRadius.brCampo,
-                      onTap: () async {
-                        await Clipboard.setData(
-                          ClipboardData(text: material.serie ?? ''),
-                        );
-                        if (!contexto.mounted) return;
-                        ScaffoldMessenger.of(contexto).showSnackBar(
-                          const SnackBar(content: Text('Serie copiada')),
-                        );
-                      },
-                      child: const SizedBox(
-                        width: 32,
-                        height: 32,
-                        child: Icon(
-                          Icons.content_copy,
-                          size: 16,
-                          color: AppColors.surfaceBright,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              if (material.ultimoMovimiento != null) ...<Widget>[
-                const SizedBox(height: AppSpacing.sm),
-                const Divider(color: AppColors.outline, height: 1),
-                const SizedBox(height: AppSpacing.sm),
-                Row(
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    for (final (int i, String parte)
-                        in _partesDelMovimiento.indexed) ...<Widget>[
-                      if (i > 0) const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          parte,
-                          textAlign: i == 0 ? TextAlign.left : TextAlign.right,
-                          style: AppTypography.etiquetaChica.copyWith(
-                            color: AppColors.surfaceDim,
-                            fontSize: 10,
-                          ),
+                    if (material.categoria.isNotEmpty)
+                      Text(
+                        material.categoria.toUpperCase(),
+                        style: AppTypography.etiquetaChica.copyWith(
+                          color: AppColors.outline,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ],
+                    Text(
+                      material.nombre,
+                      style: AppTypography.cuerpoGrande
+                          .copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    if (material.detalle.isNotEmpty)
+                      Text(material.detalle, style: AppTypography.cuerpoChico),
                   ],
                 ),
-              ],
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              // EN LA MANO, EN GRANDE: el número y su unidad juntos, para que
+              // nunca se lea un número suelto.
+              Text.rich(
+                TextSpan(
+                  children: <InlineSpan>[
+                    TextSpan(
+                      text: _MaterialesScreenState.numero(material.enMano),
+                      style: AppTypography.headlineMd.copyWith(
+                        color: material.enMano < 0
+                            ? AppColors.error
+                            : AppColors.onSurface,
+                      ),
+                    ),
+                    TextSpan(
+                      text: ' $unidad',
+                      style: AppTypography.etiquetaChica,
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: _AccionChica(
-                texto: 'Verificar MAC/SN',
-                icono: Icons.barcode_reader,
-                // «¿Es este el equipo que me entregaron?». Es la pregunta que
-                // el tecnico se hace con cinco cajas iguales en el baul, y la
-                // que hoy contestaba comparando a ojo caracter por caracter.
-                alTocar: alVerificar == null
-                    ? null
-                    : () => alVerificar!(material),
-              ),
-            ),
-            // SIN ACCION NO HAY BOTON (17/10/2026): «Log Trazabilidad» estaba dibujado sin
-            // `alTocar` porque el modulo que lo respaldaria no existe. Un boton
-            // que no responde enseña a no confiar en los demas.
-          ],
-        ),
-      ],
-    );
-  }
-
-  /// Lo que se recibe y se instala tal cual, sin barra de consumo: el diseño
-  /// lo deja en una línea con su acción al lado.
-  Widget _accionSimple() {
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: Text(
-            material.ultimoMovimiento ?? '',
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Recibido ${_MaterialesScreenState.numero(material.recibido)} · '
+            'usado ${_MaterialesScreenState.numero(material.usado)}',
             style: AppTypography.etiquetaChica,
           ),
-        ),
-        // SIN ACCION NO HAY BOTON (17/10/2026): «Asignar» / «Ajustar» estaba dibujado sin
-        // `alTocar` porque el modulo que lo respaldaria no existe. Un boton
-        // que no responde enseña a no confiar en los demas.
-      ],
-    );
-  }
-}
-
-class _ColumnaMetraje extends StatelessWidget {
-  const _ColumnaMetraje(this.titulo, this.valor, {this.color});
-
-  final String titulo;
-  final String valor;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: <Widget>[
-        Text(titulo, style: AppTypography.etiquetaChica),
-        Text(
-          valor,
-          style: AppTypography.dato.copyWith(
-            color: color ?? AppColors.onSurface,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Acción de una tarjeta de material. Hoy la única es «Verificar MAC/SN»: las
-/// que no tenían un módulo detrás se quitaron el 17/10/2026 en vez de quedar
-/// dibujadas sin hacer nada.
-class _AccionChica extends StatelessWidget {
-  const _AccionChica({
-    required this.texto,
-    required this.icono,
-    this.alTocar,
-  });
-
-  final String texto;
-  final IconData icono;
-  Color get color => AppColors.primary;
-  final VoidCallback? alTocar;
-
-  @override
-  Widget build(BuildContext context) {
-    final Widget cuerpo = Container(
-      constraints: const BoxConstraints(minHeight: AppSpacing.objetivoTactil),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-      alignment: Alignment.center,
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceContainer,
-        borderRadius: AppRadius.brCampo,
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Flexible(
-            child: Text(
-              texto,
-              style: AppTypography.etiquetaChica.copyWith(
-                color: color,
-                fontWeight: FontWeight.w600,
+          if (conSeries) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            for (final String serie in material.todasLasSeries)
+              _filaDeSerie(context, serie),
+            if (alVerificar != null) ...<Widget>[
+              const SizedBox(height: AppSpacing.xs),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => alVerificar!(material),
+                  icon: const Icon(Icons.barcode_reader, size: 18),
+                  label: const Text('Verificar un equipo'),
+                ),
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 4),
-          Icon(icono, size: 14, color: color),
+            ],
+          ],
         ],
       ),
     );
+  }
 
-    if (alTocar == null) return cuerpo;
-    return Semantics(
-      button: true,
-      label: texto,
-      excludeSemantics: true,
-      child: InkWell(
-        onTap: alTocar,
-        borderRadius: AppRadius.brCampo,
-        child: cuerpo,
+  Widget _filaDeSerie(BuildContext context, String serie) {
+    final SerieInstalada? inst = material.instaladas[serie];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              serie,
+              style: AppTypography.dato.copyWith(color: AppColors.onSurface),
+            ),
+          ),
+          if (inst == null)
+            DexterPastilla.enRegla(texto: 'En tu poder')
+          else
+            DexterPastilla.neutra(texto: textoDeInstalada(inst)),
+          IconButton(
+            tooltip: 'Copiar $serie',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.copy, size: 16),
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: serie));
+              if (!context.mounted) return;
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                const SnackBar(content: Text('Serie copiada')),
+              );
+            },
+          ),
+        ],
       ),
     );
   }
 }
+
+
 
 /// Cómo agrupa el diseño el material en custodia.
 enum _Categoria {
   todos('Todos', null),
-  activos('Activos ONT', AppColors.secondary),
+  equipos('Equipos', AppColors.secondary),
+  cable('Cable', AppColors.primary),
   consumibles('Consumibles', AppColors.exito);
 
   const _Categoria(this.etiqueta, this.punto);
@@ -1628,7 +1180,9 @@ enum _Categoria {
 
   bool incluye(MaterialEnCustodia material) => switch (this) {
         _Categoria.todos => true,
-        _Categoria.activos => material.clase == ClaseMaterial.serializado,
-        _Categoria.consumibles => material.clase != ClaseMaterial.serializado,
+        _Categoria.equipos => material.claseDeResumen == ClaseDeResumen.equipos,
+        _Categoria.cable => material.claseDeResumen == ClaseDeResumen.cable,
+        _Categoria.consumibles =>
+          material.claseDeResumen == ClaseDeResumen.consumibles,
       };
 }

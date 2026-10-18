@@ -292,9 +292,9 @@ void main() {
         expect(find.text(muerto), findsNothing, reason: muerto);
       }
       // Y lo que sí hace algo sigue.
-      expect(find.text('Escanear QR'), findsOneWidget);
+      expect(find.text('Escanear'), findsOneWidget);
       expect(find.text('Pedir'), findsOneWidget);
-      expect(find.text('Verificar MAC/SN'), findsWidgets);
+      expect(find.text('Verificar un equipo'), findsWidgets);
     });
   });
 

@@ -119,7 +119,7 @@ void main() {
       await abrirMateriales(t);
 
       expect(
-        find.textContaining('10 Disp.'),
+        find.textContaining('10 unidades', findRichText: true),
         findsWidgets,
         reason: 'el servidor no aceptó el consumo: los dos conectores siguen '
             'siendo del técnico hasta que alguien resuelva el conflicto',

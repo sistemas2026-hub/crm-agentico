@@ -510,9 +510,35 @@ def kit_de(profile, org):
                 "consumido": consumido,
                 "devuelto": devuelto,
                 "disponible": saldo_de(profile, material),
+                "series_instaladas": series_instaladas(profile, material),
             }
         )
     return filas
+
+
+def series_instaladas(profile, material) -> list[dict]:
+    """Cada serie que este técnico ya instaló, y en qué orden.
+
+    POR QUÉ (18/10/2026): el kit mandaba las series ENTREGADAS y nada más, así
+    que la app no podía decir cuál de las cinco ONT iguales del baúl seguía en
+    la camioneta y cuál quedó en la casa de un cliente. El dato ya estaba: cada
+    consumo de un equipo guarda su serie y su orden. Un conflicto no cuenta: es
+    justamente una serie que otro ya había instalado.
+    """
+    consumos = (
+        MovimientoDeMaterial.objects.filter(
+            profile=profile, material=material,
+            tipo=MovimientoDeMaterial.CONSUMO)
+        .exclude(serie="")
+        .exclude(estado=MovimientoDeMaterial.CONFLICTO)
+        .select_related("orden")
+        .order_by("ocurrido_en")
+    )
+    return [
+        {"serie": m.serie,
+         "orden_numero": m.orden.numero if m.orden_id else None}
+        for m in consumos
+    ]
 
 
 def materiales_sin_cuadrar(profile, org):

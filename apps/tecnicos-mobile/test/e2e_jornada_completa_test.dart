@@ -123,6 +123,7 @@ void main() {
             'recibido': '10',
             'consumido': '0',
             'devuelto': '0',
+            'disponible': '10',
             'acta': 'Acta #K-2026-311',
           },
         ],
@@ -274,7 +275,7 @@ void main() {
       );
 
       expect(find.text('Acta #K-2026-311'), findsOneWidget);
-      expect(find.textContaining('10 Disp.'), findsWidgets);
+      expect(find.textContaining('10 unidades', findRichText: true), findsWidgets);
     });
 
     testWidgets('3. Un consumo registrado se ve en Materiales',
@@ -296,7 +297,7 @@ void main() {
         )),
       );
 
-      expect(find.textContaining('8 Disp.'), findsWidgets,
+      expect(find.textContaining('8 unidades', findRichText: true), findsWidgets,
           reason: 'diez menos los dos que acaba de poner');
       expect(find.textContaining('1 movimiento esperando señal'),
           findsOneWidget);
@@ -342,7 +343,7 @@ void main() {
         )),
       );
 
-      expect(find.textContaining('8 Disp.'), findsWidgets);
+      expect(find.textContaining('8 unidades', findRichText: true), findsWidgets);
 
       await t.tap(find.text('Preparar Devolución al Depósito'));
       await esperarLaBase(t);

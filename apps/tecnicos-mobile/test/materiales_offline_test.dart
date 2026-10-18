@@ -304,9 +304,12 @@ void main() {
       );
     });
 
-    test('Y el saldo deja de descontarlo una vez confirmado', () async {
-      // El kit que baja del servidor ya incluye el consumo: seguir restándolo
-      // desde la cola lo contaría dos veces.
+    test('Al confirmarse queda descontado una sola vez, sin esperar el kit nuevo', () async {
+      // 18/10/2026: confirmar resta el consumo del saldo del espejo, y la cola
+      // deja de restarlo. Antes el espejo quedaba en 20 hasta bajar el kit
+      // nuevo, y en ese rato la pantalla «rebotaba» al número viejo. En la
+      // sincronización la confirmación va primero y el kit baja después, así
+      // que el kit nuevo pisa este número con el exacto del servidor.
       await darKit(disponible: '20');
       await gastar(id: 'mov-1', cantidad: '4');
       await localDb.confirmarMovimientoMaterial(
@@ -316,7 +319,7 @@ void main() {
       final saldo = await localDb.saldoLocalDe(
         orgId: orgA, profileId: perfilA, codigo: 'CON-SC-APC',
       );
-      expect(saldo, 20);
+      expect(saldo, 16);
     });
   });
 

@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 22,
+      version: 23,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -166,6 +166,23 @@ class LocalDatabase {
     // pueda leer sin señal.
     if (oldVersion < 19) {
       await _crearTablaDeNotificaciones(db);
+    }
+
+    // v23: en qué orden quedó cada serie instalada (18/10/2026). Sin esto la
+    // pantalla no podía decir cuál de las ONT iguales del baúl seguía en la
+    // camioneta. Aditiva: el espejo del kit se reescribe entero en la próxima
+    // sincronización, y hasta entonces la columna queda vacía.
+    if (oldVersion < 23) {
+      final List<Map<String, Object?>> info =
+          await db.rawQuery('PRAGMA table_info(local_kit);');
+      final Set<String> cols = <String>{
+        for (final Map<String, Object?> c in info) c['name'].toString(),
+      };
+      if (cols.isNotEmpty && !cols.contains('series_instaladas_json')) {
+        await db.execute(
+          'ALTER TABLE local_kit ADD COLUMN series_instaladas_json TEXT;',
+        );
+      }
     }
 
     // v22: los pedidos de material a bodega, encolados.
@@ -507,6 +524,7 @@ class LocalDatabase {
         devuelto TEXT NOT NULL,
         disponible TEXT NOT NULL,
         series_json TEXT,
+        series_instaladas_json TEXT,
         acta TEXT,
         entregado_en TEXT,
         regla_json TEXT,
@@ -2565,6 +2583,8 @@ class LocalDatabase {
           'devuelto': material['devuelto']?.toString() ?? '0',
           'disponible': material['disponible']?.toString() ?? '0',
           'series_json': jsonEncode(material['series'] ?? <String>[]),
+          'series_instaladas_json':
+              jsonEncode(material['series_instaladas'] ?? <dynamic>[]),
           'acta': material['acta']?.toString() ?? '',
           'entregado_en': material['entregado_en']?.toString(),
           // La regla de cantidad viaja con el material para poder avisar sin
@@ -2860,6 +2880,15 @@ class LocalDatabase {
     if (cuanto == 0) return;
 
     final Map<String, Object?> cambios = <String, Object?>{};
+    // EL SALDO TAMBIÉN BAJA (18/10/2026). Antes se sumaba solo lo consumido o
+    // devuelto, y `disponible` quedaba en el valor viejo hasta la próxima
+    // descarga del kit: desde que la pantalla muestra el saldo del servidor,
+    // eso hacía que el número «rebotara» al subir el movimiento.
+    if (tipo == 'consumo' || tipo == 'devolucion') {
+      final double disponible =
+          double.tryParse((kit.first['disponible'] ?? '0').toString()) ?? 0;
+      cambios['disponible'] = _comoTexto(disponible - cuanto);
+    }
     if (tipo == 'consumo') {
       final double antes =
           double.tryParse((kit.first['consumido'] ?? '0').toString()) ?? 0;

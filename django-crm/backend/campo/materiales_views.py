@@ -172,6 +172,7 @@ class KitView(APIView):
                 "devuelto": _numero(fila["devuelto"]),
                 "disponible": _numero(fila["disponible"]),
                 "series": fila["series"],
+                "series_instaladas": fila["series_instaladas"],
                 "acta": fila["acta"],
                 "entregado_en": (
                     fila["entregado_en"].isoformat() if fila["entregado_en"] else None

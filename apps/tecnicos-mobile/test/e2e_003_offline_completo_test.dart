@@ -49,7 +49,7 @@ void main() {
 
       await abrirMateriales(t);
 
-      expect(find.textContaining('8 Disp.'), findsWidgets);
+      expect(find.textContaining('8 unidades', findRichText: true), findsWidgets);
       expect(find.textContaining('1 movimiento esperando señal'),
           findsOneWidget);
     });
@@ -66,7 +66,7 @@ void main() {
 
       await abrirMateriales(t);
 
-      expect(find.textContaining('5 Disp.'), findsWidgets);
+      expect(find.textContaining('5 unidades', findRichText: true), findsWidgets);
       expect(find.textContaining('2 movimientos esperando señal'),
           findsOneWidget);
     });
@@ -86,7 +86,7 @@ void main() {
 
       await abrirMateriales(t);
 
-      expect(find.textContaining('8 Disp.'), findsWidgets,
+      expect(find.textContaining('8 unidades', findRichText: true), findsWidgets,
           reason: 'dos conectores, no cuatro');
       expect(find.textContaining('1 movimiento esperando señal'),
           findsOneWidget);
@@ -108,7 +108,7 @@ void main() {
 
       await abrirMateriales(t);
 
-      expect(find.textContaining('8 Disp.'), findsWidgets,
+      expect(find.textContaining('8 unidades', findRichText: true), findsWidgets,
           reason: 'el mismo saldo antes y después de subir');
       expect(
         find.textContaining('esperando señal'),
@@ -138,7 +138,7 @@ void main() {
 
       await abrirMateriales(t);
 
-      expect(find.textContaining('8 Disp.'), findsWidgets);
+      expect(find.textContaining('8 unidades', findRichText: true), findsWidgets);
       expect(find.textContaining('1 movimiento esperando señal'),
           findsOneWidget);
     });
@@ -168,7 +168,7 @@ void main() {
 
       await abrirMateriales(t);
 
-      expect(find.textContaining('8 Disp.'), findsWidgets,
+      expect(find.textContaining('8 unidades', findRichText: true), findsWidgets,
           reason: 'dos conectores gastados, por más vueltas que haya dado');
       expect(find.textContaining('esperando señal'), findsNothing);
     });

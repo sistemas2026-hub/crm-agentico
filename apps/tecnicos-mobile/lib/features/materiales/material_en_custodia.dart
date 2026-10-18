@@ -26,6 +26,21 @@ enum ClaseMaterial {
   terminal,
 }
 
+/// Cómo se agrupa el kit para contarlo: una ONT, un metro de cable y un
+/// conector no se pueden sumar entre sí (18/10/2026).
+enum ClaseDeResumen { equipos, cable, consumibles }
+
+/// Una serie que ya se instaló.
+class SerieInstalada {
+  const SerieInstalada({this.ordenNumero, this.sinSubir = false});
+
+  /// La orden donde quedó, si se sabe.
+  final int? ordenNumero;
+
+  /// Se registró en el teléfono y todavía no llegó al servidor.
+  final bool sinSubir;
+}
+
 class MaterialEnCustodia {
   const MaterialEnCustodia({
     required this.categoria,
@@ -40,6 +55,11 @@ class MaterialEnCustodia {
     this.ordenesRelacionadas = const <String>[],
     this.razon,
     this.ultimoMovimiento,
+    this.series = const <String>[],
+    this.instaladas = const <String, SerieInstalada>{},
+    this.enManoExacto,
+    this.usadoExacto,
+    this.recibidoExacto,
   });
 
   final String categoria;
@@ -66,7 +86,38 @@ class MaterialEnCustodia {
   final String? razon;
   final String? ultimoMovimiento;
 
+  /// Todas las series entregadas de este material. Hasta el 18/10/2026 la
+  /// pantalla mostraba solo la primera: con cinco ONT del mismo modelo, se veía
+  /// una.
+  final List<String> series;
+
+  /// Las que ya se instalaron, por serie: en qué orden, y si ya subió.
+  final Map<String, SerieInstalada> instaladas;
+
+  /// Las cantidades exactas: los metros de cable tienen decimales, y los
+  /// enteros de arriba los redondean.
+  final double? enManoExacto;
+  final double? usadoExacto;
+  final double? recibidoExacto;
+
   int get disponibles => recibidos - usados;
+
+  /// Lo que el técnico tiene encima AHORA: el saldo del servidor menos lo que
+  /// registró en el teléfono y todavía no subió.
+  double get enMano => enManoExacto ?? disponibles.toDouble();
+  double get usado => usadoExacto ?? usados.toDouble();
+  double get recibido => recibidoExacto ?? recibidos.toDouble();
+
+  /// Las series, con las de ejemplo de antes (una sola) como respaldo.
+  List<String> get todasLasSeries =>
+      series.isNotEmpty ? series : <String>[?serie];
+
+  /// La clase en la que se resume arriba: equipos, cable u otros.
+  ClaseDeResumen get claseDeResumen => switch (clase) {
+        ClaseMaterial.serializado => ClaseDeResumen.equipos,
+        ClaseMaterial.bobina => ClaseDeResumen.cable,
+        _ => ClaseDeResumen.consumibles,
+      };
 
   /// Qué porcentaje del material recibido ya se usó.
   double get consumo => recibidos == 0 ? 0 : usados / recibidos;
