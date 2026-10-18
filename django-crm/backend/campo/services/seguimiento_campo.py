@@ -102,6 +102,10 @@ CAMPOS_EXPUESTOS = {
     ),
     "bloqueo_detuvo_el_trabajo": ("requiere_noc", "estado_operativo_anterior"),
     "bloqueo_libero_el_trabajo": ("volvio_a",),
+    # Las mediciones en el sitio (18/10/2026): la lectura ya en palabras. Los
+    # niveles crudos quedan en el evento para comparar despues; no se vuelcan.
+    "senal_medida": ("resultado",),
+    "conexion_probada": ("resultado",),
 }
 
 
@@ -127,6 +131,8 @@ ETIQUETAS = {
     "correccion_requerida": "El supervisor devolvió el trabajo",
     "consumo": "Material consumido",
     "contexto_refrescado": "Contexto refrescado",
+    "senal_medida": "Señal medida en el sitio",
+    "conexion_probada": "Conexión probada en el sitio",
     "trabajo_iniciado": "Trabajo iniciado",
     "case": "Caso",
     "tecnico": "Técnico",
@@ -427,7 +433,10 @@ def linea_de_tiempo(orden) -> dict:
 
     tipos_seguimiento = set(TIPOS.values())
     salida = []
-    for e in eventos:
+    #  Una prueba de conexion son varias tandas: se leen como un renglon.
+    from campo.services import mediciones
+    for grupo in mediciones.juntar_tandas(eventos):
+        e = grupo[0]
         datos = e.datos or {}
         es_seguimiento = e.tipo in tipos_seguimiento
         fila = {
@@ -481,6 +490,8 @@ def linea_de_tiempo(orden) -> dict:
                 or datos.get("estado_nuevo")
                 or datos.get("estado_validacion_nuevo")
             )
+        if e.tipo == mediciones.CONEXION:
+            fila["datos"]["resultado"] = mediciones.resultado_de_tandas(grupo)
         salida.append(fila)
 
     registrados = [e.tipo for e in eventos if e.tipo in tipos_seguimiento]

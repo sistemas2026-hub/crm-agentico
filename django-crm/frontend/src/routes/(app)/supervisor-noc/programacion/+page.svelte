@@ -1726,6 +1726,11 @@
                               {/if}
                             </div>
                           {/if}
+                          <!-- Una medición en el sitio, ya en palabras por el
+                               backend (18/10/2026): señal o conexión. -->
+                          {#if ev.datos?.resultado}
+                            <span class="snoc-body-sm">{ev.datos.resultado}</span>
+                          {/if}
                           {#if ev.datos?.minutos_detenido != null}
                             <span class="snoc-body-sm snoc-tenue">
                               Estuvo detenido {ev.datos.minutos_detenido} min

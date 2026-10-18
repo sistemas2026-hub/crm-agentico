@@ -36,6 +36,7 @@ from campo.services.formulario_del_trabajo import formulario_del_trabajo
 from campo.services import salud_seguimiento
 from campo.services import seguimiento_campo as seguimiento
 from campo.services import telemetria
+from campo.services import mediciones
 from campo.services.telemetria import (
     TANDAS,
     SinServicioParaPing,
@@ -595,9 +596,13 @@ class MedirSenalView(APIView):
     def post(self, request, pk):
         orden = _obtener_orden_o_404(request, pk)
         try:
-            return Response(telemetria.medir_senal(orden))
+            resultado = telemetria.medir_senal(orden)
         except telemetria.SinEquipoParaMedir as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        # Queda en la bitacora, con su hora y quien la pidio (18/10/2026). Antes
+        # volvia al telefono y se perdia: justo el «despues» de la visita.
+        mediciones.anotar_senal(orden, request.profile, resultado)
+        return Response(resultado)
 
 
 def _telefono_de_soporte(org) -> str:
@@ -1281,6 +1286,9 @@ class ProbarConexionView(APIView):
                 {"error": "SIN_SERVICIO", "detalle": str(e)},
                 status=status.HTTP_409_CONFLICT,
             )
+
+        # Cada tanda queda en la bitacora; al leerla se juntan (18/10/2026).
+        mediciones.anotar_conexion(orden, request.profile, resultado)
 
         if not resultado["ok"]:
             # 200 y no 5xx: la peticion al CRM se proceso bien, y "no se pudo
