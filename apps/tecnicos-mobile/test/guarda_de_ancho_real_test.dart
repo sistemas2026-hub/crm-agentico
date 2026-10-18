@@ -7,6 +7,7 @@ import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/detalle_orden/acciones_orden.dart';
 import 'package:campo/features/detalle_orden/detalle_orden_screen.dart';
 import 'package:campo/features/ejecucion/ejecucion_screen.dart';
+import 'package:campo/features/detalle_orden/seguimiento_de_la_intervencion.dart';
 import 'package:campo/features/detalle_orden/visitas_anteriores.dart';
 import 'package:campo/features/inicio/inicio_screen.dart';
 import 'package:campo/features/trabajo/trabajo_screen.dart';
@@ -486,6 +487,55 @@ void main() {
                   ResultadoPing.noSePudo('sin_conexion'),
               refrescarFicha: (_) async =>
                   const ResultadoRefresco(ok: false, motivo: 'sin_conexion'),
+            ),
+          ),
+          escalaDeLetra: letraGrande,
+        );
+      });
+
+      // 18/10/2026: el seguimiento pasó a línea de tiempo, con la hora en una
+      // columna fija a la izquierda. Con la letra en 1.3 esa columna es la
+      // que puede no entrar.
+      testWidgets('La linea de tiempo del seguimiento entra con letra grande',
+          (WidgetTester t) async {
+        final DateTime hoy = DateTime.now();
+        await aEsteAncho(
+          t,
+          ancho,
+          () => SingleChildScrollView(
+            child: SeguimientoDeLaIntervencion(
+              cargando: false,
+              seguimiento: <String, dynamic>{
+                'eventos': <dynamic>[
+                  for (final (String etiqueta, int horas) in <(String, int)>[
+                    ('Bloqueo reportado por el técnico en sitio', 30),
+                    ('Avance', 2),
+                  ])
+                    <String, dynamic>{
+                      'id': etiqueta,
+                      'tipo': 'avance_campo',
+                      'etiqueta': etiqueta,
+                      'severidad': 'atencion',
+                      'quien': 'MARÍA FERNANDA SABANAGRANDE DE LA ESPRIELLA',
+                      'recibido_en': hoy
+                          .subtract(Duration(hours: horas))
+                          .toUtc()
+                          .toIso8601String(),
+                      'capturado_en_dispositivo': hoy
+                          .subtract(Duration(hours: horas + 2))
+                          .toUtc()
+                          .toIso8601String(),
+                      'detalle': <dynamic>[
+                        <String, dynamic>{
+                          'id': 'nota',
+                          'titulo': 'Qué se hizo y qué sigue',
+                          'valor': 'Se cambió el conector de la roseta y '
+                              'queda pendiente medir desde la caja NAP',
+                        },
+                      ],
+                    },
+                ],
+              },
             ),
           ),
           escalaDeLetra: letraGrande,

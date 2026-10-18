@@ -40,6 +40,21 @@ class VisitasAnteriores extends StatelessWidget {
         .toList();
   }
 
+  /// Los tickets anteriores del mismo servicio, en el sistema del ISP.
+  ///
+  /// 18/10/2026: las órdenes de campo de Dexter son nuevas, así que con solo
+  /// ellas casi todo decía «primera visita». La historia real del servicio son
+  /// sus tickets. Vienen sin asunto: el servidor no lo manda, porque trae
+  /// nombres y barrios escritos a mano.
+  List<Map<String, dynamic>> get _tickets {
+    final Object? v = historial?['tickets'];
+    if (v is! List) return const <Map<String, dynamic>>[];
+    return v
+        .whereType<Map>()
+        .map((Map m) => Map<String, dynamic>.from(m))
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     return DexterBloque(
@@ -77,7 +92,8 @@ class VisitasAnteriores extends StatelessWidget {
     }
 
     final List<Map<String, dynamic>> visitas = _visitas;
-    if (visitas.isEmpty) {
+    final List<Map<String, dynamic>> tickets = _tickets;
+    if (visitas.isEmpty && tickets.isEmpty) {
       return <Widget>[
         Text('Es la primera visita a este servicio.',
             style: AppTypography.cuerpo),
@@ -85,11 +101,74 @@ class VisitasAnteriores extends StatelessWidget {
     }
 
     return <Widget>[
-      for (int i = 0; i < visitas.length; i++) ...<Widget>[
-        if (i > 0) const SizedBox(height: AppSpacing.sm),
-        _unaVisita(visitas[i]),
+      if (visitas.isNotEmpty) ...<Widget>[
+        _subtitulo('Visitas de campo'),
+        for (int i = 0; i < visitas.length; i++) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          _unaVisita(visitas[i]),
+        ],
+      ] else
+        Text('Ninguna visita de campo anterior registrada.',
+            style: AppTypography.cuerpoChico),
+      if (tickets.isNotEmpty) ...<Widget>[
+        const SizedBox(height: AppSpacing.md),
+        _subtitulo('Tickets anteriores de este servicio'),
+        for (final Map<String, dynamic> t in tickets) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          _unTicket(t),
+        ],
       ],
     ];
+  }
+
+  Widget _subtitulo(String texto) => Text(
+        texto.toUpperCase(),
+        style: AppTypography.labelCaption.copyWith(color: AppColors.outline),
+      );
+
+  /// Un ticket: su número, cuándo se abrió y si se cerró.
+  Widget _unTicket(Map<String, dynamic> t) {
+    final String numero = (t['numero'] ?? '').toString();
+    final bool abierto = (t['estado'] ?? '') == 'abierto';
+    final String abiertoEn = _cuando(t['abierto_en']);
+    final String cerradoEn = _cuando(t['cerrado_en']);
+    final String area = (t['area'] ?? '').toString().replaceAll('_', ' ');
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: AppRadius.brTarjeta,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  numero.isEmpty ? 'Ticket' : 'Ticket #$numero',
+                  style: AppTypography.cuerpo,
+                ),
+              ),
+              if (abierto)
+                DexterPastilla.alerta(texto: 'abierto')
+              else
+                DexterPastilla.neutra(texto: 'cerrado'),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            <String>[
+              if (abiertoEn.isNotEmpty) 'Abierto el $abiertoEn',
+              if (!abierto && cerradoEn.isNotEmpty) 'cerrado el $cerradoEn',
+              if (area.isNotEmpty) area,
+            ].join(' · '),
+            style: AppTypography.etiquetaChica,
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _unaVisita(Map<String, dynamic> v) {

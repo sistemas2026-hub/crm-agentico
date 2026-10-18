@@ -242,8 +242,7 @@ class _SeguimientoDeLaIntervencionState
             style: AppTypography.cuerpoChico,
           )
         else
-          for (final dynamic crudo in eventos)
-            if (crudo is Map) _evento(Map<String, dynamic>.from(crudo)),
+          ..._lineaDeTiempo(eventos),
       ],
     ];
   }
@@ -756,7 +755,70 @@ class _SeguimientoDeLaIntervencionState
     ];
   }
 
-  Widget _evento(Map<String, dynamic> evento) {
+  /// La historia como línea de tiempo, agrupada por día y lo más nuevo arriba.
+  ///
+  /// POR QUÉ (18/10/2026, pedido del usuario): cada evento era una tarjeta
+  /// suelta con solo la hora. En una orden de dos días, «14:05» no dice si fue
+  /// hoy o ayer, y la historia se leía de lo viejo a lo nuevo cuando lo que el
+  /// técnico busca primero es qué pasó último. Ahora cada día tiene su
+  /// encabezado con la fecha, cada evento su hora a la izquierda, y una línea
+  /// los une en el orden en que ocurrieron.
+  List<Widget> _lineaDeTiempo(List<dynamic> crudos) {
+    final List<Map<String, dynamic>> eventos = <Map<String, dynamic>>[
+      for (final dynamic c in crudos)
+        if (c is Map) Map<String, dynamic>.from(c),
+    ].reversed.toList();
+
+    final List<Widget> salida = <Widget>[];
+    String? diaAnterior;
+    for (int i = 0; i < eventos.length; i++) {
+      final DateTime? cuando = _fecha(eventos[i]['recibido_en']);
+      final String dia = cuando == null ? 'Sin fecha' : _rotuloDelDia(cuando);
+      if (dia != diaAnterior) {
+        salida.add(Padding(
+          padding: EdgeInsets.only(
+            top: diaAnterior == null ? 0 : AppSpacing.sm,
+            bottom: AppSpacing.xs,
+          ),
+          child: Text(
+            dia.toUpperCase(),
+            style: AppTypography.labelCaption.copyWith(color: AppColors.outline),
+          ),
+        ));
+        diaAnterior = dia;
+      }
+      final bool ultimoDelDia = i == eventos.length - 1 ||
+          _rotuloDeEvento(eventos[i + 1]) != dia;
+      salida.add(_evento(eventos[i], conLinea: !ultimoDelDia));
+    }
+    return salida;
+  }
+
+  String _rotuloDeEvento(Map<String, dynamic> e) {
+    final DateTime? c = _fecha(e['recibido_en']);
+    return c == null ? 'Sin fecha' : _rotuloDelDia(c);
+  }
+
+  /// «Hoy · 18/10/2026», «Ayer · 17/10/2026», o la fecha sola.
+  static String _rotuloDelDia(DateTime cuando, {DateTime? ahora}) {
+    final DateTime hoy = ahora ?? DateTime.now();
+    final DateTime d = DateTime(cuando.year, cuando.month, cuando.day);
+    final int dias = DateTime(hoy.year, hoy.month, hoy.day).difference(d).inDays;
+    final String fecha = '${cuando.day.toString().padLeft(2, '0')}/'
+        '${cuando.month.toString().padLeft(2, '0')}/${cuando.year}';
+    if (dias == 0) return 'Hoy · $fecha';
+    if (dias == 1) return 'Ayer · $fecha';
+    return fecha;
+  }
+
+  Color _colorDeSeveridad(String severidad) => switch (severidad) {
+        'problema' => AppColors.error,
+        'atencion' => AppColors.precaucion,
+        'en_regla' => AppColors.secondary,
+        _ => AppColors.outline,
+      };
+
+  Widget _evento(Map<String, dynamic> evento, {bool conLinea = false}) {
     final String etiqueta = (evento['etiqueta'] ?? evento['tipo'] ?? '—')
         .toString();
     final String severidad = (evento['severidad'] ?? 'info').toString();
@@ -768,68 +830,108 @@ class _SeguimientoDeLaIntervencionState
     final Map<String, dynamic> datos =
         _mapa(evento['datos']) ?? <String, dynamic>{};
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Container(
-        padding: const EdgeInsets.all(AppSpacing.sm),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceContainerLowest,
-          borderRadius: AppRadius.brTarjeta,
-          boxShadow: AppTheme.sombraNivel1,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    final Widget contenido = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                _pastilla(etiqueta, severidad),
-                const Spacer(),
-                if (recibido != null)
-                  Text(_hora(recibido), style: AppTypography.etiquetaChica),
-              ],
-            ),
-            if (quien.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 2),
-              Text(quien, style: AppTypography.etiquetaChica),
-            ],
-
-            // El detalle de un reporte, leído con el esquema que tenía cuando se
-            // capturó. Los títulos vienen de ahí: esta pantalla no sabe qué
-            // campos existen ni necesita saberlo.
-            for (final dynamic fila in detalle)
-              if (fila is Map) ...<Widget>[
-                const SizedBox(height: AppSpacing.xs),
-                _dato(
-                  (fila['titulo'] ?? fila['id'] ?? '').toString(),
-                  _valorLegible(fila['valor']),
-                ),
-              ],
-
-            // Los hechos del sistema traen `datos` en vez de `detalle`: el
-            // backend expone solo las claves que decidió mostrar.
-            for (final String clave in datos.keys)
-              if (datos[clave] != null) ...<Widget>[
-                const SizedBox(height: AppSpacing.xs),
-                _dato(_humanizar(clave), _valorLegible(datos[clave])),
-              ],
-
-            ..._fotosDelEvento(evento),
-
-            // Las dos horas, cuando difieren. Es la decisión del objetivo hecha
-            // visible: lo que gobierna el seguimiento es la llegada al
-            // servidor, y la del teléfono está para reconstruir la historia.
-            if (enElTelefono != null && recibido != null) ...<Widget>[
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                _demora(enElTelefono, recibido),
-                style: AppTypography.etiquetaChica,
-              ),
-            ],
+            _pastilla(etiqueta, severidad),
+            if (quien.isNotEmpty) Text(quien, style: AppTypography.etiquetaChica),
           ],
         ),
+
+        // El detalle de un reporte, leído con el esquema que tenía cuando se
+        // capturó. Los títulos vienen de ahí: esta pantalla no sabe qué campos
+        // existen ni necesita saberlo.
+        for (final dynamic fila in detalle)
+          if (fila is Map) ...<Widget>[
+            const SizedBox(height: AppSpacing.xs),
+            _dato(
+              (fila['titulo'] ?? fila['id'] ?? '').toString(),
+              _valorLegible(fila['valor']),
+            ),
+          ],
+
+        // Los hechos del sistema traen `datos` en vez de `detalle`: el backend
+        // expone solo las claves que decidió mostrar.
+        for (final String clave in datos.keys)
+          if (datos[clave] != null) ...<Widget>[
+            const SizedBox(height: AppSpacing.xs),
+            _dato(_humanizar(clave), _valorLegible(datos[clave])),
+          ],
+
+        ..._fotosDelEvento(evento),
+
+        // Las dos horas, cuando difieren. Lo que gobierna el seguimiento es la
+        // llegada al servidor; la del teléfono está para reconstruir la
+        // historia.
+        if (enElTelefono != null && recibido != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            _demora(enElTelefono, recibido),
+            style: AppTypography.etiquetaChica,
+          ),
+        ],
+      ],
+    );
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          // La hora, a la izquierda: es lo primero que se busca.
+          SizedBox(
+            width: 52,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                recibido == null ? '—' : _hora(recibido),
+                style: AppTypography.etiqueta.copyWith(
+                  color: AppColors.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+          // El punto y la línea que une con el evento siguiente del mismo día.
+          SizedBox(
+            width: 20,
+            child: Column(
+              children: <Widget>[
+                const SizedBox(height: 4),
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: _colorDeSeveridad(severidad),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                if (conLinea)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      color: AppColors.surfaceContainerHigh,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: contenido,
+            ),
+          ),
+        ],
       ),
     );
   }
+
 
   /// Una fila «título: valor», con la tipografía del diseño.
   ///

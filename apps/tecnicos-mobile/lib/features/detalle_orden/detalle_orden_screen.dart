@@ -1447,7 +1447,10 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   Widget? _datosTecnicos(TrabajoVista trabajo) {
     final String cto = trabajo.contexto['cto']?.toString() ?? '';
     final String serial = trabajo.serialOnu;
-    if (cto.isEmpty && serial.isEmpty) return null;
+    // La IP del servicio (18/10/2026, pedido del usuario): es lo primero que
+    // se compara con el router del cliente, y estaba en la ficha sin mostrarse.
+    final String ip = trabajo.ipCliente.trim();
+    if (cto.isEmpty && serial.isEmpty && ip.isEmpty) return null;
 
     return DexterCard(
       child: Column(
@@ -1484,6 +1487,15 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               icono: Icons.qr_code_2,
               etiqueta: 'Serial del equipo del cliente',
               valor: serial,
+              monoespaciada: true,
+            ),
+          ],
+          if (ip.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            _lineaDeDato(
+              icono: Icons.lan_outlined,
+              etiqueta: 'IP del cliente',
+              valor: ip,
               monoespaciada: true,
             ),
           ],
@@ -2737,11 +2749,17 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
+                    // SIN EL NOMBRE DEL PROVEEDOR (18/10/2026, pedido del
+                    // usuario). Decía «Telemetría SmartOLT · Vía Dexter API»:
+                    // la próxima empresa puede leer su red con otro sistema, y
+                    // lo que el técnico necesita saber es QUÉ es el dato, no de
+                    // qué marca viene. «OLT» es el equipo de la central, igual
+                    // en cualquier red de fibra.
                     Text(
-                      'Telemetría SmartOLT',
+                      'Estado del equipo',
                       style: AppTypography.cuerpoGrande,
                     ),
-                    Text('Vía Dexter API', style: AppTypography.etiquetaChica),
+                    Text('Leído de la OLT', style: AppTypography.etiquetaChica),
                   ],
                 ),
               ),

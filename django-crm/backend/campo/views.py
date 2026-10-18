@@ -640,6 +640,7 @@ class HistorialDelServicioView(APIView):
                 # app los dibuja distinto porque el tecnico actua distinto.
                 "hay_servicio": bool(servicio),
                 "visitas": historial_del_servicio.visitas_anteriores(orden),
+                "tickets": historial_del_servicio.tickets_anteriores(orden),
             }
         )
 

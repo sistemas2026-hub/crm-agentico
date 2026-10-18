@@ -773,4 +773,20 @@ void main() {
       expect(find.byType(DexterBarraSegmentada), findsNothing);
     });
   });
+
+  group('9. La ficha no nombra al proveedor, y muestra la IP (18/10/2026)', () {
+    testWidgets('«Estado del equipo», sin SmartOLT; y la IP del cliente',
+        (WidgetTester t) async {
+      // La próxima empresa puede leer su red con otro sistema: el técnico
+      // necesita saber QUÉ es el dato, no de qué marca viene.
+      pantallaAlta(t);
+      await montar(t, orden());
+
+      expect(find.text('Estado del equipo'), findsOneWidget);
+      expect(find.textContaining('SmartOLT'), findsNothing);
+      expect(find.textContaining('Dexter API'), findsNothing);
+      expect(find.text('IP del cliente'), findsOneWidget);
+      expect(find.text('172.16.40.70'), findsOneWidget);
+    });
+  });
 }

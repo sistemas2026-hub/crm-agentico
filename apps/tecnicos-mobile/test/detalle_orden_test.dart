@@ -353,7 +353,7 @@ void main() {
       await tester.pumpWidget(_app(base));
       await tester.pumpAndSettle();
 
-      expect(find.text('Telemetría SmartOLT'), findsNothing);
+      expect(find.text('Estado del equipo'), findsNothing);
       expect(find.textContaining('POTENCIA RX'), findsNothing);
       await base.cerrar();
     });
@@ -365,7 +365,7 @@ void main() {
       await tester.pumpWidget(_app(base, mostrarDatosFuturos: true));
       await tester.pumpAndSettle();
 
-      expect(find.text('Telemetría SmartOLT'), findsOneWidget);
+      expect(find.text('Estado del equipo'), findsOneWidget);
       expect(find.text('Potencia RX ONT Actual'), findsOneWidget);
       expect(find.text('ATENUACIÓN ALTA'), findsOneWidget);
       expect(find.text('ONT SERIAL'), findsOneWidget);

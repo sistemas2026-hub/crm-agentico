@@ -77,14 +77,21 @@ def visitas_anteriores(orden, cuantas: int = CUANTAS) -> list[dict]:
     es la primera visita. Las dos cosas son normales y la pantalla las dice
     distinto; aca no se inventa ninguna.
     """
+    from django.db.models import Q
+
     from campo.models import OrdenTrabajo
 
     servicio = id_de_servicio(orden)
     if not servicio:
         return []
 
+    # POR LAS DOS VIAS, como `id_de_servicio`. Hasta el 18/10/2026 se buscaba
+    # solo por `cliente_id_abonado`, y las ordenes creadas desde Despacho no lo
+    # guardan --tienen el servicio en la ficha--: toda orden de Despacho decia
+    # «Es la primera visita» aunque el servicio tuviera historia.
     hermanas = (
-        OrdenTrabajo.objects.filter(org=orden.org, cliente_id_abonado=servicio)
+        OrdenTrabajo.objects.filter(org=orden.org)
+        .filter(Q(cliente_id_abonado=servicio) | Q(contexto__servicio=servicio))
         .exclude(pk=orden.pk)
         # Las que todavia no pasaron no son historial: una orden programada para
         # el jueves no dice nada de lo que ya se hizo.
@@ -95,6 +102,59 @@ def visitas_anteriores(orden, cuantas: int = CUANTAS) -> list[dict]:
     )
 
     return [_resumen_de(o) for o in hermanas]
+
+
+#: Cuántos tickets anteriores se muestran.
+CUANTOS_TICKETS = 5
+
+
+def tickets_anteriores(orden, cuantos: int = CUANTOS_TICKETS) -> list[dict]:
+    """Los tickets anteriores del MISMO servicio en el sistema del ISP.
+
+    POR QUE (18/10/2026): las ordenes de campo de Dexter existen desde hace
+    semanas, asi que «visitas anteriores» casi siempre decia «primera visita».
+    La historia real del servicio son sus tickets, y Dexter ya los importa cada
+    hora como casos, con el `id_servicio` del proveedor. Es lo que el tecnico
+    necesita para contestar «ya llame tres veces».
+
+    Mismo criterio de identidad que las visitas: por el identificador del
+    servicio y nada mas. Y NO lleva el asunto ni la descripcion: el asunto de un
+    ticket trae nombres y barrios escritos a mano (medido: 126 asuntos con
+    `nombre | barrio`), y lo que el tecnico necesita es cuando y como termino.
+    """
+    from cases.models import Case
+
+    servicio = id_de_servicio(orden)
+    if not servicio:
+        return []
+    casos = Case.objects.filter(org=orden.org, external_service_id=servicio)
+    #  El caso de ESTA orden no es «anterior».
+    if getattr(orden, "origen_sistema", "") == "crm" and orden.origen_ref:
+        casos = casos.exclude(pk=orden.origen_ref)
+    casos = casos.only(
+        "id", "external_ticket_id", "created_at", "resolved_at", "closed_on",
+        "status", "external_status", "area",
+    ).order_by("-created_at")[:cuantos]
+    return [_ticket(c) for c in casos]
+
+
+def _ticket(caso) -> dict:
+    from operaciones.supervisor import EN_CURSO_EN_PROVEEDOR
+
+    externo = (caso.external_status or "").strip().lower()
+    cerrado = (
+        caso.status in ("Closed", "Rejected", "Duplicate")
+        or caso.resolved_at is not None
+        or (bool(externo) and externo not in EN_CURSO_EN_PROVEEDOR)
+    )
+    cerrado_en = caso.resolved_at or caso.closed_on
+    return {
+        "numero": caso.external_ticket_id or "",
+        "abierto_en": caso.created_at.isoformat() if caso.created_at else None,
+        "cerrado_en": cerrado_en.isoformat() if cerrado_en else None,
+        "estado": "cerrado" if cerrado else "abierto",
+        "area": caso.area or "",
+    }
 
 
 def _resumen_de(orden) -> dict:

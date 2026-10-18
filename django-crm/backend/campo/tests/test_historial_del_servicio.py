@@ -359,7 +359,7 @@ def test_e1_el_endpoint_distingue_sin_servicio_de_primera_visita(
     )
     r = user_client.get(f"/api/campo/trabajos/{sin.id}/historial/")
     assert r.status_code == 200, r.data
-    assert r.data == {"hay_servicio": False, "visitas": []}
+    assert r.data == {"hay_servicio": False, "visitas": [], "tickets": []}
 
     primera = _orden(org_a, tipo, 1601, abonado="WH-SOLO")
     AsignacionTrabajo.objects.create(
@@ -367,7 +367,7 @@ def test_e1_el_endpoint_distingue_sin_servicio_de_primera_visita(
     )
     r = user_client.get(f"/api/campo/trabajos/{primera.id}/historial/")
     assert r.status_code == 200
-    assert r.data == {"hay_servicio": True, "visitas": []}
+    assert r.data == {"hay_servicio": True, "visitas": [], "tickets": []}
 
 
 def test_e2_una_orden_de_otra_empresa_responde_404(org_b, tipo_b, user_client):
@@ -377,3 +377,86 @@ def test_e2_una_orden_de_otra_empresa_responde_404(org_b, tipo_b, user_client):
     r = user_client.get(f"/api/campo/trabajos/{ajena.id}/historial/")
 
     assert r.status_code == 404
+
+
+
+# --------------------------------------------------------------------------- #
+# F. 18/10/2026: las ordenes de Despacho y los tickets del servicio
+# --------------------------------------------------------------------------- #
+
+def _caso(org, **extra):
+    from cases.models import Case
+
+    campos = {"org": org, "name": "Beatriz Pinzon / barrio La Esperanza",
+              "status": "New", "priority": "Normal", "is_active": True,
+              "provider": "wisphub"}
+    campos.update(extra)
+    return Case.objects.create(**campos)
+
+
+def test_f1_una_orden_de_despacho_encuentra_a_sus_hermanas_por_la_ficha(org_a, tipo):
+    """Las ordenes de Despacho tienen el servicio en la ficha, no en
+    `cliente_id_abonado`. Hasta hoy la busqueda miraba solo ese campo, y toda
+    orden de Despacho decia «Es la primera visita»."""
+    vieja = _orden(org_a, tipo, 1801, abonado="", contexto={"servicio": "WH-77"})
+    actual = _orden(org_a, tipo, 1802, abonado="", contexto={"servicio": "WH-77"},
+                    estado=OrdenTrabajo.EN_SITIO)
+    otra = _orden(org_a, tipo, 1803, abonado="", contexto={"servicio": "WH-78"})
+
+    numeros = [v["numero"] for v in historial.visitas_anteriores(actual)]
+    assert numeros == [vieja.numero]
+    assert otra.numero not in numeros
+
+
+def test_f2_los_tickets_anteriores_del_servicio_sin_asunto_ni_nombre(org_a, tipo):
+    actual = _orden(org_a, tipo, 1811, abonado="WH-90", estado=OrdenTrabajo.EN_SITIO)
+    cerrado = _caso(org_a, external_service_id="WH-90", external_ticket_id="95001",
+                    status="Closed")
+    _caso(org_a, external_service_id="WH-90", external_ticket_id="95002",
+          external_status="en progreso")
+    _caso(org_a, external_service_id="WH-91", external_ticket_id="95003")
+
+    tickets = historial.tickets_anteriores(actual)
+    assert sorted(t["numero"] for t in tickets) == ["95001", "95002"]
+    assert {t["numero"]: t["estado"] for t in tickets} == {"95001": "cerrado",
+                                                          "95002": "abierto"}
+    # Ni el asunto ni nada que nombre a una persona.
+    for t in tickets:
+        assert set(t) == {"numero", "abierto_en", "cerrado_en", "estado", "area"}
+    assert cerrado.name not in str(tickets)
+
+
+def test_f3_el_ticket_de_esta_misma_orden_no_es_anterior(org_a, tipo):
+    caso = _caso(org_a, external_service_id="WH-95", external_ticket_id="96000")
+    actual = _orden(org_a, tipo, 1821, abonado="WH-95", estado=OrdenTrabajo.EN_SITIO)
+    actual.origen_sistema = "crm"
+    actual.origen_ref = str(caso.id)
+    actual.save(update_fields=["origen_sistema", "origen_ref"])
+    assert historial.tickets_anteriores(actual) == []
+
+
+def test_f4_los_tickets_de_otra_empresa_no_entran(org_a, org_b, tipo):
+    """Dos empresas pueden usar el mismo id de servicio: cada una lo toma de SU
+    sistema del ISP."""
+    from conftest import rls_org
+
+    with rls_org(org_b):
+        _caso(org_b, external_service_id="WH-99", external_ticket_id="97000")
+    actual = _orden(org_a, tipo, 1831, abonado="WH-99", estado=OrdenTrabajo.EN_SITIO)
+    assert historial.tickets_anteriores(actual) == []
+
+
+def test_f5_la_orden_nueva_guarda_el_abonado_que_trae_la_ficha(admin_client, org_a, tipo):
+    """Para que las visitas futuras se encuentren por la via directa."""
+    from unittest import mock
+
+    caso = _caso(org_a, external_service_id="WH-55", external_ticket_id="98000")
+    with mock.patch("campo.despacho_views.contexto_del_caso",
+                    return_value={"contexto_disponible": True, "servicio": "WH-55"}):
+        r = admin_client.post("/api/campo/trabajos/crear/",
+                              {"work_type_version_id": str(tipo.id),
+                               "case_id": str(caso.id), "zona": "CENTRO"},
+                              format="json")
+    assert r.status_code == 201, r.content
+    orden = OrdenTrabajo.objects.get(org=org_a, origen_ref=str(caso.id))
+    assert orden.cliente_id_abonado == "WH-55"

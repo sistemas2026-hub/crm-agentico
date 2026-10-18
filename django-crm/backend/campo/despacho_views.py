@@ -159,7 +159,10 @@ class CrearOrdenView(APIView):
             # Como se entra al inmueble: con la direccion sola el tecnico llega
             # al edificio y no al apartamento.
             "detalle_acceso": d.get("cliente_detalle_acceso") or "",
-            "id_abonado": d.get("cliente_id_abonado") or "",
+            #  Si quien despacha no lo escribio, el de la ficha: sin el, las
+            #  visitas anteriores de este servicio no se encontraban (18/10/2026).
+            "id_abonado": (d.get("cliente_id_abonado")
+                           or str((contexto or {}).get("servicio") or "")[:64]),
             "gps_lat": d.get("gps_lat"),
             "gps_lng": d.get("gps_lng"),
         }
