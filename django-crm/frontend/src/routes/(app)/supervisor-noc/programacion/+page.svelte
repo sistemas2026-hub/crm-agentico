@@ -2,6 +2,7 @@
   import { enhance } from '$app/forms';
   import { invalidateAll, goto } from '$app/navigation';
   import '../supervisor-noc.css';
+  import FormularioDelTrabajo from './FormularioDelTrabajo.svelte';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
@@ -1743,6 +1744,19 @@
                 {/if}
               {/if}
             </div>
+
+            <!--
+              LO QUE LLENÓ EL TÉCNICO (18/10/2026)
+
+              El formulario del trabajo y las fotos del checklist se guardaban y
+              esta ficha solo contaba «Evidencias: N». Viajan con la bitácora y
+              el backend ya los manda leídos con la plantilla —título, «Otro» con
+              su texto, qué falta—: acá se dibujan, no se interpretan. Las fotos
+              de un reporte no están: ya se ven dentro de ese reporte.
+            -->
+            {#if bitacora?.formulario_del_trabajo}
+              <FormularioDelTrabajo form={bitacora.formulario_del_trabajo} />
+            {/if}
 
             <!--
               MATERIALES DE ESTA ORDEN

@@ -32,6 +32,7 @@ from campo.services.idempotencia import manejar_idempotencia
 from campo.services.materiales_de_orden import materiales_de_orden
 from campo.services import bloqueos
 from campo.services import historial_del_servicio
+from campo.services.formulario_del_trabajo import formulario_del_trabajo
 from campo.services import salud_seguimiento
 from campo.services import seguimiento_campo as seguimiento
 from campo.services import telemetria
@@ -334,6 +335,12 @@ class SeguimientoDeOrdenView(APIView):
         # frontend seria repetir el defecto que encontro la fase C: la regla
         # viviria en dos lados y uno se quedaria viejo.
         datos["salud"] = salud_seguimiento.calcular(orden)
+        # Lo que llenó en el formulario del trabajo y las fotos del checklist
+        # (18/10/2026). Se guardaban y ninguna pantalla los mostraba. Viajan
+        # con la bitácora porque es la misma pregunta --qué hizo el técnico--
+        # y porque su proxy la pasa entera: no hay una capa nueva que pueda
+        # dejar caer un campo.
+        datos["formulario_del_trabajo"] = formulario_del_trabajo(orden)
         return Response(datos)
 
     @manejar_idempotencia
