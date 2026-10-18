@@ -31,6 +31,7 @@ import '../../core/widgets/offline_saved_banner.dart';
 import 'progreso_evidencias.dart';
 import 'widgets/bloque_academia.dart';
 import 'widgets/formulario_de_campo.dart';
+import '../trabajo/widgets/franja_del_servicio.dart';
 
 /// El trabajo, ejecutándose: el formulario de campo y la evidencia.
 ///
@@ -1192,6 +1193,10 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
             ),
             OfflineSavedBanner(visible: _showSavedIndicator),
             _paraQuienYEnQuePaso(),
+            // LO QUE LE PREGUNTAN AL TÉCNICO, SIN BAJAR (18/10/2026): ticket,
+            // serial, IP y la señal de la ficha. Ver `FranjaDelServicio`.
+            if (_orden != null)
+              FranjaDelServicio(trabajo: TrabajoVista.desdeOrden(_orden!)),
             _franjaDelFormulario(),
             // LO QUE FALTA, ARRIBA Y FIJO
             // ---------------------------

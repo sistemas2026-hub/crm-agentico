@@ -274,6 +274,11 @@ def registrar(
         if (c.get("reglas") or {}).get("required") and cid not in respuestas
     }
 
+    # 1b. «Otro» elegido sin decir qué (18/10/2026). Un reporte llega entero,
+    #     así que acá sí se exige.
+    from campo.services.validador import faltan_textos_de_otro
+    faltan.update(faltan_textos_de_otro(definicion, respuestas))
+
     # 2. Lo que si llego, contra tipos y reglas.
     limpios, errores = validar_campos_tecnicos({"campos": definicion}, respuestas)
     errores = {**faltan, **errores}
@@ -521,6 +526,15 @@ def _leer_con_su_esquema(datos: dict) -> list[dict]:
     definicion = datos.get("definicion") or []
     respuestas = datos.get("respuestas") or {}
     titulos = {c.get("id"): c.get("titulo") or c.get("id") for c in definicion}
+    #  «Otro» y su texto se leen juntos: «Otro: conector partido». El texto no
+    #  es una fila aparte, y sin él la oficina leería «Otro» y nada más.
+    from campo.services.validador import OTRO, SUFIJO_OTRO, campos_con_otro
+    con_otro = {c["id"] for c in campos_con_otro(definicion)}
+    respuestas = dict(respuestas)
+    for cid in con_otro:
+        texto = respuestas.pop(cid + SUFIJO_OTRO, None)
+        if respuestas.get(cid) == OTRO and texto:
+            respuestas[cid] = f"{OTRO}: {texto}"
 
     filas = []
     for cid, valor in respuestas.items():

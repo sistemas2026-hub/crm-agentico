@@ -140,11 +140,24 @@ class FormularioDeCampo extends StatelessWidget {
           etiqueta: etiqueta,
           obligatorio: obligatorio,
           ayuda: ayuda,
-          contenido: _opciones(
-            campo.opciones,
-            clave,
-            campo.valor?.toString(),
-            campo.motivoDelError,
+          contenido: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _opciones(
+                campo.opciones,
+                clave,
+                campo.valor?.toString(),
+                campo.motivoDelError,
+              ),
+              // «OTRO» CON TEXTO (18/10/2026): al elegirlo aparece la caja
+              // para escribir qué fue. Lo escrito se guarda al lado del campo.
+              if (campo.eligioOtro) ...<Widget>[
+                const SizedBox(height: AppSpacing.sm),
+                Text('¿Qué fue?', style: AppTypography.etiqueta),
+                const SizedBox(height: 4),
+                _entradaDeOtro(campo),
+              ],
+            ],
           ),
         );
 
@@ -489,6 +502,21 @@ class FormularioDeCampo extends StatelessWidget {
 
   /// Texto y números. La lectura óptica se escribe grande y centrada porque es
   /// el dato que el técnico compara contra el umbral mientras lo mide.
+  /// La caja de «Otro». Su controlador se crea acá la primera vez: la
+  /// pantalla los arma por campo de la plantilla, y este no es uno.
+  Widget _entradaDeOtro(CampoDelFormulario campo) {
+    controladores.putIfAbsent(
+      campo.idOtro,
+      () => TextEditingController(text: campo.textoOtro),
+    );
+    return _entrada(
+      campo.idOtro,
+      'texto',
+      null,
+      conError: campo.textoOtro.trim().isEmpty,
+    );
+  }
+
   Widget _entrada(String clave, String tipo, String? unidad,
       {bool conError = false}) {
     final bool esNumero = tipo == 'numero' || tipo == 'decimal' || tipo == 'integer';

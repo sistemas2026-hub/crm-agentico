@@ -25,6 +25,7 @@ import '../trabajo/estado_trabajo.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'acciones_orden.dart';
 import 'comprobar_conexion.dart';
+import '../trabajo/widgets/franja_del_servicio.dart';
 import 'diagnostico_de_campo.dart';
 import 'materiales_de_esta_orden.dart';
 import 'pasos_orden.dart';
@@ -541,6 +542,8 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               ),
             ),
             if (widget.mostrarDatosFuturos) _franjaDeEnlace(),
+            // Los mismos datos que en Ejecutar, en el mismo lugar (18/10/2026).
+            FranjaDelServicio(trabajo: trabajo),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(

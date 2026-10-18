@@ -124,12 +124,55 @@ def validar_esquema_plantilla(esquema: dict) -> None:
                 )
 
 
+#: La opción que deja escribir lo que la lista no tiene (18/10/2026).
+OTRO = "Otro"
+#: Sufijo del texto que acompaña a «Otro»: `que_encontro` -> `que_encontro_otro`.
+SUFIJO_OTRO = "_otro"
+MAX_TEXTO_OTRO = 400
+
+
+def campos_con_otro(campos: list) -> list[dict]:
+    """Los campos de opciones que permiten «Otro» con texto."""
+    return [c for c in campos or []
+            if isinstance(c, dict) and c.get("permite_otro") and c.get("id")]
+
+
+def faltan_textos_de_otro(campos: list, valores: dict) -> dict:
+    """«Otro» elegido sin decir qué: {id_del_campo: mensaje}.
+
+    Elegir «Otro» y no escribir nada deja a la oficina con una respuesta que
+    no dice nada. La misma regla vive en la app (`CampoDelFormulario`): si una
+    de las dos la ignorara, la orden quedaría cerrada en el teléfono y trabada
+    acá.
+    """
+    errores = {}
+    for c in campos_con_otro(campos):
+        if valores.get(c["id"]) != OTRO:
+            continue
+        texto = valores.get(c["id"] + SUFIJO_OTRO)
+        if not isinstance(texto, str) or not texto.strip():
+            errores[c["id"]] = (f"Elegiste «{OTRO}» en «{c.get('titulo', c['id'])}»: "
+                                "contá qué fue.")
+    return errores
+
+
 def validar_campos_tecnicos(esquema: dict, nuevos_valores: dict) -> tuple[dict, dict]:
     """
     Valida un conjunto de valores parciales o totales contra los campos del esquema.
     Retorna (valores_validados, errores_por_campo).
+
+    El texto de «Otro» (`<id>_otro`) se acepta solo para los campos que lo
+    permiten, como texto corto. Que no falte cuando se eligió «Otro» NO se
+    exige acá: la app guarda cada campo apenas se toca, y exigirlo en el mismo
+    envío rechazaría el «Otro» en el instante de elegirlo. Se exige al cerrar
+    y al mandar un reporte (`faltan_textos_de_otro`).
     """
     campos_map = {c["id"]: c for c in esquema.get("campos", [])}
+    for c in campos_con_otro(esquema.get("campos", [])):
+        campos_map.setdefault(c["id"] + SUFIJO_OTRO, {
+            "id": c["id"] + SUFIJO_OTRO, "tipo": "texto",
+            "reglas": {"max": MAX_TEXTO_OTRO},
+        })
     valores_limpios = {}
     errores = {}
 
@@ -181,6 +224,12 @@ def verificar_checklist_completo(orden) -> list[dict]:
                     "campo_id": cid,
                     "mensaje": f"El campo técnico '{campo.get('titulo', cid)}' es obligatorio.",
                 })
+
+    # 1b. «Otro» sin decir qué (18/10/2026).
+    for cid, mensaje in faltan_textos_de_otro(esquema.get("campos", []),
+                                              datos_actuales).items():
+        errores.append({"codigo": "CAMPO_FALTANTE", "campo_id": cid,
+                        "mensaje": mensaje})
 
     # 2. Verificar evidencias requeridas
     #

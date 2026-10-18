@@ -507,11 +507,14 @@ class _SeguimientoDeLaIntervencionState
     final bool huboInicio = yaOcurrio.contains('inicio_campo');
 
     final List<Widget> botones = <Widget>[];
+    // EN EL ORDEN DEL TRABAJO: inicio, avance, bloqueo (pedido del usuario,
+    // 18/10/2026). El bloqueo no va primero —se probó, y rompía la secuencia—
+    // sino con su propio tono, para encontrarlo rápido.
     final List<(String, String)> opciones = widget.cierreEnFinalizar
         ? const <(String, String)>[
-            ('bloqueo', 'Reportar bloqueo'),
-            ('avance', 'Registrar avance'),
             ('inicio', 'Registrar inicio'),
+            ('avance', 'Registrar avance'),
+            ('bloqueo', 'Reportar bloqueo'),
           ]
         : const <(String, String)>[
             ('inicio', 'Registrar inicio'),
@@ -535,6 +538,7 @@ class _SeguimientoDeLaIntervencionState
         DexterAccionRapida(
           texto: opcion.$2,
           icono: _icono(momento),
+          deAlerta: momento == 'bloqueo',
           alTocar: _abierto != null
               ? null
               : () => _abrirHoja(momento, formularios),

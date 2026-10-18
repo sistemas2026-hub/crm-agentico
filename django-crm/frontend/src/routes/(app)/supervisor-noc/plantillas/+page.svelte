@@ -295,6 +295,13 @@
                                     aria-label="Opciones"
                                     value={opcionesTexto(c)}
                                     oninput={(ev) => ponerOpciones(c, ev.currentTarget.value)}></textarea>
+                          <!-- «Otro» con texto (18/10/2026): la opción la agrega la
+                               plataforma; al elegirla, el técnico tiene que
+                               escribir qué fue. -->
+                          <label class="snoc-body-sm">
+                            <input type="checkbox" bind:checked={c.permite_otro} />
+                            Permitir «Otro» con texto (el técnico escribe qué fue)
+                          </label>
                         {/if}
                         <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
                           <input class="snoc-campo" style="flex:1; min-width:10rem;"
@@ -385,7 +392,7 @@
                           <span class="snoc-secundario">
                             · {tipoTexto(c.tipo)}{c.tipo === 'numero' && c.unidad ? ` en ${c.unidad}` : ''}
                             {#if c.tipo === 'checklist'}(Hecho / No aplica){/if}
-                            {#if c.tipo === 'seleccion'}({(c.opciones ?? []).length} opciones){/if}
+                            {#if c.tipo === 'seleccion'}({(c.opciones ?? []).length} opciones{c.permite_otro ? ' + Otro' : ''}){/if}
                           </span>
                         </span>
                       {/each}

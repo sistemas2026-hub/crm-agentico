@@ -465,6 +465,16 @@ def componer(definicion: dict) -> dict:
                 o = _texto(o, "una opcion", obligatorio=False)
                 if o and o not in opciones:
                     opciones.append(o)
+            # «OTRO» CON TEXTO (18/10/2026): la opción la agrega la plataforma,
+            # siempre al final y con este nombre exacto, porque la app y el
+            # servidor la reconocen por él. Si quien edita la escribió a mano
+            # en la lista, no queda dos veces.
+            # Sin la casilla, un «Otro» escrito a mano queda como una opción
+            # más: hay empresas que lo usan así, sin texto.
+            permite_otro = bool(c.get("permite_otro"))
+            if permite_otro:
+                opciones = [o for o in opciones if o != "Otro"] + ["Otro"]
+                salida["permite_otro"] = True
             if len(opciones) < 2:
                 raise ErrorPlantilla("FALTAN_OPCIONES",
                                      f"«{titulo}» necesita al menos dos opciones.")
@@ -614,7 +624,10 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
             if c.get("presentacion") == CHECKLIST:
                 fila["tipo"] = CHECKLIST
             else:
-                fila.update(tipo=SELECCION, opciones=opciones)
+                permite_otro = bool(c.get("permite_otro"))
+                fila.update(tipo=SELECCION, permite_otro=permite_otro,
+                            opciones=[o for o in opciones
+                                      if not (permite_otro and o == "Otro")])
         else:
             motivos.append(f"«{titulo}» es de tipo '{tipo}', que el editor no ofrece")
         campos.append(fila)

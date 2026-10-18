@@ -156,6 +156,12 @@ class _HojaDeReporteState extends State<HojaDeReporte> {
         faltan[campo.id] = 'Este campo es requerido.';
       }
     }
+    // «Otro» sin decir qué, obligatorio o no: el servidor lo rechazaría.
+    for (final CampoDelFormulario campo in _normalizados) {
+      if (campo.eligioOtro && campo.textoOtro.trim().isEmpty) {
+        faltan[campo.id] = 'Elegiste «Otro»: contá qué fue.';
+      }
+    }
 
     if (faltan.isNotEmpty) {
       setState(() => _faltantes = faltan);

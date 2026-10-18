@@ -144,7 +144,25 @@ class CampoDelFormulario {
     this.minimo,
     this.maximo,
     this.referencia,
+    this.permiteOtro = false,
+    this.textoOtro = '',
   });
+
+  /// La opción que deja escribir lo que la lista no tiene (18/10/2026).
+  static const String otro = 'Otro';
+
+  /// Si este campo de opciones permite «Otro» con texto. Lo declara la
+  /// plantilla (`permite_otro`), no la app.
+  final bool permiteOtro;
+
+  /// Lo que se escribió al elegir «Otro». Se guarda al lado del campo, con la
+  /// clave [idOtro], igual que lo espera el servidor.
+  final String textoOtro;
+
+  String get idOtro => '${id}_otro';
+
+  /// Si hay que mostrar la caja para escribir qué fue.
+  bool get eligioOtro => permiteOtro && valor?.toString() == otro;
 
   final String id;
   final String titulo;
@@ -229,6 +247,9 @@ class CampoDelFormulario {
     final ReferenciaDeFicha? referencia =
         ReferenciaDeFicha.desde(campo['referencia'], ficha);
 
+    final bool permiteOtro = campo['permite_otro'] == true;
+    final String textoOtro = (valores['${id}_otro'] ?? '').toString();
+
     // --- El estado, en orden de gravedad ---------------------------------
 
     // Un campo de selección sin opciones no se puede responder. Es un
@@ -280,6 +301,14 @@ class CampoDelFormulario {
           !opciones.contains(valor.toString())) {
         estado = EstadoDeCampo.error;
         motivo = 'Esa opción ya no está en la lista.';
+      } else if (permiteOtro &&
+          valor.toString() == otro &&
+          textoOtro.trim().isEmpty) {
+        // «Otro» sin decir qué no le sirve a nadie en la oficina. La misma
+        // regla vive en el servidor (`faltan_textos_de_otro`): si una de las
+        // dos la ignorara, la orden quedaría cerrada acá y trabada allá.
+        estado = EstadoDeCampo.error;
+        motivo = 'Elegiste «Otro»: contá qué fue.';
       }
     }
 
@@ -297,6 +326,8 @@ class CampoDelFormulario {
       minimo: minimo,
       maximo: maximo,
       referencia: referencia,
+      permiteOtro: permiteOtro,
+      textoOtro: textoOtro,
     );
   }
 

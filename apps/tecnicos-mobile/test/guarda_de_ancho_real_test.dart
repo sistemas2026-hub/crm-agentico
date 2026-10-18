@@ -11,6 +11,8 @@ import 'package:campo/features/detalle_orden/seguimiento_de_la_intervencion.dart
 import 'package:campo/features/detalle_orden/visitas_anteriores.dart';
 import 'package:campo/features/inicio/inicio_screen.dart';
 import 'package:campo/features/trabajo/trabajo_screen.dart';
+import 'package:campo/features/trabajo/trabajo_vista.dart';
+import 'package:campo/features/trabajo/widgets/franja_del_servicio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -540,6 +542,22 @@ void main() {
           ),
           escalaDeLetra: letraGrande,
         );
+      });
+
+      // 18/10/2026: la franja del servicio, desplegada, con datos largos.
+      testWidgets('La franja del servicio desplegada entra con letra grande',
+          (WidgetTester t) async {
+        await aEsteAncho(
+          t,
+          ancho,
+          () => FranjaDelServicio(
+            trabajo: TrabajoVista.desdeOrden(ordenDeEjemplo()),
+          ),
+          escalaDeLetra: letraGrande,
+        );
+        await t.tap(find.byType(InkWell).first);
+        await t.pumpAndSettle();
+        expect(t.takeException(), isNull, reason: 'desplegada no entra a $ancho px');
       });
 
       testWidgets('La hoja para pedir a bodega entra', (WidgetTester t) async {

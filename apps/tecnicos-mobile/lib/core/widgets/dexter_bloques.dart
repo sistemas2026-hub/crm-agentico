@@ -698,11 +698,16 @@ class DexterAccionRapida extends StatelessWidget {
     required this.icono,
     required this.texto,
     this.alTocar,
+    this.deAlerta = false,
   });
 
   final IconData icono;
   final String texto;
   final VoidCallback? alTocar;
+
+  /// Para la acción que hay que encontrar rápido sin que vaya primera —hoy,
+  /// «Reportar bloqueo»—: borde y ícono en el tono de error, suave.
+  final bool deAlerta;
 
   @override
   Widget build(BuildContext context) {
@@ -728,6 +733,9 @@ class DexterAccionRapida extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: AppRadius.brTarjeta,
               boxShadow: activa ? AppTheme.sombraNivel1 : null,
+              border: deAlerta && activa
+                  ? Border.all(color: AppColors.errorContainer, width: 1.5)
+                  : null,
             ),
             child: SizedBox(
               height: AppSpacing.objetivoTactilAmplio,
@@ -737,7 +745,9 @@ class DexterAccionRapida extends StatelessWidget {
                   Icon(
                     icono,
                     size: 22,
-                    color: activa ? AppColors.secondary : AppColors.inactivo,
+                    color: !activa
+                        ? AppColors.inactivo
+                        : (deAlerta ? AppColors.error : AppColors.secondary),
                   ),
                   const SizedBox(width: AppSpacing.sm),
                   Flexible(
