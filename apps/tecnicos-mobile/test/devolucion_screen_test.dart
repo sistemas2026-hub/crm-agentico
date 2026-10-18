@@ -108,7 +108,8 @@ void main() {
       ]));
 
       expect(find.text('Diferencia'), findsOneWidget);
-      expect(find.text('Devolver 2.0 unidades'), findsOneWidget);
+      expect(find.text('Devolver 2 unidades'), findsOneWidget,
+          reason: 'antes decía «Devolver 2.0 unidades»');
     });
 
     testWidgets('Un equipo con número muestra su serie', (tester) async {
@@ -192,6 +193,71 @@ void main() {
       expect(find.text('Entregado a otro técnico'), findsOneWidget);
       expect(find.textContaining('Pedro'), findsOneWidget);
       expect(find.textContaining('Sigue contando como tuyo'), findsOneWidget);
+    });
+  });
+
+  group('5. Unidades separadas y dónde va lo devuelto (18/10/2026)', () {
+    EstadoDeJornada conCable({List<MaterialDeJornada>? materiales}) =>
+        EstadoDeJornada(
+          recibido: '110',
+          consumido: '35',
+          aDevolver: '75',
+          devuelto: '0',
+          diferencias: 0,
+          ordenesAsignadas: 1,
+          ordenesCompletadas: 1,
+          materiales: materiales ?? const <MaterialDeJornada>[],
+          transferencias: const <TransferenciaPendiente>[],
+          motivos: const <String>[],
+          sinSubir: 0,
+          cerrada: false,
+          hayJornada: true,
+          porUnidad: const <TotalPorUnidad>[
+            TotalPorUnidad(unidad: 'm', recibido: 100, consumido: 35,
+                aDevolver: 65, devuelto: 0),
+            TotalPorUnidad(unidad: 'unidades', recibido: 10, consumido: 0,
+                aDevolver: 10, devuelto: 0),
+          ],
+        );
+
+    testWidgets('el kit de hoy no suma metros con conectores', (tester) async {
+      await montar(tester, conCable());
+
+      expect(find.text('100 m · 10 unidades'), findsOneWidget);
+      expect(find.text('35 m'), findsOneWidget);
+      expect(find.text('65 m · 10 unidades'), findsOneWidget);
+      expect(find.text('110'), findsNothing, reason: 'el total mezclado');
+    });
+
+    testWidgets('anotado, enviado sin recibir y recibido se distinguen',
+        (tester) async {
+      await montar(tester, conCable(materiales: const <MaterialDeJornada>[
+        MaterialDeJornada(
+          codigo: 'CON', nombre: 'Conector', unidad: 'unidades',
+          esperado: '10', devuelto: '10', diferencia: 0, porDevolver: 0,
+          anotado: 3, enviado: 7, recibidoEnBodega: 4,
+        ),
+      ]));
+
+      expect(find.text('3 unidades sin enviar'), findsOneWidget);
+      expect(find.text('3 unidades enviado · falta que bodega lo reciba'),
+          findsOneWidget);
+      expect(find.text('4 unidades recibido por bodega'), findsOneWidget);
+    });
+
+    testWidgets('sin el dato de bodega no afirma que llegó ni que falta',
+        (tester) async {
+      await montar(tester, conCable(materiales: const <MaterialDeJornada>[
+        MaterialDeJornada(
+          codigo: 'CON', nombre: 'Conector', unidad: 'unidades',
+          esperado: '1', devuelto: '1', diferencia: 0, porDevolver: 0,
+          enviado: 1,
+        ),
+      ]));
+
+      expect(find.text('1 unidad enviado'), findsOneWidget);
+      expect(find.textContaining('recibido por bodega'), findsNothing);
+      expect(find.textContaining('falta que bodega'), findsNothing);
     });
   });
 }

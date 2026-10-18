@@ -589,3 +589,54 @@ class TestCadaUnoCierraLoSuyo:
         fila = conciliacion_de(user_profile, org_a)[0]
 
         assert fila["diferencia"] == Decimal("2"), "sigue sin explicarse"
+
+
+class TestLoQueYaRecibioLaBodega:
+    """18/10/2026: «devuelto» es lo que el tecnico DECLARO; lo que la bodega
+    firmo es otro numero. La app tiene que poder decir «enviado, esperando a
+    bodega» en vez de dar por llegado lo que solo se anoto."""
+
+    def _fila(self, profile, org, material):
+        return next(f for f in resumen_de_jornada(profile, org)["detalle"]
+                    if f["codigo"] == material.codigo)
+
+    def test_1_lo_declarado_no_es_lo_recibido(self, org_a, user_profile, conector, kit):
+        devolver(org_a, user_profile, conector, 7, "d1")
+        fila = self._fila(user_profile, org_a, conector)
+        assert (fila["devuelto"], fila["recibido_en_bodega"]) == ("7", "0")
+
+    def test_2_cuando_bodega_lo_recibe_se_ve_y_no_se_cuenta_dos_veces(
+            self, org_a, user_profile, conector, kit, bodega):
+        devolver(org_a, user_profile, conector, 7, "d1")
+        inv.recibir_devolucion(org=org_a, profile_origen=user_profile,
+                               ubicacion_destino=bodega,
+                               lineas=[{"material": conector, "cantidad": 7}])
+        fila = self._fila(user_profile, org_a, conector)
+        assert (fila["devuelto"], fila["recibido_en_bodega"]) == ("7", "7")
+
+    def test_3_lo_que_bodega_recibe_sin_declarar_tambien_cuenta(
+            self, org_a, user_profile, conector, kit, bodega):
+        inv.recibir_devolucion(org=org_a, profile_origen=user_profile,
+                               ubicacion_destino=bodega,
+                               lineas=[{"material": conector, "cantidad": 5}])
+        fila = self._fila(user_profile, org_a, conector)
+        assert (fila["devuelto"], fila["recibido_en_bodega"]) == ("5", "5")
+
+    def test_4_los_totales_no_mezclan_unidades(
+            self, org_a, user_profile, conector, kit, bodega, orden):
+        cable = MaterialCatalogo.objects.create(
+            org=org_a, codigo="DROP-1H", nombre="Cable drop",
+            clase=MaterialCatalogo.CONSUMIBLE, unidad="m",
+        )
+        _despachar(org_a, bodega, user_profile, "K-CABLE", [
+            {"material": cable, "cantidad": 100},
+        ])
+        consumir(org_a, user_profile, cable, 35, "c-cable", orden)
+
+        por_unidad = resumen_de_jornada(user_profile, org_a)["material"]["por_unidad"]
+        assert por_unidad == [
+            {"unidad": "m", "recibido": "100", "consumido": "35",
+             "a_devolver": "65", "devuelto": "0"},
+            {"unidad": "unidades", "recibido": "10", "consumido": "0",
+             "a_devolver": "10", "devuelto": "0"},
+        ]

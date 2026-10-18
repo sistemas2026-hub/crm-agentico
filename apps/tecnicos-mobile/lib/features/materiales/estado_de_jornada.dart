@@ -31,6 +31,7 @@ class EstadoDeJornada {
     required this.cerrada,
     required this.hayJornada,
     this.cierreTomado = false,
+    this.porUnidad = const <TotalPorUnidad>[],
   });
 
   const EstadoDeJornada.vacio()
@@ -47,7 +48,8 @@ class EstadoDeJornada {
         sinSubir = 0,
         cerrada = false,
         hayJornada = false,
-        cierreTomado = false;
+        cierreTomado = false,
+        porUnidad = const <TotalPorUnidad>[];
 
   final String recibido;
   final String consumido;
@@ -58,6 +60,11 @@ class EstadoDeJornada {
   final int ordenesCompletadas;
   final List<MaterialDeJornada> materiales;
   final List<TransferenciaPendiente> transferencias;
+
+  /// Los totales del día separados por unidad, como los calculó el servidor
+  /// (18/10/2026). `recibido` y los demás suman conectores con metros de
+  /// cable; quedan solo para un servidor viejo que no manda esto.
+  final List<TotalPorUnidad> porUnidad;
 
   /// Lo que impide cerrar, en frases. Las escribe el servidor.
   final List<String> motivos;
@@ -167,6 +174,17 @@ class EstadoDeJornada {
       cerrada: (fila['estado'] ?? '') == 'confirmada',
       hayJornada: true,
       cierreTomado: fila['cierre_local_en'] != null,
+      porUnidad: <TotalPorUnidad>[
+        for (final u in _lista(material['por_unidad']))
+          if (u is Map)
+            TotalPorUnidad(
+              unidad: (u['unidad'] ?? '').toString(),
+              recibido: _numero(u['recibido']),
+              consumido: _numero(u['consumido']),
+              aDevolver: _numero(u['a_devolver']),
+              devuelto: _numero(u['devuelto']),
+            ),
+      ],
     );
   }
 
@@ -212,6 +230,9 @@ class MaterialDeJornada {
     required this.diferencia,
     required this.porDevolver,
     this.serie,
+    this.anotado = 0,
+    this.enviado = 0,
+    this.recibidoEnBodega,
   });
 
   factory MaterialDeJornada.desde(
@@ -219,9 +240,10 @@ class MaterialDeJornada {
     double devueltoSinSubir = 0,
   }) {
     final esperado = EstadoDeJornada._numero(datos['esperado_devolver']);
-    final devuelto =
-        EstadoDeJornada._numero(datos['devuelto']) + devueltoSinSubir;
+    final enviado = EstadoDeJornada._numero(datos['devuelto']);
+    final devuelto = enviado + devueltoSinSubir;
     final serie = (datos['serie'] ?? '').toString();
+    final recibido = datos['recibido_en_bodega'];
 
     return MaterialDeJornada(
       codigo: (datos['codigo'] ?? '').toString(),
@@ -232,6 +254,10 @@ class MaterialDeJornada {
       diferencia: esperado - devuelto,
       porDevolver: esperado - devuelto > 0 ? esperado - devuelto : 0,
       serie: serie.isEmpty ? null : serie,
+      anotado: devueltoSinSubir,
+      enviado: enviado,
+      recibidoEnBodega:
+          recibido == null ? null : EstadoDeJornada._numero(recibido),
     );
   }
 
@@ -250,6 +276,32 @@ class MaterialDeJornada {
   /// Solo para equipos con número. Nunca se muestran como cantidad suelta.
   final String? serie;
 
+  /// DÓNDE VA LO DEVUELTO (18/10/2026). Antes era un solo «Devuelto», y
+  /// decía 7 desde el toque del botón aunque el material siguiera en la
+  /// camioneta. Son tres momentos distintos:
+  ///
+  ///   anotado   en la cola del teléfono, sin señal todavía
+  ///   enviado   el servidor lo tiene: el técnico lo declaró
+  ///   recibido  la bodega lo firmó
+  ///
+  /// `recibidoEnBodega` es nulo con un servidor que no lo manda: ahí no se
+  /// puede decir ni que llegó ni que falta, y la pantalla no lo afirma.
+  final double anotado;
+  final double enviado;
+  final double? recibidoEnBodega;
+
+  /// Lo que el servidor tiene como declarado y la bodega todavía no firmó.
+  double get enviadoSinRecibir {
+    final r = recibidoEnBodega;
+    if (r == null) return 0;
+    return enviado - r > 0 ? enviado - r : 0;
+  }
+
+  /// «2», o «2,5»: para escribirlo en un botón o un aviso.
+  static String numero(double valor) => valor == valor.roundToDouble()
+      ? valor.round().toString()
+      : valor.toString().replaceAll('.', ',');
+
   static String _texto(double valor) => valor == valor.roundToDouble()
       ? valor.round().toString()
       : valor.toString();
@@ -266,4 +318,22 @@ class TransferenciaPendiente {
   final String material;
   final String cantidad;
   final String recibe;
+}
+
+/// Un total del día en una sola unidad: «320 m», nunca mezclado con
+/// conectores.
+class TotalPorUnidad {
+  const TotalPorUnidad({
+    required this.unidad,
+    required this.recibido,
+    required this.consumido,
+    required this.aDevolver,
+    required this.devuelto,
+  });
+
+  final String unidad;
+  final double recibido;
+  final double consumido;
+  final double aDevolver;
+  final double devuelto;
 }

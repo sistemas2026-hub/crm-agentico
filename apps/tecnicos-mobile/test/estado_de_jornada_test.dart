@@ -290,6 +290,47 @@ void main() {
       expect(ajena.hayJornada, isFalse);
     });
   });
+
+  group('7. Unidades y dónde va lo devuelto (18/10/2026)', () {
+    test('lee los totales por unidad y los tres momentos de la devolución',
+        () async {
+      final datos = respuesta(detalle: <Map<String, dynamic>>[
+        {
+          'codigo': 'CON-SC-APC', 'nombre': 'Conector SC/APC',
+          'unidad': 'unidades', 'esperado_devolver': '10', 'devuelto': '7',
+          'recibido_en_bodega': '4',
+        },
+      ]);
+      ((datos['resumen'] as Map)['material'] as Map)['por_unidad'] =
+          <Map<String, dynamic>>[
+        {'unidad': 'm', 'recibido': '100', 'consumido': '35',
+          'a_devolver': '65', 'devuelto': '0'},
+      ];
+      await db.guardarJornada(orgId: orgA, profileId: perfilA, datos: datos);
+      await db.encolarMovimientoMaterial(
+        id: 'd1', orgId: orgA, profileId: perfilA,
+        materialCodigo: 'CON-SC-APC', tipo: 'devolucion', cantidad: '3',
+      );
+
+      final estado = await leer();
+      final m = estado.materiales.single;
+
+      expect(estado.porUnidad.single.unidad, 'm');
+      expect(estado.porUnidad.single.aDevolver, 65);
+      expect((m.anotado, m.enviado, m.recibidoEnBodega), (3.0, 7.0, 4.0));
+      expect(m.enviadoSinRecibir, 3);
+      expect(m.devuelto, '10', reason: 'el cierre sigue contando lo anotado');
+    });
+
+    test('un servidor que no manda lo de bodega no inventa un cero', () async {
+      await db.guardarJornada(orgId: orgA, profileId: perfilA, datos: respuesta());
+
+      final m = (await leer()).materiales.single;
+
+      expect(m.recibidoEnBodega, isNull);
+      expect(m.enviadoSinRecibir, 0);
+    });
+  });
 }
 
 class _Sesion implements SecureStorageLectura {

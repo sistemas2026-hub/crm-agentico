@@ -96,6 +96,50 @@ def _movido(profile, material, tipo) -> Decimal:
     return a_decimal(qs.aggregate(total=Sum("cantidad"))["total"])
 
 
+def recibido_en_bodega(profile, material) -> Decimal:
+    """Lo que de esta persona ya entro a una bodega: la bodega lo firmo.
+
+    POR QUE (18/10/2026): la app decia «Devuelto 10» desde que el tecnico
+    tocaba el boton, y eso es una declaracion, no una recepcion. Lo que llego
+    es la DEVOLUCION que tiene una bodega de destino: la que recibe lo
+    declarado (`(ninguna) -> bodega`) y la que la bodega registra sin que el
+    tecnico la haya declarado (`custodia -> bodega`). Solo informa: la cuenta
+    del cierre sigue siendo `devuelto`, porque esperar la firma de bodega para
+    poder cerrar dejaria a alguien sin poder irse a su casa.
+    """
+    total = (
+        MovimientoDeMaterial.objects.filter(
+            profile=profile, material=material,
+            tipo=MovimientoDeMaterial.DEVOLUCION,
+            ubicacion_destino__isnull=False)
+        .exclude(estado=MovimientoDeMaterial.CONFLICTO)
+        .aggregate(total=Sum("cantidad"))["total"]
+    )
+    return a_decimal(total)
+
+
+def _por_unidad(filas) -> list[dict]:
+    """Los totales del dia separados por unidad.
+
+    Sumar todo junto daba «Recibido 362»: 42 conectores mas 320 metros de
+    cable. Un numero que mezcla unidades no le dice nada a nadie.
+    """
+    grupos: dict[str, dict] = {}
+    for f in filas:
+        g = grupos.setdefault(f["material"].unidad, {
+            "recibido": CERO, "consumido": CERO,
+            "a_devolver": CERO, "devuelto": CERO,
+        })
+        g["recibido"] += f["entregado"]
+        g["consumido"] += f["consumido"]
+        g["a_devolver"] += f["esperado_devolver"]
+        g["devuelto"] += f["devuelto"]
+    return [
+        {"unidad": unidad, **{k: a_texto(v) for k, v in g.items()}}
+        for unidad, g in sorted(grupos.items())
+    ]
+
+
 def esperado_devolver(profile, material) -> Decimal:
     """Cuánto de este material debería volver a bodega."""
     return (
@@ -149,6 +193,7 @@ def conciliacion_de(profile, org):
             "transferido": transferido,
             "esperado_devolver": esperado,
             "devuelto": devuelto,
+            "recibido_en_bodega": recibido_en_bodega(profile, material),
             # Lo que falta después de contar todo, incidencias incluidas. Cero
             # es lo normal; distinto de cero es lo que hay que explicar.
             "diferencia": esperado - devuelto - incidencias,
@@ -195,6 +240,7 @@ def resumen_de_jornada(profile, org, jornada=None) -> dict:
             "a_devolver": a_texto(sum((f["esperado_devolver"] for f in filas), CERO)),
             "devuelto": a_texto(sum((f["devuelto"] for f in filas), CERO)),
             "diferencias": len(con_diferencia),
+            "por_unidad": _por_unidad(filas),
         },
         "detalle": [
             {
@@ -207,6 +253,7 @@ def resumen_de_jornada(profile, org, jornada=None) -> dict:
                 "transferido": a_texto(f["transferido"]),
                 "esperado_devolver": a_texto(f["esperado_devolver"]),
                 "devuelto": a_texto(f["devuelto"]),
+                "recibido_en_bodega": a_texto(f["recibido_en_bodega"]),
                 "diferencia": a_texto(f["diferencia"]),
             }
             for f in filas

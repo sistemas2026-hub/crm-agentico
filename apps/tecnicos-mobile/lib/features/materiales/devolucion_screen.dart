@@ -13,6 +13,13 @@ import 'estado_de_jornada.dart';
 import 'widgets/confirmar_cierre.dart';
 import 'widgets/motivo_de_diferencia.dart';
 
+/// «2 unidades», «1 unidad», «35,5 m».
+String cantidadConUnidad(double cantidad, String unidad) {
+  final texto = MaterialDeJornada.numero(cantidad);
+  if (cantidad == 1 && unidad == 'unidades') return '1 unidad';
+  return '$texto $unidad';
+}
+
 /// Devolver lo que sobró y cerrar la jornada.
 ///
 /// NINGÚN NÚMERO DE ESTA PANTALLA SE CALCULA ACÁ
@@ -246,10 +253,24 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
           children: <Widget>[
             Text('Kit de hoy', style: AppTypography.tituloChico),
             const SizedBox(height: 10),
-            _renglon('Recibido', estado.recibido),
-            _renglon('Consumido', estado.consumido),
-            _renglon('A devolver', estado.aDevolver),
-            _renglon('Devuelto', estado.devuelto),
+            // POR UNIDAD (18/10/2026): «Recibido 362» sumaba 42 conectores
+            // con 320 metros de cable. Con un servidor viejo, que no manda
+            // la separación, queda el total de antes.
+            if (estado.porUnidad.isEmpty) ...<Widget>[
+              _renglon('Recibido', estado.recibido),
+              _renglon('Consumido', estado.consumido),
+              _renglon('A devolver', estado.aDevolver),
+              _renglon('Devuelto', estado.devuelto),
+            ] else ...<Widget>[
+              _renglon('Recibido',
+                  _porUnidad(estado, (TotalPorUnidad u) => u.recibido)),
+              _renglon('Consumido',
+                  _porUnidad(estado, (TotalPorUnidad u) => u.consumido)),
+              _renglon('A devolver',
+                  _porUnidad(estado, (TotalPorUnidad u) => u.aDevolver)),
+              _renglon('Devuelto',
+                  _porUnidad(estado, (TotalPorUnidad u) => u.devuelto)),
+            ],
             _renglon(
               'Diferencias',
               estado.diferencias.toString(),
@@ -278,17 +299,33 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
         ),
       );
 
+  /// «42 unidades · 320 m». Una unidad sola, si de esa no hay nada, no se
+  /// escribe en cero: se omite. Todo en cero dice «0».
+  static String _porUnidad(
+      EstadoDeJornada estado, double Function(TotalPorUnidad) cuanto) {
+    final partes = <String>[
+      for (final u in estado.porUnidad)
+        if (cuanto(u) != 0) cantidadConUnidad(cuanto(u), u.unidad),
+    ];
+    return partes.isEmpty ? '0' : partes.join(' · ');
+  }
+
   Widget _renglon(String etiqueta, String valor, {bool resaltado = false}) =>
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(etiqueta, style: AppTypography.cuerpo),
-            Text(
-              valor,
-              style: AppTypography.dato.copyWith(
-                color: resaltado ? AppColors.error : AppColors.onSurface,
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                valor,
+                textAlign: TextAlign.end,
+                style: AppTypography.dato.copyWith(
+                  color: resaltado ? AppColors.error : AppColors.onSurface,
+                ),
               ),
             ),
           ],
@@ -346,6 +383,7 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
                 ]),
             ],
           ),
+          ..._dondeVaLoDevuelto(material),
           if (material.porDevolver > 0) ...<Widget>[
             const SizedBox(height: 10),
             SizedBox(
@@ -353,7 +391,9 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
               height: 40,
               child: OutlinedButton(
                 onPressed: () => _devolver(material),
-                child: Text('Devolver ${material.porDevolver} ${material.unidad}'),
+                // Antes decía «Devolver 2.0 unidades».
+                child: Text('Devolver ${cantidadConUnidad(
+                    material.porDevolver, material.unidad)}'),
               ),
             ),
             const SizedBox(height: 6),
@@ -373,6 +413,52 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
       ),
     );
   }
+
+  /// Lo devuelto, en sus tres momentos: anotado en el teléfono, enviado al
+  /// servidor, recibido por bodega. Solo aparece lo que tiene cantidad.
+  List<Widget> _dondeVaLoDevuelto(MaterialDeJornada material) {
+    String de(double cuanto) => cantidadConUnidad(cuanto, material.unidad);
+    final momentos = <Widget>[
+      if (material.anotado > 0)
+        _momento(Icons.schedule, '${de(material.anotado)} sin enviar',
+            AppColors.onSurfaceVariant),
+      // Sin el dato de bodega (servidor viejo) se dice solo que se envió:
+      // no se puede afirmar ni que llegó ni que falta.
+      if (material.recibidoEnBodega == null && material.enviado > 0)
+        _momento(Icons.cloud_done_outlined, '${de(material.enviado)} enviado',
+            AppColors.onSurfaceVariant),
+      if (material.enviadoSinRecibir > 0)
+        _momento(
+            Icons.local_shipping_outlined,
+            '${de(material.enviadoSinRecibir)} enviado · falta que bodega '
+            'lo reciba',
+            AppColors.onSurfaceVariant),
+      if ((material.recibidoEnBodega ?? 0) > 0)
+        _momento(Icons.inventory_2_outlined,
+            '${de(material.recibidoEnBodega!)} recibido por bodega',
+            AppColors.exito),
+    ];
+    if (momentos.isEmpty) return const <Widget>[];
+    return <Widget>[const SizedBox(height: 6), ...momentos];
+  }
+
+  /// Un renglón chico con su ícono. No es una pastilla a propósito: la
+  /// pastilla corta en una línea, y «falta que bodega lo reciba» quedaba en
+  /// puntos suspensivos en un teléfono.
+  Widget _momento(IconData icono, String texto, Color color) => Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(icono, size: 16, color: color),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(texto,
+                  style: AppTypography.cuerpoChico.copyWith(color: color)),
+            ),
+          ],
+        ),
+      );
 
   Widget _transferencias(EstadoDeJornada estado) => Container(
         padding: const EdgeInsets.all(14),
