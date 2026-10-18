@@ -535,8 +535,9 @@ class _SeguimientoDeLaIntervencionState
         continue;
       }
       botones.add(
-        DexterAccionRapida(
-          texto: opcion.$2,
+        DexterAccionCompacta(
+          texto: _palabraDelMomento(momento),
+          descripcion: opcion.$2,
           icono: _icono(momento),
           deAlerta: momento == 'bloqueo',
           alTocar: _abierto != null
@@ -566,23 +567,18 @@ class _SeguimientoDeLaIntervencionState
       ],
       if (botones.isNotEmpty) ...<Widget>[
         const SizedBox(height: AppSpacing.sm),
-        // DE A DOS, TODOS DEL MISMO ANCHO. En un `Wrap` cada uno tomaba su
-        // ancho natural y quedaban como chips desparejos; en dos columnas se
-        // leen como lo que son: las cosas que se pueden reportar.
-        for (int i = 0; i < botones.length; i += 2) ...<Widget>[
-          if (i > 0) const SizedBox(height: AppSpacing.xs),
-          Row(
-            children: <Widget>[
+        // EN UNA FILA, ÍCONO Y UNA PALABRA (18/10/2026, pedido del
+        // usuario): antes eran botones con frase larga de a dos, y ocupaban
+        // dos filas. Todos del mismo ancho.
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            for (int i = 0; i < botones.length; i++) ...<Widget>[
+              if (i > 0) const SizedBox(width: AppSpacing.xs),
               Expanded(child: botones[i]),
-              const SizedBox(width: AppSpacing.xs),
-              Expanded(
-                child: i + 1 < botones.length
-                    ? botones[i + 1]
-                    : const SizedBox.shrink(),
-              ),
             ],
-          ),
-        ],
+          ],
+        ),
       ],
     ];
   }
@@ -653,6 +649,15 @@ class _SeguimientoDeLaIntervencionState
       widget.alDescartarBorrador?.call(momento);
     }
   }
+
+  /// La palabra del botón compacto.
+  static String _palabraDelMomento(String momento) => switch (momento) {
+        'inicio' => 'Inicio',
+        'avance' => 'Avance',
+        'bloqueo' => 'Bloqueo',
+        'cierre' => 'Cierre',
+        _ => momento,
+      };
 
   static String _nombreDelReporte(String momento) {
     switch (momento) {

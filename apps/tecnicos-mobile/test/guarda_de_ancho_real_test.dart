@@ -7,6 +7,7 @@ import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/detalle_orden/acciones_orden.dart';
 import 'package:campo/features/detalle_orden/detalle_orden_screen.dart';
 import 'package:campo/features/ejecucion/ejecucion_screen.dart';
+import 'package:campo/features/detalle_orden/comprobar_conexion.dart';
 import 'package:campo/features/detalle_orden/seguimiento_de_la_intervencion.dart';
 import 'package:campo/features/detalle_orden/visitas_anteriores.dart';
 import 'package:campo/features/inicio/inicio_screen.dart';
@@ -558,6 +559,65 @@ void main() {
         await t.tap(find.byType(InkWell).first);
         await t.pumpAndSettle();
         expect(t.takeException(), isNull, reason: 'desplegada no entra a $ancho px');
+      });
+
+      // 18/10/2026: los botones compactos, ícono y una palabra, de a tres y
+      // de a cuatro en una fila. Con la letra en 1.3 es donde se aprietan.
+      testWidgets('Los botones compactos en fila entran con letra grande',
+          (WidgetTester t) async {
+        await aEsteAncho(
+          t,
+          ancho,
+          () => SingleChildScrollView(
+            child: Column(
+              children: <Widget>[
+                SeguimientoDeLaIntervencion(
+                  cargando: false,
+                  alReportar: (_, _, {bool requiereNoc = false, bool detener = true}) {},
+                  seguimiento: <String, dynamic>{
+                    'eventos': <dynamic>[],
+                    'momentos_registrados': <String>[],
+                    'formularios': <String, dynamic>{
+                      for (final String m in <String>['inicio', 'avance', 'bloqueo', 'cierre'])
+                        m: <String, dynamic>{'momento': m, 'campos': <dynamic>[]},
+                    },
+                  },
+                ),
+                ComprobarConexion(
+                  ordenId: 'ot-1',
+                  trabajo: TrabajoVista.desdeOrden(<String, dynamic>{
+                    'id': 'ot-1',
+                    'numero': 1,
+                    'estado': 'en_sitio',
+                    'cliente_nombre': 'Cliente',
+                    'contexto_json': jsonEncode(<String, dynamic>{
+                      'contexto_disponible': true,
+                      'sn_onu': 'ZTEGC0A1B2C3',
+                    }),
+                  }),
+                  acciones: AccionesOrden(
+                    transicionar: ({
+                      required String ordenId,
+                      required String nuevoEstadoLocal,
+                      required String tipoAccion,
+                      required int revisionBase,
+                    }) async {},
+                    sincronizar: () async {},
+                    medirSenal: (_) async =>
+                        const MedicionDeSenal.noSePudo('sin_conexion'),
+                    probarConexion: (_, _) async =>
+                        ResultadoPing.noSePudo('sin_conexion'),
+                    refrescarFicha: (_) async =>
+                        const ResultadoRefresco(ok: false, motivo: 'sin_conexion'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          escalaDeLetra: letraGrande,
+        );
+        expect(find.text('Consultar'), findsOneWidget);
+        expect(find.text('Bloqueo'), findsOneWidget);
       });
 
       testWidgets('La hoja para pedir a bodega entra', (WidgetTester t) async {

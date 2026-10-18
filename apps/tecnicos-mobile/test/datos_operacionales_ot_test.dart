@@ -148,11 +148,16 @@ void main() {
       await montar(t, orden());
 
       expect(find.text('Caja de distribución'), findsOneWidget);
-      expect(find.text('Serial del equipo del cliente'), findsOneWidget);
+      // El serial salió de «Datos técnicos» el 18/10/2026: está en la franja
+      // del servicio, arriba, y en la tarjeta del equipo.
+      expect(find.text('Serial del equipo del cliente'), findsNothing);
       // findsWidgets y no findsOneWidget: con la bandera de demostración
       // encendida, la matriz de telemetría de ejemplo repite estos valores.
       // Lo que se mide acá es que el bloque REAL los muestre.
       expect(find.text('CTO-04-A'), findsWidgets);
+      // Y el serial está en la franja, al desplegarla.
+      await t.tap(find.byIcon(Icons.expand_more));
+      await t.pumpAndSettle();
       expect(find.text('48575443-B981F'), findsWidgets);
     });
 

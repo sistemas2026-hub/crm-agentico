@@ -323,7 +323,7 @@ void main() {
       await montar(t, orden(conEquipo: false));
 
       expect(find.textContaining('se puede volver a consultar'), findsOneWidget);
-      expect(find.text('Volver a consultar el equipo'), findsOneWidget);
+      expect(find.text('Consultar'), findsOneWidget);
     });
   });
   group('4. El ping contesta otra pregunta, y no dictamina', () {
@@ -785,7 +785,10 @@ void main() {
       expect(find.text('Estado del equipo'), findsOneWidget);
       expect(find.textContaining('SmartOLT'), findsNothing);
       expect(find.textContaining('Dexter API'), findsNothing);
-      expect(find.text('IP del cliente'), findsOneWidget);
+      // La IP vive en la franja del servicio (18/10/2026), a un toque.
+      expect(find.text('172.16.40.70'), findsNothing);
+      await t.tap(find.byIcon(Icons.expand_more));
+      await t.pumpAndSettle();
       expect(find.text('172.16.40.70'), findsOneWidget);
     });
   });

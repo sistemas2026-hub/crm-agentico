@@ -202,7 +202,7 @@ void main() {
 
       expect(find.text('Reporte de cierre'), findsNothing,
           reason: 'el cierre ya no es un botón aparte');
-      expect(find.text('Reportar bloqueo'), findsOneWidget);
+      expect(find.text('Bloqueo'), findsOneWidget);
 
       await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
@@ -352,10 +352,10 @@ void main() {
       expect(find.textContaining('AL DESPACHAR'), findsOneWidget);
       expect(find.text('Rx ONU -21.19 dBm'), findsOneWidget);
       expect(find.textContaining('no confirma que el cliente tenga internet'), findsOneWidget);
-      expect(find.text('Volver a consultar el equipo'), findsNothing,
+      expect(find.text('Consultar'), findsNothing,
           reason: 'con ficha completa no hace falta');
 
-      await t.tap(find.text('Medir la señal ahora'));
+      await t.tap(find.text('Medir'));
       await t.pumpAndSettle();
       expect(find.textContaining('AHORA · 11:42'), findsOneWidget);
       expect(find.text('Rx ONU -19.40 dBm'), findsOneWidget);
@@ -364,7 +364,7 @@ void main() {
     testWidgets('el ping dice cuántos respondieron, y no dictamina', (WidgetTester t) async {
       await montar(t, ComprobarConexion(
         ordenId: 'ot-1', trabajo: trabajo(), acciones: acciones()));
-      await t.tap(find.text('Probar conexión (ping)'));
+      await t.tap(find.text('Ping'));
       await t.pumpAndSettle();
       expect(find.textContaining('respondieron 3 de 4'), findsOneWidget);
       expect(find.textContaining('caído'), findsNothing);
@@ -381,9 +381,9 @@ void main() {
         alActualizarFicha: () async => recargas++,
       ));
 
-      expect(find.text('Medir la señal ahora'), findsNothing);
+      expect(find.text('Medir'), findsNothing);
       expect(find.textContaining('no llegó cuando se creó la orden'), findsOneWidget);
-      await t.tap(find.text('Volver a consultar el equipo'));
+      await t.tap(find.text('Consultar'));
       await t.pumpAndSettle();
       expect(llamadas, <String>['refrescar']);
       expect(recargas, 1, reason: 'con éxito, quien la muestra relee la orden');
@@ -398,7 +398,7 @@ void main() {
             refresco: const ResultadoRefresco(ok: false, motivo: 'sin_conexion')),
         alActualizarFicha: () async => recargas++,
       ));
-      await t.tap(find.text('Volver a consultar el equipo'));
+      await t.tap(find.text('Consultar'));
       await t.pumpAndSettle();
       expect(find.textContaining('Sin señal no se puede consultar'), findsOneWidget);
       expect(recargas, 0);

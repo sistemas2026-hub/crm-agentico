@@ -117,10 +117,10 @@ void main() {
         alReportar: (_, _, {bool requiereNoc = false, bool detener = true}) {},
       );
 
-      expect(find.text('Registrar inicio'), findsOneWidget);
-      expect(find.text('Registrar avance'), findsOneWidget);
-      expect(find.text('Reportar bloqueo'), findsOneWidget);
-      expect(find.text('Reporte de cierre'), findsOneWidget);
+      expect(find.text('Inicio'), findsOneWidget);
+      expect(find.text('Avance'), findsOneWidget);
+      expect(find.text('Bloqueo'), findsOneWidget);
+      expect(find.text('Cierre'), findsOneWidget);
     });
 
     testWidgets('un momento que el tipo de trabajo NO declara no se ofrece', (
@@ -135,8 +135,8 @@ void main() {
         alReportar: (_, _, {bool requiereNoc = false, bool detener = true}) {},
       );
 
-      expect(find.text('Reportar bloqueo'), findsNothing);
-      expect(find.text('Registrar avance'), findsOneWidget);
+      expect(find.text('Bloqueo'), findsNothing);
+      expect(find.text('Avance'), findsOneWidget);
     });
 
     testWidgets('el INICIO desaparece después del primer INICIO', (
@@ -149,13 +149,13 @@ void main() {
       );
 
       expect(
-        find.text('Registrar inicio'),
+        find.text('Inicio'),
         findsNothing,
         reason:
             'El servidor rechaza un segundo INICIO: ofrecerlo haría que el '
             'técnico escriba un reporte que se va a perder.',
       );
-      expect(find.text('Registrar avance'), findsOneWidget);
+      expect(find.text('Avance'), findsOneWidget);
     });
   });
 
@@ -190,7 +190,7 @@ void main() {
           }) {},
         );
 
-        await tester.tap(find.text('Registrar avance'));
+        await tester.tap(find.text('Avance'));
         await tester.pumpAndSettle();
 
         expect(find.textContaining('Presión de línea'), findsWidgets);
@@ -208,7 +208,7 @@ void main() {
         alReportar: (_, _, {bool requiereNoc = false, bool detener = true}) {},
       );
 
-      await tester.tap(find.text('Registrar avance'));
+      await tester.tap(find.text('Avance'));
       await tester.pumpAndSettle();
 
       expect(
@@ -243,7 +243,7 @@ void main() {
         alReportar: (_, _, {bool requiereNoc = false, bool detener = true}) {},
       );
 
-      await tester.tap(find.text('Registrar avance'));
+      await tester.tap(find.text('Avance'));
       await tester.pumpAndSettle();
 
       final Finder boton = find.text(guardar);
@@ -271,7 +271,7 @@ void main() {
         alDescartar: (String m) => descartado = m,
       );
 
-      await tester.tap(find.text('Registrar avance'));
+      await tester.tap(find.text('Avance'));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Cerrar'));
       await tester.pumpAndSettle();
@@ -292,7 +292,7 @@ void main() {
         alDescartar: (String m) => descartado = m,
       );
 
-      await tester.tap(find.text('Registrar avance'));
+      await tester.tap(find.text('Avance'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'empalme hecho');
       await tester.pumpAndSettle();
@@ -325,7 +325,7 @@ void main() {
         fotos: const <String, int>{'foto_avance': 1},
       );
 
-      await tester.tap(find.text('Registrar avance'));
+      await tester.tap(find.text('Avance'));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Cerrar'));
       await tester.pumpAndSettle();
@@ -351,7 +351,7 @@ void main() {
         alDescartar: (String m) => descartado = m,
       );
 
-      await tester.tap(find.text('Registrar avance'));
+      await tester.tap(find.text('Avance'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'empalme hecho');
       await tester.pumpAndSettle();
@@ -380,7 +380,7 @@ void main() {
         },
       );
 
-      await tester.tap(find.text('Registrar avance'));
+      await tester.tap(find.text('Avance'));
       await tester.pumpAndSettle();
       await tester.tap(find.text(guardar));
       await tester.pumpAndSettle();
@@ -416,7 +416,7 @@ void main() {
             },
       );
 
-      await tester.tap(find.text('Registrar avance'));
+      await tester.tap(find.text('Avance'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'revisé el empalme');
       await tester.pumpAndSettle();
@@ -438,7 +438,7 @@ void main() {
         alReportar: (_, _, {bool requiereNoc = false, bool detener = true}) {},
       );
 
-      await tester.tap(find.text('Reportar bloqueo'));
+      await tester.tap(find.text('Bloqueo'));
       await tester.pumpAndSettle();
 
       expect(
@@ -462,7 +462,7 @@ void main() {
         alReportar: (_, _, {bool requiereNoc = false, bool detener = true}) {},
       );
 
-      await tester.tap(find.text('Registrar avance'));
+      await tester.tap(find.text('Avance'));
       await tester.pumpAndSettle();
 
       expect(find.byType(Checkbox), findsNothing);
@@ -489,7 +489,7 @@ void main() {
             },
       );
 
-      await tester.tap(find.text('Reportar bloqueo'));
+      await tester.tap(find.text('Bloqueo'));
       await tester.pumpAndSettle();
       // Se marca «requiere NOC» y se destilda «detener».
       await tester.tap(find.byType(Checkbox).first);
@@ -582,7 +582,7 @@ void main() {
             }) {},
       );
 
-      await tester.tap(find.text('Reportar bloqueo'));
+      await tester.tap(find.text('Bloqueo'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'La casa cerrada');
       await tester.pumpAndSettle();
@@ -593,7 +593,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Descartar'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Reporte de cierre'));
+      await tester.tap(find.text('Cierre'));
       await tester.pumpAndSettle();
       expect(find.text(guardar), findsOneWidget);
 

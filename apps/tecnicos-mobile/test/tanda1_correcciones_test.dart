@@ -382,7 +382,7 @@ void main() {
         ),
       ));
       await t.pumpAndSettle();
-      await t.tap(find.text('Reportar bloqueo'));
+      await t.tap(find.text('Bloqueo'));
       await t.pumpAndSettle();
       await t.tap(find.byType(Checkbox).first); // requiere NOC
       await t.pumpAndSettle();

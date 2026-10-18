@@ -38,10 +38,6 @@ class _FranjaDelServicioState extends State<FranjaDelServicio> {
 
   TrabajoVista get t => widget.trabajo;
 
-  /// Lo primero de cada dato que se dicta por teléfono.
-  static String _corto(String serial) =>
-      serial.length <= 10 ? serial : '…${serial.substring(serial.length - 6)}';
-
   static String _hora(DateTime d) =>
       '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
@@ -61,13 +57,15 @@ class _FranjaDelServicioState extends State<FranjaDelServicio> {
     final String ticket = t.numeroTicket.trim();
     final String serial = t.serialOnu.trim();
     final String ip = t.ipCliente.trim();
-    final List<String> resumen = <String>[
-      if (ticket.isNotEmpty) 'Ticket #$ticket',
-      if (serial.isNotEmpty) _corto(serial),
-      if (ip.isNotEmpty) ip,
-    ];
+    // PLEGADA, SOLO EL TICKET (18/10/2026, pedido del usuario): el serial y
+    // la IP estaban también en la línea, y al desplegar se repetían abajo.
+    // El ticket es lo primero que piden; lo demás, a un toque.
+    final bool hayAlgo = ticket.isNotEmpty ||
+        serial.isNotEmpty ||
+        ip.isNotEmpty ||
+        t.potenciaOptica.isNotEmpty;
     // Sin ningún dato no hay franja: una línea vacía fija arriba es ruido.
-    if (resumen.isEmpty && t.potenciaOptica.isEmpty) {
+    if (!hayAlgo) {
       return const SizedBox.shrink();
     }
 
@@ -89,7 +87,7 @@ class _FranjaDelServicioState extends State<FranjaDelServicio> {
                   const SizedBox(width: AppSpacing.xs),
                   Expanded(
                     child: Text(
-                      resumen.isEmpty ? 'Datos del servicio' : resumen.join(' · '),
+                      ticket.isEmpty ? 'Datos del servicio' : 'Ticket #$ticket',
                       style: AppTypography.dato.copyWith(color: AppColors.onSurface),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

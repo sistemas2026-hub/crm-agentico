@@ -267,28 +267,39 @@ class _ComprobarConexionState extends State<ComprobarConexion> {
           Text(_avisoFicha!, style: AppTypography.cuerpoChico),
         ],
         const SizedBox(height: AppSpacing.sm),
-        if (puedeMedir)
-          DexterAccionRapida(
-            texto: _midiendo ? 'Midiendo…' : 'Medir la señal ahora',
-            icono: Icons.speed,
-            alTocar: _midiendo ? null : _medir,
-          ),
-        if (puedePing) ...<Widget>[
-          const SizedBox(height: AppSpacing.xs),
-          DexterAccionRapida(
-            texto: _pingueando ? 'Probando…' : 'Probar conexión (ping)',
-            icono: Icons.wifi_tethering,
-            alTocar: _pingueando ? null : _pinguear,
-          ),
-        ],
-        if (puedeConsultar) ...<Widget>[
-          const SizedBox(height: AppSpacing.xs),
-          DexterAccionRapida(
-            texto: _consultando ? 'Consultando…' : 'Volver a consultar el equipo',
-            icono: Icons.sync,
-            alTocar: _consultando ? null : _consultarFicha,
-          ),
-        ],
+        // EN UNA FILA, ÍCONO Y UNA PALABRA (18/10/2026): eran tres botones
+        // con frase larga, uno debajo del otro.
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            for (final (int i, Widget b) in <Widget>[
+              if (puedeMedir)
+                DexterAccionCompacta(
+                  texto: _midiendo ? 'Midiendo…' : 'Medir',
+                  descripcion: 'Medir la señal ahora',
+                  icono: Icons.speed,
+                  alTocar: _midiendo ? null : _medir,
+                ),
+              if (puedePing)
+                DexterAccionCompacta(
+                  texto: _pingueando ? 'Probando…' : 'Ping',
+                  descripcion: 'Probar la conexión con un ping',
+                  icono: Icons.wifi_tethering,
+                  alTocar: _pingueando ? null : _pinguear,
+                ),
+              if (puedeConsultar)
+                DexterAccionCompacta(
+                  texto: _consultando ? 'Consultando…' : 'Consultar',
+                  descripcion: 'Volver a consultar el equipo',
+                  icono: Icons.sync,
+                  alTocar: _consultando ? null : _consultarFicha,
+                ),
+            ].indexed) ...<Widget>[
+              if (i > 0) const SizedBox(width: AppSpacing.xs),
+              Expanded(child: b),
+            ],
+          ],
+        ),
         const SizedBox(height: AppSpacing.xs),
         Text(
           'Estas pruebas necesitan señal. Lo demás de esta pantalla se guarda '

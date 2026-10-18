@@ -63,10 +63,14 @@ void main() {
           }),
         });
 
-    testWidgets('plegada: ticket, serial y IP en una línea', (WidgetTester t) async {
+    testWidgets('plegada: solo el ticket; el serial y la IP, a un toque',
+        (WidgetTester t) async {
+      // Antes la línea traía también el serial y la IP, y al desplegar se
+      // repetían abajo (pedido del usuario, 18/10/2026).
       await _montar(t, FranjaDelServicio(trabajo: trabajo()));
-      expect(find.text('Ticket #95218 · …A1B2C3 · 172.16.40.70'), findsOneWidget);
-      expect(find.text('Serial'), findsNothing);
+      expect(find.text('Ticket #95218'), findsOneWidget);
+      expect(find.textContaining('172.16.40.70'), findsNothing);
+      expect(find.textContaining('A1B2C3'), findsNothing);
     });
 
     testWidgets('desplegada: todo, la señal dice que es de la ficha, y se copia',
@@ -122,9 +126,9 @@ void main() {
           },
         },
       ));
-      final Offset inicio = t.getTopLeft(find.text('Registrar inicio'));
-      final Offset avance = t.getTopLeft(find.text('Registrar avance'));
-      final Offset bloqueo = t.getTopLeft(find.text('Reportar bloqueo'));
+      final Offset inicio = t.getTopLeft(find.text('Inicio'));
+      final Offset avance = t.getTopLeft(find.text('Avance'));
+      final Offset bloqueo = t.getTopLeft(find.text('Bloqueo'));
       // De a dos: inicio y avance arriba, bloqueo abajo a la izquierda.
       expect(inicio.dy, avance.dy);
       expect(inicio.dx < avance.dx, isTrue);

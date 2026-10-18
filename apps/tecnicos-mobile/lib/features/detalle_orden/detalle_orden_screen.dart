@@ -1449,11 +1449,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   /// ENTENDER LA FALLA» se dibujaba sobre la nada. Ausente se dice con `null`.
   Widget? _datosTecnicos(TrabajoVista trabajo) {
     final String cto = trabajo.contexto['cto']?.toString() ?? '';
-    final String serial = trabajo.serialOnu;
-    // La IP del servicio (18/10/2026, pedido del usuario): es lo primero que
-    // se compara con el router del cliente, y estaba en la ficha sin mostrarse.
-    final String ip = trabajo.ipCliente.trim();
-    if (cto.isEmpty && serial.isEmpty && ip.isEmpty) return null;
+    // El serial y la IP salieron de acá el 18/10/2026: ya están en la franja
+    // del servicio, arriba, y se repetían en la misma pantalla. Queda la caja.
+    if (cto.isEmpty) return null;
 
     return DexterCard(
       child: Column(
@@ -1481,24 +1479,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               icono: Icons.settings_input_component,
               etiqueta: 'Caja de distribución',
               valor: cto,
-              monoespaciada: true,
-            ),
-          ],
-          if (serial.isNotEmpty) ...<Widget>[
-            const SizedBox(height: AppSpacing.sm),
-            _lineaDeDato(
-              icono: Icons.qr_code_2,
-              etiqueta: 'Serial del equipo del cliente',
-              valor: serial,
-              monoespaciada: true,
-            ),
-          ],
-          if (ip.isNotEmpty) ...<Widget>[
-            const SizedBox(height: AppSpacing.sm),
-            _lineaDeDato(
-              icono: Icons.lan_outlined,
-              etiqueta: 'IP del cliente',
-              valor: ip,
               monoespaciada: true,
             ),
           ],
@@ -1971,7 +1951,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         'No se pudo consultar el equipo',
         // Decía «Se reintenta al sincronizar», y no se reintentaba nunca: la
         // ficha se pedía una sola vez (17/10/2026). Ahora hay un botón.
-        'Con señal, tocá «Volver a consultar el equipo» acá abajo.',
+        'Con señal, tocá «Consultar» en «Comprobar conexión», acá abajo.',
       ),
       SinFicha.clienteNoIdentificado => (
         Icons.person_off,

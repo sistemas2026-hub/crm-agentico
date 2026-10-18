@@ -770,6 +770,98 @@ class DexterAccionRapida extends StatelessWidget {
   }
 }
 
+/// Una acción compacta: ícono grande y UNA palabra debajo.
+///
+/// POR QUÉ (18/10/2026, pedido del usuario): los botones con frase larga
+/// —«Registrar avance», «Medir la señal ahora»— ocupaban dos filas para tres
+/// acciones. Ícono solo no: para acciones del trabajo no hay un ícono que todos
+/// lean igual, y un técnico nuevo al sol tocaría el que no es. Con una palabra
+/// debajo entran tres en una fila. La frase completa queda en [descripcion]:
+/// la lee el lector de pantalla y aparece al mantener apretado.
+class DexterAccionCompacta extends StatelessWidget {
+  const DexterAccionCompacta({
+    super.key,
+    required this.icono,
+    required this.texto,
+    required this.descripcion,
+    this.alTocar,
+    this.deAlerta = false,
+  });
+
+  final IconData icono;
+
+  /// Una palabra: «Avance», «Medir».
+  final String texto;
+
+  /// La frase entera: «Registrar un avance».
+  final String descripcion;
+  final VoidCallback? alTocar;
+
+  /// Borde e ícono en el tono de error, suave (hoy, el bloqueo).
+  final bool deAlerta;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool activa = alTocar != null;
+    final Color colorIcono = !activa
+        ? AppColors.inactivo
+        : (deAlerta ? AppColors.error : AppColors.secondary);
+    return Tooltip(
+      message: descripcion,
+      child: Semantics(
+        button: true,
+        enabled: activa,
+        label: descripcion,
+        excludeSemantics: true,
+        child: Material(
+          color: AppColors.surfaceContainerLowest,
+          borderRadius: AppRadius.brTarjeta,
+          child: InkWell(
+            onTap: alTocar,
+            borderRadius: AppRadius.brTarjeta,
+            child: Ink(
+              decoration: BoxDecoration(
+                borderRadius: AppRadius.brTarjeta,
+                boxShadow: activa ? AppTheme.sombraNivel1 : null,
+                border: deAlerta && activa
+                    ? Border.all(color: AppColors.errorContainer, width: 1.5)
+                    : null,
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 64),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: AppSpacing.xs,
+                    horizontal: 4,
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Icon(icono, size: 26, color: colorIcono),
+                      const SizedBox(height: 4),
+                      Text(
+                        texto,
+                        textAlign: TextAlign.center,
+                        style: AppTypography.etiqueta.copyWith(
+                          color: activa ? AppColors.onSurface : AppColors.inactivo,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// El botón dominante: el único relleno de azul saturado de la pantalla.
 /// `w-full h-14 rounded-lg bg-secondary-container text-on-secondary shadow-md`
 /// con el texto en `body-lg` bold y en mayúsculas.
