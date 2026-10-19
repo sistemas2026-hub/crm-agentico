@@ -96,8 +96,8 @@ SEGUNDOS_MAXIMOS_DE_DIAGNOSTICO = 60
 #
 #  POR QUE QUINCE Y NO MAS. Quince diagnosticos son ~150 s de reloj, que entran
 #  holgados en los 240 de abajo, y 15 llamadas/hora contra un limite de 1.000
-#  es el 1,5%. (19/10/2026: la cabecera de SmartOLT dice hoy 500 por hora, no
-#  1.000 -- ver la skill de SmartOLT. Sigue siendo el 3%.) El proveedor pide no hacer polling ni consultas masivas, y esto
+#  es el 1,5%. (19/10/2026: la cabecera de SmartOLT dijo 500 por hora en una
+#  lectura y 1.000 en otra el mismo dia -- ver la skill. Con el menor, el 3%.) El proveedor pide no hacer polling ni consultas masivas, y esto
 #  no es ninguna de las dos: cada diagnostico corresponde a UN ticket que un
 #  cliente reporto --el uso que SmartOLT autoriza explicitamente-- y quince
 #  tickets por hora es la carga de una mesa de soporte normal, no un barrido.

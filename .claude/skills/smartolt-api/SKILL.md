@@ -21,9 +21,13 @@ al primer intento contra `/api/system/get_olts`.
 
 ## Límite de tasa — confirmado por cabecera, no por la doc de terceros
 
-> **ACTUALIZADO 19/10/2026: la cabecera dice `X-RateLimit-Limit: 500`**, no
-> 1.000 (50 llamadas del script del verificador dejaron 468 de 500). El
-> número de abajo era el de agosto: se lee la cabecera, no este párrafo.
+> **ACTUALIZADO 19/10/2026, dos lecturas de la cabecera el mismo día que no
+> coinciden**: `X-RateLimit-Limit: 500` en la corrida del script del
+> verificador (quedaban 468 de 500) y `1000` en una llamada a
+> `get_all_onus_details` horas después (quedaban 933 de 1000). El límite no
+> es un número fijo de la cuenta --puede variar por endpoint o con el tiempo,
+> no se sabe cuál--: se lee la cabecera de cada respuesta, no este párrafo, y
+> para presupuestar se toma el menor medido, 500.
 
 **1.000 llamadas/hora**, no 15 — la cifra de 15/hora que circulaba por
 búsqueda web era de un caso de uso masivo específico, no el límite de cuenta.
@@ -753,6 +757,14 @@ puerto de prueba fue el más poblado (olt 3, placa 2, puerto 11, 118 ONU).
   claves y nada más. Es la forma de contar las ONU en LOS de un puerto, con
   su hora, sin traer un solo dato de cliente.
 - `onu_type_id` filtra (inexistente → 0).
+- **Confirmado el 19/10/2026 con la forma exacta que usa el motor**
+  (`olt_id=3`, `status=los`, `fields=status,last_status_change,sn`,
+  `page=1`, `page_size=5`; una llamada, corrida por el usuario): HTTP 200,
+  5 filas, cada una con **solo** `last_status_change`, `sn` y `status`, y el
+  serial en las 5. `page_size` se respeta. La respuesta trae arriba
+  `onus`, `page`, `page_size`, `response_code`, `status`, `total_items` (62)
+  y `total_pages` (13): es la clave con la que el motor pide las páginas
+  siguientes (`diagnostico_servicio._vecinos_en_los`).
 
 **`get_onus_signals`**: `olt_id` + `board` + `port` filtran (118, puerto 99 → 0).
 Clasificación: `Very good`, `Warning`, `Critical`, `-`.
