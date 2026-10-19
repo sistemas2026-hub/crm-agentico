@@ -58,9 +58,15 @@ from nucleo.config.schema import (AreaDeTrabajo, DestinoTicket,  # noqa: E402
 import cli.importar_tickets as cli                            # noqa: E402
 
 
-#  161 elegibles y 16 candidatos nuevos: las mismas cifras que el dry-run de
-#  produccion, para que lo que se prueba sea el caso real y no uno de juguete.
-ELEGIBLES = 161
+#  16 candidatos nuevos: la cifra del dry-run de produccion del 25/09/2026, para
+#  que lo que se prueba sea el caso real y no uno de juguete.
+#
+#  ELEGIBLES ERA 161, TAMBIEN DE ESE DRY-RUN, y se subio el 19/10/2026: la
+#  reconciliacion del reloj tiene un tope por vuelta (200 por defecto), y con
+#  161 esta prueba seguia en verde aunque la herramienta de recuperacion se
+#  recortara al tope. Lo encontro el auditor-independiente con 250: "llego 200".
+#  Ahora hay MAS elegibles que el tope, que es el caso de produccion (~800).
+ELEGIBLES = 250
 CANDIDATOS_NUEVOS = 16
 
 
@@ -103,7 +109,12 @@ def _caso(n, status="New"):
             "status": status, "closed_on": None, "external_status": "Nuevo",
             "external_created_by": "SHEILA - licencia@rapilink-sas",
             "external_created_by_type": "humano_verificado",
-            "external_fetch_error": ""}
+            "external_fetch_error": "",
+            #  Con fecha de lectura, como los manda el backend desde el
+            #  19/10/2026. Sin ella la reconciliacion no aplica tope (no hay
+            #  con que ordenar), y esta guarda quedaria en verde aunque la
+            #  herramienta de recuperacion se recortara.
+            "external_fetched_at": f"2026-10-0{1 + n % 9}T12:00:00+00:00"}
 
 
 def _ticket_nuevo(n):

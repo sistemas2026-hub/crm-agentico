@@ -153,7 +153,13 @@ def test_devuelve_exactamente_los_campos_de_la_politica(admin_client, org_a,
                          #  El id del servicio y un BOOLEANO de si falta el
                          #  nombre del cliente: con eso el backfill sabe a
                          #  quien le falta sin que le digan como se llama.
-                         "external_service_id", "tiene_nombre_cliente"}
+                         "external_service_id", "tiene_nombre_cliente",
+                         #  CUANDO SE LEYO por ultima vez (19/10/2026). Es el
+                         #  orden de la reconciliacion acotada: sin el, el
+                         #  tope por vuelta tomaria siempre los mismos casos y
+                         #  el resto no se volveria a leer nunca. Una fecha,
+                         #  no un dato del cliente.
+                         "external_fetched_at"}
     assert "name" not in caso and "description" not in caso
     #  El nombre del cliente NO sale por aqui. Esta vista promete no traer nada
     #  del cliente, y el motor ya lo tiene: se lo acaba de pedir al proveedor.

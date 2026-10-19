@@ -743,9 +743,80 @@ def hay_que_reconciliar(config_imp, caso: dict,
     return (ahora - cerrado) <= timedelta(days=config_imp.gracia_cierre_dias)
 
 
+def _momento_de_lectura(caso: dict) -> datetime:
+    """Cuando se leyo este caso por ultima vez. Nunca leido = lo mas viejo."""
+    valor = caso.get(SELLO_DE_LECTURA)
+    if isinstance(valor, str) and valor:
+        try:
+            valor = datetime.fromisoformat(valor)
+        except ValueError:
+            valor = None
+    if not isinstance(valor, datetime):
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return valor if valor.tzinfo else valor.replace(tzinfo=timezone.utc)
+
+
+def _fallo_la_lectura(caso: dict) -> bool:
+    return bool(str(caso.get("external_fetch_error") or "").strip())
+
+
+def de_esta_vuelta(config_imp, casos: list[dict],
+                   ahora: datetime | None = None, *,
+                   todos: bool = False) -> list[dict]:
+    """
+    Los casos que se releen en ESTA vuelta: los que hay que reconciliar, los de
+    lectura mas vieja primero, hasta 'reconciliar_por_vuelta'.
+
+    EL TOPE  --  19/10/2026. Se releian todos en cada vuelta, ~800 consultas
+    sueltas y mas de 50 minutos medidos en produccion. Un deploy reinicia el
+    reloj y cortaba la vuelta a la mitad; lo que no se releia envejecia hasta
+    pasar las 72 h que exige un cierre, y el Supervisor dejaba de cerrar.
+
+    EL ORDEN es lo que hace que el tope no deje a nadie afuera: cada vuelta
+    toma los que llevan mas tiempo sin leerse, y al leerlos su fecha pasa a
+    ser la mas nueva. La vuelta siguiente sigue con los que quedaron, sin
+    guardar un "por donde iba": esa marca ya es la fecha de cada caso. Un caso
+    que nunca se leyo va primero; a igual fecha, el orden de la lista.
+
+    LO QUE CAMBIO LA AUDITORIA (auditor-independiente, 19/10/2026):
+
+    'todos'  -- la herramienta de recuperacion ('--solo-reconciliar' del CLI)
+       relee TODO. Quien la corre quiere el estado entero al dia, y recortarla
+       a 200 sin avisar era decirle "listo" con 600 sin tocar.
+
+    SIN LA FECHA NO HAY TOPE  -- si ningun caso trae 'external_fetched_at' (un
+       backend que no la manda), no hay orden: el tope tomaria SIEMPRE los
+       mismos y el resto no se releeria nunca, con cada vuelta luciendo sana
+       en el log (medido en simulacion: 600 de 800 nunca releidos). Se relee
+       todo, como antes. Se pregunta por la CLAVE: un caso nunca leido la trae
+       en None, y eso si es un orden.
+
+    LOS QUE FALLAN, HASTA LA MITAD  -- una lectura fallida no estrena fecha,
+       asi que el caso queda primero en la vuelta siguiente. Con muchos que
+       fallan siempre (un ticket que el proveedor ya no devuelve) se comian el
+       tope entero: con 200 asi, 0 de 800 sanos releidos (medido en
+       simulacion). Ahora tienen como mucho la mitad del cupo si hay sanos
+       esperando, y los sanos avanzan siempre. NO se arregla escribiendo la
+       fecha en el fallo: 'TICKET_SIN_DIAGNOSTICO' usa esa fecha como prueba
+       de que el dato esta fresco.
+    """
+    elegibles = [c for c in casos if hay_que_reconciliar(config_imp, c, ahora)]
+    elegibles.sort(key=_momento_de_lectura)
+    if todos or (elegibles
+                 and not any(SELLO_DE_LECTURA in c for c in elegibles)):
+        return elegibles
+    tope = config_imp.reconciliar_por_vuelta
+    sanos = [c for c in elegibles if not _fallo_la_lectura(c)]
+    fallan = [c for c in elegibles if _fallo_la_lectura(c)]
+    de_los_que_fallan = fallan[:max(tope // 2, tope - len(sanos))]
+    de_los_sanos = sanos[:tope - len(de_los_que_fallan)]
+    return sorted(de_los_sanos + de_los_que_fallan, key=_momento_de_lectura)
+
+
 def reconciliar(config, casos: list[dict], *, leer_ticket,
                 cuenta_api: str, registrados_por_dexter: set,
-                ahora: datetime | None = None) -> list[Cambio]:
+                ahora: datetime | None = None,
+                todos: bool = False) -> list[Cambio]:
     """
     Que cambiaria de cada caso ya conocido. No escribe.
 
@@ -764,9 +835,8 @@ def reconciliar(config, casos: list[dict], *, leer_ticket,
     ahora = ahora or datetime.now(timezone.utc)
     cambios: list[Cambio] = []
 
-    for caso in casos:
-        if not hay_que_reconciliar(config.importacion_tickets, caso, ahora):
-            continue
+    for caso in de_esta_vuelta(config.importacion_tickets, casos, ahora,
+                               todos=todos):
         tid = str(caso.get("external_ticket_id") or "")
         cambio = Cambio(
             caso_id=str(caso.get("id") or ""),

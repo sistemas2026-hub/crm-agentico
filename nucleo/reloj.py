@@ -163,6 +163,17 @@ from nucleo.seguimiento import importacion, importacion_io, operativo
 # YA_EXISTE.
 _ultimo_intento_importacion: dict[str, datetime] = {}
 
+# LA PRIMERA VUELTA, A LOS 5 MINUTOS DEL ARRANQUE  --  19/10/2026
+# Antes esperaba un ciclo entero (60 min). Cada deploy reinicia este proceso,
+# y el 19/10 hubo deploys casi cada hora. MEDIDO ese dia en produccion: 22
+# tickets que la importacion aceptaba seguian sin crearse, y el log del reloj
+# (recreado por el deploy de las 15:45) no tenia ni una vuelta; la primera
+# llego a las 16:46 y los creo. Que los deploys explican los dias anteriores
+# es inferencia: sus logs se perdieron al recrear el contenedor. Cinco minutos
+# conservan el margen de la espera -- leer el arranque, apagarlo si se
+# encendio por error -- sin regalarle una hora a cada deploy.
+RETRASO_PRIMERA_VUELTA_SEGUNDOS = 300
+
 
 def habilitado() -> bool:
     """
@@ -667,12 +678,16 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(operativo.INTERVALO_BARRIDO_SEGUNDOS)
 
     registrar("reloj", "scheduler activo", ciclo_min=minutos,
+              primera_en_min=RETRASO_PRIMERA_VUELTA_SEGUNDOS // 60,
               tenants=len(tenants_conocidos()))
+    espera = RETRASO_PRIMERA_VUELTA_SEGUNDOS
     while True:
         # Duerme PRIMERO: al desplegar, el proceso no dispara en el segundo
         # cero, cuando quien mira los logs todavia no termino de leer el
-        # arranque -- y da margen para apagarlo si arranco por error.
-        time.sleep(operativo.INTERVALO_BARRIDO_SEGUNDOS)
+        # arranque -- y da margen para apagarlo si arranco por error. Ese
+        # margen es la PRIMERA espera, corta; despues, el ciclo de siempre.
+        time.sleep(espera)
+        espera = operativo.INTERVALO_BARRIDO_SEGUNDOS
         try:
             una_pasada()
         except (Exception, SystemExit) as e:                     # noqa: BLE001

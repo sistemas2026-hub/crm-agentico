@@ -295,13 +295,18 @@ def main():
         print(f"  fallidos ........ {_resultado['fallidos']}")
 
     if args.reconciliar:
+        #  TODOS, sin el tope del reloj (19/10/2026). Esto se corre a mano para
+        #  poner el estado entero al dia; recortarlo a 'reconciliar_por_vuelta'
+        #  sin decirlo era contestar "listo" con cientos sin tocar.
         cambios = imp.reconciliar(
             config, casos,
             leer_ticket=lambda t: leer_ticket(config, args.tenant, t),
-            cuenta_api=conf.cuenta_api, registrados_por_dexter=registro)
+            cuenta_api=conf.cuenta_api, registrados_por_dexter=registro,
+            todos=True)
         print(f"\n{'=' * 74}\n  RECONCILIACION  (que cambiaria, sin escribir)\n{'=' * 74}")
         print(f"  casos con referencia externa .......... {len(casos)}")
-        print(f"  alcanzados por la politica ............ {len(cambios)}")
+        print(f"  alcanzados por la politica ............ {len(cambios)}"
+              f"  (todos; el reloj relee {conf.reconciliar_por_vuelta} por vuelta)")
         print(f"  con alguna diferencia ................. "
               f"{sum(1 for c in cambios if c.hay_diferencia)}")
         print(f"  con error de lectura .................. "

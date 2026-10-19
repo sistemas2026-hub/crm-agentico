@@ -380,7 +380,14 @@ class CasosExternosView(APIView):
               #  El id del SERVICIO, que es con lo que el backfill le pregunta
               #  al proveedor por el nombre del cliente. Es un identificador,
               #  no un dato personal.
-              "external_service_id")
+              "external_service_id",
+              #  CUANDO SE LEYO POR ULTIMA VEZ  --  19/10/2026. La
+              #  reconciliacion relee primero los de lectura mas vieja, hasta
+              #  un tope por vuelta ('importacion.de_esta_vuelta'). Sin esta
+              #  fecha no hay orden, y un deploy a mitad de vuelta dejaba
+              #  siempre a los mismos sin releer. Es una fecha, no un dato
+              #  del cliente.
+              "external_fetched_at")
 
     #  Se LEE para saber si falta, y NO se devuelve.
     #

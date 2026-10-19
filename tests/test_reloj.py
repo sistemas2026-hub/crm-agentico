@@ -879,6 +879,61 @@ revisar("nucleo.reloj" not in str(motor.get("command", "")),
         "y 'motor' no es responsable de ninguna tarea periodica")
 
 
+# ==========================================================================
+#  LA PRIMERA VUELTA, A LOS 5 MINUTOS DEL ARRANQUE  --  19/10/2026
+# ==========================================================================
+# Esperaba un ciclo entero, y cada deploy reinicia el reloj: el 19/10, con
+# deploys casi cada hora, 22 tickets aceptados seguian sin crearse. Se mide el
+# EFECTO sobre el bucle real de 'main': que espera y que corre, en ese orden.
+# 'sleep' y la vuelta se sustituyen por espias; la tercera espera corta.
+
+print("\nla primera vuelta no espera un ciclo entero")
+
+
+class _Basta(Exception):
+    pass
+
+
+esperas: list[int] = []
+pasadas_tras: list[int] = []
+
+
+def _dormir(segundos):
+    esperas.append(segundos)
+    if len(esperas) >= 3:
+        raise _Basta()
+
+
+_reales = (reloj.time, reloj.una_pasada, reloj.tenants_conocidos)
+_env_previo = os.environ.get("RELOJ_HABILITADO")
+reloj.time = SimpleNamespace(sleep=_dormir)
+reloj.una_pasada = lambda seco=False: pasadas_tras.append(len(esperas))
+reloj.tenants_conocidos = lambda: ["prueba"]
+os.environ["RELOJ_HABILITADO"] = "1"
+try:
+    try:
+        reloj.main([])
+    except _Basta:
+        pass
+finally:
+    reloj.time, reloj.una_pasada, reloj.tenants_conocidos = _reales
+    if _env_previo is None:
+        os.environ.pop("RELOJ_HABILITADO", None)
+    else:
+        os.environ["RELOJ_HABILITADO"] = _env_previo
+
+revisar(esperas[:1] == [reloj.RETRASO_PRIMERA_VUELTA_SEGUNDOS]
+        and reloj.RETRASO_PRIMERA_VUELTA_SEGUNDOS <= 600,
+        "la primera espera es corta (minutos), no un ciclo entero",
+        f"esperas: {esperas}")
+revisar(esperas[1:3] == [reloj.operativo.INTERVALO_BARRIDO_SEGUNDOS] * 2,
+        "despues de la primera vuelta, el ciclo de siempre",
+        f"esperas: {esperas}")
+revisar(pasadas_tras == [1, 2],
+        "cada espera va seguida de una vuelta, y ninguna corre sin esperar",
+        f"vueltas despues de las esperas: {pasadas_tras}")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es) no pasaron.")

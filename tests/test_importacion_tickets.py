@@ -438,6 +438,116 @@ revisar(not imp.hay_que_reconciliar(
 
 
 # =============================================================================
+#  8.b  UNA VUELTA RELEE UN TOPE, LOS DE LECTURA MAS VIEJA PRIMERO  --  19/10/2026
+# =============================================================================
+# Se releian TODOS en cada vuelta: ~800 consultas y mas de 50 minutos medidos
+# en produccion. Un deploy cortaba la vuelta a la mitad, y lo que no se releia
+# envejecia hasta pasar las 72 h que exige un cierre. Se afirma sobre lo que
+# 'reconciliar' CONSULTA de verdad: que tickets le pide a 'leer_ticket'.
+
+print("\nuna vuelta relee un tope, empezando por la lectura mas vieja")
+
+_ahora = datetime.now(timezone.utc)
+
+
+def _abierto(tid, horas_desde_lectura):
+    fecha = (None if horas_desde_lectura is None
+             else (_ahora - timedelta(hours=horas_desde_lectura)).isoformat())
+    #  'external_fetch_error' vacio a proposito: CASO trae "algo viejo", y un
+    #  caso con error de lectura cuenta como "de los que fallan".
+    return {**CASO, "id": f"c-{tid}", "external_ticket_id": tid,
+            "external_fetched_at": fecha, "external_fetch_error": ""}
+
+
+_lote = [_abierto("10", 1), _abierto("20", 30), _abierto("30", None),
+         _abierto("40", 5), {**cerrado_viejo, "external_ticket_id": "50"}]
+_cfg_tope = config_piloto(reconciliar_por_vuelta=2)
+_leidos: list[str] = []
+imp.reconciliar(
+    _cfg_tope, [dict(c) for c in _lote],
+    leer_ticket=lambda t: (_leidos.append(t), ticket(t))[1],
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())
+revisar(_leidos == ["30", "20"],
+        "con tope 2 se consultan solo dos: el nunca leido y el de lectura mas vieja",
+        f"consultados: {_leidos}")
+
+# La vuelta siguiente retoma donde quedo: los leidos estrenan fecha y pasan al
+# final, sin guardar un "por donde iba" aparte.
+_lote2 = [_abierto("10", 1), _abierto("20", 0), _abierto("30", 0),
+          _abierto("40", 5)]
+_leidos.clear()
+imp.reconciliar(
+    _cfg_tope, [dict(c) for c in _lote2],
+    leer_ticket=lambda t: (_leidos.append(t), ticket(t))[1],
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())
+revisar(_leidos == ["40", "10"],
+        "la vuelta siguiente sigue con los que quedaron sin releer",
+        f"consultados: {_leidos}")
+
+# El tope no hace entrar a quien no corresponde: un cerrado viejo sigue afuera
+# aunque sobre lugar.
+_leidos.clear()
+imp.reconciliar(
+    config_piloto(reconciliar_por_vuelta=50), [dict(c) for c in _lote],
+    leer_ticket=lambda t: (_leidos.append(t), ticket(t))[1],
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())
+revisar(sorted(_leidos) == ["10", "20", "30", "40"],
+        "con lugar de sobra entran todos los que hay que releer, y el cerrado viejo no",
+        f"consultados: {_leidos}")
+
+revisar(ImportacionTickets().reconciliar_por_vuelta == 200,
+        "sin declararlo, el tope es 200 por vuelta")
+
+# --- lo que cambio la auditoria (auditor-independiente, 19/10/2026) ----------
+
+_leidos.clear()
+imp.reconciliar(
+    _cfg_tope, [dict(c) for c in _lote],
+    leer_ticket=lambda t: (_leidos.append(t), ticket(t))[1],
+    cuenta_api=CUENTA_API, registrados_por_dexter=set(), todos=True)
+revisar(sorted(_leidos) == ["10", "20", "30", "40"],
+        "'todos' (la herramienta de recuperacion) relee todo, sin el tope del reloj",
+        f"consultados: {_leidos}")
+
+# Un backend que no manda la fecha: sin orden, el tope tomaria siempre los
+# mismos. Se relee todo, como antes del tope.
+_sin_fecha = [{k: v for k, v in c.items() if k != "external_fetched_at"}
+              for c in _lote]
+_leidos.clear()
+imp.reconciliar(
+    _cfg_tope, _sin_fecha,
+    leer_ticket=lambda t: (_leidos.append(t), ticket(t))[1],
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())
+revisar(sorted(_leidos) == ["10", "20", "30", "40"],
+        "si ningun caso trae la fecha de lectura, no hay tope (no hay con que ordenar)",
+        f"consultados: {_leidos}")
+
+# Los que fallan no estrenan fecha y quedarian siempre primeros: tienen como
+# mucho la mitad del cupo si hay sanos esperando.
+_fallan = [{**_abierto(f"9{i}", 500), "external_fetch_error": "HTTP 404"}
+           for i in range(6)]
+_sanos = [_abierto(f"5{i}", 10 + i) for i in range(6)]
+_cfg_cuatro = config_piloto(reconciliar_por_vuelta=4)
+_leidos.clear()
+imp.reconciliar(
+    _cfg_cuatro, [dict(c) for c in _fallan + _sanos],
+    leer_ticket=lambda t: (_leidos.append(t), ticket(t))[1],
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())
+revisar(sum(t.startswith("9") for t in _leidos) == 2
+        and sum(t.startswith("5") for t in _leidos) == 2,
+        "con tope 4 y seis que fallan siempre, los sanos igual se llevan la mitad",
+        f"consultados: {_leidos}")
+_leidos.clear()
+imp.reconciliar(
+    _cfg_cuatro, [dict(c) for c in _fallan + _sanos[:1]],
+    leer_ticket=lambda t: (_leidos.append(t), ticket(t))[1],
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())
+revisar(len(_leidos) == 4 and "50" in _leidos,
+        "y si sobran lugares, los que fallan los usan: no se desperdicia el cupo",
+        f"consultados: {_leidos}")
+
+
+# =============================================================================
 #  9. NADA DE ESCRITURA  --  ni a WispHub ni a Case
 # =============================================================================
 

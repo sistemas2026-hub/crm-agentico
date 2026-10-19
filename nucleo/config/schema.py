@@ -2971,6 +2971,17 @@ class ImportacionTickets(Base):
     # moviendose alla unos dias, y esa divergencia es justo la que se quiere
     # poder mostrar.
     gracia_cierre_dias: int = 7
+    # CUANTOS CASOS SE RELEEN POR VUELTA  --  19/10/2026
+    # Hasta hoy se releian TODOS en cada vuelta: ~800 consultas sueltas al
+    # proveedor, mas de 50 minutos medidos. Un deploy reinicia el reloj y
+    # cortaba la vuelta a la mitad, y lo que no se releia envejecia hasta pasar
+    # las 72 h que exige un cierre. Con tope, se releen primero los de lectura
+    # MAS VIEJA: la vuelta dura minutos, y la que sigue retoma donde quedo sin
+    # guardar nada aparte -- el avance es la fecha de lectura de cada caso.
+    # Varia por empresa (cuantos casos abiertos tiene, cuanto aguanta su API):
+    # por eso es configuracion. Con 800 abiertos y 200 por vuelta, cada caso se
+    # relee cada ~4 h.
+    reconciliar_por_vuelta: int = Field(200, ge=1)
 
 
 # =============================================================================

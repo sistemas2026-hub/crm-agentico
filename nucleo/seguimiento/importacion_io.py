@@ -693,6 +693,11 @@ def _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios) -> No
                 por caso nuevo y a cambio estrenan 'external_status_at' sin
                 esperar una hora. (Este comentario decia lo contrario y era
                 falso: el orden de las llamadas manda, no la intencion.)
+                DESDE EL 19/10/2026 ESO VALE SOLO SI HAY LUGAR: la vuelta
+                relee como mucho 'reconciliar_por_vuelta', los de lectura mas
+                vieja primero, y un caso recien creado nace con la fecha de
+                lectura de ahora. Con mas elegibles que el tope, espera su
+                turno (ver 'importacion.de_esta_vuelta').
 
       aislada   que la reconciliacion falle NO puede deshacer ni ensuciar lo ya
                 importado. Los casos creados estan creados; esto solo refresca
