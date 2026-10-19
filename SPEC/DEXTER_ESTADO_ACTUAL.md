@@ -111,6 +111,62 @@ que producción ya tiene. Se rehízo sobre el archivo actual en vez de pushear l
 vieja — que es exactamente por qué §11 manda medir con `fetch` y no de memoria.
 
 
+
+### CIERRE DEL OBJETIVO «revisar el sistema de supervisión y despacho» — 19/10/2026
+
+**Se cierra en código, NO en producción de punta a punta.** La distinción no es
+un matiz: lo que sigue abierto no es trabajo, son tres acciones que exigen una
+persona, y si este archivo dijera «cerrado» a secas la próxima sesión daría por
+funcionando algo que todavía no se observó.
+
+**CERRADO Y MEDIDO**
+
+```
+seis defectos corregidos y desplegados      ba5a1a5f -> dc4fde3c (7 commits)
+campo/ contra Postgres real                 1120 pasan · 0 fallan
+vitest                                      73 fallan · 1354 pasan
+  los 73 son los 18 archivos conocidos que esperan textos en inglés, y
+  ninguno es de los archivos tocados -- línea base, no regresión
+las dos pantallas                           compilan, 0 avisos
+migraciones y cambios de esquema            CERO
+las cuatro mutaciones inversas              cazadas (ver la sección de arriba)
+```
+
+**ABIERTO, Y EN MANOS DE UNA PERSONA**
+
+| Qué | Por qué no lo cerró esta sesión |
+|---|---|
+| Cargar `tenant_config` | Exige `--forzar` y **el clasificador de seguridad lo bloquea**. Alternativas descartadas con su motivo: el editor campo por campo es peor para auditar (D7), y `--exportar` revertiría cuatro decisiones deliberadas |
+| `invocable_por_servicio` en cuatro herramientas | Es parte de la carga de arriba. **Medido campo por campo**: recorta a 11, 15 y 6 campos vía la lista blanca de `supervisor_noc`, y la cuarta es inerte (sin lista y sin llamadores). Cargar es seguro y es el estado que el repo quiso |
+| Encender el ciclo de la madrugada | Es un interruptor de la pantalla `/supervisor-noc/cuadrillas`, que escribe la base de producción. Viene apagado de fábrica **a propósito** (§8, mismo criterio que `RELOJ_HABILITADO`) |
+| Verificar que el frontend se reconstruyó | **Sin salida HTTP desde el entorno de la sesión**: `HTTP 000` a los tres dominios. El sustituto barato, para quien tenga navegador: si el panel de Despacho sigue mostrando una sola fila «sin clasificar», la imagen no se reconstruyó |
+
+**LO QUE ESTE OBJETIVO DEJA APRENDIDO, más allá de los arreglos**
+
+1. **Cinco de los seis defectos vivían en el mismo salto** —backend → capa
+   servidor del frontend— con todas las pruebas de backend en verde. §6 ya lo
+   documentaba dos veces; esta vez dio cinco de un tiro. El método que los
+   encontró está escrito arriba y es reusable.
+2. **Trabajo de seis días atrás es trabajo que hay que rehacer.** El YAML
+   preparado el 13/10 habría borrado 54 líneas que producción ya tenía, y un
+   arreglo mío ya lo había hecho la otra sesión por su cuenta. Se rehizo sobre
+   producción con `cherry-pick`.
+3. **Una prueba que falla contra producción puede ser el mejor hallazgo del
+   día.** La del camino del texto destapó que esa señal **depende de que el
+   motor conteste**: con el mapa de áreas vacío devuelve `[]` antes de mirar un
+   solo caso. Motor caído = nada entra a Despacho por esa vía, sin error ni
+   aviso.
+4. **Un hueco latente, no tocado:** `/interno/herramienta/` devuelve la salida
+   **cruda cuando no se pasa `rol`** — fail-open del lado de la salida en un
+   sistema fail-closed. Hoy no está vivo (las herramientas sensibles pasan por
+   un embudo único que no se puede olvidar). Cambiarlo rompe el contrato de los
+   llamadores que leen topología: es decisión de producto.
+5. **Dos errores propios sobre el mismo campo**, anotados para no repetirlos:
+   afirmé que la bandera «no amplía nada» sin medir la lista blanca, y después
+   me corregí mal leyendo `roles_permitidos` como si gobernara la ruta interna.
+   Recién la tercera medición dio el cuadro real.
+
+
 ### Lo que decía esta cabecera el 07/10 (queda como historia)
 
 Última actualización: **07/10/2026 16:59 Bogotá** — **DESPLEGADO A PRODUCCIÓN**:
