@@ -909,51 +909,70 @@
    *
    * El patron ya existia en esta pantalla para el boton del ciclo
    * ('Analizando…'); esto lo aplica donde faltaba.
+   *
+   * EL ROTULO SE PONE AL ENVIAR, NO AL HACER CLIC  --  19/10/2026
+   * ------------------------------------------------------------
+   * Reportado: "le doy aceptar propuesta y se queda asi", con el boton en
+   * «Guardando…» para siempre. Desde el 09/10 el rotulo se ponia en el
+   * 'onclick', y el 'disabled' de los tres botones depende de el. Svelte
+   * aplica el cambio en un microtask que corre ANTES de que el navegador envie
+   * el formulario, y un boton de envio deshabilitado no envia nada: la
+   * decision nunca salia, y nada soltaba el rotulo porque el 'finally' de
+   * abajo solo corre si hubo envio.
+   *
+   * MEDIDO con un clic real (Chrome sin interfaz, DevTools Protocol) sobre un
+   * componente Svelte 5 con el mismo patron: el clic quedaba en 'click' sin
+   * 'submit'. Marcando el rotulo al enviar, 'click' y 'submit'.
+   *
+   * Ahora lo pone 'enhance', que corre cuando el formulario YA salio y sabe
+   * que boton se apreto ('submitter'). El rotulo viaja en 'data-espera' de
+   * cada boton. El doble clic sigue cubierto: el segundo encuentra los tres
+   * botones deshabilitados.
    */
   let decidiendo = $state('');
 
-  const alDecidir = () => async (/** @type {any} */ { update }) => {
-    revisando = null;
-    comentario = '';
-    //  CUAL ERA LA SIGUIENTE, antes de que la lista se recalcule. Despues de
-    //  decidir, la propuesta actual sale de la bandeja de pendientes y los
-    //  indices se corren: preguntarlo despues devolveria otra.
-    const siguiente = pagina[posicion.indice + 1]?.id ?? null;
-    try {
-      await update({ reset: false });
+  const alDecidir = (/** @type {any} */ { submitter }) => {
+    decidiendo = submitter?.dataset?.espera || 'Guardando…';
+    return async (/** @type {any} */ { update }) => {
+      revisando = null;
+      comentario = '';
+      //  CUAL ERA LA SIGUIENTE, antes de que la lista se recalcule. Despues de
+      //  decidir, la propuesta actual sale de la bandeja de pendientes y los
+      //  indices se corren: preguntarlo despues devolveria otra.
+      const siguiente = pagina[posicion.indice + 1]?.id ?? null;
+      try {
+        await update({ reset: false });
 
-      //  SE AVANZA PRIMERO Y SE REFRESCA DESPUES  --  09/10/2026
-      //  ------------------------------------------------------
-      //  Reportado: "demora mucho cerrando un caso y no deja adelantar otro".
-      //  Eran DOS esperas encadenadas: el cierre contra WispHub --que es
-      //  inevitable-- y despues recargar el tablero entero y volver a abrir
-      //  LA MISMA ficha, que es justo la que la persona ya termino de mirar.
-      //
-      //  Ahora se salta a la siguiente apenas el cierre volvio, y el tablero
-      //  se refresca por detras SIN ESPERARLO. Lo unico que queda viejo por
-      //  unos segundos son los contadores de arriba; la ficha que se esta
-      //  mirando es la que se acaba de pedir, asi que esta fresca.
-      if (siguiente) {
-        await abrirDetalle(siguiente);
-      } else if (abierta) {
-        //  Era la ultima: se queda, con su estado ya actualizado.
-        await abrirDetalle(abierta);
+        //  SE AVANZA PRIMERO Y SE REFRESCA DESPUES  --  09/10/2026
+        //  ------------------------------------------------------
+        //  Reportado: "demora mucho cerrando un caso y no deja adelantar otro".
+        //  Eran DOS esperas encadenadas: el cierre contra WispHub --que es
+        //  inevitable-- y despues recargar el tablero entero y volver a abrir
+        //  LA MISMA ficha, que es justo la que la persona ya termino de mirar.
+        //
+        //  Ahora se salta a la siguiente apenas el cierre volvio, y el tablero
+        //  se refresca por detras SIN ESPERARLO. Lo unico que queda viejo por
+        //  unos segundos son los contadores de arriba; la ficha que se esta
+        //  mirando es la que se acaba de pedir, asi que esta fresca.
+        if (siguiente) {
+          await abrirDetalle(siguiente);
+        } else if (abierta) {
+          //  Era la ultima: se queda, con su estado ya actualizado.
+          await abrirDetalle(abierta);
+        }
+
+        //  SIN 'await' a proposito. Si se espera, se vuelve a pagar la recarga
+        //  completa --cinco consultas, ciento ocho propuestas-- antes de que la
+        //  persona pueda hacer nada.
+        invalidateAll();
+      } finally {
+        //  SIEMPRE se suelta, aunque algo falle: un boton que queda
+        //  deshabilitado para siempre despues de un error de red obliga a
+        //  recargar la pagina para volver a intentar.
+        decidiendo = '';
       }
-
-      //  SIN 'await' a proposito. Si se espera, se vuelve a pagar la recarga
-      //  completa --cinco consultas, ciento ocho propuestas-- antes de que la
-      //  persona pueda hacer nada.
-      invalidateAll();
-    } finally {
-      //  SIEMPRE se suelta, aunque algo falle: un boton que queda
-      //  deshabilitado para siempre despues de un error de red obliga a
-      //  recargar la pagina para volver a intentar.
-      decidiendo = '';
-    }
+    };
   };
-
-  /** Marca que se empezo, ANTES de que el formulario salga. */
-  const alEmpezar = (/** @type {string} */ que) => () => { decidiendo = que; };
 
   // =====================================================================
   //  ACEPTAR VARIAS PROPUESTAS DE UNA VEZ
@@ -2710,8 +2729,11 @@
                 <form method="POST" action="?/cancelar" use:enhance={alDecidir} style="display:contents;">
                   <input type="hidden" name="id" value={detalle.id} />
                   <input type="hidden" name="motivo" value={comentario} />
+                  <!-- El rotulo de espera lo pone 'alDecidir' al ENVIAR, leyendo
+                       'data-espera'. NO un 'onclick': deshabilitaria el boton
+                       antes de que el formulario salga, y no saldria. -->
                   <button class="snoc-btn" type="submit" disabled={!!decidiendo}
-                          onclick={alEmpezar('Cancelando…')}>
+                          data-espera="Cancelando…">
                     {decidiendo === 'Cancelando…' ? 'Cancelando…' : 'Cancelar'}
                   </button>
                 </form>
@@ -2720,7 +2742,7 @@
                   <input type="hidden" name="comentario" value={comentario} />
                   <button class="snoc-btn snoc-btn-error" name="decision" value="rechazada"
                           type="submit" disabled={!!decidiendo}
-                          onclick={alEmpezar('Rechazando…')}>
+                          data-espera="Rechazando…">
                     {decidiendo === 'Rechazando…' ? 'Rechazando…' : 'Rechazar'}
                   </button>
                   <!--
@@ -2732,7 +2754,7 @@
                   -->
                   <button class="snoc-btn snoc-btn-primario" name="decision" value="aceptada"
                           type="submit" disabled={!!decidiendo}
-                          onclick={alEmpezar(aceptar.ejecuta ? 'Cerrando el caso…' : 'Guardando…')}>
+                          data-espera={aceptar.ejecuta ? 'Cerrando el caso…' : 'Guardando…'}>
                     {decidiendo === 'Cerrando el caso…' || decidiendo === 'Guardando…'
                       ? decidiendo
                       : 'Aceptar propuesta'}
