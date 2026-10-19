@@ -218,3 +218,43 @@ describe('"Sin área asignada" elegida', () => {
     expect(ids(data)).toEqual(['suelto']);
   });
 });
+
+describe('"Todas las áreas"', () => {
+  //  19/10/2026: la pantalla solo mostraba un area a la vez, y en produccion
+  //  ningun ticket abierto trae el area escrita. Quien administra pidio ver
+  //  "todos los tickets sin importar el area".
+  it('quien administra ve la cola entera, y al API no le pide area', async () => {
+    listTickets.mockResolvedValue(respuesta());
+    const data = /** @type {any} */ (await load(evento('?area=__todas__')));
+    const params = listTickets.mock.lastCall[1];
+    expect(params.has('area')).toBe(false);
+    expect(params.has('area_responsables')).toBe(false);
+    expect(ids(data).sort()).toEqual(TODOS.map((t) => t.id).sort());
+    expect(data.todasLasAreas.etiqueta).toBe('Todas las áreas');
+  });
+
+  it('la tarjeta del inicio lleva los totales del servidor, no la suma de tarjetas', async () => {
+    listTickets.mockResolvedValue({
+      ...respuesta(),
+      totals: { count: 6, open: 6, urgent: 2, awaiting_reply: 5, shown: 6 }
+    });
+    const data = /** @type {any} */ (await load(evento('')));
+    expect(data.todasLasAreas).toMatchObject({
+      total: 6, urgentes: 2, sin_respuesta: 5, sin_asignar: 1
+    });
+  });
+
+  it('un colaborador que la pide por la URL cae en su area, y no ve la tarjeta', async () => {
+    listTickets.mockResolvedValue(respuesta());
+    const data = /** @type {any} */ (await load(evento('?area=__todas__', { rol: 'USER', email: 'tecnico@x.test' })));
+    expect(listTickets.mock.lastCall[1].get('area')).toBe('soporte_tecnico');
+    expect(ids(data)).not.toContain('ventas');
+    expect(data.todasLasAreas).toBeNull();
+  });
+
+  it('dentro de un area concreta no manda totales de "todas"', async () => {
+    listTickets.mockResolvedValue(respuesta());
+    const data = /** @type {any} */ (await load(evento('?area=cartera')));
+    expect(data.todasLasAreas).toBeNull();
+  });
+});

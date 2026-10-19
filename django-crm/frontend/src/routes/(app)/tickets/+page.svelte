@@ -180,6 +180,27 @@
   <h2 class="titulo-seccion">Tickets por área</h2>
 
   <div class="areas-grilla">
+    {#if data.todasLasAreas}
+      <!-- 19/10/2026: la cola entera, sin filtro de area. Solo quien
+           administra la ve; un colaborador sigue viendo solo la suya. -->
+      {@const t = data.todasLasAreas}
+      <a class="area-tarjeta" href="/tickets?area={data.todas}" style="--area-color: #475569">
+        <span class="area-marca" aria-hidden="true"><LifeBuoy size={17} strokeWidth={1.9} /></span>
+        <span class="area-nombre">{t.etiqueta}</span>
+        <span class="area-total v2-num">{t.total}</span>
+        <span class="area-detalle">
+          <span class="marca urgente" class:hay={t.urgentes > 0}
+            >{t.urgentes} urgente{t.urgentes === 1 ? '' : 's'}</span
+          >
+          <span class="marca espera" class:hay={t.sin_respuesta > 0}
+            >{t.sin_respuesta} sin respuesta</span
+          >
+        </span>
+        {#if t.sin_asignar > 0}
+          <span class="area-sin-asignar">{t.sin_asignar} sin asignar</span>
+        {/if}
+      </a>
+    {/if}
     {#each data.areas ?? [] as a (a.nombre)}
       {@const Icono = ICONOS[a.icono]}
       <a
@@ -228,7 +249,9 @@
     </p>
   {/if}
 {:else}
-  {@const actual = (data.areas ?? []).find((/** @type {any} */ x) => x.nombre === data.areaElegida)}
+  {@const actual = data.areaElegida === data.todas
+    ? data.todasLasAreas
+    : (data.areas ?? []).find((/** @type {any} */ x) => x.nombre === data.areaElegida)}
   <nav class="migas" aria-label="Ruta">
     <a href="/">Inicio</a><span aria-hidden="true">›</span>
     {#if data.soloMiArea}
@@ -244,8 +267,12 @@
       <span class="v2-num">{actual?.total ?? 0}</span> en total &middot;
       <span class="v2-num">{actual?.urgentes ?? 0}</span> urgentes &middot;
       <span class="v2-num">{actual?.sin_asignar ?? 0}</span> sin asignar &middot;
-      <span class="v2-num">{actual?.sin_respuesta ?? 0}</span> sin respuesta &middot;
-      <span class="v2-num">{actual?.en_progreso ?? 0}</span> en progreso
+      <span class="v2-num">{actual?.sin_respuesta ?? 0}</span> sin respuesta
+      <!-- "Todas las áreas" no lo trae: sumado por area contaria dos veces el
+           ticket con dos responsables. -->
+      {#if actual?.en_progreso != null}
+        &middot; <span class="v2-num">{actual.en_progreso}</span> en progreso
+      {/if}
     {/snippet}
     {#snippet actions()}
       {#if !data.soloMiArea}

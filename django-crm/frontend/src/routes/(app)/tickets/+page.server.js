@@ -3,7 +3,8 @@ import { readFilters, buildFilterQuery } from '$lib/server/v2/filter-params.js';
 import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
 import { getTags } from '$lib/server/v2/tags.js';
 import { leerAreas } from '$lib/server/v2/areas.js';
-import { areaDelCaso, resumenPorArea, responsablesSinArea, responsablesDeArea, SIN_AREA }
+import { areaDelCaso, resumenPorArea, responsablesSinArea, responsablesDeArea, SIN_AREA,
+         TODAS_LAS_AREAS }
   from '$lib/v2/tickets-resumen.js';
 import { calcularPaginacion, numerosDePagina, enlaceAPagina }
   from '$lib/v2/paginacion.js';
@@ -148,7 +149,10 @@ export async function load({ cookies, url, locals, fetch }) {
   //  "Sin área asignada" no se puede pedir al servidor: esa cola se sigue
   //  recortando aca abajo, sobre la pagina que llego. Limite conocido.
   const areaEfectiva = soloMiArea ? miArea : areaElegida;
-  if (areaEfectiva && areaEfectiva !== SIN_AREA) {
+  //  "Todas las áreas" no le pide area al servidor: es la cola sin ese filtro.
+  //  Un colaborador no llega aca con ella -- el bloque de arriba ya la cambio
+  //  por la suya.
+  if (areaEfectiva && areaEfectiva !== SIN_AREA && areaEfectiva !== TODAS_LAS_AREAS) {
     params.set('area', areaEfectiva);
     for (const persona of responsablesDeArea(areaEfectiva, areaPorPersona)) {
       params.append('area_responsables', persona);
@@ -204,7 +208,7 @@ export async function load({ cookies, url, locals, fetch }) {
       ? conArea.filter((/** @type {any} */ t) => t.area === miArea)
       : conArea;
 
-  const deLaArea = areaElegida
+  const deLaArea = areaElegida && areaElegida !== TODAS_LAS_AREAS
     ? universo.filter((/** @type {any} */ t) => t.area === areaElegida)
     : universo;
 
@@ -233,6 +237,25 @@ export async function load({ cookies, url, locals, fetch }) {
     : soloMiArea
       ? resumen.filter((/** @type {any} */ a) => a.nombre === miArea)
       : resumen;
+
+  //  LA TARJETA "TODAS LAS ÁREAS"  --  19/10/2026. Solo para quien administra,
+  //  y con los totales del SERVIDOR sobre la cola sin filtro de area. No se
+  //  suman las tarjetas: un ticket con dos responsables aparece en las dos, y
+  //  la suma diria mas tickets de los que hay. 'sin_asignar' si se suma: un
+  //  ticket sin responsable cae en una sola fila del desglose.
+  //  Dentro de un area concreta 'totals' ya viene filtrado por ella: esos
+  //  numeros no son los de todas, y no se mandan.
+  const todasLasAreas = soloMiArea || (areaElegida && areaElegida !== TODAS_LAS_AREAS)
+    ? null
+    : {
+        nombre: TODAS_LAS_AREAS,
+        etiqueta: 'Todas las áreas',
+        total: totals.open,
+        urgentes: totals.urgent,
+        sin_respuesta: totals.awaiting_reply,
+        sin_asignar: (resumen ?? []).reduce(
+          (n, /** @type {any} */ a) => n + (a.sin_asignar ?? 0), 0)
+      };
 
   //  Los enlaces se arman contra el total que da el SERVIDOR, no contra
   //  cuantas filas quedaron visibles: una pagina recortada no significa que
@@ -264,6 +287,8 @@ export async function load({ cookies, url, locals, fetch }) {
     sinAreaPropia,
     soloMiArea,
     sinArea: SIN_AREA,
+    todas: TODAS_LAS_AREAS,
+    todasLasAreas,
     conteosVista,
     vista,
     tickets: visibles,
