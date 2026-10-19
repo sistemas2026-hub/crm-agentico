@@ -249,6 +249,17 @@ export async function liberarReserva(ctx, id, motivo) {
     { method: 'POST', body: { motivo } }, ctx);
 }
 
+/**
+ * Bodega marca un pedido atendido o rechazado (18/10/2026). Un rechazo sin nota
+ * lo niega el backend con un 400: el técnico tiene que saber por qué.
+ *
+ * @param {{cookies: any}} ctx @param {string} id @param {string} estado @param {string} nota
+ */
+export async function resolverPedido(ctx, id, estado, nota) {
+  return apiRequest(`/campo/inventario/pedidos/${encodeURIComponent(id)}/resolver/`,
+    { method: 'POST', body: { estado, nota } }, ctx);
+}
+
 /** @param {{cookies: any}} ctx @param {Record<string, any>} cuerpo */
 export async function trasladar(ctx, cuerpo) {
   return apiRequest('/campo/inventario/traslados/', { method: 'POST', body: cuerpo }, ctx);

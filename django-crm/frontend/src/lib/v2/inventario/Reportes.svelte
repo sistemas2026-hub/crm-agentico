@@ -55,6 +55,18 @@
     return `?${q}`;
   }
 
+  /**
+   * A dónde va el formulario de un pedido: a la acción, sin perder la pestaña.
+   * `?/resolverPedido` a secas borraría `ver=reportes&de=pedidos` y, al volver,
+   * la pantalla abriría otra pestaña.
+   */
+  function accionPedido() {
+    const q = new URLSearchParams({ ver: 'reportes', de: 'pedidos' });
+    if (reporte?.desde) q.set('desde', reporte.desde);
+    if (reporte?.hasta) q.set('hasta', reporte.hasta);
+    return `?${q}&/resolverPedido`;
+  }
+
   /** @param {string|null} iso */
   function fecha(iso) {
     return iso ? iso.slice(0, 16).replace('T', ' ') : '—';
@@ -272,6 +284,7 @@
             <th class="py-2.5 px-space-lg w-48">Quién</th>
             <th class="py-2.5 px-space-lg w-24">Orden</th>
             <th class="py-2.5 px-space-lg">Motivo</th>
+            <th class="py-2.5 px-space-lg w-80">Bodega</th>
           </tr>
         </thead>
         <tbody>
@@ -293,6 +306,36 @@
                 {f.orden_numero ? `#${f.orden_numero}` : '—'}
               </td>
               <td class="py-space-md px-space-lg font-body-sm text-body-sm text-secondary">{f.motivo || '—'}</td>
+              <td class="py-space-md px-space-lg">
+                {#if f.estado === 'pendiente'}
+                  <!-- Atender o rechazar. La nota es la misma caja: opcional para
+                       atender, obligatoria para rechazar (lo exige el backend). -->
+                  <form method="POST" action={accionPedido()} class="flex flex-col gap-space-xs">
+                    <input type="hidden" name="pedido" value={f.id} />
+                    <input
+                      name="nota"
+                      maxlength="255"
+                      placeholder="Nota (obligatoria para rechazar)"
+                      aria-label="Nota de bodega"
+                      class="h-9 px-2 bg-surface-container-lowest text-on-surface font-body-sm text-body-sm rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                    <div class="flex gap-space-xs">
+                      <button type="submit" name="estado" value="atendido"
+                              class="h-8 px-space-sm bg-primary-container hover:bg-primary text-on-primary rounded font-body-sm text-body-sm font-medium">
+                        Atender
+                      </button>
+                      <button type="submit" name="estado" value="rechazado"
+                              class="h-8 px-space-sm bg-surface-container hover:bg-surface-container-high text-error rounded font-body-sm text-body-sm font-medium">
+                        Rechazar
+                      </button>
+                    </div>
+                  </form>
+                {:else}
+                  <span class="font-body-sm text-body-sm text-secondary">
+                    {ESTADO_PEDIDO[f.estado] ?? f.estado}{f.resuelto_por ? ` por ${f.resuelto_por}` : ''}{f.resuelto_en ? ` · ${fecha(f.resuelto_en)}` : ''}{f.nota_de_bodega ? ` · ${f.nota_de_bodega}` : ''}
+                  </span>
+                {/if}
+              </td>
             </tr>
           {/each}
         </tbody>

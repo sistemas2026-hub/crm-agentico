@@ -25,6 +25,7 @@ import {
   registrarCompra,
   leerValorizacion,
   leerReporte,
+  resolverPedido,
   // Plantillas de kit
   leerPlantillas,
   crearPlantilla,
@@ -400,6 +401,20 @@ export const actions = {
       return { hecho: `Reserva liberada. Quedan ${r?.libre_ahora} libres.` };
     } catch (e) {
       return fail(400, { error: mensajeDe(e) });
+    }
+  },
+
+  /** Bodega atiende o rechaza un pedido del técnico (18/10/2026). */
+  resolverPedido: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const estado = String(f.get('estado') ?? '');
+    try {
+      await resolverPedido(
+        { cookies }, String(f.get('pedido') ?? ''), estado, String(f.get('nota') ?? '').trim()
+      );
+      return { hecho: estado === 'rechazado' ? 'Pedido rechazado.' : 'Pedido atendido.' };
+    } catch (e) {
+      return fail(e?.status === 409 ? 409 : 400, { error: mensajeDe(e) });
     }
   },
 

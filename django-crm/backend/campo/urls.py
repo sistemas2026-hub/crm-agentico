@@ -86,6 +86,7 @@ urlpatterns = [
     # Pedir material a bodega desde el terreno. NO es un movimiento: un
     # movimiento es un hecho que ya ocurrio, y esto todavia no paso.
     path("inventario/pedidos/", pedidos_views.PedidosDeMaterialView.as_view(), name="inv_pedidos"),
+    path("inventario/pedidos/<uid:pk>/resolver/", pedidos_views.ResolverPedidoView.as_view(), name="inv_pedido_resolver"),
     path("inventario/libre/", inventario_operacion_views.LibreView.as_view(), name="inv_libre"),
     path("inventario/reservas/", inventario_operacion_views.ReservasView.as_view(), name="inv_reservas"),
     path("inventario/reservas/<uid:pk>/liberar/", inventario_operacion_views.LiberarReservaView.as_view(), name="inv_reserva_liberar"),

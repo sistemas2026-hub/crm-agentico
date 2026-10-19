@@ -748,7 +748,11 @@ def pedidos_a_bodega(org, *, desde=None, hasta=None) -> list[dict]:
         "persona": nombre_de(p.profile) if p.profile_id else None,
         "orden_numero": p.orden.numero if p.orden_id else None,
         "motivo": _tapar(p.motivo),
-    } for p in qs.select_related("material", "profile__user", "orden")
+        "resuelto_por": nombre_de(p.resuelto_por) if p.resuelto_por_id else None,
+        "resuelto_en": p.resuelto_en.isoformat() if p.resuelto_en else None,
+        "nota_de_bodega": _tapar(p.nota_de_bodega),
+    } for p in qs.select_related("material", "profile__user", "orden",
+                                 "resuelto_por__user")
                  .order_by("-created_at")[:LIMITE_DE_FILAS]]
 
 

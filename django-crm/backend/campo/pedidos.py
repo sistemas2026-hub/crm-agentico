@@ -84,6 +84,18 @@ class PedidoDeMaterial(BaseModel):
 
     estado = models.CharField(max_length=16, choices=ESTADOS, default=PENDIENTE)
 
+    #: QUIÉN LO RESOLVIÓ, CUÁNDO Y QUÉ DIJO (18/10/2026). Bodega solo podía
+    #: VER los pedidos; marcarlo atendido o rechazado es una decisión de una
+    #: persona, y sin su nombre y su hora nadie puede preguntarle después.
+    #: Un rechazo exige la nota: sin ella el técnico se queda sin material y
+    #: sin saber por qué.
+    resuelto_por = models.ForeignKey(
+        Profile, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="pedidos_resueltos",
+    )
+    resuelto_en = models.DateTimeField(null=True, blank=True)
+    nota_de_bodega = models.CharField(max_length=255, blank=True, default="")
+
     #: LA MISMA GARANTIA QUE EL RESTO DE LA COLA.
     #:
     #: El telefono reenvia sin señal, y dos pedidos iguales le harian pensar a

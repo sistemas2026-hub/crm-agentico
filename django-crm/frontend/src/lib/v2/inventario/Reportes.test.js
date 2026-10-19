@@ -48,7 +48,7 @@ const ACTA = {
 };
 
 describe('los reportes de lo que escribe el técnico', () => {
-  beforeEach(() => apiRequest.mockReset());
+  beforeEach(() => { apiRequest.mockReset(); });
 
   it('el servidor pide el reporte que se eligió', async () => {
     apiRequest.mockResolvedValue({ filas: [] });
@@ -92,5 +92,22 @@ describe('los reportes de lo que escribe el técnico', () => {
     expect(await pantalla('pedidos', [])).toContain('Nadie pidió material a bodega.');
     expect(await pantalla('faltantes', [])).toContain('Ningún técnico explicó un faltante.');
     expect(await pantalla('cierres', [])).toContain('No hay jornadas cerradas.');
+  });
+
+  it('un pedido pendiente ofrece atender o rechazar, sin perder la pestaña', async () => {
+    const b = await pantalla('pedidos', [PEDIDO]);
+    expect(b).toContain('action="?ver=reportes&amp;de=pedidos&amp;/resolverPedido"');
+    expect(b).toContain('name="pedido" value="p1"');
+    expect(b).toContain('value="atendido"');
+    expect(b).toContain('value="rechazado"');
+  });
+
+  it('uno ya resuelto dice quién, cuándo y qué nota dejó, sin botones', async () => {
+    const b = await pantalla('pedidos', [{
+      ...PEDIDO, estado: 'rechazado', resuelto_por: 'Ana Bodega',
+      resuelto_en: '2026-10-18T16:00:00-05:00', nota_de_bodega: 'sin stock hasta el lunes'
+    }]);
+    expect(b).toContain('Rechazado por Ana Bodega · 2026-10-18 16:00 · sin stock hasta el lunes');
+    expect(b).not.toContain('/resolverPedido');
   });
 });

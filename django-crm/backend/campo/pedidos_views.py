@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -247,3 +248,78 @@ def _sin_ceros(valor) -> str:
     if "." not in texto:
         return texto
     return texto.rstrip("0").rstrip(".") or "0"
+
+
+#: Lo mas que se guarda de la nota de bodega: es la columna.
+LARGO_DE_NOTA = 255
+
+
+class ResolverPedidoView(APIView):
+    """``POST`` bodega marca un pedido atendido o rechazado (18/10/2026).
+
+    Hasta hoy la oficina solo podia VER los pedidos. Resolverlos es de gestion
+    o de bodega, no de cualquier sesion de campo: un tecnico no se autoriza su
+    propio material.
+
+    UNA SOLA VEZ, y lo que pasa con un segundo toque lo dice el codigo:
+      - el mismo estado otra vez  -> 200 con el pedido como quedo (un reintento
+        o un doble clic no es un error, y no reescribe quien ni cuando);
+      - el otro estado            -> 409: ya lo decidio alguien, y cambiarlo
+        en silencio borraria esa decision.
+    Se toma la fila con `select_for_update`: dos personas de bodega mirando la
+    misma lista no pueden resolverla las dos.
+
+    UN RECHAZO EXIGE LA NOTA. Sin ella el tecnico se queda sin material y sin
+    saber por que, que es justo lo que este circuito existe para evitar.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        from campo.inventario_views import _exigir_inventario
+
+        _exigir_inventario(request)
+        estado = str(request.data.get("estado") or "").strip().lower()
+        if estado not in (PedidoDeMaterial.ATENDIDO, PedidoDeMaterial.RECHAZADO):
+            return Response(
+                {"detail": "El estado tiene que ser «atendido» o «rechazado»."},
+                status=status.HTTP_400_BAD_REQUEST)
+        nota = str(request.data.get("nota") or "").strip()
+        if estado == PedidoDeMaterial.RECHAZADO and not nota:
+            return Response(
+                {"detail": "Para rechazar un pedido hay que decir por qué."},
+                status=status.HTTP_400_BAD_REQUEST)
+        if len(nota) > LARGO_DE_NOTA:
+            return Response(
+                {"detail": f"La nota no puede pasar de {LARGO_DE_NOTA} caracteres."},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            # 404 y no 403 para un pedido de otra empresa, como el resto.
+            pedido = (PedidoDeMaterial.objects.select_for_update()
+                      .filter(org=request.org, pk=pk).first())
+            if pedido is None:
+                return Response({"detail": "Ese pedido no existe."},
+                                status=status.HTTP_404_NOT_FOUND)
+            if pedido.estado == estado:
+                return Response(_resuelto(pedido))
+            if pedido.estado != PedidoDeMaterial.PENDIENTE:
+                return Response(
+                    {"detail": f"Este pedido ya está {pedido.estado}: lo decidió "
+                               f"otra persona y no se cambia desde acá."},
+                    status=status.HTTP_409_CONFLICT)
+            pedido.estado = estado
+            pedido.resuelto_por = request.profile
+            pedido.resuelto_en = timezone.now()
+            pedido.nota_de_bodega = nota
+            pedido.save(update_fields=["estado", "resuelto_por", "resuelto_en",
+                                       "nota_de_bodega", "updated_at"])
+        return Response(_resuelto(pedido))
+
+
+def _resuelto(p: PedidoDeMaterial) -> dict:
+    return {
+        **_como_se_ve(p),
+        "resuelto_en": p.resuelto_en.isoformat() if p.resuelto_en else None,
+        "nota_de_bodega": p.nota_de_bodega,
+    }

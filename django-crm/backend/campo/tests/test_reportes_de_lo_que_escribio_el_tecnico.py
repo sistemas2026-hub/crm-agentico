@@ -143,3 +143,66 @@ def test_9_en_los_reportes_de_consumo_hasta_tambien_cuenta_el_dia_entero(
 
     assert [f["codigo"] for f in por_material] == ["CON-SC-APC"]
     assert len(por_tecnico) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Bodega resuelve el pedido (18/10/2026)
+# --------------------------------------------------------------------------- #
+
+def _resolver(client, pedido, **cuerpo):
+    return client.post(f"/api/campo/inventario/pedidos/{pedido.id}/resolver/",
+                       cuerpo, format="json")
+
+
+def test_10_bodega_lo_atiende_y_queda_quien_y_cuando(admin_client, pedido, admin_user):
+    r = _resolver(admin_client, pedido, estado="atendido", nota="sale en la camioneta de las 2")
+    assert r.status_code == 200, r.content
+    pedido.refresh_from_db()
+    assert pedido.estado == "atendido"
+    assert pedido.resuelto_en is not None
+    fila = _filas(admin_client, "pedidos")[0]
+    assert fila["estado"] == "atendido"
+    assert fila["resuelto_por"] == (admin_user.name or admin_user.email)
+    assert fila["nota_de_bodega"] == "sale en la camioneta de las 2"
+
+
+def test_11_rechazar_sin_decir_por_que_no_se_puede(admin_client, pedido):
+    assert _resolver(admin_client, pedido, estado="rechazado").status_code == 400
+    pedido.refresh_from_db()
+    assert pedido.estado == "pendiente"
+    assert _resolver(admin_client, pedido, estado="rechazado",
+                     nota="no hay stock hasta el lunes").status_code == 200
+
+
+def test_12_el_mismo_toque_dos_veces_no_reescribe_nada(admin_client, pedido):
+    _resolver(admin_client, pedido, estado="atendido")
+    pedido.refresh_from_db()
+    primero = pedido.resuelto_en
+    assert _resolver(admin_client, pedido, estado="atendido", nota="otra").status_code == 200
+    pedido.refresh_from_db()
+    assert (pedido.resuelto_en, pedido.nota_de_bodega) == (primero, "")
+
+
+def test_13_lo_ya_decidido_no_se_da_vuelta_en_silencio(admin_client, pedido):
+    _resolver(admin_client, pedido, estado="atendido")
+    r = _resolver(admin_client, pedido, estado="rechazado", nota="me equivoque")
+    assert r.status_code == 409
+    pedido.refresh_from_db()
+    assert pedido.estado == "atendido"
+
+
+def test_14_un_tecnico_no_se_autoriza_su_propio_pedido(user_client, pedido):
+    assert _resolver(user_client, pedido, estado="atendido").status_code == 403
+    pedido.refresh_from_db()
+    assert pedido.estado == "pendiente"
+
+
+def test_15_otra_empresa_recibe_404(org_b_client, pedido):
+    assert _resolver(org_b_client, pedido, estado="atendido").status_code == 404
+    pedido.refresh_from_db()
+    assert pedido.estado == "pendiente"
+
+
+def test_16_un_estado_inventado_se_rechaza(admin_client, pedido):
+    assert _resolver(admin_client, pedido, estado="pendiente").status_code == 400
+    assert _resolver(admin_client, pedido, estado="borrado").status_code == 400
