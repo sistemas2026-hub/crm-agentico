@@ -10,9 +10,77 @@
    * la evidencia y por qué, y quien despacha acepta o cambia.
    */
   import { enhance } from '$app/forms';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
+  import { untrack } from 'svelte';
+  import { paginacion } from '$lib/v2/supervisor-noc-tablero.js';
   import '../supervisor-noc.css';
 
   let { data, form } = $props();
+
+  // ---------------------------------------------------------------------
+  //  FILTRAR, CONTAR Y PAGINAR LOS CASOS  --  18/10/2026
+  //  Lo hace el backend: llegan de a `tope`, y filtrar o contar en el
+  //  navegador solo vería esos. Acá vive lo que se escribe y a qué URL ir.
+  // ---------------------------------------------------------------------
+
+  /** Lo que se está escribiendo. La URL manda; esto es solo el campo. El
+   *  valor inicial se lee una vez a propósito: después lo sigue el efecto. */
+  let busqueda = $state(untrack(() => data.filtro?.q ?? ''));
+  /** @type {HTMLInputElement | undefined} */
+  let campoBusqueda = $state();
+  /** @type {HTMLDivElement | undefined} */
+  let lista = $state();
+
+  //  Si la URL cambia por otro lado (Limpiar, atrás del navegador), el campo
+  //  la sigue. Mientras se escribe NO: la respuesta de lo que se tipeó hace
+  //  medio segundo pisaría la letra que se acaba de agregar.
+  $effect(() => {
+    const q = data.filtro?.q ?? '';
+    if (document.activeElement !== campoBusqueda) busqueda = q;
+  });
+
+  //  Página nueva, lista desde arriba: el contenedor se desplaza por su
+  //  cuenta y conservaría la posición de la página anterior.
+  $effect(() => {
+    void data.pagina;
+    if (lista) lista.scrollTop = 0;
+  });
+
+  const hayFiltro = $derived(Boolean(data.filtro?.q || data.filtro?.asunto));
+
+  const pag = $derived(paginacion(data.total ?? 0, data.pagina ?? 1, data.tope || 25));
+
+  /**
+   * La URL de la lista con lo que cambia. Conserva lo demás (`ficha`, `dia`)
+   * y vuelve a la página 1 salvo que se pida otra: filtrar estando en la 3
+   * puede dejar esa página sin filas.
+   * @param {{ q?: string, asunto?: string, pagina?: number, ficha?: boolean }} cambio
+   */
+  function enlace(cambio) {
+    const p = new URLSearchParams(page.url.searchParams);
+    const fijar = (/** @type {string} */ k, /** @type {string} */ v) =>
+      v ? p.set(k, v) : p.delete(k);
+    if ('q' in cambio) fijar('q', (cambio.q ?? '').trim());
+    if ('asunto' in cambio) fijar('asunto', cambio.asunto ?? '');
+    if ('ficha' in cambio) fijar('ficha', cambio.ficha ? '1' : '');
+    fijar('pagina', cambio.pagina && cambio.pagina > 1 ? String(cambio.pagina) : '');
+    const s = p.toString();
+    return s ? `?${s}` : page.url.pathname;
+  }
+
+  /** @param {Parameters<typeof enlace>[0]} cambio */
+  function filtrar(cambio) {
+    goto(enlace(cambio), { keepFocus: true, noScroll: true, replaceState: true });
+  }
+
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let espera;
+  /** Busca cuando se deja de escribir, no en cada letra. */
+  function alEscribir() {
+    clearTimeout(espera);
+    espera = setTimeout(() => filtrar({ q: busqueda }), 350);
+  }
 
   /** El caso abierto en el panel. `null` = ninguno. */
   let despachando = $state(/** @type {any} */ (null));
@@ -291,7 +359,16 @@
       <section class="snoc-panel" style="gap:var(--snoc-sm);">
         <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
           <div class="snoc-pila-xs">
-            <h2 class="snoc-h2">Casos abiertos</h2>
+            <h2 class="snoc-h2">
+              Casos abiertos
+              {#if !data.sinAprobados}
+                <!-- EL NÚMERO ES EL DE TODA LA COLA, no el de la página. Con
+                     filtro dice los dos: «3 de 41». -->
+                <span class="snoc-chip-conteo">
+                  {#if hayFiltro}{data.total} de {data.totalSinFiltro}{:else}{data.total}{/if}
+                </span>
+              {/if}
+            </h2>
             <p class="snoc-body-sm snoc-secundario">
               Solo los que ya aprobaste en <a href="/supervisor-noc">Pendientes por
               revisión</a>. Nada sale a campo sin pasar por ahí.
@@ -300,8 +377,11 @@
           <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
             {#if !data.conFicha && (data.casos ?? []).length}
               <!-- La ficha cuesta una llamada al motor POR CASO, que a su vez
-                   habla con WispHub y SmartOLT. Se pide, no viene sola. -->
-              <a class="snoc-btn" href="?ficha=1">Traer el diagnóstico de cada uno</a>
+                   habla con WispHub y SmartOLT. Se pide, no viene sola, y
+                   solo para la página que se está mirando. -->
+              <a class="snoc-btn" href={enlace({ ficha: true, pagina: data.pagina })}>
+                Traer el diagnóstico de esta página
+              </a>
             {/if}
             <!-- EL SUPERVISOR MIRA UNA VEZ POR HORA, pero solo si la empresa le
                  delegó «Revisar solo». Sin esa delegación espera a que alguien
@@ -316,7 +396,56 @@
           </div>
         </div>
 
-        {#if (data.casos ?? []).length === 0}
+        {#if !data.sinAprobados && data.totalSinFiltro > 0}
+          <!-- EL FILTRO. Busca en lo que se ve en la fila --asunto, cliente,
+               N.º de ticket o de servicio-- y nada más: buscar en la
+               descripción haría salir casos por un texto que no está a la
+               vista. Los asuntos son los de TODA la cola, con cuántos hay. -->
+          <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+            <label class="snoc-buscador">
+              <span class="snoc-icono snoc-tenue" style="font-size:18px;" aria-hidden="true">search</span>
+              <input
+                type="search"
+                class="snoc-buscador-campo"
+                placeholder="Buscar asunto, cliente o N.º de ticket…"
+                aria-label="Buscar en los casos abiertos"
+                maxlength="100"
+                bind:this={campoBusqueda}
+                bind:value={busqueda}
+                oninput={alEscribir}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter') { clearTimeout(espera); filtrar({ q: busqueda }); }
+                }}
+              />
+            </label>
+            <select
+              class="snoc-select"
+              aria-label="Filtrar por asunto"
+              value={data.filtro?.asunto ?? ''}
+              onchange={(e) => filtrar({ asunto: e.currentTarget.value })}
+            >
+              <option value="">Todos los asuntos ({data.totalSinFiltro})</option>
+              {#each data.asuntos ?? [] as a (a.asunto)}
+                <option value={a.asunto}>{a.asunto} ({a.n})</option>
+              {/each}
+            </select>
+            {#if hayFiltro}
+              <button
+                class="snoc-pildora"
+                type="button"
+                onclick={() => { busqueda = ''; clearTimeout(espera); filtrar({ q: '', asunto: '' }); }}
+              >
+                Limpiar filtro
+              </button>
+            {/if}
+          </div>
+        {/if}
+
+        {#if (data.casos ?? []).length === 0 && hayFiltro}
+          <p class="snoc-body-sm snoc-secundario">
+            Ningún caso coincide con el filtro. El N.º de ticket se busca completo.
+          </p>
+        {:else if (data.casos ?? []).length === 0}
           <!-- VACÍO NO ES UN ERROR, y las dos razones de estar vacío se
                dibujan distinto: una dice qué hacer, la otra que algo falló. -->
           {#if data.sinAprobados}
@@ -337,53 +466,106 @@
             </p>
           {/if}
         {:else}
-          <div class="snoc-pila-xs">
-            {#each data.casos as c (c.id)}
-              <!-- `snoc-tarjeta` YA es flex en columna con space-between, asi
-                   que encimarle `snoc-fila-sep` no la pone en fila: la deja en
-                   columna separando el contenido del boton al maximo, y la
-                   tarjeta crece hasta ocupar media pantalla. La fila va
-                   ADENTRO. -->
-              <div class="snoc-tarjeta">
-                <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
-                  <div class="snoc-pila-xs" style="min-width:0; flex:1 1 260px;">
-                  <span class="snoc-body">{c.nombre}</span>
-                  <span class="snoc-body-sm snoc-secundario">
-                    {c.estado}{c.prioridad ? ` · ${c.prioridad}` : ''}
-                    {#if c.ticket}· ticket #{c.ticket}{/if}
-                    {#if c.servicio}· servicio {c.servicio}{/if}
-                  </span>
+          <!-- LA LISTA SE DESPLAZA POR SU CUENTA (18/10/2026): con la página
+               entera desplazándose, despachar el caso 20 dejaba la jornada y
+               el filtro a una pantalla de distancia. La cabecera queda fija. -->
+          <div class="snoc-tabla-caja snoc-despacho-lista" bind:this={lista}>
+            <table class="snoc-tabla">
+              <thead>
+                <tr>
+                  <th scope="col">Asunto</th>
+                  <th scope="col">N.º ticket</th>
+                  <th scope="col">Cliente</th>
+                  <th scope="col"><span class="snoc-solo-lector">Acción</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each data.casos as c (c.id)}
+                  <tr class={despachando?.id === c.id ? 'snoc-fila-elegida' : ''}>
+                    <td>
+                      <div class="snoc-pila-xs" style="min-width:0;">
+                        <span class="snoc-body">{c.nombre}</span>
+                        <span class="snoc-body-sm snoc-secundario">
+                          {c.estado}{c.prioridad ? ` · ${c.prioridad}` : ''}
+                          {#if c.servicio}· servicio {c.servicio}{/if}
+                        </span>
 
-                  {#if c.orden_activa}
-                    <!-- No bloquea: una segunda visita al mismo caso es
-                         legítima. Pero tiene que verse ANTES. -->
-                    <span class="snoc-tag">Ya tiene la orden #{c.orden_activa} abierta ·
-                      {c.orden_activa_tecnico ? `asignada a ${c.orden_activa_tecnico}` : 'SIN ASIGNAR'}</span>
-                  {/if}
-
-                  {#if c.sugerencia}
-                    <p class="snoc-body-sm" style="margin:2px 0 0">
-                      {#if c.sugerencia.labor === 'no_requiere_visita'}
-                        <strong>No requiere visita.</strong>
-                      {:else if c.sugerencia.labor}
-                        <strong>{nombreDeLabor(c.sugerencia.labor)}</strong>
-                        {#if !c.sugerencia.verificada}
-                          <span class="snoc-tag">sin verificar</span>
+                        {#if c.orden_activa}
+                          <!-- No bloquea: una segunda visita al mismo caso es
+                               legítima. Pero tiene que verse ANTES. -->
+                          <span class="snoc-tag">Ya tiene la orden #{c.orden_activa} abierta ·
+                            {c.orden_activa_tecnico ? `asignada a ${c.orden_activa_tecnico}` : 'SIN ASIGNAR'}</span>
                         {/if}
-                      {:else}
-                        <strong>Sin concluir.</strong>
-                      {/if}
-                      <span class="snoc-secundario">{c.sugerencia.porque}</span>
-                    </p>
-                  {/if}
-                  </div>
 
-                  <button class="snoc-btn" type="button" onclick={() => abrir(c)}>
-                    Despachar
-                  </button>
-                </div>
-              </div>
-            {/each}
+                        {#if c.sugerencia}
+                          <p class="snoc-body-sm" style="margin:2px 0 0">
+                            {#if c.sugerencia.labor === 'no_requiere_visita'}
+                              <strong>No requiere visita.</strong>
+                            {:else if c.sugerencia.labor}
+                              <strong>{nombreDeLabor(c.sugerencia.labor)}</strong>
+                              {#if !c.sugerencia.verificada}
+                                <span class="snoc-tag">sin verificar</span>
+                              {/if}
+                            {:else}
+                              <strong>Sin concluir.</strong>
+                            {/if}
+                            <span class="snoc-secundario">{c.sugerencia.porque}</span>
+                          </p>
+                        {/if}
+                      </div>
+                    </td>
+                    <td class="snoc-mono" style="white-space:nowrap;">
+                      {#if c.ticket}#{c.ticket}{:else}<span class="snoc-tenue">—</span>{/if}
+                    </td>
+                    <td class="snoc-body-sm">
+                      {#if c.cliente}{c.cliente}{:else}<span class="snoc-tenue">Sin nombre</span>{/if}
+                    </td>
+                    <td style="text-align:right;">
+                      <button class="snoc-btn" type="button" onclick={() => abrir(c)}>
+                        Despachar
+                      </button>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- PAGINACIÓN. Son enlaces y no botones: la página vive en la URL,
+               así que se puede copiar y volver atrás. -->
+          <div class="snoc-paginacion">
+            <span class="snoc-mono-sm snoc-tenue">
+              Mostrando {pag.desde} a {pag.hasta} de {pag.total} caso{pag.total === 1 ? '' : 's'}
+            </span>
+            {#if pag.paginas > 1}
+              <nav class="snoc-paginacion-botones" aria-label="Páginas de casos">
+                {#if pag.actual > 1}
+                  <a class="snoc-pildora" href={enlace({ pagina: pag.actual - 1 })}
+                     data-sveltekit-noscroll>Anterior</a>
+                {:else}
+                  <span class="snoc-pildora snoc-pildora-apagada" aria-disabled="true">Anterior</span>
+                {/if}
+                {#each pag.ventana as n, i (i)}
+                  {#if n === null}
+                    <span class="snoc-paginacion-hueco" aria-hidden="true">…</span>
+                  {:else}
+                    <a
+                      class="snoc-pildora {n === pag.actual ? 'snoc-pildora-activa' : ''}"
+                      href={enlace({ pagina: n })}
+                      data-sveltekit-noscroll
+                      aria-current={n === pag.actual ? 'page' : undefined}
+                      aria-label="Página {n}"
+                    >{n}</a>
+                  {/if}
+                {/each}
+                {#if pag.actual < pag.paginas}
+                  <a class="snoc-pildora" href={enlace({ pagina: pag.actual + 1 })}
+                     data-sveltekit-noscroll>Siguiente</a>
+                {:else}
+                  <span class="snoc-pildora snoc-pildora-apagada" aria-disabled="true">Siguiente</span>
+                {/if}
+              </nav>
+            {/if}
           </div>
         {/if}
       </section>

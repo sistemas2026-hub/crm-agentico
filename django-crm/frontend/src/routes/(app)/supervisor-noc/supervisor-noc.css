@@ -1262,3 +1262,53 @@
   margin: var(--snoc-xs) 0 0; text-align: center;
   font-size: 0.6875rem; color: var(--snoc-on-surface-variant);
 }
+
+/* ==========================================================================
+   DESPACHO · LA LISTA DE CASOS  --  18/10/2026
+   ==========================================================================
+   Se desplaza por su cuenta: con la página entera desplazándose, despachar
+   el caso 20 dejaba la jornada y el filtro a una pantalla de distancia. El
+   alto deja ver unas seis filas en una laptop; la cabecera no se va con el
+   scroll, porque cuatro columnas desplazadas son cuatro celdas sin nombre. */
+.snoc-despacho-lista {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--snoc-surface-container);
+  border-radius: var(--snoc-r-lg);
+}
+.snoc-despacho-lista::-webkit-scrollbar { width: 9px; }
+.snoc-despacho-lista::-webkit-scrollbar-thumb {
+  background: var(--snoc-outline-variant);
+  border-radius: 5px;
+}
+.snoc-despacho-lista::-webkit-scrollbar-track { background: transparent; }
+.snoc-despacho-lista thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--snoc-surface-container-low);
+}
+.snoc-despacho-lista td { vertical-align: middle; }
+/* El caso que está abierto en el panel de abajo: sin marca, con la lista
+   desplazada no se sabe cuál se está despachando. */
+.snoc-despacho-lista tr.snoc-fila-elegida { background: var(--snoc-secondary-container); }
+
+/* Cuántos casos hay, al lado del título. */
+.snoc-chip-conteo {
+  display: inline-block; margin-left: var(--snoc-xs);
+  padding: 1px 8px; border-radius: var(--snoc-r-full);
+  background: var(--snoc-secondary-container);
+  color: var(--snoc-on-secondary-container);
+  font-size: 0.75rem; line-height: 1.25rem; font-weight: 700;
+  font-variant-numeric: tabular-nums; vertical-align: middle;
+}
+
+/* «Anterior» en la primera página: se ve, pero no lleva a ningún lado. */
+.snoc-pildora-apagada {
+  opacity: 0.45; cursor: default; pointer-events: none;
+}
+
+/* Texto para lectores de pantalla que no ocupa lugar a la vista. */
+.snoc-solo-lector {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}

@@ -36,6 +36,7 @@ misma labor la diferencia la sabe quien despacha, no esto.
 
 from __future__ import annotations
 
+from django.db.models import Count, Q
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -162,12 +163,28 @@ class CasosDespachablesView(APIView):
     #: ficha tecnica al motor, y eso es una llamada de red por caso. Treinta
     #: pantallas de scroll no las mira nadie, y treinta llamadas si las paga
     #: quien espera.
+    #:
+    #: DESDE EL 18/10/2026 ES EL TAMAÑO DE LA PAGINA, no un corte. Hasta ese
+    #: dia el caso numero 26 no aparecia en ningun lado y la pantalla no decia
+    #: que faltaban: el tope de la ficha estaba bien puesto, pero como corte
+    #: escondia trabajo aprobado. Ahora la ficha sigue costando 25 llamadas como
+    #: mucho --las de la pagina que se mira-- y el resto se alcanza paginando.
     TOPE = 25
+
+    #: Lo mas largo que se acepta para buscar. Un asunto, un nombre o un numero
+    #: de ticket entran de sobra; mas que esto no es una busqueda.
+    LARGO_BUSQUEDA = 100
 
     def get(self, request):
 
         org = request.profile.org
         con_ficha = request.query_params.get("ficha") == "1"
+        q = (request.query_params.get("q") or "").strip()[:self.LARGO_BUSQUEDA]
+        asunto = (request.query_params.get("asunto") or "").strip()
+        try:
+            pedida = int(request.query_params.get("pagina") or 1)
+        except (TypeError, ValueError):
+            pedida = 1
 
         #  SOLO LO QUE UNA PERSONA YA APROBO.
         #
@@ -205,16 +222,66 @@ class CasosDespachablesView(APIView):
             #  Vacio NO es un error, y se distingue: "todavia nadie aprobo
             #  ninguno" y "no se pudo leer" se dibujan distinto.
             return Response({"casos": [], "tope": self.TOPE,
-                             "sin_aprobados": True})
+                             "sin_aprobados": True, "total": 0,
+                             "total_sin_filtro": 0, "pagina": 1,
+                             "paginas": 1, "asuntos": []})
 
-        qs = (pad.casos_en_despacho(org, aprobados)
-              .order_by("-created_at")[:self.TOPE])
+        en_cola = pad.casos_en_despacho(org, aprobados)
+
+        #  LOS ASUNTOS SE CUENTAN SOBRE TODA LA COLA, no sobre lo filtrado:
+        #  son las opciones del filtro, y si se recortaran con el filtro puesto
+        #  la unica opcion seria la elegida y no habria como cambiarla.
+        asuntos = [
+            {"asunto": a["name"], "n": a["n"]}
+            for a in (en_cola.values("name").annotate(n=Count("id"))
+                      .order_by("name"))
+        ]
+        total_sin_filtro = sum(a["n"] for a in asuntos)
+
+        filtrados = en_cola
+        if asunto:
+            filtrados = filtrados.filter(name=asunto)
+        if q:
+            #  Lo que se ve en la fila, y nada mas: buscar en la descripcion
+            #  haria salir casos por un texto que no esta a la vista.
+            #
+            #  El ticket y el servicio van por 'iexact', como en la cola de
+            #  casos (cases/views.py): buscar '553' no tiene por que traer el
+            #  ticket 94553. El '#' se quita porque asi se ve el numero en la
+            #  pantalla, y quien lo copia de ahi lo trae puesto.
+            numero = q.lstrip("#").strip()
+            filtrados = filtrados.filter(
+                Q(name__icontains=q)
+                | Q(external_client_name__icontains=q)
+                | Q(account__name__icontains=q)
+                | Q(external_ticket_id__iexact=numero)
+                | Q(external_service_id__iexact=numero)
+            )
+
+        total = filtrados.count()
+        paginas = max(1, -(-total // self.TOPE))
+        #  La pagina se recorta a lo que existe: al filtrar, la 3 puede dejar
+        #  de haber, y quedarse ahi mostraria una tabla vacia sin decir por que.
+        pagina = min(max(1, pedida), paginas)
+        desde = (pagina - 1) * self.TOPE
+
+        #  'id' desempata: dos casos importados en el mismo lote comparten
+        #  'created_at', y sin un orden total la misma fila puede salir en dos
+        #  paginas y otra en ninguna.
+        qs = (filtrados.select_related("account")
+              .order_by("-created_at", "id")[desde:desde + self.TOPE])
 
         casos = []
         for caso in qs:
             fila = {
                 "id": str(caso.id),
                 "nombre": caso.name,
+                #  DE QUIEN ES. Sin esto la lista son siete "Instalacion Tdt"
+                #  iguales. La cuenta del CRM manda cuando existe; si no, el
+                #  nombre que trajo el proveedor (ver 'Case.external_client_name':
+                #  en este despliegue la tabla de cuentas esta vacia).
+                "cliente": ((caso.account.name if caso.account_id else "")
+                            or caso.external_client_name or "").strip(),
                 "estado": caso.status,
                 "prioridad": caso.priority,
                 "creado": caso.created_at.isoformat() if caso.created_at else None,
@@ -251,7 +318,13 @@ class CasosDespachablesView(APIView):
             casos.append(fila)
 
         return Response({"casos": casos, "tope": self.TOPE,
-                         "sin_aprobados": False})
+                         "sin_aprobados": False,
+                         #  'total' es lo que coincide con el filtro;
+                         #  'total_sin_filtro', toda la cola. Son dos numeros
+                         #  distintos y la pantalla dice los dos: «3 de 41».
+                         "total": total, "total_sin_filtro": total_sin_filtro,
+                         "pagina": pagina, "paginas": paginas,
+                         "asuntos": asuntos})
 
     def _localidad_de(self, caso) -> str:
         """El barrio del cliente, que es lo que el reparto mapea a una zona.

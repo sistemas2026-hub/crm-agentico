@@ -352,3 +352,92 @@ def test_u_una_propuesta_de_OTRO_TIPO_no_habilita_el_despacho(
                tipo=PropuestaSupervisor.CASO_ANTIGUO)
 
     assert admin_client.get(CASOS).json()["casos"] == []
+
+
+# ---------------------------------------------------------------------------
+# C · contar, filtrar y paginar  --  18/10/2026
+#
+# Hasta ese dia la lista se cortaba en 25 y el caso 26 no aparecia en ningun
+# lado, sin que la pantalla dijera que faltaban. El tope sigue --la ficha
+# cuesta una llamada por caso-- pero como tamaño de pagina, no como corte.
+# ---------------------------------------------------------------------------
+
+def test_v_el_caso_26_ya_no_se_pierde_va_en_la_pagina_2(admin_client, org_a):
+    from campo.despacho_pantalla_views import CasosDespachablesView
+
+    tope = CasosDespachablesView.TOPE
+    for i in range(tope + 2):
+        _aprobado(org_a, f"Caso {i:02d}")
+
+    uno = admin_client.get(CASOS).json()
+    dos = admin_client.get(f"{CASOS}?pagina=2").json()
+
+    assert uno["total"] == tope + 2
+    assert uno["paginas"] == 2
+    assert len(uno["casos"]) == tope
+    assert len(dos["casos"]) == 2
+    #  Ninguno repetido y ninguno perdido entre las dos paginas.
+    ids = [c["id"] for c in uno["casos"] + dos["casos"]]
+    assert len(set(ids)) == tope + 2
+
+
+def test_w_una_pagina_que_no_existe_se_recorta_a_la_ultima(admin_client, org_a):
+    """Filtrar estando en la 3 no puede dejar una tabla vacia sin motivo."""
+    _aprobado(org_a, "Unico")
+
+    cuerpo = admin_client.get(f"{CASOS}?pagina=9").json()
+    assert cuerpo["pagina"] == 1
+    assert [c["nombre"] for c in cuerpo["casos"]] == ["Unico"]
+
+    #  Basura en la pagina no tira la lista.
+    assert admin_client.get(f"{CASOS}?pagina=abc").json()["pagina"] == 1
+
+
+def test_x_se_filtra_por_asunto_cliente_y_ticket(admin_client, org_a):
+    _aprobado(org_a, "Instalacion Tdt", provider="wisphub", external_ticket_id="95395",
+              external_client_name="Ana Perez")
+    _aprobado(org_a, "Instalacion Tdt", provider="wisphub", external_ticket_id="95400",
+              external_client_name="Luis Gomez")
+    _aprobado(org_a, "Reconexion", provider="wisphub", external_ticket_id="95307",
+              external_client_name="Marta Ruiz")
+
+    def nombres(qs):
+        cuerpo = admin_client.get(f"{CASOS}?{qs}").json()
+        return sorted(c["cliente"] for c in cuerpo["casos"]), cuerpo
+
+    assert nombres("asunto=Reconexion")[0] == ["Marta Ruiz"]
+    assert nombres("q=gomez")[0] == ["Luis Gomez"]
+    #  El numero va exacto, y con el '#' que se ve en la pantalla.
+    assert nombres("q=%2395395")[0] == ["Ana Perez"]
+    assert nombres("q=953")[0] == []
+    #  El asunto tambien se busca por texto.
+    assert nombres("q=tdt")[0] == ["Ana Perez", "Luis Gomez"]
+
+    _, cuerpo = nombres("q=gomez")
+    #  Lo filtrado y lo que hay: dos numeros, y los dos viajan.
+    assert cuerpo["total"] == 1
+    assert cuerpo["total_sin_filtro"] == 3
+    #  Las opciones del filtro son las de TODA la cola, no las de lo filtrado.
+    assert cuerpo["asuntos"] == [
+        {"asunto": "Instalacion Tdt", "n": 2},
+        {"asunto": "Reconexion", "n": 1},
+    ]
+
+
+def test_y_el_cliente_sale_de_la_cuenta_y_si_no_del_proveedor(
+    admin_client, org_a
+):
+    from accounts.models import Account
+
+    cuenta = Account.objects.create(name="Cuenta CRM", org=org_a)
+    _aprobado(org_a, "Con cuenta", account=cuenta,
+              external_client_name="Nombre del proveedor")
+    _aprobado(org_a, "Sin cuenta", external_client_name="Solo proveedor")
+    _aprobado(org_a, "Sin nada")
+
+    por_asunto = {c["nombre"]: c["cliente"]
+                  for c in admin_client.get(CASOS).json()["casos"]}
+    assert por_asunto == {"Con cuenta": "Cuenta CRM",
+                          "Sin cuenta": "Solo proveedor",
+                          "Sin nada": ""}
+

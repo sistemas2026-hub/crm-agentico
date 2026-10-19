@@ -43,24 +43,46 @@ export async function leerPlantillasDeTrabajo(ctx) {
  * motor POR CASO, que a su vez habla con WispHub y SmartOLT. Abrir la lista no
  * puede costar veinticinco viajes de red, así que por defecto no se piden.
  *
+ * FILTRA Y PAGINA EL BACKEND (18/10/2026), no el navegador: la lista llega
+ * de a `tope` casos, y filtrar o contar solo esos dejaría afuera, sin
+ * decirlo, todo lo que está en la página siguiente.
+ *
  * @param {{ cookies: any }} ctx
  * @param {boolean} conFicha
+ * @param {{ q?: string, asunto?: string, pagina?: number }} [filtro]
  */
-export async function leerCasosDespachables(ctx, conFicha = false) {
+export async function leerCasosDespachables(ctx, conFicha = false, filtro = {}) {
+  const p = new URLSearchParams();
+  if (conFicha) p.set('ficha', '1');
+  if (filtro.q) p.set('q', filtro.q);
+  if (filtro.asunto) p.set('asunto', filtro.asunto);
+  if (filtro.pagina && filtro.pagina > 1) p.set('pagina', String(filtro.pagina));
+  const consulta = p.toString();
   try {
     const d = await apiRequest(
-      `/campo/casos-despachables/${conFicha ? '?ficha=1' : ''}`, {}, ctx
+      `/campo/casos-despachables/${consulta ? `?${consulta}` : ''}`, {}, ctx
     );
+    const casos = d?.casos ?? [];
     return {
-      casos: d?.casos ?? [],
+      casos,
       tope: d?.tope ?? 0,
       // «Todavía nadie aprobó ninguno» y «no se pudo leer» se dibujan
       // distinto: la primera dice qué hacer, la segunda que algo falló.
       sinAprobados: d?.sin_aprobados === true,
+      //  Un backend anterior a la paginación no los manda: se cae a lo que
+      //  llegó, que es lo único que se sabe con certeza.
+      total: d?.total ?? casos.length,
+      totalSinFiltro: d?.total_sin_filtro ?? d?.total ?? casos.length,
+      pagina: d?.pagina ?? 1,
+      paginas: d?.paginas ?? 1,
+      asuntos: d?.asuntos ?? [],
       error: false
     };
   } catch {
-    return { casos: [], tope: 0, sinAprobados: false, error: true };
+    return {
+      casos: [], tope: 0, sinAprobados: false, total: 0, totalSinFiltro: 0,
+      pagina: 1, paginas: 1, asuntos: [], error: true
+    };
   }
 }
 

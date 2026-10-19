@@ -83,9 +83,17 @@ export async function load({ url, cookies }) {
   //  que casi siempre termina en el mismo valor.
   const dia = url.searchParams.get('dia') || new Date().toISOString().slice(0, 10);
 
+  //  EL FILTRO Y LA PÁGINA VIVEN EN LA URL: un enlace copiado abre lo mismo,
+  //  y volver atrás después de despachar no pierde dónde se estaba.
+  const filtro = {
+    q: (url.searchParams.get('q') ?? '').trim(),
+    asunto: (url.searchParams.get('asunto') ?? '').trim(),
+    pagina: Number.parseInt(url.searchParams.get('pagina') ?? '1', 10) || 1
+  };
+
   const [plantillas, casos, reparto, barrios] = await Promise.all([
     leerPlantillasDeTrabajo({ cookies }),
-    leerCasosDespachables({ cookies }, conFicha),
+    leerCasosDespachables({ cookies }, conFicha, filtro),
     proponerReparto({ cookies }, dia),
     leerZonasConocidas({ cookies })
   ]);
@@ -106,6 +114,13 @@ export async function load({ url, cookies }) {
     casos: casos.casos,
     tope: casos.tope,
     sinAprobados: casos.sinAprobados,
+    filtro: { q: filtro.q, asunto: filtro.asunto },
+    total: casos.total,
+    totalSinFiltro: casos.totalSinFiltro,
+    //  La que devolvió el backend, no la pedida: la recorta a lo que existe.
+    pagina: casos.pagina,
+    paginas: casos.paginas,
+    asuntos: casos.asuntos,
     //  Los barrios ya mapeados, para ofrecerlos mientras se escribe.
     barriosConocidos: barrios.localidades,
     // NO SE INVENTA UNA LISTA VACÍA CUANDO LA LECTURA FALLÓ. Una empresa sin
