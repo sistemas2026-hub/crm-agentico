@@ -109,9 +109,12 @@ def _en_despacho(org, grupo, *, barrio=None, status="Assigned"):
     evidencia = [{"fuente": pad.FUENTE_DE_LA_LECTURA, "id": str(caso.id),
                   "dato": "lectura", "observado_en": ahora, "grupo": grupo}]
     if barrio is not None:
+        #  'cliente_nuevo' como lo guarda el codigo desde el 18/10/2026: una
+        #  pieza sin la marca se vuelve a pedir una vez (ver test_cn4).
         evidencia.append({"fuente": adj.FUENTE_LOCALIDAD, "id": str(caso.id),
                           "dato": "barrio", "observado_en": ahora,
-                          "localidad": barrio, "motivo": ""})
+                          "localidad": barrio, "motivo": "",
+                          "cliente_nuevo": False})
     P.objects.create(
         org=org, tipo_senal=P.TICKET_SIN_DIAGNOSTICO, origen_tipo="case",
         origen_id=str(caso.id), estado=P.ACEPTADA, revisado_en=timezone.now(),
@@ -370,8 +373,10 @@ def test_j_cada_caso_se_cuenta_en_su_zona_con_la_labor_de_su_grupo(
 
     d = adj.demanda_de_despacho(empresa, adj.propuestas_en_despacho(empresa))
 
-    assert d["por_zona"] == {str(soledad.id): {"correctivo": 2,
-                                               "instalacion": 1}}
+    #  El trabajo pedido de un cliente que ya existe es correctivo desde el
+    #  18/10/2026 (correccion 1 del usuario); hasta ese dia contaba como
+    #  instalacion. La instalacion de un cliente nuevo: test_cn2.
+    assert d["por_zona"] == {str(soledad.id): {"correctivo": 3}}
     assert (d["casos"], d["contados"]) == (6, 3)
     assert (d["sin_labor"], d["sin_zona"], d["sin_barrio"]) == (1, 1, 1)
 
@@ -574,6 +579,18 @@ def test_r_lo_que_arma_el_supervisor_queda_auditado_con_su_tarea(
     #  Un motivo que no es una clave conocida no se guarda tal cual.
     ({"contexto_disponible": False, "motor_alcanzado": True,
       "motivo": "Zoraida no contesto"}, ("", "sin_contexto")),
+    #  INSTALACION NUEVA (18/10/2026): el ticket cuelga del cliente de
+    #  instalaciones del ISP, y el barrio de esa ficha es el del cliente
+    #  ficticio, no el de la casa. No se guarda.
+    ({"contexto_disponible": True, "servicio": "999",
+      "id_servicio_instalaciones": "999",
+      "cliente": {"nombre": "INSTALACIONES NUEVAS", "localidad": "OFICINA"}},
+     ("", "instalacion_nueva")),
+    #  Y el marcador solo cuenta si coincide: otro servicio es un cliente.
+    ({"contexto_disponible": True, "servicio": "3614",
+      "id_servicio_instalaciones": "999",
+      "cliente": {"nombre": "x", "localidad": "SOLEDAD CENTRO"}},
+     ("SOLEDAD CENTRO", "")),
 ])
 def test_s_leer_localidad_lee_la_ficha_tal_como_la_trae_el_motor(
     monkeypatch, respuesta, esperado
@@ -657,7 +674,8 @@ def test_v_lo_ya_despachado_no_pide_cuadrilla(empresa, soledad, admin_profile):
     d = adj.demanda_de_despacho(empresa, adj.propuestas_en_despacho(empresa))
 
     assert d["ya_despachados"] == 2
-    assert d["por_zona"] == {str(soledad.id): {"instalacion": 2}}
+    #  Dos trabajos pedidos de clientes que ya existen: correctivo (18/10).
+    assert d["por_zona"] == {str(soledad.id): {"correctivo": 2}}
 
 
 def test_u_la_visita_que_pidio_una_medicion_cuenta_con_su_labor(

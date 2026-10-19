@@ -389,7 +389,12 @@ export const actions = {
       //  LA LABOR DE CADA GRUPO DE CASO (17/10/2026), solo si el formulario
       //  la trae: una pantalla vieja que no tiene esos campos no la borra.
       //  Vacío es «no cuenta», y viaja así.
-      const grupos = ['falla_de_servicio', 'trabajo_pedido', 'obra_de_red'];
+      const grupos = [
+        'falla_de_servicio',
+        'trabajo_pedido',
+        'instalacion_nueva',
+        'obra_de_red'
+      ];
       if (grupos.some((g) => f.has(`labor_de_${g}`))) {
         cuerpo.labor_por_grupo = Object.fromEntries(
           grupos

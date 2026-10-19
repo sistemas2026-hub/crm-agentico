@@ -269,13 +269,21 @@ class ConfiguracionDeReparto(BaseModel):
     #: otra cosa. Las claves son los grupos de `operaciones.paso_a_despacho`
     #: (`GRUPOS`); los dos que nunca pasan solos a Despacho --'nada_lo_mide' y
     #: 'ni_cliente_ni_red'-- no tienen labor, y un caso suyo no inclina la
-    #: labor de ninguna jornada. Trabajo pedido -> instalacion lo decidio el
-    #: usuario el 17/10/2026; los otros dos ya los implicaba
+    #: labor de ninguna jornada. Los de falla y obra ya los implicaba
     #: `clasificacion_de_trabajo`.
+    #:
+    #: EL TRABAJO PEDIDO SE PARTE EN DOS  --  18/10/2026, correccion 1 del
+    #: usuario. El 17/10 se habia decidido "trabajo pedido -> instalacion", y
+    #: el usuario lo corrigio con un caso a la vista: un trabajo pedido sobre
+    #: un cliente que YA existe (cambio de equipo, de plan, traslado) es
+    #: correctivo; instalacion es solo para un cliente nuevo. Cliente nuevo es
+    #: un ticket que cuelga del cliente de instalaciones del ISP
+    #: (`INSTALACION_NUEVA`, ver `operaciones.armado_de_jornadas`).
     LABOR_POR_GRUPO_DE_FABRICA = {
         "falla_de_servicio": "correctivo",
         "obra_de_red": "trabajos",
-        "trabajo_pedido": "instalacion",
+        "trabajo_pedido": "correctivo",
+        "instalacion_nueva": "instalacion",
     }
 
     org = models.OneToOneField(
@@ -335,6 +343,12 @@ class ConfiguracionDeReparto(BaseModel):
 
     def __str__(self) -> str:
         return f"Reparto de {self.org_id}"
+
+
+#: La clave de la tabla para el trabajo pedido de un CLIENTE NUEVO. No es un
+#: grupo de `paso_a_despacho`: es una parte del trabajo pedido, que la tabla
+#: distingue porque su labor es otra (correccion 1 del usuario, 18/10/2026).
+INSTALACION_NUEVA = "instalacion_nueva"
 
 
 def labor_de_cada_grupo(org) -> dict:

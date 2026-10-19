@@ -122,6 +122,59 @@ que no podés es darlo por hecho, ni escribir como si ya estuviera resuelto.
 """
 
 
+#:  LAS CORRECCIONES DEL USUARIO A LA LECTURA  --  18/10/2026. Van SOLO con la
+#:  tarea 'paso_a_despacho.TAREA_CORRECCIONES' delegada ('instrucciones_para'):
+#:  le cambian al modelo la forma de leer, y una lectura que mueve el grupo de
+#:  una falla a un trabajo pasa por la Fase 4 sin aparecer en la sombra
+#:  (auditor de frontera, 19/10/2026). Sin la tarea, las dos claves nuevas se
+#:  piden igual --son las que la sombra necesita--, pero estas lineas no.
+INSTRUCCIONES_DE_LAS_CORRECCIONES = """
+Tres cosas que corrigió la empresa sobre lecturas anteriores:
+- Un trabajo en la casa de un cliente que YA tiene el servicio (cambio de
+  equipo o de router, cambio de plan, traslado) no es una instalación: la
+  instalación es solo para un cliente nuevo.
+- Si el ticket trae un cambio YA AUTORIZADO por la empresa (por
+  fidelización, por cambio de plan), no lo objetes: medí el equipo y contá lo
+  que dé, pero esa decisión ya está tomada.
+- Si el ticket dice que el cliente ya probó otro tomacorriente, o que el
+  equipo está encendido con LOS en rojo, la falta de energía está descartada
+  aunque el equipo figure sin energía: buscá la causa en la fibra.
+"""
+
+
+#:  Con que instrucciones se hizo una lectura: queda en la pieza
+#:  ('instrucciones'), y es lo que permite releer al delegar la tarea lo que se
+#:  leyo en sombra (auditor independiente, 19/10/2026).
+CON_LAS_CORRECCIONES = "correcciones"
+SIN_LAS_CORRECCIONES = "base"
+
+
+def instrucciones_para(org, con_las_correcciones=None) -> str:
+    """Las instrucciones de la lectura para esta empresa: las de siempre, mas
+    las correcciones del usuario si la tarea esta delegada. Falla cerrado: sin
+    poder comprobarlo, las de siempre."""
+    if con_las_correcciones is None:
+        con_las_correcciones = sup._con_las_correcciones(org)
+    if con_las_correcciones:
+        return INSTRUCCIONES + INSTRUCCIONES_DE_LAS_CORRECCIONES
+    return INSTRUCCIONES
+
+
+#:  LA VERSION DE LA LECTURA  --  18/10/2026. Sube cuando cambia lo que se le
+#:  pide al modelo de una forma que cambia lo que el paso puede decidir. La 2
+#:  trae las claves 'accion_autorizada' y 'energia_descartada'
+#:  ('paso_a_despacho.CAMPO_PARA_EL_MODELO'), que se piden siempre. Una
+#:  lectura sin la clave es de la version 1.
+VERSION_DE_LA_LECTURA = 2
+
+#:  Cuantas lecturas MAS se le pagan a una propuesta para ponerla en la version
+#:  nueva, por encima de 'MAXIMAS_RELECTURAS'. Dos: una con las claves nuevas,
+#:  apenas se despliega, y otra con las instrucciones de las correcciones el
+#:  dia que se delegue la tarea. Si el modelo contesta, el criterio se apaga;
+#:  si no contesta, el tope corta como en las otras relecturas.
+RELECTURAS_POR_VERSION = 2
+
+
 def _caso_de(senal):
     from cases.models import Case
 
@@ -156,7 +209,15 @@ def _labor_de(org, senal, texto_tapado):
         contexto = {}
 
     try:
-        return clf.clasificar(contexto, texto=texto_tapado)
+        #  EL CLIENTE DE INSTALACIONES DEL PROVEEDOR  --  18/10/2026,
+        #  correccion 1 del usuario: instalacion es solo para un cliente nuevo.
+        #  Es el discriminador medido (220 de 220) que ya usan la pantalla de
+        #  Despacho y 'supervisor.analizar'; sin el, un trabajo pedido salia
+        #  'instalacion' por el texto aunque el cliente ya existiera.
+        return clf.clasificar(
+            contexto, texto=texto_tapado,
+            marcadores={"id_servicio_instalaciones":
+                        contexto.get("id_servicio_instalaciones")})
     except Exception as e:                                       # noqa: BLE001
         logger.info("Supervisor: no se pudo clasificar la labor (%s)",
                     type(e).__name__)
@@ -190,9 +251,15 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None,
     """
     ahora = ahora or timezone.now()
     tope = sup.TOPE_TICKETS_POR_CORRIDA if tope is None else tope
+    #  Una vez por corrida, como la tarea en el paso: ver
+    #  'INSTRUCCIONES_DE_LAS_CORRECCIONES'. Y queda en cada lectura.
+    con_las_correcciones = bool(sup._con_las_correcciones(org))
 
     if concluir is None:
         from operaciones import cerebro
+
+        instrucciones = instrucciones_para(
+            org, con_las_correcciones=con_las_correcciones)
 
         def concluir(org_, entrada):
             from operaciones import paso_a_despacho as pad
@@ -204,7 +271,7 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None,
             #  pide que cierre con lo que tiene. Medido el 16/10/2026: 9 de 64
             #  lecturas gastaban sus tres relecturas sin llegar a contestar.
             return cerebro.concluir(
-                org_, instrucciones=INSTRUCCIONES, entrada=entrada,
+                org_, instrucciones=instrucciones, entrada=entrada,
                 campos_extra=pad.CAMPO_PARA_EL_MODELO, cierre=True)
 
     informe = {"leidos": 0, "con_hipotesis": 0, "sin_hipotesis": 0,
@@ -249,7 +316,8 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None,
             continue
 
         labor = _labor_de(org, senal, tapado)
-        _anotar(senal, v, labor, ahora)
+        _anotar(senal, v, labor, ahora,
+                con_las_correcciones=con_las_correcciones)
         _dejar_rastro(org, v, senal, propuestas, ahora, informe)
         if getattr(v, "hipotesis", ""):
             informe["con_hipotesis"] += 1
@@ -276,7 +344,8 @@ def _entrada(caso, tapado, senal) -> str:
     )
 
 
-def _anotar(senal, veredicto, labor, ahora) -> None:
+def _anotar(senal, veredicto, labor, ahora, *,
+            con_las_correcciones: bool = False) -> None:
     """
     Deja el diagnostico en la evidencia Y en los datos, como el resto.
 
@@ -315,6 +384,14 @@ def _anotar(senal, veredicto, labor, ahora) -> None:
         pieza["confianza_del_grupo"] = str(
             (getattr(veredicto, "extras", None) or {}).get(
                 "confianza_del_grupo") or "")
+        #  LAS CORRECCIONES DEL USUARIO  --  18/10/2026. Lo que 'cerebro' ya
+        #  dejo pasar por la lista cerrada, o vacio. Las lee 'paso_a_despacho'.
+        for clave in ("accion_autorizada", "energia_descartada"):
+            pieza[clave] = str(
+                (getattr(veredicto, "extras", None) or {}).get(clave) or "")
+        pieza["version"] = VERSION_DE_LA_LECTURA
+        pieza["instrucciones"] = (CON_LAS_CORRECCIONES if con_las_correcciones
+                                  else SIN_LAS_CORRECCIONES)
         return pieza
 
     if hipotesis:
@@ -486,6 +563,59 @@ def le_falta_el_grupo(propuesta) -> bool:
         return _cuantas_veces_se_leyo(propuesta) < MAXIMAS_RELECTURAS
 
     return hay_lectura
+
+
+def le_falta_la_version(propuesta, *,
+                        con_las_correcciones: bool = False) -> bool:
+    """
+    Si la lectura guardada es de una version anterior y la nueva puede cambiar
+    lo que el paso decide.  --  18/10/2026, correcciones del usuario.
+
+    SOLO LAS QUE PUEDEN CAMBIAR. Las claves nuevas deciden sobre una falla que
+    la medicion FRENA ('paso_a_despacho.la_medicion_frena'): un trabajo ya
+    autorizado, o la energia descartada por el ticket. Releer las demas
+    gastaria el tope de la vuelta en tickets que la lectura nueva no mueve.
+
+    CON TOPE: 'RELECTURAS_POR_VERSION' por encima de 'MAXIMAS_RELECTURAS',
+    contadas como las demas. Una lectura que contesta trae la version y apaga
+    el criterio; una que no contesta, no lo repite para siempre.
+
+    Y CON LA TAREA DELEGADA, tambien la que se leyo sin sus instrucciones
+    (auditor independiente, 19/10/2026): desplegado en sombra, estas fallas se
+    releen con las claves nuevas pero sin las instrucciones de las
+    correcciones, y sin esto ya no se volvian a leer cuando el usuario las
+    encendiera.
+    """
+    from operaciones import paso_a_despacho as pad
+
+    ultima = pad._ultima_lectura_con_grupo(propuesta)
+    if ultima is None or ultima.get("grupo") != pad.FALLA_DE_SERVICIO:
+        return False
+    version = ultima.get("version")
+    if (isinstance(version, int) and not isinstance(version, bool)
+            and version >= VERSION_DE_LA_LECTURA
+            and not (con_las_correcciones
+                     and ultima.get("instrucciones") != CON_LAS_CORRECCIONES)):
+        return False
+    if not pad.la_medicion_frena(pad.ultima_medicion(propuesta)):
+        return False
+    return (_cuantas_veces_se_leyo(propuesta)
+            < MAXIMAS_RELECTURAS + RELECTURAS_POR_VERSION)
+
+
+def hay_que_releer(propuesta, *, con_las_correcciones: bool = False) -> bool:
+    """
+    Si a esta propuesta le falta una lectura que el paso necesita: ninguna,
+    una sin el grupo, o una de una version que ya no alcanza.
+
+    UN SOLO LUGAR  --  18/10/2026. Los dos sitios del ciclo que eligen que leer
+    llamaban a 'le_falta_lectura' y 'le_falta_el_grupo' por separado, con un
+    comentario que pedia que un tercer criterio fallara en los dos a la vez.
+    El tercero llego, y ahora es una funcion.
+    """
+    return (le_falta_lectura(propuesta) or le_falta_el_grupo(propuesta)
+            or le_falta_la_version(
+                propuesta, con_las_correcciones=con_las_correcciones))
 
 
 #:  Cuanto de la hipotesis tiene que aparecer en el motivo para dar por hecho

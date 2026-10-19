@@ -436,17 +436,22 @@ def test_s_el_plan_NO_escribe(org_a, admin_profile, soledad):
 # ---------------------------------------------------------------------------
 
 def test_t_la_tabla_de_fabrica_y_la_de_la_empresa(org_a):
+    #  Desde el 18/10/2026 (correccion 1 del usuario) el trabajo pedido de un
+    #  cliente que ya existe es correctivo, y la instalacion es solo para uno
+    #  nuevo: la fila 'instalacion_nueva'.
     assert labor_de_cada_grupo(org_a) == {
-        "falla_de_servicio": COR, "obra_de_red": TRA, "trabajo_pedido": INS}
+        "falla_de_servicio": COR, "obra_de_red": TRA, "trabajo_pedido": COR,
+        "instalacion_nueva": INS}
 
     ConfiguracionDeReparto.objects.create(org=org_a, labor_por_grupo={
-        "trabajo_pedido": COR,        # la empresa lo cambia
+        "trabajo_pedido": TRA,        # la empresa lo cambia
         "obra_de_red": "pintura",   # una labor que no existe: vale la de fabrica
         "falla_de_servicio": "",    # vacio a proposito: no inclina nada
     })
 
     assert labor_de_cada_grupo(org_a) == {"obra_de_red": TRA,
-                                          "trabajo_pedido": COR}
+                                          "trabajo_pedido": TRA,
+                                          "instalacion_nueva": INS}
 
 
 def test_u_la_tabla_es_de_CADA_empresa(org_a, org_b):
@@ -457,7 +462,7 @@ def test_u_la_tabla_es_de_CADA_empresa(org_a, org_b):
         "trabajo_pedido": TRA})
     set_rls_context(org_a)
 
-    assert labor_de_cada_grupo(org_a)["trabajo_pedido"] == INS
+    assert labor_de_cada_grupo(org_a)["trabajo_pedido"] == COR
 
 
 # ---------------------------------------------------------------------------
@@ -473,12 +478,15 @@ def test_v_la_pantalla_lee_y_guarda_la_tabla_y_sin_la_clave_no_la_toca(
     org_a, admin_client
 ):
     assert admin_client.get(CONFIG).json()["labor_por_grupo"] == {
-        "falla_de_servicio": COR, "obra_de_red": TRA, "trabajo_pedido": INS}
+        "falla_de_servicio": COR, "obra_de_red": TRA, "trabajo_pedido": COR,
+        "instalacion_nueva": INS}
 
     r = admin_client.put(CONFIG, {**LO_DE_SIEMPRE, "labor_por_grupo": {
-        "trabajo_pedido": COR, "obra_de_red": ""}}, format="json")
+        "trabajo_pedido": TRA, "instalacion_nueva": COR, "obra_de_red": ""}},
+        format="json")
     assert r.status_code == 200, r.content
-    esperada = {"falla_de_servicio": COR, "trabajo_pedido": COR}
+    esperada = {"falla_de_servicio": COR, "trabajo_pedido": TRA,
+                "instalacion_nueva": COR}
     assert r.json()["labor_por_grupo"] == esperada
 
     #  Una pantalla vieja que no manda la tabla no la borra.

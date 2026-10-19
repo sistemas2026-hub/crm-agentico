@@ -37,12 +37,40 @@ LO QUE NO HACE
 - No guarda un error como medicion (16/10/2026): el motor caido no dice nada
   del equipo, y con la regla de la Fase 4 una falla "sin poder medir" pasa.
   La falla espera, y la vuelta siguiente lo intenta de nuevo.
+
+LO QUE FRENA SE VUELVE A MEDIR  --  18/10/2026, correccion 2 del usuario
+------------------------------------------------------------------------
+Hasta ese dia una medicion concluyente no se repetia nunca, y el usuario
+encontro el costo: una intermitencia medida de noche (-23 dBm, en rango) se
+quedaba frenada aunque de dia la señal cayera a -29. Las dos mediciones que
+frenan una falla --en linea con la señal en rango, y caida sin energia-- se
+vuelven a medir HASTA 'REMEDICIONES_MAXIMAS' veces, separadas
+'MINUTOS_PARA_REMEDIR_LO_QUE_FRENA', y cada medicion deja su resumen en el
+HISTORIAL de la pieza ('paso_a_despacho.HORAS_DEL_HISTORIAL'): SmartOLT no da
+la serie en numeros, solo una imagen.
+
+NO ES POLLING, Y POR ESO TIENE TOPE  --  auditor independiente, 19/10/2026.
+La medicion usa 'get_onu_full_status_info', que el proveedor autoriza para
+"investigar un problema que reporto un usuario" y prohibe usar en polling
+(skill smartolt-api). La primera version re-medía cada tres horas mientras la
+propuesta viviera --hasta siete dias--, y eso es polling. Dos re-mediciones a
+ocho horas, mas la original, son tres puntos en un dia: cubren la noche y el
+dia, que es lo que hace falta para ver la oscilacion del caso 2, y quedan
+como parte de investigar ese reclamo.
+
+LA RE-MEDICION NUNCA REEMPLAZA A LA PIEZA. Va al historial, y la medicion
+que decide se elige AL DECIDIR ('paso_a_despacho.la_medicion_vigente'): con
+la tarea de las correcciones delegada, la mas reciente; sin ella, la de
+siempre, y lo que la re-medicion haria pasar se cuenta en sombra. Hasta el
+19/10/2026 la tarea la hacia reemplazar, y el auditor de frontera midio el
+costo: quitada la tarea, la pieza nueva seguia decidiendo por la Fase 4.
 ================================================================================
 """
 
 import logging
 import math
 import re
+from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
@@ -65,6 +93,18 @@ HORAS_PARA_REINTENTAR = 24
 #:  hasta veinte minutos--, y mas que lo que separan dos clics seguidos en
 #:  "Correr ciclo", que no tienen que contar como dos vueltas.
 MINUTOS_PARA_REINTENTAR_SIN_MEDIR = 30
+
+#:  Cada cuanto se vuelve a medir una falla que la medicion FRENA, y cuantas
+#:  veces  --  18/10/2026, correccion 2 del usuario; acotado el 19/10 (ver el
+#:  encabezado: no es polling). Con la original, tres mediciones a ocho horas
+#:  cubren el dia y la noche: la señal del caso 2 oscilaba entre -23 de noche y
+#:  -29 de dia. Lo eligio el asistente; se cambia si el usuario lo pide.
+MINUTOS_PARA_REMEDIR_LO_QUE_FRENA = 480
+REMEDICIONES_MAXIMAS = 2
+
+#:  Cuantas mediciones anteriores guarda la pieza. Doce entran holgadas en las
+#:  24 horas a una cada tres, y ponen techo al tamaño de la evidencia.
+MAXIMO_DEL_HISTORIAL = 12
 
 #  El vocabulario cerrado de lo que se guarda. Lo que devuelva el motor fuera
 #  de estas listas se guarda como "no se sabe", nunca tal cual.
@@ -238,21 +278,46 @@ def _vieja(medicion: dict, ahora) -> bool:
     return (ahora - cuando).total_seconds() >= espera
 
 
+def _ultima_vez(medicion: dict) -> str:
+    """Cuando se midio por ultima vez esta pieza: la medicion que decide, o la
+    re-medicion mas nueva, la que sea posterior. Texto ISO, como se guarda."""
+    return max(str(medicion.get("observado_en") or ""),
+               str(medicion.get("remedida_en") or ""))
+
+
+def _veces_remedida(medicion: dict) -> int:
+    n = (medicion or {}).get("remedida_veces")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 0
+
+
+def _toca_remedir(medicion: dict, ahora) -> bool:
+    if _veces_remedida(medicion) >= REMEDICIONES_MAXIMAS:
+        return False
+    cuando = parse_datetime(_ultima_vez(medicion))
+    if cuando is None:
+        return True
+    return ((ahora - cuando).total_seconds()
+            >= MINUTOS_PARA_REMEDIR_LO_QUE_FRENA * 60)
+
+
 def candidatas(org, ahora) -> list:
     """
     Las pendientes de falla que hay que medir, en el orden en que se miden:
     primero las que nunca se midieron, la mas nueva primero --asi la falla
     del dia pasa ese dia--; despues las que no se pudieron medir hace mas de
-    'HORAS_PARA_REINTENTAR', la de intento mas viejo primero.
+    'HORAS_PARA_REINTENTAR', la de intento mas viejo primero; y al final las
+    que la medicion frena y toca volver a medir (18/10/2026), la medida hace
+    mas tiempo primero.
 
-    Una medicion concluyente no se repite. Un caso que no puede pasar no se
-    mide: seria gastar una consulta al proveedor en algo que no va a ningun
-    lado.
+    Una medicion concluyente no se repite, SALVO las dos que frenan una falla
+    ('paso_a_despacho.la_medicion_frena'): ver el encabezado. Un caso que no
+    puede pasar no se mide: seria gastar una consulta al proveedor en algo que
+    no va a ningun lado.
     """
     from operaciones import paso_a_despacho as pad
     from operaciones.models import PropuestaSupervisor as P
 
-    nuevas, reintentos = [], []
+    nuevas, reintentos, remediciones = [], [], []
     pendientes = (P.objects
                   .filter(org=org, tipo_senal=P.TICKET_SIN_DIAGNOSTICO,
                           estado=P.PROPUESTA, origen_tipo="case")
@@ -266,19 +331,65 @@ def candidatas(org, ahora) -> list:
             #  Un error guardado antes del 16/10 no es una medicion: se pide
             #  como si nunca se hubiera medido, en esta misma vuelta.
             medicion = None
+        remedir = False
         if medicion is not None and es_concluyente(medicion):
-            continue
-        if medicion is not None and not _vieja(medicion, ahora):
+            if not (pad.la_medicion_frena(medicion)
+                    and _toca_remedir(medicion, ahora)):
+                continue
+            remedir = True
+        elif medicion is not None and not _vieja(medicion, ahora):
             continue
         caso = pad.caso_de(p)
         if pad.por_que_el_caso_no_puede_pasar(caso, ahora):
             continue
         if medicion is None:
             nuevas.append((p, caso))
+        elif remedir:
+            remediciones.append((p, caso, _ultima_vez(medicion)))
         else:
             reintentos.append((p, caso, str(medicion.get("observado_en") or "")))
     reintentos.sort(key=lambda x: x[2])
-    return nuevas + [(p, caso) for p, caso, _ in reintentos]
+    remediciones.sort(key=lambda x: x[2])
+    return (nuevas + [(p, caso) for p, caso, _ in reintentos]
+            + [(p, caso) for p, caso, _ in remediciones])
+
+
+def _resumen(medicion: dict, observado_en: str) -> dict:
+    """Lo que queda de una medicion en el historial: las claves que deciden."""
+    from operaciones import paso_a_despacho as pad
+
+    salida = {c: medicion.get(c) for c in pad.CLAVES_DEL_HISTORIAL}
+    salida["observado_en"] = observado_en
+    return salida
+
+
+def _historial(entradas, ahora) -> list:
+    """Las mediciones de las ultimas horas, en orden, y con techo. Una entrada
+    sin fecha que se entienda no se guarda: no se podria decir si es de hoy."""
+    from operaciones import paso_a_despacho as pad
+
+    vigentes = []
+    for h in entradas or []:
+        if not isinstance(h, dict):
+            continue
+        cuando = parse_datetime(str(h.get("observado_en") or ""))
+        if cuando is None or timezone.is_naive(cuando):
+            continue
+        if ahora - cuando > timedelta(hours=pad.HORAS_DEL_HISTORIAL):
+            continue
+        vigentes.append((cuando, h))
+    vigentes.sort(key=lambda x: x[0])
+    return [h for _, h in vigentes][-MAXIMO_DEL_HISTORIAL:]
+
+
+def _reemplazar_la_pieza(fresca, pieza) -> None:
+    from operaciones import paso_a_despacho as pad
+
+    resto = [x for x in (fresca.evidencia or [])
+             if not (isinstance(x, dict)
+                     and x.get("fuente") == pad.FUENTE_MEDICION)]
+    fresca.evidencia = [*resto, pieza]
+    fresca.save(update_fields=["evidencia", "updated_at"])
 
 
 def escribir(propuesta, medicion: dict, ahora) -> bool:
@@ -289,6 +400,12 @@ def escribir(propuesta, medicion: dict, ahora) -> bool:
     La llamada de red ya ocurrio, afuera: aca solo se bloquea la fila, se
     vuelve a mirar que siga pendiente y se reescribe la evidencia de ESA fila.
     Mismo patron que 'paso_a_despacho.anotar_por_que_se_queda'.
+
+    UNA RE-MEDICION (18/10/2026) es la de una pieza que FRENA, y NUNCA la
+    reemplaza: va al historial, y la pieza que decide no cambia (ver el
+    encabezado). Una re-medicion que NO MIDIO tampoco entra al historial:
+    sin esto, dos vueltas del proveedor caido convertian una falla con la
+    señal en rango en "no se pudo medir en dos vueltas", que pasa.
     """
     from operaciones import paso_a_despacho as pad
     from operaciones import supervisor as sup
@@ -300,6 +417,19 @@ def escribir(propuesta, medicion: dict, ahora) -> bool:
         if fresca is None:
             return False
         medicion = dict(medicion)
+        anterior = pad.ultima_medicion(fresca)
+        if es_concluyente(anterior) and pad.la_medicion_frena(anterior):
+            sigue = dict(anterior)
+            sigue["remedida_en"] = ahora.isoformat()
+            #  Cuenta tambien la que no midio: el tope es de consultas al
+            #  proveedor, no de respuestas.
+            sigue["remedida_veces"] = _veces_remedida(anterior) + 1
+            if es_concluyente(medicion):
+                sigue["historial"] = _historial(
+                    [*(anterior.get("historial") or []),
+                     _resumen(medicion, ahora.isoformat())], ahora)
+            _reemplazar_la_pieza(fresca, sigue)
+            return True
         if medicion.get("estado") == pad.ESTADO_DESCONOCIDO:
             #  LAS VUELTAS SEGUIDAS SIN PODER MEDIR  --  17/10/2026. Se cuentan
             #  aca, con la fila bloqueada, mirando la medicion que se reemplaza:
@@ -310,11 +440,16 @@ def escribir(propuesta, medicion: dict, ahora) -> bool:
         pieza = sup._observacion(pad.FUENTE_MEDICION, fresca.origen_id,
                                  _dato(medicion, ahora), ahora)
         pieza.update(medicion)
-        resto = [x for x in (fresca.evidencia or [])
-                 if not (isinstance(x, dict)
-                         and x.get("fuente") == pad.FUENTE_MEDICION)]
-        fresca.evidencia = [*resto, pieza]
-        fresca.save(update_fields=["evidencia", "updated_at"])
+        #  LA SERIE SIGUE  --  18/10/2026: lo que la pieza anterior ya traia,
+        #  mas ella misma si dijo algo firme del equipo.
+        previas = [*((anterior or {}).get("historial") or [])]
+        if es_concluyente(anterior):
+            previas.append(_resumen(anterior,
+                                    str(anterior.get("observado_en") or "")))
+        historial = _historial(previas, ahora)
+        if historial:
+            pieza["historial"] = historial
+        _reemplazar_la_pieza(fresca, pieza)
     return True
 
 
@@ -337,6 +472,7 @@ def medir_fallas_pendientes(org, *, desatendido: bool = False, medir=None,
     se lo comeria entero.
     """
     from operaciones import diagnostico_optico as optico
+    from operaciones import paso_a_despacho as pad
     from operaciones import supervisor as sup
 
     medir = medir or _medir_con_el_motor
@@ -344,13 +480,17 @@ def medir_fallas_pendientes(org, *, desatendido: bool = False, medir=None,
          else optico.presupuesto(desatendido=desatendido))
     informe = {"candidatas": 0, "medidas": 0, "concluyentes": 0,
                "sin_medicion": 0, "sin_id_de_servicio": 0,
-               "sin_presupuesto": 0, "errores": 0}
+               "sin_presupuesto": 0, "errores": 0,
+               #  Las que se volvieron a medir porque frenaban (18/10/2026).
+               #  Tambien cuentan en 'medidas'.
+               "remedidas": 0}
 
     ahora = timezone.now()
     cola = candidatas(org, ahora)
     informe["candidatas"] = len(cola)
     for i, (propuesta, caso) in enumerate(cola):
         id_servicio = str(getattr(caso, "external_service_id", "") or "").strip()
+        es_remedicion = pad.la_medicion_frena(pad.ultima_medicion(propuesta))
         try:
             if not id_servicio:
                 #  Sin el id no hay a quien preguntarle: se anota sin gastar
@@ -376,6 +516,7 @@ def medir_fallas_pendientes(org, *, desatendido: bool = False, medir=None,
                 continue
             if escribir(propuesta, medicion, timezone.now()):
                 informe["medidas"] += 1
+                informe["remedidas"] += int(es_remedicion)
                 informe["concluyentes" if es_concluyente(medicion)
                         else "sin_medicion"] += 1
         except Exception as e:                                   # noqa: BLE001
