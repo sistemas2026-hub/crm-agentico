@@ -246,7 +246,7 @@ def test_del_ticket_a_la_cuadrilla(
 
 def test_del_TEXTO_del_reclamo_a_la_cuadrilla(
     admin_client, org_a, admin_profile, plantilla, zona,
-    contexto_del_equipo_caido,
+    contexto_del_equipo_caido, monkeypatch,
 ):
     """El OTRO camino a Despacho: el que sale de LEER el reclamo.
 
@@ -283,12 +283,24 @@ def test_del_TEXTO_del_reclamo_a_la_cuadrilla(
     ahora = _ahora()
 
     # --- 1 - un ticket ABIERTO en el proveedor, con tecnico y con texto ----
-    #  Las cuatro precondiciones de `_tickets_abiertos_con_tecnico`, puestas a
+    #  Las CINCO precondiciones de `_tickets_abiertos_con_tecnico`, puestas a
     #  proposito y no por casualidad: estado en curso alla, lectura fresca,
-    #  alguien asignado, y descripcion con texto.
+    #  alguien asignado, descripcion con texto, y el AREA.
+    #
+    #  EL AREA SE AGREGO EL 14/10/2026 y esta prueba la encontro al correrla
+    #  contra produccion seis dias despues de escribirla: sin `area`, el caso
+    #  es `indecidible_sin_mapa` y la señal no sale --"si no se puede saber, no
+    #  se lee nada"--. No es un defecto: nacio de una medicion del cliente
+    #  ("revise la lista de soporte tecnico y no salen los ticket de descuentos
+    #  programados, esos son de cartera"), y una persona concentraba 563
+    #  tickets de los cuales 509 eran de cartera.
+    #
+    #  'soporte_tecnico' es lo que la importacion escribe en `Case.area` desde
+    #  `importacion_tickets.destinos` del tenant -- el mismo valor que produce
+    #  el comodin 'soporte tecnico|*'. Ver `AREAS_DEL_SUPERVISOR`.
     caso = Case.objects.create(
         org=org_a, name="Internet intermitente", status="New",
-        priority="Normal", is_active=True,
+        priority="Normal", is_active=True, area="soporte_tecnico",
         description="Dice que se le cae el internet cada rato desde el lunes.",
         external_service_id="6580", external_ticket_id="95048",
         provider="wisphub", external_status="En progreso",
@@ -296,10 +308,49 @@ def test_del_TEXTO_del_reclamo_a_la_cuadrilla(
     )
     caso.assigned_to.add(admin_profile)
 
+    #  Y UNO DE CARTERA, IDENTICO EN TODO LO DEMAS. Lo que el cliente pidio: la
+    #  lista de soporte no trae los tickets de otra area. Se pone ACA y no en
+    #  una prueba aparte porque es la MISMA consulta la que los separa, y
+    #  afirmarlo con un solo caso presente no distingue "lo filtro" de "no
+    #  habia ninguno".
+    ajeno = Case.objects.create(
+        org=org_a, name="Descuento programado", status="New",
+        priority="Normal", is_active=True, area="cartera",
+        description="Pregunta por el descuento que le prometieron.",
+        external_service_id="6581", external_ticket_id="95050",
+        provider="wisphub", external_status="En progreso",
+        external_fetched_at=ahora - dt.timedelta(hours=1),
+    )
+    ajeno.assigned_to.add(admin_profile)
+
     # --- 2 - el Supervisor lo detecta --------------------------------------
+    #  EL MAPA DE AREAS VIVE EN EL MOTOR, y sin el no se lee NADA.
+    #
+    #  `criterio_de_area()` pide `area_por_persona()`, que sale por HTTP al
+    #  motor. En una prueba no hay motor, el mapa vuelve vacio, y
+    #  `_tickets_abiertos_con_tecnico` devuelve `[]` ANTES de mirar un solo
+    #  caso: «un mapa vacio es ambiguo --nadie tiene area, o el motor no
+    #  contesto-- y se trata como "no se pudo"». Es fail-closed a proposito,
+    #  porque leer un ticket cuesta una llamada al modelo.
+    #
+    #  Se sustituye la LECTURA, no la decision: el criterio real corre sobre
+    #  este mapa. Y queda afirmado de paso que esta señal DEPENDE de que el
+    #  motor conteste -- que es una dependencia del circuito y no un detalle
+    #  del laboratorio.
+    from operaciones import areas_del_tenant
+    monkeypatch.setattr(areas_del_tenant, "area_por_persona",
+                        lambda: {str(admin_profile.id): "soporte_tecnico"})
+
     senales = supervisor._tickets_abiertos_con_tecnico(org_a, ahora)
     assert [s.origen_id for s in senales] == [str(caso.id)], (
-        "el Supervisor no detecto el ticket abierto con tecnico"
+        f"el Supervisor tenia que detectar SOLO el de soporte. "
+        f"detecto={[s.origen_id for s in senales]} "
+        f"soporte={caso.id} cartera={ajeno.id}"
+    )
+    #  Las dos mitades de la misma afirmacion, por separado: que el de soporte
+    #  SI entre, y que el de cartera NO.
+    assert str(ajeno.id) not in [s.origen_id for s in senales], (
+        "un ticket de cartera entro a la cola de soporte"
     )
     senal = senales[0]
     assert senal.tipo == PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO

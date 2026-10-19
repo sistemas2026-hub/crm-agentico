@@ -7,6 +7,112 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
+Última actualización: **19/10/2026 — producción en `ba5a1a5f`**, remedida con
+`git fetch` y `git patch-id --stable`.
+
+**Esta cabecera estaba 12 días vieja y afirmaba que producción era `8bc8af9`.**
+Lo era el 07/10; desde entonces entraron **90 commits** de otra sesión
+(Materiales, Cierre de jornada, Bodega en Reportes, el Supervisor midiendo el
+equipo de un ticket, la paginación de Despacho, dos APKs). **Esta actualización
+NO cataloga esos 90**: arregla el número que envejeció y agrega lo que cerró
+esta sesión. Quien necesite el detalle de los 90 lo tiene en
+`git log 8bc8af9..ba5a1a5f`.
+
+---
+
+## Los seis silencios del despacho — cerrados el 19/10/2026
+
+Rama `integracion/silencios-del-despacho`, **6 commits sobre `ba5a1a5f`, cero
+por detrás** (fast-forward limpio).
+
+El código de supervisión y despacho llevaba días en producción con sus pruebas
+de backend en verde, y tenía seis defectos. **Cinco de los seis eran el mismo
+salto**: backend → capa servidor del frontend. Es la falla que §6 ya documenta
+dos veces (`requiere_noc`, `estado_nuevo`), y la razón por la que esa sección
+dice que una prueba de backend no alcanza.
+
+| Qué estaba roto | Qué veía una persona |
+|---|---|
+| `conteosDel` leía `o.labor` y `_orden_json` **nunca la manda** | El panel de «cuántos técnicos van a cada cosa» decía **siempre** «N cuadrillas a sin clasificar» |
+| El panel imprimía el id crudo de la labor | «correctivo» donde el resto de la pantalla dice «Correctivo» |
+| Publicar leía **2 de las 5** claves que nombra `RepartoView.post` | «12 órdenes asignadas.» con **dos cuadrillas sin publicar** y tres órdenes movidas |
+| La UI ignoraba `ordenes_activas_del_caso` | La confirmación ocultaba que el caso ya tenía otra orden abierta |
+| `_avisar` filtraba `role="ADMIN"` justificándose con «`Profile.role` solo tiene ADMIN/USER» | **Falso desde M09-D** (son cuatro). Un OPERACIONES —quien publica el reparto— no recibía **ningún** aviso de que la jornada estaba lista |
+| El circuito de 9 eslabones solo recorría el camino de la **medición** | El camino del **texto** (`TICKET_SIN_DIAGNOSTICO`) estaba construido y **nada comprobaba que llegara a Despacho** |
+
+**Los dos que el backend nombra a su propio consumidor** son los más
+elocuentes: `sin_nadie_con_cuenta` lleva el comentario *«Un silencio aca haria
+creer que se repartio todo»*, y `ordenes_activas_del_caso`, *«Que la UI pueda
+avisar "este caso ya tiene una orden activa"»*. El código producía exactamente
+el silencio que esos comentarios temen.
+
+**Un séptimo lo arregló la otra sesión el mismo día, por su cuenta**:
+`mensajeDe` leía `e.data.*` y `apiRequest` cuelga `.body`, así que la pantalla
+mostraba `NO_SE_PUDO_CREAR` en vez de qué hacer. Coincidimos en la causa por
+caminos independientes. Lo que queda de esta sesión ahí es el superconjunto:
+`$lib/server/v2/mensaje-de-error.js`, que además lee `detail` (DRF), deja el
+código como último recurso, y **unifica las tres copias** que leían de tres
+lugares distintos.
+
+### Cómo se encontraron, que es lo reusable
+
+Comparando **cada clave de primer nivel que devuelve cada vista** contra lo que
+el frontend menciona. De 56 claves de las tres vistas de campo, 3 no aparecían
+en ninguna parte, y una de las tres era un defecto. El mismo barrido sobre
+`operaciones/views.py` da 21, y al revisarlas **son falsos positivos**:
+`techo_de_la_etapa`, por ejemplo, es información extra y la protección real
+vive en `niveles`, que el backend ya filtra. **Vale como pista, no como lista
+de defectos.**
+
+### El instrumento, corregido
+
+**El harness de vitest SÍ alcanza un `+page.server.js`.** El comentario de
+`vitest.config.js` dice que haría falta mover `test: {}` al `vite.config.js` de
+la app; medido, lo que no se resuelve es `$app/*`, no «ser una ruta». Ahí viven
+justo los defectos que el backend no ve, así que el techo estaba una capa más
+abajo de lo que decía.
+
+### Las tres mutaciones inversas, medidas
+
+Porque una prueba que dice que algo existe no prueba que funcione:
+
+```
+volver a leer `o.labor` de la orden        -> 2 pruebas en rojo
+volver a avisar solo a `role="ADMIN"`      -> test_t2 ROJO y test_t VERDE
+sacar TICKET_SIN_DIAGNOSTICO del filtro    -> el circuito del texto en rojo
+usar ESTADOS_REVISADOS (aplicada SOLA)     -> la prueba del rechazo en rojo
+```
+
+La segunda línea es el punto: `test_t` ya existía, afirma `avisos.count() == 1`
+con un solo perfil en la base, y **pasaba con el código roto**.
+
+Y la cuarta costó aprenderla: aplicadas **juntas**, las dos últimas mutaciones
+**se tapaban entre sí** —el caso desaparecía por el filtro de TIPO y la del
+ESTADO pasaba sin que nada se pusiera rojo—. La prueba del rechazo ahora
+rechaza **los dos** tipos de señal, y cada mutación se caza por separado.
+
+### La config del tenant
+
+**Cargarla habría apagado la visión, borrado dos áreas y dejado de importar los
+tickets de cuatro departamentos**, en silencio: el archivo declaraba menos de lo
+que la base tiene, y `areas`, `importacion_tickets` y
+`argumentos_sobrescribibles` no están en `TenantConfig.SINCRONIZADOS`, así que
+la semilla pisa. Bajado al YAML, con los valores copiados del volcado de
+`diferencias_config --todo` y no de memoria.
+
+Medido contra la base **v176**: «solo la base lo tiene» baja de **15 a 6**, y
+las 6 son los 5 campos SINCRONIZADOS —que `cargar_config.py:365-377` le
+devuelve a la base antes de escribir— más un reordenamiento que el propio
+informe marca «sin efecto».
+
+**Esto se había preparado el 13/10 sobre la base v175, y seis días después el
+YAML de producción ya era otro**: aquella versión habría **borrado 54 líneas**
+que producción ya tiene. Se rehízo sobre el archivo actual en vez de pushear la
+vieja — que es exactamente por qué §11 manda medir con `fetch` y no de memoria.
+
+
+### Lo que decía esta cabecera el 07/10 (queda como historia)
+
 Última actualización: **07/10/2026 16:59 Bogotá** — **DESPLEGADO A PRODUCCIÓN**:
 el centro de mando pasa a la **planta radial** (`8bc8af9`), y antes la planta de
 salas por área (`59edab1`). Y se **fusiona `integrar-centro-mando`** entera, que
