@@ -22,6 +22,65 @@
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
 
+  /**
+   * LAS DOS CASILLAS DEL CICLO, CON ESTADO PROPIO  --  19/10/2026
+   *
+   * Estaban escritas `checked={data.reparto_config.activo}`, de UNA VIA: la
+   * fuente de verdad seguia siendo el servidor. Y esta pantalla tiene TRECE
+   * formularios con `use:enhance` --mas del doble que cualquier otra del
+   * sistema, la siguiente tiene cinco--, de los cuales seis usan el `enhance`
+   * pelado y tres llaman `await update()`. Los nueve invalidan `data`.
+   *
+   * O sea: marcabas «Encendido», guardabas cualquier otra cosa de la misma
+   * pantalla --una labor, una zona, una persona--, `data` se recargaba y la
+   * casilla se DESMARCABA SOLA mientras vos creias que seguia marcada. Despues
+   * le dabas a Guardar y se grababa `activo: false`. El sintoma es el peor de
+   * todos: la pantalla dice una cosa y lo guardado es otra, sin error.
+   *
+   * Lo encontro el cliente: encendio el ciclo, volvio a entrar y decia APAGADO.
+   *
+   * POR QUE NO ALCANZA CON UN `$state` A SECAS: habria que resembrarlo cuando
+   * el servidor cambia, y resembrar en cada recarga de `data` reproduce el
+   * mismo bug. Por eso se compara contra lo ULTIMO QUE DIJO EL SERVIDOR: si
+   * ese valor no cambio, la recarga no toca lo que la persona marco; si cambio
+   * de verdad --otra sesion lo encendio-- se refleja.
+   *
+   * El patron `checked={}` de una via aparece 37 veces en el codigo y no es un
+   * descuido: en una pantalla con uno o dos formularios es correcto. Lo que lo
+   * rompe aca es la densidad.
+   */
+  //  Los cuatro `state_referenced_locally` que esto levanta son A PROPOSITO y
+  //  por eso se silencian con su motivo, en vez de dejar avisos que enseñan a
+  //  ignorar avisos. Svelte dice «esto solo captura el valor inicial»: eso es
+  //  lo que se busca --la semilla-- y de los cambios posteriores se ocupa el
+  //  `$effect` de abajo.
+  //
+  //  Y la semilla tiene que leer `data` AQUI, no dentro del efecto: un
+  //  `$effect` no corre en el servidor, asi que sembrando solo ahi el HTML
+  //  renderizado saldria siempre desmarcado y recien se corregiria al hidratar.
+  /* svelte-ignore state_referenced_locally */
+  let cicloActivo = $state(data.reparto_config?.activo ?? false);
+  /* svelte-ignore state_referenced_locally */
+  let cicloCopia = $state(data.reparto_config?.copia_la_jornada ?? true);
+  /* svelte-ignore state_referenced_locally */
+  let loUltimoDelServidor = $state({
+    activo: data.reparto_config?.activo,
+    copia: data.reparto_config?.copia_la_jornada
+  });
+
+  $effect(() => {
+    const activo = data.reparto_config?.activo;
+    const copia = data.reparto_config?.copia_la_jornada;
+    if (activo !== loUltimoDelServidor.activo) {
+      loUltimoDelServidor.activo = activo;
+      cicloActivo = activo ?? false;
+    }
+    if (copia !== loUltimoDelServidor.copia) {
+      loUltimoDelServidor.copia = copia;
+      cicloCopia = copia ?? true;
+    }
+  });
+
   const LABORES = [
     { id: 'instalacion', texto: 'Instalación' },
     { id: 'correctivo', texto: 'Correctivo' },
@@ -766,7 +825,7 @@
 
           <label class="snoc-fila" style="gap:var(--snoc-xs); align-items:center;">
             <input type="checkbox" name="copia_la_jornada" value="1"
-                   checked={data.reparto_config.copia_la_jornada} />
+                   bind:checked={cicloCopia} />
             <span class="snoc-body-sm">
               Armar la jornada de cada cuadrilla: su pareja de siempre, en sus zonas
               habituales
@@ -775,7 +834,7 @@
 
           <label class="snoc-fila" style="gap:var(--snoc-xs); align-items:center;">
             <input type="checkbox" name="activo" value="1"
-                   checked={data.reparto_config.activo} />
+                   bind:checked={cicloActivo} />
             <span class="snoc-body-sm">
               <strong>Encendido</strong> — corre solo todas las noches
             </span>
