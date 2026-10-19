@@ -170,19 +170,36 @@ describe('la configuración del reparto manda la labor de cada caso solo si vien
     });
   });
 
-  it('con los tres selectores, viaja la tabla entera y «no cuenta» va vacío', async () => {
+  it('con los cuatro selectores, viaja la tabla entera y «no cuenta» va vacío', async () => {
     await actions.reparto_config(envio({
       ...LO_DE_SIEMPRE,
       labor_de_falla_de_servicio: 'correctivo',
-      labor_de_trabajo_pedido: 'instalacion',
+      labor_de_trabajo_pedido: 'correctivo',
+      labor_de_instalacion_nueva: 'instalacion',
       labor_de_obra_de_red: ''
     }));
     const [, cuerpo] = guardarConfiguracionDeReparto.mock.calls[0];
     expect(cuerpo.labor_por_grupo).toEqual({
       falla_de_servicio: 'correctivo',
-      trabajo_pedido: 'instalacion',
+      trabajo_pedido: 'correctivo',
+      instalacion_nueva: 'instalacion',
       obra_de_red: ''
     });
+  });
+
+  it('una pantalla de antes del 18/10, con tres selectores, no manda la fila nueva', async () => {
+    //  La instalación de un cliente nuevo se partió del trabajo pedido el
+    //  18/10/2026. Un formulario sin ese selector no la manda, y para esa
+    //  fila vale la de fábrica en vez de un vacío que la sacaría de la cuenta.
+    await actions.reparto_config(envio({
+      ...LO_DE_SIEMPRE,
+      labor_de_falla_de_servicio: 'correctivo',
+      labor_de_trabajo_pedido: 'correctivo',
+      labor_de_obra_de_red: 'trabajos'
+    }));
+    const [, cuerpo] = guardarConfiguracionDeReparto.mock.calls[0];
+    expect(cuerpo.labor_por_grupo).not.toHaveProperty('instalacion_nueva');
+    expect(cuerpo.labor_por_grupo.trabajo_pedido).toBe('correctivo');
   });
 
   it('una pantalla vieja, sin los selectores, no manda la tabla y no la borra', async () => {

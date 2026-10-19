@@ -19,6 +19,10 @@ Es una salida pensada para pegarse en una conversación.
 
 EL CONTEXTO RLS SE FIJA ACÁ, como en 'propuestas_fuera_de_area': un comando
 no pasa por el middleware, y sin él las tablas devuelven 0 filas sin error.
+
+LAS CORRECCIONES DEL USUARIO (18/10/2026). "pasan hoy" usa lo que esté
+delegado; si las correcciones no lo están, la columna "con correcciones" dice
+cuáles pasarían con ellas y por cuál. Es la sombra del ciclo, caso por caso.
 """
 
 import re
@@ -31,7 +35,7 @@ from django.utils import timezone
 from common.models import Org
 from common.tasks import set_rls_context
 from operaciones import diagnostico_de_ticket as dxt
-from operaciones import lectura_de_ticket
+from operaciones import lectura_de_ticket, tareas_delegadas
 from operaciones import paso_a_despacho as pad
 from operaciones.models import PropuestaSupervisor
 from operaciones.razonamiento_modelos import FuenteRazonamiento, RazonamientoSupervisor
@@ -168,6 +172,10 @@ class Command(BaseCommand):
             raise CommandError("No existe una organización con ese id.")
         set_rls_context(org.id)
         ahora = timezone.now()
+        try:
+            con = bool(tareas_delegadas.esta_delegada(org, pad.TAREA_CORRECCIONES))
+        except Exception:                                        # noqa: BLE001
+            con = False
 
         pendientes = (PropuestaSupervisor.objects
                       .filter(org=org, estado=PropuestaSupervisor.PROPUESTA,
@@ -175,7 +183,7 @@ class Command(BaseCommand):
                               origen_tipo="case")
                       .order_by("created_at"))
 
-        filas, motivos, casos = [], Counter(), Counter()
+        filas, motivos, casos, pasarian = [], Counter(), Counter(), Counter()
         pasan = 0
         for p in pendientes:
             caso = pad.caso_de(p)
@@ -183,8 +191,14 @@ class Command(BaseCommand):
             grupo = str(lectura.get("grupo") or "")
             conf = str(lectura.get(pad.CONFIANZA_DEL_GRUPO) or "-")
             medicion = pad.ultima_medicion(p)
-            d = pad.evaluar(p, ahora)
+            d = pad.evaluar(p, ahora, correcciones=con)
             por_que = _por_que_corto(d, grupo, medicion)
+            sombra = "-"
+            if not con and not d.pasa and d.puerta != pad.PUERTA_CASO:
+                d2 = pad.evaluar(p, ahora, correcciones=True)
+                if d2.pasa:
+                    sombra = f"PASA ({d2.regla or '?'})"
+                    pasarian[d2.regla or "?"] += 1
             caso_corto = _caso_corto(
                 pad.por_que_el_caso_no_puede_pasar(caso, ahora), caso)
             pasan += d.pasa
@@ -195,12 +209,12 @@ class Command(BaseCommand):
             filas.append((
                 getattr(caso, "external_ticket_id", "") or "?",
                 f"{edad}d", _GRUPO.get(grupo, "sin grupo"), conf,
-                caso_corto, _medicion_corta(medicion), por_que,
+                caso_corto, _medicion_corta(medicion), por_que, sombra,
                 str(leidas), descarte, _hipotesis(p)))
 
         cab = ("ticket", "edad", "grupo", "conf", "caso", "medicion",
-               "por que se queda", "leidas", "descarte del modelo",
-               "hipotesis (tapada)")
+               "por que se queda", "con correcciones", "leidas",
+               "descarte del modelo", "hipotesis (tapada)")
         anchos = [max(len(str(f[i])) for f in [cab, *filas]) for i in range(len(cab))]
         linea = lambda f: "  ".join(str(v).ljust(a) for v, a in zip(f, anchos))  # noqa: E731
         self.stdout.write(linea(cab))
@@ -209,5 +223,9 @@ class Command(BaseCommand):
             self.stdout.write(linea(f))
         self.stdout.write("")
         self.stdout.write(f"pendientes={len(filas)} · pasan hoy={pasan}")
+        self.stdout.write(
+            "correcciones: encendidas" if con else
+            f"correcciones: en sombra · pasarian con ellas={sum(pasarian.values())} "
+            f"{dict(pasarian)}")
         self.stdout.write(f"por que se quedan: {dict(motivos)}")
         self.stdout.write(f"casos: {dict(casos)}")

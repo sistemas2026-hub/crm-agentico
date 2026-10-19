@@ -59,6 +59,9 @@ CERRAR_DESINCRONIZADOS = "cerrar_desincronizados_con_diagnostico"
 CICLO_AUTOMATICO = "revisar_solo_con_cada_actualizacion"
 PASAR_A_DESPACHO = "pasar_a_despacho_segun_las_reglas"
 ARMAR_LA_JORNADA = "armar_la_jornada_del_dia"
+#  La misma clave que 'paso_a_despacho.TAREA_CORRECCIONES': se escribe en los dos
+#  lados para no importar aquel modulo desde aca, y una prueba las ata.
+PASAR_CON_LAS_CORRECCIONES = "pasar_a_despacho_con_las_correcciones"
 
 CATALOGO = {
     CERRAR_DESINCRONIZADOS: {
@@ -113,6 +116,32 @@ CATALOGO = {
         #  le promete nada a un cliente, y una persona la corrige con un clic.
         "exige_nivel": 3,
         "necesita_que_mire": True,
+    },
+    PASAR_CON_LAS_CORRECCIONES: {
+        "nombre": "Pasar a Despacho también con las correcciones del usuario",
+        "que_hace": (
+            "Suma al paso a Despacho las correcciones del 18/10/2026: una "
+            "falla con un trabajo ya autorizado por la empresa pasa como "
+            "trabajo pedido; un equipo que figura sin energía pasa como falla "
+            "de fibra si el ticket dice que eso ya se descartó; y una falla "
+            "con la señal en rango pasa si una medición del Supervisor de las "
+            "últimas 24 horas la vio fuera de rango. Mientras no se delega, "
+            "el Supervisor solo cuenta cuáles pasarían y lo escribe en cada "
+            "propuesta. Antes de delegarla conviene mirar eso: el motivo de "
+            "cada propuesta y la columna «con correcciones» del informe de "
+            "pendientes."),
+        "que_no_hace": (
+            "No pasa nada por sí sola: hace falta también la tarea de pasar "
+            "casos a Despacho, y el nivel de la empresa. No crea órdenes ni "
+            "asigna técnicos, y no cambia el grupo que leyó el modelo."),
+        #  PROPIA, y no la del paso: encender las correcciones es una decision
+        #  aparte, que el usuario toma despues de ver en sombra que harian.
+        "exige_nivel": 3,
+        "necesita_que_mire": True,
+        #  Y NO ANDA SOLA: suma reglas al paso, que es otra tarea. 'delegar_tarea'
+        #  lo dice si falta (auditor de frontera, 19/10/2026: contestaba "ya
+        #  puede actuar" sin el paso delegado).
+        "requiere": (PASAR_A_DESPACHO,),
     },
     CICLO_AUTOMATICO: {
         "nombre": "Revisar solo, una vez por hora",

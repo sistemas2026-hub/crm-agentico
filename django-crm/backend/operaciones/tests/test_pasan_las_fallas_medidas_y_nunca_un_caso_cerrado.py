@@ -775,8 +775,17 @@ def test_g_caido_sin_causa_ni_senal_pasa_y_no_se_vuelve_a_medir(
 
     assert motor.llamadas == [], "una aceptada no se vuelve a medir"
 
-def test_g2_una_concluyente_no_se_vuelve_a_medir_aunque_sea_vieja(org_a):
-    p = _pendiente(org_a, medida=_respuesta("en_linea", dbm=-21.0))
+@pytest.mark.parametrize("medida", [
+    _respuesta("en_linea", dbm=-27.0),
+    _respuesta("caido", causa="fibra"),
+], ids=["fuera_de_rango", "caido_por_fibra"])
+def test_g2_una_concluyente_que_no_frena_no_se_vuelve_a_medir(org_a, medida):
+    """Hasta el 18/10/2026 esta prueba usaba una medicion EN RANGO, y eso es
+    justo lo que el usuario corrigio (correccion 2): la medicion que FRENA una
+    falla se vuelve a medir cada tres horas, porque una intermitencia no se ve
+    en una sola (ver test_las_correcciones_del_usuario, test_e). La que no
+    frena sigue sin repetirse."""
+    p = _pendiente(org_a, medida=medida)
     _envejecer_medicion(p, mdf.HORAS_PARA_REINTENTAR + 1)
     motor = _Motor()
 

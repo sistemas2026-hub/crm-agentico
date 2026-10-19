@@ -68,7 +68,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 
 from operaciones import chat_herramientas
@@ -441,6 +443,26 @@ def _pedir_los_extras(campos_extra) -> str:
     return (CORTE_EXTRAS + CHR_NL.join(lineas) + CIERRE_EXTRAS)
 
 
+#:  Lo que se cita tal cual en el descarte de un valor inventado: UNA palabra
+#:  suelta, como 'Obra_de_red' o 'sí', que es lo que sirve para calibrar. Una
+#:  frase no se cita --revisor de PII, 19/10/2026--: el modelo puede justificar
+#:  la respuesta con el nombre o la direccion del cliente, que 'tapar' no
+#:  cubre, y el descarte llega a 'informe_de_pendientes', cuya salida se pega
+#:  en una conversacion.
+_PALABRA_SUELTA = re.compile(r"[\w.-]{1,20}")
+
+
+def _sin_tildes_ni_mayusculas(texto: str) -> str:
+    return (unicodedata.normalize("NFKD", texto).encode("ascii", "ignore")
+            .decode("ascii").strip().lower())
+
+
+def _como_se_cita(dicho: str) -> str:
+    if _PALABRA_SUELTA.fullmatch(dicho):
+        return dicho
+    return f"<texto libre de {len(dicho)} caracteres>"
+
+
 def _validar_los_extras(crudo: dict, campos_extra, v: Veredicto) -> None:
     """
     Deja en 'v.extras' solo los valores que estan en la lista declarada.
@@ -457,12 +479,18 @@ def _validar_los_extras(crudo: dict, campos_extra, v: Veredicto) -> None:
         dicho = _texto(crudo.get(nombre), 80)
         if not dicho:
             continue
+        if (spec or {}).get("normalizar"):
+            #  Lo declara el campo, no se hace por defecto: 'Sí' y 'si' son la
+            #  misma respuesta, pero en el grupo una forma parecida es otra
+            #  (auditor independiente, 19/10/2026).
+            dicho = _sin_tildes_ni_mayusculas(dicho)
         if dicho in permitidos:
             v.extras[nombre] = dicho
         else:
             v.descartes.append(
                 f"'{nombre}' con un valor que no esta declarado "
-                f"(dijo '{dicho}'): se descarta, no se elige el mas parecido")
+                f"(dijo '{_como_se_cita(dicho)}'): se descarta, no se elige el "
+                f"mas parecido")
 
 
 #:  El descarte de una respuesta que no es un objeto. Lo lee tambien

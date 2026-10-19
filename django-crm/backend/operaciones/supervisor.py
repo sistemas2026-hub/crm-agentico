@@ -2644,6 +2644,12 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         #  delegada solo deja en el log lo que armaria (la sombra).
         ("armado de la jornada del dia",
          lambda: _armar_la_jornada_del_dia(org, ahora)),
+        #  LA MEDICION DESPUES DEL ARREGLO  --  18/10/2026, correccion 2 del
+        #  usuario: cuando el tecnico reporta el arreglo, se vuelve a medir.
+        #  VA AL FINAL: informa y no decide, y el presupuesto del proveedor se
+        #  gasta primero en lo que si decide.
+        ("medicion despues del arreglo",
+         lambda: _verificar_los_arreglos(org, desatendido=desatendido)),
     ):
         try:
             resumen.update(fase())
@@ -2660,6 +2666,24 @@ def _armar_la_jornada_del_dia(org, ahora) -> dict:
     trae los de Cuadrillas, que este no necesita para nada mas."""
     from operaciones import armado_de_jornadas
     return armado_de_jornadas.armar_las_jornadas_del_dia(org, ahora)
+
+
+def _verificar_los_arreglos(org, *, desatendido: bool = False) -> dict:
+    """La fase de 'verificacion_de_arreglos'. SON CONTEOS, nunca un caso: el
+    detalle queda en cada propuesta."""
+    from operaciones import verificacion_de_arreglos
+
+    informe = verificacion_de_arreglos.verificar_los_arreglos(
+        org, desatendido=desatendido)
+    logger.info("Supervisor: medicion despues del arreglo · candidatas=%s · "
+                "medidas=%s · quedaron en rango=%s · no quedaron=%s · "
+                "sin medicion=%s · sin id de servicio=%s · sin presupuesto=%s "
+                "· errores=%s",
+                informe["candidatas"], informe["medidas"],
+                informe["quedaron_en_rango"], informe["no_quedaron"],
+                informe["sin_medicion"], informe["sin_id_de_servicio"],
+                informe["sin_presupuesto"], informe["errores"])
+    return {"despues_del_arreglo": informe}
 
 
 #:  Cuantas propuestas sin señal se traen por vuelta para releer. El tope real
@@ -2695,21 +2719,27 @@ def _las_que_esperan_relectura(org, senales):
     from operaciones import diagnostico_de_ticket as dxt
 
     ya = {str(getattr(s, "origen_id", "")) for s in senales}
+    #  SE FILTRA ANTES DE CORTAR  --  auditor independiente, 19/10/2026: el
+    #  tope cortaba las 60 mas viejas y despues filtraba, y con mas de 60
+    #  pendientes las que esperaban relectura detras de esas no entraban nunca.
     pendientes = (PropuestaSupervisor.objects
                   .filter(org=org,
                           tipo_senal=PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO,
                           estado=PropuestaSupervisor.PROPUESTA,
                           origen_tipo="case")
-                  .order_by("created_at")[:TOPE_RELECTURA_SIN_SENAL])
+                  .order_by("created_at"))
+    con_las_correcciones = _con_las_correcciones(org)
 
     extra = []
-    for p in pendientes:
+    for p in pendientes.iterator():
+        if len(extra) >= TOPE_RELECTURA_SIN_SENAL:
+            break
         if str(p.origen_id) in ya:
             continue
-        #  Los mismos dos criterios que el bucle de abajo, y a proposito: si
-        #  alguna vez se agrega un tercero, que falle en los dos lugares a la
-        #  vez en vez de divergir en silencio.
-        if dxt.le_falta_lectura(p) or dxt.le_falta_el_grupo(p):
+        #  El mismo criterio que el bucle de abajo, y a proposito: el tercero
+        #  llego el 18/10/2026 (la version de la lectura), y por eso es una
+        #  sola funcion ('hay_que_releer') en vez de tres llamadas repetidas.
+        if dxt.hay_que_releer(p, con_las_correcciones=con_las_correcciones):
             extra.append(_SinSenal(p))
     return extra
 
@@ -2750,6 +2780,7 @@ def _leer_tickets_abiertos(org, ahora, *,
     pendientes = {}
     sin_leer = []        # 1 · ningun diagnostico todavia
     al_dia = []          # 2 · el resumen no refleja lo que ya se leyo
+    con_las_correcciones = _con_las_correcciones(org)
     for s in senales:
         #  SE BUSCA POR CASO, NO POR HUELLA  --  14/10/2026
         #  ------------------------------------------------
@@ -2784,8 +2815,10 @@ def _leer_tickets_abiertos(org, ahora, *,
             continue
         #  O LE FALTA EL GRUPO, que es una lectura incompleta para el paso
         #  a Despacho. Son dos criterios y no uno: ver la nota de
-        #  'le_falta_lectura', que distingue los tres casos.
-        if dxt.le_falta_lectura(p) or dxt.le_falta_el_grupo(p):
+        #  'le_falta_lectura', que distingue los tres casos. Desde el
+        #  18/10/2026, tambien una lectura de una version que ya no alcanza:
+        #  'hay_que_releer' junta los tres.
+        if dxt.hay_que_releer(p, con_las_correcciones=con_las_correcciones):
             #  'str()' en los dos lados: 'diagnostico_de_ticket' busca con
             #  'str(senal.origen_id)' y aca se guardaba crudo. Si alguna vez
             #  'origen_id' deja de ser texto, uno encuentra y el otro no --
@@ -2898,12 +2931,35 @@ class _SinSenal:
         self.datos = {}
 
 
+def _con_las_correcciones(org) -> bool:
+    """
+    Si la tarea de las CORRECCIONES DEL USUARIO esta delegada  --  18/10/2026.
+
+    FALLA CERRADO: no poder comprobarlo es lo mismo que no tenerla, y entonces
+    deciden las reglas de la Fase 4. Se pregunta una vez por fase, no por caso.
+    """
+    from operaciones import paso_a_despacho as pad
+    from operaciones import tareas_delegadas
+
+    try:
+        return bool(tareas_delegadas.esta_delegada(org, pad.TAREA_CORRECCIONES))
+    except Exception as e:                                       # noqa: BLE001
+        logger.info("Supervisor: no se pudo comprobar si las correcciones "
+                    "estan delegadas (%s): deciden las reglas de la Fase 4",
+                    type(e).__name__)
+        return False
+
+
 def _medir_fallas_pendientes(org, *, desatendido: bool = False) -> dict:
     """
     La medicion de las fallas pendientes, como fase del ciclo. El detalle, y
     por que es una fase propia, en 'medicion_de_fallas'.
 
     SON CONTEOS, nunca un caso: el detalle queda en cada propuesta.
+
+    Las re-mediciones de lo que frena (18/10/2026) corren siempre y van al
+    historial: NO miran la tarea de las correcciones, que se lee una sola vez,
+    al decidir (auditor de frontera, 19/10/2026).
     """
     from operaciones import medicion_de_fallas
 
@@ -2911,11 +2967,11 @@ def _medir_fallas_pendientes(org, *, desatendido: bool = False) -> dict:
         org, desatendido=desatendido)
     logger.info("Supervisor: medicion de fallas · candidatas=%s · medidas=%s · "
                 "concluyentes=%s · sin medicion=%s · sin id de servicio=%s · "
-                "sin presupuesto=%s · errores=%s",
+                "sin presupuesto=%s · errores=%s · remedidas=%s",
                 informe["candidatas"], informe["medidas"],
                 informe["concluyentes"], informe["sin_medicion"],
                 informe["sin_id_de_servicio"], informe["sin_presupuesto"],
-                informe["errores"])
+                informe["errores"], informe["remedidas"])
     return {"medicion": informe}
 
 
@@ -2981,7 +3037,14 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
                "anotaciones_fallidas": 0,
                #  Las que las reglas dejan pasar y frena una puerta de la
                #  empresa, por grupo. Ver LA SOMBRA, abajo.
-               "pasarian_por_grupo": {}}
+               "pasarian_por_grupo": {},
+               #  LAS CORRECCIONES DEL USUARIO (18/10/2026): si decidieron en
+               #  esta vuelta, las que pasaron por cada una, y --sin la tarea
+               #  delegada-- las que pasarian, por correccion. Ver LA SOMBRA DE
+               #  LAS CORRECCIONES, abajo.
+               "correcciones": False,
+               "pasaron_por_las_correcciones": {},
+               "pasarian_con_las_correcciones": {}}
     reporte["pendientes_miradas"] = len(sin_decidir)
     if not sin_decidir:
         return {"despacho": reporte}
@@ -3001,6 +3064,11 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
         reporte["se_quedaron"] = len(sin_decidir)
         return {"despacho": reporte}
 
+    #  LAS CORRECCIONES DEL USUARIO  --  18/10/2026. Una sola consulta por
+    #  vuelta, y fallando cerrado ('_con_las_correcciones').
+    con_correcciones = _con_las_correcciones(org)
+    reporte["correcciones"] = con_correcciones
+
     for p in sin_decidir:
         if reporte["pasaron"] >= TOPE_PASO_A_DESPACHO:
             #  EL TOPE DE LA VUELTA YA SE ALCANZO. Se sigue MIRANDO --por eso
@@ -3011,7 +3079,7 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
             #  motivo es de las reglas, y las puertas no lo cambian.
             #  'evaluar' y no solo las reglas  --  16/10/2026, Fase 3: un caso
             #  cerrado no "espera el tope", se queda con su motivo.
-            d = pad.evaluar(p, ahora)
+            d = pad.evaluar(p, ahora, correcciones=con_correcciones)
             if d.pasa:
                 reporte["esperan_el_tope"] += 1
                 continue
@@ -3021,7 +3089,8 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
             try:
                 r = pad.pasar_si_corresponde(
                     org, _SinSenal(p), p, ahora=ahora,
-                    autorizacion=autorizacion)
+                    autorizacion=autorizacion,
+                    correcciones=con_correcciones)
             except Exception as e:                               # noqa: BLE001
                 #  'pasar_si_corresponde' promete no levantar, pero una
                 #  excepcion inesperada aqui no puede tumbar el resto de la
@@ -3045,6 +3114,29 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
                 and r.get("puerta") in (pad.PUERTA_TAREA, pad.PUERTA_EMPRESA)):
             reporte["pasarian_por_grupo"][grupo] = (
                 reporte["pasarian_por_grupo"].get(grupo, 0) + 1)
+        #  LA SOMBRA DE LAS CORRECCIONES  --  18/10/2026. Sin la tarea de las
+        #  correcciones, una propuesta que las reglas FRENAN se vuelve a evaluar
+        #  con ellas, sin escribir ni pasar nada. Si pasaria, se cuenta por
+        #  correccion y se dice en su motivo: es lo que se le prometio al
+        #  usuario, "antes de encenderlas te muestro cuales pasarian y por que".
+        #  Solo las que frenan las reglas: si las frena una puerta de la
+        #  empresa, las correcciones no cambian nada.
+        if (not con_correcciones and not r.get("paso")
+                and (r.get("puerta") or pad.PUERTA_REGLAS) == pad.PUERTA_REGLAS):
+            try:
+                d2 = pad.evaluar(p, ahora, correcciones=True)
+            except Exception as e:                               # noqa: BLE001
+                d2 = None
+                logger.info("Supervisor: no se pudo evaluar la sombra de las "
+                            "correcciones (%s)", type(e).__name__)
+            if d2 is not None and d2.pasa:
+                regla = d2.regla or "sin regla"
+                reporte["pasarian_con_las_correcciones"][regla] = (
+                    reporte["pasarian_con_las_correcciones"].get(regla, 0) + 1)
+                r = {**r, "con_las_correcciones": d2.regla}
+        if r.get("paso") and r.get("regla"):
+            reporte["pasaron_por_las_correcciones"][r["regla"]] = (
+                reporte["pasaron_por_las_correcciones"].get(r["regla"], 0) + 1)
         if r.get("paso"):
             reporte["pasaron"] += 1
         else:
@@ -3101,13 +3193,17 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
                 "esperan el tope=%s · se quedaron=%s · motivos escritos=%s · "
                 "anotaciones fallidas=%s · fallaron=%s · por grupo=%s · "
                 "por confianza del grupo=%s · por que se quedaron=%s · "
-                "pasarian por grupo=%s",
+                "pasarian por grupo=%s · correcciones=%s · pasaron por las "
+                "correcciones=%s · pasarian con las correcciones=%s",
                 reporte["pendientes_miradas"], reporte["pasaron"],
                 reporte["esperan_el_tope"], reporte["se_quedaron"],
                 reporte["motivos_escritos"], reporte["anotaciones_fallidas"],
                 reporte["fallaron"], reporte["por_grupo"],
                 reporte["por_confianza"], reporte["motivos"],
-                reporte["pasarian_por_grupo"])
+                reporte["pasarian_por_grupo"],
+                "encendidas" if reporte["correcciones"] else "en sombra",
+                reporte["pasaron_por_las_correcciones"],
+                reporte["pasarian_con_las_correcciones"])
     return {"despacho": reporte}
 
 

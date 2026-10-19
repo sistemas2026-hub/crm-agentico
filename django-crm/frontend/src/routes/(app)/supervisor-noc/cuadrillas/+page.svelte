@@ -38,11 +38,15 @@
   /**
    * Los grupos de caso que pasan a Despacho (17/10/2026). De la labor de cada
    * uno sale la de una jornada armada sola: la de la mayoría de los casos de
-   * sus zonas. Las claves son las de `paso_a_despacho.GRUPOS`.
+   * sus zonas. Las claves son las de `paso_a_despacho.GRUPOS`, y el trabajo
+   * pedido va partido en dos desde el 18/10/2026 (corrección 1 del usuario):
+   * el de un cliente que ya existe y la instalación de uno nuevo
+   * (`cuadrillas.INSTALACION_NUEVA`).
    */
   const GRUPOS_DE_CASO = [
     { id: 'falla_de_servicio', texto: 'Falla de servicio' },
-    { id: 'trabajo_pedido', texto: 'Trabajo pedido' },
+    { id: 'trabajo_pedido', texto: 'Trabajo pedido (cliente que ya existe)' },
+    { id: 'instalacion_nueva', texto: 'Instalación de un cliente nuevo' },
     { id: 'obra_de_red', texto: 'Obra de red' }
   ];
 

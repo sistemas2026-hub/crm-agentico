@@ -82,6 +82,13 @@ _MOTIVOS_GUARDABLES = frozenset({
     "caso_sin_servicio", "sin_identidad_resoluble", "el_isp_no_tiene_barrio",
 })
 
+#:  El motivo de una INSTALACION NUEVA  --  18/10/2026. Su ticket cuelga del
+#:  cliente de instalaciones del ISP ("INSTALACIONES NUEVAS"), y el barrio de
+#:  esa ficha es el del cliente ficticio, no el de la casa a instalar: todas
+#:  las instalaciones caerian en el mismo barrio. Se guarda sin barrio, con
+#:  este motivo, y la pieza queda marcada 'cliente_nuevo'.
+MOTIVO_INSTALACION_NUEVA = "instalacion_nueva"
+
 #:  Los nombres de excepcion que dicen "el motor no esta": sin conexion. Con
 #:  estos se deja de preguntar en la vuelta; con cualquier otro, solo se salta
 #:  ese caso.
@@ -108,6 +115,11 @@ def localidad_guardada(propuesta) -> dict | None:
 def _hay_que_leer(pieza, ahora) -> bool:
     """Si este caso necesita que se le pida el barrio en esta vuelta."""
     if pieza is None:
+        return True
+    if "cliente_nuevo" not in pieza:
+        #  UNA PIEZA DE ANTES DEL 18/10/2026: no sabe si el caso es de un
+        #  cliente nuevo, y si lo es, su barrio es el del cliente ficticio. Se
+        #  pide una vez mas; la nueva ya trae la marca.
         return True
     if str(pieza.get("localidad") or "").strip():
         return False
@@ -145,6 +157,12 @@ def leer_localidad(caso_id) -> tuple:
                           else "fallo_del_caso")
         motivo = str(contexto.get("motivo") or "")
         return "", (motivo if motivo in _MOTIVOS_GUARDABLES else "sin_contexto")
+    #  EL CLIENTE DE INSTALACIONES DEL ISP: el mismo discriminador que usa
+    #  `clasificacion_de_trabajo` (220 de 220, medido el 08/10/2026).
+    servicio = str(contexto.get("servicio") or "").strip()
+    ficticio = str(contexto.get("id_servicio_instalaciones") or "").strip()
+    if servicio and ficticio and servicio == ficticio:
+        return "", MOTIVO_INSTALACION_NUEVA
     cliente = contexto.get("cliente") or {}
     if not cliente:
         #  EL MOTOR CONTESTO SIN FICHA: se traga el error del ISP y devuelve
@@ -172,11 +190,19 @@ def guardar_localidad(propuesta, barrio: str, motivo: str, ahora) -> bool:
                   .first())
         if fresca is None:
             return False
-        dato = (f"Barrio del cliente en el ISP: {barrio}." if barrio
-                else "El barrio del cliente no se pudo saber.")
+        nuevo = motivo == MOTIVO_INSTALACION_NUEVA
+        if barrio:
+            dato = f"Barrio del cliente en el ISP: {barrio}."
+        elif nuevo:
+            dato = ("Instalacion de un cliente nuevo: el ticket cuelga del "
+                    "cliente de instalaciones del ISP, que no trae el barrio "
+                    "de la casa.")
+        else:
+            dato = "El barrio del cliente no se pudo saber."
         pieza = sup._observacion(FUENTE_LOCALIDAD, fresca.origen_id, dato, ahora)
         pieza["localidad"] = barrio
         pieza["motivo"] = motivo
+        pieza["cliente_nuevo"] = nuevo
         resto = [x for x in (fresca.evidencia or [])
                  if not (isinstance(x, dict)
                          and x.get("fuente") == FUENTE_LOCALIDAD)]
@@ -257,6 +283,7 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
          "casos": n, "contados": n,
          "ya_despachados": n,  # su orden ya esta en manos de alguien, o hecha
          "sin_barrio": n,    # todavia no se sabe, o el ISP no lo tiene
+         "instalaciones_sin_barrio": n,  # cliente nuevo: su ficha no lo trae
          "sin_zona": n,      # el barrio no esta mapeado a ninguna zona
          "sin_labor": n}     # su grupo no tiene labor (o no tiene lectura)
 
@@ -273,8 +300,25 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
     Los tres que no se cuentan van aparte porque se arreglan distinto: el
     barrio llega solo en las vueltas que siguen; la zona se mapea en
     Cuadrillas; la labor se declara en la tabla de la empresa.
+
+    EL TRABAJO PEDIDO DE UN CLIENTE NUEVO ES INSTALACION, el de uno que ya
+    existe no (correccion 1 del usuario, 18/10/2026): su labor sale de la fila
+    `INSTALACION_NUEVA` de la tabla. Una instalacion nueva no trae barrio --su
+    ficha es la del cliente ficticio--, asi que hoy se cuenta aparte, en
+    'instalaciones_sin_barrio', y no en 'sin_barrio'.
+
+    Y ESAS INSTALACIONES SE LE CUENTAN A LAS ZONAS DE LAS CUADRILLAS DE
+    INSTALACION  --  auditor independiente, 19/10/2026. Sin barrio no entraban
+    en ninguna zona, y con el trabajo pedido de los clientes que ya existen
+    contado como correctivo, ningun caso real pedia instalacion: la cuadrilla
+    de instalacion salia con la labor de la mayoria de su zona, y las ordenes
+    de instalacion quedaban sin cuadrilla en el reparto. No se sabe en que
+    zona va a caer cada una, pero si que la va a hacer una cuadrilla de esa
+    labor: se suman a las zonas habituales de las cuadrillas activas cuya
+    labor habitual es la de la instalacion nueva. Va aparte de 'contados', que
+    sigue siendo de casos con zona.
     """
-    from campo.cuadrillas import labor_de_cada_grupo
+    from campo.cuadrillas import INSTALACION_NUEVA, labor_de_cada_grupo
     from campo.zonas import AliasDeZona, normalizar_localidad
     from operaciones import paso_a_despacho as pad
 
@@ -287,16 +331,17 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
     }
     despachados = _ya_despachados(org, list(propuestas))
     salida = {"por_zona": {}, "casos": len(propuestas), "contados": 0,
-              "ya_despachados": 0, "sin_barrio": 0, "sin_zona": 0,
-              "sin_labor": 0}
+              "ya_despachados": 0, "sin_barrio": 0,
+              "instalaciones_sin_barrio": 0, "sin_zona": 0, "sin_labor": 0}
     for caso, p in propuestas.items():
         if caso in despachados:
             salida["ya_despachados"] += 1
             continue
-        barrio = normalizar_localidad(
-            (localidad_guardada(p) or {}).get("localidad") or "")
+        pieza = localidad_guardada(p) or {}
+        barrio = normalizar_localidad(pieza.get("localidad") or "")
         if not barrio:
-            salida["sin_barrio"] += 1
+            salida["instalaciones_sin_barrio" if pieza.get("cliente_nuevo")
+                   else "sin_barrio"] += 1
             continue
         zona = zona_de_barrio.get(barrio)
         if zona is None:
@@ -304,6 +349,8 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
             continue
         lectura = pad._ultima_lectura_con_grupo(p) or {}
         grupo = str(lectura.get("grupo") or "")
+        if grupo == pad.TRABAJO_PEDIDO and _es_de_un_cliente_nuevo(pieza, lectura):
+            grupo = INSTALACION_NUEVA
         labor = labores.get(grupo) if grupo else labor_de_la_visita(p)
         if not labor:
             salida["sin_labor"] += 1
@@ -311,7 +358,36 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
         de_la_zona = salida["por_zona"].setdefault(zona, {})
         de_la_zona[labor] = de_la_zona.get(labor, 0) + 1
         salida["contados"] += 1
+
+    labor_nueva = labores.get(INSTALACION_NUEVA)
+    salida["zonas_con_instalaciones_sin_barrio"] = 0
+    if salida["instalaciones_sin_barrio"] and labor_nueva:
+        from campo.cuadrillas import Cuadrilla
+        from campo.zonas import ZonaOperativa
+
+        habituales = [z for z in Cuadrilla.objects
+                      .filter(org=org, activa=True, labor_habitual=labor_nueva)
+                      .values_list("zonas_habituales", flat=True) if z]
+        zonas = {str(z) for z in ZonaOperativa.objects
+                 .filter(org=org, activa=True, id__in=habituales)
+                 .values_list("id", flat=True)}
+        for zona in zonas:
+            de_la_zona = salida["por_zona"].setdefault(zona, {})
+            de_la_zona[labor_nueva] = (de_la_zona.get(labor_nueva, 0)
+                                       + salida["instalaciones_sin_barrio"])
+        salida["zonas_con_instalaciones_sin_barrio"] = len(zonas)
     return salida
+
+
+def _es_de_un_cliente_nuevo(localidad: dict, lectura: dict) -> bool:
+    """Si el trabajo pedido es la instalacion de un cliente nuevo: lo marco la
+    lectura del barrio, o el clasificador lo verifico por el cliente de
+    instalaciones del ISP al leer el ticket. Por el texto solo, NO: el asunto
+    de un trabajo pedido dice "instalacion" tambien para un punto de TV."""
+    if localidad.get("cliente_nuevo"):
+        return True
+    return (lectura.get("labor") == "instalacion"
+            and bool(lectura.get("labor_verificada")))
 
 
 #:  La accion que escribe `supervisor.analizar` para una visita medida. Es un
@@ -482,7 +558,8 @@ def armar_las_jornadas_del_dia(org, ahora=None, *, leer=None) -> dict:
         "reajustadas=%s · ya estaban=%s · sin zona=%s · lider ausente=%s · "
         "sin gente=%s · sin base=%s · labores=%s · casos=%s · "
         "ya despachados=%s · contados=%s · "
-        "sin barrio=%s · barrio sin zona=%s · sin labor=%s · barrios leidos=%s "
+        "sin barrio=%s · instalaciones sin barrio=%s · barrio sin zona=%s · "
+        "sin labor=%s · barrios leidos=%s "
         "· sin dato=%s · no se pudo=%s · esperan el tope=%s · sin preguntar "
         "por el motor caido=%s%s",
         salida["modo"] + (f" ({porque})" if porque else ""), fecha,
@@ -490,7 +567,8 @@ def armar_las_jornadas_del_dia(org, ahora=None, *, leer=None) -> dict:
         r["reajustadas"], r["ya_estaban"], r["sin_zona"],
         len(r["lider_ausente"]), len(r["sin_gente"]), r["sin_base"],
         r["labores"], d["casos"], d["ya_despachados"],
-        d["contados"], d["sin_barrio"], d["sin_zona"], d["sin_labor"],
+        d["contados"], d["sin_barrio"], d.get("instalaciones_sin_barrio", 0),
+        d["sin_zona"], d["sin_labor"],
         b["leidas"], b["sin_dato"], b["no_se_pudo"], b["esperan_el_tope"],
         b["motor_caido"], f" · {salida['aviso']}" if salida["aviso"] else "")
     return {"jornadas_del_dia": salida}

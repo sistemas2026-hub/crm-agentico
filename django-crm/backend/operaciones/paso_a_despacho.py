@@ -66,6 +66,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,42 @@ CAMPO_PARA_EL_MODELO = {
             "hipotesis de que le pasa al equipo; un texto confuso o que "
             "mezcla dos pedidos es 'baja'"),
     },
+    #  LAS CORRECCIONES DEL USUARIO  --  18/10/2026
+    #  (SPEC/objetivos/correcciones-al-diagnostico.md). Dos HECHOS que el modelo
+    #  saca del texto; que se hace con ellos lo decide el codigo en 'decidir',
+    #  y solo con la tarea de las correcciones delegada ('TAREA_CORRECCIONES').
+    #  NO cambian el grupo: un ticket que el modelo pone en falla sigue en
+    #  falla, y la regla que lo deja pasar es aparte y se enciende aparte.
+    "accion_autorizada": {
+        "valores": ("si", "no"),
+        #  'Sí', 'SI' o 'si' son lo mismo: se comparan sin tildes ni
+        #  mayusculas (ver 'cerebro._validar_los_extras'). Solo estas dos
+        #  claves: en el grupo, aceptar una forma parecida cambiaria lo que
+        #  pasa por la Fase 4.
+        "normalizar": True,
+        "ayuda": (
+            "'si' si el ticket dice que la empresa YA AUTORIZO un trabajo en "
+            "la casa del cliente: cambio de equipo o de router, cambio de "
+            "plan, traslado, o un cambio por fidelizacion. 'no' si no dice "
+            "nada de eso. Es un dato aparte: NO cambia el grupo, que sigue "
+            "saliendo de lo que pide el reclamo. En minusculas y sin tilde"),
+    },
+    "energia_descartada": {
+        "valores": ("si", "no"),
+        "normalizar": True,
+        "ayuda": (
+            "'si' si el texto dice que ya se descarto la falta de energia en "
+            "la casa: el cliente probo otro tomacorriente, el equipo esta "
+            "encendido, o se ve LOS en rojo en el equipo. 'no' si no lo dice. "
+            "Es un dato aparte: NO cambia el grupo. En minusculas y sin "
+            "tilde"),
+    },
 }
+
+#:  El valor de las dos claves de arriba que cuenta. Cualquier otro --"no",
+#:  vacio, o uno que el modelo invento y 'cerebro' descarto-- es como si no lo
+#:  hubiera dicho: la lectura conservadora, y el caso se queda donde estaba.
+SI = "si"
 
 #:  POR QUE HAY DOS CONFIANZAS, Y NO ES REDUNDANCIA  --  14/10/2026
 #:
@@ -183,14 +219,17 @@ SIN_CONDICION_DE_MEDICION = frozenset({TRABAJO_PEDIDO, OBRA_DE_RED})
 class Decision:
     """Lo que sale de evaluar un ticket. Siempre trae el POR QUE."""
 
-    __slots__ = ("pasa", "porque", "grupo", "labor", "puerta")
+    __slots__ = ("pasa", "porque", "grupo", "labor", "puerta", "regla")
 
     def __init__(self, pasa: bool, porque: str, grupo: str = "",
-                 labor: str = "", puerta: str = ""):
+                 labor: str = "", puerta: str = "", regla: str = ""):
         self.pasa = pasa
         self.porque = porque
         self.grupo = grupo
         self.labor = labor
+        #  Cual de las CORRECCIONES DEL USUARIO (18/10/2026) lo dejo pasar, o
+        #  vacio si fueron las reglas de la Fase 4. Es lo que cuenta la sombra.
+        self.regla = regla
         #  Que la freno. Las reglas, salvo que diga otra cosa: desde la Fase 3
         #  tambien puede ser el caso, que ya no esta abierto (PUERTA_CASO).
         self.puerta = puerta or PUERTA_REGLAS
@@ -200,7 +239,9 @@ class Decision:
 
 
 def decidir(grupo: str, labor_veredicto: dict | None,
-            confianza: str = "", medicion: dict | None = None) -> Decision:
+            confianza: str = "", medicion: dict | None = None, *,
+            correcciones: bool = False, accion_autorizada: str = "",
+            energia_descartada: str = "", niveles=(), ahora=None) -> Decision:
     """
     Si este ticket puede entrar a la cola de Despacho sin que alguien lo acepte.
 
@@ -222,6 +263,13 @@ def decidir(grupo: str, labor_veredicto: dict | None,
     la regla de la Fase 3 no alcanzaba a ningun ticket y que el ISP resolvia
     las fallas de fibra por su flujo normal, en 1 a 3 dias, mientras el
     Supervisor esperaba.
+
+    LAS CORRECCIONES DEL USUARIO (18/10/2026) solo deciden con
+    'correcciones=True', que el ciclo pone si la tarea 'TAREA_CORRECCIONES'
+    esta delegada: una accion ya autorizada pasa como trabajo pedido, la
+    energia descartada por el ticket pasa como fibra, y una falla en rango
+    pasa si la serie propia de 24 horas la vio fuera de rango. El doble
+    diagnostico ('niveles') INFORMA siempre y no decide nunca.
     """
     lv = labor_veredicto if isinstance(labor_veredicto, dict) else {}
     labor = str(lv.get("labor") or "")
@@ -238,6 +286,12 @@ def decidir(grupo: str, labor_veredicto: dict | None,
 
     if grupo in SIEMPRE_UNA_PERSONA:
         return Decision(False, _POR_QUE_NUNCA[grupo], grupo=grupo, labor=labor)
+    #  CORRECCION 1 (18/10/2026): un trabajo ya autorizado no se objeta, aunque
+    #  el texto hable de una falla. La medicion informa; no frena.
+    if (correcciones and grupo == FALLA_DE_SERVICIO
+            and accion_autorizada == SI):
+        return Decision(True, _ACCION_AUTORIZADA, grupo=grupo, labor=labor,
+                        regla=REGLA_ACCION_AUTORIZADA)
 
     if grupo in SIN_CONDICION_DE_MEDICION:
         #  PASAN SIEMPRE desde la Fase 4: ver la nota sobre la confianza, arriba.
@@ -279,20 +333,32 @@ def decidir(grupo: str, labor_veredicto: dict | None,
     estado = str(m.get("estado") or "")
     senal = str(m.get("senal") or "")
     causa = str(m.get("causa_caida") or "")
+    doble = _doble_diagnostico(niveles, m)
     if estado == optico.EN_LINEA:
         if senal == optico.SENAL_BUENA and _hay_nivel(m):
-            return Decision(False, _EN_RANGO.format(nivel=_nivel(m)),
+            #  CORRECCION 2 (18/10/2026): la serie propia del Supervisor puede
+            #  haber visto la falla que esta medicion no ve.
+            vista = _la_falla_en_el_historial(m, ahora) if correcciones else None
+            if vista is not None:
+                return Decision(True, _intermitencia(m, vista) + doble,
+                                grupo=grupo, labor=labor,
+                                regla=REGLA_INTERMITENCIA)
+            return Decision(False, _EN_RANGO.format(nivel=_nivel(m)) + doble,
                             grupo=grupo, labor=labor)
         if senal == optico.SENAL_DEBIL and _hay_nivel(m):
             return Decision(
                 True,
                 f"falla de servicio CONFIRMADA por la medicion del equipo: "
                 f"esta en linea con la señal fuera del rango de la guia"
-                f"{_nivel(m)}",
+                f"{_nivel(m)}" + doble,
                 grupo=grupo, labor=labor)
         return Decision(True, _EN_LINEA_SIN_SENAL, grupo=grupo, labor=labor)
     if estado == optico.CAIDO:
         if causa == optico.CAUSA_SIN_ENERGIA:
+            #  CASO 3 (18/10/2026): la energia descartada por el ticket no frena.
+            if correcciones and energia_descartada == SI:
+                return Decision(True, _ENERGIA_DESCARTADA, grupo=grupo,
+                                labor=labor, regla=REGLA_ENERGIA_DESCARTADA)
             return Decision(False, _SIN_ENERGIA, grupo=grupo, labor=labor)
         if causa == optico.CAUSA_FIBRA:
             return Decision(True, _SIN_SENAL_OPTICA, grupo=grupo, labor=labor)
@@ -314,6 +380,231 @@ def decidir(grupo: str, labor_veredicto: dict | None,
 
 #  Lo que '_nivel' agrega a un motivo, para sacarlo de la clave del log.
 _SIN_NIVEL = re.compile(r" \(-?[0-9.]+ dBm\)")
+
+
+# =============================================================================
+#  LAS CORRECCIONES DEL USUARIO  --  18/10/2026
+# =============================================================================
+#
+#  El usuario corrigio cuatro diagnosticos del Supervisor y salieron nueve
+#  reglas (SPEC/objetivos/correcciones-al-diagnostico.md). Las que hacen pasar
+#  MAS casos a Despacho van detras de su propia tarea delegada: sin ella
+#  deciden las reglas de la Fase 4, y las correcciones solo se cuentan en
+#  sombra ("con las correcciones pasaria...") para que el usuario las vea
+#  antes de encenderlas. Es lo que se le dijo: "antes de encenderlas te
+#  muestro cuales pasarian y por que".
+
+#:  La tarea que enciende las correcciones. Vive en 'tareas_delegadas.CATALOGO'
+#:  y se declara aca, como 'TAREA', para no crear un ciclo de imports; una
+#:  prueba la ata a la del catalogo.
+TAREA_CORRECCIONES = "pasar_a_despacho_con_las_correcciones"
+
+#:  Cual correccion dejo pasar un caso. Claves fijas: viajan al log y a la
+#:  propuesta, y un texto libre ahi seria repartir lo que no se controla.
+REGLA_ACCION_AUTORIZADA = "accion_autorizada"
+REGLA_ENERGIA_DESCARTADA = "energia_descartada"
+REGLA_INTERMITENCIA = "intermitencia_en_el_historial"
+REGLA_REMEDICION = "remedicion"
+REGLA_RELECTURA = "relectura"
+
+#:  Lo que se le agrega al motivo de una propuesta que se queda, si con las
+#:  correcciones pasaria. TEXTO FIJO por regla: el motivo se reescribe solo
+#:  cuando cambia, y un texto con numeros que cambian lo reescribiria siempre.
+SOMBRA_DE_LA_REGLA = {
+    REGLA_ACCION_AUTORIZADA: (
+        "el ticket trae un trabajo ya autorizado por la empresa, y eso no se "
+        "objeta (correccion 1)"),
+    REGLA_ENERGIA_DESCARTADA: (
+        "el ticket descarta la falta de energia, asi que es una falla de "
+        "fibra (caso 3)"),
+    REGLA_INTERMITENCIA: (
+        "una medicion del Supervisor de las ultimas 24 horas vio la falla: es "
+        "una intermitencia (correccion 2)"),
+    REGLA_REMEDICION: (
+        "el Supervisor volvio a medir el equipo y la medicion mas reciente ve "
+        "la falla (correccion 2)"),
+    REGLA_RELECTURA: (
+        "releido con la version nueva de la lectura, ya no se lee como una "
+        "falla sino como un trabajo o una obra, que no esperan la medicion"),
+}
+
+#:  Quien tiene que haber escrito el ticket para que una "accion autorizada"
+#:  cuente: una cuenta CON NOMBRE de la empresa en el proveedor. Auditor de
+#:  frontera, 19/10/2026: la autorizacion la da la empresa, y un ticket que
+#:  creo Dexter desde WhatsApp, o que llego por la cuenta compartida, puede
+#:  traer escrito "se autoriza" por el propio cliente. Es el valor de
+#:  'cases.models.EXTERNAL_AUTHOR_HUMAN'; una prueba los ata.
+AUTOR_DE_LA_EMPRESA = "humano_verificado"
+
+#:  Cuanto puede diferir el nivel que reporta el ticket del que mide el
+#:  Supervisor para decir que coinciden. El ejemplo del usuario: -23.38 contra
+#:  -23.57, 0.19 dB. INFORMA y no decide: un nivel malo ya pasa y uno bueno ya
+#:  se queda, coincida o no con el reporte.
+TOLERANCIA_DOBLE_DIAGNOSTICO_DB = 1.0
+
+#:  Hasta cuantas horas atras se mira la serie de mediciones propias. SmartOLT
+#:  no da el historial de la señal en numeros (solo una imagen, medido el
+#:  13/10), asi que el historial es el que el Supervisor mismo va guardando.
+HORAS_DEL_HISTORIAL = 24
+
+#:  Lo que se guarda de cada medicion en el historial ('medicion_de_fallas').
+CLAVES_DEL_HISTORIAL = ("observado_en", "estado", "senal", "senal_dbm",
+                        "causa_caida")
+
+#:  Los niveles que trae escritos un ticket: "-28.24 dBm", "-23,1dBm", y los
+#:  que van juntos antes de una sola unidad, "-23.01 / -23.38 dBm" --que es
+#:  como los escribe el ISP: el de la ONU y el de la OLT--. Hasta el
+#:  19/10/2026 se perdia el primero (auditor independiente).
+_UN_NIVEL = r"-\s?\d{1,2}(?:[.,]\d{1,3})?"
+_DBM = re.compile(r"((?:" + _UN_NIVEL + r"\s*/\s*)*" + _UN_NIVEL + r")\s*dbm",
+                  re.IGNORECASE)
+_NIVEL = re.compile(_UN_NIVEL)
+
+
+def niveles_reportados(texto: str) -> list:
+    """Los niveles en dBm que trae escritos el ticket, en el orden del texto.
+
+    EL DOBLE DIAGNOSTICO (correccion 2 del usuario). Los saca el CODIGO del
+    texto CRUDO: un numero se lee con una expresion, no se interpreta. Y del
+    crudo y no del tapado, porque 'lectura_de_ticket.tapar' puede confundir
+    "-28.240" con un documento con puntos. Solo los valores que una ONU puede
+    dar (entre -45 y -5 dBm), y como mucho cuatro. Nada mas sale del texto.
+    """
+    salida = []
+    for grupo in _DBM.findall(texto or ""):
+        for crudo in _NIVEL.findall(grupo):
+            try:
+                valor = float(crudo.replace(" ", "").replace(",", "."))
+            except ValueError:
+                continue
+            if -45.0 <= valor <= -5.0:
+                salida.append(valor)
+    return salida[:4]
+
+
+def _cuando(valor):
+    """Una fecha guardada como texto, o None si no se entiende o no trae zona."""
+    from django.utils import timezone
+    from django.utils.dateparse import parse_datetime
+
+    try:
+        t = parse_datetime(str(valor or ""))
+    except (TypeError, ValueError):
+        return None
+    if t is None or timezone.is_naive(t):
+        return None
+    return t
+
+
+def la_medicion_frena(medicion) -> bool:
+    """Si la medicion es de las dos que frenan una falla desde la Fase 4: en
+    linea con la señal en rango, o caida por falta de energia. Son las que
+    'medicion_de_fallas' vuelve a medir (correccion 2) y las unicas que una
+    relectura con las claves nuevas puede cambiar."""
+    from operaciones import diagnostico_optico as optico
+
+    m = medicion if isinstance(medicion, dict) else {}
+    if m.get("medido_con") != MEDIDO_CON:
+        return False
+    if m.get("estado") == optico.EN_LINEA:
+        return m.get("senal") == optico.SENAL_BUENA and _hay_nivel(m)
+    return (m.get("estado") == optico.CAIDO
+            and m.get("causa_caida") == optico.CAUSA_SIN_ENERGIA)
+
+
+def la_medicion_vigente(medicion, *, correcciones: bool = False):
+    """
+    La medicion con la que se decide.
+
+    SIN LAS CORRECCIONES, la pieza tal cual: es la Fase 4. CON ELLAS, la mas
+    reciente entre la pieza y las re-mediciones que 'medicion_de_fallas'
+    guardo en su historial.
+
+    UNA RE-MEDICION NUNCA REEMPLAZA A LA PIEZA, este o no delegada la tarea
+    (auditor de frontera, 19/10/2026): si la reemplazara con la tarea puesta,
+    quitarla despues no devolveria la Fase 4 --la pieza nueva seguiria
+    decidiendo--. Asi la medicion que decide depende SOLO de como esta hoy la
+    delegacion, y la sombra cuenta lo que pasaria con la misma cuenta.
+    """
+    if not correcciones or not isinstance(medicion, dict):
+        return medicion
+    serie = [h for h in (medicion.get("historial") or []) if isinstance(h, dict)]
+    mas_nueva, cuando = None, _cuando(medicion.get("observado_en"))
+    for h in serie:
+        t = _cuando(h.get("observado_en"))
+        if t is not None and (cuando is None or t > cuando):
+            mas_nueva, cuando = h, t
+    if mas_nueva is None:
+        return medicion
+    vigente = dict(medicion)
+    for clave in CLAVES_DEL_HISTORIAL:
+        vigente[clave] = mas_nueva.get(clave)
+    vigente["historial"] = ([h for h in serie if h is not mas_nueva]
+                            + [{c: medicion.get(c) for c in CLAVES_DEL_HISTORIAL}])
+    return vigente
+
+
+def _la_falla_en_el_historial(medicion, ahora) -> dict | None:
+    """La medicion propia de las ultimas horas que SI vio la falla: señal fuera
+    de rango, o caido por fibra. None si no hay ninguna."""
+    from django.utils import timezone
+
+    from operaciones import diagnostico_optico as optico
+
+    ahora = ahora or timezone.now()
+    for h in reversed((medicion or {}).get("historial") or []):
+        if not isinstance(h, dict):
+            continue
+        cuando = _cuando(h.get("observado_en"))
+        if cuando is None or ahora - cuando > timedelta(hours=HORAS_DEL_HISTORIAL):
+            continue
+        if h.get("estado") == optico.EN_LINEA and h.get("senal") == optico.SENAL_DEBIL:
+            return h
+        if (h.get("estado") == optico.CAIDO
+                and h.get("causa_caida") == optico.CAUSA_FIBRA):
+            return h
+    return None
+
+
+def _doble_diagnostico(niveles, medicion) -> str:
+    """Lo que el doble diagnostico le suma al motivo, o "" si el ticket no trae
+    niveles o la medicion no trae el suyo. El nivel va entre parentesis, como
+    el de '_nivel', para que el log lo saque de la clave."""
+    if not niveles or not _hay_nivel(medicion):
+        return ""
+    medido = float(medicion["senal_dbm"])
+    reportado = min(niveles, key=lambda v: abs(v - medido))
+    if abs(reportado - medido) <= TOLERANCIA_DOBLE_DIAGNOSTICO_DB:
+        return (f". Doble diagnostico: coincide con el nivel que reporta el "
+                f"ticket ({reportado} dBm)")
+    return (f". Doble diagnostico: el ticket reporta otro nivel "
+            f"({reportado} dBm), la señal cambio desde el reporte")
+
+
+_ACCION_AUTORIZADA = (
+    "el ticket trae un trabajo ya autorizado por la empresa (cambio de equipo, "
+    "de plan o por fidelizacion): se trata como trabajo pedido y la medicion "
+    "no lo objeta (correccion 1 del usuario)")
+_ENERGIA_DESCARTADA = (
+    "la medicion dice que el equipo se quedo sin energia, pero el ticket dice "
+    "que eso ya se descarto (otro tomacorriente, equipo encendido o LOS en "
+    "rojo): se trata como falla de fibra (caso 3 del usuario)")
+
+
+def _intermitencia(medicion, vista) -> str:
+    """El motivo de una falla que la medicion de ahora no ve y la serie si."""
+    from operaciones import diagnostico_optico as optico
+
+    if vista.get("estado") == optico.CAIDO:
+        como = "caida por perdida de señal optica"
+    else:
+        como = "con la señal fuera de rango" + (
+            _nivel(vista) if _hay_nivel(vista) else "")
+    return (f"falla de servicio CONFIRMADA por las mediciones del Supervisor: "
+            f"ahora esta en rango{_nivel(medicion)}, pero una medicion de las "
+            f"ultimas {HORAS_DEL_HISTORIAL} horas la vio {como}. Una "
+            f"intermitencia no se ve en una sola medicion (correccion 2 del "
+            f"usuario)")
 
 
 def _hay_nivel(medicion: dict) -> bool:
@@ -515,7 +806,9 @@ def de_la_senal(senal) -> Decision:
         #  ('evaluar'); una falla que llegue por aca no pasa.
 
 
-def de_la_propuesta(propuesta) -> Decision:
+def de_la_propuesta(propuesta, *, correcciones: bool = False,
+                    niveles=(), ahora=None,
+                    autor_de_la_empresa: bool = False) -> Decision:
     """
     La decision usando la lectura que YA esta guardada, sin volver a leer.
 
@@ -546,13 +839,76 @@ def de_la_propuesta(propuesta) -> Decision:
         return Decision(False, "la lectura guardada no trae el grupo: hay que "
                                "volver a leer el reclamo antes de poder "
                                "decidir")
-    return decidir(
-        str(ultima.get("grupo") or ""),
+    guardada = ultima_medicion(propuesta)
+    vigente = la_medicion_vigente(guardada, correcciones=correcciones)
+    grupo = str(ultima.get("grupo") or "")
+    releida = _la_relectura_saco_a_una_falla(propuesta, ultima, guardada)
+    if releida and not correcciones:
+        #  SIN LA TAREA, la falla sigue en la regla de la medicion: ver
+        #  '_la_relectura_saco_a_una_falla'.
+        grupo = FALLA_DE_SERVICIO
+    d = decidir(
+        grupo,
         {"labor": ultima.get("labor") or "",
          "porque": ultima.get("labor_porque") or "",
          "verificada": bool(ultima.get("labor_verificada"))},
         confianza=str(ultima.get(CONFIANZA_DEL_GRUPO) or ""),
-        medicion=ultima_medicion(propuesta))
+        medicion=vigente,
+        correcciones=correcciones,
+        #  La autorizacion la da la empresa: solo cuenta si el ticket lo
+        #  escribio una cuenta suya ('AUTOR_DE_LA_EMPRESA').
+        accion_autorizada=(str(ultima.get("accion_autorizada") or "")
+                           if autor_de_la_empresa else ""),
+        energia_descartada=str(ultima.get("energia_descartada") or ""),
+        niveles=niveles, ahora=ahora)
+    if d.pasa and not d.regla and correcciones:
+        if releida:
+            d.regla = REGLA_RELECTURA
+        elif (vigente is not guardada and grupo == FALLA_DE_SERVICIO
+                and la_medicion_frena(guardada)):
+            #  Paso por una re-medicion que no reemplaza a la medicion que
+            #  decide: es la correccion 2, no la Fase 4. Solo si la guardada
+            #  frenaba: si no, la Fase 4 sola ya lo pasaba (auditor de
+            #  frontera, 19/10: inflaba la cuenta).
+            d.regla = REGLA_REMEDICION
+    return d
+
+
+def _de_la_version_nueva(lectura) -> bool:
+    """Si la lectura se hizo con las claves de las correcciones (version 2)."""
+    from operaciones import diagnostico_de_ticket as dxt
+
+    v = (lectura or {}).get("version")
+    return (isinstance(v, int) and not isinstance(v, bool)
+            and v >= dxt.VERSION_DE_LA_LECTURA)
+
+
+def _la_relectura_saco_a_una_falla(propuesta, ultima, guardada) -> bool:
+    """
+    Si una lectura de la version nueva saco de la regla de la medicion a una
+    falla que la medicion FRENA: la lectura de antes decia falla, y la nueva
+    dice trabajo pedido u obra de red, que pasan sin medir.
+
+    POR QUE  --  auditor de frontera, 19/10/2026. La relectura por version
+    ('diagnostico_de_ticket.le_falta_la_version') vuelve a leer justo esas
+    fallas, y el modelo puede cambiar el grupo --por las instrucciones nuevas
+    o por su propia varianza--. Sin esta guarda, el caso pasaba por la Fase 4
+    en la misma vuelta, sin la tarea de las correcciones y sin aparecer en la
+    sombra. Con ella, es una correccion mas: decide solo con la tarea, y
+    mientras tanto se cuenta en sombra.
+    """
+    if str((ultima or {}).get("grupo") or "") not in SIN_CONDICION_DE_MEDICION:
+        return False
+    if not _de_la_version_nueva(ultima) or not la_medicion_frena(guardada):
+        return False
+    anterior = None
+    for pieza in (getattr(propuesta, "evidencia", None) or []):
+        if (isinstance(pieza, dict)
+                and pieza.get("fuente") == FUENTE_DE_LA_LECTURA
+                and "grupo" in pieza and not _de_la_version_nueva(pieza)):
+            anterior = pieza
+    return (anterior is not None
+            and anterior.get("grupo") == FALLA_DE_SERVICIO)
 
 
 def _ultima_lectura_con_grupo(propuesta) -> dict | None:
@@ -580,7 +936,7 @@ def _ultima_lectura_con_grupo(propuesta) -> dict | None:
 
 
 def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
-                         autorizacion=None) -> dict:
+                         autorizacion=None, correcciones: bool = False) -> dict:
     """
     Acepta la propuesta --y con eso el caso entra a la cola de Despacho-- si
     las reglas y las dos puertas lo dejan.
@@ -621,7 +977,9 @@ def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
     #  propuesta. Un segundo camino de decision que solo usaban las pruebas es
     #  una forma de tener verde lo que no corre. 'senal' queda en la firma
     #  porque el llamador la pasa; no se usa.
-    d = evaluar(propuesta, ahora)
+    #  'correcciones' lo decide el ciclo, una vez por vuelta y fallando
+    #  cerrado: si la tarea de las correcciones esta delegada.
+    d = evaluar(propuesta, ahora, correcciones=correcciones)
 
     #  PUERTA 0 · EL CASO SIGUE ABIERTO, y PUERTA 1 · LAS REGLAS.
     if not d.pasa:
@@ -672,7 +1030,7 @@ def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
                           f"({type(e).__name__})"}
 
     return {"paso": True, "porque": d.porque, "grupo": d.grupo,
-            "labor": d.labor}
+            "labor": d.labor, "regla": d.regla}
 
 
 # =============================================================================
@@ -763,7 +1121,14 @@ def motivo_para_anotar(propuesta, resultado: dict) -> str | None:
 
     if dxt.le_falta_lectura(propuesta):
         return _SIN_LECTURA
-    return str(resultado.get("porque") or "sin motivo")
+    porque = str(resultado.get("porque") or "sin motivo")
+    #  LA SOMBRA DE LAS CORRECCIONES (18/10/2026): si con ellas pasaria, se dice
+    #  en la propuesta, que es donde una persona lo va a mirar antes de
+    #  encenderlas. Clave cerrada: una que no esta en la tabla no agrega nada.
+    sombra = SOMBRA_DE_LA_REGLA.get(str(resultado.get("con_las_correcciones") or ""))
+    if sombra:
+        porque = f"{porque}. Con las correcciones del usuario pasaria: {sombra}"
+    return porque
 
 
 def motivo_para_el_registro(resultado: dict) -> str:
@@ -987,19 +1352,26 @@ def caso_de(propuesta):
         return None
 
 
-def evaluar(propuesta, ahora) -> Decision:
+def evaluar(propuesta, ahora, *, correcciones: bool = False) -> Decision:
     """
     La decision completa con lo guardado: primero el caso, despues las reglas.
 
     No llama a nada por red ni escribe: la usan la fase de paso y la rama del
     tope, que solo decide. Un caso cerrado no cuenta como "espera el tope".
     """
-    porque = por_que_el_caso_no_puede_pasar(caso_de(propuesta), ahora)
+    caso = caso_de(propuesta)
+    porque = por_que_el_caso_no_puede_pasar(caso, ahora)
     if porque:
         lectura = _ultima_lectura_con_grupo(propuesta) or {}
         return Decision(False, porque, grupo=str(lectura.get("grupo") or ""),
                         puerta=PUERTA_CASO)
-    return de_la_propuesta(propuesta)
+    #  Los niveles que reporta el ticket, del texto CRUDO del caso: es lo que
+    #  compara el doble diagnostico (correccion 2). Solo numeros salen de aca.
+    niveles = niveles_reportados(getattr(caso, "description", "") or "")
+    return de_la_propuesta(
+        propuesta, correcciones=correcciones, niveles=niveles, ahora=ahora,
+        autor_de_la_empresa=(getattr(caso, "external_created_by_type", "")
+                             == AUTOR_DE_LA_EMPRESA))
 
 
 # =============================================================================

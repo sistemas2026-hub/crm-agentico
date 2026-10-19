@@ -831,11 +831,19 @@ def delegar_tarea(org, *, clave="", pedido="", actor=None,
             f"Supervisor, y eso lo hace una persona")
     if not corre.get("si"):
         faltan.append(corre.get("por_que", ""))
+    #  LA QUE SE APOYA EN OTRA: sin esa otra delegada no hace nada.
+    for requerida in ficha.get("requiere") or ():
+        if not td.esta_delegada(org, requerida):
+            faltan.append(
+                f"necesita también la tarea «"
+                f"{td.CATALOGO.get(requerida, {}).get('nombre', requerida)}», "
+                f"que no está delegada")
 
     return {
         "delegada": fila.clave,
         "nombre": ficha.get("nombre", fila.clave),
-        "ya_puede_actuar": bool(veredicto.get("puede")),
+        "ya_puede_actuar": bool(veredicto.get("puede")) and not any(
+            not td.esta_delegada(org, r) for r in ficha.get("requiere") or ()),
         #  SEPARADO DE 'ya_puede_actuar', porque son dos preguntas distintas:
         #  una es si tiene permiso, la otra si algo la va a invocar. Una tarea
         #  con permiso que nadie invoca no hace nada, y fundirlas en un solo
