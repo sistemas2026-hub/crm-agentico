@@ -209,10 +209,47 @@ Ninguna de las 15 toca esa herramienta, ni el rol `ventas`, ni su catálogo. **E
 un fallo PREEXISTENTE** que la carga destapó al obligar a correr la
 verificación, no uno que haya introducido.
 
-**Queda abierto, y fuera del alcance de este objetivo**: el agente de ventas le
-pide la cédula a un prospecto que todavía no es cliente. Arreglarlo toca prompt
-o catálogo, y eso dispara los 56 casos dorados (~23 min) — es otro trabajo, no
-un arreglo al pasar.
+##### DECISIÓN: se deja documentado y NO se toca el prompt — 19/10/2026
+
+Decidido con el usuario. **`8/9` es la línea base esperada del humo** hasta que
+esto se arregle: quien lo vea en rojo no está viendo una regresión.
+
+**Por qué no se arregla ahora, con su evidencia:**
+
+1. **El daño real es menor de lo que el rojo sugiere.** El caso afirma DOS
+   cosas: `no_usa: [verificar_identidad_por_cedula, confirmar_identidad]` y
+   `responde_sin: [no logro encontrar, no te encuentro]`. **Solo falla la
+   primera.** El modelo consulta de más, no encuentra nada, y **igual responde
+   bien**: no trata al prospecto como un cliente fallido. El desenlace de la
+   conversación es correcto.
+2. **No hay problema de privacidad.** El modelo no pide la cédula: el prospecto
+   la ofrece solo («rafael orozco mi cedula es 101125421»). No hay un dato
+   arrancado, hay uno ofrecido y usado de más.
+3. **Más prompt no alcanza, y no hay guarda de código limpia.** La descripción
+   del rol `ventas` YA tiene el incidente escrito («El 09/09/2026 se le pidió
+   la cédula [...] a un prospecto: no apareció») y el modelo lo hace igual —que
+   es el síntoma de §4: *el prompt es guía, el código es la garantía*—. Pero lo
+   que distingue este caso es «no tengo servicio con ustedes todavía»: un
+   juicio sobre el texto, no algo que el código pueda calcular.
+4. **Sacar la herramienta del rol rompe un camino legítimo**: un cliente real
+   que le escribe a ventas por una mejora de plan sí necesita verificarse.
+
+**La cuenta**: tocar el prompt del asistente que atiende a TODOS los clientes, y
+correr los 56 casos dorados, para evitar **una lectura de más cuyo desenlace
+conversacional ya es correcto**. No lo vale hoy.
+
+**QUÉ LA REABRE** (§10: no se reabre una decisión cerrada sin una medición nueva
+que mueva el número que la cerró):
+
+> Contar en `tool_calls` cuántas veces se llamó `verificar_identidad_por_cedula`
+> en conversaciones que terminaron derivando a `ventas`, y **cuántas de esas
+> terminaron diciéndole «no te encuentro» a un prospecto**. Si ese segundo
+> número no es cero, el daño deja de ser una llamada desperdiciada y pasa a ser
+> un cliente nuevo al que le dicen que no existe — y ahí sí justifica el riesgo.
+
+**Y queda fuera del alcance de este objetivo**: es del agente de ventas, no de
+supervisión ni de despacho. Se midió que la carga de config no lo causó (ver
+arriba).
 
 **Y una advertencia del propio corredor que conviene no sobreinterpretar**: el
 set de humo tiene 10 casos y la config pide al menos 50 para dar una corrida por
