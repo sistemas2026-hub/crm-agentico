@@ -490,6 +490,40 @@ def test_m_el_doble_diagnostico_informa_y_no_decide():
     assert "dBm" not in clave
 
 
+def test_m2_el_doble_diagnostico_compara_tambien_la_olt():
+    """Tanda 2 (19/10/2026), con el ejemplo del usuario: el ticket reporta
+    -23.01 / -23.38 y el Supervisor mide -23.01 en la ONU y -23.57 en la OLT."""
+    def con(olt, niveles=(-23.01, -23.38)):
+        medicion = {**_medicion(dbm=-23.01), "senal_olt_dbm": olt}
+        return pad.decidir(pad.FALLA_DE_SERVICIO, {}, medicion=medicion,
+                           niveles=list(niveles)).porque
+
+    cerca = con(-23.57)
+    assert "coincide con el nivel que reporta el ticket (-23.01 dBm)" in cerca
+    assert ("en la OLT, que recibe (-23.57 dBm), tambien coincide "
+            "(-23.38 dBm)") in cerca
+    assert ("en la OLT, que recibe (-27.0 dBm), el ticket reporta otro nivel "
+            "(-23.38 dBm)") in con(-27.0)
+    assert "OLT" not in con(None), "sin el nivel de la OLT, como antes"
+    assert "OLT" not in con(-23.57, niveles=(-23.01,)), (
+        "con un solo nivel en el ticket, ese es el de la ONU")
+    #  Y la clave del log sigue sin niveles.
+    clave = pad.motivo_para_el_registro({"porque": cerca})
+    assert "dBm" not in clave and "OLT" in clave
+
+
+def test_m3_la_medicion_guarda_el_nivel_de_la_olt_si_es_un_numero():
+    medida = mdf.de_la_respuesta({**EN_RANGO, "senal_olt_dbm": -24.1})
+
+    assert medida["senal_olt_dbm"] == -24.1
+    assert "la OLT recibe -24.1 dBm" in mdf._lo_que_dice(medida)
+    assert mdf.de_la_respuesta(EN_RANGO)["senal_olt_dbm"] is None, (
+        "mientras la lista blanca no lo deje pasar, no llega y nada cambia")
+    for raro in (float("nan"), "-24.1", True):
+        assert mdf.de_la_respuesta(
+            {**EN_RANGO, "senal_olt_dbm": raro})["senal_olt_dbm"] is None
+
+
 def test_n_el_doble_diagnostico_sale_del_ticket_sin_llevarse_nada_mas(
         org_a, monkeypatch):
     _puertas(monkeypatch, correcciones=False)

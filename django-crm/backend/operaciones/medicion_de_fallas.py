@@ -197,10 +197,22 @@ def de_la_respuesta(respuesta) -> dict | None:
         #  Un numero de verdad, o nada (arriba). Un NaN haria fallar el
         #  guardado en JSONB: no quedaria la pieza y se pediria cada vuelta.
         "senal_dbm": float(dbm) if dbm is not None else None,
+        #  EL NIVEL QUE RECIBE LA OLT (tanda 2, 19/10/2026): solo informa, en el
+        #  doble diagnostico. Llega solo si la lista blanca de 'supervisor_noc'
+        #  lo deja pasar; mientras tanto es None, y nada cambia.
+        "senal_olt_dbm": _nivel_finito(r.get("senal_olt_dbm")),
         #  El motivo del motor cuando no pudo medir: texto fijo de su codigo
         #  ('diagnostico_servicio._resolver_serial' y '_sin_resolver').
         "motivo": _motivo(r.get("motivo")),
     }
+
+
+def _nivel_finito(valor):
+    """Un numero de verdad, o None: un NaN haria fallar el guardado en JSONB."""
+    if (isinstance(valor, (int, float)) and not isinstance(valor, bool)
+            and math.isfinite(valor)):
+        return float(valor)
+    return None
 
 
 def _motivo(crudo) -> str:
@@ -236,6 +248,8 @@ def _lo_que_dice(m: dict) -> str:
         return "volvio con un estado que no se reconoce; se vuelve a medir"
     nivel = (f" ({m['senal_dbm']} dBm)"
              if isinstance(m.get("senal_dbm"), (int, float)) else "")
+    if nivel and isinstance(m.get("senal_olt_dbm"), (int, float)):
+        nivel = f" ({m['senal_dbm']} dBm; la OLT recibe {m['senal_olt_dbm']} dBm)"
     if m.get("estado") == "en_linea":
         if m.get("senal") == "debil":
             return f"en linea, señal fuera del rango de la guia{nivel}"

@@ -569,16 +569,37 @@ def _la_falla_en_el_historial(medicion, ahora) -> dict | None:
 def _doble_diagnostico(niveles, medicion) -> str:
     """Lo que el doble diagnostico le suma al motivo, o "" si el ticket no trae
     niveles o la medicion no trae el suyo. El nivel va entre parentesis, como
-    el de '_nivel', para que el log lo saque de la clave."""
+    el de '_nivel', para que el log lo saque de la clave.
+
+    CON EL NIVEL DE LA OLT (tanda 2, 19/10/2026) se comparan los dos: el ISP
+    escribe "-23.01 / -23.38 dBm", el de la ONU y el de la OLT. Cada nivel
+    medido toma el reportado mas cercano que quede libre, asi que dos niveles
+    parecidos no se cruzan: es el ejemplo del usuario, -23.01 / -23.38 contra
+    -23.01 / -23.57.
+    """
     if not niveles or not _hay_nivel(medicion):
         return ""
+    restantes = list(niveles)
     medido = float(medicion["senal_dbm"])
-    reportado = min(niveles, key=lambda v: abs(v - medido))
+    reportado = min(restantes, key=lambda v: abs(v - medido))
+    restantes.remove(reportado)
     if abs(reportado - medido) <= TOLERANCIA_DOBLE_DIAGNOSTICO_DB:
-        return (f". Doble diagnostico: coincide con el nivel que reporta el "
-                f"ticket ({reportado} dBm)")
-    return (f". Doble diagnostico: el ticket reporta otro nivel "
-            f"({reportado} dBm), la señal cambio desde el reporte")
+        texto = (f". Doble diagnostico: coincide con el nivel que reporta el "
+                 f"ticket ({reportado} dBm)")
+    else:
+        texto = (f". Doble diagnostico: el ticket reporta otro nivel "
+                 f"({reportado} dBm), la señal cambio desde el reporte")
+    olt = (medicion or {}).get("senal_olt_dbm")
+    if (restantes and isinstance(olt, (int, float))
+            and not isinstance(olt, bool) and math.isfinite(olt)):
+        del_ticket = min(restantes, key=lambda v: abs(v - olt))
+        if abs(del_ticket - olt) <= TOLERANCIA_DOBLE_DIAGNOSTICO_DB:
+            texto += (f"; en la OLT, que recibe ({olt} dBm), tambien coincide "
+                      f"({del_ticket} dBm)")
+        else:
+            texto += (f"; en la OLT, que recibe ({olt} dBm), el ticket reporta "
+                      f"otro nivel ({del_ticket} dBm)")
+    return texto
 
 
 _ACCION_AUTORIZADA = (

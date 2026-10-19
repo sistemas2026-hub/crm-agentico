@@ -581,9 +581,11 @@ def test_la_medicion_no_es_una_lectura_ni_una_hipotesis(org_a):
 CLIENTE = "Zoraida Clientela"
 SERIAL = "ZTEG12345678"
 _URL = f"http://motor:5000/x?sn={SERIAL}"
+#  'senal_olt_dbm' desde el 19/10/2026 (tanda 2 de las correcciones del
+#  usuario): el nivel que recibe la OLT, un numero sin datos del cliente.
 _CLAVES_DE_LA_MEDICION = {"fuente", "id", "dato", "observado_en", "medido_con",
                           "estado", "causa_caida", "senal", "senal_dbm",
-                          "motivo"}
+                          "senal_olt_dbm", "motivo"}
 
 
 def test_e_el_pase_no_copia_al_feed_el_texto_del_modelo(org_a, puertas_abiertas):

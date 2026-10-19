@@ -235,6 +235,59 @@ afirmar(_resp["estado"] == "desconocido",
 afirmar(_resp["senal"] == "sin_dato",
         "y la señal queda 'sin_dato', que es lo que impide proponer un cierre")
 
+print("\n§4c EL NIVEL QUE RECIBE LA OLT VIAJA, Y SOLO SI ES UN NUMERO")
+#  Tanda 2 de las correcciones del usuario (19/10/2026): el doble diagnostico
+#  del Supervisor compara los dos niveles que el ISP escribe en el ticket. El
+#  de la OLT venia en la misma respuesta y se tiraba. Se mide con una respuesta
+#  200 de la forma verificada de 'full_status_json'.
+
+
+class _Respuesta200:
+    status_code = 200
+
+    def __init__(self, olt):
+        self._olt = olt
+
+    def json(self):
+        optico = {"Rx optical power(dBm)": "-23.57"}
+        if self._olt is not None:
+            optico["OLT Rx ONT optical power(dBm)"] = self._olt
+        return {"full_status_json": {
+            "ONU details": {"Run state": "Online", "Match state": "match",
+                            "Last down cause": "dying-gasp"},
+            "Optical status": optico}}
+
+
+def _diagnosticar_con(olt):
+    diag.requests.get = lambda *a, **k: _Respuesta200(olt)
+    diag._resolver_serial = lambda *a, **k: ("UNSERIALCUALQUIERA", "")
+    diag.ejecutor_http.base_url_de = lambda *a, **k: "https://ejemplo.invalido"
+    diag.ejecutor_http.headers_de = lambda *a, **k: {}
+    try:
+        return diag.diagnosticar(_herramienta(), {"id_servicio": 5832},
+                                 tenant="t", variables_tenant={"X": "y"},
+                                 catalogo=[])
+    finally:
+        diag.requests.get = _req_original
+        diag._resolver_serial = _serial_original
+        diag.ejecutor_http.base_url_de = _base_original
+        diag.ejecutor_http.headers_de = _headers_original
+
+
+_con = _diagnosticar_con("-23.38")
+afirmar(_con.get("senal_dbm") == -23.57 and _con.get("senal_olt_dbm") == -23.38,
+        f"los dos niveles salen como numeros: {_con.get('senal_dbm')} / "
+        f"{_con.get('senal_olt_dbm')}")
+afirmar(_con.get("senal") == "buena",
+        "la clasificacion sigue siendo la de la ONU, no la de la OLT")
+afirmar(_diagnosticar_con(None).get("senal_olt_dbm", "falta") is None,
+        "sin el campo, el nivel de la OLT es None, no falta la clave")
+for raro in ("", "N/A", "nan", "inf"):
+    afirmar(_diagnosticar_con(raro).get("senal_olt_dbm") is None,
+            f"{raro!r} no es un nivel: queda None")
+afirmar("senal_olt_dbm" in diag._sin_resolver("x", 1),
+        "y sin resolver, la forma es la misma")
+
 print("\n§5  LA CAUSA DE CAIDA SE TRADUCE A ALGO QUE DECIDE UNA ACCION")
 #  'dying-gasp' y 'LOSi' llevan a conversaciones distintas: una es un corte de
 #  luz en la casa, la otra es fibra. Si el modelo tuviera que interpretar el

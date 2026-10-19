@@ -57,6 +57,8 @@ cerrar casos seria un motor que conoce la operacion de una empresa.
 
 from __future__ import annotations
 
+import math
+
 import requests
 
 from nucleo.herramientas import http as ejecutor_http
@@ -138,10 +140,21 @@ def _sin_resolver(motivo: str, id_servicio) -> dict:
         "estado": "desconocido",
         "causa_caida": "",
         "senal_dbm": None,
+        "senal_olt_dbm": None,
         "senal": "sin_dato",
         "estado_config": "",
         "motivo": motivo,
     }
+
+
+def _dbm(valor):
+    """Un nivel en dBm como numero finito, o None. No se inventa ni se corrige:
+    lo que no es un numero no es un nivel."""
+    try:
+        n = float(str(valor).strip())
+    except (TypeError, ValueError):
+        return None
+    return n if math.isfinite(n) else None
 
 
 def _resolver_serial(herramienta, argumentos, tenant, variables_tenant,
@@ -288,6 +301,13 @@ def diagnosticar(herramienta, argumentos: dict, tenant: str | None = None,
         senal = float(str(optico.get("Rx optical power(dBm)")).strip())
     except (TypeError, ValueError):
         senal = None
+    #  EL NIVEL QUE RECIBE LA OLT  --  19/10/2026. Viene en la MISMA respuesta
+    #  ('Optical status' trae 'OLT Rx ONT optical power(dBm)', verificado el
+    #  14/08/2026 en la skill de SmartOLT) y se descartaba. El ISP lo escribe en
+    #  el ticket junto al de la ONU ("-28.24 / -29.59 dBm"), y el doble
+    #  diagnostico del Supervisor lo compara con lo que se mide. NO SE CLASIFICA:
+    #  el rango de la guia es el de la bajada, y este numero solo informa.
+    senal_olt = _dbm(optico.get("OLT Rx ONT optical power(dBm)"))
 
     return {
         "id_servicio": id_servicio,
@@ -298,6 +318,7 @@ def diagnosticar(herramienta, argumentos: dict, tenant: str | None = None,
         #  decir que esta caido cuando no lo esta.
         "causa_caida": causa if not en_linea else "",
         "senal_dbm": senal,
+        "senal_olt_dbm": senal_olt,
         #  La clasificacion la hace el codigo, no el modelo. Ver el comentario
         #  de 'SENAL_MINIMA_DBM' para el rango y para lo que NO esta confirmado.
         "senal": _clasificar_senal(senal),
