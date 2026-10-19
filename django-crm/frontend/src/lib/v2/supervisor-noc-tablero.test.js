@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   kpisDelTablero,
+  ticketsDe,
   hallazgosPorTipo,
   estadoDeCasos,
   ordenesDeTrabajo,
@@ -991,5 +992,47 @@ describe('las dos bandejas', () => {
     expect(bandejaDeRevision(TODAS, { estado: 'decididas' }).map((p) => p.n))
       .toEqual([1, 2, 3]);
     expect(bandejaDeRevision(TODAS, {}).map((p) => p.n)).toEqual([1, 2, 3, 4]);
+  });
+});
+
+
+describe('una propuesta no es un ticket', () => {
+  //  Medido en produccion el 19/10/2026: «Pendientes: 12» eran 12 propuestas
+  //  sobre 8 tickets -- cuatro con «caso abierto antiguo» y «ticket sin
+  //  diagnostico» a la vez. Con 8, 36 en Despacho + 8 = los 44 de Operativo.
+  const de = (caso, tipo) => ({
+    estado: 'propuesta', origen_tipo: 'case', origen_id: caso, tipo_senal: tipo
+  });
+  const PROD = [
+    ...['91906', '94056', '94481', '94562'].flatMap((c) => [
+      de(c, 'caso_abierto_antiguo'), de(c, 'ticket_sin_diagnostico')
+    ]),
+    ...['95251', '95318', '95394', '95531'].map((c) => de(c, 'ticket_sin_diagnostico'))
+  ];
+
+  it('12 propuestas sobre 8 tickets', () => {
+    const t = ticketsDe(PROD);
+    expect(t.propuestas).toBe(12);
+    expect(t.tickets).toBe(8);
+    expect(t.palabra).toBe('tickets');
+    expect(t.porOrigen.get('case:91906')).toBe(2);
+    expect(t.porOrigen.get('case:95251')).toBe(1);
+  });
+
+  it('la tarjeta dice los dos numeros cuando no coinciden', () => {
+    const k = kpisDelTablero(ARBOL, PROD).find((x) => x.clave === 'propuestas');
+    expect(k.n).toBe(12);
+    expect(k.sub).toBe('12 propuestas · 8 tickets');
+  });
+
+  it('con una propuesta por ticket no agrega nada', () => {
+    const k = kpisDelTablero(ARBOL, [de('1', 'x'), de('2', 'x')])
+      .find((x) => x.clave === 'propuestas');
+    expect(k.sub).toBe('Esperan decisión humana');
+  });
+
+  it('una orden de trabajo no se llama ticket', () => {
+    const t = ticketsDe([de('1', 'x'), { estado: 'propuesta', origen_tipo: 'orden', origen_id: '9' }]);
+    expect(t.palabra).toBe('casos');
   });
 });
