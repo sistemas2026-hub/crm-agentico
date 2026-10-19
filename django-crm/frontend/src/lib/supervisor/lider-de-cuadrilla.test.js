@@ -13,11 +13,11 @@ import { opcionesDeLider } from './lider-de-cuadrilla.js';
  */
 
 const SIN_CUENTA = [
-  { id: 'pc-1', nombre: 'JEIDER AMELL', tiene_cuenta: false, profile: null },
-  { id: 'pc-2', nombre: 'ISAIAS MORENO', tiene_cuenta: false, profile: null }
+  { id: 'pc-1', nombre: 'PEDRO PRUEBA', tiene_cuenta: false, profile: null },
+  { id: 'pc-2', nombre: 'PABLO PRUEBA', tiene_cuenta: false, profile: null }
 ];
 const CUENTAS = [
-  { profile: 'pr-jeider', nombre: 'Jeider Amell' },
+  { profile: 'pr-pedro', nombre: 'Pedro Prueba' },
   { profile: 'pr-admin', nombre: 'Administración' }
 ];
 
@@ -25,7 +25,7 @@ describe('opcionesDeLider', () => {
   it('sin ninguna persona de campo con cuenta, ofrece igual las cuentas del equipo', () => {
     const o = opcionesDeLider(SIN_CUENTA, CUENTAS, null);
     expect(o.deCampo).toEqual([]);
-    expect(o.cuentas.map((c) => c.profile)).toEqual(['pr-jeider', 'pr-admin']);
+    expect(o.cuentas.map((c) => c.profile)).toEqual(['pr-pedro', 'pr-admin']);
     expect(o.actual).toBeNull();
   });
 
@@ -38,19 +38,19 @@ describe('opcionesDeLider', () => {
   });
 
   it('si el líder ya está en una lista, no se repite arriba', () => {
-    const o = opcionesDeLider(SIN_CUENTA, CUENTAS, { id: 'pr-jeider', nombre: 'Jeider Amell' });
+    const o = opcionesDeLider(SIN_CUENTA, CUENTAS, { id: 'pr-pedro', nombre: 'Pedro Prueba' });
     expect(o.actual).toBeNull();
-    expect(o.cuentas.some((c) => c.profile === 'pr-jeider')).toBe(true);
+    expect(o.cuentas.some((c) => c.profile === 'pr-pedro')).toBe(true);
   });
 
   it('una persona de campo con cuenta va en su grupo, y la que no tiene cuenta no se ofrece', () => {
     const personas = [
-      { id: 'pc-3', nombre: 'JULIO MORENO', tiene_cuenta: true, profile: 'pr-julio' },
+      { id: 'pc-3', nombre: 'JUAN PRUEBA', tiene_cuenta: true, profile: 'pr-juan' },
       ...SIN_CUENTA
     ];
-    const o = opcionesDeLider(personas, CUENTAS, { id: 'pr-julio', nombre: 'Julio' });
+    const o = opcionesDeLider(personas, CUENTAS, { id: 'pr-juan', nombre: 'Juan' });
     // El valor es la CUENTA, no la persona: el líder es un Profile.
-    expect(o.deCampo).toEqual([{ profile: 'pr-julio', nombre: 'JULIO MORENO' }]);
+    expect(o.deCampo).toEqual([{ profile: 'pr-juan', nombre: 'JUAN PRUEBA' }]);
     expect(o.actual).toBeNull();
   });
 

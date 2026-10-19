@@ -35,6 +35,17 @@
     { id: 'chofer', texto: 'Chofer' }
   ];
 
+  /**
+   * Los grupos de caso que pasan a Despacho (17/10/2026). De la labor de cada
+   * uno sale la de una jornada armada sola: la de la mayoría de los casos de
+   * sus zonas. Las claves son las de `paso_a_despacho.GRUPOS`.
+   */
+  const GRUPOS_DE_CASO = [
+    { id: 'falla_de_servicio', texto: 'Falla de servicio' },
+    { id: 'trabajo_pedido', texto: 'Trabajo pedido' },
+    { id: 'obra_de_red', texto: 'Obra de red' }
+  ];
+
   /** Qué cuadrilla se está armando. `null` = ninguna. */
   let armando = $state(/** @type {any} */ (null));
   let labor = $state('instalacion');
@@ -338,6 +349,13 @@
                 <td>
                   {#if j}
                     <span class="snoc-insignia snoc-insignia-primaria">{j.labor_nombre}</span>
+                    <!-- QUIÉN LA ARMÓ (17/10/2026). La que se armó sola —el
+                         Supervisor o el ciclo de la madrugada— se reajusta de
+                         labor mientras no tenga órdenes; corregirla a mano la
+                         vuelve de una persona y ya no la toca. -->
+                    {#if j.armada_por === 'automatica'}
+                      <span class="snoc-tag">Armada sola</span>
+                    {/if}
                     {#if j.zonas?.length}
                       {#each j.zonas as z (z.id)}
                         <span class="snoc-tag">{z.nombre}</span>
@@ -688,8 +706,8 @@
           <h2 class="snoc-h2">El ciclo de la madrugada</h2>
           <p class="snoc-body-sm snoc-secundario">
             Cada día, a la hora que elijas, deja armada la jornada de cada cuadrilla
-            —copiada del último día que trabajó— y te avisa qué quedó sin resolver. El
-            reparto lo seguís publicando vos.
+            —su pareja de siempre, en sus zonas habituales— y te avisa qué quedó sin
+            resolver. El reparto lo seguís publicando vos.
           </p>
         </div>
         {#if data.reparto_config}
@@ -746,7 +764,8 @@
             <input type="checkbox" name="copia_la_jornada" value="1"
                    checked={data.reparto_config.copia_la_jornada} />
             <span class="snoc-body-sm">
-              Armar la jornada copiando la del último día trabajado
+              Armar la jornada de cada cuadrilla: su pareja de siempre, en sus zonas
+              habituales
             </span>
           </label>
 
@@ -757,6 +776,34 @@
               <strong>Encendido</strong> — corre solo todas las noches
             </span>
           </label>
+
+          <!-- DE QUÉ LABOR ES CADA CASO (17/10/2026). Por empresa y no en
+               código: en otro ISP un trabajo pedido puede ir a otra labor. -->
+          <div class="snoc-pila-xs">
+            <span class="snoc-label">De qué labor es cada caso de Despacho</span>
+            <p class="snoc-body-sm snoc-secundario">
+              Una jornada armada sola sale con la labor de la mayoría de los casos de
+              sus zonas. «No cuenta» deja ese tipo de caso afuera de la cuenta.
+            </p>
+            <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+              {#each GRUPOS_DE_CASO as g (g.id)}
+                <label class="snoc-campo-grupo">
+                  <span class="snoc-label">{g.texto}</span>
+                  <select class="snoc-select" name={`labor_de_${g.id}`}>
+                    <option value="" selected={!data.reparto_config.labor_por_grupo?.[g.id]}>
+                      — no cuenta —
+                    </option>
+                    {#each LABORES as l (l.id)}
+                      <option value={l.id}
+                              selected={data.reparto_config.labor_por_grupo?.[g.id] === l.id}>
+                        {l.texto}
+                      </option>
+                    {/each}
+                  </select>
+                </label>
+              {/each}
+            </div>
+          </div>
 
           <p class="snoc-body-sm snoc-secundario">
             El tope no es capacidad calculada: es un freno para que no le caigan treinta

@@ -58,6 +58,7 @@ from django.utils import timezone
 CERRAR_DESINCRONIZADOS = "cerrar_desincronizados_con_diagnostico"
 CICLO_AUTOMATICO = "revisar_solo_con_cada_actualizacion"
 PASAR_A_DESPACHO = "pasar_a_despacho_segun_las_reglas"
+ARMAR_LA_JORNADA = "armar_la_jornada_del_dia"
 
 CATALOGO = {
     CERRAR_DESINCRONIZADOS: {
@@ -91,6 +92,25 @@ CATALOGO = {
             "red: esos los mira una persona siempre."),
         #  PROPIA, y no la del cierre: habilitar una cosa no puede habilitar la
         #  otra de rebote. Son dos efectos distintos y cada uno se pide aparte.
+        "exige_nivel": 3,
+        "necesita_que_mire": True,
+    },
+    ARMAR_LA_JORNADA: {
+        "nombre": "Armar la jornada del día de cada cuadrilla",
+        "que_hace": (
+            "En cada vuelta arma la jornada de hoy de cada cuadrilla activa "
+            "que todavía no la tenga: su pareja de siempre, sus zonas "
+            "habituales y la labor de la mayoría de los casos de Despacho de "
+            "esas zonas. Mientras una jornada que armó él no tenga órdenes, "
+            "le cambia la labor si entran casos de otra."),
+        "que_no_hace": (
+            "No toca una jornada que armó o corrigió una persona, no arma una "
+            "cuadrilla sin zonas habituales ni una cuyo líder está ausente, y "
+            "no crea órdenes ni las reparte: al técnico no le llega nada "
+            "hasta que alguien publica el reparto."),
+        #  PROPIA, como la del paso a Despacho: habilitar una no habilita la
+        #  otra. Nivel 3 y no 4: armar una jornada no sale de la plataforma ni
+        #  le promete nada a un cliente, y una persona la corrige con un clic.
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },

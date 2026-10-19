@@ -2639,6 +2639,11 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         ("retiro de alertas de casos en Despacho",
          lambda: {"alertas_retiradas_en_despacho":
                   retirar_alertas_de_casos_en_despacho(org, ahora)}),
+        #  LA JORNADA DEL DIA VA ULTIMA  --  17/10/2026: cuenta la cola de
+        #  Despacho como quedo despues del paso de ESTA vuelta. Sin la tarea
+        #  delegada solo deja en el log lo que armaria (la sombra).
+        ("armado de la jornada del dia",
+         lambda: _armar_la_jornada_del_dia(org, ahora)),
     ):
         try:
             resumen.update(fase())
@@ -2648,6 +2653,13 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
                 {"fase": nombre, "error": type(e).__name__})
 
     return resumen
+
+
+def _armar_la_jornada_del_dia(org, ahora) -> dict:
+    """La fase de `armado_de_jornadas`, importada recien al correr: ese modulo
+    trae los de Cuadrillas, que este no necesita para nada mas."""
+    from operaciones import armado_de_jornadas
+    return armado_de_jornadas.armar_las_jornadas_del_dia(org, ahora)
 
 
 #:  Cuantas propuestas sin señal se traen por vuelta para releer. El tope real

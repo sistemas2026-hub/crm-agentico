@@ -32,7 +32,7 @@ from campo.models import AsignacionTrabajo, WorkType
 from campo.cuadrillas import (ConfiguracionDeReparto, Cuadrilla,
                               IntegranteDeJornada, JornadaDeCuadrilla,
                               PersonaDeCampo, configuracion_de_reparto,
-                              destinatarios)
+                              destinatarios, labor_de_cada_grupo)
 from campo.zonas import AliasDeZona, ZonaOperativa, normalizar_localidad
 from campo.inventario import UbicacionInventario
 from campo.permissions import IsCampoAuthenticated, ROLES_GESTION
@@ -116,6 +116,9 @@ def _jornada_json(j) -> dict:
         # El lider del DIA, que puede no ser el de la cuadrilla: si esta de
         # vacaciones, alguien la lleva igual.
         "lider": _persona(j.lider) if j.lider else None,
+        # Quien la armo: una persona, o el armado automatico. La que armo
+        # el sistema la puede reajustar el Supervisor; la de una persona, no.
+        "armada_por": j.armada_por,
         # VACIO NO ES "CUBRE TODAS": con zona dura, una cuadrilla sin zona no
         # recibe trabajo por zona, y eso tiene que notarse.
         "zonas": [{"id": str(z.id), "nombre": z.nombre}
@@ -397,6 +400,10 @@ class JornadaDeCuadrillaView(APIView):
                         "lider": _perfil_de(org, request.data.get("lider"))
                                  or cuadrilla.lider,
                         "notas": (request.data.get("notas") or "").strip(),
+                        #  ARMARLA O CORREGIRLA A MANO LA VUELVE DE UNA
+                        #  PERSONA (17/10/2026): el armado automatico ya no
+                        #  la toca. Ver `JornadaDeCuadrilla.armada_por`.
+                        "armada_por": JornadaDeCuadrilla.PERSONA,
                     },
                 )
                 # Las zonas del dia, reescritas enteras por el mismo motivo
@@ -939,6 +946,10 @@ class ConfiguracionDeRepartoView(APIView):
             # puede distinguir «esta en 8 porque alguien lo puso» de «esta en 8
             # porque nadie lo toco».
             "configurado": ConfiguracionDeReparto.objects.filter(org=org).exists(),
+            #  DE QUE LABOR ES CADA GRUPO DE CASO (17/10/2026): la que vale hoy,
+            #  de fabrica o de la empresa. Un grupo que no aparece no inclina
+            #  ninguna jornada. Ver `labor_de_cada_grupo`.
+            "labor_por_grupo": labor_de_cada_grupo(org),
         })
 
     def put(self, request):
@@ -964,15 +975,34 @@ class ConfiguracionDeRepartoView(APIView):
             return Response({"detail": "El tope tiene que ser 1 o mas."},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        defaults = {
+            "activo": bool(datos.get("activo")),
+            "hora_local": hora,
+            "tope_por_cuadrilla": tope,
+            "copia_la_jornada": bool(datos.get("copia_la_jornada", True)),
+        }
+        #  LA TABLA DE LABORES SOLO SI VIENE: sin la clave no se toca, asi una
+        #  pantalla vieja que no la manda no la borra. Solo los grupos que
+        #  pasan a Despacho y solo labores que existen; vacio es "este grupo no
+        #  inclina ninguna jornada", y se guarda asi para que no vuelva el de
+        #  fabrica.
+        if "labor_por_grupo" in datos:
+            pedido = datos.get("labor_por_grupo")
+            grupos = ConfiguracionDeReparto.LABOR_POR_GRUPO_DE_FABRICA
+            labores = dict(JornadaDeCuadrilla.LABORES)
+            if (not isinstance(pedido, dict)
+                    or any(g not in grupos for g in pedido)
+                    or any((v or "") not in labores and (v or "") != ""
+                           for v in pedido.values())):
+                return Response(
+                    {"detail": "La tabla de labores tiene un grupo o una "
+                               "labor que no existe."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            defaults["labor_por_grupo"] = {
+                str(g): (v or "") for g, v in pedido.items()}
+
         fila, _ = ConfiguracionDeReparto.objects.update_or_create(
-            org=org,
-            defaults={
-                "activo": bool(datos.get("activo")),
-                "hora_local": hora,
-                "tope_por_cuadrilla": tope,
-                "copia_la_jornada": bool(datos.get("copia_la_jornada", True)),
-            },
-        )
+            org=org, defaults=defaults)
         return Response({
             "activo": fila.activo,
             "hora_local": fila.hora_local,
@@ -981,6 +1011,7 @@ class ConfiguracionDeRepartoView(APIView):
             "ultima_corrida": (fila.ultima_corrida.isoformat()
                                if fila.ultima_corrida else None),
             "configurado": True,
+            "labor_por_grupo": labor_de_cada_grupo(org),
         })
 
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
- LA JORNADA DEL DIA, ARMADA SOLA  --  copiando la del ultimo dia trabajado
+ LA JORNADA DEL DIA, ARMADA SOLA
 ================================================================================
 
 POR QUE HACE FALTA
@@ -12,44 +12,123 @@ ese dia:
     JornadaDeCuadrilla.objects.filter(org=org, fecha=fecha)
 
 La composicion es del dia a proposito --es lo que permite decir quien estuvo el
-miercoles pasado-- pero eso tiene un costo: a las 3 de la mañana del martes, la
-jornada del martes todavia no existe. Sin este modulo el reparto automatico
-devolveria vacio todas las noches, y el sintoma seria "no se asigno nada", que
-no señala a la causa.
+miercoles pasado-- pero eso tiene un costo: a primera hora, la jornada de hoy
+todavia no existe. Sin este modulo el reparto automatico devolveria vacio, y el
+sintoma seria "no se asigno nada", que no señala a la causa.
 
-DE DONDE SALE LA JORNADA DE HOY
--------------------------------
-    1. la del ultimo dia que esa cuadrilla trabajo    <- el caso normal
-    2. lo HABITUAL de la cuadrilla                    <- el arranque en frio
-    3. nada, y se dice cual y por que                 <- ni una ni otra
+LA REGLA  --  17/10/2026, objetivo `supervisor-arma-la-jornada`
+---------------------------------------------------------------
+Decidida por el usuario con 60 dias de produccion a la vista
+(`informe_de_jornadas`): lo que se repite es la PAREJA de cada cuadrilla; las
+zonas y la labor no se repiten.
 
-El 2 existe porque sin el, una empresa que acaba de dar de alta sus cuadrillas
-tendria que armar un dia entero a mano antes de que esto sirviera para algo.
+    QUIEN VA      la gente de su ultima jornada: la pareja de siempre. Sin los
+                  dados de baja y sin los ausentes (`DisponibilidadTecnico`).
+    ADONDE        sus ZONAS HABITUALES, marcadas en Cuadrillas. No las del
+                  ultimo dia: eso era justo lo que no se repetia.
+    QUE LABOR     la de la mayoria de los casos de Despacho de sus zonas ese
+                  dia; sin casos, su labor habitual. Si dos cuadrillas
+                  comparten zona y hay casos de dos labores, cada una toma una
+                  (`_elegir_labores`).
+    QUIEN LIDERA  el lider de la cuadrilla.
+
+Hasta esa fecha se copiaba la ultima jornada entera, zonas y labor incluidas.
+
+LO QUE NO SE ARMA, Y SE DICE POR QUE
+------------------------------------
+    sin_zona        no tiene zonas habituales. Vacio NO es "cubre todas": con
+                    zona dura no recibiria trabajo, y armarla seria una fila
+                    que parece trabajo hecho.
+    lider_ausente   su lider declaro ausencia ese dia. Sin lider no hay a quien
+                    entregarle la orden (`destinatarios`): la arma una persona.
+    sin_gente       nadie de su ultima jornada puede salir.
+    sin_base        nunca trabajo y no tiene lider: no hay de donde armarla.
+
+UNA SOLA REGLA PARA LOS DOS QUE ARMAN
+------------------------------------
+El Supervisor en cada vuelta (`operaciones.armado_de_jornadas`) y el ciclo de
+la madrugada (`campo.tasks.correr_para`) usan `planear_el_dia` y `aplicar`.
+Dos constructores serian dos reglas, y el dia que difieran nadie sabria cual
+armo la jornada que esta mirando.
 
 LO QUE NO PISA
 --------------
-Una jornada que YA existe para esa fecha no se toca. Si alguien la armo --o la
-corrigio-- esa decision gana: la tomo una persona mirando el caso, y este
-proceso corre a las tres de la mañana sin mirar nada.
+Una jornada armada por una PERSONA no se toca nunca: la tomo alguien mirando
+el caso. Una armada SOLA (`armada_por = AUTOMATICA`) se reajusta de labor
+mientras no tenga ordenes: lo que entra a Despacho a la tarde con otra labor
+sale ese mismo dia (decidido por el usuario). Con ordenes ya no: cambiarle la
+labor a una cuadrilla que ya salio con trabajo seria repartirle otro.
 
 Eso hace la operacion IDEMPOTENTE: correrla dos veces deja lo mismo que
 correrla una, que es la condicion para poder reintentarla sin pensar.
-
-QUE NO SE COPIA
----------------
-Las personas dadas de BAJA. Copiar a alguien que ya no trabaja ahi lo pondria
-a recibir trabajo, y el dia que se note ya habria un cliente esperando. Se
-cuenta cuantas quedaron afuera y se informa -- un silencio ahi se leeria como
-que la cuadrilla esta completa.
 """
 
 from __future__ import annotations
 
-from django.db import transaction
+from dataclasses import dataclass, field
 
-from campo.cuadrillas import (Cuadrilla, IntegranteDeJornada,
-                              JornadaDeCuadrilla)
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
+from django.utils import timezone
 
+from campo.cuadrillas import (
+    Cuadrilla,
+    IntegranteDeJornada,
+    JornadaDeCuadrilla,
+    destinatarios,
+)
+
+#: Que se hace con cada cuadrilla.
+ARMAR = "armar"
+REAJUSTAR = "reajustar"
+DEJAR = "dejar"
+NO_SE_ARMA = "no_se_arma"
+
+#: Por que. Son CLAVES y no frases: van al resumen y al log.
+COPIADA = "copiada"
+ESTRENADA = "estrenada"
+ARMADA_POR_UNA_PERSONA = "armada_por_una_persona"
+YA_TIENE_ORDENES = "ya_tiene_ordenes"
+MISMA_LABOR = "misma_labor"
+OTRA_LABOR = "otra_labor"
+SIN_ZONA = "sin_zona"
+LIDER_AUSENTE = "lider_ausente"
+SIN_GENTE = "sin_gente"
+SIN_BASE = "sin_base"
+
+#: El desempate entre dos labores con los mismos casos, despues de la que ya
+#: tiene y de la habitual: primero quien se quedo sin servicio.
+_DESEMPATE = (JornadaDeCuadrilla.CORRECTIVO, JornadaDeCuadrilla.INSTALACION,
+              JornadaDeCuadrilla.TRABAJOS)
+
+
+@dataclass
+class Plan:
+    """Lo que se haria con UNA cuadrilla. No escribe nada."""
+
+    cuadrilla: Cuadrilla
+    accion: str
+    motivo: str
+    labor: str = ""
+    labor_antes: str = ""
+    zonas: list = field(default_factory=list)
+    lider: object = None
+    #: [(PersonaDeCampo, rol)]
+    integrantes: list = field(default_factory=list)
+    #: La que ya existe ese dia, si hay.
+    jornada: object = None
+    #: De que dia sale la gente.
+    desde: object = None
+    de_baja: int = 0
+    ausentes: int = 0
+    #: Los que una persona ya puso en otra cuadrilla ese dia: esa decision
+    #: gana, y esta cuadrilla sale sin ellos.
+    en_otra_cuadrilla: int = 0
+
+
+# ---------------------------------------------------------------------------
+#  Lo que se lee
+# ---------------------------------------------------------------------------
 
 def _ultima_jornada(cuadrilla, antes_de):
     """La jornada mas reciente de esa cuadrilla ANTERIOR a la fecha pedida.
@@ -67,106 +146,371 @@ def _ultima_jornada(cuadrilla, antes_de):
     )
 
 
-def _crear_desde(cuadrilla, fecha, anterior):
-    """Copia la jornada anterior. Devuelve (jornada, cuantos_de_baja)."""
-    jornada = JornadaDeCuadrilla.objects.create(
-        org=cuadrilla.org,
-        cuadrilla=cuadrilla,
-        fecha=fecha,
-        labor=anterior.labor,
-        # El lider del DIA, no el de la cuadrilla: si el martes la llevo otro,
-        # el miercoles arranca con ese y alguien lo corrige si hace falta.
-        lider=anterior.lider or cuadrilla.lider,
-    )
-    jornada.zonas.set(anterior.zonas.all())
+def ausentes_del_dia(org, fecha) -> set:
+    """Las cuentas que ese dia no trabajan.
 
-    de_baja = 0
-    for viejo in anterior.integrantes.all():
-        if not viejo.persona.activa:
-            de_baja += 1
-            continue
-        IntegranteDeJornada.objects.create(
-            org=cuadrilla.org, jornada=jornada,
-            persona=viejo.persona, rol=viejo.rol,
-        )
-    return jornada, de_baja
+    Una ausencia que deja a la persona sin un minuto de la jornada de la
+    empresa (`capacidad.disponibilidad_de` == AUSENTE). Una de media mañana no
+    la saca: sale tarde, pero sale. Si la empresa no tiene la jornada de ese
+    dia abierta --sin calendario, un feriado-- no hay contra que medir, y una
+    ausencia declarada cuenta entera: ante la duda no se arma con alguien que
+    dijo que no viene.
 
-
-def _crear_desde_lo_habitual(cuadrilla, fecha):
-    """El arranque en frio: la cuadrilla nunca trabajo todavia.
-
-    Se arma con lo que la cuadrilla declara como habitual. Los integrantes no
-    salen de ahi --quien trabaja cada dia es del dia-- asi que la jornada nace
-    con el lider solo, si lo tiene. Alguien le agrega la gente; lo que esto
-    evita es que no exista NADA que corregir.
+    Un auxiliar sin cuenta no puede declarar ausencia --la tabla es por
+    cuenta--, asi que de el no se sabe nada: va.
     """
-    jornada = JornadaDeCuadrilla.objects.create(
-        org=cuadrilla.org,
-        cuadrilla=cuadrilla,
-        fecha=fecha,
-        labor=cuadrilla.labor_habitual,
-        lider=cuadrilla.lider,
+    from operaciones import capacidad
+    from operaciones.models import DisponibilidadTecnico
+
+    perfiles = set(
+        DisponibilidadTecnico.objects
+        .filter(org=org, fecha=fecha, disponible=False)
+        .values_list("profile_id", flat=True)
     )
-    jornada.zonas.set(cuadrilla.zonas_habituales.all())
-    return jornada
+    if not perfiles:
+        return set()
+    jornada = capacidad.jornada_de(org, fecha)
+    if not jornada.abierta:
+        return perfiles
+    return {
+        p for p in perfiles
+        if capacidad.disponibilidad_de(org, p, fecha, jornada)["estado"]
+        == capacidad.AUSENTE
+    }
 
 
-def asegurar_jornadas(org, fecha) -> dict:
-    """Deja armada la jornada de cada cuadrilla activa para esa fecha.
+def tiene_ordenes(jornada) -> bool:
+    """Si alguien que recibe por esta jornada tiene una orden ABIERTA asignada.
 
-    No pisa lo que ya existe. Devuelve que paso con cada una, nombrandolas:
-    un conteo sin nombres obliga a salir a buscar cual fue.
+    No hay una columna que ate una orden a una jornada: la asignacion es a una
+    CUENTA (`AsignacionTrabajo`), la del lider del dia o la de un integrante
+    con cuenta (`destinatarios`).
 
-        {
-          "copiadas":   [{"cuadrilla": ..., "desde": fecha, "sin_gente": n}],
-          "estrenadas": [...],   # armadas con lo habitual, nunca trabajaron
-          "ya_estaban": [...],   # alguien las armo a mano; no se tocaron
-          "sin_base":   [...],   # ni jornada anterior ni habitual utilizable
-          "sin_zona":   [...],   # quedaron armadas pero NO reciben trabajo
-        }
+    ABIERTA, Y NO "ASIGNADA HOY"  --  auditor de frontera, 17/10/2026. La
+    primera version miraba solo lo asignado desde las 00:00, y una orden para
+    hoy asignada anoche no congelaba la labor. Ahora cuenta toda orden que no
+    este terminada --completada en campo, cerrada o cancelada--, se haya
+    asignado cuando sea: una cuadrilla que todavia carga trabajo no cambia de
+    labor. Conservador a proposito: ante la duda, la jornada no se toca.
     """
-    salida = {"copiadas": [], "estrenadas": [], "ya_estaban": [],
-              "sin_base": [], "sin_zona": []}
+    from campo.models import AsignacionTrabajo, OrdenTrabajo
+
+    perfiles = [r["profile"].id for r in destinatarios(jornada)["reciben"]]
+    if not perfiles:
+        return False
+    return (AsignacionTrabajo.objects
+            .filter(orden__org_id=jornada.org_id, profile_id__in=perfiles)
+            .exclude(orden__estado_operativo__in=(
+                OrdenTrabajo.COMPLETADA_CAMPO, OrdenTrabajo.CERRADA,
+                OrdenTrabajo.CANCELADA))
+            .exists())
+
+
+# ---------------------------------------------------------------------------
+#  El plan
+# ---------------------------------------------------------------------------
+
+def planear_el_dia(org, fecha, *, demanda=None, ausentes=None) -> list:
+    """Que se haria con cada cuadrilla activa ese dia. NO ESCRIBE.
+
+    `demanda` es {zona_id: {labor: casos}}: los casos de Despacho de cada
+    zona, por labor. Vacio = no hay casos, y cada cuadrilla sale con su labor
+    habitual. `ausentes` son ids de cuenta; si no viene se lee
+    (`ausentes_del_dia`).
+
+    Es la mitad que la sombra muestra: lo que se armaria, sin armarlo.
+    """
+    demanda = demanda or {}
+    if ausentes is None:
+        ausentes = ausentes_del_dia(org, fecha)
 
     cuadrillas = list(
         Cuadrilla.objects.filter(org=org, activa=True)
+        .select_related("lider")
         .prefetch_related("zonas_habituales")
         .order_by("nombre")
     )
-    ya = set(
-        JornadaDeCuadrilla.objects
-        .filter(org=org, fecha=fecha)
-        .values_list("cuadrilla_id", flat=True)
-    )
+    existentes = {
+        j.cuadrilla_id: j
+        for j in (JornadaDeCuadrilla.objects
+                  .filter(org=org, fecha=fecha)
+                  .select_related("cuadrilla__lider", "lider")
+                  .prefetch_related("zonas"))
+    }
 
-    for cuadrilla in cuadrillas:
-        if cuadrilla.id in ya:
-            salida["ya_estaban"].append(cuadrilla.nombre)
+    planes = []
+    for c in cuadrillas:
+        zonas = [z for z in c.zonas_habituales.all() if z.activa]
+        ya = existentes.get(c.id)
+
+        if ya is not None:
+            if ya.armada_por != JornadaDeCuadrilla.AUTOMATICA:
+                planes.append(Plan(c, DEJAR, ARMADA_POR_UNA_PERSONA,
+                                   labor=ya.labor, jornada=ya,
+                                   zonas=list(ya.zonas.all())))
+            elif tiene_ordenes(ya):
+                planes.append(Plan(c, DEJAR, YA_TIENE_ORDENES,
+                                   labor=ya.labor, jornada=ya,
+                                   zonas=list(ya.zonas.all())))
+            else:
+                #  Candidata a reajustar: la labor se elige abajo, con las
+                #  demas. Si sale la misma, queda en DEJAR.
+                planes.append(Plan(c, REAJUSTAR, OTRA_LABOR,
+                                   labor_antes=ya.labor, jornada=ya,
+                                   zonas=list(ya.zonas.all())))
             continue
 
-        anterior = _ultima_jornada(cuadrilla, fecha)
-        with transaction.atomic():
-            if anterior is not None:
-                jornada, de_baja = _crear_desde(cuadrilla, fecha, anterior)
-                salida["copiadas"].append({
-                    "cuadrilla": cuadrilla.nombre,
-                    "desde": anterior.fecha.isoformat(),
-                    "sin_gente": de_baja,
-                })
-            elif cuadrilla.zonas_habituales.exists() or cuadrilla.lider_id:
-                jornada = _crear_desde_lo_habitual(cuadrilla, fecha)
-                salida["estrenadas"].append(cuadrilla.nombre)
-            else:
-                # Ni historia ni habitual: armarla seria crear una jornada que
-                # no puede recibir nada. Se dice en vez de dejar una fila
-                # vacia que parece trabajo hecho.
-                salida["sin_base"].append(cuadrilla.nombre)
+        if not zonas:
+            planes.append(Plan(c, NO_SE_ARMA, SIN_ZONA))
+            continue
+
+        anterior = _ultima_jornada(c, fecha)
+        lider = c.lider or (anterior.lider if anterior is not None else None)
+        if lider is not None and lider.id in ausentes:
+            planes.append(Plan(c, NO_SE_ARMA, LIDER_AUSENTE, zonas=zonas))
+            continue
+
+        if anterior is None:
+            if lider is None:
+                planes.append(Plan(c, NO_SE_ARMA, SIN_BASE, zonas=zonas))
                 continue
+            #  EL ARRANQUE EN FRIO: nunca trabajo. Sale con el lider solo; la
+            #  gente la agrega una persona. Lo que esto evita es que no
+            #  exista NADA que corregir.
+            planes.append(Plan(c, ARMAR, ESTRENADA, zonas=zonas, lider=lider))
+            continue
 
-        # VACIO NO ES "CUBRE TODAS". Una cuadrilla sin zona no recibe trabajo
-        # por zona, asi que queda armada y aun asi no va a aparecer en el
-        # reparto -- eso tiene que notarse ahora, no a las siete.
-        if not jornada.zonas.exists():
-            salida["sin_zona"].append(cuadrilla.nombre)
+        gente, de_baja, fuera = [], 0, 0
+        for viejo in anterior.integrantes.all():
+            persona = viejo.persona
+            if not persona.activa:
+                de_baja += 1
+                continue
+            if persona.profile_id is not None and persona.profile_id in ausentes:
+                fuera += 1
+                continue
+            gente.append((persona, viejo.rol))
+        if not gente and lider is None:
+            planes.append(Plan(c, NO_SE_ARMA, SIN_GENTE, zonas=zonas,
+                               de_baja=de_baja, ausentes=fuera))
+            continue
+        planes.append(Plan(c, ARMAR, COPIADA, zonas=zonas, lider=lider,
+                           integrantes=gente, desde=anterior.fecha,
+                           de_baja=de_baja, ausentes=fuera))
 
+    _elegir_labores(planes, demanda)
+    return planes
+
+
+def _la_de_mas_casos(cuenta: dict, orden: list) -> str:
+    """La labor con mas casos; en empate, la que aparece antes en `orden`."""
+    return max(cuenta, key=lambda lab: (
+        cuenta[lab], -orden.index(lab) if lab in orden else -len(orden)))
+
+
+def _elegir_labores(planes, demanda) -> None:
+    """La labor de cada jornada que se arma o se reajusta. Escribe en el plan.
+
+    UNA CUADRILLA SOLA EN SU ZONA toma la labor con mas casos de sus zonas; sin
+    casos, la habitual (o la que ya tiene, si se reajusta).
+
+    DOS EN LA MISMA ZONA. Decidido por el usuario: si la zona tiene casos de
+    dos labores, la segunda toma la otra. Se recorren en orden de nombre y
+    cada una mira lo que QUEDA SIN CUBRIR en sus zonas --lo que ya cubren las
+    jornadas que no se tocan y las que se eligieron antes--:
+
+        - toma la labor con mas casos sin cubrir;
+        - pero si su HABITUAL tambien tiene casos sin cubrir y una cuadrilla
+          que viene detras comparte su zona, se queda con la habitual y le
+          deja la otra. Asi la #1 de instalacion y la #2 de correctivo no
+          salen cruzadas solo por el orden alfabetico;
+        - si todo lo de sus zonas ya esta cubierto, ayuda con la mayoria.
+
+    Empate en cantidad: la labor que ya tiene, despues la habitual, despues
+    correctivo, instalacion y trabajos.
+    """
+    cubierto = set()
+    for p in planes:
+        if p.accion == DEJAR:
+            for z in p.zonas:
+                cubierto.add((str(z.id), p.labor))
+
+    movibles = [p for p in planes if p.accion in (ARMAR, REAJUSTAR)]
+    for i, p in enumerate(movibles):
+        zonas = [str(z.id) for z in p.zonas]
+        habitual = p.cuadrilla.labor_habitual
+        orden = [x for x in (p.labor_antes, habitual, *_DESEMPATE) if x]
+
+        total, sin_cubrir, donde = {}, {}, {}
+        for z in zonas:
+            for lab, n in (demanda.get(z) or {}).items():
+                if not n or n <= 0:
+                    continue
+                total[lab] = total.get(lab, 0) + n
+                if (z, lab) not in cubierto:
+                    sin_cubrir[lab] = sin_cubrir.get(lab, 0) + n
+                    donde.setdefault(lab, set()).add(z)
+
+        if sin_cubrir:
+            #  SE QUEDA CON LA HABITUAL SOLO SI LO QUE DEJA LO TOMA OTRA: cada
+            #  labor que no elige tiene que tener una zona sin cubrir que una
+            #  de las que vienen detras tambien cubre. Antes bastaba con
+            #  compartir CUALQUIER zona, y una #1 de dos zonas dejaba sin
+            #  nadie la mayoria de la que la #2 no cubre (auditor
+            #  independiente, 17/10).
+            despues = [{str(z.id) for z in q.zonas} for q in movibles[i + 1:]]
+            otras = [lab for lab in sin_cubrir if lab != habitual]
+            la_toma_otra = bool(otras) and all(
+                any(donde[lab] & zq for zq in despues) for lab in otras)
+            if habitual in sin_cubrir and la_toma_otra:
+                elegida = habitual
+            else:
+                elegida = _la_de_mas_casos(sin_cubrir, orden)
+        elif total:
+            elegida = _la_de_mas_casos(total, orden)
+        else:
+            elegida = p.labor_antes or habitual
+
+        p.labor = elegida
+        for z in zonas:
+            cubierto.add((z, elegida))
+        if p.accion == REAJUSTAR and elegida == p.labor_antes:
+            p.accion, p.motivo = DEJAR, MISMA_LABOR
+
+
+# ---------------------------------------------------------------------------
+#  Lo que se escribe
+# ---------------------------------------------------------------------------
+
+def resumen(planes) -> dict:
+    """Que paso --o que pasaria-- con cada cuadrilla, nombrandolas.
+
+    Un conteo sin nombres obliga a salir a buscar cual fue. Son las claves de
+    siempre del ciclo de la madrugada, mas las de la regla del 17/10.
+    """
+    salida = {"copiadas": [], "estrenadas": [], "reajustadas": [],
+              "ya_estaban": [], "sin_base": [], "sin_zona": [],
+              "lider_ausente": [], "sin_gente": [], "labores": {}}
+    for p in planes:
+        nombre = p.cuadrilla.nombre
+        if p.accion == ARMAR and p.motivo == COPIADA:
+            salida["copiadas"].append({
+                "cuadrilla": nombre,
+                "desde": p.desde.isoformat() if p.desde else None,
+                "sin_gente": p.de_baja,
+                "ausentes": p.ausentes,
+                "en_otra_cuadrilla": p.en_otra_cuadrilla,
+                "labor": p.labor,
+            })
+        elif p.accion == ARMAR:
+            salida["estrenadas"].append(nombre)
+        elif p.accion == REAJUSTAR:
+            salida["reajustadas"].append(
+                {"cuadrilla": nombre, "de": p.labor_antes, "a": p.labor})
+        elif p.accion == DEJAR:
+            salida["ya_estaban"].append(nombre)
+        elif p.motivo in salida:
+            salida[p.motivo].append(nombre)
+        if p.accion in (ARMAR, REAJUSTAR):
+            salida["labores"][nombre] = p.labor
     return salida
+
+
+def aplicar(org, fecha, planes, *, origen: str = "") -> dict:
+    """Escribe el plan. Devuelve `resumen` de lo que de verdad quedo.
+
+    Cada cuadrilla en su propia transaccion: que una falle --una persona armo
+    la misma jornada en ese instante-- no deshace las demas. Cada escritura
+    lleva su fila de auditoria EN LA MISMA transaccion: una jornada armada sin
+    registro no se arma. `origen` dice quien la armo (la tarea del Supervisor,
+    o el ciclo de la madrugada).
+    """
+    for p in planes:
+        if p.accion == ARMAR:
+            if not _armar(org, fecha, p, origen):
+                p.accion, p.motivo = DEJAR, ARMADA_POR_UNA_PERSONA
+        elif p.accion == REAJUSTAR:
+            #  SE VUELVE A MIRAR AL ESCRIBIR (auditor de frontera, 17/10): entre
+            #  el plan y esto hay una llamada de red, y alguien pudo publicar el
+            #  reparto en el medio.
+            if tiene_ordenes(p.jornada):
+                p.accion, p.motivo = DEJAR, YA_TIENE_ORDENES
+                continue
+            with transaction.atomic():
+                #  CONDICIONAL: si una persona la corrigio entre el plan y esto,
+                #  ya es suya (`armada_por = PERSONA`) y no se toca.
+                n = (JornadaDeCuadrilla.objects
+                     .filter(id=p.jornada.id,
+                             armada_por=JornadaDeCuadrilla.AUTOMATICA,
+                             labor=p.labor_antes)
+                     .update(labor=p.labor, updated_at=timezone.now()))
+                if n:
+                    _auditar(org, fecha, p, p.jornada.id, origen)
+            if not n:
+                p.accion, p.motivo = DEJAR, ARMADA_POR_UNA_PERSONA
+    return resumen(planes)
+
+
+def _armar(org, fecha, p, origen) -> bool:
+    """Crea la jornada de un plan. False si ya existia: la armo alguien."""
+    try:
+        with transaction.atomic():
+            jornada = JornadaDeCuadrilla.objects.create(
+                org=org, cuadrilla=p.cuadrilla, fecha=fecha, labor=p.labor,
+                lider=p.lider, armada_por=JornadaDeCuadrilla.AUTOMATICA,
+            )
+            jornada.zonas.set(p.zonas)
+            for persona, rol in p.integrantes:
+                integrante = IntegranteDeJornada(
+                    org=org, jornada=jornada, persona=persona, rol=rol)
+                try:
+                    #  `full_clean` y no `save` a secas: ahi vive la guarda de
+                    #  "esta persona ya esta en otra cuadrilla hoy". Si una
+                    #  persona la puso en otra, esa decision gana.
+                    integrante.full_clean()
+                except ValidationError:
+                    p.en_otra_cuadrilla += 1
+                    continue
+                integrante.save()
+            _auditar(org, fecha, p, jornada.id, origen)
+    except IntegrityError:
+        return False
+    return True
+
+
+def _auditar(org, fecha, p, jornada_id, origen) -> None:
+    """La fila de auditoria de una jornada armada o reajustada sola.
+
+    EL NIVEL 3 ES EJECUTAR ALGO REVERSIBLE, y revertir se apoya en poder ver
+    que se hizo. La jornada dice `armada_por`, pero de un reajuste no quedaba
+    ni la labor anterior (auditor de frontera, 17/10/2026). Actor None: la
+    escribio el sistema, y asi se reconoce -- no por un usuario inventado.
+    """
+    from operaciones import auditoria
+
+    armada = p.accion == ARMAR
+    zonas = ", ".join(z.nombre for z in p.zonas) or "sin zona"
+    auditoria.registrar(
+        org=org, actor=None,
+        accion="CREATE" if armada else "UPDATE",
+        entidad=auditoria.ENTIDAD_JORNADA, entidad_id=jornada_id,
+        nombre=f"{p.cuadrilla.nombre} · {fecha.isoformat()}",
+        descripcion=(f"Jornada armada sola: {p.labor} en {zonas}." if armada
+                     else f"Labor reajustada sola: de {p.labor_antes} a "
+                          f"{p.labor}."),
+        estado_anterior="" if armada else p.labor_antes,
+        estado_nuevo=p.labor,
+        motivo=p.motivo,
+        extra={"automatico": True, "origen": origen or "sin_origen"},
+    )
+
+
+def asegurar_jornadas(org, fecha, *, demanda=None,
+                      origen: str = "ciclo_de_la_madrugada") -> dict:
+    """Deja armada la jornada de cada cuadrilla activa para esa fecha.
+
+    La entrada del ciclo de la madrugada. Es `planear_el_dia` + `aplicar`, la
+    misma regla que usa el Supervisor en cada vuelta.
+    """
+    return aplicar(org, fecha, planear_el_dia(org, fecha, demanda=demanda),
+                   origen=origen)

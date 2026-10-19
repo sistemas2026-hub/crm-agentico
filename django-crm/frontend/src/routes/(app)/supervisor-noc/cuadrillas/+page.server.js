@@ -334,12 +334,25 @@ export const actions = {
   reparto_config: async ({ request, cookies }) => {
     const f = await request.formData();
     try {
-      const r = await guardarConfiguracionDeReparto({ cookies }, {
+      /** @type {Record<string, any>} */
+      const cuerpo = {
         activo: f.get('activo') === '1',
         hora_local: String(f.get('hora_local') ?? '3'),
         tope_por_cuadrilla: String(f.get('tope_por_cuadrilla') ?? '8'),
         copia_la_jornada: f.get('copia_la_jornada') === '1'
-      });
+      };
+      //  LA LABOR DE CADA GRUPO DE CASO (17/10/2026), solo si el formulario
+      //  la trae: una pantalla vieja que no tiene esos campos no la borra.
+      //  Vacío es «no cuenta», y viaja así.
+      const grupos = ['falla_de_servicio', 'trabajo_pedido', 'obra_de_red'];
+      if (grupos.some((g) => f.has(`labor_de_${g}`))) {
+        cuerpo.labor_por_grupo = Object.fromEntries(
+          grupos
+            .filter((g) => f.has(`labor_de_${g}`))
+            .map((g) => [g, String(f.get(`labor_de_${g}`) ?? '')])
+        );
+      }
+      const r = await guardarConfiguracionDeReparto({ cookies }, cuerpo);
       return {
         hecho: r?.activo
           ? `El ciclo corre todos los días a las ${r.hora_local}:00, ` +

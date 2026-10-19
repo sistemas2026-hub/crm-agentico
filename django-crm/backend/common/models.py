@@ -697,6 +697,10 @@ class Activity(BaseModel):
         #  registrarlo -- y dejarlo sin auditar seria que la unica forma de
         #  saber que se intento fuera que alguien estuviera mirando.
         ("SituacionOperativa", "Situación operativa del Supervisor NOC IA"),
+        # 17/10/2026. La jornada de cuadrilla que arma el Supervisor -- o el
+        # ciclo de la madrugada -- sin que una persona la toque. Se audita como
+        # cualquier otra escritura automatica.
+        ("JornadaDeCuadrilla", "Jornada de cuadrilla"),
     )
 
     user = models.ForeignKey(
