@@ -54,6 +54,15 @@
 /** La categoria de los que no caen en ningun area del equipo. */
 export const SIN_AREA = '__sin_area__';
 
+/**
+ * La cola entera, sin filtro de area (19/10/2026). Solo para quien administra:
+ * un colaborador que la pida por la URL cae en su propia area, igual que con
+ * cualquier otra. Hacia falta porque la pantalla solo mostraba un area a la
+ * vez, y en produccion ningun ticket abierto trae el area escrita (794 de 794
+ * vacios): todo dependia de a quien estaba asignado.
+ */
+export const TODAS_LAS_AREAS = '__todas__';
+
 /** @typedef {{area?: string, assigned_to: string|null, total: number,
  *             urgentes: number, sin_respuesta: number, en_progreso: number}} FilaDesglose */
 
