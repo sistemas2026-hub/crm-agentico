@@ -352,7 +352,13 @@ describe('despachar', () => {
       orden: { numero: 1042 }, ordenes_activas_del_caso: [1042]
     });
     const r = await actions.despachar(submit(DESPACHO_OK));
-    expect(r.hecho).toBe('Orden #1042 despachada.');
+    //  NO se fija el texto entero: el mensaje tambien dice a quien quedo
+    //  asignada, y eso lo decide otra parte que puede cambiar su redaccion sin
+    //  que este caso tenga nada que opinar. Lo que se afirma es la AUSENCIA
+    //  del aviso, que es de lo que trata esta prueba.
+    expect(r.hecho).toContain('Orden #1042 despachada');
+    expect(r.hecho).not.toContain('ya tenía');
+    expect(r.hecho).not.toContain('#1042)');
   });
 
   it('sin órdenes previas la confirmación no agrega ruido', async () => {
@@ -360,7 +366,8 @@ describe('despachar', () => {
       orden: { numero: 1042 }, ordenes_activas_del_caso: []
     });
     const r = await actions.despachar(submit(DESPACHO_OK));
-    expect(r.hecho).toBe('Orden #1042 despachada.');
+    expect(r.hecho).toContain('Orden #1042 despachada');
+    expect(r.hecho).not.toContain('Atención');
   });
 
   it('un campo vacío viaja como ausente, no como cadena vacía', async () => {
