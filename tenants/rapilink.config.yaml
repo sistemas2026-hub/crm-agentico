@@ -3385,7 +3385,12 @@ herramientas:
     # Es de solo lectura y no cambia nada del cliente: no le aplica la
     # frontera de acciones externas ni pide aprobacion.
     invocable_por_servicio: true
-    argumentos_sobrescribibles: [id_servicio]
+    #  'pings' estaba SOLO en la base (se agrego desde la interfaz): deja que
+    #  la ruta interna pida mas o menos intentos que los 3 de
+    #  'argumentos_fijos'. Bajado al archivo el 19/10/2026 porque una carga sin
+    #  el lo habria borrado, y el pedido con 'pings' habria empezado a salir
+    #  con 400 sin que nada lo explique.
+    argumentos_sobrescribibles: [id_servicio, pings]
     # Si la llamada MISMA falla (WispHub caido, la tarea asincrona no
     # termina) el caso pasa a una persona por este motivo, sin que dependa de
     # como lo lea el modelo. Un '0 de 3' NO es esto -- la llamada funciono y
@@ -6543,6 +6548,21 @@ areas:
     agentes: [administracion]
     icono: edificio
     color: '#0d9488'
+  #  LAS DOS DE ABAJO SE CREARON DESDE LA INTERFAZ y vivian solo en la base.
+  #  Se bajan al YAML el 19/10/2026 porque sin ellas una carga de config las
+  #  BORRA: `areas` no esta en `TenantConfig.SINCRONIZADOS`, asi que el
+  #  archivo pisa lo que la base tenga. Los valores salen del volcado de
+  #  `cli/diferencias_config.py --todo` contra la base v176, no de memoria.
+  - nombre: ventas
+    etiqueta: Ventas
+    agentes: []
+    icono: persona
+    color: '#d97706'
+  - nombre: operativo
+    etiqueta: Operativo
+    agentes: []
+    icono: red
+    color: '#65888b'
 
 # -----------------------------------------------------------------------------
 #  IDENTIDAD EXTERNA  -  quien es cada colaborador en el sistema operativo
@@ -7123,7 +7143,10 @@ limites:
 #
 # Apagado, la foto se sigue guardando y mostrando en la bandeja igual que
 # siempre; lo unico que no pasa es que el agente la mire.
-vision_habilitada: false
+#  ENCENDIDA EN PRODUCCION. Estaba en 'false' aca y en 'true' en la base, y
+#  cargar el archivo la habria APAGADO sin que nadie lo pidiera. Se alinea
+#  el 19/10/2026 con lo que la empresa de verdad tiene.
+vision_habilitada: true
 
 evaluacion:
   minimo_acierto_pct: 90.0
@@ -7153,7 +7176,17 @@ evaluacion:
 # 'cuenta_api' es el NOMBRE de la cuenta en WispHub, no una credencial: la
 # clave va por 'auth_ref', como todo secreto en este archivo.
 importacion_tickets:
+  #  LOS ASUNTOS LITERALES son los de la v146. Los CINCO COMODINES
+  #  ('<departamento>|*') se agregaron despues desde 'activar_importacion.py'
+  #  y vivian SOLO en la base: sin bajarlos, una carga de este archivo habria
+  #  dejado de importar los tickets de Ventas, Finanzas, Operativo y
+  #  Administrativo, en silencio. Bajados el 19/10/2026 (base v176).
   asuntos:
+  - 'soporte tecnico|*'
+  - 'ventas|*'
+  - 'finanzas|*'
+  - 'operativo|*'
+  - 'administrativo|*'
   - soporte tecnico|no tiene internet
   - soporte tecnico|problemas de tv
   - soporte tecnico|internet intermitente/niveles altos
@@ -7164,7 +7197,26 @@ importacion_tickets:
   cuenta_api: Rapilink SAS - admin@rapilink-sas
   departamentos:
   - Soporte Técnico
+  - Ventas
+  - Finanzas
+  - Operativo
+  - Administrativo
   destinos:
+    'soporte tecnico|*':
+      area: soporte_tecnico
+      prioridad: Normal
+    'ventas|*':
+      area: ventas
+      prioridad: Normal
+    'finanzas|*':
+      area: cartera
+      prioridad: Normal
+    'operativo|*':
+      area: soporte_tecnico
+      prioridad: Normal
+    'administrativo|*':
+      area: administracion
+      prioridad: Normal
     soporte tecnico|configuracion dns:
       area: soporte_tecnico
       prioridad: Normal
