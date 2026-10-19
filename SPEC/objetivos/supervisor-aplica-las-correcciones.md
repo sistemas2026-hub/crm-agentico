@@ -39,6 +39,10 @@ ve, en sombra, qué casos pasarían y por qué.
 | 19/10 | **Al delegar la tarea, se relee una vez más con las instrucciones de las correcciones** lo que se leyó en sombra | `auditor-independiente`: desplegado en sombra, las fallas frenadas se releían con las claves nuevas pero sin las instrucciones, y al delegar ya no se volvían a leer. Cada lectura guarda con qué instrucciones se hizo (`test_r3`) |
 | 19/10 | **La relectura filtra antes de cortar** en las 60 pendientes | `auditor-independiente`: el tope cortaba las 60 más viejas y después filtraba; con más pendientes, las de atrás no se releían nunca. Limitación anterior a este bloque (`test_r4`) |
 | 19/10 | **"Sí" y "SI" cuentan como "si" en las dos claves nuevas; en el grupo, no** | `auditor-independiente`: un "Sí" se descartaba y la lectura, ya en versión 2, no se repetía. En el grupo se deja exacto a propósito: aceptar "Obra_de_red" cambiaría lo que pasa por la Fase 4 (`test_p`) |
+| 19/10 | **Tanda 2 · el nivel que recibe la OLT entra al doble diagnóstico** (`senal_olt_dbm`) | Ya venía en la misma respuesta de SmartOLT y se descartaba. Solo informa. Llega cuando la lista blanca de `supervisor_noc` en `tenant_config` lo declare: se carga después del deploy, con `editor._editar` |
+| 19/10 | **Tanda 2 · el corte de red: cada caso pasa marcado con su puerto** | Decidido por el usuario entre tres opciones: «cada caso marcado con la misma marca de puerto; el despachador arma una sola orden». Las otras dos eran una propuesta por puerto (hoy no llega a Despacho, y la orden apuntaría a la caja) o retener y avisar |
+| 19/10 | **Tanda 2 · es corte de red desde 2 ONU del mismo puerto, y solo cuenta LOS** | Decidido por el usuario. 2 es el umbral que ya usa el resto del sistema para una falla agrupada; un «Power fail» es la luz de la casa, no la fibra |
+| 19/10 | **Tanda 2 · la banda de la ONU sale del tipo registrado en SmartOLT, después de que el usuario corrija los 355 mal registrados** | Decidido por el usuario. Hasta entonces la parte 3 espera |
 | 19/10 | **"-23.01 / -23.38 dBm" se leen los dos niveles** | `auditor-independiente`: así escribe el ISP el de la ONU y el de la OLT, y se perdía el primero (`test_l`) |
 | 19/10 | **La relectura por versión solo toca lo que la lectura nueva puede mover** (falla con una medición que frena, lectura de versión 1), con una lectura extra de tope | Releer todo gastaría el tope de la vuelta en tickets que la lectura nueva no cambia |
 
@@ -80,11 +84,15 @@ ve, en sombra, qué casos pasarían y por qué.
   `supervisor_noc` de `tenant_config`: hay que cargar config a producción, y
   eso no lo hace una sesión.
 - **Tanda 2, la banda de cada tipo de ONU**: 355 equipos registrados `CDATA`
-  son físicamente iguales a los `CDATA-CATV`. Qué tipo es de una banda es un
-  dato de la empresa que falta, y el plan "alto" (100 Mb) va con él.
-- **Tanda 2, "un solo trabajo" para un corte del puerto**: falta decidir qué
-  hace el Supervisor con varias ONU del mismo puerto en LOS (una obra de red
-  para todas, o seguir con una visita por cliente).
+  son físicamente iguales a los `CDATA-CATV`. El usuario corrige el registro en
+  SmartOLT (19/10); después el Supervisor usa el tipo registrado, con el plan
+  "alto" (100 Mb) como configuración.
+- **Tanda 2, el corte del puerto**: decidido (casos marcados, desde 2, solo
+  LOS). Falta la verificación en vivo de `get_onus_statuses` por placa y
+  puerto, que nunca se verificó: el script del verificador (sección P2) lo
+  corre una persona. `arquitecto-dexter` (19/10) ubicó el lugar mínimo: medir
+  los vecinos dentro de `diagnosticar_servicio` solo cuando el equipo cae por
+  LOS, y decidir en `paso_a_despacho` como una corrección más.
 
 ## Riesgos que quedan, dichos
 
