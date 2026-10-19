@@ -1,7 +1,9 @@
 # Objetivo · El Supervisor aplica las correcciones del usuario a su diagnóstico
 
-> Abierto el 18/10/2026. Estado: **tandas 1, 3 y 4 construidas y verificadas
-> (19/10/2026), sin desplegar; tanda 2 bloqueada** (ver Bloqueos).
+> Abierto el 18/10/2026. Estado (19/10/2026): **tandas 1, 3 y 4 desplegadas**
+> (`5bbf9fb8`); **tanda 2, partes 1 y 2 (nivel de la OLT y corte de red)
+> construidas, auditadas y verificadas, sin desplegar**; la parte 3 (banda de
+> la ONU) espera que el usuario corrija el registro en SmartOLT.
 
 ## Qué significa terminado
 
@@ -48,15 +50,21 @@ ve, en sombra, qué casos pasarían y por qué.
 | 19/10 | **La marca del corte de red va siempre, sin la tarea de las correcciones** | No cambia si el caso pasa: una caída por LOS ya pasaba por la Fase 4. Cambia el motivo que ve el despachador ("CORTE DE RED: N equipos del puerto P… una sola orden") y que la demanda de la jornada cuente el corte una vez, como obra de red. Se enciende de hecho cuando se carga la lista blanca en `tenant_config` |
 | 19/10 | **"-23.01 / -23.38 dBm" se leen los dos niveles** | `auditor-independiente`: así escribe el ISP el de la ONU y el de la OLT, y se perdía el primero (`test_l`) |
 | 19/10 | **La relectura por versión solo toca lo que la lectura nueva puede mover** (falla con una medición que frena, lectura de versión 1), con una lectura extra de tope | Releer todo gastaría el tope de la vuelta en tickets que la lectura nueva no cambia |
+| 19/10 | **Una respuesta rota del modelo no pisa una lectura buena; en un ticket que nunca se leyó, se anota igual** | El 95531 (producción, ese día) quedó "sin grupo" porque una relectura rota pisó su lectura. Y `auditor-independiente`: no anotarla nunca dejaba al ticket nunca leído en la cola para siempre. Con lectura buena se deja el rastro y vale la anterior (`test_r5`); sin ella se anota con el grupo vacío y corta el tope absoluto, 6 pedidas al modelo (`test_r6`) |
+| 19/10 | **El corte de red se cuenta una vez por PUERTO, no por zona, y el que ya tiene su orden no pide otra obra** | `auditor-independiente`: un puerto que alimenta dos zonas contaba dos obras, y el corte cuya orden ya armó el despachador (lo que pide la marca) contaba otra con los casos que quedaban. Los cortes con orden se juntan antes de recorrer la cola, así no depende del orden (`test_u4`, `test_u5`) |
+| 19/10 | **La marca del corte llega a la ficha de Despacho aunque el caso lo haya aceptado una persona** (`lectura.corte_de_red`) | `auditor-independiente`: viajaba solo en "por qué pasó solo", vacío si aceptó una persona, y el despachador armaba una orden por cliente mientras la jornada contaba un solo trabajo. Si ya está en el motivo, no se repite (`test_h`, `test_h2`) |
+| 19/10 | **Con exactamente dos niveles en el ticket se comparan por posición: el primero con la ONU, el segundo con la OLT**. Con tres o más, cada nivel medido toma el reportado más cercano libre | `auditor-independiente`: por cercanía, ONU -29.5 y OLT -28.3 contra "-28.24 / -29.59" se cruzaban y daban "coincide" dos veces. Con tres o más el texto no dice cuál es el par (`test_m4`) |
+| 19/10 | **Los vecinos: 5 s por consulta, hasta 3 páginas, el serial también en hexadecimal, y un conteo en cero dice por qué en el log** | `auditor-independiente`: el CRM le da 25 s a todo el diagnóstico y `get_onu_full_status_info` ya usa ~10; 68 equipos de Rapilink solo responden con el serial en hexadecimal; un puerto puede venir en más de una página |
+| 19/10 | **El conteo de vecinos corre en los cinco llamadores de `diagnosticar_servicio`, no solo en el Supervisor** — costo aceptado | Solo ante una caída por LOS: dos a cuatro llamadas más, 5 s cada una, contra un cupo de 500 por hora. Hacerlo opcional por llamador exigiría un campo de configuración nuevo, y hoy el número no lo pide |
 
 ## Tandas
 
 | Tanda | Reglas | Qué necesita | Estado (19/10) |
 |---|---|---|---|
-| 1 | Labor del trabajo pedido según cliente nuevo o existente; acción ya autorizada = trabajo pedido sin objetar; energía descartada por el ticket = falla de fibra; doble diagnóstico con el nivel del ticket; la medición en rango de una falla se repite y se guarda su historial | Nada nuevo: código del Supervisor y la lectura | **Construida y verificada** |
-| 2 | El nivel que recibe la OLT en el doble diagnóstico; el modelo de la ONU como dato; ONU del mismo puerto en LOS = obra de red | Cambios en el motor (`diagnosticar_servicio` descarta hoy el nivel de la OLT) y una medición en vivo de SmartOLT que tiene que correr una persona | **Bloqueada** (ver Bloqueos) |
-| 3 | Volver a medir cuando el técnico reporta el arreglo | El cierre de la orden en campo | **Construida y verificada** (`verificacion_de_arreglos`, fase del ciclo) |
-| 4 | Volver a leer los pendientes con las instrucciones nuevas, con tope por vuelta | La versión de las instrucciones en cada lectura | **Construida y verificada** (`VERSION_DE_LA_LECTURA = 2`) |
+| 1 | Labor del trabajo pedido según cliente nuevo o existente; acción ya autorizada = trabajo pedido sin objetar; energía descartada por el ticket = falla de fibra; doble diagnóstico con el nivel del ticket; la medición en rango de una falla se repite y se guarda su historial | Nada nuevo: código del Supervisor y la lectura | **Desplegada** (`5bbf9fb8`) |
+| 2 | Parte 1: el nivel que recibe la OLT en el doble diagnóstico. Parte 2: ONU del mismo puerto en LOS = un solo trabajo de red. Parte 3: la banda de cada tipo de ONU | Partes 1 y 2: el motor (`diagnosticar_servicio`) y, después del deploy, la lista blanca de `supervisor_noc` en `tenant_config`. Parte 3: el registro corregido en SmartOLT | **Partes 1 y 2 construidas y verificadas, sin desplegar. Parte 3 espera** (ver Bloqueos) |
+| 3 | Volver a medir cuando el técnico reporta el arreglo | El cierre de la orden en campo | **Desplegada** (`5bbf9fb8`, `verificacion_de_arreglos`) |
+| 4 | Volver a leer los pendientes con las instrucciones nuevas, con tope por vuelta | La versión de las instrucciones en cada lectura | **Desplegada** (`5bbf9fb8`, `VERSION_DE_LA_LECTURA = 2`) |
 
 ## Criterios de aceptación
 
@@ -77,25 +85,22 @@ ve, en sombra, qué casos pasarían y por qué.
 
 ## Bloqueos
 
-- **Tanda 2, la parte de SmartOLT**: la medición en vivo de `get_onus_statuses`
-  por puerto y de la distribución de estados (LOS / Power fail) no se pudo
-  hacer: el clasificador de permisos negó usar la credencial. Script de solo
-  lectura listo para que lo corra el usuario (lo dejó `verificador-de-api`).
-- **Tanda 2, el nivel de la OLT**: el campo existe en la respuesta que ya se
-  pide (`Optical status` → `OLT Rx ONT optical power(dBm)`, verificado el
-  14/08/2026), pero sumarlo es un cambio en el motor y en la lista blanca de
-  `supervisor_noc` de `tenant_config`: hay que cargar config a producción, y
-  eso no lo hace una sesión.
+- **Tanda 2, partes 1 y 2, después del deploy**: la lista blanca de
+  `supervisor_noc` → `diagnosticar_servicio` en `tenant_config` tiene que
+  declarar `senal_olt_dbm`, `puerto` y `onus_en_los_a_la_vez`. Hasta entonces
+  no llegan al CRM y nada cambia. Se carga con `editor._editar` en el
+  contenedor del motor; no lo hace una sesión.
+- **Tanda 2, una llamada de confirmación**: que `fields=status,
+  last_status_change,sn` devuelva el serial (sin él, la caída propia no se
+  ubica y el corte no se marca nunca, con aviso en el log). Script de una
+  sola llamada GET, que corre el usuario: `scratchpad/scripts/verificar_fields_sn.py`.
 - **Tanda 2, la banda de cada tipo de ONU**: 355 equipos registrados `CDATA`
   son físicamente iguales a los `CDATA-CATV`. El usuario corrige el registro en
   SmartOLT (19/10); después el Supervisor usa el tipo registrado, con el plan
   "alto" (100 Mb) como configuración.
-- **Tanda 2, el corte del puerto**: decidido (casos marcados, desde 2, solo
-  LOS). Falta la verificación en vivo de `get_onus_statuses` por placa y
-  puerto, que nunca se verificó: el script del verificador (sección P2) lo
-  corre una persona. `arquitecto-dexter` (19/10) ubicó el lugar mínimo: medir
-  los vecinos dentro de `diagnosticar_servicio` solo cuando el equipo cae por
-  LOS, y decidir en `paso_a_despacho` como una corrección más.
+- **Tanda 2, el corte del puerto**: construido (casos marcados, desde 2,
+  solo LOS). Los filtros por OLT, placa, puerto y `status=los` se verificaron
+  en vivo el 19/10 con el script del verificador, corrido por el usuario.
 
 ## Riesgos que quedan, dichos
 
@@ -116,12 +121,20 @@ ve, en sombra, qué casos pasarían y por qué.
 - **Las instrucciones nuevas no se midieron contra el modelo real**: no hay
   set dorado de la lectura del Supervisor (`cli/evaluar.py` mide el motor, no
   este camino). La sombra es la medición.
+- **Dos lecturas sueltas de la ONU en el mismo ticket se leen como el par
+  ONU / OLT**: con exactamente dos niveles se compara por posición. El doble
+  diagnóstico informa y no decide.
+- **Si el proveedor deja de devolver el serial con `fields`, el corte no se
+  marca nunca**: no hay error, solo la línea del log "las filas del puerto no
+  traen el serial".
 
 ## Bitácora
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 18/10/2026 | Ficha abierta. Informe de `verificador-de-api` sobre SmartOLT | Todo | — |
-| 19/10/2026 | Auditoría independiente: re-mediciones y verificación acotadas (no son polling), las instalaciones sin barrio para las cuadrillas de instalación, relectura al delegar, filtrar antes de cortar, "Sí" con tilde, "-a / -b dBm". Ver "Riesgos que quedan" | Push (lo decide el usuario) | sin commit todavía |
-| 19/10/2026 | Auditorías de frontera y de PII: la re-medición nunca reemplaza, la relectura que mueve el grupo es una corrección más, las instrucciones nuevas y la acción autorizada atadas a la tarea y al autor, el aviso al delegar, el descarte sin frases | Auditoría independiente | sin commit todavía |
-| 19/10/2026 | Tandas 1, 3 y 4 construidas: las claves nuevas de la lectura y su versión, las tres reglas detrás de la tarea nueva con su sombra, la re-medición cada 3 h con historial, el doble diagnóstico, la labor por cliente nuevo o existente, la medición después del arreglo y la columna del informe. Pruebas en Postgres con los dos roles, mutaciones, regresión, ruff, svelte-check y build | Tanda 2 (bloqueada). Deploy, y que el usuario mire la sombra antes de delegar la tarea | sin commit todavía |
+| 19/10/2026 | Auditoría independiente: re-mediciones y verificación acotadas (no son polling), las instalaciones sin barrio para las cuadrillas de instalación, relectura al delegar, filtrar antes de cortar, "Sí" con tilde, "-a / -b dBm". Ver "Riesgos que quedan" | Push (lo decide el usuario) | `5bbf9fb8`, desplegado |
+| 19/10/2026 | Auditorías de frontera y de PII: la re-medición nunca reemplaza, la relectura que mueve el grupo es una corrección más, las instrucciones nuevas y la acción autorizada atadas a la tarea y al autor, el aviso al delegar, el descarte sin frases | Auditoría independiente | `5bbf9fb8`, desplegado |
+| 19/10/2026 | Tandas 1, 3 y 4 construidas: las claves nuevas de la lectura y su versión, las tres reglas detrás de la tarea nueva con su sombra, la re-medición cada 3 h con historial, el doble diagnóstico, la labor por cliente nuevo o existente, la medición después del arreglo y la columna del informe. Pruebas en Postgres con los dos roles, mutaciones, regresión, ruff, svelte-check y build | Tanda 2. Que el usuario mire la sombra antes de delegar la tarea | `5bbf9fb8`, desplegado |
+| 19/10/2026 | Sombra observada en producción: el 95394 pasaría por la re-medición (-22.92 de noche, -26.38 de día). Una respuesta rota dejó al 95531 "sin grupo": ya no la pisa, y el informe muestra la re-medición y la versión de cada lectura | Delegar la tarea (lo decide el usuario) | `0d328eb4` |
+| 19/10/2026 | Tanda 2, partes 1 y 2: el nivel de la OLT en el doble diagnóstico; el corte de red marcado con su puerto, umbral por empresa en Cuadrillas, contado una vez en la jornada y visible en la ficha de Despacho. Auditorías de frontera, PII e independiente, con lo que encontraron resuelto. Pruebas del motor, 734 del backend en Postgres, 71 de vitest, mutaciones (motor 8 de 8, backend 16 de 16), ruff y svelte-check sin hallazgos nuevos, build | Push (lo decide el usuario); cargar la lista blanca; la llamada de confirmación del serial; parte 3 | `5f19576f`, `3f158ed3`, `807a8dc9` y el de lo del auditor |

@@ -778,6 +778,13 @@
               <strong>Pasó solo a Despacho:</strong> {despachando.lectura.por_que_paso}
             </p>
           {/if}
+          <!-- EL CORTE DE RED (19/10/2026), lo haya pasado el Supervisor o una
+               persona: varios casos del mismo puerto son un solo trabajo. -->
+          {#if despachando.lectura?.corte_de_red}
+            <p class="snoc-aviso snoc-body-sm">
+              <strong>Corte de red:</strong> {despachando.lectura.corte_de_red}
+            </p>
+          {/if}
 
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Qué hay que hacer</span>

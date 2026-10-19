@@ -318,14 +318,22 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None,
                 f"({type(e).__name__}). Se reintenta en la siguiente.", ahora))
             continue
 
-        if _respuesta_rota(getattr(v, "descartes", None)):
-            #  UNA RESPUESTA ROTA NO ES UNA LECTURA  --  19/10/2026. El modelo
-            #  no llego a contestar con un objeto, y anotarla como lectura
-            #  dejaba un grupo VACIO encima del que la propuesta ya tenia: la
-            #  relectura por version del 19/10 lo hizo con el 95531, que era
-            #  una falla en rango y quedo "sin grupo". Se deja el rastro --la
-            #  fila cuenta para el tope absoluto de relecturas-- y la lectura
-            #  anterior sigue valiendo; la vuelta que viene lo intenta de nuevo.
+        if (_respuesta_rota(getattr(v, "descartes", None))
+                and _tiene_un_grupo((propuestas or {}).get(str(senal.origen_id)))):
+            #  UNA RESPUESTA ROTA NO PISA UNA LECTURA BUENA  --  19/10/2026. El
+            #  modelo no llego a contestar con un objeto, y anotarla como
+            #  lectura dejaba un grupo VACIO encima del que la propuesta ya
+            #  tenia: la relectura por version del 19/10 lo hizo con el 95531,
+            #  que era una falla en rango y quedo "sin grupo". Se deja el rastro
+            #  --la fila cuenta para el tope absoluto de relecturas-- y la
+            #  lectura anterior sigue valiendo.
+            #
+            #  SOLO SI HAY UNA LECTURA QUE CUIDAR (auditor independiente, mismo
+            #  dia): en un ticket que nunca se leyo, no anotar nada dejaba
+            #  'le_falta_lectura' en verdadero para siempre --esa pregunta no
+            #  tiene tope-- y se releia cada hora. Sin lectura buena se anota
+            #  como antes, con el grupo vacio, y entra el tope de
+            #  'le_falta_el_grupo'.
             informe["respuestas_rotas"] += 1
             _dejar_rastro(org, v, senal, propuestas, ahora, informe)
             continue
@@ -482,6 +490,16 @@ def _anotar(senal, veredicto, labor, ahora, *,
     #  medicion que separo las dos esta en 'paso_a_despacho'.
     senal.datos["confianza_del_grupo"] = str(
         _extras.get("confianza_del_grupo") or "")
+
+
+def _tiene_un_grupo(propuesta) -> bool:
+    """Si la propuesta ya tiene una lectura con el grupo puesto."""
+    if propuesta is None:
+        return False
+    from operaciones import paso_a_despacho as pad
+
+    ultima = pad._ultima_lectura_con_grupo(propuesta)
+    return bool(ultima and str(ultima.get("grupo") or "").strip())
 
 
 def le_falta_lectura(propuesta) -> bool:

@@ -165,3 +165,68 @@ def test_g_si_la_acepto_una_persona_no_dice_que_paso_solo(
 
     assert r.status_code == 200, r.content
     assert r.json()["lectura"]["por_que_paso"] == ""
+
+
+# =============================================================================
+#  EL CORTE DE RED  --  19/10/2026
+# =============================================================================
+#  La marca viajaba solo en 'por_que_paso', que esta vacio si la acepto una
+#  persona: el despachador veia los casos sueltos y armaba una orden por
+#  cliente (auditor independiente).
+
+def _con_la_medicion(propuesta, caso, en_los):
+    from django.utils import timezone
+
+    from operaciones import medicion_de_fallas as mdf
+    from operaciones import paso_a_despacho as pad
+
+    propuesta.evidencia = [*propuesta.evidencia, {
+        "fuente": pad.FUENTE_MEDICION, "id": str(caso.id), "dato": "medicion",
+        "observado_en": timezone.now().isoformat(),
+        **mdf.de_la_respuesta({
+            "id_servicio": "3614", "equipo_registrado": True,
+            "estado": "caido", "causa_caida": "fibra", "senal_dbm": None,
+            "senal": "sin_dato", "estado_config": "match", "motivo": "",
+            "puerto": "3/2/11", "onus_en_los_a_la_vez": en_los})}]
+    propuesta.save(update_fields=["evidencia"])
+    return propuesta
+
+
+def test_h_el_corte_de_red_llega_aunque_la_acepte_una_persona(
+        admin_client, admin_profile, org_a, ficha_del_motor):
+    from operaciones import supervisor as sup
+    from operaciones.models import PropuestaSupervisor
+
+    marcado, suelto = _caso(org_a), _caso(org_a)
+    for caso, en_los in ((marcado, 3), (suelto, 1)):
+        p = _con_la_medicion(
+            _propuesta(org_a, caso, estado=PropuestaSupervisor.PROPUESTA),
+            caso, en_los)
+        sup.revisar(p, actor=admin_profile,
+                    decision=PropuestaSupervisor.ACEPTADA,
+                    comentario="lo revise yo: hay que ir")
+
+    lectura = admin_client.get(_ruta(marcado)).json()["lectura"]
+    assert lectura["por_que_paso"] == ""
+    assert ("CORTE DE RED: 3 equipos del puerto 3/2/11"
+            in lectura["corte_de_red"])
+    assert admin_client.get(_ruta(suelto)).json()["lectura"]["corte_de_red"] == ""
+
+
+def test_h2_si_paso_solo_marcado_la_marca_no_se_repite(
+        admin_client, org_a, ficha_del_motor):
+    from operaciones import paso_a_despacho as pad
+    from operaciones import supervisor as sup
+    from operaciones.models import PropuestaSupervisor
+
+    caso = _caso(org_a)
+    p = _con_la_medicion(
+        _propuesta(org_a, caso, estado=PropuestaSupervisor.PROPUESTA), caso, 3)
+    marca = pad.texto_del_corte_de_red(pad.ultima_medicion(p))
+    sup.revisar(p, actor=None, automatico=True,
+                decision=PropuestaSupervisor.ACEPTADA,
+                comentario=f"{pad.PREFIJO_DEL_PASE}falla CONFIRMADA. {marca}")
+
+    lectura = admin_client.get(_ruta(caso)).json()["lectura"]
+    assert marca in lectura["por_que_paso"]
+    assert lectura["corte_de_red"] == ""

@@ -295,6 +295,7 @@ print("\n§4d EL CORTE DEL PUERTO: LAS DEL MISMO PUERTO EN LOS A LA VEZ, SIN PII
 
 class _Json:
     status_code = 200
+    ok = True
 
     def __init__(self, cuerpo):
         self._cuerpo = cuerpo
@@ -388,11 +389,54 @@ _r = _con_proveedor(_Proveedor(filas=_filas, detalles={
     "olt_id": "3", "board": "2 CARLOS PRUEBA", "port": "11"}))
 afirmar(_r.get("puerto") == "" and _r.get("onus_en_los_a_la_vez") is None,
         "una pieza que no es un numero no arma una llave: ni puerto ni conteo")
+_hexa = diag.ejecutor_http._gpon_hex("CDTC00000001")
+_r = _con_proveedor(_Proveedor(filas=[dict(f, sn=_hexa) if i == 0 else f
+                                      for i, f in enumerate(_filas)]))
+afirmar(bool(_hexa) and _r.get("onus_en_los_a_la_vez") == 3,
+        "la fila propia se encuentra tambien con el serial en hexadecimal")
 _r = _con_proveedor(_Proveedor(filas=[{k: v for k, v in f.items() if k != "sn"}
                                       for f in _filas]))
 afirmar(_r.get("onus_en_los_a_la_vez") == 0,
         "si las filas no traen el serial, no se afirma un corte (y queda en "
         "el log)")
+
+
+class _Paginado(_Proveedor):
+    """El proveedor recorta la pagina: la fila propia llega en la segunda."""
+
+    def __call__(self, url, **k):
+        if "get_all_onus_details" in url:
+            self.pedidos.append((url, k.get("params")))
+            pagina = (k.get("params") or {}).get("page")
+            filas = _filas[1:] if pagina == 1 else _filas[:1]
+            return _Json({"onus": filas, "total_pages": 2})
+        return super().__call__(url, **k)
+
+
+_p = _Paginado()
+_r = _con_proveedor(_p)
+afirmar(_r.get("onus_en_los_a_la_vez") == 3
+        and sum(1 for u, _ in _p.pedidos if "get_all_onus_details" in u) == 2,
+        "si el proveedor recorta la pagina, se pide la siguiente y la fila "
+        "propia aparece igual")
+
+
+class _SoloHexa(_Proveedor):
+    """El equipo solo responde con el serial en hexadecimal: 68 de Rapilink."""
+
+    def __call__(self, url, **k):
+        if url.endswith("/get_onu_details/CDTC00000001"):
+            self.pedidos.append((url, k.get("params")))
+            no = _Json({})
+            no.ok, no.status_code = False, 404
+            return no
+        return super().__call__(url, **k)
+
+
+_r = _con_proveedor(_SoloHexa(filas=_filas))
+afirmar(_r.get("puerto") == "3/2/11" and _r.get("onus_en_los_a_la_vez") == 3,
+        "si el equipo solo responde en hexadecimal, se reintenta con esa forma "
+        "y el corte se cuenta igual")
 _p = _Proveedor(run="Online", causa="")
 _r = _con_proveedor(_p)
 afirmar(len(_p.pedidos) == 1 and _r.get("onus_en_los_a_la_vez") is None,

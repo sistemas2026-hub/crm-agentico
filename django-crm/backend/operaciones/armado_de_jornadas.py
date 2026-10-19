@@ -341,10 +341,25 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
               #  puerto (19/10/2026): un solo trabajo, no uno por cliente.
               "mismo_corte_de_red": 0}
     umbral_corte = onus_para_corte_de_red(org.id)
-    cortes_contados = set()
+    #  EL CORTE DE RED SE CUENTA UNA VEZ (auditor independiente, 19/10/2026).
+    #  La llave es el PUERTO, no la zona: un puerto puede alimentar dos zonas y
+    #  sigue siendo un solo trabajo. Y los cortes que YA tienen su orden --que
+    #  es justo lo que la marca le pide al despachador-- se juntan ANTES de
+    #  recorrer: si el caso con la orden venia despues en la cola, el primero
+    #  del puerto contaba una obra que ya estaba hecha.
+    corte_de = {}
+    for caso, p in propuestas.items():
+        medicion = pad.ultima_medicion(p)
+        if pad.es_corte_de_red(medicion, umbral_corte):
+            corte_de[caso] = medicion["puerto"]
+    cortes_contados = {corte_de[c] for c in corte_de if c in despachados}
     for caso, p in propuestas.items():
         if caso in despachados:
             salida["ya_despachados"] += 1
+            continue
+        corte = corte_de.get(caso)
+        if corte and corte in cortes_contados:
+            salida["mismo_corte_de_red"] += 1
             continue
         pieza = localidad_guardada(p) or {}
         barrio = normalizar_localidad(pieza.get("localidad") or "")
@@ -360,16 +375,11 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
         grupo = str(lectura.get("grupo") or "")
         if grupo == pad.TRABAJO_PEDIDO and _es_de_un_cliente_nuevo(pieza, lectura):
             grupo = INSTALACION_NUEVA
-        medicion = pad.ultima_medicion(p)
-        if pad.es_corte_de_red(medicion, umbral_corte):
+        if corte:
             #  EL CORTE DE RED ES UN SOLO TRABAJO (caso 4, 19/10/2026): el
-            #  primer caso del puerto cuenta como obra de red, los demas no
-            #  suman.
-            llave = (zona, medicion["puerto"])
-            if llave in cortes_contados:
-                salida["mismo_corte_de_red"] += 1
-                continue
-            cortes_contados.add(llave)
+            #  primer caso del puerto que se puede ubicar cuenta como obra de
+            #  red; los demas no suman (arriba).
+            cortes_contados.add(corte)
             grupo = pad.OBRA_DE_RED
         labor = labores.get(grupo) if grupo else labor_de_la_visita(p)
         if not labor:

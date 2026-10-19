@@ -180,25 +180,58 @@ def _pieza_de_puerto(valor) -> str:
     return texto if texto.isascii() and texto.isdigit() else ""
 
 
+#:  Cuanto se espera a cada una de las dos consultas de los vecinos. CORTO a
+#:  proposito (auditor independiente, 19/10/2026): el CRM le da 25 s al motor
+#:  para TODO el diagnostico, y 'get_onu_full_status_info' ya se lleva unos 10.
+#:  Sin esto, con SmartOLT lento la medicion entera vencia y se volvia a pedir
+#:  cada hora. Si no contesta a tiempo, no hay corte que afirmar.
+TIMEOUT_VECINOS_SEGUNDOS = 5
+
+#:  Cuantas paginas del puerto se piden como mucho. Un puerto GPON tiene hasta
+#:  128 equipos; si el proveedor recorta 'page_size', esto alcanza igual.
+PAGINAS_DE_VECINOS = 3
+
+
 def _vecinos_en_los(base_url: str, headers: dict, serial: str) -> dict:
+    formas = {str(serial).strip().upper()}
+    hexa = ejecutor_http._gpon_hex(serial)
+    if hexa:
+        formas.add(str(hexa).strip().upper())
     try:
         r = requests.get(f"{base_url}/api/onu/get_onu_details/{serial}",
-                         headers=headers, timeout=TIMEOUT_SEGUNDOS)
+                         headers=headers, timeout=TIMEOUT_VECINOS_SEGUNDOS)
+        if not r.ok and hexa and hexa != serial:
+            #  El mismo reintento que 'incidentes' y el ejecutor: 68 equipos
+            #  de Rapilink solo responden con el serial en hexadecimal.
+            r = requests.get(f"{base_url}/api/onu/get_onu_details/{hexa}",
+                             headers=headers, timeout=TIMEOUT_VECINOS_SEGUNDOS)
         r.raise_for_status()
         detalles = (r.json() or {}).get("onu_details") or {}
         olt, placa, puerto = (_pieza_de_puerto(detalles.get(c))
                               for c in ("olt_id", "board", "port"))
         if not (olt and placa and puerto):
+            registrar("diagnostico_servicio",
+                      "no se pudo ubicar el equipo en su puerto")
             return {}
-        r = requests.get(
-            f"{base_url}/api/onu/get_all_onus_details", headers=headers,
-            timeout=TIMEOUT_SEGUNDOS,
-            params={"olt_id": olt, "board": placa, "port": puerto,
-                    "status": "los",
-                    "fields": "status,last_status_change,sn",
-                    "page": 1, "page_size": 200})
-        r.raise_for_status()
-        filas = (r.json() or {}).get("onus") or []
+        filas, pagina, paginas = [], 1, 1
+        while pagina <= min(paginas, PAGINAS_DE_VECINOS):
+            r = requests.get(
+                f"{base_url}/api/onu/get_all_onus_details", headers=headers,
+                timeout=TIMEOUT_VECINOS_SEGUNDOS,
+                params={"olt_id": olt, "board": placa, "port": puerto,
+                        "status": "los",
+                        "fields": "status,last_status_change,sn",
+                        "page": pagina, "page_size": 200})
+            r.raise_for_status()
+            cuerpo = r.json() or {}
+            filas.extend(cuerpo.get("onus") or [])
+            total = cuerpo.get("total_pages")
+            paginas = total if isinstance(total, int) and total > 0 else 1
+            pagina += 1
+        if paginas > PAGINAS_DE_VECINOS:
+            registrar("diagnostico_servicio",
+                      "el puerto tiene mas paginas en LOS de las que se piden: "
+                      "el conteo puede quedar corto")
     except Exception as e:                                       # noqa: BLE001
         registrar("diagnostico_servicio",
                   "no se pudo contar los vecinos del puerto", error=e)
@@ -221,11 +254,14 @@ def _vecinos_en_los(base_url: str, headers: dict, serial: str) -> dict:
         registrar("diagnostico_servicio",
                   "las filas del puerto no traen el serial: no se puede "
                   "ubicar la caida propia")
-    propia = next((t for sn, t in en_los if sn == str(serial).strip().upper()),
-                  None)
+    propia = next((t for sn, t in en_los if sn in formas), None)
     if propia is None:
         #  ESTE equipo no figura en LOS en su puerto: no hay caida propia contra
-        #  la cual comparar, y no se afirma ningun corte.
+        #  la cual comparar, y no se afirma ningun corte. Dicho en el log, sin
+        #  el serial (auditor independiente, 19/10/2026: era un 0 mudo).
+        registrar("diagnostico_servicio",
+                  "la caida propia no figura en LOS en su puerto: no se "
+                  "afirma un corte")
         return {"puerto": llave, "onus_en_los_a_la_vez": 0}
     ventana = timedelta(minutes=incidentes.VENTANA_MISMA_FALLA_MINUTOS)
     a_la_vez = sum(1 for _, t in en_los

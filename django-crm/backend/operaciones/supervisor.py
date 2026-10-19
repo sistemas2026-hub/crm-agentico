@@ -2883,8 +2883,10 @@ def _leer_tickets_abiertos(org, ahora, *,
 
     informe["guardadas"] = guardadas
     logger.info("Supervisor: lecturas guardadas=%s · sin propuesta=%s · "
-                "no se leyeron=%s · fallaron=%s (de %s candidatas)",
+                "no se leyeron=%s · fallaron=%s · respuestas rotas que no "
+                "pisaron una lectura=%s (de %s candidatas)",
                 guardadas, sin_propuesta, sin_leer_de_verdad, fallaron,
+                (informe.get("tickets") or {}).get("respuestas_rotas", 0),
                 len(candidatas))
 
     return informe

@@ -459,10 +459,34 @@ def _lectura_de(propuesta) -> dict:
         dato = str((obs or {}).get("dato") or "") if isinstance(obs, dict) else ""
         if dato.startswith(ETIQUETA_LECTURA):
             hipotesis = dato[len(ETIQUETA_LECTURA):].strip()
+    por_que_paso = _por_que_paso_solo(propuesta)
     return {"hipotesis": hipotesis,
             "recomendacion": (propuesta.accion_propuesta or "").strip(),
             "motivo": (propuesta.motivo or "").strip(),
-            "por_que_paso": _por_que_paso_solo(propuesta)}
+            "por_que_paso": por_que_paso,
+            "corte_de_red": _corte_de_red(propuesta, por_que_paso)}
+
+
+def _corte_de_red(propuesta, por_que_paso: str) -> str:
+    """
+    La marca del corte de red, la haya aceptado el Supervisor o una persona.
+
+    POR QUE  --  19/10/2026 (auditor independiente). La marca viajaba solo en
+    'por_que_paso', que esta vacio si la acepto una persona: el despachador
+    veia N casos sueltos y armaba N correctivos, mientras la jornada ya contaba
+    un solo trabajo de red. Sale de la medicion guardada y del umbral de la
+    empresa, la misma cuenta que el paso. Si ya esta en 'por_que_paso', no se
+    repite. Texto fijo con la llave del puerto y un numero: sin datos del
+    cliente.
+    """
+    from campo.cuadrillas import onus_para_corte_de_red
+    from operaciones import paso_a_despacho as pad
+
+    medicion = pad.ultima_medicion(propuesta)
+    if not pad.es_corte_de_red(medicion, onus_para_corte_de_red(propuesta.org_id)):
+        return ""
+    texto = pad.texto_del_corte_de_red(medicion)
+    return "" if texto in por_que_paso else texto
 
 
 def _por_que_paso_solo(propuesta) -> str:

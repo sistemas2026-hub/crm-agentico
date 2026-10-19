@@ -367,9 +367,8 @@ def decidir(grupo: str, labor_veredicto: dict | None,
             #  que cambia es la marca. 'corte_de_red' es el umbral de la
             #  empresa; 0 es "no se sabe", y entonces no se marca.
             if es_corte_de_red(m, corte_de_red):
-                return Decision(True, _CORTE_DE_RED.format(
-                    n=m["onus_en_los_a_la_vez"], puerto=m["puerto"]),
-                    grupo=grupo, labor=labor)
+                return Decision(True, texto_del_corte_de_red(m),
+                                grupo=grupo, labor=labor)
             return Decision(True, _SIN_SENAL_OPTICA, grupo=grupo, labor=labor)
         if causa:
             return Decision(True, _CAIDO_SIN_CAUSA, grupo=grupo, labor=labor)
@@ -581,27 +580,41 @@ def _doble_diagnostico(niveles, medicion) -> str:
     el de '_nivel', para que el log lo saque de la clave.
 
     CON EL NIVEL DE LA OLT (tanda 2, 19/10/2026) se comparan los dos: el ISP
-    escribe "-23.01 / -23.38 dBm", el de la ONU y el de la OLT. Cada nivel
-    medido toma el reportado mas cercano que quede libre, asi que dos niveles
-    parecidos no se cruzan: es el ejemplo del usuario, -23.01 / -23.38 contra
-    -23.01 / -23.57.
+    escribe "-23.01 / -23.38 dBm", el de la ONU y el de la OLT, en ese orden.
+    Con EXACTAMENTE dos niveles en el ticket se comparan por posicion: el
+    primero con la ONU, el segundo con la OLT. Con uno, ese es el de la ONU.
+    Con tres o mas el texto no dice cual es el par, y cada nivel medido toma
+    el reportado mas cercano que quede libre. Dos lecturas sueltas de la ONU
+    en el mismo ticket se leen como el par: el doble diagnostico informa y no
+    decide.
     """
     if not niveles or not _hay_nivel(medicion):
         return ""
     restantes = list(niveles)
     medido = float(medicion["senal_dbm"])
-    reportado = min(restantes, key=lambda v: abs(v - medido))
-    restantes.remove(reportado)
+    olt = (medicion or {}).get("senal_olt_dbm")
+    con_olt = (isinstance(olt, (int, float)) and not isinstance(olt, bool)
+               and math.isfinite(olt))
+    por_posicion = con_olt and len(restantes) == 2
+    if por_posicion:
+        #  POR POSICION (auditor independiente, 19/10/2026): el ISP escribe
+        #  "-a / -b dBm", primero la ONU y despues la OLT (verificado ese dia
+        #  cruzando 'get_onu_signal' con 'get_onu_full_status_info'). Por
+        #  cercania, una ONU de -29.5 y una OLT de -28.3 contra un ticket
+        #  "-28.24 / -29.59" se cruzaban y daban "coincide" dos veces.
+        reportado = restantes.pop(0)
+    else:
+        reportado = min(restantes, key=lambda v: abs(v - medido))
+        restantes.remove(reportado)
     if abs(reportado - medido) <= TOLERANCIA_DOBLE_DIAGNOSTICO_DB:
         texto = (f". Doble diagnostico: coincide con el nivel que reporta el "
                  f"ticket ({reportado} dBm)")
     else:
         texto = (f". Doble diagnostico: el ticket reporta otro nivel "
                  f"({reportado} dBm), la señal cambio desde el reporte")
-    olt = (medicion or {}).get("senal_olt_dbm")
-    if (restantes and isinstance(olt, (int, float))
-            and not isinstance(olt, bool) and math.isfinite(olt)):
-        del_ticket = min(restantes, key=lambda v: abs(v - olt))
+    if restantes and con_olt:
+        del_ticket = (restantes[0] if por_posicion
+                      else min(restantes, key=lambda v: abs(v - olt)))
         if abs(del_ticket - olt) <= TOLERANCIA_DOBLE_DIAGNOSTICO_DB:
             texto += (f"; en la OLT, que recibe ({olt} dBm), tambien coincide "
                       f"({del_ticket} dBm)")
@@ -911,6 +924,13 @@ def de_la_propuesta(propuesta, *, correcciones: bool = False,
             #  frontera, 19/10: inflaba la cuenta).
             d.regla = REGLA_REMEDICION
     return d
+
+
+def texto_del_corte_de_red(medicion) -> str:
+    """La marca del corte de red para esta medicion. Una sola redaccion: la
+    usan el paso y la ficha de Despacho."""
+    return _CORTE_DE_RED.format(n=medicion["onus_en_los_a_la_vez"],
+                                puerto=medicion["puerto"])
 
 
 def es_corte_de_red(medicion, umbral: int) -> bool:

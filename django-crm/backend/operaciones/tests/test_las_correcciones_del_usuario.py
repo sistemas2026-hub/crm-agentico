@@ -524,6 +524,27 @@ def test_m3_la_medicion_guarda_el_nivel_de_la_olt_si_es_un_numero():
             {**EN_RANGO, "senal_olt_dbm": raro})["senal_olt_dbm"] is None
 
 
+def test_m4_con_el_par_escrito_se_compara_por_posicion():
+    """Auditor independiente, 19/10/2026: por cercania, una ONU de -29.5 y una
+    OLT de -28.3 contra un ticket "-28.24 / -29.59" se cruzaban y daban
+    "coincide" dos veces. El ISP escribe primero la ONU y despues la OLT."""
+    def porque(niveles):
+        medicion = {**_medicion(senal="debil", dbm=-29.5),
+                    "senal_olt_dbm": -28.3}
+        return pad.decidir(pad.FALLA_DE_SERVICIO, {}, medicion=medicion,
+                           niveles=niveles).porque
+
+    cruzado = porque([-28.24, -29.59])
+    assert "el ticket reporta otro nivel (-28.24 dBm)" in cruzado
+    assert ("en la OLT, que recibe (-28.3 dBm), el ticket reporta otro nivel "
+            "(-29.59 dBm)") in cruzado
+    assert "coincide" not in cruzado
+    #  Con tres el texto no dice cual es el par: el mas cercano libre.
+    tres = porque([-20.0, -28.24, -29.59])
+    assert "coincide con el nivel que reporta el ticket (-29.59 dBm)" in tres
+    assert "tambien coincide (-28.24 dBm)" in tres
+
+
 def test_n_el_doble_diagnostico_sale_del_ticket_sin_llevarse_nada_mas(
         org_a, monkeypatch):
     _puertas(monkeypatch, correcciones=False)
@@ -720,6 +741,47 @@ def test_r5_una_respuesta_rota_no_pisa_la_lectura(org_a, monkeypatch):
     assert lectura["grupo"] == pad.FALLA_DE_SERVICIO
     assert pad.evaluar(P.objects.get(pk=p.pk), timezone.now()).grupo == (
         pad.FALLA_DE_SERVICIO)
+
+
+def test_r6_la_respuesta_rota_de_un_ticket_nunca_leido_tiene_tope(
+        org_a, monkeypatch):
+    """Auditor independiente, 19/10/2026: en un ticket que nunca se leyo, no
+    anotar la respuesta rota dejaba 'le_falta_lectura' en verdadero para
+    siempre, y se pedia al modelo en cada vuelta. Sin lectura buena que cuidar
+    se anota como antes, con el grupo vacio, y corta el tope absoluto."""
+    from operaciones import cerebro
+
+    caso = _caso(org_a, description="No tiene internet, LOS en rojo")
+    p = P.objects.create(
+        org=org_a, tipo_senal=P.TICKET_SIN_DIAGNOSTICO, origen_tipo="case",
+        origen_id=str(caso.id), estado=P.PROPUESTA,
+        accion_propuesta="Revisar el servicio", motivo="x", prioridad=30,
+        evidencia=[{"fuente": "detector_de_tickets", "id": "x",
+                    "dato": "ticket abierto sin lectura",
+                    "observado_en": timezone.now().isoformat()}])
+    rota = SimpleNamespace(
+        hipotesis="", confianza="sin_hipotesis", falta=[], riesgo="",
+        recomendacion="", extras={}, razonamiento=None, concluyente=False,
+        hechos=[], inferencias=[], riesgos=[],
+        descartes=[cerebro.DESCARTE_SIN_OBJETO])
+    pedidas = []
+
+    def concluir(org, **kwargs):
+        pedidas.append(1)
+        return rota
+
+    monkeypatch.setattr(cerebro, "concluir", concluir)
+    monkeypatch.setattr(sup, "detectar", lambda org, ahora: [])
+    import campo.services.despacho as despacho
+    monkeypatch.setattr(despacho, "contexto_del_caso", lambda *a, **k: {})
+
+    for _ in range(dxt.MAXIMAS_RELECTURAS * 2 + 2):
+        sup._leer_tickets_abiertos(org_a, timezone.now())
+
+    assert len(pedidas) == dxt.MAXIMAS_RELECTURAS * 2, (
+        f"{len(pedidas)} pedidas al modelo: sin tope, una por vuelta")
+    assert not dxt.le_falta_lectura(P.objects.get(pk=p.pk)), (
+        "queda anotada: se leyo y no alcanzo")
 
 
 def test_s_releer_por_version_tiene_tope(org_a):
@@ -1017,6 +1079,50 @@ def test_u3_el_corte_de_red_es_un_solo_trabajo_en_la_demanda(org_a, soledad):
 
     assert d["por_zona"] == {str(soledad.id): {"trabajos": 2, "correctivo": 1}}
     assert d["mismo_corte_de_red"] == 2
+
+
+@pytest.mark.parametrize("con_orden", [0, 2])
+def test_u4_el_corte_que_ya_tiene_su_orden_no_pide_otra_obra(
+        org_a, soledad, admin_profile, con_orden):
+    """Auditor independiente, 19/10/2026: la marca le pide al despachador UNA
+    orden para el corte, y la demanda contaba otra obra con los casos que
+    quedaban. Tampoco depende de en que lugar de la cola este el caso que
+    tiene la orden."""
+    from operaciones.tests.test_el_supervisor_arma_la_jornada import (
+        _orden_del_caso,
+    )
+
+    aca = {"localidad": BARRIO, "motivo": "", "cliente_nuevo": False}
+    casos = [_en_despacho(org_a, pad.FALLA_DE_SERVICIO, localidad=aca,
+                          medida=_los(3, puerto="3/2/11")) for _ in range(3)]
+    _en_despacho(org_a, pad.FALLA_DE_SERVICIO, localidad=aca,
+                 medida=_los(1, puerto="3/2/13"))
+    _orden_del_caso(org_a, casos[con_orden], a_quien=admin_profile)
+
+    d = adj.demanda_de_despacho(org_a, adj.propuestas_en_despacho(org_a))
+
+    assert d["por_zona"] == {str(soledad.id): {"correctivo": 1}}
+    assert (d["ya_despachados"], d["mismo_corte_de_red"]) == (1, 2)
+
+
+def test_u5_un_puerto_que_cubre_dos_zonas_es_una_sola_obra(org_a, soledad):
+    """Auditor independiente, 19/10/2026: la llave era (zona, puerto), y un
+    puerto que alimenta barrios de dos zonas contaba dos obras."""
+    from campo.zonas import AliasDeZona, ZonaOperativa
+
+    otra = ZonaOperativa.objects.create(org=org_a, nombre="MALAMBO")
+    AliasDeZona.objects.create(org=org_a, zona=otra,
+                               localidad="MALAMBO CENTRO")
+    aca = {"localidad": BARRIO, "motivo": "", "cliente_nuevo": False}
+    alla = {"localidad": "MALAMBO CENTRO", "motivo": "", "cliente_nuevo": False}
+    for localidad in (aca, alla, aca, alla):
+        _en_despacho(org_a, pad.FALLA_DE_SERVICIO, localidad=localidad,
+                     medida=_los(4, puerto="3/2/11"))
+
+    d = adj.demanda_de_despacho(org_a, adj.propuestas_en_despacho(org_a))
+
+    assert d["por_zona"] == {str(soledad.id): {"trabajos": 1}}
+    assert d["mismo_corte_de_red"] == 3
 
 
 def test_v_la_instalacion_nueva_se_guarda_sin_barrio_y_marcada(org_a, soledad):
