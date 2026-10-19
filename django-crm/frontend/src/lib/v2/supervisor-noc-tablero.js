@@ -61,9 +61,11 @@ export function kpisDelTablero(indicadores, propuestas) {
   //  `estado === 'propuesta'` a secas anunciaba un numero y llevaba a una tabla
   //  con otro, en cuanto la bandeja empezo a excluir las propuestas cuyo caso ya
   //  cerro. Se cuenta lo mismo que se va a mostrar.
-  const pendientes = Array.isArray(propuestas)
-    ? propuestas.filter((p) => bandejaDe(p) === PENDIENTES).length
+  const enPendientes = Array.isArray(propuestas)
+    ? propuestas.filter((p) => bandejaDe(p) === PENDIENTES)
     : null;
+  const pendientes = enPendientes ? enPendientes.length : null;
+  const sobre = enPendientes ? ticketsDe(enPendientes) : null;
 
   return [
     {
@@ -80,7 +82,12 @@ export function kpisDelTablero(indicadores, propuestas) {
       // en estado `propuesta`, y el estado del modelo no se toca para
       // arreglar un rotulo de pantalla.
       titulo: 'Pendientes por revisión',
-      sub: 'Esperan decisión humana',
+      //  19/10/2026: el 12 eran 12 PROPUESTAS sobre 8 tickets, y comparado
+      //  con los tickets de Despacho y de Operativo la cuenta no cerraba.
+      //  Cuando no coinciden, se dicen los dos.
+      sub: sobre && sobre.tickets < sobre.propuestas
+        ? `${sobre.propuestas} propuestas · ${sobre.tickets} ${sobre.palabra}`
+        : 'Esperan decisión humana',
       tono: 'info'
     },
     {
@@ -814,4 +821,42 @@ export function paginacion(total, pagina, porPagina) {
   }
 
   return { actual, paginas, desde, hasta, total, ventana };
+}
+
+/**
+ * Cuántos tickets hay detrás de unas propuestas.
+ *
+ * UNA PROPUESTA NO ES UN TICKET  --  19/10/2026
+ * --------------------------------------------
+ * El usuario comparó «Pendientes por revisión: 12» con los 36 de Despacho y
+ * los 44 tickets abiertos de Operativo, y la cuenta no cerraba: 12 + 36 = 48.
+ * Medido en producción, los 12 eran propuestas sobre 8 tickets -- a cuatro
+ * les había dos: «caso abierto antiguo» y «ticket sin diagnóstico». Con 8,
+ * 36 + 8 = 44.
+ *
+ * Se agrupa por el origen (`origen_tipo` + `origen_id`), que es lo que la
+ * propuesta mira. `palabra` dice «tickets» solo si todas son de un caso: una
+ * orden de trabajo no es un ticket.
+ *
+ * @param {any[]} propuestas
+ */
+export function ticketsDe(propuestas) {
+  /** @type {Map<string, number>} */
+  const porOrigen = new Map();
+  for (const p of propuestas ?? []) {
+    const clave = origenDe(p);
+    porOrigen.set(clave, (porOrigen.get(clave) ?? 0) + 1);
+  }
+  const lista = propuestas ?? [];
+  return {
+    propuestas: lista.length,
+    tickets: porOrigen.size,
+    palabra: lista.every((p) => p?.origen_tipo === 'case') ? 'tickets' : 'casos',
+    porOrigen
+  };
+}
+
+/** La clave del origen de una propuesta: con qué otras comparte ticket. */
+export function origenDe(p) {
+  return `${p?.origen_tipo ?? ''}:${p?.origen_id ?? p?.id ?? ''}`;
 }

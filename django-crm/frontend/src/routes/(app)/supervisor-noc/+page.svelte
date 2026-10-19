@@ -43,6 +43,8 @@
     bandejaDeRevision,
     rotuloDeHallazgo,
     paginacion,
+    ticketsDe,
+    origenDe,
     actividadReciente,
     celdaDeSla,
     BLOQUES_SIN_DATO
@@ -444,6 +446,12 @@
   );
 
   const pag = $derived(paginacion(bandeja.length, nPagina, POR_PAGINA));
+
+  //  CUANTOS TICKETS SON  --  19/10/2026. La bandeja lista PROPUESTAS, y un
+  //  ticket puede tener dos (caso antiguo + sin diagnostico). Medido en
+  //  produccion: 12 filas, 8 tickets. Sin decirlo, el numero no se puede
+  //  comparar con los de Despacho ni con la cola de Tickets.
+  const sobreLaBandeja = $derived(ticketsDe(bandeja));
 
   /**
    * Las filas de esta pagina. El N.º que ya traen es la posicion dentro de
@@ -1513,6 +1521,9 @@
                   <span class="snoc-body-sm snoc-secundario">
                     <strong class="snoc-primario">{bandeja.length}</strong>
                     {filtroEstado === 'pendientes' ? 'pendientes de decisión' : 'en la lista'}
+                    {#if sobreLaBandeja.tickets < bandeja.length}
+                      · de <strong>{sobreLaBandeja.tickets}</strong> {sobreLaBandeja.palabra}
+                    {/if}
                   </span>
                 {/if}
               </div>
@@ -1835,6 +1846,12 @@
                             <div class="snoc-mono-sm snoc-tenue">
                               {p.ticket_externo}{#if p.proveedor_externo} · {p.proveedor_externo}{/if}
                             </div>
+                          {/if}
+                          {#if (sobreLaBandeja.porOrigen.get(origenDe(p)) ?? 0) > 1}
+                            <!-- Para que se vea CUAL ticket cuenta dos veces. -->
+                            <span class="snoc-tag">
+                              {sobreLaBandeja.porOrigen.get(origenDe(p))} propuestas de este ticket
+                            </span>
                           {/if}
                         {:else if p.ticket_externo}
                           <span class="snoc-id">{p.ticket_externo}</span>
