@@ -136,10 +136,89 @@ las cuatro mutaciones inversas              cazadas (ver la sección de arriba)
 
 | Qué | Por qué no lo cerró esta sesión |
 |---|---|
-| Cargar `tenant_config` | Exige `--forzar` y **el clasificador de seguridad lo bloquea**. Alternativas descartadas con su motivo: el editor campo por campo es peor para auditar (D7), y `--exportar` revertiría cuatro decisiones deliberadas |
-| `invocable_por_servicio` en cuatro herramientas | Es parte de la carga de arriba. **Medido campo por campo**: recorta a 11, 15 y 6 campos vía la lista blanca de `supervisor_noc`, y la cuarta es inerte (sin lista y sin llamadores). Cargar es seguro y es el estado que el repo quiso |
+| ~~Cargar `tenant_config`~~ | **HECHO el 19/10/2026 — base en v177.** Lo corrió el usuario: el clasificador de seguridad bloquea `--forzar` a nivel de herramienta y eso no se rodea. Resultado medido: **0 diferencias** del lado «el repo lo declara y la base no», y `[OK] La base tiene todo lo que el repo declara` |
+| ~~`invocable_por_servicio` en cuatro herramientas~~ | **HECHO**, con la carga de arriba |
 | Encender el ciclo de la madrugada | Es un interruptor de la pantalla `/supervisor-noc/cuadrillas`, que escribe la base de producción. Viene apagado de fábrica **a propósito** (§8, mismo criterio que `RELOJ_HABILITADO`) |
 | Verificar que el frontend se reconstruyó | **Sin salida HTTP desde el entorno de la sesión**: `HTTP 000` a los tres dominios. El sustituto barato, para quien tenga navegador: si el panel de Despacho sigue mostrando una sola fila «sin clasificar», la imagen no se reconstruyó |
+
+
+#### La carga de config, hecha y verificada — 19/10/2026
+
+```
+cli/cargar_config.py tenants/rapilink.config.yaml --forzar
+cli/diferencias_config.py rapilink
+
+  CONFIG DE rapilink -- tenants/rapilink.config.yaml vs base (v177)
+  [!] EL REPO LO DECLARA Y LA BASE NO DICE LO MISMO  (0)   -- nada
+  [i] SOLO LA BASE LO TIENE  (5)
+      localidades · localidades_actualizado_en · parrilla_canales
+      precios_actualizado_en · precios_de_planes
+  [OK] La base tiene todo lo que el repo declara.
+```
+
+**Las 5 que quedan son los SINCRONIZADOS**, y es la respuesta correcta: el
+cargador se los devuelve a la base antes de escribir (`cargar_config.py:365-377`),
+así que 132 localidades, 100 canales y 50 precios siguen ahí.
+
+**Lo que confirma que la alineación del YAML sirvió:** `areas[ventas]`,
+`areas[operativo]`, los cinco comodines de `importacion_tickets` y
+`ping_cliente.pings` **ya no figuran como «solo la base»**. El archivo los
+tiene, así que la carga los CONSERVÓ. Sin esa alineación previa, esta misma
+carga los habría borrado en silencio — que era exactamente el riesgo.
+
+**Lo que esto enciende:** la redacción por patrón del campo `asunto` en 7
+herramientas (§5, segunda capa: de 300 tickets reales, 136 traían un documento
+embebido en el texto), y las tres lecturas del chat del Supervisor, recortadas
+a 11, 15 y 6 campos de los 54 de WispHub.
+
+
+
+#### La verificación de humo que §6 exige después de cargar — 19/10/2026
+
+`cli/evaluar.py rapilink --humo --base`, **corrida DOS veces** porque una sola
+no separa una regresión de la varianza del modelo:
+
+```
+corrida 1   8/9 OK (89%)   115s     minimo exigido: 90%
+corrida 2   8/9 OK (89%)   111s     IDENTICA: mismo caso, mismo motivo
+```
+
+**Reproducible, no varianza.** El caso que cae:
+
+```
+[FALLA] una venta a un prospecto no verifica identidad
+        -> no_usa: ejecuto 'verificar_identidad_por_cedula' y no debia
+```
+
+Y uno que **no se pudo correr**, que el corredor clasifica aparte y con razón:
+`cancelar una solicitud` necesita `backend:8000`, el nombre de red del compose,
+que desde una máquina de desarrollo no resuelve. **No se pudo correr ≠ falla**
+—la distinción que D1 metió al CI— y acá hizo su trabajo.
+
+**LA CARGA NO LO CAUSÓ, y esto se midió en vez de inferirlo.** Las 15
+diferencias aplicadas son el delta COMPLETO, así que alcanza con mirar si
+alguna toca ese camino:
+
+```
+verificar_identidad_por_cedula entre las 15 aplicadas   NO
+las dos herramientas nuevas, a que rol entraron         administracion y soporte
+el rol 'ventas': 14 herramientas, alguna nueva?         NINGUNA
+```
+
+Ninguna de las 15 toca esa herramienta, ni el rol `ventas`, ni su catálogo. **Es
+un fallo PREEXISTENTE** que la carga destapó al obligar a correr la
+verificación, no uno que haya introducido.
+
+**Queda abierto, y fuera del alcance de este objetivo**: el agente de ventas le
+pide la cédula a un prospecto que todavía no es cliente. Arreglarlo toca prompt
+o catálogo, y eso dispara los 56 casos dorados (~23 min) — es otro trabajo, no
+un arreglo al pasar.
+
+**Y una advertencia del propio corredor que conviene no sobreinterpretar**: el
+set de humo tiene 10 casos y la config pide al menos 50 para dar una corrida por
+buena. *«Sirve igual para detectar regresiones, pero todavía no es un criterio
+de aceptación.»* El 89% contra el 90% no es un gate: es una señal.
+
 
 **LO QUE ESTE OBJETIVO DEJA APRENDIDO, más allá de los arreglos**
 
