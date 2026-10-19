@@ -288,6 +288,108 @@ for raro in ("", "N/A", "nan", "inf"):
 afirmar("senal_olt_dbm" in diag._sin_resolver("x", 1),
         "y sin resolver, la forma es la misma")
 
+print("\n§4d EL CORTE DEL PUERTO: LAS DEL MISMO PUERTO EN LOS A LA VEZ, SIN PII")
+#  Caso 4 de las correcciones del usuario (19/10/2026). El proveedor se simula
+#  ruteando por URL, con la forma verificada ese dia.
+
+
+class _Json:
+    status_code = 200
+
+    def __init__(self, cuerpo):
+        self._cuerpo = cuerpo
+
+    def json(self):
+        return self._cuerpo
+
+    @staticmethod
+    def raise_for_status():
+        return None
+
+
+class _Proveedor:
+    def __init__(self, *, run="Offline", causa="ONT LOSi/LOBi alarm",
+                 detalles=None, filas=None, roto=False):
+        self.run, self.causa, self.roto = run, causa, roto
+        self.detalles = detalles if detalles is not None else {
+            "olt_id": "3", "board": "2", "port": "11"}
+        self.filas = filas or []
+        self.pedidos = []
+
+    def __call__(self, url, **k):
+        self.pedidos.append((url, k.get("params")))
+        if "get_onu_full_status_info" in url:
+            return _Json({"full_status_json": {
+                "ONU details": {"Run state": self.run,
+                                "Last down cause": self.causa},
+                "Optical status": {}}})
+        if self.roto:
+            raise ConnectionError("sin red")
+        if "get_onu_details" in url:
+            return _Json({"onu_details": self.detalles})
+        if "get_all_onus_details" in url:
+            return _Json({"onus": self.filas})
+        raise AssertionError(f"pedido inesperado: {url}")
+
+
+def _con_proveedor(proveedor):
+    diag.requests.get = proveedor
+    diag._resolver_serial = lambda *a, **k: ("CDTC00000001", "")
+    diag.ejecutor_http.base_url_de = lambda *a, **k: "https://ejemplo.invalido"
+    diag.ejecutor_http.headers_de = lambda *a, **k: {}
+    try:
+        return diag.diagnosticar(_herramienta(), {"id_servicio": 5832},
+                                 tenant="t", variables_tenant={"X": "y"},
+                                 catalogo=[])
+    finally:
+        diag.requests.get = _req_original
+        diag._resolver_serial = _serial_original
+        diag.ejecutor_http.base_url_de = _base_original
+        diag.ejecutor_http.headers_de = _headers_original
+
+
+_filas = [
+    {"status": "LOS", "last_status_change": "2026-10-19 10:00:00.123456",
+     "sn": "CDTC00000001"},                                       # este equipo
+    {"status": "LOS", "last_status_change": "2026-10-19 10:05:00.000001",
+     "sn": "CDTC00000002"},                                       # a la vez
+    {"status": "LOS", "last_status_change": "2026-10-19 09:50:00",
+     "sn": "CDTC00000003"},                                       # a la vez
+    {"status": "LOS", "last_status_change": "2026-05-01 08:00:00.000001",
+     "sn": "CDTC00000004"},                                       # hace meses
+]
+_p = _Proveedor(filas=_filas)
+_r = _con_proveedor(_p)
+afirmar(_r.get("puerto") == "3/2/11" and _r.get("onus_en_los_a_la_vez") == 3,
+        f"cuenta las del puerto en LOS a la vez, sin la de hace meses: "
+        f"{_r.get('puerto')} / {_r.get('onus_en_los_a_la_vez')}")
+_listado = next((p for u, p in _p.pedidos if "get_all_onus_details" in u), None)
+afirmar(_listado is not None
+        and (_listado["olt_id"], _listado["board"], _listado["port"],
+             _listado["status"]) == ("3", "2", "11", "los"),
+        f"pide el puerto filtrado y solo LOS: {_listado}")
+afirmar(_listado is not None and set(_listado["fields"].split(","))
+        == {"status", "last_status_change", "sn"},
+        "y pide SOLO estado, hora y serial: ni nombre, ni direccion, ni contacto")
+afirmar(not ({"sn", "name", "address", "contact"} & set(_r)),
+        f"el resultado no trae el serial ni datos del cliente: {sorted(_r)}")
+
+_r = _con_proveedor(_Proveedor(filas=_filas[1:]))
+afirmar(_r.get("onus_en_los_a_la_vez") == 0,
+        "si este equipo no figura en LOS en su puerto, no se afirma un corte")
+_r = _con_proveedor(_Proveedor(roto=True))
+afirmar(_r.get("puerto") == "" and _r.get("onus_en_los_a_la_vez") is None,
+        "sin poder contar, ni puerto ni numero: no hay corte que afirmar")
+_p = _Proveedor(run="Online", causa="")
+_r = _con_proveedor(_p)
+afirmar(len(_p.pedidos) == 1 and _r.get("onus_en_los_a_la_vez") is None,
+        "en linea no se pregunta por los vecinos: las consultas de mas son "
+        "solo para una caida por LOS")
+_p = _Proveedor(causa="dying-gasp")
+_r = _con_proveedor(_p)
+afirmar(len(_p.pedidos) == 1,
+        "una caida por falta de energia tampoco: es la casa, no la fibra")
+
 print("\n§5  LA CAUSA DE CAIDA SE TRADUCE A ALGO QUE DECIDE UNA ACCION")
 #  'dying-gasp' y 'LOSi' llevan a conversaciones distintas: una es un corte de
 #  luz en la casa, la otra es fibra. Si el modelo tuviera que interpretar el

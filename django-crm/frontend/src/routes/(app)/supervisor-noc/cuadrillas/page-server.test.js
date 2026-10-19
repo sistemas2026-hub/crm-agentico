@@ -202,6 +202,16 @@ describe('la configuración del reparto manda la labor de cada caso solo si vien
     expect(cuerpo.labor_por_grupo.trabajo_pedido).toBe('correctivo');
   });
 
+  it('el corte de red viaja si el formulario lo trae, y si no, no', async () => {
+    await actions.reparto_config(envio({ ...LO_DE_SIEMPRE, onus_para_corte_de_red: '3' }));
+    const [, con] = guardarConfiguracionDeReparto.mock.calls[0];
+    expect(con.onus_para_corte_de_red).toBe('3');
+
+    await actions.reparto_config(envio(LO_DE_SIEMPRE));
+    const [, sin] = guardarConfiguracionDeReparto.mock.calls[1];
+    expect(sin).not.toHaveProperty('onus_para_corte_de_red');
+  });
+
   it('una pantalla vieja, sin los selectores, no manda la tabla y no la borra', async () => {
     await actions.reparto_config(envio(LO_DE_SIEMPRE));
     const [, cuerpo] = guardarConfiguracionDeReparto.mock.calls[0];

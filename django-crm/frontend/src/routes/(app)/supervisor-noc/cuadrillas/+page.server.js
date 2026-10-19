@@ -386,6 +386,11 @@ export const actions = {
         tope_por_cuadrilla: String(f.get('tope_por_cuadrilla') ?? '8'),
         copia_la_jornada: f.get('copia_la_jornada') === '1'
       };
+      //  EL CORTE DE RED (19/10/2026), solo si el formulario lo trae, como la
+      //  tabla de labores: una pantalla vieja no lo vuelve al de fábrica.
+      if (f.has('onus_para_corte_de_red')) {
+        cuerpo.onus_para_corte_de_red = String(f.get('onus_para_corte_de_red') ?? '');
+      }
       //  LA LABOR DE CADA GRUPO DE CASO (17/10/2026), solo si el formulario
       //  la trae: una pantalla vieja que no tiene esos campos no la borra.
       //  Vacío es «no cuenta», y viaja así.

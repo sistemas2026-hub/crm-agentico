@@ -1905,8 +1905,11 @@ roles:
       # cosecharlos y la garantia de inyeccion se perderia por otra puerta.
       # senal_olt_dbm (19/10/2026): el nivel que recibe la OLT, para el doble
       # diagnostico de las correcciones del usuario. Un numero, sin PII.
+      # puerto y onus_en_los_a_la_vez (19/10/2026): el corte de red del caso 4.
+      # La llave olt/placa/puerto y un conteo; sin serial ni datos del cliente.
       diagnosticar_servicio: [id_servicio, equipo_registrado, estado, causa_caida,
-        senal_dbm, senal_olt_dbm, senal, estado_config, ultima_caida, ultima_conexion, motivo]
+        senal_dbm, senal_olt_dbm, senal, estado_config, ultima_caida, ultima_conexion,
+        puerto, onus_en_los_a_la_vez, motivo]
       consultar_incidente_red: [es_incidente_de_red, tipo_alerta, clientes_afectados, porcentaje_afectado, desde,
   zona, caja, motivo, clientes_caidos_a_la_vez, desde_por_tiempos]
       consultar_estado_ont: [onu_status, last_status_change]

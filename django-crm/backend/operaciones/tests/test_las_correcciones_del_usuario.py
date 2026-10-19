@@ -858,6 +858,60 @@ def test_z_la_remedicion_no_se_cuenta_si_la_fase_4_ya_lo_pasaba(org_a):
 
 
 # =============================================================================
+#  G · EL CORTE DE RED  --  caso 4, tanda 2 (19/10/2026)
+# =============================================================================
+
+def _los(n=3, puerto="3/2/11"):
+    return {**_respuesta("caido", causa="fibra"), "puerto": puerto,
+            "onus_en_los_a_la_vez": n}
+
+
+def test_g1_el_corte_de_red_pasa_marcado_con_su_puerto():
+    def porque(n, umbral):
+        m = mdf.de_la_respuesta(_los(n))
+        d = pad.decidir(pad.FALLA_DE_SERVICIO, {}, medicion=m,
+                        corte_de_red=umbral)
+        assert d.pasa, "una caida por LOS pasaba antes y pasa igual"
+        return d.porque
+
+    marcado = porque(3, 2)
+    assert "CORTE DE RED: 3 equipos del puerto 3/2/11" in marcado
+    assert "una sola orden" in marcado
+    for n, umbral in ((1, 2), (3, 4), (3, 0)):
+        assert "CORTE DE RED" not in porque(n, umbral), (n, umbral)
+
+
+def test_g2_la_medicion_guarda_el_puerto_y_el_conteo_con_forma_cerrada():
+    medida = mdf.de_la_respuesta(_los(3))
+
+    assert (medida["puerto"], medida["onus_en_los_a_la_vez"]) == ("3/2/11", 3)
+    assert ("3 equipos del puerto 3/2/11 cayeron por LOS a la vez"
+            in mdf._lo_que_dice(medida))
+    for puerto in ("3-2-11", "olt 3; board 2", "CDTC00000001", ""):
+        assert mdf.de_la_respuesta(_los(3, puerto=puerto))["puerto"] == ""
+    for n in ("3", True, -1, 9999, 2.5):
+        assert mdf.de_la_respuesta(_los(n))["onus_en_los_a_la_vez"] is None
+    assert mdf.de_la_respuesta(EN_RANGO)["puerto"] == ""
+
+
+def test_g3_el_umbral_es_de_cada_empresa(org_a, monkeypatch):
+    """En el ciclo, y con el umbral leido de la configuracion de la empresa."""
+    from campo.cuadrillas import ConfiguracionDeReparto
+
+    _puertas(monkeypatch, correcciones=False)
+    con_tres = _pendiente(org_a, medida=_los(3))
+    ConfiguracionDeReparto.objects.create(org=org_a, onus_para_corte_de_red=4)
+    con_cuatro = _pendiente(org_a, medida=_los(4))
+
+    _vuelta(org_a)
+
+    for p, marcado in ((con_tres, False), (con_cuatro, True)):
+        fila = P.objects.get(pk=p.pk)
+        assert fila.estado == P.ACEPTADA
+        assert ("CORTE DE RED" in (fila.resultado or "")) is marcado
+
+
+# =============================================================================
 #  E · LA LABOR DEL TRABAJO PEDIDO
 # =============================================================================
 
@@ -870,9 +924,14 @@ def soledad(org_a):
     return z
 
 
-def _en_despacho(org, grupo, *, localidad=None, **lectura):
+def _en_despacho(org, grupo, *, localidad=None, medida=None, **lectura):
     caso = _caso(org, status="Assigned")
     evidencia = [_lectura(grupo, **lectura)]
+    if medida is not None:
+        evidencia.append({"fuente": pad.FUENTE_MEDICION, "id": str(caso.id),
+                          "dato": "medicion",
+                          "observado_en": timezone.now().isoformat(),
+                          **mdf.de_la_respuesta(medida)})
     if localidad is not None:
         evidencia.append({"fuente": adj.FUENTE_LOCALIDAD, "id": str(caso.id),
                           "dato": "barrio",
@@ -940,6 +999,24 @@ def test_u2_las_instalaciones_sin_barrio_van_a_las_zonas_de_instalacion(
         "solo las zonas activas de las cuadrillas de instalacion")
     assert (d["contados"], d["instalaciones_sin_barrio"],
             d["zonas_con_instalaciones_sin_barrio"]) == (2, 3, 1)
+
+
+def test_u3_el_corte_de_red_es_un_solo_trabajo_en_la_demanda(org_a, soledad):
+    """Caso 4 (19/10/2026): tres casos del mismo puerto en LOS son UNA obra de
+    red, no tres correctivos. Uno de otro puerto es otro trabajo."""
+    aca = {"localidad": BARRIO, "motivo": "", "cliente_nuevo": False}
+    for _ in range(3):
+        _en_despacho(org_a, pad.FALLA_DE_SERVICIO, localidad=aca,
+                     medida=_los(3, puerto="3/2/11"))
+    _en_despacho(org_a, pad.FALLA_DE_SERVICIO, localidad=aca,
+                 medida=_los(2, puerto="3/2/12"))
+    _en_despacho(org_a, pad.FALLA_DE_SERVICIO, localidad=aca,
+                 medida=_los(1, puerto="3/2/13"))
+
+    d = adj.demanda_de_despacho(org_a, adj.propuestas_en_despacho(org_a))
+
+    assert d["por_zona"] == {str(soledad.id): {"trabajos": 2, "correctivo": 1}}
+    assert d["mismo_corte_de_red"] == 2
 
 
 def test_v_la_instalacion_nueva_se_guarda_sin_barrio_y_marcada(org_a, soledad):

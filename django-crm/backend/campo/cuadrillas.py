@@ -264,6 +264,11 @@ class ConfiguracionDeReparto(BaseModel):
     #: Valores de fabrica. Son los que valen mientras nadie cree la fila.
     TOPE_DE_FABRICA = 8
     HORA_DE_FABRICA = 3
+    #: Desde cuantas ONU del mismo puerto en LOS a la vez es un corte de red
+    #: (caso 4 de las correcciones del usuario). 2 lo decidio el usuario el
+    #: 19/10/2026: es el umbral que ya usa el resto del sistema para una falla
+    #: agrupada.
+    CORTE_DE_RED_DE_FABRICA = 2
 
     #: De que labor es cada grupo de caso de Despacho, si la empresa no dice
     #: otra cosa. Las claves son los grupos de `operaciones.paso_a_despacho`
@@ -323,6 +328,15 @@ class ConfiguracionDeReparto(BaseModel):
     #: fabrica; una clave guardada pisa solo la suya. Ver `labor_de_cada_grupo`.
     labor_por_grupo = models.JSONField(default=dict, blank=True)
 
+    #: EL CORTE DE RED  --  19/10/2026, caso 4 de las correcciones del usuario.
+    #: Cuantas ONU del mismo puerto tienen que estar en LOS a la vez (incluida
+    #: la del caso) para que una falla se marque como corte de red: un solo
+    #: trabajo para todos los casos del puerto, no una visita por cliente. Por
+    #: empresa y no en codigo (CLAUDE.md §3.3): en otro ISP puede ser otro
+    #: numero.
+    onus_para_corte_de_red = models.PositiveSmallIntegerField(
+        default=CORTE_DE_RED_DE_FABRICA)
+
     #: El ULTIMO DIA LOCAL en que esto corrio. Es lo que evita que corra dos
     #: veces.
     #:
@@ -349,6 +363,15 @@ class ConfiguracionDeReparto(BaseModel):
 #: grupo de `paso_a_despacho`: es una parte del trabajo pedido, que la tabla
 #: distingue porque su labor es otra (correccion 1 del usuario, 18/10/2026).
 INSTALACION_NUEVA = "instalacion_nueva"
+
+
+def onus_para_corte_de_red(org_id) -> int:
+    """El umbral del corte de red de esta empresa, o el de fabrica. Por id: lo
+    piden lugares que tienen la propuesta y no la empresa entera."""
+    n = (ConfiguracionDeReparto.objects.filter(org_id=org_id)
+         .values_list("onus_para_corte_de_red", flat=True).first())
+    return n if isinstance(n, int) and n >= 2 else (
+        ConfiguracionDeReparto.CORTE_DE_RED_DE_FABRICA)
 
 
 def labor_de_cada_grupo(org) -> dict:

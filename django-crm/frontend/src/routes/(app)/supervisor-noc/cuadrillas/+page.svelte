@@ -810,6 +810,21 @@
                 style="width:90px"
               />
             </label>
+            <!-- EL CORTE DE RED (19/10/2026, caso 4 de las correcciones): desde
+                 cuántos equipos del mismo puerto en LOS a la vez un caso pasa a
+                 Despacho marcado como corte de red, un solo trabajo. -->
+            <label class="snoc-campo-grupo">
+              <span class="snoc-label">Corte de red desde (equipos del puerto en LOS)</span>
+              <input
+                class="snoc-campo"
+                type="number"
+                name="onus_para_corte_de_red"
+                min="2"
+                max="64"
+                value={data.reparto_config.onus_para_corte_de_red ?? 2}
+                style="width:90px"
+              />
+            </label>
           </div>
 
           <!-- La hora es LOCAL de la empresa, no la del servidor: el servidor
@@ -871,7 +886,9 @@
           <p class="snoc-body-sm snoc-secundario">
             El tope no es capacidad calculada: es un freno para que no le caigan treinta
             órdenes a la primera cuadrilla. Una cuadrilla puede tener el suyo propio, y
-            ese le gana a este.
+            ese le gana a este. Con tantos equipos del mismo puerto sin señal (LOS) a la
+            vez, cada caso pasa a Despacho marcado como corte de red: un solo trabajo
+            para todos, no una visita por cliente.
           </p>
 
           <div>

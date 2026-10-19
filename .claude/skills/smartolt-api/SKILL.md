@@ -21,6 +21,10 @@ al primer intento contra `/api/system/get_olts`.
 
 ## Límite de tasa — confirmado por cabecera, no por la doc de terceros
 
+> **ACTUALIZADO 19/10/2026: la cabecera dice `X-RateLimit-Limit: 500`**, no
+> 1.000 (50 llamadas del script del verificador dejaron 468 de 500). El
+> número de abajo era el de agosto: se lee la cabecera, no este párrafo.
+
 **1.000 llamadas/hora**, no 15 — la cifra de 15/hora que circulaba por
 búsqueda web era de un caso de uso masivo específico, no el límite de cuenta.
 Cada respuesta trae `X-RateLimit-Limit: 1000` y `X-RateLimit-Remaining`, así
@@ -312,6 +316,14 @@ mismo formato de 12 caracteres que documenta la skill `wisphub-api`.
 
 ## ⚠️ 1310 vs 1490 — inferido por convención GPON, NO verificado empíricamente
 
+> **VERIFICADO el 19/10/2026 cruzando dos endpoints sobre la ONU de prueba**:
+> `get_onu_signal` devolvió `onu_signal_1490 = -19.5 dBm`, `onu_signal_1310 =
+> -20.87 dBm` y `onu_signal_value = "-19.5 dBm / -20.87 dBm"`, y en la misma
+> corrida `get_onu_full_status_info` dio `Rx optical power(dBm) = -19.50` y
+> `OLT Rx ONT optical power(dBm) = -20.87`. O sea: **1490 es lo que recibe la
+> ONU (bajada) y 1310 lo que recibe la OLT (subida)**, y el texto
+> "-a / -b dBm" que el ISP copia en los tickets es ONU / OLT, en ese orden.
+
 Downstream (OLT→ONU) es 1490nm, upstream (ONU→OLT) es 1310nm por estándar
 GPON. La señal que le interesa a G-GO-04 ("ONT del cliente: −8 a −25 dBm") es
 la que **recibe la ONT**, o sea la de bajada: **`signal_1490`**.
@@ -450,6 +462,12 @@ trae puertos del 0 al 15 mezclados, no solo el 14.
 Mismo método que ya cazó el `arp_ping` de WispHub — probar con un valor real
 y contar cuántos de la respuesta lo cumplen, no confiar en que el nombre del
 parámetro implica que funciona.
+
+> **ACTUALIZADO 19/10/2026: `board` y `port` SÍ filtran**, junto con
+> `olt_id` (ver la sección del 19/10 al final). Lo que se ignora es
+> `pon_port`, que además ya viene con `Deprecation: true`. El párrafo de
+> abajo quedó viejo: la regla del puerto se resuelve con una llamada filtrada
+> y paginada.
 
 **Consecuencia**: la regla del splitter (G-GO-11 — "si varias ONUs del mismo
 puerto están caídas, es la troncal") **no se puede resolver con una llamada
@@ -698,6 +716,55 @@ HTTP 403  {"status":false,"error":"Invalid API key "}
 Es el hermano de la trampa del 405 que ya está documentada arriba: **sondear sin
 clave no distingue nada**. Para saber si una ruta existe hace falta una clave
 válida, o el OpenAPI del proveedor.
+
+## Estados por puerto, `fields` y tipos de ONU — verificado en vivo el 19/10/2026
+
+Con el script de solo lectura del verificador (50 GET), corrido por el
+usuario en el motor local. Método del valor imposible en cada filtro; el
+puerto de prueba fue el más poblado (olt 3, placa 2, puerto 11, 118 ONU).
+
+**`get_onus_statuses`** (5.103 filas sin filtro, ~0,9 s, 1,5 MB):
+
+| Parámetro | Resultado |
+|---|---|
+| `olt_id` | Filtra. Inexistente → **400** `olt_not_found` |
+| `olt_id` + `board` | Filtra. Placa 99 → 0 filas |
+| `olt_id` + `board` + `port` | Filtra (118, todas del puerto, ~0,1 s, 36 KB). Puerto 99 → 0 filas |
+| `board` + `port` sin `olt_id` | **400** `specify_olt_id` |
+| `zone` | **Se ignora**: con una zona inexistente devuelve todas |
+| `status_changed_after` | Filtra (futuro → 0). Basura → **400** |
+
+- Estados, literales exactos: `Online`, `Offline`, `LOS`, `Power fail`
+  (19/10: 4.445 / 204 / 65 / 389).
+- `last_status_change`: `"AAAA-MM-DD HH:MM:SS.ffffff"`, **sin zona horaria**;
+  vacío en 46 de 5.103. Para comparar caídas, compararlo contra otra hora del
+  MISMO proveedor (`Last down time` de la ONU), no contra la del servidor.
+- ⚠️ **Cada fila trae `name`, `address`, `contact` y `sn`**: es PII y el
+  serial. No usarla para contar vecinos; ver `fields` abajo.
+
+**`get_all_onus_details` paginado** (no consume el cupo de 15/h del export):
+
+- `olt_id` + `board` + `port` filtran (118, puerto 99 → 0).
+- `status` filtra: `los` → 64 en la olt 3, `pwrfail` → 370. Un valor
+  inventado da **400** con la lista válida:
+  `online|pwrfail|los|offline|disabled|unknown`.
+- **`fields=` devuelve SOLO los campos pedidos**:
+  `fields=status,last_status_change,onu_type_name,board,port` → esas cinco
+  claves y nada más. Es la forma de contar las ONU en LOS de un puerto, con
+  su hora, sin traer un solo dato de cliente.
+- `onu_type_id` filtra (inexistente → 0).
+
+**`get_onus_signals`**: `olt_id` + `board` + `port` filtran (118, puerto 99 → 0).
+Clasificación: `Very good`, `Warning`, `Critical`, `-`.
+
+**Tipos de ONU** (`/api/system/get_onu_types`, 22 tipos; conteo por
+`onu_type_id` el 19/10): `CDATA-CATV` 1.093, `ONU-CDATA-4-ANTENAS` 1.065,
+`ONU-LATIC-4-ANTENAS` 556, `ONU-C-DATA-4-ANTENAS-29-12-2025` 504,
+`EASY4-LINK-CATV` 446, `E4L-H6201WA-30-04-2025` 306, **`CDATA` 261**
+(wifi=1, catv=0), y el resto por debajo de 250. `get_onu_details` trae
+`onu_type_name`, `onu_type_id` y `catv`. El campo `wifi` de un tipo es una
+cantidad de puertos, **no dice la banda**: que un tipo sea de una sola banda
+es un dato de la empresa (ver SPEC/objetivos/supervisor-aplica-las-correcciones.md).
 
 ## No verificado todavía (fuera del alcance del sondeo de hoy)
 

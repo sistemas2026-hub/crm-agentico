@@ -936,6 +936,7 @@ class ConfiguracionDeRepartoView(APIView):
             "hora_local": c.hora_local,
             "tope_por_cuadrilla": c.tope_por_cuadrilla,
             "copia_la_jornada": c.copia_la_jornada,
+            "onus_para_corte_de_red": c.onus_para_corte_de_red,
             "ultima_corrida": (c.ultima_corrida.isoformat()
                                if c.ultima_corrida else None),
             # La zona de la empresa, para que la pantalla pueda decir «3 de la
@@ -981,6 +982,21 @@ class ConfiguracionDeRepartoView(APIView):
             "tope_por_cuadrilla": tope,
             "copia_la_jornada": bool(datos.get("copia_la_jornada", True)),
         }
+        #  EL UMBRAL DEL CORTE DE RED SOLO SI VIENE (19/10/2026), como la tabla
+        #  de abajo: una pantalla vieja que no lo manda no lo vuelve al de
+        #  fabrica. Menos de 2 no es un corte: es un cliente.
+        if "onus_para_corte_de_red" in datos:
+            try:
+                corte = int(datos.get("onus_para_corte_de_red"))
+            except (TypeError, ValueError):
+                corte = 0
+            if not 2 <= corte <= 64:
+                return Response(
+                    {"detail": "El corte de red va de 2 a 64 equipos del "
+                               "mismo puerto."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            defaults["onus_para_corte_de_red"] = corte
+
         #  LA TABLA DE LABORES SOLO SI VIENE: sin la clave no se toca, asi una
         #  pantalla vieja que no la manda no la borra. Solo los grupos que
         #  pasan a Despacho y solo labores que existen; vacio es "este grupo no
@@ -1008,6 +1024,7 @@ class ConfiguracionDeRepartoView(APIView):
             "hora_local": fila.hora_local,
             "tope_por_cuadrilla": fila.tope_por_cuadrilla,
             "copia_la_jornada": fila.copia_la_jornada,
+            "onus_para_corte_de_red": fila.onus_para_corte_de_red,
             "ultima_corrida": (fila.ultima_corrida.isoformat()
                                if fila.ultima_corrida else None),
             "configurado": True,

@@ -58,10 +58,12 @@ cerrar casos seria un motor que conoce la operacion de una empresa.
 from __future__ import annotations
 
 import math
+from datetime import timedelta
 
 import requests
 
 from nucleo.herramientas import http as ejecutor_http
+from nucleo.herramientas import incidentes
 from nucleo.observabilidad.registro import registrar
 
 TIMEOUT_SEGUNDOS = 25
@@ -143,8 +145,76 @@ def _sin_resolver(motivo: str, id_servicio) -> dict:
         "senal_olt_dbm": None,
         "senal": "sin_dato",
         "estado_config": "",
+        "puerto": "",
+        "onus_en_los_a_la_vez": None,
         "motivo": motivo,
     }
+
+
+#  LOS VECINOS DEL PUERTO  --  19/10/2026, caso 4 de las correcciones del
+#  usuario: "varias ONU del mismo puerto en LOS a la vez es un corte de red: un
+#  solo trabajo, no una visita por cliente". Lo decidio el usuario ese dia:
+#  solo LOS (un "Power fail" es la luz de la casa, no la fibra).
+#
+#  COMO SE CUENTA, y de donde sale cada cosa:
+#    - DONDE ESTA LA ONU: 'get_onu_details' trae 'olt_id', 'board' y 'port'.
+#    - LAS DEL PUERTO EN LOS: 'get_all_onus_details' paginado y filtrado por
+#      olt, placa, puerto y 'status=los' -- todo verificado el 19/10/2026 con el
+#      metodo del valor imposible --, con 'fields=' para que vuelvan SOLO el
+#      estado, la hora y el serial. Sin 'fields', cada fila trae nombre,
+#      direccion y contacto del cliente.
+#    - A LA VEZ: la ventana de 'incidentes' (20 minutos, medida el 21/08/2026)
+#      alrededor de la caida de ESTE equipo, leida de su propia fila: el mismo
+#      reloj que el de los vecinos. Un puerto acumula equipos caidos hace meses
+#      --clientes que se fueron-- y esos no son el corte de hoy.
+#
+#  El serial solo se usa para encontrar la fila propia: no sale de aca, igual
+#  que en el resto de este modulo. Lo que sale es la llave del puerto y un
+#  numero. Y nunca levanta: sin poder contar, no hay corte que afirmar.
+def _vecinos_en_los(base_url: str, headers: dict, serial: str) -> dict:
+    try:
+        r = requests.get(f"{base_url}/api/onu/get_onu_details/{serial}",
+                         headers=headers, timeout=TIMEOUT_SEGUNDOS)
+        r.raise_for_status()
+        detalles = (r.json() or {}).get("onu_details") or {}
+        olt, placa, puerto = (str(detalles.get(c) or "").strip()
+                              for c in ("olt_id", "board", "port"))
+        if not (olt and placa and puerto):
+            return {}
+        r = requests.get(
+            f"{base_url}/api/onu/get_all_onus_details", headers=headers,
+            timeout=TIMEOUT_SEGUNDOS,
+            params={"olt_id": olt, "board": placa, "port": puerto,
+                    "status": "los",
+                    "fields": "status,last_status_change,sn",
+                    "page": 1, "page_size": 200})
+        r.raise_for_status()
+        filas = (r.json() or {}).get("onus") or []
+    except Exception as e:                                       # noqa: BLE001
+        registrar("diagnostico_servicio",
+                  "no se pudo contar los vecinos del puerto", error=e)
+        return {}
+
+    en_los = []
+    for fila in filas:
+        if not isinstance(fila, dict):
+            continue
+        estado = str(fila.get("status") or "").strip().lower()
+        if estado and estado != "los":
+            continue
+        en_los.append((str(fila.get("sn") or "").strip().upper(),
+                       incidentes._a_fecha(fila.get("last_status_change"))))
+    llave = f"{olt}/{placa}/{puerto}"
+    propia = next((t for sn, t in en_los if sn == str(serial).strip().upper()),
+                  None)
+    if propia is None:
+        #  ESTE equipo no figura en LOS en su puerto: no hay caida propia contra
+        #  la cual comparar, y no se afirma ningun corte.
+        return {"puerto": llave, "onus_en_los_a_la_vez": 0}
+    ventana = timedelta(minutes=incidentes.VENTANA_MISMA_FALLA_MINUTOS)
+    a_la_vez = sum(1 for _, t in en_los
+                   if t is not None and abs(t - propia) <= ventana)
+    return {"puerto": llave, "onus_en_los_a_la_vez": a_la_vez}
 
 
 def _dbm(valor):
@@ -308,6 +378,11 @@ def diagnosticar(herramienta, argumentos: dict, tenant: str | None = None,
     #  diagnostico del Supervisor lo compara con lo que se mide. NO SE CLASIFICA:
     #  el rango de la guia es el de la bajada, y este numero solo informa.
     senal_olt = _dbm(optico.get("OLT Rx ONT optical power(dBm)"))
+    #  Solo para una caida por perdida de señal optica: es la unica que un corte
+    #  de la fibra del puerto explica, y asi las dos consultas de mas se pagan
+    #  solo ahi.
+    vecinos = (_vecinos_en_los(base_url, headers, serial)
+               if not en_linea and causa == FIBRA else {})
 
     return {
         "id_servicio": id_servicio,
@@ -319,6 +394,8 @@ def diagnosticar(herramienta, argumentos: dict, tenant: str | None = None,
         "causa_caida": causa if not en_linea else "",
         "senal_dbm": senal,
         "senal_olt_dbm": senal_olt,
+        "puerto": vecinos.get("puerto", ""),
+        "onus_en_los_a_la_vez": vecinos.get("onus_en_los_a_la_vez"),
         #  La clasificacion la hace el codigo, no el modelo. Ver el comentario
         #  de 'SENAL_MINIMA_DBM' para el rango y para lo que NO esta confirmado.
         "senal": _clasificar_senal(senal),

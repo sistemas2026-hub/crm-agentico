@@ -241,7 +241,8 @@ class Decision:
 def decidir(grupo: str, labor_veredicto: dict | None,
             confianza: str = "", medicion: dict | None = None, *,
             correcciones: bool = False, accion_autorizada: str = "",
-            energia_descartada: str = "", niveles=(), ahora=None) -> Decision:
+            energia_descartada: str = "", niveles=(), ahora=None,
+            corte_de_red: int = 0) -> Decision:
     """
     Si este ticket puede entrar a la cola de Despacho sin que alguien lo acepte.
 
@@ -361,6 +362,14 @@ def decidir(grupo: str, labor_veredicto: dict | None,
                                 labor=labor, regla=REGLA_ENERGIA_DESCARTADA)
             return Decision(False, _SIN_ENERGIA, grupo=grupo, labor=labor)
         if causa == optico.CAUSA_FIBRA:
+            #  CASO 4 (19/10/2026): varias del mismo puerto a la vez es un corte
+            #  de red. Pasa igual que antes --una caida por LOS ya pasaba--: lo
+            #  que cambia es la marca. 'corte_de_red' es el umbral de la
+            #  empresa; 0 es "no se sabe", y entonces no se marca.
+            if es_corte_de_red(m, corte_de_red):
+                return Decision(True, _CORTE_DE_RED.format(
+                    n=m["onus_en_los_a_la_vez"], puerto=m["puerto"]),
+                    grupo=grupo, labor=labor)
             return Decision(True, _SIN_SENAL_OPTICA, grupo=grupo, labor=labor)
         if causa:
             return Decision(True, _CAIDO_SIN_CAUSA, grupo=grupo, labor=labor)
@@ -661,6 +670,14 @@ _EN_LINEA_SIN_SENAL = (
     "la medicion dice que el equipo esta en linea, pero no trajo el nivel de "
     "señal: no confirma la falla ni la contradice. Pasa a Despacho; el "
     "despachador lo confirma con el cliente")
+#:  El corte de red (caso 4, 19/10/2026). Va en la aceptacion, y por ahi en la
+#:  ficha de Despacho ('por_que_paso'): es la marca con la que el despachador ve
+#:  que varios casos son el mismo trabajo. Decidido por el usuario: cada caso
+#:  pasa marcado con su puerto, y el despachador arma una sola orden.
+_CORTE_DE_RED = (
+    "CORTE DE RED: {n} equipos del puerto {puerto} perdieron la señal optica "
+    "(LOS) a la vez. Es un solo trabajo de red para todos los casos de ese "
+    "puerto, no una visita por cliente: el despachador arma una sola orden")
 _SIN_SENAL_OPTICA = (
     "falla de servicio CONFIRMADA por la medicion del equipo: perdio la señal "
     "optica (LOS/LOF). Puede ser la fibra o un equipo desenchufado, y desde la "
@@ -829,7 +846,8 @@ def de_la_senal(senal) -> Decision:
 
 def de_la_propuesta(propuesta, *, correcciones: bool = False,
                     niveles=(), ahora=None,
-                    autor_de_la_empresa: bool = False) -> Decision:
+                    autor_de_la_empresa: bool = False,
+                    corte_de_red: int = 0) -> Decision:
     """
     La decision usando la lectura que YA esta guardada, sin volver a leer.
 
@@ -881,7 +899,7 @@ def de_la_propuesta(propuesta, *, correcciones: bool = False,
         accion_autorizada=(str(ultima.get("accion_autorizada") or "")
                            if autor_de_la_empresa else ""),
         energia_descartada=str(ultima.get("energia_descartada") or ""),
-        niveles=niveles, ahora=ahora)
+        niveles=niveles, ahora=ahora, corte_de_red=corte_de_red)
     if d.pasa and not d.regla and correcciones:
         if releida:
             d.regla = REGLA_RELECTURA
@@ -893,6 +911,18 @@ def de_la_propuesta(propuesta, *, correcciones: bool = False,
             #  frontera, 19/10: inflaba la cuenta).
             d.regla = REGLA_REMEDICION
     return d
+
+
+def es_corte_de_red(medicion, umbral: int) -> bool:
+    """Si la medicion dice que esta caida por LOS es parte de un corte de red:
+    al menos 'umbral' equipos del mismo puerto en LOS a la vez, este incluido.
+    Sin umbral (0) o sin el conteo, no."""
+    m = medicion if isinstance(medicion, dict) else {}
+    n = m.get("onus_en_los_a_la_vez")
+    return (isinstance(umbral, int) and umbral >= 2
+            and isinstance(n, int) and not isinstance(n, bool) and n >= umbral
+            and bool(m.get("puerto"))
+            and m.get("causa_caida") == "fibra")
 
 
 def _de_la_version_nueva(lectura) -> bool:
@@ -1389,10 +1419,13 @@ def evaluar(propuesta, ahora, *, correcciones: bool = False) -> Decision:
     #  Los niveles que reporta el ticket, del texto CRUDO del caso: es lo que
     #  compara el doble diagnostico (correccion 2). Solo numeros salen de aca.
     niveles = niveles_reportados(getattr(caso, "description", "") or "")
+    from campo.cuadrillas import onus_para_corte_de_red
+
     return de_la_propuesta(
         propuesta, correcciones=correcciones, niveles=niveles, ahora=ahora,
         autor_de_la_empresa=(getattr(caso, "external_created_by_type", "")
-                             == AUTOR_DE_LA_EMPRESA))
+                             == AUTOR_DE_LA_EMPRESA),
+        corte_de_red=onus_para_corte_de_red(propuesta.org_id))
 
 
 # =============================================================================

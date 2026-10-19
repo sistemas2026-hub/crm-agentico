@@ -318,7 +318,11 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
     labor habitual es la de la instalacion nueva. Va aparte de 'contados', que
     sigue siendo de casos con zona.
     """
-    from campo.cuadrillas import INSTALACION_NUEVA, labor_de_cada_grupo
+    from campo.cuadrillas import (
+        INSTALACION_NUEVA,
+        labor_de_cada_grupo,
+        onus_para_corte_de_red,
+    )
     from campo.zonas import AliasDeZona, normalizar_localidad
     from operaciones import paso_a_despacho as pad
 
@@ -332,7 +336,12 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
     despachados = _ya_despachados(org, list(propuestas))
     salida = {"por_zona": {}, "casos": len(propuestas), "contados": 0,
               "ya_despachados": 0, "sin_barrio": 0,
-              "instalaciones_sin_barrio": 0, "sin_zona": 0, "sin_labor": 0}
+              "instalaciones_sin_barrio": 0, "sin_zona": 0, "sin_labor": 0,
+              #  Casos de un corte de red que ya conto otro caso del mismo
+              #  puerto (19/10/2026): un solo trabajo, no uno por cliente.
+              "mismo_corte_de_red": 0}
+    umbral_corte = onus_para_corte_de_red(org.id)
+    cortes_contados = set()
     for caso, p in propuestas.items():
         if caso in despachados:
             salida["ya_despachados"] += 1
@@ -351,6 +360,17 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
         grupo = str(lectura.get("grupo") or "")
         if grupo == pad.TRABAJO_PEDIDO and _es_de_un_cliente_nuevo(pieza, lectura):
             grupo = INSTALACION_NUEVA
+        medicion = pad.ultima_medicion(p)
+        if pad.es_corte_de_red(medicion, umbral_corte):
+            #  EL CORTE DE RED ES UN SOLO TRABAJO (caso 4, 19/10/2026): el
+            #  primer caso del puerto cuenta como obra de red, los demas no
+            #  suman.
+            llave = (zona, medicion["puerto"])
+            if llave in cortes_contados:
+                salida["mismo_corte_de_red"] += 1
+                continue
+            cortes_contados.add(llave)
+            grupo = pad.OBRA_DE_RED
         labor = labores.get(grupo) if grupo else labor_de_la_visita(p)
         if not labor:
             salida["sin_labor"] += 1

@@ -201,6 +201,11 @@ def de_la_respuesta(respuesta) -> dict | None:
         #  doble diagnostico. Llega solo si la lista blanca de 'supervisor_noc'
         #  lo deja pasar; mientras tanto es None, y nada cambia.
         "senal_olt_dbm": _nivel_finito(r.get("senal_olt_dbm")),
+        #  EL CORTE DE RED (caso 4, 19/10/2026): la llave del puerto y cuantas
+        #  ONU de ese puerto cayeron por LOS a la vez, incluida esta. Forma
+        #  cerrada: una llave 'olt/placa/puerto' de numeros y un entero, o nada.
+        "puerto": _puerto(r.get("puerto")),
+        "onus_en_los_a_la_vez": _conteo(r.get("onus_en_los_a_la_vez")),
         #  El motivo del motor cuando no pudo medir: texto fijo de su codigo
         #  ('diagnostico_servicio._resolver_serial' y '_sin_resolver').
         "motivo": _motivo(r.get("motivo")),
@@ -212,6 +217,20 @@ def _nivel_finito(valor):
     if (isinstance(valor, (int, float)) and not isinstance(valor, bool)
             and math.isfinite(valor)):
         return float(valor)
+    return None
+
+
+_FORMA_DE_PUERTO = re.compile(r"^\d{1,4}/\d{1,3}/\d{1,3}$")
+
+
+def _puerto(valor) -> str:
+    texto = str(valor or "").strip()
+    return texto if _FORMA_DE_PUERTO.match(texto) else ""
+
+
+def _conteo(valor):
+    if isinstance(valor, int) and not isinstance(valor, bool) and 0 <= valor <= 512:
+        return valor
     return None
 
 
@@ -259,10 +278,14 @@ def _lo_que_dice(m: dict) -> str:
     if m.get("estado") == "caido":
         if not m.get("causa_caida"):
             return "caido, sin causa ni señal"
-        return {
+        texto = {
             "sin_energia": "caido, sin energia (dying-gasp)",
             "fibra": "caido, perdio la señal optica (LOS/LOF)",
         }.get(m.get("causa_caida"), "caido, por otra causa")
+        n, puerto = m.get("onus_en_los_a_la_vez"), m.get("puerto")
+        if isinstance(n, int) and n >= 2 and puerto:
+            texto += f"; {n} equipos del puerto {puerto} cayeron por LOS a la vez"
+        return texto
     n = pad.intentos_sin_medir(m)
     if 0 < n < pad.VUELTAS_SIN_MEDIR_PARA_PASAR:
         return "no se pudo medir; se vuelve a intentar en la vuelta siguiente"

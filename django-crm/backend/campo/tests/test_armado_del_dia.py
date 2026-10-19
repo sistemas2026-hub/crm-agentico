@@ -495,6 +495,28 @@ def test_v_la_pantalla_lee_y_guarda_la_tabla_y_sin_la_clave_no_la_toca(
     assert labor_de_cada_grupo(org_a) == esperada
 
 
+def test_v2_el_corte_de_red_se_edita_desde_la_pantalla(org_a, admin_client):
+    """Caso 4 de las correcciones del usuario (19/10/2026): el umbral es de cada
+    empresa. 2 de fabrica, se cambia aca, y una pantalla vieja no lo pisa."""
+    assert admin_client.get(CONFIG).json()["onus_para_corte_de_red"] == 2
+
+    r = admin_client.put(CONFIG, {**LO_DE_SIEMPRE, "onus_para_corte_de_red": 3},
+                         format="json")
+    assert r.status_code == 200, r.content
+    assert r.json()["onus_para_corte_de_red"] == 3
+
+    r = admin_client.put(CONFIG, LO_DE_SIEMPRE, format="json")
+    assert r.json()["onus_para_corte_de_red"] == 3, "sin la clave no se toca"
+
+    for malo in (1, 0, 65, "dos"):
+        r = admin_client.put(CONFIG, {**LO_DE_SIEMPRE,
+                                      "onus_para_corte_de_red": malo},
+                             format="json")
+        assert r.status_code == 400, malo
+    from campo.cuadrillas import onus_para_corte_de_red
+    assert onus_para_corte_de_red(org_a.id) == 3
+
+
 def test_w_un_grupo_o_una_labor_que_no_existe_no_se_guarda(org_a, admin_client):
     for mala in ({"pintura": COR}, {"trabajo_pedido": "pintura"},
                  ["trabajo_pedido"]):
