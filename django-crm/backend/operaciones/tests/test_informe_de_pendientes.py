@@ -88,14 +88,14 @@ def test_dice_por_ticket_por_que_se_queda(org_a):
 
     salida = _correr(org_a)
 
-    #  columnas: ticket edad grupo conf caso medicion por_que correcciones
-    #  leidas descarte
-    assert _fila(salida, los)[6] == "PASA"
-    assert _fila(salida, en_rango)[6] == "en rango"
-    assert _fila(salida, trabajo)[6] == "PASA"
+    #  columnas: ticket edad grupo conf caso medicion re-medida por_que
+    #  correcciones leidas lectura descarte hipotesis
+    assert _fila(salida, los)[7] == "PASA"
+    assert _fila(salida, en_rango)[7] == "en rango"
+    assert _fila(salida, trabajo)[7] == "PASA"
     assert _fila(salida, cerrado)[4].startswith("cerrado Dexter")
-    assert _fila(salida, cerrado)[6] == "caso"
-    assert _fila(salida, sin_grupo)[6] == "sin grupo"
+    assert _fila(salida, cerrado)[7] == "caso"
+    assert _fila(salida, sin_grupo)[7] == "sin grupo"
     assert "pendientes=5 · pasan hoy=2" in salida
 
 
@@ -131,7 +131,8 @@ def test_dice_cuantas_veces_se_leyo_y_que_descarto_el_modelo(org_a):
 
     salida = _correr(org_a)
 
-    assert _fila(salida, ticket)[8:10] == ["2", "grupo='Obra_de_red'"]
+    fila = _fila(salida, ticket)
+    assert (fila[9], fila[11]) == ("2", "grupo='Obra_de_red'")
 
 
 def test_una_que_ya_pasa_lo_dice(org_a):
@@ -140,5 +141,5 @@ def test_una_que_ya_pasa_lo_dice(org_a):
 
     salida = _correr(org_a)
 
-    assert _fila(salida, debil)[6] == "PASA"
+    assert _fila(salida, debil)[7] == "PASA"
     assert "pasan hoy=1" in salida

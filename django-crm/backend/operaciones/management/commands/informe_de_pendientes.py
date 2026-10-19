@@ -26,6 +26,7 @@ cuáles pasarían con ellas y por cuál. Es la sombra del ciclo, caso por caso.
 """
 
 import re
+import zoneinfo
 from collections import Counter
 
 from django.core.exceptions import ValidationError
@@ -145,6 +146,46 @@ def _por_que_corto(d, grupo, medicion):
     return "no se pudo medir, reintenta"
 
 
+def _lectura_corta(lectura):
+    """Con que version de la lectura se decidio: 'v1', 'v2', o 'v2+corr' si se
+    leyo con las instrucciones de las correcciones del usuario."""
+    if not lectura:
+        return "-"
+    version = lectura.get("version")
+    if not (isinstance(version, int) and version >= dxt.VERSION_DE_LA_LECTURA):
+        return "v1"
+    if lectura.get("instrucciones") == dxt.CON_LAS_CORRECCIONES:
+        return f"v{version}+corr"
+    return f"v{version}"
+
+
+def _remedida_corta(medicion, zona) -> str:
+    """Cuantas veces se re-midio, y la ultima re-medicion que dijo algo: la
+    serie que decide la correccion 2 y que la columna 'medicion' no muestra
+    --esa es la medicion que decide sin las correcciones--."""
+    from django.utils.dateparse import parse_datetime
+
+    m = medicion or {}
+    veces = m.get("remedida_veces")
+    veces = veces if isinstance(veces, int) and veces > 0 else 0
+    serie = [h for h in (m.get("historial") or []) if isinstance(h, dict)]
+    if not veces and not serie:
+        return "-"
+    texto = f"{veces}x"
+    if serie:
+        ultima = serie[-1]
+        if ultima.get("estado") == "caido":
+            dato = f"caido/{ultima.get('causa_caida') or 'sin causa'}"
+        else:
+            dbm = ultima.get("senal_dbm")
+            nivel = f" {dbm}" if isinstance(dbm, (int, float)) else ""
+            dato = f"{ultima.get('senal') or 'sin_dato'}{nivel}"
+        cuando = parse_datetime(str(ultima.get("observado_en") or ""))
+        hora = cuando.astimezone(zona).strftime("%d/%m %H:%M") if cuando else "?"
+        texto += f" · {dato} · {hora}"
+    return texto
+
+
 def _hipotesis(propuesta):
     for pieza in reversed(propuesta.evidencia or []):
         if not isinstance(pieza, dict) or pieza.get("fuente") != dxt.FUENTE:
@@ -172,6 +213,10 @@ class Command(BaseCommand):
             raise CommandError("No existe una organización con ese id.")
         set_rls_context(org.id)
         ahora = timezone.now()
+        try:
+            zona = zoneinfo.ZoneInfo(getattr(org, "timezone", "") or "UTC")
+        except Exception:                                        # noqa: BLE001
+            zona = zoneinfo.ZoneInfo("UTC")
         try:
             con = bool(tareas_delegadas.esta_delegada(org, pad.TAREA_CORRECCIONES))
         except Exception:                                        # noqa: BLE001
@@ -209,12 +254,13 @@ class Command(BaseCommand):
             filas.append((
                 getattr(caso, "external_ticket_id", "") or "?",
                 f"{edad}d", _GRUPO.get(grupo, "sin grupo"), conf,
-                caso_corto, _medicion_corta(medicion), por_que, sombra,
-                str(leidas), descarte, _hipotesis(p)))
+                caso_corto, _medicion_corta(medicion),
+                _remedida_corta(medicion, zona), por_que, sombra,
+                str(leidas), _lectura_corta(lectura), descarte, _hipotesis(p)))
 
         cab = ("ticket", "edad", "grupo", "conf", "caso", "medicion",
-               "por que se queda", "con correcciones", "leidas",
-               "descarte del modelo", "hipotesis (tapada)")
+               "re-medida", "por que se queda", "con correcciones", "leidas",
+               "lectura", "descarte del modelo", "hipotesis (tapada)")
         anchos = [max(len(str(f[i])) for f in [cab, *filas]) for i in range(len(cab))]
         linea = lambda f: "  ".join(str(v).ljust(a) for v, a in zip(f, anchos))  # noqa: E731
         self.stdout.write(linea(cab))

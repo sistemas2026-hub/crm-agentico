@@ -659,6 +659,35 @@ def test_r4_la_relectura_filtra_antes_de_cortar(org_a, monkeypatch):
     assert elegidas == [espera.origen_id]
 
 
+def test_r5_una_respuesta_rota_no_pisa_la_lectura(org_a, monkeypatch):
+    """19/10/2026, en produccion: la relectura por version del 95531 volvio
+    con una respuesta que no era un objeto, y la falla en rango quedo "sin
+    grupo". Una respuesta rota no es una lectura: la anterior sigue valiendo."""
+    from operaciones import cerebro
+
+    p = _pendiente(org_a, medida=EN_RANGO)
+    rota = SimpleNamespace(hipotesis="", confianza="", falta=[], riesgo="",
+                           recomendacion="", extras={}, razonamiento=None,
+                           descartes=[cerebro.DESCARTE_SIN_OBJETO])
+    pedidas = []
+
+    def concluir(org, **kwargs):
+        pedidas.append(1)
+        return rota
+
+    monkeypatch.setattr(cerebro, "concluir", concluir)
+    monkeypatch.setattr(sup, "detectar", lambda org, ahora: [])
+
+    informe = sup._leer_tickets_abiertos(org_a, timezone.now())
+
+    assert pedidas == [1], "la relectura por version la tenia que pedir"
+    assert informe["tickets"]["respuestas_rotas"] == 1
+    lectura = pad._ultima_lectura_con_grupo(P.objects.get(pk=p.pk))
+    assert lectura["grupo"] == pad.FALLA_DE_SERVICIO
+    assert pad.evaluar(P.objects.get(pk=p.pk), timezone.now()).grupo == (
+        pad.FALLA_DE_SERVICIO)
+
+
 def test_s_releer_por_version_tiene_tope(org_a):
     from operaciones.razonamiento_modelos import (
         FuenteRazonamiento,
@@ -930,3 +959,31 @@ def test_x_el_informe_dice_cuales_pasarian_con_las_correcciones(org_a):
     assert "PASA (accion_autorizada)" in fila
     assert ("correcciones: en sombra · pasarian con ellas=1 "
             "{'accion_autorizada': 1}") in salida
+
+
+def test_x2_el_informe_dice_con_que_se_leyo_y_que_se_re_midio(org_a):
+    """19/10/2026: el informe decia que el 95394 pasaria con la re-medicion, y
+    no mostraba en cuanto habia dado. Sin el numero no se puede decidir."""
+    import re
+
+    remedida = _pendiente(org_a, medida=EN_RANGO, hace_horas=9,
+                          version=dxt.VERSION_DE_LA_LECTURA,
+                          instrucciones=dxt.CON_LAS_CORRECCIONES)
+    mdf.escribir(remedida, mdf.de_la_respuesta(DEBIL), timezone.now())
+    vieja = _pendiente(org_a, medida=EN_RANGO)
+
+    out = StringIO()
+    call_command("informe_de_pendientes", "--org", str(org_a.id), stdout=out)
+
+    def fila(p):
+        ticket = pad.caso_de(p).external_ticket_id
+        linea = next(f for f in out.getvalue().splitlines()
+                     if f.startswith(ticket))
+        return re.split(r"\s{2,}", linea.strip())
+
+    #  columnas: ... medicion(5) re-medida(6) ... leidas(9) lectura(10)
+    assert fila(remedida)[5] == "en linea/buena -23.0dBm", (
+        "la medicion que decide sin las correcciones no cambia")
+    assert fila(remedida)[6].startswith("1x · debil -28.5 · ")
+    assert fila(remedida)[10] == f"v{dxt.VERSION_DE_LA_LECTURA}+corr"
+    assert (fila(vieja)[6], fila(vieja)[10]) == ("-", "v1")

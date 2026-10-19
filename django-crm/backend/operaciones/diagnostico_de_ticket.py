@@ -276,6 +276,9 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None,
 
     informe = {"leidos": 0, "con_hipotesis": 0, "sin_hipotesis": 0,
                "sin_texto": 0, "errores": 0, "fuera_de_tope": 0,
+               #  El modelo contesto algo que no es un objeto: no se anota
+               #  como lectura (ver abajo).
+               "respuestas_rotas": 0,
                #  CUANTAS DE LAS LEIDAS MIDIERON EL EQUIPO. Va en el informe
                #  del ciclo --no solo en la tabla-- para que el numero este a
                #  la vista en cada corrida y no haya que ir a buscarlo.
@@ -313,6 +316,18 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None,
                 FUENTE, senal.origen_id,
                 f"no se pudo diagnosticar en esta corrida "
                 f"({type(e).__name__}). Se reintenta en la siguiente.", ahora))
+            continue
+
+        if _respuesta_rota(getattr(v, "descartes", None)):
+            #  UNA RESPUESTA ROTA NO ES UNA LECTURA  --  19/10/2026. El modelo
+            #  no llego a contestar con un objeto, y anotarla como lectura
+            #  dejaba un grupo VACIO encima del que la propuesta ya tenia: la
+            #  relectura por version del 19/10 lo hizo con el 95531, que era
+            #  una falla en rango y quedo "sin grupo". Se deja el rastro --la
+            #  fila cuenta para el tope absoluto de relecturas-- y la lectura
+            #  anterior sigue valiendo; la vuelta que viene lo intenta de nuevo.
+            informe["respuestas_rotas"] += 1
+            _dejar_rastro(org, v, senal, propuestas, ahora, informe)
             continue
 
         labor = _labor_de(org, senal, tapado)
