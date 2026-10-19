@@ -139,7 +139,7 @@ las cuatro mutaciones inversas              cazadas (ver la sección de arriba)
 | ~~Cargar `tenant_config`~~ | **HECHO el 19/10/2026 — base en v177.** Lo corrió el usuario: el clasificador de seguridad bloquea `--forzar` a nivel de herramienta y eso no se rodea. Resultado medido: **0 diferencias** del lado «el repo lo declara y la base no», y `[OK] La base tiene todo lo que el repo declara` |
 | ~~`invocable_por_servicio` en cuatro herramientas~~ | **HECHO**, con la carga de arriba |
 | Encender el ciclo de la madrugada | Es un interruptor de la pantalla `/supervisor-noc/cuadrillas`, que escribe la base de producción. Viene apagado de fábrica **a propósito** (§8, mismo criterio que `RELOJ_HABILITADO`) |
-| Verificar que el frontend se reconstruyó | **Sin salida HTTP desde el entorno de la sesión**: `HTTP 000` a los tres dominios. El sustituto barato, para quien tenga navegador: si el panel de Despacho sigue mostrando una sola fila «sin clasificar», la imagen no se reconstruyó |
+| ~~Verificar que el frontend se reconstruyó~~ | **HECHO por observación el 19/10/2026.** El panel de Despacho dice «1 cuadrilla a **Correctivo**» —no «sin clasificar», y con mayúscula—, que es exactamente lo que solo el código nuevo produce. Ver la sección de abajo |
 
 
 #### La carga de config, hecha y verificada — 19/10/2026
@@ -218,6 +218,43 @@ un arreglo al pasar.
 set de humo tiene 10 casos y la config pide al menos 50 para dar una corrida por
 buena. *«Sirve igual para detectar regresiones, pero todavía no es un criterio
 de aceptación.»* El 89% contra el 90% no es un gate: es una señal.
+
+
+
+#### Observado en producción: los arreglos están vivos — 19/10/2026
+
+Lo que no se podía medir desde la sesión —**sin salida HTTP, `HTTP 000` a los
+tres dominios**— lo resolvió una captura de la pantalla de Despacho. El panel
+«Cómo quedaría la jornada» dice:
+
+```
+1
+cuadrilla a Correctivo
+1 orden
+```
+
+**Esa línea prueba los dos arreglos del frontend a la vez**, y por eso vale más
+que una fecha de imagen (§ «la fecha de una imagen no dice qué código tiene»):
+
+| Lo que se lee | Lo que prueba |
+|---|---|
+| dice «Correctivo» y **no «sin clasificar»** | `conteosDel` lee la labor de la **asignación**. Con el código viejo `o.labor` era `undefined` SIEMPRE y la tarjeta decía «sin clasificar» pasara lo que pasara |
+| dice «Correctivo» **con mayúscula** | pasa por `nombreDeLabor()`. El id que guarda la jornada es minúscula |
+
+**O sea: la imagen del frontend SÍ se reconstruyó.** Era el tercer punto abierto
+del cierre y queda cerrado por observación, no por inferencia.
+
+**Y el circuito se ve entero funcionando** en la misma pantalla: 39 casos
+abiertos, todos pasados por Pendientes por revisión —«Nada sale a campo sin
+pasar por ahí»—, con su ticket, su servicio y su botón de despachar. Más «1
+orden asignada a mano: el reparto no las mueve».
+
+**Un detalle que confirma que alinear el YAML antes de cargar servía:** entre
+esos casos hay asuntos que **no están entre los seis literales** de
+`importacion_tickets` —«Cambio De Domicilio», «Instalación Tdt», «Punto De Tv
+Adicional»—. Entran por los comodines `soporte tecnico|*`, que son justo lo que
+se bajó al archivo para que la carga no los borrara. Sin esa alineación, esos
+tickets habrían dejado de importarse en silencio.
 
 
 **LO QUE ESTE OBJETIVO DEJA APRENDIDO, más allá de los arreglos**
