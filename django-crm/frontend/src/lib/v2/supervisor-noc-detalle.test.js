@@ -485,6 +485,58 @@ describe('¿qué pasa si acepto?', () => {
     expect(r.efecto).toMatch(/no ejecuta/i);
   });
 
+  //  19/10/2026: hasta hoy estas dos decian «no ejecuta ninguna acción» y
+  //  aceptarlas pone el caso en Despacho. El efecto lo anuncia el backend.
+  const LECTURA = (labor) => ({
+    fuente: 'diagnostico_del_ticket', dato: 'se leyó el reclamo', labor
+  });
+  const TICKET = {
+    ...DESINCRONIZADO,
+    tipo_senal: 'ticket_sin_diagnostico',
+    al_aceptar: 'pasa_a_despacho',
+    evidencia: [LECTURA('correctivo')]
+  };
+
+  it('un ticket leído anuncia que pasa a Despacho, y no que no ejecuta nada', () => {
+    const r = siAcepto(TICKET);
+
+    expect(r.pasaADespacho).toBe(true);
+    expect(r.ejecuta).toBe(false);
+    expect(r.rotuloBoton).toBe('Aceptar y pasar a Despacho');
+    expect(r.espera).toBe('Pasando a Despacho…');
+    expect(r.efecto).toMatch(/pasa a la cola de Despacho/i);
+    expect(r.efecto).not.toMatch(/no ejecuta ninguna acción/i);
+    //  Pasar a Despacho no es crear la orden: eso lo hace una persona allá.
+    expect(r.efecto).toMatch(/no crea la orden/i);
+    expect(r.avisoLectura).toBe('');
+  });
+
+  it('si la lectura dice que no hace falta ir, lo avisa antes de aceptar', () => {
+    const r = siAcepto({ ...TICKET, evidencia: [LECTURA('correctivo'), LECTURA('no_requiere_visita')] });
+    expect(r.avisoLectura).toMatch(/no hace falta visita/i);
+    expect(r.avisoLectura).toMatch(/igual pasa a Despacho/i);
+  });
+
+  it('si la lectura no concluyó una labor, también lo avisa', () => {
+    expect(siAcepto({ ...TICKET, evidencia: [LECTURA('')] }).avisoLectura)
+      .toMatch(/no concluyó/i);
+  });
+
+  it('sin el campo del backend no se promete Despacho', () => {
+    const { al_aceptar, ...sinCampo } = TICKET;
+    const r = siAcepto(sinCampo);
+    expect(r.pasaADespacho).toBe(false);
+    expect(r.rotuloBoton).toBe('Aceptar propuesta');
+    expect(r.avisoLectura).toBe('');
+  });
+
+  it('una desincronización sigue anunciando el cierre aunque traiga el campo', () => {
+    const r = siAcepto({ ...DESINCRONIZADO, al_aceptar: 'cierra_caso' });
+    expect(r.ejecuta).toBe(true);
+    expect(r.pasaADespacho).toBe(false);
+    expect(r.espera).toBe('Cerrando el caso…');
+  });
+
   it('un tipo de senal desconocido no ejecuta: la lista es blanca', () => {
     //  Fail-closed. Un tipo nuevo del backend no anuncia una ejecucion que
     //  nadie verifico -- se anuncia recien cuando se agrega a mano.

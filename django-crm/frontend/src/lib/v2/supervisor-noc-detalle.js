@@ -207,6 +207,60 @@ export function aceptarEjecuta(d) {
 }
 
 /**
+ * ¿Aceptar esta propuesta pone su caso en la cola de Despacho?
+ *
+ * LO DICE EL BACKEND, NO UNA LISTA DE ACÁ  --  19/10/2026
+ * -------------------------------------------------------
+ * Hasta hoy esta pantalla solo conocía el cierre, y para todo lo demás
+ * anunciaba «aceptar no ejecuta nada». Era falso para «caso que necesita una
+ * visita» y «ticket sin diagnóstico»: aceptarlos pone el caso en Despacho. Lo
+ * preguntó el usuario («si acepto la propuesta, ¿se pasa a despacho?»).
+ *
+ * `al_aceptar` sale de `paso_a_despacho.efecto_al_aceptar`, la misma regla que
+ * arma la cola. Una copia acá se desincronizaría el día que entre un tipo
+ * nuevo. Sin el campo (un backend anterior) no se promete nada.
+ *
+ * @param {any} d  la propuesta
+ */
+export function aceptarPasaADespacho(d) {
+  return !aceptarEjecuta(d) && d?.al_aceptar === 'pasa_a_despacho';
+}
+
+/** La fuente de la lectura del ticket en la evidencia (`diagnostico_de_ticket.FUENTE`). */
+const FUENTE_LECTURA_TICKET = 'diagnostico_del_ticket';
+
+/**
+ * Qué concluyó la lectura del ticket sobre ir a campo, para avisarlo ANTES
+ * de aceptar.
+ *
+ * Aceptar pasa a Despacho aunque la lectura diga que no hace falta ir: el
+ * backend mira el tipo y la aceptación, no la recomendación. Quien acepta
+ * tiene que verlo justo ahí, no enterarse en la cola.
+ *
+ * Se lee la CLAVE `labor` de la última lectura, no la frase: la frase la
+ * redacta el modelo. Vacío si no hubo lectura (una visita sostenida por una
+ * medición del equipo no la tiene) o si concluyó una labor.
+ *
+ * @param {any[]} [evidencia]
+ */
+export function avisoDeLectura(evidencia) {
+  const lecturas = (evidencia ?? []).filter(
+    (e) => e?.fuente === FUENTE_LECTURA_TICKET && typeof e?.labor === 'string'
+  );
+  const ultima = lecturas[lecturas.length - 1];
+  if (!ultima) return '';
+  if (ultima.labor === 'no_requiere_visita') {
+    return 'La lectura del Supervisor dice que no hace falta visita. Si aceptás, igual ' +
+      'pasa a Despacho: si estás de acuerdo con la lectura, rechazala con el motivo.';
+  }
+  if (!ultima.labor) {
+    return 'La lectura no concluyó qué trabajo hace falta. Si aceptás, pasa a Despacho ' +
+      'y la plantilla se elige allá sin sugerencia.';
+  }
+  return '';
+}
+
+/**
  * Qué promete el botón de aceptar varias a la vez.
  *
  * EL BOTÓN DECÍA «ACEPTAR Y CERRAR» SIEMPRE, Y CASI NUNCA CERRABA
@@ -230,19 +284,31 @@ export function aceptarEjecuta(d) {
 export function loteDeSeleccion(filas, ids) {
   const tildadas = (filas ?? []).filter((f) => (ids ?? []).includes(String(f?.id)));
   const cierran = tildadas.filter(aceptarEjecuta).length;
+  //  LAS QUE PASAN A DESPACHO  --  19/10/2026. Hasta hoy caían en «solo
+  //  quedan registradas», y aceptarlas las pone en la cola de campo.
+  const aDespacho = tildadas.filter(aceptarPasaADespacho).length;
   const n = tildadas.length;
+  const soloRegistran = n - cierran - aDespacho;
+  const partes = [
+    cierran ? `${cierran} cierran el caso en Dexter` : '',
+    aDespacho ? `${aDespacho} pasan a Despacho` : '',
+    soloRegistran ? `${soloRegistran} solo quedan registradas` : ''
+  ].filter(Boolean);
   return {
     n,
     cierran,
-    soloRegistran: n - cierran,
+    aDespacho,
+    soloRegistran,
     //  El rótulo nunca promete más de lo que el backend va a hacer.
-    etiqueta: cierran === n && n > 0 ? `Aceptar y cerrar ${n}` : `Aceptar ${n}`,
-    //  La aclaración solo cuando hay dos conductas mezcladas: repetirla
-    //  siempre la vuelve parte del decorado y deja de leerse.
-    aclaracion:
-      cierran > 0 && cierran < n
-        ? `${cierran} cierran el caso en Dexter; ${n - cierran} solo quedan registradas.`
-        : ''
+    etiqueta:
+      n > 0 && cierran === n
+        ? `Aceptar y cerrar ${n}`
+        : n > 0 && aDespacho === n
+          ? `Aceptar y pasar ${n} a Despacho`
+          : `Aceptar ${n}`,
+    //  La aclaración solo cuando hay conductas mezcladas: repetirla siempre
+    //  la vuelve parte del decorado y deja de leerse.
+    aclaracion: partes.length > 1 ? `${partes.join('; ')}.` : ''
   };
 }
 
@@ -589,7 +655,14 @@ export function filasDeAceptar(aceptar) {
 export function siAcepto(d, contraste) {
   const c = contraste ?? contrasteDeEstados(d?.evidencia);
   const ejecuta = aceptarEjecuta(d);
+  const despacho = aceptarPasaADespacho(d);
   return {
+    pasaADespacho: despacho,
+    //  Lo que dice el botón, y lo que dice mientras viaja. El rótulo de
+    //  espera es el que `alDecidir` pone al enviar (`data-espera`).
+    rotuloBoton: despacho ? 'Aceptar y pasar a Despacho' : 'Aceptar propuesta',
+    espera: ejecuta ? 'Cerrando el caso…' : despacho ? 'Pasando a Despacho…' : 'Guardando…',
+    avisoLectura: despacho ? avisoDeLectura(d?.evidencia) : '',
     estadoActual: oAusente(c?.crm),
     //  Lo que la propuesta pide hacer, con sus palabras. No se traduce a un
     //  estado final: la propuesta puede decir REVISAR la sincronización aunque
@@ -599,14 +672,20 @@ export function siAcepto(d, contraste) {
     origenDecision: hay(c?.proveedor) ? 'WispHub' : AUSENTE,
     tipo: ejecuta
       ? 'Cierre controlado · autorizado por vos, revalidado por el sistema'
-      : 'Revisión humana · propuesta del Supervisor NOC IA',
+      : despacho
+        ? 'Pasa a Despacho a campo · autorizado por vos'
+        : 'Revisión humana · propuesta del Supervisor NOC IA',
     ejecuta,
     efecto: ejecuta
       ? 'Al aceptar, se realizará una nueva validación antes de intentar cerrar el ' +
         'caso en Dexter. Si todas las condiciones siguen dándose, el caso se cierra; ' +
         'si alguna cambió, no se ejecuta y se te dice cuál. No toca WispHub.'
-      : 'Queda registrado que estás de acuerdo. No cierra el caso, no toca WispHub y no ' +
-        'ejecuta ninguna acción: en esta etapa el Supervisor observa y propone.',
+      : despacho
+        ? 'Al aceptar, el caso pasa a la cola de Despacho a campo. Ahí una persona ' +
+          'elige la plantilla y crea la orden: aceptar no crea la orden ni manda a ' +
+          'nadie todavía. No cierra el caso y no toca WispHub.'
+        : 'Queda registrado que estás de acuerdo. No cierra el caso, no toca WispHub y no ' +
+          'ejecuta ninguna acción: en esta etapa el Supervisor observa y propone.',
     requiereConfirmacion: true
   };
 }

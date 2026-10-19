@@ -139,15 +139,32 @@ describe('el botón de aceptar varias no promete un cierre que no ocurre', () =>
   //  Lo vio el usuario en producción el 13/10/2026: seis tickets leídos
   //  tildados, y el botón ofreciendo «Aceptar y cerrar 6». Ninguno de esos
   //  seis cierra nada -- aceptar registra el acuerdo y se acabó.
-  const leido = (id) => ({ id, tipo_senal: 'ticket_sin_diagnostico' });
-  const desinc = (id) => ({ id, tipo_senal: 'caso_desincronizado' });
+  //  'al_aceptar' como lo manda el backend desde el 19/10/2026. Antes de esa
+  //  fecha estas filas no lo traian y la prueba de «mezcladas» afirmaba que
+  //  los tickets leidos «solo quedan registradas»: era falso, aceptarlos los
+  //  pasa a Despacho.
+  const leido = (id) => ({ id, tipo_senal: 'ticket_sin_diagnostico', al_aceptar: 'pasa_a_despacho' });
+  const desinc = (id) => ({ id, tipo_senal: 'caso_desincronizado', al_aceptar: 'cierra_caso' });
+  const antiguo = (id) => ({ id, tipo_senal: 'caso_abierto_antiguo', al_aceptar: 'registra' });
 
-  it('seis tickets leídos no se «cierran»', () => {
+  it('seis tickets leídos no se «cierran»: pasan a Despacho, y lo dice', () => {
     const filas = ['1', '2', '3', '4', '5', '6'].map(leido);
     const r = loteDeSeleccion(filas, ['1', '2', '3', '4', '5', '6']);
-    expect(r.etiqueta).toBe('Aceptar 6');
+    expect(r.etiqueta).toBe('Aceptar y pasar 6 a Despacho');
     expect(r.etiqueta).not.toContain('cerrar');
     expect(r.aclaracion).toBe('');
+  });
+
+  it('las que solo registran no prometen nada', () => {
+    const filas = ['1', '2'].map(antiguo);
+    const r = loteDeSeleccion(filas, ['1', '2']);
+    expect(r.etiqueta).toBe('Aceptar 2');
+    expect(r.aclaracion).toBe('');
+  });
+
+  it('sin el campo del backend no se promete Despacho', () => {
+    const filas = [{ id: '1', tipo_senal: 'ticket_sin_diagnostico' }];
+    expect(loteDeSeleccion(filas, ['1']).etiqueta).toBe('Aceptar 1');
   });
 
   it('seis desincronizaciones sí, porque el backend las cierra', () => {
@@ -156,11 +173,12 @@ describe('el botón de aceptar varias no promete un cierre que no ocurre', () =>
   });
 
   it('mezcladas: promete lo chico y dice el reparto', () => {
-    const filas = [desinc('1'), leido('2'), leido('3')];
-    const r = loteDeSeleccion(filas, ['1', '2', '3']);
-    expect(r.etiqueta).toBe('Aceptar 3');
+    const filas = [desinc('1'), leido('2'), leido('3'), antiguo('4')];
+    const r = loteDeSeleccion(filas, ['1', '2', '3', '4']);
+    expect(r.etiqueta).toBe('Aceptar 4');
     expect(r.aclaracion).toContain('1 cierran');
-    expect(r.aclaracion).toContain('2 solo quedan registradas');
+    expect(r.aclaracion).toContain('2 pasan a Despacho');
+    expect(r.aclaracion).toContain('1 solo quedan registradas');
   });
 
   it('solo cuenta lo tildado, no lo que está en pantalla', () => {

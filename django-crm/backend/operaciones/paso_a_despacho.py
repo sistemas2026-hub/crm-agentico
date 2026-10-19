@@ -1387,14 +1387,51 @@ def evaluar(propuesta, ahora, *, correcciones: bool = False) -> Decision:
 #  CASO_REQUIERE_VISITA y TICKET_SIN_DIAGNOSTICO. ACEPTADA y MODIFICADA, no
 #  RECHAZADA: modificar es aceptar cambiando algo, rechazar es decir que no.
 
+def tipos_que_llevan_a_despacho() -> tuple:
+    """Los tipos de señal que, aceptados, ponen su caso en Despacho."""
+    from operaciones.models import PropuestaSupervisor as P
+
+    return (P.CASO_REQUIERE_VISITA, P.TICKET_SIN_DIAGNOSTICO)
+
+
 def propuestas_que_llevan_a_despacho(org):
     """Las propuestas aceptadas que ponen su caso en la cola de Despacho."""
     from operaciones.models import PropuestaSupervisor as P
 
     return P.objects.filter(
         org=org, origen_tipo="case",
-        tipo_senal__in=(P.CASO_REQUIERE_VISITA, P.TICKET_SIN_DIAGNOSTICO),
+        tipo_senal__in=tipos_que_llevan_a_despacho(),
         estado__in=(P.ACEPTADA, P.MODIFICADA))
+
+
+#  QUE PASA SI SE ACEPTA  --  19/10/2026
+#  -------------------------------------
+#  Lo que la pantalla de revision le anuncia a quien decide, en clave. Hasta
+#  hoy el frontend solo conocia el cierre y para todo lo demas decia «aceptar
+#  no ejecuta nada», y era falso para los dos tipos de arriba: aceptarlos pone
+#  el caso en la cola de Despacho. Lo vio el usuario preguntando «si acepto la
+#  propuesta, ¿se pasa a despacho?», con una lectura en pantalla que decia
+#  «no corresponde despachar un tecnico».
+#
+#  SALE DE LA MISMA REGLA QUE ARMA LA COLA ('tipos_que_llevan_a_despacho'):
+#  una copia en el frontend se desincronizaria el dia que entre un tipo nuevo.
+#  El cierre es el de 'views.RevisarPropuestaView', que lo intenta solo para
+#  'CASO_DESINCRONIZADO'.
+AL_ACEPTAR_PASA_A_DESPACHO = "pasa_a_despacho"
+AL_ACEPTAR_CIERRA_CASO = "cierra_caso"
+AL_ACEPTAR_REGISTRA = "registra"
+
+
+def efecto_al_aceptar(propuesta) -> str:
+    """Que hace aceptar esta propuesta: pasa a Despacho, cierra, o registra."""
+    from operaciones.models import PropuestaSupervisor as P
+
+    if (propuesta.origen_tipo == "case"
+            and propuesta.tipo_senal in tipos_que_llevan_a_despacho()):
+        return AL_ACEPTAR_PASA_A_DESPACHO
+    if propuesta.tipo_senal == P.CASO_DESINCRONIZADO:
+        return AL_ACEPTAR_CIERRA_CASO
+    return AL_ACEPTAR_REGISTRA
 
 
 def aprobados_para_despacho(org) -> set:

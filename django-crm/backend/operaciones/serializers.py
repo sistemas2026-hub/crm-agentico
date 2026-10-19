@@ -8,6 +8,7 @@ from rest_framework import serializers
 from datetime import timedelta
 
 from operaciones import asistentes, indicadores
+from operaciones import paso_a_despacho
 from operaciones.models import (APROBADO, REQUIERE_CORRECCION,
                                 REQUIERE_REVISION, ActividadOperativa,
                                 DisponibilidadTecnico, ProgramacionOrden,
@@ -41,6 +42,9 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
     asunto = serializers.SerializerMethodField()
     origen_creado_en = serializers.SerializerMethodField()
     caso_cerrado = serializers.SerializerMethodField()
+    #  Que hace aceptarla (19/10/2026): el boton de aceptar varias lo dice
+    #  antes de que se apriete. Ver 'paso_a_despacho.efecto_al_aceptar'.
+    al_aceptar = serializers.SerializerMethodField()
 
     class Meta:
         model = PropuestaSupervisor
@@ -53,6 +57,7 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
             "proveedor_externo",
             "orden_numero", "sla_estado", "sla_minutos",
             "cliente", "asunto", "origen_creado_en", "caso_cerrado",
+            "al_aceptar",
         ]
 
     def _contexto(self, obj):
@@ -104,6 +109,9 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
         #  solo con True.
         return self._contexto(obj).get("caso_cerrado")
 
+    def get_al_aceptar(self, obj):
+        return paso_a_despacho.efecto_al_aceptar(obj)
+
 
 class PropuestaDetalleSerializer(serializers.ModelSerializer):
     tipo_senal_display = serializers.CharField(
@@ -111,6 +119,9 @@ class PropuestaDetalleSerializer(serializers.ModelSerializer):
     dentro_del_alcance = serializers.BooleanField(read_only=True)
     revisado_por_email = serializers.SerializerMethodField()
     responsable_sugerido_email = serializers.SerializerMethodField()
+    #  Que hace aceptarla (19/10/2026): el modal lo anuncia en el boton y en
+    #  «¿Qué pasa si acepto?». Ver 'paso_a_despacho.efecto_al_aceptar'.
+    al_aceptar = serializers.SerializerMethodField()
 
     class Meta:
         model = PropuestaSupervisor
@@ -126,6 +137,7 @@ class PropuestaDetalleSerializer(serializers.ModelSerializer):
             "responsable_sugerido", "responsable_sugerido_email",
             "observaciones", "propuesta_original",
             "accion_propuesta_ref", "created_at", "updated_at",
+            "al_aceptar",
         ]
 
     def get_revisado_por_email(self, obj):
@@ -137,6 +149,9 @@ class PropuestaDetalleSerializer(serializers.ModelSerializer):
         if obj.responsable_sugerido and obj.responsable_sugerido.user:
             return obj.responsable_sugerido.user.email
         return None
+
+    def get_al_aceptar(self, obj):
+        return paso_a_despacho.efecto_al_aceptar(obj)
 
 
 class RevisionSerializer(serializers.Serializer):

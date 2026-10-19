@@ -2269,7 +2269,9 @@
               <span class="snoc-punto snoc-punto-primario"></span>
               {aceptar.ejecuta
                 ? 'Cierre controlado · requiere tu autorización'
-                : 'Observación · sin ejecución'}
+                : aceptar.pasaADespacho
+                  ? 'Pasa a Despacho · requiere tu autorización'
+                  : 'Observación · sin ejecución'}
             </span>
             <button class="snoc-btn" type="button" onclick={cerrarDetalle} aria-label="Cerrar">
               <span class="snoc-icono" style="font-size:18px;">close</span>
@@ -2583,6 +2585,15 @@
                 <span class="snoc-icono" style="font-size:16px;">info</span>
                 {aceptar.efecto}
               </p>
+              {#if aceptar.avisoLectura}
+                <!-- 19/10/2026: aceptar pasa a Despacho aunque la lectura diga
+                     que no hace falta ir. Se dice acá y en el pie, junto al
+                     botón, que es donde se decide. -->
+                <p class="snoc-aviso">
+                  <span class="snoc-icono" style="font-size:16px;" aria-hidden="true">warning</span>
+                  {aceptar.avisoLectura}
+                </p>
+              {/if}
             </section>
 
             <!-- ============ EL REGISTRO DE AUDITORIA ============
@@ -2707,11 +2718,18 @@
         {#if detalle && !cargandoDetalle && !errorDetalle}
           <div class="snoc-modal-pie">
             <div class="snoc-fila" style="gap:var(--snoc-xs); min-width:0;">
-              <span class="snoc-icono snoc-primario" style="font-size:16px;">verified_user</span>
+              <span class="snoc-icono snoc-primario" style="font-size:16px;">{aceptar.avisoLectura ? 'warning' : 'verified_user'}</span>
               <span class="snoc-body-sm snoc-secundario">
                 {#if aceptar.ejecuta}
                   La IA observa y propone. <strong>La decisión es tuya</strong>: aceptar autoriza un intento de
                   cierre en Dexter, que el sistema revalida antes de ejecutar.
+                {:else if aceptar.avisoLectura}
+                  <!-- Junto al boton, que es donde se decide: la seccion de
+                       arriba puede quedar fuera de la vista. -->
+                  <strong>{aceptar.avisoLectura}</strong>
+                {:else if aceptar.pasaADespacho}
+                  La IA observa y propone. <strong>La decisión es tuya</strong>: aceptar pasa el caso a
+                  Despacho a campo; la orden la crea una persona ahí.
                 {:else}
                   La IA observa y propone. <strong>La decisión es tuya</strong>: aceptar no ejecuta nada.
                 {/if}
@@ -2751,13 +2769,15 @@
                     un cierre contra el proveedor. El texto de espera tiene
                     que decir lo que de verdad esta pasando, que ademas
                     explica por que tarda.
+
+                    Y DICE A DONDE VA (19/10/2026): «Aceptar y pasar a
+                    Despacho» cuando aceptar pone el caso en la cola de campo.
+                    El rotulo sale de 'siAcepto', con lo que dice el backend.
                   -->
                   <button class="snoc-btn snoc-btn-primario" name="decision" value="aceptada"
                           type="submit" disabled={!!decidiendo}
-                          data-espera={aceptar.ejecuta ? 'Cerrando el caso…' : 'Guardando…'}>
-                    {decidiendo === 'Cerrando el caso…' || decidiendo === 'Guardando…'
-                      ? decidiendo
-                      : 'Aceptar propuesta'}
+                          data-espera={aceptar.espera}>
+                    {decidiendo && decidiendo === aceptar.espera ? decidiendo : aceptar.rotuloBoton}
                   </button>
                 </form>
               </div>
