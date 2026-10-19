@@ -138,7 +138,7 @@ las cuatro mutaciones inversas              cazadas (ver la sección de arriba)
 |---|---|
 | ~~Cargar `tenant_config`~~ | **HECHO el 19/10/2026 — base en v177.** Lo corrió el usuario: el clasificador de seguridad bloquea `--forzar` a nivel de herramienta y eso no se rodea. Resultado medido: **0 diferencias** del lado «el repo lo declara y la base no», y `[OK] La base tiene todo lo que el repo declara` |
 | ~~`invocable_por_servicio` en cuatro herramientas~~ | **HECHO**, con la carga de arriba |
-| Encender el ciclo de la madrugada | Es un interruptor de la pantalla `/supervisor-noc/cuadrillas`, que escribe la base de producción. Viene apagado de fábrica **a propósito** (§8, mismo criterio que `RELOJ_HABILITADO`) |
+| ~~Encender el ciclo de la madrugada~~ | **HECHO el 19/10/2026**, y además **ya corrió**: `Última corrida: 2026-10-19`. Ver la sección de abajo |
 | ~~Verificar que el frontend se reconstruyó~~ | **HECHO por observación el 19/10/2026.** El panel de Despacho dice «1 cuadrilla a **Correctivo**» —no «sin clasificar», y con mayúscula—, que es exactamente lo que solo el código nuevo produce. Ver la sección de abajo |
 
 
@@ -255,6 +255,48 @@ esos casos hay asuntos que **no están entre los seis literales** de
 Adicional»—. Entran por los comodines `soporte tecnico|*`, que son justo lo que
 se bajó al archivo para que la carga no los borrara. Sin esa alineación, esos
 tickets habrían dejado de importarse en silencio.
+
+
+
+#### El ciclo de la madrugada: encendido, guardado y YA CORRIÓ — 19/10/2026
+
+Observado en `/supervisor-noc/cuadrillas`:
+
+```
+El ciclo de la madrugada                                    ENCENDIDO
+Hora 03:00 · Órdenes por cuadrilla 10
+Hora de America/Bogota.  Última corrida: 2026-10-19.
+[x] Armar la jornada de cada cuadrilla
+[x] Encendido — corre solo todas las noches
+```
+
+**Tres cosas, y la tercera es la que vale.**
+
+1. El badge y las dos casillas **persistieron a la recarga** → el guardado
+   funcionó. (El arreglo de `c19f7a62` queda verificado en producción por su
+   efecto, que es la única forma: la reactividad no se puede probar acá.)
+2. El tope en 10 y las cuatro labores, también.
+3. **«Última corrida: 2026-10-19»** — antes decía *«Todavía no corrió ninguna
+   vez»*.
+
+**El ciclo no solo está encendido: YA CORRIÓ.** Y corrió el mismo día que se
+encendió, de tarde y no a las 3 de la mañana: eso es la **recuperación de
+corrida perdida** haciendo su trabajo. `_le_toca` usa `>=`, así que al
+encenderlo el primer tic horario del reloj vio que la hora local ya había
+pasado y que `ultima_corrida` no era hoy, y lo ejecutó en el acto. Está
+probado en `test_k_una_corrida_perdida_se_recupera_a_la_hora_siguiente`, y acá
+se observó en producción.
+
+**Esto cierra lo que §6 llama «código construido no es código que corre».** La
+medición del 19/10 sobre `beat_schedule` probaba que la tarea estaba
+registrada y que las 13 entradas resolvían; lo que no probaba era que el reloj
+la disparara de verdad en la topología real. El sello de `ultima_corrida` lo
+prueba.
+
+Y cuadra con lo que muestra Despacho —«1 cuadrilla a **Correctivo** · 1
+orden»—, que es la propuesta que ese ciclo armó: el reparto agrupó por (zona,
+labor), no publicó nada solo, y dejó la propuesta para que una persona la
+publique. Que es exactamente el diseño.
 
 
 **LO QUE ESTE OBJETIVO DEJA APRENDIDO, más allá de los arreglos**
