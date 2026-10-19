@@ -117,7 +117,14 @@ CAMPOS = ["id_servicio", "equipo_registrado", "estado", "causa_caida",
           #  señal. Estuvo mapeado a un campo llamado 'senal_texto' y la primera
           #  corrida real devolvio 'mismatch' ahi con una señal buena.
           "estado_config",
-          "ultima_caida", "ultima_conexion", "motivo"]
+          "ultima_caida", "ultima_conexion",
+          #  19/10/2026, tanda 2 de las correcciones del usuario: el nivel que
+          #  recibe la OLT (doble diagnostico) y el corte de red del caso 4 (la
+          #  llave olt/placa/puerto y cuantas ONU de ese puerto cayeron por LOS
+          #  a la vez). Numeros, sin el serial ni datos del cliente. Sin estos,
+          #  volver a correr este script los borraba de la base.
+          "senal_olt_dbm", "puerto", "onus_en_los_a_la_vez",
+          "motivo"]
 
 
 def _mutar(cfg: dict) -> None:

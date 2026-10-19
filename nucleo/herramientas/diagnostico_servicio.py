@@ -171,13 +171,22 @@ def _sin_resolver(motivo: str, id_servicio) -> dict:
 #  El serial solo se usa para encontrar la fila propia: no sale de aca, igual
 #  que en el resto de este modulo. Lo que sale es la llave del puerto y un
 #  numero. Y nunca levanta: sin poder contar, no hay corte que afirmar.
+def _pieza_de_puerto(valor) -> str:
+    """Una pieza de la llave del puerto: digitos, o "". El 0 vale --la placa 0
+    y el puerto 0 existen--, asi que no se mira si es falso sino si es numero.
+    Y solo digitos: la llave viaja al Supervisor y al modelo, y un texto del
+    proveedor no puede colarse por aca (revisor de PII, 19/10/2026)."""
+    texto = "" if valor is None else str(valor).strip()
+    return texto if texto.isascii() and texto.isdigit() else ""
+
+
 def _vecinos_en_los(base_url: str, headers: dict, serial: str) -> dict:
     try:
         r = requests.get(f"{base_url}/api/onu/get_onu_details/{serial}",
                          headers=headers, timeout=TIMEOUT_SEGUNDOS)
         r.raise_for_status()
         detalles = (r.json() or {}).get("onu_details") or {}
-        olt, placa, puerto = (str(detalles.get(c) or "").strip()
+        olt, placa, puerto = (_pieza_de_puerto(detalles.get(c))
                               for c in ("olt_id", "board", "port"))
         if not (olt and placa and puerto):
             return {}
@@ -205,6 +214,13 @@ def _vecinos_en_los(base_url: str, headers: dict, serial: str) -> dict:
         en_los.append((str(fila.get("sn") or "").strip().upper(),
                        incidentes._a_fecha(fila.get("last_status_change"))))
     llave = f"{olt}/{placa}/{puerto}"
+    if en_los and not any(sn for sn, _ in en_los):
+        #  NO ES SILENCIOSO: si un dia el proveedor deja de devolver el serial
+        #  con 'fields', ninguna caida se podria ubicar y el corte no se
+        #  marcaria nunca. Queda dicho en el log, sin el serial.
+        registrar("diagnostico_servicio",
+                  "las filas del puerto no traen el serial: no se puede "
+                  "ubicar la caida propia")
     propia = next((t for sn, t in en_los if sn == str(serial).strip().upper()),
                   None)
     if propia is None:

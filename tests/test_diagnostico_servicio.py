@@ -380,6 +380,19 @@ afirmar(_r.get("onus_en_los_a_la_vez") == 0,
 _r = _con_proveedor(_Proveedor(roto=True))
 afirmar(_r.get("puerto") == "" and _r.get("onus_en_los_a_la_vez") is None,
         "sin poder contar, ni puerto ni numero: no hay corte que afirmar")
+_r = _con_proveedor(_Proveedor(filas=_filas, detalles={
+    "olt_id": 3, "board": 0, "port": 11}))
+afirmar(_r.get("puerto") == "3/0/11" and _r.get("onus_en_los_a_la_vez") == 3,
+        f"la placa 0 existe, y como numero tambien vale: {_r.get('puerto')}")
+_r = _con_proveedor(_Proveedor(filas=_filas, detalles={
+    "olt_id": "3", "board": "2 CARLOS PRUEBA", "port": "11"}))
+afirmar(_r.get("puerto") == "" and _r.get("onus_en_los_a_la_vez") is None,
+        "una pieza que no es un numero no arma una llave: ni puerto ni conteo")
+_r = _con_proveedor(_Proveedor(filas=[{k: v for k, v in f.items() if k != "sn"}
+                                      for f in _filas]))
+afirmar(_r.get("onus_en_los_a_la_vez") == 0,
+        "si las filas no traen el serial, no se afirma un corte (y queda en "
+        "el log)")
 _p = _Proveedor(run="Online", causa="")
 _r = _con_proveedor(_p)
 afirmar(len(_p.pedidos) == 1 and _r.get("onus_en_los_a_la_vez") is None,
