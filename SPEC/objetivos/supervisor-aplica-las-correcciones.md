@@ -2,8 +2,9 @@
 
 > Abierto el 18/10/2026. Estado (19/10/2026): **tandas 1, 3 y 4 desplegadas**
 > (`5bbf9fb8`); **tanda 2, partes 1 y 2 (nivel de la OLT y corte de red)
-> construidas, auditadas y verificadas, sin desplegar**; la parte 3 (banda de
-> la ONU) espera que el usuario corrija el registro en SmartOLT.
+> desplegadas** (`179610c4`, 18:08) **con su lista blanca cargada** (config
+> v178); la parte 3 (banda de la ONU) espera que el usuario corrija el
+> registro en SmartOLT.
 
 ## Qué significa terminado
 
@@ -62,7 +63,7 @@ ve, en sombra, qué casos pasarían y por qué.
 | Tanda | Reglas | Qué necesita | Estado (19/10) |
 |---|---|---|---|
 | 1 | Labor del trabajo pedido según cliente nuevo o existente; acción ya autorizada = trabajo pedido sin objetar; energía descartada por el ticket = falla de fibra; doble diagnóstico con el nivel del ticket; la medición en rango de una falla se repite y se guarda su historial | Nada nuevo: código del Supervisor y la lectura | **Desplegada** (`5bbf9fb8`) |
-| 2 | Parte 1: el nivel que recibe la OLT en el doble diagnóstico. Parte 2: ONU del mismo puerto en LOS = un solo trabajo de red. Parte 3: la banda de cada tipo de ONU | Partes 1 y 2: el motor (`diagnosticar_servicio`) y, después del deploy, la lista blanca de `supervisor_noc` en `tenant_config`. Parte 3: el registro corregido en SmartOLT | **Partes 1 y 2 construidas y verificadas, sin desplegar. Parte 3 espera** (ver Bloqueos) |
+| 2 | Parte 1: el nivel que recibe la OLT en el doble diagnóstico. Parte 2: ONU del mismo puerto en LOS = un solo trabajo de red. Parte 3: la banda de cada tipo de ONU | Partes 1 y 2: el motor (`diagnosticar_servicio`) y, después del deploy, la lista blanca de `supervisor_noc` en `tenant_config`. Parte 3: el registro corregido en SmartOLT | **Partes 1 y 2 desplegadas** (`179610c4`) **y su lista blanca cargada** (v178). **Parte 3 espera** (ver Bloqueos) |
 | 3 | Volver a medir cuando el técnico reporta el arreglo | El cierre de la orden en campo | **Desplegada** (`5bbf9fb8`, `verificacion_de_arreglos`) |
 | 4 | Volver a leer los pendientes con las instrucciones nuevas, con tope por vuelta | La versión de las instrucciones en cada lectura | **Desplegada** (`5bbf9fb8`, `VERSION_DE_LA_LECTURA = 2`) |
 
@@ -85,11 +86,11 @@ ve, en sombra, qué casos pasarían y por qué.
 
 ## Bloqueos
 
-- **Tanda 2, partes 1 y 2, después del deploy**: la lista blanca de
-  `supervisor_noc` → `diagnosticar_servicio` en `tenant_config` tiene que
-  declarar `senal_olt_dbm`, `puerto` y `onus_en_los_a_la_vez`. Hasta entonces
-  no llegan al CRM y nada cambia. Se carga con `editor._editar` en el
-  contenedor del motor; no lo hace una sesión.
+- ~~**Tanda 2, partes 1 y 2, después del deploy**: la lista blanca~~ —
+  **cargada el 19/10/2026** por el usuario, con `editor._editar` en el
+  contenedor del motor: config v178. `diferencias_config.py`: 0 en la
+  dirección peligrosa. Humo con `--base`: 9/10, cae solo el caso aceptado
+  como línea base ("una venta a un prospecto no verifica identidad").
 - **Tanda 2, una llamada de confirmación**: que `fields=status,
   last_status_change,sn` devuelva el serial (sin él, la caída propia no se
   ubica y el corte no se marca nunca, con aviso en el log). Script de una
@@ -136,5 +137,6 @@ ve, en sombra, qué casos pasarían y por qué.
 | 19/10/2026 | Auditoría independiente: re-mediciones y verificación acotadas (no son polling), las instalaciones sin barrio para las cuadrillas de instalación, relectura al delegar, filtrar antes de cortar, "Sí" con tilde, "-a / -b dBm". Ver "Riesgos que quedan" | Push (lo decide el usuario) | `5bbf9fb8`, desplegado |
 | 19/10/2026 | Auditorías de frontera y de PII: la re-medición nunca reemplaza, la relectura que mueve el grupo es una corrección más, las instrucciones nuevas y la acción autorizada atadas a la tarea y al autor, el aviso al delegar, el descarte sin frases | Auditoría independiente | `5bbf9fb8`, desplegado |
 | 19/10/2026 | Tandas 1, 3 y 4 construidas: las claves nuevas de la lectura y su versión, las tres reglas detrás de la tarea nueva con su sombra, la re-medición cada 3 h con historial, el doble diagnóstico, la labor por cliente nuevo o existente, la medición después del arreglo y la columna del informe. Pruebas en Postgres con los dos roles, mutaciones, regresión, ruff, svelte-check y build | Tanda 2. Que el usuario mire la sombra antes de delegar la tarea | `5bbf9fb8`, desplegado |
-| 19/10/2026 | Sombra observada en producción: el 95394 pasaría por la re-medición (-22.92 de noche, -26.38 de día). Una respuesta rota dejó al 95531 "sin grupo": ya no la pisa, y el informe muestra la re-medición y la versión de cada lectura | Delegar la tarea (lo decide el usuario) | `0d328eb4` |
-| 19/10/2026 | Tanda 2, partes 1 y 2: el nivel de la OLT en el doble diagnóstico; el corte de red marcado con su puerto, umbral por empresa en Cuadrillas, contado una vez en la jornada y visible en la ficha de Despacho. Auditorías de frontera, PII e independiente, con lo que encontraron resuelto. Pruebas del motor, 734 del backend en Postgres, 71 de vitest, mutaciones (motor 8 de 8, backend 16 de 16), ruff y svelte-check sin hallazgos nuevos, build | Push (lo decide el usuario); cargar la lista blanca; la llamada de confirmación del serial; parte 3 | `5f19576f`, `3f158ed3`, `807a8dc9` y el de lo del auditor |
+| 19/10/2026 | Sombra observada en producción: el 95394 pasaría por la re-medición (-22.92 de noche, -26.38 de día). Una respuesta rota dejó al 95531 "sin grupo": ya no la pisa, y el informe muestra la re-medición y la versión de cada lectura | Delegar la tarea (lo decide el usuario) | `4f559af2` (rebaseado; era `0d328eb4`) |
+| 19/10/2026 | Tanda 2, partes 1 y 2: el nivel de la OLT en el doble diagnóstico; el corte de red marcado con su puerto, umbral por empresa en Cuadrillas, contado una vez en la jornada y visible en la ficha de Despacho. Auditorías de frontera, PII e independiente, con lo que encontraron resuelto. Pruebas del motor, 734 del backend en Postgres, 71 de vitest, mutaciones (motor 8 de 8, backend 16 de 16), ruff y svelte-check sin hallazgos nuevos, build | Push (lo decide el usuario); cargar la lista blanca; la llamada de confirmación del serial; parte 3 | `8bedc9dd`, `a47b96ef`, `180c138f`, `179610c4` (los hashes que quedaron en origin después de rebasar) |
+| 19/10/2026 | Tanda 2 desplegada a las 18:08 (el sello del frontend cambió después del push), con los mismos 22 rojos previos en la regresión de `campo`, `operaciones` y `cases`. Lista blanca cargada (v178), `diferencias_config` limpio y humo `--base` 9/10 | La llamada de confirmación del serial; parte 3 | `179610c4` |
