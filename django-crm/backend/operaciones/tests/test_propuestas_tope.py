@@ -129,6 +129,49 @@ def test_las_pendientes_llegan_aunque_el_tope_recorte(org_a, admin_client,
     assert all(p["caso_cerrado"] is False for p in pendientes)
 
 
+def test_abiertas_no_gasta_el_tope_en_casos_terminados(org_a, admin_client,
+                                                       admin_profile):
+    """
+    19/10/2026, en produccion: «Ya decididas (3)» con 52 casos pasados a
+    Despacho esa tarde. Las 200 se llenaban de propuestas cuyo caso ya habia
+    terminado --la pantalla no las muestra en ninguna bandeja-- y las
+    decididas de casos abiertos quedaban afuera. Con 'abiertas=1' no viajan,
+    con el mismo criterio de caso terminado que usa la pantalla.
+    """
+    from cases.models import Case
+
+    with rls_org(org_a):
+        cerrado = _caso(org_a, cerrado=True)
+        abierto = _caso(org_a, cerrado=False)
+        #  Terminado por UNO solo de los dos campos: 'resolved_at' sin el
+        #  estado, y un estado final que no es 'Closed' sin 'resolved_at'.
+        solo_resuelto = Case.objects.create(org=org_a, name="resuelto",
+                                            status="New",
+                                            resolved_at=timezone.now())
+        rechazado = Case.objects.create(org=org_a, name="rechazado",
+                                        status="Rejected", resolved_at=None)
+        for _ in range(LOTE_MAXIMO + 5):
+            _propuesta(org_a, cerrado,
+                       estado=PropuestaSupervisor.ACEPTADA, prioridad=1)
+        for caso in (solo_resuelto, rechazado):
+            _propuesta(org_a, caso,
+                       estado=PropuestaSupervisor.ACEPTADA, prioridad=1)
+        for _ in range(3):
+            _propuesta(org_a, abierto,
+                       estado=PropuestaSupervisor.ACEPTADA, prioridad=40)
+        _propuesta(org_a, abierto,
+                   estado=PropuestaSupervisor.PROPUESTA, prioridad=40)
+
+    todas = admin_client.get(RUTA).json()
+    assert todas["truncado"] is True, "sin el parametro, la lista de siempre"
+
+    cuerpo = admin_client.get(RUTA + "?abiertas=1").json()
+    assert (cuerpo["count"], cuerpo["truncado"]) == (4, False)
+    assert sorted(p["estado"] for p in cuerpo["resultados"]) == sorted(
+        [PropuestaSupervisor.ACEPTADA] * 3 + [PropuestaSupervisor.PROPUESTA])
+    assert all(p["caso_cerrado"] is False for p in cuerpo["resultados"])
+
+
 def test_sin_pendientes_el_cero_es_un_cero(org_a, admin_client, admin_profile):
     """Cero pendientes es cero, no un recorte disfrazado."""
     with rls_org(org_a):

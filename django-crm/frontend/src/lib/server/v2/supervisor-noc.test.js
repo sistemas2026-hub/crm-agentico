@@ -49,6 +49,17 @@ describe('listarPropuestas', () => {
     expect(apiRequest.mock.calls[0][0]).toBe('/operaciones/propuestas/?tipo_senal=caso_desincronizado');
   });
 
+  it('con abiertas pide solo lo que la bandeja puede mostrar', async () => {
+    //  19/10/2026: el tope de 200 se llenaba de propuestas de casos ya
+    //  terminados, que la pantalla no muestra, y las decididas de hoy
+    //  quedaban afuera.
+    apiRequest.mockResolvedValue({ count: 0, resultados: [] });
+
+    await listarPropuestas(event, { abiertas: true });
+
+    expect(apiRequest.mock.calls[0][0]).toBe('/operaciones/propuestas/?abiertas=1');
+  });
+
   it('ante un fallo deja el total en null, NO en 0', async () => {
     // Un 0 diria "no hay propuestas". Lo cierto es "no se pudo saber", y son
     // afirmaciones distintas.

@@ -103,6 +103,28 @@ logger = logging.getLogger(__name__)
 LOTE_MAXIMO = 200
 
 
+def _casos_terminados(org):
+    """
+    Los ids, como texto --que es como los guarda 'origen_id'--, de los casos
+    de la empresa que ya terminaron.
+
+    EL MISMO CRITERIO que 'contexto_propuesta._esta_cerrado': 'resolved_at'
+    puesto, o un estado de 'cases.workflow.TERMINAL_STATUSES'. Es el que la
+    pantalla usa para sacar una propuesta de las dos bandejas; uno distinto
+    aca volveria a separar lo que viaja de lo que se muestra.
+    """
+    from django.db.models import CharField, Q
+    from django.db.models.functions import Cast
+
+    from cases.models import Case
+    from cases.workflow import TERMINAL_STATUSES
+
+    return (Case.objects.filter(org=org)
+            .filter(Q(resolved_at__isnull=False) | Q(status__in=TERMINAL_STATUSES))
+            .annotate(id_texto=Cast("id", output_field=CharField()))
+            .values("id_texto"))
+
+
 class PropuestasView(APIView):
     """
     Las propuestas de esta organización: primero las que esperan una
@@ -121,6 +143,16 @@ class PropuestasView(APIView):
         tipo = request.query_params.get("tipo_senal")
         if tipo:
             qs = qs.filter(tipo_senal=tipo)
+        #  SOLO LO QUE LA BANDEJA PUEDE MOSTRAR  --  19/10/2026
+        #  ----------------------------------------------------
+        #  Con 'abiertas=1' no viajan las propuestas cuyo caso ya termino: la
+        #  pantalla del Supervisor no las muestra en ninguna bandeja y gastaban
+        #  el tope. Ese dia decia «Ya decididas (3)» con 52 casos pasados a
+        #  Despacho esa misma tarde: no entraban en las 200. Es opcional porque
+        #  Programacion lee la lista entera.
+        if request.query_params.get("abiertas") == "1":
+            qs = qs.exclude(origen_tipo="case",
+                            origen_id__in=_casos_terminados(request.org))
         #  LO QUE ESPERA UNA DECISION VIAJA PRIMERO  --  06/10/2026
         #  --------------------------------------------------------
         #  El orden del modelo es ("prioridad", "-created_at") y el tope es de

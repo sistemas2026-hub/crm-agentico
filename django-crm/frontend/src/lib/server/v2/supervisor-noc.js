@@ -100,12 +100,17 @@ export async function leerIndicadores({ cookies }, dias) {
  * propuestas, que es una afirmacion distinta de "no se pudo saber".
  *
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
- * @param {{ estado?: string, tipo_senal?: string }} [filtros]
+ * 'abiertas' (19/10/2026) le pide al backend que no mande las propuestas
+ * cuyo caso ya termino: la bandeja no las muestra en ningun lado y gastaban
+ * el tope de 200.
+ *
+ * @param {{ estado?: string, tipo_senal?: string, abiertas?: boolean }} [filtros]
  */
 export async function listarPropuestas({ cookies }, filtros = {}) {
   const params = new URLSearchParams();
   if (filtros.estado) params.set('estado', filtros.estado);
   if (filtros.tipo_senal) params.set('tipo_senal', filtros.tipo_senal);
+  if (filtros.abiertas) params.set('abiertas', '1');
   const query = params.toString() ? `?${params}` : '';
   try {
     const datos = await apiRequest(`/operaciones/propuestas/${query}`, {}, { cookies });

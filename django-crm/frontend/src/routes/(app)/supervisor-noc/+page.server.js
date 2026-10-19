@@ -103,7 +103,7 @@ export async function load({ cookies, locals, url, fetch }) {
   //  NO SE PIERDE NINGUN DATO: llegan todos, solo que despues. Y si uno falla,
   //  falla solo: hoy un fallo de la autonomia se llevaba la pantalla entera.
   const [todas, actividad] = await Promise.all([
-    listarPropuestas({ cookies }),
+    listarPropuestas({ cookies }, { abiertas: true }),
     leerActividad({ cookies })
   ]);
 

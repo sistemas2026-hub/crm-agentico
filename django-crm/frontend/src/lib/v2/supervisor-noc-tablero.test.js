@@ -3,6 +3,8 @@ import {
   kpisDelTablero,
   ticketsDe,
   hallazgosPorTipo,
+  baseDeLaBandeja,
+  conteoPorBandeja,
   estadoDeCasos,
   ordenesDeTrabajo,
   cargaPorTecnico,
@@ -110,6 +112,52 @@ describe('kpisDelTablero', () => {
   it('una lista vacia de propuestas si es un cero', () => {
     const k = kpisDelTablero(ARBOL, []);
     expect(k.find((x) => x.clave === 'propuestas').n).toBe(0);
+  });
+});
+
+describe('las cuentas del panel siguen la regla de la tabla', () => {
+  //  19/10/2026, en produccion: «Pendientes por revisión: 61», «Pendientes
+  //  (61)» y un donut de 200 encima de una tabla de 15. Las tres contaban las
+  //  desincronizaciones que la tabla oculta, y el donut ademas todo lo que
+  //  llego del backend.
+  const p = (id, estado, tipo_senal) => ({
+    id,
+    estado,
+    tipo_senal,
+    caso_cerrado: false,
+    prioridad: 40,
+    accion_propuesta: 'algo'
+  });
+  const TODAS = [
+    p('pend', 'propuesta', 'ticket_sin_diagnostico'),
+    p('pend-desinc-1', 'propuesta', 'caso_desincronizado'),
+    p('pend-desinc-2', 'propuesta', 'caso_desincronizado'),
+    p('acep', 'aceptada', 'ticket_sin_diagnostico'),
+    p('acep-desinc', 'aceptada', 'caso_desincronizado'),
+    { ...p('cerrada', 'aceptada', 'ticket_sin_diagnostico'), caso_cerrado: true }
+  ];
+
+  it('la tarjeta de pendientes cuenta lo que la tabla lista', () => {
+    const tarjeta = kpisDelTablero(ARBOL, TODAS).find((x) => x.clave === 'propuestas').n;
+    expect(tarjeta).toBe(1);
+    expect(tarjeta).toBe(bandejaDeRevision(TODAS, { estado: 'pendientes' }).length);
+  });
+
+  it('las pestañas cuentan con la misma regla de las desincronizaciones', () => {
+    expect(conteoPorBandeja(TODAS)).toEqual({ pendientes: 1, decididas: 1, '': 2 });
+    expect(conteoPorBandeja(TODAS, 'solo')).toEqual({ pendientes: 2, decididas: 1, '': 3 });
+    expect(conteoPorBandeja(TODAS, 'incluir')).toEqual({ pendientes: 3, decididas: 2, '': 5 });
+  });
+
+  it('el donut suma lo mismo que la pestaña elegida', () => {
+    /** @type {('ocultar'|'solo'|'incluir')[]} */
+    const MODOS = ['ocultar', 'solo', 'incluir'];
+    for (const estado of ['pendientes', 'decididas', '']) {
+      for (const modo of MODOS) {
+        const base = baseDeLaBandeja(TODAS, estado, modo);
+        expect(hallazgosPorTipo(base).total).toBe(conteoPorBandeja(TODAS, modo)[estado]);
+      }
+    }
   });
 });
 
@@ -585,14 +633,20 @@ describe('bandejaDeRevision', () => {
           estado: 'aceptada'
         })
       ],
-      { estado: 'pendientes', nivel: 'Alta', tipo: 'caso_desincronizado' },
+      //  'incluir': desde el 13/10 la tabla oculta las desincronizaciones por
+      //  defecto, y esta prueba es de como se combinan los demas filtros.
+      { estado: 'pendientes', nivel: 'Alta', tipo: 'caso_desincronizado', desincronizados: 'incluir' },
       hoy
     );
     expect(b.map((p) => p.id)).toEqual(['si']);
   });
 
   it('cada fila llega con su rotulo unificado y su antiguedad', () => {
-    const b = bandejaDeRevision([prop({ tipo_senal: 'caso_desincronizado' })], {}, hoy);
+    const b = bandejaDeRevision(
+      [prop({ tipo_senal: 'caso_desincronizado' })],
+      { desincronizados: 'incluir' },
+      hoy
+    );
     expect(b[0].rotulo).toBe('Desincronización WispHub ↔ Dexter');
     expect(b[0].edad.texto).toBe('5 días');
   });
@@ -780,7 +834,10 @@ describe('las dos bandejas', () => {
     caso_cerrado,
     prioridad: 50,
     accion_propuesta: 'algo',
-    tipo_senal: 'caso_desincronizado'
+    //  No un desincronizado: la tabla los oculta por defecto desde el 13/10
+    //  y estas pruebas son de las bandejas. Con ese tipo quedaron diez en rojo
+    //  sin que nadie las corriera (19/10/2026).
+    tipo_senal: 'caso_antiguo'
   });
 
   //  Los OCHO cuadrantes de la regla: cuatro estados por dos estados del caso.

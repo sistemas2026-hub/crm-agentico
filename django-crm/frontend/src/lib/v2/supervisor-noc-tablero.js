@@ -61,8 +61,16 @@ export function kpisDelTablero(indicadores, propuestas) {
   //  `estado === 'propuesta'` a secas anunciaba un numero y llevaba a una tabla
   //  con otro, en cuanto la bandeja empezo a excluir las propuestas cuyo caso ya
   //  cerro. Se cuenta lo mismo que se va a mostrar.
+  //
+  //  Y SIN LAS DESINCRONIZACIONES, COMO LA TABLA  --  19/10/2026
+  //  -----------------------------------------------------------
+  //  La tabla las oculta por defecto desde el 13/10 y esta cuenta no se
+  //  entero: el usuario vio «Pendientes por revisión: 61» arriba y «15
+  //  pendientes de decisión» abajo. Las 46 de la diferencia eran
+  //  desincronizaciones, que tienen su propia tarjeta al lado. Se cuenta con
+  //  'bandejaDeRevision', la misma funcion que arma la tabla.
   const enPendientes = Array.isArray(propuestas)
-    ? propuestas.filter((p) => bandejaDe(p) === PENDIENTES)
+    ? bandejaDeRevision(propuestas, { estado: PENDIENTES })
     : null;
   const pendientes = enPendientes ? enPendientes.length : null;
   const sobre = enPendientes ? ticketsDe(enPendientes) : null;
@@ -131,6 +139,11 @@ const COLORES = ['#f97316', '#f59e0b', '#fbbf24', '#ef4444', '#ec4899', '#a855f7
  * Se arma sobre las PROPUESTAS y no sobre `senales_por_tipo` porque el donut
  * acompaña a la tabla de abajo: los dos tienen que sumar lo mismo, o el
  * gráfico contradice a la lista que tiene al lado.
+ *
+ * Y POR ESO SE LE PASA LO QUE LA TABLA LISTA ('baseDeLaBandeja'), no todo lo
+ * que llego  --  19/10/2026. Con todo, el donut decia 200 --el tope del
+ * backend, con decididas, casos cerrados y desincronizaciones-- al lado de
+ * una tabla de 15.
  *
  * @param {any[]} propuestas
  */
@@ -745,6 +758,37 @@ export function bandejaDeRevision(propuestas, filtros = {}, ahora = new Date()) 
   });
 
   return visibles.map((p, i) => ({ ...p, n: i + 1 }));
+}
+
+/**
+ * Lo que la tabla lista en una bandeja ANTES de los filtros finos (nivel,
+ * tipo, texto, con o sin propuesta): sobre esto cuentan el donut y el
+ * selector de tipo, para sumar lo mismo que la pestaña elegida.
+ *
+ * @param {any[]} propuestas
+ * @param {string} estado  'pendientes', 'decididas' o '' (las dos)
+ * @param {'ocultar'|'solo'|'incluir'} [desincronizados]
+ */
+export function baseDeLaBandeja(propuestas, estado, desincronizados = 'ocultar') {
+  return bandejaDeRevision(propuestas, { estado, desincronizados });
+}
+
+/**
+ * Cuántas hay en cada bandeja, con la MISMA regla que la tabla: también la de
+ * las desincronizaciones.
+ *
+ * 19/10/2026: las pestañas contaban con 'bandejaDe' a secas, que no mira el
+ * tipo, mientras la tabla oculta las desincronizaciones: «Pendientes (61)»
+ * encima de una tabla de 15. Se cuenta con la función que arma la tabla, así
+ * que las dos ya no pueden separarse.
+ *
+ * @param {any[]} propuestas
+ * @param {'ocultar'|'solo'|'incluir'} [desincronizados]
+ */
+export function conteoPorBandeja(propuestas, desincronizados = 'ocultar') {
+  const pendientes = baseDeLaBandeja(propuestas, PENDIENTES, desincronizados).length;
+  const decididas = baseDeLaBandeja(propuestas, DECIDIDAS, desincronizados).length;
+  return { pendientes, decididas, '': pendientes + decididas };
 }
 
 /**

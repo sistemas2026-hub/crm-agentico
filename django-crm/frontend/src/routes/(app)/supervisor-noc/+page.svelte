@@ -39,8 +39,9 @@
     ordenesDeTrabajo,
     cargaPorTecnico,
     ticketsPorOrigen,
-    bandejaDe,
     bandejaDeRevision,
+    baseDeLaBandeja,
+    conteoPorBandeja,
     rotuloDeHallazgo,
     paginacion,
     ticketsDe,
@@ -302,7 +303,6 @@
   const esperandoIndicadores = $derived(indicadoresVivos === null);
 
   const kpis = $derived(kpisDelTablero(indicadoresVivos?.datos, leidas));
-  const donut = $derived(hallazgosPorTipo(leidas));
   const barras = $derived(estadoDeCasos(indicadoresVivos?.datos));
   const ordenes = $derived(ordenesDeTrabajo(indicadoresVivos?.datos));
   const tecnicos = $derived(cargaPorTecnico(capacidadViva?.personas));
@@ -447,6 +447,12 @@
 
   const pag = $derived(paginacion(bandeja.length, nPagina, POR_PAGINA));
 
+  //  EL DONUT Y EL SELECTOR DE TIPO CUENTAN LO QUE LA TABLA LISTA  --  19/10/2026.
+  //  Contaban las 200 que llegan --el tope del backend, con decididas, casos
+  //  cerrados y desincronizaciones-- al lado de una tabla de 15.
+  const enLaBandeja = $derived(baseDeLaBandeja(propuestas, filtroEstado, verDesincronizados));
+  const donut = $derived(hallazgosPorTipo(leidas ? enLaBandeja : null));
+
   //  CUANTOS TICKETS SON  --  19/10/2026. La bandeja lista PROPUESTAS, y un
   //  ticket puede tener dos (caso antiguo + sin diagnostico). Medido en
   //  produccion: 12 filas, 8 tickets. Sin decirlo, el numero no se puede
@@ -590,12 +596,9 @@
     //  Se cuenta con la MISMA funcion que clasifica, una pasada y sin restas.
     //  Una propuesta que no cae en ninguna bandeja no se cuenta en ninguna --
     //  ni siquiera en «Todas», que es la union de las dos y no el total.
-    const cuenta = { pendientes: 0, decididas: 0 };
-    for (const p of propuestas) {
-      const b = bandejaDe(p);
-      if (b) cuenta[b] += 1;
-    }
-    return { ...cuenta, '': cuenta.pendientes + cuenta.decididas };
+    //  Y con la regla de las desincronizaciones, como la tabla (19/10/2026):
+    //  con 'bandejaDe' a secas decia «Pendientes (61)» sobre una tabla de 15.
+    return conteoPorBandeja(propuestas, verDesincronizados);
   });
 
   /**
@@ -607,7 +610,7 @@
    * anuncia.
    */
   const conteoPorNivel = $derived.by(() => {
-    const base = bandejaDeRevision(propuestas, { estado: filtroEstado });
+    const base = baseDeLaBandeja(propuestas, filtroEstado, verDesincronizados);
     /** @type {Record<string, number>} */
     const cuenta = {};
     for (const p of base) cuenta[p.nivel.texto] = (cuenta[p.nivel.texto] ?? 0) + 1;
@@ -648,7 +651,7 @@
   const porSenal = $derived.by(() => {
     /** @type {Map<string, {etiqueta: string, n: number}>} */
     const cuenta = new Map();
-    for (const p of propuestas) {
+    for (const p of enLaBandeja) {
       const previo = cuenta.get(p.tipo_senal);
       cuenta.set(p.tipo_senal, { etiqueta: p.tipo_senal_display, n: (previo?.n ?? 0) + 1 });
     }
@@ -1331,7 +1334,11 @@
           <div class="snoc-grafico">
             <h2 class="snoc-grafico-titulo">
               <span class="snoc-icono snoc-primario" style="font-size:15px;">donut_small</span>
-              Hallazgos por tipo
+              {filtroEstado === 'pendientes'
+                ? 'Pendientes'
+                : filtroEstado === 'decididas'
+                  ? 'Ya decididas'
+                  : 'Todas'} por tipo
             </h2>
             {#if donut.disponible}
               <div class="snoc-grafico-cuerpo">
@@ -1374,6 +1381,9 @@
                 {#if data.hallazgos.error}
                   <span class="snoc-hueco-rotulo">Sin dato</span>
                   <p class="snoc-hueco-motivo">{data.hallazgos.error.mensaje}</p>
+                {:else if propuestas.length > 0}
+                  <span class="snoc-hueco-rotulo">Nada en esta bandeja</span>
+                  <p class="snoc-hueco-motivo">Ninguna propuesta cae en la bandeja elegida abajo.</p>
                 {:else}
                   <span class="snoc-hueco-rotulo">Sin propuestas</span>
                   <p class="snoc-hueco-motivo">
@@ -1525,6 +1535,14 @@
                       · de <strong>{sobreLaBandeja.tickets}</strong> {sobreLaBandeja.palabra}
                     {/if}
                   </span>
+                  <!-- EL TOPE SE DICE (19/10/2026): el backend manda 200 y lo que
+                       espera decision va primero; lo demas puede quedar afuera. -->
+                  {#if data.hallazgos.truncado}
+                    <span class="snoc-body-sm snoc-secundario">
+                      · se cargaron {propuestas.length} de {data.hallazgos.count}: las que esperan
+                      decisión van primero, y «Ya decididas» puede quedar corta
+                    </span>
+                  {/if}
                 {/if}
               </div>
             </div>
@@ -1613,7 +1631,7 @@
                 value={filtro ?? ''}
                 onchange={(e) => (filtro = e.currentTarget.value || null)}
               >
-                <option value="">Todos los tipos ({propuestas.length})</option>
+                <option value="">Todos los tipos ({enLaBandeja.length})</option>
                 {#each porSenal as [clave, info] (clave)}
                   <option value={clave}>{rotuloDeHallazgo(clave, info.etiqueta)} ({info.n})</option>
                 {/each}
