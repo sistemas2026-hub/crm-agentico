@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """Configuración del panel de administración Django para el dominio Campo."""
 
+from django import forms
 from django.contrib import admin
 from django.utils.html import format_html
+
+from campo.labores import labor_valida
 
 from campo.models import (
     AsignacionTrabajo,
@@ -235,8 +238,31 @@ class OrdenTrabajoAdmin(admin.ModelAdmin):
         return obj.origen_sistema.upper()
 
 
+class WorkTypeAdminForm(forms.ModelForm):
+    """La labor de una plantilla, validada como en el resto del sistema.
+
+    Hasta el 20/10/2026 la validaba el `choices` del campo. Sin el (las labores
+    son de cada empresa), el admin aceptaba cualquier texto, y un error de
+    tipeo dejaba las ordenes de esa plantilla sin cuadrilla (auditor
+    independiente, Fase 1 de labores propias).
+    """
+
+    class Meta:
+        model = WorkType
+        fields = "__all__"
+
+    def clean(self):
+        datos = super().clean()
+        labor = datos.get("labor") or ""
+        org = datos.get("org") or self.instance.org_id
+        if labor and org and not labor_valida(org, labor):
+            self.add_error("labor", f"'{labor}' no es una labor activa de esta empresa.")
+        return datos
+
+
 @admin.register(WorkType)
 class WorkTypeAdmin(admin.ModelAdmin):
+    form = WorkTypeAdminForm
     list_display = ("codigo", "nombre", "org", "activo", "created_at")
     list_filter = ("activo", "org")
     search_fields = ("codigo", "nombre")

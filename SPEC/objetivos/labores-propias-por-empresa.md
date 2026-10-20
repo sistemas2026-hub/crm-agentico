@@ -1,6 +1,7 @@
 # Objetivo · Labores propias por empresa, cada una con sus asuntos
 
-> Abierto el 20/10/2026. Estado: **abierto** — Fase 1 sin empezar.
+> Abierto el 20/10/2026. Estado: **abierto** — Fase 1 construida y auditada,
+> **sin desplegar** (falta 1.7, que corre el usuario, y su permiso de push).
 
 Pedido del usuario, textual: «coloca que se pueda crear labor y al momento de
 crearla uno le asigna los asuntos que cubre esa labor».
@@ -70,7 +71,7 @@ Postgres efímero en la red `wt-cerebro-prod_default`, rol `crm_t`
 | 1.4 | `python manage.py makemigrations campo --check --dry-run` | `No changes detected in app 'campo'` |
 | 1.5 | `grep -rnE "in dict\((WorkType\|JornadaDeCuadrilla)\.LABORES\)\|validas = dict\(" django-crm/backend --include=*.py \| grep -v tests/` | 0 líneas: `labor_valida` es la única validación |
 | 1.6 | Regresión `python -m pytest campo operaciones cases -q --no-cov` | los mismos rojos que origin, medidos al empezar con la misma receta — lista pegada |
-| 1.7 | Consulta de solo lectura **en producción** (la corre el usuario) antes del deploy de F1 | salida pegada: 0 choques de asuntos normalizados por empresa; plantillas sin labor con asuntos = 0 (si no, se resuelven antes) |
+| 1.7 | Consulta de solo lectura **en producción** (la corre el usuario) antes del deploy de F1 | salida pegada: 0 choques de asuntos normalizados por empresa; plantillas sin labor con asuntos = 0 (si no, se resuelven antes). **Cómo**: `informe_de_labores` todavía no está en la imagen de producción, así que va como `python manage.py shell` en el backend desplegado con el mismo cálculo. **Nunca** levantar el backend del worktree contra la base de producción: su entrypoint corre `migrate` |
 | 1.8 | `auditor-independiente` corrió sobre F1 | hallazgos resueltos o anotados con motivo en la bitácora |
 
 ### F2 — pantalla y regla D2
@@ -83,6 +84,8 @@ Postgres efímero en la red `wt-cerebro-prod_default`, rol `crm_t`
 | 2.4 | `npx svelte-check --output machine \| grep COMPLETED` desde el worktree sin contenedor | errores ≤ los de origin al empezar (161 el 20/10) |
 | 2.5 | `npx vite build` | sin error |
 | 2.6 | `revisor-de-pii` y `auditor-independiente` corrieron sobre F2 | hallazgos resueltos o anotados |
+| 2.7 | **`AsuntoDeLabor` no queda como foto de la siembra** (auditor de F1): todo camino que cambia `WorkType.asuntos` o `WorkType.labor` mantiene D2 contra la tabla — también `bulk_create`/`update()`, que se saltean `save()` y por lo tanto `normalizado` | una prueba por camino; una mutación que deja de sincronizar en cada uno la deja en rojo |
+| 2.8 | Crear una labor propia **siembra antes** las 3 de fábrica (auditor de F1): con filas parciales, `labor_valida` rechazaría `correctivo` | prueba: empresa sin filas → crear una propia → las 4 válidas |
 
 ### F3 — el asunto decide la labor
 
@@ -99,7 +102,7 @@ Postgres efímero en la red `wt-cerebro-prod_default`, rol `crm_t`
 | # | Evidencia | Cómo se comprueba |
 |---|---|---|
 | 4.1 | `grep -rnE "\bLABORES\b\|nombres_de_labor" django-crm/backend django-crm/frontend/src --include=*.py --include=*.js --include=*.svelte \| grep -v "migrations/\|tests/\|\.test\."` | 0 líneas |
-| 4.2 | Antes del push, el usuario comprueba en producción (solo lectura) que `Labor.nombre` refleja `nombres_de_labor` en cada empresa | salida pegada |
+| 4.2 | Antes del push, el usuario comprueba en producción (solo lectura) que **toda empresa con `nombres_de_labor` no vacío tiene sus filas en `campo_labor`** | salida pegada: 0 empresas sin filas. *Reescrito el 20/10 (auditor de F1)*: el criterio viejo pedía que `Labor.nombre` reflejara la columna, y desde F1 la columna queda congelada mientras `Labor.nombre` cambia — se contradecían. Lo que se pierde al borrar la columna es el nombre de una empresa que **nunca** se sembró, y eso es lo que se mide |
 | 4.3 | 1.4 y 1.6 otra vez | igual que en F1 |
 
 ### Cierre
@@ -142,7 +145,7 @@ Devuelto por el `orquestador` (20/10/2026).
 | Agente | Para qué | Estado |
 |---|---|---|
 | `arquitecto-dexter` | Dónde vive cada pieza, plan por fases | **corrió** (20/10) |
-| `auditor-independiente` | F1 (sin cambio de conducta, siembra completa, mutaciones), F2 («en uso», un 4.º camino que rompa D2, capa servidor, prioridad de una labor nueva), F3 (orden de fuentes, asunto contra la skill wisphub-api, labor dada de baja, `mapa_de_texto`, pruebas de las correcciones) | pendiente |
+| `auditor-independiente` | F1 (sin cambio de conducta, siembra completa, mutaciones), F2 («en uso», un 4.º camino que rompa D2, capa servidor, prioridad de una labor nueva), F3 (orden de fuentes, asunto contra la skill wisphub-api, labor dada de baja, `mapa_de_texto`, pruebas de las correcciones) | **corrió sobre F1** (20/10, ver bitácora); F2 y F3 pendientes |
 | `revisor-de-pii` | F2 (de dónde salen los asuntos, qué queda en `Activity`/logs, qué nombra el bloqueo), F3 (el `porque` y el informe sin asuntos crudos) | pendiente |
 | `auditor-de-frontera` | F3, solo si se cumple la condición de 3.4 | se decide en F3 |
 | `guardia-de-release` | Antes de cada push: migración de datos al desplegar (rol, todas las empresas, `unique` contra datos reales), RemoveField en F4 | pendiente |
@@ -160,4 +163,7 @@ Devuelto por el `orquestador` (20/10/2026).
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
-| 20/10/2026 | Ficha abierta. Plan de `arquitecto-dexter` y de `orquestador`. Decisiones D1–D8 del usuario | Todo F1 | este commit |
+| 20/10/2026 | Ficha abierta. Plan de `arquitecto-dexter` y de `orquestador`. Decisiones D1–D8 del usuario | Todo F1 | `b37c0a5a` |
+| 20/10/2026 | **F1 construida.** `campo/labores.py` (Labor, AsuntoDeLabor, `labores_de`, `labor_valida`, siembra), migración `0036` que siembra las 3 en toda empresa, `choices=` quitado sin cambiar valores, comando `informe_de_labores`. Medido: 1.1 (24 → 33 passed tras la auditoría), 1.2 (las 2 mutaciones de la ficha, 6 y 3 rojos), 1.3, 1.4 (`No changes detected`), 1.5 (0 líneas), 1.6 (mismos 106 rojos que origin; passed 4186 → 4202), informe antes/después en base local | 1.7 en producción; push | `a1c0f528` |
+| 20/10/2026 | **Auditoría de F1 (`auditor-independiente`), ocho hallazgos.** Resueltos en código, cada uno con prueba y mutación que la prueba mata (9 de 9): (1) 4 de los 6 lugares que validan no tenían prueba con una labor propia → `test_g1`–`g3`; (3) `" correctivo "` pasaba la validación y quedaba guardado con espacios → comparación exacta, `test_g4`/`g5`; (4) `labor_nombre` de las jornadas ahora es el de la empresa (cambio querido) → afirmado en `test_g1`; (5) el admin de Django aceptaba cualquier labor → formulario con `labor_valida`, `test_g6`; (6) el PUT de nombres pasó a tocar solo los que venían → vuelve a reemplazar la tabla entera, `test_g7`; y el worker de Celery puede leer antes de que `migrate` cree la tabla → `_filas` cae a las de fábrica con savepoint, `test_g8`. **Anotados**: (2) `AsuntoDeLabor` es una foto de la siembra → criterio 2.7; filas parciales → 2.8; (7) 4.2 contradecía el diseño → reescrito; (8) el informe no está en producción antes del deploy → procedimiento en 1.7 | 1.6 otra vez sobre el arreglo; push | este commit |
+| 20/10/2026 | **1.7 en producción** (la corrió el usuario, solo lectura, `manage.py shell` en el backend desplegado): 8 empresas, `TOTAL choques: 0 - plantillas sin labor con asuntos: 0`, ninguna con `nombres_de_labor` propios → la siembra les pone los de fábrica | push | — |

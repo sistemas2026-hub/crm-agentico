@@ -1052,8 +1052,11 @@ class ConfiguracionDeRepartoView(APIView):
                     {"detail": "Los nombres de las labores tienen una labor "
                                "que no existe."},
                     status=status.HTTP_400_BAD_REQUEST)
-            for labor, nombre in pedido.items():
-                nombre = " ".join(nombre.split())
+            #  LA TABLA ENTERA, como antes de la Fase 1: la que no viene vuelve
+            #  al de fabrica. Tocar solo las que vienen cambiaba lo que un PUT
+            #  parcial significaba (auditor independiente, 20/10/2026).
+            for labor in NOMBRE_DE_FABRICA:
+                nombre = " ".join(str(pedido.get(labor) or "").split())
                 if len(nombre) > MAX_NOMBRE_DE_LABOR:
                     return Response(
                         {"detail": f"El nombre de una labor pasa de "

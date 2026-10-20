@@ -34,7 +34,7 @@ con los mismos codigos y los nombres que la empresa ya les habia puesto.
 
 from __future__ import annotations
 
-from django.db import IntegrityError, models, transaction
+from django.db import DatabaseError, IntegrityError, models, transaction
 
 from common.base import BaseModel
 from common.models import Org
@@ -132,6 +132,24 @@ def _nombres_viejos(org) -> dict:
     return propios if isinstance(propios, dict) else {}
 
 
+def _filas(org):
+    """(codigo, nombre, activa) de la empresa, o None si la tabla no existe.
+
+    LA TABLA PUEDE NO EXISTIR TODAVIA (auditor independiente, 20/10/2026): en
+    produccion el worker de Celery no espera al backend, y puede correr este
+    codigo antes de que `migrate` cree `campo_labor`. Sin esto, el armado de
+    la madrugada reventaria con ProgrammingError mientras tanto -- y para
+    siempre si `migrate` fallara. Se trata igual que "sin filas": las de
+    fabrica. El savepoint deja la transaccion de quien llama usable.
+    """
+    try:
+        with transaction.atomic():
+            return list(Labor.objects.filter(org=org)
+                        .values_list("codigo", "nombre", "activa"))
+    except DatabaseError:
+        return None
+
+
 def labores_de(org, *, incluir_inactivas: bool = False) -> list[dict]:
     """Las labores de esta empresa: [{"id": codigo, "texto": nombre}].
 
@@ -143,8 +161,7 @@ def labores_de(org, *, incluir_inactivas: bool = False) -> list[dict]:
     tenia, SIN ESCRIBIR: leer no tiene por que crear nada, y una lista vacia
     haria que toda validacion rechazara y que el ciclo de la madrugada fallara.
     """
-    filas = list(Labor.objects.filter(org=org)
-                 .values_list("codigo", "nombre", "activa"))
+    filas = _filas(org)
     if not filas:
         viejos = _nombres_viejos(org)
         return [{"id": c, "texto": str(viejos.get(c) or "").strip() or n}
@@ -161,14 +178,19 @@ def labor_valida(org, codigo) -> bool:
     cuadrillas_views, una en plantillas, una en `labor_de_cada_grupo`) leian
     las tuplas fijas, y una labor creada por la empresa no habria pasado por
     ninguna. Vacio no es una labor: quien acepta «sin labor» lo dice aparte.
+
+    COMPARA EXACTO, sin limpiar espacios: quien llama guarda el valor tal como
+    lo paso, y ' correctivo ' validado como 'correctivo' quedaria guardado con
+    los espacios y el reparto no lo emparejaria (auditor independiente,
+    20/10/2026; origin lo rechazaba, y lo sigue rechazando).
     """
-    codigo = str(codigo or "").strip()
-    if not codigo:
+    codigo = codigo if isinstance(codigo, str) else str(codigo or "")
+    if not codigo.strip():
         return False
-    filas = Labor.objects.filter(org=org)
-    if not filas.exists():
+    filas = _filas(org)
+    if not filas:
         return codigo in NOMBRE_DE_FABRICA
-    return filas.filter(codigo=codigo, activa=True).exists()
+    return any(c == codigo and activa for c, _, activa in filas)
 
 
 def nombres_de_labor(org) -> dict:

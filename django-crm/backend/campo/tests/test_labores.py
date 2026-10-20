@@ -19,6 +19,9 @@ EFECTO:
      renombre del 20/10 sigue funcionando y ahora escribe `Labor.nombre`
   E  un asunto va en una sola labor: lo garantiza la base
   F  el informe es de solo lectura
+  G  lo que encontro el auditor independiente (20/10/2026): los cuatro
+     lugares que validaban sin prueba, el codigo con espacios, el admin, el
+     renombre parcial y la tabla que todavia no existe
 
     pytest campo/tests/test_labores.py
 ================================================================================
@@ -236,3 +239,137 @@ def test_f_el_informe_es_de_solo_lectura(org_a, capsys):
     assert "plantillas SIN labor con asuntos: 1" in salida
     assert "TOTAL choques: 0" in salida
     assert not L.Labor.objects.filter(org=org_a).exists()
+
+
+# ---------------------------------------------------------------------------
+# G · lo que encontro el auditor independiente
+# ---------------------------------------------------------------------------
+#  Las pruebas de C cubrian dos de los seis lugares que validan. Una labor
+#  creada por la empresa que uno de los otros cuatro rechazara seguiria en
+#  verde: cada uno se prueba aca con una labor PROPIA.
+
+JORNADA = "/api/campo/cuadrillas/jornada/"
+PLANTILLAS = "/api/campo/plantillas/"
+DEFINICION = {"campos": [{"titulo": "Que se hizo", "tipo": "texto"}],
+              "evidencias": [{"titulo": "Trabajo terminado"}]}
+
+
+def _propias(org):
+    L.sembrar_de_fabrica(org)
+    L.Labor.objects.create(org=org, codigo="traslados", nombre="Traslados")
+    L.Labor.objects.create(org=org, codigo="vieja", nombre="Vieja", activa=False)
+
+
+def test_g1_la_jornada_acepta_una_labor_propia_y_muestra_su_nombre(
+        admin_client, org_a):
+    _propias(org_a)
+    L.renombrar_de_fabrica(org_a, "correctivo", "Correctivos y traslados")
+    c = Cuadrilla.objects.create(org=org_a, nombre="Cuadrilla #9")
+    ok = admin_client.post(JORNADA, {"cuadrilla": str(c.id), "fecha": "2026-10-21",
+                                     "labor": "traslados", "integrantes": []},
+                           format="json")
+    mal = admin_client.post(JORNADA, {"cuadrilla": str(c.id), "fecha": "2026-10-22",
+                                      "labor": "vieja", "integrantes": []},
+                            format="json")
+    assert ok.status_code in (200, 201), ok.content
+    assert mal.status_code == 400, mal.content
+    assert ok.json()["labor_nombre"] == "Traslados"
+
+    #  El nombre que se ve es el de la EMPRESA, tambien en la lista: antes
+    #  salia de la tupla fija y decia «Correctivo» aunque se hubiera cambiado.
+    admin_client.post(JORNADA, {"cuadrilla": str(c.id), "fecha": "2026-10-22",
+                                "labor": "correctivo", "integrantes": []},
+                      format="json")
+    lista = admin_client.get(JORNADA, {"fecha": "2026-10-22"}).json()["jornadas"]
+    assert [j["labor_nombre"] for j in lista] == ["Correctivos y traslados"]
+
+
+def test_g2_la_tabla_de_grupos_acepta_una_propia_y_el_reparto_la_usa(
+        admin_client, org_a):
+    _propias(org_a)
+    r = admin_client.put(CONFIG, {**LO_DE_SIEMPRE, "labor_por_grupo": {
+        "falla_de_servicio": "traslados"}}, format="json")
+    assert r.status_code == 200, r.content
+    from campo.cuadrillas import labor_de_cada_grupo
+    assert labor_de_cada_grupo(org_a)["falla_de_servicio"] == "traslados"
+
+    #  Dada de baja despues de guardada: vuelve al de fabrica, no inclina
+    #  jornadas hacia una labor que ya no sale.
+    L.Labor.objects.filter(org=org_a, codigo="traslados").update(activa=False)
+    assert labor_de_cada_grupo(org_a)["falla_de_servicio"] == \
+        ConfiguracionDeReparto.LABOR_POR_GRUPO_DE_FABRICA["falla_de_servicio"]
+
+
+def test_g3_la_plantilla_se_crea_y_publica_con_una_propia(admin_client, org_a):
+    _propias(org_a)
+    r = admin_client.post(PLANTILLAS, {"nombre": "Traslado", "labor": "traslados",
+                                       "definicion": DEFINICION}, format="json")
+    assert r.status_code == 201, r.content
+    tipo_id = r.json()["id"]
+    assert WorkType.objects.get(pk=tipo_id).labor == "traslados"
+
+    mal = admin_client.post(f"{PLANTILLAS}{tipo_id}/publicar/",
+                            {"definicion": DEFINICION, "labor": "vieja"},
+                            format="json")
+    assert mal.status_code == 400, mal.content
+    assert WorkType.objects.get(pk=tipo_id).labor == "traslados"
+
+
+@pytest.mark.parametrize("con_filas", [False, True], ids=["sin_filas", "sembrada"])
+def test_g4_un_codigo_con_espacios_no_es_la_labor(org_a, con_filas):
+    """Quien lo guarda tal cual (la tabla de grupos) dejaria ' correctivo '
+    escrito, y el reparto compara exacto: no emparejaria nunca."""
+    if con_filas:
+        L.sembrar_de_fabrica(org_a)
+    assert L.labor_valida(org_a, "correctivo")
+    assert not L.labor_valida(org_a, " correctivo ")
+    assert not L.labor_valida(org_a, "correctivo ")
+
+
+def test_g5_y_la_tabla_de_grupos_lo_rechaza(admin_client, org_a):
+    r = admin_client.put(CONFIG, {**LO_DE_SIEMPRE, "labor_por_grupo": {
+        "falla_de_servicio": " correctivo "}}, format="json")
+    assert r.status_code == 400, r.content
+
+
+def test_g6_el_admin_de_django_valida_la_labor(org_a):
+    from campo.admin import WorkTypeAdminForm
+    _propias(org_a)
+    tipo = _tipo(org_a, "traslado", "correctivo")
+    for labor, pasa in (("traslados", True), ("inventada", False),
+                        ("vieja", False), ("", True)):
+        form = WorkTypeAdminForm(instance=tipo, data={
+            "org": org_a.pk, "codigo": tipo.codigo, "nombre": tipo.nombre,
+            "labor": labor, "activo": True, "asuntos": "[]"})
+        form.is_valid()
+        assert ("labor" not in form.errors) is pasa, (labor, form.errors)
+
+
+def test_g7_el_renombre_reemplaza_la_tabla_entera(admin_client, org_a):
+    """Como antes de la Fase 1: el que no viene vuelve al de fabrica. Si no,
+    la pantalla mandaria «sin cambio» y el nombre viejo seguiria."""
+    admin_client.put(CONFIG, {**LO_DE_SIEMPRE, "nombres_de_labor": {
+        "correctivo": "Correctivos y traslados", "trabajos": "Retiros"}},
+        format="json")
+    r = admin_client.put(CONFIG, {**LO_DE_SIEMPRE, "nombres_de_labor": {
+        "correctivo": "Correctivos y traslados"}}, format="json")
+    assert r.json()["nombres_de_labor"] == {"correctivo": "Correctivos y traslados"}
+    assert L.Labor.objects.get(org=org_a, codigo="trabajos").nombre == "Trabajos"
+
+    #  Y sin la clave no se toca nada.
+    r = admin_client.put(CONFIG, LO_DE_SIEMPRE, format="json")
+    assert r.json()["nombres_de_labor"] == {"correctivo": "Correctivos y traslados"}
+
+
+def test_g8_sin_la_tabla_lee_las_de_fabrica_y_la_transaccion_sigue(org_a):
+    """El worker de Celery no espera a `migrate`: puede leer antes de que
+    `campo_labor` exista. Tiene que caer a las de fabrica Y dejar usable la
+    transaccion de quien llamo (si no, lo siguiente del armado revienta con
+    «current transaction is aborted»)."""
+    from django.db import connection
+    with connection.cursor() as cur:
+        cur.execute("ALTER TABLE campo_labor RENAME TO campo_labor_ausente")
+    assert L.labores_de(org_a) == DE_FABRICA
+    assert L.labor_valida(org_a, "correctivo")
+    assert not L.labor_valida(org_a, "traslados")
+    assert WorkType.objects.filter(org=org_a).count() == 0
