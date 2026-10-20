@@ -304,6 +304,18 @@ menos no da error: responde 200 y no cambia lo que falta.
 
 ## Trampas que ya costaron tiempo
 
+**`GET /api/tickets/{id}/` en paralelo devuelve 429.** Medido en produccion el
+20/10/2026: 808 tickets releidos con 6 lecturas a la vez dieron **80 con
+`429 Too Many Requests`** (~10 %). La misma relectura de a una, la del reloj,
+no los da. La API no manda cabecera de cupo que se haya visto. Para releer
+mucho, de a una o pocas; y para enterarse de cierres, no releer ticket por
+ticket: buscar un filtro del listado (por estado y fecha de cierre) y
+verificarlo con el metodo del valor imposible antes de usarlo.
+
+**Un ticket borrado en WispHub responde 404 por su numero**, y su caso en
+Dexter queda abierto para siempre: nada lo cierra solo. El mismo 20/10/2026,
+2 de 808 abiertos (95549 y 95778). Se cierran a mano.
+
 **`estado_instalacion` y `costo_instalacion` NO sirven para detectar una
 instalacion desde `/api/clientes/`.** Esta misma skill documentaba que
 `?instalacion` "habilita" esos campos, y eso vale para ESCRIBIR, no para LEER.
