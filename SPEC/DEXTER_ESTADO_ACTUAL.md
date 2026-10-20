@@ -336,6 +336,39 @@ labor), no publicó nada solo, y dejó la propuesta para que una persona la
 publique. Que es exactamente el diseño.
 
 
+
+#### Dos cosas que aparecieron el 20/10 y no estaban escritas
+
+**1 · Una copia vieja del código NO PUEDE LEER la config de producción.**
+
+Pasó al correr `cli/evaluar.py --base` con el árbol trece commits atrás:
+
+```
+nucleo.config.fuente.ErrorConfig: tenant_config[rapilink]:
+  - importacion_tickets.reconciliar_por_vuelta: Extra inputs are not permitted
+```
+
+Otra sesión agregó ese campo al esquema y cargó la config; esta copia no lo
+conocía. **Falló cerrado y con el nombre del campo**, que es lo correcto.
+
+Lo que vale anotar es la **asimetría**: `cargar_config` tiene una guarda
+explícita para «esta copia es más vieja que producción» del lado de
+**escribir** —se niega y lo explica—. Del lado de **leer** no hay guarda: hay
+un `ErrorConfig` de Pydantic que resulta legible por suerte, no por diseño.
+
+Y la consecuencia operativa: **si una copia vieja se desplegara, el motor no
+podría leer la config y dejaría de atender.** Hoy no puede pasar porque el
+despliegue va por la misma rama que el esquema, pero lo que lo impide es el
+orden de los pushes, no una garantía.
+
+**2 · Los casos dorados ya no son 56, son 90.**
+
+CLAUDE.md §6 y §11.3 dicen «los 56 casos dorados» en varios lugares, y la
+corrida del 20/10 reporta `86/90 casos OK (96%)`. El set creció y el número
+quedó viejo en la documentación. Es la clase de dato que envejece y que §6
+pide medir en vez de recordar: corregir al pasar, no como tarea aparte (D10).
+
+
 **LO QUE ESTE OBJETIVO DEJA APRENDIDO, más allá de los arreglos**
 
 1. **Cinco de los seis defectos vivían en el mismo salto** —backend → capa
