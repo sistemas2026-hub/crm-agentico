@@ -663,7 +663,7 @@ def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
         "conciliacion": {"activa": conf.conciliar_meses > 0,
                          "abiertos_en_proveedor": None, "sospechosos": 0,
                          "eliminados": 0, "transitorios": 0,
-                         "eliminados_retenidos": 0},
+                         "eliminados_pospuestos": 0, "lista_descartada": False},
     }
 
     # -----------------------------------------------------------------------
@@ -678,15 +678,27 @@ def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
     abiertos = None
     try:
         areas = persistencia.areas_de_colaboradores(tenant)
+        tickets = None
         if conf.conciliar_meses > 0:
             #  LA CONCILIACION: todos los abiertos, no solo los de la ventana.
             #  El descubrimiento importa los que falten y la reconciliacion
             #  relee primero los que ya no estan abiertos alla.
-            tickets = listar_abiertos(config, tenant)
-            abiertos = {str(t.get("id_ticket")) for t in tickets
-                        if t.get("id_ticket")}
-            resumen["conciliacion"]["abiertos_en_proveedor"] = len(abiertos)
-        else:
+            try:
+                tickets = listar_abiertos(config, tenant)
+                abiertos = {str(t.get("id_ticket")) for t in tickets
+                            if t.get("id_ticket")}
+                resumen["conciliacion"]["abiertos_en_proveedor"] = len(abiertos)
+            except Exception as e:                          # noqa: BLE001
+                #  SI LA LISTA FALLA, SE IMPORTA IGUAL (auditor independiente,
+                #  20/10/2026): con un tramo viejo que da 500 siempre, o un
+                #  429 en cualquiera de las ~30 consultas, se perdia ademas la
+                #  importacion de los tickets nuevos. Esta vuelta no concilia;
+                #  importa con la ventana de siempre.
+                tickets = None
+                resumen["conciliacion"]["error"] = type(e).__name__
+                registrar("importacion", "la lista de abiertos fallo: esta "
+                          "vuelta no concilia", tenant=tenant, error=e)
+        if tickets is None:
             tickets = listar_tickets(config, tenant, desde, hasta)
         ids = [str(t.get("id_ticket")) for t in tickets if t.get("id_ticket")]
         conocidos, registro = tickets_conocidos(config, tenant, ids)
@@ -756,6 +768,14 @@ def _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios,
     """
     try:
         casos = casos_de_este_proveedor(config, tenant)
+        if abiertos is not None and not imp.lista_creible(conf, casos, abiertos):
+            #  UNA LISTA QUE NO CUBRE NI LA MITAD no es la lista: no se sospecha
+            #  ni se elimina con ella (auditor independiente, 20/10/2026).
+            registrar("importacion", "la lista de abiertos no es creible: "
+                      "esta vuelta no concilia", tenant=tenant,
+                      en_la_lista=len(abiertos))
+            resumen["conciliacion"]["lista_descartada"] = True
+            abiertos = None
         cambios = imp.reconciliar(
             config, casos,
             leer_ticket=lambda t: leer_ticket(config, tenant, t),
@@ -779,17 +799,17 @@ def _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios,
             == imp.ESTADO_ELIMINADO)
         con["transitorios"] = sum(
             1 for c in cambios if getattr(c, "transitorio", False))
-        con["eliminados_retenidos"] = sum(
+        con["eliminados_pospuestos"] = sum(
             1 for c in cambios
-            if "eliminacion retenida" in (getattr(c, "error", "") or ""))
-        if con["eliminados_retenidos"]:
-            #  LA ALARMA: no son borrados, es el proveedor contestando 404 a
-            #  todo. Nada se cerro; alguien tiene que mirar la credencial o la
-            #  URL del proveedor.
+            if "eliminacion pospuesta" in (getattr(c, "error", "") or ""))
+        if con["eliminados_pospuestos"]:
+            #  Mas borrados que el tope en una vuelta: se declararon los mas
+            #  viejos y el resto sigue en la proxima. Queda dicho por si no
+            #  son borrados reales.
             registrar("importacion",
-                      "demasiados 404 en una vuelta: no se da por eliminado "
-                      "ninguno", tenant=tenant,
-                      retenidos=con["eliminados_retenidos"])
+                      "mas tickets eliminados que el tope de la vuelta: el "
+                      "resto sigue en la proxima", tenant=tenant,
+                      pospuestos=con["eliminados_pospuestos"])
         rec["errores_lectura"] = sum(1 for c in cambios if c.error)
         rec["con_diferencia"] = sum(1 for c in cambios if c.hay_diferencia)
         if aplicar_cambios and cambios:

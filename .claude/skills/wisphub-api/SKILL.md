@@ -322,7 +322,9 @@ conciliacion del motor (`importacion_io.listar_abiertos`).
 
 **Un ticket borrado en WispHub responde 404 por su numero**, y su caso en
 Dexter queda abierto para siempre: nada lo cierra solo. El mismo 20/10/2026,
-2 de 808 abiertos (95549 y 95778). Se cierran a mano.
+2 de 808 abiertos (95549 y 95778). Ese dia se cerraron a mano; desde la
+conciliacion del motor (`conciliar_meses`), dos 404 separados por una hora lo
+dejan "Eliminado" y el Supervisor lo cierra solo.
 
 **`estado_instalacion` y `costo_instalacion` NO sirven para detectar una
 instalacion desde `/api/clientes/`.** Esta misma skill documentaba que

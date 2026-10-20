@@ -912,6 +912,35 @@ def tramos_de_conciliacion(meses: int,
     return tramos
 
 
+#: Una lista de abiertos que no contiene ni la mitad de los casos abiertos de
+#: Dexter no es la lista: es una respuesta rota (un 200 vacio, un formato
+#: nuevo). Medido el 20/10/2026: 788 abiertos alla, ~800 aca, coinciden casi
+#: todos. Con pocos casos no se mide el porcentaje: alcanza con que no venga
+#: vacia (auditor independiente, 20/10/2026).
+COBERTURA_MINIMA = 0.5
+MINIMO_PARA_MEDIR_COBERTURA = 20
+
+
+def lista_creible(config_imp, casos: list[dict], abiertos: set | None) -> bool:
+    """Si la lista de abiertos del proveedor se puede usar para sospechar."""
+    if abiertos is None:
+        return False
+    aca = [str(c.get("external_ticket_id") or "") for c in casos
+           if c.get("status") in config_imp.reconciliar_estados
+           and c.get("external_ticket_id")]
+    if not aca:
+        return True
+    if len(aca) < MINIMO_PARA_MEDIR_COBERTURA:
+        return bool(abiertos)
+    return sum(1 for t in aca if t in abiertos) >= COBERTURA_MINIMA * len(aca)
+
+
+#: Lo que el proveedor ya dijo que esta cerrado o que ya no existe. Esos casos
+#: no se releen primero: Dexter ya sabe lo que son y los cierra el Supervisor.
+#: Releerlos cada hora era trafico para nada (auditor independiente).
+YA_SABIDOS_CERRADOS = ("cerrado", "eliminado")
+
+
 def sospechosos_de(config_imp, casos: list[dict],
                    abiertos_en_proveedor: set | None) -> list[dict]:
     """
@@ -924,7 +953,8 @@ def sospechosos_de(config_imp, casos: list[dict],
         return []
     return [c for c in casos
             if c.get("status") in config_imp.reconciliar_estados
-            and str(c.get("external_ticket_id") or "") not in abiertos_en_proveedor]
+            and str(c.get("external_ticket_id") or "") not in abiertos_en_proveedor
+            and normalizar(c.get("external_status") or "") not in YA_SABIDOS_CERRADOS]
 
 
 def de_esta_vuelta(config_imp, casos: list[dict],
@@ -1111,26 +1141,35 @@ def reconciliar(config, casos: list[dict], *, leer_ticket,
         cambio.respuestas = leer_respuestas(t)
         cambios.append(cambio)
 
-    retener_eliminados_si_son_demasiados(cambios)
+    limitar_eliminados_por_vuelta(cambios)
     return cambios
 
 
-def retener_eliminados_si_son_demasiados(cambios: list) -> int:
+def limitar_eliminados_por_vuelta(cambios: list) -> int:
     """
-    Si una vuelta da mas de TOPE_ELIMINADOS_POR_VUELTA tickets por eliminados,
-    no se declara NINGUNO: eso no son borrados, es el proveedor contestando
-    404 a todo. La marca del primer 404 se conserva; la vuelta siguiente, con
-    el proveedor sano, lee bien y la limpia. Devuelve cuantos retuvo.
+    Una vuelta declara como mucho TOPE_ELIMINADOS_POR_VUELTA eliminados: los de
+    marca MAS VIEJA. Los demas conservan su marca y esperan la vuelta
+    siguiente. Devuelve cuantos quedaron para despues.
+
+    Hasta la auditoria del 20/10/2026 no declaraba NINGUNO si pasaban el tope,
+    y con mas de diez borrados reales quedaban retenidos para siempre: habia
+    que cerrarlos a mano, justo lo que el usuario pidio evitar. El 404 a todo
+    lo frena antes la lista: sin una lista entera y creible no se declara
+    nada ('puede_eliminar' y 'lista_creible').
     """
     declarados = [c for c in cambios
                   if c.despues.get("external_status") == ESTADO_ELIMINADO]
     if len(declarados) <= TOPE_ELIMINADOS_POR_VUELTA:
         return 0
-    for c in declarados:
+    lejos = datetime.max.replace(tzinfo=timezone.utc)
+    declarados.sort(key=lambda c: _desde_cuando_no_existe(
+        str(c.antes.get("external_fetch_error") or "")) or lejos)
+    para_despues = declarados[TOPE_ELIMINADOS_POR_VUELTA:]
+    for c in para_despues:
         c.despues = {}
-        c.error = (f"eliminacion retenida: {len(declarados)} en una vuelta, "
-                   f"mas que el tope de {TOPE_ELIMINADOS_POR_VUELTA}")
-    return len(declarados)
+        c.error = (f"eliminacion pospuesta: {len(declarados)} en una vuelta, "
+                   f"el tope es {TOPE_ELIMINADOS_POR_VUELTA}")
+    return len(para_despues)
 
 
 def resumen(veredictos: list[Veredicto]) -> dict:

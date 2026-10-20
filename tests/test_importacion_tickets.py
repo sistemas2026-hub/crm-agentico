@@ -1358,6 +1358,22 @@ _con = imp.de_esta_vuelta(_cfg_dos.importacion_tickets, _lote_c, _ahora_c,
 revisar(_ids_de(_con)[:2] == ["30", "40"] and len(_con) == 4,
         "los que ya no estan abiertos alla van primero, aunque se hayan leido "
         "recien, y fuera del tope", str(_ids_de(_con)))
+_ya_cerrado = {**_abierto_c("50", 0), "external_status": "Cerrado"}
+revisar("50" not in _ids_de(imp.sospechosos_de(
+            _cfg_dos.importacion_tickets, [_ya_cerrado], {"10"})),
+        "uno que Dexter ya sabe cerrado alla no se relee primero: lo cierra el "
+        "Supervisor, y releerlo cada hora era trafico para nada")
+
+_muchos = [{**_abierto_c(str(100 + i), 1)} for i in range(30)]
+revisar(not imp.lista_creible(_cfg_dos.importacion_tickets, _muchos, {"100", "101"})
+        and imp.lista_creible(_cfg_dos.importacion_tickets, _muchos,
+                              {str(100 + i) for i in range(20)}),
+        "una lista que no cubre ni la mitad de los abiertos de Dexter no es "
+        "creible; una que cubre la mayoria, si")
+revisar(not imp.lista_creible(_cfg_dos.importacion_tickets, _lote_c, set())
+        and imp.lista_creible(_cfg_dos.importacion_tickets, _lote_c, {"999"}),
+        "con pocos casos alcanza con que no venga vacia")
+
 _sin = imp.de_esta_vuelta(_cfg_dos.importacion_tickets, _lote_c, _ahora_c)
 revisar(_ids_de(_sin) == ["10", "20"],
         "sin la lista, la vuelta de siempre: los de lectura mas vieja, hasta el tope")
@@ -1412,15 +1428,22 @@ revisar(_releer(_marcado, _falla_con(404), _tarde,
         "tampoco si el ticket figura en la lista de abiertos: la lista y el "
         "detalle se contradicen")
 _masivo = imp.reconciliar(
-    cfg, [{**_marcado, "id": f"m-{i}", "external_ticket_id": f"9{i:04d}"}
+    cfg, [{**CASO, "id": f"m-{i}", "external_ticket_id": f"9{i:04d}",
+           "external_fetch_error":
+               f"{imp.MARCA_NO_EXISTE} {(_ahora_c - timedelta(minutes=i)).isoformat()}"}
           for i in range(imp.TOPE_ELIMINADOS_POR_VUELTA + 1)],
     leer_ticket=_falla_con(404), cuenta_api=CUENTA_API,
     registrados_por_dexter=set(), ahora=_tarde, todos=True,
     abiertos_en_proveedor=set())
-revisar(all(c.despues == {} for c in _masivo)
-        and all("retenida" in c.error for c in _masivo),
-        "si una vuelta da mas eliminados que el tope, no se declara ninguno",
-        "eso no son borrados: es el proveedor contestando 404 a todo")
+_declarados = [c.external_ticket_id for c in _masivo
+               if c.despues.get("external_status") == imp.ESTADO_ELIMINADO]
+_pospuestos = [c.external_ticket_id for c in _masivo if "pospuesta" in c.error]
+revisar(len(_declarados) == imp.TOPE_ELIMINADOS_POR_VUELTA
+        and _pospuestos == ["90000"],
+        "con mas eliminados que el tope se declaran los de marca mas vieja y el "
+        "resto sigue en la vuelta siguiente",
+        "antes no se declaraba ninguno y quedaban retenidos para siempre: "
+        f"declarados={len(_declarados)} pospuestos={_pospuestos}")
 _justo = imp.reconciliar(
     cfg, [{**_marcado, "id": f"j-{i}", "external_ticket_id": f"8{i:04d}"}
           for i in range(imp.TOPE_ELIMINADOS_POR_VUELTA)],
@@ -1492,6 +1515,14 @@ revisar(_leidos_b[:1] == ["30"],
 
 _parches["listar_abiertos"] = lambda config, tenant, ahora=None: (_ for _ in ()).throw(
     RuntimeError("502"))
+_ventana: list = []
+_importados: list = []
+_guardados["listar_tickets"] = io.listar_tickets
+_parches["listar_tickets"] = (
+    lambda config, tenant, desde, hasta, tope=5000: (_ventana.append(desde), [ticket(99)])[1])
+_parches["_importar"] = (
+    lambda config, tenant, tickets, *a, **k: _importados.append(
+        [str(t["id_ticket"]) for t in tickets]))
 _leidos_b.clear()
 for k, v in _parches.items():
     setattr(io, k, v)
@@ -1507,7 +1538,32 @@ revisar(_res["conciliacion"]["abiertos_en_proveedor"] is None
         and _res["reconciliacion"]["alcanzados"] == 1,
         "sin la lista entera no se sospecha de nadie, y la reconciliacion "
         "corre igual, con su tope de siempre", str(_res["conciliacion"]))
+revisar(_importados == [["99"]] and len(_ventana) == 1
+        and not _res["error_global"],
+        "y se importa igual con la ventana de siempre: que falle la lista no "
+        "le cuesta a nadie los tickets nuevos de esa hora",
+        f"importados={_importados} error_global={_res['error_global']!r}")
 
+
+#  Y UNA LISTA QUE NO CUBRE NI LA MITAD se descarta en el barrido mismo: no
+#  se sospecha de nadie con ella (auditor independiente, 20/10/2026).
+_parches["listar_abiertos"] = lambda config, tenant, ahora=None: [ticket(100)]
+_parches["casos_de_este_proveedor"] = (
+    lambda config, tenant: [_abierto_c(str(100 + i), 1) for i in range(30)])
+for k, v in _parches.items():
+    setattr(io, k, v)
+io.persistencia.areas_de_colaboradores = lambda tenant: {}
+try:
+    _res = io.barrido(_cfg_b, "t", aplicar_cambios=False)
+finally:
+    for k, v in _guardados.items():
+        setattr(io, k, v)
+    io.persistencia.areas_de_colaboradores = _areas_orig
+revisar(_res["conciliacion"]["lista_descartada"] is True
+        and _res["conciliacion"]["sospechosos"] == 0,
+        "el barrido descarta una lista que no cubre ni la mitad de los "
+        "abiertos de Dexter, y no sospecha de nadie con ella",
+        str(_res["conciliacion"]))
 
 print()
 if fallos:
