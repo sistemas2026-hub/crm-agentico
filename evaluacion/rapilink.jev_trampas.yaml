@@ -1,0 +1,273 @@
+# ============================================================================
+#  CORPUS DE TRAMPAS  --  sintetico, sin datos de nadie
+# ============================================================================
+#
+#  QUE PREGUNTA CONTESTA
+#  ---------------------
+#  Una sola, y no es "quien acierta mas":
+#
+#      cuando la informacion NO alcanza para decidir, el decisor se abstiene,
+#      o elige igual?
+#
+#  Esa es la capacidad que Dexter hoy no tiene. No es que decida mal con poca
+#  confianza: es que 'escalamiento.evaluar' NO TIENE campo de confianza. La
+#  salida no existe. Asi que en un caso ambiguo no devuelve "no se" -- devuelve
+#  una decision firme, y a veces otra distinta en la corrida siguiente (medido:
+#  7 y 9 de 88 casos con la entrada identica, 28/09/2026).
+#
+#  POR QUE ESTE CORPUS PUEDE IR A UN TERCERO Y EL REAL NO
+#  ------------------------------------------------------
+#  Porque no hay nadie adentro. Ninguna conversacion de aca ocurrio: estan
+#  escritas para ser ambiguas, no recolectadas. El gate legal de
+#  SPEC/objetivos/piloto-jev-sombra.md existe para las conversaciones de
+#  abonados de Rapilink, y ninguna de esas esta aca.
+#
+#  Eso NO se cree por esta linea. 'contiene_pii: false' de abajo es una
+#  DECLARACION, y una declaracion es justo la marca que destraba que CLAUDE.md
+#  9 dice que no hay que construir. El instrumento lo MIDE antes de mandar
+#  nada, y ademas solo puede mandar texto que paso esa medicion.
+#
+#  LA TRAMPA DE LA TRAMPA
+#  ----------------------
+#  Un corpus de solo trampas lo aprueba un decisor que se abstiene SIEMPRE, y
+#  un decisor asi no sirve para nada. Por eso aca hay dos clases mezcladas y el
+#  veredicto de cada una es opuesto:
+#
+#      tipo: abstenerse   la informacion no alcanza; elegir es adivinar
+#      tipo: decidir      la informacion alcanza; abstenerse es esconderse
+#
+#  Se miden las DOS. Abstenerse en un caso claro cuenta como error, igual que
+#  decidir en uno ambiguo.
+#
+#  LO QUE ESTE CORPUS NO PUEDE AFIRMAR
+#  -----------------------------------
+#  Que un decisor sea mejor que otro. Las conversaciones las escribi yo y el
+#  veredicto lo puse yo: medir acierto contra eso seria medir mi criterio. En
+#  los casos 'abstenerse' eso pesa menos --el veredicto no es "la respuesta
+#  correcta" sino "no hay una respuesta que se pueda sostener"-- pero no
+#  desaparece. Esto es un LABORATORIO DE CONDUCTA. Quien sirve de verdad son
+#  los casos reales de 'evaluacion/rapilink.etiquetas.yaml', que necesitan el
+#  veredicto de una persona que atienda esa cola.
+# ============================================================================
+
+origen: sintetico
+contiene_pii: false
+uso: laboratorio_jev
+
+casos:
+
+  # ------------------------------------------------------------------ TRAMPAS
+  # Cada una es ambigua entre etiquetas que el tenant declara de verdad. La
+  # ambiguedad no es de redaccion: es que faltan datos, y ningun dato del
+  # historial los trae.
+
+  - id: trampa_cancelar_que
+    mensajes:
+      - "quiero cancelar"
+    contexto: >-
+      'Cancelar' puede ser dar de baja el servicio, cancelar una solicitud que
+      ya hizo, o cancelar un cobro. Son tres colas distintas.
+    veredicto:
+      tipo: abstenerse
+      entre: [comercial, facturacion]
+      razon: no dice QUE cancela
+
+  - id: trampa_no_me_funciona
+    mensajes:
+      - "no me funciona"
+    contexto: >-
+      No dice que. Puede ser el internet, el televisor, o el boton de pago.
+    veredicto:
+      tipo: abstenerse
+      entre: [soporte_tecnico, facturacion]
+      razon: no dice que cosa no funciona
+
+  - id: trampa_ayuda_con_mi_servicio
+    mensajes:
+      - "necesito ayuda con mi servicio"
+    contexto: >-
+      El ejemplo de manual de un mensaje que no aporta nada: nombra el servicio
+      y nada mas.
+    veredicto:
+      tipo: abstenerse
+      entre: [soporte_tecnico, facturacion, comercial]
+      razon: no hay ningun dato para clasificar
+
+  - id: trampa_es_sobre_el_cobro
+    mensajes:
+      - "es sobre el cobro"
+    contexto: >-
+      Hablar del cobro puede ser una consulta (facturacion) o un reclamo
+      (queja), y esas dos van a colas distintas con prioridades distintas.
+    veredicto:
+      tipo: abstenerse
+      entre: [facturacion, queja]
+      razon: no se sabe si consulta o reclama
+
+  - id: trampa_quiero_cambiar
+    mensajes:
+      - "quiero cambiar"
+    contexto: >-
+      Cambiar de plan, cambiar la clave del wifi, cambiar el titular o cambiar
+      la direccion. La primera es comercial y la segunda es tecnica.
+    veredicto:
+      tipo: abstenerse
+      entre: [comercial, soporte_tecnico]
+      razon: no dice que cambia
+
+  - id: trampa_ya_hable_con_alguien
+    mensajes:
+      - "ya hable con alguien de esto"
+    contexto: >-
+      Puede ser el seguimiento tranquilo de un caso abierto, o el preambulo de
+      un reclamo por no haber sido atendido.
+    veredicto:
+      tipo: abstenerse
+      entre: [queja, soporte_tecnico]
+      razon: no dice como termino esa conversacion ni de que era
+
+  - id: trampa_esto_no_puede_seguir
+    mensajes:
+      - "esto no puede seguir asi"
+    contexto: >-
+      Tono de reclamo sin objeto. Tratarlo como queja formal cuando era un
+      desahogo dentro de un problema tecnico abre un caso que nadie pidio.
+    veredicto:
+      tipo: abstenerse
+      entre: [queja, soporte_tecnico]
+      razon: hay molestia pero no hay asunto
+
+  - id: trampa_me_iban_a_llamar
+    mensajes:
+      - "me dijeron que me iban a llamar y no paso nada"
+    contexto: >-
+      Incumplimiento de un compromiso. Es queja por el incumplimiento, o
+      seguimiento del asunto original, que no se nombra.
+    veredicto:
+      tipo: abstenerse
+      entre: [queja, soporte_tecnico, facturacion]
+      razon: el asunto original no aparece en ningun lado
+
+  - id: trampa_dos_areas_a_la_vez
+    mensajes:
+      - "quiero saber cuanto debo y tambien por que se me corta"
+    contexto: >-
+      Dos asuntos reales en un mensaje, uno de cada area. Una sola etiqueta
+      deja la mitad sin atender, y cualquiera de las dos es defendible.
+    veredicto:
+      tipo: abstenerse
+      entre: [facturacion, soporte_tecnico]
+      razon: son dos asuntos y la salida admite uno solo
+
+  - id: trampa_suspender_un_mes
+    mensajes:
+      - "lo quiero suspender un mes"
+    contexto: >-
+      Una suspension temporal se parece a una baja y se parece a un acuerdo de
+      pago. Depende de que ofrezca el tenant, no del mensaje.
+    veredicto:
+      tipo: abstenerse
+      entre: [comercial, facturacion]
+      razon: la suspension temporal cae entre dos colas segun el producto
+
+  - id: trampa_mandame_el_recibo
+    mensajes:
+      - "mandame el recibo"
+    contexto: >-
+      La factura del mes que viene o el comprobante de un pago ya hecho. Las
+      dos son facturacion, pero una es consulta y la otra puede ser un reclamo
+      de pago no acreditado.
+    veredicto:
+      tipo: abstenerse
+      entre: [facturacion, queja]
+      razon: no se sabe si falta el documento o falta que le acrediten el pago
+
+  - id: trampa_saludo_solo
+    mensajes:
+      - "buenas"
+    contexto: >-
+      No hay asunto todavia. Cualquier etiqueta es inventada. Incluido aca a
+      proposito porque en el corpus real este caso ya se movio entre dos.
+    veredicto:
+      tipo: abstenerse
+      entre: [soporte_tecnico, facturacion, comercial, queja]
+      razon: todavia no dijo nada
+
+  # ------------------------------------------------------------------- CLAROS
+  # El contrapeso. Sin estos, un decisor que se abstiene siempre saca 100%.
+  # Abstenerse aca cuenta como error.
+
+  - id: claro_sin_internet
+    mensajes:
+      - "no tengo internet desde ayer"
+      - "ya reinicie el equipo y sigue igual"
+    veredicto:
+      tipo: decidir
+      escalar: false
+      etiqueta: soporte_tecnico
+      razon: falla tecnica declarada, con el paso basico ya intentado
+
+  - id: claro_cobro_duplicado
+    mensajes:
+      - "me cobraron dos veces la factura de este mes"
+    veredicto:
+      tipo: decidir
+      escalar: false
+      etiqueta: facturacion
+      razon: asunto de facturacion nombrado sin ambiguedad
+
+  - id: claro_contratar
+    mensajes:
+      - "quiero contratar el plan de cien megas para mi casa nueva"
+    veredicto:
+      tipo: decidir
+      escalar: false
+      etiqueta: comercial
+      razon: pedido de alta, es venta
+
+  - id: claro_quinta_vez
+    mensajes:
+      - "ya llame cinco veces por lo mismo y nadie me ayuda"
+      - "quiero hablar con un supervisor"
+    veredicto:
+      tipo: decidir
+      escalar: true
+      etiqueta: queja
+      razon: reclamo por atencion repetida y pedido explicito de un superior
+
+  - id: claro_saldo
+    mensajes:
+      - "cuanto tengo que pagar este mes"
+    veredicto:
+      tipo: decidir
+      escalar: false
+      etiqueta: facturacion
+      razon: consulta de saldo, sin nada mas
+
+  - id: claro_cable_caido
+    mensajes:
+      - "se cayo el cable de la calle y quedo colgando"
+    veredicto:
+      tipo: decidir
+      escalar: false
+      etiqueta: soporte_tecnico
+      razon: falla de planta externa, es tecnica
+
+  - id: claro_baja_decidida
+    mensajes:
+      - "quiero dar de baja el internet"
+      - "ya lo decidi, no me interesa ninguna oferta"
+    veredicto:
+      tipo: decidir
+      escalar: true
+      etiqueta: comercial
+      razon: baja explicita y retencion rechazada, la toma una persona
+
+  - id: claro_pide_persona
+    mensajes:
+      - "quiero hablar con una persona, no con un bot"
+    veredicto:
+      tipo: decidir
+      escalar: true
+      etiqueta: soporte_tecnico
+      razon: solicitud explicita de un humano, que nunca se pospone
