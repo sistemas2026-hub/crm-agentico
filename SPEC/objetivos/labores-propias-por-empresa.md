@@ -1,7 +1,8 @@
 # Objetivo · Labores propias por empresa, cada una con sus asuntos
 
 > Abierto el 20/10/2026. Estado: **abierto** — **Fase 1 desplegada** el 20/10
-> (`b1c75518`); Fase 2 sin empezar.
+> (`b1c75518`); Fase 2 **ampliada** el 20/10, tarde (la plantilla de cada caso,
+> D9–D13), sin empezar: espera la medición B1.
 
 Pedido del usuario, textual: «coloca que se pueda crear labor y al momento de
 crearla uno le asigna los asuntos que cubre esa labor».
@@ -31,6 +32,31 @@ lo que ya existe.
 | D7 | **Una plantilla sin labor no puede tener asuntos**; puede seguir existiendo sin clasificar | Consecuencia directa de D2 |
 | D8 | **«Medido» incluye de qué cliente cuelga el ticket**: un ticket colgado del cliente de instalaciones del ISP es instalación, diga lo que diga el asunto | Es la corrección 1 del 19/10 (`supervisor-aplica-las-correcciones.md`, 220 de 220); no se reabre |
 
+### Ampliación del 20/10/2026, tarde — la plantilla de cada caso
+
+Pedido del usuario, textual: «que las plantillas se puedan crear y esté
+amarrada a qué asunto para que el supervisor sepa qué plantilla usar en
+despacho». Va **dentro de esta ficha** y no en una nueva (recomendación del
+`orquestador`): son los mismos invariantes (D2, D6, D7) y los mismos archivos
+(`plantillas.py::crear/publicar/_asuntos`, el editor). Dos fichas serían dos
+dueños de `_asuntos`.
+
+Lo que ya existía, medido: el editor tiene «Asuntos de WispHub que se
+despachan con esta plantilla» y Despacho pre-elige con `plantilla_para_asunto`
+(`ce3e9c34`, 19/10, **nunca auditado**). En producción, las 5 plantillas tienen
+**0 asuntos** cargados. Al **crear** una plantilla no se pueden poner, y una
+plantilla armada a mano no puede recibirlos por ningún camino (`publicar` da 409
+`NO_EDITABLE`). Además, Despacho elige por asunto **sin mirar la labor
+«Sugerido»**: es la contradicción por la que existe D2.
+
+| # | Decisión | Por qué (lo que se le mostró) |
+|---|---|---|
+| D9 | **Quien usa la plantilla elegida es el Supervisor IA, cuando cree la orden solo** (Fase 2 de `supervisor-arma-la-jornada`). Esta ficha entrega **la elección**; crear la orden es de aquella | El usuario eligió esto entre: la persona que despacha, verla en Pendientes, o el Supervisor IA |
+| D10 | **La plantilla la elige el código, nunca el modelo**, con una sola función: dentro de la labor del caso, la única plantilla activa de esa labor, o la que marca el asunto del ticket. **Si no hay una sola respuesta, no hay plantilla, y se dice por qué**: el Supervisor no crea esa orden y Despacho no pre-elige | CLAUDE.md §4 («el código calcula») y fail-closed. La usan el pre-llenado de Despacho y la Fase 2 de `supervisor-arma-la-jornada`; dos copias de la regla se desincronizan |
+| D11 | **Los asuntos de una plantilla se marcan con casillas, de los de su labor**; con una sola plantilla en la labor no hace falta marcar nada | Elegido por el usuario: es D2 tal como está escrita («la plantilla solo afina») y elimina los errores de tipeo |
+| D12 | **Las plantillas armadas a mano reciben asuntos y plazo sin tocar su formulario**, solo si la medición B1 muestra alguna activa; si no, queda fuera y se dice | Elegido por el usuario |
+| D13 | **El filtro de asuntos de Despacho marca «sin plantilla»** los asuntos de la cola que ninguna plantilla atiende | Elegido por el usuario: esa lista ya la ven los mismos roles, así que no reabre D6 |
+
 Decisión tomada por defecto, revisable: una labor nueva entra con la prioridad y
 el desempate más bajos, después de las 3 de fábrica (`operaciones/supervisor.py`
 ~1726, `campo/jornada_automatica.py::_DESEMPATE`). Si hiciera falta por empresa,
@@ -43,7 +69,7 @@ Cuatro fases, **cada una desplegable sola y segura**:
 | Fase | Qué | Estimación |
 |---|---|---|
 | **F1** | `Labor(org, codigo, nombre, activa)` + `AsuntoDeLabor(org, labor, asunto, normalizado)` con `unique(org, normalizado)`, en `campo/labores.py`. Migración que **siembra** instalacion/correctivo/trabajos en **todas** las empresas (nombre desde `nombres_de_labor`; asuntos = unión de los de sus plantillas). `labores_de` lee la tabla. **Una sola** `labor_valida(org, codigo)` reemplaza las validaciones fijas. Se quita `choices=` sin cambiar valores. **Sin cambio de conducta** | ~1 día |
-| **F2** | Pantalla de labores (crear, renombrar, dar de baja bloqueada en uso, asuntos). Regla D2 en los 3 caminos que escriben (`plantillas.publicar`, `TiposDeTrabajoView.patch`, edición de labor). Cuadrillas deja sus listas propias | 1,5–2 días |
+| **F2** | Pantalla de labores (crear, renombrar, dar de baja bloqueada en uso, asuntos). Regla D2 en **los 5 caminos** que escriben (`plantillas.crear`, `plantillas.publicar`, el de asuntos de una plantilla armada a mano, `TiposDeTrabajoView.patch`, edición de labor). Cuadrillas deja sus listas propias. **Ampliada (D9–D13)**: casillas de asuntos en la plantilla, la función única que elige la plantilla de un caso, Despacho la usa y marca «sin plantilla» | 1,5–2 días + ~1 día de la ampliación |
 | **F3** | Una función que decide la labor de un caso (D3/D8), usada en la demanda de jornadas y en la sugerencia de Despacho. **Antes**, un informe de solo lectura de cuántos casos cambian de labor: el ciclo de la madrugada está ENCENDIDO | 1,5–2 días |
 | **F4** | Borrar `ConfiguracionDeReparto.nombres_de_labor` y las tuplas `LABORES` | ~0,5 día |
 
@@ -88,6 +114,20 @@ Postgres efímero en la red `wt-cerebro-prod_default`, rol `crm_t`
 | 2.8 | Crear una labor propia **siembra antes** las 3 de fábrica (auditor de F1): con filas parciales, `labor_valida` rechazaría `correctivo` | prueba: empresa sin filas → crear una propia → las 4 válidas |
 | 2.9 | **`_filas` deja rastro cuando cae a las de fábrica** (guardia de F1): hoy se traga cualquier `DatabaseError` sin log, también un permiso denegado, y en F2 eso rechazaría labores propias en silencio | log por tipo (evento fijo, sin datos), y una prueba que lo afirma |
 
+**Ampliación (D9–D13): la plantilla de cada caso.**
+
+| # | Evidencia | Cómo se comprueba |
+|---|---|---|
+| 2.10 | `python -m pytest campo/tests/test_plantilla_del_caso.py -q --no-cov` (rol `crm_t`). Afirma: la única activa de la labor; con varias, la que marca el asunto (normalizado); con varias y ninguna marcada, **ninguna, con motivo**; nunca una de otra labor, ni una inactiva; una armada a mano con asuntos, sí | `N passed`, 0 failed — salida pegada |
+| 2.11 | Mutaciones que mueren: elegir por asunto sin mirar la labor; devolver la primera cuando hay varias y ninguna marcada; aceptar una inactiva; comparar el asunto sin normalizar | cada una deja 2.10 en rojo — salida pegada |
+| 2.12 | **Una sola función**: `grep -rn "plantilla_para_asunto(" django-crm/backend --include=*.py \| grep -v "tests/"` | solo la definición y la llamada desde la función única — salida pegada |
+| 2.13 | Despacho usa la función: `python -m pytest campo/tests/test_despacho_pantalla.py campo/tests/test_ficha_despachable.py -q --no-cov`. La ficha devuelve la plantilla de la función y, si no hay, el **motivo**; el filtro de asuntos trae `sin_plantilla` por asunto (D13) | `passed`; una mutación que pre-elige de otra labor deja rojo |
+| 2.14 | Casillas (D11): crear y publicar con un asunto que no es de su labor → 400 nombrando la labor; con asuntos y sin labor → 400 (D7). Pruebas en `test_labores_pantalla.py` | `passed`; mutación por camino (crear, publicar) muere |
+| 2.15 | Plantillas armadas a mano (D12): **si B1 muestra alguna activa**, un camino para asuntos y plazo que no toca el esquema, con prueba de que la versión publicada no cambia; **si no**, la bitácora lo dice con la salida de B1 | prueba en verde, o la línea en la bitácora |
+| 2.16 | Pantallas: `npx vitest run "src/routes/(app)/supervisor-noc/plantillas" "src/routes/(app)/supervisor-noc/despacho" src/lib/v2/despacho-sugerencias.test.js` (capa `+page.server.js` incluida); casillas en el editor, motivo y marca «sin plantilla» en Despacho | sin rojos nuevos frente a origin (memoria `vitest-rojos-previos`) — salida pegada |
+| 2.17 | `grep -n "plantilla_del_caso" SPEC/objetivos/supervisor-arma-la-jornada.md` | 1 línea: su Fase 2 usa esta función |
+| 2.18 | `auditor-independiente` sobre la ampliación **y sobre `ce3e9c34`**; `revisor-de-pii` sobre quién lee `WorkType.asuntos` (hoy `GET /campo/plantillas/` lo devuelve a cualquiera con `IsCampoAuthenticated`) | hallazgos resueltos o anotados con motivo |
+
 ### F3 — el asunto decide la labor
 
 | # | Evidencia | Cómo se comprueba |
@@ -127,6 +167,8 @@ Postgres efímero en la red `wt-cerebro-prod_default`, rol `crm_t`
 - **`operaciones/armado_de_jornadas.py` tiene un solo dueño a la vez**: antes de F3, acordar con la sesión de `supervisor-arma-la-jornada` (su Fase 2 está pendiente).
 - **F3 no se despliega sin el informe 3.1**, y se despliega de día.
 - **F4 (`RemoveField`) solo después** de que F1–F3 lleven al menos una versión en producción.
+- **Esta ficha NO crea órdenes** (D9): entrega la función que elige la plantilla. Crear la orden sola es la Fase 2 de `supervisor-arma-la-jornada`, con su `auditor-de-frontera`.
+- **NO ofrecer en ninguna pantalla los asuntos de la cola** (D6 sigue en pie): las casillas salen de los asuntos de la labor, que escribe una persona.
 
 ## Qué NO hacer
 
@@ -147,7 +189,7 @@ Devuelto por el `orquestador` (20/10/2026).
 |---|---|---|
 | `arquitecto-dexter` | Dónde vive cada pieza, plan por fases | **corrió** (20/10) |
 | `auditor-independiente` | F1 (sin cambio de conducta, siembra completa, mutaciones), F2 («en uso», un 4.º camino que rompa D2, capa servidor, prioridad de una labor nueva), F3 (orden de fuentes, asunto contra la skill wisphub-api, labor dada de baja, `mapa_de_texto`, pruebas de las correcciones) | **corrió sobre F1** (20/10, ver bitácora); F2 y F3 pendientes |
-| `revisor-de-pii` | F2 (de dónde salen los asuntos, qué queda en `Activity`/logs, qué nombra el bloqueo), F3 (el `porque` y el informe sin asuntos crudos) | pendiente |
+| `revisor-de-pii` | F2 (de dónde salen los asuntos, qué queda en `Activity`/logs, qué nombra el bloqueo, **quién lee `WorkType.asuntos`**), F3 (el `porque` y el informe sin asuntos crudos) | pendiente |
 | `auditor-de-frontera` | F3, solo si se cumple la condición de 3.4 | se decide en F3 |
 | `guardia-de-release` | Antes de cada push: migración de datos al desplegar (rol, todas las empresas, `unique` contra datos reales), RemoveField en F4 | **corrió sobre F1** (20/10): listo para push, sin bloqueos; ver bitácora |
 | `verificador-de-api` | — | **se saltea**: no hay llamada nueva a WispHub (D6) |
@@ -159,6 +201,40 @@ Devuelto por el `orquestador` (20/10/2026).
 - **Ninguna decisión de producto abierta** (D1–D8 cerradas el 20/10).
 - **Antes del deploy de F1:** la consulta 1.7 en producción, que corre el usuario.
 - **Antes de F3:** acordar con la sesión de `supervisor-arma-la-jornada` quién es dueño de `operaciones/armado_de_jornadas.py`; la recomendación del orquestador es que F3 entre antes que esa Fase 2.
+- **B1 · antes de construir la ampliación** (la corre el usuario, solo lectura, backend de producción): por plantilla, labor, activa, editable, cantidad de asuntos y plazo; plantillas activas por labor; casos y asuntos distintos en Despacho (**solo números**, sin el texto de los asuntos). Decide D12 (¿hay alguna armada a mano activa?) y cuántas labores tienen más de una plantilla. Validado el 20/10 contra Postgres con datos dentro de una transacción revertida:
+
+  ```
+  python manage.py shell <<'EOF'
+  from collections import Counter
+  from campo.models import WorkType
+  from campo import plantillas as P
+  from common.models import Org
+  from common.tasks import set_rls_context
+  from operaciones import paso_a_despacho as pad
+  for org in Org.objects.order_by("name"):
+      tipos = list(WorkType.objects.filter(org=org).order_by("labor", "codigo"))
+      set_rls_context(org.id)
+      aprob = pad.aprobados_para_despacho(org)
+      cola = pad.casos_en_despacho(org, aprob) if aprob else None
+      if not tipos and cola is None:
+          continue
+      print("==", org.name)
+      por_labor = Counter()
+      for t in tipos:
+          v = P.ultima_publicada(t)
+          editable = bool(v) and P.leer_definicion(v.esquema)[0] is not None
+          print("   plantilla", t.codigo, "| labor:", t.labor or "-", "| activa:", t.activo, "| editable:", editable, "| asuntos:", len(t.asuntos or []), "| plazo:", t.plazo_dias)
+          if t.activo:
+              por_labor[t.labor or "-"] += 1
+      print("   activas por labor:", dict(por_labor))
+      if cola is None:
+          print("   Despacho: nadie aprobo ninguno")
+      else:
+          print("   Despacho: casos", cola.count(), "| asuntos distintos", cola.values("name").distinct().count())
+  EOF
+  ```
+- **B3 · antes de desplegar F2:** revisar la primera madrugada después de F1 (21/10, 03:00 Bogotá). No frena el código.
+- **B4 · coordinación:** avisarle a la sesión de `supervisor-arma-la-jornada` que su Fase 2 elige la plantilla con `plantilla_del_caso` (2.17), y que sin plantilla no se crea la orden.
 
 ## Bitácora
 
@@ -169,4 +245,5 @@ Devuelto por el `orquestador` (20/10/2026).
 | 20/10/2026 | **Auditoría de F1 (`auditor-independiente`), ocho hallazgos.** Resueltos en código, cada uno con prueba y mutación que la prueba mata (9 de 9): (1) 4 de los 6 lugares que validan no tenían prueba con una labor propia → `test_g1`–`g3`; (3) `" correctivo "` pasaba la validación y quedaba guardado con espacios → comparación exacta, `test_g4`/`g5`; (4) `labor_nombre` de las jornadas ahora es el de la empresa (cambio querido) → afirmado en `test_g1`; (5) el admin de Django aceptaba cualquier labor → formulario con `labor_valida`, `test_g6`; (6) el PUT de nombres pasó a tocar solo los que venían → vuelve a reemplazar la tabla entera, `test_g7`; y el worker de Celery puede leer antes de que `migrate` cree la tabla → `_filas` cae a las de fábrica con savepoint, `test_g8`. **Anotados**: (2) `AsuntoDeLabor` es una foto de la siembra → criterio 2.7; filas parciales → 2.8; (7) 4.2 contradecía el diseño → reescrito; (8) el informe no está en producción antes del deploy → procedimiento en 1.7 | 1.6 otra vez sobre el arreglo; push | este commit |
 | 20/10/2026 | **1.7 en producción** (la corrió el usuario, solo lectura, `manage.py shell` en el backend desplegado): 8 empresas, `TOTAL choques: 0 - plantillas sin labor con asuntos: 0`, ninguna con `nombres_de_labor` propios → la siembra les pone los de fábrica | push | — |
 | 20/10/2026 | **`guardia-de-release` sobre F1: listo para push.** Medido: la siembra no viola ningún `unique` (repetidos en una plantilla, en dos labores, en dos empresas), ninguna tabla que lee tiene RLS (rol no superusuario siembra todas las empresas), la 0036 va y vuelve (`migrate campo 0035` y otra vez adelante), los `AlterField` son no-op, no hay otra 0036 en ninguna rama. **1.6 re-medido sobre el arreglo**, misma receta en las dos: origin 22 rojos / HEAD 22 rojos, los mismos (+25 passed = `test_labores`). Inferido (no medido en producción): `migrate` corre como `crm_migrator` y los default privileges dan acceso a `crm_user` a las tablas nuevas. Riesgos anotados: `_filas` sin log → 2.9; asuntos escritos desde el admin como texto o de más de 255 letras abortarían la siembra (la API no lo permite; chequeo de solo lectura antes del push); rollback = `migrate campo 0035` **antes** de revertir el código | push | `b1c75518` |
-| 20/10/2026 | **F1 DESPLEGADA** (push `fbc02764..b1c75518`, 16:51 Bogotá, con permiso explícito del usuario). Antes del push, solo lectura en producción: 5 plantillas, `no_lista 0`, `max_largo 0` → **ninguna plantilla tiene asuntos cargados** (el «0 choques» de 1.7 era por eso). Después, en el backend desplegado: `[X] 0036_labores_por_empresa` e `informe_de_labores` → `tablas de labores: SI`, las 8 empresas con correctivo/instalacion/trabajos activas, de fábrica, 0 asuntos, `TOTAL choques: 0`. El informe corre como `crm_user` y no atrapa errores: los privilegios sobre las tablas nuevas quedan medidos, no inferidos. `/_app/version.json` no cambió (el deploy no tocó el frontend), así que la prueba del deploy es el backend | Revisar la primera madrugada (armado sin `errores`); F2 | este commit |
+| 20/10/2026 | **F1 DESPLEGADA** (push `fbc02764..b1c75518`, 16:51 Bogotá, con permiso explícito del usuario). Antes del push, solo lectura en producción: 5 plantillas, `no_lista 0`, `max_largo 0` → **ninguna plantilla tiene asuntos cargados** (el «0 choques» de 1.7 era por eso). Después, en el backend desplegado: `[X] 0036_labores_por_empresa` e `informe_de_labores` → `tablas de labores: SI`, las 8 empresas con correctivo/instalacion/trabajos activas, de fábrica, 0 asuntos, `TOTAL choques: 0`. El informe corre como `crm_user` y no atrapa errores: los privilegios sobre las tablas nuevas quedan medidos, no inferidos. `/_app/version.json` no cambió (el deploy no tocó el frontend), así que la prueba del deploy es el backend | Revisar la primera madrugada (armado sin `errores`); F2 | `9a79581c` |
+| 20/10/2026, tarde | **F2 ampliada (D9–D13)** con `/objetivo` y el `orquestador`: la plantilla de cada caso va dentro de esta ficha. El usuario eligió: la usa el Supervisor IA al crear la orden (D9), la elige una función única en código (D10), asuntos por casillas de su labor (D11), plantillas a mano sí si hay alguna activa (D12), marca «sin plantilla» en Despacho (D13). La medición B1 quedó en Bloqueos | B1; F2 entera | este commit |
