@@ -369,6 +369,53 @@ quedó viejo en la documentación. Es la clase de dato que envejece y que §6
 pide medir en vez de recordar: corregir al pasar, no como tarea aparte (D10).
 
 
+
+#### El piso de ruido del set dorado: TRES casos — medido el 20/10/2026
+
+Salió de un accidente útil. La primera corrida se truncó —`tail` se comió los
+casos y dejó solo el total— así que hubo que rehacerla. **Las dos corridas
+fueron con el MISMO código**, el mismo día, contra la misma base:
+
+```
+corrida 1    86/90 OK (96%)    4 fallos     1446 s
+corrida 2    83/90 OK (92%)    7 fallos     ~2000 s
+```
+
+**Tres casos de diferencia con el código idéntico.** Eso no es una regresión:
+es el piso de ruido del instrumento, y es más alto de lo que §6 tenía anotado
+(«70/88 contra 69/88 … es varianza» — un caso, no tres).
+
+**Qué significa operativamente:** este set **no puede distinguir una regresión
+de tres casos del ruido**. Una corrida sola nunca alcanza, y dos tampoco si la
+diferencia es ≤ 3. Para afirmar una regresión hace falta o un cambio mayor, o
+el caso puntual señalado por su nombre.
+
+#### Los 8 que no pasaron, nombrados
+
+```
+usa          5   nunca llamó una herramienta que el caso exige
+deriva_a     1   el router no derivó
+no_usa       1   el caso de ventas (rojo conocido, decisión del 19/10)
+sin_errores  1   ConnectionError a `backend:8000` -> NO SE PUDO CORRER
+```
+
+**Ninguna de las ocho es una afirmación sobre `escalar`** — que es lo único
+que tocó el campo de confianza. Y hay un argumento estructural que lo
+respalda, verificado en el código y no en el docstring:
+
+> `nucleo/canales/api.py:2154` — *«abrir() envuelve solo motor.responder(), y
+> esto corre despues»*
+
+La evaluación de escalada corre **después** de que la respuesta del turno ya se
+calculó y se guardó. No puede cambiar qué herramientas llamó el modelo durante
+el turno, que es exactamente lo que fallan esos 7 casos.
+
+**Lo que NO se hizo, y hay que decirlo:** no se corrió una línea base SIN el
+campo. Las dos corridas lo tienen. La evidencia de que no hay regresión es la
+estructural más el «ninguna falla es de escalar», no una comparación
+antes/después.
+
+
 **LO QUE ESTE OBJETIVO DEJA APRENDIDO, más allá de los arreglos**
 
 1. **Cinco de los seis defectos vivían en el mismo salto** —backend → capa
