@@ -313,6 +313,29 @@ def test_se_le_PIDE_al_motor_cerrar_aunque_el_equipo_no_lo_respalde(
         f"la propuesta no quedo aceptada: {p.estado}")
 
 
+def test_un_ticket_ELIMINADO_alla_tambien_se_cierra_solo(org_a, monkeypatch):
+    """
+    20/10/2026: el motor marca 'Eliminado' un ticket que el proveedor contesta
+    con 404 dos veces, separadas por una hora. Ya no existe alla: el detector
+    lo ve como cerrado alla y se le pide al motor cerrarlo, por el mismo
+    camino y con las mismas compuertas que un 'Cerrado'. Hasta ese dia habia
+    que cerrarlos a mano (95549 y 95778).
+    """
+    from operaciones import supervisor
+
+    llamadas = []
+    caso = _caso_cerrado_en_el_proveedor(org_a)
+    caso.external_status = "Eliminado"
+    caso.save(update_fields=["external_status"])
+    p = _propuesta_ya_diagnosticada(org_a, caso)
+    _las_puertas_abiertas(org_a, monkeypatch, llamadas)
+
+    supervisor._atender_desincronizados(org_a, timezone.now(),
+                                        desatendido=True)
+
+    assert llamadas == [(str(p.id), str(caso.id))], llamadas
+
+
 def test_y_el_ciclo_lo_CUENTA_entre_los_cerrados(org_a, monkeypatch):
     """
     Que el caso quede cerrado y el informe diga 'cerrados: 0' seria un cierre

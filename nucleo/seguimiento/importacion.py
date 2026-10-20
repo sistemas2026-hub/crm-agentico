@@ -311,6 +311,9 @@ class Cambio:
     # payload: sincronizar el hilo no cuesta ni una llamada mas.
     respuestas: list = field(default_factory=list)
     error: str = ""
+    #  Un fallo pasajero del proveedor (429, 5xx, sin red): NO se escribe.
+    #  Ver 'clase_de_fallo'.
+    transitorio: bool = False
 
     @property
     def hay_diferencia(self) -> bool:
@@ -795,9 +798,139 @@ def _fallo_la_lectura(caso: dict) -> bool:
     return bool(str(caso.get("external_fetch_error") or "").strip())
 
 
+# =============================================================================
+#  LA CONCILIACION  --  20/10/2026
+# =============================================================================
+#  El usuario comparo WispHub con Dexter y no coincidian: Dexter relee 200
+#  casos por hora y tardaba hasta ~4 h en enterarse de un cierre; un ticket
+#  borrado alla dejaba su caso abierto aca para siempre; y una relectura en
+#  paralelo devolvio 80 de 808 con '429 Too Many Requests', que quedaban
+#  escritos como error. Pidio: "que se mantenga sincronizado bajo cualquier
+#  pronostico de error, que no se tenga que repetir ni cerrar manual".
+
+#: Como queda un caso cuyo ticket el proveedor ya no tiene. El Supervisor lo
+#: trata como cerrado alla (operaciones/supervisor.py::CERRADO_EN_PROVEEDOR) y
+#: lo cierra con sus mismas compuertas.
+ESTADO_ELIMINADO = "Eliminado"
+
+#: La marca del primer 404, con su momento: el segundo 404, una hora despues,
+#: es el que lo da por eliminado. Un 404 suelto puede ser un tropiezo del
+#: proveedor; dos, separados, no.
+MARCA_NO_EXISTE = "NO_EXISTE_EN_PROVEEDOR desde"
+HORAS_PARA_DARLO_POR_ELIMINADO = 1
+
+#: LA GUARDA DEL 404 MASIVO. Una credencial o una URL mal puesta hace que el
+#: proveedor conteste 404 a TODO, y sin esto cada caso abierto quedaria
+#: "Eliminado" y el Supervisor los cerraria en masa. Medido el 20/10/2026: 2
+#: borrados de 808 abiertos. Si una vuelta da mas que esto, no se declara
+#: ninguno y queda la alarma: eso no es un borrado, es una falla.
+TOPE_ELIMINADOS_POR_VUELTA = 10
+
+#: Respuestas que dicen "ahora no", no "esto es asi": no se escriben.
+CODIGOS_TRANSITORIOS = (408, 425, 429, 500, 502, 503, 504)
+
+NO_EXISTE = "no_existe"
+TRANSITORIO = "transitorio"
+OTRO_FALLO = "otro"
+
+
+def clase_de_fallo(error) -> str:
+    """
+    Que dice un fallo al leer un ticket: que no existe (404), que es pasajero
+    (429, 5xx, sin red) u otra cosa. Se mira el codigo de la respuesta y el
+    tipo del error, nunca el texto.
+    """
+    codigo = getattr(getattr(error, "response", None), "status_code", None)
+    if codigo == 404:
+        return NO_EXISTE
+    if codigo in CODIGOS_TRANSITORIOS:
+        return TRANSITORIO
+    nombres = {k.__name__ for k in type(error).__mro__}
+    if nombres & {"Timeout", "ConnectionError"}:
+        return TRANSITORIO
+    return OTRO_FALLO
+
+
+def _desde_cuando_no_existe(error: str):
+    """El momento del primer 404 anotado en el error, o None."""
+    if not error.startswith(MARCA_NO_EXISTE + " "):
+        return None
+    try:
+        momento = datetime.fromisoformat(
+            error[len(MARCA_NO_EXISTE) + 1:].strip().split()[0])
+    except (ValueError, IndexError):
+        return None
+    return momento if momento.tzinfo else momento.replace(tzinfo=timezone.utc)
+
+
+def por_no_existir(caso: dict, ahora: datetime, *,
+                   puede_eliminar: bool = True) -> dict:
+    """
+    Que se escribe de un caso cuyo ticket el proveedor contesta con 404.
+
+    El primero deja la marca con su momento; uno dentro de la hora no toca
+    nada; uno despues de la hora lo da por ELIMINADO --con su momento y la
+    lectura fresca, que es lo que el cierre del Supervisor exige-- y uno que
+    ya estaba eliminado solo refresca la lectura, para que el cierre no se
+    trabe por "lectura vieja" mientras espera sus compuertas.
+
+    'puede_eliminar' en False deja la marca pero nunca declara: es lo que pasa
+    cuando esta vuelta no consiguio la lista entera de abiertos, o cuando el
+    ticket SI figura en ella (la lista y el detalle se contradicen).
+    """
+    if normalizar(caso.get("external_status") or "") == normalizar(ESTADO_ELIMINADO):
+        return {SELLO_DE_LECTURA: ahora.isoformat()}
+    desde = _desde_cuando_no_existe(str(caso.get("external_fetch_error") or ""))
+    if desde is None:
+        return {"external_fetch_error": f"{MARCA_NO_EXISTE} {ahora.isoformat()}"}
+    if not puede_eliminar or ahora - desde < timedelta(
+            hours=HORAS_PARA_DARLO_POR_ELIMINADO):
+        return {}
+    return {"external_status": ESTADO_ELIMINADO,
+            MOMENTO_DEL_ESTADO: ahora.isoformat(),
+            "external_fetch_error": "",
+            SELLO_DE_LECTURA: ahora.isoformat()}
+
+
+def tramos_de_conciliacion(meses: int,
+                           ahora: datetime | None = None) -> list[tuple[str, str]]:
+    """
+    Los tramos [desde, hasta] que cubren los ultimos 'meses', de 59 dias como
+    mucho cada uno: el proveedor responde 400 a mas de dos meses. 59 es lo que
+    se uso el 20/10/2026 en produccion, en 30 tramos seguidos, sin un error.
+    """
+    if meses <= 0:
+        return []
+    ahora = ahora or datetime.now(timezone.utc)
+    inicio = ahora.date() - timedelta(days=30 * meses)
+    fin = ahora.date() + timedelta(days=1)
+    tramos = []
+    while fin >= inicio:
+        desde = fin - timedelta(days=59)
+        tramos.append((desde.isoformat(), fin.isoformat()))
+        fin = desde - timedelta(days=1)
+    return tramos
+
+
+def sospechosos_de(config_imp, casos: list[dict],
+                   abiertos_en_proveedor: set | None) -> list[dict]:
+    """
+    Los casos ABIERTOS en Dexter cuyo ticket ya no esta en la lista de
+    abiertos del proveedor: los que probablemente se cerraron o se borraron
+    alla. Sin la lista (no se pudo pedir entera), ninguno: sin el dato no se
+    sospecha.
+    """
+    if abiertos_en_proveedor is None:
+        return []
+    return [c for c in casos
+            if c.get("status") in config_imp.reconciliar_estados
+            and str(c.get("external_ticket_id") or "") not in abiertos_en_proveedor]
+
+
 def de_esta_vuelta(config_imp, casos: list[dict],
                    ahora: datetime | None = None, *,
-                   todos: bool = False) -> list[dict]:
+                   todos: bool = False,
+                   abiertos_en_proveedor: set | None = None) -> list[dict]:
     """
     Los casos que se releen en ESTA vuelta: los que hay que reconciliar, los de
     lectura mas vieja primero, hasta 'reconciliar_por_vuelta'.
@@ -841,17 +974,28 @@ def de_esta_vuelta(config_imp, casos: list[dict],
                  and not any(SELLO_DE_LECTURA in c for c in elegibles)):
         return elegibles
     tope = config_imp.reconciliar_por_vuelta
+    #  PRIMERO LOS SOSPECHOSOS  --  20/10/2026. Los abiertos aca que ya no estan
+    #  abiertos alla van al frente y fuera del tope: son los que el usuario
+    #  necesita ver cerrados. Con un tope propio (dos veces el de la vuelta)
+    #  por si la lista viniera mal: nunca releer 800 de golpe.
+    primero = sospechosos_de(config_imp, elegibles,
+                             abiertos_en_proveedor)[:2 * tope]
+    if primero:
+        ya = {id(c) for c in primero}
+        elegibles = [c for c in elegibles if id(c) not in ya]
     sanos = [c for c in elegibles if not _fallo_la_lectura(c)]
     fallan = [c for c in elegibles if _fallo_la_lectura(c)]
     de_los_que_fallan = fallan[:max(tope // 2, tope - len(sanos))]
     de_los_sanos = sanos[:tope - len(de_los_que_fallan)]
-    return sorted(de_los_sanos + de_los_que_fallan, key=_momento_de_lectura)
+    return primero + sorted(de_los_sanos + de_los_que_fallan,
+                            key=_momento_de_lectura)
 
 
 def reconciliar(config, casos: list[dict], *, leer_ticket,
                 cuenta_api: str, registrados_por_dexter: set,
                 ahora: datetime | None = None,
-                todos: bool = False) -> list[Cambio]:
+                todos: bool = False,
+                abiertos_en_proveedor: set | None = None) -> list[Cambio]:
     """
     Que cambiaria de cada caso ya conocido. No escribe.
 
@@ -871,7 +1015,8 @@ def reconciliar(config, casos: list[dict], *, leer_ticket,
     cambios: list[Cambio] = []
 
     for caso in de_esta_vuelta(config.importacion_tickets, casos, ahora,
-                               todos=todos):
+                               todos=todos,
+                               abiertos_en_proveedor=abiertos_en_proveedor):
         tid = str(caso.get("external_ticket_id") or "")
         cambio = Cambio(
             caso_id=str(caso.get("id") or ""),
@@ -897,9 +1042,27 @@ def reconciliar(config, casos: list[dict], *, leer_ticket,
             t = leer_ticket(tid)
         except Exception as e:                              # noqa: BLE001
             cambio.error = f"{type(e).__name__}: {e}"
-            # El fallo se escribe en la fila para que se vea en la plataforma,
-            # y no toca el estado: un error de lectura no dice nada del caso.
-            cambio.despues = {"external_fetch_error": cambio.error[:500]}
+            clase = clase_de_fallo(e)
+            if clase == TRANSITORIO:
+                #  UN FRENAZO NO ES UN DATO  --  20/10/2026: 80 de 808 con 429
+                #  quedaron escritos como error y trababan el cierre. No se
+                #  escribe nada; el caso sigue siendo de lectura vieja y va
+                #  primero en la vuelta siguiente.
+                cambio.transitorio = True
+                cambio.despues = {}
+            elif clase == NO_EXISTE:
+                #  Solo se puede dar por eliminado si ESTA vuelta consiguio la
+                #  lista entera de abiertos --prueba de que el proveedor
+                #  contesta bien con esta credencial-- y el ticket no esta.
+                cambio.despues = por_no_existir(
+                    caso, ahora,
+                    puede_eliminar=(abiertos_en_proveedor is not None
+                                    and tid not in abiertos_en_proveedor))
+            else:
+                # El fallo se escribe en la fila para que se vea en la
+                # plataforma, y no toca el estado: un error de lectura no dice
+                # nada del caso.
+                cambio.despues = {"external_fetch_error": cambio.error[:500]}
             cambios.append(cambio)
             continue
 
@@ -948,7 +1111,26 @@ def reconciliar(config, casos: list[dict], *, leer_ticket,
         cambio.respuestas = leer_respuestas(t)
         cambios.append(cambio)
 
+    retener_eliminados_si_son_demasiados(cambios)
     return cambios
+
+
+def retener_eliminados_si_son_demasiados(cambios: list) -> int:
+    """
+    Si una vuelta da mas de TOPE_ELIMINADOS_POR_VUELTA tickets por eliminados,
+    no se declara NINGUNO: eso no son borrados, es el proveedor contestando
+    404 a todo. La marca del primer 404 se conserva; la vuelta siguiente, con
+    el proveedor sano, lee bien y la limpia. Devuelve cuantos retuvo.
+    """
+    declarados = [c for c in cambios
+                  if c.despues.get("external_status") == ESTADO_ELIMINADO]
+    if len(declarados) <= TOPE_ELIMINADOS_POR_VUELTA:
+        return 0
+    for c in declarados:
+        c.despues = {}
+        c.error = (f"eliminacion retenida: {len(declarados)} en una vuelta, "
+                   f"mas que el tope de {TOPE_ELIMINADOS_POR_VUELTA}")
+    return len(declarados)
 
 
 def resumen(veredictos: list[Veredicto]) -> dict:

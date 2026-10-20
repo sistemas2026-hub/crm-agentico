@@ -2982,6 +2982,16 @@ class ImportacionTickets(Base):
     # por eso es configuracion. Con 800 abiertos y 200 por vuelta, cada caso se
     # relee cada ~4 h.
     reconciliar_por_vuelta: int = Field(200, ge=1)
+    # LA CONCILIACION  --  20/10/2026
+    # Cuantos meses hacia atras se le pide al proveedor, en cada vuelta, la
+    # lista de tickets ABIERTOS, en tramos de dos meses (su tope). Con ella el
+    # descubrimiento ve todos los abiertos y no solo los de la ventana, y la
+    # reconciliacion relee PRIMERO los casos abiertos en Dexter que ya no
+    # estan abiertos alla: un cierre se ve en la vuelta siguiente y no en ~4 h.
+    # Medido ese dia en Rapilink: 788 abiertos, ninguno de hace mas de 20
+    # meses, unas 30 consultas por vuelta. 0 = apagada: la ventana de siempre.
+    # Varia por empresa (cuanta historia abierta tiene): es configuracion.
+    conciliar_meses: int = Field(0, ge=0, le=60)
 
 
 # =============================================================================

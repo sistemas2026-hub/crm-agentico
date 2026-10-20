@@ -7199,6 +7199,10 @@ importacion_tickets:
   - soporte tecnico|internet intermitente
   - soporte tecnico|configuracion dns
   cada_horas: 1
+  # LA CONCILIACION (20/10/2026): cada vuelta pide la lista entera de abiertos
+  # de WispHub de los ultimos 24 meses y relee primero los que ya no estan
+  # abiertos alla. Medido ese dia: 788 abiertos, el mas viejo de abril de 2025.
+  conciliar_meses: 24
   cuenta_api: Rapilink SAS - admin@rapilink-sas
   departamentos:
   - Soporte Técnico

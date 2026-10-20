@@ -755,6 +755,37 @@ suya (eso es un rol, no esta regla), o que un departamento de WispHub deje de
 corresponder a un área de Dexter. Lo primero se resuelve con permisos; lo
 segundo, en `destinos`, que es configuración del tenant.
 
+### 8.15 DECISIÓN — Dexter se concilia con WispHub cada hora, sin trabajo manual (20/10/2026)
+
+**El error que la originó.** Con las áreas ya completas, el usuario volvió a
+comparar y sobraban 7 tickets en Dexter: los había cerrado en WispHub esa
+tarde, y Dexter relee 200 casos por hora, así que tardaba hasta ~4 h en
+enterarse. Además, dos tickets borrados en WispHub (404) dejaban su caso
+abierto para siempre, y una relectura en paralelo devolvió 80 de 808 con
+`429` que quedaban escritos como error. Pidió que se mantenga sincronizado
+«bajo cualquier pronóstico de error, que no se tenga que repetir ni cerrar
+manual».
+
+**Lo que se decidió:**
+
+1. Cada vuelta del reloj pide a WispHub la **lista entera de abiertos** de los
+   últimos `conciliar_meses` (configuración del tenant; 24 en Rapilink), en
+   tramos de 59 días: sin fechas WispHub solo devuelve el último mes.
+2. La reconciliación relee **primero** los casos abiertos en Dexter que ya no
+   están en esa lista. Un cierre en WispHub se ve en la vuelta siguiente.
+3. Un `429`, un 5xx o una caída de red **no se escriben**: el caso queda para
+   la vuelta siguiente.
+4. Un ticket que da 404 dos veces, separadas por una hora, queda «Eliminado» y
+   el Supervisor lo cierra por el mismo camino y con las mismas compuertas que
+   un «Cerrado». **Nunca en masa:** solo si esa vuelta consiguió la lista
+   entera y el ticket no está en ella, y nunca más de 10 por vuelta; si son
+   más, no se declara ninguno y queda una alarma en el log. Una credencial
+   rota da 404 a todo, y eso no puede cerrar casos.
+
+**Lo que la reabre:** que WispHub exponga un filtro por fecha de cierre o de
+modificación (sería una sola consulta en lugar de los tramos), o que el tope
+de 10 eliminados por vuelta se quede corto con borrados reales.
+
 ---
 
 ## 9. Despliegue

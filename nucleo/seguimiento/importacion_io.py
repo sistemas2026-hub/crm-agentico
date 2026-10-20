@@ -158,6 +158,28 @@ def listar_tickets(config, tenant, desde, hasta, tope=5000) -> list[dict]:
     return filas
 
 
+def listar_abiertos(config, tenant, ahora=None) -> list[dict]:
+    """
+    TODOS los tickets abiertos del proveedor de los ultimos
+    'conciliar_meses', tramo por tramo y de a una consulta (20/10/2026).
+
+    Sin fechas, el proveedor devuelve solo el ultimo mes: medido ese dia, 226
+    de 788 abiertos, el mas viejo el 94433. Por eso los tramos.
+
+    ENTERA O NADA: si un tramo falla, la excepcion sale. Una lista a medias
+    haria sospechosos a cientos de casos que siguen abiertos alla.
+    """
+    conf = config.importacion_tickets
+    filas, vistos = [], set()
+    for desde, hasta in imp.tramos_de_conciliacion(conf.conciliar_meses, ahora):
+        for t in listar_tickets(config, tenant, desde, hasta):
+            tid = str(t.get("id_ticket") or "")
+            if tid and tid not in vistos:
+                vistos.add(tid)
+                filas.append(t)
+    return filas
+
+
 def leer_ticket(config, tenant, id_ticket) -> dict:
     """
     Un ticket suelto, para reconciliar uno que salio de la ventana.
@@ -513,6 +535,11 @@ def aplicar_reconciliacion(config, tenant, cambios, actor: str = "") -> dict:
     # 'con_diferencia' (ver Cambio.hay_diferencia), no este.
     resumen = {"actualizados": 0, "sin_cambios": 0, "fallidos": 0}
     for c in cambios:
+        if not c.despues:
+            #  Nada que escribir: un fallo pasajero, o un 404 dentro de su
+            #  hora de gracia (20/10/2026). Mandar solo el id seria una
+            #  escritura vacia que el endpoint contaria como actualizacion.
+            continue
         cuerpo = {k: v for k, v in c.despues.items() if v is not None}
         cuerpo["id_caso"] = c.caso_id
         try:
@@ -631,6 +658,12 @@ def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
                            "actualizados": 0, "sin_cambios": 0,
                            "fallidos": 0, "errores_lectura": 0,
                            "respuestas": {}},
+        #  LA CONCILIACION (20/10/2026). 'abiertos_en_proveedor' en None es
+        #  "no se pudo pedir la lista entera": esa vuelta no sospecha de nadie.
+        "conciliacion": {"activa": conf.conciliar_meses > 0,
+                         "abiertos_en_proveedor": None, "sospechosos": 0,
+                         "eliminados": 0, "transitorios": 0,
+                         "eliminados_retenidos": 0},
     }
 
     # -----------------------------------------------------------------------
@@ -642,9 +675,19 @@ def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
     # motivo para dejar de refrescar los casos que YA existen -- son dos
     # trabajos sobre datos distintos.
     registro: set = set()
+    abiertos = None
     try:
         areas = persistencia.areas_de_colaboradores(tenant)
-        tickets = listar_tickets(config, tenant, desde, hasta)
+        if conf.conciliar_meses > 0:
+            #  LA CONCILIACION: todos los abiertos, no solo los de la ventana.
+            #  El descubrimiento importa los que falten y la reconciliacion
+            #  relee primero los que ya no estan abiertos alla.
+            tickets = listar_abiertos(config, tenant)
+            abiertos = {str(t.get("id_ticket")) for t in tickets
+                        if t.get("id_ticket")}
+            resumen["conciliacion"]["abiertos_en_proveedor"] = len(abiertos)
+        else:
+            tickets = listar_tickets(config, tenant, desde, hasta)
         ids = [str(t.get("id_ticket")) for t in tickets if t.get("id_ticket")]
         conocidos, registro = tickets_conocidos(config, tenant, ids)
         _importar(config, tenant, tickets, conocidos, registro, areas, conf,
@@ -653,7 +696,8 @@ def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
         resumen["error_global"] = f"{type(e).__name__}: {e}"
         registrar("importacion", "el descubrimiento fallo", tenant=tenant, error=e)
 
-    _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios)
+    _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios,
+                 abiertos=abiertos)
     return resumen
 
 
@@ -680,7 +724,8 @@ def _importar(config, tenant, tickets, conocidos, registro, areas, conf,
         resumen["importacion"].update(creado)
 
 
-def _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios) -> None:
+def _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios,
+                 abiertos=None) -> None:
     """
     El paso C: refrescar lo que el proveedor dice de los casos que ya existen.
 
@@ -719,9 +764,32 @@ def _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios) -> No
             # porque 'clasificar_creador_persistente' no degrada un caso que
             # YA tiene 'dexter' guardado: la evidencia vive en la fila, no en
             # esta lista.
-            registrados_por_dexter=registro)
+            registrados_por_dexter=registro,
+            #  La lista entera de abiertos del proveedor, o None: con ella se
+            #  releen primero los que ya no estan abiertos alla.
+            abiertos_en_proveedor=abiertos)
         rec = resumen["reconciliacion"]
         rec["alcanzados"] = len(cambios)
+        con = resumen["conciliacion"]
+        con["sospechosos"] = len(imp.sospechosos_de(conf, casos, abiertos))
+        #  Con getattr: un contador no puede tumbar la reconciliacion entera.
+        con["eliminados"] = sum(
+            1 for c in cambios
+            if (getattr(c, "despues", None) or {}).get("external_status")
+            == imp.ESTADO_ELIMINADO)
+        con["transitorios"] = sum(
+            1 for c in cambios if getattr(c, "transitorio", False))
+        con["eliminados_retenidos"] = sum(
+            1 for c in cambios
+            if "eliminacion retenida" in (getattr(c, "error", "") or ""))
+        if con["eliminados_retenidos"]:
+            #  LA ALARMA: no son borrados, es el proveedor contestando 404 a
+            #  todo. Nada se cerro; alguien tiene que mirar la credencial o la
+            #  URL del proveedor.
+            registrar("importacion",
+                      "demasiados 404 en una vuelta: no se da por eliminado "
+                      "ninguno", tenant=tenant,
+                      retenidos=con["eliminados_retenidos"])
         rec["errores_lectura"] = sum(1 for c in cambios if c.error)
         rec["con_diferencia"] = sum(1 for c in cambios if c.hay_diferencia)
         if aplicar_cambios and cambios:
