@@ -150,6 +150,46 @@ def _esquema_evaluacion(config, rol_cfg=None) -> dict:
             "type": "boolean",
             "description": _cuando_escalar(config),
         },
+        #  CUANTA CONFIANZA TIENE EN ESA DECISION  --  20/10/2026
+        #
+        #  POR QUE EXISTE. 'escalar' es un booleano, y un booleano no tiene
+        #  donde alojar una duda: "no molesto a nadie" y "no se si molestar a
+        #  alguien" salian identicos. Medido con 12 casos escritos a mano como
+        #  ambiguos: 0 de 12 abstenciones. Ese cero NO era un fallo de
+        #  criterio, era una IMPOSIBILIDAD -- no existia la salida con la que
+        #  decir que no sabe.
+        #
+        #  Y hay numero del otro lado: 88 casos por 5 corridas, el evaluador
+        #  decide distinto con la ENTRADA IDENTICA en 6 de 88 justo en
+        #  'escalar'. O sea que el sistema ya duda; lo que faltaba era que
+        #  pudiera decirlo.
+        #
+        #  EL CASO PELIGROSO NO ES EL QUE DESPIERTA DE MAS. Es
+        #  'escalar: false' con confianza baja: el agente decide no molestar a
+        #  nadie y no esta seguro. Hoy eso es indistinguible de un "no" firme,
+        #  y a las 3 de la mañana nadie lo revisa.
+        #
+        #  EL VOCABULARIO NO ES NUEVO: es el mismo
+        #  ('alta'/'media'/'baja') que ya usa 'confianza_del_grupo' en
+        #  'operaciones/paso_a_despacho.py'. Inventar una escala propia habria
+        #  dejado dos formas de decir lo mismo, y la segunda se desincroniza.
+        #
+        #  NO DECIDE NADA TODAVIA, a proposito. Se declara y se guarda; quien
+        #  la lea para cambiar una conducta es otro paso, y va en sombra
+        #  primero -- el mismo patron que el paso a Despacho y que las
+        #  correcciones del usuario.
+        "confianza": {
+            "type": "string",
+            "enum": ["alta", "media", "baja"],
+            "description": (
+                "Cuanta confianza tenes en el valor de 'escalar', no en el "
+                "resto de la ficha. 'baja' es una respuesta valida y util: "
+                "decila cuando el mensaje admite dos lecturas razonables, "
+                "cuando falta un dato que cambiaria la decision, o cuando "
+                "estas eligiendo entre escalar y no escalar casi en empate. "
+                "No la uses para decir que el caso es grave: eso es 'motivo'."
+            ),
+        },
         "motivo": {
             "type": "string",
             # Los motivos son nombres que declara cada empresa, asi que el
@@ -387,7 +427,11 @@ def _esquema_evaluacion(config, rol_cfg=None) -> dict:
     # que cuando SI escala tiene que nombrarlo, aunque sea con el mas cercano
     # -- y ese "mas cercano" es el dato que dice si al vocabulario del tenant
     # le falta un motivo. Un null no dice nada.
-    requeridos = ["escalar", "etiqueta", "resuelta",
+    #  'confianza' va en los REQUERIDOS y no como opcional: un campo que el
+    #  modelo puede omitir es un campo que omite, y entonces la ausencia se
+    #  confunde con "no tuvo dudas" -- que es exactamente la confusion que
+    #  esto viene a deshacer.
+    requeridos = ["escalar", "confianza", "etiqueta", "resuelta",
                   "no_se_pudo_comprobar", "siguiente_paso", "motivo"]
     if config.manual.casos:
         requeridos.append("caso_manual")
