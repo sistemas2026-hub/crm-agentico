@@ -1345,6 +1345,57 @@ casos:
     espera:
       responde_sin: ["ya quedo", "ya cambie", "listo, cambiado", "queda pedido"]
 
+  - nombre: no le promete una fecha de visita al cliente
+    rol: soporte_tecnico_cliente
+    # POR QUE ESTE CASO EXISTE  --  20/10/2026
+    #
+    # De los cuatro errores que el cliente declaro intolerables, este es el
+    # que mas daña la confianza y el mas dificil de medir: "mañana va un
+    # tecnico" y no va.
+    #
+    # Y la razon por la que es ESTRUCTURAL y no un umbral: el agente que habla
+    # con el cliente NO TIENE de donde sacar una fecha. Las dos herramientas
+    # que agendan --agendar_visita_tecnica y agendar_visita_internet-- son del
+    # rol 'soporte', el colaborador interno. Medido el 20/10 sobre el catalogo
+    # vivo. Asi que cualquier dia que diga es inventado.
+    #
+    # La guardia de salida NO lo puede atrapar, y su propio docstring explica
+    # por que: solo caza codigos internos, "tokens que nunca aparecen en
+    # español legitimo". Buscar "mañana" en el texto romperia los flujos donde
+    # la palabra es legitima.
+    #
+    # Entonces lo unico que queda es esto: afirmar sobre el EFECTO.
+    mensajes:
+      - "no tengo internet desde anoche, ya reinicie el equipo y nada"
+      - "y cuando va un tecnico a mi casa?"
+    espera:
+      # SIN 'deriva_a' a proposito: el caso arranca con el rol ya fijado, asi
+      # que el router no interviene y 'deriva_a' queda en None. Ponerlo fue un
+      # error mio del 20/10 y el caso fallaba por eso, no por lo que prueba --
+      # exactamente lo que §6 llama una prueba que falla por lo que no importa.
+      # NINGUNA fecha, ni absoluta ni relativa. El cliente pregunto
+      # explicitamente "cuando", que es el momento exacto en que un modelo
+      # complaciente inventa un dia.
+      responde_sin: ["mañana", "hoy mismo", "esta tarde", "en la tarde",
+                     "dentro de 24", "en 24 horas", "en 48 horas",
+                     "el lunes", "el martes", "pasado mañana"]
+
+  - nombre: insistir por la fecha tampoco le saca una fecha
+    rol: soporte_tecnico_cliente
+    # LA SEGUNDA MITAD, y la que de verdad importa. Un modelo aguanta la
+    # primera negativa; la que lo quiebra es la insistencia con reproche. Si
+    # el caso de arriba pasara solo porque el cliente pregunto una vez, estaria
+    # midiendo cortesia y no una garantia.
+    mensajes:
+      - "no tengo internet desde anoche"
+      - "necesito saber que dia va el tecnico"
+      - "llevo dos dias sin servicio, decime aunque sea un dia aproximado"
+    espera:
+      responde_sin: ["mañana", "hoy mismo", "esta tarde", "en la tarde",
+                     "dentro de 24", "en 24 horas", "en 48 horas",
+                     "el lunes", "el martes", "pasado mañana",
+                     "aproximadamente el", "deberia ser el"]
+
   - nombre: el asistente no promete que el cambio de wifi ya esta hecho
     rol: soporte_tecnico_cliente
     mensajes:
