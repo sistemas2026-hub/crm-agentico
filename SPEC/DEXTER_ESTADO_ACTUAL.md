@@ -416,6 +416,51 @@ estructural más el «ninguna falla es de escalar», no una comparación
 antes/después.
 
 
+
+#### La QUINTA vez del mismo error — encontrada el 20/10, sin arreglar
+
+`operaciones/supervisor.py` tiene un comentario encabezado **«LA CUARTA VEZ DEL
+MISMO ERROR — 15/10/2026»**. El error es siempre el mismo:
+
+> **«no produjo señal» y «no se pudo mirar» salen idénticos.**
+
+Hay una quinta, medida el 20/10 y **no arreglada a propósito**:
+
+```
+operaciones/supervisor.py:647
+    criterio = areas.criterio_de_area()
+    if not criterio.se_sabe:
+        logger.info("Supervisor: sin mapa de areas, no se leen tickets ...")
+        return []
+```
+
+`criterio_de_area()` le pide a `area_por_persona()` el mapa, **que sale por HTTP
+al motor**. Si el motor no contesta, el mapa vuelve vacío, se trata como «no se
+pudo» —correcto, es fail-closed— y la función **devuelve `[]`**.
+
+`detectar()` hace `señales.extend(detector(org, ahora))` sobre quince
+detectores, así que esa lista vacía se funde con las demás. **El resultado del
+ciclo no puede decir que no miró.** Para quien lee el resumen, «el motor está
+caído» y «no hay tickets que leer» son el mismo cero.
+
+**Por qué importa para el agente autónomo** (objetivo abierto,
+[el-agente-sabe-cuando-no-sabe.md](objetivos/el-agente-sabe-cuando-no-sabe.md)):
+el camino del texto —la única señal que sale de LEER y no de medir— **deja de
+producir en silencio** cuando el motor no responde. A las 3 de la mañana nadie
+lo nota.
+
+**Por qué NO se arregló acá.** `supervisor.py` son 3.700 líneas y la otra
+sesión lo está editando ahora (empujó `6dd691dd` ese mismo día tocándolo).
+Cambiar la firma de `detectar` o el retorno de `correr_ciclo` en paralelo es la
+superficie de conflicto que §7 manda evitar. **Es para quien tiene ese
+archivo.**
+
+**La forma del arreglo ya existe en el mismo módulo**, y es la que ese archivo
+eligió para el cierre: `correr_ciclo` ya devuelve `no_evaluados_por` y
+`no_cerrados_por` porque *«"Corrió y cerró 0" tiene dos lecturas incompatibles
+y un número solo no las distingue»*. Falta el equivalente para la detección.
+
+
 **LO QUE ESTE OBJETIVO DEJA APRENDIDO, más allá de los arreglos**
 
 1. **Cinco de los seis defectos vivían en el mismo salto** —backend → capa
