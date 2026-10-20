@@ -706,9 +706,10 @@ def ultima_publicada(tipo: WorkType) -> WorkTypeVersion | None:
             .order_by("-version").first())
 
 
-def _labor(labor) -> str:
+def _labor(labor, org) -> str:
+    from campo.labores import labor_valida
     labor = (labor or "").strip()
-    if labor and labor not in dict(WorkType.LABORES):
+    if labor and not labor_valida(org, labor):
         raise ErrorPlantilla("LABOR_INVALIDA", f"'{labor}' no es una labor.")
     return labor
 
@@ -808,12 +809,12 @@ def crear(org, *, base: str = "", nombre: str = "", labor: str = "",
             raise ErrorPlantilla("BASE_INEXISTENTE", "Esa plantilla de partida no existe.")
         codigo = b["codigo"]
         nombre = _texto(nombre or b["nombre"], "el nombre")
-        labor = _labor(labor or b["labor"])
+        labor = _labor(labor or b["labor"], org)
         definicion = definicion or definicion_de_base(b)
     else:
         nombre = _texto(nombre, "el nombre")
         codigo = _slug(nombre)
-        labor = _labor(labor)
+        labor = _labor(labor, org)
         if definicion is None:
             raise ErrorPlantilla("PLANTILLA_VACIA",
                                  "La plantilla no pide ningun dato ni foto.")
@@ -854,7 +855,7 @@ def publicar(tipo: WorkType, definicion: dict, *, nombre: str | None = None,
             tipo.nombre = _texto(nombre, "el nombre")
             campos.append("nombre")
         if labor is not None:
-            tipo.labor = _labor(labor)
+            tipo.labor = _labor(labor, tipo.org_id)
             campos.append("labor")
         #  Asuntos y plazo, del TIPO como la labor (19/10/2026). Viajan solo si
         #  vienen: 'con_plazo' distingue "no lo mande" de "lo borro" (None).

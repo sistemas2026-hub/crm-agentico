@@ -45,8 +45,10 @@ class WorkType(BaseModel):
         (CORRECTIVO, "Correctivo"),
         (TRABAJOS, "Trabajos"),
     )
+    #  Sin `choices` desde el 20/10/2026: las labores son de cada empresa
+    #  (`campo.labores`). Las valida `labor_valida`, no la columna.
     labor = models.CharField(
-        max_length=20, choices=LABORES, blank=True, default="",
+        max_length=20, blank=True, default="",
         help_text="Que cuadrillas pueden tomarlo. Vacio = sin clasificar.",
     )
     # LO QUE DESPACHO NECESITA PARA LLENAR EL FORMULARIO SOLO  --  19/10/2026
@@ -1501,4 +1503,8 @@ from campo.cuadrillas import (  # noqa: E402,F401
     Cuadrilla,
     IntegranteDeJornada,
     JornadaDeCuadrilla,
+)
+from campo.labores import (  # noqa: E402,F401
+    AsuntoDeLabor,
+    Labor,
 )

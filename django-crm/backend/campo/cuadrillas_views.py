@@ -29,6 +29,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from campo.models import AsignacionTrabajo, WorkType
+from campo.labores import (NOMBRE_DE_FABRICA, labor_valida,
+                           nombres_de_labor, renombrar_de_fabrica)
 from campo.cuadrillas import (ConfiguracionDeReparto, Cuadrilla,
                               IntegranteDeJornada, JornadaDeCuadrilla,
                               PersonaDeCampo, configuracion_de_reparto,
@@ -107,12 +109,28 @@ def _cuadrilla_json(c) -> dict:
     }
 
 
-def _jornada_json(j) -> dict:
+def _nombres_cambiados(org) -> dict:
+    """Los nombres de las de fabrica que la empresa CAMBIO; la que no aparece
+    usa el de fabrica. Es lo que la pantalla de Cuadrillas espera."""
+    return {c: n for c, n in nombres_de_labor(org).items()
+            if c in NOMBRE_DE_FABRICA and n != NOMBRE_DE_FABRICA[c]}
+
+
+def _codigos(org) -> str:
+    """Las labores de la empresa, para decir cuales son en un error."""
+    return ", ".join(l["id"] for l in labores_de(org))
+
+
+def _jornada_json(j, nombres: dict | None = None) -> dict:
+    #  El nombre de la labor, el de la EMPRESA (20/10/2026): antes salia de
+    #  `get_labor_display()`, que leia la tupla fija. `nombres` llega armado
+    #  cuando se arman muchas, para no consultar una vez por jornada.
+    nombres = nombres if nombres is not None else nombres_de_labor(j.org_id)
     return {
         "id": str(j.id),
         "fecha": j.fecha.isoformat(),
         "labor": j.labor,
-        "labor_nombre": j.get_labor_display(),
+        "labor_nombre": nombres.get(j.labor, j.labor),
         "cuadrilla": {"id": str(j.cuadrilla_id), "nombre": j.cuadrilla.nombre},
         # El lider del DIA, que puede no ser el de la cuadrilla: si esta de
         # vacaciones, alguien la lleva igual.
@@ -169,7 +187,7 @@ class CuadrillasView(APIView):
         #  Supervisor la jornada de cada dia; una cuadrilla nueva sin zonas no
         #  recibiria trabajo hasta que alguien la editara. Se valida ANTES de
         #  crear: una labor que no existe no deja una cuadrilla a medias.
-        labor, error = _labor_habitual_pedida(request.data)
+        labor, error = _labor_habitual_pedida(org, request.data)
         if error is not None:
             return error
         try:
@@ -190,7 +208,7 @@ class CuadrillasView(APIView):
         return Response(_cuadrilla_json(c), status=status.HTTP_201_CREATED)
 
 
-def _labor_habitual_pedida(data):
+def _labor_habitual_pedida(org, data):
     """
     (labor, None) con la labor habitual pedida, o (None, respuesta 400) si no
     es una labor. ("", None) si no vino: no se toca. Una sola validacion para
@@ -199,10 +217,9 @@ def _labor_habitual_pedida(data):
     if "labor_habitual" not in data:
         return "", None
     labor = (data.get("labor_habitual") or "").strip()
-    validas = dict(JornadaDeCuadrilla.LABORES)
-    if labor not in validas:
+    if not labor_valida(org, labor):
         return None, Response(
-            {"detail": f"'{labor}' no es una labor. Son: {', '.join(validas)}."},
+            {"detail": f"'{labor}' no es una labor. Son: {_codigos(org)}."},
             status=status.HTTP_400_BAD_REQUEST)
     return labor, None
 
@@ -246,7 +263,7 @@ class CuadrillaView(APIView):
             c.vehiculo = _vehiculo_de(org, request.data.get("vehiculo"))
         if "activa" in request.data:
             c.activa = bool(request.data.get("activa"))
-        labor, error = _labor_habitual_pedida(request.data)
+        labor, error = _labor_habitual_pedida(org, request.data)
         if error is not None:
             return error
         if labor:
@@ -360,7 +377,9 @@ class JornadaDeCuadrillaView(APIView):
             "fecha": fecha,
             "desde": desde,
             "hasta": hasta,
-            "jornadas": [_jornada_json(j) for j in qs],
+            #  Los nombres de las labores, una vez por pedido.
+            "jornadas": [_jornada_json(j, nombres)
+                         for nombres in [nombres_de_labor(org)] for j in qs],
         })
 
     def post(self, request):
@@ -380,10 +399,9 @@ class JornadaDeCuadrillaView(APIView):
                             status=status.HTTP_400_BAD_REQUEST)
 
         labor = (request.data.get("labor") or "").strip()
-        if labor not in dict(JornadaDeCuadrilla.LABORES):
+        if not labor_valida(org, labor):
             return Response(
-                {"detail": f"'{labor}' no es una labor. Son: "
-                           f"{', '.join(dict(JornadaDeCuadrilla.LABORES))}."},
+                {"detail": f"'{labor}' no es una labor. Son: {_codigos(org)}."},
                 status=status.HTTP_400_BAD_REQUEST)
 
         crudos = request.data.get("integrantes") or []
@@ -901,13 +919,11 @@ class TiposDeTrabajoView(APIView):
                             status=status.HTTP_404_NOT_FOUND)
 
         labor = (request.data.get("labor") or "").strip()
-        validas = dict(WorkType.LABORES)
         # Vacio es valido: es «volver a sin clasificar», y hace falta para
         # poder deshacer una clasificacion equivocada sin tocar la base.
-        if labor and labor not in validas:
+        if labor and not labor_valida(org, labor):
             return Response(
-                {"detail": f"'{labor}' no es una labor. Son: "
-                           f"{', '.join(validas)}."},
+                {"detail": f"'{labor}' no es una labor. Son: {_codigos(org)}."},
                 status=status.HTTP_400_BAD_REQUEST)
 
         tipo.labor = labor
@@ -956,7 +972,7 @@ class ConfiguracionDeRepartoView(APIView):
             #  COMO SE LLAMA CADA LABOR (20/10/2026): solo los que la empresa
             #  CAMBIO; la que no aparece usa el de fabrica. Las pantallas que
             #  listan labores las reciben ya con el nombre (`labores_de`).
-            "nombres_de_labor": dict(c.nombres_de_labor or {}),
+            "nombres_de_labor": _nombres_cambiados(org),
         })
 
     def put(self, request):
@@ -1011,10 +1027,9 @@ class ConfiguracionDeRepartoView(APIView):
         if "labor_por_grupo" in datos:
             pedido = datos.get("labor_por_grupo")
             grupos = ConfiguracionDeReparto.LABOR_POR_GRUPO_DE_FABRICA
-            labores = dict(JornadaDeCuadrilla.LABORES)
             if (not isinstance(pedido, dict)
                     or any(g not in grupos for g in pedido)
-                    or any((v or "") not in labores and (v or "") != ""
+                    or any((v or "") != "" and not labor_valida(org, v)
                            for v in pedido.values())):
                 return Response(
                     {"detail": "La tabla de labores tiene un grupo o una "
@@ -1024,19 +1039,19 @@ class ConfiguracionDeRepartoView(APIView):
                 str(g): (v or "") for g, v in pedido.items()}
 
         #  LOS NOMBRES DE LAS LABORES SOLO SI VIENEN (20/10/2026), como la
-        #  tabla de arriba. Se guarda solo lo que se cambio: vacio, o igual al
-        #  de fabrica, vuelve al de fabrica y no queda escrito.
+        #  tabla de arriba. Vacio, o igual al de fabrica, vuelve al de fabrica.
+        #  Desde la Fase 1 de labores propias se escriben en `Labor.nombre`
+        #  (la unica fuente del nombre), no en la columna vieja.
+        renombres = {}
         if "nombres_de_labor" in datos:
             pedido = datos.get("nombres_de_labor")
-            de_fabrica = dict(JornadaDeCuadrilla.LABORES)
             if (not isinstance(pedido, dict)
-                    or any(k not in de_fabrica for k in pedido)
+                    or any(k not in NOMBRE_DE_FABRICA for k in pedido)
                     or any(not isinstance(v, str) for v in pedido.values())):
                 return Response(
                     {"detail": "Los nombres de las labores tienen una labor "
                                "que no existe."},
                     status=status.HTTP_400_BAD_REQUEST)
-            propios = {}
             for labor, nombre in pedido.items():
                 nombre = " ".join(nombre.split())
                 if len(nombre) > MAX_NOMBRE_DE_LABOR:
@@ -1044,12 +1059,12 @@ class ConfiguracionDeRepartoView(APIView):
                         {"detail": f"El nombre de una labor pasa de "
                                    f"{MAX_NOMBRE_DE_LABOR} letras."},
                         status=status.HTTP_400_BAD_REQUEST)
-                if nombre and nombre != de_fabrica[labor]:
-                    propios[labor] = nombre
-            defaults["nombres_de_labor"] = propios
+                renombres[labor] = nombre
 
         fila, _ = ConfiguracionDeReparto.objects.update_or_create(
             org=org, defaults=defaults)
+        for labor, nombre in renombres.items():
+            renombrar_de_fabrica(org, labor, nombre)
         return Response({
             "activo": fila.activo,
             "hora_local": fila.hora_local,
@@ -1060,7 +1075,7 @@ class ConfiguracionDeRepartoView(APIView):
                                if fila.ultima_corrida else None),
             "configurado": True,
             "labor_por_grupo": labor_de_cada_grupo(org),
-            "nombres_de_labor": dict(fila.nombres_de_labor or {}),
+            "nombres_de_labor": _nombres_cambiados(org),
         })
 
 
