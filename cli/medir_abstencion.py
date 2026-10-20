@@ -43,6 +43,32 @@ QUÉ CUENTA COMO ABSTENERSE
 `confianza == "baja"`. No es «escaló» ni «no escaló»: es que lo haya DICHO.
 Un agente que escala por las dudas sin declararlo no se está absteniendo —
 está adivinando hacia el lado caro, y eso no se puede calibrar después.
+
+LO QUE ESTE NÚMERO **NO** ES  --  corregido el 20/10/2026
+---------------------------------------------------------
+La primera lectura de esta medición fue equivocada y conviene que quede
+escrita, porque el error es sutil y caro.
+
+**Este corpus etiqueta ambigüedad de RUTEO, no de escalada.** Se ve en el
+campo `veredicto.entre` de cada caso ambiguo: los doce listan ÁREAS
+(`[facturacion, soporte_tecnico]`, `[comercial, facturacion]`…). Lo que está
+en duda es *a qué cola va esto*, no *si hace falta una persona*.
+
+Y `confianza` mide otra cosa: su propia descripción dice «cuánta confianza
+tenés en el valor de **'escalar'**, no en el resto de la ficha».
+
+Más aún: **la derivación a área ni siquiera vive en este decisor** — está en
+el router (`derivar_a_area`, en `motor.py`), que es un componente distinto.
+
+Así que un `8 de 12` acá **no** dice «se abstiene bien». Dice que en 8 de 12
+conversaciones ambiguas la duda sobre el ruteo arrastró también a la decisión
+de escalar, que es una correlación razonable y no la medición pedida.
+
+**Lo que esto destapó, y es el hallazgo de verdad:** el router —que es donde
+vive la ambigüedad— **no tiene ninguna forma de decir «no sé a qué área va
+esto»**. Para un agente que rutea solo, mandar un caso a la cola equivocada
+con total seguridad es exactamente el error confiado-y-equivocado que esta
+ficha existe para evitar.
 ================================================================================
 """
 
@@ -135,6 +161,12 @@ def main() -> None:
     print("=" * 72)
     print("  ¿SE ABSTIENE CUANDO NO ALCANZA?")
     print("=" * 72)
+    print()
+    print("  OJO CON LEER ESTO MAL: el corpus etiqueta ambigüedad de RUTEO")
+    print("  (ver `veredicto.entre`, que lista áreas) y `confianza` mide la")
+    print("  decisión de ESCALAR. Un número alto acá es correlación, no la")
+    print("  medición de que rutee bien -- el router no tiene campo de")
+    print("  confianza todavía.")
     print()
     print(f"  ambiguos  (debía abstenerse)   {len(ok_ambiguos):>3} de {len(ambiguos)}")
     print(f"  claros    (NO debía)           {len(ok_claros):>3} de {len(claros)}")
