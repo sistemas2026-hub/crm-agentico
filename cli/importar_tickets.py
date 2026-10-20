@@ -57,7 +57,7 @@ from nucleo.seguimiento import importacion as imp  # noqa: E402
 from nucleo.seguimiento import importacion_io as io  # noqa: E402
 from nucleo.seguimiento.importacion_io import (  # noqa: E402
     aplicar, aplicar_reconciliacion, casos_de_este_proveedor, leer_ticket,
-    listar_tickets, resolver_servicios, tickets_conocidos)
+    listar_abiertos, listar_tickets, resolver_servicios, tickets_conocidos)
 
 # La cuenta con la que firma la API key de WispHub. Todo lo que entra por API
 # sale con este nombre, asi que NO identifica a Dexter: identifica "por API".
@@ -178,6 +178,10 @@ def main():
     p.add_argument("--area", default="soporte_tecnico",
                    help="area destino de la whitelist piloto")
     p.add_argument("--dias", type=int, help="ancho de la ventana, en dias")
+    p.add_argument("--meses", type=int,
+                   help="la conciliacion: lista los abiertos de los ultimos N "
+                        "meses en vez de la ventana, y dice cuantos casos "
+                        "abiertos en Dexter ya no estan abiertos alla")
     p.add_argument("--detalle", action="store_true", help="una linea por ticket")
     p.add_argument("--reconciliar", action="store_true",
                    help="ademas, que cambiaria de los casos ya conocidos")
@@ -210,6 +214,8 @@ def main():
               f"guardada del tenant no se toca")
     if args.dias:
         config.importacion_tickets.ventana_dias = args.dias
+    if args.meses is not None:
+        config.importacion_tickets.conciliar_meses = args.meses
 
     conf = config.importacion_tickets
     desde, hasta = imp.ventana(conf)
@@ -241,12 +247,21 @@ def main():
         print("[solo-reconciliar] NO se lista WispHub y NO se crea ningun caso")
         print(f"[casos] con referencia externa: {len(casos)}")
     else:
-        tickets = listar_tickets(config, args.tenant, desde, hasta)
-        print(f"[wisphub] tickets en la ventana: {len(tickets)}")
+        if conf.conciliar_meses > 0:
+            tickets = listar_abiertos(config, args.tenant)
+            print(f"[conciliacion] abiertos en WispHub, ultimos "
+                  f"{conf.conciliar_meses} meses: {len(tickets)}")
+        else:
+            tickets = listar_tickets(config, args.tenant, desde, hasta)
+            print(f"[wisphub] tickets en la ventana: {len(tickets)}")
         ids = [str(t.get("id_ticket")) for t in tickets if t.get("id_ticket")]
         conocidos, registro = tickets_conocidos(config, args.tenant, ids)
-        casos = casos_de_este_proveedor(config, args.tenant) if args.reconciliar else []
+        casos = (casos_de_este_proveedor(config, args.tenant)
+                 if args.reconciliar or conf.conciliar_meses > 0 else [])
         print(f"[casos] con referencia externa: {len(conocidos)}")
+        if conf.conciliar_meses > 0:
+            print(f"[conciliacion] abiertos en Dexter que ya no estan abiertos "
+                  f"alla: {len(imp.sospechosos_de(conf, casos, set(ids)))}")
 
     areas_por_persona = persistencia.areas_de_colaboradores(args.tenant)
     print(f"[areas] colaboradores con area: {len(areas_por_persona)} "

@@ -222,7 +222,10 @@ def detectar(org, ahora=None) -> list[Senal]:
 #
 #  Lo que NINGUN camino afirma: que el problema del cliente este resuelto. Eso
 #  no lo dice ninguna columna -- lo sabe el cliente.
-CERRADO_EN_PROVEEDOR = ("cerrado",)
+#  "eliminado" (20/10/2026): el motor marca asi un ticket que el proveedor
+#  contesta con 404 dos veces, separadas por una hora. Ya no existe alla: para
+#  el Supervisor es un cerrado alla, y se cierra con las mismas compuertas.
+CERRADO_EN_PROVEEDOR = ("cerrado", "eliminado")
 EN_CURSO_EN_PROVEEDOR = ("nuevo", "en progreso")
 
 #  CUANTO PUEDE TENER LA LECTURA PARA SOSTENER UNA PROPUESTA DE CIERRE
