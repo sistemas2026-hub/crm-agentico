@@ -56,7 +56,7 @@ es indistinguible de un «no» firme, y a las 3 de la mañana nadie lo revisa.
 | 1 | La decisión declara confianza, con el vocabulario que el sistema YA usa (`alta`/`media`/`baja`, de `operaciones/paso_a_despacho.py:119`) — no una escala nueva | `grep -n '"confianza"' nucleo/seguimiento/escalamiento.py` muestra el campo en el esquema y en `requeridos` |
 | 2 | Una guarda que mata la mutación: quitar `confianza` de `requeridos` tiene que poner una prueba en rojo | correr la prueba con la mutación aplicada, y pegar el rojo |
 | 3 | `cli/evaluar.py rapilink --humo --base` **no empeora** respecto de la línea base | línea base del 19/10: `8/9 OK (89%)`, con el caso de ventas como rojo conocido. Pegar la salida |
-| 4 | Los 56 casos dorados no empeoran | `py -3.13 cli/evaluar.py rapilink --base`, salida pegada, comparada contra una corrida previa del mismo día (§6: una sola corrida no separa regresión de varianza) |
+| 4 | El set dorado completo no empeora | `py -3.13 cli/evaluar.py rapilink --base --json <archivo>`, **con `--json`**: sin él la salida se trunca y queda el total sin los casos, que es lo que pasó el 20/10. Son **90 casos, no 56** (medido ese día: `86/90 OK (96%)`); CLAUDE.md todavía dice 56 en varios lugares. Comparado contra una corrida previa del mismo día — §6: una sola corrida no separa regresión de varianza |
 | 5 | La abstención se MIDE, no se declara | contra el corpus sintético de 20 trampas (12 ambiguas / 8 claras). Hoy da `0 de 12`; terminado es un número distinto de cero, con las 8 claras sin romperse |
 
 ## Lo que NO se toca en el camino
