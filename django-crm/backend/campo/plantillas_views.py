@@ -28,6 +28,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from campo import plantillas as P
+from campo.cuadrillas import labores_de
 from campo.cuadrillas_views import _exigir_gestion
 from campo.models import OrdenTrabajo, WorkType
 from campo.permissions import IsCampoAuthenticated
@@ -101,7 +102,8 @@ class PlantillasView(APIView):
                 for b in P.CATALOGO_BASE
             ],
             "tipos": [{"id": i, "texto": t, "ayuda": a} for i, t, a in P.TIPOS],
-            "labores": [{"id": v, "texto": n} for v, n in WorkType.LABORES],
+            #  Con el nombre que les da la empresa (20/10/2026).
+            "labores": labores_de(org),
         })
 
     @manejar_idempotencia

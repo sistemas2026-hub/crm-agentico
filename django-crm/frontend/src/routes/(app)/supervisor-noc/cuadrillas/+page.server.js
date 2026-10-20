@@ -407,6 +407,16 @@ export const actions = {
             .map((g) => [g, String(f.get(`labor_de_${g}`) ?? '')])
         );
       }
+      //  LOS NOMBRES DE LAS LABORES (20/10/2026), solo si el formulario los
+      //  trae. Vacío viaja vacío: es «el de siempre».
+      const labores = ['instalacion', 'correctivo', 'trabajos'];
+      if (labores.some((l) => f.has(`nombre_labor_${l}`))) {
+        cuerpo.nombres_de_labor = Object.fromEntries(
+          labores
+            .filter((l) => f.has(`nombre_labor_${l}`))
+            .map((l) => [l, String(f.get(`nombre_labor_${l}`) ?? '').trim()])
+        );
+      }
       const r = await guardarConfiguracionDeReparto({ cookies }, cuerpo);
       return {
         hecho: r?.activo

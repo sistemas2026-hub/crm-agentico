@@ -337,6 +337,15 @@ class ConfiguracionDeReparto(BaseModel):
     onus_para_corte_de_red = models.PositiveSmallIntegerField(
         default=CORTE_DE_RED_DE_FABRICA)
 
+    #: COMO SE LLAMA CADA LABOR EN ESTA EMPRESA  --  20/10/2026. Pedido del
+    #: usuario: en Rapilink la cuadrilla de instalacion solo hace clientes
+    #: nuevos, y los traslados los hace la de correctivo -- pero «un cambio de
+    #: domicilio no es un correctivo». Se cambia el NOMBRE que se ve, no la
+    #: labor: el valor interno ('correctivo') lo usan el reparto, el Supervisor
+    #: y las jornadas. Por empresa (CLAUDE.md §3.3). Vacio = los de fabrica;
+    #: una clave guardada pisa solo la suya. Ver `labores_de`.
+    nombres_de_labor = models.JSONField(default=dict, blank=True)
+
     #: El ULTIMO DIA LOCAL en que esto corrio. Es lo que evita que corra dos
     #: veces.
     #:
@@ -372,6 +381,24 @@ def onus_para_corte_de_red(org_id) -> int:
          .values_list("onus_para_corte_de_red", flat=True).first())
     return n if isinstance(n, int) and n >= 2 else (
         ConfiguracionDeReparto.CORTE_DE_RED_DE_FABRICA)
+
+
+#: El nombre mas largo que se acepta para una labor.
+MAX_NOMBRE_DE_LABOR = 40
+
+
+def labores_de(org) -> list[dict]:
+    """Las labores, con el nombre que les da ESTA empresa (o el de fabrica).
+
+    UNA sola lista para todas las pantallas que las muestran -- Plantillas,
+    Despacho, Cuadrillas --: si cada una armara la suya, el nombre cambiaria
+    en una y no en las otras. El 'id' es siempre el interno.
+    """
+    propios = (ConfiguracionDeReparto.objects.filter(org=org)
+               .values_list("nombres_de_labor", flat=True).first()) or {}
+    return [{"id": v,
+             "texto": str(propios.get(v) or "").strip() or n}
+            for v, n in JornadaDeCuadrilla.LABORES]
 
 
 def labor_de_cada_grupo(org) -> dict:

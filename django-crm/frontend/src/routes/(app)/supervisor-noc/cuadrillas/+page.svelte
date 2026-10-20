@@ -81,11 +81,22 @@
     }
   });
 
-  const LABORES = [
+  const LABORES_DE_FABRICA = [
     { id: 'instalacion', texto: 'Instalación' },
     { id: 'correctivo', texto: 'Correctivo' },
     { id: 'trabajos', texto: 'Trabajos' }
   ];
+  /**
+   * CON EL NOMBRE DE LA EMPRESA (20/10/2026). Se llaman como la empresa las
+   * nombró en «Nombre de cada labor»; las que no cambió, como siempre. El id
+   * es el interno y no cambia.
+   */
+  const LABORES = $derived(
+    LABORES_DE_FABRICA.map((l) => ({
+      ...l,
+      texto: data.reparto_config?.nombres_de_labor?.[l.id] || l.texto
+    }))
+  );
 
   const ROLES = [
     { id: 'tecnico_lider', texto: 'Técnico líder' },
@@ -854,6 +865,29 @@
               <strong>Encendido</strong> — corre solo todas las noches
             </span>
           </label>
+
+          <!-- CÓMO SE LLAMA CADA LABOR (20/10/2026). Pedido del usuario: los
+               traslados los hace la cuadrilla de correctivo, «pero un cambio
+               de domicilio no es un correctivo». Cambia el nombre que se ve en
+               todas las pantallas; qué cuadrilla recibe qué no cambia. Vacío =
+               el de siempre. -->
+          <div class="snoc-pila-xs">
+            <span class="snoc-label">Nombre de cada labor</span>
+            <p class="snoc-body-sm snoc-secundario">
+              Cambia solo cómo se llama en Plantillas, Despacho y Cuadrillas. Qué
+              cuadrilla recibe cada trabajo sigue igual.
+            </p>
+            <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+              {#each LABORES_DE_FABRICA as l (l.id)}
+                <label class="snoc-campo-grupo">
+                  <span class="snoc-label">{l.texto}</span>
+                  <input class="snoc-campo" name={`nombre_labor_${l.id}`} maxlength="40"
+                         value={data.reparto_config.nombres_de_labor?.[l.id] ?? ''}
+                         placeholder={l.texto} />
+                </label>
+              {/each}
+            </div>
+          </div>
 
           <!-- DE QUÉ LABOR ES CADA CASO (17/10/2026). Por empresa y no en
                código: en otro ISP un trabajo pedido puede ir a otra labor. -->

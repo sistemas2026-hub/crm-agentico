@@ -41,6 +41,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from campo.models import OrdenTrabajo, WorkType, WorkTypeVersion
+from campo.cuadrillas import labores_de
 from campo.permissions import IsCampoAuthenticated
 
 
@@ -78,7 +79,8 @@ class PlantillasDeTrabajoView(APIView):
 
         return Response({
             "plantillas": plantillas,
-            "labores": [{"id": v, "texto": n} for v, n in WorkType.LABORES],
+            #  Con el nombre que les da la empresa (20/10/2026).
+            "labores": labores_de(org),
             #  Las que no tienen labor NO las puede repartir el ciclo de la
             #  madrugada. Se dice aca para que el aviso aparezca donde se
             #  despacha, no solo en la pantalla de configuracion.

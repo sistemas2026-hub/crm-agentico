@@ -32,7 +32,8 @@ from campo.models import AsignacionTrabajo, WorkType
 from campo.cuadrillas import (ConfiguracionDeReparto, Cuadrilla,
                               IntegranteDeJornada, JornadaDeCuadrilla,
                               PersonaDeCampo, configuracion_de_reparto,
-                              destinatarios, labor_de_cada_grupo)
+                              destinatarios, labor_de_cada_grupo,
+                              labores_de, MAX_NOMBRE_DE_LABOR)
 from campo.zonas import AliasDeZona, ZonaOperativa, normalizar_localidad
 from campo.inventario import UbicacionInventario
 from campo.permissions import IsCampoAuthenticated, ROLES_GESTION
@@ -882,7 +883,8 @@ class TiposDeTrabajoView(APIView):
                  "labor": t.labor}
                 for t in qs
             ],
-            "labores": [{"id": v, "texto": n} for v, n in WorkType.LABORES],
+            #  Con el nombre que les da la empresa (20/10/2026).
+            "labores": labores_de(org),
             # Cuantos quedan sin clasificar: es el numero que explica por que
             # el reparto deja ordenes afuera, y tenerlo aqui evita cruzarlo a
             # mano contra la lista.
@@ -951,6 +953,10 @@ class ConfiguracionDeRepartoView(APIView):
             #  de fabrica o de la empresa. Un grupo que no aparece no inclina
             #  ninguna jornada. Ver `labor_de_cada_grupo`.
             "labor_por_grupo": labor_de_cada_grupo(org),
+            #  COMO SE LLAMA CADA LABOR (20/10/2026): solo los que la empresa
+            #  CAMBIO; la que no aparece usa el de fabrica. Las pantallas que
+            #  listan labores las reciben ya con el nombre (`labores_de`).
+            "nombres_de_labor": dict(c.nombres_de_labor or {}),
         })
 
     def put(self, request):
@@ -1017,6 +1023,31 @@ class ConfiguracionDeRepartoView(APIView):
             defaults["labor_por_grupo"] = {
                 str(g): (v or "") for g, v in pedido.items()}
 
+        #  LOS NOMBRES DE LAS LABORES SOLO SI VIENEN (20/10/2026), como la
+        #  tabla de arriba. Se guarda solo lo que se cambio: vacio, o igual al
+        #  de fabrica, vuelve al de fabrica y no queda escrito.
+        if "nombres_de_labor" in datos:
+            pedido = datos.get("nombres_de_labor")
+            de_fabrica = dict(JornadaDeCuadrilla.LABORES)
+            if (not isinstance(pedido, dict)
+                    or any(k not in de_fabrica for k in pedido)
+                    or any(not isinstance(v, str) for v in pedido.values())):
+                return Response(
+                    {"detail": "Los nombres de las labores tienen una labor "
+                               "que no existe."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            propios = {}
+            for labor, nombre in pedido.items():
+                nombre = " ".join(nombre.split())
+                if len(nombre) > MAX_NOMBRE_DE_LABOR:
+                    return Response(
+                        {"detail": f"El nombre de una labor pasa de "
+                                   f"{MAX_NOMBRE_DE_LABOR} letras."},
+                        status=status.HTTP_400_BAD_REQUEST)
+                if nombre and nombre != de_fabrica[labor]:
+                    propios[labor] = nombre
+            defaults["nombres_de_labor"] = propios
+
         fila, _ = ConfiguracionDeReparto.objects.update_or_create(
             org=org, defaults=defaults)
         return Response({
@@ -1029,6 +1060,7 @@ class ConfiguracionDeRepartoView(APIView):
                                if fila.ultima_corrida else None),
             "configurado": True,
             "labor_por_grupo": labor_de_cada_grupo(org),
+            "nombres_de_labor": dict(fila.nombres_de_labor or {}),
         })
 
 
