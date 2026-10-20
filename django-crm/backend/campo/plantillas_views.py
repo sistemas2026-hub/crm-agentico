@@ -62,6 +62,10 @@ def _resumen(tipo) -> dict:
         "codigo": tipo.codigo,
         "nombre": tipo.nombre,
         "labor": tipo.labor,
+        #  Con que asuntos del proveedor y en cuantos dias (19/10/2026): lo
+        #  que Despacho usa para llenar el formulario solo.
+        "asuntos": list(tipo.asuntos or []),
+        "plazo_dias": tipo.plazo_dias,
         "activo": tipo.activo,
         "version": v.version if v else None,
         "publicada_en": v.publicada_en.isoformat() if v and v.publicada_en else None,
@@ -183,6 +187,9 @@ class PublicarPlantillaView(APIView):
                 tipo, d.get("definicion"),
                 nombre=d.get("nombre") if "nombre" in d else None,
                 labor=d.get("labor") if "labor" in d else None,
+                asuntos=d.get("asuntos") if "asuntos" in d else None,
+                plazo_dias=d.get("plazo_dias"),
+                con_plazo="plazo_dias" in d,
             )
         except P.ErrorPlantilla as e:
             return _error(e)

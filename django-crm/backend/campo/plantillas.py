@@ -713,6 +713,88 @@ def _labor(labor) -> str:
     return labor
 
 
+# =============================================================================
+#  ASUNTOS Y PLAZO  --  19/10/2026
+# =============================================================================
+#  Lo que Despacho necesita para llenar el formulario solo. Ver el comentario
+#  de los campos en 'campo/models.py::WorkType'.
+
+#: Cuantos asuntos puede atender una plantilla. Mas que esto no es una lista de
+#: asuntos, es haber pegado otra cosa.
+MAX_ASUNTOS = 40
+#: El plazo mas largo que se acepta. Un trabajo a mas de dos meses no se
+#: despacha: se agenda aparte.
+MAX_PLAZO_DIAS = 60
+
+
+def normalizar_asunto(texto) -> str:
+    """El asunto sin mayusculas, tildes ni espacios de mas: «Cambio De
+    Domicilio» y «cambio de  domicilio» son el mismo."""
+    sin_tildes = "".join(
+        c for c in unicodedata.normalize("NFKD", str(texto or ""))
+        if not unicodedata.combining(c))
+    return " ".join(sin_tildes.lower().split())
+
+
+def _asuntos(valor, tipo: WorkType) -> list[str]:
+    """La lista de asuntos, limpia. Acepta una lista o un texto, uno por linea.
+
+    Dos plantillas de la misma empresa NO comparten asunto: Despacho no podria
+    saber cual proponer, y elegir una por un orden que nadie ve es adivinar.
+    """
+    if isinstance(valor, str):
+        valor = valor.splitlines()
+    if not isinstance(valor, (list, tuple)):
+        raise ErrorPlantilla("ASUNTOS_INVALIDOS",
+                             "Los asuntos van uno por linea.")
+    limpios, vistos = [], set()
+    for a in valor:
+        t = _texto(a, "un asunto", obligatorio=False)
+        clave = normalizar_asunto(t)
+        if not clave or clave in vistos:
+            continue
+        vistos.add(clave)
+        limpios.append(t)
+    if len(limpios) > MAX_ASUNTOS:
+        raise ErrorPlantilla("ASUNTOS_DEMASIADOS",
+                             f"Pasan de {MAX_ASUNTOS} asuntos.")
+    otros = (WorkType.objects.filter(org_id=tipo.org_id)
+             .exclude(pk=tipo.pk).only("nombre", "asuntos"))
+    for otro in otros:
+        repetidos = vistos & {normalizar_asunto(x) for x in (otro.asuntos or [])}
+        if repetidos:
+            raise ErrorPlantilla(
+                "ASUNTO_REPETIDO",
+                f"«{sorted(repetidos)[0]}» ya lo atiende la plantilla "
+                f"«{otro.nombre}». Un asunto va en una sola.")
+    return limpios
+
+
+def _plazo(valor) -> int | None:
+    if valor in (None, ""):
+        return None
+    try:
+        n = int(valor)
+    except (TypeError, ValueError):
+        raise ErrorPlantilla("PLAZO_INVALIDO", "El plazo va en dias, un numero.")
+    if n < 0 or n > MAX_PLAZO_DIAS:
+        raise ErrorPlantilla("PLAZO_INVALIDO",
+                             f"El plazo va de 0 a {MAX_PLAZO_DIAS} dias.")
+    return n
+
+
+def plantilla_para_asunto(versiones, asunto):
+    """De las plantillas que Despacho ofrece, la que atiende este asunto.
+    None si ninguna lo declara."""
+    clave = normalizar_asunto(asunto)
+    if not clave:
+        return None
+    for v in versiones:
+        if clave in {normalizar_asunto(x) for x in (v.work_type.asuntos or [])}:
+            return v
+    return None
+
+
 def crear(org, *, base: str = "", nombre: str = "", labor: str = "",
           definicion: dict | None = None) -> tuple[WorkType, WorkTypeVersion]:
     """Una plantilla nueva para la empresa, desde el catalogo o desde cero.
@@ -752,7 +834,9 @@ def crear(org, *, base: str = "", nombre: str = "", labor: str = "",
 
 
 def publicar(tipo: WorkType, definicion: dict, *, nombre: str | None = None,
-             labor: str | None = None) -> tuple[WorkTypeVersion, bool]:
+             labor: str | None = None, asuntos=None,
+             plazo_dias=None, con_plazo: bool = False
+             ) -> tuple[WorkTypeVersion, bool]:
     """Publica una version NUEVA. Devuelve `(version, cambio)`.
 
     Si el esquema no cambio no se crea otra version: «v7» igual a «v6» solo
@@ -772,6 +856,14 @@ def publicar(tipo: WorkType, definicion: dict, *, nombre: str | None = None,
         if labor is not None:
             tipo.labor = _labor(labor)
             campos.append("labor")
+        #  Asuntos y plazo, del TIPO como la labor (19/10/2026). Viajan solo si
+        #  vienen: 'con_plazo' distingue "no lo mande" de "lo borro" (None).
+        if asuntos is not None:
+            tipo.asuntos = _asuntos(asuntos, tipo)
+            campos.append("asuntos")
+        if con_plazo:
+            tipo.plazo_dias = _plazo(plazo_dias)
+            campos.append("plazo_dias")
         if campos:
             tipo.save(update_fields=campos)
 

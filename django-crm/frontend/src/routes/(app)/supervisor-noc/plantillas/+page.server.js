@@ -91,14 +91,35 @@ export const actions = {
     //  Nombre y labor viajan SOLO si el formulario los trae. Mandarlos vacíos
     //  no es «sin cambios»: el backend borraría la labor, y una plantilla sin
     //  labor deja de repartirse sin que nada lo diga.
-    /** @type {{ definicion: any, nombre?: string, labor?: string }} */
+    /** @type {{ definicion: any, nombre?: string, labor?: string,
+     *           asuntos?: string[], plazo_dias?: number | null }} */
     const cuerpo = { definicion };
     if (f.has('nombre')) cuerpo.nombre = String(f.get('nombre')).trim();
     if (f.has('labor')) cuerpo.labor = String(f.get('labor')).trim();
+    //  Asuntos y plazo (19/10/2026), con la misma regla: solo si el formulario
+    //  los trae. Vacío en el plazo SÍ viaja, como null: es «sin plazo».
+    if (f.has('asuntos')) {
+      cuerpo.asuntos = String(f.get('asuntos'))
+        .split('\n').map((a) => a.trim()).filter(Boolean);
+    }
+    if (f.has('plazo_dias')) {
+      const p = String(f.get('plazo_dias')).trim();
+      cuerpo.plazo_dias = p === '' ? null : Number(p);
+    }
     try {
       const r = await publicarPlantilla({ cookies }, id, cuerpo);
       if (!r.cambio) {
-        return { hecho: 'No había cambios en el formulario: sigue la misma versión.' };
+        //  El formulario del técnico no cambió, pero nombre, labor, asuntos y
+        //  plazo son de la plantilla y se guardan igual: decir "no había
+        //  cambios" a quien acaba de cargar asuntos sería falso. Y al revés:
+        //  decir "guardados" cuando no viajó ninguno también.
+        const deLaPlantilla = ['nombre', 'labor', 'asuntos', 'plazo_dias'].some((k) => f.has(k));
+        return {
+          hecho: deLaPlantilla
+            ? 'Guardados nombre, labor, asuntos y plazo. El formulario del técnico no cambió: ' +
+              'sigue la misma versión.'
+            : 'No había cambios en el formulario: sigue la misma versión.'
+        };
       }
       //  Lo que NO cambia se dice: las órdenes ya creadas conservan la
       //  versión con la que nacieron.

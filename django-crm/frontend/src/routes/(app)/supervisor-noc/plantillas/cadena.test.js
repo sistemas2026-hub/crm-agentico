@@ -63,6 +63,22 @@ describe('publicar', () => {
     expect(apiRequest.mock.calls[0][1].body).toEqual({ definicion: { campos: [] } });
   });
 
+  it('asuntos uno por línea y plazo vacío = sin plazo (19/10/2026)', async () => {
+    apiRequest.mockResolvedValue({ cambio: false, version: 1 });
+    const r = await actions.publicar(peticion({
+      id: 'abc', definicion: '{"campos":[]}',
+      asuntos: 'Cambio De Domicilio\n\n  Traslado  \n', plazo_dias: ''
+    }));
+    expect(apiRequest.mock.calls[0][1].body).toEqual({
+      definicion: { campos: [] },
+      asuntos: ['Cambio De Domicilio', 'Traslado'],
+      plazo_dias: null
+    });
+    //  Se guardaron aunque el formulario del técnico no cambió: decirlo.
+    expect(r.hecho).toMatch(/Guardados/);
+    expect(r.hecho).toMatch(/sigue la misma versión/);
+  });
+
   it('dice que las órdenes abiertas NO cambian', async () => {
     apiRequest.mockResolvedValue({ cambio: true, version: 2, ordenes_vivas: 4 });
     const r = await actions.publicar(peticion({ id: 'abc', definicion: '{"campos":[]}' }));

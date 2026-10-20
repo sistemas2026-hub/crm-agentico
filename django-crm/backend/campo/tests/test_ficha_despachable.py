@@ -230,3 +230,69 @@ def test_h2_si_paso_solo_marcado_la_marca_no_se_repite(
     lectura = admin_client.get(_ruta(caso)).json()["lectura"]
     assert marca in lectura["por_que_paso"]
     assert lectura["corte_de_red"] == ""
+
+
+# ---------------------------------------------------------------------------
+# I · el formulario lleno  --  19/10/2026
+# ---------------------------------------------------------------------------
+# Pedido del usuario: al tocar «Despachar», plantilla, fecha y prioridad
+# elegidas segun lo que vio el Supervisor. La ficha trae los tres datos.
+
+def _plantilla(org, codigo, nombre, *, asuntos=(), plazo=None):
+    from campo.models import WorkType, WorkTypeVersion
+    tipo = WorkType.objects.create(org=org, codigo=codigo, nombre=nombre,
+                                   labor="trabajos", asuntos=list(asuntos),
+                                   plazo_dias=plazo)
+    return WorkTypeVersion.objects.create(
+        work_type=tipo, version=1, estado=WorkTypeVersion.PUBLICADA,
+        esquema={"campos": [{"id": "foto", "tipo": "foto"}]})
+
+
+def test_i_la_plantilla_viene_por_el_asunto_del_ticket(
+        admin_client, org_a, ficha_del_motor):
+    _plantilla(org_a, "router", "Cambio de router",
+               asuntos=["Cambio De Router Wifi"])
+    traslado = _plantilla(org_a, "traslado", "Traslado",
+                          asuntos=["Cambio De Domicilio"], plazo=3)
+    #  Sin mayusculas, con tilde de mas y doble espacio: es el mismo asunto.
+    caso = _caso(org_a, name="cambio de  domicílio")
+    _propuesta(org_a, caso)
+
+    d = admin_client.get(_ruta(caso)).json()
+    assert d["plantilla_sugerida"] == str(traslado.id)
+
+
+def test_i2_un_asunto_que_ninguna_declara_no_propone_plantilla(
+        admin_client, org_a, ficha_del_motor):
+    _plantilla(org_a, "reconexion", "Reconexion", asuntos=["Reconexion"])
+    caso = _caso(org_a)
+    _propuesta(org_a, caso)
+    assert admin_client.get(_ruta(caso)).json()["plantilla_sugerida"] is None
+
+
+def test_i3_una_plantilla_dada_de_baja_no_se_propone(
+        admin_client, org_a, ficha_del_motor):
+    from campo.models import WorkType
+    v = _plantilla(org_a, "traslado", "Traslado", asuntos=["Cambio De Domicilio"])
+    WorkType.objects.filter(pk=v.work_type_id).update(activo=False)
+    caso = _caso(org_a, name="Cambio De Domicilio")
+    _propuesta(org_a, caso)
+    assert admin_client.get(_ruta(caso)).json()["plantilla_sugerida"] is None
+
+
+def test_j_trae_la_creacion_y_la_prioridad_del_supervisor(
+        admin_client, org_a, ficha_del_motor):
+    from operaciones.models import PropuestaSupervisor
+    caso = _caso(org_a)
+    p = _propuesta(org_a, caso)
+    PropuestaSupervisor.objects.filter(pk=p.pk).update(prioridad=14)
+
+    d = admin_client.get(_ruta(caso)).json()
+    assert d["prioridad_supervisor"] == 14
+    assert d["creado"].startswith(caso.created_at.date().isoformat())
+
+
+def test_k_la_lista_de_plantillas_trae_el_plazo(admin_client, org_a):
+    _plantilla(org_a, "traslado", "Traslado", plazo=3)
+    p = admin_client.get("/api/campo/plantillas-de-trabajo/").json()["plantillas"][0]
+    assert p["plazo_dias"] == 3

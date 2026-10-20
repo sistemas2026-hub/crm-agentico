@@ -49,6 +49,30 @@ class WorkType(BaseModel):
         max_length=20, choices=LABORES, blank=True, default="",
         help_text="Que cuadrillas pueden tomarlo. Vacio = sin clasificar.",
     )
+    # LO QUE DESPACHO NECESITA PARA LLENAR EL FORMULARIO SOLO  --  19/10/2026
+    #
+    # Pedido por el usuario: al tocar «Despachar», que la plantilla, la fecha y
+    # la prioridad vengan elegidas. La labor no alcanza para la plantilla: una
+    # labor tiene varias (trabajos = traslado, punto de TV, cambio de router), y
+    # el Supervisor no la concluye en un trabajo pedido por el cliente -- lo
+    # dice él mismo: «qué tipo de trabajo es lo decide quien despacha».
+    #
+    # Lo que identifica el trabajo es el ASUNTO del ticket del proveedor
+    # («Cambio De Domicilio»). Cada empresa dice que asuntos atiende cada
+    # plantilla: es configuracion de la empresa, no una regla del codigo. Se
+    # comparan sin mayusculas, tildes ni espacios de mas.
+    asuntos = models.JSONField(
+        default=list, blank=True,
+        help_text="Asuntos de tickets del proveedor que se despachan con esta "
+                  "plantilla. Dos plantillas de la empresa no comparten asunto.",
+    )
+    # Cuantos dias, desde que se CREO el ticket, tiene la empresa para hacer
+    # este trabajo. Despacho propone «para cuando» = creacion + plazo; si ya
+    # paso, hoy. Vacio = no se propone fecha.
+    plazo_dias = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="Dias desde la creacion del ticket para hacer el trabajo.",
+    )
 
     class Meta:
         db_table = "campo_work_type"

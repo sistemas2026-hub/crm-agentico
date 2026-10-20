@@ -25,11 +25,16 @@
   let borrador = $state(/** @type {any} */ (null));
   let nombre = $state('');
   let labor = $state('');
+  /** Uno por línea, como se escriben y se leen (19/10/2026). */
+  let asuntos = $state('');
+  let plazoDias = $state(/** @type {number | null} */ (null));
   $effect(() => {
     const e = data.edicion;
     borrador = e?.definicion ? clonar(e.definicion) : null;
     nombre = e?.nombre ?? '';
     labor = e?.labor ?? '';
+    asuntos = (e?.asuntos ?? []).join('\n');
+    plazoDias = e?.plazo_dias ?? null;
   });
 
   let publicando = $state(false);
@@ -252,7 +257,26 @@
                   <input class="snoc-campo" type="number" min="1" max="1440"
                          bind:value={borrador.duracion_estimada_minutos} />
                 </label>
+                <label class="snoc-campo-grupo">
+                  <span class="snoc-label">Plazo para hacerlo (días)</span>
+                  <input class="snoc-campo" type="number" name="plazo_dias" min="0" max="60"
+                         bind:value={plazoDias} placeholder="sin plazo" />
+                </label>
               </div>
+
+              <!-- LO QUE DESPACHO USA PARA LLENAR EL FORMULARIO SOLO (19/10/2026).
+                   El asunto del ticket elige esta plantilla; el plazo, contado
+                   desde que se creó el ticket, propone «para cuándo». -->
+              <label class="snoc-campo-grupo">
+                <span class="snoc-label">Asuntos de WispHub que se despachan con esta plantilla</span>
+                <textarea class="snoc-campo" name="asuntos" rows="3" bind:value={asuntos}
+                          placeholder={'Uno por línea, como vienen en el ticket. Ej.:\nCambio De Domicilio'}></textarea>
+                <span class="snoc-body-sm snoc-secundario">
+                  Al despachar un ticket con uno de estos asuntos, esta plantilla viene elegida, y
+                  «para cuándo» se propone como la fecha de creación del ticket más el plazo.
+                  Un asunto va en una sola plantilla.
+                </span>
+              </label>
 
               <div class="snoc-dos-columnas" style="gap:var(--snoc-md); align-items:start;">
                 <!-- ---- lo que se edita ---- -->

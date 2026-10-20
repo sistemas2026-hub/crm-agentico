@@ -356,3 +356,67 @@ def test_i_lo_que_anota_el_tecnico_pasa_el_validador_del_backend():
     assert ids[1] in errores          # fuera de rango
     _, errores = validar_campos_tecnicos(esquema, {ids[3]: "Quizas"})
     assert ids[3] in errores          # fuera de las opciones del checklist
+
+
+# ---------------------------------------------------------------------------
+# I · asuntos y plazo  --  19/10/2026
+# ---------------------------------------------------------------------------
+# Lo que Despacho usa para llenar el formulario solo: el asunto del ticket
+# elige la plantilla, y el plazo propone «para cuando». Son del TIPO, como la
+# labor: se guardan aunque el formulario del tecnico no cambie.
+
+def _nueva(admin_client, nombre):
+    return admin_client.post(LISTA, {"nombre": nombre, "labor": "trabajos",
+                                     "definicion": _definicion_minima()},
+                             format="json").json()["id"]
+
+
+def test_i_publicar_guarda_asuntos_y_plazo_sin_crear_version(admin_client):
+    tipo_id = _nueva(admin_client, "Traslado")
+    r = admin_client.post(_publicar(tipo_id), {
+        "definicion": _definicion_minima(),
+        "asuntos": ["Cambio De Domicilio", "  cambio de  domicilio ", "", "Traslado"],
+        "plazo_dias": 3}, format="json")
+    assert r.status_code == 200, r.content
+    assert r.json()["cambio"] is False
+    #  Repetidos (sin mayusculas ni espacios) y vacios se descartan.
+    assert r.json()["asuntos"] == ["Cambio De Domicilio", "Traslado"]
+    assert r.json()["plazo_dias"] == 3
+
+
+def test_i2_no_mandarlos_no_los_borra_y_null_borra_el_plazo(admin_client):
+    tipo_id = _nueva(admin_client, "Traslado")
+    admin_client.post(_publicar(tipo_id), {"definicion": _definicion_minima(),
+                                           "asuntos": ["Cambio De Domicilio"],
+                                           "plazo_dias": 3}, format="json")
+    r = admin_client.post(_publicar(tipo_id), {"definicion": _definicion_minima(),
+                                               "nombre": "Traslado de servicio"},
+                          format="json")
+    assert r.json()["asuntos"] == ["Cambio De Domicilio"]
+    assert r.json()["plazo_dias"] == 3
+    r = admin_client.post(_publicar(tipo_id), {"definicion": _definicion_minima(),
+                                               "plazo_dias": None}, format="json")
+    assert r.json()["plazo_dias"] is None
+
+
+def test_i3_un_asunto_va_en_una_sola_plantilla(admin_client):
+    a = _nueva(admin_client, "Traslado")
+    b = _nueva(admin_client, "Visita general")
+    admin_client.post(_publicar(a), {"definicion": _definicion_minima(),
+                                     "asuntos": ["Cambio De Domicilio"]},
+                      format="json")
+    r = admin_client.post(_publicar(b), {"definicion": _definicion_minima(),
+                                         "asuntos": ["CAMBIO DE DOMICILIO"]},
+                          format="json")
+    assert r.status_code == 400, r.content
+    assert "Traslado" in str(r.content.decode())
+    assert WorkType.objects.get(pk=b).asuntos == []
+
+
+@pytest.mark.parametrize("plazo", [-1, 61, "tres"])
+def test_i4_un_plazo_fuera_de_rango_no_se_guarda(admin_client, plazo):
+    tipo_id = _nueva(admin_client, "Traslado")
+    r = admin_client.post(_publicar(tipo_id), {"definicion": _definicion_minima(),
+                                               "plazo_dias": plazo}, format="json")
+    assert r.status_code == 400, r.content
+    assert WorkType.objects.get(pk=tipo_id).plazo_dias is None

@@ -60,23 +60,8 @@ class PlantillasDeTrabajoView(APIView):
 
     def get(self, request):
         org = request.profile.org
-        qs = (
-            WorkTypeVersion.objects
-            .filter(work_type__org=org, work_type__activo=True,
-                    estado=WorkTypeVersion.PUBLICADA)
-            .select_related("work_type")
-            .order_by("work_type__codigo", "-version")
-        )
-
-        #  UNA POR TIPO: la version publicada mas alta. Ofrecer todas las
-        #  versiones publicadas de un mismo tipo obligaria a quien despacha a
-        #  elegir entre dos cosas que para el son la misma, y la vieja solo
-        #  sirve para auditar lo ya despachado.
-        vistas, plantillas = set(), []
-        for v in qs:
-            if v.work_type_id in vistas:
-                continue
-            vistas.add(v.work_type_id)
+        plantillas = []
+        for v in plantillas_que_se_ofrecen(org):
             plantillas.append({
                 "id": str(v.id),
                 "version": v.version,
@@ -86,6 +71,9 @@ class PlantillasDeTrabajoView(APIView):
                 #  Cuantos requisitos trae: quien despacha puede anticipar que
                 #  le va a pedir al tecnico sin abrir la plantilla.
                 "requisitos": len((v.esquema or {}).get("campos") or []),
+                #  El plazo, para proponer «para cuando» con la plantilla que
+                #  se elija -- tambien si quien despacha la cambia (19/10/2026).
+                "plazo_dias": v.work_type.plazo_dias,
             })
 
         return Response({
@@ -96,6 +84,31 @@ class PlantillasDeTrabajoView(APIView):
             #  despacha, no solo en la pantalla de configuracion.
             "sin_clasificar": sum(1 for p in plantillas if not p["labor"]),
         })
+
+
+def plantillas_que_se_ofrecen(org) -> list:
+    """Las plantillas que Despacho ofrece: publicadas, de tipos activos, y UNA
+    por tipo -- la version publicada mas alta.
+
+    Ofrecer todas las versiones publicadas de un mismo tipo obligaria a quien
+    despacha a elegir entre dos cosas que para el son la misma, y la vieja solo
+    sirve para auditar lo ya despachado. La usan la lista y la ficha: la
+    plantilla que la ficha propone tiene que ser una que la lista ofrece.
+    """
+    qs = (
+        WorkTypeVersion.objects
+        .filter(work_type__org=org, work_type__activo=True,
+                estado=WorkTypeVersion.PUBLICADA)
+        .select_related("work_type")
+        .order_by("work_type__codigo", "-version")
+    )
+    vistas, salida = set(), []
+    for v in qs:
+        if v.work_type_id in vistas:
+            continue
+        vistas.add(v.work_type_id)
+        salida.append(v)
+    return salida
 
 
 def _orden_activa_de(org, case_id: str):
@@ -422,12 +435,31 @@ class FichaDespachableView(CasosDespachablesView):
             sugerencia = self._sugerencia_de(caso)
         except Exception:                                    # noqa: BLE001
             sugerencia = None
+
+        #  EL FORMULARIO LLENO  --  19/10/2026. Lo pidio el usuario: al tocar
+        #  «Despachar», plantilla, fecha y prioridad elegidas segun lo que vio
+        #  el Supervisor. Son PROPUESTAS: quien despacha las ve y las cambia.
+        #
+        #    plantilla_sugerida   la que declara el asunto del ticket en
+        #                         Plantillas. La labor sola no alcanza: una
+        #                         labor tiene varias plantillas.
+        #    creado               cuando se creo el ticket; la pantalla le
+        #                         suma el plazo de la plantilla elegida.
+        #    prioridad_supervisor el numero de la propuesta (menor = mas
+        #                         urgente); la pantalla lo lee con el mismo
+        #                         corte que la bandeja de Pendientes.
+        from campo import plantillas as P
+        elegida = P.plantilla_para_asunto(plantillas_que_se_ofrecen(org),
+                                          caso.name)
         return Response({
             "id": str(caso.id),
             "localidad": self._localidad_de(caso),
             "sugerencia": sugerencia,
             "lectura": _lectura_de(propuesta),
             "descripcion": _descripcion_tapada(caso),
+            "plantilla_sugerida": str(elegida.id) if elegida else None,
+            "creado": caso.created_at.isoformat() if caso.created_at else None,
+            "prioridad_supervisor": propuesta.prioridad,
         })
 
 

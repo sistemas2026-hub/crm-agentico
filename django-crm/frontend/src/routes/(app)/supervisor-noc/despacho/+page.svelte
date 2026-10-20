@@ -14,6 +14,7 @@
   import { page } from '$app/state';
   import { untrack } from 'svelte';
   import { paginacion } from '$lib/v2/supervisor-noc-tablero.js';
+  import { fechaSugerida, prioridadSugerida } from '$lib/v2/despacho-sugerencias.js';
   import '../supervisor-noc.css';
 
   let { data, form } = $props();
@@ -86,11 +87,27 @@
   let despachando = $state(/** @type {any} */ (null));
   let plantillaElegida = $state('');
 
+  /**
+   * LAS DEL BACKEND, NO OTRAS (19/10/2026). Decía «normal / Alta / Urgente», y
+   * la orden solo acepta alta, media y baja (campo/serializers.py): elegir
+   * «Urgente» hacía fallar el despacho entero con un 400.
+   */
   const PRIORIDADES = [
-    { id: '', texto: '— normal —' },
     { id: 'alta', texto: 'Alta' },
-    { id: 'urgente', texto: 'Urgente' }
+    { id: 'media', texto: 'Media' },
+    { id: 'baja', texto: 'Baja' }
   ];
+  let prioridadElegida = $state('media');
+
+  /**
+   * DE DÓNDE SALIÓ CADA VALOR PROPUESTO (19/10/2026). Plantilla, fecha y
+   * prioridad vienen elegidas según lo que vio el Supervisor; quien despacha
+   * tiene que poder ver por qué, para confirmarlas o cambiarlas. Vacío = no se
+   * propuso nada y el campo se llena a mano.
+   */
+  let propuesto = $state({ plantilla: '', fecha: '', prioridad: '' });
+  /** Si la persona eligió la fecha a mano, cambiar la plantilla no la pisa. */
+  let fechaTocada = $state(false);
 
   /**
    * Qué plantillas coinciden con la labor sugerida.
@@ -156,8 +173,33 @@
     const coinciden = sugeridas(labor);
     //  Si hay UNA sola de esa labor, viene elegida. Con dos o más no se elige
     //  por el usuario: entre dos plantillas de la misma labor la diferencia la
-    //  sabe él, no nosotros.
-    if (coinciden.length === 1) plantillaElegida = coinciden[0].id;
+    //  sabe él, no nosotros. (Desde el 19/10 primero se mira el ASUNTO del
+    //  ticket, que sí distingue entre plantillas de la misma labor.)
+    if (coinciden.length === 1) {
+      plantillaElegida = coinciden[0].id;
+      propuesto.plantilla = 'por la labor que sugiere el Supervisor';
+    }
+  }
+
+  /**
+   * «Para cuándo» = creación del ticket + plazo de la plantilla elegida (si ya
+   * pasó, hoy). Se recalcula al cambiar la plantilla, salvo que la persona
+   * haya puesto la fecha a mano.
+   */
+  function proponerFecha() {
+    if (fechaTocada || !despachando) return;
+    const plazo = (data.plantillas ?? []).find((p) => p.id === plantillaElegida)?.plazo_dias;
+    const sugerida = fechaSugerida(despachando.creado, plazo);
+    fecha = sugerida;
+    propuesto.fecha = sugerida
+      ? `creación del ticket + ${plazo} ${plazo === 1 ? 'día' : 'días'} de plazo de la plantilla`
+      : '';
+  }
+
+  function alCambiarPlantilla() {
+    propuesto.plantilla = '';
+    proponerFecha();
+    revisarCobertura();
   }
 
   /**
@@ -174,6 +216,10 @@
     jornadaElegida = '';
     tecnicoElegido = '';
     plantillaElegida = '';
+    fecha = '';
+    fechaTocada = false;
+    prioridadElegida = 'media';
+    propuesto = { plantilla: '', fecha: '', prioridad: '' };
     preelegir(caso?.sugerencia?.labor);
     cargandoFicha = true;
     try {
@@ -186,9 +232,26 @@
         localidad: ficha.localidad || despachando.localidad || '',
         sugerencia: despachando.sugerencia ?? ficha.sugerencia ?? null,
         lectura: ficha.lectura ?? null,
-        descripcion: ficha.descripcion ?? ''
+        descripcion: ficha.descripcion ?? '',
+        creado: ficha.creado ?? despachando.creado ?? null
       };
-      if (!plantillaElegida) preelegir(despachando.sugerencia?.labor);
+      //  LA PLANTILLA, POR EL ASUNTO DEL TICKET (19/10/2026). La declara cada
+      //  plantilla en «Plantillas»; el backend busca cuál atiende este asunto.
+      //  Gana sobre la labor, que no distingue entre plantillas de la misma.
+      const porAsunto = ficha.plantilla_sugerida;
+      if (porAsunto && (data.plantillas ?? []).some((p) => p.id === porAsunto)) {
+        plantillaElegida = porAsunto;
+        propuesto.plantilla = `por el asunto «${despachando.nombre}»`;
+      } else if (!plantillaElegida) {
+        preelegir(despachando.sugerencia?.labor);
+      }
+      //  LA PRIORIDAD, la del Supervisor leída con el corte de Pendientes.
+      const prioridad = prioridadSugerida(ficha.prioridad_supervisor);
+      if (prioridad) {
+        prioridadElegida = prioridad;
+        propuesto.prioridad = `la del Supervisor (${ficha.prioridad_supervisor}; menor es más urgente)`;
+      }
+      proponerFecha();
       if (!barrio && despachando.localidad) barrio = despachando.localidad;
       revisarCobertura();
     } catch {
@@ -601,7 +664,7 @@
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Con qué plantilla va</span>
             <select class="snoc-select" name="work_type_version_id"
-                    bind:value={plantillaElegida} onchange={revisarCobertura} required>
+                    bind:value={plantillaElegida} onchange={alCambiarPlantilla} required>
               <option value="">— elegí una —</option>
               {#each data.plantillas as p (p.id)}
                 <option value={p.id}>
@@ -613,12 +676,15 @@
             <!-- Sin esta línea la pregunta no se entendía (13/10/2026: «¿por
                  qué me pregunta con qué plantilla va?»). La plantilla define
                  el formulario que llena el técnico Y qué cuadrilla la recibe. -->
+            {#if propuesto.plantilla}
+              <span class="snoc-body-sm snoc-primario">Propuesta {propuesto.plantilla}.</span>
+            {/if}
             <span class="snoc-body-sm snoc-secundario">
               Define qué anota y qué fotos saca el técnico, y por su labor, qué cuadrilla
               la recibe.
-              {#if !despachando.sugerencia && !cargandoFicha}
-                Viene elegida sola cuando el diagnóstico sugiere una labor y hay una sola
-                plantilla de esa labor.
+              {#if !plantillaElegida && !cargandoFicha}
+                Viene elegida sola cuando el asunto del ticket está declarado en una
+                plantilla, o cuando el diagnóstico sugiere una labor con una sola plantilla.
               {/if}
               Se crean y se editan en <a href="/supervisor-noc/plantillas">Plantillas</a>.
             </span>
@@ -627,16 +693,26 @@
           <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
             <label class="snoc-campo-grupo">
               <span class="snoc-label">Prioridad</span>
-              <select class="snoc-select" name="prioridad">
+              <select class="snoc-select" name="prioridad" bind:value={prioridadElegida}
+                      onchange={() => (propuesto.prioridad = '')}>
                 {#each PRIORIDADES as p (p.id)}<option value={p.id}>{p.texto}</option>{/each}
               </select>
             </label>
             <label class="snoc-campo-grupo">
               <span class="snoc-label">Para cuándo</span>
               <input class="snoc-campo" type="date" name="programada_para"
-                     bind:value={fecha} onchange={revisarCobertura} />
+                     bind:value={fecha}
+                     onchange={() => { fechaTocada = true; propuesto.fecha = ''; revisarCobertura(); }} />
             </label>
           </div>
+          {#if propuesto.prioridad || propuesto.fecha}
+            <!-- DE DÓNDE SALEN (19/10/2026): son propuestas, y quien despacha
+                 tiene que poder ver por qué para confirmarlas o cambiarlas. -->
+            <span class="snoc-body-sm snoc-primario">
+              {#if propuesto.prioridad}Prioridad propuesta: {propuesto.prioridad}.{/if}
+              {#if propuesto.fecha}Fecha propuesta: {propuesto.fecha}.{/if}
+            </span>
+          {/if}
 
           <!-- EL BARRIO DECIDE LA ZONA, Y LA ZONA DECIDE LA CUADRILLA. Viene
                de la ficha del cliente en el ISP; si hay que escribirlo, se
