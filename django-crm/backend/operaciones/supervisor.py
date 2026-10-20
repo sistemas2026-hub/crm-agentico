@@ -2761,6 +2761,43 @@ def _leer_tickets_abiertos(org, ahora, *,
 
     informe = {"tickets": {}}
 
+    #  LA QUINTA VEZ DEL MISMO ERROR  --  20/10/2026
+    #  ---------------------------------------------
+    #  Este archivo ya tiene un comentario encabezado «LA CUARTA VEZ DEL MISMO
+    #  ERROR» (ver '_las_que_esperan_relectura'), y el error es siempre el
+    #  mismo: **«no produjo señal» y «no se pudo mirar» salen identicos**.
+    #
+    #  Aca estaba la quinta. '_tickets_abiertos_con_tecnico' le pide el mapa de
+    #  areas a 'criterio_de_area()', que sale por HTTP al motor. Si el motor no
+    #  contesta, el mapa vuelve vacio, se trata como «no se pudo» --correcto,
+    #  es fail-closed, porque leer un ticket cuesta una llamada al modelo-- y
+    #  el detector devuelve []. 'detectar()' hace extend() sobre quince
+    #  detectores, asi que ese [] se funde con los demas y **el informe se
+    #  quedaba callado**: para quien lo lee, «el motor esta caido» y «no hay
+    #  tickets que leer» eran el mismo cero.
+    #
+    #  Importa de madrugada: el camino del texto es la UNICA señal que sale de
+    #  LEER y no de medir. Si el motor no responde, deja de producir en
+    #  silencio y nadie lo nota.
+    #
+    #  SE PREGUNTA ACA Y NO SE CAMBIA 'detectar': su firma la comparten quince
+    #  detectores y varios llamadores, y esta es la misma pregunta que ya
+    #  resolvio este modulo para el cierre --'correr_ciclo' devuelve
+    #  'no_evaluados_por' y 'no_cerrados_por' porque «'Corrio y cerro 0' tiene
+    #  dos lecturas incompatibles y un numero solo no las distingue»--. Esto es
+    #  ese mismo patron para la deteccion.
+    #
+    #  La consulta es barata: 'area_por_persona' cachea 15 minutos
+    #  ('areas_del_tenant.SEGUNDOS_DE_CACHE'), asi que esta llamada reusa la
+    #  que el detector acaba de hacer en la misma vuelta.
+    from operaciones import areas_del_tenant as _areas
+
+    if not _areas.criterio_de_area().se_sabe:
+        #  Se NOMBRA y no se calla. El valor no es un booleano suelto: dice
+        #  QUE no se pudo mirar, que es lo que alguien necesita para saber
+        #  donde buscar.
+        informe["no_se_pudo_mirar"] = "sin mapa de areas: el motor no contesto"
+
     senales = [s for s in detectar(org, ahora)
                if s.tipo == PropuestaSupervisor.TICKET_SIN_DIAGNOSTICO]
     #  Y LAS QUE NO PRODUJERON SEÑAL HOY pero esperan relectura: ver
