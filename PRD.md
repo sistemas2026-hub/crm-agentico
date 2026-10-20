@@ -724,6 +724,37 @@ primera vez eran 23 lugares; hoy son 80. Cada pantalla nueva del asistente suma
 otra aparición, así que posponer la ejecución encarece la decisión que ya se
 tomó.
 
+### 8.14 DECISIÓN — el área de un caso sale del departamento del ticket, y cada persona ve siempre lo suyo (20/10/2026)
+
+**El error que la originó.** El usuario comparó los tickets abiertos de WispHub
+en Soporte y Operativo (64) con las tarjetas de Dexter (37 + 35 = 72) y no
+coincidían. Medido en producción ese día con un comando de solo lectura: **816 de
+816 casos abiertos sin `Case.area` escrita**. El campo existe desde el 16/10 y el
+backend lo aceptaba, pero el alta lo descartaba y la relectura de WispHub nunca
+lo mandaba. Así el área de cada caso salía de la persona asignada, y las
+tarjetas contaban personas, no departamentos.
+
+**Lo que se decidió**, con el usuario:
+
+1. El área de un caso la da la regla de importación (`importacion_tickets.destinos`,
+   departamento y asunto del ticket), al crearlo **y cada vez que se relee**. Si
+   el ticket cambia de departamento en WispHub, el caso cambia de área. Si la
+   regla no resuelve un área declarada, no se escribe nada: no se adivina y no
+   se borra.
+2. **El departamento Operativo de WispHub es el área `operativo`** en Dexter.
+   Hasta ese día iba a `soporte_tecnico`. Consecuencia buscada: las tarjetas de
+   Tickets coinciden con los departamentos. Consecuencia aceptada: los tickets
+   nuevos de Operativo se asignan a gente de operativo.
+3. **Una persona siempre ve en Tickets los casos que tiene asignados**, aunque
+   sean de otra área. Sin esto, escribir el área sacaba de la lista de un
+   técnico los tickets que le tocan. Las tarjetas por área siguen contando por
+   el área del caso, y la pantalla dice cuántos de la lista son de otra área.
+
+**Lo que la reabre:** que una persona necesite ver un área entera que no es la
+suya (eso es un rol, no esta regla), o que un departamento de WispHub deje de
+corresponder a un área de Dexter. Lo primero se resuelve con permisos; lo
+segundo, en `destinos`, que es configuración del tenant.
+
 ---
 
 ## 9. Despliegue

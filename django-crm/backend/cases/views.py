@@ -89,8 +89,12 @@ _ALLOWED_CASE_ORDERINGS = frozenset(
 )
 
 
-def apply_case_list_filters(queryset, params):
+def apply_case_list_filters(queryset, params, yo=None):
     """Apply the case-list query-param filters to ``queryset``.
+
+    ``yo`` is the requester's profile, taken from the SESSION by the caller.
+    It is only read by ``incluir_mios`` (see the area filter below) and is
+    never accepted from a query param.
 
     Shared between CaseListView and WatchingListView so both endpoints accept
     the same filter chips from the mobile client. Caller is responsible for
@@ -159,6 +163,15 @@ def apply_case_list_filters(queryset, params):
                 assigned_to__id__in=sin_area_de
             ).values("pk")
             del_area |= Q(area="") & Q(pk__in=de_esa_gente)
+        #  LO QUE TENGO ASIGNADO LO VEO SIEMPRE  --  20/10/2026, decidido por
+        #  el usuario. Con el area escrita en cada caso, un ticket asignado a
+        #  alguien de OTRA area salia de la lista de esa persona: un
+        #  colaborador solo ve su area. 'incluir_mios' lo pide la pantalla
+        #  solo para quien no administra, y la persona sale de la SESION
+        #  ('yo'), nunca de un parametro. Las tarjetas por area no cambian:
+        #  siguen contando por el area del caso.
+        if yo is not None and params.get("incluir_mios") == "1":
+            del_area |= Q(pk__in=Case.objects.filter(assigned_to=yo).values("pk"))
         queryset = queryset.filter(del_area)
     tags = uuid_list_param(params, "tags")
     if tags:
@@ -282,7 +295,8 @@ class CaseListView(APIView, LimitOffsetPagination):
             ).distinct()
             profiles = profiles.filter(role="ADMIN")
 
-        queryset = apply_case_list_filters(queryset, params)
+        queryset = apply_case_list_filters(queryset, params,
+                                           yo=self.request.profile)
 
         context = {}
 

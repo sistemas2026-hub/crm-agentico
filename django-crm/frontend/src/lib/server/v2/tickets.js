@@ -136,6 +136,11 @@ function toRow(row) {
     assignee: assignees.length ? profileName(assignees[0]) : null,
     assignee_id: assignees.length ? assignees[0].id : null,
     assignee_count: assignees.length,
+    //  TODOS los responsables, no solo el primero (20/10/2026, auditor
+    //  independiente): "lo que tengo asignado lo veo siempre" miraba solo
+    //  'assignee_id', y un caso donde la persona era el segundo responsable
+    //  llegaba del API y la pantalla lo descartaba.
+    assignee_ids: assignees.map((/** @type {any} */ a) => a.id),
     opened_at: row.created_at,
     closed_on: row.closed_on ?? null,
     first_response_at: row.first_response_at ?? null,

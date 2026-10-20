@@ -7216,8 +7216,12 @@ importacion_tickets:
     'finanzas|*':
       area: cartera
       prioridad: Normal
+    # 20/10/2026, decidido por el usuario: los tickets del departamento
+    # Operativo de WispHub son del area operativo en Dexter, para que las
+    # tarjetas de Tickets coincidan con los departamentos. Hasta ese dia iban
+    # a soporte_tecnico. Los nuevos se asignan a gente de operativo.
     'operativo|*':
-      area: soporte_tecnico
+      area: operativo
       prioridad: Normal
     'administrativo|*':
       area: administracion

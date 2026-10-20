@@ -306,6 +306,12 @@
 {#if page.url.search}
   <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">Estos números describen la cola filtrada.</p>
 {/if}
+{#if data.deOtrasAreas > 0}
+  <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">
+    En esta página {data.deOtrasAreas === 1 ? 'hay 1 ticket de otra área asignado' : `hay ${data.deOtrasAreas} tickets de otra área asignados`}
+    a vos: los ves porque son tuyos, y cuentan en la tarjeta de su área.
+  </p>
+{/if}
 
 <!-- Approvals and Analytics were buttons in this header that went nowhere.
      They are sibling pages, so they belong in a tab strip that also tells you

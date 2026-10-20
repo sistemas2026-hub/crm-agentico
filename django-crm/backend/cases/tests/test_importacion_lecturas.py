@@ -159,7 +159,11 @@ def test_devuelve_exactamente_los_campos_de_la_politica(admin_client, org_a,
                          #  tope por vuelta tomaria siempre los mismos casos y
                          #  el resto no se volveria a leer nunca. Una fecha,
                          #  no un dato del cliente.
-                         "external_fetched_at"}
+                         "external_fetched_at",
+                         #  EL AREA QUE YA TIENE (19/10/2026): la
+                         #  reconciliacion la compara con la que da la regla
+                         #  del alta. Es el nombre de un area de la empresa.
+                         "area"}
     assert "name" not in caso and "description" not in caso
     #  El nombre del cliente NO sale por aqui. Esta vista promete no traer nada
     #  del cliente, y el motor ya lo tiene: se lo acaba de pedir al proveedor.

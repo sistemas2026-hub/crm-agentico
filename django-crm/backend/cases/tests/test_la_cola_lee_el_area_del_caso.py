@@ -267,6 +267,48 @@ def test_la_pagina_que_llega_es_la_del_area_aunque_lo_reciente_sea_de_otra(
 #  §4  EL DESGLOSE Y CADA FILA DICEN SU AREA
 # =============================================================================
 
+# =============================================================================
+#  LO QUE TENGO ASIGNADO LO VEO SIEMPRE  --  20/10/2026, decidido por el usuario
+# =============================================================================
+
+def _como(persona):
+    from rest_framework.test import APIClient
+
+    from common.serializer import OrgAwareRefreshToken
+
+    cliente = APIClient()
+    token = OrgAwareRefreshToken.for_user_and_org(persona.user, persona.org, persona)
+    cliente.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
+    return cliente
+
+
+def test_un_colaborador_ve_lo_suyo_de_otra_area_cuando_la_pantalla_lo_pide(
+        admin_user, org_a, equipo):
+    tecnico = equipo["tecnico"]
+    propio = _caso(org_a, admin_user, area="soporte_tecnico", responsable=tecnico)
+    suyo_de_ventas = _caso(org_a, admin_user, area="ventas", responsable=tecnico,
+                           nombre="Cotización plan nuevo")
+    _caso(org_a, admin_user, area="ventas", responsable=equipo["cartera"])
+    cliente = _como(tecnico)
+
+    sin = _ids(cliente.get(f"{RUTA}&area=soporte_tecnico").json())
+    con = _ids(cliente.get(f"{RUTA}&area=soporte_tecnico&incluir_mios=1").json())
+
+    assert sin == {str(propio.id)}, "sin pedirlo, la cola sigue siendo la del area"
+    assert con == {str(propio.id), str(suyo_de_ventas.id)}, (
+        "con el area escrita, el de ventas que tiene asignado salia de su lista")
+
+
+def test_incluir_mios_es_de_quien_mira_no_de_un_parametro(
+        admin_client, admin_user, org_a, equipo):
+    """'yo' sale de la sesion: quien administra no hereda los casos de otro
+    por pedir 'incluir_mios'."""
+    _caso(org_a, admin_user, area="ventas", responsable=equipo["tecnico"])
+    ids = _ids(admin_client.get(
+        f"{RUTA}&area=soporte_tecnico&incluir_mios=1&yo={equipo['tecnico'].id}").json())
+    assert ids == set()
+
+
 def test_el_desglose_separa_por_area_a_la_misma_persona(
         admin_client, admin_user, org_a, equipo):
     """

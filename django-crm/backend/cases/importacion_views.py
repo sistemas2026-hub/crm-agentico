@@ -97,6 +97,21 @@ PRIORIDADES = frozenset(p[0] for p in PRIORITY_CHOICE)
 TIPOS_DE_AUTOR = frozenset(t[0] for t in EXTERNAL_AUTHOR_TYPE)
 
 
+def _area_valida(valor) -> str:
+    """
+    El area tal como se puede escribir, o "" si no se debe escribir.
+
+    UNA SOLA REGLA PARA EL ALTA Y LA RECONCILIACION (20/10/2026): texto, sin
+    espacios alrededor, y que quepa en el campo. "" quiere decir "no tocar":
+    perder un area buena por una lectura pobre es peor que quedarse con ella,
+    y una mas larga que el campo tumbaria la fila entera.
+    """
+    if not isinstance(valor, str):
+        return ""
+    valor = valor.strip()
+    return valor if len(valor) <= Case._meta.get_field("area").max_length else ""
+
+
 def _error(detalle, codigo="DATOS_INVALIDOS", estado=http.HTTP_400_BAD_REQUEST):
     return Response({"error": codigo, "detalle": detalle}, status=estado)
 
@@ -185,6 +200,11 @@ class ImportarCaseView(APIView):
             "external_client_name": str(
                 cuerpo.get("external_client_name") or "")[:255],
             "external_fetched_at": cuerpo.get("external_fetched_at") or None,
+            #  EL AREA QUE DECIDIO LA REGLA DE IMPORTACION  --  20/10/2026. Se
+            #  aceptaba (CAMPOS_DESCUBRIMIENTO) y no se guardaba: medido en
+            #  produccion, 816 de 816 casos abiertos sin area escrita, y el
+            #  area de cada uno salia de la persona asignada.
+            "area": _area_valida(cuerpo.get("area")),
             "name": nombre[:64],
             "description": cuerpo.get("description") or "",
             "priority": prioridad,
@@ -387,7 +407,12 @@ class CasosExternosView(APIView):
               #  fecha no hay orden, y un deploy a mitad de vuelta dejaba
               #  siempre a los mismos sin releer. Es una fecha, no un dato
               #  del cliente.
-              "external_fetched_at")
+              "external_fetched_at",
+              #  EL AREA QUE YA TIENE  --  19/10/2026. La reconciliacion la
+              #  manda con la regla del alta y la compara con esta: sin ella,
+              #  cada area escrita contaria una diferencia en cada vuelta. Es
+              #  el nombre de un area de la empresa, no un dato del cliente.
+              "area")
 
     #  Se LEE para saber si falta, y NO se devuelve.
     #
@@ -502,6 +527,15 @@ class ReconciliarCaseView(APIView):
                 # perder un dato externo bueno por una respuesta pobre es peor
                 # que quedarse con el anterior.
                 continue
+
+            if campo == "area":
+                #  UN AREA VACIA O RARA NO BORRA LA QUE HAY  --  19/10/2026. El
+                #  motor solo la manda cuando la regla de importacion la
+                #  resuelve, pero esta puerta no depende de eso. La regla es
+                #  '_area_valida', la misma del alta.
+                valor = _area_valida(valor)
+                if not valor:
+                    continue
 
             if getattr(caso, campo) != valor:
                 setattr(caso, campo, valor)

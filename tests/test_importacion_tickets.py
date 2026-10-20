@@ -407,6 +407,60 @@ otro = imp.reconciliar(
     cfg, [dict(CASO)], leer_ticket=lambda t: ticket(99999),
     cuenta_api=CUENTA_API, registrados_por_dexter=set())
 revisar(otro[0].error, "y un ticket con OTRO id tampoco se acepta")
+revisar("area" not in roto[0].despues and "area" not in listado[0].despues,
+        "un ticket que no se pudo leer no manda area")
+
+# EL AREA, CON LA REGLA DEL ALTA  --  19/10/2026. Medido en produccion: 816 de
+# 816 casos abiertos sin area escrita, porque solo el alta la mandaba.
+print("\nla reconciliacion completa el area con la regla del alta")
+
+
+def _releido(config, caso, **del_ticket):
+    return imp.reconciliar(
+        config, [caso], leer_ticket=lambda t: ticket(t, **del_ticket),
+        cuenta_api=CUENTA_API, registrados_por_dexter=set())[0]
+
+
+primero = _releido(cfg, dict(CASO))
+revisar(primero.despues.get("area") == "soporte",
+        "un caso sin area recibe la del destino de su departamento|asunto")
+escrito = {**CASO, **{k: v for k, v in primero.despues.items()
+                      if k != imp.SELLO_DE_LECTURA}}
+segundo = _releido(cfg, escrito)
+revisar(segundo.despues.get("area") == "soporte" and not segundo.hay_diferencia,
+        "con el area ya escrita, releer no cuenta una diferencia",
+        "sin el area en 'antes', cada vuelta contaria una diferencia para siempre")
+movido = _releido(cfg, {**escrito, "area": "ventas"})
+revisar(movido.despues.get("area") == "soporte" and movido.hay_diferencia,
+        "si la regla da otra area que la escrita, se corrige")
+revisar("area" not in _releido(cfg, dict(CASO), departamento="Cartera").despues,
+        "un departamento sin destino no manda area: no se adivina ni se borra")
+revisar("area" not in _releido(config_piloto(destinos={
+            "soporte tecnico|no tiene internet": DestinoTicket(area="ventas")}),
+            dict(CASO)).despues,
+        "un destino con un area que no esta declarada no manda area")
+revisar(_releido(config_piloto(destinos={
+            "soporte tecnico|*": DestinoTicket(area="soporte")}),
+            dict(CASO), asunto="Otra Cosa").despues.get("area") == "soporte",
+        "el comodin del departamento vale igual que en el alta")
+raro = imp.reconciliar(
+    cfg, [dict(CASO)],
+    leer_ticket=lambda t: {**ticket(t), "departamento": {"id": 3}},
+    cuenta_api=CUENTA_API, registrados_por_dexter=set())[0]
+revisar(not raro.error and "area" not in raro.despues,
+        "un departamento que no es texto no rompe la lectura ni manda area")
+revisar("status" not in primero.despues and "assigned_to" not in primero.despues,
+        "y el area no arrastra el estado ni el responsable")
+
+# EL NOMBRE QUE SE ESCRIBE ES EL DECLARADO (auditor independiente, 20/10/2026):
+# la cola de Tickets filtra por igualdad exacta.
+_mayus = config_piloto(destinos={
+    "soporte tecnico|no tiene internet": DestinoTicket(area="SOPORTE")})
+revisar(_releido(_mayus, dict(CASO)).despues.get("area") == "soporte",
+        "la reconciliacion escribe el nombre declarado, no la grafia del destino")
+_alta = descubrir(_mayus, [ticket(10)])
+revisar(_alta[0].resultado == imp.CANDIDATO and _alta[0].area == "soporte",
+        "y el alta tambien", f"{_alta[0].resultado} {_alta[0].area!r}")
 
 cerrado_viejo = {"id": "c-3", "external_ticket_id": "1", "status": "Closed",
                  "closed_on": (datetime.now(timezone.utc)
@@ -919,6 +973,9 @@ _ya_guardado = {
     "external_created_by_type": imp.EXTERNO_DESCONOCIDO,
     "external_fetch_error": "",
     "external_status_at": "2026-09-05T20:22:38+00:00",
+    #  Y el area que le da la regla (19/10/2026): un caso al dia ya la tiene
+    #  escrita. Sin ella, la primera lectura SI es novedad -- la escribe.
+    "area": "soporte",
 }
 _sin_novedad = imp.reconciliar(
     cfg, [dict(_ya_guardado)], leer_ticket=lambda t: _cerrado_real,
@@ -942,7 +999,8 @@ revisar(_movido.hay_diferencia is True,
 _abierto = imp.reconciliar(
     cfg, [{**CASO, "external_status": "Nuevo", "external_created_by": CUENTA_API,
            "external_created_by_type": imp.EXTERNO_DESCONOCIDO,
-           "external_fetch_error": "", "external_status_at": None}],
+           "external_fetch_error": "", "external_status_at": None,
+           "area": "soporte"}],
     leer_ticket=lambda t: ticket(t, creado_por=CUENTA_API),
     cuenta_api=CUENTA_API, registrados_por_dexter=set())[0]
 revisar(_abierto.despues[imp.MOMENTO_DEL_ESTADO] is None

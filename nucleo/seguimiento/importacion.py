@@ -499,6 +499,38 @@ def destino_de(config_imp, departamento, asunto):
             or normalizados.get(_comodin(departamento)))
 
 
+def area_declarada(config, area) -> str:
+    """
+    El nombre con que el tenant declaro esa area, o "" si no la declaro.
+
+    Se compara normalizado --como valida el alta-- pero se escribe el nombre
+    DECLARADO: la cola de Tickets filtra por igualdad exacta, y un destino
+    escrito 'Soporte_Tecnico' quedaba afuera de 'soporte_tecnico' (auditor
+    independiente, 20/10/2026).
+    """
+    nombres = {normalizar(a.nombre): a.nombre for a in (config.areas or [])}
+    return nombres.get(normalizar(area or ""), "")
+
+
+def area_por_la_regla(config, ticket) -> str:
+    """
+    El area que la regla de importacion le da a este ticket, o "".
+
+    LA MISMA REGLA QUE EL ALTA: 'destino_de' sobre 'departamento|asunto' (con
+    el comodin 'departamento|*'), y solo si el area esta declarada en las
+    areas del tenant -- lo mismo que 'descubrir' exige antes de crear un caso.
+
+    "" NO BORRA NADA: quien la llama no manda la clave, y el caso se queda con
+    el area que tenia. Tampoco adivina: un destino que no existe devuelve "".
+    El departamento y el asunto se toman como los toma 'descubrir' -- vacios
+    si faltan--, y 'normalizar' ya tolera lo que no es texto.
+    """
+    destino = destino_de(config.importacion_tickets,
+                         ticket.get("departamento") or "",
+                         ticket.get("asunto") or "")
+    return area_declarada(config, destino.area) if destino else ""
+
+
 def responsable_para(area: str, areas_por_persona: dict,
                      carga: dict | None = None) -> str | None:
     """
@@ -664,6 +696,9 @@ def descubrir(config, tickets: list[dict], *,
             v.resultado = AREA_DESTINO_INVALIDA
             v.detalle = f"'{destino.area}' no esta declarada en areas"
             continue
+        #  El nombre DECLARADO, no la grafia del destino (20/10/2026): es el
+        #  que viaja al caso, y la cola de Tickets lo compara exacto.
+        v.area = area_declarada(config, destino.area)
 
         elegido = responsable_para(destino.area, areas_por_persona, carga)
         if not elegido:
@@ -846,6 +881,10 @@ def reconciliar(config, casos: list[dict], *, leer_ticket,
                 "external_created_by": caso.get("external_created_by") or "",
                 "external_created_by_type": caso.get("external_created_by_type") or "",
                 "external_fetch_error": caso.get("external_fetch_error") or "",
+                #  El area que el caso ya tiene (19/10/2026). Sin ella, cada
+                #  area que se manda contaria una diferencia en cada vuelta, la
+                #  misma trampa que el momento del estado de aca abajo.
+                "area": caso.get("area") or "",
                 #  Tiene que estar, y sin el 'or ""' de los demas: lo que se
                 #  compara es un instante, y una cadena vacia no es uno. Si
                 #  falta esta clave, 'antes.get' devuelve None contra la fecha
@@ -893,6 +932,16 @@ def reconciliar(config, casos: list[dict], *, leer_ticket,
             "external_fetch_error": "",
             "external_fetched_at": ahora.isoformat(),
         }
+        #  EL AREA, CON LA REGLA DEL ALTA  --  19/10/2026
+        #  ----------------------------------------------
+        #  El backend la acepta desde el 16/10 ("es lo que rellena los
+        #  viejos"), pero solo el alta la mandaba: medido en produccion, 816 de
+        #  816 casos abiertos sin area escrita, y el area de cada uno salia de
+        #  la persona asignada. Solo viaja si la regla la resuelve: un ticket
+        #  sin destino no le borra el area a nadie.
+        area = area_por_la_regla(config, t)
+        if area:
+            cambio.despues["area"] = area
         # El hilo viene en el MISMO payload que se acaba de leer para saber el
         # estado. Medido el 10/09/2026: 24 de 25 tickets tienen respuestas, 70
         # en total, asi que esto es la norma y no un caso raro.

@@ -194,11 +194,29 @@ describe('las tarjetas', () => {
 });
 
 describe('un colaborador de soporte, que solo ve su area', () => {
-  it('ve el LOS y no ve el de ventas, aunque el de ventas sea suyo', async () => {
+  //  20/10/2026, decidido por el usuario: lo que tiene asignado lo ve
+  //  siempre. Hasta ese dia esta prueba afirmaba lo contrario --"no ve el de
+  //  ventas, aunque sea suyo"--, y con el area escrita en cada caso eso
+  //  sacaba de su lista los tickets que le tocan.
+  it('ve el LOS y TAMBIEN el de ventas que es suyo, y no el viejo de cartera', async () => {
     listTickets.mockResolvedValue(respuesta());
-    const data = await load(evento('?area=soporte_tecnico', { rol: 'USER', email: 'tecnico@x.test' }));
+    const data = /** @type {any} */ (await load(evento('?area=soporte_tecnico', { rol: 'USER', email: 'tecnico@x.test' })));
     expect(ids(data)).toContain('los');
-    expect(ids(data)).not.toContain('ventas');
+    expect(ids(data)).toContain('ventas');
+    expect(ids(data)).not.toContain('viejo-cartera');
+    expect(data.deOtrasAreas).toBe(1);
+  });
+
+  it('ve el de otra area donde es el SEGUNDO responsable', async () => {
+    //  Auditor independiente, 20/10/2026: 'mios' miraba solo el primero.
+    const segundo = {
+      ...ticket('segundo', { area: 'ventas', assignee: 'p-cartera' }),
+      assignee_ids: ['p-cartera', 'p-soporte'], assignee_count: 2
+    };
+    listTickets.mockResolvedValue(respuesta([...TODOS, segundo]));
+    const data = /** @type {any} */ (await load(evento('?area=soporte_tecnico', { rol: 'USER', email: 'tecnico@x.test' })));
+    expect(ids(data)).toContain('segundo');
+    expect(data.deOtrasAreas).toBe(2);
   });
 
   it('y el API recibe su area, no una lista de responsables', async () => {
@@ -207,6 +225,7 @@ describe('un colaborador de soporte, que solo ve su area', () => {
     const params = listTickets.mock.lastCall[1];
     expect(params.get('area')).toBe('soporte_tecnico');
     expect(params.has('assigned_to')).toBe(false);
+    expect(params.get('incluir_mios')).toBe('1');
   });
 });
 
@@ -229,6 +248,7 @@ describe('"Todas las áreas"', () => {
     const params = listTickets.mock.lastCall[1];
     expect(params.has('area')).toBe(false);
     expect(params.has('area_responsables')).toBe(false);
+    expect(params.has('incluir_mios')).toBe(false);
     expect(ids(data).sort()).toEqual(TODOS.map((t) => t.id).sort());
     expect(data.todasLasAreas.etiqueta).toBe('Todas las áreas');
   });
@@ -248,7 +268,9 @@ describe('"Todas las áreas"', () => {
     listTickets.mockResolvedValue(respuesta());
     const data = /** @type {any} */ (await load(evento('?area=__todas__', { rol: 'USER', email: 'tecnico@x.test' })));
     expect(listTickets.mock.lastCall[1].get('area')).toBe('soporte_tecnico');
-    expect(ids(data)).not.toContain('ventas');
+    //  'ventas' es SUYO, y desde el 20/10/2026 lo ve (lo suyo siempre). Lo
+    //  que no ve es lo de otra area que no le toca.
+    expect(ids(data)).not.toContain('viejo-cartera');
     expect(data.todasLasAreas).toBeNull();
   });
 

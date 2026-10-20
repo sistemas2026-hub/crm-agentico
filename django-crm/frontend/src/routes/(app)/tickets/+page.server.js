@@ -157,6 +157,11 @@ export async function load({ cookies, url, locals, fetch }) {
     for (const persona of responsablesDeArea(areaEfectiva, areaPorPersona)) {
       params.append('area_responsables', persona);
     }
+    //  LO QUE TENGO ASIGNADO LO VEO SIEMPRE  --  20/10/2026, decidido por el
+    //  usuario. Con el area escrita en cada caso, un ticket de otra area
+    //  asignado a esta persona salia de su lista. El API toma a la persona de
+    //  la sesion; aca solo se pide.
+    if (soloMiArea) params.set('incluir_mios', '1');
   }
 
   const { results, totals, openByAssignee } = await listTickets({ cookies }, params);
@@ -201,16 +206,25 @@ export async function load({ cookies, url, locals, fetch }) {
   // El universo de tickets se recorta ANTES de armar la respuesta, no solo al
   // dibujar: 'data' viaja serializado dentro del HTML, asi que un ticket de
   // otra area que no se renderiza igual habria viajado hasta el navegador.
-  const mios = (/** @type {any} */ t) => meId && t.assignee_id === meId;
+  //  Cualquiera de sus asignaciones, no solo la primera: 'assignee_id' es el
+  //  primer responsable, y un caso con dos se perdia si la persona era el
+  //  segundo (20/10/2026). Sin la lista --una fila vieja-- vale el primero.
+  const mios = (/** @type {any} */ t) =>
+    Boolean(meId) && (t.assignee_ids ?? (t.assignee_id ? [t.assignee_id] : [])).includes(meId);
   const universo = sinAreaPropia
     ? []
     : soloMiArea
-      ? conArea.filter((/** @type {any} */ t) => t.area === miArea)
+      ? conArea.filter((/** @type {any} */ t) => t.area === miArea || mios(t))
       : conArea;
 
   const deLaArea = areaElegida && areaElegida !== TODAS_LAS_AREAS
-    ? universo.filter((/** @type {any} */ t) => t.area === areaElegida)
+    ? universo.filter((/** @type {any} */ t) => t.area === areaElegida || (soloMiArea && mios(t)))
     : universo;
+  //  Cuantos de la lista son de otra area y estan porque son suyos: la
+  //  pantalla lo dice, para que la lista no parezca contradecir a la tarjeta.
+  const deOtrasAreas = soloMiArea
+    ? deLaArea.filter((/** @type {any} */ t) => t.area !== miArea).length
+    : 0;
 
   // Los dos cortes de la sub-navegacion. Se cuentan sobre la cola del area
   // YA elegida y no sobre todo el CRM: el numero al lado de "Sin asignar"
@@ -290,6 +304,7 @@ export async function load({ cookies, url, locals, fetch }) {
     todas: TODAS_LAS_AREAS,
     todasLasAreas,
     conteosVista,
+    deOtrasAreas,
     vista,
     tickets: visibles,
     totals,

@@ -292,6 +292,40 @@ def test_dexter_no_se_degrada_ni_aunque_lo_pidan(cliente_a, importado):
         "degradarlo perderia la unica evidencia especifica que tenemos")
 
 
+def test_el_alta_guarda_el_area_que_decidio_la_regla(cliente_a):
+    """20/10/2026: el alta aceptaba 'area' y no la guardaba -- 816 de 816
+    casos abiertos sin area en produccion (auditor independiente). Una vacia,
+    que no es texto o mas larga que el campo no se escribe, y el caso se crea
+    igual."""
+    r = cliente_a.post(IMPORTAR, cuerpo(area="soporte_tecnico"), format="json")
+    assert r.status_code in (200, 201), r.content
+    assert Case.objects.get(id=r.json()["case_id"]).area == "soporte_tecnico"
+
+    for i, pobre in enumerate(("", "   ", None, 7, "x" * 65)):
+        r = cliente_a.post(IMPORTAR, cuerpo(external_ticket_id=f"9300{i}", area=pobre),
+                           format="json")
+        assert r.status_code in (200, 201), (pobre, r.content)
+        assert Case.objects.get(id=r.json()["case_id"]).area == "", pobre
+
+
+def test_reconciliar_escribe_el_area_y_una_pobre_no_la_borra(cliente_a, importado):
+    """19/10/2026: la reconciliacion completa el area de los casos viejos con
+    la regla del alta. Una vacia, que no es texto o mas larga que el campo no
+    borra la que hay, y el estado de Dexter no se mueve."""
+    r = cliente_a.post(_reconciliar(importado), {"area": "soporte_tecnico"},
+                       format="json")
+    assert r.status_code == 200, r.content
+    importado.refresh_from_db()
+    assert importado.area == "soporte_tecnico"
+
+    for pobre in ("", "   ", None, 7, "x" * 65):
+        r = cliente_a.post(_reconciliar(importado), {"area": pobre}, format="json")
+        assert r.status_code == 200, (pobre, r.content)
+        importado.refresh_from_db()
+        assert importado.area == "soporte_tecnico", pobre
+    assert importado.status == "New", "la reconciliacion movio el estado de Dexter"
+
+
 def test_una_lectura_pobre_no_borra_el_estado_externo_bueno(cliente_a, importado):
     cliente_a.post(_reconciliar(importado), {"external_status": ""}, format="json")
     importado.refresh_from_db()
