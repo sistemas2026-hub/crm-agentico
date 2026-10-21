@@ -311,89 +311,95 @@ def _la_de_mas_casos(cuenta: dict, orden: list) -> str:
 def _elegir_labores(planes, demanda) -> None:
     """La labor de cada jornada que se arma o se reajusta. Escribe en el plan.
 
-    UNA CUADRILLA SOLA EN SU ZONA toma la labor con mas casos de sus zonas; sin
-    casos, la habitual (o la que ya tiene, si se reajusta).
+    SEGUN LA CANTIDAD  --  21/10/2026, decision del usuario. Reemplaza la regla
+    del 17/10 («si la zona tiene casos de dos labores, la segunda toma la
+    otra»): la vista previa mostro en Soledad 27 casos de correctivo y 1 de
+    trabajos, y esa regla mandaba una cuadrilla ENTERA a trabajos por un caso.
 
-    DOS EN LA MISMA ZONA. Decidido por el usuario: si la zona tiene casos de
-    dos labores, la segunda toma la otra. Se recorren en orden de nombre y
-    cada una mira lo que QUEDA SIN CUBRIR en sus zonas --lo que ya cubren las
-    jornadas que no se tocan y las que se eligieron antes--:
+    COMO: cada cuadrilla «se lleva» tantos casos como su tope (el suyo, o el
+    de la empresa). Primero descuentan las jornadas que no se tocan. Despues,
+    de a una, se asigna el par (cuadrilla, labor) con MAS casos sin cubrir en
+    las zonas de esa cuadrilla; en empate gana la que ya tiene esa labor, o la
+    tiene de habitual, y despues el orden de nombre. Asi:
 
-        - toma la labor con mas casos sin cubrir;
-        - pero si su HABITUAL tambien tiene casos sin cubrir y una cuadrilla
-          que viene detras comparte su zona, se queda con la habitual y le
-          deja la otra. Asi la #1 de instalacion y la #2 de correctivo no
-          salen cruzadas solo por el orden alfabetico;
-        - si todo lo de sus zonas ya esta cubierto, ayuda con la mayoria.
-
-    Empate en cantidad: la labor que ya tiene, despues la habitual, despues
-    correctivo, instalacion y trabajos.
+        - una labor con pocos casos no se lleva una cuadrilla mientras otra
+          tenga mas sin cubrir: esos casos esperan, o los despacha una persona;
+        - una cuadrilla no cambia de labor si la suya todavia tiene trabajo
+          (la #1 de instalacion y la #2 de correctivo no salen cruzadas por el
+          orden alfabetico);
+        - si todo lo de sus zonas ya esta cubierto, ayuda con la mayoria; sin
+          casos, sale con la que tiene o su habitual.
     """
-    cubierto = set()
+    from campo.cuadrillas import configuracion_de_reparto
+
+    if not planes:
+        return
+    tope_de_la_empresa = configuracion_de_reparto(
+        planes[0].cuadrilla.org).tope_por_cuadrilla
+
+    def _tope(p) -> int:
+        return p.cuadrilla.tope_diario or tope_de_la_empresa
+
+    resto = {str(z): {lab: n for lab, n in (labs or {}).items() if n and n > 0}
+             for z, labs in demanda.items()}
+
+    def _cubrir(zonas, labor, cuanto) -> None:
+        for z in sorted(zonas, key=lambda z: -resto.get(z, {}).get(labor, 0)):
+            if cuanto <= 0:
+                break
+            hay = resto.get(z, {}).get(labor, 0)
+            if hay > 0:
+                toma = min(hay, cuanto)
+                resto[z][labor] = hay - toma
+                cuanto -= toma
+
+    def _cerrar(p) -> None:
+        if p.accion == REAJUSTAR and p.labor == p.labor_antes:
+            p.accion, p.motivo = DEJAR, MISMA_LABOR
+
     for p in planes:
         if p.accion == DEJAR:
-            for z in p.zonas:
-                cubierto.add((str(z.id), p.labor))
+            _cubrir([str(z.id) for z in p.zonas], p.labor, _tope(p))
 
-    #  PRIMERO SE QUEDA LA QUE YA TIENE UNA LABOR QUE HACE FALTA  --  21/10/2026.
-    #  La vista previa lo mostro en Soledad (27 de correctivo, 1 de trabajos,
-    #  la #5 con ordenes de correctivo): la #2 (correctivo) veia «sin cubrir»
-    #  solo el de trabajos y se pasaba, y la #3 (trabajos) tomaba correctivo.
-    #  Mismo resultado, dos cuadrillas movidas. Una jornada ya armada cuya
-    #  labor todavia tiene casos sin cubrir en sus zonas se queda con ella;
-    #  recien despues se reparte lo demas.
-    for p in planes:
-        if p.accion != REAJUSTAR or not p.labor_antes:
-            continue
-        zonas = [str(z.id) for z in p.zonas]
-        if any((demanda.get(z) or {}).get(p.labor_antes, 0) > 0
-               and (z, p.labor_antes) not in cubierto for z in zonas):
-            p.labor = p.labor_antes
-            p.accion, p.motivo = DEJAR, MISMA_LABOR
-            for z in zonas:
-                cubierto.add((z, p.labor))
-
-    movibles = [p for p in planes if p.accion in (ARMAR, REAJUSTAR)]
-    for i, p in enumerate(movibles):
-        zonas = [str(z.id) for z in p.zonas]
-        habitual = p.cuadrilla.labor_habitual
-        orden = [x for x in (p.labor_antes, habitual, *_DESEMPATE) if x]
-
-        total, sin_cubrir, donde = {}, {}, {}
-        for z in zonas:
-            for lab, n in (demanda.get(z) or {}).items():
-                if not n or n <= 0:
-                    continue
-                total[lab] = total.get(lab, 0) + n
-                if (z, lab) not in cubierto:
-                    sin_cubrir[lab] = sin_cubrir.get(lab, 0) + n
-                    donde.setdefault(lab, set()).add(z)
-
-        if sin_cubrir:
-            #  SE QUEDA CON LA HABITUAL SOLO SI LO QUE DEJA LO TOMA OTRA: cada
-            #  labor que no elige tiene que tener una zona sin cubrir que una
-            #  de las que vienen detras tambien cubre. Antes bastaba con
-            #  compartir CUALQUIER zona, y una #1 de dos zonas dejaba sin
-            #  nadie la mayoria de la que la #2 no cubre (auditor
-            #  independiente, 17/10).
-            despues = [{str(z.id) for z in q.zonas} for q in movibles[i + 1:]]
-            otras = [lab for lab in sin_cubrir if lab != habitual]
-            la_toma_otra = bool(otras) and all(
-                any(donde[lab] & zq for zq in despues) for lab in otras)
-            if habitual in sin_cubrir and la_toma_otra:
-                elegida = habitual
-            else:
-                elegida = _la_de_mas_casos(sin_cubrir, orden)
-        elif total:
-            elegida = _la_de_mas_casos(total, orden)
-        else:
-            elegida = p.labor_antes or habitual
-
-        p.labor = elegida
-        for z in zonas:
-            cubierto.add((z, elegida))
-        if p.accion == REAJUSTAR and elegida == p.labor_antes:
-            p.accion, p.motivo = DEJAR, MISMA_LABOR
+    pendientes = [p for p in planes if p.accion in (ARMAR, REAJUSTAR)]
+    while pendientes:
+        mejor = None
+        for i, p in enumerate(pendientes):
+            preferidas = [x for x in (p.labor_antes,
+                                      p.cuadrilla.labor_habitual) if x]
+            sin_cubrir = {}
+            for z in (str(z.id) for z in p.zonas):
+                for lab, n in resto.get(z, {}).items():
+                    if n > 0:
+                        sin_cubrir[lab] = sin_cubrir.get(lab, 0) + n
+            for lab, n in sin_cubrir.items():
+                clave = (n,
+                         len(preferidas) - preferidas.index(lab)
+                         if lab in preferidas else 0,
+                         -i,
+                         -(_DESEMPATE.index(lab) if lab in _DESEMPATE
+                           else len(_DESEMPATE)))
+                if mejor is None or clave > mejor[0]:
+                    mejor = (clave, p, lab)
+        if mejor is None:
+            #  Nadie tiene casos sin cubrir en sus zonas.
+            for p in pendientes:
+                total = {}
+                for z in (str(z.id) for z in p.zonas):
+                    for lab, n in (demanda.get(z) or {}).items():
+                        if n and n > 0:
+                            total[lab] = total.get(lab, 0) + n
+                orden = [x for x in (p.labor_antes, p.cuadrilla.labor_habitual,
+                                     *_DESEMPATE) if x]
+                p.labor = (_la_de_mas_casos(total, orden) if total
+                           else p.labor_antes or p.cuadrilla.labor_habitual)
+                _cerrar(p)
+            break
+        _, p, lab = mejor
+        p.labor = lab
+        _cubrir([str(z.id) for z in p.zonas], lab, _tope(p))
+        _cerrar(p)
+        pendientes.remove(p)
 
 
 # ---------------------------------------------------------------------------

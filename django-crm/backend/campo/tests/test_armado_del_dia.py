@@ -673,11 +673,12 @@ def test_f3_la_habitual_solo_si_lo_que_deja_lo_toma_otra(
     assert _de(planes, "Cuadrilla #2").labor == COR
 
 
-def test_w_no_intercambia_las_labores_de_las_ya_armadas(org_a, soledad):
-    """21/10/2026, lo mostro la vista previa en Soledad: 27 casos de
-    correctivo, 1 de trabajos, una cuadrilla de correctivo que no se toca. La
-    #2 (correctivo) veia «sin cubrir» solo el de trabajos y se pasaba, y la #3
-    (trabajos) tomaba correctivo: mismo resultado, dos cuadrillas movidas."""
+def test_w_27_contra_1_el_caso_suelto_no_se_lleva_una_cuadrilla(org_a, soledad):
+    """21/10/2026, decision del usuario: SEGUN LA CANTIDAD. La vista previa
+    mostro Soledad con 27 casos de correctivo y 1 de trabajos, y la regla del
+    17/10 mandaba una cuadrilla entera a trabajos por ese caso (ademas de
+    cruzar a la #2 y la #3). Ahora todas van a correctivo, y la que ya era de
+    correctivo no se mueve."""
     a = _cuadrilla(org_a, "Cuadrilla #1", _cuenta(org_a, "a@x.co"), [soledad], COR)
     b = _cuadrilla(org_a, "Cuadrilla #2", _cuenta(org_a, "b@x.co"), [soledad], COR)
     c = _cuadrilla(org_a, "Cuadrilla #3", _cuenta(org_a, "c@x.co"), [soledad], TRA)
@@ -690,6 +691,32 @@ def test_w_no_intercambia_las_labores_de_las_ya_armadas(org_a, soledad):
     planes = ja.planear_el_dia(org_a, MARTES,
                                demanda={str(soledad.id): {COR: 27, TRA: 1}})
 
-    for nombre, labor in (("Cuadrilla #2", COR), ("Cuadrilla #3", TRA)):
-        p = _de(planes, nombre)
-        assert (p.labor, p.accion) == (labor, ja.DEJAR), nombre
+    dos, tres = _de(planes, "Cuadrilla #2"), _de(planes, "Cuadrilla #3")
+    assert (dos.labor, dos.accion) == (COR, ja.DEJAR)
+    assert (tres.labor, tres.accion, tres.labor_antes) == (COR, ja.REAJUSTAR, TRA)
+
+
+def test_w2_si_la_otra_labor_tiene_trabajo_para_una_cuadrilla_se_la_lleva(
+        org_a, admin_profile, user_profile, soledad):
+    """Con el tope de fabrica (8): 9 de correctivo y 8 de trabajos son una
+    cuadrilla para cada una, aunque las dos sean de correctivo."""
+    _cuadrilla(org_a, "Cuadrilla #1", admin_profile, [soledad], labor=COR)
+    _cuadrilla(org_a, "Cuadrilla #2", user_profile, [soledad], labor=COR)
+    planes = ja.planear_el_dia(org_a, MARTES,
+                               demanda={str(soledad.id): {COR: 9, TRA: 8}})
+    assert sorted(_de(planes, n).labor for n in ("Cuadrilla #1", "Cuadrilla #2")) \
+        == sorted([COR, TRA])
+
+
+def test_w3_el_tope_propio_de_una_cuadrilla_cuenta(
+        org_a, admin_profile, user_profile, soledad):
+    """La #1 saca 20 por dia: con ella alcanza para los 15 de correctivo, y la
+    #2 va a los 6 de trabajos. Con el tope de fabrica (8) las dos irian a
+    correctivo."""
+    uno = _cuadrilla(org_a, "Cuadrilla #1", admin_profile, [soledad], labor=COR)
+    Cuadrilla.objects.filter(pk=uno.pk).update(tope_diario=20)
+    _cuadrilla(org_a, "Cuadrilla #2", user_profile, [soledad], labor=COR)
+    planes = ja.planear_el_dia(org_a, MARTES,
+                               demanda={str(soledad.id): {COR: 15, TRA: 6}})
+    assert _de(planes, "Cuadrilla #1").labor == COR
+    assert _de(planes, "Cuadrilla #2").labor == TRA
