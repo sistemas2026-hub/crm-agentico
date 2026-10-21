@@ -30,7 +30,24 @@
  *
  * @param {any} c
  */
-export const pendiente = (c) =>
+export const pendiente = (c) => delChat(c).some(conversacionPendiente);
+
+/**
+ * UN CHAT, NO UNA CONVERSACIÓN  --  21/10/2026 (contrato §4.5, C19)
+ *
+ * La bandeja muestra un chat por número: la fila es la conversación que
+ * representa al chat y trae en `abiertas` las OTRAS abiertas del mismo
+ * número. Las tres reglas de este archivo miran todas: si una escalada
+ * vieja queda detrás de una conversación nueva que atiende la IA, el chat
+ * sigue «Por atender». Mirar solo la fila la escondía, que es justo lo que
+ * la agrupación promete no hacer.
+ *
+ * @param {any} c
+ */
+const delChat = (c) => [c, ...((c && c.abiertas) || [])];
+
+/** @param {any} c */
+const conversacionPendiente = (c) =>
   // La tercera forma (26/09/2026): la IA la dejo SIN una accion de resolucion
   // registrada y el cliente no volvio. No hay escalada ni marca --nadie
   // decidio nada, que es justamente el problema-- asi que la unica señal es
@@ -63,7 +80,7 @@ export const pendiente = (c) =>
  *
  * @param {any} c
  */
-export const resuelta = (c) => c.estado === 'cerrada';
+export const resuelta = (c) => c.estado === 'cerrada' && !((c.abiertas || []).length);
 
 /**
  * Alguien se hizo cargo y el caso sigue vivo.
@@ -85,4 +102,5 @@ export const resuelta = (c) => c.estado === 'cerrada';
  * persona ya escribió en el hilo: eso también es hacerse cargo.
  * @param {any} c
  */
-export const enAtencion = (c) => (!!c.tomada_por || c.atendida) && !resuelta(c);
+export const enAtencion = (c) =>
+  delChat(c).some((x) => (!!x.tomada_por || x.atendida) && x.estado !== 'cerrada');

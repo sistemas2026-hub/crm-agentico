@@ -118,7 +118,7 @@ for nombre, nodo in funciones.items():
 # es exigir que una funcion escriba la asignacion por su cuenta, que es lo
 # contrario de lo que esta prueba defiende. Entraron en su lugar las dos que
 # SI escriben: cerrar y adoptar_de_legado.
-ESCRITORAS_ESPERADAS = {"intervenir", "tomar", "soltar", "reasignar",
+ESCRITORAS_ESPERADAS = {"intervenir", "abrir_por_operador", "tomar", "soltar", "reasignar",
                         "cerrar", "adoptar_de_legado", "devolver_a_ia"}
 comprobar(ESCRITORAS_ESPERADAS <= set(escritoras),
           f"se reconocen las transiciones que escriben la asignacion ({sorted(escritoras)})")

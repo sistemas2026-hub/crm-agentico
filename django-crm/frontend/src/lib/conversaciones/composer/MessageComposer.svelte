@@ -67,7 +67,12 @@
     onGrabar, onPausar, onParar, onCancelarGrabacion,
     onPonerEmoji, onAbrirPlantillas, onElegirPlantilla, onEnviarPlantilla,
     onDevolver, devolviendoAIA = false, errorDevolver = '',
-    onIntervenir
+    onIntervenir,
+    // --- T21: la conversación está cerrada y escribir abre una nueva. Se
+    //     escribe como en una escalada, pero sin «Devolver a la IA» (no hay
+    //     nada que devolver todavía) ni adjuntos (el motor solo continúa el
+    //     chat con texto o plantilla).
+    chatCerrado = false
   } = $props();
 
   /* QUÉ DICE LA BANDA, y de qué color. Sale del estado real --quién controla,
@@ -393,6 +398,7 @@
                abre el navegador. "Imagen" filtra a jpeg/png, que es justo lo
                que WhatsApp acepta, y evita que alguien elija un HEIC del
                celular para que se lo rechacen después. -->
+          {#if !chatCerrado}
           <div class="emoji-caja">
             <button
               type="button"
@@ -425,6 +431,7 @@
               onclick={() => onGrabar?.()}><Mic size={18} /></button
             >
           {/if}
+          {/if}
         </div>
         <span class="barra-sep" aria-hidden="true"></span>
         <div class="modos" role="group" aria-label="Qué estás escribiendo">
@@ -454,7 +461,7 @@
                dos cosas -- lo manda Y devuelve. La garantia de siempre se
                conserva: con mensaje, la conversacion vuelve SOLO si el
                mensaje sale. Sin mensaje, vuelve y punto. -->
-          {#if escalada}
+          {#if escalada && !chatCerrado}
             <button
               type="button"
               class="barra-boton barra-devolver"

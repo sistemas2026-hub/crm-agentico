@@ -218,3 +218,93 @@ def orden_de_cola(proyeccion) -> tuple:
     return (banda if banda is not None else 99,
             0 if desde is not None else 1,
             desde.timestamp() if desde is not None else 0.0)
+
+
+_CAMPOS_DEL_ULTIMO_MENSAJE = ("ultimo_mensaje", "ultimo_rol", "ultimo_mensaje_en")
+
+
+def agrupar_por_numero(filas: list[dict], creado_en: dict) -> list[dict]:
+    """
+    LA BANDEJA POR CHAT  --  21/10/2026, contrato §4.5 (C19)
+
+    Reportado: "cuando uno escribe desde el mismo numero de telefono se crea
+    una nueva conversacion como si fuera otro numero nuevo". Es la conducta
+    del contrato -- una conversacion cerrada (E3) no se reabre, y lo siguiente
+    que escribe ese numero abre otra --, pero la bandeja listaba
+    CONVERSACIONES y el usuario la quiere como WhatsApp: un chat por numero.
+
+    Esto es una VISTA. La conversacion sigue siendo la unidad del relevo:
+    estado, control, asignacion, eventos, desenlace y metricas no cambian.
+
+    Recibe las filas ya proyectadas (proyectar + canal_operativo) y
+    {id: creado_en}. Devuelve una fila por chat, con la MISMA forma que una
+    fila de conversacion mas: 'ids' (todas, por creado_en), 'tramos'
+    (cuantas), 'abiertas' (las abiertas que no son la urgente, proyectadas),
+    'urgente_id' y 'buscable' (nombres y motivos de todas, solo para buscar).
+
+      CLAVE          (canal, usuario_externo). La empresa ya la fija la
+                     consulta. Solo se agrupan las filas operativas: la vista
+                     de simulacion reutiliza numeros de bateria y fusionaria
+                     corridas distintas. Un usuario_externo vacio no es un
+                     chat: no se agrupa con nada.
+      REPRESENTANTE  la abierta mas reciente por creado_en; sin abiertas, la
+                     ultima por creado_en. NUNCA por 'actualizado_en': el
+                     propio cierre lo mueve. Es a la que se enlaza y en la
+                     que se escribe.
+      LA COLA        todo el estado de la fila (banda, escalada, quien la
+                     tomo, asignacion, espera) es el de la abierta MAS URGENTE
+                     por orden_de_cola. Si un chat tiene dos abiertas --nada lo
+                     impide en la base--, ninguna queda escondida: falla hacia
+                     lo visible (§4.2, regla 10).
+      ULTIMO MENSAJE el mas reciente de todo el chat.
+    """
+    sueltas, grupos = [], {}
+    for f in filas:
+        numero = (f.get("usuario_externo") or "").strip()
+        if not f.get("canal_operativo") or not numero:
+            sueltas.append({**f, "ids": [str(f["id"])], "tramos": 1, "abiertas": [],
+                            "creado_en": creado_en.get(str(f["id"]))})
+            continue
+        grupos.setdefault((f.get("canal"), numero), []).append(f)
+
+    def nacio(f):
+        momento = creado_en.get(str(f["id"]))
+        return (momento is None, momento.timestamp() if momento is not None else 0.0,
+                str(f["id"]))
+
+    salida = list(sueltas)
+    for grupo in grupos.values():
+        grupo.sort(key=nacio)
+        abiertas = [f for f in grupo if f.get("estado") == "abierta"]
+        representante = abiertas[-1] if abiertas else grupo[-1]
+        urgente = min(abiertas, key=orden_de_cola) if abiertas else representante
+        con_mensaje = [f for f in grupo if f.get("ultimo_mensaje_en")]
+        ultimo = max(con_mensaje, key=lambda f: f["ultimo_mensaje_en"]) if con_mensaje else representante
+        # EL ESTADO DE LA FILA ES EL DE LA URGENTE, entero (auditor
+        # independiente, 21/10/2026). Se copiaba solo la banda: una escalada de
+        # 8 dias detras de una conversacion nueva de la IA se veia "Por
+        # atender" con 0 criticas, espera de minutos, sin plazo de toma y fuera
+        # de "solo escaladas" y del filtro por motivo, porque esos datos salian
+        # del representante, que nunca escalo. Copiar campo por campo tampoco
+        # sirve: la escalada de una con el "tomada_por" de la otra da un chat
+        # "Por atender" que ya tiene quien lo atienda. Del representante quedan
+        # el enlace ('id') y cuando nacio; del chat, el ultimo mensaje.
+        fila = dict(urgente)
+        fila["id"] = representante["id"]
+        fila.update({c: ultimo.get(c) for c in _CAMPOS_DEL_ULTIMO_MENSAJE})
+        fila["urgente_id"] = str(urgente["id"])
+        fila["ids"] = [str(f["id"]) for f in grupo]
+        fila["tramos"] = len(grupo)
+        # Las OTRAS abiertas: todas menos la que ya describe la fila. Con la
+        # fila, cada abierta se cuenta una vez (estado.js, delChat).
+        fila["abiertas"] = [dict(f) for f in abiertas if f is not urgente]
+        fila["creado_en"] = creado_en.get(str(representante["id"]))
+        # Para BUSCAR, no para mostrar: un cliente que vuelve y todavia no se
+        # identifico en la conversacion nueva se encuentra por el nombre que
+        # dio antes. No se pinta en la fila: si el numero cambio de dueno,
+        # rotularia a la persona de ahora con el nombre de otra.
+        fila["buscable"] = sorted({str(f[c]) for f in grupo
+                                   for c in ("nombre_cliente", "motivo_escalamiento", "caso_manual")
+                                   if f.get(c)})
+        salida.append(fila)
+    return salida

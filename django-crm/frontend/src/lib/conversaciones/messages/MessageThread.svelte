@@ -33,7 +33,16 @@
     /** Se está enviando y la IA responde: muestra los tres puntitos. */
     escribiendo = false,
     reintentando = null,
-    onReintentar
+    onReintentar,
+    /** Ver las conversaciones anteriores del chat (21/10/2026). Lo dibuja el
+        elemento {tipo:'mas'} que arma lib/conversaciones/chat.js. */
+    onVerAnteriores = undefined,
+    cargandoAnteriores = false,
+    /** Si se puede reintentar una entrega: NO en una conversación cerrada,
+        que el motor ya no le acepta envíos (X26). Sin esto, "Reintentar" en
+        una cerrada pasaba por T21 y abría una conversación fantasma
+        (auditor de frontera, 21/10/2026). */
+    puedeReintentar = true
   } = $props();
 
   /** Si debajo de la burbuja hay algo que decir: el estado de entrega, el
@@ -190,6 +199,27 @@
              evento de sistema, que sí es una línea que cruza. Dos separadores
              distintos tienen que verse distintos. -->
         <div class="dia"><span class="dia-chip">{item.texto}</span></div>
+      {:else if item.tipo === 'mas'}
+        <div class="mas">
+          <button type="button" class="mas-boton" onclick={() => onVerAnteriores?.()}
+                  disabled={cargandoAnteriores} aria-busy={cargandoAnteriores}>
+            {cargandoAnteriores ? 'Cargando…' : item.texto}
+          </button>
+        </div>
+      {:else if item.tipo === 'cierre'}
+        <!-- UN CHAT, VARIAS CONVERSACIONES (21/10/2026, contrato §4.5): la
+             marca entre una conversación y la siguiente del mismo número.
+             Dice SOLO lo registrado -- sin hora ni motivo si el cierre no los
+             dejó (T18) -- y es un renglón con filete, no una ficha: tiene que
+             verse distinta del separador de día. -->
+        <div class="cierre" role="separator" aria-label={item.texto}>
+          <span class="cierre-texto">{item.texto}</span>
+          {#if item.enlace}
+            <!-- Una conversación del mismo número que sigue ABIERTA: se
+                 atiende en ella, y sin el enlace no había cómo llegar. -->
+            <a class="cierre-enlace" href="/conversaciones/{item.enlace}">Abrirla</a>
+          {/if}
+        </div>
       {:else if item.m.rol === 'nota'}
         {@const autor = autorDe(item.m)}
         <!-- LA NOTA INTERNA NO SE PARECE A UN MENSAJE, y ahora tampoco ocupa
@@ -243,7 +273,10 @@
                de trabajo. -->
           <div class="msg-cabeza">
             {#if autor.clase === 'a-cliente'}
-              <span class="msg-quien">{nombreCliente || autor.etiqueta}</span>
+              <!-- El nombre es el del cliente de ESTA conversación. Un mensaje
+                   de una anterior del chat lleva la etiqueta neutra: el número
+                   pudo ser de otra persona (revisor de PII, 21/10/2026). -->
+              <span class="msg-quien">{(!item.m.deOtraConversacion && nombreCliente) || autor.etiqueta}</span>
             {:else}
               <span class="msg-chip">
                 <span class="msg-punto" aria-hidden="true"></span>{autor.etiqueta}
@@ -355,6 +388,10 @@
                 <!-- Reintentar sin volver a escribir: el texto ya está en la
                      burbuja, y hacer que alguien lo tipee de nuevo después de
                      un fallo del canal es cobrarle a la persona equivocada. -->
+                <!-- Un mensaje de una conversación ANTERIOR del chat no se
+                     reintenta desde acá: esa conversación está cerrada y el
+                     motor no le acepta envíos (X26). -->
+                {#if puedeReintentar && !item.m.deOtraConversacion}
                 <button
                   type="button"
                   class="pie-reintentar"
@@ -365,6 +402,7 @@
                   <RotateCcw size={11} />
                   {reintentando === item.m.id ? 'Reintentando…' : 'Reintentar'}
                 </button>
+                {/if}
               {:else if item.m.estado_entrega === 'descartado'}
                 <!-- D24: la IA la calculó y una persona tomó el control antes
                      de que saliera. Va con PALABRA y no con palomita: un tilde
@@ -374,7 +412,7 @@
               {/if}
               {#if item.m.rol === 'assistant' && casos.length > 0}
                 <MarcarEjemplo
-                  conversacionId={conversacionId}
+                  conversacionId={item.m.conversation_id || conversacionId}
                   mensajeId={item.m.id}
                   casoInicial={item.m.caso_marcado}
                   {casos}
@@ -439,6 +477,51 @@
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
+  }
+
+  /* ── el chat: la marca entre conversaciones y "ver anteriores" ─────── */
+  .cierre {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 14px 0;
+    color: var(--bandeja-texto-3);
+    font-size: 11px;
+  }
+  .cierre::before,
+  .cierre::after {
+    content: '';
+    flex: 1;
+    border-top: 1px dashed var(--bandeja-borde);
+  }
+  .cierre-texto {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 80%;
+  }
+  .cierre-enlace {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+  }
+  .mas {
+    display: flex;
+    justify-content: center;
+    margin: 6px 0 10px;
+  }
+  .mas-boton {
+    padding: 3px 10px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: 3px;
+    background: var(--bandeja-superficie-suave);
+    color: var(--bandeja-texto-2);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .mas-boton:disabled {
+    cursor: progress;
+    opacity: 0.7;
   }
 
   /* ── el evento de sistema: un riel que cruza ────────────────────────── */

@@ -8,12 +8,12 @@
   let { totales, ms } = $props();
 
   const cifras = $derived([
-    ['Activas (24 h)', totales.conversaciones_activas, ''],
+    ['Conversaciones activas (24 h)', totales.conversaciones_activas, ''],
     ['Agentes con trabajo', totales.agentes_activos, ''],
     ['Conversaciones hoy', totales.atendidas_hoy, ''],
     ['Herramientas hoy', totales.herramientas_hoy, ''],
     ['Herramienta promedio', ms(totales.duracion_media_ms), ''],
-    ['Esperan a una persona', totales.esperando_humano, 'ambar']
+    ['Conversaciones que esperan a una persona', totales.esperando_humano, 'ambar']
   ]);
 </script>
 

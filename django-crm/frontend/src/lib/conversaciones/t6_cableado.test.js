@@ -87,7 +87,9 @@ describe('el control no cambia antes de tiempo', () => {
     const i = composer.indexOf('barra-devolver');
     expect(i, 'no se encontro el boton de devolver').toBeGreaterThan(-1);
     const antes = composer.slice(Math.max(0, i - 700), i);
-    expect(antes).toMatch(/\{#if escalada\}/);
+    // 21/10/2026: y tampoco en un chat cerrado (T21), donde no hay nada que
+    // devolver todavía. La condición puede endurecerse; nunca aflojarse.
+    expect(antes).toMatch(/\{#if escalada( && !chatCerrado)?\}/);
   });
 });
 

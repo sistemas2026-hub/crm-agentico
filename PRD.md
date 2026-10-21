@@ -786,6 +786,48 @@ manual».
 modificación (sería una sola consulta en lugar de los tramos), o que el tope
 de 10 eliminados por vuelta se quede corto con borrados reales.
 
+### 8.16 DECISIÓN — La bandeja como WhatsApp: un chat por número (21/10/2026)
+
+**El error que la originó.** Reportado por el usuario: *"cuando uno escribe
+desde el mismo numero de telefono se crea una nueva conversacion como si fuera
+otro numero nuevo"*. Medido en el código ese día: no era una carrera ni un
+formato de número distinto. `registrar_mensaje` reutiliza solo una conversación
+`abierta`, y cuatro caminos la cierran (la IA cuando el cliente confirma, el
+plazo, el operador y las 24 h de inactividad). Lo siguiente que escribe ese
+número abre otra conversación, y la bandeja —que listaba conversaciones— la
+mostraba como una ventana nueva. Era la conducta del contrato del relevo.
+
+**Lo que se decidió**, con las palabras del usuario: *"el sistema puede cerrar
+la conversacion pero debe mostrar los mensajes anteriores como whatsapp"*; y
+que el equipo **pueda escribirle** a un número aunque su última conversación
+esté cerrada.
+
+1. Por dentro nada cambia: cerrar sigue siendo cerrar, y el desenlace, las
+   métricas, el Supervisor y el resumen que recibe la IA son por conversación.
+2. La bandeja muestra un **chat** por número `(canal, usuario_externo)`, con
+   las conversaciones anteriores arriba y una marca de cierre entre ellas que
+   dice solo lo que quedó registrado. Lo calcula el motor
+   (`GET /conversaciones?por_numero=1`, `GET /conversaciones/<id>/hilo`).
+3. Si un número tiene dos conversaciones abiertas, ninguna queda escondida: la
+   fila lleva el estado de la más urgente y la ventana avisa de la otra con un
+   enlace para atenderla.
+4. Escribirle a un chat cerrado **no reabre** la conversación: abre una nueva
+   del mismo número, en manos de quien escribe (T21). Fuera de las 24 h, solo
+   plantilla; a un número dado de baja, nada. Desde la pantalla del ticket,
+   igual: si el número ya tiene una abierta se escribe ahí, y la copia va al
+   ticket del caso. En el simulador no corre.
+5. Lo que encontró el diseño en el camino: el motor **aceptaba** texto, media y
+   plantilla en una conversación cerrada; solo la pantalla lo impedía. Ahora el
+   motor lo rechaza (contrato X26).
+
+Contrato del relevo v3.2 (C19, C20). Ficha:
+`SPEC/objetivos/bandeja-como-whatsapp.md`.
+
+**Lo que la reabre:** que una empresa necesite ver cada conversación por
+separado en la cola (sería un ajuste de la bandeja, no un cambio del relevo), o
+que T18 empiece a registrar quién cerró y cuándo — entonces la marca de cierre
+lo diría sin cambiar nada más.
+
 ---
 
 ## 9. Despliegue

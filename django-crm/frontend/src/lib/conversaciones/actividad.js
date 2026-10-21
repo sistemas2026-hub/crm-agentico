@@ -104,6 +104,11 @@ export function loQuePaso(ev) {
     case 'escalada':
       return { texto: 'Pasó a manos del equipo', detalle: motivo || null, tono: 'ia' };
     case 'intervencion':
+      // T21 (21/10/2026): la conversación nació porque una persona le escribió
+      // a un chat cerrado. No "intervino" nada: no había nada abierto.
+      if (d.continua_de) {
+        return { texto: `${quien} le escribió al chat cerrado`, detalle: null, tono: 'humano' };
+      }
       return { texto: `${quien} intervino la conversación`, detalle: motivo || null, tono: 'humano' };
     case 'tomada':
       return { texto: `${quien} la tomó`, detalle: null, tono: 'humano' };

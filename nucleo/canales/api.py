@@ -5536,6 +5536,20 @@ def conversaciones():
         fila.update(proyeccion.proyectar(fila, rol_de_entrada=rol_entrada,
                                          sin_gestion_horas=horas_sg))
         fila["canal_operativo"] = fila.get("canal") in canales.REALES
+    # LA BANDEJA POR CHAT (21/10/2026, contrato §4.5 / C19): con 'por_numero'
+    # cada fila operativa es un CHAT -- todas las conversaciones de un mismo
+    # numero -- y no una conversacion. Se agrupa DESPUES de proyectar, asi la
+    # banda de un chat es la de su abierta mas urgente, y ANTES de ordenar.
+    # Apagado por defecto: el resto de los llamadores sigue recibiendo una
+    # fila por conversacion.
+    por_numero = (request.args.get("por_numero") or "").strip().lower() in ("1", "true", "si")
+    if por_numero:
+        try:
+            nacimientos = persistencia.creado_en_de(tenant, [f["id"] for f in salida])
+        except Exception as e:
+            registrar("conversaciones", "no se pudo agrupar por chat", error=e)
+            return jsonify({"error": "No se pudo leer las conversaciones."}), 500
+        salida = proyeccion.agrupar_por_numero(salida, nacimientos)
     salida.sort(key=proyeccion.orden_de_cola)
 
     # El plazo de toma viaja con la cola y no por conversacion: es uno solo
@@ -5555,6 +5569,7 @@ def conversaciones():
     canal_whatsapp = persistencia.salud_canal_whatsapp(tenant)
 
     return jsonify({"tenant": tenant, "conversaciones": salida,
+                    "agrupada": por_numero,
                     "sla_toma_minutos": sla,
                     "canal_whatsapp": canal_whatsapp})
 
@@ -6219,8 +6234,12 @@ def conversaciones_mensajes(id_conversacion):
     # operador sin poder escribir donde nadie se lo impide.
     conv = resultado["conversacion"]
     if conv.get("canal") == "whatsapp":
+        # Del NUMERO y no de esta conversacion (21/10/2026, T21): la que abre
+        # una persona al escribirle a un chat cerrado no tiene todavia ningun
+        # mensaje del cliente, y medida sola daba "no se sabe" -- la pantalla
+        # dejaba mandar texto libre a alguien que no escribe hace dias.
         conv["ventana_whatsapp"] = whatsapp.estado_de_ventana(
-            conv.get("ultimo_mensaje_cliente"))
+            conv.get("ultimo_mensaje_cliente_numero") or conv.get("ultimo_mensaje_cliente"))
     # Quien controla HOY, ya calculado: la pantalla no reimplementa la regla.
     conv["control_efectivo"] = control_efectivo(conv)
 
@@ -6237,6 +6256,52 @@ def conversaciones_mensajes(id_conversacion):
                       if sesion_guardada.get(c)}
 
     return jsonify(resultado)
+
+
+@app.get("/conversaciones/<id_conversacion>/hilo")
+def conversaciones_hilo(id_conversacion):
+    """
+    LA VENTANA DEL CHAT  --  21/10/2026, contrato §4.5 (C19)
+
+    Las conversaciones ANTERIORES del mismo numero, con sus mensajes, para que
+    la bandeja muestre un solo chat "como WhatsApp". La pedida no viene: esa
+    la trae /mensajes, que tiene cuatro consumidores y no cambia de forma.
+
+    Por id de conversacion y nunca por telefono: la URL termina en los logs de
+    acceso. Pagina por conversacion con 'antes' (el id de la mas vieja ya
+    mostrada) y 'limite' (hasta 5).
+
+    Solo canales reales: la vista de simulacion no agrupa (los numeros de
+    bateria se reutilizan y fusionarian corridas distintas).
+
+    El log no lleva contenido ni numero: el id interno y cuantas se leyeron.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        limite = int(request.args.get("limite") or persistencia.TRAMOS_POR_PAGINA)
+    except ValueError:
+        return jsonify({"error": "'limite' tiene que ser un numero."}), 400
+    try:
+        hilo = persistencia.hilo_del_numero(
+            tenant, id_conversacion, antes=(request.args.get("antes") or None), limite=limite)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("conversaciones", "fallo al leer el chat",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer el chat."}), 500
+    if hilo is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    # 'agrupa' le dice a la pantalla si este canal es un chat: sin eso, una
+    # simulada cerrada se veia como "la ultima del chat" y ofrecia escribirle.
+    hilo["agrupa"] = hilo["canal"] in canales.REALES
+    if not hilo["agrupa"]:
+        hilo.update({"tramos": [], "hay_anteriores": False, "antes": None,
+                     "mas_reciente_id": hilo["ancla"], "abiertas": [], "posteriores": [],
+                     "total_tramos": 1})
+    return jsonify(hilo)
 
 
 @app.get("/canales/plantillas")
@@ -6296,6 +6361,12 @@ def _exigir_control_humano(tenant: str, id_conversacion: str):
     tiene control 'ia' por default, cuenta como humana y no se bloquea a quien
     la esta atendiendo. La nota interna NO pasa por aca: no sale del equipo.
     """
+    #  EL ESTADO VA ANTES QUE EL CONTROL  --  21/10/2026, contrato X26.
+    #  Cerrar no le quita el control a quien lo tenia: una conversacion cerrada
+    #  por T16 o T17 seguia "en manos de una persona", y esta guarda le
+    #  aceptaba texto, media y plantilla. Lo unico que lo impedia era que la
+    #  pantalla escondia la caja de escribir. Ahora una cerrada da 409
+    #  'conversacion_cerrada'; texto y plantilla lo resuelven con T21.
     try:
         control = persistencia.control_efectivo_de(tenant, id_conversacion)
     except Exception as e:
@@ -6305,11 +6376,140 @@ def _exigir_control_humano(tenant: str, id_conversacion: str):
                                  "No se envio nada.", "codigo": "control_desconocido"}), 503
     if control is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if control == "cerrada":
+        return jsonify({"error": "Esta conversacion esta cerrada.",
+                        "codigo": "conversacion_cerrada"}), 409
     if control != "humano":
         return jsonify({"error": "La IA esta atendiendo esta conversacion. Para escribirle "
                                  "al cliente hay que intervenir primero.",
                         "codigo": "control_ia", "control": control}), 409
     return None
+
+
+def _cerrada_en_el_medio():
+    """
+    La conversacion se cerro entre la guarda y el guardado (I22): no se guardo
+    ni se envio nada. Mismo codigo que la guarda, para que la pantalla lo trate
+    igual -- volver a enviar ya escribe con T21, en una conversacion nueva.
+    """
+    return jsonify({"error": "La conversacion se cerro mientras escribias. No se guardo "
+                             "ni se envio nada.", "codigo": "conversacion_cerrada"}), 409
+
+
+def _es_cerrada(bloqueo) -> bool:
+    """Si el bloqueo de _exigir_control_humano es el de una conversacion cerrada."""
+    respuesta, codigo = bloqueo
+    return codigo == 409 and (respuesta.get_json(silent=True) or {}).get("codigo") == "conversacion_cerrada"
+
+
+def _escribir_en_chat_cerrado(tenant: str, id_conversacion: str, contenido: str, *,
+                              autor: str, autor_id: str, clave: str | None, enviar,
+                              etiqueta: str, es_plantilla: bool,
+                              ticket_del_caso: str | None = None):
+    """
+    T21 por HTTP: escribirle a un chat cuya conversacion pedida esta cerrada
+    (21/10/2026, contrato C20). La decision -- precondiciones, la conversacion
+    nueva, su evento y el mensaje -- vive en transiciones.abrir_por_operador;
+    aca va lo que es de HTTP: la ventana de 24 h, la baja del canal y la
+    entrega.
+
+      texto     solo dentro de la ventana de 24 h del NUMERO: afuera, 409
+                'fuera_de_ventana' y no se crea nada (WhatsApp lo rechazaria).
+      plantilla es un envio que inicia el equipo: un numero dado de baja no
+                la recibe (409 'de_baja'), igual que /avisos.
+
+    'enviar(numero)' manda por WhatsApp y devuelve el wamid. La sesion viva
+    del numero se descarta: el turno siguiente se reconstruye desde la base,
+    sobre la conversacion nueva.
+    """
+    if not (clave or "").strip():
+        return jsonify({"error": "Escribirle a un chat cerrado requiere clave_idempotencia.",
+                        "codigo": "clave_requerida"}), 400
+    try:
+        chat = persistencia.datos_del_chat(tenant, id_conversacion)
+    except Exception as e:
+        registrar("relevo", "no se pudo leer el chat", conversation_id=id_interno(id_conversacion),
+                  error=e)
+        return jsonify({"error": "No se pudo comprobar el chat. No se envio nada.",
+                        "codigo": "control_desconocido"}), 503
+    if chat is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    # Solo un chat de verdad se continua (auditor independiente, 21/10/2026):
+    # en el simulador T21 dejaba el numero de bateria en manos de una persona,
+    # y la proxima corrida con ese numero no la contestaba la IA (D9).
+    if chat["canal"] not in canales.REALES:
+        return jsonify({"error": "Esta conversacion esta cerrada.",
+                        "codigo": "conversacion_cerrada"}), 409
+    if es_plantilla and chat["canal"] != "whatsapp":
+        return jsonify({"error": "Las plantillas son de WhatsApp; esta "
+                                 "conversacion es de otro canal."}), 400
+    if chat["canal"] == "whatsapp":
+        if not es_plantilla and whatsapp.estado_de_ventana(
+                chat.get("ultimo_mensaje_cliente_numero")).get("abierta") is not True:
+            return jsonify({"error": "Pasaron mas de 24 horas desde el ultimo mensaje del "
+                                     "cliente: WhatsApp solo deja mandarle una plantilla.",
+                            "codigo": "fuera_de_ventana"}), 409
+        if es_plantilla:
+            # Sin poder leer la baja no se manda: fallar cerrado, con un 503
+            # que se explica, igual que /avisos (auditor de frontera).
+            try:
+                de_baja = persistencia.esta_de_baja(tenant, chat["usuario_externo"], chat["canal"])
+            except Exception as e:
+                registrar("relevo", "no se pudo leer la baja del canal",
+                          conversation_id=id_interno(id_conversacion), error=e)
+                return jsonify({"error": "No se pudo comprobar si el numero pidio no recibir "
+                                         "mensajes. No se envio nada.",
+                                "codigo": "baja_desconocida"}), 503
+            if de_baja:
+                return jsonify({"error": "Este numero pidio no recibir mensajes. No se envio nada.",
+                                "codigo": "de_baja"}), 409
+    try:
+        r = transiciones.abrir_por_operador(tenant, id_conversacion, contenido,
+                                            operador_id=autor_id, operador_nombre=autor,
+                                            clave=clave)
+    except Exception as e:
+        registrar("relevo", "no se pudo escribir al chat cerrado",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo guardar el mensaje."}), 500
+    if r.motivo == "no_existe":
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if r.motivo == "ya_hay_abierta":
+        return jsonify({"error": "Este chat ya tiene una conversacion abierta: hay que "
+                                 "escribir en ella.", "codigo": "hay_conversacion_abierta",
+                        "conversation_id": r.datos["conversation_id"]}), 409
+    if r.motivo == "clave_usada":
+        return jsonify({"error": "Ese mensaje ya estaba guardado en este chat: no se volvio a "
+                                 "enviar. Para escribirle de nuevo, escribi un mensaje nuevo.",
+                        "codigo": "clave_usada",
+                        "conversation_id": r.datos["conversation_id"]}), 409
+    if r.motivo in ("clave_ajena", "no_cerrada", "sin_numero"):
+        return jsonify({"error": "No se pudo escribir en este chat.", "codigo": r.motivo}), 409
+    d = r.datos
+    _sesiones.pop(canales.clave_sesion_de_fila(tenant, d["canal"], d["usuario_externo"]), None)
+    salida = {"ok": True, "conversation_id": d["conversation_id"],
+              "continua_de": d["continua_de"], "mensaje_id": d["mensaje_id"]}
+    if r.motivo == "reintento":
+        salida.update({"ya_existia": True, "estado_entrega": d["estado_entrega"]})
+        if d["estado_entrega"] != "fallido":
+            return jsonify(salida), 200
+    elif ticket_del_caso:
+        # Escrito desde un caso: la copia al ticket del ISP, como cualquier
+        # respuesta desde un caso. La conversacion nueva no lleva ese ticket:
+        # T21 no la ata a ningun caso.
+        try:
+            salida["copiado_al_ticket"] = operativo.responder(
+                _config_de(tenant), tenant, ticket_del_caso, contenido, autor)
+        except Exception as e:
+            registrar("operativo", "no se pudo copiar la respuesta al ticket", error=e)
+            salida["copiado_al_ticket"] = False
+    if d["canal"] != "whatsapp":
+        salida.update({"aceptado_por_meta": None, "aceptacion_registrada": True,
+                       "resultado": "aceptado"})
+        return jsonify(salida), 201
+    salida.update(_entregar_y_registrar(
+        tenant, d["mensaje_id"], lambda: enviar(d["usuario_externo"]), etiqueta,
+        clave_salida=f"humano:{clave}", conversation_id=d["conversation_id"]))
+    return jsonify(salida), 201
 
 
 def _ya_guardado(destino: dict) -> bool:
@@ -6354,7 +6554,10 @@ def conversaciones_enviar_plantilla(id_conversacion):
     except persistencia.AutorInvalido as e:
         return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
     bloqueo = _exigir_control_humano(tenant, id_conversacion)
-    if bloqueo:
+    # Una cerrada sigue de largo hasta tener el texto armado: la plantilla se
+    # valida igual, y despues la manda T21 en una conversacion nueva.
+    chat_cerrado = bool(bloqueo) and _es_cerrada(bloqueo)
+    if bloqueo and not chat_cerrado:
         return bloqueo
 
     try:
@@ -6388,11 +6591,20 @@ def conversaciones_enviar_plantilla(id_conversacion):
                                  f"variable(s) y llegaron {len(variables)}."}), 400
 
     texto = _armar_plantilla(elegida, variables)
+    if chat_cerrado:
+        return _escribir_en_chat_cerrado(
+            tenant, id_conversacion, texto, autor=autor, autor_id=autor_id, clave=clave,
+            enviar=lambda numero: whatsapp.enviar_plantilla_aprobada(
+                config, tenant, numero, nombre, variables,
+                elegida.get("idioma") or "es", plantilla=elegida),
+            etiqueta=f"plantillas '{nombre}'", es_plantilla=True)
 
     try:
         destino = persistencia.agregar_mensaje_humano(
             tenant, id_conversacion, texto, autor, autor_usuario_id=autor_id,
             clave_idempotencia=clave, solo_canal=canales.WHATSAPP)
+    except persistencia.ConversacionCerrada:
+        return _cerrada_en_el_medio()
     except persistencia.CanalNoAdmite:
         return jsonify({"error": "Las plantillas son de WhatsApp; esta "
                                  "conversacion es de otro canal."}), 400
@@ -6518,11 +6730,39 @@ def caso_responder_humano(caso_id):
         # detras, y quien responde ahi no le esta hablando a nadie por chat.
         return jsonify({"error": "Este caso no vino de una conversacion.",
                         "sin_conversacion": True}), 404
-    return conversaciones_responder_humano(datos["id"])
+    # EL CASO APUNTA A UNA CONVERSACION QUE PUEDE ESTAR CERRADA (auditor
+    # independiente, 21/10/2026). Antes de X26 la respuesta se escribia en la
+    # cerrada; con X26 la primera abria una nueva por T21 sin copiar al ticket
+    # del ISP, y la segunda chocaba con esa misma nueva (409) -- y la pantalla
+    # del ticket lo tragaba. Ahora, como en el chat: si el numero ya tiene una
+    # abierta, se escribe en ella (con sus guardas: si la atiende la IA, 409);
+    # si no, T21. Y la copia va al ticket de ESTE caso, que es donde se
+    # escribio.
+    #
+    # El chat se lee SOLO si la del caso esta cerrada: con una abierta el
+    # camino es el de siempre, sin una lectura mas. Si el control no se puede
+    # leer, sigue de largo: la guarda de la ruta lo vuelve a leer y falla
+    # cerrado (503) con su propio mensaje.
+    destino, ticket = str(datos["id"]), None
+    try:
+        cerrada = persistencia.control_efectivo_de(tenant, destino) == "cerrada"
+    except Exception:
+        cerrada = False
+    if cerrada:
+        try:
+            chat = persistencia.datos_del_chat(tenant, destino)
+        except Exception as e:
+            registrar("conversaciones", "fallo al leer el chat del caso", caso_id=caso_id, error=e)
+            return jsonify({"error": "No se pudo comprobar el chat. No se envio nada.",
+                            "codigo": "control_desconocido"}), 503
+        if chat and chat.get("abierta_id"):
+            destino = str(chat["abierta_id"])
+        ticket = (chat or {}).get("ticket_operativo")
+    return conversaciones_responder_humano(destino, ticket_del_caso=ticket)
 
 
 @app.post("/conversaciones/<id_conversacion>/mensajes")
-def conversaciones_responder_humano(id_conversacion):
+def conversaciones_responder_humano(id_conversacion, ticket_del_caso: str | None = None):
     """
     Un agente humano responde directo en una conversacion ya escalada -- sin
     pasar por el modelo. Distinto de /chat: eso simula al cliente escribiendo
@@ -6565,6 +6805,20 @@ def conversaciones_responder_humano(id_conversacion):
         return jsonify({"error": "Devolver al asistente requiere clave_idempotencia.",
                         "codigo": "clave_requerida"}), 400
     bloqueo = _exigir_control_humano(tenant, id_conversacion)
+    if bloqueo and _es_cerrada(bloqueo):
+        # T21: escribirle a un chat cerrado abre una conversacion nueva. Sin
+        # "responder y devolver" en este paso: la nueva nace en manos de quien
+        # escribe, y devolverla a la IA es T7, despues.
+        if devolver:
+            return jsonify({"error": "En un chat cerrado no se puede responder y devolver "
+                                     "a la vez: primero se escribe, despues se devuelve.",
+                            "codigo": "devolver_no_disponible"}), 400
+        return _escribir_en_chat_cerrado(
+            tenant, id_conversacion, contenido, autor=autor, autor_id=autor_id, clave=clave,
+            enviar=lambda numero: whatsapp.enviar_texto(_config_de(tenant), tenant, numero,
+                                                        contenido),
+            etiqueta=f"conversaciones '{id_conversacion}'", es_plantilla=False,
+            ticket_del_caso=ticket_del_caso)
     if bloqueo:
         return bloqueo
 
@@ -6575,6 +6829,8 @@ def conversaciones_responder_humano(id_conversacion):
                    if devolver else persistencia.agregar_mensaje_humano(
                        tenant, id_conversacion, contenido, autor,
                        autor_usuario_id=autor_id, clave_idempotencia=clave))
+    except persistencia.ConversacionCerrada:
+        return _cerrada_en_el_medio()
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
@@ -6660,11 +6916,14 @@ def conversaciones_responder_humano(id_conversacion):
     # La misma respuesta, copiada al ticket del sistema del ISP. Va aparte de
     # la entrega al cliente y no la condiciona: que la operacion no se entere
     # es un problema, pero uno menor que no contestarle a quien espera.
-    if destino.get("ticket_operativo") and not reintento:
+    # Desde un caso, al ticket de ESE caso aunque se haya escrito en otra
+    # conversacion del mismo chat (ver caso_responder_humano).
+    ticket = ticket_del_caso or destino.get("ticket_operativo")
+    if ticket and not reintento:
         try:
             config = _config_de(tenant)
             salida["copiado_al_ticket"] = operativo.responder(
-                config, tenant, destino["ticket_operativo"], contenido, autor)
+                config, tenant, ticket, contenido, autor)
         except Exception as e:
             registrar("operativo", "no se pudo copiar la respuesta al ticket", error=e)
             salida["copiado_al_ticket"] = False
@@ -10005,6 +10264,8 @@ def conversaciones_enviar_media(id_conversacion):
         destino = persistencia.agregar_mensaje_humano(
             tenant, id_conversacion, texto, autor, autor_usuario_id=autor_id,
             clave_idempotencia=clave)
+    except persistencia.ConversacionCerrada:
+        return _cerrada_en_el_medio()
     except Exception as e:
         registrar("media", "fallo al guardar el mensaje", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500

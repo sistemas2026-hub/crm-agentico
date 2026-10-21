@@ -139,14 +139,19 @@
   const estaActiva = (/** @type {any} */ c) =>
     !!c.ultimo_mensaje_en &&
     ahora - new Date(c.ultimo_mensaje_en).getTime() < MINUTOS_ACTIVA * 60 * 1000;
+
+  /* La fila es un CHAT (21/10/2026): se marca abierta si la URL apunta a
+     CUALQUIERA de sus conversaciones -- un enlace viejo a una anterior del
+     mismo número abre este mismo chat. */
+  const esDeEsteChat = $derived((c.ids || [c.id]).includes(abierta));
 </script>
 
 <a
   class="fila"
   class:pide={pendiente(c)}
-  class:activa={c.id === abierta}
+  class:activa={esDeEsteChat}
   href="/conversaciones/{c.id}"
-  aria-current={c.id === abierta ? 'page' : undefined}
+  aria-current={esDeEsteChat ? 'page' : undefined}
 >
   <div class="cuerpo">
     <!-- Primer renglón: POR QUÉ está en la cola, y desde cuándo espera. El

@@ -501,6 +501,17 @@ class CanalNoAdmite(ValueError):
     """La conversacion es de un canal que no puede recibir este envio."""
 
 
+class ConversacionCerrada(Exception):
+    """
+    La conversacion se cerro entre la guarda y el guardado (contrato I22).
+
+    Medido por el auditor de frontera el 21/10/2026: la guarda de envio lee el
+    estado, pero un cierre del barrido, de otra persona o de un "listo,
+    gracias" que llegaba en el medio dejaba el mensaje guardado en la cerrada
+    y salia a WhatsApp. El guardado vuelve a mirar, con la fila bloqueada.
+    """
+
+
 def validar_origen(rol: str, origen: str) -> None:
     """Levanta ValueError si 'origen' falta, es desconocido o no corresponde
     al rol. Se llama antes de cualquier escritura."""
@@ -762,59 +773,12 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
         return [dict(f) for f in cur.fetchall()]
 
 
-def mensajes_de(tenant: str, conversation_id: str) -> dict:
-    """
-    El encabezado de una conversacion puntual (para el detalle de la
-    bandeja) mas su hilo de mensajes en orden. `conversacion` viene None si
-    el id no existe o no es de este tenant -- el llamador decide si eso es
-    un 404.
-    """
-    with sesion(tenant) as (cur, org):
-        cur.execute(
-            """select id, canal, usuario_externo, rol_efectivo, estado,
-                      escalada_a_humano, necesita_atencion_humana,
-                      motivo_escalamiento, caso_id, etiqueta,
-                      actualizado_en, conservar, conservar_motivo, conservar_por,
-                      atendida_manual, atendida_por, tomada_por, tomada_en,
-                      id_cliente, nombre_cliente, datos_sesion,
-                      -- El control del relevo (B3): la pantalla recibe el
-                      -- control EFECTIVO ya calculado (api.py), no la regla.
-                      relevo_version, control, control_motivo,
-                      asignada_a_usuario_id, asignada_a_nombre, aviso_relevo,
-                      -- Lo que el modelo ya habia escrito al escalar y hasta
-                      -- ahora solo viajaba a la descripcion del ticket. Es lo
-                      -- que arma el resumen de arriba en el detalle: que
-                      -- queria el cliente, que no se pudo comprobar y que
-                      -- falta hacer.
-                      escalada_en, resumen, escalada_no_comprobado,
-                      escalada_siguiente_paso,
-                      -- Cuando escribio el CLIENTE por ultima vez. No es lo
-                      -- mismo que 'actualizado_en' ni que el ultimo mensaje
-                      -- del hilo, y la diferencia es justamente el bug facil
-                      -- de esta funcionalidad: la ventana de 24 h de WhatsApp
-                      -- la abre el cliente, y solo el. Si esto mirara
-                      -- cualquier mensaje, cada respuesta nuestra --o del
-                      -- asistente-- renovaria la ventana en la pantalla
-                      -- mientras Meta la considera cerrada, y el operador
-                      -- descubriria la verdad recien cuando Enviar falla, que
-                      -- es exactamente lo que se viene a evitar.
-                      (select max(u.creado_en) from asistente.messages u
-                        where u.conversation_id = conversations.id
-                          and u.organization_id = conversations.organization_id
-                          and u.rol = 'user') as ultimo_mensaje_cliente,
-                      (atendida_manual or exists (
-                           select 1 from asistente.messages h
-                            where h.conversation_id = conversations.id
-                              and h.rol = 'humano')) as atendida
-               from asistente.conversations
-               where organization_id = %s and id = %s""",
-            (org, conversation_id))
-        conversacion = cur.fetchone()
-        if not conversacion:
-            return {"conversacion": None, "mensajes": []}
-
-        cur.execute(
-            """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_marcado,
+# Los mensajes de UNA conversacion, como los ve la bandeja. Constante y no
+# texto dentro de mensajes_de() desde el 21/10/2026: la ventana del chat
+# (hilo_del_numero) muestra los de las conversaciones anteriores del mismo
+# numero, y esta consulta lleva decisiones de privacidad -- que viaja y que no
+# de cada adjunto -- que no pueden quedar en dos copias que diverjan.
+_SQL_MENSAJES = """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_marcado,
                       -- QUIEN produjo el mensaje, y su nombre si fue una
                       -- persona (D30). 'rol' es el protocolo del canal y NO
                       -- alcanza: desde B2 una respuesta humana es rol
@@ -863,9 +827,232 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                left join asistente.ejemplos_validados e
                  on e.mensaje_id = m.id and e.organization_id = m.organization_id
                where m.organization_id = %s and m.conversation_id = %s
-               order by m.creado_en asc""",
+               order by m.creado_en asc"""
+
+
+def mensajes_de(tenant: str, conversation_id: str) -> dict:
+    """
+    El encabezado de una conversacion puntual (para el detalle de la
+    bandeja) mas su hilo de mensajes en orden. `conversacion` viene None si
+    el id no existe o no es de este tenant -- el llamador decide si eso es
+    un 404.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, canal, usuario_externo, rol_efectivo, estado,
+                      escalada_a_humano, necesita_atencion_humana,
+                      motivo_escalamiento, caso_id, etiqueta,
+                      actualizado_en, conservar, conservar_motivo, conservar_por,
+                      atendida_manual, atendida_por, tomada_por, tomada_en,
+                      id_cliente, nombre_cliente, datos_sesion,
+                      -- El control del relevo (B3): la pantalla recibe el
+                      -- control EFECTIVO ya calculado (api.py), no la regla.
+                      relevo_version, control, control_motivo,
+                      asignada_a_usuario_id, asignada_a_nombre, aviso_relevo,
+                      -- Lo que el modelo ya habia escrito al escalar y hasta
+                      -- ahora solo viajaba a la descripcion del ticket. Es lo
+                      -- que arma el resumen de arriba en el detalle: que
+                      -- queria el cliente, que no se pudo comprobar y que
+                      -- falta hacer.
+                      escalada_en, resumen, escalada_no_comprobado,
+                      escalada_siguiente_paso,
+                      -- Cuando escribio el CLIENTE por ultima vez. No es lo
+                      -- mismo que 'actualizado_en' ni que el ultimo mensaje
+                      -- del hilo, y la diferencia es justamente el bug facil
+                      -- de esta funcionalidad: la ventana de 24 h de WhatsApp
+                      -- la abre el cliente, y solo el. Si esto mirara
+                      -- cualquier mensaje, cada respuesta nuestra --o del
+                      -- asistente-- renovaria la ventana en la pantalla
+                      -- mientras Meta la considera cerrada, y el operador
+                      -- descubriria la verdad recien cuando Enviar falla, que
+                      -- es exactamente lo que se viene a evitar.
+                      (select max(u.creado_en) from asistente.messages u
+                        where u.conversation_id = conversations.id
+                          and u.organization_id = conversations.organization_id
+                          and u.rol = 'user') as ultimo_mensaje_cliente,
+                      -- La MISMA hora, pero del NUMERO y no de esta
+                      -- conversacion (21/10/2026, T21). Escribirle a un chat
+                      -- cerrado abre una conversacion nueva que todavia no
+                      -- tiene ningun mensaje del cliente: medida por
+                      -- conversacion, su ventana daba "no se sabe" y la
+                      -- pantalla dejaba mandar texto libre a alguien que no
+                      -- escribe hace dias. Meta la cuenta por numero.
+                      (select max(u.creado_en) from asistente.messages u
+                         join asistente.conversations o
+                           on o.id = u.conversation_id
+                          and o.organization_id = u.organization_id
+                        where u.organization_id = conversations.organization_id
+                          and u.rol = 'user'
+                          and o.canal = conversations.canal
+                          and o.usuario_externo = conversations.usuario_externo
+                      ) as ultimo_mensaje_cliente_numero,
+                      (atendida_manual or exists (
+                           select 1 from asistente.messages h
+                            where h.conversation_id = conversations.id
+                              and h.rol = 'humano')) as atendida
+               from asistente.conversations
+               where organization_id = %s and id = %s""",
             (org, conversation_id))
+        conversacion = cur.fetchone()
+        if not conversacion:
+            return {"conversacion": None, "mensajes": []}
+
+        cur.execute(_SQL_MENSAJES, (org, conversation_id))
         return {"conversacion": dict(conversacion), "mensajes": [dict(f) for f in cur.fetchall()]}
+
+
+def creado_en_de(tenant: str, ids) -> dict:
+    """
+    {id: creado_en} de esas conversaciones. Lo necesita la bandeja por chat
+    (proyeccion.agrupar_por_numero): el representante de un chat se elige por
+    CUANDO NACIO cada conversacion, nunca por 'actualizado_en', que lo mueve el
+    propio cierre. Es una consulta aparte a proposito: ultima_actividad() la
+    usa tambien el detector de seguimientos y no cambia.
+    """
+    ids = [str(i) for i in ids or []]
+    if not ids:
+        return {}
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, creado_en from asistente.conversations
+               where organization_id = %s and id = any(%s::uuid[])""",
+            (org, ids))
+        return {str(f["id"]): f["creado_en"] for f in cur.fetchall()}
+
+
+TRAMOS_POR_PAGINA = 5
+
+
+def hilo_del_numero(tenant: str, conversation_id: str, *, antes: str | None = None,
+                    limite: int = TRAMOS_POR_PAGINA) -> dict | None:
+    """
+    La VENTANA DEL CHAT (21/10/2026, contrato §4.5): las conversaciones
+    ANTERIORES del mismo numero -- mismo canal y mismo usuario_externo, dentro
+    de la empresa --, con sus mensajes, de la mas vieja a la mas nueva. La
+    conversacion pedida ('ancla') NO viene: esa la trae mensajes_de().
+
+    Pagina por conversacion: 'antes' es el id de la mas vieja ya mostrada, y
+    se devuelven hasta 'limite' anteriores a ella. None si el ancla no existe o
+    no es de esta empresa.
+
+    Cada tramo trae lo que dibuja la marca de cierre, y SOLO lo registrado:
+    la hora del evento 'cerrada' (no 'actualizado_en': T18 lo fija cuando
+    llega el mensaje de la conversacion SIGUIENTE, y otros escritores lo mueven
+    despues del cierre), 'cerrada_por_tipo' y el desenlace. 'desenlace_nota'
+    NO viaja: es texto libre del operador. Un cierre sin esos datos (T18,
+    legado) se dibuja como "Conversacion cerrada", sin inventar el motivo.
+
+    Un usuario_externo vacio no es un chat: solo el ancla, sin anteriores.
+    """
+    limite = max(1, min(int(limite or TRAMOS_POR_PAGINA), TRAMOS_POR_PAGINA))
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select canal, usuario_externo from asistente.conversations
+               where organization_id = %s and id = %s""", (org, conversation_id))
+        ancla = cur.fetchone()
+        if not ancla:
+            return None
+        cur.execute(
+            """select c.id, c.estado, c.creado_en, c.cerrada_por_tipo, c.desenlace_codigo,
+                      c.id_cliente,
+                      (select max(e.creado_en) from asistente.relevo_eventos e
+                        where e.organization_id = c.organization_id
+                          and e.conversation_id = c.id and e.tipo = 'cerrada') as cerrada_en,
+                      exists (select 1 from asistente.sincronizaciones_externas s
+                               where s.organization_id = c.organization_id
+                                 and s.conversation_id = c.id
+                                 and s.estado <> 'hecha') as sincronizacion_pendiente
+               from asistente.conversations c
+               where c.organization_id = %s
+                 and (c.id = %s
+                      or (%s::text is not null and %s::text <> ''
+                          and c.canal = %s and c.usuario_externo = %s))
+               order by c.creado_en, c.id""",
+            (org, conversation_id, ancla["usuario_externo"], ancla["usuario_externo"],
+             ancla["canal"], ancla["usuario_externo"]))
+        todas = [dict(f) for f in cur.fetchall()]
+        ids = [str(f["id"]) for f in todas]
+        fin = ids.index(str(conversation_id))
+        if antes:
+            fin = ids.index(str(antes)) if str(antes) in ids[:fin] else 0
+        ini = max(0, fin - limite)
+        # UN NUMERO QUE CAMBIO DE DUENO (revisor de PII, 21/10/2026): si una
+        # conversacion anterior quedo verificada como OTRO cliente que la
+        # pedida, se marca -- sin decir quien: el id del cliente no viaja. Sin
+        # esto, la pantalla rotulaba los mensajes de otra persona con el nombre
+        # del cliente de ahora.
+        cliente_ancla = todas[ids.index(str(conversation_id))].get("id_cliente")
+        tramos = []
+        for f in todas[ini:fin]:
+            cur.execute(_SQL_MENSAJES, (org, f["id"]))
+            cid = str(f["id"])
+            cerrada = f["estado"] == "cerrada"
+            tramos.append({
+                "conversacion": {
+                    "id": cid, "estado": f["estado"], "creado_en": f["creado_en"],
+                    "cierre": ({"por": f["cerrada_por_tipo"], "en": f["cerrada_en"],
+                                "desenlace": f["desenlace_codigo"]} if cerrada else None),
+                    "sincronizacion_pendiente": bool(f["sincronizacion_pendiente"]),
+                    "otro_cliente": bool(f.get("id_cliente") and cliente_ancla
+                                         and str(f["id_cliente"]) != str(cliente_ancla)),
+                },
+                "mensajes": [{**dict(m), "conversation_id": cid} for m in cur.fetchall()],
+            })
+        abiertas = sorted((f for f in todas if f["estado"] == "abierta"),
+                          key=lambda f: f["creado_en"], reverse=True)
+        mas_reciente = abiertas[0] if abiertas else todas[-1]
+        # LAS POSTERIORES AL ANCLA (auditor independiente, 21/10/2026). El
+        # representante es la abierta mas reciente, que no siempre es la
+        # ultima: con dos abiertas, si la nueva se cierra queda una cerrada
+        # DESPUES de la abierta vieja. La fila del chat mostraba su ultimo
+        # mensaje y la ventana no lo tenia en ningun lado. No se dibujan
+        # dentro del hilo -- lo que se escribe va al ancla, y mezclar debajo
+        # una conversacion cerrada lo haria leer como respuesta --: se dicen,
+        # con su enlace.
+        posteriores = [str(f["id"]) for f in todas[ids.index(str(conversation_id)) + 1:]]
+        return {"ancla": str(conversation_id), "canal": ancla["canal"],
+                "mas_reciente_id": str(mas_reciente["id"]),
+                "abiertas": [str(f["id"]) for f in abiertas],
+                "posteriores": posteriores,
+                "tramos": tramos, "hay_anteriores": ini > 0,
+                "antes": tramos[0]["conversacion"]["id"] if tramos else None,
+                "total_tramos": len(todas)}
+
+
+def datos_del_chat(tenant: str, conversation_id: str) -> dict | None:
+    """
+    Canal, numero y la ultima vez que el CLIENTE escribio por ese numero, en
+    cualquiera de sus conversaciones. Es lo que T21 necesita para saber si
+    puede mandar texto libre (la ventana de 24 h de WhatsApp es del numero).
+
+    Y, para responder desde un CASO: el ticket del ISP de esta conversacion y
+    la abierta mas reciente del chat (por creado_en, como el representante),
+    o None.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select c.canal, c.usuario_externo, c.estado, c.ticket_operativo,
+                      (select max(u.creado_en) from asistente.messages u
+                         join asistente.conversations o
+                           on o.id = u.conversation_id
+                          and o.organization_id = u.organization_id
+                        where u.organization_id = c.organization_id
+                          and u.rol = 'user'
+                          and o.canal = c.canal
+                          and o.usuario_externo = c.usuario_externo
+                      ) as ultimo_mensaje_cliente_numero,
+                      (select a.id from asistente.conversations a
+                        where a.organization_id = c.organization_id
+                          and a.estado = 'abierta'
+                          and coalesce(c.usuario_externo, '') <> ''
+                          and a.canal = c.canal
+                          and a.usuario_externo = c.usuario_externo
+                        order by a.creado_en desc, a.id desc
+                        limit 1) as abierta_id
+               from asistente.conversations c
+               where c.organization_id = %s and c.id = %s""", (org, conversation_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
 
 
 def tasa_escalamiento(tenant: str, dias: int) -> dict:
@@ -1592,14 +1779,23 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
     nombre, usuario = validar_autor(autor, autor_usuario_id)
     clave = (clave_idempotencia or "").strip() or None
     with sesion(tenant) as (cur, org):
+        # FOR UPDATE y el estado, en la MISMA transaccion del insert (I22,
+        # 21/10/2026): la guarda de la ruta ya lo miro, pero entre esa lectura
+        # y este insert cabe un cierre. Con la fila bloqueada, un cierre que
+        # llega despues espera a que este mensaje este guardado -- y uno que
+        # llego antes se ve aca.
         cur.execute(
-            """select canal, usuario_externo, ticket_operativo
+            """select canal, usuario_externo, ticket_operativo, estado
                from asistente.conversations
-               where organization_id = %s and id = %s""",
+               where organization_id = %s and id = %s
+               for update""",
             (org, conversation_id))
         fila = cur.fetchone()
         if not fila:
             return None
+        if fila["estado"] != "abierta":
+            raise ConversacionCerrada("la conversacion se cerro antes de guardar el mensaje")
+        fila = {k: fila[k] for k in ("canal", "usuario_externo", "ticket_operativo")}
         if solo_canal is not None and fila["canal"] != solo_canal:
             raise CanalNoAdmite(
                 f"la conversacion es del canal '{fila['canal']}', no '{solo_canal}'")
@@ -2934,15 +3130,26 @@ def control_efectivo_de(tenant: str, conversation_id: str) -> str | None:
     Quien controla la conversacion hoy ('ia' | 'humano'), por la regla unica de
     nucleo/relevo/control.py. None si no existe o no es de este tenant. La usan
     las guardas del backend; ninguna ruta deriva el control por su cuenta.
+
+    'cerrada' si la conversacion no esta abierta (21/10/2026, contrato X26):
+    nadie la controla. Cerrar no le quita el control a quien lo tenia, asi que
+    una cerrada por T16 o T17 seguia diciendo 'humano', y la guarda de envio le
+    aceptaba texto, media y plantilla; solo lo impedia la pantalla, escondiendo
+    la caja de escribir. El ESTADO se mira antes que el control.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select relevo_version, control, escalada_a_humano, necesita_atencion_humana
+            """select estado, relevo_version, control, escalada_a_humano,
+                      necesita_atencion_humana
                from asistente.conversations
                where organization_id = %s and id = %s""",
             (org, conversation_id))
         fila = cur.fetchone()
-    return regla_control.control_efectivo(fila) if fila else None
+    if not fila:
+        return None
+    if fila["estado"] != "abierta":
+        return "cerrada"
+    return regla_control.control_efectivo(fila)
 
 
 def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:

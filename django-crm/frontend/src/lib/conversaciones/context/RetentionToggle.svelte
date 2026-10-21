@@ -28,8 +28,10 @@
       onchange={(e) => onGuardar?.(/** @type {HTMLInputElement} */ (e.currentTarget).checked)}
     />
     <span>
-      <b>Conservar</b>
-      <span class="v2-muted">— no borrar al vencer la retención</span>
+      <b>Conservar esta conversación</b>
+      <!-- Solo ESTA, no las anteriores del chat (21/10/2026): la bandeja
+           muestra el chat entero, pero la retención es por conversación. -->
+      <span class="v2-muted">— no borrarla al vencer la retención (las anteriores del chat no)</span>
     </span>
   </label>
 

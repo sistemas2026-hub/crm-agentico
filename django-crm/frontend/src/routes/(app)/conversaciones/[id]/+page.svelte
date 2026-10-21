@@ -27,6 +27,7 @@
   import DocumentationPanel from '$lib/conversaciones/context/DocumentationPanel.svelte';
   import MessageThread from '$lib/conversaciones/messages/MessageThread.svelte';
   import { diaDe, etiquetaDia } from '$lib/conversaciones/formato.js';
+  import { itemsDelChat } from '$lib/conversaciones/chat.js';
   import { estadoDeDevolucion } from '$lib/conversaciones/devolucion.js';
   import {
     sesionDeGrabacion,
@@ -65,6 +66,10 @@
   // un componente remontado siempre arranca de cero.
   let conversacion = $state(untrack(() => data.conversacion));
   let mensajes = $state(untrack(() => data.mensajes ?? []));
+  /* EL CHAT DEL NÚMERO (21/10/2026, contrato §4.5): las conversaciones
+     anteriores, que se muestran arriba como en WhatsApp, y cuál es la actual. */
+  let chat = $state(untrack(() => data.chat ?? { tramos: [], hay_anteriores: false, antes: null }));
+  let cargandoAnteriores = $state(false);
   let caso = $state(untrack(() => data.caso));
   let owners = $state(untrack(() => data.owners ?? []));
   let herramientas = $state(untrack(() => data.herramientas ?? []));
@@ -953,6 +958,18 @@
       if (!marcandoAtendida && datos.conversacion) {
         atendida = !!datos.conversacion.atendida;
       }
+      // Mirando un chat CERRADO, lo nuevo del cliente cae en OTRA conversación
+      // y el sondeo de arriba no la ve. Se relee solo el mapa del chat --no los
+      // tramos-- y solo con la caja vacía: con un borrador a medias, que el
+      // compositor desaparezca se lo llevaría (al enviar, el 409 lo avisa).
+      if (chatCerrado && !entrada.trim()) {
+        const r = await fetch(`/api/conversaciones/${conversacion.id}/hilo?limite=1`);
+        if (r.ok) {
+          const mapa = await r.json();
+          chat = { ...chat, mas_reciente_id: mapa.mas_reciente_id, abiertas: mapa.abiertas,
+                   posteriores: mapa.posteriores, agrupa: mapa.agrupa };
+        }
+      }
     } catch {
       // un sondeo que falla no tiene que avisar nada -- se reintenta solo.
     }
@@ -1071,19 +1088,70 @@
       El autoscroll que sigue al cliente vive dentro del componente. */
   let hiloRef = $state();
 
-  let hilo = $derived.by(() => {
-    const salida = [];
-    let dia = null;
-    for (const m of mensajes) {
-      const d = diaDe(m.creado_en);
-      if (d !== dia) {
-        salida.push({ tipo: 'dia', clave: `d-${d}-${salida.length}`, texto: etiquetaDia(m.creado_en) });
-        dia = d;
+  /* El chat entero: las conversaciones anteriores del número, cada una con su
+     marca de cierre, y después la actual. Lo arma lib/conversaciones/chat.js,
+     que tiene sus pruebas: la marca dice solo lo que quedó registrado. */
+  const horaDeCierre = (/** @type {string} */ iso) =>
+    new Date(iso).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: 'numeric',
+                                            minute: '2-digit', timeZone: 'America/Bogota' });
+  let hilo = $derived(itemsDelChat(chat.tramos, mensajes, {
+    diaDe, etiquetaDia, formatoHora: horaDeCierre, hayAnteriores: chat.hay_anteriores
+  }));
+
+  /* La conversación pedida está cerrada y es la ÚLTIMA del chat: se puede
+     escribir igual, y el motor abre una nueva del mismo número a cargo de
+     quien escribe (T21). La cerrada no se reabre. */
+  let chatCerrado = $derived(
+    conversacion.estado === 'cerrada' && chat.agrupa !== false &&
+      (!chat.mas_reciente_id || chat.mas_reciente_id === conversacion.id)
+  );
+  /* Un enlace viejo: hay una conversación más reciente de este mismo chat. */
+  let hayMasReciente = $derived(!!chat.mas_reciente_id && chat.mas_reciente_id !== conversacion.id);
+  /* Esta es la actual del chat, pero el número tiene OTRA abierta (más vieja):
+     nada impide dos en la base, y la fila de la bandeja puede estar «Por
+     atender» por esa otra. Sin un enlace no había forma de llegar a tomarla
+     (auditor independiente, 21/10/2026). */
+  let otrasAbiertas = $derived(
+    hayMasReciente ? [] : (chat.abiertas || []).filter((/** @type {string} */ id) => id !== conversacion.id)
+  );
+  /* Y conversaciones creadas DESPUÉS de esta que ya se cerraron: su último
+     mensaje es el que muestra la fila del chat. */
+  let posterioresCerradas = $derived(
+    hayMasReciente ? [] : (chat.posteriores || []).filter((/** @type {string} */ id) => !(chat.abiertas || []).includes(id))
+  );
+  /* El motor no escribió en el chat cerrado porque el número ya sigue en otra
+     conversación (409 'hay_conversacion_abierta'): el borrador vuelve a la caja
+     y esto lleva a ella. */
+  let continuaEn = $state(/** @type {string|null} */ (null));
+
+  async function verAnteriores() {
+    if (cargandoAnteriores || !chat.antes) return;
+    cargandoAnteriores = true;
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/hilo?antes=${encodeURIComponent(chat.antes)}`);
+      const datos = await resp.json();
+      if (!resp.ok) {
+        error = datos.error || 'No se pudieron leer las conversaciones anteriores.';
+        return;
       }
-      salida.push({ tipo: 'msg', clave: `m-${salida.length}`, m });
+      chat = { ...chat, tramos: [...(datos.tramos || []), ...chat.tramos],
+               hay_anteriores: datos.hay_anteriores, antes: datos.antes };
+    } catch {
+      error = 'No se pudieron leer las conversaciones anteriores.';
+    } finally {
+      cargandoAnteriores = false;
     }
-    return salida;
-  });
+  }
+
+  /** Si la respuesta de un envío trae otra conversación (T21), se pasa a ella:
+      es el mismo chat, y lo que sigue pasa ahí. */
+  async function seguirEnLaNueva(/** @type {any} */ datos) {
+    if (datos?.conversation_id && datos.conversation_id !== conversacion.id) {
+      await goto(`/conversaciones/${datos.conversation_id}`, { invalidateAll: true });
+      return true;
+    }
+    return false;
+  }
 
   // --- copiloto documental -------------------------------------------------
   // Lo que dice la documentacion interna sobre lo ultimo que pregunto el
@@ -1250,7 +1318,7 @@
       Cubre TODO lo que le llega al cliente: texto, imagen, documento, nota de
       voz y plantilla. Solo la nota interna sigue, porque no sale del equipo. */
   let bloqueadoPorIA = $derived(
-    !escalada && conversacion.canal === 'whatsapp' && modo !== 'nota'
+    !escalada && !chatCerrado && conversacion.canal === 'whatsapp' && modo !== 'nota'
   );
 
   let interviniendo = $state(false);
@@ -1440,6 +1508,7 @@
         return;
       }
       eligiendoPlantilla = false;
+      if (await seguirEnLaNueva(datos)) return;
       // Si el canal la rechazó, se dice acá y además queda en la burbuja: el
       // aviso de arriba desaparece y el mensaje se queda en el hilo.
       if (datos.aviso) error = `Se guardó pero no salió: ${datos.aviso}`;
@@ -1490,13 +1559,15 @@
     enviando = true;
     error = '';
 
-    if (escalada) {
+    if (escalada || chatCerrado) {
       // Una sola burbuja: lo que el agente escribio ES la respuesta, no hay
       // nada que "contestar" del otro lado.
       // La intención se congela ACÁ, con la burbuja. Si se leyera `modo` más
       // tarde, un clic en otra pestaña del compositor mientras el envío está
       // en vuelo cambiaría lo que el reintento le pide al motor.
-      const devolviendo = modo === 'responder_y_devolver';
+      // En un chat cerrado no se devuelve en el mismo paso (T21): primero se
+      // escribe, y la conversación nueva se devuelve a la IA después.
+      const devolviendo = modo === 'responder_y_devolver' && !chatCerrado;
       const burbuja = {
         rol: 'assistant',
         contenido: texto,
@@ -1526,6 +1597,16 @@
           })
         });
         const datos = await resp.json();
+        if (resp.ok && (await seguirEnLaNueva(datos))) return;
+        if (!resp.ok && chatCerrado && datos?.codigo === 'hay_conversacion_abierta') {
+          // No se guardó ni se envió nada: la burbuja se va y el texto vuelve.
+          const i = mensajes.findIndex((m) => m.clave_idempotencia === burbuja.clave_idempotencia);
+          if (i >= 0) mensajes.splice(i, 1);
+          entrada = texto;
+          continuaEn = datos.conversation_id || null;
+          error = 'El cliente ya escribió de nuevo y este chat sigue en otra conversación. Tu texto sigue acá.';
+          return;
+        }
         avisoDevolucion = estadoDeDevolucion({ pedida: devolviendo, ok: resp.ok, datos });
         if (!resp.ok) {
           error = datos.error || 'No se pudo guardar la respuesta.';
@@ -1657,6 +1738,31 @@
     <EscalationSummary {resumenEscalada} {hizoLaIA} />
   {/if}
 
+  {#if continuaEn}
+    <p class="chat-aviso" role="status">
+      Este chat sigue en otra conversación.
+      <a href="/conversaciones/{continuaEn}">Ir a la conversación actual</a>
+    </p>
+  {:else if hayMasReciente}
+    <!-- D8: se llegó por un enlace a una conversación vieja del chat. -->
+    <p class="chat-aviso" role="status">
+      Esta es una conversación anterior de este chat.
+      <a href="/conversaciones/{chat.mas_reciente_id}">Ir a la conversación actual</a>
+    </p>
+  {/if}
+  {#each otrasAbiertas as otra (otra)}
+    <p class="chat-aviso" role="status">
+      Este chat tiene otra conversación abierta, más vieja: puede estar esperando a una persona.
+      <a href="/conversaciones/{otra}">Abrirla</a>
+    </p>
+  {/each}
+  {#if posterioresCerradas.length}
+    <p class="chat-aviso" role="status">
+      Este chat tiene una conversación más reciente, ya cerrada.
+      <a href="/conversaciones/{posterioresCerradas[posterioresCerradas.length - 1]}">Verla</a>
+    </p>
+  {/if}
+
   <MessageThread
     bind:this={hiloRef}
     {hilo}
@@ -1664,14 +1770,23 @@
     conversacionId={conversacion.id}
     nombreCliente={conversacion.nombre_cliente ?? ''}
     {casos}
-    escribiendo={enviando && !escalada}
+    escribiendo={enviando && !escalada && !chatCerrado}
     {reintentando}
     onReintentar={reintentar}
+    onVerAnteriores={verAnteriores}
+    {cargandoAnteriores}
+    puedeReintentar={conversacion.estado === 'abierta'}
   />
 
-  {#if conversacion.estado === 'abierta'}
+  {#if chatCerrado}
+    <p class="chat-aviso" role="note">
+      Esta conversación está cerrada. Si le escribís, se abre una nueva en este
+      mismo chat, a tu cargo; lo de arriba no se modifica.
+    </p>
+  {/if}
+  {#if conversacion.estado === 'abierta' || chatCerrado}
     <MessageComposer
-      {conversacion} {error} {escalada} {enviando} {avisoDevolucion}
+      {conversacion} {error} escalada={escalada || chatCerrado} {chatCerrado} {enviando} {avisoDevolucion}
       {bloqueadoPorIA} {bloqueadoPorVentana}
       {interviniendo} {errorIntervenir}
       {adjunto} {grabando} {grabPausada} {segundos} {limites}
@@ -1828,6 +1943,21 @@
 </aside>
 
 <style>
+  /* ── el chat del número: avisos de tramo (21/10/2026) ────────────────── */
+  .chat-aviso {
+    margin: 6px 16px;
+    padding: 6px 10px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: 3px;
+    background: var(--bandeja-superficie-suave);
+    color: var(--bandeja-texto-2);
+    font-size: 12px;
+  }
+  .chat-aviso a {
+    margin-left: 6px;
+    text-decoration: underline;
+  }
+
   /* ── columna del centro: la conversación ────────────────────────────── */
   .centro {
     flex: 1;

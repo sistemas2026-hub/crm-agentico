@@ -48,7 +48,11 @@ export async function load({ fetch, depends, locals }) {
   }
 
   try {
-    const resp = await fetch(`${baseUrl}/conversaciones?tenant=${encodeURIComponent(tenant)}`,
+    /* `por_numero=1` (21/10/2026, contrato §4.5): cada fila operativa es un
+       CHAT -- todas las conversaciones de un mismo número --, agrupado por el
+       motor una sola vez. La pantalla no reimplementa la agrupación. */
+    const resp = await fetch(
+      `${baseUrl}/conversaciones?tenant=${encodeURIComponent(tenant)}&por_numero=1`,
       { headers: headersMotor() });
     const datos = await resp.json();
     if (!resp.ok) {

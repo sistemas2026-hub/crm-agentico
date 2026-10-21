@@ -186,15 +186,21 @@
      vuelve a deducir quién la lleva. "Sin dueño" son las que están en manos
      de una persona pero que todavía no tomó nadie: es el número que dice si
      la cola se está quedando sin atender. */
+  /* Cada fila es un CHAT (21/10/2026): lo lleva una persona si CUALQUIERA de
+     sus abiertas está en manos de personas, no solo la que lo representa. */
+  const abiertasDe = (/** @type {any} */ c) =>
+    [c, ...(c.abiertas || [])].filter((/** @type {any} */ x) => x.estado !== 'cerrada');
+  const enManosDePersonas = (/** @type {any} */ c) =>
+    abiertasDe(c).some((/** @type {any} */ x) => x.control === 'humano');
   let llevaIA = $derived(
-    base.filter((/** @type {any} */ c) => c.control === 'ia' && !resuelta(c)).length
+    base.filter((/** @type {any} */ c) => !resuelta(c) && !enManosDePersonas(c)).length
   );
   let llevaHumano = $derived(
-    base.filter((/** @type {any} */ c) => c.control === 'humano' && !resuelta(c)).length
+    base.filter((/** @type {any} */ c) => !resuelta(c) && enManosDePersonas(c)).length
   );
   let sinDueno = $derived(
-    base.filter(
-      (/** @type {any} */ c) => c.control === 'humano' && !resuelta(c) && !c.asignada_a_usuario_id
+    base.filter((/** @type {any} */ c) =>
+      abiertasDe(c).some((/** @type {any} */ x) => x.control === 'humano' && !x.asignada_a_usuario_id)
     ).length
   );
 
@@ -326,15 +332,21 @@
 
   const motivoLabel = (/** @type {string} */ m) => (m ? m.replaceAll('_', ' ') : '');
 
-  // Cuatro estados que se excluyen entre si, en el orden en que transcurre un
-  // caso. La pestaña "Asistente" (las que el bot lleva solo) desaparecio: no
-  // era un estado de atencion sino su ausencia, y ocupaba el lugar de
-  // "Resueltas", que si es trabajo terminado y alguien quiere revisar.
+  // Cuatro estados, en el orden en que transcurre un caso. La pestaña
+  // "Asistente" (las que el bot lleva solo) desaparecio: no era un estado de
+  // atencion sino su ausencia, y ocupaba el lugar de "Resueltas", que si es
+  // trabajo terminado y alguien quiere revisar. Para una conversacion se
+  // excluyen entre si; un CHAT con dos abiertas cuenta en la pestaña de cada
+  // una (contrato §4.5, regla 2), asi que la suma puede pasar del total.
+  /* Los números cuentan CHATS, no conversaciones (21/10/2026, D7): un número
+     que escribió tres veces es una fila. El Centro de mando sigue contando
+     conversaciones; por eso cada bloque lo dice al pasar el cursor. */
+  const CUENTA_CHATS = 'Cuenta chats: todas las conversaciones de un mismo número son una fila';
   let pestanas = $derived([
-    { id: 'por-atender', label: 'Por atender', n: pendientes, urge: true },
-    { id: 'en-atencion', label: 'En atención', n: base.filter(enAtencion).length },
-    { id: 'resueltas', label: 'Resueltas', n: base.filter(resuelta).length },
-    { id: 'todas', label: 'Todas', n: base.length }
+    { id: 'por-atender', label: 'Por atender', n: pendientes, urge: true, titulo: CUENTA_CHATS },
+    { id: 'en-atencion', label: 'En atención', n: base.filter(enAtencion).length, titulo: CUENTA_CHATS },
+    { id: 'resueltas', label: 'Resueltas', n: base.filter(resuelta).length, titulo: CUENTA_CHATS },
+    { id: 'todas', label: 'Todos los chats', n: base.length, titulo: CUENTA_CHATS }
   ]);
 
   let visibles = $derived.by(() => {
@@ -351,8 +363,11 @@
     const q = busqueda.trim().toLowerCase();
     if (q) {
       lista = lista.filter((/** @type {any} */ c) =>
+        // 'buscable': nombres y motivos de TODAS las conversaciones del chat
+        // (21/10/2026). Un cliente que vuelve y todavía no se identificó en la
+        // nueva se encuentra por el nombre que dio antes.
         [c.usuario_externo, c.nombre_cliente, c.ultimo_mensaje, c.resumen,
-         c.etiqueta, c.caso_manual, c.motivo_escalamiento]
+         c.etiqueta, c.caso_manual, c.motivo_escalamiento, ...(c.buscable || [])]
           .filter(Boolean)
           .some((campo) => String(campo).toLowerCase().includes(q))
       );
@@ -447,7 +462,7 @@
     {#if pendientes > 0}
       <!-- Solo las que de verdad esperan: ni cerradas ni las que traian
            puesta la marca por el default viejo. Decia 155 y eran 31. -->
-      <span class="consola-dato">
+      <span class="consola-dato" title={CUENTA_CHATS}>
         Por atender <b class="v2-num">{pendientes}</b>
       </span>
       <span class="consola-dato" class:consola-critico={criticas > 0}>

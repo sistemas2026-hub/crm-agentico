@@ -157,7 +157,18 @@ export const actions = {
           });
           // 404 con 'sin_conversacion' es lo normal en un ticket cargado a
           // mano: no hay chat detrás, y el comentario del caso alcanza.
-          entrega = r.ok ? await r.json() : null;
+          //
+          // CUALQUIER OTRO rechazo se dice (auditor independiente, 21/10/2026):
+          // un 409 --la IA atiende el chat, o el chat ya sigue en otra
+          // conversación-- se leía igual que "no había a quién", y quien
+          // respondía creía que el cliente lo había recibido.
+          const cuerpo = await r.json().catch(() => ({}));
+          if (r.ok) entrega = cuerpo;
+          else if (!(r.status === 404 && cuerpo?.sin_conversacion)) {
+            entrega = { ok: false, aceptado_por_meta: false, aceptacion_registrada: false,
+              resultado: 'rechazado',
+              aviso: `No le llegó al cliente: ${cuerpo?.error || 'el asistente rechazó el envío.'}` };
+          }
         }
       } catch (/** @type {any} */ err) {
         console.error('[tickets] no se pudo entregar la respuesta al cliente', err);

@@ -457,7 +457,7 @@
       color: colorDe(a.estado), rotulo: rotuloDe(a.estado),
       filas: [
         ['Conversaciones', a.conversaciones ?? 0, false],
-        ['Esperan a una persona', a.esperando_humano ?? 0, (a.esperando_humano ?? 0) > 0],
+        ['Conversaciones que esperan persona', a.esperando_humano ?? 0, (a.esperando_humano ?? 0) > 0],
         ['Herramienta', a.ultima_herramienta || '—', false]
       ]
     };

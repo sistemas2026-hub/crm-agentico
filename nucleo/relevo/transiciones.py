@@ -108,7 +108,9 @@ ESQUEMAS: dict[str, frozenset[str]] = {
     # decidio que hacer con ella. Sin esas dos claves, dentro de un año nadie
     # podria distinguir una escalada real de una adopcion administrativa.
     "escalada": frozenset({"version", "motivo", "legado", "g8"}),
-    "intervencion": frozenset({"version", "motivo_texto", "tomada"}),
+    # 'continua_de' solo en T21: la conversacion nacio porque una persona le
+    # escribio a un chat cerrado, y este es el id de la cerrada (21/10/2026).
+    "intervencion": frozenset({"version", "motivo_texto", "tomada", "continua_de"}),
     "tomada": frozenset({"version", "anterior_nombre"}),
     "soltada": frozenset({"version", "anterior_nombre"}),
     "reasignada": frozenset({"version", "anterior_usuario_id", "anterior_nombre",
@@ -314,6 +316,132 @@ def intervenir(tenant: str, conversation_id: str, *, operador_id: str, operador_
         ev = _evento(cur, org, conversation_id, "intervencion", "operador", usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
     return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="intervencion", actor_id=usuario)
+
+
+def abrir_por_operador(tenant: str, conversation_id: str, contenido: str, *,
+                       operador_id: str, operador_nombre: str, clave: str) -> Resultado:
+    """
+    T21  --  ESCRIBIRLE A UN CHAT CERRADO  (21/10/2026, contrato C20)
+
+    El usuario pidio la bandeja "como WhatsApp", y que el equipo pueda
+    escribirle a un numero aunque su ultima conversacion este cerrada. Una
+    conversacion cerrada (E3) NO se reabre: su estado, quien la cerro, su
+    desenlace y su 'actualizado_en' quedan como estaban. Lo que nace es una
+    conversacion NUEVA del mismo numero, en manos de quien escribe, y en la
+    pantalla es el mismo chat.
+
+    Nace con control_motivo = 'intervencion' -- "una persona toma el control
+    sin que la IA haya escalado" (§2) -- porque el turno ya hace exactamente
+    lo que hace falta cuando el cliente conteste: guarda su mensaje sin acuse,
+    sin IA y sin tocar el CRM. Un motivo nuevo haria que el turno la trate
+    como una escalada (acuse, caso del CRM que no existe).
+
+    'conversation_id' es la cerrada (el ancla). Una transaccion, serializada
+    por chat con un lock consultivo: dos personas escribiendo a la vez en dos
+    tramos cerrados del mismo chat no abren dos conversaciones.
+
+    Precondiciones, en orden: el ancla existe y esta cerrada; el chat no tiene
+    ninguna abierta (si la tiene: 'ya_hay_abierta' con su id, y se escribe
+    ahi); clave obligatoria. La ventana de 24 h y la baja del canal las mira
+    quien llama, antes, porque necesita decidir entre texto y plantilla.
+
+    Reintento: la misma clave del mismo operador devuelve la conversacion y el
+    mensaje que ya existen ('reintento'); de otro operador, 'clave_ajena'.
+
+    Devuelve en datos: conversation_id (la nueva), continua_de, mensaje_id,
+    canal, usuario_externo, existente, estado_entrega.
+    """
+    nombre, usuario = db.validar_autor(operador_nombre, operador_id)
+    if not (clave or "").strip():
+        raise ValueError("T21 necesita clave de idempotencia")
+    clave_evento = f"t21:{clave}"
+    ancla = str(conversation_id)
+
+    def cuerpo(cur, org, f):
+        cur.execute("""select canal, usuario_externo from asistente.conversations
+                       where organization_id = %s and id = %s""", (org, ancla))
+        chat = cur.fetchone()
+        numero = (chat["usuario_externo"] or "").strip()
+        cur.execute("select pg_advisory_xact_lock(hashtext(%s))",
+                    (f"t21|{org}|{chat['canal']}|{numero}",))
+        cur.execute("""select id, conversation_id, actor_usuario_id, datos
+                       from asistente.relevo_eventos
+                       where organization_id = %s and tipo = 'intervencion'
+                         and clave_idempotencia = %s and datos->>'continua_de' = %s""",
+                    (org, clave_evento, ancla))
+        previo = cur.fetchone()
+        if previo:
+            if str(previo["actor_usuario_id"]) != usuario:
+                return Resultado(False, True, None, None, "clave_ajena")
+            cur.execute("""select id, estado_entrega from asistente.messages
+                           where organization_id = %s and conversation_id = %s
+                             and clave_idempotencia = %s""",
+                        (org, previo["conversation_id"], clave))
+            mensaje = cur.fetchone()
+            return Resultado(False, True, (previo["datos"] or {}).get("version"),
+                             str(previo["id"]), "reintento",
+                             datos={"conversation_id": str(previo["conversation_id"]),
+                                    "continua_de": ancla, "canal": chat["canal"],
+                                    "usuario_externo": numero, "existente": True,
+                                    "mensaje_id": str(mensaje["id"]) if mensaje else None,
+                                    "estado_entrega": mensaje["estado_entrega"] if mensaje else None})
+        # LA MISMA CLAVE YA SE USO EN ESTE CHAT (auditor de frontera,
+        # 21/10/2026): un "Reintentar" o un pedido repetido despues de que la
+        # conversacion se cerro llegaban aca con una clave que ya tenia su
+        # mensaje en OTRA conversacion del chat. Sin esto nacia una
+        # conversacion fantasma, y con una plantilla el cliente la recibia dos
+        # veces. Una clave es un mensaje: si ya existe, no se crea ni se envia.
+        cur.execute("""select m.conversation_id from asistente.messages m
+                       join asistente.conversations c
+                         on c.id = m.conversation_id and c.organization_id = m.organization_id
+                       where m.organization_id = %s and m.clave_idempotencia = %s
+                         and c.canal = %s and c.usuario_externo = %s
+                       limit 1""", (org, clave, chat["canal"], numero))
+        usada = cur.fetchone()
+        if usada:
+            return Resultado(False, True, None, None, "clave_usada",
+                             datos={"conversation_id": str(usada["conversation_id"])})
+        if f["estado"] != "cerrada":
+            return Resultado(False, f["relevo_version"] > 0, f["relevo_version"], None, "no_cerrada")
+        if not numero:
+            return Resultado(False, f["relevo_version"] > 0, f["relevo_version"], None, "sin_numero")
+        cur.execute("""select id from asistente.conversations
+                       where organization_id = %s and canal = %s and usuario_externo = %s
+                         and estado = 'abierta'
+                       order by creado_en desc limit 1""", (org, chat["canal"], numero))
+        abierta = cur.fetchone()
+        if abierta:
+            return Resultado(False, True, None, None, "ya_hay_abierta",
+                             datos={"conversation_id": str(abierta["id"])})
+        cur.execute("""insert into asistente.conversations
+                         (organization_id, canal, usuario_externo, control, control_motivo)
+                       values (%s, %s, %s, 'humano', 'intervencion') returning id""",
+                    (org, chat["canal"], numero))
+        nueva = str(cur.fetchone()["id"])
+        version = _subir_version(
+            cur, org, nueva,
+            "asignada_a_usuario_id = %s, asignada_a_nombre = %s, asignada_en = now(), "
+            "tomada_por = %s, tomada_en = now()",
+            (usuario, nombre, nombre))
+        datos = {"version": version, "motivo_texto": None, "tomada": True, "continua_de": ancla}
+        ev = _evento(cur, org, nueva, "intervencion", "operador", usuario, nombre, datos,
+                     clave_evento)
+        estado_entrega = "pendiente" if chat["canal"] == "whatsapp" else None
+        cur.execute("""insert into asistente.messages
+                         (organization_id, conversation_id, rol, contenido, estado_entrega,
+                          origen, autor_usuario_id, autor_nombre, clave_idempotencia)
+                       values (%s, %s, 'assistant', %s, %s, 'humano', %s, %s, %s)
+                       returning id""",
+                    (org, nueva, contenido, estado_entrega, usuario, nombre, clave))
+        mensaje_id = str(cur.fetchone()["id"])
+        cur.execute("""update asistente.conversations
+                       set actualizado_en = now(), atendida_manual = true, atendida_por = %s
+                       where organization_id = %s and id = %s""", (nombre, org, nueva))
+        return Resultado(True, True, version, ev, datos={
+            "conversation_id": nueva, "continua_de": ancla, "mensaje_id": mensaje_id,
+            "canal": chat["canal"], "usuario_externo": numero, "existente": False,
+            "estado_entrega": estado_entrega})
+    return _ejecutar(tenant, ancla, None, cuerpo, tipo="intervencion", actor_id=usuario)
 
 
 # =============================================================================
@@ -1061,6 +1189,13 @@ def devolver_a_ia(tenant: str, conversation_id: str, *, operador_id: str, operad
 
     def cuerpo(cur, org, f):
         legado_sql = "escalada_a_humano = false, necesita_atencion_humana = false"
+        # Una cerrada no se devuelve, tampoco la de legado (auditor
+        # independiente, 21/10/2026): E3 es terminal, y en legado esto borraba
+        # 'escalada_a_humano' de una conversacion ya cerrada -- la metrica de
+        # escalamiento la contaba distinto despues de cerrada.
+        if f["estado"] != "abierta":
+            return Resultado(False, f["relevo_version"] > 0, f["relevo_version"], None,
+                             "no_es_humana")
         if f["relevo_version"] == 0:
             cur.execute(f"""update asistente.conversations set {legado_sql}
                             where organization_id = %s and id = %s""", (org, conversation_id))

@@ -60,7 +60,11 @@ export async function POST({ request, params, locals, fetch }) {
     });
     const datos = await resp.json();
     if (!resp.ok) {
-      return json({ error: datos.error || 'No se pudo guardar la respuesta' }, { status: resp.status });
+      // El código y el id viajan (21/10/2026): con 'hay_conversacion_abierta'
+      // o 'clave_usada' la pantalla tiene que saber A QUÉ conversación ir.
+      return json({ error: datos.error || 'No se pudo guardar la respuesta',
+                    codigo: datos.codigo, conversation_id: datos.conversation_id },
+                  { status: resp.status });
     }
     return json(datos);
   } catch (/** @type {any} */ err) {

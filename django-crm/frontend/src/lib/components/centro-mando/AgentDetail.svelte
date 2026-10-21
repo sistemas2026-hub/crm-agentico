@@ -49,9 +49,9 @@
   }
 
   const cifras = $derived([
-    [agente.conversaciones, 'Activas (24 h)', false],
+    [agente.conversaciones, 'Conversaciones activas (24 h)', false],
     [agente.abiertas_total, 'Abiertas sin cerrar', false],
-    [agente.esperando_humano, 'Esperan persona', false],
+    [agente.esperando_humano, 'Conversaciones que esperan persona', false],
     [agente.esperando_cliente, 'Esperan al cliente', false],
     [agente.llamadas_ventana, `Herramientas (${ventana} min)`, false],
     [agente.fallos_ventana, 'Fallos recientes', agente.fallos_ventana > 0]

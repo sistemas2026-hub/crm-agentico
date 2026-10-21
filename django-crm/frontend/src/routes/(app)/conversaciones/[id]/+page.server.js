@@ -36,7 +36,7 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   // idas y vueltas al motor en vez del maximo de las tres, y esa espera es
   // la que se sentia como si la pagina entera se recargara.
   const [respMensajes, respHerr, respCasos, respRelevo, respEquipo, respSync,
-         respAcciones, respCliente] = await Promise.all([
+         respAcciones, respCliente, respChat] = await Promise.all([
     fetch(
       `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/mensajes?tenant=${encodeURIComponent(tenant)}`,
       { headers: headersMotor() }
@@ -71,8 +71,16 @@ export async function load({ fetch, cookies, params, locals, depends }) {
     fetch(
       `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/cliente?tenant=${encodeURIComponent(tenant)}`,
       { headers: headersMotor() }
+    ).catch(() => null),
+    /* EL CHAT (21/10/2026, contrato §4.5): las conversaciones ANTERIORES del
+       mismo número, para mostrarlas arriba como WhatsApp. Si no llega, la
+       conversación se lee igual, sola, como antes. */
+    fetch(
+      `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/hilo?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() }
     ).catch(() => null)
   ]);
+  const chat = respChat && respChat.ok ? await respChat.json().catch(() => null) : null;
 
   const datos = await respMensajes.json();
   if (respMensajes.status === 404) {
@@ -229,7 +237,12 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   const yo = { id: locals.user?.id ?? '', nombre: (locals.user?.name || locals.user?.email || '').trim() };
 
   return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, diagnostico, casos,
-    relevo, equipo, sincronizaciones, acciones, yo, rol, operadores, fichaCliente, optica };
+    relevo, equipo, sincronizaciones, acciones, yo, rol, operadores, fichaCliente, optica,
+    // Sin el chat no se sabe si esta es la última del número: 'agrupa: false'
+    // no ofrece escribirle a una cerrada a ciegas.
+    chat: chat ?? { tramos: [], hay_anteriores: false, antes: null,
+                    mas_reciente_id: datos.conversacion?.id ?? null, abiertas: [],
+                    posteriores: [], agrupa: false } };
 }
 
 /** @type {import('./$types').Actions} */

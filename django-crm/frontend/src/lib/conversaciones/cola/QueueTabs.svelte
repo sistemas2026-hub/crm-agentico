@@ -34,6 +34,7 @@
       type="button"
       class="tab"
       aria-current={filtro === t.id ? 'true' : undefined}
+      title={t.titulo}
       onclick={() => onIr(t.id)}
     >
       <span class="tab-rotulo">{t.label}</span>

@@ -69,6 +69,9 @@ ESCRITORES = {
     #  El cuarto del motor, desde T6: la devolucion al asistente deja su
     #  mensaje. Nombra origen.
     "solicitar_devolucion",
+    #  El quinto, desde T21 (21/10/2026): escribirle a un chat cerrado abre
+    #  una conversacion nueva con el mensaje de la persona. Nombra origen.
+    "abrir_por_operador",
     #  Y los dos de cli/preflight_g6.py, que siembra filas sinteticas para
     #  cronometrar el DDL. Solo escriben con --medir, y ese comando se niega
     #  si la base se llama como la de produccion o si encuentra datos que no
@@ -86,8 +89,13 @@ for ruta in sorted(list((RAIZ / "nucleo").rglob("*.py")) + list((RAIZ / "cli").r
         arbol = ast.parse(ruta.read_text(encoding="utf-8"))
     except (SyntaxError, UnicodeDecodeError):
         continue
+    #  Una funcion ANIDADA se cuenta como la de afuera: T21 escribe dentro de
+    #  su 'cuerpo' (la transaccion de _ejecutar), y contarlo aparte agregaba un
+    #  escritor llamado 'cuerpo' que no dice cual es.
+    anidadas = {id(sub) for f in ast.walk(arbol) if isinstance(f, ast.FunctionDef)
+                for sub in ast.walk(f) if isinstance(sub, ast.FunctionDef) and sub is not f}
     for nodo in ast.walk(arbol):
-        if not isinstance(nodo, ast.FunctionDef):
+        if not isinstance(nodo, ast.FunctionDef) or id(nodo) in anidadas:
             continue
         for sub in ast.walk(nodo):
             if isinstance(sub, ast.Constant) and isinstance(sub.value, str) \
