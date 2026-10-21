@@ -209,3 +209,86 @@ def avisar_cierres(org, cerrados: list[dict], *, ahora=None) -> bool:
         #  atras eso ni tumbar la corrida: se registra con traza y se sigue.
         logger.exception("Supervisor: no se pudo avisar el cierre en el chat")
         return False
+
+
+
+# =============================================================================
+#  LO QUE HAY QUE DECIDIR, POR EL CHAT  --  21/10/2026
+# =============================================================================
+#  Pedido del usuario, al ver la propuesta del feriado en Pendientes: «seria
+#  bueno que mande esas propuestas por el chat, que el supervisor escriba y no
+#  solo cuando yo le pregunto algo».
+#
+#  A QUIEN: a quien delego «Revisar solo, una vez por hora» -- esa tarea es la
+#  que hace que estas propuestas existan --, nunca a otro (mismo criterio que
+#  los cierres de arriba).
+#
+#  A QUE CONVERSACION, Y ACA SE APARTA DE LOS CIERRES A PROPOSITO: a su
+#  conversacion MAS RECIENTE, y se la marca como la ultima. El chat muestra la
+#  mas reciente de cada persona; un aviso en una conversacion vieja no lo ve
+#  nadie, y una decision con fecha (un feriado) que no se ve a tiempo es una
+#  decision que no se toma.
+#
+#  SOLO LO QUE PIDE UNA DECISION CON FECHA. Todo lo demas sigue en Pendientes:
+#  un aviso por cada propuesta llenaria la conversacion de ruido y empujaria
+#  afuera lo que importa.
+
+#: Los tipos de propuesta que se mandan por el chat apenas nacen.
+TIPOS_QUE_SE_AVISAN = ("feriado_por_decidir",)
+
+
+def redactar_decisiones(propuestas: list[dict]) -> str:
+    """El mensaje. La accion y el motivo son los de la propuesta: una sola
+    redaccion, la de `supervisor.analizar`, para el chat y para Pendientes."""
+    lineas = ["Tengo algo para que decidas:", ""]
+    for p in propuestas:
+        lineas.append(f"• {p.get('accion_propuesta')}. {p.get('motivo')}")
+    lineas += ["", "La propuesta está en Pendientes por revisión."]
+    return "\n".join(lineas)
+
+
+def avisar_decisiones(org, propuestas: list[dict], *, ahora=None) -> bool:
+    """Deja en el chat de quien delego la revision de cada hora lo que hay
+    que decidir. Devuelve si se escribio. No levanta: las propuestas YA estan
+    guardadas en Pendientes, y eso no se pierde porque el aviso falle."""
+    if not propuestas:
+        return False
+    try:
+        from django.utils import timezone
+
+        from operaciones import tareas_delegadas as td
+        from operaciones.chat_modelos import (ConversacionSupervisor,
+                                              MensajeSupervisor, RolMensaje)
+        from operaciones.tareas_modelos import TareaDelegada
+
+        fila = (TareaDelegada.objects
+                .filter(org=org, clave=td.CICLO_AUTOMATICO, activa=True)
+                .first())
+        if fila is None or not fila.delegada_por_id:
+            logger.info("Supervisor: %s decisiones sin revision delegada a "
+                        "quien avisar", len(propuestas))
+            return False
+        conversacion = (ConversacionSupervisor.objects
+                        .filter(org=org, actor_id=fila.delegada_por_id,
+                                archivada=False)
+                        .order_by("-ultimo_mensaje_en")
+                        .first())
+        if conversacion is None:
+            logger.info("Supervisor: %s decisiones sin conversacion donde "
+                        "avisar", len(propuestas))
+            return False
+        momento = ahora or timezone.now()
+        MensajeSupervisor.objects.create(
+            conversacion=conversacion,
+            org=org,
+            rol=RolMensaje.SUPERVISOR,
+            contenido=redactar_decisiones(propuestas),
+            escrito_en=momento,
+        )
+        conversacion.ultimo_mensaje_en = momento
+        conversacion.save(update_fields=["ultimo_mensaje_en"])
+        return True
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Supervisor: no se pudo avisar en el chat lo que "
+                         "hay que decidir")
+        return False

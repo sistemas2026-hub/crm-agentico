@@ -2785,6 +2785,21 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
             resumen.setdefault("fases_que_fallaron", []).append(
                 {"fase": nombre, "error": type(e).__name__})
 
+    #  LO QUE HAY QUE DECIDIR, POR EL CHAT  --  21/10/2026, pedido del
+    #  usuario: que el Supervisor escriba solo lo que pide una decision con
+    #  fecha (un feriado), y no solo cuando se le pregunta. Despues de todo:
+    #  la propuesta ya esta guardada, y avisar es lo menos importante.
+    try:
+        from operaciones import aviso_al_chat
+        para_avisar = [f["propuesta"] for f in resumen.get("detalle") or []
+                       if f.get("resultado") == "propuesta"
+                       and f.get("tipo") in aviso_al_chat.TIPOS_QUE_SE_AVISAN]
+        if para_avisar:
+            resumen["avisos_en_el_chat"] = int(aviso_al_chat.avisar_decisiones(
+                org, para_avisar, ahora=ahora))
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Supervisor: no se pudo avisar lo que hay que decidir")
+
     return resumen
 
 

@@ -267,6 +267,16 @@ export async function leerHorarioDeCuadrillas(ctx) {
   }
 }
 
+/**
+ * Lo que armaría el Supervisor ese día, sin escribir nada (21/10/2026).
+ *
+ * @param {{ cookies: any }} ctx @param {string} fecha AAAA-MM-DD; vacío = hoy
+ */
+export async function leerVistaPreviaDeLaJornada(ctx, fecha) {
+  const q = fecha ? `?fecha=${encodeURIComponent(fecha)}` : '';
+  return apiRequest(`/operaciones/jornada/vista-previa/${q}`, {}, ctx);
+}
+
 /** @param {{ cookies: any }} ctx @param {Record<string, any>} cuerpo */
 export async function guardarHorarioDeCuadrillas(ctx, cuerpo) {
   return apiRequest('/campo/cuadrillas/horario/',

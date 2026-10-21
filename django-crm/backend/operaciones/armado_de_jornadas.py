@@ -607,3 +607,90 @@ def armar_las_jornadas_del_dia(org, ahora=None, *, leer=None) -> dict:
         b["leidas"], b["sin_dato"], b["no_se_pudo"], b["esperan_el_tope"],
         b["motor_caido"], f" · {salida['aviso']}" if salida["aviso"] else "")
     return {"jornadas_del_dia": salida}
+
+
+# =============================================================================
+#  LA VISTA PREVIA  --  21/10/2026
+# =============================================================================
+#  Pedido del usuario: «¿por que no se pone que arme ahora y muestre solo para
+#  yo ver y asi saber que va a funcionar? Esperar a mañana es tiempo perdido».
+#  Es la sombra, puesta en la pantalla en vez de en el log: el MISMO
+#  planificador (`planear_el_dia`) y la MISMA demanda que usa la fase horaria,
+#  sin escribir nada.
+#
+#  LO QUE NO HACE, A PROPOSITO: no le pregunta al motor el barrio de los casos
+#  que todavia no lo tienen. `completar_localidades` GUARDA lo que encuentra y
+#  tarda hasta 30 s por caso; mirar una pantalla no puede escribir ni colgarse.
+#  Esos casos se cuentan aparte, y la fase de cada hora los lee.
+
+_QUE_HARIA = {
+    ("armar", "copiada"): "Se arma con la gente de su última jornada",
+    ("armar", "estrenada"): "Se arma por primera vez, solo con el líder",
+    ("reajustar", "otra_labor"): "Ya está armada: le cambia la labor",
+    ("dejar", "armada_por_una_persona"): "La armó una persona: no se toca",
+    ("dejar", "ya_tiene_ordenes"): "Ya tiene órdenes: no se toca",
+    ("dejar", "otra_labor"): "Ya está armada con la labor que corresponde",
+    ("no_se_arma", "sin_zona"): "No se arma: no tiene zonas habituales",
+    ("no_se_arma", "lider_ausente"): "No se arma: el líder está ausente",
+    ("no_se_arma", "sin_base"): "No se arma: no tiene líder ni una jornada anterior",
+    ("no_se_arma", "sin_gente"): "No se arma: no le queda gente",
+}
+
+
+def vista_previa(org, fecha) -> dict:
+    """Lo que armaria el Supervisor ese dia, SIN escribir nada."""
+    from campo import jornada_automatica as ja
+    from campo.labores import nombres_de_labor
+    from campo.zonas import ZonaOperativa
+    from operaciones import capacidad
+
+    nombres = nombres_de_labor(org)
+    salida = {"fecha": fecha.isoformat(), "trabaja": False, "porque": "",
+              "apertura": "", "cierre": "", "cuadrillas": [], "demanda": {},
+              "por_zona": []}
+
+    jornada = capacidad.jornada_de(org, fecha, solo_de_cuadrillas=True)
+    if jornada.motivo == capacidad.SIN_HORARIO_DE_CUADRILLAS:
+        salida["porque"] = ("Falta el horario de las cuadrillas: sin él, el "
+                            "Supervisor no arma.")
+        return salida
+    if not jornada.abierta:
+        salida["porque"] = {
+            capacidad.FERIADO: "Ese día es feriado y no tiene horario.",
+            capacidad.CERRADA: "Ese día las cuadrillas no trabajan.",
+        }.get(jornada.motivo, "Ese día no se trabaja.")
+        return salida
+    salida["trabaja"] = True
+    salida["apertura"] = jornada.apertura.strftime("%H:%M") if jornada.apertura else ""
+    salida["cierre"] = jornada.cierre.strftime("%H:%M") if jornada.cierre else ""
+
+    demanda = demanda_de_despacho(org, propuestas_en_despacho(org))
+    salida["demanda"] = {k: v for k, v in demanda.items() if k != "por_zona"}
+    #  Por texto: la demanda guarda el id de la zona como cadena.
+    zonas = {str(i): n for i, n in ZonaOperativa.objects.filter(org=org)
+             .values_list("id", "nombre")}
+    salida["por_zona"] = sorted(
+        ({"zona": zonas.get(str(z), "?"),
+          "labores": sorted(({"labor": nombres.get(l, l), "casos": n}
+                             for l, n in por_labor.items()),
+                            key=lambda x: -x["casos"])}
+         for z, por_labor in demanda["por_zona"].items()),
+        key=lambda x: x["zona"])
+
+    for p in ja.planear_el_dia(org, fecha, demanda=demanda["por_zona"]):
+        lider = getattr(p.lider, "user", None)
+        salida["cuadrillas"].append({
+            "cuadrilla": p.cuadrilla.nombre,
+            "accion": p.accion,
+            "que_haria": _QUE_HARIA.get((p.accion, p.motivo),
+                                        f"{p.accion} ({p.motivo})"),
+            "labor": nombres.get(p.labor, p.labor) if p.labor else "",
+            "labor_antes": (nombres.get(p.labor_antes, p.labor_antes)
+                            if p.labor_antes else ""),
+            "zonas": [z.nombre for z in p.zonas],
+            "lider": ((getattr(lider, "name", "") or getattr(lider, "email", ""))
+                      if lider else ""),
+            "gente": [{"nombre": persona.nombre, "rol": rol}
+                      for persona, rol in p.integrantes],
+        })
+    return salida

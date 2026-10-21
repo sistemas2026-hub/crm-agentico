@@ -16,7 +16,7 @@
    * motor, y se recupera con GET al abrir.
    */
   import { onMount } from 'svelte';
-  import { aBurbujas, esDuplicado } from './chat-sesion.js';
+  import { aBurbujas, esDuplicado, lleganNuevos } from './chat-sesion.js';
 
   let abierta = $state(false);
   //  EL PANEL GRANDE. En la burbuja chica una respuesta con evidencia se lee
@@ -49,6 +49,34 @@
 
   const hayHilo = $derived(burbujas.length > 0);
 
+  //  LO QUE EL SUPERVISOR ESCRIBE SOLO (21/10/2026). Pedido del usuario: que
+  //  mande por el chat lo que hay que decidir, no solo cuando se le pregunta.
+  //  El backend lo deja en la conversacion; esto lo trae y lo cuenta.
+  let nuevos = $state(0);
+  /** La conversacion que se limpio: lo que llegue ahi no vuelve a pintarse. */
+  /** @type {string | null} */
+  let descartada = null;
+  /** Cada cuanto se mira si escribio algo. Una lectura liviana, solo con la pestaña a la vista. */
+  const CADA_CUANTO_MS = 120_000;
+
+  async function revisarNuevos() {
+    if (enviando || cargando || !historialPedido) return;
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    try {
+      const resp = await fetch('/api/supervisor-noc/chat?limite=200');
+      if (!resp.ok) return;
+      const r = lleganNuevos(burbujas, await resp.json(), { conversacionId, descartada });
+      //  Si mientras tanto se empezo a enviar, lo de la pantalla es mas nuevo.
+      if (!r || enviando) return;
+      burbujas = r.burbujas;
+      conversacionId = r.conversacionId;
+      if (abierta) alFinal();
+      else nuevos += r.nuevas;
+    } catch {
+      //  Es un refresco: si falla, la proxima vuelta lo intenta de nuevo.
+    }
+  }
+
   /**
    * Empieza una conversacion nueva. Vacia lo que se ve Y suelta el hilo.
    *
@@ -64,6 +92,7 @@
   function limpiar() {
     if (enviando) return;
     burbujas = [];
+    descartada = conversacionId;
     conversacionId = null;
     borrador = '';
     error = '';
@@ -99,7 +128,10 @@
 
   function alternar() {
     abierta = !abierta;
-    if (abierta) recuperarHistorial();
+    if (abierta) {
+      nuevos = 0;
+      recuperarHistorial();
+    }
   }
 
   function alFinal() {
@@ -176,6 +208,8 @@
     //  El hilo se trae al montar, no al abrir: asi el contador del boton
     //  puede decir que hay conversacion antes de que nadie la abra.
     recuperarHistorial();
+    const reloj = setInterval(revisarNuevos, CADA_CUANTO_MS);
+    return () => clearInterval(reloj);
   });
 </script>
 
@@ -254,7 +288,9 @@
           aria-expanded={abierta}
           aria-label={abierta ? 'Cerrar el chat del Supervisor' : 'Abrir el chat del Supervisor'}>
     {#if abierta}&times;{:else}Preguntar{/if}
-    {#if !abierta && hayHilo}<span class="snoc-chat-punto" aria-hidden="true"></span>{/if}
+    {#if !abierta && nuevos > 0}
+      <span class="snoc-chat-nuevos" aria-label={`${nuevos} ${nuevos === 1 ? 'mensaje nuevo' : 'mensajes nuevos'}`}>{nuevos}</span>
+    {:else if !abierta && hayHilo}<span class="snoc-chat-punto" aria-hidden="true"></span>{/if}
   </button>
 </div>
 
@@ -286,6 +322,20 @@
   }
   .snoc-chat-boton:hover { filter: brightness(1.08); }
   .snoc-chat-boton:focus-visible { outline: 3px solid var(--snoc-primary-fixed-dim, #9ec1ff); outline-offset: 2px; }
+
+  .snoc-chat-nuevos {
+    min-width: 1.4rem;
+    height: 1.4rem;
+    padding: 0 0.35rem;
+    border-radius: 999px;
+    background: #d93025;
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
 
   .snoc-chat-punto {
     width: 0.5rem; height: 0.5rem; border-radius: 50%;

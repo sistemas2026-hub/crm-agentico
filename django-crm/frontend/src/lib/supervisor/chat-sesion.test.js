@@ -5,8 +5,62 @@ import {
   aBurbujas,
   esDuplicado,
   bloqueDeContexto,
-  mensajeParaElMotor
+  mensajeParaElMotor,
+  lleganNuevos
 } from './chat-sesion.js';
+
+describe('lleganNuevos — lo que el Supervisor escribió solo (21/10/2026)', () => {
+  const hilo = (/** @type {string[]} */ ...roles) => ({
+    conversacion_id: 'c-1',
+    mensajes: roles.map((rol, i) => ({ id: `m${i}`, rol, contenido: `texto ${i}` }))
+  });
+  const locales = [
+    { id: 'local-1', rol: 'usuario', texto: 'hola' },
+    { id: 'r-1', rol: 'supervisor', texto: 'hola' }
+  ];
+
+  it('un mensaje del Supervisor que no estaba es UNO nuevo, aunque los ids sean otros', () => {
+    const r = lleganNuevos(locales, hilo('user', 'assistant', 'assistant'),
+      { conversacionId: 'c-1' });
+    expect(r?.nuevas).toBe(1);
+    expect(r?.burbujas).toHaveLength(3);
+  });
+
+  it('la misma conversación, releída, no trae nada nuevo', () => {
+    expect(lleganNuevos(locales, hilo('user', 'assistant'), { conversacionId: 'c-1' })).toBeNull();
+  });
+
+  it('la conversación que la persona limpió no vuelve', () => {
+    expect(lleganNuevos([], hilo('user', 'assistant', 'assistant'),
+      { conversacionId: null, descartada: 'c-1' })).toBeNull();
+  });
+
+  it('otra conversación no se mezcla con la que se está mirando', () => {
+    expect(lleganNuevos(locales, hilo('user', 'assistant', 'assistant'),
+      { conversacionId: 'c-2' })).toBeNull();
+  });
+
+  it('con un hilo largo (el historial trae los últimos 60) se ancla en el último mensaje visto', () => {
+    //  70 respuestas en pantalla; el servidor devuelve solo las últimas 60, más
+    //  una nueva. Contar diría «nada nuevo» (61 < 70); anclar encuentra 1.
+    const largos = Array.from({ length: 70 }, (_, i) => ({ id: `r-${i}`, rol: 'supervisor', texto: `r ${i}` }));
+    const datos = {
+      conversacion_id: 'c-1',
+      mensajes: [
+        ...Array.from({ length: 60 }, (_, i) => ({ id: `s${i}`, rol: 'assistant', contenido: `r ${i + 10}` })),
+        { id: 's-nuevo', rol: 'assistant', contenido: 'El lunes 16/11 es feriado…' }
+      ]
+    };
+    const r = lleganNuevos(largos, datos, { conversacionId: 'c-1' });
+    expect(r?.nuevas).toBe(1);
+  });
+
+  it('sin conversación abierta todavía, la que llega se toma', () => {
+    const r = lleganNuevos([], hilo('assistant'), {});
+    expect(r?.nuevas).toBe(1);
+    expect(r?.conversacionId).toBe('c-1');
+  });
+});
 
 describe('claveDeSesion — de quien es la conversacion', () => {
   it('lleva prefijo, para no compartir hilo con el asistente general', () => {

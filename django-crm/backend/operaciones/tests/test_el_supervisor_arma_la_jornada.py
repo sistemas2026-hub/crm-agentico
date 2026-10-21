@@ -730,3 +730,61 @@ def test_w_antes_de_que_abra_la_empresa_no_arma(
     assert r["modo"] == adj.NO_CORRIO
     assert "no abrio" in r["porque"]
     assert not JornadaDeCuadrilla.objects.filter(fecha=MARTES).exists()
+
+
+# ---------------------------------------------------------------------------
+# VP · la vista previa  --  21/10/2026
+# ---------------------------------------------------------------------------
+#  Pedido del usuario: ver YA lo que armaria el Supervisor, sin esperar al
+#  dia siguiente. El mismo planificador y la misma demanda, SIN escribir nada.
+
+VISTA_PREVIA = "/api/operaciones/jornada/vista-previa/"
+
+
+def test_vp_muestra_lo_que_armaria_y_no_escribe(admin_client, empresa,
+                                                cuadrilla, monkeypatch):
+    def _no(*a, **k):
+        raise AssertionError("la vista previa no le pregunta nada al motor")
+
+    monkeypatch.setattr(adj, "completar_localidades", _no)
+    _en_despacho(empresa, pad.FALLA_DE_SERVICIO, barrio=BARRIO)
+    antes = JornadaDeCuadrilla.objects.count()
+
+    r = admin_client.get(VISTA_PREVIA, {"fecha": MARTES.isoformat()})
+    assert r.status_code == 200, r.content
+    d = r.json()
+    assert d["trabaja"] is True and (d["apertura"], d["cierre"]) == ("07:00", "17:00")
+    [c] = d["cuadrillas"]
+    assert c["cuadrilla"] == "Cuadrilla #1"
+    assert c["que_haria"] == "Se arma con la gente de su última jornada"
+    assert c["zonas"] == ["SOLEDAD"]
+    assert sorted(g["nombre"] for g in c["gente"]) == ["PABLO", "PEDRO"]
+    #  La labor de la mayoria de los casos de su zona: una falla de servicio.
+    assert c["labor"] == "Correctivo"
+    assert d["demanda"]["contados"] == 1
+    assert d["por_zona"] == [{"zona": "SOLEDAD",
+                              "labores": [{"labor": "Correctivo", "casos": 1}]}]
+    assert JornadaDeCuadrilla.objects.count() == antes
+
+
+def test_vp2_sin_horario_de_cuadrillas_lo_dice(admin_client, empresa, cuadrilla):
+    from campo.cuadrillas import ConfiguracionDeReparto
+    ConfiguracionDeReparto.objects.filter(org=empresa).update(
+        calendario_de_cuadrillas=None)
+    d = admin_client.get(VISTA_PREVIA, {"fecha": MARTES.isoformat()}).json()
+    assert d["trabaja"] is False and "horario de las cuadrillas" in d["porque"]
+    assert d["cuadrillas"] == []
+
+
+def test_vp3_un_dia_que_no_se_trabaja_lo_dice(admin_client, empresa, cuadrilla):
+    domingo = MARTES + dt.timedelta(days=5)
+    d = admin_client.get(VISTA_PREVIA, {"fecha": domingo.isoformat()}).json()
+    assert d["trabaja"] is False and "no trabajan" in d["porque"]
+
+
+def test_vp4_la_fecha_mal_escrita_es_400(admin_client, empresa):
+    assert admin_client.get(VISTA_PREVIA, {"fecha": "21/10"}).status_code == 400
+
+
+def test_vp5_solo_gestion(user_client, empresa):
+    assert user_client.get(VISTA_PREVIA).status_code == 403

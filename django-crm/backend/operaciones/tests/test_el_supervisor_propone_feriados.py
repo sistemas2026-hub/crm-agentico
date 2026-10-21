@@ -192,3 +192,110 @@ def test_e2_entra_por_detectar(org_a):
     _cuadrillas(org_a, 1)
     tipos = {s.tipo for s in sup.detectar(org_a, VIERNES_10)}
     assert PropuestaSupervisor.FERIADO_POR_DECIDIR in tipos
+
+
+# ---------------------------------------------------------------------------
+# F · el Supervisor lo escribe en el chat  --  21/10/2026
+# ---------------------------------------------------------------------------
+#  Pedido del usuario: «que mande esas propuestas por el chat, que el
+#  supervisor escriba y no solo cuando yo le pregunto».
+
+def _conversacion(org, profile, *, minutos_atras=0):
+    from django.utils import timezone
+    from operaciones.chat_modelos import ConversacionSupervisor
+    t = timezone.now() - dt.timedelta(minutes=minutos_atras)
+    return ConversacionSupervisor.objects.create(
+        org=org, actor=profile, abierta_en=t, ultimo_mensaje_en=t)
+
+
+def _delegar_la_revision(org, profile):
+    from operaciones import tareas_delegadas as td
+    #  Por el camino de verdad: el chat delega con 'delegar'.
+    td.delegar(org, td.CICLO_AUTOMATICO, actor=profile)
+
+
+PROPUESTA = {"accion_propuesta": "Trabajar el feriado del lunes 16/11",
+             "motivo": "Hay 17 casos en Despacho y las 2 cuadrillas sacan 16."}
+
+
+def test_f_va_a_la_conversacion_mas_reciente_de_quien_delego(org_a, admin_profile):
+    from operaciones import aviso_al_chat
+    from operaciones.chat_modelos import MensajeSupervisor, RolMensaje
+
+    vieja = _conversacion(org_a, admin_profile, minutos_atras=60)
+    nueva = _conversacion(org_a, admin_profile, minutos_atras=5)
+    antes = nueva.ultimo_mensaje_en
+    _delegar_la_revision(org_a, admin_profile)
+
+    assert aviso_al_chat.avisar_decisiones(org_a, [PROPUESTA]) is True
+    [m] = MensajeSupervisor.objects.filter(conversacion=nueva)
+    assert m.rol == RolMensaje.SUPERVISOR
+    assert "Trabajar el feriado del lunes 16/11" in m.contenido
+    assert "Pendientes" in m.contenido
+    assert not MensajeSupervisor.objects.filter(conversacion=vieja).exists()
+    #  Queda como la mas reciente: es la que el chat muestra.
+    nueva.refresh_from_db()
+    assert nueva.ultimo_mensaje_en > antes
+
+
+def test_f2_sin_la_revision_delegada_no_escribe(org_a, admin_profile):
+    from operaciones import aviso_al_chat
+    from operaciones.chat_modelos import MensajeSupervisor
+    _conversacion(org_a, admin_profile)
+    assert aviso_al_chat.avisar_decisiones(org_a, [PROPUESTA]) is False
+    assert not MensajeSupervisor.objects.exists()
+
+
+def test_f3_el_ciclo_lo_escribe_cuando_nace_la_propuesta(org_a, admin_profile,
+                                                          monkeypatch):
+    from operaciones.chat_modelos import MensajeSupervisor
+
+    _horario(org_a)
+    _cuadrillas(org_a, 2)
+    _en_despacho(org_a, 17)
+    conv = _conversacion(org_a, admin_profile)
+    _delegar_la_revision(org_a, admin_profile)
+    #  Solo el feriado: las demas fases no son de esta prueba (y algunas le
+    #  preguntan al motor). El cerebro, apagado.
+    monkeypatch.setattr(sup, "_el_cerebro_corre", lambda: False)
+    for fase in ("_atender_desincronizados", "_leer_tickets_abiertos",
+                 "_medir_fallas_pendientes",
+                 "_pasar_a_despacho_los_que_las_reglas_habiliten",
+                 "_armar_la_jornada_del_dia", "_verificar_los_arreglos"):
+        monkeypatch.setattr(sup, fase, lambda *a, **k: {})
+    monkeypatch.setattr(sup, "retirar_alertas_de_casos_en_despacho",
+                        lambda *a, **k: 0)
+
+    r = sup.correr_ciclo(org_a, VIERNES_10)
+    assert r.get("avisos_en_el_chat") == 1
+    assert MensajeSupervisor.objects.filter(
+        conversacion=conv,
+        contenido__contains="Trabajar el feriado del lunes 16/11").exists()
+
+    #  La vuelta siguiente no lo repite: la propuesta ya existe.
+    r = sup.correr_ciclo(org_a, VIERNES_10 + dt.timedelta(hours=1))
+    assert not r.get("avisos_en_el_chat")
+    assert MensajeSupervisor.objects.filter(conversacion=conv).count() == 1
+
+
+def test_f4_lo_demas_no_va_al_chat(org_a, admin_profile, monkeypatch):
+    """Solo lo que pide una decision con fecha: un aviso por cada propuesta
+    llenaria la conversacion de ruido."""
+    from operaciones.chat_modelos import MensajeSupervisor
+
+    _conversacion(org_a, admin_profile)
+    _delegar_la_revision(org_a, admin_profile)
+    monkeypatch.setattr(sup, "_correr_ciclo", lambda *a, **k: {"detalle": [{
+        "resultado": "propuesta", "tipo": PropuestaSupervisor.CASO_ANTIGUO,
+        "propuesta": PROPUESTA}]})
+    for fase in ("_atender_desincronizados", "_leer_tickets_abiertos",
+                 "_medir_fallas_pendientes",
+                 "_pasar_a_despacho_los_que_las_reglas_habiliten",
+                 "_armar_la_jornada_del_dia", "_verificar_los_arreglos"):
+        monkeypatch.setattr(sup, fase, lambda *a, **k: {})
+    monkeypatch.setattr(sup, "retirar_alertas_de_casos_en_despacho",
+                        lambda *a, **k: 0)
+
+    r = sup.correr_ciclo(org_a, VIERNES_10)
+    assert not r.get("avisos_en_el_chat")
+    assert not MensajeSupervisor.objects.exists()

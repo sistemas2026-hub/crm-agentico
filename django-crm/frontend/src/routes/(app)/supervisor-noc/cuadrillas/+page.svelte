@@ -98,6 +98,29 @@
     }))
   );
 
+  /**
+   * LA VISTA PREVIA DEL ARMADO (21/10/2026). Pedido del usuario: ver ya lo
+   * que armaría el Supervisor, sin esperar al día siguiente. Lee y no escribe.
+   */
+  let previa = $state(/** @type {any} */ (null));
+  let cargandoPrevia = $state(false);
+  let errorPrevia = $state('');
+  async function verPrevia() {
+    cargandoPrevia = true;
+    errorPrevia = '';
+    try {
+      const r = await fetch(`/supervisor-noc/cuadrillas/vista-previa?fecha=${encodeURIComponent(data.dia ?? '')}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'No se pudo calcular.');
+      previa = d;
+    } catch (/** @type {any} */ e) {
+      previa = null;
+      errorPrevia = e?.message || 'No se pudo calcular.';
+    } finally {
+      cargandoPrevia = false;
+    }
+  }
+
   /** Los días del horario de las cuadrillas (21/10/2026), como los guarda el backend. */
   const DIAS_DEL_HORARIO = [
     { id: 'lunes', texto: 'Lunes' },
@@ -402,8 +425,60 @@
         <form method="GET" class="snoc-fila" style="gap:var(--snoc-xs);">
           <input class="snoc-campo" type="date" name="dia" value={data.dia} />
           <button class="snoc-btn" type="submit">Ver ese día</button>
+          <button class="snoc-btn" type="button" onclick={verPrevia} disabled={cargandoPrevia}>
+            {cargandoPrevia ? 'Calculando…' : 'Ver qué armaría el Supervisor'}
+          </button>
         </form>
       </div>
+
+      {#if errorPrevia}
+        <p class="snoc-aviso snoc-error-txt">{errorPrevia}</p>
+      {/if}
+      {#if previa}
+        <div class="snoc-tarjeta snoc-pila" style="gap:var(--snoc-sm);">
+          <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+            <strong class="snoc-body">Lo que armaría el Supervisor el {previa.fecha}</strong>
+            <button class="snoc-btn" type="button" onclick={() => (previa = null)}>Cerrar</button>
+          </div>
+          <span class="snoc-body-sm snoc-secundario">
+            Vista previa: no se guardó nada. Para que lo arme, pedíselo en su chat
+            («armá la jornada del día de cada cuadrilla»).
+          </span>
+          {#if !previa.trabaja}
+            <p class="snoc-aviso">{previa.porque}</p>
+          {:else}
+            <span class="snoc-body-sm">Horario de ese día: {previa.apertura} a {previa.cierre}.</span>
+            <table class="snoc-tabla">
+              <thead>
+                <tr><th>Cuadrilla</th><th>Qué haría</th><th>Labor</th><th>Zonas</th><th>Quiénes</th></tr>
+              </thead>
+              <tbody>
+                {#each previa.cuadrillas as c (c.cuadrilla)}
+                  <tr>
+                    <td>{c.cuadrilla}</td>
+                    <td>{c.que_haria}</td>
+                    <td>{c.labor_antes && c.labor_antes !== c.labor ? `${c.labor_antes} → ` : ''}{c.labor || '—'}</td>
+                    <td>{c.zonas.join(', ') || '—'}</td>
+                    <td>{[c.lider, ...c.gente.map((g) => g.nombre)].filter(Boolean).join(', ') || '—'}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+            <span class="snoc-body-sm snoc-secundario">
+              Casos en Despacho que cuentan para la labor: {previa.demanda.contados ?? 0}
+              · sin barrio todavía: {previa.demanda.sin_barrio ?? 0}
+              · barrio sin zona: {previa.demanda.sin_zona ?? 0}
+              · sin labor: {previa.demanda.sin_labor ?? 0}
+              · ya despachados: {previa.demanda.ya_despachados ?? 0}.
+            </span>
+            {#each previa.por_zona as z (z.zona)}
+              <span class="snoc-body-sm">
+                {z.zona}: {z.labores.map((l) => `${l.casos} de ${l.labor}`).join(', ')}
+              </span>
+            {/each}
+          {/if}
+        </div>
+      {/if}
 
       {#if (data.cuadrillas ?? []).length === 0}
         <p class="snoc-body snoc-secundario">

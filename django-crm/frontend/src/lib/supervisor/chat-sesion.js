@@ -79,6 +79,49 @@ export function aBurbujas(mensajes) {
 }
 
 /**
+ * Lo que el Supervisor escribio SOLO desde la ultima vez que se miro.
+ *
+ * 21/10/2026, pedido del usuario: que el Supervisor mande por el chat lo que
+ * hay que decidir (un feriado por trabajar), y no solo cuando se le pregunta.
+ * El backend lo deja en la conversacion; esto decide si lo que trajo una
+ * nueva lectura es nuevo.
+ *
+ * NO SE COMPARA POR ID: las respuestas que llegan en vivo se pintan con un id
+ * local ('r-<hora>') y el servidor las devuelve con el suyo. Por id, cada
+ * lectura pareceria traer todo de nuevo. El ancla es el TEXTO del ultimo
+ * mensaje del Supervisor que ya se ve: lo nuevo es lo suyo que vino despues.
+ * Si no se encuentra (el historial trae los ultimos 60), se cuenta.
+ *
+ * Devuelve null si no hay nada nuevo, si es la conversacion que la persona
+ * acaba de limpiar (`descartada`), o si es OTRA que la que se esta mirando:
+ * mezclar dos hilos haria creer que el Supervisor contesto algo que no.
+ *
+ * @param {Array<{rol: string}>} locales lo que se ve ahora
+ * @param {{conversacion_id?: string|null, mensajes?: any[]}} datos la lectura nueva
+ * @param {{conversacionId?: string|null, descartada?: string|null}} [hilo]
+ * @returns {{burbujas: ReturnType<typeof aBurbujas>, nuevas: number, conversacionId: string} | null}
+ */
+export function lleganNuevos(locales, datos, { conversacionId = null, descartada = null } = {}) {
+  const id = datos?.conversacion_id ?? null;
+  if (!id || id === descartada) return null;
+  if (conversacionId && id !== conversacionId) return null;
+  const servidor = aBurbujas(datos?.mensajes);
+  /** @param {Array<{rol: string}>} bs */
+  const delSupervisor = (bs) => bs.filter((b) => b.rol === 'supervisor').length;
+  const ultimo = [...(locales ?? [])].reverse()
+    .find((b) => b.rol === 'supervisor');
+  const ancla = ultimo
+    ? servidor.map((b) => b.rol === 'supervisor' && b.texto === /** @type {any} */ (ultimo).texto)
+      .lastIndexOf(true)
+    : -1;
+  const nuevas = ancla >= 0
+    ? delSupervisor(servidor.slice(ancla + 1))
+    : delSupervisor(servidor) - delSupervisor(locales ?? []);
+  if (nuevas <= 0) return null;
+  return { burbujas: servidor, nuevas, conversacionId: id };
+}
+
+/**
  * Si este texto es el mismo que ya se esta enviando o se acaba de enviar.
  *
  * EL DUPLICADO QUE IMPORTA NO ES EL DEL USUARIO
