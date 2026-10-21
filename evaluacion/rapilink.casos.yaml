@@ -587,7 +587,26 @@ casos:
       id_cliente: "5832"
       nombre: MARIO SABANAGRANDE
       sn_onu: ""
-    mensajes: ["no tengo servicio de tv"]
+    #  DOS TURNOS  (21/10/2026). Medido en aislamiento, tres corridas: 1 de 3.
+    #  Cuando fallaba la traza era inequivoca -- 0 herramientas, 6 a 9s,
+    #  'deriva_a' en None -- y la respuesta, las dos veces, una repregunta:
+    #
+    #      "Entiendo, lo revisamos. ¿El problema es que no ves ningun canal,
+    #       o solo algunos?"
+    #
+    #  Preguntar antes de medir esta bien. Lo que estaba mal era el caso: con
+    #  un solo mensaje, gastar el turno en la repregunta lo dejaba sin lugar
+    #  para derivar y mirar.
+    #
+    #  EL SEGUNDO MENSAJE NO PUEDE CAMBIAR LO QUE EL CASO MIDE, y eso ya se
+    #  cobro hoy en otros dos casos: "los puntos de pago" y "es el servicio
+    #  5832" desviaron al modelo y hubo que revertirlos. "ninguno" contesta la
+    #  repregunta con el escenario que el caso ya describe (no hay TV) y no
+    #  dice nada de la casa, del cable ni de la central -- que es justo lo que
+    #  este caso prueba que el agente no debe dar por sentado.
+    mensajes:
+      - "no tengo servicio de tv"
+      - "ninguno, no veo nada"
     espera:
       deriva_a: soporte_tecnico_cliente
       # Nada de mandarlo a revisar la casa cuando no se pudo mirar la central.
