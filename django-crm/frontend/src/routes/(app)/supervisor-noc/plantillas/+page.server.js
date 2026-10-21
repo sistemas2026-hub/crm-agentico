@@ -49,6 +49,26 @@ function definicionDel(f) {
   }
 }
 
+/**
+ * Asuntos y plazo, si el formulario los trae. Uno por línea; vacío en el plazo
+ * SÍ viaja, como null: es «sin plazo». Lo usan crear y publicar: dos copias del
+ * mismo parseo se desincronizan.
+ * @param {FormData} f
+ */
+function asuntosYPlazoDel(f) {
+  /** @type {{ asuntos?: string[], plazo_dias?: number | null }} */
+  const r = {};
+  if (f.has('asuntos')) {
+    r.asuntos = String(f.get('asuntos'))
+      .split('\n').map((a) => a.trim()).filter(Boolean);
+  }
+  if (f.has('plazo_dias')) {
+    const p = String(f.get('plazo_dias')).trim();
+    r.plazo_dias = p === '' ? null : Number(p);
+  }
+  return r;
+}
+
 /** @type {import('./$types').Actions} */
 export const actions = {
   /** Adoptar una del catálogo: queda publicada como v1 de la empresa. */
@@ -65,7 +85,7 @@ export const actions = {
   /**
    * Una desde cero. Arranca con la definición de «Trabajo general» para que no
    * nazca vacía —el backend rechaza una plantilla que no pide nada— y se edita
-   * después.
+   * después. Con sus asuntos y su plazo desde el alta (21/10/2026).
    */
   crear: async ({ request, cookies }) => {
     const f = await request.formData();
@@ -75,9 +95,15 @@ export const actions = {
       const r = await crearPlantilla({ cookies }, {
         nombre: String(f.get('nombre') ?? '').trim(),
         labor: String(f.get('labor') ?? '').trim(),
-        definicion
+        definicion,
+        ...asuntosYPlazoDel(f)
       });
-      return { hecho: `«${r.nombre}» creada. Ajustala y publicala.`, abrir: r.id };
+      const n = (r.asuntos ?? []).length;
+      const conAsuntos = n ? ` con ${n} ${n === 1 ? 'asunto' : 'asuntos'}` : '';
+      return {
+        hecho: `«${r.nombre}» creada${conAsuntos}. Abajo ajustás qué anota el técnico.`,
+        abrir: r.id
+      };
     } catch (e) {
       return fail(e?.status ?? 502, { error: mensajeDePlantilla(e, 'No se pudo crear.') });
     }
@@ -97,15 +123,8 @@ export const actions = {
     if (f.has('nombre')) cuerpo.nombre = String(f.get('nombre')).trim();
     if (f.has('labor')) cuerpo.labor = String(f.get('labor')).trim();
     //  Asuntos y plazo (19/10/2026), con la misma regla: solo si el formulario
-    //  los trae. Vacío en el plazo SÍ viaja, como null: es «sin plazo».
-    if (f.has('asuntos')) {
-      cuerpo.asuntos = String(f.get('asuntos'))
-        .split('\n').map((a) => a.trim()).filter(Boolean);
-    }
-    if (f.has('plazo_dias')) {
-      const p = String(f.get('plazo_dias')).trim();
-      cuerpo.plazo_dias = p === '' ? null : Number(p);
-    }
+    //  los trae.
+    Object.assign(cuerpo, asuntosYPlazoDel(f));
     try {
       const r = await publicarPlantilla({ cookies }, id, cuerpo);
       if (!r.cambio) {
@@ -126,7 +145,10 @@ export const actions = {
       const vivas = r.ordenes_vivas
         ? ` Las ${r.ordenes_vivas} órdenes abiertas siguen con la versión anterior.`
         : '';
-      return { hecho: `Publicada la versión ${r.version}. Las órdenes nuevas salen con ella.${vivas}` };
+      return {
+        hecho: `Guardado. Cambió lo que anota el técnico: versión ${r.version}, ` +
+          `y las órdenes nuevas salen con ella.${vivas}`
+      };
     } catch (e) {
       return fail(e?.status ?? 502, { error: mensajeDePlantilla(e, 'No se pudo publicar.') });
     }

@@ -129,6 +129,46 @@ describe('adoptar y crear', () => {
     expect(r.abrir).toBe('nuevo');
   });
 
+  it('crear manda nombre, labor, asuntos y plazo, y abre la nueva (21/10/2026)', async () => {
+    apiRequest.mockResolvedValue({ id: 'nueva', nombre: 'Traslado', asuntos: ['A', 'B'] });
+    const definicion = { campos: [{ titulo: 'Qué se hizo', tipo: 'texto' }], evidencias: [] };
+    const r = await actions.crear(peticion({
+      definicion: JSON.stringify(definicion), nombre: ' Traslado ', labor: 'correctivo',
+      asuntos: 'Cambio De Domicilio\n\n  Traslado  \n', plazo_dias: '3'
+    }));
+    expect(apiRequest).toHaveBeenCalledWith(
+      '/campo/plantillas/',
+      { method: 'POST', body: {
+        nombre: 'Traslado', labor: 'correctivo', definicion,
+        asuntos: ['Cambio De Domicilio', 'Traslado'], plazo_dias: 3
+      } },
+      { cookies }
+    );
+    expect(r.abrir).toBe('nueva');
+    expect(r.hecho).toContain('con 2 asuntos');
+  });
+
+  it('crear sin asuntos ni plazo en el formulario no los manda', async () => {
+    apiRequest.mockResolvedValue({ id: 'nueva', nombre: 'Traslado', asuntos: [] });
+    const r = await actions.crear(peticion({
+      definicion: '{"campos":[]}', nombre: 'Traslado', labor: ''
+    }));
+    expect(apiRequest.mock.calls[0][1].body).toEqual({
+      nombre: 'Traslado', labor: '', definicion: { campos: [] }
+    });
+    expect(r.hecho).not.toContain('asunto');
+  });
+
+  it('un asunto sin labor llega como la frase del backend', async () => {
+    rechazar(httpError(400, {
+      error: 'ASUNTOS_SIN_LABOR', detalle: 'Elegi la labor antes de ponerle asuntos.' }));
+    const r = await actions.crear(peticion({
+      definicion: '{"campos":[]}', nombre: 'X', labor: '', asuntos: 'Traslado'
+    }));
+    expect(r.status).toBe(400);
+    expect(r.data.error).toContain('Elegi la labor');
+  });
+
   it('un 403 de gestión llega con su texto y su estado', async () => {
     rechazar(httpError(403, {
       detail: 'Para armar cuadrillas hace falta un rol de gestion.' }));
