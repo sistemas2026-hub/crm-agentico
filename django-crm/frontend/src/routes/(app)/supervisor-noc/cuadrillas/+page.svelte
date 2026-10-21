@@ -108,9 +108,11 @@
     { id: 'sabado', texto: 'Sábado' },
     { id: 'domingo', texto: 'Domingo' }
   ];
-  /** Los feriados, uno por línea, como se escriben. */
+  /** Los feriados, uno por línea, como se escriben; el que se trabaja, con su horario. */
   const feriadosTexto = $derived(
-    (data.horario?.feriados ?? []).map((f) => `${f.fecha} ${f.nombre}`).join('\n')
+    (data.horario?.feriados ?? [])
+      .map((f) => `${f.fecha}${f.abre ? ` ${f.abre}-${f.cierra}` : ''} ${f.nombre}`)
+      .join('\n')
   );
 
   const ROLES = [
@@ -848,6 +850,11 @@
             <span class="snoc-label">Feriados</span>
             <textarea class="snoc-campo" name="feriados" rows="4" value={feriadosTexto}
                       placeholder={'Uno por línea: AAAA-MM-DD Nombre\n2026-12-08 Inmaculada Concepción'}></textarea>
+            <span class="snoc-body-sm snoc-secundario">
+              Un feriado queda cerrado. Si se trabaja, poné el horario después de la fecha:
+              2026-11-16 07:00-12:00 Independencia de Cartagena. El día hábil anterior, el
+              Supervisor propone si conviene trabajarlo, según la cola.
+            </span>
           </label>
           <div>
             <button class="snoc-btn snoc-btn-primario" type="submit">Guardar horario</button>

@@ -821,6 +821,13 @@ class PropuestaSupervisor(BaseModel):
     #  una decision -- y el texto queda a la vista para que pueda discutirla.
     TICKET_SIN_DIAGNOSTICO = "ticket_sin_diagnostico"
 
+    #  21/10/2026. Decision del usuario: «no todos los festivos se trabaja, eso
+    #  se define por cantidad de ticket y eso si lo propone el supervisor». El
+    #  dia habil anterior a un feriado, compara la cola de Despacho con lo que
+    #  sacan las cuadrillas en un dia y RECOMIENDA. No cambia nada: quien
+    #  aprueba pone el horario del feriado en Cuadrillas. Habilidad H-20.
+    FERIADO_POR_DECIDIR = "feriado_por_decidir"
+
     TIPOS_SENAL = (
         (CASO_ANTIGUO, "Caso abierto antiguo"),
         (ACTIVIDAD_VENCIDA, "Actividad vencida"),
@@ -839,6 +846,7 @@ class PropuestaSupervisor(BaseModel):
         (CASO_DESINCRONIZADO, "Caso cerrado en el proveedor y abierto en el CRM"),
         (CASO_REQUIERE_VISITA, "Caso que necesita una visita a campo"),
         (TICKET_SIN_DIAGNOSTICO, "Ticket abierto en el proveedor, sin diagnóstico"),
+        (FERIADO_POR_DECIDIR, "Feriado: ¿se trabaja?"),
     )
 
     PROPUESTA = "propuesta"

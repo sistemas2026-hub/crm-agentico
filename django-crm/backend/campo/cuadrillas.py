@@ -363,6 +363,13 @@ class ConfiguracionDeReparto(BaseModel):
     #: ordenes solo (Fase 2.3 de supervisor-arma-la-jornada).
     hora_de_corte = models.TimeField(null=True, blank=True)
 
+    #: LOS FERIADOS QUE SI SE TRABAJAN  --  21/10/2026, decision del usuario:
+    #: un feriado no es «cerrado» sin mas; se trabaja segun la cola, lo propone
+    #: el Supervisor y quien lo aprueba pone el horario. {"AAAA-MM-DD":
+    #: {"abre": "HH:MM", "cierra": "HH:MM"}}. Un feriado que no esta aca queda
+    #: cerrado. Ver `campo/horario_de_cuadrillas.py`.
+    feriados_trabajados = models.JSONField(default=dict, blank=True)
+
     #: El ULTIMO DIA LOCAL en que esto corrio. Es lo que evita que corra dos
     #: veces.
     #:

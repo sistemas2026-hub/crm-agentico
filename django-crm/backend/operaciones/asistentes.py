@@ -91,6 +91,9 @@ SENALES = {
         P.ORDEN_SLA_POR_VENCER,
         #  M05-A. Incidencia con lifecycle persistente.
         P.INCIDENCIA_SIN_RESOLVER,
+        #  21/10/2026. Si se trabaja un feriado: es planificar el dia de las
+        #  cuadrillas, no un caso.
+        P.FERIADO_POR_DECIDIR,
     ),
     SOPORTE: (
         #  Uno solo, y es a proposito: este dominio no agrupa fuentes, agrupa

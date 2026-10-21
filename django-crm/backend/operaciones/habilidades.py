@@ -1088,6 +1088,71 @@ _FICHAS: tuple[Habilidad, ...] = (
         huella_condicion="faltan:<campos>",
     ),
 
+    #  21/10/2026, CON AUTORIZACION EXPLICITA del usuario: «no todos los
+    #  festivos se trabaja, eso se define por cantidad de ticket y eso si lo
+    #  propone el supervisor». Eligio el dia habil anterior, la regla (la cola
+    #  contra un dia de trabajo) y que el horario lo ponga quien aprueba.
+    Habilidad(
+        id="H-20",
+        nombre="Proponer si se trabaja un feriado",
+        tipo=DOMINIO, version=1, vigente_desde="2026-10-21", estado=VIGENTE,
+        proposito=(
+            "Que un feriado no se cierre ni se trabaje por costumbre: que se "
+            "decida con la cola de Despacho a la vista."),
+        responsabilidad=(
+            "Comparar la cola con lo que sacan las cuadrillas en un dia y "
+            "recomendar. Nunca abrir el feriado: el horario lo pone quien "
+            "aprueba."),
+        alcance=(
+            "Feriados cerrados del horario de las cuadrillas, en dias que "
+            "normalmente se trabajan, vistos el dia habil anterior."),
+        fuera_de_alcance=(
+            "No cambia el horario ni arma jornadas.",
+            "No mira el horario de atencion al cliente.",
+            "No decide quienes salen ese dia.",
+        ),
+        activacion=(
+            "Hoy es el dia habil anterior a un feriado sin horario que cae en "
+            "un dia de trabajo.",),
+        entradas=("org", "ahora"),
+        datos=("calendario de las cuadrillas y sus feriados",
+               "ConfiguracionDeReparto.feriados_trabajados",
+               "casos en la cola de Despacho",
+               "cuadrillas activas y su tope"),
+        reglas=(
+            "Recomienda trabajarlo si la cola supera un dia de trabajo: "
+            "cuadrillas activas por su tope (o el de la empresa).",
+            "La huella es la fecha del feriado: que la cola crezca no vuelve "
+            "a preguntar.",
+            "Sin horario de las cuadrillas no emite nada.",
+        ),
+        procedimiento=(
+            "1. Leer el horario de las cuadrillas en su zona horaria.",
+            "2. Si hoy se trabaja, buscar feriados cerrados en los proximos dias.",
+            "3. Para el que tiene a hoy como dia habil anterior, contar la cola "
+            "y la capacidad de un dia, y emitir la señal.",
+        ),
+        conocimiento=(),
+        herramientas_lectura=("ORM: business_hours.BusinessCalendar",
+                              "ORM: campo.Cuadrilla",
+                              "operaciones.paso_a_despacho.casos_en_despacho"),
+        herramientas_escritura=(),
+        salida="list[Senal] con tipo 'feriado_por_decidir'.",
+        evidencia=("observado: el feriado y que no tiene horario",
+                   "observado: casos en Despacho",
+                   "observado: cuadrillas activas y lo que sacan por dia"),
+        incertidumbre=(
+            "La capacidad es el tope, no lo que de verdad se alcanza a hacer.",
+            "La cola puede cambiar entre la propuesta y el feriado.",
+        ),
+        escalamiento=("A humano: siempre; el horario lo pone quien aprueba.",),
+        nivel=1,
+        metricas=("Feriados propuestos contra feriados trabajados.",),
+        detector="_feriados_por_decidir",
+        senal="feriado_por_decidir",
+        huella_condicion="feriado:<fecha>",
+    ),
+
 )
 
 

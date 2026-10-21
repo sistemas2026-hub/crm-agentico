@@ -206,21 +206,29 @@ def jornada_de(org, dia: _date, *, solo_de_cuadrillas: bool = False) -> Jornada:
     """
     from campo.horario_de_cuadrillas import calendario_de_cuadrillas
 
-    cal = calendario_de_cuadrillas(org)
-    if cal is None and solo_de_cuadrillas:
+    de_cuadrillas = calendario_de_cuadrillas(org)
+    if de_cuadrillas is None and solo_de_cuadrillas:
         return Jornada(abierta=False, motivo=SIN_HORARIO_DE_CUADRILLAS)
-    cal = (cal
+    cal = (de_cuadrillas
            or BusinessCalendar.objects.filter(org=org, is_default=True).first()
            or BusinessCalendar.objects.filter(org=org).first())
     if cal is None:
         return Jornada(abierta=False, motivo=SIN_CALENDARIO)
 
-    if cal.holidays.filter(date=dia).exists():
-        return Jornada(abierta=False, motivo=FERIADO, zona_horaria=cal.timezone)
-
     nombre = DIAS[dia.weekday()]
     apertura = getattr(cal, f"{nombre}_open")
     cierre = getattr(cal, f"{nombre}_close")
+    if cal.holidays.filter(date=dia).exists():
+        #  UN FERIADO QUE SE TRABAJA  --  21/10/2026, decision del usuario: lo
+        #  propone el Supervisor y quien lo aprueba pone el horario. Solo en el
+        #  horario de las cuadrillas: el de atencion al cliente no tiene esto.
+        from campo.horario_de_cuadrillas import horario_del_feriado
+        horas = (horario_del_feriado(org, dia)
+                 if de_cuadrillas is not None and cal.pk == de_cuadrillas.pk
+                 else None)
+        if horas is None:
+            return Jornada(abierta=False, motivo=FERIADO, zona_horaria=cal.timezone)
+        apertura, cierre = horas
     if apertura is None or cierre is None:
         return Jornada(abierta=False, motivo=CERRADA, zona_horaria=cal.timezone)
 

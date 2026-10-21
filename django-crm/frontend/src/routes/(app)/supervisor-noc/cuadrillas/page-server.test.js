@@ -259,4 +259,17 @@ describe('el horario de las cuadrillas (21/10/2026)', () => {
     expect(r.status).toBe(400);
     expect(r.data.error).toContain('cierra antes de abrir');
   });
+
+  it('un feriado con «HH:MM-HH:MM» se trabaja con ese horario; sin horas, cerrado', async () => {
+    guardarHorarioDeCuadrillas.mockReset().mockResolvedValue({ configurado: true });
+    await actions.horario(envio({
+      zona_horaria: 'America/Bogota',
+      feriados: '2026-11-16 07:00-12:00 Independencia de Cartagena\n2026-12-25 Navidad'
+    }));
+    const [, cuerpo] = guardarHorarioDeCuadrillas.mock.calls[0];
+    expect(cuerpo.feriados).toEqual([
+      { fecha: '2026-11-16', abre: '07:00', cierra: '12:00', nombre: 'Independencia de Cartagena' },
+      { fecha: '2026-12-25', nombre: 'Navidad' }
+    ]);
+  });
 });

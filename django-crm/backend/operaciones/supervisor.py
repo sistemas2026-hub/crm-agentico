@@ -179,6 +179,8 @@ def detectar(org, ahora=None) -> list[Senal]:
         _ordenes_sin_programar,
         _ordenes_desincronizadas,
         _programaciones_sin_publicar,
+        #  21/10/2026. Recomienda si se trabaja un feriado, segun la cola.
+        _feriados_por_decidir,
         _ordenes_en_riesgo,
         #  M09-L. Consume M03-G; no recalcula capacidad por su cuenta.
         _capacidad_de_jornada,
@@ -1317,6 +1319,102 @@ def _programaciones_sin_publicar(org, ahora) -> list[Senal]:
     ]
 
 
+#: Cuantos dias hacia adelante se buscan feriados. Alcanza para un fin de
+#: semana largo con el feriado el lunes, visto desde el viernes.
+DIAS_PARA_MIRAR_FERIADOS = 10
+
+_DIAS_ES = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado",
+            "domingo")
+
+
+def _feriados_por_decidir(org, ahora) -> list[Senal]:
+    """
+    El dia habil anterior a un feriado cerrado: cuanta cola hay en Despacho y
+    cuanto sacan las cuadrillas en un dia.
+
+    DECISION DEL USUARIO (21/10/2026): «no todos los festivos se trabaja, eso
+    se define por cantidad de ticket y eso si lo propone el supervisor». Se
+    propone el dia habil ANTERIOR (lo eligio el usuario), y se RECOMIENDA
+    trabajarlo si la cola supera un dia de trabajo: cuadrillas activas por su
+    tope. La cuenta la hace el codigo (CLAUDE.md §4). No cambia nada: el
+    horario lo pone quien aprueba, en la linea del feriado.
+
+    Sin horario de las cuadrillas no emite nada: no hay de donde saber que
+    dias se trabaja. Un feriado que ya tiene horario (se decidio trabajarlo)
+    tampoco. Ni uno que cae en un dia que de todos modos no se trabaja.
+    """
+    import zoneinfo
+
+    from campo.cuadrillas import Cuadrilla, configuracion_de_reparto
+    from campo.horario_de_cuadrillas import (calendario_de_cuadrillas,
+                                             horario_del_feriado)
+    from operaciones import capacidad
+    from operaciones import paso_a_despacho as pad
+
+    cal = calendario_de_cuadrillas(org)
+    if cal is None:
+        return []
+    try:
+        zona = zoneinfo.ZoneInfo(cal.timezone)
+    except Exception:                                        # noqa: BLE001
+        return []
+    hoy = ahora.astimezone(zona).date()
+    if not capacidad.jornada_de(org, hoy, solo_de_cuadrillas=True).abierta:
+        return []
+
+    def _abierto(dia) -> bool:
+        return capacidad.jornada_de(org, dia, solo_de_cuadrillas=True).abierta
+
+    salida, cola, por_dia, cuadrillas = [], None, 0, 0
+    proximos = cal.holidays.filter(
+        date__gt=hoy,
+        date__lte=hoy + timedelta(days=DIAS_PARA_MIRAR_FERIADOS),
+    ).order_by("date")
+    for feriado in proximos:
+        dia = feriado.date
+        if horario_del_feriado(org, dia) is not None:
+            continue
+        if getattr(cal, f"{capacidad.DIAS[dia.weekday()]}_open") is None:
+            continue
+        anterior = dia - timedelta(days=1)
+        while anterior > hoy and not _abierto(anterior):
+            anterior -= timedelta(days=1)
+        if anterior != hoy:
+            continue
+        if cola is None:
+            cola = pad.casos_en_despacho(org).count()
+            tope = configuracion_de_reparto(org).tope_por_cuadrilla
+            activas = list(Cuadrilla.objects.filter(org=org, activa=True)
+                           .values_list("tope_diario", flat=True))
+            cuadrillas = len(activas)
+            por_dia = sum((t or tope) for t in activas)
+        recomienda = cola > por_dia
+        legible = f"{_DIAS_ES[dia.weekday()]} {dia:%d/%m}"
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.FERIADO_POR_DECIDIR,
+            origen_tipo="feriado",
+            origen_id=dia.isoformat(),
+            evidencia=[
+                _observacion("calendario_de_cuadrillas", cal.id,
+                             f"el {legible} es feriado y no tiene horario: "
+                             f"hoy queda cerrado", ahora),
+                _observacion("cola_de_despacho", org.id,
+                             f"{cola} casos en Despacho", ahora),
+                _observacion("cuadrillas", org.id,
+                             f"{cuadrillas} cuadrillas activas sacan "
+                             f"{por_dia} ordenes por dia", ahora),
+            ],
+            datos={"fecha": dia.isoformat(), "fecha_legible": legible,
+                   "nombre": feriado.name, "cola": cola,
+                   "capacidad": por_dia, "cuadrillas": cuadrillas,
+                   "recomienda": recomienda},
+            #  La fecha, y no la cola: que la cola crezca no vuelve a preguntar
+            #  algo que alguien ya decidio.
+            huella=f"feriado:{dia.isoformat()}",
+        ))
+    return salida
+
+
 def _ordenes_en_riesgo(org, ahora) -> list[Senal]:
     """
     Órdenes programadas cuyo técnico principal está declarado ausente ese día.
@@ -1983,6 +2081,32 @@ def analizar(senal: Senal) -> dict:
                        f"comprometida no hay atraso que medir."),
             "prioridad": prioridad,
             "impacto": "Una orden sin fecha no se despacha y no aparece en la ruta de nadie",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.FERIADO_POR_DECIDIR:
+        #  21/10/2026. Recomienda; no cambia nada. Quien aprueba pone el
+        #  horario del feriado en Cuadrillas (decision del usuario).
+        recomienda = bool(d.get("recomienda"))
+        prioridad, comp = _prioridad(20 if recomienda else 60, {})
+        cuando = d.get("fecha_legible") or d.get("fecha")
+        return {
+            "accion_propuesta": (f"Trabajar el feriado del {cuando}" if recomienda
+                                 else f"No hace falta trabajar el feriado del {cuando}"),
+            "motivo": (
+                f"El {cuando} es feriado ({d.get('nombre')}). Hay {d.get('cola')} "
+                f"casos en Despacho y las {d.get('cuadrillas')} cuadrillas sacan "
+                f"{d.get('capacidad')} por dia: la cola "
+                + ("supera un dia de trabajo. " if recomienda
+                   else "entra en un dia de trabajo. ")
+                + "Para trabajarlo, pone el horario en la linea del feriado, en "
+                  "Cuadrillas > Horario de las cuadrillas (por ejemplo "
+                  f"{d.get('fecha')} 07:00-12:00). Sin horario, queda cerrado."),
+            "prioridad": prioridad,
+            "impacto": ("Un feriado cerrado con la cola llena deja casos un dia "
+                        "mas sin visita; uno trabajado sin necesidad saca gente "
+                        "en un feriado"),
             "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
             "componentes_prioridad": comp,
         }

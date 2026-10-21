@@ -205,7 +205,8 @@ def test_conocimiento_de_devuelve_vacio_donde_no_hay_documento():
     sin_documento = [i for i in habilidades.IDS
                      if i not in habilidades.CONOCIMIENTO]
     #  M09-N: H-15 tampoco trae documento, por el mismo criterio de D-3.
-    assert len(sin_documento) == 15
+    #  21/10/2026: H-20 tampoco trae documento.
+    assert len(sin_documento) == 16
     for i in sin_documento:
         assert habilidades.conocimiento_de(i) == ""
 
@@ -222,8 +223,10 @@ def test_las_catorce_habilidades_siguen_intactas():
     #  M09-M dejo 14. Despues se agregaron, con autorizacion explicita: H-11/H-12 (M04-A), H-13 (M05-A) y H-14 (M05-B).
     #  M09-N (22/09/2026) agrega H-15 (caso cerrado en el proveedor y abierto
     #  en el CRM), tambien con autorizacion explicita.
-    assert len(habilidades.HABILIDADES) == 19
-    assert len(habilidades.IDS) == 19
+    #  21/10/2026 agrega H-20 (proponer si se trabaja un feriado), con
+    #  autorizacion explicita del usuario.
+    assert len(habilidades.HABILIDADES) == 20
+    assert len(habilidades.IDS) == 20
 
 
 def test_ninguna_habilidad_gano_herramienta_de_escritura():

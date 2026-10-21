@@ -180,3 +180,55 @@ def test_g_cambiarlo_exige_gestion(user_client, org_a):
     r = _guardar(user_client)
     assert r.status_code == 403, r.content
     assert H.calendario_de_cuadrillas(org_a) is None
+
+
+# ---------------------------------------------------------------------------
+# H · un feriado que se trabaja (21/10/2026)
+# ---------------------------------------------------------------------------
+#  Decision del usuario: un feriado se trabaja o no segun la cola, lo propone
+#  el Supervisor y quien lo aprueba pone el horario en la linea del feriado.
+
+def test_h_un_feriado_con_horario_se_trabaja_con_ese_horario(admin_client, org_a):
+    r = _guardar(admin_client, feriados=[
+        {"fecha": "2026-10-06", "nombre": "Trabajado", "abre": "07:00",
+         "cierra": "12:00"},
+        {"fecha": "2026-12-25", "nombre": "Navidad"}])
+    assert r.status_code == 200, r.content
+
+    martes = capacidad.jornada_de(org_a, MARTES)
+    assert martes.abierta and martes.cierre == dt.time(12, 0)
+    navidad = capacidad.jornada_de(org_a, dt.date(2026, 12, 25))
+    assert not navidad.abierta and navidad.motivo == capacidad.FERIADO
+
+    feriados = {f["fecha"]: f for f in r.json()["feriados"]}
+    assert feriados["2026-10-06"]["abre"] == "07:00"
+    assert "abre" not in feriados["2026-12-25"]
+
+
+def test_h2_sacarle_el_horario_lo_vuelve_a_cerrar(admin_client, org_a):
+    _guardar(admin_client, feriados=[{"fecha": "2026-10-06", "nombre": "X",
+                                      "abre": "07:00", "cierra": "12:00"}])
+    _guardar(admin_client, feriados=[{"fecha": "2026-10-06", "nombre": "X"}])
+    assert not capacidad.jornada_de(org_a, MARTES).abierta
+
+
+def test_h3_un_feriado_con_una_sola_hora_no_se_guarda(admin_client, org_a):
+    r = _guardar(admin_client, feriados=[{"fecha": "2026-10-06", "nombre": "X",
+                                          "abre": "07:00"}])
+    assert r.status_code == 400, r.content
+    assert H.calendario_de_cuadrillas(org_a) is None
+
+
+def test_h4_el_horario_de_atencion_no_tiene_feriados_trabajados(org_a):
+    """El dia que se trabaja es de las cuadrillas: el calendario de atencion
+    al cliente sigue cerrado ese feriado."""
+    from business_hours.models import BusinessHoliday
+    from campo.cuadrillas import ConfiguracionDeReparto
+
+    cal = _atencion_al_cliente(org_a)
+    BusinessHoliday.objects.create(calendar=cal, org=org_a, date=MARTES,
+                                   name="Feriado")
+    ConfiguracionDeReparto.objects.create(
+        org=org_a, feriados_trabajados={MARTES.isoformat(): {
+            "abre": "07:00", "cierra": "12:00"}})
+    assert not capacidad.jornada_de(org_a, MARTES).abierta

@@ -598,7 +598,9 @@ def test_21_22_habilidades_y_conocimiento(org_a, actor):
     #  M09-M dejo 14. Despues se agregaron, con autorizacion explicita: H-11/H-12 (M04-A), H-13 (M05-A) y H-14 (M05-B).
     #  M09-N (22/09/2026) agrega H-15 (caso cerrado en el proveedor y abierto
     #  en el CRM), tambien con autorizacion explicita.
-    assert len(habilidades.HABILIDADES) == 19, "se creó una habilidad no prevista"
+    #  21/10/2026 agrega H-20 (proponer si se trabaja un feriado), con
+    #  autorizacion explicita del usuario.
+    assert len(habilidades.HABILIDADES) == 20, "se creó una habilidad no prevista"
 
     #  Toda señal emitida tiene ficha: es el guarda de M09-K, comprobado
     #  también sobre lo que este ciclo produjo de verdad.

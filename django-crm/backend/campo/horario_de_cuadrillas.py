@@ -106,12 +106,20 @@ def leer(org) -> dict:
                                 "cierra": cierra.strftime("%H:%M")}
                                if abre and cierra else None)
     if cal is not None:
-        salida["feriados"] = [{"fecha": h.date.isoformat(), "nombre": h.name}
-                              for h in cal.holidays.order_by("date")]
+        trabajados = getattr(config, "feriados_trabajados", None) or {}
+        for h in cal.holidays.order_by("date"):
+            f = {"fecha": h.date.isoformat(), "nombre": h.name}
+            horas = trabajados.get(f["fecha"]) if isinstance(trabajados, dict) else None
+            if isinstance(horas, dict) and horas.get("abre") and horas.get("cierra"):
+                f.update(abre=horas["abre"], cierra=horas["cierra"])
+            salida["feriados"].append(f)
     return salida
 
 
-def _feriados(valor) -> list[tuple[_dt.date, str]]:
+def _feriados(valor) -> list[tuple[_dt.date, str, _dt.time | None, _dt.time | None]]:
+    """(fecha, nombre, abre, cierra). Con horas = ese feriado SE TRABAJA
+    (decision del usuario, 21/10/2026: lo decide quien aprueba la propuesta
+    del Supervisor). Sin horas = cerrado."""
     if valor in (None, ""):
         return []
     if not isinstance(valor, list):
@@ -128,10 +136,34 @@ def _feriados(valor) -> list[tuple[_dt.date, str]]:
             continue
         vistos.add(fecha)
         nombre = " ".join(str(f.get("nombre") or "").split())[:100] or "Feriado"
-        salida.append((fecha, nombre))
+        abre = _hora(f.get("abre"), f"El feriado del {fecha}")
+        cierra = _hora(f.get("cierra"), f"El feriado del {fecha}")
+        if (abre is None) != (cierra is None):
+            raise ErrorHorario(f"El feriado del {fecha} necesita las dos horas "
+                               "(HH:MM-HH:MM) o ninguna.")
+        if abre is not None and cierra <= abre:
+            raise ErrorHorario(f"El feriado del {fecha} cierra antes de abrir.")
+        salida.append((fecha, nombre, abre, cierra))
     if len(salida) > MAX_FERIADOS:
         raise ErrorHorario(f"Pasan de {MAX_FERIADOS} feriados.")
     return salida
+
+
+def horario_del_feriado(org, fecha: _dt.date):
+    """(abre, cierra) si ese feriado SE TRABAJA, o None si queda cerrado."""
+    from campo.cuadrillas import ConfiguracionDeReparto
+
+    trabajados = (ConfiguracionDeReparto.objects.filter(org=org)
+                  .values_list("feriados_trabajados", flat=True).first())
+    h = (trabajados or {}).get(fecha.isoformat()) if isinstance(trabajados, dict) else None
+    if not isinstance(h, dict):
+        return None
+    try:
+        abre = _dt.time.fromisoformat(str(h.get("abre"))[:5])
+        cierra = _dt.time.fromisoformat(str(h.get("cierra"))[:5])
+    except ValueError:
+        return None
+    return (abre, cierra) if cierra > abre else None
 
 
 def guardar(org, datos: dict) -> dict:
@@ -189,8 +221,13 @@ def guardar(org, datos: dict) -> dict:
         cal.holidays.all().delete()
         BusinessHoliday.objects.bulk_create([
             BusinessHoliday(calendar=cal, org=org, date=fecha, name=nombre)
-            for fecha, nombre in feriados])
+            for fecha, nombre, _, _ in feriados])
         config.calendario_de_cuadrillas = cal
         config.hora_de_corte = corte
-        config.save(update_fields=["calendario_de_cuadrillas", "hora_de_corte"])
+        config.feriados_trabajados = {
+            fecha.isoformat(): {"abre": abre.strftime("%H:%M"),
+                                "cierra": cierra.strftime("%H:%M")}
+            for fecha, _, abre, cierra in feriados if abre is not None}
+        config.save(update_fields=["calendario_de_cuadrillas", "hora_de_corte",
+                                   "feriados_trabajados"])
     return leer(org)

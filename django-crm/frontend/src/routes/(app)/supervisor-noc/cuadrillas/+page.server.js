@@ -457,6 +457,13 @@ export const actions = {
       .filter(Boolean)
       .map((l) => {
         const [fecha, ...resto] = l.split(/\s+/);
+        //  «AAAA-MM-DD 07:00-12:00 Nombre» = ese feriado SE TRABAJA, con ese
+        //  horario (21/10/2026: lo pone quien aprueba la propuesta).
+        const horas = /^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/.exec(resto[0] ?? '');
+        if (horas) {
+          resto.shift();
+          return { fecha, abre: horas[1], cierra: horas[2], nombre: resto.join(' ') };
+        }
         return { fecha, nombre: resto.join(' ') };
       });
     try {

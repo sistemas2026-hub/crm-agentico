@@ -45,9 +45,11 @@ def test_hay_exactamente_dieciocho():
     #  M09-M dejo 14. Despues se agregaron, con autorizacion explicita: H-11/H-12 (M04-A), H-13 (M05-A) y H-14 (M05-B).
     #  M09-N (22/09/2026) agrega H-15 (caso cerrado en el proveedor y abierto
     #  en el CRM), tambien con autorizacion explicita.
-    assert len(habilidades.HABILIDADES) == 19
-    assert len(habilidades.IDS) == 19
-    assert len(set(habilidades.IDS)) == 19, "hay ids repetidos"
+    #  21/10/2026 agrega H-20 (proponer si se trabaja un feriado), con
+    #  autorizacion explicita del usuario.
+    assert len(habilidades.HABILIDADES) == 20
+    assert len(habilidades.IDS) == 20
+    assert len(set(habilidades.IDS)) == 20, "hay ids repetidos"
 
 
 def test_catorce_de_dominio_y_cuatro_transversales():
@@ -59,7 +61,9 @@ def test_catorce_de_dominio_y_cuatro_transversales():
     transversales = [h for h in habilidades.HABILIDADES.values()
                      if h.tipo == habilidades.TRANSVERSAL]
     #  M09-N: 15 de dominio con H-15. Las 4 transversales no se tocaron.
-    assert len(dominio) == 15
+    #  21/10/2026: 16 con H-20 (proponer si se trabaja un feriado), con
+    #  autorizacion explicita del usuario.
+    assert len(dominio) == 16
     assert len(transversales) == 4
 
 
