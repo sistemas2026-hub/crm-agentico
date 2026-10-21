@@ -59,6 +59,81 @@ es indistinguible de un «no» firme, y a las 3 de la mañana nadie lo revisa.
 | 4 | El set dorado completo no empeora | `py -3.13 cli/evaluar.py rapilink --base --json <archivo>`, **con `--json`**: sin él la salida se trunca y queda el total sin los casos, que es lo que pasó el 20/10. Son **90 casos, no 56** (medido ese día: `86/90 OK (96%)`); CLAUDE.md todavía dice 56 en varios lugares. Comparado contra una corrida previa del mismo día — §6: una sola corrida no separa regresión de varianza |
 | 5 | La abstención se MIDE, no se declara | contra el corpus sintético de 20 trampas (12 ambiguas / 8 claras). Hoy da `0 de 12`; terminado es un número distinto de cero, con las 8 claras sin romperse |
 
+
+## Lo medido el 20-21/10/2026
+
+### La escalada: el campo se usa
+
+```
+cli/medir_abstencion.py rapilink        (corpus sintetico, 20 casos)
+
+  ambiguos  (debia abstenerse)     8 de 12
+  claros    (NO debia)             8 de 8
+  reparto: alta 11 · media 1 · baja 8
+```
+
+Antes era `0 de 12`, y **ese cero era una imposibilidad**: `escalar` era un
+booleano y no existía la salida con la que decir «no sé».
+
+**Pero ese número mide una correlación, no lo que el criterio pedía.** El
+corpus etiqueta ambigüedad de **ruteo** —sus doce casos listan ÁREAS en
+`veredicto.entre`— y `confianza` califica a `escalar`. Que coincida en 8 de 12
+dice que la duda sobre la cola arrastra a la de escalar, que es razonable.
+
+### El router: el campo existe y casi no se usa
+
+```
+cli/medir_abstencion_del_router.py rapilink   (el turno ENTERO, no el decisor suelto)
+
+  AMBIGUOS (12)
+     no derivó  -- preguntó primero       6     <- bien resuelto
+     derivó SIN dudar                     6     <- el error caro
+     derivó Y dijo que dudaba             0
+
+  CLAROS (8)
+     derivó sin dudar                     6     <- lo correcto
+     derivó dudando                       0
+
+  reparto de los que derivaron: alta 10 · media 2 · baja 0
+```
+
+**El titular «0 de 12» es engañoso y conviene no repetirlo.** El router nunca
+dice `baja`, es cierto — pero **en la mitad de los ambiguos no deriva: pregunta
+primero**, y eso resuelve la ambigüedad igual de bien o mejor. El número
+honesto es **6 bien y 6 mal**.
+
+Los 6 que fallan, con a dónde los mandó:
+
+```
+trampa_cancelar_que        -> facturacion_cliente      (el corpus: comercial | facturacion)
+trampa_no_me_funciona      -> soporte_tecnico_cliente  (soporte_tecnico | facturacion)  [media]
+trampa_es_sobre_el_cobro   -> facturacion_cliente      (facturacion | queja)
+trampa_dos_areas_a_la_vez  -> facturacion_cliente      (facturacion | soporte_tecnico)
+trampa_suspender_un_mes    -> facturacion_cliente      (comercial | facturacion)        [media]
+trampa_mandame_el_recibo   -> facturacion_cliente      (facturacion | queja)
+```
+
+**La hipótesis, que es hipótesis y no medición:** pedirle la confianza en la
+misma llamada donde se le exige elegir un área empuja hacia la seguridad. Ya
+eligió al llamar la herramienta; calificarse bajo después se contradice. En la
+escalada no pasa porque «no sé si hace falta una persona» es una respuesta
+coherente consigo misma.
+
+**Qué se haría con eso, y por qué todavía no se hizo:** decirle que si fuera a
+calificar `baja`, no derive y pregunte — que es lo que ya hace bien la mitad de
+las veces. Es barato, pero **cambia conducta en conversaciones reales** (más
+preguntas, menos derivaciones) y varios casos dorados afirman `deriva_a`. Pide
+su propia medición antes y después, no un cambio al pasar.
+
+### Lo que esto deja dicho sobre el objetivo
+
+El mismo campo, el mismo vocabulario y la misma descripción se usan **en un
+lugar sí y en el otro casi no**. Eso es evidencia directa de lo que la
+documentación de TypeSafe dice y este proyecto ya tenía escrito con otras
+palabras: **la confianza no es permiso para actuar, y tampoco es una propiedad
+del modelo — es una propiedad de CÓMO se le pregunta.**
+
+
 ## Lo que NO se toca en el camino
 
 - **La conducta sin la bandera.** El campo se agrega, pero **nada cambia de
