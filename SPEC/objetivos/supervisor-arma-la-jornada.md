@@ -210,6 +210,58 @@ lo corre el usuario, de solo lectura):
 - **Fase 3 · Publicar**: el reparto por el mismo camino que el botón, con
   `auditor-de-frontera`: le llega al técnico.
 
+### Fases 2 y 3 · plan del `arquitecto-dexter` (21/10/2026)
+
+| Fase | Qué | Cambia la conducta de | Estimación |
+|---|---|---|---|
+| **2.0** | `plantilla_del_caso` y Despacho la usa (F2 ampliada de `labores-propias-por-empresa`, criterios 2.10–2.13) | la ficha humana de Despacho (con motivo) | ~1 día |
+| **2.1** | Extracciones sin cambio de conducta: `labor_del_caso` (de `demanda_de_despacho`), `orden_desde_el_caso` (de `CrearOrdenView`), una sola «orden viva del caso» (hoy hay 3 copias con 2 definiciones), `plantillas_que_se_ofrecen` a `campo/plantillas.py` | nada | ~1 día |
+| **2.2** | El reparto se corrige y `RepartoView.post` se extrae a `campo/reparto.py::publicar` (el botón la usa): inicio real (`iniciada_en`, bajo bloqueo), respeta `programada_para`, ordena por la prioridad, no reasigna a los mismos destinatarios, sube `revision` | **el botón humano**, cada punto dicho | ~1–1,5 días |
+| **2.3** | El Supervisor **crea** las órdenes: tarea `crear_las_ordenes_de_despacho` (nivel 3), fase después del armado, una lectura de ficha por caso con tope por vuelta, lock por propuesta, prioridad única (backend, también para la ficha humana), `hora_de_corte` (campo + migración + API + pantalla), corte de red = una orden por puerto con la atadura guardada. Sombra = tarea sin delegar | ninguna hasta delegar | ~2,5–3 días |
+| **3.1** | El Supervisor **publica**: tarea `publicar_el_reparto_del_dia` (nivel 3, justificado por escrito), `proponer` → `reparto.publicar(automatico=True)` solo con la empresa trabajando; mover solo si `ASIGNADA` e `iniciada_en` vacío, bajo bloqueo; sobrantes a mañana con aviso | ninguna hasta delegar | ~1,5–2 días |
+
+Total ≈ 7–8,5 días de construcción, más al menos un día hábil de sombra
+observada por fase. Sin persona, el actor es `profile=None` con
+`automatico=True` explícito (patrón de `revisar`), nunca un usuario «Supervisor».
+No se usa `asignar_a_jornada` (la deja como «a mano» para siempre) ni un
+`origen_sistema` nuevo.
+
+**Hallazgos que cambian el diseño** (VERIFICADOS en el código por el arquitecto):
+
+- **A.6 · «Empezada» no se mide.** El reparto decide «el técnico la empezó» por
+  el evento `trabajo_iniciado`, que **ningún código de producción escribe**;
+  `test_reparto.py:252,430` lo fabrican. Lo real es `iniciada_en` (se pone al
+  pasar a EN_CAMINO o EN_SITIO).
+- **A.7 · Una orden por caso no la garantiza nada**: tres copias de «orden
+  viva», dos definiciones, y la restricción única excluye `crm` y `manual`.
+- **B.3 · El reparto ignora la prioridad y la fecha**: ordena por
+  `orden.created_at` + duración, y no filtra por `programada_para`. Ya pasa con
+  el botón humano: una orden para mañana se reparte hoy.
+- **D.2 · Hueco offline**: el técnico puede marcar «en camino» sin red; si el
+  Supervisor la mueve antes de que sincronice, el teléfono recibe 404.
+- **D.5 · `MOTOR_TENANT`**: la ficha del cliente se pide al tenant del proceso,
+  y `Org` no tiene campo que la ate a un tenant. Con otra empresa delegando,
+  sus órdenes llevarían datos de clientes de Rapilink. Falta configuración.
+- **A.5 · No hay push al asignar**: el técnico ve la orden al sincronizar.
+
+**Decisiones tomadas por defecto** (revisables; las que cambian lo que ve el
+usuario se le preguntan):
+
+- Sin plazo en la plantilla, la prioridad ordena por antigüedad, después de las
+  vencidas. «Creación» = `Case.created_at` (la importación corre cada pocos
+  minutos). El asunto solo pesa a través de su plantilla.
+- **Una sola regla de prioridad** para todas las órdenes, también las humanas.
+- `hora_de_corte`: vacía = la fase no corre; hora:minuto; en el reloj de la
+  empresa, como la Fase 1.
+- Un caso que no se puede despachar bien (sin ficha, sin barrio, barrio sin
+  zona, sin plantilla) **no se crea**: queda para una persona con el motivo.
+- Un caso con una orden ya cerrada no recibe una segunda orden automática.
+- Corte de red: la atadura se guarda en la propuesta; cerrar en WispHub los
+  tickets atados queda para una persona en esta fase (efecto externo).
+- El botón Publicar humano sigue y usa la **misma** función.
+- D.5: la fase solo corre en la empresa atada al tenant del motor por un campo
+  de configuración nuevo; sin el campo, no corre (fail-closed).
+
 ## Restricciones
 
 - **NO push** sin decirlo: push a `fix/integracion-wisphub` es deploy a
