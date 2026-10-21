@@ -182,6 +182,7 @@
 .snoc-punto-error { background: var(--snoc-error); }
 .snoc-punto-primario { background: var(--snoc-primary); }
 .snoc-punto-secundario { background: var(--snoc-secondary); }
+.snoc-punto-tenue { background: var(--snoc-outline); }
 
 /* Botones */
 .snoc-btn {

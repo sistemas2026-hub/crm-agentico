@@ -2913,6 +2913,19 @@
             {#if alcance.motivo}
               <div class="snoc-tenue">• {alcance.motivo}</div>
             {/if}
+            <!-- LA OTRA MITAD DEL ESTADO, y faltaba (21/10/2026). El nivel
+                 dice CUANTO puede hacer; esto, QUE le pidieron que haga. Las
+                 dos hacen falta: una tarea delegada con el nivel en 1 no
+                 cierra nada, y el nivel en 3 sin tareas delegadas tampoco
+                 hace nada. El detalle va al final del modal para no empujar
+                 el freno de mano hacia abajo. -->
+            {#if alcance.delegaciones}
+              <div>
+                • Tareas delegadas:
+                <strong>{alcance.delegaciones.filter((/** @type {any} */ d) => d.delegada).length}</strong>
+                de {alcance.delegaciones.length}
+              </div>
+            {/if}
           </div>
 
           <!-- EL FRENO VA PRIMERO, y es a propósito: si alguien abre esta
@@ -2989,6 +3002,66 @@
                 {alcanceGuardando ? 'Guardando…' : 'Cambiar el nivel'}
               </button>
             </div>
+          </section>
+          <!-- QUÉ LE PIDIERON QUE HAGA  --  21/10/2026
+               Hasta hoy esto no se veía en ninguna pantalla: se delegaba
+               hablándole al Supervisor en el chat, y para saber si había
+               quedado encendido había que volver a preguntarle.
+               SOLO LECTURA a propósito: delegar sigue siendo una
+               conversación. Un segundo camino de escritura serían dos
+               lugares donde garantizar lo mismo. -->
+          <section class="snoc-columna" style="gap:var(--snoc-xs);">
+            <span class="snoc-label-sm" style="text-transform:uppercase;">Qué le pidieron que haga</span>
+            {#each alcance.delegaciones ?? [] as d (d.clave)}
+              <div class="snoc-caja-datos snoc-columna" style="gap:2px;">
+                <div class="snoc-fila" style="gap:var(--snoc-xs); align-items:baseline;">
+                  <!-- TRES ESTADOS Y NO DOS. "Delegada" y "delegada y
+                       funcionando" no son lo mismo: el 15/10 una tarea estuvo
+                       delegada, con el nivel en 3, y nada la corrió en cinco
+                       vueltas porque faltaba el ciclo horario. Un punto verde
+                       ahí habría mentido. -->
+                  <span
+                    class="snoc-punto {!d.delegada
+                      ? 'snoc-punto-tenue'
+                      : d.nivel_alcanza && d.la_despierta_algo?.si
+                        ? 'snoc-punto-secundario'
+                        : 'snoc-punto-error'}"
+                  ></span>
+                  <strong class="snoc-body-sm">{d.nombre}</strong>
+                </div>
+                {#if !d.delegada}
+                  <div class="snoc-body-sm snoc-tenue">
+                    No delegada. Para encenderla, pedísela al Supervisor en el chat.
+                  </div>
+                {:else}
+                  <div class="snoc-body-sm snoc-secundario">
+                    Delegada el {fecha(d.delegada_en)}
+                  </div>
+                  {#if d.con_estas_palabras}
+                    <!-- LA FRASE TAL CUAL, que es el único registro de qué
+                         creía estar pidiendo quien la delegó. Si la tarea hace
+                         algo distinto de lo que esa frase dice, el problema es
+                         del catálogo y conviene poder verlo. -->
+                    <div class="snoc-body-sm snoc-tenue">«{d.con_estas_palabras}»</div>
+                  {/if}
+                  {#if !d.nivel_alcanza}
+                    <div class="snoc-body-sm snoc-error-txt">
+                      No va a actuar: necesita nivel {d.exige_nivel} y el que aplica hoy es
+                      {alcance.efectivo}.
+                    </div>
+                  {/if}
+                  {#if d.la_despierta_algo && !d.la_despierta_algo.si}
+                    <div class="snoc-body-sm snoc-error-txt">{d.la_despierta_algo.por_que}</div>
+                  {/if}
+                {/if}
+                <div class="snoc-body-sm snoc-tenue">{d.que_hace}</div>
+              </div>
+            {/each}
+            {#if !(alcance.delegaciones ?? []).length}
+              <p class="snoc-body-sm snoc-tenue" style="margin:0;">
+                El backend no devolvió el catálogo de tareas.
+              </p>
+            {/if}
           </section>
         {/if}
 

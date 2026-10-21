@@ -2276,7 +2276,7 @@ class AutonomiaSupervisorView(APIView):
 
     def get(self, request):
         """El nivel vigente, el interruptor, los niveles posibles y el historial."""
-        from operaciones import autonomia
+        from operaciones import autonomia, tareas_delegadas as td
         from operaciones.models import PropuestaSupervisor as P
 
         estado = autonomia.nivel_efectivo(request.org)
@@ -2294,7 +2294,82 @@ class AutonomiaSupervisorView(APIView):
                         for n, e in P.NIVELES
                         if n <= P.NIVEL_MAXIMO_ETAPA],
             "historial": autonomia.historial(request.org, limite=20),
+            #  QUE ESTA DELEGADO, y no solo CUANTO puede hacer  --  21/10/2026
+            #
+            #  'tareas_delegadas.py' lo dice en su propio encabezado: hacen
+            #  falta las dos cosas y son distintas. "Delegar una tarea con el
+            #  nivel en 1 no cierra nada, y subir el nivel sin delegar la tarea
+            #  tampoco". El nivel se veia en esta pantalla desde el 08/10; la
+            #  delegacion no se veia en NINGUNA -- se escribia y se leia solo
+            #  hablandole al chat, y 'delegadas()' y 'algo_la_va_a_correr()' no
+            #  tenian ningun lector en la interfaz.
+            #
+            #  Es la misma falla que 'autonomia.cambiar' tuvo durante semanas y
+            #  que el docstring de arriba cuenta: un control que solo se
+            #  consulta por consola no sirve cuando hace falta. Y aca costaba
+            #  ademas una pregunta a mano cada vez -- "confirmame si la
+            #  delegacion quedo encendida" -- que nadie podia contestar mirando
+            #  la pantalla.
+            #
+            #  SOLO LECTURA, A PROPOSITO. Delegar sigue siendo una conversacion
+            #  ('chat_herramientas.py::delegar_tarea'): un segundo camino de
+            #  escritura serian dos lugares donde garantizar lo mismo. Lo que
+            #  faltaba no era otra puerta, era poder ver por donde se entro.
+            "delegaciones": self._delegaciones(request.org, estado, td),
         })
+
+    @staticmethod
+    def _delegaciones(org, estado, td):
+        """
+        El catalogo entero, cada tarea con sus DOS precondiciones resueltas.
+
+        Se devuelven todas y no solo las encendidas: media pantalla del valor
+        esta en ver lo que NO esta delegado -- es la lista de lo que el
+        Supervisor podria hacer y hoy no hace.
+
+        Las dos precondiciones se calculan aca y no en la pantalla, por la
+        regla del 29/09: "el backend decide, la pantalla representa". La
+        diferencia entre "esta delegada y va a correr" y "esta delegada y no la
+        despierta nadie" no puede vivir en dos lugares.
+        """
+        from operaciones.models import PropuestaSupervisor as P
+
+        vigentes = {f["clave"]: f for f in td.delegadas(org)}
+        salida = []
+        for ficha in td.catalogo_legible():
+            clave = ficha["clave"]
+            fila = vigentes.get(clave)
+            exige = ficha.get("exige_nivel") or 0
+            salida.append({
+                "clave": clave,
+                "nombre": ficha.get("nombre") or clave,
+                "que_hace": ficha.get("que_hace") or "",
+                "que_no_hace": ficha.get("que_no_hace") or "",
+                "exige_nivel": exige,
+                "delegada": fila is not None,
+                "delegada_en": (fila or {}).get("delegada_en"),
+                "con_estas_palabras": (fila or {}).get("con_estas_palabras") or "",
+                #  EL NIVEL EFECTIVO, no el configurado: con el interruptor
+                #  abajo el efectivo cae, y una pantalla que mirara el
+                #  configurado diria que la tarea alcanza el nivel justo
+                #  cuando el freno de mano esta puesto.
+                #
+                #  Y el nivel 4 NUNCA alcanza por configuracion -- es "siempre
+                #  la aprueba una persona"--, igual que en 'autonomia.puede'.
+                #  Se repite la regla en vez de llamar a esa funcion porque
+                #  'puede' recalcula 'nivel_efectivo', y eso es UNA CONSULTA AL
+                #  MOTOR POR TAREA: el interruptor se lee sin cache y por HTTP.
+                #  Una pantalla no puede pagar seis llamadas para pintar una
+                #  lista. Si algun dia la regla cambia, cambia en dos lugares
+                #  y esta prueba lo dice: 'test_un_nivel_4_no_alcanza_nunca'.
+                "nivel_alcanza": (exige < P.NIVEL_CRITICO
+                                  and int(estado["efectivo"]) >= exige),
+                #  La precondicion que estaba en silencio hasta el 15/10: que
+                #  algo la despierte. Sin 'CICLO_AUTOMATICO' una tarea
+                #  delegada corre solo cuando una persona aprieta el boton.
+                "la_despierta_algo": td.algo_la_va_a_correr(org, clave),
+            })
+        return salida
 
     def put(self, request):
         """Cambia el nivel. Exige motivo y criterios, como el servicio."""
