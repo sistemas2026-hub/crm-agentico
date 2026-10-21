@@ -287,8 +287,55 @@ def _esquema_openai(herramienta):
         propiedades = {
             "area": {"type": "string", "enum": herramienta.areas_destino,
                      "description": "A que area pasar el resto de la conversacion."},
+            #  CUANTA CONFIANZA TIENE EN ESA ELECCION  --  20/10/2026
+            #
+            #  POR QUE EXISTE, Y POR QUE ACA Y NO EN LA ESCALADA. El 20/10 se
+            #  le dio a la decision de ESCALAR un campo de confianza, y al
+            #  medirla contra el corpus de trampas aparecio que ese corpus
+            #  etiqueta otra cosa: sus doce casos ambiguos listan AREAS en
+            #  'veredicto.entre' --[facturacion, soporte_tecnico], [comercial,
+            #  facturacion]...--. La duda no era "¿hace falta una persona?"
+            #  sino "¿a que cola va esto?", y eso se decide ACA.
+            #
+            #  Ejemplos del corpus que el router no puede expresar hoy:
+            #     "quiero cancelar"          baja el servicio, una solicitud, o un cobro
+            #     "mandame el recibo"        falta el documento, o falta que le acrediten
+            #     "buenas"                   todavia no dijo nada
+            #
+            #  Ante los tres el router elige un area y sigue, con total
+            #  seguridad. Para un agente que rutea solo de madrugada, mandar
+            #  un caso a la cola equivocada SIN DUDAR es el error
+            #  confiado-y-equivocado que mas cuesta: nadie lo revisa despues,
+            #  porque nada dijo que hubiera algo que revisar.
+            #
+            #  EL VOCABULARIO NO ES NUEVO: el mismo 'alta'/'media'/'baja' que
+            #  ya usan 'confianza_del_grupo' (operaciones/paso_a_despacho.py)
+            #  y la decision de escalar (seguimiento/escalamiento.py). Tres
+            #  escalas distintas para la misma idea serian tres cosas que
+            #  comparar a mano.
+            #
+            #  NO DECIDE NADA TODAVIA, a proposito: se declara y queda en la
+            #  traza. Que alguien la lea para cambiar una conducta --no
+            #  derivar, preguntar primero, avisar al supervisor-- es otro
+            #  paso, y va en sombra. Mismo patron que el paso a Despacho.
+            "confianza": {
+                "type": "string",
+                "enum": ["alta", "media", "baja"],
+                "description": (
+                    "Cuanta confianza tenes en el AREA que elegiste, no en el "
+                    "resto de tu respuesta. 'baja' es una respuesta valida y "
+                    "util: decila cuando el mensaje encaja en dos areas, "
+                    "cuando todavia no dijo que necesita, o cuando elegiste "
+                    "una por descarte. Preferir 'alta' cuando dudas no te hace "
+                    "quedar mejor: hace que nadie revise una derivacion "
+                    "equivocada."
+                ),
+            },
         }
-        requeridos = ["area"]
+        #  OBLIGATORIA, por lo mismo que en la escalada: un campo que el
+        #  modelo puede omitir es un campo que omite, y entonces la ausencia
+        #  se lee como "no tuvo dudas".
+        requeridos = ["area", "confianza"]
         if herramienta.servicios_reportables:
             # 'no_lo_dijo' es la razon de ser de este argumento, no un relleno:
             # es lo que frena las acciones que interrumpen el servicio (ver
