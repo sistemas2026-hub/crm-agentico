@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
@@ -113,6 +115,41 @@ describe('la ruta de alcance', () => {
     //  Comparación de conjuntos y no campo por campo: un endpoint que mañana
     //  agregue un dato y una ruta que enumere campos se separan en silencio.
     expect(Object.keys(cuerpo).sort()).toEqual(Object.keys(RESPUESTA).sort());
+  });
+
+  /**
+   * LA PLANTILLA NO LEE NINGUNA CLAVE QUE EL BACKEND NO MANDE.
+   *
+   * Lo que NO se pudo medir: nadie abrió esta pantalla en un navegador. El
+   * laboratorio monta otro worktree, y una pila completa con sesión y org para
+   * ver un panel de lectura es más de lo que el riesgo pide.
+   *
+   * Lo que sí se puede medir sin navegador es el único defecto que ese salto
+   * produce de verdad: que el `.svelte` lea `d.nivel_alcanzado` mientras el
+   * backend manda `nivel_alcanza`. Eso no da error —da `undefined`, que en un
+   * `{#if}` se lee como "no"— y la pantalla diría algo falso con total aplomo.
+   * Es exactamente la cicatriz del 29/09: la línea de tiempo leía
+   * `estado_nuevo` mientras el backend escribe `nuevo_estado`.
+   *
+   * Se lee el archivo y se comparan los nombres. Es estático y no ve qué
+   * dibuja, pero sí ve el renombre que se pierde.
+   */
+  it('la plantilla del panel no lee ninguna clave inventada', () => {
+    const panel = readFileSync(
+      new URL('../../../(app)/supervisor-noc/+page.svelte', import.meta.url),
+      'utf8'
+    );
+
+    const bloque = panel.split('{#each alcance.delegaciones')[1]?.split('{/each}')[0];
+    expect(bloque, 'no se encontró el bloque de delegaciones en el panel').toBeTruthy();
+
+    const usadas = [...new Set([...bloque.matchAll(/\bd\.(\w+)/g)].map((m) => m[1]))];
+    //  Y que de verdad lea algo: un bloque que no usara ninguna clave pasaría
+    //  esta prueba sin decir nada.
+    expect(usadas.length).toBeGreaterThan(4);
+    expect(usadas.sort()).toEqual(
+      usadas.filter((k) => k in RESPUESTA.delegaciones[0]).sort()
+    );
   });
 
   it('a quien no es de gestión no le dice nada', async () => {
