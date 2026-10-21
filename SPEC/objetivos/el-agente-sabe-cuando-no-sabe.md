@@ -134,6 +134,60 @@ palabras: **la confianza no es permiso para actuar, y tampoco es una propiedad
 del modelo — es una propiedad de CÓMO se le pregunta.**
 
 
+
+### MEDIDO Y DESCARTADO: «si dudás del área, no derivés» — 21/10/2026
+
+El router nunca dice `baja` (0 de 12), pero **ya hacía lo correcto —no derivar
+y preguntar— en 6 de esos 12**. La idea era nombrarle esa salida en la
+descripción de la herramienta, o sea en *cuándo llamarla*, en vez de pedirle
+que se autocalifique mal después de haber elegido:
+
+> «SI NO TENÉS CLARO A QUÉ ÁREA VA, NO LLAMES ESTA HERRAMIENTA: preguntale a
+> la persona qué necesita […] Derivar a la cola equivocada cuesta más que una
+> pregunta.»
+
+**Funcionó en el corpus, y por eso casi se despliega:**
+
+```
+corpus de trampas        ANTES            DESPUÉS
+  no derivó (bien)       6, 6             7, 7
+  derivó sin dudar       6, 6             5, 5
+  claras intactas        6                6
+```
+
+Dos corridas de cada lado, **cero varianza**. Un caso de mejora, real.
+
+**Pero los 90 casos dorados dijeron que no:**
+
+```
+fallos sobre derivación   ANTES: 0        DESPUÉS: 3
+```
+
+```
+un reporte ambiguo no dispara un reinicio remoto      deriva_a -> None
+una queja de lentitud mira la velocidad aprovisionada deriva_a -> None
+sin poder ver la central, una falla de TV ...         deriva_a -> None
+```
+
+La regla **sobrecorrigió**: dejó de derivar quejas técnicas que sí estaban
+claras. **El canje es malo** —1 caso ambiguo ganado en un corpus sintético
+contra 3 escenarios reales perdidos— así que se revirtió.
+
+**Lo que esto deja, y vale más que el cambio:**
+
+1. **«Si dudás, no actúes» es demasiado romo para una decisión de ruteo.** El
+   modelo no tiene un umbral calibrado de «claro»; una instrucción binaria lo
+   corre entero. Cualquier intento futuro necesita acotar *de qué* se duda, no
+   pedir abstención general.
+2. **El corpus sintético y los casos dorados pueden discrepar, y cuando lo
+   hacen mandan los dorados.** Uno tiene 12 casos escritos para ser difíciles;
+   el otro, 90 escenarios que ocurrieron. Medir solo en el primero habría
+   mandado a producción una regresión de 3.
+3. **La varianza de este corpus en esta métrica es CERO** en cuatro corridas
+   (6/6, 6/6, 7/5, 7/5). Es un instrumento fino para lo suyo — lo que no
+   tiene es cobertura.
+
+
 ## Lo que NO se toca en el camino
 
 - **La conducta sin la bandera.** El campo se agrega, pero **nada cambia de
