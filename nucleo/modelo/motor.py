@@ -2703,17 +2703,57 @@ def _despacho_de_herramienta(herramienta, argumentos: dict,
         f"Tipo de herramienta '{herramienta.tipo}' aun no tiene ejecutor en nucleo/.")
 
 
-def _enmascarar(argumentos: dict) -> dict:
+def _valores_cerrados(herramienta) -> set:
+    """Las claves cuyo valor sale de un enum declarado por el tenant.
+
+    Un enum es un conjunto CERRADO que escribio la empresa en su catalogo:
+    nombres de area, niveles de confianza, tipos de servicio. No puede
+    contener una cedula ni un id de cliente, porque no sale de la
+    conversacion -- sale del archivo de configuracion.
+    """
+    if herramienta is None:
+        return set()
+    try:
+        props = (_esquema_openai(herramienta)["function"]["parameters"]
+                 ["properties"])
+    except Exception:                                            # noqa: BLE001
+        #  FAIL-CLOSED: si no se puede leer el esquema, no se exime a nadie y
+        #  se enmascara todo, como antes. Un error aca nunca puede terminar en
+        #  un dato de cliente guardado entero.
+        return set()
+    return {c for c, d in (props or {}).items() if isinstance(d, dict) and d.get("enum")}
+
+
+def _enmascarar(argumentos: dict, herramienta=None) -> dict:
     """
     Para asistente.tool_calls.parametros -- deja ver QUE se consulto (nombre
     de la clave) sin guardar el dato completo (cedula, id_servicio...). Los
     ultimos 4 caracteres alcanzan para que un supervisor reconozca "es el
     mismo cliente de siempre" sin que la auditoria termine siendo una copia
     de los datos del cliente.
+
+    LO QUE SALE DE UN ENUM NO SE ENMASCARA  --  20/10/2026
+    ------------------------------------------------------
+    Enmascarar un valor de enum no protege nada y cuesta la unica cosa que la
+    traza existe para contar: QUE decidio el modelo. Se encontro midiendo la
+    confianza del router, donde 'media' llegaba a la auditoria como '...edia'
+    y 'alta' pasaba entera por tener cuatro letras -- o sea que la mascara ni
+    siquiera era consistente, dependia del largo de la palabra.
+
+    Un enum es un conjunto cerrado que la empresa escribio en su catalogo
+    (areas, niveles de confianza, tipos de servicio). No sale de la
+    conversacion, asi que no puede traer una cedula.
+
+    Sin 'herramienta' se enmascara todo, como siempre: ningun llamador queda
+    peor que antes por no pasarla.
     """
+    exentas = _valores_cerrados(herramienta)
     out = {}
     for clave, valor in (argumentos or {}).items():
         texto = str(valor)
+        if clave in exentas:
+            out[clave] = texto
+            continue
         out[clave] = f"...{texto[-4:]}" if len(texto) > 4 else texto
     return out
 
@@ -4147,7 +4187,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 }
             registro.append({
                 "herramienta": llamada.nombre,
-                "parametros": _enmascarar(llamada.argumentos),
+                "parametros": _enmascarar(llamada.argumentos, herramienta),
                 "resumen": resumen_pedido,
                 "verificacion_pendiente": pendiente,
                 # La propuesta que dejo esta llamada, si quedo en la cola:
