@@ -788,3 +788,34 @@ def test_vp4_la_fecha_mal_escrita_es_400(admin_client, empresa):
 
 def test_vp5_solo_gestion(user_client, empresa):
     assert user_client.get(VISTA_PREVIA).status_code == 403
+
+
+def test_vp6_nombra_los_barrios_sin_zona(admin_client, empresa, cuadrilla,
+                                         admin_profile):
+    """La vista previa del 21/10 mostro 21 casos con barrio sin zona: sin el
+    nombre no se sabe que cargar en Zonas operativas."""
+    from campo.zonas import normalizar_localidad
+    _en_despacho(empresa, pad.FALLA_DE_SERVICIO, barrio="Villa Nueva")
+    _en_despacho(empresa, pad.FALLA_DE_SERVICIO, barrio="Villa Nueva")
+    _en_despacho(empresa, pad.FALLA_DE_SERVICIO, barrio=BARRIO)
+    #  Uno ya despachado no cuenta, como en la demanda: ya tiene a alguien.
+    hecho = _en_despacho(empresa, pad.FALLA_DE_SERVICIO, barrio="Villa Nueva")
+    _orden_del_caso(empresa, hecho, a_quien=admin_profile)
+    d = admin_client.get(VISTA_PREVIA, {"fecha": MARTES.isoformat()}).json()
+    assert d["barrios_sin_zona"] == [
+        {"barrio": normalizar_localidad("Villa Nueva"), "casos": 2}]
+
+
+def test_vp7_una_ya_armada_muestra_su_gente_y_dice_que_no_cambia(
+        admin_client, empresa, cuadrilla, soledad):
+    j = JornadaDeCuadrilla.objects.create(
+        org=empresa, cuadrilla=cuadrilla, fecha=MARTES, labor="correctivo",
+        armada_por=JornadaDeCuadrilla.AUTOMATICA)
+    j.zonas.set([soledad])
+    IntegranteDeJornada.objects.create(
+        org=empresa, jornada=j, rol="tecnico",
+        persona=PersonaDeCampo.objects.create(org=empresa, nombre="JUAN"))
+    _en_despacho(empresa, pad.FALLA_DE_SERVICIO, barrio=BARRIO)
+    [c] = admin_client.get(VISTA_PREVIA, {"fecha": MARTES.isoformat()}).json()["cuadrillas"]
+    assert c["que_haria"] == "Ya está armada con la labor que corresponde"
+    assert [g["nombre"] for g in c["gente"]] == ["JUAN"]

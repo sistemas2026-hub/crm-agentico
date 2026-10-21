@@ -103,13 +103,17 @@
    * que armaría el Supervisor, sin esperar al día siguiente. Lee y no escribe.
    */
   let previa = $state(/** @type {any} */ (null));
+  //  El dia ELEGIDO en la caja, no el cargado: el 21/10 se pidio el 22 y la
+  //  vista previa calculo el 21 porque nadie habia tocado «Ver ese dia».
+  /* svelte-ignore state_referenced_locally */
+  let diaElegido = $state(data.dia ?? '');
   let cargandoPrevia = $state(false);
   let errorPrevia = $state('');
   async function verPrevia() {
     cargandoPrevia = true;
     errorPrevia = '';
     try {
-      const r = await fetch(`/supervisor-noc/cuadrillas/vista-previa?fecha=${encodeURIComponent(data.dia ?? '')}`);
+      const r = await fetch(`/supervisor-noc/cuadrillas/vista-previa?fecha=${encodeURIComponent(diaElegido)}`);
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'No se pudo calcular.');
       previa = d;
@@ -423,7 +427,7 @@
         </div>
         <!-- La fecha va en la URL: así un día se puede compartir por enlace. -->
         <form method="GET" class="snoc-fila" style="gap:var(--snoc-xs);">
-          <input class="snoc-campo" type="date" name="dia" value={data.dia} />
+          <input class="snoc-campo" type="date" name="dia" bind:value={diaElegido} />
           <button class="snoc-btn" type="submit">Ver ese día</button>
           <button class="snoc-btn" type="button" onclick={verPrevia} disabled={cargandoPrevia}>
             {cargandoPrevia ? 'Calculando…' : 'Ver qué armaría el Supervisor'}
@@ -471,6 +475,13 @@
               · sin labor: {previa.demanda.sin_labor ?? 0}
               · ya despachados: {previa.demanda.ya_despachados ?? 0}.
             </span>
+            {#if (previa.barrios_sin_zona ?? []).length}
+              <p class="snoc-aviso">
+                Barrios sin zona: sus casos no le llegan a ninguna cuadrilla. Cargalos en
+                Zonas operativas → Elegir barrios:
+                {previa.barrios_sin_zona.map((b) => `${b.barrio} (${b.casos})`).join(', ')}.
+              </p>
+            {/if}
             {#each previa.por_zona as z (z.zona)}
               <span class="snoc-body-sm">
                 {z.zona}: {z.labores.map((l) => `${l.casos} de ${l.labor}`).join(', ')}

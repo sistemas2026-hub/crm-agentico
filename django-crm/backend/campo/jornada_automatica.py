@@ -335,6 +335,24 @@ def _elegir_labores(planes, demanda) -> None:
             for z in p.zonas:
                 cubierto.add((str(z.id), p.labor))
 
+    #  PRIMERO SE QUEDA LA QUE YA TIENE UNA LABOR QUE HACE FALTA  --  21/10/2026.
+    #  La vista previa lo mostro en Soledad (27 de correctivo, 1 de trabajos,
+    #  la #5 con ordenes de correctivo): la #2 (correctivo) veia «sin cubrir»
+    #  solo el de trabajos y se pasaba, y la #3 (trabajos) tomaba correctivo.
+    #  Mismo resultado, dos cuadrillas movidas. Una jornada ya armada cuya
+    #  labor todavia tiene casos sin cubrir en sus zonas se queda con ella;
+    #  recien despues se reparte lo demas.
+    for p in planes:
+        if p.accion != REAJUSTAR or not p.labor_antes:
+            continue
+        zonas = [str(z.id) for z in p.zonas]
+        if any((demanda.get(z) or {}).get(p.labor_antes, 0) > 0
+               and (z, p.labor_antes) not in cubierto for z in zonas):
+            p.labor = p.labor_antes
+            p.accion, p.motivo = DEJAR, MISMA_LABOR
+            for z in zonas:
+                cubierto.add((z, p.labor))
+
     movibles = [p for p in planes if p.accion in (ARMAR, REAJUSTAR)]
     for i, p in enumerate(movibles):
         zonas = [str(z.id) for z in p.zonas]

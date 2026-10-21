@@ -671,3 +671,25 @@ def test_f3_la_habitual_solo_si_lo_que_deja_lo_toma_otra(
 
     assert _de(planes, "Cuadrilla #1").labor == INS
     assert _de(planes, "Cuadrilla #2").labor == COR
+
+
+def test_w_no_intercambia_las_labores_de_las_ya_armadas(org_a, soledad):
+    """21/10/2026, lo mostro la vista previa en Soledad: 27 casos de
+    correctivo, 1 de trabajos, una cuadrilla de correctivo que no se toca. La
+    #2 (correctivo) veia «sin cubrir» solo el de trabajos y se pasaba, y la #3
+    (trabajos) tomaba correctivo: mismo resultado, dos cuadrillas movidas."""
+    a = _cuadrilla(org_a, "Cuadrilla #1", _cuenta(org_a, "a@x.co"), [soledad], COR)
+    b = _cuadrilla(org_a, "Cuadrilla #2", _cuenta(org_a, "b@x.co"), [soledad], COR)
+    c = _cuadrilla(org_a, "Cuadrilla #3", _cuenta(org_a, "c@x.co"), [soledad], TRA)
+    _jornada(org_a, a, MARTES, zonas=[soledad], labor=COR)
+    _jornada(org_a, b, MARTES, zonas=[soledad], labor=COR,
+             armada_por=JornadaDeCuadrilla.AUTOMATICA)
+    _jornada(org_a, c, MARTES, zonas=[soledad], labor=TRA,
+             armada_por=JornadaDeCuadrilla.AUTOMATICA)
+
+    planes = ja.planear_el_dia(org_a, MARTES,
+                               demanda={str(soledad.id): {COR: 27, TRA: 1}})
+
+    for nombre, labor in (("Cuadrilla #2", COR), ("Cuadrilla #3", TRA)):
+        p = _de(planes, nombre)
+        assert (p.labor, p.accion) == (labor, ja.DEJAR), nombre

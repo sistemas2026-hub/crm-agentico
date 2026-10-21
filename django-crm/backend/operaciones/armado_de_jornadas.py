@@ -629,12 +629,37 @@ _QUE_HARIA = {
     ("reajustar", "otra_labor"): "Ya está armada: le cambia la labor",
     ("dejar", "armada_por_una_persona"): "La armó una persona: no se toca",
     ("dejar", "ya_tiene_ordenes"): "Ya tiene órdenes: no se toca",
-    ("dejar", "otra_labor"): "Ya está armada con la labor que corresponde",
+    ("dejar", "misma_labor"): "Ya está armada con la labor que corresponde",
     ("no_se_arma", "sin_zona"): "No se arma: no tiene zonas habituales",
     ("no_se_arma", "lider_ausente"): "No se arma: el líder está ausente",
     ("no_se_arma", "sin_base"): "No se arma: no tiene líder ni una jornada anterior",
     ("no_se_arma", "sin_gente"): "No se arma: no le queda gente",
 }
+
+
+def _barrios_sin_zona(org, propuestas: dict) -> list[dict]:
+    """Los barrios de la cola que ninguna zona activa tiene: esos casos no le
+    llegan a ninguna cuadrilla. Se NOMBRAN para que una persona los cargue en
+    Zonas operativas -- la vista previa del 21/10 mostro 21 casos asi, y un
+    numero sin nombres no dice a donde ir. Mismo criterio que
+    `demanda_de_despacho`: lo ya despachado no cuenta."""
+    from collections import Counter
+
+    from campo.zonas import AliasDeZona, normalizar_localidad
+
+    mapeados = set(AliasDeZona.objects.filter(org=org, zona__activa=True)
+                   .values_list("localidad", flat=True))
+    despachados = _ya_despachados(org, list(propuestas))
+    cuenta = Counter()
+    for caso, p in propuestas.items():
+        if caso in despachados:
+            continue
+        barrio = normalizar_localidad(
+            (localidad_guardada(p) or {}).get("localidad") or "")
+        if barrio and barrio not in mapeados:
+            cuenta[barrio] += 1
+    return [{"barrio": b, "casos": n}
+            for b, n in sorted(cuenta.items(), key=lambda x: (-x[1], x[0]))]
 
 
 def vista_previa(org, fecha) -> dict:
@@ -664,8 +689,10 @@ def vista_previa(org, fecha) -> dict:
     salida["apertura"] = jornada.apertura.strftime("%H:%M") if jornada.apertura else ""
     salida["cierre"] = jornada.cierre.strftime("%H:%M") if jornada.cierre else ""
 
-    demanda = demanda_de_despacho(org, propuestas_en_despacho(org))
+    propuestas = propuestas_en_despacho(org)
+    demanda = demanda_de_despacho(org, propuestas)
     salida["demanda"] = {k: v for k, v in demanda.items() if k != "por_zona"}
+    salida["barrios_sin_zona"] = _barrios_sin_zona(org, propuestas)
     #  Por texto: la demanda guarda el id de la zona como cadena.
     zonas = {str(i): n for i, n in ZonaOperativa.objects.filter(org=org)
              .values_list("id", "nombre")}
@@ -678,7 +705,15 @@ def vista_previa(org, fecha) -> dict:
         key=lambda x: x["zona"])
 
     for p in ja.planear_el_dia(org, fecha, demanda=demanda["por_zona"]):
-        lider = getattr(p.lider, "user", None)
+        #  LA GENTE: la de la jornada si ya esta armada (el plan no la trae
+        #  porque no la va a cambiar), la que se copiaria si no.
+        if p.jornada is not None:
+            lider = getattr(p.jornada.lider, "user", None)
+            gente = [(i.persona, i.rol) for i in
+                     p.jornada.integrantes.select_related("persona")]
+        else:
+            lider = getattr(p.lider, "user", None)
+            gente = p.integrantes
         salida["cuadrillas"].append({
             "cuadrilla": p.cuadrilla.nombre,
             "accion": p.accion,
@@ -691,6 +726,6 @@ def vista_previa(org, fecha) -> dict:
             "lider": ((getattr(lider, "name", "") or getattr(lider, "email", ""))
                       if lider else ""),
             "gente": [{"nombre": persona.nombre, "rol": rol}
-                      for persona, rol in p.integrantes],
+                      for persona, rol in gente],
         })
     return salida
