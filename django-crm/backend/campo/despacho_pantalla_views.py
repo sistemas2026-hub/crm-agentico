@@ -40,7 +40,11 @@ from django.db.models import Count, Q
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from campo.models import OrdenTrabajo, WorkType, WorkTypeVersion
+from campo.models import OrdenTrabajo, WorkType
+#  `plantillas_que_se_ofrecen` vive en `campo/plantillas.py` desde el
+#  21/10/2026 (la usa tambien el Supervisor, que no importa vistas); el
+#  nombre sigue importable desde aca.
+from campo.plantillas import plantillas_que_se_ofrecen
 from campo.cuadrillas import labores_de
 from campo.permissions import IsCampoAuthenticated
 
@@ -88,29 +92,6 @@ class PlantillasDeTrabajoView(APIView):
         })
 
 
-def plantillas_que_se_ofrecen(org) -> list:
-    """Las plantillas que Despacho ofrece: publicadas, de tipos activos, y UNA
-    por tipo -- la version publicada mas alta.
-
-    Ofrecer todas las versiones publicadas de un mismo tipo obligaria a quien
-    despacha a elegir entre dos cosas que para el son la misma, y la vieja solo
-    sirve para auditar lo ya despachado. La usan la lista y la ficha: la
-    plantilla que la ficha propone tiene que ser una que la lista ofrece.
-    """
-    qs = (
-        WorkTypeVersion.objects
-        .filter(work_type__org=org, work_type__activo=True,
-                estado=WorkTypeVersion.PUBLICADA)
-        .select_related("work_type")
-        .order_by("work_type__codigo", "-version")
-    )
-    vistas, salida = set(), []
-    for v in qs:
-        if v.work_type_id in vistas:
-            continue
-        vistas.add(v.work_type_id)
-        salida.append(v)
-    return salida
 
 
 def _orden_activa_de(org, case_id: str):
@@ -442,24 +423,30 @@ class FichaDespachableView(CasosDespachablesView):
         #  «Despachar», plantilla, fecha y prioridad elegidas segun lo que vio
         #  el Supervisor. Son PROPUESTAS: quien despacha las ve y las cambia.
         #
-        #    plantilla_sugerida   la que declara el asunto del ticket en
-        #                         Plantillas. La labor sola no alcanza: una
-        #                         labor tiene varias plantillas.
+        #    plantilla_sugerida   la de `plantilla_del_caso` (21/10/2026): la
+        #                         UNA regla que usa tambien el Supervisor. Con
+        #                         `plantilla_por` (asunto o labor) y, si no hay
+        #                         ninguna, el motivo en `plantilla_motivo`.
         #    creado               cuando se creo el ticket; la pantalla le
         #                         suma el plazo de la plantilla elegida.
         #    prioridad_supervisor el numero de la propuesta (menor = mas
         #                         urgente); la pantalla lo lee con el mismo
         #                         corte que la bandeja de Pendientes.
         from campo import plantillas as P
-        elegida = P.plantilla_para_asunto(plantillas_que_se_ofrecen(org),
-                                          caso.name)
+        s = sugerencia or {}
+        elegida = P.plantilla_del_caso(
+            org, labor=str(s.get("labor") or ""), asunto=caso.name,
+            labor_medida=bool(s.get("verificada")))
         return Response({
             "id": str(caso.id),
             "localidad": self._localidad_de(caso),
             "sugerencia": sugerencia,
             "lectura": _lectura_de(propuesta),
             "descripcion": _descripcion_tapada(caso),
-            "plantilla_sugerida": str(elegida.id) if elegida else None,
+            "plantilla_sugerida": (str(elegida["version"].id)
+                                   if elegida["version"] else None),
+            "plantilla_por": elegida["por"],
+            "plantilla_motivo": elegida["detalle"],
             "creado": caso.created_at.isoformat() if caso.created_at else None,
             "prioridad_supervisor": propuesta.prioridad,
         })

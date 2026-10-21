@@ -106,6 +106,8 @@
    * propuso nada y el campo se llena a mano.
    */
   let propuesto = $state({ plantilla: '', fecha: '', prioridad: '' });
+  /** Por qué no viene ninguna plantilla elegida (21/10/2026): lo dice el backend. */
+  let sinPlantillaPorque = $state('');
   /** Si la persona eligió la fecha a mano, cambiar la plantilla no la pisa. */
   let fechaTocada = $state(false);
 
@@ -220,6 +222,7 @@
     fechaTocada = false;
     prioridadElegida = 'media';
     propuesto = { plantilla: '', fecha: '', prioridad: '' };
+    sinPlantillaPorque = '';
     preelegir(caso?.sugerencia?.labor);
     cargandoFicha = true;
     try {
@@ -235,16 +238,22 @@
         descripcion: ficha.descripcion ?? '',
         creado: ficha.creado ?? despachando.creado ?? null
       };
-      //  LA PLANTILLA, POR EL ASUNTO DEL TICKET (19/10/2026). La declara cada
-      //  plantilla en «Plantillas»; el backend busca cuál atiende este asunto.
-      //  Gana sobre la labor, que no distingue entre plantillas de la misma.
-      const porAsunto = ficha.plantilla_sugerida;
-      if (porAsunto && (data.plantillas ?? []).some((p) => p.id === porAsunto)) {
-        plantillaElegida = porAsunto;
-        propuesto.plantilla = `por el asunto «${despachando.nombre}»`;
-      } else if (!plantillaElegida) {
-        preelegir(despachando.sugerencia?.labor);
+      //  LA PLANTILLA LA DECIDE EL BACKEND (21/10/2026), con UNA regla
+      //  (`plantilla_del_caso`): la misma que usa el Supervisor cuando crea la
+      //  orden solo. Lo de arriba (`preelegir` al abrir) es solo para no
+      //  esperar la ficha; si la regla dice otra cosa, gana la regla.
+      const sugerida = ficha.plantilla_sugerida;
+      if (sugerida && (data.plantillas ?? []).some((p) => p.id === sugerida)) {
+        plantillaElegida = sugerida;
+        propuesto.plantilla = ficha.plantilla_por === 'asunto'
+          ? `por el asunto «${despachando.nombre}»`
+          : 'por la labor: es la única plantilla de esa labor';
+      } else if (propuesto.plantilla) {
+        //  La que se eligió al abrir no es la de la regla: se suelta.
+        plantillaElegida = '';
+        propuesto.plantilla = '';
       }
+      sinPlantillaPorque = sugerida ? '' : (ficha.plantilla_motivo ?? '');
       //  LA PRIORIDAD, la del Supervisor leída con el corte de Pendientes.
       const prioridad = prioridadSugerida(ficha.prioridad_supervisor);
       if (prioridad) {
@@ -678,6 +687,8 @@
                  el formulario que llena el técnico Y qué cuadrilla la recibe. -->
             {#if propuesto.plantilla}
               <span class="snoc-body-sm snoc-primario">Propuesta {propuesto.plantilla}.</span>
+            {:else if sinPlantillaPorque && !plantillaElegida}
+              <span class="snoc-body-sm snoc-secundario">Sin plantilla propuesta: {sinPlantillaPorque}</span>
             {/if}
             <span class="snoc-body-sm snoc-secundario">
               Define qué anota y qué fotos saca el técnico, y por su labor, qué cuadrilla

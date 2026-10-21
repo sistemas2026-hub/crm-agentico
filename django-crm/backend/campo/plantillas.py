@@ -786,7 +786,7 @@ def _plazo(valor) -> int | None:
 
 def plantilla_para_asunto(versiones, asunto):
     """De las plantillas que Despacho ofrece, la que atiende este asunto.
-    None si ninguna lo declara."""
+    None si ninguna lo declara. Se usa SOLO desde `plantilla_del_caso`."""
     clave = normalizar_asunto(asunto)
     if not clave:
         return None
@@ -794,6 +794,100 @@ def plantilla_para_asunto(versiones, asunto):
         if clave in {normalizar_asunto(x) for x in (v.work_type.asuntos or [])}:
             return v
     return None
+
+
+def plantillas_que_se_ofrecen(org) -> list:
+    """Las plantillas que Despacho ofrece: publicadas, de tipos activos, y UNA
+    por tipo -- la version publicada mas alta.
+
+    Ofrecer todas las versiones publicadas de un mismo tipo obligaria a quien
+    despacha a elegir entre dos cosas que para el son la misma, y la vieja solo
+    sirve para auditar lo ya despachado. Vive aca y no en la vista desde el
+    21/10/2026: la usa tambien el Supervisor, que no importa vistas.
+    """
+    qs = (
+        WorkTypeVersion.objects
+        .filter(work_type__org=org, work_type__activo=True,
+                estado=WorkTypeVersion.PUBLICADA)
+        .select_related("work_type")
+        .order_by("work_type__codigo", "-version")
+    )
+    vistas, salida = set(), []
+    for v in qs:
+        if v.work_type_id in vistas:
+            continue
+        vistas.add(v.work_type_id)
+        salida.append(v)
+    return salida
+
+
+# =============================================================================
+#  LA PLANTILLA DE UN CASO  --  21/10/2026
+# =============================================================================
+#  UNA sola regla, en codigo, para Despacho y para el Supervisor cuando cree la
+#  orden solo (ficha labores-propias-por-empresa, D9-D10; ficha
+#  supervisor-arma-la-jornada, Fase 2). Hasta hoy Despacho decidia en dos
+#  lugares: el backend por el asunto y la pantalla por la labor. Dos reglas que
+#  pueden contestar distinto no son una regla.
+#
+#  EL ORDEN ES EL DE D3 (medido > asunto > grupo):
+#
+#    1  el asunto del ticket lo atiende una plantilla  -> esa, salvo que la
+#       labor del caso este MEDIDA (cliente nuevo, corte de red) y sea otra:
+#       lo medido no lo pisa un texto
+#    2  si no, la labor del caso tiene UNA sola plantilla -> esa
+#    3  si no hay una sola respuesta -> ninguna, con el motivo. Elegir una por
+#       un orden que nadie ve es adivinar, y el Supervisor no despacha a
+#       adivinanzas
+#
+#  Los motivos son codigos cerrados para el log (sin texto del ticket) y una
+#  frase para la pantalla.
+
+SIN_LABOR = "SIN_LABOR"
+LABOR_SIN_PLANTILLA = "LABOR_SIN_PLANTILLA"
+VARIAS_SIN_ASUNTO = "VARIAS_SIN_ASUNTO"
+
+
+def plantilla_del_caso(org, *, labor: str = "", asunto: str = "",
+                       labor_medida: bool = False, ofrecidas=None) -> dict:
+    """Con que plantilla sale un caso.
+
+    Devuelve {"version", "por", "motivo", "detalle"}: `version` es la
+    WorkTypeVersion o None; `por` es "asunto" o "labor" (como se eligio);
+    `motivo` el codigo de por que no hay ninguna; `detalle` la frase.
+
+    `ofrecidas` deja pasar la lista ya leida: el Supervisor decide muchos casos
+    por vuelta y no tiene por que leerla una vez por caso.
+    """
+    from campo.labores import nombres_de_labor
+
+    ofrecidas = plantillas_que_se_ofrecen(org) if ofrecidas is None else ofrecidas
+    labor = (labor or "").strip()
+
+    por_asunto = plantilla_para_asunto(ofrecidas, asunto)
+    if por_asunto is not None and not (
+            labor_medida and labor and por_asunto.work_type.labor != labor):
+        return {"version": por_asunto, "por": "asunto", "motivo": "",
+                "detalle": ""}
+
+    if not labor:
+        return {"version": None, "por": "", "motivo": SIN_LABOR,
+                "detalle": "El Supervisor no sabe la labor de este caso y "
+                           "ninguna plantilla tiene su asunto."}
+
+    de_la_labor = [v for v in ofrecidas if v.work_type.labor == labor]
+    nombre = nombres_de_labor(org).get(labor, labor)
+    if len(de_la_labor) == 1:
+        return {"version": de_la_labor[0], "por": "labor", "motivo": "",
+                "detalle": ""}
+    if not de_la_labor:
+        return {"version": None, "por": "", "motivo": LABOR_SIN_PLANTILLA,
+                "detalle": f"La labor «{nombre}» no tiene ninguna plantilla "
+                           "activa."}
+    return {"version": None, "por": "", "motivo": VARIAS_SIN_ASUNTO,
+            "detalle": f"La labor «{nombre}» tiene {len(de_la_labor)} "
+                       "plantillas y ninguna tiene este asunto: cargalo en la "
+                       "que corresponda, en Plantillas."}
 
 
 def _sin_labor_sin_asuntos(labor: str, asuntos: list) -> None:

@@ -40,7 +40,9 @@ Despacho.
 | 21/10 | **Hora de corte por empresa**, editable en Cuadrillas: antes del corte la orden sale para hoy y se publica; después queda para mañana a primera hora | Elegido por el usuario entre «según hora de corte», «siempre hoy» y «siempre mañana». Configuración y no código (CLAUDE.md §3.3) |
 | 21/10 | **Un corte de red es UNA orden por puerto**; los demás casos del puerto quedan atados a ella y no generan visita | Elegido por el usuario; es como ya lo cuenta `demanda_de_despacho` |
 | 21/10 | **Cupo lleno: entran hoy las más urgentes; el resto queda creado para mañana, primero en la fila**, y el aviso dice cuántas | Elegido por el usuario entre pasar a mañana, asignar igual o avisar a una persona |
-| 21/10 | **El Supervisor puede mover una orden publicada a otra cuadrilla mientras el técnico no la empezó** (antes de «en camino») | Elegido por el usuario contra «la mueve una persona». Una vez empezada, no la toca |
+| 21/10 | ~~**El Supervisor puede mover una orden publicada a otra cuadrilla mientras el técnico no la empezó**~~ **Ajustada el mismo día: solo antes de que arranque el día** (la apertura del calendario de la empresa); desde ahí lo publicado queda quieto y lo nuevo se suma | Elegido por el usuario al ver el hueco offline (D.2): un técnico sin señal que ya va en camino perdería la orden al sincronizar |
+| 21/10 | **Las instalaciones nuevas se despachan igual**, aunque cuelguen del cliente de instalaciones ficticio. La orden **no copia** la dirección ni el teléfono de ese cliente: sale con lo que trae el ticket y marcada «llamar al cliente para ubicarlo» | Elegido por el usuario contra «dejarlas a una persona». Copiar la ficha del cliente ficticio mandaría al técnico a otra casa |
+| 21/10 | **Aviso al teléfono del técnico cada vez que le asignan una visita**, la asigne el Supervisor o una persona (mismo `push_fcm` que las devoluciones) | Elegido por el usuario: hoy la ve recién cuando la app sincroniza |
 
 ## Lo que ya existe, medido en el código el 17/10
 
