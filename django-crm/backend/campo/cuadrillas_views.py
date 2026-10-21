@@ -932,6 +932,29 @@ class TiposDeTrabajoView(APIView):
                          "nombre": tipo.nombre, "labor": tipo.labor})
 
 
+class HorarioDeCuadrillasView(APIView):
+    """``GET`` cuando trabajan las cuadrillas · ``PUT`` cambiarlo, entero.
+
+    21/10/2026: el horario de la operacion de campo, aparte del de atencion
+    al cliente. Ver `campo/horario_de_cuadrillas.py`.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        from campo import horario_de_cuadrillas as H
+        return Response(H.leer(request.profile.org))
+
+    def put(self, request):
+        from campo import horario_de_cuadrillas as H
+        _exigir_gestion(request)
+        try:
+            return Response(H.guardar(request.profile.org, request.data or {}))
+        except H.ErrorHorario as e:
+            return Response({"detail": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+
 class ConfiguracionDeRepartoView(APIView):
     """``GET`` como reparte esta empresa · ``PUT`` cambiarlo.
 

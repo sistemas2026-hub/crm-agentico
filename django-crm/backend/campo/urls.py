@@ -67,6 +67,9 @@ urlpatterns = [
     path("tipos-de-trabajo/", cuadrillas_views.TiposDeTrabajoView.as_view(), name="tipos_de_trabajo"),
     path("tipos-de-trabajo/<uid:pk>/", cuadrillas_views.TiposDeTrabajoView.as_view(), name="tipo_de_trabajo"),
     path("cuadrillas/configuracion/", cuadrillas_views.ConfiguracionDeRepartoView.as_view(), name="reparto_configuracion"),
+    #  Cuando trabajan las cuadrillas: aparte del horario de atencion al
+    #  cliente (21/10/2026). Ver campo/horario_de_cuadrillas.py.
+    path("cuadrillas/horario/", cuadrillas_views.HorarioDeCuadrillasView.as_view(), name="horario_de_cuadrillas"),
     path("cuadrillas/reparto/", cuadrillas_views.RepartoView.as_view(), name="cuadrilla_reparto"),
     path("cuadrillas/jornada/", cuadrillas_views.JornadaDeCuadrillaView.as_view(), name="cuadrilla_jornada"),
     path("cuadrillas/<uid:pk>/", cuadrillas_views.CuadrillaView.as_view(), name="cuadrilla"),

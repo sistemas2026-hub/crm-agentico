@@ -68,6 +68,12 @@ def empresa(org_a):
         setattr(cal, f"{d}_open", dt.time(7, 0))
         setattr(cal, f"{d}_close", dt.time(17, 0))
     cal.save()
+    #  Y es el HORARIO DE LAS CUADRILLAS (21/10/2026): sin el, el Supervisor
+    #  no arma solo. Aca es la misma fila, para que lo que estas pruebas miden
+    #  --el reloj, la apertura, el cierre-- siga siendo lo mismo.
+    from campo.cuadrillas import ConfiguracionDeReparto
+    ConfiguracionDeReparto.objects.update_or_create(
+        org=org_a, defaults={"calendario_de_cuadrillas": cal})
     return org_a
 
 
@@ -421,8 +427,8 @@ def test_m_la_madrugada_usa_la_MISMA_regla_y_la_misma_demanda(
     from campo import tasks
     from campo.cuadrillas import ConfiguracionDeReparto
 
-    ConfiguracionDeReparto.objects.create(org=empresa, activo=True,
-                                          copia_la_jornada=True)
+    ConfiguracionDeReparto.objects.filter(org=empresa).update(
+        activo=True, copia_la_jornada=True)
     _en_despacho(empresa, pad.FALLA_DE_SERVICIO, barrio=BARRIO)
 
     r = tasks.correr_para(
@@ -526,8 +532,8 @@ def test_q_la_madrugada_fija_el_contexto_de_cada_empresa(
         org=empresa, profile=admin_profile, fecha=hoy,
         hora_inicio=dt.time(0, 0), hora_fin=dt.time(23, 59),
         disponible=False, motivo="vacaciones")
-    ConfiguracionDeReparto.objects.create(org=empresa, activo=True,
-                                          hora_local=0)
+    ConfiguracionDeReparto.objects.filter(org=empresa).update(
+        activo=True, hora_local=0)
     clear_rls_context()
 
     r = tasks.ciclo_de_la_madrugada()

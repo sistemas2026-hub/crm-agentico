@@ -26,6 +26,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const editarCuadrilla = vi.fn();
 const crearCuadrilla = vi.fn();
 const guardarConfiguracionDeReparto = vi.fn();
+const guardarHorarioDeCuadrillas = vi.fn();
 
 vi.mock('$lib/server/v2/cuadrillas.js', () => {
   const nada = async () => ({});
@@ -47,6 +48,8 @@ vi.mock('$lib/server/v2/cuadrillas.js', () => {
     editarPersonaDeCampo: nada,
     leerConfiguracionDeReparto: nada,
     guardarConfiguracionDeReparto: (...a) => guardarConfiguracionDeReparto(...a),
+    leerHorarioDeCuadrillas: nada,
+    guardarHorarioDeCuadrillas: (...a) => guardarHorarioDeCuadrillas(...a),
     leerTiposDeTrabajo: nada,
     clasificarTipoDeTrabajo: nada
   };
@@ -217,5 +220,43 @@ describe('la configuración del reparto manda la labor de cada caso solo si vien
     const [, cuerpo] = guardarConfiguracionDeReparto.mock.calls[0];
     expect(cuerpo).not.toHaveProperty('labor_por_grupo');
     expect(cuerpo.tope_por_cuadrilla).toBe('8');
+  });
+});
+
+describe('el horario de las cuadrillas (21/10/2026)', () => {
+  it('manda el horario ENTERO: los días sin «trabaja» viajan cerrados', async () => {
+    guardarHorarioDeCuadrillas.mockReset().mockResolvedValue({ configurado: true });
+    const r = /** @type {any} */ (await actions.horario(envio({
+      zona_horaria: ' America/Bogota ',
+      trabaja_lunes: '1', abre_lunes: '07:00', cierra_lunes: '17:00',
+      abre_martes: '07:00', cierra_martes: '17:00',
+      trabaja_sabado: '1', abre_sabado: '07:00', cierra_sabado: '12:00',
+      feriados: '2026-12-08 Inmaculada Concepción\n\n  2026-12-25   Navidad  \n',
+      hora_de_corte: '14:00'
+    })));
+    expect(guardarHorarioDeCuadrillas).toHaveBeenCalledTimes(1);
+    const [, cuerpo] = guardarHorarioDeCuadrillas.mock.calls[0];
+    expect(cuerpo.zona_horaria).toBe('America/Bogota');
+    expect(cuerpo.hora_de_corte).toBe('14:00');
+    expect(cuerpo.dias.lunes).toEqual({ abre: '07:00', cierra: '17:00' });
+    //  Con horas escritas pero sin la casilla: cerrado.
+    expect(cuerpo.dias.martes).toBeNull();
+    expect(cuerpo.dias.sabado).toEqual({ abre: '07:00', cierra: '12:00' });
+    expect(cuerpo.dias.domingo).toBeNull();
+    expect(Object.keys(cuerpo.dias)).toHaveLength(7);
+    expect(cuerpo.feriados).toEqual([
+      { fecha: '2026-12-08', nombre: 'Inmaculada Concepción' },
+      { fecha: '2026-12-25', nombre: 'Navidad' }
+    ]);
+    expect(r.hecho).toMatch(/Horario de las cuadrillas guardado/);
+  });
+
+  it('lo que el backend rechaza llega como su frase', async () => {
+    guardarHorarioDeCuadrillas.mockReset().mockRejectedValue(
+      Object.assign(new Error('x'), { status: 400, body: { detail: 'El lunes cierra antes de abrir.' } })
+    );
+    const r = /** @type {any} */ (await actions.horario(envio({ zona_horaria: 'America/Bogota' })));
+    expect(r.status).toBe(400);
+    expect(r.data.error).toContain('cierra antes de abrir');
   });
 });

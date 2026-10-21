@@ -252,6 +252,28 @@ export async function guardarConfiguracionDeReparto(ctx, cuerpo) {
 }
 
 /**
+ * Cuándo trabajan las cuadrillas (21/10/2026). Aparte del horario de
+ * atención al cliente, que cuenta los objetivos de los tickets: el
+ * Supervisor arma y despacha con este, y sin este no lo hace solo.
+ *
+ * @param {{ cookies: any }} ctx
+ */
+export async function leerHorarioDeCuadrillas(ctx) {
+  try {
+    const d = await apiRequest('/campo/cuadrillas/horario/', {}, ctx);
+    return { horario: d, error: false };
+  } catch {
+    return { horario: null, error: true };
+  }
+}
+
+/** @param {{ cookies: any }} ctx @param {Record<string, any>} cuerpo */
+export async function guardarHorarioDeCuadrillas(ctx, cuerpo) {
+  return apiRequest('/campo/cuadrillas/horario/',
+    { method: 'PUT', body: cuerpo }, ctx);
+}
+
+/**
  * Qué labor tiene cada tipo de trabajo.
  *
  * Define qué cuadrillas pueden tomarlo: una puesta en correctivo no recibe

@@ -347,6 +347,22 @@ class ConfiguracionDeReparto(BaseModel):
     #: una clave guardada pisa solo la suya. Ver `labores_de`.
     nombres_de_labor = models.JSONField(default=dict, blank=True)
 
+    #: EL HORARIO DE LAS CUADRILLAS  --  21/10/2026. Pedido del usuario: el
+    #: calendario por defecto de la empresa es el de ATENCION AL CLIENTE (cuenta
+    #: los objetivos de respuesta de los tickets), y el Supervisor lo estaba
+    #: usando para saber cuando trabajan las cuadrillas. Son dos horarios
+    #: distintos: este apunta a un `BusinessCalendar` propio, que no es el por
+    #: defecto. Ver `campo/horario_de_cuadrillas.py`.
+    calendario_de_cuadrillas = models.ForeignKey(
+        "business_hours.BusinessCalendar", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+")
+
+    #: LA HORA DE CORTE  --  21/10/2026, decision del usuario: lo que entra a
+    #: Despacho antes de esta hora sale HOY; despues, mañana a primera hora. En
+    #: el reloj del horario de las cuadrillas. Vacia = el Supervisor no crea
+    #: ordenes solo (Fase 2.3 de supervisor-arma-la-jornada).
+    hora_de_corte = models.TimeField(null=True, blank=True)
+
     #: El ULTIMO DIA LOCAL en que esto corrio. Es lo que evita que corra dos
     #: veces.
     #:

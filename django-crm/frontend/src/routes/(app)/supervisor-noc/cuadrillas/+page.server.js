@@ -17,6 +17,8 @@ import {
   editarPersonaDeCampo,
   leerConfiguracionDeReparto,
   guardarConfiguracionDeReparto,
+  leerHorarioDeCuadrillas,
+  guardarHorarioDeCuadrillas,
   leerTiposDeTrabajo,
   clasificarTipoDeTrabajo
 } from '$lib/server/v2/cuadrillas.js';
@@ -62,7 +64,7 @@ export async function load({ url, cookies, locals, fetch }) {
   // vehículos no se le puede asignar uno, y sin la jornada no se sabe qué
   // hace hoy. Pedirlas en serie sumaría tres esperas que no hacen falta.
   const [cuadrillas, jornada, personas, ubicaciones, historial, zonas, locs,
-         reparto, configuracion, tipos] =
+         reparto, configuracion, tipos, horario] =
     await Promise.all([
       leerCuadrillas({ cookies }, verBajas),
       leerJornadaDeCuadrillas({ cookies }, dia),
@@ -93,7 +95,10 @@ export async function load({ url, cookies, locals, fetch }) {
       leerConfiguracionDeReparto({ cookies }),
       //  Qué labor tiene cada tipo de trabajo. Sin esto no se puede clasificar
       //  nada, y lo que no está clasificado no se reparte.
-      leerTiposDeTrabajo({ cookies })
+      leerTiposDeTrabajo({ cookies }),
+      //  Cuándo trabajan las cuadrillas (21/10/2026): el Supervisor arma
+      //  y despacha con este horario, no con el de atención al cliente.
+      leerHorarioDeCuadrillas({ cookies })
     ]);
 
   const vehiculos = (ubicaciones.ubicaciones ?? []).filter(
@@ -132,6 +137,8 @@ export async function load({ url, cookies, locals, fetch }) {
     tiposSinClasificar: tipos.sinClasificar,
     reparto_config: configuracion.configuracion,
     repartoConfigError: configuracion.error,
+    horario: horario.horario,
+    horarioError: horario.error,
     personas: personas.personas,
     //  Las cuentas del equipo que todavia no son persona de campo: se
     //  ofrecen para darlas de alta en un clic, en vez de teclear el nombre
@@ -424,6 +431,42 @@ export const actions = {
             `con hasta ${r.tope_por_cuadrilla} órdenes por cuadrilla.`
           : 'El ciclo quedó apagado. Las jornadas se arman a mano.'
       };
+    } catch (e) {
+      return fail(400, { error: mensajeDe(e) });
+    }
+  },
+
+  /**
+   * El horario de las cuadrillas, ENTERO (21/10/2026): la pantalla manda
+   * todos los días, y un día sin la casilla «trabaja» viaja cerrado. Los
+   * feriados, uno por línea: «AAAA-MM-DD Nombre».
+   */
+  horario: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const DIAS = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+    /** @type {Record<string, { abre: string, cierra: string } | null>} */
+    const dias = {};
+    for (const d of DIAS) {
+      dias[d] = f.get(`trabaja_${d}`) === '1'
+        ? { abre: String(f.get(`abre_${d}`) ?? ''), cierra: String(f.get(`cierra_${d}`) ?? '') }
+        : null;
+    }
+    const feriados = String(f.get('feriados') ?? '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => {
+        const [fecha, ...resto] = l.split(/\s+/);
+        return { fecha, nombre: resto.join(' ') };
+      });
+    try {
+      await guardarHorarioDeCuadrillas({ cookies }, {
+        zona_horaria: String(f.get('zona_horaria') ?? '').trim(),
+        dias,
+        feriados,
+        hora_de_corte: String(f.get('hora_de_corte') ?? '').trim()
+      });
+      return { hecho: 'Horario de las cuadrillas guardado. El Supervisor arma y despacha con este.' };
     } catch (e) {
       return fail(400, { error: mensajeDe(e) });
     }

@@ -98,6 +98,21 @@
     }))
   );
 
+  /** Los días del horario de las cuadrillas (21/10/2026), como los guarda el backend. */
+  const DIAS_DEL_HORARIO = [
+    { id: 'lunes', texto: 'Lunes' },
+    { id: 'martes', texto: 'Martes' },
+    { id: 'miercoles', texto: 'Miércoles' },
+    { id: 'jueves', texto: 'Jueves' },
+    { id: 'viernes', texto: 'Viernes' },
+    { id: 'sabado', texto: 'Sábado' },
+    { id: 'domingo', texto: 'Domingo' }
+  ];
+  /** Los feriados, uno por línea, como se escriben. */
+  const feriadosTexto = $derived(
+    (data.horario?.feriados ?? []).map((f) => `${f.fecha} ${f.nombre}`).join('\n')
+  );
+
   const ROLES = [
     { id: 'tecnico_lider', texto: 'Técnico líder' },
     { id: 'tecnico', texto: 'Técnico' },
@@ -760,6 +775,84 @@
           No se calcula sola: mirar esta pantalla no puede disparar un recorrido de todas
           las órdenes pendientes.
         </p>
+      {/if}
+    </section>
+
+    <!-- ============ EL HORARIO DE LAS CUADRILLAS (21/10/2026) ============
+         Pedido del usuario: el horario por defecto de la empresa es el de
+         atención al cliente. El Supervisor arma y despacha con ESTE, y sin
+         este no lo hace solo. -->
+    <section class="snoc-panel" style="gap:var(--snoc-sm);">
+      <div class="snoc-pila-xs">
+        <h2 class="snoc-h2">Horario de las cuadrillas</h2>
+        <p class="snoc-body-sm snoc-secundario">
+          Cuándo trabajan las cuadrillas. Es aparte del horario de atención al cliente: el
+          Supervisor arma la jornada y despacha solo dentro de este horario.
+        </p>
+      </div>
+      {#if data.horarioError}
+        <p class="snoc-aviso snoc-error-txt">No se pudo leer el horario de las cuadrillas.</p>
+      {:else}
+        {#if !data.horario?.configurado}
+          <p class="snoc-aviso">
+            Todavía no está cargado: hasta que lo guardes, el Supervisor no arma ni despacha solo.
+          </p>
+        {:else if data.horario.zona_horaria !== data.horario.zona_de_la_empresa}
+          <p class="snoc-aviso">
+            La empresa está en {data.horario.zona_de_la_empresa} y este horario en
+            {data.horario.zona_horaria}: revisá cuál es la de la operación.
+          </p>
+        {/if}
+        <form method="POST" action="?/horario" use:enhance class="snoc-pila"
+              style="gap:var(--snoc-md);">
+          <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap; align-items:end;">
+            <label class="snoc-campo-grupo">
+              <span class="snoc-label">Zona horaria</span>
+              <input class="snoc-campo" name="zona_horaria" list="zonas-horarias" required
+                     value={data.horario?.zona_horaria || 'America/Bogota'} />
+              <datalist id="zonas-horarias">
+                <option value="America/Bogota"></option>
+                <option value="America/Lima"></option>
+                <option value="America/Guayaquil"></option>
+                <option value="America/Caracas"></option>
+                <option value="America/Mexico_City"></option>
+              </datalist>
+            </label>
+            <label class="snoc-campo-grupo">
+              <span class="snoc-label">Hora de corte</span>
+              <input class="snoc-campo" type="time" name="hora_de_corte"
+                     value={data.horario?.hora_de_corte ?? ''} />
+            </label>
+          </div>
+          <span class="snoc-body-sm snoc-secundario">
+            Hora de corte: lo que entra a Despacho antes sale hoy; lo que entra después, mañana
+            a primera hora. Vacía, el Supervisor no crea órdenes solo.
+          </span>
+          <div class="snoc-pila-xs">
+            {#each DIAS_DEL_HORARIO as d (d.id)}
+              {@const v = data.horario?.dias?.[d.id]}
+              <div class="snoc-fila" style="gap:var(--snoc-sm); align-items:center; flex-wrap:wrap;">
+                <label class="snoc-fila" style="gap:var(--snoc-xs); min-width:120px;">
+                  <input type="checkbox" name={`trabaja_${d.id}`} value="1" checked={!!v} />
+                  <span class="snoc-body">{d.texto}</span>
+                </label>
+                <input class="snoc-campo" type="time" name={`abre_${d.id}`}
+                       value={v?.abre ?? '07:00'} aria-label={`${d.texto}: abre`} />
+                <span class="snoc-body-sm">a</span>
+                <input class="snoc-campo" type="time" name={`cierra_${d.id}`}
+                       value={v?.cierra ?? '17:00'} aria-label={`${d.texto}: cierra`} />
+              </div>
+            {/each}
+          </div>
+          <label class="snoc-campo-grupo">
+            <span class="snoc-label">Feriados</span>
+            <textarea class="snoc-campo" name="feriados" rows="4" value={feriadosTexto}
+                      placeholder={'Uno por línea: AAAA-MM-DD Nombre\n2026-12-08 Inmaculada Concepción'}></textarea>
+          </label>
+          <div>
+            <button class="snoc-btn snoc-btn-primario" type="submit">Guardar horario</button>
+          </div>
+        </form>
       {/if}
     </section>
 

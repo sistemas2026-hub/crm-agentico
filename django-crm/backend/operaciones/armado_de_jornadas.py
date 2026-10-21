@@ -483,10 +483,15 @@ def _la_empresa_trabaja(org, fecha, ahora) -> tuple:
     from operaciones import capacidad
 
     try:
-        jornada = capacidad.jornada_de(org, fecha)
+        #  EL HORARIO DE LAS CUADRILLAS, NO EL DE ATENCION AL CLIENTE
+        #  (21/10/2026, pedido del usuario): sin el, no se arma solo.
+        jornada = capacidad.jornada_de(org, fecha, solo_de_cuadrillas=True)
     except Exception as e:                                       # noqa: BLE001
         return (f"no se pudo leer el calendario de la empresa "
                 f"({type(e).__name__})", "")
+    if jornada.motivo == capacidad.SIN_HORARIO_DE_CUADRILLAS:
+        return ("falta el horario de las cuadrillas (se carga en Cuadrillas): "
+                "sin el, el Supervisor no arma solo", "")
     if not jornada.abierta:
         return f"la empresa no trabaja ese dia ({jornada.motivo or 'cerrada'})", ""
     del_calendario = jornada.zona_horaria or "UTC"

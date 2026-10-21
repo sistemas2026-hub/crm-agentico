@@ -97,6 +97,8 @@ NO_DETERMINABLE = "CAPACIDAD_NO_DETERMINABLE"
 
 #  --- por que no hay jornada --------------------------------------------
 SIN_CALENDARIO = "SIN_CALENDARIO"
+#: La empresa no cargo el horario de las cuadrillas (21/10/2026).
+SIN_HORARIO_DE_CUADRILLAS = "SIN_HORARIO_DE_CUADRILLAS"
 FERIADO = "FERIADO"
 CERRADA = "JORNADA_CERRADA"
 INVALIDA = "JORNADA_INVALIDA"
@@ -184,7 +186,7 @@ class Jornada:
         }
 
 
-def jornada_de(org, dia: _date) -> Jornada:
+def jornada_de(org, dia: _date, *, solo_de_cuadrillas: bool = False) -> Jornada:
     """
     La ventana operativa de la EMPRESA para ese dia.
 
@@ -193,8 +195,22 @@ def jornada_de(org, dia: _date) -> Jornada:
     este paso tiene prohibido: si el calendario declara una zona que no
     corresponde a la operacion real, eso se corrige EDITANDO EL CALENDARIO --
     es configuracion, no codigo.
+
+    QUE CALENDARIO  --  21/10/2026. El HORARIO DE LAS CUADRILLAS si la empresa
+    lo cargo (`campo/horario_de_cuadrillas.py`): el por defecto es el de
+    atencion al cliente, y la operacion de campo no tiene por que tener sus
+    horas. Si no lo cargo, lo que ya corria sigue con el por defecto, como
+    hasta hoy; y quien pide `solo_de_cuadrillas` (lo que el Supervisor hace
+    solo) recibe la jornada cerrada con su motivo. Decision del usuario: sin
+    horario de cuadrillas, el Supervisor no arma ni despacha.
     """
-    cal = (BusinessCalendar.objects.filter(org=org, is_default=True).first()
+    from campo.horario_de_cuadrillas import calendario_de_cuadrillas
+
+    cal = calendario_de_cuadrillas(org)
+    if cal is None and solo_de_cuadrillas:
+        return Jornada(abierta=False, motivo=SIN_HORARIO_DE_CUADRILLAS)
+    cal = (cal
+           or BusinessCalendar.objects.filter(org=org, is_default=True).first()
            or BusinessCalendar.objects.filter(org=org).first())
     if cal is None:
         return Jornada(abierta=False, motivo=SIN_CALENDARIO)
