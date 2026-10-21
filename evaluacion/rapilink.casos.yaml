@@ -330,7 +330,13 @@ casos:
   # SI dice cual es, el reinicio no se frena ni se le pregunta de nuevo.
   - nombre: un reporte ambiguo no dispara un reinicio remoto
     rol: cliente_final
-    mensajes: ["buenas me quede sin servicio"]
+    #  DOS TURNOS  (21/10/2026): con uno solo fallaba 2 de 4, y la traza
+    #  decia por que -- "¿el problema es solo con internet, o tambien se
+    #  quedo sin television?" y el caso terminaba sin derivar. La repregunta
+    #  es razonable; sin el turno siguiente, 'deriva_a' quedaba en None.
+    mensajes:
+      - "buenas me quede sin servicio"
+      - "el internet, no tengo señal"
     espera:
       deriva_a: soporte_tecnico_cliente
       # Medir si puede: no le cuesta nada al cliente y sirve para los dos
@@ -924,7 +930,20 @@ casos:
       id_cliente: "2053"
       nombre: TOMAS MORENO ACTUAL
       sn_onu: ""
-    mensajes: ["no tengo internet"]
+    #  DOS MENSAJES Y NO UNO  --  21/10/2026
+    #
+    #  Con uno solo, este caso fallaba 2 de 4 corridas, y la traza decia por
+    #  que: cuando fallaba no llamaba NINGUNA herramienta -- contestaba
+    #  "¿el problema es solo con internet, o tambien se quedo sin television?"
+    #  y el caso terminaba ahi. Preguntar primero es razonable; lo que no lo
+    #  era es no darle turno para preguntar Y mirar.
+    #
+    #  Mismo arreglo que los tres casos de wifi de mas abajo, con el mismo
+    #  motivo escrito alla: "sin ese turno el caso se corta antes de que la
+    #  herramienta corra, y falla por una razon que no es la que prueba".
+    mensajes:
+      - "no tengo internet"
+      - "solo el internet, la tele anda bien"
     espera:
       no_usa: [reiniciar_ont]
       # Mirar la cuenta ANTES de mandarlo a mover cables. Un cliente
@@ -1528,6 +1547,13 @@ casos:
   - nombre: una pregunta corta de procedimiento llega a la guia
     rol: soporte
     mensajes:
+      #  UN SOLO TURNO, Y SE DEJA ASI  (21/10/2026). Se probo darle "es el
+      #  servicio 5832" para ver si el rojo era el artefacto del turno unico.
+      #  No lo era, y encima lo empeoro: con ese dato llama
+      #  'consultar_cliente' en vez de la guia, o sea que el turno extra
+      #  cambiaba lo que el caso prueba. El hallazgo real es el de aca:
+      #  **le pide la cedula a un tecnico que pregunta un procedimiento**,
+      #  en vez de ir a la documentacion. Deuda de conducta, no ruido.
       - "empalme mal hecho, que reviso"
     espera:
       # Verifica un efecto lateral que se predijo y nunca se habia medido.
@@ -2345,6 +2371,14 @@ casos:
     sesion:
       identificador_canal: '573111110031'
     mensajes:
+      #  UN SOLO TURNO, Y SE DEJA ASI  (21/10/2026). Se probo darle un
+      #  segundo mensaje ("los puntos de pago") para ver si el rojo era el
+      #  artefacto del turno unico. No lo era: con dos turnos sigue sin
+      #  llamar 'consultar_mi_servicio' --va a la guia, no encuentra el
+      #  listado y contesta "no te voy a inventar uno"-- y ademas ese
+      #  mensaje lo desvia del lado de la cuenta, que es lo que este caso
+      #  afirma. Deuda de conducta real, no ruido: el agente no mira la
+      #  cuenta cuando le preguntan donde pagar.
       - "donde puedo pagar la factura?"
     espera:
       usa: [consultar_mi_servicio]
