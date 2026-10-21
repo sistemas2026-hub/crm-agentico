@@ -706,9 +706,10 @@ def ultima_publicada(tipo: WorkType) -> WorkTypeVersion | None:
             .order_by("-version").first())
 
 
-def _labor(labor) -> str:
+def _labor(labor, org) -> str:
+    from campo.labores import labor_valida
     labor = (labor or "").strip()
-    if labor and labor not in dict(WorkType.LABORES):
+    if labor and not labor_valida(org, labor):
         raise ErrorPlantilla("LABOR_INVALIDA", f"'{labor}' no es una labor.")
     return labor
 
@@ -795,12 +796,30 @@ def plantilla_para_asunto(versiones, asunto):
     return None
 
 
+def _sin_labor_sin_asuntos(labor: str, asuntos: list) -> None:
+    """D7 de labores propias (20/10/2026): una plantilla sin labor no tiene
+    asuntos. Sin labor la orden no le llega a ninguna cuadrilla, y un asunto
+    que la elige mandaria trabajo a un lugar que no reparte."""
+    if asuntos and not labor:
+        raise ErrorPlantilla(
+            "ASUNTOS_SIN_LABOR",
+            "Elegi la labor antes de ponerle asuntos: sin labor, la orden no "
+            "le llega a ninguna cuadrilla.")
+
+
 def crear(org, *, base: str = "", nombre: str = "", labor: str = "",
-          definicion: dict | None = None) -> tuple[WorkType, WorkTypeVersion]:
+          definicion: dict | None = None, asuntos=None,
+          plazo_dias=None) -> tuple[WorkType, WorkTypeVersion]:
     """Una plantilla nueva para la empresa, desde el catalogo o desde cero.
 
     Desde el catalogo toma su codigo: dos empresas pueden adoptar la misma
     base sin pisarse, porque el codigo es unico POR EMPRESA.
+
+    CON SUS ASUNTOS Y SU PLAZO DESDE EL ALTA (21/10/2026), pedido del usuario:
+    «un boton que permita crear y editar las plantillas y agregar los asuntos
+    de esa plantilla». Hasta hoy se creaba sin asuntos y habia que abrirla y
+    publicarla para cargarlos. Se validan DENTRO de la transaccion: un asunto
+    que ya es de otra plantilla no deja una plantilla creada a medias.
     """
     if base:
         b = base_por_codigo(base)
@@ -808,12 +827,12 @@ def crear(org, *, base: str = "", nombre: str = "", labor: str = "",
             raise ErrorPlantilla("BASE_INEXISTENTE", "Esa plantilla de partida no existe.")
         codigo = b["codigo"]
         nombre = _texto(nombre or b["nombre"], "el nombre")
-        labor = _labor(labor or b["labor"])
+        labor = _labor(labor or b["labor"], org)
         definicion = definicion or definicion_de_base(b)
     else:
         nombre = _texto(nombre, "el nombre")
         codigo = _slug(nombre)
-        labor = _labor(labor)
+        labor = _labor(labor, org)
         if definicion is None:
             raise ErrorPlantilla("PLANTILLA_VACIA",
                                  "La plantilla no pide ningun dato ni foto.")
@@ -827,6 +846,11 @@ def crear(org, *, base: str = "", nombre: str = "", labor: str = "",
                 "Editala en vez de crear otra.")
         tipo = WorkType.objects.create(org=org, codigo=codigo, nombre=nombre,
                                        labor=labor, activo=True)
+        if asuntos is not None or plazo_dias not in (None, ""):
+            tipo.asuntos = _asuntos(asuntos or [], tipo)
+            _sin_labor_sin_asuntos(tipo.labor, tipo.asuntos)
+            tipo.plazo_dias = _plazo(plazo_dias)
+            tipo.save(update_fields=["asuntos", "plazo_dias"])
         version = WorkTypeVersion.objects.create(
             work_type=tipo, version=1, schema_version=1,
             estado=WorkTypeVersion.PUBLICADA, esquema=esquema)
@@ -854,7 +878,7 @@ def publicar(tipo: WorkType, definicion: dict, *, nombre: str | None = None,
             tipo.nombre = _texto(nombre, "el nombre")
             campos.append("nombre")
         if labor is not None:
-            tipo.labor = _labor(labor)
+            tipo.labor = _labor(labor, tipo.org_id)
             campos.append("labor")
         #  Asuntos y plazo, del TIPO como la labor (19/10/2026). Viajan solo si
         #  vienen: 'con_plazo' distingue "no lo mande" de "lo borro" (None).
@@ -864,6 +888,8 @@ def publicar(tipo: WorkType, definicion: dict, *, nombre: str | None = None,
         if con_plazo:
             tipo.plazo_dias = _plazo(plazo_dias)
             campos.append("plazo_dias")
+        if "asuntos" in campos or "labor" in campos:
+            _sin_labor_sin_asuntos(tipo.labor, tipo.asuntos)
         if campos:
             tipo.save(update_fields=campos)
 

@@ -91,12 +91,27 @@
     return [...grupos.values()];
   });
 
+  /** El formulario de «+ Nueva plantilla» abierto (21/10/2026). */
+  let creando = $state(false);
+  let creandoAhora = $state(false);
+
   /** Tras adoptar o crear, se abre en el editor. */
-  const alCrear = () => async ({ result, update }) => {
-    await update();
-    const id = result?.type === 'success' ? result.data?.abrir : null;
-    if (id) await goto(`?editar=${id}`, { invalidateAll: true });
+  const alCrear = () => {
+    creandoAhora = true;
+    return async ({ result, update }) => {
+      await update();
+      creandoAhora = false;
+      const id = result?.type === 'success' ? result.data?.abrir : null;
+      if (id) {
+        creando = false;
+        await goto(`?editar=${id}`, { invalidateAll: true });
+      }
+    };
   };
+
+  /** Los asuntos de una plantilla, cortos para la lista. @param {string[]} a */
+  const asuntosCortos = (a) =>
+    a.length <= 3 ? a.join(' · ') : `${a.slice(0, 3).join(' · ')} y ${a.length - 3} más`;
 
   const definicionDeCero = $derived(
     (data.catalogo ?? []).find((b) => b.codigo === 'trabajo_general')?.definicion ?? null
@@ -156,7 +171,63 @@
     {:else}
       <!-- ============ LAS DE LA EMPRESA ============ -->
       <section class="snoc-panel" style="gap:var(--snoc-sm);">
-        <h2 class="snoc-h2">Las de la empresa</h2>
+        <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+          <h2 class="snoc-h2">Las de la empresa</h2>
+          {#if definicionDeCero && !creando}
+            <button class="snoc-btn snoc-btn-primario" type="button" onclick={() => (creando = true)}>
+              + Nueva plantilla
+            </button>
+          {/if}
+        </div>
+
+        <!-- ============ NUEVA PLANTILLA (21/10/2026) ============
+             Pedido del usuario: un botón que cree la plantilla con sus asuntos.
+             Nace con el formulario de «Trabajo general» —el backend rechaza una
+             plantilla que no pide nada— y se abre en el editor para ajustarlo. -->
+        {#if creando && definicionDeCero}
+          <form method="POST" action="?/crear" use:enhance={alCrear}
+                class="snoc-tarjeta snoc-pila" style="gap:var(--snoc-md);">
+            <input type="hidden" name="definicion" value={JSON.stringify(definicionDeCero)} />
+            <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap; align-items:end;">
+              <label class="snoc-campo-grupo">
+                <span class="snoc-label">Nombre</span>
+                <input class="snoc-campo" name="nombre" required maxlength="120"
+                       placeholder="Por ejemplo: Traslado de servicio" />
+              </label>
+              <label class="snoc-campo-grupo">
+                <span class="snoc-label">Labor</span>
+                <select class="snoc-select" name="labor">
+                  <option value="">— sin labor —</option>
+                  {#each data.labores as l (l.id)}<option value={l.id}>{l.texto}</option>{/each}
+                </select>
+              </label>
+              <label class="snoc-campo-grupo">
+                <span class="snoc-label">Plazo para hacerlo (días)</span>
+                <input class="snoc-campo" type="number" name="plazo_dias" min="0" max="60"
+                       placeholder="sin plazo" />
+              </label>
+            </div>
+            <label class="snoc-campo-grupo">
+              <span class="snoc-label">Asuntos de WispHub que se despachan con esta plantilla</span>
+              <textarea class="snoc-campo" name="asuntos" rows="4"
+                        placeholder={'Uno por línea, como vienen en el ticket. Ej.:\nCambio De Domicilio'}></textarea>
+              <span class="snoc-body-sm snoc-secundario">
+                Al despachar un ticket con uno de estos asuntos, esta plantilla viene elegida.
+                Un asunto va en una sola plantilla, y hace falta elegir la labor.
+              </span>
+            </label>
+            <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+              <button class="snoc-btn snoc-btn-primario" type="submit" disabled={creandoAhora}>
+                {creandoAhora ? 'Creando…' : 'Crear plantilla'}
+              </button>
+              <button class="snoc-btn" type="button" onclick={() => (creando = false)}>Cancelar</button>
+              <span class="snoc-body-sm snoc-secundario">
+                Después se abre para ajustar qué anota y qué fotos saca el técnico.
+              </span>
+            </div>
+          </form>
+        {/if}
+
         {#if !(data.propias ?? []).length}
           <p class="snoc-body-sm snoc-secundario">
             Todavía no hay ninguna. Adoptá una del catálogo de abajo: queda lista para
@@ -176,6 +247,13 @@
                     {p.datos} {p.datos === 1 ? 'dato' : 'datos'} ·
                     {p.fotos} {p.fotos === 1 ? 'foto' : 'fotos'}
                     {#if p.version} · versión {p.version}{/if}
+                  </span>
+                  <span class="snoc-body-sm snoc-secundario">
+                    {#if (p.asuntos ?? []).length}
+                      Asuntos: {asuntosCortos(p.asuntos)}
+                    {:else}
+                      Sin asuntos: Despacho no la elige sola por el asunto del ticket.
+                    {/if}
                   </span>
                   {#if !p.editable}
                     <span class="snoc-body-sm snoc-secundario">
@@ -448,10 +526,11 @@
 
               <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
                 <button class="snoc-btn snoc-btn-primario" type="submit" disabled={publicando}>
-                  {publicando ? 'Publicando…' : 'Publicar versión nueva'}
+                  {publicando ? 'Guardando…' : 'Guardar'}
                 </button>
                 <span class="snoc-body-sm snoc-secundario">
-                  Las órdenes nuevas salen con esta versión; las ya creadas no cambian.
+                  Guarda nombre, labor, plazo y asuntos. Si cambiaste lo que anota el técnico, sale
+                  una versión nueva: las órdenes ya creadas no cambian.
                 </span>
               </div>
             </form>
@@ -493,25 +572,8 @@
           {/each}
         </div>
 
-        {#if definicionDeCero}
-          <form method="POST" action="?/crear" use:enhance={alCrear}
-                class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap; align-items:end;">
-            <input type="hidden" name="definicion" value={JSON.stringify(definicionDeCero)} />
-            <label class="snoc-campo-grupo">
-              <span class="snoc-label">O una nueva desde cero</span>
-              <input class="snoc-campo" name="nombre" required maxlength="120"
-                     placeholder="Por ejemplo: Instalación de cámara" />
-            </label>
-            <label class="snoc-campo-grupo">
-              <span class="snoc-label">Labor</span>
-              <select class="snoc-select" name="labor">
-                <option value="">— sin labor —</option>
-                {#each data.labores as l (l.id)}<option value={l.id}>{l.texto}</option>{/each}
-              </select>
-            </label>
-            <button class="snoc-btn" type="submit">Crear</button>
-          </form>
-        {/if}
+        <!-- Crear desde cero vive arriba, en «+ Nueva plantilla» (21/10/2026):
+             aca abajo, debajo del catalogo, nadie lo encontraba. -->
       </section>
     {/if}
     </div>

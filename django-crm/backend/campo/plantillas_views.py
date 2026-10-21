@@ -117,6 +117,9 @@ class PlantillasView(APIView):
                 nombre=str(d.get("nombre") or ""),
                 labor=str(d.get("labor") or ""),
                 definicion=d.get("definicion"),
+                #  Asuntos y plazo desde el alta (21/10/2026), solo si vienen.
+                asuntos=d.get("asuntos") if "asuntos" in d else None,
+                plazo_dias=d.get("plazo_dias"),
             )
         except P.ErrorPlantilla as e:
             return _error(e, status.HTTP_409_CONFLICT

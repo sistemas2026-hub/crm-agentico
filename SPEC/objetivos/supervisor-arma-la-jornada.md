@@ -193,6 +193,11 @@ lo corre el usuario, de solo lectura):
 
 - **Fase 2 · Las órdenes**: crear la orden de cada caso de la cola de
   Despacho (plantilla por labor, prioridad, fecha de hoy, barrio).
+  **La plantilla la elige `plantilla_del_caso`** (20/10/2026, ficha
+  `labores-propias-por-empresa.md`, D9–D10): «plantilla por labor» es ambiguo
+  apenas una labor tiene dos plantillas, y el usuario decidió que el asunto del
+  ticket desempata. **Sin plantilla no se crea la orden**: el caso queda para
+  una persona con el motivo que devuelve la función.
 - **Fase 3 · Publicar**: el reparto por el mismo camino que el botón, con
   `auditor-de-frontera`: le llega al técnico.
 

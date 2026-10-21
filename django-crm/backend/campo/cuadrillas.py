@@ -112,11 +112,9 @@ class Cuadrilla(BaseModel):
     # que.
 
     #: Que hace normalmente. Mismo catalogo que la jornada.
+    #  Sin `choices` desde el 20/10/2026: ver `campo.labores`.
     labor_habitual = models.CharField(
         max_length=20,
-        choices=(("instalacion", "Instalacion"),
-                 ("correctivo", "Correctivo"),
-                 ("trabajos", "Trabajos")),
         default="instalacion",
     )
 
@@ -185,7 +183,8 @@ class JornadaDeCuadrilla(BaseModel):
         Cuadrilla, on_delete=models.CASCADE, related_name="jornadas"
     )
     fecha = models.DateField()
-    labor = models.CharField(max_length=20, choices=LABORES, default=INSTALACION)
+    #  Sin `choices` desde el 20/10/2026: ver `campo.labores`.
+    labor = models.CharField(max_length=20, default=INSTALACION)
 
     #: QUE ZONAS CUBRE ESE DIA, y por eso vive en la jornada y no en la
     #: cuadrilla: igual que la labor, hay dias que una cuadrilla se sale de su
@@ -239,7 +238,9 @@ class JornadaDeCuadrilla(BaseModel):
         ]
 
     def __str__(self) -> str:
-        return f"{self.cuadrilla.nombre} · {self.fecha} · {self.get_labor_display()}"
+        from campo.labores import NOMBRE_DE_FABRICA
+        return (f"{self.cuadrilla.nombre} · {self.fecha} · "
+                f"{NOMBRE_DE_FABRICA.get(self.labor, self.labor)}")
 
 
 class ConfiguracionDeReparto(BaseModel):
@@ -387,34 +388,27 @@ def onus_para_corte_de_red(org_id) -> int:
 MAX_NOMBRE_DE_LABOR = 40
 
 
-def labores_de(org) -> list[dict]:
-    """Las labores, con el nombre que les da ESTA empresa (o el de fabrica).
-
-    UNA sola lista para todas las pantallas que las muestran -- Plantillas,
-    Despacho, Cuadrillas --: si cada una armara la suya, el nombre cambiaria
-    en una y no en las otras. El 'id' es siempre el interno.
-    """
-    propios = (ConfiguracionDeReparto.objects.filter(org=org)
-               .values_list("nombres_de_labor", flat=True).first()) or {}
-    return [{"id": v,
-             "texto": str(propios.get(v) or "").strip() or n}
-            for v, n in JornadaDeCuadrilla.LABORES]
+def labores_de(org, *, incluir_inactivas: bool = False) -> list[dict]:
+    """Ver `campo.labores.labores_de`: vive alla desde el 20/10/2026. Queda
+    aca para quien ya la importaba de este modulo."""
+    from campo.labores import labores_de as _labores_de
+    return _labores_de(org, incluir_inactivas=incluir_inactivas)
 
 
 def labor_de_cada_grupo(org) -> dict:
     """grupo -> labor para esta empresa: los de fabrica, pisados por lo suyo.
 
     Solo se toman las labores que existen: una clave guardada con una labor
-    que no esta en `JornadaDeCuadrilla.LABORES` --una que se dio de baja, un
+    que `campo.labores.labor_valida` rechaza --una que se dio de baja, un
     error de tipeo-- vuelve al valor de fabrica en vez de inclinar jornadas
     hacia una labor que el reparto no conoce. Lo que no tiene labor --un grupo
     sin entrada-- no aparece: quien llama lo cuenta aparte.
     """
-    validas = dict(JornadaDeCuadrilla.LABORES)
+    from campo.labores import labor_valida
     efectivo = dict(ConfiguracionDeReparto.LABOR_POR_GRUPO_DE_FABRICA)
     propio = getattr(configuracion_de_reparto(org), "labor_por_grupo", None)
     for grupo, labor in (propio if isinstance(propio, dict) else {}).items():
-        if labor in validas:
+        if labor_valida(org, labor):
             efectivo[str(grupo)] = labor
         elif labor in (None, ""):
             #  Vacio a proposito: la empresa dice que ese grupo no inclina
