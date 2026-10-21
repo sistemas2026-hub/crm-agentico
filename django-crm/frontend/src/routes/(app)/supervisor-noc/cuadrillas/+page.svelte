@@ -821,7 +821,7 @@
             <label class="snoc-campo-grupo">
               <span class="snoc-label">Hora de corte</span>
               <input class="snoc-campo" type="time" name="hora_de_corte"
-                     value={data.horario?.hora_de_corte ?? ''} />
+                     value={data.horario?.hora_de_corte ?? ''} style="width:auto;" />
             </label>
           </div>
           <span class="snoc-body-sm snoc-secundario">
@@ -836,10 +836,10 @@
                   <input type="checkbox" name={`trabaja_${d.id}`} value="1" checked={!!v} />
                   <span class="snoc-body">{d.texto}</span>
                 </label>
-                <input class="snoc-campo" type="time" name={`abre_${d.id}`}
+                <input class="snoc-campo" type="time" name={`abre_${d.id}`} style="width:auto;"
                        value={v?.abre ?? '07:00'} aria-label={`${d.texto}: abre`} />
                 <span class="snoc-body-sm">a</span>
-                <input class="snoc-campo" type="time" name={`cierra_${d.id}`}
+                <input class="snoc-campo" type="time" name={`cierra_${d.id}`} style="width:auto;"
                        value={v?.cierra ?? '17:00'} aria-label={`${d.texto}: cierra`} />
               </div>
             {/each}
