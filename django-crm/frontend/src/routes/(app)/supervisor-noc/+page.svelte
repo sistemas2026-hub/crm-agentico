@@ -1,11 +1,9 @@
 <script>
   import { onDestroy } from 'svelte';
 
-  import ChatBurbuja from '$lib/supervisor/ChatBurbuja.svelte';
   import { resultadoDelCierre } from '$lib/v2/resultado-del-cierre.js';
-  //  La burbuja del chat del Supervisor. Vive en su propio componente: este
-  //  archivo ya tiene 1.900 lineas y es de los que CLAUDE.md marca como
-  //  superficie de conflicto alta.
+  //  La burbuja del chat del Supervisor ya no se monta aca: vive en
+  //  +layout.svelte (21/10/2026), para que salga en todas las pestañas.
   import { deserialize, enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import {
@@ -3113,14 +3111,7 @@
   {/if}
 </div>
 
-<!-- La burbuja del Supervisor. Fuera del contenedor a proposito:
-     es fija y pertenece a la pantalla, no a una seccion.
-
-     UNA SOLA, y la eleccion esta medida: dos ramas construyeron un chat del
-     Supervisor y esta es la que recupera el hilo al abrir (hace GET al montarse)
-     y la que ya estaba desplegada y probada. Lo que cambio en la reconciliacion
-     no es la burbuja: es a QUE le habla -- ahora al Supervisor dedicado, con sus
-     15 herramientas, en vez del agente generico del tenant.
-     'lib/v2/ChatSupervisor.svelte' quedo sin montar a proposito; su destino es
-     una decision pendiente, no un olvido. -->
-<ChatBurbuja />
+<!-- La burbuja del Supervisor vive en +layout.svelte desde el 21/10/2026:
+     aparece en todas las pestañas y no se corta al cambiar de una a otra.
+     'lib/v2/ChatSupervisor.svelte' sigue sin montar a proposito; su destino
+     es una decision pendiente, no un olvido. -->
