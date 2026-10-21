@@ -1032,6 +1032,16 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  escribe su propio resultado se declara correcto
                        #  solo. 'OrigenAprendizaje' no tiene 'supervisor'.
                        "propuesta-resultado",
+                       #  21/10/2026. 'jornada-vista-previa' es de las faciles
+                       #  de declarar: es un **GET**. Devuelve lo que armaria el
+                       #  Supervisor un dia (el mismo `planear_el_dia` de la fase
+                       #  horaria) y NO ESCRIBE NI UNA FILA: no arma jornadas, no
+                       #  guarda barrios y no le pregunta nada al motor. Su suite
+                       #  lo afirma sobre el efecto (test_el_supervisor_arma_la_
+                       #  jornada.py::test_vp_*): tras mirar, ninguna jornada
+                       #  nueva, y el lector del motor reemplazado por uno que
+                       #  revienta si se lo llama. Exige 'EsJefeDeOperaciones'.
+                       "jornada-vista-previa",
                        #  LOTE 1, paso P11 (05/10/2026). 'supervisor-turno' es
                        #  el relevo de turno, y es de las faciles de declarar:
                        #  es un **GET**.
