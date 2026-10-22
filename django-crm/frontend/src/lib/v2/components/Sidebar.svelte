@@ -22,15 +22,18 @@
     Smartphone,
     LogOut,
     Sparkles,
-    Network,
     MessageCircle,
-    ListChecks,
     PlugZap,
     GraduationCap,
     Gauge,
     ClipboardCheck,
     Radar,
-    Boxes
+    Boxes,
+    Activity,
+    Bot,
+    Cable,
+    Download,
+    BookMarked
   } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
 
@@ -71,42 +74,30 @@
     onsearch = () => {}
   } = $props();
 
+  /*
+   * Grupos por TRABAJO, del mas urgente al menos (22/10/2026). Antes el
+   * primero era "Vender" -- la portada de BottleCRM -- y toda la operacion
+   * del ISP cabia en "Atender", con 14 entradas y dos iconos repetidos
+   * (Radar dos veces, Network dos veces). Ningun destino se quito: solo
+   * cambiaron de grupo, y cada uno tiene ahora un icono propio.
+   */
   const GROUPS = [
     {
-      label: 'Vender',
+      label: 'Operación en vivo',
       items: [
         { href: '/', label: 'Hoy', icon: Sun, exact: true },
-        {
-          href: '/pipeline',
-          label: 'Negociaciones',
-          icon: Columns3,
-          count: 'pipeline',
-          termKey: 'opportunity.plural'
-        },
-        { href: '/leads', label: 'Prospectos', icon: Target, count: 'leads', termKey: 'lead.plural' },
-        { href: '/accounts', label: 'Cuentas', icon: Building2, termKey: 'account.plural' },
-        { href: '/contacts', label: 'Contactos', icon: Users, termKey: 'contact.plural' },
-        { href: '/goals', label: 'Objetivos', icon: Trophy }
-      ]
-    },
-    {
-      label: 'Atender',
-      items: [
-        { href: '/tasks', label: 'Tareas', icon: CircleCheck, count: 'tasks' },
-        // Approvals and Analytics live under Tickets as section tabs. They are
-        // not separate destinations, so they do not get separate nav entries,
-        // one level of navigation, and the tab strip carries the rest.
-        { href: '/tickets', label: 'Tickets', icon: LifeBuoy, count: 'tickets' },
-        { href: '/asistente', label: 'Asistente', icon: Sparkles },
         { href: '/conversaciones', label: 'Conversaciones', icon: MessageCircle },
-        { href: '/simulador-whatsapp', label: 'Simulador WhatsApp', icon: Smartphone },
+        { href: '/supervisor-noc', label: 'Supervisor NOC IA', icon: Activity },
         // Que hace cada agente AHORA. /agentes dice como esta configurado
         // cada uno; esto, en que anda en este momento -- son dos preguntas
         // distintas y por eso son dos entradas.
         { href: '/centro-mando', label: 'Centro de mando', icon: Radar },
-        { href: '/agentes', label: 'Agentes', icon: Network },
-        { href: '/supervisor-noc', label: 'Supervisor NOC IA', icon: Radar },
-        { href: '/manual', label: 'Manual', icon: ListChecks },
+        { href: '/asistente', label: 'Asistente', icon: Sparkles }
+      ]
+    },
+    {
+      label: 'Campo',
+      items: [
         // La bandeja donde se decide la factibilidad de cada solicitud.
         // Existia desde el 02/09 y NO estaba enlazada en ningun lado: solo
         // se llegaba escribiendo la URL. Una pantalla sin entrada no esta
@@ -115,13 +106,39 @@
         // Que hay en bodega y que tiene cada tecnico. Va aca y no bajo
         // Configurar porque es una pantalla de OPERACION: se abre para
         // decidir si se puede despachar, no para ajustar nada.
-        { href: '/inventario', label: 'Inventario', icon: Boxes },
+        { href: '/inventario', label: 'Inventario', icon: Boxes }
+      ]
+    },
+    {
+      label: 'Clientes',
+      items: [
+        // Approvals and Analytics live under Tickets as section tabs. They are
+        // not separate destinations, so they do not get separate nav entries,
+        // one level of navigation, and the tab strip carries the rest.
+        { href: '/tickets', label: 'Tickets', icon: LifeBuoy, count: 'tickets' },
+        { href: '/tasks', label: 'Tareas', icon: CircleCheck, count: 'tasks' },
+        { href: '/accounts', label: 'Cuentas', icon: Building2, termKey: 'account.plural' },
+        { href: '/contacts', label: 'Contactos', icon: Users, termKey: 'contact.plural' },
         { href: '/solutions', label: 'Base de conocimiento', icon: BookOpen },
         { href: '/documents', label: 'Documentos', icon: FileText }
       ]
     },
     {
-      label: 'Facturar',
+      label: 'Ventas',
+      items: [
+        {
+          href: '/pipeline',
+          label: 'Negociaciones',
+          icon: Columns3,
+          count: 'pipeline',
+          termKey: 'opportunity.plural'
+        },
+        { href: '/leads', label: 'Prospectos', icon: Target, count: 'leads', termKey: 'lead.plural' },
+        { href: '/goals', label: 'Objetivos', icon: Trophy }
+      ]
+    },
+    {
+      label: 'Facturación',
       items: [
         {
           href: '/invoices',
@@ -131,6 +148,19 @@
           termKey: 'invoice.plural'
         },
         { href: '/timesheet', label: 'Registro de horas', icon: Clock }
+      ]
+    },
+    {
+      // Lo que se ajusta de la IA: quien atiende, que sigue al pie de la
+      // letra, de que ejemplos aprende, y donde se la prueba sin un cliente.
+      label: 'Dexter',
+      items: [
+        { href: '/agentes', label: 'Agentes', icon: Bot },
+        // ADMIN-only: una habilidad vigente es lo que un agente sigue "al pie
+        // de la letra" frente a un cliente.
+        { href: '/habilidades', label: 'Habilidades', icon: GraduationCap, admin: true },
+        { href: '/manual', label: 'Manual', icon: BookMarked },
+        { href: '/simulador-whatsapp', label: 'Simulador WhatsApp', icon: Smartphone }
       ]
     },
     {
@@ -153,10 +183,7 @@
         // hechos); la guiada es para uno que nadie conecto todavia (se
         // describe la API, se sondea de verdad, y sale una propuesta).
         { href: '/conectores', label: 'Conectar sistema', icon: PlugZap, admin: true },
-        { href: '/configuracion-guiada', label: 'Conectar API nueva', icon: Network, admin: true },
-        // ADMIN-only, mismo motivo: una habilidad vigente es lo que un agente
-        // sigue "al pie de la letra" frente a un cliente.
-        { href: '/habilidades', label: 'Habilidades', icon: GraduationCap, admin: true },
+        { href: '/configuracion-guiada', label: 'Conectar API nueva', icon: Cable, admin: true },
         // ADMIN-only: es el gasto de la empresa y su tope. Un colaborador de
         // soporte no tiene por que ver la factura.
         { href: '/consumo', label: 'Consumo', icon: Gauge, admin: true }
@@ -182,9 +209,18 @@
 </script>
 
 <nav class="v2-nav" aria-label="Principal">
+  <!-- La marca es la del producto; la empresa va debajo. Con un solo nombre
+       arriba no se sabia si se estaba en Dexter o en el sistema del ISP. -->
   <div class="v2-org">
-    <span class="v2-mark">{org.name.slice(0, 1)}</span>
-    <b>{org.name}</b>
+    <span class="v2-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round">
+        <path d="M5 12a7 7 0 0 1 14 0M8.5 12a3.5 3.5 0 0 1 7 0M12 13v7" />
+      </svg>
+    </span>
+    <span class="v2-org-texto">
+      <b>Dexter</b>
+      <span>{org.name}</span>
+    </span>
   </div>
 
   <!--
@@ -245,7 +281,7 @@
       target="_blank"
       rel="noopener noreferrer"
     >
-      <Smartphone />
+      <Download />
       Descargar app
     </a>
     <!-- Leaving the app. Last in the list, and a plain link. /logout is a
@@ -270,5 +306,22 @@
     font-size: inherit;
     text-align: left;
     cursor: pointer;
+  }
+  .v2-mark svg {
+    width: 18px;
+    height: 18px;
+  }
+  .v2-org-texto {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+    min-width: 0;
+  }
+  .v2-org-texto span {
+    font-size: 12px;
+    color: var(--v2-nav-label);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

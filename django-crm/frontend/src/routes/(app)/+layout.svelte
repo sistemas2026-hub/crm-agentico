@@ -70,7 +70,7 @@
 </script>
 
 <svelte:head>
-  <title>BottleCRM v2</title>
+  <title>Dexter</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 

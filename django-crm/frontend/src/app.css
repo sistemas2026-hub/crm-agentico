@@ -5,7 +5,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   BOTTLECRM DESIGN SYSTEM - Orange Primary
+   DEXTER DESIGN SYSTEM - Fibra (indigo primary; antes BottleCRM naranja)
    A modern CRM design system with warm orange accents and professional styling
    Based on DESIGN_SYSTEM.md v1.2
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -17,7 +17,7 @@
   /* ─────────────────────────────────────────────────────────────────────────
      BRAND COLORS
      ───────────────────────────────────────────────────────────────────────── */
-  --color-brand-primary: #ea580c;
+  --color-brand-primary: #4f46e5;
   --color-brand-dark: #404346;
   --color-brand-white: #ffffff;
 
@@ -34,7 +34,7 @@
   --popover-foreground: oklch(0.15 0.02 260);
 
   /* Primary - Orange */
-  --primary: oklch(0.58 0.2 30);
+  --primary: #4f46e5;
   --primary-foreground: oklch(0.98 0 0);
 
   /* Secondary */
@@ -46,8 +46,8 @@
   --muted-foreground: oklch(0.45 0.02 260);
 
   /* Accent - Light orange tint */
-  --accent: oklch(0.98 0.02 60);
-  --accent-foreground: oklch(0.25 0.05 30);
+  --accent: #eef0fd;
+  --accent-foreground: #3730a3;
 
   /* Destructive */
   --destructive: oklch(0.55 0.22 25);
@@ -55,24 +55,24 @@
   /* Borders & inputs */
   --border: oklch(0.91 0.005 60);
   --input: oklch(0.91 0.005 60);
-  --ring: oklch(0.58 0.2 30);
+  --ring: #4f46e5;
 
   /* Chart colors - Sequential (Orange-based) */
-  --chart-1: #ea580c;
-  --chart-2: #f97316;
-  --chart-3: #fb923c;
-  --chart-4: #fdba74;
-  --chart-5: #fed7aa;
+  --chart-1: #4f46e5;
+  --chart-2: #6366f1;
+  --chart-3: #818cf8;
+  --chart-4: #a5b4fc;
+  --chart-5: #c7d2fe;
 
   /* Sidebar */
   --sidebar: oklch(1 0 0);
   --sidebar-foreground: #111827;
-  --sidebar-primary: #ea580c;
+  --sidebar-primary: #4f46e5;
   --sidebar-primary-foreground: oklch(0.995 0 0);
   --sidebar-accent: oklch(0.96 0 0);
   --sidebar-accent-foreground: #111827;
   --sidebar-border: oklch(0.94 0 0);
-  --sidebar-ring: #ea580c;
+  --sidebar-ring: #4f46e5;
   --sidebar-active-fill: oklch(0.94 0 0);
   --sidebar-muted: #4b5563;
   --sidebar-subtle: #9ca3af;
@@ -80,11 +80,11 @@
   /* ─────────────────────────────────────────────────────────────────────────
      PRIMARY COLOR SCALE
      ───────────────────────────────────────────────────────────────────────── */
-  --color-primary-default: #ea580c;
-  --color-primary-hover: #c2410c;
-  --color-primary-dark: #c2410c;
-  --color-primary-active: #9a3412;
-  --color-primary-light: #fff7ed;
+  --color-primary-default: #4f46e5;
+  --color-primary-hover: #4338ca;
+  --color-primary-dark: #4338ca;
+  --color-primary-active: #3730a3;
+  --color-primary-light: #eef0fd;
 
   /* ─────────────────────────────────────────────────────────────────────────
      SEMANTIC COLORS
@@ -139,7 +139,7 @@
   --text-tertiary: #9ca3af;
   --text-disabled: #bdbdbd;
   --text-inverse: #ffffff;
-  --text-link: #ea580c;
+  --text-link: #4f46e5;
   --text-error: #dc3545;
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -488,8 +488,8 @@
   --popover-foreground: oklch(0.95 0.005 60);
 
   /* Primary - Vivid orange */
-  --primary: oklch(0.72 0.18 35);
-  --primary-foreground: oklch(0.12 0.01 30);
+  --primary: #8b85ff;
+  --primary-foreground: #0f1217;
 
   /* Secondary */
   --secondary: oklch(0.22 0.01 30);
@@ -500,8 +500,8 @@
   --muted-foreground: oklch(0.65 0.01 60);
 
   /* Accent - Warm orange glow */
-  --accent: oklch(0.25 0.04 35);
-  --accent-foreground: oklch(0.85 0.12 35);
+  --accent: #25234a;
+  --accent-foreground: #c7c4ff;
 
   /* Destructive */
   --destructive: oklch(0.65 0.2 25);
@@ -509,34 +509,34 @@
   /* Borders & inputs */
   --border: oklch(0.28 0.01 30);
   --input: oklch(0.24 0.01 30);
-  --ring: oklch(0.7 0.16 35);
+  --ring: #8b85ff;
 
   /* Chart colors - Vibrant */
-  --chart-1: #fb923c;
-  --chart-2: #fdba74;
-  --chart-3: #fed7aa;
-  --chart-4: #ffedd5;
-  --chart-5: #fff7ed;
+  --chart-1: #8b85ff;
+  --chart-2: #a5a0ff;
+  --chart-3: #c7c4ff;
+  --chart-4: #e0deff;
+  --chart-5: #f1f0ff;
 
   /* Sidebar */
   --sidebar: oklch(0.14 0 0);
   --sidebar-foreground: rgba(255, 255, 255, 0.95);
-  --sidebar-primary: #fb923c;
+  --sidebar-primary: #8b85ff;
   --sidebar-primary-foreground: oklch(0.12 0.01 30);
   --sidebar-accent: rgba(255, 255, 255, 0.06);
   --sidebar-accent-foreground: rgba(255, 255, 255, 0.95);
   --sidebar-border: rgba(255, 255, 255, 0.08);
-  --sidebar-ring: #fb923c;
+  --sidebar-ring: #8b85ff;
   --sidebar-active-fill: rgba(255, 255, 255, 0.1);
   --sidebar-muted: #9ca3af;
   --sidebar-subtle: #6b7280;
 
   /* Primary color scale - Dark mode */
-  --color-primary-default: #fb923c;
-  --color-primary-hover: #fdba74;
-  --color-primary-dark: #f97316;
-  --color-primary-active: #f97316;
-  --color-primary-light: #431407;
+  --color-primary-default: #8b85ff;
+  --color-primary-hover: #a5a0ff;
+  --color-primary-dark: #6d66f5;
+  --color-primary-active: #6d66f5;
+  --color-primary-light: #1e1b4b;
 
   /* Surface Colors - Dark mode */
   --surface-default: #1e1e1e;
@@ -550,7 +550,7 @@
   --text-tertiary: #6b7280;
   --text-disabled: #525252;
   --text-inverse: #212121;
-  --text-link: #fb923c;
+  --text-link: #a5a0ff;
   --text-error: #f87171;
 
   /* Border Colors - Dark mode */
