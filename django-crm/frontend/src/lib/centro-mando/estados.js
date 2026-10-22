@@ -14,6 +14,13 @@
  * contraste y la leyenda 2.56, contra el 4.5 que pide WCAG AA. Estos tonos
  * dicen lo mismo y se leen: ninguno baja de 4.7 sobre blanco.
  *
+ * Desde la paleta "Fibra" (22/10/2026) error, espera de respuesta, disponible
+ * y fuera de linea llevan los valores de --v2-rust, --v2-clay, --v2-moss y
+ * --v2-slate, y la espera de aprobacion --que pide a una persona-- el de
+ * --v2-ember. Van en hex y no como var(): PlantaRadial los pasa por `tono()`,
+ * que parsea el hex. 'working' y 'waiting_tool' conservan su cian y su azul:
+ * no tienen token y existen para distinguirse de los demas.
+ *
  * OCHO ESTADOS, SEIS QUE EL MOTOR EMITE HOY
  * La interfaz sabe pintar los ocho. El motor (nucleo/canales/api.py) solo
  * emite los que puede medir; `waiting_tool` y `completed` estan definidos
@@ -34,7 +41,7 @@
 export const ESTADOS = {
   error: {
     rotulo: 'CON ERRORES',
-    color: '#B91C1C',
+    color: '#B42318',
     pulso: true,
     orden: 0,
     emitido: true,
@@ -42,7 +49,7 @@ export const ESTADOS = {
   },
   waiting_approval: {
     rotulo: 'ESPERA APROBACIÓN',
-    color: '#6D28D9',
+    color: '#4F46E5',
     pulso: true,
     orden: 1,
     emitido: true,
@@ -66,7 +73,7 @@ export const ESTADOS = {
   },
   waiting_user: {
     rotulo: 'ESPERA RESPUESTA',
-    color: '#A15C07',
+    color: '#9A5B00',
     pulso: false,
     orden: 4,
     emitido: true,
@@ -74,7 +81,7 @@ export const ESTADOS = {
   },
   completed: {
     rotulo: 'COMPLETADO',
-    color: '#15803D',
+    color: '#2B6E46',
     pulso: false,
     orden: 5,
     emitido: false,
@@ -82,7 +89,7 @@ export const ESTADOS = {
   },
   idle: {
     rotulo: 'DISPONIBLE',
-    color: '#15803D',
+    color: '#2B6E46',
     pulso: false,
     orden: 6,
     emitido: true,
@@ -90,7 +97,7 @@ export const ESTADOS = {
   },
   offline: {
     rotulo: 'FUERA DE LÍNEA',
-    color: '#64748B',
+    color: '#4A5869',
     pulso: false,
     orden: 7,
     // No se emite: nada en la base dice que un agente esté apagado. Derivarlo

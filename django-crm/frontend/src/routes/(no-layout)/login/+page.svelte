@@ -4,7 +4,6 @@
   import { enhance } from '$app/forms';
 
   import imgGoogle from '$lib/assets/images/google.svg';
-  import imgLogo from '$lib/assets/images/logo.png';
   import { Mail, Check } from '@lucide/svelte';
 
   let { data = {} } = $props();
@@ -57,18 +56,18 @@
 </script>
 
 <svelte:head>
-  <title>Iniciar sesión · BottleCRM</title>
+  <title>Iniciar sesión · Dexter</title>
   <meta
     name="description"
-    content="Iniciá sesión en BottleCRM para gestionar tus contactos, negociaciones y hacer crecer tu negocio."
+    content="Iniciá sesión en Dexter."
   />
 </svelte:head>
 
 <div class="v2-root v2-auth">
   <div class="v2-auth-box">
     <a href="/" class="v2-auth-brand">
-      <img src={imgLogo} alt="" />
-      <b>BottleCRM</b>
+      <span class="v2-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M5 12a7 7 0 0 1 14 0M8.5 12a3.5 3.5 0 0 1 7 0M12 13v7" /></svg></span>
+      <b>Dexter</b>
     </a>
 
     <div class="v2-auth-card">

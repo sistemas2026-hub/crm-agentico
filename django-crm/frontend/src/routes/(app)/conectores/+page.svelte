@@ -306,16 +306,16 @@
   .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
   .tarjeta {
     padding: 16px 18px; text-align: left; cursor: pointer;
-    border: 1px solid var(--v2-line-soft); background: var(--v2-surface, #fff);
+    border: 1px solid var(--v2-line-soft); background: var(--v2-card);
     font: inherit; color: inherit;
   }
-  .tarjeta:hover { border-color: color-mix(in srgb, var(--v2-accent, #2563eb) 40%, transparent); }
+  .tarjeta:hover { border-color: color-mix(in srgb, var(--v2-ember) 40%, transparent); }
 
   .cabeza { display: flex; align-items: center; gap: 9px; }
   .icono {
     display: grid; place-items: center; width: 30px; height: 30px; flex: none;
-    border-radius: 7px; color: var(--v2-accent, #2563eb);
-    background: color-mix(in srgb, var(--v2-accent, #2563eb) 10%, transparent);
+    border-radius: 7px; color: var(--v2-ember);
+    background: color-mix(in srgb, var(--v2-ember) 10%, transparent);
   }
 
   .cifras {
@@ -339,8 +339,8 @@
 
   .pendiente {
     padding: 12px 14px; border-radius: 6px;
-    background: color-mix(in srgb, var(--v2-accent, #2563eb) 6%, transparent);
-    border: 1px solid color-mix(in srgb, var(--v2-accent, #2563eb) 22%, transparent);
+    background: color-mix(in srgb, var(--v2-ember) 6%, transparent);
+    border: 1px solid color-mix(in srgb, var(--v2-ember) 22%, transparent);
   }
   .lista-pendiente { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; line-height: 1.7; }
 

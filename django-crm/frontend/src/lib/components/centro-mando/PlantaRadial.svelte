@@ -594,9 +594,9 @@
     {#if ficha}
       <g class="ficha" transform="translate({ficha.x}, {ficha.y})" aria-hidden="true">
         <rect x="0" y="0" width={FW} height={FH} rx="10"
-          fill="#FFFFFF" stroke="#D9E0EA" stroke-width="1.5" />
+          fill="#FFFFFF" stroke="#E1E6ED" stroke-width="1.5" />
         <rect x="0" y="0" width="6" height={FH} rx="3" fill={ficha.color} />
-        <text x="18" y="27" font-size="15" font-weight="800" fill="#0F172A">
+        <text x="18" y="27" font-size="15" font-weight="800" fill="#14122E">
           {String(ficha.agente.nombre).replaceAll('_', ' ')}
         </text>
         <rect x="18" y="36" width={ficha.rotulo.length * 7.2 + 18} height="20" rx="10"
@@ -605,9 +605,9 @@
           {ficha.rotulo}
         </text>
         {#each ficha.filas as f, i (f[0])}
-          <text x="18" y={78 + i * 19} font-size="12" fill="#64748B">{f[0]}</text>
+          <text x="18" y={78 + i * 19} font-size="12" fill="#4A5869">{f[0]}</text>
           <text x={FW - 18} y={78 + i * 19} text-anchor="end" font-size="12.5" font-weight="700"
-            fill={f[2] ? '#6D28D9' : '#0F172A'}>{f[1]}</text>
+            fill={f[2] ? '#3730A3' : '#14122E'}>{f[1]}</text>
         {/each}
       </g>
     {/if}
@@ -673,10 +673,10 @@
   .filtros { flex: 0 0 auto; display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 2px 0; }
   .filtros button {
     font: inherit; font-size: 11.5px; font-weight: 600; line-height: 1;
-    padding: 5px 10px; border: 1px solid #D9E0EA; border-radius: 999px;
-    background: #fff; color: #475569; cursor: pointer;
+    padding: 5px 10px; border: 1px solid var(--v2-line-strong); border-radius: 999px;
+    background: var(--v2-card); color: var(--v2-slate); cursor: pointer;
   }
-  .filtros button.activo { background: #0F172A; color: #fff; border-color: #0F172A; }
+  .filtros button.activo { background: var(--v2-ember); color: var(--v2-on-ember); border-color: var(--v2-ember); }
   .filtros button:disabled { opacity: .45; cursor: default; }
   .filtros .n { margin-left: 6px; opacity: .7; font-variant-numeric: tabular-nums; }
 
@@ -684,14 +684,14 @@
     flex: 0 0 auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     padding: 6px 4px 0;
   }
-  .sep { width: 1px; align-self: stretch; background: #DCE3EC; }
+  .sep { width: 1px; align-self: stretch; background: var(--v2-line); }
   .crece { flex: 1; }
   .zona, .frescura, .falta {
     display: flex; align-items: center; gap: 5px;
-    font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: #64748B;
+    font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--v2-slate);
   }
   .zona i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
-  .falta { color: #B45309; font-weight: 700; }
+  .falta { color: var(--v2-clay); font-weight: 700; }
   /* El paseo dura menos que el intervalo entre lecturas: si no, el
      repintado lo cortaria por la mitad. */
   @keyframes andar {
@@ -716,7 +716,7 @@
   .mandos { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
   .mandos button {
     font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 7px;
-    border: 1px solid #D9E0EA; background: #fff; color: #334155; cursor: pointer;
+    border: 1px solid var(--v2-line-strong); background: var(--v2-card); color: var(--v2-ink); cursor: pointer;
   }
   .mandos button:disabled { opacity: .45; cursor: default; }
 </style>

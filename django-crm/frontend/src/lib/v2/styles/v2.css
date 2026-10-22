@@ -240,6 +240,10 @@
   font-weight: 750;
   flex: none;
 }
+.v2-mark svg {
+  width: 18px;
+  height: 18px;
+}
 /* Las etiquetas de grupo usan .v2-label, que es pizarra sobre papel; sobre
    la barra oscura tienen que ser su propio tono. */
 .v2-nav .v2-label {
@@ -1404,6 +1408,11 @@ a.v2-setting:hover {
   border-radius: 7px;
   display: block;
   flex: none;
+}
+.v2-auth-brand .v2-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
 }
 .v2-auth-brand b {
   font-size: 17px;

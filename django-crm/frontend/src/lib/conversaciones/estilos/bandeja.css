@@ -269,8 +269,14 @@ html:not(.dark) .bandeja {
    personas. Enviar una respuesta es exactamente las dos cosas -- una acción,
    hecha por una persona.
 
-   Va acotado a `.bandeja` y no se toca la clase global: el resto del CRM
-   conserva su ámbar. Hoy son los cuatro botones del compositor.
+   Va acotado a `.bandeja` y no se toca la clase global. Hoy son los cuatro
+   botones del compositor.
+
+   22/10/2026: el resto de Dexter dejo el ambar por el indigo de "Fibra"
+   (#4F46E5, ver la cabecera de v2.css) y la Bandeja NO lo adopta a
+   proposito: aca el azul dice "lo hizo una persona" y el violeta (#7c3aed)
+   "lo hizo la IA". El indigo cae entre los dos y borraria justo esa
+   distincion, que es para lo que existe esta pantalla.
 
    El ámbar ademas ya tiene un trabajo acá: `--bandeja-aviso` marca lo que
    necesita atención. Un botón permanentemente ámbar al lado de un aviso

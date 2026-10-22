@@ -176,7 +176,7 @@
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <code
               class="v2-num"
-              style="flex:1;min-width:220px;background:var(--v2-bg-sunk);border:1px solid var(--v2-line);border-radius:var(--v2-radius);padding:9px 11px;font-size:12.5px;word-break:break-all"
+              style="flex:1;min-width:220px;background:var(--v2-paper);border:1px solid var(--v2-line);border-radius:var(--v2-radius);padding:9px 11px;font-size:12.5px;word-break:break-all"
             >
               {form.created.token}
             </code>
@@ -424,7 +424,7 @@
      estilo propio -- el resto usa las clases de v2. */
   .alcances {
     flex: 1 0 100%;
-    border: 1px solid var(--v2-rule, #e4e7e9);
+    border: 1px solid var(--v2-line);
     padding: 12px 14px;
     margin: 4px 0 0;
   }
@@ -452,7 +452,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    color: var(--v2-muted, #5c6672);
+    color: var(--v2-slate);
     cursor: pointer;
   }
 </style>

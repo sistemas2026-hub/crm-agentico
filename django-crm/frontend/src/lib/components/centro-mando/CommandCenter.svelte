@@ -135,37 +135,37 @@
 
 <style>
   .sala {
-    background: #fff;
-    background-image: radial-gradient(ellipse at 50% 40%, rgba(14,116,144,.06), transparent 62%);
-    color: #0f172a; border: 1px solid #e2e8f0; border-radius: 14px;
+    background: var(--v2-card);
+    background-image: radial-gradient(ellipse at 50% 40%, rgba(79,70,229,.06), transparent 62%);
+    color: var(--v2-ink); border: 1px solid var(--v2-line); border-radius: 14px;
     overflow: hidden; display: flex; flex-direction: column;
     min-height: 560px;
   }
 
   .identidad {
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    padding: 9px 16px; border-bottom: 1px solid #e2e8f0; font-size: 11px;
+    padding: 9px 16px; border-bottom: 1px solid var(--v2-line); font-size: 11px;
   }
-  .marca { font-weight: 700; letter-spacing: .16em; color: #0f172a; display: flex; align-items: center; gap: 8px; }
-  .marca b { font-weight: 500; letter-spacing: .18em; color: #475569; }
-  .marca i { width: 7px; height: 7px; border-radius: 50%; background: #0e7490; }
-  .tenant { font-family: ui-monospace, monospace; letter-spacing: .08em; padding: 3px 9px; border: 1px solid #e2e8f0; border-radius: 6px; text-transform: uppercase; }
+  .marca { font-weight: 700; letter-spacing: .16em; color: var(--v2-ink); display: flex; align-items: center; gap: 8px; }
+  .marca b { font-weight: 500; letter-spacing: .18em; color: var(--v2-slate); }
+  .marca i { width: 7px; height: 7px; border-radius: 50%; background: var(--v2-ember); }
+  .tenant { font-family: ui-monospace, monospace; letter-spacing: .08em; padding: 3px 9px; border: 1px solid var(--v2-line); border-radius: 6px; text-transform: uppercase; }
   .sep { flex: 1; }
   .dato { font-family: ui-monospace, monospace; font-size: 10.5px; }
-  .dato.rojo { color: #b91c1c; }
-  .reloj { font-family: ui-monospace, monospace; font-size: 11px; color: #0f172a; }
-  .reloj em { color: #64748b; font-style: normal; }
+  .dato.rojo { color: var(--v2-rust); }
+  .reloj { font-family: ui-monospace, monospace; font-size: 11px; color: var(--v2-ink); }
+  .reloj em { color: var(--v2-slate); font-style: normal; }
 
   .cuerpo { flex: 1; display: flex; min-height: 0; }
   /* La planta trae su propio lienzo, su encaje y sus mandos: aqui solo se le
      da el sitio. */
   .mapa { flex: 1; min-width: 0; min-height: 0; display: flex; padding: 0 10px 8px; }
 
-  .lateral { flex: 0 0 319px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid #e2e8f0; }
+  .lateral { flex: 0 0 319px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--v2-line); }
   .lateral :global(.eventos) { flex: 1; min-height: 0; border-left: 0; }
 
   @media (max-width: 1100px) {
     .cuerpo { flex-direction: column; }
-    .lateral { flex: 0 0 auto; border-left: 0; border-top: 1px solid #e2e8f0; max-height: 300px; }
+    .lateral { flex: 0 0 auto; border-left: 0; border-top: 1px solid var(--v2-line); max-height: 300px; }
   }
 </style>

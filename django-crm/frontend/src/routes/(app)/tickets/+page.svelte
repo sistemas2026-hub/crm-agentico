@@ -184,7 +184,7 @@
       <!-- 19/10/2026: la cola entera, sin filtro de area. Solo quien
            administra la ve; un colaborador sigue viendo solo la suya. -->
       {@const t = data.todasLasAreas}
-      <a class="area-tarjeta" href="/tickets?area={data.todas}" style="--area-color: #475569">
+      <a class="area-tarjeta" href="/tickets?area={data.todas}" style="--area-color: var(--v2-slate)">
         <span class="area-marca" aria-hidden="true"><LifeBuoy size={17} strokeWidth={1.9} /></span>
         <span class="area-nombre">{t.etiqueta}</span>
         <span class="area-total v2-num">{t.total}</span>
@@ -533,8 +533,8 @@
   /* La actual no es un enlace: lleva a donde ya estas. Se marca y no se pulsa. */
   .pag-actual {
     font-weight: 600;
-    background: var(--v2-accent-soft, #eef2ff);
-    border-color: var(--v2-accent, #2f6fed);
+    background: var(--v2-ember-soft);
+    border-color: var(--v2-ember);
     cursor: default;
   }
   /* Los extremos se muestran apagados en vez de desaparecer: si el boton se
@@ -545,13 +545,13 @@
   }
   .pag-hueco {
     padding: 0 2px;
-    color: var(--v2-muted, #6b7280);
+    color: var(--v2-slate);
   }
   .divergencia {
     display: block;
     margin-top: 2px;
     font-size: 11px;
-    color: var(--v2-muted, #6b7280);
+    color: var(--v2-slate);
   }
   .asignado {
     display: inline-flex;
@@ -566,13 +566,13 @@
     max-width: 140px;
   }
   .asignado-mas {
-    color: var(--v2-muted, #8a9196);
+    color: var(--v2-slate);
     font-size: 11px;
   }
   .asunto-id {
     display: block;
     font-size: 11px;
-    color: var(--v2-muted, #8a9196);
+    color: var(--v2-slate);
     margin-top: 1px;
   }
   /* Grilla fluida: en pantallas chicas las tarjetas se reacomodan solas, sin
@@ -617,7 +617,7 @@
   }
   .aviso-sin-area p + p {
     margin-top: 6px;
-    color: var(--v2-muted, #6b7378);
+    color: var(--v2-slate);
   }
   .migas {
     display: flex;
@@ -625,7 +625,7 @@
     gap: 6px;
     padding: 14px 0 2px;
     font-size: 12px;
-    color: var(--v2-muted, #8a9196);
+    color: var(--v2-slate);
   }
   .migas a {
     color: inherit;
@@ -640,7 +640,7 @@
     font-weight: 600;
     letter-spacing: 0.02em;
     text-transform: uppercase;
-    color: var(--v2-muted, #6b7378);
+    color: var(--v2-slate);
     margin: 4px 0 0;
   }
   .sub-nav {
@@ -667,7 +667,7 @@
   .area-nombre {
     font-size: 12.5px;
     font-weight: 600;
-    color: var(--v2-muted, #6b7378);
+    color: var(--v2-slate);
   }
   .area-total {
     font-size: 26px;
@@ -682,7 +682,7 @@
     margin-top: 2px;
   }
   .marca {
-    color: var(--v2-muted, #8a9196);
+    color: var(--v2-slate);
   }
   .marca.urgente.hay {
     color: var(--v2-rust, #e8590c);
@@ -694,7 +694,7 @@
   }
   .area-sin-asignar {
     font-size: 11px;
-    color: var(--v2-muted, #8a9196);
+    color: var(--v2-slate);
     margin-top: 3px;
   }
 </style>

@@ -307,10 +307,6 @@
     text-align: left;
     cursor: pointer;
   }
-  .v2-mark svg {
-    width: 18px;
-    height: 18px;
-  }
   .v2-org-texto {
     display: flex;
     flex-direction: column;

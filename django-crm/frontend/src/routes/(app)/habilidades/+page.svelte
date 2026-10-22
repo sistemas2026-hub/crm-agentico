@@ -425,7 +425,7 @@
     align-items: center;
     gap: 10px;
     padding: 8px 10px;
-    background: var(--v2-surface-soft, rgba(0, 0, 0, 0.02));
+    background: var(--v2-paper);
     border-radius: 6px;
   }
 
@@ -436,7 +436,7 @@
   .bloque-pasos {
     margin: 6px 0 0;
     padding: 10px 12px;
-    background: var(--v2-surface-soft, rgba(0, 0, 0, 0.03));
+    background: var(--v2-paper);
     border-radius: 6px;
     font-family: ui-monospace, monospace;
     font-size: 12px;
@@ -454,9 +454,9 @@
     cursor: pointer;
   }
   .chip-rol.activo {
-    background: var(--v2-accent, #2563eb);
-    border-color: var(--v2-accent, #2563eb);
-    color: #fff;
+    background: var(--v2-ember);
+    border-color: var(--v2-ember);
+    color: var(--v2-on-ember);
   }
 
   .v2-table {

@@ -313,22 +313,22 @@
     padding: 0.85rem 1.4rem;
     border: none;
     border-radius: var(--snoc-r-full, 999px);
-    background: var(--snoc-primary, #2b5cab);
-    color: var(--snoc-on-primary, #fff);
+    background: var(--v2-ember);
+    color: var(--v2-on-ember);
     font: inherit;
     font-weight: 600;
     cursor: pointer;
     box-shadow: 0 6px 20px rgb(0 0 0 / 22%);
   }
   .snoc-chat-boton:hover { filter: brightness(1.08); }
-  .snoc-chat-boton:focus-visible { outline: 3px solid var(--snoc-primary-fixed-dim, #9ec1ff); outline-offset: 2px; }
+  .snoc-chat-boton:focus-visible { outline: 3px solid var(--v2-ember); outline-offset: 2px; }
 
   .snoc-chat-nuevos {
     min-width: 1.4rem;
     height: 1.4rem;
     padding: 0 0.35rem;
     border-radius: 999px;
-    background: #d93025;
+    background: var(--v2-rust);
     color: #fff;
     font-size: 0.8rem;
     font-weight: 700;
@@ -339,7 +339,7 @@
 
   .snoc-chat-punto {
     width: 0.5rem; height: 0.5rem; border-radius: 50%;
-    background: var(--snoc-primary-fixed, #cfe0ff);
+    background: color-mix(in srgb, var(--v2-ember) 25%, var(--v2-card));
   }
 
   .snoc-chat-panel {
@@ -347,9 +347,9 @@
     height: min(32rem, calc(100vh - 8rem));
     display: flex;
     flex-direction: column;
-    background: var(--snoc-surface, #fff);
-    color: var(--snoc-on-surface, #1a1c1e);
-    border: 1px solid var(--snoc-outline-variant, #c3c7cf);
+    background: var(--v2-card);
+    color: var(--v2-ink);
+    border: 1px solid var(--v2-line);
     border-radius: var(--snoc-lg, 16px);
     box-shadow: 0 16px 48px rgb(0 0 0 / 26%);
     overflow: hidden;
@@ -365,9 +365,9 @@
   .snoc-chat-cabecera {
     display: flex; align-items: center; justify-content: space-between;
     gap: 1rem; padding: 0.9rem 1.1rem;
-    background: var(--snoc-primary-container, #d8e2ff);
-    color: var(--snoc-on-secondary-container, #0f1b2d);
-    border-bottom: 1px solid var(--snoc-outline-variant, #c3c7cf);
+    background: var(--v2-ember-soft);
+    color: var(--v2-ink);
+    border-bottom: 1px solid var(--v2-line);
   }
   .snoc-chat-titulo { margin: 0; font-weight: 700; }
   .snoc-chat-sub { margin: 0.15rem 0 0; font-size: 0.8rem; opacity: 0.8; }
@@ -383,7 +383,7 @@
 
   .snoc-chat-aviso {
     margin: 0; font-size: 0.85rem; line-height: 1.5;
-    color: var(--snoc-on-surface-variant, #43474e);
+    color: var(--v2-slate);
   }
 
   .snoc-chat-msg {
@@ -395,42 +395,42 @@
 
   .snoc-chat-usuario {
     align-self: flex-end;
-    background: var(--snoc-primary, #2b5cab);
-    color: var(--snoc-on-primary, #fff);
+    background: var(--v2-ember);
+    color: var(--v2-on-ember);
     border-bottom-right-radius: 4px;
   }
   .snoc-chat-supervisor {
     align-self: flex-start;
-    background: var(--snoc-primary-container, #d8e2ff);
-    color: var(--snoc-on-secondary-container, #0f1b2d);
+    background: var(--v2-ember-soft);
+    color: var(--v2-ink);
     border-bottom-left-radius: 4px;
   }
   .snoc-chat-pensando { opacity: 0.7; font-style: italic; }
 
   .snoc-chat-error {
     margin: 0; padding: 0.6rem 1.1rem; font-size: 0.85rem;
-    background: var(--snoc-error-container, #ffdad6);
-    color: var(--snoc-on-error-container, #410002);
+    background: color-mix(in srgb, var(--v2-rust) 10%, var(--v2-card));
+    color: var(--v2-rust);
   }
 
   .snoc-chat-caja {
     display: flex; gap: 0.5rem; padding: 0.75rem;
-    border-top: 1px solid var(--snoc-outline-variant, #c3c7cf);
+    border-top: 1px solid var(--v2-line);
   }
   .snoc-chat-caja textarea {
     flex: 1; resize: none; font: inherit; font-size: 0.9rem;
     padding: 0.5rem 0.65rem;
-    border: 1px solid var(--snoc-outline, #73777f);
+    border: 1px solid var(--v2-line-strong);
     border-radius: var(--snoc-r, 8px);
-    background: var(--snoc-surface, #fff);
+    background: var(--v2-card);
     color: inherit;
   }
   .snoc-chat-caja button {
     align-self: flex-end;
     padding: 0.55rem 1rem; border: none;
     border-radius: var(--snoc-r, 8px);
-    background: var(--snoc-primary, #2b5cab);
-    color: var(--snoc-on-primary, #fff);
+    background: var(--v2-ember);
+    color: var(--v2-on-ember);
     font: inherit; font-weight: 600; cursor: pointer;
   }
   .snoc-chat-caja button:disabled { opacity: 0.5; cursor: default; }

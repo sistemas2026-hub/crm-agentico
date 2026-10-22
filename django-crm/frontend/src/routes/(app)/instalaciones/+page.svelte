@@ -296,79 +296,83 @@
     display: flex;
     gap: 4px;
     flex-wrap: wrap;
-    border-bottom: 1px solid var(--v2-border, #e3e6e4);
+    border-bottom: 1px solid var(--v2-line);
     margin-bottom: 4px;
   }
   .pestana {
     padding: 8px 14px;
     font-size: 13.5px;
-    color: var(--v2-text-muted, #6b7671);
+    color: var(--v2-slate);
     text-decoration: none;
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
   }
-  .pestana:hover { color: var(--v2-text, #16211f); }
+  .pestana:hover { color: var(--v2-ink); }
   .pestana.activa {
-    color: var(--v2-text, #16211f);
+    color: var(--v2-ink);
     font-weight: 600;
-    border-bottom-color: var(--v2-accent, #0f6e6a);
+    border-bottom-color: var(--v2-ember);
   }
 
   .hoja { max-width: 820px; padding: 24px 20px 60px; display: flex; flex-direction: column; gap: 14px; }
   h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -.02em; }
-  .bajada { color: #5a6672; margin: 0; max-width: 62ch; }
+  .bajada { color: var(--v2-slate); margin: 0; max-width: 62ch; }
 
   .tarjeta {
-    background: #fff; border: 1px solid #d3dae1; border-radius: 10px;
+    background: var(--v2-card); border: 1px solid var(--v2-line); border-radius: 10px;
     padding: 16px; display: flex; flex-direction: column; gap: 11px;
   }
   .encabezado { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
   .encabezado h2 { font-size: 1.05rem; margin: 0; }
-  .meta { margin: 2px 0 0; font-size: .86rem; color: #5a6672; }
-  .cuando { font-size: .8rem; color: #7b8794; white-space: nowrap; }
+  .meta { margin: 2px 0 0; font-size: .86rem; color: var(--v2-slate); }
+  .cuando { font-size: .8rem; color: var(--v2-slate); white-space: nowrap; }
 
-  .donde { background: #f2f6fa; border: 1px solid #d3dae1; border-radius: 8px; padding: 10px 12px; }
+  .donde { background: var(--v2-paper); border: 1px solid var(--v2-line); border-radius: 8px; padding: 10px 12px; }
   .dir { font-weight: 650; }
-  .sub { font-size: .86rem; color: #5a6672; margin-top: 2px; }
+  .sub { font-size: .86rem; color: var(--v2-slate); margin-top: 2px; }
 
   .acciones-datos { display: flex; flex-wrap: wrap; gap: 8px; }
   .chip {
     display: inline-flex; align-items: center; gap: 6px; font-size: .83rem;
-    border: 1px solid #cbd4dd; border-radius: 999px; padding: 5px 11px;
-    color: #35404b; text-decoration: none; background: #fafbfc;
+    border: 1px solid var(--v2-line-strong); border-radius: 999px; padding: 5px 11px;
+    color: var(--v2-ink); text-decoration: none; background: var(--v2-paper);
   }
-  .chip.tenue { color: #7b8794; }
-  .chip.dudoso { background: #fdf6e3; border-color: #e6d9ae; color: #6b5a2b; }
+  .chip.tenue { color: var(--v2-slate); }
+  .chip.dudoso {
+    background: color-mix(in srgb, var(--v2-clay) 10%, var(--v2-card));
+    border-color: color-mix(in srgb, var(--v2-clay) 35%, var(--v2-card));
+    color: var(--v2-clay);
+  }
 
-  .fallo { display: flex; gap: 7px; align-items: flex-start; margin: 0; font-size: .83rem; color: #8a2a20; }
+  .fallo { display: flex; gap: 7px; align-items: flex-start; margin: 0; font-size: .83rem; color: var(--v2-rust); }
 
   /* El motivo de cancelacion se lee como una cita, porque lo es: son las
      palabras del cliente sin resumir ni corregir (ver CancelarSolicitudView). */
   .motivo {
-    border-left: 3px solid #b45309; background: #fffbeb;
+    border-left: 3px solid var(--v2-clay); background: color-mix(in srgb, var(--v2-clay) 10%, var(--v2-card));
     border-radius: 0 8px 8px 0; padding: 9px 12px;
   }
-  .motivo.revision { border-left-color: #1668c1; background: #f2f7fd; }
+  .motivo.revision { border-left-color: var(--v2-origen-ink); background: var(--v2-origen); }
   .motivo-rotulo {
     font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
-    color: #6b7280; margin-bottom: 4px;
+    color: var(--v2-slate); margin-bottom: 4px;
   }
-  .motivo-texto { margin: 0; font-size: .93rem; line-height: 1.45; color: #35404b; }
-  .motivo-cuando { margin-top: 5px; font-size: .78rem; color: #6b7280; }
+  .motivo-texto { margin: 0; font-size: .93rem; line-height: 1.45; color: var(--v2-ink); }
+  .motivo-cuando { margin-top: 5px; font-size: .78rem; color: var(--v2-slate); }
 
   .ver-detalle {
     align-self: flex-start; font: inherit; font-size: .82rem; font-weight: 600;
     background: none; border: 0; padding: 2px 0; cursor: pointer;
-    color: #1668c1; text-decoration: underline;
+    color: var(--v2-ember-text); text-decoration: underline;
   }
   .detalle {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-    gap: 14px; padding: 12px; border: 1px solid #e3e8ee; border-radius: 8px;
-    background: #fbfcfd;
+    gap: 14px; padding: 12px; border: 1px solid var(--v2-line); border-radius: 8px;
+    background: var(--v2-paper);
   }
   .grupo-titulo {
     font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
-    color: #6b7280; margin-bottom: 6px;
+    color: var(--v2-slate); margin-bottom: 6px;
   }
   /* Rotulo y valor en dos columnas: leer 'Ticket del ISP  92151' de un
      vistazo es lo que hace util esta tabla. */
@@ -376,41 +380,49 @@
     margin: 0; display: grid; grid-template-columns: auto 1fr;
     gap: 3px 10px; font-size: .83rem;
   }
-  .detalle dt { color: #6b7280; }
-  .detalle dd { margin: 0; color: #23303c; font-weight: 600; word-break: break-word; }
-  .detalle dd.si { color: #1f7a4d; }
+  .detalle dt { color: var(--v2-slate); }
+  .detalle dd { margin: 0; color: var(--v2-ink); font-weight: 600; word-break: break-word; }
+  .detalle dd.si { color: var(--v2-moss); }
 
   .decidir, .cancelar {
-    align-self: flex-start; font: inherit; font-weight: 600; background: #fff;
-    border: 1px solid #cbd4dd; border-radius: 8px; padding: 9px 16px; cursor: pointer;
+    align-self: flex-start; font: inherit; font-weight: 600; background: var(--v2-card);
+    border: 1px solid var(--v2-line-strong); border-radius: 8px; padding: 9px 16px; cursor: pointer;
   }
   .decision { display: flex; flex-direction: column; gap: 9px; }
-  .nota { display: flex; flex-direction: column; gap: 5px; font-size: .86rem; font-weight: 600; color: #35404b; }
+  .nota { display: flex; flex-direction: column; gap: 5px; font-size: .86rem; font-weight: 600; color: var(--v2-ink); }
   textarea {
-    font: inherit; font-weight: 400; padding: 9px 11px; border: 1px solid #cbd4dd;
-    border-radius: 8px; background: #fafbfc; resize: vertical;
+    font: inherit; font-weight: 400; padding: 9px 11px; border: 1px solid var(--v2-line-strong);
+    border-radius: 8px; background: var(--v2-card); resize: vertical;
   }
   .botones { display: flex; flex-wrap: wrap; gap: 8px; }
   .aprobar, .rechazar {
     font: inherit; font-weight: 650; border-radius: 8px; padding: 9px 16px;
     cursor: pointer; border: 1px solid transparent;
   }
-  .aprobar { background: #1d7a45; color: #fff; }
-  .rechazar { background: #fff; color: #8a2a20; border-color: #f0b8b2; }
+  .aprobar { background: var(--v2-moss); color: #fff; }
+  .rechazar { background: var(--v2-card); color: var(--v2-rust); border-color: color-mix(in srgb, var(--v2-rust) 35%, var(--v2-card)); }
   button:disabled { opacity: .6; cursor: default; }
   textarea:focus-visible, button:focus-visible, a:focus-visible {
-    outline: 2px solid #1668c1; outline-offset: 2px;
+    outline: 2px solid var(--v2-ember); outline-offset: 2px;
   }
 
   .vacio {
-    text-align: center; color: #5a6672; background: #fff; border: 1px solid #d3dae1;
+    text-align: center; color: var(--v2-slate); background: var(--v2-card); border: 1px solid var(--v2-line);
     border-radius: 10px; padding: 40px 24px; display: flex; flex-direction: column;
     align-items: center; gap: 8px;
   }
-  .vacio h2 { margin: 0; font-size: 1.05rem; color: #17202b; }
+  .vacio h2 { margin: 0; font-size: 1.05rem; color: var(--v2-ink); }
   .vacio p { margin: 0; max-width: 46ch; font-size: .9rem; }
 
   .alerta, .ok { display: flex; gap: 9px; align-items: center; border-radius: 8px; padding: 11px 13px; font-size: .9rem; }
-  .alerta { background: #fdecea; border: 1px solid #f0b8b2; color: #8a2a20; }
-  .ok { background: #f4fbf6; border: 1px solid #b9dfc6; color: #1d7a45; }
+  .alerta {
+    background: color-mix(in srgb, var(--v2-rust) 10%, var(--v2-card));
+    border: 1px solid color-mix(in srgb, var(--v2-rust) 35%, var(--v2-card));
+    color: var(--v2-rust);
+  }
+  .ok {
+    background: color-mix(in srgb, var(--v2-moss) 10%, var(--v2-card));
+    border: 1px solid color-mix(in srgb, var(--v2-moss) 35%, var(--v2-card));
+    color: var(--v2-moss);
+  }
 </style>

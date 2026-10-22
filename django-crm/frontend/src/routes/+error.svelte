@@ -5,7 +5,7 @@
 </script>
 
 <svelte:head>
-  <title>{$page.status} {$page.status === 404 ? 'No encontrado' : 'Error'} | BottleCRM</title>
+  <title>{$page.status} {$page.status === 404 ? 'No encontrado' : 'Error'} | Dexter</title>
 </svelte:head>
 
 <main class="bg-background min-h-screen">

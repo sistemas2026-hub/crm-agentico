@@ -567,7 +567,7 @@
 
   .tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
   .tarjeta { padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
-  .tarjeta.destacada { border-color: color-mix(in srgb, var(--v2-accent, #2563eb) 35%, transparent); }
+  .tarjeta.destacada { border-color: color-mix(in srgb, var(--v2-ember) 35%, transparent); }
 
   .rotulo {
     display: flex; align-items: center; gap: 5px;
@@ -608,12 +608,12 @@
   .medidor {
     width: 132px; height: 132px; margin: 0 auto; border-radius: 50%;
     display: grid; place-items: center;
-    background: conic-gradient(var(--tono, #3b82f6) calc(var(--pct) * 360deg),
+    background: conic-gradient(var(--tono, var(--v2-moss)) calc(var(--pct) * 360deg),
                                var(--v2-line-soft) 0);
   }
   .medidor::before {
     content: ''; grid-area: 1/1; width: 104px; height: 104px;
-    border-radius: 50%; background: var(--v2-surface, #fff);
+    border-radius: 50%; background: var(--v2-card);
   }
   .medidor span {
     grid-area: 1/1; font-size: 24px; font-weight: 700;
@@ -636,8 +636,8 @@
 
   .nota {
     padding: 14px 16px;
-    background: color-mix(in srgb, var(--v2-accent, #2563eb) 6%, transparent);
-    border-color: color-mix(in srgb, var(--v2-accent, #2563eb) 22%, transparent);
+    background: color-mix(in srgb, var(--v2-ember) 6%, transparent);
+    border-color: color-mix(in srgb, var(--v2-ember) 22%, transparent);
   }
 
   .campos-tarifa { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -646,7 +646,7 @@
     font-size: 11px; color: var(--v2-slate);
   }
 
-  .enlace { font-size: 12.5px; color: var(--v2-accent, #2563eb); text-decoration: none; }
+  .enlace { font-size: 12.5px; color: var(--v2-ember-text); text-decoration: none; }
   .enlace:hover { text-decoration: underline; }
 
   .vacio { font-size: 12.5px; color: var(--v2-slate); line-height: 1.5; padding: 20px 0; }
@@ -672,24 +672,24 @@
      la atención, y mezclarla con las otras dos invita a leer el total como si
      todo contara igual. */
   .origen.facturable { border-color:var(--v2-slate, #475569); }
-  .origen-nombre { font-size:0.75rem; color:var(--v2-muted, #64748b); }
+  .origen-nombre { font-size:0.75rem; color:var(--v2-slate); }
   .origen-costo { font-size:1.05rem; font-weight:600; }
-  .origen-n { font-size:0.7rem; color:var(--v2-muted, #64748b); }
+  .origen-n { font-size:0.7rem; color:var(--v2-slate); }
   .nota-origen, .nota-sin-tarifa {
     margin:0 0 12px; font-size:0.8125rem; line-height:1.5;
     color:var(--v2-slate, #475569);
   }
-  .nota-sin-tarifa { color:var(--v2-muted, #64748b); }
+  .nota-sin-tarifa { color:var(--v2-slate); }
   .tabla-desglose {
     width:100%; border-collapse:collapse; margin:10px 0 0; font-size:0.8125rem;
   }
   .tabla-desglose th {
     text-align:left; font-weight:600; font-size:0.7rem; padding:4px 8px;
-    color:var(--v2-muted, #64748b);
+    color:var(--v2-slate);
     border-bottom:1px solid var(--v2-line, #e2e8f0);
   }
   .tabla-desglose td { padding:5px 8px; border-bottom:1px solid var(--v2-line, #f1f5f9); }
   .tabla-desglose .num { text-align:right; font-variant-numeric:tabular-nums; }
-  .tabla-desglose .tenue { color:var(--v2-muted, #64748b); }
-  .aviso-tarifa { color:var(--v2-muted, #64748b); font-style:italic; }
+  .tabla-desglose .tenue { color:var(--v2-slate); }
+  .aviso-tarifa { color:var(--v2-slate); font-style:italic; }
 </style>

@@ -305,7 +305,7 @@
     padding: 5px 9px;
     border: 1px solid var(--v2-line);
     border-radius: 6px;
-    background: var(--v2-bg);
+    background: var(--v2-card);
     color: inherit;
     min-width: 160px;
   }

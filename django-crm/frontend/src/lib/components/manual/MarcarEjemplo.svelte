@@ -112,7 +112,7 @@
     font-size: 11px;
     padding: 2px 8px;
     border-radius: 999px;
-    border: 1px solid var(--v2-border, #e5e5e5);
+    border: 1px solid var(--v2-line);
     background: transparent;
     cursor: pointer;
     color: inherit;
@@ -127,9 +127,9 @@
   }
   .marcar-trigger.marcado {
     opacity: 1;
-    border-color: var(--v2-moss, #15803d);
-    color: var(--v2-moss, #15803d);
-    background: rgba(21, 128, 61, 0.08);
+    border-color: var(--v2-moss);
+    color: var(--v2-moss);
+    background: color-mix(in srgb, var(--v2-moss) 8%, transparent);
   }
   .marcar-fondo {
     position: fixed;
@@ -144,8 +144,8 @@
     position: absolute;
     top: calc(100% + 4px);
     left: 0;
-    background: var(--v2-surface, #fff);
-    border: 1px solid var(--v2-border, #e5e5e5);
+    background: var(--v2-card);
+    border: 1px solid var(--v2-line);
     border-radius: 10px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     padding: 6px;
@@ -172,15 +172,15 @@
   }
   .marcar-item:hover,
   .marcar-item:focus-visible {
-    background: var(--v2-surface-2, #f1f1f1);
+    background: var(--v2-line-soft);
     outline: none;
   }
   .marcar-item.activo {
     font-weight: 600;
   }
   .marcar-quitar {
-    color: var(--v2-rust, #b91c1c);
-    border-bottom: 1px solid var(--v2-border, #e5e5e5);
+    color: var(--v2-rust);
+    border-bottom: 1px solid var(--v2-line);
     margin-bottom: 4px;
     padding-bottom: 8px;
     text-transform: none;

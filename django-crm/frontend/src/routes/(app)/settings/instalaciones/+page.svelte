@@ -116,43 +116,43 @@
 <style>
   .hoja { max-width: 640px; padding: 24px 20px 60px; display: flex; flex-direction: column; gap: 16px; }
   h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -.02em; }
-  .bajada { color: #5a6672; margin: 0; }
+  .bajada { color: var(--v2-slate); margin: 0; }
 
   .tarjeta {
-    background: #fff; border: 1px solid #d3dae1; border-radius: 10px;
+    background: var(--v2-card); border: 1px solid var(--v2-line); border-radius: 10px;
     padding: 16px; display: flex; flex-direction: column; gap: 8px;
   }
   .tarjeta[disabled] { opacity: .65; }
   legend { font-weight: 650; padding: 0 4px; }
-  .ayuda { margin: 0; font-size: .88rem; color: #5a6672; line-height: 1.5; }
+  .ayuda { margin: 0; font-size: .88rem; color: var(--v2-slate); line-height: 1.5; }
 
   select, input {
-    font: inherit; padding: 10px 12px; border: 1px solid #cbd4dd;
-    border-radius: 8px; background: #fafbfc; width: 100%;
+    font: inherit; padding: 10px 12px; border: 1px solid var(--v2-line-strong);
+    border-radius: 8px; background: var(--v2-paper); width: 100%;
   }
   select:focus-visible, input:focus-visible, button:focus-visible {
-    outline: 2px solid #1668c1; outline-offset: 2px;
+    outline: 2px solid var(--v2-ember); outline-offset: 2px;
   }
 
   /* El paso entre los dos equipos, dibujado: sin esto son dos campos sueltos
      y no se ve que uno viene después del otro. */
   .flecha {
     display: flex; align-items: center; gap: 8px; justify-content: center;
-    color: #7b8794; font-size: .84rem; margin: -6px 0;
+    color: var(--v2-slate); font-size: .84rem; margin: -6px 0;
   }
 
   .guardar {
-    align-self: flex-start; font: inherit; font-weight: 650; color: #fff;
-    background: #1668c1; border: none; border-radius: 8px;
+    align-self: flex-start; font: inherit; font-weight: 650; color: var(--v2-on-ember);
+    background: var(--v2-ember); border: none; border-radius: 8px;
     padding: 11px 20px; cursor: pointer;
   }
-  .guardar:disabled { background: #8fb4d9; cursor: default; }
-  .nota { color: #7b8794; font-size: .86rem; margin: 0; }
+  .guardar:disabled { background: color-mix(in srgb, var(--v2-ember) 45%, var(--v2-card)); cursor: default; }
+  .nota { color: var(--v2-slate); font-size: .86rem; margin: 0; }
 
   .alerta, .ok {
     display: flex; gap: 9px; align-items: center; border-radius: 8px;
     padding: 11px 13px; font-size: .9rem;
   }
-  .alerta { background: #fdecea; border: 1px solid #f0b8b2; color: #8a2a20; }
-  .ok { background: #f4fbf6; border: 1px solid #b9dfc6; color: #1d7a45; }
+  .alerta { background: color-mix(in srgb, var(--v2-rust) 10%, var(--v2-card)); border: 1px solid color-mix(in srgb, var(--v2-rust) 32%, var(--v2-card)); color: var(--v2-rust); }
+  .ok { background: color-mix(in srgb, var(--v2-moss) 10%, var(--v2-card)); border: 1px solid color-mix(in srgb, var(--v2-moss) 32%, var(--v2-card)); color: var(--v2-moss); }
 </style>

@@ -508,7 +508,7 @@
   }
   .cf-label {
     flex: 0 0 40%;
-    color: var(--v2-ink-soft);
+    color: var(--v2-slate);
   }
   .cf-value {
     flex: 1 1 auto;

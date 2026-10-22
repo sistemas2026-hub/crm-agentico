@@ -225,7 +225,7 @@
     padding: 0 5px;
     border-radius: 9px;
     background: var(--v2-ember);
-    color: #fff;
+    color: var(--v2-on-ember);
     font-size: 11.5px;
   }
   .v2-cal-cell-body {

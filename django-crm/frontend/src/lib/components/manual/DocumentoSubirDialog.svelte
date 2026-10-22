@@ -94,22 +94,22 @@
 
     <div class="space-y-3">
       <label class="space-y-1 text-sm">
-        <span class="font-medium">Archivo <span class="text-red-600">*</span></span>
+        <span class="font-medium">Archivo <span class="text-destructive">*</span></span>
         <input
           type="file"
           accept=".docx"
           onchange={elegirArchivo}
-          class="w-full rounded-md border border-[var(--border-default)] bg-[var(--surface-default)] p-2 text-sm"
+          class="w-full rounded-md border border-[var(--v2-line-strong,#d5dce6)] bg-[var(--v2-card,#ffffff)] p-2 text-sm"
         />
         {#if archivo && !nombreArchivoValido}
-          <span class="text-xs text-red-600">Solo se admite .docx.</span>
+          <span class="text-xs text-destructive">Solo se admite .docx.</span>
         {/if}
       </label>
 
       <div class="space-y-1.5">
         <span class="text-sm font-medium">Quién lo puede consultar</span>
         {#if !roles || roles.length === 0}
-          <p class="text-xs text-[var(--text-secondary)]">
+          <p class="text-xs text-muted-foreground">
             Este tenant no tiene roles configurados todavía (ver Agentes).
           </p>
         {:else}
@@ -123,7 +123,7 @@
           </div>
         {/if}
         {#if sinRoles}
-          <p class="text-xs text-[var(--text-secondary)]">
+          <p class="text-xs text-muted-foreground">
             Sin roles marcados, nadie lo va a poder consultar hasta que se lo asignes.
           </p>
         {/if}

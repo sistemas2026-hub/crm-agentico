@@ -120,29 +120,29 @@
 </aside>
 
 <style>
-  .telon { position: fixed; inset: 0; background: rgba(15,23,42,.45); backdrop-filter: blur(3px); border: 0; z-index: 40; }
+  .telon { position: fixed; inset: 0; background: rgba(20,18,46,.45); backdrop-filter: blur(3px); border: 0; z-index: 40; }
   .detalle {
     position: fixed; top: 0; right: 0; height: 100%; width: 440px; z-index: 41;
-    background: #ffffff; color: #0f172a; border-left: 1px solid var(--c);
-    box-shadow: -18px 0 46px rgba(15,23,42,.18); display: flex; flex-direction: column; overflow-y: auto;
+    background: var(--v2-card); color: var(--v2-ink); border-left: 1px solid var(--c);
+    box-shadow: -18px 0 46px rgba(20,18,46,.18); display: flex; flex-direction: column; overflow-y: auto;
   }
-  header { display: flex; gap: 14px; align-items: center; padding: 18px 16px; border-bottom: 1px solid #e2e8f0; position: relative; }
+  header { display: flex; gap: 14px; align-items: center; padding: 18px 16px; border-bottom: 1px solid var(--v2-line); position: relative; }
   .retrato { width: 76px; height: 76px; border-radius: 14px; object-fit: cover; border: 2px solid var(--c); flex-shrink: 0; }
   h2 { font-size: 18px; margin: 0 0 3px; text-transform: capitalize; }
-  header p { font-size: 11.5px; color: #475569; margin: 0 0 8px; }
-  .cerrar { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid #e2e8f0; background: #f1f5f9; color: #475569; cursor: pointer; }
+  header p { font-size: 11.5px; color: var(--v2-slate); margin: 0 0 8px; }
+  .cerrar { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--v2-line-strong); background: var(--v2-line-soft); color: var(--v2-slate); cursor: pointer; }
   .rejilla-cifras { display: grid; grid-template-columns: repeat(3, 1fr); }
-  .rejilla-cifras div { padding: 12px 8px; text-align: center; border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; }
+  .rejilla-cifras div { padding: 12px 8px; text-align: center; border-right: 1px solid var(--v2-line); border-bottom: 1px solid var(--v2-line); }
   .rejilla-cifras b { display: block; font-family: ui-monospace, monospace; font-size: 17px; }
-  .rejilla-cifras span { font-size: 8.5px; letter-spacing: .08em; color: #475569; text-transform: uppercase; }
-  .rejilla-cifras .rojo b { color: #b91c1c; }
-  .bloque { padding: 14px 16px; border-bottom: 1px solid #e2e8f0; }
-  .bloque h3 { font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: .14em; color: #475569; text-transform: uppercase; margin: 0 0 8px; }
-  .bloque p { font-size: 12.5px; line-height: 1.55; margin: 0; color: #334155; }
-  .bloque .pista { font-size: 11px; color: #475569; margin-top: 6px; }
+  .rejilla-cifras span { font-size: 8.5px; letter-spacing: .08em; color: var(--v2-slate); text-transform: uppercase; }
+  .rejilla-cifras .rojo b { color: var(--v2-rust); }
+  .bloque { padding: 14px 16px; border-bottom: 1px solid var(--v2-line); }
+  .bloque h3 { font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: .14em; color: var(--v2-slate); text-transform: uppercase; margin: 0 0 8px; }
+  .bloque p { font-size: 12.5px; line-height: 1.55; margin: 0; color: var(--v2-ink); }
+  .bloque .pista { font-size: 11px; color: var(--v2-slate); margin-top: 6px; }
   .bloque code { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--c); }
-  .tz { color: #64748b; }
-  .extracto { color: #64748b; font-size: 0.8125rem; margin-top: 0.375rem; }
+  .tz { color: var(--v2-slate); }
+  .extracto { color: var(--v2-slate); font-size: 0.8125rem; margin-top: 0.375rem; }
   .instrumentos { display: flex; align-items: center; gap: 14px; }
   .instrumentos :global(.spark) { flex: 1; min-width: 0; }
   footer { margin-top: auto; padding: 14px 16px; display: flex; gap: 10px; }

@@ -41,9 +41,9 @@
   function salud(s) {
     const usos = s.usos || 0;
     const fallos = s.fallos || 0;
-    if (fallos === 0) return { color: '#15803D', rotulo: 'responde' };
-    if (usos && fallos / usos > 0.2) return { color: '#B91C1C', rotulo: 'fallando' };
-    return { color: '#A15C07', rotulo: 'con fallos sueltos' };
+    if (fallos === 0) return { color: 'var(--v2-moss)', rotulo: 'responde' };
+    if (usos && fallos / usos > 0.2) return { color: 'var(--v2-rust)', rotulo: 'fallando' };
+    return { color: 'var(--v2-clay)', rotulo: 'con fallos sueltos' };
   }
 </script>
 
@@ -77,19 +77,19 @@
      y no se veia ninguna. */
   .et {
     font-size: 8.5px; letter-spacing: .1em; text-transform: uppercase;
-    font-weight: 700; color: #94a3b8; flex: 0 0 auto;
+    font-weight: 700; color: var(--v2-slate); flex: 0 0 auto;
     align-self: center; line-height: 1.25;
   }
   .sis {
     display: flex; align-items: stretch; gap: 8px; flex: 1 1 0; min-width: 138px;
-    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+    background: var(--v2-paper); border: 1px solid var(--v2-line); border-radius: 6px;
     overflow: hidden;
   }
   .barra { width: 4px; flex: 0 0 auto; }
   .cuerpo { padding: 5px 8px 5px 2px; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
   .n {
-    font-family: ui-monospace, monospace; font-size: 10.5px; font-weight: 700; color: #0f172a;
+    font-family: ui-monospace, monospace; font-size: 10.5px; font-weight: 700; color: var(--v2-ink);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .d { font-size: 9.5px; color: #475569; margin-top: 2px; white-space: nowrap; }
+  .d { font-size: 9.5px; color: var(--v2-slate); margin-top: 2px; white-space: nowrap; }
 </style>

@@ -37,8 +37,8 @@
 
 <style>
   .anillo { flex-shrink: 0; }
-  .pista { fill: none; stroke: #e2e8f0; stroke-width: 5; }
+  .pista { fill: none; stroke: var(--v2-line); stroke-width: 5; }
   .carga { fill: none; stroke: var(--c); stroke-width: 5; stroke-linecap: round; transition: stroke-dasharray .5s ease; }
-  .cifra { fill: #0f172a; font-family: ui-monospace, monospace; font-size: 15px; font-weight: 700; text-anchor: middle; }
-  .et { fill: #475569; font-size: 7.5px; letter-spacing: .1em; text-anchor: middle; text-transform: uppercase; }
+  .cifra { fill: var(--v2-ink); font-family: ui-monospace, monospace; font-size: 15px; font-weight: 700; text-anchor: middle; }
+  .et { fill: var(--v2-slate); font-size: 7.5px; letter-spacing: .1em; text-anchor: middle; text-transform: uppercase; }
 </style>

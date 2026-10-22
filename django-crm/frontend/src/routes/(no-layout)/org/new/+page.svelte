@@ -3,7 +3,6 @@
   import '$lib/v2/styles/v2.css';
   import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
-  import imgLogo from '$lib/assets/images/logo.png';
   import { ArrowLeft, Check, AlertCircle } from '@lucide/svelte';
 
   let { data, form } = $props();
@@ -40,14 +39,14 @@
 </script>
 
 <svelte:head>
-  <title>Crear organización · BottleCRM</title>
+  <title>Crear organización · Dexter</title>
 </svelte:head>
 
 <div class="v2-root v2-auth">
   <div class="v2-auth-box">
     <a href="/" class="v2-auth-brand">
-      <img src={imgLogo} alt="" />
-      <b>BottleCRM</b>
+      <span class="v2-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M5 12a7 7 0 0 1 14 0M8.5 12a3.5 3.5 0 0 1 7 0M12 13v7" /></svg></span>
+      <b>Dexter</b>
     </a>
 
     <div class="v2-auth-card">
@@ -78,7 +77,7 @@
             required
             disabled={isSubmitting || !!form?.data}
           />
-          <p class="v2-hint">Este va a ser el nombre de tu espacio de trabajo en BottleCRM.</p>
+          <p class="v2-hint">Este va a ser el nombre de tu espacio de trabajo en Dexter.</p>
         </div>
 
         <div class="v2-field">

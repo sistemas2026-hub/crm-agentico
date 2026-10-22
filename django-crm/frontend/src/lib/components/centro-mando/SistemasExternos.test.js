@@ -6,7 +6,10 @@ const ms = (v) => (v == null ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)} s` 
 const pinta = (servicios, props = {}) =>
   render(SistemasExternos, { props: { servicios, ms, ...props } }).body;
 
-const VERDE = '#15803D', AMBAR = '#A15C07', ROJO = '#B91C1C';
+// El estado se afirma por el TOKEN que lo pinta, no por un hex: con la paleta
+// Fibra (22/10/2026) los hex cambiaron y la prueba seguia verde solo porque el
+// componente arrastraba los viejos como respaldo.
+const VERDE = 'var(--v2-moss)', AMBAR = 'var(--v2-clay)', ROJO = 'var(--v2-rust)';
 
 describe('la franja de sistemas externos', () => {
   it('sin servicios no dibuja nada', () => {

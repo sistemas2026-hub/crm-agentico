@@ -633,7 +633,7 @@
 
 <style>
   .aviso-error {
-    color: #991b1b;
+    color: var(--v2-rust);
     font-size: 14px;
   }
   .casos-titulo {
@@ -647,7 +647,7 @@
     border: none;
     padding: 0;
     font: inherit;
-    color: var(--v2-accent, #b45309);
+    color: var(--v2-ember-text);
     cursor: pointer;
     text-transform: none;
     letter-spacing: 0;
@@ -661,7 +661,7 @@
     gap: 6px;
     padding: 3px 10px;
     border-radius: 999px;
-    border: 1px solid var(--v2-linea, #e2e0db);
+    border: 1px solid var(--v2-line);
     font-size: 13px;
     line-height: 1.6;
   }
@@ -673,15 +673,15 @@
     font-size: 15px;
     line-height: 1;
     cursor: pointer;
-    color: var(--v2-sub, #7a736a);
+    color: var(--v2-slate);
   }
-  .caso-quitar:hover { color: #b3261e; }
+  .caso-quitar:hover { color: var(--v2-rust); }
   .casos-alta { display: flex; gap: 8px; margin-top: 12px; }
   .caso-input {
     flex: 1;
     min-width: 0;
     padding: 5px 9px;
-    border: 1px solid var(--v2-linea, #e2e0db);
+    border: 1px solid var(--v2-line-strong);
     border-radius: 6px;
     font: inherit;
   }
@@ -768,12 +768,12 @@
   .doc-cuerpo {
     margin-top: 12px;
     padding-top: 12px;
-    border-top: 1px solid var(--v2-border, #e5e5e5);
+    border-top: 1px solid var(--v2-line);
   }
   .doc-seccion {
     font-size: 12px;
     font-weight: 600;
-    color: var(--v2-muted, #888);
+    color: var(--v2-slate);
     margin: 14px 0 6px;
     text-transform: uppercase;
     letter-spacing: 0.02em;

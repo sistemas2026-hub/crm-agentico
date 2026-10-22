@@ -11,7 +11,7 @@
 </script>
 
 <svelte:head>
-  <title>Iniciando sesión · BottleCRM</title>
+  <title>Iniciando sesión · Dexter</title>
 </svelte:head>
 
 <div class="v2-root v2-auth">

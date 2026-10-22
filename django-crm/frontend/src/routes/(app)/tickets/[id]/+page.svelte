@@ -949,7 +949,7 @@
       <dt>Área</dt>
       <dd>
         {#if data.area}
-          <span class="punto-area" style="--c: {data.area.color || 'var(--v2-muted)'}"></span>
+          <span class="punto-area" style="--c: {data.area.color || 'var(--v2-slate)'}"></span>
           {data.area.etiqueta}
         {:else}
           <span class="v2-sub">Sin área asignada</span>
@@ -1155,12 +1155,12 @@
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    border: 2px solid var(--v2-indigo, #5b52d6);
+    border: 2px solid var(--v2-ember);
     background: var(--v2-card, #fff);
   }
   /* El mas reciente, relleno: es donde esta parado el caso ahora. */
   .linea li:first-child .hito {
-    background: var(--v2-indigo, #5b52d6);
+    background: var(--v2-ember);
   }
   .hito-texto {
     font-size: 12.5px;
@@ -1211,7 +1211,7 @@
     font-weight: 650;
     letter-spacing: 0.03em;
     text-transform: uppercase;
-    color: var(--v2-muted, #6b7378);
+    color: var(--v2-slate);
     margin: 0 0 9px;
   }
   .tecnica-grilla {
@@ -1229,7 +1229,7 @@
     border-left: 3px solid var(--acento);
   }
   .ficha-olt {
-    --acento: #e8590c;
+    --acento: #0e7490;
   }
   .ficha-isp {
     --acento: #2f6fed;
@@ -1246,7 +1246,7 @@
     font-size: 12px;
   }
   .ficha dt {
-    color: var(--v2-muted, #8a9196);
+    color: var(--v2-slate);
   }
   .ficha dd {
     margin: 0;
@@ -1260,7 +1260,7 @@
     margin: 8px 0 0;
     font-size: 12px;
     line-height: 1.5;
-    color: var(--v2-muted, #8a9196);
+    color: var(--v2-slate);
   }
 
   .quien {
@@ -1271,11 +1271,11 @@
     font-weight: 650;
     letter-spacing: 0.02em;
     background: var(--v2-line-soft, #f0f0ee);
-    color: var(--v2-muted, #6b7378);
+    color: var(--v2-slate);
   }
   .quien.humano {
-    background: color-mix(in srgb, var(--v2-teal, #0d7a6f) 13%, transparent);
-    color: var(--v2-teal, #0d7a6f);
+    background: color-mix(in srgb, var(--v2-ember) 10%, transparent);
+    color: var(--v2-ember-text);
   }
 
   .punto-area {
@@ -1314,7 +1314,7 @@
     align-items: center;
     gap: 4px;
     font-size: 11px;
-    color: var(--v2-muted, #6b7378);
+    color: var(--v2-slate);
     border: 1px solid var(--v2-line, #e3e4e1);
     border-radius: 999px;
     padding: 2px 9px 2px 7px;
@@ -1334,7 +1334,7 @@
     font-weight: 650;
     letter-spacing: 0.03em;
     text-transform: uppercase;
-    color: var(--v2-muted, #6b7378);
+    color: var(--v2-slate);
     margin: 0 0 6px;
   }
   .bloque p {
@@ -1350,7 +1350,7 @@
   .dato-suelto {
     margin-top: 6px !important;
     font-size: 12px !important;
-    color: var(--v2-muted, #6b7378);
+    color: var(--v2-slate);
   }
   .lista-chequeos {
     list-style: none;
@@ -1366,7 +1366,7 @@
     gap: 6px;
     font-size: 12.5px;
     line-height: 1.45;
-    color: var(--v2-teal, #0d7a6f);
+    color: var(--v2-moss);
   }
   .lista-chequeos li.fallo {
     color: var(--v2-rust, #b0400c);
@@ -1386,7 +1386,7 @@
     padding-top: 12px;
     border-top: 1px solid var(--v2-line, #e3e4e1);
     font-size: 12.5px;
-    color: var(--v2-muted, #6b7378);
+    color: var(--v2-slate);
   }
 
   /* ---- la conversacion del asistente ---------------------------------- */
@@ -1421,20 +1421,20 @@
     font-size: 11px;
     font-weight: 700;
     background: var(--v2-line-soft, #f0f0ee);
-    color: var(--v2-muted, #6b7378);
+    color: var(--v2-slate);
   }
   .turno.propio .turno-avatar {
-    background: color-mix(in srgb, var(--v2-indigo, #5b52d6) 14%, transparent);
-    color: var(--v2-indigo, #5b52d6);
+    background: color-mix(in srgb, var(--v2-ember) 10%, transparent);
+    color: var(--v2-ember-text);
   }
   .turno-quien {
     font-size: 11px;
     font-weight: 600;
-    color: var(--v2-muted, #6b7378);
+    color: var(--v2-slate);
     margin-bottom: 3px;
   }
   .turno.propio .turno-quien {
-    color: var(--v2-indigo, #5b52d6);
+    color: var(--v2-ember-text);
   }
   .burbuja {
     display: inline-block;
@@ -1454,7 +1454,7 @@
     text-align: center;
     margin: 14px 0 0;
     font-size: 11.5px;
-    color: var(--v2-muted, #a3a9ad);
+    color: var(--v2-slate);
   }
 
   /* Identity mark for a ticket that has no account to show a face for. */
@@ -1518,8 +1518,8 @@
   .conflicto-identidad {
     margin: 0 0 var(--v2-space-3);
     padding: var(--v2-space-3);
-    border-left: 3px solid var(--v2-warning, #b45309);
-    background: var(--v2-surface-2, rgba(180, 83, 9, 0.06));
+    border-left: 3px solid var(--v2-clay);
+    background: color-mix(in srgb, var(--v2-clay) 6%, transparent);
     border-radius: 4px;
     font-size: 0.875rem;
     line-height: 1.5;
@@ -1528,7 +1528,7 @@
     display: block;
     margin-top: var(--v2-space-2);
     font-size: 0.8125rem;
-    color: var(--v2-text-muted, #666);
+    color: var(--v2-slate);
   }
 
   /* El veredicto de la potencia, al lado del numero. Cuando no es aceptable
@@ -1542,12 +1542,12 @@
     line-height: 1.35;
     padding: 1px 6px;
     border-radius: 3px;
-    background: var(--v2-surface-2, rgba(0, 0, 0, 0.05));
-    color: var(--v2-text-muted, #666);
+    background: var(--v2-line-soft);
+    color: var(--v2-slate);
   }
   .veredicto-senal.mal {
-    background: rgba(180, 83, 9, 0.1);
-    color: var(--v2-warning, #b45309);
+    background: color-mix(in srgb, var(--v2-clay) 10%, transparent);
+    color: var(--v2-clay);
   }
   .tel { display: inline-block; margin-right: 10px; }
 
@@ -1562,8 +1562,8 @@
     font-size: 10.5px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    background: var(--v2-surface-2, rgba(0, 0, 0, 0.06));
-    color: var(--v2-text-muted, #666);
+    background: var(--v2-origen);
+    color: var(--v2-origen-ink);
   }
   .candidatos-onu {
     list-style: none;
@@ -1576,8 +1576,8 @@
     display: grid;
     gap: 1px;
     padding: 6px 8px;
-    border-left: 2px solid var(--v2-warning, #b45309);
-    background: var(--v2-surface-2, rgba(180, 83, 9, 0.05));
+    border-left: 2px solid var(--v2-clay);
+    background: color-mix(in srgb, var(--v2-clay) 5%, transparent);
     font-size: 12px;
   }
   .candidatos-onu .v2-sub { font-size: 11px; }

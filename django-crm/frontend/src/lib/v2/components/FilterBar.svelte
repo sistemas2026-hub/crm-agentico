@@ -386,7 +386,7 @@
     text-decoration: none;
   }
   .v2-menu-item:hover {
-    background: var(--v2-wash);
+    background: var(--v2-line-soft);
   }
   .v2-menu-item-on {
     font-weight: 600;

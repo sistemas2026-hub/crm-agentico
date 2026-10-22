@@ -300,7 +300,7 @@
 <style>
   /* El umbral guardado y el efectivo difieren: es un aviso, no una ayuda. */
   .aviso-acotado {
-    border-left: 3px solid var(--v2-warn, #b45309);
+    border-left: 3px solid var(--v2-clay);
     padding-left: 10px;
     margin-top: 8px;
   }

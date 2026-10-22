@@ -161,7 +161,7 @@
     list-style: none;
     margin: 1rem 0;
     padding: 0.75rem 1rem;
-    border: 1px solid var(--v2-borde, #e2e2e2);
+    border: 1px solid var(--v2-line);
     border-radius: 6px;
   }
   .por-tipo li {
@@ -173,7 +173,7 @@
     padding: 0;
   }
   .accion {
-    border: 1px solid var(--v2-borde, #e2e2e2);
+    border: 1px solid var(--v2-line);
     border-radius: 6px;
     padding: 0.85rem 1rem;
     margin-bottom: 0.75rem;

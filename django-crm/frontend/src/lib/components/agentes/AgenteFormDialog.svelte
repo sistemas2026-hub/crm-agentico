@@ -155,7 +155,7 @@
       <div class="flex min-h-0 flex-col gap-3">
       <div class="grid grid-cols-2 gap-2">
         <label class="space-y-1 text-sm">
-          <span class="font-medium">Nombre (identificador) <span class="text-red-600">*</span></span>
+          <span class="font-medium">Nombre (identificador) <span class="text-destructive">*</span></span>
           <input
             type="text"
             bind:value={nombre}
@@ -164,7 +164,7 @@
             class="w-full rounded-md border border-[var(--border-default)] bg-[var(--surface-default)] p-2 text-sm disabled:opacity-60"
           />
           {#if nombre && !nombreValido}
-            <span class="text-xs text-red-600">Minúscula, empieza con letra, solo letras/números/_</span>
+            <span class="text-xs text-destructive">Minúscula, empieza con letra, solo letras/números/_</span>
           {/if}
         </label>
         <label class="space-y-1 text-sm">
@@ -201,7 +201,7 @@
       </div>
 
       <label class="flex min-h-0 flex-1 flex-col gap-1 text-sm">
-        <span class="font-medium">Descripción / instrucciones <span class="text-red-600">*</span></span>
+        <span class="font-medium">Descripción / instrucciones <span class="text-destructive">*</span></span>
         <!--
           Esto no es una nota interna: entra TAL CUAL en el prompt de cada
           turno (la pieza 'Tu rol especifico', ver "Que recibe este agente" en

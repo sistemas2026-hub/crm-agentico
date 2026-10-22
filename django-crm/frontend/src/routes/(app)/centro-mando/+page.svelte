@@ -61,8 +61,8 @@
 </PageHeader>
 
 {#if error}
-  <div class="mb-4 flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
-    <AlertTriangle class="mt-0.5 size-5 shrink-0 text-amber-500" />
+  <div class="mb-4 flex items-start gap-3 rounded-lg border border-[var(--v2-clay)]/35 bg-[var(--v2-clay)]/10 p-4">
+    <AlertTriangle class="mt-0.5 size-5 shrink-0 text-[var(--v2-clay)]" />
     <div>
       <p class="font-medium">No se pudo leer la operación</p>
       <p class="text-muted-foreground text-sm">{error}</p>

@@ -322,9 +322,9 @@
     flex-direction: column;
     gap: 14px;
     padding: 20px;
-    border: 1px solid var(--v2-border, #e3e6e4);
+    border: 1px solid var(--v2-line);
     border-radius: 8px;
-    background: var(--v2-surface, #fff);
+    background: var(--v2-card);
   }
   .bloque header {
     display: flex;
@@ -342,19 +342,19 @@
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--v2-text-muted, #6b7671);
+    color: var(--v2-slate);
   }
   .ayuda {
     margin: 0;
     font-size: 13px;
     line-height: 1.55;
-    color: var(--v2-text-muted, #6b7671);
+    color: var(--v2-slate);
     max-width: 72ch;
   }
   code {
     font-family: ui-monospace, monospace;
     font-size: 0.92em;
-    background: var(--v2-surface-2, #f1f3f2);
+    background: var(--v2-line-soft);
     padding: 1px 4px;
     border-radius: 3px;
   }
@@ -368,14 +368,14 @@
     font-size: 11px;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    color: var(--v2-text-muted, #6b7671);
+    color: var(--v2-slate);
     font-weight: 600;
     padding: 8px 10px;
-    border-bottom: 1px solid var(--v2-border, #e3e6e4);
+    border-bottom: 1px solid var(--v2-line);
   }
   .tabla td {
     padding: 7px 10px;
-    border-bottom: 1px solid var(--v2-border-soft, #eff1f0);
+    border-bottom: 1px solid var(--v2-line-soft);
     vertical-align: middle;
   }
   .tabla tr.apagado .campo {
@@ -391,14 +391,14 @@
   .campo {
     width: 100%;
     padding: 6px 8px;
-    border: 1px solid var(--v2-border, #e3e6e4);
+    border: 1px solid var(--v2-line-strong);
     border-radius: 5px;
     font: inherit;
-    background: var(--v2-surface, #fff);
+    background: var(--v2-card);
     color: inherit;
   }
   .campo:disabled {
-    background: var(--v2-surface-2, #f1f3f2);
+    background: var(--v2-line-soft);
   }
   .acciones {
     display: flex;
@@ -419,10 +419,10 @@
   .canales-scroll {
     max-height: 340px;
     overflow-y: auto;
-    border: 1px solid var(--v2-border, #e3e6e4);
+    border: 1px solid var(--v2-line);
     border-radius: 6px;
     padding: 10px 12px;
-    background: var(--v2-surface-2, #f8f9f8);
+    background: var(--v2-paper);
   }
   .canales {
     margin: 0;
@@ -435,7 +435,7 @@
   }
   .canales li {
     padding: 3px 0;
-    border-bottom: 1px solid var(--v2-border-soft, #eff1f0);
+    border-bottom: 1px solid var(--v2-line-soft);
   }
   .cab-lista {
     display: flex;
@@ -453,13 +453,13 @@
   .conteo-filtro {
     margin: 0;
     font-size: 12px;
-    color: var(--v2-text-muted, #6b7671);
+    color: var(--v2-slate);
     font-variant-numeric: tabular-nums;
   }
   .vacio {
     margin: 0;
     font-size: 13px;
-    color: var(--v2-text-muted, #6b7671);
+    color: var(--v2-slate);
     max-width: 72ch;
     line-height: 1.55;
   }
@@ -474,12 +474,12 @@
     flex-wrap: wrap;
   }
   .aviso-ok {
-    background: var(--v2-ok-soft, #e4f0e9);
-    color: var(--v2-ok, #2c6e49);
+    background: color-mix(in srgb, var(--v2-moss) 10%, var(--v2-card));
+    color: var(--v2-moss);
   }
   .aviso-error {
-    background: var(--v2-danger-soft, #f7e2de);
-    color: var(--v2-danger, #a03323);
+    background: color-mix(in srgb, var(--v2-rust) 10%, var(--v2-card));
+    color: var(--v2-rust);
   }
   .descartados {
     font-family: ui-monospace, monospace;

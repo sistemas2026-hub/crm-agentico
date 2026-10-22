@@ -221,7 +221,7 @@
           contra la API: devuelve id, nombre y tipo— y el precio vive en el
           detalle, uno por uno.
         -->
-        <div style="margin-top:14px;border-top:1px solid var(--v2-border);padding-top:14px">
+        <div style="margin-top:14px;border-top:1px solid var(--v2-line);padding-top:14px">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
             <div>
               <strong style="font-size:13px">Precio de cada plan</strong>
@@ -494,9 +494,9 @@
     align-items: center;
     gap: 4px;
     padding: 2px 10px;
-    border: 1px solid var(--v2-border, #e2e2e2);
+    border: 1px solid var(--v2-line);
     border-radius: 8px;
-    background: var(--v2-surface, #fff);
+    background: var(--v2-card);
     max-width: 360px;
   }
   .pv-tabla {
@@ -509,11 +509,11 @@
     font-weight: 600;
     color: var(--v2-slate);
     padding: 10px 12px;
-    border-bottom: 1px solid var(--v2-border, #e2e2e2);
+    border-bottom: 1px solid var(--v2-line);
   }
   .pv-tabla td {
     padding: 8px 12px;
-    border-bottom: 1px solid var(--v2-border, #eee);
+    border-bottom: 1px solid var(--v2-line-soft);
     vertical-align: middle;
   }
   .pv-tabla tr:last-child td {
@@ -523,11 +523,11 @@
     max-height: 320px;
     overflow-y: auto;
     overflow-x: auto;
-    border: 1px solid var(--v2-border, #e2e2e2);
+    border: 1px solid var(--v2-line);
     border-radius: 8px;
   }
   .pv-fila-marcada {
-    background: color-mix(in oklab, var(--v2-moss, #2f9e44) 6%, transparent);
+    background: var(--v2-ember-soft);
   }
   .pv-ok {
     display: flex;
@@ -543,16 +543,16 @@
     align-items: center;
     padding: 3px 9px;
     border-radius: 999px;
-    border: 1px solid var(--v2-border, #e2e2e2);
+    border: 1px solid var(--v2-line);
     font-size: 11px;
     cursor: pointer;
     user-select: none;
     color: var(--v2-slate);
   }
   .pv-chip-activo {
-    background: color-mix(in oklab, var(--v2-moss, #2f9e44) 14%, transparent);
-    border-color: var(--v2-moss, #2f9e44);
-    color: var(--v2-ink, inherit);
+    background: color-mix(in srgb, var(--v2-ember) 14%, var(--v2-card));
+    border-color: var(--v2-ember);
+    color: var(--v2-ember-text);
     font-weight: 550;
   }
   .pv-girando {
@@ -586,9 +586,9 @@
   .pv-elegir select {
     font-size: 12px;
     padding: 6px 8px;
-    border: 1px solid var(--v2-border);
+    border: 1px solid var(--v2-line-strong);
     border-radius: 6px;
-    background: var(--v2-card, #fff);
+    background: var(--v2-card);
     color: inherit;
     width: 100%;
     min-width: 0;
@@ -598,7 +598,7 @@
     border: 0;
     padding: 0;
     font: inherit;
-    color: var(--v2-link, #2563eb);
+    color: var(--v2-ember-text);
     cursor: pointer;
     text-decoration: underline;
   }

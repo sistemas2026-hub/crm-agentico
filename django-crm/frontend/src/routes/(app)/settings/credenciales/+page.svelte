@@ -308,7 +308,7 @@
     font-size: 13px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--v2-muted, #5c6672);
+    color: var(--v2-slate);
     margin: 0;
   }
   .lista {
@@ -318,11 +318,11 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
-    background: var(--v2-rule, #e4e7e9);
-    border: 1px solid var(--v2-rule, #e4e7e9);
+    background: var(--v2-line);
+    border: 1px solid var(--v2-line);
   }
   .fila {
-    background: var(--v2-surface, #fff);
+    background: var(--v2-card);
     padding: 14px 16px;
   }
   .fila.falta {
@@ -349,7 +349,7 @@
   .regla {
     margin: 6px 0 0;
     font-size: 13px;
-    color: var(--v2-muted, #5c6672);
+    color: var(--v2-slate);
   }
   .herramientas {
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -361,7 +361,7 @@
   .editor {
     margin-top: 12px;
     padding-top: 12px;
-    border-top: 1px solid var(--v2-rule, #e4e7e9);
+    border-top: 1px solid var(--v2-line);
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -373,7 +373,7 @@
   .aviso {
     margin: 8px 0 0;
     font-size: 12px;
-    color: var(--v2-muted, #5c6672);
+    color: var(--v2-slate);
   }
   .acciones {
     display: flex;
@@ -388,6 +388,6 @@
   .agregar {
     margin-top: 28px;
     padding-top: 16px;
-    border-top: 1px solid var(--v2-rule, #e4e7e9);
+    border-top: 1px solid var(--v2-line);
   }
 </style>

@@ -255,11 +255,11 @@
     gap: 10px;
     padding-bottom: 12px;
     margin-bottom: 12px;
-    border-bottom: 1px solid var(--v2-border, #e5e5e5);
+    border-bottom: 1px solid var(--v2-line);
   }
   .fila-telefono label {
     font-size: 13px;
-    color: var(--v2-muted, #888);
+    color: var(--v2-slate);
     white-space: nowrap;
   }
   .fila-telefono input {
@@ -269,7 +269,7 @@
     font-size: 0.85rem;
     padding: 0.15rem 0.5rem;
     border-radius: 999px;
-    border: 1px solid var(--v2-borde, #d7d7d7);
+    border: 1px solid var(--v2-line-strong);
     white-space: nowrap;
   }
   .agente-activo code {
@@ -281,10 +281,10 @@
   .estado-verificacion {
     margin-left: auto;
     font-size: 13px;
-    color: #991b1b;
+    color: var(--v2-rust);
   }
   .estado-verificacion.ok {
-    color: #15803d;
+    color: var(--v2-moss);
   }
   .chat {
     display: flex;
@@ -300,7 +300,7 @@
     gap: 10px;
   }
   .chat-vacio {
-    color: var(--v2-muted, #888);
+    color: var(--v2-slate);
     font-size: 14px;
   }
   .chat-burbuja {
@@ -313,25 +313,25 @@
   }
   .chat-usuario {
     align-self: flex-end;
-    background: var(--v2-accent, #2563eb);
-    color: white;
+    background: var(--v2-ember);
+    color: var(--v2-on-ember);
   }
   .chat-asistente {
     align-self: flex-start;
-    background: var(--v2-surface-2, #f1f1f1);
+    background: var(--v2-line-soft);
   }
   .chat-error {
     align-self: flex-start;
-    background: #fee2e2;
-    color: #991b1b;
+    background: color-mix(in srgb, var(--v2-rust) 10%, var(--v2-card));
+    color: var(--v2-rust);
   }
   .chat-cerrada {
     align-self: center;
     font-size: 12px;
-    color: var(--v2-muted, #888);
+    color: var(--v2-slate);
     padding: 4px 10px;
-    border-top: 1px dashed var(--v2-border, #e5e5e5);
-    border-bottom: 1px dashed var(--v2-border, #e5e5e5);
+    border-top: 1px dashed var(--v2-line);
+    border-bottom: 1px dashed var(--v2-line);
     margin: 4px 0;
   }
   .chat-escribiendo {
@@ -370,7 +370,7 @@
     display: flex;
     gap: 8px;
     padding-top: 12px;
-    border-top: 1px solid var(--v2-border, #e5e5e5);
+    border-top: 1px solid var(--v2-line);
   }
   .chat-form input {
     flex: 1;

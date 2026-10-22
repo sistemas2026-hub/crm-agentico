@@ -101,7 +101,7 @@ export function zonaDe(agente, entrada) {
  * siempre el mismo y por eso sirve para reconocerlo; el del estado cambia
  * cada pocos minutos y por eso sirve para alarmar.
  *
- * Tonos medios, ninguno cerca de los cuatro de estado (rojo, violeta, cian y
+ * Tonos medios, ninguno cerca de los cuatro de estado (rojo, indigo, cian y
  * ambar), para que una pared no se confunda con una alarma.
  */
 export const COLORES_AGENTE = [

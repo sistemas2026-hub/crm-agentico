@@ -233,7 +233,7 @@
     gap: 10px;
   }
   .chat-vacio {
-    color: var(--v2-muted, #888);
+    color: var(--v2-slate);
     font-size: 14px;
     max-width: 60ch;
   }
@@ -247,17 +247,17 @@
   }
   .chat-usuario {
     align-self: flex-end;
-    background: var(--v2-accent, #2563eb);
-    color: white;
+    background: var(--v2-ember);
+    color: var(--v2-on-ember);
   }
   .chat-asistente {
     align-self: flex-start;
-    background: var(--v2-surface-2, #f1f1f1);
+    background: var(--v2-line-soft);
   }
   .chat-error {
     align-self: flex-start;
-    background: #fee2e2;
-    color: #991b1b;
+    background: color-mix(in srgb, var(--v2-rust) 10%, var(--v2-card));
+    color: var(--v2-rust);
   }
   .chat-escribiendo {
     display: flex;
@@ -287,13 +287,13 @@
     display: flex;
     gap: 8px;
     padding-top: 12px;
-    border-top: 1px solid var(--v2-border, #e5e5e5);
+    border-top: 1px solid var(--v2-line);
   }
   .chat-form input {
     flex: 1;
   }
   .panel-propuestas {
-    border-left: 1px solid var(--v2-border, #e5e5e5);
+    border-left: 1px solid var(--v2-line);
     padding-left: 20px;
   }
   .propuestas-lista {

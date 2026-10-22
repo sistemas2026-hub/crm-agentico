@@ -1,7 +1,6 @@
 <script>
   import '../../../app.css';
   import '$lib/v2/styles/v2.css';
-  import imgLogo from '$lib/assets/images/logo.png';
   import { Building2, LogOut, Plus, ChevronRight } from '@lucide/svelte';
   import { enhance } from '$app/forms';
 
@@ -16,14 +15,14 @@
 </script>
 
 <svelte:head>
-  <title>Elegir organización · BottleCRM</title>
+  <title>Elegir organización · Dexter</title>
 </svelte:head>
 
 <div class="v2-root v2-auth">
   <div class="v2-auth-box">
     <a href="/" class="v2-auth-brand">
-      <img src={imgLogo} alt="" />
-      <b>BottleCRM</b>
+      <span class="v2-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M5 12a7 7 0 0 1 14 0M8.5 12a3.5 3.5 0 0 1 7 0M12 13v7" /></svg></span>
+      <b>Dexter</b>
     </a>
 
     <div class="v2-auth-card">
@@ -86,7 +85,7 @@
         <div class="v2-state" style="padding:22px 0 8px">
           <div class="v2-state-icon"><Building2 size={22} /></div>
           <h3>Todavía no hay organizaciones</h3>
-          <p>Creá tu primer espacio de trabajo para empezar a usar BottleCRM.</p>
+          <p>Creá tu primer espacio de trabajo para empezar a usar Dexter.</p>
           <a href="/org/new" class="v2-btn v2-btn-primary">
             <Plus size={15} />
             Crear organización

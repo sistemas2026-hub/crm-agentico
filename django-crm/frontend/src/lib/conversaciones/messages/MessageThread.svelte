@@ -899,7 +899,7 @@
     margin-top: 6px;
     font-size: 0.75rem;
     font-weight: 500;
-    color: var(--v2-muted, #64748b);
+    color: var(--v2-slate, #64748b);
     cursor: pointer;
     list-style: none;
   }

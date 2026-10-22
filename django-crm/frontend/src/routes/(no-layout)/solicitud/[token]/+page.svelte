@@ -379,77 +379,77 @@
 
   .encabezado { text-align: center; margin-bottom: 18px; }
   h1 { font-size: clamp(1.6rem, 5vw, 2.1rem); margin: 0 0 6px; letter-spacing: -.02em; }
-  .bajada { color: #5a6672; margin: 0; }
+  .bajada { color: var(--v2-slate, #4a5869); margin: 0; }
 
   .requisitos {
-    background: #f2f6fa; border: 1px solid #d3dae1; border-radius: 10px;
+    background: var(--v2-paper, #f4f6f9); border: 1px solid var(--v2-line-strong, #d5dce6); border-radius: 10px;
     padding: 14px 16px; margin-bottom: 18px; font-size: .93rem;
   }
   .requisitos ul { margin: 8px 0 6px; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 4px; }
-  .minuto { color: #5a6672; font-size: .86rem; }
+  .minuto { color: var(--v2-slate, #4a5869); font-size: .86rem; }
 
   .tarjeta {
-    background: #fff; border: 1px solid #d3dae1; border-radius: 10px;
+    background: var(--v2-card, #ffffff); border: 1px solid var(--v2-line-strong, #d5dce6); border-radius: 10px;
     padding: 18px 16px; margin-bottom: 14px;
   }
   .tarjeta[disabled] { opacity: .6; }
   .centro { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 20px; }
-  .exito { border-color: #b9dfc6; background: #f4fbf6; }
+  .exito { border-color: color-mix(in srgb, var(--v2-moss, #2b6e46) 30%, var(--v2-card, #ffffff)); background: color-mix(in srgb, var(--v2-moss, #2b6e46) 10%, var(--v2-card, #ffffff)); }
 
   legend { font-weight: 650; font-size: 1.02rem; display: flex; align-items: center; gap: 9px; padding: 0 4px; }
   .n {
-    background: #1668c1; color: #fff; width: 24px; height: 24px; border-radius: 50%;
+    background: var(--v2-ember, #4f46e5); color: var(--v2-on-ember, #ffffff); width: 24px; height: 24px; border-radius: 50%;
     display: inline-flex; align-items: center; justify-content: center; font-size: .82rem;
   }
 
   .grilla { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 12px; }
   .ancho { grid-column: 1 / -1; }
-  label, .campo { display: flex; flex-direction: column; gap: 5px; font-size: .88rem; font-weight: 600; color: #35404b; }
+  label, .campo { display: flex; flex-direction: column; gap: 5px; font-size: .88rem; font-weight: 600; color: var(--v2-ink, #14122e); }
   .rotulo { font-size: .88rem; font-weight: 600; }
-  .req { color: #c0392b; }
+  .req { color: var(--v2-rust, #b42318); }
 
   /* Los campos de texto van sin 'type' y con 'inputmode' (numeric/tel): el
      teclado del celular cambia igual y no se hereda la validacion rara de
      type=tel. Por eso aca no hay selectores por type salvo email. */
   input:not([type]), input[type='email'], select {
     font: inherit; font-weight: 400; padding: 10px 12px;
-    border: 1px solid #cbd4dd; border-radius: 8px; background: #fafbfc; width: 100%;
+    border: 1px solid var(--v2-line-strong, #d5dce6); border-radius: 8px; background: var(--v2-paper, #f4f6f9); width: 100%;
   }
   input:focus-visible, select:focus-visible, button:focus-visible, canvas:focus-visible {
-    outline: 2px solid #1668c1; outline-offset: 2px;
+    outline: 2px solid var(--v2-ember, #4f46e5); outline-offset: 2px;
   }
 
   .principal, .secundario {
     font: inherit; font-weight: 600; border-radius: 8px; padding: 10px 14px; cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   }
-  .principal { background: #1668c1; color: #fff; border: 1px solid #1668c1; }
-  .secundario { background: #fff; color: #35404b; border: 1px solid #cbd4dd; }
-  .gps-ok { margin: 0; color: #1d7a45; font-weight: 600; display: flex; align-items: center; gap: 6px; }
-  .error-campo { color: #c0392b; font-weight: 400; font-size: .85rem; margin: 4px 0 0; }
+  .principal { background: var(--v2-ember, #4f46e5); color: var(--v2-on-ember, #ffffff); border: 1px solid var(--v2-ember, #4f46e5); }
+  .secundario { background: var(--v2-card, #ffffff); color: var(--v2-ink, #14122e); border: 1px solid var(--v2-line-strong, #d5dce6); }
+  .gps-ok { margin: 0; color: var(--v2-moss, #2b6e46); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .error-campo { color: var(--v2-rust, #b42318); font-weight: 400; font-size: .85rem; margin: 4px 0 0; }
 
   .aviso {
     display: flex; gap: 9px; align-items: flex-start; margin: 14px 0 0;
-    background: #fdf6e3; border: 1px solid #e6d9ae; border-radius: 8px;
-    padding: 11px 13px; font-size: .87rem; font-weight: 400; color: #6b5a2b;
+    background: color-mix(in srgb, var(--v2-clay, #9a5b00) 10%, var(--v2-card, #ffffff)); border: 1px solid color-mix(in srgb, var(--v2-clay, #9a5b00) 30%, var(--v2-card, #ffffff)); border-radius: 8px;
+    padding: 11px 13px; font-size: .87rem; font-weight: 400; color: var(--v2-clay, #9a5b00);
   }
 
   .fotos { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 12px; }
   .foto {
-    border: 1px dashed #cbd4dd; border-radius: 8px; padding: 14px; gap: 7px;
-    align-items: flex-start; background: #fafbfc;
+    border: 1px dashed var(--v2-line-strong, #d5dce6); border-radius: 8px; padding: 14px; gap: 7px;
+    align-items: flex-start; background: var(--v2-paper, #f4f6f9);
   }
   .foto .rot { font-size: .86rem; }
-  .foto .peso { font-weight: 400; font-size: .78rem; color: #7b8794; }
+  .foto .peso { font-weight: 400; font-size: .78rem; color: var(--v2-slate, #4a5869); }
   .foto input[type='file'] { font: inherit; font-weight: 400; font-size: .82rem; width: 100%; }
 
   .lienzo {
-    width: 100%; height: 190px; margin-top: 12px; background: #fafbfc;
-    border: 1px dashed #cbd4dd; border-radius: 8px; touch-action: none; cursor: crosshair;
+    width: 100%; height: 190px; margin-top: 12px; background: var(--v2-paper, #f4f6f9);
+    border: 1px dashed var(--v2-line-strong, #d5dce6); border-radius: 8px; touch-action: none; cursor: crosshair;
   }
   .bajo-lienzo {
     display: flex; justify-content: space-between; align-items: center;
-    margin-top: 8px; font-size: .83rem; color: #7b8794;
+    margin-top: 8px; font-size: .83rem; color: var(--v2-slate, #4a5869);
   }
   .bajo-lienzo span { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -460,15 +460,15 @@
   .check input { margin-top: 3px; flex: none; width: 17px; height: 17px; }
 
   .enviar {
-    width: 100%; font: inherit; font-size: 1.02rem; font-weight: 650; color: #fff;
-    background: #1668c1; border: none; border-radius: 10px; padding: 15px; cursor: pointer;
+    width: 100%; font: inherit; font-size: 1.02rem; font-weight: 650; color: var(--v2-on-ember, #ffffff);
+    background: var(--v2-ember, #4f46e5); border: none; border-radius: 10px; padding: 15px; cursor: pointer;
   }
-  .enviar:disabled { background: #8fb4d9; cursor: default; }
-  .pie { text-align: center; color: #7b8794; font-size: .82rem; margin: 10px 0 0; }
+  .enviar:disabled { background: color-mix(in srgb, var(--v2-ember, #4f46e5) 45%, var(--v2-card, #ffffff)); cursor: default; }
+  .pie { text-align: center; color: var(--v2-slate, #4a5869); font-size: .82rem; margin: 10px 0 0; }
 
   .alerta {
-    display: flex; gap: 9px; align-items: center; background: #fdecea;
-    border: 1px solid #f0b8b2; color: #8a2a20; border-radius: 8px;
+    display: flex; gap: 9px; align-items: center; background: color-mix(in srgb, var(--v2-rust, #b42318) 10%, var(--v2-card, #ffffff));
+    border: 1px solid color-mix(in srgb, var(--v2-rust, #b42318) 35%, var(--v2-card, #ffffff)); color: var(--v2-rust, #b42318); border-radius: 8px;
     padding: 11px 13px; margin-bottom: 14px; font-size: .9rem;
   }
 </style>

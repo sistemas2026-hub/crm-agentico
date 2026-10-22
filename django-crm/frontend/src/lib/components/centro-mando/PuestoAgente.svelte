@@ -210,7 +210,7 @@
 
   <!-- piso, con la franja de su zona -->
   <polygon points={poli(e, [0,0,0], [L,0,0], [L,L,0], [0,L,0])}
-    fill={llaman ? '#FBF7FF' : '#FCFDFE'} stroke="#C9D1DC" stroke-width="1" />
+    fill={llaman ? '#F8F8FE' : '#FCFDFE'} stroke="#C9D1DC" stroke-width="1" />
   <polygon class="tenido" points={poli(e, [0,L,0], [L,L,0], [L,L-3,0], [0,L-3,0])}
     fill={color} fill-opacity=".55" />
   {#if !enSala}
@@ -340,19 +340,19 @@
        que el texto baja siguiendo la perspectiva sin deformarse. -->
   <g transform="matrix({e.ex} {e.ey} 0 1 {xa * e.ex} {xa * e.ey - za})">
     <rect x="0" y="0" width={anchoC} height={altoC} rx={L * 0.028}
-      fill="#FFFFFF" stroke={llaman ? '#6D28D9' : '#C9D1DC'} stroke-width={llaman ? 2 : 1} />
+      fill="#FFFFFF" stroke={llaman ? '#4F46E5' : '#C9D1DC'} stroke-width={llaman ? 2 : 1} />
     <rect class="tenidoRelleno" x="0" y="0" width={L * 0.185} height={altoC} rx={L * 0.028} fill={colorAgente} />
     <rect class="tenidoRelleno" x={L * 0.12} y="0" width={L * 0.065} height={altoC} fill={colorAgente} />
     <text x={L * 0.0925} y={altoC * 0.66} text-anchor="middle" fill="#fff"
       font-family="ui-monospace, monospace" font-size={L * 0.098} font-weight="700">
       {esRecep ? '◆' : String(numero).padStart(2, '0')}
     </text>
-    <text x={zonaX} y={altoC * 0.66} font-size={cuerpoNombre} font-weight="800" letter-spacing={L * 0.002} fill="#0F172A">
+    <text x={zonaX} y={altoC * 0.66} font-size={cuerpoNombre} font-weight="800" letter-spacing={L * 0.002} fill="#14122E">
       {recortar(nombreArea, zonaW, cuerpoNombre)}
     </text>
     <text class="cifra" x={anchoC - L * 0.055} y={altoC * 0.70} text-anchor="end"
       font-family="ui-monospace, monospace" font-size={L * 0.105} font-weight="700"
-      fill={agente.conversaciones ? color : '#94A3B8'}>
+      fill={agente.conversaciones ? color : '#4A5869'}>
       {agente.conversaciones ? mostrada : '—'}
     </text>
 
@@ -361,8 +361,8 @@
          chapa a medir un 35% mas. La frase entera vive en el tooltip. -->
     {#if llaman > 0}
       <circle class="onda" cx={chX + chH * 0.5} cy={icY} r={chH * 0.5}
-        fill="none" stroke="#6D28D9" stroke-width="2" />
-      <rect x={chX} y={chY} width={chW} height={chH} rx={chH * 0.5} fill="#6D28D9" />
+        fill="none" stroke="#4F46E5" stroke-width="2" />
+      <rect x={chX} y={chY} width={chW} height={chH} rx={chH * 0.5} fill="#4F46E5" />
       <text x={chX + chH * 0.52} y={chY + chH * 0.68} text-anchor="middle" fill="#fff"
         font-family="ui-monospace, monospace" font-size={chH * 0.56} font-weight="700">{llaman}</text>
       <circle cx={icX} cy={icY - chH * 0.17} r={chH * 0.14} fill="#fff" />

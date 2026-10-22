@@ -1125,7 +1125,7 @@
            ningún código ('ftth', 'soporte') dice a cuál pertenece: cada empresa
            nombra los suyos. Lo que no está clasificado NO se reparte, así que
            esto no es cosmético. -->
-      <div style="margin-top:14px;border-top:1px solid var(--snoc-borde,#e5e7eb);padding-top:14px">
+      <div style="margin-top:14px;border-top:1px solid var(--v2-line);padding-top:14px">
         <div class="snoc-pila-xs">
           <strong class="snoc-body-sm">Qué labor tiene cada tipo de trabajo</strong>
           <p class="snoc-body-sm snoc-secundario">

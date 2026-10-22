@@ -1,21 +1,20 @@
 <script>
   import '../../../../app.css';
   import '$lib/v2/styles/v2.css';
-  import imgLogo from '$lib/assets/images/logo.png';
 
   let { data } = $props();
 </script>
 
 <svelte:head>
-  <title>Verificando · BottleCRM</title>
+  <title>Verificando · Dexter</title>
   <meta name="referrer" content="no-referrer" />
 </svelte:head>
 
 <div class="v2-root v2-auth">
   <div class="v2-auth-box">
     <a href="/" class="v2-auth-brand">
-      <img src={imgLogo} alt="" />
-      <b>BottleCRM</b>
+      <span class="v2-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M5 12a7 7 0 0 1 14 0M8.5 12a3.5 3.5 0 0 1 7 0M12 13v7" /></svg></span>
+      <b>Dexter</b>
     </a>
 
     <div class="v2-auth-card" style="text-align:center">
