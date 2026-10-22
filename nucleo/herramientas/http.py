@@ -155,7 +155,8 @@ def _alternativas(herramienta, argumentos: dict) -> dict:
     return cambiados if hubo_cambio else {}
 
 
-def _exigir_frontera(herramienta, tenant, argumentos=None) -> None:
+def _exigir_frontera(herramienta, tenant, argumentos=None,
+                     variables_tenant=None) -> None:
     """
     EL ULTIMO METRO ANTES DEL EFECTO  --  paso 10.14A.
 
@@ -172,14 +173,27 @@ def _exigir_frontera(herramienta, tenant, argumentos=None) -> None:
     'interruptor', que importa 'persistencia.db'; hacerlo arriba ataria este
     ejecutor --que hoy corre en pruebas sin base-- a la cadena entera.
     """
-    from nucleo.seguridad import frontera
+    from nucleo.seguridad import entorno, frontera
+
+    if not frontera.escribe(herramienta):
+        return
+
+    #  UN ENTORNO DE PRUEBAS NO ESCRIBE AFUERA  --  20/10/2026
+    #  Va ANTES de la frontera: un permiso o una aprobacion de un solo uso no
+    #  se gastan en una llamada que no va a salir. Ver nucleo/seguridad/entorno.py.
+    if entorno.activo():
+        try:
+            destino = base_url_de(herramienta, variables_tenant)
+        except ErrorHerramientaHttp:
+            destino = ""
+        if not entorno.es_de_la_red_local(destino):
+            raise ErrorHerramientaHttp(entorno.motivo(f"'{herramienta.nombre}'"))
 
     #  Los argumentos viajan a la frontera tal como llegan, ANTES de que
     #  url_de() saque los de la ruta: son los mismos que el llamador aprobo, y
     #  para una herramienta irreversible se comparan contra la huella de la
     #  aprobacion (ver frontera.exigir).
-    if frontera.escribe(herramienta):
-        frontera.exigir(herramienta, tenant, argumentos=argumentos)
+    frontera.exigir(herramienta, tenant, argumentos=argumentos)
 
 
 def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
@@ -197,7 +211,8 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
         raise ErrorHerramientaHttp(
             f"'{herramienta.nombre}' no es tipo 'http' (es '{herramienta.tipo}').")
 
-    _exigir_frontera(herramienta, tenant, dict(argumentos or {}))
+    _exigir_frontera(herramienta, tenant, dict(argumentos or {}),
+                     variables_tenant)
 
     argumentos = dict(argumentos or {})
     headers = headers_de(herramienta, tenant)

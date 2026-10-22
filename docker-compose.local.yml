@@ -1,0 +1,113 @@
+# =============================================================================
+#  EL ENTORNO LOCAL IGUAL A PRODUCCION  --  20/10/2026
+# =============================================================================
+#
+#  Se usa ENCIMA de docker-compose.prod.yml, nunca solo:
+#
+#    docker compose -p dexter-local \
+#      -f docker-compose.prod.yml -f docker-compose.local.yml \
+#      --env-file <el .env con las credenciales> --env-file .env.local \
+#      up -d
+#
+#  (cli/entorno_local.py arma ese comando; no hace falta escribirlo a mano.)
+#
+#  QUE ES IGUAL A PRODUCCION
+#  -------------------------
+#  Las imagenes (las mismas Dockerfile y el mismo 'target: prod' del frontend),
+#  los servicios y sus comandos, gunicorn con un worker para el motor, Django en
+#  ENV_TYPE=prod, PostgreSQL 17 como el Supabase del VPS, y las credenciales de
+#  lectura de WispHub y SmartOLT.
+#
+#  QUE NO, Y POR QUE
+#  -----------------
+#  1. La base es local ('db' de abajo). Producción usa el Supabase del VPS.
+#  2. SIN_EFECTOS_EXTERNOS=1 en el motor y el reloj: se LEE afuera, pero nada
+#     ESCRIBE afuera -- ni WispHub, ni SmartOLT, ni WhatsApp. Ver
+#     nucleo/seguridad/entorno.py. Escribir en el CRM local si funciona.
+#  3. Sin notificaciones a los telefonos de los tecnicos (FCM vacio).
+#  4. celery-beat y motor-reloj NO arrancan solos (perfil 'ciclo'): el ciclo
+#     del Supervisor y la importacion de tickets corren cuando se piden. Dos
+#     relojes leyendo WispHub a la vez -- este y el de produccion -- compiten
+#     por el mismo limite de la API (los 429 medidos el 20/10/2026).
+#  5. Los puertos se publican SOLO en 127.0.0.1: este entorno tiene datos de la
+#     empresa y no se sirve a la red de la oficina.
+# =============================================================================
+
+services:
+
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${LOCAL_PG_PASSWORD:?definir en .env.local}
+      POSTGRES_DB: ${DBNAME:?}
+    ports:
+      - "127.0.0.1:${LOCAL_PUERTO_DB:-55440}:5432"
+    volumes:
+      - dexter_local_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${LOCAL_PUERTO_BACKEND:-8300}:8000"
+    environment:
+      FCM_CUENTA_DE_SERVICIO: ""
+      TRUST_PROXY_SSL_HEADER: "False"
+      #  El correo del CRM no sale: se imprime en el log (encuestas CSAT al
+      #  cliente, avisos de asignacion). Ver nucleo/seguridad/entorno.py.
+      EMAIL_BACKEND: django.core.mail.backends.console.EmailBackend
+
+  celery-worker:
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      EMAIL_BACKEND: django.core.mail.backends.console.EmailBackend
+
+  celery-beat:
+    profiles: ["ciclo"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      EMAIL_BACKEND: django.core.mail.backends.console.EmailBackend
+
+  frontend:
+    ports:
+      - "127.0.0.1:${LOCAL_PUERTO_FRONTEND:-3300}:3000"
+    environment:
+      #  Sin ORIGIN, adapter-node supone https:// (en el VPS Traefik termina
+      #  el HTTPS). Aca se entra por http://, y SvelteKit rechazaba TODO
+      #  formulario -- el login incluido -- con 403 "Cross-site POST form
+      #  submissions are forbidden" (medido el 21/10/2026). Se entra por esta
+      #  direccion exacta.
+      ORIGIN: "http://dexter.localhost:${LOCAL_PUERTO_FRONTEND:-3300}"
+
+  motor:
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${LOCAL_PUERTO_MOTOR:-5300}:5000"
+    environment:
+      SIN_EFECTOS_EXTERNOS: "1"
+
+  motor-reloj:
+    profiles: ["ciclo"]
+    environment:
+      SIN_EFECTOS_EXTERNOS: "1"
+
+volumes:
+  dexter_local_pg: {}
+
+networks:
+  #  En el VPS es la red de Dokploy/Traefik. Aca no existe: se crea una propia.
+  dokploy-network:
+    external: false
