@@ -50,7 +50,7 @@ import re
 import requests
 
 from nucleo.observabilidad.registro import ref_proveedor, registrar
-from nucleo.seguridad import secretos
+from nucleo.seguridad import entorno, secretos
 
 API_BASE_POR_DEFECTO = "https://graph.facebook.com"
 TIMEOUT_SEGUNDOS = 20
@@ -401,6 +401,10 @@ def _url(config, recurso: str) -> str:
 
 
 def _post(config, tenant: str, recurso: str, payload: dict) -> dict:
+    #  Un entorno de pruebas no le escribe a nadie (nucleo/seguridad/entorno.py).
+    if entorno.activo():
+        raise ErrorWhatsApp(entorno.motivo("El mensaje de WhatsApp"),
+                            operacion="el envío")
     token = _secreto(tenant, _cfg(config).token_ref,
                      "de envio (token_ref)")
     r = requests.post(
@@ -554,6 +558,9 @@ def subir_media(config, tenant: str, contenido: bytes, mime: str,
     guarda de nuestro lado son los bytes, en asistente.media, igual que con lo
     que entra.
     """
+    if entorno.activo():
+        raise ErrorWhatsApp(entorno.motivo("El archivo para WhatsApp"),
+                            operacion="la subida")
     cfg = _cfg(config)
     token = _secreto(tenant, cfg.token_ref, "de envio (token_ref)")
     emisor = _secreto(tenant, cfg.phone_number_id_ref,
