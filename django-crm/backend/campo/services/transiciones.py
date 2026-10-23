@@ -15,6 +15,11 @@ class TransicionInvalidaError(ValidationError):
     pass
 
 
+class OrdenYaNoAsignadaError(Exception):
+    """Quien marca la accion ya no esta asignado: la orden cambio de manos
+    entre que se la leyo y que se la bloqueo (ver ejecutar_accion_operativa)."""
+
+
 # Matriz de transiciones operativas válidas
 #: Desde donde se puede DETENER un trabajo.
 #:
@@ -102,10 +107,14 @@ def ejecutar_accion_operativa(
     accion: str,
     profile=None,
     metadatos: dict | None = None,
+    exigir_asignado: bool = False,
 ) -> OrdenTrabajo:
     """
     Ejecuta una acción intermedia (/acciones/).
     IMPORTANTE: 'completar_campo' no pasa por acá; tiene su propio validador y endpoint.
+
+    Con `exigir_asignado`, `profile` tiene que seguir asignado a la orden
+    cuando se la bloquea; si no, `OrdenYaNoAsignadaError` y no se escribe nada.
     """
     if accion not in ACCIONES_OPERATIVAS:
         raise TransicionInvalidaError(
@@ -113,13 +122,37 @@ def ejecutar_accion_operativa(
         )
 
     nuevo_estado = ACCIONES_OPERATIVAS[accion]
-    return _aplicar_transicion(
-        orden=orden,
+    #  SE RELEE BAJO BLOQUEO, Y SE VUELVE A PREGUNTAR DE QUIEN ES (23/10/2026,
+    #  heredado de la fase 2.2 de SPEC/objetivos/supervisor-arma-la-jornada.md).
+    #
+    #  La vista comprueba la asignacion al LEER la orden, sin bloqueo. Si en ese
+    #  momento `reparto.publicar` --que bloquea la orden y le cambia las manos--
+    #  todavia no habia confirmado, el «en camino» se escribia despues sobre una
+    #  orden que ya era de otra cuadrilla: el tecnico salia hacia un trabajo que
+    #  no era suyo y la otra cuadrilla lo encontraba empezado. Ahora la accion
+    #  espera a que publicar termine, relee, y si quien la marca ya no esta
+    #  asignado no escribe nada.
+    #
+    #  Y la transicion se calcula sobre la fila releida, no sobre la que leyo la
+    #  vista: con el estado viejo, un «en camino» que llega despues de un «en
+    #  sitio» hacia retroceder la orden.
+    fresca = OrdenTrabajo.objects.select_for_update().get(pk=orden.pk)
+    if exigir_asignado and not fresca.asignaciones.filter(profile=profile).exists():
+        raise OrdenYaNoAsignadaError(
+            f"La orden {fresca.numero} ya no esta asignada a quien marca la accion.")
+    fresca = _aplicar_transicion(
+        orden=fresca,
         nuevo_estado=nuevo_estado,
         tipo_evento=f"accion_{accion}",
         profile=profile,
         metadatos=metadatos or {},
     )
+    #  El objeto que llego queda igual que la fila: quien lo paso lo sigue
+    #  usando (una prueba, o completar_campo despues de marcar la llegada).
+    for campo in ("estado_operativo", "revision", "iniciada_en", "completada_campo_en",
+                  "cerrada_en", "updated_at"):
+        setattr(orden, campo, getattr(fresca, campo))
+    return orden
 
 
 @transaction.atomic

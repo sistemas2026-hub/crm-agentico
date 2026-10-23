@@ -39,8 +39,8 @@ seguimiento encontro en el frontend.
 from __future__ import annotations
 
 from campo.bloqueos import BloqueoDeTrabajo
-from campo.models import EventoTrabajo, OrdenTrabajo
-from campo.reparto import ESTADOS_QUE_ESPERAN, EVENTO_INICIO
+from campo.models import OrdenTrabajo
+from campo.reparto import ESTADOS_QUE_ESPERAN, vueltas_empezadas
 from campo.services import salud_seguimiento
 
 BLOQUEADO = "bloqueado"
@@ -71,11 +71,15 @@ def revisar(org, *, ahora=None) -> dict:
     Solo mira los EMPEZADOS: una orden que nadie toco no esta atrasada, esta
     esperando, y de esa se encarga el reparto.
     """
-    empezadas = set(
-        EventoTrabajo.objects
-        .filter(org=org, tipo=EVENTO_INICIO)
-        .values_list("orden_id", flat=True)
-    )
+    #  «EMPEZADA» ES LA VUELTA REAL (23/10/2026). Hasta aca era el evento
+    #  `trabajo_iniciado`, que ningun codigo de produccion escribe: este modulo
+    #  nunca encontraba nada, y el ciclo de la madrugada informaba cero
+    #  pendientes todos los dias. Es la misma regla y el mismo universo que usa
+    #  `reparto.proponer` para no repartir lo que alguien empezo: lo que el
+    #  reparto deja quieto por empezado es exactamente lo que aca se explica.
+    empezadas = vueltas_empezadas(org, OrdenTrabajo.objects.filter(
+        org=org, estado_operativo__in=ESTADOS_QUE_ESPERAN
+    ).values_list("id", flat=True))
     if not empezadas:
         return {"bloqueados": [], "en_curso": [], "sin_explicacion": []}
 

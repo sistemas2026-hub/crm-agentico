@@ -43,8 +43,24 @@ from campo.services.telemetria import (
     probar_conexion,
 )
 from campo.services.storage import CampoStorage
-from campo.services.transiciones import TransicionInvalidaError, completar_campo, ejecutar_accion_operativa
+from campo.services.transiciones import (
+    OrdenYaNoAsignadaError,
+    TransicionInvalidaError,
+    completar_campo,
+    ejecutar_accion_operativa,
+)
 from campo.services.validador import validar_campos_tecnicos, verificar_checklist_completo
+
+
+def _debe_estar_asignado(request) -> bool:
+    """La gestion actua sobre cualquier orden de su empresa; el resto, solo
+    sobre las que tiene asignadas. Una sola regla para leer la orden y para
+    volver a comprobarla bajo bloqueo (AccionesTrabajoView)."""
+    profile = getattr(request, "profile", None)
+    if not profile:
+        return False
+    rol = (profile.role or "").upper()
+    return rol not in ROLES_GESTION and not request.user.is_superuser
 
 
 def _obtener_orden_o_404(request, pk) -> OrdenTrabajo:
@@ -63,13 +79,10 @@ def _obtener_orden_o_404(request, pk) -> OrdenTrabajo:
         raise Http404
 
     # Permisos intra-tenant
-    profile = getattr(request, "profile", None)
-    if profile:
-        rol = (profile.role or "").upper()
-        if rol not in ROLES_GESTION and not request.user.is_superuser:
-            esta_asignado = orden.asignaciones.filter(profile=profile).exists()
-            if not esta_asignado:
-                raise Http404
+    if _debe_estar_asignado(request):
+        esta_asignado = orden.asignaciones.filter(profile=request.profile).exists()
+        if not esta_asignado:
+            raise Http404
 
     return orden
 
@@ -677,6 +690,21 @@ class AccionesTrabajoView(APIView):
                 accion=accion,
                 profile=request.profile,
                 metadatos=metadatos,
+                exigir_asignado=_debe_estar_asignado(request),
+            )
+        except OrdenYaNoAsignadaError:
+            # La orden cambio de manos entre la lectura de arriba y el bloqueo.
+            # 404, como si ya se hubiera movido antes de pedir: la cola offline
+            # de la app (apps/tecnicos-mobile, sync_queue_service.dart) trata un
+            # 404 de /acciones/ como «la orden no existe o fue reasignada», lo
+            # da por terminado y no reintenta. Un 409 lo dejaria en «conflicto»
+            # --algo que el tecnico tiene que resolver-- y un 403 diria «sesion
+            # expirada». Y el mismo hecho tiene que dar la misma respuesta, haya
+            # pasado antes o durante el pedido.
+            return Response(
+                {"error": "ORDEN_REASIGNADA",
+                 "detalle": "La orden ya no está asignada a quien marca la acción."},
+                status=status.HTTP_404_NOT_FOUND,
             )
         except TransicionInvalidaError as e:
             return Response(
