@@ -819,3 +819,30 @@ def test_vp7_una_ya_armada_muestra_su_gente_y_dice_que_no_cambia(
     [c] = admin_client.get(VISTA_PREVIA, {"fecha": MARTES.isoformat()}).json()["cuadrillas"]
     assert c["que_haria"] == "Ya está armada con la labor que corresponde"
     assert [g["nombre"] for g in c["gente"]] == ["JUAN"]
+
+
+# ---------------------------------------------------------------------------
+# LDC · la labor de un caso, una sola regla  --  21/10/2026 (Fase 2.1)
+# ---------------------------------------------------------------------------
+#  Extraida de `demanda_de_despacho`: la usa la demanda de la jornada y la va a
+#  usar el Supervisor al crear la orden (2.3). Tienen que dar LO MISMO.
+
+def test_ldc_la_labor_de_cada_caso(empresa):
+    from campo.cuadrillas import labor_de_cada_grupo
+
+    labores = labor_de_cada_grupo(empresa)
+    falla = _en_despacho(empresa, pad.FALLA_DE_SERVICIO, barrio=BARRIO)
+    pedido = _en_despacho(empresa, pad.TRABAJO_PEDIDO, barrio=BARRIO)
+    nuevo = _en_despacho(empresa, pad.TRABAJO_PEDIDO, barrio=BARRIO)
+    #  El trabajo pedido de un CLIENTE NUEVO es instalacion (correccion 1, 18/10).
+    p = P.objects.get(origen_id=str(nuevo.id))
+    ev = [dict(e, cliente_nuevo=True) if e.get("fuente") == adj.FUENTE_LOCALIDAD
+          else e for e in p.evidencia]
+    P.objects.filter(pk=p.pk).update(evidencia=ev)
+
+    ps = adj.propuestas_en_despacho(empresa)
+    assert adj.labor_del_caso(ps[str(falla.id)], labores) == "correctivo"
+    assert adj.labor_del_caso(ps[str(pedido.id)], labores) == "correctivo"
+    assert adj.labor_del_caso(ps[str(nuevo.id)], labores) == "instalacion"
+    #  Un corte de red es obra de red, sea cual sea su lectura.
+    assert adj.labor_del_caso(ps[str(falla.id)], labores, es_corte=True) == "trabajos"

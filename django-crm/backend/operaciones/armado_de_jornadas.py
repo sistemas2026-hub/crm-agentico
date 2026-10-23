@@ -371,17 +371,12 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
         if zona is None:
             salida["sin_zona"] += 1
             continue
-        lectura = pad._ultima_lectura_con_grupo(p) or {}
-        grupo = str(lectura.get("grupo") or "")
-        if grupo == pad.TRABAJO_PEDIDO and _es_de_un_cliente_nuevo(pieza, lectura):
-            grupo = INSTALACION_NUEVA
         if corte:
             #  EL CORTE DE RED ES UN SOLO TRABAJO (caso 4, 19/10/2026): el
             #  primer caso del puerto que se puede ubicar cuenta como obra de
             #  red; los demas no suman (arriba).
             cortes_contados.add(corte)
-            grupo = pad.OBRA_DE_RED
-        labor = labores.get(grupo) if grupo else labor_de_la_visita(p)
+        labor = labor_del_caso(p, labores, es_corte=bool(corte))
         if not labor:
             salida["sin_labor"] += 1
             continue
@@ -434,6 +429,33 @@ def labor_de_la_visita(propuesta) -> str:
         return ""
     m = _VISITA.match(str(getattr(propuesta, "accion_propuesta", "") or ""))
     return m.group(1) if m else ""
+
+
+def labor_del_caso(propuesta, labores: dict, *, es_corte: bool = False):
+    """La labor de un caso de Despacho: la que cuenta para armar la jornada.
+
+    Extraida de `demanda_de_despacho` sin cambiar nada (21/10/2026, Fase 2.1
+    de supervisor-arma-la-jornada): el Supervisor va a crear la orden de cada
+    caso (2.3) y la labor de esa orden tiene que ser LA MISMA que inclino la
+    jornada -- si no, la orden sale de una labor y la cuadrilla de otra, y el
+    reparto no la empareja (el motivo de D2 de labores-propias).
+
+    El grupo de la lectura, por la tabla de la empresa (`labores`); un
+    trabajo pedido de un cliente nuevo es instalacion nueva (correccion 1
+    del 18/10); un corte de red es obra de red; sin grupo, la labor medida
+    de la visita. None o "" = no se sabe (quien llama lo cuenta aparte).
+    """
+    from campo.cuadrillas import INSTALACION_NUEVA
+    from operaciones import paso_a_despacho as pad
+
+    lectura = pad._ultima_lectura_con_grupo(propuesta) or {}
+    grupo = str(lectura.get("grupo") or "")
+    if grupo == pad.TRABAJO_PEDIDO and _es_de_un_cliente_nuevo(
+            localidad_guardada(propuesta) or {}, lectura):
+        grupo = INSTALACION_NUEVA
+    if es_corte:
+        grupo = pad.OBRA_DE_RED
+    return labores.get(grupo) if grupo else labor_de_la_visita(propuesta)
 
 
 def _ya_despachados(org, casos: list) -> set:

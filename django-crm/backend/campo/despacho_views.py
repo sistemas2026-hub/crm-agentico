@@ -42,7 +42,9 @@ from campo.serializers import (
 )
 from campo.services.despacho import (
     ConflictoDeCuadrilla, ErrorDespacho, RequiereSucesor, agregar_integrante,
-    asignar, asignar_a_jornada, cambiar_principal, contexto_del_caso, crear_orden, desasignar,
+    anotar_labor_sugerida, asignar, asignar_a_jornada, cambiar_principal,
+    cliente_para_la_orden, contexto_del_caso, crear_orden, desasignar,
+    ordenes_vivas_del_caso,
     retirar_integrante,
 )
 from campo.services.idempotencia import manejar_idempotencia
@@ -89,11 +91,6 @@ def _orden_o_404(request, pk) -> OrdenTrabajo:
     return orden
 
 
-class _SinFicha(Exception):
-    """No hay contexto que clasificar. No es un error: es el caso en que
-    el motor no respondio y la orden nace sin snapshot, a proposito."""
-
-
 class CrearOrdenView(APIView):
     """Alta de orden de trabajo, desde un caso del CRM o a mano."""
 
@@ -126,46 +123,14 @@ class CrearOrdenView(APIView):
             # razon anotada adentro.
             contexto = contexto_del_caso(case_id)
             # Que la UI pueda avisar "este caso ya tiene una orden activa". No
-            # se bloquea: una segunda visita al mismo caso es legitima, y lo
-            # que evita el duplicado accidental es la Idempotency-Key.
-            activas = list(
-                OrdenTrabajo.objects.filter(
-                    org=org, origen_sistema="crm", origen_ref=case_id)
-                .exclude(estado_operativo__in=[OrdenTrabajo.CERRADA,
-                                               OrdenTrabajo.CANCELADA])
-                .values_list("numero", flat=True))
+            # se bloquea: ver `ordenes_vivas_del_caso`.
+            activas = list(ordenes_vivas_del_caso(org, case_id)
+                           .values_list("numero", flat=True))
 
-        #  LO QUE EL PROVEEDOR YA SABE DEL CLIENTE, cuando quien despacha no lo
-        #  escribio. Hasta el 09/10/2026 solo el NOMBRE caia al contexto: el
-        #  telefono y la direccion quedaban vacios aunque la ficha los
-        #  trajera, y el tecnico recibia la orden sin con que llamar ni a donde
-        #  ir. Nadie lo veia porque la orden se creaba igual, sin error.
-        _ficha = (contexto.get("cliente") or {}) if isinstance(contexto, dict) else {}
-
-        #  Lo que viene de la ficha del ISP se RECORTA al largo de la columna:
-        #  el serializer valida lo que escribe la persona, pero un telefono con
-        #  cinco numeros separados por coma o una direccion larga del proveedor
-        #  llegarian intactos a Postgres, que rechazaria la orden entera.
-        def _de_ficha(clave, largo):
-            return str(_ficha.get(clave) or "")[:largo]
-
-        cliente = {
-            "nombre": d.get("cliente_nombre") or _de_ficha("nombre", 255) or "",
-            #  El telefono del proveedor puede traer varios separados por coma
-            #  --ver la skill de WispHub-- y se pasa tal cual: recortarlo aca
-            #  elegiria por el tecnico cual llamar.
-            "telefono": d.get("cliente_telefono") or _de_ficha("telefono", 64) or "",
-            "direccion": d.get("cliente_direccion") or _de_ficha("direccion", 255) or "",
-            # Como se entra al inmueble: con la direccion sola el tecnico llega
-            # al edificio y no al apartamento.
-            "detalle_acceso": d.get("cliente_detalle_acceso") or "",
-            #  Si quien despacha no lo escribio, el de la ficha: sin el, las
-            #  visitas anteriores de este servicio no se encontraban (18/10/2026).
-            "id_abonado": (d.get("cliente_id_abonado")
-                           or str((contexto or {}).get("servicio") or "")[:64]),
-            "gps_lat": d.get("gps_lat"),
-            "gps_lng": d.get("gps_lng"),
-        }
+        #  EL CLIENTE, con la MISMA traduccion que va a usar el Supervisor
+        #  cuando cree ordenes solo (21/10/2026). Ver
+        #  `campo/services/despacho.py::cliente_para_la_orden`.
+        cliente = cliente_para_la_orden(contexto, d)
 
         # Lo que decide la oficina y el tecnico no puede deducir.
         despacho = {
@@ -178,46 +143,9 @@ class CrearOrdenView(APIView):
             "requisitos_seguridad": d.get("requisitos_seguridad"),
         }
 
-        #  DE QUE TIPO ES ESTE TRABAJO, SEGUN LO QUE SE PUDO MEDIR.
-        #
-        #  NO elige la plantilla --eso ya lo decidio quien despacha, y su
-        #  decision gana-- pero deja ESCRITO que decia la evidencia en ese
-        #  momento. Sirve para dos cosas: comparar despues cuantas veces la
-        #  medicion y la eleccion coincidieron, y tener el porque a mano
-        #  cuando una orden salga con la plantilla equivocada.
-        #
-        #  Va dentro del contexto, que es lo que se CONGELA en la orden: una
-        #  clasificacion sin la hora al lado deja de ser una medicion y pasa a
-        #  ser una afirmacion sobre el presente que nadie puede verificar.
-        #  SOLO SI HAY FICHA. Sin contexto no hay nada que clasificar, y una
-        #  'labor_sugerida' vacia dentro de un contexto que ya dice "no se
-        #  pudo traer la ficha" es ruido: repite la misma ausencia en otra
-        #  clave. El contexto sin ficha tiene que quedar con su motivo y nada
-        #  mas -- lo verifica `test_la_ficha_no_rompe_la_creacion`.
-        try:
-            from operaciones import clasificacion_de_trabajo as clf
-
-            if not (isinstance(contexto, dict)
-                    and contexto.get("contexto_disponible")):
-                raise _SinFicha
-
-            sugerida = clf.clasificar(
-                contexto,
-                texto=(d.get("resumen") or "").strip(),
-                marcadores={
-                    "id_servicio_instalaciones":
-                        contexto.get("id_servicio_instalaciones"),
-                },
-            )
-            if isinstance(contexto, dict):
-                contexto["labor_sugerida"] = sugerida
-        except _SinFicha:
-            pass
-        except Exception:                                    # noqa: BLE001
-            #  Nunca rompe el despacho. Una sugerencia que no se pudo calcular
-            #  es una orden sin esa nota; un supervisor que no puede despachar
-            #  porque una clasificacion fallo, no.
-            pass
+        #  DE QUE TIPO ES ESTE TRABAJO, SEGUN LO QUE SE PUDO MEDIR: queda
+        #  escrito en el contexto congelado. Ver `anotar_labor_sugerida`.
+        anotar_labor_sugerida(contexto, d.get("resumen") or "")
 
         #  A QUIEN VA, VALIDADO ANTES DE CREAR. Antes el tecnico se buscaba
         #  DESPUES de crear la orden: si no existia la respuesta era 404 con la

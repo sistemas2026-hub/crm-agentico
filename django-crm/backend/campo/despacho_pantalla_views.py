@@ -40,7 +40,7 @@ from django.db.models import Count, Q
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from campo.models import OrdenTrabajo, WorkType
+from campo.models import WorkType
 #  `plantillas_que_se_ofrecen` vive en `campo/plantillas.py` desde el
 #  21/10/2026 (la usa tambien el Supervisor, que no importa vistas); el
 #  nombre sigue importable desde aca.
@@ -102,14 +102,9 @@ def _orden_activa_de(org, case_id: str):
     duplicado accidental es la `Idempotency-Key`. Pero quien despacha tiene que
     VERLO antes, que es distinto de que el sistema decida por el.
     """
-    return (
-        OrdenTrabajo.objects
-        .filter(org=org, origen_sistema="crm", origen_ref=str(case_id))
-        .exclude(estado_operativo__in=[OrdenTrabajo.CERRADA,
-                                       OrdenTrabajo.CANCELADA])
-        .values_list("numero", flat=True)
-        .first()
-    )
+    from campo.services.despacho import ordenes_vivas_del_caso
+    return (ordenes_vivas_del_caso(org, case_id)
+            .values_list("numero", flat=True).first())
 
 
 def _quien_tiene(org, case_id: str) -> str | None:
@@ -119,11 +114,8 @@ def _quien_tiene(org, case_id: str) -> str | None:
     nadie (13/10/2026) -- y eso hacia creer que ya le habia llegado a alguien.
     Esto dice la verdad: el nombre del principal, o None = SIN ASIGNAR.
     """
-    orden = (OrdenTrabajo.objects
-             .filter(org=org, origen_sistema="crm", origen_ref=str(case_id))
-             .exclude(estado_operativo__in=[OrdenTrabajo.CERRADA,
-                                            OrdenTrabajo.CANCELADA])
-             .first())
+    from campo.services.despacho import ordenes_vivas_del_caso
+    orden = ordenes_vivas_del_caso(org, case_id).first()
     if orden is None:
         return None
     a = (orden.asignaciones.select_related("profile__user")

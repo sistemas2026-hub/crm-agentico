@@ -277,6 +277,89 @@ def asignar_a_jornada(orden: OrdenTrabajo, jornada, profile_actor) -> dict:
             "sin_cuenta": len(d["van_sin_cuenta"])}
 
 
+# =============================================================================
+#  DEL CASO A LA ORDEN  --  21/10/2026
+# =============================================================================
+#  Extraido de `CrearOrdenView` sin cambiar nada (Fase 2.1 de la ficha
+#  supervisor-arma-la-jornada): el Supervisor va a crear ordenes solo (2.3) y
+#  tiene que traducir la ficha del caso EXACTAMENTE como el boton. Dos copias
+#  de esta traduccion se desincronizan, y la que quedara vieja mandaria a un
+#  tecnico sin telefono o a otra direccion.
+
+def ordenes_vivas_del_caso(org, case_id):
+    """Las ordenes del caso que no estan cerradas ni canceladas.
+
+    UNA definicion para las tres pantallas que la usaban copiada (el aviso
+    «este caso ya tiene una orden» de Despacho, la columna de la lista y a
+    quien esta asignada). NO bloquea nada: una segunda visita al mismo caso es
+    legitima; lo que evita el duplicado accidental es la Idempotency-Key.
+    """
+    return (OrdenTrabajo.objects
+            .filter(org=org, origen_sistema="crm", origen_ref=str(case_id))
+            .exclude(estado_operativo__in=[OrdenTrabajo.CERRADA,
+                                           OrdenTrabajo.CANCELADA]))
+
+
+def cliente_para_la_orden(contexto, escrito: dict | None = None) -> dict:
+    """Lo que la orden lleva del cliente.
+
+    Lo que escribio quien despacha y, si no, lo que el proveedor ya sabe (la
+    ficha). Hasta el 09/10/2026 solo el NOMBRE caia: el telefono y la
+    direccion quedaban vacios aunque la ficha los trajera.
+
+    Lo de la ficha se RECORTA al largo de la columna: un telefono con cinco
+    numeros separados por coma o una direccion larga del proveedor llegarian
+    intactos a Postgres, que rechazaria la orden entera. El telefono va tal
+    cual (con sus comas): recortarlo elegiria por el tecnico cual llamar.
+    """
+    escrito = escrito or {}
+    ficha = (contexto.get("cliente") or {}) if isinstance(contexto, dict) else {}
+
+    def _de_ficha(clave, largo):
+        return str(ficha.get(clave) or "")[:largo]
+
+    return {
+        "nombre": escrito.get("cliente_nombre") or _de_ficha("nombre", 255) or "",
+        "telefono": escrito.get("cliente_telefono") or _de_ficha("telefono", 64) or "",
+        "direccion": (escrito.get("cliente_direccion")
+                      or _de_ficha("direccion", 255) or ""),
+        # Como se entra al inmueble: con la direccion sola el tecnico llega
+        # al edificio y no al apartamento.
+        "detalle_acceso": escrito.get("cliente_detalle_acceso") or "",
+        #  Si quien despacha no lo escribio, el de la ficha: sin el, las
+        #  visitas anteriores de este servicio no se encontraban (18/10/2026).
+        "id_abonado": (escrito.get("cliente_id_abonado")
+                       or str((contexto or {}).get("servicio") or "")[:64]),
+        "gps_lat": escrito.get("gps_lat"),
+        "gps_lng": escrito.get("gps_lng"),
+    }
+
+
+def anotar_labor_sugerida(contexto, texto: str = "") -> None:
+    """Deja en el contexto de que tipo es el trabajo SEGUN LO MEDIDO.
+
+    NO elige la plantilla --eso lo decide quien despacha, y su decision gana--
+    pero deja escrito que decia la evidencia en ese momento, dentro del
+    contexto que se CONGELA en la orden. SOLO SI HAY FICHA: sin ella no hay
+    nada que clasificar, y una 'labor_sugerida' vacia junto a «no se pudo
+    traer la ficha» repetiria la misma ausencia en otra clave. NUNCA LEVANTA:
+    una sugerencia que no se pudo calcular es una orden sin esa nota.
+    """
+    if not (isinstance(contexto, dict) and contexto.get("contexto_disponible")):
+        return
+    try:
+        from operaciones import clasificacion_de_trabajo as clf
+
+        contexto["labor_sugerida"] = clf.clasificar(
+            contexto,
+            texto=(texto or "").strip(),
+            marcadores={"id_servicio_instalaciones":
+                        contexto.get("id_servicio_instalaciones")},
+        )
+    except Exception:                                        # noqa: BLE001
+        pass
+
+
 def contexto_del_caso(case_id: str) -> dict:
     """
     Le pide al motor la ficha tecnica de un caso, para congelarla en la orden.
