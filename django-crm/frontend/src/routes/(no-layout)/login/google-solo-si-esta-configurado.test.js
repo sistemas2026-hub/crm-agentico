@@ -13,6 +13,10 @@ vi.mock('$env/dynamic/private', () => entorno);
 
 const { load } = await import('./+page.server.js');
 
+/**
+ * Lo minimo que `load` lee de un evento: la URL y las cookies.
+ * @returns {any}
+ */
 function evento() {
   const guardadas = new Map();
   return {
@@ -33,7 +37,7 @@ describe('Google en el login', () => {
 
   it('sin GOOGLE_CLIENT_ID no hay boton ni cookies de PKCE', async () => {
     const e = evento();
-    const datos = await load(e);
+    const datos = /** @type {any} */ (await load(e));
     expect(datos.google_url).toBeNull();
     expect(e.guardadas.has('oauth_state')).toBe(false);
     expect(e.guardadas.has('oauth_code_verifier')).toBe(false);
@@ -42,7 +46,7 @@ describe('Google en el login', () => {
   it('con GOOGLE_CLIENT_ID el enlace lleva ese client_id, nunca "undefined"', async () => {
     entorno.env = { GOOGLE_CLIENT_ID: 'cliente-de-prueba', GOOGLE_LOGIN_DOMAIN: 'https://dexter.example' };
     const e = evento();
-    const datos = await load(e);
+    const datos = /** @type {any} */ (await load(e));
     const url = new URL(datos.google_url);
     expect(url.searchParams.get('client_id')).toBe('cliente-de-prueba');
     expect(datos.google_url).not.toContain('undefined');
