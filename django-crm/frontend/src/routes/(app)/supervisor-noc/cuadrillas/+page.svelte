@@ -323,8 +323,9 @@
   // =====================================================================
   //  MOVER UNA ORDEN DE CUADRILLA ANTES DE PUBLICAR  --  13/10/2026
   // =====================================================================
-  //  El reparto propone con un criterio declarado --lo que vence primero,
-  //  despues lo mas viejo, respetando zonas-- y ese criterio es bueno. Pero
+  //  El reparto propone con un criterio declarado --lo vencido primero,
+  //  despues la prioridad y lo que vence antes, respetando zonas-- y ese
+  //  criterio es bueno. Pero
   //  quien conoce el terreno puede saber algo que el criterio no ve: que esa
   //  casa queda de paso, que ese cliente ya conoce a ese tecnico.
   //
@@ -818,9 +819,10 @@
         <!--
           LOS TRES MOTIVOS, POR SEPARADO. Se arreglan distinto: una necesita
           que alguien mapee su barrio, otra que alguien cubra esa zona hoy, y
-          la tercera que haya más gente o menos tope.
+          la tercera que haya más gente o menos tope. La cuarta no se arregla:
+          es lo programado para otro día, que sale ese día (23/10/2026).
         -->
-        {#each [['sin_zona', 'Sin zona: su barrio no está mapeado a ninguna zona'], ['sin_cuadrilla', 'Nadie cubre su zona hoy'], ['sobrantes', 'No entraron por el tope de la cuadrilla']] as [clave, titulo] (clave)}
+        {#each [['sin_zona', 'Sin zona: su barrio no está mapeado a ninguna zona'], ['sin_cuadrilla', 'Nadie cubre su zona hoy'], ['sobrantes', 'No entraron por el tope de la cuadrilla'], ['otro_dia', 'Programadas para otro día: salen el día que les toca'], ['empezadas', 'Ya empezadas: siguen con quien las tiene']] as [clave, titulo] (clave)}
           {#if p[clave]?.length}
             <div class="snoc-pila-xs">
               <span class="snoc-label">{titulo} ({p[clave].length})</span>

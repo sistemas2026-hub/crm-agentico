@@ -76,7 +76,12 @@ function conteosDel(propuesta) {
     sobrantes: (propuesta.sobrantes ?? []).length,
     sinClasificar: (propuesta.sin_clasificar ?? []).length,
     //  Asignadas a mano por una persona: el reparto no las toca.
-    aMano: (propuesta.a_mano ?? []).length
+    aMano: (propuesta.a_mano ?? []).length,
+    //  Programadas para un día posterior: salen en el reparto de ese día.
+    otroDia: (propuesta.otro_dia ?? []).length,
+    //  Ya empezadas y todavía esperando (volvieron de un bloqueo): siguen con
+    //  quien las tiene.
+    empezadas: (propuesta.empezadas ?? []).length
   };
 }
 
@@ -122,9 +127,10 @@ export async function load({ url, cookies }) {
     conFicha,
     dia,
     //  LA PROPUESTA DEL REPARTO, tal como la calcula el motor que ya existe.
-    //  No se recalcula aquí ni se reordena: el criterio --lo que vence
-    //  primero, después lo más viejo, respetando las zonas de cada cuadrilla--
-    //  vive en 'campo/reparto.py' y una segunda copia se desincronizaría.
+    //  No se recalcula aquí ni se reordena: el criterio --lo vencido primero,
+    //  después la prioridad y lo que vence antes (23/10/2026), respetando las
+    //  zonas de cada cuadrilla-- vive en 'campo/reparto.py' y una segunda
+    //  copia se desincronizaría.
     reparto: reparto.propuesta,
     repartoError: reparto.error ? (reparto.motivo || 'No se pudo calcular la propuesta.') : null,
     conteos: conteosDel(reparto.propuesta),

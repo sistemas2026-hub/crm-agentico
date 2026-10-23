@@ -279,12 +279,51 @@ export const actions = {
       const sinCuenta = r?.sin_nadie_con_cuenta ?? [];
       const movidas = r?.reasignadas ?? [];
       const auxiliares = r?.auxiliares_sin_asignacion ?? 0;
+      //  LO QUE CAMBIÓ DESDE QUE SE MIRÓ  --  23/10/2026. Publicar relee cada
+      //  orden bajo bloqueo (`campo/reparto.py::publicar`) y nombra por
+      //  separado lo que no tocó: se arregla distinto cada una.
+      const noEsperan = r?.ya_no_esperan ?? [];
+      const aMano = r?.a_mano ?? [];
+      const sinCambio = r?.sin_cambio ?? [];
+      const otroDia = r?.otro_dia ?? [];
+      /** @param {number[]} l */
+      const numeros = (l) => l.map((n) => `#${n}`).join(', ');
 
       const partes = [`${n} ${n === 1 ? 'orden asignada' : 'órdenes asignadas'}.`];
       if (ya.length) {
+        //  `ya_tenian` = la vuelta ya empezó: el técnico la marcó en camino.
         partes.push(
-          `${ya.length} ya tenía${ya.length === 1 ? '' : 'n'} a alguien y no se tocó: ` +
-          `${ya.map((n) => `#${n}`).join(', ')}.`
+          ya.length === 1
+            ? `1 ya estaba empezada por quien la tenía y no se tocó: ${numeros(ya)}.`
+            : `${ya.length} ya estaban empezadas por quien las tenía y no se tocaron: ${numeros(ya)}.`
+        );
+      }
+      if (noEsperan.length) {
+        partes.push(
+          noEsperan.length === 1
+            ? `1 se cerró, se canceló o se bloqueó desde que la miraste y no se asignó: ${numeros(noEsperan)}.`
+            : `${noEsperan.length} se cerraron, se cancelaron o se bloquearon desde que las miraste y no se asignaron: ${numeros(noEsperan)}.`
+        );
+      }
+      if (aMano.length) {
+        partes.push(
+          aMano.length === 1
+            ? `1 la asignó alguien a mano desde que la miraste y se respetó: ${numeros(aMano)}.`
+            : `${aMano.length} las asignó alguien a mano desde que las miraste y se respetaron: ${numeros(aMano)}.`
+        );
+      }
+      if (sinCambio.length) {
+        partes.push(
+          sinCambio.length === 1
+            ? `1 ya estaba con esa cuadrilla y no se tocó: ${numeros(sinCambio)}.`
+            : `${sinCambio.length} ya estaban con esa cuadrilla y no se tocaron: ${numeros(sinCambio)}.`
+        );
+      }
+      if (otroDia.length) {
+        partes.push(
+          otroDia.length === 1
+            ? `1 la programaron para otro día desde que la miraste y no se asignó: ${numeros(otroDia)}.`
+            : `${otroDia.length} las programaron para otro día desde que las miraste y no se asignaron: ${numeros(otroDia)}.`
         );
       }
       if (movidas.length) {

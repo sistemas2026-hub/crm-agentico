@@ -180,6 +180,8 @@ def correr_para(org, *, ahora_local=None, avisar=True) -> dict:
         "a_mano": [o.numero for o in propuesta.get("a_mano", [])],
         "sin_cuadrilla": [o.numero for o in propuesta["sin_cuadrilla"]],
         "sobrantes": [o.numero for o in propuesta["sobrantes"]],
+        "otro_dia": [o.numero for o in propuesta.get("otro_dia", [])],
+        "empezadas": [o.numero for o in propuesta.get("empezadas", [])],
         # El tipo de trabajo sin labor declarada. Va en el aviso porque se
         # arregla UNA vez en el catalogo y despues no vuelve a aparecer --
         # pero mientras nadie lo haga, esas ordenes no se reparten.

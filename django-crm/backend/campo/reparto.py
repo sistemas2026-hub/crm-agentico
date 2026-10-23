@@ -24,11 +24,16 @@ kilometros.
 
 EL ORDEN, Y POR QUE ESE
 -----------------------
-    1. SLA        lo que esta por vencer va primero, siempre.
-    2. antiguedad entre dos con el mismo riesgo, la que lleva mas esperando.
-    3. numero     para que dos corridas con los mismos datos den lo mismo.
+    1. vencidas   lo que ya paso su plazo va primero, siempre; entre ellas,
+                  la de mas atraso.
+    2. prioridad  entre las que no vencieron, la alta, despues la media y la
+                  baja (decision del usuario, 23/10/2026: hasta ahi la
+                  prioridad solo ordenaba la lista del tecnico).
+    3. plazo      dentro de cada prioridad, la que vence antes; sin plazo, al
+                  final de su grupo.
+    4. numero     para que dos corridas con los mismos datos den lo mismo.
 
-El tercero no es un criterio de negocio: es lo que hace el reparto
+El ultimo no es un criterio de negocio: es lo que hace el reparto
 REPRODUCIBLE. Sin un desempate estable, dos corridas seguidas pueden entregar
 ordenes distintas a la misma cuadrilla y nadie podria explicar por que.
 
@@ -83,11 +88,12 @@ from campo.cuadrillas import (JornadaDeCuadrilla, destinatarios,
                               por_que_nadie_recibe)
 from campo.models import AsignacionTrabajo, EventoTrabajo, OrdenTrabajo
 
-#: El evento que dice que alguien YA fue al sitio.
+#: El evento que se suponia que decia que alguien YA fue al sitio.
 #:
-#: `EventoTrabajo.tipo` es texto libre --cada tenant puede escribir los suyos--
-#: asi que el valor vive aca, nombrado, y no repetido como cadena suelta en
-#: medio de una consulta.
+#: NINGUN codigo de produccion lo escribe (medido el 21/10/2026: solo las
+#: pruebas lo fabricaban). El reparto y publicar ya no lo miran: miran la
+#: vuelta real, `vueltas_empezadas`. Queda porque `pendientes_de_ayer` todavia
+#: lo lee, y ahi tampoco encuentra nada.
 EVENTO_INICIO = "trabajo_iniciado"
 from campo.zonas import normalizar_localidad
 
@@ -110,6 +116,15 @@ ESTADOS_QUE_ESPERAN = (
 #: revisar; lo que no puede es que el reparto decida solo que alguien hace
 #: veinte visitas.
 TOPE_POR_CUADRILLA = 8
+
+#: Como pesa la prioridad que se eligio al despachar, entre las que no
+#: vencieron. Un valor que no esta aca pesa como media: un dato raro no manda
+#: una orden ni arriba ni al fondo.
+_RANGO_DE_PRIORIDAD = {
+    OrdenTrabajo.PRIORIDAD_ALTA: 0,
+    OrdenTrabajo.PRIORIDAD_MEDIA: 1,
+    OrdenTrabajo.PRIORIDAD_BAJA: 2,
+}
 
 
 def _localidad_de(orden) -> str:
@@ -186,17 +201,136 @@ def _riesgo_de(orden, plazo: dict) -> tuple:
     return (2, 0)
 
 
+def _urgencia(orden, plazo: dict) -> tuple:
+    """La clave de orden con la prioridad adentro: menos es mas urgente.
+
+    LO VENCIDO VA PRIMERO, SIEMPRE, y entre lo vencido manda el atraso: ya se
+    incumplio, y la prioridad no lo vuelve menos incumplido. Entre lo que no
+    vencio manda la prioridad que se eligio al despachar, y dentro de cada
+    prioridad, la que vence antes (sin plazo, al final de su grupo).
+    """
+    clase, valor = _riesgo_de(orden, plazo)
+    if clase == 0:
+        return (0, 0, clase, valor)
+    rango = _RANGO_DE_PRIORIDAD.get(getattr(orden, "prioridad", ""), 1)
+    return (1, rango, clase, valor)
+
+
+def _como_fecha(fecha):
+    """La fecha del reparto como `date`: la pantalla la manda como texto."""
+    import datetime as _dt
+
+    if isinstance(fecha, _dt.datetime):
+        return fecha.date()
+    if isinstance(fecha, _dt.date):
+        return fecha
+    return _dt.date.fromisoformat(str(fecha))
+
+
+def _zona_de(org):
+    """La zona horaria de ESA empresa (`Org.timezone`), no la del servidor.
+
+    El servidor corre en UTC (`settings.TIME_ZONE`), asi que
+    `timezone.localtime` daria el dia de Greenwich: en Bogota, todo lo
+    programado despues de las siete de la noche caeria en el dia siguiente.
+    Mismo criterio y misma caida a UTC que `campo.tasks._ahora_local`.
+    """
+    import zoneinfo
+
+    nombre = (getattr(org, "timezone", "") or "UTC").strip() or "UTC"
+    try:
+        return zoneinfo.ZoneInfo(nombre)
+    except Exception:                                            # noqa: BLE001
+        return zoneinfo.ZoneInfo("UTC")
+
+
+def _para_otro_dia(orden, dia, zona) -> bool:
+    """Si la orden esta programada para un dia POSTERIOR al del reparto.
+
+    Hasta el 23/10/2026 el reparto no miraba `programada_para`: una orden para
+    mañana se repartia hoy, y el tecnico llegaba a una cita que el cliente
+    habia pedido para otro dia. Lo programado para hoy o para un dia que ya
+    paso si entra: si nadie la hizo, sigue esperando a alguien.
+
+    El dia en el reloj de la empresa (`_zona_de`).
+    """
+    cuando = getattr(orden, "programada_para", None)
+    if cuando is None:
+        return False
+    return cuando.astimezone(zona).date() > dia
+
+
+def vueltas_empezadas(org, ids) -> set:
+    """De esas ordenes, las que tienen la VUELTA ACTUAL empezada.
+
+    Es la regla de `operaciones.programacion.clasificar_ruta` (la ruta de
+    contingencia), en tres consultas para todas en vez de dos por orden:
+
+        sin devoluciones   ->  `iniciada_en` escrito
+        con devoluciones   ->  un inicio (en camino, en sitio) despues de la
+                               ultima reapertura
+
+    POR QUE NO `trabajo_iniciado` (23/10/2026). Hasta aca la linea era ese
+    evento, y NINGUN codigo de produccion lo escribe: solo las pruebas lo
+    fabricaban. En los hechos nada contaba como empezado, y publicar le
+    quitaba la orden al tecnico que ya la habia marcado en camino.
+
+    POR QUE NO `iniciada_en` A SECAS: se escribe una sola vez, asi que una
+    orden devuelta a correccion contaria como empezada para siempre y no
+    volveria a repartirse nunca -- justo la que mas lo necesita. Ver
+    «LA FRONTERA NO ES 'iniciada_en'» en `operaciones/programacion.py`.
+    """
+    from django.db.models import Max
+
+    from operaciones.programacion import ESTADOS_DE_INICIO, EVENTO_REAPERTURA
+
+    iniciadas = dict(OrdenTrabajo.objects
+                     .filter(org=org, id__in=list(ids))
+                     .values_list("id", "iniciada_en"))
+    if not iniciadas:
+        return set()
+    reabiertas = dict(
+        EventoTrabajo.objects
+        .filter(orden_id__in=list(iniciadas), tipo=EVENTO_REAPERTURA)
+        .order_by()
+        .values("orden_id")
+        .annotate(ultima=Max("created_at"))
+        .values_list("orden_id", "ultima"))
+    inicios: dict = {}
+    for orden_id, cuando in (EventoTrabajo.objects
+                             .filter(orden_id__in=list(reabiertas),
+                                     datos__nuevo_estado__in=ESTADOS_DE_INICIO)
+                             .values_list("orden_id", "created_at")):
+        inicios.setdefault(orden_id, []).append(cuando)
+
+    empezadas = set()
+    for orden_id, iniciada_en in iniciadas.items():
+        ultima = reabiertas.get(orden_id)
+        if ultima is None:
+            if iniciada_en is not None:
+                empezadas.add(orden_id)
+        elif any(c > ultima for c in inicios.get(orden_id, ())):
+            empezadas.add(orden_id)
+    return empezadas
+
+
 #: Los eventos que dicen QUIEN decidio el ultimo cambio de manos de una orden.
 EVENTOS_MANUALES = ("asignacion", "reasignacion")
 EVENTOS_QUE_LIBERAN = ("reasignada_por_reparto", "cuadrilla_desasignada")
 
 
-def _asignadas_a_mano(org) -> set:
-    """Ordenes cuya ULTIMA decision de asignacion la tomo una persona."""
+def _asignadas_a_mano(org, ids=None) -> set:
+    """Ordenes cuya ULTIMA decision de asignacion la tomo una persona.
+
+    Con `ids`, solo esas: publicar lo pregunta por una orden, bajo bloqueo.
+    """
+    eventos = EventoTrabajo.objects.filter(
+        org=org, tipo__in=EVENTOS_MANUALES + EVENTOS_QUE_LIBERAN)
+    if ids is not None:
+        eventos = eventos.filter(orden_id__in=list(ids))
     ultimo: dict = {}
     for orden_id, tipo in (
-        EventoTrabajo.objects
-        .filter(org=org, tipo__in=EVENTOS_MANUALES + EVENTOS_QUE_LIBERAN)
+        eventos
         .order_by("created_at")
         .values_list("orden_id", "tipo")
     ):
@@ -225,6 +359,8 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
           "sin_cuadrilla": [ordenes de zonas que nadie cubre hoy CON SU LABOR],
           "sobrantes":     [ordenes que no entraron por el tope],
           "sin_clasificar":[ordenes cuyo tipo no declara a que labor va],
+          "otro_dia":      [ordenes programadas para un dia posterior],
+          "empezadas":     [ya empezadas que siguen con quien las tiene],
         }
     """
     if plazo_de is None:                      # import tardio: evita el ciclo
@@ -273,15 +409,12 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
     #  nadie visito se quedaba pegada a su cuadrilla aunque esa cuadrilla hoy
     #  no cubriera su zona. El SLA no podia moverla y nadie veia por que.
     #
-    #  La linea se corre a donde de verdad esta: `trabajo_iniciado` en la
-    #  bitacora. Si alguien ya fue al sitio y hablo con el cliente, sabe algo
-    #  que el reparto no; si no fue nadie, la orden es tan libre como una
-    #  nueva.
-    ya_empezadas = set(
-        EventoTrabajo.objects
-        .filter(org=org, tipo=EVENTO_INICIO)
-        .values_list("orden_id", flat=True)
-    )
+    #  La linea esta donde de verdad esta: la vuelta actual empezo
+    #  (`vueltas_empezadas`). Si alguien ya salio para alla, sabe algo que el
+    #  reparto no; si no salio nadie, la orden es tan libre como una nueva.
+    ya_empezadas = vueltas_empezadas(org, OrdenTrabajo.objects.filter(
+        org=org, estado_operativo__in=ESTADOS_QUE_ESPERAN
+    ).values_list("id", flat=True))
     #  LO QUE UNA PERSONA ASIGNO A MANO NO SE REPARTE (13/10/2026). Desde que
     #  se puede elegir el tecnico al despachar, el reparto -- que reasigna lo
     #  que nadie empezo -- movia esa decision a otra cuadrilla en la siguiente
@@ -301,6 +434,14 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
                   .filter(org=org, id__in=a_mano_ids,
                           estado_operativo__in=ESTADOS_QUE_ESPERAN)
                   .exclude(id__in=ya_empezadas))
+    #  LAS EMPEZADAS QUE SIGUEN ESPERANDO (23/10/2026): por ejemplo, una que
+    #  volvio de un bloqueo a «asignada». Siguen con quien las tiene, y se
+    #  NOMBRAN: sin esta lista no aparecian en ninguna (lo encontro la
+    #  auditoria de la Fase 2.2).
+    empezadas = list(OrdenTrabajo.objects
+                     .filter(org=org, id__in=ya_empezadas,
+                             estado_operativo__in=ESTADOS_QUE_ESPERAN)
+                     .order_by("numero"))
 
     # El orden, con su desempate estable por numero.
     precios = precios_por_plan or {}
@@ -310,7 +451,7 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
         # Mas caro primero -> precio NEGADO. Sin precio queda en el medio: ni
         # arriba como si fuera el mas caro, ni al fondo como si fuera gratis.
         peso = (0, -p) if p is not None else (1, Decimal(0))
-        return _riesgo_de(o, plazo_de(o, ahora=ahora)) + peso + (o.numero or 0,)
+        return _urgencia(o, plazo_de(o, ahora=ahora)) + peso + (o.numero or 0,)
 
     ordenadas = sorted(pendientes, key=clave)
 
@@ -329,8 +470,16 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
     carga = {j.id: 0 for j in jornadas}
     asignadas: dict = {j.id: [] for j in jornadas}
     sin_zona, sin_cuadrilla, sobrantes, sin_clasificar = [], [], [], []
+    otro_dia = []
+    dia, zona = _como_fecha(fecha), _zona_de(org)
 
     for orden in ordenadas:
+        #  LO QUE ES PARA OTRO DIA, ESE DIA. Va primero: no importa si tiene
+        #  zona o cuadrilla, hoy no le toca.
+        if _para_otro_dia(orden, dia, zona):
+            otro_dia.append(orden)
+            continue
+
         # LA LABOR PRIMERO. Una orden sin clasificar no se reparte: ningun
         # codigo de tipo de trabajo dice a que labor pertenece --cada empresa
         # nombra los suyos-- y mandarla a cualquier cuadrilla seria adivinar.
@@ -380,6 +529,174 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
         # a que labor pertenece. Se arregla clasificando el tipo UNA vez, no
         # orden por orden.
         "sin_clasificar": sin_clasificar,
+        #  Programadas para un dia posterior: salen en el reparto de ese dia.
+        "otro_dia": otro_dia,
+        #  Ya empezadas y todavia esperando: siguen con quien las tiene.
+        "empezadas": empezadas,
+    }
+
+
+# ---------------------------------------------------------------------------
+#  PUBLICAR  --  lo que el boton hace, y lo que va a hacer el Supervisor
+# ---------------------------------------------------------------------------
+#
+#  Hasta el 23/10/2026 vivia dentro de `RepartoView.post`. Sale aca para que
+#  el Supervisor (Fase 3.1 de SPEC/objetivos/supervisor-arma-la-jornada.md)
+#  publique con la MISMA funcion que el boton, y no con una copia que se
+#  desincronice el primer dia que alguien toque una de las dos.
+
+def publicar(org, asignaciones) -> dict:
+    """Escribe las asignaciones que se vieron. No recalcula.
+
+    `asignaciones` = [{"jornada": id, "ordenes": [id, ...]}], lo que la
+    pantalla mostro. Si recalculara, entre mirar y publicar podrian aparecer
+    ordenes nuevas y se publicaria algo que nadie reviso.
+
+    Pero lo que se vio puede haber cambiado, y eso SI se relee: cada orden se
+    toma bajo bloqueo y se vuelve a preguntar si todavia espera a alguien, si
+    nadie la empezo y si nadie la asigno a mano mientras tanto. Lo que se
+    decide es la fila bloqueada, nunca lo que la pantalla creia.
+    """
+    from django.db import transaction
+
+    publicadas = 0
+    ya_tenian, ya_no_esperan, a_mano, sin_cambio = [], [], [], []
+    sin_cuenta, reasignadas, otro_dia = [], [], []
+    #  Se acumula FUERA del ciclo: una variable por cuadrilla solo
+    #  guardaria la ultima, y con dos cuadrillas el numero mentiria.
+    auxiliares = 0
+    zona = _zona_de(org)
+    with transaction.atomic():
+        #  TODAS SE BLOQUEAN DE UNA VEZ, EN ORDEN DE id. Una por una y en el
+        #  orden en que llegan, dos publicaciones con las mismas ordenes
+        #  cruzadas se esperarian entre si y Postgres abortaria una entera.
+        ids = [oid for cruda in asignaciones
+               for oid in ((cruda or {}).get("ordenes") or [])]
+        bloqueadas = {
+            str(o.id): o
+            for o in (OrdenTrabajo.objects.select_for_update()
+                      .filter(org=org, id__in=ids).order_by("id"))
+        }
+        for cruda in asignaciones:
+            jornada = JornadaDeCuadrilla.objects.filter(
+                org=org, id=(cruda or {}).get("jornada")
+            ).prefetch_related("integrantes__persona").first()
+            if jornada is None:
+                continue
+
+            # QUIEN RECIBE LA ORDEN: el lider del dia siempre, aunque no
+            # este anotado entre los integrantes, y quien mas tenga cuenta.
+            # El auxiliar sin celular integra la cuadrilla --y por eso
+            # queda en la jornada, que es donde se lee quien estuvo-- pero
+            # no es a quien se le manda el trabajo. La regla vive en
+            # `cuadrillas.destinatarios`, la misma del despacho a mano y
+            # del recuadro de la zona (15/10/2026: hasta ahi cada camino
+            # tenia su copia, y las tres ignoraban al lider).
+            quienes = destinatarios(jornada)
+            if not quienes["reciben"]:
+                # Nadie que la vea en un telefono: la orden quedaria sin
+                # una sola asignacion. Se SALTEA y se dice -- publicar cero
+                # asignaciones e informar exito seria peor que no publicar.
+                sin_cuenta.append(jornada.cuadrilla.nombre)
+                continue
+
+            auxiliares += len(quienes["van_sin_cuenta"])
+            nuevos = {(r["profile"].id, r["es_principal"])
+                      for r in quienes["reciben"]}
+            for oid in (cruda or {}).get("ordenes") or []:
+                orden = bloqueadas.get(str(oid))
+                if orden is None:
+                    continue
+
+                #  LO QUE YA SE EMPEZO NO SE PISA; LO QUE NADIE TOCO, SI.
+                #
+                #  Con el ESTADO de la fila bloqueada y la vuelta real
+                #  (`vueltas_empezadas`), no con `trabajo_iniciado`, que
+                #  nadie escribe: hasta el 23/10/2026 una orden marcada en
+                #  camino entre mirar y publicar cambiaba de manos igual.
+                if orden.estado_operativo in (OrdenTrabajo.EN_CAMINO,
+                                              OrdenTrabajo.EN_SITIO):
+                    ya_tenian.append(orden.numero)
+                    continue
+                if orden.estado_operativo not in ESTADOS_QUE_ESPERAN:
+                    #  Se cerro, se cancelo o se bloqueo mientras tanto.
+                    ya_no_esperan.append(orden.numero)
+                    continue
+                if vueltas_empezadas(org, [orden.id]):
+                    ya_tenian.append(orden.numero)
+                    continue
+                #  Una persona la asigno a mano despues de que se miro: esa
+                #  decision gana, igual que en `proponer` (13/10/2026).
+                if _asignadas_a_mano(org, [orden.id]):
+                    a_mano.append(orden.numero)
+                    continue
+                #  La programaron para otro dia despues de que se miro.
+                if _para_otro_dia(orden, jornada.fecha, zona):
+                    otro_dia.append(orden.numero)
+                    continue
+
+                viejas = list(orden.asignaciones.all())
+                #  YA ESTA CON ESA GENTE: no se toca. Borrarla y volverla a
+                #  crear dejaba en la bitacora una «reasignacion» de la
+                #  cuadrilla a si misma, y el telefono la recibia como
+                #  cambiada sin que nada cambiara.
+                if viejas and {(a.profile_id, a.es_principal)
+                               for a in viejas} == nuevos:
+                    sin_cambio.append(orden.numero)
+                    continue
+                if viejas:
+                    #  Se REEMPLAZA, y queda escrito quien la tenia. Borrar
+                    #  sin registro seria perder el unico dato que explica
+                    #  por que un trabajo cambio de manos.
+                    EventoTrabajo.objects.create(
+                        org=org, orden=orden, tipo="reasignada_por_reparto",
+                        datos={
+                            "de": [str(a.profile_id) for a in viejas],
+                            "a_cuadrilla": jornada.cuadrilla.nombre,
+                            "motivo": ("nadie la habia empezado y el "
+                                       "reparto del dia la movio"),
+                        },
+                    )
+                    orden.asignaciones.all().delete()
+                    reasignadas.append(orden.numero)
+                for r in quienes["reciben"]:
+                    AsignacionTrabajo.objects.create(
+                        orden=orden,
+                        profile=r["profile"],
+                        rol=r["rol"],
+                        es_principal=r["es_principal"],
+                    )
+                #  SUBE LA REVISION: la orden cambio en el servidor, y
+                #  `revision` cuenta escrituras (viaja como `revision_base`
+                #  cuando el telefono guarda datos). OJO: hoy el telefono NO
+                #  suelta una orden porque suba (auditoria de la 2.2,
+                #  23/10/2026). Que quien la tenia deje de verla es de la
+                #  Fase 3.1.
+                orden.revision += 1
+                orden.save(update_fields=["revision", "updated_at"])
+                publicadas += 1
+
+    return {
+        "publicadas": publicadas,
+        # Se nombran: si no, la cuenta no cuadra con lo que se vio y nadie
+        # sabe cuales quedaron afuera.
+        "ya_tenian": ya_tenian,
+        "ya_no_esperan": ya_no_esperan,
+        "a_mano": a_mano,
+        "sin_cambio": sin_cambio,
+        "otro_dia": otro_dia,
+        # Las cuadrillas que no se pudieron publicar porque NADIE en ellas
+        # entra al sistema. Un silencio aca haria creer que se repartio
+        # todo.
+        "sin_nadie_con_cuenta": sin_cuenta,
+        # Cuantos auxiliares integran las cuadrillas publicadas sin recibir
+        # asignacion: es lo esperado, no un error, pero se dice para que
+        # nadie lo lea como gente perdida.
+        "auxiliares_sin_asignacion": auxiliares,
+        #  Las que cambiaron de cuadrilla: nadie las habia empezado, asi
+        #  que el reparto del dia las movio. Se nombran porque alguien
+        #  puede estar esperandolas donde estaban.
+        "reasignadas": reasignadas,
     }
 
 

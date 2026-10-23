@@ -222,8 +222,9 @@ def test_j_una_orden_asignada_pero_que_NADIE_EMPEZO_vuelve_al_reparto(
     visito se quedaba pegada a su cuadrilla aunque esa cuadrilla hoy no
     cubriera su zona ni su labor. El SLA no podia moverla y nadie veia por que.
 
-    La linea se corre a donde de verdad esta --`trabajo_iniciado` en la
-    bitacora-- y el caso contrario lo cubre la prueba siguiente.
+    La linea se corre a donde de verdad esta --la vuelta empezada,
+    `reparto.vueltas_empezadas` (23/10/2026: antes era `trabajo_iniciado`, que
+    nadie escribe)-- y el caso contrario lo cubre la prueba siguiente.
     """
     _jornada(org_a, "Cuadrilla 1", [norte])
     ya = _orden(org_a, version, 10, "MARTHA GISELA")
@@ -241,15 +242,14 @@ def test_j2_pero_la_que_YA_SE_EMPEZO_no_cambia_de_manos(
     org_a, version, norte, admin_profile
 ):
     """Quien fue al sitio y hablo con el cliente sabe algo que el reparto no."""
-    from campo.models import EventoTrabajo
-    from campo.reparto import EVENTO_INICIO
+    from campo.services.transiciones import ejecutar_accion_operativa
 
     _jornada(org_a, "Cuadrilla 1", [norte])
     empezada = _orden(org_a, version, 10, "MARTHA GISELA")
     AsignacionTrabajo.objects.create(
         orden=empezada, profile=admin_profile, rol="tecnico", es_principal=True
     )
-    EventoTrabajo.objects.create(org=org_a, orden=empezada, tipo=EVENTO_INICIO)
+    ejecutar_accion_operativa(empezada, "marcar_en_camino", profile=admin_profile)
     _orden(org_a, version, 20, "MARTHA GISELA")
 
     p = proponer(org_a, LUNES, plazo_de=plazo_falso({10: 10, 20: 999}))
@@ -397,8 +397,9 @@ def test_s_una_orden_ASIGNADA_pero_que_nadie_empezo_SE_REASIGNA(
     visito: el reparto las ofrecia, publicar no hacia nada, y la unica señal
     era un numero en `ya_tenian` que nadie relacionaba con eso.
 
-    La linea esta donde el reparto la puso: `trabajo_iniciado`. El caso
-    contrario lo cubre la prueba siguiente.
+    La linea esta donde el reparto la puso: la vuelta empezada
+    (`reparto.vueltas_empezadas`). El caso contrario lo cubre la prueba
+    siguiente.
     """
     j = _con_gente(org_a, _jornada(org_a, "Cuadrilla 1", [norte]), admin_profile)
     o = _orden(org_a, version, 10, "MARTHA GISELA")
@@ -419,15 +420,15 @@ def test_s2_pero_la_que_YA_SE_EMPEZO_no_se_pisa(
     admin_client, org_a, version, norte, admin_profile, user_profile
 ):
     """Quien fue al sitio y hablo con el cliente sabe algo que el reparto no."""
-    from campo.models import EventoTrabajo
-    from campo.reparto import EVENTO_INICIO
+    from campo.services.transiciones import ejecutar_accion_operativa
 
     j = _con_gente(org_a, _jornada(org_a, "Cuadrilla 1", [norte]), admin_profile)
     o = _orden(org_a, version, 10, "MARTHA GISELA")
     AsignacionTrabajo.objects.create(
         orden=o, profile=user_profile, rol="tecnico", es_principal=True
     )
-    EventoTrabajo.objects.create(org=org_a, orden=o, tipo=EVENTO_INICIO)
+    #  Entre mirar y publicar, el tecnico sale para alla.
+    ejecutar_accion_operativa(o, "marcar_en_camino", profile=user_profile)
 
     r = admin_client.post(REPARTO, {
         "asignaciones": [{"jornada": str(j.id), "ordenes": [str(o.id)]}],

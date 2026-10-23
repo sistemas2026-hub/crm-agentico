@@ -352,9 +352,9 @@
       <!--
         COMO QUEDARIA LA JORNADA  --  13/10/2026
         ========================================
-        El reparto ya existia y nadie lo veia desde aca. Ordena por lo que
-        VENCE primero, despues por lo mas viejo, y respeta las zonas de cada
-        cuadrilla. No publica nada: lo que se ve es una propuesta, y una
+        El reparto ya existia y nadie lo veia desde aca. Ordena por lo que ya
+        VENCIO, despues por la prioridad y lo que vence antes (23/10/2026), y
+        respeta las zonas de cada cuadrilla. No publica nada: lo que se ve es una propuesta, y una
         persona decide.
 
         LO QUE NO ENTRO SE MUESTRA JUNTO A LO QUE SI, y no escondido: una
@@ -411,6 +411,23 @@
             <p class="snoc-body-sm snoc-secundario">
               {data.conteos.aMano} {data.conteos.aMano === 1 ? 'orden asignada' : 'órdenes asignadas'}
               a mano: el reparto no las mueve.
+            </p>
+          {/if}
+          {#if data.conteos.otroDia}
+            <!-- 23/10/2026: el reparto ya no reparte hoy lo programado para
+                 otro día. No es una falla: salen el día que les toca. -->
+            <p class="snoc-body-sm snoc-secundario">
+              {data.conteos.otroDia}
+              {data.conteos.otroDia === 1 ? 'programada para otro día: sale' : 'programadas para otro día: salen'}
+              en el reparto de ese día.
+            </p>
+          {/if}
+          {#if data.conteos.empezadas}
+            <p class="snoc-body-sm snoc-secundario">
+              {data.conteos.empezadas}
+              {data.conteos.empezadas === 1
+                ? 'ya empezada sigue con quien la tiene: el reparto no la mueve.'
+                : 'ya empezadas siguen con quien las tiene: el reparto no las mueve.'}
             </p>
           {/if}
           {#if data.conteos.sinZona || data.conteos.sinCuadrilla || data.conteos.sobrantes || data.conteos.sinClasificar}

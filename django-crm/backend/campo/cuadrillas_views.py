@@ -34,7 +34,7 @@ from campo.labores import (NOMBRE_DE_FABRICA, labor_valida,
 from campo.cuadrillas import (ConfiguracionDeReparto, Cuadrilla,
                               IntegranteDeJornada, JornadaDeCuadrilla,
                               PersonaDeCampo, configuracion_de_reparto,
-                              destinatarios, labor_de_cada_grupo,
+                              labor_de_cada_grupo,
                               labores_de, MAX_NOMBRE_DE_LABOR)
 from campo.zonas import AliasDeZona, ZonaOperativa, normalizar_localidad
 from campo.inventario import UbicacionInventario
@@ -1157,6 +1157,12 @@ class RepartoView(APIView):
             # Ni siquiera se pudieron evaluar: su tipo de trabajo no dice a
             # que labor pertenece. Se arregla clasificando el TIPO una vez.
             "sin_clasificar": [_orden_json(o) for o in p["sin_clasificar"]],
+            #  Programadas para un dia posterior: salen en el reparto de ese
+            #  dia, no en este.
+            "otro_dia": [_orden_json(o) for o in p.get("otro_dia", [])],
+            #  Ya empezadas y todavia esperando (volvieron de un bloqueo):
+            #  siguen con quien las tiene, y se nombran.
+            "empezadas": [_orden_json(o) for o in p.get("empezadas", [])],
         })
 
     def post(self, request):
@@ -1168,107 +1174,11 @@ class RepartoView(APIView):
             return Response({"detail": "No hay nada que publicar."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        from campo.models import (AsignacionTrabajo, EventoTrabajo,
-                                  OrdenTrabajo)
-        from campo.reparto import EVENTO_INICIO
+        #  La misma funcion que va a usar el Supervisor (23/10/2026): lo que
+        #  se relee bajo bloqueo y lo que se nombra estan alla.
+        from campo import reparto as rep
 
-        publicadas, ya_tenian, sin_cuenta, reasignadas = 0, [], [], []
-        #  Se acumula FUERA del ciclo: una variable por cuadrilla solo
-        #  guardaria la ultima, y con dos cuadrillas el numero mentiria.
-        auxiliares = 0
-        with transaction.atomic():
-            for cruda in crudas:
-                jornada = JornadaDeCuadrilla.objects.filter(
-                    org=org, id=(cruda or {}).get("jornada")
-                ).prefetch_related("integrantes__persona").first()
-                if jornada is None:
-                    continue
-
-                # QUIEN RECIBE LA ORDEN: el lider del dia siempre, aunque no
-                # este anotado entre los integrantes, y quien mas tenga cuenta.
-                # El auxiliar sin celular integra la cuadrilla --y por eso
-                # queda en la jornada, que es donde se lee quien estuvo-- pero
-                # no es a quien se le manda el trabajo. La regla vive en
-                # `cuadrillas.destinatarios`, la misma del despacho a mano y
-                # del recuadro de la zona (15/10/2026: hasta ahi cada camino
-                # tenia su copia, y las tres ignoraban al lider).
-                quienes = destinatarios(jornada)
-                if not quienes["reciben"]:
-                    # Nadie que la vea en un telefono: la orden quedaria sin
-                    # una sola asignacion. Se SALTEA y se dice -- publicar cero
-                    # asignaciones e informar exito seria peor que no publicar.
-                    sin_cuenta.append(jornada.cuadrilla.nombre)
-                    continue
-
-                auxiliares += len(quienes["van_sin_cuenta"])
-                for oid in (cruda or {}).get("ordenes") or []:
-                    orden = OrdenTrabajo.objects.filter(org=org, id=oid).first()
-                    if orden is None:
-                        continue
-                    #  LO QUE YA SE EMPEZO NO SE PISA; LO QUE NADIE TOCO, SI.
-                    #
-                    #  Hasta el 09/10/2026 se salteaba TODA orden con
-                    #  asignacion, y eso quedo desalineado con el reparto el
-                    #  dia que `proponer()` empezo a devolver las de ayer que
-                    #  nadie visito: el reparto las ofrecia, publicar no hacia
-                    #  nada, y la unica señal era un numero en `ya_tenian` que
-                    #  nadie relacionaba con eso. El reparto prometia algo que
-                    #  esta mitad no cumplia.
-                    #
-                    #  La linea esta donde el reparto la puso: `trabajo_iniciado`
-                    #  en la bitacora. Quien fue al sitio y hablo con el cliente
-                    #  sabe algo que el reparto no; quien no fue, no.
-                    empezada = EventoTrabajo.objects.filter(
-                        org=org, orden=orden, tipo=EVENTO_INICIO
-                    ).exists()
-                    if empezada:
-                        ya_tenian.append(orden.numero)
-                        continue
-
-                    viejas = list(orden.asignaciones.all())
-                    if viejas:
-                        #  Se REEMPLAZA, y queda escrito quien la tenia. Borrar
-                        #  sin registro seria perder el unico dato que explica
-                        #  por que un trabajo cambio de manos.
-                        EventoTrabajo.objects.create(
-                            org=org, orden=orden, tipo="reasignada_por_reparto",
-                            datos={
-                                "de": [str(a.profile_id) for a in viejas],
-                                "a_cuadrilla": jornada.cuadrilla.nombre,
-                                "motivo": ("nadie la habia empezado y el "
-                                           "reparto del dia la movio"),
-                            },
-                        )
-                        orden.asignaciones.all().delete()
-                        reasignadas.append(orden.numero)
-                    for r in quienes["reciben"]:
-                        AsignacionTrabajo.objects.create(
-                            orden=orden,
-                            profile=r["profile"],
-                            rol=r["rol"],
-                            es_principal=r["es_principal"],
-                        )
-                    publicadas += 1
-
-        return Response({
-            "publicadas": publicadas,
-            # Se nombran: si no, la cuenta no cuadra con lo que se vio y nadie
-            # sabe cuales quedaron afuera.
-            "ya_tenian": ya_tenian,
-            # Las cuadrillas que no se pudieron publicar porque NADIE en ellas
-            # entra al sistema. Un silencio aca haria creer que se repartio
-            # todo.
-            "sin_nadie_con_cuenta": sin_cuenta,
-            # Cuantos auxiliares integran las cuadrillas publicadas sin recibir
-            # asignacion: es lo esperado, no un error, pero se dice para que
-            # nadie lo lea como gente perdida.
-            "auxiliares_sin_asignacion": auxiliares,
-            #  Las que cambiaron de cuadrilla: nadie las habia empezado, asi
-            #  que el reparto del dia las movio. Se nombran porque alguien
-            #  puede estar esperandolas donde estaban.
-            "reasignadas": reasignadas,
-        })
-
+        return Response(rep.publicar(org, crudas))
 
 def _orden_json(o) -> dict:
     return {

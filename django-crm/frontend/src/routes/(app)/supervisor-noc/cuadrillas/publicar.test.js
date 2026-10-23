@@ -121,8 +121,30 @@ describe('publicar', () => {
     }
     //  Y el singular/plural de cada una, que es lo que hace que el texto se
     //  lea como escrito por alguien y no como una plantilla.
-    expect(r.hecho).toContain('ya tenía a alguien');
+    expect(r.hecho).toContain('1 ya estaba empezada por quien la tenía');
     expect(r.hecho).toContain('integra la cuadrilla');
+  });
+
+  it('lo que cambió desde que se miró se nombra, cada cosa por separado', async () => {
+    //  23/10/2026: publicar relee cada orden bajo bloqueo. Lo que no tocó
+    //  tiene cuatro motivos y cada uno se arregla distinto.
+    apiRequest.mockResolvedValue({
+      publicadas: 1,
+      ya_tenian: [900, 901],
+      ya_no_esperan: [902],
+      a_mano: [903],
+      sin_cambio: [904, 905],
+      otro_dia: [906],
+      sin_nadie_con_cuenta: [],
+      reasignadas: []
+    });
+
+    const r = /** @type {any} */ (await actions.publicar(submitPublicar(UNA)));
+    expect(r.hecho).toContain('2 ya estaban empezadas por quien las tenía y no se tocaron: #900, #901.');
+    expect(r.hecho).toContain('1 se cerró, se canceló o se bloqueó desde que la miraste y no se asignó: #902.');
+    expect(r.hecho).toContain('1 la asignó alguien a mano desde que la miraste y se respetó: #903.');
+    expect(r.hecho).toContain('2 ya estaban con esa cuadrilla y no se tocaron: #904, #905.');
+    expect(r.hecho).toContain('1 la programaron para otro día desde que la miraste y no se asignó: #906.');
   });
 
   it('sin asignaciones no se llama al backend', async () => {

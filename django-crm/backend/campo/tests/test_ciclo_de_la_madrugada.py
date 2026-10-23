@@ -437,17 +437,16 @@ def test_s_lo_que_YA_SE_EMPEZO_no_cambia_de_manos(
     org_a, cuadrilla, norte, version, admin_profile
 ):
     """Quien fue al sitio y hablo con el cliente sabe algo que el reparto no."""
-    from campo.models import AsignacionTrabajo, EventoTrabajo
+    from campo.models import AsignacionTrabajo
     from campo import reparto
+    from campo.services.transiciones import ejecutar_accion_operativa
 
     _jornada(org_a, cuadrilla, MARTES, zonas=[norte])
     orden = _orden(org_a, version, 1)
     AsignacionTrabajo.objects.create(
         orden=orden, profile=admin_profile, rol="tecnico", es_principal=True
     )
-    EventoTrabajo.objects.create(
-        org=org_a, orden=orden, tipo=reparto.EVENTO_INICIO
-    )
+    ejecutar_accion_operativa(orden, "marcar_en_camino", profile=admin_profile)
 
     p = reparto.proponer(org_a, MARTES)
     assert p["asignaciones"][0]["ordenes"] == []
@@ -807,15 +806,15 @@ def test_z5_pero_la_que_YA_SE_EMPEZO_no_se_pisa(
     admin_client, org_a, cuadrilla, norte, version, admin_profile, user_profile
 ):
     """Quien fue al sitio y habló con el cliente sabe algo que el reparto no."""
-    from campo.models import AsignacionTrabajo, EventoTrabajo
-    from campo.reparto import EVENTO_INICIO
+    from campo.models import AsignacionTrabajo
+    from campo.services.transiciones import ejecutar_accion_operativa
 
     _jornada(org_a, cuadrilla, MARTES, zonas=[norte])
     orden = _orden(org_a, version, 1)
     AsignacionTrabajo.objects.create(
         orden=orden, profile=user_profile, rol="tecnico", es_principal=True
     )
-    EventoTrabajo.objects.create(org=org_a, orden=orden, tipo=EVENTO_INICIO)
+    ejecutar_accion_operativa(orden, "marcar_en_camino", profile=user_profile)
 
     jornada = JornadaDeCuadrilla.objects.get(cuadrilla=cuadrilla, fecha=MARTES)
     IntegranteDeJornada.objects.create(
