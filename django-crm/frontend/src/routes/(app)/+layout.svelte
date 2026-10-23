@@ -5,7 +5,7 @@
   import { afterNavigate } from '$app/navigation';
   import Sidebar from '$lib/v2/components/Sidebar.svelte';
   import CommandPalette from '$lib/v2/components/CommandPalette.svelte';
-  import { Search, Sun, Columns3, LifeBuoy, Receipt, Plus, Menu } from '@lucide/svelte';
+  import { Search, Sun, MessageCircle, LifeBuoy, ClipboardCheck, Plus, Menu } from '@lucide/svelte';
   import { barra, recordarPreferencia, resumenRecogido } from '$lib/conversaciones/barra-lateral.svelte.js';
 
   /** @type {{ data: { counts: Record<string, number>, org: { name: string, terminology?: Record<string, string> | null }, role: string }, children: import('svelte').Snippet }} */
@@ -28,12 +28,18 @@
   /**
    * The five things worth a thumb on a phone. Fewer than the sidebar on
    * purpose. A tab bar that scrolls is a menu wearing a tab bar's clothes.
+   *
+   * Hasta el 23/10/2026 eran Hoy, Negociaciones, Tickets y Facturas: el
+   * telefono de BottleCRM, pensado para vender. En Dexter quien abre la web en
+   * el telefono esta operando, asi que son los cuatro destinos de operacion
+   * que sirven a cualquier rol (ninguno exige un rol de gestion). Lo demas
+   * sigue en el menu.
    */
   const TABS = [
     { href: '/', label: 'Hoy', icon: Sun, exact: true },
-    { href: '/pipeline', label: 'Negociaciones', icon: Columns3 },
+    { href: '/conversaciones', label: 'Conversaciones', icon: MessageCircle },
     { href: '/tickets', label: 'Tickets', icon: LifeBuoy },
-    { href: '/invoices', label: 'Facturas', icon: Receipt }
+    { href: '/instalaciones', label: 'Instalaciones', icon: ClipboardCheck }
   ];
 
   const isActive = (href, exact) =>
@@ -146,7 +152,10 @@
   <!-- Both live inside .v2-root so they inherit the scoped tokens; both are
        position:fixed, so the shell's overflow:hidden does not clip them.
 
-       NOT on the inbox. The FAB is "nueva negociación" -- a sales shortcut with
+       Desde el 23/10/2026 el FAB es "Nuevo ticket" y no "nueva negociacion":
+       el atajo de un CRM de ventas no era el de una operacion de ISP.
+
+       NOT on the inbox. The FAB was "nueva negociación" -- a sales shortcut with
        nothing to do with answering a client -- and it is `position: fixed;
        z-index: 30`, so on a phone it lands ON TOP of the composer. Measured on
        21/09/2026 at 390px: it covered 40% of the "Enviar" button, and a tap on
@@ -154,7 +163,7 @@
        Raising the composer instead would only move the collision somewhere
        else; on this screen the shortcut simply does not belong. -->
   {#if !page.url.pathname.startsWith('/conversaciones')}
-    <a class="v2-fab" href="/pipeline/new" aria-label="Nueva negociación"><Plus size={21} /></a>
+    <a class="v2-fab" href="/tickets/new" aria-label="Nuevo ticket"><Plus size={21} /></a>
   {/if}
 
   <!-- Mobile navigation drawer. Only openable from the mobile top bar, so it
