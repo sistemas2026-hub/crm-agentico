@@ -711,7 +711,7 @@
         <div class="snoc-pila-xs">
           <h2 class="snoc-h2">Armar la jornada</h2>
           <p class="snoc-body-sm snoc-secundario">
-            Ordena lo pendiente por SLA y antigüedad, y lo reparte entre las cuadrillas que
+            Pone primero lo vencido y después la prioridad (alta, media, baja), y lo reparte entre las cuadrillas que
             trabajan el {data.dia}, respetando sus zonas. <strong>Propone: no asigna nada
             hasta que vos publiques.</strong>
           </p>
