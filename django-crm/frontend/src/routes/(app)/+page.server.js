@@ -24,11 +24,20 @@ export async function load(event) {
   // en vez de afirmar que "eso es todo".
   const crmOcultos = f.crm ? Math.max(0, (f.crm.summary.count ?? 0) - (f.crm.summary.shown ?? 0)) : 0;
 
+  // "Esperan a una persona" sale de la MISMA cola que la Bandeja (chats en las
+  // bandas 1-3), no de `esperando_humano` del centro de mando: ese cuenta toda
+  // conversacion abierta con la marca, de cualquier antigüedad y una por
+  // conversacion. Medido en produccion el 23/10/2026: 84 arriba contra 39 en
+  // "Por area" en la misma pantalla. Solo si la cola no se pudo leer se cae al
+  // numero del centro.
+  const piden = f.conversaciones
+    ? f.conversaciones.filter((c) => c.banda === 1 || c.banda === 2 || c.banda === 3).length
+    : null;
   const t = f.centro?.totales;
   const dexter = t
     ? {
         activas: t.conversaciones_activas ?? 0,
-        esperanPersona: t.esperando_humano ?? 0,
+        esperanPersona: piden ?? t.esperando_humano ?? 0,
         atendidasHoy: t.atendidas_hoy ?? 0,
         fallosHoy: t.fallos_hoy ?? 0,
         agentesActivos: t.agentes_activos ?? 0,

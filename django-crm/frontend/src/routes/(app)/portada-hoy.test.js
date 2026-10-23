@@ -74,7 +74,10 @@ describe('portada Hoy', () => {
     // instalacion (120 min) antes que el bloqueo (40 min).
     expect(datos.cola.map((i) => i.id)).toEqual(['conv-espera', 'crm-3', 'instalaciones', 'noc-bloqueos']);
     expect(datos.cola[0].href).toBe('/conversaciones/c9');
-    expect(datos.dexter).toMatchObject({ activas: 23, esperanPersona: 4, agentesActivos: 6, agentesTotal: 8 });
+    // esperanPersona es 1 (el chat c9 en banda 1), no el 4 del centro de mando:
+    // arriba y en "Por area" tiene que decir lo mismo que la Bandeja.
+    expect(datos.dexter).toMatchObject({ activas: 23, esperanPersona: 1, agentesActivos: 6, agentesTotal: 8 });
+    expect(datos.porArea.find((a) => a.id === 'conversaciones')?.valor).toBe(datos.dexter.esperanPersona);
     expect(datos.noLeidas).toEqual([]);
     expect(datos.resumen).toMatch(/^4 cosas te necesitan ahora; 2 ya pasaron su plazo\./);
   });

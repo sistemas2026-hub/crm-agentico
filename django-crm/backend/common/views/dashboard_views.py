@@ -59,9 +59,37 @@ def _fmt_money(amount, currency):
     return f"{sym}{n:,.0f}" if sym else f"{(currency or '').upper()} {n:,.0f}".strip()
 
 
+_MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
+_DIAS = ("Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom")
+
+# Los valores se guardan en ingles (son los `choices` de los modelos); se
+# traducen solo al mostrarlos, con las MISMAS palabras que usa el frontend en
+# lib/v2/enums.js (CASE_PRIORITY_LABEL, TASK_PRIORITY_LABEL, STAGE_LABEL), para
+# que la portada y el resto de la interfaz digan lo mismo. Hasta el 23/10/2026
+# la cola de "Hoy" salia en ingles ("Overdue", "Reply", "awaiting first reply").
+_PRIORIDAD = {"Urgent": "Urgente", "High": "Alta", "Normal": "Normal", "Medium": "Media", "Low": "Baja"}
+_ETAPA = {
+    "PROSPECTING": "Prospección",
+    "QUALIFICATION": "Calificación",
+    "PROPOSAL": "Propuesta",
+    "NEGOTIATION": "Negociación",
+    "CLOSED_WON": "Ganada",
+    "CLOSED_LOST": "Perdida",
+}
+
+
 def _fmt_date(d):
-    """'Jul 5'. Portable (avoids the platform-specific %-d)."""
-    return f"{d:%b} {d.day}"
+    """'5 jul'. Portable: no depende del locale del servidor ni de %-d."""
+    return f"{d.day} {_MESES[d.month - 1]}"
+
+
+def _dia(d):
+    """'Lun'. Mismo motivo: strftime('%a') sale en el idioma del servidor."""
+    return _DIAS[d.weekday()]
+
+
+def _prioridad(valor):
+    return _PRIORIDAD.get(valor, valor or "")
 
 
 def _owned_or_assigned(queryset, profile):
@@ -460,10 +488,10 @@ class ApiTodayView(APIView):
                     "_rank": 0 if breached else 3,
                     "id": f"case-{c.id}",
                     "tone": "rust" if (hot or breached) else "clay",
-                    "due": "Overdue" if breached else "Today",
+                    "due": "Vencido" if breached else "Hoy",
                     "title": c.name,
-                    "detail": f"{c.priority} · {c.account.name if c.account_id else 'No account'} · awaiting first reply",
-                    "action": "Reply",
+                    "detail": f"Prioridad {_prioridad(c.priority).lower()} · {c.account.name if c.account_id else 'Sin cuenta'} · sin primera respuesta",
+                    "action": "Responder",
                     "href": f"/tickets/{c.id}",
                 }
             )
@@ -477,16 +505,16 @@ class ApiTodayView(APIView):
                     "_rank": 1,
                     "id": f"invoice-{inv.id}",
                     "tone": "clay",
-                    "due": "Overdue",
+                    "due": "Vencida",
                     "title": inv.invoice_title or inv.invoice_number,
-                    "detail": f"{_fmt_money(inv.total_amount, inv.currency)} · {inv.account.name if inv.account_id else 'No account'} · due {_fmt_date(inv.due_date)}",
-                    "action": "Send a reminder",
+                    "detail": f"{_fmt_money(inv.total_amount, inv.currency)} · {inv.account.name if inv.account_id else 'Sin cuenta'} · venció el {_fmt_date(inv.due_date)}",
+                    "action": "Enviar recordatorio",
                     "href": f"/invoices/{inv.id}",
                 }
             )
 
         # 3. Quiet deals (aging). Rotten (red) outrank merely slowing (yellow).
-        stage_labels = dict(STAGES)
+        stage_labels = {**dict(STAGES), **_ETAPA}
         for opp in quiet_opps.order_by("stage_changed_at")[:TODAY_SOURCE_LIMIT]:
             rotten = (
                 opp.stage in rotten_cutoffs
@@ -499,10 +527,10 @@ class ApiTodayView(APIView):
                     "_rank": 2 if rotten else 6,
                     "id": f"deal-{opp.id}",
                     "tone": "rust" if rotten else "clay",
-                    "due": "Stalled" if rotten else "Aging",
+                    "due": "Estancada" if rotten else "Se está enfriando",
                     "title": opp.name,
-                    "detail": f"No movement for {days} days · {_fmt_money(opp.amount, opp.currency)} · {stage_labels.get(opp.stage, opp.stage)}",
-                    "action": "Open the deal",
+                    "detail": f"Sin movimiento hace {days} {'día' if days == 1 else 'días'} · {_fmt_money(opp.amount, opp.currency)} · {stage_labels.get(opp.stage, opp.stage)}",
+                    "action": "Abrir la negociación",
                     "href": f"/pipeline/{opp.id}",
                 }
             )
@@ -515,14 +543,14 @@ class ApiTodayView(APIView):
                     "_rank": 4 if overdue else 5,
                     "id": f"task-{t.id}",
                     "tone": "clay" if overdue else "slate",
-                    "due": "Overdue" if overdue else "Today",
+                    "due": "Vencida" if overdue else "Hoy",
                     "title": t.title,
                     "detail": (
-                        f"Due {_fmt_date(t.due_date)} · {t.priority}"
+                        f"Vence el {_fmt_date(t.due_date)} · prioridad {_prioridad(t.priority).lower()}"
                         if t.due_date
-                        else t.priority
+                        else f"Prioridad {_prioridad(t.priority).lower()}"
                     ),
-                    "action": "Open the task",
+                    "action": "Abrir la tarea",
                     "href": f"/tasks/{t.id}",
                 }
             )
@@ -542,17 +570,17 @@ class ApiTodayView(APIView):
         # to go. The hrefs are literals built here, never stored values.
         sources = [
             {
-                "label": "tickets awaiting a reply",
+                "label": "tickets sin primera respuesta",
                 "count": awaiting_cases.count(),
                 "href": "/tickets",
             },
             {
-                "label": "overdue invoices",
+                "label": "facturas vencidas",
                 "count": invoices.count(),
                 "href": "/invoices",
             },
-            {"label": "quiet deals", "count": quiet_deals, "href": "/pipeline"},
-            {"label": "tasks due", "count": tasks.count(), "href": "/tasks"},
+            {"label": "negociaciones frías", "count": quiet_deals, "href": "/pipeline"},
+            {"label": "tareas para hoy", "count": tasks.count(), "href": "/tasks"},
         ]
         sources = [s for s in sources if s["count"]]
         total_urgent = sum(s["count"] for s in sources)
@@ -605,9 +633,9 @@ class ApiTodayView(APIView):
                     t.due_date,
                     {
                         "id": f"task-{t.id}",
-                        "day": t.due_date.strftime("%a"),
+                        "day": _dia(t.due_date),
                         "title": t.title,
-                        "meta": f"Task · {t.priority}",
+                        "meta": f"Tarea · prioridad {_prioridad(t.priority).lower()}",
                     },
                 )
             )
@@ -617,8 +645,8 @@ class ApiTodayView(APIView):
                     o.closed_on,
                     {
                         "id": f"deal-{o.id}",
-                        "day": o.closed_on.strftime("%a"),
-                        "title": f"{o.name} expected to close",
+                        "day": _dia(o.closed_on),
+                        "title": f"Se espera cerrar {o.name}",
                         "meta": f"{stage_labels.get(o.stage, o.stage)} · {_fmt_money(o.amount, o.currency)}",
                     },
                 )
@@ -629,8 +657,8 @@ class ApiTodayView(APIView):
                     inv.due_date,
                     {
                         "id": f"invoice-{inv.id}",
-                        "day": inv.due_date.strftime("%a"),
-                        "title": f"{inv.invoice_title or inv.invoice_number} due",
+                        "day": _dia(inv.due_date),
+                        "title": f"Vence {inv.invoice_title or inv.invoice_number}",
                         "meta": _fmt_money(inv.total_amount, inv.currency),
                     },
                 )

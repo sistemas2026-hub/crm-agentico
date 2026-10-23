@@ -90,8 +90,8 @@ class TestTodayView:
             (i for i in resp.data["queue"] if i["id"] == f"invoice-{inv.id}"), None
         )
         assert item is not None
-        assert item["due"] == "Overdue"
-        assert item["action"] == "Send a reminder"
+        assert item["due"] == "Vencida"
+        assert item["action"] == "Enviar recordatorio"
         assert item["href"] == f"/invoices/{inv.id}"
 
     def test_future_invoice_is_later_not_queue(self, admin_client, org_a):
@@ -138,7 +138,7 @@ class TestTodayView:
             (i for i in resp.data["queue"] if i["id"] == f"case-{case.id}"), None
         )
         assert item is not None
-        assert item["action"] == "Reply"
+        assert item["action"] == "Responder"
         assert item["href"] == f"/tickets/{case.id}"
 
     def test_answered_case_absent(self, admin_client, org_a, admin_user):
@@ -375,10 +375,10 @@ class TestTheHeaderCountMatchesThePage:
         summary = admin_client.get(self.url).data["summary"]
         by_label = {s["label"]: s for s in summary["sources"]}
 
-        assert by_label["overdue invoices"]["count"] == 10
-        assert by_label["overdue invoices"]["href"] == "/invoices"
-        assert by_label["tasks due"]["count"] == 4
-        assert by_label["tasks due"]["href"] == "/tasks"
+        assert by_label["facturas vencidas"]["count"] == 10
+        assert by_label["facturas vencidas"]["href"] == "/invoices"
+        assert by_label["tareas para hoy"]["count"] == 4
+        assert by_label["tareas para hoy"]["href"] == "/tasks"
         assert sum(s["count"] for s in summary["sources"]) == summary["count"] == 14
 
     def test_a_source_with_nothing_in_it_is_not_listed(self, admin_client, org_a):
@@ -388,7 +388,7 @@ class TestTheHeaderCountMatchesThePage:
 
         summary = admin_client.get(self.url).data["summary"]
 
-        assert [s["label"] for s in summary["sources"]] == ["overdue invoices"]
+        assert [s["label"] for s in summary["sources"]] == ["facturas vencidas"]
 
     def test_the_count_is_scoped_to_the_member(
         self, user_client, org_a, regular_user, admin_user
@@ -413,3 +413,63 @@ class TestTheHeaderCountMatchesThePage:
         summary = admin_client.get(self.url).data["summary"]
 
         assert summary["count"] == 1
+
+
+@pytest.mark.django_db
+class TestLaColaHablaEspanol:
+    """La portada muestra estos textos tal cual. Hasta el 23/10/2026 salian en
+    ingles ("Overdue", "Reply", "No account · awaiting first reply", "tickets
+    awaiting a reply") en una interfaz en espanol. Se barre TODO texto de la
+    respuesta, no un campo: el que se escapa es siempre el que nadie miro."""
+
+    url = "/api/dashboard/today/"
+
+    INGLES = (
+        "Overdue", "Today", "Reply", "awaiting", "No account", "Send a",
+        "Open the", "Stalled", "Aging", "No movement", "expected to close",
+        "Due ", " due", "Task ·", "tickets awaiting", "overdue invoices",
+        "quiet deals", "tasks due", "Urgent", "High", "Medium", "Low",
+    )
+
+    def _textos(self, data):
+        for fila in data["queue"]:
+            yield from (fila["due"], fila["detail"], fila["action"])
+        for fuente in data["summary"]["sources"]:
+            yield fuente["label"]
+        for fila in data["later"]:
+            yield from (fila["day"], fila["title"], fila["meta"])
+
+    def test_ningun_texto_de_la_cola_sale_en_ingles(
+        self, admin_client, org_a, admin_user
+    ):
+        _set_rls(org_a)
+        Case.objects.create(
+            name="Sin internet", status="New", priority="High",
+            case_type="Question", org=org_a, created_by=admin_user,
+            first_response_at=None,
+        )
+        Invoice.objects.create(
+            invoice_title="Mensualidad", org=org_a, currency="USD",
+            total_amount=100, status="Sent", due_date=_today() - _days(3),
+        )
+        Task.objects.create(
+            title="Llamar al cliente", status="New", priority="Low",
+            org=org_a, created_by=admin_user, due_date=_today() - _days(1),
+        )
+        Task.objects.create(
+            title="Revisar instalacion", status="New", priority="Medium",
+            org=org_a, created_by=admin_user, due_date=_today() + _days(2),
+        )
+        Invoice.objects.create(
+            invoice_title="Proxima", org=org_a, currency="USD",
+            total_amount=50, status="Sent", due_date=_today() + _days(3),
+        )
+
+        data = admin_client.get(self.url).data
+        textos = list(self._textos(data))
+        assert len(data["queue"]) == 3 and len(data["later"]) == 2
+        en_ingles = [t for t in textos for p in self.INGLES if p in t]
+        assert en_ingles == []
+        caso = next(f for f in data["queue"] if f["id"].startswith("case-"))
+        assert caso["detail"] == "Prioridad alta · Sin cuenta · sin primera respuesta"
+        assert {f["day"] for f in data["later"]} <= {"Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"}

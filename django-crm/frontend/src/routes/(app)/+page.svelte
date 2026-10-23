@@ -74,8 +74,8 @@
             <span class="v2-label">Dexter ahora</span>
             <span class="agentes">
               <i class="punto-ok"></i>
-              {data.dexter.agentesActivos}{#if data.dexter.agentesTotal != null}
-                de {data.dexter.agentesTotal}{/if} agentes trabajando
+              {data.dexter.agentesActivos}{#if data.dexter.agentesTotal != null}{' '}de
+                {data.dexter.agentesTotal}{/if} agentes trabajando
             </span>
           </div>
           <div class="franja-celda">
