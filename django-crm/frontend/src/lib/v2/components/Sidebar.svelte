@@ -32,9 +32,18 @@
     Activity,
     Bot,
     Cable,
-    BookMarked
+    BookMarked,
+    Moon
   } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
+  import { alternarTema, leerTema } from '$lib/v2/tema.js';
+
+  // El tema se lee del navegador, asi que recien cuando hay navegador: en el
+  // servidor no existe localStorage. Arranca en claro (ver lib/v2/tema.js).
+  let oscuro = $state(false);
+  $effect(() => {
+    oscuro = leerTema() === 'oscuro';
+  });
 
   /**
    * One flat tree, grouped by what the person is doing rather than by which
@@ -271,6 +280,17 @@
       <CircleHelp />
       Ayuda
     </a>
+    <!-- Un boton, no un enlace: cambia el tema en el lugar, no navega. -->
+    <button
+      class="v2-link v2-nav-search"
+      type="button"
+      aria-pressed={oscuro}
+      onclick={() => (oscuro = alternarTema() === 'oscuro')}
+    >
+      <Moon />
+      Tema oscuro
+      <span class="v2-count">{oscuro ? 'Sí' : 'No'}</span>
+    </button>
     <!-- Aca iba "Descargar app", que abria la app de BottleCRM en Play Store
          (io.bottlecrm). La de Dexter es la de campo (com.dexter.campo): un
          solo APK para todas las empresas, que hoy se instala a mano y no esta

@@ -15,6 +15,15 @@
          resolver la autorizacion de tratamiento antes (CLAUDE.md §5, mismo
          criterio que tiene apagado a Sentry). La prueba
          lib/observabilidad/sin-analitica-de-terceros.test.js impide que vuelva. -->
+    <!-- El tema oscuro se aplica ANTES del primer pintado, o la pagina se ve
+         clara un instante y salta. Lee la misma clave que lib/v2/tema.js. -->
+    <script>
+      try {
+        if (localStorage.getItem('dexter-tema') === 'oscuro') {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />

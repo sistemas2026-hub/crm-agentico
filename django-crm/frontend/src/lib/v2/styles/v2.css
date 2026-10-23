@@ -100,10 +100,11 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* Oscuro "Grafito". Ojo: hoy ninguna pantalla v2 pone la clase .dark (el
-   unico interruptor vive en AppSidebar, de v1, que no se usa). Queda
-   definido para el dia que exista el interruptor. */
+/* Oscuro "Grafito". Lo prende el boton "Tema oscuro" del pie del menu
+   (lib/v2/tema.js, desde el 23/10/2026); es opcional y arranca en claro. */
 .dark .v2-root {
+  /* Barras de desplazamiento, selects y casillas nativas en oscuro tambien. */
+  color-scheme: dark;
   --v2-ember: #8b85ff; /* 5.7:1 sobre la tarjeta; texto oscuro encima 6.2:1 */
   --v2-ember-hover: #9d98ff;
   --v2-ember-text: #a5a0ff;
