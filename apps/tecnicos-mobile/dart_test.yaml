@@ -1,0 +1,11 @@
+# Las capturas de QA no corren en la suite normal.
+#
+# No afirman nada: dibujan cada pantalla y guardan el PNG, asi que en una
+# corrida comun solo gastan tiempo y fallan cada vez que alguien cambia un
+# pixel a proposito. Se piden a mano cuando se quiere comparar contra el
+# diseno:
+#
+#   flutter test test/capturas_qa_test.dart --run-skipped --update-goldens
+tags:
+  capturas:
+    skip: "capturas de QA: correr con --tags capturas"

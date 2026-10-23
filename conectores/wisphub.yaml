@@ -1,0 +1,1316 @@
+id: wisphub
+nombre: Wisphub
+descripcion: Herramientas verificadas contra api.wisphub.io.
+extraido_de: rapilink
+variables:
+- nombre: WISPHUB_BASE_URL
+  etiqueta: URL base de la API
+  ejemplo: https://api.wisphub.io
+secretos:
+- nombre: WISPHUB_API_KEY
+  etiqueta: Credencial de Wisphub
+areas:
+  soporte:
+    descripcion: Atiende a un colaborador interno (nunca al cliente directo), revisa
+    orientado_a: colaborador
+  facturacion:
+    descripcion: Revisa facturas, saldos y registra pagos.
+    orientado_a: colaborador
+  administracion:
+    descripcion: Consultas consolidadas, sin datos personales.
+    orientado_a: colaborador
+  facturacion_cliente:
+    descripcion: El suscriptor, ya derivado desde el agente general porque su consulta
+    orientado_a: cliente_final
+  soporte_tecnico_cliente:
+    descripcion: El suscriptor, ya derivado desde el agente general porque su consulta
+    orientado_a: cliente_final
+  ventas:
+    descripcion: Un prospecto por WhatsApp -- TODAVIA NO es cliente de Rapilink. Nunca
+    orientado_a: cliente_final
+herramientas:
+- nombre: consultar_cliente
+  tipo: http
+  descripcion: Datos de un cliente por su ID de servicio.
+  solo_lectura: true
+  endpoint: /api/clientes/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  filtros_verificados:
+    id_servicio:
+      param: id_servicio
+      tipo: id
+      verificado_el: 2026-08-12
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - administracion
+  - facturacion
+  - soporte
+  campos_por_area:
+    administracion:
+    - id_servicio
+    - nombre
+    - estado
+    - plan_internet
+    - zona
+    - fecha_instalacion
+    - estado_facturas
+    facturacion:
+    - id_servicio
+    - nombre
+    - cedula
+    - estado
+    - email
+    - telefono
+    - direccion
+    - localidad
+    - ciudad
+    - estado_facturas
+    - saldo
+    - fecha_corte
+    - plan_internet
+    soporte:
+    - id_servicio
+    - nombre
+    - cedula
+    - estado
+    - email
+    - telefono
+    - direccion
+    - localidad
+    - ciudad
+    - plan_internet
+    - zona
+    - fecha_instalacion
+    - estado_facturas
+    - saldo
+    - fecha_corte
+- nombre: consultar_cliente_por_cedula
+  tipo: http
+  descripcion: Datos de un cliente por su cedula.
+  solo_lectura: true
+  endpoint: /api/clientes/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  filtros_verificados:
+    cedula:
+      param: cedula
+      tipo: id
+      verificado_el: 2026-08-12
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - facturacion
+  - soporte
+  campos_por_area:
+    facturacion:
+    - id_servicio
+    - nombre
+    - cedula
+    - estado
+    - email
+    - telefono
+    - estado_facturas
+    - saldo
+    - fecha_corte
+    - plan_internet
+    soporte:
+    - id_servicio
+    - nombre
+    - cedula
+    - estado
+    - email
+    - telefono
+    - direccion
+    - localidad
+    - ciudad
+    - plan_internet
+    - zona
+    - fecha_instalacion
+    - estado_facturas
+    - saldo
+    - fecha_corte
+- nombre: consultar_mi_servicio
+  tipo: http
+  descripcion: 'Estado del servicio del cliente autenticado. El id_cliente NO viaja como argumento del
+    modelo: lo inyecta el codigo desde la sesion. Si viniera del modelo, una inyeccion de prompt bastaria
+    para pedir el de otro.
+
+    '
+  solo_lectura: true
+  endpoint: /api/clientes/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  inyectar_sesion:
+    id_servicio: id_cliente
+  inyectados_obligatorios:
+  - id_servicio
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - facturacion_cliente
+  - soporte_tecnico_cliente
+  campos_por_area:
+    facturacion_cliente:
+    - estado
+    - estado_facturas
+    - saldo
+    - fecha_corte
+    - plan_internet
+    soporte_tecnico_cliente:
+    - estado
+    - plan_internet
+    - ssid_router_wifi
+- nombre: consultar_plan_tv
+  tipo: http
+  descripcion: 'Confirma si un plan de internet incluye TV, leyendo su descripcion real -- el NOMBRE del
+    plan casi nunca lo dice (''PLAN HOGAR'', ''PLAN ELITE'', etc. pueden incluir TV igual, verificado
+    en vivo agosto 2026). Pasale ''id_plan'', el id que ya viste en plan_internet.id al llamar a consultar_mi_servicio.
+
+    '
+  solo_lectura: true
+  endpoint: /api/plan-internet/queue/{id_plan}/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  filtros_verificados:
+    id_plan:
+      param: id_plan
+      tipo: id
+      verificado_el: 2026-08-14
+  cache: true
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte_tecnico_cliente:
+    - descripcion
+- nombre: consultar_planes
+  tipo: http
+  descripcion: 'Catalogo TECNICO completo de WispHub (nombre e ID) -- trae variantes duplicadas y nombres
+    legacy pensados para facturar clientes existentes, NO una lista de venta (para eso esta consultar_planes_venta,
+    que hay que llamar primero). Usala solo para resolver el ID de un plan YA CONFIRMADO por consultar_planes_venta,
+    antes de pedir su precio con consultar_plan_detalle -- nunca inventes un nombre de plan que no aparezca
+    aca.
+
+    '
+  solo_lectura: true
+  cache: true
+  cache_vigencia_dias: 7
+  endpoint: /api/plan-internet/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - ventas
+  campos_por_area:
+    ventas:
+    - id
+    - nombre
+- nombre: consultar_plan_detalle
+  tipo: http
+  descripcion: 'Precio y velocidad reales de UN plan, por su ID (resolvelo primero con consultar_planes).
+    Verificado en vivo (19/08/2026): el precio NO viene en el listado de consultar_planes, solo aca.
+
+    '
+  solo_lectura: true
+  cache: true
+  endpoint: /api/plan-internet/queue/{id_plan}/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  requeridos:
+  - id_plan
+  filtros_verificados:
+    id_plan:
+      param: id_plan
+      tipo: id
+      verificado_el: 2026-08-19
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - ventas
+  campos_por_area:
+    ventas:
+    - nombre
+    - precio
+    - bajada
+    - subida
+    - descripcion
+- nombre: verificar_identidad_por_cedula
+  tipo: http
+  descripcion: 'Primer paso de la verificacion (no el unico -- ver confirmar_identidad) por numero de
+    cedula, cuando el numero de WhatsApp no alcanzo para verificarlo solo. Filtro verificado contra la
+    API real (metodo del valor imposible, agosto 2026 -- ver .claude/skills/wisphub-api/SKILL.md). NUNCA
+    devuelve datos del cliente: solo el nombre a confirmar, o si quedo ambiguo o no encontrado.
+
+    '
+  solo_lectura: true
+  verifica_identidad: true
+  campo_busqueda: cedula
+  endpoint: /api/clientes/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - facturacion_cliente
+  - soporte_tecnico_cliente
+  - ventas
+- nombre: ping_cliente
+  tipo: http
+  asincrona: true
+  descripcion: 'Ping en tiempo real al equipo del cliente autenticado, via WispHub -- confirma si hay
+    comunicacion real con la red, mas alla de lo que diga el estado de facturacion. Verificado en vivo
+    (agosto 2026, cliente de prueba id_servicio=5832): responde en pocos segundos, 3 intentos.
+
+    Si ''ping-exitoso'' dice que todos respondieron: el corte NO es de conectividad a nivel de red --
+    no sugieras reiniciar el router por eso, la causa es otra (revisar plan/facturacion, o escalar para
+    revision mas profunda). Si no responde ninguno o la mayoria: sigue el procedimiento del manual (luces
+    del router, reinicio de 30 segundos, escalar si persiste).
+
+    '
+  solo_lectura: true
+  endpoint: /clientes/{id_servicio}/ping/
+  metodo: POST
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  argumentos_fijos:
+    pings: 3
+    arp_ping: false
+  inyectar_sesion:
+    id_servicio: id_cliente
+  inyectados_obligatorios:
+  - id_servicio
+  escalar_si_falla: sin_datos_para_diagnosticar
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - soporte_tecnico_cliente
+  campos_por_area:
+    soporte_tecnico_cliente:
+    - ping-exitoso
+    - ping-1.packet-loss
+    - ping-2.packet-loss
+    - ping-3.packet-loss
+    - ping-1.avg-rtt
+    - ping-2.avg-rtt
+    - ping-3.avg-rtt
+    - ping-1.max-rtt
+    - ping-2.max-rtt
+    - ping-3.max-rtt
+- nombre: agendar_visita_tecnica
+  tipo: http
+  multipart: true
+  descripcion: 'Agenda una visita tecnica real en WispHub (crea un ticket) -- se ejecuta de inmediato,
+    SIN ningun paso de confirmacion humana despues de la llamada, asi que la decision de llamarla o no
+    es toda tuya.
+
+    Solo la usas cuando el colaborador que te escribe ya CONFIRMO (reviso la central) que una falla puntual
+    de TV en canales especificos no se explica por causas del lado del cliente (cableado, exceso de TV
+    sobre el splitter, etc. -- ver seccion 5.11 del manual). Nunca la llames porque el cliente final lo
+    pida directo, ni porque alguien pregunte "se puede agendar" sin haber confirmado nada -- eso es una
+    pregunta, no una confirmacion.
+
+    Argumentos que propones: ''servicio'' (id_servicio del cliente -- si solo tienes la cedula, resuelvela
+    primero con consultar_cliente_por_cedula) y ''descripcion'' (canales afectados por NOMBRE, nunca numero,
+    y que se valido antes de escalar). Si falta alguno, pidelo antes de llamar -- nunca inventes ni completes
+    a medias. El resto (tecnico, prioridad, departamento, asunto) queda fijo, siempre el mismo tecnico
+    y asunto ''Problemas De Tv''.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  endpoint: /api/tickets/
+  metodo: POST
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  argumentos_fijos:
+    tecnico: '1428053'
+    email_tecnico: mario.vasquez.moreno@gmail.com
+    asunto: Problemas De Tv
+    asuntos_default: Problemas De Tv
+    estado: '1'
+    prioridad: '2'
+    departamento: Soporte Técnico
+    departamentos_default: Soporte Técnico
+    origen_reporte: oficina
+  argumentos_sobrescribibles:
+  - tecnico
+  fechas_automaticas:
+    fecha_inicio: 0
+    fecha_final: 3
+  filtros_verificados:
+    servicio:
+      param: servicio
+      tipo: id
+      verificado_el: 2026-08-12
+    descripcion:
+      param: descripcion
+      tipo: texto
+      verificado_el: 2026-08-12
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - soporte
+  campos_por_area:
+    soporte:
+    - id_ticket
+    - asunto
+    - estado
+    - prioridad
+    - tecnico
+    - departamento
+    - fecha_creacion
+    - servicio.id_servicio
+- nombre: agendar_visita_internet
+  tipo: http
+  multipart: true
+  descripcion: 'Agenda una visita tecnica real en WispHub por una falla de INTERNET (crea un ticket).
+    NO la llames tu: la ejecuta el codigo cuando el caso ''no_internet'' llega a una rama que requiere
+    visita (ver nucleo/seguimiento/agendamiento.py). Existe aparte de ''agendar_visita_tecnica'' solo
+    porque el asunto del ticket es otro.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  endpoint: /api/tickets/
+  metodo: POST
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  argumentos_fijos:
+    tecnico: '1428053'
+    email_tecnico: mario.vasquez.moreno@gmail.com
+    asunto: No Tiene Internet
+    asuntos_default: No Tiene Internet
+    estado: '1'
+    prioridad: '2'
+    departamento: Soporte Técnico
+    departamentos_default: Soporte Técnico
+    origen_reporte: oficina
+  argumentos_sobrescribibles:
+  - tecnico
+  fechas_automaticas:
+    fecha_inicio: 0
+    fecha_final: 3
+  filtros_verificados:
+    servicio:
+      param: servicio
+      tipo: id
+      verificado_el: 2026-08-12
+    descripcion:
+      param: descripcion
+      tipo: texto
+      verificado_el: 2026-08-12
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - soporte
+  campos_por_area:
+    soporte:
+    - id_ticket
+    - asunto
+    - estado
+    - prioridad
+    - tecnico
+    - departamento
+    - fecha_creacion
+    - servicio.id_servicio
+- nombre: responder_ticket_operativo
+  tipo: http
+  multipart: true
+  responde_ticket_operativo: true
+  descripcion: 'Copia al ticket de WispHub la respuesta que una persona del equipo le dio al cliente,
+    y lo deja En Progreso. NO la llames tu: la ejecuta el codigo cuando alguien responde desde la pantalla
+    del ticket.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  endpoint: /api/tickets/{id_ticket}/respuesta/
+  metodo: POST
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  argumentos_fijos:
+    ticket-estado: '2'
+    ticket-prioridad: '2'
+  base_url_ref: WISPHUB_BASE_URL
+  areas: []
+- nombre: cerrar_ticket_operativo
+  tipo: http
+  multipart: true
+  cierra_ticket_operativo: true
+  descripcion: 'Cierra el ticket de WispHub dejando escrito con que se cerro. NO la llames tu: la ejecuta
+    el codigo cuando el caso termina.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  endpoint: /api/tickets/{id_ticket}/respuesta/
+  metodo: POST
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  argumentos_fijos:
+    ticket-estado: '4'
+    ticket-prioridad: '2'
+  base_url_ref: WISPHUB_BASE_URL
+  areas: []
+- nombre: crear_ticket_caso
+  tipo: http
+  multipart: true
+  descripcion: 'Deja el caso anotado en WispHub para que lo trabaje una persona. NO la llames tu: la ejecuta
+    el codigo cuando una conversacion se escala.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  endpoint: /api/tickets/
+  metodo: POST
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  argumentos_fijos:
+    tecnico: '1428053'
+    email_tecnico: mario.vasquez.moreno@gmail.com
+    asunto: Problemas De Conexion
+    asuntos_default: Problemas De Conexion
+    estado: '1'
+    prioridad: '2'
+    departamento: Soporte Técnico
+    departamentos_default: Soporte Técnico
+    origen_reporte: oficina
+  argumentos_sobrescribibles:
+  - tecnico
+  - asunto
+  - asuntos_default
+  - prioridad
+  fechas_automaticas:
+    fecha_inicio: 0
+    fecha_final: 3
+  filtros_verificados:
+    servicio:
+      param: servicio
+      tipo: id
+      verificado_el: 2026-08-12
+    descripcion:
+      param: descripcion
+      tipo: texto
+      verificado_el: 2026-08-12
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - soporte
+  campos_por_area:
+    soporte:
+    - id_ticket
+    - asunto
+    - estado
+    - prioridad
+    - tecnico
+    - departamento
+    - fecha_creacion
+    - servicio.id_servicio
+- nombre: consultar_ticket
+  tipo: http
+  solo_lectura: true
+  endpoint: /api/tickets/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  campos_texto_libre:
+  - descripcion
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - administracion
+  - soporte
+  campos_por_area:
+    administracion:
+    - asunto
+    - fecha_inicio
+    - servicio.id_servicio
+    - departamento
+    - servicio.plan_internet
+    - descripcion
+    - origen_reporte
+    - estado
+    - prioridad
+    - servicio.zona
+    - fecha_creacion
+    - razon_falla
+    - tecnico
+    - fecha_fin
+    - id_ticket
+    soporte:
+    - id_ticket
+    - asunto
+    - descripcion
+    - razon_falla
+    - estado
+    - prioridad
+    - tecnico
+    - departamento
+    - origen_reporte
+    - fecha_creacion
+    - fecha_inicio
+    - fecha_fin
+    - servicio.id_servicio
+    - servicio.plan_internet
+    - servicio.zona
+- nombre: consultar_tickets_de_cliente
+  tipo: http
+  descripcion: 'La API de tickets NO filtra por cliente (probados 8 nombres de parametro, todos ignorados).
+    Se filtra por estado y se cruza por cliente en codigo, solo sobre los abiertos.
+
+    '
+  solo_lectura: true
+  endpoint: /api/tickets/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - administracion
+  - soporte
+  campos_por_area:
+    administracion:
+    - id_ticket
+    - asunto
+    - estado
+    - prioridad
+    - tecnico
+    - fecha_creacion
+    soporte:
+    - id_ticket
+    - asunto
+    - estado
+    - prioridad
+    - tecnico
+    - fecha_creacion
+- nombre: consultar_tecnicos
+  tipo: http
+  descripcion: 'Lista el personal (staff) de WispHub. Usala para resolver el ID de un tecnico cuando el
+    colaborador lo menciona por nombre, antes de crear o reasignar un ticket -- nunca inventes un ID.
+
+    '
+  solo_lectura: true
+  cache: true
+  cache_vigencia_dias: 7
+  invocable_por_servicio: true
+  endpoint: /api/staff/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  auth_header: Authorization
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - soporte
+  campos_por_area:
+    soporte:
+    - id
+    - username
+    - nombre
+    - email
+- nombre: reasignar_ticket_instalacion
+  tipo: http
+  descripcion: 'Reasigna un ticket de instalacion al equipo que lo ejecuta. NO la llama el modelo: la
+    llama el backend cuando una persona confirma la factibilidad desde la plataforma.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  invocable_por_servicio: true
+  endpoint: /api/tickets/{id_ticket}/
+  metodo: PUT
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  auth_header: Authorization
+  argumentos_fijos:
+    asunto: Instalacion Nueva
+    asuntos_default: Instalacion Nueva
+    departamento: Ventas
+    departamentos_default: Ventas
+    estado: '1'
+    prioridad: '2'
+    origen_reporte: oficina
+  argumentos_desde_variables:
+    tecnico: WISPHUB_TECNICO_APROBADAS
+    email_tecnico: WISPHUB_EMAIL_TECNICO_APROBADAS
+  requeridos:
+  - id_ticket
+  - descripcion
+  filtros_verificados:
+    id_ticket:
+      param: id_ticket
+      tipo: texto
+      verificado_el: 2026-08-28
+    descripcion:
+      param: descripcion
+      tipo: texto
+      verificado_el: 2026-08-28
+  base_url_ref: WISPHUB_BASE_URL
+  areas: []
+- nombre: crear_ticket
+  tipo: http
+  descripcion: 'Crea un ticket de soporte tecnico real en WispHub. Necesitas el id_servicio del cliente
+    (si solo tenes la cedula, resolvela primero con consultar_cliente_por_cedula) y el ''asunto'' TIENE
+    que ser exactamente una de las opciones del enum -- nunca inventes un asunto que no este en la lista.
+    Si no sabes el ID del tecnico, usa consultar_tecnicos primero. Queda PENDIENTE de aprobacion -- decile
+    al colaborador que todavia no se creo de verdad, alguien tiene que aprobarla desde la pantalla correspondiente.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  aprobacion_humana: true
+  endpoint: /api/tickets/
+  metodo: POST
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  plantilla_resumen: Crear ticket '{asunto}' para el servicio {servicio} (prioridad {prioridad})
+  argumentos_fijos:
+    departamento: Soporte Técnico
+    estado: 1
+  espejar_campos:
+    asunto: asuntos_default
+    departamento: departamentos_default
+  requeridos:
+  - servicio
+  - asunto
+  - tecnico
+  filtros_verificados:
+    servicio:
+      param: servicio
+      tipo: id
+    tecnico:
+      param: tecnico
+      tipo: id
+    descripcion:
+      param: descripcion
+      tipo: texto
+    prioridad:
+      param: prioridad
+      tipo: enum
+      valores:
+        baja: 1
+        normal: 2
+        alta: 3
+        muy_alta: 4
+    origen_reporte:
+      param: origen_reporte
+      tipo: enum
+      valores:
+        oficina: oficina
+        portal_cliente: portal_cliente
+        telefono: telefono
+        presencial: presencial
+        redes_sociales: redes_sociales
+    asunto:
+      param: asunto
+      tipo: enum
+      valores:
+        Internet Lento: Internet Lento
+        No Tiene Internet: No Tiene Internet
+        Antena Desalineada: Antena Desalineada
+        Antena Dañada: Antena Dañada
+        No Responde la Antena: No Responde la Antena
+        No Responde el Router Wifi: No Responde el Router Wifi
+        Router Wifi Reseteado(Valores de Fabrica): Router Wifi Reseteado(Valores de Fabrica)
+        Cambio de Router Wifi: Cambio de Router Wifi
+        Cambio de Antena: Cambio de Antena
+        Cambio de Antena + Router Wifi: Cambio de Antena + Router Wifi
+        Cambio de Contraseña en Router Wifi: Cambio de Contraseña en Router Wifi
+        Cable UTP Dañado: Cable UTP Dañado
+        Internet Intermitente: Internet Intermitente
+        Cambio de Domicilio: Cambio de Domicilio
+        PoE Dañado: PoE Dañado
+        Reconexión: Reconexión
+        Recolección De Equipos: Recolección De Equipos
+        Conector Dañado: Conector Dañado
+        Cambio A Fibra Óptica: Cambio A Fibra Óptica
+        Cable Fibra Dañado: Cable Fibra Dañado
+        Jumper Dañado: Jumper Dañado
+        Antena valores De Fabrica: Antena valores De Fabrica
+        Cableado Para Modem Extra: Cableado Para Modem Extra
+        Eliminador Dañado: Eliminador Dañado
+        Cables Mal Colocados: Cables Mal Colocados
+        RJ45 Dañado: RJ45 Dañado
+        Alambres Rotos: Alambres Rotos
+        Cancelación: Cancelación
+        Desconexión: Desconexión
+        Troncal Dañado: Troncal Dañado
+        Caja Nap Dañada: Caja Nap Dañada
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - soporte
+  campos_por_area:
+    soporte:
+    - accion_id
+    - estado
+    - resumen
+    - instruccion_interna
+- nombre: responder_ticket
+  tipo: http
+  descripcion: 'Agrega una respuesta/nota a un ticket YA EXISTENTE en WispHub, con la opcion de reabrirlo.
+    Necesitas el id_ticket (de consultar_ticket o de una creacion previa). Queda PENDIENTE de aprobacion,
+    igual que crear_ticket.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  aprobacion_humana: true
+  endpoint: /api/tickets/{id_ticket}/respuesta/
+  metodo: POST
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  plantilla_resumen: 'Responder al ticket {id_ticket}: "{respuesta}"'
+  campos_texto_libre:
+  - respuesta
+  firmar_campo: respuesta
+  requeridos:
+  - id_ticket
+  - respuesta
+  - estado
+  - prioridad
+  filtros_verificados:
+    id_ticket:
+      param: id_ticket
+      tipo: id
+    respuesta:
+      param: respuesta
+      tipo: texto
+    reabrir_ticket:
+      param: reabrir-ticket
+      tipo: texto
+    estado:
+      param: ticket-estado
+      tipo: enum
+      valores:
+        nuevo: 1
+        en_progreso: 2
+        resuelto: 3
+        cerrado: 4
+    prioridad:
+      param: ticket-prioridad
+      tipo: enum
+      valores:
+        baja: 1
+        normal: 2
+        alta: 3
+        muy_alta: 4
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - soporte
+  campos_por_area:
+    soporte:
+    - accion_id
+    - estado
+    - resumen
+    - instruccion_interna
+- nombre: actualizar_estado_ticket
+  tipo: http
+  descripcion: 'Cambia el estado de un ticket YA EXISTENTE (ej. marcarlo Resuelto o Cerrado). Solo el
+    estado -- para agregar una nota usa responder_ticket. Necesitas el id_ticket. Queda PENDIENTE de aprobacion,
+    igual que las otras dos.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  aprobacion_humana: true
+  endpoint: /api/tickets/{id_ticket}/
+  metodo: PUT
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  plantilla_resumen: Cambiar el ticket {id_ticket} a estado '{estado}'
+  requeridos:
+  - id_ticket
+  - estado
+  filtros_verificados:
+    id_ticket:
+      param: id_ticket
+      tipo: id
+    estado:
+      param: estado
+      tipo: enum
+      valores:
+        nuevo: 1
+        en_progreso: 2
+        resuelto: 3
+        cerrado: 4
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - soporte
+  campos_por_area:
+    soporte:
+    - accion_id
+    - estado
+    - resumen
+    - instruccion_interna
+- nombre: consultar_facturas
+  tipo: http
+  solo_lectura: true
+  endpoint: /api/facturas/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  filtros_verificados:
+    cliente:
+      param: cliente
+      tipo: texto
+      verificado_el: 2026-08-19
+    estado:
+      param: estado
+      tipo: enum
+      valores:
+        pendiente: 1
+        pagada: 2
+        cancelada: 3
+        en_revision: 4
+        transferida: 5
+      verificado_el: 2026-07-29
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - facturacion
+  campos_por_area:
+    facturacion:
+    - id_factura
+    - estado
+    - total
+    - saldo
+    - fecha_emision
+    - fecha_vencimiento
+    - fecha_pago
+- nombre: consultar_factura_detalle
+  tipo: http
+  descripcion: 'Detalle completo de UNA factura por su ID, con sus articulos (linea por linea: descripcion,
+    cantidad, precio) y el cliente asociado. Usala cuando el colaborador pida el detalle de una factura
+    puntual (ya identificada por id_factura), no para buscar facturas -- para eso esta consultar_facturas.
+
+    '
+  solo_lectura: true
+  endpoint: /api/facturas/{id_factura}/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  requeridos:
+  - id_factura
+  filtros_verificados:
+    id_factura:
+      param: id_factura
+      tipo: id
+      verificado_el: 2026-08-19
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - facturacion
+  campos_por_area:
+    facturacion:
+    - id_factura
+    - folio
+    - fecha_emision
+    - fecha_vencimiento
+    - fecha_pago
+    - estado
+    - tipo
+    - sub_total
+    - descuento
+    - saldo
+    - total
+    - cliente.nombre
+    - articulos
+- nombre: consultar_formas_pago
+  tipo: http
+  descripcion: 'Catalogo de formas de pago (Efectivo, Transferencia Bancaria, etc.). Usala para resolver
+    el ID de ''forma_pago'' que pide registrar_pago cuando el colaborador menciona el medio por nombre
+    -- nunca inventes un ID.
+
+    '
+  solo_lectura: true
+  cache: true
+  cache_vigencia_dias: 7
+  endpoint: /api/formas-de-pago/
+  metodo: GET
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - facturacion
+  campos_por_area:
+    facturacion:
+    - id
+    - nombre
+- nombre: registrar_pago
+  tipo: http
+  descripcion: 'ACCION SENSIBLE. Registra un pago sobre una factura EXISTENTE (necesitas su id_factura).
+    Si el colaborador menciona la forma de pago por nombre, resolvela primero con consultar_formas_pago
+    -- no inventes el ID. ''accion'' decide si ademas de registrar el pago se reactiva el servicio del
+    cliente.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  endpoint: /api/facturas/{id}/registrar-pago/
+  metodo: POST
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  requeridos:
+  - id_factura
+  - accion
+  fechas_automaticas:
+    fecha_pago: 0
+  formato_fechas_automaticas: '%Y-%m-%d %H:%M'
+  filtros_verificados:
+    id_factura:
+      param: id
+      tipo: id
+    referencia:
+      param: referencia
+      tipo: texto
+    total_cobrado:
+      param: total_cobrado
+      tipo: texto
+    accion:
+      param: accion
+      tipo: enum
+      valores:
+        solo_registrar_pago: 0
+        registrar_pago_y_activar_servicio: 1
+    forma_pago:
+      param: forma_pago
+      tipo: id
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - facturacion
+  campos_por_area:
+    facturacion:
+    - resultado
+    - id_factura
+    - total_cobrado
+    - mensajes
+    - messages
+    - task_id
+    - errors
+- nombre: agregar_promesa_pago
+  tipo: http
+  descripcion: 'Registra que un cliente prometio pagar una factura para cierta fecha limite. Necesitas
+    el id_factura (de consultar_facturas o consultar_factura_detalle). Queda PENDIENTE de aprobacion humana
+    -- decile al colaborador que todavia no se registro, alguien tiene que aprobarla.
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  aprobacion_humana: true
+  endpoint: /api/promesa-pago/
+  metodo: POST
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  plantilla_resumen: Promesa de pago de la factura {id_factura} para el {fecha_limite}
+  campos_texto_libre:
+  - comentarios
+  requeridos:
+  - id_factura
+  - fecha_limite
+  - accion
+  filtros_verificados:
+    id_factura:
+      param: id_factura
+      tipo: id
+    fecha_limite:
+      param: fecha_limite
+      tipo: texto
+    comentarios:
+      param: comentarios
+      tipo: texto
+    accion:
+      param: accion
+      tipo: enum
+      valores:
+        registrar_promesa: 0
+        registrar_promesa_y_activar_servicio: 1
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - facturacion
+  campos_por_area:
+    facturacion:
+    - accion_id
+    - estado
+    - resumen
+    - instruccion_interna
+- nombre: contar_clientes
+  tipo: agregado
+  entidad: clientes
+  etiqueta: clientes
+  descripcion: 'Cuenta clientes por estado, plan, ciudad, localidad, router o tecnico (o el total sin
+    filtro). El resultado ya viene calculado -- nunca sumes ni corrijas el numero que te llega.
+
+    Si el colaborador pide explicitamente un archivo o reporte descargable ("mandame un excel", "quiero
+    el reporte de morosos", "pasamelo en pdf"), pasa formato=''excel'' o formato=''pdf'' segun lo que
+    haya pedido (si no aclaro el tipo de archivo, usa ''excel''): se genera un archivo real y queda adjunto
+    a tu respuesta automaticamente, el colaborador lo ve en la misma conversacion. El resultado te trae
+    ''archivo_id'' -- es un identificador TECNICO, NUNCA lo escribas ni lo menciones en tu respuesta (no
+    significa nada para una persona). Solo confirma que ya generaste el archivo, por ejemplo "Listo, te
+    dejo el Excel con el detalle". Si solo pregunta un numero ("cuantos clientes activos hay"), no uses
+    formato o dejalo en ''texto'' -- redacta la respuesta como siempre, sin mencionar ningun archivo.
+
+    Si el resultado trae ''error_archivo'', el archivo NO se genero -- decile al colaborador que el reporte
+    no se pudo generar en este momento, nunca afirmes que si se genero.
+
+    '
+  solo_lectura: true
+  exportable: true
+  sincroniza_localidades: true
+  endpoint: /api/clientes/
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  filtros_verificados:
+    estado:
+      param: estado
+      tipo: enum
+      valores:
+        activo: 1
+        suspendido: 2
+        cancelado: 3
+        gratis: 4
+      verificado_el: 2026-07-29
+    plan_internet:
+      param: plan_internet
+      tipo: id
+      verificado_el: 2026-07-29
+    ciudad:
+      param: ciudad
+      tipo: texto
+      verificado_el: 2026-07-29
+    localidad:
+      param: localidad
+      tipo: texto
+      verificado_el: 2026-07-29
+    router:
+      param: router
+      tipo: id
+      verificado_el: 2026-08-04
+    tecnico:
+      param: tecnico
+      tipo: id
+      verificado_el: 2026-08-04
+  filtros_ignorados_por_api:
+    zona: 'La API de clientes IGNORA el filtro por zona (devuelve los 7.272). Para agrupar clientes geograficamente
+      usa ''router''. Las facturas si se pueden contar por zona.
+
+      '
+    estado_facturas: 'La API de clientes ignora este filtro. Para saber quien debe se cuentan facturas
+      en estado ''pendiente'' (cuenta facturas, no clientes).
+
+      '
+    saldo: La API de clientes ignora el filtro por saldo.
+    periodo: 'La API de clientes no filtra por fecha en ninguna forma: no se pueden contar altas de un
+      mes.
+
+      '
+  agrupar_por:
+  - estado
+  - router
+  - tecnico
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - administracion
+  - facturacion
+  - soporte
+  campos_por_area:
+    administracion:
+    - total
+    - desglose
+    - interpretacion
+    - advertencia
+    - archivo_id
+    - error_archivo
+    facturacion:
+    - total
+    - desglose
+    - interpretacion
+    - advertencia
+    - archivo_id
+    - error_archivo
+    soporte:
+    - total
+    - desglose
+    - interpretacion
+    - advertencia
+    - archivo_id
+    - error_archivo
+- nombre: contar_facturas
+  tipo: agregado
+  entidad: facturas
+  etiqueta: facturas
+  descripcion: 'Cuenta facturas por estado o zona (o el total sin filtro). El resultado ya viene calculado
+    -- nunca sumes ni corrijas el numero.
+
+    Si el colaborador pide explicitamente un archivo o reporte descargable ("mandame un excel", "quiero
+    el reporte de morosos", "pasamelo en pdf"), pasa formato=''excel'' o formato=''pdf'' segun lo que
+    haya pedido (si no aclaro, usa ''excel''): se genera un archivo real y queda adjunto a tu respuesta
+    automaticamente. El resultado te trae ''archivo_id'' -- es un identificador TECNICO, NUNCA lo escribas
+    ni lo menciones en tu respuesta. Solo confirma que ya generaste el archivo. Si solo pregunta un numero,
+    no uses formato o dejalo en ''texto''.
+
+    Si el resultado trae ''error_archivo'', el archivo NO se genero -- decile al colaborador que el reporte
+    no se pudo generar en este momento, nunca afirmes que si se genero.
+
+    '
+  solo_lectura: true
+  exportable: true
+  endpoint: /api/facturas/
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  filtros_verificados:
+    estado:
+      param: estado
+      tipo: enum
+      valores:
+        pendiente: 1
+        pagada: 2
+        cancelada: 3
+        en_revision: 4
+        transferida: 5
+      verificado_el: 2026-07-29
+    zona:
+      param: zona
+      tipo: enum
+      valores:
+        SERVIDOR SABANAGRANDE: 32278
+        CORTE 15 - SERVIDOR 1: 20053
+        CORTE 15 - SERVIDOR 2: 20054
+        CORTE 30 - SERVIDOR 1: 20049
+        CORTE 30 - SERVIDOR 2: 20050
+      verificado_el: 2026-08-17
+  filtros_ignorados_por_api:
+    facturadas: La API ignora este filtro.
+    cliente: Para las facturas de UN cliente usa consultar_facturas.
+  agrupar_por:
+  - estado
+  - zona
+  periodo:
+    campos:
+      emision: fecha_emision__range
+      vencimiento: fecha_vencimiento__range
+      pago: fecha_pago__range
+    por_defecto: emision
+    max_meses: 3
+    nota_defecto: periodo por defecto del API (~2 ultimos meses de emision)
+    advertencia_defecto: 'Sin periodo explicito, el API cuenta solo sus ultimos ~2 meses de emision, no
+      el historico completo.
+
+      '
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - administracion
+  - facturacion
+  campos_por_area:
+    administracion:
+    - total
+    - desglose
+    - interpretacion
+    - advertencia
+    - archivo_id
+    - error_archivo
+    facturacion:
+    - total
+    - desglose
+    - interpretacion
+    - advertencia
+    - archivo_id
+    - error_archivo
+- nombre: contar_tickets
+  tipo: agregado
+  entidad: tickets
+  etiqueta: tickets
+  descripcion: 'Cuenta tickets por estado (o el total sin filtro). El resultado ya viene calculado --
+    nunca sumes ni corrijas el numero.
+
+    Si el colaborador pide explicitamente un archivo o reporte descargable, pasa formato=''excel'' o formato=''pdf''
+    segun lo que haya pedido (si no aclaro, usa ''excel''): se genera un archivo real y queda adjunto
+    a tu respuesta automaticamente. El resultado te trae ''archivo_id'' -- es un identificador TECNICO,
+    NUNCA lo escribas ni lo menciones en tu respuesta. Solo confirma que ya generaste el archivo. Si solo
+    pregunta un numero, no uses formato o dejalo en ''texto''.
+
+    Si el resultado trae ''error_archivo'', el archivo NO se genero -- decile al colaborador que el reporte
+    no se pudo generar en este momento, nunca afirmes que si se genero.
+
+    '
+  solo_lectura: true
+  exportable: true
+  endpoint: /api/tickets/
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  filtros_verificados:
+    estado:
+      param: estado
+      tipo: enum
+      valores:
+        nuevo: 1
+        en_progreso: 2
+        cerrado: 4
+      verificado_el: 2026-07-29
+  filtros_ignorados_por_api:
+    cliente: 'La API de tickets no filtra por cliente. Para los tickets de UN cliente usa consultar_tickets_de_cliente.
+
+      '
+    tecnico: La API de tickets ignora el filtro por tecnico.
+    prioridad: La API de tickets ignora el filtro por prioridad.
+    departamento: La API de tickets ignora el filtro por departamento.
+  agrupar_por:
+  - estado
+  periodo:
+    campos:
+      creacion: fecha_creacion
+    por_defecto: creacion
+    max_meses: 2
+    nota_defecto: 'sin periodo: recorte temporal propio del API, no el historico'
+    advertencia_defecto: 'SIN PERIODO: el API aplica un recorte temporal propio. Sin filtro devuelve 2.635,
+      pero solo julio da 2.637 y junio 3.341 — un subconjunto no puede superar al conjunto. Este total
+      NO es el historico y no sirve para comparar.
+
+      '
+  base_url_ref: WISPHUB_BASE_URL
+  areas:
+  - administracion
+  - soporte
+  campos_por_area:
+    administracion:
+    - total
+    - desglose
+    - interpretacion
+    - advertencia
+    - archivo_id
+    - error_archivo
+    soporte:
+    - total
+    - desglose
+    - interpretacion
+    - advertencia
+    - archivo_id
+    - error_archivo
+- nombre: crear_ticket_instalacion
+  tipo: http
+  descripcion: 'Crea el ticket de instalacion en WispHub cuando alguien envia el formulario de contratacion.
+    NO la llama el modelo: la llama el backend al recibir la solicitud (ver ''invocable_por_servicio'').
+
+    '
+  solo_lectura: false
+  requiere_confirmacion: true
+  invocable_por_servicio: true
+  endpoint: /api/tickets/
+  metodo: POST
+  auth_ref: WISPHUB_API_KEY
+  auth_esquema: Api-Key
+  auth_header: Authorization
+  argumentos_fijos:
+    asunto: Instalacion Nueva
+    asuntos_default: Instalacion Nueva
+    departamento: Ventas
+    departamentos_default: Ventas
+    estado: '1'
+    prioridad: '2'
+    origen_reporte: oficina
+  argumentos_desde_variables:
+    servicio: WISPHUB_ID_SERVICIO_INSTALACIONES
+    tecnico: WISPHUB_TECNICO_SOLICITUDES
+    email_tecnico: WISPHUB_EMAIL_TECNICO_SOLICITUDES
+  filtros_verificados:
+    descripcion:
+      param: descripcion
+      tipo: texto
+      verificado_el: 2026-08-27
+  base_url_ref: WISPHUB_BASE_URL
+  areas: []

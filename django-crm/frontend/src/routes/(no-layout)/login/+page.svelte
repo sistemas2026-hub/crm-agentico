@@ -1,0 +1,141 @@
+<script>
+  import '../../../app.css';
+  import '$lib/v2/styles/v2.css';
+  import { enhance } from '$app/forms';
+
+  import imgGoogle from '$lib/assets/images/google.svg';
+
+  let { data = {} } = $props();
+
+  let isLoading = $state(false);
+
+  let passwordEmail = $state('');
+  let password = $state('');
+  let isSigningIn = $state(false);
+  let passwordError = $state('');
+
+  function handleGoogleLogin() {
+    isLoading = true;
+  }
+
+  function handlePasswordLogin() {
+    isSigningIn = true;
+    passwordError = '';
+    return async ({ result, update }) => {
+      isSigningIn = false;
+      if (result?.type === 'failure') {
+        passwordError = result.data?.error || 'Correo o contraseña incorrectos.';
+      } else {
+        // 'success' here is the server redirecting to /org; 'redirect' if
+        // SvelteKit already followed it. Either way there is nothing local
+        // left to update -- but call it anyway for the case that isn't.
+        await update();
+      }
+    };
+  }
+</script>
+
+<svelte:head>
+  <title>Iniciar sesión · Dexter</title>
+  <meta
+    name="description"
+    content="Iniciá sesión en Dexter."
+  />
+</svelte:head>
+
+<div class="v2-root v2-auth">
+  <div class="v2-auth-box">
+    <a href="/" class="v2-auth-brand">
+      <span class="v2-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M5 12a7 7 0 0 1 14 0M8.5 12a3.5 3.5 0 0 1 7 0M12 13v7" /></svg></span>
+      <b>Dexter</b>
+    </a>
+
+    <div class="v2-auth-card">
+      <div class="v2-auth-head">
+        <h1>Iniciar sesión</h1>
+        <p>Bienvenido de nuevo.</p>
+      </div>
+
+      <!-- Google solo existe si esta configurado (ver generateOAuthUrl): sin
+           GOOGLE_CLIENT_ID el boton llevaba a un error de Google. Y no es el
+           principal: el principal es uno por pantalla, y es el que funciona en
+           toda instalacion -- correo y contrasena. -->
+      {#if data['google_url']}
+        <a
+          href={data['google_url']}
+          onclick={handleGoogleLogin}
+          class="v2-btn v2-btn-block"
+          style:pointer-events={isLoading ? 'none' : null}
+          style:opacity={isLoading ? '0.85' : null}
+        >
+          {#if isLoading}
+            <span class="v2-spin"></span>
+            <span>Redirigiendo…</span>
+          {:else}
+            <img src={imgGoogle} alt="" class="v2-auth-gicon" />
+            <span>Continuar con Google</span>
+          {/if}
+        </a>
+
+        <div class="v2-auth-divider">o</div>
+      {/if}
+
+      <form
+        method="POST"
+        action="?/password"
+        use:enhance={handlePasswordLogin}
+        style="display:flex;flex-direction:column;gap:9px"
+      >
+        <label for="password-email" class="v2-sr-only">Correo electrónico</label>
+        <input
+          id="password-email"
+          type="email"
+          name="email"
+          class="v2-input"
+          placeholder="vos@empresa.com"
+          required
+          bind:value={passwordEmail}
+          disabled={isSigningIn}
+        />
+        <label for="password" class="v2-sr-only">Contraseña</label>
+        <input
+          id="password"
+          type="password"
+          name="password"
+          class="v2-input"
+          placeholder="Contraseña"
+          required
+          bind:value={password}
+          disabled={isSigningIn}
+        />
+        <button type="submit" class="v2-btn v2-btn-primary v2-btn-block" disabled={isSigningIn}>
+          {#if isSigningIn}
+            <span class="v2-spin"></span>
+            <span>Iniciando sesión…</span>
+          {:else}
+            <span>Iniciar sesión</span>
+          {/if}
+        </button>
+        {#if passwordError}
+          <div class="v2-auth-note v2-auth-note-bad">
+            <span>{passwordError}</span>
+          </div>
+        {/if}
+      </form>
+      <!-- Aca iba "Continuar con correo" (enlace magico), y debajo "¿Primera
+           vez? Ingresa tu correo arriba para empezar". Ese camino CREABA una
+           cuenta con cualquier correo, y desde ahi una organizacion propia.
+           Desde el 23/10/2026 el registro esta cerrado (backend:
+           PERMITIR_AUTORREGISTRO) y las cuentas las crea un administrador desde
+           Equipo, con contrasena. -->
+    </div>
+
+    <p class="v2-sub" style="text-align:center;margin:14px 0 0">
+      ¿No tenés cuenta? Pedile a un administrador de tu empresa que te sume.
+    </p>
+    <!-- Aca iban Privacidad y Terminos de bottlecrm.io y el GitHub de
+         Django-CRM: la politica de otra empresa. El responsable del tratamiento
+         es el ISP (Ley 1581); cuando haya una URL de su politica, va como
+         configuracion por tenant, no escrita aca. -->
+  </div>
+</div>

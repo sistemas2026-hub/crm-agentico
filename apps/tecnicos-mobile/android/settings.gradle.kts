@@ -1,0 +1,31 @@
+pluginManagement {
+    val flutterSdkPath =
+        run {
+            val properties = java.util.Properties()
+            file("local.properties").inputStream().use { properties.load(it) }
+            val flutterSdkPath = properties.getProperty("flutter.sdk")
+            require(flutterSdkPath != null) { "flutter.sdk not set in local.properties" }
+            flutterSdkPath
+        }
+
+    includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
+
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id("dev.flutter.flutter-plugin-loader") version "1.0.0"
+    id("com.android.application") version "9.1.0" apply false
+    id("org.jetbrains.kotlin.android") version "2.4.0" apply false
+    // Lee android/app/google-services.json y genera los recursos que el SDK
+    // de Firebase busca en tiempo de arranque. Sin el plugin el archivo es
+    // un JSON que nadie mira y `Firebase.initializeApp()` falla en el
+    // telefono, no al compilar.
+    id("com.google.gms.google-services") version "4.4.3" apply false
+}
+
+include(":app")
