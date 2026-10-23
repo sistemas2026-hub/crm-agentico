@@ -443,6 +443,19 @@ SWAGGER_SETTINGS = {
     },
 }
 
+# Autorregistro: si un inicio de sesion (Google, enlace magico, codigo) puede
+# CREAR una cuenta, y si cualquier cuenta puede crear una organizacion.
+#
+# Apagado por defecto desde el 23/10/2026. BottleCRM lo traia abierto: con
+# cualquier correo se obtenia una cuenta, y con ella una organizacion propia
+# como ADMIN, en una instalacion de produccion que es una herramienta interna.
+# En Dexter las cuentas las crea un administrador desde Equipo, y dar de alta un
+# ISP es tarea de la plataforma. Si algun dia los ISP se dan de alta solos, se
+# prende aca, sin tocar codigo.
+PERMITIR_AUTORREGISTRO = (
+    os.environ.get("PERMITIR_AUTORREGISTRO", "False").lower() == "true"
+)
+
 CORS_ALLOW_HEADERS = default_headers + ("org",)
 # Security: CORS configuration via environment variables
 CORS_ORIGIN_ALLOW_ALL = os.environ.get("CORS_ALLOW_ALL", "False").lower() == "true"

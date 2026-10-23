@@ -201,6 +201,8 @@ py -3.13 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key()
 
 `BOTTLECRM_API_TOKEN` lo usa el motor para abrir el ticket al escalar una conversación y para comprobar si ese caso sigue abierto. Sin él, el bot escala y el ticket nunca se crea.
 
+`PERMITIR_AUTORREGISTRO` **no está en la lista a propósito**, y tampoco en `docker-compose.prod.yml`: sin ella el registro está cerrado (23/10/2026). Ningún inicio de sesión —enlace mágico, código, Google— crea una cuenta; las cuentas las crea un administrador desde Equipo, y una organización solo la crea un superusuario. Hasta ese día cualquier correo conseguía una cuenta y con ella una organización propia como ADMIN en producción. Prenderla (`true`) exige agregarla al bloque `environment` del `backend` en el compose; es una decisión de producto, no de despliegue. Ver `crm/settings.py` y `common/tests/test_registro_cerrado.py`.
+
 Los valores vacíos salen del `.env` local, salvo `SECRET_KEY`, que se genera nuevo y **nunca** se reutiliza el de desarrollo:
 
 ```

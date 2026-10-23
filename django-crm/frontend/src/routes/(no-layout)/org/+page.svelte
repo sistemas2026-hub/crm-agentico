@@ -1,7 +1,7 @@
 <script>
   import '../../../app.css';
   import '$lib/v2/styles/v2.css';
-  import { Building2, LogOut, Plus, ChevronRight } from '@lucide/svelte';
+  import { Building2, LogOut, ChevronRight } from '@lucide/svelte';
   import { enhance } from '$app/forms';
 
   let { data = { orgs: [] } } = $props();
@@ -77,19 +77,18 @@
           </form>
         {/each}
 
-        <a href="/org/new" class="v2-auth-add">
-          <Plus />
-          Crear nueva organización
-        </a>
+        <!-- Sin "Crear nueva organizacion": a una cuenta comun el backend se
+             lo niega (ver el estado vacio de abajo). La plataforma da de alta
+             un ISP desde /org/new. -->
       {:else}
+        <!-- Antes ofrecia "Crear organizacion" a cualquiera que llegara aca. Desde
+             el 23/10/2026 crear una es tarea de la plataforma (el backend lo
+             niega a una cuenta comun: PERMITIR_AUTORREGISTRO), asi que el
+             camino real de alguien sin empresa es que lo sumen. -->
         <div class="v2-state" style="padding:22px 0 8px">
           <div class="v2-state-icon"><Building2 size={22} /></div>
-          <h3>Todavía no hay organizaciones</h3>
-          <p>Creá tu primer espacio de trabajo para empezar a usar Dexter.</p>
-          <a href="/org/new" class="v2-btn v2-btn-primary">
-            <Plus size={15} />
-            Crear organización
-          </a>
+          <h3>Tu cuenta todavía no está en ninguna empresa</h3>
+          <p>Pedile a un administrador de tu empresa que te sume desde Equipo y accesos.</p>
         </div>
       {/if}
     </div>

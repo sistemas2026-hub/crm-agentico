@@ -15,6 +15,15 @@ from rest_framework import status
 from common.models import MagicLinkToken, Profile, User
 
 
+@pytest.fixture(autouse=True)
+def _autorregistro_abierto(settings):
+    """Estas pruebas cubren la mecanica del token (vencimiento, reuso, limite
+    por hora) con el autorregistro PRENDIDO, como lo traia BottleCRM: casi todas
+    usan un correo sin cuenta. El comportamiento por defecto -- cerrado -- lo
+    afirma test_registro_cerrado.py."""
+    settings.PERMITIR_AUTORREGISTRO = True
+
+
 @pytest.mark.django_db
 class TestMagicLinkRequest:
     """Tests for POST /api/auth/magic-link/request/"""

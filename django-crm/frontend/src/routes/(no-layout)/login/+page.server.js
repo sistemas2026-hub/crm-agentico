@@ -218,35 +218,15 @@ async function generateOAuthUrl(cookies, destino) {
 
 /** @type {import('@sveltejs/kit').Actions} */
 export const actions = {
-  // SvelteKit forbids mixing a `default` action with named ones, so both
-  // forms on this page use named actions -- this one keeps its original
-  // behavior, just under an explicit name instead of `default`.
-  magicLink: async ({ request }) => {
-    const formData = await request.formData();
-    const email = formData.get('email');
+  // Aca vivia la accion `magicLink` (pedir un enlace de acceso por correo). Se
+  // quito el 23/10/2026 junto con su formulario: ese camino creaba cuentas con
+  // cualquier correo, y el registro ahora esta cerrado (backend:
+  // PERMITIR_AUTORREGISTRO). Queda una sola accion, con nombre por si vuelve
+  // otra: SvelteKit no deja mezclar `default` con acciones con nombre.
 
-    if (!email) {
-      return { success: false, error: 'El correo electrónico es obligatorio' };
-    }
-
-    try {
-      const apiUrl = env.PRIVATE_DJANGO_API_URL;
-      await axios.post(
-        `${apiUrl}/api/auth/magic-link/request/`,
-        { email },
-        { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }
-      );
-      return { success: true };
-    } catch (error) {
-      // Always show success to user (backend also returns 200 always)
-      return { success: true };
-    }
-  },
-
-  // Email+password sign-in. Unlike the magic-link action above, a failure
-  // HAS to reach the user -- there is no "always say success" cover here,
-  // since a wrong password needs to be told apart from a wrong email so
-  // someone can tell what to fix.
+  // Email+password sign-in. A failure HAS to reach the user -- there is no
+  // "always say success" cover here, since a wrong password needs to be told
+  // apart from a wrong email so someone can tell what to fix.
   password: async ({ request, cookies, url }) => {
     const formData = await request.formData();
     const email = formData.get('email');

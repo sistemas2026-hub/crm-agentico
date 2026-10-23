@@ -11,6 +11,15 @@ from rest_framework import status
 from common.models import Org, Profile, Teams
 
 
+@pytest.fixture(autouse=True)
+def _autorregistro_abierto(settings):
+    """Las pruebas de crear una organizacion cubren la mecanica (nombre, id,
+    zona horaria) con un ADMIN comun, asi que corren con el autorregistro
+    PRENDIDO. Quien puede crear una por defecto -- solo la plataforma -- lo
+    afirma test_registro_cerrado.py."""
+    settings.PERMITIR_AUTORREGISTRO = True
+
+
 @pytest.mark.django_db
 class TestOrgProfileCreateView:
     """Tests for GET/POST /api/org/"""

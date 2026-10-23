@@ -79,6 +79,27 @@ def _disabled_account_response():
     )
 
 
+def _sin_cuenta_response():
+    """403 para un correo al que nadie le creo una cuenta.
+
+    Con ``settings.PERMITIR_AUTORREGISTRO`` apagado (el default) ningun inicio
+    de sesion crea cuentas: las crea un administrador desde Equipo. Las cuatro
+    vias que antes creaban una al vuelo -- Google por redireccion, Google por
+    id_token, enlace magico y codigo -- pasan por aca, con la misma forma, para
+    que un cliente maneje un solo caso.
+
+    Decirle "no tenes cuenta" no filtra nada: en las cuatro vias quien pregunta
+    ya probo que es duenio del correo (Google lo verifico, o abrio el enlace).
+    """
+    return Response(
+        {
+            "error": "Este correo no tiene una cuenta. "
+            "Pedile a un administrador de tu empresa que te sume."
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
 class GoogleOAuthCallbackView(APIView):
     """
     Handle Google OAuth authorization code exchange with PKCE.
@@ -192,6 +213,8 @@ class GoogleOAuthCallbackView(APIView):
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
+            if not settings.PERMITIR_AUTORREGISTRO:
+                return _sin_cuenta_response()
             user = User.objects.create(
                 email=email,
                 name=google_name,
@@ -299,14 +322,18 @@ class GoogleIdTokenView(APIView):
             )
 
         # Get or create user
-        user, _created = User.objects.get_or_create(
-            email=email,
-            defaults={
-                "name": google_name,
-                "profile_pic": picture,
-                "password": make_password(secrets.token_urlsafe(32)),
-            },
-        )
+        user = User.objects.filter(email=email).first()
+        if user is None:
+            if not settings.PERMITIR_AUTORREGISTRO:
+                return _sin_cuenta_response()
+            user, _created = User.objects.get_or_create(
+                email=email,
+                defaults={
+                    "name": google_name,
+                    "profile_pic": picture,
+                    "password": make_password(secrets.token_urlsafe(32)),
+                },
+            )
 
         if not user.is_active:
             return _disabled_account_response()
@@ -727,6 +754,17 @@ class MagicLinkRequestView(APIView):
         email = serializer_obj.validated_data["email"].lower()
         delivery = serializer_obj.validated_data.get("delivery", "link")
 
+        # Sin autorregistro, a un correo sin cuenta no se le manda nada: el
+        # enlace no le serviria (la verificacion ya no crea cuentas) y mandarlo
+        # convierte el endpoint en un emisor de correos a direcciones
+        # arbitrarias. La respuesta es la misma de siempre, para no revelar
+        # que correos tienen cuenta.
+        if (
+            not settings.PERMITIR_AUTORREGISTRO
+            and not User.objects.filter(email__iexact=email, is_active=True).exists()
+        ):
+            return generic_response
+
         # Rate limit: max 5 tokens per email per hour
         one_hour_ago = timezone.now() - timedelta(hours=1)
         recent_count = MagicLinkToken.objects.filter(
@@ -828,6 +866,8 @@ class MagicLinkVerifyView(APIView):
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
+            if not settings.PERMITIR_AUTORREGISTRO:
+                return _sin_cuenta_response()
             user = User.objects.create(
                 email=email,
                 password=make_password(secrets.token_urlsafe(32)),
@@ -1046,6 +1086,8 @@ class MagicLinkVerifyCodeView(APIView):
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
+            if not settings.PERMITIR_AUTORREGISTRO:
+                return _sin_cuenta_response()
             user = User.objects.create(
                 email=email,
                 password=make_password(secrets.token_urlsafe(32)),

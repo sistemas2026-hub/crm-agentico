@@ -4,15 +4,10 @@
   import { enhance } from '$app/forms';
 
   import imgGoogle from '$lib/assets/images/google.svg';
-  import { Mail, Check } from '@lucide/svelte';
 
   let { data = {} } = $props();
 
   let isLoading = $state(false);
-  let email = $state('');
-  let magicLinkSent = $state(false);
-  let isSendingLink = $state(false);
-  let magicLinkError = $state('');
 
   let passwordEmail = $state('');
   let password = $state('');
@@ -38,21 +33,6 @@
       }
     };
   }
-
-  function handleMagicLink() {
-    isSendingLink = true;
-    magicLinkError = '';
-    return async ({ result }) => {
-      isSendingLink = false;
-      if (result?.type === 'success') {
-        magicLinkSent = true;
-      } else if (result?.type === 'failure') {
-        magicLinkError = result.data?.error || 'Algo salió mal. Probá de nuevo.';
-      } else if (!result) {
-        magicLinkError = 'Algo salió mal. Probá de nuevo.';
-      }
-    };
-  }
 </script>
 
 <svelte:head>
@@ -73,7 +53,7 @@
     <div class="v2-auth-card">
       <div class="v2-auth-head">
         <h1>Iniciar sesión</h1>
-        <p>Bienvenido de nuevo. Elegí cómo querés continuar.</p>
+        <p>Bienvenido de nuevo.</p>
       </div>
 
       <!-- Google solo existe si esta configurado (ver generateOAuthUrl): sin
@@ -142,57 +122,16 @@
           </div>
         {/if}
       </form>
-
-      <div class="v2-auth-divider">o</div>
-
-      {#if magicLinkSent}
-        <div class="v2-auth-note v2-auth-note-ok">
-          <Check />
-          <div>
-            <b>Revisá tu correo.</b>
-            <div style="font-weight:400;margin-top:2px">
-              Te enviamos un enlace de acceso. Vence en 10 minutos.
-            </div>
-          </div>
-        </div>
-      {:else}
-        <form
-          method="POST"
-          action="?/magicLink"
-          use:enhance={handleMagicLink}
-          style="display:flex;flex-direction:column;gap:9px"
-        >
-          <label for="email" class="v2-sr-only">Correo electrónico</label>
-          <input
-            id="email"
-            type="email"
-            name="email"
-            class="v2-input"
-            placeholder="vos@empresa.com"
-            required
-            bind:value={email}
-            disabled={isSendingLink}
-          />
-          <button type="submit" class="v2-btn v2-btn-block" disabled={isSendingLink}>
-            {#if isSendingLink}
-              <span class="v2-spin"></span>
-              <span>Enviando…</span>
-            {:else}
-              <Mail size={15} />
-              <span>Continuar con correo</span>
-            {/if}
-          </button>
-        </form>
-        {#if magicLinkError}
-          <div class="v2-auth-note v2-auth-note-bad" style="margin-top:11px">
-            <span>{magicLinkError}</span>
-          </div>
-        {/if}
-      {/if}
+      <!-- Aca iba "Continuar con correo" (enlace magico), y debajo "¿Primera
+           vez? Ingresa tu correo arriba para empezar". Ese camino CREABA una
+           cuenta con cualquier correo, y desde ahi una organizacion propia.
+           Desde el 23/10/2026 el registro esta cerrado (backend:
+           PERMITIR_AUTORREGISTRO) y las cuentas las crea un administrador desde
+           Equipo, con contrasena. -->
     </div>
 
     <p class="v2-sub" style="text-align:center;margin:14px 0 0">
-      ¿Primera vez? Ingresá tu correo arriba para empezar.
+      ¿No tenés cuenta? Pedile a un administrador de tu empresa que te sume.
     </p>
     <!-- Aca iban Privacidad y Terminos de bottlecrm.io y el GitHub de
          Django-CRM: la politica de otra empresa. El responsable del tratamiento

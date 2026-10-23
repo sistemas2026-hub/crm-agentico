@@ -18,6 +18,15 @@ from common.models import Profile, User
 from common.serializer import OrgAwareRefreshToken
 
 
+@pytest.fixture(autouse=True)
+def _autorregistro_abierto(settings):
+    """Estas pruebas cubren la mecanica de cada via de ingreso con el
+    autorregistro PRENDIDO, como lo traia BottleCRM (varias entran con un correo
+    nuevo). El comportamiento por defecto -- cerrado -- lo afirma
+    test_registro_cerrado.py."""
+    settings.PERMITIR_AUTORREGISTRO = True
+
+
 @pytest.mark.django_db
 class TestMeView:
     """Tests for GET /api/auth/me/"""
