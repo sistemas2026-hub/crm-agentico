@@ -76,25 +76,29 @@
         <p>Bienvenido de nuevo. Elegí cómo querés continuar.</p>
       </div>
 
-      <!-- Primary path. Google's mark keeps a white tile so it stays legible on
-           Ember; the whole button is the one Ember action on this screen. -->
-      <a
-        href={data['google_url']}
-        onclick={handleGoogleLogin}
-        class="v2-btn v2-btn-primary v2-btn-block"
-        style:pointer-events={isLoading ? 'none' : null}
-        style:opacity={isLoading ? '0.85' : null}
-      >
-        {#if isLoading}
-          <span class="v2-spin"></span>
-          <span>Redirigiendo…</span>
-        {:else}
-          <img src={imgGoogle} alt="" class="v2-auth-gicon" />
-          <span>Continuar con Google</span>
-        {/if}
-      </a>
+      <!-- Google solo existe si esta configurado (ver generateOAuthUrl): sin
+           GOOGLE_CLIENT_ID el boton llevaba a un error de Google. Y no es el
+           principal: el principal es uno por pantalla, y es el que funciona en
+           toda instalacion -- correo y contrasena. -->
+      {#if data['google_url']}
+        <a
+          href={data['google_url']}
+          onclick={handleGoogleLogin}
+          class="v2-btn v2-btn-block"
+          style:pointer-events={isLoading ? 'none' : null}
+          style:opacity={isLoading ? '0.85' : null}
+        >
+          {#if isLoading}
+            <span class="v2-spin"></span>
+            <span>Redirigiendo…</span>
+          {:else}
+            <img src={imgGoogle} alt="" class="v2-auth-gicon" />
+            <span>Continuar con Google</span>
+          {/if}
+        </a>
 
-      <div class="v2-auth-divider">o</div>
+        <div class="v2-auth-divider">o</div>
+      {/if}
 
       <form
         method="POST"
@@ -190,13 +194,9 @@
     <p class="v2-sub" style="text-align:center;margin:14px 0 0">
       ¿Primera vez? Ingresá tu correo arriba para empezar.
     </p>
-
-    <div class="v2-auth-foot">
-      <a href="https://bottlecrm.io/privacy-policy">Privacidad</a>
-      <span class="v2-auth-dot"></span>
-      <a href="https://bottlecrm.io/terms">Términos</a>
-      <span class="v2-auth-dot"></span>
-      <a href="https://github.com/django-crm/Django-CRM" target="_blank" rel="noopener">GitHub</a>
-    </div>
+    <!-- Aca iban Privacidad y Terminos de bottlecrm.io y el GitHub de
+         Django-CRM: la politica de otra empresa. El responsable del tratamiento
+         es el ISP (Ley 1581); cuando haya una URL de su politica, va como
+         configuracion por tenant, no escrita aca. -->
   </div>
 </div>

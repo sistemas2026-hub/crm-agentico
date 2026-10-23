@@ -164,6 +164,15 @@ async function handleOAuthCallback(code, returnedState, cookies) {
  * @returns {Promise<object>} Object containing the Google OAuth URL
  */
 async function generateOAuthUrl(cookies, destino) {
+  // Sin GOOGLE_CLIENT_ID no hay a donde mandar a nadie. Hasta el 23/10/2026 se
+  // armaba igual la URL con client_id=undefined (medido en produccion: 9
+  // caracteres, la palabra "undefined"), y el boton principal del login
+  // llevaba a una pagina de error de Google. Sin la variable, la pantalla no
+  // ofrece Google y no se dejan cookies de PKCE que nadie va a usar.
+  if (!env.GOOGLE_CLIENT_ID) {
+    return { google_url: null };
+  }
+
   // Generate PKCE parameters
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
