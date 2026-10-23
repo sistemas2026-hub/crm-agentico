@@ -26,8 +26,6 @@
   import {
     BookOpen,
     LifeBuoy,
-    Bug,
-    Mail,
     Activity,
     ArrowUpRight,
     ClipboardList
@@ -54,26 +52,20 @@
     }
   ];
 
+  /*
+   * Hasta el 23/10/2026 aca habia tres contactos de BottleCRM: "Reportar un
+   * error" al GitHub PUBLICO de Django-CRM (un reporte con captura exponia
+   * datos de clientes en el repositorio de otro proyecto), y un correo y una
+   * pagina de estado en bottlecrm.example, que no existen. Queda solo lo que
+   * Dexter de verdad tiene. Un canal de soporte propio no existe todavia: no
+   * se inventa uno.
+   */
   const CONTACT = [
     {
-      href: 'https://github.com/django-crm/Django-CRM/issues',
-      icon: Bug,
-      title: 'Reportar un error',
-      body: 'Rastreador público de incidencias. La ruta más rápida para cualquier cosa reproducible.',
-      external: true
-    },
-    {
-      href: 'mailto:support@bottlecrm.example',
-      icon: Mail,
-      title: 'Soporte por correo',
-      body: 'Para cualquier cosa que involucre tus datos, facturación o una cuenta a la que no podés entrar.'
-    },
-    {
-      href: 'https://status.bottlecrm.example',
+      href: '/centro-mando',
       icon: Activity,
-      title: 'Estado del servicio',
-      body: 'Revisá acá primero si algo que funcionaba esta mañana dejó de funcionar a la tarde.',
-      external: true
+      title: 'Estado de los sistemas',
+      body: 'Si WispHub, SmartOLT o el CRM dejaron de responder, se ve acá antes que en ningún otro lado.'
     }
   ];
 
@@ -136,6 +128,9 @@
         </a>
       {/each}
     </div>
+    <p class="lead" style="margin:12px 0 0">
+      Para todo lo demás, escribile a quien administra Dexter en tu empresa.
+    </p>
 
     <div class="v2-label" style="margin:26px 0 10px">Qué incluir cuando escribas</div>
     <div class="v2-card" style="padding:16px 18px">

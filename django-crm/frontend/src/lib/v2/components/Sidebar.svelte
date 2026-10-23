@@ -32,7 +32,6 @@
     Activity,
     Bot,
     Cable,
-    Download,
     BookMarked
   } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
@@ -68,7 +67,7 @@
    */
   let {
     counts = {},
-    org = { name: 'BottleCRM' },
+    org = { name: '' },
     role = 'USER',
     terminology = undefined,
     onsearch = () => {}
@@ -272,18 +271,11 @@
       <CircleHelp />
       Ayuda
     </a>
-    <!-- The phone app for people on the hosted service. No pulsing dot. A
-         download link is not something that needs you right now, and v2 keeps
-         attention for the things that do. -->
-    <a
-      class="v2-link"
-      href="https://play.google.com/store/apps/details?id=io.bottlecrm&hl=en"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      <Download />
-      Descargar app
-    </a>
+    <!-- Aca iba "Descargar app", que abria la app de BottleCRM en Play Store
+         (io.bottlecrm). La de Dexter es la de campo (com.dexter.campo): un
+         solo APK para todas las empresas, que hoy se instala a mano y no esta
+         publicado en ningun lado. Cuando tenga una URL de descarga, vuelve con
+         esa URL; mientras tanto un enlace a otra app es peor que ninguno. -->
     <!-- Leaving the app. Last in the list, and a plain link. /logout is a
          server load that clears the auth cookies and redirects to /login, so a
          GET navigation is all it takes and no data-fetching component follows. -->
