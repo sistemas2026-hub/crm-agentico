@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <!-- Google Fonts - Geist (kept for back-compat), Inter (new primary), JetBrains Mono (kbd chips) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -8,17 +8,13 @@
       href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-JNWHD22PPN"></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag() {
-        dataLayer.push(arguments);
-      }
-      gtag('js', new Date());
-
-      gtag('config', 'G-JNWHD22PPN');
-    </script>
+    <!-- Sin analitica de terceros. Aca estaba el Google Analytics de BottleCRM
+         (G-JNWHD22PPN), heredado al vendorizar el 08/08/2026: mandaba la URL de
+         cada pagina a una cuenta ajena, y hay URLs que SON la llave de acceso
+         (/solicitud/<token>, el portal de facturas). Un tercero nuevo exige
+         resolver la autorizacion de tratamiento antes (CLAUDE.md §5, mismo
+         criterio que tiene apagado a Sentry). La prueba
+         lib/observabilidad/sin-analitica-de-terceros.test.js impide que vuelva. -->
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
