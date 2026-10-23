@@ -1,6 +1,56 @@
-import { getToday } from '$lib/server/v2/today.js';
+import { leerFuentesDeHoy } from '$lib/server/v2/hoy-operacion.js';
+import { armarCola, armarPorArea, contarPorTono, resumen } from '$lib/v2/hoy-operacion.js';
 
-/** @type {import('./$types').PageServerLoad} */
+/**
+ * La portada: "Hoy de la operacion". Lee las fuentes en paralelo (cada una
+ * puede fallar sola) y arma la cola en codigo; la pantalla solo dibuja.
+ * Ver lib/v2/hoy-operacion.js para los tonos y el orden.
+ *
+ * @type {import('./$types').PageServerLoad}
+ */
 export async function load(event) {
-  return await getToday(event);
+  const f = await leerFuentesDeHoy(event);
+
+  const cola = armarCola({
+    conversaciones: f.conversaciones,
+    slaTomaMinutos: f.slaTomaMinutos,
+    bloqueos: f.bloqueos,
+    solicitudes: f.solicitudes,
+    pedidos: f.pedidos,
+    crm: f.crm?.queue ?? null
+  });
+
+  // El CRM muestra sus 8 mas urgentes; si tiene mas, se nombra cuantos y donde
+  // en vez de afirmar que "eso es todo".
+  const crmOcultos = f.crm ? Math.max(0, (f.crm.summary.count ?? 0) - (f.crm.summary.shown ?? 0)) : 0;
+
+  const t = f.centro?.totales;
+  const dexter = t
+    ? {
+        activas: t.conversaciones_activas ?? 0,
+        esperanPersona: t.esperando_humano ?? 0,
+        atendidasHoy: t.atendidas_hoy ?? 0,
+        fallosHoy: t.fallos_hoy ?? 0,
+        agentesActivos: t.agentes_activos ?? 0,
+        agentesTotal: Array.isArray(f.centro?.agentes) ? f.centro.agentes.length : null
+      }
+    : null;
+
+  return {
+    cola,
+    resumen: resumen(cola),
+    conteos: contarPorTono(cola),
+    porArea: armarPorArea({
+      conversaciones: f.conversaciones,
+      bloqueos: f.bloqueos,
+      solicitudes: f.solicitudes,
+      pedidos: f.pedidos,
+      crmFuentes: f.crm?.summary.sources ?? null
+    }),
+    dexter,
+    crmOcultos,
+    crmFuentes: f.crm?.summary.sources ?? [],
+    luego: f.crm?.later ?? [],
+    noLeidas: f.noLeidas
+  };
 }
