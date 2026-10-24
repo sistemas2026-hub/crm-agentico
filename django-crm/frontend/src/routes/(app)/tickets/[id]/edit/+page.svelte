@@ -15,6 +15,11 @@
   import { enhance } from '$app/forms';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import { ChevronRight, TriangleAlert } from '@lucide/svelte';
+  // Las etiquetas en español. El VALOR de cada opcion sigue siendo el de Django
+  // (New, Low, Question...): es lo que el serializer acepta. Antes se mostraba
+  // tambien la etiqueta del modelo, en ingles. Un valor sin traduccion cae a la
+  // del API en vez de quedar en blanco.
+  import { CASE_STATUS_LABEL, CASE_PRIORITY_LABEL, CASE_TYPE_LABEL } from '$lib/v2/enums.js';
 
   /** @type {{ data: any, form: any }} */
   let { data, form: result } = $props();
@@ -107,7 +112,7 @@
         <label for="f-status">Estado</label>
         <select id="f-status" name="status" class="v2-input" bind:value={form.status}>
           {#each data.statuses as s (s.value)}
-            <option value={s.value}>{s.label}</option>
+            <option value={s.value}>{CASE_STATUS_LABEL[s.value] ?? s.label}</option>
           {/each}
         </select>
       </div>
@@ -115,7 +120,7 @@
         <label for="f-priority">Prioridad</label>
         <select id="f-priority" name="priority" class="v2-input" bind:value={form.priority}>
           {#each data.priorities as p (p.value)}
-            <option value={p.value}>{p.label}</option>
+            <option value={p.value}>{CASE_PRIORITY_LABEL[p.value] ?? p.label}</option>
           {/each}
         </select>
       </div>
@@ -124,7 +129,7 @@
         <select id="f-type" name="case_type" class="v2-input" bind:value={form.case_type}>
           <option value="">Sin definir</option>
           {#each data.caseTypes as t (t.value)}
-            <option value={t.value}>{t.label}</option>
+            <option value={t.value}>{CASE_TYPE_LABEL[t.value] ?? t.label}</option>
           {/each}
         </select>
       </div>

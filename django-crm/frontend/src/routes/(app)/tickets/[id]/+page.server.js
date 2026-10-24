@@ -8,10 +8,20 @@ import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
+import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ locals, cookies, params, fetch }) {
-  const datos = await getTicket({ cookies }, params.id);
+  // La gente de la organizacion va en paralelo con el caso, y para TODOS: el
+  // control de asignar es solo de un admin, pero la linea de tiempo de
+  // cualquiera necesita los nombres para decir a quien se asigno (el evento
+  // trae ids de perfil). `getOrgPeopleAndTeams` no lanza: si falla, listas
+  // vacias, y la pantalla cae a "Asignado" sin nombre.
+  const [datos, gente] = await Promise.all([
+    getTicket({ cookies }, params.id),
+    getOrgPeopleAndTeams(cookies)
+  ]);
+  const esAdmin = /** @type {any} */ (locals)?.profile?.role === 'ADMIN';
 
   // El area del caso, para el panel lateral. Misma regla que la cola
   // (areaDelCaso): la escrita en el caso manda, y la de la persona asignada
@@ -82,7 +92,24 @@ export async function load({ locals, cookies, params, fetch }) {
   return {
     ...datos,
     area,
+    // Quien puede reasignar desde el encabezado. El backend solo deja a un
+    // admin ver y escribir casos ajenos; un colaborador ve al responsable sin
+    // control, en vez de un selector que el API le iba a rechazar.
+    esAdmin,
+    // Solo id y nombre: el selector no necesita el correo de nadie.
+    personas: gente.people.map((p) => ({ id: p.id, name: p.name })),
+    yo: resolveMe(gente.people, /** @type {any} */ (locals)?.user?.email),
     origen: delMotor.then((d) => d?.conversacion ?? null),
+    // Si el ticket tiene un chat al que la respuesta pueda salir. Es la MISMA
+    // busqueda que hace el envio (`conversacion_de_caso` en el motor, en las
+    // dos rutas), asi que lo que esto dice es lo que el envio va a encontrar.
+    //   'si'          hay conversacion detras.
+    //   'no'          el motor contesto y no hay: ticket a mano o importado.
+    //   'no_se_pudo'  el motor no contesto o no esta configurado. NO es "no
+    //                 hay": decir que no le llega cuando quiza si, tampoco.
+    estadoConversacion: delMotor.then((d) =>
+      d === null ? 'no_se_pudo' : d?.conversacion ? 'si' : 'no'
+    ),
     contexto: delMotor.then((d) => d?.contexto ?? null),
     // Null cuando el caso no lo escribio el asistente (uno cargado a mano, o
     // uno viejo con otro formato): la pantalla vuelve entonces a mostrar la
@@ -136,6 +163,10 @@ export const actions = {
     // en el hilo y la copia al ticket del sistema del ISP firmada con el
     // nombre de quien la escribió.
     let entrega = null;
+    // Que el motor dijo "no hay chat": la respuesta quedo en el ticket y al
+    // cliente no le llego. Se devuelve para decirlo tambien DESPUES de enviar,
+    // no solo en el aviso de antes. No cambia nada de la entrega.
+    let sinConversacion = false;
     if (!internal) {
       try {
         const base = env.PRIVATE_ASISTENTE_URL;
@@ -164,6 +195,7 @@ export const actions = {
           // respondía creía que el cliente lo había recibido.
           const cuerpo = await r.json().catch(() => ({}));
           if (r.ok) entrega = cuerpo;
+          else if (r.status === 404 && cuerpo?.sin_conversacion) sinConversacion = true;
           else if (!(r.status === 404 && cuerpo?.sin_conversacion)) {
             entrega = { ok: false, aceptado_por_meta: false, aceptacion_registrada: false,
               resultado: 'rechazado',
@@ -199,6 +231,7 @@ export const actions = {
     return {
       sent: true,
       internal,
+      sin_conversacion: sinConversacion,
       aceptado_por_meta: entrega ? entrega.aceptado_por_meta : null,
       aceptacion_registrada: entrega ? entrega.aceptacion_registrada : null,
       resultado: entrega ? entrega.resultado : null,
@@ -232,5 +265,53 @@ export const actions = {
     }
 
     return { moved: status };
+  },
+
+  /**
+   * Cambiar al responsable desde el encabezado. Solo para un admin.
+   *
+   * `updateTicket` recibe UN id y no una lista: `toBody()` de tickets.js ya lo
+   * envuelve en `[id]`, y '' lo deja sin responsable. Pasarle `[id]` mandaria
+   * una lista dentro de otra.
+   *
+   * Es PATCH con `assigned_to`, asi que REEMPLAZA a todos los responsables
+   * por uno, igual que el formulario de edicion. La pantalla lo avisa cuando
+   * hay mas de uno.
+   *
+   * "Asignarme" no confia en un id que mande el navegador: se resuelve aca,
+   * desde la sesion, con la misma regla que los presets "Mios" (resolveMe).
+   */
+  asignar: async ({ cookies, params, request, locals }) => {
+    if (/** @type {any} */ (locals)?.profile?.role !== 'ADMIN') {
+      return fail(403, { error: 'Solo un administrador puede reasignar un ticket desde acá.' });
+    }
+    const form = await request.formData();
+    const { people } = await getOrgPeopleAndTeams(cookies);
+
+    /** @type {string} */
+    let persona;
+    if (form.get('yo') === '1') {
+      const yo = resolveMe(people, /** @type {any} */ (locals)?.user?.email);
+      if (!yo) return fail(400, { error: 'No se encontró tu perfil en esta organización.' });
+      persona = yo;
+    } else {
+      persona = form.get('persona')?.toString().trim() ?? '';
+      // Vacio = sin responsable, a proposito. Un id que no es de la gente de
+      // la organizacion se rechaza aca, antes de ir al API (que igual lo
+      // validaria): el mensaje es mejor que un 400 generico.
+      if (persona && !people.some((p) => p.id === persona)) {
+        return fail(400, { error: 'Esa persona no está en la organización.' });
+      }
+    }
+
+    try {
+      await updateTicket({ cookies }, params.id, { assigned_to: persona });
+    } catch (/** @type {any} */ err) {
+      return fail(400, { error: readableError(err, 'No se pudo cambiar el responsable.') });
+    }
+    return {
+      asignado: persona,
+      asignadoNombre: people.find((p) => p.id === persona)?.name ?? ''
+    };
   }
 };

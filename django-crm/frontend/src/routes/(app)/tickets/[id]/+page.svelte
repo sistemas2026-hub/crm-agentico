@@ -4,7 +4,7 @@
   import NextAction from '$lib/v2/components/NextAction.svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
-  import { relativeDays, shortAge, longDate, relativeTime } from '$lib/v2/format.js';
+  import { relativeDays, shortAge, longDate } from '$lib/v2/format.js';
   import {
     PRIORITY_TONE,
     CASE_STATUS_TONE,
@@ -22,10 +22,20 @@
     Sparkles,
     CircleCheck,
     CircleAlert,
-    ArrowRight
+    ArrowRight,
+    MessageCircle,
+    TriangleAlert,
+    LoaderCircle,
+    UserRound,
+    Cog,
+    Hand,
+    Inbox
   } from '@lucide/svelte';
   import { nombreLegible } from '$lib/v2/nombre-herramienta.js';
-  import { accionLegible } from '$lib/v2/acciones-historial.js';
+  import { destinoDeLaRespuesta } from '$lib/v2/respuesta-destino.js';
+  import { plazoPrimeraRespuesta } from '$lib/v2/plazo-primera-respuesta.js';
+  import { partirNombreDelTicket, actorDelEvento, textoDelEvento } from '$lib/v2/ticket-detalle.js';
+  import { origenDelTicket } from '$lib/v2/ticket-origen.js';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
@@ -49,8 +59,48 @@
    */
   let verConversacion = $state(true);
 
-  /** Que pestaña se ve: la conversacion o lo que el cliente adjunto. */
-  let pestana = $state('conversacion');
+  /*
+   * El asunto limpio para el titulo, y de donde vino el ticket.
+   *
+   * El nombre crudo es "Asunto · Cliente · #id8" (lo arma el asistente al
+   * escalar); de titulo se leia como una linea de log. El asunto va arriba y
+   * el resto baja a los chips. `origenDelTicket` es la regla compartida con la
+   * cola: no se escribe una segunda.
+   */
+  let nombre = $derived(partirNombreDelTicket(ticket.name));
+  let origenTicket = $derived(origenDelTicket(ticket));
+  /** El nombre del sistema del ISP, para el chip "WispHub #N". */
+  let sistemaExterno = $derived(
+    ticket.provider ? origenDelTicket({ provider: ticket.provider }).etiqueta : 'WispHub'
+  );
+  const ICONO_ORIGEN = { whatsapp: MessageCircle, wisphub: Inbox, manual: Hand };
+  let IconoOrigen = $derived(ICONO_ORIGEN[origenTicket.clave] ?? Hand);
+
+  /** Nombres por id de perfil, para la linea de tiempo. */
+  let nombrePorId = $derived(
+    Object.fromEntries((data.personas ?? []).map((/** @type {any} */ p) => [p.id, p.name]))
+  );
+
+  /*
+   * El reloj de la primera respuesta, con el vencimiento del SERVIDOR (ver
+   * lib/v2/plazo-primera-respuesta.js). `ahora` avanza cada 30 s para que la
+   * franja no se quede quieta mientras alguien tiene el ticket abierto.
+   */
+  let ahora = $state(Date.now());
+  $effect(() => {
+    const reloj = setInterval(() => (ahora = Date.now()), 30000);
+    return () => clearInterval(reloj);
+  });
+  let plazo = $derived(plazoPrimeraRespuesta(ticket, ahora));
+  const TONO_PLAZO = {
+    moss: 'var(--v2-moss)',
+    rust: 'var(--v2-rust)',
+    clay: 'var(--v2-clay)',
+    ember: 'var(--v2-ember)',
+    slate: 'var(--v2-slate)'
+  };
+  /** El texto en indigo usa la variante para texto: la de relleno es para la barra. */
+  const TEXTO_PLAZO = { ...TONO_PLAZO, ember: 'var(--v2-ember-text)' };
 
   /**
    * La conversación como está AHORA, no como estaba cuando se escaló.
@@ -79,11 +129,41 @@
     }
   }
 
+  /**
+   * La conversacion de origen, cuando llega: su canal y el nombre del cliente
+   * dicen a donde va la respuesta. Y si HAY chat o no, que es lo que decide
+   * el aviso de la caja (`estadoConversacion`, ver +page.server.js).
+   *
+   * Null mientras no llego: la caja dice "Comprobando…" y no afirma nada.
+   * @type {any}
+   */
+  let conversacionOrigen = $state(null);
+  /** @type {'si'|'no'|'no_se_pudo'|null} */
+  let estadoConversacion = $state(null);
+  // Plano, no $state: solo sirve para notar que se cambio de ticket sin
+  // desmontar la pagina, y no tiene que disparar nada.
+  let ticketDelEstado = '';
+
   $effect(() => {
     // 'origen' llega despues que la pagina (ver +page.server.js), asi que el
     // id se toma cuando resuelve y no al montar.
     Promise.resolve(data.origen).then((o) => {
       if (o?.id) conversacionId = o.id;
+      conversacionOrigen = o ?? null;
+    });
+  });
+
+  $effect(() => {
+    const id = data.ticket?.id;
+    // Otro ticket en la misma pagina: lo que se sabia del anterior no vale.
+    // Una revalidacion del MISMO ticket (tras enviar) conserva el valor hasta
+    // que llegue el nuevo, para que el aviso no parpadee a "Comprobando".
+    if (id !== ticketDelEstado) {
+      ticketDelEstado = id;
+      estadoConversacion = null;
+    }
+    Promise.resolve(data.estadoConversacion).then((e) => {
+      if (data.ticket?.id === id) estadoConversacion = e ?? 'no_se_pudo';
     });
   });
 
@@ -168,6 +248,67 @@
   let devolverAlAsistente = $state(true);
   let sending = $state(false);
 
+  /** A quien se le habla, para el aviso "Sale por WhatsApp a {cliente}". */
+  let cliente = $derived(
+    conversacionOrigen?.nombre_cliente ||
+      ticket.external_client_name ||
+      nombre.cliente ||
+      contacts?.[0]?.name ||
+      ticket.account?.name ||
+      ''
+  );
+
+  /** A DONDE VA lo que se escribe. Ver lib/v2/respuesta-destino.js. */
+  let destino = $derived(
+    destinoDeLaRespuesta({
+      interna: internal,
+      hayConversacion:
+        estadoConversacion === 'si'
+          ? true
+          : estadoConversacion === 'no'
+            ? false
+            : estadoConversacion === 'no_se_pudo'
+              ? 'no_se_pudo'
+              : null,
+      cliente,
+      canal: conversacionOrigen?.canal
+    })
+  );
+  const ICONO_DESTINO = {
+    nota: Lock,
+    chat: MessageCircle,
+    sin_chat: TriangleAlert,
+    comprobando: LoaderCircle,
+    no_se_pudo: CircleAlert
+  };
+
+  /**
+   * Las dos pestañas de la caja, con flechas como manda el patron de
+   * pestañas: izquierda/derecha (y Inicio/Fin) cambian y llevan el foco.
+   * @param {KeyboardEvent} e
+   */
+  function teclaPestana(e) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    internal = e.key === 'Home' ? false : e.key === 'End' ? true : !internal;
+    document.getElementById(internal ? 'tab-nota' : 'tab-cliente')?.focus();
+  }
+
+  /*
+   * Asignar desde el encabezado. Sin reset: un form.reset() devolveria el
+   * selector a su primera opcion ("Sin asignar") aunque el caso ya tenga
+   * responsable, porque Svelte fija la PROPIEDAD value y no el atributo.
+   */
+  let asignando = $state(false);
+  /** @type {import('@sveltejs/kit').SubmitFunction} */
+  const asignar = () => {
+    asignando = true;
+    return async ({ update }) => {
+      asignando = false;
+      await update({ reset: false });
+    };
+  };
+
   // The picked file's name, mirrored out of the input so the composer can show
   // and clear it. `fileInput` is the element itself. A file input's value can
   // only be cleared through the DOM, not by rebinding.
@@ -214,21 +355,13 @@
    *
    * @type {{ tone: 'ember'|'rust', label: string, text: string } | null}
    */
+  //
+  // La primera respuesta ya NO es un banner (24/10/2026): la franja de plazo
+  // de arriba dice lo mismo, con el numero, y la caja para contestar quedo
+  // justo debajo. Dos avisos del mismo reloj, uno al lado del otro, competian.
   let alert = $derived.by(() => {
     if (!ticket.is_open) return null;
-    if (!ticket.first_response_at) {
-      return ticket.first_response_breached
-        ? {
-            tone: 'rust',
-            label: 'Primera respuesta atrasada',
-            text: 'Pasó su objetivo de primera respuesta y sigue sin contestar. Una respuesta abajo es la primera respuesta. Detiene el reloj.'
-          }
-        : {
-            tone: 'ember',
-            label: 'Necesita una primera respuesta',
-            text: 'Todavía nadie respondió. Una respuesta abajo es la primera respuesta. Es lo que detiene el reloj de primera respuesta.'
-          };
-    }
+    if (!ticket.first_response_at) return null;
     // Waiting on the customer is not something we can act on, so it is not a
     // banner. It falls through to the quiet line below.
     if (ticket.status === 'Pending') return null;
@@ -247,7 +380,7 @@
   );
 </script>
 
-<PageHeader title={ticket.name} record>
+<PageHeader title={nombre.asunto} record>
   {#snippet leading()}
     <!-- Whose ticket this is, at a glance. The account's mark where there is
          one; a ticket glyph where nobody is attached. -->
@@ -264,6 +397,59 @@
       <a href="/accounts/{ticket.account.id}">{ticket.account.name}</a>
     {/if}
   {/snippet}
+  {#snippet sub()}
+    <!-- Lo que identifica al ticket, en chips debajo del asunto. Antes iba
+         todo pegado en el titulo ("Asunto · Cliente · #id8") y el numero del
+         ticket de WispHub no se mostraba en el detalle, aunque el caso lo
+         trae: era lo que une esta pantalla con el panel del proveedor. -->
+    <span class="chips">
+      <span class="chip v2-num" title="Identificador del ticket en Dexter">
+        Ticket {nombre.id || `#${String(ticket.id).slice(0, 8)}`}
+      </span>
+      <span class="chip chip-origen">
+        <IconoOrigen size={11} aria-hidden="true" />
+        {origenTicket.etiqueta}
+      </span>
+      {#if ticket.external_ticket_id}
+        <span class="chip">
+          {sistemaExterno} #{ticket.external_ticket_id}{#if ticket.external_status}
+            · {ticket.external_status}{/if}
+        </span>
+      {/if}
+      <Pill tone={PRIORITY_TONE[ticket.priority]}>{CASE_PRIORITY_LABEL[ticket.priority] ?? ticket.priority}</Pill>
+      <Pill tone={CASE_STATUS_TONE[ticket.status]}>{CASE_STATUS_LABEL[ticket.status] ?? ticket.status}</Pill>
+      {#if ticket.case_type}<Pill tone="slate">{CASE_TYPE_LABEL[ticket.case_type] ?? ticket.case_type}</Pill>{/if}
+    </span>
+    <!-- EL RESPONSABLE. Para un admin, el control para cambiarlo; para
+         cualquier otro, el nombre y nada mas: el backend solo deja a un
+         admin escribir casos ajenos, y un selector que el API iba a rechazar
+         es un control que miente. -->
+    {#if data.esAdmin}
+      <form method="POST" action="?/asignar" use:enhance={asignar} class="asignar">
+        <label for="f-asignar">Responsable</label>
+        <select id="f-asignar" name="persona" class="v2-input" value={ticket.assignee_id ?? ''}>
+          <option value="">Sin asignar</option>
+          {#each data.personas ?? [] as p (p.id)}
+            <option value={p.id}>{p.name}</option>
+          {/each}
+        </select>
+        <button class="v2-btn v2-btn-sm" disabled={asignando}>Asignar</button>
+        {#if data.yo && !(ticket.assignee_ids ?? []).includes(data.yo)}
+          <button class="v2-btn v2-btn-sm" name="yo" value="1" disabled={asignando}>Asignarme</button>
+        {/if}
+        {#if ticket.assignee_count > 1}
+          <!-- PATCH con assigned_to REEMPLAZA la lista entera: decirlo antes. -->
+          <span class="asignar-nota">Hoy tiene {ticket.assignee_count} responsables; asignar deja uno solo.</span>
+        {/if}
+      </form>
+    {:else}
+      <span class="asignar">
+        <span class="asignar-rotulo">Responsable</span>
+        <b>{ticket.assignee ?? 'Sin asignar'}</b>
+        {#if ticket.assignee_count > 1}<span>+{ticket.assignee_count - 1}</span>{/if}
+      </span>
+    {/if}
+  {/snippet}
   {#snippet actions()}
     <a class="v2-btn" href="/tickets/{ticket.id}/edit"><Pencil size={12} />Editar</a>
     {#if ticket.is_open}
@@ -271,7 +457,10 @@
         {#if ticket.status !== 'Pending'}
           <button class="v2-btn" name="status" value="Pending">Poner en espera</button>
         {/if}
-        <button class="v2-btn v2-btn-primary" name="status" value="Closed">Cerrar</button>
+        <!-- Secundario desde el 24/10/2026: la accion principal de esta
+             pantalla es contestar (la caja de arriba), y la regla Fibra es una
+             sola principal por pantalla. -->
+        <button class="v2-btn" name="status" value="Closed">Cerrar</button>
       </form>
     {:else}
       <form method="POST" action="?/setStatus" use:enhance style="display:contents">
@@ -283,24 +472,34 @@
 
 <div style="display:flex;flex:1;min-height:0;overflow:hidden">
   <div class="v2-main">
-    <div
-      class="v2-pad"
-      style="padding-top:12px;display:flex;gap:7px;align-items:center;flex-wrap:wrap;flex:none"
-    >
-      <Pill tone={PRIORITY_TONE[ticket.priority]}>{CASE_PRIORITY_LABEL[ticket.priority] ?? ticket.priority}</Pill>
-      <Pill tone={CASE_STATUS_TONE[ticket.status]}>{CASE_STATUS_LABEL[ticket.status] ?? ticket.status}</Pill>
-      {#if ticket.case_type}<Pill tone="slate">{CASE_TYPE_LABEL[ticket.case_type] ?? ticket.case_type}</Pill>{/if}
-      <span class="v2-sub">
-        <!-- There is no ticket number. `Case` has a UUID and a subject, so the
-             subject is the identifier and the age is the useful fact. -->
-        Abierto hace {shortAge(ticket.opened_at)}
-        {#if ticket.first_response_at}
-          · primera respuesta {relativeTime(ticket.first_response_at)}
-        {/if}
-        {#if ticket.escalation_count > 0}
-          · <span style="color:var(--v2-rust)">escalado {ticket.escalation_count}×</span>
-        {/if}
-      </span>
+    <!-- ============================================================
+         LA FRANJA DE PLAZO. Lo primero que se lee debajo del asunto: como
+         esta el reloj de la primera respuesta. El vencimiento es el del
+         servidor (calendario laboral y pausas ya descontados), no
+         `abierto + horas`. Ver lib/v2/plazo-primera-respuesta.js.
+         ============================================================ -->
+    <div class="v2-pad franja" style="--tono:{TONO_PLAZO[plazo.tono]};--tono-texto:{TEXTO_PLAZO[plazo.tono]}">
+      <div class="franja-linea">
+        <span class="franja-estado">{plazo.texto}</span>
+        <span class="v2-sub franja-dato">
+          {#if plazo.plazo}{plazo.plazo} · {/if}abierto hace {shortAge(ticket.opened_at)}
+          {#if ticket.escalation_count > 0}
+            · <span style="color:var(--v2-rust)">escalado {ticket.escalation_count}×</span>
+          {/if}
+        </span>
+      </div>
+      {#if plazo.pct !== null}
+        <div
+          class="franja-barra"
+          role="progressbar"
+          aria-label="Tiempo usado del plazo de primera respuesta"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow={plazo.pct}
+        >
+          <i style="width:{plazo.pct}%"></i>
+        </div>
+      {/if}
     </div>
 
     <div class="v2-scroll">
@@ -346,6 +545,14 @@
             que le haya llegado al cliente. No la envíes de nuevo: si salió, la
             recibiría dos veces.
           </p>
+        {:else if form?.sent && form?.sin_conversacion}
+          <!-- El motor dijo "no hay chat" (404 sin_conversacion). Antes esto
+               no decia nada y se leia como enviado. El aviso de la caja ya lo
+               anticipaba; esto confirma lo que paso. -->
+          <p class="v2-card resultado-atencion">
+            Quedó guardada en el ticket. Al cliente no le llegó: este ticket no tiene un chat
+            de WhatsApp. Para avisarle, llamalo o escribile por otro medio.
+          </p>
         {/if}
 
         {#if alert}
@@ -355,6 +562,145 @@
         {:else if waiting}
           <p class="v2-sub" style="margin:0 0 18px;font-size:12.5px">
             Esperando al cliente: el reloj de primera respuesta está en pausa mientras está en Pendiente.
+          </p>
+        {/if}
+
+        <!-- ============================================================
+             LA CAJA DE RESPUESTA, ARRIBA (24/10/2026). Estaba al final de
+             todo, debajo del resumen, la ficha tecnica y el hilo: quien abria
+             el ticket para contestar tenia que bajar la pantalla entera.
+
+             Dos pestañas en vez de la casilla "Nota interna": las dos mandan
+             el mismo campo `internal` que siempre (on = nota), asi que el
+             servidor no cambia. Y debajo, A DONDE VA el mensaje -- decidido
+             por destinoDeLaRespuesta() con la misma señal que usa el envio.
+             ============================================================ -->
+        {#if canReply}
+          {@const IconoDestino = ICONO_DESTINO[destino.clave]}
+          <form
+            method="POST"
+            action="?/reply"
+            enctype="multipart/form-data"
+            use:enhance={send}
+            class="compositor-form"
+          >
+            <div class="v2-card compositor">
+              <div class="compositor-pestanas" role="tablist" aria-label="A quién le escribís">
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-cliente"
+                  aria-selected={!internal}
+                  aria-controls="panel-respuesta"
+                  tabindex={internal ? -1 : 0}
+                  onclick={() => (internal = false)}
+                  onkeydown={teclaPestana}>Responder al cliente</button
+                >
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-nota"
+                  aria-selected={internal}
+                  aria-controls="panel-respuesta"
+                  tabindex={internal ? 0 : -1}
+                  onclick={() => (internal = true)}
+                  onkeydown={teclaPestana}><Lock size={11} aria-hidden="true" /> Nota interna</button
+                >
+              </div>
+
+              <div
+                role="tabpanel"
+                id="panel-respuesta"
+                aria-labelledby={internal ? 'tab-nota' : 'tab-cliente'}
+                class="compositor-panel"
+              >
+                <!-- El mismo campo de siempre: el servidor lee internal === 'on'. -->
+                {#if internal}<input type="hidden" name="internal" value="on" />{/if}
+
+                <p class="destino destino-{destino.tono}" class:destino-sin-chat={destino.clave === 'sin_chat'} aria-live="polite">
+                  <IconoDestino size={13} aria-hidden="true" />
+                  <span>{destino.aviso}</span>
+                </p>
+
+                <label for="f-cuerpo" class="v2-sr-only">
+                  {internal ? 'Nota para el equipo' : 'Respuesta al cliente'}
+                </label>
+                <textarea
+                  id="f-cuerpo"
+                  name="body"
+                  bind:value={body}
+                  rows="3"
+                  placeholder={internal ? 'Nota para el equipo…' : 'Escribí la respuesta…'}
+                  class="compositor-texto"
+                ></textarea>
+
+                <div class="compositor-pie">
+                  <!-- Lo decide quien responde, no el sistema: acaba de hacer el
+                       trabajo y sabe si su parte terminó o si todavía le está
+                       preguntando algo al cliente. Marcado por defecto porque
+                       ese es el caso normal --se aplicó el cambio y se avisa--
+                       y desmarcarlo es un clic para quien sigue en la charla.
+                       Solo con chat detras: sin conversacion no hay nada que
+                       devolverle al asistente. -->
+                  {#if destino.ofreceDevolver}
+                    <label
+                      class="v2-sub compositor-casilla"
+                      title="El asistente vuelve a atender: responde lo que siga y pregunta si puede cerrar."
+                    >
+                      <input type="checkbox" name="devolver" bind:checked={devolverAlAsistente} />
+                      Devolver la conversación a Dexter
+                    </label>
+                  {/if}
+                  <!-- The whole chip is the click target: a label wrapping a hidden
+                       input. A file may ride with the reply or go on its own. -->
+                  <label class="attach" class:has-file={fileName}>
+                    <Paperclip size={13} />
+                    <span class="attach-label">{fileName || 'Adjuntar'}</span>
+                    <input
+                      bind:this={fileInput}
+                      type="file"
+                      name="attachment"
+                      onchange={pickFile}
+                      hidden
+                    />
+                  </label>
+                  {#if fileName}
+                    <button type="button" class="clear-file" onclick={clearFile} title="Quitar archivo">
+                      <X size={12} />
+                    </button>
+                  {/if}
+                  <label for="f-estado" class="v2-sub" style="margin-left:auto;font-size:11.5px">Estado al enviar</label>
+                  <!-- Answering and moving the ticket is one decision, so it is
+                       one submit. Empty means "leave the status alone". -->
+                  <select id="f-estado" name="status" class="v2-input" style="width:auto;font-size:12px">
+                    <option value="">Sin cambios</option>
+                    <option value="Assigned">Asignado</option>
+                    <option value="Pending">Pendiente</option>
+                  </select>
+                  <!-- Principal SOLO cuando el mensaje sale de verdad al cliente.
+                       Una nota, o una respuesta que se queda en el ticket, no es
+                       la accion de esta pantalla: un boton indigo ahi prometeria
+                       un envio que no ocurre. -->
+                  <button
+                    class={destino.primario ? 'v2-btn v2-btn-primary' : 'v2-btn'}
+                    disabled={sending || !canSend}
+                  >
+                    {sending
+                      ? internal || destino.clave === 'sin_chat'
+                        ? 'Guardando…'
+                        : 'Enviando…'
+                      : !body.trim() && fileName
+                        ? 'Adjuntar archivo'
+                        : destino.boton}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </form>
+        {:else}
+          <p class="v2-sub" style="margin:0 0 18px;font-size:12.5px">
+            Podés leer este ticket pero no responderlo. Pedile a un administrador, o a quien esté
+            asignado.
           </p>
         {/if}
 
@@ -456,45 +802,27 @@
           {#if agente.turnos.length}
             <section class="conversacion-cliente">
               <header class="conv-cab">
-                <!-- Pestañas, no dos secciones: la conversacion y lo que el
-                     cliente mando son la misma evidencia mirada de dos
-                     formas. Los adjuntos siguen ademas en el panel derecho,
-                     donde estan SIEMPRE visibles -- esto no los mueve de
-                     ahi, agrega el lugar donde uno los busca cuando esta
-                     leyendo la conversacion. -->
-                <nav class="v2-tabs conv-pestanas" aria-label="Conversación">
-                  <button type="button" onclick={() => (pestana = 'conversacion')}
-                    aria-current={pestana === 'conversacion' ? 'page' : undefined}
-                    >Conversación</button>
-                  <button type="button" onclick={() => (pestana = 'adjuntos')}
-                    aria-current={pestana === 'adjuntos' ? 'page' : undefined}>
-                    Adjuntos
-                    {#if attachments.length}
-                      <span class="v2-tab-count v2-num">{attachments.length}</span>
-                    {/if}
-                  </button>
-                </nav>
-                {#if pestana === 'conversacion'}
-                  <button type="button" class="v2-btn v2-btn-sm" onclick={() => (verConversacion = !verConversacion)}>
-                    {verConversacion ? 'Colapsar' : 'Expandir'} conversación
-                  </button>
-                {/if}
+                <!-- Sin pestaña de adjuntos desde el 24/10/2026: los mismos
+                     archivos estaban aca Y en el panel derecho. Quedan en el
+                     panel, donde se ven siempre, sin abrir nada.
+
+                     Al lado del titulo, CUAL conversacion se esta viendo: la
+                     viva (se refresca cada 5 s) o la transcripcion que quedo
+                     guardada al pasar a una persona. Reemplaza al viejo "Fin de
+                     la conversación", que se mostraba aunque el chat siguiera. -->
+                <h2 class="conv-titulo">
+                  Conversación
+                  <span class="conv-fuente">
+                    {hilo.length ? 'En vivo · se actualiza sola' : 'Transcripción del momento del pase'}
+                  </span>
+                </h2>
+                <button type="button" class="v2-btn v2-btn-sm" onclick={() => (verConversacion = !verConversacion)}
+                  aria-expanded={verConversacion}>
+                  {verConversacion ? 'Colapsar' : 'Expandir'} conversación
+                </button>
               </header>
 
-              {#if pestana === 'adjuntos'}
-                {#if attachments.length}
-                  <ul class="lista-adjuntos">
-                    {#each attachments as f (f.id)}
-                      <li>
-                        <a href={f.url} target="_blank" rel="noopener">{f.name}</a>
-                        <span class="v2-sub">hace {shortAge(f.at)}</span>
-                      </li>
-                    {/each}
-                  </ul>
-                {:else}
-                  <p class="fin-conv">Esta conversación no trajo archivos.</p>
-                {/if}
-              {:else if verConversacion}
+              {#if verConversacion}
                 <div class="turnos">
                   <!-- El hilo VIVO si se pudo traer; si no, la transcripción
                        que quedó guardada en el caso. Lo segundo es lo que
@@ -518,7 +846,6 @@
                     </div>
                   {/each}
                 </div>
-                <p class="fin-conv">Fin de la conversación con el asistente</p>
               {/if}
             </section>
           {/if}
@@ -779,8 +1106,7 @@
 
         {#if conversation.length === 0}
           <p class="v2-sub" style="margin:0 0 18px;font-size:12.5px">
-            Todavía no se dijo nada en este ticket. Una respuesta abajo es la primera respuesta. Es
-            lo que detiene el reloj de primera respuesta.
+            Todavía no se dijo nada en este ticket.
           </p>
         {/if}
 
@@ -835,113 +1161,16 @@
           {/if}
         {/each}
 
-        {#if canReply}
-          <form method="POST" action="?/reply" enctype="multipart/form-data" use:enhance={send}>
-            <div class="v2-card" style="padding:13px 14px;margin-top:18px">
-              <textarea
-                name="body"
-                bind:value={body}
-                rows="3"
-                placeholder={internal
-                  ? 'Nota para el equipo — el cliente no la ve…'
-                  : 'Responder al cliente por donde escribió…'}
-                style="width:100%;border:none;background:transparent;resize:vertical;font:inherit;font-size:13.5px;line-height:1.55;color:var(--v2-ink);outline:none"
-              ></textarea>
-              <div
-                style="display:flex;gap:9px;align-items:center;border-top:1px solid var(--v2-line);padding-top:12px;flex-wrap:wrap"
-              >
-                <label
-                  class="v2-sub"
-                  style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"
-                >
-                  <input type="checkbox" name="internal" bind:checked={internal} />
-                  Nota interna
-                </label>
-                <!-- Lo decide quien responde, no el sistema: acaba de hacer el
-                     trabajo y sabe si su parte terminó o si todavía le está
-                     preguntando algo al cliente. Marcado por defecto porque
-                     ese es el caso normal --se aplicó el cambio y se avisa--
-                     y desmarcarlo es un clic para quien sigue en la charla. -->
-                {#if !internal}
-                  <label
-                    class="v2-sub"
-                    style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"
-                    title="El asistente vuelve a atender: responde lo que siga y pregunta si puede cerrar."
-                  >
-                    <input
-                      type="checkbox"
-                      name="devolver"
-                      bind:checked={devolverAlAsistente}
-                    />
-                    Devolver al asistente
-                  </label>
-                {/if}
-                <!-- The whole chip is the click target: a label wrapping a hidden
-                     input. A file may ride with the reply or go on its own. -->
-                <label class="attach" class:has-file={fileName}>
-                  <Paperclip size={13} />
-                  <span class="attach-label">{fileName || 'Adjuntar'}</span>
-                  <input
-                    bind:this={fileInput}
-                    type="file"
-                    name="attachment"
-                    onchange={pickFile}
-                    hidden
-                  />
-                </label>
-                {#if fileName}
-                  <button type="button" class="clear-file" onclick={clearFile} title="Quitar archivo">
-                    <X size={12} />
-                  </button>
-                {/if}
-                <span class="v2-sub" style="margin-left:auto;font-size:11.5px">Estado al enviar</span>
-                <!-- Answering and moving the ticket is one decision, so it is
-                     one submit. Empty means "leave the status alone". -->
-                <select name="status" class="v2-input" style="width:auto;font-size:12px">
-                  <option value="">Sin cambios</option>
-                  <option value="Assigned">Asignado</option>
-                  <option value="Pending">Pendiente</option>
-                </select>
-                <button class="v2-btn v2-btn-primary" disabled={sending || !canSend}>
-                  {sending
-                    ? 'Enviando…'
-                    : body.trim()
-                      ? internal
-                        ? 'Agregar nota'
-                        : 'Enviar respuesta'
-                      : fileName
-                        ? 'Adjuntar archivo'
-                        : internal
-                          ? 'Agregar nota'
-                          : 'Enviar respuesta'}
-                </button>
-              </div>
-            </div>
-            {#if internal}
-              <p class="v2-sub" style="margin:8px 2px 0;font-size:11.5px">
-                Una nota queda dentro del equipo y no detiene el reloj de primera respuesta.
-              </p>
-            {/if}
-          </form>
-        {:else}
-          <p class="v2-sub" style="margin-top:18px;font-size:12.5px">
-            Podés leer este ticket pero no responderlo. Pedile a un administrador, o a quien esté
-            asignado.
-          </p>
-        {/if}
       </div>
     </div>
   </div>
 
   <aside class="v2-rail">
     <div class="v2-label v2-rail-head">Ticket</div>
+    <!-- Prioridad, estado, tipo y responsable viven en el encabezado, y el
+         reloj de primera respuesta en la franja de arriba (24/10/2026): aca
+         quedan los datos que no estan en ningun otro lado. -->
     <dl class="v2-kv">
-      <dt>Prioridad</dt>
-      <dd><Pill tone={PRIORITY_TONE[ticket.priority]}>{CASE_PRIORITY_LABEL[ticket.priority] ?? ticket.priority}</Pill></dd>
-      <dt>Estado</dt>
-      <dd><Pill tone={CASE_STATUS_TONE[ticket.status]}>{CASE_STATUS_LABEL[ticket.status] ?? ticket.status}</Pill></dd>
-      <dt>Tipo</dt>
-      <dd>{ticket.case_type ? (CASE_TYPE_LABEL[ticket.case_type] ?? ticket.case_type) : 'Sin definir'}</dd>
       <!-- El area es la escrita en el caso ('Case.area'); la de la persona
            asignada solo decide mientras el caso no la tenga -- misma regla
            que la cola (areaDelCaso). Un caso sin ninguna de las dos no tiene
@@ -955,34 +1184,15 @@
           <span class="v2-sub">Sin área asignada</span>
         {/if}
       </dd>
-      <dt>Asignado a</dt>
-      <dd>
-        {ticket.assignee ?? 'Sin asignar'}
-        {#if ticket.assignee_count > 1}
-          <span class="v2-sub">+{ticket.assignee_count - 1}</span>
-        {/if}
-      </dd>
       <dt>Abierto</dt>
       <dd>{longDate(ticket.opened_at)}</dd>
-      <dt>Primera respuesta</dt>
-      <dd>
-        {#if ticket.first_response_at}
-          {relativeTime(ticket.first_response_at)}
-        {:else if ticket.first_response_deadline}
-          <span style={ticket.first_response_breached ? 'color:var(--v2-rust)' : ''}>
-            vence {relativeTime(ticket.first_response_deadline)}
-          </span>
-        {:else}
-          Sin objetivo
-        {/if}
-      </dd>
+      {#if ticket.first_response_at}
+        <dt>Primera respuesta</dt>
+        <dd>{longDate(ticket.first_response_at)}</dd>
+      {/if}
       {#if ticket.resolved_at}
         <dt>Resuelto</dt>
         <dd>{longDate(ticket.resolved_at)}</dd>
-      {/if}
-      {#if ticket.paused_at}
-        <dt>SLA</dt>
-        <dd>Pausado mientras está pendiente</dd>
       {/if}
     </dl>
 
@@ -1105,19 +1315,30 @@
            iguales obliga a leer las fechas para reconstruirlo. -->
       <ol class="linea">
         {#each activity.slice(0, 8) as a (a.id)}
+          {@const actor = actorDelEvento(a, { delAsistente: origenTicket.clave === 'whatsapp' || Boolean(agente) })}
           <li>
             <span class="hito" aria-hidden="true"></span>
-            <div class="hito-texto">{accionLegible(a)}</div>
+            <!-- Con NOMBRES: una asignacion trae ids de perfil en su metadata
+                 y antes solo decia "Asignado". -->
+            <div class="hito-texto">{textoDelEvento(a, nombrePorId)}</div>
             <div class="v2-sub hito-pie">
-              <!-- Quien hizo cada cosa, para poder auditarlo.
-                   Solo hay DOS etiquetas, no tres, y es una limitacion real y
-                   no una simplificacion: el CRM guarda 'user_id' vacio para
-                   todo lo que no hizo una persona, asi que lo que ejecuto el
-                   asistente y lo que hizo un automatismo del CRM llegan aca
-                   indistinguibles. Poner "IA" adivinando cual es cual seria
-                   inventar dentro de la parte de la pantalla que existe
-                   justamente para poder confiar en ella. -->
-              <span class="quien" class:humano={a.by}>{a.by ? 'Humano' : 'Sistema'}</span>
+              <!-- Quien hizo cada cosa, para poder auditarlo: persona, IA o
+                   sistema SOLO donde el dato lo permite. El CRM guarda
+                   'user_id' vacio para todo lo que no hizo una persona, asi que
+                   el resto se dice como es -- "IA o sistema" -- en vez de
+                   adivinar dentro de la parte de la pantalla que existe para
+                   poder confiar en ella. La regla: lib/v2/ticket-detalle.js. -->
+              <span
+                class="quien quien-{actor.clave}"
+                title={actor.clave === 'ambos'
+                  ? 'Sin persona registrada: lo hizo el asistente o un automatismo del CRM, y el registro no distingue cuál.'
+                  : undefined}
+              >
+                {#if actor.clave === 'persona'}<UserRound size={10} aria-hidden="true" />
+                {:else if actor.clave === 'ia'}<Sparkles size={10} aria-hidden="true" />
+                {:else}<Cog size={10} aria-hidden="true" />{/if}
+                {actor.rotulo}
+              </span>
               <span>{#if a.by}{a.by} · {/if}{longDate(a.at)}</span>
             </div>
           </li>
@@ -1176,31 +1397,194 @@
     flex-wrap: wrap;
   }
 
-  .conv-pestanas {
-    margin-bottom: 0;
+  /* ---- encabezado: chips y responsable -------------------------------- */
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
   }
-  .conv-pestanas button {
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--v2-slate);
+    background: var(--v2-line-soft);
+  }
+  /* De donde vino: el fondo neutro de origen, nunca un color de plazo. */
+  .chip-origen {
+    background: var(--v2-origen);
+    color: var(--v2-origen-ink);
+  }
+  .asignar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--v2-slate);
+  }
+  .asignar b {
+    color: var(--v2-ink);
+    font-weight: 600;
+  }
+  .asignar select {
+    width: auto;
+    max-width: 220px;
+    font-size: 12px;
+  }
+  .asignar-nota {
+    font-size: 11.5px;
+    color: var(--v2-clay);
+  }
+
+  /* ---- franja de plazo ------------------------------------------------- */
+  .franja {
+    flex: none;
+    padding-top: 10px;
+    padding-bottom: 2px;
+  }
+  .franja-linea {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+  }
+  .franja-estado {
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--tono-texto);
+  }
+  .franja-dato {
+    font-size: 12px;
+  }
+  .franja-barra {
+    margin-top: 6px;
+    height: 4px;
+    border-radius: 3px;
+    background: var(--v2-line);
+    overflow: hidden;
+  }
+  .franja-barra i {
+    display: block;
+    height: 100%;
+    background: var(--tono);
+  }
+
+  /* ---- la caja de respuesta ------------------------------------------- */
+  .compositor-form {
+    margin-bottom: 20px;
+  }
+  .compositor {
+    padding: 0;
+    overflow: hidden;
+  }
+  .compositor-pestanas {
+    display: flex;
+    gap: 2px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--v2-line);
+  }
+  .compositor-pestanas button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 10px 10px 9px;
+    margin-bottom: -1px;
     background: none;
     border: 0;
+    border-bottom: 2px solid transparent;
     font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--v2-slate);
     cursor: pointer;
   }
-  .lista-adjuntos {
-    list-style: none;
-    margin: 10px 0 0;
-    padding: 0;
+  .compositor-pestanas button:hover {
+    color: var(--v2-ink);
+  }
+  .compositor-pestanas button[aria-selected='true'] {
+    color: var(--v2-ink);
+    font-weight: 650;
+    border-bottom-color: var(--v2-ember);
+  }
+  .compositor-pestanas button:focus-visible {
+    outline: 2px solid var(--v2-ember);
+    outline-offset: -2px;
+    border-radius: 6px 6px 0 0;
+  }
+  .compositor-panel {
+    padding: 12px 14px 13px;
+  }
+  .compositor-texto {
+    width: 100%;
+    border: none;
+    background: transparent;
+    resize: vertical;
+    font: inherit;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--v2-ink);
+    outline: none;
+  }
+  .compositor-pie {
     display: flex;
-    flex-direction: column;
+    gap: 9px;
+    align-items: center;
+    border-top: 1px solid var(--v2-line);
+    padding-top: 12px;
+    flex-wrap: wrap;
+  }
+  .compositor-casilla {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  /* A DONDE VA. Gris = se queda adentro; indigo suave = sale al cliente;
+     ambar = el cliente NO lo va a recibir. */
+  .destino {
+    display: flex;
+    align-items: flex-start;
     gap: 7px;
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+  .destino :global(svg) {
+    flex: none;
+    margin-top: 2px;
+  }
+  .destino-neutro {
+    background: var(--v2-line-soft);
+    color: var(--v2-slate);
+  }
+  .destino-accion {
+    background: var(--v2-ember-soft);
+    color: var(--v2-ember-text);
+  }
+  .destino-atencion {
+    background: color-mix(in srgb, var(--v2-clay) 9%, transparent);
+    color: var(--v2-clay);
+    border-left: 3px solid var(--v2-clay);
+  }
+  .destino-sin-chat span {
+    color: var(--v2-ink);
+  }
+  .resultado-atencion {
+    padding: 10px 13px;
+    margin-bottom: 16px;
     font-size: 13px;
-  }
-  .lista-adjuntos li {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-  }
-  .lista-adjuntos .v2-sub {
-    font-size: 11.5px;
+    border-left: 3px solid var(--v2-clay);
   }
 
   .tecnica {
@@ -1264,7 +1648,9 @@
   }
 
   .quien {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     padding: 0 5px;
     border-radius: 4px;
     font-size: 10px;
@@ -1273,9 +1659,20 @@
     background: var(--v2-line-soft, #f0f0ee);
     color: var(--v2-slate);
   }
-  .quien.humano {
-    background: color-mix(in srgb, var(--v2-ember) 10%, transparent);
+  /* Persona en tinta, IA con la marca del asistente, sistema neutro. Ninguno
+     usa un color de plazo: quien hizo algo no es una alarma. */
+  .quien-persona {
+    background: var(--v2-origen);
+    color: var(--v2-ink);
+  }
+  .quien-ia {
+    background: var(--v2-ember-soft);
     color: var(--v2-ember-text);
+  }
+  .quien-sistema,
+  .quien-ambos {
+    background: var(--v2-line-soft);
+    color: var(--v2-slate);
   }
 
   .punto-area {
@@ -1450,10 +1847,18 @@
     background: var(--v2-card, #fff);
     border: 1px solid var(--v2-line, #e3e4e1);
   }
-  .fin-conv {
-    text-align: center;
-    margin: 14px 0 0;
+  .conv-titulo {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 9px;
+    margin: 0;
+    font-size: 14.5px;
+    font-weight: 650;
+  }
+  .conv-fuente {
     font-size: 11.5px;
+    font-weight: 500;
     color: var(--v2-slate);
   }
 
