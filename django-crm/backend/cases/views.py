@@ -4,7 +4,20 @@ from datetime import timedelta
 
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Count, Q
+from django.db.models import (
+    BooleanField,
+    Count,
+    DateTimeField,
+    DurationField,
+    ExpressionWrapper,
+    F,
+    Q,
+    Value,
+    When,
+)
+# `Case` en este modulo es el MODELO de tickets; la expresion condicional de
+# Django entra con otro nombre para que nadie lea una por la otra.
+from django.db.models import Case as CasoSQL
 from django.http import Http404
 from django.utils import timezone
 from drf_spectacular.utils import (
@@ -240,7 +253,105 @@ def apply_case_list_filters(queryset, params, yo=None):
     ordering = params.get("ordering")
     if ordering in _ALLOWED_CASE_ORDERINGS:
         queryset = queryset.order_by(ordering, "-id")
+    elif ordering == ORDEN_VENCE_PRIMERO:
+        queryset = ordenar_por_vencimiento(queryset)
 
+    return queryset
+
+
+#  "VENCE PRIMERO": LA COLA ORDENADA POR LO QUE SE ESTA POR INCUMPLIR  --  24/10/2026
+#  ---------------------------------------------------------------------------
+#  Va aparte de '_ALLOWED_CASE_ORDERINGS' porque no es una columna: es un
+#  calculo. Sigue siendo lista blanca --un valor fijo que elige una expresion
+#  escrita aqui, nunca un nombre de columna que venga en la URL--.
+#
+#  El vencimiento es el de la PRIMERA RESPUESTA y se calcula en horas corridas,
+#  'created_at + sla_first_response_hours * 1 hora': el MISMO calculo que usa
+#  el filtro 'sla_breached' de arriba. Si la lista ordenara con el calendario
+#  laboral y el filtro con horas corridas, la primera fila de "vence primero"
+#  podria no salir en "vencidos", y la pantalla se contradiria sola.
+#
+#  Orden, de arriba a abajo:
+#    1. sin primera respuesta, por vencimiento ascendente (el vencido hace mas
+#       tiempo arriba de todo);
+#    2. sin primera respuesta y sin SLA (vencimiento NULL) despues de los que
+#       si lo tienen. Hoy la columna es NOT NULL, asi que este escalon es una
+#       defensa para el dia que deje de serlo, no un caso que ocurra;
+#    3. al final los ya respondidos, mas nuevos primero.
+#  '-id' desempata para que la paginacion sea estable.
+#
+#  Sin 'ordering' nada de esto corre: el orden por defecto (-created_at) lo
+#  usa tambien la app movil y no cambia.
+ORDEN_VENCE_PRIMERO = "vence"
+
+
+def ordenar_por_vencimiento(queryset):
+    vence_primera_respuesta = ExpressionWrapper(
+        F("created_at")
+        + ExpressionWrapper(
+            F("sla_first_response_hours") * Value(timedelta(hours=1)),
+            output_field=DurationField(),
+        ),
+        output_field=DateTimeField(),
+    )
+    # Expresiones directas en el ORDER BY, sin 'annotate': una anotacion
+    # quedaria colgada del queryset y viajaria a los conteos y al GROUP BY del
+    # desglose por responsable, que se calculan sobre este mismo queryset.
+    ya_respondido = ExpressionWrapper(
+        Q(first_response_at__isnull=False), output_field=BooleanField()
+    )
+    vence_si_falta_responder = CasoSQL(
+        When(first_response_at__isnull=True, then=vence_primera_respuesta),
+        default=None,
+        output_field=DateTimeField(),
+    )
+    return queryset.order_by(
+        ya_respondido.asc(),
+        vence_si_falta_responder.asc(nulls_last=True),
+        "-created_at",
+        "-id",
+    )
+
+
+#  LAS PESTANAS "MIOS" Y "SIN ASIGNAR", CALCULADAS EN EL SERVIDOR  --  24/10/2026
+#  ---------------------------------------------------------------------------
+#  Hasta hoy la pantalla filtraba esas dos pestanas sobre 'cases', que es UNA
+#  PAGINA: con 25 filas por pagina, "Mios" mostraba los mios DE ESTAS 25, y el
+#  numero de la pestana y la paginacion no coincidian. Es el mismo defecto que
+#  ya explica el desglose por responsable (06/10/2026), en otra pestana.
+#
+#  'vista' NO vive en apply_case_list_filters a proposito: los conteos de las
+#  pestanas ('mios_count', 'sin_asignar_count') y los de siempre
+#  ('open_count', ...) se calculan ANTES de aplicarla, para que cada pestana
+#  muestre su numero aunque este activa otra. Solo la lista paginada (y por lo
+#  tanto 'cases_count') la lleva.
+#
+#  'mios' sale de la SESION ('yo' = request.profile), nunca de un parametro:
+#  un 'assigned_to' en la URL sigue siendo el filtro de la barra y no cambia
+#  quien soy. Las dos van por SUBCONSULTA y no por un join al M2M, por la
+#  misma razon que la mitad vieja del filtro de area: un join duplica la fila
+#  de un caso con dos responsables.
+VISTA_MIOS = "mios"
+VISTA_SIN_ASIGNAR = "sin_asignar"
+
+
+def _ids_mios(yo):
+    return Case.objects.filter(assigned_to=yo).values("pk")
+
+
+def _ids_sin_asignar():
+    return Case.objects.filter(assigned_to__isnull=True).values("pk")
+
+
+def aplicar_vista(queryset, params, yo):
+    """Filtra por la pestana pedida; cualquier otro valor no filtra nada."""
+    vista = (params.get("vista") or "").strip()
+    if vista == VISTA_MIOS:
+        if yo is None:
+            return queryset.none()
+        return queryset.filter(pk__in=_ids_mios(yo))
+    if vista == VISTA_SIN_ASIGNAR:
+        return queryset.filter(pk__in=_ids_sin_asignar())
     return queryset
 
 
@@ -373,6 +484,19 @@ class CaseListView(APIView, LimitOffsetPagination):
             ).order_by()
         ]
 
+        # Los numeros de las pestanas, sobre los ABIERTOS de la cola ya
+        # filtrada por todo lo demas y ANTES de 'vista' (ver aplicar_vista):
+        # asi "Mios 7" sigue diciendo 7 con la pestana "Sin asignar" activa.
+        context["mios_count"] = open_cases.filter(
+            pk__in=_ids_mios(self.request.profile)
+        ).count()
+        context["sin_asignar_count"] = open_cases.filter(
+            pk__in=_ids_sin_asignar()
+        ).count()
+
+        # Desde aqui, la lista que se pagina (y 'cases_count') lleva la vista.
+        queryset = aplicar_vista(queryset, params, self.request.profile)
+
         results_cases = self.paginate_queryset(queryset, self.request, view=self)
         cases = CaseSerializer(results_cases, many=True).data
 
@@ -419,6 +543,8 @@ class CaseListView(APIView, LimitOffsetPagination):
                 fields={
                     "cases_count": serializers.IntegerField(),
                     "offset": serializers.IntegerField(allow_null=True),
+                    "mios_count": serializers.IntegerField(),
+                    "sin_asignar_count": serializers.IntegerField(),
                     "cases": CaseSerializer(many=True),
                     "status": serializers.ListField(),
                     "priority": serializers.ListField(),
