@@ -13,8 +13,9 @@
     CASE_PRIORITY_LABEL,
     CASE_STATUS_LABEL
   } from '$lib/v2/enums.js';
-  import { LifeBuoy, Wrench, Receipt, Building2, Network, UserRound,
-           PackageOpen } from '@lucide/svelte';
+  import { LifeBuoy, Plus, MessageCircle, Server, PenLine } from '@lucide/svelte';
+  import { enhance } from '$app/forms';
+  import { origenDelTicket } from '$lib/v2/ticket-origen.js';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -41,7 +42,7 @@
     if (t.first_response_at) {
       const took =
         (new Date(t.first_response_at).getTime() - new Date(t.opened_at).getTime()) / 6e4;
-      return { state: 'met', label: `Cumplido en ${fmtMins(took)}`, tone: 'moss' };
+      return { state: 'met', label: `Respondido a los ${fmtMins(took)}`, tone: 'moss' };
     }
     if (!t.first_response_deadline) {
       return { state: 'none', label: 'Sin objetivo', tone: 'slate' };
@@ -50,90 +51,95 @@
     const opened = new Date(t.opened_at).getTime();
     const due = new Date(t.first_response_deadline).getTime();
     if (now >= due) {
-      return { state: 'breached', label: `${fmtMins((now - due) / 6e4)} de más`, tone: 'rust' };
+      return { state: 'breached', label: `Venció hace ${fmtMins((now - due) / 6e4)}`, tone: 'rust' };
     }
     const pct = Math.max(0, Math.min(100, Math.round(((now - opened) / (due - opened)) * 100)));
     return {
       state: 'running',
       pct,
-      label: `${fmtMins((due - now) / 6e4)} restantes`,
-      tone: pct >= 75 ? 'rust' : pct >= 50 ? 'clay' : 'slate'
+      label: `Vence en ${fmtMins((due - now) / 6e4)}`,
+      // Fibra: rojo SOLO cuando ya vencio; ambar desde el 75 %; antes, el
+      // color de accion. Hasta el 23/10/2026 se ponia rojo al 75 % sin
+      // haber vencido, y rojo dejaba de querer decir "vencido".
+      tone: pct >= 75 ? 'clay' : 'ember'
     };
   }
 
   /** @param {number} m */
   function fmtMins(m) {
     const n = Math.max(0, Math.round(m));
-    if (n < 60) return `${n}m`;
-    if (n < 1440) return `${Math.round(n / 60)}h`;
-    return `${Math.round(n / 1440)}d`;
+    if (n < 60) return `${n} min`;
+    if (n < 1440) return `${Math.round(n / 60)} h`;
+    const d = Math.round(n / 1440);
+    return d === 1 ? '1 día' : `${d} días`;
   }
 
   const TONE_VAR = {
     moss: 'var(--v2-moss)',
     rust: 'var(--v2-rust)',
     clay: 'var(--v2-clay)',
-    slate: 'var(--v2-slate)'
+    slate: 'var(--v2-slate)',
+    ember: 'var(--v2-ember)'
   };
-  /**
-   * Catalogo GENERICO de iconos. La empresa elige cual le toca a cada area
-   * (campo 'icono' de su config); la pantalla solo sabe dibujarlos.
-   *
-   * Es la misma linea que separa 'nombre' de 'etiqueta': el vocabulario es
-   * del producto, la eleccion es de la empresa. Un icono que se llamara
-   * "soporte" en vez de "llave" volveria a meter el organigrama de un ISP
-   * dentro del CSS del otro.
-   */
-  const ICONOS = {
-    llave: Wrench,
-    factura: Receipt,
-    edificio: Building2,
-    red: Network,
-    persona: UserRound,
-    caja: PackageOpen
-  };
-
-  /**
-   * Color de un area cuando su config no declara uno.
-   *
-   * Se deriva del nombre, no de la posicion en la lista: asi el color de un
-   * area no cambia porque alguien reordeno la config o declaro una nueva
-   * arriba. Un tono que baila entre recargas no sirve para reconocer nada.
-   */
-  function colorDeArea(/** @type {any} */ a) {
-    if (a.color) return a.color;
-    let h = 0;
-    for (const c of a.nombre ?? '') h = (h * 31 + c.charCodeAt(0)) % 360;
-    return `hsl(${h} 52% 46%)`;
-  }
 
   const VISTAS = [
     { clave: 'todos', etiqueta: 'Todos' },
-    { clave: 'mios', etiqueta: 'Mis asignados' },
+    { clave: 'mios', etiqueta: 'Míos' },
     { clave: 'sin_asignar', etiqueta: 'Sin asignar' }
   ];
 
   /**
-   * Cambiar de vista CONSERVA los filtros ya puestos -- se reescribe un solo
-   * parametro sobre la URL actual en vez de armar una nueva. Perder el filtro
-   * de estado por pasar a "Mis asignados" obligaria a ponerlo de nuevo cada
-   * vez, y ensena que la sub-navegacion pisa el trabajo anterior.
+   * Reescribe UN parametro sobre la URL actual y vuelve a la primera pagina.
+   * Cambiar de vista, de area o de orden CONSERVA los filtros ya puestos:
+   * perder el filtro de estado por pasar a "Míos" obligaria a ponerlo de
+   * nuevo cada vez. El 'offset' se descarta: la pagina 7 de "Todos" no existe
+   * en "Míos".
    */
-  function hrefVista(/** @type {string} */ clave) {
+  function hrefCon(/** @type {string} */ clave, /** @type {string|null} */ valor) {
     const p = new URLSearchParams(page.url.searchParams);
-    if (clave === 'todos') p.delete('vista');
-    else p.set('vista', clave);
-    return `?${p.toString()}`;
+    p.delete('offset');
+    if (valor === null) p.delete(clave);
+    else p.set(clave, valor);
+    const q = p.toString();
+    return q ? `?${q}` : '?';
   }
 
-  /** Iniciales, para un area sin icono declarado. */
-  const iniciales = (/** @type {string} */ etiqueta) =>
-    (etiqueta ?? '')
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0].toUpperCase())
-      .join('');
+  /** El nombre visible de un area interna ('soporte_tecnico' -> 'Soporte Técnico'). */
+  let etiquetaDeArea = $derived(
+    Object.fromEntries(
+      [...(data.selectorAreas ?? []), ...(data.areas ?? [])].map((/** @type {any} */ a) => [
+        a.nombre,
+        a.etiqueta
+      ])
+    )
+  );
+
+  const ORIGEN_ICONO = { whatsapp: MessageCircle, wisphub: Server, manual: PenLine };
+
+  /**
+   * Con el orden "vence primero", la cola se parte en tres tramos que se leen
+   * de un vistazo. El tramo lo decide el MISMO reloj que dibuja la barra
+   * (responsePressure, con el vencimiento que calcula el servidor), no otro
+   * calculo: si el tramo y la barra no coincidieran, la pantalla se
+   * contradiria en la misma fila. Dentro de cada tramo se respeta el orden
+   * que mando el servidor.
+   */
+  let grupos = $derived.by(() => {
+    if (data.orden !== 'vence') return [{ clave: 'todos', etiqueta: '', filas: tickets }];
+    /** @type {Record<string, any[]>} */
+    const tramos = { urg: [], aten: [], ok: [] };
+    for (const t of tickets) {
+      const p = responsePressure(t);
+      const clave = p.state === 'breached' ? 'urg'
+        : p.state === 'running' && p.pct >= 75 ? 'aten' : 'ok';
+      tramos[clave].push(t);
+    }
+    return [
+      { clave: 'urg', etiqueta: 'Vencieron', filas: tramos.urg },
+      { clave: 'aten', etiqueta: 'Por vencer', filas: tramos.aten },
+      { clave: 'ok', etiqueta: 'En plazo o respondidos', filas: tramos.ok }
+    ].filter((g) => g.filas.length);
+  });
 
   /**
    * El nombre del caso viene como "Asunto · Cliente · #id8" desde el
@@ -165,158 +171,107 @@
 
 </script>
 
-{#if !data.areaElegida}
-  <!-- La pantalla NO arranca con todos los tickets mezclados. Arranca
-       diciendo donde esta la carga, que es la pregunta que alguien se hace al
-       abrirla: ¿que area esta desbordada? Recien despues se entra a una. -->
-  <nav class="migas" aria-label="Ruta">
-    <a href="/">Inicio</a><span aria-hidden="true">›</span><span aria-current="page">Tickets</span>
-  </nav>
+<nav class="migas" aria-label="Ruta">
+  <a href="/">Inicio</a><span aria-hidden="true">›</span><span aria-current="page">Tickets</span>
+</nav>
 
-  <PageHeader title="Tickets">
-    {#snippet sub()}Elegí un área para ver su cola.{/snippet}
-  </PageHeader>
-
-  <h2 class="titulo-seccion">Tickets por área</h2>
-
-  <div class="areas-grilla">
-    {#if data.todasLasAreas}
-      <!-- 19/10/2026: la cola entera, sin filtro de area. Solo quien
-           administra la ve; un colaborador sigue viendo solo la suya. -->
-      {@const t = data.todasLasAreas}
-      <a class="area-tarjeta" href="/tickets?area={data.todas}" style="--area-color: var(--v2-slate)">
-        <span class="area-marca" aria-hidden="true"><LifeBuoy size={17} strokeWidth={1.9} /></span>
-        <span class="area-nombre">{t.etiqueta}</span>
-        <span class="area-total v2-num">{t.total}</span>
-        <span class="area-detalle">
-          <span class="marca urgente" class:hay={t.urgentes > 0}
-            >{t.urgentes} urgente{t.urgentes === 1 ? '' : 's'}</span
-          >
-          <span class="marca espera" class:hay={t.sin_respuesta > 0}
-            >{t.sin_respuesta} sin respuesta</span
-          >
-        </span>
-        {#if t.sin_asignar > 0}
-          <span class="area-sin-asignar">{t.sin_asignar} sin asignar</span>
-        {/if}
-      </a>
+<PageHeader title="Tickets">
+  {#snippet sub()}
+    {#if data.sinAreaPropia}
+      Tu usuario todavía no tiene un área asignada.
+    {:else}
+      <span class="v2-num">{count(totals.open)}</span> abiertos
+      {#if data.conteosVista?.sin_asignar != null}
+        &middot; <span class="v2-num">{count(data.conteosVista.sin_asignar)}</span> sin asignar
+      {/if}
+      &middot; <span class="v2-num">{count(totals.awaiting_reply)}</span> sin primera respuesta
     {/if}
-    {#each data.areas ?? [] as a (a.nombre)}
-      {@const Icono = ICONOS[a.icono]}
-      <a
-        class="area-tarjeta"
-        href="/tickets?area={encodeURIComponent(a.nombre)}"
-        style="--area-color: {colorDeArea(a)}"
+  {/snippet}
+  {#snippet actions()}
+    <a class="v2-btn v2-btn-primary" href="/tickets/new"><Plus /> Nuevo ticket</a>
+  {/snippet}
+</PageHeader>
+
+<!-- Approvals and Analytics were buttons in this header that went nowhere.
+     They are sibling pages, so they belong in a tab strip that also tells you
+     which one you are on. -->
+<SectionTabs set="tickets" />
+
+{#if data.sinAreaPropia}
+  <div class="aviso-sin-area">
+    <p><b>Tu usuario todavía no tiene un área asignada.</b></p>
+    <p>
+      Por eso no se muestra ninguna cola: los tickets se organizan por área, y sin
+      una definida no hay forma de saber cuáles te corresponden. Pedile a quien
+      administra la plataforma que te asigne un área desde <b>Agentes</b>.
+    </p>
+  </div>
+{:else}
+  <!-- La barra de la cola: de quien, que area, y en que orden. Las tres viajan
+       por la URL, asi un enlace a "sin asignar de Soporte, vence primero"
+       sigue diciendo lo mismo al abrirlo. -->
+  <div class="barra-cola">
+    <div class="vistas" role="group" aria-label="De quién">
+      {#each VISTAS as v (v.clave)}
+        {@const n = v.clave === 'todos' ? totals.open : data.conteosVista?.[v.clave]}
+        <a
+          class="vista"
+          href={hrefCon('vista', v.clave === 'todos' ? null : v.clave)}
+          aria-current={data.vista === v.clave ? 'page' : undefined}
+        >
+          {v.etiqueta}
+          {#if n != null}<span class="v2-num">{count(n)}</span>{/if}
+        </a>
+      {/each}
+    </div>
+
+    {#if data.soloMiArea}
+      <span class="area-fija">Área: <b>{etiquetaDeArea[data.areaElegida] ?? data.areaElegida}</b></span>
+    {:else if (data.selectorAreas ?? []).length > 1}
+      <!-- Un formulario GET y no un menu armado a mano: funciona sin JS, se
+           puede compartir el enlace que deja, y conserva los demas filtros
+           (los campos ocultos). Con JS se envia solo al elegir. -->
+      <form method="GET" class="area-form">
+        {#each [...page.url.searchParams.entries()] as [k, val] (k + val)}
+          {#if k !== 'area' && k !== 'offset'}<input type="hidden" name={k} value={val} />{/if}
+        {/each}
+        <label for="area-cola">Área</label>
+        <select
+          id="area-cola"
+          name="area"
+          class="v2-input area-select"
+          value={data.areaElegida}
+          onchange={(e) => e.currentTarget.form?.requestSubmit()}
+        >
+          {#each data.selectorAreas as a (a.nombre)}
+            <option value={a.nombre}>{a.etiqueta}{a.total != null ? ` (${a.total})` : ''}</option>
+          {/each}
+        </select>
+        <noscript><button class="v2-btn v2-btn-sm" type="submit">Ver</button></noscript>
+      </form>
+    {/if}
+
+    <div class="orden" role="group" aria-label="Orden">
+      <span class="orden-rotulo">Orden</span>
+      <a class="vista" href={hrefCon('orden', null)} aria-current={data.orden === 'vence' ? 'page' : undefined}
+        >Vence primero</a
       >
-        <span class="area-marca" aria-hidden="true">
-          {#if Icono}
-            <Icono size={17} strokeWidth={1.9} />
-          {:else}
-            <span class="area-iniciales">{iniciales(a.etiqueta)}</span>
-          {/if}
-        </span>
-        <span class="area-nombre">{a.etiqueta}</span>
-        <span class="area-total v2-num">{a.total}</span>
-        <span class="area-detalle">
-          <!-- Apagados cuando son cero: un "0 urgentes" en rojo grita algo
-               que no esta pasando. -->
-          <span class="marca urgente" class:hay={a.urgentes > 0}
-            >{a.urgentes} urgente{a.urgentes === 1 ? '' : 's'}</span
-          >
-          <span class="marca espera" class:hay={a.sin_respuesta > 0}
-            >{a.sin_respuesta} sin respuesta</span
-          >
-        </span>
-        {#if a.sin_asignar > 0}
-          <span class="area-sin-asignar">{a.sin_asignar} sin asignar</span>
-        {/if}
-      </a>
-    {/each}
+      <a class="vista" href={hrefCon('orden', 'recientes')}
+        aria-current={data.orden === 'recientes' ? 'page' : undefined}>Más recientes</a
+      >
+    </div>
   </div>
 
-  {#if data.sinAreaPropia}
-    <div class="aviso-sin-area">
-      <p><b>Tu usuario todavía no tiene un área asignada.</b></p>
-      <p>
-        Por eso no se muestra ninguna cola: los tickets se organizan por área, y sin
-        una definida no hay forma de saber cuáles te corresponden. Pedile a quien
-        administra la plataforma que te asigne un área desde <b>Agentes</b>.
-      </p>
-    </div>
-  {:else if !(data.areas ?? []).length}
-    <p class="v2-sub" style="padding:0 0 18px">
-      No se pudieron leer las áreas del asistente. Abajo está la cola sin agrupar.
-    </p>
-  {/if}
-{:else}
-  {@const actual = data.areaElegida === data.todas
-    ? data.todasLasAreas
-    : (data.areas ?? []).find((/** @type {any} */ x) => x.nombre === data.areaElegida)}
-  <nav class="migas" aria-label="Ruta">
-    <a href="/">Inicio</a><span aria-hidden="true">›</span>
-    {#if data.soloMiArea}
-      <span>Tickets</span><span aria-hidden="true">›</span>
-    {:else}
-      <a href="/tickets">Tickets</a><span aria-hidden="true">›</span>
-    {/if}
-    <span aria-current="page">{actual?.etiqueta ?? 'Área'}</span>
-  </nav>
-
-  <PageHeader title={actual?.etiqueta ?? 'Área'}>
-    {#snippet sub()}
-      <span class="v2-num">{actual?.total ?? 0}</span> en total &middot;
-      <span class="v2-num">{actual?.urgentes ?? 0}</span> urgentes &middot;
-      <span class="v2-num">{actual?.sin_asignar ?? 0}</span> sin asignar &middot;
-      <span class="v2-num">{actual?.sin_respuesta ?? 0}</span> sin respuesta
-      <!-- "Todas las áreas" no lo trae: sumado por area contaria dos veces el
-           ticket con dos responsables. -->
-      {#if actual?.en_progreso != null}
-        &middot; <span class="v2-num">{actual.en_progreso}</span> en progreso
-      {/if}
-    {/snippet}
-    {#snippet actions()}
-      {#if !data.soloMiArea}
-        <a class="v2-btn v2-btn-sm" href="/tickets">&larr; Volver a áreas</a>
-      {/if}
-    {/snippet}
-  </PageHeader>
-
-  <!-- Los tres cortes que alguien hace sobre su propia cola, y que no son un
-       filtro mas: "que me toca a mi" y "que no le toca a nadie" son las dos
-       preguntas con las que se abre el dia. Viajan por la URL para que un
-       enlace a "sin asignar de Soporte" siga diciendo lo mismo al abrirlo. -->
-  <nav class="v2-tabs sub-nav" aria-label="Vista del área">
-    {#each VISTAS as v (v.clave)}
-      <a
-        href={hrefVista(v.clave)}
-        aria-current={(page.url.searchParams.get('vista') ?? 'todos') === v.clave
-          ? 'page'
-          : undefined}
-      >
-        {v.etiqueta}
-        {#if v.clave !== 'todos' && data.conteosVista?.[v.clave]}
-          <span class="v2-tab-count v2-num">{data.conteosVista[v.clave]}</span>
-        {/if}
-      </a>
-    {/each}
-  </nav>
-{/if}
-
-{#if !data.sinAreaPropia && (data.areaElegida || !(data.areas ?? []).length)}
 {#if page.url.search}
   <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">Estos números describen la cola filtrada.</p>
 {/if}
 {#if data.deOtrasAreas > 0}
   <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">
     En esta página {data.deOtrasAreas === 1 ? 'hay 1 ticket de otra área asignado' : `hay ${data.deOtrasAreas} tickets de otra área asignados`}
-    a vos: los ves porque son tuyos, y cuentan en la tarjeta de su área.
+    a vos: los ves porque son tuyos, y cuentan en su área.
   </p>
 {/if}
 
-<!-- Approvals and Analytics were buttons in this header that went nowhere.
-     They are sibling pages, so they belong in a tab strip that also tells you
-     which one you are on. -->
-<SectionTabs set="tickets" />
 
 <FilterBar
   page="tickets"
@@ -351,121 +306,105 @@
       <table class="v2-table">
         <thead>
           <tr>
+            <!-- El plazo va PRIMERO (23/10/2026): con "vence primero" es lo que
+                 decide que se abre a continuacion. Cliente, numero y area
+                 bajaron a la segunda linea del asunto, que es donde se leen
+                 junto con lo que pide el cliente. -->
+            <th style="width:160px">Primera respuesta</th>
             <th>Asunto</th>
-            <!-- Cliente y #Ticket reemplazan a Tipo y Cuenta (07/10/2026).
-                 'Tipo' es el enum del CRM generico (Question/Incident/Problem)
-                 y un ISP no lo usa: el asunto del proveedor dice mas. 'Cuenta'
-                 decia "Sin cuenta" en TODAS las filas, porque los clientes del
-                 ISP no existen como cuentas en Dexter. Dos columnas que no
-                 informaban nada ocupando el ancho que les hace falta a estas. -->
-            <th>Cliente</th>
-            <th class="v2-r" style="width:92px">#Ticket</th>
+            <th>Origen</th>
             <th>Prioridad</th>
             <th>Estado</th>
-            <th>Asignado a</th>
-            <th class="v2-r">Antigüedad</th>
-            <th style="width:130px">Primera respuesta</th>
+            <th>Responsable</th>
           </tr>
         </thead>
         <tbody>
-          {#each tickets as t (t.id)}
-            {@const p = responsePressure(t)}
-            {@const asunto = partirAsunto(t.name)}
-            <!-- La fila entera abre el ticket, no solo el asunto: ver
-                 .v2-row-click en v2.css y el clic que no hacia nada. -->
-            <tr class="v2-row-click">
-              <td data-m="title">
-                <a class="v2-row-link" href="/tickets/{t.id}">
-                  <span class="v2-table-primary">{asunto.principal}</span>
-                </a>
-                {#if asunto.id}
-                  <span class="asunto-id">
-                    {#if asunto.cliente}{asunto.cliente} &middot; {/if}Ticket {asunto.id}
-                    &middot; WhatsApp
-                  </span>
-                {/if}
-              </td>
-              <!-- Sin 'v2-muted': estas dos son DATOS y no texto secundario.
-                   Iban en gris por haber heredado el estilo de las celdas que
-                   reemplazaron (Tipo y Cuenta), que si eran accesorias. -->
-              <td style="font-size:13px">
-                {#if t.external_client_name}
-                  {t.external_client_name}
-                {:else}
-                  <span class="v2-muted">—</span>
-                {/if}
-              </td>
-              <td class="v2-r" style="font-size:13px;font-variant-numeric:tabular-nums">
-                {#if t.external_ticket_id}
-                  {t.external_ticket_id}
-                {:else}
-                  <span class="v2-muted">—</span>
-                {/if}
-              </td>
-              <td><Pill tone={PRIORITY_TONE[t.priority]}>{CASE_PRIORITY_LABEL[t.priority] ?? t.priority}</Pill></td>
-              <!-- EL ESTADO DEL PROVEEDOR, y la divergencia cuando la hay.
-                   El equipo trabaja con los estados de WispHub (Nuevo / En
-                   Progreso / Cerrado); los de Dexter son otros y mostrarlos
-                   solos obligaba a traducir de cabeza. Pero no se reemplaza a
-                   ciegas: cuando el proveedor ya cerro y en Dexter sigue
-                   abierto --12 casos el 07/10/2026-- esa diferencia es el
-                   dato, y se dice. -->
-              <td data-m="tag">
-                {#if t.external_status}
-                  <Pill tone={CASE_STATUS_TONE[t.status]}>{t.external_status}</Pill>
-                  {#if t.status !== 'Closed' && t.external_status === 'Cerrado'}
-                    <span class="divergencia">abierto en Dexter</span>
+          {#each grupos as g (g.clave)}
+            {#if g.etiqueta}
+              <tr class="tramo" data-tramo={g.clave}>
+                <td colspan="6"><i aria-hidden="true"></i>{g.etiqueta} <span class="v2-num">{g.filas.length}</span></td>
+              </tr>
+            {/if}
+            {#each g.filas as t (t.id)}
+              {@const p = responsePressure(t)}
+              {@const asunto = partirAsunto(t.name)}
+              {@const origen = origenDelTicket(t)}
+              {@const OrigenIcono = ORIGEN_ICONO[origen.clave]}
+              <!-- La fila entera abre el ticket, no solo el asunto: ver
+                   .v2-row-click en v2.css y el clic que no hacia nada. -->
+              <tr class="v2-row-click">
+                <!-- Kept on a phone: a running first-reply clock is the one
+                     thing in this queue that decides what to open next. -->
+                <td data-m="meta">
+                  <span class="plazo-texto v2-num" style="color:{TONE_VAR[p.tone]}">{p.label}</span>
+                  {#if p.state === 'running' || p.state === 'breached'}
+                    <span class="plazo-pista" aria-hidden="true"
+                      ><i style="width:{p.state === 'breached' ? 100 : p.pct}%;background:{TONE_VAR[p.tone]}"></i></span
+                    >
                   {/if}
-                {:else}
-                  <Pill tone={CASE_STATUS_TONE[t.status]}>{CASE_STATUS_LABEL[t.status] ?? t.status}</Pill>
-                {/if}
-              </td>
-              <td data-m="hide">
-                {#if t.assignee}
-                  <!-- Con nombre, no solo la inicial: una 'D' sola no
-                       distingue a dos personas del equipo cuyo nombre empieza
-                       igual, que es justo cuando hace falta saber a quien le
-                       toca. Y si hay mas de un asignado se dice, en vez de
-                       mostrar al primero como si fuera el unico. -->
-                  <span class="asignado">
-                    <Avatar name={t.assignee} size={22} />
-                    <span class="asignado-nombre">{t.assignee}</span>
-                    {#if t.assignee_count > 1}
-                      <span class="asignado-mas">+{t.assignee_count - 1}</span>
-                    {/if}
+                </td>
+                <td data-m="title">
+                  <a class="v2-row-link" href="/tickets/{t.id}">
+                    <span class="v2-table-primary">{asunto.principal}</span>
+                  </a>
+                  <span class="asunto-id">
+                    {#if t.external_client_name || asunto.cliente}{t.external_client_name || asunto.cliente} &middot; {/if}
+                    {#if t.external_ticket_id}<span class="v2-num">#{t.external_ticket_id}</span>
+                    {:else if asunto.id}<span class="v2-num">{asunto.id}</span>{/if}
+                    {#if t.area && etiquetaDeArea[t.area]} &middot; {etiquetaDeArea[t.area]}{/if}
+                    &middot; hace {shortAge(t.opened_at)}
                   </span>
-                {:else}
-                  <span class="v2-muted" style="font-size:12.5px">Sin asignar</span>
-                {/if}
-              </td>
-              <td class="v2-r v2-num v2-muted" data-m="meta">{shortAge(t.opened_at)}</td>
-              <!-- Kept on a phone, unlike the other trailing columns: a running
-                   first-reply clock is the one thing in this queue that decides
-                   what to open next. It takes its own line so the meter has a
-                   width to fill. -->
-              <td data-m="bar">
-                {#if p.state === 'running'}
-                  <div style="display:flex;align-items:center;gap:8px">
-                    <span
-                      style="flex:1;height:4px;border-radius:3px;background:var(--v2-line);overflow:hidden;display:block"
-                    >
-                      <i
-                        style="display:block;height:100%;width:{p.pct}%;background:{TONE_VAR[
-                          p.tone
-                        ]}"
-                      ></i>
+                </td>
+                <td data-m="hide">
+                  <span class="origen" data-origen={origen.clave}><OrigenIcono size={13} />{origen.etiqueta}</span>
+                </td>
+                <td><Pill tone={PRIORITY_TONE[t.priority]}>{CASE_PRIORITY_LABEL[t.priority] ?? t.priority}</Pill></td>
+                <!-- EL ESTADO DEL PROVEEDOR, y la divergencia cuando la hay.
+                     El equipo trabaja con los estados de WispHub (Nuevo / En
+                     Progreso / Cerrado); los de Dexter son otros y mostrarlos
+                     solos obligaba a traducir de cabeza. Pero no se reemplaza a
+                     ciegas: cuando el proveedor ya cerro y en Dexter sigue
+                     abierto --12 casos el 07/10/2026-- esa diferencia es el
+                     dato, y se dice. -->
+                <td data-m="tag">
+                  {#if t.external_status}
+                    <Pill tone={CASE_STATUS_TONE[t.status]}>{t.external_status}</Pill>
+                    {#if t.status !== 'Closed' && t.external_status === 'Cerrado'}
+                      <span class="divergencia">abierto en Dexter</span>
+                    {/if}
+                  {:else}
+                    <Pill tone={CASE_STATUS_TONE[t.status]}>{CASE_STATUS_LABEL[t.status] ?? t.status}</Pill>
+                  {/if}
+                </td>
+                <td data-m="hide">
+                  {#if t.assignee}
+                    <!-- Con nombre, no solo la inicial: una 'D' sola no
+                         distingue a dos personas del equipo cuyo nombre empieza
+                         igual. Y si hay mas de un asignado se dice. -->
+                    <span class="asignado">
+                      <Avatar name={t.assignee} size={22} />
+                      <span class="asignado-nombre">{t.assignee}</span>
+                      {#if t.assignee_count > 1}
+                        <span class="asignado-mas">+{t.assignee_count - 1}</span>
+                      {/if}
                     </span>
-                    <span class="v2-num" style="font-size:11px;color:{TONE_VAR[p.tone]}"
-                      >{p.label}</span
-                    >
-                  </div>
-                {:else}
-                  <span class="v2-num" style="font-size:11.5px;color:{TONE_VAR[p.tone]}"
-                    >{p.label}</span
-                  >
-                {/if}
-              </td>
-            </tr>
+                  {:else}
+                    <span class="asignado">
+                      <span class="v2-muted" style="font-size:12.5px">Sin asignar</span>
+                      {#if data.esAdmin}
+                        <!-- Solo quien administra: el backend no deja a un
+                             colaborador tomar un caso que no es suyo. La
+                             accion vuelve a mirar el rol del lado del servidor. -->
+                        <form method="POST" action="?/asignarme" use:enhance class="asignarme">
+                          <input type="hidden" name="id" value={t.id} />
+                          <button class="v2-btn v2-btn-sm" type="submit">Asignarme</button>
+                        </form>
+                      {/if}
+                    </span>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
           {/each}
         </tbody>
       </table>
@@ -516,6 +455,142 @@
 {/if}
 
 <style>
+  /* ── la barra de la cola (23/10/2026) ──────────────────────────────── */
+  .barra-cola {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+    padding: 14px var(--v2-pad) 4px;
+  }
+  .vistas,
+  .orden {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .orden {
+    margin-left: auto;
+  }
+  .orden-rotulo {
+    font-size: 12.5px;
+    color: var(--v2-slate);
+    margin-right: 2px;
+  }
+  .vista {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid var(--v2-line-strong);
+    background: var(--v2-card);
+    color: var(--v2-ink);
+    font-size: 12.5px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .vista:hover {
+    border-color: var(--v2-ember);
+  }
+  .vista[aria-current='page'] {
+    background: var(--v2-ink);
+    border-color: var(--v2-ink);
+    color: var(--v2-paper);
+  }
+  .area-form {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--v2-slate);
+  }
+  .area-select {
+    width: auto;
+    min-height: 34px;
+    padding: 4px 10px;
+    font-size: 13px;
+  }
+  .area-fija {
+    font-size: 13px;
+    color: var(--v2-slate);
+  }
+  .area-fija b {
+    color: var(--v2-ink);
+    font-weight: 650;
+  }
+  /* Los tramos de "vence primero": una fila de cabecera por grupo, del color
+     de lo que dice. */
+  .tramo td {
+    height: auto;
+    padding: 8px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--v2-slate);
+    background: color-mix(in srgb, var(--v2-paper) 60%, var(--v2-card));
+  }
+  .tramo i {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 8px;
+    vertical-align: 1px;
+    background: currentColor;
+  }
+  .tramo[data-tramo='urg'] td {
+    color: var(--v2-rust);
+  }
+  .tramo[data-tramo='aten'] td {
+    color: var(--v2-clay);
+  }
+  .plazo-texto {
+    display: block;
+    font-size: 12px;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  .plazo-pista {
+    display: block;
+    width: 120px;
+    max-width: 100%;
+    height: 4px;
+    margin-top: 5px;
+    border-radius: 999px;
+    background: var(--v2-line-soft);
+    overflow: hidden;
+  }
+  .plazo-pista i {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+  }
+  .origen {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 650;
+    padding: 3px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+    color: var(--v2-origen-ink);
+    background: var(--v2-origen);
+  }
+  .origen[data-origen='whatsapp'] {
+    color: var(--v2-ember-text);
+    background: var(--v2-ember-soft);
+  }
+  /* Encima de la capa que hace clicable toda la fila (.v2-row-click). */
+  .asignarme {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+  }
   .pie-cola {
     display: flex;
     flex-wrap: wrap;
@@ -575,32 +650,6 @@
     color: var(--v2-slate);
     margin-top: 1px;
   }
-  /* Grilla fluida: en pantallas chicas las tarjetas se reacomodan solas, sin
-     puntos de corte escritos a mano. */
-  .areas-grilla {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(205px, 1fr));
-    gap: 12px;
-    padding: 14px 0 22px;
-  }
-  .area-tarjeta {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 14px 16px 15px;
-    border: 1px solid var(--v2-line, #e3e4e1);
-    border-radius: 10px;
-    background: var(--v2-card, #fff);
-    text-decoration: none;
-    color: inherit;
-    transition:
-      border-color 0.12s,
-      transform 0.12s;
-  }
-  .area-tarjeta:hover {
-    border-color: var(--area-color);
-    transform: translateY(-1px);
-  }
   .aviso-sin-area {
     max-width: 62ch;
     margin: 16px 0 22px;
@@ -634,67 +683,5 @@
   .migas a:hover {
     color: var(--v2-ink, #1c1f21);
     text-decoration: underline;
-  }
-  .titulo-seccion {
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--v2-slate);
-    margin: 4px 0 0;
-  }
-  .sub-nav {
-    margin-bottom: 4px;
-  }
-  /* El color del area se aplica a la marca, no a la tarjeta entera: cinco
-     tarjetas de fondo saturado compiten entre si y ninguna resalta. */
-  .area-marca {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
-    margin-bottom: 6px;
-    border-radius: 8px;
-    color: var(--area-color);
-    background: color-mix(in srgb, var(--area-color) 13%, transparent);
-  }
-  .area-iniciales {
-    font-size: 11.5px;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
-  .area-nombre {
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--v2-slate);
-  }
-  .area-total {
-    font-size: 26px;
-    font-weight: 700;
-    line-height: 1.15;
-  }
-  .area-detalle {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    font-size: 11.5px;
-    margin-top: 2px;
-  }
-  .marca {
-    color: var(--v2-slate);
-  }
-  .marca.urgente.hay {
-    color: var(--v2-rust, #e8590c);
-    font-weight: 600;
-  }
-  .marca.espera.hay {
-    color: var(--v2-clay, #a8560b);
-    font-weight: 600;
-  }
-  .area-sin-asignar {
-    font-size: 11px;
-    color: var(--v2-slate);
-    margin-top: 3px;
   }
 </style>

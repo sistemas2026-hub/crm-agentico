@@ -51,8 +51,10 @@ const AREAS = [
 const MAPA = { 'p-soporte': 'soporte_tecnico', 'p-cartera': 'cartera', 'p-admin': 'administracion' };
 
 const listTickets = vi.fn();
+const updateTicket = vi.fn();
 vi.mock('$lib/server/v2/tickets.js', () => ({
   listTickets: (...args) => listTickets(...args),
+  updateTicket: (...args) => updateTicket(...args),
   OPEN_STATUSES: ['New', 'Assigned', 'Pending'],
   FILTER_FIELDS: ['assigned_to', 'priority', 'case_type', 'sla_breached', 'tags']
 }));
@@ -65,7 +67,7 @@ vi.mock('$lib/server/v2/org-people.js', () => ({
 }));
 vi.mock('$lib/server/v2/tags.js', () => ({ getTags: async () => ({ tags: [] }) }));
 
-const { load } = await import('./+page.server.js');
+const { load, actions } = await import('./+page.server.js');
 
 /** Una fila como la deja el modelador de tickets.js. */
 function ticket(id, { area = '', assignee = null, name = 'No tiene internet' } = {}) {
@@ -278,5 +280,84 @@ describe('"Todas las áreas"', () => {
     listTickets.mockResolvedValue(respuesta());
     const data = /** @type {any} */ (await load(evento('?area=cartera')));
     expect(data.todasLasAreas).toBeNull();
+  });
+});
+
+describe('la cola nueva (23/10/2026)', () => {
+  it('quien administra abre directo en "Todas las áreas", sin las tarjetas de antes', async () => {
+    listTickets.mockResolvedValue(respuesta());
+    const data = /** @type {any} */ (await load(evento('')));
+    expect(data.areaElegida).toBe(data.todas);
+    expect(ids(data).sort()).toEqual(TODOS.map((t) => t.id).sort());
+    expect(data.selectorAreas[0]).toMatchObject({ nombre: data.todas, etiqueta: 'Todas las áreas' });
+  });
+
+  it('un colaborador abre directo en su area, y no tiene selector', async () => {
+    listTickets.mockResolvedValue(respuesta());
+    const data = /** @type {any} */ (await load(evento('', { rol: 'USER', email: 'tecnico@x.test' })));
+    expect(data.areaElegida).toBe('soporte_tecnico');
+    expect(data.selectorAreas).toEqual([]);
+  });
+
+  it('"Míos" y "Sin asignar" se le piden al servidor, y el numero de la pestaña es el suyo', async () => {
+    listTickets.mockResolvedValue({
+      ...respuesta([SUELTO_SIN_NADA]),
+      totals: { count: 1, open: 6, urgent: 0, awaiting_reply: 0, shown: 1, mine: 2, unassigned: 1 }
+    });
+    const data = /** @type {any} */ (await load(evento('?vista=sin_asignar')));
+    expect(listTickets.mock.lastCall[1].get('vista')).toBe('sin_asignar');
+    expect(data.conteosVista).toEqual({ mios: 2, sin_asignar: 1 });
+    // La pagina NO se vuelve a filtrar en el navegador: lo que mando el API es lo que hay.
+    expect(ids(data)).toEqual(['suelto']);
+  });
+
+  it('el orden por defecto es "vence primero"; "Más recientes" se pide por la URL', async () => {
+    listTickets.mockResolvedValue(respuesta());
+    await load(evento(''));
+    expect(listTickets.mock.lastCall[1].get('ordering')).toBe('vence');
+    await load(evento('?orden=recientes'));
+    expect(listTickets.mock.lastCall[1].get('ordering')).toBe('-created_at');
+  });
+
+  it('dentro de un area, el selector cuenta todas las areas con una consulta sin filtro de area', async () => {
+    listTickets.mockReset();
+    listTickets.mockResolvedValue(respuesta());
+    const data = /** @type {any} */ (await load(evento('?area=cartera')));
+    expect(listTickets).toHaveBeenCalledTimes(2);
+    const global = listTickets.mock.calls[0][1];
+    expect(global.has('area')).toBe(false);
+    expect(global.get('limit')).toBe('1');
+    expect(listTickets.mock.lastCall[1].get('area')).toBe('cartera');
+    const soporte = data.selectorAreas.find((a) => a.nombre === 'soporte_tecnico');
+    expect(soporte.total).toBe(3);
+  });
+});
+
+describe('"Asignarme"', () => {
+  /** @param {string} rol */
+  function pedido(rol) {
+    const fd = new FormData();
+    fd.set('id', 'caso-1');
+    return /** @type {any} */ ({
+      request: { formData: async () => fd },
+      cookies: { get: () => 'token' },
+      locals: { profile: { role: rol }, user: { email: 'admin@x.test' } }
+    });
+  }
+
+  it('asigna a quien esta en la SESION, con un id y no una lista', async () => {
+    updateTicket.mockReset();
+    updateTicket.mockResolvedValue({});
+    const r = await actions.asignarme(pedido('ADMIN'));
+    expect(r).toEqual({ asignado: 'caso-1' });
+    expect(updateTicket.mock.lastCall[1]).toBe('caso-1');
+    expect(updateTicket.mock.lastCall[2]).toEqual({ assigned_to: 'p-admin' });
+  });
+
+  it('un colaborador no puede, aunque mande el formulario a mano', async () => {
+    updateTicket.mockReset();
+    const r = /** @type {any} */ (await actions.asignarme(pedido('USER')));
+    expect(r.status).toBe(403);
+    expect(updateTicket).not.toHaveBeenCalled();
   });
 });

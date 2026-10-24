@@ -1,4 +1,5 @@
-import { listTickets, OPEN_STATUSES, FILTER_FIELDS } from '$lib/server/v2/tickets.js';
+import { fail } from '@sveltejs/kit';
+import { listTickets, updateTicket, OPEN_STATUSES, FILTER_FIELDS } from '$lib/server/v2/tickets.js';
 import { readFilters, buildFilterQuery } from '$lib/server/v2/filter-params.js';
 import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
 import { getTags } from '$lib/server/v2/tags.js';
@@ -126,6 +127,31 @@ export async function load({ cookies, url, locals, fetch }) {
     else if (areaElegida && areaElegida !== miArea) areaElegida = miArea;
   }
 
+  //  LA PANTALLA ABRE EN LA COLA, NO EN LAS TARJETAS  --  23/10/2026
+  //
+  //  Hasta hoy, sin area en la URL se mostraban tarjetas por area y hacia
+  //  falta un clic mas para ver un solo ticket. Desde el rediseño de Tickets
+  //  abre directo en la cola: quien administra, en "Todas las áreas"; un
+  //  colaborador, en la suya. El "¿cuántos tiene cada area?" no se pierde:
+  //  viaja como el numero de cada opcion del selector de area (`areasSelector`
+  //  abajo). Quien no tiene area propia sigue sin cola -- fail-closed, igual
+  //  que antes --.
+  if (!areaElegida && !sinAreaPropia) areaElegida = soloMiArea ? miArea : TODAS_LAS_AREAS;
+
+  //  LA VISTA Y EL ORDEN SE LOS PIDE AL SERVIDOR  --  23/10/2026
+  //
+  //  "Mis asignados" y "Sin asignar" se filtraban aca, sobre las 25 filas que
+  //  ya habian llegado: la pestaña decia un numero y la tabla mostraba otro, y
+  //  la paginacion contaba la cola entera. Ahora viajan como `vista` y el API
+  //  toma a la persona de la SESION (nunca de un parametro).
+  //  El orden por defecto es "vence primero": los que todavia no tienen
+  //  primera respuesta, el que vence antes arriba. Con 735 abiertos y el orden
+  //  por fecha, los vencidos quedaban repartidos en 24 paginas.
+  const vista = url.searchParams.get('vista') ?? 'todos';
+  if (vista === 'mios' || vista === 'sin_asignar') params.set('vista', vista);
+  const orden = url.searchParams.get('orden') === 'recientes' ? 'recientes' : 'vence';
+  params.set('ordering', orden === 'vence' ? 'vence' : '-created_at');
+
   //  EL FILTRO DE AREA VIAJA AL SERVIDOR  --  07/10/2026, reescrito el 16/10/2026
   //
   //  Sin esto la tabla mostraba las 25 filas mas recientes de TODA la cola y
@@ -164,7 +190,27 @@ export async function load({ cookies, url, locals, fetch }) {
     if (soloMiArea) params.set('incluir_mios', '1');
   }
 
-  const { results, totals, openByAssignee } = await listTickets({ cookies }, params);
+  //  EL SELECTOR DE AREA LLEVA EL NUMERO DE CADA UNA  --  23/10/2026
+  //
+  //  Reemplaza a las tarjetas del inicio. Esos numeros salen de la cola SIN
+  //  filtro de area; dentro de un area concreta la respuesta principal ya
+  //  viene recortada (las demas darian cero), asi que quien administra pide
+  //  aparte el desglose de toda la cola: `limit=1`, solo los conteos. Va
+  //  PRIMERO a proposito, en paralelo: la llamada principal sigue siendo la
+  //  ultima. Un colaborador no lo necesita -- ve una sola area --.
+  const dentroDeUnArea = Boolean(areaEfectiva) && areaEfectiva !== TODAS_LAS_AREAS
+    && areaEfectiva !== SIN_AREA;
+  const paramsGlobal = new URLSearchParams(params);
+  for (const clave of ['area', 'area_responsables', 'incluir_mios', 'vista', 'offset']) {
+    paramsGlobal.delete(clave);
+  }
+  paramsGlobal.set('limit', '1');
+  const [global, { results, totals, openByAssignee }] = await Promise.all([
+    !soloMiArea && dentroDeUnArea
+      ? listTickets({ cookies }, paramsGlobal).catch(() => null)
+      : Promise.resolve(null),
+    listTickets({ cookies }, params)
+  ]);
 
   /**
    * El area de un caso: la escrita en el caso, y si no la tiene, la de su
@@ -226,18 +272,20 @@ export async function load({ cookies, url, locals, fetch }) {
     ? deLaArea.filter((/** @type {any} */ t) => t.area !== miArea).length
     : 0;
 
-  // Los dos cortes de la sub-navegacion. Se cuentan sobre la cola del area
-  // YA elegida y no sobre todo el CRM: el numero al lado de "Sin asignar"
-  // tiene que ser el que se va a ver al pulsarlo.
+  // Los dos cortes de la sub-navegacion. Los cuenta el API sobre la cola del
+  // area ya elegida y ANTES de la vista, asi cada pestaña dice cuantos va a
+  // mostrar al pulsarla (`totals.mine` / `totals.unassigned`). Si el API no
+  // los manda --una version vieja-- se vuelve a la cuenta sobre la pagina, que
+  // es lo que habia, en vez de mostrar un cero inventado.
   const sinAsignar = (/** @type {any} */ t) => !t.assignee_count;
-  const conteosVista = {
-    mios: deLaArea.filter(mios).length,
-    sin_asignar: deLaArea.filter(sinAsignar).length
-  };
+  const delServidor = totals.mine !== null && totals.unassigned !== null;
+  const conteosVista = delServidor
+    ? { mios: totals.mine, sin_asignar: totals.unassigned }
+    : { mios: deLaArea.filter(mios).length, sin_asignar: deLaArea.filter(sinAsignar).length };
 
-  const vista = url.searchParams.get('vista') ?? 'todos';
-  const visibles =
-    vista === 'mios' ? deLaArea.filter(mios)
+  const visibles = delServidor
+    ? deLaArea
+    : vista === 'mios' ? deLaArea.filter(mios)
     : vista === 'sin_asignar' ? deLaArea.filter(sinAsignar)
     : deLaArea;
 
@@ -284,8 +332,26 @@ export async function load({ cookies, url, locals, fetch }) {
       n === null ? null : { n, url: enlaceAPagina(url, n, porPagina), actual: n === base.pagina })
   };
 
+  //  Las opciones del selector: "Todas las áreas" (solo quien administra) y
+  //  cada area con su numero de abiertos, sobre la cola entera. Un colaborador
+  //  ve solo la suya, sin selector. `total` null = no se pudo contar.
+  const desgloseGlobal = global ? global.openByAssignee : openByAssignee;
+  const totalGlobal = global ? global.totals.open : totals.open;
+  const resumenGlobal = global ? resumenPorArea(desgloseGlobal, areas, areaPorPersona) : resumen;
+  const selectorAreas = soloMiArea
+    ? []
+    : [
+        { nombre: TODAS_LAS_AREAS, etiqueta: 'Todas las áreas', total: totalGlobal },
+        ...(resumenGlobal ?? []).map((/** @type {any} */ a) => ({
+          nombre: a.nombre, etiqueta: a.etiqueta, total: a.total
+        }))
+      ];
+
   return {
     areas: areasVisibles,
+    selectorAreas,
+    orden,
+    esAdmin,
     paginacion,
     //  false = el desglose no llego, asi que 'areas' esta vacio porque no se
     //  pudo contar, no porque no haya tickets. Son dos pantallas distintas.
@@ -317,3 +383,30 @@ export async function load({ cookies, url, locals, fetch }) {
     meId
   };
 }
+
+/** @type {import('./$types').Actions} */
+export const actions = {
+  //  "ASIGNARME" DESDE LA COLA  --  23/10/2026
+  //
+  //  Solo para quien administra: el backend no le deja a un colaborador ver ni
+  //  escribir un caso que no es suyo (cases/access.py), asi que el boton solo
+  //  aparece para un ADMIN. Aca se vuelve a mirar el rol -- la pantalla no es
+  //  la que decide --, y la persona sale de la SESION, nunca del formulario.
+  asignarme: async ({ request, cookies, locals }) => {
+    if (/** @type {any} */ (locals).profile?.role !== 'ADMIN') {
+      return fail(403, { error: 'Solo quien administra asigna desde la cola.' });
+    }
+    const id = String((await request.formData()).get('id') ?? '');
+    if (!id) return fail(400, { error: 'Falta el ticket.' });
+    const { people } = await getOrgPeopleAndTeams(cookies);
+    const yo = resolveMe(people, /** @type {any} */ (locals).user?.email);
+    if (!yo) return fail(400, { error: 'No se encontró tu perfil en la organización.' });
+    try {
+      //  Un id, no una lista: toBody() de tickets.js ya lo envuelve.
+      await updateTicket({ cookies }, id, { assigned_to: yo });
+    } catch {
+      return fail(400, { error: 'No se pudo asignar el ticket.' });
+    }
+    return { asignado: id };
+  }
+};

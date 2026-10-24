@@ -173,7 +173,9 @@ function toRow(row) {
 export const FILTER_FIELDS = ['assigned_to', 'priority', 'case_type', 'sla_breached', 'tags'];
 
 /**
- * The queue, newest first.
+ * The queue. Newest first unless the caller asks for `ordering=vence`
+ * (first-response deadline first), which is what the screen asks for by
+ * default since 23/10/2026.
  *
  * `slim=true` drops the account and contact catalogues the endpoint used to
  * attach to every list response. They are for the form, not the queue, and
@@ -213,6 +215,14 @@ export async function listTickets({ cookies }, params) {
       open: response.open_count ?? 0,
       urgent: response.urgent_count ?? 0,
       awaiting_reply: response.awaiting_first_reply ?? 0,
+      //  Las dos pestanas "Mios" y "Sin asignar", contadas por la API sobre la
+      //  cola filtrada ANTES de aplicar la vista (23/10/2026). Hasta ese dia se
+      //  contaban en el navegador sobre las 25 filas de la pagina, y el numero
+      //  de la pestana no coincidia con lo que habia. `null` si la API no las
+      //  manda: no se sabe, que no es cero.
+      mine: typeof response.mios_count === 'number' ? response.mios_count : null,
+      unassigned:
+        typeof response.sin_asignar_count === 'number' ? response.sin_asignar_count : null,
       shown: rows.length
     }
   };
