@@ -9,6 +9,7 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
+import { reparteTickets } from '$lib/v2/roles.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ locals, cookies, params, fetch }) {
@@ -21,7 +22,9 @@ export async function load({ locals, cookies, params, fetch }) {
     getTicket({ cookies }, params.id),
     getOrgPeopleAndTeams(cookies)
   ]);
-  const esAdmin = /** @type {any} */ (locals)?.profile?.role === 'ADMIN';
+  //  Quien reparte (ADMIN, SUPERVISOR, OPERACIONES), no solo ADMIN: ver
+  //  lib/v2/roles.js y cases/access.py::reparte_tickets.
+  const reparte = reparteTickets(/** @type {any} */ (locals)?.profile?.role);
 
   // El area del caso, para el panel lateral. Misma regla que la cola
   // (areaDelCaso): la escrita en el caso manda, y la de la persona asignada
@@ -95,7 +98,7 @@ export async function load({ locals, cookies, params, fetch }) {
     // Quien puede reasignar desde el encabezado. El backend solo deja a un
     // admin ver y escribir casos ajenos; un colaborador ve al responsable sin
     // control, en vez de un selector que el API le iba a rechazar.
-    esAdmin,
+    reparte,
     // Solo id y nombre: el selector no necesita el correo de nadie.
     personas: gente.people.map((p) => ({ id: p.id, name: p.name })),
     yo: resolveMe(gente.people, /** @type {any} */ (locals)?.user?.email),
@@ -282,8 +285,8 @@ export const actions = {
    * desde la sesion, con la misma regla que los presets "Mios" (resolveMe).
    */
   asignar: async ({ cookies, params, request, locals }) => {
-    if (/** @type {any} */ (locals)?.profile?.role !== 'ADMIN') {
-      return fail(403, { error: 'Solo un administrador puede reasignar un ticket desde acá.' });
+    if (!reparteTickets(/** @type {any} */ (locals)?.profile?.role)) {
+      return fail(403, { error: 'Solo quien reparte el trabajo puede reasignar un ticket desde acá.' });
     }
     const form = await request.formData();
     const { people } = await getOrgPeopleAndTeams(cookies);

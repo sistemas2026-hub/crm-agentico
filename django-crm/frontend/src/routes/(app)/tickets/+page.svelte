@@ -391,9 +391,10 @@
                   {:else}
                     <span class="asignado">
                       <span class="v2-muted" style="font-size:12.5px">Sin asignar</span>
-                      {#if data.esAdmin}
-                        <!-- Solo quien administra: el backend no deja a un
-                             colaborador tomar un caso que no es suyo. La
+                      {#if data.reparte}
+                        <!-- Solo quien reparte (admin, supervisión,
+                             operaciones): el backend no deja a un
+                             colaborador comun tomar un caso que no es suyo. La
                              accion vuelve a mirar el rol del lado del servidor. -->
                         <form method="POST" action="?/asignarme" use:enhance class="asignarme">
                           <input type="hidden" name="id" value={t.id} />

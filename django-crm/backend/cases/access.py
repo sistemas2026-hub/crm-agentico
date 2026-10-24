@@ -17,12 +17,22 @@ when the verbs disagree by accident it is a mistake, not a policy.
 Where they disagree *on purpose*, they now say so. Reading, writing and
 deleting are three rules on three lines, deliberately not one:
 
-    read    admin · creator · assignee · watcher
-    write   admin · creator · assignee
+    read    admin · reparte · creator · assignee · watcher
+    write   admin · reparte · creator · assignee
     delete  admin · creator
 
 Watching is subscribing to a ticket, not being handed the keys to it, so the
 watcher clause that was missing from reads is not quietly added to writes.
+
+QUIEN REPARTE (23/10/2026)
+--------------------------
+"reparte" son los roles de gestion: ADMIN, SUPERVISOR y OPERACIONES, los
+mismos que ya despachan cuadrillas y validan ordenes en campo y en el
+Supervisor NOC (campo/permissions.py, operaciones/permissions.py). Hasta ese
+dia solo ADMIN veia la cola entera: un supervisor que reparte trabajo en la
+calle no podia ver un ticket sin asignar, y con 212 de 735 sin responsable el
+reparto esperaba a una sola persona. Ver y escribir, si; BORRAR, no: eso sigue
+siendo de admin o de quien lo creo.
 """
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -41,6 +51,17 @@ from common.permissions import is_org_admin  # noqa: F401
 
 _DENIED = "You do not have Permission to perform this action"
 
+ROLES_QUE_REPARTEN = frozenset({"ADMIN", "SUPERVISOR", "OPERACIONES"})
+
+
+def reparte_tickets(profile):
+    """Si ``profile`` reparte el trabajo: ve la cola entera y asigna.
+
+    ``None`` no reparte (una vista sin contexto de organizacion da 403 y no
+    500), igual que ``is_org_admin``.
+    """
+    return profile is not None and getattr(profile, "role", None) in ROLES_QUE_REPARTEN
+
 
 def visible_cases_qs(profile):
     """Cases ``profile`` is allowed to open. The queryset form of `read`.
@@ -49,7 +70,7 @@ def visible_cases_qs(profile):
     they are unassigned, and it is the clause the detail view was missing.
     """
     qs = Case.objects.filter(org=profile.org)
-    if is_org_admin(profile):
+    if is_org_admin(profile) or reparte_tickets(profile):
         return qs
     return qs.filter(
         Q(created_by=profile.user) | Q(assigned_to=profile) | Q(watchers=profile)
@@ -82,7 +103,7 @@ def has_case_read_access(profile, case):
 
 def has_case_write_access(profile, case):
     """Non-raising form of `write`."""
-    if is_org_admin(profile):
+    if is_org_admin(profile) or reparte_tickets(profile):
         return True
     if profile.user_id == case.created_by_id:
         return True

@@ -424,7 +424,7 @@
          cualquier otro, el nombre y nada mas: el backend solo deja a un
          admin escribir casos ajenos, y un selector que el API iba a rechazar
          es un control que miente. -->
-    {#if data.esAdmin}
+    {#if data.reparte}
       <form method="POST" action="?/asignar" use:enhance={asignar} class="asignar">
         <label for="f-asignar">Responsable</label>
         <select id="f-asignar" name="persona" class="v2-input" value={ticket.assignee_id ?? ''}>

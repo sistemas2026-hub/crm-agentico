@@ -106,7 +106,7 @@ describe('load: estadoConversacion', () => {
 
   it('un colaborador no recibe el control de asignar; los nombres si, sin correos', async () => {
     const { datos } = await cargar(ok({ conversacion: null }));
-    expect(datos.esAdmin).toBe(false);
+    expect(datos.reparte).toBe(false);
     expect(datos.yo).toBe('p-tec');
     expect(datos.personas).toEqual([
       { id: 'p-admin', name: 'Ana Admin' },

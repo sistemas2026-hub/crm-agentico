@@ -40,6 +40,7 @@ from cases.access import (
     get_case_or_404,
     has_case_write_access,
     is_org_admin,
+    reparte_tickets,
     visible_cases_qs,
 )
 from cases.models import Case, ReopenPolicy, Solution
@@ -404,7 +405,11 @@ class CaseListView(APIView, LimitOffsetPagination):
                 Q(created_by=self.request.profile.user)
                 | Q(assigned_to=self.request.profile)
             ).distinct()
-            profiles = profiles.filter(role="ADMIN")
+            #  Quien reparte (SUPERVISOR, OPERACIONES) necesita a toda la gente
+            #  para asignar, no solo a los admins (23/10/2026). A un colaborador
+            #  comun se le siguen ofreciendo solo admins, como antes.
+            if not reparte_tickets(self.request.profile):
+                profiles = profiles.filter(role="ADMIN")
 
         queryset = apply_case_list_filters(queryset, params,
                                            yo=self.request.profile)

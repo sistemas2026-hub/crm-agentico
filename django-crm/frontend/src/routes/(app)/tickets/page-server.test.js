@@ -292,6 +292,15 @@ describe('la cola nueva (23/10/2026)', () => {
     expect(data.selectorAreas[0]).toMatchObject({ nombre: data.todas, etiqueta: 'Todas las áreas' });
   });
 
+  it('un supervisor ve la cola entera como quien administra, con selector', async () => {
+    listTickets.mockResolvedValue(respuesta());
+    const data = /** @type {any} */ (await load(evento('', { rol: 'SUPERVISOR', email: 'admin@x.test' })));
+    expect(data.areaElegida).toBe(data.todas);
+    expect(data.soloMiArea).toBe(false);
+    expect(data.reparte).toBe(true);
+    expect(data.selectorAreas.length).toBeGreaterThan(1);
+  });
+
   it('un colaborador abre directo en su area, y no tiene selector', async () => {
     listTickets.mockResolvedValue(respuesta());
     const data = /** @type {any} */ (await load(evento('', { rol: 'USER', email: 'tecnico@x.test' })));
@@ -352,6 +361,13 @@ describe('"Asignarme"', () => {
     expect(r).toEqual({ asignado: 'caso-1' });
     expect(updateTicket.mock.lastCall[1]).toBe('caso-1');
     expect(updateTicket.mock.lastCall[2]).toEqual({ assigned_to: 'p-admin' });
+  });
+
+  it('un supervisor tambien reparte: puede asignarse (23/10/2026)', async () => {
+    updateTicket.mockReset();
+    updateTicket.mockResolvedValue({});
+    const r = await actions.asignarme(pedido('SUPERVISOR'));
+    expect(r).toEqual({ asignado: 'caso-1' });
   });
 
   it('un colaborador no puede, aunque mande el formulario a mano', async () => {

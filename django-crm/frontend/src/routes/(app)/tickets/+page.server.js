@@ -1,4 +1,5 @@
 import { fail } from '@sveltejs/kit';
+import { reparteTickets } from '$lib/v2/roles.js';
 import { listTickets, updateTicket, OPEN_STATUSES, FILTER_FIELDS } from '$lib/server/v2/tickets.js';
 import { readFilters, buildFilterQuery } from '$lib/server/v2/filter-params.js';
 import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
@@ -106,9 +107,12 @@ export async function load({ cookies, url, locals, fetch }) {
   // se la asignaron, o el asistente no respondio y no hay con que resolverla
   // -- no ve NINGUNA cola. Al reves (mostrar todo mientras no se sepa) el
   // hueco se abre justo en el caso que esto existe para cerrar.
-  const esAdmin = /** @type {any} */ (locals).profile?.role === 'ADMIN';
+  //  "Quien reparte" y no solo ADMIN desde el 23/10/2026: SUPERVISOR y
+  //  OPERACIONES ven la cola entera y asignan, como en campo (lib/v2/roles.js,
+  //  espejo de cases/access.py::reparte_tickets).
+  const reparte = reparteTickets(/** @type {any} */ (locals).profile?.role);
   const miArea = meId ? areaPorPersona[meId] : '';
-  const soloMiArea = !esAdmin;
+  const soloMiArea = !reparte;
   const sinAreaPropia = soloMiArea && !miArea;
 
   let areaElegida = url.searchParams.get('area') ?? '';
@@ -351,7 +355,7 @@ export async function load({ cookies, url, locals, fetch }) {
     areas: areasVisibles,
     selectorAreas,
     orden,
-    esAdmin,
+    reparte,
     paginacion,
     //  false = el desglose no llego, asi que 'areas' esta vacio porque no se
     //  pudo contar, no porque no haya tickets. Son dos pantallas distintas.
@@ -388,13 +392,13 @@ export async function load({ cookies, url, locals, fetch }) {
 export const actions = {
   //  "ASIGNARME" DESDE LA COLA  --  23/10/2026
   //
-  //  Solo para quien administra: el backend no le deja a un colaborador ver ni
-  //  escribir un caso que no es suyo (cases/access.py), asi que el boton solo
-  //  aparece para un ADMIN. Aca se vuelve a mirar el rol -- la pantalla no es
+  //  Solo para quien reparte (ADMIN, SUPERVISOR, OPERACIONES): el backend no
+  //  le deja a un colaborador comun ver ni escribir un caso que no es suyo
+  //  (cases/access.py), asi que el boton solo aparece para esos roles. Aca se vuelve a mirar el rol -- la pantalla no es
   //  la que decide --, y la persona sale de la SESION, nunca del formulario.
   asignarme: async ({ request, cookies, locals }) => {
-    if (/** @type {any} */ (locals).profile?.role !== 'ADMIN') {
-      return fail(403, { error: 'Solo quien administra asigna desde la cola.' });
+    if (!reparteTickets(/** @type {any} */ (locals).profile?.role)) {
+      return fail(403, { error: 'Solo quien reparte el trabajo asigna desde la cola.' });
     }
     const id = String((await request.formData()).get('id') ?? '');
     if (!id) return fail(400, { error: 'Falta el ticket.' });
