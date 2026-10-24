@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-La vista previa del armado de la jornada  --  21/10/2026.
+Las vistas previas del Supervisor: lo que haria, sin escribir nada.
 
-``GET /api/operaciones/jornada/vista-previa/?fecha=AAAA-MM-DD`` devuelve lo
-que armaria el Supervisor ese dia, sin escribir nada. Ver
+``GET /api/operaciones/jornada/vista-previa/?fecha=AAAA-MM-DD`` (21/10/2026)
+devuelve lo que armaria ese dia. Ver
 `operaciones.armado_de_jornadas.vista_previa`.
+
+``GET /api/operaciones/ordenes/vista-previa/`` (23/10/2026) devuelve que
+ordenes crearia ahora en la cola de Despacho, y por que no las otras. Ver
+`operaciones.ordenes_de_despacho.decidir`.
 
 Modulo propio y no `views.py`: ese archivo es de los de superficie de conflicto
 alta (CLAUDE.md §2), y esto es una lectura sola.
@@ -39,3 +43,15 @@ class VistaPreviaDeLaJornadaView(APIView):
         else:
             fecha = _ahora_local(request.org).date()
         return Response(vista_previa(request.org, fecha))
+
+
+class VistaPreviaDeLasOrdenesView(APIView):
+    """Que ordenes crearia el Supervisor ahora. No crea ninguna, no guarda
+    nada y no le pregunta al motor: todo sale de lo ya guardado."""
+
+    permission_classes = [EsJefeDeOperaciones]
+
+    def get(self, request):
+        from operaciones.ordenes_de_despacho import decidir
+
+        return Response(decidir(request.org))

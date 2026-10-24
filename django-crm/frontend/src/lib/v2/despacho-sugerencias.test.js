@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fechaSugerida, prioridadSugerida } from './despacho-sugerencias.js';
+import { fechaSugerida } from './despacho-sugerencias.js';
 
 //  Las fechas se arman con el constructor LOCAL, igual que la función: la
 //  prueba no depende de la zona horaria de la máquina que la corre.
@@ -32,25 +32,5 @@ describe('«para cuándo»: creación del ticket + plazo de la plantilla', () =>
     expect(fechaSugerida(creado, undefined, hoy)).toBe('');
     expect(fechaSugerida(null, 3, hoy)).toBe('');
     expect(fechaSugerida('no es fecha', 3, hoy)).toBe('');
-  });
-});
-
-describe('prioridad: la del Supervisor, con el corte de la bandeja', () => {
-  it('menor es más urgente', () => {
-    expect(prioridadSugerida(14)).toBe('alta');
-    expect(prioridadSugerida(40)).toBe('media');
-    expect(prioridadSugerida(80)).toBe('baja');
-  });
-
-  it('los bordes son los de Pendientes (33 y 66)', () => {
-    expect(prioridadSugerida(33)).toBe('alta');
-    expect(prioridadSugerida(34)).toBe('media');
-    expect(prioridadSugerida(66)).toBe('media');
-    expect(prioridadSugerida(67)).toBe('baja');
-  });
-
-  it('sin número no propone nada', () => {
-    expect(prioridadSugerida(null)).toBe('');
-    expect(prioridadSugerida(undefined)).toBe('');
   });
 });

@@ -292,6 +292,32 @@ def test_j_trae_la_creacion_y_la_prioridad_del_supervisor(
     assert d["creado"].startswith(caso.created_at.date().isoformat())
 
 
+def test_j2_la_prioridad_sugerida_es_la_del_supervisor_al_crear(
+        admin_client, org_a, ficha_del_motor):
+    """23/10/2026: el boton sugiere la prioridad con la MISMA regla con la
+    que el Supervisor crea la orden -- el plazo de la plantilla sugerida."""
+    import datetime as dt
+
+    from cases.models import Case
+    from django.utils import timezone
+
+    _plantilla(org_a, "traslado", "Traslado", asuntos=["Cambio De Domicilio"],
+               plazo=5)
+    vencido = _caso(org_a, name="Cambio De Domicilio")
+    a_tiempo = _caso(org_a, name="Cambio De Domicilio")
+    Case.objects.filter(pk=vencido.pk).update(
+        created_at=timezone.now() - dt.timedelta(days=6))
+    #  Tres dias esperando, pero con cinco de plazo: por la espera seria alta,
+    #  por el plazo (vence en dos dias) es baja. Manda el plazo.
+    Case.objects.filter(pk=a_tiempo.pk).update(
+        created_at=timezone.now() - dt.timedelta(days=3))
+    for c in (vencido, a_tiempo):
+        _propuesta(org_a, c)
+
+    assert admin_client.get(_ruta(vencido)).json()["prioridad_sugerida"] == "alta"
+    assert admin_client.get(_ruta(a_tiempo)).json()["prioridad_sugerida"] == "baja"
+
+
 def test_k_la_lista_de_plantillas_trae_el_plazo(admin_client, org_a):
     _plantilla(org_a, "traslado", "Traslado", plazo=3)
     p = admin_client.get("/api/campo/plantillas-de-trabajo/").json()["plantillas"][0]

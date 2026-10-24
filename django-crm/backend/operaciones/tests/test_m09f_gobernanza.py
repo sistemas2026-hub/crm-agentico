@@ -1042,6 +1042,14 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  nueva, y el lector del motor reemplazado por uno que
                        #  revienta si se lo llama. Exige 'EsJefeDeOperaciones'.
                        "jornada-vista-previa",
+                       #  23/10/2026. 'ordenes-vista-previa', tambien un **GET**:
+                       #  que ordenes crearia el Supervisor en la cola de
+                       #  Despacho (`ordenes_de_despacho.decidir`). NO ESCRIBE NI
+                       #  UNA FILA y no le pregunta nada al motor: lo afirma
+                       #  test_el_supervisor_crea_las_ordenes.py::test_n_*, con
+                       #  el lector del motor reemplazado por uno que revienta.
+                       #  Exige 'EsJefeDeOperaciones'.
+                       "ordenes-vista-previa",
                        #  LOTE 1, paso P11 (05/10/2026). 'supervisor-turno' es
                        #  el relevo de turno, y es de las faciles de declarar:
                        #  es un **GET**.

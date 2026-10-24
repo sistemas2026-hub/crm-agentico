@@ -14,7 +14,7 @@
   import { page } from '$app/state';
   import { untrack } from 'svelte';
   import { paginacion } from '$lib/v2/supervisor-noc-tablero.js';
-  import { fechaSugerida, prioridadSugerida } from '$lib/v2/despacho-sugerencias.js';
+  import { fechaSugerida } from '$lib/v2/despacho-sugerencias.js';
   import '../supervisor-noc.css';
 
   let { data, form } = $props();
@@ -97,6 +97,34 @@
     { id: 'media', texto: 'Media' },
     { id: 'baja', texto: 'Baja' }
   ];
+
+  /**
+   * QUÉ CREARÍA EL SUPERVISOR  --  23/10/2026 (Fase 2.3, entrega 1).
+   *
+   * Antes de que el Supervisor cree órdenes solo, se ve qué crearía con esta
+   * cola y por qué no las otras. Se pide al tocar el botón, no al abrir: la
+   * pantalla no tiene por qué pagarla cada vez.
+   */
+  let ordenesPrevia = $state(/** @type {any} */ (null));
+  let cargandoOrdenes = $state(false);
+  let errorOrdenes = $state('');
+  async function verOrdenesPrevia() {
+    cargandoOrdenes = true;
+    errorOrdenes = '';
+    try {
+      const r = await fetch('/supervisor-noc/despacho/vista-previa');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'No se pudo calcular.');
+      ordenesPrevia = d;
+    } catch (/** @type {any} */ e) {
+      ordenesPrevia = null;
+      errorOrdenes = e?.message || 'No se pudo calcular.';
+    } finally {
+      cargandoOrdenes = false;
+    }
+  }
+  /** @param {string} id */
+  const textoDePrioridad = (id) => PRIORIDADES.find((p) => p.id === id)?.texto ?? id;
   let prioridadElegida = $state('media');
 
   /**
@@ -254,11 +282,12 @@
         propuesto.plantilla = '';
       }
       sinPlantillaPorque = sugerida ? '' : (ficha.plantilla_motivo ?? '');
-      //  LA PRIORIDAD, la del Supervisor leída con el corte de Pendientes.
-      const prioridad = prioridadSugerida(ficha.prioridad_supervisor);
-      if (prioridad) {
-        prioridadElegida = prioridad;
-        propuesto.prioridad = `la del Supervisor (${ficha.prioridad_supervisor}; menor es más urgente)`;
+      //  LA PRIORIDAD, con la MISMA regla que usa el Supervisor cuando crea la
+      //  orden solo (23/10/2026): el plazo de la plantilla sugerida y, si no
+      //  tiene, la espera del ticket. La calcula el backend.
+      if (['alta', 'media', 'baja'].includes(ficha.prioridad_sugerida)) {
+        prioridadElegida = ficha.prioridad_sugerida;
+        propuesto.prioridad = 'por el plazo de la plantilla y lo que lleva esperando el ticket';
       }
       proponerFecha();
       if (!barrio && despachando.localidad) barrio = despachando.localidad;
@@ -349,6 +378,96 @@
         </section>
       {/if}
 
+      <!-- LO QUE CREARÍA EL SUPERVISOR (23/10/2026): ver `verOrdenesPrevia`. -->
+      <section class="snoc-panel" style="gap:var(--snoc-sm);">
+        <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+          <div class="snoc-pila-xs">
+            <h2 class="snoc-h2">Lo que crearía el Supervisor</h2>
+            <p class="snoc-body-sm snoc-secundario">
+              Las órdenes que crearía ahora con esta cola, y por qué no las otras.
+              <strong>No crea nada.</strong>
+            </p>
+          </div>
+          <button class="snoc-btn" type="button" onclick={verOrdenesPrevia} disabled={cargandoOrdenes}>
+            {cargandoOrdenes ? 'Calculando…' : 'Ver qué crearía el Supervisor'}
+          </button>
+        </div>
+        {#if errorOrdenes}
+          <p class="snoc-aviso snoc-error-txt">{errorOrdenes}</p>
+        {/if}
+        {#if ordenesPrevia}
+          {#if ordenesPrevia.porque}
+            <p class="snoc-aviso">{ordenesPrevia.porque}</p>
+          {/if}
+          <p class="snoc-body-sm">
+            Crearía {ordenesPrevia.crear.length} · no crearía {ordenesPrevia.no_se_crea.length}
+            {#if ordenesPrevia.atadas.length}· atadas a un corte de red {ordenesPrevia.atadas.length}{/if}
+            {#if ordenesPrevia.hora_de_corte}· hora de corte {ordenesPrevia.hora_de_corte}{/if}
+          </p>
+          {#if ordenesPrevia.crear.length}
+            <div style="overflow-x:auto;">
+              <table class="snoc-tabla">
+                <thead>
+                  <tr>
+                    <th>Ticket</th><th>Asunto</th><th>Plantilla</th><th>Prioridad</th>
+                    <th>Para</th><th>Dónde</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each ordenesPrevia.crear as f (f.caso)}
+                    <tr>
+                      <td class="snoc-mono">#{f.ticket}</td>
+                      <td>{f.asunto}</td>
+                      <td>
+                        {f.plantilla}
+                        <span class="snoc-body-sm snoc-secundario">
+                          · {f.por === 'asunto' ? 'por el asunto' : 'por la labor'}
+                        </span>
+                      </td>
+                      <td>{textoDePrioridad(f.prioridad)}</td>
+                      <td>{f.para || '—'}</td>
+                      <td>
+                        {f.llamar_al_cliente ? 'Llamar al cliente para ubicarlo' : `${f.barrio} (${f.zona})`}
+                        {#if f.corte_de_red}· corte de red{/if}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+          {#if ordenesPrevia.no_se_crea.length}
+            <span class="snoc-label">No las crearía ({ordenesPrevia.no_se_crea.length})</span>
+            <div style="overflow-x:auto;">
+              <table class="snoc-tabla">
+                <thead><tr><th>Ticket</th><th>Asunto</th><th>Por qué</th></tr></thead>
+                <tbody>
+                  {#each ordenesPrevia.no_se_crea as f (f.caso)}
+                    <tr>
+                      <td class="snoc-mono">#{f.ticket}</td>
+                      <td>{f.asunto}</td>
+                      <td>{f.detalle}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+          {#if ordenesPrevia.atadas.length}
+            <span class="snoc-label">
+              Atadas a un corte de red ({ordenesPrevia.atadas.length}): van con la orden de otro
+              caso del mismo puerto
+            </span>
+            {#each ordenesPrevia.atadas as f (f.caso)}
+              <p class="snoc-body-sm">
+                <span class="snoc-mono">#{f.ticket}</span> {f.asunto} → con el
+                <span class="snoc-mono">#{f.a_ticket}</span>
+              </p>
+            {/each}
+          {/if}
+        {/if}
+      </section>
+
       <!--
         COMO QUEDARIA LA JORNADA  --  13/10/2026
         ========================================
@@ -368,8 +487,8 @@
           <div class="snoc-pila-xs">
             <h2 class="snoc-h2">Cómo quedaría la jornada</h2>
             <p class="snoc-body-sm snoc-secundario">
-              Del {data.dia}. Primero lo que está por vencer, después lo más
-              viejo, respetando las zonas de cada cuadrilla.
+              Del {data.dia}. Primero lo vencido, después la prioridad y lo que
+              vence antes, respetando las zonas de cada cuadrilla.
               <strong>Es una propuesta: no se publica sola.</strong>
             </p>
           </div>

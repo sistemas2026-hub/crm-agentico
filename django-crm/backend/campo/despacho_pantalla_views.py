@@ -441,7 +441,25 @@ class FichaDespachableView(CasosDespachablesView):
             "plantilla_motivo": elegida["detalle"],
             "creado": caso.created_at.isoformat() if caso.created_at else None,
             "prioridad_supervisor": propuesta.prioridad,
+            #  LA PRIORIDAD DE LA ORDEN, con la MISMA regla que usa el
+            #  Supervisor cuando la crea solo (23/10/2026, decision del
+            #  usuario): el plazo de la plantilla sugerida y, sin plazo, la
+            #  espera del ticket. Ver `ordenes_de_despacho.prioridad_de`.
+            "prioridad_sugerida": _prioridad_sugerida(org, caso, elegida),
         })
+
+
+def _prioridad_sugerida(org, caso, elegida) -> str:
+    from django.utils import timezone
+
+    from campo.reparto import _zona_de
+    from operaciones.ordenes_de_despacho import prioridad_de
+
+    zona = _zona_de(org)
+    version = elegida.get("version")
+    plazo = getattr(getattr(version, "work_type", None), "plazo_dias", None)
+    return prioridad_de(caso.created_at, plazo,
+                        timezone.now().astimezone(zona).date(), zona)
 
 
 #: Lo que se muestra del ticket. Es para copiar una indicacion, no para leer el

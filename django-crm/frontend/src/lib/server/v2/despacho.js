@@ -142,3 +142,14 @@ export async function leerCobertura(ctx, { barrio, fecha = '', labor = '' }) {
     return null;
   }
 }
+
+/**
+ * Qué órdenes crearía el Supervisor ahora en la cola de Despacho, y por qué no
+ * las otras (23/10/2026). No crea nada: ver
+ * `operaciones/ordenes_de_despacho.py::decidir`.
+ *
+ * @param {{ cookies: any }} ctx
+ */
+export async function leerVistaPreviaDeLasOrdenes(ctx) {
+  return apiRequest('/operaciones/ordenes/vista-previa/', {}, ctx);
+}

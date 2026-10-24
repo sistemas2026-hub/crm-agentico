@@ -3,12 +3,11 @@
  *
  * Pedido por el usuario: que la plantilla, la fecha y la prioridad vengan
  * elegidas según lo que vio el Supervisor. Son PROPUESTAS: quien despacha las
- * ve y las cambia. La plantilla la elige el backend por el asunto del ticket
- * (`plantilla_sugerida` en la ficha); acá viven las dos que dependen de lo que
- * se elija en pantalla.
+ * ve y las cambia. La plantilla y la prioridad las elige el backend
+ * (`plantilla_sugerida` y `prioridad_sugerida` en la ficha; la prioridad, desde
+ * el 23/10/2026, con la misma regla que usa el Supervisor al crear la orden);
+ * acá vive la fecha, que depende de la plantilla que se elija en pantalla.
  */
-import { nivelDePrioridad } from './supervisor-noc-tablero.js';
-
 /** @param {Date} d */
 const ymd = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -36,22 +35,4 @@ export function fechaSugerida(creadoISO, plazoDias, hoy = new Date()) {
   const limite = new Date(creado.getFullYear(), creado.getMonth(), creado.getDate() + plazoDias);
   const hoyLocal = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
   return ymd(limite < hoyLocal ? hoyLocal : limite);
-}
-
-const PRIORIDAD_DE_NIVEL = { Alta: 'alta', Media: 'media', Baja: 'baja' };
-
-/**
- * La prioridad de la orden, desde la del Supervisor.
- *
- * El número del Supervisor es «menor = más urgente» (operaciones/supervisor.py
- * ::_prioridad). Se lee con el MISMO corte que la bandeja de Pendientes
- * (`nivelDePrioridad`): si acá se usara otro, la misma propuesta saldría Alta
- * en una pantalla y Media en la otra.
- *
- * @param {number | null | undefined} n
- * @returns {'alta' | 'media' | 'baja' | ''}
- */
-export function prioridadSugerida(n) {
-  if (typeof n !== 'number') return '';
-  return /** @type {any} */ (PRIORIDAD_DE_NIVEL)[nivelDePrioridad(n).texto] ?? '';
 }
