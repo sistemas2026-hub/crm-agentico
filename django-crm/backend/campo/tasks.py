@@ -73,6 +73,23 @@ def _ahora_local(org):
     return timezone.now().astimezone(zona)
 
 
+def _las_cuadrillas_no_trabajan(org, fecha) -> str:
+    """Por que las cuadrillas no trabajan ese dia, o "" si trabajan o si la
+    empresa no cargo su horario (sin el no se sabe, y se arma como siempre)."""
+    from campo.horario_de_cuadrillas import calendario_de_cuadrillas
+    from operaciones import capacidad
+
+    try:
+        if calendario_de_cuadrillas(org) is None:
+            return ""
+        jornada = capacidad.jornada_de(org, fecha, solo_de_cuadrillas=True)
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("Ciclo de la madrugada: no se pudo leer el horario de "
+                       "las cuadrillas (%s)", type(e).__name__)
+        return ""
+    return "" if jornada.abierta else (jornada.motivo or "cerrada")
+
+
 def _le_toca(config, ahora_local) -> bool:
     """Si a esta empresa le toca ahora, y no corrio ya hoy."""
     if not config.activo:
@@ -151,7 +168,16 @@ def correr_para(org, *, ahora_local=None, avisar=True) -> dict:
     resumen = {"fecha": fecha.isoformat(), "jornadas": None,
                "reparto": None, "pendientes": None}
 
-    if config.copia_la_jornada:
+    #  UN DIA QUE LAS CUADRILLAS NO TRABAJAN NO SE ARMA  --  25/10/2026. La
+    #  simulacion del dia mostro las cinco cuadrillas armadas un domingo: la
+    #  madrugada armaba todos los dias y el Supervisor no (el mira el horario,
+    #  `armado_de_jornadas._la_empresa_trabaja`). Solo cuando la empresa cargo
+    #  el horario de las cuadrillas: sin el, la madrugada sigue como estaba
+    #  (decision del 21/10).
+    no_se_trabaja = _las_cuadrillas_no_trabajan(org, fecha)
+    if config.copia_la_jornada and no_se_trabaja:
+        resumen["jornadas"] = {"no_se_arma": no_se_trabaja}
+    elif config.copia_la_jornada:
         #  LA MISMA REGLA QUE EL SUPERVISOR  --  17/10/2026: la labor sale de
         #  los casos de Despacho de cada zona. Con los barrios ya guardados y
         #  sin pedir ninguno: a esta hora no se le pregunta al ISP. Si contar

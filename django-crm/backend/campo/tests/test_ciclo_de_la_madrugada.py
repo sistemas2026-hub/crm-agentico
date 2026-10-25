@@ -482,6 +482,44 @@ def test_t_el_ciclo_deja_la_jornada_y_avisa(
     assert avisos.first().data["reparto"]["repartibles"] == 1
 
 
+def test_t1_un_dia_que_las_cuadrillas_no_trabajan_no_se_arma(
+    org_a, cuadrilla, norte, version
+):
+    """25/10/2026: la simulacion mostro las cinco cuadrillas armadas un
+    domingo. Con el horario de las cuadrillas cargado, la madrugada mira el
+    dia como el Supervisor; sin el, arma como siempre (`test_t`)."""
+    import datetime as _dt
+
+    from business_hours.models import BusinessCalendar
+    from campo import tasks
+    from campo.cuadrillas import ConfiguracionDeReparto, JornadaDeCuadrilla
+
+    _config(org_a)
+    _habitual(cuadrilla, [norte])
+    _jornada(org_a, cuadrilla, LUNES, zonas=[norte])
+    cal = BusinessCalendar.objects.create(org=org_a, name="Cuadrillas",
+                                          timezone="UTC")
+    #  Abre de lunes a sabado; el domingo, no.
+    for d in ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday"):
+        setattr(cal, f"{d}_open", _dt.time(7, 0))
+        setattr(cal, f"{d}_close", _dt.time(17, 0))
+    cal.save()
+    ConfiguracionDeReparto.objects.filter(org=org_a).update(
+        calendario_de_cuadrillas=cal)
+
+    domingo = tasks.correr_para(org_a, ahora_local=_dt.datetime(
+        2026, 10, 11, 3, 5, tzinfo=_dt.timezone.utc))
+    martes = tasks.correr_para(org_a, ahora_local=dt.datetime(
+        2026, 10, 6, 3, 5, tzinfo=dt.timezone.utc))
+
+    from operaciones import capacidad
+
+    assert domingo["jornadas"] == {"no_se_arma": capacidad.CERRADA}
+    assert not JornadaDeCuadrilla.objects.filter(
+        fecha=_dt.date(2026, 10, 11)).exists()
+    assert martes["jornadas"]["copiadas"][0]["cuadrilla"] == "Cuadrilla 1"
+
+
 def test_t2_el_aviso_llega_a_TODOS_los_que_pueden_publicar(
     org_a, cuadrilla, norte, version, admin_profile
 ):

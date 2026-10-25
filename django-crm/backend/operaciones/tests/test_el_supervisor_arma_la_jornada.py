@@ -528,6 +528,16 @@ def test_q_la_madrugada_fija_el_contexto_de_cada_empresa(
     from operaciones.models import DisponibilidadTecnico
 
     hoy = tasks._ahora_local(empresa).date()
+    #  ABIERTO TODOS LOS DIAS (25/10/2026): corre con la fecha real, y desde que
+    #  la madrugada no arma los dias que las cuadrillas no trabajan, un
+    #  domingo esta prueba media eso y no el contexto RLS.
+    from business_hours.models import BusinessCalendar
+
+    for cal in BusinessCalendar.objects.filter(org=empresa):
+        for d in ("saturday", "sunday"):
+            setattr(cal, f"{d}_open", dt.time(0, 0))
+            setattr(cal, f"{d}_close", dt.time(23, 59))
+        cal.save()
     DisponibilidadTecnico.objects.create(
         org=empresa, profile=admin_profile, fecha=hoy,
         hora_inicio=dt.time(0, 0), hora_fin=dt.time(23, 59),

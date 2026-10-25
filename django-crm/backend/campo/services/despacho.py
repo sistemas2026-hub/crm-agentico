@@ -300,6 +300,30 @@ def ordenes_vivas_del_caso(org, case_id):
                                            OrdenTrabajo.CANCELADA]))
 
 
+def bloquear_el_caso(org, case_id) -> None:
+    """Bloquea el caso hasta el fin de la transaccion en curso.
+
+    Lo toman LOS DOS caminos que crean una orden desde un caso: el boton
+    Despachar (`CrearOrdenView`) y el Supervisor
+    (`ordenes_de_despacho._crear_una`). Sin el, los dos leian "este caso no
+    tiene orden" a la vez y salian dos visitas sin que nadie se enterara --
+    la restriccion unica de la orden excluye el origen `crm` a proposito
+    (auditoria de frontera del 24/10/2026, medido con dos transacciones).
+
+    `pg_advisory_xact_lock`: no necesita una fila (la clave natural es el
+    caso, no la propuesta ni la orden) y se suelta solo al confirmar o
+    deshacer. Exige una transaccion abierta: fuera de una, se soltaria en el
+    acto y no protegeria nada.
+    """
+    from django.db import connection
+
+    if not connection.in_atomic_block:
+        raise RuntimeError("bloquear_el_caso necesita una transaccion abierta")
+    with connection.cursor() as c:
+        c.execute("select pg_advisory_xact_lock(hashtext(%s))",
+                  [f"orden-del-caso:{org.id}:{case_id}"])
+
+
 def cliente_para_la_orden(contexto, escrito: dict | None = None) -> dict:
     """Lo que la orden lleva del cliente.
 

@@ -278,3 +278,364 @@ def decidir(org, ahora=None) -> dict:
             "corte_de_red": bool(puerto),
         })
     return salida
+
+
+# =============================================================================
+#  ENTREGA 2  --  CREARLAS DE VERDAD (24/10/2026)
+# =============================================================================
+#
+#  La fase del ciclo. Usa ESTA regla (`decidir`) y crea con la MISMA
+#  traduccion que el boton Despachar (`campo.services.despacho`): la ficha del
+#  motor, `cliente_para_la_orden`, `anotar_labor_sugerida`, `crear_orden`.
+#
+#  LAS PUERTAS, todas fail-closed (no poder comprobarlas es no tenerlas):
+#
+#      la tarea `crear_las_ordenes_de_despacho`, delegada por una persona
+#      el nivel 3 de la empresa (`autonomia.puede`, con su interruptor)
+#      la hora de corte (sin ella `decidir` no pone dia)
+#      `MOTOR_TENANT`: la ficha del cliente se le pide al tenant del motor, y
+#      sin saber cual no se pide (mismo criterio que `lazo_isp` y
+#      `cierre_en_isp`). Que una empresa del CRM este atada a ese tenant es la
+#      decision D5 de CLAUDE.md (una instalacion por ISP), y vale para todas
+#      las acciones del Supervisor, no solo para esta.
+#
+#  Sin alguna, la fase queda en SOMBRA: no escribe nada y dice en el log
+#  cuantas crearia. Lo que crearia se ve en «Ver qué crearía el Supervisor».
+#
+#  UNA ORDEN POR CASO, AUNQUE CORRAN DOS VUELTAS A LA VEZ: la restriccion unica
+#  de la orden excluye el origen `crm`, asi que la garantia es esta: la
+#  propuesta del caso se bloquea, y bajo ese bloqueo se vuelve a preguntar si
+#  el caso ya tiene una orden. La segunda vuelta espera y ve la primera.
+#
+#  LA FICHA SE PIDE AFUERA DE TODA TRANSACCION (CLAUDE.md §12: ninguna
+#  transaccion abierta mientras se espera una operacion externa), hasta
+#  `TOPE_POR_VUELTA` casos, y si el motor no contesta se deja para la vuelta
+#  que viene en vez de preguntarle uno por uno.
+
+#: Cuantas ordenes crea, como mucho, en una vuelta. Cada una le pide la ficha
+#: al motor (hasta 30 s); el resto espera la vuelta siguiente, una hora.
+TOPE_POR_VUELTA = 8
+
+CREO = "creo"
+SOMBRA = "sombra"
+NO_CORRIO = "no_corrio"
+
+FUENTE_ORDEN = "orden_de_despacho"
+FUENTE_ATADURA = "atada_a_corte_de_red"
+FUENTE_SIN_FICHA = "orden_sin_ficha"
+
+#: Cuanto se espera para volver a pedir la ficha de un caso que el motor
+#: contesto sin ella (auditoria de frontera, 24/10/2026): sin esto, los mismos
+#: ocho casos viejos sin ficha ocupaban el tope de cada vuelta y los demas no
+#: llegaban nunca.
+HORAS_PARA_VOLVER_A_PEDIR_LA_FICHA = 6
+
+#: Lo que dice que el MOTOR no esta, y no que a ESTE caso le falta algo: se
+#: corta la vuelta. Un `ReadTimeout` tambien: son 30 s por pregunta.
+_MOTOR_NO_ESTA = frozenset({"ConnectionError", "ConnectTimeout", "ReadTimeout",
+                            "Timeout"})
+
+
+def _tarea():
+    from operaciones import tareas_delegadas as td
+    return td.CREAR_LAS_ORDENES
+
+
+def _puertas(org) -> str:
+    """Por que NO puede crear, o "" si puede. Texto fijo: va a un log."""
+    import os
+
+    from operaciones import autonomia
+    from operaciones import tareas_delegadas as td
+
+    if not (os.environ.get("MOTOR_TENANT", "") or "").strip():
+        return ("falta MOTOR_TENANT: sin saber de qué empresa es la ficha del "
+                "cliente, no se pide")
+    try:
+        if not td.esta_delegada(org, _tarea()):
+            return ("nadie le delegó al Supervisor que cree las órdenes: se le "
+                    "pide desde su chat")
+    except Exception as e:                                       # noqa: BLE001
+        return f"no se pudo comprobar la tarea ({type(e).__name__})"
+    try:
+        veredicto = autonomia.puede(
+            org, td.CATALOGO[_tarea()]["exige_nivel"]) or {}
+    except Exception as e:                                       # noqa: BLE001
+        veredicto = {"puede": False, "motivo": type(e).__name__}
+    if not veredicto.get("puede"):
+        #  TEXTO FIJO: el motivo del interruptor arrastra lo que una persona
+        #  escribio al moverlo, y esto va a un log.
+        return "la empresa no tiene autorizado que el Supervisor cree órdenes"
+    return ""
+
+
+def _a_las_cero(dia, zona):
+    """El comienzo de ese dia en el reloj de la empresa: lo que el reparto lee
+    como «programada para ese dia» (`reparto._para_otro_dia`)."""
+    return dt.datetime.combine(dia, dt.time(0, 0), tzinfo=zona)
+
+
+def crear_las_ordenes(org, ahora=None, *, leer=None) -> dict:
+    """La fase del ciclo. Nunca levanta: lo que no se pudo, se dice."""
+    from campo.reparto import _zona_de
+    from campo.services.despacho import contexto_del_caso
+    from operaciones import armado_de_jornadas as adj
+
+    ahora = ahora or timezone.now()
+    leer = leer or contexto_del_caso
+    salida = {"modo": NO_CORRIO, "porque": "", "creadas": 0, "atadas": 0,
+              "crearia": 0, "sin_ficha": 0, "sin_ficha_reciente": 0,
+              "ya_tenian": 0, "esperan_el_tope": 0, "motor_caido": 0,
+              "se_apago": 0, "errores": 0}
+
+    decision = decidir(org, ahora)
+    salida["crearia"] = len(decision["crear"])
+    if decision["porque"]:
+        salida["porque"] = "falta la hora de corte"
+        return {"ordenes_de_despacho": salida}
+    porque = _puertas(org)
+    if porque:
+        salida["modo"], salida["porque"] = SOMBRA, porque
+        logger.info("Supervisor: ordenes de Despacho · sombra (%s) · crearia=%s "
+                    "· no crearia=%s · atadas=%s", porque, len(decision["crear"]),
+                    len(decision["no_se_crea"]), len(decision["atadas"]))
+        return {"ordenes_de_despacho": salida}
+
+    salida["modo"] = CREO
+    zona = _zona_de(org)
+    propuestas = adj.propuestas_en_despacho(org)
+    caido = apagada = False
+    preguntadas = 0
+    for f in decision["crear"]:
+        if caido:
+            salida["motor_caido"] += 1
+            continue
+        if apagada:
+            salida["se_apago"] += 1
+            continue
+        if _sin_ficha_hace_poco(propuestas.get(f["caso"]), ahora):
+            salida["sin_ficha_reciente"] += 1
+            continue
+        #  EL TOPE CUENTA PREGUNTAS AL MOTOR, que es lo que cuesta tiempo.
+        if preguntadas >= TOPE_POR_VUELTA:
+            salida["esperan_el_tope"] += 1
+            continue
+        #  LAS PUERTAS OTRA VEZ, antes de cada una (auditoria de frontera):
+        #  apagar el interruptor o quitar la tarea a mitad de vuelta la frena
+        #  aca, y no despues de ocho fichas de hasta 30 s.
+        if _puertas(org):
+            apagada = True
+            salida["se_apago"] += 1
+            continue
+        #  LA FICHA, AFUERA DE TODA TRANSACCION.
+        preguntadas += 1
+        try:
+            contexto = leer(f["caso"])
+        except Exception as e:                                   # noqa: BLE001
+            contexto = {"motivo": type(e).__name__, "motor_alcanzado": False}
+        if not (isinstance(contexto, dict) and contexto.get("contexto_disponible")):
+            crudo = str((contexto or {}).get("motivo") or "")
+            if not (contexto or {}).get("motor_alcanzado") and \
+                    crudo in _MOTOR_NO_ESTA:
+                caido = True
+                salida["motor_caido"] += 1
+                continue
+            #  Sin ficha no se crea: la orden saldria sin con que llamar ni a
+            #  donde ir. Se anota, y se vuelve a pedir en unas horas.
+            salida["sin_ficha"] += 1
+            try:
+                _anotar_sin_ficha(propuestas.get(f["caso"]), crudo, ahora)
+            except Exception as e:                               # noqa: BLE001
+                logger.warning("Supervisor: no se pudo anotar un caso sin "
+                               "ficha (%s)", type(e).__name__)
+            continue
+        try:
+            r = _crear_una(org, propuestas.get(f["caso"]), f, contexto,
+                           ahora=ahora, zona=zona)
+        except Exception as e:                                   # noqa: BLE001
+            #  Un caso roto no tumba la vuelta. Tipo y no texto: va a un log.
+            salida["errores"] += 1
+            logger.warning("Supervisor: no se pudo crear una orden de Despacho "
+                           "(%s)", type(e).__name__)
+            continue
+        salida["creadas" if r == CREO else "ya_tenian"] += 1
+
+    for fila in decision["atadas"]:
+        try:
+            if _atar(org, propuestas.get(fila["caso"]), fila, ahora=ahora):
+                salida["atadas"] += 1
+        except Exception as e:                                   # noqa: BLE001
+            salida["errores"] += 1
+            logger.warning("Supervisor: no se pudo atar un caso a su corte de "
+                           "red (%s)", type(e).__name__)
+
+    #  CONTEOS, nunca un caso ni un cliente: esto va a un log.
+    logger.info("Supervisor: ordenes de Despacho · creadas=%s · ya tenian=%s · "
+                "sin ficha=%s · sin ficha hace poco=%s · esperan el tope=%s · "
+                "motor caido=%s · se apago=%s · atadas=%s · errores=%s",
+                salida["creadas"], salida["ya_tenian"], salida["sin_ficha"],
+                salida["sin_ficha_reciente"], salida["esperan_el_tope"],
+                salida["motor_caido"], salida["se_apago"], salida["atadas"],
+                salida["errores"])
+    return {"ordenes_de_despacho": salida}
+
+
+def _crear_una(org, propuesta, f, contexto, *, ahora, zona) -> str:
+    """Crea la orden de un caso, bajo el bloqueo de su propuesta. CREO, o
+    "ya_tenia" si mientras tanto alguien (una persona, otra vuelta) la creo."""
+    from django.db import transaction
+
+    from campo.models import EventoTrabajo, OrdenTrabajo, WorkTypeVersion
+    from campo.services.despacho import (
+        anotar_labor_sugerida,
+        bloquear_el_caso,
+        cliente_para_la_orden,
+        crear_orden,
+    )
+    from operaciones import paso_a_despacho as pad
+    from operaciones import supervisor as sup
+    from operaciones.models import PropuestaSupervisor as P
+
+    if propuesta is None:
+        return "ya_tenia"
+    with transaction.atomic():
+        #  EL CASO, CON EL MISMO BLOQUEO QUE TOMA EL BOTON DESPACHAR
+        #  (`bloquear_el_caso`): sin el, una persona y el Supervisor leian a la
+        #  vez "no tiene orden" y salian dos (auditoria de frontera, medido).
+        bloquear_el_caso(org, f["caso"])
+        fresca = (P.objects.select_for_update()
+                  .filter(pk=propuesta.pk, estado__in=(P.ACEPTADA, P.MODIFICADA))
+                  .first())
+        if fresca is None:
+            return "ya_tenia"
+        #  BAJO EL BLOQUEO: si una persona la despacho o otra vuelta la creo
+        #  mientras se pedia la ficha, no se crea otra. Cualquier orden del
+        #  caso cuenta, tambien una cerrada o cancelada (`decidir` ya no las
+        #  ofrece: aca se vuelve a mirar porque pudo cambiar).
+        if OrdenTrabajo.objects.filter(org=org, origen_sistema="crm",
+                                       origen_ref=f["caso"]).exists():
+            return "ya_tenia"
+        #  Y QUE EL CASO SIGA EN LA COLA: abierto, activo y sin fusionar (la
+        #  misma regla que la pantalla). Pudo cerrarse mientras se pedia la
+        #  ficha de otro.
+        if not pad.casos_en_despacho(org, {f["caso"]}).exists():
+            return "ya_tenia"
+        version = WorkTypeVersion.objects.select_related("work_type").get(
+            pk=f["version"])
+        resumen = (fresca.accion_propuesta or "").strip()[:1000]
+        if f["llamar_al_cliente"]:
+            #  LA INSTALACION DE UN CLIENTE NUEVO (decision del 21/10): su
+            #  ficha es la del cliente de instalaciones del ISP. No se copia:
+            #  mandaria al tecnico a otra casa. Sale con lo que trae el ticket.
+            contexto = {**contexto, "cliente": {}}
+            cliente = {"nombre": "", "telefono": "", "direccion": "",
+                       "detalle_acceso": "", "id_abonado": ""}
+            resumen = ("Llamar al cliente para ubicarlo: es una instalación "
+                       "nueva y el ISP no tiene su dirección. "
+                       + resumen).strip()
+        else:
+            cliente = cliente_para_la_orden(contexto)
+        anotar_labor_sugerida(contexto, resumen)
+        para = dt.date.fromisoformat(f["para"])
+        orden = crear_orden(
+            org=org, profile=None, version=version, cliente=cliente,
+            origen_sistema="crm", origen_tipo="case", origen_ref=f["caso"],
+            programada_para=_a_las_cero(para, zona), contexto=contexto,
+            despacho={"prioridad": f["prioridad"], "zona": f["barrio"],
+                      "resumen": resumen})
+        #  QUE LA CREO EL SUPERVISOR, Y POR QUE ASI. Sin persona: el actor es
+        #  la tarea (patron de `supervisor.revisar` con `automatico=True`).
+        EventoTrabajo.objects.create(
+            org=org, orden=orden, tipo="creada_por_el_supervisor", profile=None,
+            datos={"tarea": _tarea(), "propuesta": str(fresca.pk),
+                   "plantilla_por": f["por"], "prioridad": f["prioridad"],
+                   "para": f["para"], "corte_de_red": f["corte_de_red"]})
+        pieza = sup._observacion(
+            FUENTE_ORDEN, fresca.origen_id,
+            f"El Supervisor creó la orden #{orden.numero}.", ahora)
+        pieza["orden"] = orden.numero
+        fresca.evidencia = [*(fresca.evidencia or []), pieza]
+        fresca.save(update_fields=["evidencia", "updated_at"])
+    return CREO
+
+
+def _sin_ficha_hace_poco(propuesta, ahora) -> bool:
+    """Si al caso se le pidio la ficha hace menos de
+    `HORAS_PARA_VOLVER_A_PEDIR_LA_FICHA` y el motor contesto sin ella."""
+    from django.utils.dateparse import parse_datetime
+
+    for pieza in reversed(getattr(propuesta, "evidencia", None) or []):
+        if isinstance(pieza, dict) and pieza.get("fuente") == FUENTE_SIN_FICHA:
+            cuando = parse_datetime(str(pieza.get("observado_en") or ""))
+            return (cuando is not None and ahora - cuando
+                    < dt.timedelta(hours=HORAS_PARA_VOLVER_A_PEDIR_LA_FICHA))
+    return False
+
+
+def _anotar_sin_ficha(propuesta, motivo: str, ahora) -> None:
+    """Deja en la propuesta que el motor contesto sin la ficha, reemplazando la
+    anterior: es lo que `_sin_ficha_hace_poco` lee, y lo que explica despues
+    por que el caso no tiene orden. El motivo es un codigo fijo del motor."""
+    from django.db import transaction
+
+    from operaciones import supervisor as sup
+    from operaciones.models import PropuestaSupervisor as P
+
+    if propuesta is None:
+        return
+    with transaction.atomic():
+        fresca = (P.objects.select_for_update()
+                  .filter(pk=propuesta.pk, estado__in=(P.ACEPTADA, P.MODIFICADA))
+                  .first())
+        if fresca is None:
+            return
+        pieza = sup._observacion(
+            FUENTE_SIN_FICHA, fresca.origen_id,
+            "El motor no trajo la ficha del cliente: la orden no se creó.", ahora)
+        pieza["motivo"] = (motivo or "")[:64]
+        resto = [x for x in (fresca.evidencia or [])
+                 if not (isinstance(x, dict) and x.get("fuente") == FUENTE_SIN_FICHA)]
+        fresca.evidencia = [*resto, pieza]
+        fresca.save(update_fields=["evidencia", "updated_at"])
+    propuesta.evidencia = fresca.evidencia
+
+
+def _atar(org, propuesta, fila, *, ahora) -> bool:
+    """Deja escrito en la propuesta de un caso de un corte de red a que orden
+    va atado. Solo si esa orden existe, y solo si cambia: no reescribe la
+    propuesta cada hora. Cerrar en el ISP los tickets atados lo hace una
+    persona (decision del 21/10: es un efecto externo)."""
+    from django.db import transaction
+
+    from campo.models import OrdenTrabajo
+    from operaciones import supervisor as sup
+    from operaciones.models import PropuestaSupervisor as P
+
+    if propuesta is None:
+        return False
+    orden = (OrdenTrabajo.objects
+             .filter(org=org, origen_sistema="crm", origen_ref=fila["a_caso"])
+             .order_by("numero").values_list("numero", flat=True).first())
+    if orden is None:
+        return False
+    with transaction.atomic():
+        fresca = (P.objects.select_for_update()
+                  .filter(pk=propuesta.pk, estado__in=(P.ACEPTADA, P.MODIFICADA))
+                  .first())
+        if fresca is None:
+            return False
+        previa = [x for x in (fresca.evidencia or [])
+                  if isinstance(x, dict) and x.get("fuente") == FUENTE_ATADURA]
+        if previa and previa[-1].get("orden") == orden:
+            return False
+        pieza = sup._observacion(
+            FUENTE_ATADURA, fresca.origen_id,
+            f"Va con la orden #{orden} del mismo corte de red "
+            f"(ticket {fila['a_ticket']}): no lleva una visita propia.", ahora)
+        pieza["orden"] = orden
+        pieza["a_caso"] = fila["a_caso"]
+        resto = [x for x in (fresca.evidencia or [])
+                 if not (isinstance(x, dict) and x.get("fuente") == FUENTE_ATADURA)]
+        fresca.evidencia = [*resto, pieza]
+        fresca.save(update_fields=["evidencia", "updated_at"])
+    return True

@@ -17,6 +17,7 @@ una cuadrilla.
 
 from __future__ import annotations
 
+from django.db import transaction
 from django.http import Http404
 from django.utils import timezone
 from rest_framework import status
@@ -42,9 +43,9 @@ from campo.serializers import (
 )
 from campo.services.despacho import (
     ConflictoDeCuadrilla, ErrorDespacho, RequiereSucesor, agregar_integrante,
-    anotar_labor_sugerida, asignar, asignar_a_jornada, cambiar_principal,
-    cliente_para_la_orden, contexto_del_caso, crear_orden, desasignar,
-    ordenes_vivas_del_caso,
+    anotar_labor_sugerida, asignar, asignar_a_jornada, bloquear_el_caso,
+    cambiar_principal, cliente_para_la_orden, contexto_del_caso, crear_orden,
+    desasignar, ordenes_vivas_del_caso,
     retirar_integrante,
 )
 from campo.services.idempotencia import manejar_idempotencia
@@ -122,10 +123,6 @@ class CrearOrdenView(APIView):
             # si el motor no responde, la orden nace sin snapshot y con la
             # razon anotada adentro.
             contexto = contexto_del_caso(case_id)
-            # Que la UI pueda avisar "este caso ya tiene una orden activa". No
-            # se bloquea: ver `ordenes_vivas_del_caso`.
-            activas = list(ordenes_vivas_del_caso(org, case_id)
-                           .values_list("numero", flat=True))
 
         #  EL CLIENTE, con la MISMA traduccion que va a usar el Supervisor
         #  cuando cree ordenes solo (21/10/2026). Ver
@@ -176,18 +173,33 @@ class CrearOrdenView(APIView):
                     status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            orden = crear_orden(
-                org=org,
-                profile=request.profile,
-                version=version,
-                cliente=cliente,
-                origen_sistema="crm" if case_id else "manual",
-                origen_tipo="case" if case_id else "",
-                origen_ref=case_id,
-                programada_para=d.get("programada_para"),
-                contexto=contexto,
-                despacho=despacho,
-            )
+            #  EL CASO SE BLOQUEA ENTRE MIRAR Y CREAR  --  24/10/2026. Desde que
+            #  el Supervisor tambien crea ordenes, los dos caminos toman el
+            #  mismo bloqueo por caso (`bloquear_el_caso`): sin el, los dos
+            #  leian "no tiene orden" a la vez y salian dos visitas sin que
+            #  nadie se enterara (auditoria de frontera, medido). No se
+            #  rechaza: una segunda visita es legitima, y la decide quien
+            #  despacha -- pero ahora `activas` ve la del Supervisor y lo dice.
+            #  La ficha ya se pidio AFUERA (CLAUDE.md §12).
+            with transaction.atomic():
+                if case_id:
+                    bloquear_el_caso(org, case_id)
+                    # Que la UI pueda avisar "este caso ya tiene una orden
+                    # activa". Ver `ordenes_vivas_del_caso`.
+                    activas = list(ordenes_vivas_del_caso(org, case_id)
+                                   .values_list("numero", flat=True))
+                orden = crear_orden(
+                    org=org,
+                    profile=request.profile,
+                    version=version,
+                    cliente=cliente,
+                    origen_sistema="crm" if case_id else "manual",
+                    origen_tipo="case" if case_id else "",
+                    origen_ref=case_id,
+                    programada_para=d.get("programada_para"),
+                    contexto=contexto,
+                    despacho=despacho,
+                )
         except ErrorDespacho as e:
             return Response({"error": "NO_SE_PUDO_CREAR", "detalle": str(e)},
                             status=status.HTTP_400_BAD_REQUEST)

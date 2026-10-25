@@ -59,6 +59,7 @@ CERRAR_DESINCRONIZADOS = "cerrar_desincronizados_con_diagnostico"
 CICLO_AUTOMATICO = "revisar_solo_con_cada_actualizacion"
 PASAR_A_DESPACHO = "pasar_a_despacho_segun_las_reglas"
 ARMAR_LA_JORNADA = "armar_la_jornada_del_dia"
+CREAR_LAS_ORDENES = "crear_las_ordenes_de_despacho"
 #  La misma clave que 'paso_a_despacho.TAREA_CORRECCIONES': se escribe en los dos
 #  lados para no importar aquel modulo desde aca, y una prueba las ata.
 PASAR_CON_LAS_CORRECCIONES = "pasar_a_despacho_con_las_correcciones"
@@ -114,6 +115,28 @@ CATALOGO = {
         #  PROPIA, como la del paso a Despacho: habilitar una no habilita la
         #  otra. Nivel 3 y no 4: armar una jornada no sale de la plataforma ni
         #  le promete nada a un cliente, y una persona la corrige con un clic.
+        "exige_nivel": 3,
+        "necesita_que_mire": True,
+    },
+    CREAR_LAS_ORDENES: {
+        "nombre": "Crear las órdenes de los casos de Despacho",
+        "que_hace": (
+            "En cada vuelta crea la orden de trabajo de cada caso de la cola "
+            "de Despacho que todavía no la tiene, como si alguien apretara "
+            "«Despachar»: la plantilla por el asunto, la prioridad por el "
+            "plazo y la espera, el día por la hora de corte, y los datos del "
+            "cliente de su ficha. Un corte de red lleva una sola orden por "
+            "puerto. Hasta 8 por vuelta."),
+        "que_no_hace": (
+            "No asigna técnico ni publica: la orden queda esperando el "
+            "reparto. No crea la de un caso sin barrio, con un barrio sin "
+            "zona, sin plantilla o sin ficha del cliente, ni la de uno que ya "
+            "tuvo una orden: esos los mira una persona. La instalación de un "
+            "cliente nuevo sale sin dirección ni teléfono, para llamar al "
+            "cliente."),
+        #  PROPIA, como las otras: habilitar armar la jornada no habilita
+        #  crear ordenes. Nivel 3: la orden no sale de la plataforma ni le
+        #  llega a nadie hasta que se publica, y una persona la cancela.
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },

@@ -455,7 +455,10 @@ class CancelarPropuestaView(APIView):
 
 class CicloSupervisorView(APIView):
     """
-    Corre una pasada de detección a pedido. Solo lee y propone.
+    Corre una pasada de detección a pedido. Detecta y propone; las tareas
+    que una persona delegó (cerrar, pasar a Despacho, armar la jornada, crear
+    las órdenes) actúan con sus propias puertas, igual que en el ciclo
+    automático.
 
     Cuando se escribió esto era la única vía: engancharlo al scheduler era
     darle al Supervisor la capacidad de correr solo, y esa etapa no la tenía.

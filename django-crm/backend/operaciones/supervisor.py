@@ -2654,8 +2654,11 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
     siguen iguales, y una corrida desatendida que diagnostica quince equipos
     puede cerrar cero.
 
-    NO EJECUTA NADA. Lo único que escribe son filas de PropuestaSupervisor y
-    sus renglones de auditoría.
+    LA DETECCION NO EJECUTA NADA: lo único que escribe son filas de PropuestaSupervisor y
+    sus renglones de auditoría. Las fases de después, fuera de la
+    transacción, ejecutan SOLO lo que una persona delegó, cada una con sus
+    propias puertas: el cierre, el paso a Despacho, armar la jornada y, desde
+    el 24/10/2026, crear las órdenes de Despacho (auditoría de frontera).
     """
     ahora = ahora or timezone.now()
     with transaction.atomic():
@@ -2771,6 +2774,11 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         #  delegada solo deja en el log lo que armaria (la sombra).
         ("armado de la jornada del dia",
          lambda: _armar_la_jornada_del_dia(org, ahora)),
+        #  LAS ORDENES, DESPUES DEL ARMADO  --  24/10/2026: la cola ya paso
+        #  lo de esta vuelta y la jornada ya esta armada. Sin la tarea
+        #  delegada solo deja en el log cuantas crearia (la sombra).
+        ("creacion de las ordenes de Despacho",
+         lambda: _crear_las_ordenes(org, ahora)),
         #  LA MEDICION DESPUES DEL ARREGLO  --  18/10/2026, correccion 2 del
         #  usuario: cuando el tecnico reporta el arreglo, se vuelve a medir.
         #  VA AL FINAL: informa y no decide, y el presupuesto del proveedor se
@@ -2808,6 +2816,13 @@ def _armar_la_jornada_del_dia(org, ahora) -> dict:
     trae los de Cuadrillas, que este no necesita para nada mas."""
     from operaciones import armado_de_jornadas
     return armado_de_jornadas.armar_las_jornadas_del_dia(org, ahora)
+
+
+def _crear_las_ordenes(org, ahora) -> dict:
+    """La fase de `ordenes_de_despacho`, importada recien al correr, como
+    la del armado."""
+    from operaciones import ordenes_de_despacho
+    return ordenes_de_despacho.crear_las_ordenes(org, ahora)
 
 
 def _verificar_los_arreglos(org, *, desatendido: bool = False) -> dict:

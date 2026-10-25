@@ -246,8 +246,10 @@ def ciclo_a_pedido(org_id: str) -> dict:
     SU empresa, aunque no haya delegacion. Mezclarlas haria que el boton
     dependiera de una delegacion que no tiene nada que ver.
 
-    NO AFLOJA NINGUNA PUERTA: 'correr_ciclo' solo escribe propuestas y su
-    auditoria, igual que antes. Lo unico que cambia es quien espera.
+    NO AFLOJA NINGUNA PUERTA: 'correr_ciclo' propone, y solo ejecuta lo que
+    una persona le delego, cada tarea con sus propias puertas (desde el
+    24/10/2026 tambien crear las ordenes de Despacho). Lo unico que cambia es
+    quien espera.
     """
     from operaciones import supervisor
 

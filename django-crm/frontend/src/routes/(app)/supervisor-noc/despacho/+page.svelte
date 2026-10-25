@@ -441,7 +441,7 @@
                  le da trabajo (auditoría del 24/10/2026). -->
             <p class="snoc-aviso">
               {simulacion.porque}
-              {#if simulacion.cuadrillas.length}Se muestra solo lo que una persona ya armó para ese día.{/if}
+              {#if simulacion.cuadrillas.length}Se muestra solo lo que ya estaba armado para ese día.{/if}
             </p>
           {/if}
           {#if simulacion.trabaja || simulacion.cuadrillas.length}
