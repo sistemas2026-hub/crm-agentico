@@ -135,6 +135,13 @@ R2_REGISTRO_EXTERNO = {
     #  Escribe solo donde el nombre falta y no sobrescribe nada, y pasa por la
     #  frontera como las demas (importacion_io.py::_puerta).
     "fijar_nombre_cliente_externo",
+    #  25/10/2026: 'avisar_primera_respuesta_crm' le dice al caso del CRM que
+    #  una persona contesto desde la Bandeja (POST /cases/<id>/primera-respuesta/).
+    #  R2 como sus hermanas del CRM: registra afuera de Dexter, no toca un
+    #  equipo ni dinero. Solo puede ADELANTAR un sello, nunca borrarlo, y el
+    #  CRM rechaza un momento del futuro. Pasa por la frontera con la persona
+    #  que respondio como actor (operativo.py::sellar_primera_respuesta).
+    "avisar_primera_respuesta_crm",
     "completar_ticket_instalacion",
     "crear_caso_soporte",
     "crear_tag_crm",

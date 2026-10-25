@@ -3693,6 +3693,25 @@ herramientas:
       closed_on: 0
     formato_fechas_automaticas: "%Y-%m-%d"
 
+  # La primera respuesta que dio una PERSONA desde la Bandeja (25/10/2026). La
+  # ejecuta el codigo cuando la respuesta fue aceptada para entrega; el CRM se
+  # queda con la mas temprana. Sin esto, un ticket de WhatsApp atendido desde
+  # la Bandeja figuraba "sin primera respuesta" para siempre.
+  - nombre: avisar_primera_respuesta_crm
+    tipo: http
+    sella_primera_respuesta: true
+    descripcion: >
+      Le avisa al caso del CRM que una persona le contesto al cliente desde la
+      Bandeja. NO la llames tu: la ejecuta el codigo.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [soporte]
+    base_url: http://backend:8000
+    endpoint: /api/cases/{id_caso}/primera-respuesta/
+    metodo: POST
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+
   - nombre: responder_ticket_operativo
     tipo: http
     multipart: true

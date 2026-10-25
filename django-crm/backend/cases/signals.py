@@ -27,7 +27,7 @@ from django.db.models.signals import (
 from django.dispatch import receiver
 from django.utils import timezone
 
-from cases.models import Case, ReopenPolicy, Solution, TimeEntry
+from cases.models import Case, ReopenPolicy, RespuestaExterna, Solution, TimeEntry
 from common.models import Activity, Comment
 
 REOPEN_TRIGGER_STATUS = "Closed"
@@ -238,11 +238,92 @@ def _maybe_stamp_first_response(case, comment):
         return
     if comment.commented_by_id is None:
         return
-    stamped = comment.created_at or timezone.now()
-    case.first_response_at = stamped
-    Case.objects.filter(pk=case.pk, first_response_at__isnull=True).update(
-        first_response_at=stamped
-    )
+    sellar_primera_respuesta(case, comment.created_at or timezone.now())
+
+
+def sellar_primera_respuesta(case, momento):
+    """La primera respuesta de ``case`` pasa a ser ``momento`` si es anterior.
+
+    LA REGLA, UNA SOLA (25/10/2026): la primera respuesta es la primera vez
+    que alguien del equipo le dijo algo al cliente sobre este caso, por el
+    canal que sea -- un comentario publico aca, una respuesta en el ticket del
+    proveedor, un mensaje desde la Bandeja. Cada camino trae su momento y este
+    se queda con el MAS TEMPRANO: un hilo externo llega despues (la
+    importacion corre por reloj) con respuestas que pueden ser anteriores al
+    comentario que ya sello.
+
+    Nunca antes de que el caso exista aca. Un caso importado nace con la hora
+    de la importacion y no con la del proveedor, asi que una respuesta escrita
+    alla antes de importarlo quedaria "antes del ticket": ese caso llego ya
+    respondido, y su primera respuesta es su nacimiento.
+
+    La condicion va en el UPDATE y no en un 'if': dos caminos que sellan a la
+    vez no se pisan, gana el momento menor.
+    """
+    from datetime import timezone as zona
+    from django.db.models import Q
+    from django.utils.dateparse import parse_datetime
+
+    if isinstance(momento, str):
+        momento = parse_datetime(momento)
+    if momento is None:
+        return
+    if timezone.is_naive(momento):
+        momento = timezone.make_aware(momento, zona.utc)
+    if case.created_at and momento < case.created_at:
+        momento = case.created_at
+    hechos = Case.objects.filter(pk=case.pk).filter(
+        Q(first_response_at__isnull=True) | Q(first_response_at__gt=momento)
+    ).update(first_response_at=momento)
+    if hechos:
+        case.first_response_at = momento
+
+
+@receiver(post_save, sender=RespuestaExterna)
+def respuesta_externa_es_primera_respuesta(sender, instance, created, **kwargs):
+    """Una respuesta en el ticket del proveedor cuenta como respuesta.
+
+    Es el camino de los tickets que nacen por telefono: se abren en WispHub,
+    se trabajan en WispHub, y su hilo llega aca por la importacion. Hasta el
+    25/10/2026 ese hilo se guardaba y no contaba, asi que un ticket atendido
+    alla figuraba aca "sin primera respuesta" para siempre.
+
+    Solo con un USUARIO del proveedor como autor: el hilo de WispHub lo
+    escriben cuentas del equipo (el autor es un usuario de WispHub, no un
+    cliente), y una fila sin usuario no dice quien la escribio. Sin fecha
+    del proveedor tampoco: no se le inventa un momento.
+    """
+    if not created:
+        return
+    if not (instance.autor_usuario or "").strip():
+        return
+    if not _quien_envia_puede_sellar(instance.case):
+        return
+    sellar_primera_respuesta(instance.case, instance.creada_en_proveedor)
+
+
+def _quien_envia_puede_sellar(case):
+    """Si quien manda el hilo podria haber sellado la primera respuesta.
+
+    La ruta de importacion acepta a cualquier usuario autenticado de la
+    organizacion (cases/importacion_views.py), y hasta el 25/10/2026 eso solo
+    agregaba texto al hilo. Desde que el hilo sella la primera respuesta, esa
+    misma puerta serviria para maquillar el tiempo de respuesta de un ticket
+    ajeno. Se exige lo mismo que para sellarla comentando: poder escribir el
+    caso. La importacion no cambia -- el hilo se guarda igual --; lo unico
+    que se acota es el sello.
+
+    Sin request (una migracion, un comando) no hay a quien preguntarle y se
+    sella: esos caminos no los abre un usuario.
+    """
+    from cases.access import has_case_write_access
+    from common.models import Profile
+
+    user = get_current_user()
+    if user is None or not getattr(user, "is_authenticated", False):
+        return True
+    perfil = Profile.objects.filter(user=user, org_id=case.org_id, is_active=True).first()
+    return perfil is not None and has_case_write_access(perfil, case)
 
 
 @receiver(post_save, sender=Case)

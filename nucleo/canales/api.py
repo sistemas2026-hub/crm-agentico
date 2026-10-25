@@ -6512,6 +6512,34 @@ def _escribir_en_chat_cerrado(tenant: str, id_conversacion: str, contenido: str,
     return jsonify(salida), 201
 
 
+def _avisar_primera_respuesta(tenant: str, id_conversacion: str,
+                              caso: str | None, autor: str) -> bool:
+    """
+    Le avisa al caso del CRM que una persona le contesto al cliente.
+
+    El caso sale del que se respondio (desde la pantalla del ticket) o de la
+    conversacion. Una conversacion sin caso no avisa nada: nadie la escalo, y
+    no hay ticket que medir. Nunca rompe la respuesta: el mensaje ya salio, y
+    que el indicador no se entere es un problema menor que no contestarle a
+    quien espera.
+    """
+    try:
+        caso = caso or persistencia.caso_de_conversacion(tenant, id_conversacion)
+    except Exception as e:
+        registrar("operativo", "no se pudo leer el caso de la conversacion",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return False
+    if not caso:
+        return False
+    try:
+        return operativo.sellar_primera_respuesta(
+            _config_de(tenant), tenant, caso,
+            datetime.now(timezone.utc).isoformat(), autor)
+    except Exception as e:
+        registrar("operativo", "no se pudo avisar la primera respuesta", error=e)
+        return False
+
+
 def _ya_guardado(destino: dict) -> bool:
     """
     True si 'destino' es un REINTENTO de un mensaje que ya existia (misma
@@ -6758,11 +6786,13 @@ def caso_responder_humano(caso_id):
         if chat and chat.get("abierta_id"):
             destino = str(chat["abierta_id"])
         ticket = (chat or {}).get("ticket_operativo")
-    return conversaciones_responder_humano(destino, ticket_del_caso=ticket)
+    return conversaciones_responder_humano(destino, ticket_del_caso=ticket,
+                                           caso_del_caso=caso_id)
 
 
 @app.post("/conversaciones/<id_conversacion>/mensajes")
-def conversaciones_responder_humano(id_conversacion, ticket_del_caso: str | None = None):
+def conversaciones_responder_humano(id_conversacion, ticket_del_caso: str | None = None,
+                                    caso_del_caso: str | None = None):
     """
     Un agente humano responde directo en una conversacion ya escalada -- sin
     pasar por el modelo. Distinto de /chat: eso simula al cliente escribiendo
@@ -6945,6 +6975,8 @@ def conversaciones_responder_humano(id_conversacion, ticket_del_caso: str | None
             # quedaba afuera.
             if salida["devuelto_al_asistente"] and clave_sesion in _sesiones:
                 _sesiones[clave_sesion]["escalada"] = False
+        salida["primera_respuesta_avisada"] = _avisar_primera_respuesta(
+            tenant, id_conversacion, caso_del_caso, autor)
         return jsonify(salida), 201
 
     # 201 aunque la entrega falle: el mensaje SI quedo guardado, y el agente
@@ -6959,6 +6991,12 @@ def conversaciones_responder_humano(id_conversacion, ticket_del_caso: str | None
                                       destino["usuario_externo"], contenido),
         f"conversaciones '{id_conversacion}'", clave_salida=f"humano:{clave}",
         conversation_id=id_conversacion))
+    # LA PRIMERA RESPUESTA CUENTA CUANDO SALIO, NO CUANDO SE GUARDO. Con la
+    # ventana de 24 h cerrada el mensaje queda en el hilo y al cliente no le
+    # llega: contarlo como respuesta escondería justo ese problema.
+    if salida["resultado"] == "aceptado":
+        salida["primera_respuesta_avisada"] = _avisar_primera_respuesta(
+            tenant, id_conversacion, caso_del_caso, autor)
     if devolver:
         if salida["resultado"] == "aceptado" and salida["aceptacion_registrada"]:
             # T6 paso 4: solo después del commit que guardó el wamid.

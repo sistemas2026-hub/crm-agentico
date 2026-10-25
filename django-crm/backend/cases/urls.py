@@ -13,6 +13,7 @@ from cases import (
     kb_views,
     merge_views,
     parent_views,
+    primera_respuesta_views,
     routing_views,
     solution_views,
     time_views,
@@ -227,6 +228,12 @@ urlpatterns = [
         "<uid:pk>/assignees/",
         assignee_views.CaseAssigneesView.as_view(),
         name="case_assignees",
+    ),
+    # La primera respuesta que dio una persona desde la Bandeja (la avisa el motor).
+    path(
+        "<uid:pk>/primera-respuesta/",
+        primera_respuesta_views.CasePrimeraRespuestaView.as_view(),
+        name="case_primera_respuesta",
     ),
     # Asignarse un caso sin responsable: quien reparte o alguien de su area.
     path(

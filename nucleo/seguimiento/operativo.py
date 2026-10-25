@@ -147,6 +147,37 @@ def cerrar_caso_crm(config, tenant: str, caso_id: str) -> bool:
         return False
 
 
+def sellar_primera_respuesta(config, tenant: str, caso_id: str, momento: str,
+                             autor: str = "") -> bool:
+    """
+    Le avisa al caso del CRM que una persona le acaba de contestar al cliente.
+
+    Existe porque la respuesta desde la Bandeja la guarda y la entrega el
+    motor, y el CRM no se enteraba: el ticket de un chat figuraba "sin primera
+    respuesta" aunque alguien le hubiera escrito al cliente al minuto. La copia
+    que va al ticket del ISP no vuelve, porque el caso de un chat no esta atado
+    a ese ticket como los importados.
+
+    El CRM decide si es la primera (se queda con la mas temprana). Devuelve si
+    se pudo avisar; no poder hacerlo no rompe la respuesta, que ya salio.
+    """
+    herr = _herramienta(config, "sella_primera_respuesta")
+    if herr is None or not caso_id or not momento:
+        return False
+    argumentos = dict(herr.argumentos_fijos or {})
+    argumentos.update({"id_caso": str(caso_id), "momento": momento})
+    try:
+        # Con actor: lo origina la respuesta de una persona, igual que la
+        # copia al ticket del ISP.
+        with _permiso(tenant, herr.nombre, autor, f"caso:{caso_id}"):
+            ejecutor_http.ejecutar(herr, argumentos, tenant)
+        return True
+    except Exception as e:
+        registrar("operativo", "no se pudo avisar la primera respuesta",
+                  caso_id=id_interno(caso_id), error=e)
+        return False
+
+
 def cerrar_todo(config, tenant: str, conversacion: dict, texto: str,
                 autor: str = "", *, por: str = "cliente") -> dict:
     """

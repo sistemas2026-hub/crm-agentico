@@ -1278,6 +1278,11 @@ class Herramienta(Base):
     # La que cierra el caso en el CRM. Misma idea: el motor no sabe con que
     # palabra cierra un caso cada CRM ('Closed' aqui), eso va en la config.
     cierra_caso: bool = False
+    # La que le avisa al caso del CRM que una persona le contesto al cliente
+    # desde la Bandeja: es su primera respuesta si no habia otra anterior. La
+    # ejecuta el codigo (operativo.sellar_primera_respuesta) cuando la
+    # respuesta fue ACEPTADA para entrega, nunca el modelo.
+    sella_primera_respuesta: bool = False
     # Nombres de campo en la respuesta cruda del proveedor -- configurables
     # por tenant para no hardcodear el vocabulario de un proveedor puntual
     # (WispHub llama 'localidad' y 'zona') en nucleo/. 'campo_zona_sync'
