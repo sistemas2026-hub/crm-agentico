@@ -211,6 +211,7 @@ def simular(org, fecha=None, ahora=None) -> dict:
             return {"nueva": True, "orden": None, "ticket": f["ticket"],
                     "asunto": f["asunto"], "plantilla": f["plantilla"],
                     "prioridad": o.prioridad, "barrio": f["barrio"],
+                    "barrio_de": f.get("barrio_de", ""),
                     "llamar_al_cliente": f["llamar_al_cliente"]}
         caso = casos.get(str(o.origen_ref or ""))
         return {"nueva": False, "orden": o.numero,

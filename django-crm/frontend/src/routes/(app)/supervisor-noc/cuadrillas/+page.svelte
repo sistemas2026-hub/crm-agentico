@@ -473,6 +473,11 @@
               Casos en Despacho que cuentan para la labor: {previa.demanda.contados ?? 0}
               · sin barrio todavía: {previa.demanda.sin_barrio ?? 0}
               · barrio sin zona: {previa.demanda.sin_zona ?? 0}
+              {#if previa.demanda.obras_sin_barrio}
+                <!-- 25/10/2026: una obra de red se ubica por el barrio que nombra
+                     su ticket; si no nombra ninguno, la ubica una persona. -->
+                · obras de red que no dicen dónde son: {previa.demanda.obras_sin_barrio}
+              {/if}
               · sin labor: {previa.demanda.sin_labor ?? 0}
               · ya despachados: {previa.demanda.ya_despachados ?? 0}.
             </span>

@@ -488,7 +488,7 @@
                       <span style="min-width:0;">{o.asunto || o.plantilla}</span>
                       <span class="snoc-body-sm">{textoDePrioridad(o.prioridad)}</span>
                       <span class="snoc-body-sm snoc-secundario">
-                        {o.llamar_al_cliente ? 'llamar al cliente' : o.barrio}{o.nueva ? ' · nueva' : ''}
+                        {o.barrio || ''}{o.barrio_de === 'ticket' ? ' · según el ticket' : ''}{o.llamar_al_cliente ? ' · llamar al cliente' : ''}{o.nueva ? ' · nueva' : ''}
                       </span>
                     </div>
                   {/each}
@@ -566,7 +566,11 @@
                       <td>{textoDePrioridad(f.prioridad)}</td>
                       <td>{f.para || '—'}</td>
                       <td>
-                        {f.llamar_al_cliente ? 'Llamar al cliente para ubicarlo' : `${f.barrio} (${f.zona})`}
+                        <!-- «Según el ticket» (25/10/2026): el Supervisor sacó el barrio
+                             del texto del ticket, no de la ficha del cliente. -->
+                        {f.barrio ? `${f.barrio} (${f.zona})` : ''}
+                        {#if f.barrio_de === 'ticket'}· según el ticket{/if}
+                        {#if f.llamar_al_cliente}{f.barrio ? '· llamar al cliente' : 'Llamar al cliente para ubicarlo'}{/if}
                         {#if f.corte_de_red}· corte de red{/if}
                       </td>
                     </tr>

@@ -325,6 +325,7 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
     )
     from campo.zonas import AliasDeZona, normalizar_localidad
     from operaciones import paso_a_despacho as pad
+    from operaciones import ubicacion_del_caso as ub
 
     labores = labor_de_cada_grupo(org)
     #  Se arma una vez, como en `reparto.proponer`: preguntarlo por caso seria
@@ -333,13 +334,18 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
         a.localidad: str(a.zona_id)
         for a in AliasDeZona.objects.filter(org=org, zona__activa=True)
     }
+    buscables = ub.preparar(zona_de_barrio)
+    textos = _textos_de_los_casos(org, list(propuestas))
     despachados = _ya_despachados(org, list(propuestas))
     salida = {"por_zona": {}, "casos": len(propuestas), "contados": 0,
               "ya_despachados": 0, "sin_barrio": 0,
               "instalaciones_sin_barrio": 0, "sin_zona": 0, "sin_labor": 0,
               #  Casos de un corte de red que ya conto otro caso del mismo
               #  puerto (19/10/2026): un solo trabajo, no uno por cliente.
-              "mismo_corte_de_red": 0}
+              "mismo_corte_de_red": 0,
+              #  Obras de red cuyo ticket no nombra un barrio cargado (o
+              #  nombra dos zonas): no se sabe donde son (25/10/2026).
+              "obras_sin_barrio": 0}
     umbral_corte = onus_para_corte_de_red(org.id)
     #  EL CORTE DE RED SE CUENTA UNA VEZ (auditor independiente, 19/10/2026).
     #  La llave es el PUERTO, no la zona: un puerto puede alimentar dos zonas y
@@ -362,9 +368,16 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
             salida["mismo_corte_de_red"] += 1
             continue
         pieza = localidad_guardada(p) or {}
-        barrio = normalizar_localidad(pieza.get("localidad") or "")
+        #  EL BARRIO DE UNA OBRA DE RED LO NOMBRA EL TICKET (25/10/2026): el
+        #  de la cuenta es el de la oficina. Ver `ubicacion_del_caso`.
+        obra = ub.es_obra_de_red(pad._ultima_lectura_con_grupo(p) or {},
+                                 es_corte=bool(corte))
+        barrio, _de_donde = ub.barrio_del_caso(
+            normalizar_localidad(pieza.get("localidad") or ""),
+            textos.get(caso, ""), es_obra=obra, buscables=buscables)
         if not barrio:
-            salida["instalaciones_sin_barrio" if pieza.get("cliente_nuevo")
+            salida["obras_sin_barrio" if obra
+                   else "instalaciones_sin_barrio" if pieza.get("cliente_nuevo")
                    else "sin_barrio"] += 1
             continue
         zona = zona_de_barrio.get(barrio)
@@ -402,6 +415,18 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
                                        + salida["instalaciones_sin_barrio"])
         salida["zonas_con_instalaciones_sin_barrio"] = len(zonas)
     return salida
+
+
+def _textos_de_los_casos(org, casos: list) -> dict:
+    """{caso: asunto y descripcion}, en una consulta. Solo para buscar ahi el
+    barrio (`ubicacion_del_caso`): no se guarda ni va a ningun log."""
+    from cases.models import Case
+
+    if not casos:
+        return {}
+    return {str(i): f"{n or ''} {d or ''}"
+            for i, n, d in Case.objects.filter(org=org, id__in=casos)
+            .values_list("id", "name", "description")}
 
 
 def _es_de_un_cliente_nuevo(localidad: dict, lectura: dict) -> bool:
@@ -668,17 +693,31 @@ def _barrios_sin_zona(org, propuestas: dict) -> list[dict]:
     from collections import Counter
 
     from campo.zonas import AliasDeZona, normalizar_localidad
+    from operaciones import paso_a_despacho as pad
+    from operaciones import ubicacion_del_caso as ub
 
-    mapeados = set(AliasDeZona.objects.filter(org=org, zona__activa=True)
-                   .values_list("localidad", flat=True))
+    #  EL MISMO BARRIO QUE CUENTA LA DEMANDA (25/10/2026): el de una obra de
+    #  red sale del ticket, y la cuenta de la oficina no se pide cargar.
+    zona_de_barrio = {a.localidad: str(a.zona_id) for a in
+                      AliasDeZona.objects.filter(org=org, zona__activa=True)}
+    buscables = ub.preparar(zona_de_barrio)
+    textos = _textos_de_los_casos(org, list(propuestas))
+    from campo.cuadrillas import onus_para_corte_de_red
+    umbral = onus_para_corte_de_red(org.id)
     despachados = _ya_despachados(org, list(propuestas))
     cuenta = Counter()
     for caso, p in propuestas.items():
         if caso in despachados:
             continue
-        barrio = normalizar_localidad(
-            (localidad_guardada(p) or {}).get("localidad") or "")
-        if barrio and barrio not in mapeados:
+        medicion = pad.ultima_medicion(p)
+        barrio, _de_donde = ub.barrio_del_caso(
+            normalizar_localidad((localidad_guardada(p) or {}).get("localidad") or ""),
+            textos.get(caso, ""),
+            es_obra=ub.es_obra_de_red(
+                pad._ultima_lectura_con_grupo(p) or {},
+                es_corte=pad.es_corte_de_red(medicion, umbral)),
+            buscables=buscables)
+        if barrio and barrio not in zona_de_barrio:
             cuenta[barrio] += 1
     return [{"barrio": b, "casos": n}
             for b, n in sorted(cuenta.items(), key=lambda x: (-x[1], x[0]))]

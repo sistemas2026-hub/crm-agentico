@@ -171,6 +171,9 @@ def test_l_una_labor_sin_cuadrilla_ese_dia_se_nombra(con_corte, cuadrilla, plant
     _caso(con_corte)
     _caso(con_corte)
     red = _caso(con_corte, pad.OBRA_DE_RED, asunto="Corte de fibra")
+    #  Una obra de red se ubica por el barrio que nombra su ticket
+    #  (`ubicacion_del_caso`, 25/10/2026), no por el de la cuenta.
+    Case.objects.filter(pk=red.pk).update(description=f"Caja de {BARRIO}")
 
     s = simular(con_corte, MARTES, A_LAS_3)
 

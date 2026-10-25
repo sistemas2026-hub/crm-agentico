@@ -61,6 +61,7 @@ YA_TUVO_ORDEN = "ya_tuvo_orden"
 SIN_BARRIO_TODAVIA = "sin_barrio_todavia"
 SIN_BARRIO = "sin_barrio"
 BARRIO_SIN_ZONA = "barrio_sin_zona"
+OBRA_SIN_BARRIO = "obra_sin_barrio"
 SIN_PLANTILLA = "sin_plantilla"
 
 _POR_QUE_NO = {
@@ -72,6 +73,9 @@ _POR_QUE_NO = {
     SIN_BARRIO: "El ISP no tiene el barrio del cliente.",
     BARRIO_SIN_ZONA: ("Su barrio no está en ninguna zona: se carga en Zonas "
                       "operativas."),
+    OBRA_SIN_BARRIO: ("Es una obra de red y el ticket no nombra un barrio "
+                      "cargado en Zonas (o nombra barrios de dos zonas): "
+                      "dónde es lo decide una persona."),
 }
 
 #: La prioridad de la orden, con los valores de `OrdenTrabajo.prioridad`.
@@ -160,6 +164,7 @@ def decidir(org, ahora=None) -> dict:
     from cases.models import Case
     from operaciones import armado_de_jornadas as adj
     from operaciones import paso_a_despacho as pad
+    from operaciones import ubicacion_del_caso as ub
 
     ahora = ahora or timezone.now()
     zona_horaria = _zona_de(org)
@@ -187,6 +192,7 @@ def decidir(org, ahora=None) -> dict:
         for a in AliasDeZona.objects.filter(org=org, zona__activa=True)
         .select_related("zona")
     }
+    buscables = ub.preparar(zona_de_barrio)
     umbral = onus_para_corte_de_red(org.id)
     #  El puerto de cada caso que es parte de un corte de red, y el caso que
     #  lleva la orden de cada puerto. Los que ya tienen orden viva van primero:
@@ -237,8 +243,17 @@ def decidir(org, ahora=None) -> dict:
         pieza = adj.localidad_guardada(p)
         lectura = pad._ultima_lectura_con_grupo(p) or {}
         nuevo = adj._es_de_un_cliente_nuevo(pieza or {}, lectura)
-        barrio = normalizar_localidad((pieza or {}).get("localidad") or "")
+        #  EL BARRIO DE UNA OBRA DE RED LO NOMBRA EL TICKET (25/10/2026): el
+        #  de la cuenta es el de la oficina. Ver `ubicacion_del_caso`.
+        obra = ub.es_obra_de_red(lectura, es_corte=bool(puerto))
+        barrio, de_donde = ub.barrio_del_caso(
+            normalizar_localidad((pieza or {}).get("localidad") or ""),
+            f"{caso.name or ''} {getattr(caso, 'description', '') or ''}",
+            es_obra=obra, buscables=buscables)
         zona = zona_de_barrio.get(barrio) if barrio else None
+        if not barrio and obra:
+            no(OBRA_SIN_BARRIO)
+            continue
         if not barrio and not nuevo:
             no(SIN_BARRIO_TODAVIA if pieza is None else SIN_BARRIO)
             continue
@@ -273,8 +288,11 @@ def decidir(org, ahora=None) -> dict:
                                       zona_horaria),
             "para": para.isoformat() if para else "",
             "barrio": barrio,
+            "barrio_de": de_donde,
             "zona": zona or "",
-            "llamar_al_cliente": not barrio,
+            #  La instalacion nueva no trae direccion aunque el ticket nombre
+            #  el barrio (y con el, la zona): igual hay que llamar al cliente.
+            "llamar_al_cliente": nuevo,
             "corte_de_red": bool(puerto),
         })
     return salida
