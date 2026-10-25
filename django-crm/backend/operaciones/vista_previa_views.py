@@ -10,6 +10,10 @@ devuelve lo que armaria ese dia. Ver
 ordenes crearia ahora en la cola de Despacho, y por que no las otras. Ver
 `operaciones.ordenes_de_despacho.decidir`.
 
+``GET /api/operaciones/dia/simulacion/?fecha=AAAA-MM-DD`` (24/10/2026) junta
+las dos y el reparto: el dia entero como lo dejaria. Ver
+`operaciones.simulacion_del_dia.simular`.
+
 Modulo propio y no `views.py`: ese archivo es de los de superficie de conflicto
 alta (CLAUDE.md §2), y esto es una lectura sola.
 """
@@ -55,3 +59,24 @@ class VistaPreviaDeLasOrdenesView(APIView):
         from operaciones.ordenes_de_despacho import decidir
 
         return Response(decidir(request.org))
+
+
+class SimulacionDelDiaView(APIView):
+    """El dia entero como lo dejaria el Supervisor: cuadrillas, ordenes y
+    reparto. No escribe nada ni le pregunta al motor. Sin `fecha`, hoy en la
+    hora de la empresa. Ver `operaciones.simulacion_del_dia.simular`."""
+
+    permission_classes = [EsJefeDeOperaciones]
+
+    def get(self, request):
+        from operaciones.simulacion_del_dia import simular
+
+        texto = (request.query_params.get("fecha") or "").strip()
+        fecha = None
+        if texto:
+            try:
+                fecha = date.fromisoformat(texto)
+            except ValueError:
+                return Response({"detail": "La fecha va como AAAA-MM-DD."},
+                                status=400)
+        return Response(simular(request.org, fecha))

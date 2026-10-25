@@ -6,6 +6,7 @@ from django.urls import path
 from operaciones import views
 from operaciones.vista_previa_views import (
     VistaPreviaDeLaJornadaView,
+    SimulacionDelDiaView,
     VistaPreviaDeLasOrdenesView,
 )
 
@@ -18,6 +19,9 @@ urlpatterns = [
     #  23/10/2026. Que ordenes crearia el Supervisor ahora, sin crear nada.
     path("ordenes/vista-previa/", VistaPreviaDeLasOrdenesView.as_view(),
          name="ordenes-vista-previa"),
+    #  24/10/2026. El dia entero como lo dejaria el Supervisor, sin escribir.
+    path("dia/simulacion/", SimulacionDelDiaView.as_view(),
+         name="dia-simulacion"),
     path("propuestas/", views.PropuestasView.as_view(), name="propuestas"),
     path("propuestas/<uuid:propuesta_id>/", views.PropuestaDetalleView.as_view(),
          name="propuesta-detalle"),

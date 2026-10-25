@@ -363,10 +363,6 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
           "empezadas":     [ya empezadas que siguen con quien las tiene],
         }
     """
-    if plazo_de is None:                      # import tardio: evita el ciclo
-        from operaciones.sla import plazo_de as _plazo
-        plazo_de = _plazo
-
     #  El tope de la empresa cuando no se pide uno. Se resuelve aca y no en el
     #  default del parametro: un default se evalua al IMPORTAR el modulo, asi
     #  que leeria la configuracion una sola vez en la vida del proceso y no se
@@ -382,26 +378,80 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
         .prefetch_related("zonas")
     )
 
-    # Que zonas cubre cada cuadrilla hoy, Y CON QUE LABOR. Una cuadrilla SIN
-    # zonas no entra: vacio es "sin zona asignada", nunca "cubre todas".
-    #
-    # La clave lleva la labor porque una cuadrilla puesta en correctivo no
-    # puede recibir instalaciones -- hasta el 08/10/2026 el reparto ignoraba
-    # ese campo y se las daba igual.
-    por_zona: dict = {}
-    for j in jornadas:
-        for z in j.zonas.all():
-            por_zona.setdefault((str(z.id), j.labor), []).append(j)
+    # Que zonas cubre cada cuadrilla hoy. Una cuadrilla SIN zonas no entra:
+    # vacio es "sin zona asignada", nunca "cubre todas".
+    zonas_de = {j.id: [str(z.id) for z in j.zonas.all()] for j in jornadas}
 
-    # De que zona es cada barrio. Se arma una vez: preguntarlo por orden seria
-    # una consulta por fila.
+    espera = lo_que_espera(org)
+    ordenadas = sorted(espera["pendientes"],
+                       key=clave_de_reparto(precios_por_plan, plazo_de, ahora))
+
+    #  EL TOPE ES POR CUADRILLA, no uno solo para todas.
+    #
+    #  Una cuadrilla de dos personas no rinde lo mismo que una de cuatro, y un
+    #  numero unico obliga a elegir entre sobrecargar a la chica o
+    #  desaprovechar a la grande. `Cuadrilla.tope_diario` manda; si no lo
+    #  declara, vale el de la empresa, y si la empresa no tiene fila, el de
+    #  fabrica. Ninguno de los tres es capacidad calculada: es un freno.
+    topes = {
+        j.id: (j.cuadrilla.tope_diario or tope)
+        for j in jornadas
+    }
+
+    r = repartir(ordenadas, jornadas, zonas_de=zonas_de, topes=topes,
+                 zona_de_barrio=zona_de_barrio(org), dia=_como_fecha(fecha),
+                 zona_horaria=_zona_de(org))
+
+    return {
+        "asignaciones": [
+            {"jornada": j, "cuadrilla": j.cuadrilla,
+             "ordenes": r["asignadas"][j.id]}
+            for j in jornadas
+        ],
+        "sin_zona": r["sin_zona"],
+        #  Las que una persona asigno a mano: no se tocan, y se nombran para
+        #  que nadie las busque entre las «perdidas».
+        "a_mano": espera["a_mano"],
+        "sin_cuadrilla": r["sin_cuadrilla"],
+        "sobrantes": r["sobrantes"],
+        # Las que ni siquiera se pudieron evaluar: su tipo de trabajo no dice
+        # a que labor pertenece. Se arregla clasificando el tipo UNA vez, no
+        # orden por orden.
+        "sin_clasificar": r["sin_clasificar"],
+        #  Programadas para un dia posterior: salen en el reparto de ese dia.
+        "otro_dia": r["otro_dia"],
+        #  Ya empezadas y todavia esperando: siguen con quien las tiene.
+        "empezadas": espera["empezadas"],
+    }
+
+
+# ---------------------------------------------------------------------------
+#  LAS PIEZAS DE PROPONER  --  24/10/2026
+# ---------------------------------------------------------------------------
+#
+#  Separadas sin cambiar nada para que «Simular el dia»
+#  (`operaciones/simulacion_del_dia.py`) reparta con la MISMA regla las
+#  ordenes que ya existen y las que el Supervisor crearia, entre las jornadas
+#  que armaria. Una segunda copia del reparto se desincronizaria el primer
+#  dia que alguien toque una de las dos.
+
+def zona_de_barrio(org) -> dict:
+    """{barrio normalizado: id de su zona activa}. Se arma una vez: preguntarlo
+    por orden seria una consulta por fila."""
     from campo.zonas import AliasDeZona
 
-    zona_de_barrio = {
+    return {
         a.localidad: str(a.zona_id)
         for a in AliasDeZona.objects.filter(org=org, zona__activa=True)
     }
 
+
+def lo_que_espera(org) -> dict:
+    """Las ordenes que el reparto puede mover, y las que no se tocan.
+
+        {"pendientes": [las que esperan a alguien y nadie empezo ni asigno a
+                        mano], "a_mano": [...], "empezadas": [...]}
+    """
     #  QUIEN EMPEZO UN TRABAJO LO TERMINA, y lo que nadie toco vuelve a
     #  repartirse.
     #
@@ -423,7 +473,7 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
     #  respeta; si despues el reparto la movio o se desasigno, vuelve a ser
     #  libre.
     a_mano_ids = _asignadas_a_mano(org)
-    pendientes = (
+    pendientes = list(
         OrdenTrabajo.objects
         .filter(org=org, estado_operativo__in=ESTADOS_QUE_ESPERAN)
         .exclude(id__in=ya_empezadas)
@@ -442,8 +492,15 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
                      .filter(org=org, id__in=ya_empezadas,
                              estado_operativo__in=ESTADOS_QUE_ESPERAN)
                      .order_by("numero"))
+    return {"pendientes": pendientes, "a_mano": a_mano, "empezadas": empezadas}
 
-    # El orden, con su desempate estable por numero.
+
+def clave_de_reparto(precios_por_plan=None, plazo_de=None, ahora=None):
+    """La clave con que se ordena lo que se reparte, con su desempate estable
+    por numero (ver «EL ORDEN, Y POR QUE ESE» arriba)."""
+    if plazo_de is None:                      # import tardio: evita el ciclo
+        from operaciones.sla import plazo_de as _plazo
+        plazo_de = _plazo
     precios = precios_por_plan or {}
 
     def clave(o):
@@ -453,30 +510,40 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
         peso = (0, -p) if p is not None else (1, Decimal(0))
         return _urgencia(o, plazo_de(o, ahora=ahora)) + peso + (o.numero or 0,)
 
-    ordenadas = sorted(pendientes, key=clave)
+    return clave
 
-    #  EL TOPE ES POR CUADRILLA, no uno solo para todas.
+
+def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
+             zona_de_barrio: dict, dia, zona_horaria) -> dict:
+    """Reparte `ordenadas` (ya en su orden) entre `jornadas`. No consulta la
+    base ni escribe nada.
+
+    Cada jornada necesita `id`, `labor` y `cuadrilla.nombre`; `zonas_de` y
+    `topes` van por `id`. Por eso sirve igual para las jornadas de la base y
+    para las que el Supervisor armaria.
+
+        {"asignadas": {jornada.id: [ordenes]}, "sin_zona", "sin_cuadrilla",
+         "sobrantes", "sin_clasificar", "otro_dia"}
+    """
+    # Que zonas cubre cada cuadrilla hoy, Y CON QUE LABOR.
     #
-    #  Una cuadrilla de dos personas no rinde lo mismo que una de cuatro, y un
-    #  numero unico obliga a elegir entre sobrecargar a la chica o
-    #  desaprovechar a la grande. `Cuadrilla.tope_diario` manda; si no lo
-    #  declara, vale el de la empresa, y si la empresa no tiene fila, el de
-    #  fabrica. Ninguno de los tres es capacidad calculada: es un freno.
-    topes = {
-        j.id: (j.cuadrilla.tope_diario or tope)
-        for j in jornadas
-    }
+    # La clave lleva la labor porque una cuadrilla puesta en correctivo no
+    # puede recibir instalaciones -- hasta el 08/10/2026 el reparto ignoraba
+    # ese campo y se las daba igual.
+    por_zona: dict = {}
+    for j in jornadas:
+        for z in zonas_de.get(j.id, ()):
+            por_zona.setdefault((str(z), j.labor), []).append(j)
 
     carga = {j.id: 0 for j in jornadas}
     asignadas: dict = {j.id: [] for j in jornadas}
     sin_zona, sin_cuadrilla, sobrantes, sin_clasificar = [], [], [], []
     otro_dia = []
-    dia, zona = _como_fecha(fecha), _zona_de(org)
 
     for orden in ordenadas:
         #  LO QUE ES PARA OTRO DIA, ESE DIA. Va primero: no importa si tiene
         #  zona o cuadrilla, hoy no le toca.
-        if _para_otro_dia(orden, dia, zona):
+        if _para_otro_dia(orden, dia, zona_horaria):
             otro_dia.append(orden)
             continue
 
@@ -514,26 +581,9 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
         asignadas[elegida.id].append(orden)
         carga[elegida.id] += 1
 
-    return {
-        "asignaciones": [
-            {"jornada": j, "cuadrilla": j.cuadrilla, "ordenes": asignadas[j.id]}
-            for j in jornadas
-        ],
-        "sin_zona": sin_zona,
-        #  Las que una persona asigno a mano: no se tocan, y se nombran para
-        #  que nadie las busque entre las «perdidas».
-        "a_mano": a_mano,
-        "sin_cuadrilla": sin_cuadrilla,
-        "sobrantes": sobrantes,
-        # Las que ni siquiera se pudieron evaluar: su tipo de trabajo no dice
-        # a que labor pertenece. Se arregla clasificando el tipo UNA vez, no
-        # orden por orden.
-        "sin_clasificar": sin_clasificar,
-        #  Programadas para un dia posterior: salen en el reparto de ese dia.
-        "otro_dia": otro_dia,
-        #  Ya empezadas y todavia esperando: siguen con quien las tiene.
-        "empezadas": empezadas,
-    }
+    return {"asignadas": asignadas, "sin_zona": sin_zona,
+            "sin_cuadrilla": sin_cuadrilla, "sobrantes": sobrantes,
+            "sin_clasificar": sin_clasificar, "otro_dia": otro_dia}
 
 
 # ---------------------------------------------------------------------------

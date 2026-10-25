@@ -153,3 +153,15 @@ export async function leerCobertura(ctx, { barrio, fecha = '', labor = '' }) {
 export async function leerVistaPreviaDeLasOrdenes(ctx) {
   return apiRequest('/operaciones/ordenes/vista-previa/', {}, ctx);
 }
+
+/**
+ * El día entero como lo dejaría el Supervisor: cuadrillas, órdenes y reparto,
+ * sin guardar nada (24/10/2026). Ver `operaciones/simulacion_del_dia.py`.
+ *
+ * @param {{ cookies: any }} ctx
+ * @param {string} [fecha]  'AAAA-MM-DD'; vacía = hoy en la hora de la empresa
+ */
+export async function leerSimulacionDelDia(ctx, fecha) {
+  const q = fecha ? `?fecha=${encodeURIComponent(fecha)}` : '';
+  return apiRequest(`/operaciones/dia/simulacion/${q}`, {}, ctx);
+}

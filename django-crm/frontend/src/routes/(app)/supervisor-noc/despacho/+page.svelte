@@ -125,6 +125,42 @@
   }
   /** @param {string} id */
   const textoDePrioridad = (id) => PRIORIDADES.find((p) => p.id === id)?.texto ?? id;
+
+  /**
+   * SIMULAR EL DÍA  --  24/10/2026.
+   *
+   * El ensayo entero: las cuadrillas que armaría, las órdenes que crearía y cómo
+   * las repartiría entre ellas, sin guardar nada. Pedido del usuario: ver la
+   * carga de cada cuadrilla y si la labor cuadra antes de dejarlo hacerlo solo.
+   */
+  let simulacion = $state(/** @type {any} */ (null));
+  let simulando = $state(false);
+  let errorSimulacion = $state('');
+  //  El día con que abre la página; después lo cambia quien simula.
+  let diaSimulado = $state(untrack(() => data.dia));
+  async function simularElDia() {
+    simulando = true;
+    errorSimulacion = '';
+    try {
+      const r = await fetch(`/supervisor-noc/despacho/simulacion?fecha=${encodeURIComponent(diaSimulado)}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'No se pudo simular.');
+      simulacion = d;
+    } catch (/** @type {any} */ e) {
+      simulacion = null;
+      errorSimulacion = e?.message || 'No se pudo simular.';
+    } finally {
+      simulando = false;
+    }
+  }
+  /** Lo que quedó afuera, con el título que dice por qué y cómo se arregla. */
+  const FUERA = [
+    ['sin_cuadrilla', 'Sin cuadrilla de su labor ese día'],
+    ['sobrantes', 'No entraron por el tope de la cuadrilla'],
+    ['sin_zona', 'Sin zona: su barrio no está en ninguna'],
+    ['sin_clasificar', 'Su plantilla no tiene labor'],
+    ['otro_dia', 'Programadas para otro día']
+  ];
   let prioridadElegida = $state('media');
 
   /**
@@ -377,6 +413,109 @@
           </p>
         </section>
       {/if}
+
+      <!-- SIMULAR EL DÍA (24/10/2026): ver `simularElDia`. -->
+      <section class="snoc-panel" style="gap:var(--snoc-sm);">
+        <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+          <div class="snoc-pila-xs" style="min-width:0;">
+            <h2 class="snoc-h2">Simular el día</h2>
+            <p class="snoc-body-sm snoc-secundario">
+              Las cuadrillas que armaría el Supervisor, las órdenes que crearía y a quién se
+              las daría. <strong>No guarda nada.</strong>
+            </p>
+          </div>
+          <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+            <input id="dia-simulado" class="snoc-campo" type="date" bind:value={diaSimulado}
+                   aria-label="Día a simular" />
+            <button class="snoc-btn" type="button" onclick={simularElDia} disabled={simulando}>
+              {simulando ? 'Simulando…' : 'Simular el día'}
+            </button>
+          </div>
+        </div>
+        {#if errorSimulacion}
+          <p class="snoc-aviso snoc-error-txt">{errorSimulacion}</p>
+        {/if}
+        {#if simulacion}
+          {#if !simulacion.trabaja}
+            <!-- Un día que no se trabaja igual muestra lo armado a mano: publicar
+                 le da trabajo (auditoría del 24/10/2026). -->
+            <p class="snoc-aviso">
+              {simulacion.porque}
+              {#if simulacion.cuadrillas.length}Se muestra solo lo que una persona ya armó para ese día.{/if}
+            </p>
+          {/if}
+          {#if simulacion.trabaja || simulacion.cuadrillas.length}
+            {#if simulacion.sin_crear_porque}
+              <p class="snoc-aviso">{simulacion.sin_crear_porque}</p>
+            {/if}
+            <p class="snoc-body-sm">
+              Repartiría {simulacion.cuentas.repartidas}:
+              {simulacion.cuentas.repartidas_nuevas} nuevas y {simulacion.cuentas.repartidas_existentes} que ya esperaban
+              · {simulacion.cuentas.afuera} quedan afuera
+              · no crearía {simulacion.cuentas.no_se_crearian}
+              {#if simulacion.cuentas.nuevas_para_otro_dia}· {simulacion.cuentas.nuevas_para_otro_dia} salen otro día{/if}
+              {#if simulacion.cuentas.a_mano || simulacion.cuentas.empezadas}
+                · no se mueven: {simulacion.cuentas.a_mano} asignadas a mano y {simulacion.cuentas.empezadas} ya empezadas
+              {/if}
+            </p>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap:var(--snoc-sm);">
+              {#each simulacion.cuadrillas as c (c.cuadrilla)}
+                <div class="snoc-tarjeta snoc-pila-xs" style="min-width:0;">
+                  <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs);">
+                    <strong>{c.cuadrilla}</strong>
+                    <span class="snoc-mono">
+                      {c.carga} de {c.tope}{#if c.carga >= c.tope} · llena{:else if c.carga === 0} · sin trabajo{/if}
+                    </span>
+                    {#if c.ya_tiene}
+                      <!-- Lo asignado a mano o ya empezado no cuenta para el tope
+                           (el reparto no lo mueve), pero es trabajo de esa gente. -->
+                      <span class="snoc-body-sm snoc-secundario">
+                        además ya {c.ya_tiene === 1 ? 'tiene 1 orden' : `tiene ${c.ya_tiene} órdenes`} a mano o empezadas
+                      </span>
+                    {/if}
+                  </div>
+                  <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                    {#if c.labor}<span class="snoc-tag">{c.labor}</span>{/if}
+                    {#each c.zonas as z (z)}<span class="snoc-body-sm snoc-secundario">{z}</span>{/each}
+                  </div>
+                  <p class="snoc-body-sm snoc-secundario">
+                    {c.lider || 'Sin líder'}{#if c.gente.length} · {c.gente.map((/** @type {any} */ g) => g.nombre).join(', ')}{/if}
+                    <br />{c.que_haria}
+                  </p>
+                  {#each c.ordenes as o, i (i)}
+                    <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap; border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-xs);">
+                      <span class="snoc-mono">#{o.ticket || o.orden}</span>
+                      <span style="min-width:0;">{o.asunto || o.plantilla}</span>
+                      <span class="snoc-body-sm">{textoDePrioridad(o.prioridad)}</span>
+                      <span class="snoc-body-sm snoc-secundario">
+                        {o.llamar_al_cliente ? 'llamar al cliente' : o.barrio}{o.nueva ? ' · nueva' : ''}
+                      </span>
+                    </div>
+                  {/each}
+                </div>
+              {/each}
+            </div>
+            {#each FUERA as [clave, titulo] (clave)}
+              {#if simulacion.fuera[clave]?.length}
+                <span class="snoc-label">{titulo} ({simulacion.fuera[clave].length})</span>
+                {#each simulacion.fuera[clave] as o, i (i)}
+                  <p class="snoc-body-sm">
+                    <span class="snoc-mono">#{o.ticket || o.orden}</span> {o.asunto || o.plantilla}
+                    · {textoDePrioridad(o.prioridad)}
+                    {#if clave === 'sin_cuadrilla'}· nadie de «{o.labor}» cubre {o.zona || o.barrio}{:else if o.barrio}· {o.barrio}{/if}
+                  </p>
+                {/each}
+              {/if}
+            {/each}
+            {#if simulacion.no_salen.length}
+              <span class="snoc-label">No salen ({simulacion.no_salen.length})</span>
+              {#each simulacion.no_salen as n (n.cuadrilla)}
+                <p class="snoc-body-sm">{n.cuadrilla}: {n.porque}</p>
+              {/each}
+            {/if}
+          {/if}
+        {/if}
+      </section>
 
       <!-- LO QUE CREARÍA EL SUPERVISOR (23/10/2026): ver `verOrdenesPrevia`. -->
       <section class="snoc-panel" style="gap:var(--snoc-sm);">

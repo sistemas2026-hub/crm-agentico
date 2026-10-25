@@ -1050,6 +1050,13 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  el lector del motor reemplazado por uno que revienta.
                        #  Exige 'EsJefeDeOperaciones'.
                        "ordenes-vista-previa",
+                       #  24/10/2026. 'dia-simulacion', un **GET**: arma las
+                       #  cuadrillas, crea las ordenes y las reparte, todo en
+                       #  memoria (`simulacion_del_dia.simular`). NO ESCRIBE NI
+                       #  UNA FILA ni le pregunta al motor: lo afirma
+                       #  test_simular_el_dia.py::test_n_*. Exige
+                       #  'EsJefeDeOperaciones'.
+                       "dia-simulacion",
                        #  LOTE 1, paso P11 (05/10/2026). 'supervisor-turno' es
                        #  el relevo de turno, y es de las faciles de declarar:
                        #  es un **GET**.
