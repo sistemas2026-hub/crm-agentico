@@ -186,6 +186,17 @@ class TestAgregarExigeEscribir:
         assert r.status_code == status.HTTP_403_FORBIDDEN
         assert not casos["soporte"].assigned_to.exists()
 
+    def test_quien_creo_el_caso_suma_responsables(self, org_a, user_profile, mapa):
+        """El camino del reconciliador D28 del motor ('asignar_caso_crm'): su
+        identidad crea los casos de escalamiento, y sin ser admin tiene que
+        poder seguir sumando a quien atiende."""
+        cliente, perfil = _cliente(org_a, "USER", "motor@test.com")
+        suyo = _caso(org_a, perfil.user, "", "Escalado desde WhatsApp")
+        r = cliente.post(f"{CASES_URL}{suyo.id}/assignees/",
+                         {"profile_id": str(user_profile.id)}, format="json")
+        assert r.status_code == status.HTTP_201_CREATED
+        assert list(suyo.assigned_to.values_list("id", flat=True)) == [user_profile.id]
+
     def test_quien_sigue_un_ticket_no_suma_a_nadie(self, org_a, casos, user_profile, mapa):
         cliente, perfil = _cliente(org_a, "USER", "seguidor@test.com")
         CaseWatcher.objects.create(case=casos["cartera"], profile=perfil, org=org_a,

@@ -38,12 +38,18 @@ AGREGAR EXIGE PODER ESCRIBIR (24/10/2026)
 -----------------------------------------
 Hasta ese dia el POST buscaba el caso con la regla de LECTURA y no miraba
 mas: quien solo SEGUIA un ticket podia sumarle a cualquiera como
-responsable. Nadie lo llamaba asi -- ni el motor ni la pantalla usan esta
-ruta, solo sus pruebas y como admin --, pero ese mismo dia la lectura se
-abrio a los tickets sin asignar del area de cada colaborador, y con ella se
-habria abierto asignarselos a cualquiera. Ver no es repartir: ahora hace
-falta 'write'. Para asignarse a uno mismo un ticket sin responsable esta
-'tomar', abajo.
+responsable. Ese mismo dia la lectura se abrio a los tickets sin asignar
+del area de cada colaborador, y con ella se habria abierto asignarselos a
+cualquiera. Ver no es repartir: ahora hace falta 'write'. Para asignarse a
+uno mismo un ticket sin responsable esta 'tomar', abajo.
+
+QUIEN LA LLAMA: el reconciliador D28 del motor ('asignar_caso_crm' en
+tenants/<slug>.config.yaml -- por eso un grep en el codigo no la encuentra).
+Sigue pudiendo: actua con la identidad que CREA los casos de escalamiento
+('crear_caso_soporte', mismo token), y quien crea un caso lo escribe; la
+misma identidad ya escribe casos con 'cerrar_caso_crm' (PATCH, que siempre
+exigio 'write'). Lo unico que pierde este camino es quien solo SIGUE el
+caso. Guarda: test_tomar_de_su_area.py::test_quien_creo_el_caso_suma_responsables.
 
 TOMAR (24/10/2026)
 ------------------
