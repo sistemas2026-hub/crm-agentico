@@ -228,6 +228,12 @@ urlpatterns = [
         assignee_views.CaseAssigneesView.as_view(),
         name="case_assignees",
     ),
+    # Asignarse un caso sin responsable: quien reparte o alguien de su area.
+    path(
+        "<uid:pk>/tomar/",
+        assignee_views.CaseTomarView.as_view(),
+        name="case_tomar",
+    ),
     # Watch toggle + watchers list (must be before <uid:pk>/ pattern)
     path(
         "<uid:pk>/watch/",

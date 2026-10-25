@@ -110,9 +110,85 @@ def area_por_persona() -> dict:
     ESO de "nadie es de esa area": son cosas distintas y la diferencia decide
     si se lee un ticket ajeno.
     """
+    _, tenant, _ = _motor()
+    if not tenant:
+        #  FAIL-CLOSED CON EL TENANT, igual que en el resto del proyecto: sin
+        #  saber de que empresa es, preguntar por sus areas devolveria las de
+        #  otra.
+        logger.info("Supervisor: falta MOTOR_TENANT, no se consultan areas")
+        return {}
+    return _mapa_del_motor(tenant, "areas_por_persona")
+
+
+def area_por_persona_de_org(org_id) -> dict:
+    """
+    {profile_id: area} de la empresa de ESA organizacion.
+
+    Lo mismo que 'area_por_persona', con la empresa sacada de la organizacion
+    de quien pregunta y no de 'MOTOR_TENANT' (24/10/2026). Existe porque de
+    este mapa pasa a depender un PERMISO -- un colaborador toma un ticket sin
+    asignar de su area (cases/access.py) -- y un permiso no puede leer las
+    areas de la empresa que diga una variable de entorno: con dos empresas en
+    la misma instalacion, la segunda leeria las de la primera.
+
+    {} si no se sabe de que empresa es o el motor no contesta: el permiso cae
+    al de antes, ver solo lo propio.
+    """
+    tenant = tenant_de_organizacion(org_id)
+    if not tenant:
+        return {}
+    return _mapa_del_motor(tenant, f"areas_por_persona:{tenant}")
+
+
+def tenant_de_organizacion(org_id) -> str:
+    """
+    El tenant del motor para una organizacion del CRM, o '' si no se sabe.
+
+    Lo resuelve el motor ('/tenant-de-organizacion/<id>'), igual que el
+    frontend en 'tenantDeLaSesion': Django no lee el esquema 'asistente'. SIN
+    DEFAULT: ni 'MOTOR_TENANT' ni "el de siempre" -- no saber es '' y quien
+    llama no le da a nadie nada que dependa de la empresa.
+    """
     from django.core.cache import cache
 
-    clave = "areas_por_persona"
+    if not org_id:
+        return ""
+    clave = f"tenant_de_org:{org_id}"
+    try:
+        guardado = cache.get(clave)
+        if guardado == _SIN_RESPUESTA:
+            return ""
+        if guardado is not None:
+            return guardado
+    except Exception:                                        # noqa: BLE001
+        pass
+
+    base, _, cabeceras = _motor()
+    tenant = ""
+    try:
+        r = requests.get(f"{base}/tenant-de-organizacion/{org_id}",
+                         headers=cabeceras, timeout=ESPERA_MAXIMA)
+        if r.ok:
+            tenant = str((r.json() or {}).get("tenant") or "").strip()
+        else:
+            logger.info("Areas: el motor respondio %s al tenant", r.status_code)
+    except Exception as e:                                   # noqa: BLE001
+        logger.info("Areas: no se pudo resolver el tenant (%s)",
+                    type(e).__name__)
+    try:
+        if tenant:
+            cache.set(clave, tenant, SEGUNDOS_DE_CACHE)
+        else:
+            cache.set(clave, _SIN_RESPUESTA, SEGUNDOS_SIN_RESPUESTA)
+    except Exception:                                        # noqa: BLE001
+        pass
+    return tenant
+
+
+def _mapa_del_motor(tenant: str, clave: str) -> dict:
+    """El mapa persona -> area de 'tenant' segun el motor, con su cache."""
+    from django.core.cache import cache
+
     try:
         guardado = cache.get(clave)
         if guardado == _SIN_RESPUESTA:
@@ -138,13 +214,7 @@ def area_por_persona() -> dict:
             pass
         return {}
 
-    base, tenant, cabeceras = _motor()
-    if not tenant:
-        #  FAIL-CLOSED CON EL TENANT, igual que en el resto del proyecto: sin
-        #  saber de que empresa es, preguntar por sus areas devolveria las de
-        #  otra.
-        logger.info("Supervisor: falta MOTOR_TENANT, no se consultan areas")
-        return {}
+    base, _, cabeceras = _motor()
 
     #  Se prueba el liviano y se cae al viejo, igual que la pantalla de
     #  Tickets: '/agentes/asignaciones' devuelve lo mismo y ademas sale a

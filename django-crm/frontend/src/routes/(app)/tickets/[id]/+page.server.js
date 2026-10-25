@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { getTicket, replyToTicket, updateTicket } from '$lib/server/v2/tickets.js';
+import { getTicket, replyToTicket, updateTicket, tomarTicket } from '$lib/server/v2/tickets.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
 import { leerResumenDelAgente } from '$lib/server/v2/resumen-agente.js';
 import { leerAreas } from '$lib/server/v2/areas.js';
@@ -316,5 +316,19 @@ export const actions = {
       asignado: persona,
       asignadoNombre: people.find((p) => p.id === persona)?.name ?? ''
     };
+  },
+
+  //  Tomar un ticket sin responsable, para quien no reparte: un colaborador lo
+  //  ve porque es de su area, y esta es la unica escritura que tiene sobre el
+  //  antes de ser responsable. Decide el backend ('/tomar/').
+  tomar: async ({ cookies, params }) => {
+    try {
+      await tomarTicket({ cookies }, params.id);
+    } catch (/** @type {any} */ err) {
+      if (err?.status === 409) return fail(409, { error: 'Otra persona tomó este ticket primero.' });
+      if (err?.status === 403) return fail(403, { error: 'Este ticket no es de tu área.' });
+      return fail(400, { error: readableError(err, 'No se pudo tomar el ticket.') });
+    }
+    return { tomado: true };
   }
 };

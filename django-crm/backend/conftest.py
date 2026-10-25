@@ -105,6 +105,22 @@ def _use_db(db):
 
 
 @pytest.fixture(autouse=True)
+def _las_areas_por_organizacion_no_salen_a_la_red(monkeypatch):
+    """La cola de un colaborador no le pregunta al motor en las pruebas.
+
+    Desde el 24/10/2026 'visible_cases_qs' de un colaborador lee su area
+    (cases/access.py::area_de), que el motor sirve. En pruebas no hay motor, y
+    cada intento tarda ~3,75 s en fallar (medido en el contenedor): la suite
+    de cases y operaciones tardo dos minutos mas y un token llego vencido.
+    Vacio es el comportamiento de antes -- ve solo lo suyo --, y las pruebas
+    del area (cases/tests/test_tomar_de_su_area.py) ponen su propio mapa.
+    """
+    from operaciones import areas_del_tenant
+
+    monkeypatch.setattr(areas_del_tenant, "area_por_persona_de_org", lambda org_id: {})
+
+
+@pytest.fixture(autouse=True)
 def _restore_rls_context_after_each_request(db):
     """Put the ambient context back once a test client request has finished.
 

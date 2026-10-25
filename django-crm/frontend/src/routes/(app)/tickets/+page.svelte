@@ -15,10 +15,18 @@
   } from '$lib/v2/enums.js';
   import { LifeBuoy, Plus, MessageCircle, Server, PenLine } from '@lucide/svelte';
   import { enhance } from '$app/forms';
+  import { invalidateAll } from '$app/navigation';
   import { origenDelTicket } from '$lib/v2/ticket-origen.js';
 
-  /** @type {{ data: any }} */
-  let { data } = $props();
+  /** @type {{ data: any, form?: any }} */
+  let { data, form } = $props();
+
+  //  Si no se pudo tomar -- otra persona lo tomo primero -- la fila que se ve
+  //  ya esta vieja: se recarga la cola ademas de mostrar el motivo.
+  const alTomar = () => async (/** @type {any} */ { result, update }) => {
+    await update();
+    if (result.type === 'failure') await invalidateAll();
+  };
 
   let tickets = $derived(data.tickets);
   let totals = $derived(data.totals);
@@ -210,6 +218,9 @@
   <!-- La barra de la cola: de quien, que area, y en que orden. Las tres viajan
        por la URL, asi un enlace a "sin asignar de Soporte, vence primero"
        sigue diciendo lo mismo al abrirlo. -->
+  {#if form?.error}
+    <p class="aviso-accion" role="alert">{form.error}</p>
+  {/if}
   <div class="barra-cola">
     <div class="vistas" role="group" aria-label="De quién">
       {#each VISTAS as v (v.clave)}
@@ -391,16 +402,14 @@
                   {:else}
                     <span class="asignado">
                       <span class="v2-muted" style="font-size:12.5px">Sin asignar</span>
-                      {#if data.reparte}
-                        <!-- Solo quien reparte (admin, supervisión,
-                             operaciones): el backend no deja a un
-                             colaborador comun tomar un caso que no es suyo. La
-                             accion vuelve a mirar el rol del lado del servidor. -->
-                        <form method="POST" action="?/asignarme" use:enhance class="asignarme">
-                          <input type="hidden" name="id" value={t.id} />
-                          <button class="v2-btn v2-btn-sm" type="submit">Asignarme</button>
-                        </form>
-                      {/if}
+                      <!-- En cada fila sin responsable: si se ve, se puede
+                           tomar. Quien reparte ve todo; un colaborador solo
+                           ve lo sin asignar de SU area. Lo decide el backend
+                           ('/tomar/'), no este boton. -->
+                      <form method="POST" action="?/asignarme" use:enhance={alTomar} class="asignarme">
+                        <input type="hidden" name="id" value={t.id} />
+                        <button class="v2-btn v2-btn-sm" type="submit">Asignarme</button>
+                      </form>
                     </span>
                   {/if}
                 </td>
@@ -664,6 +673,15 @@
   }
   .aviso-sin-area p {
     margin: 0;
+  }
+  .aviso-accion {
+    margin: 12px 0 0;
+    padding: 10px 14px;
+    border: 1px solid var(--v2-line);
+    border-left: 3px solid var(--v2-clay);
+    border-radius: 8px;
+    background: var(--v2-card);
+    font-size: 13px;
   }
   .aviso-sin-area p + p {
     margin-top: 6px;

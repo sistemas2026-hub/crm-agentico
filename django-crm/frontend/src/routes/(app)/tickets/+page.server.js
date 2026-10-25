@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { reparteTickets } from '$lib/v2/roles.js';
-import { listTickets, updateTicket, OPEN_STATUSES, FILTER_FIELDS } from '$lib/server/v2/tickets.js';
+import { listTickets, tomarTicket, OPEN_STATUSES, FILTER_FIELDS } from '$lib/server/v2/tickets.js';
 import { readFilters, buildFilterQuery } from '$lib/server/v2/filter-params.js';
 import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
 import { getTags } from '$lib/server/v2/tags.js';
@@ -396,19 +396,26 @@ export const actions = {
   //  le deja a un colaborador comun ver ni escribir un caso que no es suyo
   //  (cases/access.py), asi que el boton solo aparece para esos roles. Aca se vuelve a mirar el rol -- la pantalla no es
   //  la que decide --, y la persona sale de la SESION, nunca del formulario.
-  asignarme: async ({ request, cookies, locals }) => {
-    if (!reparteTickets(/** @type {any} */ (locals).profile?.role)) {
-      return fail(403, { error: 'Solo quien reparte el trabajo asigna desde la cola.' });
-    }
+  //  TOMAR, NO EDITAR (24/10/2026). Asignarme llama a '/tomar/', que decide
+  //  el backend: quien reparte toma cualquier ticket sin responsable, un
+  //  colaborador solo los de su area. Ya no se mira el rol aca -- la regla es
+  //  una sola y vive en cases/access.py::puede_tomar -- y ya no es un PATCH:
+  //  aquel reemplazaba el conjunto de responsables, y dos que apretaban a la
+  //  vez quedaban con el ultimo. '/tomar/' bloquea la fila y al segundo le
+  //  contesta 409.
+  asignarme: async ({ request, cookies }) => {
     const id = String((await request.formData()).get('id') ?? '');
     if (!id) return fail(400, { error: 'Falta el ticket.' });
-    const { people } = await getOrgPeopleAndTeams(cookies);
-    const yo = resolveMe(people, /** @type {any} */ (locals).user?.email);
-    if (!yo) return fail(400, { error: 'No se encontró tu perfil en la organización.' });
     try {
-      //  Un id, no una lista: toBody() de tickets.js ya lo envuelve.
-      await updateTicket({ cookies }, id, { assigned_to: yo });
-    } catch {
+      await tomarTicket({ cookies }, id);
+    } catch (e) {
+      const estado = /** @type {any} */ (e)?.status;
+      if (estado === 409) {
+        return fail(409, { error: 'Otra persona tomó este ticket primero.' });
+      }
+      if (estado === 403) {
+        return fail(403, { error: 'Este ticket no es de tu área.' });
+      }
       return fail(400, { error: 'No se pudo asignar el ticket.' });
     }
     return { asignado: id };

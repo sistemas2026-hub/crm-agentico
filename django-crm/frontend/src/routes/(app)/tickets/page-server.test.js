@@ -51,10 +51,10 @@ const AREAS = [
 const MAPA = { 'p-soporte': 'soporte_tecnico', 'p-cartera': 'cartera', 'p-admin': 'administracion' };
 
 const listTickets = vi.fn();
-const updateTicket = vi.fn();
+const tomarTicket = vi.fn();
 vi.mock('$lib/server/v2/tickets.js', () => ({
   listTickets: (...args) => listTickets(...args),
-  updateTicket: (...args) => updateTicket(...args),
+  tomarTicket: (...args) => tomarTicket(...args),
   OPEN_STATUSES: ['New', 'Assigned', 'Pending'],
   FILTER_FIELDS: ['assigned_to', 'priority', 'case_type', 'sla_breached', 'tags']
 }));
@@ -354,26 +354,34 @@ describe('"Asignarme"', () => {
     });
   }
 
-  it('asigna a quien esta en la SESION, con un id y no una lista', async () => {
-    updateTicket.mockReset();
-    updateTicket.mockResolvedValue({});
-    const r = await actions.asignarme(pedido('ADMIN'));
-    expect(r).toEqual({ asignado: 'caso-1' });
-    expect(updateTicket.mock.lastCall[1]).toBe('caso-1');
-    expect(updateTicket.mock.lastCall[2]).toEqual({ assigned_to: 'p-admin' });
+  /** @param {number} status */
+  const rechazo = (status) => Object.assign(new Error('x'), { status, body: {} });
+
+  it('toma el ticket por /tomar/, sin decidir el rol aca (24/10/2026)', async () => {
+    //  Un colaborador tambien llega al backend: es quien decide si el ticket
+    //  es de su area. Antes esta accion le cortaba el paso por rol.
+    for (const rol of ['ADMIN', 'SUPERVISOR', 'USER']) {
+      tomarTicket.mockReset();
+      tomarTicket.mockResolvedValue({});
+      const r = await actions.asignarme(pedido(rol));
+      expect(r).toEqual({ asignado: 'caso-1' });
+      expect(tomarTicket.mock.lastCall[1]).toBe('caso-1');
+    }
   });
 
-  it('un supervisor tambien reparte: puede asignarse (23/10/2026)', async () => {
-    updateTicket.mockReset();
-    updateTicket.mockResolvedValue({});
-    const r = await actions.asignarme(pedido('SUPERVISOR'));
-    expect(r).toEqual({ asignado: 'caso-1' });
+  it('si otra persona lo tomo primero, lo dice', async () => {
+    tomarTicket.mockReset();
+    tomarTicket.mockRejectedValue(rechazo(409));
+    const r = /** @type {any} */ (await actions.asignarme(pedido('USER')));
+    expect(r.status).toBe(409);
+    expect(r.data.error).toMatch(/primero/);
   });
 
-  it('un colaborador no puede, aunque mande el formulario a mano', async () => {
-    updateTicket.mockReset();
+  it('si no es de su area, lo dice y no lo disfraza de error generico', async () => {
+    tomarTicket.mockReset();
+    tomarTicket.mockRejectedValue(rechazo(403));
     const r = /** @type {any} */ (await actions.asignarme(pedido('USER')));
     expect(r.status).toBe(403);
-    expect(updateTicket).not.toHaveBeenCalled();
+    expect(r.data.error).toMatch(/área/);
   });
 });

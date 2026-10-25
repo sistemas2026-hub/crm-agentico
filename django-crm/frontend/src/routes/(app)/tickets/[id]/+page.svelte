@@ -447,6 +447,13 @@
         <span class="asignar-rotulo">Responsable</span>
         <b>{ticket.assignee ?? 'Sin asignar'}</b>
         {#if ticket.assignee_count > 1}<span>+{ticket.assignee_count - 1}</span>{/if}
+        {#if !ticket.assignee_count}
+          <!-- Sin responsable y a la vista: es de su area (si no, el backend
+               no se lo mostraria). Tomarlo lo decide '/tomar/'. -->
+          <form method="POST" action="?/tomar" use:enhance={asignar}>
+            <button class="v2-btn v2-btn-sm" disabled={asignando}>Asignarme</button>
+          </form>
+        {/if}
       </span>
     {/if}
   {/snippet}

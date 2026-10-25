@@ -33,15 +33,46 @@ table does not record *who* created the relation or why, so nothing can tell a
 stale automated assignment apart from a collaboration somebody set up by hand
 this morning. Removing on a guess deletes work that cannot be recovered.
 Un-assigning stays manual until there is a way to know the difference.
+
+AGREGAR EXIGE PODER ESCRIBIR (24/10/2026)
+-----------------------------------------
+Hasta ese dia el POST buscaba el caso con la regla de LECTURA y no miraba
+mas: quien solo SEGUIA un ticket podia sumarle a cualquiera como
+responsable. Nadie lo llamaba asi -- ni el motor ni la pantalla usan esta
+ruta, solo sus pruebas y como admin --, pero ese mismo dia la lectura se
+abrio a los tickets sin asignar del area de cada colaborador, y con ella se
+habria abierto asignarselos a cualquiera. Ver no es repartir: ahora hace
+falta 'write'. Para asignarse a uno mismo un ticket sin responsable esta
+'tomar', abajo.
+
+TOMAR (24/10/2026)
+------------------
+    POST /<id>/tomar/        sin cuerpo: asigna a quien lo pide
+
+Solo sobre un caso SIN responsable, y solo quien reparte, quien lo creo o
+alguien del area escrita del caso (cases/access.py::puede_tomar). Dos que aprietan a
+la vez: la fila se bloquea y la segunda recibe 409 YA_TIENE_RESPONSABLE, no
+un segundo responsable. El area se lee ANTES de abrir la transaccion -- le
+pregunta al motor, y ninguna transaccion espera a un servicio externo.
 """
 
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from cases.access import (
+    area_de,
+    assert_case_write_access,
+    get_case_or_404,
+    is_org_admin,
+    puede_tomar,
+    reparte_tickets,
+)
 from cases.access import visible_cases_qs as _visible_cases_qs
+from cases.models import Case
 from common.models import Profile
 from common.permissions import HasOrgContext
 from common.serializer import ProfileSerializer
@@ -65,6 +96,7 @@ class CaseAssigneesView(APIView):
 
     def post(self, request, pk, *args, **kwargs):
         case = get_object_or_404(_visible_cases_qs(request.profile), pk=pk)
+        assert_case_write_access(request.profile, case)
 
         profile_id = (request.data or {}).get("profile_id")
         if not profile_id:
@@ -98,4 +130,45 @@ class CaseAssigneesView(APIView):
                 "assigned_to": _assigned_payload(case),
             },
             status=status.HTTP_201_CREATED if not already else status.HTTP_200_OK,
+        )
+
+
+class CaseTomarView(APIView):
+    """POST /api/cases/<pk>/tomar/ -- asignarse un caso sin responsable."""
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def post(self, request, pk, *args, **kwargs):
+        yo = request.profile
+        # 404 para un id de otra organizacion o mal formado, igual que el detalle.
+        get_case_or_404(yo, pk)
+        # Fuera de la transaccion: puede preguntarle al motor.
+        area = "" if (is_org_admin(yo) or reparte_tickets(yo)) else area_de(yo)
+
+        with transaction.atomic():
+            case = Case.objects.select_for_update().get(pk=pk, org=yo.org)
+            if case.assigned_to.exists():
+                return Response(
+                    {
+                        "error": True,
+                        "codigo": "YA_TIENE_RESPONSABLE",
+                        "errors": "Otra persona ya tomo este ticket.",
+                        "assigned_to": _assigned_payload(case),
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if not puede_tomar(yo, case, area=area):
+                return Response(
+                    {
+                        "error": True,
+                        "codigo": "NO_ES_DE_TU_AREA",
+                        "errors": "Este ticket no es de tu area.",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            case.assigned_to.add(yo)
+
+        return Response(
+            {"error": False, "assigned_to": _assigned_payload(case)},
+            status=status.HTTP_200_OK,
         )

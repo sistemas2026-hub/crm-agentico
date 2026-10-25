@@ -28,11 +28,13 @@ vi.mock('$env/dynamic/private', () => entorno);
 const sesion = vi.hoisted(() => ({ tenant: /** @type {string | null} */ (null) }));
 
 const updateTicket = vi.fn();
+const tomarTicket = vi.fn();
 const getTicket = vi.fn();
 vi.mock('$lib/server/v2/tickets.js', () => ({
   getTicket: (...args) => getTicket(...args),
   replyToTicket: vi.fn(),
-  updateTicket: (...args) => updateTicket(...args)
+  updateTicket: (...args) => updateTicket(...args),
+  tomarTicket: (...args) => tomarTicket(...args)
 }));
 
 const PERSONAS = [
@@ -180,5 +182,29 @@ describe('?/asignar', () => {
     const r = /** @type {any} */ (await actions.asignar(evento({ persona: 'p-tec' })));
     expect(r.status).toBe(400);
     expect(r.data.error).toBe('No se pudo cambiar el responsable.');
+  });
+});
+
+describe('?/tomar', () => {
+  /** @param {number} status */
+  const rechazo = (status) => Object.assign(new Error('x'), { status, body: {} });
+
+  it('un colaborador toma por /tomar/: decide el backend, no el rol', async () => {
+    tomarTicket.mockReset();
+    tomarTicket.mockResolvedValue({});
+    const r = /** @type {any} */ (await actions.tomar(evento({}, { role: 'USER' })));
+    expect(r).toEqual({ tomado: true });
+    expect(tomarTicket.mock.lastCall[1]).toBe('caso-1');
+  });
+
+  it('409: otra persona lo tomo primero; 403: no es de su area', async () => {
+    tomarTicket.mockReset();
+    tomarTicket.mockRejectedValueOnce(rechazo(409)).mockRejectedValueOnce(rechazo(403));
+    const a = /** @type {any} */ (await actions.tomar(evento({}, { role: 'USER' })));
+    expect(a.status).toBe(409);
+    expect(a.data.error).toMatch(/primero/);
+    const b = /** @type {any} */ (await actions.tomar(evento({}, { role: 'USER' })));
+    expect(b.status).toBe(403);
+    expect(b.data.error).toMatch(/área/);
   });
 });

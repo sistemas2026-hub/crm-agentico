@@ -538,6 +538,20 @@ export async function updateTicket({ cookies }, id, values) {
 }
 
 /**
+ * Asignarse un ticket SIN responsable. Sin cuerpo: el backend asigna a quien
+ * lo pide, y decide si puede -- quien reparte, o alguien del area escrita del
+ * caso (cases/access.py::puede_tomar). Si otra persona lo tomo primero
+ * responde 409 en vez de dejar dos responsables; el error lanzado lleva
+ * `status` y `body.codigo`.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} id
+ */
+export async function tomarTicket({ cookies }, id) {
+  return await apiRequest(`/cases/${id}/tomar/`, { method: 'POST' }, { cookies });
+}
+
+/**
  * Create a ticket.
  *
  * No `org` and no `created_by` in the body: `CaseListView.post` sets both from

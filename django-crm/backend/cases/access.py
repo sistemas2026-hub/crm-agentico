@@ -33,7 +33,22 @@ dia solo ADMIN veia la cola entera: un supervisor que reparte trabajo en la
 calle no podia ver un ticket sin asignar, y con 212 de 735 sin responsable el
 reparto esperaba a una sola persona. Ver y escribir, si; BORRAR, no: eso sigue
 siendo de admin o de quien lo creo.
+
+LO SIN ASIGNAR DE SU AREA (24/10/2026)
+--------------------------------------
+Un colaborador ve ademas los tickets SIN RESPONSABLE cuya area escrita
+('Case.area') es la suya, y puede TOMARLOS -- asignarselos a si mismo y nada
+mas, por 'tomar_caso'. No puede editarlos antes de tomarlos: tomar es la
+unica escritura nueva, y despues escribe como cualquier responsable.
+
+El area de la persona es la que la empresa configura ('area_colaborador',
+servida por el motor), leida por la organizacion de quien pregunta. Si no se
+sabe -- el motor no contesta, la persona no tiene area, el caso no tiene area
+escrita -- no se agrega nada: vuelve a ver solo lo suyo. Un caso sin area
+escrita no es de nadie todavia, y repartirlo le toca a quien reparte.
 """
+
+import re
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
@@ -63,6 +78,34 @@ def reparte_tickets(profile):
     return profile is not None and getattr(profile, "role", None) in ROLES_QUE_REPARTEN
 
 
+def _normal(area):
+    return str(area or "").strip().lower()
+
+
+def area_de(profile):
+    """El area de ``profile`` segun la empresa, normalizada, o '' si no se sabe.
+
+    Pregunta al motor (con cache): quien la llame no puede tener una
+    transaccion abierta esperando.
+    """
+    if profile is None or not getattr(profile, "org_id", None):
+        return ""
+    from operaciones import areas_del_tenant as areas
+
+    mapa = areas.area_por_persona_de_org(profile.org_id) or {}
+    return _normal(mapa.get(str(profile.id)))
+
+
+def _sin_asignar_del_area(area):
+    """Casos sin responsable con ``area`` escrita (sin mayusculas ni espacios
+    alrededor, igual que 'criterio_de_area'). Por subconsulta: un join al M2M
+    dentro de un OR duplica filas."""
+    patron = r"^\s*" + re.escape(area) + r"\s*$"
+    return Q(area__iregex=patron) & Q(
+        pk__in=Case.objects.filter(assigned_to__isnull=True).values("pk")
+    )
+
+
 def visible_cases_qs(profile):
     """Cases ``profile`` is allowed to open. The queryset form of `read`.
 
@@ -72,9 +115,25 @@ def visible_cases_qs(profile):
     qs = Case.objects.filter(org=profile.org)
     if is_org_admin(profile) or reparte_tickets(profile):
         return qs
-    return qs.filter(
-        Q(created_by=profile.user) | Q(assigned_to=profile) | Q(watchers=profile)
-    ).distinct()
+    suyo = Q(created_by=profile.user) | Q(assigned_to=profile) | Q(watchers=profile)
+    area = area_de(profile)
+    if area:
+        suyo |= _sin_asignar_del_area(area)
+    return qs.filter(suyo).distinct()
+
+
+def puede_tomar(profile, case, area=None):
+    """Si ``profile`` puede asignarse ``case``: sin responsable, y quien
+    reparte, quien lo creo (ya podia asignarlo por PATCH) o alguien de su
+    area. ``area`` permite pasarla ya leida."""
+    if case.assigned_to.exists():
+        return False
+    if is_org_admin(profile) or reparte_tickets(profile):
+        return True
+    if profile.user_id == case.created_by_id:
+        return True
+    area = area_de(profile) if area is None else _normal(area)
+    return bool(area) and _normal(case.area) == area
 
 
 def get_case_or_404(profile, pk):
@@ -98,7 +157,9 @@ def has_case_read_access(profile, case):
     """Non-raising form of `read`, for computing response flags."""
     if has_case_write_access(profile, case):
         return True
-    return case.watchers.filter(id=profile.id).exists()
+    if case.watchers.filter(id=profile.id).exists():
+        return True
+    return puede_tomar(profile, case)
 
 
 def has_case_write_access(profile, case):
