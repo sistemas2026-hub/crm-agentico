@@ -600,7 +600,9 @@ def test_21_22_habilidades_y_conocimiento(org_a, actor):
     #  en el CRM), tambien con autorizacion explicita.
     #  21/10/2026 agrega H-20 (proponer si se trabaja un feriado), con
     #  autorizacion explicita del usuario.
-    assert len(habilidades.HABILIDADES) == 20, "se creó una habilidad no prevista"
+    #  24/10/2026 agrega H-21 (ubicar cada asunto en su nivel de respuesta),
+    #  con autorizacion explicita del usuario: «autorizo la h-21».
+    assert len(habilidades.HABILIDADES) == 21, "se creó una habilidad no prevista"
 
     #  Toda señal emitida tiene ficha: es el guarda de M09-K, comprobado
     #  también sobre lo que este ciclo produjo de verdad.

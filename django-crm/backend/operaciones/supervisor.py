@@ -2657,8 +2657,10 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
     LA DETECCION NO EJECUTA NADA: lo único que escribe son filas de PropuestaSupervisor y
     sus renglones de auditoría. Las fases de después, fuera de la
     transacción, ejecutan SOLO lo que una persona delegó, cada una con sus
-    propias puertas: el cierre, el paso a Despacho, armar la jornada y, desde
-    el 24/10/2026, crear las órdenes de Despacho (auditoría de frontera).
+    propias puertas: el cierre, el paso a Despacho, armar la jornada, desde
+    el 24/10/2026 crear las órdenes de Despacho (auditoría de frontera) y,
+    desde el 25/10/2026, ubicar cada asunto en su nivel de respuesta (H-21,
+    autorizada por el usuario; `nivel_de_los_asuntos`).
     """
     ahora = ahora or timezone.now()
     with transaction.atomic():
@@ -2769,6 +2771,11 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         ("retiro de alertas de casos en Despacho",
          lambda: {"alertas_retiradas_en_despacho":
                   retirar_alertas_de_casos_en_despacho(org, ahora)}),
+        #  H-21 · EL NIVEL DE RESPUESTA DE CADA ASUNTO  --  24/10/2026,
+        #  autorizada por el usuario. Despues de la lectura: los tickets leidos
+        #  en esta vuelta ya cuentan. Solo base, sin terceros.
+        ("niveles de respuesta de los asuntos",
+         lambda: _ubicar_los_asuntos(org, ahora)),
         #  LA JORNADA DEL DIA VA ULTIMA  --  17/10/2026: cuenta la cola de
         #  Despacho como quedo despues del paso de ESTA vuelta. Sin la tarea
         #  delegada solo deja en el log lo que armaria (la sombra).
@@ -2809,6 +2816,14 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         logger.exception("Supervisor: no se pudo avisar lo que hay que decidir")
 
     return resumen
+
+
+def _ubicar_los_asuntos(org, ahora) -> dict:
+    """La fase de H-21 (`nivel_de_los_asuntos.fase`): con su tarea delegada y
+    el nivel 3, ubica cada asunto y lo cuenta en el chat; sin eso, la sombra.
+    SON CONTEOS: el detalle queda en cada asunto y en el aviso."""
+    from operaciones import nivel_de_los_asuntos
+    return nivel_de_los_asuntos.fase(org, ahora)
 
 
 def _armar_la_jornada_del_dia(org, ahora) -> dict:

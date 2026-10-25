@@ -11,6 +11,7 @@ from campo import (
     inventario_operacion_views,
     inventario_views,
     materiales_views,
+    niveles_views,
     pedidos_views,
     plantillas_views,
     views,
@@ -64,6 +65,10 @@ urlpatterns = [
     path("plantillas/", plantillas_views.PlantillasView.as_view(), name="plantillas"),
     path("plantillas/<uid:pk>/", plantillas_views.PlantillaView.as_view(), name="plantilla"),
     path("plantillas/<uid:pk>/publicar/", plantillas_views.PublicarPlantillaView.as_view(), name="plantilla_publicar"),
+    #  Los niveles de respuesta (24/10/2026): plazo y prioridad por asunto.
+    #  Ver campo/niveles.py.
+    path("niveles-de-respuesta/", niveles_views.NivelesDeRespuestaView.as_view(), name="niveles_de_respuesta"),
+    path("niveles-de-respuesta/asunto/", niveles_views.NivelDeAsuntoView.as_view(), name="nivel_de_asunto"),
     path("tipos-de-trabajo/", cuadrillas_views.TiposDeTrabajoView.as_view(), name="tipos_de_trabajo"),
     path("tipos-de-trabajo/<uid:pk>/", cuadrillas_views.TiposDeTrabajoView.as_view(), name="tipo_de_trabajo"),
     path("cuadrillas/configuracion/", cuadrillas_views.ConfiguracionDeRepartoView.as_view(), name="reparto_configuracion"),

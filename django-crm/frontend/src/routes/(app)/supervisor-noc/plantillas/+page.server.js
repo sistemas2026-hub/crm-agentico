@@ -7,6 +7,10 @@ import {
   activarPlantilla,
   mensajeDePlantilla
 } from '$lib/server/v2/plantillas.js';
+import { leerNiveles, guardarNiveles, ponerNivelDeAsunto } from '$lib/server/v2/niveles.js';
+
+/** Los códigos de los tres niveles: los del backend (`campo/niveles.py`). */
+const CODIGOS_DE_NIVEL = ['urgente', 'normal', 'programable'];
 
 /**
  * Plantillas de trabajo — Supervisor NOC.
@@ -25,7 +29,12 @@ import {
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ url, cookies }) {
-  const lista = await leerPlantillas({ cookies });
+  //  Los niveles de respuesta (24/10/2026) se leen junto con las plantillas:
+  //  si no responden, la pantalla de plantillas sigue funcionando igual.
+  const [lista, niveles] = await Promise.all([
+    leerPlantillas({ cookies }),
+    leerNiveles({ cookies })
+  ]);
   const editar = url.searchParams.get('editar');
 
   let edicion = null;
@@ -37,7 +46,7 @@ export async function load({ url, cookies }) {
       edicionError = mensajeDePlantilla(e, 'No se pudo abrir esa plantilla.');
     }
   }
-  return { ...lista, edicion, edicionError };
+  return { ...lista, edicion, edicionError, niveles };
 }
 
 /** @param {FormData} f */
@@ -151,6 +160,39 @@ export const actions = {
       };
     } catch (e) {
       return fail(e?.status ?? 502, { error: mensajeDePlantilla(e, 'No se pudo publicar.') });
+    }
+  },
+
+  /** Los tres niveles de respuesta: nombre, plazo y prioridad de cada uno. */
+  guardarNiveles: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const niveles = CODIGOS_DE_NIVEL
+      .filter((c) => f.has(`nombre_${c}`))
+      .map((c) => ({
+        codigo: c,
+        nombre: String(f.get(`nombre_${c}`) ?? '').trim(),
+        plazo_dias: Number(String(f.get(`plazo_${c}`) ?? '').trim()),
+        prioridad: String(f.get(`prioridad_${c}`) ?? '')
+      }));
+    try {
+      await guardarNiveles({ cookies }, niveles);
+      //  Lo que NO pasa todavía se dice (auditor independiente, 25/10/2026):
+      //  ninguna orden lee estos niveles hasta que el Supervisor cree órdenes.
+      return { hecho: 'Niveles guardados. Todavía no cambian ninguna orden: los va a usar el Supervisor cuando cree las órdenes.' };
+    } catch (e) {
+      return fail(e?.status ?? 502, { error: mensajeDePlantilla(e, 'No se pudieron guardar los niveles.') });
+    }
+  },
+
+  /** Una persona pone un asunto en un nivel: desde ahí el Supervisor no lo toca. */
+  nivelDeAsunto: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const asunto = String(f.get('asunto') ?? '');
+    try {
+      await ponerNivelDeAsunto({ cookies }, asunto, String(f.get('nivel') ?? ''));
+      return { hecho: `«${asunto}» quedó en ese nivel. El Supervisor ya no lo cambia.` };
+    } catch (e) {
+      return fail(e?.status ?? 502, { error: mensajeDePlantilla(e, 'No se pudo cambiar el nivel.') });
     }
   },
 

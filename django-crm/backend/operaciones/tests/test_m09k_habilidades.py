@@ -32,6 +32,14 @@ from django.utils import timezone
 from operaciones import habilidades, supervisor
 from operaciones.models import PropuestaSupervisor
 
+ESCRITURA_AUTORIZADA = {
+    #  24/10/2026, autorizada por el usuario («autorizo la h-21»): la
+    #  UNICA habilidad que escribe, y solo esto. Si otra declarara
+    #  escritura, o H-21 declarara otra cosa, esto falla.
+    "H-21": ("ORM: campo.NivelDeAsunto, solo las filas que decidio el Supervisor",
+             "ORM: operaciones.MensajeSupervisor, el aviso a quien delego"),
+}
+
 
 # =============================================================================
 #  1-5.  LAS 14 ESTAN, Y ESTAN COMPLETAS
@@ -47,9 +55,11 @@ def test_hay_exactamente_dieciocho():
     #  en el CRM), tambien con autorizacion explicita.
     #  21/10/2026 agrega H-20 (proponer si se trabaja un feriado), con
     #  autorizacion explicita del usuario.
-    assert len(habilidades.HABILIDADES) == 20
-    assert len(habilidades.IDS) == 20
-    assert len(set(habilidades.IDS)) == 20, "hay ids repetidos"
+    #  24/10/2026 agrega H-21 (ubicar cada asunto en su nivel de respuesta),
+    #  con autorizacion explicita del usuario: «autorizo la h-21».
+    assert len(habilidades.HABILIDADES) == 21
+    assert len(habilidades.IDS) == 21
+    assert len(set(habilidades.IDS)) == 21, "hay ids repetidos"
 
 
 def test_catorce_de_dominio_y_cuatro_transversales():
@@ -65,6 +75,12 @@ def test_catorce_de_dominio_y_cuatro_transversales():
     #  autorizacion explicita del usuario.
     assert len(dominio) == 16
     assert len(transversales) == 4
+    #  24/10/2026: H-21 no es de dominio ni transversal: ACTUA (escribe,
+    #  autorizada). Es la unica.
+    actuan = [h.id for h in habilidades.HABILIDADES.values()
+              if h.tipo == habilidades.ACTUA]
+    assert actuan == ["H-21"]
+    assert len(dominio) + len(transversales) + len(actuan) == len(habilidades.IDS)
 
 
 @pytest.mark.parametrize("id_habilidad", list(habilidades.IDS))
@@ -124,13 +140,18 @@ def test_ninguna_declara_herramienta_de_escritura(id_habilidad):
     permiso que la frontera nunca le dio.
     """
     h = habilidades.HABILIDADES[id_habilidad]
-    assert h.herramientas_escritura == (), \
+    assert h.herramientas_escritura == ESCRITURA_AUTORIZADA.get(id_habilidad, ()), \
         f"{id_habilidad} declara escritura: {h.herramientas_escritura}"
 
 
 @pytest.mark.parametrize("id_habilidad", list(habilidades.IDS))
 def test_ninguna_pide_nivel_mayor_que_recomendar(id_habilidad):
     h = habilidades.HABILIDADES[id_habilidad]
+    if id_habilidad in ESCRITURA_AUTORIZADA:
+        #  H-21 escribe una tabla interna y reversible: una persona la
+        #  cambia y el Supervisor no la vuelve a tocar.
+        assert h.nivel == PropuestaSupervisor.NIVEL_EJECUTAR_REVERSIBLE
+        return
     assert h.nivel in (PropuestaSupervisor.NIVEL_OBSERVAR,
                        PropuestaSupervisor.NIVEL_RECOMENDAR), \
         f"{id_habilidad} pide nivel {h.nivel}"

@@ -247,6 +247,47 @@ def redactar_decisiones(propuestas: list[dict]) -> str:
     return "\n".join(lineas)
 
 
+def _escribir_a_quien_delego(org, contenido: str, *, ahora, que: str,
+                             cuantos: int) -> bool:
+    """Deja `contenido` en la conversacion MAS RECIENTE de quien delego la
+    revision de cada hora, y la marca como la ultima. La usan las decisiones
+    y los niveles de los asuntos: una sola regla de a quien se le escribe."""
+    from django.utils import timezone
+
+    from operaciones import tareas_delegadas as td
+    from operaciones.chat_modelos import (ConversacionSupervisor,
+                                          MensajeSupervisor, RolMensaje)
+    from operaciones.tareas_modelos import TareaDelegada
+
+    fila = (TareaDelegada.objects
+            .filter(org=org, clave=td.CICLO_AUTOMATICO, activa=True)
+            .first())
+    if fila is None or not fila.delegada_por_id:
+        logger.info("Supervisor: %s %s sin revision delegada a quien avisar",
+                    cuantos, que)
+        return False
+    conversacion = (ConversacionSupervisor.objects
+                    .filter(org=org, actor_id=fila.delegada_por_id,
+                            archivada=False)
+                    .order_by("-ultimo_mensaje_en")
+                    .first())
+    if conversacion is None:
+        logger.info("Supervisor: %s %s sin conversacion donde avisar",
+                    cuantos, que)
+        return False
+    momento = ahora or timezone.now()
+    MensajeSupervisor.objects.create(
+        conversacion=conversacion,
+        org=org,
+        rol=RolMensaje.SUPERVISOR,
+        contenido=contenido,
+        escrito_en=momento,
+    )
+    conversacion.ultimo_mensaje_en = momento
+    conversacion.save(update_fields=["ultimo_mensaje_en"])
+    return True
+
+
 def avisar_decisiones(org, propuestas: list[dict], *, ahora=None) -> bool:
     """Deja en el chat de quien delego la revision de cada hora lo que hay
     que decidir. Devuelve si se escribio. No levanta: las propuestas YA estan
@@ -254,41 +295,90 @@ def avisar_decisiones(org, propuestas: list[dict], *, ahora=None) -> bool:
     if not propuestas:
         return False
     try:
-        from django.utils import timezone
-
-        from operaciones import tareas_delegadas as td
-        from operaciones.chat_modelos import (ConversacionSupervisor,
-                                              MensajeSupervisor, RolMensaje)
-        from operaciones.tareas_modelos import TareaDelegada
-
-        fila = (TareaDelegada.objects
-                .filter(org=org, clave=td.CICLO_AUTOMATICO, activa=True)
-                .first())
-        if fila is None or not fila.delegada_por_id:
-            logger.info("Supervisor: %s decisiones sin revision delegada a "
-                        "quien avisar", len(propuestas))
-            return False
-        conversacion = (ConversacionSupervisor.objects
-                        .filter(org=org, actor_id=fila.delegada_por_id,
-                                archivada=False)
-                        .order_by("-ultimo_mensaje_en")
-                        .first())
-        if conversacion is None:
-            logger.info("Supervisor: %s decisiones sin conversacion donde "
-                        "avisar", len(propuestas))
-            return False
-        momento = ahora or timezone.now()
-        MensajeSupervisor.objects.create(
-            conversacion=conversacion,
-            org=org,
-            rol=RolMensaje.SUPERVISOR,
-            contenido=redactar_decisiones(propuestas),
-            escrito_en=momento,
-        )
-        conversacion.ultimo_mensaje_en = momento
-        conversacion.save(update_fields=["ultimo_mensaje_en"])
-        return True
+        return _escribir_a_quien_delego(
+            org, redactar_decisiones(propuestas), ahora=ahora,
+            que="decisiones", cuantos=len(propuestas))
     except Exception:                                            # noqa: BLE001
         logger.exception("Supervisor: no se pudo avisar en el chat lo que "
                          "hay que decidir")
+        return False
+
+
+# =============================================================================
+#  LOS NIVELES DE LOS ASUNTOS  --  H-21, 24/10/2026
+# =============================================================================
+#  Lo que el Supervisor ubico en esta vuelta: un asunto que entra por primera
+#  vez, o uno que cambia de nivel. UN mensaje por vuelta, aunque sean muchos
+#  (la primera vuelta ubica todos los de la empresa), con los primeros
+#  TOPE_DETALLADOS y cuantos mas. Que el conteo de un asunto crezca sin
+#  cambiarlo de nivel no se avisa.
+
+#: Cuantos caracteres de un asunto entran en un renglon del aviso.
+_LARGO_DEL_ASUNTO = 60
+
+
+def _asunto_corto(texto) -> str:
+    t = " ".join(str(texto or "").split())
+    return t if len(t) <= _LARGO_DEL_ASUNTO else t[:_LARGO_DEL_ASUNTO - 1] + "…"
+
+
+def redactar_niveles(cambios: list[dict], nombres: dict) -> str:
+    """El aviso de H-21. `nombres` = {codigo: nombre del nivel en la empresa}.
+    Pura, para probarla sin base. NO LO ESCRIBE EL MODELO: afirma algo que ya
+    se hizo, y lo que hay que decir es exactamente eso."""
+    n = len(cambios)
+    cabeza = ("Ubiqué 1 asunto en su nivel de respuesta:" if n == 1 else
+              f"Ubiqué {n} asuntos en su nivel de respuesta:")
+    lineas = [cabeza]
+    #  SE NOMBRA SOLO LO QUE ES UN ASUNTO DE VERDAD (auditor independiente,
+    #  25/10/2026): uno de una plantilla, o uno con 3 tickets o mas. El asunto
+    #  sale del nombre del caso, y si el corte no alcanzo a sacar al cliente,
+    #  un asunto de un solo ticket es justo donde quedaria su nombre -- y este
+    #  mensaje lo lee el modelo en el turno siguiente.
+    nombrables = [c for c in cambios
+                  if c.get("de_plantilla") or (c.get("tickets") or 0) >= 3]
+    sin_nombre = n - len(nombrables)
+    for c in nombrables[:TOPE_DETALLADOS]:
+        nivel = nombres.get(c.get("nivel"), c.get("nivel"))
+        asunto = _asunto_corto(c.get("asunto"))
+        motivo = str(c.get("motivo") or "")
+        porque = (f"por ahora ({motivo.split(':', 1)[-1].strip()})"
+                  if c.get("provisional") else f"porque {motivo}")
+        if c.get("antes"):
+            antes = nombres.get(c["antes"], c["antes"])
+            lineas.append(f"- «{asunto}»: de {antes} a {nivel}, {porque}.")
+        else:
+            lineas.append(f"- «{asunto}»: {nivel}, {porque}.")
+    if len(nombrables) > TOPE_DETALLADOS:
+        lineas.append(f"- …y {len(nombrables) - TOPE_DETALLADOS} más.")
+    if sin_nombre:
+        lineas.append(
+            f"- {sin_nombre} {'asunto' if sin_nombre == 1 else 'asuntos'} con "
+            "pocos tickets y sin plantilla: los ves en Plantillas → Niveles de "
+            "respuesta.")
+    lineas += ["", "Si alguno no va ahí, se cambia en Plantillas → Niveles de "
+                   "respuesta, y no lo vuelvo a tocar."]
+    return "\n".join(lineas)
+
+
+def avisar_niveles(org, cambios: list[dict], *, ahora=None) -> bool:
+    """Cuenta en el chat lo que H-21 ubico. Devuelve si se escribio. No
+    levanta: los niveles YA estan guardados."""
+    if not cambios:
+        return False
+    try:
+        from django.db import transaction
+
+        from campo.niveles import niveles_de
+        nombres = {n["codigo"]: n["nombre"] for n in niveles_de(org)}
+        #  En su propio punto de guardado: H-21 avisa DENTRO de su
+        #  transaccion, y un error de la base aca tiene que deshacer solo el
+        #  aviso, no dejar la transaccion de afuera rota.
+        with transaction.atomic():
+            return _escribir_a_quien_delego(
+                org, redactar_niveles(cambios, nombres), ahora=ahora,
+                que="asuntos ubicados", cuantos=len(cambios))
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Supervisor: no se pudo avisar en el chat los "
+                         "niveles de los asuntos")
         return False

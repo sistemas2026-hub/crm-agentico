@@ -206,7 +206,8 @@ def test_conocimiento_de_devuelve_vacio_donde_no_hay_documento():
                      if i not in habilidades.CONOCIMIENTO]
     #  M09-N: H-15 tampoco trae documento, por el mismo criterio de D-3.
     #  21/10/2026: H-20 tampoco trae documento.
-    assert len(sin_documento) == 16
+    #  24/10/2026: H-21 tampoco.
+    assert len(sin_documento) == 17
     for i in sin_documento:
         assert habilidades.conocimiento_de(i) == ""
 
@@ -225,17 +226,27 @@ def test_las_catorce_habilidades_siguen_intactas():
     #  en el CRM), tambien con autorizacion explicita.
     #  21/10/2026 agrega H-20 (proponer si se trabaja un feriado), con
     #  autorizacion explicita del usuario.
-    assert len(habilidades.HABILIDADES) == 20
-    assert len(habilidades.IDS) == 20
+    #  24/10/2026 agrega H-21 (ubicar cada asunto en su nivel de respuesta),
+    #  con autorizacion explicita del usuario: «autorizo la h-21».
+    assert len(habilidades.HABILIDADES) == 21
+    assert len(habilidades.IDS) == 21
 
 
 def test_ninguna_habilidad_gano_herramienta_de_escritura():
+    #  24/10/2026: H-21 es la UNICA que escribe (autorizada por el usuario,
+    #  «autorizo la h-21»), y solo esto.
+    autorizada = {"H-21": ("ORM: campo.NivelDeAsunto, solo las filas que decidio el Supervisor",
+             "ORM: operaciones.MensajeSupervisor, el aviso a quien delego")}
     for h in habilidades.HABILIDADES.values():
-        assert h.herramientas_escritura == ()
+        assert h.herramientas_escritura == autorizada.get(h.id, ())
 
 
 def test_ninguna_habilidad_cambio_de_nivel():
     for h in habilidades.HABILIDADES.values():
+        if h.id == "H-21":
+            #  24/10/2026, autorizada: escribe una tabla interna y reversible.
+            assert h.nivel == PropuestaSupervisor.NIVEL_EJECUTAR_REVERSIBLE
+            continue
         assert h.nivel in (PropuestaSupervisor.NIVEL_OBSERVAR,
                            PropuestaSupervisor.NIVEL_RECOMENDAR)
 

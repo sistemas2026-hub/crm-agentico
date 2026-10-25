@@ -63,6 +63,9 @@ CREAR_LAS_ORDENES = "crear_las_ordenes_de_despacho"
 #  La misma clave que 'paso_a_despacho.TAREA_CORRECCIONES': se escribe en los dos
 #  lados para no importar aquel modulo desde aca, y una prueba las ata.
 PASAR_CON_LAS_CORRECCIONES = "pasar_a_despacho_con_las_correcciones"
+#  H-21 (24/10/2026, autorizada por el usuario): ubicar cada asunto en su nivel
+#  de respuesta. Ver operaciones/nivel_de_los_asuntos.py.
+UBICAR_LOS_ASUNTOS = "ubicar_los_asuntos_en_su_nivel"
 
 CATALOGO = {
     CERRAR_DESINCRONIZADOS: {
@@ -165,6 +168,25 @@ CATALOGO = {
         #  lo dice si falta (auditor de frontera, 19/10/2026: contestaba "ya
         #  puede actuar" sin el paso delegado).
         "requiere": (PASAR_A_DESPACHO,),
+    },
+    UBICAR_LOS_ASUNTOS: {
+        "nombre": "Ubicar cada asunto en su nivel de respuesta",
+        "que_hace": (
+            "En cada vuelta pone cada asunto en Urgente, Normal o Programable "
+            "según lo que midió en sus tickets: si la mayoría fueron falla de "
+            "servicio, Urgente; obra de red, Normal; trabajo pedido, "
+            "Programable. Con menos de 3 tickets lo deja en Normal por ahora. "
+            "Lo cuenta en el chat, con el porqué. Mientras no se delega, solo "
+            "cuenta cuántos ubicaría y lo deja en el registro."),
+        "que_no_hace": (
+            "No toca un asunto que ubicó una persona, no cambia los niveles "
+            "(plazo y prioridad los pone la empresa en Plantillas) y no "
+            "cambia órdenes ya creadas."),
+        #  PROPIA, como el armado y el paso: habilitar una no habilita la otra.
+        #  Nivel 3: escribe una clasificacion interna que una persona corrige
+        #  con un clic; no sale de la plataforma ni le promete nada a nadie.
+        "exige_nivel": 3,
+        "necesita_que_mire": True,
     },
     CICLO_AUTOMATICO: {
         "nombre": "Revisar solo, una vez por hora",

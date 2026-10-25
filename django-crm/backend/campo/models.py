@@ -1508,3 +1508,7 @@ from campo.labores import (  # noqa: E402,F401
     AsuntoDeLabor,
     Labor,
 )
+from campo.niveles import (  # noqa: E402,F401
+    NivelDeAsunto,
+    NivelDeRespuesta,
+)

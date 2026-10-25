@@ -15,6 +15,7 @@
   import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
   import '../supervisor-noc.css';
+  import NivelesDeRespuesta from './NivelesDeRespuesta.svelte';
 
   let { data, form } = $props();
 
@@ -537,6 +538,9 @@
           {/if}
         </section>
       {/if}
+
+      <!-- ============ NIVELES DE RESPUESTA (24/10/2026) ============ -->
+      <NivelesDeRespuesta {...data.niveles} />
 
       <!-- ============ EL CATÁLOGO ============ -->
       <section class="snoc-panel" style="gap:var(--snoc-sm);">

@@ -72,6 +72,12 @@ BLOQUEADA = "bloqueada"
 
 DOMINIO = "dominio"
 TRANSVERSAL = "transversal"
+#  'actua' (24/10/2026): una habilidad que ESCRIBE, con autorizacion explicita
+#  del usuario y sobre UNA tabla interna. No es de dominio porque no detecta
+#  ni emite una señal --no deja una propuesta para que alguien la acepte--, y
+#  meterla ahi obligaria a inventarle una. Hoy hay una sola: H-21. Las guardas
+#  de escritura y de nivel la nombran a ella y a lo que escribe, y a nada mas.
+ACTUA = "actua"
 
 
 @dataclass(frozen=True)
@@ -86,7 +92,7 @@ class Habilidad:
 
     id: str
     nombre: str
-    tipo: str                     # DOMINIO | TRANSVERSAL
+    tipo: str                     # DOMINIO | TRANSVERSAL | ACTUA
     version: int
     vigente_desde: str            # AAAA-MM-DD
     estado: str                   # VIGENTE | BLOQUEADA
@@ -115,7 +121,9 @@ class Habilidad:
     evidencia: tuple[str, ...] = ()
     incertidumbre: tuple[str, ...] = ()
     escalamiento: tuple[str, ...] = ()
-    nivel: int = 1                # 0 observar · 1 recomendar. Nada mas.
+    nivel: int = 1                # 0 observar · 1 recomendar. Nada mas,
+                                  # salvo H-21 (ACTUA, autorizada el
+                                  # 24/10/2026): 3, ejecutar reversible.
     metricas: tuple[str, ...] = ()
 
     # El enganche con el codigo real. 'detector' es la funcion de supervisor.py;
@@ -1151,6 +1159,96 @@ _FICHAS: tuple[Habilidad, ...] = (
         detector="_feriados_por_decidir",
         senal="feriado_por_decidir",
         huella_condicion="feriado:<fecha>",
+    ),
+
+    #  24/10/2026, CON AUTORIZACION EXPLICITA del usuario: «autorizo la h-21».
+    #  Propuesta del mismo dia: cada asunto con su plazo y su prioridad sin que
+    #  una persona configure los ~50 uno por uno; el Supervisor los ubica por
+    #  lo que ya mide y lo avisa en su chat, y lo que decide una persona no lo
+    #  vuelve a tocar. Es la primera habilidad que ESCRIBE: lo hace sobre una
+    #  sola tabla interna (el nivel de cada asunto), no toca ordenes creadas ni
+    #  habla con terceros. Ficha: supervisor-arma-la-jornada.md.
+    Habilidad(
+        id="H-21",
+        nombre="Ubicar cada asunto en su nivel de respuesta",
+        tipo=ACTUA, version=1, vigente_desde="2026-10-24", estado=VIGENTE,
+        proposito=(
+            "Que cada asunto tenga plazo y prioridad sin que una persona tenga "
+            "que configurarlos uno por uno."),
+        responsabilidad=(
+            "Poner cada asunto en Urgente, Normal o Programable segun el grupo "
+            "de la lectura de sus tickets, decir por que, y avisarlo en el "
+            "chat. Nunca cambiar lo que decidio una persona."),
+        alcance=(
+            "Los asuntos de la empresa: los de sus tickets leidos y los de sus "
+            "plantillas activas."),
+        fuera_de_alcance=(
+            "No cambia los niveles (nombre, plazo, prioridad): los define una "
+            "persona.",
+            "No toca un asunto que ubico una persona.",
+            "No cambia ordenes ya creadas ni su prioridad.",
+            "No habla con el proveedor ni con el motor.",
+        ),
+        activacion=(
+            "Cada vuelta del ciclo del Supervisor, con su tarea delegada "
+            "(ubicar_los_asuntos_en_su_nivel) y el nivel 3 de la empresa; "
+            "sin alguna de las dos, solo cuenta cuantos ubicaria (sombra).",),
+        entradas=("org",),
+        datos=("la lectura de cada ticket (el grupo)",
+               "el asunto de cada caso",
+               "los asuntos de las plantillas activas",
+               "el nivel guardado de cada asunto y quien lo decidio"),
+        reglas=(
+            "El grupo con mas tickets manda: falla de servicio -> Urgente, "
+            "obra de red -> Normal, trabajo pedido -> Programable.",
+            "Con menos de 3 tickets leidos: Normal, provisional.",
+            "Si dos grupos empatan arriba, o gana uno sin nivel: Normal.",
+            "Cada caso vota una vez, con su lectura mas reciente.",
+            "El asunto se corta como lo guarda WispHub (Asunto - Cliente).",
+            "Un nivel ya medido cambia solo si el grupo nuevo tiene mas de la "
+            "mitad de los tickets y dos o mas de ventaja.",
+            "Lo que decidio una persona no se escribe: lo filtra el UPDATE.",
+            "En el chat se nombran solo asuntos de una plantilla o con 3 o mas "
+            "tickets; el resto se cuenta.",
+        ),
+        procedimiento=(
+            "1. Contar, por asunto, los tickets de cada grupo "
+            "(nivel_de_los_asuntos.tickets_por_asunto).",
+            "2. Decidir el nivel y su motivo (nivel_de_los_asuntos.decidir).",
+            "3. Escribirlo si es del Supervisor "
+            "(campo.niveles.ubicar_por_el_supervisor).",
+            "4. Contar en el chat los que entraron o cambiaron de nivel "
+            "(aviso_al_chat.avisar_niveles).",
+            "Todo dentro de una transaccion con la empresa bloqueada "
+            "(nivel_de_los_asuntos.fase).",
+        ),
+        conocimiento=(),
+        herramientas_lectura=(
+            "ORM: operaciones.PropuestaSupervisor",
+            "ORM: cases.Case",
+            "ORM: campo.WorkType",
+            "operaciones.paso_a_despacho._ultima_lectura_con_grupo"),
+        herramientas_escritura=(
+            "ORM: campo.NivelDeAsunto, solo las filas que decidio el Supervisor",
+            "ORM: operaciones.MensajeSupervisor, el aviso a quien delego",),
+        salida="El nivel de cada asunto, con su motivo, y un aviso en el chat.",
+        evidencia=("observado: el grupo de la lectura de cada ticket",
+                   "observado: cuantos tickets de cada grupo tiene el asunto"),
+        incertidumbre=(
+            "El grupo lo pone la lectura del modelo, y puede equivocarse "
+            "ticket por ticket.",
+            "Con pocos tickets el nivel es provisional y puede cambiar.",
+            "El asunto lo escribe quien abre el ticket: dos formas de escribir "
+            "lo mismo que no se normalizan igual cuentan como dos asuntos.",
+        ),
+        escalamiento=("A humano: cualquier persona lo cambia en Plantillas, y "
+                      "desde ahi el Supervisor no lo toca.",),
+        nivel=3,
+        metricas=("Asuntos que una persona cambio contra los que ubico el "
+                  "Supervisor.",),
+        detector="",
+        senal="",
+        huella_condicion="",
     ),
 
 )

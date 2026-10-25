@@ -686,7 +686,9 @@ def test_habilidades_ni_nuevas_ni_ocultas(org_a, actor):
     #  en el CRM), tambien con autorizacion explicita.
     #  21/10/2026 agrega H-20 (proponer si se trabaja un feriado), con
     #  autorizacion explicita del usuario.
-    assert len(habilidades.HABILIDADES) == 20, "se creó una habilidad no prevista"
+    #  24/10/2026 agrega H-21 (ubicar cada asunto en su nivel de respuesta),
+    #  con autorizacion explicita del usuario: «autorizo la h-21».
+    assert len(habilidades.HABILIDADES) == 21, "se creó una habilidad no prevista"
     assert habilidades.HABILIDADES["H-05"].estado == habilidades.BLOQUEADA
 
     _, p1 = _persona(org_a)

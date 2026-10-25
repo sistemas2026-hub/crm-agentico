@@ -279,9 +279,15 @@ def test_el_supervisor_noc_ia_no_tiene_ninguna_herramienta_que_escriba():
     """
     from operaciones import habilidades
 
+    #  24/10/2026: H-21 es la UNICA que escribe (autorizada por el usuario,
+    #  «autorizo la h-21»), y solo esto.
+    autorizada = {"H-21": ("ORM: campo.NivelDeAsunto, solo las filas que decidio el Supervisor",
+             "ORM: operaciones.MensajeSupervisor, el aviso a quien delego")}
     for h in habilidades.HABILIDADES.values():
-        assert h.herramientas_escritura == (), \
+        assert h.herramientas_escritura == autorizada.get(h.id, ()), \
             f"{h.id} declara escritura: {h.herramientas_escritura}"
+        assert not any("disponibilidad" in x.lower()
+                       for x in h.herramientas_escritura)
 
 
 def test_el_modulo_del_supervisor_no_escribe_disponibilidad():
