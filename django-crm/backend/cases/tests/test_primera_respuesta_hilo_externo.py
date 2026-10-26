@@ -146,18 +146,58 @@ class TestLaMigracionCompletaLoQueYaEstaba:
 
 
 @pytest.mark.django_db
-class TestElHiloAjenoNoMaquillaElIndicador:
-    def test_quien_no_puede_escribir_el_caso_guarda_el_hilo_pero_no_sella(
+class TestLaImportacionEsSoloDeAdministracion:
+    """Desde el 26/10/2026 las rutas de importacion exigen administracion: lo
+    que viene del proveedor tiene que venir del proveedor, no de un usuario
+    con su sesion. El importador entra con un token de la cuenta 'admin'."""
+
+    def test_las_seis_rutas_rechazan_a_quien_no_administra(
         self, user_client, org_a, admin_user
     ):
-        """La ruta de importacion acepta a cualquiera de la organizacion. El
-        hilo se guarda igual; el sello no, si quien lo manda no podria haberlo
-        sellado comentando."""
         caso = _caso(org_a, admin_user)
-        r = _hilo(user_client, caso, _fila("a", hace_horas=4))
-        assert r.status_code == 200, r.content
-        assert RespuestaExterna.objects.filter(case=caso).count() == 1
+        base = "/api/importacion"
+        pedidos = [
+            ("get", f"{base}/tickets-conocidos/", {"provider": "wisphub", "ids": "91865"}),
+            ("post", f"{base}/casos/", {"provider": "wisphub"}),
+            ("get", f"{base}/casos-externos/", {"provider": "wisphub"}),
+            ("post", f"{base}/casos/{caso.pk}/reconciliar/", {"provider": "wisphub"}),
+            ("post", f"{base}/casos/{caso.pk}/respuestas/",
+             {"provider": "wisphub", "respuestas": [_fila("a", hace_horas=4)]}),
+            ("post", f"{base}/casos/nombre-cliente/",
+             {"external_service_id": "5832", "external_client_name": "Otro"}),
+        ]
+        for metodo, url, cuerpo in pedidos:
+            if metodo == "get":
+                r = user_client.get(url, cuerpo)
+            else:
+                r = user_client.post(url, cuerpo, format="json")
+            assert r.status_code == 403, f"{metodo} {url}: {r.status_code}"
+        assert RespuestaExterna.objects.filter(case=caso).count() == 0
+        caso.refresh_from_db()
+        assert caso.external_client_name == ""
         assert _primera(caso) is None
+
+    def test_la_segunda_capa_tampoco_sella_lo_de_quien_no_escribe_el_caso(
+        self, org_a, admin_user, admin_profile, regular_user, user_profile
+    ):
+        """Donde ocurre el efecto: una respuesta externa creada a nombre de
+        alguien que no puede escribir el caso no sella, venga por donde venga."""
+        from crum import impersonate
+
+        caso = _caso(org_a, admin_user)
+
+        def respuesta(huella):
+            return RespuestaExterna.objects.create(
+                org=org_a, case=caso, provider="wisphub", huella=huella,
+                autor_usuario="tecnico.uno",
+                creada_en_proveedor=AHORA - timedelta(hours=4))
+
+        with impersonate(regular_user):
+            respuesta("a")
+        assert _primera(caso) is None
+        with impersonate(admin_user):
+            respuesta("b")
+        assert _primera(caso) == AHORA - timedelta(hours=4)
 
 
 def _bandeja(cliente, caso, momento):

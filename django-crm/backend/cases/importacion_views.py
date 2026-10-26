@@ -45,8 +45,24 @@ from rest_framework.views import APIView
 
 from cases.models import (EXTERNAL_AUTHOR_DEXTER, EXTERNAL_AUTHOR_TYPE, Case)
 from common.models import Activity, Profile
-from common.permissions import HasOrgContext
+from common.permissions import HasOrgContext, IsOrgAdmin
 from common.utils import PRIORITY_CHOICE
+
+#  QUIEN ENTRA: SOLO ADMINISTRACION  --  26/10/2026
+#  -----------------------------------------------
+#  Estas rutas las usa el importador del motor (y cli/backfill_nombre_cliente.py),
+#  y hasta hoy pedian solo "ser de la organizacion": cualquier usuario --un
+#  tecnico con su sesion-- podia crear un caso que parecia importado, marcarlo
+#  "de WispHub" o agregarle respuestas que nadie escribio alla. Lo que viene del
+#  proveedor tiene que venir del proveedor.
+#
+#  POR QUE ADMIN Y NO UN PERMISO NUEVO: medido en Ajustes -> Tokens de API, los
+#  dos tokens con que el motor entra al CRM ('importacion-wisphub' con
+#  importacion:read/write, y 'derivar_a_humano') son de la cuenta 'admin', rol
+#  Administrador. Exigir admin no le quita nada al importador y deja afuera a
+#  todos los demas. Si algun dia el token pasa a una cuenta sin ese rol, la
+#  importacion responde 403 -- visible en el log del reloj --, no en silencio.
+PERMISOS_IMPORTACION = (IsAuthenticated, HasOrgContext, IsOrgAdmin)
 
 # Lo que el descubrimiento puede escribir. Nada mas.
 CAMPOS_DESCUBRIMIENTO = frozenset({
@@ -132,7 +148,7 @@ class ImportarCaseView(APIView):
     que saber perder la carrera con elegancia.
     """
 
-    permission_classes = (IsAuthenticated, HasOrgContext)
+    permission_classes = PERMISOS_IMPORTACION
 
     def post(self, request):
         cuerpo = request.data if isinstance(request.data, dict) else {}
@@ -309,7 +325,7 @@ class TicketsConocidosView(APIView):
     POST habria exigido 'importacion:write' para una operacion que no escribe.
     """
 
-    permission_classes = (IsAuthenticated, HasOrgContext)
+    permission_classes = PERMISOS_IMPORTACION
 
     # Cuantos ids se pueden preguntar de una vez, y cuanto puede medir la
     # lista entera. Los dos limites hacen falta y miden cosas distintas: hoy
@@ -386,7 +402,7 @@ class CasosExternosView(APIView):
     nada del cliente ni del texto del caso.
     """
 
-    permission_classes = (IsAuthenticated, HasOrgContext)
+    permission_classes = PERMISOS_IMPORTACION
 
     CAMPOS = ("id", "external_ticket_id", "status", "closed_on",
               "external_status", "external_created_by",
@@ -483,7 +499,7 @@ class ReconciliarCaseView(APIView):
     escribio, y el dia que alguien los mande por error querra saberlo.
     """
 
-    permission_classes = (IsAuthenticated, HasOrgContext)
+    permission_classes = PERMISOS_IMPORTACION
 
     def post(self, request, pk):
         cuerpo = request.data if isinstance(request.data, dict) else {}
@@ -582,7 +598,7 @@ class RespuestasExternasView(APIView):
     que hace es agregar filas al hilo externo.
     """
 
-    permission_classes = (IsAuthenticated, HasOrgContext)
+    permission_classes = PERMISOS_IMPORTACION
 
     def post(self, request, pk):
         from cases.models import RespuestaExterna
@@ -694,7 +710,7 @@ class NombreClienteView(APIView):
     decide es la base.
     """
 
-    permission_classes = (IsAuthenticated, HasOrgContext)
+    permission_classes = PERMISOS_IMPORTACION
 
     def post(self, request):
         cuerpo = request.data if isinstance(request.data, dict) else {}

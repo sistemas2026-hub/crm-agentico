@@ -305,13 +305,14 @@ def respuesta_externa_es_primera_respuesta(sender, instance, created, **kwargs):
 def _quien_envia_puede_sellar(case):
     """Si quien manda el hilo podria haber sellado la primera respuesta.
 
-    La ruta de importacion acepta a cualquier usuario autenticado de la
-    organizacion (cases/importacion_views.py), y hasta el 25/10/2026 eso solo
-    agregaba texto al hilo. Desde que el hilo sella la primera respuesta, esa
-    misma puerta serviria para maquillar el tiempo de respuesta de un ticket
-    ajeno. Se exige lo mismo que para sellarla comentando: poder escribir el
-    caso. La importacion no cambia -- el hilo se guarda igual --; lo unico
-    que se acota es el sello.
+    La ruta de importacion aceptaba a cualquier usuario autenticado de la
+    organizacion, y desde que el hilo sella la primera respuesta esa puerta
+    servia para maquillar el tiempo de respuesta de un ticket ajeno. Desde el
+    26/10/2026 la ruta exige administracion (cases/importacion_views.py::
+    PERMISOS_IMPORTACION); esto queda como segunda capa, aca donde ocurre el
+    efecto: un camino nuevo que cree respuestas externas sin pasar por esa
+    ruta tampoco sella si quien lo origina no podria haberlo sellado
+    comentando.
 
     Sin request (una migracion, un comando) no hay a quien preguntarle y se
     sella: esos caminos no los abre un usuario.
