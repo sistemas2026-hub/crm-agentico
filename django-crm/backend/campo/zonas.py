@@ -116,6 +116,60 @@ def normalizar_localidad(texto: str) -> str:
     return " ".join((texto or "").upper().split())
 
 
+def sin_tildes(texto: str) -> str:
+    """El barrio normalizado y sin tildes: «VIÑA DEL REY» -> «VINA DEL REY».
+    Solo para buscar (`MapaDeBarrios`); lo que se guarda sigue con su tilde."""
+    import unicodedata
+
+    return normalizar_localidad("".join(
+        c for c in unicodedata.normalize("NFKD", texto or "")
+        if not unicodedata.combining(c)))
+
+
+class MapaDeBarrios(dict):
+    """{barrio cargado: zona} que tambien encuentra un barrio escrito con o sin
+    tilde  --  25/10/2026.
+
+    El informe de Despacho mostro cuatro clientes de «VINA DEL REY» sin zona
+    porque la empresa cargo «VIÑA DEL REY». El usuario pidio que el Supervisor
+    identifique la zona solo, sin que una persona cargue cada forma.
+
+    NO CONTRADICE la decision de `normalizar_localidad` (no quitar tildes): lo
+    cargado tal cual GANA siempre, asi que una empresa que cargo «BOGOTÁ» y
+    «BOGOTA» en zonas distintas sigue teniendo las dos. Sin tilde solo se
+    busca cuando lo escrito no esta cargado, y solo si una UNICA zona tiene un
+    barrio que coincide sin tildes: si dos zonas coinciden, no se elige.
+
+    Lo que cambia es `get`, `[]` e `in`; recorrerlo (`items`) da solo lo
+    cargado.
+    """
+
+    def __init__(self, base=()):
+        super().__init__(base)
+        zonas_por_forma: dict = {}
+        for barrio, zona in self.items():
+            zonas_por_forma.setdefault(sin_tildes(barrio), set()).add(zona)
+        self._sin_tildes = {forma: next(iter(zonas))
+                            for forma, zonas in zonas_por_forma.items()
+                            if len(zonas) == 1}
+
+    def get(self, barrio, default=None):
+        if dict.__contains__(self, barrio):
+            return dict.__getitem__(self, barrio)
+        if not barrio:
+            return default
+        return self._sin_tildes.get(sin_tildes(barrio), default)
+
+    def __getitem__(self, barrio):
+        zona = self.get(barrio)
+        if zona is None:
+            raise KeyError(barrio)
+        return zona
+
+    def __contains__(self, barrio):
+        return self.get(barrio) is not None
+
+
 def zona_de(org, localidad: str):
     """La zona operativa de un barrio, o `None` si nadie la mapeo.
 

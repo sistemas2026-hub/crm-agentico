@@ -160,7 +160,7 @@ def decidir(org, ahora=None) -> dict:
     )
     from campo.labores import nombres_de_labor
     from campo.reparto import _zona_de
-    from campo.zonas import AliasDeZona, normalizar_localidad
+    from campo.zonas import AliasDeZona, MapaDeBarrios, normalizar_localidad
     from cases.models import Case
     from operaciones import armado_de_jornadas as adj
     from operaciones import paso_a_despacho as pad
@@ -187,11 +187,12 @@ def decidir(org, ahora=None) -> dict:
     labores = labor_de_cada_grupo(org)
     nombres = nombres_de_labor(org)
     ofrecidas = P.plantillas_que_se_ofrecen(org)
-    zona_de_barrio = {
+    #  Con o sin tilde: `MapaDeBarrios` (25/10/2026).
+    zona_de_barrio = MapaDeBarrios({
         a.localidad: a.zona.nombre
         for a in AliasDeZona.objects.filter(org=org, zona__activa=True)
         .select_related("zona")
-    }
+    })
     buscables = ub.preparar(zona_de_barrio)
     umbral = onus_para_corte_de_red(org.id)
     #  El puerto de cada caso que es parte de un corte de red, y el caso que

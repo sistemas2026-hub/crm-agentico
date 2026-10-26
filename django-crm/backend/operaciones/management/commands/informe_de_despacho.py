@@ -52,7 +52,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         from campo import plantillas as P
         from campo.cuadrillas import labor_de_cada_grupo, onus_para_corte_de_red
-        from campo.zonas import AliasDeZona, normalizar_localidad
+        from campo.zonas import AliasDeZona, MapaDeBarrios, normalizar_localidad
         from cases.models import Case
         from operaciones import armado_de_jornadas as adj
         from operaciones import paso_a_despacho as pad
@@ -69,10 +69,10 @@ class Command(BaseCommand):
             org=org, id__in=list(propuestas))}
         labores = labor_de_cada_grupo(org)
         ofrecidas = P.plantillas_que_se_ofrecen(org)
-        zona_de_barrio = {
+        zona_de_barrio = MapaDeBarrios({
             a.localidad: a.zona.nombre
             for a in AliasDeZona.objects.filter(org=org, zona__activa=True)
-            .select_related("zona")}
+            .select_related("zona")})
         buscables = ub.preparar(zona_de_barrio)
         umbral = onus_para_corte_de_red(org.id)
 

@@ -185,7 +185,8 @@ def test_c_cada_caso_con_su_respuesta(empresa, plantillas):
     sin_leer = _caso(empresa, barrio=None)
     sin_barrio = _caso(empresa, barrio="")
     sin_zona = _caso(empresa, barrio="OFICINA")
-    sin_plantilla = _caso(empresa, asunto="Algo raro", grupo=pad.NADA_LO_MIDE)
+    #  Sin grupo: desde el 25/10/2026 «nada lo mide» tiene labor de fabrica.
+    sin_plantilla = _caso(empresa, asunto="Algo raro", grupo="")
     con_orden = _caso(empresa)
     _orden_de(empresa, con_orden, plantillas["soporte"])
     cancelada = _caso(empresa)

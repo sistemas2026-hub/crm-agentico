@@ -161,7 +161,10 @@
     { id: 'falla_de_servicio', texto: 'Falla de servicio' },
     { id: 'trabajo_pedido', texto: 'Trabajo pedido (cliente que ya existe)' },
     { id: 'instalacion_nueva', texto: 'Instalación de un cliente nuevo' },
-    { id: 'obra_de_red', texto: 'Obra de red' }
+    { id: 'obra_de_red', texto: 'Obra de red' },
+    //  25/10/2026: los que pasan a Despacho porque una persona los aceptó.
+    { id: 'ni_cliente_ni_red', texto: 'Ni de un cliente ni de la red (proyectos, oficina)' },
+    { id: 'nada_lo_mide', texto: 'Reclamo que ninguna herramienta mide' }
   ];
 
   /** Qué cuadrilla se está armando. `null` = ninguna. */

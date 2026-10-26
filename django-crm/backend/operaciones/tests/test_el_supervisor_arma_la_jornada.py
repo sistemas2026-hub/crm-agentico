@@ -370,7 +370,9 @@ def test_j_cada_caso_se_cuenta_en_su_zona_con_la_labor_de_su_grupo(
     _en_despacho(empresa, pad.FALLA_DE_SERVICIO, barrio=BARRIO)
     _en_despacho(empresa, pad.FALLA_DE_SERVICIO, barrio="soledad   centro")
     _en_despacho(empresa, pad.TRABAJO_PEDIDO, barrio=BARRIO)
-    _en_despacho(empresa, pad.NADA_LO_MIDE, barrio=BARRIO)
+    #  Sin grupo: no tiene labor. «Nada lo mide» la tiene de fabrica desde el
+    #  25/10/2026 (informe de Despacho).
+    _en_despacho(empresa, "", barrio=BARRIO)
     _en_despacho(empresa, pad.FALLA_DE_SERVICIO, barrio="BARRIO SIN MAPEAR")
     _en_despacho(empresa, pad.FALLA_DE_SERVICIO)
     #  Cerrado: ya no esta en la cola, y no cuenta para nada.

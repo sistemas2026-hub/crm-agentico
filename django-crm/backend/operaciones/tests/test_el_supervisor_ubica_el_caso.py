@@ -116,7 +116,11 @@ def test_r3_un_cliente_siempre_por_su_barrio(del_cliente, esperado):
     (pad.OBRA_DE_RED, False, True),
     (pad.OBRA_DE_RED, True, False),       # el cliente de un corte de red
     (pad.FALLA_DE_SERVICIO, False, False),
-    (pad.NI_CLIENTE_NI_RED, False, False),
+    #  25/10/2026: en el informe de Despacho eran obras con la cuenta de la
+    #  oficina.
+    (pad.NI_CLIENTE_NI_RED, False, True),
+    (pad.NI_CLIENTE_NI_RED, True, False),
+    (pad.NADA_LO_MIDE, False, False),
     ("", False, False),
 ])
 def test_o_que_es_una_obra(grupo, es_corte, esperado):
@@ -228,7 +232,7 @@ def test_i_el_informe_muestra_lo_que_calculo_y_no_el_asunto(dos_zonas, plantilla
 
     obra = _caso(dos_zonas, asunto="Intervencio Santa Sofia Niveles Altos",
                  grupo=pad.OBRA_DE_RED, barrio="OFICINA")
-    _caso(dos_zonas, asunto="Algo raro", grupo=pad.NADA_LO_MIDE)
+    _caso(dos_zonas, asunto="Algo raro", grupo="")
     salida = io.StringIO()
 
     call_command("informe_de_despacho", "--org", str(dos_zonas.id), stdout=salida)
@@ -236,7 +240,109 @@ def test_i_el_informe_muestra_lo_que_calculo_y_no_el_asunto(dos_zonas, plantilla
     texto = salida.getvalue()
     assert obra.external_ticket_id in texto
     assert "SANTA SOFIA [ticket]" in texto and "SABANAGRANDE" in texto
-    assert "sin labor, por grupo: nada_mide 1" in texto
+    assert "sin labor, por grupo: sin grupo 1" in texto
     #  Ni el asunto ni el cliente: solo el numero del ticket y lo calculado.
     assert "Intervencio" not in texto and "Algo raro" not in texto
     assert "Zoraida" not in texto
+
+
+# ---------------------------------------------------------------------------
+# N · lo que mostro el informe de Despacho del 25/10/2026
+# ---------------------------------------------------------------------------
+
+def test_n_ni_cliente_ni_red_es_una_obra_de_trabajos(dos_zonas, plantillas):
+    """«PROYECTO DE AMPLIACION», «INTERVENCION CTO»: el modelo los puso en
+    «ni cliente ni red» y eran obras con la cuenta de la oficina."""
+    caso = _caso(dos_zonas, asunto="PROYECTO DE AMPLIACION Santa Sofia",
+                 grupo=pad.NI_CLIENTE_NI_RED, barrio="OFICINA")
+
+    crear, _ = _por_caso(O.decidir(dos_zonas, A_LAS_3))
+
+    f = crear[str(caso.id)]
+    assert (f["plantilla"], f["por"], f["zona"], f["barrio_de"]) == (
+        "Red", "labor", "SABANAGRANDE", ub.DEL_TICKET)
+
+
+def test_n2_nada_lo_mide_es_un_cliente_de_soporte(dos_zonas, plantillas):
+    """«Paginas Bloqueadas», de un cliente: va por su barrio."""
+    caso = _caso(dos_zonas, asunto="Paginas Bloqueadas", grupo=pad.NADA_LO_MIDE)
+    _con_descripcion(caso, "el cliente es de Santa Sofia")
+
+    crear, _ = _por_caso(O.decidir(dos_zonas, A_LAS_3))
+
+    f = crear[str(caso.id)]
+    assert (f["plantilla"], f["zona"], f["barrio_de"]) == (
+        "Soporte", "SOLEDAD", ub.DEL_CLIENTE)
+
+
+def test_n3_lo_que_la_empresa_dejo_sin_labor_se_respeta(dos_zonas, plantillas):
+    from campo.cuadrillas import ConfiguracionDeReparto
+
+    ConfiguracionDeReparto.objects.filter(org=dos_zonas).update(
+        labor_por_grupo={"ni_cliente_ni_red": ""})
+    caso = _caso(dos_zonas, asunto="PROYECTO DE AMPLIACION Santa Sofia",
+                 grupo=pad.NI_CLIENTE_NI_RED, barrio="OFICINA")
+
+    _, no = _por_caso(O.decidir(dos_zonas, A_LAS_3))
+
+    assert no[str(caso.id)]["motivo"] == O.SIN_PLANTILLA
+
+
+# ---------------------------------------------------------------------------
+# T · con o sin tilde
+# ---------------------------------------------------------------------------
+
+def test_t_un_barrio_con_o_sin_tilde():
+    from campo.zonas import MapaDeBarrios
+
+    m = MapaDeBarrios({"VIÑA DEL REY": SOL, "SANTA SOFIA": SAB})
+    assert (m.get("VIÑA DEL REY"), m.get("VINA DEL REY"), m.get("SANTA SOFÍA")) == (
+        SOL, SOL, SAB)
+    assert "VINA DEL REY" in m and "OTRO" not in m
+    assert m["VINA DEL REY"] == SOL
+    with pytest.raises(KeyError):
+        m["OTRO"]
+    assert m.get("") is None
+    #  Un caso sin barrio no hereda la zona de un alias cargado en blanco.
+    assert MapaDeBarrios({"": SOL}).get(None) is None
+    #  Recorrerlo da solo lo cargado.
+    assert sorted(m) == ["SANTA SOFIA", "VIÑA DEL REY"]
+
+
+def test_t2_lo_cargado_gana_y_dos_zonas_no_se_eligen():
+    from campo.zonas import MapaDeBarrios
+
+    m = MapaDeBarrios({"BOGOTÁ": SOL, "BOGOTA": SAB})
+    assert (m.get("BOGOTÁ"), m.get("BOGOTA"), m.get("BOGÓTA")) == (SOL, SAB, None)
+
+
+def test_t3_el_cliente_de_vina_del_rey_sale_para_soledad(dos_zonas, plantillas):
+    soledad = ZonaOperativa.objects.get(org=dos_zonas, nombre="SOLEDAD")
+    AliasDeZona.objects.create(org=dos_zonas, zona=soledad, localidad="VIÑA DEL REY")
+    caso = _caso(dos_zonas, barrio="VINA DEL REY")
+
+    crear, _ = _por_caso(O.decidir(dos_zonas, A_LAS_3))
+
+    assert crear[str(caso.id)]["zona"] == "SOLEDAD"
+
+    #  Y el informe de solo lectura dice lo mismo.
+    import io
+
+    from django.core.management import call_command
+
+    salida = io.StringIO()
+    call_command("informe_de_despacho", "--org", str(dos_zonas.id), stdout=salida)
+    assert "SOLEDAD" in salida.getvalue()
+
+
+def test_t4_el_reparto_y_la_demanda_tambien(dos_zonas, plantillas):
+    from campo import reparto
+
+    soledad = ZonaOperativa.objects.get(org=dos_zonas, nombre="SOLEDAD")
+    AliasDeZona.objects.create(org=dos_zonas, zona=soledad, localidad="VIÑA DEL REY")
+    _caso(dos_zonas, barrio="VINA DEL REY")
+
+    assert reparto.zona_de_barrio(dos_zonas).get("VINA DEL REY") == str(soledad.id)
+    d = adj.demanda_de_despacho(dos_zonas, adj.propuestas_en_despacho(dos_zonas))
+    assert (d["sin_zona"], d["por_zona"]) == (0, {str(soledad.id): {"correctivo": 1}})
+    assert adj._barrios_sin_zona(dos_zonas, adj.propuestas_en_despacho(dos_zonas)) == []

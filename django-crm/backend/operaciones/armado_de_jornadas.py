@@ -323,17 +323,17 @@ def demanda_de_despacho(org, propuestas: dict) -> dict:
         labor_de_cada_grupo,
         onus_para_corte_de_red,
     )
-    from campo.zonas import AliasDeZona, normalizar_localidad
+    from campo.zonas import AliasDeZona, MapaDeBarrios, normalizar_localidad
     from operaciones import paso_a_despacho as pad
     from operaciones import ubicacion_del_caso as ub
 
     labores = labor_de_cada_grupo(org)
     #  Se arma una vez, como en `reparto.proponer`: preguntarlo por caso seria
-    #  una consulta por fila.
-    zona_de_barrio = {
+    #  una consulta por fila. Con o sin tilde: `MapaDeBarrios`.
+    zona_de_barrio = MapaDeBarrios({
         a.localidad: str(a.zona_id)
         for a in AliasDeZona.objects.filter(org=org, zona__activa=True)
-    }
+    })
     buscables = ub.preparar(zona_de_barrio)
     textos = _textos_de_los_casos(org, list(propuestas))
     despachados = _ya_despachados(org, list(propuestas))
@@ -692,14 +692,15 @@ def _barrios_sin_zona(org, propuestas: dict) -> list[dict]:
     `demanda_de_despacho`: lo ya despachado no cuenta."""
     from collections import Counter
 
-    from campo.zonas import AliasDeZona, normalizar_localidad
+    from campo.zonas import AliasDeZona, MapaDeBarrios, normalizar_localidad
     from operaciones import paso_a_despacho as pad
     from operaciones import ubicacion_del_caso as ub
 
     #  EL MISMO BARRIO QUE CUENTA LA DEMANDA (25/10/2026): el de una obra de
-    #  red sale del ticket, y la cuenta de la oficina no se pide cargar.
-    zona_de_barrio = {a.localidad: str(a.zona_id) for a in
-                      AliasDeZona.objects.filter(org=org, zona__activa=True)}
+    #  red sale del ticket, y la cuenta de la oficina no se pide cargar. Con
+    #  o sin tilde: `MapaDeBarrios`.
+    zona_de_barrio = MapaDeBarrios({a.localidad: str(a.zona_id) for a in
+                                    AliasDeZona.objects.filter(org=org, zona__activa=True)})
     buscables = ub.preparar(zona_de_barrio)
     textos = _textos_de_los_casos(org, list(propuestas))
     from campo.cuadrillas import onus_para_corte_de_red

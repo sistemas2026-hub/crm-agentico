@@ -290,6 +290,15 @@ class ConfiguracionDeReparto(BaseModel):
         "obra_de_red": "trabajos",
         "trabajo_pedido": "correctivo",
         "instalacion_nueva": "instalacion",
+        #  LOS QUE PASAN PORQUE UNA PERSONA LOS ACEPTO  --  25/10/2026. El
+        #  informe de Despacho de ese dia: los dos «ni cliente ni red» eran
+        #  obras abiertas con la cuenta de la oficina («PROYECTO DE
+        #  AMPLIACION», «INTERVENCION CTO») y el «nada lo mide» era un cliente
+        #  («Paginas Bloqueadas»). Sin fila quedaban sin labor y no se creaba
+        #  su orden. Pedido del usuario: que el Supervisor lo identifique solo.
+        #  Como las demas, la empresa las cambia en Cuadrillas.
+        "ni_cliente_ni_red": "trabajos",
+        "nada_lo_mide": "correctivo",
     }
 
     org = models.OneToOneField(

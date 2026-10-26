@@ -438,12 +438,13 @@ def proponer(org, fecha, *, ahora=None, plazo_de=None, tope=None,
 def zona_de_barrio(org) -> dict:
     """{barrio normalizado: id de su zona activa}. Se arma una vez: preguntarlo
     por orden seria una consulta por fila."""
-    from campo.zonas import AliasDeZona
+    from campo.zonas import AliasDeZona, MapaDeBarrios
 
-    return {
+    #  CON O SIN TILDE (25/10/2026): ver `MapaDeBarrios`.
+    return MapaDeBarrios({
         a.localidad: str(a.zona_id)
         for a in AliasDeZona.objects.filter(org=org, zona__activa=True)
-    }
+    })
 
 
 def lo_que_espera(org) -> dict:

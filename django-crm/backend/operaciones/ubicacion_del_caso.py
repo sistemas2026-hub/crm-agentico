@@ -113,9 +113,12 @@ def barrio_del_caso(barrio_del_cliente: str, texto: str, *, es_obra: bool,
 
 def es_obra_de_red(lectura: dict, *, es_corte: bool) -> bool:
     """Si el caso es una obra de red: la lectura del Supervisor lo puso en
-    `obra_de_red`, y no es el ticket de un cliente dentro de un corte (ese es
-    de un cliente en su casa, aunque su labor sea la de la obra)."""
+    `obra_de_red` --o en `ni_cliente_ni_red`, que en el informe de Despacho
+    del 25/10/2026 eran obras abiertas con la cuenta de la oficina-- y no es
+    el ticket de un cliente dentro de un corte (ese es de un cliente en su
+    casa, aunque su labor sea la de la obra)."""
     from operaciones import paso_a_despacho as pad
 
     return (not es_corte
-            and str((lectura or {}).get("grupo") or "") == pad.OBRA_DE_RED)
+            and str((lectura or {}).get("grupo") or "")
+            in (pad.OBRA_DE_RED, pad.NI_CLIENTE_NI_RED))
