@@ -31,6 +31,24 @@
 
   let org = $derived(data.org);
 
+  /*
+   * Lo que sale del motor llega APARTE (ver settings.js::getSettingsHub): la
+   * pagina se dibuja con lo del CRM sin esperarlo, y las tarjetas del
+   * asistente se completan cuando llega. Mientras tanto se ven sin valor, que
+   * es lo mismo que mostraban con el motor caido. La promesa nunca rechaza.
+   */
+  /** @type {any} */
+  let motor = $state({});
+  $effect(() => {
+    let vigente = true;
+    Promise.resolve(data.motor).then((m) => {
+      if (vigente) motor = m ?? {};
+    });
+    return () => {
+      vigente = false;
+    };
+  });
+
   /**
    * Weekday hours as one line. When the days do not all match it says so
    * rather than printing the first day's hours; "09:00-17:00" beside a
@@ -55,7 +73,7 @@
    * significa `null` acá, un caso distinto.
    */
   let resumenBandeja = $derived.by(() => {
-    const a = data.ajustesBandeja;
+    const a = motor.ajustesBandeja;
     if (!a) return null;
     const sla = Number(a.sla_toma_minutos) > 0 ? `${a.sla_toma_minutos} min` : null;
     const umbral =
@@ -108,12 +126,12 @@
           href: '/settings/credenciales',
           title: 'Credenciales',
           body: 'Las claves que el asistente usa para hablar con los sistemas de la empresa.',
-          value: data.credencialesTotales
-            ? (data.credencialesTotales.faltan
-                ? `${data.credencialesTotales.faltan} sin cargar`
-                : `${data.credencialesTotales.cargadas} cargadas`)
+          value: motor.credencialesTotales
+            ? (motor.credencialesTotales.faltan
+                ? `${motor.credencialesTotales.faltan} sin cargar`
+                : `${motor.credencialesTotales.cargadas} cargadas`)
             : null,
-          warn: data.credencialesTotales ? data.credencialesTotales.faltan > 0 : false
+          warn: motor.credencialesTotales ? motor.credencialesTotales.faltan > 0 : false
         },
         {
           href: '/settings/organization',
@@ -201,24 +219,24 @@
           href: '/agentes',
           title: 'Agentes y permisos',
           body: 'Que puede consultar cada agente, y que campos le devuelve cada consulta.',
-          value: data.asistente ? `${count(data.asistente.roles.length)} agentes` : null,
+          value: motor.asistente ? `${count(motor.asistente.roles.length)} agentes` : null,
           warn: false
         },
         {
           href: '/settings/areas',
           title: 'Areas de trabajo',
           body: 'Como se agrupa el equipo. Un ticket hereda el area de su responsable.',
-          value: data.asistente?.areas ? `${count(data.asistente.areas.length)} areas` : null,
+          value: motor.asistente?.areas ? `${count(motor.asistente.areas.length)} areas` : null,
           //  Sin areas, TODOS los tickets caen juntos y los tableros por area
           //  quedan vacios. No es cosmetico: es el tablero apagado.
-          warn: !!data.asistente?.areas && data.asistente.areas.length === 0
+          warn: !!motor.asistente?.areas && motor.asistente.areas.length === 0
         },
         {
           href: '/settings/asistente',
           title: 'Personalidad del asistente',
           body: 'Con que nombre se presenta, en que tono habla y cuanto se extiende.',
-          value: data.asistente
-            ? `${data.asistente.persona.nombre_asistente} · ${data.asistente.persona.tono}`
+          value: motor.asistente
+            ? `${motor.asistente.persona.nombre_asistente} · ${motor.asistente.persona.tono}`
             : null,
           warn: false
         },
@@ -226,7 +244,7 @@
           href: '/settings/bandeja',
           title: 'Bandeja',
           body: 'Los dos números con los que la Bandeja se permite emitir un veredicto: el plazo de toma y el umbral óptico.',
-          value: data.ajustesBandeja ? resumenBandeja : null,
+          value: motor.ajustesBandeja ? resumenBandeja : null,
           // Nunca avisa. Que los dos esten sin definir es el default
           // deliberado --la Bandeja entonces muestra el dato crudo sin
           // afirmar nada-- y no una falta que alguien tenga que ir a
@@ -238,15 +256,15 @@
           href: '/settings/canales/whatsapp',
           title: 'WhatsApp',
           body: 'Las credenciales de Meta que activan el canal, y la URL del webhook.',
-          value: data.canalWhatsapp
-            ? data.canalWhatsapp.activo
+          value: motor.canalWhatsapp
+            ? motor.canalWhatsapp.activo
               ? 'Activo'
               : 'Apagado'
             : null,
           // Avisa cuando esta apagado Y ya tiene numero visible cargado -- es
           // la senal de que alguien empezo la carga y no llego a activarlo,
           // no el estado de "todavia nadie lo toco".
-          warn: !!data.canalWhatsapp && !data.canalWhatsapp.activo && !!data.canalWhatsapp.numero_visible
+          warn: !!motor.canalWhatsapp && !motor.canalWhatsapp.activo && !!motor.canalWhatsapp.numero_visible
         },
         {
           href: '/settings/canales/avisos',
@@ -263,38 +281,38 @@
         // Solo aparece si el catalogo del tenant declara las herramientas de
         // SmartOLT -- un tenant sin esa integracion no tiene por que ver un
         // destino que no lleva a nada util.
-        ...(data.smartolt?.instalado
+        ...(motor.smartolt?.instalado
           ? [
               {
                 href: '/settings/canales/smartolt',
                 title: 'SmartOLT',
                 body: 'La clave que le da al asistente lectura y reinicio de la ONU del cliente.',
-                value: data.smartolt.tiene_clave ? 'Clave cargada' : null,
-                warn: !data.smartolt.tiene_clave
+                value: motor.smartolt.tiene_clave ? 'Clave cargada' : null,
+                warn: !motor.smartolt.tiene_clave
               }
             ]
           : []),
         // Solo aparece si el tenant tiene el rol 'ventas' -- mismo criterio
         // que SmartOLT arriba.
-        ...(data.asistente?.roles?.includes('ventas')
+        ...(motor.asistente?.roles?.includes('ventas')
           ? [
               {
                 href: '/settings/planes-venta',
                 title: 'Planes de venta',
                 body: 'Qué planes se ofrecen a un prospecto nuevo, y en qué localidades.',
-                value: data.planesVenta ? `${count(data.planesVenta.cantidad)} planes` : null,
-                warn: !!data.planesVenta && data.planesVenta.cantidad === 0
+                value: motor.planesVenta ? `${count(motor.planesVenta.cantidad)} planes` : null,
+                warn: !!motor.planesVenta && motor.planesVenta.cantidad === 0
               },
               {
                 href: '/settings/oferta',
                 title: 'Servicios y canales',
                 body: 'Qué servicios vende la empresa, y la parrilla de TV que consulta el agente.',
-                value: data.oferta
-                  ? `${count(data.oferta.servicios)} servicios · ${count(data.oferta.canales)} canales`
+                value: motor.oferta
+                  ? `${count(motor.oferta.servicios)} servicios · ${count(motor.oferta.canales)} canales`
                   : null,
                 // Sin parrilla el agente no puede responder por canales: no es
                 // un detalle cosmetico, es una funcionalidad apagada.
-                warn: !!data.oferta && data.oferta.canales === 0
+                warn: !!motor.oferta && motor.oferta.canales === 0
               }
             ]
           : []),
@@ -307,8 +325,8 @@
           href: '/settings/guias-tv',
           title: 'Guías de sintonización',
           body: 'Qué le dice el agente al cliente para sintonizar el televisor, por marca y según use TDT.',
-          value: data.guiasTv ? `${count(data.guiasTv.activas)} activas` : null,
-          warn: !!data.guiasTv && (!data.guiasTv.tieneGeneral || !data.guiasTv.tieneTdt)
+          value: motor.guiasTv ? `${count(motor.guiasTv.activas)} activas` : null,
+          warn: !!motor.guiasTv && (!motor.guiasTv.tieneGeneral || !motor.guiasTv.tieneTdt)
         }
       ]
     },

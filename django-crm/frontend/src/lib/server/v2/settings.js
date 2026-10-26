@@ -103,6 +103,22 @@ async function reopenOrNull(promise) {
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  */
 export async function getSettingsHub(event) {
+  //  LO DEL MOTOR VIAJA APARTE  --  26/10/2026
+  //  ------------------------------------------
+  //  Hasta hoy las 21 lecturas iban en un solo Promise.all y la pagina no se
+  //  dibujaba hasta que llegaba la ULTIMA. Ocho van al motor, que corre con un
+  //  proceso y 8 hilos (docker-compose.prod.yml) y los comparte con los turnos
+  //  de WhatsApp: con clientes escribiendo, esas ocho hacian fila detras de
+  //  turnos de 10-30 s, y siete no tenian plazo. "Ya abrio pero demora", dijo
+  //  el usuario.
+  //
+  //  Ahora lo del CRM se espera como antes, y lo del motor sale como una
+  //  promesa que SvelteKit manda cuando llega: la pagina se dibuja sin
+  //  esperarla, y cada tarjeta del asistente muestra su valor al llegar. Cada
+  //  lectura del motor tiene ademas su plazo (conPlazo): si no contesta, esa
+  //  tarjeta queda sin valor -- lo mismo que ya pasaba con el motor caido --,
+  //  y la promesa nunca rechaza, asi que no hay error que tumbe la pagina.
+  const motor = leerDelMotor(event);
   const [
     org,
     calendar,
@@ -116,14 +132,6 @@ export async function getSettingsHub(event) {
     macro,
     tag,
     field,
-    asistente,
-    canalWhatsapp,
-    smartolt,
-    planesVenta,
-    oferta,
-    guiasTv,
-    credenciales,
-    ajustesBandeja,
     avisosCampo
   ] = await Promise.all([
     getOrgSettings(event),
@@ -138,44 +146,9 @@ export async function getSettingsHub(event) {
     getMacros(event),
     getTags(event),
     getCustomFields(event),
-    //  LAS OCHO RECIBEN 'event.locals, event.fetch', Y HACE FALTA  --  07/10/2026
-    //
-    //  Se las llamaba SIN argumentos. Sin 'locals' no hay tenant
-    //  ('tenantDeLaSesion' lo saca de locals.tenant o locals.org.id), sin
-    //  tenant no hay destino, y cada una devolvia null por su propio catch.
-    //
-    //  El resultado era una pantalla de Ajustes a la que le faltaban las
-    //  tarjetas que dependen del asistente: "Servicios y canales" (la parrilla
-    //  de TV) y "Planes de venta" (las localidades) ni se dibujaban, porque su
-    //  condicion es que el tenant tenga el rol 'ventas' y la lista de roles
-    //  llegaba vacia. El tenant TENIA ese rol.
-    //
-    //  El catch esta para que el motor caido no tumbe el hub entero, y eso
-    //  sigue valiendo. Lo que no puede hacer es tapar una llamada mal escrita:
-    //  el sintoma era identico --todo en null-- y por eso nadie lo vio.
-    leerConfiguracionAsistente(event.locals, event.fetch),
-    leerCanalWhatsapp(event.locals, event.fetch),
-    leerSmartOlt(event.locals, event.fetch),
-    // Solo el conteo -- no pega contra WispHub (ver contarPlanesVenta()),
-    // asi el hub no paga un viaje de red a una API externa en cada carga.
-    contarPlanesVenta(event.locals, event.fetch),
-    // Tampoco pega contra terceros: las dos listas salen de la config
-    // del tenant, que el motor ya tiene en memoria.
-    leerOferta(event.locals, event.fetch),
-    // Tampoco sale a ningun tercero: el catalogo ya esta en la config que el
-    // motor tiene en memoria.
-    leerGuiasTV(event.locals, event.fetch),
-    // Tampoco sale a ningun tercero: la lista de credenciales que hacen falta
-    // la arma el motor con su propio catalogo, y de las cargadas solo trae
-    // nombre y pista. Nunca un valor.
-    leerCredenciales(event.locals, event.fetch),
-    // Dos enteros de la config del tenant. Mismo contrato que los de arriba:
-    // devuelve null si el motor no contesta, y el hub muestra el destino sin
-    // valor en vez de caerse entero.
-    leerAjustesBandeja(event.locals, event.fetch),
-    // Cuantos canales de aviso tiene cargados esta empresa. `leerAvisos` ya
-    // atrapa su propio error y devuelve la lista vacia: el hub no se cae
-    // porque un destino no conteste.
+    // Cuantos canales de aviso tiene cargados esta empresa. Es del CRM, no del
+    // motor. `leerAvisos` ya atrapa su propio error y devuelve la lista vacia:
+    // el hub no se cae porque un destino no conteste.
     leerAvisos(event)
   ]);
 
@@ -199,44 +172,104 @@ export async function getSettingsHub(event) {
     macroTotals: macro.totals,
     tagTotals: tag.totals,
     fieldTotals: field.totals,
-    // null = no hay asistente, o no contesta. El hub lista igual sus destinos,
-    // sin valor, como ya hace con lo que un miembro no puede contar.
-    asistente,
-    canalWhatsapp,
-    smartolt,
-    // Los dos numeros con los que la Bandeja emite un veredicto. Que esten
-    // sin definir NO lleva warn: es el default deliberado, no una falta.
-    ajustesBandeja,
     // Cuantos canales hay. CERO no es un error --ninguna empresa nace con esto
     // configurado-- pero la tarjeta lo avisa, porque hoy esos avisos los
     // escribe alguien a mano.
     avisosCampo: { cuantos: avisosCampo.canales.length },
+    // Lo que sale del motor, sin esperar. Ver leerDelMotor().
+    motor
+  };
+}
+
+/** Cuanto se espera cada lectura del motor antes de dibujar la tarjeta sin valor. */
+export const PLAZO_MOTOR_MS = 4000;
+
+/**
+ * `promesa`, o null si falla o tarda mas de `ms`. Nunca rechaza.
+ *
+ * El plazo corta la ESPERA de la pagina, no la llamada: el pedido sigue en
+ * curso del otro lado hasta que conteste. Lo que se evita es que una tarjeta
+ * deje a todas las demas mirando un motor ocupado.
+ *
+ * @template T
+ * @param {Promise<T>} promesa
+ * @param {number} [ms]
+ * @returns {Promise<T | null>}
+ */
+export function conPlazo(promesa, ms = PLAZO_MOTOR_MS) {
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let reloj;
+  const vencido = new Promise((resolver) => {
+    reloj = setTimeout(() => resolver(null), ms);
+  });
+  return Promise.race([Promise.resolve(promesa).catch(() => null), vencido]).finally(
+    () => clearTimeout(reloj)
+  );
+}
+
+/**
+ * Las ocho lecturas que dependen del asistente, ya resumidas para el hub.
+ *
+ * LAS OCHO RECIBEN 'event.locals, event.fetch', Y HACE FALTA  --  07/10/2026.
+ * Se las llamaba SIN argumentos: sin 'locals' no hay tenant, sin tenant no hay
+ * destino, y cada una devolvia null por su propio catch. Faltaban las tarjetas
+ * "Servicios y canales" y "Planes de venta", que dependen del rol 'ventas'.
+ * El catch esta para que el motor caido no tumbe el hub; lo que no puede hacer
+ * es tapar una llamada mal escrita. Ver settings-argumentos.test.js.
+ *
+ * @param {any} event
+ */
+async function leerDelMotor(event) {
+  const [asistente, canalWhatsapp, smartolt, planesVenta, oferta, guiasTv, credenciales,
+    ajustesBandeja] = await Promise.all([
+    conPlazo(leerConfiguracionAsistente(event.locals, event.fetch)),
+    conPlazo(leerCanalWhatsapp(event.locals, event.fetch)),
+    conPlazo(leerSmartOlt(event.locals, event.fetch)),
+    // Solo el conteo -- no pega contra WispHub (ver contarPlanesVenta()).
+    conPlazo(contarPlanesVenta(event.locals, event.fetch)),
+    // Las dos listas salen de la config del tenant, que el motor ya tiene.
+    conPlazo(leerOferta(event.locals, event.fetch)),
+    conPlazo(leerGuiasTV(event.locals, event.fetch)),
+    // La lista de credenciales que hacen falta, y de las cargadas solo nombre
+    // y pista. Nunca un valor.
+    conPlazo(leerCredenciales(event.locals, event.fetch)),
+    // Dos enteros de la config del tenant. Sin definir NO lleva warn: es el
+    // default deliberado, no una falta.
+    conPlazo(leerAjustesBandeja(event.locals, event.fetch))
+  ]);
+  return {
+    // null = no hay asistente, o no contesto a tiempo. El hub lista igual sus
+    // destinos, sin valor, como ya hace con lo que un miembro no puede contar.
+    asistente,
+    canalWhatsapp,
+    smartolt,
+    ajustesBandeja,
     // Cuantas pide el catalogo y cuantas estan cargadas. La fila del hub avisa
     // cuando falta alguna: eso es una herramienta que va a fallar al usarse.
-    credencialesTotales: credenciales.disponible
+    credencialesTotales: credenciales?.disponible
       ? {
-          cargadas: credenciales.credenciales.filter((c) => c.cargado).length,
-          faltan: credenciales.credenciales.filter((c) => c.declarado && !c.cargado).length
+          cargadas: credenciales.credenciales.filter((/** @type {any} */ c) => c.cargado).length,
+          faltan: credenciales.credenciales.filter(
+            (/** @type {any} */ c) => c.declarado && !c.cargado
+          ).length
         }
       : null,
     planesVenta,
     oferta: oferta
-      ? { servicios: (oferta.servicios_ofrecidos ?? []).filter((s) => s.activo).length,
+      ? { servicios: (oferta.servicios_ofrecidos ?? []).filter((/** @type {any} */ s) => s.activo).length,
           canales: (oferta.parrilla_canales ?? []).length }
       : null,
     // Se cuentan las ACTIVAS y, aparte, si estan las dos de respaldo. Sin la
     // general, una marca sin guia propia deja al agente sin nada que
     // entregar; sin la de TDT, tampoco puede orientar a quien tiene cajita.
-    // Eso no es un detalle cosmetico: es una funcionalidad apagada, y por eso
-    // el indice lo marca igual que la parrilla vacia.
     guiasTv: guiasTv
       ? {
-          activas: (guiasTv.guias_tv ?? []).filter((g) => g.activa).length,
+          activas: (guiasTv.guias_tv ?? []).filter((/** @type {any} */ g) => g.activa).length,
           tieneGeneral: (guiasTv.guias_tv ?? []).some(
-            (g) => g.activa && g.tipo_conexion === 'directo' && !(g.marca ?? '').trim()
+            (/** @type {any} */ g) => g.activa && g.tipo_conexion === 'directo' && !(g.marca ?? '').trim()
           ),
           tieneTdt: (guiasTv.guias_tv ?? []).some(
-            (g) => g.activa && g.tipo_conexion === 'tdt'
+            (/** @type {any} */ g) => g.activa && g.tipo_conexion === 'tdt'
           )
         }
       : null
