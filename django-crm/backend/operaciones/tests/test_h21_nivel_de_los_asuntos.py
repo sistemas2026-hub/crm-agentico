@@ -200,8 +200,19 @@ def test_c4_el_asunto_de_la_plantilla_gana_al_corte(org_a):
 
 
 def test_c5_otra_empresa_no_cuenta(org_a, org_b):
-    _varios(org_b, "No Tiene Internet", FALLA, FALLA, FALLA)
-    assert H.tickets_por_asunto(org_a) == {}
+    from conftest import _apply_rls_context
+
+    #  Con el contexto de la OTRA empresa (26/10/2026): con un rol que el RLS
+    #  ata, como el de produccion, crear sus casos con el de la primera
+    #  fallaba; y asi el RLS deja ver sus filas y solo el filtro del codigo
+    #  puede sacarlas.
+    _apply_rls_context(org_b.id)
+    try:
+        _varios(org_b, "No Tiene Internet", FALLA, FALLA, FALLA)
+        assert H.tickets_por_asunto(org_b) != {}
+        assert H.tickets_por_asunto(org_a) == {}
+    finally:
+        _apply_rls_context(org_a.id)
 
 
 # ---------------------------------------------------------------------------
