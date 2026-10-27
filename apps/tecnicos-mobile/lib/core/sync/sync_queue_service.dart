@@ -1168,6 +1168,8 @@ class SyncQueueService {
     try {
       String? cursor;
       var paginas = 0;
+      // Lo que el servidor le lista a esta persona, para soltar lo demás.
+      final vistas = <String>{};
 
       // El listado pagina con cursor. Quedarse en la primera página dejaba
       // fuera del teléfono todo lo que pasara de cien órdenes: para el técnico
@@ -1188,6 +1190,7 @@ class SyncQueueService {
 
         for (final item in results) {
           final id = item['id'] as String;
+          vistas.add(id);
           Map<String, dynamic> fullData = item as Map<String, dynamic>;
           // Si el detalle no llega, lo que se guarda es el retrato pobre del
           // listado. Decirlo importa: sin esto, un fallo de red pasajero
@@ -1215,6 +1218,20 @@ class SyncQueueService {
         cursor = datos is Map ? datos['next_cursor'] as String? : null;
         paginas++;
       } while (cursor != null && paginas < _maximoDePaginas);
+
+      // SOLTAR LO QUE YA NO ES SUYO (27/10/2026): una orden reasignada a otra
+      // cuadrilla deja de venir en el listado, y hasta hoy se quedaba en el
+      // teléfono. SOLO CON EL LISTADO COMPLETO: un corte de red sale antes
+      // (el `return` de arriba o el `catch`), y con el tope de páginas el
+      // cursor no llega a null; en los dos casos «no vino» no significa «ya
+      // no es suya». Lo que tiene algo sin subir lo protege la base.
+      if (cursor == null) {
+        await _localDb.soltarOrdenesQueYaNoSonMias(
+          orgId: orgId,
+          profileId: profileId,
+          vistas: vistas,
+        );
+      }
     } catch (_) {
       // Offline o error de red: se ignora silenciosamente para mantener datos locales
     }

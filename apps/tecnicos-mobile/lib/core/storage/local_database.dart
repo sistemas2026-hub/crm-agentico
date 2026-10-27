@@ -3410,4 +3410,115 @@ class LocalDatabase {
     }
     return borradas;
   }
+
+  /// Si el teléfono todavía tiene algo de ESTA orden que no llegó al servidor.
+  ///
+  /// Conservador a propósito: cuenta todo lo que no terminó en un estado final
+  /// de éxito, en cada cola que guarda un `orden_id` —una transición, un dato
+  /// editado, una foto, un reporte de seguimiento, un movimiento de material,
+  /// un pedido a bodega—. Es la misma idea que `CicloDeVidaLocal.pendientesDe`
+  /// para cerrar sesión, aplicada a una orden: lo que no subió no se borra.
+  Future<bool> ordenTieneAlgoSinSubir({
+    required String orgId,
+    required String profileId,
+    required String ordenId,
+  }) async {
+    final db = await database;
+    const List<String> consultas = <String>[
+      "SELECT 1 FROM cola_mutaciones WHERE org_id = ? AND profile_id = ? "
+          "AND orden_id = ? AND estado NOT IN ('sincronizada', 'terminal_404') "
+          'LIMIT 1',
+      'SELECT 1 FROM local_datos_dirty WHERE org_id = ? AND profile_id = ? '
+          'AND orden_id = ? LIMIT 1',
+      'SELECT 1 FROM cola_evidencias WHERE org_id = ? AND profile_id = ? '
+          "AND orden_id = ? AND subida_estado != 'confirmada' LIMIT 1",
+      'SELECT 1 FROM cola_seguimiento WHERE org_id = ? AND profile_id = ? '
+          "AND orden_id = ? AND estado != 'sincronizado' LIMIT 1",
+      'SELECT 1 FROM cola_movimientos_material WHERE org_id = ? '
+          "AND profile_id = ? AND orden_id = ? AND estado != 'confirmado' "
+          'LIMIT 1',
+      'SELECT 1 FROM cola_pedidos_material WHERE org_id = ? AND profile_id = ? '
+          "AND orden_id = ? AND estado != 'enviado' LIMIT 1",
+    ];
+    for (final String sql in consultas) {
+      final List<Map<String, Object?>> filas =
+          await db.rawQuery(sql, <Object?>[orgId, profileId, ordenId]);
+      if (filas.isNotEmpty) return true;
+    }
+    return false;
+  }
+
+  /// Suelta las órdenes de esta persona que el servidor YA NO LE LISTA: se
+  /// las reasignaron —el Supervisor o una persona movió el reparto— o se
+  /// borraron  --  27/10/2026, hueco heredado de la fase 2.2 para la 3.1
+  /// (SPEC/objetivos/supervisor-arma-la-jornada.md).
+  ///
+  /// La descarga solo agregaba y actualizaba: una orden que pasaba a otra
+  /// cuadrilla se quedaba en este teléfono —con el nombre, la dirección y el
+  /// teléfono del cliente— y el técnico la seguía viendo como suya.
+  ///
+  /// `vistas` TIENE QUE SER EL LISTADO COMPLETO del servidor: quien llama lo
+  /// garantiza (sin cortes de red ni tope de páginas). Una orden con algo sin
+  /// subir (`ordenTieneAlgoSinSubir`) NO se suelta: la cola la resuelve
+  /// primero —un 404 de /acciones/ la da por reasignada— y se suelta en una
+  /// vuelta siguiente. Con la orden se van sus copias (materiales, historial,
+  /// seguimiento), salvo que otra identidad de este teléfono la siga teniendo.
+  ///
+  /// Devuelve los ids que soltó.
+  Future<List<String>> soltarOrdenesQueYaNoSonMias({
+    required String orgId,
+    required String profileId,
+    required Set<String> vistas,
+  }) async {
+    final db = await database;
+    final List<Map<String, Object?>> locales = await db.query(
+      'local_ordenes',
+      columns: <String>['id'],
+      where: 'org_id = ? AND profile_id = ?',
+      whereArgs: <Object?>[orgId, profileId],
+    );
+    final List<String> soltadas = <String>[];
+    for (final Map<String, Object?> fila in locales) {
+      final String id = (fila['id'] ?? '').toString();
+      if (id.isEmpty || vistas.contains(id)) continue;
+      if (await ordenTieneAlgoSinSubir(
+        orgId: orgId,
+        profileId: profileId,
+        ordenId: id,
+      )) {
+        continue;
+      }
+      await db.transaction((txn) async {
+        await txn.delete(
+          'local_ordenes',
+          where: 'id = ? AND org_id = ? AND profile_id = ?',
+          whereArgs: <Object?>[id, orgId, profileId],
+        );
+        final List<Map<String, Object?>> otra = await txn.query(
+          'local_ordenes',
+          columns: <String>['id'],
+          where: 'id = ? AND org_id = ?',
+          whereArgs: <Object?>[id, orgId],
+          limit: 1,
+        );
+        if (otra.isNotEmpty) return;
+        for (final String tabla in const <String>[
+          'local_materiales_orden',
+          'local_historial_servicio',
+          'local_seguimiento',
+        ]) {
+          await txn.delete(
+            tabla,
+            where: 'orden_id = ? AND org_id = ?',
+            whereArgs: <Object?>[id, orgId],
+          );
+        }
+      });
+      soltadas.add(id);
+    }
+    if (soltadas.isNotEmpty) {
+      _notifyChange(orgId: orgId, profileId: profileId, tabla: 'local_ordenes');
+    }
+    return soltadas;
+  }
 }
