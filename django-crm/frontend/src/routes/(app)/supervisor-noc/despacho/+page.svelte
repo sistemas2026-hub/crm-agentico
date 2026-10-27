@@ -15,6 +15,7 @@
   import { untrack } from 'svelte';
   import { paginacion } from '$lib/v2/supervisor-noc-tablero.js';
   import { fechaSugerida } from '$lib/v2/despacho-sugerencias.js';
+  import { textoDeLosTotales, totalesDeLoQueCrearia } from '$lib/supervisor/lo-que-crearia.js';
   import '../supervisor-noc.css';
 
   let { data, form } = $props();
@@ -544,7 +545,12 @@
             {#if ordenesPrevia.atadas.length}· atadas a un corte de red {ordenesPrevia.atadas.length}{/if}
             {#if ordenesPrevia.hora_de_corte}· hora de corte {ordenesPrevia.hora_de_corte}{/if}
           </p>
+          <!-- Los totales (27/10/2026): lo que daba el comando `informe_de_despacho`,
+               para verificarlo desde acá sin contar filas. -->
           {#if ordenesPrevia.crear.length}
+            {#each textoDeLosTotales(totalesDeLoQueCrearia(ordenesPrevia.crear)) as linea (linea)}
+              <p class="snoc-body-sm snoc-secundario">{linea}</p>
+            {/each}
             <div style="overflow-x:auto;">
               <table class="snoc-tabla">
                 <thead>
