@@ -478,3 +478,31 @@ describe('ciclo', () => {
     expect(r.hecho).not.toContain('0');
   });
 });
+
+/* ------------------------------------------------------------------ *
+ *  EL DÍA ES EL DE LA EMPRESA (27/10/2026)
+ * ------------------------------------------------------------------ */
+
+describe('load: el día del reparto en el reloj de la empresa', () => {
+  it('a las 20:30 de Bogotá pide el reparto de hoy, no el de mañana', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    //  Lunes 26 a las 20:30 de Bogotá = martes 27 a la 01:30 UTC.
+    vi.setSystemTime(new Date('2026-10-27T01:30:00Z'));
+    try {
+      const sano = apiRequest.getMockImplementation();
+      apiRequest.mockImplementation(async (endpoint, ...resto) =>
+        endpoint === '/org/settings/' ? { timezone: 'America/Bogota' } : sano?.(endpoint, ...resto)
+      );
+
+      const d = /** @type {any} */ (
+        await load({ ...CTX, locals: { org: { id: 'org-del-dia' } } })
+      );
+
+      expect(d.dia).toBe('2026-10-26');
+      const reparto = apiRequest.mock.calls.map(([e]) => e).find((e) => e.includes('reparto'));
+      expect(reparto).toContain('fecha=2026-10-26');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

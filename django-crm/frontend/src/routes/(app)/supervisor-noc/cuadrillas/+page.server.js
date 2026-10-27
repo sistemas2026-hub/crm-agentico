@@ -22,6 +22,7 @@ import {
   leerTiposDeTrabajo,
   clasificarTipoDeTrabajo
 } from '$lib/server/v2/cuadrillas.js';
+import { hoyDeLaEmpresa } from '$lib/server/v2/hoy-de-la-empresa.js';
 import { leerUbicaciones } from '$lib/server/v2/inventario.js';
 import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 
@@ -37,14 +38,12 @@ import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
  * `?dia=` se usa hoy en vez de mostrar «todo».
  */
 
-/** Hoy en formato YYYY-MM-DD, en la zona del servidor. */
-function hoy() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ url, cookies, locals, fetch }) {
-  const dia = (url.searchParams.get('dia') ?? '').trim() || hoy();
+  //  Hoy en el reloj de la EMPRESA, no en el del servidor (UTC): desde las
+  //  19:00 de Bogotá abría en el día siguiente (27/10/2026).
+  const dia =
+    (url.searchParams.get('dia') ?? '').trim() || (await hoyDeLaEmpresa(locals, cookies));
   const verBajas = url.searchParams.get('bajas') === '1';
 
   // EL HISTORIAL SE PIDE, NO VIENE SIEMPRE. Es otra pregunta que «armar

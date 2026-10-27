@@ -12,6 +12,7 @@ import {
   traducirError
 } from '$lib/server/v2/supervisor-noc.js';
 import { leerCapacidad } from '$lib/server/v2/programacion-noc.js';
+import { hoyDeLaEmpresa } from '$lib/server/v2/hoy-de-la-empresa.js';
 
 /**
  * POR QUE ESTA RUTA VIVE EN (app)
@@ -74,7 +75,9 @@ export async function load({ cookies, locals, url, fetch }) {
   // La capacidad EXIGE un dia (el backend responde 400 sin el), asi que el
   // tablero abre con hoy. Es una lectura mas, no una pantalla nueva: el
   // bloque de tecnicos necesita quien trabaja hoy y cuanto tiene encima.
-  const hoy = new Date().toISOString().slice(0, 10);
+  // Hoy en el reloj de la EMPRESA, no en el del servidor (UTC): desde las
+  // 19:00 de Bogota la capacidad era la de manana (27/10/2026). Se pide en
+  // paralelo con las dos que se esperan, y no falla: cae a UTC.
 
   //  LA PANTALLA NO ESPERA A LA CONSULTA MAS LENTA  --  09/10/2026
   //  --------------------------------------------------------------
@@ -102,9 +105,10 @@ export async function load({ cookies, locals, url, fetch }) {
   //
   //  NO SE PIERDE NINGUN DATO: llegan todos, solo que despues. Y si uno falla,
   //  falla solo: hoy un fallo de la autonomia se llevaba la pantalla entera.
-  const [todas, actividad] = await Promise.all([
+  const [todas, actividad, hoy] = await Promise.all([
     listarPropuestas({ cookies }, { abiertas: true }),
-    leerActividad({ cookies })
+    leerActividad({ cookies }),
+    hoyDeLaEmpresa(locals, cookies)
   ]);
 
   //  SIN 'await'. Cada una lleva su propio '.catch' porque una promesa

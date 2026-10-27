@@ -6,6 +6,7 @@ import {
   despacharACampo
 } from '$lib/server/v2/despacho.js';
 import { correrCiclo } from '$lib/server/v2/supervisor-noc.js';
+import { hoyDeLaEmpresa } from '$lib/server/v2/hoy-de-la-empresa.js';
 import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 
 /** El mismo conjunto que `campo/permissions.py::ROLES_GESTION` y que la
@@ -100,13 +101,15 @@ function conteosDel(propuesta) {
  */
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ url, cookies }) {
+export async function load({ url, cookies, locals }) {
   const conFicha = url.searchParams.get('ficha') === '1';
 
   //  El día del reparto. Hoy por defecto: es el que una persona mira cuando
   //  abre la pantalla, y pedir una fecha antes de mostrar nada sería un paso
-  //  que casi siempre termina en el mismo valor.
-  const dia = url.searchParams.get('dia') || new Date().toISOString().slice(0, 10);
+  //  que casi siempre termina en el mismo valor. Hoy en el reloj de la
+  //  EMPRESA: con el del servidor (UTC), desde las 19:00 de Bogotá abría el
+  //  reparto de mañana (27/10/2026).
+  const dia = url.searchParams.get('dia') || (await hoyDeLaEmpresa(locals, cookies));
 
   //  EL FILTRO Y LA PÁGINA VIVEN EN LA URL: un enlace copiado abre lo mismo,
   //  y volver atrás después de despachar no pierde dónde se estaba.

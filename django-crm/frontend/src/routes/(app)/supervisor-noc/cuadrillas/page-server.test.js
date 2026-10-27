@@ -55,6 +55,7 @@ vi.mock('$lib/server/v2/cuadrillas.js', () => {
   };
 });
 vi.mock('$lib/server/v2/inventario.js', () => ({ leerUbicaciones: async () => ({}) }));
+vi.mock('$lib/server/v2/hoy-de-la-empresa.js', () => ({ hoyDeLaEmpresa: async () => '2026-10-26' }));
 
 const { actions } = await import('./+page.server.js');
 
