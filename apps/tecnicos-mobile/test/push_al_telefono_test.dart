@@ -378,6 +378,62 @@ void main() {
   // D. El bloque de avisos en la pantalla
   // ------------------------------------------------------------------------- #
 
+  /// Un aviso de asignación, con la forma que arma el backend
+  /// (`campo/services/avisos.py::avisar_asignacion` y
+  /// `avisar_jornada_publicada`).
+  RemoteMessage mensajeDeAsignacion({
+    String id = 'notif-asig-1',
+    String verbo = 'trabajo_asignado',
+    Map<String, dynamic>? datos,
+    String titulo = 'OT #9402 asignada',
+  }) {
+    return RemoteMessage.fromMap(<String, dynamic>{
+      'data': <String, String>{
+        'enlace': '/ot/$ordenA',
+        'clase': 'aviso_de_campo',
+        'id': id,
+        'verbo': verbo,
+        'titulo': titulo,
+        'creada_en': '2026-10-27T11:00:00+00:00',
+        'datos': jsonEncode(datos ?? <String, dynamic>{'orden_numero': 9402}),
+      },
+      'notification': <String, dynamic>{'title': titulo, 'body': titulo},
+    });
+  }
+
+  group('E · un aviso de asignación (27/10/2026)', () {
+    test('e1 · trae trabajo nuevo: la app sincroniza; una devolución, no',
+        () async {
+      var veces = 0;
+      final AvisosPush conEspia = AvisosPush(
+        baseLocal: base,
+        almacen: SecureStorageService(),
+        sincronizar: () async => veces++,
+      );
+
+      expect(await conEspia.sincronizarSiTraeTrabajo(mensajeDeAsignacion()), isTrue);
+      expect(
+        await conEspia.sincronizarSiTraeTrabajo(mensajeDeAsignacion(
+          verbo: 'jornada_asignada',
+          datos: <String, dynamic>{'cantidad': 8},
+        )),
+        isTrue,
+      );
+      expect(await conEspia.sincronizarSiTraeTrabajo(mensajeDeDevolucion()), isFalse);
+      expect(veces, 2);
+    });
+
+    test('e2 · si la sincronización falla, el aviso no se rompe', () async {
+      final AvisosPush rota = AvisosPush(
+        baseLocal: base,
+        almacen: SecureStorageService(),
+        sincronizar: () async => throw StateError('sin señal'),
+      );
+
+      expect(await rota.sincronizarSiTraeTrabajo(mensajeDeAsignacion()), isTrue);
+    });
+  });
+
   group('D · el bloque de avisos', () {
     /// POR QUE `montarConBaseReal` Y NO `pumpAndSettle`
     /// -----------------------------------------------
@@ -425,6 +481,28 @@ void main() {
 
       expect(find.text('Avisos'), findsOneWidget);
       expect(find.text('No hay avisos.'), findsOneWidget);
+    });
+
+    testWidgets('d6 · una asignación y una jornada dicen qué llegó',
+        (tester) async {
+      await tester.runAsync(() async {
+        await push.espejar(mensajeDeAsignacion());
+        await push.espejar(mensajeDeAsignacion(
+          id: 'notif-jornada',
+          verbo: 'jornada_asignada',
+          titulo: '8 visitas asignadas',
+          datos: <String, dynamic>{
+            'cantidad': 8,
+            'fecha': '2026-10-27',
+            'ordenes': <int>[1, 2, 3, 4, 5, 6, 7, 8],
+          },
+        ));
+      });
+
+      await montar(tester, ocultarSiVacio: true);
+
+      expect(find.text('Te asignaron la OT #9402'), findsOneWidget);
+      expect(find.text('Te asignaron 8 visitas'), findsOneWidget);
     });
 
     testWidgets('d0 · la frase no repite la palabra del asunto', (tester) async {

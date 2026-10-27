@@ -267,6 +267,21 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
         final Object? numero = datos['orden_numero'];
         if (numero != null) return 'Te devolvieron la OT #$numero';
         return 'Te devolvieron la $titulo';
+      // LA ASIGNACIÓN (27/10/2026, fase 3.1): con el número, por lo mismo que
+      // la devolución --el push y la sincronización traen títulos distintos--.
+      case 'trabajo_asignado':
+        final Object? asignada = datos['orden_numero'];
+        if (asignada != null) return 'Te asignaron la OT #$asignada';
+        return 'Te asignaron la $titulo';
+      case 'jornada_asignada':
+        final int cantidad = int.tryParse('${datos['cantidad'] ?? ''}') ?? 0;
+        final List<Object?> ordenes =
+            datos['ordenes'] is List ? datos['ordenes'] as List<Object?> : const <Object?>[];
+        if (cantidad == 1 && ordenes.length == 1) {
+          return 'Te asignaron la OT #${ordenes.first}';
+        }
+        if (cantidad > 1) return 'Te asignaron $cantidad visitas';
+        return titulo.isEmpty ? 'Te asignaron visitas' : 'Te asignaron $titulo';
       default:
         return titulo.isEmpty ? 'Aviso' : titulo;
     }

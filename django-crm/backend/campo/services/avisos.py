@@ -139,27 +139,151 @@ def _notificar_en_la_app(orden, perfiles, contenido: dict):
     aviso que llega al telefono seria una fila nueva, y la sincronizacion
     traeria la misma notificacion otra vez, sin leer.
     """
+    # Relativo: quien lo abre ya esta autenticado, y el dominio lo pone cada
+    # cliente. Un absoluto obligaria a que la notificacion sepa si la lee la
+    # web o el telefono.
+    return _notificar(perfiles, VERBO_DEVUELTO, entity=orden,
+                      entity_name=f"OT #{orden.numero}",
+                      link=f"/ot/{orden.id}", contenido=contenido)
+
+
+def _notificar(perfiles, verbo: str, *, entity, entity_name: str, link: str,
+               contenido: dict) -> dict:
+    """Una notificacion de la plataforma por persona. `{profile_id: id}`.
+
+    La comparten la devolucion y la asignacion (27/10/2026): el aviso que llega
+    por push tiene que ser LA MISMA fila que despues baja la sincronizacion, y
+    eso depende de que las dos la escriban igual.
+    """
     from common import notifications
 
     ids: dict = {}
     for perfil in perfiles:
         notificacion = notifications.create(
-            perfil,
-            "trabajo_devuelto",
-            entity=orden,
-            entity_name=f"OT #{orden.numero}",
-            # Relativo: quien lo abre ya esta autenticado, y el dominio lo pone
-            # cada cliente. Un absoluto obligaria a que la notificacion sepa si
-            # la lee la web o el telefono.
-            link=f"/ot/{orden.id}",
-            data=contenido,
-        )
+            perfil, verbo, entity=entity, entity_name=entity_name, link=link,
+            data=contenido)
         # Puede devolver None: a una persona desactivada no se le notifica. Ese
         # caso no se filtra aca --el perfil sigue en la lista para los canales
         # externos-- pero tampoco entra al push, porque no hay fila que espejar.
         if notificacion is not None:
             ids[perfil.id] = str(notificacion.id)
     return ids
+
+
+# =============================================================================
+#  LA ASIGNACION  --  27/10/2026, fase 3.1 de
+#  SPEC/objetivos/supervisor-arma-la-jornada.md
+# =============================================================================
+#
+#  Decision del usuario del 21/10: aviso al telefono del tecnico CADA VEZ que le
+#  asignan una visita, la asigne el Supervisor o una persona. Hasta hoy la veia
+#  recien cuando la app sincronizaba.
+#
+#  SOLO AL TELEFONO, NO AL CHAT DE LA EMPRESA: una devolucion es un hecho raro
+#  que conviene que vea todo el mundo; una asignacion pasa decenas de veces por
+#  dia, y una por mensaje taparia el canal.
+#
+#  UN AVISO POR PERSONA Y POR PUBLICACION, no uno por orden: publicar el
+#  reparto le da ocho visitas a un tecnico de una vez, y ocho avisos seguidos
+#  son ocho vibraciones para decir una sola cosa. Cuando es UNA orden --la de
+#  Despachar con su cuadrilla, la de agregar un integrante-- el aviso la nombra
+#  y abre esa orden.
+#
+#  Sin datos del cliente, como todo aviso: el numero de la orden y la fecha.
+
+VERBO_DEVUELTO = "trabajo_devuelto"
+VERBO_ASIGNADO = "trabajo_asignado"
+VERBO_JORNADA = "jornada_asignada"
+
+_DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado",
+         "domingo")
+
+
+def _el_dia(fecha) -> str:
+    """«el martes 27/10»: lo que dice el aviso, sin año ni hora."""
+    return f"el {_DIAS[fecha.weekday()]} {fecha.day:02d}/{fecha.month:02d}"
+
+
+def avisar_asignacion(orden, perfiles) -> None:
+    """A quien le asignaron UNA orden: «Te asignaron la OT #N».
+
+    Llamar DENTRO de la transaccion que asigna: la notificacion es parte del
+    hecho y el envio sale despues del commit (`_despachar`).
+    """
+    perfiles = [p for p in perfiles if p is not None]
+    if not perfiles:
+        return
+    contenido = {"orden_numero": orden.numero}
+    avisos_por_perfil = _notificar(
+        perfiles, VERBO_ASIGNADO, entity=orden,
+        entity_name=f"OT #{orden.numero}", link=f"/ot/{orden.id}",
+        contenido=contenido)
+    _despachar(
+        org=orden.org,
+        #  La clave es la ASIGNACION: la revision sube con cada una, asi que
+        #  volver a asignar la misma orden es otro hecho y otro aviso.
+        clave=f"asignacion|{orden.id}|{orden.revision}",
+        asunto=f"OT #{orden.numero} asignada",
+        texto=f"📋 Te asignaron la OT #{orden.numero}",
+        enlace_a=orden.id,
+        perfiles=perfiles,
+        enlace_interno=f"/ot/{orden.id}",
+        avisos_por_perfil=avisos_por_perfil,
+        contenido=contenido,
+        verbo=VERBO_ASIGNADO,
+        solo_telefono=True,
+    )
+
+
+def avisar_jornada_publicada(org, nuevas_por_perfil: dict, fecha) -> None:
+    """Un aviso por persona: «Te asignaron N visitas para el martes 27/10».
+
+    `nuevas_por_perfil` = {Profile: [OrdenTrabajo, ...]}, SOLO lo que esta
+    publicacion le asigno: lo que ya tenia no se vuelve a avisar. Con una sola
+    orden, el aviso la nombra y abre esa orden.
+    """
+    import hashlib
+
+    for perfil, ordenes in nuevas_por_perfil.items():
+        ordenes = [o for o in (ordenes or []) if o is not None]
+        if perfil is None or not ordenes:
+            continue
+        ordenes.sort(key=lambda o: o.numero)
+        cuando = _el_dia(fecha)
+        if len(ordenes) == 1:
+            uno = ordenes[0]
+            asunto = f"OT #{uno.numero} asignada"
+            texto = f"📋 Te asignaron la OT #{uno.numero} para {cuando}"
+            enlace = f"/ot/{uno.id}"
+            nombre = f"OT #{uno.numero}"
+        else:
+            asunto = f"{len(ordenes)} visitas asignadas"
+            texto = f"📋 Te asignaron {len(ordenes)} visitas para {cuando}"
+            #  Sin `/ot/`: la app abre su inicio, que es la lista del dia.
+            enlace = ""
+            nombre = f"{len(ordenes)} visitas"
+        contenido = {"cantidad": len(ordenes), "fecha": fecha.isoformat(),
+                     "ordenes": [o.numero for o in ordenes]}
+        avisos_por_perfil = _notificar(
+            [perfil], VERBO_JORNADA, entity=ordenes[0], entity_name=nombre,
+            link=enlace, contenido=contenido)
+        #  La clave es ESTA publicacion para ESTA persona: las mismas ordenes
+        #  publicadas dos veces son un solo aviso.
+        huella = hashlib.sha1(
+            ",".join(sorted(str(o.id) for o in ordenes)).encode()).hexdigest()[:20]
+        _despachar(
+            org=org,
+            clave=f"jornada|{perfil.id}|{fecha.isoformat()}|{huella}",
+            asunto=asunto,
+            texto=texto,
+            enlace_a=ordenes[0].id if len(ordenes) == 1 else None,
+            perfiles=[perfil],
+            enlace_interno=enlace,
+            avisos_por_perfil=avisos_por_perfil,
+            contenido=contenido,
+            verbo=VERBO_JORNADA,
+            solo_telefono=True,
+        )
 
 
 def _titulos_de(orden, requisitos: list[str]) -> list[str]:
@@ -197,6 +321,8 @@ def _despachar(
     enlace_interno: str = "",
     avisos_por_perfil=None,
     contenido=None,
+    verbo: str = VERBO_DEVUELTO,
+    solo_telefono: bool = False,
 ):
     """Programa el envio para DESPUES del commit. Nunca antes.
 
@@ -214,6 +340,8 @@ def _despachar(
             enlace_interno=enlace_interno,
             avisos_por_perfil=avisos_por_perfil or {},
             contenido=contenido or {},
+            verbo=verbo,
+            solo_telefono=solo_telefono,
         )
     )
 
@@ -221,6 +349,7 @@ def _despachar(
 def _enviar_ahora(
     *, org, clave, asunto, texto, enlace_a, perfiles,
     enlace_interno="", avisos_por_perfil=None, contenido=None,
+    verbo=VERBO_DEVUELTO, solo_telefono=False,
 ):
     """El envio de verdad. Fuera de toda transaccion, y nunca lanza.
 
@@ -229,7 +358,9 @@ def _enviar_ahora(
     el supervisor ya no puede ver -- su peticion termino hace rato.
     """
     try:
-        canales = list(CanalDeAvisos.objects.filter(org=org, activo=True))
+        #  Una asignacion va solo al telefono: ver «LA ASIGNACION» arriba.
+        canales = ([] if solo_telefono else
+                   list(CanalDeAvisos.objects.filter(org=org, activo=True)))
         perfiles_reales = [p for p in perfiles if p is not None]
         hay_push = (
             DispositivoDeTecnico.objects.filter(
@@ -251,7 +382,7 @@ def _enviar_ahora(
         except IntegrityError:
             return
 
-        enlace = _enlace_de(org, enlace_a)
+        enlace = _enlace_de(org, enlace_a) if enlace_a else ""
         cuerpo = texto if not enlace else f"{texto}\n{enlace}"
 
         usados = []
@@ -269,6 +400,7 @@ def _enviar_ahora(
             enlace=enlace_interno or enlace,
             avisos_por_perfil=avisos_por_perfil or {},
             contenido=contenido or {},
+            verbo=verbo,
         ):
             usados.append("push")
 
@@ -366,7 +498,8 @@ def probar(canal) -> tuple[bool, str]:
 
 
 def _notificar_a_telefonos(
-    *, org, perfiles, titulo, texto, enlace, avisos_por_perfil=None, contenido=None
+    *, org, perfiles, titulo, texto, enlace, avisos_por_perfil=None, contenido=None,
+    verbo=VERBO_DEVUELTO,
 ) -> bool:
     """Manda la notificacion a los telefonos registrados de esos perfiles.
 
@@ -415,6 +548,7 @@ def _notificar_a_telefonos(
             enlace,
             por_perfil.get(profile_id, ""),
             contenido or {},
+            verbo=verbo,
         )
         if resultado == push_fcm.ENTREGADO:
             llego = True
@@ -436,6 +570,7 @@ def _enviar_una(
     enlace: str,
     aviso_id: str = "",
     contenido: dict | None = None,
+    verbo: str = VERBO_DEVUELTO,
 ) -> str:
     """Un envio al proveedor. Devuelve el resultado de `push_fcm`, sin traducir.
 
@@ -450,7 +585,7 @@ def _enviar_una(
         texto,
         enlace,
         aviso_id=aviso_id,
-        verbo="trabajo_devuelto",
+        verbo=verbo,
         contenido=contenido or {},
     )
 

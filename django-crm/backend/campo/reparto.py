@@ -596,7 +596,8 @@ def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
 #  publique con la MISMA funcion que el boton, y no con una copia que se
 #  desincronice el primer dia que alguien toque una de las dos.
 
-def publicar(org, asignaciones) -> dict:
+def publicar(org, asignaciones, *, mover: bool = True,
+             por_el_supervisor: dict | None = None) -> dict:
     """Escribe las asignaciones que se vieron. No recalcula.
 
     `asignaciones` = [{"jornada": id, "ordenes": [id, ...]}], lo que la
@@ -607,12 +608,32 @@ def publicar(org, asignaciones) -> dict:
     toma bajo bloqueo y se vuelve a preguntar si todavia espera a alguien, si
     nadie la empezo y si nadie la asigno a mano mientras tanto. Lo que se
     decide es la fila bloqueada, nunca lo que la pantalla creia.
+
+    LO QUE AGREGO LA FASE 3.1 (27/10/2026)
+    --------------------------------------
+    `mover=False`: lo que ya tiene gente NO se mueve, solo se asigna lo que no
+    tenia a nadie. Es la regla del Supervisor una vez que arranco el dia
+    (decision del usuario del 21/10: desde la apertura lo publicado queda
+    quieto y lo nuevo se suma). El boton humano sigue moviendo, como siempre.
+
+    `por_el_supervisor`: los datos del evento `asignada_por_el_supervisor`
+    que se deja en cada orden que asigna el Supervisor, sin persona (el patron
+    de `creada_por_el_supervisor`). Es OTRO tipo que el `asignacion` de una
+    persona, a proposito: ese es el que congela una orden para el reparto
+    (`_asignadas_a_mano`), y lo que asigno el Supervisor se puede volver a
+    acomodar antes de que arranque el dia.
+
+    Y avisa al telefono, una vez por persona, con lo que ESTA publicacion le
+    dio (`avisos.avisar_jornada_publicada`).
     """
     from django.db import transaction
 
     publicadas = 0
     ya_tenian, ya_no_esperan, a_mano, sin_cambio = [], [], [], []
-    sin_cuenta, reasignadas, otro_dia = [], [], []
+    sin_cuenta, reasignadas, otro_dia, quietas = [], [], [], []
+    #  {fecha: {Profile: [OrdenTrabajo]}}: lo que cada persona recibe por
+    #  primera vez en esta publicacion, para avisarle una sola vez.
+    nuevas: dict = {}
     #  Se acumula FUERA del ciclo: una variable por cuadrilla solo
     #  guardaria la ultima, y con dos cuadrillas el numero mentiria.
     auxiliares = 0
@@ -695,6 +716,12 @@ def publicar(org, asignaciones) -> dict:
                                for a in viejas} == nuevos:
                     sin_cambio.append(orden.numero)
                     continue
+                if viejas and not mover:
+                    #  EL DIA YA ARRANCO (decision del 21/10/2026): lo
+                    #  publicado queda quieto. Un tecnico sin señal que ya va
+                    #  en camino la perderia al sincronizar.
+                    quietas.append(orden.numero)
+                    continue
                 if viejas:
                     #  Se REEMPLAZA, y queda escrito quien la tenia. Borrar
                     #  sin registro seria perder el unico dato que explica
@@ -710,6 +737,7 @@ def publicar(org, asignaciones) -> dict:
                     )
                     orden.asignaciones.all().delete()
                     reasignadas.append(orden.numero)
+                antes = {a.profile_id for a in viejas}
                 for r in quienes["reciben"]:
                     AsignacionTrabajo.objects.create(
                         orden=orden,
@@ -717,15 +745,33 @@ def publicar(org, asignaciones) -> dict:
                         rol=r["rol"],
                         es_principal=r["es_principal"],
                     )
+                    if r["profile"].id not in antes:
+                        (nuevas.setdefault(jornada.fecha, {})
+                         .setdefault(r["profile"], []).append(orden))
                 #  SUBE LA REVISION: la orden cambio en el servidor, y
                 #  `revision` cuenta escrituras (viaja como `revision_base`
-                #  cuando el telefono guarda datos). OJO: hoy el telefono NO
-                #  suelta una orden porque suba (auditoria de la 2.2,
-                #  23/10/2026). Que quien la tenia deje de verla es de la
-                #  Fase 3.1.
+                #  cuando el telefono guarda datos). Quien la tenia deja de
+                #  verla porque ya no le viene en el listado: el telefono
+                #  suelta lo que el servidor no le lista (27/10/2026,
+                #  `LocalDatabase.soltarOrdenesQueYaNoSonMias`).
                 orden.revision += 1
                 orden.save(update_fields=["revision", "updated_at"])
+                if por_el_supervisor is not None:
+                    EventoTrabajo.objects.create(
+                        org=org, orden=orden,
+                        tipo="asignada_por_el_supervisor", profile=None,
+                        datos={**por_el_supervisor,
+                               "cuadrilla": jornada.cuadrilla.nombre,
+                               "jornada": str(jornada.id)})
                 publicadas += 1
+
+        #  EL AVISO AL TELEFONO (3.1): dentro de la transaccion se escribe la
+        #  notificacion --es parte del hecho--, y el envio sale despues del
+        #  commit. Si la publicacion se deshace, no sale nada.
+        if nuevas:
+            from campo.services.avisos import avisar_jornada_publicada
+            for fecha, por_perfil in nuevas.items():
+                avisar_jornada_publicada(org, por_perfil, fecha)
 
     return {
         "publicadas": publicadas,
@@ -748,6 +794,8 @@ def publicar(org, asignaciones) -> dict:
         #  que el reparto del dia las movio. Se nombran porque alguien
         #  puede estar esperandolas donde estaban.
         "reasignadas": reasignadas,
+        #  Con `mover=False`: ya tenian gente y el dia ya arranco.
+        "quietas": quietas,
     }
 
 

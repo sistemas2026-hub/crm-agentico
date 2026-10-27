@@ -218,6 +218,11 @@ def asignar(orden: OrdenTrabajo, profile_tecnico, profile_actor,
 
     orden.revision += 1
     orden.save(update_fields=["revision", "updated_at"])
+    if creada:
+        #  Aviso al telefono (3.1, 27/10/2026). Solo si la orden es NUEVA para
+        #  esa persona: pasar de ayudante a principal no es una visita nueva.
+        from campo.services.avisos import avisar_asignacion
+        avisar_asignacion(orden, [profile_tecnico])
 
     EventoTrabajo.objects.create(
         org=orden.org, orden=orden,
@@ -259,6 +264,7 @@ def asignar_a_jornada(orden: OrdenTrabajo, jornada, profile_actor) -> dict:
     d = destinatarios(jornada)
     if not d["reciben"]:
         raise ErrorDespacho(por_que_nadie_recibe(jornada, d))
+    antes = set(orden.asignaciones.values_list("profile_id", flat=True))
     orden.asignaciones.all().delete()
     for r in d["reciben"]:
         AsignacionTrabajo.objects.create(
@@ -266,6 +272,10 @@ def asignar_a_jornada(orden: OrdenTrabajo, jornada, profile_actor) -> dict:
             es_principal=r["es_principal"])
     orden.revision += 1
     orden.save(update_fields=["revision", "updated_at"])
+    #  Aviso al telefono (3.1, 27/10/2026), a quien la recibe por primera vez.
+    from campo.services.avisos import avisar_asignacion
+    avisar_asignacion(orden, [r["profile"] for r in d["reciben"]
+                              if r["profile"].id not in antes])
     EventoTrabajo.objects.create(
         org=orden.org, orden=orden, tipo="asignacion", profile=profile_actor,
         datos={"a_cuadrilla": jornada.cuadrilla.nombre,
@@ -926,6 +936,9 @@ def agregar_integrante(orden: OrdenTrabajo, profile, actor,
 
     fresca.revision += 1
     fresca.save(update_fields=["revision", "updated_at"])
+    #  Aviso al telefono (3.1, 27/10/2026).
+    from campo.services.avisos import avisar_asignacion
+    avisar_asignacion(fresca, [profile])
 
     _evento(fresca, "integrante_agregado", actor, antes,
             integrante=str(profile.id), rol=rol, motivo=motivo)

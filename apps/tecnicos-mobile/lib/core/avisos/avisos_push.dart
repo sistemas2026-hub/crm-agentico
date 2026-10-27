@@ -10,6 +10,7 @@ import '../api/api_client.dart';
 import '../api/api_endpoints.dart';
 import '../storage/local_database.dart';
 import '../storage/secure_storage_service.dart';
+import '../sync/sync_queue_service.dart';
 
 /// El golpecito en el hombro: que el teléfono avise sin que nadie abra la app.
 ///
@@ -48,17 +49,48 @@ class AvisosPush {
     SecureStorageService? almacen,
     FirebaseMessaging? mensajeria,
     FlutterLocalNotificationsPlugin? locales,
+    Future<void> Function()? sincronizar,
   })  : _api = api ?? ApiClient(),
         _base = baseLocal ?? LocalDatabase(),
         _almacen = almacen ?? SecureStorageService(),
         _mensajeriaInyectada = mensajeria,
-        _localesInyectadas = locales;
+        _localesInyectadas = locales,
+        _sincronizar = sincronizar ?? _sincronizarDeVerdad;
 
   final ApiClient _api;
   final LocalDatabase _base;
   final SecureStorageService _almacen;
   final FirebaseMessaging? _mensajeriaInyectada;
   final FlutterLocalNotificationsPlugin? _localesInyectadas;
+  final Future<void> Function() _sincronizar;
+
+  static Future<void> _sincronizarDeVerdad() =>
+      SyncQueueService().procesarCola();
+
+  /// Los avisos que traen TRABAJO NUEVO (27/10/2026, fase 3.1 de
+  /// `SPEC/objetivos/supervisor-arma-la-jornada.md`): una orden asignada, o
+  /// las visitas del día que publicó el reparto.
+  ///
+  /// Al llegar uno, la app sincroniza: la orden tiene que estar en el teléfono
+  /// cuando el técnico toque el aviso. Sin esto, tocarlo abría el detalle de
+  /// una orden que todavía no había bajado, y la pantalla decía que no existe.
+  static const Set<String> verbosConTrabajoNuevo = <String>{
+    'trabajo_asignado',
+    'jornada_asignada',
+  };
+
+  /// Si el aviso trae trabajo nuevo, pide una sincronización y devuelve
+  /// `true`. Nunca lanza: sin señal, la orden baja en la próxima.
+  Future<bool> sincronizarSiTraeTrabajo(RemoteMessage mensaje) async {
+    final String verbo = (mensaje.data['verbo'] ?? '').toString();
+    if (!verbosConTrabajoNuevo.contains(verbo)) return false;
+    try {
+      await _sincronizar();
+    } catch (e) {
+      debugPrint('push: no se pudo sincronizar (${e.runtimeType})');
+    }
+    return true;
+  }
 
   /// El id del canal de Android.
   ///
@@ -194,6 +226,8 @@ class AvisosPush {
   /// buscarlo.
   Future<void> _alLlegar(RemoteMessage mensaje) async {
     await espejar(mensaje);
+    // Sin esperarla: el aviso se dibuja ya, y la orden baja mientras tanto.
+    unawaited(sincronizarSiTraeTrabajo(mensaje));
     final RemoteNotification? n = mensaje.notification;
     if (n == null) return;
     try {

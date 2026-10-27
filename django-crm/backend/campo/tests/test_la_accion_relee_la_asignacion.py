@@ -104,8 +104,16 @@ def _publicar_sin_confirmar(org, jornada, orden, salida):
     listo = threading.Event()
 
     def supervisor():
+        from conftest import _apply_rls_context
+
         try:
             with transaction.atomic():
+                #  El hilo abre su propia conexion: sin el contexto de la
+                #  empresa, la notificacion que publicar escribe desde el
+                #  27/10/2026 (aviso al telefono, en `common`, con RLS) se
+                #  rechaza y la publicacion entera se deshace. En produccion
+                #  lo fijan el middleware y el ciclo del Supervisor.
+                _apply_rls_context(org.id)
                 salida["publicar"] = R.publicar(
                     org, [{"jornada": str(jornada.id), "ordenes": [str(orden.id)]}])
                 listo.set()
