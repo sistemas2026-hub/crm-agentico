@@ -326,3 +326,214 @@ def test_n3_la_pantalla_la_pide_quien_gestiona(
     assert r.status_code == 200
     assert [f["caso"] for f in r.json()["crear"]] == [str(caso.id)]
     assert user_client.get(VISTA).status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# V · la prioridad con el nivel del asunto (regla del 24/10, integrada 26/10)
+# ---------------------------------------------------------------------------
+
+def _nivel(codigo, plazo, prioridad, por="persona"):
+    return {"nivel": codigo, "plazo_dias": plazo, "prioridad": prioridad,
+            "por": por}
+
+
+URG = _nivel("urgente", 0, O.ALTA)
+NOR = _nivel("normal", 2, O.MEDIA)
+PRO = _nivel("programable", 5, O.BAJA)
+
+
+def _prioridad(creado, nivel, plazo=30, caido=False):
+    return O.prioridad_del_caso(creado, nivel=nivel, plazo_de_la_plantilla=plazo,
+                                caido=caido, hoy=MARTES, zona=BOGOTA)
+
+
+@pytest.mark.parametrize("nivel, creado_el, esperada", [
+    (URG, 6, O.ALTA),     # urgente: alta desde que entra
+    (NOR, 6, O.MEDIA),    # faltan dos dias: arranca en la del nivel, no baja
+    (NOR, 5, O.MEDIA),    # vence mañana
+    (NOR, 4, O.ALTA),     # vence hoy
+    (PRO, 6, O.BAJA),
+    (PRO, 2, O.MEDIA),    # 2 + 5 = 7: vence mañana
+    (PRO, 1, O.ALTA),     # 1 + 5 = 6: vence hoy
+])
+def test_v_arranca_en_el_nivel_y_sube_con_su_plazo(nivel, creado_el, esperada):
+    """El plazo de la plantilla (30) no cuenta: manda el del nivel."""
+    assert _prioridad(_bogota(creado_el, 9), nivel) == esperada
+
+
+def test_v2_con_el_equipo_caido_alta():
+    hoy = _bogota(6, 9)
+    assert _prioridad(hoy, PRO, caido=True) == O.ALTA
+    assert _prioridad(hoy, None, plazo=5, caido=True) == O.ALTA
+
+
+def test_v3_sin_nivel_la_regla_del_23():
+    for creado_el, plazo in ((3, 2), (5, 2), (6, 2), (4, None), (6, None)):
+        creado = _bogota(creado_el, 9)
+        assert _prioridad(creado, None, plazo=plazo) == O.prioridad_de(
+            creado, plazo, MARTES, BOGOTA)
+
+
+def test_v4_sin_creacion_la_del_nivel():
+    assert _prioridad(None, PRO) == O.BAJA
+    assert _prioridad(None, URG) == O.ALTA
+    assert _prioridad(None, None) == O.MEDIA
+
+
+def test_v5_decidir_lee_el_nivel_del_asunto_y_la_caida(empresa, plantillas):
+    from campo import niveles as N
+    from operaciones import diagnostico_optico as optico
+
+    #  «No tiene internet» en Programable, por una persona: el plazo de la
+    #  plantilla (2 dias) deja de mandar en la prioridad.
+    N.decidir_por_persona(empresa, "No tiene internet", N.PROGRAMABLE)
+    #  WispHub guarda «Asunto - Cliente»: igual encuentra plantilla y nivel.
+    tranquilo = _caso(empresa, asunto="No tiene internet - Zoraida Clientela",
+                      creado=_bogota(3, 9))
+    caido = _caso(empresa, creado=_bogota(6, 9), medicion={
+        "medido_con": pad.MEDIDO_CON, "estado": optico.CAIDO,
+        "causa_caida": optico.CAUSA_FIBRA})
+    #  Una pieza que no midio el motor no dice nada del equipo, y un equipo
+    #  en linea no sube nada.
+    sin_motor = _caso(empresa, creado=_bogota(6, 9), medicion={
+        "estado": optico.CAIDO})
+    en_linea = _caso(empresa, creado=_bogota(6, 9), medicion={
+        "medido_con": pad.MEDIDO_CON, "estado": optico.EN_LINEA})
+    #  Manda la medicion MAS RECIENTE, la pieza o una re-medicion de su
+    #  historial (auditor independiente, 26/10/2026, con sonda).
+    antes, despues = _bogota(6, 10).isoformat(), _bogota(6, 14).isoformat()
+    remedido_caido = _caso(empresa, creado=_bogota(6, 9), medicion={
+        "medido_con": pad.MEDIDO_CON, "estado": optico.EN_LINEA,
+        "observado_en": antes,
+        "historial": [{"observado_en": despues, "estado": optico.CAIDO,
+                       "causa_caida": optico.CAUSA_FIBRA}]})
+    remedido_en_linea = _caso(empresa, creado=_bogota(6, 9), medicion={
+        "medido_con": pad.MEDIDO_CON, "estado": optico.CAIDO,
+        "causa_caida": optico.CAUSA_SIN_ENERGIA, "observado_en": antes,
+        "historial": [{"observado_en": despues, "estado": optico.EN_LINEA}]})
+    sin_nivel = _caso(empresa, asunto="Instalacion nueva",
+                      grupo=pad.TRABAJO_PEDIDO, creado=_bogota(4, 9))
+
+    crear, _, _ = _por_caso(O.decidir(empresa, A_LAS_3))
+
+    t = crear[str(tranquilo.id)]
+    #  Con el plazo de la plantilla habria sido alta (vencio el 5).
+    assert (t["plantilla"], t["por"], t["nivel"], t["prioridad"]) == (
+        "Soporte", "asunto", N.PROGRAMABLE, O.BAJA)
+    c = crear[str(caido.id)]
+    assert (c["prioridad"], c["equipo_caido"], c["nivel_nombre"]) == (
+        O.ALTA, True, "Programable")
+    assert crear[str(sin_motor.id)]["prioridad"] == O.BAJA
+    assert crear[str(en_linea.id)]["prioridad"] == O.BAJA
+    assert crear[str(remedido_caido.id)]["prioridad"] == O.ALTA
+    assert crear[str(remedido_en_linea.id)]["prioridad"] == O.BAJA
+    #  Sin nivel: el plazo de su plantilla (3 dias desde el 4 = vence mañana).
+    s = crear[str(sin_nivel.id)]
+    assert (s["nivel"], s["prioridad"]) == ("", O.MEDIA)
+
+
+def test_v6_el_lector_contesta_lo_mismo_que_de_a_uno(empresa, plantillas):
+    from campo import niveles as N
+
+    N.decidir_por_persona(empresa, "No tiene internet", N.URGENTE)
+    N.ubicar_por_el_supervisor(empresa, "Corte de fibra", N.NORMAL, motivo="x",
+                               tickets=0, provisional=True)
+    N.ubicar_por_el_supervisor(empresa, "Instalacion nueva", N.PROGRAMABLE,
+                               motivo="x", tickets=5, provisional=False)
+    #  Una plantilla con « - » en el asunto: solo cortando contra las
+    #  plantillas se lo encuentra entero (auditor, 26/10/2026).
+    _plantilla(empresa, "upgrade", "correctivo", ["Cambio De Plan - Upgrade"])
+    N.decidir_por_persona(empresa, "Cambio De Plan - Upgrade", N.URGENTE)
+
+    leer = N.lector_de_niveles(empresa)
+
+    for asunto in ("No tiene internet", "No tiene internet - Zoraida",
+                   "Corte de fibra", "Instalacion nueva", "Otra cosa", "",
+                   "Cambio De Plan - Upgrade - Zoraida"):
+        assert leer(asunto) == N.nivel_del_asunto(empresa, asunto), asunto
+    assert leer("No tiene internet - Zoraida")["nivel"] == N.URGENTE
+    assert leer("Cambio De Plan - Upgrade - Zoraida")["nivel"] == N.URGENTE
+    #  El Normal provisional del Supervisor no es una decision.
+    assert leer("Corte de fibra") is None
+    assert leer("Instalacion nueva")["por"] == N.POR_SUPERVISOR
+
+
+def test_v7_decidir_no_pregunta_el_nivel_caso_por_caso(empresa, plantillas):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from campo import niveles as N
+
+    N.decidir_por_persona(empresa, "No tiene internet", N.URGENTE)
+    _caso(empresa)
+    with CaptureQueriesContext(connection) as uno:
+        O.decidir(empresa, A_LAS_3)
+    for _ in range(3):
+        _caso(empresa)
+    with CaptureQueriesContext(connection) as cuatro:
+        salida = O.decidir(empresa, A_LAS_3)
+
+    assert len(salida["crear"]) == 4
+    assert len(cuatro.captured_queries) == len(uno.captured_queries)
+
+
+def test_v8_el_informe_muestra_el_nivel_y_la_prioridad(empresa, plantillas):
+    import io
+
+    from django.core.management import call_command
+
+    from campo import niveles as N
+
+    N.decidir_por_persona(empresa, "No tiene internet", N.URGENTE)
+    caso = _caso(empresa, asunto="No tiene internet - Zoraida Clientela",
+                 creado=_bogota(6, 9))
+    salida = io.StringIO()
+
+    #  Urgente es alta cualquier dia: no hace falta fijar el reloj.
+    call_command("informe_de_despacho", "--org", str(empresa.id), stdout=salida)
+
+    fila = next(linea for linea in salida.getvalue().splitlines()
+                if caso.external_ticket_id in linea)
+    assert fila.split()[-2:] == [N.URGENTE, O.ALTA]
+    assert "por nivel del asunto: urgente 1" in salida.getvalue()
+    assert "Zoraida" not in salida.getvalue()
+
+
+def test_v9_la_plantilla_por_el_asunto_cortado(empresa, plantillas):
+    """El corte de «Asunto - Cliente» no confunde una plantilla cuyo asunto
+    trae « - » con la mas corta (auditor independiente, 26/10/2026)."""
+    from campo import plantillas as P
+
+    _plantilla(empresa, "plan", "correctivo", ["Cambio De Plan"])
+    _plantilla(empresa, "upgrade", "correctivo", ["Cambio De Plan - Upgrade"])
+    ofrecidas = P.plantillas_que_se_ofrecen(empresa)
+
+    def cual(nombre):
+        v = P.plantilla_para_asunto(ofrecidas, nombre)
+        return v.work_type.codigo if v else None
+
+    assert [cual(n) for n in (
+        "Cambio De Plan - Upgrade", "Cambio De Plan - Upgrade - Zoraida",
+        "Cambio De Plan · Zoraida", "Cambio De Plan - Zoraida",
+        "No tiene internet", "Otra Cosa - Zoraida", "")] == [
+        "upgrade", "upgrade", "plan", "plan", "soporte", None, None]
+
+
+def test_v10_sin_poder_leer_los_niveles_queda_en_el_log(empresa, plantillas,
+                                                         caplog):
+    """Sin rastro, la regla del 23/10 no se distinguiria de «ningun asunto
+    tiene nivel» (auditor independiente, 26/10/2026)."""
+    import logging
+
+    from django.db import DatabaseError
+
+    from campo import niveles as N
+
+    N.decidir_por_persona(empresa, "No tiene internet", N.URGENTE)
+    caplog.set_level(logging.WARNING, logger="campo.niveles")
+    with mock.patch.object(N.NivelDeAsunto.objects, "filter",
+                           side_effect=DatabaseError("x")):
+        leer = N.lector_de_niveles(empresa)
+
+    assert leer("No tiene internet") is None
+    assert "no se pudieron leer los niveles" in caplog.text

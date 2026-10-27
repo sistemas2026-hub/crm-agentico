@@ -319,11 +319,12 @@
       }
       sinPlantillaPorque = sugerida ? '' : (ficha.plantilla_motivo ?? '');
       //  LA PRIORIDAD, con la MISMA regla que usa el Supervisor cuando crea la
-      //  orden solo (23/10/2026): el plazo de la plantilla sugerida y, si no
-      //  tiene, la espera del ticket. La calcula el backend.
+      //  orden solo: el nivel del asunto, su plazo y la caída del equipo
+      //  (26/10/2026) y, sin nivel, el plazo de la plantilla sugerida o la
+      //  espera del ticket (23/10/2026). La calcula el backend.
       if (['alta', 'media', 'baja'].includes(ficha.prioridad_sugerida)) {
         prioridadElegida = ficha.prioridad_sugerida;
-        propuesto.prioridad = 'por el plazo de la plantilla y lo que lleva esperando el ticket';
+        propuesto.prioridad = 'con la misma regla con la que el Supervisor crea la orden';
       }
       proponerFecha();
       if (!barrio && despachando.localidad) barrio = despachando.localidad;
@@ -563,7 +564,12 @@
                           · {f.por === 'asunto' ? 'por el asunto' : 'por la labor'}
                         </span>
                       </td>
-                      <td>{textoDePrioridad(f.prioridad)}</td>
+                      <td>
+                        {textoDePrioridad(f.prioridad)}
+                        <!-- El nivel del asunto (26/10/2026): de ahí arranca la prioridad. -->
+                        {#if f.nivel}<span class="snoc-body-sm snoc-secundario">· {f.nivel_nombre || f.nivel}</span>{/if}
+                        {#if f.equipo_caido}<span class="snoc-body-sm snoc-secundario">· equipo caído</span>{/if}
+                      </td>
                       <td>{f.para || '—'}</td>
                       <td>
                         <!-- «Según el ticket» (25/10/2026): el Supervisor sacó el barrio

@@ -1,7 +1,8 @@
 """
 Lista, sin escribir nada, cómo ve el Supervisor cada caso de la cola de
 Despacho: qué grupo leyó, qué labor sale de ahí, con qué plantilla iría, si es
-una obra de red, de dónde sale su barrio y en qué zona cae.
+una obra de red, de dónde sale su barrio, en qué zona cae, y (26/10/2026) el
+nivel de su asunto y la prioridad con la que saldría su orden.
 
     python manage.py informe_de_despacho --org <id>
 
@@ -50,11 +51,16 @@ class Command(BaseCommand):
                             help="id (UUID) de la organización")
 
     def handle(self, *args, **options):
+        from django.utils import timezone
+
+        from campo import niveles as N
         from campo import plantillas as P
         from campo.cuadrillas import labor_de_cada_grupo, onus_para_corte_de_red
+        from campo.reparto import _zona_de
         from campo.zonas import AliasDeZona, MapaDeBarrios, normalizar_localidad
         from cases.models import Case
         from operaciones import armado_de_jornadas as adj
+        from operaciones import ordenes_de_despacho as O
         from operaciones import paso_a_despacho as pad
         from operaciones import ubicacion_del_caso as ub
 
@@ -75,9 +81,13 @@ class Command(BaseCommand):
             .select_related("zona")})
         buscables = ub.preparar(zona_de_barrio)
         umbral = onus_para_corte_de_red(org.id)
+        nivel_de = N.lector_de_niveles(org)
+        zona_horaria = _zona_de(org)
+        hoy = timezone.now().astimezone(zona_horaria).date()
 
         filas = []
         por_grupo, sin_labor, obras = Counter(), Counter(), Counter()
+        por_nivel = Counter()
         for caso_id, p in propuestas.items():
             caso = casos.get(caso_id)
             if caso is None:
@@ -98,6 +108,13 @@ class Command(BaseCommand):
             plantilla = (f"{elegida['version'].work_type.nombre} "
                          f"({elegida['por']})" if elegida["version"]
                          else f"— ({elegida['motivo']})")
+            nivel = nivel_de(caso.name or "")
+            por_nivel[(nivel or {}).get("nivel") or "sin nivel"] += 1
+            prioridad = O.prioridad_del_caso(
+                caso.created_at, nivel=nivel,
+                plazo_de_la_plantilla=(elegida["version"].work_type.plazo_dias
+                                       if elegida["version"] else None),
+                caido=O.equipo_medido_caido(p), hoy=hoy, zona=zona_horaria)
             por_grupo[_GRUPO.get(grupo, grupo or "sin grupo")] += 1
             if not labor:
                 sin_labor[_GRUPO.get(grupo, grupo or "sin grupo")] += 1
@@ -112,10 +129,12 @@ class Command(BaseCommand):
                 "sí" if obra else "",
                 f"{barrio or '—'} [{de_donde or '—'}]",
                 zona_de_barrio.get(barrio, "—") if barrio else "—",
+                (nivel or {}).get("nivel") or "—",
+                prioridad,
             ))
 
         cab = ("ticket", "grupo", "labor", "labor leída", "plantilla",
-               "obra", "barrio [de]", "zona")
+               "obra", "barrio [de]", "zona", "nivel", "prioridad")
         anchos = [max(len(str(x)) for x in col) for col in zip(cab, *filas)] \
             if filas else [len(c) for c in cab]
         linea = "  ".join(f"{{:<{a}}}" for a in anchos)
@@ -130,3 +149,5 @@ class Command(BaseCommand):
             f"{g} {n}" for g, n in sorted(sin_labor.items())) or "ninguno"))
         self.stdout.write("obras de red: " + (", ".join(
             f"{k} {n}" for k, n in sorted(obras.items())) or "ninguna"))
+        self.stdout.write("por nivel del asunto: " + ", ".join(
+            f"{k} {n}" for k, n in sorted(por_nivel.items())))

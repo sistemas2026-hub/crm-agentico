@@ -150,6 +150,10 @@ def test_p4_sin_hora_de_corte_no_corre(abierto, plantillas):
 # ---------------------------------------------------------------------------
 
 def test_c_crea_la_orden_como_el_boton(abierto, plantillas):
+    from campo import niveles as N
+
+    #  Urgente: alta igual que por vencida, y queda escrito de donde salio.
+    N.decidir_por_persona(abierto, "No tiene internet", N.URGENTE)
     caso = _caso(abierto, creado=_bogota(3, 9))     # vencida: alta
     motor = _Motor()
 
@@ -168,6 +172,8 @@ def test_c_crea_la_orden_como_el_boton(abierto, plantillas):
     #  Sin persona, y escrito que fue el Supervisor y con que tarea.
     ev = EventoTrabajo.objects.get(orden=o, tipo="creada_por_el_supervisor")
     assert (ev.profile_id, ev.datos["tarea"]) == (None, td.CREAR_LAS_ORDENES)
+    #  Por que esa prioridad (26/10/2026): el nivel puede cambiar despues.
+    assert (ev.datos["nivel"], ev.datos["equipo_caido"]) == (N.URGENTE, False)
     pieza = [x for x in P.objects.get(origen_id=str(caso.id)).evidencia
              if x.get("fuente") == O.FUENTE_ORDEN]
     assert [x["orden"] for x in pieza] == [o.numero]

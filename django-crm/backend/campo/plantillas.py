@@ -786,14 +786,25 @@ def _plazo(valor) -> int | None:
 
 def plantilla_para_asunto(versiones, asunto):
     """De las plantillas que Despacho ofrece, la que atiende este asunto.
-    None si ninguna lo declara. Se usa SOLO desde `plantilla_del_caso`."""
-    clave = normalizar_asunto(asunto)
-    if not clave:
-        return None
+    None si ninguna lo declara. Se usa SOLO desde `plantilla_del_caso`.
+
+    EL ASUNTO SE CORTA COMO LO GUARDA WISPHUB, «Asunto - Cliente»
+    (26/10/2026): con el nombre entero, un caso que trae al cliente no
+    coincidia con ninguna plantilla (lo anoto la sesion de H-21). Se corta con
+    `campo.niveles.asunto_del_ticket`, la regla con la que H-21 cuenta los
+    asuntos. La misma regla, no la misma lista: H-21 corta contra las
+    plantillas activas y esto contra las que Despacho ofrece (publicadas).
+    """
+    from campo.niveles import asunto_del_ticket
+
+    por_asunto: dict = {}
     for v in versiones:
-        if clave in {normalizar_asunto(x) for x in (v.work_type.asuntos or [])}:
-            return v
-    return None
+        for x in (v.work_type.asuntos or []):
+            clave = normalizar_asunto(x)
+            if clave:
+                por_asunto.setdefault(clave, v)
+    clave, _ = asunto_del_ticket(asunto, {c: c for c in por_asunto})
+    return por_asunto.get(clave) if clave else None
 
 
 def plantillas_que_se_ofrecen(org) -> list:

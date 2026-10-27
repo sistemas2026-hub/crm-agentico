@@ -442,24 +442,32 @@ class FichaDespachableView(CasosDespachablesView):
             "creado": caso.created_at.isoformat() if caso.created_at else None,
             "prioridad_supervisor": propuesta.prioridad,
             #  LA PRIORIDAD DE LA ORDEN, con la MISMA regla que usa el
-            #  Supervisor cuando la crea solo (23/10/2026, decision del
-            #  usuario): el plazo de la plantilla sugerida y, sin plazo, la
-            #  espera del ticket. Ver `ordenes_de_despacho.prioridad_de`.
-            "prioridad_sugerida": _prioridad_sugerida(org, caso, elegida),
+            #  Supervisor cuando la crea solo: el nivel del asunto, el plazo y
+            #  la caida del equipo (26/10/2026) y, sin nivel, el plazo de la
+            #  plantilla sugerida o la espera del ticket (23/10/2026). Ver
+            #  `ordenes_de_despacho.prioridad_del_caso`.
+            "prioridad_sugerida": _prioridad_sugerida(org, caso, elegida,
+                                                      propuesta),
         })
 
 
-def _prioridad_sugerida(org, caso, elegida) -> str:
+def _prioridad_sugerida(org, caso, elegida, propuesta) -> str:
     from django.utils import timezone
 
+    from campo.niveles import nivel_del_asunto
     from campo.reparto import _zona_de
-    from operaciones.ordenes_de_despacho import prioridad_de
+    from operaciones.ordenes_de_despacho import (
+        equipo_medido_caido,
+        prioridad_del_caso,
+    )
 
     zona = _zona_de(org)
     version = elegida.get("version")
     plazo = getattr(getattr(version, "work_type", None), "plazo_dias", None)
-    return prioridad_de(caso.created_at, plazo,
-                        timezone.now().astimezone(zona).date(), zona)
+    return prioridad_del_caso(
+        caso.created_at, nivel=nivel_del_asunto(org, caso.name or ""),
+        plazo_de_la_plantilla=plazo, caido=equipo_medido_caido(propuesta),
+        hoy=timezone.now().astimezone(zona).date(), zona=zona)
 
 
 #: Lo que se muestra del ticket. Es para copiar una indicacion, no para leer el

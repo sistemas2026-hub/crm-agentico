@@ -103,6 +103,64 @@ def prioridad_de(creado, plazo_dias, hoy: dt.date, zona) -> str:
     return MEDIA if espera == 1 else BAJA
 
 
+_RANGO = {BAJA: 0, MEDIA: 1, ALTA: 2}
+
+
+def prioridad_del_caso(creado, *, nivel, plazo_de_la_plantilla, caido: bool,
+                       hoy: dt.date, zona) -> str:
+    """La prioridad de la orden de un caso, con el nivel de su asunto  --
+    regla del usuario del 24/10/2026 (informe «Plazo y prioridad por asunto»,
+    seccion 3), integrada el 26/10:
+
+        arranca en la prioridad del NIVEL del asunto (H-21,
+          `campo.niveles.nivel_del_asunto`);
+        sube con el tiempo y nunca baja: con el plazo del nivel, vence
+          mañana -> al menos media; vence hoy o vencio -> alta;
+        con el equipo medido caido, alta, aunque el asunto sea Normal o
+          Programable.
+
+    SIN NIVEL (un asunto sin ubicar, o un Normal provisional del Supervisor:
+    `nivel_del_asunto` devuelve None) sigue la regla del 23/10, `prioridad_de`
+    con el plazo de la plantilla y, sin plazo, la espera. La caida del equipo
+    vale igual: es una medicion, no depende del asunto. Sin fecha de creacion,
+    la del nivel tal cual.
+    """
+    if caido:
+        return ALTA
+    if nivel is None:
+        return prioridad_de(creado, plazo_de_la_plantilla, hoy, zona)
+    inicial = nivel.get("prioridad")
+    if creado is None:
+        return inicial if inicial in _RANGO else MEDIA
+    por_el_plazo = prioridad_de(creado, nivel.get("plazo_dias"), hoy, zona)
+    return max((inicial, por_el_plazo), key=lambda p: _RANGO.get(p, -1))
+
+
+def equipo_medido_caido(propuesta) -> bool:
+    """Si la medicion MAS RECIENTE del equipo del caso lo vio caido: «equipo
+    caido = alta» (24/10/2026).
+
+    La mas reciente entre la pieza y las re-mediciones de su historial
+    (`paso_a_despacho.la_medicion_vigente` con las correcciones), este o no
+    delegada esa tarea: aca no se decide si el caso pasa, se lee como esta el
+    equipo. Con la pieza sola, un caso que paso porque una re-medicion lo vio
+    caido salia con la prioridad de su asunto, y uno que una re-medicion vio
+    en linea salia alta (auditor independiente, 26/10/2026, con sonda). El
+    corte de red sigue con la pieza: el historial no guarda el puerto.
+
+    Una pieza que no midio el motor (`medido_con`) no dice nada del equipo.
+    Caido por falta de energia tambien cuenta: si llego a Despacho, la energia
+    se descarto o una persona decidio mandar a alguien.
+    """
+    from operaciones import diagnostico_optico as optico
+    from operaciones import paso_a_despacho as pad
+
+    m = pad.la_medicion_vigente(pad.ultima_medicion(propuesta),
+                                correcciones=True) or {}
+    return (m.get("medido_con") == pad.MEDIDO_CON
+            and m.get("estado") == optico.CAIDO)
+
+
 def dia_de_la_orden(entro_en, hora_de_corte, ahora, zona):
     """Para que dia sale la orden, o None si no hay hora de corte.
 
@@ -144,7 +202,8 @@ def decidir(org, ahora=None) -> dict:
 
         {"hoy", "hora_de_corte", "porque",   # porque: por que no correria
          "crear":      [{caso, ticket, asunto, plantilla, version, por,
-                         labor, prioridad, para, barrio, zona,
+                         labor, prioridad, nivel, nivel_nombre,
+                         equipo_caido, para, barrio, zona,
                          llamar_al_cliente, corte_de_red}],
          "no_se_crea": [{caso, ticket, asunto, motivo, detalle}],
          "atadas":     [{caso, ticket, asunto, a_caso, a_ticket}]}
@@ -152,6 +211,7 @@ def decidir(org, ahora=None) -> dict:
     En el orden en que se crearon los tickets: el corte de red lo lleva el
     caso mas viejo del puerto que se puede crear.
     """
+    from campo import niveles as N
     from campo import plantillas as P
     from campo.cuadrillas import (
         configuracion_de_reparto,
@@ -187,6 +247,9 @@ def decidir(org, ahora=None) -> dict:
     labores = labor_de_cada_grupo(org)
     nombres = nombres_de_labor(org)
     ofrecidas = P.plantillas_que_se_ofrecen(org)
+    #  El nivel del asunto de cada caso (H-21), leido una vez (26/10/2026).
+    nivel_de = N.lector_de_niveles(org)
+    nombre_del_nivel = {n["codigo"]: n["nombre"] for n in N.niveles_de(org)}
     #  Con o sin tilde: `MapaDeBarrios` (25/10/2026).
     zona_de_barrio = MapaDeBarrios({
         a.localidad: a.zona.nombre
@@ -279,14 +342,24 @@ def decidir(org, ahora=None) -> dict:
             con_orden[puerto] = caso_id
         tipo = version.work_type
         para = dia_de_la_orden(p.revisado_en, corte, ahora, zona_horaria)
+        nivel = nivel_de(caso.name or "")
+        caido = equipo_medido_caido(p)
         salida["crear"].append({
             **fila,
             "plantilla": tipo.nombre,
             "version": str(version.id),
             "por": elegida["por"],
             "labor": nombres.get(tipo.labor, tipo.labor),
-            "prioridad": prioridad_de(caso.created_at, tipo.plazo_dias, hoy,
-                                      zona_horaria),
+            "prioridad": prioridad_del_caso(
+                caso.created_at, nivel=nivel,
+                plazo_de_la_plantilla=tipo.plazo_dias,
+                caido=caido, hoy=hoy, zona=zona_horaria),
+            #  De donde sale la prioridad (26/10/2026): el codigo del nivel del
+            #  asunto ("" si no tiene), su nombre en la empresa, y si la
+            #  medicion mas reciente vio el equipo caido.
+            "nivel": (nivel or {}).get("nivel", ""),
+            "nivel_nombre": nombre_del_nivel.get((nivel or {}).get("nivel"), ""),
+            "equipo_caido": caido,
             "para": para.isoformat() if para else "",
             "barrio": barrio,
             "barrio_de": de_donde,
@@ -568,6 +641,9 @@ def _crear_una(org, propuesta, f, contexto, *, ahora, zona) -> str:
             org=org, orden=orden, tipo="creada_por_el_supervisor", profile=None,
             datos={"tarea": _tarea(), "propuesta": str(fresca.pk),
                    "plantilla_por": f["por"], "prioridad": f["prioridad"],
+                   #  Por que esa prioridad (26/10/2026): el nivel del asunto
+                   #  puede cambiar despues, y la orden tiene que explicarse.
+                   "nivel": f["nivel"], "equipo_caido": f["equipo_caido"],
                    "para": f["para"], "corte_de_red": f["corte_de_red"]})
         pieza = sup._observacion(
             FUENTE_ORDEN, fresca.origen_id,

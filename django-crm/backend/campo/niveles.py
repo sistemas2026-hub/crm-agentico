@@ -32,7 +32,8 @@ LO QUE NO CAMBIA
 La plantilla sigue decidiendo la labor y el formulario del tecnico; un asunto
 sigue en una sola plantilla; las ordenes ya creadas no cambian. Y nadie lee
 esto todavia para crear una orden: la fase 2.3 (el Supervisor crea las ordenes)
-es la que lo va a usar.
+es la que lo va a usar. -- Desde el 26/10/2026 lo usa, para la prioridad de la
+orden: `operaciones.ordenes_de_despacho.prioridad_del_caso`.
 
 SON TRES, Y SON ESTOS TRES (decision N1)
 ----------------------------------------
@@ -55,11 +56,15 @@ Como el resto de `campo` (`campo_labor` incluida): toda consulta filtra por
 
 from __future__ import annotations
 
+import logging
+
 from django.db import DatabaseError, IntegrityError, models, transaction
 from django.utils import timezone
 
 from common.base import BaseModel
 from common.models import Org, Profile
+
+logger = logging.getLogger(__name__)
 
 URGENTE = "urgente"
 NORMAL = "normal"
@@ -362,13 +367,53 @@ def nivel_del_asunto(org, asunto) -> dict | None:
                     .values("nivel", "por", "provisional").first())
     except DatabaseError:
         return None
+    if fila is None:
+        return None
+    return _el_nivel(fila, niveles_de(org))
+
+
+def _el_nivel(fila, niveles: list[dict]) -> dict | None:
+    """Lo que contesta `nivel_del_asunto` para una fila de `NivelDeAsunto`
+    ({nivel, por, provisional}). Una sola regla para el de a uno y para
+    `lector_de_niveles`."""
     if fila is None or (fila["por"] == POR_SUPERVISOR and fila["provisional"]):
         return None
-    nivel = next((n for n in niveles_de(org) if n["codigo"] == fila["nivel"]), None)
+    nivel = next((n for n in niveles if n["codigo"] == fila["nivel"]), None)
     if nivel is None:
         return None
     return {"nivel": nivel["codigo"], "plazo_dias": nivel["plazo_dias"],
             "prioridad": nivel["prioridad"], "por": fila["por"]}
+
+
+def lector_de_niveles(org):
+    """`nivel_del_asunto` para muchos casos a la vez  --  26/10/2026.
+
+    Lee UNA vez las plantillas, los niveles y los asuntos ubicados de la
+    empresa, y devuelve `leer(asunto)`, que contesta lo mismo que
+    `nivel_del_asunto(org, asunto)`. La usan `ordenes_de_despacho.decidir` y
+    el informe de Despacho, que preguntan por cada caso de la cola: de a uno
+    serian tres consultas por caso. Si la base no contesta, `leer` devuelve
+    None para todos, como `nivel_del_asunto` con la base caida.
+    """
+    try:
+        with transaction.atomic():
+            plantillas = asuntos_de_las_plantillas(org)
+            filas = {f["normalizado"]: f for f in NivelDeAsunto.objects
+                     .filter(org=org)
+                     .values("normalizado", "nivel", "por", "provisional")}
+    except DatabaseError as e:
+        #  Sin rastro, todas las ordenes saldrian con la regla del 23/10 y no
+        #  se distinguiria de «ningun asunto tiene nivel» (auditor, 26/10).
+        logger.warning("Niveles: no se pudieron leer los niveles de los "
+                       "asuntos (%s)", type(e).__name__)
+        return lambda asunto: None
+    niveles = niveles_de(org)
+
+    def leer(asunto):
+        clave, _ = asunto_del_ticket(asunto, plantillas)
+        return _el_nivel(filas.get(clave), niveles) if clave else None
+
+    return leer
 
 
 def asuntos_con_nivel(org) -> list[dict]:

@@ -322,3 +322,31 @@ def test_k_la_lista_de_plantillas_trae_el_plazo(admin_client, org_a):
     _plantilla(org_a, "traslado", "Traslado", plazo=3)
     p = admin_client.get("/api/campo/plantillas-de-trabajo/").json()["plantillas"][0]
     assert p["plazo_dias"] == 3
+
+
+def test_j3_la_prioridad_sugerida_lee_el_nivel_y_la_caida(
+        admin_client, org_a, ficha_del_motor):
+    """26/10/2026: la misma regla que el Supervisor al crear, con el nivel del
+    asunto (H-21) y la caida del equipo."""
+    from campo import niveles as N
+    from operaciones import diagnostico_optico as optico
+    from operaciones import paso_a_despacho as pad
+
+    _plantilla(org_a, "traslado", "Traslado", asuntos=["Cambio De Domicilio"],
+               plazo=5)
+    _plantilla(org_a, "soporte", "Soporte", asuntos=["Sin Internet"], plazo=5)
+    N.decidir_por_persona(org_a, "Cambio De Domicilio", N.URGENTE)
+    N.decidir_por_persona(org_a, "Sin Internet", N.PROGRAMABLE)
+    #  Recien creados y con cinco dias de plazo: por la plantilla, baja.
+    urgente = _caso(org_a, name="Cambio De Domicilio - Zoraida Clientela")
+    caido = _caso(org_a, name="Sin Internet")
+    _propuesta(org_a, urgente)
+    p = _propuesta(org_a, caido)
+    p.evidencia = [*p.evidencia, {"fuente": pad.FUENTE_MEDICION,
+                                  "medido_con": pad.MEDIDO_CON,
+                                  "estado": optico.CAIDO}]
+    p.save(update_fields=["evidencia"])
+
+    d = admin_client.get(_ruta(urgente)).json()
+    assert (d["prioridad_sugerida"], d["plantilla_por"]) == ("alta", "asunto")
+    assert admin_client.get(_ruta(caido)).json()["prioridad_sugerida"] == "alta"
