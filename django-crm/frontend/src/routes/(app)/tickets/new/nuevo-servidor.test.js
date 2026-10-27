@@ -10,11 +10,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  */
 
 const createTicket = vi.fn();
+const replyToTicket = vi.fn();
 const crearEnWispHub = vi.fn();
 const ASUNTOS = [{ asunto: 'No Tiene Internet', area: 'soporte_tecnico' }];
 const leerAsuntosWispHub = vi.fn();
 vi.mock('$lib/server/v2/tickets.js', () => ({
   createTicket: (...a) => createTicket(...a),
+  replyToTicket: (...a) => replyToTicket(...a),
   getTicketFormOptions: async () => ({ defaults: {}, accounts: [], contacts: [], people: [] })
 }));
 vi.mock('$lib/server/v2/ticket-desde-dexter.js', () => ({
@@ -25,7 +27,7 @@ vi.mock('$lib/server/v2/form-errors.js', () => ({ readableError: (_e, m) => m })
 
 const { actions, load } = await import('./+page.server.js');
 
-/** @param {Record<string, string>} campos */
+/** @param {Record<string, any>} campos */
 function evento(campos) {
   const fd = new FormData();
   for (const [k, v] of Object.entries(campos)) fd.set(k, v);
@@ -57,6 +59,8 @@ describe('Nuevo ticket', () => {
     createTicket.mockReset();
     crearEnWispHub.mockReset();
     createTicket.mockResolvedValue({ id: 'caso-1' });
+    replyToTicket.mockReset();
+    replyToTicket.mockResolvedValue({});
     leerAsuntosWispHub.mockReset();
     leerAsuntosWispHub.mockResolvedValue(ASUNTOS);
   });
@@ -101,6 +105,42 @@ describe('Nuevo ticket', () => {
     expect(createTicket).toHaveBeenCalledTimes(1);
     expect(crearEnWispHub).not.toHaveBeenCalled();
     expect(r.destino).toBe('/tickets/caso-1');
+  });
+
+  //  ADJUNTO  --  27/10/2026
+  const archivo = (bytes = 10) => new File([new Uint8Array(bytes)], 'foto.jpg', { type: 'image/jpeg' });
+
+  it('sin archivo no sube nada', async () => {
+    await correr(BASE);
+    expect(replyToTicket).not.toHaveBeenCalled();
+  });
+
+  it('el archivo se sube al caso YA creado, sin texto (no es una respuesta)', async () => {
+    crearEnWispHub.mockResolvedValue({ ok: true, idTicket: '95001', vinculado: true });
+    const r = await correr({ ...CON_WISPHUB, attachment: archivo() });
+    const [, caso, envio] = replyToTicket.mock.calls[0];
+    expect(caso).toBe('caso-1');
+    expect(envio.body).toBe('');
+    expect(envio.file.name).toBe('foto.jpg');
+    expect(createTicket.mock.invocationCallOrder[0]).toBeLessThan(
+      replyToTicket.mock.invocationCallOrder[0]
+    );
+    expect(r.destino).toBe('/tickets/caso-1?wisphub=95001');
+  });
+
+  it('si el archivo no sube, el ticket queda y el detalle lo dice', async () => {
+    replyToTicket.mockRejectedValue(new Error('x'));
+    const r = await correr({ ...BASE, attachment: archivo() });
+    const destino = new URL(`http://x${r.destino}`);
+    expect(destino.pathname).toBe('/tickets/caso-1');
+    expect(destino.searchParams.get('adjunto_error')).toBe('No se pudo subir el archivo.');
+  });
+
+  it('un archivo de mas de 25 MB no crea nada', async () => {
+    const r = await correr({ ...BASE, attachment: archivo(25 * 1024 * 1024 + 1) });
+    expect(createTicket).not.toHaveBeenCalled();
+    expect(replyToTicket).not.toHaveBeenCalled();
+    expect(r.resultado.data.error).toMatch(/25 MB/);
   });
 
   it('si el motor no contesta los asuntos, no crea nada y dice como seguir', async () => {

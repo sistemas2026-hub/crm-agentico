@@ -1,5 +1,9 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { createTicket, getTicketFormOptions } from '$lib/server/v2/tickets.js';
+import { createTicket, getTicketFormOptions, replyToTicket } from '$lib/server/v2/tickets.js';
+
+//  El mismo tope que el CRM (common/utils.py, ATTACHMENT_MAX_BYTES): pasado
+//  eso el archivo se rechaza ANTES de crear el ticket, no despues.
+const ADJUNTO_MAX_BYTES = 25 * 1024 * 1024;
 import { readableError } from '$lib/server/v2/form-errors.js';
 import { leerAsuntosWispHub, crearEnWispHub } from '$lib/server/v2/ticket-desde-dexter.js';
 
@@ -45,8 +49,15 @@ export const actions = {
     };
     const eco = { ...values, en_wisphub: enWispHub, servicio: wisphub.servicio };
 
+    const elegido = form.get('attachment');
+    const adjunto =
+      elegido && typeof elegido === 'object' && 'size' in elegido && elegido.size > 0 ? elegido : null;
+
     if (!values.name) {
       return fail(400, { values: eco, error: 'Un ticket necesita un asunto.' });
+    }
+    if (adjunto && adjunto.size > ADJUNTO_MAX_BYTES) {
+      return fail(400, { values: eco, error: 'El archivo pesa más de 25 MB. Elegí uno más liviano.' });
     }
     //  El asunto sale de la lista de WispHub CON la casilla o SIN ella
     //  (decision del usuario, 27/10/2026: que Dexter no tenga asuntos
@@ -81,20 +92,36 @@ export const actions = {
     if (!created?.id) redirect(303, '/tickets');
 
     //  El caso YA existe (guardar primero, entregar despues). Pase lo que pase
-    //  con WispHub se va al ticket, y la pantalla del ticket dice el resultado.
-    if (!enWispHub) redirect(303, `/tickets/${created.id}`);
-    const r = /** @type {any} */ (await crearEnWispHub(locals, fetch, created.id, {
-      servicio: wisphub.servicio,
-      asunto: wisphub.asunto,
-      descripcion: values.description
-    }));
+    //  con el adjunto o con WispHub se va al ticket, y la pantalla del ticket
+    //  dice el resultado.
     const p = new URLSearchParams();
-    if (r.ok) {
-      p.set('wisphub', r.idTicket);
-      if (!r.vinculado) p.set('wisphub_sin_atar', '1');
-    } else {
-      p.set('wisphub_error', r.motivo);
+
+    //  ADJUNTO  --  27/10/2026. Se sube al caso ya creado, por el mismo camino
+    //  que el adjunto de una respuesta (CaseDetailView.post lo guarda aparte
+    //  del comentario: sin texto no hay comentario, ni primera respuesta).
+    //  Queda en Dexter; a WispHub no viaja -- ese envio no esta verificado.
+    if (adjunto) {
+      try {
+        await replyToTicket({ cookies }, created.id, { body: '', file: adjunto });
+      } catch (/** @type {any} */ err) {
+        p.set('adjunto_error', readableError(err, 'No se pudo subir el archivo.'));
+      }
     }
-    redirect(303, `/tickets/${created.id}?${p}`);
+
+    if (enWispHub) {
+      const r = /** @type {any} */ (await crearEnWispHub(locals, fetch, created.id, {
+        servicio: wisphub.servicio,
+        asunto: wisphub.asunto,
+        descripcion: values.description
+      }));
+      if (r.ok) {
+        p.set('wisphub', r.idTicket);
+        if (!r.vinculado) p.set('wisphub_sin_atar', '1');
+      } else {
+        p.set('wisphub_error', r.motivo);
+      }
+    }
+    const q = p.toString();
+    redirect(303, `/tickets/${created.id}${q ? `?${q}` : ''}`);
   }
 };

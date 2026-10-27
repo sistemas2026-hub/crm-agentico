@@ -43,8 +43,13 @@ FROM node:24-slim AS prod
 
 WORKDIR /app
 
+# BODY_SIZE_LIMIT: adapter-node corta todo envio de mas de 512K si nadie lo
+# fija (medido en files/handler.js, 27/10/2026), y una foto de celular pesa
+# mas. El CRM acepta hasta 25 MB por adjunto (common/utils.py,
+# ATTACHMENT_MAX_BYTES); 26M deja lugar al resto del formulario.
 ENV NODE_ENV=production \
-    PORT=3000
+    PORT=3000 \
+    BODY_SIZE_LIMIT=26M
 
 COPY --from=build /app/build ./build
 COPY --from=build /app/node_modules ./node_modules

@@ -116,7 +116,13 @@
 </PageHeader>
 
 <div class="v2-scroll v2-pad" style="padding-top:18px">
-  <form class="v2-form" method="POST" action="?/create" use:enhance={check} novalidate>
+  <form
+    class="v2-form"
+    method="POST"
+    action="?/create"
+    enctype="multipart/form-data"
+    use:enhance={check}
+    novalidate>
     {#if result?.error}
       <div
         class="v2-next"
@@ -279,6 +285,12 @@
         class="v2-input"
         rows="4"
         bind:value={form.description}></textarea>
+    </div>
+
+    <div class="v2-field">
+      <label for="f-adjunto">Adjuntar documento</label>
+      <input id="f-adjunto" name="attachment" type="file" class="v2-input" />
+      <p class="v2-hint">Opcional, hasta 25 MB. Queda en el ticket de Dexter.</p>
     </div>
 
     <div class="actions">

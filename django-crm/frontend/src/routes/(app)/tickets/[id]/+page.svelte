@@ -60,6 +60,9 @@
     if (error) return { tono: 'clay', texto: `El ticket quedó solo en Dexter. ${error}` };
     return null;
   });
+  //  El adjunto de "Nuevo ticket" se sube despues de crear el caso: si falla,
+  //  el ticket existe igual y esto lo dice (27/10/2026).
+  let avisoAdjunto = $derived(page.url.searchParams.get('adjunto_error'));
 
   let { ticket, conversation, articles, alsoOpen, contacts, attachments, activity, canReply } =
     $derived(data);
@@ -539,6 +542,16 @@
             style="padding:10px 13px;margin-bottom:16px;font-size:13px;border-left:3px solid var(--v2-{avisoWispHub.tono})"
           >
             {avisoWispHub.texto}
+          </p>
+        {/if}
+        {#if avisoAdjunto}
+          <p
+            class="v2-card"
+            role="status"
+            style="padding:10px 13px;margin-bottom:16px;font-size:13px;border-left:3px solid var(--v2-clay)"
+          >
+            El ticket se creó, pero el archivo no se adjuntó: {avisoAdjunto} Podés subirlo desde la
+            respuesta de abajo.
           </p>
         {/if}
         {#if form?.error}
