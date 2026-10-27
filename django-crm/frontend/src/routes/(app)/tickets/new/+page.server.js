@@ -48,19 +48,23 @@ export const actions = {
     if (!values.name) {
       return fail(400, { values: eco, error: 'Un ticket necesita un asunto.' });
     }
+    //  El asunto sale de la lista de WispHub CON la casilla o SIN ella
+    //  (decision del usuario, 27/10/2026: que Dexter no tenga asuntos
+    //  distintos a los del ISP). Sin lista -- la empresa no la habilito o el
+    //  motor no contesto -- solo se puede crear aca, con texto libre.
+    const habilitados = await leerAsuntosWispHub(locals, fetch);
+    if (enWispHub && !habilitados.length) {
+      return fail(400, {
+        values: eco,
+        error: 'No se pudo hablar con WispHub ahora. Desmarcá la casilla para crearlo solo en Dexter.'
+      });
+    }
+    if (habilitados.length && !habilitados.some((/** @type {any} */ a) => a.asunto === values.name)) {
+      return fail(400, { values: eco, error: 'Elegí el asunto de la lista de WispHub.' });
+    }
     if (enWispHub) {
       if (!/^\d{1,12}$/.test(wisphub.servicio)) {
         return fail(400, { values: eco, error: 'El número de servicio de WispHub va solo con dígitos.' });
-      }
-      const habilitados = await leerAsuntosWispHub(locals, fetch);
-      if (!habilitados.length) {
-        return fail(400, {
-          values: eco,
-          error: 'No se pudo hablar con WispHub ahora. Desmarcá la casilla para crearlo solo en Dexter.'
-        });
-      }
-      if (!habilitados.some((/** @type {any} */ a) => a.asunto === wisphub.asunto)) {
-        return fail(400, { values: eco, error: 'Elegí el asunto de la lista de WispHub.' });
       }
       if (!values.description) {
         return fail(400, { values: eco, error: 'Para crearlo en WispHub hace falta contar qué pasó.' });

@@ -38,21 +38,16 @@
    */
   /*
    * 27/10/2026: la casilla viene MARCADA -- lo normal es que un ticket del
-   * ISP viva tambien en WispHub -- y con ella el asunto se elige de la lista
-   * de WispHub en vez de escribirse: un solo campo, el mismo nombre alla y
-   * aca, como los tickets importados. Desmarcada, el asunto vuelve a ser
-   * texto libre y el ticket queda solo en Dexter.
+   * ISP viva tambien en WispHub. Y el asunto se elige SIEMPRE de la lista de
+   * WispHub, con la casilla o sin ella: decision del usuario, para que Dexter
+   * no tenga asuntos distintos a los del ISP. Texto libre solo si la empresa
+   * no tiene asuntos habilitados (o el motor no los mando).
    */
   let enWispHub = $state(
     untrack(() => (result?.values ? result.values.en_wisphub === true : true))
   );
   let servicio = $state(untrack(() => result?.values?.servicio ?? ''));
-  let usaWispHub = $derived(enWispHub && (data.asuntosWispHub?.length ?? 0) > 0);
-  /** Al pasar a la lista, un asunto escrito a mano que no esta en ella se vacia. */
-  function alCambiarWispHub() {
-    if (enWispHub && !(data.asuntosWispHub ?? []).some((/** @type {any} */ a) => a.asunto === form.name))
-      form.name = '';
-  }
+  let usaWispHub = $derived((data.asuntosWispHub?.length ?? 0) > 0);
   /** @type {any} */
   let titular = $state(null);
   let verificando = $state(false);
@@ -85,7 +80,7 @@
     /** @type {Record<string, string>} */
     const e = {};
     const name = form.name.trim();
-    if (!name) e.name = usaWispHub ? 'Elegí el asunto de WispHub.' : 'Un ticket necesita un asunto.';
+    if (!name) e.name = usaWispHub ? 'Elegí el asunto de la lista.' : 'Un ticket necesita un asunto.';
     // `Case.name` is max_length=64, short for a subject line, but it is the
     // column, and a 65th character is a 400 from the serializer.
     else if (name.length > 64)
@@ -143,8 +138,7 @@
             type="checkbox"
             name="en_wisphub"
             value="1"
-            bind:checked={enWispHub}
-            onchange={alCambiarWispHub} />
+            bind:checked={enWispHub} />
           Crear también en WispHub
         </label>
         {#if enWispHub}
@@ -211,7 +205,7 @@
       {#if show('name')}
         <p class="v2-error">{errors.name}</p>
       {:else if usaWispHub}
-        <p class="v2-hint">Los asuntos de WispHub. El ticket se llama igual allá y acá.</p>
+        <p class="v2-hint">Los mismos asuntos de WispHub, aunque el ticket quede solo en Dexter.</p>
       {/if}
     </div>
 

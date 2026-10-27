@@ -47,9 +47,10 @@ async function correr(campos) {
   }
 }
 
-const BASE = { name: 'Sin internet', description: 'El cliente llamo: sin internet.' };
-//  27/10/2026: con la casilla, el asunto del ticket ES el de WispHub ('name').
-const CON_WISPHUB = { ...BASE, name: 'No Tiene Internet', en_wisphub: '1', servicio: '5832' };
+//  27/10/2026: el asunto del ticket ES uno de la lista de WispHub ('name'),
+//  con la casilla o sin ella.
+const BASE = { name: 'No Tiene Internet', description: 'El cliente llamo: sin internet.' };
+const CON_WISPHUB = { ...BASE, en_wisphub: '1', servicio: '5832' };
 
 describe('Nuevo ticket', () => {
   beforeEach(() => {
@@ -86,6 +87,20 @@ describe('Nuevo ticket', () => {
     expect(r.resultado.data.error).toMatch(mensaje);
     // Lo que se escribio vuelve, para no tener que tipearlo de nuevo.
     expect(r.resultado.data.values.en_wisphub).toBe(true);
+  });
+
+  it('sin la casilla, un asunto fuera de la lista tampoco crea nada', async () => {
+    const r = await correr({ ...BASE, name: 'Un asunto inventado' });
+    expect(createTicket).not.toHaveBeenCalled();
+    expect(r.resultado.data.error).toMatch(/lista de WispHub/);
+  });
+
+  it('sin lista (motor sin contestar) y sin la casilla, se crea solo aca con texto libre', async () => {
+    leerAsuntosWispHub.mockResolvedValue([]);
+    const r = await correr({ ...BASE, name: 'Un asunto escrito a mano' });
+    expect(createTicket).toHaveBeenCalledTimes(1);
+    expect(crearEnWispHub).not.toHaveBeenCalled();
+    expect(r.destino).toBe('/tickets/caso-1');
   });
 
   it('si el motor no contesta los asuntos, no crea nada y dice como seguir', async () => {
