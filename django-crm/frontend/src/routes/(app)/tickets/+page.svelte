@@ -221,6 +221,26 @@
   {#if form?.error}
     <p class="aviso-accion" role="alert">{form.error}</p>
   {/if}
+  <!-- LAS AREAS A LA VISTA, UNA PESTAÑA CADA UNA  --  27/10/2026, pedido del
+       usuario: «no están saliendo separados por soporte, operativo, ventas,
+       cartera, administración». Desde el 24/10 la separacion vivia en un
+       selector que nadie abria, y la cola arrancaba en «Todas las áreas»
+       mezclada. Son enlaces y no un formulario: funcionan sin JS, conservan
+       los demas filtros (hrefCon) y cada uno dice cuantos tiene. -->
+  {#if !data.soloMiArea && (data.selectorAreas ?? []).length > 1}
+    <nav class="areas-cola" aria-label="Área">
+      {#each data.selectorAreas as a (a.nombre)}
+        <a
+          class="vista"
+          href={hrefCon('area', a.nombre)}
+          aria-current={data.areaElegida === a.nombre ? 'page' : undefined}
+        >
+          {a.etiqueta}
+          {#if a.total != null}<span class="v2-num">{count(a.total)}</span>{/if}
+        </a>
+      {/each}
+    </nav>
+  {/if}
   <div class="barra-cola">
     <div class="vistas" role="group" aria-label="De quién">
       {#each VISTAS as v (v.clave)}
@@ -238,28 +258,6 @@
 
     {#if data.soloMiArea}
       <span class="area-fija">Área: <b>{etiquetaDeArea[data.areaElegida] ?? data.areaElegida}</b></span>
-    {:else if (data.selectorAreas ?? []).length > 1}
-      <!-- Un formulario GET y no un menu armado a mano: funciona sin JS, se
-           puede compartir el enlace que deja, y conserva los demas filtros
-           (los campos ocultos). Con JS se envia solo al elegir. -->
-      <form method="GET" class="area-form">
-        {#each [...page.url.searchParams.entries()] as [k, val] (k + val)}
-          {#if k !== 'area' && k !== 'offset'}<input type="hidden" name={k} value={val} />{/if}
-        {/each}
-        <label for="area-cola">Área</label>
-        <select
-          id="area-cola"
-          name="area"
-          class="v2-input area-select"
-          value={data.areaElegida}
-          onchange={(e) => e.currentTarget.form?.requestSubmit()}
-        >
-          {#each data.selectorAreas as a (a.nombre)}
-            <option value={a.nombre}>{a.etiqueta}{a.total != null ? ` (${a.total})` : ''}</option>
-          {/each}
-        </select>
-        <noscript><button class="v2-btn v2-btn-sm" type="submit">Ver</button></noscript>
-      </form>
     {/if}
 
     <div class="orden" role="group" aria-label="Orden">
@@ -362,8 +360,16 @@
                     {#if t.external_client_name || asunto.cliente}{t.external_client_name || asunto.cliente} &middot; {/if}
                     {#if t.external_ticket_id}<span class="v2-num">#{t.external_ticket_id}</span>
                     {:else if asunto.id}<span class="v2-num">{asunto.id}</span>{/if}
-                    {#if t.area && etiquetaDeArea[t.area]} &middot; {etiquetaDeArea[t.area]}{/if}
                     &middot; hace {shortAge(t.opened_at)}
+                  </span>
+                  <!-- El area SIEMPRE, como etiqueta (27/10/2026): en «Todas las
+                       áreas» es lo que separa una fila de la otra. Antes solo
+                       salia si el asistente habia mandado el nombre del area, y
+                       un caso sin area no decia nada. -->
+                  <span class="area-etiqueta" data-sin-area={!t.area || t.area === data.sinArea}>
+                    {!t.area || t.area === data.sinArea
+                      ? 'Sin área'
+                      : (etiquetaDeArea[t.area] ?? t.area.replaceAll('_', ' '))}
                   </span>
                 </td>
                 <td data-m="hide">
@@ -510,18 +516,25 @@
     border-color: var(--v2-ink);
     color: var(--v2-paper);
   }
-  .area-form {
+  .areas-cola {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12.5px;
-    color: var(--v2-slate);
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 14px var(--v2-pad) 0;
   }
-  .area-select {
-    width: auto;
-    min-height: 34px;
-    padding: 4px 10px;
-    font-size: 13px;
+  .area-etiqueta {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--v2-line-strong);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--v2-ink);
+  }
+  .area-etiqueta[data-sin-area='true'] {
+    color: var(--v2-slate);
+    border-style: dashed;
   }
   .area-fija {
     font-size: 13px;
