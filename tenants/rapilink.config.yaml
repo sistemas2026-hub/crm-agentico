@@ -4169,6 +4169,48 @@ herramientas:
     auth_ref: IMPORTACION_API_TOKEN
     auth_esquema: Bearer
 
+  # El documento de "Nuevo ticket" viaja al ticket de WispHub (27/10/2026).
+  #
+  # Es el mismo camino que 'completar_ticket_instalacion', verificado en
+  # produccion el 09/09/2026: PATCH multipart sobre el ticket YA creado, con
+  # 'archivo_ticket' y un campo comun al lado (con el archivo solo, 500). Sin
+  # las fechas estimadas: esas son de instalacion.
+  #
+  # LO QUE SE SUBE QUEDA PUBLICO. Medido de nuevo el 27/10/2026 sobre el
+  # ticket 94222: sus 6 adjuntos (un PDF de solicitud y 5 capturas) se
+  # descargan de avisos.wisphub.io/media/ con HTTP 200 SIN ninguna
+  # credencial, y la API no los borra. El usuario lo decidio con esa medicion
+  # sobre la mesa: el adjunto va, y el formulario NO muestra un aviso. El
+  # motor si le cambia el nombre por uno aleatorio (el original puede traer
+  # el nombre de una persona y queda en la URL).
+  - nombre: adjuntar_archivo_ticket
+    tipo: http
+    adjunta_archivo_ticket: true
+    descripcion: >
+      Adjunta un archivo a un ticket de WispHub ya creado. NO la llames tu: la
+      ejecuta el codigo al crear el ticket desde "Nuevo ticket".
+    solo_lectura: false
+    requiere_confirmacion: true
+    # Igual que su hermana de instalacion (M06-E): no puede salir por la
+    # puerta autonoma. Por la humana -- una persona que llena el formulario --
+    # si.
+    aprobacion_humana: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/
+    metodo: PATCH
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    multipart: true
+    # El campo acompañante sin el cual el endpoint devuelve 500. Inventado a
+    # proposito: WispHub lo ignora y asi no se pisa ningun dato del ticket.
+    argumentos_fijos:
+      _adjunto: "1"
+    argumentos_archivo: [archivo_ticket]
+    argumentos_sobrescribibles: [id_ticket, archivo_ticket]
+    filtros_verificados: {}
+
   - nombre: consultar_ticket_por_id
     tipo: http
     # Capacidad de la cola (B4): leer antes de cerrar.

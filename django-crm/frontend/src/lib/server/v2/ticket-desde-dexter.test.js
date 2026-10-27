@@ -42,6 +42,19 @@ describe('crearEnWispHub', () => {
     expect('external_ticket_id' in pedidos[0].cuerpo).toBe(false);
   });
 
+  it('el archivo viaja al motor y la respuesta dice si llego al ISP', async () => {
+    const fetch = /** @type {any} */ (async (url, init) => {
+      pedidos.push({ url, cuerpo: JSON.parse(init.body) });
+      return respuesta(201, { id_ticket: '95001', vinculado: true, adjunto: false });
+    });
+    const archivo = { nombre: 'foto.jpg', tipo: 'image/jpeg', base64: 'anBn' };
+    const r = await crearEnWispHub(locals, fetch, 'caso-1', {
+      servicio: '5832', asunto: 'No Tiene Internet', descripcion: 'x', archivo
+    });
+    expect(pedidos[0].cuerpo.archivo).toEqual(archivo);
+    expect(r).toEqual({ ok: true, idTicket: '95001', vinculado: true, adjunto: false });
+  });
+
   it('traduce el motivo del motor', async () => {
     const fetch = /** @type {any} */ (async () => respuesta(404, { error: 'SERVICIO_NO_EXISTE' }));
     const r = await crearEnWispHub(locals, fetch, 'caso-1', { servicio: '1', asunto: 'a', descripcion: 'x' });

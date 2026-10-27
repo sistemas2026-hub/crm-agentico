@@ -128,6 +128,28 @@ describe('Nuevo ticket', () => {
     expect(r.destino).toBe('/tickets/caso-1?wisphub=95001');
   });
 
+  it('con la casilla, el archivo TAMBIEN va al ticket de WispHub, en base64', async () => {
+    crearEnWispHub.mockResolvedValue({ ok: true, idTicket: '95001', vinculado: true, adjunto: true });
+    const bytes = new Uint8Array([104, 111, 108, 97]);
+    const f = new File([bytes], 'foto.jpg', { type: 'image/jpeg' });
+    const r = await correr({ ...CON_WISPHUB, attachment: f });
+    const datos = crearEnWispHub.mock.calls[0][3];
+    expect(datos.archivo).toEqual({ nombre: 'foto.jpg', tipo: 'image/jpeg', base64: 'aG9sYQ==' });
+    expect(r.destino).toBe('/tickets/caso-1?wisphub=95001');
+  });
+
+  it('sin la casilla, el archivo queda solo en Dexter', async () => {
+    await correr({ ...BASE, attachment: archivo() });
+    expect(replyToTicket).toHaveBeenCalledTimes(1);
+    expect(crearEnWispHub).not.toHaveBeenCalled();
+  });
+
+  it('si el archivo no llego a WispHub, el detalle lo dice', async () => {
+    crearEnWispHub.mockResolvedValue({ ok: true, idTicket: '95001', vinculado: true, adjunto: false });
+    const r = await correr({ ...CON_WISPHUB, attachment: archivo() });
+    expect(r.destino).toBe('/tickets/caso-1?wisphub=95001&wisphub_sin_adjunto=1');
+  });
+
   it('si el archivo no sube, el ticket queda y el detalle lo dice', async () => {
     replyToTicket.mockRejectedValue(new Error('x'));
     const r = await correr({ ...BASE, attachment: archivo() });

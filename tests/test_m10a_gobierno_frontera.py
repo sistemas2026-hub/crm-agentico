@@ -147,6 +147,10 @@ R2_REGISTRO_EXTERNO = {
     #  R2 como sus hermanas de importacion: registra en el CRM, no toca un
     #  equipo ni dinero, y no pisa un vinculo existente (409).
     "vincular_caso_externo",
+    #  27/10/2026: 'adjuntar_archivo_ticket' sube el documento de "Nuevo
+    #  ticket" al ticket de WispHub ya creado. R2 como su hermana de
+    #  instalacion de abajo: mismo PATCH, sin las fechas.
+    "adjuntar_archivo_ticket",
     "completar_ticket_instalacion",
     "crear_caso_soporte",
     "crear_tag_crm",

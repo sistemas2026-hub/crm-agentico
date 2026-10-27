@@ -28,11 +28,21 @@ reenvio no crea dos tickets, devuelve el que ya se creo.
 
 SIN LA HERRAMIENTA DE VINCULO NO SE CREA NADA. Un ticket sin atar es peor que
 no tenerlo: la importacion lo traeria duplicado.
+
+EL ADJUNTO (27/10/2026), si viene, va DESPUES de atar, al ticket ya creado
+('adjunta_archivo_ticket'). Si falla, el ticket ya existe y el resultado lo
+dice ('adjunto': False): el archivo es una comodidad, no el ticket. Lo que se
+sube al ISP puede quedar publico (ver la herramienta en la config del tenant),
+asi que el nombre original no viaja: va uno aleatorio con su extension.
 ================================================================================
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
+import uuid
+from pathlib import PurePath
 from types import SimpleNamespace
 
 from nucleo.herramientas import http as ejecutor_http
@@ -42,6 +52,9 @@ from nucleo.seguimiento import agendamiento, importacion_io
 from nucleo.seguridad import frontera
 
 ORIGEN = "ticket_desde_dexter"
+# El mismo tope que el CRM para un adjunto (common/utils.py,
+# ATTACHMENT_MAX_BYTES): lo que el CRM acepto, aca no se rechaza.
+ADJUNTO_MAX_BYTES = 25 * 1024 * 1024
 
 
 class TicketNoCreado(Exception):
@@ -70,6 +83,54 @@ def _servicio(servicio) -> str:
     return s
 
 
+def _adjunto(archivo) -> dict | None:
+    """
+    El archivo como lo pide 'argumentos_archivo' ({nombre, tipo, base64}), ya
+    validado, o None si no vino. Se valida ANTES de escribir nada afuera: un
+    base64 roto no tiene que dejar un ticket creado y el archivo perdido.
+    """
+    if not archivo:
+        return None
+    if not isinstance(archivo, dict) or not isinstance(archivo.get("base64"), str):
+        raise TicketNoCreado("ADJUNTO_INVALIDO")
+    try:
+        crudo = base64.b64decode(archivo["base64"], validate=True)
+    except (binascii.Error, ValueError):
+        raise TicketNoCreado("ADJUNTO_INVALIDO")
+    if not crudo:
+        raise TicketNoCreado("ADJUNTO_INVALIDO")
+    if len(crudo) > ADJUNTO_MAX_BYTES:
+        raise TicketNoCreado("ADJUNTO_MUY_GRANDE")
+    extension = PurePath(str(archivo.get("nombre") or "")).suffix.lower()
+    if not extension[1:].isalnum() or len(extension) > 8:
+        extension = ""
+    return {"nombre": f"adjunto-{uuid.uuid4().hex}{extension}",
+            "tipo": str(archivo.get("tipo") or "application/octet-stream")[:100],
+            "base64": archivo["base64"]}
+
+
+def _adjuntar(config, tenant, caso_id, servicio, id_ticket, adjunto, autor) -> bool:
+    """Sube el adjunto al ticket ya creado. False si no se pudo (y se registra)."""
+    herramienta = _herramienta(config, "adjunta_archivo_ticket")
+    if herramienta is None:
+        registrar("ticket_desde_dexter", "sin herramienta para adjuntar: el archivo queda en el CRM",
+                  caso_id=id_interno(caso_id))
+        return False
+    try:
+        with frontera.puerta(tenant, herramienta.nombre, actor=autor,
+                             evidencia=f"caso:{caso_id}", origen=ORIGEN):
+            _ejecutar_tool(
+                herramienta, SimpleNamespace(id_cliente=servicio), {}, tenant,
+                variables_tenant=config.variables_tenant,
+                sobrescribir={"id_ticket": str(id_ticket), "archivo_ticket": adjunto},
+                origen=f"{ORIGEN}:{caso_id}:adjunto", aprobada_por_humano=True)
+        return True
+    except Exception as e:                                       # noqa: BLE001
+        registrar("ticket_desde_dexter", "el ticket se creo pero el archivo no se adjunto",
+                  caso_id=id_interno(caso_id), error=e)
+        return False
+
+
 def titular(config, tenant: str, servicio) -> dict | None:
     """
     Nombre y estado del titular del servicio, para que quien llena el
@@ -87,15 +148,18 @@ def titular(config, tenant: str, servicio) -> dict | None:
 
 
 def crear(config, tenant: str, caso_id: str, servicio, asunto: str,
-          descripcion: str, autor: str) -> dict:
+          descripcion: str, autor: str, archivo: dict | None = None) -> dict:
     """
-    Crea el ticket del caso en el ISP y ata el caso a el.
+    Crea el ticket del caso en el ISP, ata el caso a el, y le adjunta el
+    archivo si vino uno.
 
-    Devuelve {'id_ticket', 'vinculado'}. 'vinculado' en False significa que el
-    ticket SI se creo pero el caso no quedo atado (otro caso ya tenia ese
-    ticket, el CRM no contesto): la pantalla lo dice, porque es justo el caso
-    que la importacion podria duplicar. Lanza TicketNoCreado si no se creo.
+    Devuelve {'id_ticket', 'vinculado'}, mas 'adjunto' (bool) si vino archivo.
+    'vinculado' en False significa que el ticket SI se creo pero el caso no
+    quedo atado (otro caso ya tenia ese ticket, el CRM no contesto): la
+    pantalla lo dice, porque es justo el caso que la importacion podria
+    duplicar. Lanza TicketNoCreado si no se creo.
     """
+    adjunto = _adjunto(archivo)
     elegido = next((a for a in config.tickets_desde_dexter.asuntos
                     if a.asunto == (asunto or "")), None)
     if elegido is None:
@@ -171,4 +235,7 @@ def crear(config, tenant: str, caso_id: str, servicio, asunto: str,
     except Exception as e:                                       # noqa: BLE001
         registrar("ticket_desde_dexter", "el ticket se creo pero el caso no quedo atado",
                   caso_id=id_interno(caso_id), error=e)
-    return {"id_ticket": str(id_ticket), "vinculado": vinculado}
+    resultado = {"id_ticket": str(id_ticket), "vinculado": vinculado}
+    if adjunto is not None:
+        resultado["adjunto"] = _adjuntar(config, tenant, caso_id, s, id_ticket, adjunto, autor)
+    return resultado

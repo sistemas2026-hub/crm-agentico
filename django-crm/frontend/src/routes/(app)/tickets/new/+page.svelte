@@ -290,7 +290,9 @@
     <div class="v2-field">
       <label for="f-adjunto">Adjuntar documento</label>
       <input id="f-adjunto" name="attachment" type="file" class="v2-input" />
-      <p class="v2-hint">Opcional, hasta 25 MB. Queda en el ticket de Dexter.</p>
+      <p class="v2-hint">
+        Opcional, hasta 25 MB. Queda en el ticket{enWispHub && usaWispHub ? ' y también va a WispHub' : ''}.
+      </p>
     </div>
 
     <div class="actions">

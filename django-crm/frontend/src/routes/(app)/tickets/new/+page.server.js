@@ -99,7 +99,7 @@ export const actions = {
     //  ADJUNTO  --  27/10/2026. Se sube al caso ya creado, por el mismo camino
     //  que el adjunto de una respuesta (CaseDetailView.post lo guarda aparte
     //  del comentario: sin texto no hay comentario, ni primera respuesta).
-    //  Queda en Dexter; a WispHub no viaja -- ese envio no esta verificado.
+    //  Con la casilla, ademas viaja al ticket de WispHub (abajo).
     if (adjunto) {
       try {
         await replyToTicket({ cookies }, created.id, { body: '', file: adjunto });
@@ -109,14 +109,26 @@ export const actions = {
     }
 
     if (enWispHub) {
+      //  El archivo tambien va al ticket de WispHub (decision del usuario,
+      //  27/10/2026). En base64 porque el puente con el motor es JSON, como
+      //  la orden de instalacion (solicitudes/entrega.py).
+      const archivo = adjunto
+        ? {
+            nombre: adjunto.name,
+            tipo: adjunto.type || 'application/octet-stream',
+            base64: Buffer.from(await adjunto.arrayBuffer()).toString('base64')
+          }
+        : undefined;
       const r = /** @type {any} */ (await crearEnWispHub(locals, fetch, created.id, {
         servicio: wisphub.servicio,
         asunto: wisphub.asunto,
-        descripcion: values.description
+        descripcion: values.description,
+        ...(archivo ? { archivo } : {})
       }));
       if (r.ok) {
         p.set('wisphub', r.idTicket);
         if (!r.vinculado) p.set('wisphub_sin_atar', '1');
+        if (r.adjunto === false) p.set('wisphub_sin_adjunto', '1');
       } else {
         p.set('wisphub_error', r.motivo);
       }

@@ -26,6 +26,8 @@ export const MOTIVOS = /** @type {Record<string, string>} */ ({
   ISP_NO_CONTESTA: 'WispHub no respondió.',
   NO_SE_CREO: 'WispHub no aceptó el ticket.',
   SIN_ID_DE_TICKET: 'WispHub no devolvió el número del ticket.',
+  ADJUNTO_INVALIDO: 'El archivo no se pudo leer.',
+  ADJUNTO_MUY_GRANDE: 'El archivo pesa más de 25 MB.',
   INCIERTO:
     'No se pudo confirmar si quedó creado en WispHub. Si en unos minutos el ticket muestra «WispHub #…» arriba, quedó creado; si no, avisá a un administrador antes de crearlo de nuevo.'
 });
@@ -92,8 +94,13 @@ export async function titularDelServicio(locals, fetch, servicio) {
  * @param {App.Locals} locals
  * @param {typeof globalThis.fetch} fetch
  * @param {string} casoId
- * @param {{servicio: string, asunto: string, descripcion: string}} datos
- * @returns {Promise<{ok: true, idTicket: string, vinculado: boolean} | {ok: false, motivo: string}>}
+ * 'archivo' (27/10/2026) va al ticket ya creado, del otro lado. 'adjunto' en
+ * la respuesta: true si llego, false si el ticket se creo pero el archivo no,
+ * ausente si no se mando ninguno.
+ *
+ * @param {{servicio: string, asunto: string, descripcion: string,
+ *   archivo?: {nombre: string, tipo: string, base64: string}}} datos
+ * @returns {Promise<{ok: true, idTicket: string, vinculado: boolean, adjunto?: boolean} | {ok: false, motivo: string}>}
  */
 export async function crearEnWispHub(locals, fetch, casoId, datos) {
   const d = await destino(locals, fetch);
@@ -107,13 +114,20 @@ export async function crearEnWispHub(locals, fetch, casoId, datos) {
         servicio: datos.servicio,
         asunto: datos.asunto,
         descripcion: datos.descripcion,
+        ...(datos.archivo ? { archivo: datos.archivo } : {}),
         ...autorDeSesion(locals)
       }),
-      signal: AbortSignal.timeout(30000)
+      //  Con archivo es una subida mas a WispHub, de hasta 25 MB.
+      signal: AbortSignal.timeout(datos.archivo ? 90000 : 30000)
     });
     const cuerpo = await r.json().catch(() => ({}));
     if (r.ok && cuerpo?.id_ticket) {
-      return { ok: true, idTicket: String(cuerpo.id_ticket), vinculado: cuerpo.vinculado === true };
+      return {
+        ok: true,
+        idTicket: String(cuerpo.id_ticket),
+        vinculado: cuerpo.vinculado === true,
+        ...(typeof cuerpo.adjunto === 'boolean' ? { adjunto: cuerpo.adjunto } : {})
+      };
     }
     return { ok: false, motivo: MOTIVOS[cuerpo?.error] ?? MOTIVOS.NO_SE_CREO };
   } catch {

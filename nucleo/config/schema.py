@@ -1287,6 +1287,10 @@ class Herramienta(Base):
     # sistema del ISP (ver nucleo/seguimiento/ticket_desde_dexter.py). Sin
     # ella no se crea el ticket: uno sin atar lo importaria como caso nuevo.
     vincula_caso_externo: bool = False
+    # La herramienta que le adjunta un archivo a un ticket YA creado en el
+    # sistema del ISP -- el documento de "Nuevo ticket" (27/10/2026). Sin ella
+    # el ticket se crea igual y el archivo queda solo en el CRM.
+    adjunta_archivo_ticket: bool = False
     # Nombres de campo en la respuesta cruda del proveedor -- configurables
     # por tenant para no hardcodear el vocabulario de un proveedor puntual
     # (WispHub llama 'localidad' y 'zona') en nucleo/. 'campo_zona_sync'

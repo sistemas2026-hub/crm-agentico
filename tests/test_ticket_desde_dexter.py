@@ -16,12 +16,16 @@ Lo que se afirma, sobre el EFECTO:
   3. el caso se ata con el id que DEVOLVIO el ISP, el proveedor de la config y
      el area del asunto; si atarlo falla, se dice (no se esconde);
   4. la ruta del motor exige autor y traduce cada motivo a su codigo;
-  5. el catalogo del tenant declara los asuntos y la herramienta de vinculo.
+  5. el catalogo del tenant declara los asuntos y la herramienta de vinculo;
+  7. el adjunto (27/10/2026): se valida antes de escribir nada, va DESPUES
+     de atar, al ticket creado, por la puerta humana, con un nombre
+     aleatorio; si falla, el ticket queda y se dice.
 ================================================================================
 """
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import os
 import sys
@@ -59,8 +63,9 @@ CONFIG = cargar_config(RAIZ / "tenants" / "rapilink.config.yaml")
 
 class Espia:
     def __init__(self, *, titular=True, vinculo_rompe=False, responsable=None,
-                 id_ticket="95001"):
+                 id_ticket="95001", adjunto_rompe=False):
         self.titular, self.vinculo_rompe = titular, vinculo_rompe
+        self.adjunto_rompe = adjunto_rompe
         self.responsable, self.id_ticket = responsable, id_ticket
         self.creaciones: list[dict] = []
         self.vinculos: list[dict] = []
@@ -75,6 +80,8 @@ def montar(espia, parches):
         yield
 
     def ejecutar_tool(herr, sesion, args, tenant, **kw):
+        if herr.adjunta_archivo_ticket and espia.adjunto_rompe:
+            raise RuntimeError("500 de WispHub")
         espia.creaciones.append({"herramienta": herr.nombre, "args": args, **kw,
                                  "servicio_sesion": getattr(sesion, "id_cliente", None)})
         return {"id_ticket": espia.id_ticket}
@@ -108,7 +115,8 @@ def crear(espia, config=CONFIG, **kw):
     montar(espia, parches)
     try:
         return tdd.crear(config, TENANT, CASO, datos["servicio"], datos["asunto"],
-                         datos["descripcion"], datos["autor"]), None
+                         datos["descripcion"], datos["autor"],
+                         archivo=datos.get("archivo")), None
     except tdd.TicketNoCreado as e:
         return None, e.codigo
     finally:
@@ -200,10 +208,12 @@ cliente = api.app.test_client()
 originales = [(api, "_config_de", api._config_de),
               (api.ticket_desde_dexter, "crear", api.ticket_desde_dexter.crear)]
 llamadas: list = []
+archivos: list = []
 
 
-def crear_falso(config, tenant, caso_id, servicio, asunto, descripcion, autor):
+def crear_falso(config, tenant, caso_id, servicio, asunto, descripcion, autor, archivo=None):
     llamadas.append((caso_id, servicio, asunto, autor))
+    archivos.append(archivo)
     if asunto == "malo":
         raise tdd.TicketNoCreado("ASUNTO_NO_PERMITIDO")
     if servicio == "999":
@@ -229,6 +239,9 @@ try:
             "cada motivo sale con su codigo", f"{r.status_code} {r.get_json()}")
     r = cliente.post(url, json={**base, **AUTOR, "servicio": "999"})
     revisar(r.status_code == 404, "servicio inexistente -> 404", f"{r.status_code}")
+    adj = {"nombre": "x.pdf", "tipo": "application/pdf", "base64": "eA=="}
+    cliente.post(url, json={**base, **AUTOR, "archivo": adj})
+    revisar(archivos[-1] == adj, "el archivo de la pantalla llega al modulo", f"{archivos[-1:]}")
     r = cliente.get(f"/tickets-desde-dexter/asuntos?tenant={TENANT}")
     nombres = [a["asunto"] for a in (r.get_json() or {}).get("asuntos", [])]
     revisar(r.status_code == 200 and "No Tiene Internet" in nombres and len(nombres) == 15,
@@ -264,8 +277,12 @@ class RespuestaHttp:
         return None
 
 
+partes: list = []
+
+
 def pedido_http(metodo, url, **kw):
     pedidos.append((metodo, url))
+    partes.append(kw.get("files") or {})
     if "/vincular/" in url:
         return RespuestaHttp({"vinculado": True, "ya_estaba": False})
     return RespuestaHttp({"id_ticket": 95888})
@@ -310,6 +327,96 @@ revisar([m for m, _ in pedidos] == ["POST", "POST"]
         and pedidos[0][1].endswith("/api/tickets/")
         and pedidos[1][1].endswith(f"/importacion/casos/{CASO}/vincular/"),
         "salen exactamente dos escrituras: el ticket y el vinculo", f"{pedidos}")
+
+#  La misma cadena real, con un archivo: tres escrituras, y el adjunto
+#  tambien con permiso HUMANO y por el PATCH ya verificado.
+pedidos.clear()
+partes.clear()
+permisos.clear()
+PDF = base64.b64encode(b"%PDF-1.4 prueba").decode()
+tdd.ejecutor_http.headers_de = lambda h, t: {}
+tdd.ejecutor_http.requests.request = pedido_http
+motor_mod.idempotencia.ejecutar = una_vez
+tdd.titular = lambda c, t, s: {"nombre": "Cliente", "estado": "Activo"}
+tdd.agendamiento.responsable_de = lambda *a, **k: None
+try:
+    r = tdd.crear(CONFIG, TENANT, CASO, "5832", "Reconexion", "Pide reconexion.",
+                  AUTOR["autor"],
+                  archivo={"nombre": "Cedula Juan Perez.pdf", "tipo": "application/pdf",
+                           "base64": PDF})
+finally:
+    for obj, nombre, original in reales:
+        setattr(obj, nombre, original)
+
+revisar(r == {"id_ticket": "95888", "vinculado": True, "adjunto": True},
+        "con archivo: crea, ata y adjunta", f"{r}")
+revisar([m for m, _ in pedidos] == ["POST", "POST", "PATCH"]
+        and pedidos[2][1].endswith("/api/tickets/95888/"),
+        "la tercera escritura es el PATCH al ticket que DEVOLVIO el ISP", f"{pedidos}")
+tercera = partes[2] if len(partes) > 2 else {}
+archivo_ticket = tercera.get("archivo_ticket") or ()
+revisar(len(archivo_ticket) == 3 and archivo_ticket[1] == b"%PDF-1.4 prueba"
+        and archivo_ticket[2] == "application/pdf" and "_adjunto" in tercera,
+        "viaja como archivo de verdad, con el campo acompañante (sin el, 500)",
+        f"{list(tercera)}")
+nombre_subido = archivo_ticket[0] if archivo_ticket else ""
+revisar(nombre_subido.startswith("adjunto-") and nombre_subido.endswith(".pdf")
+        and "Juan" not in nombre_subido and "Cedula" not in nombre_subido,
+        "el nombre original NO viaja (queda en una URL publica): uno aleatorio", nombre_subido)
+revisar(("adjuntar_archivo_ticket", "humana", AUTOR["autor"],
+         f"ticket_desde_dexter:{CASO}:adjunto") in permisos,
+        "el adjunto corre con permiso HUMANO, una vez por caso", f"{permisos}")
+
+# =============================================================================
+titulo("7. El adjunto, con la puerta doblada")
+# =============================================================================
+for archivo, codigo in (({"nombre": "a.pdf", "base64": "esto no es base64!!"}, "ADJUNTO_INVALIDO"),
+                        ({"nombre": "a.pdf", "base64": "    "}, "ADJUNTO_INVALIDO"),
+                        ("texto suelto", "ADJUNTO_INVALIDO")):
+    e = Espia()
+    _, cod = crear(e, archivo=archivo)
+    revisar(cod == codigo and not e.creaciones and not e.vinculos,
+            f"un adjunto roto ({codigo}) no deja NADA creado afuera", f"{cod} {e.creaciones}")
+
+tope = tdd.ADJUNTO_MAX_BYTES
+tdd.ADJUNTO_MAX_BYTES = 3
+try:
+    e = Espia()
+    _, cod = crear(e, archivo={"nombre": "a.pdf", "base64": base64.b64encode(b"1234").decode()})
+finally:
+    tdd.ADJUNTO_MAX_BYTES = tope
+revisar(cod == "ADJUNTO_MUY_GRANDE" and not e.creaciones,
+        "uno de mas del tope no deja nada creado", f"{cod}")
+
+ARCHIVO = {"nombre": "foto.JPG", "tipo": "image/jpeg", "base64": base64.b64encode(b"jpg").decode()}
+e = Espia()
+r, cod = crear(e, archivo=ARCHIVO)
+nombres = [c["herramienta"] for c in e.creaciones]
+revisar(r == {"id_ticket": "95001", "vinculado": True, "adjunto": True}
+        and nombres == ["crear_ticket_caso", "adjuntar_archivo_ticket"],
+        "con archivo: el ticket primero, el adjunto despues", f"{r} {nombres}")
+sob = (e.creaciones[1] if len(e.creaciones) > 1 else {}).get("sobrescribir") or {}
+revisar(sob.get("id_ticket") == "95001"
+        and (sob.get("archivo_ticket") or {}).get("base64") == ARCHIVO["base64"]
+        and (sob.get("archivo_ticket") or {}).get("nombre", "").endswith(".jpg"),
+        "al ticket que devolvio el ISP, con los mismos bytes y su extension", f"{sob}")
+revisar([p["herramienta"] for p in e.puertas] ==
+        ["crear_ticket_caso", "vincular_caso_externo", "adjuntar_archivo_ticket"]
+        and all(p["actor"] == AUTOR["autor"] for p in e.puertas),
+        "las tres por la puerta humana, con quien lleno el formulario", f"{e.puertas}")
+
+e = Espia(adjunto_rompe=True)
+r, cod = crear(e, archivo=ARCHIVO)
+revisar(cod is None and r == {"id_ticket": "95001", "vinculado": True, "adjunto": False},
+        "si el adjunto falla, el ticket queda y se DICE", f"{r} {cod}")
+
+sin_adjuntar = CONFIG.model_copy(update={"herramientas": [
+    h for h in CONFIG.herramientas if not h.adjunta_archivo_ticket]})
+e = Espia()
+r, cod = crear(e, config=sin_adjuntar, archivo=ARCHIVO)
+revisar(cod is None and (r or {}).get("adjunto") is False and len(e.creaciones) == 1,
+        "sin la herramienta de adjuntar, el ticket se crea igual y dice que el archivo no fue",
+        f"{r} {cod}")
 
 # =============================================================================
 titulo("5. El catalogo del tenant")

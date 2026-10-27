@@ -63,6 +63,10 @@
   //  El adjunto de "Nuevo ticket" se sube despues de crear el caso: si falla,
   //  el ticket existe igual y esto lo dice (27/10/2026).
   let avisoAdjunto = $derived(page.url.searchParams.get('adjunto_error'));
+  //  Y si llego a Dexter pero no al ticket de WispHub.
+  let adjuntoSinWispHub = $derived(
+    !avisoAdjunto && page.url.searchParams.get('wisphub_sin_adjunto') === '1'
+  );
 
   let { ticket, conversation, articles, alsoOpen, contacts, attachments, activity, canReply } =
     $derived(data);
@@ -552,6 +556,15 @@
           >
             El ticket se creó, pero el archivo no se adjuntó: {avisoAdjunto} Podés subirlo desde la
             respuesta de abajo.
+          </p>
+        {:else if adjuntoSinWispHub}
+          <p
+            class="v2-card"
+            role="status"
+            style="padding:10px 13px;margin-bottom:16px;font-size:13px;border-left:3px solid var(--v2-clay)"
+          >
+            El archivo quedó en este ticket, pero no llegó al de WispHub. Si el técnico lo necesita,
+            subilo allá a mano.
           </p>
         {/if}
         {#if form?.error}
