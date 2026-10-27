@@ -36,9 +36,23 @@
    * habilitados. El numero de servicio se confirma con "Verificar" -- muestra
    * el titular -- antes de abrir un ticket que le va a caer a un tecnico.
    */
-  let enWispHub = $state(untrack(() => result?.values?.en_wisphub === true));
+  /*
+   * 27/10/2026: la casilla viene MARCADA -- lo normal es que un ticket del
+   * ISP viva tambien en WispHub -- y con ella el asunto se elige de la lista
+   * de WispHub en vez de escribirse: un solo campo, el mismo nombre alla y
+   * aca, como los tickets importados. Desmarcada, el asunto vuelve a ser
+   * texto libre y el ticket queda solo en Dexter.
+   */
+  let enWispHub = $state(
+    untrack(() => (result?.values ? result.values.en_wisphub === true : true))
+  );
   let servicio = $state(untrack(() => result?.values?.servicio ?? ''));
-  let asuntoW = $state(untrack(() => result?.values?.asunto ?? ''));
+  let usaWispHub = $derived(enWispHub && (data.asuntosWispHub?.length ?? 0) > 0);
+  /** Al pasar a la lista, un asunto escrito a mano que no esta en ella se vacia. */
+  function alCambiarWispHub() {
+    if (enWispHub && !(data.asuntosWispHub ?? []).some((/** @type {any} */ a) => a.asunto === form.name))
+      form.name = '';
+  }
   /** @type {any} */
   let titular = $state(null);
   let verificando = $state(false);
@@ -71,7 +85,7 @@
     /** @type {Record<string, string>} */
     const e = {};
     const name = form.name.trim();
-    if (!name) e.name = 'Un ticket necesita un asunto.';
+    if (!name) e.name = usaWispHub ? 'Elegí el asunto de WispHub.' : 'Un ticket necesita un asunto.';
     // `Case.name` is max_length=64, short for a subject line, but it is the
     // column, and a 65th character is a 400 from the serializer.
     else if (name.length > 64)
@@ -122,23 +136,82 @@
       </div>
     {/if}
 
+    {#if data.asuntosWispHub?.length}
+      <fieldset class="wisphub">
+        <label class="marca">
+          <input
+            type="checkbox"
+            name="en_wisphub"
+            value="1"
+            bind:checked={enWispHub}
+            onchange={alCambiarWispHub} />
+          Crear también en WispHub
+        </label>
+        {#if enWispHub}
+          <div class="v2-field">
+            <label for="f-servicio">Número de servicio del cliente</label>
+            <div class="servicio">
+              <input
+                id="f-servicio"
+                name="servicio"
+                class="v2-input"
+                inputmode="numeric"
+                autocomplete="off"
+                bind:value={servicio}
+                oninput={() => (titular = null)} />
+              <button
+                type="button"
+                class="v2-btn v2-btn-sm"
+                onclick={verificar}
+                disabled={verificando || !servicio.trim()}>Verificar</button>
+            </div>
+            {#if titular?.ok}
+              <p class="v2-hint">Titular: <b>{titular.nombre}</b>{titular.estado ? ` · ${titular.estado}` : ''}</p>
+            {:else if titular}
+              <p class="v2-hint aviso">{titular.motivo}</p>
+            {/if}
+          </div>
+          <p class="v2-hint">
+            Se abre en WispHub a nombre del responsable del área, con lo que escribas en «Qué
+            pasó», y queda atado a este ticket: lo que respondan allá aparece acá.
+          </p>
+        {/if}
+      </fieldset>
+    {/if}
+
     <div class="v2-field">
       <label for="f-name">Asunto</label>
-      <input
-        id="f-name"
-        name="name"
-        class="v2-input"
-        bind:value={form.name}
-        onblur={() => (touched.name = true)}
-        aria-invalid={show('name') ? 'true' : undefined}
-      />
+      {#if usaWispHub}
+        <select
+          id="f-name"
+          name="name"
+          class="v2-input"
+          bind:value={form.name}
+          onblur={() => (touched.name = true)}
+          aria-invalid={show('name') ? 'true' : undefined}>
+          <option value="">Elegí uno</option>
+          {#each asuntosPorArea as [area, lista] (area)}
+            <optgroup label={AREAS[area] ?? (area || 'Otros')}>
+              {#each lista as a (a)}
+                <option value={a}>{a}</option>
+              {/each}
+            </optgroup>
+          {/each}
+        </select>
+      {:else}
+        <input
+          id="f-name"
+          name="name"
+          class="v2-input"
+          bind:value={form.name}
+          onblur={() => (touched.name = true)}
+          aria-invalid={show('name') ? 'true' : undefined}
+        />
+      {/if}
       {#if show('name')}
         <p class="v2-error">{errors.name}</p>
-      {:else}
-        <!-- Worth saying up front, because it is an unusual rule for a
-             helpdesk and the refusal is otherwise baffling: two tickets in one
-             organisation cannot share a subject, ignoring capitals. -->
-        <p class="v2-hint">Tiene que ser único en esta organización, sin distinguir mayúsculas.</p>
+      {:else if usaWispHub}
+        <p class="v2-hint">Los asuntos de WispHub. El ticket se llama igual allá y acá.</p>
       {/if}
     </div>
 
@@ -214,59 +287,6 @@
         bind:value={form.description}></textarea>
     </div>
 
-    {#if data.asuntosWispHub?.length}
-      <fieldset class="wisphub">
-        <label class="marca">
-          <input type="checkbox" name="en_wisphub" value="1" bind:checked={enWispHub} />
-          Crear también en WispHub
-        </label>
-        {#if enWispHub}
-          <div class="pair">
-            <div class="v2-field">
-              <label for="f-servicio">Número de servicio del cliente</label>
-              <div class="servicio">
-                <input
-                  id="f-servicio"
-                  name="servicio"
-                  class="v2-input"
-                  inputmode="numeric"
-                  autocomplete="off"
-                  bind:value={servicio}
-                  oninput={() => (titular = null)} />
-                <button
-                  type="button"
-                  class="v2-btn v2-btn-sm"
-                  onclick={verificar}
-                  disabled={verificando || !servicio.trim()}>Verificar</button>
-              </div>
-              {#if titular?.ok}
-                <p class="v2-hint">Titular: <b>{titular.nombre}</b>{titular.estado ? ` · ${titular.estado}` : ''}</p>
-              {:else if titular}
-                <p class="v2-hint aviso">{titular.motivo}</p>
-              {/if}
-            </div>
-            <div class="v2-field">
-              <label for="f-asunto-w">Asunto en WispHub</label>
-              <select id="f-asunto-w" name="asunto_wisphub" class="v2-input" bind:value={asuntoW}>
-                <option value="">Elegí uno</option>
-                {#each asuntosPorArea as [area, lista] (area)}
-                  <optgroup label={AREAS[area] ?? (area || 'Otros')}>
-                    {#each lista as a (a)}
-                      <option value={a}>{a}</option>
-                    {/each}
-                  </optgroup>
-                {/each}
-              </select>
-            </div>
-          </div>
-          <p class="v2-hint">
-            Se abre en WispHub a nombre del responsable del área, con lo que escribiste en «Qué
-            pasó», y queda atado a este ticket: lo que respondan allá aparece acá.
-          </p>
-        {/if}
-      </fieldset>
-    {/if}
-
     <div class="actions">
       <button class="v2-btn v2-btn-primary" type="submit">Crear ticket</button>
       <a class="v2-btn" href="/tickets">Cancelar</a>
@@ -276,7 +296,7 @@
 
 <style>
   .wisphub {
-    margin: 4px 0 0;
+    margin: 0 0 18px;
     padding: 14px 16px;
     border: 1px solid var(--v2-line);
     border-radius: var(--v2-radius-control);
@@ -294,6 +314,7 @@
   .servicio {
     display: flex;
     gap: 8px;
+    max-width: 380px;
   }
   .servicio .v2-input {
     flex: 1;

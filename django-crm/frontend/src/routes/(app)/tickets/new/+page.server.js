@@ -30,15 +30,20 @@ export const actions = {
     const contacts = form.getAll('contacts').map((id) => id.toString());
     if (contacts.length) values.contacts = contacts;
 
-    //  TAMBIEN EN WISPHUB  --  26/10/2026. Se valida la FORMA antes de crear
-    //  nada, para no dejar un caso a medias por un numero mal tipeado. Que el
-    //  servicio exista y que el asunto este habilitado lo decide el motor.
+    //  TAMBIEN EN WISPHUB  --  26/10/2026. Se valida antes de crear nada, para
+    //  no dejar un caso a medias por un numero mal tipeado. Que el servicio
+    //  exista lo decide el motor.
+    //
+    //  27/10/2026: con la casilla marcada el asunto del ticket ES el de
+    //  WispHub -- un solo campo, elegido de la lista, como llegan los tickets
+    //  importados. Un asunto fuera de la lista no crea el caso: el motor lo
+    //  rechazaria DESPUES de creado.
     const enWispHub = form.get('en_wisphub') === '1';
     const wisphub = {
       servicio: form.get('servicio')?.toString().trim() ?? '',
-      asunto: form.get('asunto_wisphub')?.toString().trim() ?? ''
+      asunto: values.name
     };
-    const eco = { ...values, en_wisphub: enWispHub, ...wisphub };
+    const eco = { ...values, en_wisphub: enWispHub, servicio: wisphub.servicio };
 
     if (!values.name) {
       return fail(400, { values: eco, error: 'Un ticket necesita un asunto.' });
@@ -47,8 +52,15 @@ export const actions = {
       if (!/^\d{1,12}$/.test(wisphub.servicio)) {
         return fail(400, { values: eco, error: 'El número de servicio de WispHub va solo con dígitos.' });
       }
-      if (!wisphub.asunto) {
-        return fail(400, { values: eco, error: 'Elegí con qué asunto se abre en WispHub.' });
+      const habilitados = await leerAsuntosWispHub(locals, fetch);
+      if (!habilitados.length) {
+        return fail(400, {
+          values: eco,
+          error: 'No se pudo hablar con WispHub ahora. Desmarcá la casilla para crearlo solo en Dexter.'
+        });
+      }
+      if (!habilitados.some((/** @type {any} */ a) => a.asunto === wisphub.asunto)) {
+        return fail(400, { values: eco, error: 'Elegí el asunto de la lista de WispHub.' });
       }
       if (!values.description) {
         return fail(400, { values: eco, error: 'Para crearlo en WispHub hace falta contar qué pasó.' });
@@ -68,7 +80,8 @@ export const actions = {
     //  con WispHub se va al ticket, y la pantalla del ticket dice el resultado.
     if (!enWispHub) redirect(303, `/tickets/${created.id}`);
     const r = /** @type {any} */ (await crearEnWispHub(locals, fetch, created.id, {
-      ...wisphub,
+      servicio: wisphub.servicio,
+      asunto: wisphub.asunto,
       descripcion: values.description
     }));
     const p = new URLSearchParams();

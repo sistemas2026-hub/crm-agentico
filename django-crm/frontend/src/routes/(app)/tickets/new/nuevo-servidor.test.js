@@ -11,12 +11,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const createTicket = vi.fn();
 const crearEnWispHub = vi.fn();
+const ASUNTOS = [{ asunto: 'No Tiene Internet', area: 'soporte_tecnico' }];
+const leerAsuntosWispHub = vi.fn();
 vi.mock('$lib/server/v2/tickets.js', () => ({
   createTicket: (...a) => createTicket(...a),
   getTicketFormOptions: async () => ({ defaults: {}, accounts: [], contacts: [], people: [] })
 }));
 vi.mock('$lib/server/v2/ticket-desde-dexter.js', () => ({
-  leerAsuntosWispHub: async () => [{ asunto: 'No Tiene Internet', area: 'soporte_tecnico' }],
+  leerAsuntosWispHub: (...a) => leerAsuntosWispHub(...a),
   crearEnWispHub: (...a) => crearEnWispHub(...a)
 }));
 vi.mock('$lib/server/v2/form-errors.js', () => ({ readableError: (_e, m) => m }));
@@ -46,13 +48,16 @@ async function correr(campos) {
 }
 
 const BASE = { name: 'Sin internet', description: 'El cliente llamo: sin internet.' };
-const CON_WISPHUB = { ...BASE, en_wisphub: '1', servicio: '5832', asunto_wisphub: 'No Tiene Internet' };
+//  27/10/2026: con la casilla, el asunto del ticket ES el de WispHub ('name').
+const CON_WISPHUB = { ...BASE, name: 'No Tiene Internet', en_wisphub: '1', servicio: '5832' };
 
 describe('Nuevo ticket', () => {
   beforeEach(() => {
     createTicket.mockReset();
     crearEnWispHub.mockReset();
     createTicket.mockResolvedValue({ id: 'caso-1' });
+    leerAsuntosWispHub.mockReset();
+    leerAsuntosWispHub.mockResolvedValue(ASUNTOS);
   });
 
   it('la carga trae los asuntos habilitados para WispHub', async () => {
@@ -70,7 +75,8 @@ describe('Nuevo ticket', () => {
   it.each([
     [{ servicio: '58 32' }, /dígitos/],
     [{ servicio: '' }, /dígitos/],
-    [{ asunto_wisphub: '' }, /asunto/],
+    [{ name: '' }, /asunto/],
+    [{ name: 'Un asunto inventado' }, /lista de WispHub/],
     [{ description: '' }, /qué pasó/]
   ])('un dato de WispHub mal puesto NO crea nada, ni el caso (%o)', async (cambio, mensaje) => {
     const r = await correr({ ...CON_WISPHUB, ...cambio });
@@ -82,10 +88,18 @@ describe('Nuevo ticket', () => {
     expect(r.resultado.data.values.en_wisphub).toBe(true);
   });
 
+  it('si el motor no contesta los asuntos, no crea nada y dice como seguir', async () => {
+    leerAsuntosWispHub.mockResolvedValue([]);
+    const r = await correr(CON_WISPHUB);
+    expect(createTicket).not.toHaveBeenCalled();
+    expect(r.resultado.data.error).toMatch(/Desmarcá la casilla/);
+  });
+
   it('crea el caso PRIMERO y despues pide el de WispHub para ese caso', async () => {
     crearEnWispHub.mockResolvedValue({ ok: true, idTicket: '95001', vinculado: true });
     const r = await correr(CON_WISPHUB);
     expect(createTicket).toHaveBeenCalledTimes(1);
+    expect(createTicket.mock.calls[0][1].name).toBe('No Tiene Internet');
     const [, , caso, datos] = crearEnWispHub.mock.calls[0];
     expect(caso).toBe('caso-1');
     expect(datos).toEqual({
