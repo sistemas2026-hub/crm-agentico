@@ -4,6 +4,7 @@
 from django.urls import path
 
 from operaciones import views
+from operaciones.ajustes_views import AjustesSupervisorView
 from operaciones.vista_previa_views import (
     VistaPreviaDeLaJornadaView,
     SimulacionDelDiaView,
@@ -138,4 +139,8 @@ urlpatterns = [
     #  interruptor (exige motivo, no criterios).
     path("supervisor/autonomia/", views.AutonomiaSupervisorView.as_view(),
          name="supervisor-autonomia"),
+    #  27/10/2026. Delegar o quitar cada tarea con un clic, con persona y
+    #  motivo. Escribe por 'td.delegar'/'td.quitar', las mismas que el chat.
+    path("supervisor/ajustes/", AjustesSupervisorView.as_view(),
+         name="supervisor-ajustes"),
 ]

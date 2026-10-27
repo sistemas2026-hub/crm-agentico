@@ -29,6 +29,7 @@
    * CUSTOM is chosen so the form does not walk into that gap, but this is a UX
    * guard over a real backend gap, not a mirror of a server rule.
    */
+  import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import SectionTabs from '$lib/v2/components/SectionTabs.svelte';
@@ -37,10 +38,12 @@
   import { money } from '$lib/v2/format.js';
   import { Plus, Trash2 } from '@lucide/svelte';
 
-  /** @type {{ data: { products: any[], accounts: any[], contacts: any[] }, form: any }} */
+  /** @type {{ data: { products: any[], accounts: any[], contacts: any[], hoy: string }, form: any }} */
   let { data, form } = $props();
 
-  const today = new Date().toISOString().slice(0, 10);
+  //  The company's day, from the server (27/10/2026). `toISOString()` is
+  //  UTC's, and from 19:00 in Bogotá the schedule started tomorrow.
+  const today = untrack(() => data.hoy);
 
   /**
    * The currency codes `RecurringInvoice.currency` accepts (`common.utils.

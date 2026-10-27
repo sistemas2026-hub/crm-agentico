@@ -10,6 +10,7 @@ import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
 import { reparteTickets } from '$lib/v2/roles.js';
+import { hoyDeLaEmpresa } from '$lib/server/v2/hoy-de-la-empresa.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ locals, cookies, params, fetch }) {
@@ -252,14 +253,16 @@ export const actions = {
    * user into a form to type a date they were never going to change. Where an
    * approval rule covers the ticket, the API refuses and says which rule.
    */
-  setStatus: async ({ cookies, params, request }) => {
+  setStatus: async ({ cookies, params, request, locals }) => {
     const form = await request.formData();
     const status = form.get('status')?.toString().trim() ?? '';
     if (!status) return fail(400, { error: 'No se eligió ningún estado.' });
 
     /** @type {Record<string, any>} */
     const values = { status };
-    if (status === 'Closed') values.closed_on = new Date().toISOString().slice(0, 10);
+    //  The company's day (27/10/2026): `toISOString()` is the server's (UTC),
+    //  and a ticket closed from 19:00 in Bogotá was dated tomorrow.
+    if (status === 'Closed') values.closed_on = await hoyDeLaEmpresa(locals, cookies);
 
     try {
       await updateTicket({ cookies }, params.id, values);

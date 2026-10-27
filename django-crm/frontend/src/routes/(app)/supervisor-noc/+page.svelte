@@ -1183,6 +1183,7 @@
           <a class="snoc-pildora" href="/supervisor-noc/cuadrillas">Cuadrillas</a>
           <a class="snoc-pildora" href="/supervisor-noc/despacho">Despacho</a>
           <a class="snoc-pildora" href="/supervisor-noc/plantillas">Plantillas</a>
+          <a class="snoc-pildora" href="/supervisor-noc/ajustes">Ajustes</a>
           </div>
         </header>
 
@@ -3005,9 +3006,10 @@
                Hasta hoy esto no se veía en ninguna pantalla: se delegaba
                hablándole al Supervisor en el chat, y para saber si había
                quedado encendido había que volver a preguntarle.
-               SOLO LECTURA a propósito: delegar sigue siendo una
-               conversación. Un segundo camino de escritura serían dos
-               lugares donde garantizar lo mismo. -->
+               SOLO LECTURA acá. Desde el 27/10/2026 se delega y se quita
+               también en «Ajustes del Supervisor», que escribe por las mismas
+               funciones que el chat (`td.delegar` / `td.quitar`): dos caras,
+               una sola regla. -->
           <section class="snoc-columna" style="gap:var(--snoc-xs);">
             <span class="snoc-label-sm" style="text-transform:uppercase;">Qué le pidieron que haga</span>
             {#each alcance.delegaciones ?? [] as d (d.clave)}
@@ -3029,7 +3031,8 @@
                 </div>
                 {#if !d.delegada}
                   <div class="snoc-body-sm snoc-tenue">
-                    No delegada. Para encenderla, pedísela al Supervisor en el chat.
+                    No delegada. Se enciende en <a href="/supervisor-noc/ajustes">Ajustes</a>, o
+                    pidiéndosela al Supervisor en el chat.
                   </div>
                 {:else}
                   <div class="snoc-body-sm snoc-secundario">

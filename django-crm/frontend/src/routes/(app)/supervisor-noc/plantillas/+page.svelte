@@ -153,6 +153,7 @@
           <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc/plantillas">
             Plantillas
           </a>
+          <a class="snoc-pildora" href="/supervisor-noc/ajustes">Ajustes</a>
         </div>
       </div>
       {#if form?.error}

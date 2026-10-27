@@ -64,6 +64,11 @@ class TareaDelegada(BaseModel):
         Profile, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="tareas_que_quito")
     quitada_en = models.DateTimeField(null=True, blank=True)
+    #  POR QUE SE QUITO, en palabras de quien la apago  --  27/10/2026. Desde
+    #  «Ajustes del Supervisor» una tarea se apaga con un clic, y el clic solo
+    #  dice quien y cuando. El motivo de DELEGAR ya tenia lugar
+    #  ('pedido_textual'); el de quitar no tenia ninguno.
+    motivo_al_quitar = models.CharField(max_length=500, blank=True, default="")
 
     class Meta:
         db_table = "operaciones_tarea_delegada"

@@ -55,6 +55,9 @@ vi.mock('$lib/server/v2/areas.js', () => ({ leerAreas: async () => ({ areas: [],
 vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({}) }));
 vi.mock('$lib/server/v2/autor.js', () => ({ autorDeSesion: () => ({}), claveIdempotencia: () => 'k' }));
 vi.mock('$lib/server/v2/tenant.js', () => ({ tenantDeLaSesion: async () => sesion.tenant }));
+//  El día de la EMPRESA, distinto a propósito del de hoy en UTC: si la acción
+//  volviera a `toISOString()`, la prueba de cierre lo nota.
+vi.mock('$lib/server/v2/hoy-de-la-empresa.js', () => ({ hoyDeLaEmpresa: async () => '2001-02-03' }));
 
 const { actions, load } = await import('./+page.server.js');
 
@@ -206,5 +209,24 @@ describe('?/tomar', () => {
     const b = /** @type {any} */ (await actions.tomar(evento({}, { role: 'USER' })));
     expect(b.status).toBe(403);
     expect(b.data.error).toMatch(/área/);
+  });
+});
+
+describe('?/setStatus', () => {
+  beforeEach(() => {
+    updateTicket.mockReset();
+    updateTicket.mockResolvedValue({});
+  });
+
+  it('cerrar pone la fecha de la EMPRESA, no la del servidor en UTC', async () => {
+    await actions.setStatus(evento({ status: 'Closed' }));
+    const [, , valores] = updateTicket.mock.calls[0];
+    expect(valores).toEqual({ status: 'Closed', closed_on: '2001-02-03' });
+  });
+
+  it('otro estado no lleva fecha de cierre', async () => {
+    await actions.setStatus(evento({ status: 'Pending' }));
+    const [, , valores] = updateTicket.mock.calls[0];
+    expect(valores).toEqual({ status: 'Pending' });
   });
 });

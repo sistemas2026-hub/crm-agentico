@@ -1057,6 +1057,23 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  test_simular_el_dia.py::test_n_*. Exige
                        #  'EsJefeDeOperaciones'.
                        "dia-simulacion",
+                       #  27/10/2026. 'supervisor-ajustes', «Ajustes del
+                       #  Supervisor». GET lee el catalogo de tareas con su
+                       #  estado; POST DELEGA O QUITA una tarea, y ESO ES TODO
+                       #  lo que escribe: la fila de 'TareaDelegada', por
+                       #  'td.delegar'/'td.quitar' --las mismas funciones que el
+                       #  chat--, con persona y motivo obligatorios.
+                       #
+                       #  NO EJECUTA NADA: delegar no corre el ciclo, no cierra,
+                       #  no crea ordenes ni llama a ningun sistema externo. Lo
+                       #  que una tarea delegada llegue a hacer sigue detras de
+                       #  las otras dos puertas, que esta ruta no abre: el nivel
+                       #  de autonomia de la empresa y el interruptor del motor.
+                       #  Exige 'EsJefeDeOperaciones' para leer y para escribir.
+                       #  Su suite (test_ajustes_del_supervisor.py) afirma
+                       #  sobre el efecto: lo que ve el ciclo ('esta_delegada')
+                       #  y el chat ('tareas_activas') despues del clic.
+                       "supervisor-ajustes",
                        #  LOTE 1, paso P11 (05/10/2026). 'supervisor-turno' es
                        #  el relevo de turno, y es de las faciles de declarar:
                        #  es un **GET**.

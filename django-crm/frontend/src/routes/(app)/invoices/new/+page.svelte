@@ -30,6 +30,7 @@
    * server-derived from the JWT and the profile. A form that collects them is
    * a form that can be edited to claim them.
    */
+  import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import SectionTabs from '$lib/v2/components/SectionTabs.svelte';
@@ -38,7 +39,7 @@
   import { money, longDate } from '$lib/v2/format.js';
   import { Plus, Trash2, Info } from '@lucide/svelte';
 
-  /** @type {{ data: { products: any[], accounts: any[], contacts: any[] }, form: any }} */
+  /** @type {{ data: { products: any[], accounts: any[], contacts: any[], hoy: string }, form: any }} */
   let { data, form } = $props();
 
   const CURRENCY = 'USD';
@@ -47,7 +48,9 @@
   let accountId = $state('');
   let contactId = $state('');
   let title = $state('');
-  let issueDate = $state(new Date().toISOString().slice(0, 10));
+  //  The company's day, from the server (27/10/2026). `toISOString()` is
+  //  UTC's, and from 19:00 in Bogotá it issued the invoice tomorrow.
+  let issueDate = $state(untrack(() => data.hoy));
   let paymentTerms = $state('NET_30');
   let customDueDate = $state('');
   let discountType = $state('');

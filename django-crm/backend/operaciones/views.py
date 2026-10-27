@@ -2314,10 +2314,10 @@ class AutonomiaSupervisorView(APIView):
             #  delegacion quedo encendida" -- que nadie podia contestar mirando
             #  la pantalla.
             #
-            #  SOLO LECTURA, A PROPOSITO. Delegar sigue siendo una conversacion
-            #  ('chat_herramientas.py::delegar_tarea'): un segundo camino de
-            #  escritura serian dos lugares donde garantizar lo mismo. Lo que
-            #  faltaba no era otra puerta, era poder ver por donde se entro.
+            #  SOLO LECTURA ACA. Desde el 27/10/2026 se delega y se quita
+            #  tambien en «Ajustes del Supervisor» ('ajustes_views.py'), que
+            #  escribe por 'td.delegar'/'td.quitar' --las mismas que el chat--
+            #  y reusa esta lectura: las garantias siguen en un solo lugar.
             "delegaciones": self._delegaciones(request.org, estado, td),
         })
 

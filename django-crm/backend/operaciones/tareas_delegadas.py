@@ -311,6 +311,34 @@ class ErrorTarea(Exception):
     """No se pudo delegar o quitar. El mensaje lo lee una persona."""
 
 
+def bloquear(org, clave: str) -> None:
+    """
+    Una sola escritura a la vez sobre ESTA tarea de ESTA empresa  --  27/10/2026.
+
+    Desde «Ajustes del Supervisor» hay dos caminos que escriben (la pantalla y
+    el chat), y la pantalla además lee el estado antes de escribir para no
+    pisar a nadie. Sin esto, dos personas que delegan por primera vez a la vez
+    ven las dos "no hay fila", y la segunda reactiva la de la primera a su
+    nombre (auditor independiente, 27/10/2026). Un 'select_for_update' no
+    alcanza: la primera vez no hay fila que bloquear.
+
+    'pg_advisory_xact_lock', como 'campo.services.despacho.bloquear_el_caso':
+    no necesita fila y se suelta solo al confirmar o deshacer. Exige una
+    transaccion abierta: fuera de una se soltaria en el acto. Solo en
+    Postgres, como 'common/packs/applier.py': en SQLite (solo pruebas) no
+    existe y se saltea en vez de romper.
+    """
+    from django.db import connection
+
+    if not connection.in_atomic_block:
+        raise RuntimeError("bloquear una tarea necesita una transaccion abierta")
+    if connection.vendor != "postgresql":
+        return
+    with connection.cursor() as c:
+        c.execute("select pg_advisory_xact_lock(hashtext(%s))",
+                  [f"tarea-delegada:{org.id}:{clave}"])
+
+
 def delegar(org, clave: str, *, actor, pedido_textual: str = "",
             conversacion_id=None, ahora=None):
     """
@@ -322,6 +350,8 @@ def delegar(org, clave: str, *, actor, pedido_textual: str = "",
     delegó. Si la tarea hace algo distinto de lo que esa frase dice, el
     problema es del catálogo y conviene poder verlo.
     """
+    from django.db import transaction
+
     from operaciones.tareas_modelos import TareaDelegada
 
     if clave not in CATALOGO:
@@ -334,51 +364,74 @@ def delegar(org, clave: str, *, actor, pedido_textual: str = "",
             "Supervisor no puede darse trabajo a sí mismo")
 
     ahora = ahora or timezone.now()
-    fila, creada = TareaDelegada.objects.get_or_create(
-        org=org, clave=clave,
-        defaults={"activa": True, "delegada_por": actor,
-                  "pedido_textual": (pedido_textual or "")[:500],
-                  "conversacion_id": conversacion_id,
-                  "delegada_en": ahora})
-    if not creada:
-        #  Volver a delegar una que ya estaba es REACTIVARLA, y queda a nombre
-        #  de quien lo pidió esta vez. Lo contrario --dejar el actor viejo--
-        #  haría que la auditoría culpara a quien la delegó hace meses.
-        fila.activa = True
-        fila.delegada_por = actor
-        fila.delegada_en = ahora
-        if pedido_textual:
-            fila.pedido_textual = pedido_textual[:500]
-        #  LA CONVERSACION SE MUEVE A LA ULTIMA, igual que el actor: el aviso
-        #  tiene que llegar donde se pidio esta vez, no donde se pidio hace
-        #  meses. Y solo si viene una: volver a delegar desde fuera del chat
-        #  no deberia dejar la tarea sin donde avisar.
-        if conversacion_id:
-            fila.conversacion_id = conversacion_id
-        fila.save(update_fields=["activa", "delegada_por", "delegada_en",
-                                 "pedido_textual", "conversacion_id",
-                                 "updated_at"])
+    with transaction.atomic():
+        bloquear(org, clave)
+        fila, creada = TareaDelegada.objects.get_or_create(
+            org=org, clave=clave,
+            defaults={"activa": True, "delegada_por": actor,
+                      "pedido_textual": (pedido_textual or "")[:500],
+                      "conversacion_id": conversacion_id,
+                      "delegada_en": ahora})
+        if not creada:
+            #  LA CONVERSACION SE MUEVE A LA ULTIMA, igual que el actor: el
+            #  aviso tiene que llegar donde se pidio esta vez, no donde se pidio
+            #  hace meses. Si no viene una --se delego desde «Ajustes del
+            #  Supervisor»-- se conserva solo si es de la MISMA persona: la de
+            #  otro le mandaria a esa persona avisos de algo que delego otra
+            #  (auditor independiente, 27/10/2026). Sin conversacion, el aviso
+            #  cae a la ultima de quien la delego ('aviso_al_chat').
+            if conversacion_id:
+                fila.conversacion_id = conversacion_id
+            elif fila.delegada_por_id != actor.id:
+                fila.conversacion_id = None
+            #  Volver a delegar una que ya estaba es REACTIVARLA, y queda a
+            #  nombre de quien lo pidió esta vez. Lo contrario --dejar el actor
+            #  viejo-- haría que la auditoría culpara a quien la delegó hace
+            #  meses.
+            fila.activa = True
+            fila.delegada_por = actor
+            fila.delegada_en = ahora
+            if pedido_textual:
+                fila.pedido_textual = pedido_textual[:500]
+            fila.save(update_fields=["activa", "delegada_por", "delegada_en",
+                                     "pedido_textual", "conversacion_id",
+                                     "updated_at"])
     return fila
 
 
-def quitar(org, clave: str, *, actor, ahora=None):
+def quitar(org, clave: str, *, actor, motivo: str = "", ahora=None):
     """
     Deja de delegar una tarea. NO la borra: queda el registro de que existió.
 
     Borrarla haría imposible contestar "¿esto estuvo delegado alguna vez?", que
     es justo la pregunta que alguien va a hacer el día que un caso aparezca
     cerrado y nadie recuerde por qué.
+
+    'motivo' lo trae «Ajustes del Supervisor» (27/10/2026). Se escribe SIEMPRE,
+    también vacío: si no, quitarla por el chat dejaría a la vista el motivo de
+    la vez anterior, como si fuera de esta.
+
+    UNA YA QUITADA NO SE VUELVE A QUITAR  --  27/10/2026. Antes se re-sellaba:
+    pedirle al chat que quite algo que ya estaba quitado borraba quién lo quitó
+    y por qué, sin cambiar nada (auditor independiente). Ahora se dice.
     """
+    from django.db import transaction
+
     from operaciones.tareas_modelos import TareaDelegada
 
     if actor is None:
         raise ErrorTarea("quitar una tarea necesita la persona que lo decide")
-    fila = TareaDelegada.objects.filter(org=org, clave=clave).first()
-    if fila is None:
-        raise ErrorTarea(f"'{clave}' no estaba delegada")
-    fila.activa = False
-    fila.quitada_por = actor
-    fila.quitada_en = ahora or timezone.now()
-    fila.save(update_fields=["activa", "quitada_por", "quitada_en",
-                             "updated_at"])
+    with transaction.atomic():
+        bloquear(org, clave)
+        fila = TareaDelegada.objects.filter(org=org, clave=clave).first()
+        if fila is None:
+            raise ErrorTarea(f"'{clave}' no estaba delegada")
+        if not fila.activa:
+            raise ErrorTarea(f"'{clave}' ya no estaba delegada")
+        fila.activa = False
+        fila.quitada_por = actor
+        fila.quitada_en = ahora or timezone.now()
+        fila.motivo_al_quitar = (motivo or "")[:500]
+        fila.save(update_fields=["activa", "quitada_por", "quitada_en",
+                                 "motivo_al_quitar", "updated_at"])
     return fila

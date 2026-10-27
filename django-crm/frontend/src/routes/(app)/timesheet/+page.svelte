@@ -58,7 +58,9 @@
   }
 
   const WEEKDAY = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-  const todayISO = new Date().toISOString().slice(0, 10);
+  //  The company's day, from the server (27/10/2026): `toISOString()` here
+  //  was UTC's, and from 19:00 in Bogotá it marked tomorrow's column.
+  const todayISO = $derived(data.hoy);
 
   /** Jump `deltaDays` from the current week's Mon..Sun and reload. */
   function shiftWeek(/** @type {number} */ deltaDays) {

@@ -34,13 +34,17 @@ function isoWeekRange(date) {
 /**
  * The caller's timesheet for a Mon..Sun week, shaped for the page.
  *
+ * `hoy` (YYYY-MM-DD) is today on the COMPANY's clock (`hoyDeLaEmpresa`). The
+ * server runs in UTC, so `new Date()` alone puts Sunday 19:00 in Bogotá in
+ * next week (27/10/2026). Without it, it falls back to the server's day.
+ *
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
- * @param {{ start?: string, end?: string }} [range] explicit week; defaults to this ISO week
+ * @param {{ start?: string, end?: string, hoy?: string }} [range] explicit week; defaults to this ISO week
  * @returns {Promise<{ week: any }>}
  */
-export async function getTimesheet({ cookies }, { start, end } = {}) {
+export async function getTimesheet({ cookies }, { start, end, hoy } = {}) {
   if (!start || !end) {
-    const range = isoWeekRange(new Date());
+    const range = isoWeekRange(hoy ? new Date(`${hoy}T00:00:00Z`) : new Date());
     start = start || range.start;
     end = end || range.end;
   }

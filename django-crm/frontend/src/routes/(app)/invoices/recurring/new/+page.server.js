@@ -4,6 +4,7 @@ import { listContacts } from '$lib/server/v2/contacts.js';
 import { listProducts } from '$lib/server/v2/products.js';
 import { createRecurringInvoice } from '$lib/server/v2/recurring.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
+import { hoyDeLaEmpresa } from '$lib/server/v2/hoy-de-la-empresa.js';
 
 /**
  * Same three pickers as the one-off invoice builder: account and contact are
@@ -12,13 +13,18 @@ import { readableError } from '$lib/server/v2/form-errors.js';
  * rows. Contacts carry their account so the page can offer only the ones that
  * pass that rule.
  *
+ * `hoy` is the company's day (27/10/2026): the page used the browser's
+ * `toISOString()`, which is UTC's day, and from 19:00 in Bogotá it
+ * defaulted to tomorrow.
+ *
  * @type {import('./$types').PageServerLoad}
  */
-export async function load({ cookies }) {
-  const [accounts, contacts, products] = await Promise.all([
+export async function load({ cookies, locals }) {
+  const [accounts, contacts, products, hoy] = await Promise.all([
     listAccounts({ cookies }, new URLSearchParams({ limit: '1000' })),
     listContacts({ cookies }, new URLSearchParams({ limit: '1000' })),
-    listProducts({ cookies })
+    listProducts({ cookies }),
+    hoyDeLaEmpresa(locals, cookies)
   ]);
 
   return {
@@ -31,7 +37,8 @@ export async function load({ cookies }) {
     })),
     products: products.results
       .filter((p) => p.is_active)
-      .map((p) => ({ id: p.id, name: p.name, sku: p.sku, price: p.price }))
+      .map((p) => ({ id: p.id, name: p.name, sku: p.sku, price: p.price })),
+    hoy
   };
 }
 
