@@ -284,7 +284,7 @@ describe('"Todas las áreas"', () => {
 });
 
 describe('la cola nueva (23/10/2026)', () => {
-  it('quien administra abre directo en "Todas las áreas", sin las tarjetas de antes', async () => {
+  it('quien administra abre directo en "Todas las áreas" (las tarjetas, arriba de la cola)', async () => {
     listTickets.mockResolvedValue(respuesta());
     const data = /** @type {any} */ (await load(evento('')));
     expect(data.areaElegida).toBe(data.todas);
@@ -339,6 +339,38 @@ describe('la cola nueva (23/10/2026)', () => {
     expect(listTickets.mock.lastCall[1].get('area')).toBe('cartera');
     const soporte = data.selectorAreas.find((a) => a.nombre === 'soporte_tecnico');
     expect(soporte.total).toBe(3);
+  });
+});
+
+describe('las tarjetas por area vuelven (27/10/2026)', () => {
+  it('quien administra ve "Todas las áreas" y una tarjeta por area, con sus numeros', async () => {
+    listTickets.mockResolvedValue(respuesta());
+    const data = /** @type {any} */ (await load(evento('')));
+    const [todas, ...areas] = data.tarjetas;
+    expect(todas).toMatchObject({ nombre: data.todas, etiqueta: 'Todas las áreas', todas: true });
+    expect(todas.total).toBe(data.totals.open);
+    expect(areas.map((a) => a.nombre)).toEqual(data.selectorAreas.slice(1).map((a) => a.nombre));
+    for (const a of areas) {
+      expect(a).toHaveProperty('urgentes');
+      expect(a).toHaveProperty('sin_respuesta');
+      expect(a).toHaveProperty('sin_asignar');
+    }
+  });
+
+  it('dentro de un area, las demas tarjetas siguen con los numeros de la cola entera', async () => {
+    listTickets.mockReset();
+    listTickets.mockResolvedValue(respuesta());
+    const data = /** @type {any} */ (await load(evento('?area=cartera')));
+    const soporte = data.tarjetas.find((a) => a.nombre === 'soporte_tecnico');
+    //  La misma cuenta que el selector, que sale de la consulta sin filtro.
+    expect(soporte.total).toBe(data.selectorAreas.find((a) => a.nombre === 'soporte_tecnico').total);
+    expect(soporte.total).toBeGreaterThan(0);
+  });
+
+  it('un colaborador ve solo la tarjeta de su area', async () => {
+    listTickets.mockResolvedValue(respuesta());
+    const data = /** @type {any} */ (await load(evento('', { rol: 'USER', email: 'tecnico@x.test' })));
+    expect(data.tarjetas.map((a) => a.nombre)).toEqual(['soporte_tecnico']);
   });
 });
 

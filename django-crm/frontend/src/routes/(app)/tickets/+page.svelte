@@ -13,7 +13,8 @@
     CASE_PRIORITY_LABEL,
     CASE_STATUS_LABEL
   } from '$lib/v2/enums.js';
-  import { LifeBuoy, Plus, MessageCircle, Server, PenLine } from '@lucide/svelte';
+  import { LifeBuoy, Plus, MessageCircle, Server, PenLine, Wrench, Receipt, Building2,
+           Network, UserRound, PackageOpen } from '@lucide/svelte';
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import { origenDelTicket } from '$lib/v2/ticket-origen.js';
@@ -122,6 +123,41 @@
     )
   );
 
+  /**
+   * LAS TARJETAS POR AREA (vuelven el 27/10/2026, como eran el 19/10). El
+   * icono lo declara la config de cada area con una palabra, no con el nombre
+   * del area: «soporte» en vez de «llave» volveria a meter el organigrama de
+   * un ISP dentro del codigo del otro.
+   */
+  const ICONOS = {
+    llave: Wrench,
+    factura: Receipt,
+    edificio: Building2,
+    red: Network,
+    persona: UserRound,
+    caja: PackageOpen
+  };
+
+  /**
+   * Color de un area cuando su config no declara uno. Del nombre, no de la
+   * posicion: el color no cambia porque alguien reordeno las areas.
+   */
+  function colorDeArea(/** @type {any} */ a) {
+    if (a.color) return a.color;
+    let h = 0;
+    for (const c of a.nombre ?? '') h = (h * 31 + c.charCodeAt(0)) % 360;
+    return `hsl(${h} 52% 46%)`;
+  }
+
+  /** Iniciales, para un area sin icono declarado. */
+  const iniciales = (/** @type {string} */ etiqueta) =>
+    (etiqueta ?? '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0].toUpperCase())
+      .join('');
+
   const ORIGEN_ICONO = { whatsapp: MessageCircle, wisphub: Server, manual: PenLine };
 
   /**
@@ -221,22 +257,44 @@
   {#if form?.error}
     <p class="aviso-accion" role="alert">{form.error}</p>
   {/if}
-  <!-- LAS AREAS A LA VISTA, UNA PESTAÑA CADA UNA  --  27/10/2026, pedido del
-       usuario: «no están saliendo separados por soporte, operativo, ventas,
-       cartera, administración». Desde el 24/10 la separacion vivia en un
-       selector que nadie abria, y la cola arrancaba en «Todas las áreas»
-       mezclada. Son enlaces y no un formulario: funcionan sin JS, conservan
-       los demas filtros (hrefCon) y cada uno dice cuantos tiene. -->
-  {#if !data.soloMiArea && (data.selectorAreas ?? []).length > 1}
-    <nav class="areas-cola" aria-label="Área">
-      {#each data.selectorAreas as a (a.nombre)}
+  <!-- LAS TARJETAS POR AREA  --  27/10/2026, pedido del usuario: «no están
+       saliendo las tarjetas como antes: administración, soporte, operativo,
+       cartera, ventas». Las del 19/10 --total, urgentes, sin respuesta, sin
+       asignar--, ahora ARRIBA de la cola: un clic abre esa area y la elegida
+       queda marcada. Son enlaces: funcionan sin JS y conservan los demas
+       filtros (hrefCon). Los numeros son de la cola entera. -->
+  {#if (data.tarjetas ?? []).length}
+    <nav class="areas-grilla" aria-label="Tickets por área">
+      {#each data.tarjetas as a (a.nombre)}
+        {@const Icono = a.todas ? LifeBuoy : ICONOS[a.icono]}
         <a
-          class="vista"
+          class="area-tarjeta"
           href={hrefCon('area', a.nombre)}
           aria-current={data.areaElegida === a.nombre ? 'page' : undefined}
+          style="--area-color: {a.todas ? 'var(--v2-slate)' : colorDeArea(a)}"
         >
-          {a.etiqueta}
-          {#if a.total != null}<span class="v2-num">{count(a.total)}</span>{/if}
+          <span class="area-marca" aria-hidden="true">
+            {#if Icono}
+              <Icono size={17} strokeWidth={1.9} />
+            {:else}
+              <span class="area-iniciales">{iniciales(a.etiqueta)}</span>
+            {/if}
+          </span>
+          <span class="area-nombre">{a.etiqueta}</span>
+          <span class="area-total v2-num">{a.total ?? '—'}</span>
+          <span class="area-detalle">
+            <!-- Apagados cuando son cero: un "0 urgentes" en rojo grita algo
+                 que no esta pasando. -->
+            <span class="marca urgente" class:hay={a.urgentes > 0}
+              >{a.urgentes ?? 0} urgente{a.urgentes === 1 ? '' : 's'}</span
+            >
+            <span class="marca espera" class:hay={a.sin_respuesta > 0}
+              >{a.sin_respuesta ?? 0} sin respuesta</span
+            >
+          </span>
+          {#if a.sin_asignar > 0}
+            <span class="area-sin-asignar">{a.sin_asignar} sin asignar</span>
+          {/if}
         </a>
       {/each}
     </nav>
@@ -516,11 +574,89 @@
     border-color: var(--v2-ink);
     color: var(--v2-paper);
   }
-  .areas-cola {
+  /* ── las tarjetas por area (las del 19/10, de vuelta el 27/10) ───────── */
+  /* Grilla fluida: en pantallas chicas las tarjetas se reacomodan solas, sin
+     puntos de corte escritos a mano. */
+  .areas-grilla {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 12px;
+    padding: 14px var(--v2-pad) 4px;
+  }
+  .area-tarjeta {
     display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 16px 15px;
+    border: 1px solid var(--v2-line, #e3e4e1);
+    border-radius: 10px;
+    background: var(--v2-card, #fff);
+    text-decoration: none;
+    color: inherit;
+    transition:
+      border-color 0.12s,
+      transform 0.12s;
+  }
+  .area-tarjeta:hover {
+    border-color: var(--area-color);
+    transform: translateY(-1px);
+  }
+  /* La que se esta mirando: borde del color del area, y no un fondo saturado
+     que compita con la cola de abajo. */
+  .area-tarjeta[aria-current='page'] {
+    border-color: var(--area-color);
+    box-shadow: inset 0 0 0 1px var(--area-color);
+  }
+  /* El color del area se aplica a la marca, no a la tarjeta entera: cinco
+     tarjetas de fondo saturado compiten entre si y ninguna resalta. */
+  .area-marca {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    margin-bottom: 6px;
+    border-radius: 8px;
+    color: var(--area-color);
+    background: color-mix(in srgb, var(--area-color) 13%, transparent);
+  }
+  .area-iniciales {
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .area-nombre {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--v2-slate);
+  }
+  .area-total {
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+  .area-detalle {
+    display: flex;
+    gap: 10px;
     flex-wrap: wrap;
-    gap: 6px;
-    padding: 14px var(--v2-pad) 0;
+    font-size: 11.5px;
+    margin-top: 2px;
+  }
+  .marca {
+    color: var(--v2-slate);
+  }
+  .marca.urgente.hay {
+    color: var(--v2-rust, #e8590c);
+    font-weight: 600;
+  }
+  .marca.espera.hay {
+    color: var(--v2-clay, #a8560b);
+    font-weight: 600;
+  }
+  .area-sin-asignar {
+    font-size: 11px;
+    color: var(--v2-slate);
+    margin-top: 3px;
   }
   .area-etiqueta {
     display: inline-block;

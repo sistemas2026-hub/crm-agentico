@@ -351,9 +351,36 @@ export async function load({ cookies, url, locals, fetch }) {
         }))
       ];
 
+  //  LAS TARJETAS VUELVEN  --  27/10/2026, pedido del usuario: «no están
+  //  saliendo las tarjetas como antes: administración, soporte, operativo,
+  //  cartera, ventas». Las del 19/10 (total, urgentes, sin respuesta, sin
+  //  asignar), ahora ARRIBA de la cola en vez de en una pantalla aparte: un
+  //  clic abre esa área, y la elegida queda marcada.
+  //  Los numeros son de la cola ENTERA (`global` cuando hay un area elegida,
+  //  igual que el selector): dentro de un area, la consulta principal ya
+  //  viene recortada y las demas tarjetas darian cero. Un colaborador ve la
+  //  de su area y nada mas, como antes.
+  const totalesGlobales = global ? global.totals : totals;
+  const tarjetas = soloMiArea
+    ? areasVisibles
+    : [
+        {
+          nombre: TODAS_LAS_AREAS,
+          etiqueta: 'Todas las áreas',
+          todas: true,
+          total: totalesGlobales.open,
+          urgentes: totalesGlobales.urgent,
+          sin_respuesta: totalesGlobales.awaiting_reply,
+          sin_asignar: (resumenGlobal ?? []).reduce(
+            (n, /** @type {any} */ a) => n + (a.sin_asignar ?? 0), 0)
+        },
+        ...(resumenGlobal ?? [])
+      ];
+
   return {
     areas: areasVisibles,
     selectorAreas,
+    tarjetas,
     orden,
     reparte,
     paginacion,
