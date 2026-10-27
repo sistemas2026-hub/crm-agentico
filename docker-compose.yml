@@ -137,6 +137,10 @@ services:
       MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
       MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
       MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
+      #  EL AVISO AL TELEFONO TAMBIEN SALE DE ACA (27/10/2026): el ciclo del
+      #  Supervisor corre en este contenedor y publica el reparto. Misma
+      #  variable que en 'backend'; sin ella el log dice 'push_sin_proveedor'.
+      FCM_CUENTA_DE_SERVICIO: ${FCM_CUENTA_DE_SERVICIO:-}
     volumes:
       - ./django-crm/backend:/app
     depends_on:

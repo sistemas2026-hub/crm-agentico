@@ -116,8 +116,8 @@ def _de(orden, profile):
     return orden
 
 
-def _jornada_de(org, zonas, *profiles):
-    c = Cuadrilla.objects.create(org=org, nombre="Cuadrilla norte")
+def _jornada_de(org, zonas, *profiles, nombre="Cuadrilla norte"):
+    c = Cuadrilla.objects.create(org=org, nombre=nombre)
     j = JornadaDeCuadrilla.objects.create(
         org=org, cuadrilla=c, fecha=LUNES, labor=JornadaDeCuadrilla.INSTALACION)
     j.zonas.set(zonas)
@@ -213,6 +213,23 @@ def test_b2_si_se_suma_alguien_solo_se_le_avisa_al_que_llega(
 
     assert r["reasignadas"] == [310]
     assert [m["token"] for m in fcm] == ["tok-o"]
+
+
+def test_b3_una_orden_que_vuelve_a_la_misma_persona_le_avisa_otra_vez(
+        org_a, version, norte, admin_profile, otro, fcm,
+        django_capture_on_commit_callbacks):
+    """De A a B y de vuelta a A: tres asignaciones, tres avisos. La huella del
+    aviso lleva la revision (auditoria independiente, 27/10/2026)."""
+    _telefono(org_a, admin_profile, "tok-a")
+    _telefono(org_a, otro, "tok-o")
+    o = _orden(org_a, version, 320)
+    ja = _jornada_de(org_a, [norte], admin_profile, nombre="Cuadrilla A")
+    jb = _jornada_de(org_a, [norte], otro, nombre="Cuadrilla B")
+
+    for j in (ja, jb, ja):
+        _publicar(org_a, j, [o], django_capture_on_commit_callbacks)
+
+    assert [m["token"] for m in fcm] == ["tok-a", "tok-o", "tok-a"]
 
 
 # ---------------------------------------------------------------------------

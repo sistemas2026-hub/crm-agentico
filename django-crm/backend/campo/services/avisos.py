@@ -268,9 +268,11 @@ def avisar_jornada_publicada(org, nuevas_por_perfil: dict, fecha) -> None:
             [perfil], VERBO_JORNADA, entity=ordenes[0], entity_name=nombre,
             link=enlace, contenido=contenido)
         #  La clave es ESTA publicacion para ESTA persona: las mismas ordenes
-        #  publicadas dos veces son un solo aviso.
-        huella = hashlib.sha1(
-            ",".join(sorted(str(o.id) for o in ordenes)).encode()).hexdigest()[:20]
+        #  publicadas dos veces son un solo aviso. Con la REVISION de cada una:
+        #  una orden que va de A a B y vuelve a A es otra asignacion, y A tiene
+        #  que enterarse (auditoria independiente, 27/10/2026).
+        huella = hashlib.sha1(",".join(sorted(
+            f"{o.id}:{o.revision}" for o in ordenes)).encode()).hexdigest()[:20]
         _despachar(
             org=org,
             clave=f"jornada|{perfil.id}|{fecha.isoformat()}|{huella}",

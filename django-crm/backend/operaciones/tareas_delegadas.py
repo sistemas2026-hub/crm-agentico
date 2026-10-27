@@ -60,6 +60,9 @@ CICLO_AUTOMATICO = "revisar_solo_con_cada_actualizacion"
 PASAR_A_DESPACHO = "pasar_a_despacho_segun_las_reglas"
 ARMAR_LA_JORNADA = "armar_la_jornada_del_dia"
 CREAR_LAS_ORDENES = "crear_las_ordenes_de_despacho"
+#  Fase 3.1 (27/10/2026): publicar el reparto del dia. Ver
+#  operaciones/publicacion_del_reparto.py.
+PUBLICAR_EL_REPARTO = "publicar_el_reparto_del_dia"
 #  La misma clave que 'paso_a_despacho.TAREA_CORRECCIONES': se escribe en los dos
 #  lados para no importar aquel modulo desde aca, y una prueba las ata.
 PASAR_CON_LAS_CORRECCIONES = "pasar_a_despacho_con_las_correcciones"
@@ -140,6 +143,33 @@ CATALOGO = {
         #  PROPIA, como las otras: habilitar armar la jornada no habilita
         #  crear ordenes. Nivel 3: la orden no sale de la plataforma ni le
         #  llega a nadie hasta que se publica, y una persona la cancela.
+        "exige_nivel": 3,
+        "necesita_que_mire": True,
+    },
+    PUBLICAR_EL_REPARTO: {
+        "nombre": "Publicar el reparto del día",
+        "que_hace": (
+            "En cada vuelta, desde dos horas antes de que abran las cuadrillas "
+            "hasta el cierre, asigna a las cuadrillas del día las órdenes que "
+            "no tienen a nadie y las que tiene alguien que hoy no trabaja, "
+            "con la regla de reparto del botón «Publicar» y contando lo que "
+            "cada cuadrilla ya tiene hoy para no pasar su tope. A cada técnico "
+            "le avisa al teléfono una vez por vuelta, con cuántas visitas le "
+            "tocaron."),
+        "que_no_hace": (
+            "No mueve una orden que ya tiene a alguien que hoy trabaja: ni lo "
+            "que publicó una persona, ni lo que asignó el mismo Supervisor, ni "
+            "lo que un técnico empezó. No publica en un día que las cuadrillas "
+            "no trabajan, ni a una cuadrilla sin nadie con cuenta o con alguien "
+            "que declaró ausencia. Lo que no entra por el tope queda sin "
+            "asignar, para mañana."),
+        #  PROPIA, como las otras: crear las ordenes no habilita publicarlas.
+        #  Nivel 3, justificado por escrito (27/10/2026): es la primera que
+        #  hace que el trabajo LE LLEGUE a alguien sin que una persona lo mire
+        #  --la visita en su lista y un aviso al telefono--, y eso lo decidio
+        #  el usuario el 17/10. Lo acota: una persona lo deshace moviendo la
+        #  orden en Cuadrillas, desde la apertura nada publicado se mueve solo,
+        #  y lo que un tecnico empezo o una persona asigno no se toca nunca.
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },

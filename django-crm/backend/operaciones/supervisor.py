@@ -2662,6 +2662,11 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
     desde el 25/10/2026, ubicar cada asunto en su nivel de respuesta (H-21,
     autorizada por el usuario; `nivel_de_los_asuntos`).
     """
+    #  La hora PEDIDA, antes de completarla: la publicacion del reparto la
+    #  usa si la pidieron (pruebas, una corrida a mano) y si no toma la hora
+    #  real al publicar, porque las fases de antes pueden tardar minutos
+    #  (auditoria de frontera, 27/10/2026).
+    ahora_pedido = ahora
     ahora = ahora or timezone.now()
     with transaction.atomic():
         #  UN CICLO A LA VEZ POR ORGANIZACION  --  paso M09-L
@@ -2786,6 +2791,11 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         #  delegada solo deja en el log cuantas crearia (la sombra).
         ("creacion de las ordenes de Despacho",
          lambda: _crear_las_ordenes(org, ahora)),
+        #  LA PUBLICACION, DESPUES DE CREAR  --  27/10/2026, fase 3.1: lo que
+        #  se creo en esta vuelta ya entra al reparto. Sin la tarea delegada
+        #  solo deja en el log cuantas publicaria (la sombra).
+        ("publicacion del reparto del dia",
+         lambda: _publicar_el_reparto(org, ahora_pedido)),
         #  LA MEDICION DESPUES DEL ARREGLO  --  18/10/2026, correccion 2 del
         #  usuario: cuando el tecnico reporta el arreglo, se vuelve a medir.
         #  VA AL FINAL: informa y no decide, y el presupuesto del proveedor se
@@ -2838,6 +2848,13 @@ def _crear_las_ordenes(org, ahora) -> dict:
     la del armado."""
     from operaciones import ordenes_de_despacho
     return ordenes_de_despacho.crear_las_ordenes(org, ahora)
+
+
+def _publicar_el_reparto(org, ahora) -> dict:
+    """La fase de `publicacion_del_reparto`, importada recien al correr, como
+    la del armado y la de las ordenes."""
+    from operaciones import publicacion_del_reparto
+    return publicacion_del_reparto.publicar_el_reparto(org, ahora)
 
 
 def _verificar_los_arreglos(org, *, desatendido: bool = False) -> dict:

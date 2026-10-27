@@ -515,13 +515,19 @@ def clave_de_reparto(precios_por_plan=None, plazo_de=None, ahora=None):
 
 
 def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
-             zona_de_barrio: dict, dia, zona_horaria) -> dict:
+             zona_de_barrio: dict, dia, zona_horaria,
+             carga_inicial: dict | None = None) -> dict:
     """Reparte `ordenadas` (ya en su orden) entre `jornadas`. No consulta la
     base ni escribe nada.
 
     Cada jornada necesita `id`, `labor` y `cuadrilla.nombre`; `zonas_de` y
     `topes` van por `id`. Por eso sirve igual para las jornadas de la base y
     para las que el Supervisor armaria.
+
+    `carga_inicial` (27/10/2026, fase 3.1): lo que cada jornada ya tiene hoy.
+    Sin ella cada vuelta arranca en cero, y una cuadrilla con tope 8 terminaba
+    con 11 si entraban ordenes despues de publicar (auditorias de frontera e
+    independiente). El boton no la pasa: reparte el dia entero de una vez.
 
         {"asignadas": {jornada.id: [ordenes]}, "sin_zona", "sin_cuadrilla",
          "sobrantes", "sin_clasificar", "otro_dia"}
@@ -536,7 +542,7 @@ def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
         for z in zonas_de.get(j.id, ()):
             por_zona.setdefault((str(z), j.labor), []).append(j)
 
-    carga = {j.id: 0 for j in jornadas}
+    carga = {j.id: (carga_inicial or {}).get(j.id, 0) for j in jornadas}
     asignadas: dict = {j.id: [] for j in jornadas}
     sin_zona, sin_cuadrilla, sobrantes, sin_clasificar = [], [], [], []
     otro_dia = []
@@ -597,7 +603,8 @@ def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
 #  desincronice el primer dia que alguien toque una de las dos.
 
 def publicar(org, asignaciones, *, mover: bool = True,
-             por_el_supervisor: dict | None = None) -> dict:
+             por_el_supervisor: dict | None = None,
+             trabajan_hoy: frozenset | None = None) -> dict:
     """Escribe las asignaciones que se vieron. No recalcula.
 
     `asignaciones` = [{"jornada": id, "ordenes": [id, ...]}], lo que la
@@ -612,9 +619,15 @@ def publicar(org, asignaciones, *, mover: bool = True,
     LO QUE AGREGO LA FASE 3.1 (27/10/2026)
     --------------------------------------
     `mover=False`: lo que ya tiene gente NO se mueve, solo se asigna lo que no
-    tenia a nadie. Es la regla del Supervisor una vez que arranco el dia
-    (decision del usuario del 21/10: desde la apertura lo publicado queda
-    quieto y lo nuevo se suma). El boton humano sigue moviendo, como siempre.
+    tenia a nadie. Es la regla del Supervisor (decision del usuario del 21/10:
+    lo publicado queda quieto y lo nuevo se suma; ver
+    `operaciones/publicacion_del_reparto.py`). El boton humano sigue moviendo,
+    como siempre.
+
+    `trabajan_hoy` (con `mover=False`): las cuentas que hoy trabajan. Una
+    orden cuya gente NO esta en ese conjunto --no salio hoy, o declaro
+    ausencia-- si se mueve: si no, quedaria en el telefono de quien no sale. Se
+    decide sobre la fila bloqueada, con la gente que tiene en ese momento.
 
     `por_el_supervisor`: los datos del evento `asignada_por_el_supervisor`
     que se deja en cada orden que asigna el Supervisor, sin persona (el patron
@@ -716,10 +729,13 @@ def publicar(org, asignaciones, *, mover: bool = True,
                                for a in viejas} == nuevos:
                     sin_cambio.append(orden.numero)
                     continue
-                if viejas and not mover:
-                    #  EL DIA YA ARRANCO (decision del 21/10/2026): lo
-                    #  publicado queda quieto. Un tecnico sin señal que ya va
-                    #  en camino la perderia al sincronizar.
+                if viejas and not mover and not (
+                        trabajan_hoy is not None
+                        and {a.profile_id for a in viejas}.isdisjoint(
+                            trabajan_hoy)):
+                    #  LO PUBLICADO QUEDA QUIETO (decision del 21/10/2026):
+                    #  un tecnico sin señal que ya va en camino la perderia al
+                    #  sincronizar. Salvo que quien la tiene hoy no trabaja.
                     quietas.append(orden.numero)
                     continue
                 if viejas:

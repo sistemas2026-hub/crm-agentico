@@ -423,6 +423,36 @@ void main() {
       expect(veces, 2);
     });
 
+    test('e3 · con la app abierta, recibirlo lo guarda y sincroniza', () async {
+      var veces = 0;
+      final AvisosPush conEspia = AvisosPush(
+        baseLocal: base,
+        almacen: SecureStorageService(),
+        sincronizar: () async => veces++,
+      );
+
+      await conEspia.recibido(mensajeDeAsignacion());
+      await pumpEventQueue();
+
+      expect(veces, 1);
+      expect((await filaUnica())?['verbo'], 'trabajo_asignado');
+    });
+
+    test('e4 · con la app cerrada, tocarlo sincroniza y abre la orden', () async {
+      var veces = 0;
+      final AvisosPush conEspia = AvisosPush(
+        baseLocal: base,
+        almacen: SecureStorageService(),
+        sincronizar: () async => veces++,
+      );
+
+      conEspia.alTocar(mensajeDeAsignacion());
+      await pumpEventQueue();
+
+      expect(veces, 1);
+      expect(AvisosPush.tomarOrdenPendiente(), ordenA);
+    });
+
     test('e2 · si la sincronización falla, el aviso no se rompe', () async {
       final AvisosPush rota = AvisosPush(
         baseLocal: base,

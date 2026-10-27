@@ -210,11 +210,11 @@ class AvisosPush {
     _suscripcionToken = mensajeria.onTokenRefresh.listen(_registrar);
 
     // Tocar el aviso con la app en segundo plano.
-    FirebaseMessaging.onMessageOpenedApp.listen(_alTocar);
+    FirebaseMessaging.onMessageOpenedApp.listen(alTocar);
 
     // Y tocarlo con la app cerrada, que arranca el proceso de cero.
     mensajeria.getInitialMessage().then((RemoteMessage? m) {
-      if (m != null) _alTocar(m);
+      if (m != null) alTocar(m);
     });
   }
 
@@ -225,9 +225,7 @@ class AvisosPush {
   /// se guarda desaparece al cerrar la app, y el técnico no tiene dónde volver a
   /// buscarlo.
   Future<void> _alLlegar(RemoteMessage mensaje) async {
-    await espejar(mensaje);
-    // Sin esperarla: el aviso se dibuja ya, y la orden baja mientras tanto.
-    unawaited(sincronizarSiTraeTrabajo(mensaje));
+    await recibido(mensaje);
     final RemoteNotification? n = mensaje.notification;
     if (n == null) return;
     try {
@@ -304,8 +302,22 @@ class AvisosPush {
     }
   }
 
+  /// Llegó un aviso con la app abierta: se guarda y, si trae trabajo nuevo,
+  /// se pide la sincronización sin esperarla —el aviso se dibuja ya, y la
+  /// orden baja mientras tanto—.
+  Future<void> recibido(RemoteMessage mensaje) async {
+    await espejar(mensaje);
+    unawaited(sincronizarSiTraeTrabajo(mensaje));
+  }
+
   /// El técnico tocó el aviso: abrir la orden, no la pantalla de inicio.
-  void _alTocar(RemoteMessage mensaje) {
+  ///
+  /// CON LA APP EN SEGUNDO PLANO O CERRADA el aviso no pasa por `recibido`
+  /// (eso es solo `onMessage`, con la app abierta): llega directo acá. Sin
+  /// pedir la sincronización, tocar «Te asignaron la OT #N» abría el detalle
+  /// de una orden que todavía no bajó (auditoría independiente, 27/10/2026).
+  void alTocar(RemoteMessage mensaje) {
+    unawaited(sincronizarSiTraeTrabajo(mensaje));
     abrirDesdeUnEnlace((mensaje.data['enlace'] ?? '').toString());
   }
 
