@@ -299,6 +299,11 @@
       {/each}
     </nav>
   {/if}
+  <!-- LOS TICKETS SOLO DENTRO DE UNA TARJETA  --  27/10/2026, pedido del
+       usuario: «los ticket no tienen que salir fuera de la tarjeta, solo se
+       ven los ticket dentro de la tarjeta». Como hasta el 23/10: la pantalla
+       abre en las tarjetas, y la cola aparece al elegir una. -->
+  {#if data.areaElegida}
   <div class="barra-cola">
     <div class="vistas" role="group" aria-label="De quién">
       {#each VISTAS as v (v.clave)}
@@ -526,9 +531,17 @@
     </div>
   {/if}
 </div>
+  {:else}
+    <p class="elegi-area">Elegí un área para ver sus tickets.</p>
+  {/if}
 {/if}
 
 <style>
+  .elegi-area {
+    margin: 6px var(--v2-pad) 24px;
+    font-size: 13px;
+    color: var(--v2-slate);
+  }
   /* ── la barra de la cola (23/10/2026) ──────────────────────────────── */
   .barra-cola {
     display: flex;

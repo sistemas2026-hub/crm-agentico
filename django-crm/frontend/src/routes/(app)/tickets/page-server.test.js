@@ -284,27 +284,38 @@ describe('"Todas las áreas"', () => {
 });
 
 describe('la cola nueva (23/10/2026)', () => {
-  it('quien administra abre directo en "Todas las áreas" (las tarjetas, arriba de la cola)', async () => {
+  //  27/10/2026, pedido del usuario: «los ticket no tienen que salir fuera de
+  //  la tarjeta». La pantalla abre en las tarjetas, sin area elegida; la cola
+  //  aparece al elegir una. Hasta ese dia abria directo en «Todas las áreas».
+  it('quien administra abre en las tarjetas, sin un area elegida', async () => {
     listTickets.mockResolvedValue(respuesta());
     const data = /** @type {any} */ (await load(evento('')));
-    expect(data.areaElegida).toBe(data.todas);
+    expect(data.areaElegida).toBe('');
+    expect(data.tarjetas[0]).toMatchObject({ nombre: data.todas, etiqueta: 'Todas las áreas' });
+  });
+
+  it('la tarjeta «Todas las áreas» abre la cola entera', async () => {
+    listTickets.mockResolvedValue(respuesta());
+    const todas = /** @type {any} */ (await load(evento(''))).todas;
+    const data = /** @type {any} */ (await load(evento(`?area=${encodeURIComponent(todas)}`)));
+    expect(data.areaElegida).toBe(todas);
     expect(ids(data).sort()).toEqual(TODOS.map((t) => t.id).sort());
-    expect(data.selectorAreas[0]).toMatchObject({ nombre: data.todas, etiqueta: 'Todas las áreas' });
   });
 
   it('un supervisor ve la cola entera como quien administra, con selector', async () => {
     listTickets.mockResolvedValue(respuesta());
     const data = /** @type {any} */ (await load(evento('', { rol: 'SUPERVISOR', email: 'admin@x.test' })));
-    expect(data.areaElegida).toBe(data.todas);
+    expect(data.areaElegida).toBe('');
     expect(data.soloMiArea).toBe(false);
     expect(data.reparte).toBe(true);
     expect(data.selectorAreas.length).toBeGreaterThan(1);
   });
 
-  it('un colaborador abre directo en su area, y no tiene selector', async () => {
+  it('un colaborador abre en la tarjeta de su area, y no tiene selector', async () => {
     listTickets.mockResolvedValue(respuesta());
     const data = /** @type {any} */ (await load(evento('', { rol: 'USER', email: 'tecnico@x.test' })));
-    expect(data.areaElegida).toBe('soporte_tecnico');
+    expect(data.areaElegida).toBe('');
+    expect(data.tarjetas.map((/** @type {any} */ a) => a.nombre)).toEqual(['soporte_tecnico']);
     expect(data.selectorAreas).toEqual([]);
   });
 

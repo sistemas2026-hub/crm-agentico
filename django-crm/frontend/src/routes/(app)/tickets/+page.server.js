@@ -133,14 +133,13 @@ export async function load({ cookies, url, locals, fetch }) {
 
   //  LA PANTALLA ABRE EN LA COLA, NO EN LAS TARJETAS  --  23/10/2026
   //
-  //  Hasta hoy, sin area en la URL se mostraban tarjetas por area y hacia
-  //  falta un clic mas para ver un solo ticket. Desde el rediseño de Tickets
-  //  abre directo en la cola: quien administra, en "Todas las áreas"; un
-  //  colaborador, en la suya. El "¿cuántos tiene cada area?" no se pierde:
-  //  viaja como el numero de cada opcion del selector de area (`areasSelector`
-  //  abajo). Quien no tiene area propia sigue sin cola -- fail-closed, igual
-  //  que antes --.
-  if (!areaElegida && !sinAreaPropia) areaElegida = soloMiArea ? miArea : TODAS_LAS_AREAS;
+  //  Desde el 23/10 Tickets abria directo en la cola ("Todas las áreas"
+  //  para quien reparte, la suya para un colaborador). DESHECHO EL
+  //  27/10/2026, pedido del usuario: «los ticket no tienen que salir fuera de
+  //  la tarjeta, solo se ven los ticket dentro de la tarjeta». Sin area en la
+  //  URL la pantalla muestra las tarjetas y nada mas; la cola aparece al
+  //  elegir una (`?area=`). Por eso aca ya no se completa un area por
+  //  defecto. Quien no tiene area propia sigue sin cola -- fail-closed --.
 
   //  LA VISTA Y EL ORDEN SE LOS PIDE AL SERVIDOR  --  23/10/2026
   //
