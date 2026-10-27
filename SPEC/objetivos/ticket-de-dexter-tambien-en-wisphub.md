@@ -1,7 +1,7 @@
 # Objetivo · Un ticket creado en Dexter nace también en WispHub
 
-> Abierto el 25/10/2026. Estado: **abierto** — diseñado, sin código. Bloqueado
-> por una autorización (ver Bloqueos).
+> Abierto el 25/10/2026. Estado: **abierto** — construido el 26/10/2026, sin desplegar.
+> Falta: deploy, cargar la config y el ticket real de prueba (ver Bloqueos).
 
 ## Qué significa terminado
 
@@ -105,3 +105,4 @@ las tres sin caminos especiales.
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
 | 25/10/2026 | Diseño, mediciones y decisiones | Todo el código; la autorización de Bloqueos | — |
+| 26/10/2026 | Construido: `nucleo/seguimiento/ticket_desde_dexter.py` + rutas del motor (`/tickets-desde-dexter/asuntos`, `/servicios/<id>/titular`, `/casos/<id>/ticket-operativo`); `POST /api/importacion/casos/<id>/vincular/` (solo admin, no pisa, 409 si el ticket ya tiene caso); herramienta `vincular_caso_externo` y `tickets_desde_dexter.asuntos` en la config (15 asuntos, todos ya usados por el escalamiento en producción); "Crear también en WispHub" en Nuevo ticket con "Verificar" titular. Decisión al construir: **la primera versión usa solo valores ya probados en producción** (la herramienta `crear_ticket_caso` del escalamiento, su departamento y sus asuntos) — lo que no está verificado contra WispHub no entra | Deploy; cargar la config; el ticket real de prueba | — |

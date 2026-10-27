@@ -1283,6 +1283,10 @@ class Herramienta(Base):
     # ejecuta el codigo (operativo.sellar_primera_respuesta) cuando la
     # respuesta fue ACEPTADA para entrega, nunca el modelo.
     sella_primera_respuesta: bool = False
+    # La que ata un caso de Dexter al ticket que se le acaba de crear en el
+    # sistema del ISP (ver nucleo/seguimiento/ticket_desde_dexter.py). Sin
+    # ella no se crea el ticket: uno sin atar lo importaria como caso nuevo.
+    vincula_caso_externo: bool = False
     # Nombres de campo en la respuesta cruda del proveedor -- configurables
     # por tenant para no hardcodear el vocabulario de un proveedor puntual
     # (WispHub llama 'localidad' y 'zona') en nucleo/. 'campo_zona_sync'
@@ -2156,6 +2160,32 @@ class TicketEscalado(Base):
     # 22/08/2026, WispHub RECHAZA con 400 uno que no este en su lista.
     asunto: str = ""
     prioridad: str = ""
+
+
+class AsuntoDesdeDexter(Base):
+    """
+    Un asunto con el que una persona puede abrir, desde "Nuevo ticket", el
+    ticket en el sistema del ISP.
+
+    'asunto' va LITERAL al proveedor: tiene que existir en su catalogo. 'area'
+    decide a nombre de quien se abre alla (el responsable del area, igual que
+    al escalar) y es el area que queda escrita en el caso. 'prioridad' es el
+    codigo del proveedor; vacia = la de la herramienta.
+    """
+    asunto: str
+    area: str = ""
+    prioridad: str = ""
+
+
+class TicketsDesdeDexter(Base):
+    """
+    Que se puede abrir en el sistema del ISP desde "Nuevo ticket" (26/10/2026).
+
+    VACIO = APAGADO: sin asuntos declarados el formulario no ofrece crear el
+    ticket alla. Es la lista que la pantalla muestra, y la unica que el motor
+    acepta: un asunto que no este aca se rechaza antes de llamar al proveedor.
+    """
+    asuntos: list[AsuntoDesdeDexter] = Field(default_factory=list)
 
 
 class Escalamiento(Base):
@@ -3217,6 +3247,8 @@ class TenantConfig(Base):
     manual: Manual = Field(default_factory=Manual)
     importacion_tickets: ImportacionTickets = Field(
         default_factory=ImportacionTickets)
+    tickets_desde_dexter: TicketsDesdeDexter = Field(
+        default_factory=TicketsDesdeDexter)
 
     def advertencias_de_aprobacion(self) -> list[str]:
         """
@@ -3699,6 +3731,24 @@ class TenantConfig(Base):
                         f"{i} no tiene condiciones, asi que gana siempre y las "
                         f"que siguen no se evaluan nunca. El caso por defecto "
                         f"va ultimo.")
+
+        # Los asuntos de "Nuevo ticket": sin repetidos (la pantalla los lista y
+        # el motor los busca por nombre) y con un area que exista. Un area mal
+        # escrita no romperia nada en vivo -- el ticket saldria a nombre del
+        # tecnico fijo -- y por eso se ataja al cargar.
+        vistos_asunto = set()
+        nombres_area = {a.nombre for a in self.areas}
+        for a in self.tickets_desde_dexter.asuntos:
+            if not a.asunto.strip():
+                raise ValueError("tickets_desde_dexter.asuntos: un asunto vacio")
+            if a.asunto in vistos_asunto:
+                raise ValueError(
+                    f"tickets_desde_dexter.asuntos: '{a.asunto}' esta repetido")
+            vistos_asunto.add(a.asunto)
+            if a.area and nombres_area and a.area not in nombres_area:
+                raise ValueError(
+                    f"tickets_desde_dexter.asuntos['{a.asunto}'] apunta al area "
+                    f"inexistente '{a.area}' ({sorted(nombres_area)})")
 
         # Mismo control para el veto: si la herramienta que tendria que
         # frenar el agendamiento no existe, el veto no frena nada y no lo

@@ -1,5 +1,6 @@
 <script>
   import { enhance } from '$app/forms';
+  import { page } from '$app/state';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import NextAction from '$lib/v2/components/NextAction.svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
@@ -39,6 +40,26 @@
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
+
+  /*
+   * Lo que paso con WispHub al crear el ticket desde "Nuevo ticket"
+   * (26/10/2026). Viaja en la direccion porque el caso ya existia cuando se
+   * intento: pase lo que pase, quien lo creo cae aca y tiene que saberlo.
+   */
+  let avisoWispHub = $derived.by(() => {
+    const q = page.url.searchParams;
+    const id = q.get('wisphub');
+    if (id && q.get('wisphub_sin_atar')) {
+      return {
+        tono: 'clay',
+        texto: `Se creó en WispHub (#${id}), pero no quedó atado a este ticket. Avisá a un administrador para que la importación no lo traiga duplicado.`
+      };
+    }
+    if (id) return { tono: 'moss', texto: `Creado también en WispHub: ticket #${id}.` };
+    const error = q.get('wisphub_error');
+    if (error) return { tono: 'clay', texto: `El ticket quedó solo en Dexter. ${error}` };
+    return null;
+  });
 
   let { ticket, conversation, articles, alsoOpen, contacts, attachments, activity, canReply } =
     $derived(data);
@@ -511,6 +532,15 @@
 
     <div class="v2-scroll">
       <div class="v2-pad" style="padding-top:14px;padding-bottom:24px">
+        {#if avisoWispHub}
+          <p
+            class="v2-card"
+            role="status"
+            style="padding:10px 13px;margin-bottom:16px;font-size:13px;border-left:3px solid var(--v2-{avisoWispHub.tono})"
+          >
+            {avisoWispHub.texto}
+          </p>
+        {/if}
         {#if form?.error}
           <p
             class="v2-card"

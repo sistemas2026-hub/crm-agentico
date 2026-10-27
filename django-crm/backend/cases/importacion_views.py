@@ -780,3 +780,79 @@ class NombreClienteView(APIView):
 
         return Response({"actualizados": actualizados, "ya_tenian": ya_tenian,
                          "sin_nombre": False}, status=http.HTTP_200_OK)
+
+
+# ===========================================================================
+#  VINCULAR UN CASO DE DEXTER CON EL TICKET QUE SE LE CREO ALLA  --  26/10/2026
+# ===========================================================================
+#  Un ticket creado desde "Nuevo ticket" nace aca y despues en el proveedor.
+#  Hasta que el caso no lleva la identidad de ese ticket, la importacion no lo
+#  reconoce como suyo: entra por la cuenta de la API, no figura en ningun
+#  registro de Dexter, y la proxima vuelta lo traeria como un CASO NUEVO. Esta
+#  ruta lo ata en el mismo paso en que el motor lo crea, y desde ahi la
+#  importacion lo ve como 'YA_EXISTE' y le trae el hilo.
+#
+#  LA IDENTIDAD LA PONE EL MOTOR, que la leyo de la respuesta del proveedor:
+#  nunca la pantalla. Por eso es una ruta de importacion (solo
+#  administracion) y no un campo del formulario -- atar un caso a un ticket
+#  ajeno es traerle a ese caso el hilo de otro cliente.
+#
+#  NO PISA: un caso ya atado a otro ticket es un 409, y un ticket que ya tiene
+#  caso tambien. Repetir el MISMO vinculo es un 200: el motor reintenta.
+
+CAMPOS_VINCULO = frozenset({
+    "provider", "external_ticket_id", "external_service_id", "area",
+})
+
+
+class VincularCaseView(APIView):
+    """POST /api/importacion/casos/<uuid:pk>/vincular/"""
+
+    permission_classes = PERMISOS_IMPORTACION
+
+    def post(self, request, pk):
+        cuerpo = request.data if isinstance(request.data, dict) else {}
+        sobra = _campos_inesperados(cuerpo, CAMPOS_VINCULO)
+        if sobra:
+            return _error(f"campos no aceptados: {sobra}", "CAMPO_NO_PERMITIDO")
+        proveedor = str(cuerpo.get("provider") or "").strip()
+        ticket = str(cuerpo.get("external_ticket_id") or "").strip()
+        servicio = str(cuerpo.get("external_service_id") or "").strip()
+        area = str(cuerpo.get("area") or "").strip()
+        if not proveedor or not ticket:
+            return _error("faltan 'provider' y 'external_ticket_id'", "CAMPO_REQUERIDO")
+        if len(ticket) > 64 or len(servicio) > 64 or len(area) > 64:
+            return _error("un valor es demasiado largo", "CAMPO_INVALIDO")
+
+        with transaction.atomic():
+            caso = Case.objects.select_for_update().filter(pk=pk, org=request.org).first()
+            if caso is None:
+                return _error("no existe ese caso", "CASO_NO_ENCONTRADO",
+                              http.HTTP_404_NOT_FOUND)
+            if caso.provider == proveedor and caso.external_ticket_id == ticket:
+                return Response({"vinculado": True, "ya_estaba": True})
+            if caso.provider or caso.external_ticket_id:
+                return _error("ese caso ya esta atado a otro ticket",
+                              "CASO_YA_VINCULADO", http.HTTP_409_CONFLICT)
+            if Case.objects.filter(org=request.org, provider=proveedor,
+                                   external_ticket_id=ticket).exists():
+                return _error("ese ticket ya tiene un caso", "TICKET_YA_TIENE_CASO",
+                              http.HTTP_409_CONFLICT)
+            caso.provider = proveedor
+            caso.external_ticket_id = ticket
+            caso.external_service_id = servicio
+            caso.external_created_by_type = EXTERNAL_AUTHOR_DEXTER
+            campos = ["provider", "external_ticket_id", "external_service_id",
+                      "external_created_by_type"]
+            if area and not (caso.area or "").strip():
+                caso.area = area
+                campos.append("area")
+            try:
+                with transaction.atomic():
+                    caso.save(update_fields=campos)
+            except IntegrityError:
+                # Otro caso se quedo con el mismo ticket entre el 'exists' y
+                # el guardado: decide el UNIQUE de la base, y es el mismo 409.
+                return _error("ese ticket ya tiene un caso", "TICKET_YA_TIENE_CASO",
+                              http.HTTP_409_CONFLICT)
+        return Response({"vinculado": True, "ya_estaba": False})

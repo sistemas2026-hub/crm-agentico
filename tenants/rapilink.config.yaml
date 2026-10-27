@@ -4148,6 +4148,27 @@ herramientas:
         tipo: texto
         verificado_el: 2026-09-10
 
+  # Ata un caso creado en Dexter al ticket que se le acaba de abrir en WispHub
+  # (26/10/2026). Sin esto la importacion lo traeria como un caso NUEVO: entra
+  # por la cuenta de la API y no figura en ningun registro de Dexter. La
+  # ejecuta el codigo (nucleo/seguimiento/ticket_desde_dexter.py) en el mismo
+  # paso que crea el ticket, con el id que devolvio WispHub -- nunca la pantalla.
+  - nombre: vincular_caso_externo
+    efecto_externo: false
+    tipo: http
+    vincula_caso_externo: true
+    descripcion: >
+      Ata un caso de Dexter al ticket que se le creo en WispHub. NO la llames
+      tu: la ejecuta el codigo al crear el ticket desde "Nuevo ticket".
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000/api
+    endpoint: /importacion/casos/{id_caso}/vincular/
+    metodo: POST
+    auth_ref: IMPORTACION_API_TOKEN
+    auth_esquema: Bearer
+
   - nombre: consultar_ticket_por_id
     tipo: http
     # Capacidad de la cola (B4): leer antes de cerrar.
@@ -7316,3 +7337,30 @@ cierre_inactivas_ia:
   rollout_cutoff: '2026-09-22T15:58:07Z'
   backfill_habilitado: false
   backfill_lote: 10
+# Con que asuntos una persona puede abrir, desde "Nuevo ticket", el ticket
+# tambien en WispHub (26/10/2026). Vacio = el formulario no lo ofrece.
+#
+# SOLO ASUNTOS YA PROBADOS EN PRODUCCION: son los mismos que el escalamiento
+# usa al abrir tickets ('escalamiento.ticket_al_escalar'), con su area y su
+# prioridad, mas 'No Tiene Internet', que sale del catalogo real
+# /api/tickets/asuntos-tickets/ y ya lo usa 'agendar_visita_internet'. El
+# departamento es el de la herramienta ('Soporte Tecnico', igual que al
+# escalar). Agregar otro asunto o departamento exige verificarlo antes contra
+# WispHub: la documentacion de su API es una hipotesis.
+tickets_desde_dexter:
+  asuntos:
+  - {asunto: No Tiene Internet, area: soporte_tecnico, prioridad: "3"}
+  - {asunto: Internet Intermitente, area: soporte_tecnico, prioridad: "3"}
+  - {asunto: Internet Lento, area: soporte_tecnico, prioridad: "2"}
+  - {asunto: Internet Lento/Niveles Altos, area: soporte_tecnico, prioridad: "3"}
+  - {asunto: Cambio De Contraseña En Router Wifi, area: soporte_tecnico, prioridad: "2"}
+  - {asunto: Cambio De Nombre De Red, area: soporte_tecnico, prioridad: "2"}
+  - {asunto: Red Oculta, area: soporte_tecnico, prioridad: "2"}
+  - {asunto: Red Visible, area: soporte_tecnico, prioridad: "2"}
+  - {asunto: Otros, area: soporte_tecnico, prioridad: "2"}
+  - {asunto: Reconexion, area: cartera, prioridad: "3"}
+  - {asunto: Baja De Servicio, area: cartera, prioridad: "3"}
+  - {asunto: Ajuste Factura, area: cartera, prioridad: "2"}
+  - {asunto: Asesoria Para Pago En Linea, area: cartera, prioridad: "2"}
+  - {asunto: Actualización De Datos, area: cartera, prioridad: "2"}
+  - {asunto: Pqr, area: cartera, prioridad: "4"}

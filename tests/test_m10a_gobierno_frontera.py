@@ -142,6 +142,11 @@ R2_REGISTRO_EXTERNO = {
     #  CRM rechaza un momento del futuro. Pasa por la frontera con la persona
     #  que respondio como actor (operativo.py::sellar_primera_respuesta).
     "avisar_primera_respuesta_crm",
+    #  26/10/2026: 'vincular_caso_externo' ata un caso de Dexter al ticket que
+    #  se le acaba de crear en WispHub (POST /importacion/casos/<id>/vincular/).
+    #  R2 como sus hermanas de importacion: registra en el CRM, no toca un
+    #  equipo ni dinero, y no pisa un vinculo existente (409).
+    "vincular_caso_externo",
     "completar_ticket_instalacion",
     "crear_caso_soporte",
     "crear_tag_crm",

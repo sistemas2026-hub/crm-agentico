@@ -77,6 +77,7 @@ from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
 from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
+from nucleo.seguimiento import ticket_desde_dexter
 from nucleo.seguimiento import verificacion_accion
 from nucleo.seguimiento.forzado import (puede_intentar_algo, por_que_posponer,
                                         decidir_pedido_humano_de,
@@ -6732,6 +6733,75 @@ def mantenimiento_cerrar_inactivas_ia():
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     return jsonify(operativo.cerrar_inactivas_de_ia(config, tenant, simular=simular))
+
+
+@app.get("/tickets-desde-dexter/asuntos")
+def tickets_desde_dexter_asuntos():
+    """
+    Los asuntos con que "Nuevo ticket" puede abrir el ticket en el ISP.
+    Vacio = la pantalla no ofrece crearlo alla. Ver ticket_desde_dexter.py.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="ticket_desde_dexter", e=e)
+    return jsonify({"asuntos": ticket_desde_dexter.asuntos(config)})
+
+
+@app.get("/servicios/<servicio>/titular")
+def servicio_titular(servicio):
+    """
+    Nombre y estado del titular de un servicio, para que quien abre el ticket
+    confirme que es el cliente correcto. Solo eso: nada de la ficha cruda.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+        datos = ticket_desde_dexter.titular(config, tenant, servicio)
+    except ticket_desde_dexter.TicketNoCreado as e:
+        return jsonify({"error": e.codigo}), e.http
+    except Exception as e:
+        return fallo(502, "isp_no_contesta", "No se pudo consultar el servicio.",
+                     componente="ticket_desde_dexter", e=e)
+    if datos is None:
+        return jsonify({"error": "SERVICIO_NO_EXISTE"}), 404
+    return jsonify(datos)
+
+
+@app.post("/casos/<caso_id>/ticket-operativo")
+def caso_crear_ticket_operativo(caso_id):
+    """
+    Crea en el ISP el ticket de un caso que se acaba de abrir en "Nuevo
+    ticket", y ata el caso a el. Lo pide una PERSONA: el autor es obligatorio
+    (D2) y es el actor de la frontera. Una sola vez por caso. Ver
+    nucleo/seguimiento/ticket_desde_dexter.py.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, _, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="ticket_desde_dexter", e=e)
+    try:
+        resultado = ticket_desde_dexter.crear(
+            config, tenant, caso_id, cuerpo.get("servicio"), cuerpo.get("asunto"),
+            cuerpo.get("descripcion"), autor)
+    except ticket_desde_dexter.TicketNoCreado as e:
+        return jsonify({"error": e.codigo}), e.http
+    return jsonify(resultado), 201
 
 
 @app.post("/casos/<caso_id>/mensajes")
