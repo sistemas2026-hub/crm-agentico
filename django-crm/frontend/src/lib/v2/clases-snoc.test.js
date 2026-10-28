@@ -200,7 +200,7 @@ describe('las clases propias de supervisor-noc', () => {
     }
   });
 
-  for (const archivo of ['+page.svelte', 'programacion/+page.svelte', 'programacion/FormularioDelTrabajo.svelte']) {
+  for (const archivo of ['+page.svelte', 'programacion/+page.svelte', 'planes-semanales/+page.svelte', 'planes-semanales/FormularioDelTrabajo.svelte']) {
     it(`toda clase snoc- de ${archivo} existe en la hoja`, () => {
       const fuente = readFileSync(`${RUTA}/${archivo}`, 'utf8');
       const huerfanas = [...clasesUsadas(fuente)].filter((c) => !definidas.has(c)).sort();

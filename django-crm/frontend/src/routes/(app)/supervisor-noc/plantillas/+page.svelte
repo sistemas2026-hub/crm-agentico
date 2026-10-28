@@ -13,6 +13,7 @@
    * los dos lados hacen igual.
    */
   import { enhance } from '$app/forms';
+  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import { goto } from '$app/navigation';
   import '../supervisor-noc.css';
   import NivelesDeRespuesta from './NivelesDeRespuesta.svelte';
@@ -146,14 +147,7 @@
           </p>
         </div>
         <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
-          <a class="snoc-pildora" href="/supervisor-noc">Pendientes por revisión</a>
-          <a class="snoc-pildora" href="/supervisor-noc/programacion">Programación</a>
-          <a class="snoc-pildora" href="/supervisor-noc/cuadrillas">Cuadrillas</a>
-          <a class="snoc-pildora" href="/supervisor-noc/despacho">Despacho</a>
-          <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc/plantillas">
-            Plantillas
-          </a>
-          <a class="snoc-pildora" href="/supervisor-noc/ajustes">Ajustes</a>
+          <PestanasNoc activa="plantillas" />
         </div>
       </div>
       {#if form?.error}

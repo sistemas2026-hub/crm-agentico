@@ -1,5 +1,5 @@
 /**
- * Programación — Supervisor NOC IA: los datos de /supervisor-noc/programacion.
+ * Programación — Supervisor NOC IA: los datos de /supervisor-noc/planes-semanales.
  *
  * Server-only, y hermano de `supervisor-noc.js`: reusa su `traducirError` en
  * vez de repetir la traduccion de status, y pasa por el mismo `apiRequest`.

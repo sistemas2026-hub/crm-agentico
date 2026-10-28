@@ -604,7 +604,8 @@ def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
 
 def publicar(org, asignaciones, *, mover: bool = True,
              por_el_supervisor: dict | None = None,
-             trabajan_hoy: frozenset | None = None) -> dict:
+             trabajan_hoy: frozenset | None = None,
+             por_una_persona=None) -> dict:
     """Escribe las asignaciones que se vieron. No recalcula.
 
     `asignaciones` = [{"jornada": id, "ordenes": [id, ...]}], lo que la
@@ -623,6 +624,12 @@ def publicar(org, asignaciones, *, mover: bool = True,
     lo publicado queda quieto y lo nuevo se suma; ver
     `operaciones/publicacion_del_reparto.py`). El boton humano sigue moviendo,
     como siempre.
+
+    `por_una_persona` (28/10/2026): quien apreto «Publicar» en Cuadrillas. Deja
+    en cada orden que asigna el evento `publicada_por_una_persona`, con esa
+    persona: es lo que la pantalla de Programacion muestra como «la asigno».
+    Es OTRO tipo que `asignacion`, a proposito: no congela la orden para el
+    reparto (`_asignadas_a_mano`), igual que antes de esta fecha.
 
     `trabajan_hoy` (con `mover=False`): las cuentas que hoy trabajan. Una
     orden cuya gente NO esta en ese conjunto --no salio hoy, o declaro
@@ -778,6 +785,13 @@ def publicar(org, asignaciones, *, mover: bool = True,
                         tipo="asignada_por_el_supervisor", profile=None,
                         datos={**por_el_supervisor,
                                "cuadrilla": jornada.cuadrilla.nombre,
+                               "jornada": str(jornada.id)})
+                elif por_una_persona is not None:
+                    EventoTrabajo.objects.create(
+                        org=org, orden=orden,
+                        tipo="publicada_por_una_persona",
+                        profile=por_una_persona,
+                        datos={"cuadrilla": jornada.cuadrilla.nombre,
                                "jornada": str(jornada.id)})
                 publicadas += 1
 

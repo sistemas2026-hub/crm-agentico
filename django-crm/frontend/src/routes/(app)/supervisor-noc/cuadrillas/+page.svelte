@@ -16,6 +16,7 @@
    * que es justo lo que la idempotencia evita.
    */
   import { enhance } from '$app/forms';
+  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import { opcionesDeLider } from '$lib/supervisor/lider-de-cuadrilla.js';
   import '../supervisor-noc.css';
 
@@ -396,13 +397,7 @@
           </p>
         </div>
         <div class="snoc-fila" style="gap:var(--snoc-sm);">
-          <a class="snoc-pildora" href="/supervisor-noc">Pendientes por revisión</a>
-          <a class="snoc-pildora" href="/supervisor-noc/programacion">Programación</a>
-          <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc/cuadrillas">
-            Cuadrillas
-          </a>
-          <a class="snoc-pildora" href="/supervisor-noc/despacho">Despacho</a>
-          <a class="snoc-pildora" href="/supervisor-noc/plantillas">Plantillas</a>
+          <PestanasNoc activa="cuadrillas" />
         </div>
       </div>
 

@@ -7,6 +7,7 @@ from campo import (
     avisos_views,
     cuadrillas_views,
     despacho_views,
+    dia_publicado_views,
     despacho_pantalla_views,
     inventario_operacion_views,
     inventario_views,
@@ -76,6 +77,9 @@ urlpatterns = [
     #  cliente (21/10/2026). Ver campo/horario_de_cuadrillas.py.
     path("cuadrillas/horario/", cuadrillas_views.HorarioDeCuadrillasView.as_view(), name="horario_de_cuadrillas"),
     path("cuadrillas/reparto/", cuadrillas_views.RepartoView.as_view(), name="cuadrilla_reparto"),
+    #  Lo que quedo publicado un dia, con quien lo asigno (28/10/2026): la
+    #  pantalla de Programacion. Ver campo/dia_publicado.py.
+    path("dia-publicado/", dia_publicado_views.DiaPublicadoView.as_view(), name="dia_publicado"),
     path("cuadrillas/jornada/", cuadrillas_views.JornadaDeCuadrillaView.as_view(), name="cuadrilla_jornada"),
     path("cuadrillas/<uid:pk>/", cuadrillas_views.CuadrillaView.as_view(), name="cuadrilla"),
     path("inventario/series/", inventario_views.SeriesDisponiblesView.as_view(), name="inv_series"),

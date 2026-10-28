@@ -12,6 +12,7 @@
    * Supervisor hizo (o dejó de hacer) algo.
    */
   import { enhance } from '$app/forms';
+  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import '../supervisor-noc.css';
   import { loQueLeFalta, tonoDeLaTarea } from '$lib/supervisor/ajustes.js';
 
@@ -73,12 +74,7 @@
           </p>
         </div>
         <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
-          <a class="snoc-pildora" href="/supervisor-noc">Pendientes por revisión</a>
-          <a class="snoc-pildora" href="/supervisor-noc/programacion">Programación</a>
-          <a class="snoc-pildora" href="/supervisor-noc/cuadrillas">Cuadrillas</a>
-          <a class="snoc-pildora" href="/supervisor-noc/despacho">Despacho</a>
-          <a class="snoc-pildora" href="/supervisor-noc/plantillas">Plantillas</a>
-          <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc/ajustes">Ajustes</a>
+          <PestanasNoc activa="ajustes" />
         </div>
       </div>
       <!-- El error de UNA tarea se muestra en su fila; acá solo el que no

@@ -10,6 +10,7 @@
    * la evidencia y por qué, y quien despacha acepta o cambia.
    */
   import { enhance } from '$app/forms';
+  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { untrack } from 'svelte';
@@ -384,13 +385,7 @@
           </p>
         </div>
         <div class="snoc-fila" style="gap:var(--snoc-sm);">
-          <a class="snoc-pildora" href="/supervisor-noc">Pendientes por revisión</a>
-          <a class="snoc-pildora" href="/supervisor-noc/programacion">Programación</a>
-          <a class="snoc-pildora" href="/supervisor-noc/cuadrillas">Cuadrillas</a>
-          <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc/despacho">
-            Despacho
-          </a>
-          <a class="snoc-pildora" href="/supervisor-noc/plantillas">Plantillas</a>
+          <PestanasNoc activa="despacho" />
         </div>
       </div>
     </section>

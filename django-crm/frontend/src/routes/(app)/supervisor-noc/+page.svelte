@@ -1,5 +1,6 @@
 <script>
   import { onDestroy } from 'svelte';
+  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
 
   import { resultadoDelCierre } from '$lib/v2/resultado-del-cierre.js';
   //  La burbuja del chat del Supervisor ya no se monta aca: vive en
@@ -1178,12 +1179,7 @@
           </div>
 
           <div class="snoc-envuelve snoc-pestanas" style="width:100%; order:3;">
-            <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc">Pendientes por revisión</a>
-            <a class="snoc-pildora" href="/supervisor-noc/programacion">Programación</a>
-          <a class="snoc-pildora" href="/supervisor-noc/cuadrillas">Cuadrillas</a>
-          <a class="snoc-pildora" href="/supervisor-noc/despacho">Despacho</a>
-          <a class="snoc-pildora" href="/supervisor-noc/plantillas">Plantillas</a>
-          <a class="snoc-pildora" href="/supervisor-noc/ajustes">Ajustes</a>
+            <PestanasNoc activa="pendientes" />
           </div>
         </header>
 

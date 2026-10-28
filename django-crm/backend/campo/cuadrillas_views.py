@@ -1178,7 +1178,9 @@ class RepartoView(APIView):
         #  se relee bajo bloqueo y lo que se nombra estan alla.
         from campo import reparto as rep
 
-        return Response(rep.publicar(org, crudas))
+        #  QUIEN PUBLICO (28/10/2026): sin esto, la pantalla de Programacion
+        #  no podia decir «lo asigno Mayra a las 08:15», solo «sin registro».
+        return Response(rep.publicar(org, crudas, por_una_persona=request.profile))
 
 def _orden_json(o) -> dict:
     return {
