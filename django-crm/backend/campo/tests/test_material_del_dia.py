@@ -246,16 +246,113 @@ def test_r3_el_reparto_puro():
 # ---------------------------------------------------------------------------
 
 def test_a_sin_kit_sin_bodega_sin_lider(org_a, bodega, kit, admin_profile, otro):
+    #  Con dos bodegas y ninguna pista, el Supervisor no puede elegir.
+    UbicacionInventario.objects.create(org=org_a, tipo=UbicacionInventario.BODEGA,
+                                       nombre="BOF-SAB_GRANDE")
+    #  Como en produccion: las labores de fabrica estan sembradas con su nombre.
+    Labor.objects.get_or_create(org=org_a, codigo="trabajos",
+                                defaults={"nombre": "Trabajos", "de_fabrica": True})
     _cuadrilla(org_a, "Trabajos", admin_profile, bodega, labor="trabajos")
     _cuadrilla(org_a, "Sin bodega", otro, None)
     _cuadrilla(org_a, "Sin lider", None, bodega)
 
     p = M.propuesta(org_a, HOY)
 
-    assert _avisos(p, "Trabajos") == ["Su labor no tiene kit: no carga material."]
-    assert _avisos(p, "Sin bodega") == ["La cuadrilla no tiene bodega: no se sabe de dónde carga."]
+    assert _avisos(p, "Trabajos") == [
+        "Ningún kit se parece a «Trabajos»: no carga material."]
+    assert _avisos(p, "Sin bodega") == [
+        "No sé de qué bodega carga: su zona no nombra ninguna y a su líder no le "
+        "despacharon antes."]
     assert _avisos(p, "Sin lider") == ["No tiene líder con cuenta activa: no hay a quién cargarle."]
     assert p["cuentas"]["sin_carga"] == 3
+
+
+# ---------------------------------------------------------------------------
+# D · lo que elige el Supervisor cuando nadie eligio («la idea era que lo
+#     hiciera el Supervisor», 28/10/2026)
+# ---------------------------------------------------------------------------
+
+class _Kit:
+    def __init__(self, nombre):
+        self.nombre = nombre
+
+
+KITS = [_Kit("Kit de soporte técnico"), _Kit("Kit de instalaciones nuevas")]
+
+
+def test_d_el_kit_por_el_nombre_de_la_labor():
+    assert M.kit_que_elige("Soporte en campo", KITS)[0].nombre == "Kit de soporte técnico"
+    assert M.kit_que_elige("Instalación", KITS)[0].nombre == "Kit de instalaciones nuevas"
+    kit, motivo = M.kit_que_elige("Trabajos", KITS)
+    assert kit is None and "no carga material" in motivo
+    #  Dos igual de parecidos: no elige.
+    kit, motivo = M.kit_que_elige("Soporte", KITS + [_Kit("Kit soporte nocturno")])
+    assert kit is None and "más de un kit" in motivo
+
+
+def test_d2_en_la_propuesta_elige_el_supervisor_y_dice_por_que(
+        org_a, bodega, conector, ont, admin_profile):
+    _stock(org_a, bodega, conector, ont, 50, ["S-1"])
+    soporte = PlantillaDeKit.objects.create(org=org_a, nombre="Kit de soporte técnico")
+    LineaDePlantilla.objects.create(plantilla=soporte, material=conector, cantidad=5)
+    PlantillaDeKit.objects.create(org=org_a, nombre="Kit de instalaciones nuevas")
+    Labor.objects.get_or_create(org=org_a, codigo="correctivo",
+                                defaults={"nombre": "Soporte en campo", "de_fabrica": True})
+    _cuadrilla(org_a, "Cuadrilla #1", admin_profile, None)
+
+    fila = next(c for c in M.propuesta(org_a, HOY)["cuadrillas"])
+
+    assert (fila["kit"], fila["bodega"]) == ("Kit de soporte técnico", "BOG-SOLEDAD")
+    assert "se parece por el nombre" in fila["kit_por"]
+    assert fila["bodega_por"] == "es la única bodega"
+    assert _lineas({"cuadrillas": [fila]}, "Cuadrilla #1")["Conector UPC"]["asignado"] == "5"
+
+
+def test_d3_lo_que_eligio_una_persona_manda(org_a, bodega, kit, admin_profile):
+    otra = UbicacionInventario.objects.create(org=org_a, tipo=UbicacionInventario.BODEGA,
+                                              nombre="BOF-SAB_GRANDE")
+    PlantillaDeKit.objects.create(org=org_a, nombre="Kit de soporte nocturno")
+    _cuadrilla(org_a, "Cuadrilla #1", admin_profile, otra)
+
+    fila = next(c for c in M.propuesta(org_a, HOY)["cuadrillas"])
+
+    assert (fila["kit"], fila["kit_por"]) == ("Kit de soporte técnico", M.POR_UNA_PERSONA)
+    assert (fila["bodega"], fila["bodega_por"]) == ("BOF-SAB_GRANDE", M.POR_UNA_PERSONA)
+
+
+def test_d4_la_bodega_que_nombra_su_zona_y_si_no_la_de_su_historial(
+        org_a, bodega, conector, admin_profile):
+    sab = UbicacionInventario.objects.create(org=org_a, tipo=UbicacionInventario.BODEGA,
+                                             nombre="BOF-SAB_GRANDE")
+    bodegas = [bodega, sab]
+
+    assert M.bodega_que_elige(org_a, ["Soledad zona 1"], None, bodegas) == (
+        bodega, "su zona la nombra")
+    assert M.bodega_que_elige(org_a, ["SABANAGRANDE"], None, bodegas) == (
+        sab, "su zona la nombra")
+    #  Sin zona que la nombre: la de la que ya le despacharon a su lider.
+    inv.registrar_entrada(org=org_a, material=conector, cantidad=5, ubicacion_destino=sab)
+    inv.despachar(org=org_a, ubicacion_origen=sab, profile_destino=admin_profile, acta="A-1",
+                  lineas=[{"material": conector, "cantidad": 2}])
+    assert M.bodega_que_elige(org_a, ["Malambo"], admin_profile, bodegas) == (
+        sab, "de ahí le despacharon antes a su líder")
+    #  Una zona que nombra a dos: no elige.
+    norte = UbicacionInventario.objects.create(org=org_a, tipo=UbicacionInventario.BODEGA,
+                                               nombre="SOLEDAD-NORTE")
+    eleccion, motivo = M.bodega_que_elige(org_a, ["Soledad zona 1"], None, bodegas + [norte])
+    assert eleccion is None and "más de una bodega" in motivo
+
+
+def test_d5_el_panel_muestra_lo_que_elegiria_el_supervisor(org_a, bodega, kit, admin_client):
+    PlantillaDeKit.objects.create(org=org_a, nombre="Kit de instalaciones nuevas")
+    Labor.objects.get_or_create(org=org_a, codigo="instalacion",
+                                defaults={"nombre": "Instalación", "de_fabrica": True})
+
+    d = admin_client.get(RUTA + "configuracion/").json()
+
+    instalacion = next(lab for lab in d["labores"] if lab["codigo"] == "instalacion")
+    assert instalacion["kit"] is None
+    assert instalacion["elige_el_supervisor"] == "Kit de instalaciones nuevas"
 
 
 # ---------------------------------------------------------------------------

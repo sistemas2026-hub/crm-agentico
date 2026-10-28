@@ -15,6 +15,33 @@ export function lineaDeMaterial(l) {
   return `${l.material}: carga ${cantidad(l.asignado, l.unidad)}${tiene}`;
 }
 
+/** Lo que devuelve el backend cuando lo eligió una persona en el panel. */
+export const POR_UNA_PERSONA = 'lo eligió una persona';
+
+/**
+ * Por qué ese kit o esa bodega: «elegido por una persona», o «lo eligió el
+ * Supervisor: su zona la nombra» (28/10/2026: «la idea era que lo hiciera el
+ * Supervisor»).
+ *
+ * @param {string} motivo
+ */
+export function porQue(motivo) {
+  if (!motivo) return '';
+  return motivo === POR_UNA_PERSONA ? 'elegido por una persona' : `lo eligió el Supervisor: ${motivo}`;
+}
+
+/**
+ * La primera opción del panel: dejar que elija el Supervisor, diciendo qué
+ * elegiría hoy.
+ *
+ * @param {string} eligeElSupervisor el nombre, o vacío si no puede elegir
+ */
+export function opcionDelSupervisor(eligeElSupervisor) {
+  return eligeElSupervisor
+    ? `Que elija el Supervisor (hoy: ${eligeElSupervisor})`
+    : 'Que elija el Supervisor (hoy no puede: ver el motivo)';
+}
+
 /**
  * «1 unidad», «6 unidades», «300 metros».
  * @param {string} n

@@ -16,7 +16,7 @@
     textoDePrioridad,
     textoSinBajar
   } from '$lib/supervisor/dia-publicado.js';
-  import { lineaDeMaterial } from '$lib/supervisor/material-del-dia.js';
+  import { lineaDeMaterial, opcionDelSupervisor, porQue } from '$lib/supervisor/material-del-dia.js';
   import '../supervisor-noc.css';
 
   /** @type {{ data: any, form: any }} */
@@ -116,29 +116,38 @@
                 {/each}
               {/if}
               {#if conf}
+                <!-- EL SUPERVISOR ELIGE SOLO (28/10/2026: «la idea era que lo
+                     hiciera el Supervisor»). Esto es para corregirlo: lo que
+                     queda en «Que elija el Supervisor» lo deduce él. -->
                 <details>
                   <summary class="snoc-body-sm">
-                    Configurar qué kit lleva cada labor y de qué bodega carga cada cuadrilla
+                    Corregir lo que eligió el Supervisor (kit de cada labor, bodega de cada cuadrilla)
                   </summary>
                   <form method="POST" action="?/material" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
                     <span class="snoc-label">Kit de cada labor</span>
                     {#each conf.labores as l (l.codigo)}
-                      <label class="snoc-fila-sep" style="gap:var(--snoc-sm); flex-wrap:wrap;">
-                        <span class="snoc-body-sm">{l.nombre}</span>
-                        <select class="snoc-select" name={`kit:${l.codigo}`} value={l.kit ?? ''}>
-                          <option value="">Sin kit (no carga material)</option>
-                          {#each conf.kits as k (k.id)}<option value={k.id}>{k.nombre}</option>{/each}
-                        </select>
+                      <label class="snoc-pila-xs">
+                        <span class="snoc-fila-sep" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+                          <span class="snoc-body-sm">{l.nombre}</span>
+                          <select class="snoc-select" name={`kit:${l.codigo}`} value={l.kit ?? ''}>
+                            <option value="">{opcionDelSupervisor(l.elige_el_supervisor)}</option>
+                            {#each conf.kits as k (k.id)}<option value={k.id}>{k.nombre}</option>{/each}
+                          </select>
+                        </span>
+                        {#if !l.kit}<span class="snoc-body-sm snoc-secundario">{l.motivo}</span>{/if}
                       </label>
                     {/each}
                     <span class="snoc-label">Bodega de cada cuadrilla</span>
                     {#each conf.cuadrillas as c (c.id)}
-                      <label class="snoc-fila-sep" style="gap:var(--snoc-sm); flex-wrap:wrap;">
-                        <span class="snoc-body-sm">{c.nombre}</span>
-                        <select class="snoc-select" name={`bodega:${c.id}`} value={c.bodega ?? ''}>
-                          <option value="">Sin bodega</option>
-                          {#each conf.bodegas as b (b.id)}<option value={b.id}>{b.nombre}</option>{/each}
-                        </select>
+                      <label class="snoc-pila-xs">
+                        <span class="snoc-fila-sep" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+                          <span class="snoc-body-sm">{c.nombre}</span>
+                          <select class="snoc-select" name={`bodega:${c.id}`} value={c.bodega ?? ''}>
+                            <option value="">{opcionDelSupervisor(c.elige_el_supervisor)}</option>
+                            {#each conf.bodegas as b (b.id)}<option value={b.id}>{b.nombre}</option>{/each}
+                          </select>
+                        </span>
+                        {#if !c.bodega}<span class="snoc-body-sm snoc-secundario">{c.motivo}</span>{/if}
                       </label>
                     {/each}
                     <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
@@ -179,8 +188,13 @@
                   {#if m && (m.lineas.length || m.avisos.length)}
                     <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-xs);">
                       <span class="snoc-label">Material{#if m.kit} · {m.kit}{/if}</span>
+                      {#if m.kit}
+                        <p class="snoc-body-sm snoc-secundario">Kit: {porQue(m.kit_por)}</p>
+                      {/if}
                       {#if m.lineas.length}
-                        <p class="snoc-body-sm snoc-secundario">Desde {m.bodega} · a {m.lider}</p>
+                        <p class="snoc-body-sm snoc-secundario">
+                          Desde {m.bodega} ({porQue(m.bodega_por)}) · a {m.lider}
+                        </p>
                       {/if}
                       {#each m.lineas as l (l.material)}
                         <p class="snoc-body-sm">{lineaDeMaterial(l)}</p>

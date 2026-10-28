@@ -17,8 +17,12 @@ dice lo que se cargaria. La carga la hara el Supervisor en la fase 3, con
 
 LAS REGLAS (las decisiones del 28/10/2026)
 ------------------------------------------
-- Que kit: el de la labor de la jornada (`Labor.plantilla_de_kit`).
-- De donde: la bodega de la cuadrilla (`Cuadrilla.bodega`).
+- Que kit: el que una persona eligio para la labor (`Labor.plantilla_de_kit`);
+  si nadie eligio, lo elige el Supervisor (`kit_que_elige`, por el nombre).
+- De donde: la bodega que una persona eligio para la cuadrilla
+  (`Cuadrilla.bodega`); si nadie eligio, la elige el Supervisor
+  (`bodega_que_elige`: la unica, la que nombra su zona, o la de la que ya le
+  despacharon a su lider).
 - A quien: al LIDER de la jornada (`destinatarios`), a su custodia.
 - Cuanto: el kit menos lo que el lider ya tiene en custodia, nunca negativo.
 - Si no alcanza: lo LIBRE de la bodega (existencia menos reservado) se reparte
@@ -58,18 +62,35 @@ def configuracion(org) -> dict:
     from campo.inventario_operacion import PlantillaDeKit
     from campo.labores import Labor
 
+    kits = list(PlantillaDeKit.objects.filter(org=org, activa=True).order_by("nombre"))
+    bodegas = list(UbicacionInventario.objects.filter(
+        org=org, tipo=UbicacionInventario.BODEGA).order_by("nombre"))
+
+    def labor(lab):
+        #  Lo que elegiria el Supervisor si nadie eligiera: para que el panel
+        #  muestre contra que se corrige.
+        kit, motivo = kit_que_elige(lab.nombre, kits)
+        return {"codigo": lab.codigo, "nombre": lab.nombre,
+                "kit": str(lab.plantilla_de_kit_id) if lab.plantilla_de_kit_id else None,
+                "elige_el_supervisor": kit.nombre if kit else "", "motivo": motivo}
+
+    def cuadrilla(c):
+        bodega, motivo = bodega_que_elige(
+            org, [z.nombre for z in c.zonas_habituales.all()],
+            c.lider if c.lider_id and c.lider.is_active else None, bodegas)
+        return {"id": str(c.id), "nombre": c.nombre,
+                "bodega": str(c.bodega_id) if c.bodega_id else None,
+                "elige_el_supervisor": bodega.nombre if bodega else "", "motivo": motivo}
+
     return {
-        "labores": [{"codigo": lab.codigo, "nombre": lab.nombre,
-                     "kit": str(lab.plantilla_de_kit_id) if lab.plantilla_de_kit_id else None}
-                    for lab in Labor.objects.filter(org=org, activa=True).order_by("nombre")],
-        "cuadrillas": [{"id": str(c.id), "nombre": c.nombre,
-                        "bodega": str(c.bodega_id) if c.bodega_id else None}
-                       for c in Cuadrilla.objects.filter(org=org, activa=True).order_by("nombre")],
-        "kits": [{"id": str(p.id), "nombre": p.nombre}
-                 for p in PlantillaDeKit.objects.filter(org=org, activa=True).order_by("nombre")],
-        "bodegas": [{"id": str(u.id), "nombre": u.nombre}
-                    for u in UbicacionInventario.objects.filter(
-                        org=org, tipo=UbicacionInventario.BODEGA).order_by("nombre")],
+        "labores": [labor(lab) for lab in
+                    Labor.objects.filter(org=org, activa=True).order_by("nombre")],
+        "cuadrillas": [cuadrilla(c) for c in
+                       Cuadrilla.objects.filter(org=org, activa=True)
+                       .select_related("lider").prefetch_related("zonas_habituales")
+                       .order_by("nombre")],
+        "kits": [{"id": str(p.id), "nombre": p.nombre} for p in kits],
+        "bodegas": [{"id": str(u.id), "nombre": u.nombre} for u in bodegas],
     }
 
 
@@ -127,6 +148,88 @@ def guardar_configuracion(org, datos: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Lo que elige el Supervisor cuando nadie lo eligio (28/10/2026)
+# ---------------------------------------------------------------------------
+#
+#  Pedido del usuario al ver el panel de configuracion: «la idea era que lo
+#  hiciera el Supervisor». El kit de cada labor y la bodega de cada cuadrilla
+#  los DEDUCE el codigo, con una regla que se puede leer y un motivo que se
+#  muestra; cuando no puede deducirlo, lo dice y no adivina. Lo que una persona
+#  eligio en el panel manda siempre: el panel es para corregir al Supervisor.
+
+#: Una palabra «se parece» a otra si comparten estas primeras letras:
+#: «instalac(ion)» e «instalac(iones)», «soport(e)» y «soport(e)».
+RAIZ = 6
+#: Las palabras mas cortas no cuentan: «de», «en», «kit».
+LARGO_MINIMO = 5
+#: En el nombre de una bodega, las palabras de menos letras son codigos
+#: («BOG», «BOF», «SAB»), no lugares.
+LARGO_DE_LUGAR = 4
+
+POR_UNA_PERSONA = "lo eligió una persona"
+
+
+def _palabras(texto: str) -> list[str]:
+    """Sin tildes, en minuscula, solo letras y numeros."""
+    import unicodedata
+
+    s = unicodedata.normalize("NFKD", texto or "")
+    s = "".join(ch for ch in s if not unicodedata.combining(ch)).lower()
+    return "".join(ch if ch.isalnum() else " " for ch in s).split()
+
+
+def _raices(texto: str) -> set:
+    return {p[:RAIZ] for p in _palabras(texto) if len(p) >= LARGO_MINIMO}
+
+
+def kit_que_elige(nombre_de_labor: str, kits) -> tuple:
+    """(kit, motivo) o (None, motivo): el kit cuyo nombre comparte mas raices
+    con el de la labor. Empate: no elige. Ninguno: esa labor no carga."""
+    raices = _raices(nombre_de_labor)
+    puntos = [(len(raices & _raices(k.nombre)), k) for k in kits]
+    mejor = max((n for n, _ in puntos), default=0)
+    mejores = [k for n, k in puntos if n == mejor and n > 0]
+    if len(mejores) == 1:
+        return mejores[0], f"se parece por el nombre a «{nombre_de_labor}»"
+    if mejores:
+        return None, (f"«{nombre_de_labor}» se parece a más de un kit "
+                      f"({', '.join(k.nombre for k in mejores)}): no elijo")
+    return None, f"ningún kit se parece a «{nombre_de_labor}»: no carga material"
+
+
+def bodega_que_elige(org, zonas, lider, bodegas) -> tuple:
+    """(bodega, motivo) o (None, motivo). En este orden: la unica bodega; la
+    que nombra su zona («Soledad zona 1» -> «BOG-SOLEDAD»); la de la que ya le
+    despacharon a su lider. Mas de una que cumple: no elige."""
+    from django.db.models import Count
+
+    from campo.models import MovimientoDeMaterial
+
+    if len(bodegas) == 1:
+        return bodegas[0], "es la única bodega"
+    if not bodegas:
+        return None, "la empresa no tiene bodegas"
+    textos = ["".join(_palabras(z)) for z in zonas]
+    nombran = [b for b in bodegas
+               if any(p in t for p in _palabras(b.nombre) if len(p) >= LARGO_DE_LUGAR
+                      for t in textos)]
+    if len(nombran) == 1:
+        return nombran[0], "su zona la nombra"
+    if len(nombran) > 1:
+        return None, "su zona nombra a más de una bodega: no elijo"
+    if lider is not None:
+        filas = list(MovimientoDeMaterial.objects
+                     .filter(org=org, tipo=MovimientoDeMaterial.DESPACHO, profile=lider,
+                             ubicacion_origen__in=bodegas)
+                     .values("ubicacion_origen").annotate(n=Count("id")).order_by("-n")[:2])
+        if filas and (len(filas) == 1 or filas[0]["n"] > filas[1]["n"]):
+            elegida = next(b for b in bodegas if b.id == filas[0]["ubicacion_origen"])
+            return elegida, "de ahí le despacharon antes a su líder"
+    return None, ("no sé de qué bodega carga: su zona no nombra ninguna y a su líder "
+                  "no le despacharon antes")
+
+
+# ---------------------------------------------------------------------------
 # El reparto de lo que no alcanza
 # ---------------------------------------------------------------------------
 
@@ -168,6 +271,8 @@ def propuesta(org, fecha) -> dict:
     """
     from campo import dia_publicado
     from campo.cuadrillas import JornadaDeCuadrilla, destinatarios
+    from campo.inventario import UbicacionInventario
+    from campo.inventario_operacion import PlantillaDeKit
     from campo.labores import Labor, nombres_de_labor
     from campo.services import inventario as inv
     from campo.services.inventario_operacion import libre
@@ -175,9 +280,13 @@ def propuesta(org, fecha) -> dict:
     jornadas = list(
         JornadaDeCuadrilla.objects.filter(org=org, fecha=fecha)
         .select_related("cuadrilla", "cuadrilla__bodega", "cuadrilla__lider", "lider")
+        .prefetch_related("zonas", "cuadrilla__zonas_habituales")
         .order_by("cuadrilla__nombre"))
     kit_de = {lab.codigo: lab.plantilla_de_kit for lab in
               Labor.objects.filter(org=org).select_related("plantilla_de_kit")}
+    kits = list(PlantillaDeKit.objects.filter(org=org, activa=True).order_by("nombre"))
+    bodegas = list(UbicacionInventario.objects.filter(
+        org=org, tipo=UbicacionInventario.BODEGA).order_by("nombre"))
     nombres = nombres_de_labor(org)
 
     #  EL PESO DE CADA CUADRILLA: su trabajo publicado del dia, con la misma
@@ -192,20 +301,33 @@ def propuesta(org, fecha) -> dict:
     filas, pedidos = [], defaultdict(list)
     for j in jornadas:
         lider = destinatarios(j)["lider"]
+        nombre_de_labor = nombres.get(j.labor, j.labor)
+        #  LO QUE ELIGIO UNA PERSONA MANDA; si no, elige el Supervisor.
         kit = kit_de.get(j.labor)
+        if kit is not None:
+            kit_por = POR_UNA_PERSONA
+        else:
+            kit, kit_por = kit_que_elige(nombre_de_labor, kits)
         bodega = j.cuadrilla.bodega
+        if bodega is not None:
+            bodega_por = POR_UNA_PERSONA
+        else:
+            zonas = ([z.nombre for z in j.zonas.all()]
+                     + [z.nombre for z in j.cuadrilla.zonas_habituales.all()])
+            bodega, bodega_por = bodega_que_elige(org, zonas, lider, bodegas)
         fila = {"jornada": str(j.id), "cuadrilla": j.cuadrilla.nombre,
-                "labor": nombres.get(j.labor, j.labor),
+                "labor": nombre_de_labor,
                 "lider": inv.nombre_de(lider) if lider is not None else "",
-                "kit": kit.nombre if kit is not None else "",
+                "kit": kit.nombre if kit is not None else "", "kit_por": kit_por,
                 "bodega": bodega.nombre if bodega is not None else "",
+                "bodega_por": bodega_por,
                 "peso": peso.get(str(j.id), 0), "lineas": [], "avisos": []}
         filas.append(fila)
         if kit is None:
-            fila["avisos"].append("Su labor no tiene kit: no carga material.")
+            fila["avisos"].append(kit_por[:1].upper() + kit_por[1:] + ".")
             continue
         if bodega is None:
-            fila["avisos"].append("La cuadrilla no tiene bodega: no se sabe de dónde carga.")
+            fila["avisos"].append(bodega_por[:1].upper() + bodega_por[1:] + ".")
             continue
         if lider is None or not lider.is_active:
             fila["avisos"].append("No tiene líder con cuenta activa: no hay a quién cargarle.")

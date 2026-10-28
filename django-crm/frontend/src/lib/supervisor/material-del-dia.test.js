@@ -1,6 +1,25 @@
 import { describe, expect, it } from 'vitest';
 
-import { cantidad, cuerpoDeConfiguracion, lineaDeMaterial } from './material-del-dia.js';
+import {
+  cantidad,
+  cuerpoDeConfiguracion,
+  lineaDeMaterial,
+  opcionDelSupervisor,
+  porQue
+} from './material-del-dia.js';
+
+describe('lo que eligió el Supervisor, y por qué', () => {
+  it('una persona o el Supervisor con su motivo', () => {
+    expect(porQue('lo eligió una persona')).toBe('elegido por una persona');
+    expect(porQue('su zona la nombra')).toBe('lo eligió el Supervisor: su zona la nombra');
+    expect(porQue('')).toBe('');
+  });
+
+  it('la opción del panel dice qué elegiría hoy', () => {
+    expect(opcionDelSupervisor('BOG-SOLEDAD')).toBe('Que elija el Supervisor (hoy: BOG-SOLEDAD)');
+    expect(opcionDelSupervisor('')).toBe('Que elija el Supervisor (hoy no puede: ver el motivo)');
+  });
+});
 
 describe('el material del día, como lo lee una persona', () => {
   it('lo que carga, y lo que ya tiene', () => {
