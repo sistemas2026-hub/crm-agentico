@@ -118,7 +118,12 @@
     clearTimeout(reintento);
     buscando = true;
     try {
-      const r = await fetch(`/tickets/new/cliente?q=${encodeURIComponent(busqueda.trim())}`);
+      //  En el cuerpo, no en la URL: es la cédula o el nombre de una persona.
+      const r = await fetch('/tickets/new/cliente', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ q: busqueda.trim() })
+      });
       hallazgo = await r.json();
       //  La primera búsqueda por nombre arma la lista de clientes del lado del
       //  motor (cerca de un minuto): se reintenta sola, hasta dos minutos.
