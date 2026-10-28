@@ -79,6 +79,10 @@ PUBLICO = "publico"
 SOMBRA = "sombra"
 NO_CORRIO = "no_corrio"
 
+#: Por que una jornada del dia no recibe trabajo (`propuesta`, «detalle»).
+SIN_CUENTA = "sin_cuenta"
+AUSENTE = "ausente"
+
 #: Desde cuantas horas antes de la apertura publica. Ver «CUANDO» arriba.
 #: Candidato a «Ajustes del Supervisor» (ficha, «Anotado para otro momento»).
 HORAS_ANTES_DE_ABRIR = 2
@@ -167,7 +171,15 @@ def propuesta(org, hoy, ahora) -> dict:
         {"asignaciones": [{"jornada": id, "ordenes": [id]}],
          "trabajan_hoy": frozenset(profile_id),
          "publicaria": n, "libera": n, "sobrantes": n, "sin_cuadrilla": n,
-         "sin_zona": n, "sin_nadie_con_cuenta": n, "con_ausentes": n}
+         "sin_zona": n, "sin_nadie_con_cuenta": n, "con_ausentes": n,
+         "detalle": {"cabe": {orden_id: jornada}, "sobrantes": [orden_id],
+                     "sin_cuadrilla": [...], "sin_zona": [...],
+                     "sin_clasificar": [...],
+                     "no_reciben": [(jornada, "sin_cuenta" | "ausente")]}}
+
+    `detalle` (28/10/2026): por orden, por que queda donde queda. Lo lee
+    Programacion (`campo/dia_publicado.py`) para decir por que una orden
+    espera cuadrilla con la MISMA cuenta que publica, y no con una copia.
     """
     from campo import reparto as R
     from campo.cuadrillas import (
@@ -179,7 +191,7 @@ def propuesta(org, hoy, ahora) -> dict:
     from campo.models import OrdenTrabajo
 
     ausentes = ausentes_del_dia(org, hoy)
-    jornadas, receptores = [], {}
+    jornadas, receptores, no_reciben = [], {}, []
     sin_nadie = con_ausentes = 0
     for j in (JornadaDeCuadrilla.objects.filter(org=org, fecha=hoy)
               .select_related("cuadrilla", "cuadrilla__lider", "lider")
@@ -187,10 +199,12 @@ def propuesta(org, hoy, ahora) -> dict:
         ids = {r["profile"].id for r in destinatarios(j)["reciben"]}
         if not ids:
             sin_nadie += 1
+            no_reciben.append((j, SIN_CUENTA))
         elif ids & ausentes:
             #  Alguien que la recibiria declaro ausencia despues de armarla:
             #  que la mire una persona, no se le manda trabajo.
             con_ausentes += 1
+            no_reciben.append((j, AUSENTE))
         else:
             jornadas.append(j)
             receptores[j.id] = ids
@@ -249,6 +263,14 @@ def propuesta(org, hoy, ahora) -> dict:
         "sin_zona": len(r["sin_zona"]),
         "sin_nadie_con_cuenta": sin_nadie,
         "con_ausentes": con_ausentes,
+        "detalle": {
+            "cabe": {str(o.id): j for j in jornadas for o in r["asignadas"][j.id]},
+            "sobrantes": [str(o.id) for o in r["sobrantes"]],
+            "sin_cuadrilla": [str(o.id) for o in r["sin_cuadrilla"]],
+            "sin_zona": [str(o.id) for o in r["sin_zona"]],
+            "sin_clasificar": [str(o.id) for o in r["sin_clasificar"]],
+            "no_reciben": no_reciben,
+        },
     }
 
 

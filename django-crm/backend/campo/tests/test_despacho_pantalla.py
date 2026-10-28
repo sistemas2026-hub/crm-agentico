@@ -441,3 +441,53 @@ def test_y_el_cliente_sale_de_la_cuenta_y_si_no_del_proveedor(
                           "Sin cuenta": "Solo proveedor",
                           "Sin nada": ""}
 
+
+# ---------------------------------------------------------------------------
+# Z · lo que ya tiene tecnico no esta en Despacho: esta en Programacion
+#     (pedido del usuario, 28/10/2026)
+# ---------------------------------------------------------------------------
+
+def _orden_del_caso(org, caso, numero, *, de=None, estado=OrdenTrabajo.ASIGNADA):
+    from campo.models import AsignacionTrabajo
+
+    version = _version(_tipo(org, f"t{numero}", "instalacion"))
+    o = OrdenTrabajo.objects.create(
+        org=org, numero=numero, tipo_trabajo_version=version,
+        estado_operativo=estado, origen_sistema="crm", origen_ref=str(caso.id))
+    if de is not None:
+        AsignacionTrabajo.objects.create(orden=o, profile=de, rol="tecnico",
+                                         es_principal=True)
+    return o
+
+
+def test_z_lo_que_ya_tiene_tecnico_sale_de_la_lista_y_se_cuenta(
+        admin_client, org_a, user_profile):
+    _aprobado(org_a, "Sin orden")
+    _orden_del_caso(org_a, _aprobado(org_a, "Orden sin nadie"), 91)
+    _orden_del_caso(org_a, _aprobado(org_a, "Con tecnico"), 92, de=user_profile)
+    #  Cerrada con tecnico: ya no esta viva, el caso vuelve a faltar.
+    _orden_del_caso(org_a, _aprobado(org_a, "Cerrada"), 93, de=user_profile,
+                    estado=OrdenTrabajo.CERRADA)
+
+    d = admin_client.get(CASOS).json()
+
+    assert {c["nombre"] for c in d["casos"]} == {"Sin orden", "Orden sin nadie",
+                                                 "Cerrada"}
+    assert d["con_tecnico"] == 1
+    #  Los totales y el filtro por asunto cuentan lo que se ve.
+    assert d["total_sin_filtro"] == 3
+    assert "Con tecnico" not in {a["asunto"] for a in d["asuntos"]}
+
+
+def test_z2_pidiendolo_se_ven_tambien_los_que_tienen_tecnico(
+        admin_client, org_a, user_profile):
+    _aprobado(org_a, "Sin orden")
+    _orden_del_caso(org_a, _aprobado(org_a, "Con tecnico"), 94, de=user_profile)
+
+    d = admin_client.get(CASOS, {"con_tecnico": "1"}).json()
+
+    assert {c["nombre"] for c in d["casos"]} == {"Sin orden", "Con tecnico"}
+    assert d["con_tecnico"] == 1
+    con = next(c for c in d["casos"] if c["nombre"] == "Con tecnico")
+    assert con["orden_activa"] == 94 and con["orden_activa_tecnico"]
+

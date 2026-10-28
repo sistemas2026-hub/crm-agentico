@@ -381,6 +381,95 @@ def test_d2_el_tope_es_el_de_la_cuadrilla_y_si_no_el_de_la_empresa(
 
 
 # ---------------------------------------------------------------------------
+# E · por que espera cuadrilla, con la cuenta con la que publica el Supervisor
+#     (pregunta del usuario, 28/10/2026: «¿por que solo 4 a la cuadrilla 3?»)
+# ---------------------------------------------------------------------------
+
+def _esperan(d) -> dict:
+    return {e["numero"]: e for e in d["esperan"]}
+
+
+def _de_labor(org, labor, codigo):
+    wt = WorkType.objects.create(org=org, codigo=codigo, nombre=codigo, labor=labor)
+    return WorkTypeVersion.objects.create(
+        work_type=wt, version=1, estado=WorkTypeVersion.PUBLICADA,
+        esquema={"campos": []})
+
+
+def test_e_cabe_y_cupo_lleno(org_a, version, norte, admin_profile, user_profile):
+    llena = _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    Cuadrilla.objects.filter(pk=llena.cuadrilla_id).update(tope_diario=1)
+    _orden(org_a, version, de=admin_profile)                 # su carga: 1 de 1
+    libre = _orden(org_a, version)
+
+    e = _esperan(D.del_dia(org_a, LUNES))[libre.numero]
+    assert e["motivo"] == D.CUPO_LLENO
+    assert "Norte" in e["por_que"]
+
+    _jornada(org_a, [norte], "Cuadrilla #2", user_profile)
+
+    e = _esperan(D.del_dia(org_a, LUNES))[libre.numero]
+    assert e["motivo"] == D.CABE
+    assert "Cuadrilla #2" in e["por_que"]
+
+
+def test_e2_ninguna_cuadrilla_de_su_labor_y_la_que_no_recibe(
+        org_a, version, norte, admin_profile):
+    from campo.labores import nombres_de_labor
+
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)   # instalacion
+    trabajo = _orden(org_a, _de_labor(org_a, JornadaDeCuadrilla.TRABAJOS, "obra"))
+
+    e = _esperan(D.del_dia(org_a, LUNES))[trabajo.numero]
+    assert e["motivo"] == D.SIN_CUADRILLA
+    T = JornadaDeCuadrilla.TRABAJOS
+    assert nombres_de_labor(org_a).get(T, T) in e["por_que"]
+    assert "Norte" in e["por_que"]
+
+    #  Una cuadrilla de esa zona, sin nadie con cuenta, pero de OTRA labor: no
+    #  es la que falta.
+    sin_cuenta = _jornada(org_a, [norte], "Cuadrilla #7")
+
+    assert _esperan(D.del_dia(org_a, LUNES))[trabajo.numero]["motivo"] == D.SIN_CUADRILLA
+
+    #  De esa labor y esa zona, sin nadie con cuenta: esa es la que no recibe.
+    JornadaDeCuadrilla.objects.filter(pk=sin_cuenta.pk).update(
+        labor=JornadaDeCuadrilla.TRABAJOS)
+
+    e = _esperan(D.del_dia(org_a, LUNES))[trabajo.numero]
+    assert e["motivo"] == D.NO_RECIBE
+    assert "Cuadrilla #7" in e["por_que"] and "cuenta" in e["por_que"]
+
+
+def test_e3_sin_zona_y_sin_labor(org_a, version, norte, admin_profile):
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    rara = _orden(org_a, version)
+    OrdenTrabajo.objects.filter(pk=rara.pk).update(zona="BARRIO QUE NO EXISTE")
+    sin_labor = _orden(org_a, _de_labor(org_a, "", "sin-labor"))
+
+    d = _esperan(D.del_dia(org_a, LUNES))
+
+    assert d[rara.numero]["motivo"] == D.SIN_ZONA
+    assert "BARRIO QUE NO EXISTE" in d[rara.numero]["por_que"]
+    assert d[sin_labor.numero]["motivo"] == D.SIN_LABOR
+
+
+def test_e4_si_la_cuenta_falla_no_inventa_un_motivo(
+        org_a, version, norte, admin_profile, monkeypatch):
+    from operaciones import publicacion_del_reparto as pub
+
+    def falla(*a, **k):
+        raise RuntimeError("caida")
+
+    monkeypatch.setattr(pub, "propuesta", falla)
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    o = _orden(org_a, version)
+
+    e = _esperan(D.del_dia(org_a, LUNES))[o.numero]
+    assert (e["motivo"], e["por_que"]) == ("", "")
+
+
+# ---------------------------------------------------------------------------
 # P · permisos, fecha y empresa
 # ---------------------------------------------------------------------------
 

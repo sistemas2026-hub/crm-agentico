@@ -47,13 +47,18 @@ export async function leerPlantillasDeTrabajo(ctx) {
  * de a `tope` casos, y filtrar o contar solo esos dejaría afuera, sin
  * decirlo, todo lo que está en la página siguiente.
  *
+ * LO QUE YA TIENE TÉCNICO NO VIENE (28/10/2026): está en Programación. El
+ * backend lo cuenta (`conTecnico`) y `filtro.conTecnico` lo vuelve a traer,
+ * para una segunda visita al mismo caso.
+ *
  * @param {{ cookies: any }} ctx
  * @param {boolean} conFicha
- * @param {{ q?: string, asunto?: string, pagina?: number }} [filtro]
+ * @param {{ q?: string, asunto?: string, pagina?: number, conTecnico?: boolean }} [filtro]
  */
 export async function leerCasosDespachables(ctx, conFicha = false, filtro = {}) {
   const p = new URLSearchParams();
   if (conFicha) p.set('ficha', '1');
+  if (filtro.conTecnico) p.set('con_tecnico', '1');
   if (filtro.q) p.set('q', filtro.q);
   if (filtro.asunto) p.set('asunto', filtro.asunto);
   if (filtro.pagina && filtro.pagina > 1) p.set('pagina', String(filtro.pagina));
@@ -76,12 +81,13 @@ export async function leerCasosDespachables(ctx, conFicha = false, filtro = {}) 
       pagina: d?.pagina ?? 1,
       paginas: d?.paginas ?? 1,
       asuntos: d?.asuntos ?? [],
+      conTecnico: d?.con_tecnico ?? 0,
       error: false
     };
   } catch {
     return {
       casos: [], tope: 0, sinAprobados: false, total: 0, totalSinFiltro: 0,
-      pagina: 1, paginas: 1, asuntos: [], error: true
+      pagina: 1, paginas: 1, asuntos: [], conTecnico: 0, error: true
     };
   }
 }

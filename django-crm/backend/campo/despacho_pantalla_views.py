@@ -127,6 +127,24 @@ def _quien_tiene(org, case_id: str) -> str | None:
     return nombre_de(a.profile)
 
 
+def _casos_con_tecnico(org) -> list:
+    """Los casos cuya orden viva ya tiene a alguien asignado.
+
+    «Viva» con la misma regla que `ordenes_vivas_del_caso` (ni cerrada ni
+    cancelada). `origen_ref` es texto: lo que no es un id de caso se descarta
+    antes de compararlo con uno (`supervisor._uuids`).
+    """
+    from campo.models import OrdenTrabajo
+    from operaciones import supervisor as sup
+
+    refs = (OrdenTrabajo.objects
+            .filter(org=org, origen_sistema="crm", asignaciones__isnull=False)
+            .exclude(estado_operativo__in=[OrdenTrabajo.CERRADA,
+                                           OrdenTrabajo.CANCELADA])
+            .values_list("origen_ref", flat=True).distinct())
+    return sup._uuids(list(refs))
+
+
 class CasosDespachablesView(APIView):
     """``GET`` los casos abiertos que podrian ir a campo, con su evidencia.
 
@@ -167,6 +185,7 @@ class CasosDespachablesView(APIView):
 
         org = request.profile.org
         con_ficha = request.query_params.get("ficha") == "1"
+        con_tecnico = request.query_params.get("con_tecnico") == "1"
         q = (request.query_params.get("q") or "").strip()[:self.LARGO_BUSQUEDA]
         asunto = (request.query_params.get("asunto") or "").strip()
         try:
@@ -212,9 +231,22 @@ class CasosDespachablesView(APIView):
             return Response({"casos": [], "tope": self.TOPE,
                              "sin_aprobados": True, "total": 0,
                              "total_sin_filtro": 0, "pagina": 1,
-                             "paginas": 1, "asuntos": []})
+                             "paginas": 1, "asuntos": [], "con_tecnico": 0})
 
         en_cola = pad.casos_en_despacho(org, aprobados)
+
+        #  LO QUE YA TIENE TECNICO SALE DE LA LISTA (28/10/2026).
+        #
+        #  Pedido del usuario con Programacion a la vista: «de Despacho no
+        #  deberian salir los que el tecnico ya tiene asignado». Despacho es lo
+        #  que FALTA; lo que ya tiene a alguien esta en Programacion. Se quedan
+        #  los que no tienen orden y los que tienen orden SIN nadie: a esos
+        #  todavia les falta algo. Se cuentan, y `con_tecnico=1` los vuelve a
+        #  mostrar --una segunda visita al mismo caso es legitima--.
+        tomados = _casos_con_tecnico(org)
+        n_con_tecnico = en_cola.filter(id__in=tomados).count()
+        if not con_tecnico:
+            en_cola = en_cola.exclude(id__in=tomados)
 
         #  LOS ASUNTOS SE CUENTAN SOBRE TODA LA COLA, no sobre lo filtrado:
         #  son las opciones del filtro, y si se recortaran con el filtro puesto
@@ -312,7 +344,10 @@ class CasosDespachablesView(APIView):
                          #  distintos y la pantalla dice los dos: «3 de 41».
                          "total": total, "total_sin_filtro": total_sin_filtro,
                          "pagina": pagina, "paginas": paginas,
-                         "asuntos": asuntos})
+                         "asuntos": asuntos,
+                         #  Cuantos de la cola ya tienen tecnico (estan en
+                         #  Programacion), se muestren o no.
+                         "con_tecnico": n_con_tecnico})
 
     def _localidad_de(self, caso) -> str:
         """El barrio del cliente, que es lo que el reparto mapea a una zona.

@@ -80,6 +80,84 @@ def _terminadas():
     return (OrdenTrabajo.COMPLETADA_CAMPO, OrdenTrabajo.CERRADA)
 
 
+#: Por que una orden espera cuadrilla (28/10/2026).
+CABE = "cabe"
+CUPO_LLENO = "cupo_lleno"
+NO_RECIBE = "no_recibe"
+SIN_CUADRILLA = "sin_cuadrilla"
+SIN_ZONA = "sin_zona"
+SIN_LABOR = "sin_labor"
+
+
+def _por_que_espera(org, fecha, esperan, labores) -> dict:
+    """{orden_id: (motivo, texto)} de las ordenes sin nadie.
+
+    Pregunta del usuario el 28/10/2026, con la pantalla a la vista: «¿por que
+    si hay mas tickets asigno solo 4 a la cuadrilla 3?». La respuesta sale de
+    la MISMA cuenta con la que el Supervisor publica
+    (`publicacion_del_reparto.propuesta`), no de una copia: con la carga de
+    cada cuadrilla, su tope, sus zonas y su labor.
+
+    Si la cuenta no se puede hacer, no se dice nada: vacio, no un motivo
+    inventado.
+    """
+    from django.utils import timezone
+
+    from campo import reparto as R
+    from campo.zonas import ZonaOperativa
+    from operaciones import publicacion_del_reparto as pub
+
+    try:
+        detalle = pub.propuesta(org, fecha, timezone.now())["detalle"]
+    except Exception:                                            # noqa: BLE001
+        return {}
+    nombre_zona = {str(i): n for i, n in
+                   ZonaOperativa.objects.filter(org=org).values_list("id", "nombre")}
+    zona_de_barrio = R.zona_de_barrio(org)
+    sobrantes = set(detalle["sobrantes"])
+    sin_cuadrilla = set(detalle["sin_cuadrilla"])
+    sin_zona = set(detalle["sin_zona"])
+    sin_labor = set(detalle["sin_clasificar"])
+
+    salida = {}
+    for o in esperan:
+        clave = str(o.id)
+        barrio = R._localidad_de(o) or ""
+        zona_id = zona_de_barrio.get(barrio) if barrio else None
+        zona = nombre_zona.get(str(zona_id), "su zona")
+        labor_cod = R._labor_de(o)
+        labor = labores.get(labor_cod, labor_cod) or "su labor"
+        if clave in detalle["cabe"]:
+            j = detalle["cabe"][clave]
+            salida[clave] = (CABE, f"Cabe en {j.cuadrilla.nombre}: sale en la "
+                                   "próxima publicación.")
+        elif clave in sobrantes:
+            salida[clave] = (CUPO_LLENO, f"Cupo lleno: las cuadrillas que cubren "
+                                         f"{zona} con {labor} ya tienen su tope.")
+        elif clave in sin_cuadrilla:
+            no_recibe = next(
+                ((j, por) for j, por in detalle["no_reciben"]
+                 if j.labor == labor_cod
+                 and str(zona_id) in {str(z.id) for z in j.zonas.all()}), None)
+            if no_recibe:
+                j, por = no_recibe
+                causa = ("alguien declaró ausencia" if por == pub.AUSENTE
+                         else "nadie de la cuadrilla tiene cuenta")
+                salida[clave] = (NO_RECIBE, f"{j.cuadrilla.nombre} cubre {zona} "
+                                            f"con {labor}, pero no recibe: {causa}.")
+            else:
+                salida[clave] = (SIN_CUADRILLA, f"Ninguna cuadrilla de este día "
+                                                f"cubre {zona} con {labor}.")
+        elif clave in sin_zona:
+            salida[clave] = (SIN_ZONA, (
+                f"El barrio {barrio} no está en ninguna zona: se carga en "
+                "Cuadrillas → Zonas operativas." if barrio
+                else "No se sabe su barrio."))
+        elif clave in sin_labor:
+            salida[clave] = (SIN_LABOR, "Su tipo de trabajo no tiene labor.")
+    return salida
+
+
 def del_dia(org, fecha) -> dict:
     """Lo publicado para `fecha`. Ver el encabezado.
 
@@ -242,6 +320,7 @@ def del_dia(org, fecha) -> dict:
     labores = nombres_de_labor(org)
     tope = configuracion_de_reparto(org).tope_por_cuadrilla
     filas = [fila(o) for o in ordenes]
+    por_que = _por_que_espera(org, fecha, esperan, labores) if esperan else {}
     return {
         "fecha": fecha.isoformat(),
         "cuadrillas": [{
@@ -259,6 +338,8 @@ def del_dia(org, fecha) -> dict:
                             "nombre", "") or "",
             "barrio": R._localidad_de(o) or "",
             "prioridad": o.prioridad or "",
+            "motivo": por_que.get(str(o.id), ("", ""))[0],
+            "por_que": por_que.get(str(o.id), ("", ""))[1],
         } for o in sorted(esperan, key=lambda o: (
             _RANGO_PRIORIDAD.get(o.prioridad or "", 3), o.numero))],
         "cuentas": {

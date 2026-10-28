@@ -125,5 +125,9 @@ def test_e_despacho_dice_si_la_orden_viva_no_la_tiene_nadie(
     orden = OrdenTrabajo.objects.get(org=org_a)
     AsignacionTrabajo.objects.create(orden=orden, profile=user_profile,
                                      rol="tecnico", es_principal=True)
-    fila = admin_client.get(CASOS).json()["casos"][0]
+    #  Con tecnico sale de la lista por defecto: esta en Programacion
+    #  (28/10/2026). Se cuenta, y pidiendolo se ve con su nombre.
+    d = admin_client.get(CASOS).json()
+    assert d["casos"] == [] and d["con_tecnico"] == 1
+    fila = admin_client.get(CASOS, {"con_tecnico": "1"}).json()["casos"][0]
     assert fila["orden_activa_tecnico"]                    # su nombre

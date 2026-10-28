@@ -132,12 +132,18 @@
             {#if publicado.esperan.length}
               <span class="snoc-label">Esperan cuadrilla ({publicado.esperan.length})</span>
               <p class="snoc-body-sm snoc-secundario">
-                Órdenes sin nadie: no entraron por el cupo, o su zona no tiene cuadrilla ese día.
+                Órdenes sin nadie. Cada una dice por qué, con la misma cuenta con la que publica el
+                Supervisor: la carga de cada cuadrilla, su tope, sus zonas y su labor.
               </p>
               {#each publicado.esperan as o (o.id)}
-                <p class="snoc-body-sm">
-                  <span class="snoc-mono">#{o.numero}</span> {o.tipo} · {textoDePrioridad(o.prioridad)} · {o.barrio}
-                </p>
+                <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-xs);">
+                  <p class="snoc-body-sm">
+                    <span class="snoc-mono">#{o.numero}</span> {o.tipo} · {textoDePrioridad(o.prioridad)} · {o.barrio}
+                  </p>
+                  {#if o.por_que}
+                    <p class="snoc-body-sm snoc-secundario">{o.por_que}</p>
+                  {/if}
+                </div>
               {/each}
             {/if}
           {/if}

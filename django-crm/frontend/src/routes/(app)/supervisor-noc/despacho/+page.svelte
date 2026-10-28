@@ -58,7 +58,7 @@
    * La URL de la lista con lo que cambia. Conserva lo demás (`ficha`, `dia`)
    * y vuelve a la página 1 salvo que se pida otra: filtrar estando en la 3
    * puede dejar esa página sin filas.
-   * @param {{ q?: string, asunto?: string, pagina?: number, ficha?: boolean }} cambio
+   * @param {{ q?: string, asunto?: string, pagina?: number, ficha?: boolean, conTecnico?: boolean }} cambio
    */
   function enlace(cambio) {
     const p = new URLSearchParams(page.url.searchParams);
@@ -67,6 +67,7 @@
     if ('q' in cambio) fijar('q', (cambio.q ?? '').trim());
     if ('asunto' in cambio) fijar('asunto', cambio.asunto ?? '');
     if ('ficha' in cambio) fijar('ficha', cambio.ficha ? '1' : '');
+    if ('conTecnico' in cambio) fijar('con_tecnico', cambio.conTecnico ? '1' : '');
     fijar('pagina', cambio.pagina && cambio.pagina > 1 ? String(cambio.pagina) : '');
     const s = p.toString();
     return s ? `?${s}` : page.url.pathname;
@@ -735,6 +736,23 @@
               Solo los que ya aprobaste en <a href="/supervisor-noc">Pendientes por
               revisión</a>. Nada sale a campo sin pasar por ahí.
             </p>
+            <!-- LO QUE YA TIENE TÉCNICO ESTÁ EN PROGRAMACIÓN (28/10/2026):
+                 Despacho es lo que falta. Se cuenta, y se puede volver a ver
+                 acá para una segunda visita al mismo caso. -->
+            {#if data.conTecnico}
+              <p class="snoc-body-sm snoc-secundario">
+                {#if data.mostrandoConTecnico}
+                  Se ven también {data.conTecnico}
+                  {data.conTecnico === 1 ? 'caso que ya tiene técnico' : 'casos que ya tienen técnico'}.
+                  <a href={enlace({ conTecnico: false })}>Ocultarlos</a>
+                {:else}
+                  {data.conTecnico}
+                  {data.conTecnico === 1 ? 'caso ya tiene técnico' : 'casos ya tienen técnico'}: están en
+                  <a href="/supervisor-noc/programacion">Programación</a>.
+                  <a href={enlace({ conTecnico: true })}>Mostrarlos acá</a> (para una segunda visita).
+                {/if}
+              </p>
+            {/if}
           </div>
           <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
             {#if !data.conFicha && (data.casos ?? []).length}

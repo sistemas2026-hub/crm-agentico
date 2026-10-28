@@ -116,7 +116,9 @@ export async function load({ url, cookies, locals }) {
   const filtro = {
     q: (url.searchParams.get('q') ?? '').trim(),
     asunto: (url.searchParams.get('asunto') ?? '').trim(),
-    pagina: Number.parseInt(url.searchParams.get('pagina') ?? '1', 10) || 1
+    pagina: Number.parseInt(url.searchParams.get('pagina') ?? '1', 10) || 1,
+    //  Lo que ya tiene técnico está en Programación; se pide para verlo acá.
+    conTecnico: url.searchParams.get('con_tecnico') === '1'
   };
 
   const [plantillas, casos, reparto, barrios] = await Promise.all([
@@ -150,6 +152,8 @@ export async function load({ url, cookies, locals }) {
     pagina: casos.pagina,
     paginas: casos.paginas,
     asuntos: casos.asuntos,
+    conTecnico: casos.conTecnico,
+    mostrandoConTecnico: filtro.conTecnico,
     //  Los barrios ya mapeados, para ofrecerlos mientras se escribe.
     barriosConocidos: barrios.localidades,
     // NO SE INVENTA UNA LISTA VACÍA CUANDO LA LECTURA FALLÓ. Una empresa sin
