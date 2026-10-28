@@ -8,7 +8,9 @@ publicado un dia, para la pantalla de Programacion. Cada punto, con su prueba:
   Q  QUIEN la asigno y a que hora: el Supervisor, una persona con el boton
      «Publicar» (que desde hoy lo deja escrito), una persona al Despachar, o
      «sin registro» cuando no hay evento --no se adivina--.
-  A  el AVISO: avisado, sin aviso, o sin telefono registrado.
+  A  el AVISO: enviado al telefono (Google lo acepto), sin telefono
+     registrado, no llego al telefono, o sin aviso. Que exista la
+     notificacion no alcanza para decir «avisado».
   C  cada orden en la cuadrilla cuya gente la tiene; aparte, lo que tiene a
      alguien que ese dia no sale y lo que espera sin nadie.
   D  el DIA: lo programado para otro dia no entra; lo terminado ese dia si,
@@ -20,6 +22,7 @@ publicado un dia, para la pantalla de Programacion. Cada punto, con su prueba:
 ================================================================================
 """
 import datetime as dt
+from unittest import mock
 
 import pytest
 from django.utils import timezone
@@ -40,7 +43,7 @@ from campo.models import (
     WorkType,
     WorkTypeVersion,
 )
-from campo.services import despacho
+from campo.services import despacho, push_fcm
 from campo.zonas import AliasDeZona, ZonaOperativa
 
 pytestmark = pytest.mark.django_db
@@ -184,42 +187,119 @@ def test_q5_manda_el_ultimo_evento_y_la_hora_es_la_de_la_empresa(
 # A · el aviso
 # ---------------------------------------------------------------------------
 
+@pytest.fixture
+def fcm():
+    """El borde con Google. `fcm["contesta"]` decide que devuelve."""
+    estado = {"contesta": push_fcm.ENTREGADO}
+
+    def mandar(token, titulo, texto, enlace, *, aviso_id="", verbo="",
+               contenido=None):
+        return estado["contesta"]
+
+    with mock.patch.object(push_fcm, "esta_configurado", return_value=True), \
+            mock.patch.object(push_fcm, "mandar_a_un_telefono", side_effect=mandar):
+        yield estado
+
+
+def _telefono(org, profile):
+    return DispositivoDeTecnico.objects.create(
+        org=org, profile=profile, token=f"tok-{profile.id}", plataforma="android",
+        activo=True)
+
+
+def _persona(django_user_model, org, email):
+    from common.models import Profile
+
+    u = django_user_model.objects.create_user(email=email, password="testpass123")
+    return Profile.objects.create(user=u, org=org, role="USER", is_active=True)
+
+
 def test_a_el_aviso_avisado_sin_aviso_y_sin_telefono(
-        org_a, version, norte, admin_profile, user_profile,
-        django_capture_on_commit_callbacks):
+        org_a, version, norte, admin_profile, user_profile, django_user_model,
+        fcm, django_capture_on_commit_callbacks):
+    sin_tel = _persona(django_user_model, org_a, "sin.telefono@test.com")
     j = _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
     _jornada(org_a, [norte], "Cuadrilla #2", user_profile)
+    _jornada(org_a, [norte], "Cuadrilla #3", sin_tel)
+    _telefono(org_a, admin_profile)
+    _telefono(org_a, user_profile)
     publicada = _orden(org_a, version)
     with django_capture_on_commit_callbacks(execute=True):
         R.publicar(org_a, [{"jornada": str(j.id), "ordenes": [str(publicada.id)]}])
-    #  Sin aviso, con telefono.
-    DispositivoDeTecnico.objects.create(org=org_a, profile=user_profile,
-                                        token="tok-u", plataforma="android",
-                                        activo=True)
+    #  Con telefono y sin aviso.
     a_mano = _orden(org_a, version, de=user_profile)
     #  Sin aviso y nadie con telefono.
-    sin_tel = _orden(org_a, version, de=admin_profile)
+    nadie = _orden(org_a, version, de=sin_tel)
 
     f = _filas(D.del_dia(org_a, LUNES))
 
     assert f[publicada.numero]["aviso"] == D.AVISADO
     assert f[a_mano.numero]["aviso"] == D.SIN_AVISO
-    assert f[sin_tel.numero]["aviso"] == D.SIN_TELEFONO
+    assert f[nadie.numero]["aviso"] == D.SIN_TELEFONO
 
 
 def test_a2_el_aviso_de_una_orden_despachada_a_mano_cuenta(
-        org_a, version, norte, admin_profile, user_profile):
+        org_a, version, norte, admin_profile, user_profile, fcm,
+        django_capture_on_commit_callbacks):
     from common.models import Notification
 
     _jornada(org_a, [norte], "Cuadrilla #1", user_profile)
+    _telefono(org_a, user_profile)
     o = _orden(org_a, version)
-    despacho.asignar(o, user_profile, admin_profile)
+    with django_capture_on_commit_callbacks(execute=True):
+        despacho.asignar(o, user_profile, admin_profile)
     #  Es el aviso de UNA orden: va atado a ella, no a una lista de numeros.
     n = Notification.objects.get(recipient=user_profile, verb="trabajo_asignado")
     assert str(n.entity_id) == str(o.id)
     assert "ordenes" not in (n.data or {})
 
     assert _filas(D.del_dia(org_a, LUNES))[o.numero]["aviso"] == D.AVISADO
+
+
+def test_a3_sin_telefono_no_dice_avisado_aunque_exista_la_notificacion(
+        org_a, version, norte, admin_profile, user_profile, fcm,
+        django_capture_on_commit_callbacks):
+    #  Lo que mostro produccion el 28/10/2026: el mismo tecnico, sin telefono,
+    #  «Avisado» en dos ordenes y «Sin telefono registrado» en la tercera. La
+    #  notificacion se crea igual; el envio no se intenta.
+    from common.models import Notification
+
+    j = _jornada(org_a, [norte], "Cuadrilla #1", user_profile)
+    publicada, despachada = _orden(org_a, version), _orden(org_a, version)
+    with django_capture_on_commit_callbacks(execute=True):
+        R.publicar(org_a, [{"jornada": str(j.id), "ordenes": [str(publicada.id)]}])
+        despacho.asignar(despachada, user_profile, admin_profile)
+    assert Notification.objects.filter(recipient=user_profile).count() == 2
+
+    f = _filas(D.del_dia(org_a, LUNES))
+
+    assert f[publicada.numero]["aviso"] == D.SIN_TELEFONO
+    assert f[despachada.numero]["aviso"] == D.SIN_TELEFONO
+
+
+def test_a4_con_telefono_y_sin_envio_aceptado_dice_que_no_llego(
+        org_a, version, norte, admin_profile, user_profile, fcm,
+        django_capture_on_commit_callbacks):
+    j = _jornada(org_a, [norte], "Cuadrilla #1", user_profile)
+    _jornada(org_a, [norte], "Cuadrilla #2", admin_profile)
+    #  Google lo rechazo.
+    _telefono(org_a, user_profile)
+    fcm["contesta"] = push_fcm.FALLO
+    rechazada = _orden(org_a, version)
+    with django_capture_on_commit_callbacks(execute=True):
+        R.publicar(org_a, [{"jornada": str(j.id), "ordenes": [str(rechazada.id)]}])
+    #  Se aviso cuando no tenia telefono, y lo registro despues: a ese
+    #  telefono nunca le llego.
+    fcm["contesta"] = push_fcm.ENTREGADO
+    antes = _orden(org_a, version)
+    with django_capture_on_commit_callbacks(execute=True):
+        despacho.asignar(antes, admin_profile, admin_profile)
+    _telefono(org_a, admin_profile)
+
+    f = _filas(D.del_dia(org_a, LUNES))
+
+    assert f[rechazada.numero]["aviso"] == D.NO_LLEGO
+    assert f[antes.numero]["aviso"] == D.NO_LLEGO
 
 
 # ---------------------------------------------------------------------------

@@ -24,11 +24,19 @@ export function quienLaAsigno(fila, dia) {
   return `${quien} · ${hora}`;
 }
 
-/** @param {string} aviso */
+/**
+ * «Enviado al teléfono» y no «Avisado»: Google lo aceptó para un teléfono, que
+ * no es lo mismo que leído. «No llegó al teléfono»: había teléfono y el envío
+ * no salió (rechazado, o el teléfono se registró después del aviso).
+ *
+ * @param {string} aviso
+ */
 export function textoDelAviso(aviso) {
   switch (aviso) {
     case 'avisado':
-      return 'Avisado';
+      return 'Enviado al teléfono';
+    case 'no_llego':
+      return 'No llegó al teléfono';
     case 'sin_telefono':
       return 'Sin teléfono registrado';
     case 'sin_aviso':

@@ -457,7 +457,7 @@
             </p>
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap:var(--snoc-sm);">
               {#each simulacion.cuadrillas as c (c.cuadrilla)}
-                <div class="snoc-tarjeta snoc-pila-xs" style="min-width:0;">
+                <div class="snoc-tarjeta snoc-pila-xs" style="min-width:0; justify-content:flex-start;">
                   <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs);">
                     <strong>{c.cuadrilla}</strong>
                     <span class="snoc-mono">

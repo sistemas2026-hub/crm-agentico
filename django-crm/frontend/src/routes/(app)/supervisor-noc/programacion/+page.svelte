@@ -70,7 +70,7 @@
               {cuentas.publicadas} {cuentas.publicadas === 1 ? 'orden publicada' : 'órdenes publicadas'}:
               {cuentas.por_el_supervisor} por el Supervisor · {cuentas.por_personas} por una persona{#if cuentas.sin_registro}
                 · {cuentas.sin_registro} sin registro de quién{/if}
-              · {cuentas.avisadas} con aviso al técnico
+              · {cuentas.avisadas} con aviso enviado al teléfono
               {#if cuentas.esperan}· {cuentas.esperan} esperan cuadrilla{/if}
             </p>
 
@@ -79,7 +79,7 @@
             {/if}
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap:var(--snoc-sm);">
               {#each publicado.cuadrillas as c (c.jornada)}
-                <div class="snoc-tarjeta snoc-pila-xs" style="min-width:0;">
+                <div class="snoc-tarjeta snoc-pila-xs" style="min-width:0; justify-content:flex-start;">
                   <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs);">
                     <strong>{c.cuadrilla}</strong>
                     <span class="snoc-mono">{c.ordenes.length} de {c.tope}</span>

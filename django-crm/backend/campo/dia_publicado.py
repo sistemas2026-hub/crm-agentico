@@ -24,10 +24,17 @@ de: `asignada_por_el_supervisor` (sin persona: el Supervisor),
 el boton ANTES de esa fecha no dejo quien: dice «sin registro», que es la
 verdad, y no se adivina.
 
-EL AVISO: si a alguien de la orden le llego la notificacion de la asignacion
-(la de la plataforma, la que el telefono espeja: `avisos.VERBO_ASIGNADO` con la
-orden, o `avisos.VERBO_JORNADA` con su numero). Si nadie de la orden tiene un
-telefono registrado, se dice: el aviso no puede llegar.
+EL AVISO: si el aviso de la asignacion SALIO AL TELEFONO. No alcanza con que
+exista la notificacion (`avisos.VERBO_ASIGNADO` con la orden, o
+`avisos.VERBO_JORNADA` con su numero): se crea aunque nadie tenga telefono, y
+entonces el envio ni se intenta. Lo que dice si salio es el registro del envio
+(`AvisoEnviado`): «push» en sus canales = Google lo ACEPTO para un telefono
+(aceptado, no leido). Medido en produccion el 28/10/2026: la pantalla decia
+«Avisado» en dos ordenes de un tecnico y «Sin telefono registrado» en la
+tercera --las tres del mismo tecnico, que no tiene telefono--.
+
+Por eso, en este orden: enviado al telefono; si no, nadie de la orden tiene
+telefono; si no, se aviso y no llego al telefono; si no, sin aviso.
 ================================================================================
 """
 
@@ -43,6 +50,7 @@ SUPERVISOR = "supervisor"
 PERSONA = "persona"
 
 AVISADO = "avisado"
+NO_LLEGO = "no_llego"
 SIN_AVISO = "sin_aviso"
 SIN_TELEFONO = "sin_telefono"
 
@@ -84,7 +92,7 @@ def del_dia(org, fecha) -> dict:
     from django.db.models import Q
 
     from campo import reparto as R
-    from campo.avisos import DispositivoDeTecnico
+    from campo.avisos import AvisoEnviado, DispositivoDeTecnico
     from campo.cuadrillas import (
         JornadaDeCuadrilla,
         configuracion_de_reparto,
@@ -130,7 +138,8 @@ def del_dia(org, fecha) -> dict:
                .select_related("profile__user").order_by("created_at", "id")):
         ultimo[ev.orden_id] = ev
 
-    #  EL AVISO: la notificacion de la asignacion, y si hay telefono.
+    #  EL AVISO: la notificacion de la asignacion, si salio al telefono, y si
+    #  hay telefono. Ver el encabezado.
     perfiles = {a.profile_id for o in ordenes for a in o.asignaciones.all()}
     con_telefono = set(
         DispositivoDeTecnico.objects.filter(org=org, activo=True,
@@ -138,15 +147,37 @@ def del_dia(org, fecha) -> dict:
         .values_list("profile_id", flat=True))
     desde = dt.datetime.combine(fecha - dt.timedelta(days=DIAS_DE_AVISOS),
                                 dt.time(0, 0), tzinfo=zona)
-    avisado = set()
+    #  Lo que Google acepto, con la clave que arma `services/avisos.py`:
+    #  `asignacion|<orden>|<revision>` y `jornada|<perfil>|<fecha>|<huella>`.
+    orden_al_telefono, jornada_al_telefono = set(), set()
+    for clave, canales in (AvisoEnviado.objects
+                           .filter(org=org, created_at__gte=desde)
+                           .filter(Q(clave__startswith="asignacion|")
+                                   | Q(clave__startswith="jornada|"))
+                           .values_list("clave", "canales")):
+        if "push" not in (canales or []):
+            continue
+        partes = clave.split("|")
+        if partes[0] == "asignacion" and len(partes) >= 2:
+            orden_al_telefono.add(partes[1])
+        elif partes[0] == "jornada" and len(partes) >= 3:
+            jornada_al_telefono.add((partes[1], partes[2]))
+    notificado, al_telefono = set(), set()
     for n in (Notification.objects
               .filter(org=org, recipient_id__in=perfiles, created_at__gte=desde,
                       verb__in=(avisos.VERBO_ASIGNADO, avisos.VERBO_JORNADA))
               .values("recipient_id", "verb", "entity_id", "data")):
+        datos = n["data"] or {}
         if n["verb"] == avisos.VERBO_ASIGNADO and n["entity_id"]:
-            avisado.add((n["recipient_id"], str(n["entity_id"])))
-        for numero in (n["data"] or {}).get("ordenes") or []:
-            avisado.add((n["recipient_id"], numero))
+            clave = (n["recipient_id"], str(n["entity_id"]))
+            notificado.add(clave)
+            if str(n["entity_id"]) in orden_al_telefono:
+                al_telefono.add(clave)
+        salio = (str(n["recipient_id"]), str(datos.get("fecha") or "")) in jornada_al_telefono
+        for numero in datos.get("ordenes") or []:
+            notificado.add((n["recipient_id"], numero))
+            if salio:
+                al_telefono.add((n["recipient_id"], numero))
 
     def fila(o) -> dict:
         quienes = sorted(o.asignaciones.all(),
@@ -161,10 +192,16 @@ def del_dia(org, fecha) -> dict:
             por = PERSONA
             por_nombre = _nombre(ev.profile) if ev.profile_id else "Una persona"
             cuando = ev.created_at
-        if any((p, str(o.id)) in avisado or (p, o.numero) in avisado for p in ids):
+        def hay(conjunto):
+            return any((p, str(o.id)) in conjunto or (p, o.numero) in conjunto
+                       for p in ids)
+
+        if hay(al_telefono):
             aviso = AVISADO
         elif not set(ids) & con_telefono:
             aviso = SIN_TELEFONO
+        elif hay(notificado):
+            aviso = NO_LLEGO
         else:
             aviso = SIN_AVISO
         version = o.tipo_trabajo_version

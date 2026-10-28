@@ -39,8 +39,9 @@ describe('quién asignó una orden, como lo lee una persona', () => {
 
 describe('el aviso y la prioridad', () => {
   it('cada estado del aviso dice lo suyo', () => {
-    expect(['avisado', 'sin_aviso', 'sin_telefono'].map(textoDelAviso)).toEqual([
-      'Avisado',
+    expect(['avisado', 'no_llego', 'sin_aviso', 'sin_telefono'].map(textoDelAviso)).toEqual([
+      'Enviado al teléfono',
+      'No llegó al teléfono',
       'Sin aviso',
       'Sin teléfono registrado'
     ]);
