@@ -6334,6 +6334,27 @@ def canales_plantillas():
     return jsonify({"plantillas": aprobadas, "total_en_meta": len(todas)})
 
 
+@app.get("/canales/whatsapp/salud")
+def canales_whatsapp_salud():
+    """
+    Como ve Meta al numero emisor: calidad, estado, nombre visible. EN VIVO,
+    sin cache: lo mira una persona en Ajustes, pocas veces, y un dato de ayer
+    sobre la calidad es justo el que no sirve. Ver whatsapp.salud_del_numero.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+        return jsonify(whatsapp.salud_del_numero(config, tenant))
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        return fallo(502, "salud_no_leida",
+                     mensaje_publico(e, "No se pudo leer el estado del número en Meta."),
+                     componente="whatsapp", e=e)
+
+
 def _autor_y_clave(campos) -> tuple[str, str, str | None]:
     """
     (autor_nombre, autor_usuario_id, clave_idempotencia) de un cuerpo JSON o
@@ -6554,7 +6575,8 @@ def _ya_guardado(destino: dict) -> bool:
 
 
 @app.post("/conversaciones/<id_conversacion>/plantilla")
-def conversaciones_enviar_plantilla(id_conversacion):
+def conversaciones_enviar_plantilla(id_conversacion, ticket_del_caso: str | None = None,
+                                    caso_del_caso: str | None = None):
     """
     Mandar una plantilla aprobada, que es la unica forma de escribirle a
     alguien con la ventana de 24 h cerrada.
@@ -6626,7 +6648,8 @@ def conversaciones_enviar_plantilla(id_conversacion):
             enviar=lambda numero: whatsapp.enviar_plantilla_aprobada(
                 config, tenant, numero, nombre, variables,
                 elegida.get("idioma") or "es", plantilla=elegida),
-            etiqueta=f"plantillas '{nombre}'", es_plantilla=True)
+            etiqueta=f"plantillas '{nombre}'", es_plantilla=True,
+            ticket_del_caso=ticket_del_caso)
 
     try:
         destino = persistencia.agregar_mensaje_humano(
@@ -6650,12 +6673,27 @@ def conversaciones_enviar_plantilla(id_conversacion):
                         "estado_entrega": destino["estado_entrega"]}), 200
 
     salida = {"ok": True, "texto": texto, "mensaje_id": destino["mensaje_id"]}
+    # 28/10/2026: como la respuesta de texto, la copia va al ticket del ISP
+    # (el tecnico tiene que ver que se le escribio al cliente) y, si salio, es
+    # la primera respuesta del caso. Antes una plantilla no hacia ninguna de
+    # las dos: el ticket figuraba sin respuesta con el cliente ya avisado.
+    ticket = ticket_del_caso or destino.get("ticket_operativo")
+    if ticket:
+        try:
+            salida["copiado_al_ticket"] = operativo.responder(
+                config, tenant, ticket, texto, autor)
+        except Exception as e:
+            registrar("operativo", "no se pudo copiar la plantilla al ticket", error=e)
+            salida["copiado_al_ticket"] = False
     salida.update(_entregar_y_registrar(
         tenant, destino["mensaje_id"],
         lambda: whatsapp.enviar_plantilla_aprobada(
             config, tenant, destino["usuario_externo"], nombre, variables,
             elegida.get("idioma") or "es", plantilla=elegida),
         f"plantillas '{nombre}'"))
+    if salida.get("resultado") == "aceptado":
+        salida["primera_respuesta_avisada"] = _avisar_primera_respuesta(
+            tenant, id_conversacion, caso_del_caso, autor)
     return jsonify(salida), 201
 
 
@@ -6838,16 +6876,50 @@ def caso_responder_humano(caso_id):
     tenant = (request.get_json(force=True, silent=True) or {}).get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    destino, ticket, error = _destino_del_caso(tenant, caso_id)
+    if error is not None:
+        return error
+    return conversaciones_responder_humano(destino, ticket_del_caso=ticket,
+                                           caso_del_caso=caso_id)
+
+
+@app.post("/casos/<caso_id>/plantilla")
+def caso_enviar_plantilla(caso_id):
+    """
+    Una plantilla aprobada desde la pantalla del TICKET (28/10/2026): lo que
+    queda cuando la respuesta de texto no sale porque el cliente escribio
+    hace mas de 24 h. Antes la pantalla decia "no le llego al cliente" y no
+    ofrecia salida; la Bandeja si podia mandar plantillas.
+
+    Misma conversacion que la respuesta de texto (_destino_del_caso), misma
+    ruta que la de la Bandeja, y la copia va al ticket de ESTE caso.
+    """
+    tenant = (request.get_json(force=True, silent=True) or {}).get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    destino, ticket, error = _destino_del_caso(tenant, caso_id)
+    if error is not None:
+        return error
+    return conversaciones_enviar_plantilla(destino, ticket_del_caso=ticket,
+                                           caso_del_caso=caso_id)
+
+
+def _destino_del_caso(tenant: str, caso_id: str):
+    """
+    (conversacion, ticket_del_isp, None) a la que escribirle desde un caso, o
+    (None, None, respuesta_de_error). La comparten la respuesta de texto y la
+    plantilla: las dos tienen que ir al MISMO chat.
+    """
     try:
         datos = persistencia.conversacion_de_caso(tenant, caso_id)
     except Exception as e:
         registrar("conversaciones", "fallo al resolver el caso", caso_id=caso_id, error=e)
-        return jsonify({"error": "No se pudo resolver la conversacion."}), 500
+        return None, None, (jsonify({"error": "No se pudo resolver la conversacion."}), 500)
     if not datos:
         # No es un error: un ticket cargado a mano no tiene conversacion
         # detras, y quien responde ahi no le esta hablando a nadie por chat.
-        return jsonify({"error": "Este caso no vino de una conversacion.",
-                        "sin_conversacion": True}), 404
+        return None, None, (jsonify({"error": "Este caso no vino de una conversacion.",
+                                     "sin_conversacion": True}), 404)
     # EL CASO APUNTA A UNA CONVERSACION QUE PUEDE ESTAR CERRADA (auditor
     # independiente, 21/10/2026). Antes de X26 la respuesta se escribia en la
     # cerrada; con X26 la primera abria una nueva por T21 sin copiar al ticket
@@ -6871,13 +6943,12 @@ def caso_responder_humano(caso_id):
             chat = persistencia.datos_del_chat(tenant, destino)
         except Exception as e:
             registrar("conversaciones", "fallo al leer el chat del caso", caso_id=caso_id, error=e)
-            return jsonify({"error": "No se pudo comprobar el chat. No se envio nada.",
-                            "codigo": "control_desconocido"}), 503
+            return None, None, (jsonify({"error": "No se pudo comprobar el chat. No se envio nada.",
+                                         "codigo": "control_desconocido"}), 503)
         if chat and chat.get("abierta_id"):
             destino = str(chat["abierta_id"])
         ticket = (chat or {}).get("ticket_operativo")
-    return conversaciones_responder_humano(destino, ticket_del_caso=ticket,
-                                           caso_del_caso=caso_id)
+    return destino, ticket, None
 
 
 @app.post("/conversaciones/<id_conversacion>/mensajes")

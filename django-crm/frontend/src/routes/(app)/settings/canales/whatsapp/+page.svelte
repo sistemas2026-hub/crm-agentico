@@ -38,6 +38,41 @@
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
 
+  /*
+   * Lo que Meta dice del número, en palabras (28/10/2026). Los códigos son los
+   * de la API de Meta; uno que no esté acá se muestra como llega, no se esconde.
+   */
+  const CALIDAD = /** @type {Record<string, {texto: string, tono: 'moss' | 'clay' | 'rust' | 'slate'}>} */ ({
+    GREEN: { texto: 'Alta', tono: 'moss' },
+    YELLOW: { texto: 'Media', tono: 'clay' },
+    RED: { texto: 'Baja', tono: 'rust' },
+    UNKNOWN: { texto: 'Sin calificar todavía', tono: 'slate' }
+  });
+  const ESTADO = /** @type {Record<string, string>} */ ({
+    CONNECTED: 'Conectado',
+    PENDING: 'Pendiente',
+    FLAGGED: 'Marcado por Meta',
+    RESTRICTED: 'Restringido',
+    RATE_LIMITED: 'Con límite de envío',
+    DISCONNECTED: 'Desconectado',
+    BANNED: 'Bloqueado por Meta',
+    DELETED: 'Borrado',
+    MIGRATED: 'Migrado'
+  });
+  const ESTADO_NOMBRE = /** @type {Record<string, string>} */ ({
+    APPROVED: 'aprobado',
+    PENDING_REVIEW: 'en revisión',
+    DECLINED: 'rechazado',
+    EXPIRED: 'vencido',
+    NONE: 'sin pedir'
+  });
+  const MODO = /** @type {Record<string, string>} */ ({ LIVE: 'Producción', SANDBOX: 'Prueba' });
+  const NIVEL = /** @type {Record<string, string>} */ ({
+    STANDARD: 'Estándar',
+    HIGH: 'Alta',
+    NOT_APPLICABLE: 'No aplica'
+  });
+
   let canal = $derived(data.canal);
   let secretos = $derived(data.secretos ?? []);
 
@@ -282,6 +317,63 @@
         </form>
       </div>
 
+      <!-- ── salud del número (28/10/2026) ────────────────────────────────── -->
+      {#if canal.activo}
+        <div class="v2-label" style="margin:22px 0 10px">Cómo ve Meta a tu número</div>
+        <div class="v2-card" style="padding:16px">
+          {#await data.salud}
+            <p class="v2-sub" style="font-size:12.5px;margin:0">Consultando a Meta…</p>
+          {:then salud}
+            {#if !salud}
+              <p class="v2-sub" style="font-size:12.5px;margin:0">
+                No se pudo leer el estado del número en Meta. Probá recargar en un rato; si sigue,
+                revisá que el token no haya vencido.
+              </p>
+            {:else}
+              {@const cal = CALIDAD[salud.calidad ?? ''] ?? CALIDAD.UNKNOWN}
+              <div class="salud">
+                <div>
+                  <span class="salud-k">Calidad</span>
+                  <Pill tone={cal.tono} dot>{cal.texto}</Pill>
+                </div>
+                <div>
+                  <span class="salud-k">Estado</span>
+                  <span>{ESTADO[salud.estado ?? ''] ?? salud.estado ?? '—'}</span>
+                </div>
+                <div>
+                  <span class="salud-k">Nombre que ven los clientes</span>
+                  <span
+                    >{salud.nombre_visible ?? '—'}{#if salud.estado_nombre}
+                      · {ESTADO_NOMBRE[salud.estado_nombre] ?? salud.estado_nombre}{/if}</span>
+                </div>
+                <div>
+                  <span class="salud-k">Número</span>
+                  <span>{salud.numero_final ? `termina en ${salud.numero_final}` : '—'}</span>
+                </div>
+                <div>
+                  <span class="salud-k">Modo</span>
+                  <span>{MODO[salud.modo ?? ''] ?? salud.modo ?? '—'}</span>
+                </div>
+                <div>
+                  <span class="salud-k">Velocidad de envío</span>
+                  <span>{NIVEL[salud.nivel_envio ?? ''] ?? salud.nivel_envio ?? '—'}</span>
+                </div>
+              </div>
+              <p class="v2-hint" style="margin:12px 0 0">
+                {#if salud.calidad === 'RED' || salud.calidad === 'YELLOW'}
+                  <b>La calidad bajó.</b> La bajan los clientes que bloquean o reportan el número.
+                  Si sigue cayendo, Meta limita cuántos mensajes puede mandar la empresa por día.
+                  Revisá a quién se le escribe sin que lo haya pedido.
+                {:else}
+                  La calidad la deciden los clientes: la bajan los bloqueos y los reportes. En
+                  amarillo o rojo, Meta empieza a limitar los envíos de toda la empresa.
+                {/if}
+              </p>
+            {/if}
+          {/await}
+        </div>
+      {/if}
+
       <!-- ── URL del webhook ─────────────────────────────────────────────── -->
       <div class="v2-label" style="margin:22px 0 10px">URL para pegar en Meta</div>
       <div class="v2-card" style="padding:16px">
@@ -446,6 +538,22 @@
 </div>
 
 <style>
+  .salud {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px 18px;
+    font-size: 13px;
+  }
+  .salud > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+  }
+  .salud-k {
+    font-size: 11.5px;
+    color: var(--v2-slate);
+  }
   .canal-switch {
     display: flex;
     align-items: center;

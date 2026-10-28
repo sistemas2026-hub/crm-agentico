@@ -4,6 +4,7 @@ import {
   guardarCanalWhatsapp,
   guardarSecreto,
   leerCanalWhatsapp,
+  leerSaludWhatsapp,
   listarSecretos
 } from '$lib/server/v2/canal-whatsapp.js';
 
@@ -15,6 +16,9 @@ export async function load({ fetch, locals }) {
   return {
     canal,
     secretos,
+    //  Sin await: le pregunta a Meta, y la pantalla no tiene por qué esperarlo
+    //  para mostrar las credenciales (28/10/2026).
+    salud: canal?.activo ? leerSaludWhatsapp(locals, fetch) : Promise.resolve(null),
     // Mismo criterio que /settings/asistente: esto decide la afordancia
     // (esconder los botones), no el permiso -- cada action lo vuelve a
     // comprobar, porque ocultar un boton no es control de acceso.

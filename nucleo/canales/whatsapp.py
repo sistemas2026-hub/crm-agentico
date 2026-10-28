@@ -733,6 +733,54 @@ def plantillas_aprobadas(config, tenant: str) -> list[dict]:
     return [_desarmar_plantilla(p) for p in (r.json().get("data") or [])]
 
 
+#: Lo que se le pide a Meta del numero emisor. Medido el 28/10/2026 contra el
+#: numero real (v23.0): todos estos campos se aceptan y un campo inventado da 400
+#: con codigo 100, asi que un campo mal escrito no pasaria callado.
+#: 'messaging_limit_tier' se acepta pero NO VIENE en la respuesta de esta
+#: version: el limite diario de envios no se puede mostrar desde aca.
+CAMPOS_SALUD = ("display_phone_number,verified_name,quality_rating,status,"
+                "name_status,platform_type,throughput,account_mode,"
+                "is_official_business_account,messaging_limit_tier")
+
+
+def salud_del_numero(config, tenant: str) -> dict:
+    """
+    Como ve Meta al numero emisor: calidad, estado, nombre visible y modo.
+
+    La CALIDAD es la que importa: la bajan los bloqueos y los reportes de los
+    clientes, y en amarillo o rojo Meta empieza a limitar los envios de TODA
+    la empresa. Nadie la veia sin entrar al panel de Meta.
+
+    Del numero sale solo el final: es el de la empresa, no el de un cliente,
+    pero la pantalla no necesita mas para reconocerlo. Lo que Meta no mande
+    queda en None -- no se inventa un valor.
+    """
+    cfg = _cfg(config)
+    telefono = _secreto(tenant, cfg.phone_number_id_ref, "del numero (phone_number_id_ref)")
+    token = _secreto(tenant, cfg.token_ref, "de envio (token_ref)")
+
+    r = requests.get(_url(config, telefono),
+                     headers={"Authorization": f"Bearer {token}"},
+                     params={"fields": CAMPOS_SALUD}, timeout=TIMEOUT_SEGUNDOS)
+    if r.status_code >= 400:
+        raise _rechazo(r, "la lectura del numero")
+
+    d = r.json()
+    numero = str(d.get("display_phone_number") or "")
+    return {
+        "numero_final": numero[-4:] if numero else None,
+        "nombre_visible": d.get("verified_name"),
+        "estado_nombre": d.get("name_status"),
+        "calidad": d.get("quality_rating"),
+        "estado": d.get("status"),
+        "modo": d.get("account_mode"),
+        "plataforma": d.get("platform_type"),
+        "nivel_envio": (d.get("throughput") or {}).get("level"),
+        "limite_diario": d.get("messaging_limit_tier"),
+        "cuenta_oficial": d.get("is_official_business_account"),
+    }
+
+
 #: Un hueco de plantilla. Meta acepta DOS formatos y no los mezcla en una
 #: misma plantilla: posicional ({{1}}) y nombrado ({{customer_name}}, desde
 #: 2024). Sin espacios a proposito: el reemplazo del texto es literal, y un

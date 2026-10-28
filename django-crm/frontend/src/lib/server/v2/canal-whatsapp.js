@@ -36,6 +36,31 @@ export async function leerCanalWhatsapp(locals, fetch) {
 }
 
 /**
+ * Cómo ve Meta al número emisor (28/10/2026): calidad, estado, nombre visible,
+ * modo. En vivo. null si el motor o Meta no contestan: la pantalla dice "no se
+ * pudo leer" y sigue, como el resto de los `leer*`.
+ *
+ * @returns {Promise<{ numero_final: string | null, nombre_visible: string | null,
+ *   estado_nombre: string | null, calidad: string | null, estado: string | null,
+ *   modo: string | null, plataforma: string | null, nivel_envio: string | null,
+ *   limite_diario: string | null, cuenta_oficial: boolean | null } | null>}
+ */
+export async function leerSaludWhatsapp(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return null;
+  try {
+    const resp = await fetch(
+      `${cfg.baseUrl}/canales/whatsapp/salud?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor(), signal: AbortSignal.timeout(10000) }
+    );
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Que secretos de la empresa ya tienen un valor cargado -- nombre,
  * descripcion, pista (los ultimos 4 caracteres) y cuando se cargaron. Nunca
  * el valor.

@@ -34,6 +34,7 @@
   } from '@lucide/svelte';
   import { nombreLegible } from '$lib/v2/nombre-herramienta.js';
   import { destinoDeLaRespuesta } from '$lib/v2/respuesta-destino.js';
+  import EnviarPlantilla from '$lib/v2/EnviarPlantilla.svelte';
   import { plazoPrimeraRespuesta } from '$lib/v2/plazo-primera-respuesta.js';
   import { partirNombreDelTicket, actorDelEvento, textoDelEvento } from '$lib/v2/ticket-detalle.js';
   import { origenDelTicket } from '$lib/v2/ticket-origen.js';
@@ -760,6 +761,12 @@
               </div>
             </div>
           </form>
+          <!-- La salida cuando la respuesta no le llega por la ventana de 24 h
+               (28/10/2026). Solo con chat detrás; se abre sola si la última
+               respuesta volvió con «no le llegó». -->
+          {#if !internal && estadoConversacion === 'si'}
+            <EnviarPlantilla casoId={ticket.id} abierta={Boolean(form?.aviso)} />
+          {/if}
         {:else}
           <p class="v2-sub" style="margin:0 0 18px;font-size:12.5px">
             Podés leer este ticket pero no responderlo. Pedile a un administrador, o a quien esté
