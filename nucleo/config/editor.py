@@ -1253,6 +1253,25 @@ def guardar_guias_tv(tenant: str, guias: list[dict]) -> TenantConfig:
 
 
 
+def _mutar_mensaje_automatico(doc: dict, evento: str, activo: bool, plantilla: str,
+                              datos: list[str]) -> None:
+    """
+    Un momento de 'mensajes_automaticos' (28/10/2026): su plantilla, QUE dato
+    va en cada {{n}} y si esta encendido. Que el evento y los datos existan lo
+    valida el esquema (TenantConfig._mensajes_del_catalogo); que la plantilla
+    este aprobada y pida tantos valores, la ruta contra Meta antes de llamar.
+    """
+    doc.setdefault("mensajes_automaticos", {})[evento] = {
+        "activo": bool(activo), "plantilla": (plantilla or "").strip(),
+        "datos": [str(d) for d in (datos or [])]}
+
+
+def guardar_mensaje_automatico(tenant: str, evento: str, activo: bool, plantilla: str,
+                               datos: list[str]) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_mensaje_automatico(doc, evento, activo,
+                                                                 plantilla, datos))
+
+
 def guardar_variable_tenant(tenant: str, nombre: str, valor: str) -> TenantConfig:
     if not RE_NOMBRE_REF.match(nombre):
         raise ErrorEdicion(

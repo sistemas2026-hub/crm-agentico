@@ -79,6 +79,9 @@ from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
 from nucleo.seguimiento import buscar_cliente, encuesta, ticket_desde_dexter
 from nucleo.persistencia import encuestas as encuestas_db
+from nucleo.config.schema import MensajeAutomatico as _MensajeAutomatico
+
+MensajeAutomaticoVacio = _MensajeAutomatico()
 from nucleo.seguimiento import verificacion_accion
 from nucleo.seguimiento.forzado import (puede_intentar_algo, por_que_posponer,
                                         decidir_pedido_humano_de,
@@ -6332,7 +6335,17 @@ def canales_plantillas():
                      componente="plantillas", e=e)
 
     aprobadas = [p for p in todas if (p.get("estado") or "").upper() == "APPROVED"]
-    return jsonify({"plantillas": aprobadas, "total_en_meta": len(todas)})
+    # QUE dato va en cada {{n}} de una plantilla, segun como la armo la empresa
+    # en Mensajes automaticos (28/10/2026): con eso la pantalla del ticket
+    # rotula los campos ("Nombre del cliente" y no "Dato 1") y llena los que
+    # conoce. Si una plantilla esta en dos momentos, vale el primero.
+    from nucleo.config.mensajes_catalogo import CAMPOS
+    armados: dict = {}
+    for evento, m in config.mensajes_automaticos.items():
+        if m.plantilla and m.datos and m.plantilla not in armados:
+            armados[m.plantilla] = {"evento": evento, "datos": list(m.datos)}
+    return jsonify({"plantillas": aprobadas, "total_en_meta": len(todas), "armados": armados,
+                    "campos": {k: e for k, (e, _ej) in CAMPOS.items()}})
 
 
 @app.get("/canales/plantillas/todas")
@@ -6412,6 +6425,91 @@ def canales_plantillas_borrar(nombre):
                      componente="plantillas", e=e)
     registrar("plantillas", "plantilla borrada", tenant=tenant, plantilla=nombre)
     return jsonify({"ok": True, "borrada": nombre})
+
+
+@app.get("/mensajes-automaticos")
+def mensajes_automaticos_listar():
+    """
+    Ajustes -> WhatsApp -> Mensajes automaticos (28/10/2026): cada momento del
+    catalogo con los datos que ofrece, lo que la empresa configuro, y sus
+    plantillas en Meta (todas, para avisar si una en uso se pauso). Si Meta no
+    contesta, igual se devuelve la configuracion: la pantalla se puede abrir.
+    """
+    from nucleo.config.mensajes_catalogo import CAMPOS, EVENTOS, LISTOS, RESPALDOS_POR_DEFECTO
+
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    try:
+        plantillas, error_meta = whatsapp.plantillas_aprobadas(config, tenant), None
+    except Exception as e:
+        registrar("mensajes", "no se pudieron leer las plantillas para Ajustes", tenant=tenant, error=e)
+        plantillas, error_meta = [], "No se pudieron leer las plantillas de Meta."
+    eventos = []
+    for clave, ev in EVENTOS.items():
+        m = config.mensajes_automaticos.get(clave)
+        eventos.append({
+            "clave": clave, "grupo": ev["grupo"], "etiqueta": ev["etiqueta"],
+            "descripcion": ev["descripcion"], "destinatario": ev["destinatario"],
+            "disparo": ev["disparo"], "campos": ev["campos"], "listo": clave in LISTOS,
+            "config": {"activo": bool(m and m.activo), "plantilla": m.plantilla if m else "",
+                       "datos": list(m.datos) if m else []}})
+    return jsonify({
+        "eventos": eventos,
+        "campos": {k: {"etiqueta": e, "ejemplo": ej} for k, (e, ej) in CAMPOS.items()},
+        "respaldos": {**RESPALDOS_POR_DEFECTO, **(config.respaldos_mensajes or {})},
+        "plantillas": plantillas, "error_meta": error_meta})
+
+
+@app.put("/mensajes-automaticos/<evento>")
+def mensajes_automaticos_guardar(evento):
+    """
+    Guarda un momento: {tenant, activo, plantilla, datos}. Antes de guardar lo
+    compara con Meta, porque es donde el CRM anterior dejaba pasar el error:
+    ENCENDIDO exige la plantilla APROBADA y tantos datos como {{n}} pide.
+    Apagado se puede guardar a medias (es un borrador).
+    """
+    from nucleo.config.mensajes_catalogo import EVENTOS
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    if evento not in EVENTOS:
+        return jsonify({"error": f"'{evento}' no es un momento conocido."}), 404
+    activo = bool(cuerpo.get("activo"))
+    plantilla = (cuerpo.get("plantilla") or "").strip()
+    datos = [str(d) for d in (cuerpo.get("datos") or [])]
+    if activo:
+        try:
+            config = _config_de(tenant)
+            ficha = next((p for p in whatsapp.plantillas_aprobadas(config, tenant)
+                          if p.get("nombre") == plantilla), None)
+        except FileNotFoundError:
+            return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+        except Exception as e:
+            return fallo(502, "plantillas_no_leidas",
+                         "No se pudo comprobar la plantilla en Meta: no se encendió.",
+                         componente="mensajes", e=e)
+        if ficha is None or (ficha.get("estado") or "").upper() != "APPROVED":
+            return jsonify({"error": "Para encenderlo, la plantilla tiene que estar aprobada por Meta."}), 400
+        if ficha.get("variables") != len(datos):
+            return jsonify({"error": f"La plantilla pide {ficha.get('variables')} dato(s) y "
+                                     f"elegiste {len(datos)}."}), 400
+    try:
+        config = editor.guardar_mensaje_automatico(tenant, evento, activo, plantilla, datos)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo guardar.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    m = config.mensajes_automaticos[evento]
+    return jsonify({"evento": evento, "activo": m.activo, "plantilla": m.plantilla,
+                    "datos": list(m.datos)})
 
 
 @app.get("/canales/whatsapp/salud")
@@ -7004,7 +7102,7 @@ def caso_enviar_encuesta(caso_id):
             config, tenant, caso_id,
             responsable_id=cuerpo.get("responsable_id"),
             responsable_nombre=cuerpo.get("responsable_nombre"),
-            area=cuerpo.get("area"))
+            area=cuerpo.get("area"), ticket_numero=cuerpo.get("ticket_numero"))
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
@@ -7045,7 +7143,8 @@ def encuestas_resumen():
         return fallo(500, "resumen_no_calculado", "No se pudo calcular el resumen.",
                      componente="encuesta", e=e)
     return jsonify({"desde": desde.isoformat(), "hasta": hasta.isoformat(),
-                    "activa": config.encuesta_whatsapp.activo,
+                    "activa": bool((config.mensajes_automaticos.get(encuesta.EVENTO)
+                                    or MensajeAutomaticoVacio).activo),
                     "satisfecho_desde": config.encuesta_whatsapp.satisfecho_desde,
                     **resumen})
 

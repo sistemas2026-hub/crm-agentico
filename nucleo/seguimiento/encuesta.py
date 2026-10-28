@@ -35,18 +35,20 @@ from nucleo.canales import whatsapp
 from nucleo.observabilidad.registro import id_interno, registrar
 from nucleo.persistencia import db as persistencia
 from nucleo.persistencia import encuestas
+from nucleo.seguimiento import mensajes_automaticos as mensajes
 
-
-def _valores(cfg, nombre_cliente: str | None) -> list[str]:
-    nombre = (nombre_cliente or "").strip().split(" ")[0] or cfg.nombre_por_defecto
-    return [v.replace("{nombre_cliente}", nombre) for v in cfg.variables]
+#: El momento del catalogo: su plantilla, sus datos y si esta encendida viven
+#: en mensajes_automaticos['encuesta_cierre'], como cualquier otro aviso.
+EVENTO = "encuesta_cierre"
 
 
 def enviar(config, tenant: str, caso_id: str, *, responsable_id: str | None = None,
-           responsable_nombre: str | None = None, area: str | None = None) -> dict:
+           responsable_nombre: str | None = None, area: str | None = None,
+           ticket_numero: str | None = None) -> dict:
     """{'enviada': bool, 'motivo': str|None}. Nunca levanta por una decision; si por la base."""
     cfg = config.encuesta_whatsapp
-    if not cfg.activo:
+    m = config.mensajes_automaticos.get(EVENTO)
+    if not m or not m.activo:
         return {"enviada": False, "motivo": "apagada"}
     if not whatsapp.activo(config):
         return {"enviada": False, "motivo": "canal_apagado"}
@@ -63,16 +65,24 @@ def enviar(config, tenant: str, caso_id: str, *, responsable_id: str | None = No
     except Exception as e:                                       # noqa: BLE001
         registrar("encuesta", "no se pudieron leer las plantillas", tenant=tenant, error=e)
         return {"enviada": False, "motivo": "meta_no_contesta"}
-    elegida = next((p for p in aprobadas if p.get("nombre") == cfg.plantilla
+    elegida = next((p for p in aprobadas if p.get("nombre") == m.plantilla
                     and (p.get("estado") or "").upper() == "APPROVED"), None)
     if elegida is None:
         return {"enviada": False, "motivo": "plantilla_no_aprobada"}
-    valores = _valores(cfg, destino.get("nombre_cliente"))
-    if elegida.get("variables") != len(valores) or elegida.get("formato_variables") == "mixto":
+    if elegida.get("variables") != len(m.datos) or elegida.get("formato_variables") == "mixto":
         return {"enviada": False, "motivo": "plantilla_no_coincide"}
+    completo = " ".join((destino.get("nombre_cliente") or "").split())
+    try:
+        valores = mensajes.valores(config, EVENTO, {
+            "cliente_nombre": completo.split(" ")[0] if completo else "",
+            "cliente_nombre_completo": completo,
+            "responsable": responsable_nombre or "",
+            "ticket_numero": ticket_numero or ""})
+    except mensajes.DatoFaltante as e:
+        return {"enviada": False, "motivo": f"dato_faltante:{e.dato}"}
 
     encuesta_id = encuestas.reservar(
-        tenant, caso_id, str(destino["id"]), cfg.plantilla, cfg.vigencia_horas,
+        tenant, caso_id, str(destino["id"]), m.plantilla, cfg.vigencia_horas,
         responsable_id=responsable_id, responsable_nombre=responsable_nombre, area=area)
     if encuesta_id is None:
         return {"enviada": False, "motivo": "ya_enviada"}

@@ -19,8 +19,13 @@
     vistaPrevia
   } from '$lib/conversaciones/plantillas.js';
 
-  /** @type {{ casoId: string, abierta?: boolean }} */
-  let { casoId, abierta = false } = $props();
+  /*
+   * 28/10/2026: si la empresa armó la plantilla en «Mensajes automáticos», cada
+   * campo dice QUÉ es («Nombre del cliente», no «Dato 1») y los que el ticket
+   * conoce vienen llenos (se pueden cambiar). 'contexto' son esos datos.
+   */
+  /** @type {{ casoId: string, abierta?: boolean, contexto?: Record<string, string> }} */
+  let { casoId, abierta = false, contexto = {} } = $props();
 
   let abierto = $state(false);
   $effect(() => {
@@ -29,6 +34,10 @@
 
   /** @type {any[] | null} */
   let plantillas = $state(null);
+  /** @type {Record<string, {evento: string, datos: string[]}>} */
+  let armados = $state({});
+  /** @type {Record<string, string>} */
+  let nombresDeCampo = $state({});
   let cargando = $state(false);
   let errorLista = $state('');
   let nombre = $state('');
@@ -41,7 +50,15 @@
   let clave = $state('');
 
   let elegida = $derived((plantillas ?? []).find((p) => p.nombre === nombre) ?? null);
-  let etiquetas = $derived(elegida ? etiquetasDe(elegida) : []);
+  let armado = $derived(elegida ? armados[elegida.nombre] ?? null : null);
+  let etiquetas = $derived(
+    elegida
+      ? etiquetasDe(elegida).map((et, i) => {
+          const dato = armado?.datos?.[i];
+          return dato && nombresDeCampo[dato] ? { ...et, titulo: nombresDeCampo[dato], donde: '' } : et;
+        })
+      : []
+  );
   let previa = $derived(elegida ? vistaPrevia(elegida, valores) : '');
   let bloqueo = $derived(motivoDeBloqueo(elegida));
   let listo = $derived(Boolean(elegida) && sePuedeEnviar(elegida, valores) && !enviando);
@@ -59,6 +76,8 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || 'No se pudieron leer las plantillas.');
       plantillas = d.plantillas ?? [];
+      armados = d.armados ?? {};
+      nombresDeCampo = d.campos ?? {};
     } catch (/** @type {any} */ e) {
       errorLista = e?.message || 'No se pudieron leer las plantillas.';
       plantillas = null;
@@ -70,7 +89,9 @@
   function elegir(/** @type {string} */ n) {
     nombre = n;
     const p = (plantillas ?? []).find((x) => x.nombre === n);
-    valores = p ? etiquetasDe(p).map(() => '') : [];
+    const datos = p ? armados[p.nombre]?.datos ?? [] : [];
+    //  Lo que el ticket conoce, ya puesto; lo que escribe la persona, vacío.
+    valores = p ? etiquetasDe(p).map((_, i) => (datos[i] && datos[i] !== 'escrito' ? contexto[datos[i]] ?? '' : '')) : [];
     resultado = null;
   }
 

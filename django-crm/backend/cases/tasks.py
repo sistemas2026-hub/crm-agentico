@@ -430,6 +430,8 @@ def enviar_encuesta_whatsapp(case_id, org_id):
             ((responsable.user.name or "").strip() or responsable.user.email) if responsable else None
         ),
         "area": case.area or None,
+        #  El numero del ticket en el sistema del ISP, por si la plantilla lo nombra.
+        "ticket_numero": case.external_ticket_id or None,
     }
     cabeceras = {}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")

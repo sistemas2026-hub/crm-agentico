@@ -53,6 +53,10 @@ class Config:
                         verify_token_ref="WA_VERIFY")
         opciones.update(kw)
         self.canales = type("C", (), {"whatsapp": CanalWhatsApp(**opciones)})()
+        # Lo que el esquema real siempre trae: sin esto el doble no sigue al
+        # original y cualquier campo nuevo da un falso rojo.
+        self.mensajes_automaticos = {}
+        self.respaldos_mensajes = {}
 
 
 SECRETOS = {"WA_TEL": "1112223334", "WA_TOKEN": "tok-secreto", "WA_WABA": "999888777"}
@@ -438,7 +442,7 @@ finally:
 titulo("4. La encuesta: el boton tocado, el envio y el webhook")
 # =============================================================================
 from nucleo.seguimiento import encuesta as enc            # noqa: E402
-from nucleo.config.schema import EncuestaWhatsApp         # noqa: E402
+from nucleo.config.schema import EncuestaWhatsApp, MensajeAutomatico  # noqa: E402
 
 
 def sobre(mensaje):
@@ -459,7 +463,7 @@ revisar(m["texto"] == "Buena" and m["contexto"] is None, "un boton interactivo t
 m = whatsapp.mensajes_entrantes(sobre({"id": "wamid.T", "type": "text", "text": {"body": "hola"}}))[0]
 revisar(m["texto"] == "hola" and m["contexto"] is None, "el texto de siempre no cambia", f"{m}")
 
-CFG = EncuestaWhatsApp(activo=True)
+CFG = EncuestaWhatsApp()
 revisar(enc.puntaje_de(CFG, "Excelente") == 5 and enc.puntaje_de(CFG, " mala ") == 1
         and enc.puntaje_de(CFG, "Otra") is None,
         "el puntaje sale de la config: exacto o sin mayusculas; uno desconocido, None")
@@ -516,10 +520,21 @@ class Encuestador:
                 setattr(obj, nombre, original)
 
 
+class Identidad:
+    nombre_comercial, nombre_legal, zona_horaria = "Empresa", "Empresa SAS", "America/Bogota"
+
+
 class ConfigEnc(Config):
-    def __init__(self, **kw):
+    """La encuesta es un mensaje automatico mas: su plantilla, datos y si esta
+    encendida van en mensajes_automaticos['encuesta_cierre'] (28/10/2026)."""
+
+    def __init__(self, activo=True, datos=("cliente_nombre",), respaldos=None, **kw):
         super().__init__()
-        self.encuesta_whatsapp = EncuestaWhatsApp(**{"activo": True, **kw})
+        self.identidad = Identidad()
+        self.encuesta_whatsapp = EncuestaWhatsApp(**kw)
+        self.mensajes_automaticos = {"encuesta_cierre": MensajeAutomatico(
+            activo=activo, plantilla="encuesta_satisfaccion", datos=list(datos))}
+        self.respaldos_mensajes = dict(respaldos or {})
 
 
 e = Encuestador()
@@ -543,12 +558,15 @@ for armado, cfg, motivo, que in (
     r = e.correr(cfg)
     revisar(r == {"enviada": False, "motivo": motivo} and not e.envios, que, f"{r} {e.envios}")
 
-e = Encuestador()
-e.correr(ConfigEnc(variables=["{nombre_cliente}"], nombre_por_defecto="vecino"))
 e2 = Encuestador()
 e2.destino = {**e2.destino, "nombre_cliente": None} if e2.destino else None
-e2.correr(ConfigEnc(nombre_por_defecto="vecino"))
-revisar(e2.envios and e2.envios[0][2] == ["vecino"], "sin nombre en el perfil, el de la config", f"{e2.envios}")
+e2.correr(ConfigEnc(respaldos={"cliente_nombre": "vecino"}))
+revisar(e2.envios and e2.envios[0][2] == ["vecino"], "sin nombre en el perfil, el respaldo de la empresa",
+        f"{e2.envios}")
+e3 = Encuestador(variables=2)
+r = e3.correr(ConfigEnc(datos=("cliente_nombre", "responsable")))
+revisar(r["enviada"] and e3.envios[0][2] == ["Juana", "Ana"],
+        "los datos de la plantilla salen del armado de la empresa, en orden", f"{r} {e3.envios}")
 
 e = Encuestador(meta="rechaza")
 r = e.correr(ConfigEnc())
@@ -639,10 +657,12 @@ try:
     pedidos_e: list = []
     api.encuesta.enviar = lambda c, t, caso, **kw: pedidos_e.append((caso, kw)) or {"enviada": True, "motivo": None}
     r = cliente.post("/casos/caso-1/encuesta", json={"tenant": TENANT, "responsable_id": "p-1",
-                                                     "responsable_nombre": "Ana", "area": "soporte_tecnico"})
+                                                     "responsable_nombre": "Ana", "area": "soporte_tecnico",
+                                                     "ticket_numero": "95001"})
     revisar(r.status_code == 200 and pedidos_e == [("caso-1", {"responsable_id": "p-1",
                                                                "responsable_nombre": "Ana",
-                                                               "area": "soporte_tecnico"})],
+                                                               "area": "soporte_tecnico",
+                                                               "ticket_numero": "95001"})],
             "la ruta pasa el caso y el responsable", f"{r.status_code} {pedidos_e}")
 
     def cae(c, t, caso, **kw):
@@ -680,6 +700,196 @@ try:
         revisar(r.status_code == 400, f"resumen con {que}: 400", f"{r.status_code}")
 finally:
     for obj, nombre, original in orig_x:
+        setattr(obj, nombre, original)
+
+
+# =============================================================================
+titulo("5. Mensajes automaticos: el armado comun de todos los avisos")
+# =============================================================================
+from nucleo.seguimiento import mensajes_automaticos as mens  # noqa: E402
+from nucleo.config.schema import TenantConfig, cargar_config  # noqa: E402
+from pydantic import ValidationError                        # noqa: E402
+
+
+class ConfigMens(Config):
+    def __init__(self, evento="ticket_creado_cliente", activo=True, datos=("cliente_nombre", "ticket_numero"),
+                 respaldos=None):
+        super().__init__()
+        self.identidad = Identidad()
+        self.mensajes_automaticos = {evento: MensajeAutomatico(activo=activo, plantilla="ticket_creado",
+                                                               datos=list(datos))}
+        self.respaldos_mensajes = dict(respaldos or {})
+
+
+class Avisador:
+    def __init__(self, *, baja=False, aprobada=True, variables=2, ya=False, meta="ok"):
+        self.baja, self.aprobada, self.variables, self.ya, self.meta = baja, aprobada, variables, ya, meta
+        self.envios: list = []
+        self.marcas: list = []
+        self.bajas_consultadas: list = []
+
+    def correr(self, config, evento="ticket_creado_cliente", para="573001112233", contexto=None,
+               clave="caso:c1"):
+        p = [(mens.persistencia, "esta_de_baja", mens.persistencia.esta_de_baja),
+             (mens.whatsapp, "plantillas_aprobadas", mens.whatsapp.plantillas_aprobadas),
+             (mens.whatsapp, "enviar_plantilla_aprobada", mens.whatsapp.enviar_plantilla_aprobada),
+             (mens.whatsapp, "activo", mens.whatsapp.activo),
+             (mens.registro_envios, "reservar", mens.registro_envios.reservar),
+             (mens.registro_envios, "marcar", mens.registro_envios.marcar)]
+        mens.persistencia.esta_de_baja = lambda t, n, c: self.bajas_consultadas.append(n) or self.baja
+        mens.whatsapp.activo = lambda c: True
+        mens.whatsapp.plantillas_aprobadas = lambda c, t: (
+            [{"nombre": "ticket_creado", "estado": "APPROVED", "idioma": "es",
+              "variables": self.variables, "formato_variables": "posicional"}] if self.aprobada else [])
+
+        def mandar(c, t, numero, nombre, valores, idioma, plantilla=None):
+            self.envios.append((numero, valores))
+            if self.meta == "rechaza":
+                raise whatsapp.ErrorWhatsApp("x", codigo=131026)
+            if self.meta == "corta":
+                raise TimeoutError()
+            return "wamid.A"
+        mens.whatsapp.enviar_plantilla_aprobada = mandar
+        mens.registro_envios.reservar = lambda t, ev, cl, pl: None if self.ya else "res-1"
+        mens.registro_envios.marcar = lambda t, i, est, w=None: self.marcas.append((est, w))
+        try:
+            return mens.enviar(config, TENANT, evento, para,
+                               contexto if contexto is not None else
+                               {"cliente_nombre": "Juana", "ticket_numero": "95001"}, clave)
+        finally:
+            for obj, nombre, original in reversed(p):
+                setattr(obj, nombre, original)
+
+
+a = Avisador()
+r = a.correr(ConfigMens())
+revisar(r == {"enviado": True, "motivo": None} and a.envios == [("573001112233", ["Juana", "95001"])]
+        and a.marcas == [("enviado", "wamid.A")],
+        "sale con los datos en el orden que armo la empresa, y queda el wamid", f"{r} {a.envios} {a.marcas}")
+for armado, cfg, kw, motivo, que in (
+        (dict(), ConfigMens(activo=False), {}, "apagado", "apagado: no sale"),
+        (dict(), ConfigMens(evento="bienvenida"), {}, "apagado", "un momento que la empresa no configuro: no sale"),
+        (dict(), ConfigMens(), {"para": "  "}, "sin_numero", "sin numero: no sale"),
+        (dict(baja=True), ConfigMens(), {}, "de_baja", "el cliente pidio no recibir avisos: no sale"),
+        (dict(aprobada=False), ConfigMens(), {}, "plantilla_no_aprobada", "plantilla sin aprobar: no sale"),
+        (dict(variables=3), ConfigMens(), {}, "plantilla_no_coincide", "la plantilla pide otra cantidad: no sale"),
+        (dict(), ConfigMens(), {"contexto": {"ticket_numero": "95001"}}, None, None),
+        (dict(), ConfigMens(datos=("ticket_asunto", "ticket_numero")), {"contexto": {"ticket_numero": "1"}},
+         "dato_faltante:ticket_asunto", "un dato vacio sin respaldo: no sale a medias"),
+        (dict(ya=True), ConfigMens(), {}, "ya_enviado", "el mismo motivo no lo dispara dos veces")):
+    if que is None:
+        continue
+    a = Avisador(**armado)
+    r = a.correr(cfg, **kw)
+    revisar(r == {"enviado": False, "motivo": motivo} and not a.envios, que, f"{r} {a.envios}")
+
+a = Avisador()
+r = a.correr(ConfigMens(), contexto={"ticket_numero": "95001"})
+revisar(r["enviado"] and a.envios[0][1] == ["cliente", "95001"],
+        "un nombre vacio cae al respaldo ('cliente')", f"{a.envios}")
+a = Avisador()
+a.correr(ConfigMens(respaldos={"cliente_nombre": "vecino"}), contexto={"ticket_numero": "1"})
+revisar(a.envios and a.envios[0][1][0] == "vecino", "la empresa cambia el respaldo", f"{a.envios}")
+a = Avisador()
+a.correr(ConfigMens(), contexto={"cliente_nombre": "Juana\n\tPerez   Gomez", "ticket_numero": "1"})
+revisar(a.envios and a.envios[0][1][0] == "Juana Perez Gomez",
+        "un valor con saltos o tabuladores se aplana (Meta lo rechaza)", f"{a.envios}")
+a = Avisador()
+a.correr(ConfigMens(datos=("empresa", "fecha")), contexto={})
+revisar(a.envios and a.envios[0][1][0] == "Empresa" and len(a.envios[0][1][1]) == 10,
+        "la empresa y la fecha salen solas", f"{a.envios}")
+a = Avisador(baja=True)
+r = a.correr(ConfigMens(evento="ticket_creado_tecnico", datos=("tecnico_nombre", "ticket_numero")),
+             evento="ticket_creado_tecnico", contexto={"tecnico_nombre": "Luis", "ticket_numero": "1"})
+revisar(r["enviado"] and not a.bajas_consultadas,
+        "al tecnico no se le aplica la baja de avisos de clientes", f"{r} {a.bajas_consultadas}")
+a = Avisador(meta="rechaza")
+r = a.correr(ConfigMens())
+revisar(r == {"enviado": False, "motivo": "rechazado"} and a.marcas == [("fallido", None)],
+        "Meta lo rechaza: fallido", f"{r} {a.marcas}")
+a = Avisador(meta="corta")
+r = a.correr(ConfigMens())
+revisar(r == {"enviado": False, "motivo": "incierto"} and a.marcas == [],
+        "sin respuesta: queda reservado y no se reintenta", f"{r} {a.marcas}")
+
+#  El esquema: lo que la config no acepta.
+BASE_YAML = cargar_config(RAIZ / "tenants" / "rapilink.config.yaml").model_dump()
+for cambio, que in (
+        ({"mensajes_automaticos": {"cumpleanos": {"activo": False}}}, "un momento que no existe"),
+        ({"mensajes_automaticos": {"ticket_cerrado_cliente": {"datos": ["total"]}}},
+         "un dato que ese momento no tiene (total al cerrar un ticket)"),
+        ({"mensajes_automaticos": {"bienvenida": {"activo": True, "plantilla": ""}}}, "encendido sin plantilla"),
+        ({"respaldos_mensajes": {"inventado": "x"}}, "un respaldo de un dato que no existe")):
+    try:
+        TenantConfig(**{**BASE_YAML, **cambio})
+        rechazo = False
+    except ValidationError:
+        rechazo = True
+    revisar(rechazo, f"la config rechaza {que}")
+
+#  Las rutas de la pantalla.
+from nucleo.config.mensajes_catalogo import EVENTOS  # noqa: E402
+
+guardados: list = []
+orig_m = [(api, "_config_de", api._config_de),
+          (api.whatsapp, "plantillas_aprobadas", api.whatsapp.plantillas_aprobadas),
+          (api.editor, "guardar_mensaje_automatico", api.editor.guardar_mensaje_automatico),
+          (api, "olvidar_config", api.olvidar_config)]
+try:
+    cfg_real = cargar_config(RAIZ / "tenants" / "rapilink.config.yaml")
+    api._config_de = lambda t: cfg_real
+    lecturas_meta: list = []
+    api.whatsapp.plantillas_aprobadas = lambda c, t: lecturas_meta.append(1) or [
+        {"nombre": "ticket_creado", "estado": "APPROVED", "variables": 2},
+        {"nombre": "pausada", "estado": "PAUSED", "variables": 1}]
+
+    def guardar(t, ev, activo, plantilla, datos):
+        guardados.append((ev, activo, plantilla, datos))
+        return cfg_real.model_copy(update={"mensajes_automaticos": {
+            ev: MensajeAutomatico(activo=activo, plantilla=plantilla, datos=datos)}})
+    api.editor.guardar_mensaje_automatico = guardar
+    api.olvidar_config = lambda t: None
+
+    r = cliente.get(f"/mensajes-automaticos?tenant={TENANT}")
+    d = r.get_json()
+    revisar(r.status_code == 200 and [e["clave"] for e in d["eventos"]] == list(EVENTOS)
+            and d["campos"]["cliente_nombre"]["etiqueta"] == "Nombre del cliente",
+            "la pantalla recibe los 11 momentos del catalogo y los nombres de los datos", f"{r.status_code}")
+    seg = next(e for e in d["eventos"] if e["clave"] == "seguimiento_ticket")
+    revisar(seg["config"] == {"activo": True, "plantilla": "seguimiento_caso",
+                              "datos": ["cliente_nombre", "escrito"]},
+            "con lo que la empresa ya configuro", f"{seg['config']}")
+    revisar(len(d["plantillas"]) == 2, "y TODAS sus plantillas, para avisar si una en uso se pauso")
+
+    url = "/mensajes-automaticos/ticket_creado_cliente"
+    r = cliente.put(url, json={"tenant": TENANT, "activo": True, "plantilla": "ticket_creado",
+                               "datos": ["cliente_nombre"]})
+    revisar(r.status_code == 400 and "pide 2" in r.get_json()["error"] and not guardados,
+            "encender con menos datos de los que pide: 400, y no se guarda", f"{r.get_json()}")
+    r = cliente.put(url, json={"tenant": TENANT, "activo": True, "plantilla": "pausada", "datos": ["empresa"]})
+    revisar(r.status_code == 400 and not guardados, "encender con una plantilla no aprobada: 400")
+    r = cliente.put(url, json={"tenant": TENANT, "activo": True, "plantilla": "ticket_creado",
+                               "datos": ["cliente_nombre", "ticket_numero"]})
+    revisar(r.status_code == 200 and guardados[-1] == ("ticket_creado_cliente", True, "ticket_creado",
+                                                       ["cliente_nombre", "ticket_numero"]),
+            "con la plantilla aprobada y los datos justos: se guarda", f"{r.status_code} {guardados}")
+    n = len(lecturas_meta)
+    r = cliente.put(url, json={"tenant": TENANT, "activo": False, "plantilla": "", "datos": []})
+    revisar(r.status_code == 200 and len(lecturas_meta) == n,
+            "apagado se guarda como borrador, sin consultar a Meta", f"{r.status_code}")
+    r = cliente.put("/mensajes-automaticos/cumpleanos", json={"tenant": TENANT})
+    revisar(r.status_code == 404, "un momento que no existe: 404")
+
+    api.whatsapp.plantillas_aprobadas = lambda c, t: [
+        {"nombre": "seguimiento_caso", "estado": "APPROVED", "variables": 2}]
+    r = cliente.get(f"/canales/plantillas?tenant={TENANT}")
+    d = r.get_json()
+    revisar(d["armados"].get("seguimiento_caso") == {"evento": "seguimiento_ticket",
+                                                     "datos": ["cliente_nombre", "escrito"]}
+            and d["campos"]["cliente_nombre"] == "Nombre del cliente",
+            "el ticket recibe el armado de la plantilla: que dato es cada {{n}}", f"{d.get('armados')}")
+finally:
+    for obj, nombre, original in orig_m:
         setattr(obj, nombre, original)
 
 

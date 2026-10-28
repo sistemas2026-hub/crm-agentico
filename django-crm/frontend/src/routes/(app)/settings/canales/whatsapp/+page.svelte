@@ -384,6 +384,16 @@
           </span>
           <span aria-hidden="true">→</span>
         </a>
+        <a class="v2-card plantillas-link" href="/settings/canales/whatsapp/mensajes" style="margin-top:10px">
+          <span>
+            <b>Mensajes automáticos</b>
+            <span class="v2-sub">
+              Qué plantilla se manda en cada momento (ticket creado, pago, encuesta…) y qué dato va en
+              cada lugar.
+            </span>
+          </span>
+          <span aria-hidden="true">→</span>
+        </a>
       {/if}
 
       <!-- ── URL del webhook ─────────────────────────────────────────────── -->

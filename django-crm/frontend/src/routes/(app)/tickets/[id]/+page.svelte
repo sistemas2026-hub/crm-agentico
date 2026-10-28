@@ -765,7 +765,17 @@
                (28/10/2026). Solo con chat detrás; se abre sola si la última
                respuesta volvió con «no le llegó». -->
           {#if !internal && estadoConversacion === 'si'}
-            <EnviarPlantilla casoId={ticket.id} abierta={Boolean(form?.aviso)} />
+            <EnviarPlantilla
+              casoId={ticket.id}
+              abierta={Boolean(form?.aviso)}
+              contexto={{
+                cliente_nombre: (cliente || '').trim().split(/\s+/)[0] || '',
+                cliente_nombre_completo: (cliente || '').trim(),
+                ticket_numero: ticket.external_ticket_id ?? '',
+                ticket_asunto: ticket.name ?? '',
+                servicio: ticket.external_service_id ?? '',
+                responsable: ticket.assignee ?? ''
+              }} />
           {/if}
         {:else}
           <p class="v2-sub" style="margin:0 0 18px;font-size:12.5px">

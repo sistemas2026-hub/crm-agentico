@@ -189,3 +189,50 @@ export async function borrarPlantilla(locals, fetch, nombre) {
   const datos = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(datos.error || 'Meta no borró la plantilla.');
 }
+
+/*
+ * MENSAJES AUTOMATICOS (28/10/2026): cada momento en que Dexter le escribe a
+ * alguien por plantilla, y que dato va en cada {{n}}. El catalogo de momentos
+ * y datos es del motor (nucleo/config/mensajes_catalogo.py); la eleccion de
+ * cada empresa vive en su config.
+ */
+
+/**
+ * Los momentos, sus datos posibles, lo configurado y las plantillas en Meta.
+ * null si el motor no contesta.
+ * @returns {Promise<any | null>}
+ */
+export async function leerMensajesAutomaticos(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return null;
+  try {
+    const resp = await fetch(
+      `${cfg.baseUrl}/mensajes-automaticos?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor(), signal: AbortSignal.timeout(10000) }
+    );
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Guarda un momento. Lanza con el motivo si el motor lo rechaza (plantilla
+ * sin aprobar, datos de menos o de mas).
+ * @param {string} evento
+ * @param {{ activo: boolean, plantilla: string, datos: string[] }} valores
+ */
+export async function guardarMensajeAutomatico(locals, fetch, evento, valores) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  const resp = await fetch(`${cfg.baseUrl}/mensajes-automaticos/${encodeURIComponent(evento)}`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, ...valores }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'No se pudo guardar.');
+  return datos;
+}

@@ -2186,21 +2186,31 @@ class AsuntoDesdeDexter(Base):
     prioridad: str = ""
 
 
-class EncuestaWhatsApp(Base):
+class MensajeAutomatico(Base):
     """
-    La encuesta de satisfaccion por WhatsApp al cerrar un caso (28/10/2026).
+    Un momento en que Dexter le escribe a alguien por plantilla (28/10/2026).
 
-    APAGADA POR DEFECTO: se enciende cuando la plantilla ya esta aprobada en
-    Meta. 'opciones' es el texto EXACTO de cada boton de la plantilla y el
-    puntaje (1 a 5) que vale: un boton que no este aca no se cuenta como nota.
-    'variables' son los valores de la plantilla, en orden; el unico dinamico
-    es '{nombre_cliente}' (el nombre del perfil de WhatsApp), que sin nombre
-    cae a 'nombre_por_defecto'. Ver nucleo/seguimiento/encuesta.py.
+    'plantilla' es el nombre en Meta; 'datos' dice QUE va en cada {{n}}, en
+    orden -- claves de nucleo/config/mensajes_catalogo.py::CAMPOS, y solo las
+    que ese momento ofrece. APAGADO POR DEFECTO. Que la plantilla exista y
+    pida tantos valores como datos hay se comprueba contra Meta al guardar
+    desde la pantalla (no aca: el esquema no habla con Meta).
     """
     activo: bool = False
-    plantilla: str = "encuesta_satisfaccion"
-    variables: list[str] = Field(default_factory=lambda: ["{nombre_cliente}"])
-    nombre_por_defecto: str = "cliente"
+    plantilla: str = ""
+    datos: list[str] = Field(default_factory=list)
+
+
+class EncuestaWhatsApp(Base):
+    """
+    Lo propio de la encuesta de satisfaccion (28/10/2026). La plantilla, sus
+    datos y si esta encendida son los de cualquier mensaje automatico:
+    mensajes_automaticos['encuesta_cierre'].
+
+    'opciones' es el texto EXACTO de cada boton de la plantilla y el puntaje
+    (1 a 5) que vale: un boton que no este aca no se cuenta como nota. Ver
+    nucleo/seguimiento/encuesta.py.
+    """
     opciones: dict[str, int] = Field(default_factory=lambda: {
         "Excelente": 5, "Buena": 4, "Regular": 3, "Mala": 1})
     agradecimiento: str = "¡Gracias por tu respuesta! Nos ayuda a mejorar."
@@ -3312,6 +3322,35 @@ class TenantConfig(Base):
     tickets_desde_dexter: TicketsDesdeDexter = Field(
         default_factory=TicketsDesdeDexter)
     encuesta_whatsapp: EncuestaWhatsApp = Field(default_factory=EncuestaWhatsApp)
+    #: Los avisos por plantilla, por momento (ver MensajeAutomatico). Vacio = ninguno.
+    mensajes_automaticos: dict[str, MensajeAutomatico] = Field(default_factory=dict)
+    #: Si un dato llega vacio, que se manda en su lugar: Meta rechaza un valor
+    #: vacio. Se suma a RESPALDOS_POR_DEFECTO del catalogo.
+    respaldos_mensajes: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("mensajes_automaticos")
+    @classmethod
+    def _mensajes_del_catalogo(cls, v):
+        from nucleo.config.mensajes_catalogo import EVENTOS
+        for evento, m in v.items():
+            if evento not in EVENTOS:
+                raise ValueError(f"mensajes_automaticos: '{evento}' no es un momento conocido "
+                                 f"(los hay: {', '.join(EVENTOS)})")
+            fuera = [d for d in m.datos if d not in EVENTOS[evento]["campos"]]
+            if fuera:
+                raise ValueError(f"mensajes_automaticos.{evento}: {fuera} no existe(n) en ese momento")
+            if m.activo and not m.plantilla.strip():
+                raise ValueError(f"mensajes_automaticos.{evento}: encendido sin plantilla")
+        return v
+
+    @field_validator("respaldos_mensajes")
+    @classmethod
+    def _respaldos_del_catalogo(cls, v):
+        from nucleo.config.mensajes_catalogo import CAMPOS
+        fuera = [k for k in v if k not in CAMPOS]
+        if fuera:
+            raise ValueError(f"respaldos_mensajes: {fuera} no es un dato conocido")
+        return v
 
     def advertencias_de_aprobacion(self) -> list[str]:
         """
