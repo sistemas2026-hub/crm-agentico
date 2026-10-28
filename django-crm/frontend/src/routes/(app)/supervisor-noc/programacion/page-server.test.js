@@ -8,7 +8,44 @@ const apiRequest = vi.fn();
 vi.mock('$lib/api-helpers.js', () => ({ apiRequest: (...a) => apiRequest(...a) }));
 vi.mock('$lib/server/v2/hoy-de-la-empresa.js', () => ({ hoyDeLaEmpresa: async () => '2026-10-28' }));
 
-const { load } = await import('./+page.server.js');
+const { load, actions } = await import('./+page.server.js');
+
+describe('Programación: guardar de dónde y qué carga cada cuadrilla', () => {
+  /** @param {string} rol */
+  const pedido = (rol) => {
+    const f = new FormData();
+    f.set('kit:correctivo', 'k-1');
+    f.set('bodega:c-1', '');
+    return /** @type {any} */ ({
+      request: { formData: async () => f },
+      cookies: { get: () => 'token' },
+      locals: { profile: { role: rol } }
+    });
+  };
+
+  it('quien gestiona: viaja lo del formulario, vacío como «sin»', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({});
+
+    const r = /** @type {any} */ (await actions.material(pedido('SUPERVISOR')));
+
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/material-del-dia/configuracion/');
+    expect(apiRequest.mock.calls[0][1]).toEqual({
+      method: 'PUT',
+      body: { kits: { correctivo: 'k-1' }, bodegas: { 'c-1': null } }
+    });
+    expect(r.hecho).toBeTruthy();
+  });
+
+  it('quien no gestiona no guarda nada', async () => {
+    apiRequest.mockReset();
+
+    const r = /** @type {any} */ (await actions.material(pedido('USER')));
+
+    expect(r.status).toBe(403);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+});
 
 const PUBLICADO = { fecha: '2026-10-28', cuadrillas: [], con_alguien_que_no_sale: [], esperan: [], cuentas: {} };
 

@@ -95,6 +95,20 @@ class Cuadrilla(BaseModel):
         help_text="Ubicacion de inventario de tipo vehiculo.",
     )
 
+    #: De que bodega carga su kit cada mañana (28/10/2026,
+    #: SPEC/objetivos/material-del-dia.md). Una empresa con mas de una bodega
+    #: carga cada cuadrilla de la suya. Vacio = no se le puede proponer carga.
+    #: El kit va a la custodia del LIDER, no al `vehiculo`: decidido por el
+    #: usuario, y es lo que la app y el cierre de jornada cuentan por persona.
+    bodega = models.ForeignKey(
+        "campo.UbicacionInventario",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cuadrillas_que_cargan",
+        help_text="Ubicacion de inventario de tipo bodega.",
+    )
+
     #: Una cuadrilla NO se borra: se da de baja. Sus jornadas la referencian y
     #: son las que explican quien hizo que.
     activa = models.BooleanField(default=True)

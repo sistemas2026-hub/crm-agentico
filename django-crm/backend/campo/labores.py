@@ -66,6 +66,15 @@ class Labor(BaseModel):
     activa = models.BooleanField(default=True)
     #: Una de las tres sembradas (D5): se renombra, no se da de baja.
     de_fabrica = models.BooleanField(default=False)
+    #: El kit que lleva una cuadrilla que sale con esta labor (28/10/2026,
+    #: SPEC/objetivos/material-del-dia.md). Vacio = esta labor no carga.
+    plantilla_de_kit = models.ForeignKey(
+        "campo.PlantillaDeKit",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="labores",
+    )
 
     class Meta:
         db_table = "campo_labor"

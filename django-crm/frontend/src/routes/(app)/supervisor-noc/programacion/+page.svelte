@@ -6,6 +6,7 @@
    * dice lo que el Supervisor HARÍA; esto, lo que QUEDÓ. Por cuadrilla, cada
    * orden con quién la asignó y a qué hora, y si al técnico le llegó el aviso.
    */
+  import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import {
@@ -15,13 +16,25 @@
     textoDePrioridad,
     textoSinBajar
   } from '$lib/supervisor/dia-publicado.js';
+  import { lineaDeMaterial } from '$lib/supervisor/material-del-dia.js';
   import '../supervisor-noc.css';
 
-  /** @type {{ data: any }} */
-  let { data } = $props();
+  /** @type {{ data: any, form: any }} */
+  let { data, form } = $props();
 
   const publicado = $derived(data.publicado);
   const cuentas = $derived(publicado?.cuentas ?? {});
+
+  //  EL MATERIAL DEL DÍA (28/10/2026): la propuesta, por jornada, para
+  //  dibujarla dentro de la tarjeta de cada cuadrilla.
+  const material = $derived(data.material);
+  const materialPor = $derived(
+    new Map((material?.cuadrillas ?? []).map((/** @type {any} */ m) => [m.jornada, m]))
+  );
+  const faltantes = $derived(
+    (material?.bodegas ?? []).filter((/** @type {any} */ b) => Number(b.falta) > 0)
+  );
+  const conf = $derived(data.configuracion);
 
   /** @param {Event} e */
   function cambiarDia(e) {
@@ -80,11 +93,70 @@
               {#if cuentas.esperan}· {cuentas.esperan} esperan cuadrilla{/if}
             </p>
 
+            <!-- EL MATERIAL DEL DÍA (28/10/2026, SPEC/objetivos/material-del-dia.md).
+                 Fase 1: propone. Nada de esto mueve material todavía. -->
+            <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-sm);">
+              <span class="snoc-label">Material del día · propuesta: todavía no se carga nada</span>
+              {#if data.errorMaterial}
+                <p class="snoc-body-sm snoc-error-txt">
+                  No se pudo calcular el material. No es que no haga falta: no se sabe.
+                </p>
+              {:else if material}
+                <p class="snoc-body-sm">
+                  {material.cuentas.completas} de {material.cuentas.cuadrillas} cuadrillas con el kit
+                  completo{#if material.cuentas.con_faltantes} · {material.cuentas.con_faltantes} con
+                    faltantes{/if}{#if material.cuentas.sin_carga} · {material.cuentas.sin_carga} sin
+                    carga{/if}
+                </p>
+                {#each faltantes as b (b.bodega + b.material)}
+                  <p class="snoc-body-sm snoc-error-txt">
+                    {b.bodega}: faltan {b.falta} {b.unidad} de {b.material} (hay {b.disponible}
+                    libres; se piden {b.pedido}).
+                  </p>
+                {/each}
+              {/if}
+              {#if conf}
+                <details>
+                  <summary class="snoc-body-sm">
+                    Configurar qué kit lleva cada labor y de qué bodega carga cada cuadrilla
+                  </summary>
+                  <form method="POST" action="?/material" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
+                    <span class="snoc-label">Kit de cada labor</span>
+                    {#each conf.labores as l (l.codigo)}
+                      <label class="snoc-fila-sep" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+                        <span class="snoc-body-sm">{l.nombre}</span>
+                        <select class="snoc-select" name={`kit:${l.codigo}`} value={l.kit ?? ''}>
+                          <option value="">Sin kit (no carga material)</option>
+                          {#each conf.kits as k (k.id)}<option value={k.id}>{k.nombre}</option>{/each}
+                        </select>
+                      </label>
+                    {/each}
+                    <span class="snoc-label">Bodega de cada cuadrilla</span>
+                    {#each conf.cuadrillas as c (c.id)}
+                      <label class="snoc-fila-sep" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+                        <span class="snoc-body-sm">{c.nombre}</span>
+                        <select class="snoc-select" name={`bodega:${c.id}`} value={c.bodega ?? ''}>
+                          <option value="">Sin bodega</option>
+                          {#each conf.bodegas as b (b.id)}<option value={b.id}>{b.nombre}</option>{/each}
+                        </select>
+                      </label>
+                    {/each}
+                    <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+                      <button class="snoc-btn" type="submit">Guardar</button>
+                      {#if form?.hecho}<span class="snoc-body-sm">{form.hecho}</span>{/if}
+                      {#if form?.error}<span class="snoc-body-sm snoc-error-txt">{form.error}</span>{/if}
+                    </div>
+                  </form>
+                </details>
+              {/if}
+            </div>
+
             {#if !publicado.cuadrillas.length}
               <p class="snoc-body-sm snoc-secundario">No hay cuadrillas armadas para este día.</p>
             {/if}
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap:var(--snoc-sm);">
               {#each publicado.cuadrillas as c (c.jornada)}
+                {@const m = materialPor.get(c.jornada)}
                 <div class="snoc-tarjeta snoc-pila-xs" style="min-width:0; justify-content:flex-start;">
                   <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs);">
                     <strong>{c.cuadrilla}</strong>
@@ -103,6 +175,21 @@
                       <p class="snoc-body-sm snoc-error-txt">{textoSinBajar(p)}</p>
                     {/if}
                   {/each}
+                  <!-- EL MATERIAL QUE SE LE CARGARÍA (propuesta, 28/10/2026). -->
+                  {#if m && (m.lineas.length || m.avisos.length)}
+                    <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-xs);">
+                      <span class="snoc-label">Material{#if m.kit} · {m.kit}{/if}</span>
+                      {#if m.lineas.length}
+                        <p class="snoc-body-sm snoc-secundario">Desde {m.bodega} · a {m.lider}</p>
+                      {/if}
+                      {#each m.lineas as l (l.material)}
+                        <p class="snoc-body-sm">{lineaDeMaterial(l)}</p>
+                      {/each}
+                      {#each m.avisos as a (a)}
+                        <p class="snoc-body-sm snoc-error-txt">{a}</p>
+                      {/each}
+                    </div>
+                  {/if}
                   {#if !c.ordenes.length}
                     <p class="snoc-body-sm snoc-secundario">Sin órdenes publicadas.</p>
                   {/if}
