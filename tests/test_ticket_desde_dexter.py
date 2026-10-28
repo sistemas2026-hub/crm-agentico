@@ -19,7 +19,13 @@ Lo que se afirma, sobre el EFECTO:
   5. el catalogo del tenant declara los asuntos y la herramienta de vinculo;
   7. el adjunto (27/10/2026): se valida antes de escribir nada, va DESPUES
      de atar, al ticket creado, por la puerta humana, con un nombre
-     aleatorio; si falla, el ticket queda y se dice.
+     aleatorio; si falla, el ticket queda y se dice;
+  8. el catalogo COMPLETO del proveedor (28/10/2026): los frecuentes primero,
+     el resto con el area por defecto, leido una vez; sin catalogo, uno de
+     fuera de los frecuentes no se crea y se dice por que;
+  9. buscar al cliente por servicio, cedula o nombre: solo servicio, nombre y
+     estado salen; el padron recorre todas las paginas, se arma aparte, no
+     guarda datos de mas y la busqueda nunca va al log.
 ================================================================================
 """
 
@@ -61,11 +67,23 @@ from nucleo.seguimiento import ticket_desde_dexter as tdd          # noqa: E402
 CONFIG = cargar_config(RAIZ / "tenants" / "rapilink.config.yaml")
 
 
+#  La forma REAL de /api/tickets/asuntos-tickets/ (medida el 28/10/2026): una
+#  sola fila, con la lista adentro. 'next' es una cadena fuera de una lista y
+#  no puede colarse como asunto.
+CATALOGO_FALSO = ["No Tiene Internet", "Cable Bajito", "Ampliación", "Cable Bajito"]
+
+
+def respuesta_catalogo(lista):
+    return {"count": 1, "next": "https://isp.invalid/pagina-2", "previous": None,
+            "results": [{"asuntos_tickets": list(lista)}]}
+
+
 class Espia:
     def __init__(self, *, titular=True, vinculo_rompe=False, responsable=None,
-                 id_ticket="95001", adjunto_rompe=False):
+                 id_ticket="95001", adjunto_rompe=False, catalogo=CATALOGO_FALSO):
         self.titular, self.vinculo_rompe = titular, vinculo_rompe
         self.adjunto_rompe = adjunto_rompe
+        self.catalogo, self.lecturas_catalogo = catalogo, 0
         self.responsable, self.id_ticket = responsable, id_ticket
         self.creaciones: list[dict] = []
         self.vinculos: list[dict] = []
@@ -87,6 +105,11 @@ def montar(espia, parches):
         return {"id_ticket": espia.id_ticket}
 
     def ejecutar_http(herr, args, tenant, **kw):
+        if herr.lista_asuntos_ticket:
+            espia.lecturas_catalogo += 1
+            if espia.catalogo is None:
+                raise RuntimeError("WispHub no contesta")
+            return respuesta_catalogo(espia.catalogo)
         if espia.vinculo_rompe:
             raise RuntimeError("409 TICKET_YA_TIENE_CASO")
         espia.vinculos.append({"herramienta": herr.nombre, "args": dict(args)})
@@ -113,6 +136,7 @@ def crear(espia, config=CONFIG, **kw):
              "autor": AUTOR["autor"], **kw}
     parches: list = []
     montar(espia, parches)
+    tdd._CATALOGOS.clear()
     try:
         return tdd.crear(config, TENANT, CASO, datos["servicio"], datos["asunto"],
                          datos["descripcion"], datos["autor"],
@@ -206,7 +230,9 @@ from nucleo.canales import api                                    # noqa: E402
 api.app.config["TESTING"] = True
 cliente = api.app.test_client()
 originales = [(api, "_config_de", api._config_de),
-              (api.ticket_desde_dexter, "crear", api.ticket_desde_dexter.crear)]
+              (api.ticket_desde_dexter, "crear", api.ticket_desde_dexter.crear),
+              (api.ticket_desde_dexter, "_catalogo", api.ticket_desde_dexter._catalogo)]
+api.ticket_desde_dexter._catalogo = lambda c, t: ["Cable Bajito", "No Tiene Internet"]
 llamadas: list = []
 archivos: list = []
 
@@ -244,8 +270,10 @@ try:
     revisar(archivos[-1] == adj, "el archivo de la pantalla llega al modulo", f"{archivos[-1:]}")
     r = cliente.get(f"/tickets-desde-dexter/asuntos?tenant={TENANT}")
     nombres = [a["asunto"] for a in (r.get_json() or {}).get("asuntos", [])]
-    revisar(r.status_code == 200 and "No Tiene Internet" in nombres and len(nombres) == 15,
-            "la pantalla recibe la lista de asuntos", f"{r.status_code} {len(nombres)}")
+    revisar(r.status_code == 200 and nombres[:1] == ["No Tiene Internet"]
+            and nombres[-1] == "Cable Bajito" and len(nombres) == 16,
+            "la pantalla recibe los frecuentes y despues el resto del catalogo, sin repetir",
+            f"{r.status_code} {len(nombres)} {nombres[-2:]}")
 finally:
     for obj, nombre, original in originales:
         setattr(obj, nombre, original)
@@ -419,14 +447,252 @@ revisar(cod is None and (r or {}).get("adjunto") is False and len(e.creaciones) 
         f"{r} {cod}")
 
 # =============================================================================
+titulo("8. El catalogo COMPLETO de asuntos del proveedor (28/10/2026)")
+# =============================================================================
+revisar(tdd._cadenas(respuesta_catalogo(["A", " B ", "A"])) == ["A", "B"],
+        "de la respuesta real salen las cadenas de la lista, sin repetir; 'next' no se cuela",
+        f"{tdd._cadenas(respuesta_catalogo(['A', ' B ', 'A']))}")
+
+
+def con_espia(espia, hacer):
+    parches: list = []
+    montar(espia, parches)
+    tdd._CATALOGOS.clear()
+    try:
+        return hacer()
+    finally:
+        for obj, nombre, original in reversed(parches):
+            setattr(obj, nombre, original)
+
+
+e = Espia()
+lista = con_espia(e, lambda: tdd.asuntos(CONFIG, TENANT))
+frecuentes = [a.asunto for a in CONFIG.tickets_desde_dexter.asuntos]
+revisar([a["asunto"] for a in lista[:15]] == frecuentes
+        and all(a["frecuente"] for a in lista[:15]),
+        "primero los 15 frecuentes, en el orden de la config", f"{lista[:2]}")
+revisar([a["asunto"] for a in lista[15:]] == ["Ampliación", "Cable Bajito"]
+        and all(not a["frecuente"] and a["area"] == "soporte_tecnico" for a in lista[15:]),
+        "despues el resto del catalogo: alfabetico, sin repetir un frecuente, area por defecto",
+        f"{lista[15:]}")
+
+e = Espia()
+lecturas = con_espia(e, lambda: (tdd.asuntos(CONFIG, TENANT), tdd.asuntos(CONFIG, TENANT),
+                                 e.lecturas_catalogo)[2])
+revisar(lecturas == 1, "el catalogo se lee UNA vez y se guarda (la pantalla lo pide cada vez)",
+        f"{lecturas}")
+
+e = Espia(catalogo=None)
+lista = con_espia(e, lambda: tdd.asuntos(CONFIG, TENANT))
+revisar(len(lista) == 15, "si el proveedor no contesta, la pantalla sigue con los frecuentes",
+        f"{len(lista)}")
+
+e = Espia(responsable=("1500111", "Tecnica de soporte"))
+r, cod = crear(e, asunto="Cable Bajito")
+sob = (e.creaciones[0] if e.creaciones else {}).get("sobrescribir") or {}
+v = e.vinculos[0] if e.vinculos else {}
+revisar(cod is None and sob.get("asunto") == "Cable Bajito" == sob.get("asuntos_default")
+        and sob.get("prioridad") == "2" and sob.get("tecnico") == "1500111"
+        and v.get("args", {}).get("area") == "soporte_tecnico",
+        "un asunto del catalogo sale tal cual, con la prioridad y el area por defecto",
+        f"{cod} {sob} {v}")
+
+e = Espia(catalogo=None)
+_, cod = crear(e, asunto="Cable Bajito")
+revisar(cod == "ISP_NO_CONTESTA" and not e.creaciones,
+        "sin catalogo, uno de fuera de los frecuentes NO se crea, y no se dice 'no permitido'",
+        f"{cod}")
+e = Espia(catalogo=None)
+r, cod = crear(e)
+revisar(cod is None and e.creaciones and e.lecturas_catalogo == 0,
+        "un frecuente no necesita el catalogo: se crea aunque el proveedor no lo mande",
+        f"{cod} {e.lecturas_catalogo}")
+
+apagado = CONFIG.model_copy(update={"tickets_desde_dexter":
+    CONFIG.tickets_desde_dexter.model_copy(update={"catalogo_del_proveedor": False})})
+e = Espia()
+_, cod = crear(e, config=apagado, asunto="Cable Bajito")
+revisar(cod == "ASUNTO_NO_PERMITIDO" and e.lecturas_catalogo == 0 and not e.creaciones,
+        "con el catalogo apagado vale solo la lista de la config, sin leer nada", f"{cod}")
+
+# =============================================================================
+titulo("9. Buscar al cliente por servicio, cedula o nombre (28/10/2026)")
+# =============================================================================
+import threading                                                  # noqa: E402
+
+from nucleo.seguimiento import buscar_cliente as bc               # noqa: E402
+
+#  Filas como las del listado de clientes: con los datos que NO pueden salir.
+def fila(sid, nombre, estado="Activo"):
+    return {"id_servicio": sid, "nombre": nombre, "estado": estado,
+            "cedula": "1234567", "telefono": "3001234567", "password_router": "x"}
+
+
+PADRON = ([fila(1000 + i, f"CLIENTE NUMERO {i}") for i in range(640)]
+          + [fila(9001, "JOSE MARIA PEREZ"), fila(9002, "MARÍA LÓPEZ GÓMEZ"),
+             fila(9003, "MARIA LOPEZ ZAPATA", "Suspendido")])
+
+
+class Proveedor:
+    def __init__(self, padron=PADRON, rompe=False):
+        self.padron, self.rompe = padron, rompe
+        self.paginas: list = []
+        self.cedulas: list = []
+
+    def ejecutar(self, herr, args, tenant, **kw):
+        if "cedula" in args:
+            self.cedulas.append(args["cedula"])
+            return {"count": 2, "results": [fila(5832, "TITULAR CEDULA"),
+                                             fila(7001, "TITULAR CEDULA")]}
+        if self.rompe:
+            raise RuntimeError("WispHub no contesta")
+        self.paginas.append((args.get("limit"), args.get("offset")))
+        o, n = args["offset"], args["limit"]
+        return {"count": len(self.padron), "results": self.padron[o:o + n]}
+
+
+registros: list = []
+
+
+def con_proveedor(prov, hacer, servicio=None):
+    parches = [(bc.ejecutor_http, "ejecutar", bc.ejecutor_http.ejecutar),
+               (bc, "registrar", bc.registrar),
+               (bc.importacion_io, "resolver_servicios", bc.importacion_io.resolver_servicios)]
+    bc.ejecutor_http.ejecutar = prov.ejecutar
+    bc.registrar = lambda comp, ev, **k: registros.append((comp, ev, k))
+    bc.importacion_io.resolver_servicios = lambda c, t: (
+        lambda ids: {ids[0]: {"nombre": "TITULAR SERVICIO", "estado": "Activo",
+                              "sn_onu": "x"}} if ids[0] == servicio else {})
+    try:
+        return hacer()
+    finally:
+        for obj, nombre, original in reversed(parches):
+            setattr(obj, nombre, original)
+
+
+def esperar_carga():
+    for h in threading.enumerate():
+        if h.name.startswith("padron-"):
+            h.join(10)
+
+
+def limpio():
+    bc._PADRONES.clear()
+    bc._CARGANDO.clear()
+
+
+limpio()
+for q in ("", "ab", "  a  ", "1" * 13):
+    try:
+        bc.buscar(CONFIG, TENANT, q)
+        cod = None
+    except bc.BusquedaInvalida as e:
+        cod = e.codigo
+    revisar(cod == "BUSQUEDA_CORTA", f"{q!r} -> BUSQUEDA_CORTA, sin salir a nadie", f"{cod}")
+
+prov = Proveedor()
+r = con_proveedor(prov, lambda: bc.buscar(CONFIG, TENANT, "5832"), servicio="5832")
+revisar([x["servicio"] for x in r["resultados"]] == ["5832", "7001"] and prov.cedulas == ["5832"],
+        "solo digitos: como servicio Y como cedula, sin repetir el mismo servicio", f"{r}")
+revisar(all(set(x) == {"servicio", "nombre", "estado"} for x in r["resultados"]),
+        "de cada cliente salen SOLO servicio, nombre y estado", f"{r['resultados'][:1]}")
+revisar(not prov.paginas, "buscar por numero no arma el padron", f"{prov.paginas}")
+
+limpio()
+prov = Proveedor()
+r = con_proveedor(prov, lambda: bc.buscar(CONFIG, TENANT, "maria lopez"))
+revisar(r == {"resultados": [], "mas": False, "cargando": True},
+        "la primera busqueda por nombre contesta 'cargando' en vez de colgar", f"{r}")
+con_proveedor(prov, esperar_carga)
+revisar(prov.paginas == [(300, 0), (300, 300), (300, 600)],
+        "el padron recorre TODAS las paginas del proveedor, de a 300", f"{prov.paginas}")
+filas = (bc._PADRONES.get(TENANT) or {}).get("filas") or []
+revisar(len(filas) == len(PADRON) and all("cedula" not in f and "telefono" not in f for f in filas),
+        "el padron guarda a todos, sin cedula, telefono ni claves", f"{len(filas)}")
+revisar(TENANT not in bc._CARGANDO, "al terminar, deja de figurar como cargando")
+
+r = con_proveedor(prov, lambda: bc.buscar(CONFIG, TENANT, "Maria  LOPEZ"))
+revisar([x["servicio"] for x in r["resultados"]] == ["9002", "9003"] and r["cargando"] is False,
+        "por nombre: todas las palabras, sin importar tildes ni mayusculas, por apellido tambien",
+        f"{r}")
+r = con_proveedor(prov, lambda: bc.buscar(CONFIG, TENANT, "maria"))
+revisar([x["servicio"] for x in r["resultados"]] == ["9002", "9003", "9001"],
+        "primero los que EMPIEZAN asi, despues los que lo contienen", f"{r}")
+r = con_proveedor(prov, lambda: bc.buscar(CONFIG, TENANT, "cliente numero"))
+revisar(len(r["resultados"]) == bc.MAXIMO and r["mas"] is True,
+        "mas de 15: los primeros 15 y 'mas', para que se afine", f"{len(r['resultados'])}")
+revisar(len(prov.paginas) == 3, "con el padron vigente no se vuelve a leer al proveedor",
+        f"{len(prov.paginas)}")
+revisar(not any("maria" in str(k).lower() or "cliente numero" in str(k).lower()
+                for _, _, k in registros),
+        "la busqueda NUNCA va al log", f"{registros}")
+
+bc._PADRONES[TENANT]["cuando"] -= 7 * 3600
+prov2 = Proveedor(padron=[fila(9100, "MARIA NUEVA")])
+r = con_proveedor(prov2, lambda: bc.buscar(CONFIG, TENANT, "maria lopez"))
+revisar([x["servicio"] for x in r["resultados"]] == ["9002", "9003"],
+        "vencido: contesta con el viejo mientras arma el nuevo", f"{r}")
+con_proveedor(prov2, esperar_carga)
+r = con_proveedor(prov2, lambda: bc.buscar(CONFIG, TENANT, "maria"))
+revisar([x["servicio"] for x in r["resultados"]] == ["9100"], "y despues usa el nuevo", f"{r}")
+
+limpio()
+prov = Proveedor(rompe=True)
+con_proveedor(prov, lambda: (bc.buscar(CONFIG, TENANT, "maria"), esperar_carga()))
+revisar(TENANT not in bc._PADRONES and TENANT not in bc._CARGANDO
+        and any(ev == "no se pudo cargar el padron" for _, ev, _ in registros),
+        "si el proveedor falla: queda dicho en el log y la proxima busqueda reintenta",
+        f"{bc._CARGANDO} {registros[-1:]}")
+
+limpio()
+sin_nombre = CONFIG.model_copy(update={"tickets_desde_dexter":
+    CONFIG.tickets_desde_dexter.model_copy(update={"buscar_por_nombre": False})})
+prov = Proveedor()
+try:
+    con_proveedor(prov, lambda: bc.buscar(sin_nombre, TENANT, "maria"))
+    cod = None
+except bc.BusquedaInvalida as e:
+    cod = e.codigo
+revisar(cod == "SIN_BUSQUEDA_POR_NOMBRE" and not prov.paginas and TENANT not in bc._CARGANDO,
+        "con la busqueda por nombre apagada no se arma ningun padron", f"{cod}")
+
+#  La ruta del motor: traduce cada caso a su codigo.
+originales = [(api, "_config_de", api._config_de),
+              (api.buscar_cliente, "buscar", api.buscar_cliente.buscar)]
+api._config_de = lambda t: CONFIG
+try:
+    api.buscar_cliente.buscar = lambda c, t, q: {"resultados": [{"servicio": "1", "nombre": q,
+                                                                "estado": "Activo"}],
+                                                 "mas": False, "cargando": False}
+    r = cliente.get(f"/clientes/buscar?tenant={TENANT}&q=mario%20saba")
+    revisar(r.status_code == 200 and r.get_json()["resultados"][0]["nombre"] == "mario saba",
+            "la ruta pasa la busqueda y devuelve lo que encontro", f"{r.status_code}")
+    r = cliente.get("/clientes/buscar?q=mario")
+    revisar(r.status_code == 400, "sin tenant -> 400", f"{r.status_code}")
+
+    def corta(c, t, q):
+        raise bc.BusquedaInvalida("BUSQUEDA_CORTA")
+    api.buscar_cliente.buscar = corta
+    r = cliente.get(f"/clientes/buscar?tenant={TENANT}&q=ma")
+    revisar(r.status_code == 400 and r.get_json() == {"error": "BUSQUEDA_CORTA"},
+            "una busqueda invalida sale con su codigo", f"{r.get_json()}")
+finally:
+    for obj, nombre, original in originales:
+        setattr(obj, nombre, original)
+
+# =============================================================================
 titulo("5. El catalogo del tenant")
 # =============================================================================
+lista_h = [h for h in CONFIG.herramientas if h.lista_asuntos_ticket]
+revisar(len(lista_h) == 1 and lista_h[0].solo_lectura and lista_h[0].metodo == "GET",
+        "una sola herramienta de catalogo, de solo lectura", f"{lista_h}")
 vinc = [h for h in CONFIG.herramientas if h.vincula_caso_externo]
 revisar(len(vinc) == 1 and vinc[0].endpoint.endswith("/vincular/"),
         "una herramienta de vinculo, apuntando a la ruta de importacion", f"{vinc}")
 roles = list(CONFIG.roles.values()) if isinstance(CONFIG.roles, dict) else list(CONFIG.roles)
 visibles = [getattr(r, "nombre", "?") for r in roles
-            if "vincular_caso_externo" in (getattr(r, "puede_consultar", None) or [])]
+            if {"vincular_caso_externo", "listar_asuntos_ticket"}
+            & set(getattr(r, "puede_consultar", None) or [])]
 revisar(visibles == [], "ningun rol del modelo la ve", f"{visibles}")
 revisar(any("consultar_ticket" in (getattr(r, "puede_consultar", None) or []) for r in roles),
         "control: la misma lectura SI ve una herramienta que el modelo usa")

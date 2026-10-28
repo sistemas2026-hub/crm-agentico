@@ -1291,6 +1291,11 @@ class Herramienta(Base):
     # sistema del ISP -- el documento de "Nuevo ticket" (27/10/2026). Sin ella
     # el ticket se crea igual y el archivo queda solo en el CRM.
     adjunta_archivo_ticket: bool = False
+    # La que lee el catalogo COMPLETO de asuntos de ticket del ISP, para que
+    # "Nuevo ticket" ofrezca todos y no solo los de 'tickets_desde_dexter'
+    # (28/10/2026). Se recorre la respuesta y vale toda cadena que venga en
+    # una lista: el motor no sabe como llama cada proveedor a ese campo.
+    lista_asuntos_ticket: bool = False
     # Nombres de campo en la respuesta cruda del proveedor -- configurables
     # por tenant para no hardcodear el vocabulario de un proveedor puntual
     # (WispHub llama 'localidad' y 'zona') en nucleo/. 'campo_zona_sync'
@@ -2185,11 +2190,28 @@ class TicketsDesdeDexter(Base):
     """
     Que se puede abrir en el sistema del ISP desde "Nuevo ticket" (26/10/2026).
 
-    VACIO = APAGADO: sin asuntos declarados el formulario no ofrece crear el
-    ticket alla. Es la lista que la pantalla muestra, y la unica que el motor
-    acepta: un asunto que no este aca se rechaza antes de llamar al proveedor.
+    VACIO = APAGADO: sin asuntos declarados (y sin el catalogo del proveedor)
+    el formulario no ofrece crear el ticket alla. Un asunto que no este en la
+    lista se rechaza antes de llamar al proveedor.
+
+    'asuntos' son los FRECUENTES, con su area y su prioridad. Con
+    'catalogo_del_proveedor' la pantalla ofrece ademas TODOS los del ISP
+    (28/10/2026: el usuario pidio "todos los que estan en WispHub"); esos van
+    con 'area_por_defecto' y 'prioridad_por_defecto'. Leerlo exige una
+    herramienta con 'lista_asuntos_ticket'.
+
+    'buscar_por_nombre' arma en memoria un padron de servicio, nombre y estado
+    de TODOS los clientes, para buscar por nombre: el filtro por nombre del
+    proveedor puede no servir (el de WispHub compara exacto contra los nombres
+    de pila, sin apellidos -- medido el 28/10/2026). Se renueva cada
+    'padron_vigencia_horas' y nunca se escribe a disco ni a la base.
     """
     asuntos: list[AsuntoDesdeDexter] = Field(default_factory=list)
+    catalogo_del_proveedor: bool = False
+    area_por_defecto: str = ""
+    prioridad_por_defecto: str = ""
+    buscar_por_nombre: bool = False
+    padron_vigencia_horas: int = Field(default=6, ge=1, le=48)
 
 
 class Escalamiento(Base):

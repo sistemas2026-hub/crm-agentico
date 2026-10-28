@@ -47,7 +47,14 @@ export const actions = {
       servicio: form.get('servicio')?.toString().trim() ?? '',
       asunto: values.name
     };
-    const eco = { ...values, en_wisphub: enWispHub, servicio: wisphub.servicio };
+    //  'cliente_nombre' solo vuelve a la pantalla si algo falla, para que el
+    //  cliente elegido siga a la vista: el motor no lo usa.
+    const eco = {
+      ...values,
+      en_wisphub: enWispHub,
+      servicio: wisphub.servicio,
+      cliente_nombre: form.get('cliente_nombre')?.toString().trim() ?? ''
+    };
 
     const elegido = form.get('attachment');
     const adjunto =
@@ -74,6 +81,9 @@ export const actions = {
       return fail(400, { values: eco, error: 'Elegí el asunto de la lista de WispHub.' });
     }
     if (enWispHub) {
+      if (!wisphub.servicio) {
+        return fail(400, { values: eco, error: 'Buscá y elegí el cliente antes de crearlo en WispHub.' });
+      }
       if (!/^\d{1,12}$/.test(wisphub.servicio)) {
         return fail(400, { values: eco, error: 'El número de servicio de WispHub va solo con dígitos.' });
       }

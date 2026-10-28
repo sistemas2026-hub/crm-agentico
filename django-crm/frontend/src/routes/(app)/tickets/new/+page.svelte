@@ -46,31 +46,65 @@
   let enWispHub = $state(
     untrack(() => (result?.values ? result.values.en_wisphub === true : true))
   );
+  /*
+   * 28/10/2026: el cliente se BUSCA por número de servicio, cédula o nombre
+   * -- quien atiende una llamada casi nunca tiene el número. Lo que viaja en
+   * el formulario sigue siendo el número de servicio del que se eligió.
+   */
   let servicio = $state(untrack(() => result?.values?.servicio ?? ''));
-  let usaWispHub = $derived((data.asuntosWispHub?.length ?? 0) > 0);
+  let clienteNombre = $state(untrack(() => result?.values?.cliente_nombre ?? ''));
+  let busqueda = $state('');
   /** @type {any} */
-  let titular = $state(null);
-  let verificando = $state(false);
+  let hallazgo = $state(null);
+  let buscando = $state(false);
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let reintento;
+  let usaWispHub = $derived((data.asuntosWispHub?.length ?? 0) > 0);
   const AREAS = /** @type {Record<string, string>} */ ({
     soporte_tecnico: 'Soporte técnico',
     cartera: 'Cartera'
   });
-  let asuntosPorArea = $derived.by(() => {
+  //  Los frecuentes por área, y después todo el catálogo de WispHub.
+  let asuntosPorGrupo = $derived.by(() => {
     /** @type {Record<string, string[]>} */
     const g = {};
-    for (const a of data.asuntosWispHub ?? []) (g[a.area || ''] ??= []).push(a.asunto);
-    return Object.entries(g);
-  });
-  async function verificar() {
-    verificando = true;
-    try {
-      const r = await fetch(`/tickets/new/titular?servicio=${encodeURIComponent(servicio.trim())}`);
-      titular = await r.json();
-    } catch {
-      titular = { ok: false, motivo: 'No se pudo consultar ahora. Probá de nuevo.' };
-    } finally {
-      verificando = false;
+    /** @type {string[]} */
+    const resto = [];
+    for (const a of data.asuntosWispHub ?? []) {
+      if (a.frecuente === false) resto.push(a.asunto);
+      else (g[a.area || ''] ??= []).push(a.asunto);
     }
+    const grupos = Object.entries(g).map(
+      ([area, lista]) => /** @type {[string, string[]]} */ ([AREAS[area] ?? (area || 'Otros'), lista])
+    );
+    if (resto.length) grupos.push(['Todos los asuntos de WispHub', resto]);
+    return grupos;
+  });
+  async function buscar(intento = 0) {
+    clearTimeout(reintento);
+    buscando = true;
+    try {
+      const r = await fetch(`/tickets/new/cliente?q=${encodeURIComponent(busqueda.trim())}`);
+      hallazgo = await r.json();
+      //  La primera búsqueda por nombre arma la lista de clientes del lado del
+      //  motor (cerca de un minuto): se reintenta sola, hasta dos minutos.
+      if (hallazgo?.ok && hallazgo.cargando && intento < 24) {
+        reintento = setTimeout(() => buscar(intento + 1), 5000);
+      }
+    } catch {
+      hallazgo = { ok: false, motivo: 'No se pudo buscar ahora. Probá de nuevo.' };
+    } finally {
+      buscando = false;
+    }
+  }
+  function elegir(/** @type {any} */ c) {
+    servicio = c.servicio;
+    clienteNombre = c.nombre;
+    hallazgo = null;
+  }
+  function cambiar() {
+    servicio = '';
+    clienteNombre = '';
   }
 
   let touched = $state(/** @type {Record<string, boolean>} */ ({}));
@@ -149,26 +183,57 @@
         </label>
         {#if enWispHub}
           <div class="v2-field">
-            <label for="f-servicio">Número de servicio del cliente</label>
-            <div class="servicio">
-              <input
-                id="f-servicio"
-                name="servicio"
-                class="v2-input"
-                inputmode="numeric"
-                autocomplete="off"
-                bind:value={servicio}
-                oninput={() => (titular = null)} />
-              <button
-                type="button"
-                class="v2-btn v2-btn-sm"
-                onclick={verificar}
-                disabled={verificando || !servicio.trim()}>Verificar</button>
-            </div>
-            {#if titular?.ok}
-              <p class="v2-hint">Titular: <b>{titular.nombre}</b>{titular.estado ? ` · ${titular.estado}` : ''}</p>
-            {:else if titular}
-              <p class="v2-hint aviso">{titular.motivo}</p>
+            <label for="f-cliente">Cliente</label>
+            <input type="hidden" name="servicio" value={servicio} />
+            <input type="hidden" name="cliente_nombre" value={clienteNombre} />
+            {#if servicio}
+              <div class="elegido">
+                <span><b>{clienteNombre || 'Cliente'}</b> · servicio {servicio}</span>
+                <button type="button" class="v2-btn v2-btn-sm" onclick={cambiar}>Cambiar</button>
+              </div>
+            {:else}
+              <div class="servicio">
+                <input
+                  id="f-cliente"
+                  class="v2-input"
+                  autocomplete="off"
+                  placeholder="Número de servicio, cédula o nombre"
+                  bind:value={busqueda}
+                  onkeydown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    if (busqueda.trim().length >= 3) buscar();
+                  }} />
+                <button
+                  type="button"
+                  class="v2-btn v2-btn-sm"
+                  onclick={() => buscar()}
+                  disabled={buscando || busqueda.trim().length < 3}>Buscar</button>
+              </div>
+              {#if hallazgo && !hallazgo.ok}
+                <p class="v2-hint aviso">{hallazgo.motivo}</p>
+              {:else if hallazgo?.cargando}
+                <p class="v2-hint">
+                  Cargando la lista de clientes de WispHub: la primera vez tarda cerca de un minuto.
+                  La búsqueda sigue sola.
+                </p>
+              {:else if hallazgo && !hallazgo.resultados.length}
+                <p class="v2-hint aviso">No hay ningún cliente con eso.</p>
+              {:else if hallazgo}
+                <ul class="hallados">
+                  {#each hallazgo.resultados as c (c.servicio)}
+                    <li>
+                      <button type="button" onclick={() => elegir(c)}>
+                        <b>{c.nombre}</b>
+                        <span>Servicio {c.servicio}{c.estado ? ` · ${c.estado}` : ''}</span>
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+                {#if hallazgo.mas}
+                  <p class="v2-hint">Hay más: escribí el nombre más completo.</p>
+                {/if}
+              {/if}
             {/if}
           </div>
           <p class="v2-hint">
@@ -190,8 +255,8 @@
           onblur={() => (touched.name = true)}
           aria-invalid={show('name') ? 'true' : undefined}>
           <option value="">Elegí uno</option>
-          {#each asuntosPorArea as [area, lista] (area)}
-            <optgroup label={AREAS[area] ?? (area || 'Otros')}>
+          {#each asuntosPorGrupo as [grupo, lista] (grupo)}
+            <optgroup label={grupo}>
               {#each lista as a (a)}
                 <option value={a}>{a}</option>
               {/each}
@@ -330,6 +395,45 @@
   }
   .aviso {
     color: var(--v2-clay);
+  }
+  .elegido {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+  }
+  .hallados {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    max-width: 480px;
+    border: 1px solid var(--v2-line);
+    border-radius: var(--v2-radius-control);
+    overflow: hidden;
+  }
+  .hallados li + li {
+    border-top: 1px solid var(--v2-line);
+  }
+  .hallados button {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    padding: 8px 12px;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .hallados button:hover,
+  .hallados button:focus-visible {
+    background: color-mix(in srgb, var(--v2-ink, currentColor) 6%, transparent);
+  }
+  .hallados span {
+    font-size: 12.5px;
+    opacity: 0.75;
   }
   .pair {
     display: grid;

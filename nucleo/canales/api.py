@@ -77,7 +77,7 @@ from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
 from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
-from nucleo.seguimiento import ticket_desde_dexter
+from nucleo.seguimiento import buscar_cliente, ticket_desde_dexter
 from nucleo.seguimiento import verificacion_accion
 from nucleo.seguimiento.forzado import (puede_intentar_algo, por_que_posponer,
                                         decidir_pedido_humano_de,
@@ -6749,7 +6749,26 @@ def tickets_desde_dexter_asuntos():
     except Exception as e:
         return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
                      componente="ticket_desde_dexter", e=e)
-    return jsonify({"asuntos": ticket_desde_dexter.asuntos(config)})
+    return jsonify({"asuntos": ticket_desde_dexter.asuntos(config, tenant)})
+
+
+@app.get("/clientes/buscar")
+def clientes_buscar():
+    """
+    El cliente de "Nuevo ticket" por servicio, cedula o nombre: solo servicio,
+    nombre y estado de cada uno. Ver nucleo/seguimiento/buscar_cliente.py.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+        return jsonify(buscar_cliente.buscar(config, tenant, request.args.get("q")))
+    except buscar_cliente.BusquedaInvalida as e:
+        return jsonify({"error": e.codigo}), e.http
+    except Exception as e:
+        return fallo(502, "isp_no_contesta", "No se pudo buscar el cliente.",
+                     componente="buscar_cliente", e=e)
 
 
 @app.get("/servicios/<servicio>/titular")

@@ -11,7 +11,7 @@ vi.mock('$env/dynamic/private', () => ({ env: { PRIVATE_ASISTENTE_URL: 'http://m
 vi.mock('$lib/server/v2/tenant.js', () => ({ tenantDeLaSesion: async () => 'empresa' }));
 vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({ 'X-Servicio-Token': 't' }) }));
 
-const { crearEnWispHub, titularDelServicio, MOTIVOS } = await import('./ticket-desde-dexter.js');
+const { crearEnWispHub, buscarClientes, MOTIVOS } = await import('./ticket-desde-dexter.js');
 
 const locals = /** @type {any} */ ({ user: { name: 'Ana Operadora', id: 'u-1' } });
 
@@ -70,18 +70,48 @@ describe('crearEnWispHub', () => {
   });
 });
 
-describe('titularDelServicio', () => {
-  it('un numero mal escrito ni siquiera sale al motor', async () => {
+describe('buscarClientes', () => {
+  it('una busqueda de menos de 3 ni siquiera sale al motor', async () => {
     const fetch = vi.fn();
-    const r = await titularDelServicio(locals, /** @type {any} */ (fetch), '58-32');
-    expect(r).toEqual({ ok: false, motivo: MOTIVOS.SERVICIO_INVALIDO });
+    const r = await buscarClientes(locals, /** @type {any} */ (fetch), ' ma ');
+    expect(r).toEqual({ ok: false, motivo: MOTIVOS.BUSQUEDA_CORTA });
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('devuelve solo nombre y estado', async () => {
+  it('pide al motor por servicio, cedula o nombre, y de cada uno deja solo servicio, nombre y estado', async () => {
+    /** @type {string[]} */
+    const urls = [];
+    const fetch = /** @type {any} */ (async (/** @type {string} */ url) => {
+      urls.push(url);
+      return respuesta(200, {
+        resultados: [{ servicio: 5832, nombre: 'MARIA LOPEZ', estado: 'Activo', cedula: 'no-deberia' }],
+        mas: true,
+        cargando: false
+      });
+    });
+    const r = await buscarClientes(locals, fetch, 'maría lópez');
+    expect(urls[0]).toBe(
+      'http://motor:5000/clientes/buscar?tenant=empresa&q=mar%C3%ADa%20l%C3%B3pez'
+    );
+    expect(r).toEqual({
+      ok: true,
+      resultados: [{ servicio: '5832', nombre: 'MARIA LOPEZ', estado: 'Activo' }],
+      mas: true,
+      cargando: false
+    });
+  });
+
+  it('dice cuando el motor todavia esta cargando la lista', async () => {
     const fetch = /** @type {any} */ (async () =>
-      respuesta(200, { nombre: 'Cliente', estado: 'Activo', cedula: 'no-deberia' }));
-    const r = await titularDelServicio(locals, fetch, '5832');
-    expect(r).toEqual({ ok: true, nombre: 'Cliente', estado: 'Activo' });
+      respuesta(200, { resultados: [], mas: false, cargando: true }));
+    const r = await buscarClientes(locals, fetch, 'maria');
+    expect(r).toEqual({ ok: true, resultados: [], mas: false, cargando: true });
+  });
+
+  it('traduce el motivo del motor', async () => {
+    const fetch = /** @type {any} */ (async () =>
+      respuesta(400, { error: 'SIN_BUSQUEDA_POR_NOMBRE' }));
+    const r = await buscarClientes(locals, fetch, 'maria');
+    expect(r).toEqual({ ok: false, motivo: MOTIVOS.SIN_BUSQUEDA_POR_NOMBRE });
   });
 });

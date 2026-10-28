@@ -79,7 +79,7 @@ describe('Nuevo ticket', () => {
 
   it.each([
     [{ servicio: '58 32' }, /dígitos/],
-    [{ servicio: '' }, /dígitos/],
+    [{ servicio: '' }, /elegí el cliente/],
     [{ name: '' }, /asunto/],
     [{ name: 'Un asunto inventado' }, /lista de WispHub/],
     [{ description: '' }, /qué pasó/]
@@ -91,6 +91,12 @@ describe('Nuevo ticket', () => {
     expect(r.resultado.data.error).toMatch(mensaje);
     // Lo que se escribio vuelve, para no tener que tipearlo de nuevo.
     expect(r.resultado.data.values.en_wisphub).toBe(true);
+  });
+
+  it('si algo falla, el cliente elegido vuelve a la pantalla', async () => {
+    const r = await correr({ ...CON_WISPHUB, cliente_nombre: 'MARIA LOPEZ', description: '' });
+    expect(r.resultado.data.values.servicio).toBe('5832');
+    expect(r.resultado.data.values.cliente_nombre).toBe('MARIA LOPEZ');
   });
 
   it('sin la casilla, un asunto fuera de la lista tampoco crea nada', async () => {

@@ -4211,6 +4211,26 @@ herramientas:
     argumentos_sobrescribibles: [id_ticket, archivo_ticket]
     filtros_verificados: {}
 
+  # El catalogo COMPLETO de asuntos de ticket, para "Nuevo ticket" (28/10/2026:
+  # el usuario pidio "todos los que estan en WispHub", no solo los 15 de
+  # 'tickets_desde_dexter'). Medido ese dia con un GET real: 200, una sola fila
+  # '{asuntos_tickets: [...]}' con 148 asuntos, sin area ni departamento.
+  - nombre: listar_asuntos_ticket
+    tipo: http
+    lista_asuntos_ticket: true
+    descripcion: >
+      Lista los asuntos de ticket de WispHub. NO la llames tu: la usa el
+      formulario de "Nuevo ticket".
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/asuntos-tickets/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    filtros_verificados: {}
+
   - nombre: consultar_ticket_por_id
     tipo: http
     # Capacidad de la cola (B4): leer antes de cerrar.
@@ -7389,7 +7409,23 @@ cierre_inactivas_ia:
 # departamento es el de la herramienta ('Soporte Tecnico', igual que al
 # escalar). Agregar otro asunto o departamento exige verificarlo antes contra
 # WispHub: la documentacion de su API es una hipotesis.
+#
+# 28/10/2026: la pantalla ofrece ademas TODO el catalogo de WispHub (148
+# asuntos, 'listar_asuntos_ticket'), a pedido del usuario. Los de esta lista
+# quedan arriba como frecuentes, con su area y prioridad; el resto va a
+# soporte tecnico con prioridad 2, la de la mayoria de estos. El primer ticket
+# con un asunto de fuera de esta lista es la verificacion contra WispHub.
+#
+# Y se busca al cliente por servicio, cedula o NOMBRE. '?nombre=' de WispHub no
+# sirve para eso (compara exacto contra los nombres de pila: MARIA da 27 de
+# 7.574, MAR da 0), asi que el motor arma un padron en memoria de servicio,
+# nombre y estado. Ver nucleo/seguimiento/buscar_cliente.py.
 tickets_desde_dexter:
+  catalogo_del_proveedor: true
+  area_por_defecto: soporte_tecnico
+  prioridad_por_defecto: "2"
+  buscar_por_nombre: true
+  padron_vigencia_horas: 6
   asuntos:
   - {asunto: No Tiene Internet, area: soporte_tecnico, prioridad: "3"}
   - {asunto: Internet Intermitente, area: soporte_tecnico, prioridad: "3"}

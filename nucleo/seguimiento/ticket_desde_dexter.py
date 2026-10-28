@@ -13,8 +13,9 @@ LO QUE HACE, EN ORDEN
 ---------------------
 El caso YA existe en el CRM (guardar primero, entregar despues). Esto:
 
-  1. valida que el asunto sea uno de 'tickets_desde_dexter.asuntos' y que el
-     servicio exista en el ISP -- antes de escribir nada afuera;
+  1. valida que el asunto sea uno de 'tickets_desde_dexter.asuntos' (o, desde
+     el 28/10/2026, del catalogo completo del ISP si la empresa lo pidio) y
+     que el servicio exista en el ISP -- antes de escribir nada afuera;
   2. crea el ticket con la MISMA herramienta que usa el escalamiento
      ('crea_ticket_operativo'), que ya esta verificada en produccion, a
      nombre del responsable del area si hay uno (como al escalar);
@@ -41,6 +42,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import time
 import uuid
 from pathlib import PurePath
 from types import SimpleNamespace
@@ -55,6 +57,8 @@ ORIGEN = "ticket_desde_dexter"
 # El mismo tope que el CRM para un adjunto (common/utils.py,
 # ATTACHMENT_MAX_BYTES): lo que el CRM acepto, aca no se rechaza.
 ADJUNTO_MAX_BYTES = 25 * 1024 * 1024
+CATALOGO_VIGENCIA_S = 3600
+_CATALOGOS: dict[str, tuple[float, list[str]]] = {}
 
 
 class TicketNoCreado(Exception):
@@ -70,10 +74,82 @@ def _herramienta(config, bandera: str):
     return next((h for h in config.herramientas if getattr(h, bandera, False)), None)
 
 
-def asuntos(config) -> list[dict]:
-    """Los asuntos que la pantalla ofrece. Vacio = apagado."""
-    return [{"asunto": a.asunto, "area": a.area}
-            for a in config.tickets_desde_dexter.asuntos]
+def _cadenas(dato) -> list[str]:
+    """Toda cadena que venga dentro de una lista, en orden y sin repetir."""
+    vistas, salida = set(), []
+
+    def recorrer(x, en_lista=False):
+        if isinstance(x, dict):
+            for v in x.values():
+                recorrer(v)
+        elif isinstance(x, list):
+            for v in x:
+                recorrer(v, en_lista=True)
+        elif en_lista and isinstance(x, str) and x.strip() and x.strip() not in vistas:
+            vistas.add(x.strip())
+            salida.append(x.strip())
+
+    recorrer(dato)
+    return salida
+
+
+def _catalogo(config, tenant: str | None) -> list[str] | None:
+    """
+    TODOS los asuntos del proveedor (28/10/2026). [] si la empresa no lo
+    pidio; None si lo pidio y el proveedor no contesto -- y no hay copia.
+
+    Se guarda una hora en la RAM del proceso: es un catalogo, cambia cuando
+    el ISP agrega un asunto, y la pantalla lo pide cada vez que se abre.
+    """
+    if not config.tickets_desde_dexter.catalogo_del_proveedor or not tenant:
+        return []
+    herr = _herramienta(config, "lista_asuntos_ticket")
+    if herr is None:
+        return []
+    guardado = _CATALOGOS.get(tenant)
+    if guardado and time.monotonic() - guardado[0] < CATALOGO_VIGENCIA_S:
+        return guardado[1]
+    try:
+        lista = _cadenas(ejecutor_http.ejecutar(
+            herr, {}, tenant, variables_tenant=config.variables_tenant))
+    except Exception as e:                                       # noqa: BLE001
+        registrar("ticket_desde_dexter", "no se pudo leer el catalogo de asuntos",
+                  tenant=tenant, error=e)
+        return guardado[1] if guardado else None
+    _CATALOGOS[tenant] = (time.monotonic(), lista)
+    return lista
+
+
+def asuntos(config, tenant: str | None = None) -> list[dict]:
+    """
+    Los asuntos que la pantalla ofrece. Vacio = apagado.
+
+    Primero los FRECUENTES de la config, con su area; despues el resto del
+    catalogo del proveedor en orden alfabetico, con el area por defecto. Si
+    el proveedor no contesta, quedan los frecuentes: la pantalla sigue.
+    """
+    td = config.tickets_desde_dexter
+    salida = [{"asunto": a.asunto, "area": a.area, "frecuente": True} for a in td.asuntos]
+    ya = {a.asunto for a in td.asuntos}
+    resto = sorted((a for a in (_catalogo(config, tenant) or []) if a not in ya),
+                   key=lambda a: a.casefold())
+    salida += [{"asunto": a, "area": td.area_por_defecto, "frecuente": False} for a in resto]
+    return salida
+
+
+def _elegir(config, tenant: str, asunto: str):
+    """El asunto con su area y prioridad, o TicketNoCreado si no se ofrece."""
+    td = config.tickets_desde_dexter
+    elegido = next((a for a in td.asuntos if a.asunto == (asunto or "")), None)
+    if elegido is not None:
+        return elegido
+    lista = _catalogo(config, tenant)
+    if lista is None:
+        raise TicketNoCreado("ISP_NO_CONTESTA", 502)
+    if (asunto or "") in lista:
+        return SimpleNamespace(asunto=asunto, area=td.area_por_defecto,
+                               prioridad=td.prioridad_por_defecto)
+    raise TicketNoCreado("ASUNTO_NO_PERMITIDO")
 
 
 def _servicio(servicio) -> str:
@@ -160,10 +236,7 @@ def crear(config, tenant: str, caso_id: str, servicio, asunto: str,
     duplicar. Lanza TicketNoCreado si no se creo.
     """
     adjunto = _adjunto(archivo)
-    elegido = next((a for a in config.tickets_desde_dexter.asuntos
-                    if a.asunto == (asunto or "")), None)
-    if elegido is None:
-        raise TicketNoCreado("ASUNTO_NO_PERMITIDO")
+    elegido = _elegir(config, tenant, asunto)
     s = _servicio(servicio)
     descripcion = (descripcion or "").strip()
     if not descripcion:
