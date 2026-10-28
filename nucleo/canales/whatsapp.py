@@ -841,13 +841,18 @@ def _desarmar_plantilla(p: dict) -> dict:
     tambien puede tener variables, y Meta las cuenta aparte. Una plantilla asi
     se enviaba con un valor de menos y el rechazo no decia por que.
     """
-    encabezado = cuerpo = ""
+    encabezado = cuerpo = pie = ""
+    botones: list[str] = []
     for c in p.get("components") or []:
         tipo = (c.get("type") or "").upper()
         if tipo == "HEADER" and (c.get("format") or "TEXT").upper() == "TEXT":
             encabezado = c.get("text") or ""
         elif tipo == "BODY":
             cuerpo = c.get("text") or ""
+        elif tipo == "FOOTER":
+            pie = c.get("text") or ""
+        elif tipo == "BUTTONS":
+            botones = [b.get("text") or "" for b in (c.get("buttons") or [])]
 
     formato_e, del_encabezado = huecos_de(encabezado)
     formato_c, del_cuerpo = huecos_de(cuerpo)
@@ -865,7 +870,155 @@ def _desarmar_plantilla(p: dict) -> dict:
         # Cuantos valores hay que pedir en total. Sigue siendo un numero
         # porque es lo que la pantalla pregunta y lo que el endpoint valida.
         "variables": len(del_encabezado) + len(del_cuerpo),
+        # Para mostrarla entera en Ajustes (28/10/2026). El pie y los botones
+        # no llevan variables en las que arma Dexter, asi que no cambian que
+        # valores se piden.
+        "pie": pie,
+        "botones": botones,
+        "motivo_rechazo": p.get("rejected_reason") if p.get("rejected_reason") not in (None, "NONE") else None,
     }
+
+
+# =============================================================================
+#  ALTA Y BAJA DE PLANTILLAS  --  28/10/2026
+# =============================================================================
+#  Las reglas de Meta para una plantilla nueva. Se validan ANTES de mandarla:
+#  un rechazo de Meta llega con un codigo y nada mas (su texto no se conserva,
+#  ver ErrorWhatsApp), asi que quien la escribe no sabria que corregir.
+#  Medido el 28/10/2026 con un nombre invalido: 400, codigo 100, subcodigo
+#  2388046 ("solo letras en minuscula y guiones bajos") -- el permiso para
+#  crear esta. Las demas reglas son las documentadas por Meta; las confirma el
+#  primer alta real.
+NOMBRE_PLANTILLA = re.compile(r"^[a-z0-9_]{1,512}$")
+IDIOMA_PLANTILLA = re.compile(r"^[a-z]{2,3}(_[A-Z]{2})?$")
+CATEGORIAS_PLANTILLA = ("UTILITY", "MARKETING")
+MAX_CUERPO, MAX_ENCABEZADO, MAX_PIE = 1024, 60, 60
+MAX_BOTONES, MAX_TEXTO_BOTON = 10, 25
+#: Los subcodigos de Meta que ya se midieron, dichos para quien la escribe.
+RECHAZOS_CONOCIDOS = {
+    2388046: "El nombre solo puede tener letras minúsculas, números y guiones bajos.",
+}
+
+
+class PlantillaInvalida(ValueError):
+    """Una plantilla que Meta rechazaria. El texto lo escribe Dexter y es para
+    quien la esta armando."""
+
+
+def armar_plantilla_nueva(datos: dict) -> dict:
+    """
+    El pedido de alta para Meta, o PlantillaInvalida con el motivo.
+
+    Solo variables NUMERADAS ({{1}}, {{2}}...) y solo en el cuerpo: es lo que
+    el resto de Dexter ya sabe completar y mostrar, y cada variable lleva un
+    EJEMPLO, que Meta exige para revisarla.
+    """
+    datos = datos or {}
+    nombre = str(datos.get("nombre") or "").strip()
+    if not NOMBRE_PLANTILLA.match(nombre):
+        raise PlantillaInvalida(RECHAZOS_CONOCIDOS[2388046])
+    categoria = str(datos.get("categoria") or "").strip().upper()
+    if categoria not in CATEGORIAS_PLANTILLA:
+        raise PlantillaInvalida("La categoría tiene que ser Servicio (UTILITY) o Marketing (MARKETING).")
+    idioma = str(datos.get("idioma") or "es").strip()
+    if not IDIOMA_PLANTILLA.match(idioma):
+        raise PlantillaInvalida("El idioma no es válido (por ejemplo: es, es_CO).")
+
+    cuerpo = str(datos.get("cuerpo") or "").strip()
+    if not cuerpo:
+        raise PlantillaInvalida("Falta el texto del mensaje.")
+    if len(cuerpo) > MAX_CUERPO:
+        raise PlantillaInvalida(f"El texto del mensaje tiene más de {MAX_CUERPO} caracteres.")
+    # Las variables TAL COMO APARECEN, no huecos_de(): ese devuelve 1..maximo
+    # (sirve para completar una que ya existe), y con {{1}} y {{3}} diria que
+    # hay tres sin saltos.
+    huecos = _HUECO.findall(cuerpo)
+    if huecos and not all(h.isdigit() for h in huecos):
+        raise PlantillaInvalida("Usá variables numeradas: {{1}}, {{2}}, en ese orden.")
+    if [int(h) for h in huecos] != list(range(1, len(huecos) + 1)):
+        raise PlantillaInvalida("Las variables van numeradas desde {{1}}, sin saltos ni repetidas, en orden.")
+    if huecos and (cuerpo.startswith("{{") or cuerpo.endswith("}}")):
+        raise PlantillaInvalida("El mensaje no puede empezar ni terminar con una variable: agregá texto antes y después.")
+    ejemplos = [str(e).strip() for e in (datos.get("ejemplos") or [])]
+    if len(ejemplos) != len(huecos) or not all(ejemplos):
+        raise PlantillaInvalida("Cada variable necesita un ejemplo: Meta lo usa para revisarla.")
+
+    componentes: list[dict] = []
+    encabezado = str(datos.get("encabezado") or "").strip()
+    if encabezado:
+        if len(encabezado) > MAX_ENCABEZADO or "{{" in encabezado:
+            raise PlantillaInvalida(f"El título va sin variables y hasta {MAX_ENCABEZADO} caracteres.")
+        componentes.append({"type": "HEADER", "format": "TEXT", "text": encabezado})
+    cuerpo_c: dict = {"type": "BODY", "text": cuerpo}
+    if ejemplos:
+        cuerpo_c["example"] = {"body_text": [ejemplos]}
+    componentes.append(cuerpo_c)
+    pie = str(datos.get("pie") or "").strip()
+    if pie:
+        if len(pie) > MAX_PIE or "{{" in pie:
+            raise PlantillaInvalida(f"El pie va sin variables y hasta {MAX_PIE} caracteres.")
+        componentes.append({"type": "FOOTER", "text": pie})
+    botones = [str(b).strip() for b in (datos.get("botones") or []) if str(b).strip()]
+    if len(botones) > MAX_BOTONES:
+        raise PlantillaInvalida(f"Hasta {MAX_BOTONES} botones de respuesta.")
+    if any(len(b) > MAX_TEXTO_BOTON for b in botones):
+        raise PlantillaInvalida(f"Cada botón va hasta {MAX_TEXTO_BOTON} caracteres.")
+    if len(set(b.casefold() for b in botones)) != len(botones):
+        raise PlantillaInvalida("Hay dos botones con el mismo texto.")
+    if botones:
+        componentes.append({"type": "BUTTONS",
+                            "buttons": [{"type": "QUICK_REPLY", "text": b} for b in botones]})
+    return {"name": nombre, "language": idioma, "category": categoria, "components": componentes}
+
+
+def _rechazo_de_alta(r, que: str) -> ErrorWhatsApp:
+    """Como _rechazo, pero un subcodigo ya medido se dice en palabras."""
+    error = _rechazo(r, que)
+    try:
+        sub = ((r.json() or {}).get("error") or {}).get("error_subcode")
+    except ValueError:
+        sub = None
+    if sub in RECHAZOS_CONOCIDOS:
+        return ErrorWhatsApp(f"WhatsApp rechazó {que}: {RECHAZOS_CONOCIDOS[sub]}",
+                             codigo=error.codigo, http_status=error.http_status,
+                             operacion=error.operacion)
+    return error
+
+
+def crear_plantilla(config, tenant: str, datos: dict) -> dict:
+    """
+    Manda una plantilla nueva a revision de Meta. Devuelve {nombre, estado,
+    categoria}: casi siempre 'PENDING', y Meta puede CAMBIAR la categoria
+    (una de servicio que suena a promocion pasa a marketing).
+    """
+    pedido = armar_plantilla_nueva(datos)
+    cfg = _cfg(config)
+    waba = _secreto(tenant, cfg.waba_id_ref, "de la cuenta (waba_id_ref)")
+    token = _secreto(tenant, cfg.token_ref, "de envio (token_ref)")
+    r = requests.post(_url(config, f"{waba}/message_templates"),
+                      headers={"Authorization": f"Bearer {token}"},
+                      json=pedido, timeout=TIMEOUT_SEGUNDOS)
+    if r.status_code >= 400:
+        raise _rechazo_de_alta(r, "la plantilla")
+    d = r.json() or {}
+    return {"nombre": pedido["name"], "estado": d.get("status"),
+            "categoria": d.get("category") or pedido["category"]}
+
+
+def borrar_plantilla(config, tenant: str, nombre: str) -> None:
+    """Borra la plantilla (en todos sus idiomas). Meta no deja reusar el
+    nombre de una aprobada por un tiempo: la pantalla lo avisa."""
+    nombre = str(nombre or "").strip()
+    if not NOMBRE_PLANTILLA.match(nombre):
+        raise PlantillaInvalida(RECHAZOS_CONOCIDOS[2388046])
+    cfg = _cfg(config)
+    waba = _secreto(tenant, cfg.waba_id_ref, "de la cuenta (waba_id_ref)")
+    token = _secreto(tenant, cfg.token_ref, "de envio (token_ref)")
+    r = requests.delete(_url(config, f"{waba}/message_templates"),
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"name": nombre}, timeout=TIMEOUT_SEGUNDOS)
+    if r.status_code >= 400:
+        raise _rechazo(r, "el borrado de la plantilla")
 
 
 def componentes_de_plantilla(plantilla: dict, variables: list) -> list[dict]:

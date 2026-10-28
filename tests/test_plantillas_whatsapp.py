@@ -305,5 +305,133 @@ finally:
         setattr(obj, nombre, original)
 
 
+# =============================================================================
+titulo("3. Crear y borrar plantillas desde Dexter")
+# =============================================================================
+BIEN = {"nombre": "seguimiento_caso", "categoria": "utility", "idioma": "es",
+        "cuerpo": "Hola {{1}}, sobre tu caso: {{2}}. Gracias.", "ejemplos": ["Juan", "listo"],
+        "pie": "Equipo de soporte", "botones": ["Bien", "Mal"]}
+pedido = whatsapp.armar_plantilla_nueva(BIEN)
+revisar(pedido == {"name": "seguimiento_caso", "language": "es", "category": "UTILITY",
+                   "components": [
+                       {"type": "BODY", "text": "Hola {{1}}, sobre tu caso: {{2}}. Gracias.",
+                        "example": {"body_text": [["Juan", "listo"]]}},
+                       {"type": "FOOTER", "text": "Equipo de soporte"},
+                       {"type": "BUTTONS", "buttons": [{"type": "QUICK_REPLY", "text": "Bien"},
+                                                       {"type": "QUICK_REPLY", "text": "Mal"}]}]},
+        "arma el pedido de Meta: cuerpo con ejemplos, pie y botones de respuesta", f"{pedido}")
+
+
+def invalida(**cambio):
+    try:
+        whatsapp.armar_plantilla_nueva({**BIEN, **cambio})
+        return None
+    except whatsapp.PlantillaInvalida as e:
+        return str(e)
+
+
+for cambio, que in (
+        ({"nombre": "Seguimiento Caso"}, "nombre con mayusculas o espacios (lo medido: 2388046)"),
+        ({"categoria": "AUTHENTICATION"}, "categoria que Dexter no arma"),
+        ({"cuerpo": ""}, "sin texto"),
+        ({"cuerpo": "x" * 1025, "ejemplos": []}, "texto de mas de 1024"),
+        ({"cuerpo": "Hola {{1}} y {{3}}.", "ejemplos": ["a", "b"]}, "variables con salto ({{1}}, {{3}})"),
+        ({"cuerpo": "Hola {{2}} y {{1}}.", "ejemplos": ["a", "b"]}, "variables fuera de orden"),
+        ({"cuerpo": "Hola {{nombre}}.", "ejemplos": ["a"]}, "variables con nombre"),
+        ({"cuerpo": "{{1}} te escribimos.", "ejemplos": ["a"]}, "empieza con una variable"),
+        ({"cuerpo": "Te escribimos {{1}}", "ejemplos": ["a"]}, "termina con una variable"),
+        ({"ejemplos": ["Juan"]}, "una variable sin ejemplo"),
+        ({"pie": "Hola {{1}}"}, "variable en el pie"),
+        ({"botones": ["Muy bien"] * 2}, "dos botones iguales"),
+        ({"botones": ["x" * 26]}, "boton de mas de 25"),
+        ({"botones": [str(i) for i in range(11)]}, "mas de 10 botones")):
+    motivo = invalida(**cambio)
+    revisar(bool(motivo), f"rechaza ANTES de llamar a Meta: {que}", f"{motivo}")
+
+red = Red([Respuesta(200, {"id": "tpl-1", "status": "PENDING", "category": "MARKETING"})])
+c = con_red(red, lambda: whatsapp.crear_plantilla(Config(), TENANT, BIEN))
+p = red.pedidos[0]
+revisar(p["metodo"] == "POST" and p["url"].endswith("/999888777/message_templates")
+        and p["json"] == pedido,
+        "la manda a revision a la cuenta (waba) de la empresa", f"{p['url']}")
+revisar(c == {"nombre": "seguimiento_caso", "estado": "PENDING", "categoria": "MARKETING"},
+        "devuelve el estado y la categoria QUE DIJO META (la puede cambiar)", f"{c}")
+
+red = Red([])
+try:
+    con_red(red, lambda: whatsapp.crear_plantilla(Config(), TENANT, {**BIEN, "nombre": "Mal Nombre"}))
+except whatsapp.PlantillaInvalida:
+    pass
+revisar(not red.pedidos, "una invalida no sale a Meta", f"{red.pedidos}")
+
+red = Red([Respuesta(400, {"error": {"code": 100, "error_subcode": 2388046,
+                                     "message": "texto de Meta"}})])
+e = con_red(red, lambda: levanta(lambda: whatsapp.crear_plantilla(Config(), TENANT, BIEN)))
+revisar(e is not None and "minúsculas" in str(e) and "texto de Meta" not in str(e),
+        "un subcodigo ya medido se dice en palabras de Dexter, no las de Meta", f"{e}")
+red = Red([Respuesta(400, {"error": {"code": 100, "error_subcode": 99, "message": "texto de Meta"}})])
+e = con_red(red, lambda: levanta(lambda: whatsapp.crear_plantilla(Config(), TENANT, BIEN)))
+revisar(e is not None and "100" in str(e) and "texto de Meta" not in str(e),
+        "uno desconocido: solo el codigo", f"{e}")
+
+red = Red([Respuesta(200, {"success": True})])
+con_red(red, lambda: whatsapp.borrar_plantilla(Config(), TENANT, "seguimiento_caso"))
+p = red.pedidos[0]
+revisar(p["metodo"] == "DELETE" and p["url"].endswith("/999888777/message_templates")
+        and p["params"] == {"name": "seguimiento_caso"},
+        "el borrado va por nombre a la cuenta de la empresa", f"{p}")
+red = Red([])
+try:
+    con_red(red, lambda: whatsapp.borrar_plantilla(Config(), TENANT, "../otra cuenta"))
+    raro = True
+except whatsapp.PlantillaInvalida:
+    raro = False
+revisar(not raro and not red.pedidos, "un nombre raro no se manda a borrar", f"{red.pedidos}")
+
+#  Las rutas.
+registros: list = []
+orig = [(api, "_config_de", api._config_de), (api, "registrar", api.registrar),
+        (api.whatsapp, "plantillas_aprobadas", api.whatsapp.plantillas_aprobadas)]
+api._config_de = lambda t: Config()
+api.registrar = lambda comp, ev, **k: registros.append((comp, ev, k))
+api.whatsapp.plantillas_aprobadas = lambda c, t: [{"nombre": "bienvenida", "estado": "APPROVED"},
+                                                  {"nombre": "nueva", "estado": "PENDING"}]
+try:
+    r = cliente.get(f"/canales/plantillas/todas?tenant={TENANT}")
+    revisar(r.status_code == 200 and [p["estado"] for p in r.get_json()["plantillas"]] == ["APPROVED", "PENDING"],
+            "Ajustes ve TODAS, en cualquier estado", f"{r.get_json()}")
+    r = cliente.get(f"/canales/plantillas?tenant={TENANT}")
+    revisar([p["nombre"] for p in r.get_json()["plantillas"]] == ["bienvenida"],
+            "y al cliente se le sigue ofreciendo solo las aprobadas", f"{r.get_json()}")
+
+    red = Red([Respuesta(200, {"id": "t", "status": "PENDING", "category": "UTILITY"})])
+    r = con_red(red, lambda: cliente.post("/canales/plantillas",
+                                          json={"tenant": TENANT, "plantilla": BIEN, **AUTOR}))
+    revisar(r.status_code == 201 and r.get_json()["estado"] == "PENDING"
+            and any(ev == "plantilla mandada a revision" for _, ev, _ in registros),
+            "crear: 201 con el estado de Meta, y queda en el log", f"{r.status_code} {r.get_json()}")
+    revisar(all("Ana" not in str(k) for _, _, k in registros),
+            "el log no lleva el nombre de quien la creo", f"{registros}")
+    red = Red([])
+    r = con_red(red, lambda: cliente.post("/canales/plantillas",
+                                          json={"tenant": TENANT, "plantilla": {**BIEN, "cuerpo": ""}, **AUTOR}))
+    revisar(r.status_code == 400 and r.get_json()["codigo"] == "plantilla_invalida" and not red.pedidos,
+            "invalida: 400 con el motivo, sin salir a Meta", f"{r.status_code} {r.get_json()}")
+    r = con_red(Red([]), lambda: cliente.post("/canales/plantillas", json={"tenant": TENANT, "plantilla": BIEN}))
+    revisar(r.status_code == 400, "crear sin autor: 400", f"{r.status_code}")
+
+    red = Red([Respuesta(200, {"success": True})])
+    r = con_red(red, lambda: cliente.delete("/canales/plantillas/seguimiento_caso",
+                                            json={"tenant": TENANT, **AUTOR}))
+    revisar(r.status_code == 200 and red.pedidos and red.pedidos[0]["metodo"] == "DELETE",
+            "borrar: 200 y sale el DELETE", f"{r.status_code}")
+    r = con_red(Red([]), lambda: cliente.delete("/canales/plantillas/seguimiento_caso",
+                                                json={"tenant": TENANT}))
+    revisar(r.status_code == 400, "borrar sin autor: 400", f"{r.status_code}")
+finally:
+    for obj, nombre, original in orig:
+        setattr(obj, nombre, original)
+
+
 print(f"\n{'=' * 76}\n  {'TODO OK' if not fallos else f'{len(fallos)} FALLAS'}\n{'=' * 76}")
 sys.exit(1 if fallos else 0)

@@ -372,6 +372,18 @@
             {/if}
           {/await}
         </div>
+
+        <div class="v2-label" style="margin:22px 0 10px">Plantillas</div>
+        <a class="v2-card plantillas-link" href="/settings/canales/whatsapp/plantillas">
+          <span>
+            <b>Plantillas de WhatsApp</b>
+            <span class="v2-sub">
+              Los mensajes aprobados por Meta para escribirle a un cliente que no habló en las
+              últimas 24 h. Verlas, crearlas y borrarlas.
+            </span>
+          </span>
+          <span aria-hidden="true">→</span>
+        </a>
       {/if}
 
       <!-- ── URL del webhook ─────────────────────────────────────────────── -->
@@ -538,6 +550,23 @@
 </div>
 
 <style>
+  .plantillas-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    color: inherit;
+    text-decoration: none;
+    font-size: 13px;
+  }
+  .plantillas-link > span:first-child {
+    display: grid;
+    gap: 3px;
+  }
+  .plantillas-link:hover {
+    border-color: var(--v2-line-strong);
+  }
   .salud {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));

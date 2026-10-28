@@ -13,6 +13,7 @@
  */
 import { headersMotor } from './motor-headers.js';
 import { destinoDelAsistente } from './tenant.js';
+import { autorDeSesion } from './autor.js';
 
 /**
  * Estado del canal: activo, version, numero visible, plantillas y los
@@ -129,4 +130,62 @@ export async function borrarSecreto(locals, fetch, nombre) {
   );
   const datos = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(datos.error || 'No se pudo borrar la credencial.');
+}
+
+/*
+ * PLANTILLAS (28/10/2026): verlas en cualquier estado, mandar una nueva a
+ * revision de Meta y borrarla, desde Ajustes. El motor valida antes de
+ * mandarla (whatsapp.armar_plantilla_nueva) y firma con el autor de la sesion.
+ */
+
+/**
+ * Todas las plantillas de la empresa en Meta, en cualquier estado. null si
+ * el motor o Meta no contestan -- no es "no hay plantillas".
+ * @returns {Promise<any[] | null>}
+ */
+export async function listarPlantillas(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return null;
+  try {
+    const resp = await fetch(
+      `${cfg.baseUrl}/canales/plantillas/todas?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor(), signal: AbortSignal.timeout(10000) }
+    );
+    if (!resp.ok) return null;
+    return (await resp.json()).plantillas ?? [];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {Record<string, any>} plantilla
+ * @returns {Promise<{ nombre: string, estado: string, categoria: string }>}
+ */
+export async function crearPlantilla(locals, fetch, plantilla) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  const resp = await fetch(`${cfg.baseUrl}/canales/plantillas`, {
+    method: 'POST',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, plantilla, ...autorDeSesion(locals) }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'Meta no aceptó la plantilla.');
+  return datos;
+}
+
+/** @param {string} nombre */
+export async function borrarPlantilla(locals, fetch, nombre) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  const resp = await fetch(`${cfg.baseUrl}/canales/plantillas/${encodeURIComponent(nombre)}`, {
+    method: 'DELETE',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, ...autorDeSesion(locals) }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'Meta no borró la plantilla.');
 }

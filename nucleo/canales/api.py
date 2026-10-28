@@ -6334,6 +6334,85 @@ def canales_plantillas():
     return jsonify({"plantillas": aprobadas, "total_en_meta": len(todas)})
 
 
+@app.get("/canales/plantillas/todas")
+def canales_plantillas_todas():
+    """
+    TODAS las plantillas de la empresa en Meta, en cualquier estado, para
+    administrarlas desde Ajustes (28/10/2026). La que se manda a un cliente
+    sigue saliendo de /canales/plantillas, que solo da las aprobadas.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+        return jsonify({"plantillas": whatsapp.plantillas_aprobadas(config, tenant)})
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        return fallo(502, "plantillas_no_leidas",
+                     mensaje_publico(e, "No se pudieron leer las plantillas."),
+                     componente="plantillas", e=e)
+
+
+@app.post("/canales/plantillas")
+def canales_plantillas_crear():
+    """
+    Manda una plantilla nueva a revision de Meta (28/10/2026). La valida
+    antes (whatsapp.armar_plantilla_nueva): el rechazo de Meta llega con un
+    codigo y nada mas. Lo pide una PERSONA desde Ajustes: el autor es
+    obligatorio, como todo lo que sale de Dexter hacia afuera.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    try:
+        config = _config_de(tenant)
+        creada = whatsapp.crear_plantilla(config, tenant, cuerpo.get("plantilla") or {})
+    except whatsapp.PlantillaInvalida as e:
+        return jsonify({"error": str(e), "codigo": "plantilla_invalida"}), 400
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        return fallo(502, "plantilla_no_creada",
+                     mensaje_publico(e, "Meta no aceptó la plantilla."),
+                     componente="plantillas", e=e)
+    registrar("plantillas", "plantilla mandada a revision", tenant=tenant,
+              plantilla=creada["nombre"], categoria=creada["categoria"], estado=creada["estado"])
+    return jsonify(creada), 201
+
+
+@app.delete("/canales/plantillas/<nombre>")
+def canales_plantillas_borrar(nombre):
+    """Borra una plantilla de la empresa en Meta. Autor obligatorio."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    try:
+        config = _config_de(tenant)
+        whatsapp.borrar_plantilla(config, tenant, nombre)
+    except whatsapp.PlantillaInvalida as e:
+        return jsonify({"error": str(e), "codigo": "plantilla_invalida"}), 400
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        return fallo(502, "plantilla_no_borrada",
+                     mensaje_publico(e, "Meta no borró la plantilla."),
+                     componente="plantillas", e=e)
+    registrar("plantillas", "plantilla borrada", tenant=tenant, plantilla=nombre)
+    return jsonify({"ok": True, "borrada": nombre})
+
+
 @app.get("/canales/whatsapp/salud")
 def canales_whatsapp_salud():
     """
