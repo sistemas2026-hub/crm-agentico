@@ -5,7 +5,8 @@ import {
   cuerpoDeConfiguracion,
   lineaDeMaterial,
   opcionDelSupervisor,
-  porQue
+  porQue,
+  resumenDeLineas
 } from './material-del-dia.js';
 
 describe('lo que eligió el Supervisor, y por qué', () => {
@@ -29,6 +30,25 @@ describe('el material del día, como lo lee una persona', () => {
     expect(
       lineaDeMaterial({ material: 'ONU WIFI', unidad: 'unidades', en_mano: '0', necesita: '1', asignado: '1' })
     ).toBe('ONU WIFI: carga 1 unidad');
+  });
+
+  it('lo que falta va en la misma línea, y «no hay en bodega» en vez de «carga 0»', () => {
+    expect(
+      lineaDeMaterial({ material: 'CABLE COAXIAL', unidad: 'm', en_mano: '0', necesita: '200', asignado: '100', falta: '100' })
+    ).toBe('CABLE COAXIAL: carga 100 m (faltan 100 m)');
+    expect(
+      lineaDeMaterial({ material: 'CHAZO', unidad: 'unidades', en_mano: '0', necesita: '10', asignado: '0', falta: '10' })
+    ).toBe('CHAZO: no hay en bodega (faltan 10 unidades)');
+    expect(
+      lineaDeMaterial({ material: 'TENSOR', unidad: 'unidades', en_mano: '2', necesita: '8', asignado: '5', falta: '3' })
+    ).toBe('TENSOR: carga 5 unidades (ya tiene 2 · faltan 3 unidades)');
+  });
+
+  it('el rótulo de la lista plegada', () => {
+    expect(resumenDeLineas([{ falta: '0' }, { falta: '3' }, { falta: '1' }])).toBe(
+      'Ver los 3 materiales del kit · 2 incompletos'
+    );
+    expect(resumenDeLineas([{ falta: '0' }])).toBe('Ver el material del kit');
   });
 
   it('si ya tiene el kit completo no dice «carga 0»', () => {

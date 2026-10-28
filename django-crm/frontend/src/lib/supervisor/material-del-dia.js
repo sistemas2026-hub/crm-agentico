@@ -7,12 +7,33 @@
  * «Conector UPC: carga 6 unidades (ya tiene 4)», «ONU WIFI: carga 1 unidad», o
  * «Cable drop: tiene el kit completo» cuando no hay que cargar nada.
  *
- * @param {{ material: string, unidad: string, en_mano: string, necesita: string, asignado: string }} l
+ * Lo que falta va en la MISMA línea: «CABLE COAXIAL: carga 100 m (faltan 100
+ * m)», «CHAZO: no hay en bodega (faltan 10 unidades)». Una línea aparte por
+ * faltante llenaba la tarjeta (captura del usuario, 28/10/2026).
+ *
+ * @param {{ material: string, unidad: string, en_mano: string, necesita: string, asignado: string, falta?: string }} l
  */
 export function lineaDeMaterial(l) {
-  const tiene = Number(l.en_mano) > 0 ? ` (ya tiene ${l.en_mano})` : '';
-  if (Number(l.necesita) <= 0) return `${l.material}: tiene el kit completo${tiene}`;
-  return `${l.material}: carga ${cantidad(l.asignado, l.unidad)}${tiene}`;
+  const tiene = Number(l.en_mano) > 0 ? `ya tiene ${l.en_mano}` : '';
+  const falta = Number(l.falta) > 0 ? `faltan ${cantidad(l.falta ?? '0', l.unidad)}` : '';
+  const entre = [tiene, falta].filter(Boolean).join(' · ');
+  const extra = entre ? ` (${entre})` : '';
+  if (Number(l.necesita) <= 0) return `${l.material}: tiene el kit completo${extra}`;
+  if (Number(l.asignado) <= 0) return `${l.material}: no hay en bodega${extra}`;
+  return `${l.material}: carga ${cantidad(l.asignado, l.unidad)}${extra}`;
+}
+
+/**
+ * El rótulo de la lista plegada: «Ver los 14 materiales del kit · 9
+ * incompletos».
+ *
+ * @param {{ falta?: string }[]} lineas
+ */
+export function resumenDeLineas(lineas) {
+  const n = lineas.length;
+  const incompletos = lineas.filter((l) => Number(l.falta) > 0).length;
+  const base = n === 1 ? 'Ver el material del kit' : `Ver los ${n} materiales del kit`;
+  return incompletos ? `${base} · ${incompletos} incompleto${incompletos === 1 ? '' : 's'}` : base;
 }
 
 /** Lo que devuelve el backend cuando lo eligió una persona en el panel. */

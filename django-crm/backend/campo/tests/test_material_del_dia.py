@@ -193,7 +193,11 @@ def test_r_lo_que_hay_se_reparte_por_el_trabajo_del_dia(
     uno, dos = _lineas(p, "Cuadrilla #1"), _lineas(p, "Cuadrilla #2")
     assert (uno["Conector UPC"]["asignado"], dos["Conector UPC"]["asignado"]) == ("10", "2")
     assert dos["Conector UPC"]["falta"] == "8"
-    assert "Faltan 8 unidades de Conector UPC." in _avisos(p, "Cuadrilla #2")
+    #  UN mensaje, primero, y no una linea por material (28/10/2026).
+    assert _avisos(p, "Cuadrilla #2") == [
+        "Le falta material para completar el kit (1 de 2 materiales): sale con lo que "
+        "hay en bodega."]
+    assert _avisos(p, "Cuadrilla #1") == []
     resumen = next(b for b in p["bodegas"] if b["material"] == "Conector UPC")
     assert (resumen["disponible"], resumen["pedido"], resumen["falta"]) == ("12", "20", "8")
 
@@ -341,6 +345,26 @@ def test_d4_la_bodega_que_nombra_su_zona_y_si_no_la_de_su_historial(
                                                nombre="SOLEDAD-NORTE")
     eleccion, motivo = M.bodega_que_elige(org_a, ["Soledad zona 1"], None, bodegas + [norte])
     assert eleccion is None and "más de una bodega" in motivo
+
+
+def test_d6_mandan_las_zonas_del_dia_sobre_las_habituales(
+        org_a, bodega, conector, ont, kit, admin_profile):
+    #  La captura del usuario: hoy sale a Sabanagrande, pero entre sus
+    #  habituales esta Soledad. Sumadas nombraban a las dos bodegas.
+    from campo.zonas import ZonaOperativa
+
+    sab = UbicacionInventario.objects.create(org=org_a, tipo=UbicacionInventario.BODEGA,
+                                             nombre="BOF-SAB_GRANDE")
+    sabana = ZonaOperativa.objects.create(org=org_a, nombre="SABANAGRANDE")
+    soledad = ZonaOperativa.objects.create(org=org_a, nombre="Soledad zona 1")
+    j = _cuadrilla(org_a, "Cuadrilla #5", admin_profile, None)
+    j.zonas.set([sabana])
+    j.cuadrilla.zonas_habituales.set([sabana, soledad])
+
+    fila = next(c for c in M.propuesta(org_a, HOY)["cuadrillas"])
+
+    assert (fila["bodega"], fila["bodega_por"]) == ("BOF-SAB_GRANDE", "su zona la nombra")
+    assert sab.nombre == fila["bodega"]
 
 
 def test_d5_el_panel_muestra_lo_que_elegiria_el_supervisor(org_a, bodega, kit, admin_client):

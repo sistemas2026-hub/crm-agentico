@@ -16,7 +16,12 @@
     textoDePrioridad,
     textoSinBajar
   } from '$lib/supervisor/dia-publicado.js';
-  import { lineaDeMaterial, opcionDelSupervisor, porQue } from '$lib/supervisor/material-del-dia.js';
+  import {
+    lineaDeMaterial,
+    opcionDelSupervisor,
+    porQue,
+    resumenDeLineas
+  } from '$lib/supervisor/material-del-dia.js';
   import '../supervisor-noc.css';
 
   /** @type {{ data: any, form: any }} */
@@ -196,12 +201,19 @@
                           Desde {m.bodega} ({porQue(m.bodega_por)}) · a {m.lider}
                         </p>
                       {/if}
-                      {#each m.lineas as l (l.material)}
-                        <p class="snoc-body-sm">{lineaDeMaterial(l)}</p>
-                      {/each}
                       {#each m.avisos as a (a)}
                         <p class="snoc-body-sm snoc-error-txt">{a}</p>
                       {/each}
+                      <!-- PLEGADO (28/10/2026): la lista entera empachaba la
+                           tarjeta; se abre cuando hace falta. -->
+                      {#if m.lineas.length}
+                        <details>
+                          <summary class="snoc-body-sm">{resumenDeLineas(m.lineas)}</summary>
+                          {#each m.lineas as l (l.material)}
+                            <p class="snoc-body-sm">{lineaDeMaterial(l)}</p>
+                          {/each}
+                        </details>
+                      {/if}
                     </div>
                   {/if}
                   {#if !c.ordenes.length}

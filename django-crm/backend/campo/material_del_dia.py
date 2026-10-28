@@ -312,8 +312,12 @@ def propuesta(org, fecha) -> dict:
         if bodega is not None:
             bodega_por = POR_UNA_PERSONA
         else:
+            #  LAS ZONAS DEL DIA MANDAN; las habituales solo si ese dia no
+            #  tiene. Sumadas, una cuadrilla que hoy sale a Sabanagrande pero
+            #  tiene Soledad entre sus habituales nombraba a las dos bodegas y
+            #  quedaba sin elegir (captura del usuario, 28/10/2026).
             zonas = ([z.nombre for z in j.zonas.all()]
-                     + [z.nombre for z in j.cuadrilla.zonas_habituales.all()])
+                     or [z.nombre for z in j.cuadrilla.zonas_habituales.all()])
             bodega, bodega_por = bodega_que_elige(org, zonas, lider, bodegas)
         fila = {"jornada": str(j.id), "cuadrilla": j.cuadrilla.nombre,
                 "labor": nombre_de_labor,
@@ -357,16 +361,26 @@ def propuesta(org, fecha) -> dict:
             item["asignado"] = reparto[id(item)]
             item["falta"] = item["necesita"] - item["asignado"]
             repartido += item["asignado"]
+            #  Solo lo grave va como aviso propio: salir sin un equipo con
+            #  serie. Lo que falta de cada material va en su linea.
             if item["falta"] > 0 and item["serializado"] and item["asignado"] == 0:
                 fila["avisos"].append(
                     f"Sale sin {material.nombre}: no puede hacer el trabajo que lo necesita.")
-            elif item["falta"] > 0:
-                fila["avisos"].append(
-                    f"Faltan {_texto(item['falta'])} {material.unidad} de {material.nombre}.")
         resumen.append({"bodega": bodega.nombre, "material": material.nombre,
                         "unidad": material.unidad, "disponible": disponible,
                         "pedido": pedido, "repartido": repartido,
                         "falta": pedido - repartido})
+
+    #  UN SOLO MENSAJE POR CUADRILLA cuando el kit no se completa, y primero:
+    #  una linea «Faltan …» por material llenaba la tarjeta (captura del
+    #  usuario, 28/10/2026: «que deje un mensaje que le falta material para
+    #  completar el kit pero puede salir con lo que hay en bodega»).
+    for fila in filas:
+        incompletos = sum(1 for i in fila["lineas"] if i["falta"] > 0)
+        if incompletos:
+            fila["avisos"].insert(0, (
+                f"Le falta material para completar el kit ({incompletos} de "
+                f"{len(fila['lineas'])} materiales): sale con lo que hay en bodega."))
 
     def completa(f):
         return f["lineas"] and all(i["falta"] == 0 for i in f["lineas"])
