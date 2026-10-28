@@ -60,8 +60,13 @@ def _texto(cantidad: Decimal) -> str:
     return f"{cantidad.normalize():f}" if cantidad == cantidad.to_integral() else f"{cantidad:f}"
 
 
-def planear(org, profile) -> dict:
-    """Que se borraria y que pasaria. No escribe nada."""
+def planear(org, profile, *, descartar_sin_historia: bool = False) -> dict:
+    """Que se borraria y que pasaria. No escribe nada.
+
+    `descartar_sin_historia`: un equipo con serie que solo existe en el
+    historial de esta cuenta se descarta en vez de frenar todo. Lo pide una
+    persona, con el simulacro a la vista, cuando son numeros de prueba.
+    """
     from campo.inventario import UbicacionDeActivo, UbicacionInventario
     from campo.models import (
         ActaDeDevolucion,
@@ -149,16 +154,24 @@ def planear(org, profile) -> dict:
                     .exclude(id__in=ids).exclude(estado__in=inv._NO_CUENTAN)
                     .order_by("-ocurrido_en", "-created_at")
                     .select_related("ubicacion_destino").first())
-        if anterior is None:
+        descartar = False
+        if anterior is None and descartar_sin_historia:
+            #  Se dio de alta AL DESPACHARSELA (`_comprobar_serie_libre`: una
+            #  serie nunca vista entra) y no paso por ningun otro lado. Una
+            #  persona confirmo que es un numero de prueba (28/10/2026).
+            descartar = True
+            destino = "se descarta: solo existe en el historial de esta cuenta"
+        elif anterior is None:
             bloqueos.append(f"El equipo {a.serie} no tiene historia fuera de esta persona: "
-                            "borrarla haria desaparecer un equipo que existe.")
+                            "borrarla haria desaparecer un equipo que existe. Si es un "
+                            "numero de prueba, repetir con --descartar-series-sin-historia.")
             destino = "—"
         elif anterior.ubicacion_destino is None:
             destino = "instalado, consumido o dado de baja (su movimiento anterior)"
         else:
             destino = anterior.ubicacion_destino.nombre
         series.append({"serie": a.serie, "material": a.material.nombre, "vuelve_a": destino,
-                       "activo": a})
+                       "activo": a, "descartar": descartar})
 
     entregas = EntregaDeKit.objects.filter(org=org, profile=profile)
     ordenes = sorted({m.orden.numero for m in movs if m.orden_id})
@@ -183,7 +196,7 @@ def planear(org, profile) -> dict:
 
 def aplicar(org, profile, plan) -> None:
     """Borra lo planeado y recoloca los equipos con serie. En una transaccion."""
-    from campo.inventario import UbicacionDeActivo
+    from campo.inventario import ActivoSerializado, UbicacionDeActivo
     from campo.models import (
         ActaDeDevolucion,
         EntregaDeKit,
@@ -203,7 +216,13 @@ def aplicar(org, profile, plan) -> None:
     ItemDeKit.objects.filter(entrega__in=entregas).delete()
     entregas.delete()
     MovimientoDeMaterial.objects.filter(org=org, id__in=plan["ids"]).delete()
-    for activo in activos:
+    for s in plan["series"]:
+        activo = s["activo"]
+        quedan = MovimientoDeMaterial.objects.filter(
+            org=org, material=activo.material, serie=activo.serie).exists()
+        if s["descartar"] and not quedan:
+            ActivoSerializado.objects.filter(pk=activo.pk).delete()
+            continue
         ubicacion, movimiento = inv.posicion_recalculada(activo)
         if movimiento is not None:
             inv._mover_activo(activo, ubicacion, movimiento)
@@ -218,6 +237,9 @@ class Command(BaseCommand):
         parser.add_argument("--tecnico", required=True, help="Correo de la cuenta.")
         parser.add_argument("--aplicar", action="store_true",
                             help="Borra. Sin esto, solo muestra que borraria.")
+        parser.add_argument("--descartar-series-sin-historia", action="store_true",
+                            help="Los equipos que solo existen en el historial de esta "
+                                 "cuenta (numeros de prueba) se descartan en vez de frenar.")
 
     def handle(self, *args, **options):
         try:
@@ -231,7 +253,8 @@ class Command(BaseCommand):
         if profile is None:
             raise CommandError("No hay una cuenta con ese correo en esa organización.")
 
-        plan = planear(org, profile)
+        descartar = options["descartar_series_sin_historia"]
+        plan = planear(org, profile, descartar_sin_historia=descartar)
         w = self.stdout.write
         w(f"Cuenta: {correo}")
         for que, n in plan["cuentas"].items():
@@ -264,7 +287,7 @@ class Command(BaseCommand):
         #  que hay en ese momento, no lo que habia al imprimir el simulacro.
         with transaction.atomic():
             set_rls_context(org.id)
-            plan = planear(org, profile)
+            plan = planear(org, profile, descartar_sin_historia=descartar)
             if plan["bloqueos"]:
                 raise CommandError("Cambió algo mientras tanto: " + " ".join(plan["bloqueos"]))
             aplicar(org, profile, plan)

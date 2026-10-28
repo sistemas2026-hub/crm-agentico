@@ -254,6 +254,30 @@ def test_b4_una_bodega_que_quedaria_en_negativo(org_a, bodega, user_profile, con
     assert MovimientoDeMaterial.objects.filter(org=org_a).count() == antes
 
 
+def test_b5_una_serie_que_solo_existe_en_su_historial(org_a, escenario, bodega, ont):
+    #  Como en produccion: se le despacho una serie que la bodega nunca registro
+    #  (`_comprobar_serie_libre` la deja entrar).
+    inv.despachar(org=org_a, ubicacion_origen=bodega, profile_destino=escenario,
+                  acta="K-FALSA", lineas=[{"material": ont, "serie": "CDTC50000001"}])
+    antes = MovimientoDeMaterial.objects.filter(org=org_a).count()
+
+    with pytest.raises(CommandError):
+        _correr(org_a, escenario, "--aplicar")
+    assert MovimientoDeMaterial.objects.filter(org=org_a).count() == antes
+
+    #  Una persona confirma que es un numero de prueba: se descarta.
+    salida = _correr(org_a, escenario, "--descartar-series-sin-historia")
+    assert "CDTC50000001 (ONU WIFI): vuelve a se descarta" in salida
+    _correr(org_a, escenario, "--aplicar", "--descartar-series-sin-historia")
+
+    assert inv.activo_de(org_a, ont, "CDTC50000001", crear=False) is None
+    assert not MovimientoDeMaterial.objects.filter(org=org_a, serie="CDTC50000001").exists()
+    assert motivos_para_no_cerrar(escenario, org_a) == []
+    #  Las reales siguen en la bodega, con su indice.
+    assert inv.activo_de(org_a, ont, "S-2", crear=False) is not None
+    assert inv.existencia(bodega, ont) == Decimal("2")
+
+
 def test_b3_cuenta_u_organizacion_que_no_existen(org_a, org_b, escenario):
     with pytest.raises(CommandError):
         call_command("reiniciar_custodia", "--org", str(org_a.id),
