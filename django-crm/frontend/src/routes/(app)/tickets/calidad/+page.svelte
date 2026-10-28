@@ -69,8 +69,8 @@
         <strong>La encuesta todavía no está encendida.</strong>
         <p>
           Para que salga al cerrar cada caso con chat: creá la plantilla «Encuesta de satisfacción» en
-          Ajustes → WhatsApp → Plantillas, esperá a que Meta la apruebe, y encendé la encuesta en la
-          configuración del asistente (<code>encuesta_whatsapp.activo</code>).
+          Ajustes → WhatsApp → Plantillas, esperá a que Meta la apruebe, y encendé «Encuesta de
+          satisfacción» en <a href="/settings/canales/whatsapp/mensajes">Mensajes automáticos</a>.
         </p>
       </div>
     {:else}
