@@ -17,6 +17,7 @@ Lo que se afirma, sobre el EFECTO (no llama a Meta: se dobla 'requests'):
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -430,6 +431,255 @@ try:
     revisar(r.status_code == 400, "borrar sin autor: 400", f"{r.status_code}")
 finally:
     for obj, nombre, original in orig:
+        setattr(obj, nombre, original)
+
+
+# =============================================================================
+titulo("4. La encuesta: el boton tocado, el envio y el webhook")
+# =============================================================================
+from nucleo.seguimiento import encuesta as enc            # noqa: E402
+from nucleo.config.schema import EncuestaWhatsApp         # noqa: E402
+
+
+def sobre(mensaje):
+    return {"entry": [{"changes": [{"value": {
+        "contacts": [{"wa_id": "573001112233", "profile": {"name": "Juana"}}],
+        "messages": [mensaje]}}]}]}
+
+
+m = whatsapp.mensajes_entrantes(sobre({"id": "wamid.R", "type": "button",
+                                       "context": {"id": "wamid.ENC"},
+                                       "button": {"text": "Excelente", "payload": "Excelente"}}))[0]
+revisar(m["texto"] == "Excelente" and m["contexto"] == "wamid.ENC" and m["tipo"] == "button",
+        "un boton de plantilla llega como TEXTO, con el mensaje al que responde", f"{m}")
+m = whatsapp.mensajes_entrantes(sobre({"id": "wamid.I", "type": "interactive",
+                                       "interactive": {"type": "button_reply",
+                                                       "button_reply": {"id": "b1", "title": "Buena"}}}))[0]
+revisar(m["texto"] == "Buena" and m["contexto"] is None, "un boton interactivo tambien", f"{m}")
+m = whatsapp.mensajes_entrantes(sobre({"id": "wamid.T", "type": "text", "text": {"body": "hola"}}))[0]
+revisar(m["texto"] == "hola" and m["contexto"] is None, "el texto de siempre no cambia", f"{m}")
+
+CFG = EncuestaWhatsApp(activo=True)
+revisar(enc.puntaje_de(CFG, "Excelente") == 5 and enc.puntaje_de(CFG, " mala ") == 1
+        and enc.puntaje_de(CFG, "Otra") is None,
+        "el puntaje sale de la config: exacto o sin mayusculas; uno desconocido, None")
+
+
+class Encuestador:
+    """Dobla la base y a Meta alrededor de seguimiento/encuesta.py."""
+
+    def __init__(self, *, destino=True, baja=False, aprobada=True, ya=False, meta="ok",
+                 variables=1, canal="whatsapp"):
+        self.destino = ({"id": "conv-1", "canal": canal, "usuario_externo": "573001112233",
+                         "nombre_cliente": "Juana Perez"} if destino else None)
+        self.baja, self.aprobada, self.ya, self.meta = baja, aprobada, ya, meta
+        self.variables = variables
+        self.reservas: list = []
+        self.envios: list = []
+        self.marcas: list = []
+
+    def montar(self):
+        p = [(enc.encuestas, n, getattr(enc.encuestas, n)) for n in
+             ("destino_del_caso", "reservar", "marcar_enviada", "marcar_fallida")]
+        p += [(enc.persistencia, "esta_de_baja", enc.persistencia.esta_de_baja),
+              (enc.whatsapp, "plantillas_aprobadas", enc.whatsapp.plantillas_aprobadas),
+              (enc.whatsapp, "enviar_plantilla_aprobada", enc.whatsapp.enviar_plantilla_aprobada),
+              (enc.whatsapp, "activo", enc.whatsapp.activo)]
+        enc.encuestas.destino_del_caso = lambda t, c: self.destino
+        enc.encuestas.reservar = lambda t, c, conv, pl, vig, **kw: (
+            self.reservas.append((c, conv, pl, vig, kw)) or (None if self.ya else "enc-1"))
+        enc.encuestas.marcar_enviada = lambda t, i, w: self.marcas.append(("enviada", i, w))
+        enc.encuestas.marcar_fallida = lambda t, i: self.marcas.append(("fallida", i))
+        enc.persistencia.esta_de_baja = lambda t, n, c: self.baja
+        enc.whatsapp.activo = lambda c: True
+        enc.whatsapp.plantillas_aprobadas = lambda c, t: (
+            [{"nombre": "encuesta_satisfaccion", "estado": "APPROVED", "idioma": "es",
+              "variables": self.variables, "formato_variables": "posicional"}] if self.aprobada else [])
+
+        def mandar(c, t, numero, nombre, valores, idioma, plantilla=None):
+            self.envios.append((numero, nombre, valores))
+            if self.meta == "rechaza":
+                raise whatsapp.ErrorWhatsApp("WhatsApp rechazo", codigo=131026)
+            if self.meta == "corta":
+                raise TimeoutError("sin respuesta")
+            return "wamid.ENC"
+        enc.whatsapp.enviar_plantilla_aprobada = mandar
+        return p
+
+    def correr(self, config):
+        p = self.montar()
+        try:
+            return enc.enviar(config, TENANT, "caso-1", responsable_id="p-1",
+                              responsable_nombre="Ana", area="soporte_tecnico")
+        finally:
+            for obj, nombre, original in reversed(p):
+                setattr(obj, nombre, original)
+
+
+class ConfigEnc(Config):
+    def __init__(self, **kw):
+        super().__init__()
+        self.encuesta_whatsapp = EncuestaWhatsApp(**{"activo": True, **kw})
+
+
+e = Encuestador()
+r = e.correr(ConfigEnc())
+revisar(r == {"enviada": True, "motivo": None} and e.envios == [("573001112233", "encuesta_satisfaccion", ["Juana"])]
+        and e.marcas == [("enviada", "enc-1", "wamid.ENC")],
+        "sale al numero del chat, con el PRIMER nombre del cliente, y queda el wamid", f"{r} {e.envios} {e.marcas}")
+revisar(e.reservas and e.reservas[0][4] == {"responsable_id": "p-1", "responsable_nombre": "Ana",
+                                            "area": "soporte_tecnico"},
+        "la reserva lleva al responsable y el area que mando el CRM", f"{e.reservas}")
+
+for armado, cfg, motivo, que in (
+        (dict(), ConfigEnc(activo=False), "apagada", "apagada en la config: no sale"),
+        (dict(destino=False), ConfigEnc(), "sin_chat", "un caso sin chat: no sale"),
+        (dict(canal="web"), ConfigEnc(), "sin_chat", "un chat que no es WhatsApp: no sale"),
+        (dict(baja=True), ConfigEnc(), "de_baja", "el numero pidio no recibir avisos: no sale"),
+        (dict(aprobada=False), ConfigEnc(), "plantilla_no_aprobada", "la plantilla sin aprobar: no sale"),
+        (dict(variables=2), ConfigEnc(), "plantilla_no_coincide", "la plantilla pide otros valores: no sale"),
+        (dict(ya=True), ConfigEnc(), "ya_enviada", "el caso ya tenia encuesta: no sale otra")):
+    e = Encuestador(**armado)
+    r = e.correr(cfg)
+    revisar(r == {"enviada": False, "motivo": motivo} and not e.envios, que, f"{r} {e.envios}")
+
+e = Encuestador()
+e.correr(ConfigEnc(variables=["{nombre_cliente}"], nombre_por_defecto="vecino"))
+e2 = Encuestador()
+e2.destino = {**e2.destino, "nombre_cliente": None} if e2.destino else None
+e2.correr(ConfigEnc(nombre_por_defecto="vecino"))
+revisar(e2.envios and e2.envios[0][2] == ["vecino"], "sin nombre en el perfil, el de la config", f"{e2.envios}")
+
+e = Encuestador(meta="rechaza")
+r = e.correr(ConfigEnc())
+revisar(r == {"enviada": False, "motivo": "rechazada"} and e.marcas == [("fallida", "enc-1")],
+        "Meta la rechaza: queda fallida", f"{r} {e.marcas}")
+e = Encuestador(meta="corta")
+r = e.correr(ConfigEnc())
+revisar(r == {"enviada": False, "motivo": "incierto"} and e.marcas == [],
+        "sin respuesta de Meta: incierta, ni enviada ni fallida (no se reintenta)", f"{r} {e.marcas}")
+
+#  responder_boton: lo que decide si un toque es una encuesta.
+llamadas_r: list = []
+orig_r = enc.encuestas.responder
+try:
+    enc.encuestas.responder = lambda t, w, o, p: (llamadas_r.append((w, o, p)) or
+                                                  ({"encuesta": w == "wamid.ENC", "registrada": w == "wamid.ENC",
+                                                    "motivo": None, "caso_id": "caso-1"}))
+    cfg = ConfigEnc()
+    r = enc.responder_boton(cfg, TENANT, {"tipo": "button", "texto": "Buena", "contexto": "wamid.ENC"})
+    revisar(r and r["registrada"] and llamadas_r[-1] == ("wamid.ENC", "Buena", 4),
+            "un toque a una encuesta: se registra con su puntaje", f"{r} {llamadas_r}")
+    r = enc.responder_boton(cfg, TENANT, {"tipo": "button", "texto": "Si", "contexto": "wamid.OTRA"})
+    revisar(r is None, "un toque a otra plantilla: None (sigue al turno)")
+    n = len(llamadas_r)
+    r = enc.responder_boton(cfg, TENANT, {"tipo": "text", "texto": "Excelente", "contexto": "wamid.ENC"})
+    revisar(r is None and len(llamadas_r) == n, "un TEXTO que dice 'Excelente' no es un toque: ni se consulta")
+    r = enc.responder_boton(ConfigEnc(activo=False), TENANT,
+                            {"tipo": "button", "texto": "Mala", "contexto": "wamid.ENC"})
+    revisar(r and r["registrada"], "con la encuesta apagada despues, las ya enviadas se siguen contando")
+finally:
+    enc.encuestas.responder = orig_r
+
+#  El webhook: el toque a una encuesta NO llega al modelo.
+turnos: list = []
+textos: list = []
+orig_w = [(api, "atender_turno", api.atender_turno),
+          (api.whatsapp, "enviar_texto", api.whatsapp.enviar_texto),
+          (api.whatsapp, "marcar_leido", api.whatsapp.marcar_leido),
+          (api.encuesta, "responder_boton", api.encuesta.responder_boton),
+          (api, "_atendio_baja_o_alta", api._atendio_baja_o_alta),
+          (api, "_guardar_adjunto", api._guardar_adjunto),
+          (api, "_transcribir_si_es_voz", api._transcribir_si_es_voz),
+          (api, "_analizar_si_es_imagen", api._analizar_si_es_imagen),
+          (api.consumo, "estado_del_gasto", api.consumo.estado_del_gasto)]
+try:
+    api.atender_turno = lambda config, tenant, rol, de, texto, canal, **kw: (
+        turnos.append(texto) or {"respuesta": "", "conversacion_id": None})
+    api.whatsapp.enviar_texto = lambda c, t, de, texto: textos.append(texto)
+    api.whatsapp.marcar_leido = lambda c, t, w: None
+    api._atendio_baja_o_alta = lambda c, t, de, texto: False
+    api._guardar_adjunto = lambda *a, **k: None
+    api._transcribir_si_es_voz = lambda *a, **k: {}
+    api._analizar_si_es_imagen = lambda *a, **k: {}
+    api.consumo.estado_del_gasto = lambda c, t: {"accion": "seguir"}
+    cfgw = ConfigEnc(agradecimiento="Gracias, de verdad")
+    entrada = {"de": "573001112233", "telefono": "573001112233", "wamid": "wamid.R",
+               "tipo": "button", "texto": "Excelente", "contexto": "wamid.ENC"}
+
+    api.encuesta.responder_boton = lambda c, t, e: {"encuesta": True, "registrada": True,
+                                                    "motivo": None, "caso_id": "caso-1"}
+    api._procesar_mensaje_whatsapp(cfgw, TENANT, "cliente_final", dict(entrada))
+    revisar(turnos == [] and textos == ["Gracias, de verdad"],
+            "el toque a una encuesta: se agradece y NO va al modelo", f"{turnos} {textos}")
+
+    turnos.clear(); textos.clear()
+    api.encuesta.responder_boton = lambda c, t, e: None
+    api._procesar_mensaje_whatsapp(cfgw, TENANT, "cliente_final", dict(entrada))
+    revisar(turnos == ["Excelente"] and "no puedo leer" not in " ".join(textos),
+            "un boton que no es encuesta va al modelo como texto, no como 'archivo'", f"{turnos} {textos}")
+
+    turnos.clear(); textos.clear()
+
+    def rompe(c, t, e):
+        raise RuntimeError("la base no contesta")
+    api.encuesta.responder_boton = rompe
+    api._procesar_mensaje_whatsapp(cfgw, TENANT, "cliente_final", dict(entrada))
+    revisar(turnos == ["Excelente"], "si la base no contesta, el cliente igual recibe respuesta (va al turno)",
+            f"{turnos}")
+finally:
+    for obj, nombre, original in orig_w:
+        setattr(obj, nombre, original)
+
+#  Las rutas.
+orig_x = [(api, "_config_de", api._config_de), (api.encuesta, "enviar", api.encuesta.enviar),
+          (api.encuestas_db, "filas", api.encuestas_db.filas)]
+try:
+    api._config_de = lambda t: ConfigEnc()
+    pedidos_e: list = []
+    api.encuesta.enviar = lambda c, t, caso, **kw: pedidos_e.append((caso, kw)) or {"enviada": True, "motivo": None}
+    r = cliente.post("/casos/caso-1/encuesta", json={"tenant": TENANT, "responsable_id": "p-1",
+                                                     "responsable_nombre": "Ana", "area": "soporte_tecnico"})
+    revisar(r.status_code == 200 and pedidos_e == [("caso-1", {"responsable_id": "p-1",
+                                                               "responsable_nombre": "Ana",
+                                                               "area": "soporte_tecnico"})],
+            "la ruta pasa el caso y el responsable", f"{r.status_code} {pedidos_e}")
+
+    def cae(c, t, caso, **kw):
+        raise RuntimeError("base caida")
+    api.encuesta.enviar = cae
+    r = cliente.post("/casos/caso-1/encuesta", json={"tenant": TENANT})
+    revisar(r.status_code == 503, "si la base no contesta, 503: no sale nada (falla cerrado)", f"{r.status_code}")
+
+    ahora = datetime.now(timezone.utc)
+    api.encuestas_db.filas = lambda t, d, h: [
+        {"caso_id": "c1", "estado": "respondida", "opcion": "Excelente", "puntaje": 5,
+         "responsable_id": "p-1", "responsable_nombre": "Ana", "area": "soporte_tecnico",
+         "enviada_en": ahora, "respondida_en": ahora},
+        {"caso_id": "c2", "estado": "respondida", "opcion": "Mala", "puntaje": 1,
+         "responsable_id": "p-2", "responsable_nombre": "Luis", "area": "soporte_tecnico",
+         "enviada_en": ahora, "respondida_en": ahora},
+        {"caso_id": "c3", "estado": "enviada", "opcion": None, "puntaje": None,
+         "responsable_id": "p-1", "responsable_nombre": "Ana", "area": "cartera",
+         "enviada_en": ahora, "respondida_en": None}]
+    r = cliente.get(f"/encuestas/resumen?tenant={TENANT}")
+    d = r.get_json()
+    revisar(r.status_code == 200 and d["total"] == {"enviadas": 3, "respondidas": 2, "tasa_respuesta": 66.7,
+                                                    "promedio": 3.0, "satisfaccion": 50.0},
+            "el resumen: 3 enviadas, 2 respondidas, promedio 3, 50% satisfechos", f"{d.get('total')}")
+    revisar([x["nombre"] for x in d["por_responsable"]] == ["Luis", "Ana"],
+            "por responsable, de peor a mejor", f"{d['por_responsable']}")
+    cart = next(x for x in d["por_area"] if x["clave"] == "cartera")
+    revisar(cart["promedio"] is None and cart["satisfaccion"] is None and cart["enviadas"] == 1,
+            "un area sin respuestas va con None, no con cero", f"{cart}")
+    revisar(all(set(x) <= {"caso_id", "opcion", "puntaje", "responsable", "area", "respondida_en"}
+                for x in d["recientes"]), "las recientes no traen datos del cliente", f"{d['recientes'][:1]}")
+    for q, que in (("desde=2026-13-01", "fecha mal escrita"), ("desde=2026-10-10&hasta=2026-10-01", "desde despues de hasta"),
+                   ("desde=2024-01-01&hasta=2026-01-01", "mas de un año")):
+        r = cliente.get(f"/encuestas/resumen?tenant={TENANT}&{q}")
+        revisar(r.status_code == 400, f"resumen con {que}: 400", f"{r.status_code}")
+finally:
+    for obj, nombre, original in orig_x:
         setattr(obj, nombre, original)
 
 

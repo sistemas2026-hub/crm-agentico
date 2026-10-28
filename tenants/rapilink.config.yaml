@@ -7420,6 +7420,23 @@ cierre_inactivas_ia:
 # sirve para eso (compara exacto contra los nombres de pila: MARIA da 27 de
 # 7.574, MAR da 0), asi que el motor arma un padron en memoria de servicio,
 # nombre y estado. Ver nucleo/seguimiento/buscar_cliente.py.
+# La encuesta de satisfaccion por WhatsApp al cerrar un caso con chat
+# (28/10/2026). APAGADA hasta que Meta apruebe la plantilla
+# 'encuesta_satisfaccion' (Ajustes -> WhatsApp -> Plantillas -> la sugerencia
+# "Encuesta de satisfaccion"). 'opciones' es el texto EXACTO de cada boton de
+# esa plantilla y lo que vale; si se cambian los botones en Meta, se cambian
+# aca. Sale 30 min despues de cerrar (lo agenda el CRM), una vez por caso, y
+# nunca a quien pidio no recibir avisos. Los resultados: Tickets -> Calidad.
+encuesta_whatsapp:
+  activo: false
+  plantilla: encuesta_satisfaccion
+  variables: ["{nombre_cliente}"]
+  nombre_por_defecto: cliente
+  opciones: {Excelente: 5, Buena: 4, Regular: 3, Mala: 1}
+  agradecimiento: "¡Gracias por tu respuesta! Nos ayuda a mejorar."
+  vigencia_horas: 72
+  satisfecho_desde: 4
+
 tickets_desde_dexter:
   catalogo_del_proveedor: true
   area_por_defecto: soporte_tecnico

@@ -16,7 +16,8 @@ export const TAB_SETS = {
   tickets: [
     { href: '/tickets', label: 'Cola', exact: true, count: 'tickets' },
     { href: '/tickets/approvals', label: 'Aprobaciones', count: 'approvals' },
-    { href: '/tickets/analytics', label: 'Análisis', admin: true }
+    { href: '/tickets/analytics', label: 'Análisis', admin: true },
+    { href: '/tickets/calidad', label: 'Calidad', admin: true }
   ],
   /**
    * These two are NOT two views of one list. `tasks.Task` and

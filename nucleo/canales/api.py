@@ -39,7 +39,7 @@ import contextlib
 import threading
 import uuid
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 from flask import Flask, jsonify, request
@@ -77,7 +77,8 @@ from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
 from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
-from nucleo.seguimiento import buscar_cliente, ticket_desde_dexter
+from nucleo.seguimiento import buscar_cliente, encuesta, ticket_desde_dexter
+from nucleo.persistencia import encuestas as encuestas_db
 from nucleo.seguimiento import verificacion_accion
 from nucleo.seguimiento.forzado import (puede_intentar_algo, por_que_posponer,
                                         decidir_pedido_humano_de,
@@ -6983,6 +6984,72 @@ def caso_enviar_plantilla(caso_id):
                                            caso_del_caso=caso_id)
 
 
+@app.post("/casos/<caso_id>/encuesta")
+def caso_enviar_encuesta(caso_id):
+    """
+    La encuesta de satisfaccion de un caso cerrado, por WhatsApp (28/10/2026).
+
+    La pide el CRM un rato despues de cerrar el caso, por la red interna.
+    Decide aca: apagada, sin chat, de baja, plantilla sin aprobar o ya
+    enviada -> no sale, y se dice por que. Cuerpo: {tenant, responsable_id?,
+    responsable_nombre?, area?}. Ver nucleo/seguimiento/encuesta.py.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        config = _config_de(tenant)
+        resultado = encuesta.enviar(
+            config, tenant, caso_id,
+            responsable_id=cuerpo.get("responsable_id"),
+            responsable_nombre=cuerpo.get("responsable_nombre"),
+            area=cuerpo.get("area"))
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        #  La base no contesto (la baja no se pudo comprobar, o no se pudo
+        #  reservar): no sale nada -- falla cerrado.
+        return fallo(503, "encuesta_no_enviada", "No se pudo decidir si mandar la encuesta.",
+                     componente="encuesta", e=e)
+    return jsonify(resultado), 200
+
+
+@app.get("/encuestas/resumen")
+def encuestas_resumen():
+    """
+    "Calidad de la atencion": como calificaron los clientes, en el periodo
+    (por fecha de ENVIO). ?tenant&desde=AAAA-MM-DD&hasta=AAAA-MM-DD (hasta
+    incluido); sin fechas, los ultimos 30 dias. Lo calcula el codigo.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        hoy = datetime.now(timezone.utc).date()
+        hasta = date.fromisoformat(request.args.get("hasta") or hoy.isoformat())
+        desde = date.fromisoformat(request.args.get("desde") or (hasta - timedelta(days=29)).isoformat())
+    except ValueError:
+        return jsonify({"error": "Las fechas van como AAAA-MM-DD."}), 400
+    if desde > hasta or (hasta - desde).days > 366:
+        return jsonify({"error": "El periodo va de 1 día a un año."}), 400
+    try:
+        config = _config_de(tenant)
+        inicio = datetime.combine(desde, datetime.min.time(), tzinfo=timezone.utc)
+        fin = datetime.combine(hasta + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+        resumen = encuestas_db.resumir(encuestas_db.filas(tenant, inicio, fin),
+                                       config.encuesta_whatsapp.satisfecho_desde)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        return fallo(500, "resumen_no_calculado", "No se pudo calcular el resumen.",
+                     componente="encuesta", e=e)
+    return jsonify({"desde": desde.isoformat(), "hasta": hasta.isoformat(),
+                    "activa": config.encuesta_whatsapp.activo,
+                    "satisfecho_desde": config.encuesta_whatsapp.satisfecho_desde,
+                    **resumen})
+
+
 def _destino_del_caso(tenant: str, caso_id: str):
     """
     (conversacion, ticket_del_isp, None) a la que escribirle desde un caso, o
@@ -9672,6 +9739,21 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         # dejar de recibir y no puede, bloquea -- y los bloqueos le bajan la
         # reputacion al numero de la empresa.
         if _atendio_baja_o_alta(config, tenant, de, entrante.get("texto", "")):
+            return
+
+        # LA RESPUESTA A UNA ENCUESTA, ANTES DEL MODELO (28/10/2026). El boton
+        # que toco ("Excelente") no es una pregunta: se guarda la nota y se le
+        # agradece. Si el boton no responde a una encuesta, sigue al turno
+        # como texto. Si la base no contesta, tambien: un cliente sin
+        # respuesta es peor que una nota perdida. Ver seguimiento/encuesta.py.
+        try:
+            respuesta_encuesta = encuesta.responder_boton(config, tenant, entrante)
+        except Exception as e:
+            registrar("encuesta", "no se pudo registrar la respuesta de una encuesta",
+                      tenant=tenant, remitente=ref_sesion(de), error=e)
+            respuesta_encuesta = None
+        if respuesta_encuesta is not None:
+            whatsapp.enviar_texto(config, tenant, de, config.encuesta_whatsapp.agradecimiento)
             return
 
         texto = entrante.get("texto", "")

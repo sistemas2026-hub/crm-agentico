@@ -390,3 +390,58 @@ def auto_stop_stale_timers(threshold_hours=TIME_ENTRY_AUTO_STOP_HOURS):
         with connection.cursor() as cursor:
             cursor.execute("SELECT set_config('app.current_org', '', false)")
     return stopped
+
+
+# =============================================================================
+#  ENCUESTA POR WHATSAPP  --  28/10/2026
+# =============================================================================
+#  La encuesta de arriba sale por CORREO y solo con un contacto con correo: en
+#  un ISP cuyos clientes hablan por WhatsApp no salia ninguna. Esta la pide al
+#  motor, que es quien tiene el chat. El motor DECIDE: apagada, sin chat, de
+#  baja, plantilla sin aprobar o ya enviada -> no sale, y lo dice. Aca solo se
+#  mira que el caso siga cerrado (la misma proteccion contra el reabrir de la
+#  de correo) y se le pasa quien lo tenia, para medir la calidad por persona.
+
+
+@shared_task
+def enviar_encuesta_whatsapp(case_id, org_id):
+    """Le pide al motor la encuesta de un caso cerrado. Devuelve lo que dijo."""
+    import os
+
+    import requests
+
+    from common.tasks import _motor
+
+    set_rls_context(org_id)
+    case = Case.objects.filter(id=case_id, org_id=org_id).first()
+    if case is None or case.status != "Closed":
+        logger.info("enviar_encuesta_whatsapp: case=%s ya no esta cerrado, no se pide", case_id)
+        return None
+    url, tenant = _motor()
+    if not url or not tenant:
+        logger.info("enviar_encuesta_whatsapp: el asistente no esta configurado")
+        return None
+
+    responsable = case.assigned_to.select_related("user").first()
+    cuerpo = {
+        "tenant": tenant,
+        "responsable_id": str(responsable.id) if responsable else None,
+        "responsable_nombre": (
+            ((responsable.user.name or "").strip() or responsable.user.email) if responsable else None
+        ),
+        "area": case.area or None,
+    }
+    cabeceras = {}
+    token = os.environ.get("MOTOR_SERVICE_TOKEN")
+    if token:
+        cabeceras["X-Servicio-Token"] = token
+    try:
+        r = requests.post(f"{url.rstrip('/')}/casos/{case_id}/encuesta", json=cuerpo,
+                          headers=cabeceras, timeout=30)
+        datos = r.json() if r.content else {}
+    except Exception:  # noqa: BLE001 -- un motor caido no rompe el cierre
+        logger.warning("enviar_encuesta_whatsapp: el motor no contesto (case=%s)", case_id)
+        return None
+    logger.info("enviar_encuesta_whatsapp: case=%s http=%s enviada=%s motivo=%s",
+                case_id, r.status_code, datos.get("enviada"), datos.get("motivo"))
+    return datos

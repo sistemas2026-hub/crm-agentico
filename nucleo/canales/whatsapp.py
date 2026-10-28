@@ -257,7 +257,9 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
         de       telefono del cliente, en formato internacional sin '+'
         nombre   como se llama en su perfil de WhatsApp, si vino
         tipo     text | image | audio | ...
-        texto    el contenido si es texto; '' en los demas tipos
+        texto    el contenido si es texto, o lo que dice el boton tocado
+                 ('button' / 'interactive'); '' en los demas tipos
+        contexto el wamid del mensaje al que responde, si responde a uno
         crudo    el mensaje entero, para lo que todavia no se traduce
 
     DE DONDE SALE EL TELEFONO  (no es una sola clave)
@@ -310,6 +312,20 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
                 # Los tipos con archivo comparten la forma {id, mime_type,
                 # caption}: se lee igual para todos en vez de una rama por tipo.
                 adjunto = m.get(tipo) or {} if tipo in TIPOS_CON_ARCHIVO else {}
+                # UN BOTON TOCADO ES TEXTO (28/10/2026). Llega como 'button'
+                # (respuesta rapida de una plantilla) o 'interactive' (boton o
+                # lista), con lo que dice el boton. Antes se leia como vacio y
+                # el cliente recibia "no puedo leer ese tipo de archivo" por
+                # tocar "Excelente". 'contexto' es el mensaje al que responde:
+                # con eso se sabe si es la respuesta a una encuesta.
+                if tipo == "button":
+                    texto = (m.get("button") or {}).get("text") or ""
+                elif tipo == "interactive":
+                    inter = m.get("interactive") or {}
+                    texto = ((inter.get("button_reply") or inter.get("list_reply") or {})
+                             .get("title") or "")
+                else:
+                    texto = (m.get("text") or {}).get("body", "") if tipo == "text" else ""
                 salida.append({
                     "wamid": m.get("id"),
                     # DOS IDENTIDADES, NO UNA  -- se guardan por separado a
@@ -331,7 +347,8 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
                     "de": wa_id or m.get("from") or bsuid or m.get("from_user_id"),
                     "nombre": nombre,
                     "tipo": tipo,
-                    "texto": (m.get("text") or {}).get("body", "") if tipo == "text" else "",
+                    "texto": texto,
+                    "contexto": (m.get("context") or {}).get("id"),
                     # El pie de foto es texto del cliente: "mira como quedo"
                     # dice tanto como la foto misma.
                     "descripcion": adjunto.get("caption", ""),

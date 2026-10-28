@@ -2186,6 +2186,37 @@ class AsuntoDesdeDexter(Base):
     prioridad: str = ""
 
 
+class EncuestaWhatsApp(Base):
+    """
+    La encuesta de satisfaccion por WhatsApp al cerrar un caso (28/10/2026).
+
+    APAGADA POR DEFECTO: se enciende cuando la plantilla ya esta aprobada en
+    Meta. 'opciones' es el texto EXACTO de cada boton de la plantilla y el
+    puntaje (1 a 5) que vale: un boton que no este aca no se cuenta como nota.
+    'variables' son los valores de la plantilla, en orden; el unico dinamico
+    es '{nombre_cliente}' (el nombre del perfil de WhatsApp), que sin nombre
+    cae a 'nombre_por_defecto'. Ver nucleo/seguimiento/encuesta.py.
+    """
+    activo: bool = False
+    plantilla: str = "encuesta_satisfaccion"
+    variables: list[str] = Field(default_factory=lambda: ["{nombre_cliente}"])
+    nombre_por_defecto: str = "cliente"
+    opciones: dict[str, int] = Field(default_factory=lambda: {
+        "Excelente": 5, "Buena": 4, "Regular": 3, "Mala": 1})
+    agradecimiento: str = "¡Gracias por tu respuesta! Nos ayuda a mejorar."
+    vigencia_horas: int = Field(default=72, ge=1, le=720)
+    #: Desde que puntaje cuenta como "satisfecho" en "Calidad de la atencion".
+    satisfecho_desde: int = Field(default=4, ge=1, le=5)
+
+    @field_validator("opciones")
+    @classmethod
+    def _puntajes_validos(cls, v):
+        malos = [k for k, p in v.items() if not 1 <= int(p) <= 5]
+        if malos:
+            raise ValueError(f"encuesta_whatsapp.opciones: el puntaje va de 1 a 5 ({malos})")
+        return v
+
+
 class TicketsDesdeDexter(Base):
     """
     Que se puede abrir en el sistema del ISP desde "Nuevo ticket" (26/10/2026).
@@ -3280,6 +3311,7 @@ class TenantConfig(Base):
         default_factory=ImportacionTickets)
     tickets_desde_dexter: TicketsDesdeDexter = Field(
         default_factory=TicketsDesdeDexter)
+    encuesta_whatsapp: EncuestaWhatsApp = Field(default_factory=EncuestaWhatsApp)
 
     def advertencias_de_aprobacion(self) -> list[str]:
         """

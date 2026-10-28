@@ -353,6 +353,7 @@ def case_post_save_emit_activity(sender, instance, created, **kwargs):
             {"before": old.status, "after": instance.status},
         )
         _maybe_schedule_csat(instance, old.status)
+        _maybe_schedule_encuesta_whatsapp(instance, old.status)
 
     if old.priority != instance.priority:
         _create_activity(
@@ -423,6 +424,27 @@ def _maybe_schedule_csat(case, old_status):
         )
     except Exception:  # pragma: no cover. Broker outage shouldn't block close
         logger.exception("Failed to enqueue CSAT survey for case=%s", case.pk)
+
+
+def _maybe_schedule_encuesta_whatsapp(case, old_status):
+    """La encuesta por WhatsApp de un caso que se acaba de cerrar (28/10/2026).
+
+    Misma espera que la de correo, por el mismo motivo: un caso que se cierra
+    y se reabre al rato no tiene que recibirla. No mira 'csat_enabled' -- ese
+    es el interruptor de la de CORREO; la de WhatsApp la enciende la config
+    del asistente, y el motor es quien decide (ver cases.tasks).
+    """
+    if case.status != "Closed" or old_status == "Closed" or not case.org_id:
+        return
+    try:
+        from cases.tasks import CSAT_SEND_DELAY_MINUTES, enviar_encuesta_whatsapp
+
+        enviar_encuesta_whatsapp.apply_async(
+            args=[str(case.id), str(case.org_id)],
+            countdown=CSAT_SEND_DELAY_MINUTES * 60,
+        )
+    except Exception:  # pragma: no cover. Un broker caido no frena el cierre
+        logger.exception("No se pudo agendar la encuesta por WhatsApp del caso %s", case.pk)
 
 
 @receiver(post_delete, sender=Case)
