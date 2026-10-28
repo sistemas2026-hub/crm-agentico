@@ -12,7 +12,7 @@
   import { tick, untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
-  import { ChevronRight, TriangleAlert } from '@lucide/svelte';
+  import { ChevronRight, FileText, Paperclip, TriangleAlert, X } from '@lucide/svelte';
 
   /** @type {{ data: any, form: any }} */
   let { data, form: result } = $props();
@@ -80,6 +80,32 @@
     if (resto.length) grupos.push(['Todos los asuntos de WispHub', resto]);
     return grupos;
   });
+  //  EL ADJUNTO (28/10/2026): una zona con ícono en lugar del control nativo
+  //  del navegador. El archivo sigue viajando en el mismo <input name="attachment">.
+  const ADJUNTO_MAX = 25 * 1024 * 1024;
+  /** @type {{nombre: string, tamano: number} | null} */
+  let archivo = $state(null);
+  /** @type {HTMLInputElement | null} */
+  let entradaArchivo = $state(null);
+  let arrastrando = $state(false);
+  const peso = (/** @type {number} */ n) =>
+    n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+  function alElegir(/** @type {Event} */ e) {
+    const f = /** @type {HTMLInputElement} */ (e.currentTarget).files?.[0];
+    archivo = f ? { nombre: f.name, tamano: f.size } : null;
+  }
+  function quitarArchivo() {
+    if (entradaArchivo) entradaArchivo.value = '';
+    archivo = null;
+  }
+  function soltar(/** @type {DragEvent} */ e) {
+    e.preventDefault();
+    arrastrando = false;
+    const lista = e.dataTransfer?.files;
+    if (!lista?.length || !entradaArchivo) return;
+    entradaArchivo.files = lista;
+    archivo = { nombre: lista[0].name, tamano: lista[0].size };
+  }
   //  Elegir el asunto propone su prioridad (la de WispHub para ese asunto);
   //  la persona la puede cambiar, y la que quede es la que llega allá.
   function proponerPrioridad() {
@@ -325,16 +351,19 @@
     </p>
 
     <div class="pair">
-      <div class="v2-field">
-        <label for="f-account">Cuenta</label>
-        <select id="f-account" name="account" class="v2-input" bind:value={form.account}>
-          <option value="">Sin vincular</option>
-          {#each data.accounts as a (a.id)}
-            <option value={a.id}>{a.name}</option>
-          {/each}
-        </select>
-        <p class="v2-hint">No se puede cambiar después. La API lo deja de solo lectura tras la creación.</p>
-      </div>
+      <!-- Igual que «Personas afectadas»: sin cuentas en el CRM solo ofrecía «Sin vincular». -->
+      {#if data.accounts?.length}
+        <div class="v2-field">
+          <label for="f-account">Cuenta</label>
+          <select id="f-account" name="account" class="v2-input" bind:value={form.account}>
+            <option value="">Sin vincular</option>
+            {#each data.accounts as a (a.id)}
+              <option value={a.id}>{a.name}</option>
+            {/each}
+          </select>
+          <p class="v2-hint">No se puede cambiar después. La API lo deja de solo lectura tras la creación.</p>
+        </div>
+      {/if}
       <div class="v2-field">
         <label for="f-owner">Asignado a</label>
         <select id="f-owner" name="assigned_to" class="v2-input" bind:value={form.assigned_to}>
@@ -347,15 +376,22 @@
       </div>
     </div>
 
-    <div class="v2-field">
-      <label for="f-contacts">Personas afectadas</label>
-      <select id="f-contacts" name="contacts" class="v2-input" multiple size="4">
-        {#each data.contacts as c (c.id)}
-          <option value={c.id}>{c.name}</option>
-        {/each}
-      </select>
-      <p class="v2-hint">Opcional. Mantené presionado ctrl o cmd para elegir más de uno.</p>
-    </div>
+    <!--
+      28/10/2026: solo si el CRM tiene contactos. Son los contactos del CRM
+      (no los clientes de WispHub, que se eligen arriba), y en una empresa que
+      no los carga la lista salia vacia: un campo que no se podia usar.
+    -->
+    {#if data.contacts?.length}
+      <div class="v2-field">
+        <label for="f-contacts">Personas afectadas</label>
+        <select id="f-contacts" name="contacts" class="v2-input" multiple size="4">
+          {#each data.contacts as c (c.id)}
+            <option value={c.id}>{c.name}</option>
+          {/each}
+        </select>
+        <p class="v2-hint">Opcional. Mantené presionado ctrl o cmd para elegir más de uno.</p>
+      </div>
+    {/if}
 
     <div class="v2-field">
       <label for="f-desc">Qué pasó</label>
@@ -369,7 +405,42 @@
 
     <div class="v2-field">
       <label for="f-adjunto">Adjuntar documento</label>
-      <input id="f-adjunto" name="attachment" type="file" class="v2-input" />
+      <!-- El control nativo queda oculto a la vista, no al teclado: se enfoca con Tab y la zona lo muestra. -->
+      <input
+        id="f-adjunto"
+        bind:this={entradaArchivo}
+        name="attachment"
+        type="file"
+        class="oculto"
+        onchange={alElegir} />
+      {#if archivo}
+        <div class="adjunto-elegido" class:excede={archivo.tamano > ADJUNTO_MAX}>
+          <FileText size={18} style="flex:none" />
+          <div class="adjunto-datos">
+            <b>{archivo.nombre}</b>
+            <span>
+              {peso(archivo.tamano)}{archivo.tamano > ADJUNTO_MAX ? ' · pasa de 25 MB, no se va a poder subir' : ''}
+            </span>
+          </div>
+          <button type="button" class="v2-btn v2-btn-sm" onclick={quitarArchivo} aria-label="Quitar el archivo">
+            <X size={14} />
+          </button>
+        </div>
+      {:else}
+        <label
+          for="f-adjunto"
+          class="soltar"
+          class:arrastrando
+          ondragover={(e) => {
+            e.preventDefault();
+            arrastrando = true;
+          }}
+          ondragleave={() => (arrastrando = false)}
+          ondrop={soltar}>
+          <Paperclip size={18} style="flex:none" />
+          <span><b>Elegí un archivo</b> o arrastralo acá</span>
+        </label>
+      {/if}
       <p class="v2-hint">
         Opcional, hasta 25 MB. Queda en el ticket{enWispHub && usaWispHub ? ' y también va a WispHub' : ''}.
       </p>
@@ -457,6 +528,78 @@
   }
   .nace {
     margin: -4px 0 14px;
+  }
+  .oculto {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    border: 0;
+  }
+  .soltar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 64px;
+    padding: 14px 16px;
+    border: 1.5px dashed color-mix(in srgb, var(--v2-slate) 45%, transparent);
+    border-radius: var(--v2-radius-control);
+    background: var(--v2-paper);
+    color: var(--v2-slate);
+    font-size: 14px;
+    font-weight: 400;
+    cursor: pointer;
+    transition:
+      border-color 0.15s,
+      background 0.15s;
+  }
+  .soltar b {
+    color: var(--v2-ember-text);
+    font-weight: 600;
+  }
+  .soltar:hover,
+  .soltar.arrastrando {
+    border-color: var(--v2-ember-line);
+    background: var(--v2-ember-soft);
+  }
+  .oculto:focus-visible + .soltar {
+    outline: 2px solid var(--v2-ember);
+    outline-offset: 2px;
+  }
+  .adjunto-elegido {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--v2-line);
+    border-radius: var(--v2-radius-control);
+    background: var(--v2-card);
+  }
+  .adjunto-elegido.excede {
+    border-color: var(--v2-rust);
+  }
+  .adjunto-datos {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+    font-size: 14px;
+  }
+  .adjunto-datos b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .adjunto-datos span {
+    font-size: 12.5px;
+    color: var(--v2-slate);
+  }
+  .excede .adjunto-datos span {
+    color: var(--v2-rust);
   }
   .actions {
     display: flex;
