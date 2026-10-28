@@ -1008,7 +1008,7 @@ class CaseDetailView(APIView):
                 is_internal = is_internal_raw.lower() in ("true", "1", "yes")
             else:
                 is_internal = bool(is_internal_raw)
-            Comment.objects.create(
+            comentario = Comment(
                 comment=comment_text,
                 content_type=ContentType.objects.get_for_model(Case),
                 object_id=self.cases_obj.id,
@@ -1016,6 +1016,16 @@ class CaseDetailView(APIView):
                 is_internal=is_internal,
                 org=self.request.profile.org,
             )
+            # 28/10/2026: la pantalla del ticket lo manda cuando la respuesta
+            # salio por el CHAT. Ahi la primera respuesta la marca el motor y
+            # solo si WhatsApp la acepto: este comentario la marcaba igual
+            # aunque al cliente no le hubiera llegado nada. No es un campo:
+            # viaja en la instancia hasta la señal (_maybe_stamp_first_response).
+            sin_primera = params.get("sin_primera_respuesta", False)
+            if isinstance(sin_primera, str):
+                sin_primera = sin_primera.lower() in ("true", "1", "yes")
+            comentario._sin_primera_respuesta = bool(sin_primera)
+            comentario.save()
 
         if self.request.FILES.get("case_attachment"):
             create_attachment(

@@ -488,6 +488,31 @@ class TestFirstResponseIsRecorded:
         case_a.refresh_from_db()
         assert case_a.first_response_at is None
 
+    @pytest.mark.parametrize("bandera", [True, "true", "1"])
+    def test_a_reply_that_went_through_the_chat_does_not(self, admin_client, case_a, bandera):
+        """28/10/2026: si la respuesta salio por el chat, la marca el motor y
+        solo cuando WhatsApp la acepta. El comentario queda, sin marcar."""
+        response = admin_client.post(
+            _detail(case_a.id),
+            {"comment": "Ya revisamos su equipo", "sin_primera_respuesta": bandera},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_200_OK
+        case_a.refresh_from_db()
+        assert case_a.first_response_at is None
+        assert Comment.objects.filter(
+            object_id=case_a.id, comment="Ya revisamos su equipo", is_internal=False
+        ).exists()
+
+    def test_the_flag_off_still_stamps(self, admin_client, case_a):
+        admin_client.post(
+            _detail(case_a.id),
+            {"comment": "Hola", "sin_primera_respuesta": "false"},
+            format="json",
+        )
+        case_a.refresh_from_db()
+        assert case_a.first_response_at is not None
+
     def test_the_second_reply_does_not_move_it(self, admin_client, case_a):
         admin_client.post(_detail(case_a.id), {"comment": "First"}, format="json")
         case_a.refresh_from_db()

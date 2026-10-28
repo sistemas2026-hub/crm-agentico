@@ -214,7 +214,16 @@ export const actions = {
     }
 
     try {
-      await replyToTicket({ cookies }, params.id, { body, internal, file });
+      //  Si hubo chat detrás (el motor tomó la entrega, haya salido o no), la
+      //  primera respuesta la marca el motor y sólo si WhatsApp la aceptó: el
+      //  comentario no la marca (28/10/2026). Sin chat -- un ticket cargado a
+      //  mano -- el comentario ES la respuesta y la marca como siempre.
+      await replyToTicket({ cookies }, params.id, {
+        body,
+        internal,
+        file,
+        sinPrimeraRespuesta: entrega !== null
+      });
     } catch (/** @type {any} */ err) {
       return fail(400, { body, internal, error: readableError(err, 'No se pudo publicar esta respuesta.') });
     }

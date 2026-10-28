@@ -238,6 +238,10 @@ def _maybe_stamp_first_response(case, comment):
         return
     if comment.commented_by_id is None:
         return
+    # La respuesta salio por el chat: la marca el motor, cuando WhatsApp la
+    # acepta (28/10/2026). Ver CaseDetailView.post.
+    if getattr(comment, "_sin_primera_respuesta", False):
+        return
     sellar_primera_respuesta(case, comment.created_at or timezone.now())
 
 

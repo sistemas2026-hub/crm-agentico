@@ -30,9 +30,10 @@ const sesion = vi.hoisted(() => ({ tenant: /** @type {string | null} */ (null) }
 const updateTicket = vi.fn();
 const tomarTicket = vi.fn();
 const getTicket = vi.fn();
+const replyToTicket = vi.fn();
 vi.mock('$lib/server/v2/tickets.js', () => ({
   getTicket: (...args) => getTicket(...args),
-  replyToTicket: vi.fn(),
+  replyToTicket: (...args) => replyToTicket(...args),
   updateTicket: (...args) => updateTicket(...args),
   tomarTicket: (...args) => tomarTicket(...args)
 }));
@@ -209,6 +210,67 @@ describe('?/tomar', () => {
     const b = /** @type {any} */ (await actions.tomar(evento({}, { role: 'USER' })));
     expect(b.status).toBe(403);
     expect(b.data.error).toMatch(/área/);
+  });
+});
+
+/*
+ * ?/reply Y LA PRIMERA RESPUESTA (28/10/2026). Con chat detrás, la marca el
+ * motor y sólo si WhatsApp aceptó el mensaje; el comentario del CRM la marcaba
+ * igual aunque al cliente no le hubiera llegado nada. Sin chat, el comentario
+ * ES la respuesta y la sigue marcando.
+ */
+describe('?/reply: quién marca la primera respuesta', () => {
+  beforeEach(() => {
+    entorno.env = { PRIVATE_ASISTENTE_URL: 'http://motor.test' };
+    sesion.tenant = 'empresa';
+    replyToTicket.mockReset();
+    replyToTicket.mockResolvedValue({});
+  });
+
+  /** @param {(url: string) => Promise<any>} motor */
+  async function responder(motor) {
+    const e = /** @type {any} */ (evento({ body: 'Ya revisamos su equipo' }));
+    e.fetch = vi.fn(motor);
+    const r = /** @type {any} */ (await actions.reply(e));
+    return { r, datos: replyToTicket.mock.calls[0]?.[2] };
+  }
+  const motorDice = (/** @type {number} */ status, /** @type {any} */ cuerpo) => async () => ({
+    ok: status < 300,
+    status,
+    json: async () => cuerpo
+  });
+
+  it('salió por WhatsApp y Meta la aceptó: el comentario NO la marca (la marcó el motor)', async () => {
+    const { datos } = await responder(
+      motorDice(201, { ok: true, resultado: 'aceptado', aceptado_por_meta: true })
+    );
+    expect(datos.sinPrimeraRespuesta).toBe(true);
+  });
+
+  it('el motor la rechazó: tampoco, y el aviso dice que no llegó', async () => {
+    const { r, datos } = await responder(motorDice(409, { error: 'La IA atiende este chat.' }));
+    expect(datos.sinPrimeraRespuesta).toBe(true);
+    expect(r.aviso).toMatch(/No le llegó al cliente/);
+  });
+
+  it('el motor no contestó: tampoco (si el mensaje salió, lo marcó el motor)', async () => {
+    const { datos } = await responder(async () => {
+      throw new Error('ECONNREFUSED');
+    });
+    expect(datos.sinPrimeraRespuesta).toBe(true);
+  });
+
+  it('un ticket sin chat: el comentario ES la respuesta y la marca', async () => {
+    const { datos } = await responder(motorDice(404, { sin_conversacion: true }));
+    expect(datos.sinPrimeraRespuesta).toBe(false);
+  });
+
+  it('sin motor configurado: la marca el comentario, como siempre', async () => {
+    entorno.env = {};
+    const { datos } = await responder(async () => {
+      throw new Error('no deberia llamarse');
+    });
+    expect(datos.sinPrimeraRespuesta).toBe(false);
   });
 });
 

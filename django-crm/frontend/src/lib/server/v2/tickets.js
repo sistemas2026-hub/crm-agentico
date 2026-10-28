@@ -583,21 +583,34 @@ export async function createTicket({ cookies }, values) {
  * or arrive on its own. The field name is `case_attachment`. The file rides as
  * multipart; a plain reply stays JSON so the common path is unchanged.
  *
+ * `sinPrimeraRespuesta` (28/10/2026): la respuesta salió por el chat, y ahí la
+ * primera respuesta la marca el motor, sólo si WhatsApp la aceptó. Sin esto el
+ * comentario la marcaba aunque al cliente no le hubiera llegado nada.
+ *
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  * @param {string} id
- * @param {{ body: string, internal?: boolean, file?: File|null }} reply
+ * @param {{ body: string, internal?: boolean, file?: File|null, sinPrimeraRespuesta?: boolean }} reply
  */
 export async function replyToTicket({ cookies }, id, reply) {
+  const sinPrimera = Boolean(reply.sinPrimeraRespuesta);
   if (reply.file) {
     const form = new FormData();
     if (reply.body) form.set('comment', reply.body);
     form.set('is_internal', String(Boolean(reply.internal)));
+    if (sinPrimera) form.set('sin_primera_respuesta', 'true');
     form.set('case_attachment', reply.file);
     return await apiRequest(`/cases/${id}/`, { method: 'POST', body: form }, { cookies });
   }
   return await apiRequest(
     `/cases/${id}/`,
-    { method: 'POST', body: { comment: reply.body, is_internal: Boolean(reply.internal) } },
+    {
+      method: 'POST',
+      body: {
+        comment: reply.body,
+        is_internal: Boolean(reply.internal),
+        ...(sinPrimera ? { sin_primera_respuesta: true } : {})
+      }
+    },
     { cookies }
   );
 }
