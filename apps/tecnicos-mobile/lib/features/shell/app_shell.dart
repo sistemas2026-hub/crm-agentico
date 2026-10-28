@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../../core/api/api_client.dart';
 import '../../core/avisos/avisos_push.dart';
 import '../../core/acciones/salir_de_la_app.dart';
 import '../../core/estado/ordenes_jornada.dart';
@@ -71,7 +72,12 @@ class ShellDependencias {
     this.conectividad,
     this.cerrarSesion,
     this.cicloDeVida,
+    this.sesionVencida,
   });
+
+  /// Avisa que el servidor rechazó la sesión (28/10/2026). Nulo en pruebas
+  /// que no lo miden.
+  final Stream<void>? sesionVencida;
 
   /// El estado de la cola, ya calculado por el servicio real.
   final Stream<SyncSummary> resumenes;
@@ -138,6 +144,7 @@ class ShellDependencias {
       resumenInicial: sincronizacion.lastSummary,
       sincronizarAhora: sincronizacion.procesarCola,
       conectividad: _conectividadDelTelefono(),
+      sesionVencida: ApiClient.sesionVencida,
       cargarIdentidad: () async => IdentidadTecnico(
         nombre: await almacenamiento.getUserName() ?? FieldMockData.tecnicoPorDefecto,
         empresa: await almacenamiento.getOrgName() ?? FieldMockData.empresaPorDefecto,
@@ -234,6 +241,12 @@ class AppShell extends StatefulWidget {
   final ShellDependencias dependencias;
   final SeccionCampo seccionInicial;
 
+  /// Lo que se le dice al técnico al volver a la pantalla de entrada cuando el
+  /// servidor rechazó su sesión (28/10/2026).
+  static const String avisoSesionVencida =
+      'Tu sesión venció. Entrá de nuevo: lo que no se envió quedó guardado en '
+      'el teléfono y sube al entrar con esta misma cuenta.';
+
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -241,6 +254,11 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   StreamSubscription<SyncSummary>? _suscripcionResumen;
   StreamSubscription<bool>? _suscripcionConexion;
+  StreamSubscription<void>? _suscripcionSesion;
+
+  /// Para salir una sola vez: varios pedidos pueden recibir el rechazo juntos.
+  bool _saliendoPorSesionVencida = false;
+
 
   late SeccionCampo _seccion = widget.seccionInicial;
 
@@ -298,6 +316,15 @@ class _AppShellState extends State<AppShell> {
 
     widget.dependencias.ordenes.addListener(_alCambiarOrdenes);
     _cargarIdentidad();
+
+    // LA SESIÓN VENCIDA SACA A ENTRAR DE NUEVO (28/10/2026). Antes la app se
+    // quedaba abierta mostrando lo último que bajó, con «sincronizado», sin
+    // volver a hablar con el servidor: la orden nueva no llegaba y nadie lo
+    // veía. Se sale CONSERVANDO lo pendiente, como el cierre de sesión.
+    _suscripcionSesion = widget.dependencias.sesionVencida?.listen(
+      (_) => _alVencerLaSesion(),
+      onError: (Object _) {},
+    );
 
     // QUIEN ABRE LA ORDEN CUANDO EL TECNICO TOCA UN AVISO
     // ---------------------------------------------------
@@ -371,10 +398,29 @@ class _AppShellState extends State<AppShell> {
     if (mounted) setState(() => _identidad = identidad);
   }
 
+  Future<void> _alVencerLaSesion() async {
+    if (_saliendoPorSesionVencida || !mounted) return;
+    _saliendoPorSesionVencida = true;
+    try {
+      final ciclo = widget.dependencias.cicloDeVida;
+      if (ciclo != null) {
+        await ciclo.salirConservando();
+      } else {
+        await widget.dependencias.cerrarSesion?.call();
+      }
+    } catch (_) {
+      // Lo que no se pudo soltar (el push, sin sesión) no frena la salida: lo
+      // que importa es que el técnico pueda volver a entrar.
+    }
+    if (!mounted) return;
+    _irALogin(aviso: AppShell.avisoSesionVencida);
+  }
+
   @override
   void dispose() {
     _suscripcionResumen?.cancel();
     _suscripcionConexion?.cancel();
+    _suscripcionSesion?.cancel();
     _suscripcionAvisos?.cancel();
     AvisosPush.alAbrirOrden = null;
     widget.dependencias.ordenes.removeListener(_alCambiarOrdenes);
@@ -511,9 +557,9 @@ class _AppShellState extends State<AppShell> {
     _irALogin();
   }
 
-  void _irALogin() {
+  void _irALogin({String? aviso}) {
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+      MaterialPageRoute<void>(builder: (_) => LoginScreen(aviso: aviso)),
     );
   }
 

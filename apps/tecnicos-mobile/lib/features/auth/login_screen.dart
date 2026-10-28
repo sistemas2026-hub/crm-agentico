@@ -14,7 +14,11 @@ import '../../core/theme/app_theme.dart';
 import '../shell/app_shell.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.aviso});
+
+  /// Por qué se llegó acá, si no fue por elección del técnico: hoy, que el
+  /// servidor rechazó la sesión (28/10/2026). Nulo al abrir la app.
+  final String? aviso;
 
   /// Lo escrito, si es una dirección a la que se le puede pedir algo.
   ///
@@ -372,6 +376,32 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 32),
+                  if (widget.aviso != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryBlue.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: AppTheme.primaryBlue.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.lock_clock,
+                              color: AppTheme.primaryBlue, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              widget.aviso!,
+                              style: const TextStyle(
+                                  color: AppTheme.primaryDark, fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   if (_errorMessage != null) ...[
                     Container(
                       padding: const EdgeInsets.all(12),

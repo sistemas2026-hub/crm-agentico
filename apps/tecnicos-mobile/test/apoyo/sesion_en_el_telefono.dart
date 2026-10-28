@@ -78,6 +78,18 @@ class SesionEnElTelefono {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(_canal, null);
   }
+
+  /// Lo que hay guardado bajo [clave], para afirmar qué quedó de la sesión.
+  String? valor(String clave) => _valores[clave];
+
+  /// Guarda o quita una llave antes de la prueba (`null` la quita).
+  void poner(String clave, String? valor) {
+    if (valor == null) {
+      _valores.remove(clave);
+    } else {
+      _valores[clave] = valor;
+    }
+  }
 }
 
 /// Monta un widget y deja que su carga real termine.

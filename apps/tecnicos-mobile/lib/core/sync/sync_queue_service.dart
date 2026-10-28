@@ -181,11 +181,15 @@ class SyncQueueService {
         _isSyncing = false;
         _setStatus(SyncStatus.idle);
         await refreshSyncSummary(hasConnectionErrorOverride: false);
+        //  Sin sesión no hay a quién sincronizar. Si la app sigue abierta, que
+        //  lo sepa quien la contiene: quedarse mostrando lo viejo con
+        //  «sincronizado» es justo lo que pasó en producción (28/10/2026).
+        ApiClient.avisarSesionVencida();
         return;
       }
 
       // 1. Descargar o refrescar órdenes asignadas desde el servidor si hay conexión
-      await _descargarOrdenesAsignadas(orgId, profileId);
+      final llegoAlEmpezar = await _descargarOrdenesAsignadas(orgId, profileId);
 
       // 2. Procesar mutaciones de estado no finales (iniciar, en_camino, suspender)
       await _procesarMutacionesTransicion(
@@ -227,7 +231,18 @@ class SyncQueueService {
       await _descargarJornada(orgId, profileId);
 
       // 6. Refresco final de estado
-      await _descargarOrdenesAsignadas(orgId, profileId);
+      final llegoAlTerminar = await _descargarOrdenesAsignadas(orgId, profileId);
+
+      //  «SINCRONIZADO» SOLO SI EL SERVIDOR CONTESTÓ (28/10/2026). Cada paso
+      //  de arriba se traga su error para no frenar a los demás, y hasta hoy
+      //  esto marcaba éxito igual: sin señal, o con la sesión muerta, la app
+      //  decía «sincronizado» mostrando lo que había bajado horas antes. Si
+      //  ninguna de las dos descargas de órdenes llegó, no se sabe nada nuevo.
+      if (!llegoAlEmpezar && !llegoAlTerminar) {
+        _setStatus(SyncStatus.error);
+        await refreshSyncSummary(hasConnectionErrorOverride: true);
+        return;
+      }
 
       _setStatus(SyncStatus.success);
       await refreshSyncSummary(hasConnectionErrorOverride: false);
@@ -1161,10 +1176,14 @@ class SyncQueueService {
   /// girando para siempre con la pantalla bloqueada.
   static const int _maximoDePaginas = 50;
 
-  Future<void> _descargarOrdenesAsignadas(
+  /// Baja las órdenes de esta persona. Devuelve si el servidor CONTESTÓ el
+  /// listado (al menos su primera página): es lo que separa «sincronizado» de
+  /// «sin conexión» (28/10/2026).
+  Future<bool> _descargarOrdenesAsignadas(
     String orgId,
     String profileId,
   ) async {
+    var llego = false;
     try {
       String? cursor;
       var paginas = 0;
@@ -1181,7 +1200,8 @@ class SyncQueueService {
               ? null
               : <String, dynamic>{'cursor': cursor},
         );
-        if (response.statusCode != 200 || response.data == null) return;
+        if (response.statusCode != 200 || response.data == null) return llego;
+        llego = true;
 
         final datos = response.data;
         final List results = datos is Map
@@ -1233,8 +1253,10 @@ class SyncQueueService {
         );
       }
     } catch (_) {
-      // Offline o error de red: se ignora silenciosamente para mantener datos locales
+      // Offline o error de red: los datos locales quedan. Lo que NO queda en
+      // silencio es el resultado: quien llama sabe si el servidor contestó.
     }
+    return llego;
   }
 
   Future<void> _procesarMutacionesTransicion(

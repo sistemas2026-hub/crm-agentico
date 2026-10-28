@@ -7,11 +7,14 @@ import 'package:campo/core/sync/sync_queue_service.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/core/widgets/dexter_app_header.dart';
 import 'package:campo/core/widgets/dexter_bottom_nav.dart';
+import 'package:campo/features/auth/login_screen.dart';
 import 'package:campo/features/materiales/materiales_screen.dart';
 import 'package:campo/features/shell/app_shell.dart';
 import 'package:campo/features/trabajo/trabajo_vista.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'apoyo/sesion_en_el_telefono.dart';
 
 SyncSummary _resumen({
   bool sincronizando = false,
@@ -94,6 +97,14 @@ class _Banco {
   final StreamController<SyncStatus> avisosSync =
       StreamController<SyncStatus>.broadcast();
 
+  /// El aviso de sesión vencida, y cuántas veces se cerró la sesión.
+  final StreamController<void> sesion = StreamController<void>.broadcast();
+  int cierres = 0;
+
+  /// Lo que además hace el cierre en la prueba que lo necesita (borrar la
+  /// sesión del llavero simulado, como el cierre real).
+  void Function()? alCerrarSesion;
+
   int escuchasResumen = 0;
   int cancelacionesResumen = 0;
   int escuchasConexion = 0;
@@ -137,7 +148,11 @@ class _Banco {
             ),
           );
         },
-        cerrarSesion: () async {},
+        cerrarSesion: () async {
+          cierres++;
+          alCerrarSesion?.call();
+        },
+        sesionVencida: sesion.stream,
       );
 
   /// La aplicación montada para una prueba.
@@ -164,6 +179,7 @@ class _Banco {
     await resumenes.close();
     await conectividad.close();
     await avisosSync.close();
+    await sesion.close();
     ordenes.dispose();
   }
 }
@@ -561,6 +577,31 @@ void main() {
         find.text('Un cambio guardado acá · se envían al volver la conexión'),
         findsOneWidget,
       );
+      await banco.cerrar();
+    });
+
+    testWidgets(
+        '16. La sesión vencida sale una vez, conservando, y pide entrar de nuevo',
+        (WidgetTester tester) async {
+      //  La pantalla de entrada lee el servidor guardado: el llavero simulado.
+      final telefono = SesionEnElTelefono(orgId: 'org', profileId: 'p')..instalar();
+      addTearDown(telefono.desinstalar);
+      //  Con la sesión todavía guardada, la pantalla de entrada volvería sola
+      //  a la app: el cierre real la borra antes de mostrarla.
+      final banco = _Banco()
+        ..alCerrarSesion = () => telefono.poner('dexter_access_token', null);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      //  Dos pedidos rechazados juntos: una sola salida.
+      banco.sesion
+        ..add(null)
+        ..add(null);
+      await tester.pumpAndSettle();
+
+      expect(banco.cierres, 1);
+      expect(find.byType(LoginScreen), findsOneWidget);
+      expect(find.text(AppShell.avisoSesionVencida), findsOneWidget);
       await banco.cerrar();
     });
   });

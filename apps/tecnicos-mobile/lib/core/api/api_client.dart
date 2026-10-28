@@ -1,6 +1,18 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+
 import '../storage/secure_storage_service.dart';
 import 'api_endpoints.dart';
+
+/// Qué pasó al pedir una sesión nueva.
+///
+/// `rechazada` y `sinRespuesta` NO son lo mismo, y confundirlas tiene dos
+/// costos opuestos: sacar al técnico de la app cada vez que se queda sin señal
+/// o se reinicia el servidor (un despliegue contesta 404 o 502 un rato), o
+/// dejarlo adentro para siempre con una sesión muerta.
+enum RenovacionDeSesion { renovada, rechazada, sinRespuesta }
 
 class ApiClient {
   static final ApiClient _instance = ApiClient._internal();
@@ -9,6 +21,37 @@ class ApiClient {
   late final Dio _dio;
   final SecureStorageService _storage = SecureStorageService();
   bool _isRefreshing = false;
+
+  /// Marca, en el pedido, que ya es el reintento después de renovar.
+  static const String _marcaDeReintento = 'dexter_reintento_tras_renovar';
+
+  /// LA SESIÓN VENCIÓ (28/10/2026): el servidor RECHAZÓ la renovación.
+  ///
+  /// Medido en producción: un técnico con la app abierta, «sincronizado» en
+  /// pantalla, y su última conexión con el servidor horas atrás; la orden que
+  /// le asignaron no le llegaba. Con la sesión muerta la app no avisaba nada:
+  /// seguía mostrando lo último que había bajado. Esto lo avisa, y quien
+  /// escucha (el contenedor de la app) lo saca por el mismo camino que el
+  /// cierre de sesión que conserva lo pendiente.
+  static final StreamController<void> _sesionVencida =
+      StreamController<void>.broadcast();
+  static Stream<void> get sesionVencida => _sesionVencida.stream;
+  static void avisarSesionVencida() => _sesionVencida.add(null);
+
+  /// Con qué se pide la sesión nueva. Reemplazable en pruebas para simular al
+  /// servidor sin red.
+  @visibleForTesting
+  static Dio Function(String baseUrl) crearDioDeRenovacion =
+      (String baseUrl) => Dio(BaseOptions(baseUrl: baseUrl));
+
+  /// Solo un «no» del servidor es un rechazo: 400 (falta el token), 401
+  /// (vencido o dado de baja) y 403 (la cuenta ya no puede entrar). Cualquier
+  /// otra cosa --sin respuesta, 404 o 5xx mientras se despliega-- no prueba
+  /// nada sobre la sesión.
+  static RenovacionDeSesion clasificarRespuesta(int? estado) =>
+      (estado == 400 || estado == 401 || estado == 403)
+          ? RenovacionDeSesion.rechazada
+          : RenovacionDeSesion.sinRespuesta;
 
   ApiClient._internal() {
     _dio = Dio(
@@ -59,23 +102,39 @@ class ApiClient {
         },
         onError: (DioException error, handler) async {
           final statusCode = error.response?.statusCode;
-          if ((statusCode == 401 || statusCode == 403) && !_isRefreshing) {
+          //  UN REINTENTO NO VUELVE A RENOVAR. Si no, un 403 de permiso
+          //  renovaba y reintentaba sin fin; el código anterior cortaba ese
+          //  bucle borrando la sesión, que es justo el defecto de arriba.
+          final esReintento = error.requestOptions.extra[_marcaDeReintento] == true;
+          if ((statusCode == 401 || statusCode == 403) && !_isRefreshing && !esReintento) {
             final isAuthPath = error.requestOptions.path.contains('/api/auth/');
             if (!isAuthPath) {
               _isRefreshing = true;
+              final RenovacionDeSesion renovacion;
               try {
-                final refreshed = await _refreshToken();
+                renovacion = await _renovarSesion();
+              } finally {
                 _isRefreshing = false;
-                if (refreshed) {
-                  final retryOptions = error.requestOptions;
-                  final token = await _storage.getAccessToken();
-                  retryOptions.headers['Authorization'] = 'Bearer $token';
+              }
+              if (renovacion == RenovacionDeSesion.renovada) {
+                final retryOptions = error.requestOptions;
+                retryOptions.extra[_marcaDeReintento] = true;
+                final token = await _storage.getAccessToken();
+                retryOptions.headers['Authorization'] = 'Bearer $token';
+                try {
                   final response = await _dio.fetch(retryOptions);
                   return handler.resolve(response);
+                } on DioException catch (otra) {
+                  //  El reintento falló CON la sesión recién renovada: es un
+                  //  403 de permiso de esa ruta, o falta de señal. Ninguno
+                  //  dice nada de la sesión. Hasta el 28/10/2026 esto borraba
+                  //  las llaves sin avisar: la app quedaba abierta, sin volver
+                  //  a hablar con el servidor y marcando «sincronizado».
+                  return handler.next(otra);
                 }
-              } catch (e) {
-                _isRefreshing = false;
-                await _storage.clearSession();
+              }
+              if (renovacion == RenovacionDeSesion.rechazada) {
+                avisarSesionVencida();
               }
             }
           }
@@ -87,20 +146,23 @@ class ApiClient {
 
   Dio get dio => _dio;
 
-  Future<bool> _refreshToken() async {
+  Future<RenovacionDeSesion> _renovarSesion() async {
     final refreshToken = await _storage.getRefreshToken();
-    if (refreshToken == null || refreshToken.isEmpty) return false;
+    //  Sin con qué renovar, no hay renovación posible: es un rechazo.
+    if (refreshToken == null || refreshToken.isEmpty) {
+      return RenovacionDeSesion.rechazada;
+    }
 
     try {
       final baseUrl = await _storage.getBaseUrl();
-      final refreshDio = Dio(BaseOptions(baseUrl: baseUrl));
+      final refreshDio = crearDioDeRenovacion(baseUrl);
       final response = await refreshDio.post(
         ApiEndpoints.refreshToken,
         data: {'refresh': refreshToken},
       );
 
-      if (response.statusCode == 200 && response.data != null) {
-        final data = response.data;
+      if (response.statusCode == 200 && response.data is Map) {
+        final data = response.data as Map;
         final newAccess = data['access'] as String?;
         final newRefresh = data['refresh'] as String? ?? refreshToken;
 
@@ -109,11 +171,15 @@ class ApiClient {
             accessToken: newAccess,
             refreshToken: newRefresh,
           );
-          return true;
+          return RenovacionDeSesion.renovada;
         }
       }
-    } catch (_) {}
-    return false;
+      return clasificarRespuesta(response.statusCode);
+    } on DioException catch (e) {
+      return clasificarRespuesta(e.response?.statusCode);
+    } catch (_) {
+      return RenovacionDeSesion.sinRespuesta;
+    }
   }
 
   // Métodos wrapper
