@@ -46,6 +46,7 @@
 import { error, redirect } from '@sveltejs/kit';
 import { env } from '$env/dynamic/public';
 import { apiRequest } from '$lib/api-helpers.js';
+import { CASE_PRIORITY_LABEL, CASE_STATUS_LABEL, CASE_TYPE_LABEL } from '$lib/v2/enums.js';
 
 /** Statuses where somebody still owes the customer something. Mirrors `cases.views.OPEN_STATUSES`. */
 export const OPEN_STATUSES = ['New', 'Assigned', 'Pending'];
@@ -400,8 +401,12 @@ export const EDITABLE_FIELDS = [
 async function listChoices(cookies) {
   const response = await apiRequest('/cases/?limit=1', {}, { cookies });
 
-  /** @param {any[]} pairs */
-  const choices = (pairs) => (pairs ?? []).map((pair) => ({ value: pair[0], label: pair[1] }));
+  //  El CRM manda los rotulos en ingles ('Normal', 'Question', 'New'); la
+  //  pantalla los muestra en español, los mismos que ya usa el listado
+  //  (28/10/2026). El valor que viaja sigue siendo el del CRM.
+  /** @param {any[]} pairs @param {Record<string, string>} rotulos */
+  const choices = (pairs, rotulos) =>
+    (pairs ?? []).map((pair) => ({ value: pair[0], label: rotulos[pair[0]] ?? pair[1] }));
 
   const accounts = (response.accounts_list ?? []).map((/** @type {any} */ account) => ({
     id: account.id,
@@ -416,9 +421,9 @@ async function listChoices(cookies) {
   contacts.sort((/** @type {any} */ a, /** @type {any} */ b) => a.name.localeCompare(b.name));
 
   return {
-    statuses: choices(response.status),
-    priorities: choices(response.priority),
-    caseTypes: choices(response.type_of_case),
+    statuses: choices(response.status, CASE_STATUS_LABEL),
+    priorities: choices(response.priority, CASE_PRIORITY_LABEL),
+    caseTypes: choices(response.type_of_case, CASE_TYPE_LABEL),
     accounts,
     contacts,
     // `users` is new: the endpoint computed this list and then discarded it.

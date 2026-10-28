@@ -115,7 +115,7 @@ export async function buscarClientes(locals, fetch, texto) {
  * la respuesta: true si llego, false si el ticket se creo pero el archivo no,
  * ausente si no se mando ninguno.
  *
- * @param {{servicio: string, asunto: string, descripcion: string,
+ * @param {{servicio: string, asunto: string, descripcion: string, prioridad?: string,
  *   archivo?: {nombre: string, tipo: string, base64: string}}} datos
  * @returns {Promise<{ok: true, idTicket: string, vinculado: boolean, adjunto?: boolean} | {ok: false, motivo: string}>}
  */
@@ -131,6 +131,7 @@ export async function crearEnWispHub(locals, fetch, casoId, datos) {
         servicio: datos.servicio,
         asunto: datos.asunto,
         descripcion: datos.descripcion,
+        ...(datos.prioridad ? { prioridad: datos.prioridad } : {}),
         ...(datos.archivo ? { archivo: datos.archivo } : {}),
         ...autorDeSesion(locals)
       }),

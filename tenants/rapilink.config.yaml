@@ -7426,6 +7426,10 @@ tickets_desde_dexter:
   prioridad_por_defecto: "2"
   buscar_por_nombre: true
   padron_vigencia_horas: 6
+  # Prioridad del CRM -> la de WispHub (1 Baja, 2 Normal, 3 Alta, 4 Muy Alta,
+  # ver la skill de WispHub, 'ticket-prioridad'). La que elige la persona en el
+  # formulario es la que llega; antes llegaba siempre la del asunto.
+  prioridades: {Low: "1", Normal: "2", High: "3", Urgent: "4"}
   asuntos:
   - {asunto: No Tiene Internet, area: soporte_tecnico, prioridad: "3"}
   - {asunto: Internet Intermitente, area: soporte_tecnico, prioridad: "3"}

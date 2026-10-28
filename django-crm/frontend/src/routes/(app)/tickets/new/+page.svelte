@@ -80,6 +80,14 @@
     if (resto.length) grupos.push(['Todos los asuntos de WispHub', resto]);
     return grupos;
   });
+  //  Elegir el asunto propone su prioridad (la de WispHub para ese asunto);
+  //  la persona la puede cambiar, y la que quede es la que llega allá.
+  function proponerPrioridad() {
+    const a = (data.asuntosWispHub ?? []).find((/** @type {any} */ x) => x.asunto === form.name);
+    if (a?.prioridad && data.priorities.some((/** @type {any} */ p) => p.value === a.prioridad)) {
+      form.priority = a.prioridad;
+    }
+  }
   async function buscar(intento = 0) {
     clearTimeout(reintento);
     buscando = true;
@@ -252,6 +260,7 @@
           name="name"
           class="v2-input"
           bind:value={form.name}
+          onchange={proponerPrioridad}
           onblur={() => (touched.name = true)}
           aria-invalid={show('name') ? 'true' : undefined}>
           <option value="">Elegí uno</option>
@@ -280,7 +289,14 @@
       {/if}
     </div>
 
-    <div class="triple">
+    <!--
+      28/10/2026: sin selector de estado. Un ticket nace «Nuevo», aca y en
+      WispHub (que lo crea siempre en 1): ofrecer otro estado al crearlo era
+      ofrecer algo que WispHub no iba a reflejar. Se cambia despues, desde el
+      ticket.
+    -->
+    <input type="hidden" name="status" value={form.status} />
+    <div class="pair">
       <div class="v2-field">
         <label for="f-priority">Prioridad</label>
         <select id="f-priority" name="priority" class="v2-input" bind:value={form.priority}>
@@ -288,7 +304,11 @@
             <option value={p.value}>{p.label}</option>
           {/each}
         </select>
-        <p class="v2-hint">Define el objetivo de primera respuesta.</p>
+        <p class="v2-hint">
+          {enWispHub && usaWispHub
+            ? 'La misma llega a WispHub. Define el objetivo de primera respuesta.'
+            : 'Define el objetivo de primera respuesta.'}
+        </p>
       </div>
       <div class="v2-field">
         <label for="f-type">Tipo</label>
@@ -299,15 +319,10 @@
           {/each}
         </select>
       </div>
-      <div class="v2-field">
-        <label for="f-status">Estado</label>
-        <select id="f-status" name="status" class="v2-input" bind:value={form.status}>
-          {#each data.statuses as s (s.value)}
-            <option value={s.value}>{s.label}</option>
-          {/each}
-        </select>
-      </div>
     </div>
+    <p class="v2-hint nace">
+      El ticket nace como «Nuevo», igual que en WispHub. El estado se cambia después, desde el ticket.
+    </p>
 
     <div class="pair">
       <div class="v2-field">
@@ -440,10 +455,8 @@
     grid-template-columns: 1fr 1fr;
     gap: 14px;
   }
-  .triple {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 14px;
+  .nace {
+    margin: -4px 0 14px;
   }
   .actions {
     display: flex;
@@ -453,8 +466,7 @@
     padding-bottom: 40px;
   }
   @media (max-width: 720px) {
-    .pair,
-    .triple {
+    .pair {
       grid-template-columns: 1fr;
     }
   }

@@ -129,11 +129,17 @@ def asuntos(config, tenant: str | None = None) -> list[dict]:
     el proveedor no contesta, quedan los frecuentes: la pantalla sigue.
     """
     td = config.tickets_desde_dexter
-    salida = [{"asunto": a.asunto, "area": a.area, "frecuente": True} for a in td.asuntos]
+    # 'prioridad' es la del CRM que corresponde a la del asunto, para que la
+    # pantalla la proponga al elegirlo. Vacia si no hay como traducirla.
+    del_crm = {codigo: valor for valor, codigo in td.prioridades.items()}
+    salida = [{"asunto": a.asunto, "area": a.area, "frecuente": True,
+               "prioridad": del_crm.get(a.prioridad or td.prioridad_por_defecto, "")}
+              for a in td.asuntos]
     ya = {a.asunto for a in td.asuntos}
     resto = sorted((a for a in (_catalogo(config, tenant) or []) if a not in ya),
                    key=lambda a: a.casefold())
-    salida += [{"asunto": a, "area": td.area_por_defecto, "frecuente": False} for a in resto]
+    salida += [{"asunto": a, "area": td.area_por_defecto, "frecuente": False,
+                "prioridad": del_crm.get(td.prioridad_por_defecto, "")} for a in resto]
     return salida
 
 
@@ -224,7 +230,8 @@ def titular(config, tenant: str, servicio) -> dict | None:
 
 
 def crear(config, tenant: str, caso_id: str, servicio, asunto: str,
-          descripcion: str, autor: str, archivo: dict | None = None) -> dict:
+          descripcion: str, autor: str, archivo: dict | None = None,
+          prioridad: str | None = None) -> dict:
     """
     Crea el ticket del caso en el ISP, ata el caso a el, y le adjunta el
     archivo si vino uno.
@@ -263,8 +270,11 @@ def crear(config, tenant: str, caso_id: str, servicio, asunto: str,
         raise TicketNoCreado("SERVICIO_NO_EXISTE", 404)
 
     sobrescribir = {"asunto": elegido.asunto, "asuntos_default": elegido.asunto}
-    if elegido.prioridad:
-        sobrescribir["prioridad"] = elegido.prioridad
+    # La que eligio la persona manda (28/10/2026); la del asunto es el
+    # respaldo si el formulario no trajo una que se sepa traducir.
+    traducida = config.tickets_desde_dexter.prioridades.get(prioridad or "")
+    if traducida or elegido.prioridad:
+        sobrescribir["prioridad"] = traducida or elegido.prioridad
     externa = getattr(config, "identidad_externa", None)
     if elegido.area and externa:
         quien = agendamiento.responsable_de(tenant, elegido.area, externa.sistema)

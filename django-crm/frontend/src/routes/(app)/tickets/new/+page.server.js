@@ -133,6 +133,9 @@ export const actions = {
         servicio: wisphub.servicio,
         asunto: wisphub.asunto,
         descripcion: values.description,
+        //  La prioridad del formulario llega a WispHub (28/10/2026); el motor
+        //  la traduce con la config de la empresa.
+        ...(values.priority ? { prioridad: values.priority } : {}),
         ...(archivo ? { archivo } : {})
       }));
       if (r.ok) {

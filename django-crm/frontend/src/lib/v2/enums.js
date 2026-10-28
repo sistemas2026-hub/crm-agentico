@@ -199,7 +199,9 @@ export const INDUSTRY_LABEL = {
 export const industryLabel = (v) => (!v ? '' : (INDUSTRY_LABEL[v] ?? v));
 
 export const PRIORITY_TONE = { Urgent: 'rust', High: 'clay', Normal: 'slate', Low: 'slate' };
-export const CASE_PRIORITY_LABEL = { Urgent: 'Urgente', High: 'Alta', Normal: 'Normal', Low: 'Baja' };
+//  'Muy alta' y no 'Urgente' (28/10/2026): son las cuatro de WispHub (Baja,
+//  Normal, Alta, Muy Alta), y un ticket vive en los dos sistemas.
+export const CASE_PRIORITY_LABEL = { Urgent: 'Muy alta', High: 'Alta', Normal: 'Normal', Low: 'Baja' };
 
 export const CASE_STATUS_TONE = {
   New: 'ink',

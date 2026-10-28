@@ -193,6 +193,13 @@ describe('Nuevo ticket', () => {
     expect(r.destino).toBe('/tickets/caso-1?wisphub=95001');
   });
 
+  it('la prioridad del formulario viaja a WispHub, la misma del caso', async () => {
+    crearEnWispHub.mockResolvedValue({ ok: true, idTicket: '95001', vinculado: true });
+    await correr({ ...CON_WISPHUB, priority: 'High' });
+    expect(createTicket.mock.calls[0][1].priority).toBe('High');
+    expect(crearEnWispHub.mock.calls[0][3].prioridad).toBe('High');
+  });
+
   it('si se creo pero no quedo atado, el detalle lo dice', async () => {
     crearEnWispHub.mockResolvedValue({ ok: true, idTicket: '95001', vinculado: false });
     const r = await correr(CON_WISPHUB);

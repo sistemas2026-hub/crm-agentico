@@ -140,7 +140,8 @@ def crear(espia, config=CONFIG, **kw):
     try:
         return tdd.crear(config, TENANT, CASO, datos["servicio"], datos["asunto"],
                          datos["descripcion"], datos["autor"],
-                         archivo=datos.get("archivo")), None
+                         archivo=datos.get("archivo"),
+                         prioridad=datos.get("prioridad")), None
     except tdd.TicketNoCreado as e:
         return None, e.codigo
     finally:
@@ -237,9 +238,14 @@ llamadas: list = []
 archivos: list = []
 
 
-def crear_falso(config, tenant, caso_id, servicio, asunto, descripcion, autor, archivo=None):
+prioridades_recibidas: list = []
+
+
+def crear_falso(config, tenant, caso_id, servicio, asunto, descripcion, autor, archivo=None,
+                prioridad=None):
     llamadas.append((caso_id, servicio, asunto, autor))
     archivos.append(archivo)
+    prioridades_recibidas.append(prioridad)
     if asunto == "malo":
         raise tdd.TicketNoCreado("ASUNTO_NO_PERMITIDO")
     if servicio == "999":
@@ -268,6 +274,9 @@ try:
     adj = {"nombre": "x.pdf", "tipo": "application/pdf", "base64": "eA=="}
     cliente.post(url, json={**base, **AUTOR, "archivo": adj})
     revisar(archivos[-1] == adj, "el archivo de la pantalla llega al modulo", f"{archivos[-1:]}")
+    cliente.post(url, json={**base, **AUTOR, "prioridad": "High"})
+    revisar(prioridades_recibidas[-1] == "High", "la prioridad del formulario llega al modulo",
+            f"{prioridades_recibidas[-1:]}")
     r = cliente.get(f"/tickets-desde-dexter/asuntos?tenant={TENANT}")
     nombres = [a["asunto"] for a in (r.get_json() or {}).get("asuntos", [])]
     revisar(r.status_code == 200 and nombres[:1] == ["No Tiene Internet"]
@@ -514,6 +523,26 @@ e = Espia()
 _, cod = crear(e, config=apagado, asunto="Cable Bajito")
 revisar(cod == "ASUNTO_NO_PERMITIDO" and e.lecturas_catalogo == 0 and not e.creaciones,
         "con el catalogo apagado vale solo la lista de la config, sin leer nada", f"{cod}")
+
+# =============================================================================
+titulo("10. La prioridad que elige la persona es la que llega (28/10/2026)")
+# =============================================================================
+for elegida, esperada, que in (
+        ("Low", "1", "Baja en el formulario -> 1 alla, aunque el asunto diga 3"),
+        ("Urgent", "4", "Urgente -> 4, la 'Muy Alta' del ISP"),
+        (None, "3", "sin prioridad en el pedido, la del asunto"),
+        ("Inventada", "3", "una que no se sabe traducir cae a la del asunto")):
+    e = Espia()
+    crear(e, prioridad=elegida)
+    sob = (e.creaciones[0] if e.creaciones else {}).get("sobrescribir") or {}
+    revisar(sob.get("prioridad") == esperada, que, f"{sob.get('prioridad')}")
+
+e = Espia()
+lista = con_espia(e, lambda: tdd.asuntos(CONFIG, TENANT))
+por = {a["asunto"]: a["prioridad"] for a in lista}
+revisar(por.get("No Tiene Internet") == "High" and por.get("Pqr") == "Urgent"
+        and por.get("Cable Bajito") == "Normal",
+        "cada asunto propone la prioridad del CRM que le corresponde", f"{por}")
 
 # =============================================================================
 titulo("9. Buscar al cliente por servicio, cedula o nombre (28/10/2026)")

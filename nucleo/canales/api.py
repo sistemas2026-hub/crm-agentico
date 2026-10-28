@@ -6817,7 +6817,8 @@ def caso_crear_ticket_operativo(caso_id):
     try:
         resultado = ticket_desde_dexter.crear(
             config, tenant, caso_id, cuerpo.get("servicio"), cuerpo.get("asunto"),
-            cuerpo.get("descripcion"), autor, archivo=cuerpo.get("archivo"))
+            cuerpo.get("descripcion"), autor, archivo=cuerpo.get("archivo"),
+            prioridad=cuerpo.get("prioridad"))
     except ticket_desde_dexter.TicketNoCreado as e:
         return jsonify({"error": e.codigo}), e.http
     return jsonify(resultado), 201

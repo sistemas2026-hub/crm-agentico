@@ -2212,6 +2212,11 @@ class TicketsDesdeDexter(Base):
     prioridad_por_defecto: str = ""
     buscar_por_nombre: bool = False
     padron_vigencia_horas: int = Field(default=6, ge=1, le=48)
+    # Prioridad del CRM -> codigo del proveedor (28/10/2026). Con esto la
+    # prioridad que elige la persona en el formulario es la que llega alla;
+    # sin esto llegaba la del asunto y el formulario mentia. Un valor que no
+    # este aca cae a la del asunto.
+    prioridades: dict[str, str] = Field(default_factory=dict)
 
 
 class Escalamiento(Base):
