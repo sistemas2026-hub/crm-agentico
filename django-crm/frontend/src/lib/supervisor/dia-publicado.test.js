@@ -1,6 +1,40 @@
 import { describe, expect, it } from 'vitest';
 
-import { quienLaAsigno, textoDelAviso, textoDePrioridad } from './dia-publicado.js';
+import {
+  lineaDePersona,
+  quienLaAsigno,
+  textoDelAviso,
+  textoDePrioridad,
+  textoSinBajar
+} from './dia-publicado.js';
+
+describe('lo que la app de cada persona debería tener', () => {
+  const dia = '2026-10-28';
+
+  it('órdenes, teléfono y última conexión', () => {
+    expect(
+      lineaDePersona(
+        { nombre: 'Jeider Amell', ordenes: 2, telefono: false, ultimo_contacto: '2026-10-28T10:15:00-05:00' },
+        dia
+      )
+    ).toBe('Jeider Amell: 2 órdenes · sin teléfono registrado · última conexión 10:15');
+  });
+
+  it('con teléfono no lo menciona; de otro día lleva la fecha; nunca conectado lo dice', () => {
+    expect(
+      lineaDePersona({ nombre: 'Ana', ordenes: 1, telefono: true, ultimo_contacto: '2026-10-27T18:02:00-05:00' }, dia)
+    ).toBe('Ana: 1 orden · última conexión 27/10 18:02');
+    expect(lineaDePersona({ nombre: 'Luis', ordenes: 0, telefono: true, ultimo_contacto: null }, dia)).toBe(
+      'Luis: 0 órdenes · nunca se conectó'
+    );
+  });
+
+  it('lo asignado después de la última conexión, y nada si no hay', () => {
+    expect(textoSinBajar({ sin_bajar: 0 })).toBe('');
+    expect(textoSinBajar({ sin_bajar: 1 })).toContain('1 asignada después');
+    expect(textoSinBajar({ sin_bajar: 3 })).toContain('3 asignadas después');
+  });
+});
 
 describe('quién asignó una orden, como lo lee una persona', () => {
   const dia = '2026-10-28';

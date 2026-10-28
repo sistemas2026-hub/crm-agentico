@@ -470,6 +470,69 @@ def test_e4_si_la_cuenta_falla_no_inventa_un_motivo(
 
 
 # ---------------------------------------------------------------------------
+# G · por persona, lo que su app deberia tener (pregunta del usuario,
+#     28/10/2026: «¿y si en Programacion le salen 5 y en la app menos?»)
+# ---------------------------------------------------------------------------
+
+def test_g_lo_publicado_va_a_todos_y_lo_de_a_mano_a_uno(
+        org_a, version, norte, admin_profile, user_profile):
+    j = _jornada(org_a, [norte], "Cuadrilla #1", admin_profile, user_profile)
+    publicada = _orden(org_a, version)
+    R.publicar(org_a, [{"jornada": str(j.id), "ordenes": [str(publicada.id)]}])
+    _orden(org_a, version, de=admin_profile)                   # a mano, a uno
+
+    c = D.del_dia(org_a, LUNES)["cuadrillas"][0]
+
+    assert len(c["ordenes"]) == 2
+    assert {p["nombre"]: p["ordenes"] for p in c["personas"]} == {
+        "Cuadrilla #1 0": 2, "Cuadrilla #1 1": 1}
+
+
+def test_g2_lo_asignado_despues_del_ultimo_contacto_todavia_no_esta(
+        org_a, version, norte, admin_profile, user_profile):
+    from campo.seguimiento import ContactoDeDispositivo
+
+    org_a.timezone = "America/Bogota"
+    org_a.save(update_fields=["timezone"])
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    _jornada(org_a, [norte], "Cuadrilla #2", user_profile)
+    DispositivoDeTecnico.objects.create(org=org_a, profile=admin_profile,
+                                        token="tok-a", plataforma="android",
+                                        activo=True)
+    visto = timezone.now() - dt.timedelta(hours=3)
+    ContactoDeDispositivo.objects.create(org=org_a, profile=admin_profile,
+                                         visto_en=visto, ultima_ruta="/api/campo/")
+
+    def asignada_en(o, cuando):
+        AsignacionTrabajo.objects.filter(orden=o).update(created_at=cuando)
+
+    antes = _orden(org_a, version, de=admin_profile)
+    asignada_en(antes, visto - dt.timedelta(minutes=30))
+    despues = _orden(org_a, version, de=admin_profile)
+    asignada_en(despues, visto + dt.timedelta(hours=1))
+    #  Dentro del freno con que se anota el contacto: no se sabe, no se afirma.
+    en_el_freno = _orden(org_a, version, de=admin_profile)
+    asignada_en(en_el_freno, visto + dt.timedelta(seconds=30))
+    #  Terminada: ya la tuvo.
+    terminada = _orden(org_a, version, de=admin_profile,
+                       estado=OrdenTrabajo.COMPLETADA_CAMPO)
+    OrdenTrabajo.objects.filter(pk=terminada.pk).update(
+        completada_campo_en=timezone.make_aware(dt.datetime.combine(LUNES, dt.time(15, 0))))
+    asignada_en(terminada, visto + dt.timedelta(hours=1))
+    #  Quien nunca hablo con el servidor no tiene nada en el telefono.
+    asignada_en(_orden(org_a, version, de=user_profile), visto)
+
+    c1, c2 = D.del_dia(org_a, LUNES)["cuadrillas"]
+    (a,), (u,) = c1["personas"], c2["personas"]
+
+    assert (a["ordenes"], a["sin_bajar"], a["telefono"]) == (4, 1, True)
+    assert a["ultimo_contacto"] == visto.astimezone(R._zona_de(org_a)).isoformat()
+    assert a["ultimo_contacto"].endswith("-05:00")
+    assert (u["ordenes"], u["sin_bajar"], u["telefono"], u["ultimo_contacto"]) == (
+        1, 1, False, None)
+
+
+# ---------------------------------------------------------------------------
 # P · permisos, fecha y empresa
 # ---------------------------------------------------------------------------
 

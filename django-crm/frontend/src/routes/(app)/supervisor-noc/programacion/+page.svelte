@@ -8,7 +8,13 @@
    */
   import { goto } from '$app/navigation';
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
-  import { quienLaAsigno, textoDelAviso, textoDePrioridad } from '$lib/supervisor/dia-publicado.js';
+  import {
+    lineaDePersona,
+    quienLaAsigno,
+    textoDelAviso,
+    textoDePrioridad,
+    textoSinBajar
+  } from '$lib/supervisor/dia-publicado.js';
   import '../supervisor-noc.css';
 
   /** @type {{ data: any }} */
@@ -88,6 +94,15 @@
                     {#if c.labor}<span class="snoc-tag">{c.labor}</span>{/if}
                     {#each c.zonas as z (z)}<span class="snoc-body-sm snoc-secundario">{z}</span>{/each}
                   </div>
+                  <!-- POR PERSONA: lo que la app de cada uno debería tener. La
+                       tarjeta cuenta las de toda la cuadrilla; la app, las de la
+                       cuenta con que se entró (28/10/2026). -->
+                  {#each c.personas ?? [] as p, i (i)}
+                    <p class="snoc-body-sm snoc-secundario">{lineaDePersona(p, data.dia)}</p>
+                    {#if p.sin_bajar}
+                      <p class="snoc-body-sm snoc-error-txt">{textoSinBajar(p)}</p>
+                    {/if}
+                  {/each}
                   {#if !c.ordenes.length}
                     <p class="snoc-body-sm snoc-secundario">Sin órdenes publicadas.</p>
                   {/if}

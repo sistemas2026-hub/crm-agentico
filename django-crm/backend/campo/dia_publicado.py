@@ -158,6 +158,59 @@ def _por_que_espera(org, fecha, esperan, labores) -> dict:
     return salida
 
 
+def _personas_de(org, jornadas, reciben, por_jornada, zona) -> dict:
+    """{jornada.id: [persona]}: lo que la app de cada uno deberia tener.
+
+    Pregunta del usuario el 28/10/2026: «¿y si en Programacion a una cuadrilla
+    le salen 5 y en la app le salen menos?». La tarjeta cuenta las ordenes de
+    TODA la cuadrilla; la app muestra las de la cuenta con que se entro. Lo
+    que publica el Supervisor va a todos los que reciben, pero lo que se
+    despacha a mano va a uno solo. Por persona:
+
+        {"nombre", "ordenes": n,          las de esta tarjeta que son suyas
+         "telefono": bool,                si tiene un telefono registrado
+         "ultimo_contacto": iso | None,   la ultima vez que su cuenta hablo
+                                          con /api/campo/ (`ContactoDeDispositivo`)
+         "sin_bajar": n}                  asignadas DESPUES de ese contacto
+
+    `sin_bajar` afirma solo lo seguro: una orden asignada despues del ultimo
+    contacto (mas el freno con que se anota) todavia no puede estar en su
+    telefono. Lo contrario no se afirma: haber hablado despues no prueba que
+    la app haya bajado la lista. Lo terminado no cuenta: ya lo tuvo.
+    """
+    from campo.avisos import DispositivoDeTecnico
+    from campo.seguimiento import ContactoDeDispositivo
+
+    ids = {r["profile"].id for j in jornadas for r in reciben[j.id]}
+    con_telefono = set(DispositivoDeTecnico.objects.filter(
+        org=org, activo=True, profile_id__in=ids).values_list("profile_id", flat=True))
+    contacto = dict(ContactoDeDispositivo.objects.filter(
+        org=org, profile_id__in=ids).values_list("profile_id", "visto_en"))
+    freno = dt.timedelta(seconds=ContactoDeDispositivo.SEGUNDOS_DE_FRENO)
+
+    salida = {}
+    for j in jornadas:
+        filas = []
+        for r in reciben[j.id]:
+            pid = r["profile"].id
+            visto = contacto.get(pid)
+            suyas = [(o, a) for o in por_jornada[j.id] for a in o.asignaciones.all()
+                     if a.profile_id == pid]
+            sin_bajar = sum(
+                1 for o, a in suyas
+                if o.estado_operativo not in _terminadas()
+                and (visto is None or a.created_at > visto + freno))
+            filas.append({
+                "nombre": r.get("nombre") or _nombre(r["profile"]),
+                "ordenes": len(suyas),
+                "telefono": pid in con_telefono,
+                "ultimo_contacto": visto.astimezone(zona).isoformat() if visto else None,
+                "sin_bajar": sin_bajar,
+            })
+        salida[j.id] = filas
+    return salida
+
+
 def del_dia(org, fecha) -> dict:
     """Lo publicado para `fecha`. Ver el encabezado.
 
@@ -186,8 +239,8 @@ def del_dia(org, fecha) -> dict:
         JornadaDeCuadrilla.objects.filter(org=org, fecha=fecha)
         .select_related("cuadrilla", "cuadrilla__lider", "lider")
         .prefetch_related("zonas").order_by("cuadrilla__nombre"))
-    receptores = {j.id: {r["profile"].id for r in destinatarios(j)["reciben"]}
-                  for j in jornadas}
+    reciben = {j.id: destinatarios(j)["reciben"] for j in jornadas}
+    receptores = {j.id: {r["profile"].id for r in reciben[j.id]} for j in jornadas}
 
     #  LAS ORDENES DEL DIA: las vivas con gente (salvo las programadas para
     #  otro dia) y las que se terminaron ESE dia.
@@ -321,6 +374,7 @@ def del_dia(org, fecha) -> dict:
     tope = configuracion_de_reparto(org).tope_por_cuadrilla
     filas = [fila(o) for o in ordenes]
     por_que = _por_que_espera(org, fecha, esperan, labores) if esperan else {}
+    personas = _personas_de(org, jornadas, reciben, por_jornada, zona)
     return {
         "fecha": fecha.isoformat(),
         "cuadrillas": [{
@@ -330,6 +384,7 @@ def del_dia(org, fecha) -> dict:
             "zonas": [z.nombre for z in j.zonas.all()],
             "tope": j.cuadrilla.tope_diario or tope,
             "ordenes": [fila(o) for o in en_orden(por_jornada[j.id])],
+            "personas": personas[j.id],
         } for j in jornadas],
         "con_alguien_que_no_sale": [fila(o) for o in en_orden(sin_jornada)],
         "esperan": [{
