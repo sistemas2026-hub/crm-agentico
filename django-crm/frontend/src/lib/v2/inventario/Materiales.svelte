@@ -33,6 +33,8 @@
   let categoria = $state('');
   let clase = $state('consumible');
   let unidad = $state('unidades');
+  /** De a cuánto se reparte cuando no alcanza (29/10/2026): el drop, de a 50 m. */
+  let deA = $state('1');
   /** Del material que se está editando: de esto dependen los bloqueos. */
   let conMovimientos = $state(false);
   let verBajas = $state(false);
@@ -65,6 +67,7 @@
     categoria = '';
     clase = 'consumible';
     unidad = 'unidades';
+    deA = '1';
     conMovimientos = false;
   }
 
@@ -76,6 +79,7 @@
     categoria = m.categoria ?? '';
     clase = m.clase;
     unidad = m.unidad;
+    deA = m.se_entrega_de_a ?? '1';
     conMovimientos = m.tiene_movimientos === true;
   }
 
@@ -470,6 +474,35 @@
             {MOTIVO}
           {:else}
             Cómo se cuenta: unidades, m, kg. Es lo que se lee en cada existencia.
+          {/if}
+        </span>
+      </div>
+
+      <div class="flex flex-col gap-space-xs">
+        <label for="mat-de-a" class="font-table-header text-table-header text-on-surface-variant uppercase tracking-wider">
+          Se entrega de a
+        </label>
+        <div class="flex items-center gap-space-sm">
+          <input
+            id="mat-de-a"
+            name="se_entrega_de_a"
+            inputmode="decimal"
+            value={clase === 'serializado' ? '1' : deA}
+            oninput={(e) => (deA = e.currentTarget.value)}
+            readonly={clase === 'serializado'}
+            class="h-10 w-32 px-3 font-body-md text-body-md rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-primary {clase === 'serializado'
+              ? 'bg-surface-container-low text-secondary cursor-not-allowed'
+              : 'bg-surface-container-lowest text-on-surface'}"
+          />
+          <span class="font-body-md text-body-md text-secondary">{unidad}</span>
+        </div>
+        <span class="font-body-sm text-body-sm text-secondary">
+          {#if clase === 'serializado'}
+            Un equipo con serie se entrega de a uno.
+          {:else}
+            Si la bodega no alcanza para los kits del día, el Supervisor reparte de a esta
+            cantidad. El drop, por ejemplo, de a 50 m: la cispa más chica. Al entregar se
+            mira si va una cispa o un tramo del rollo. Se puede cambiar siempre.
           {/if}
         </span>
       </div>

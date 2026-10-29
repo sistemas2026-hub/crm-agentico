@@ -837,6 +837,14 @@ class MaterialCatalogo(BaseModel):
         default="unidades",
         help_text="Como se cuenta: unidades, m, kg.",
     )
+    #: DE A CUANTO SE ENTREGA cuando no alcanza para todos (29/10/2026). El
+    #: drop viene en cispas de 50, 100, 150 o 200 m y en rollos de 1000: si la
+    #: bodega no alcanza, repartirlo metro a metro le daba 10 m a una cuadrilla,
+    #: que no sirven para ninguna acometida. Con 50, el Supervisor reparte de a
+    #: 50 (`material_del_dia.repartir_lo_que_hay`); al entregar se mira si va
+    #: una cispa o un tramo del rollo. Es de cada empresa y de cada material, no
+    #: del codigo. No toca el libro: se puede cambiar siempre.
+    se_entrega_de_a = models.DecimalField(max_digits=12, decimal_places=3, default=1)
     #: La foto del material, para reconocerlo de un vistazo.
     #:
     #: Se guarda la CLAVE del archivo en el storage, no la URL: la URL depende de

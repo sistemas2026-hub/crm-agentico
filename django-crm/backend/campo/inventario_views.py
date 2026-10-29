@@ -490,6 +490,7 @@ class MaterialesView(APIView):
                 clase=request.data.get("clase") or "",
                 unidad=request.data.get("unidad") or "",
                 categoria=request.data.get("categoria") or "",
+                se_entrega_de_a=request.data.get("se_entrega_de_a"),
             )
         except cat.MaterialInvalido as e:
             # 409 y no 400: el dato esta bien escrito; lo que no se puede es
@@ -529,6 +530,7 @@ class MaterialView(APIView):
                 unidad=request.data.get("unidad"),
                 categoria=request.data.get("categoria"),
                 activo=request.data.get("activo"),
+                se_entrega_de_a=request.data.get("se_entrega_de_a"),
             )
         except cat.MaterialInvalido as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)

@@ -233,26 +233,54 @@ def bodega_que_elige(org, zonas, lider, bodegas) -> tuple:
 # El reparto de lo que no alcanza
 # ---------------------------------------------------------------------------
 
-def repartir_lo_que_hay(pedidos: list[tuple], disponible: Decimal) -> dict:
+def repartir_lo_que_hay(pedidos: list[tuple], disponible: Decimal, de_a=UNO) -> dict:
     """`pedidos` = [(clave, necesita, peso)] en un orden estable. Devuelve
-    {clave: asignado}. Si alcanza, cada una recibe lo que necesita; si no, por
-    unidades con D'Hondt: la siguiente unidad va a la de mayor peso / (lo ya
-    asignado + 1), entre las que todavia necesitan. Pura: no consulta nada."""
+    {clave: asignado}. Pura: no consulta nada.
+
+    Si alcanza, cada una recibe lo que necesita. Si no (29/10/2026, pedido
+    del usuario: «distribución equitativa en caso de escasez»):
+
+      1. DE A `de_a`: lo que se entrega de una vez (el drop de a 50 m, la
+         cispa mas chica). Nunca 10 m sueltos que no sirven para nada; solo
+         menos que `de_a` si es lo que le falta para completar.
+      2. PRIMERO UNA ENTREGA A CADA UNA CON TRABAJO, de la de mas peso a la de
+         menos: antes, la de mas trabajo se llevaba todo y una cuadrilla con
+         una orden salia sin un solo conector.
+      3. LO QUE QUEDA, por el peso (D'Hondt): la siguiente entrega va a la de
+         mayor peso / (entregas ya hechas + 1), sin pasarse de lo que necesita.
+
+    Una sin trabajo publicado (peso 0) recibe solo cuando las demas ya
+    completaron. Un resto menor que `de_a` que no completa a nadie queda en
+    la bodega."""
     necesita = {k: max(CERO, Decimal(n)) for k, n, _ in pedidos}
     if sum(necesita.values(), CERO) <= disponible:
         return dict(necesita)
+    de_a = Decimal(de_a) if Decimal(de_a) > 0 else UNO
     asignado = {k: CERO for k, _, _ in pedidos}
+    entregas = {k: 0 for k, _, _ in pedidos}
     peso = {k: Decimal(p) for k, _, p in pedidos}
     orden = {k: i for i, (k, _, _) in enumerate(pedidos)}
     restante = max(CERO, Decimal(disponible))
-    while restante > 0:
-        candidatas = [k for k in asignado if asignado[k] < necesita[k]]
+
+    def paso(k):
+        return min(de_a, necesita[k] - asignado[k])
+
+    def entregar(k):
+        nonlocal restante
+        p = paso(k)
+        asignado[k] += p
+        entregas[k] += 1
+        restante -= p
+
+    for k in sorted((k for k in asignado if peso[k] > 0), key=lambda c: (-peso[c], orden[c])):
+        if CERO < paso(k) <= restante:
+            entregar(k)
+
+    while True:
+        candidatas = [k for k in asignado if CERO < paso(k) <= restante]
         if not candidatas:
             break
-        k = max(candidatas, key=lambda c: (peso[c] / (asignado[c] + 1), -orden[c]))
-        paso = min(UNO, restante, necesita[k] - asignado[k])
-        asignado[k] += paso
-        restante -= paso
+        entregar(max(candidatas, key=lambda c: (peso[c] / (entregas[c] + 1), -orden[c])))
     return asignado
 
 
@@ -410,7 +438,9 @@ def calcular(org, fecha) -> dict:
         disponible = libre(bodega, material)
         reparto = repartir_lo_que_hay(
             [(id(item), item["necesita"], fila["peso"]) for item, fila in lista],
-            disponible)
+            disponible,
+            #  Un equipo con serie es de a uno, se haya escrito lo que se escriba.
+            de_a=UNO if material.es_serializado else material.se_entrega_de_a)
         pedido = sum((item["necesita"] for item, _ in lista), CERO)
         repartido = CERO
         for item, fila in lista:

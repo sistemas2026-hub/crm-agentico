@@ -38,6 +38,8 @@ ayuda para quien lo usa, no una garantia: cualquiera puede mandar un PATCH.
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+
 from campo.models import MaterialCatalogo, MovimientoDeMaterial
 from campo.services.storage import CampoStorage
 
@@ -187,6 +189,7 @@ def materiales_de(org, *, solo_activos: bool = False) -> list[dict]:
             "categoria": m.categoria,
             "clase": m.clase,
             "unidad": m.unidad,
+            "se_entrega_de_a": _texto(m.se_entrega_de_a),
             "activo": m.activo,
             "es_serializado": m.es_serializado,
             "tiene_movimientos": m.id in usados,
@@ -196,7 +199,8 @@ def materiales_de(org, *, solo_activos: bool = False) -> list[dict]:
     ]
 
 
-def crear_material(*, org, codigo, nombre, clase="", unidad="", categoria=""):
+def crear_material(*, org, codigo, nombre, clase="", unidad="", categoria="",
+                   se_entrega_de_a=None):
     """Da de alta un material. Todo editable todavia: no tiene historia.
 
     Para un material serializado esto crea el TIPO --"ONT Huawei HG8145V5"--, no
@@ -218,14 +222,16 @@ def crear_material(*, org, codigo, nombre, clase="", unidad="", categoria=""):
             f"Ya hay un material con el codigo {codigo} en esta empresa."
         )
 
+    de_a = _de_a(se_entrega_de_a, clase) if se_entrega_de_a not in (None, "") else Decimal("1")
+
     return MaterialCatalogo.objects.create(
         org=org, codigo=codigo, nombre=nombre, clase=clase, unidad=unidad,
-        categoria=(categoria or "").strip(),
+        categoria=(categoria or "").strip(), se_entrega_de_a=de_a,
     )
 
 
 def editar_material(material, *, codigo=None, nombre=None, clase=None,
-                    unidad=None, categoria=None, activo=None):
+                    unidad=None, categoria=None, activo=None, se_entrega_de_a=None):
     """Corrige un material, respetando lo que ya no se puede tocar.
 
     Un campo que llega con el MISMO valor no cuenta como cambio: la pantalla
@@ -278,12 +284,40 @@ def editar_material(material, *, codigo=None, nombre=None, clase=None,
         cambios["categoria"] = (categoria or "").strip()
     if activo is not None:
         cambios["activo"] = bool(activo)
+    #  Tampoco toca el libro: es como se reparte cuando no alcanza.
+    if se_entrega_de_a not in (None, ""):
+        de_a = _de_a(se_entrega_de_a, cambios.get("clase", material.clase))
+        if de_a != material.se_entrega_de_a:
+            cambios["se_entrega_de_a"] = de_a
 
     for campo, valor in cambios.items():
         setattr(material, campo, valor)
     if cambios:
         material.save(update_fields=[*cambios.keys(), "updated_at"])
     return material
+
+
+#: Hasta cuanto se acepta en «se entrega de a»: un rollo entero.
+MAX_DE_A = Decimal("100000")
+
+
+def _de_a(valor, clase) -> Decimal:
+    """«Se entrega de a» valido: un numero mayor que cero. Un equipo con serie
+    se entrega de a uno: cada uno es un aparato."""
+    try:
+        de_a = Decimal(str(valor).replace(",", ".").strip())
+    except (InvalidOperation, ValueError):
+        raise MaterialInvalido("«Se entrega de a» tiene que ser un número.")
+    if not de_a.is_finite() or de_a <= 0 or de_a > MAX_DE_A:
+        raise MaterialInvalido("«Se entrega de a» tiene que ser mayor que cero.")
+    if clase == MaterialCatalogo.SERIALIZADO and de_a != 1:
+        raise MaterialInvalido("Un equipo con serie se entrega de a uno.")
+    return de_a.quantize(Decimal("0.001"))
+
+
+def _texto(cantidad) -> str:
+    """50.000 -> «50», 0.500 -> «0.5»: sin ceros de mas."""
+    return f"{Decimal(cantidad).normalize():f}"
 
 
 def _exigir_clase(clase) -> None:

@@ -405,3 +405,54 @@ def test_la_foto_de_otra_empresa_no_se_puede_tocar(admin_client, org_b_client, o
 def test_un_tecnico_raso_no_puede_cambiar_la_foto(user_client, admin_client, org_a):
     creado = _crear(admin_client).json()
     assert _subir(user_client, creado["id"]).status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# K · de a cuanto se entrega cuando no alcanza (29/10/2026)
+# ---------------------------------------------------------------------------
+
+def test_K_se_entrega_de_a_se_guarda_y_se_corrige_aun_con_movimientos(
+        admin_client, org_a, bodega):
+    """El drop de a 50 m (la cispa mas chica). No toca el libro: se cambia siempre."""
+    creado = _crear(admin_client, codigo="DROP", nombre="Cable drop", clase="bobina",
+                    unidad="m", se_entrega_de_a="50").json()
+    material = MaterialCatalogo.objects.get(id=creado["id"])
+    assert material.se_entrega_de_a == Decimal("50")
+    _con_movimientos(org_a, material, bodega)
+
+    r = admin_client.patch(f"{MATERIALES}{creado['id']}/", {"se_entrega_de_a": "100,5"},
+                           format="json")
+    assert r.status_code == 200, r.content
+    material.refresh_from_db()
+    assert material.se_entrega_de_a == Decimal("100.5")
+    fila = next(m for m in admin_client.get(MATERIALES).json()["materiales"]
+                if m["codigo"] == "DROP")
+    assert fila["se_entrega_de_a"] == "100.5"
+
+
+def test_K2_sin_decirlo_es_de_a_uno_y_no_se_pisa_al_editar_otra_cosa(admin_client, org_a):
+    creado = _crear(admin_client).json()
+    assert MaterialCatalogo.objects.get(id=creado["id"]).se_entrega_de_a == Decimal("1")
+
+    MaterialCatalogo.objects.filter(id=creado["id"]).update(se_entrega_de_a=Decimal("5"))
+    r = admin_client.patch(f"{MATERIALES}{creado['id']}/", {"nombre": "Otro nombre"},
+                           format="json")
+    assert r.status_code == 200, r.content
+    assert MaterialCatalogo.objects.get(id=creado["id"]).se_entrega_de_a == Decimal("5")
+
+
+@pytest.mark.parametrize("valor", ["0", "-50", "cincuenta", "NaN", "999999999"])
+def test_K3_un_valor_que_no_sirve_se_rechaza_y_no_cambia_nada(admin_client, org_a, valor):
+    creado = _crear(admin_client).json()
+    r = admin_client.patch(f"{MATERIALES}{creado['id']}/", {"se_entrega_de_a": valor},
+                           format="json")
+    assert r.status_code == 409, r.content
+    assert "Se entrega de a" in r.json()["detail"]
+    assert MaterialCatalogo.objects.get(id=creado["id"]).se_entrega_de_a == Decimal("1")
+
+
+def test_K4_un_equipo_con_serie_se_entrega_de_a_uno(admin_client, org_a):
+    r = _crear(admin_client, codigo="ONU", nombre="ONU WIFI", clase="serializado",
+               se_entrega_de_a="2")
+    assert r.status_code == 409, r.content
+    assert "de a uno" in r.json()["detail"]

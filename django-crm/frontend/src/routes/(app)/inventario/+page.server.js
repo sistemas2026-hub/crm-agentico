@@ -509,7 +509,10 @@ export const actions = {
       nombre: f.get('nombre'),
       clase: f.get('clase'),
       unidad: f.get('unidad'),
-      categoria: f.get('categoria') ?? ''
+      categoria: f.get('categoria') ?? '',
+      // De a cuánto se reparte cuando no alcanza (29/10/2026). Vacío = no se
+      // cambia: el servidor deja el que tenía.
+      se_entrega_de_a: String(f.get('se_entrega_de_a') ?? '').trim() || undefined
     };
     try {
       const r = id

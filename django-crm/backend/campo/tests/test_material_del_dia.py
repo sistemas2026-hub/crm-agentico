@@ -245,6 +245,80 @@ def test_r3_el_reparto_puro():
         "a": Decimal("2.5")}
 
 
+def _d(**kw):
+    return {k: Decimal(str(v)) for k, v in kw.items()}
+
+
+def test_e_primero_una_entrega_a_cada_una_con_trabajo():
+    """Pedido del usuario el 29/10/2026: «distribución equitativa en caso de
+    escasez». Antes, con 15 conectores la de más trabajo se llevaba 10, la
+    siguiente 5 y la de una orden salía sin ninguno."""
+    pedidos = [("dos", 10, 12), ("tres", 6, 6), ("cuatro", 10, 1), ("cinco", 10, 0)]
+    assert M.repartir_lo_que_hay(pedidos, Decimal("15")) == _d(dos=10, tres=4, cuatro=1, cinco=0)
+
+
+def test_e2_el_drop_de_a_50_nunca_10_metros_sueltos():
+    """La simulación del 29/10: 200 m entre cuatro que piden 150. Antes
+    127 / 63 / 10 / 0; los 10 m no servían para ninguna acometida."""
+    pedidos = [("dos", 150, 12), ("tres", 150, 6), ("cuatro", 150, 1), ("cinco", 150, 0)]
+    assert M.repartir_lo_que_hay(pedidos, Decimal("200"), de_a=50) == _d(
+        dos=100, tres=50, cuatro=50, cinco=0)
+
+
+def test_e3_un_resto_menor_que_de_a_solo_sirve_para_completar():
+    #  70 m: 50 a la de más peso y los 20 que le faltan a la otra para completar.
+    assert M.repartir_lo_que_hay([("a", 150, 2), ("b", 20, 1)], Decimal("70"), de_a=50) == _d(
+        a=50, b=20)
+    #  30 m: no alcanza para una entrega de 50; completa a la que le faltan 20, y
+    #  los otros 10 se quedan en la bodega.
+    assert M.repartir_lo_que_hay([("a", 150, 2), ("b", 20, 1)], Decimal("30"), de_a=50) == _d(
+        a=0, b=20)
+
+
+def test_e4_si_no_alcanza_para_una_a_cada_una_van_las_de_mas_trabajo():
+    #  Dos ONU para tres cuadrillas: a las dos de más peso, y en el orden dado
+    #  si empatan.
+    assert M.repartir_lo_que_hay([("a", 1, 1), ("b", 1, 6), ("c", 1, 6)], Decimal("2")) == _d(
+        a=0, b=1, c=1)
+
+
+def test_e5_despues_de_la_primera_entrega_manda_el_peso_sin_pasarse():
+    #  12 de peso contra 1: la primera vuelta da 1 y 1, y los 8 que quedan van
+    #  casi todos a la de 12, que no recibe más de los 10 que necesita.
+    assert M.repartir_lo_que_hay([("a", 10, 12), ("b", 10, 1)], Decimal("10")) == _d(a=9, b=1)
+
+
+def test_e5b_de_a_50_el_peso_cuenta_entregas_y_no_metros():
+    #  250 m de a 50 = 5 entregas, peso 12 contra 5. La primera vuelta da una
+    #  a cada una; las tres que quedan, por peso sobre ENTREGAS: 12/2, 12/3,
+    #  12/4 le ganan a 5/2. Contadas en metros (12/151 contra 5/51) la quinta
+    #  se iria a la de menos trabajo.
+    assert M.repartir_lo_que_hay([("a", 1000, 12), ("b", 1000, 5)], Decimal("250"),
+                                 de_a=50) == _d(a=200, b=50)
+
+
+def test_e6_la_propuesta_reparte_cada_material_de_a_lo_suyo(
+        org_a, bodega, conector, ont, kit, version, admin_profile, otro):
+    """Por el camino real: el drop del kit, de a 50; los conectores, de a uno."""
+    drop = MaterialCatalogo.objects.create(
+        org=org_a, codigo="DROP", nombre="Cable drop", clase=MaterialCatalogo.BOBINA,
+        unidad="m", se_entrega_de_a=Decimal("50"))
+    LineaDePlantilla.objects.create(plantilla=kit, material=drop, cantidad=150)
+    inv.registrar_entrada(org=org_a, material=drop, cantidad=120, ubicacion_destino=bodega)
+    _stock(org_a, bodega, conector, ont, 12, ["S-1", "S-2"])
+    _cuadrilla(org_a, "Cuadrilla #1", admin_profile, bodega)
+    _cuadrilla(org_a, "Cuadrilla #2", otro, bodega)
+    _ordenes(org_a, version, admin_profile, "alta", "alta")      # peso 6
+    _ordenes(org_a, version, otro, "baja")                       # peso 1
+
+    p = M.propuesta(org_a, HOY)
+
+    uno, dos = _lineas(p, "Cuadrilla #1"), _lineas(p, "Cuadrilla #2")
+    #  120 m: 50 a cada una y los 20 que sobran no completan a nadie.
+    assert (uno["Cable drop"]["asignado"], dos["Cable drop"]["asignado"]) == ("50", "50")
+    assert (uno["Conector UPC"]["asignado"], dos["Conector UPC"]["asignado"]) == ("10", "2")
+
+
 # ---------------------------------------------------------------------------
 # A · avisos de configuracion
 # ---------------------------------------------------------------------------
