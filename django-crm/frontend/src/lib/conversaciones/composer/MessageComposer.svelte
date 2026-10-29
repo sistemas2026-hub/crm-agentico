@@ -108,7 +108,10 @@
       : modo === 'responder_y_devolver' ? 'Sale y devuelve'
         : bloqueadoPorIA ? 'Responde el asistente'
           : bloqueadoPorVentana ? 'WhatsApp · 24 h'
-            : escalada ? 'Canal directo del operador'
+            // Escalada: sin sello. El renglón ya dice «Se envía directo al
+            // cliente · no pasa por el asistente», y el sello lo repetía por
+            // tercera vez en el mismo renglón.
+            : escalada ? ''
               : 'Responde el asistente'
   );
 
@@ -361,7 +364,7 @@
             Responde el asistente
           {/if}
         </span>
-        <span class="banda-canal">{canalBanda}</span>
+        {#if canalBanda}<span class="banda-canal">{canalBanda}</span>{/if}
       </div>
 
       <!-- ── 2. LA BARRA ───────────────────────────────────────────────────
@@ -494,10 +497,6 @@
           <span class="barra-mal">{errorDevolver}</span>
         {/if}
 
-        <!-- Por dónde sale y si el canal está disponible. La ventana de 24 h
-             es de WhatsApp, así que el estado se dice con ese dato real y no
-             con un «Online» fijo. -->
-        <span class="barra-canal">{estadoCanal}</span>
       </div>
 
 
@@ -595,6 +594,12 @@
               class="v2-kbd">Enter</kbd
             > salto de línea
           {/if}
+          <!-- Por dónde sale y si el canal está disponible. La ventana de 24 h
+               es de WhatsApp, así que el estado se dice con ese dato real y
+               no con un «Online» fijo. Vivía al final de la barra de arriba y
+               la partía en dos renglones en una columna de ~520px: acá, al
+               lado de la pista, no le quita lugar a nada (29/10/2026). -->
+          <span class="barra-canal">{estadoCanal}</span>
         </span>
 
         {#if modo === 'nota'}
@@ -1426,7 +1431,7 @@
   }
 
   .barra-canal {
-    margin-left: auto;
+    margin-left: 8px;
     flex: none;
     font-family: var(--bandeja-mono);
     font-size: 9.5px;

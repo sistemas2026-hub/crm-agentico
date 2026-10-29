@@ -131,3 +131,32 @@ export function ordenar(lista, orden) {
     return peso(b) - peso(a);
   });
 }
+
+/** Legado sin reconciliar (banda 6 de nucleo/relevo/proyeccion.py). */
+const esLegado = (/** @type {any} */ c) => !!c.es_legado || c.banda_nombre === 'legado';
+
+// Tres tramos, no un gradiente: el ojo no distingue 61h de 58h, y si
+// distingue "hoy" de "hace mas de una semana". Los cortes son a un dia y a
+// una semana porque es como habla la gente de esto, no por un umbral
+// calculado.
+//
+// Y un cuarto que no es tiempo: el legado. El motor lo deja en su banda
+// porque se revisa aparte y "no se mezcla con la cola"; con meses encima caia
+// siempre en critico, y la cola entera quedaba en rojo (29/10/2026). Cuando
+// todo es alarma, la escalada de hoy no se distingue.
+export const tramoEspera = (/** @type {any} */ c) => {
+  if (esLegado(c)) return 'legado';
+  const h = horasEsperando(c);
+  if (h >= 168) return 'critico';
+  if (h >= 24) return 'viejo';
+  return 'fresco';
+};
+
+/** La mayor espera entre las que de verdad esperan, sin el legado. null si
+    no queda ninguna: «Espera máx. 77d» hecho solo de legado no dice nada de
+    la cola de hoy. */
+export const esperaMaximaDe = (/** @type {any[]} */ conversaciones) => {
+  const esperando = conversaciones.filter((c) => pendiente(c) && !esLegado(c));
+  if (esperando.length === 0) return null;
+  return Math.max(...esperando.map((c) => horasEsperando(c)));
+};

@@ -106,3 +106,49 @@ export async function guardarAjustesBandeja(locals, fetch, valores) {
   }
   return datos;
 }
+
+/**
+ * Cómo se lee en pantalla cada motivo, etiqueta y caso (29/10/2026), o `null`
+ * si no hay asistente. Devuelve las claves que admiten rótulo, por familia, y
+ * los rótulos guardados. No lanza, por lo mismo que `leerAjustesBandeja`.
+ *
+ * @returns {Promise<{ claves: { motivos: string[], etiquetas: string[], casos: string[] }, rotulos: Record<string, string> } | null>}
+ */
+export async function leerRotulosBandeja(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return null;
+  try {
+    const resp = await fetch(
+      `${cfg.baseUrl}/configuracion/bandeja/rotulos?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor() }
+    );
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reemplaza el mapa entero de rótulos: lo que no viene, se borra. El motor
+ * valida que cada clave exista en la empresa y el largo de cada texto, y su
+ * mensaje se deja pasar tal cual.
+ *
+ * @param {Record<string, string>} rotulos
+ */
+export async function guardarRotulosBandeja(locals, fetch, rotulos) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) {
+    throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  }
+  const resp = await fetch(`${cfg.baseUrl}/configuracion/bandeja/rotulos`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, rotulos })
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(datos.error || 'El asistente rechazó el cambio.');
+  }
+  return datos;
+}

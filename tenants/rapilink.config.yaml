@@ -7183,6 +7183,36 @@ escalamiento:
 #  partida, se ajusta con uso real.
 conversaciones:
   etiquetas: [soporte_tecnico, facturacion, comercial, queja]
+  # Como se LEE cada clave en la Bandeja. Sin esto se mostraba la clave con
+  # espacios y sin tildes: «frustracion detectada», «informacion a confirmar»
+  # (29/10/2026). Se editan tambien desde /settings/bandeja.
+  rotulos:
+    frustracion_detectada: Frustración detectada
+    tres_fallos_seguidos: Tres fallos seguidos
+    solicitud_explicita: Pidió hablar con una persona
+    duda_de_identidad: Duda de identidad
+    visita_tecnica_requerida: Requiere visita técnica
+    sin_datos_para_diagnosticar: Sin datos para diagnosticar
+    pedido_para_ejecutar: Pedido para ejecutar
+    accion_sin_efecto: La acción no tuvo efecto
+    comprobante_para_validar: Comprobante para validar
+    informacion_a_confirmar: Información a confirmar
+    soporte_tecnico: Soporte técnico
+    facturacion: Facturación
+    comercial: Comercial
+    queja: Queja
+    no_internet: Sin internet
+    internet_lento: Internet lento
+    consulta_saldo: Consulta de saldo
+    consulta_factura: Consulta de factura
+    estado_servicio: Estado del servicio
+    reconexion: Reconexión
+    cambio_wifi: Cambio de clave WiFi
+    reclamo_formal: Reclamo formal
+    validacion_de_pago: Validación de pago
+    baja_servicio: Baja del servicio
+    sin_senal_tv: Sin señal de TV
+    otro: Otro
   # Ninguna conversacion se cierra sin preguntarle al cliente. Un "ok" o un
   # "gracias" son despedidas, no una confirmacion de que no quedo nada
   # pendiente -- y el 28/08/2026 un "ok" cerro un caso con el cambio de clave

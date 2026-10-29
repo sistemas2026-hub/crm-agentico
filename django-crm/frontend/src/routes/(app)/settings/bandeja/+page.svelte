@@ -32,12 +32,28 @@
   import SettingsCrumb from '$lib/v2/components/SettingsCrumb.svelte';
   import StatCard from '$lib/v2/components/StatCard.svelte';
   import SettingsFormPanel from '$lib/v2/components/SettingsFormPanel.svelte';
-  import { Timer, Activity, PlugZap } from '@lucide/svelte';
+  import { Timer, Activity, PlugZap, Tag } from '@lucide/svelte';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
 
   let editando = $state(false);
+  let editandoRotulos = $state(false);
+
+  /* Los rótulos de motivos, etiquetas y casos (29/10/2026). Las claves son
+     identificadores y la Bandeja las mostraba sin tildes; acá cada empresa
+     escribe cómo se leen. Vacío = se muestra la clave con espacios. */
+  let r = $derived(data.rotulos);
+  const FAMILIAS = [
+    { id: 'motivos', titulo: 'Motivos de escalamiento' },
+    { id: 'etiquetas', titulo: 'Etiquetas' },
+    { id: 'casos', titulo: 'Casos' }
+  ];
+  const conRotulo = $derived(r ? Object.keys(r.rotulos ?? {}).length : 0);
+  const totalClaves = $derived(
+    r ? FAMILIAS.reduce((n, f) => n + (r.claves?.[f.id]?.length ?? 0), 0) : 0
+  );
+  const comoClave = (/** @type {string} */ k) => k.replaceAll('_', ' ');
 
   let a = $derived(data.ajustes);
 
@@ -232,6 +248,58 @@
         </SettingsFormPanel>
       {/if}
 
+      <!-- ── CÓMO SE LEEN LOS MOTIVOS ───────────────────────────────────── -->
+      {#if r}
+        {#if editandoRotulos}
+          <SettingsFormPanel
+            title="Cómo se leen en la Bandeja"
+            action="?/rotulos"
+            error={form?.rotulos?.error}
+            submitLabel="Guardar rótulos"
+            oncancel={() => (editandoRotulos = false)}
+            ondone={() => (editandoRotulos = false)}
+          >
+            {#snippet fields()}
+              {#each FAMILIAS as f (f.id)}
+                {#if r.claves?.[f.id]?.length}
+                  <p class="familia">{f.titulo}</p>
+                  {#each r.claves[f.id] as k (k)}
+                    <div class="v2-field fila-rotulo">
+                      <label for="r-{f.id}-{k}" class="clave">{k}</label>
+                      <input
+                        id="r-{f.id}-{k}"
+                        class="v2-input"
+                        name="rotulo:{k}"
+                        maxlength="60"
+                        value={r.rotulos?.[k] ?? ''}
+                        placeholder={comoClave(k)}
+                      />
+                    </div>
+                  {/each}
+                {/if}
+              {/each}
+              <p class="v2-hint">
+                Vacío: la Bandeja muestra la clave con espacios, como hasta ahora.
+              </p>
+            {/snippet}
+          </SettingsFormPanel>
+        {:else}
+          <div class="v2-card rotulos-resumen">
+            <p class="titulo"><Tag size={14} /> Cómo se leen los motivos, etiquetas y casos</p>
+            <p class="cuerpo">
+              {conRotulo} de {totalClaves} tienen un rótulo propio. El resto se muestra
+              como su clave, sin tildes: «frustracion detectada» en vez de
+              «Frustración detectada».
+            </p>
+            {#if data.can_edit}
+              <button class="v2-btn v2-btn-sm" onclick={() => (editandoRotulos = true)}>
+                Editar rótulos
+              </button>
+            {/if}
+          </div>
+        {/if}
+      {/if}
+
       <!-- ── QUE HACE CADA UNO ──────────────────────────────────────────── -->
       <div class="v2-card explica">
         <div class="bloque">
@@ -303,6 +371,36 @@
     border-left: 3px solid var(--v2-clay);
     padding-left: 10px;
     margin-top: 8px;
+  }
+
+  .rotulos-resumen {
+    padding: 16px;
+    margin-top: 16px;
+  }
+  .familia {
+    margin: 8px 0 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--v2-slate);
+  }
+  .fila-rotulo {
+    display: grid;
+    grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+  }
+  .clave {
+    font-family: var(--v2-mono, ui-monospace, monospace);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 640px) {
+    .fila-rotulo {
+      grid-template-columns: 1fr;
+      gap: 4px;
+    }
   }
 
   .explica {

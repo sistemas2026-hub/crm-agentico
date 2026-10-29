@@ -19,6 +19,7 @@
    * visual, no ahora.
    */
   import { TriangleAlert, CircleCheck, UserCheck } from '@lucide/svelte';
+  import { rotuloDe } from '$lib/conversaciones/rotulos.js';
 
   let {
     conversacion,
@@ -34,10 +35,19 @@
     reasignando = $bindable(false),
     destinoReasignar = $bindable(''),
     motivoReasignar = $bindable(''),
-    guardandoReasignar = false, errorReasignar = '', onReasignar
+    guardandoReasignar = false, errorReasignar = '', onReasignar,
+    // Cómo se lee cada motivo en esta empresa (lib/conversaciones/rotulos.js).
+    rotulos = {}
   } = $props();
 
-  const motivoLabel = (/** @type {string} */ m) => (m ? m.replaceAll('_', ' ') : '');
+  const motivoLabel = (/** @type {string} */ m) => rotuloDe(m, rotulos);
+
+  /* Rojo SOLO cuando nadie se hizo cargo. Antes el chip era rojo siempre, y
+     una conversación ya respondida mostraba a la vez «ESCALADA» en rojo y
+     «Atendida» en verde (29/10/2026): dos veredictos opuestos en la misma
+     línea. Con dueño o con respuesta, es trabajo en curso y va en el azul de
+     «humano». */
+  const sinDueno = $derived(escalada && !atendida && !esMia && !asignadaA);
 </script>
 
   <!-- El icono dice QUÉ tipo de situación es, y no era así: el triángulo de
@@ -47,11 +57,11 @@
 
        Alerta sólo cuando falta alguien; cuando ya hay dueño, la señal es que
        está en manos de una persona. -->
-  <p class="aviso" class:aviso-sin-dueno={escalada && !atendida && !esMia && !asignadaA}>
+  <p class="aviso" class:aviso-sin-dueno={sinDueno}>
     <!-- El icono va DENTRO del chip: fuera de él heredaba el rojo de la franja
          entera, y ese rojo se fue. -->
-    <span class="aviso-estado">
-      {#if escalada && !atendida && !esMia && !asignadaA}
+    <span class="aviso-estado" class:aviso-estado-tomada={!sinDueno}>
+      {#if sinDueno}
         <TriangleAlert size={12} />
       {:else}
         <UserCheck size={12} />
@@ -61,7 +71,9 @@
            depende que un "listo, gracias" del cliente cierre el caso solo.
            Lo que dejo de hacer es contestar. -->
       <strong>
-        {#if iaEnPausa}
+        {#if iaEnPausa && atendida}
+          Respondida por el equipo · IA no responde
+        {:else if iaEnPausa}
           Escalada · IA no responde
         {:else}
           <!-- Escalo, pero no hay a quien esperar (quedo agendada, o el CRM no
@@ -132,8 +144,14 @@
           Reasignar
         </button>
       {/if}
-    {:else if atendida && conversacion.estado !== 'cerrada'}
+    {:else if atendida && !iaEnPausa && conversacion.estado !== 'cerrada'}
+      <!-- Con la IA en pausa el chip ya dice «Respondida por el equipo»:
+           repetirlo en verde era la segunda voz de la misma línea. -->
       <span class="aviso-atendida"><CircleCheck size={13} /> Atendida</span>
+    {:else if conversacion.estado !== 'cerrada'}
+      <!-- Lo que empujaba «Marcar como resuelta» a la derecha era el verde de
+           al lado; sin él, este hueco hace lo mismo. -->
+      <span class="aviso-empuje" aria-hidden="true"></span>
     {/if}
     <!-- Cerrar el caso. Va junto a "Atender" porque es la otra mitad del
          mismo momento -- se toma un caso y despues se termina-- pero en
@@ -266,6 +284,12 @@
     white-space: nowrap;
   }
 
+  .aviso-estado-tomada {
+    border-color: var(--bandeja-humano-borde);
+    background: var(--bandeja-humano-fondo);
+    color: var(--bandeja-humano);
+  }
+
   .aviso-estado strong {
     font-weight: inherit;
   }
@@ -277,6 +301,10 @@
 
   /* Sin margin-left:auto a proposito: el hermano de la izquierda ya empuja al
      grupo a la derecha, y un segundo 'auto' los separaria a los extremos. */
+  .aviso-empuje {
+    margin-left: auto;
+  }
+
   .aviso-resolver {
     flex: none;
   }

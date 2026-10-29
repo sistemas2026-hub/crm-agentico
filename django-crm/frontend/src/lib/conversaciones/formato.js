@@ -148,3 +148,26 @@ export const ENTREGA_TEXTO = {
   // saliera. No se envió y no se ofrece reintentar: ya atiende una persona.
   descartado: 'No enviada: una persona tomó el control'
 };
+
+/**
+ * El tono de la insignia «Estado del servicio».
+ *
+ * Antes era rojo todo lo que no dijera «activo», y eso pintaba como cortado un
+ * servicio GRATIS -- que funciona: es una cortesía, no una deuda. Y al revés,
+ * «Inactivo» contiene «activo» y salía verde.
+ *
+ * El estado viene del ISP y no hay una lista cerrada, así que se marca en rojo
+ * solo lo que dice que el servicio está limitado, en verde lo que dice que
+ * anda, y lo que no se reconoce queda neutro: sin afirmar ninguna de las dos.
+ * La palabra va siempre al lado, el color nunca decide solo.
+ *
+ * @param {unknown} estado
+ * @returns {'mal'|'ok'|'neutro'}
+ */
+export function tonoDeEstadoServicio(estado) {
+  const e = String(estado ?? '').trim().toLowerCase();
+  if (!e) return 'neutro';
+  if (/suspend|cortad|cancel|retirad|baja|moros|inactiv|bloque/.test(e)) return 'mal';
+  if (/^(activo|activa|active|gratis|gratuito|free)$/.test(e)) return 'ok';
+  return 'neutro';
+}

@@ -27,6 +27,7 @@
    * técnicos sólo se escriben al verificar, y verificar exige id_cliente.
    */
   import { ShieldCheck, ShieldQuestion } from '@lucide/svelte';
+  import { tonoDeEstadoServicio } from '$lib/conversaciones/formato.js';
 
   let {
     conversacion,
@@ -65,10 +66,8 @@
 
   /* Cortado o suspendido se marca: es lo que explica la mitad de las
      consultas. Con palabra ademas del color -- 'estado' viene del ISP y no
-     hay una lista cerrada de valores. */
-  const servicioCortado = $derived(
-    !!ficha?.estado && !/activo|active/i.test(String(ficha.estado))
-  );
+     hay una lista cerrada de valores (ver tonoDeEstadoServicio). */
+  const tonoServicio = $derived(tonoDeEstadoServicio(ficha?.estado));
 
   // Un BSUID de WhatsApp no es un teléfono y no hay que mostrarlo como tal.
   const esIdOpaco = $derived(
@@ -167,7 +166,8 @@
              prometer al cliente en la frase siguiente. -->
         <div class="panel-fila"><span class="panel-etiqueta">Estado del servicio</span>
           <span class="panel-valor">
-            <span class="estado-servicio" class:estado-mal={servicioCortado}>
+            <span class="estado-servicio" class:estado-mal={tonoServicio === 'mal'}
+                  class:estado-neutro={tonoServicio === 'neutro'}>
               <span class="estado-punto" aria-hidden="true"></span>{ficha.estado}
             </span>
           </span></div>
@@ -314,6 +314,12 @@
     color: var(--bandeja-error);
     border-color: var(--bandeja-error-borde);
     background: var(--bandeja-error-fondo);
+  }
+
+  .estado-neutro {
+    color: var(--bandeja-texto-2);
+    border-color: var(--bandeja-borde);
+    background: var(--bandeja-superficie-suave);
   }
 
 

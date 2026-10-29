@@ -75,7 +75,9 @@
   // fila mostraba hasta tres pildoras y el pedido era justo lo contrario --
   // cliente, tiempo esperando, motivo, y la excepcion. El tema de la
   // conversacion sigue estando en 'caso_manual', que es mas especifico.
-  const etiquetaLabel = (/** @type {string} */ e) => (e ? e.replaceAll('_', ' ') : '');
+  // Los casos se rotulan igual que los motivos: con la palabra de la empresa
+  // (lib/conversaciones/rotulos.js), que viene en el mismo `motivoLabel`.
+  const etiquetaLabel = (/** @type {string} */ e) => motivoLabel(e);
 
   const AUTOR = { user: 'Cliente', assistant: 'Asistente', humano: 'Vos', tool: 'Herramienta' };
 
@@ -148,7 +150,7 @@
 
 <a
   class="fila"
-  class:pide={pendiente(c)}
+  class:pide={pendiente(c) && tramoEspera(c) !== 'legado'}
   class:activa={esDeEsteChat}
   href="/conversaciones/{c.id}"
   aria-current={esDeEsteChat ? 'page' : undefined}
@@ -619,6 +621,13 @@
     font-weight: 750;
     font-size: 11.5px;
     letter-spacing: -0.01em;
+  }
+
+  /* El legado espera, pero no pide nada nuevo: se revisa aparte (banda 6).
+     Gris, sin el filete rojo de la fila, para que no tape a lo de hoy. */
+  .cuando.espera-legado {
+    color: var(--bandeja-texto-3);
+    font-weight: 500;
   }
 
 

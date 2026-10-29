@@ -36,7 +36,8 @@
   // abierta, y no puede alcanzar ninguna otra ruta del CRM.
   import '$lib/conversaciones/estilos/bandeja.css';
   import { pendiente, resuelta, enAtencion } from '$lib/conversaciones/estado.js';
-  import { ordenar, horasEsperando } from '$lib/conversaciones/cola/ordenamiento.js';
+  import { ordenar, tramoEspera, esperaMaximaDe } from '$lib/conversaciones/cola/ordenamiento.js';
+  import { rotuloDe } from '$lib/conversaciones/rotulos.js';
   import { saludDelCanal } from '$lib/conversaciones/canal.js';
   import { barra, alternar } from '$lib/conversaciones/barra-lateral.svelte.js';
   import { PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
@@ -167,11 +168,8 @@
                      invalida cada 8s, así que este número dice si lo que se
                      está mirando es de hace un momento o de hace un rato --
                      que es lo que un operador necesita saber de una consola. */
-  let esperaMaxima = $derived.by(() => {
-    const esperando = base.filter(pendiente);
-    if (esperando.length === 0) return null;
-    return Math.max(...esperando.map((/** @type {any} */ c) => horasEsperando(c)));
-  });
+  /* Sin el legado: ver esperaMaximaDe en ordenamiento.js. */
+  let esperaMaxima = $derived(esperaMaximaDe(base));
 
   const enHoras = (/** @type {number|null} */ h) => {
     if (h === null) return '—';
@@ -239,16 +237,7 @@
   );
 
 
-  // Tres tramos, no un gradiente: el ojo no distingue 61h de 58h, y si
-  // distingue "hoy" de "hace mas de una semana". Los cortes son a un dia y a
-  // una semana porque es como habla la gente de esto, no por un umbral
-  // calculado.
-  const tramoEspera = (/** @type {any} */ c) => {
-    const h = horasEsperando(c);
-    if (h >= 168) return 'critico';
-    if (h >= 24) return 'viejo';
-    return 'fresco';
-  };
+  // tramoEspera vive en ordenamiento.js, con el legado aparte.
 
   // Se dibuja en QueueFilters pero se declara acá, al lado de
   // ORDEN_POR_PESTANA: ese mapa apunta a estos mismos ids, y separarlos
@@ -330,7 +319,8 @@
     if (motivo && !motivosVisibles.some(([m]) => m === motivo)) motivosDesplegados = true;
   });
 
-  const motivoLabel = (/** @type {string} */ m) => (m ? m.replaceAll('_', ' ') : '');
+  // La palabra de la empresa si la tiene (lib/conversaciones/rotulos.js).
+  const motivoLabel = (/** @type {string} */ m) => rotuloDe(m, data.rotulos);
 
   // Cuatro estados, en el orden en que transcurre un caso. La pestaña
   // "Asistente" (las que el bot lleva solo) desaparecio: no era un estado de
@@ -471,9 +461,6 @@
     {:else}
       <span class="consola-dato">Ninguna esperando</span>
     {/if}
-    <span class="consola-dato consola-total">
-      Total <b class="v2-num">{base.length}</b>
-    </span>
 
     <!-- El estado del enlace con el motor. No es un "99.99% uptime"
          inventado: es cuándo se leyó esta cola. Si el sondeo se cae, el
@@ -548,22 +535,30 @@
      mirando. Nada de SLA, cluster ni latencia inventados -- si alguna de esas
      se mide algún día, éste es el lugar donde va. -->
 <footer class="pie-consola bandeja">
-  <span class="pie-dato">
+  <!-- «Control», con la misma palabra que la cabecera de la conversación.
+       Decía «Las lleva la IA 33 · En manos de una persona 1» al lado de la
+       pestaña «En atención 3», y se leían como dos cuentas de lo mismo que no
+       cuadraban. No lo son: «En atención» es quien se HIZO CARGO (tomó o
+       escribió); esto es quién tiene el control AHORA. Quien contesta y
+       devuelve a la IA suma en la pestaña y no acá. -->
+  <span class="pie-rotulo">Control ahora</span>
+  <span class="pie-dato" title="Chats abiertos que hoy contesta la IA">
     <span class="pie-marca pie-ia"></span>
-    Las lleva la IA <b class="v2-num">{llevaIA}</b>
+    IA <b class="v2-num">{llevaIA}</b>
   </span>
-  <span class="pie-dato">
+  <span class="pie-dato" title="Chats abiertos con el control en manos de una persona. No es lo mismo que «En atención»: esa pestaña cuenta quién se hizo cargo, aunque después lo haya devuelto a la IA">
     <span class="pie-marca pie-humano"></span>
-    En manos de una persona <b class="v2-num">{llevaHumano}</b>
+    Persona <b class="v2-num">{llevaHumano}</b>
   </span>
   {#if sinDueno > 0}
     <span class="pie-dato pie-alerta">Sin dueño <b class="v2-num">{sinDueno}</b></span>
   {/if}
+  <!-- Hace cuánto se leyó la cola ya lo dice «En vivo» arriba, y cambia a
+       «Hace …» cuando se enfría: acá solo queda el corte, que es lo que no
+       puede pasar desapercibido. -->
   <span class="pie-derecha">
     {#if data.error}
       <span class="pie-dato pie-alerta">Sin conexión con el motor</span>
-    {:else if sondeoHaceSegundos !== null}
-      <span class="pie-dato">Cola leída hace <b class="v2-num">{sondeoHaceSegundos}s</b></span>
     {/if}
   </span>
 </footer>
@@ -718,11 +713,6 @@
     color: var(--v2-rust);
   }
 
-  .consola-total,
-  .consola-total b {
-    color: var(--bandeja-texto-3);
-  }
-
   /* El latido del sondeo. Verde mientras la cola es reciente; apagado cuando
      pasó más de un minuto sin releerla, que con un intervalo de 8s significa
      que algo no está andando. */
@@ -796,6 +786,16 @@
     padding: 0 16px;
     background: var(--bandeja-superficie);
     border-top: 1px solid var(--bandeja-borde);
+  }
+
+  .pie-rotulo {
+    font-family: var(--bandeja-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-2);
+    margin-right: -8px;
   }
 
   .pie-dato {

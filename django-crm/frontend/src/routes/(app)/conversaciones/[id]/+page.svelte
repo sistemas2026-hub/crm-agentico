@@ -11,6 +11,7 @@
   import CierrePanel from '$lib/conversaciones/conversation/CierrePanel.svelte';
   import { cargarDesenlaces, cuerpoDeCierre } from '$lib/conversaciones/desenlaces.js';
   import { incorporarMensaje } from '$lib/conversaciones/eco_local.js';
+  import { rotuloDe } from '$lib/conversaciones/rotulos.js';
   import MessageComposer from '$lib/conversaciones/composer/MessageComposer.svelte';
   import CasePanel from '$lib/conversaciones/context/CasePanel.svelte';
   import ActivityPanel from '$lib/conversaciones/context/ActivityPanel.svelte';
@@ -236,7 +237,9 @@
       }));
   });
 
-  const motivoLabel = (/** @type {string} */ m) => (m ? m.replaceAll('_', ' ') : '');
+  // La palabra de la empresa si la tiene; los rótulos vienen con la cola,
+  // en el load del layout (lib/conversaciones/rotulos.js).
+  const motivoLabel = (/** @type {string} */ m) => rotuloDe(m, data.rotulos);
 
   /** Lo primero que escribió el cliente. Es el respaldo de "Qué quiere"
       cuando el modelo no dejó un resumen: no es tan bueno, pero es de él y es
@@ -1030,7 +1033,7 @@
 
   const ETIQUETA_TONE = { soporte_tecnico: 'clay', facturacion: 'moss', comercial: 'slate', queja: 'rust' };
   const etiquetaTone = (e) => ETIQUETA_TONE[e] ?? 'ink';
-  const etiquetaLabel = (e) => (e ? e.replaceAll('_', ' ') : '');
+  const etiquetaLabel = (/** @type {string} */ e) => rotuloDe(e, data.rotulos);
 
 
   let asignadoA = $state(caso?.assignee_id ?? '');
@@ -1701,6 +1704,7 @@
   <HandoffControls
     {conversacion}
     {caso}
+    rotulos={data.rotulos ?? {}}
     operadores={data.operadores ?? []}
     {iaEnPausa} {escalada} {atendida} {esMia} {asignadaA} {esAdmin} {gobernada}
     {marcandoAtendida} {errorAtender} onAtender={marcarAtendida}
@@ -1893,6 +1897,7 @@
            pantalla los montaron. -->
       <CasePanel
         {caso} {conversacion} {owners} {ownerActual}
+        rotulos={data.rotulos ?? {}}
         asignadaDexter={asignadaA}
         bind:asignadoA bind:listaAbierta bind:formularioAsignar
       />

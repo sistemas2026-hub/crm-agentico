@@ -12,7 +12,7 @@
  * Se prueba el módulo que `+layout.svelte` importa de verdad, no una copia.
  */
 import { describe, it, expect } from 'vitest';
-import { ordenar, porBanda, peso, bandaDe, esperaDesde } from './ordenamiento.js';
+import { ordenar, porBanda, peso, bandaDe, esperaDesde, tramoEspera, esperaMaximaDe, HORA } from './ordenamiento.js';
 
 /** Las bandas de nucleo/relevo/proyeccion.py, con sus nombres. */
 const BANDA = {
@@ -283,5 +283,38 @@ describe('ordenar no muta la lista que recibe', () => {
     expect(ids(entrada)).toEqual(['b', 'a']);
     expect(ids(salida)).toEqual(['a', 'b']);
     expect(salida).not.toBe(entrada);
+  });
+});
+
+describe('el tramo de espera', () => {
+  const HACE = (h) => new Date(Date.now() - h * HORA).toISOString();
+  const esperando = (h, extra = {}) =>
+    ({ escalada_a_humano: true, estado: 'abierta', escalada_en: HACE(h), ...extra });
+
+  it('tres tramos: hoy, más de un día, más de una semana', () => {
+    expect(tramoEspera(esperando(2))).toBe('fresco');
+    expect(tramoEspera(esperando(30))).toBe('viejo');
+    expect(tramoEspera(esperando(200))).toBe('critico');
+  });
+
+  it('el legado no es crítico aunque lleve meses', () => {
+    // Visto el 29/10/2026: la cola entera en rojo y «Espera máx. 77d», todo
+    // legado. El motor lo manda a la banda 6 porque «no se mezcla con la
+    // cola»; pintarlo de crítico lo mezclaba igual, y una escalada de hoy se
+    // perdía entre alarmas que no piden nada nuevo.
+    expect(tramoEspera(esperando(1800, { banda_nombre: 'legado', es_legado: true }))).toBe('legado');
+    expect(tramoEspera(esperando(1800, { es_legado: true }))).toBe('legado');
+  });
+
+  it('y no cuenta para la espera máxima', () => {
+    const cola = [
+      esperando(1800, { banda_nombre: 'legado', es_legado: true }),
+      esperando(5)
+    ];
+    expect(Math.round(esperaMaximaDe(cola))).toBe(5);
+  });
+
+  it('si solo hay legado esperando, no hay espera máxima que mostrar', () => {
+    expect(esperaMaximaDe([esperando(1800, { es_legado: true })])).toBeNull();
   });
 });

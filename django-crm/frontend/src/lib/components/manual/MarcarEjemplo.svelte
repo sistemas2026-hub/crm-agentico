@@ -72,7 +72,7 @@
     title={casoMarcado ? `Buen ejemplo de: ${etiqueta(casoMarcado)}` : 'Marcar como buen ejemplo'}
     onclick={() => (abierto = !abierto)}
   >
-    {#if casoMarcado}★ {etiqueta(casoMarcado)}{:else}☆ Marcar{/if}
+    {#if casoMarcado}★ {etiqueta(casoMarcado)}{:else}☆ Buen ejemplo{/if}
   </button>
 
   {#if abierto}

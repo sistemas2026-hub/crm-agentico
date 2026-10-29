@@ -20,6 +20,7 @@
   import { ChevronDown, ArrowUpRight, TriangleAlert, Info, Copy, Check } from '@lucide/svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { enhance } from '$app/forms';
+  import { rotuloDe } from '$lib/conversaciones/rotulos.js';
 
   let {
     caso, conversacion, owners = [], ownerActual,
@@ -29,10 +30,12 @@
     asignadaDexter = '',
     asignadoA = $bindable(''),
     listaAbierta = $bindable(false),
-    formularioAsignar = $bindable()
+    formularioAsignar = $bindable(),
+    // Cómo se lee cada etiqueta en esta empresa (lib/conversaciones/rotulos.js).
+    rotulos = {}
   } = $props();
 
-  const etiquetaLabel = (e) => (e ? e.replaceAll('_', ' ') : '');
+  const etiquetaLabel = (/** @type {string} */ e) => rotuloDe(e, rotulos);
   const CANAL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
 
   // D28 HECHO VISIBLE. Son dos dueños distintos y no se reconcilian: el del

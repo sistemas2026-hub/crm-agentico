@@ -64,6 +64,9 @@ export async function load({ fetch, depends, locals }) {
        pantalla no dibuja ninguna cuenta regresiva. */
     return { conversaciones: datos.conversaciones, yo, sondeadoEn,
              sla_toma_minutos: datos.sla_toma_minutos ?? 0,
+             /* Cómo se lee cada motivo, etiqueta y caso: uno solo para la
+                empresa, como el plazo (ver lib/conversaciones/rotulos.js). */
+             rotulos: datos.rotulos ?? {},
              /* Los tres numeros crudos de la salud del canal. El veredicto
                 lo arma `lib/conversaciones/canal.js`, en un solo lugar. */
              canal_whatsapp: datos.canal_whatsapp ?? null };

@@ -42,6 +42,7 @@ from nucleo.config.editor import (ErrorEdicion, _mutar_ajustes_bandeja,  # noqa:
                                   _mutar_crear, _mutar_editar,
                                   _mutar_marcas_precio,
                                   _mutar_persona, _mutar_rol_de_entrada,
+                                  _mutar_rotulos_bandeja,
                                   _validar,
                                   _validar_nombre_rol,
                                   catalogo_herramientas,
@@ -669,6 +670,51 @@ def prueba_marcas_de_precio() -> None:
     lanza("un catalogo vacio se rechaza en vez de guardar marcas que no apuntan a nada",
           lambda: _mutar_marcas_precio(sin_herramientas, a, b))
 
+def prueba_rotulos_bandeja() -> None:
+    """
+    Como se lee cada motivo, etiqueta y caso en la Bandeja (29/10/2026).
+
+    Lo que se protege: que un rotulo solo se guarde para una clave que la
+    empresa tiene de verdad, que el vacio no se guarde como texto, y que el
+    documento siga validando -- un mapa que muta bien y no carga no sirve.
+    """
+    print("\n-- rotulos de la Bandeja --")
+    doc = documento_base()
+    motivo = (doc.get("escalamiento") or {}).get("activar_si", [None])[0]
+    etiqueta = ((doc.get("conversaciones") or {}).get("etiquetas") or [None])[0]
+    if not motivo or not etiqueta:
+        comprobar(False, "el tenant de prueba necesita al menos un motivo y una etiqueta")
+        return
+
+    _mutar_rotulos_bandeja(doc, {motivo: "  Algo   con tilde: acción ", etiqueta: ""})
+    rot = doc["conversaciones"].get("rotulos", {})
+    comprobar(rot.get(motivo) == "Algo con tilde: acción",
+              "el rotulo de un motivo se guarda, con los espacios normalizados")
+    comprobar(etiqueta not in rot, "un rotulo vacio no se guarda: es no tenerlo")
+    cfg = _validar(TENANT, doc)
+    comprobar(cfg.conversaciones.rotulos.get(motivo) == "Algo con tilde: acción",
+              "y el documento valida con el mismo validador que usa el motor")
+
+    lanza("una clave que no es motivo, etiqueta ni caso se rechaza",
+          lambda: _mutar_rotulos_bandeja(documento_base(), {"no_existe_xyz": "Texto"}))
+    lanza("un rotulo de mas de 60 caracteres se rechaza",
+          lambda: _mutar_rotulos_bandeja(documento_base(), {motivo: "x" * 61}))
+
+    # Reemplaza el mapa entero: mandarlo vacio borra los que habia.
+    _mutar_rotulos_bandeja(doc, {})
+    comprobar("rotulos" not in doc["conversaciones"], "un mapa vacio borra los rotulos")
+
+    # Un huerfano que ya estaba en la base no impide cargar la config: el
+    # schema no lo rechaza, para no trabar el guardado de quien borro el caso.
+    huerfano = documento_base()
+    huerfano["conversaciones"]["rotulos"] = {"clave_que_se_borro": "Viejo"}
+    try:
+        _validar(TENANT, huerfano)
+        comprobar(True, "un rotulo huerfano no impide cargar la configuracion")
+    except Exception as e:
+        comprobar(False, f"un rotulo huerfano no impide cargar la configuracion -- {type(e).__name__}")
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print(" EDITOR DE ROLES  --  mutaciones sobre el documento de configuracion")
@@ -686,6 +732,7 @@ if __name__ == "__main__":
     prueba_origen_de_la_config()
     prueba_umbral_efectivo_de_la_banda()
     prueba_marcas_de_precio()
+    prueba_rotulos_bandeja()
 
     print("\n" + "=" * 70)
     if fallos:

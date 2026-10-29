@@ -1,11 +1,23 @@
 import { fail } from '@sveltejs/kit';
-import { guardarAjustesBandeja, leerAjustesBandeja } from '$lib/server/v2/bandeja-config.js';
+import {
+  guardarAjustesBandeja,
+  leerAjustesBandeja,
+  guardarRotulosBandeja,
+  leerRotulosBandeja
+} from '$lib/server/v2/bandeja-config.js';
+
+/** Prefijo de los campos del formulario de rótulos: `rotulo:<clave>`. */
+const PREFIJO_ROTULO = 'rotulo:';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ fetch, locals }) {
-  const ajustes = await leerAjustesBandeja(locals, fetch);
+  const [ajustes, rotulos] = await Promise.all([
+    leerAjustesBandeja(locals, fetch),
+    leerRotulosBandeja(locals, fetch)
+  ]);
   return {
     ajustes,
+    rotulos,
     // El motor no tiene identidad propia: quien decide si esto se puede
     // editar es el CRM, mismo criterio que /settings/asistente. Esto es la
     // afordancia (esconder el boton); la accion vuelve a comprobarlo, porque
@@ -95,5 +107,32 @@ export const actions = {
     // Sin redirect: `load` se vuelve a correr despues de la accion y los
     // valores nuevos aparecen donde el usuario ya esta mirando.
     return { updated: true };
+  },
+
+  /* Los rótulos de motivos, etiquetas y casos. El formulario manda un campo
+     por clave; vacío = sin rótulo, y el motor lo descarta. Cuál clave existe
+     lo valida el motor contra la configuración de la empresa. */
+  async rotulos({ fetch, request, locals }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, {
+        rotulos: { error: 'Solo un administrador puede cambiar los rótulos de la Bandeja.' }
+      });
+    }
+    const form = await request.formData();
+    /** @type {Record<string, string>} */
+    const rotulos = {};
+    for (const [nombre, valor] of form.entries()) {
+      if (!nombre.startsWith(PREFIJO_ROTULO)) continue;
+      const texto = valor.toString().trim();
+      if (texto) rotulos[nombre.slice(PREFIJO_ROTULO.length)] = texto;
+    }
+    try {
+      await guardarRotulosBandeja(locals, fetch, rotulos);
+    } catch (/** @type {any} */ err) {
+      return fail(400, {
+        rotulos: { error: err?.message || 'No se pudieron guardar los rótulos.' }
+      });
+    }
+    return { rotulosGuardados: true };
   }
 };

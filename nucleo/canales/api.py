@@ -4317,6 +4317,48 @@ def configuracion_bandeja_guardar():
     })
 
 
+def _rotulos_de(config) -> dict:
+    """Las claves que admiten rotulo y los rotulos guardados, para la pantalla."""
+    return {
+        "claves": editor.claves_con_rotulo(config.model_dump()),
+        "rotulos": dict(config.conversaciones.rotulos),
+    }
+
+
+@app.get("/configuracion/bandeja/rotulos")
+def configuracion_bandeja_rotulos():
+    """Como se lee en pantalla cada motivo, etiqueta y caso (29/10/2026)."""
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify(_rotulos_de(config))
+
+
+@app.put("/configuracion/bandeja/rotulos")
+def configuracion_bandeja_rotulos_guardar():
+    """
+    Reemplaza el mapa entero de rotulos. Va en un endpoint propio y no dentro
+    de PUT /configuracion/bandeja: aquel tiene una guarda sobre la clave
+    'sin_gestion_horas' que un formulario de texto no tiene por que conocer.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        config = editor.guardar_rotulos_bandeja(tenant, cuerpo.get("rotulos") or {})
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify(_rotulos_de(config))
+
+
 @app.get("/configuracion/canales")
 def configuracion_canales():
     """
@@ -5562,11 +5604,17 @@ def conversaciones():
     # numero N veces. 0 = la empresa no definio objetivo, y entonces la
     # pantalla no dibuja cuenta regresiva -- ver TenantConfig.sla_toma_minutos.
     try:
-        sla = int(getattr(_config_de(tenant), "sla_toma_minutos", 0) or 0)
+        cfg_cola = _config_de(tenant)
+        sla = int(getattr(cfg_cola, "sla_toma_minutos", 0) or 0)
+        # Como se lee cada motivo, etiqueta y caso: uno solo para la empresa,
+        # igual que el plazo (Conversaciones.rotulos).
+        rotulos = dict(cfg_cola.conversaciones.rotulos)
     except Exception:
         # No poder leer la config no puede tumbar la cola entera: sin plazo,
-        # la Bandeja funciona igual, sólo que sin el reloj.
+        # la Bandeja funciona igual, sólo que sin el reloj -- y sin rótulos,
+        # con las claves como venían.
         sla = 0
+        rotulos = {}
 
     # La salud del canal viaja con la cola por lo mismo que el plazo: es una
     # sola para la empresa. Son los tres numeros crudos -- el veredicto lo
@@ -5576,6 +5624,7 @@ def conversaciones():
     return jsonify({"tenant": tenant, "conversaciones": salida,
                     "agrupada": por_numero,
                     "sla_toma_minutos": sla,
+                    "rotulos": rotulos,
                     "canal_whatsapp": canal_whatsapp})
 
 

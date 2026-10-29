@@ -1240,6 +1240,64 @@ def guardar_casos_manual(tenant: str, casos: list[str]) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_casos_manual(doc, casos))
 
 
+ROTULO_MAXIMO = 60
+
+
+def claves_con_rotulo(doc: dict) -> dict[str, list[str]]:
+    """Las claves que la Bandeja muestra y que admiten rotulo, por familia."""
+    return {
+        "motivos": list((doc.get("escalamiento") or {}).get("activar_si") or []),
+        "etiquetas": list((doc.get("conversaciones") or {}).get("etiquetas") or []),
+        "casos": list((doc.get("manual") or {}).get("casos") or []),
+    }
+
+
+def guardar_rotulos_bandeja(tenant: str, rotulos: dict) -> TenantConfig:
+    """
+    Como se lee en pantalla cada motivo, etiqueta o caso (29/10/2026).
+
+    Reemplaza el mapa entero: lo que el formulario no manda, se borra. Un
+    rotulo vacio es lo mismo que no tenerlo -- la pantalla vuelve a mostrar la
+    clave con espacios --, asi que se descarta en vez de guardarse.
+    """
+    if not isinstance(rotulos, dict):
+        raise ErrorEdicion("los rótulos tienen que venir como un mapa clave → texto.")
+    return _editar(tenant, lambda doc: _mutar_rotulos_bandeja(doc, rotulos))
+
+
+def _mutar_rotulos_bandeja(doc: dict, rotulos: dict) -> None:
+    """
+    La validacion de claves vive aca y no en el schema: solo desde el
+    documento se ve que motivos, etiquetas y casos tiene HOY la empresa. Una
+    clave que no esta en ninguna lista se rechaza con su nombre: es un error
+    de tipeo o un formulario viejo, y guardarla dejaria un rotulo que no se
+    muestra nunca. Los huerfanos que ya estaban (una clave que se borro de su
+    lista despues) se van en este guardado.
+    """
+    conocidas = {c for lista in claves_con_rotulo(doc).values() for c in lista}
+    limpios: dict[str, str] = {}
+    for clave, texto in rotulos.items():
+        clave = str(clave or "").strip()
+        texto = " ".join(str(texto or "").split())
+        if not clave or not texto:
+            continue
+        if clave not in conocidas:
+            raise ErrorEdicion(
+                f"'{clave}' no es un motivo, una etiqueta ni un caso de esta empresa, "
+                "así que su rótulo no se mostraría nunca.")
+        if len(texto) > ROTULO_MAXIMO:
+            raise ErrorEdicion(
+                f"el rótulo de '{clave}' tiene {len(texto)} caracteres; el máximo es "
+                f"{ROTULO_MAXIMO}: se muestra en una fila de la cola, no es una descripción.")
+        limpios[clave] = texto
+    conv = doc.get("conversaciones") or {}
+    doc["conversaciones"] = conv
+    if limpios:
+        conv["rotulos"] = limpios
+    else:
+        conv.pop("rotulos", None)
+
+
 def guardar_parrilla_canales(tenant: str, canales: list[str]) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_parrilla_canales(doc, canales))
 

@@ -2644,6 +2644,19 @@ class Conversaciones(Base):
     nunca inventa una categoria fuera de esta lista.
     """
     etiquetas: list[str] = Field(default_factory=list)
+    # Como se LEE en pantalla cada clave de motivo ('escalamiento.activar_si'),
+    # de etiqueta (arriba) o de caso ('manual.casos'). Las claves son
+    # identificadores y la Bandeja las mostraba con el guion bajo cambiado por
+    # un espacio: «frustracion detectada», «informacion a confirmar»,
+    # «facturacion» -- sin tildes, porque un identificador no las lleva
+    # (29/10/2026). Son palabras de cada empresa, igual que las listas.
+    #
+    # Una clave sin rotulo se sigue mostrando como antes, asi que agregar un
+    # motivo nunca deja una fila sin texto. Un rotulo cuya clave ya no existe
+    # NO se rechaza aca: haria fallar el guardado de quien borro el caso, con
+    # un error sobre otra cosa. El editor las descarta al guardar
+    # (editor.guardar_rotulos_bandeja).
+    rotulos: dict[str, str] = Field(default_factory=dict)
     # Lo que se le pregunta al cliente ANTES de cerrar su conversacion.
     #
     # Ninguna conversacion se cierra por lo que el modelo interprete de un

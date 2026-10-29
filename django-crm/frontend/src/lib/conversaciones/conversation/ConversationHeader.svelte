@@ -92,7 +92,11 @@
         <span class="centro-tel v2-num">{telefono}</span>
       {/if}
       <span class="cab-chip">{canalLabel(conversacion.canal)}</span>
-      <span class="cab-chip">{conversacion.estado}</span>
+      <!-- «abierta» no se dice: es el caso normal, y competía con el estado
+           del relevo justo debajo. Solo se nombra lo que se sale de eso. -->
+      {#if conversacion.estado && conversacion.estado !== 'abierta'}
+        <span class="cab-chip">{conversacion.estado}</span>
+      {/if}
     </div>
 
     <!-- SEGUNDO RENGLÓN: los identificadores, en mono y separados por puntos,

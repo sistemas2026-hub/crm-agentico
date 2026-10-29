@@ -8,7 +8,7 @@
  * personas y a las filas históricas por igual.
  */
 import { describe, it, expect } from 'vitest';
-import { autorDe } from './formato.js';
+import { autorDe, tonoDeEstadoServicio } from './formato.js';
 
 const msg = (extra) => ({ rol: 'assistant', origen: null, autor_nombre: null, ...extra });
 
@@ -115,5 +115,22 @@ describe('lo que NO se puede afirmar', () => {
   it('un mensaje nulo no rompe ni inventa autor', () => {
     expect(() => autorDe(null)).not.toThrow();
     expect(autorDe(null).clase).toBe('a-sin-registro');
+  });
+});
+
+describe('el tono del estado del servicio', () => {
+  it('un servicio gratis anda: no es rojo', () => {
+    // Visto el 29/10/2026: «Gratis» salía con la insignia de cortado.
+    expect(tonoDeEstadoServicio('Gratis')).toBe('ok');
+  });
+  it.each(['Suspendido', 'Cancelado', 'Cortado', 'Inactivo', 'Retirado'])(
+    '%s es rojo', (e) => expect(tonoDeEstadoServicio(e)).toBe('mal'));
+  it('inactivo NO es activo, aunque contenga la palabra', () => {
+    expect(tonoDeEstadoServicio('Inactivo')).not.toBe('ok');
+  });
+  it('activo es verde', () => expect(tonoDeEstadoServicio('Activo')).toBe('ok'));
+  it('lo que no se reconoce no afirma nada', () => {
+    expect(tonoDeEstadoServicio('En revisión')).toBe('neutro');
+    expect(tonoDeEstadoServicio(null)).toBe('neutro');
   });
 });

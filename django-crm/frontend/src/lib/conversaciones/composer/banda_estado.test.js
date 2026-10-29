@@ -171,18 +171,28 @@ describe('la banda dice lo que se puede hacer AHORA', () => {
        «ventana cerrada» con el sello «responde el asistente» al lado.
 
        Esto compara los tres en las combinaciones donde se separaron. */
+    /** @type {Array<[Record<string, any>, RegExp, RegExp | null]>} */
     const casos = [
       [{ bloqueadoPorIA: true }, /atiende la IA/i, /RESPONDE EL ASISTENTE/i],
       [{ bloqueadoPorIA: true, bloqueadoPorVentana: true }, /atiende la IA/i, /RESPONDE EL ASISTENTE/i],
       [{ escalada: true, bloqueadoPorVentana: true }, /Ventana de WhatsApp cerrada/i, /24 h/],
-      [{ escalada: true }, /directo al cliente/i, /CANAL DIRECTO/i],
+      // Escalada: SIN sello (29/10/2026). «Canal directo del operador» repetía
+      // por tercera vez lo que el renglón ya dice. null = no se dibuja ninguno.
+      [{ escalada: true }, /directo al cliente/i, null],
       [{ modo: 'nota' }, /Solo la ve el equipo/i, /INTERNO/i]
     ];
     for (const [props, texto, sello] of casos) {
       const b = banda(props);
       const etiqueta = JSON.stringify(props);
       expect(b.texto, etiqueta).toMatch(texto);
-      expect(b.html, etiqueta).toMatch(sello);
+      if (sello) {
+        expect(b.html, etiqueta).toMatch(sello);
+      } else {
+        // Y que no quede el de otro estado: un sello «responde el asistente»
+        // al lado de «se envía directo al cliente» es la contradicción que
+        // esta prueba existe para cazar.
+        expect(b.html, etiqueta).not.toMatch(/banda-canal/);
+      }
     }
   });
 });

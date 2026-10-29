@@ -664,7 +664,7 @@
         Dexter IA #F5F3FF sobre #DDD6FE
         operador  #EFF6FF sobre #BFDBFE
 
-     Tipografía: 12px sobre interlínea 1.625 (`text-xs leading-relaxed`),
+     Tipografía: la referencia pide 12px (`text-xs leading-relaxed`); acá va 14, ver abajo.
      padding 12 y radio 4. */
   .burbuja {
     padding: 12px;
@@ -672,8 +672,10 @@
     border: 1px solid var(--bandeja-borde);
     background: var(--bandeja-superficie);
     color: var(--bandeja-texto);
-    font-size: 12px;
-    line-height: 1.625;
+    /* 12px era el `text-xs` de la referencia, y es lo que se viene a LEER en
+       esta pantalla: todo lo demás es contexto. 14 sobre 1.5 (29/10/2026). */
+    font-size: 14px;
+    line-height: 1.5;
     /* El texto se lee de izquierda a derecha también del lado que sale: lo
        que se alinea a la derecha es el bloque, no el renglón. */
     text-align: left;
