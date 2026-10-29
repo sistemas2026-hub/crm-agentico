@@ -8,13 +8,12 @@
    */
   import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
+  import OrdenDelDia from '$lib/supervisor/OrdenDelDia.svelte';
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import {
     lineaDePersona,
     quienLaAsigno,
-    textoDelAviso,
     textoDeLaSiguiente,
-    textoDelVencimiento,
     textoDePrioridad,
     textoSinBajar
   } from '$lib/supervisor/dia-publicado.js';
@@ -226,35 +225,15 @@
                   {#if !c.ordenes.length}
                     <p class="snoc-body-sm snoc-secundario">Sin órdenes publicadas.</p>
                   {/if}
-                  {#each c.ordenes as o (o.id)}
-                    <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-xs);">
-                      <!-- El orden del día que arma el Supervisor y sigue la app
-                           (29/10/2026): esta lista viene en ese orden, y la
-                           siguiente es la que el técnico hace al terminar. -->
-                      {#if o.siguiente}
-                        <span class="snoc-tag" style="align-self:flex-start;">{textoDeLaSiguiente(c.ordenes)}</span>
-                      {/if}
-                      <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-                        {#if o.orden_del_dia}<span class="snoc-mono">{o.orden_del_dia}.</span>{/if}
-                        <span class="snoc-mono">#{o.numero}</span>
-                        <span style="min-width:0;">{o.cliente || o.tipo}</span>
-                        <span class="snoc-body-sm">{textoDePrioridad(o.prioridad)}</span>
-                        <span class="snoc-body-sm">· {textoDelVencimiento(o.vence_en, data.dia)}</span>
-                      </div>
-                      <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-                        <span class="snoc-body-sm snoc-secundario">{o.tipo}</span>
-                        <span class="snoc-body-sm snoc-secundario">· {o.barrio}</span>
-                      </div>
-                      <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-                        <span class="snoc-tag">{o.estado_texto}</span>
-                        <span class="snoc-body-sm snoc-secundario">{o.tecnicos.join(', ')}</span>
-                      </div>
-                      <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-                        <span class="snoc-body-sm">Asignó: {quienLaAsigno(o, data.dia)}</span>
-                        <span class="snoc-body-sm snoc-secundario">· {textoDelAviso(o.aviso)}</span>
-                      </div>
+                  <!-- Las órdenes, cada una en su tarjeta y en el orden del día
+                       que arma el Supervisor y sigue la app (29/10/2026). -->
+                  {#if c.ordenes.length}
+                    <div class="snoc-pila-xs" style="gap:var(--snoc-sm); padding-top:var(--snoc-xs);">
+                      {#each c.ordenes as o (o.id)}
+                        <OrdenDelDia orden={o} dia={data.dia} marca={textoDeLaSiguiente(c.ordenes)} />
+                      {/each}
                     </div>
-                  {/each}
+                  {/if}
                 </div>
               {/each}
             </div>

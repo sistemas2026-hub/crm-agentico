@@ -168,6 +168,25 @@ def test_p_programacion_muestra_el_orden_el_cliente_cuando_vence_y_la_siguiente(
     assert filas[0]["vence_en"] is None
 
 
+def test_p3_el_asunto_del_ticket_sin_el_cliente_que_trae_pegado(
+        org_a, version, cuadrilla, admin_profile):
+    """Pedido del usuario, 29/10/2026: «también añade el asunto». El nombre del
+    ticket es «Asunto - Cliente»: sale el asunto, y el cliente va en su campo."""
+    from cases.models import Case
+
+    caso = Case.objects.create(org=org_a, name=f"No Tiene Internet - {CLIENTE}",
+                               status="New", priority="Normal", is_active=True)
+    del_ticket = _orden(org_a, version, admin_profile)
+    OrdenTrabajo.objects.filter(pk=del_ticket.pk).update(origen_tipo="case",
+                                                         origen_ref=str(caso.id))
+    a_mano = _orden(org_a, version, admin_profile)
+
+    filas = {f["numero"]: f for f in D.del_dia(org_a, LUNES)["cuadrillas"][0]["ordenes"]}
+
+    assert filas[del_ticket.numero]["asunto"] == "No Tiene Internet"
+    assert filas[a_mano.numero]["asunto"] == "", "sin ticket no se inventa un asunto"
+
+
 def test_p2_sin_orden_del_supervisor_ordena_como_la_app_y_lo_de_otro_dia_no_cuenta(
         org_a, version, cuadrilla, admin_profile):
     viejo = _orden(org_a, version, admin_profile, prioridad="alta")

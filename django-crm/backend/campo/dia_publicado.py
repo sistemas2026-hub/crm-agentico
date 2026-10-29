@@ -41,6 +41,9 @@ telefono; si no, se aviso y no llego al telefono; si no, sin aviso.
 from __future__ import annotations
 
 import datetime as dt
+import logging
+
+logger = logging.getLogger(__name__)
 
 #: De la bitacora de la orden, los eventos que dicen quien se la dio a quien.
 EVENTOS_DE_ASIGNACION = ("asignada_por_el_supervisor", "publicada_por_una_persona",
@@ -262,6 +265,28 @@ def por_jornada_de(jornadas, receptores, ordenes) -> tuple:
     return por, sin
 
 
+def _asuntos_de(org, ordenes) -> dict:
+    """{orden.id: asunto} de las ordenes que nacieron de un ticket (29/10/2026,
+    pedido del usuario: «también añade el asunto»). Cortado como lo cuentan los
+    niveles (`niveles.asunto_del_ticket`): «No Tiene Internet», sin el cliente
+    que el nombre del ticket trae pegado. Una sola consulta; si falla, vacio."""
+    from campo.niveles import asunto_del_ticket, asuntos_de_las_plantillas
+    from cases.models import Case
+
+    refs ={str(o.origen_ref) for o in ordenes if o.origen_tipo == "case" and o.origen_ref}
+    if not refs:
+        return {}
+    try:
+        nombre_de = {str(i): n for i, n in
+                     Case.objects.filter(org=org, id__in=list(refs)).values_list("id", "name")}
+        plantillas = asuntos_de_las_plantillas(org)
+    except Exception:                                            # noqa: BLE001
+        logger.warning("Programacion: no se pudo leer el asunto de las ordenes")
+        return {}
+    return {o.id: asunto_del_ticket(nombre_de[str(o.origen_ref)], plantillas)[1]
+            for o in ordenes if str(o.origen_ref) in nombre_de}
+
+
 def del_dia(org, fecha) -> dict:
     """Lo publicado para `fecha`. Ver el encabezado.
 
@@ -284,6 +309,7 @@ def del_dia(org, fecha) -> dict:
 
     zona = R._zona_de(org)
     jornadas, reciben, receptores, ordenes = jornadas_y_ordenes(org, fecha)
+    asunto_de = _asuntos_de(org, ordenes)
 
     #  QUIEN LA ASIGNO: el ultimo evento de asignacion de cada orden.
     ultimo = {}
@@ -376,6 +402,7 @@ def del_dia(org, fecha) -> dict:
             #  29/10/2026, pedido del usuario: el cliente, cuando vence y su
             #  lugar en el orden del dia (el que sigue la app).
             "cliente": o.cliente_nombre or "",
+            "asunto": asunto_de.get(o.id, ""),
             "vence_en": o.sla_vence_en.astimezone(zona).isoformat() if o.sla_vence_en else None,
             "orden_del_dia": (o.orden_del_dia if o.orden_del_dia_fecha == fecha else None),
             "siguiente": False,

@@ -119,14 +119,35 @@ export function textoDeLaSiguiente(ordenes) {
  * @param {string} dia AAAA-MM-DD
  */
 export function textoDelVencimiento(iso, dia) {
+  return vencimiento(iso, dia).texto;
+}
+
+/**
+ * Con qué tono se pinta el vencimiento en la tarjeta de la orden (29/10/2026):
+ * «vencida» en rojo, «hoy» en ámbar, «proxima» y «sin» en gris. Sale de la misma
+ * cuenta que el texto, para que el color y la frase no se contradigan.
+ *
+ * @param {string | null | undefined} iso
+ * @param {string} dia AAAA-MM-DD
+ */
+export function tonoDelVencimiento(iso, dia) {
+  return vencimiento(iso, dia).tono;
+}
+
+/**
+ * @param {string | null | undefined} iso
+ * @param {string} dia
+ * @returns {{ texto: string, tono: 'vencida' | 'hoy' | 'proxima' | 'sin' }}
+ */
+function vencimiento(iso, dia) {
   const fecha = (iso ?? '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !/^\d{4}-\d{2}-\d{2}$/.test(dia ?? '')) {
-    return 'Sin vencimiento';
+    return { texto: 'Sin vencimiento', tono: 'sin' };
   }
   const dias = Math.round((Date.parse(`${fecha}T00:00:00Z`) - Date.parse(`${dia}T00:00:00Z`)) / 86400000);
   const corta = `${fecha.slice(8, 10)}/${fecha.slice(5, 7)}`;
-  if (dias < 0) return `Venció el ${corta}`;
-  if (dias === 0) return 'Vence hoy';
-  if (dias === 1) return 'Vence mañana';
-  return `Vence el ${corta}`;
+  if (dias < 0) return { texto: `Venció el ${corta}`, tono: 'vencida' };
+  if (dias === 0) return { texto: 'Vence hoy', tono: 'hoy' };
+  if (dias === 1) return { texto: 'Vence mañana', tono: 'proxima' };
+  return { texto: `Vence el ${corta}`, tono: 'proxima' };
 }

@@ -6,6 +6,7 @@ import {
   textoDelAviso,
   textoDeLaSiguiente,
   textoDelVencimiento,
+  tonoDelVencimiento,
   textoDePrioridad,
   textoSinBajar
 } from './dia-publicado.js';
@@ -115,6 +116,18 @@ describe('cuándo vence, contra el día que se mira (29/10/2026)', () => {
   it('el día es el de la empresa, no el del navegador ni el de UTC', () => {
     //  23:59 en Bogotá es el 04:59 UTC del día siguiente: sigue siendo «hoy».
     expect(textoDelVencimiento('2026-10-29T23:59:59-05:00', dia)).toBe('Vence hoy');
+  });
+
+  it('el tono dice lo mismo que el texto: rojo lo vencido, ámbar lo de hoy', () => {
+    expect(
+      [
+        '2026-10-28T23:59:59-05:00',
+        '2026-10-29T23:59:59-05:00',
+        '2026-10-30T23:59:59-05:00',
+        '2026-11-03T23:59:59-05:00',
+        null
+      ].map((v) => tonoDelVencimiento(v, dia))
+    ).toEqual(['vencida', 'hoy', 'proxima', 'proxima', 'sin']);
   });
 
   it('sin fecha no inventa', () => {
