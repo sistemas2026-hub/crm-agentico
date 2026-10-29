@@ -1,6 +1,8 @@
 # Objetivo · La operación de un ISP se mira como una empresa virtual
 
-> Abierto el 29/10/2026. Estado: **abierto** — fase 0 sin arrancar.
+> Abierto el 29/10/2026. Estado: **abierto** — **FASE 0 CERRADA** el
+> 29/10/2026, con A1 verificado contra PostgreSQL. La fase 1 (eventos) espera
+> autorización. Los riesgos pendientes NO se podan al cerrar: siguen abajo.
 > El **qué** y el **por qué** del multi-ISP viven en [PRD.md §8.13](../../PRD.md)
 > y en [plataforma-multi-isp.md](plataforma-multi-isp.md); acá no se repiten.
 > Si difieren, manda el PRD.
@@ -255,15 +257,71 @@ Facturación y Cartera como funciones independientes dentro.**
 | `operativo` | `Operaciones` | **¿el mismo?** | **ambigua** |
 | — | `Atención al Cliente` | **falta como área** | **ambigua** |
 
-**Dos ambigüedades que necesitan decisión de negocio, y no las resuelvo yo:**
+### Las dos ambigüedades, RESUELTAS el 29/10/2026
 
-1. **`operativo` (área) vs `Operaciones` (rol).** El único rol con
-   `area: Operaciones` es `supervisor_noc`. ¿Es `operativo` el departamento del
-   NOC, o es otra cosa? Importa porque **el NOC es el primer departamento que
-   se va a construir**.
-2. **`Atención al Cliente` no existe como área.** Tres roles la declaran
-   (`soporte`, `cliente_final`, `soporte_tecnico_cliente`) y no hay entrada en
-   `config.areas`. ¿Se crea el departamento, o esos roles pertenecen a otro?
+**1 · `operativo` NO se fusiona con el NOC.** Se crea una agrupación
+**Dirección de Operaciones** con **dos departamentos independientes**:
+
+```
+Direccion de Operaciones          (agrupacion, no departamento)
+  ├── NOC y Redes                 supervision de red, alarmas, diagnostico
+  └── Operaciones de Campo        instalaciones, correctivos, cuadrillas
+```
+
+`supervisor_noc` se mapea a **NOC y Redes**, conservando sus permisos y
+registros históricos. **`operativo` queda como identificador legado pendiente
+de mapeo** — no se fusiona automáticamente con ninguno de los dos.
+
+El motivo lo dio el usuario y es de diseño, no de comodidad: *«mañana una
+empresa tendrá que separar el NOC de las cuadrillas y habría que rehacer su
+estructura»*. Un ISP pequeño las tiene juntas; uno grande, no. Por eso la
+agrupación existe desde el principio aunque hoy sobre.
+
+**2 · `Atención al Cliente` se crea como departamento independiente.** Los tres
+roles que hoy declaran esa área (`soporte`, `cliente_final`,
+`soporte_tecnico_cliente`) se mapean a ella **documentando la asignación y sin
+cambiar permisos ni rutas de ejecución**.
+
+Debe poder derivar hacia NOC, Operaciones de Campo o Finanzas **según las
+capacidades realmente implementadas** — hoy la derivación solo alcanza a
+`facturacion_cliente`, `soporte_tecnico_cliente` y `ventas`, y eso no se
+inventa en la pantalla.
+
+---
+
+## Personajes virtuales — decidido el 29/10/2026
+
+| Rol ejecutable | Representación | Presencia |
+|---|---|---|
+| `cliente_final` | recepcionista digital | permanente, **solo origen** |
+| `facturacion_cliente` | agente de facturación | permanente |
+| `soporte_tecnico_cliente` | agente de soporte | permanente |
+| `ventas` | agente comercial | permanente |
+| `supervisor_noc` | supervisor virtual del NOC | permanente |
+| `configuracion_guiada` | asistente administrativo | **aparece al ser invocado** |
+| `soporte` · `facturacion` · `administracion` | — | **capacidades de una persona**, sin personaje |
+
+**`cliente_final` nunca se dibuja como destino de derivación.** No es una
+preferencia estética: el motor no permite esa operación —no está en
+`areas_destino`— y pintarla sería mostrar una ruta que no existe.
+
+**Los personajes distinguen existir de estar trabajando.** Un agente
+configurado y en reposo se ve distinto de uno ejecutando una tarea, y la
+diferencia la marca la procedencia del evento, no la animación.
+
+### El número de personajes NO es seis
+
+Seis es lo que tiene Rapilink hoy, **no un límite del sistema**. Otra empresa
+tendrá un solo agente para varias funciones, o cuatro especializados en
+soporte, redes, cartera y ventas.
+
+> **La escena se dimensiona por los agentes EJECUTABLES que el motor reporta,
+> nunca por los roles declarados en un archivo.** Son dos números distintos y
+> hoy difieren: 9 roles, 6 ejecutables, 5 con escritorio permanente.
+
+Esto es lo mismo que ya gobierna la planta actual —la geometría se deriva del
+número de agentes y del lienzo, sin una sola constante de posición— y se
+conserva al cambiar de motor gráfico.
 
 **No se fusionan datos, permisos ni registros históricos.** El mapeo es una
 tabla de equivalencias a aplicar en la fase 2, no una migración.
@@ -476,7 +534,7 @@ alcanzan para animar con honestidad, el proyecto es otro.
 
 | Fase | Qué | Cierra con |
 |---|---|---|
-| **0** | Auditoría y decisiones. Arreglar D-A. Medir qué roles son ejecutables. Mapear los dos vocabularios **sin fusionar** | A1, y el mapeo aprobado |
+| **0** ✅ | ~~Auditoría y decisiones~~ **CERRADA 29/10/2026**: D-A y D-D corregidos, A1 verificado contra PostgreSQL, inventario de ejecutables medido, mapeo propuesto y las tres decisiones de negocio tomadas | A1 ✅ · A3 medido · A5 ✅ · A6 ✅ (panorama) |
 | **1** | Eventos: cursor, endpoint incremental **con aislamiento por empresa**, destino de derivación. Medir la carga | A6, A7, A8 |
 | **2** | Modelo organizacional canónico. Migración con respaldo | A2, A3, A4 |
 | **3** | Prototipo PixiJS: escena aislada, cámara, **un** departamento (NOC), sin personajes | A11 |
