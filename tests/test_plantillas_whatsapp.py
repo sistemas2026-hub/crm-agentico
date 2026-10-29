@@ -57,6 +57,7 @@ class Config:
         # original y cualquier campo nuevo da un falso rojo.
         self.mensajes_automaticos = {}
         self.respaldos_mensajes = {}
+        self.plantillas_desactivadas = []
 
 
 SECRETOS = {"WA_TEL": "1112223334", "WA_TOKEN": "tok-secreto", "WA_WABA": "999888777"}
@@ -891,6 +892,97 @@ try:
 finally:
     for obj, nombre, original in orig_m:
         setattr(obj, nombre, original)
+
+
+# =============================================================================
+titulo("6. Una plantilla desactivada por la empresa no se usa en ningun lado")
+# =============================================================================
+#  En el motor, no solo en la pantalla: no se ofrece, no se manda pidiendola
+#  por su nombre, no la manda un aviso automatico ni la encuesta, y no se
+#  puede encender un momento con ella.
+c6 = ConfigMens()
+c6.plantillas_desactivadas = ["ticket_creado"]
+a = Avisador()
+r = a.correr(c6)
+revisar(r == {"enviado": False, "motivo": "plantilla_desactivada"} and not a.envios,
+        "un aviso automatico con su plantilla desactivada no sale", f"{r}")
+ce = ConfigEnc()
+ce.plantillas_desactivadas = ["encuesta_satisfaccion"]
+e = Encuestador()
+r = e.correr(ce)
+revisar(r == {"enviada": False, "motivo": "plantilla_desactivada"} and not e.envios and not e.reservas,
+        "la encuesta con su plantilla desactivada no sale (ni reserva)", f"{r}")
+
+orig_6 = [(api, "_config_de", api._config_de),
+          (api.whatsapp, "plantillas_aprobadas", api.whatsapp.plantillas_aprobadas),
+          (api.editor, "guardar_uso_de_plantilla", api.editor.guardar_uso_de_plantilla),
+          (api, "olvidar_config", api.olvidar_config)]
+try:
+    c_api = Config()
+    c_api.plantillas_desactivadas = ["seguimiento_caso"]
+    api._config_de = lambda t: c_api
+    api.whatsapp.plantillas_aprobadas = lambda c, t: [
+        {"nombre": "seguimiento_caso", "estado": "APPROVED", "variables": 1},
+        {"nombre": "bienvenida", "estado": "APPROVED", "variables": 0}]
+    r = cliente.get(f"/canales/plantillas?tenant={TENANT}")
+    revisar([p["nombre"] for p in r.get_json()["plantillas"]] == ["bienvenida"],
+            "no se ofrece para mandar", f"{r.get_json()['plantillas']}")
+    r = cliente.get(f"/canales/plantillas/todas?tenant={TENANT}")
+    revisar({p["nombre"]: p["en_uso"] for p in r.get_json()["plantillas"]}
+            == {"seguimiento_caso": False, "bienvenida": True},
+            "en Ajustes se ve, con su estado de uso", f"{r.get_json()}")
+
+    m = Motor()
+    p = montar(m)
+    try:
+        api._config_de = lambda t: c_api
+        api.whatsapp.plantillas_aprobadas = lambda c, t: [PLANTILLA]
+        r = cliente.post("/casos/caso-1/plantilla", json=CUERPO)
+    finally:
+        for obj, nombre, original in reversed(p):
+            setattr(obj, nombre, original)
+    revisar(r.status_code == 400 and not m.guardados and "desactiv" in r.get_json()["error"],
+            "pedirla por su nombre desde el ticket: 400, y no se guarda ni se manda", f"{r.status_code}")
+
+    cfg_real2 = cargar_config(RAIZ / "tenants" / "rapilink.config.yaml").model_copy(
+        update={"plantillas_desactivadas": ["ticket_creado"]})
+    api._config_de = lambda t: cfg_real2
+    api.whatsapp.plantillas_aprobadas = lambda c, t: [
+        {"nombre": "ticket_creado", "estado": "APPROVED", "variables": 1}]
+    r = cliente.put("/mensajes-automaticos/ticket_creado_cliente",
+                    json={"tenant": TENANT, "activo": True, "plantilla": "ticket_creado",
+                          "datos": ["cliente_nombre"]})
+    revisar(r.status_code == 400 and "desactivada" in r.get_json()["error"],
+            "no se enciende un momento con una plantilla desactivada", f"{r.get_json()}")
+
+    usos: list = []
+
+    def guardar_uso(t, nombre, en_uso):
+        usos.append((nombre, en_uso))
+        return cfg_real2.model_copy(update={
+            "plantillas_desactivadas": [] if en_uso else [nombre],
+            "mensajes_automaticos": {"seguimiento_ticket": MensajeAutomatico(
+                activo=True, plantilla="seguimiento_caso", datos=["cliente_nombre", "escrito"])}})
+    api.editor.guardar_uso_de_plantilla = guardar_uso
+    api.olvidar_config = lambda t: None
+    r = cliente.put("/canales/plantillas/seguimiento_caso/uso", json={"tenant": TENANT, "en_uso": False})
+    revisar(r.status_code == 200 and usos == [("seguimiento_caso", False)]
+            and r.get_json() == {"plantilla": "seguimiento_caso", "en_uso": False,
+                                 "momentos_que_la_usan": ["seguimiento_ticket"]},
+            "desactivarla: se guarda y dice que momentos encendidos la usan", f"{r.get_json()}")
+finally:
+    for obj, nombre, original in orig_6:
+        setattr(obj, nombre, original)
+
+#  El editor, de verdad: entra y sale de la lista sin duplicarse.
+from nucleo.config import editor as editor_real               # noqa: E402
+
+doc: dict = {"plantillas_desactivadas": ["b"]}
+editor_real._mutar_uso_de_plantilla(doc, "a", False)
+editor_real._mutar_uso_de_plantilla(doc, "a", False)
+revisar(doc["plantillas_desactivadas"] == ["a", "b"], "desactivar dos veces no la duplica", f"{doc}")
+editor_real._mutar_uso_de_plantilla(doc, "a", True)
+revisar(doc["plantillas_desactivadas"] == ["b"], "activarla la saca de la lista", f"{doc}")
 
 
 print(f"\n{'=' * 76}\n  {'TODO OK' if not fallos else f'{len(fallos)} FALLAS'}\n{'=' * 76}")

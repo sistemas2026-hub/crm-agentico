@@ -9,7 +9,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const crearPlantilla = vi.fn();
 const borrarPlantilla = vi.fn();
 const listarPlantillas = vi.fn();
+const cambiarUsoDePlantilla = vi.fn();
 vi.mock('$lib/server/v2/canal-whatsapp.js', () => ({
+  cambiarUsoDePlantilla: (...a) => cambiarUsoDePlantilla(...a),
   crearPlantilla: (...a) => crearPlantilla(...a),
   borrarPlantilla: (...a) => borrarPlantilla(...a),
   listarPlantillas: (...a) => listarPlantillas(...a)
@@ -45,6 +47,7 @@ describe('Plantillas de WhatsApp en Ajustes', () => {
   beforeEach(() => {
     crearPlantilla.mockReset();
     borrarPlantilla.mockReset();
+    cambiarUsoDePlantilla.mockReset();
     listarPlantillas.mockReset();
   });
 
@@ -84,6 +87,22 @@ describe('Plantillas de WhatsApp en Ajustes', () => {
     expect((/** @type {any} */ (await actions.borrar(evento({ nombre: 'x' }, 'SUPERVISOR')))).status).toBe(403);
     expect(crearPlantilla).not.toHaveBeenCalled();
     expect(borrarPlantilla).not.toHaveBeenCalled();
+  });
+
+  it('desactivar una plantilla dice qué mensajes automáticos dejan de salir', async () => {
+    cambiarUsoDePlantilla.mockResolvedValue({ en_uso: false, momentos_que_la_usan: ['seguimiento_ticket'] });
+    const r = /** @type {any} */ (await actions.uso(evento({ nombre: 'seguimiento_caso', en_uso: '0' })));
+    expect(cambiarUsoDePlantilla.mock.calls[0].slice(2)).toEqual(['seguimiento_caso', false]);
+    expect(r.uso).toEqual({ nombre: 'seguimiento_caso', enUso: false, momentos: ['seguimiento_ticket'] });
+  });
+
+  it('activarla, y solo un administrador', async () => {
+    cambiarUsoDePlantilla.mockResolvedValue({ en_uso: true, momentos_que_la_usan: [] });
+    await actions.uso(evento({ nombre: 'seguimiento_caso', en_uso: '1' }));
+    expect(cambiarUsoDePlantilla.mock.calls[0][3]).toBe(true);
+    const r = /** @type {any} */ (await actions.uso(evento({ nombre: 'x', en_uso: '0' }, 'SUPERVISOR')));
+    expect(r.status).toBe(403);
+    expect(cambiarUsoDePlantilla).toHaveBeenCalledTimes(1);
   });
 
   it('borrar va por nombre', async () => {

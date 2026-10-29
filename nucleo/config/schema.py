@@ -3327,6 +3327,10 @@ class TenantConfig(Base):
     #: Si un dato llega vacio, que se manda en su lugar: Meta rechaza un valor
     #: vacio. Se suma a RESPALDOS_POR_DEFECTO del catalogo.
     respaldos_mensajes: dict[str, str] = Field(default_factory=dict)
+    #: Plantillas de Meta que la empresa decidio NO usar (28/10/2026): no se
+    #: ofrecen en el ticket, la Bandeja ni Mensajes automaticos, y el motor no
+    #: las manda aunque se las pidan. Meta no tiene un "apagado" propio.
+    plantillas_desactivadas: list[str] = Field(default_factory=list)
 
     @field_validator("mensajes_automaticos")
     @classmethod

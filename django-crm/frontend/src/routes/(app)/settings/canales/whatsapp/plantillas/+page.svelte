@@ -125,6 +125,16 @@
       </p>
     {:else if form?.borrada}
       <p class="v2-card aviso-ok">«{form.borrada}» se borró.</p>
+    {:else if form?.uso}
+      <p class="v2-card aviso-ok">
+        «{form.uso.nombre}» {form.uso.enUso ? 'vuelve a estar en uso.' : 'quedó desactivada: no se ofrece ni se manda.'}
+        {#if !form.uso.enUso && form.uso.momentos.length}
+          <b>Ojo:</b> la usa{form.uso.momentos.length > 1 ? 'n' : ''}
+          {form.uso.momentos.length} mensaje{form.uso.momentos.length > 1 ? 's' : ''} automático{form.uso.momentos.length > 1 ? 's' : ''}
+          encendido{form.uso.momentos.length > 1 ? 's' : ''}, que no van a salir mientras esté desactivada
+          (<a href="/settings/canales/whatsapp/mensajes">Mensajes automáticos</a>).
+        {/if}
+      </p>
     {/if}
     {#if form?.error && !form?.valores}
       <p class="v2-card aviso-mal">{form.error}</p>
@@ -258,6 +268,25 @@
               <b>{p.nombre}</b>
               <Pill tone={est.tono} dot>{est.texto}</Pill>
               <span class="meta">{CATEGORIA[p.categoria] ?? p.categoria} · {p.idioma}</span>
+              {#if p.en_uso === false}<Pill tone="slate">Desactivada</Pill>{/if}
+              {#if data.can_edit}
+                <form method="POST" action="?/uso" use:enhance class="uso">
+                  <input type="hidden" name="nombre" value={p.nombre} />
+                  <input type="hidden" name="en_uso" value={p.en_uso === false ? '1' : '0'} />
+                  <button
+                    type="submit"
+                    class="interruptor"
+                    class:encendido={p.en_uso !== false}
+                    role="switch"
+                    aria-checked={p.en_uso !== false}
+                    aria-label={`${p.en_uso === false ? 'Activar' : 'Desactivar'} ${p.nombre}`}
+                    title={p.en_uso === false ? 'Activar: se vuelve a ofrecer y a mandar' : 'Desactivar: deja de ofrecerse y de mandarse'}
+                  >
+                    <span class="perilla"></span>
+                  </button>
+                  <span class="uso-texto">{p.en_uso === false ? 'Sin usar' : 'En uso'}</span>
+                </form>
+              {/if}
               {#if data.can_edit}
                 <form
                   method="POST"
@@ -374,8 +403,49 @@
     gap: 10px;
     font-size: 13.5px;
   }
-  .fila-cabeza form {
+  .fila-cabeza .uso {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .uso-texto {
+    font-size: 12px;
+    color: var(--v2-slate);
+    min-width: 52px;
+  }
+  /* El interruptor: un botón que se ve como tal (28/10/2026). */
+  .interruptor {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    border-radius: 999px;
+    border: 0;
+    padding: 0;
+    background: var(--v2-line-strong);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .interruptor.encendido {
+    background: var(--v2-moss);
+  }
+  .perilla {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+    transition: transform 0.15s;
+  }
+  .interruptor.encendido .perilla {
+    transform: translateX(16px);
+  }
+  .interruptor:focus-visible {
+    outline: 2px solid var(--v2-ember);
+    outline-offset: 2px;
   }
   .texto {
     font-size: 13px;

@@ -236,3 +236,25 @@ export async function guardarMensajeAutomatico(locals, fetch, evento, valores) {
   if (!resp.ok) throw new Error(datos.error || 'No se pudo guardar.');
   return datos;
 }
+
+/**
+ * Activa o desactiva una plantilla para esta empresa (28/10/2026). En Meta no
+ * cambia nada. Devuelve qué momentos encendidos de Mensajes automáticos la
+ * usan: esos dejan de salir mientras esté desactivada.
+ * @param {string} nombre
+ * @param {boolean} enUso
+ * @returns {Promise<{ plantilla: string, en_uso: boolean, momentos_que_la_usan: string[] }>}
+ */
+export async function cambiarUsoDePlantilla(locals, fetch, nombre, enUso) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  const resp = await fetch(`${cfg.baseUrl}/canales/plantillas/${encodeURIComponent(nombre)}/uso`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, en_uso: enUso }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'No se pudo cambiar.');
+  return datos;
+}

@@ -50,6 +50,8 @@ def enviar(config, tenant: str, caso_id: str, *, responsable_id: str | None = No
     m = config.mensajes_automaticos.get(EVENTO)
     if not m or not m.activo:
         return {"enviada": False, "motivo": "apagada"}
+    if m.plantilla in (config.plantillas_desactivadas or []):
+        return {"enviada": False, "motivo": "plantilla_desactivada"}
     if not whatsapp.activo(config):
         return {"enviada": False, "motivo": "canal_apagado"}
 

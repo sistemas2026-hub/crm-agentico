@@ -1272,6 +1272,21 @@ def guardar_mensaje_automatico(tenant: str, evento: str, activo: bool, plantilla
                                                                  plantilla, datos))
 
 
+def _mutar_uso_de_plantilla(doc: dict, nombre: str, en_uso: bool) -> None:
+    """Pone o saca 'nombre' de 'plantillas_desactivadas' (28/10/2026)."""
+    lista = [n for n in (doc.get("plantillas_desactivadas") or []) if n != nombre]
+    if not en_uso:
+        lista.append(nombre)
+    doc["plantillas_desactivadas"] = sorted(set(lista))
+
+
+def guardar_uso_de_plantilla(tenant: str, nombre: str, en_uso: bool) -> TenantConfig:
+    nombre = (nombre or "").strip()
+    if not nombre:
+        raise ErrorEdicion("falta el nombre de la plantilla.")
+    return _editar(tenant, lambda doc: _mutar_uso_de_plantilla(doc, nombre, en_uso))
+
+
 def guardar_variable_tenant(tenant: str, nombre: str, valor: str) -> TenantConfig:
     if not RE_NOMBRE_REF.match(nombre):
         raise ErrorEdicion(

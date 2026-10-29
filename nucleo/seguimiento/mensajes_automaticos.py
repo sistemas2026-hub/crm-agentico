@@ -97,6 +97,8 @@ def enviar(config, tenant: str, evento: str, para: str | None, contexto: dict | 
     m = config.mensajes_automaticos.get(evento)
     if not m or not m.activo:
         return {"enviado": False, "motivo": "apagado"}
+    if m.plantilla in (config.plantillas_desactivadas or []):
+        return {"enviado": False, "motivo": "plantilla_desactivada"}
     if not whatsapp.activo(config):
         return {"enviado": False, "motivo": "canal_apagado"}
     numero = _limpio(para)

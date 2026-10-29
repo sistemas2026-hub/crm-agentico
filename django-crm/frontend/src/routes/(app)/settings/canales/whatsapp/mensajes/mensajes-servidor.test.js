@@ -65,6 +65,32 @@ describe('Mensajes automáticos', () => {
     expect(r.data).toEqual({ evento: 'bienvenida', error: 'La plantilla pide 2 dato(s) y elegiste 1.' });
   });
 
+  it('el interruptor enciende al instante con lo ya guardado', async () => {
+    guardarMensajeAutomatico.mockResolvedValue({});
+    const r = /** @type {any} */ (await actions.encender(evento({
+      evento: 'seguimiento_ticket', activo: '1', plantilla: 'seguimiento_caso', dato: ['cliente_nombre', 'escrito']
+    })));
+    expect(guardarMensajeAutomatico.mock.calls[0][3]).toEqual({
+      activo: true, plantilla: 'seguimiento_caso', datos: ['cliente_nombre', 'escrito']
+    });
+    expect(r.guardado).toBe('seguimiento_ticket');
+  });
+
+  it('apagar no exige datos completos; encender incompleto lo rechaza el motor y se dice', async () => {
+    guardarMensajeAutomatico.mockResolvedValue({});
+    await actions.encender(evento({ evento: 'bienvenida', activo: '0', plantilla: '' }));
+    expect(guardarMensajeAutomatico.mock.calls[0][3]).toEqual({ activo: false, plantilla: '', datos: [] });
+    guardarMensajeAutomatico.mockRejectedValue(new Error('Para encenderlo, la plantilla tiene que estar aprobada por Meta.'));
+    const r = /** @type {any} */ (await actions.encender(evento({ evento: 'bienvenida', activo: '1', plantilla: '' })));
+    expect(r.status).toBe(400);
+    expect(r.data.evento).toBe('bienvenida');
+  });
+
+  it('el interruptor tampoco lo usa quien no es administrador', async () => {
+    const r = /** @type {any} */ (await actions.encender(evento({ evento: 'bienvenida', activo: '1' }, 'USER')));
+    expect(r.status).toBe(403);
+  });
+
   it('quien no es administrador no cambia nada', async () => {
     const r = /** @type {any} */ (await actions.guardar(evento({ evento: 'bienvenida' }, 'SUPERVISOR')));
     expect(r.status).toBe(403);

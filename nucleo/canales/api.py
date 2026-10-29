@@ -6334,7 +6334,10 @@ def canales_plantillas():
                      mensaje_publico(e, "No se pudieron leer las plantillas."),
                      componente="plantillas", e=e)
 
-    aprobadas = [p for p in todas if (p.get("estado") or "").upper() == "APPROVED"]
+    # Las que la empresa desactivo no se ofrecen (28/10/2026).
+    fuera = set(config.plantillas_desactivadas or [])
+    aprobadas = [p for p in todas if (p.get("estado") or "").upper() == "APPROVED"
+                 and p.get("nombre") not in fuera]
     # QUE dato va en cada {{n}} de una plantilla, segun como la armo la empresa
     # en Mensajes automaticos (28/10/2026): con eso la pantalla del ticket
     # rotula los campos ("Nombre del cliente" y no "Dato 1") y llena los que
@@ -6360,7 +6363,9 @@ def canales_plantillas_todas():
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
     try:
         config = _config_de(tenant)
-        return jsonify({"plantillas": whatsapp.plantillas_aprobadas(config, tenant)})
+        fuera = set(config.plantillas_desactivadas or [])
+        return jsonify({"plantillas": [{**p, "en_uso": p.get("nombre") not in fuera}
+                                       for p in whatsapp.plantillas_aprobadas(config, tenant)]})
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
@@ -6445,7 +6450,10 @@ def mensajes_automaticos_listar():
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     try:
-        plantillas, error_meta = whatsapp.plantillas_aprobadas(config, tenant), None
+        fuera = set(config.plantillas_desactivadas or [])
+        plantillas = [{**p, "en_uso": p.get("nombre") not in fuera}
+                      for p in whatsapp.plantillas_aprobadas(config, tenant)]
+        error_meta = None
     except Exception as e:
         registrar("mensajes", "no se pudieron leer las plantillas para Ajustes", tenant=tenant, error=e)
         plantillas, error_meta = [], "No se pudieron leer las plantillas de Meta."
@@ -6497,6 +6505,8 @@ def mensajes_automaticos_guardar(evento):
                          componente="mensajes", e=e)
         if ficha is None or (ficha.get("estado") or "").upper() != "APPROVED":
             return jsonify({"error": "Para encenderlo, la plantilla tiene que estar aprobada por Meta."}), 400
+        if plantilla in (config.plantillas_desactivadas or []):
+            return jsonify({"error": "Esa plantilla está desactivada en Plantillas: activala primero."}), 400
         if ficha.get("variables") != len(datos):
             return jsonify({"error": f"La plantilla pide {ficha.get('variables')} dato(s) y "
                                      f"elegiste {len(datos)}."}), 400
@@ -6510,6 +6520,31 @@ def mensajes_automaticos_guardar(evento):
     m = config.mensajes_automaticos[evento]
     return jsonify({"evento": evento, "activo": m.activo, "plantilla": m.plantilla,
                     "datos": list(m.datos)})
+
+
+@app.put("/canales/plantillas/<nombre>/uso")
+def canales_plantilla_uso(nombre):
+    """
+    Activa o desactiva una plantilla PARA ESTA EMPRESA (28/10/2026): en Meta
+    sigue igual. Desactivada no se ofrece ni se manda. Devuelve que momentos de
+    Mensajes automaticos la usan, para que la pantalla lo diga: esos dejan de
+    salir mientras este apagada. Cuerpo: {tenant, en_uso}.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        config = editor.guardar_uso_de_plantilla(tenant, nombre, bool(cuerpo.get("en_uso")))
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo guardar.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    afectados = [ev for ev, m in config.mensajes_automaticos.items()
+                 if m.plantilla == nombre and m.activo]
+    return jsonify({"plantilla": nombre, "en_uso": nombre not in config.plantillas_desactivadas,
+                    "momentos_que_la_usan": afectados})
 
 
 @app.get("/canales/whatsapp/salud")
@@ -6808,6 +6843,8 @@ def conversaciones_enviar_plantilla(id_conversacion, ticket_del_caso: str | None
     if elegida is None:
         return jsonify({"error": f"'{nombre}' no es una plantilla aprobada de "
                                  f"esta cuenta."}), 400
+    if nombre in (config.plantillas_desactivadas or []):
+        return jsonify({"error": f"La empresa desactivó '{nombre}': no se usa."}), 400
     # Una plantilla que mezcla {{1}} con {{nombre}} no es un formato de Meta.
     # No se adivina cual de las dos lecturas vale: se rechaza, porque
     # cualquiera de las dos pondria un valor en el lugar de otro.

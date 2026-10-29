@@ -1,6 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import {
   borrarPlantilla,
+  cambiarUsoDePlantilla,
   crearPlantilla,
   listarPlantillas
 } from '$lib/server/v2/canal-whatsapp.js';
@@ -47,6 +48,20 @@ export const actions = {
       return { creada };
     } catch (/** @type {any} */ err) {
       return fail(400, { error: err?.message || 'Meta no aceptó la plantilla.', valores: plantilla });
+    }
+  },
+
+  /** Activar o desactivar una plantilla para esta empresa (28/10/2026). */
+  async uso({ fetch, request, locals }) {
+    if (locals.profile?.role !== 'ADMIN') return fail(403, { error: SOLO_ADMIN });
+    const form = await request.formData();
+    const nombre = form.get('nombre')?.toString().trim() ?? '';
+    if (!nombre) return fail(400, { error: 'Falta el nombre.' });
+    try {
+      const r = await cambiarUsoDePlantilla(locals, fetch, nombre, form.get('en_uso') === '1');
+      return { uso: { nombre, enUso: r.en_uso, momentos: r.momentos_que_la_usan ?? [] } };
+    } catch (/** @type {any} */ err) {
+      return fail(400, { error: err?.message || 'No se pudo cambiar.' });
     }
   },
 
