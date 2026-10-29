@@ -8,15 +8,32 @@ import {
   tituloDelMaterial,
   opcionDelSupervisor,
   porQue,
+  resumenDeAvisos,
   resumenDeLineas
 } from './material-del-dia.js';
 
 describe('si el Supervisor ya cargó el material (fase 3)', () => {
-  it('la hora y el acta, o nada', () => {
+  it('la hora, sin el acta (29/10/2026: «está de más»), o nada', () => {
     expect(estadoDeCarga({ cargado_en: '2026-10-28T06:07:10-05:00', acta: 'MAT-20261028-1a2b3c4d' })).toBe(
-      'Cargado por el Supervisor a las 06:07 · acta MAT-20261028-1a2b3c4d'
+      'Cargado a las 06:07'
     );
     expect(estadoDeCarga({ cargado_en: null, acta: 'MAT-x' })).toBe('');
+  });
+
+  it('los avisos en una línea: lo que falta y los equipos con que no sale', () => {
+    const falta = 'Le falta material para completar el kit (13 de 14 materiales): sale con lo que hay en bodega.';
+    const catv = 'Sale sin ONU CATV: no puede hacer el trabajo que lo necesita.';
+    const wifi = 'Sale sin ONU WIFI: no puede hacer el trabajo que lo necesita.';
+    const tv = 'Sale sin SPLITER DE TV 1X2: no puede hacer el trabajo que lo necesita.';
+    expect(resumenDeAvisos([falta, catv, wifi])).toBe('Falta material · sale sin ONU CATV y ONU WIFI');
+    expect(resumenDeAvisos([falta, catv, wifi, tv])).toBe(
+      'Falta material · sale sin ONU CATV, ONU WIFI y SPLITER DE TV 1X2'
+    );
+    expect(resumenDeAvisos([catv])).toBe('Sale sin ONU CATV');
+    expect(resumenDeAvisos([falta, 'No tiene líder con cuenta activa: no hay a quién cargarle.'])).toBe(
+      'Falta material · 1 aviso más'
+    );
+    expect(resumenDeAvisos([])).toBe('');
   });
 
   it('el título dice cuántas ya se cargaron, o que es una propuesta', () => {

@@ -64,14 +64,40 @@ export function opcionDelSupervisor(eligeElSupervisor) {
 }
 
 /**
- * Si el Supervisor ya le cargó el material hoy (fase 3, 28/10/2026): «Cargado
- * por el Supervisor a las 06:07 · acta MAT-20261028-1a2b3c4d». Vacío si no.
+ * Si el Supervisor ya le cargó el material hoy: «Cargado a las 06:07». Vacío
+ * si no. Sin el acta desde el 29/10/2026 (el usuario: «está de más»): el acta
+ * sigue en Inventario → Reportes → Entregas, que es donde se busca.
  *
  * @param {{ cargado_en?: string | null, acta?: string }} m
  */
 export function estadoDeCarga(m) {
   if (!m?.cargado_en) return '';
-  return `Cargado por el Supervisor a las ${m.cargado_en.slice(11, 16)} · acta ${m.acta}`;
+  return `Cargado a las ${m.cargado_en.slice(11, 16)}`;
+}
+
+/**
+ * Una línea que resume los avisos del material de una cuadrilla (29/10/2026,
+ * el usuario: «que se contraiga como el material»): «Falta material · sale sin
+ * ONU CATV y ONU WIFI». Lo que no reconoce lo cuenta: «1 aviso más».
+ *
+ * @param {string[]} avisos
+ */
+export function resumenDeAvisos(avisos) {
+  const lista = avisos ?? [];
+  const sinEquipo = lista.map((a) => /^Sale sin (.+?):/.exec(a)?.[1]).filter(Boolean);
+  const falta = lista.some((a) => a.startsWith('Le falta material'));
+  const otros = lista.length - sinEquipo.length - (falta ? 1 : 0);
+  const partes = [];
+  if (falta) partes.push('Falta material');
+  if (sinEquipo.length) partes.push(`${partes.length ? 'sale' : 'Sale'} sin ${unidos(sinEquipo)}`);
+  if (otros > 0) partes.push(`${otros} ${otros === 1 ? 'aviso' : 'avisos'} más`);
+  return partes.join(' · ');
+}
+
+/** «A», «A y B», «A, B y C». @param {string[]} cosas */
+function unidos(cosas) {
+  if (cosas.length <= 1) return cosas.join('');
+  return `${cosas.slice(0, -1).join(', ')} y ${cosas[cosas.length - 1]}`;
 }
 
 /**

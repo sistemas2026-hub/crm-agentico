@@ -8,6 +8,7 @@
    */
   import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
+  import MaterialDeLaCuadrilla from '$lib/supervisor/MaterialDeLaCuadrilla.svelte';
   import OrdenDelDia from '$lib/supervisor/OrdenDelDia.svelte';
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import {
@@ -17,14 +18,7 @@
     textoDePrioridad,
     textoSinBajar
   } from '$lib/supervisor/dia-publicado.js';
-  import {
-    estadoDeCarga,
-    lineaDeMaterial,
-    opcionDelSupervisor,
-    porQue,
-    resumenDeLineas,
-    tituloDelMaterial
-  } from '$lib/supervisor/material-del-dia.js';
+  import { opcionDelSupervisor, tituloDelMaterial } from '$lib/supervisor/material-del-dia.js';
   import '../supervisor-noc.css';
 
   /** @type {{ data: any, form: any }} */
@@ -175,12 +169,12 @@
               {#each publicado.cuadrillas as c (c.jornada)}
                 {@const m = materialPor.get(c.jornada)}
                 <div class="snoc-tarjeta snoc-pila-xs" style="min-width:0; justify-content:flex-start;">
-                  <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs);">
-                    <strong>{c.cuadrilla}</strong>
-                    <span class="snoc-mono">{c.ordenes.length} de {c.tope}</span>
+                  <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs); align-items:baseline;">
+                    <strong style="font-size:15px;">{c.cuadrilla}</strong>
+                    <span class="snoc-body-sm snoc-secundario">{c.ordenes.length} de {c.tope} órdenes</span>
                   </div>
-                  <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-                    {#if c.labor}<span class="snoc-tag">{c.labor}</span>{/if}
+                  <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap; align-items:center;">
+                    {#if c.labor}<span style="padding:0 8px; border-radius:999px; background:var(--snoc-surface-container); color:var(--snoc-on-surface-variant); font-size:12px; line-height:20px; font-weight:600;">{c.labor}</span>{/if}
                     {#each c.zonas as z (z)}<span class="snoc-body-sm snoc-secundario">{z}</span>{/each}
                   </div>
                   <!-- POR PERSONA: lo que la app de cada uno debería tener. La
@@ -192,35 +186,10 @@
                       <p class="snoc-body-sm snoc-error-txt">{textoSinBajar(p)}</p>
                     {/if}
                   {/each}
-                  <!-- EL MATERIAL QUE SE LE CARGARÍA (propuesta, 28/10/2026). -->
+                  <!-- EL MATERIAL: compacto, con los avisos y la lista plegados
+                       (29/10/2026). Ver MaterialDeLaCuadrilla.svelte. -->
                   {#if m && (m.lineas.length || m.avisos.length)}
-                    <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-xs);">
-                      <span class="snoc-label">Material{#if m.kit} · {m.kit}{/if}</span>
-                      {#if estadoDeCarga(m)}
-                        <p class="snoc-body-sm">{estadoDeCarga(m)}</p>
-                      {/if}
-                      {#if m.kit}
-                        <p class="snoc-body-sm snoc-secundario">Kit: {porQue(m.kit_por)}</p>
-                      {/if}
-                      {#if m.lineas.length}
-                        <p class="snoc-body-sm snoc-secundario">
-                          Desde {m.bodega} ({porQue(m.bodega_por)}) · a {m.lider}
-                        </p>
-                      {/if}
-                      {#each m.avisos as a (a)}
-                        <p class="snoc-body-sm snoc-error-txt">{a}</p>
-                      {/each}
-                      <!-- PLEGADO (28/10/2026): la lista entera empachaba la
-                           tarjeta; se abre cuando hace falta. -->
-                      {#if m.lineas.length}
-                        <details>
-                          <summary class="snoc-body-sm">{resumenDeLineas(m.lineas)}</summary>
-                          {#each m.lineas as l (l.material)}
-                            <p class="snoc-body-sm">{lineaDeMaterial(l)}</p>
-                          {/each}
-                        </details>
-                      {/if}
-                    </div>
+                    <MaterialDeLaCuadrilla {m} />
                   {/if}
                   {#if !c.ordenes.length}
                     <p class="snoc-body-sm snoc-secundario">Sin órdenes publicadas.</p>
