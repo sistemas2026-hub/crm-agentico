@@ -606,6 +606,115 @@ siguen vivas, coordinar.
 
 ---
 
+## E1 · Registro de eventos — validación exhaustiva, 29/10/2026
+
+Todo lo de abajo está **ejecutado contra PostgreSQL 17.11**, que es la versión
+que corre producción (Supabase nuevo; el `docker-compose` local usa pg16 y por
+eso no servía para decidir).
+
+### El banco de garantía: ocho escenarios
+
+```
+                                           A (creado_en,id)   B (tx,id)+snapshot
+1  commit tardio                           PIERDE 1 de 2      2 de 2
+2  rollback de una transaccion                   --           2 de 2, sin la abortada
+3  cinco eventos de UNA transaccion              --           5 de 5, sin repetir
+4  paginacion: 25 eventos en paginas de 4        --           25 de 25, 25 distintos
+5  reconexion con el cursor guardado             --           7 de 7, sin repetir
+6  retroceso del reloj                      2 de 2            2 de 2
+7  filas historicas sin tx                       --           NO se entregan
+8  transaccion abierta en vuelo                  --           retiene a las posteriores
+```
+
+**El cursor B es el que se adopta.** Resuelve el único caso donde A pierde, y no
+rompe ninguno de los demás.
+
+### Dos hallazgos del banco que cambian el diseño
+
+**[7] Las filas históricas no se entregan, y está bien.** Una fila con `tx NULL`
+queda fuera del cursor. **El backfill de lo ya existente es trabajo aparte** —el
+cursor no lo resuelve y no debe fingir que sí—. Para la oficina virtual no
+importa: lo que se anima es lo que pasa *ahora*, y la foto inicial sigue
+viniendo de `/centro-mando`.
+
+**[8] La garantía tiene un coste, y es de orden.** Con una transacción abierta,
+el cursor **no avanza**: en el banco, 4 eventos insertados y 0 entregados hasta
+que la transacción cerró. Después salieron los 4 de golpe.
+
+Eso sería inaceptable sin techo. **Pero el techo existe y está medido en este
+proyecto**: producción tiene `idle_in_transaction_session_timeout = 60s` en
+`postgres`, `crm_user` y `motor_user` (CONTRATO_RELEVO_IA_HUMANO P-A, PRD §16),
+más la restricción transversal de que **ninguna transacción queda abierta
+esperando una operación externa**.
+
+> **El retraso máximo del cursor es de 60 segundos, y no es una estimación:
+> es el timeout configurado en producción.** Con un sondeo de pocos segundos,
+> el caso normal es inmediato y el peor caso está acotado.
+
+### V6 DESBLOQUEADO · la migración no necesita `CONCURRENTLY`
+
+El bloqueante era que el ledger envuelve cada migración en una transacción y
+PostgreSQL rechaza ahí `CREATE INDEX CONCURRENTLY`. **Se resuelve sin
+necesitarlo**, en tres pasos que son todos de metadata:
+
+```sql
+alter table asistente.tool_calls add column tx xid8;          -- sin default
+alter table asistente.tool_calls
+  alter column tx set default pg_current_xact_id();           -- solo filas nuevas
+create index tool_calls_cursor_idx
+  on asistente.tool_calls (organization_id, tx, id)
+  where tx is not null;                                       -- indice PARCIAL
+```
+
+**Por qué funciona, medido sobre 400.000 filas / 46 MB simuladas:**
+
+```
+indice parcial recien creado   8192 bytes   (nace VACIO: ninguna fila vieja tiene tx)
+una fila nueva recibe tx       si
+los tres pasos, cronometrados  0,050 s
+```
+
+- `ADD COLUMN` **sin default** no reescribe la tabla: es solo metadata. Con un
+  default **volátil** como `pg_current_xact_id()` sí la reescribiría entera y
+  tomaría un bloqueo largo — por eso va en dos pasos y no en uno.
+- El índice es **parcial**: al crearse no hay ninguna fila con `tx`, así que
+  nace vacío y crece desde cero.
+
+A 0,05 s cabe de sobra dentro de la transacción del ledger. **No hay que tocar
+el mecanismo de migraciones.**
+
+### Lo que sigue sin medir: el tamaño real
+
+No tengo acceso a producción y **no voy a leer `.env`**, que es donde están las
+credenciales. Las consultas, para ejecutar a mano:
+
+```sql
+select version();
+select pg_size_pretty(pg_total_relation_size('asistente.tool_calls')) as total,
+       pg_size_pretty(pg_table_size('asistente.tool_calls'))          as tabla,
+       pg_size_pretty(pg_indexes_size('asistente.tool_calls'))        as indices;
+select reltuples::bigint as filas_estimadas
+  from pg_class where oid = 'asistente.tool_calls'::regclass;
+select min(creado_en), max(creado_en) from asistente.tool_calls;
+```
+
+Son todas de lectura y ninguna toma bloqueos. **El número ya no bloquea E1** —la
+migración es instantánea sea cual sea el tamaño— pero sí hace falta para decidir
+la política de retención, que el PRD registra como pendiente.
+
+### Ramas concurrentes sobre los monolitos
+
+```
+origin/campo/al-dia              5 semanas sin actividad   api.py +31/-6   db.py +8/-1
+origin/feat/campo-diseno-stitch  5 semanas sin actividad   api.py +120/-0  db.py +139/-0
+```
+
+Las dos están **paradas hace cinco semanas** y sus cambios son **aditivos** —la
+segunda no borra una sola línea—. El riesgo de conflicto es bajo, pero existe.
+**No se integran ni se tocan**: si reviven, se coordina antes.
+
+---
+
 ## Modelo de eventos
 
 
