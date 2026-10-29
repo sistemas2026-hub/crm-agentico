@@ -876,6 +876,25 @@ Dos cosas que se deciden junto con eso:
 
 Errores que ya costaron tiempo una vez.
 
+**`permission denied for schema asistente` (o `for table migraciones_aplicadas`) al correr `cli/migrar_asistente.py`.** No falta un usuario ni hay que pedir credenciales nuevas: el migrador eligió la credencial equivocada. Medido el 29/10/2026, solo lectura, contra producción. En el `.env` de desarrollo conviven tres credenciales de base, y **solo una sirve para el ledger del motor**:
+
+| Variable | Rol | Para qué es | `--estado` del ledger del motor |
+|---|---|---|---|
+| `MIGRATOR_DBUSER` | `crm_migrator` | las migraciones de **Django** (el `entrypoint.sh` del backend) | `permission denied for schema asistente` |
+| `MOTOR_DBUSER` | `motor_user` | el **tráfico** del motor (lo lee `docker-compose.prod.yml` como `DBUSER` del servicio `motor`) | `permission denied for table migraciones_aplicadas` |
+| `DBUSER` | `postgres` | la que aplicó las migraciones del motor hasta hoy | responde: 68 aplicadas, 3 pendientes |
+
+El migrador toma `MIGRATOR_DBUSER` si existe y `DBUSER` si no (`cli/migrar_asistente.py::credencial`, desde `7920c201`, 08/10/2026). Esa precedencia se pensó para el contenedor del motor, donde `DBUSER` es `motor_user`; en una máquina con el `.env` completo elige la del CRM, que no tiene nada sobre `asistente`. El comando no lee el `.env` por su cuenta: usa lo que haya en el entorno del proceso. Para correrlo con la credencial correcta, vaciar el override **solo para ese comando** (no se edita el `.env`):
+
+```
+# PowerShell
+$env:MIGRATOR_DBUSER=''; $env:MIGRATOR_DBPASSWORD=''; py -3.13 cli/migrar_asistente.py --estado
+# Git Bash
+MIGRATOR_DBUSER= MIGRATOR_DBPASSWORD= py -3.13 cli/migrar_asistente.py --estado
+```
+
+La primera línea que imprime dice con cuál se conectó (`[migrar] conectando con la credencial de DBUSER`): si dice `MIGRATOR_DBUSER`, el override no tomó. Así quedaron sin aplicar, creyendo que faltaba una credencial, `202610281600_encuestas_whatsapp` y `202610290900_mensajes_automaticos`; y `202610081900_roles_scheduler_a_motor` lleva pendiente desde el 08/10 con un diagnóstico escrito en su propia cabecera que solo miró `motor_user` y `crm_migrator`. Que `DBUSER` lea el ledger está medido; que pueda además **conceder** los roles del scheduler (hace falta `ADMIN` sobre ellos) no, hasta correr `--aplicar`.
+
 **`fetch failed` (o `Bad Gateway`) en mitad de una conversación que venía bien, y la respuesta SÍ está guardada en la base.** No es el motor caído: es el motor tardando de más *después* de haber hecho su trabajo. `atender_turno()` (`nucleo/canales/api.py`) calcula la respuesta, la persiste, y **recién después** — todavía dentro del mismo request, antes de devolver el HTTP — hace hasta tres llamadas más al modelo que no son parte de la respuesta del cliente: evaluar si corresponde escalar, verificar agendamiento, y auditar con el supervisor. Si alguna se demora, el proxy corta la conexión y el cliente ve un error por una respuesta que ya existía.
 
 La señal que lo identifica, y que evita perseguirlo como un problema de red: **buscar la conversación en `asistente.messages` y ver si la respuesta del asistente está ahí.** Si está (y `tool_calls` muestra todo en orden y rápido), el motor funcionó — lo que falló fue la entrega, y la causa está en lo que corre *después* de persistir.

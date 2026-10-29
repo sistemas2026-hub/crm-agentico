@@ -210,6 +210,7 @@ Corolario operativo: **código construido no es código que corre**. El reloj de
   py -3.13 cli/migrar_asistente.py --estado
   py -3.13 cli/migrar_asistente.py --aplicar
   ```
+  Con el `.env` completo cargado, el migrador elige `MIGRATOR_DBUSER` —el del **CRM**— y responde `permission denied for schema asistente`. No falta ninguna credencial: se corre vaciando ese override solo para el comando, y conecta con `DBUSER`. Ni `MIGRATOR_DBUSER` (`crm_migrator`) ni `MOTOR_DBUSER` (`motor_user`, el tráfico del motor) pueden leer el ledger. Ver DESPLIEGUE.md → **Diagnóstico**.
 - **La config no se aplica sola.** Un `pull` que trae `tenants/*.config.yaml` cambiado deja el entorno corriendo la versión vieja. Cargarla con `cli/cargar_config.py`; si se **niega**, no forzar a ciegas: hay algo en la base que el archivo no trae (típico: un agente creado desde la interfaz). Exportar, revisar el diff, y recién ahí.
 - **Horas siempre en America/Bogotá al reportar.** La base y los logs son UTC.
 - **Nunca `pnpm check` en Windows con Docker arriba** — rompe el frontend por truncamiento de rutas. Usar `docker exec <frontend> pnpm check`, o un worktree aislado sin contenedor de frontend.
