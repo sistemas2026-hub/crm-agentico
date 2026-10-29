@@ -10,6 +10,7 @@
   import HandoffControls from '$lib/conversaciones/conversation/HandoffControls.svelte';
   import CierrePanel from '$lib/conversaciones/conversation/CierrePanel.svelte';
   import { cargarDesenlaces, cuerpoDeCierre } from '$lib/conversaciones/desenlaces.js';
+  import { incorporarMensaje } from '$lib/conversaciones/eco_local.js';
   import MessageComposer from '$lib/conversaciones/composer/MessageComposer.svelte';
   import CasePanel from '$lib/conversaciones/context/CasePanel.svelte';
   import ActivityPanel from '$lib/conversaciones/context/ActivityPanel.svelte';
@@ -929,18 +930,9 @@
               : crudo.quien === 'humano' ? 'humano' : 'assistant'),
           contenido: crudo.contenido ?? crudo.texto ?? ''
         };
-        if (!m.id || mensajes.some((loc) => loc.id === m.id)) continue;
-        // Evita duplicar un mensaje que ESTA pestaña ya empujo de forma
-        // optimista (sin id todavia) y que el sondeo recien ahora trae con
-        // su id real -- match por rol + contenido + reciente.
-        const esEcoDeOptimista = mensajes.some(
-          (loc) =>
-            !loc.id &&
-            loc.rol === m.rol &&
-            loc.contenido === m.contenido &&
-            ahora - new Date(loc.creado_en).getTime() < 15000
-        );
-        if (!esEcoDeOptimista) mensajes.push(m);
+        // Lo que ESTA pestaña ya dibujó sin id se reconoce por su clave y toma
+        // el id, el autor y la entrega de la fila real (ver eco_local.js).
+        incorporarMensaje(mensajes, m, ahora);
       }
 
       // La conversacion tambien cambia sin que esta pestaña lo sepa -- se
@@ -1570,6 +1562,11 @@
       const devolviendo = modo === 'responder_y_devolver' && !chatCerrado;
       const burbuja = {
         rol: 'assistant',
+        // Lo escribió quien está en esta sesión, y eso SÍ se sabe. Sin el
+        // origen, autorDe() la dibujaba como «Origen no registrado» -- la
+        // etiqueta de las filas viejas -- sobre un mensaje de hace un segundo.
+        origen: 'humano',
+        autor_nombre: data.yo?.nombre || null,
         contenido: texto,
         creado_en: new Date().toISOString(),
         // La clave viaja con la burbuja: "Reintentar" la reusa y el motor
@@ -1615,7 +1612,10 @@
           // ventana de 24 h de WhatsApp. Va marcado en la burbuja y no solo
           // como error suelto: dentro de un rato el aviso de arriba ya no
           // esta, y la burbuja sigue ahi pareciendo entregada.
-          burbuja.sinEntregar = datos.aviso;
+          // Sobre la burbuja que está EN el hilo, buscada por su clave: si el
+          // sondeo ya la fundió con la fila real, `burbuja` es otro objeto.
+          const enHilo = mensajes.find((m) => m.clave_idempotencia === burbuja.clave_idempotencia);
+          if (enHilo) enHilo.sinEntregar = datos.aviso;
           error = datos.aviso;
         }
         if (datos.devuelto_al_asistente) {
