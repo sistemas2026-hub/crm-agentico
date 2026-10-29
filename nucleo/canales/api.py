@@ -3382,6 +3382,80 @@ def agentes_asignaciones():
                     "candidatos_externos": candidatos})
 
 
+@app.get("/eventos")
+def eventos_incrementales():
+    """
+    Los eventos posteriores a un cursor. El flujo que alimenta la oficina.
+
+    GET /eventos?tenant=<slug>[&desde=<cursor>][&limite=<n>]
+
+        {"eventos": [...], "siguiente": "<cursor>", "salto": false,
+         "retraso_s": 0.4}
+
+    SIN 'desde' devuelve la frontera actual y CERO eventos. Es como arranca un
+    cliente nuevo: no se traga el historico, que para eso esta la foto de
+    /centro-mando.
+
+    EL ORDEN IMPORTA AL ARRANCAR, y es al reves de lo que parece:
+
+        1) pedir el cursor aqui (sin 'desde')
+        2) pedir la foto a /centro-mando
+
+    Asi, lo que ocurra entre las dos lecturas llega por los DOS caminos: sale
+    en la foto y ademas lo entrega el cursor. Es un duplicado, y deduplicar por
+    'id' es trivial. Al reves habria un HUECO, y un hueco no se recupera.
+    Duplicar es seguro; perder no.
+
+    EL TENANT NO ES UNA AUTORIZACION. Llega por query como en el resto de
+    rutas del motor, y el motor no sabe quien inicio sesion: lo que lo protege
+    es 'MOTOR_SERVICE_TOKEN' y que el PROXY del CRM resuelva la empresa desde
+    la sesion ('tenantDeLaSesion'), nunca desde el navegador. El aislamiento
+    real lo pone 'sesion(tenant)' en persistencia: fija la empresa en la
+    conexion y una consulta sin ella devuelve cero filas, no todas.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    try:
+        limite = int(request.args.get("limite", 100))
+    except ValueError:
+        return jsonify({"error": "'limite' debe ser un numero."}), 400
+
+    #  El cursor viaja como "<tx>.<uuid>", opaco para quien lo recibe. Si viene
+    #  roto se trata como ausente --se devuelve la frontera actual-- en vez de
+    #  reventar: un cursor corrupto no puede dejar la pantalla sin datos.
+    cursor = None
+    crudo = (request.args.get("desde") or "").strip()
+    if crudo:
+        tx, _, ident = crudo.partition(".")
+        if tx.isdigit() and len(ident) == 36:
+            cursor = (tx, ident)
+
+    try:
+        datos = persistencia.eventos_desde(tenant, cursor, limite)
+    except Exception as e:
+        registrar("eventos", "fallo al leer el flujo incremental", error=e)
+        return jsonify({"error": "No se pudo leer el flujo de eventos."}), 500
+
+    return jsonify({
+        "eventos": datos["eventos"],
+        "siguiente": f"{datos['siguiente'][0]}.{datos['siguiente'][1]}",
+        "salto": datos["salto"],
+        #  Cuanto hace que empezo la transaccion mas vieja en vuelo, que es lo
+        #  que RETIENE el cursor. Viaja a proposito: la pantalla tiene que
+        #  poder decir "el flujo esta retrasado N segundos" en vez de afirmar
+        #  una frescura que no tiene. No hay techo garantizado --
+        #  'idle_in_transaction_session_timeout' solo corta sesiones OCIOSAS,
+        #  no una transaccion que sigue ejecutando o esperando un lock.
+        "retraso_s": datos["retraso_s"],
+    })
+
+
 @app.get("/agentes/areas")
 def agentes_areas():
     """

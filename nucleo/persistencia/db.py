@@ -5111,3 +5111,122 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
         "eventos_herramienta": eventos_herramienta,
         "eventos_escalada": eventos_escalada,
     }
+
+
+#  CURSOR DE EVENTOS  ---------------------------------------------------------
+#
+#  La frontera: la transaccion mas antigua TODAVIA ACTIVA. Nada por encima de
+#  ella se entrega, porque cualquiera de esas puede commitear despues y quedar
+#  detras de un cursor que ya avanzo. Es el defecto que se midio el 29/10/2026
+#  con el cursor por (creado_en, id): de 2 eventos se entregaba 1.
+_FRONTERA = "pg_snapshot_xmin(pg_current_snapshot())"
+
+#  Lo unico de 'parametros' que puede salir: las claves cuyo valor viene de un
+#  ENUM del catalogo del tenant. El resto queda enmascarado por el motor antes
+#  de guardarse ('_enmascarar' en modelo/motor.py), pero eso no basta como
+#  garantia: '...6789' sigue siendo el final de una cedula. Aqui se devuelve
+#  una LISTA BLANCA, no el jsonb entero, asi que una herramienta nueva no
+#  puede filtrar un campo nuevo sin que alguien lo agregue a mano.
+CLAVES_PUBLICAS = ("area", "servicio", "confianza")
+
+
+def eventos_desde(tenant: str, cursor: tuple[str, str] | None = None,
+                  limite: int = 100) -> dict:
+    """
+    Los eventos posteriores a `cursor`, en orden de COMMIT y sin perder ninguno.
+
+    `cursor` es (tx, id) de la ultima fila entregada, o None para empezar. Lo
+    que devuelve:
+
+        eventos     la lista, ya acotada a lo que puede salir
+        siguiente   el cursor para la proxima llamada
+        salto       True cuando el cursor quedo fuera de lo que hay
+        retraso_s   cuanto hace que empezo la transaccion mas vieja en vuelo
+
+    POR QUE 'retraso_s' VIAJA CON LOS EVENTOS
+    Una transaccion abierta RETIENE a todas las posteriores: mientras siga en
+    vuelo, el cursor no avanza. Medido: con una transaccion abierta, 4 eventos
+    insertados y 0 entregados hasta que cerro.
+
+    No se promete un techo. 'idle_in_transaction_session_timeout = 60s' en
+    produccion solo mata sesiones OCIOSAS dentro de una transaccion -- una que
+    sigue ejecutando una consulta, o esperando un lock, no la corta. Asi que el
+    retraso se MIDE y se devuelve, para que la pantalla pueda decir "el flujo
+    esta retrasado N segundos" en vez de afirmar una frescura que no tiene.
+    """
+    limite = max(1, min(int(limite or 100), 500))
+    with sesion(tenant) as (cur, org):
+        if cursor is None:
+            #  Arranque: se devuelve la frontera ACTUAL sin eventos. El cliente
+            #  pide la foto DESPUES de esto, asi que cualquier evento entre
+            #  ambas lecturas llega por los dos caminos -- duplicado, no
+            #  perdido. Deduplicar por id es trivial; recuperar un hueco, no.
+            cur.execute(f"select {_FRONTERA}::text")
+            return {"eventos": [], "siguiente": [cur.fetchone()[0], _UUID_CERO],
+                    "salto": False, "retraso_s": _retraso_del_flujo(cur)}
+
+        tx, ident = cursor
+        cur.execute(
+            f"""select tx::text, id::text, herramienta, rol_solicitante, exito,
+                       es_escritura, codigo_error, duracion_ms, creado_en,
+                       parametros
+                  from asistente.tool_calls
+                 where organization_id = %s
+                   and tx is not null
+                   and tx < {_FRONTERA}
+                   and (tx, id) > (%s::xid8, %s::uuid)
+                 order by tx, id
+                 limit %s""",
+            (org, tx, ident, limite))
+        filas = cur.fetchall()
+
+        eventos = []
+        for (f_tx, f_id, herr, rol, exito, escritura, err, ms, cuando,
+             params) in filas:
+            eventos.append({
+                "id": f_id,
+                "en": cuando.isoformat(),
+                "agente": rol,
+                "tipo": ("herramienta_fallida" if not exito
+                         else "accion" if escritura else "consulta"),
+                "herramienta": herr,
+                "duracion_ms": ms,
+                "codigo_error": err,
+                #  Solo la lista blanca. 'area' es el destino de una derivacion
+                #  y sobrevive al enmascarado por ser un enum del catalogo; el
+                #  motivo y la cedula no salen de aqui.
+                "datos": {c: params[c] for c in CLAVES_PUBLICAS
+                          if isinstance(params, dict) and c in params},
+            })
+
+        siguiente = ([filas[-1][0], filas[-1][1]] if filas
+                     else [tx, ident])
+        return {"eventos": eventos, "siguiente": siguiente,
+                "salto": False, "retraso_s": _retraso_del_flujo(cur)}
+
+
+_UUID_CERO = "00000000-0000-0000-0000-000000000000"
+
+
+def _retraso_del_flujo(cur) -> float | None:
+    """
+    Hace cuantos segundos empezo la transaccion mas vieja que sigue en vuelo.
+
+    Es lo que RETIENE el cursor: mientras esa transaccion no cierre, nada
+    posterior se entrega. Devuelve None si no hay ninguna (el caso normal).
+
+    Se mira 'backend_xid', no 'xact_start' a secas: una transaccion que todavia
+    no escribio no tiene xid asignado y no retiene a nadie.
+    """
+    try:
+        cur.execute("""select extract(epoch from (now() - min(xact_start)))
+                         from pg_stat_activity
+                        where backend_xid is not null
+                          and pid <> pg_backend_pid()""")
+        fila = cur.fetchone()
+        return round(float(fila[0]), 1) if fila and fila[0] is not None else None
+    except Exception:                                            # noqa: BLE001
+        #  Sin permiso sobre pg_stat_activity la consulta falla. No es motivo
+        #  para tumbar la entrega de eventos: se devuelve None, que la pantalla
+        #  ya sabe leer como "no se pudo medir".
+        return None
