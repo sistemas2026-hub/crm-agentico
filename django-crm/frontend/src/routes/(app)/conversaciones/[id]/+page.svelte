@@ -364,6 +364,41 @@
       al lado y pasa a abrirse como panel. */
   let contextoAbierto = $state(false);
 
+  /* EN PANTALLA ANCHA LA COLUMNA TAMBIÉN SE RECOGE (29/10/2026). Hasta hoy
+     estaba siempre fija por encima de 1240px, y en una conversación donde no
+     hay nada que mirar ahí -- sin verificar, sin ficha -- ocupaba 350px que el
+     hilo necesitaba. Se recuerda por navegador: es una preferencia de quien
+     mira, no un dato de la conversación. Si el almacenamiento no está (modo
+     privado), simplemente arranca desplegada. */
+  const CLAVE_RECOGIDO = 'bandeja.contexto.recogido';
+  let contextoRecogido = $state(false);
+  let pantallaAncha = $state(true);
+  $effect(() => {
+    try {
+      contextoRecogido = localStorage.getItem(CLAVE_RECOGIDO) === '1';
+    } catch {
+      /* sin almacenamiento: desplegada */
+    }
+    const mq = window.matchMedia('(min-width: 1241px)');
+    pantallaAncha = mq.matches;
+    const alCambiar = (/** @type {MediaQueryListEvent} */ e) => (pantallaAncha = e.matches);
+    mq.addEventListener('change', alCambiar);
+    return () => mq.removeEventListener('change', alCambiar);
+  });
+  function recogerContexto(/** @type {boolean} */ recoger) {
+    contextoRecogido = recoger;
+    try {
+      localStorage.setItem(CLAVE_RECOGIDO, recoger ? '1' : '0');
+    } catch {
+      /* sin almacenamiento: vale para esta visita */
+    }
+  }
+  /** Un solo botón para los dos tamaños: en ancha recoge, en angosta abre el cajón. */
+  function alternarContexto() {
+    if (pantallaAncha) recogerContexto(!contextoRecogido);
+    else contextoAbierto = !contextoAbierto;
+  }
+
   // --- atender: sacar el caso de "Sin atender" sin pasar por el chat -------
   // 'atendida' hoy se calcula sola en cuanto alguien responde de verdad
   // (ver nucleo/persistencia/db.py::ultima_actividad) -- esto es el camino
@@ -1696,9 +1731,9 @@
     {conversacion}
     {escalada}
     {asignadaA}
-    {contextoAbierto}
+    contextoAbierto={pantallaAncha ? !contextoRecogido : contextoAbierto}
     ficha={data.fichaCliente?.cliente ?? null}
-    onAlternarContexto={() => (contextoAbierto = !contextoAbierto)}
+    onAlternarContexto={alternarContexto}
   />
 
   <HandoffControls
@@ -1845,14 +1880,15 @@
 <aside
   class="info"
   class:abierto={contextoAbierto}
+  class:recogida={contextoRecogido}
   aria-label="Contexto de la conversación"
 >
   <button
     type="button"
     class="v2-btn v2-btn-sm info-cerrar"
-    onclick={() => (contextoAbierto = false)}
+    onclick={() => (pantallaAncha ? recogerContexto(true) : (contextoAbierto = false))}
   >
-    <X size={14} /> Cerrar
+    <X size={14} /> {pantallaAncha ? 'Recoger' : 'Cerrar'}
   </button>
 
   <ContextTabs
@@ -2035,9 +2071,21 @@
   /* Por encima de 1240px la columna está siempre a la vista: ni botón para
      cerrarla, ni fondo que interceptar. El del encabezado que la abre vive
      con el encabezado. */
-  .info-cerrar,
   .info-fondo {
     display: none;
+  }
+  /* En ancha el botón de la columna la RECOGE, y se despliega de nuevo con
+     «Contexto» en la cabecera. Va chico y a la derecha, arriba de las
+     pestañas. */
+  .info-cerrar {
+    display: flex;
+    width: fit-content;
+    margin: 6px 8px 0 auto;
+  }
+  @media (min-width: 1241px) {
+    .info.recogida {
+      display: none;
+    }
   }
   .info-fondo {
     position: fixed;

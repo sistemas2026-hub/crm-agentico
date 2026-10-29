@@ -12,7 +12,7 @@
    * exporta `alFinal()` y el padre lo llama con `bind:this` — es la misma
    * llamada que antes era local, no una señal nueva.
    */
-  import { TriangleAlert, RotateCcw, Paperclip, Lock, Check, CheckCheck, Clock } from '@lucide/svelte';
+  import { TriangleAlert, RotateCcw, Paperclip, Lock, Check, CheckCheck, Clock, Bot, UserRound, User } from '@lucide/svelte';
   import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
   import { autorDe, burbujaClase, extension, hora, ENTREGA_TEXTO } from '../formato.js';
   import { partirMensaje, resumir } from './analisis-imagen.js';
@@ -276,10 +276,24 @@
               <!-- El nombre es el del cliente de ESTA conversación. Un mensaje
                    de una anterior del chat lleva la etiqueta neutra: el número
                    pudo ser de otra persona (revisor de PII, 21/10/2026). -->
-              <span class="msg-quien">{(!item.m.deOtraConversacion && nombreCliente) || autor.etiqueta}</span>
+              <span class="msg-quien">
+                <User size={12} aria-hidden="true" />
+                {(!item.m.deOtraConversacion && nombreCliente) || autor.etiqueta}
+              </span>
             {:else}
+              <!-- El ícono es la tercera señal, además de la palabra y el color
+                   (29/10/2026): un robot para la IA y una persona para el
+                   equipo se distinguen de reojo, sin leer y sin depender de
+                   distinguir violeta de azul. -->
               <span class="msg-chip">
-                <span class="msg-punto" aria-hidden="true"></span>{autor.etiqueta}
+                {#if autor.clase === 'a-ia'}
+                  <Bot size={12} aria-hidden="true" />
+                {:else if autor.clase === 'a-humano'}
+                  <UserRound size={12} aria-hidden="true" />
+                {:else}
+                  <span class="msg-punto" aria-hidden="true"></span>
+                {/if}
+                {autor.etiqueta}
               </span>
             {/if}
             <span class="msg-hora v2-num">{hora(item.m.creado_en)}</span>
@@ -592,6 +606,9 @@
   }
 
   .msg-quien {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     font-size: 12px;
     font-weight: 600;
     color: var(--bandeja-texto);
@@ -614,14 +631,14 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 1px 6px;
+    padding: 2px 7px;
     border: 1px solid var(--bandeja-borde);
     border-radius: 3px;
     background: var(--bandeja-superficie-suave);
     color: var(--bandeja-texto-2);
     font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     white-space: nowrap;
@@ -635,16 +652,18 @@
     flex: none;
   }
 
+  /* La ficha va RELLENA con el color de quien escribió: es lo primero que
+     el ojo encuentra al repasar el hilo (29/10/2026). */
   .a-ia .msg-chip {
-    background: var(--bandeja-ia-fondo);
-    border-color: var(--bandeja-ia-borde);
-    color: var(--bandeja-ia);
+    background: var(--bandeja-ia);
+    border-color: var(--bandeja-ia);
+    color: #fff;
   }
 
   .a-humano .msg-chip {
-    background: var(--bandeja-humano-fondo);
-    border-color: var(--bandeja-humano-borde);
-    color: var(--bandeja-humano);
+    background: var(--bandeja-humano);
+    border-color: var(--bandeja-humano);
+    color: #fff;
   }
 
   /* Sistema y "origen no registrado" quedan en gris a propósito: ninguno de
@@ -692,17 +711,21 @@
      coincidencia de la cascada: se declara. */
   .a-cliente .burbuja {
     background: var(--bandeja-superficie);
-    border-color: var(--bandeja-borde);
+    border-color: var(--bandeja-borde-fuerte);
   }
 
+  /* Fondos que se DISTINGUEN (29/10/2026). Los de la referencia --#F5F3FF y
+     #EFF6FF-- eran casi blancos los dos, y de reojo la IA y una persona del
+     equipo se veían iguales. Ahora un tinte que se ve, y el filete en el
+     color de cada uno. El texto sigue oscuro: el contraste no se toca. */
   .a-ia .burbuja {
-    background: var(--bandeja-ia-fondo);
-    border-color: var(--bandeja-ia-borde);
+    background: color-mix(in srgb, var(--bandeja-ia) 9%, #fff);
+    border-color: color-mix(in srgb, var(--bandeja-ia) 45%, #fff);
   }
 
   .a-humano .burbuja {
-    background: var(--bandeja-humano-fondo);
-    border-color: var(--bandeja-humano-borde);
+    background: color-mix(in srgb, var(--bandeja-humano) 9%, #fff);
+    border-color: color-mix(in srgb, var(--bandeja-humano) 45%, #fff);
   }
 
   /* Una respuesta automática de una conversación en pausa SÍ salió al

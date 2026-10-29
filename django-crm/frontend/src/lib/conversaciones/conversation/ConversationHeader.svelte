@@ -340,10 +340,11 @@
     color: var(--bandeja-texto-2);
   }
 
-  /* Por encima de 1240px la columna está siempre a la vista: ni botón para
-     abrirla, ni botón para cerrarla, ni fondo que interceptar. */
+  /* Desde el 29/10/2026 el botón está en todos los tamaños: por encima de
+     1240px recoge y despliega la columna; por debajo abre el cajón. */
   .contexto-toggle {
-    display: none;
+    display: inline-flex;
+    flex: none;
   }
 
   /* Debajo de 1240px las tres columnas ahogan el hilo. El contexto deja de

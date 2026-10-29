@@ -12,6 +12,9 @@ vi.mock('$lib/server/v2/tenant.js', () => ({ tenantDeLaSesion: async () => 'empr
 
 const { PUT } = await import('./+server.js');
 
+/** El cuerpo que el intermediario le mandó al motor. */
+const enviadoAlMotor = (/** @type {any} */ f) => JSON.parse(f.mock.calls[0][1].body);
+
 function evento(cuerpo, rol = 'ADMIN') {
   const fetch = vi.fn(async () => new Response(JSON.stringify({ casos: cuerpo.casos }), { status: 200 }));
   return {
@@ -28,7 +31,7 @@ describe('PUT /api/manual/casos', () => {
   it('reenvía los rótulos al motor junto con los casos', async () => {
     const { fetch, ev } = evento({ casos: ['otro', 'problema_de_tv'], rotulos: { problema_de_tv: 'Problema de TV' } });
     await PUT(ev);
-    const enviado = JSON.parse(fetch.mock.calls[0][1].body);
+    const enviado = enviadoAlMotor(fetch);
     expect(enviado.rotulos).toEqual({ problema_de_tv: 'Problema de TV' });
     expect(enviado.casos).toEqual(['otro', 'problema_de_tv']);
   });
@@ -36,7 +39,7 @@ describe('PUT /api/manual/casos', () => {
   it('sin rótulos manda un mapa vacío, no se cae', async () => {
     const { fetch, ev } = evento({ casos: ['otro'] });
     await PUT(ev);
-    expect(JSON.parse(fetch.mock.calls[0][1].body).rotulos).toEqual({});
+    expect(enviadoAlMotor(fetch).rotulos).toEqual({});
   });
 
   it('quien no es administrador no llega al motor', async () => {

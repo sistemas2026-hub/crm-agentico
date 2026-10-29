@@ -112,7 +112,7 @@ export async function guardarAjustesBandeja(locals, fetch, valores) {
  * si no hay asistente. Devuelve las claves que admiten rótulo, por familia, y
  * los rótulos guardados. No lanza, por lo mismo que `leerAjustesBandeja`.
  *
- * @returns {Promise<{ claves: { motivos: string[], etiquetas: string[], casos: string[] }, rotulos: Record<string, string> } | null>}
+ * @returns {Promise<{ claves: { motivos: string[], etiquetas: string[], casos: string[] }, rotulos: Record<string, string>, sin_rotulo?: Record<string, string[]> } | null>}
  */
 export async function leerRotulosBandeja(locals, fetch) {
   const cfg = await destinoDelAsistente(locals, fetch);

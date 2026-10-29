@@ -165,13 +165,18 @@
       <span class="con-ayuda">
         <button
           type="button"
-          class="v2-btn v2-btn-sm v2-btn-quiet aviso-resolver"
+          class="v2-btn v2-btn-sm aviso-resolver"
           onclick={() => onResolver?.()}
           disabled={resolviendo}
           aria-busy={resolviendo}
           aria-describedby="ayuda-resolver"
         >
-          {resolviendo ? 'Cerrando…' : 'Marcar como resuelta'}
+          <!-- «Resuelto» a secas (29/10/2026): «Marcar como resuelta» era el
+               rótulo más largo de la barra y el más apagado, para la acción
+               que cierra el caso. La ayuda de al lado sigue explicando qué
+               hace. -->
+          <CircleCheck size={13} aria-hidden="true" />
+          {resolviendo ? 'Cerrando…' : 'Resuelto'}
         </button>
         <span class="ayuda" id="ayuda-resolver" role="tooltip">
           Usá esto si el caso se resolvió por teléfono, presencialmente o por
@@ -450,13 +455,18 @@
 
 
   /* El secundario de verdad: se lee, pero no compite con "Atender". */
+  /* Verde y con relleno suave: se ve sin gritar, y no se confunde con
+     «Tomar» (tinta), que es lo que se hace al ENTRAR; esto es al salir. */
   .aviso-resolver {
-    border-color: var(--bandeja-borde);
+    border-color: var(--bandeja-ok);
+    background: color-mix(in srgb, var(--bandeja-ok) 10%, #fff);
+    color: var(--bandeja-ok);
+    font-weight: 600;
   }
 
-  .aviso-resolver:hover {
-    border-color: var(--bandeja-texto-2);
-    background: var(--bandeja-superficie-suave);
+  .aviso-resolver:hover:not(:disabled) {
+    background: var(--bandeja-ok);
+    color: #fff;
   }
 
 
