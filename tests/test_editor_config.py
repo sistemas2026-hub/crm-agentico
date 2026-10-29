@@ -43,6 +43,8 @@ from nucleo.config.editor import (ErrorEdicion, _mutar_ajustes_bandeja,  # noqa:
                                   _mutar_marcas_precio,
                                   _mutar_persona, _mutar_rol_de_entrada,
                                   _mutar_rotulos_bandeja,
+                                  _mutar_casos_manual, _fundir_rotulos_de_casos,
+                                  claves_sin_rotulo,
                                   _validar,
                                   _validar_nombre_rol,
                                   catalogo_herramientas,
@@ -715,6 +717,39 @@ def prueba_rotulos_bandeja() -> None:
         comprobar(False, f"un rotulo huerfano no impide cargar la configuracion -- {type(e).__name__}")
 
 
+def prueba_rotulos_de_casos() -> None:
+    """
+    Un caso nuevo de /manual nace con su rotulo (29/10/2026): la persona
+    escribe «Problema de TV», la clave es 'problema_de_tv', y lo escrito es
+    como se lee. Y uno que se borra no deja el suyo colgado.
+    """
+    print("\n-- rotulos de casos nuevos --")
+    doc = documento_base()
+    casos = list(doc["manual"]["casos"])
+    _mutar_casos_manual(doc, casos + ["problema_de_tv"])
+    _fundir_rotulos_de_casos(doc, {"problema_de_tv": "Problema de TV"})
+    rot = doc["conversaciones"].get("rotulos") or {}
+    comprobar(rot.get("problema_de_tv") == "Problema de TV",
+              "el caso nuevo se guarda con lo que la persona escribio")
+    cfg = _validar(TENANT, doc)
+    comprobar("problema_de_tv" not in claves_sin_rotulo(cfg)["casos"],
+              "y ya no figura entre las claves sin rotulo")
+
+    _mutar_casos_manual(doc, casos)
+    _fundir_rotulos_de_casos(doc, {})
+    comprobar("problema_de_tv" not in (doc["conversaciones"].get("rotulos") or {}),
+              "al borrar el caso, su rotulo se va con el")
+
+    lanza("por esta puerta no se rotula algo que no es un caso",
+          lambda: _fundir_rotulos_de_casos(documento_base(), {"no_es_caso_xyz": "Algo"}))
+
+    sin = documento_base()
+    sin["conversaciones"]["rotulos"] = {}
+    faltan = claves_sin_rotulo(_validar(TENANT, sin))
+    comprobar(sum(len(v) for v in faltan.values()) > 0,
+              "sin rotulos, claves_sin_rotulo las cuenta todas")
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print(" EDITOR DE ROLES  --  mutaciones sobre el documento de configuracion")
@@ -733,6 +768,7 @@ if __name__ == "__main__":
     prueba_umbral_efectivo_de_la_banda()
     prueba_marcas_de_precio()
     prueba_rotulos_bandeja()
+    prueba_rotulos_de_casos()
 
     print("\n" + "=" * 70)
     if fallos:

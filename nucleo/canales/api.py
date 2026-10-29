@@ -4318,10 +4318,11 @@ def configuracion_bandeja_guardar():
 
 
 def _rotulos_de(config) -> dict:
-    """Las claves que admiten rotulo y los rotulos guardados, para la pantalla."""
+    """Las claves que admiten rotulo, los rotulos guardados y las que faltan."""
     return {
         "claves": editor.claves_con_rotulo(config.model_dump()),
         "rotulos": dict(config.conversaciones.rotulos),
+        "sin_rotulo": editor.claves_sin_rotulo(config),
     }
 
 
@@ -8352,7 +8353,8 @@ def manual_casos():
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
 
-    return jsonify({"casos": config.manual.casos})
+    return jsonify({"casos": config.manual.casos,
+                    "rotulos": dict(config.conversaciones.rotulos)})
 
 
 @app.put("/manual/casos")
@@ -8371,15 +8373,20 @@ def manual_casos_guardar():
     casos = cuerpo.get("casos")
     if not isinstance(casos, list):
         return jsonify({"error": "'casos' tiene que ser una lista."}), 400
+    # Como se lee cada caso nuevo (29/10/2026). Opcional: una pantalla vieja
+    # que no lo manda guarda los casos igual que antes.
+    rotulos = cuerpo.get("rotulos") or {}
 
     try:
-        config = editor.guardar_casos_manual(tenant, casos)
+        config = editor.guardar_casos_manual(tenant, casos, rotulos)
     except editor.ErrorEdicion as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
-    return jsonify({"casos": config.manual.casos})
+    olvidar_config(tenant)
+    return jsonify({"casos": config.manual.casos,
+                    "rotulos": dict(config.conversaciones.rotulos)})
 
 
 @app.get("/manual/ejemplos")

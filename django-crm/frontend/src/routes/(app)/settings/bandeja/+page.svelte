@@ -49,10 +49,15 @@
     { id: 'etiquetas', titulo: 'Etiquetas' },
     { id: 'casos', titulo: 'Casos' }
   ];
-  const conRotulo = $derived(r ? Object.keys(r.rotulos ?? {}).length : 0);
   const totalClaves = $derived(
     r ? FAMILIAS.reduce((n, f) => n + (r.claves?.[f.id]?.length ?? 0), 0) : 0
   );
+  /* Las que faltan, las calcula el motor (editor.claves_sin_rotulo): la misma
+     cuenta que avisa en Ajustes y al cargar el YAML. */
+  const faltan = $derived(
+    r ? FAMILIAS.flatMap((f) => r.sin_rotulo?.[f.id] ?? []) : []
+  );
+  const conRotulo = $derived(totalClaves - faltan.length);
   const comoClave = (/** @type {string} */ k) => k.replaceAll('_', ' ');
 
   let a = $derived(data.ajustes);
@@ -300,6 +305,11 @@
               como su clave, sin tildes: «frustracion detectada» en vez de
               «Frustración detectada».
             </p>
+            {#if faltan.length}
+              <p class="cuerpo faltan">
+                Sin rótulo: {#each faltan as k, i (k)}<code>{k}</code>{i < faltan.length - 1 ? ', ' : ''}{/each}
+              </p>
+            {/if}
             {#if data.can_edit}
               <button class="v2-btn v2-btn-sm" onclick={() => (editandoRotulos = true)}>
                 Editar rótulos
@@ -385,6 +395,10 @@
   .rotulos-resumen {
     padding: 16px;
     margin-top: 16px;
+  }
+  .faltan code {
+    font-family: var(--v2-mono, ui-monospace, monospace);
+    font-size: 11.5px;
   }
   .familia {
     margin: 8px 0 4px;

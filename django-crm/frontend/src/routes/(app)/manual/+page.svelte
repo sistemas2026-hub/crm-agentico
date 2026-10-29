@@ -11,6 +11,7 @@
    * re-vectorizar (PUT /api/corpus/documentos/<id>/roles).
    */
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
+  import { rotuloDe } from '$lib/conversaciones/rotulos.js';
   import Pill from '$lib/v2/components/Pill.svelte';
   import { relativeTime } from '$lib/v2/format.js';
   import { Button } from '$lib/components/ui/button/index.js';
@@ -20,7 +21,9 @@
   /** @type {{ data: any }} */
   let { data } = $props();
 
-  const etiqueta = (c) => c.replaceAll('_', ' ');
+  // La palabra de la empresa si la tiene (lib/conversaciones/rotulos.js); un
+  // caso recién agregado usa lo que la persona escribió.
+  const etiqueta = (c) => rotuloDe(c, { ...rotulosGuardados, ...rotulosNuevos });
   const esAdmin = $derived(data.role === 'ADMIN');
 
   let dialogoSubirAbierto = $state(false);
@@ -176,6 +179,15 @@
   // desarrollador.
   let editandoCasos = $state(false);
   let casoNuevo = $state('');
+  /* Lo que la persona ESCRIBIÓ al agregar cada caso (29/10/2026). La clave se
+     normaliza -- «Problema de TV» se guarda como `problema_de_tv` -- y lo
+     escrito se tiraba, cuando es justamente cómo se lee. Viaja con el
+     guardado para que la clave no nazca sin rótulo. */
+  /** @type {Record<string, string>} */
+  let rotulosNuevos = $state({});
+  /** Los ya guardados; se reemplazan con lo que devuelve el motor al guardar. */
+  /** @type {Record<string, string>} */
+  let rotulosGuardados = $state({ ...(data.rotulos ?? {}) });
   let guardandoCasos = $state(false);
   // Copia de respaldo para poder cancelar sin recargar la pagina.
   let casosAntes = $state([]);
@@ -183,11 +195,13 @@
   function abrirEdicionCasos() {
     casosAntes = [...casos];
     casoNuevo = '';
+    rotulosNuevos = {};
     editandoCasos = true;
   }
 
   function cancelarEdicionCasos() {
     casos = [...casosAntes];
+    rotulosNuevos = {};
     editandoCasos = false;
   }
 
@@ -204,6 +218,12 @@
       return;
     }
     casos = [...casos, limpio];
+    // Si lo escrito dice algo más que la clave (una tilde, una mayúscula),
+    // ése es su rótulo. Si es igual a la clave con espacios, no aporta nada.
+    const escrito = casoNuevo.trim().replace(/\s+/g, ' ');
+    if (escrito && escrito !== limpio.replaceAll('_', ' ')) {
+      rotulosNuevos = { ...rotulosNuevos, [limpio]: escrito.slice(0, 60) };
+    }
     casoNuevo = '';
   }
 
@@ -220,7 +240,14 @@
       const resp = await fetch('/api/manual/casos', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ casos })
+        body: JSON.stringify({
+          casos,
+          // Solo los de casos que siguen en la lista: uno agregado y quitado
+          // antes de guardar no tiene nada que rotular.
+          rotulos: Object.fromEntries(
+            Object.entries(rotulosNuevos).filter(([k]) => casos.includes(k))
+          )
+        })
       });
       const datos = await resp.json();
       if (!resp.ok) {
@@ -228,6 +255,8 @@
         return;
       }
       casos = datos.casos;
+      if (datos.rotulos) rotulosGuardados = datos.rotulos;
+      rotulosNuevos = {};
       editandoCasos = false;
       toast.success('Tipos de caso actualizados');
     } catch (err) {
@@ -580,7 +609,8 @@
             <Button variant="outline" size="sm" onclick={agregarCaso}>Agregar</Button>
           </div>
           <p class="v2-sub casos-nota">
-            Se guarda en minúscula y con guiones bajos. «otro» no se puede quitar: es lo que
+            Escribilo como se lee («Problema de TV»): así aparece en la Bandeja, y por
+            dentro se guarda en minúscula y con guiones bajos. «otro» no se puede quitar: es lo que
             usa el asistente cuando ninguno encaja. Tampoco se puede quitar un caso del que
             dependa el agendamiento automático de visitas.
           </p>

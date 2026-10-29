@@ -18,7 +18,7 @@
  * throw from one of those is a real failure and is left to propagate.
  */
 import { leerConfiguracionAsistente } from './asistente-config.js';
-import { leerAjustesBandeja } from './bandeja-config.js';
+import { leerAjustesBandeja, leerRotulosBandeja } from './bandeja-config.js';
 import { leerCanalWhatsapp } from './canal-whatsapp.js';
 import { leerCredenciales } from './credenciales.js';
 import { leerSmartOlt } from './smartolt.js';
@@ -221,7 +221,7 @@ export function conPlazo(promesa, ms = PLAZO_MOTOR_MS) {
  */
 async function leerDelMotor(event) {
   const [asistente, canalWhatsapp, smartolt, planesVenta, oferta, guiasTv, credenciales,
-    ajustesBandeja] = await Promise.all([
+    ajustesBandeja, rotulosBandeja] = await Promise.all([
     conPlazo(leerConfiguracionAsistente(event.locals, event.fetch)),
     conPlazo(leerCanalWhatsapp(event.locals, event.fetch)),
     conPlazo(leerSmartOlt(event.locals, event.fetch)),
@@ -235,7 +235,10 @@ async function leerDelMotor(event) {
     conPlazo(leerCredenciales(event.locals, event.fetch)),
     // Dos enteros de la config del tenant. Sin definir NO lleva warn: es el
     // default deliberado, no una falta.
-    conPlazo(leerAjustesBandeja(event.locals, event.fetch))
+    conPlazo(leerAjustesBandeja(event.locals, event.fetch)),
+    // Cuantas claves (motivos, etiquetas, casos) se muestran sin rotulo. Esta
+    // SI avisa: es una palabra sin tilde en la cola de cada operador.
+    conPlazo(leerRotulosBandeja(event.locals, event.fetch))
   ]);
   return {
     // null = no hay asistente, o no contesto a tiempo. El hub lista igual sus
@@ -244,6 +247,11 @@ async function leerDelMotor(event) {
     canalWhatsapp,
     smartolt,
     ajustesBandeja,
+    // null = no se pudo leer; un numero = cuantas claves faltan rotular.
+    sinRotulo: rotulosBandeja?.sin_rotulo
+      ? Object.values(rotulosBandeja.sin_rotulo).reduce(
+          (/** @type {number} */ n, /** @type {any} */ l) => n + (l?.length ?? 0), 0)
+      : null,
     // Cuantas pide el catalogo y cuantas estan cargadas. La fila del hub avisa
     // cuando falta alguna: eso es una herramienta que va a fallar al usarse.
     credencialesTotales: credenciales?.disponible

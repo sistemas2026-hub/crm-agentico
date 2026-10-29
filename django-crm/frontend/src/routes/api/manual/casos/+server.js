@@ -40,7 +40,9 @@ export async function PUT({ request, locals, fetch }) {
     const resp = await fetch(`${baseUrl}/manual/casos`, {
       method: 'PUT',
       headers: headersMotor({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ casos: cuerpo.casos, tenant })
+      // 'rotulos': cómo se lee cada caso nuevo (29/10/2026). Si se cayera
+      // acá, los casos se guardarían igual y nacerían sin rótulo, sin error.
+      body: JSON.stringify({ casos: cuerpo.casos, rotulos: cuerpo.rotulos ?? {}, tenant })
     });
     const datos = await resp.json();
     if (!resp.ok) {

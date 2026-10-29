@@ -253,6 +253,21 @@
           warn: false
         },
         {
+          // Este SÍ avisa (29/10/2026): una clave sin rótulo es una palabra sin
+          // tilde en la cola de cada operador, y nadie se entera al crearla --
+          // un caso nuevo de /manual nace así si no se escribió cómo se lee.
+          href: '/settings/bandeja',
+          title: 'Rótulos de la Bandeja',
+          body: 'Cómo se leen en la cola los motivos de escalamiento, las etiquetas y los casos.',
+          value:
+            motor.sinRotulo === null || motor.sinRotulo === undefined
+              ? null
+              : motor.sinRotulo === 0
+                ? 'Todos con rótulo'
+                : `${motor.sinRotulo} sin rótulo`,
+          warn: !!motor.sinRotulo
+        },
+        {
           href: '/settings/canales/whatsapp',
           title: 'WhatsApp',
           body: 'Las credenciales de Meta que activan el canal, y la URL del webhook.',

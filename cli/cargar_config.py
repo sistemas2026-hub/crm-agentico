@@ -348,10 +348,30 @@ def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
     return lineas
 
 
+def avisar_claves_sin_rotulo(cfg) -> list[str]:
+    """
+    Las claves que la Bandeja va a mostrar con su nombre crudo (29/10/2026).
+
+    Un motivo o una etiqueta nueva nace aca, en el YAML, y quien la agrega es
+    el que esta en mejor posicion para escribir como se lee. No frena la
+    carga: una clave sin rotulo se sigue leyendo, y trabar un guardado por un
+    texto opcional enseña a escribir cualquier cosa para destrabarlo.
+    """
+    lineas = [f"{familia}: {', '.join(claves)}"
+              for familia, claves in editor.claves_sin_rotulo(cfg).items() if claves]
+    if lineas:
+        print("[aviso] sin rotulo en 'conversaciones.rotulos' -- la Bandeja las muestra "
+              "con espacios y sin tildes:")
+        for linea in lineas:
+            print(f"          {linea}")
+    return lineas
+
+
 def cargar(ruta: Path, org_id: str | None = None, forzar: bool = False) -> None:
     cfg = cargar_config(ruta)                     # valida o revienta
     slug = cfg.identidad.slug
     datos = cfg.model_dump(mode="json")
+    avisar_claves_sin_rotulo(cfg)
 
     with _conectar() as con, con.cursor() as cur:
         org = _organizacion(cur, slug, org_id)

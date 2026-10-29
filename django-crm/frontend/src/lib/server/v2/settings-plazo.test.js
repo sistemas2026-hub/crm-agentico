@@ -33,7 +33,13 @@ vi.mock('./credenciales.js', () => ({
     credenciales: [{ cargado: true }, { declarado: true, cargado: false }]
   })
 }));
-vi.mock('./bandeja-config.js', () => ({ leerAjustesBandeja: async () => null }));
+vi.mock('./bandeja-config.js', () => ({
+  leerAjustesBandeja: async () => null,
+  // Dos claves sin rótulo en dos familias: la tarjeta tiene que decir 2.
+  leerRotulosBandeja: async () => ({
+    sin_rotulo: { motivos: ['frustracion_detectada'], etiquetas: [], casos: ['problema_de_tv'] }
+  })
+}));
 vi.mock('./avisos-campo.js', () => ({ leerAvisos: async () => ({ canales: [1, 2] }) }));
 vi.mock('./business-hours.js', () => ({ getBusinessHours: async () => ({ calendar: {} }) }));
 vi.mock('./custom-fields.js', () => ({ getCustomFields: async () => ({ totals: {} }) }));
@@ -89,6 +95,8 @@ describe('getSettingsHub', () => {
     expect(motor.canalWhatsapp).toEqual({ activo: true, numero_visible: '+57 300' });
     expect(motor.planesVenta).toEqual({ cantidad: 6 });
     expect(motor.credencialesTotales).toEqual({ cargadas: 1, faltan: 1 });
+    // Las claves sin rótulo se cuentan entre las tres familias (29/10/2026).
+    expect(motor.sinRotulo).toBe(2);
   });
 
   it('con el motor al dia, todo llega', async () => {

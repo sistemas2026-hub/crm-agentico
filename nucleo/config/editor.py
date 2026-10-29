@@ -1236,8 +1236,52 @@ def guardar_flujo_derivacion(tenant: str, destinos: list[str],
     return _editar(tenant, lambda doc: _mutar_flujo_derivacion(doc, destinos, atiende))
 
 
-def guardar_casos_manual(tenant: str, casos: list[str]) -> TenantConfig:
-    return _editar(tenant, lambda doc: _mutar_casos_manual(doc, casos))
+def guardar_casos_manual(tenant: str, casos: list[str],
+                         rotulos: dict | None = None) -> TenantConfig:
+    """
+    'rotulos' (29/10/2026): como se LEE cada caso nuevo. En /manual la persona
+    escribe «Problema de TV» y la pantalla guarda la clave 'problema_de_tv';
+    lo que escribio es justamente el rotulo, y se guarda en la misma
+    operacion para que la clave no nazca sin el. Opcional: sin el, todo
+    queda como antes.
+    """
+    def mutar(doc: dict) -> None:
+        _mutar_casos_manual(doc, casos)
+        _fundir_rotulos_de_casos(doc, rotulos or {})
+    return _editar(tenant, mutar)
+
+
+def _fundir_rotulos_de_casos(doc: dict, rotulos: dict) -> None:
+    """
+    Agrega los rotulos de casos que vienen, sin tocar los demas, y saca los de
+    casos que ya no estan en ninguna lista: un caso borrado no deja su rotulo
+    colgado. Solo acepta claves que son casos: esta puerta edita casos, no
+    motivos ni etiquetas.
+    """
+    if not isinstance(rotulos, dict):
+        raise ErrorEdicion("los rótulos tienen que venir como un mapa clave → texto.")
+    casos = set((doc.get("manual") or {}).get("casos") or [])
+    conv = doc.get("conversaciones") or {}
+    doc["conversaciones"] = conv
+    actuales = dict(conv.get("rotulos") or {})
+    for clave, texto in rotulos.items():
+        clave = str(clave or "").strip()
+        texto = " ".join(str(texto or "").split())
+        if not clave or not texto:
+            continue
+        if clave not in casos:
+            raise ErrorEdicion(f"'{clave}' no es uno de los casos que se están guardando.")
+        if len(texto) > ROTULO_MAXIMO:
+            raise ErrorEdicion(
+                f"el rótulo de '{clave}' tiene {len(texto)} caracteres; el máximo es "
+                f"{ROTULO_MAXIMO}.")
+        actuales[clave] = texto
+    vivas = {c for lista in claves_con_rotulo(doc).values() for c in lista}
+    actuales = {k: v for k, v in actuales.items() if k in vivas}
+    if actuales:
+        conv["rotulos"] = actuales
+    else:
+        conv.pop("rotulos", None)
 
 
 ROTULO_MAXIMO = 60
@@ -1250,6 +1294,20 @@ def claves_con_rotulo(doc: dict) -> dict[str, list[str]]:
         "etiquetas": list((doc.get("conversaciones") or {}).get("etiquetas") or []),
         "casos": list((doc.get("manual") or {}).get("casos") or []),
     }
+
+
+def claves_sin_rotulo(config) -> dict[str, list[str]]:
+    """
+    Las claves que la Bandeja muestra con su nombre crudo porque nadie les
+    escribio un rotulo, por familia. La usan dos avisos: el de
+    cli/cargar_config.py (para quien agrega un motivo en el YAML) y el de
+    Ajustes (para quien agrega un caso desde /manual y no lo vio). Ninguno
+    bloquea: una clave sin rotulo se sigue leyendo.
+    """
+    doc = config.model_dump() if hasattr(config, "model_dump") else config
+    rot = (doc.get("conversaciones") or {}).get("rotulos") or {}
+    return {familia: [c for c in claves if not str(rot.get(c) or "").strip()]
+            for familia, claves in claves_con_rotulo(doc).items()}
 
 
 def guardar_rotulos_bandeja(tenant: str, rotulos: dict) -> TenantConfig:

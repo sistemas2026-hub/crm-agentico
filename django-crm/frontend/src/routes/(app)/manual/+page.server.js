@@ -42,6 +42,9 @@ export async function load({ locals, fetch }) {
     const catalogo = respCatalogo.ok ? await respCatalogo.json() : {};
     return {
       casos: datosCasos.casos,
+      // Cómo se lee cada clave (conversaciones.rotulos). Un motor viejo no lo
+      // manda, y entonces los casos se muestran con su clave, como antes.
+      rotulos: datosCasos.rotulos ?? {},
       ejemplos: respEjemplos.ok ? (await respEjemplos.json()).ejemplos : [],
       documentos: respDocs.ok ? (await respDocs.json()).documentos : [],
       revisiones: respRevisiones.ok ? (await respRevisiones.json()).revisiones : [],
