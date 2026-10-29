@@ -23,6 +23,14 @@ class ApiEndpoints {
 
   // Materiales: la custodia del tecnico y lo que gasta.
   static String get kit => '$baseUrl/api/campo/kit/';
+
+  // La recepción del kit (28/10/2026): confirmar lo recibido y escanear los
+  // equipos apartados a su nombre. Ver campo/recepcion_del_kit.py.
+  static String get recepcion => '$baseUrl/api/campo/kit/recepcion/';
+  static String get recepcionEscanear =>
+      '$baseUrl/api/campo/kit/recepcion/escanear/';
+  static String confirmarEntrega(String id) =>
+      '$baseUrl/api/campo/kit/recepcion/$id/confirmar/';
   static String get movimientosMaterial =>
       '$baseUrl/api/campo/materiales/movimientos/';
   static String get incidenciasMaterial =>

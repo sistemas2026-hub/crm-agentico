@@ -9,6 +9,7 @@ import 'package:campo/core/widgets/dexter_app_header.dart';
 import 'package:campo/core/widgets/dexter_bottom_nav.dart';
 import 'package:campo/features/auth/login_screen.dart';
 import 'package:campo/features/materiales/materiales_screen.dart';
+import 'package:campo/features/materiales/recepcion_del_kit.dart';
 import 'package:campo/features/shell/app_shell.dart';
 import 'package:campo/features/trabajo/trabajo_vista.dart';
 import 'package:flutter/material.dart';
@@ -105,6 +106,9 @@ class _Banco {
   /// sesión del llavero simulado, como el cierre real).
   void Function()? alCerrarSesion;
 
+  /// La recepción del kit que el contenedor le pasa a Materiales.
+  RecepcionDelKit? recepcion;
+
   int escuchasResumen = 0;
   int cancelacionesResumen = 0;
   int escuchasConexion = 0;
@@ -153,6 +157,7 @@ class _Banco {
           alCerrarSesion?.call();
         },
         sesionVencida: sesion.stream,
+        recepcion: recepcion,
       );
 
   /// La aplicación montada para una prueba.
@@ -604,5 +609,36 @@ void main() {
       expect(find.text(AppShell.avisoSesionVencida), findsOneWidget);
       await banco.cerrar();
     });
+
+    testWidgets(
+        '17. Materiales recibe la recepción del contenedor, y al recibir sincroniza',
+        (WidgetTester tester) async {
+      //  Sin esto la tarjeta de recepción existe y nadie la monta en la app.
+      final _RecepcionVacia recepcion = _RecepcionVacia();
+      final banco = _Banco()..recepcion = recepcion;
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+      await tester.tap(_enBarra('Materiales'));
+      await tester.pumpAndSettle();
+
+      final MaterialesScreen m = tester.widget(find.byType(MaterialesScreen));
+      expect(m.recepcion, same(recepcion));
+      final int antes = banco.sincronizacionesPedidas;
+      await m.alRecibir!();
+      expect(banco.sincronizacionesPedidas, antes + 1);
+      await banco.cerrar();
+    });
   });
+}
+
+class _RecepcionVacia implements RecepcionDelKit {
+  @override
+  Future<PendienteDeRecepcion> leer() async => const PendienteDeRecepcion();
+
+  @override
+  Future<void> confirmar(String entregaId,
+      {required bool conforme, List<Diferencia> diferencias = const <Diferencia>[]}) async {}
+
+  @override
+  Future<String> escanear(String serie) async => '';
 }

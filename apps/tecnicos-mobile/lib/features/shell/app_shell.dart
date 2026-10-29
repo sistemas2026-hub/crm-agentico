@@ -26,6 +26,7 @@ import '../detalle_orden/acciones_orden.dart';
 import '../detalle_orden/detalle_orden_screen.dart';
 import '../inicio/inicio_screen.dart';
 import '../materiales/materiales_screen.dart';
+import '../materiales/recepcion_del_kit.dart';
 import '../sesion/cierre_de_sesion.dart';
 import '../sesion/hoja_de_pendientes.dart';
 import '../trabajo/seleccion_jornada.dart';
@@ -73,11 +74,16 @@ class ShellDependencias {
     this.cerrarSesion,
     this.cicloDeVida,
     this.sesionVencida,
+    this.recepcion,
   });
 
   /// Avisa que el servidor rechazó la sesión (28/10/2026). Nulo en pruebas
   /// que no lo miden.
   final Stream<void>? sesionVencida;
+
+  /// La recepción del kit en Materiales (28/10/2026). Nula en pruebas que no
+  /// la miden: sin ella Materiales no la dibuja ni va a la red.
+  final RecepcionDelKit? recepcion;
 
   /// El estado de la cola, ya calculado por el servicio real.
   final Stream<SyncSummary> resumenes;
@@ -145,6 +151,7 @@ class ShellDependencias {
       sincronizarAhora: sincronizacion.procesarCola,
       conectividad: _conectividadDelTelefono(),
       sesionVencida: ApiClient.sesionVencida,
+      recepcion: RecepcionDelKit.real(),
       cargarIdentidad: () async => IdentidadTecnico(
         nombre: await almacenamiento.getUserName() ?? FieldMockData.tecnicoPorDefecto,
         empresa: await almacenamiento.getOrgName() ?? FieldMockData.empresaPorDefecto,
@@ -593,7 +600,11 @@ class _AppShellState extends State<AppShell> {
               return (lat.toDouble(), lng.toDouble());
             },
           ),
-        SeccionCampo.materiales => MaterialesScreen(tecnico: _identidad?.nombre),
+        SeccionCampo.materiales => MaterialesScreen(
+            tecnico: _identidad?.nombre,
+            recepcion: widget.dependencias.recepcion,
+            alRecibir: widget.dependencias.sincronizarAhora,
+          ),
         // Perfil no es una sección del apilado: es una hoja. Está en la barra
         // porque el diseño lo pone cuarto, y al tocarlo se abre lo que ya
         // existe —identidad y cierre de sesión— sin sacar al técnico de donde

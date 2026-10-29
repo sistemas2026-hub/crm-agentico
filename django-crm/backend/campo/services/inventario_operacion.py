@@ -174,8 +174,15 @@ def liberar(reserva, *, motivo="", desenlace=ReservaDeMaterial.LIBERADA,
 
 @transaction.atomic
 def consumir_reservas(*, org, ubicacion, material, cantidad, serie="",
-                      movimiento=None, orden=None) -> list:
+                      movimiento=None, orden=None, para=None) -> list:
     """Lo que se despacho deja de estar comprometido.
+
+    `para` (28/10/2026): a quien se le despacha. Dentro de cada grupo se cierra
+    primero la reserva apartada A SU NOMBRE (`reservada_por`): el Supervisor
+    reserva las ONT del dia a nombre del lider de cada cuadrilla, y cuando uno
+    escanea la suya no puede cerrarse la del otro solo por ser mas antigua.
+    Una reserva comun la hace alguien de bodega, que no es quien recibe: para
+    esas nada cambia.
 
     EL DEFECTO QUE ESTO ARREGLA, MEDIDO EL 28/09/2026
     -------------------------------------------------
@@ -239,9 +246,15 @@ def consumir_reservas(*, org, ubicacion, material, cantidad, serie="",
 
     def _ordenadas(qs):
         """Primero las de ESTA orden, despues las genericas; dentro de cada
-        grupo, la mas antigua. Cumplir lo especifico antes que lo generico."""
-        propias = [r for r in qs.order_by("created_at") if r.orden_id]
-        genericas = [r for r in qs.order_by("created_at") if not r.orden_id]
+        grupo, primero las apartadas para quien recibe (`para`) y despues la
+        mas antigua. Cumplir lo especifico antes que lo generico."""
+        def clave(r):
+            ajena = para is not None and r.reservada_por_id != para.id
+            return (ajena, r.created_at)
+
+        todas = list(qs)
+        propias = sorted([r for r in todas if r.orden_id], key=clave)
+        genericas = sorted([r for r in todas if not r.orden_id], key=clave)
         return propias + genericas
 
     if serie:

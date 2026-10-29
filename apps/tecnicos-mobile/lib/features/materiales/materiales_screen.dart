@@ -13,6 +13,8 @@ import 'devolucion_screen.dart';
 import 'kit_de_jornada.dart';
 import 'material_en_custodia.dart';
 import 'pedir_a_bodega.dart';
+import 'recepcion_del_kit.dart';
+import 'widgets/tarjeta_de_recepcion.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_empty_state.dart';
 
@@ -40,9 +42,23 @@ class MaterialesScreen extends StatefulWidget {
     this.tecnico,
     this.kit,
     this.pedidos,
+    this.recepcion,
+    this.leerCodigo,
+    this.alRecibir,
   });
 
   final bool mostrarDatosFuturos;
+
+  /// Lo que hay que confirmar al recibir el kit. Lo pasa el contenedor de la
+  /// app; nulo en pruebas que no la miden, y entonces no se dibuja ni va a la red.
+  final RecepcionDelKit? recepcion;
+
+  /// El lector de códigos de la recepción. Solo las pruebas lo cambian.
+  final LeerCodigo? leerCodigo;
+
+  /// Después de confirmar o escanear: la custodia cambió en el servidor y hay
+  /// que bajarla. En la app es la sincronización; sin él, se vuelve a leer.
+  final Future<void> Function()? alRecibir;
 
   /// El kit ya leido. Se inyecta en las pruebas; en la aplicacion se lee solo.
   final KitDeJornada? kit;
@@ -68,6 +84,22 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
   /// Lo que ya le pidió a bodega y todavía no llegó.
   List<PedidoEnCola> _pedidos = const <PedidoEnCola>[];
 
+  /// Cuántas veces se bajó el kit desde que se abrió la pantalla.
+  int _bajadasDelKit = 0;
+
+  /// Confirmar o escanear cambia la custodia en el servidor. Bajarla escribe
+  /// `local_kit`, y ese cambio vuelve a dibujar esta pantalla.
+  Widget? _tarjetaDeRecepcion() {
+    final RecepcionDelKit? recepcion = widget.recepcion;
+    if (recepcion == null) return null;
+    return TarjetaDeRecepcion(
+      recepcion: recepcion,
+      leerCodigo: widget.leerCodigo ?? leerConLaCamara,
+      alCambiar: widget.alRecibir ?? _cargar,
+      recargarCon: _bajadasDelKit,
+    );
+  }
+
   @override
   void dispose() {
     _suscripcion?.cancel();
@@ -87,6 +119,9 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
     // impide que el test termine.
     _suscripcion = LocalDatabase.onDataChanged.listen((evento) {
       if (!mounted) return;
+      // Un kit bajado del servidor puede traer una entrega nueva: la recepción
+      // se vuelve a leer (la pestaña queda viva y no se entera sola).
+      if (evento.tabla == 'local_kit') _bajadasDelKit++;
       if (evento.tabla == 'local_kit' ||
           evento.tabla == 'cola_movimientos_material' ||
           evento.tabla == 'cola_pedidos_material') {
@@ -153,18 +188,32 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
             ? KitMockData.items
             : const <MaterialEnCustodia>[]);
 
+    final Widget? tarjeta = _tarjetaDeRecepcion();
+
     if (todos.isEmpty) {
-      return const ColoredBox(
-        color: AppColors.surface,
-        child: Center(
-          child: DexterEmptyState(
-            icono: Icons.inventory_2_outlined,
-            titulo: 'Mi kit y custodia',
-            mensaje: 'Todavía no hay material entregado a tu nombre. Aparece '
-                'cuando la bodega registre la entrega y haya señal para '
-                'sincronizar.',
-          ),
+      const Widget vacio = Center(
+        child: DexterEmptyState(
+          icono: Icons.inventory_2_outlined,
+          titulo: 'Mi kit y custodia',
+          mensaje: 'Todavía no hay material entregado a tu nombre. Aparece '
+              'cuando la bodega registre la entrega y haya señal para '
+              'sincronizar.',
         ),
+      );
+      // Sin nada en custodia puede haber equipos apartados por escanear: la
+      // recepción va arriba también acá.
+      return ColoredBox(
+        color: AppColors.surface,
+        child: tarjeta == null
+            ? vacio
+            : Column(children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.margen, AppSpacing.md, AppSpacing.margen, 0),
+                  child: tarjeta,
+                ),
+                const Expanded(child: vacio),
+              ]),
       );
     }
 
@@ -188,6 +237,7 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
             style: AppTypography.cuerpoChico,
           ),
           const SizedBox(height: AppSpacing.md),
+          ?tarjeta,
           _recepcionDelKit(todos),
           if (_kit != null && _kit!.conNovedad.isNotEmpty) ...<Widget>[
             const SizedBox(height: AppSpacing.md),

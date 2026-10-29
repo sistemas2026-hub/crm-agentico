@@ -6,9 +6,9 @@ from django.urls import path
 from campo import (
     avisos_views,
     cuadrillas_views,
+    despacho_pantalla_views,
     despacho_views,
     dia_publicado_views,
-    despacho_pantalla_views,
     inventario_operacion_views,
     inventario_views,
     material_del_dia_views,
@@ -16,6 +16,7 @@ from campo import (
     niveles_views,
     pedidos_views,
     plantillas_views,
+    recepcion_views,
     views,
 )
 
@@ -26,6 +27,13 @@ urlpatterns = [
     path("trabajos/", views.TrabajosListView.as_view(), name="trabajos_list"),
     # Materiales: la custodia del tecnico y lo que gasta en la calle.
     path("kit/", materiales_views.KitView.as_view(), name="kit"),
+    # La recepcion del kit (28/10/2026, fase 2 del material del dia): confirmar
+    # lo recibido y escanear los equipos apartados a su nombre.
+    path("kit/recepcion/", recepcion_views.RecepcionView.as_view(), name="kit_recepcion"),
+    path("kit/recepcion/escanear/", recepcion_views.EscanearEquipoView.as_view(),
+         name="kit_recepcion_escanear"),
+    path("kit/recepcion/<uid:pk>/confirmar/", recepcion_views.ConfirmarEntregaView.as_view(),
+         name="kit_recepcion_confirmar"),
     path(
         "materiales/movimientos/",
         materiales_views.MovimientosMaterialView.as_view(),

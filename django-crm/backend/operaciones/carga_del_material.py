@@ -104,8 +104,11 @@ def _cargar_una(org, hoy, fila, comunes, con_serie) -> int:
                 notas=(f"Material del día {hoy.isoformat()}: lo cargó el "
                        f"Supervisor ({fila['cuadrilla']})."))
         for material, cantidad in con_serie:
+            #  A NOMBRE DEL LIDER: es lo que la recepcion busca cuando escanea
+            #  (`campo/recepcion_del_kit.py`), y lo que hace que el despacho de
+            #  esa ONT cierre SU reserva y no la de otra cuadrilla.
             reservar(org=org, ubicacion=fila["_bodega"], material=material,
-                     cantidad=cantidad,
+                     cantidad=cantidad, reservada_por=fila["_lider"],
                      motivo=(f"{fila['acta']} · equipos del día para "
                              f"{fila['cuadrilla']}: se entregan al escanearlos"))
     return len(con_serie)

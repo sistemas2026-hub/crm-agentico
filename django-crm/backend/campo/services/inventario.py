@@ -498,7 +498,8 @@ def despachar(*, org, ubicacion_origen, profile_destino, lineas,
         # PERMANENTE: nada volvia a mirar esa reserva nunca.
         from campo.services.inventario_operacion import consumir_reservas
         consumir_reservas(org=org, ubicacion=ubicacion_origen, material=material,
-                          cantidad=cantidad, serie=serie, movimiento=mov)
+                          cantidad=cantidad, serie=serie, movimiento=mov,
+                          para=profile_destino)
 
     return entrega, movimientos
 
