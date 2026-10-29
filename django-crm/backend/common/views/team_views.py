@@ -1,3 +1,4 @@
+from django.db.models import Prefetch
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.pagination import LimitOffsetPagination
@@ -24,8 +25,16 @@ class TeamsListView(APIView, LimitOffsetPagination):
 
     def get_context_data(self, **kwargs):
         params = self.request.query_params
-        queryset = self.model.objects.filter(org=self.request.profile.org).order_by(
-            "-id"
+        # Cada integrante se serializa con su usuario (user_details) y cada
+        # equipo con created_by: sin esto, una consulta por persona y por
+        # equipo (131 con 3 equipos de 40, medido el 29/10/2026).
+        queryset = (
+            self.model.objects.filter(org=self.request.profile.org)
+            .select_related("created_by")
+            .prefetch_related(
+                Prefetch("users", queryset=Profile.objects.select_related("user"))
+            )
+            .order_by("-id")
         )
         if params:
             if params.get("team_name"):

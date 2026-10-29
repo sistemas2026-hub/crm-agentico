@@ -64,7 +64,12 @@ def add_business_hours(start_dt: datetime, hours: float, calendar) -> datetime:
         return start_dt + timedelta(hours=float(hours))
 
     tz = _resolve_tz(calendar.timezone or "UTC")
-    holidays = set(calendar.holidays.values_list("date", flat=True))
+    # .all(), no .values_list(): values_list arma una consulta nueva y se salta
+    # el prefetch_related("holidays") de get_default_calendar. Medido el
+    # 29/10/2026: el resumen de escalamiento hacia 2 consultas POR CASO de los
+    # ultimos 30 dias (408 con 200 casos), y Configuracion esperaba por eso.
+    # Sin prefetch, .all() consulta igual que antes.
+    holidays = {h.date for h in calendar.holidays.all()}
 
     cur = start_dt.astimezone(tz)
     remaining = timedelta(hours=float(hours))
