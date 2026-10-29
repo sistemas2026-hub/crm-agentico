@@ -182,6 +182,122 @@ a usar `--forzar` sin leer.
 
 ---
 
+## Inventario de agentes ejecutables — medido el 29/10/2026
+
+**Son 9 roles, y NO son 9 empleados virtuales.** El motor los invoca por
+caminos distintos, y eso decide cuáles merecen personaje propio.
+
+| Rol | Orientado a | Cómo se invoca | ¿Autónomo? | Herramientas | Personaje |
+|---|---|---|---|---|---|
+| `cliente_final` | cliente_final | webhook WhatsApp vía `rol_de_entrada` | **sí** | **1** | **Recepción** |
+| `facturacion_cliente` | cliente_final | derivación desde recepción | **sí** | 7 | propio |
+| `soporte_tecnico_cliente` | cliente_final | derivación | **sí** | 21 | propio |
+| `ventas` | cliente_final | derivación | **sí** | 15 | propio |
+| `supervisor_noc` | colaborador | `/interno/supervisor/chat` (puerta propia) | **sí** | 11 | propio |
+| `configuracion_guiada` | colaborador | `/api/configuracion-guiada`, **rol fijo** | **sí** | 2 | propio |
+| `soporte` | colaborador | asignado a una **persona** | no | 28 | **capacidad** |
+| `facturacion` | colaborador | asignado a una **persona** | no | 11 | **capacidad** |
+| `administracion` | colaborador | asignado a una **persona** | no | 9 | **capacidad** |
+
+### Las tres categorías, y cómo se distinguen en el código
+
+**1 · Agentes autónomos del canal público (4).** Atienden solos a quien
+escribe por WhatsApp. `cliente_final` es la puerta —y **un ROUTER sin
+herramientas propias**: tiene **1 sola**, la de derivar—; los otros tres
+reciben el caso derivado. El mapa está en la herramienta con `deriva_rol: true`:
+
+```
+roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente, ventas]
+areas_destino:    [facturacion_cliente, soporte_tecnico_cliente, ventas]
+```
+
+`cliente_final` **no** está entre los destinos, y el comentario explica por qué:
+*«sería un callejón sin salida — el cliente quedaría con un agente que no puede
+resolverle nada»*. Un especialista que se equivocó de área pasa **directo** al
+otro, no vuelve a pasar por recepción. **Eso es una ruta de personaje, y está
+medida: cuatro personajes y las derivaciones entre ellos.**
+
+**2 · Agentes con puerta propia (2).** `supervisor_noc` y
+`configuracion_guiada` se invocan desde una pantalla del CRM con rol fijo o
+resuelto por Django. Son ejecutables y tienen personaje, pero **no reciben
+clientes**: su trabajo lo dispara un colaborador.
+
+**3 · Capacidades de una persona (3).** `soporte`, `facturacion` y
+`administracion` **no son empleados virtuales**. `/api/asistente` dejó de mandar
+rol fijo: manda **quién pregunta**, y el motor resuelve
+`agentes_de_colaborador(tenant, profile_id)` —`{profile_id: [agente, ...]}`—
+**fusionándolos si son varios**. Son una capacidad que se le asigna a una
+persona real del CRM, no alguien sentado en un escritorio.
+
+> **Consecuencia para la oficina**: dibujar nueve personajes sería inventar
+> tres empleados que no existen como procesos. Los tres de la categoría 3
+> deberían aparecer **sobre la persona que los tiene asignados** —un distintivo
+> en su puesto, no un escritorio propio—. Es la decisión que queda para ti.
+
+Y un matiz que afecta al diseño: la **bandeja** (`conversaciones/[id]`) invoca
+`rol_efectivo || 'cliente_final'`, así que una persona puede responder *con* el
+rol de un agente. El personaje y quien lo opera no siempre son lo mismo.
+
+---
+
+## Mapeo organizacional — propuesto el 29/10/2026, sin ejecutar
+
+Según la decisión aprobada: **«Finanzas y cartera» como departamento principal,
+Facturación y Cartera como funciones independientes dentro.**
+
+| `config.areas` | `rol.area` | Propuesta | Confianza |
+|---|---|---|---|
+| `cartera` | — | **Finanzas y cartera** › Cartera | aprobado |
+| — | `Facturación` | **Finanzas y cartera** › Facturación | aprobado |
+| `soporte_tecnico` | `Soporte Técnico` | Soporte Técnico | directa |
+| `administracion` | `Administración` | Administración | directa |
+| `ventas` | `Ventas` | Comercial › Ventas | directa |
+| `operativo` | `Operaciones` | **¿el mismo?** | **ambigua** |
+| — | `Atención al Cliente` | **falta como área** | **ambigua** |
+
+**Dos ambigüedades que necesitan decisión de negocio, y no las resuelvo yo:**
+
+1. **`operativo` (área) vs `Operaciones` (rol).** El único rol con
+   `area: Operaciones` es `supervisor_noc`. ¿Es `operativo` el departamento del
+   NOC, o es otra cosa? Importa porque **el NOC es el primer departamento que
+   se va a construir**.
+2. **`Atención al Cliente` no existe como área.** Tres roles la declaran
+   (`soporte`, `cliente_final`, `soporte_tecnico_cliente`) y no hay entrada en
+   `config.areas`. ¿Se crea el departamento, o esos roles pertenecen a otro?
+
+**No se fusionan datos, permisos ni registros históricos.** El mapeo es una
+tabla de equivalencias a aplicar en la fase 2, no una migración.
+
+---
+
+## Defecto independiente · 68 falsos positivos al reordenar listas
+
+**Registrado el 29/10/2026. No corregido a propósito: no es de este objetivo.**
+
+`planes_venta` y `guias_tv` se indexan por POSICIÓN en `_hojas`, porque sus
+elementos no traen clave `nombre` (usan `nombre_wisphub` y `marca`). Reordenar
+el YAML produce **68 avisos** que no son pérdidas:
+
+```
+planes_venta[0].nombre_wisphub: la base dice 'PLAN ELITE' y el archivo
+'PLAN FIBRA OPTICA 150MB_SB' -- se PISARIA
+```
+
+**Impacto, y por qué importa para el SaaS:** la guarda bloquea con `SystemExit`
+y ofrece `--forzar` como salida. Un operador que ve 68 avisos falsos aprende a
+correr `--forzar` sin leer — y entonces la guarda deja de proteger, incluida la
+de departamentos que se acaba de arreglar. Es el mismo mecanismo que ya rompió
+esta guarda el 24/08/2026 (15 falsos de 31).
+
+**No bloquea el trabajo visual.** Sí debería resolverse **antes** de convertir
+la importación de YAML en una función para clientes del SaaS: ahí el que
+corre `--forzar` no sería quien escribió el archivo.
+
+**Arreglo probable**: que `_hojas` acepte más claves identificadoras que
+`nombre`. Toca la comparación entera, así que pide su propia medición.
+
+---
+
 ## Decisiones de producto congeladas
 
 ### Facturación y Cartera — aprobado el 29/10/2026
@@ -337,9 +453,9 @@ endpoint vacío, con N empresas abiertas a la vez, contra `--workers 1`.
 
 | # | Evidencia | Cómo se comprueba |
 |---|---|---|
-| **A1** | Una carga de config **no** borra departamentos creados desde la interfaz | ✅ **29/10/2026**: `tests/test_guarda_cargar_config.py` bloque [8]. La prueba falló con 4 errores antes del arreglo y pasa después |
+| **A1** | Una carga de config **no** borra departamentos creados desde la interfaz | ✅ **CERRADO 29/10/2026 contra PostgreSQL real**: `tests/test_conservacion_departamentos_con_base.py`. `cargar()` corta, nombra `areas`, dice BORRARIA, la base queda intacta y la versión no sube. Verificada por mutación: quitar el arreglo da **3 fallas**, entre ellas «los departamentos se habrían perdido». Más la unitaria del bloque [8] |
 | **A2** | Los dos vocabularios quedan unificados **sin fusionar nada por decisión propia** | Un volcado antes y después muestra las mismas relaciones agente↔departamento. Las fusiones que haya están aprobadas por escrito |
-| **A3** | Rol, agente ejecutable y personaje son tres entidades | Existe un `RolEmpresarial` sin `AgenteIA`, y un `Departamento` sin ninguno de los dos, y la oficina los dibuja |
+| **A3** | Rol, agente ejecutable y personaje son tres entidades | Existe un `RolEmpresarial` sin `AgenteIA`, y un `Departamento` sin ninguno de los dos, y la oficina los dibuja. **Inventario medido el 29/10**: de 9 roles, 6 son ejecutables y 3 son capacidades de una persona |
 | **A4** | Un agente puede estar en varios departamentos | Una `Asignacion` doble se dibuja en las dos oficinas |
 | **A5** | El refresco respeta la sesión | ✅ **29/10/2026**: ya se cumplía (D-C era falso positivo) y lo guarda `tenant.test.js:112`, que afirma sobre el efecto |
 | **A6** | Dos ISPs no se ven entre sí | ✅ **29/10/2026** *para el panorama*: `routes/api/centro-mando/server.test.js`, 7 pruebas. Verificada por mutación: devolver el endpoint a la variable de entorno **mata 5 de 7**. Queda pendiente para los EVENTOS de la fase 1 |

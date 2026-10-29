@@ -8,8 +8,10 @@ import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
  * (GET, cualquier miembro logueado) y crear un agente nuevo (POST, solo
  * ADMIN -- elegir que datos puede ver un agente es un cambio de superficie
  * de seguridad, no una accion de cualquier miembro). Mismo patron que
- * /api/simulador-whatsapp: tenant sale de PRIVATE_ASISTENTE_TENANT en el
- * servidor, nunca del cliente.
+ * /api/simulador-whatsapp: la empresa sale de LA SESION
+ * (`tenantDeLaSesion`) en el servidor, nunca del cliente. El texto anterior
+ * decia PRIVATE_ASISTENTE_TENANT y quedo viejo al cerrar el criterio A1 de
+ * SPEC/objetivos/plataforma-multi-isp.md -- lo guarda `tenant.test.js`.
  */
 
 async function baseUrlYTenant(locals, fetch) {

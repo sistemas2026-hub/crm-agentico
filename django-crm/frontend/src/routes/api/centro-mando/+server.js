@@ -8,10 +8,21 @@ import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
  * para refrescarse sola cada pocos segundos sin recargar (el `load` del
  * servidor resuelve la primera pintada; esto, las siguientes).
  *
- * Mismo patron que /api/agentes: el tenant sale de PRIVATE_ASISTENTE_TENANT
- * en el servidor, nunca del cliente -- que el navegador pudiera elegir de que
- * empresa son los datos convertiria una pantalla interna en un selector de
- * organizaciones ajenas.
+ * Mismo patron que /api/agentes: la empresa sale de LA SESION
+ * (`tenantDeLaSesion`), en el servidor y nunca del cliente -- que el navegador
+ * pudiera elegir de que empresa son los datos convertiria una pantalla interna
+ * en un selector de organizaciones ajenas.
+ *
+ * Decia "sale de PRIVATE_ASISTENTE_TENANT" y era FALSO desde que se cerro el
+ * criterio A1 de SPEC/objetivos/plataforma-multi-isp.md. El comentario viejo
+ * sobrevivio al cambio y el 29/10/2026 una auditoria lo leyo y reporto una
+ * vulnerabilidad que no existia. Un comentario que miente cuesta el tiempo de
+ * quien lo cree.
+ *
+ * Lo que de verdad lo sostiene no es este parrafo: son
+ * `routes/api/centro-mando/server.test.js` --dos organizaciones, sesion sin
+ * empresa, y el cliente intentando elegir empresa por query string-- y la
+ * guarda de arquitectura de `tenant.test.js`.
  */
 
 /** @type {import('./$types').RequestHandler} */
