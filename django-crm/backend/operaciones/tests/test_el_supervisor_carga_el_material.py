@@ -350,6 +350,11 @@ def test_a2_bodega_sin_elegir_faltante_y_equipo_que_no_sale(
     assert [k for k in a if k[0] == "sale_sin_equipo"] == [
         ("sale_sin_equipo", f"{cuadrilla}:ONU-WIFI")]
     assert a[("sale_sin_equipo", f"{cuadrilla}:ONU-WIFI")].motivo == "ONU WIFI"
+    #  Y que le falta a la bodega, uno por material: lo que hay que cargar.
+    assert {k[1]: v.motivo for k, v in a.items() if k[0] == "falta_en_bodega"} == {
+        "BOG-SOLEDAD:Conector UPC": "BOG-SOLEDAD · Conector UPC",
+        "BOG-SOLEDAD:ONU WIFI": "BOG-SOLEDAD · ONU WIFI",
+    }
 
 
 def test_a3_lo_ya_cargado_no_es_un_atasco(abierto, bodega, conector, ont, jornada):

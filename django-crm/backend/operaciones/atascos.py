@@ -74,6 +74,7 @@ TIPOS = {
     "sin_lider": (FALTA_DATO, "la cuadrilla no tiene líder con cuenta activa"),
     "material_no_alcanza": (NO_ALCANZA, "la bodega no alcanza para completar el kit"),
     "sale_sin_equipo": (NO_ALCANZA, "la cuadrilla sale sin un equipo con serie de su kit"),
+    "falta_en_bodega": (NO_ALCANZA, "a la bodega le falta un material para los kits del día"),
     "carga_fallo": (FALLO, "la carga de una cuadrilla se cayó"),
     # Reparto del dia (operaciones/publicacion_del_reparto.py)
     "orden_sin_labor": (NO_DECIDE, "la orden no tiene labor: no se sabe a qué cuadrilla va"),

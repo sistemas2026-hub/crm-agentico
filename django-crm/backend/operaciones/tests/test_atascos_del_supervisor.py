@@ -164,6 +164,46 @@ def test_r_el_reparto_anota_lo_que_no_pudo_ubicar_aunque_este_en_sombra(empresa,
     assert {str(a.dia) for a in _filas(empresa)} == {"2026-10-28"}, "el dia de la vuelta"
 
 
+def test_r2_cada_orden_dice_su_labor_y_su_zona(empresa, monkeypatch):
+    """Pedido del usuario ante «36 órdenes sin cuadrilla»: de qué labor y en
+    qué zona. El barrio solo cuando no tiene zona, que es lo que hay que cargar."""
+    from campo.labores import Labor
+    from campo.models import OrdenTrabajo, WorkType, WorkTypeVersion
+    from campo.zonas import AliasDeZona, ZonaOperativa
+    from operaciones import publicacion_del_reparto as pub
+
+    Labor.objects.update_or_create(org=empresa, codigo="instalacion",
+                                   defaults={"nombre": "Instalacion", "de_fabrica": True})
+    wt = WorkType.objects.create(org=empresa, codigo="ins", nombre="Instalación",
+                                 labor="instalacion")
+    v = WorkTypeVersion.objects.create(work_type=wt, version=1,
+                                       estado=WorkTypeVersion.PUBLICADA, esquema={"campos": []})
+    zona = ZonaOperativa.objects.create(org=empresa, nombre="SOLEDAD")
+    AliasDeZona.objects.create(org=empresa, zona=zona, localidad="VILLA ESTADIO")
+
+    def orden(numero, barrio):
+        return OrdenTrabajo.objects.create(org=empresa, numero=numero, tipo_trabajo_version=v,
+                                           estado_operativo=OrdenTrabajo.ASIGNADA, zona=barrio)
+
+    con_zona, sin_zona, sin_barrio = orden(901, "Villa Estadio"), orden(902, "Rincón"), orden(903, "")
+    detalle = {"cabe": {}, "sobrantes": [], "sin_clasificar": [], "no_reciben": [],
+               "sin_cuadrilla": [str(con_zona.id)],
+               "sin_zona": [str(sin_zona.id), str(sin_barrio.id)]}
+    monkeypatch.setattr(pub, "cuando", lambda org, ahora: (dt.date(2026, 10, 28), "", ""))
+    monkeypatch.setattr(pub, "propuesta", lambda org, hoy, ahora: {
+        "asignaciones": [], "trabajan_hoy": set(), "publicaria": 0, "libera": 0,
+        "sobrantes": 0, "sin_cuadrilla": 1, "sin_zona": 2, "sin_nadie_con_cuenta": 0,
+        "con_ausentes": 0, "detalle": detalle})
+
+    pub.publicar_el_reparto(empresa, _a_las(28, 6))
+
+    assert {a.sujeto: a.motivo for a in _filas(empresa)} == {
+        str(con_zona.id): "Instalacion en SOLEDAD",
+        str(sin_zona.id): "Instalacion · el barrio RINCÓN no está en ninguna zona",
+        str(sin_barrio.id): "Instalacion · no se sabe su barrio",
+    }
+
+
 # ---------------------------------------------------------------------------
 # C · el ciclo
 # ---------------------------------------------------------------------------

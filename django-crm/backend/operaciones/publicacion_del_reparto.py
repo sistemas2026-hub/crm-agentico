@@ -279,15 +279,57 @@ _ATASCO_DE_LA_ORDEN = (("sin_clasificar", "orden_sin_labor"), ("sin_zona", "orde
                        ("sin_cuadrilla", "orden_sin_cuadrilla"), ("sobrantes", "orden_sobrante"))
 
 
+def _motivos_de_las_ordenes(org, ids) -> dict:
+    """{orden_id: «Instalación en Soledad zona 1»}: la labor y la zona de cada
+    orden que no se pudo ubicar, con las mismas cuentas del reparto
+    (`campo.reparto`). Pedido del usuario el 29/10/2026, ante «36 órdenes sin
+    cuadrilla»: hace falta saber de qué labor y en qué zona para resolverlo.
+
+    El barrio solo cuando no tiene zona, que es justo lo que hay que cargar:
+    un nombre de barrio, no una dirección (el mismo criterio que
+    `informe_de_despacho`). Si no se puede calcular, vacio: el atasco se anota
+    igual, con el texto del catalogo."""
+    from campo import reparto as R
+    from campo.labores import nombres_de_labor
+    from campo.models import OrdenTrabajo
+    from campo.zonas import ZonaOperativa
+
+    try:
+        labores = nombres_de_labor(org)
+        zona_de_barrio = R.zona_de_barrio(org)
+        nombre_zona = {str(i): n for i, n in
+                       ZonaOperativa.objects.filter(org=org).values_list("id", "nombre")}
+        salida = {}
+        for o in (OrdenTrabajo.objects.filter(org=org, id__in=list(ids))
+                  .select_related("tipo_trabajo_version__work_type")):
+            barrio = R._localidad_de(o) or ""
+            zona_id = zona_de_barrio.get(barrio) if barrio else None
+            labor_cod = R._labor_de(o)
+            labor = labores.get(labor_cod, labor_cod) or "sin labor"
+            if zona_id is not None:
+                salida[str(o.id)] = f"{labor} en {nombre_zona.get(str(zona_id), 'su zona')}"
+            elif barrio:
+                salida[str(o.id)] = f"{labor} · el barrio {barrio} no está en ninguna zona"
+            else:
+                salida[str(o.id)] = f"{labor} · no se sabe su barrio"
+        return salida
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("Supervisor: reparto del dia · no se pudo decir la labor y la zona "
+                       "de lo que no se ubico (%s)", type(e).__name__)
+        return {}
+
+
 def _anotar_atascos(org, detalle, ahora) -> None:
     """Lo que el reparto no pudo ubicar, en la sombra tambien: se mide si el
     Supervisor sabe decidir, no si tiene permiso."""
     from operaciones import atascos
 
+    motivos = _motivos_de_las_ordenes(
+        org, [i for lista, _ in _ATASCO_DE_LA_ORDEN for i in detalle.get(lista) or ()])
     for lista, tipo in _ATASCO_DE_LA_ORDEN:
         for orden_id in detalle.get(lista) or ():
             atascos.anotar(org, atascos.FASE_REPARTO, tipo, orden_id,
-                           atascos.TIPOS[tipo][1], ahora=ahora)
+                           motivos.get(str(orden_id)) or atascos.TIPOS[tipo][1], ahora=ahora)
     for jornada, motivo in detalle.get("no_reciben") or ():
         tipo = "cuadrilla_sin_cuenta" if motivo == SIN_CUENTA else "cuadrilla_ausente"
         atascos.anotar(org, atascos.FASE_REPARTO, tipo, jornada.cuadrilla_id,

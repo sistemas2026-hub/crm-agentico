@@ -148,6 +148,16 @@ def _anotar_atascos(org, plan, ya, ahora) -> None:
             if i["serializado"] and i["asignado"] == M.CERO:
                 anotar("sale_sin_equipo", f"{cuadrilla}:{i['_material'].codigo}",
                        i["material"])
+    #  QUE FALTA EN CADA BODEGA (29/10/2026): «13 de 14 materiales» por
+    #  cuadrilla no dice que comprar ni que cargar en Inventario. Uno por
+    #  bodega y material. SIN LA CANTIDAD en el motivo: el informe agrupa por
+    #  motivo, y un numero que cambia cada dia partiria la misma falta en
+    #  catorce lineas. Cuanto falta hoy lo dice Programacion. Solo de las
+    #  cuadrillas que no se cargaron, como todo lo demas.
+    faltan = {(f["bodega"], i["material"]) for f in plan["cuadrillas"]
+              if f["acta"] not in ya for i in f["lineas"] if i["falta"] > 0}
+    for bodega, material in sorted(faltan):
+        anotar("falta_en_bodega", f"{bodega}:{material}", f"{bodega} · {material}")
 
 
 def cargar_el_material(org, ahora=None) -> dict:
