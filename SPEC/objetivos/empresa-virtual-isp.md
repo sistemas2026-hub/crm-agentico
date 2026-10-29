@@ -111,26 +111,107 @@ agrupa por un vocabulario distinto al que el CRM usa para organizar la empresa.*
 > negocio de Rapilink, no una equivalencia técnica, y se pregunta antes de
 > fusionar nada. La migración conserva ambos lados hasta que alguien decida.
 
-### D-C · El refresco del Centro de Mando no respeta la sesión
+### ~~D-C · El refresco del Centro de Mando no respeta la sesión~~ — FALSO POSITIVO
 
-Medido: `PRIVATE_ASISTENTE_TENANT` queda en 5 archivos, y **dos son lectores
-reales**, no el ayudante ni sus pruebas:
+**No existía. Lo afirmé y era mío el error**, corregido el 29/10/2026 al abrir
+el archivo en vez de confiar en un `grep`.
+
+`routes/api/centro-mando/+server.js:24` **ya usa `tenantDeLaSesion(locals,
+fetch)`**. Lo que mi búsqueda encontró era el **comentario** de la cabecera y
+el texto de un mensaje de error, no código ejecutable. Medido después:
 
 ```
-src/routes/api/centro-mando/+server.js     <- el refresco de ESTA pantalla
-src/routes/api/agentes/+server.js
+lecturas reales de env.PRIVATE_ASISTENTE_TENANT en src/   0
+las 8 apariciones son: 3 comentarios + 5 en pruebas
 ```
 
-La primera pintada (`+page.server.js`) **sí** usa `tenantDeLaSesion`. El proxy
-que la refresca cada 12 s **no**: toma el tenant de una variable de entorno del
-despliegue. Con dos ISPs en la misma instalación, los refrescos servirían los
-datos del tenant de la variable a cualquier sesión.
+Y hay más de lo que supuse: **ya existe una guarda de arquitectura** que lo
+impide —`tenant.test.js:112`, «ningún archivo de src/ lee
+PRIVATE_ASISTENTE_TENANT»— escrita para afirmar sobre el **efecto** y no sobre
+que `tenantDeLaSesion` exista. El criterio **A1** de
+[plataforma-multi-isp.md](plataforma-multi-isp.md) está cumplido en el código;
+lo que queda son dos comentarios desactualizados que dicen lo contrario de lo
+que hace el archivo, y que son justo los que me hicieron creer en el defecto.
 
-Su comentario explica la intención —que el navegador no pueda elegir la
-empresa— y esa intención es correcta; lo que está mal es de dónde sale el dato.
-Es el criterio **A1** de [plataforma-multi-isp.md](plataforma-multi-isp.md),
-que sigue abierto (su ficha dice «hoy son 70»; hoy son 5, de los cuales 2
-cuentan).
+**La lección vale más que el falso positivo**: un `grep` encuentra texto, no
+comportamiento. Es la otra cara de lo que CLAUDE.md §6 llama *«no detectado por
+chequeo estático ≠ no hay diferencias»*.
+
+Lo que **sí** faltaba, y se construyó: una prueba que afirme el aislamiento
+**en el endpoint**, no solo en el ayudante. Aquella puede estar perfecta y este
+proxy pasarle otra cosa al motor — la falla del salto entre capas que §6
+describe y que ya se cobró dos veces el 29/09/2026.
+
+---
+
+### D-D · La guarda no veía que se quitara UN elemento de una lista
+
+Apareció al construir la prueba de conservación, y es el caso más probable de
+todos: **nadie vacía la lista entera — se edita el archivo y se pierde uno.**
+
+Medido el 29/10/2026, antes de tocar nada:
+
+```
+                       quitar uno      vaciar entera
+areas                   0 avisos         1 aviso
+planes_venta            0 avisos         1 aviso
+servicios_ofrecidos     0 avisos         1 aviso
+```
+
+La comparación hoja por hoja saltaba las rutas que el archivo no trae —y con
+razón, porque un campo ausente lo completa el esquema con su default— pero eso
+metía en la misma bolsa dos cosas distintas: *falta el campo* (ruido) y *falta
+el elemento entero* (pérdida). Se distinguen por el prefijo.
+
+Es la **tercera** vez que esta guarda se queda corta; las dos anteriores están
+documentadas en su propia prueba (23/08 y 24/08/2026).
+
+**Lo que había que cuidar, y se midió**: que el arreglo no reintrodujera falsos
+positivos, que es como esta guarda se rompió la segunda vez.
+
+```
+reordenar listas    original 68 avisos  ->  con el arreglo 68   (sin ruido nuevo)
+quitar un area      original  0 avisos  ->  con el arreglo  1   (el defecto)
+```
+
+Y un hallazgo **preexistente que queda abierto**: esos 68 avisos al reordenar
+son falsos positivos de `planes_venta` y `guias_tv`, cuyas listas se indexan
+por POSICIÓN porque sus elementos no traen clave `nombre`. No es de este
+objetivo y no se tocó; queda anotado porque es exactamente el ruido que enseña
+a usar `--forzar` sin leer.
+
+---
+
+## Decisiones de producto congeladas
+
+### Facturación y Cartera — aprobado el 29/10/2026
+
+**Son funciones distintas que pueden compartir departamento.** Inicialmente
+ambas bajo «Finanzas y cartera». La arquitectura debe permitir que cada ISP las
+mantenga juntas o las separe en departamentos independientes.
+
+**No se fusionan datos históricos, roles ni permisos automáticamente.** El
+mapeo se documenta antes de cualquier migración. Esto es lo que convierte
+`UnidadOrganizacional` en un árbol y no en una lista plana: el departamento
+principal agrupa, las funciones viven dentro.
+
+### La base manda; el YAML es plantilla — aprobado el 29/10/2026
+
+| | Papel |
+|---|---|
+| **Base de datos** | fuente de verdad **operativa** de cada empresa |
+| **YAML** | plantillas, importación y configuración versionada |
+
+Una importación **no puede** eliminar ni sobrescribir departamentos creados
+desde la interfaz sin mostrar las diferencias, advertir y obtener autorización
+explícita.
+
+**Ese mecanismo ya existía y no había que diseñarlo desde cero**:
+`cargar_config.py:457` calcula lo que se perdería, **corta con `SystemExit`**
+—no solo avisa—, lista las diferencias una por una, explica cómo exportar
+primero, y deja `--forzar` como la autorización explícita. Las tres condiciones
+estaban cubiertas. Lo que faltaba era que `areas` entrara en su alcance (D-A) y
+que detectara elementos quitados (D-D).
 
 ---
 
@@ -256,12 +337,12 @@ endpoint vacío, con N empresas abiertas a la vez, contra `--workers 1`.
 
 | # | Evidencia | Cómo se comprueba |
 |---|---|---|
-| **A1** | Una carga de config **no** borra departamentos creados desde la interfaz | Crear un área en `/settings/areas`, correr `cli/cargar_config.py`, volver a leerla. Debe seguir ahí. Hoy desaparece |
+| **A1** | Una carga de config **no** borra departamentos creados desde la interfaz | ✅ **29/10/2026**: `tests/test_guarda_cargar_config.py` bloque [8]. La prueba falló con 4 errores antes del arreglo y pasa después |
 | **A2** | Los dos vocabularios quedan unificados **sin fusionar nada por decisión propia** | Un volcado antes y después muestra las mismas relaciones agente↔departamento. Las fusiones que haya están aprobadas por escrito |
 | **A3** | Rol, agente ejecutable y personaje son tres entidades | Existe un `RolEmpresarial` sin `AgenteIA`, y un `Departamento` sin ninguno de los dos, y la oficina los dibuja |
 | **A4** | Un agente puede estar en varios departamentos | Una `Asignacion` doble se dibuja en las dos oficinas |
-| **A5** | El refresco respeta la sesión | `grep -rn "PRIVATE_ASISTENTE_TENANT" django-crm/frontend/src` no devuelve `routes/api/centro-mando/+server.js` |
-| **A6** | Dos ISPs no se ven entre sí | Dos orgs, dos sesiones: cada una recibe sus eventos y **nunca** los de la otra. Medido, no inferido |
+| **A5** | El refresco respeta la sesión | ✅ **29/10/2026**: ya se cumplía (D-C era falso positivo) y lo guarda `tenant.test.js:112`, que afirma sobre el efecto |
+| **A6** | Dos ISPs no se ven entre sí | ✅ **29/10/2026** *para el panorama*: `routes/api/centro-mando/server.test.js`, 7 pruebas. Verificada por mutación: devolver el endpoint a la variable de entorno **mata 5 de 7**. Queda pendiente para los EVENTOS de la fase 1 |
 | **A7** | El cursor no pierde ni duplica | Reconectar con un cursor de hace 10 min: cero duplicados y cero pérdidas, **contados** |
 | **A8** | La carga del sondeo está medida antes de fijarla | Número publicado: peticiones/s y conexiones de base con N empresas abiertas |
 | **A9** | Toda animación operativa tiene procedencia | Ninguna instrucción con `tipo: operativa` carece de `evento:<uuid>`. Verificable leyendo el estado de la escena |

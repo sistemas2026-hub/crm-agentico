@@ -47,6 +47,7 @@ import inspect                                          # noqa: E402
 
 from cli import cargar_config                           # noqa: E402
 from cli.cargar_config import _lo_que_pisaria           # noqa: E402
+from nucleo.config import editor                        # noqa: E402
 from nucleo.config.schema import TenantConfig           # noqa: E402
 
 fallos: list[str] = []
@@ -186,6 +187,64 @@ comprobar(fuente_exportar.index("if perdidas > 0 and not forzar")
 comprobar("forzar" in inspect.signature(cargar_config.exportar).parameters,
           "hay una salida deliberada: --forzar, para cuando la exportacion "
           "vale mas que las notas")
+
+# ---------------------------------------------------------------------- 8 --
+print("\n[8] Los DEPARTAMENTOS de una empresa no se pierden al cargar")
+#
+# Que protege esto
+# ----------------
+# 'areas' son los departamentos del ISP: se crean desde /settings/areas, con
+# su etiqueta, color e icono, y viven en la base. Son la estructura con la que
+# la empresa se organiza -- y en el SaaS son LO QUE EL CLIENTE CONFIGURA.
+#
+# El 19/10/2026 una carga de config las borro. No hubo aviso, y ese silencio
+# es el defecto de verdad: 'areas' no estaba declarada en SECCIONES_EDITABLES,
+# asi que _lo_que_pisaria --que existe exactamente para gritar "se BORRARIA"--
+# ni siquiera la miraba. Hubo que recuperarlas a mano desde un volcado de
+# 'cli/diferencias_config.py --todo' contra la base v176.
+#
+# Una guarda que no cubre una seccion no es una guarda a medias: para esa
+# seccion es como si no existiera.
+comprobar("areas" in editor.SECCIONES_EDITABLES,
+          "'areas' esta declarada como editable desde la interfaz -- sin esto "
+          "la guarda no la mira y los departamentos se pierden EN SILENCIO")
+
+con_areas = {"roles": {}, "areas": [
+    {"nombre": "cartera", "etiqueta": "Cartera"},
+    {"nombre": "soporte_tecnico", "etiqueta": "Soporte Tecnico"},
+]}
+sin_areas = {"roles": {}, "areas": []}
+salida = _lo_que_pisaria(con_areas, sin_areas)
+comprobar(len(salida) == 1 and "areas" in salida[0],
+          "un archivo que trae 'areas' vacia se reporta (el caso del 19/10)")
+comprobar(bool(salida) and "BORRARIA" in salida[0],
+          "y dice BORRARIA: es una perdida, no un cambio de valor")
+
+# Quitar UNA sola tambien tiene que verse. Borrar un departamento de ocho es
+# mas facil de pasar por alto que vaciarlos todos, y duele igual.
+una_menos = {"roles": {}, "areas": [{"nombre": "cartera", "etiqueta": "Cartera"}]}
+salida = _lo_que_pisaria(con_areas, una_menos)
+comprobar(len(salida) >= 1,
+          "quitar UN departamento de la lista tambien se reporta")
+
+# Y lo que NO debe gritar: agregar un departamento desde el archivo es una
+# incorporacion. Si esto avisara, el aviso aparece cada vez que alguien da de
+# alta un area y se aprende a saltearlo con --forzar, que es como se pierde
+# la guarda entera.
+uno_mas = {"roles": {}, "areas": [
+    {"nombre": "cartera", "etiqueta": "Cartera"},
+    {"nombre": "soporte_tecnico", "etiqueta": "Soporte Tecnico"},
+    {"nombre": "noc", "etiqueta": "NOC y Redes"},
+]}
+comprobar(_lo_que_pisaria(con_areas, uno_mas) == [],
+          "agregar un departamento NO se reporta: sumar no es perder")
+
+# 'areas' NO es sincronizada, y es a proposito: la decide una persona, no un
+# proceso. Tiene que poder leerse en un diff y versionarse, igual que un plan
+# de venta y al reves que las 128 localidades.
+comprobar("areas" not in TenantConfig.SINCRONIZADOS,
+          "'areas' se versiona en el YAML -- la base manda en operacion, el "
+          "archivo sirve de plantilla, y por eso la guarda es lo que protege")
 
 print("\n" + "=" * 70)
 if fallos:

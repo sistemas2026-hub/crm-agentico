@@ -316,6 +316,35 @@ def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
 
         viejo = _hojas(en_base, seccion)
         nuevo_plano = _hojas(en_archivo, seccion)
+
+        # UN ELEMENTO QUITADO DE UNA LISTA tampoco lo veia la comparacion de
+        # mas abajo, y es el caso mas probable de todos: nadie vacia la lista
+        # entera -- se edita el archivo y se pierde uno.
+        #
+        # El bucle siguiente SALTA las rutas que el archivo no trae, y con
+        # razon: una clave ausente la completa el esquema con su default, y
+        # reportarla seria ruido en cada corrida. Pero eso mete en la misma
+        # bolsa dos cosas distintas:
+        #
+        #   areas[cartera].icono        falta el CAMPO     -> default, ruido
+        #   areas[soporte_tecnico].*    falta el ELEMENTO  -> perdida real
+        #
+        # Se distinguen por el prefijo: si NINGUNA ruta del archivo empieza
+        # por 'seccion[x]', el elemento entero no esta. Medido el 29/10/2026:
+        # quitar uno de dos departamentos daba 0 avisos, y lo mismo con
+        # planes_venta y servicios_ofrecidos.
+        def _ident(ruta: str) -> str | None:
+            corte = ruta.find("]")
+            return ruta[:corte + 1] if corte != -1 else None
+
+        ids_base = {i for i in map(_ident, viejo) if i}
+        ids_archivo = {i for i in map(_ident, nuevo_plano) if i}
+        for ident in sorted(ids_base - ids_archivo):
+            cual = ident[ident.index("[") + 1:-1]
+            lineas.append(
+                f"{seccion}: '{cual}' esta en la base y no en el archivo: "
+                f"se BORRARIA")
+
         for ruta, valor in viejo.items():
             # Solo lo que ya existe en el archivo con OTRO valor. Una clave que
             # el archivo no trae la completa el esquema con su default, y

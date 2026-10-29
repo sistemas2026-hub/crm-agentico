@@ -165,6 +165,22 @@ SECCIONES_EDITABLES = (
     # de las dos listas. Comprobado enumerando las claves de la base contra
     # SECCIONES_EDITABLES + TenantConfig.SINCRONIZADOS.
     "importacion_tickets",
+    # 29/10/2026. Los DEPARTAMENTOS del ISP -- se crean desde /settings/areas
+    # con su etiqueta, color e icono, y son la estructura con la que la empresa
+    # se organiza.
+    #
+    # Sin esta linea, 'cargar_config._lo_que_pisaria' no las miraba: esa guarda
+    # recorre SECCIONES_QUE_EDITA_LA_INTERFAZ, que es justo esta lista. El
+    # 19/10/2026 una carga las borro SIN UN AVISO, y hubo que recuperarlas a
+    # mano desde un volcado contra la base v176. Lo caro no fue perderlas: fue
+    # que la guarda que existe para gritar "se BORRARIA" no cubria la seccion,
+    # asi que para 'areas' era como si no existiera.
+    #
+    # NO entra en SINCRONIZADOS a proposito: una persona decide un
+    # departamento, no lo produce un proceso, y tiene que poder leerse en un
+    # diff. La base manda en operacion y el archivo sirve de plantilla; lo que
+    # protege el trabajo del cliente es esta guarda, no esconder la seccion.
+    "areas",
 )
 
 
