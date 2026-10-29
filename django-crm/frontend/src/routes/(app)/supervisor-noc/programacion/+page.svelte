@@ -17,10 +17,12 @@
     textoSinBajar
   } from '$lib/supervisor/dia-publicado.js';
   import {
+    estadoDeCarga,
     lineaDeMaterial,
     opcionDelSupervisor,
     porQue,
-    resumenDeLineas
+    resumenDeLineas,
+    tituloDelMaterial
   } from '$lib/supervisor/material-del-dia.js';
   import '../supervisor-noc.css';
 
@@ -101,7 +103,7 @@
             <!-- EL MATERIAL DEL DÍA (28/10/2026, SPEC/objetivos/material-del-dia.md).
                  Fase 1: propone. Nada de esto mueve material todavía. -->
             <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-sm);">
-              <span class="snoc-label">Material del día · propuesta: todavía no se carga nada</span>
+              <span class="snoc-label">{tituloDelMaterial(material?.cuadrillas ?? [])}</span>
               {#if data.errorMaterial}
                 <p class="snoc-body-sm snoc-error-txt">
                   No se pudo calcular el material. No es que no haga falta: no se sabe.
@@ -193,6 +195,9 @@
                   {#if m && (m.lineas.length || m.avisos.length)}
                     <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-xs);">
                       <span class="snoc-label">Material{#if m.kit} · {m.kit}{/if}</span>
+                      {#if estadoDeCarga(m)}
+                        <p class="snoc-body-sm">{estadoDeCarga(m)}</p>
+                      {/if}
                       {#if m.kit}
                         <p class="snoc-body-sm snoc-secundario">Kit: {porQue(m.kit_por)}</p>
                       {/if}

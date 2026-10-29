@@ -34,14 +34,18 @@
     // gestión o bodega: un técnico recibe 403 y la lista sale vacía.
     { id: 'pedidos', texto: 'Pedidos a bodega', icono: 'local_shipping' },
     { id: 'faltantes', texto: 'Faltantes explicados', icono: 'help' },
-    { id: 'cierres', texto: 'Cierres de jornada', icono: 'task_alt' }
+    { id: 'cierres', texto: 'Cierres de jornada', icono: 'task_alt' },
+    // Cada acta de entrega a un técnico (28/10/2026): «¿dónde puedo ver el
+    // registro de lo entregado? Se tiene que guardar por entrega».
+    { id: 'entregas', texto: 'Entregas a técnicos', icono: 'inventory_2' }
   ];
 
   /** @type {Record<string, string>} */
   const VACIO = {
     pedidos: 'Nadie pidió material a bodega',
     faltantes: 'Ningún técnico explicó un faltante',
-    cierres: 'No hay jornadas cerradas'
+    cierres: 'No hay jornadas cerradas',
+    entregas: 'No se le entregó material a ningún técnico en estas fechas'
   };
 
   /** @type {Record<string, string>} */
@@ -385,6 +389,59 @@
         </tbody>
       </table>
     </div>
+  </section>
+{:else if cual === 'entregas'}
+  <!-- ENTREGAS A TÉCNICOS (28/10/2026): cada acta tal como quedó, una por
+       entrega, con la serie de cada equipo y si el técnico la confirmó. -->
+  <section class="flex flex-col gap-space-md">
+    <div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-lg">
+      <h2 class="font-headline-sm text-headline-sm text-on-surface">Entregas a técnicos</h2>
+      <p class="font-body-sm text-body-sm text-secondary mt-0.5">
+        Cada acta de lo que salió de una bodega hacia un técnico, tal como quedó: no se
+        recalcula. La más reciente primero.
+      </p>
+    </div>
+    {#each filas as f (f.id)}
+      <div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-lg flex flex-col gap-space-sm">
+        <div class="flex flex-wrap items-baseline justify-between gap-space-sm">
+          <h3 class="font-headline-sm text-body-md text-on-surface font-semibold">
+            {f.tecnico ?? '—'}{f.acta ? ` · acta ${f.acta}` : ''}
+          </h3>
+          <span class="font-label-numeric text-body-sm text-secondary">{fecha(f.entregado_en)}</span>
+        </div>
+        <p class="font-body-sm text-body-sm text-secondary">
+          Desde {f.bodega ?? 'una bodega que no quedó registrada'}{f.despachado_por
+            ? ` · despachó ${f.despachado_por}`
+            : ''} ·
+          <span class={f.confirmado_en ? 'text-on-surface' : 'text-error font-semibold'}>
+            {f.confirmado_en ? `el técnico la confirmó ${fecha(f.confirmado_en)}` : 'el técnico no la confirmó'}
+          </span>
+        </p>
+        <div class="w-full overflow-x-auto">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="bg-surface-container-low text-secondary font-table-header text-table-header uppercase">
+                <th class="py-2 px-space-md">Material</th>
+                <th class="py-2 px-space-md text-right">Cantidad</th>
+                <th class="py-2 px-space-md">Serie</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each f.lineas as l, j (j)}
+                <tr>
+                  <td class="py-2 px-space-md font-body-sm text-body-sm text-on-surface">{l.material}</td>
+                  <td class="py-2 px-space-md text-right font-label-numeric text-body-sm tabular-nums">{l.cantidad} {l.unidad}</td>
+                  <td class="py-2 px-space-md font-label-code text-label-code text-secondary">{l.serie || '—'}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        {#if f.notas}
+          <p class="font-body-sm text-body-sm text-secondary">Notas: {f.notas}</p>
+        {/if}
+      </div>
+    {/each}
   </section>
 {:else if cual === 'cierres'}
   <section class="flex flex-col gap-space-md">

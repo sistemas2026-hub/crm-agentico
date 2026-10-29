@@ -63,6 +63,9 @@ CREAR_LAS_ORDENES = "crear_las_ordenes_de_despacho"
 #  Fase 3.1 (27/10/2026): publicar el reparto del dia. Ver
 #  operaciones/publicacion_del_reparto.py.
 PUBLICAR_EL_REPARTO = "publicar_el_reparto_del_dia"
+#  Fase 3 del material del dia (28/10/2026): cargarle a cada cuadrilla su kit.
+#  Ver operaciones/carga_del_material.py.
+CARGAR_EL_MATERIAL = "cargar_el_material_del_dia"
 #  La misma clave que 'paso_a_despacho.TAREA_CORRECCIONES': se escribe en los dos
 #  lados para no importar aquel modulo desde aca, y una prueba las ata.
 PASAR_CON_LAS_CORRECCIONES = "pasar_a_despacho_con_las_correcciones"
@@ -170,6 +173,28 @@ CATALOGO = {
         #  el usuario el 17/10. Lo acota: una persona lo deshace moviendo la
         #  orden en Cuadrillas, desde la apertura nada publicado se mueve solo,
         #  y lo que un tecnico empezo o una persona asigno no se toca nunca.
+        "exige_nivel": 3,
+        "necesita_que_mire": True,
+    },
+    CARGAR_EL_MATERIAL: {
+        "nombre": "Cargar el material del día",
+        "que_hace": (
+            "Una vez por día y por cuadrilla, después de publicar el reparto, "
+            "le carga a su líder el kit de su labor desde su bodega: lo que le "
+            "falta para completarlo. Si en la bodega no alcanza, reparte lo que "
+            "hay según el trabajo publicado de cada cuadrilla. Las ONT y demás "
+            "equipos con serie no los despacha: los deja reservados a nombre del "
+            "líder hasta que los escanee al recibirlos."),
+        "que_no_hace": (
+            "No carga dos veces en el mismo día a la misma cuadrilla, ni carga "
+            "material que la bodega no tiene. No elige la serie de un equipo. "
+            "No recarga lo que se publica después durante el día: eso se pide "
+            "desde la app. No reemplaza que el técnico confirme lo que recibió."),
+        #  PROPIA y nivel 3, como publicar el reparto (28/10/2026): mueve
+        #  material de una bodega a la custodia de una persona sin que nadie lo
+        #  mire. Lo acota: una sola vez por dia y cuadrilla (el acta tiene clave
+        #  fija), nunca mas de lo que la bodega tiene libre, y el tecnico
+        #  confirma o marca la diferencia al recibir.
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },

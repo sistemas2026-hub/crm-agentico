@@ -819,6 +819,78 @@ def cierres_de_jornada(org, *, desde=None, hasta=None) -> list[dict]:
     return salida
 
 
+def entregas_a_tecnicos(org, *, desde=None, hasta=None) -> list[dict]:
+    """Cada acta de entrega: lo que salio de una bodega hacia un tecnico.
+
+    Pedido del usuario el 28/10/2026: «¿donde puedo ver el registro de lo
+    entregado a los tecnicos? Se tiene que guardar por entrega». Se guardaba
+    desde siempre --cada despacho deja su acta (`EntregaDeKit`), sus lineas
+    (`ItemDeKit`) y sus movimientos--, pero ninguna pantalla la mostraba.
+
+    Se muestra el acta TAL COMO QUEDO, no un recalculo. Las fechas se cortan en
+    el dia de la EMPRESA: una entrega a las 20:00 de Bogota es de ese dia, no
+    del siguiente en UTC. La bodega sale de los movimientos del despacho: desde
+    el 28/10/2026 llevan el id de la entrega; antes, solo el acta si tenia.
+    """
+    import datetime as dt
+
+    from campo.material_del_dia import PREFIJO_DE_ACTA
+    from campo.models import EntregaDeKit, MovimientoDeMaterial
+    from campo.reparto import _zona_de
+    from campo.services.inventario import nombre_de
+
+    zona = _zona_de(org)
+    qs = EntregaDeKit.objects.filter(org=org)
+    if desde:
+        qs = qs.filter(entregado_en__gte=dt.datetime.combine(desde.date(), dt.time.min,
+                                                            tzinfo=zona))
+    if hasta:
+        qs = qs.filter(entregado_en__lt=dt.datetime.combine(
+            hasta.date() + dt.timedelta(days=1), dt.time.min, tzinfo=zona))
+    entregas = list(qs.select_related("profile__user", "despachado_por__user")
+                    .prefetch_related("items__material")
+                    .order_by("-entregado_en")[:LIMITE_DE_FILAS])
+
+    #  DE QUE BODEGA SALIO: los movimientos del despacho, por id de entrega o
+    #  por acta. Una entrega vieja sin acta no se puede atar: se dice.
+    ids = [str(e.id) for e in entregas]
+    actas = [e.acta for e in entregas if e.acta]
+    bodega_de = {}
+    for datos, origen in (MovimientoDeMaterial.objects
+                          .filter(org=org, tipo=MovimientoDeMaterial.DESPACHO)
+                          .filter(Q(datos__entrega__in=ids) | Q(datos__acta__in=actas))
+                          .values_list("datos", "ubicacion_origen__nombre")):
+        datos = datos or {}
+        if datos.get("entrega"):
+            bodega_de.setdefault(datos["entrega"], origen)
+        if datos.get("acta"):
+            bodega_de.setdefault(("acta", datos["acta"]), origen)
+
+    salida = []
+    for e in entregas:
+        salida.append({
+            "id": str(e.id),
+            "acta": e.acta,
+            "entregado_en": e.entregado_en.astimezone(zona).isoformat(),
+            "tecnico": nombre_de(e.profile) if e.profile_id else None,
+            #  Las que cargo el Supervisor (fase 3 del material del dia) no
+            #  tienen persona: lo dicen por su acta.
+            "despachado_por": (nombre_de(e.despachado_por) if e.despachado_por_id
+                               else "el Supervisor"
+                               if (e.acta or "").startswith(PREFIJO_DE_ACTA)
+                               else None),
+            "bodega": bodega_de.get(str(e.id)) or bodega_de.get(("acta", e.acta)) or None,
+            "confirmado_en": (e.confirmado_en.astimezone(zona).isoformat()
+                              if e.confirmado_en else None),
+            "lineas": [{"material": i.material.nombre, "unidad": i.material.unidad,
+                        "cantidad": f"{i.cantidad.normalize():f}", "serie": i.serie}
+                       for i in sorted(e.items.all(),
+                                       key=lambda i: (i.material.nombre, i.serie))],
+            "notas": _tapar(e.notas),
+        })
+    return salida
+
+
 # ---------------------------------------------------------------------------
 # Plantillas de kit
 # ---------------------------------------------------------------------------

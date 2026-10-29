@@ -92,6 +92,35 @@ describe('los reportes de lo que escribe el técnico', () => {
     expect(await pantalla('pedidos', [])).toContain('Nadie pidió material a bodega.');
     expect(await pantalla('faltantes', [])).toContain('Ningún técnico explicó un faltante.');
     expect(await pantalla('cierres', [])).toContain('No hay jornadas cerradas.');
+    expect(await pantalla('entregas', [])).toContain(
+      'No se le entregó material a ningún técnico en estas fechas.'
+    );
+  });
+
+  it('una entrega dice a quién, desde dónde, quién despachó, cada material con su serie y si se confirmó (28/10/2026)', async () => {
+    const b = await pantalla('entregas', [
+      {
+        id: 'e1', acta: 'K-1', entregado_en: '2026-10-28T06:40:00-05:00',
+        tecnico: 'Mario Vasquez', despachado_por: 'Mayra', bodega: 'BOG-SOLEDAD',
+        confirmado_en: null, notas: '',
+        lineas: [
+          { material: 'Conector UPC', unidad: 'unidades', cantidad: '10', serie: '' },
+          { material: 'ONU WIFI', unidad: 'unidades', cantidad: '1', serie: 'CDTC505AEA5F' }
+        ]
+      },
+      {
+        id: 'e2', acta: '', entregado_en: '2026-10-27T07:00:00-05:00',
+        tecnico: 'Javier Olivera', despachado_por: null, bodega: null,
+        confirmado_en: '2026-10-27T07:20:00-05:00', notas: '', lineas: []
+      }
+    ]);
+    expect(b).toContain('Mario Vasquez · acta K-1');
+    expect(b).toContain('2026-10-28 06:40');
+    expect(b).toContain('Desde BOG-SOLEDAD · despachó Mayra');
+    expect(b).toContain('CDTC505AEA5F');
+    expect(b).toContain('el técnico no la confirmó');
+    expect(b).toContain('Desde una bodega que no quedó registrada');
+    expect(b).toContain('el técnico la confirmó 2026-10-27 07:20');
   });
 
   it('un pedido pendiente ofrece atender o rechazar, sin perder la pestaña', async () => {

@@ -515,6 +515,9 @@ class ReportesView(APIView):
             "pedidos": op.pedidos_a_bodega,
             "faltantes": op.faltantes_explicados,
             "cierres": op.cierres_de_jornada,
+            #  Cada acta de entrega a un tecnico (28/10/2026): lo que la
+            #  bodega le dio a otra persona, por eso tambien va aca.
+            "entregas": op.entregas_a_tecnicos,
         }
         if cual in de_otros:
             _exigir_inventario(request)
@@ -523,7 +526,7 @@ class ReportesView(APIView):
 
         return Response(
             {"detail": f"No hay un reporte '{cual}'. Los que hay: consumo, "
-                       f"tecnicos, descuadres, pedidos, faltantes, cierres."},
+                       f"tecnicos, descuadres, pedidos, faltantes, cierres, entregas."},
             status=status.HTTP_400_BAD_REQUEST)
 
 

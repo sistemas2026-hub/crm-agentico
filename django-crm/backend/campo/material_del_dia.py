@@ -257,11 +257,59 @@ def repartir_lo_que_hay(pedidos: list[tuple], disponible: Decimal) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# El acta del dia: la que deja la carga del Supervisor (fase 3)
+# ---------------------------------------------------------------------------
+
+#: Las actas que carga el Supervisor empiezan asi. Las lee el reporte de
+#: entregas para decir «la cargo el Supervisor».
+PREFIJO_DE_ACTA = "MAT-"
+
+
+def acta_de(fecha, jornada_id) -> str:
+    """La clave del material de UNA jornada UN dia. Fija: `despachar` es
+    idempotente por acta, y eso es lo que impide cargar dos veces."""
+    return f"{PREFIJO_DE_ACTA}{fecha:%Y%m%d}-{str(jornada_id)[:8]}"
+
+
+def cargadas(org, actas) -> dict:
+    """{acta: cuando se cargo} de las que ya se cargaron: por su acta de
+    entrega, o por la reserva de sus equipos con serie."""
+    from campo.inventario_operacion import ReservaDeMaterial
+    from campo.models import EntregaDeKit
+
+    actas = [a for a in actas if a]
+    salida = dict(EntregaDeKit.objects.filter(org=org, acta__in=actas)
+                  .values_list("acta", "entregado_en"))
+    for motivo, en in (ReservaDeMaterial.objects
+                       .filter(org=org, motivo__startswith=PREFIJO_DE_ACTA)
+                       .values_list("motivo", "created_at")):
+        acta = motivo.split(" ", 1)[0]
+        if acta in actas:
+            salida.setdefault(acta, en)
+    return salida
+
+
+def _zona_de_la_empresa(org):
+    from campo.reparto import _zona_de
+    return _zona_de(org)
+
+
+# ---------------------------------------------------------------------------
 # La propuesta del dia
 # ---------------------------------------------------------------------------
 
 def propuesta(org, fecha) -> dict:
-    """Lo que se cargaria `fecha`. NO ESCRIBE. Ver el encabezado.
+    """Lo que se cargaria `fecha`, lista para la pantalla. NO ESCRIBE.
+
+    Lo de `calcular`, sin los objetos internos (las claves con «_»).
+    """
+    return _serializable(calcular(org, fecha))
+
+
+def calcular(org, fecha) -> dict:
+    """Lo que se cargaria `fecha`. NO ESCRIBE. Ver el encabezado. Cada fila
+    lleva tambien los objetos que necesita la carga (fase 3):
+    `_lider`, `_bodega` y, en cada linea, `_material`.
 
         {"fecha", "cuadrillas": [{jornada, cuadrilla, labor, lider, kit,
                                   bodega, peso, lineas: [linea], avisos: [str]}],
@@ -325,7 +373,9 @@ def propuesta(org, fecha) -> dict:
                 "kit": kit.nombre if kit is not None else "", "kit_por": kit_por,
                 "bodega": bodega.nombre if bodega is not None else "",
                 "bodega_por": bodega_por,
-                "peso": peso.get(str(j.id), 0), "lineas": [], "avisos": []}
+                "peso": peso.get(str(j.id), 0), "lineas": [], "avisos": [],
+                "_lider": lider, "_bodega": bodega,
+                "acta": acta_de(fecha, j.id), "cargado_en": None}
         filas.append(fila)
         if kit is None:
             fila["avisos"].append(kit_por[:1].upper() + kit_por[1:] + ".")
@@ -344,7 +394,7 @@ def propuesta(org, fecha) -> dict:
             item = {"material": m.nombre, "unidad": m.unidad,
                     "serializado": m.es_serializado, "kit": linea.cantidad,
                     "en_mano": en_mano, "necesita": necesita,
-                    "asignado": CERO, "falta": CERO}
+                    "asignado": CERO, "falta": CERO, "_material": m}
             fila["lineas"].append(item)
             pedidos[(bodega, m)].append((item, fila))
 
@@ -382,13 +432,21 @@ def propuesta(org, fecha) -> dict:
                 f"Le falta material para completar el kit ({incompletos} de "
                 f"{len(fila['lineas'])} materiales): sale con lo que hay en bodega."))
 
+    #  SI YA SE CARGO HOY (fase 3): el acta del dia de esa jornada, o la
+    #  reserva de sus equipos con serie cuando no habia nada mas que cargar.
+    cuando = cargadas(org, [f["acta"] for f in filas])
+    zona = _zona_de_la_empresa(org)
+    for fila in filas:
+        en = cuando.get(fila["acta"])
+        fila["cargado_en"] = en.astimezone(zona).isoformat() if en else None
+
     def completa(f):
         return f["lineas"] and all(i["falta"] == 0 for i in f["lineas"])
 
     return {
         "fecha": fecha.isoformat(),
-        "cuadrillas": [_serializable(f) for f in filas],
-        "bodegas": [_serializable(b) for b in resumen],
+        "cuadrillas": filas,
+        "bodegas": resumen,
         "cuentas": {
             "cuadrillas": len(filas),
             "completas": sum(1 for f in filas if completa(f)),
@@ -406,7 +464,7 @@ def _texto(cantidad: Decimal) -> str:
 def _serializable(d):
     """Los Decimal viajan como texto sin ceros de mas: el JSON los perderia."""
     if isinstance(d, dict):
-        return {k: _serializable(v) for k, v in d.items()}
+        return {k: _serializable(v) for k, v in d.items() if not str(k).startswith("_")}
     if isinstance(d, list):
         return [_serializable(v) for v in d]
     if isinstance(d, Decimal):

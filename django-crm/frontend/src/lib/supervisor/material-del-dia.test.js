@@ -3,11 +3,31 @@ import { describe, expect, it } from 'vitest';
 import {
   cantidad,
   cuerpoDeConfiguracion,
+  estadoDeCarga,
   lineaDeMaterial,
+  tituloDelMaterial,
   opcionDelSupervisor,
   porQue,
   resumenDeLineas
 } from './material-del-dia.js';
+
+describe('si el Supervisor ya cargó el material (fase 3)', () => {
+  it('la hora y el acta, o nada', () => {
+    expect(estadoDeCarga({ cargado_en: '2026-10-28T06:07:10-05:00', acta: 'MAT-20261028-1a2b3c4d' })).toBe(
+      'Cargado por el Supervisor a las 06:07 · acta MAT-20261028-1a2b3c4d'
+    );
+    expect(estadoDeCarga({ cargado_en: null, acta: 'MAT-x' })).toBe('');
+  });
+
+  it('el título dice cuántas ya se cargaron, o que es una propuesta', () => {
+    expect(tituloDelMaterial([{ cargado_en: null }, { cargado_en: null }])).toBe(
+      'Material del día · propuesta: el Supervisor todavía no cargó nada'
+    );
+    expect(tituloDelMaterial([{ cargado_en: '2026-10-28T06:07:00-05:00' }, { cargado_en: null }])).toBe(
+      'Material del día · el Supervisor ya cargó 1 de 2 cuadrillas'
+    );
+  });
+});
 
 describe('lo que eligió el Supervisor, y por qué', () => {
   it('una persona o el Supervisor con su motivo', () => {

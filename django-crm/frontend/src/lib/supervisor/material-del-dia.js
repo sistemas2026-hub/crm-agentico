@@ -64,6 +64,29 @@ export function opcionDelSupervisor(eligeElSupervisor) {
 }
 
 /**
+ * Si el Supervisor ya le cargó el material hoy (fase 3, 28/10/2026): «Cargado
+ * por el Supervisor a las 06:07 · acta MAT-20261028-1a2b3c4d». Vacío si no.
+ *
+ * @param {{ cargado_en?: string | null, acta?: string }} m
+ */
+export function estadoDeCarga(m) {
+  if (!m?.cargado_en) return '';
+  return `Cargado por el Supervisor a las ${m.cargado_en.slice(11, 16)} · acta ${m.acta}`;
+}
+
+/**
+ * La línea de arriba del material del día: cuántas ya se cargaron, o que es
+ * todavía una propuesta.
+ *
+ * @param {{ cargado_en?: string | null }[]} cuadrillas
+ */
+export function tituloDelMaterial(cuadrillas) {
+  const cargadas = cuadrillas.filter((c) => c.cargado_en).length;
+  if (!cargadas) return 'Material del día · propuesta: el Supervisor todavía no cargó nada';
+  return `Material del día · el Supervisor ya cargó ${cargadas} de ${cuadrillas.length} cuadrillas`;
+}
+
+/**
  * «1 unidad», «6 unidades», «300 metros».
  * @param {string} n
  * @param {string} unidad

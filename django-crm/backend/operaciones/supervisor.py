@@ -2796,6 +2796,12 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         #  solo deja en el log cuantas publicaria (la sombra).
         ("publicacion del reparto del dia",
          lambda: _publicar_el_reparto(org, ahora_pedido)),
+        #  EL MATERIAL, DESPUES DE PUBLICAR  --  28/10/2026, fase 3 del
+        #  material del dia: con el trabajo ya repartido se sabe cuanto le toca
+        #  a cada cuadrilla si no alcanza. Una vez por dia y cuadrilla. Sin la
+        #  tarea delegada solo deja en el log cuantas cargaria (la sombra).
+        ("carga del material del dia",
+         lambda: _cargar_el_material(org, ahora_pedido)),
         #  LA MEDICION DESPUES DEL ARREGLO  --  18/10/2026, correccion 2 del
         #  usuario: cuando el tecnico reporta el arreglo, se vuelve a medir.
         #  VA AL FINAL: informa y no decide, y el presupuesto del proveedor se
@@ -2855,6 +2861,13 @@ def _publicar_el_reparto(org, ahora) -> dict:
     la del armado y la de las ordenes."""
     from operaciones import publicacion_del_reparto
     return publicacion_del_reparto.publicar_el_reparto(org, ahora)
+
+
+def _cargar_el_material(org, ahora) -> dict:
+    """La fase de `carga_del_material`, importada recien al correr, como la
+    de la publicacion."""
+    from operaciones import carga_del_material
+    return carga_del_material.cargar_el_material(org, ahora)
 
 
 def _verificar_los_arreglos(org, *, desatendido: bool = False) -> dict:

@@ -482,7 +482,9 @@ def despachar(*, org, ubicacion_origen, profile_destino, lineas,
             ubicacion_destino=destino,
             idempotency_key=_clave_de_hecho("despacho", acta, org.id, i,
                                             material.id, serie or cantidad),
-            datos={"acta": acta} if acta else {},
+            #  El id de la entrega SIEMPRE (28/10/2026): sin acta, el reporte
+            #  de entregas no podia decir de que bodega salio.
+            datos={"entrega": str(entrega.id), **({"acta": acta} if acta else {})},
         )
         movimientos.append(mov)
         if serie:
