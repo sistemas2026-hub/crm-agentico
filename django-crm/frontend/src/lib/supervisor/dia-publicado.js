@@ -93,3 +93,40 @@ export function textoDelAviso(aviso) {
 export function textoDePrioridad(prioridad) {
   return { alta: 'Alta', media: 'Media', baja: 'Baja' }[prioridad] ?? (prioridad || '—');
 }
+
+/**
+ * Cómo se marca la SIGUIENTE orden de una cuadrilla (29/10/2026): «Empieza por
+ * esta» si la cuadrilla todavía no arrancó ninguna, «Sigue esta» si ya hay una
+ * en camino, en sitio o terminada.
+ *
+ * @param {{ estado: string }[]} ordenes
+ */
+export function textoDeLaSiguiente(ordenes) {
+  const arranco = (ordenes ?? []).some((o) =>
+    ['en_camino', 'en_sitio', 'completada_campo', 'cerrada'].includes(o.estado)
+  );
+  return arranco ? 'Sigue esta' : 'Empieza por esta';
+}
+
+/**
+ * Cuándo vence el compromiso de la orden (29/10/2026), contra el día que se
+ * mira: «Vence hoy», «Vence mañana», «Vence el 31/10», «Venció el 28/10». Sin
+ * fecha, «Sin vencimiento»: no se inventa.
+ *
+ * La fecha viene en el reloj de la empresa: se lee el día tal cual.
+ *
+ * @param {string | null | undefined} iso
+ * @param {string} dia AAAA-MM-DD
+ */
+export function textoDelVencimiento(iso, dia) {
+  const fecha = (iso ?? '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !/^\d{4}-\d{2}-\d{2}$/.test(dia ?? '')) {
+    return 'Sin vencimiento';
+  }
+  const dias = Math.round((Date.parse(`${fecha}T00:00:00Z`) - Date.parse(`${dia}T00:00:00Z`)) / 86400000);
+  const corta = `${fecha.slice(8, 10)}/${fecha.slice(5, 7)}`;
+  if (dias < 0) return `Venció el ${corta}`;
+  if (dias === 0) return 'Vence hoy';
+  if (dias === 1) return 'Vence mañana';
+  return `Vence el ${corta}`;
+}

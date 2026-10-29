@@ -169,6 +169,11 @@ def test_c_crea_la_orden_como_el_boton(abierto, plantillas):
         CLIENTE, "300 111 2222", "Calle 38 # 78-33")
     #  El dia de la empresa: entro antes del corte, sale el martes.
     assert o.programada_para.astimezone(BOGOTA).date() == dt.date(2026, 10, 6)
+    #  CUANDO VENCE (29/10/2026): el dia del ticket mas el plazo de su nivel
+    #  (Urgente, 0 dias), hasta el final de ese dia en Bogota. Antes quedaba
+    #  vacio, y la app no podia ordenar por lo que vence antes.
+    assert o.sla_vence_en.astimezone(BOGOTA) == dt.datetime(2026, 10, 3, 23, 59, 59,
+                                                            tzinfo=BOGOTA)
     #  Sin persona, y escrito que fue el Supervisor y con que tarea.
     ev = EventoTrabajo.objects.get(orden=o, tipo="creada_por_el_supervisor")
     assert (ev.profile_id, ev.datos["tarea"]) == (None, td.CREAR_LAS_ORDENES)

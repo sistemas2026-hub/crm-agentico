@@ -543,6 +543,15 @@ class OrdenTrabajo(BaseModel):
     completada_campo_en = models.DateTimeField(null=True, blank=True)
     cerrada_en = models.DateTimeField(null=True, blank=True)
 
+    # EL ORDEN DEL DIA (29/10/2026): en que lugar la hace su cuadrilla ese dia,
+    # 1 la primera. Lo arma el Supervisor al publicar (`campo.orden_del_dia`)
+    # y lo sigue la app; Programacion muestra el mismo. Pedido del usuario:
+    # «que el mismo supervisor le arme el orden en que trabaja los tickets».
+    # Con su FECHA: el numero de ayer no dice nada hoy, y una orden que pasa
+    # al dia siguiente se vuelve a ordenar.
+    orden_del_dia = models.PositiveSmallIntegerField(null=True, blank=True)
+    orden_del_dia_fecha = models.DateField(null=True, blank=True)
+
     class Meta:
         db_table = "campo_orden_trabajo"
         ordering = ["-numero"]

@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 23,
+      version: 24,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -181,6 +181,27 @@ class LocalDatabase {
       if (cols.isNotEmpty && !cols.contains('series_instaladas_json')) {
         await db.execute(
           'ALTER TABLE local_kit ADD COLUMN series_instaladas_json TEXT;',
+        );
+      }
+    }
+
+    // v24: el orden del día que arma el Supervisor (29/10/2026). Aditiva: las
+    // órdenes se vuelven a bajar en la próxima sincronización, y hasta entonces
+    // la app ordena con su regla de siempre.
+    if (oldVersion < 24) {
+      final List<Map<String, Object?>> info =
+          await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final Set<String> cols = <String>{
+        for (final Map<String, Object?> c in info) c['name'].toString(),
+      };
+      if (cols.isNotEmpty && !cols.contains('orden_del_dia')) {
+        await db.execute(
+          'ALTER TABLE local_ordenes ADD COLUMN orden_del_dia INTEGER;',
+        );
+      }
+      if (cols.isNotEmpty && !cols.contains('orden_del_dia_fecha')) {
+        await db.execute(
+          'ALTER TABLE local_ordenes ADD COLUMN orden_del_dia_fecha TEXT;',
         );
       }
     }
@@ -878,6 +899,8 @@ class LocalDatabase {
         ventana_inicio TEXT,
         ventana_fin TEXT,
         sla_vence_en TEXT,
+        orden_del_dia INTEGER,
+        orden_del_dia_fecha TEXT,
         detalle_acceso TEXT,
         contacto_alterno_nombre TEXT,
         contacto_alterno_telefono TEXT,
@@ -1113,6 +1136,8 @@ class LocalDatabase {
         'ventana_inicio',
         'ventana_fin',
         'sla_vence_en',
+        'orden_del_dia',
+        'orden_del_dia_fecha',
         'detalle_acceso',
         'contacto_alterno_nombre',
         'contacto_alterno_telefono',
@@ -1226,6 +1251,14 @@ class LocalDatabase {
         compromiso,
         'sla_vence_en',
         'sla_vence_en',
+      )?.toString(),
+      // El lugar que le dio el Supervisor en el día de su cuadrilla
+      // (29/10/2026), con el día al que se refiere.
+      'orden_del_dia': conservando(compromiso, 'orden_del_dia', 'orden_del_dia'),
+      'orden_del_dia_fecha': conservando(
+        compromiso,
+        'orden_del_dia_fecha',
+        'orden_del_dia_fecha',
       )?.toString(),
       'detalle_acceso': conservando(
         clienteObj,

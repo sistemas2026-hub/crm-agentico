@@ -136,6 +136,26 @@ def prioridad_del_caso(creado, *, nivel, plazo_de_la_plantilla, caido: bool,
     return max((inicial, por_el_plazo), key=lambda p: _RANGO.get(p, -1))
 
 
+def vencimiento_del_caso(creado, *, nivel, plazo_de_la_plantilla, zona):
+    """Cuando vence el compromiso con el cliente (29/10/2026): el dia en que
+    se creo el ticket mas el plazo de su nivel --o el de la plantilla, si el
+    asunto no tiene nivel--, hasta las 23:59:59 de ese dia en la zona de la
+    empresa. Es el mismo plazo con el que `prioridad_del_caso` sube la
+    prioridad: vence hoy o vencio -> alta.
+
+    Va a `OrdenTrabajo.sla_vence_en`, que estaba vacio en todas las ordenes
+    del Supervisor: la app ordena por eso («lo que vence antes») y no podia, y
+    Programacion no tenia fecha que mostrar. None sin fecha o sin plazo: no se
+    inventa un compromiso."""
+    if creado is None:
+        return None
+    plazo = nivel.get("plazo_dias") if nivel is not None else plazo_de_la_plantilla
+    if plazo is None:
+        return None
+    dia = creado.astimezone(zona).date() + dt.timedelta(days=int(plazo))
+    return dt.datetime.combine(dia, dt.time(23, 59, 59), tzinfo=zona)
+
+
 def equipo_medido_caido(propuesta) -> bool:
     """Si la medicion MAS RECIENTE del equipo del caso lo vio caido: «equipo
     caido = alta» (24/10/2026).
@@ -344,6 +364,8 @@ def decidir(org, ahora=None) -> dict:
         para = dia_de_la_orden(p.revisado_en, corte, ahora, zona_horaria)
         nivel = nivel_de(caso.name or "")
         caido = equipo_medido_caido(p)
+        vence = vencimiento_del_caso(caso.created_at, nivel=nivel,
+                                     plazo_de_la_plantilla=tipo.plazo_dias, zona=zona_horaria)
         salida["crear"].append({
             **fila,
             "plantilla": tipo.nombre,
@@ -354,6 +376,9 @@ def decidir(org, ahora=None) -> dict:
                 caso.created_at, nivel=nivel,
                 plazo_de_la_plantilla=tipo.plazo_dias,
                 caido=caido, hoy=hoy, zona=zona_horaria),
+            #  Cuando vence, con el mismo plazo (29/10/2026). Texto: viaja
+            #  por la pantalla de lo que crearia.
+            "vence": vence.isoformat() if vence else "",
             #  De donde sale la prioridad (26/10/2026): el codigo del nivel del
             #  asunto ("" si no tiene), su nombre en la empresa, y si la
             #  medicion mas reciente vio el equipo caido.
@@ -634,7 +659,9 @@ def _crear_una(org, propuesta, f, contexto, *, ahora, zona) -> str:
             origen_sistema="crm", origen_tipo="case", origen_ref=f["caso"],
             programada_para=_a_las_cero(para, zona), contexto=contexto,
             despacho={"prioridad": f["prioridad"], "zona": f["barrio"],
-                      "resumen": resumen})
+                      "resumen": resumen,
+                      "sla_vence_en": (dt.datetime.fromisoformat(f["vence"])
+                                       if f.get("vence") else None)})
         #  QUE LA CREO EL SUPERVISOR, Y POR QUE ASI. Sin persona: el actor es
         #  la tarea (patron de `supervisor.revisar` con `automatico=True`).
         EventoTrabajo.objects.create(

@@ -559,12 +559,25 @@ def test_p2_otra_empresa_no_aparece(org_a, org_b, version, norte, admin_profile,
     assert ajena.numero not in [f["numero"] for f in d["con_alguien_que_no_sale"]]
 
 
-def test_p3_sin_datos_del_cliente(org_a, version, norte, admin_profile):
+def test_p3_del_cliente_solo_el_nombre_y_solo_en_lo_asignado(org_a, version, norte,
+                                                            admin_profile):
+    """DECISION DEL USUARIO, 29/10/2026: «en Programacion, donde muestra los
+    tickets asignados, salgan los nombres». Hasta entonces esto afirmaba que no
+    salia NINGUN dato del cliente; ahora sale el NOMBRE, y solo en las ordenes
+    de una cuadrilla. El telefono y la direccion, nunca: no hacen falta para
+    saber con cual empieza."""
     _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
-    _orden(org_a, version, de=admin_profile)
-    _orden(org_a, version)
+    asignada = _orden(org_a, version, de=admin_profile)
+    espera = _orden(org_a, version)
+    OrdenTrabajo.objects.filter(pk__in=[asignada.pk, espera.pk]).update(
+        cliente_telefono="3113683499", cliente_direccion="Calle 38 # 78-33")
 
-    assert CLIENTE not in str(D.del_dia(org_a, LUNES))
+    d = D.del_dia(org_a, LUNES)
+
+    assert _filas(d)[asignada.numero]["cliente"] == CLIENTE
+    texto = str(d)
+    assert texto.count(CLIENTE) == 1, "solo en la orden asignada, no en las que esperan"
+    assert "3113683499" not in texto and "Calle 38" not in texto
 
 
 # ---------------------------------------------------------------------------

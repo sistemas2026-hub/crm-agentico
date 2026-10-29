@@ -4,6 +4,8 @@ import {
   lineaDePersona,
   quienLaAsigno,
   textoDelAviso,
+  textoDeLaSiguiente,
+  textoDelVencimiento,
   textoDePrioridad,
   textoSinBajar
 } from './dia-publicado.js';
@@ -83,5 +85,44 @@ describe('el aviso y la prioridad', () => {
 
   it('la prioridad en palabras', () => {
     expect(['alta', 'media', 'baja', ''].map(textoDePrioridad)).toEqual(['Alta', 'Media', 'Baja', '—']);
+  });
+});
+
+describe('la siguiente de la cuadrilla (29/10/2026)', () => {
+  it('sin nada empezado, empieza por esta; con algo en marcha o hecho, sigue esta', () => {
+    expect(textoDeLaSiguiente([{ estado: 'asignada' }, { estado: 'asignada' }])).toBe('Empieza por esta');
+    for (const estado of ['en_camino', 'en_sitio', 'completada_campo', 'cerrada']) {
+      expect(textoDeLaSiguiente([{ estado }, { estado: 'asignada' }])).toBe('Sigue esta');
+    }
+    expect(textoDeLaSiguiente([])).toBe('Empieza por esta');
+  });
+});
+
+describe('cuándo vence, contra el día que se mira (29/10/2026)', () => {
+  const dia = '2026-10-29';
+
+  it('hoy, mañana, otro día y lo vencido', () => {
+    expect(
+      [
+        '2026-10-29T23:59:59-05:00',
+        '2026-10-30T23:59:59-05:00',
+        '2026-11-03T23:59:59-05:00',
+        '2026-10-28T23:59:59-05:00'
+      ].map((v) => textoDelVencimiento(v, dia))
+    ).toEqual(['Vence hoy', 'Vence mañana', 'Vence el 03/11', 'Venció el 28/10']);
+  });
+
+  it('el día es el de la empresa, no el del navegador ni el de UTC', () => {
+    //  23:59 en Bogotá es el 04:59 UTC del día siguiente: sigue siendo «hoy».
+    expect(textoDelVencimiento('2026-10-29T23:59:59-05:00', dia)).toBe('Vence hoy');
+  });
+
+  it('sin fecha no inventa', () => {
+    expect([null, undefined, '', 'mañana'].map((v) => textoDelVencimiento(v, dia))).toEqual([
+      'Sin vencimiento',
+      'Sin vencimiento',
+      'Sin vencimiento',
+      'Sin vencimiento'
+    ]);
   });
 });

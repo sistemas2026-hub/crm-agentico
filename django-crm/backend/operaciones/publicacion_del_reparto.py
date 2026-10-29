@@ -383,10 +383,22 @@ def publicar_el_reparto(org, ahora=None) -> dict:
             por_el_supervisor={"tarea": _tarea(), "fecha": hoy.isoformat()})
         salida.update(publicadas=r["publicadas"], liberadas=len(r["reasignadas"]),
                       quietas=len(r["quietas"]))
+    #  EL ORDEN DEL DIA (29/10/2026): en cada vuelta, con lo ya publicado, el
+    #  lugar de cada orden en su cuadrilla (`campo.orden_del_dia`). Lo que
+    #  entra urgente pasa adelante de lo que no empezo. Si falla, lo publicado
+    #  queda publicado: la app ordena con su propia regla.
+    try:
+        from campo import orden_del_dia
+        salida["ordenadas"] = orden_del_dia.ordenar(org, hoy, ahora)
+    except Exception as e:                                       # noqa: BLE001
+        salida["ordenadas"] = 0
+        logger.warning("Supervisor: reparto del dia · no se pudo armar el orden del "
+                       "dia (%s)", type(e).__name__)
     logger.info("Supervisor: reparto del dia · asigno=%s · libero=%s · "
                 "quietas=%s · sobrantes=%s · sin cuadrilla=%s · sin zona=%s · "
-                "cuadrillas sin nadie=%s · con ausentes=%s",
+                "cuadrillas sin nadie=%s · con ausentes=%s · reordenadas=%s",
                 salida["publicadas"], salida["liberadas"], salida["quietas"],
                 salida["sobrantes"], salida["sin_cuadrilla"], salida["sin_zona"],
-                salida["sin_nadie_con_cuenta"], salida["con_ausentes"])
+                salida["sin_nadie_con_cuenta"], salida["con_ausentes"],
+                salida["ordenadas"])
     return {"reparto_del_dia": salida}

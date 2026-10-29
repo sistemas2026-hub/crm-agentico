@@ -13,6 +13,8 @@
     lineaDePersona,
     quienLaAsigno,
     textoDelAviso,
+    textoDeLaSiguiente,
+    textoDelVencimiento,
     textoDePrioridad,
     textoSinBajar
   } from '$lib/supervisor/dia-publicado.js';
@@ -226,11 +228,22 @@
                   {/if}
                   {#each c.ordenes as o (o.id)}
                     <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-xs);">
+                      <!-- El orden del día que arma el Supervisor y sigue la app
+                           (29/10/2026): esta lista viene en ese orden, y la
+                           siguiente es la que el técnico hace al terminar. -->
+                      {#if o.siguiente}
+                        <span class="snoc-tag" style="align-self:flex-start;">{textoDeLaSiguiente(c.ordenes)}</span>
+                      {/if}
                       <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                        {#if o.orden_del_dia}<span class="snoc-mono">{o.orden_del_dia}.</span>{/if}
                         <span class="snoc-mono">#{o.numero}</span>
-                        <span style="min-width:0;">{o.tipo}</span>
+                        <span style="min-width:0;">{o.cliente || o.tipo}</span>
                         <span class="snoc-body-sm">{textoDePrioridad(o.prioridad)}</span>
-                        <span class="snoc-body-sm snoc-secundario">{o.barrio}</span>
+                        <span class="snoc-body-sm">· {textoDelVencimiento(o.vence_en, data.dia)}</span>
+                      </div>
+                      <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                        <span class="snoc-body-sm snoc-secundario">{o.tipo}</span>
+                        <span class="snoc-body-sm snoc-secundario">· {o.barrio}</span>
                       </div>
                       <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
                         <span class="snoc-tag">{o.estado_texto}</span>

@@ -22,6 +22,7 @@ import '../../core/tiempo/momento_leido.dart';
 import '../../core/widgets/dexter_sync_badge.dart';
 import '../ejecucion/ejecucion_screen.dart';
 import '../trabajo/estado_trabajo.dart';
+import '../trabajo/orden_operativo.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'acciones_orden.dart';
 import 'comprobar_conexion.dart';
@@ -454,6 +455,47 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     return null;
   }
 
+  /// La que sigue después de esta, en el orden del día (29/10/2026).
+  TrabajoVista? _queSigue(TrabajoVista trabajo) => OrdenOperativo.queSigue(
+        widget.ordenes.trabajos,
+        actual: trabajo.id,
+        ahora: DateTime.now(),
+      );
+
+  Widget _tarjetaQueSigue(TrabajoVista sigue) {
+    final String cual = <String>[
+      if (sigue.numero != null) 'OT #${sigue.numero}',
+      if (sigue.clienteNombre.isNotEmpty) sigue.clienteNombre,
+    ].join(' · ');
+    return Container(
+      key: const ValueKey<String>('que-sigue'),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: AppRadius.brTarjeta,
+        boxShadow: AppTheme.sombraNivel1,
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(Icons.arrow_forward, color: AppColors.primary),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('SIGUE',
+                    style: AppTypography.labelBadge.copyWith(color: AppColors.outline)),
+                Text(cual, style: AppTypography.cuerpo),
+                if (sigue.zona.isNotEmpty)
+                  Text(sigue.zona, style: AppTypography.cuerpoChico),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _ejecutarAccion(TrabajoVista trabajo, AccionOrden accion) async {
     if (_trabajando) return;
 
@@ -556,6 +598,12 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   if (trabajo.requiereActualizacion)
                     _avisoActualizacion(trabajo),
                   _cabeceraConPasos(trabajo, lectura),
+                  // Con cuál sigue (29/10/2026): la siguiente del orden del día
+                  // que arma el Supervisor, la misma que marca Programación.
+                  if (_queSigue(trabajo) case final TrabajoVista sigue) ...<Widget>[
+                    const SizedBox(height: AppSpacing.md),
+                    _tarjetaQueSigue(sigue),
+                  ],
                   if (lectura.avisoExcepcion != null) ...<Widget>[
                     const SizedBox(height: AppSpacing.md),
                     _avisoExcepcion(trabajo, lectura),

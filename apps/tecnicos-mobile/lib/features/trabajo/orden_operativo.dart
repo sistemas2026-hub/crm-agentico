@@ -9,14 +9,18 @@ import 'trabajo_vista.dart';
 /// oficina y no dice nada de qué hacer primero. Las dos pantallas podían
 /// contradecirse sobre el mismo día; ahora no pueden, porque leen esto.
 ///
-/// EL CRITERIO (el que ya tenía Inicio, sin cambios)
-/// -------------------------------------------------
+/// EL CRITERIO
+/// -----------
 ///   1. el que está en sitio: dejarlo a medias es lo que hace que no cierre;
 ///   2. el que va en camino;
-///   3. lo vencido y lo que vence antes;
-///   4. la prioridad que puso la oficina (alta, media, baja);
-///   5. el resto, en el orden en que llegó;
-///   6. al final, lo terminado o cancelado.
+///   3. EL ORDEN DEL DÍA QUE ARMÓ EL SUPERVISOR (29/10/2026): «que el mismo
+///      Supervisor le arme el orden en que trabaja los tickets». Lo decide el
+///      servidor (`campo/orden_del_dia.py`) y Programación muestra el mismo;
+///      cuenta solo si es el de hoy;
+///   4. sin él: lo vencido y lo que vence antes;
+///   5. la prioridad que puso la oficina (alta, media, baja);
+///   6. el resto, en el orden en que llegó;
+///   7. al final, lo terminado o cancelado.
 ///
 /// Dentro de cada escalón se respeta el orden de llegada: `List.sort` de Dart
 /// no es estable, y sin el desempate por posición dos trabajos iguales podían
@@ -49,12 +53,13 @@ class OrdenOperativo {
     ];
 
     int escalon(TrabajoVista t) {
-      if (terminado(t)) return 5;
+      if (terminado(t)) return 6;
       if (t.estado == EstadoTrabajo.enSitio) return 0;
       if (t.estado == EstadoTrabajo.enCamino) return 1;
-      if (t.minutosParaVencer(ahora: ahora) != null) return 2;
-      if (t.prioridad.isNotEmpty) return 3;
-      return 4;
+      if (t.ordenDelDiaPara(ahora) != null) return 2;
+      if (t.minutosParaVencer(ahora: ahora) != null) return 3;
+      if (t.prioridad.isNotEmpty) return 4;
+      return 5;
     }
 
     conPosicion.sort(((int, TrabajoVista) a, (int, TrabajoVista) b) {
@@ -63,11 +68,17 @@ class OrdenOperativo {
       if (ea != eb) return ea.compareTo(eb);
       if (ea == 2) {
         final int c = a.$2
+            .ordenDelDiaPara(ahora)!
+            .compareTo(b.$2.ordenDelDiaPara(ahora)!);
+        if (c != 0) return c;
+      }
+      if (ea == 3) {
+        final int c = a.$2
             .minutosParaVencer(ahora: ahora)!
             .compareTo(b.$2.minutosParaVencer(ahora: ahora)!);
         if (c != 0) return c;
       }
-      if (ea == 3) {
+      if (ea == 4) {
         final int c = (_prioridad[a.$2.prioridad] ?? 9)
             .compareTo(_prioridad[b.$2.prioridad] ?? 9);
         if (c != 0) return c;
@@ -86,5 +97,19 @@ class OrdenOperativo {
     final List<TrabajoVista> ordenados = ordenar(trabajos, ahora: ahora);
     if (ordenados.isEmpty || terminado(ordenados.first)) return null;
     return ordenados.first;
+  }
+
+  /// Con cuál sigue después de `actual` (29/10/2026): el primero de la lista,
+  /// sin contar `actual`, que no está terminado. Es lo que el técnico ve
+  /// mientras hace una orden: «Sigue: OT #…».
+  static TrabajoVista? queSigue(
+    List<TrabajoVista> trabajos, {
+    required String actual,
+    required DateTime ahora,
+  }) {
+    for (final TrabajoVista t in ordenar(trabajos, ahora: ahora)) {
+      if (t.id != actual && !terminado(t)) return t;
+    }
+    return null;
   }
 }

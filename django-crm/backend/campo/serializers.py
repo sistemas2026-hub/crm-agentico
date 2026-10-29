@@ -73,6 +73,11 @@ def _compromiso(obj: OrdenTrabajo) -> dict:
         "ventana_inicio": obj.ventana_inicio,
         "ventana_fin": obj.ventana_fin,
         "sla_vence_en": obj.sla_vence_en,
+        #  El lugar que le dio el Supervisor en el dia de su cuadrilla
+        #  (29/10/2026, `campo.orden_del_dia`), con el dia al que se refiere: la
+        #  app lo sigue solo si es el de hoy.
+        "orden_del_dia": obj.orden_del_dia,
+        "orden_del_dia_fecha": obj.orden_del_dia_fecha,
     }
 
 

@@ -56,6 +56,8 @@ class TrabajoVista {
     this.ventanaInicio,
     this.ventanaFin,
     this.slaVenceEn,
+    this.ordenDelDia,
+    this.ordenDelDiaFecha = '',
     this.detalleAcceso = '',
     this.contactoAlternoNombre = '',
     this.contactoAlternoTelefono = '',
@@ -153,6 +155,19 @@ class TrabajoVista {
   /// reglas de la empresa; el teléfono no las conoce.
   final DateTime? slaVenceEn;
 
+  /// En qué lugar la hace su cuadrilla ese día, 1 la primera (29/10/2026). Lo
+  /// arma el Supervisor en el servidor; la app lo sigue solo el día al que se
+  /// refiere (`ordenDelDiaFecha`, AAAA-MM-DD), y sin él ordena con su regla.
+  final int? ordenDelDia;
+  final String ordenDelDiaFecha;
+
+  /// El lugar del Supervisor si es de `hoy`; null si es de otro día o no hay.
+  int? ordenDelDiaPara(DateTime hoy) {
+    final String dia =
+        '${hoy.year.toString().padLeft(4, '0')}-${hoy.month.toString().padLeft(2, '0')}-${hoy.day.toString().padLeft(2, '0')}';
+    return ordenDelDiaFecha == dia ? ordenDelDia : null;
+  }
+
   /// Cómo se entra al inmueble: torre, piso, apartamento.
   final String detalleAcceso;
 
@@ -213,6 +228,8 @@ class TrabajoVista {
       ventanaInicio: _fecha(orden['ventana_inicio']),
       ventanaFin: _fecha(orden['ventana_fin']),
       slaVenceEn: _fecha(orden['sla_vence_en']),
+      ordenDelDia: orden['orden_del_dia'] as int?,
+      ordenDelDiaFecha: orden['orden_del_dia_fecha']?.toString() ?? '',
       detalleAcceso: orden['detalle_acceso']?.toString() ?? '',
       contactoAlternoNombre:
           orden['contacto_alterno_nombre']?.toString() ?? '',

@@ -211,28 +211,18 @@ def _personas_de(org, jornadas, reciben, por_jornada, zona) -> dict:
     return salida
 
 
-def del_dia(org, fecha) -> dict:
-    """Lo publicado para `fecha`. Ver el encabezado.
-
-        {"fecha", "cuadrillas": [{jornada, cuadrilla, labor, zonas, tope,
-                                  ordenes: [fila]}],
-         "con_alguien_que_no_sale": [fila], "esperan": [orden],
-         "cuentas": {publicadas, por_el_supervisor, por_personas,
-                     sin_registro, avisadas, esperan}}
-    """
+def jornadas_y_ordenes(org, fecha) -> tuple:
+    """(jornadas, reciben, receptores, ordenes) de `fecha`: las cuadrillas del
+    dia, quienes de cada una reciben, y LAS ORDENES DEL DIA --las vivas con
+    gente (salvo las programadas para otro dia) y las que se terminaron ESE
+    dia--. Sale de `del_dia` (29/10/2026) para que el orden del dia que arma
+    el Supervisor (`campo.orden_del_dia`) ordene exactamente lo que
+    Programacion muestra."""
     from django.db.models import Q
 
     from campo import reparto as R
-    from campo.avisos import AvisoEnviado, DispositivoDeTecnico
-    from campo.cuadrillas import (
-        JornadaDeCuadrilla,
-        configuracion_de_reparto,
-        destinatarios,
-    )
-    from campo.labores import nombres_de_labor
-    from campo.models import EventoTrabajo, OrdenTrabajo
-    from campo.services import avisos
-    from common.models import Notification
+    from campo.cuadrillas import JornadaDeCuadrilla, destinatarios
+    from campo.models import OrdenTrabajo
 
     zona = R._zona_de(org)
     jornadas = list(
@@ -242,8 +232,6 @@ def del_dia(org, fecha) -> dict:
     reciben = {j.id: destinatarios(j)["reciben"] for j in jornadas}
     receptores = {j.id: {r["profile"].id for r in reciben[j.id]} for j in jornadas}
 
-    #  LAS ORDENES DEL DIA: las vivas con gente (salvo las programadas para
-    #  otro dia) y las que se terminaron ESE dia.
     ordenes = []
     for o in (OrdenTrabajo.objects
               .filter(org=org, asignaciones__isnull=False)
@@ -260,6 +248,42 @@ def del_dia(org, fecha) -> dict:
               or o.completada_campo_en.astimezone(zona).date() != fecha):
             continue
         ordenes.append(o)
+    return jornadas, reciben, receptores, ordenes
+
+
+def por_jornada_de(jornadas, receptores, ordenes) -> tuple:
+    """({jornada.id: [orden]}, [sin jornada]): cada orden va a la cuadrilla
+    de alguien que la tiene asignada."""
+    por, sin = {j.id: [] for j in jornadas}, []
+    for o in ordenes:
+        quienes = {a.profile_id for a in o.asignaciones.all()}
+        destino = next((j for j in jornadas if quienes & receptores[j.id]), None)
+        (por[destino.id] if destino else sin).append(o)
+    return por, sin
+
+
+def del_dia(org, fecha) -> dict:
+    """Lo publicado para `fecha`. Ver el encabezado.
+
+        {"fecha", "cuadrillas": [{jornada, cuadrilla, labor, zonas, tope,
+                                  ordenes: [fila]}],
+         "con_alguien_que_no_sale": [fila], "esperan": [orden],
+         "cuentas": {publicadas, por_el_supervisor, por_personas,
+                     sin_registro, avisadas, esperan}}
+    """
+    from django.db.models import Q
+
+    from campo import orden_del_dia as OD
+    from campo import reparto as R
+    from campo.avisos import AvisoEnviado, DispositivoDeTecnico
+    from campo.cuadrillas import configuracion_de_reparto
+    from campo.labores import nombres_de_labor
+    from campo.models import EventoTrabajo, OrdenTrabajo
+    from campo.services import avisos
+    from common.models import Notification
+
+    zona = R._zona_de(org)
+    jornadas, reciben, receptores, ordenes = jornadas_y_ordenes(org, fecha)
 
     #  QUIEN LA ASIGNO: el ultimo evento de asignacion de cada orden.
     ultimo = {}
@@ -349,19 +373,31 @@ def del_dia(org, fecha) -> dict:
             "asignada_por_nombre": por_nombre,
             "asignada_en": cuando.astimezone(zona).isoformat() if cuando else None,
             "aviso": aviso,
+            #  29/10/2026, pedido del usuario: el cliente, cuando vence y su
+            #  lugar en el orden del dia (el que sigue la app).
+            "cliente": o.cliente_nombre or "",
+            "vence_en": o.sla_vence_en.astimezone(zona).isoformat() if o.sla_vence_en else None,
+            "orden_del_dia": (o.orden_del_dia if o.orden_del_dia_fecha == fecha else None),
+            "siguiente": False,
         }
 
     def en_orden(lista):
-        return sorted(lista, key=lambda o: (
-            o.estado_operativo in _terminadas(),
-            _RANGO_PRIORIDAD.get(o.prioridad or "", 3), o.numero))
+        """EN EL ORDEN DE LA APP (29/10/2026): el que arma el Supervisor, con la
+        misma regla que el telefono (`orden_del_dia.como_la_app`)."""
+        return sorted(lista, key=lambda o: OD.como_la_app(o, fecha))
 
-    por_jornada = {j.id: [] for j in jornadas}
-    sin_jornada = []
-    for o in ordenes:
-        quienes = {a.profile_id for a in o.asignaciones.all()}
-        destino = next((j for j in jornadas if quienes & receptores[j.id]), None)
-        (por_jornada[destino.id] if destino else sin_jornada).append(o)
+    def filas_de(lista):
+        """Las filas en el orden de la app, con la SIGUIENTE marcada: la primera
+        que todavia no empezo ni termino --la que el tecnico hace al llegar,
+        o con la que arranca el dia--."""
+        filas_ = [fila(o) for o in en_orden(lista)]
+        siguiente = next((f for f in filas_ if f["estado"] in _activas()
+                          and f["estado"] not in OD._empezadas()), None)
+        if siguiente is not None:
+            siguiente["siguiente"] = True
+        return filas_
+
+    por_jornada, sin_jornada = por_jornada_de(jornadas, receptores, ordenes)
 
     esperan = [
         o for o in (OrdenTrabajo.objects
@@ -383,7 +419,7 @@ def del_dia(org, fecha) -> dict:
             "labor": labores.get(j.labor, j.labor),
             "zonas": [z.nombre for z in j.zonas.all()],
             "tope": j.cuadrilla.tope_diario or tope,
-            "ordenes": [fila(o) for o in en_orden(por_jornada[j.id])],
+            "ordenes": filas_de(por_jornada[j.id]),
             "personas": personas[j.id],
         } for j in jornadas],
         "con_alguien_que_no_sale": [fila(o) for o in en_orden(sin_jornada)],
