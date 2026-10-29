@@ -1223,3 +1223,11 @@ from operaciones.estilo_modelos import (                        # noqa: E402,F40
 #  no inventa tareas. Si lo que se ejecutara saliera de interpretar una frase,
 #  la garantia de un cliente dependeria de como estaba redactada esa frase.
 from operaciones.tareas_modelos import TareaDelegada             # noqa: E402,F401
+
+# =============================================================================
+#  ATASCOS DEL SUPERVISOR  --  vive en 'atascos_modelos.py'
+# =============================================================================
+#  Mismo motivo que las capas anteriores. Lo que el ciclo no pudo decidir, un
+#  dia, con su tipo: la medicion que se pidio antes de decidir si un agente de
+#  IA lo resuelve (29/10/2026). Ver 'operaciones/atascos.py'.
+from operaciones.atascos_modelos import AtascoDelSupervisor     # noqa: E402,F401

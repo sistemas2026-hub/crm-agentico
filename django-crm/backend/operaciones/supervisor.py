@@ -2815,6 +2815,9 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
             logger.exception("Supervisor: fallo la fase '%s'", nombre)
             resumen.setdefault("fases_que_fallaron", []).append(
                 {"fase": nombre, "error": type(e).__name__})
+            from operaciones import atascos
+            atascos.anotar(org, atascos.FASE_CICLO, "fase_caida", nombre,
+                           type(e).__name__, ahora=ahora)
 
     #  LO QUE HAY QUE DECIDIR, POR EL CHAT  --  21/10/2026, pedido del
     #  usuario: que el Supervisor escriba solo lo que pide una decision con
@@ -3216,6 +3219,11 @@ def _medir_fallas_pendientes(org, *, desatendido: bool = False) -> dict:
     return {"medicion": informe}
 
 
+#: Por que puerta se quedo, en el tipo del atasco ('operaciones/atascos.py').
+_ATASCO_DE_LA_PUERTA = {"reglas": "despacho_por_reglas", "tarea": "despacho_sin_delegar",
+                        "empresa": "despacho_sin_autorizar"}
+
+
 def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
     """
     Las cinco reglas, aplicadas a TODAS las propuestas de ticket sin decidir.
@@ -3236,7 +3244,7 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
 
     NO LEVANTA. Un paso que no ocurre es un resultado posible del ciclo.
     """
-    from operaciones import autonomia, paso_a_despacho as pad
+    from operaciones import atascos, autonomia, paso_a_despacho as pad
 
     #  LAS PENDIENTES, las mas viejas primero: una propuesta que lleva dias
     #  esperando es la que mas necesita moverse.
@@ -3303,6 +3311,8 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
         reporte["motivos"]["no se pudo leer el techo de autonomia"] = len(
             sin_decidir)
         reporte["se_quedaron"] = len(sin_decidir)
+        atascos.anotar(org, atascos.FASE_DESPACHO, "techo_ilegible", "todas",
+                       type(e).__name__, ahora=ahora)
         return {"despacho": reporte}
 
     #  LAS CORRECCIONES DEL USUARIO  --  18/10/2026. Una sola consulta por
@@ -3339,6 +3349,8 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
                 reporte["fallaron"] += 1
                 logger.exception("Supervisor: el paso a Despacho fallo (%s)",
                                  type(e).__name__)
+                atascos.anotar(org, atascos.FASE_DESPACHO, "despacho_fallo", p.id,
+                               type(e).__name__, ahora=ahora)
                 continue
 
         grupo = r.get("grupo") or "sin grupo"
@@ -3396,6 +3408,12 @@ def _pasar_a_despacho_los_que_las_reglas_habiliten(org, ahora) -> dict:
             #  escribio al mover el interruptor, y esto va a un log.
             m = _en_una_linea(pad.motivo_para_el_registro(r))[:120]
             reporte["motivos"][m] = reporte["motivos"].get(m, 0) + 1
+            #  EL ATASCO, con la misma clave del log (29/10/2026,
+            #  'operaciones/atascos.py'): cuantos dias se queda cada una.
+            atascos.anotar(org, atascos.FASE_DESPACHO,
+                           _ATASCO_DE_LA_PUERTA.get(r.get("puerta") or pad.PUERTA_REGLAS,
+                                                    "despacho_otra_puerta"),
+                           p.id, m, ahora=ahora)
 
         #  ANOTAR NO PUEDE TUMBAR LA VUELTA. Es informativo: si falla --un
         #  bloqueo, la conexion--, la propuesta sigue igual. Fuera de un try,

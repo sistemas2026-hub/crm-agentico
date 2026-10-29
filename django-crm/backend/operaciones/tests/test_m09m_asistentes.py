@@ -652,7 +652,14 @@ def test_17_18_no_hay_segunda_cola_ni_task(org_a, actor):
                        #  'EstiloSupervisor' es el tono que una persona edita,
                        #  y 'RazonamientoSupervisor' es la traza de un turno.
                        #  Ninguna se consulta para decidir nada.
-                       "EstiloSupervisor", "RazonamientoSupervisor"}
+                       "EstiloSupervisor", "RazonamientoSupervisor",
+                       #  29/10/2026. 'AtascoDelSupervisor' tampoco es una
+                       #  cola: es una MEDICION --lo que el ciclo no pudo
+                       #  decidir, una fila por dia y atasco-- que solo lee el
+                       #  informe 'informe_de_atascos'. No se revisa ni se
+                       #  decide desde ahi; lo que pide una persona sigue
+                       #  siendo 'PropuestaSupervisor'.
+                       "AtascoDelSupervisor"}
 
     #  Se miran los IDENTIFICADORES del código, no el texto del archivo: los
     #  docstrings nombran justamente lo que NO se creó, y un 'in fuente' los

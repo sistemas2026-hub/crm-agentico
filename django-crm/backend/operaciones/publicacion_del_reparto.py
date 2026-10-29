@@ -274,6 +274,26 @@ def propuesta(org, hoy, ahora) -> dict:
     }
 
 
+#: De la lista del detalle al tipo del atasco (`operaciones/atascos.py`).
+_ATASCO_DE_LA_ORDEN = (("sin_clasificar", "orden_sin_labor"), ("sin_zona", "orden_sin_zona"),
+                       ("sin_cuadrilla", "orden_sin_cuadrilla"), ("sobrantes", "orden_sobrante"))
+
+
+def _anotar_atascos(org, detalle, ahora) -> None:
+    """Lo que el reparto no pudo ubicar, en la sombra tambien: se mide si el
+    Supervisor sabe decidir, no si tiene permiso."""
+    from operaciones import atascos
+
+    for lista, tipo in _ATASCO_DE_LA_ORDEN:
+        for orden_id in detalle.get(lista) or ():
+            atascos.anotar(org, atascos.FASE_REPARTO, tipo, orden_id,
+                           atascos.TIPOS[tipo][1], ahora=ahora)
+    for jornada, motivo in detalle.get("no_reciben") or ():
+        tipo = "cuadrilla_sin_cuenta" if motivo == SIN_CUENTA else "cuadrilla_ausente"
+        atascos.anotar(org, atascos.FASE_REPARTO, tipo, jornada.cuadrilla_id,
+                       atascos.TIPOS[tipo][1], ahora=ahora)
+
+
 def publicar_el_reparto(org, ahora=None) -> dict:
     """La fase del ciclo. Nunca levanta: lo que no se pudo, se dice.
 
@@ -299,6 +319,7 @@ def publicar_el_reparto(org, ahora=None) -> dict:
     for clave in ("publicaria", "libera", "sobrantes", "sin_cuadrilla",
                   "sin_zona", "sin_nadie_con_cuenta", "con_ausentes"):
         salida[clave] = p[clave]
+    _anotar_atascos(org, p["detalle"], ahora)
     if aviso:
         logger.warning("Supervisor: reparto del dia · %s", aviso)
 

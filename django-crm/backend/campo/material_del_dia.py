@@ -375,15 +375,21 @@ def calcular(org, fecha) -> dict:
                 "bodega_por": bodega_por,
                 "peso": peso.get(str(j.id), 0), "lineas": [], "avisos": [],
                 "_lider": lider, "_bodega": bodega,
+                #  POR QUE NO CARGA, para anotar el atasco (29/10/2026,
+                #  `operaciones/atascos.py`): sin leer el texto del aviso.
+                "_sin": "", "_labor": j.labor, "_cuadrilla_id": str(j.cuadrilla_id),
                 "acta": acta_de(fecha, j.id), "cargado_en": None}
         filas.append(fila)
         if kit is None:
+            fila["_sin"] = "kit"
             fila["avisos"].append(kit_por[:1].upper() + kit_por[1:] + ".")
             continue
         if bodega is None:
+            fila["_sin"] = "bodega"
             fila["avisos"].append(bodega_por[:1].upper() + bodega_por[1:] + ".")
             continue
         if lider is None or not lider.is_active:
+            fila["_sin"] = "lider"
             fila["avisos"].append("No tiene líder con cuenta activa: no hay a quién cargarle.")
             continue
         custodia = inv.ubicacion_de_tecnico(lider, org, crear=False)

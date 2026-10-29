@@ -210,3 +210,60 @@ def test_si_la_bitacora_falla_el_diagnostico_igual_queda(org_a):
     assert informe["midieron"] == 1, "el contador vale aunque no haya fila"
     assert any(p.get("fuente") == dxt.FUENTE for p in s.evidencia), (
         "se perdio el diagnostico por no poder escribir la bitacora")
+
+
+# =============================================================================
+#  §3  LA IA QUE NO CONTESTA BIEN ES UN ATASCO ANOTADO (29/10/2026)
+# =============================================================================
+
+def _atasco_de(org, caso):
+    from operaciones.models import AtascoDelSupervisor
+
+    return [(a.fase, a.tipo, a.motivo) for a in
+            AtascoDelSupervisor.objects.filter(org=org, sujeto=str(caso.id))]
+
+
+def _leer(org, caso, concluir):
+    dxt.diagnosticar(org, [_senal(caso)], ahora=timezone.now(), concluir=concluir,
+                     propuestas={str(caso.id): _propuesta(org, caso)})
+
+
+def test_un_error_del_modelo_es_un_atasco_de_la_ia_con_su_tipo(org_a):
+    caso = _caso(org_a)
+
+    def falla(o, entrada):
+        raise TimeoutError("el prompt con la descripcion del cliente")
+
+    _leer(org_a, caso, falla)
+
+    assert _atasco_de(org_a, caso) == [("lectura de tickets", "ia_error", "TimeoutError")], (
+        "el error del modelo tiene que quedar con su tipo, nunca con su mensaje")
+
+
+def test_una_lectura_sin_hipotesis_y_una_rota_son_atascos_distintos(org_a):
+    from operaciones import cerebro
+
+    def sin_hipotesis():
+        #  Sin hipotesis la confianza es 'sin_hipotesis': viajan juntas (la
+        #  tabla lo exige, y es lo que 'cerebro.validar' devuelve).
+        from operaciones.situaciones_modelos import Confianza
+
+        v = _Veredicto([], hipotesis="")
+        v.confianza = Confianza.SIN_HIPOTESIS
+        return v
+
+    sin = _caso(org_a)
+    _leer(org_a, sin, lambda o, e: sin_hipotesis())
+    assert [t for _, t, _ in _atasco_de(org_a, sin)] == ["ia_sin_hipotesis"]
+
+    rota = _caso(org_a)
+    v = sin_hipotesis()
+    v.descartes = [cerebro.DESCARTE_SIN_OBJETO]
+    _leer(org_a, rota, lambda o, e: v)
+    assert [t for _, t, _ in _atasco_de(org_a, rota)] == ["ia_respuesta_rota"]
+
+
+def test_una_lectura_con_hipotesis_no_es_un_atasco(org_a):
+    caso = _caso(org_a)
+    _leer(org_a, caso, lambda o, e: _Veredicto(["diagnosticar_servicio"]))
+    assert _atasco_de(org_a, caso) == []

@@ -820,3 +820,50 @@ def test_e2_obra_de_red_y_trabajo_pedido_pasan_con_confianza_media(
 
     assert _estado(obra) == P.ACEPTADA and _estado(trabajo) == P.ACEPTADA
     assert "confianza media" in (P.objects.get(pk=obra.pk).resultado or "")
+
+
+# =============================================================================
+#  §6  CADA UNA QUE SE QUEDA ES UN ATASCO ANOTADO (29/10/2026)
+# =============================================================================
+
+
+def _atascos(org):
+    from operaciones.models import AtascoDelSupervisor
+
+    return {a.sujeto: a for a in AtascoDelSupervisor.objects.filter(org=org)}
+
+
+def test_o_la_que_se_queda_por_las_reglas_es_un_atasco_con_el_motivo_del_log(
+    org_a, puertas_abiertas
+):
+    """Con la MISMA clave que el log, y una fila por dia: la segunda vuelta
+    suma. La que pasa no se anota."""
+    sana = _sana(org_a, hace_min=20)
+    pasa = _confirmada(org_a, hace_min=10)
+
+    r = _vuelta(org_a)
+
+    a = _atascos(org_a)
+    assert list(a) == [str(sana.pk)], "solo la que se queda es un atasco"
+    assert (a[str(sana.pk)].tipo, a[str(sana.pk)].fase) == ("despacho_por_reglas",
+                                                            "paso a Despacho")
+    assert {a[str(sana.pk)].motivo: 1} == r["motivos"]
+    _sin_datos_del_cliente({"motivo": a[str(sana.pk)].motivo})
+    assert _estado(pasa) == P.ACEPTADA
+
+    _vuelta(org_a)
+    assert _atascos(org_a)[str(sana.pk)].veces == 2
+
+
+def test_o2_sin_la_tarea_delegada_es_un_atasco_de_configuracion(org_a, monkeypatch):
+    from operaciones import autonomia, tareas_delegadas
+
+    monkeypatch.setattr(tareas_delegadas, "esta_delegada", lambda o, clave: False)
+    monkeypatch.setattr(
+        autonomia, "puede", lambda o, nivel: {"puede": True, "motivo": ""}
+    )
+    p = _confirmada(org_a, hace_min=10)
+
+    _vuelta(org_a)
+
+    assert _atascos(org_a)[str(p.pk)].tipo == "despacho_sin_delegar"

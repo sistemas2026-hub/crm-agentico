@@ -57,7 +57,7 @@ import logging
 
 from django.utils import timezone
 
-from operaciones import lectura_de_ticket
+from operaciones import atascos, lectura_de_ticket
 from operaciones import supervisor as sup
 from operaciones.models import PropuestaSupervisor
 
@@ -316,9 +316,22 @@ def diagnosticar(org, senales, *, ahora=None, tope=None, concluir=None,
                 FUENTE, senal.origen_id,
                 f"no se pudo diagnosticar en esta corrida "
                 f"({type(e).__name__}). Se reintenta en la siguiente.", ahora))
+            atascos.anotar(org, atascos.FASE_LECTURA, "ia_error", senal.origen_id,
+                           type(e).__name__, ahora=ahora)
             continue
 
-        if (_respuesta_rota(getattr(v, "descartes", None))
+        #  EL ATASCO DE LA IA (29/10/2026, 'operaciones/atascos.py'): una
+        #  respuesta rota, se cuide o no una lectura anterior, o una lectura
+        #  sin hipotesis. El id del caso y un texto fijo: nunca lo que leyo.
+        rota = _respuesta_rota(getattr(v, "descartes", None))
+        if rota:
+            atascos.anotar(org, atascos.FASE_LECTURA, "ia_respuesta_rota", senal.origen_id,
+                           atascos.TIPOS["ia_respuesta_rota"][1], ahora=ahora)
+        elif not getattr(v, "hipotesis", ""):
+            atascos.anotar(org, atascos.FASE_LECTURA, "ia_sin_hipotesis", senal.origen_id,
+                           atascos.TIPOS["ia_sin_hipotesis"][1], ahora=ahora)
+
+        if (rota
                 and _tiene_un_grupo((propuestas or {}).get(str(senal.origen_id)))):
             #  UNA RESPUESTA ROTA NO PISA UNA LECTURA BUENA  --  19/10/2026. El
             #  modelo no llego a contestar con un objeto, y anotarla como

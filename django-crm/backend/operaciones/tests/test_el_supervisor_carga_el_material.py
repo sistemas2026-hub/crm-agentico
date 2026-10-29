@@ -287,3 +287,80 @@ def test_r_el_reporte_y_la_propuesta_dicen_que_ya_se_cargo(
     assert fila["cargado_en"] is not None
     #  Ya lo tiene en mano: no hay nada mas que cargarle.
     assert fila["lineas"][0]["necesita"] == "0"
+
+
+# ---------------------------------------------------------------------------
+# A · lo que no se puede cargar queda anotado como atasco (29/10/2026)
+# ---------------------------------------------------------------------------
+
+def _atascos(org):
+    from operaciones.models import AtascoDelSupervisor
+
+    return {(a.tipo, a.sujeto): a for a in AtascoDelSupervisor.objects.filter(org=org)}
+
+
+def test_a_en_la_sombra_anota_el_kit_que_no_elige_una_vez_por_labor(
+        empresa, bodega, conector, ont, jornada, admin_profile, django_user_model):
+    """Lo que se mide es si sabe decidir, no si tiene permiso: en la sombra
+    tambien. Dos cuadrillas de la misma labor son UN kit sin elegir."""
+    from common.models import Profile
+
+    PlantillaDeKit.objects.create(org=empresa, nombre="Kit de obras")
+    Labor.objects.get_or_create(org=empresa, codigo="correctivo",
+                                defaults={"nombre": "Soporte en campo", "de_fabrica": True})
+    u = django_user_model.objects.create_user(email="otro-lider@test.com", password="x1234567")
+    otro = Profile.objects.create(user=u, org=empresa, role="USER", is_active=True)
+    c2 = Cuadrilla.objects.create(org=empresa, nombre="Cuadrilla #2", lider=otro)
+    JornadaDeCuadrilla.objects.create(org=empresa, cuadrilla=c2, fecha=MARTES, labor="correctivo")
+
+    r = CM.cargar_el_material(empresa, _a_las(6))["material_del_dia"]
+
+    assert r["modo"] == CM.SOMBRA
+    a = _atascos(empresa)
+    assert list(a) == [("kit_sin_elegir", "correctivo")]
+    atasco = a[("kit_sin_elegir", "correctivo")]
+    assert atasco.motivo.startswith("ningún kit se parece")
+    assert (atasco.fase, str(atasco.dia), atasco.veces) == ("material del dia", "2026-10-27", 1)
+
+    #  La vuelta siguiente suma, no crea otra fila.
+    CM.cargar_el_material(empresa, _a_las(7))
+    assert _atascos(empresa)[("kit_sin_elegir", "correctivo")].veces == 2
+
+
+def test_a2_bodega_sin_elegir_faltante_y_equipo_que_no_sale(
+        abierto, bodega, conector, ont, jornada, admin_profile):
+    UbicacionInventario.objects.create(org=abierto, tipo=UbicacionInventario.BODEGA,
+                                       nombre="BOF-SAB_GRANDE")
+    _kit(abierto, (conector, 10), (ont, 1))
+
+    CM.cargar_el_material(abierto, _a_las(6))
+    a = _atascos(abierto)
+    cuadrilla = str(jornada.cuadrilla_id)
+    assert list(a) == [("bodega_sin_elegir", cuadrilla)]
+    assert a[("bodega_sin_elegir", cuadrilla)].motivo.startswith("no sé de qué bodega")
+
+    #  Con su bodega elegida y la bodega corta: faltan conectores y no hay ONT.
+    jornada.cuadrilla.bodega = bodega
+    jornada.cuadrilla.save(update_fields=["bodega"])
+    _stock(abierto, bodega, conector, ont, 4)
+    CM.cargar_el_material(abierto, _a_las(7))
+    a = _atascos(abierto)
+    assert a[("material_no_alcanza", cuadrilla)].motivo == "2 de 2 materiales"
+    #  Solo el equipo con serie que no le toca: los conectores salen, aunque cortos.
+    assert [k for k in a if k[0] == "sale_sin_equipo"] == [
+        ("sale_sin_equipo", f"{cuadrilla}:ONU-WIFI")]
+    assert a[("sale_sin_equipo", f"{cuadrilla}:ONU-WIFI")].motivo == "ONU WIFI"
+
+
+def test_a3_lo_ya_cargado_no_es_un_atasco(abierto, bodega, conector, ont, jornada):
+    from operaciones.models import AtascoDelSupervisor
+
+    _kit(abierto, (conector, 10))
+    _stock(abierto, bodega, conector, ont, 4)
+    CM.cargar_el_material(abierto, _a_las(6))
+    assert ("material_no_alcanza", str(jornada.cuadrilla_id)) in _atascos(abierto)
+
+    AtascoDelSupervisor.objects.filter(org=abierto).delete()
+    CM.cargar_el_material(abierto, _a_las(7))
+
+    assert _atascos(abierto) == {}, "su dia ya se decidio: no se vuelve a anotar"

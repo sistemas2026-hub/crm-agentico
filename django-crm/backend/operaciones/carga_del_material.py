@@ -44,6 +44,8 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 
+from operaciones import atascos
+
 logger = logging.getLogger(__name__)
 
 PUBLICO = "publico"
@@ -114,6 +116,40 @@ def _cargar_una(org, hoy, fila, comunes, con_serie) -> int:
     return len(con_serie)
 
 
+def _anotar_atascos(org, plan, ya, ahora) -> None:
+    """Lo que no se puede cargar, en `operaciones/atascos.py`: en la sombra
+    tambien, porque lo que se mide es si el Supervisor sabe decidir, no si
+    tiene permiso. Las cuadrillas ya cargadas no: su dia ya se decidio."""
+    from campo import material_del_dia as M
+
+    def anotar(tipo, sujeto, motivo):
+        atascos.anotar(org, atascos.FASE_MATERIAL, tipo, sujeto, motivo, ahora=ahora)
+
+    labores_sin_kit = set()
+    for fila in plan["cuadrillas"]:
+        if fila["acta"] in ya:
+            continue
+        cuadrilla = fila["_cuadrilla_id"]
+        if fila["_sin"] == "kit":
+            #  El atasco es de la LABOR: dos cuadrillas de la misma labor son
+            #  un solo kit que no se eligio.
+            if fila["_labor"] not in labores_sin_kit:
+                labores_sin_kit.add(fila["_labor"])
+                anotar("kit_sin_elegir", fila["_labor"], fila["kit_por"])
+        elif fila["_sin"] == "bodega":
+            anotar("bodega_sin_elegir", cuadrilla, fila["bodega_por"])
+        elif fila["_sin"] == "lider":
+            anotar("sin_lider", cuadrilla, "no tiene líder con cuenta activa")
+        incompletos = [i for i in fila["lineas"] if i["falta"] > 0]
+        if incompletos:
+            anotar("material_no_alcanza", cuadrilla,
+                   f"{len(incompletos)} de {len(fila['lineas'])} materiales")
+        for i in incompletos:
+            if i["serializado"] and i["asignado"] == M.CERO:
+                anotar("sale_sin_equipo", f"{cuadrilla}:{i['_material'].codigo}",
+                       i["material"])
+
+
 def cargar_el_material(org, ahora=None) -> dict:
     """La fase del ciclo. Nunca levanta: lo que no se pudo, se dice."""
     from campo import material_del_dia as M
@@ -151,6 +187,7 @@ def cargar_el_material(org, ahora=None) -> dict:
             salida["con_faltantes"] += 1
         pendientes.append((fila, comunes, con_serie))
     salida["cargaria"] = len(pendientes)
+    _anotar_atascos(org, plan, ya, ahora)
 
     porque = _puertas(org)
     if porque:
@@ -172,6 +209,8 @@ def cargar_el_material(org, ahora=None) -> dict:
             salida["no_se_pudo"] += 1
             logger.warning("Supervisor: material del dia · una cuadrilla no se "
                            "pudo cargar (%s)", type(e).__name__)
+            atascos.anotar(org, atascos.FASE_MATERIAL, "carga_fallo",
+                           fila["_cuadrilla_id"], type(e).__name__, ahora=ahora)
     logger.info("Supervisor: material del dia · cargadas=%s · reservas=%s · ya "
                 "cargadas=%s · sin carga=%s · con faltantes=%s · no se pudo=%s",
                 salida["cargadas"], salida["reservas"], salida["ya_cargadas"],
