@@ -511,11 +511,11 @@ class Encuestador:
         enc.whatsapp.enviar_plantilla_aprobada = mandar
         return p
 
-    def correr(self, config):
+    def correr(self, config, **kw):
         p = self.montar()
         try:
             return enc.enviar(config, TENANT, "caso-1", responsable_id="p-1",
-                              responsable_nombre="Ana", area="soporte_tecnico")
+                              responsable_nombre="Ana", area="soporte_tecnico", **kw)
         finally:
             for obj, nombre, original in reversed(p):
                 setattr(obj, nombre, original)
@@ -663,7 +663,8 @@ try:
     revisar(r.status_code == 200 and pedidos_e == [("caso-1", {"responsable_id": "p-1",
                                                                "responsable_nombre": "Ana",
                                                                "area": "soporte_tecnico",
-                                                               "ticket_numero": "95001"})],
+                                                               "ticket_numero": "95001",
+                                                               "cerrado_en": None})],
             "la ruta pasa el caso y el responsable", f"{r.status_code} {pedidos_e}")
 
     def cae(c, t, caso, **kw):
@@ -1083,6 +1084,69 @@ revisar(doc8["mensajes_automaticos"]["bienvenida"]["solo_a"] == ["573001112233"]
 editor_real._mutar_mensaje_automatico(doc8, "bienvenida", True, "b", [], [])
 revisar(doc8["mensajes_automaticos"]["bienvenida"]["solo_a"] == [],
         "guardar la lista vacia a proposito la abre a todos", f"{doc8}")
+
+
+# =============================================================================
+titulo("9. La espera de la encuesta la elige la empresa")
+# =============================================================================
+#  Era fija en el CRM (30 minutos). Ahora el CRM avisa el cierre en el acto y
+#  el motor dice "todavia no, volve en N segundos" hasta que pase la espera
+#  de la empresa. Sin 'cerrado_en' (un CRM de antes) sale como salia.
+from datetime import timedelta as _td                         # noqa: E402
+
+ahora9 = datetime(2026, 10, 29, 15, 0, tzinfo=timezone.utc)
+ce9 = ConfigEnc(espera_minutos=10)
+e = Encuestador()
+r = e.correr(ce9, cerrado_en=ahora9 - _td(minutes=4), ahora=ahora9)
+revisar(r == {"enviada": False, "motivo": "todavia_no", "reintentar_en": 360}
+        and not e.envios and not e.reservas,
+        "cerrado hace 4 de 10 minutos: no sale, ni reserva, y dice volver en 6 minutos", f"{r}")
+e = Encuestador()
+r = e.correr(ce9, cerrado_en=ahora9 - _td(minutes=10), ahora=ahora9)
+revisar(r["enviada"], "pasada la espera, sale", f"{r}")
+e = Encuestador()
+r = e.correr(ConfigEnc(espera_minutos=0), cerrado_en=ahora9, ahora=ahora9)
+revisar(r["enviada"], "con espera 0, sale en cuanto se cierra", f"{r}")
+e = Encuestador()
+r = e.correr(ce9)
+revisar(r["enviada"], "sin 'cerrado_en' (un CRM de antes, que ya espero): sale como salia", f"{r}")
+e = Encuestador()
+r = e.correr(ConfigEnc(activo=False, espera_minutos=10), cerrado_en=ahora9, ahora=ahora9)
+revisar(r["motivo"] == "apagada", "apagada no pide volver: no hay nada que esperar", f"{r}")
+for malo in (-1, 1441):
+    try:
+        EncuestaWhatsApp(espera_minutos=malo)
+        revisar(False, f"una espera de {malo} minutos se rechaza")
+    except ValidationError:
+        revisar(True, f"una espera de {malo} minutos se rechaza")
+
+orig_9 = [(api, "_config_de", api._config_de), (api.encuesta, "enviar", api.encuesta.enviar),
+          (api.editor, "guardar_espera_encuesta", api.editor.guardar_espera_encuesta),
+          (api, "olvidar_config", api.olvidar_config)]
+try:
+    api._config_de = lambda t: ce9
+    pedidos9: list = []
+    api.encuesta.enviar = lambda c, t, caso, **kw: pedidos9.append(kw) or {"enviada": False,
+                                                                           "motivo": "todavia_no"}
+    cliente.post("/casos/caso-1/encuesta", json={"tenant": TENANT, "cerrado_en": "2026-10-29T15:00:00Z"})
+    cliente.post("/casos/caso-1/encuesta", json={"tenant": TENANT, "cerrado_en": "ayer"})
+    revisar(pedidos9[0]["cerrado_en"] == ahora9 and pedidos9[1]["cerrado_en"] is None,
+            "la ruta entiende la hora del cierre, y una que no entiende la ignora", f"{pedidos9}")
+    esperas9: list = []
+    api.editor.guardar_espera_encuesta = lambda t, m: esperas9.append(m) or ConfigEnc(espera_minutos=m)
+    api.olvidar_config = lambda t: None
+    r = cliente.put("/encuestas/espera", json={"tenant": TENANT, "espera_minutos": "5"})
+    revisar(r.status_code == 200 and esperas9 == [5] and r.get_json() == {"espera_minutos": 5},
+            "la empresa cambia la espera desde la pantalla", f"{r.get_json()}")
+    r = cliente.put("/encuestas/espera", json={"tenant": TENANT, "espera_minutos": "cinco"})
+    revisar(r.status_code == 400 and esperas9 == [5], "una espera que no es un numero: 400, no se guarda")
+finally:
+    for obj, nombre, original in orig_9:
+        setattr(obj, nombre, original)
+
+doc9: dict = {}
+editor_real._mutar_espera_encuesta(doc9, 5)
+revisar(doc9 == {"encuesta_whatsapp": {"espera_minutos": 5}}, "el editor la escribe en la encuesta", f"{doc9}")
 
 
 print(f"\n{'=' * 76}\n  {'TODO OK' if not fallos else f'{len(fallos)} FALLAS'}\n{'=' * 76}")

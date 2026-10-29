@@ -6470,6 +6470,7 @@ def mensajes_automaticos_listar():
                        "solo_a": list(m.solo_a) if m else []}})
     return jsonify({
         "eventos": eventos,
+        "encuesta": {"espera_minutos": config.encuesta_whatsapp.espera_minutos},
         "campos": {k: {"etiqueta": e, "ejemplo": ej} for k, (e, ej) in CAMPOS.items()},
         "respaldos": {**RESPALDOS_POR_DEFECTO, **(config.respaldos_mensajes or {})},
         "plantillas": plantillas, "error_meta": error_meta})
@@ -6526,6 +6527,30 @@ def mensajes_automaticos_guardar(evento):
     m = config.mensajes_automaticos[evento]
     return jsonify({"evento": evento, "activo": m.activo, "plantilla": m.plantilla,
                     "datos": list(m.datos), "solo_a": list(m.solo_a)})
+
+
+@app.put("/encuestas/espera")
+def encuestas_espera_guardar():
+    """
+    Cuantos minutos despues de cerrar un caso sale la encuesta (29/10/2026):
+    {tenant, espera_minutos}, de 0 a 1440. Lo valida el esquema.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        minutos = int(cuerpo.get("espera_minutos"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "La espera tiene que ser un número de minutos."}), 400
+    try:
+        config = editor.guardar_espera_encuesta(tenant, minutos)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo guardar.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify({"espera_minutos": config.encuesta_whatsapp.espera_minutos})
 
 
 @app.put("/canales/plantillas/<nombre>/uso")
@@ -7139,13 +7164,25 @@ def caso_enviar_encuesta(caso_id):
     tenant = cuerpo.get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    #  Cuando se cerro el caso (29/10/2026): con eso el motor aplica la espera
+    #  de la empresa. Una fecha que no se entiende se ignora -- es lo mismo que
+    #  un CRM de antes, que ya espero sus 30 minutos fijos.
+    cerrado_en = None
+    try:
+        if cuerpo.get("cerrado_en"):
+            cerrado_en = datetime.fromisoformat(str(cuerpo["cerrado_en"]).replace("Z", "+00:00"))
+            if cerrado_en.tzinfo is None:
+                cerrado_en = cerrado_en.replace(tzinfo=timezone.utc)
+    except ValueError:
+        cerrado_en = None
     try:
         config = _config_de(tenant)
         resultado = encuesta.enviar(
             config, tenant, caso_id,
             responsable_id=cuerpo.get("responsable_id"),
             responsable_nombre=cuerpo.get("responsable_nombre"),
-            area=cuerpo.get("area"), ticket_numero=cuerpo.get("ticket_numero"))
+            area=cuerpo.get("area"), ticket_numero=cuerpo.get("ticket_numero"),
+            cerrado_en=cerrado_en)
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:

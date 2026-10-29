@@ -15,8 +15,8 @@
   import { etiquetasDe, vistaPrevia } from '$lib/conversaciones/plantillas.js';
 
   /** @type {{ evento: any, campos: Record<string, {etiqueta: string, ejemplo: string}>,
-   *   plantillas: any[], canEdit: boolean, form: any }} */
-  let { evento, campos, plantillas, canEdit, form } = $props();
+   *   plantillas: any[], canEdit: boolean, form: any, encuesta?: { espera_minutos: number } }} */
+  let { evento, campos, plantillas, canEdit, form, encuesta } = $props();
 
   //  untrack: se parte de lo guardado, y después manda lo que se edita.
   let plantilla = $state(untrack(() => evento.config.plantilla));
@@ -119,6 +119,32 @@
       Al mandarla desde un ticket, Dexter llena estos datos y quien la manda escribe el resto.
     {/if}
   </p>
+
+  {#if evento.clave === 'encuesta_cierre' && encuesta}
+    <!-- La espera después del cierre (29/10/2026): la elige la empresa, y la
+         aplica el motor. Antes era fija: 30 minutos. -->
+    <form method="POST" action="?/espera" class="espera" use:enhance={() => async ({ update }) => update({ reset: false })}>
+      <label for="espera-encuesta">Mandarla</label>
+      <input
+        id="espera-encuesta"
+        name="espera_minutos"
+        type="number"
+        min="0"
+        max="1440"
+        step="1"
+        class="v2-input"
+        style="width:90px"
+        value={encuesta.espera_minutos}
+        disabled={!canEdit}
+      />
+      <span>minutos después de cerrar el caso</span>
+      {#if canEdit}<button class="v2-btn v2-btn-sm" type="submit">Guardar espera</button>{/if}
+      <p class="v2-hint" style="margin:0;flex-basis:100%">
+        La espera evita mandarla si el caso se cerró por error y se reabre enseguida: justo antes de
+        enviarla se revisa que siga cerrado. Con 0 sale en cuanto se cierra.
+      </p>
+    </form>
+  {/if}
 
   <form
     method="POST"
@@ -242,6 +268,13 @@
   .armado {
     display: grid;
     gap: 12px;
+  }
+  .espera {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
   }
   .cabeza {
     display: flex;

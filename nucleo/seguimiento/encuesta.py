@@ -8,8 +8,10 @@ El CRM ya tenia encuestas, por correo y solo con un contacto con correo: en un
 ISP cuyos clientes viven en el sistema del ISP y hablan por WhatsApp, no salia
 ninguna. Esto la manda por el canal real.
 
-ENVIAR  (lo pide el CRM, un rato despues de cerrar el caso)
+ENVIAR  (lo pide el CRM al cerrar el caso; sale pasada la espera de la empresa)
 ------
+  0. si no paso 'espera_minutos' desde el cierre -> 'todavia_no', con en
+     cuantos segundos volver: el CRM reagenda y pregunta de nuevo;
   1. apagada, canal apagado, sin chat o el numero dio de baja -> no se manda;
      en modo prueba ('solo_a'), solo a esos numeros;
   2. la plantilla tiene que estar APROBADA y pedir los valores que se le dan;
@@ -32,6 +34,9 @@ La respuesta no: si el cliente toca el boton, se registra.
 
 from __future__ import annotations
 
+import math
+from datetime import datetime, timedelta, timezone
+
 from nucleo.canales import whatsapp
 from nucleo.observabilidad.registro import id_interno, registrar
 from nucleo.persistencia import db as persistencia
@@ -45,8 +50,19 @@ EVENTO = "encuesta_cierre"
 
 def enviar(config, tenant: str, caso_id: str, *, responsable_id: str | None = None,
            responsable_nombre: str | None = None, area: str | None = None,
-           ticket_numero: str | None = None) -> dict:
-    """{'enviada': bool, 'motivo': str|None}. Nunca levanta por una decision; si por la base."""
+           ticket_numero: str | None = None, cerrado_en: datetime | None = None,
+           ahora: datetime | None = None) -> dict:
+    """
+    {'enviada': bool, 'motivo': str|None}. Nunca levanta por una decision; si
+    por la base.
+
+    'cerrado_en' (29/10/2026): cuando se cerro el caso. Si todavia no paso la
+    espera de la empresa ('espera_minutos'), no sale y se dice en cuantos
+    segundos volver a pedirla ('reintentar_en'): el CRM avisa el cierre en el
+    acto y vuelve a preguntar, y la espera vive en un solo lugar. Sin
+    'cerrado_en' (un CRM de antes, que ya espero sus 30 minutos) sale como
+    salia.
+    """
     cfg = config.encuesta_whatsapp
     m = config.mensajes_automaticos.get(EVENTO)
     if not m or not m.activo:
@@ -55,6 +71,11 @@ def enviar(config, tenant: str, caso_id: str, *, responsable_id: str | None = No
         return {"enviada": False, "motivo": "plantilla_desactivada"}
     if not whatsapp.activo(config):
         return {"enviada": False, "motivo": "canal_apagado"}
+    if cerrado_en is not None:
+        falta = (cerrado_en + timedelta(minutes=cfg.espera_minutos)
+                 - (ahora or datetime.now(timezone.utc))).total_seconds()
+        if falta > 0:
+            return {"enviada": False, "motivo": "todavia_no", "reintentar_en": math.ceil(falta)}
 
     destino = encuestas.destino_del_caso(tenant, caso_id)
     if not destino or destino.get("canal") != "whatsapp" or not destino.get("usuario_externo"):

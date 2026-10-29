@@ -2240,6 +2240,12 @@ class EncuestaWhatsApp(Base):
     vigencia_horas: int = Field(default=72, ge=1, le=720)
     #: Desde que puntaje cuenta como "satisfecho" en "Calidad de la atencion".
     satisfecho_desde: int = Field(default=4, ge=1, le=5)
+    #: Cuantos minutos despues de CERRAR el caso sale la encuesta (29/10/2026).
+    #: La espera existe para que un caso cerrado por error y reabierto al rato
+    #: no la reciba: justo antes de mandarla se vuelve a mirar que siga
+    #: cerrado. Era fija en el CRM (30, la misma que la de correo); ahora la
+    #: elige la empresa. 0 = en cuanto se cierra (sin esa proteccion).
+    espera_minutos: int = Field(default=30, ge=0, le=1440)
 
     @field_validator("opciones")
     @classmethod

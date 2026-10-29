@@ -1279,6 +1279,16 @@ def guardar_mensaje_automatico(tenant: str, evento: str, activo: bool, plantilla
                                                                  plantilla, datos, solo_a))
 
 
+def _mutar_espera_encuesta(doc: dict, minutos: int) -> None:
+    """La espera de la encuesta despues del cierre (29/10/2026). El rango
+    (0 a 1440) lo valida EncuestaWhatsApp."""
+    doc.setdefault("encuesta_whatsapp", {})["espera_minutos"] = int(minutos)
+
+
+def guardar_espera_encuesta(tenant: str, minutos: int) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_espera_encuesta(doc, minutos))
+
+
 def _mutar_uso_de_plantilla(doc: dict, nombre: str, en_uso: bool) -> None:
     """Pone o saca 'nombre' de 'plantillas_desactivadas' (28/10/2026)."""
     lista = [n for n in (doc.get("plantillas_desactivadas") or []) if n != nombre]

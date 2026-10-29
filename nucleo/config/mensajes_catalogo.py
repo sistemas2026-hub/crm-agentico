@@ -77,7 +77,7 @@ EVENTOS: dict[str, dict] = {
         "campos": _CLIENTE + ["servicio", "ticket_numero", "ticket_asunto", "responsable", "escrito"]},
     "encuesta_cierre": {
         "grupo": "Tickets", "etiqueta": "Encuesta de satisfacción",
-        "descripcion": "Al cliente, 30 minutos después de cerrar un caso que vino de un chat.",
+        "descripcion": "Al cliente, un rato después de cerrar un caso que vino de un chat (cuánto, se elige acá).",
         "destinatario": "cliente", "disparo": "dexter",
         "campos": _CLIENTE + ["ticket_numero", "responsable"]},
     "recordatorio_pago": {

@@ -1,5 +1,9 @@
 import { fail } from '@sveltejs/kit';
-import { guardarMensajeAutomatico, leerMensajesAutomaticos } from '$lib/server/v2/canal-whatsapp.js';
+import {
+  guardarEsperaEncuesta,
+  guardarMensajeAutomatico,
+  leerMensajesAutomaticos
+} from '$lib/server/v2/canal-whatsapp.js';
 
 /*
  * Mensajes automáticos (28/10/2026): para cada momento en que Dexter le escribe
@@ -40,6 +44,22 @@ export const actions = {
       return { guardado: evento };
     } catch (/** @type {any} */ err) {
       return fail(400, { evento, error: err?.message || 'No se pudo cambiar.' });
+    }
+  },
+
+  /** Cuántos minutos después de cerrar sale la encuesta (29/10/2026). */
+  async espera({ fetch, request, locals }) {
+    if (locals.profile?.role !== 'ADMIN') return fail(403, { error: SOLO_ADMIN });
+    const crudo = (await request.formData()).get('espera_minutos')?.toString().trim() ?? '';
+    const minutos = Number(crudo);
+    if (crudo === '' || !Number.isInteger(minutos) || minutos < 0 || minutos > 1440) {
+      return fail(400, { evento: 'encuesta_cierre', error: 'La espera va de 0 a 1440 minutos.' });
+    }
+    try {
+      await guardarEsperaEncuesta(locals, fetch, minutos);
+      return { guardado: 'encuesta_cierre' };
+    } catch (/** @type {any} */ err) {
+      return fail(400, { evento: 'encuesta_cierre', error: err?.message || 'No se pudo guardar.' });
     }
   },
 

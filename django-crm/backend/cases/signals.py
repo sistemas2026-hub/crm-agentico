@@ -429,19 +429,23 @@ def _maybe_schedule_csat(case, old_status):
 def _maybe_schedule_encuesta_whatsapp(case, old_status):
     """La encuesta por WhatsApp de un caso que se acaba de cerrar (28/10/2026).
 
-    Misma espera que la de correo, por el mismo motivo: un caso que se cierra
-    y se reabre al rato no tiene que recibirla. No mira 'csat_enabled' -- ese
-    es el interruptor de la de CORREO; la de WhatsApp la enciende la config
-    del asistente, y el motor es quien decide (ver cases.tasks).
+    Se pide EN EL ACTO con la hora del cierre (29/10/2026): cuanto esperar lo
+    elige la empresa y lo aplica el motor, que contesta "todavia no" hasta que
+    pase -- ver cases.tasks. La espera sigue siendo la proteccion contra el
+    caso que se cierra y se reabre al rato. No mira 'csat_enabled' -- ese es
+    el interruptor de la de CORREO; la de WhatsApp la enciende la config del
+    asistente, y el motor es quien decide.
     """
     if case.status != "Closed" or old_status == "Closed" or not case.org_id:
         return
     try:
-        from cases.tasks import CSAT_SEND_DELAY_MINUTES, enviar_encuesta_whatsapp
+        from django.utils import timezone
+
+        from cases.tasks import enviar_encuesta_whatsapp
 
         enviar_encuesta_whatsapp.apply_async(
-            args=[str(case.id), str(case.org_id)],
-            countdown=CSAT_SEND_DELAY_MINUTES * 60,
+            args=[str(case.id), str(case.org_id), timezone.now().isoformat()],
+            countdown=0,
         )
     except Exception:  # pragma: no cover. Un broker caido no frena el cierre
         logger.exception("No se pudo agendar la encuesta por WhatsApp del caso %s", case.pk)

@@ -401,10 +401,21 @@ def auto_stop_stale_timers(threshold_hours=TIME_ENTRY_AUTO_STOP_HOURS):
 #  baja, plantilla sin aprobar o ya enviada -> no sale, y lo dice. Aca solo se
 #  mira que el caso siga cerrado (la misma proteccion contra el reabrir de la
 #  de correo) y se le pasa quien lo tenia, para medir la calidad por persona.
+#
+#  LA ESPERA LA DECIDE LA EMPRESA  --  29/10/2026
+#  Era fija: 30 minutos, la de correo. Ahora se pide EN EL ACTO con la hora del
+#  cierre, y el motor contesta 'todavia_no' con en cuantos segundos volver
+#  hasta que pase la espera que la empresa eligio (encuesta_whatsapp.
+#  espera_minutos). Cada vuelta vuelve a mirar que el caso siga cerrado.
+#  Las vueltas tienen tope: un motor que contestara 'todavia_no' para siempre
+#  no deja una tarea viva para siempre.
+
+#: Cuantas veces se vuelve a preguntar si el motor dice 'todavia no'.
+ENCUESTA_MAX_VUELTAS = 3
 
 
 @shared_task
-def enviar_encuesta_whatsapp(case_id, org_id):
+def enviar_encuesta_whatsapp(case_id, org_id, cerrado_en=None, vuelta=0):
     """Le pide al motor la encuesta de un caso cerrado. Devuelve lo que dijo."""
     import os
 
@@ -432,6 +443,8 @@ def enviar_encuesta_whatsapp(case_id, org_id):
         "area": case.area or None,
         #  El numero del ticket en el sistema del ISP, por si la plantilla lo nombra.
         "ticket_numero": case.external_ticket_id or None,
+        #  Con la hora del cierre el motor aplica la espera de la empresa.
+        "cerrado_en": cerrado_en,
     }
     cabeceras = {}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
@@ -446,4 +459,11 @@ def enviar_encuesta_whatsapp(case_id, org_id):
         return None
     logger.info("enviar_encuesta_whatsapp: case=%s http=%s enviada=%s motivo=%s",
                 case_id, r.status_code, datos.get("enviada"), datos.get("motivo"))
+    if datos.get("motivo") == "todavia_no" and vuelta < ENCUESTA_MAX_VUELTAS:
+        try:
+            espera = min(max(int(datos.get("reintentar_en") or 60), 5), 24 * 3600)
+        except (TypeError, ValueError):
+            espera = 60
+        enviar_encuesta_whatsapp.apply_async(
+            args=[case_id, org_id, cerrado_en, vuelta + 1], countdown=espera)
     return datos

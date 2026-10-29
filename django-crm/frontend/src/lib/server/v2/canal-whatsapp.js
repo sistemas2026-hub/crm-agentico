@@ -238,6 +238,25 @@ export async function guardarMensajeAutomatico(locals, fetch, evento, valores) {
 }
 
 /**
+ * Cuántos minutos después de cerrar un caso sale la encuesta (29/10/2026), de
+ * 0 a 1440. Lo valida el motor.
+ * @param {number} minutos
+ */
+export async function guardarEsperaEncuesta(locals, fetch, minutos) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  const resp = await fetch(`${cfg.baseUrl}/encuestas/espera`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, espera_minutos: minutos }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'No se pudo guardar.');
+  return datos;
+}
+
+/**
  * Activa o desactiva una plantilla para esta empresa (28/10/2026). En Meta no
  * cambia nada. Devuelve qué momentos encendidos de Mensajes automáticos la
  * usan: esos dejan de salir mientras esté desactivada.

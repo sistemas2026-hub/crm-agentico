@@ -78,8 +78,10 @@ class TestEncuestaAlCerrar:
         caso_abierto.save()
         pedidos = [p for p in motor if p["url"].endswith("/encuesta")]
         assert len(pedidos) == 1
-        assert ESPERAS == [30 * 60]  # la misma espera que la de correo
+        # Se pide EN EL ACTO, con la hora del cierre: la espera la aplica el motor.
+        assert ESPERAS == [0]
         p = pedidos[0]
+        assert p["json"]["cerrado_en"]
         assert p["url"] == f"http://motor:5000/casos/{caso_abierto.id}/encuesta"
         assert p["headers"] == {"X-Servicio-Token": "tok-servicio"}
         assert p["json"]["tenant"] == "empresa"
@@ -123,10 +125,54 @@ class TestEncuestaAlCerrar:
         caso_abierto.save()
         caso_abierto.refresh_from_db()
         assert caso_abierto.status == "Closed"
-        assert ESPERAS == [30 * 60]  # la tarea si corrio, y no rompio nada
+        assert ESPERAS == [0]  # la tarea si corrio, y no rompio nada
 
     def test_sin_responsable_va_vacio_no_inventado(self, motor, org_a):
         caso = Case.objects.create(org=org_a, name="x", status="Closed", priority="Normal")
         enviar_encuesta_whatsapp(str(caso.id), str(org_a.id))
         p = [x for x in motor if x["url"].endswith("/encuesta")][-1]
         assert p["json"]["responsable_id"] is None and p["json"]["area"] is None
+
+    def test_todavia_no_vuelve_a_preguntar_cuando_dice_el_motor_y_con_tope(
+            self, monkeypatch, caso_abierto):
+        """La espera de la empresa (29/10/2026): el motor dice en cuantos
+        segundos volver; se vuelve a preguntar, y no para siempre."""
+        import requests
+
+        from cases.tasks import ENCUESTA_MAX_VUELTAS
+
+        monkeypatch.setenv("ASISTENTE_URL", "http://motor:5000")
+        monkeypatch.setenv("ASISTENTE_TENANT", "empresa")
+        pedidos = []
+
+        def post(url, json=None, headers=None, timeout=None):
+            pedidos.append(json)
+            return _Resp(cuerpo={"enviada": False, "motivo": "todavia_no", "reintentar_en": 300})
+
+        monkeypatch.setattr(requests, "post", post)
+        caso_abierto.status = "Closed"
+        caso_abierto.closed_on = timezone.localdate()
+        caso_abierto.save()
+        assert ESPERAS == [0] + [300] * ENCUESTA_MAX_VUELTAS
+        assert len(pedidos) == 1 + ENCUESTA_MAX_VUELTAS
+        # Todas las vueltas llevan la MISMA hora de cierre: la espera no se corre.
+        assert len({p["cerrado_en"] for p in pedidos}) == 1
+
+    def test_reabierto_entre_vueltas_no_la_pide_mas(self, monkeypatch, caso_abierto, org_a):
+        import requests
+
+        monkeypatch.setenv("ASISTENTE_URL", "http://motor:5000")
+        monkeypatch.setenv("ASISTENTE_TENANT", "empresa")
+        pedidos = []
+
+        def post(url, json=None, headers=None, timeout=None):
+            pedidos.append(json)
+            # Mientras el motor hace esperar, alguien reabre el caso.
+            Case.objects.filter(pk=caso_abierto.pk).update(status="New")
+            return _Resp(cuerpo={"enviada": False, "motivo": "todavia_no", "reintentar_en": 60})
+
+        monkeypatch.setattr(requests, "post", post)
+        caso_abierto.status = "Closed"
+        caso_abierto.closed_on = timezone.localdate()
+        caso_abierto.save()
+        assert len(pedidos) == 1, "la segunda vuelta mira el caso, lo ve abierto y no pregunta"

@@ -52,7 +52,8 @@
         <div class="v2-label" style="margin:22px 0 10px">{grupo}</div>
         <div class="lista">
           {#each eventos as e (e.clave)}
-            <Momento evento={e} campos={m.campos} plantillas={m.plantillas} canEdit={data.can_edit} {form} />
+            <Momento evento={e} campos={m.campos} plantillas={m.plantillas} canEdit={data.can_edit} {form}
+              encuesta={m.encuesta} />
           {/each}
         </div>
       {/each}

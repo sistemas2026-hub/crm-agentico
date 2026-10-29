@@ -9,7 +9,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const guardarMensajeAutomatico = vi.fn();
 const leerMensajesAutomaticos = vi.fn();
+const guardarEsperaEncuesta = vi.fn();
 vi.mock('$lib/server/v2/canal-whatsapp.js', () => ({
+  guardarEsperaEncuesta: (...a) => guardarEsperaEncuesta(...a),
   guardarMensajeAutomatico: (...a) => guardarMensajeAutomatico(...a),
   leerMensajesAutomaticos: (...a) => leerMensajesAutomaticos(...a)
 }));
@@ -63,6 +65,21 @@ describe('Mensajes automáticos', () => {
     expect(guardarMensajeAutomatico.mock.calls[0][3].solo_a).toEqual([]);
     await actions.guardar(evento({ evento: 'seguimiento_ticket', plantilla: 'x', dato: ['cliente_nombre'] }));
     expect('solo_a' in guardarMensajeAutomatico.mock.calls[1][3]).toBe(false);
+  });
+
+  it('la espera de la encuesta viaja como número; fuera de 0 a 1440 no se manda', async () => {
+    guardarEsperaEncuesta.mockReset();
+    guardarEsperaEncuesta.mockResolvedValue({ espera_minutos: 5 });
+    const r = /** @type {any} */ (await actions.espera(evento({ espera_minutos: '5' })));
+    expect(guardarEsperaEncuesta.mock.calls[0][2]).toBe(5);
+    expect(r.guardado).toBe('encuesta_cierre');
+    for (const malo of ['', '-1', '1441', '2.5', 'cinco']) {
+      const x = /** @type {any} */ (await actions.espera(evento({ espera_minutos: malo })));
+      expect(x.status).toBe(400);
+    }
+    expect(guardarEsperaEncuesta).toHaveBeenCalledTimes(1);
+    const y = /** @type {any} */ (await actions.espera(evento({ espera_minutos: '5' }, 'USER')));
+    expect(y.status).toBe(403);
   });
 
   it('un lugar sin dato no se manda al motor', async () => {
