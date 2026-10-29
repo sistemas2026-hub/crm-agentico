@@ -860,6 +860,10 @@ try:
     revisar(seg["config"] == {"activo": True, "plantilla": "seguimiento_caso",
                               "datos": ["cliente_nombre", "escrito"]},
             "con lo que la empresa ya configuro", f"{seg['config']}")
+    revisar(seg["sugerencia"]["nombre"] == "seguimiento_caso"
+            and seg["sugerencia"]["datos"] == ["cliente_nombre", "escrito"]
+            and len(seg["sugerencia"]["ejemplos"]) == 2,
+            "y su plantilla de partida, con el dato de cada lugar y un ejemplo", f"{seg.get('sugerencia')}")
     revisar(len(d["plantillas"]) == 2, "y TODAS sus plantillas, para avisar si una en uso se pauso")
 
     url = "/mensajes-automaticos/ticket_creado_cliente"
@@ -983,6 +987,34 @@ editor_real._mutar_uso_de_plantilla(doc, "a", False)
 revisar(doc["plantillas_desactivadas"] == ["a", "b"], "desactivar dos veces no la duplica", f"{doc}")
 editor_real._mutar_uso_de_plantilla(doc, "a", True)
 revisar(doc["plantillas_desactivadas"] == ["b"], "activarla la saca de la lista", f"{doc}")
+
+
+# =============================================================================
+titulo("7. Cada momento trae una plantilla de partida que Meta puede aceptar")
+# =============================================================================
+#  La pantalla de Plantillas ofrece una por momento, con el orden de sus datos
+#  ya puesto. Si una no pasa el mismo armado que el formulario, el boton
+#  "Usar" llevaria a un rechazo seguro.
+from nucleo.config import mensajes_catalogo as cat            # noqa: E402
+from nucleo.canales import whatsapp as wa                    # noqa: E402
+
+revisar(set(cat.SUGERENCIAS) == set(cat.EVENTOS), "hay una sugerencia por cada momento del catalogo",
+        f"{set(cat.EVENTOS) ^ set(cat.SUGERENCIAS)}")
+nombres = [s["nombre"] for s in cat.SUGERENCIAS.values()]
+revisar(len(nombres) == len(set(nombres)), "ningun nombre se repite entre momentos", f"{nombres}")
+for ev, s in cat.SUGERENCIAS.items():
+    lista = cat.sugerencia(ev)
+    try:
+        wa.armar_plantilla_nueva({**lista, "idioma": "es"})
+        armo = ""
+    except wa.PlantillaInvalida as e:
+        armo = str(e)
+    huecos = wa._HUECO.findall(s["cuerpo"])
+    revisar(not armo and len(huecos) == len(s["datos"]) == len(lista["ejemplos"])
+            and all(d in cat.EVENTOS[ev]["campos"] for d in s["datos"]),
+            f"{ev}: se arma, y cada {{{{n}}}} tiene un dato que ese momento ofrece",
+            f"{armo or (huecos, s['datos'])}")
+revisar(cat.sugerencia("no_existe") is None, "un momento desconocido no tiene sugerencia")
 
 
 print(f"\n{'=' * 76}\n  {'TODO OK' if not fallos else f'{len(fallos)} FALLAS'}\n{'=' * 76}")

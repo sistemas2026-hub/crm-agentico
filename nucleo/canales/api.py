@@ -6440,7 +6440,7 @@ def mensajes_automaticos_listar():
     plantillas en Meta (todas, para avisar si una en uso se pauso). Si Meta no
     contesta, igual se devuelve la configuracion: la pantalla se puede abrir.
     """
-    from nucleo.config.mensajes_catalogo import CAMPOS, EVENTOS, LISTOS, RESPALDOS_POR_DEFECTO
+    from nucleo.config.mensajes_catalogo import CAMPOS, EVENTOS, LISTOS, RESPALDOS_POR_DEFECTO, sugerencia
 
     tenant = request.args.get("tenant")
     if not tenant:
@@ -6464,6 +6464,7 @@ def mensajes_automaticos_listar():
             "clave": clave, "grupo": ev["grupo"], "etiqueta": ev["etiqueta"],
             "descripcion": ev["descripcion"], "destinatario": ev["destinatario"],
             "disparo": ev["disparo"], "campos": ev["campos"], "listo": clave in LISTOS,
+            "sugerencia": sugerencia(clave),
             "config": {"activo": bool(m and m.activo), "plantilla": m.plantilla if m else "",
                        "datos": list(m.datos) if m else []}})
     return jsonify({

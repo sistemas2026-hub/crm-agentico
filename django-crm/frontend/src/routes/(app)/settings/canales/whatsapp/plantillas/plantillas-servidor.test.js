@@ -10,9 +10,11 @@ const crearPlantilla = vi.fn();
 const borrarPlantilla = vi.fn();
 const listarPlantillas = vi.fn();
 const cambiarUsoDePlantilla = vi.fn();
+const leerMensajesAutomaticos = vi.fn();
 vi.mock('$lib/server/v2/canal-whatsapp.js', () => ({
   cambiarUsoDePlantilla: (...a) => cambiarUsoDePlantilla(...a),
   crearPlantilla: (...a) => crearPlantilla(...a),
+  leerMensajesAutomaticos: (...a) => leerMensajesAutomaticos(...a),
   borrarPlantilla: (...a) => borrarPlantilla(...a),
   listarPlantillas: (...a) => listarPlantillas(...a)
 }));
@@ -49,6 +51,7 @@ describe('Plantillas de WhatsApp en Ajustes', () => {
     borrarPlantilla.mockReset();
     cambiarUsoDePlantilla.mockReset();
     listarPlantillas.mockReset();
+    leerMensajesAutomaticos.mockReset();
   });
 
   it('la carga trae todas, y null si Meta no contestó (no "no hay")', async () => {
@@ -56,6 +59,37 @@ describe('Plantillas de WhatsApp en Ajustes', () => {
     const d = /** @type {any} */ (await load(/** @type {any} */ ({ fetch: vi.fn(), locals: { profile: { role: 'USER' } } })));
     expect(d.plantillas).toBeNull();
     expect(d.can_edit).toBe(false);
+  });
+
+  it('ofrece la sugerida de cada momento, menos las que la empresa ya creó', async () => {
+    listarPlantillas.mockResolvedValue([{ nombre: 'seguimiento_caso', estado: 'APPROVED' }]);
+    const sug = (/** @type {string} */ nombre) => ({ nombre, cuerpo: 'Hola {{1}}.', datos: ['cliente_nombre'], ejemplos: ['Juan'] });
+    leerMensajesAutomaticos.mockResolvedValue({
+      eventos: [
+        { clave: 'seguimiento_ticket', grupo: 'Tickets', etiqueta: 'Seguimiento', sugerencia: sug('seguimiento_caso') },
+        { clave: 'suspension', grupo: 'Servicio', etiqueta: 'Suspensión', sugerencia: sug('servicio_suspendido') },
+        { clave: 'raro', grupo: 'X', etiqueta: 'Sin sugerencia', sugerencia: null }
+      ]
+    });
+    const d = /** @type {any} */ (
+      await load(/** @type {any} */ ({
+        fetch: vi.fn(),
+        locals: { profile: { role: 'ADMIN' } },
+        url: new URL('http://x/settings?sugerida=suspension')
+      }))
+    );
+    expect(d.sugeridas.map((/** @type {any} */ s) => s.clave)).toEqual(['suspension']);
+    expect(d.sugeridas[0].sugerencia.nombre).toBe('servicio_suspendido');
+    expect(d.sugerida).toBe('suspension');
+  });
+
+  it('si Meta no contestó no se ofrece ninguna: no se sabe cuáles ya existen', async () => {
+    listarPlantillas.mockResolvedValue(null);
+    leerMensajesAutomaticos.mockResolvedValue({
+      eventos: [{ clave: 'suspension', sugerencia: { nombre: 'servicio_suspendido' } }]
+    });
+    const d = /** @type {any} */ (await load(/** @type {any} */ ({ fetch: vi.fn(), locals: { profile: { role: 'ADMIN' } } })));
+    expect(d.sugeridas).toEqual([]);
   });
 
   it('crear manda todo lo escrito: ejemplos y botones (sin los vacíos)', async () => {

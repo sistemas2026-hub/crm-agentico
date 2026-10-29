@@ -112,6 +112,84 @@ EVENTOS: dict[str, dict] = {
         "campos": _CLIENTE + ["servicio", "plan"]},
 }
 
+#: Una plantilla de partida para cada momento (29/10/2026), con QUE dato va en
+#: cada {{n}}: el que la crea desde Ajustes -> Plantillas no tiene que adivinar
+#: el orden, y al elegirla en Mensajes automaticos los datos ya vienen puestos.
+#: Escritas para cualquier empresa (la empresa es un dato, no un texto fijo) y
+#: en "usted". Se pueden cambiar antes de mandarlas a Meta; Meta revisa igual.
+#: Cada una pasa por armar_plantilla_nueva en tests/test_plantillas_whatsapp.py.
+SUGERENCIAS: dict[str, dict] = {
+    "ticket_creado_cliente": {
+        "nombre": "ticket_creado", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, registramos su solicitud con el número {{2}}: {{3}}. "
+                  "Le avisaremos por este medio cuando tengamos novedades.",
+        "datos": ["cliente_nombre", "ticket_numero", "ticket_asunto"]},
+    "ticket_cerrado_cliente": {
+        "nombre": "ticket_cerrado", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, su caso número {{2}} quedó cerrado. Si el inconveniente "
+                  "continúa, responda este mensaje y lo revisamos.",
+        "datos": ["cliente_nombre", "ticket_numero"]},
+    "ticket_creado_tecnico": {
+        "nombre": "orden_asignada_tecnico", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, se le asignó un trabajo nuevo. Ticket {{2}}: {{3}}. "
+                  "Cliente {{4}}, en {{5}}. Fecha de la visita: {{6}}. "
+                  "Encuentra todos los detalles en la aplicación de campo.",
+        "datos": ["tecnico_nombre", "ticket_numero", "ticket_asunto",
+                  "cliente_nombre_completo", "cliente_direccion", "fecha_visita"]},
+    "seguimiento_ticket": {
+        "nombre": "seguimiento_caso", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, le escribimos por su caso de soporte: {{2}}. "
+                  "Si necesita algo más, responda este mensaje.",
+        "datos": ["cliente_nombre", "escrito"]},
+    "encuesta_cierre": {
+        "nombre": "encuesta_satisfaccion", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, cerramos su caso de soporte. "
+                  "¿Cómo calificaría la atención que recibió?",
+        "pie": "Su respuesta nos ayuda a mejorar",
+        "botones": ["Excelente", "Buena", "Regular", "Mala"],
+        "datos": ["cliente_nombre"]},
+    "recordatorio_pago": {
+        "nombre": "recordatorio_pago", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, le recordamos que su factura {{2}} por {{3}} del servicio {{4}} "
+                  "vence el {{5}}. Pagarla a tiempo evita la suspensión del servicio.",
+        "datos": ["cliente_nombre", "factura_numero", "total", "servicio", "fecha_corte"]},
+    "confirmacion_pago": {
+        "nombre": "pago_recibido", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, recibimos su pago de {{2}} del {{3}} para el servicio {{4}}. "
+                  "Gracias por mantenerse al día.",
+        "datos": ["cliente_nombre", "total", "fecha_pago", "servicio"]},
+    "rechazo_pago": {
+        "nombre": "pago_no_aceptado", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, no pudimos aceptar el comprobante de pago que nos envió porque {{2}}. "
+                  "Por favor envíenos uno nuevo respondiendo este mensaje.",
+        "datos": ["cliente_nombre", "motivo_rechazo"]},
+    "promesa_pago": {
+        "nombre": "promesa_de_pago", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, registramos su compromiso de pagar {{2}} a más tardar el {{3}}. "
+                  "Si ya realizó el pago, puede ignorar este mensaje.",
+        "datos": ["cliente_nombre", "total", "fecha_promesa"]},
+    "suspension": {
+        "nombre": "servicio_suspendido", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, su servicio {{2}} fue suspendido por un saldo pendiente de {{3}}. "
+                  "Si ya pagó, responda este mensaje con el comprobante y lo revisamos.",
+        "datos": ["cliente_nombre", "servicio", "total"]},
+    "bienvenida": {
+        "nombre": "bienvenida_servicio", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, bienvenido a {{2}}. Su servicio {{3}} con el plan {{4}} ya está activo. "
+                  "Si necesita ayuda, escríbanos por este medio.",
+        "datos": ["cliente_nombre", "empresa", "servicio", "plan"]},
+}
+
+
+def sugerencia(evento: str) -> dict | None:
+    """La sugerencia del momento lista para el formulario: con un ejemplo por dato."""
+    s = SUGERENCIAS.get(evento)
+    if s is None:
+        return None
+    return {"encabezado": "", "pie": "", "botones": [], **s,
+            "ejemplos": [CAMPOS[d][1] for d in s["datos"]]}
+
+
 #: Si un dato llega vacio, que se manda en su lugar (Meta rechaza un valor
 #: vacio). Cada empresa puede cambiarlos en 'respaldos_mensajes'.
 #: Los momentos cuyo DISPARADOR ya esta construido. Los demas se pueden dejar

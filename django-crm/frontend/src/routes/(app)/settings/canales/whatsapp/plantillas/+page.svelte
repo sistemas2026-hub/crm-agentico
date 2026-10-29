@@ -11,6 +11,7 @@
    * Solo variables numeradas ({{1}}, {{2}}) y solo en el texto del mensaje: es
    * lo que el resto de Dexter sabe completar (lib/conversaciones/plantillas.js).
    */
+  import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
@@ -34,37 +35,28 @@
   });
 
   /*
-   * Dos puntos de partida, escritos para cualquier empresa: la salida del
-   * ticket cuando la ventana está cerrada, y la encuesta al cerrar un caso.
-   * Se pueden cambiar antes de mandarlas.
+   * Las sugeridas (29/10/2026): una por cada mensaje automático, del catálogo
+   * del motor, con el dato que va en cada {{n}}. Las que la empresa ya creó
+   * no aparecen. Se pueden cambiar antes de mandarlas a Meta.
    */
-  const SUGERENCIAS = [
-    {
-      titulo: 'Seguimiento de un caso',
-      valores: {
-        nombre: 'seguimiento_caso',
-        categoria: 'UTILITY',
-        encabezado: '',
-        cuerpo:
-          'Hola {{1}}, te escribimos por tu caso de soporte: {{2}}. Si necesitás algo más, respondé este mensaje.',
-        pie: '',
-        ejemplos: ['Juan', 'ya revisamos tu equipo y quedó funcionando'],
-        botones: []
-      }
-    },
-    {
-      titulo: 'Encuesta de satisfacción',
-      valores: {
-        nombre: 'encuesta_satisfaccion',
-        categoria: 'UTILITY',
-        encabezado: '',
-        cuerpo: 'Hola {{1}}, cerramos tu caso de soporte. ¿Cómo calificarías la atención que recibiste?',
-        pie: 'Tu respuesta nos ayuda a mejorar',
-        ejemplos: ['Juan'],
-        botones: ['Excelente', 'Buena', 'Regular', 'Mala']
-      }
-    }
-  ];
+  /** @param {any} s */
+  function desdeSugerencia(s) {
+    return {
+      nombre: s.nombre,
+      categoria: s.categoria,
+      encabezado: s.encabezado ?? '',
+      cuerpo: s.cuerpo,
+      pie: s.pie ?? '',
+      ejemplos: [...(s.ejemplos ?? [])],
+      botones: [...(s.botones ?? [])]
+    };
+  }
+  /** @param {any} s */
+  function textoDe(s) {
+    return s.cuerpo.replace(/\{\{(\d+)\}\}/g, (/** @type {string} */ _m, /** @type {string} */ n) =>
+      s.ejemplos?.[Number(n) - 1] ?? `{{${n}}}`
+    );
+  }
 
   const VACIA = {
     nombre: '',
@@ -85,6 +77,15 @@
       creando = true;
       valores = { ...structuredClone(VACIA), ...form.valores };
     }
+  });
+
+  //  Llegando desde Mensajes automáticos con ?sugerida=<momento>. Una sola vez
+  //  al abrir: después de otra acción la página recarga y no debe reabrirse.
+  $effect(() => {
+    untrack(() => {
+      const s = data.sugeridas.find((/** @type {any} */ x) => x.clave === data.sugerida);
+      if (s && data.can_edit) usar(desdeSugerencia(s.sugerencia));
+    });
   });
 
   //  Cuántas variables tiene el texto: una por cada {{n}} distinto.
@@ -146,9 +147,9 @@
           <button type="button" class="v2-btn v2-btn-primary" onclick={() => usar(VACIA)}>
             <Plus size={14} /> Nueva plantilla
           </button>
-          {#each SUGERENCIAS as s (s.titulo)}
-            <button type="button" class="v2-btn" onclick={() => usar(s.valores)}>Usar «{s.titulo}»</button>
-          {/each}
+          {#if data.sugeridas.length}
+            <a class="v2-btn" href="#sugeridas">Ver {data.sugeridas.length} sugerida{data.sugeridas.length > 1 ? 's' : ''}</a>
+          {/if}
         </div>
       {:else}
         <form
@@ -313,6 +314,40 @@
         {/each}
       </div>
     {/if}
+
+    {#if data.can_edit && data.sugeridas.length}
+      <div class="v2-label" id="sugeridas" style="margin:26px 0 4px">Sugeridas para los mensajes automáticos</div>
+      <p class="v2-hint" style="margin:0 0 10px">
+        Una por cada momento en que Dexter puede escribirle a alguien. Al usarla se abre el formulario con el
+        texto listo para cambiar; Meta la revisa igual que cualquier otra. Después, en
+        <a href="/settings/canales/whatsapp/mensajes">Mensajes automáticos</a>, sus datos ya vienen en orden.
+      </p>
+      <div class="lista">
+        {#each data.sugeridas as s (s.clave)}
+          <div class="v2-card fila sugerida">
+            <div class="fila-cabeza">
+              <b>{s.etiqueta}</b>
+              <span class="meta">{s.grupo} · {s.sugerencia.nombre}</span>
+              <button
+                type="button"
+                class="v2-btn v2-btn-sm usar"
+                onclick={() => {
+                  usar(desdeSugerencia(s.sugerencia));
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+              >
+                Usar esta
+              </button>
+            </div>
+            <div class="texto">{textoDe(s.sugerencia)}</div>
+            {#if s.sugerencia.pie}<small class="meta">{s.sugerencia.pie}</small>{/if}
+            {#if s.sugerencia.botones?.length}
+              <div class="previa-botones">{#each s.sugerencia.botones as b (b)}<span>{b}</span>{/each}</div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -402,6 +437,12 @@
     flex-wrap: wrap;
     gap: 10px;
     font-size: 13.5px;
+  }
+  .sugerida {
+    border-style: dashed;
+  }
+  .fila-cabeza .usar {
+    margin-left: auto;
   }
   .fila-cabeza .uso {
     margin-left: auto;

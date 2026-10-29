@@ -32,11 +32,24 @@
   let ficha = $derived(plantillas.find((p) => p.nombre === plantilla) ?? null);
   let lugares = $derived(ficha ? etiquetasDe(ficha) : []);
   //  Tantos lugares como pide la plantilla: si cambia, se acomoda la lista.
+  //  Si es la sugerida de este momento y no hay nada elegido, sus datos vienen
+  //  puestos en el orden con que se escribió (29/10/2026).
   $effect(() => {
-    if (ficha && datos.length !== lugares.length) {
+    if (!ficha) return;
+    const sug = evento.sugerencia;
+    if (
+      sug && ficha.nombre === sug.nombre && sug.datos.length === lugares.length &&
+      untrack(() => datos.every((d) => !d))
+    ) {
+      datos = [...sug.datos];
+    } else if (datos.length !== lugares.length) {
       datos = Array.from({ length: lugares.length }, (_, i) => datos[i] ?? '');
     }
   });
+  //  La sugerida de este momento todavía no existe en Meta: se ofrece crearla.
+  let falta_sugerida = $derived(
+    Boolean(evento.sugerencia) && !plantillas.some((p) => p.nombre === evento.sugerencia.nombre)
+  );
   let previa = $derived(
     ficha ? vistaPrevia(ficha, datos.map((d) => (d ? campos[d]?.ejemplo ?? d : '…'))) : ''
   );
@@ -125,6 +138,13 @@
           <option value={ficha.nombre}>{ficha.nombre} ({desactivada ? 'desactivada' : 'no aprobada'})</option>
         {/if}
       </select>
+      {#if !ficha && falta_sugerida && canEdit}
+        <p class="v2-hint" style="margin:4px 0 0">
+          Para este momento hay una plantilla sugerida:
+          <a href={`/settings/canales/whatsapp/plantillas?sugerida=${evento.clave}`}>crearla en Plantillas</a>.
+          Cuando Meta la apruebe, aparece acá con sus datos en orden.
+        </p>
+      {/if}
       {#if pausada}
         <p class="mal">Meta tiene esta plantilla como «{ficha.estado}»: así no se puede mandar.</p>
       {:else if desactivada}

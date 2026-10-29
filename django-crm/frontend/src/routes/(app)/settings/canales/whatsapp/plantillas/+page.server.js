@@ -3,6 +3,7 @@ import {
   borrarPlantilla,
   cambiarUsoDePlantilla,
   crearPlantilla,
+  leerMensajesAutomaticos,
   listarPlantillas
 } from '$lib/server/v2/canal-whatsapp.js';
 
@@ -15,9 +16,31 @@ import {
 const SOLO_ADMIN = 'Solo un administrador puede cambiar las plantillas.';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ fetch, locals }) {
+export async function load({ fetch, locals, url }) {
+  const [plantillas, mensajes] = await Promise.all([
+    listarPlantillas(locals, fetch),
+    leerMensajesAutomaticos(locals, fetch)
+  ]);
+  //  Una plantilla de partida por momento (29/10/2026), menos las que la
+  //  empresa ya tiene con ese nombre. Si Meta no contesta no se sabe cuáles
+  //  existen, y tampoco se podría crear: no se ofrece ninguna.
+  const existentes = new Set((plantillas ?? []).map((/** @type {any} */ p) => p.nombre));
+  const sugeridas =
+    plantillas === null
+      ? []
+      : (mensajes?.eventos ?? [])
+          .filter((/** @type {any} */ e) => e.sugerencia && !existentes.has(e.sugerencia.nombre))
+          .map((/** @type {any} */ e) => ({
+            clave: e.clave,
+            grupo: e.grupo,
+            etiqueta: e.etiqueta,
+            sugerencia: e.sugerencia
+          }));
   return {
-    plantillas: await listarPlantillas(locals, fetch),
+    plantillas,
+    sugeridas,
+    //  Desde Mensajes automáticos: abre el formulario con la de ese momento.
+    sugerida: url?.searchParams.get('sugerida') ?? null,
     // Afordancia, no permiso: cada action lo vuelve a comprobar.
     can_edit: locals.profile?.role === 'ADMIN'
   };
