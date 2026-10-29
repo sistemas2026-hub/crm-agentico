@@ -809,6 +809,154 @@ no descartar duplicados        -> 1 falla
 
 ---
 
+## Fases 3A y 3B — diseño, 29/10/2026 · sin implementar
+
+### El hallazgo que ordena las dos fases
+
+**3B puede romper E1 si se hace mal, y por un camino que no es obvio.**
+
+Para registrar «ejecución en curso» hay que escribir ANTES de llamar a la
+herramienta. Si esa escritura deja una transacción abierta mientras se espera
+a WispHub o SmartOLT, pasan dos cosas: se viola la decisión congelada
+*«ninguna transacción de base abierta mientras se espera una operación
+externa»* (§12), y **el cursor de eventos se queda clavado** — es el escenario
+[8] del banco, donde una transacción en vuelo retiene a todas las posteriores.
+
+Una llamada HTTP lenta a un ISP congelaría el flujo de la oficina entera.
+
+El patrón obligatorio, que ya existe en el repositorio (CONTRATO_RELEVO P-A):
+
+```
+transaccion corta -> marcar INICIO -> COMMIT
+                     ejecutar la herramienta (fuera de toda transaccion)
+transaccion corta -> marcar FIN     -> COMMIT
+```
+
+### A9 NO valida identificadores — confirmado
+
+Medido el 29/10/2026. El proyector solo comprueba que `ev.id` sea *truthy*:
+
+```
+"ambiente"   -> procedencia "evento:ambiente"
+"e1"         -> procedencia "evento:e1"
+"../../etc"  -> procedencia "evento:../../etc"
+```
+
+En producción el dato real **sí** es un UUID (`tool_calls.id uuid primary
+key`), así que hoy no hay falsos. **Pero la garantía no lo impide**, y eso deja
+de ser teórico en cuanto 3A introduzca eventos simulados: una instrucción
+marcada `evento:simulado-1` entraría al historial como operativa.
+
+Peor: `"ambiente"` —la palabra reservada para lo NO operativo— pasa como si
+fuera un evento.
+
+**Arreglo (fase 3A, primera tarea):** validar formato UUID en `proyectar()`, y
+que los eventos simulados lleven `procedencia: 'simulado'` como tercera
+categoría, nunca un uuid inventado.
+
+### 3A · Prototipo visual del NOC
+
+Ruta **nueva e independiente**: `/centro-mando/laboratorio`. `/centro-mando` no
+se toca.
+
+```
+  +page.svelte            monta la escena y el panel
+  escena/montar.ts        la unica puerta: montar/aplicar/seleccionar/destruir
+  escena/oficina.ts       suelo, paredes, mobiliario, monitores
+  escena/personaje.ts     sprite, estados, animacion
+  escena/camara.ts        zoom y desplazamiento
+  escena/adaptador.ts     instrucciones E2 -> animaciones  <- LA FRONTERA
+```
+
+**`adaptador.ts` es la pieza que importa.** Traduce el contrato E2 a lo que la
+escena entiende. Todo lo que sabe de negocio vive ahí; `oficina.ts` y
+`personaje.ts` no conocen la palabra «herramienta» ni «ISP». Cambiar PixiJS por
+otra cosa es reescribir `escena/`, no `adaptador.ts`.
+
+**Tres indicadores distintos, que hoy son dos:**
+
+| Estado | Qué significa | De dónde sale |
+|---|---|---|
+| **actividad** | hay un evento vigente | instrucción E2 |
+| **reposo** | no hay eventos, y el flujo está al día | `retraso_s` bajo |
+| **sin información** | el flujo está retrasado o caído | `retraso_s` alto o error |
+
+El tercero **no existe todavía** y es la petición directa: *un agente no debería
+aparecer como disponible cuando en realidad perdió conexión*. El dato ya viaja
+—`retraso_s` del endpoint de E1— pero nadie lo lee.
+
+### 3B · Ciclo de vida de las ejecuciones
+
+**Una llamada de herramienta no es una ejecución.** Un turno del agente puede
+llamar a varias herramientas; la ejecución es el turno, no cada llamada. Hoy
+`tool_calls` registra llamadas terminadas y nada más.
+
+Tabla nueva, no columnas en `tool_calls` —esa es de auditoría y no debe mutar:
+
+```
+asistente.ejecuciones
+  id uuid, organization_id uuid, agente text,
+  estado text         iniciada | terminada | fallida | cancelada | desconocida
+  iniciada_en, actualizada_en, terminada_en timestamptz
+  tx xid8 default pg_current_xact_id()      <- mismo cursor que E1
+  herramienta_actual text, latido timestamptz
+```
+
+**`desconocida` es un estado de primera clase.** Un proceso que muere a mitad
+deja la fila en `iniciada` para siempre; un barrido la pasa a `desconocida`
+pasado un umbral. La pantalla entonces dice «no sé», que es la verdad — el
+mismo criterio por el que el motor hoy **no** emite `offline`.
+
+### Dependencias
+
+```
+3A  necesita  el contrato E2 (ya existe) + el arreglo de A9
+3B  necesita  el patron de transaccion corta, o rompe E1
+3A + 3B       la integracion final: el personaje muestra "trabajando AHORA"
+```
+
+**3A no depende de 3B.** Puede construirse con eventos terminados y simulados,
+y gana el estado «sin información» desde el primer día con `retraso_s`.
+
+### Recursos gráficos
+
+```
+suelo y paredes isometricos          tiles, 2-3 variantes
+mobiliario NOC                       escritorio, silla, rack, pantalla mural
+personaje: 7 animaciones             reposo, caminar, sentarse, teclear,
+                                     alerta, esperando, levantarse
+expediente                           el paquete que viaja entre departamentos
+```
+
+**El arte es el coste real, no la librería.** PixiJS son ~500 KB; producir y
+mantener estas animaciones no lo abarata ningún framework. Para el prototipo
+basta **un** personaje (el supervisor) y **una** oficina.
+
+### Riesgos
+
+| Riesgo | Gravedad | Mitigación |
+|---|---|---|
+| 3B deja transacciones abiertas y congela el cursor | **alta** | transacción corta obligatoria; prueba que lo verifique |
+| Una escritura más por llamada, con `--workers 1` | **alta** | medir antes; si no da, solo turnos y no cada herramienta |
+| No hay pruebas de interacción (jsdom no arranca) | **media** | la escena se valida con navegador, diciéndolo |
+| Fuga de memoria del canvas | media | `destruir()` obligatorio en `onDestroy` |
+| Eventos simulados contados como reales | **alta** | procedencia `simulado`, separada de `evento:` |
+
+### Orden recomendado
+
+```
+1  arreglar A9 (validar uuid + procedencia 'simulado')     pequeño, desbloquea 3A
+2  el indicador "sin informacion" leyendo retraso_s        sin PixiJS todavia
+3  3A: escena, camara, un personaje, adaptador
+4  3B: diseño de ejecuciones + medicion de la escritura extra
+5  integracion
+```
+
+Los pasos 1 y 2 **no necesitan PixiJS** y hacen que el prototipo nazca sin dos
+defectos conocidos.
+
+---
+
 ## Modelo de eventos
 
 
