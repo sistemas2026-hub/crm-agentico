@@ -260,25 +260,34 @@
             ondone={() => (editandoRotulos = false)}
           >
             {#snippet fields()}
+              <!-- Cada familia ocupa TODO el ancho del panel, con sus propias dos
+                   columnas adentro. Sueltos, los campos se repartían en la
+                   grilla del panel fila por fila y las familias se mezclaban:
+                   «Soporte técnico» quedaba debajo de los motivos y el
+                   encabezado «Etiquetas» en la otra columna (29/10/2026). -->
               {#each FAMILIAS as f (f.id)}
                 {#if r.claves?.[f.id]?.length}
-                  <p class="familia">{f.titulo}</p>
-                  {#each r.claves[f.id] as k (k)}
-                    <div class="v2-field fila-rotulo">
-                      <label for="r-{f.id}-{k}" class="clave">{k}</label>
-                      <input
-                        id="r-{f.id}-{k}"
-                        class="v2-input"
-                        name="rotulo:{k}"
-                        maxlength="60"
-                        value={r.rotulos?.[k] ?? ''}
-                        placeholder={comoClave(k)}
-                      />
+                  <section class="v2-sfp-wide grupo-rotulos" aria-labelledby="fam-{f.id}">
+                    <p class="familia" id="fam-{f.id}">{f.titulo}</p>
+                    <div class="grupo-campos">
+                      {#each r.claves[f.id] as k (k)}
+                        <div class="v2-field fila-rotulo">
+                          <label for="r-{f.id}-{k}" class="clave">{k}</label>
+                          <input
+                            id="r-{f.id}-{k}"
+                            class="v2-input"
+                            name="rotulo:{k}"
+                            maxlength="60"
+                            value={r.rotulos?.[k] ?? ''}
+                            placeholder={comoClave(k)}
+                          />
+                        </div>
+                      {/each}
                     </div>
-                  {/each}
+                  </section>
                 {/if}
               {/each}
-              <p class="v2-hint">
+              <p class="v2-hint v2-sfp-wide">
                 Vacío: la Bandeja muestra la clave con espacios, como hasta ahora.
               </p>
             {/snippet}
@@ -385,9 +394,14 @@
     letter-spacing: 0.04em;
     color: var(--v2-slate);
   }
+  .grupo-campos {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 24px;
+  }
   .fila-rotulo {
     display: grid;
-    grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
     align-items: center;
     gap: 12px;
   }
@@ -397,6 +411,9 @@
     overflow-wrap: anywhere;
   }
   @media (max-width: 640px) {
+    .grupo-campos {
+      grid-template-columns: 1fr;
+    }
     .fila-rotulo {
       grid-template-columns: 1fr;
       gap: 4px;
