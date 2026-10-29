@@ -3702,6 +3702,8 @@ def _correr_ciclo(org, ahora) -> dict:
     #  proponerse en esta misma vuelta, y el panel que la persona abre
     #  despues del boton "Correr ciclo" ya esta limpio.
     resumen["retiradas_por_area"] = retirar_propuestas_fuera_de_area(org, ahora)
+    #  29/10/2026: las de plazo de orden que quedaron de antes (SOLO_SE_CUENTAN).
+    resumen["retiradas_por_duplicar"] = retirar_las_que_solo_se_cuentan(org)
 
     senales = detectar(org, ahora)
 
@@ -3724,6 +3726,13 @@ def _correr_ciclo(org, ahora) -> dict:
         fila = {"tipo": senal.tipo, "origen_tipo": senal.origen_tipo,
                 "origen_id": senal.origen_id, "huella": senal.huella,
                 "evidencia": senal.evidencia, "datos": senal.datos}
+
+        if senal.tipo in SOLO_SE_CUENTAN:
+            #  Se conto arriba y el tablero la ve; no abre propuesta (ver
+            #  SOLO_SE_CUENTAN: la orden ya esta en Despacho).
+            resumen["solo_se_cuentan"] = resumen.get("solo_se_cuentan", 0) + 1
+            detalle.append({**fila, "resultado": "solo_se_cuenta", "propuesta": None})
+            continue
 
         if _ya_propuesta(org, senal):
             resumen["repetidas"] += 1
@@ -3981,6 +3990,52 @@ def retirar_alertas_de_casos_en_despacho(org, ahora=None) -> int:
     if retiradas:
         logger.info("Supervisor: %s alertas de caso antiguo retiradas: el caso "
                     "ya esta en Despacho", retiradas)
+    return retiradas
+
+
+#: Las señales que se DETECTAN y se cuentan (el tablero las muestra) pero NO
+#: abren una propuesta.
+#:
+#: DECISION DEL USUARIO, 29/10/2026, mirando Pendientes: «esos tickets que dicen
+#: OT-numero son los mismos que estan en Despacho, ¿por que aparece aca otra con
+#: una propuesta?» ... «creo yo que no deberia duplicar esa informacion». La
+#: orden ya esta en Despacho; la propuesta repetia en otra lista algo que la
+#: orden ya es. Y el plazo que median era la DURACION del trabajo contada desde
+#: que se creo la orden: una orden de ayer programada para hoy salia «vencida
+#: 25 horas» antes de que el tecnico saliera. La urgencia que importa ya va en
+#: la prioridad de la orden, que sube con el plazo del asunto
+#: (`ordenes_de_despacho.prioridad_del_caso`).
+#:
+#: Las fichas H-11 y H-12 no cambian: describen la DETECCION, que sigue.
+SOLO_SE_CUENTAN = frozenset({PropuestaSupervisor.ORDEN_SLA_VENCIDO,
+                             PropuestaSupervisor.ORDEN_SLA_POR_VENCER})
+
+DUPLICA_LA_ORDEN = "El plazo de la orden lo dice la orden en Despacho"
+
+
+def retirar_las_que_solo_se_cuentan(org) -> int:
+    """Cancela las propuestas PENDIENTES de `SOLO_SE_CUENTAN` que quedaron de
+    antes de la decision. Lo que una persona ya decidio queda como esta.
+    Mismo molde que `retirar_alertas_de_casos_en_despacho`."""
+    pendientes = list(
+        PropuestaSupervisor.objects
+        .filter(org=org, tipo_senal__in=SOLO_SE_CUENTAN,
+                estado=PropuestaSupervisor.PROPUESTA)
+        .only("id", "origen_id", "estado", "accion_propuesta"))
+    retiradas = 0
+    for propuesta in pendientes:
+        try:
+            cancelar(propuesta,
+                     motivo=f"{DUPLICA_LA_ORDEN}: el aviso de plazo repetia en "
+                            f"Pendientes una orden que ya esta en la cola. Su "
+                            f"urgencia va en la prioridad de la orden.",
+                     descripcion=DUPLICA_LA_ORDEN, nombre=DUPLICA_LA_ORDEN)
+        except YaRevisada:
+            continue
+        retiradas += 1
+    if retiradas:
+        logger.info("Supervisor: %s avisos de plazo de orden retirados: lo dice la "
+                    "orden en Despacho", retiradas)
     return retiradas
 
 

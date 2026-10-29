@@ -15,6 +15,13 @@ hace mal cuando nadie mira:
 
 La ventana es min(24 h, 20% del plazo): un umbral fijo hace que todo trabajo
 corto nazca ya avisado.
+
+DESDE EL 29/10/2026 SE DICE Y NO SE PROPONE. Decision del usuario mirando
+Pendientes: el aviso repetia una orden que ya esta en Despacho («no deberia
+duplicar esa informacion»). La señal se sigue detectando y contando --el
+tablero la muestra-- y el asistente la lista, pero ninguna de las dos vias
+abre una propuesta, y las pendientes de antes se retiran solas
+(`supervisor.SOLO_SE_CUENTAN`).
 ================================================================================
 """
 
@@ -86,7 +93,7 @@ def _senales(org, ahora, tipo):
 
 # ============================================== emisión
 @pytest.mark.django_db
-def test_ot_vencida_genera_propuesta(org_a, actor):
+def test_ot_vencida_se_dice_y_no_abre_propuesta(org_a, actor):
     _calendario(org_a)
     o = _orden(org_a, duracion=120)
     salida = A.asistir(org_a, A.PROGRAMACION, MARTES_9 + timedelta(hours=5))
@@ -95,15 +102,13 @@ def test_ot_vencida_genera_propuesta(org_a, actor):
            if r["senal_origen"] == P.ORDEN_SLA_VENCIDO and r["origen_id"] == str(o.id)]
     assert rec, "la orden vencida no produjo señal"
     r = rec[0]
-    assert r["resultado"] == A.PROPUESTA
-    assert r["propuesta_id"]
+    assert r["resultado"] == A.SOLO_SE_CUENTA
+    assert r["propuesta_id"] is None
     assert r["habilidad"]["id"] == "H-11"
     assert r["habilidad"]["estado"] == "vigente"
-    assert r["requiere_revision_humana"] is True
-
-    prop = P.objects.get(id=r["propuesta_id"])
-    assert prop.tipo_senal == P.ORDEN_SLA_VENCIDO
-    assert prop.nivel_autonomia_requerido <= P.NIVEL_RECOMENDAR
+    assert salida["resumen"]["solo_se_cuentan"] >= 1
+    assert not P.objects.filter(org=org_a, tipo_senal=P.ORDEN_SLA_VENCIDO).exists(), (
+        "la orden ya esta en Despacho: el aviso no se duplica en Pendientes")
 
 
 @pytest.mark.django_db
@@ -125,7 +130,7 @@ def test_la_evidencia_explica_la_senal_de_vencida(org_a, actor):
 
 
 @pytest.mark.django_db
-def test_ot_por_vencer_genera_propuesta_con_ventana(org_a, actor):
+def test_ot_por_vencer_se_dice_con_ventana_sin_propuesta(org_a, actor):
     _calendario(org_a)
     o = _orden(org_a, duracion=120)          # ventana = 24 min
     #  limite 11:00; a las 10:45 quedan 15 min < 24 min
@@ -140,6 +145,8 @@ def test_ot_por_vencer_genera_propuesta_con_ventana(org_a, actor):
     assert round(s.datos["ventana_horas"], 4) == 0.4       # 24 minutos
     assert s.datos["ventana_fraccion"] == 0.20
     assert rec[0]["habilidad"]["id"] == "H-12"
+    assert (rec[0]["resultado"], rec[0]["propuesta_id"]) == (A.SOLO_SE_CUENTA, None)
+    assert not P.objects.filter(org=org_a, tipo_senal=P.ORDEN_SLA_POR_VENCER).exists()
 
 
 # ============================================== silencio
@@ -172,23 +179,19 @@ def test_no_hay_senal_de_sla_cuando_no_corresponde(org_a, caso, duracion,
     (P.ORDEN_SLA_VENCIDO, timedelta(hours=5)),
     (P.ORDEN_SLA_POR_VENCER, timedelta(minutes=105)),
 ])
-def test_deduplicacion(org_a, actor, tipo, delta):
+def test_ni_la_primera_ni_la_segunda_pasada_abren_propuesta(org_a, actor, tipo, delta):
     """
-    Segunda pasada: el hecho sigue, la propuesta no se repite. Y a los diez
-    minutos tampoco, aunque el atraso haya crecido -- la huella no lleva los
-    minutos, justamente para eso.
+    Antes del 29/10 la segunda pasada no repetia la propuesta; desde entonces
+    no hay ninguna que repetir, y el hecho se sigue diciendo en las dos.
     """
     _calendario(org_a)
     _orden(org_a, duracion=120)
 
-    A.asistir(org_a, A.PROGRAMACION, MARTES_9 + delta)
-    n1 = P.objects.filter(org=org_a, tipo_senal=tipo).count()
-    assert n1 == 1, f"no se creo la propuesta de {tipo}"
-
-    segunda = A.asistir(org_a, A.PROGRAMACION, MARTES_9 + delta + timedelta(minutes=10))
-    assert P.objects.filter(org=org_a, tipo_senal=tipo).count() == n1
-    assert any(r["resultado"] == A.REPETIDA
-               for r in segunda["recomendaciones"] if r["senal_origen"] == tipo)
+    for minutos in (0, 10):
+        salida = A.asistir(org_a, A.PROGRAMACION, MARTES_9 + delta + timedelta(minutes=minutos))
+        assert [r["resultado"] for r in salida["recomendaciones"]
+                if r["senal_origen"] == tipo] == [A.SOLO_SE_CUENTA]
+    assert not P.objects.filter(org=org_a, tipo_senal=tipo).exists()
 
 
 # ============================================== la ventana
@@ -298,15 +301,23 @@ def test_el_texto_describe_tiempo_y_no_conducta(org_a, actor):
     """
     _calendario(org_a)
     _orden(org_a, duracion=120)
-    A.asistir(org_a, A.PROGRAMACION, MARTES_9 + timedelta(hours=5))
+    _orden(org_a, duracion=600)
 
     prohibidas = ("culpa", "culpable", "incumpli", "negligen", "responsable de",
                   "no atendio", "no atendió", "abandono", "desidia", "sancion")
-    for p in P.objects.filter(org=org_a, tipo_senal__in=(
-            P.ORDEN_SLA_VENCIDO, P.ORDEN_SLA_POR_VENCER)):
-        texto = f"{p.accion_propuesta} {p.motivo} {p.impacto}".lower()
-        for mala in prohibidas:
-            assert mala not in texto, f"{mala!r} en: {texto[:120]}"
+    #  Desde el 29/10 no hay propuesta: el texto que se ve es el del analisis,
+    #  que el asistente sigue mostrando.
+    leidos = 0
+    for ahora in (MARTES_9 + timedelta(hours=5), MARTES_9 + timedelta(hours=1, minutes=45)):
+        for s in supervisor.detectar(org_a, ahora):
+            if s.tipo not in (P.ORDEN_SLA_VENCIDO, P.ORDEN_SLA_POR_VENCER):
+                continue
+            a = supervisor.analizar(s)
+            texto = f"{a['accion_propuesta']} {a['motivo']} {a['impacto']}".lower()
+            leidos += 1
+            for mala in prohibidas:
+                assert mala not in texto, f"{mala!r} en: {texto[:120]}"
+    assert leidos >= 2, "no se leyo el texto de las dos señales"
 
 
 # ============================================== A-1 / A-2 y no-ejecución
@@ -378,11 +389,62 @@ def test_sin_efectos_externos_ni_bypass_de_autonomia(org_a, actor):
     _calendario(org_a)
     _orden(org_a, duracion=120)
     A.asistir(org_a, A.PROGRAMACION, MARTES_9 + timedelta(hours=5))
-    for p in P.objects.filter(org=org_a, tipo_senal__in=(
-            P.ORDEN_SLA_VENCIDO, P.ORDEN_SLA_POR_VENCER)):
-        assert p.nivel_autonomia_requerido <= P.NIVEL_RECOMENDAR
-        assert p.estado == P.PROPUESTA
-        assert p.revisado_por_id is None
+    #  Desde el 29/10 ni siquiera una propuesta: se dice y nada mas.
+    assert not P.objects.filter(org=org_a, tipo_senal__in=(
+        P.ORDEN_SLA_VENCIDO, P.ORDEN_SLA_POR_VENCER)).exists()
+
+
+def _propuesta_de(org, tipo, estado):
+    import uuid
+
+    return P.objects.create(
+        org=org, tipo_senal=tipo, origen_tipo="orden_trabajo",
+        origen_id=str(uuid.uuid4()), estado=estado,
+        accion_propuesta="Revisar esta orden: su plazo operativo ya pasó",
+        motivo="m", prioridad=40, impacto="i",
+        evidencia=[{"fuente": "orden_trabajo", "id": "x", "dato": "orden",
+                    "observado_en": timezone.now().isoformat()}],
+        huella_condicion=f"h-{uuid.uuid4().hex[:8]}",
+        expira_en=timezone.now() + timedelta(days=7))
+
+
+@pytest.mark.django_db
+def test_el_ciclo_la_cuenta_y_no_la_propone(org_a, actor):
+    _calendario(org_a)
+    o = _orden(org_a, duracion=120)
+
+    resumen = supervisor._correr_ciclo(org_a, MARTES_9 + timedelta(hours=5))
+
+    assert resumen["por_tipo"].get(P.ORDEN_SLA_VENCIDO) == 1, "la señal se cuenta"
+    assert resumen["solo_se_cuentan"] == 1
+    assert [f["resultado"] for f in resumen["detalle"]
+            if f["origen_id"] == str(o.id) and f["tipo"] == P.ORDEN_SLA_VENCIDO
+            ] == ["solo_se_cuenta"]
+    assert not P.objects.filter(org=org_a, tipo_senal__in=supervisor.SOLO_SE_CUENTAN).exists()
+
+
+@pytest.mark.django_db
+def test_las_pendientes_de_antes_se_retiran_y_lo_decidido_queda(org_a, actor):
+    pendiente = _propuesta_de(org_a, P.ORDEN_SLA_VENCIDO, P.PROPUESTA)
+    por_vencer = _propuesta_de(org_a, P.ORDEN_SLA_POR_VENCER, P.PROPUESTA)
+    decidida = _propuesta_de(org_a, P.ORDEN_SLA_VENCIDO, P.ACEPTADA)
+    otra = _propuesta_de(org_a, P.CASO_ANTIGUO, P.PROPUESTA)
+
+    resumen = supervisor._correr_ciclo(org_a, MARTES_9)
+
+    assert resumen["retiradas_por_duplicar"] == 2
+    from common.models import Activity
+
+    for p in (pendiente, por_vencer):
+        p.refresh_from_db()
+        assert p.estado == P.CANCELADA
+        #  El porque queda en la auditoria, como en todo retiro.
+        a = Activity.objects.get(entity_id=p.pk, description=supervisor.DUPLICA_LA_ORDEN)
+        assert "ya esta en la cola" in a.metadata["motivo"]
+    decidida.refresh_from_db()
+    otra.refresh_from_db()
+    assert (decidida.estado, otra.estado) == (P.ACEPTADA, P.PROPUESTA), (
+        "lo que decidio una persona, y las alertas de otro tipo, no se tocan")
 
 
 @pytest.mark.django_db

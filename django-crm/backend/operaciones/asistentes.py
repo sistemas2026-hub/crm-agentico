@@ -115,6 +115,8 @@ SENALES = {
 DATOS_INSUFICIENTES = "DATOS_INSUFICIENTES"
 PROPUESTA = "propuesta"
 REPETIDA = "repetida"
+#: Se dice y no se propone (29/10/2026, `supervisor.SOLO_SE_CUENTAN`).
+SOLO_SE_CUENTA = "solo_se_cuenta"
 
 
 class ErrorAsistente(Exception):
@@ -514,7 +516,7 @@ def asistir(org, dominio: str, ahora=None, registrar: bool = True) -> dict:
 def _asistir(org, dominio, ahora, registrar) -> dict:
     tipos = set(SENALES[dominio])
     recomendaciones = []
-    conteo = {PROPUESTA: 0, REPETIDA: 0, DATOS_INSUFICIENTES: 0}
+    conteo = {PROPUESTA: 0, REPETIDA: 0, DATOS_INSUFICIENTES: 0, SOLO_SE_CUENTA: 0}
 
     for senal in supervisor.detectar(org, ahora):
         if senal.tipo not in tipos:
@@ -529,6 +531,14 @@ def _asistir(org, dominio, ahora, registrar) -> dict:
             conteo[DATOS_INSUFICIENTES] += 1
             recomendaciones.append(
                 _recomendacion(senal, None, ficha, DATOS_INSUFICIENTES, ahora=ahora))
+            continue
+
+        if senal.tipo in supervisor.SOLO_SE_CUENTAN:
+            #  29/10/2026: se dice, no se propone -- la orden ya esta en
+            #  Despacho (ver `supervisor.SOLO_SE_CUENTAN`).
+            conteo[SOLO_SE_CUENTA] += 1
+            recomendaciones.append(
+                _recomendacion(senal, analisis, ficha, SOLO_SE_CUENTA, ahora=ahora))
             continue
 
         if supervisor._ya_propuesta(org, senal):
@@ -565,6 +575,7 @@ def _asistir(org, dominio, ahora, registrar) -> dict:
             "recomendaciones": len(recomendaciones),
             "propuestas_creadas": conteo[PROPUESTA] if registrar else 0,
             "repetidas": conteo[REPETIDA],
+            "solo_se_cuentan": conteo[SOLO_SE_CUENTA],
             "datos_insuficientes": conteo[DATOS_INSUFICIENTES],
             "con_datos_faltantes": sum(
                 1 for r in recomendaciones if r["datos_faltantes"]),
