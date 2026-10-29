@@ -51,7 +51,18 @@ export const actions = {
       activo: form.get('activo') === 'on',
       plantilla: form.get('plantilla')?.toString() ?? '',
       //  En orden: el primero es {{1}}, el segundo {{2}}... Uno vacío no se manda.
-      datos: form.getAll('dato').map((d) => d.toString())
+      datos: form.getAll('dato').map((d) => d.toString()),
+      //  Modo prueba (29/10/2026): uno por línea o separados por coma. Solo
+      //  viaja si el formulario tiene el campo: un momento manual no lo tiene,
+      //  y sin el campo el motor conserva los que había.
+      ...(form.has('solo_a')
+        ? {
+            solo_a: (form.get('solo_a')?.toString() ?? '')
+              .split(/[\n,;]+/)
+              .map((n) => n.trim())
+              .filter(Boolean)
+          }
+        : {})
     };
     if (!evento) return fail(400, { error: 'Falta el momento.' });
     if (valores.datos.some((d) => !d)) {

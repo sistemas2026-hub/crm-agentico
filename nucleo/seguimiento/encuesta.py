@@ -11,6 +11,7 @@ ninguna. Esto la manda por el canal real.
 ENVIAR  (lo pide el CRM, un rato despues de cerrar el caso)
 ------
   1. apagada, canal apagado, sin chat o el numero dio de baja -> no se manda;
+     en modo prueba ('solo_a'), solo a esos numeros;
   2. la plantilla tiene que estar APROBADA y pedir los valores que se le dan;
   3. se RESERVA la fila antes de mandar: si el caso ya tenia una encuesta, no
      sale otra (guardar primero, entregar despues; una por caso);
@@ -59,6 +60,8 @@ def enviar(config, tenant: str, caso_id: str, *, responsable_id: str | None = No
     if not destino or destino.get("canal") != "whatsapp" or not destino.get("usuario_externo"):
         return {"enviada": False, "motivo": "sin_chat"}
     numero = destino["usuario_externo"]
+    if mensajes.fuera_de_prueba(m, numero):
+        return {"enviada": False, "motivo": "fuera_de_prueba"}
     if persistencia.esta_de_baja(tenant, numero, "whatsapp"):
         return {"enviada": False, "motivo": "de_baja"}
 

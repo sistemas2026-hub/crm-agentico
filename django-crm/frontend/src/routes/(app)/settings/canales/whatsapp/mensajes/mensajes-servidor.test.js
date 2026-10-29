@@ -48,6 +48,23 @@ describe('Mensajes automáticos', () => {
     expect(r.guardado).toBe('ticket_creado_cliente');
   });
 
+  it('los números de prueba viajan como lista, uno por línea o con coma', async () => {
+    guardarMensajeAutomatico.mockResolvedValue({});
+    await actions.guardar(evento({
+      evento: 'encuesta_cierre', plantilla: 'encuesta_satisfaccion', activo: 'on',
+      dato: ['cliente_nombre'], solo_a: '573001112233\n 573009998877 , \n'
+    }));
+    expect(guardarMensajeAutomatico.mock.calls[0][3].solo_a).toEqual(['573001112233', '573009998877']);
+  });
+
+  it('vaciar el campo de prueba lo manda vacío (abre a todos); sin el campo no se manda', async () => {
+    guardarMensajeAutomatico.mockResolvedValue({});
+    await actions.guardar(evento({ evento: 'encuesta_cierre', plantilla: 'x', dato: ['cliente_nombre'], solo_a: '' }));
+    expect(guardarMensajeAutomatico.mock.calls[0][3].solo_a).toEqual([]);
+    await actions.guardar(evento({ evento: 'seguimiento_ticket', plantilla: 'x', dato: ['cliente_nombre'] }));
+    expect('solo_a' in guardarMensajeAutomatico.mock.calls[1][3]).toBe(false);
+  });
+
   it('un lugar sin dato no se manda al motor', async () => {
     const r = /** @type {any} */ (await actions.guardar(evento({
       evento: 'ticket_creado_cliente', plantilla: 'ticket_creado', dato: ['cliente_nombre', '']

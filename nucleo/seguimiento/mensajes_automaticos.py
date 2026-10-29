@@ -14,6 +14,8 @@ solo dice: este evento, a este numero, con estos datos, por este motivo. Lo
 demas es comun y esta aca:
 
   1. apagado / canal apagado / sin numero          -> no sale
+     en MODO PRUEBA ('solo_a') y no es uno de esos numeros -> no sale, y no
+     reserva: cuando se abra a todos, ese motivo todavia puede salir
   2. al CLIENTE, si pidio no recibir avisos         -> no sale (Ley 1581)
   3. la plantilla tiene que estar APROBADA y pedir tantos valores como datos
      hay; un dato vacio cae a su respaldo, y sin respaldo no sale
@@ -52,6 +54,18 @@ def _limpio(valor) -> str:
     """Meta rechaza saltos de linea y tabuladores en un valor, y mas de cuatro
     espacios seguidos: se aplanan."""
     return " ".join(str(valor if valor is not None else "").split())
+
+
+def fuera_de_prueba(m, numero: str | None) -> bool:
+    """
+    True si el momento esta en MODO PRUEBA ('solo_a' con numeros) y este no es
+    uno de ellos (29/10/2026). Se compara solo por los digitos: el remitente
+    de WhatsApp llega sin '+'. Un destino que no es un numero (un BSUID) no
+    esta en la lista, y no sale: en prueba, ante la duda, a nadie.
+    """
+    if not getattr(m, "solo_a", None):
+        return False
+    return "".join(ch for ch in str(numero or "") if ch.isdigit()) not in m.solo_a
 
 
 def contexto_comun(config, contexto: dict | None) -> dict:
@@ -104,6 +118,8 @@ def enviar(config, tenant: str, evento: str, para: str | None, contexto: dict | 
     numero = _limpio(para)
     if not numero:
         return {"enviado": False, "motivo": "sin_numero"}
+    if fuera_de_prueba(m, numero):
+        return {"enviado": False, "motivo": "fuera_de_prueba"}
     if EVENTOS[evento]["destinatario"] == "cliente" and persistencia.esta_de_baja(tenant, numero, "whatsapp"):
         return {"enviado": False, "motivo": "de_baja"}
 

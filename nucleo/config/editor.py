@@ -1254,22 +1254,29 @@ def guardar_guias_tv(tenant: str, guias: list[dict]) -> TenantConfig:
 
 
 def _mutar_mensaje_automatico(doc: dict, evento: str, activo: bool, plantilla: str,
-                              datos: list[str]) -> None:
+                              datos: list[str], solo_a: list[str] | None = None) -> None:
     """
     Un momento de 'mensajes_automaticos' (28/10/2026): su plantilla, QUE dato
     va en cada {{n}} y si esta encendido. Que el evento y los datos existan lo
     valida el esquema (TenantConfig._mensajes_del_catalogo); que la plantilla
     este aprobada y pida tantos valores, la ruta contra Meta antes de llamar.
+
+    'solo_a' None = se conserva el que tenia (29/10/2026): el interruptor de
+    la pantalla enciende y apaga sin tocar los numeros de prueba, y apagar un
+    aviso en prueba no puede abrirlo a todos al volver a encenderlo.
     """
+    previo = (doc.get("mensajes_automaticos") or {}).get(evento) or {}
     doc.setdefault("mensajes_automaticos", {})[evento] = {
         "activo": bool(activo), "plantilla": (plantilla or "").strip(),
-        "datos": [str(d) for d in (datos or [])]}
+        "datos": [str(d) for d in (datos or [])],
+        "solo_a": list(previo.get("solo_a") or []) if solo_a is None
+        else [str(n) for n in solo_a]}
 
 
 def guardar_mensaje_automatico(tenant: str, evento: str, activo: bool, plantilla: str,
-                               datos: list[str]) -> TenantConfig:
+                               datos: list[str], solo_a: list[str] | None = None) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_mensaje_automatico(doc, evento, activo,
-                                                                 plantilla, datos))
+                                                                 plantilla, datos, solo_a))
 
 
 def _mutar_uso_de_plantilla(doc: dict, nombre: str, en_uso: bool) -> None:

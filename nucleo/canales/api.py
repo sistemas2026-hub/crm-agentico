@@ -6466,7 +6466,8 @@ def mensajes_automaticos_listar():
             "disparo": ev["disparo"], "campos": ev["campos"], "listo": clave in LISTOS,
             "sugerencia": sugerencia(clave),
             "config": {"activo": bool(m and m.activo), "plantilla": m.plantilla if m else "",
-                       "datos": list(m.datos) if m else []}})
+                       "datos": list(m.datos) if m else [],
+                       "solo_a": list(m.solo_a) if m else []}})
     return jsonify({
         "eventos": eventos,
         "campos": {k: {"etiqueta": e, "ejemplo": ej} for k, (e, ej) in CAMPOS.items()},
@@ -6493,6 +6494,10 @@ def mensajes_automaticos_guardar(evento):
     activo = bool(cuerpo.get("activo"))
     plantilla = (cuerpo.get("plantilla") or "").strip()
     datos = [str(d) for d in (cuerpo.get("datos") or [])]
+    # Los numeros de prueba (29/10/2026): si el pedido no los trae, se
+    # conservan -- el interruptor de la pantalla no los manda.
+    solo_a = ([str(n) for n in (cuerpo.get("solo_a") or [])]
+              if "solo_a" in cuerpo else None)
     if activo:
         try:
             config = _config_de(tenant)
@@ -6512,7 +6517,7 @@ def mensajes_automaticos_guardar(evento):
             return jsonify({"error": f"La plantilla pide {ficha.get('variables')} dato(s) y "
                                      f"elegiste {len(datos)}."}), 400
     try:
-        config = editor.guardar_mensaje_automatico(tenant, evento, activo, plantilla, datos)
+        config = editor.guardar_mensaje_automatico(tenant, evento, activo, plantilla, datos, solo_a)
     except editor.ErrorEdicion as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo guardar.")}), 400
     except Exception as e:
@@ -6520,7 +6525,7 @@ def mensajes_automaticos_guardar(evento):
     olvidar_config(tenant)
     m = config.mensajes_automaticos[evento]
     return jsonify({"evento": evento, "activo": m.activo, "plantilla": m.plantilla,
-                    "datos": list(m.datos)})
+                    "datos": list(m.datos), "solo_a": list(m.solo_a)})
 
 
 @app.put("/canales/plantillas/<nombre>/uso")

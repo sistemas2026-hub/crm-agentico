@@ -2199,6 +2199,29 @@ class MensajeAutomatico(Base):
     activo: bool = False
     plantilla: str = ""
     datos: list[str] = Field(default_factory=list)
+    # MODO PRUEBA (29/10/2026): mientras tenga algun numero, el aviso sale SOLO
+    # a esos numeros y a nadie mas -- encendido y todo. Vacio = a todos. Asi
+    # una empresa prueba un aviso nuevo con su propio telefono antes de
+    # abrirlo a sus clientes. Numero completo, con indicativo de pais
+    # (573001234567): es como llega el remitente de WhatsApp, y el motor no
+    # supone de que pais es una empresa.
+    solo_a: list[str] = Field(default_factory=list)
+
+    @field_validator("solo_a")
+    @classmethod
+    def _numeros_de_prueba(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for crudo in v or []:
+            n = re.sub(r"[\s\-().+]", "", str(crudo))
+            if not n:
+                continue
+            if not n.isdigit() or not 8 <= len(n) <= 15:
+                raise ValueError(
+                    f"'{crudo}' no es un numero de WhatsApp: escribilo completo, con el "
+                    f"indicativo del pais y sin letras (ej. 573001234567).")
+            if n not in out:
+                out.append(n)
+        return out
 
 
 class EncuestaWhatsApp(Base):

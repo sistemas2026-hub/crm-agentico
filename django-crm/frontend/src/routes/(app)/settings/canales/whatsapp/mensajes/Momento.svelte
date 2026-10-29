@@ -59,6 +59,12 @@
     Boolean(ficha) && !pausada && !desactivada && datos.length === lugares.length && datos.every(Boolean)
   );
   let encendido = $derived(Boolean(evento.config.activo));
+  //  Modo prueba (29/10/2026): con números, sale SOLO a esos. Lo decide el
+  //  motor; acá se muestra y se edita. Un momento manual no lo tiene: lo
+  //  manda una persona que ya eligió a quién.
+  let admitePrueba = $derived(evento.disparo !== 'manual');
+  let prueba = $derived(admitePrueba ? (evento.config.solo_a ?? []) : []);
+  let soloA = $state(untrack(() => (evento.config.solo_a ?? []).join('\n')));
   let mio = $derived(form?.evento === evento.clave || form?.guardado === evento.clave);
 </script>
 
@@ -83,7 +89,9 @@
         <input type="hidden" name="activo" value={encendido ? '0' : '1'} />
         <input type="hidden" name="plantilla" value={evento.config.plantilla} />
         {#each evento.config.datos as d, i (i)}<input type="hidden" name="dato" value={d} />{/each}
-        <span class="estado">{encendido ? 'Encendido' : 'Apagado'}</span>
+        <span class="estado">
+          {encendido ? (prueba.length ? 'Encendido · solo prueba' : 'Encendido') : 'Apagado'}
+        </span>
         <button
           type="submit"
           class="interruptor"
@@ -97,7 +105,9 @@
         </button>
       </form>
     {:else}
-      <Pill tone={encendido ? 'moss' : 'slate'} dot>{encendido ? 'Encendido' : 'Apagado'}</Pill>
+      <Pill tone={encendido ? (prueba.length ? 'clay' : 'moss') : 'slate'} dot>
+        {encendido ? (prueba.length ? 'Encendido · solo prueba' : 'Encendido') : 'Apagado'}
+      </Pill>
     {/if}
   </div>
 
@@ -177,6 +187,27 @@
       <div>
         <div class="v2-hint" style="margin:0 0 4px">Así le llega (con datos de ejemplo)</div>
         <div class="previa">{previa}</div>
+      </div>
+    {/if}
+
+    {#if admitePrueba}
+      <div class="v2-field" style="margin:0">
+        <label for={`s-${evento.clave}`}>Solo a estos números (modo prueba)</label>
+        <textarea
+          id={`s-${evento.clave}`}
+          name="solo_a"
+          class="v2-input"
+          rows="2"
+          style="max-width:320px"
+          placeholder="573001234567"
+          bind:value={soloA}
+          disabled={!canEdit}
+        ></textarea>
+        <p class="v2-hint" style="margin:0">
+          Con el indicativo del país, uno por línea. Mientras haya alguno, este mensaje le llega
+          <b>solo</b> a esos números, aunque esté encendido. Vacío: les llega a todos los
+          {evento.destinatario === 'tecnico' ? 'técnicos' : 'clientes'}.
+        </p>
       </div>
     {/if}
 

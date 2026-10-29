@@ -844,10 +844,14 @@ try:
         {"nombre": "ticket_creado", "estado": "APPROVED", "variables": 2},
         {"nombre": "pausada", "estado": "PAUSED", "variables": 1}]
 
-    def guardar(t, ev, activo, plantilla, datos):
+    solos: list = []
+
+    def guardar(t, ev, activo, plantilla, datos, solo_a=None):
         guardados.append((ev, activo, plantilla, datos))
+        solos.append(solo_a)
         return cfg_real.model_copy(update={"mensajes_automaticos": {
-            ev: MensajeAutomatico(activo=activo, plantilla=plantilla, datos=datos)}})
+            ev: MensajeAutomatico(activo=activo, plantilla=plantilla, datos=datos,
+                                  solo_a=solo_a or [])}})
     api.editor.guardar_mensaje_automatico = guardar
     api.olvidar_config = lambda t: None
 
@@ -858,7 +862,7 @@ try:
             "la pantalla recibe los 11 momentos del catalogo y los nombres de los datos", f"{r.status_code}")
     seg = next(e for e in d["eventos"] if e["clave"] == "seguimiento_ticket")
     revisar(seg["config"] == {"activo": True, "plantilla": "seguimiento_caso",
-                              "datos": ["cliente_nombre", "escrito"]},
+                              "datos": ["cliente_nombre", "escrito"], "solo_a": []},
             "con lo que la empresa ya configuro", f"{seg['config']}")
     revisar(seg["sugerencia"]["nombre"] == "seguimiento_caso"
             and seg["sugerencia"]["datos"] == ["cliente_nombre", "escrito"]
@@ -884,6 +888,14 @@ try:
             "apagado se guarda como borrador, sin consultar a Meta", f"{r.status_code}")
     r = cliente.put("/mensajes-automaticos/cumpleanos", json={"tenant": TENANT})
     revisar(r.status_code == 404, "un momento que no existe: 404")
+    r = cliente.put(url, json={"tenant": TENANT, "activo": False, "plantilla": "", "datos": [],
+                               "solo_a": ["573001112233"]})
+    revisar(r.status_code == 200 and solos[-1] == ["573001112233"]
+            and r.get_json()["solo_a"] == ["573001112233"],
+            "los numeros de prueba viajan cuando el pedido los trae", f"{solos[-1]} {r.get_json()}")
+    r = cliente.put(url, json={"tenant": TENANT, "activo": False, "plantilla": "", "datos": []})
+    revisar(solos[-1] is None, "sin 'solo_a' en el pedido (el interruptor): se conservan, no se borran",
+            f"{solos[-1]}")
 
     api.whatsapp.plantillas_aprobadas = lambda c, t: [
         {"nombre": "seguimiento_caso", "estado": "APPROVED", "variables": 2}]
@@ -1015,6 +1027,62 @@ for ev, s in cat.SUGERENCIAS.items():
             f"{ev}: se arma, y cada {{{{n}}}} tiene un dato que ese momento ofrece",
             f"{armo or (huecos, s['datos'])}")
 revisar(cat.sugerencia("no_existe") is None, "un momento desconocido no tiene sugerencia")
+
+
+# =============================================================================
+titulo("8. Modo prueba: un aviso encendido sale SOLO a los numeros de prueba")
+# =============================================================================
+#  En el motor: mientras 'solo_a' tenga numeros, a un cliente real no le llega
+#  nada. Y lo que no salio por estar en prueba no queda reservado: al abrirlo
+#  a todos, ese motivo todavia puede salir.
+from nucleo.config.schema import MensajeAutomatico as MA      # noqa: E402
+
+revisar(MA(solo_a=["+57 300 111 2233", "573001112233", " "]).solo_a == ["573001112233"],
+        "se guarda solo con digitos, sin repetir ni vacios")
+for malo in ("3001112", "57300abc2233", "5730011122334455"):
+    try:
+        MA(solo_a=[malo])
+        revisar(False, f"'{malo}' no es un numero valido y se rechaza")
+    except ValidationError:
+        revisar(True, f"'{malo}' no es un numero valido y se rechaza")
+
+cp = ConfigMens()
+cp.mensajes_automaticos["ticket_creado_cliente"].solo_a = ["573009998877"]
+a = Avisador()
+r = a.correr(cp, para="573001112233")
+revisar(r == {"enviado": False, "motivo": "fuera_de_prueba"} and not a.envios and not a.marcas,
+        "encendido en prueba: a un cliente que no esta en la lista no le llega", f"{r} {a.envios}")
+a = Avisador()
+r = a.correr(cp, para="+57 300 999 8877")
+revisar(r["enviado"] and a.envios and a.envios[0][0] == "+57 300 999 8877",
+        "al numero de prueba si le llega (se compara por los digitos)", f"{r} {a.envios}")
+a = Avisador(ya=True)
+r = a.correr(cp, para="573001112233")
+revisar(r["motivo"] == "fuera_de_prueba",
+        "fuera de prueba ni llega a reservar: el motivo queda libre para cuando se abra", f"{r}")
+a = Avisador()
+r = a.correr(ConfigMens(), para="573001112233")
+revisar(r["enviado"], "sin numeros de prueba sale a todos, como antes", f"{r}")
+
+ce8 = ConfigEnc()
+ce8.mensajes_automaticos["encuesta_cierre"].solo_a = ["573009998877"]
+e = Encuestador()
+r = e.correr(ce8)
+revisar(r == {"enviada": False, "motivo": "fuera_de_prueba"} and not e.envios and not e.reservas,
+        "la encuesta en prueba tampoco le llega a un cliente real (ni reserva)", f"{r}")
+ce8.mensajes_automaticos["encuesta_cierre"].solo_a = ["573001112233"]
+e = Encuestador()
+r = e.correr(ce8)
+revisar(r["enviada"], "y al numero de prueba si", f"{r}")
+
+doc8: dict = {"mensajes_automaticos": {"bienvenida": {
+    "activo": True, "plantilla": "b", "datos": [], "solo_a": ["573001112233"]}}}
+editor_real._mutar_mensaje_automatico(doc8, "bienvenida", False, "b", [])
+revisar(doc8["mensajes_automaticos"]["bienvenida"]["solo_a"] == ["573001112233"],
+        "apagar con el interruptor no borra los numeros de prueba", f"{doc8}")
+editor_real._mutar_mensaje_automatico(doc8, "bienvenida", True, "b", [], [])
+revisar(doc8["mensajes_automaticos"]["bienvenida"]["solo_a"] == [],
+        "guardar la lista vacia a proposito la abre a todos", f"{doc8}")
 
 
 print(f"\n{'=' * 76}\n  {'TODO OK' if not fallos else f'{len(fallos)} FALLAS'}\n{'=' * 76}")
