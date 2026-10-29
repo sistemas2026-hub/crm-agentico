@@ -467,7 +467,147 @@ invoque.
 
 ---
 
+## Verificaciones previas a la fase 1 — 29/10/2026
+
+### V1 ✅ El destino de la derivación SOBREVIVE al enmascarado
+
+El enmascarado de `tool_calls.parametros` tiene una excepción declarada el
+20/10/2026: **lo que sale de un enum no se enmascara**, y el ejemplo que da su
+propio comentario es *«nombres de area»*. Medido ejecutando el esquema real:
+
+```
+herramienta  derivar_a_area
+  area        INTACTO       'facturacion_cliente'   <- enum
+  confianza   INTACTO       'alta'                  <- enum
+  servicio    INTACTO       'internet'              <- enum
+  motivo      enmascarado   '...ubre'
+  cedula      enmascarado   '...6789'
+```
+
+**El parámetro se llama `area`, no `area_destino`** — ese nombre lo inventé yo
+al leer `areas_destino`, que es la lista del catálogo y no el argumento.
+
+Se expone **solo las claves que `_valores_cerrados()` declara exentas**, nunca
+el `jsonb` entero: así el destino viaja y el motivo y la cédula no. Y es
+fail-closed: si el esquema no se puede leer, no se exime a nadie.
+
+**Cuando no hay destino** —una derivación sin `area`, o una herramienta sin
+enum— no se inventa ninguno: el evento se proyecta como actividad genérica.
+
+### V2 ❌ El cursor `(creado_en, id)` PIERDE EVENTOS — demostrado
+
+No es una hipótesis. Reproducido contra PostgreSQL 16:
+
+```
+A) cursor (creado_en, id)                  insertados 2  entregados 1  PERDIDA
+B) cursor (tx, id) + frontera de snapshot  insertados 2  entregados 2  SIN PERDIDAS
+```
+
+**La causa**: `creado_en default now()` es el instante de **inicio de la
+transacción**, no el del commit. Una transacción que empieza a las 10:00:00 y
+commitea a las 10:00:05 inserta una fila con sello 10:00:00. Si el cliente ya
+avanzó su cursor a 10:00:03, esa fila queda **detrás** y no se entrega
+**nunca**. El `id` desempata sellos iguales; no corrige sellos anteriores.
+
+**La solución, verificada**: ordenar por identificador de transacción y no
+entregar nada que todavía pueda tener transacciones por delante.
+
+```sql
+-- columna nueva:  tx xid8 not null default pg_current_xact_id()
+where tx < pg_snapshot_xmin(pg_current_snapshot())   -- ya no hay nada en vuelo
+  and (tx, id) > (:cursor_tx, :cursor_id)
+order by tx, id
+```
+
+`xid8` es de 64 bits y **no da la vuelta**, a diferencia de `xid`. La condición
+del snapshot es la garantía: cuando se entrega hasta `tx = X`, ninguna
+transacción con `tx <= X` puede commitear después.
+
+**Consecuencia de alcance**: esto ya no es «un índice sobre `tool_calls`». Pide
+una **columna nueva**, y las filas anteriores no la tendrán. Es trabajo de fase
+1, no un ajuste.
+
+### V3 ⚠️ Un evento NO es un estado — hay que separar cuatro cosas
+
+Una llamada registrada hace diez segundos **no prueba** que el agente siga
+trabajando. `tool_calls` se escribe cuando la llamada **termina**, con su
+duración: no existe la fila «en vuelo». Ya está documentado en `api.py`, que
+por eso **no emite el estado `waiting_tool`**: *«una herramienta lenta y una
+recién terminada se ven igual»*.
+
+| Capa | Qué es | De dónde sale |
+|---|---|---|
+| **Evento** | algo que ocurrió | `tool_calls`, inmutable |
+| **Ejecución activa** | trabajo en curso | **hoy NO existe** |
+| **Estado proyectado** | qué se cree que hace | derivado, con caducidad |
+| **Ambiental** | relleno visual | nada |
+
+**Regla**: un evento produce una animación **breve y acotada por su
+`duracion_ms`**, no un estado permanente. Pasado ese tiempo el personaje vuelve
+a reposo. **No se afirma que sigue trabajando.** Y cuando el sistema no sabe, la
+pantalla lo dice — igual que `offline` no se emite hoy porque *«confundir sin
+datos con caído hace que la pantalla avise de una avería que no existe»*.
+
+### V4 ✅ La derivación se representa como EXPEDIENTE, no como caminata
+
+Decidido el 29/10/2026. Un paquete digital viaja al departamento destino; el
+personaje no abandona su escritorio. La transferencia sigue siendo real y
+verificable: la respalda el evento con su `area`.
+
+Caminar se reserva para lo que de verdad implica moverse.
+
+### V5 ⚠️ El parámetro `tenant` no es una autorización
+
+Medido: el motor hace `request.args.get("tenant")` y con eso llama a
+`_config_de(tenant)`, **sin comprobar que el llamante corresponda a esa
+empresa**. Lo único que lo protege es `X-Servicio-Token`, que es **de la
+instalación, no de la empresa**.
+
+El modelo de confianza real es: *el frontend resuelve la empresa desde la sesión
+(probado) y el motor confía en el token de servicio*. Funciona mientras el
+frontend sea el único llamante.
+
+**Para el endpoint nuevo**: el `tenant` **no viaja desde el navegador**; lo pone
+el proxy del servidor desde `tenantDeLaSesion`, igual que hoy. **Queda como
+riesgo anotado** que el token no distingue empresas — cerrarlo exige que el
+motor conozca sesiones del CRM, que es otro objetivo.
+
+### V6 🚫 BLOQUEANTE · `CREATE INDEX CONCURRENTLY` no es viable hoy
+
+```
+el ledger envuelve cada migracion en   with con.transaction()  (migrar_asistente.py:589)
+CONCURRENTLY dentro de una transaccion  ->  PostgreSQL lo RECHAZA
+veces que se uso CONCURRENTLY en el repo ->  0
+politica de retencion de tool_calls      ->  NO EXISTE (el PRD lo registra)
+tamaño de tool_calls en produccion       ->  NO MEDIDO (no se toca produccion)
+```
+
+Un índice normal **bloquea escrituras** mientras se construye, y la tabla crece
+sin purga desde agosto de 2026. **No se puede estimar el impacto sin conocer su
+tamaño, y no se mide desde acá.**
+
+Salidas, en orden de preferencia: (a) que alguien con acceso mida
+`pg_total_relation_size('asistente.tool_calls')` y el conteo de filas; (b)
+permitir al ledger migraciones fuera de transacción, declarándolo — es cambio
+de infraestructura; (c) crear el índice a mano, que **§8 prohíbe**.
+
+### V7 ⚠️ `api.py` y `db.py` están muy transitados
+
+```
+commits sobre ellos en 7 dias                        8
+ramas con cambios NO integrados sobre ellos:
+   origin/campo/al-dia              5 commit(s)
+   origin/feat/campo-diseno-stitch  2 commit(s)
+```
+
+Son los dos monolitos de §2 (9.091 y 4.625 líneas). **No se integra ni se pisa
+trabajo ajeno**: antes de tocarlos hay que volver a medir y, si esas ramas
+siguen vivas, coordinar.
+
+---
+
 ## Modelo de eventos
+
 
 **El sustrato ya existe.** `asistente.tool_calls` tiene lo necesario:
 
