@@ -120,3 +120,52 @@ describe('lo que el navegador puede pedir', () => {
     expect(tenantPedido()).toBe('isp-norte');
   });
 });
+
+describe('intentos deliberados de pedir la empresa de otro', () => {
+  // La API debe rechazar CUALQUIER combinación donde la identidad autorizada y
+  // la organización solicitada no coincidan. No alcanza con que el proxy use
+  // el tenant de la sesión: hay que probar que el del cliente no se cuela por
+  // ninguna vía, y que probarlo con una sola forma no basta.
+  const ATAQUES = [
+    ['?tenant=isp-sur', 'el slug de la otra empresa, tal cual'],
+    ['?tenant=isp-sur&tenant=isp-norte', 'el parámetro repetido'],
+    ['?TENANT=isp-sur', 'en mayúsculas, por si el servidor normaliza'],
+    ['?tenant=isp-sur%00', 'con un byte nulo pegado'],
+    ['?tenant=../isp-sur', 'con un salto de ruta'],
+    ['?desde=1.00000000-0000-0000-0000-000000000000&tenant=isp-sur',
+     'escondido detrás de un cursor válido']
+  ];
+
+  for (const [query, como] of ATAQUES) {
+    it(`ignora ${como}`, async () => {
+      const url = new URL(`http://crm/api/eventos${query}`);
+      await GET({ url, locals: sesion('org-aaa'), fetch: motorFetch });
+      // Lo que importa no es que falle: es QUÉ empresa se le pidió al motor.
+      expect(tenantPedido()).toBe('isp-norte');
+      motorFetch.mockClear();
+    });
+  }
+
+  it('el cursor del cliente SÍ viaja, y es inofensivo', async () => {
+    // El cursor no elige empresa: filtra hacia adelante DENTRO de la empresa
+    // ya resuelta. Uno inventado devuelve menos eventos, nunca los de otra.
+    const url = new URL('http://crm/api/eventos?desde=99.00000000-0000-0000-0000-000000000000');
+    await GET({ url, locals: sesion('org-bbb'), fetch: motorFetch });
+    const pedido = new URL(motorFetch.mock.calls[0][0]);
+    expect(pedido.searchParams.get('tenant')).toBe('isp-sur');
+    expect(pedido.searchParams.get('desde')).toBe('99.00000000-0000-0000-0000-000000000000');
+  });
+
+  it('dos sesiones seguidas NO se contaminan entre sí', async () => {
+    // El caso que un mock perezoso dejaría pasar: que el tenant quede cacheado
+    // entre peticiones y la segunda sesión herede el de la primera.
+    const u = new URL('http://crm/api/eventos');
+    await GET({ url: u, locals: sesion('org-aaa'), fetch: motorFetch });
+    const primera = tenantPedido();
+    motorFetch.mockClear();
+    await GET({ url: u, locals: sesion('org-bbb'), fetch: motorFetch });
+    const segunda = tenantPedido();
+    expect(primera).toBe('isp-norte');
+    expect(segunda).toBe('isp-sur');
+  });
+});

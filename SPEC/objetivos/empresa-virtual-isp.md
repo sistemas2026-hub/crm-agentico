@@ -715,6 +715,100 @@ segunda no borra una sola línea—. El riesgo de conflicto es bajo, pero existe
 
 ---
 
+## E2 · Contrato de instrucciones visuales — 29/10/2026
+
+La capa que convierte eventos del motor en algo que una escena puede dibujar.
+**No sabe qué es PixiJS**, ni un sprite, ni un píxel: por eso se puede cambiar
+el motor gráfico sin tocarla.
+
+### El contrato
+
+```js
+{
+  id:           "<uuid del evento>",      // identidad, rastreable
+  procedencia:  "evento:<uuid>",          // o 'ambiente'
+  agente:       "soporte_tecnico_cliente",
+  tipo:         "consulta" | "accion" | "falla" | "expediente" | "escalada",
+  en:           "2026-10-29T17:00:00Z",   // cuando PASO
+  duracion_ms:  900,                      // cuanto se muestra
+  caduca_en:    1730221200900,            // y cuando deja de mostrarse
+  etiqueta:     "consultar_olt",          // del catalogo, nunca del cliente
+  destino:      "facturacion_cliente"     // solo en 'expediente'
+}
+```
+
+Y el reposo, que **no es una instrucción operativa**:
+
+```js
+{ agente: "ventas", tipo: "reposo", etiqueta: null, procedencia: "ambiente" }
+```
+
+### Las reglas que lo gobiernan
+
+**Una llamada terminada no prueba que el agente siga trabajando.**
+`tool_calls` se escribe cuando la llamada **termina**: no existe la fila «en
+vuelo», y por eso el motor ya se niega a emitir `waiting_tool`. Un evento
+produce una animación **breve y acotada** que cuenta *algo que pasó*, nunca un
+estado que afirme *algo que sigue pasando*.
+
+**Todo caduca.** `caduca_en` es obligatorio y el techo son 2.500 ms. Una
+herramienta que tardó 40 s **no** deja al personaje 40 s moviéndose: la
+animación cuenta QUE pasó, no cuánto duró.
+
+**Lo desconocido no se dibuja.** Un tipo que esta versión no conoce, un agente
+que no es instancia ejecutable, un área que la empresa no configuró: nada de
+eso produce instrucción. Se cuentan en `descartados` para que la pantalla
+pueda decirlo. *Pintar algo genérico ante lo desconocido es cómo una pantalla
+empieza a afirmar cosas que nadie midió.*
+
+**Los duplicados se descartan, no se animan dos veces.** El flujo puede
+entregar el mismo evento repetido —es el precio de no perder ninguno en la
+transición foto→cursor— y animarlo dos veces contaría una actividad que
+ocurrió una.
+
+**La derivación es un expediente, no una caminata.** El personaje no abandona
+su escritorio; lo que viaja es el paquete, con el `area` real del evento.
+
+**Los departamentos y los agentes entran por parámetro**, nunca fijos en el
+código: otra empresa tendrá otras áreas y otros agentes. Probado con una
+empresa inventada cuyo departamento es `cobranzas`.
+
+### Resultados — 22 pruebas
+
+```
+A9 · procedencia verificable         toda instruccion lleva evento:<uuid>
+     sin id -> no se proyecta        y el reposo lleva 'ambiente'
+duplicados y fuera de orden          el mismo evento 2 veces -> 1 instruccion
+identidad del agente                 'soporte' (capacidad) NO se dibuja
+derivacion                           area valida -> expediente; invalida -> nada
+pasado vs activo                     todo caduca; 40 s -> 2,5 s como maximo
+tipos desconocidos                   no se dibujan, y se cuentan
+datos sensibles                      ni 'motivo' ni 'cedula' en ninguna etiqueta
+independencia del motor grafico      sin sprite/pixi/canvas/x/y en la salida
+```
+
+**Y las cuatro garantías críticas mueren al mutarlas:**
+
+```
+quitar la caducidad            -> 1 falla
+quitar la lista de agentes     -> 3 fallas
+aceptar areas invalidas        -> 1 falla
+no descartar duplicados        -> 1 falla
+```
+
+### Lo que E2 NO resuelve, y hay que decirlo
+
+- **No hay ejecuciones activas.** El backend no las registra: `tool_calls` solo
+  tiene llamadas terminadas. Mientras eso no cambie, la oficina puede mostrar
+  lo que *pasó*, no lo que *está pasando*.
+- **La ubicación no está en el contrato.** `agente` y `destino` son nombres,
+  no coordenadas: dónde se dibuja cada uno lo decide la escena, con la
+  configuración de departamentos.
+- **El reposo no distingue «sin trabajo» de «sin datos».** Hoy son lo mismo
+  visualmente; separarlos exige que el motor diga cuándo no sabe.
+
+---
+
 ## Modelo de eventos
 
 
