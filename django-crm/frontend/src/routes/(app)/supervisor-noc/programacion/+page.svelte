@@ -10,12 +10,15 @@
   import { goto } from '$app/navigation';
   import FaltantesDelDia from '$lib/supervisor/FaltantesDelDia.svelte';
   import MaterialDeLaCuadrilla from '$lib/supervisor/MaterialDeLaCuadrilla.svelte';
+  import NovedadesDeLaCuadrilla from '$lib/supervisor/NovedadesDeLaCuadrilla.svelte';
+  import SeguimientoDeCuadrillas from '$lib/supervisor/SeguimientoDeCuadrillas.svelte';
   import OrdenDelDia from '$lib/supervisor/OrdenDelDia.svelte';
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import {
     lineaDePersona,
     quienLaAsigno,
     textoDeLaSiguiente,
+    textoDelDiaDeLaCuadrilla,
     textoDePrioridad,
     textoSinBajar
   } from '$lib/supervisor/dia-publicado.js';
@@ -74,6 +77,15 @@
           <p class="snoc-body">Esta pantalla es para quien gestiona el trabajo de campo.</p>
         </section>
       {:else}
+        <!-- ============ EL SEGUIMIENTO DE LAS CUADRILLAS (30/10/2026) ============
+             Arriba de todo: en qué está cada una, hace cuánto, y su log del día. -->
+        {#if publicado?.cuadrillas?.length}
+          <section class="snoc-panel" style="gap:var(--snoc-sm);">
+            <span class="snoc-label">Seguimiento de las cuadrillas</span>
+            <SeguimientoDeCuadrillas cuadrillas={publicado.cuadrillas} />
+          </section>
+        {/if}
+
         <section class="snoc-panel" style="gap:var(--snoc-sm);">
           <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
             <label class="snoc-campo-grupo">
@@ -180,6 +192,13 @@
                     {#if c.apoyo}<span style="padding:0 8px; border-radius:999px; border:1px dashed var(--snoc-outline-variant); color:var(--snoc-secondary); font-size:12px; line-height:20px; font-weight:600;">Apoyo: {c.apoyo}</span>{/if}
                     {#each c.zonas as z (z)}<span class="snoc-body-sm snoc-secundario">{z}</span>{/each}
                   </div>
+                  <!-- EL DÍA EN UNA LÍNEA (30/10/2026): a qué hora salió, cuántas
+                       lleva y en cuál está. -->
+                  {#if c.resumen_del_dia}
+                    <span class="snoc-body-sm snoc-secundario">{textoDelDiaDeLaCuadrilla(c.resumen_del_dia)}</span>
+                  {/if}
+                  <!-- LO QUE AVISÓ LA CUADRILLA (30/10/2026): «se pinchó la llanta». -->
+                  <NovedadesDeLaCuadrilla novedades={c.novedades ?? []} />
                   <!-- POR PERSONA: lo que la app de cada uno debería tener. La
                        tarjeta cuenta las de toda la cuadrilla; la app, las de la
                        cuenta con que se entró (28/10/2026). -->

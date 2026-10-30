@@ -109,6 +109,72 @@ export function textoDeLaSiguiente(ordenes) {
 }
 
 /**
+ * Los tiempos de una orden (30/10/2026, «¿cuánto han demorado?»): «28 min en
+ * camino · 40 min en sitio», o «en sitio hace 35 min» si sigue ahí. Vacío si
+ * todavía no salió. Lo calcula el servidor (`campo/tiempos_del_dia.py`).
+ *
+ * @param {{ traslado_min?: number | null, en_sitio_min?: number | null, en_sitio_hace_min?: number | null } | null | undefined} t
+ */
+export function textoDeTiempos(t) {
+  if (!t) return '';
+  const partes = [];
+  if (t.traslado_min != null) partes.push(`${t.traslado_min} min en camino`);
+  if (t.en_sitio_min != null) partes.push(`${t.en_sitio_min} min en sitio`);
+  else if (t.en_sitio_hace_min != null) partes.push(`en sitio hace ${t.en_sitio_hace_min} min`);
+  return partes.join(' · ');
+}
+
+/**
+ * El día de una cuadrilla en una línea (30/10/2026): «Salió 07:42 · 3 de 6
+ * hechas · en sitio en OT #12 desde 09:10», o «Todavía no sale · 0 de 6».
+ *
+ * @param {{ salio?: string | null, hechas: number, total: number, en_curso?: { numero: number, estado: string, desde?: string | null } | null } | null | undefined} r
+ */
+export function textoDelDiaDeLaCuadrilla(r) {
+  if (!r) return '';
+  const partes = [r.salio ? `Salió ${r.salio}` : 'Todavía no sale', `${r.hechas} de ${r.total} hechas`];
+  if (r.en_curso) {
+    const donde = r.en_curso.estado === 'en_sitio' ? 'en sitio en' : 'en camino a';
+    partes.push(`${donde} OT #${r.en_curso.numero}${r.en_curso.desde ? ` desde ${r.en_curso.desde}` : ''}`);
+  }
+  return partes.join(' · ');
+}
+
+/**
+ * La regla de los 30 minutos de una orden, como la calcula el servidor
+ * (`services/salud_seguimiento.py`): «Sin reporte hace 38 min» si venció, o
+ * por qué no corre. Vacío si está al día o no aplica.
+ *
+ * @param {{ tipo: string, minutos_desde_la_referencia?: number | null } | null | undefined} s
+ */
+export function textoDeSeguimiento(s) {
+  if (!s) return '';
+  if (s.tipo === 'vencido') return `Sin reporte hace ${s.minutos_desde_la_referencia ?? '?'} min`;
+  if (s.tipo === 'pausado_noc') return 'Pausado: espera al NOC';
+  if (s.tipo === 'pausado_novedad') return 'Pausado por la novedad de la cuadrilla';
+  return '';
+}
+
+/**
+ * Cuándo fue una novedad de la cuadrilla (30/10/2026, novedad-de-cuadrilla.md):
+ * «desde las 10:12 · hasta las 10:42», «desde las 10:12 · el resto del día», y
+ * si ya terminó, «de 10:12 a 10:40» (lo que llegue antes: «Ya seguí» o su
+ * hora). Las horas vienen en la de la empresa (`campo/novedades.py::a_json`).
+ *
+ * @param {{ avisada_en: string, hasta?: string | null, resuelta_en?: string | null, vigente?: boolean }} n
+ */
+export function textoDeNovedad(n) {
+  /** @param {string | null | undefined} iso */
+  const hm = (iso) => (iso ?? '').slice(11, 16);
+  const desde = hm(n.avisada_en);
+  if (n.vigente) {
+    return n.hasta ? `desde las ${desde} · hasta las ${hm(n.hasta)}` : `desde las ${desde} · el resto del día`;
+  }
+  const fin = n.resuelta_en && (!n.hasta || n.resuelta_en < n.hasta) ? n.resuelta_en : n.hasta;
+  return fin ? `de ${desde} a ${hm(fin)}` : `desde las ${desde}`;
+}
+
+/**
  * Cuándo vence el compromiso de la orden (29/10/2026), contra el día que se
  * mira: «Vence hoy», «Vence mañana», «Vence el 31/10», «Venció el 28/10». Sin
  * fecha, «Sin vencimiento»: no se inventa.

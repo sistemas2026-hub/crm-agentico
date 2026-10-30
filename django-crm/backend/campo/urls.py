@@ -14,6 +14,7 @@ from campo import (
     material_del_dia_views,
     materiales_views,
     niveles_views,
+    novedades_views,
     pedidos_views,
     plantillas_views,
     recepcion_views,
@@ -25,6 +26,10 @@ app_name = "campo"
 urlpatterns = [
     path("bootstrap/", views.BootstrapView.as_view(), name="bootstrap"),
     path("mi-dia/", views.MiDiaView.as_view(), name="mi_dia"),
+    #  La novedad de la cuadrilla (30/10/2026): «se pincho la llanta».
+    path("novedades/", novedades_views.NovedadesView.as_view(), name="novedades"),
+    path("novedades/<uid:pk>/resolver/", novedades_views.ResolverNovedadView.as_view(),
+         name="novedad_resolver"),
     path("trabajos/", views.TrabajosListView.as_view(), name="trabajos_list"),
     # Materiales: la custodia del tecnico y lo que gasta en la calle.
     path("kit/", materiales_views.KitView.as_view(), name="kit"),

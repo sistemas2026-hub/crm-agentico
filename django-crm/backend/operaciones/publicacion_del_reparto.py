@@ -189,8 +189,12 @@ def propuesta(org, hoy, ahora) -> dict:
     )
     from campo.jornada_automatica import ausentes_del_dia
     from campo.models import OrdenTrabajo
+    from campo.novedades import fuera_por_novedad
 
-    ausentes = ausentes_del_dia(org, hoy)
+    #  Y LA NOVEDAD DEL RESTO DEL DIA (30/10/2026, novedad-de-cuadrilla.md):
+    #  la cuadrilla que avisa «se pincho la llanta, el resto del dia» cuenta
+    #  como fuera hoy. Su jornada no recibe y lo suyo SIN EMPEZAR pasa a otra.
+    ausentes = ausentes_del_dia(org, hoy) | fuera_por_novedad(org, hoy, ahora)
     jornadas, receptores, no_reciben = [], {}, []
     sin_nadie = con_ausentes = 0
     for j in (JornadaDeCuadrilla.objects.filter(org=org, fecha=hoy)

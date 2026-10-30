@@ -254,6 +254,20 @@ def jornadas_y_ordenes(org, fecha) -> tuple:
     return jornadas, reciben, receptores, ordenes
 
 
+def jornada_de_la_persona(org, profile, fecha):
+    """La `JornadaDeCuadrilla` con que `profile` sale en `fecha`, o None. La
+    regla de quien RECIBE sus ordenes (`cuadrillas.destinatarios`); la usan
+    `mi-dia/` y la novedad de la cuadrilla (30/10/2026)."""
+    from campo.cuadrillas import JornadaDeCuadrilla, destinatarios
+
+    for j in (JornadaDeCuadrilla.objects.filter(org=org, fecha=fecha)
+              .select_related("cuadrilla", "cuadrilla__lider", "lider")
+              .prefetch_related("zonas").order_by("cuadrilla__nombre", "id")):
+        if profile.id in {r["profile"].id for r in destinatarios(j)["reciben"]}:
+            return j
+    return None
+
+
 def de_la_persona(org, profile, fecha) -> dict | None:
     """La jornada con que `profile` sale en `fecha`, como la muestra la app:
     su cuadrilla, su labor y sus zonas. None si ese dia no sale con ninguna.
@@ -264,23 +278,20 @@ def de_la_persona(org, profile, fecha) -> dict | None:
     (`cuadrillas.destinatarios`): la misma que decide a quien le llega el
     trabajo, para que el saludo no diga una cuadrilla y las ordenes otra.
     """
-    from campo.cuadrillas import JornadaDeCuadrilla, destinatarios
     from campo.labores import nombres_de_labor
 
-    for j in (JornadaDeCuadrilla.objects.filter(org=org, fecha=fecha)
-              .select_related("cuadrilla", "cuadrilla__lider", "lider")
-              .prefetch_related("zonas").order_by("cuadrilla__nombre", "id")):
-        if profile.id in {r["profile"].id for r in destinatarios(j)["reciben"]}:
-            nombres = nombres_de_labor(org)
-            return {"cuadrilla": j.cuadrilla.nombre,
-                    "labor": j.labor,
-                    "labor_nombre": nombres.get(j.labor, j.labor),
-                    #  La de apoyo (30/10/2026): «y apoyás Instalación».
-                    "apoyo": j.labor_de_apoyo,
-                    "apoyo_nombre": (nombres.get(j.labor_de_apoyo, j.labor_de_apoyo)
-                                     if j.labor_de_apoyo else ""),
-                    "zonas": sorted(z.nombre for z in j.zonas.all())}
-    return None
+    j = jornada_de_la_persona(org, profile, fecha)
+    if j is None:
+        return None
+    nombres = nombres_de_labor(org)
+    return {"cuadrilla": j.cuadrilla.nombre,
+            "labor": j.labor,
+            "labor_nombre": nombres.get(j.labor, j.labor),
+            #  La de apoyo (30/10/2026): «y apoyás Instalación».
+            "apoyo": j.labor_de_apoyo,
+            "apoyo_nombre": (nombres.get(j.labor_de_apoyo, j.labor_de_apoyo)
+                             if j.labor_de_apoyo else ""),
+            "zonas": sorted(z.nombre for z in j.zonas.all())}
 
 
 def por_jornada_de(jornadas, receptores, ordenes) -> tuple:
@@ -304,20 +315,44 @@ def del_dia(org, fecha) -> dict:
                      sin_registro, avisadas, esperan}}
     """
     from django.db.models import Q
+    from django.utils import timezone
 
+    from campo import material_del_dia as MD
+    from campo import novedades as N
     from campo import orden_del_dia as OD
     from campo import reparto as R
+    from campo import tiempos_del_dia as TD
     from campo.avisos import AvisoEnviado, DispositivoDeTecnico
     from campo.cuadrillas import configuracion_de_reparto
     from campo.labores import nombres_de_labor
     from campo.models import EventoTrabajo, OrdenTrabajo
     from campo.niveles import asuntos_de_las_ordenes
     from campo.services import avisos
+    from campo.services import salud_seguimiento as SS
     from common.models import Notification
 
     zona = R._zona_de(org)
     jornadas, reciben, receptores, ordenes = jornadas_y_ordenes(org, fecha)
     asunto_de = asuntos_de_las_ordenes(org, ordenes)
+
+    #  EL SEGUIMIENTO (30/10/2026): cuanto lleva cada orden y si dejo de
+    #  reportar. Lo que no se pudo calcular no tumba Programacion.
+    ahora = timezone.now()
+    try:
+        tiempos = TD.tiempos_de(ordenes, zona=zona, ahora=ahora)
+    except Exception:                                            # noqa: BLE001
+        logger.warning("Programacion: no se pudieron calcular los tiempos")
+        tiempos = {}
+    salud = {}
+    try:
+        config = SS.configuracion_de(org)
+        for o in ordenes:
+            if o.estado_operativo in SS.EN_EJECUCION:
+                s = SS.calcular(o, ahora=ahora, config=config)
+                salud[o.id] = {"tipo": s["tipo"], "etiqueta": s["etiqueta"],
+                               "minutos_desde_la_referencia": s.get("minutos_desde_la_referencia")}
+    except Exception:                                            # noqa: BLE001
+        logger.warning("Programacion: no se pudo leer la regla de los 30 minutos")
 
     #  QUIEN LA ASIGNO: el ultimo evento de asignacion de cada orden.
     ultimo = {}
@@ -414,6 +449,9 @@ def del_dia(org, fecha) -> dict:
             "vence_en": o.sla_vence_en.astimezone(zona).isoformat() if o.sla_vence_en else None,
             "orden_del_dia": (o.orden_del_dia if o.orden_del_dia_fecha == fecha else None),
             "siguiente": False,
+            #  30/10/2026: cuanto lleva, y la regla de los 30 minutos.
+            "tiempos": tiempos.get(o.id),
+            "seguimiento": salud.get(o.id),
         }
 
     def en_orden(lista):
@@ -446,6 +484,44 @@ def del_dia(org, fecha) -> dict:
     filas = [fila(o) for o in ordenes]
     por_que = _por_que_espera(org, fecha, esperan, labores) if esperan else {}
     personas = _personas_de(org, jornadas, reciben, por_jornada, zona)
+
+    #  POR CUADRILLA (30/10/2026): sus novedades del dia, el material cargado,
+    #  la primera orden sin reporte, el resumen y el log.
+    novedades_de = {}
+    for n in (N.NovedadDeCuadrilla.objects.filter(org=org, fecha=fecha)
+              .select_related("jornada__cuadrilla", "profile__user", "org")):
+        if n.jornada_id:
+            novedades_de.setdefault(n.jornada_id, []).append(n)
+    try:
+        actas = {j.id: MD.acta_de(fecha, j.id) for j in jornadas}
+        cargado = MD.cargadas(org, actas.values())
+    except Exception:                                            # noqa: BLE001
+        actas, cargado = {}, {}
+
+    def sin_reporte_de(lista):
+        o = next((o for o in lista if (salud.get(o.id) or {}).get("tipo") == SS.VENCIDO), None)
+        return ({"numero": o.numero, "minutos": salud[o.id]["minutos_desde_la_referencia"]}
+                if o is not None else None)
+
+    def seguimiento_de(j):
+        lista = por_jornada[j.id]
+        try:
+            sin_reporte = sin_reporte_de(lista)
+            return {
+                "resumen_del_dia": TD.resumen_de_la_cuadrilla(
+                    lista, tiempos, asuntos=asunto_de, ahora=ahora),
+                "novedades": [N.a_json(n, ahora) for n in novedades_de.get(j.id, [])],
+                "sin_reporte": sin_reporte,
+                "log": TD.log_del_dia(
+                    lista, fecha=fecha, zona=zona, tiempos=tiempos,
+                    novedades=novedades_de.get(j.id, []),
+                    material=("", cargado.get(actas.get(j.id))) if actas else None,
+                    sin_reporte=sin_reporte, ahora=ahora),
+            }
+        except Exception:                                        # noqa: BLE001
+            logger.warning("Programacion: no se pudo armar el seguimiento de una cuadrilla")
+            return {"resumen_del_dia": None, "novedades": [], "sin_reporte": None, "log": []}
+
     return {
         "fecha": fecha.isoformat(),
         "cuadrillas": [{
@@ -460,6 +536,7 @@ def del_dia(org, fecha) -> dict:
             "tope": j.cuadrilla.tope_diario or tope,
             "ordenes": filas_de(por_jornada[j.id]),
             "personas": personas[j.id],
+            **seguimiento_de(j),
         } for j in jornadas],
         "con_alguien_que_no_sale": [fila(o) for o in en_orden(sin_jornada)],
         "esperan": [{

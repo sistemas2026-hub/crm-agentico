@@ -1529,3 +1529,4 @@ from campo.niveles import (  # noqa: E402,F401
     NivelDeAsunto,
     NivelDeRespuesta,
 )
+from campo.novedades import NovedadDeCuadrilla  # noqa: E402,F401

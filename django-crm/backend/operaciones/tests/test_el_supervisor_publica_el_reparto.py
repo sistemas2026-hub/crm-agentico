@@ -376,6 +376,45 @@ def test_l2_la_cuadrilla_con_alguien_ausente_no_recibe_y_lo_suyo_se_libera(
     assert _de_quien(nueva) == [admin_profile.id]
 
 
+def test_l3_la_novedad_del_resto_del_dia_es_como_una_ausencia(
+        abierto, version, soledad, jornada, admin_profile, otro,
+        django_capture_on_commit_callbacks):
+    """30/10/2026, novedad-de-cuadrilla.md: «se pincho la llanta, el resto del
+    dia». Su jornada no recibe y lo suyo SIN EMPEZAR pasa a otra; lo empezado
+    se queda con quien lo tiene."""
+    from campo.novedades import RESTO_DEL_DIA, NovedadDeCuadrilla
+
+    j2 = _jornada(abierto, soledad, "Cuadrilla #2", otro)
+    NovedadDeCuadrilla.objects.create(
+        org=abierto, jornada=j2, profile=otro, tipo="llanta", afecta=RESTO_DEL_DIA,
+        fecha=MARTES, avisada_en=_a_las(9), clave="llanta-1")
+    sin_empezar = _orden(abierto, version, de=otro)
+    empezada = _orden(abierto, version, de=otro, estado=OrdenTrabajo.EN_SITIO)
+
+    r = _correr(abierto, _a_las(10), django_capture_on_commit_callbacks)
+
+    assert r["con_ausentes"] == 1
+    assert _de_quien(sin_empezar) == [admin_profile.id]
+    assert _de_quien(empezada) == [otro.id], "lo empezado no se mueve"
+
+
+def test_l4_la_novedad_corta_no_mueve_nada(
+        abierto, version, soledad, jornada, admin_profile, otro,
+        django_capture_on_commit_callbacks):
+    from campo.novedades import MEDIA_HORA, NovedadDeCuadrilla
+
+    j2 = _jornada(abierto, soledad, "Cuadrilla #2", otro)
+    NovedadDeCuadrilla.objects.create(
+        org=abierto, jornada=j2, profile=otro, tipo="llanta", afecta=MEDIA_HORA,
+        fecha=MARTES, avisada_en=_a_las(9, 50), clave="llanta-2")
+    suya = _orden(abierto, version, de=otro)
+
+    r = _correr(abierto, _a_las(10), django_capture_on_commit_callbacks)
+
+    assert r["con_ausentes"] == 0
+    assert _de_quien(suya) == [otro.id]
+
+
 # ---------------------------------------------------------------------------
 # T · el tope es la carga del dia
 # ---------------------------------------------------------------------------

@@ -17,6 +17,8 @@
     textoDelAviso,
     textoDelVencimiento,
     textoDePrioridad,
+    textoDeSeguimiento,
+    textoDeTiempos,
     tonoDelVencimiento
   } from './dia-publicado.js';
 
@@ -26,6 +28,9 @@
   let terminada = $derived(['completada_campo', 'cerrada'].includes(orden.estado));
   let tono = $derived(tonoDelVencimiento(orden.vence_en, dia));
   let aviso = $derived(textoDelAviso(orden.aviso));
+  //  El seguimiento (30/10/2026): cuánto lleva y si dejó de reportar.
+  let tiempos = $derived(textoDeTiempos(orden.tiempos));
+  let seguimiento = $derived(textoDeSeguimiento(orden.seguimiento));
 </script>
 
 <article
@@ -54,6 +59,12 @@
     <span class="od-cliente">{orden.cliente || 'Sin cliente'}</span>
     {#if orden.barrio}<span class="od-barrio">{orden.barrio}</span>{/if}
   </div>
+
+  {#if tiempos || seguimiento}
+    <p class="od-tiempos">
+      {tiempos}{#if seguimiento}<span class="od-seguimiento" class:od-seguimiento-vencido={orden.seguimiento?.tipo === 'vencido'}>{seguimiento}</span>{/if}
+    </p>
+  {/if}
 
   <footer class="od-pie">
     <span>
@@ -169,4 +180,16 @@
   .od-tecnicos { margin-left: 6px; }
   .od-aviso { margin-left: 6px; }
   .od-aviso-mal { color: var(--snoc-error); }
+
+  /* Los tiempos y la regla de los 30 minutos (30/10/2026). */
+  .od-tiempos {
+    margin: 0;
+    font-size: 12px;
+    color: var(--snoc-secondary);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+  .od-seguimiento { font-weight: 600; }
+  .od-seguimiento-vencido { color: var(--snoc-error); }
 </style>
