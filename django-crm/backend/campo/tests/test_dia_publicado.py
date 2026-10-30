@@ -565,7 +565,13 @@ def test_p3_del_cliente_solo_el_nombre_y_solo_en_lo_asignado(org_a, version, nor
     tickets asignados, salgan los nombres». Hasta entonces esto afirmaba que no
     salia NINGUN dato del cliente; ahora sale el NOMBRE, y solo en las ordenes
     de una cuadrilla. El telefono y la direccion, nunca: no hacen falta para
-    saber con cual empieza."""
+    saber con cual empieza.
+
+    CAMBIO DEL USUARIO, 30/10/2026: «donde dice todavia no sale deberia ir el
+    asunto del ticket y la direccion» (el cuadro del seguimiento de cada
+    cuadrilla). La DIRECCION sale, con el mismo alcance que el nombre: solo en
+    las ordenes de una cuadrilla, nunca en las que esperan. El telefono sigue
+    sin salir."""
     _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
     asignada = _orden(org_a, version, de=admin_profile)
     espera = _orden(org_a, version)
@@ -577,7 +583,9 @@ def test_p3_del_cliente_solo_el_nombre_y_solo_en_lo_asignado(org_a, version, nor
     assert _filas(d)[asignada.numero]["cliente"] == CLIENTE
     texto = str(d)
     assert texto.count(CLIENTE) == 1, "solo en la orden asignada, no en las que esperan"
-    assert "3113683499" not in texto and "Calle 38" not in texto
+    assert _filas(d)[asignada.numero]["direccion"] == "Calle 38 # 78-33"
+    assert texto.count("Calle 38") == 1, "la direccion, solo en la orden asignada"
+    assert "3113683499" not in texto, "el telefono, nunca"
 
 
 # ---------------------------------------------------------------------------
