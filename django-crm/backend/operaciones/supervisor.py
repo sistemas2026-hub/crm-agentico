@@ -2808,6 +2808,12 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         #  gasta primero en lo que si decide.
         ("medicion despues del arreglo",
          lambda: _verificar_los_arreglos(org, desatendido=desatendido)),
+        #  EL CIERRE DE LO REVISADO  --  30/10/2026, SPEC/objetivos/revision-
+        #  del-cierre.md: DESPUES de la medicion, que es una de las cosas que
+        #  la revision mira. Sin la tarea delegada solo dice cuantas cerraria
+        #  (la sombra).
+        ("cierre de lo revisado",
+         lambda: _cerrar_lo_revisado(org, ahora)),
     ):
         try:
             resumen.update(fase())
@@ -2864,6 +2870,13 @@ def _publicar_el_reparto(org, ahora) -> dict:
     la del armado y la de las ordenes."""
     from operaciones import publicacion_del_reparto
     return publicacion_del_reparto.publicar_el_reparto(org, ahora)
+
+
+def _cerrar_lo_revisado(org, ahora) -> dict:
+    """La fase de `campo.cierre_por_el_supervisor`, importada recien al correr,
+    como las otras."""
+    from campo import cierre_por_el_supervisor
+    return cierre_por_el_supervisor.cerrar_lo_revisado(org, ahora=ahora)
 
 
 def _cargar_el_material(org, ahora) -> dict:

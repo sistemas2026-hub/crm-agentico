@@ -1,13 +1,15 @@
 """Lo que el Supervisor hace solo con el seguimiento, por empresa (30/10/2026).
 
     GET  /api/campo/seguimiento/configuracion/   como esta
-    PUT  /api/campo/seguimiento/configuracion/   {"recordar_al_tecnico": bool,
-                                                  "supervisor_cierra_solo": bool}
+    PUT  /api/campo/seguimiento/configuracion/   {"recordar_al_tecnico": bool}
 
 Editable desde Programacion (CLAUDE.md §3.3: lo que varia por empresa se
-edita desde la interfaz). Solo quien gestiona. Encender el cierre solo NO
-abre ninguna compuerta del motor: el Supervisor sigue pasando por la puerta
-autonoma (`campo/cierre_por_el_supervisor.py`)."""
+edita desde la interfaz). Solo quien gestiona.
+
+Que el Supervisor CIERRE solo no se enciende aca: es una tarea que se le
+delega desde su chat, con el nivel 3 y el interruptor de emergencia, como las
+otras (auditoria de frontera, 30/10/2026: una casilla sin actor ni motivo no
+puede habilitar una accion con efecto en el ISP)."""
 
 from rest_framework import status
 from rest_framework.response import Response
@@ -16,7 +18,7 @@ from rest_framework.views import APIView
 from campo.cuadrillas_views import _exigir_gestion
 from campo.permissions import IsCampoAuthenticated
 
-CAMPOS = ("recordar_al_tecnico", "supervisor_cierra_solo")
+CAMPOS = ("recordar_al_tecnico",)
 
 
 def _como_esta(org) -> dict:

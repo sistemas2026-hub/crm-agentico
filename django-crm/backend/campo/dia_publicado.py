@@ -354,6 +354,8 @@ def del_dia(org, fecha) -> dict:
     except Exception:                                            # noqa: BLE001
         logger.warning("Programacion: no se pudo leer la regla de los 30 minutos")
 
+    pendientes = []
+
     def revision_de(o):
         """Lo que dice el Supervisor del cierre. No tumba Programacion."""
         from campo import revision_del_cierre as RC
@@ -361,7 +363,13 @@ def del_dia(org, fecha) -> dict:
         from campo.cierre_por_el_supervisor import EVENTO_BLOQUEADO
 
         try:
-            r = RC.revisar(o)
+            if not RC.aplica(o):
+                return None
+            #  Las que esperan la medicion, UNA vez por pantalla y solo si hay
+            #  algo que revisar.
+            if not pendientes:
+                pendientes.append(RC.pendientes_de_medir(org, ahora))
+            r = RC.revisar(o, pendientes=pendientes[0])
             if r is not None:
                 #  Si el Supervisor la quiso cerrar solo y el motor no lo
                 #  dejo: cuando, y que compuerta (30/10/2026).

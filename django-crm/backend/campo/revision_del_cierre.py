@@ -8,13 +8,15 @@ SPEC/objetivos/revision-del-cierre.md. El usuario: «al momento que el tecnico
 envia el reporte final, el supervisor debe revisar si quedo bien y indicar si
 lo cierra o no y por que».
 
-INDICA, NO DECIDE
------------------
-Aprobar una orden cierra el ticket del ISP por la puerta HUMANA del motor
-(`services/cierre_en_isp.py`). Si esto aprobara solo, una IA cerraria tickets
-por una puerta que no es la suya (CLAUDE.md §4: crecer en alcance, no en
-autonomia). Asi que esto devuelve un veredicto con sus motivos, y una persona
-lo confirma con un toque en Programacion.
+INDICA; Y SI SE LE DELEGA, CIERRA POR SU PUERTA
+-----------------------------------------------
+Esto devuelve un veredicto con sus motivos y no escribe nada. Lo usan dos:
+una persona, que lo confirma con un toque en Programacion (y entonces el ticket
+del ISP se cierra por la puerta HUMANA del motor); y el Supervisor, si se le
+delego la tarea (`campo/cierre_por_el_supervisor.py`), que cierra solo lo que
+esto marca «Se puede cerrar» por la puerta AUTONOMA, con sus compuertas. Un
+Supervisor por la puerta humana seria una IA usando una puerta que no es la
+suya (CLAUDE.md §4).
 
 EN CODIGO, PUNTO POR PUNTO
 --------------------------
@@ -23,7 +25,10 @@ Cada punto responde si (True), no (False) o no se sabe (None), con su texto:
     checklist     los datos y las fotos obligatorias (`verificar_checklist_completo`)
     reporte       que el tecnico mando el cierre de ESTA vuelta
     servicio      si el tecnico AFIRMO que el servicio quedo funcionando
-    medicion      la señal despues del arreglo, si el Supervisor ya la midio
+    medicion      la señal despues del arreglo: si el Supervisor ya la
+                  midio, en rango o no; si la orden la espera y todavia no
+                  llego, «no se sabe» (auditoria, 30/10/2026: la ausencia no
+                  puede contar como aprobacion)
     material      si registro lo que gasto, o confirmo que no gasto nada
 
 El veredicto: algun «no» -> NO SE CIERRA; algun «no se sabe» -> REVISAR; todo
@@ -58,13 +63,30 @@ def aplica(orden) -> bool:
                                             OrdenTrabajo.REQUIERE_REVISION))
 
 
-def revisar(orden) -> dict | None:
-    """El veredicto de UNA orden, o None si no hay nada que revisar."""
+def pendientes_de_medir(org, ahora=None) -> set | None:
+    """Los ids de las ordenes que esperan la medicion despues del arreglo
+    (`operaciones/verificacion_de_arreglos.candidatas`), o None si no se pudo
+    saber. None no es «ninguna»: quien cierra solo no cierra nada con None."""
+    from django.utils import timezone
+
+    from operaciones.verificacion_de_arreglos import candidatas
+
+    try:
+        return {str(orden_id) for _p, _c, orden_id in candidatas(org, ahora or timezone.now())}
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def revisar(orden, *, pendientes=None) -> dict | None:
+    """El veredicto de UNA orden, o None si no hay nada que revisar.
+    `pendientes`: los de `pendientes_de_medir`; sin ellos, una orden sin
+    medicion se lee como una que no la necesita."""
     if not aplica(orden):
         return None
     cierre = _cierre_de_esta_vuelta(orden)
     puntos = [p for p in (_checklist(orden), _reporte(cierre), _servicio(cierre),
-                          _medicion(orden), _material(orden, cierre)) if p is not None]
+                          _medicion(orden, pendientes), _material(orden, cierre))
+              if p is not None]
     if any(p["ok"] is False for p in puntos):
         veredicto = NO_CERRAR
     elif any(p["ok"] is None for p in puntos):
@@ -143,23 +165,27 @@ def _servicio(cierre):
     return _punto("servicio", None, "El reporte no dice si el servicio quedó funcionando.")
 
 
-def _medicion(orden):
+def _medicion(orden, pendientes=None):
     """La señal despues del arreglo (`operaciones/verificacion_de_arreglos.py`),
-    si el Supervisor ya la midio para ESTA orden. Sin medicion, no aplica."""
+    si el Supervisor ya la midio para ESTA orden. Si la espera y no llego,
+    «no se sabe». Si no la espera, no aplica."""
     from operaciones.models import PropuestaSupervisor
     from operaciones.verificacion_de_arreglos import FUENTE
+
+    esperando = _punto("medicion", None,
+                       "La señal después del arreglo todavía no se midió: el "
+                       "Supervisor mide una vez por hora.")
 
     propuesta = (PropuestaSupervisor.objects
                  .filter(org=orden.org,
                          evidencia__contains=[{"fuente": FUENTE, "orden": str(orden.id)}])
                  .order_by("-updated_at").first())
-    if propuesta is None:
-        return None
-    pieza = next((p for p in reversed(propuesta.evidencia or [])
-                  if isinstance(p, dict) and p.get("fuente") == FUENTE
-                  and p.get("orden") == str(orden.id)), None)
+    pieza = None if propuesta is None else next(
+        (p for p in reversed(propuesta.evidencia or [])
+         if isinstance(p, dict) and p.get("fuente") == FUENTE
+         and p.get("orden") == str(orden.id)), None)
     if pieza is None:
-        return None
+        return esperando if pendientes and str(orden.id) in pendientes else None
     rango = pieza.get("quedo_en_rango")
     if rango is True:
         return _punto("medicion", True, "La señal quedó en rango después del arreglo.")

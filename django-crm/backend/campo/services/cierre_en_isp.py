@@ -141,6 +141,13 @@ def _cerrar(orden, profile, ruta: str = "cerrar-ticket") -> dict:
     if _ya_cerrado(orden):
         return {"estado": "ya_cerrado", "detalle": f"ticket {ticket}"}
 
+    #  LA RUTA HUMANA EXIGE UNA PERSONA (auditoria de frontera, 30/10/2026,
+    #  H2). Sin perfil no se inventa un «Oficina de operaciones»: el Supervisor
+    #  tiene su ruta, la autonoma.
+    if ruta == "cerrar-ticket" and profile is None:
+        return {"estado": "no_cerrado",
+                "detalle": "sin una persona que valide no se pide por la ruta humana"}
+
     tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
     if not tenant:
         return {"estado": "no_cerrado",
