@@ -354,6 +354,16 @@ def del_dia(org, fecha) -> dict:
     except Exception:                                            # noqa: BLE001
         logger.warning("Programacion: no se pudo leer la regla de los 30 minutos")
 
+    def revision_de(o):
+        """Lo que dice el Supervisor del cierre. No tumba Programacion."""
+        from campo import revision_del_cierre as RC
+
+        try:
+            return RC.revisar(o)
+        except Exception:                                        # noqa: BLE001
+            logger.warning("Programacion: no se pudo revisar un cierre")
+            return None
+
     #  QUIEN LA ASIGNO: el ultimo evento de asignacion de cada orden.
     ultimo = {}
     for ev in (EventoTrabajo.objects
@@ -455,6 +465,12 @@ def del_dia(org, fecha) -> dict:
             #  30/10/2026: cuanto lleva, y la regla de los 30 minutos.
             "tiempos": tiempos.get(o.id),
             "seguimiento": salud.get(o.id),
+            #  30/10/2026 (`revision_del_cierre.py`): lo terminado que nadie
+            #  valido trae lo que dice el Supervisor. Indica, no decide.
+            "revision": revision_de(o),
+            #  La vuelta arma la clave de la decision: aprobar dos veces la
+            #  misma vuelta es una sola decision; otra vuelta, otra.
+            "vuelta": o.vuelta,
         }
 
     def en_orden(lista):
