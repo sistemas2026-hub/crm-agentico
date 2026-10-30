@@ -42,7 +42,7 @@ describe('hay más de un departamento, y no son el mismo con otro rótulo', () =
   });
 
   it('la sala de atención NO tiene mobiliario de centro de operaciones', () => {
-    const atencion = departamentoPorId('soporte_tecnico');
+    const atencion = departamentoPorId('atencion_cliente');
     const tipos = atencion.planta.mobiliario.map((m) => m.tipo);
     expect(tipos).not.toContain('armario');
     expect(tipos).not.toContain('panel_fibra');
@@ -134,11 +134,47 @@ describe('quién ocupa cada sala', () => {
     expect(otros).toHaveLength(1);
   });
 
-  it('no adivina sinónimos', () => {
-    // Aceptar «operaciones» como `operativo` serviría hoy y el día que una
-    // empresa tenga las dos cosas sentaría al agente equivocado en el puesto.
-    expect(agentesDe([{ nombre: 'x', area: 'operaciones' }],
-                     departamentoPorId('operativo'))).toEqual([]);
+  it('acepta las etiquetas que el departamento DECLARA', () => {
+    // `supervisor_noc` declara área «Operaciones» y el área configurada se
+    // llama `operativo`: los dos vocabularios no coinciden. Antes de declarar
+    // las etiquetas, esta sala salía VACÍA en producción.
+    expect(agentesDe([{ nombre: 'x', area: 'Operaciones' }],
+                     departamentoPorId('operativo'))).toHaveLength(1);
+  });
+
+  it('y NO adivina las que no declara', () => {
+    // Aceptar parecidos serviría hoy y el día que una empresa tenga las dos
+    // cosas sentaría al agente equivocado en el puesto, sin un error que lo
+    // explique. Lo que acepta se escribe; no se deduce.
+    for (const inventada of ['ops', 'operacion', 'red', 'noc']) {
+      expect(agentesDe([{ nombre: 'x', area: inventada }],
+                       departamentoPorId('operativo')), inventada).toEqual([]);
+    }
+  });
+
+  it('cada área real del tenant cae en algún departamento', () => {
+    // Las seis que los roles declaran hoy. Si una no cayera en ninguna sala,
+    // ese agente no se dibujaría en ninguna parte y nadie se enteraría.
+    const reales = ['Operaciones', 'Atención al Cliente', 'Soporte Técnico',
+                    'Facturación', 'Ventas', 'Administración'];
+    for (const area of reales) {
+      const encaja = DEPARTAMENTOS.some(
+        (d) => agentesDe([{ nombre: 'x', area }], d).length === 1
+      );
+      expect(encaja, `«${area}» no tiene sala`).toBe(true);
+    }
+  });
+
+  it('y ninguna cae en DOS departamentos a la vez', () => {
+    // El mismo agente en dos salas sería el mismo trabajo contado dos veces.
+    const reales = ['Operaciones', 'Atención al Cliente', 'Soporte Técnico',
+                    'Facturación', 'Ventas', 'Administración'];
+    for (const area of reales) {
+      const cuantas = DEPARTAMENTOS.filter(
+        (d) => agentesDe([{ nombre: 'x', area }], d).length === 1
+      ).length;
+      expect(cuantas, `«${area}» cae en ${cuantas} salas`).toBe(1);
+    }
   });
 
   it('no muta el inventario que recibe', () => {
@@ -172,14 +208,16 @@ describe('la planta lista para dibujar', () => {
     expect(typeof planta.cartel.gx).toBe('number');
   });
 
-  it('sin inventario, la sala se dibuja entera y vacía', () => {
-    const sola = plantaDe(departamentoPorId('soporte_tecnico'), []);
-    expect(sola.puestos).toHaveLength(4);
-    expect(sola.puestos.every((p) => p.agente === null)).toBe(true);
+  it('sin inventario, cada sala se dibuja entera y vacía', () => {
+    for (const d of DEPARTAMENTOS) {
+      const sola = plantaDe(d, []);
+      expect(sola.puestos, d.id).toHaveLength(d.planta.puestos.length);
+      expect(sola.puestos.every((p) => p.agente === null), d.id).toBe(true);
+    }
   });
 
   it('conserva mundo, pasillo y mobiliario del departamento', () => {
-    const d = departamentoPorId('soporte_tecnico');
+    const d = departamentoPorId('atencion_cliente');
     const p = plantaDe(d, inventario);
     expect(p.mundo).toEqual(d.planta.mundo);
     expect(p.pasillo).toEqual(d.planta.pasillo);

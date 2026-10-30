@@ -137,6 +137,8 @@ export interface Puesto {
   rotulo: Text;
   /** El punto de color del estado en la placa. */
   testigo: Graphics;
+  /** El rótulo del puesto. Vive en la capa de arriba, no en el puesto. */
+  placa: Container;
   /** El marco que aparece al seleccionar. */
   seleccion: Graphics;
   /** El paquete que sale del puesto cuando algo se despacha. */
@@ -997,6 +999,104 @@ function construirDucto(gy: number, desde: number, hasta: number): Mueble {
   return { nodo };
 }
 
+/**
+ * Un mostrador de atención: la pieza que una sala de recepción tiene y un
+ * centro de operaciones no.
+ *
+ * Es un volumen en L —tablero alto y encimera— porque un mostrador recto se lee
+ * como otro escritorio. Lo que lo distingue a esta escala es el peto: la cara
+ * que mira al visitante, más alta que la mesa de trabajo de detrás.
+ */
+function construirMostrador(gx: number, gy: number, largo: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+  //  El cuerpo, alto: es lo que separa a quien atiende de quien espera.
+  caja(g, gx, gy, 0, largo, 0.7, 1.05, PALETA.escritorioCanto);
+  //  La encimera, sobresaliendo hacia el visitante.
+  caja(g, gx - 0.08, gy - 0.12, 1.05, largo + 0.16, 0.95, 0.08, PALETA.escritorioTapa);
+  //  Una franja de luz en el frente: el detalle que lo vuelve un mostrador de
+  //  oficina y no una barra.
+  caja(g, gx + 0.1, gy + 0.72, 0.28, largo - 0.2, 0.04, 0.45, ACENTO_CLARO);
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/**
+ * Una mesa de reunión con sus sillas alrededor.
+ *
+ * La mesa es ovalada —dos elipses— porque una rectangular en isometría es
+ * indistinguible de un escritorio grande. Las sillas van sin respaldo: a esta
+ * escala el respaldo solo agrega ruido.
+ */
+function construirMesa(gx: number, gy: number, texturas: Texturas): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+
+  const sombra = new Sprite(texturas.sombra);
+  sombra.anchor.set(0.5);
+  const centro = aPantalla(gx, gy, 0);
+  sombra.position.set(centro.x, centro.y + 4);
+  sombra.width = 150;
+  sombra.height = 75;
+  sombra.alpha = 0.55;
+  nodo.addChild(sombra);
+
+  const g = new Graphics();
+  //  Las sillas primero: las de atrás quedan detrás de la mesa.
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const p = aPantalla(gx + Math.cos(a) * 1.25, gy + Math.sin(a) * 1.25, 0);
+    g.ellipse(p.x, p.y - 11, 8, 4).fill({ color: PALETA.sillaTela });
+    g.rect(p.x - 1.5, p.y - 11, 3, 11).fill({ color: PALETA.sillaBase });
+  }
+  //  El tablero y su canto.
+  const tapa = aPantalla(gx, gy, 0.74);
+  g.ellipse(tapa.x, tapa.y + 3, 44, 22).fill({ color: PALETA.escritorioCanto });
+  g.ellipse(tapa.x, tapa.y, 44, 22).fill({ color: PALETA.escritorioTapa });
+  //  La columna central.
+  const pie = aPantalla(gx, gy, 0);
+  g.moveTo(pie.x - 5, pie.y).lineTo(pie.x - 3, tapa.y)
+    .lineTo(pie.x + 3, tapa.y).lineTo(pie.x + 5, pie.y)
+    .fill({ color: PALETA.escritorioPata });
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/**
+ * Una estantería contra el muro lateral, con carpetas.
+ *
+ * Las carpetas son tiras verticales de alturas desiguales. La desigualdad es lo
+ * que importa: una fila regular se lee como una textura repetida, y una
+ * estantería real nunca lo está.
+ */
+function construirEstanteria(gy: number, largo: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(0.25, gy);
+  const g = new Graphics();
+
+  caja(g, 0.1, gy, 0, 0.5, largo, 2.4, PALETA.escritorioPata);
+  //  Cuatro baldas.
+  for (let i = 0; i < 4; i++) {
+    const z = 0.35 + i * 0.52;
+    panelMuroLateral(g, gy + 0.06, largo - 0.12, z, z + 0.06, PALETA.escritorioTapa);
+    //  Las carpetas, apoyadas sobre cada balda.
+    let y = gy + 0.14;
+    let k = i * 3;
+    while (y < gy + largo - 0.2) {
+      const ancho = 0.07 + ((k * 7) % 5) * 0.012;
+      const alto = 0.3 + ((k * 13) % 7) * 0.025;
+      const color = [PALETA.clayClaro, PALETA.textoTenue, ACENTO_CLARO,
+                     PALETA.mossClaro][k % 4];
+      panelMuroLateral(g, y, ancho, z + 0.06, z + 0.06 + alto, color, 0.55);
+      y += ancho + 0.015;
+      k++;
+    }
+  }
+  nodo.addChild(g);
+  return { nodo };
+}
+
 /* ════════════════════════════════════════════════════════════════════════════
    El puesto de trabajo
    ════════════════════════════════════════════════════════════════════════════ */
@@ -1220,7 +1320,12 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
   rotulo.y = 16;
   rotulo.visible = false;
 
-  const anchoPlaca = Math.max(titulo.width, subtitulo.width) + 26;
+  //  El margen es 36 y no 26 porque el caso peor es un título corto con un
+  //  rótulo de área largo —«Gestión» bajo «Administración»— y ahí el subtítulo
+  //  se salía de su propia placa. Se vio en una captura, no en una prueba: el
+  //  ancho se mide al crear el texto, y lo que falla es el margen, no la
+  //  medida. Diez píxeles cuestan nada y cubren el caso.
+  const anchoPlaca = Math.max(titulo.width, subtitulo.width) + 36;
   const fondoPlaca = new Graphics();
   fondoPlaca
     .roundRect(-anchoPlaca / 2, -titulo.height - 5, anchoPlaca, titulo.height + subtitulo.height + 11, 4)
@@ -1235,7 +1340,17 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
   placa.alpha = ocupado ? 1 : 0.72;
 
   placa.addChild(fondoPlaca, testigo, titulo, subtitulo, rotulo);
-  nodo.addChild(placa);
+  //  LA PLACA NO CUELGA DEL PUESTO: va a una capa propia, encima de todo.
+  //
+  //  Colgaba de él, y una luminaria de techo le pasaba por delante: la
+  //  luminaria está más cerca de la cámara que un escritorio del fondo, así
+  //  que se dibuja después, y su carcasa tapaba media placa. En la captura se
+  //  leía «ministración» y parecía que la placa era demasiado estrecha — no lo
+  //  era, tenía 18 px de margen a cada lado.
+  //
+  //  Un rótulo no compite por profundidad con el mobiliario: es información
+  //  sobre la sala, no un objeto dentro de ella. Quien monta el recinto lo
+  //  recoge y lo pone en la capa de arriba.
 
   /* El marco de selección. Un rombo en el suelo, no un recuadro: un recuadro
      recto sobre una escena isométrica se lee como parte de la interfaz, no de
@@ -1281,7 +1396,7 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
     ])
   );
 
-  return { def, nodo, ancla, halo, brillos, rotulo, testigo, seleccion, paquete };
+  return { def, nodo, placa, ancla, halo, brillos, rotulo, testigo, seleccion, paquete };
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -1307,7 +1422,10 @@ const TIPOS: Record<string, (m: Mueble2D, tx: Texturas) => Mueble> = {
   luminaria: (m, tx) => construirLuminaria(m.gx ?? 0, m.gy ?? 0, tx),
   planta: (m, tx) => construirPlanta(m.gx ?? 0, m.gy ?? 0, tx),
   banco: (m) => construirBanco(m.gx ?? 0, m.gy ?? 0),
-  dispensador: (m) => construirDispensador(m.gx ?? 0, m.gy ?? 0)
+  dispensador: (m) => construirDispensador(m.gx ?? 0, m.gy ?? 0),
+  mostrador: (m) => construirMostrador(m.gx ?? 0, m.gy ?? 0, m.largo ?? 2),
+  mesa: (m, tx) => construirMesa(m.gx ?? 0, m.gy ?? 0, tx),
+  estanteria: (m) => construirEstanteria(m.gy ?? 0, m.largo ?? 2)
 };
 
 /** Los tipos de mueble que una planta puede pedir. Para probarlo desde fuera. */
@@ -1360,9 +1478,17 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
     if (m.animar) animables.push(m.animar);
   }
 
+  //  La capa de rótulos, por encima de todo el mobiliario. Es lo que impide
+  //  que un objeto cercano tape el nombre de un puesto lejano.
+  const capaRotulos = new Container();
+  capaRotulos.zIndex = 5000;
+  capaRotulos.eventMode = 'none';
+  raiz.addChild(capaRotulos);
+
   const puestos = (planta.puestos || []).map((def) => {
     const p = construirPuesto(def, texturas);
     raiz.addChild(p.nodo);
+    capaRotulos.addChild(p.placa);
     return p;
   });
 

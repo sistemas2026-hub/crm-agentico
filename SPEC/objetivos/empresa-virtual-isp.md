@@ -1552,6 +1552,112 @@ Y la guarda de la escena **volvió a cazarme**: escribí «ISP» en un comentari
 - **No hay editor de plantas.** Mover un escritorio hoy es editar una fila en un
   archivo del repositorio, no una pantalla.
 
+---
+
+## Fase 5 — las seis salas, y el defecto que habrían tenido todas (30/10/2026)
+
+### Seis, no ocho, y por qué
+
+Los departamentos salen de las **áreas que los roles declaran de verdad** en la
+configuración del tenant, leídas del YAML y no de memoria:
+
+```
+Operaciones         1 rol    → NOC y Redes
+Atención al Cliente 2 roles  → Atención al Cliente
+Soporte Técnico     1 rol    → Soporte Técnico
+Facturación         2 roles  → Facturación y Cartera
+Ventas              1 rol    → Ventas
+Administración      2 roles  → Administración
+```
+
+Nueve roles, seis áreas, seis salas. **No son ocho**: ocho era mi estimación, y
+el dato dice seis. Hay una prueba que lo fija por los dos lados — cada área real
+cae en alguna sala, y ninguna cae en dos (el mismo agente en dos salas sería el
+mismo trabajo contado dos veces).
+
+### El defecto que ya estaba entregado
+
+`config.areas` declara `operativo`; el rol `supervisor_noc` declara área
+**`Operaciones`**. Los dos vocabularios no solo se escriben distinto: **tienen
+miembros distintos** — «Atención al Cliente» existe en los roles y no tiene
+entrada en `config.areas`, y `operativo.agentes` está vacío.
+
+Con el identificador y el rótulo como únicas etiquetas, **la sala del NOC salía
+vacía en producción**. Se vio leyendo el YAML del tenant, no deduciéndolo.
+
+El arreglo: cada departamento **declara** las etiquetas que acepta, como dato.
+Se escriben; no se adivinan. Y la prueba que decía «no adivina sinónimos» pasó a
+comprobar las dos mitades: acepta lo declarado, rechaza lo que no.
+
+### Tres tipos de mueble nuevos, y lo que distinguen
+
+```
+mostrador     solo Ventas          es el departamento al que alguien LLEGA
+mesa          solo Administración  donde se reúne gente hay menos escritorios
+estanteria    Cartera, Soporte,    la sala del papel
+              Administración
+```
+
+Y una ausencia deliberada: **Facturación y Administración no tienen mural**. Un
+mural es una sala que mira algo en vivo; ahí lo que se mira son cuentas y
+decisiones. Colgarles pantallas habría sido repetir el NOC con otro color.
+
+### Los acentos se eligieron midiendo
+
+La configuración del tenant declara un color por área. **La escena no los usa
+tal cual**: el naranja de Ventas (`#d97706`) quedaba a **143** de distancia del
+rojo de alarma y la guarda lo rechazó — una sala tranquila se habría leído como
+una sala en alarma.
+
+```
+distancia al rojo de alarma   NOC 351 · Atención 340 · Admin 370
+                              Soporte 278 · Cartera 265 · Ventas 178
+distancia mínima entre salas  77
+```
+
+Es una divergencia deliberada con la configuración de la empresa, no un
+descuido: el color de un área en una lista y el color de una sala entera
+iluminada no se eligen con el mismo criterio.
+
+### Un defecto estructural que solo aparece con seis salas
+
+**Una luminaria de techo tapaba el rótulo de un puesto del fondo.** La luminaria
+está más cerca de la cámara que un escritorio lejano, así que se dibuja después
+y su carcasa cubría media placa: en la captura se leía «ministración» y parecía
+que la placa era demasiado estrecha. **No lo era** —tenía 18 px de margen a cada
+lado, medido en el navegador—; era oclusión.
+
+Los rótulos pasaron a una **capa propia por encima de todo el mobiliario**. Un
+rótulo no compite por profundidad con los muebles: es información sobre la sala,
+no un objeto dentro de ella. La capa va con `eventMode: 'none'`, o se comería
+los clics.
+
+### Medido
+
+```
+NOC y Redes            279 objetos
+Atención al Cliente    248
+Soporte Técnico        169
+Facturación y Cartera  203
+Ventas                 228
+Administración         166
+las seis               142-144 fps
+recorrido completo de las seis, ida y vuelta: sin errores de consola
+selección comprobada con la capa de rótulos encima
+412 pruebas verdes · guarda de arquitectura del motor en verde
+```
+
+### Lo que queda fuera, dicho
+
+- **Las seis salas siguen siendo rectángulos con dos muros.** Es el límite que
+  queda sin tocar: no hay L, ni columnas, ni tabiques interiores. Se va a notar
+  antes con seis que con dos.
+- **La planta sigue en `departamentos.js`**, no en `tenant_config`.
+- **Los nueve roles no son nueve empleados.** Tres son capacidades asignadas a
+  personas, no agentes ejecutables con puerta propia. La oficina los dibuja
+  igual porque el inventario del motor los sirve igual; distinguirlos pide un
+  dato que hoy no viaja.
+
 ## Qué NO hacer
 
 - **No construir los ocho departamentos a la vez.** Uno (NOC), de punta a punta,

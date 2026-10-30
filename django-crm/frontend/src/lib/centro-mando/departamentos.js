@@ -42,6 +42,15 @@ const NOC = {
   id: 'operativo',
   rotulo: 'NOC y Redes',
   direccion: 'Dirección de Operaciones',
+  //  Lo que el motor sirve por agente es `rol.area`, TEXTO LIBRE, y no coincide
+  //  con los identificadores de `config.areas`. `supervisor_noc` declara
+  //  «Operaciones»; el área configurada se llama `operativo`. Con solo el id y
+  //  el rótulo, esta sala salía VACÍA en producción — medido contra el YAML del
+  //  tenant el 30/10/2026, no deducido.
+  //
+  //  Así que las etiquetas aceptadas son un DATO del departamento. Se declaran;
+  //  no se adivinan. El día que una empresa escriba otra cosa, se agrega acá.
+  areas: ['operativo', 'Operaciones', 'NOC y Redes'],
   planta: {
     //  Índigo: el color de la acción del producto. La primera sala se queda
     //  con él porque es la que fijó la identidad visual.
@@ -95,13 +104,29 @@ const NOC = {
  * red.
  */
 const ATENCION = {
-  id: 'soporte_tecnico',
+  id: 'atencion_cliente',
   rotulo: 'Atención al Cliente',
   direccion: 'Dirección de Servicio',
+  //  «Atención al Cliente» existe en el vocabulario de los ROLES y NO tiene
+  //  entrada en `config.areas`: los dos vocabularios no solo se escriben
+  //  distinto, tienen miembros distintos. Por eso este departamento lleva un
+  //  identificador propio.
+  areas: ['Atención al Cliente', 'atencion_cliente'],
   planta: {
-    //  Verde azulado. Distinto del NOC de un vistazo y a la misma distancia
-    //  del rojo de un fallo, que es lo que no puede cambiar de sala en sala.
-    acento: 0x1f7a6b,
+    //  LOS SEIS ACENTOS SE ELIGIERON MIDIENDO, NO A OJO.
+    //
+    //  La configuración del tenant declara un color por área —Ventas en
+    //  `#d97706`, Cartera en `#7c5cd6`— y la escena NO los usa tal cual. El
+    //  naranja de Ventas quedaba a 143 de distancia del rojo de alarma y la
+    //  guarda lo rechazó: una sala tranquila se habría leído como una sala en
+    //  alarma. Los seis están ahora a más de 160 de ese rojo y a más de 70
+    //  entre sí.
+    //
+    //  Queda anotado porque es una divergencia deliberada con la configuración
+    //  de la empresa, no un descuido: el color de un área en una lista y el
+    //  color de una sala entera iluminada no pueden elegirse con el mismo
+    //  criterio.
+    acento: 0x0ea5a4,
     mundo: { ancho: 13, fondo: 9, alto: 4 },
     pasillo: { desde: 10, hasta: 13 },
     cartel: { gx: 5.2 },
@@ -141,8 +166,166 @@ const ATENCION = {
   }
 };
 
+
+/**
+ * Soporte Técnico. La sala del diagnóstico: poco mobiliario y mucha pantalla.
+ *
+ * Es la más pequeña de las seis, y es su rasgo: un equipo chico que mira
+ * mediciones. Sin pasillo —se entra por el vano del muro— y con una estantería
+ * de expedientes contra el lateral.
+ */
+const SOPORTE = {
+  id: 'soporte_tecnico',
+  rotulo: 'Soporte Técnico',
+  direccion: 'Dirección de Servicio',
+  areas: ['soporte_tecnico', 'Soporte Técnico'],
+  planta: {
+    acento: 0x4d9e2a,
+    mundo: { ancho: 11, fondo: 8, alto: 4 },
+    //  Sin pasillo: una sala chica con una franja de paso se queda sin sitio
+    //  para trabajar, y el pasillo deja de significar algo.
+    pasillo: null,
+    cartel: { gx: 5.0 },
+    mural: { paneles: [{ gx: 3.0, ancho: 4.4 }] },
+    mobiliario: [
+      { tipo: 'zona', gx: 2.4, gy: 4.6, ancho: 4.6, fondo: 2.8 },
+      { tipo: 'ducto', gy: 3.8, desde: 1.0, hasta: 9.8 },
+      { tipo: 'estanteria', gy: 4.4, largo: 3.0 },
+      { tipo: 'luminaria', gx: 4, gy: 3 },
+      { tipo: 'luminaria', gx: 8, gy: 5 },
+      { tipo: 'planta', gx: 9.6, gy: 1.0 },
+      { tipo: 'planta', gx: 0.8, gy: 7.0 },
+      { tipo: 'dispensador', gx: 9.9, gy: 6.4 }
+    ],
+    puestos: [
+      { id: 'soporte-diagnostico', nombre: 'Diagnóstico', principal: true, gx: 3.4, gy: 5.4 },
+      { id: 'soporte-1', nombre: 'Soporte 1', gx: 1.6, gy: 2.4 },
+      { id: 'soporte-2', nombre: 'Soporte 2', gx: 5.4, gy: 2.4 }
+    ]
+  }
+};
+
+/**
+ * Facturación y Cartera. La sala del papel: estanterías en los dos muros y
+ * NINGUNA pantalla de pared.
+ *
+ * Esa ausencia es la decisión que más la distingue. Un mural es una sala que
+ * mira algo en vivo; acá lo que se mira son cuentas, y colgarle pantallas
+ * habría sido repetir el NOC con otro color.
+ */
+const CARTERA = {
+  id: 'cartera',
+  rotulo: 'Facturación y Cartera',
+  direccion: 'Dirección Financiera',
+  areas: ['cartera', 'Facturación', 'Cartera'],
+  planta: {
+    acento: 0xa855f7,
+    mundo: { ancho: 12, fondo: 10, alto: 4 },
+    pasillo: { desde: 0, hasta: 2 },
+    cartel: { gx: 6.0 },
+    mural: null,
+    mobiliario: [
+      { tipo: 'mampara', gx: 2, desde: 0.2, hasta: 9.8, vano: [4.0, 5.8] },
+      { tipo: 'zona', gx: 4.0, gy: 6.0, ancho: 5.0, fondo: 3.4 },
+      { tipo: 'estanteria', gy: 1.0, largo: 3.6 },
+      { tipo: 'estanteria', gy: 5.2, largo: 3.6 },
+      { tipo: 'luminaria', gx: 6, gy: 3 },
+      { tipo: 'luminaria', gx: 9, gy: 7 },
+      { tipo: 'planta', gx: 0.6, gy: 3.0 },
+      { tipo: 'planta', gx: 10.8, gy: 1.0 },
+      { tipo: 'banco', gx: 0.4, gy: 7.6 },
+      { tipo: 'dispensador', gx: 11.0, gy: 8.4 }
+    ],
+    puestos: [
+      { id: 'cartera-coordinacion', nombre: 'Coordinación', principal: true, gx: 4.6, gy: 6.8 },
+      { id: 'cartera-1', nombre: 'Cobranza 1', gx: 3.0, gy: 3.2 },
+      { id: 'cartera-2', nombre: 'Cobranza 2', gx: 6.4, gy: 3.2 },
+      { id: 'cartera-3', nombre: 'Cobranza 3', gx: 9.0, gy: 5.6 }
+    ]
+  }
+};
+
+/**
+ * Ventas. La sala que recibe gente: mostrador al frente y una espera de verdad.
+ *
+ * Es la única con mostrador, y es a propósito — es el departamento al que
+ * alguien llega. Lo que en el NOC es un pasillo técnico, acá es una antesala.
+ */
+const VENTAS = {
+  id: 'ventas',
+  rotulo: 'Ventas',
+  direccion: 'Dirección Comercial',
+  areas: ['ventas', 'Ventas'],
+  planta: {
+    acento: 0xb8860b,
+    mundo: { ancho: 13, fondo: 10, alto: 4 },
+    pasillo: { desde: 9, hasta: 13 },
+    cartel: { gx: 4.4 },
+    mural: { paneles: [{ gx: 2.2, ancho: 2.6 }, { gx: 5.2, ancho: 2.6 }] },
+    mobiliario: [
+      { tipo: 'mostrador', gx: 6.6, gy: 7.4, largo: 2.6 },
+      { tipo: 'mampara', gx: 9, desde: 0.2, hasta: 9.8, vano: [6.6, 8.4] },
+      { tipo: 'zona', gx: 1.6, gy: 5.8, ancho: 4.6, fondo: 3.4 },
+      { tipo: 'banco', gx: 9.4, gy: 2.0 },
+      { tipo: 'banco', gx: 9.4, gy: 5.0 },
+      { tipo: 'banco', gx: 11.6, gy: 3.4 },
+      { tipo: 'luminaria', gx: 4, gy: 3 },
+      { tipo: 'luminaria', gx: 7, gy: 7 },
+      { tipo: 'planta', gx: 11.8, gy: 0.8 },
+      { tipo: 'planta', gx: 0.8, gy: 9.0 },
+      { tipo: 'planta', gx: 10.4, gy: 8.6 },
+      { tipo: 'dispensador', gx: 12.0, gy: 6.2 }
+    ],
+    puestos: [
+      { id: 'ventas-cierre', nombre: 'Cierre', principal: true, gx: 2.2, gy: 6.6 },
+      { id: 'ventas-1', nombre: 'Asesoría 1', gx: 1.4, gy: 2.6 },
+      { id: 'ventas-2', nombre: 'Asesoría 2', gx: 4.6, gy: 2.6 },
+      { id: 'ventas-3', nombre: 'Asesoría 3', gx: 6.6, gy: 4.4 }
+    ]
+  }
+};
+
+/**
+ * Administración. La sala de las decisiones: mesa de reunión en medio y un
+ * único puesto.
+ *
+ * Es la más vacía de las seis y no por descuido — un departamento donde se
+ * reúne gente tiene menos escritorios y más sitio libre. Llenarla de puestos
+ * habría sido hacerla igual a las demás.
+ */
+const ADMINISTRACION = {
+  id: 'administracion',
+  rotulo: 'Administración',
+  direccion: 'Dirección General',
+  areas: ['administracion', 'Administración'],
+  planta: {
+    acento: 0x2563eb,
+    mundo: { ancho: 12, fondo: 9, alto: 4 },
+    pasillo: null,
+    cartel: { gx: 5.6 },
+    mural: null,
+    mobiliario: [
+      { tipo: 'mesa', gx: 7.6, gy: 4.2 },
+      { tipo: 'zona', gx: 1.6, gy: 5.4, ancho: 4.0, fondo: 2.8 },
+      { tipo: 'estanteria', gy: 2.0, largo: 4.0 },
+      { tipo: 'tablero', gy: 6.4 },
+      { tipo: 'luminaria', gx: 3, gy: 3 },
+      { tipo: 'luminaria', gx: 8, gy: 4 },
+      { tipo: 'planta', gx: 10.6, gy: 0.9 },
+      { tipo: 'planta', gx: 0.8, gy: 8.0 },
+      { tipo: 'planta', gx: 10.4, gy: 7.6 },
+      { tipo: 'banco', gx: 9.6, gy: 1.4 },
+      { tipo: 'dispensador', gx: 11.0, gy: 5.6 }
+    ],
+    puestos: [
+      { id: 'admin-direccion', nombre: 'Dirección', principal: true, gx: 2.0, gy: 6.0 },
+      { id: 'admin-1', nombre: 'Gestión', gx: 2.2, gy: 2.4 }
+    ]
+  }
+};
+
 /** Los departamentos que la oficina virtual sabe mostrar hoy. */
-export const DEPARTAMENTOS = [NOC, ATENCION];
+export const DEPARTAMENTOS = [NOC, ATENCION, SOPORTE, CARTERA, VENTAS, ADMINISTRACION];
 
 /** @param {string} id */
 export function departamentoPorId(id) {
@@ -183,7 +366,11 @@ function normalizar(texto) {
  */
 export function agentesDe(agentes, depto) {
   const lista = Array.isArray(agentes) ? agentes : [];
-  const buscadas = new Set([normalizar(depto.id), normalizar(depto.rotulo)]);
+  //  Las etiquetas que este departamento acepta. Si no las declara, se cae a
+  //  su identificador y su rótulo — que es lo que había antes y lo que dejaba
+  //  al NOC vacío en producción.
+  const declaradas = depto.areas ?? [depto.id, depto.rotulo];
+  const buscadas = new Set(declaradas.map(normalizar));
   return [...lista]
     .filter((a) => a && buscadas.has(normalizar(a.area)))
     .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))

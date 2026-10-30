@@ -123,6 +123,21 @@ describe('cada departamento tiene su color, y ninguno choca con una alarma', () 
     expect(new Set(acentos).size).toBe(acentos.length);
   });
 
+  it('se distinguen entre sí de un vistazo', () => {
+    // No es la garantía fuerte --esa es la distancia al rojo-- pero dos salas
+    // del mismo azul se leerían como la misma.
+    const canales = (c) => [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
+    for (const a of DEPARTAMENTOS) {
+      for (const b of DEPARTAMENTOS) {
+        if (a === b) continue;
+        const [r1, g1, b1] = canales(a.planta.acento);
+        const [r2, g2, b2] = canales(b.planta.acento);
+        const d = Math.abs(r1 - r2) + Math.abs(g1 - g2) + Math.abs(b1 - b2);
+        expect(d, `${a.id} y ${b.id} se parecen`).toBeGreaterThan(70);
+      }
+    }
+  });
+
   it('ninguno se parece al rojo de un fallo', () => {
     // Un acento rojizo haría que una sala tranquila se leyera como una sala en
     // alarma. Se mide la distancia en los tres canales.
