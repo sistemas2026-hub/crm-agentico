@@ -1469,6 +1469,89 @@ prueba se puso roja.
   es el correcto —pasado el umbral se deriva «no sé»— pero el estado `fallida`
   del esquema hoy no lo escribe nadie.
 
+---
+
+## Fase 4 — la planta deja de ser código, y entra el segundo departamento (30/10/2026)
+
+### Lo que de verdad cambió
+
+La geometría de la oficina estaba escrita dentro de `escena/oficina.ts`: un
+mundo de 14 × 10, un pasillo en una franja fija y una lista de muebles con sus
+coordenadas. Servía para UNA sala.
+
+Ahora la escena **recibe la planta como dato**, sabe dibujar TIPOS de mueble y
+no sabe qué departamento está construyendo:
+
+```ts
+Planta = { mundo, pasillo, cartel, mural, mobiliario[], puestos[] }
+```
+
+**La prueba de que eso valía la pena es que el segundo departamento no toca una
+sola línea de `escena/`.** Es un archivo de datos y nada más. Hay una prueba que
+lo fija: todo tipo de mueble que una planta pide tiene que existir en el
+registro de la escena, y un tipo desconocido se cuenta en vez de dibujarse
+«parecido».
+
+`noc.js` desapareció, como decía dentro de sí mismo que iba a pasar.
+
+### El segundo departamento no es el primero con otro rótulo
+
+Atención al Cliente tiene **otro mundo** (13 × 9), **dos** pantallas de muro en
+vez de tres, una espera con bancos junto al paso —lo que una sala de atención
+tiene y un centro de operaciones no— y **ni armarios de equipos ni panel de
+empalmes**. Si las dos salas se vieran iguales, la oficina virtual no estaría
+representando a la empresa: estaría repitiendo un fondo.
+
+Identificador `soporte_tecnico`, rótulo «Atención al Cliente». Mismo criterio
+que `operativo` → «NOC y Redes»: el identificador es el que ya existe en la
+configuración y en los datos; renombrarlo daría un rótulo bonito y perdería la
+continuidad de todo lo registrado con el nombre viejo.
+
+### Dos defectos que solo aparecieron al haber una segunda sala
+
+**1. La escena seguía respondiendo después de `destruir()`.** Cambiar de sala
+desmonta una escena y monta otra en el mismo gesto, y el bucle de quien la usa
+puede tener un fotograma en vuelo. `metricas()` entraba a un `app.stage` que ya
+era `null` y reventaba — y no reventaba sola: **se llevaba por delante el bucle
+entero**, así que la sala nueva se quedaba quieta sin un solo mensaje que lo
+explicara. Ninguna prueba podía verlo: hasta ese día nunca se había desmontado
+una escena con otra arrancando detrás. Arreglado con una bandera de vida en los
+ocho métodos, y `destruir()` idempotente.
+
+**2. Las placas de dos puestos se tapaban.** En isometría dos puestos caen en la
+misma columna de pantalla cuando `gx - gy` coincide, por lejos que estén en la
+sala; el de delante se dibuja después y su placa corta el nombre del de atrás a
+media palabra. Resolverlo moviendo muebles hasta que encajen no es resolverlo
+—la siguiente planta vuelve a chocar y el síntoma no señala a la geometría—,
+así que se separan en ALTURA: lo que está más lejos se rotula más arriba.
+Funciona para cualquier reparto.
+
+### Medido
+
+```
+NOC y Redes          279 objetos
+Atención al Cliente  248 objetos
+las dos              144 fps
+ida y vuelta entre salas, dos veces: sin errores de consola
+371 pruebas verdes del centro de mando (eran 364)
+la guarda de arquitectura del motor, en verde
+```
+
+Y la guarda de la escena **volvió a cazarme**: escribí «ISP» en un comentario de
+`oficina.ts`. La escena no puede saber en qué industria está.
+
+### Lo que queda fuera, dicho
+
+- **La planta sigue siendo código.** Vive en `departamentos.js`, no en
+  `tenant_config`. Lo que SÍ está resuelto es la forma: una planta ya es un
+  documento de datos que se puede guardar y editar, así que moverlo es cambiar
+  de dónde se lee, no rediseñarlo. Mientras tanto es semilla, igual que
+  `tenants/<slug>.config.yaml` lo es de la configuración.
+- **Faltan seis departamentos.** Dos no prueban que el séptimo sea gratis, pero
+  sí prueban que el segundo no costó lo que costó el primero.
+- **No hay editor de plantas.** Mover un escritorio hoy es editar una fila en un
+  archivo del repositorio, no una pantalla.
+
 ## Qué NO hacer
 
 - **No construir los ocho departamentos a la vez.** Uno (NOC), de punta a punta,

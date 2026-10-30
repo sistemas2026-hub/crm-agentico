@@ -34,21 +34,29 @@
   import { crearDemostracion } from '$lib/centro-mando/demo.js';
   import { proyectar, vigentes } from '$lib/centro-mando/proyeccion.js';
   import { frescura } from '$lib/centro-mando/frescura.js';
-  import { DEPARTAMENTO_NOC, puestosDelNoc, supervisorDelNoc } from '$lib/centro-mando/noc.js';
+  import { DEPARTAMENTOS, plantaDe } from '$lib/centro-mando/departamentos.js';
   import FichaDePuesto from '$lib/components/centro-mando/FichaDePuesto.svelte';
 
   let { data } = $props();
 
   /**
-   * El inventario se lee UNA vez, al montar, y es deliberado: la escena se
-   * construye a partir de `puestos` y no sabe reconstruirse sola. Si el
-   * inventario cambiara habría que desmontar y volver a montar, que es lo que
-   * pasa al navegar. El compilador avisa de que esto captura el valor inicial;
-   * ese es exactamente el valor que queremos.
+   * El departamento que se está mirando.
+   *
+   * Cambiarlo DESMONTA y vuelve a montar la escena: la sala entera es otra
+   * —otro mundo, otro mobiliario, otros puestos— y reconstruirla en caliente
+   * sería mantener dos caminos para el mismo resultado.
    */
-  const supervisor = supervisorDelNoc(data.agentes);
-  const puestos = puestosDelNoc(supervisor);
-  const agentesConPuesto = puestos.map((p) => p.agente).filter(Boolean);
+  let deptoId = $state(DEPARTAMENTOS[0].id);
+  let depto = $derived(DEPARTAMENTOS.find((d) => d.id === deptoId) ?? DEPARTAMENTOS[0]);
+
+  /**
+   * El inventario se lee UNA vez, al montar. El compilador avisa de que esto
+   * captura el valor inicial; ese es exactamente el valor que queremos: si el
+   * inventario cambiara habría que remontar, que es lo que pasa al navegar.
+   */
+  const inventario = data.agentes;
+  let planta = $derived(plantaDe(depto, inventario));
+  let agentesConPuesto = $derived(planta.puestos.map((p) => p.agente).filter(Boolean));
 
   /** @type {HTMLElement|null} */
   let lienzo = $state(null);
@@ -94,8 +102,11 @@
   /** @type {string|null} */
   let seleccionado = $state(null);
 
+  //  El flujo pide TODOS los agentes de la empresa, no los de la sala que se
+  //  está mirando: si filtrara por departamento, cambiar de sala tiraría el
+  //  cursor y se perderían los eventos de los demás mientras tanto.
   const flujo = crearFlujo({
-    agentes: agentesConPuesto,
+    agentes: (data.agentes || []).map((a) => a.nombre).filter(Boolean),
     areas: data.areas || [],
     // Un agente sin puesto no se proyecta, y sin agentes con puesto no se filtra
     // por agente: así el prototipo se puede mirar aunque el inventario venga
@@ -110,7 +121,7 @@
   });
 
   /** El puesto que está seleccionado, con su definición. */
-  let puestoSeleccionado = $derived(puestos.find((p) => p.id === seleccionado) ?? null);
+  let puestoSeleccionado = $derived(planta.puestos.find((p) => p.id === seleccionado) ?? null);
   let estadoSeleccionado = $derived(
     puestoSeleccionado?.agente
       ? (estados.find((e) => e.agente === puestoSeleccionado.agente) ?? null)
@@ -205,6 +216,9 @@
   /* ── montaje ────────────────────────────────────────────────────────────── */
   $effect(() => {
     if (!lienzo) return;
+    //  Leer `planta` acá es lo que hace que cambiar de departamento vuelva a
+    //  ejecutar este efecto: la escena se destruye y se monta de nuevo.
+    const laPlanta = planta;
     let vivo = true;
     /** @type {any} */
     let reloj = null;
@@ -220,7 +234,7 @@
         ]);
         if (!vivo) return;
         visualizar = adaptador.visualizar;
-        escena = await montarEscena({ contenedor: lienzo, puestos, rotulo: DEPARTAMENTO_NOC.rotulo });
+        escena = await montarEscena({ contenedor: lienzo, planta: laPlanta });
         if (!vivo) {
           escena.destruir();
           escena = null;
@@ -267,14 +281,27 @@
   }
 </script>
 
-<svelte:head><title>Oficina virtual · {DEPARTAMENTO_NOC.rotulo}</title></svelte:head>
+<svelte:head><title>Oficina virtual · {depto.rotulo}</title></svelte:head>
 
 <div class="pantalla">
   <header class="barra">
     <div class="donde">
-      <h1>{DEPARTAMENTO_NOC.rotulo}</h1>
-      <p>{DEPARTAMENTO_NOC.direccion} · prototipo de oficina virtual</p>
+      <h1>{depto.rotulo}</h1>
+      <p>{depto.direccion} · prototipo de oficina virtual</p>
     </div>
+
+    <!-- El selector de sala. Cambiarlo remonta la escena entera: es otra
+         planta, no el mismo recinto con otros muebles. -->
+    <nav class="salas" aria-label="Departamento">
+      {#each DEPARTAMENTOS as d (d.id)}
+        <button
+          type="button"
+          class:activa={d.id === deptoId}
+          aria-pressed={d.id === deptoId}
+          onclick={() => { deptoId = d.id; seleccionado = null; }}
+        >{d.rotulo}</button>
+      {/each}
+    </nav>
 
     <!-- El indicador de frescura, siempre a la vista y no escondido en la
          ficha: es la diferencia entre «este agente no tiene trabajo» y «no
@@ -336,13 +363,16 @@
   <footer class="pie">
     {#if data.error}
       <span class="alarma">Inventario de agentes: {data.error}</span>
-    {:else if !supervisor}
+    {:else if agentesConPuesto.length === 0}
       <span class="alarma">
-        El inventario no trae ningún agente del área «{DEPARTAMENTO_NOC.id}»: el
-        puesto de supervisión se dibuja vacío a propósito.
+        El inventario no trae ningún agente del área «{depto.id}»: los puestos se
+        dibujan vacíos a propósito.
       </span>
     {:else}
-      <span>Puesto de supervisión: <code>{supervisor.nombre}</code></span>
+      <span>
+        {agentesConPuesto.length} de {planta.puestos.length} puestos ocupados:
+        <code>{agentesConPuesto.join(', ')}</code>
+      </span>
     {/if}
     {#if sinRepresentacion > 0}
       <span class="alarma">
@@ -411,6 +441,25 @@
   .desde {
     color: #9a98bd;
     font-variant-numeric: tabular-nums;
+  }
+
+  .salas {
+    display: flex;
+    gap: 6px;
+  }
+  .salas button {
+    padding: 5px 11px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    background: transparent;
+    color: #9a98bd;
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .salas button.activa {
+    border-color: #8b84f5;
+    color: #e8e7f5;
+    background: rgba(139, 132, 245, 0.12);
   }
 
   .mandos {

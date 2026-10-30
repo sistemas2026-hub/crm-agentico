@@ -35,11 +35,55 @@ import { ALTURA_UNIDAD, BALDOSA, aPantalla, profundidad, rombo, type Mundo } fro
 import { PALETA, tono } from './paleta';
 import type { Texturas } from './texturas';
 
-/** El recinto del primer prototipo. Un NOC, y nada más. */
+/**
+ * UNA PLANTA ES UN DATO, NO CÓDIGO.
+ *
+ * Hasta acá el recinto estaba escrito a mano dentro de esta función: un mundo
+ * de 14 × 10, un pasillo en una franja fija y una lista de muebles con sus
+ * coordenadas. Servía para UNA sala, y la regla de esta casa es que dar de alta
+ * una empresa nueva sea una fila en una tabla y un archivo en una carpeta, con
+ * cero cambios en el motor. Una oficina virtual no es una excepción a eso.
+ *
+ * Así que la escena pasa a recibir la planta. Sabe dibujar TIPOS de mueble
+ * —un armario, una mampara, una planta— y no sabe qué departamento está
+ * construyendo. El día que una empresa quiera mover un escritorio, lo que
+ * cambia es una fila, no este archivo.
+ *
+ * Lo que NO hace esto todavía: la planta vive en `plantas.js`, en el navegador.
+ * Su sitio definitivo es la configuración del tenant, igual que los agentes.
+ * Está dicho ahí.
+ */
+export interface Mueble2D {
+  tipo: string;
+  gx?: number;
+  gy?: number;
+  /** Parámetros propios del tipo: largo de una mampara, ancho de una zona… */
+  [extra: string]: any;
+}
+
+export interface Planta {
+  mundo: Mundo;
+  /** La franja de suelo más clara que cruza el recinto. */
+  pasillo: { desde: number; hasta: number } | null;
+  /** Lo que se lee en el muro del fondo, y a qué altura del muro va. */
+  cartel?: { rotulo: string; gx: number } | null;
+  /** El mural de pantallas del muro de fondo, si lo hay. */
+  mural?: { paneles: { gx: number; ancho: number }[] } | null;
+  mobiliario: Mueble2D[];
+  puestos: DefinicionDePuesto[];
+}
+
+/** El recinto del primer prototipo. Se conserva como respaldo. */
 export const MUNDO: Mundo = { ancho: 14, fondo: 10, alto: 4 };
 
-/** El pasillo: una franja de suelo más clara que cruza el recinto. */
-const PASILLO = { desde: 11, hasta: 14 };
+/**
+ * El pasillo de la planta que se está dibujando.
+ *
+ * Es un módulo-global y es feo, y tiene un motivo: `construirSuelo` se llama
+ * una vez por montaje y la alternativa era pasarlo por cuatro firmas. Se fija
+ * al entrar en `construirOficina` y no se lee desde ningún otro sitio.
+ */
+let PASILLO: { desde: number; hasta: number } = { desde: 11, hasta: 14 };
 
 /** Declaración de un puesto. Posición y a quién pertenece, nada más. */
 export interface DefinicionDePuesto {
@@ -84,6 +128,14 @@ export interface Oficina {
   raiz: Container;
   mundo: Mundo;
   puestos: Puesto[];
+  /**
+   * Muebles que la planta pedía y esta escena no conoce.
+   *
+   * Se cuentan en vez de dibujarse «parecido». Una planta guardada puede venir
+   * de una versión posterior de la interfaz; dibujar un sustituto haría que la
+   * sala mostrara algo que nadie puso ahí.
+   */
+  sinTipo: number;
   /** Lo que se mueve por sí solo. `t` acumulado y `dt`, en segundos. */
   animar(t: number, dt: number): void;
   destruir(): void;
@@ -303,15 +355,11 @@ interface Mural {
  * ni nombres, y es a propósito — una pantalla de adorno con un número encima se
  * lee como una medición, y en cuanto alguien la cree, la escena está mintiendo.
  */
-function construirMural(texturas: Texturas): Mural {
+function construirMural(texturas: Texturas,
+                        paneles: { gx: number; ancho: number }[]): Mural {
   const nodo = new Container();
   const anim: ((t: number, dt: number) => void)[] = [];
 
-  const paneles = [
-    { gx: 2.6, ancho: 3.0 },
-    { gx: 5.9, ancho: 3.0 },
-    { gx: 9.2, ancho: 3.0 }
-  ];
   const z0 = 1.45;
   const z1 = 3.35;
 
@@ -1092,7 +1140,19 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
      eso es justo lo que la paleta del tablero ya tuvo que corregir una vez. */
   const placa = new Container();
   placa.zIndex = 30;
-  const alturaPlaca = def.principal ? 3.0 : 2.45;
+  //  LA PLACA LEJANA VA MÁS ALTA QUE LA CERCANA.
+  //
+  //  En isometría dos puestos caen en la misma columna de pantalla cuando
+  //  `gx - gy` coincide, por lejos que estén en la sala. Cuando eso pasa, el
+  //  puesto de delante se dibuja después y su placa TAPA la de atrás: el
+  //  nombre del agente del fondo queda cortado a media palabra.
+  //
+  //  Resolverlo moviendo muebles hasta que encajen no es resolverlo: la
+  //  siguiente planta que alguien escriba vuelve a chocar, y el síntoma —un
+  //  nombre cortado— no señala a la geometría. Separarlas en ALTURA funciona
+  //  para cualquier reparto, y además es lo natural: lo que está más lejos se
+  //  rotula más arriba.
+  const alturaPlaca = def.principal ? 2.9 : 3.65;
   const puntoPlaca = aPantalla(def.gx + ancho / 2, def.gy - 0.4, alturaPlaca);
   placa.position.set(puntoPlaca.x, puntoPlaca.y);
 
@@ -1209,57 +1269,77 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
    El montaje del recinto
    ════════════════════════════════════════════════════════════════════════════ */
 
-export function construirOficina(
-  definiciones: DefinicionDePuesto[],
-  texturas: Texturas,
-  /** Lo que se lee en el muro. Dato de la empresa; la escena solo lo dibuja. */
-  rotulo = ''
-): Oficina {
+/**
+ * De qué sabe dibujar la escena.
+ *
+ * Un registro por TIPO, no una lista de llamadas. Es lo que permite que la
+ * planta sea un dato: agregar un mueble a una sala es una fila más, y agregar
+ * un TIPO nuevo de mueble es una entrada acá. Un tipo que no está se ignora y
+ * se cuenta — no se dibuja «algo parecido», que es como una escena empieza a
+ * mostrar lo que nadie pidió.
+ */
+const TIPOS: Record<string, (m: Mueble2D, tx: Texturas) => Mueble> = {
+  mampara: (m) => construirMampara(m.gx ?? 0, m.desde ?? 0, m.hasta ?? 0, m.vano ?? [0, 0]),
+  zona: (m) => construirZona(m.gx ?? 0, m.gy ?? 0, m.ancho ?? 1, m.fondo ?? 1),
+  ducto: (m) => construirDucto(m.gy ?? 0, m.desde ?? 0, m.hasta ?? 0),
+  tablero: (m) => construirTableroDePared(m.gy ?? 0),
+  armario: (m, tx) => construirArmario(m.gy ?? 0, tx),
+  panel_fibra: (m) => construirPanelDeFibra(m.gy ?? 0),
+  luminaria: (m, tx) => construirLuminaria(m.gx ?? 0, m.gy ?? 0, tx),
+  planta: (m, tx) => construirPlanta(m.gx ?? 0, m.gy ?? 0, tx),
+  banco: (m) => construirBanco(m.gx ?? 0, m.gy ?? 0),
+  dispensador: (m) => construirDispensador(m.gx ?? 0, m.gy ?? 0)
+};
+
+/** Los tipos de mueble que una planta puede pedir. Para probarlo desde fuera. */
+export const TIPOS_DE_MUEBLE = Object.keys(TIPOS);
+
+export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
   const raiz = new Container();
   raiz.sortableChildren = true;
 
-  const suelo = construirSuelo(MUNDO);
+  const mundo = planta.mundo;
+  //  Sin pasillo se fija una franja vacía en vez de un `if` repartido por el
+  //  dibujo del suelo: una sala sin pasillo es una sala con un pasillo de
+  //  ancho cero, y así hay un solo camino de código.
+  PASILLO = planta.pasillo ?? { desde: 0, hasta: 0 };
+
+  const suelo = construirSuelo(mundo);
   suelo.zIndex = -2000;
   raiz.addChild(suelo);
 
-  const muros = construirMuros(MUNDO);
+  const muros = construirMuros(mundo);
   muros.zIndex = -1000;
   raiz.addChild(muros);
 
   const animables: ((t: number, dt: number) => void)[] = [];
 
-  const mural = construirMural(texturas);
-  mural.nodo.zIndex = -900;
-  raiz.addChild(mural.nodo);
-  animables.push(mural.animar);
+  if (planta.mural && planta.mural.paneles.length) {
+    const mural = construirMural(texturas, planta.mural.paneles);
+    mural.nodo.zIndex = -900;
+    raiz.addChild(mural.nodo);
+    animables.push(mural.animar);
+  }
 
-  const muebles: Mueble[] = [
-    // El pasillo, separado de la sala y con su vano de paso. Sin esto la mitad
-    // derecha del recinto era suelo vacío.
-    construirMampara(11, 0.2, 9.8, [4.6, 6.4]),
-    // La zona del puesto principal y el ducto que cruza la sala: lo que le da
-    // al suelo del frente algo que mirar y una dirección.
-    construirZona(4.2, 6.2, 4.4, 3.4),
-    construirDucto(5.3, 1.0, 10.6),
-    construirTableroDePared(7.0),
-    construirArmario(2.4, texturas),
-    construirArmario(4.2, texturas),
-    construirPanelDeFibra(6.3),
-    construirLuminaria(4, 3, texturas),
-    construirLuminaria(9, 6, texturas),
-    construirPlanta(12.4, 1.1, texturas),
-    construirPlanta(0.9, 8.9, texturas),
-    construirBanco(11.3, 8.2),
-    construirDispensador(13.0, 4.6),
-    construirPlanta(12.3, 6.6, texturas)
-  ];
-  if (rotulo) muebles.push(construirCartel(rotulo, 7.4, texturas));
+  const muebles: Mueble[] = [];
+  let sinTipo = 0;
+  for (const m of planta.mobiliario || []) {
+    const hacer = TIPOS[m?.tipo];
+    if (!hacer) {
+      sinTipo++;
+      continue;
+    }
+    muebles.push(hacer(m, texturas));
+  }
+  if (planta.cartel?.rotulo) {
+    muebles.push(construirCartel(planta.cartel.rotulo, planta.cartel.gx, texturas));
+  }
   for (const m of muebles) {
     raiz.addChild(m.nodo);
     if (m.animar) animables.push(m.animar);
   }
 
-  const puestos = definiciones.map((def) => {
+  const puestos = (planta.puestos || []).map((def) => {
     const p = construirPuesto(def, texturas);
     raiz.addChild(p.nodo);
     return p;
@@ -1267,8 +1347,10 @@ export function construirOficina(
 
   return {
     raiz,
-    mundo: MUNDO,
+    mundo,
     puestos,
+    /** Cuántos muebles pedía la planta que esta escena no sabe dibujar. */
+    sinTipo,
     animar(t, dt) {
       for (const f of animables) f(t, dt);
     },

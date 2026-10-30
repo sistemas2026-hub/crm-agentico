@@ -30,7 +30,7 @@ import { Camara, LIMITES, gesto, type Toque } from './camara';
 import { aPantalla, extensionDelMundo } from './isometria';
 import { COLOR_DE_ANIMACION, PALETA } from './paleta';
 import { Transicion } from './pose';
-import { construirOficina, type DefinicionDePuesto, type Puesto } from './oficina';
+import { construirOficina, type Planta, type Puesto } from './oficina';
 import { construirPersonaje, type Personaje } from './personaje';
 import { generarTexturas } from './texturas';
 import type { EstadoDeAgente } from './adaptador';
@@ -89,9 +89,14 @@ export interface Escena {
 export interface OpcionesDeEscena {
   /** El elemento que contiene el lienzo. Se mide para encuadrar. */
   contenedor: HTMLElement;
-  puestos: DefinicionDePuesto[];
-  /** Lo que se lee en el muro del fondo. Lo pone quien monta, no la escena. */
-  rotulo?: string;
+  /**
+   * La planta completa: mundo, pasillo, mobiliario, puestos y cartel.
+   *
+   * Entra como DATO. La escena sabe dibujar tipos de mueble y no sabe qué
+   * departamento está construyendo, que es lo que permite que la segunda sala
+   * no cueste lo que costó la primera.
+   */
+  planta: Planta;
 }
 
 interface Habitante {
@@ -128,7 +133,7 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
   (app.canvas.style as any).userSelect = 'none';
 
   const texturas = generarTexturas();
-  const oficina = construirOficina(opciones.puestos, texturas, opciones.rotulo ?? '');
+  const oficina = construirOficina(opciones.planta, texturas);
 
   /* El mundo entero cuelga de un contenedor al que se le aplica la cámara. */
   const mundo = new Container();
@@ -367,6 +372,22 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     }
   });
 
+  /**
+   * ¿La escena sigue viva?
+   *
+   * Hace falta porque `destruir()` no es el final de las llamadas: el bucle de
+   * quien la usa puede tener un fotograma en vuelo, y al cambiar de sala se
+   * destruye una escena y se monta otra en el mismo gesto. Sin esta bandera,
+   * `metricas()` entra a un `app.stage` que ya es `null` y revienta — y no
+   * revienta sola: se lleva por delante el bucle entero, así que la escena
+   * nueva se queda quieta sin un solo mensaje que lo explique.
+   *
+   * Encontrado el 30/10/2026 al construir el segundo departamento. Ninguna
+   * prueba podía verlo: hasta ese día nunca se había desmontado una escena con
+   * otra arrancando detrás.
+   */
+  let vivo = true;
+
   function contar(c: Container): number {
     let n = 1;
     for (const h of c.children) n += contar(h as Container);
@@ -375,6 +396,7 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
 
   return {
     aplicar(estados) {
+      if (!vivo) return;
       for (const e of estados || []) {
         const h = habitantes.find((x) => x.puesto.def.agente === e.agente);
         if (!h) continue;
@@ -386,10 +408,12 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     },
 
     seleccionar(id) {
+      if (!vivo) return;
       marcar(id);
     },
 
     enfocar(id) {
+      if (!vivo) return;
       const h = habitantes.find((x) => x.puesto.def.id === id);
       if (!h) return;
       marcar(id);
@@ -397,6 +421,7 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     },
 
     encuadrar() {
+      if (!vivo) return;
       camara.encuadrar();
     },
 
@@ -405,18 +430,23 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     },
 
     estadoVisualDe(idPuesto) {
+      if (!vivo) return null;
       const h = habitantes.find((x) => x.puesto.def.id === idPuesto);
       if (!h) return null;
       return { animacion: h.transicion.destino, pose: { ...h.transicion.actual } };
     },
 
     medirDibujo(cuadros = 120) {
+      if (!vivo) return { ms: 0, cuadros: 0 };
       const t0 = performance.now();
       for (let i = 0; i < cuadros; i++) app.renderer.render(app.stage);
       return { ms: Number(((performance.now() - t0) / cuadros).toFixed(3)), cuadros };
     },
 
     metricas() {
+      if (!vivo) {
+        return { fps: 0, fpsMinimo: 0, objetos: 0, motor: 'destruida', escala: 0 };
+      }
       return {
         fps: Math.round(fps),
         fpsMinimo: Number.isFinite(fpsMinimo) ? Math.round(fpsMinimo) : Math.round(fps),
@@ -427,6 +457,11 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     },
 
     destruir() {
+      //  Idempotente: destruir dos veces no puede explotar. Al cambiar de sala
+      //  hay un desmontaje y un montaje en el mismo gesto, y basta con que el
+      //  efecto de limpieza corra dos veces.
+      if (!vivo) return;
+      vivo = false;
       app.canvas.removeEventListener('pointerdown', alBajar);
       app.canvas.removeEventListener('pointermove', alMover);
       app.canvas.removeEventListener('pointerup', alSubir);
