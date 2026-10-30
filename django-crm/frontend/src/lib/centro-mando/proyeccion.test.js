@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { proyectar, vigentes, estadoDeAgentes } from './proyeccion.js';
+import { proyectar, vigentes, estadoDeAgentes, PROCEDENCIA } from './proyeccion.js';
 
 /**
  * Lo que se fija acá es, sobre todo, lo que el proyector NO hace: no inventa
@@ -57,15 +57,15 @@ describe('duplicados y eventos fuera de orden', () => {
     // El flujo puede entregarlo repetido: es el precio de no perder ninguno
     // en la transición foto -> cursor. Animarlo dos veces contaría una
     // actividad que ocurrió una.
-    const uno = ev({ id: 'a1b2' });
+    const uno = ev({ id: crypto.randomUUID() });
     const { instrucciones, descartados } = proyectar([uno, { ...uno }], CTX);
     expect(instrucciones).toHaveLength(1);
     expect(descartados.repetido).toBe(1);
   });
 
   it('el orden de llegada no cambia lo que se proyecta', () => {
-    const a = ev({ id: 'x1', en: '2026-10-29T17:00:02.000Z' });
-    const b = ev({ id: 'x2', en: '2026-10-29T17:00:01.000Z' });
+    const a = ev({ id: crypto.randomUUID(), en: '2026-10-29T17:00:02.000Z' });
+    const b = ev({ id: crypto.randomUUID(), en: '2026-10-29T17:00:01.000Z' });
     const ordenados = proyectar([b, a], CTX).instrucciones.map((i) => i.id);
     const alReves = proyectar([a, b], CTX).instrucciones.map((i) => i.id);
     expect(ordenados.sort()).toEqual(alReves.sort());
@@ -217,5 +217,75 @@ describe('el contrato es independiente del motor gráfico', () => {
     const { instrucciones } = proyectar(
       [ev({ agente: 'ventas', datos: { area: 'cobranzas' } })], otra);
     expect(instrucciones[0].destino).toBe('cobranzas');
+  });
+});
+
+describe('A9 reforzada · el identificador tiene que ser REAL', () => {
+  // Hasta el 29/10/2026 esta garantía comprobaba que `id` fuera truthy, y
+  // dejaba pasar cualquier cadena. Lo peor: `ambiente`, que es la palabra
+  // reservada para lo que NO es actividad operativa.
+  const FALSOS = ['ambiente', 'simulado', 'e1', 'inventado', '../../etc', '1',
+                  'true', '', '   ', 'no-es-un-uuid',
+                  '00000000-0000-0000-0000', 'zzzzzzzz-0000-4000-8000-000000000000'];
+
+  for (const id of FALSOS) {
+    it(`rechaza el identificador ${JSON.stringify(id)}`, () => {
+      const { instrucciones } = proyectar([ev({ id })], CTX);
+      expect(instrucciones).toHaveLength(0);
+    });
+  }
+
+  it('acepta un uuid de verdad', () => {
+    const id = crypto.randomUUID();
+    const { instrucciones } = proyectar([ev({ id })], CTX);
+    expect(instrucciones).toHaveLength(1);
+    expect(instrucciones[0].procedencia).toBe(`evento:${id}`);
+  });
+
+  it('los rechazados se CUENTAN aparte de los que no tienen id', () => {
+    const { descartados } = proyectar(
+      [ev({ id: 'ambiente' }), ev({ id: null })], CTX);
+    expect(descartados.id_invalido).toBe(1);
+    expect(descartados.sin_evento).toBe(1);
+  });
+});
+
+describe('eventos simulados: se mueven, pero no mienten', () => {
+  it('un lote simulado sale con procedencia "simulado", nunca "evento:"', () => {
+    // Para que el prototipo visual pueda moverse sin datos reales.
+    const { instrucciones } = proyectar(
+      [ev({ id: 'demo-1' })], { ...CTX, simulado: true });
+    expect(instrucciones).toHaveLength(1);
+    expect(instrucciones[0].procedencia).toBe(PROCEDENCIA.SIMULADO);
+    expect(instrucciones[0].procedencia).not.toMatch(/^evento:/);
+  });
+
+  it('un simulado con uuid REAL tampoco se hace pasar por operativo', () => {
+    // El caso traicionero: alguien genera un uuid válido para una demo. Lo
+    // que decide no es la forma del id, es de qué lote viene.
+    const { instrucciones } = proyectar(
+      [ev({ id: crypto.randomUUID() })], { ...CTX, simulado: true });
+    expect(instrucciones[0].procedencia).toBe(PROCEDENCIA.SIMULADO);
+  });
+
+  it('y las tres procedencias son distinguibles entre sí', () => {
+    const real = proyectar([ev({ id: crypto.randomUUID() })], CTX).instrucciones[0];
+    const sim = proyectar([ev({ id: 'x' })], { ...CTX, simulado: true }).instrucciones[0];
+    const amb = estadoDeAgentes([], ['ventas'], 1)[0];
+    expect(real.procedencia.startsWith('evento:')).toBe(true);
+    expect(sim.procedencia).toBe('simulado');
+    expect(amb.procedencia).toBe('ambiente');
+    expect(new Set([real.procedencia, sim.procedencia, amb.procedencia]).size).toBe(3);
+  });
+
+  it('solo lo REAL puede entrar al historial', () => {
+    // La regla que hace útil la separación: el historial filtra por `evento:`.
+    const lote = [
+      ...proyectar([ev({ id: crypto.randomUUID() })], CTX).instrucciones,
+      ...proyectar([ev({ id: 'd1' })], { ...CTX, simulado: true }).instrucciones
+    ];
+    const auditables = lote.filter((i) => i.procedencia.startsWith('evento:'));
+    expect(lote).toHaveLength(2);
+    expect(auditables).toHaveLength(1);
   });
 });

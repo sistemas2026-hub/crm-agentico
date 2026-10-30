@@ -957,6 +957,104 @@ defectos conocidos.
 
 ---
 
+## Pasos 1 y 2 — hechos el 30/10/2026
+
+### Paso 1 · A9 ya exige un identificador REAL
+
+El proyector comprobaba que `ev.id` fuera *truthy*. Ahora exige **formato
+UUID**, que es lo que de verdad tiene `tool_calls.id`.
+
+```
+rechazados ahora:  "ambiente" · "simulado" · "e1" · "inventado" · "../../etc"
+                   "1" · "true" · "" · "   " · "no-es-un-uuid"
+                   "00000000-0000-0000-0000"  (truncado)
+                   "zzzzzzzz-0000-4000-8000-000000000000"  (no hexadecimal)
+```
+
+El peor de todos era `"ambiente"`: la palabra reservada para lo **no**
+operativo entraba como `evento:ambiente`.
+
+**Tres procedencias que no se mezclan:**
+
+| | Qué es | ¿Al historial? |
+|---|---|---|
+| `evento:<uuid>` | actividad real, rastreable hasta su fila | **sí** |
+| `simulado` | generada para probar o demostrar | **no** |
+| `ambiente` | decorativo: caminar, estirarse | **no** |
+
+**El lote se marca entero, no evento por evento.** Si dependiera de cada fila,
+bastaría olvidarse de una para que un movimiento de prueba entrara como
+trabajo real. Y un simulado **con uuid válido** sigue saliendo como `simulado`:
+lo que decide no es la forma del id, es de qué lote viene.
+
+### Paso 2 · «Sin información» como tercer estado
+
+Hasta ahora un agente sin eventos se veía igual que uno cuyo backend murió:
+los dos quietos. Eso convierte la quietud en una afirmación falsa — *«este
+agente no tiene trabajo»* cuando lo cierto es *«no sé qué hace este agente»*.
+
+**`retraso_s` no alcanza, y esa fue la corrección que lo ordenó todo.** Lo
+calcula el backend y viaja **con** la respuesta: si el backend deja de
+responder no llega un retraso alto, no llega **nada**. Un indicador que solo
+mirara ese campo se quedaría mostrando el último valor bueno justo cuando más
+importa que avise.
+
+Cuatro señales, **tres de ellas del cliente**, que es quien puede notar un
+silencio:
+
+```
+1  hace cuanto fue la ultima respuesta correcta    silencio   <- del cliente
+2  si el ultimo intento fallo                      error      <- del cliente
+3  si nunca hubo una respuesta                     arranque   <- del cliente
+4  el retraso que el backend declara               retraso    <- del backend
+```
+
+**Umbrales, declarados en un solo sitio y configurables por empresa:**
+
+| | Valor | Por qué |
+|---|---|---|
+| `silencio_s` | **40 s** | ~3 sondeos de 12 s. Uno perdido es ruido; tres son un silencio. Avisar al primero haría que el aviso saliera a diario y se aprendiera a ignorarlo |
+| `retraso_s` | **30 s** | el peor caso **no** está acotado: `idle_in_transaction_session_timeout` solo corta sesiones OCIOSAS, no una que sigue ejecutando o esperando un lock |
+
+**Dos reglas que gobiernan el indicador:**
+
+- **«Sin información» prevalece sobre todo.** Una actividad vigente no tapa un
+  backend caído. Mostrar actividad vieja como si fuera actual es peor que no
+  mostrar nada: lo segundo se nota, lo primero no.
+- **Reposo NO es «disponible».** Significa «no hay actividad vigente y los
+  datos están al día». Si el agente puede atender algo es otra pregunta, y
+  esta pantalla no la responde.
+
+Un error viejo **no** condena para siempre: si después hubo una respuesta
+buena, se recupera. Si no, la pantalla se quedaría en rojo tras un parpadeo.
+
+### Verificado
+
+```
+40 pruebas del proyector   +18 sobre A9 y las procedencias
+17 pruebas de frescura     arranque, silencio, error, retraso, recuperacion
+159 verdes en total        cero regresiones en el Centro de Mando
+```
+
+**Las seis garantías críticas mueren al mutarlas:**
+
+```
+no validar el uuid                  -> 12 fallas
+marcar lo simulado como real        ->  4 fallas
+que sin_informacion deje de ganar   ->  3 fallas
+no detectar el silencio             ->  5 fallas
+tratar el arranque como reposo      ->  1 falla
+ignorar el retraso del backend      ->  1 falla
+```
+
+### Lo que queda pendiente
+
+**Nadie consume `frescura.js` todavía.** El módulo existe y está probado, pero
+conectarlo a la pantalla es trabajo de 3A: ahí es donde el indicador se ve.
+Hasta entonces el Centro de Mando sigue sin distinguir reposo de desconexión.
+
+---
+
 ## Modelo de eventos
 
 

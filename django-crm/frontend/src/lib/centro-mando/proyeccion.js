@@ -29,6 +29,33 @@
  * se proyecta, y `descartados` lo cuenta para que la pantalla pueda decirlo.
  */
 
+/**
+ * Un identificador de evento REAL: el uuid de la fila de `tool_calls`.
+ *
+ * Esto existe porque la garantía A9 decía «ninguna instrucción operativa sin
+ * evento verificable» y lo que comprobaba era «sin un id truthy». Medido el
+ * 29/10/2026: pasaban `e1`, `inventado`, `../../etc` y -- lo peor --
+ * `ambiente`, que es justo la palabra reservada para lo NO operativo.
+ *
+ * En producción el dato siempre fue un uuid, así que no hubo falsos. Pero una
+ * garantía que depende de que nadie se equivoque no es una garantía, y deja de
+ * ser teórica en cuanto entren eventos simulados para probar la escena.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Las TRES procedencias, que no se mezclan nunca.
+ *
+ *   evento:<uuid>  actividad real, rastreable hasta la fila que la causó
+ *   simulado       generada para probar o demostrar. NUNCA entra al historial
+ *   ambiente       decorativo: caminar, estirarse. No significa nada
+ *
+ * La segunda existe para que el prototipo visual pueda moverse sin datos
+ * reales sin que esos movimientos acaben contados como trabajo. Un evento
+ * simulado que se cuela como operativo es peor que no tener prototipo.
+ */
+export const PROCEDENCIA = { REAL: 'evento', SIMULADO: 'simulado', AMBIENTE: 'ambiente' };
+
 /** Cuánto dura en pantalla cada tipo, cuando el evento no dice su duración. */
 const DURACION = {
   consulta: 900,
@@ -57,15 +84,26 @@ export function proyectar(eventos, ctx = {}) {
   const areasValidas = new Set(ctx.areas || []);
   const ahora = ctx.ahora ?? Date.now();
 
+  //  Un lote simulado se marca ENTERO al entrar, nunca evento por evento: si
+  //  dependiera de cada fila, bastaría con olvidarse de una para que un
+  //  movimiento de prueba entrara como actividad real.
+  const simulado = ctx.simulado === true;
+
   const instrucciones = [];
   const vistos = new Set();
-  const descartados = { sin_evento: 0, agente_desconocido: 0, tipo_desconocido: 0, repetido: 0 };
+  const descartados = { sin_evento: 0, id_invalido: 0, agente_desconocido: 0,
+                        tipo_desconocido: 0, repetido: 0 };
 
   for (const ev of eventos || []) {
     // 1 · SIN IDENTIDAD NO HAY INSTRUCCIÓN. El id del evento es lo que hace
     //     verificable la animación: sin él no se puede rastrear hasta el
     //     hecho que la causó, y entonces es decoración disfrazada de dato.
     if (!ev || !ev.id) { descartados.sin_evento++; continue; }
+
+    // 1b · Y ESE id TIENE QUE SER UN UUID DE VERDAD cuando la instrucción va a
+    //      declararse operativa. Un lote simulado se salta esta puerta porque
+    //      no pretende ser real -- y por eso sale con otra procedencia.
+    if (!simulado && !UUID.test(String(ev.id))) { descartados.id_invalido++; continue; }
 
     // 2 · DUPLICADOS. El flujo puede entregar el mismo evento dos veces —es
     //     el precio de no perder ninguno en la transición foto→cursor— y
@@ -94,7 +132,7 @@ export function proyectar(eventos, ctx = {}) {
     instrucciones.push({
       // Identidad y procedencia: lo que hace auditable cada animación.
       id: ev.id,
-      procedencia: `evento:${ev.id}`,
+      procedencia: simulado ? PROCEDENCIA.SIMULADO : `${PROCEDENCIA.REAL}:${ev.id}`,
       agente,
       tipo: forma.tipo,
       // Referencia temporal: cuándo PASÓ, no cuándo se dibuja.
