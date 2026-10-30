@@ -121,6 +121,29 @@ class BootstrapView(APIView):
         })
 
 
+class MiDiaView(APIView):
+    """``GET /api/campo/mi-dia/`` — con que cuadrilla y que labor sale hoy
+    quien pregunta, segun lo armado en Programacion (29/10/2026: el saludo de
+    Inicio, «tu labor para hoy es …»).
+
+    `jornada` va siempre, aunque sea null: la app distingue «hoy no sale con
+    ninguna cuadrilla» de «el servidor viejo no lo manda». `fecha` es el dia de
+    la EMPRESA, no el de Greenwich: la app no muestra una jornada de otro dia.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        from campo import reparto as R
+        from campo.dia_publicado import de_la_persona
+
+        hoy = timezone.now().astimezone(R._zona_de(request.org)).date()
+        return Response({
+            "fecha": hoy.isoformat(),
+            "jornada": de_la_persona(request.org, request.profile, hoy),
+        })
+
+
 #: Cuantas ordenes se entregan por pagina si el cliente no pide otra cosa.
 LIMITE_POR_DEFECTO = 100
 
@@ -215,7 +238,12 @@ class TrabajosListView(APIView):
         hay_mas = len(filas) > limite
         filas = filas[:limite]
 
-        serializer = OrdenTrabajoListSerializer(filas, many=True)
+        #  El asunto de toda la pagina en una consulta, no una por orden.
+        from campo.niveles import asuntos_de_las_ordenes
+
+        serializer = OrdenTrabajoListSerializer(
+            filas, many=True,
+            context={"asuntos": asuntos_de_las_ordenes(org, filas)})
         return Response(
             {
                 "results": serializer.data,

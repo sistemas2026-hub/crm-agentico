@@ -254,6 +254,30 @@ def jornadas_y_ordenes(org, fecha) -> tuple:
     return jornadas, reciben, receptores, ordenes
 
 
+def de_la_persona(org, profile, fecha) -> dict | None:
+    """La jornada con que `profile` sale en `fecha`, como la muestra la app:
+    su cuadrilla, su labor y sus zonas. None si ese dia no sale con ninguna.
+
+    Pedido del usuario (29/10/2026): que Inicio salude con «tu labor para hoy
+    es …» y que cambie cuando cambia en Programacion. «Sale con esta
+    cuadrilla» es la regla de quien RECIBE sus ordenes
+    (`cuadrillas.destinatarios`): la misma que decide a quien le llega el
+    trabajo, para que el saludo no diga una cuadrilla y las ordenes otra.
+    """
+    from campo.cuadrillas import JornadaDeCuadrilla, destinatarios
+    from campo.labores import nombres_de_labor
+
+    for j in (JornadaDeCuadrilla.objects.filter(org=org, fecha=fecha)
+              .select_related("cuadrilla", "cuadrilla__lider", "lider")
+              .prefetch_related("zonas").order_by("cuadrilla__nombre", "id")):
+        if profile.id in {r["profile"].id for r in destinatarios(j)["reciben"]}:
+            return {"cuadrilla": j.cuadrilla.nombre,
+                    "labor": j.labor,
+                    "labor_nombre": nombres_de_labor(org).get(j.labor, j.labor),
+                    "zonas": sorted(z.nombre for z in j.zonas.all())}
+    return None
+
+
 def por_jornada_de(jornadas, receptores, ordenes) -> tuple:
     """({jornada.id: [orden]}, [sin jornada]): cada orden va a la cuadrilla
     de alguien que la tiene asignada."""
@@ -263,28 +287,6 @@ def por_jornada_de(jornadas, receptores, ordenes) -> tuple:
         destino = next((j for j in jornadas if quienes & receptores[j.id]), None)
         (por[destino.id] if destino else sin).append(o)
     return por, sin
-
-
-def _asuntos_de(org, ordenes) -> dict:
-    """{orden.id: asunto} de las ordenes que nacieron de un ticket (29/10/2026,
-    pedido del usuario: «también añade el asunto»). Cortado como lo cuentan los
-    niveles (`niveles.asunto_del_ticket`): «No Tiene Internet», sin el cliente
-    que el nombre del ticket trae pegado. Una sola consulta; si falla, vacio."""
-    from campo.niveles import asunto_del_ticket, asuntos_de_las_plantillas
-    from cases.models import Case
-
-    refs ={str(o.origen_ref) for o in ordenes if o.origen_tipo == "case" and o.origen_ref}
-    if not refs:
-        return {}
-    try:
-        nombre_de = {str(i): n for i, n in
-                     Case.objects.filter(org=org, id__in=list(refs)).values_list("id", "name")}
-        plantillas = asuntos_de_las_plantillas(org)
-    except Exception:                                            # noqa: BLE001
-        logger.warning("Programacion: no se pudo leer el asunto de las ordenes")
-        return {}
-    return {o.id: asunto_del_ticket(nombre_de[str(o.origen_ref)], plantillas)[1]
-            for o in ordenes if str(o.origen_ref) in nombre_de}
 
 
 def del_dia(org, fecha) -> dict:
@@ -304,12 +306,13 @@ def del_dia(org, fecha) -> dict:
     from campo.cuadrillas import configuracion_de_reparto
     from campo.labores import nombres_de_labor
     from campo.models import EventoTrabajo, OrdenTrabajo
+    from campo.niveles import asuntos_de_las_ordenes
     from campo.services import avisos
     from common.models import Notification
 
     zona = R._zona_de(org)
     jornadas, reciben, receptores, ordenes = jornadas_y_ordenes(org, fecha)
-    asunto_de = _asuntos_de(org, ordenes)
+    asunto_de = asuntos_de_las_ordenes(org, ordenes)
 
     #  QUIEN LA ASIGNO: el ultimo evento de asignacion de cada orden.
     ultimo = {}

@@ -24,6 +24,7 @@ app_name = "campo"
 
 urlpatterns = [
     path("bootstrap/", views.BootstrapView.as_view(), name="bootstrap"),
+    path("mi-dia/", views.MiDiaView.as_view(), name="mi_dia"),
     path("trabajos/", views.TrabajosListView.as_view(), name="trabajos_list"),
     # Materiales: la custodia del tecnico y lo que gasta en la calle.
     path("kit/", materiales_views.KitView.as_view(), name="kit"),
