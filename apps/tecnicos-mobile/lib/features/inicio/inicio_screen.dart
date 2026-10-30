@@ -16,6 +16,7 @@ import '../trabajo/estado_trabajo.dart';
 import '../trabajo/seleccion_jornada.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'labor_de_hoy.dart';
+import 'novedad_de_cuadrilla.dart';
 import 'resumen_de_inicio.dart';
 
 /// Inicio — la pantalla de decisión de la jornada.
@@ -49,6 +50,9 @@ class InicioScreen extends StatefulWidget {
     required this.abrirTrabajo,
     required this.nombreTecnico,
     this.laborDeHoy,
+    this.novedades = const <NovedadLocal>[],
+    this.onAvisarNovedad,
+    this.onYaSegui,
     this.resumenSincronizacion,
     this.onVerTodos,
     this.onVerMateriales,
@@ -66,6 +70,16 @@ class InicioScreen extends StatefulWidget {
   /// Con qué cuadrilla y qué labor sale hoy. Null si no se sabe; si es de otro
   /// día, no se muestra.
   final LaborDeHoy? laborDeHoy;
+
+  /// Las novedades que avisó este técnico (30/10/2026): «se pinchó la llanta».
+  final List<NovedadLocal> novedades;
+
+  /// Avisar una: (tipo, afecta, texto). Null = no se ofrece.
+  final Future<void> Function(String tipo, String afecta, String texto)?
+      onAvisarNovedad;
+
+  /// «Ya seguí» de la vigente.
+  final Future<void> Function(String id)? onYaSegui;
   final SyncSummary? resumenSincronizacion;
   final VoidCallback? onVerTodos;
 
@@ -197,6 +211,10 @@ class _InicioScreenState extends State<InicioScreen> {
               ),
             ] else ...<Widget>[
               _saludo(sync),
+              // LA NOVEDAD DE LA CUADRILLA (30/10/2026): «se pinchó la llanta»
+              // sin escribir en ningún ticket. Arriba, junto al saludo: es lo
+              // que cambia el día.
+              ..._novedad(),
               // LOS AVISOS VAN PRIMERO, Y SOLO SI HAY ALGUNO
               // -------------------------------------------
               // Un trabajo devuelto es lo más urgente que puede haber en esta
@@ -368,6 +386,18 @@ class _InicioScreenState extends State<InicioScreen> {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
+                      // La de apoyo (30/10/2026): con el cupo libre, órdenes
+                      // de esta otra.
+                      if (jornada.apoyo.isNotEmpty) ...<InlineSpan>[
+                        const TextSpan(text: ', y apoyás '),
+                        TextSpan(
+                          text: jornada.apoyo,
+                          style: const TextStyle(
+                            color: AppColors.secondary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                   key: const ValueKey<String>('labor-de-hoy'),
@@ -439,6 +469,53 @@ class _InicioScreenState extends State<InicioScreen> {
         ],
       ),
     );
+  }
+
+  /// La vigente, con «Ya seguí»; si no hay, el botón para avisar una.
+  List<Widget> _novedad() {
+    final DateTime ahora = widget.ahora ?? DateTime.now();
+    NovedadLocal? vigente;
+    for (final NovedadLocal n in widget.novedades) {
+      if (n.vigente(ahora)) {
+        vigente = n;
+        break;
+      }
+    }
+    if (vigente != null) {
+      final NovedadLocal v = vigente;
+      return <Widget>[
+        const SizedBox(height: AppSpacing.md),
+        FranjaDeNovedad(
+          novedad: v,
+          onYaSegui:
+              widget.onYaSegui == null ? null : () => widget.onYaSegui!(v.id),
+        ),
+      ];
+    }
+    if (widget.onAvisarNovedad == null) return const <Widget>[];
+    return <Widget>[
+      const SizedBox(height: AppSpacing.sm),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          key: const ValueKey<String>('avisar-una-novedad'),
+          onPressed: _abrirHojaDeNovedad,
+          icon: const Icon(Icons.campaign_outlined),
+          label: const Text('Avisar una novedad'),
+        ),
+      ),
+    ];
+  }
+
+  Future<void> _abrirHojaDeNovedad() async {
+    final (String, String, String)? r =
+        await showModalBottomSheet<(String, String, String)>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const HojaDeNovedad(),
+    );
+    if (r == null || !mounted) return;
+    await widget.onAvisarNovedad!(r.$1, r.$2, r.$3);
   }
 
   // --- 2. En qué estado está la jornada ------------------------------------

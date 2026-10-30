@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/api/api_endpoints.dart';
@@ -28,6 +29,7 @@ import '../detalle_orden/acciones_orden.dart';
 import '../detalle_orden/detalle_orden_screen.dart';
 import '../inicio/inicio_screen.dart';
 import '../inicio/labor_de_hoy.dart';
+import '../inicio/novedad_de_cuadrilla.dart';
 import '../materiales/materiales_screen.dart';
 import '../materiales/recepcion_del_kit.dart';
 import '../sesion/cierre_de_sesion.dart';
@@ -79,7 +81,17 @@ class ShellDependencias {
     this.sesionVencida,
     this.recepcion,
     this.cargarLaborDeHoy,
+    this.leerNovedades,
+    this.avisarNovedad,
+    this.yaSegui,
   });
+
+  /// Las novedades de la cuadrilla (30/10/2026). Nulas en pruebas que no las
+  /// miden: sin ellas Inicio no ofrece avisar.
+  final Future<List<NovedadLocal>> Function()? leerNovedades;
+  final Future<void> Function(String tipo, String afecta, String texto)?
+      avisarNovedad;
+  final Future<void> Function(String id)? yaSegui;
 
   /// Con qué cuadrilla y qué labor sale hoy (29/10/2026), para el saludo de
   /// Inicio. Null si no se sabe. Nulo en pruebas que no la miden.
@@ -161,6 +173,40 @@ class ShellDependencias {
       sesionVencida: ApiClient.sesionVencida,
       recepcion: RecepcionDelKit.real(),
       // Se pregunta al servidor; sin señal, vale lo último que se supo.
+      // Las novedades: se encolan acá y suben con la cola (30/10/2026).
+      leerNovedades: () async {
+        final String? orgId = await almacenamiento.getOrgId();
+        final String? profileId = await almacenamiento.getProfileId();
+        if (orgId == null || profileId == null) return const <NovedadLocal>[];
+        final List<Map<String, dynamic>> filas = await LocalDatabase()
+            .leerNovedades(orgId: orgId, profileId: profileId);
+        return <NovedadLocal>[
+          for (final Map<String, dynamic> f in filas) ?NovedadLocal.desdeFila(f),
+        ];
+      },
+      avisarNovedad: (String tipo, String afecta, String texto) async {
+        final String? orgId = await almacenamiento.getOrgId();
+        final String? profileId = await almacenamiento.getProfileId();
+        if (orgId == null || profileId == null) return;
+        await LocalDatabase().encolarNovedad(
+          orgId: orgId,
+          profileId: profileId,
+          id: const Uuid().v4(),
+          tipo: tipo,
+          afecta: afecta,
+          texto: texto,
+          avisadaEn: DateTime.now().toUtc().toIso8601String(),
+        );
+        unawaited(sincronizacion.procesarCola());
+      },
+      yaSegui: (String id) async {
+        final String? orgId = await almacenamiento.getOrgId();
+        final String? profileId = await almacenamiento.getProfileId();
+        if (orgId == null || profileId == null) return;
+        await LocalDatabase()
+            .resolverNovedad(id: id, orgId: orgId, profileId: profileId);
+        unawaited(sincronizacion.procesarCola());
+      },
       cargarLaborDeHoy: () async {
         try {
           final Response<dynamic> r =
@@ -312,6 +358,9 @@ class _AppShellState extends State<AppShell> {
   LaborDeHoy? _laborDeHoy;
   DateTime? _laborPedidaEn;
 
+  /// Las novedades de este técnico (30/10/2026).
+  List<NovedadLocal> _novedades = const <NovedadLocal>[];
+
   /// Cuántos trabajos le siguen tocando al técnico, para el número de la barra
   /// inferior. Se recalcula cuando cambian las órdenes compartidas; el cálculo
   /// es el mismo que usan las dos pantallas.
@@ -357,6 +406,7 @@ class _AppShellState extends State<AppShell> {
     widget.dependencias.ordenes.addListener(_alCambiarOrdenes);
     _cargarIdentidad();
     _cargarLaborDeHoy(siempre: true);
+    _cargarNovedades();
 
     // LA SESIÓN VENCIDA SACA A ENTRAR DE NUEVO (28/10/2026). Antes la app se
     // quedaba abierta mostrando lo último que bajó, con «sincronizado», sin
@@ -395,6 +445,7 @@ class _AppShellState extends State<AppShell> {
         _contarAvisos();
         _cargarLaborDeHoy();
       }
+      if (evento.tabla == 'cola_novedades') _cargarNovedades();
     });
   }
 
@@ -436,6 +487,17 @@ class _AppShellState extends State<AppShell> {
       _trabajosActivos =
           SeleccionJornada.activos(widget.dependencias.ordenes.trabajos).length;
     });
+  }
+
+  Future<void> _cargarNovedades() async {
+    final leer = widget.dependencias.leerNovedades;
+    if (leer == null) return;
+    try {
+      final List<NovedadLocal> n = await leer();
+      if (mounted) setState(() => _novedades = n);
+    } catch (_) {
+      // No puede tumbar el contenedor.
+    }
   }
 
   Future<void> _cargarLaborDeHoy({bool siempre = false}) async {
@@ -633,6 +695,9 @@ class _AppShellState extends State<AppShell> {
             abrirTrabajo: widget.dependencias.abrirTrabajo,
             nombreTecnico: _identidad?.nombre ?? FieldMockData.tecnicoPorDefecto,
             laborDeHoy: _laborDeHoy,
+            novedades: _novedades,
+            onAvisarNovedad: widget.dependencias.avisarNovedad,
+            onYaSegui: widget.dependencias.yaSegui,
             resumenSincronizacion: _resumen,
             abrirOrdenDeUnAviso: widget.dependencias.abrirOrdenPorId == null
                 ? null

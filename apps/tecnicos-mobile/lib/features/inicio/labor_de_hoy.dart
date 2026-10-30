@@ -58,6 +58,7 @@ class JornadaDeHoy {
   const JornadaDeHoy({
     required this.cuadrilla,
     required this.labor,
+    this.apoyo = '',
     this.zonas = const <String>[],
   });
 
@@ -65,11 +66,16 @@ class JornadaDeHoy {
 
   /// Cómo la llama la empresa: «Instalación», «Soporte en campo».
   final String labor;
+
+  /// La labor de apoyo (30/10/2026): la que hace con el cupo que la suya deja
+  /// libre. Vacía = sin apoyo.
+  final String apoyo;
   final List<String> zonas;
 
   static JornadaDeHoy desdeJson(Map<dynamic, dynamic> j) => JornadaDeHoy(
     cuadrilla: j['cuadrilla']?.toString() ?? '',
     labor: (j['labor_nombre'] ?? j['labor'] ?? '').toString(),
+    apoyo: (j['apoyo_nombre'] ?? '').toString(),
     zonas: <String>[
       if (j['zonas'] is List)
         for (final Object? z in j['zonas'] as List) z.toString(),
@@ -79,6 +85,7 @@ class JornadaDeHoy {
   Map<String, Object?> aJson() => <String, Object?>{
     'cuadrilla': cuadrilla,
     'labor_nombre': labor,
+    'apoyo_nombre': apoyo,
     'zonas': zonas,
   };
 

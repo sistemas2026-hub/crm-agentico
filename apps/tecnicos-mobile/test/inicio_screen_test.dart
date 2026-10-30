@@ -5,6 +5,7 @@ import 'package:campo/core/sync/sync_queue_service.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/inicio/inicio_screen.dart';
 import 'package:campo/features/inicio/labor_de_hoy.dart';
+import 'package:campo/features/inicio/novedad_de_cuadrilla.dart';
 import 'package:campo/features/materiales/estado_de_jornada.dart';
 import 'package:campo/features/trabajo/seleccion_jornada.dart';
 import 'package:campo/features/trabajo/trabajo_vista.dart';
@@ -135,6 +136,9 @@ class _Banco {
     DateTime? ahora,
     LaborDeHoy? laborDeHoy,
     VoidCallback? onVerMateriales,
+    List<NovedadLocal> novedades = const <NovedadLocal>[],
+    Future<void> Function(String, String, String)? onAvisarNovedad,
+    Future<void> Function(String)? onYaSegui,
   }) =>
       MaterialApp(
         theme: AppTheme.lightTheme,
@@ -147,6 +151,9 @@ class _Banco {
             onVerTodos: onVerTodos,
             onVerMateriales: onVerMateriales,
             laborDeHoy: laborDeHoy,
+            novedades: novedades,
+            onAvisarNovedad: onAvisarNovedad,
+            onYaSegui: onYaSegui,
             ahora: ahora,
             abrirTrabajo: (BuildContext contexto, TrabajoVista trabajo) async {
               abiertos.add(trabajo.id);
@@ -903,6 +910,32 @@ void main() {
       await banco.cerrar();
     });
 
+    testWidgets('con labor de apoyo lo dice: «y apoyás …» (30/10/2026)',
+        (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: hoy,
+        laborDeHoy: labor(
+          jornada: const JornadaDeHoy(
+              cuadrilla: 'Cuadrilla #1', labor: 'Soporte', apoyo: 'Instalación'),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(textoDe(tester, 'labor-de-hoy'),
+          'Tu labor para hoy es Soporte, y apoyás Instalación');
+      expect(
+        LaborDeHoy.desdeTexto(
+          labor(jornada: const JornadaDeHoy(
+                  cuadrilla: 'C', labor: 'Soporte', apoyo: 'Instalación'))
+              .aTexto(),
+        )?.jornada?.apoyo,
+        'Instalación',
+        reason: 'guardado sin señal, el apoyo vuelve',
+      );
+      await banco.cerrar();
+    });
+
     testWidgets('la labor de otro día no se muestra: mandaría a hacer otra cosa',
         (WidgetTester tester) async {
       final banco = _Banco();
@@ -1107,6 +1140,78 @@ void main() {
 
       expect(find.text('3 pendientes'), findsOneWidget);
       expect(find.byKey(const ValueKey<String>('despues-con-scroll')), findsNothing);
+      await banco.cerrar();
+    });
+  });
+
+  group('17. La novedad de la cuadrilla (30/10/2026)', () {
+    // El usuario: «¿cómo el técnico reporta alguna novedad sin escribir en el
+    // ticket, por ejemplo se pinchó la llanta?».
+    final DateTime ahora = DateTime(2026, 10, 30, 10, 15);
+    NovedadLocal llanta({String afecta = 'media_hora'}) => NovedadLocal(
+          id: 'n-1',
+          tipo: 'llanta',
+          afecta: afecta,
+          avisadaEn: DateTime(2026, 10, 30, 10, 0),
+        );
+
+    testWidgets('sin novedad, el botón para avisar; avisar manda lo elegido',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final List<(String, String, String)> avisadas = <(String, String, String)>[];
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: ahora,
+        onAvisarNovedad: (String t, String a, String x) async => avisadas.add((t, a, x)),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey<String>('franja-de-novedad')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey<String>('avisar-una-novedad')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey<String>('tipo-vehiculo')));
+      await tester.tap(find.byKey(const ValueKey<String>('afecta-una_hora')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey<String>('avisar-novedad')));
+      await tester.pumpAndSettle();
+
+      expect(avisadas, <(String, String, String)>[('vehiculo', 'una_hora', '')]);
+      await banco.cerrar();
+    });
+
+    testWidgets('con una vigente, la franja en vez del botón, y «Ya seguí» la cierra',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final List<String> cerradas = <String>[];
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: ahora,
+        novedades: <NovedadLocal>[llanta()],
+        onAvisarNovedad: (String t, String a, String x) async {},
+        onYaSegui: (String id) async => cerradas.add(id),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey<String>('franja-de-novedad')), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('avisar-una-novedad')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey<String>('ya-segui')));
+      expect(cerradas, <String>['n-1']);
+      await banco.cerrar();
+    });
+
+    testWidgets('la que ya venció no se muestra: vuelve el botón',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: ahora.add(const Duration(hours: 1)),
+        novedades: <NovedadLocal>[llanta()],
+        onAvisarNovedad: (String t, String a, String x) async {},
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey<String>('franja-de-novedad')), findsNothing);
+      expect(find.byKey(const ValueKey<String>('avisar-una-novedad')), findsOneWidget);
       await banco.cerrar();
     });
   });

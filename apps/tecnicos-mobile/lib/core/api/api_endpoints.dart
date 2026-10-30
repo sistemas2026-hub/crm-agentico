@@ -22,6 +22,11 @@ class ApiEndpoints {
 
   /// Con qué cuadrilla y qué labor sale hoy el técnico (29/10/2026).
   static String get miDia => '$baseUrl/api/campo/mi-dia/';
+
+  /// Las novedades de la cuadrilla (30/10/2026): «se pinchó la llanta».
+  static String get novedades => '$baseUrl/api/campo/novedades/';
+  static String resolverNovedad(String id) =>
+      '$baseUrl/api/campo/novedades/$id/resolver/';
   static String get trabajos => '$baseUrl/api/campo/trabajos/';
 
   // Materiales: la custodia del tecnico y lo que gasta.
