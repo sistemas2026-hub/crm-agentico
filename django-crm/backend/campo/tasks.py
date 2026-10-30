@@ -238,6 +238,30 @@ def correr_para(org, *, ahora_local=None, avisar=True) -> dict:
     return resumen
 
 
+@shared_task(name="campo.tasks.recordar_reportes")
+def recordar_reportes() -> dict:
+    """Cada 5 minutos: el Supervisor le recuerda al tecnico la orden que paso la
+    ventana sin reporte (`campo/recordatorio_de_reporte.py`). Cada empresa con
+    su contexto y en su propio try/except, como el ciclo de abajo."""
+    from campo.recordatorio_de_reporte import recordar_para
+    from common.tasks import clear_rls_context, set_rls_context
+
+    salida = {"vencidas": 0, "avisadas": 0, "errores": []}
+    try:
+        for org in Org.objects.filter(is_active=True):
+            set_rls_context(org.id)
+            try:
+                r = recordar_para(org)
+                salida["vencidas"] += r["vencidas"]
+                salida["avisadas"] += r["avisadas"]
+            except Exception as e:                               # noqa: BLE001
+                salida["errores"].append({"org": str(org.id),
+                                          "error": type(e).__name__})
+    finally:
+        clear_rls_context()
+    return salida
+
+
 @shared_task(name="campo.tasks.ciclo_de_la_madrugada")
 def ciclo_de_la_madrugada() -> dict:
     """Recorre las empresas y corre el ciclo de las que les toca.

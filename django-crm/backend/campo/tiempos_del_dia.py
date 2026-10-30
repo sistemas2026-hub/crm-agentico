@@ -217,6 +217,27 @@ def log_del_dia(ordenes, *, fecha, zona, tiempos, novedades=(), material=None,
         kit, cuando = material
         entradas.append((cuando, f"El Supervisor cargó el material{f' ({kit})' if kit else ''}",
                          "supervisor"))
+    #  Los recordatorios que el Supervisor le mando al telefono (30/10/2026,
+    #  `recordatorio_de_reporte.py`), con si llegaron.
+    from campo.avisos import AvisoEnviado
+    from campo.services.avisos import CLAVE_SIN_REPORTE
+
+    import datetime as dt
+
+    por_id = {str(i): n for i, n in numero.items()}
+    inicio = dt.datetime.combine(fecha, dt.time(0, 0), tzinfo=zona)
+    for clave, canales, cuando in (
+            AvisoEnviado.objects
+            .filter(clave__startswith=f"{CLAVE_SIN_REPORTE}|", created_at__gte=inicio,
+                    created_at__lt=inicio + dt.timedelta(days=1))
+            .values_list("clave", "canales", "created_at")):
+        partes = clave.split("|")
+        n = por_id.get(partes[1]) if len(partes) > 2 else None
+        if n is None:
+            continue
+        llego = "" if "push" in (canales or []) else " (no llegó al teléfono)"
+        entradas.append((cuando, f"El Supervisor le recordó reportar en OT #{n}{llego}",
+                         "supervisor"))
     for nov in novedades:
         entradas.append((nov.avisada_en, f"Avisó novedad: {nov.get_tipo_display().lower()} "
                                          f"({nov.get_afecta_display().lower()})", "alerta"))

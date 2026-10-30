@@ -83,6 +83,17 @@ class ConfiguracionDeSeguimiento(BaseModel):
         ),
     )
 
+    #: 30/10/2026 (`campo/recordatorio_de_reporte.py`): el Supervisor le
+    #: recuerda al tecnico, en su telefono, que la orden paso la ventana.
+    recordar_al_tecnico = models.BooleanField(
+        default=True,
+        help_text=(
+            "Si el Supervisor le manda un recordatorio al teléfono del "
+            "técnico cuando su orden pasa la ventana sin reporte. Uno "
+            "por atraso: un reporte nuevo empieza otro."
+        ),
+    )
+
     class Meta:
         db_table = "campo_configuracion_seguimiento"
 

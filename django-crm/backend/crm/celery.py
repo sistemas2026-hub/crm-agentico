@@ -126,6 +126,13 @@ app.conf.beat_schedule = {
         "task": "campo.tasks.ciclo_de_la_madrugada",
         "schedule": crontab(minute=5),
     },
+    # El Supervisor le recuerda al tecnico la orden que paso la ventana sin
+    # reporte (campo/recordatorio_de_reporte.py). Uno por atraso: mirar cada 5
+    # minutos no manda un aviso cada 5 minutos.
+    "recordar-reportes-de-campo": {
+        "task": "campo.tasks.recordar_reportes",
+        "schedule": crontab(minute="*/5"),
+    },
     # Purge already-read in-app notifications older than 90 days - daily at 3 AM
     "purge-read-notifications": {
         "task": "common.tasks.purge_read_notifications",
