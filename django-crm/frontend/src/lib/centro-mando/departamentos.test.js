@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DEPARTAMENTOS, agentesDe, departamentoPorId, plantaDe } from './departamentos.js';
+import { DEPARTAMENTOS, agentesDe, departamentoPorId, plantaDe, plantaDeLaEmpresa } from './departamentos.js';
 import { TIPOS_DE_MUEBLE } from './escena/oficina';
 
 /**
@@ -16,11 +16,17 @@ import { TIPOS_DE_MUEBLE } from './escena/oficina';
  * se describe como «el mobiliario parpadea».
  */
 
+//  Los nueve roles reales del tenant, con el area que DECLARAN.
 const inventario = [
-  { nombre: 'supervisor_noc', area: 'operativo', cargo: 'Supervisor NOC' },
-  { nombre: 'redes_noc', area: 'operativo', cargo: 'Ingeniero de red' },
-  { nombre: 'soporte_tecnico_cliente', area: 'soporte_tecnico', cargo: 'Soporte' },
-  { nombre: 'ventas', area: 'ventas', cargo: 'Comercial' }
+  { nombre: 'supervisor_noc', area: 'Operaciones', cargo: 'Supervisor NOC' },
+  { nombre: 'soporte', area: 'Atención al Cliente', cargo: 'Soporte' },
+  { nombre: 'cliente_final', area: 'Atención al Cliente', cargo: 'Primera línea' },
+  { nombre: 'soporte_tecnico_cliente', area: 'Soporte Técnico', cargo: 'Diagnóstico' },
+  { nombre: 'facturacion', area: 'Facturación', cargo: 'Facturación' },
+  { nombre: 'facturacion_cliente', area: 'Facturación', cargo: 'Cobranza' },
+  { nombre: 'ventas', area: 'Ventas', cargo: 'Comercial' },
+  { nombre: 'administracion', area: 'Administración', cargo: 'Administración' },
+  { nombre: 'configuracion_guiada', area: 'Administración', cargo: 'Gestión' }
 ];
 
 describe('hay más de un departamento, y no son el mismo con otro rótulo', () => {
@@ -123,8 +129,10 @@ describe('los identificadores de puesto no chocan entre salas', () => {
 
 describe('quién ocupa cada sala', () => {
   it('los agentes salen por área, no por nombre', () => {
-    const noc = agentesDe(inventario, departamentoPorId('operativo'));
-    expect(noc.map((a) => a.nombre)).toEqual(['redes_noc', 'supervisor_noc']);
+    // Buscar `supervisor_noc` literal funcionaría hoy y dejaría la sala vacía
+    // en la siguiente empresa, sin un error que lo explique.
+    const atencion = agentesDe(inventario, departamentoPorId('atencion_cliente'));
+    expect(atencion.map((a) => a.nombre)).toEqual(['cliente_final', 'soporte']);
   });
 
   it('acepta el rótulo además del identificador', () => {
@@ -191,15 +199,17 @@ describe('la planta lista para dibujar', () => {
 
   it('sienta a los agentes, el primero en el principal', () => {
     const principal = planta.puestos.find((p) => p.principal);
-    expect(principal.agente).toBe('redes_noc');
-    expect(principal.nombre).toBe('Ingeniero de red');
+    const primero = agentesDe(inventario, departamentoPorId('operativo'))[0];
+    expect(principal.agente).toBe(primero.nombre);
+    expect(principal.nombre).toBe(primero.rotulo);
   });
 
   it('los puestos sin agente se dibujan vacíos y lo dicen', () => {
     // Inventarles un ocupante para que la escena no se vea sosa es la clase de
     // afirmación que esta pantalla no puede permitirse.
+    const cuantos = agentesDe(inventario, departamentoPorId('operativo')).length;
     const libres = planta.puestos.filter((p) => !p.agente);
-    expect(libres.length).toBe(planta.puestos.length - 2);
+    expect(libres.length).toBe(planta.puestos.length - cuantos);
     expect(libres.every((p) => p.area === 'puesto libre')).toBe(true);
   });
 
@@ -226,5 +236,70 @@ describe('la planta lista para dibujar', () => {
 
   it('un id desconocido no rompe: cae en el primero', () => {
     expect(departamentoPorId('no_existe')).toBe(DEPARTAMENTOS[0]);
+  });
+});
+
+describe('la empresa entera, las seis salas a la vez', () => {
+  const edificio = plantaDeLaEmpresa(inventario);
+
+  it('están todas', () => {
+    expect(edificio).toHaveLength(DEPARTAMENTOS.length);
+  });
+
+  it('NINGUNA sala se solapa con otra', () => {
+    // Es la condición que sostiene la simplificación de la escena: ordena las
+    // salas por la profundidad de su origen y dentro de cada una por la suya.
+    // Si dos se tocaran habría que intercalar sus objetos uno a uno, y eso no
+    // lo hace — el síntoma sería un muro de una sala apareciendo delante del
+    // mobiliario de la vecina.
+    for (const a of edificio) {
+      for (const b of edificio) {
+        if (a === b) continue;
+        const solapaX = a.origen.gx < b.origen.gx + b.mundo.ancho &&
+                        a.origen.gx + a.mundo.ancho > b.origen.gx;
+        const solapaY = a.origen.gy < b.origen.gy + b.mundo.fondo &&
+                        a.origen.gy + a.mundo.fondo > b.origen.gy;
+        expect(solapaX && solapaY).toBe(false);
+      }
+    }
+  });
+
+  it('y el hueco entre vecinas cubre la ALTURA de un muro', () => {
+    // Tres celdas no alcanzaban: un muro de cuatro unidades se proyecta más de
+    // cien píxeles hacia arriba e invade la sala de atrás aunque en planta no
+    // se toquen. El hueco se mide contra la altura, no contra el suelo.
+    const alto = Math.max(...edificio.map((p) => p.mundo.alto));
+    const porFila = {};
+    for (const p of edificio) (porFila[p.origen.gy] = porFila[p.origen.gy] || []).push(p);
+    for (const fila of Object.values(porFila)) {
+      const orden = [...fila].sort((a, b) => a.origen.gx - b.origen.gx);
+      for (let i = 1; i < orden.length; i++) {
+        const hueco = orden[i].origen.gx - (orden[i - 1].origen.gx + orden[i - 1].mundo.ancho);
+        expect(hueco).toBeGreaterThanOrEqual(alto);
+      }
+    }
+  });
+
+  it('los 21 puestos conservan identificadores únicos', () => {
+    // La selección se guarda por id, y en la vista de empresa están los de las
+    // seis salas a la vez: uno repetido marcaría dos puestos.
+    const ids = edificio.flatMap((p) => p.puestos.map((q) => q.id));
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('los nueve agentes del inventario se sientan en alguna sala', () => {
+    // Si uno no cayera en ninguna, ese agente no se dibujaría en ninguna parte
+    // y nadie se enteraría.
+    const sentados = new Set(
+      edificio.flatMap((p) => p.puestos.map((q) => q.agente)).filter(Boolean)
+    );
+    for (const a of inventario) {
+      expect(sentados.has(a.nombre), `${a.nombre} no se sienta en ninguna sala`).toBe(true);
+    }
+  });
+
+  it('cada sala conserva su acento', () => {
+    const acentos = edificio.map((p) => p.acento);
+    expect(new Set(acentos).size).toBe(edificio.length);
   });
 });

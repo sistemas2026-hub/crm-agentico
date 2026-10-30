@@ -1658,6 +1658,63 @@ selección comprobada con la capa de rótulos encima
   igual porque el inventario del motor los sirve igual; distinguirlos pide un
   dato que hoy no viaja.
 
+---
+
+## Fase 6 — la empresa entera, las seis salas a la vez (30/10/2026)
+
+Hasta acá la oficina virtual se miraba **de una sala en una**. Juntas son otra
+cosa: se ve la empresa, no un departamento — y es lo que le da sentido al
+nombre.
+
+### Lo que costó, que es el punto
+
+**Una sala no sabe que hay otras.** Cada planta gana un `origen` en celdas y la
+escena la construye exactamente igual, en sus propias coordenadas, dentro de un
+contenedor desplazado. Montar las seis **no obligó a tocar nada de
+`oficina.ts`**: es la segunda vez que ese corte se paga solo.
+
+El orden entre salas lo da la profundidad de su origen; dentro de cada una
+sigue siendo el suyo. Es una simplificación honesta **y tiene un límite
+declarado**: si dos salas se solaparan en la rejilla habría que intercalar sus
+objetos uno a uno, y eso no se hace. Hay una prueba que comprueba que no se
+solapan.
+
+### El hueco se mide contra la ALTURA, no contra el suelo
+
+Con tres celdas de separación los muros de una sala se metían dentro de la
+vecina. En isometría un muro de cuatro unidades se proyecta más de cien píxeles
+hacia arriba, así que invade la sala de atrás **aunque en planta no se toquen**.
+Cinco celdas, y una prueba que exige que el hueco cubra la altura máxima.
+
+### Medido en el navegador
+
+```
+1.289 objetos · 132-144 fps · escala 0,41
+21 de 21 puestos seleccionables, de las SEIS salas
+los nueve agentes del inventario, sentados y visibles a la vez
+```
+
+El barrido de selección es lo que más dice: recorrió el lienzo entero pulsando
+cada 18 px y encontró los 21 puestos, repartidos en las seis salas. La cámara y
+la selección funcionan igual con seis recintos que con uno.
+
+### Una decisión sobre el color
+
+Con las seis a la vez, **los colores de estado toman el acento de la primera
+sala**, no el de cada una. Si cada sala tiñera su propio «trabajando», el mismo
+estado se vería de seis colores distintos en la misma pantalla y el color
+dejaría de decir nada. Los de alarma siguen sin cambiar nunca.
+
+### Lo que queda fuera, dicho
+
+- **Los rótulos están por encima del mobiliario de SU sala, no del de las
+  vecinas.** Con las seis a la vez, un mueble de una sala cercana puede tapar el
+  rótulo de una lejana. Se arregla subiendo la capa de rótulos al edificio;
+  hoy vive en cada recinto.
+- **No hay nada entre las salas.** El hueco es suelo vacío: ni pasillos que las
+  unan, ni puertas, ni un vestíbulo. Son seis oficinas cerca, no un edificio.
+- **Las seis siguen siendo rectángulos con dos muros.**
+
 ## Qué NO hacer
 
 - **No construir los ocho departamentos a la vez.** Uno (NOC), de punta a punta,

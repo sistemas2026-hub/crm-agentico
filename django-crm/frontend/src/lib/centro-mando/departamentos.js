@@ -412,3 +412,64 @@ export function plantaDe(depto, agentes) {
     puestos
   };
 }
+
+/**
+ * LA PLANTA DE LA EMPRESA ENTERA: las seis salas a la vez.
+ *
+ * Hasta acá la oficina virtual se miraba de una sala en una. Juntas son otra
+ * cosa — se ve la empresa, no un departamento— y es lo que da sentido al
+ * nombre.
+ *
+ * EL REPARTO DEJA PASILLO ENTRE SALAS, Y NO ES ESTÉTICO. La escena ordena las
+ * salas por la profundidad de su origen y dentro de cada una por la suya: eso
+ * es correcto mientras dos salas no se solapen en la rejilla. Si se tocaran,
+ * habría que intercalar sus objetos uno a uno, y eso la escena no lo hace. El
+ * hueco es lo que mantiene cierta la simplificación.
+ *
+ * El reparto se calcula, no se escribe a mano: las salas no miden lo mismo, y
+ * una rejilla con coordenadas fijas se descuadra en cuanto alguien cambie el
+ * tamaño de una.
+ *
+ * @param {any[]} agentes inventario del motor
+ * @param {number} columnas cuántas salas por fila
+ */
+export function plantaDeLaEmpresa(agentes, columnas = 3) {
+  //  Cinco celdas, no tres. Con tres los muros de una sala se metían dentro de
+  //  la vecina: en isometría un muro de cuatro unidades de alto se proyecta
+  //  más de cien píxeles hacia arriba, y eso invade la sala de atrás aunque en
+  //  planta no se toquen. El hueco se mide contra la ALTURA, no contra el
+  //  suelo.
+  const SEPARACION = 5;
+  //  Cada columna es tan ancha como su sala más ancha, y cada fila tan honda
+  //  como su sala más honda. Así ninguna invade a su vecina por mucho que
+  //  crezca.
+  const anchoDeColumna = [];
+  const fondoDeFila = [];
+  DEPARTAMENTOS.forEach((d, i) => {
+    const c = i % columnas;
+    const f = Math.floor(i / columnas);
+    anchoDeColumna[c] = Math.max(anchoDeColumna[c] ?? 0, d.planta.mundo.ancho);
+    fondoDeFila[f] = Math.max(fondoDeFila[f] ?? 0, d.planta.mundo.fondo);
+  });
+
+  const desplazamientoX = [];
+  const desplazamientoY = [];
+  let acumulado = 0;
+  anchoDeColumna.forEach((w, c) => {
+    desplazamientoX[c] = acumulado;
+    acumulado += w + SEPARACION;
+  });
+  acumulado = 0;
+  fondoDeFila.forEach((h, f) => {
+    desplazamientoY[f] = acumulado;
+    acumulado += h + SEPARACION;
+  });
+
+  return DEPARTAMENTOS.map((d, i) => ({
+    ...plantaDe(d, agentes),
+    origen: {
+      gx: desplazamientoX[i % columnas],
+      gy: desplazamientoY[Math.floor(i / columnas)]
+    }
+  }));
+}

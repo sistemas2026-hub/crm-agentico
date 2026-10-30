@@ -27,7 +27,7 @@
 
 import { Application, Container, Sprite } from 'pixi.js';
 import { Camara, LIMITES, gesto, type Toque } from './camara';
-import { aPantalla, extensionDelMundo } from './isometria';
+import { aPantalla, extensionDelMundo, profundidad } from './isometria';
 import { PALETA, coloresConAcento } from './paleta';
 import { Transicion } from './pose';
 import { construirOficina, type Planta, type Puesto } from './oficina';
@@ -90,13 +90,14 @@ export interface OpcionesDeEscena {
   /** El elemento que contiene el lienzo. Se mide para encuadrar. */
   contenedor: HTMLElement;
   /**
-   * La planta completa: mundo, pasillo, mobiliario, puestos y cartel.
+   * La planta, o LAS plantas.
    *
-   * Entra como DATO. La escena sabe dibujar tipos de mueble y no sabe qué
-   * departamento está construyendo, que es lo que permite que la segunda sala
-   * no cueste lo que costó la primera.
+   * Una sola dibuja una sala. Varias dibujan el edificio: cada una se construye
+   * exactamente igual, en sus propias coordenadas, y se desplaza entera por su
+   * `origen`. Ninguna sala sabe que hay otras — por eso montar las seis no
+   * obligó a tocar nada de `oficina.ts`.
    */
-  planta: Planta;
+  planta: Planta | Planta[];
 }
 
 interface Habitante {
@@ -133,12 +134,48 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
   (app.canvas.style as any).userSelect = 'none';
 
   const texturas = generarTexturas();
-  const oficina = construirOficina(opciones.planta, texturas);
+
+  const plantas = Array.isArray(opciones.planta) ? opciones.planta : [opciones.planta];
 
   /* El mundo entero cuelga de un contenedor al que se le aplica la cámara. */
   const mundo = new Container();
-  mundo.addChild(oficina.raiz);
+  mundo.sortableChildren = true;
   app.stage.addChild(mundo);
+
+  /*  Una sala por planta, cada una en su contenedor desplazado.
+   *
+   *  El orden entre salas lo da la profundidad de su origen: la de delante se
+   *  dibuja después. Dentro de cada una el orden sigue siendo el suyo. Es una
+   *  simplificación honesta y tiene un límite: si dos salas se SOLAPARAN en la
+   *  rejilla, habría que intercalar sus objetos y esto no lo hace. Por eso el
+   *  reparto deja pasillo entre ellas. */
+  const salas = plantas.map((planta) => {
+    const o = planta.origen ?? { gx: 0, gy: 0 };
+    const oficina = construirOficina(planta, texturas);
+    const caja = new Container();
+    const p = aPantalla(o.gx, o.gy, 0);
+    caja.position.set(p.x, p.y);
+    caja.zIndex = profundidad(o.gx, o.gy);
+    caja.addChild(oficina.raiz);
+    mundo.addChild(caja);
+    return { oficina, origen: o };
+  });
+
+  const oficina = {
+    //  El recinto que la cámara encuadra: la unión de todas las salas.
+    mundo: {
+      ancho: Math.max(...salas.map((s) => s.origen.gx + s.oficina.mundo.ancho)),
+      fondo: Math.max(...salas.map((s) => s.origen.gy + s.oficina.mundo.fondo)),
+      alto: Math.max(...salas.map((s) => s.oficina.mundo.alto))
+    },
+    puestos: salas.flatMap((s) => s.oficina.puestos),
+    animar(t: number, dt: number) {
+      for (const s of salas) s.oficina.animar(t, dt);
+    },
+    destruir() {
+      for (const s of salas) s.oficina.destruir();
+    }
+  };
 
   /* ── la viñeta ────────────────────────────────────────────────────────── */
   /* Va en el ESCENARIO y no en el mundo: oscurece las esquinas de la vista,
@@ -198,7 +235,11 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
 
   /*  Los colores de estado con el acento de esta sala. Los de alarma NO
       cambian: un rojo tiene que ser el mismo rojo en las ocho. */
-  const colores = coloresConAcento(opciones.planta.acento);
+  //  Con varias salas el acento de los estados es el de la primera: los
+  //  colores de alarma no cambian nunca y el de «normal» tiene que ser uno
+  //  solo cuando se ven todas a la vez, o el mismo estado se vería de seis
+  //  colores distintos en la misma pantalla.
+  const colores = coloresConAcento(plantas[0]?.acento);
 
   /* ── selección ────────────────────────────────────────────────────────── */
   /* Qué puesto estaba bajo el puntero al pulsar. Lo escribe el sistema de

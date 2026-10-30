@@ -34,7 +34,7 @@
   import { crearDemostracion } from '$lib/centro-mando/demo.js';
   import { proyectar, vigentes } from '$lib/centro-mando/proyeccion.js';
   import { frescura } from '$lib/centro-mando/frescura.js';
-  import { DEPARTAMENTOS, plantaDe } from '$lib/centro-mando/departamentos.js';
+  import { DEPARTAMENTOS, plantaDe, plantaDeLaEmpresa } from '$lib/centro-mando/departamentos.js';
   import FichaDePuesto from '$lib/components/centro-mando/FichaDePuesto.svelte';
 
   let { data } = $props();
@@ -46,6 +46,8 @@
    * —otro mundo, otro mobiliario, otros puestos— y reconstruirla en caliente
    * sería mantener dos caminos para el mismo resultado.
    */
+  //  `null` significa LA EMPRESA ENTERA: las seis salas a la vez. No es un
+  //  departamento más — cambia qué se monta, no cuál se mira.
   let deptoId = $state(DEPARTAMENTOS[0].id);
   let depto = $derived(DEPARTAMENTOS.find((d) => d.id === deptoId) ?? DEPARTAMENTOS[0]);
 
@@ -55,8 +57,14 @@
    * inventario cambiara habría que remontar, que es lo que pasa al navegar.
    */
   const inventario = data.agentes;
-  let planta = $derived(plantaDe(depto, inventario));
-  let agentesConPuesto = $derived(planta.puestos.map((p) => p.agente).filter(Boolean));
+  let planta = $derived(
+    deptoId === null ? plantaDeLaEmpresa(inventario) : plantaDe(depto, inventario)
+  );
+  /** Los puestos de lo que se esté mirando: una sala o las seis. */
+  let puestosVisibles = $derived(
+    Array.isArray(planta) ? planta.flatMap((p) => p.puestos) : planta.puestos
+  );
+  let agentesConPuesto = $derived(puestosVisibles.map((p) => p.agente).filter(Boolean));
 
   /** @type {HTMLElement|null} */
   let lienzo = $state(null);
@@ -121,7 +129,7 @@
   });
 
   /** El puesto que está seleccionado, con su definición. */
-  let puestoSeleccionado = $derived(planta.puestos.find((p) => p.id === seleccionado) ?? null);
+  let puestoSeleccionado = $derived(puestosVisibles.find((p) => p.id === seleccionado) ?? null);
   let estadoSeleccionado = $derived(
     puestoSeleccionado?.agente
       ? (estados.find((e) => e.agente === puestoSeleccionado.agente) ?? null)
@@ -281,18 +289,28 @@
   }
 </script>
 
-<svelte:head><title>Oficina virtual · {depto.rotulo}</title></svelte:head>
+<svelte:head><title>Oficina virtual · {deptoId === null ? 'La empresa' : depto.rotulo}</title></svelte:head>
 
 <div class="pantalla">
   <header class="barra">
     <div class="donde">
-      <h1>{depto.rotulo}</h1>
-      <p>{depto.direccion} · prototipo de oficina virtual</p>
+      <h1>{deptoId === null ? 'La empresa' : depto.rotulo}</h1>
+      <p>
+        {deptoId === null
+          ? `${DEPARTAMENTOS.length} departamentos`
+          : depto.direccion} · prototipo de oficina virtual
+      </p>
     </div>
 
     <!-- El selector de sala. Cambiarlo remonta la escena entera: es otra
          planta, no el mismo recinto con otros muebles. -->
     <nav class="salas" aria-label="Departamento">
+      <button
+        type="button"
+        class:activa={deptoId === null}
+        aria-pressed={deptoId === null}
+        onclick={() => { deptoId = null; seleccionado = null; }}
+      >La empresa</button>
       {#each DEPARTAMENTOS as d (d.id)}
         <button
           type="button"
@@ -370,7 +388,7 @@
       </span>
     {:else}
       <span>
-        {agentesConPuesto.length} de {planta.puestos.length} puestos ocupados:
+        {agentesConPuesto.length} de {puestosVisibles.length} puestos ocupados:
         <code>{agentesConPuesto.join(', ')}</code>
       </span>
     {/if}

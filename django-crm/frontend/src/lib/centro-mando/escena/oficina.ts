@@ -62,6 +62,15 @@ export interface Mueble2D {
 }
 
 export interface Planta {
+  /**
+   * Dónde empieza esta sala dentro del edificio, en celdas.
+   *
+   * Ausente o `{0,0}` para una sala sola. Cuando se montan varias a la vez, es
+   * lo único que las separa: cada una sigue dibujándose en SUS coordenadas, y
+   * el edificio la desplaza entera. Así una sala no necesita saber que hay
+   * otras, que es lo que permitió montar las seis sin tocar nada de acá.
+   */
+  origen?: { gx: number; gy: number };
   mundo: Mundo;
   /** El color propio del departamento. Tiñe la sala, nunca los estados. */
   acento?: number;
