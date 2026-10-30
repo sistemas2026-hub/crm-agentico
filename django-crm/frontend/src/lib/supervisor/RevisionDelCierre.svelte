@@ -29,8 +29,13 @@
     <p class="rc-titulo"><strong>El Supervisor revisó el cierre:</strong> {r.texto}</p>
     {#if r.solucion}<p class="rc-solucion">Qué hizo: «{r.solucion}»</p>{/if}
     {#if r.supervisor_no_pudo}
-      <!-- La quiso cerrar solo y el motor no lo dejó: cuándo y qué compuerta. -->
-      <p class="rc-no-pudo">El Supervisor la quiso cerrar solo a las {r.supervisor_no_pudo.hora} y el motor no lo dejó: {r.supervisor_no_pudo.detalle}</p>
+      <!-- La quiso cerrar solo y no quedó cerrada: cuándo, y si el motor no lo
+           dejó o no se sabe si el ISP la cerró (no es lo mismo). -->
+      {#if r.supervisor_no_pudo.detalle.includes('ESTADO_INCIERTO')}
+        <p class="rc-no-pudo">El Supervisor la quiso cerrar solo a las {r.supervisor_no_pudo.hora} y no se sabe si el ISP la cerró: revisalo en su sistema antes de aprobar.</p>
+      {:else}
+        <p class="rc-no-pudo">El Supervisor la quiso cerrar solo a las {r.supervisor_no_pudo.hora} y el motor no lo dejó: {r.supervisor_no_pudo.detalle}</p>
+      {/if}
     {/if}
     <ul class="rc-puntos">
       {#each r.puntos as p (p.clave)}

@@ -73,6 +73,14 @@ describe('la revisión del cierre en la tarjeta', () => {
     expect(html(orden())).not.toContain('quiso cerrar solo');
   });
 
+  it('si no se sabe si el ISP la cerró, no dice «no lo dejó»', () => {
+    const h = html(orden({
+      revision: revision({ supervisor_no_pudo: { hora: '15:00', detalle: 'ESTADO_INCIERTO: ReadTimeout' } })
+    }));
+    expect(h).toContain('no se sabe si el ISP la cerró');
+    expect(h).not.toContain('no lo dejó');
+  });
+
   it('sin revisión no dibuja nada', () => {
     expect(html(orden({ revision: null }))).not.toContain('rc-');
   });
