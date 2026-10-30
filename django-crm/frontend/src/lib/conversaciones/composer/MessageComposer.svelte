@@ -50,6 +50,9 @@
     avisoDevolucion = null,
     // --- lo que el marcado escribe
     entrada = $bindable(''),
+    // «Queda en espera» (29/10/2026, opción de T5): la marca y qué se espera.
+    quedaEnEspera = $bindable(false),
+    notaEspera = $bindable(''),
     modo = $bindable('responder'),
     campoTexto = $bindable(),
     adjuntarAbierto = $bindable(false),
@@ -123,7 +126,12 @@
       ? bloqueadoPorVentana
         ? 'WhatsApp · ventana cerrada'
         : ventanaAbierta
-          ? 'WhatsApp · ventana abierta'
+          ? // Cuánto queda, SIEMPRE (29/10/2026): el aviso grande sale recién
+            // en la última hora, y hasta ahí «abierta» no decía si eran 23 h
+            // o 2.
+            ventanaRestante != null
+            ? `WhatsApp · ventana: quedan ${comoDuracion(ventanaRestante)}`
+            : 'WhatsApp · ventana abierta'
           : 'WhatsApp'
       : conversacion.canal
   );
@@ -582,6 +590,29 @@
           }
         }}
       ></textarea>
+      <!-- «QUEDA EN ESPERA» (29/10/2026). La opción que el contrato del relevo
+           le da a T5 y que nunca tuvo pantalla: la conversación queda marcada
+           como esperando algo -- que el cliente reinicie, que pase el técnico
+           -- y la cola la muestra aparte. Responder sin marcarla la quita. Solo
+           al responder como persona: en nota o devolviendo a la IA no aplica. -->
+      {#if escalada && modo === 'responder' && !bloqueadoPorVentana && !bloqueadoPorIA}
+        <div class="espera" class:espera-activa={quedaEnEspera}>
+          <label class="espera-marca">
+            <input type="checkbox" bind:checked={quedaEnEspera} />
+            Queda en espera
+          </label>
+          {#if quedaEnEspera}
+            <input
+              class="espera-nota"
+              type="text"
+              maxlength="200"
+              bind:value={notaEspera}
+              placeholder="¿Qué se espera? Ej: que el cliente reinicie el equipo"
+              aria-label="Qué se espera"
+            />
+          {/if}
+        </div>
+      {/if}
       <!-- ── 4. EL PIE ─────────────────────────────────────────────────────
            La pista del teclado a la izquierda y el envío a la derecha, como
            la referencia. La pista no se dibuja cuando Enter no manda nada:
@@ -1233,6 +1264,36 @@
   /* Igual que los modos: "Enviar y devolver" y su "Enviando y devolviendo…"
      son mas anchos que "Enviar", y el pie tambien lleva la pista del canal a
      la izquierda. Que baje en vez de apretarse. */
+  .espera {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 2px;
+    font-size: 11.5px;
+    color: var(--bandeja-texto-2);
+  }
+  .espera-marca {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .espera-activa .espera-marca {
+    color: var(--bandeja-aviso);
+    font-weight: 600;
+  }
+  .espera-nota {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 7px;
+    border: 1px solid var(--bandeja-aviso-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-aviso-fondo);
+    font: inherit;
+    color: var(--bandeja-texto);
+  }
+
   .compositor-pie {
     display: flex;
     flex-wrap: wrap;

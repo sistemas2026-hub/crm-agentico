@@ -4323,7 +4323,30 @@ def _rotulos_de(config) -> dict:
         "claves": editor.claves_con_rotulo(config.model_dump()),
         "rotulos": dict(config.conversaciones.rotulos),
         "sin_rotulo": editor.claves_sin_rotulo(config),
+        # Viaja con los rotulos porque se edita en la misma pantalla.
+        "reincidencia_dias": config.conversaciones.reincidencia_dias,
     }
+
+
+@app.put("/configuracion/bandeja/reincidencia")
+def configuracion_bandeja_reincidencia_guardar():
+    """Cuantos dias mira el aviso de reincidencia; 0 lo apaga (29/10/2026)."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        dias = int(cuerpo.get("dias"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "'dias' tiene que ser un numero entero."}), 400
+    try:
+        config = editor.guardar_reincidencia(tenant, dias)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify({"reincidencia_dias": config.conversaciones.reincidencia_dias})
 
 
 @app.get("/configuracion/bandeja/rotulos")
@@ -5600,6 +5623,19 @@ def conversaciones():
         salida = proyeccion.agrupar_por_numero(salida, nacimientos)
     salida.sort(key=proyeccion.orden_de_cola)
 
+    # LA VENTANA DE 24 H TAMBIEN EN LA COLA (29/10/2026). Hasta hoy solo la
+    # calculaba la vista de UNA conversacion, y en la cola no se veia cual
+    # estaba por cerrarse. Mismo calculo que alla (whatsapp.estado_de_ventana)
+    # y del NUMERO, no de la fila: el ultimo mensaje del cliente puede estar
+    # en otra abierta del mismo chat (C19).
+    for fila in salida:
+        if fila.get("canal") != "whatsapp":
+            continue
+        entrantes = [x.get("ultimo_mensaje_cliente")
+                     for x in [fila, *(fila.get("abiertas") or [])]
+                     if x.get("ultimo_mensaje_cliente")]
+        fila["ventana_whatsapp"] = whatsapp.estado_de_ventana(max(entrantes) if entrantes else None)
+
     # El plazo de toma viaja con la cola y no por conversacion: es uno solo
     # para toda la empresa, y mandarlo repetido en cada fila seria el mismo
     # numero N veces. 0 = la empresa no definio objetivo, y entonces la
@@ -6297,6 +6333,15 @@ def conversaciones_mensajes(id_conversacion):
             conv.get("ultimo_mensaje_cliente_numero") or conv.get("ultimo_mensaje_cliente"))
     # Quien controla HOY, ya calculado: la pantalla no reimplementa la regla.
     conv["control_efectivo"] = control_efectivo(conv)
+    # REINCIDENCIA (29/10/2026): cuantas veces escribio este numero en los
+    # ultimos N dias, y por que. La cuenta es del codigo; la pantalla solo la
+    # dice. No poder calcularla no puede tumbar la conversacion.
+    try:
+        dias = int(getattr(_config_de(tenant).conversaciones, "reincidencia_dias", 0) or 0)
+        conv["reincidencia"] = persistencia.reincidencia_de(tenant, id_conversacion, dias)
+    except Exception as e:
+        registrar("conversaciones", "no se pudo calcular la reincidencia", error=e)
+        conv["reincidencia"] = None
 
     # Los identificadores tecnicos del equipo del cliente, FILTRADOS por la
     # misma lista que decide que se persiste al verificar. 'datos_sesion'
@@ -7450,6 +7495,20 @@ def conversaciones_responder_humano(id_conversacion, ticket_del_caso: str | None
                         "aceptacion_registrada": entrega["aceptacion_registrada"],
                         "devuelto_al_asistente": devuelto}), 200
     reintento = bool(destino.get("existente"))
+
+    # «QUEDA EN ESPERA» -- la opcion de T5 (29/10/2026). Con texto abre o
+    # renueva el pendiente interno; sin el, cierra el que habia ("sin la
+    # marca: cierra el pendiente interno previo", contrato §6). No va con
+    # "responder y devolver": esa deja la conversacion a la IA. Un fallo aca
+    # no tumba la respuesta, que ya esta guardada: queda en el log.
+    if not devolver:
+        try:
+            transiciones.marcar_pendiente_interno(
+                tenant, id_conversacion, nota=cuerpo.get("pendiente_interno"),
+                operador_id=autor_id, operador_nombre=autor,
+                clave=f"pendiente:{clave}" if clave else None)
+        except Exception as e:
+            registrar("conversaciones", "no se pudo marcar el pendiente interno", error=e)
 
     # Lo que escribio la persona entra al HISTORIAL que ve el modelo, marcado
     # como suyo.

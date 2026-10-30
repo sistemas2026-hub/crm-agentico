@@ -11,11 +11,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const guardarRotulosBandeja = vi.fn();
 const leerRotulosBandeja = vi.fn();
 const leerAjustesBandeja = vi.fn();
+const guardarReincidencia = vi.fn();
 vi.mock('$lib/server/v2/bandeja-config.js', () => ({
   guardarAjustesBandeja: vi.fn(),
   leerAjustesBandeja: (...a) => leerAjustesBandeja(...a),
   guardarRotulosBandeja: (...a) => guardarRotulosBandeja(...a),
-  leerRotulosBandeja: (...a) => leerRotulosBandeja(...a)
+  leerRotulosBandeja: (...a) => leerRotulosBandeja(...a),
+  guardarReincidencia: (...a) => guardarReincidencia(...a)
 }));
 
 const { actions, load } = await import('./+page.server.js');
@@ -63,6 +65,20 @@ describe('rótulos de la Bandeja', () => {
     const r = /** @type {any} */ (await actions.rotulos(evento({ 'rotulo:x': 'Algo' })));
     expect(r.status).toBe(400);
     expect(r.data.rotulos.error).toMatch(/no es un motivo/);
+  });
+
+  it('los días de reincidencia llegan como número', async () => {
+    guardarReincidencia.mockReset().mockResolvedValue({});
+    const r = /** @type {any} */ (await actions.reincidencia(evento({ reincidencia_dias: '15' })));
+    expect(guardarReincidencia.mock.calls[0][2]).toBe(15);
+    expect(r.reincidenciaGuardada).toBe(true);
+  });
+
+  it('fuera de rango no llega al motor', async () => {
+    guardarReincidencia.mockReset();
+    const r = /** @type {any} */ (await actions.reincidencia(evento({ reincidencia_dias: '900' })));
+    expect(r.status).toBe(400);
+    expect(guardarReincidencia).not.toHaveBeenCalled();
   });
 
   it('quien no es administrador no escribe', async () => {

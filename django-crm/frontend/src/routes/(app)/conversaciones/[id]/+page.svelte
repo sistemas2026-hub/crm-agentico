@@ -364,6 +364,12 @@
       al lado y pasa a abrirse como panel. */
   let contextoAbierto = $state(false);
 
+  /* «Queda en espera» del compositor (opción de T5). Se manda con la
+     respuesta y se limpia al enviar: la próxima respuesta sin marcar la
+     quita, como dice el contrato. */
+  let quedaEnEspera = $state(false);
+  let notaEspera = $state('');
+
   /* EN PANTALLA ANCHA LA COLUMNA TAMBIÉN SE RECOGE (29/10/2026). Hasta hoy
      estaba siempre fija por encima de 1240px, y en una conversación donde no
      hay nada que mirar ahí -- sin verificar, sin ficha -- ocupaba 350px que el
@@ -1628,11 +1634,22 @@
           body: JSON.stringify({
             mensaje: texto,
             clave_idempotencia: burbuja.clave_idempotencia,
-            devolver_al_asistente: devolviendo
+            devolver_al_asistente: devolviendo,
+            // Sin marcar = null = cierra la espera que hubiera (contrato T5).
+            pendiente_interno:
+              !devolviendo && quedaEnEspera ? notaEspera.trim() || 'En espera' : null
           })
         });
         const datos = await resp.json();
         if (resp.ok && (await seguirEnLaNueva(datos))) return;
+        if (resp.ok && !devolviendo) {
+          // Lo que la pantalla muestra ya, sin esperar al sondeo: la marca se
+          // envió con la respuesta y el motor la abrió o la cerró (T5).
+          conversacion.pendiente_interno_desde = quedaEnEspera ? new Date().toISOString() : null;
+          conversacion.pendiente_interno_nota = quedaEnEspera ? notaEspera.trim() || 'En espera' : null;
+          quedaEnEspera = false;
+          notaEspera = '';
+        }
         if (!resp.ok && chatCerrado && datos?.codigo === 'hay_conversacion_abierta') {
           // No se guardó ni se envió nada: la burbuja se va y el texto vuelve.
           const i = mensajes.findIndex((m) => m.clave_idempotencia === burbuja.clave_idempotencia);
@@ -1732,6 +1749,7 @@
     {escalada}
     {asignadaA}
     contextoAbierto={pantallaAncha ? !contextoRecogido : contextoAbierto}
+    rotulos={data.rotulos ?? {}}
     ficha={data.fichaCliente?.cliente ?? null}
     onAlternarContexto={alternarContexto}
   />
@@ -1830,6 +1848,7 @@
       {interviniendo} {errorIntervenir}
       {adjunto} {grabando} {grabPausada} {segundos} {limites}
       {ventanaAbierta} {ventanaRestante} {ventanaPorCerrarse}
+      bind:quedaEnEspera bind:notaEspera
       {plantillas} {cargandoPlantillas} {errorPlantillas}
       {enviandoPlantilla} {plantillaCompleta}
       {vistaPreviaPlantilla} {hayPlantillaDeServicio}

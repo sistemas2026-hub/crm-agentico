@@ -830,6 +830,38 @@ _SQL_MENSAJES = """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_
                order by m.creado_en asc"""
 
 
+def reincidencia_de(tenant: str, conversation_id: str, dias: int) -> dict | None:
+    """
+    Cuantas conversaciones tuvo el MISMO numero en los ultimos 'dias', y por
+    que caso (29/10/2026). "Escribio 3 veces en 15 dias por internet lento"
+    cambia la conversacion: deja de ser reiniciar el equipo y pasa a ser una
+    visita. Lo cuenta el codigo, no el modelo (CLAUDE.md §4).
+
+    Solo metadatos: canal y numero para agrupar, y el caso. Ningun texto.
+    'dias' 0 = apagado. None si la conversacion no existe.
+    """
+    if not dias or dias <= 0:
+        return None
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select coalesce(nullif(c.caso_manual, ''), nullif(c.etiqueta, '')) as caso,
+                      count(*) as n
+               from asistente.conversations c
+               join asistente.conversations x
+                 on x.organization_id = c.organization_id
+                and x.canal = c.canal and x.usuario_externo = c.usuario_externo
+               where c.organization_id = %s and x.id = %s
+                 and c.creado_en >= now() - make_interval(days => %s)
+               group by 1""",
+            (org, conversation_id, int(dias)))
+        filas = cur.fetchall()
+    if not filas:
+        return None
+    por_caso = sorted(({"caso": f["caso"], "n": int(f["n"])} for f in filas if f["caso"]),
+                      key=lambda x: -x["n"])
+    return {"dias": int(dias), "total": sum(int(f["n"]) for f in filas), "por_caso": por_caso}
+
+
 def mensajes_de(tenant: str, conversation_id: str) -> dict:
     """
     El encabezado de una conversacion puntual (para el detalle de la
@@ -849,6 +881,10 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       -- control EFECTIVO ya calculado (api.py), no la regla.
                       relevo_version, control, control_motivo,
                       asignada_a_usuario_id, asignada_a_nombre, aviso_relevo,
+                      -- «En espera» (29/10/2026): para que la pantalla diga
+                      -- que se espera y desde cuando. La nota es de quien
+                      -- atiende, no del cliente.
+                      pendiente_interno_desde, pendiente_interno_nota,
                       -- Lo que el modelo ya habia escrito al escalar y hasta
                       -- ahora solo viajaba a la descripcion del ticket. Es lo
                       -- que arma el resumen de arriba en el detalle: que

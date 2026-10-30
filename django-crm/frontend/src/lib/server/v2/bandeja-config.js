@@ -112,7 +112,7 @@ export async function guardarAjustesBandeja(locals, fetch, valores) {
  * si no hay asistente. Devuelve las claves que admiten rótulo, por familia, y
  * los rótulos guardados. No lanza, por lo mismo que `leerAjustesBandeja`.
  *
- * @returns {Promise<{ claves: { motivos: string[], etiquetas: string[], casos: string[] }, rotulos: Record<string, string>, sin_rotulo?: Record<string, string[]> } | null>}
+ * @returns {Promise<{ claves: { motivos: string[], etiquetas: string[], casos: string[] }, rotulos: Record<string, string>, sin_rotulo?: Record<string, string[]>, reincidencia_dias?: number } | null>}
  */
 export async function leerRotulosBandeja(locals, fetch) {
   const cfg = await destinoDelAsistente(locals, fetch);
@@ -145,6 +145,29 @@ export async function guardarRotulosBandeja(locals, fetch, rotulos) {
     method: 'PUT',
     headers: headersMotor({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ tenant: cfg.tenant, rotulos })
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(datos.error || 'El asistente rechazó el cambio.');
+  }
+  return datos;
+}
+
+/**
+ * Cuántos días mira el aviso de reincidencia (29/10/2026). 0 lo apaga. El
+ * rango lo valida el motor y su mensaje se deja pasar.
+ *
+ * @param {number} dias
+ */
+export async function guardarReincidencia(locals, fetch, dias) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) {
+    throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  }
+  const resp = await fetch(`${cfg.baseUrl}/configuracion/bandeja/reincidencia`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, dias })
   });
   const datos = await resp.json().catch(() => ({}));
   if (!resp.ok) {

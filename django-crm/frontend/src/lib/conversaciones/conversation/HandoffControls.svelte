@@ -97,6 +97,13 @@
     {#if caso?.id}
       <span class="aviso-caso">Caso abierto en CRM</span>
     {/if}
+    <!-- EN ESPERA (29/10/2026): qué se espera, para quien la abra después.
+         Se quita respondiendo sin marcar «Queda en espera». -->
+    {#if conversacion.pendiente_interno_desde && conversacion.estado !== 'cerrada'}
+      <span class="aviso-espera" title="Se quita al responder sin marcar «Queda en espera»">
+        En espera: {conversacion.pendiente_interno_nota || 'sin detalle'}
+      </span>
+    {/if}
     <!-- Tomar el caso, y soltarlo. Son el mismo boton porque son el mismo
          gesto en dos sentidos, y porque tener dos ("Atender" / "Soltar")
          obligaria a mirar cual esta activo para saber quien lo tiene. -->
@@ -413,6 +420,20 @@
      el, en vez de que el motivo desaparezca para que quepan. */
   .aviso-motivo {
     color: var(--bandeja-texto-2);
+  }
+
+  .aviso-espera {
+    padding: 1px 7px;
+    border: 1px solid var(--bandeja-aviso-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-aviso-fondo);
+    color: var(--bandeja-aviso);
+    font-size: 11.5px;
+    font-weight: 600;
+    max-width: 22rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
 

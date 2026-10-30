@@ -12,6 +12,7 @@
    * iniciales, el filete vertical y el bloque de control de dos renglones.
    */
   import { ArrowLeft, Phone, User, PanelRight } from '@lucide/svelte';
+  import { rotuloDe } from '$lib/conversaciones/rotulos.js';
 
   let {
     conversacion,
@@ -30,8 +31,22 @@
         vivo y NO se guarda, así que puede venir vacía o no venir -- cada
         campo se dibuja sólo si llegó. */
     ficha = null,
+    /** Cómo se lee cada caso en esta empresa (lib/conversaciones/rotulos.js). */
+    rotulos = {},
     onAlternarContexto
   } = $props();
+
+  /* REINCIDENCIA (29/10/2026): la cuenta la hace el motor
+     (db.reincidencia_de); acá solo se dice. Desde la SEGUNDA conversación: con
+     una sola no hay nada que repetir. */
+  const reincide = $derived(
+    conversacion?.reincidencia && conversacion.reincidencia.total >= 2
+      ? conversacion.reincidencia
+      : null
+  );
+  const casoQueSeRepite = $derived(
+    reincide?.por_caso?.[0]?.n >= 2 ? reincide.por_caso[0] : null
+  );
 
   const CANAL_LABEL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
   const canalLabel = (/** @type {string} */ c) => CANAL_LABEL[c] ?? c;
@@ -123,6 +138,15 @@
       {#if conversacion.ticket_operativo}
         <span class="centro-id">Ticket <b>{conversacion.ticket_operativo}</b></span>
       {/if}
+      {#if reincide}
+        <span
+          class="centro-id reincide"
+          title="Conversaciones de este número en los últimos {reincide.dias} días, contando esta"
+        >
+          <b>{reincide.total}</b> en {reincide.dias} días{#if casoQueSeRepite}
+            · {rotuloDe(casoQueSeRepite.caso, rotulos)} ×{casoQueSeRepite.n}{/if}
+        </span>
+      {/if}
     </div>
   </div>
 
@@ -162,6 +186,16 @@
 </header>
 
 <style>
+  /* La reincidencia se lee como aviso, no como un identificador más: cambia
+     lo que conviene ofrecerle al cliente. */
+  .reincide {
+    padding: 0 6px;
+    border: 1px solid var(--bandeja-aviso-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-aviso-fondo);
+    color: var(--bandeja-aviso);
+  }
+
   .centro-top {
     flex: none;
     display: flex;

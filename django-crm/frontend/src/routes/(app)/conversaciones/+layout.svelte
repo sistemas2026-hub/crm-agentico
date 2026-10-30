@@ -38,6 +38,8 @@
   import { pendiente, resuelta, enAtencion } from '$lib/conversaciones/estado.js';
   import { ordenar, tramoEspera, esperaMaximaDe } from '$lib/conversaciones/cola/ordenamiento.js';
   import { rotuloDe } from '$lib/conversaciones/rotulos.js';
+  import CargaEquipo from '$lib/conversaciones/cola/CargaEquipo.svelte';
+  import { restanteDeVentana } from '$lib/conversaciones/ventana.js';
   import { saludDelCanal } from '$lib/conversaciones/canal.js';
   import { barra, alternar } from '$lib/conversaciones/barra-lateral.svelte.js';
   import { PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
@@ -136,6 +138,10 @@
       esta ADEMAS por atender, o en atencion, o resuelta. Por eso es un filtro
       que se cruza con la pestaña, y no una quinta pestaña. */
   let soloEscaladas = $state(false);
+  /* El panel de carga del equipo y el filtro por persona (29/10/2026). */
+  const esAdmin = $derived(data.yo?.rol === 'ADMIN');
+  let verCarga = $state(false);
+  let filtroOperador = $state(/** @type {string|null} */ (null));
   /** Ver ORDENES y ORDEN_POR_PESTANA. Arranca con el de 'Por atender', que es
       la pestaña con la que abre la bandeja. */
   let orden = $state('recomendado');
@@ -238,6 +244,12 @@
 
 
   // tramoEspera vive en ordenamiento.js, con el legado aparte.
+
+  /* Lo que le queda a la ventana de 24 h de cada fila: lo que mandó el motor
+     menos lo que pasó desde que se leyó la cola (lib/conversaciones/ventana.js).
+     Usa el mismo reloj de 20 s que el resto de la lista. */
+  const ventanaDe = (/** @type {any} */ c) =>
+    restanteDeVentana(c.ventana_whatsapp, data.sondeadoEn, ahora);
 
   // Se dibuja en QueueFilters pero se declara acá, al lado de
   // ORDEN_POR_PESTANA: ese mapa apunta a estos mismos ids, y separarlos
@@ -348,6 +360,13 @@
     else if (filtro === 'resueltas') lista = lista.filter(resuelta);
 
     if (soloEscaladas) lista = lista.filter((/** @type {any} */ c) => c.escalada_a_humano);
+    // La cola de UNA persona, desde el panel de carga (29/10/2026). Mira
+    // también las otras abiertas del chat: la suya puede no ser la fila.
+    if (filtroOperador) {
+      lista = lista.filter((/** @type {any} */ c) =>
+        [c, ...(c.abiertas || [])].some(
+          (/** @type {any} */ x) => String(x.asignada_a_usuario_id ?? '') === filtroOperador));
+    }
     if (motivo) lista = lista.filter((/** @type {any} */ c) => c.motivo_escalamiento === motivo);
 
     const q = busqueda.trim().toLowerCase();
@@ -483,6 +502,13 @@
       <span class="consola-punto"></span>{canal.etiqueta}
     </span>
 
+    {#if esAdmin}
+      <!-- La carga del equipo (29/10/2026). Solo ADMIN: reasignar es suyo. -->
+      <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet consola-equipo"
+        aria-expanded={verCarga} onclick={() => (verCarga = !verCarga)}>
+        Equipo
+      </button>
+    {/if}
     {#if data.yo?.nombre}
       <span class="consola-operador" title="Sesión de {data.yo.nombre}">{data.yo.nombre}</span>
     {/if}
@@ -497,6 +523,15 @@
            es trabajo sin tomar. -->
       <QueueTabs {pestanas} {filtro} onIr={irA} />
 
+      {#if esAdmin && verCarga}
+        <CargaEquipo
+          conversaciones={base}
+          filtro={filtroOperador}
+          onFiltrar={(/** @type {string|null} */ id) => (filtroOperador = id)}
+          onCambio={() => invalidate('app:conversaciones')}
+        />
+      {/if}
+
       <QueueFilters
         bind:vista bind:orden bind:ordenElegido
         bind:soloEscaladas bind:motivo bind:motivosDesplegados
@@ -506,7 +541,7 @@
 
     <ConversationList
       {visibles} {conversaciones} error={data.error} {busqueda}
-      {abierta} {ahora} {tramoEspera} {motivoLabel} {slaToma}
+      {abierta} {ahora} {tramoEspera} {motivoLabel} {ventanaDe} {slaToma}
     />
   </aside>
 

@@ -2657,6 +2657,10 @@ class Conversaciones(Base):
     # un error sobre otra cosa. El editor las descarta al guardar
     # (editor.guardar_rotulos_bandeja).
     rotulos: dict[str, str] = Field(default_factory=dict)
+    # Cuantos dias mira el aviso de reincidencia (29/10/2026): "este numero
+    # tuvo N conversaciones en los ultimos X dias". Es un HECHO, no un
+    # veredicto, y por eso tiene un valor de partida. 0 = no se muestra.
+    reincidencia_dias: int = Field(default=30, ge=0, le=365)
     # Lo que se le pregunta al cliente ANTES de cerrar su conversacion.
     #
     # Ninguna conversacion se cierra por lo que el modelo interprete de un

@@ -1296,6 +1296,21 @@ def claves_con_rotulo(doc: dict) -> dict[str, list[str]]:
     }
 
 
+def guardar_reincidencia(tenant: str, dias: int) -> TenantConfig:
+    """
+    Cuantos dias mira el aviso de reincidencia (29/10/2026). 0 lo apaga. El
+    rango lo valida el schema (0-365); aca se da el mensaje para la pantalla.
+    """
+    if not isinstance(dias, int) or isinstance(dias, bool) or not (0 <= dias <= 365):
+        raise ErrorEdicion("los días de reincidencia tienen que ser un entero entre 0 y 365.")
+
+    def mutar(doc: dict) -> None:
+        conv = doc.get("conversaciones") or {}
+        conv["reincidencia_dias"] = dias
+        doc["conversaciones"] = conv
+    return _editar(tenant, mutar)
+
+
 def claves_sin_rotulo(config) -> dict[str, list[str]]:
     """
     Las claves que la Bandeja muestra con su nombre crudo porque nadie les

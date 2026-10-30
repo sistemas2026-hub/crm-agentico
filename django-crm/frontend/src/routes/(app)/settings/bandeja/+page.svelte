@@ -319,6 +319,35 @@
         {/if}
       {/if}
 
+      <!-- ── REINCIDENCIA ───────────────────────────────────────────────── -->
+      {#if r}
+        <form method="POST" action="?/reincidencia" class="v2-card rotulos-resumen">
+          <p class="titulo"><Tag size={14} /> Aviso de reincidencia</p>
+          <p class="cuerpo">
+            La conversación muestra cuántas veces escribió ese número en los últimos días, y
+            por qué: «3 en 30 días · Internet lento ×2». Es un dato, no un veredicto. 0 lo apaga.
+          </p>
+          <div class="fila-reincidencia">
+            <label for="f-reincidencia">Días que mira</label>
+            <input
+              id="f-reincidencia"
+              class="v2-input"
+              type="number"
+              name="reincidencia_dias"
+              min="0"
+              max="365"
+              value={r.reincidencia_dias ?? 30}
+              disabled={!data.can_edit}
+            />
+            {#if data.can_edit}
+              <button class="v2-btn v2-btn-sm" type="submit">Guardar</button>
+            {/if}
+          </div>
+          {#if form?.reincidencia?.error}<p class="v2-error">{form.reincidencia.error}</p>{/if}
+          {#if form?.reincidenciaGuardada}<p class="v2-hint">Guardado.</p>{/if}
+        </form>
+      {/if}
+
       <!-- ── QUE HACE CADA UNO ──────────────────────────────────────────── -->
       <div class="v2-card explica">
         <div class="bloque">
@@ -395,6 +424,14 @@
   .rotulos-resumen {
     padding: 16px;
     margin-top: 16px;
+  }
+  .fila-reincidencia {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .fila-reincidencia input {
+    width: 6rem;
   }
   .faltan code {
     font-family: var(--v2-mono, ui-monospace, monospace);

@@ -236,3 +236,40 @@ describe('la banda de la ventana de 24 h solo aparece cuando avisa algo', () => 
     expect(hayVentana({ escalada: true, ventanaPorCerrarse: true })).toBe(true);
   });
 });
+
+describe('el sello del canal dice cuánto queda de ventana', () => {
+  /* 29/10/2026: «ventana abierta» no decía si eran 23 h o 2, y el aviso grande
+     sale recién en la última hora. */
+  const html = (props) => render(MessageComposer, { props: { ...BASE, ...props } }).body;
+
+  it('abierta con dato: dice cuánto queda', () => {
+    expect(html({ escalada: true, ventanaAbierta: true, ventanaRestante: 10800 }))
+      .toMatch(/ventana: quedan 3 h/);
+  });
+
+  it('abierta sin dato: no inventa un número', () => {
+    const b = html({ escalada: true, ventanaAbierta: true, ventanaRestante: null });
+    expect(b).toMatch(/ventana abierta/);
+    expect(b).not.toMatch(/quedan/);
+  });
+});
+
+describe('«Queda en espera» solo al responder como persona', () => {
+  /* 29/10/2026: la opción de T5. En nota, o con la IA atendiendo, o con la
+     ventana cerrada, no hay respuesta a la que colgarle la marca. */
+  const hay = (props) =>
+    /Queda en espera/.test(render(MessageComposer, { props: { ...BASE, ...props } }).body);
+
+  it('escalada y respondiendo: aparece', () => {
+    expect(hay({ escalada: true })).toBe(true);
+  });
+  it('en nota interna, no', () => {
+    expect(hay({ escalada: true, modo: 'nota' })).toBe(false);
+  });
+  it('con la IA atendiendo, no', () => {
+    expect(hay({ escalada: true, bloqueadoPorIA: true })).toBe(false);
+  });
+  it('con la ventana cerrada, no', () => {
+    expect(hay({ escalada: true, bloqueadoPorVentana: true })).toBe(false);
+  });
+});

@@ -73,6 +73,18 @@ def _guardar(tenant, rotulos):
     return editor._validar(tenant, estado["doc"])
 
 
+def _guardar_reincidencia(tenant, dias):
+    """guardar_reincidencia real sin la transaccion."""
+    real = editor._editar
+    try:
+        editor._editar = lambda t, mutar: (mutar(estado["doc"]), editor._validar(t, estado["doc"]))[1]
+        return real_reincidencia(tenant, dias)
+    finally:
+        editor._editar = real
+
+
+real_reincidencia = editor.guardar_reincidencia
+editor.guardar_reincidencia = _guardar_reincidencia
 real_casos = editor.guardar_casos_manual
 editor.guardar_casos_manual = _guardar_casos
 reales = (api._config_de, editor.guardar_rotulos_bandeja,
@@ -142,6 +154,16 @@ try:
         comprobar(r.status_code == 200 and "problema_de_tv" not in (r.get_json() or {}).get("rotulos", {}),
                   "una pantalla que no manda rotulos guarda igual, y el caso borrado se lleva el suyo")
 
+        # Los dias de reincidencia: se guardan, vuelven, y fuera de rango no.
+        r = c.put("/configuracion/bandeja/reincidencia", json={"tenant": TENANT, "dias": 15})
+        comprobar(r.status_code == 200 and (r.get_json() or {}).get("reincidencia_dias") == 15,
+                  f"reincidencia: 15 dias se guardan (devolvio {r.status_code})")
+        r = c.put("/configuracion/bandeja/reincidencia", json={"tenant": TENANT, "dias": 900})
+        comprobar(r.status_code == 400, "y 900 se rechaza")
+        r = c.get(f"/configuracion/bandeja/rotulos?tenant={TENANT}")
+        comprobar((r.get_json() or {}).get("reincidencia_dias") == 15,
+                  "y la pantalla de ajustes los lee")
+
     # El aviso de cargar_config, para quien agrega un motivo en el YAML.
     import io
     from contextlib import redirect_stdout
@@ -155,6 +177,7 @@ try:
     # cortado la prueba antes de llegar aca.
 finally:
     editor.guardar_casos_manual = real_casos
+    editor.guardar_reincidencia = real_reincidencia
     (api._config_de, editor.guardar_rotulos_bandeja,
      api.persistencia.ultima_actividad, api.persistencia.salud_canal_whatsapp,
      api.olvidar_config) = reales

@@ -48,6 +48,7 @@
   import { shortAge } from '$lib/v2/format.js';
   import { pendiente, resuelta } from '$lib/conversaciones/estado.js';
   import { plazoDeToma, textoDePlazo } from '$lib/conversaciones/sla.js';
+  import { ventanaUrge, comoRestante } from '$lib/conversaciones/ventana.js';
 
   let {
     // La conversación, entera y tal como la manda el motor.
@@ -61,6 +62,9 @@
     // motivoLabel también lo usa QueueFilters.
     tramoEspera,
     motivoLabel,
+    /** Segundos que le quedan a la ventana de 24 h de esta fila, o null. Lo
+        calcula el layout con la hora en que leyó la cola (ventana.js). */
+    ventanaDe = () => null,
     /** El plazo de toma del tenant, en minutos. 0 = la empresa no definió
         objetivo y no se dibuja cuenta regresiva. */
     slaToma = 0
@@ -100,7 +104,7 @@
     // No dice "el cliente abandono": no se sabe por que no volvio. Dice lo que
     // si se sabe: nadie registro una accion de resolucion.
     sin_gestion: { texto: 'Sin resolución registrada', clase: 'b-sin-gestion' },
-    interno_pendiente: { texto: 'Pendiente interno', clase: 'b-interno' },
+    interno_pendiente: { texto: 'En espera', clase: 'b-interno' },
     en_curso: { texto: 'En atención', clase: 'b-en-curso' },
     legado: { texto: 'Legado · revisar', clase: 'b-legado' }
   };
@@ -185,6 +189,17 @@
         >
           {plazo.vencido ? 'Vencido' : 'Quedan'}
           <b class="v2-num">{textoDePlazo(plazo)}</b>
+        </span>
+      {/if}
+      <!-- LA VENTANA DE 24 H, solo cuando queda poco y le toca a una persona
+           (29/10/2026). Pasada, ya no se le puede escribir texto libre: hay
+           que usar una plantilla, y eso tiene que verse antes de abrirla. -->
+      {#if ventanaUrge(c, ventanaDe(c))}
+        <span
+          class="plazo plazo-cerca ventana"
+          title="La ventana de WhatsApp cierra en {comoRestante(ventanaDe(c) ?? 0)}: después solo se le puede escribir con una plantilla"
+        >
+          Ventana <b class="v2-num">{comoRestante(ventanaDe(c) ?? 0)}</b>
         </span>
       {/if}
       {#if c.esperando_desde}

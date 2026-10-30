@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
+import { rolDeSesion } from '$lib/server/v2/operadores.js';
 
 /**
  * Server load: lista las conversaciones del asistente con clientes finales
@@ -33,7 +34,11 @@ export async function load({ fetch, depends, locals }) {
      `sondeadoEn` es la marca de tiempo de ESTA carga: como el layout se
      invalida cada 8s, es literalmente "cuándo se leyó la cola por última
      vez", y la barra lo muestra. */
-  const yo = { id: locals.user?.id ?? '', nombre: (locals.user?.name || locals.user?.email || '').trim() };
+  // 'rol' (29/10/2026): solo para mostrar el panel de carga del equipo a un
+  // ADMIN. Mostrar no es autorizar: la ruta de operadores y la de reasignar
+  // vuelven a mirar el rol de la sesión.
+  const yo = { id: locals.user?.id ?? '', nombre: (locals.user?.name || locals.user?.email || '').trim(),
+               rol: rolDeSesion(locals) };
   const sondeadoEn = new Date().toISOString();
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;

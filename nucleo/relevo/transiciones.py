@@ -134,6 +134,11 @@ ESQUEMAS: dict[str, frozenset[str]] = {
     "devolucion_fallida": frozenset({"mensaje_id", "resultado"}),
     "devuelta_a_ia": frozenset({"version", "legado", "g8"}),
     "caso_externo_cerrado": frozenset({"version", "aplicado"}),
+    # La opcion de T5 (29/10/2026): "queda en espera". La NOTA no viaja en el
+    # evento: es texto libre de quien atiende y puede traer datos del
+    # cliente; vive solo en 'pendiente_interno_nota'.
+    "pendiente_interno_abierto": frozenset({"version"}),
+    "pendiente_interno_cerrado": frozenset({"version"}),
 }
 DATOS_VERSION = 1
 MAX_TEXTO = 500
@@ -579,6 +584,50 @@ def soltar(tenant: str, conversation_id: str, *, operador_id: str, operador_nomb
         ev = _evento(cur, org, conversation_id, "soltada", "operador", usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
     return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="soltada", actor_id=usuario)
+
+
+MAX_NOTA_PENDIENTE = 200
+
+
+def marcar_pendiente_interno(tenant: str, conversation_id: str, *, nota: str | None,
+                             operador_id: str, operador_nombre: str,
+                             clave: str | None = None) -> Resultado:
+    """
+    La opcion de T5 (contrato §6): al responder, quien atiende marca que el
+    caso QUEDA EN ESPERA de algo interno o del cliente ("esperando que
+    reinicie", "esperando al tecnico"). Con nota abre o renueva el pendiente;
+    sin nota cierra el que habia -- "sin la marca: cierra el pendiente interno
+    previo". Ya estaba definido desde septiembre, con columnas, banda 4 y
+    eventos; lo que nunca existio fue quien lo escribiera (29/10/2026).
+
+    Solo con la conversacion abierta y en manos de personas: con la IA
+    atendiendo no hay a quien dejarle un pendiente. Legado (relevo_version 0)
+    no se toca.
+    """
+    nombre, usuario = db.validar_autor(operador_nombre, operador_id)
+    texto = " ".join((nota or "").split())[:MAX_NOTA_PENDIENTE] or None
+    tipo = "pendiente_interno_abierto" if texto else "pendiente_interno_cerrado"
+
+    def cuerpo(cur, org, f):
+        if f["relevo_version"] == 0:
+            return Resultado(False, False, 0, None, "legado")
+        impide = _es_de_personas(f)
+        if impide:
+            return impide
+        if texto is None:
+            if f["pendiente_interno_desde"] is None:
+                return Resultado(False, True, f["relevo_version"], None, "sin_pendiente")
+            version = _subir_version(
+                cur, org, conversation_id,
+                "pendiente_interno_desde = null, pendiente_interno_nota = null", ())
+        else:
+            version = _subir_version(
+                cur, org, conversation_id,
+                "pendiente_interno_desde = now(), pendiente_interno_nota = %s", (texto,))
+        ev = _evento(cur, org, conversation_id, tipo, "operador", usuario, nombre,
+                     {"version": version}, clave)
+        return Resultado(True, True, version, ev)
+    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo=tipo, actor_id=usuario)
 
 
 def reasignar(tenant: str, conversation_id: str, *, admin_id: str, admin_nombre: str,

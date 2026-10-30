@@ -34,6 +34,7 @@
     // Helpers que se quedan en el layout porque los usa alguien más.
     tramoEspera,
     motivoLabel,
+    ventanaDe = () => null,
     /** El plazo de toma del tenant, en minutos. Se propaga tal cual: la
         lista no lo interpreta. */
     slaToma = 0
@@ -49,7 +50,7 @@
     <QueueEmptyState variante="sin-coincidencias" {busqueda} />
   {:else}
     {#each visibles as c (c.id)}
-      <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} {slaToma} />
+      <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} {ventanaDe} {slaToma} />
     {/each}
   {/if}
 </div>
