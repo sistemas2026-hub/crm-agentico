@@ -3151,6 +3151,30 @@ class ImportacionTickets(Base):
 #  RAIZ
 # =============================================================================
 
+class Capacidad(Base):
+    """
+    Lo que el tablero de capacidad necesita saber de ESTA empresa (30/10/2026,
+    PRD §2 y §8.17). El tablero cuenta en la base; esto le dice que contar y
+    como traducirlo a minutos.
+
+    Los minutos los declara la empresa porque solo ella sabe cuanto le cuesta
+    atender una conversacion o mandar una visita. Sin declararlos, el tablero
+    devuelve los minutos en null con el motivo: un default haria pasar una
+    suposicion por una medicion, y es el numero que se le muestra a quien compra.
+    """
+    minutos_por_conversacion: int | None = Field(default=None, ge=1, le=600)
+    minutos_por_visita: int | None = Field(default=None, ge=1, le=1440)
+    #: Acciones remotas que, confirmadas, pueden ahorrar una visita (p. ej. un
+    #: reinicio). Tienen que declarar 'verificacion': sin ella no hay
+    #: ACCION_CONFIRMADA que contar.
+    acciones_que_evitan_visita: list[str] = Field(default_factory=list)
+    #: Las herramientas que agendan una visita. Una accion confirmada seguida de
+    #: una de estas para el mismo cliente no evito nada.
+    herramientas_de_visita: list[str] = Field(default_factory=list)
+    ventana_recontacto_horas: int = Field(default=72, ge=1, le=720)
+    dias_sin_visita: int = Field(default=7, ge=1, le=60)
+
+
 class TenantConfig(Base):
     # Campos que NO son configuracion sino la SALIDA de un proceso: los
     # produce el sistema, no los escribe una persona, y se reemplazan enteros
@@ -3377,6 +3401,8 @@ class TenantConfig(Base):
     #: ofrecen en el ticket, la Bandeja ni Mensajes automaticos, y el motor no
     #: las manda aunque se las pidan. Meta no tiene un "apagado" propio.
     plantillas_desactivadas: list[str] = Field(default_factory=list)
+    #: Que mide el tablero de capacidad y como lo traduce a minutos (PRD §2).
+    capacidad: Capacidad = Field(default_factory=Capacidad)
 
     @field_validator("mensajes_automaticos")
     @classmethod
@@ -3461,6 +3487,26 @@ class TenantConfig(Base):
             self.desenlaces.propios, self.desenlaces.ocultos)
         if fallos:
             raise ValueError("desenlaces: " + "; ".join(fallos))
+        return self
+
+    @model_validator(mode="after")
+    def _capacidad_coherente(self):
+        """Lo que el tablero cuenta tiene que existir en el catalogo: un nombre
+        mal escrito contaria cero en silencio, y cero es un numero creible."""
+        por_nombre = {h.nombre: h for h in self.herramientas}
+        for nombre in self.capacidad.acciones_que_evitan_visita:
+            h = por_nombre.get(nombre)
+            if h is None:
+                raise ValueError(f"capacidad.acciones_que_evitan_visita: '{nombre}' "
+                                 f"no es una herramienta del catalogo")
+            if h.verificacion is None:
+                raise ValueError(f"capacidad.acciones_que_evitan_visita: '{nombre}' "
+                                 f"no declara 'verificacion', asi que nunca queda "
+                                 f"confirmada y el tablero contaria cero")
+        for nombre in self.capacidad.herramientas_de_visita:
+            if nombre not in por_nombre:
+                raise ValueError(f"capacidad.herramientas_de_visita: '{nombre}' "
+                                 f"no es una herramienta del catalogo")
         return self
 
     @model_validator(mode="after")

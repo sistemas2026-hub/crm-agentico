@@ -51,6 +51,10 @@ PING_REAL = {
 }
 
 
+# La empresa se declara: sin MOTOR_TENANT el ping no sale (30/10/2026,
+# common/tests/test_motor_tenant_falla_cerrado.py). Estas pruebas miden el
+# ping, no esa regla, asi que fijan una.
+@patch.dict("os.environ", {"MOTOR_TENANT": "rapilink"})
 class ProbarConexionTest(SimpleTestCase):
 
     def _orden(self, servicio="5832"):

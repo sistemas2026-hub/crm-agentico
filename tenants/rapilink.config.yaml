@@ -6017,7 +6017,8 @@ herramientas:
     descripcion: >
       LLAMA A ESTA HERRAMIENTA (no sugieras el reinicio manual del router, no escales) apenas
       consultar_senal_ont haya dado 'aceptable' Y ping_cliente haya
-      respondido bien, en un cliente que dice NO TENER SERVICIO -- sin internet,
+      respondido bien Y consultar_incidente_red haya dado que NO hay una caida
+      compartida en su zona, en un cliente que dice NO TENER SERVICIO -- sin internet,
       nada carga, ningun aparato anda. Ese es exactamente el caso para el que existe esta herramienta, y usar el
       reinicio manual en su lugar le hace perder tiempo al cliente para
       lograr lo mismo que esto hace en un paso. NUNCA la llames por una queja de LENTITUD o de
@@ -6037,9 +6038,11 @@ herramientas:
       (medido en vivo, 14/08/2026: volvio a responder en ~73 segundos).
 
       Ademas de la aprobacion, el codigo exige que ya hayas corrido
-      consultar_senal_ont y ping_cliente EN ESTA conversacion y que los dos
-      hayan dado resultado favorable (senal aceptable, ping exitoso) -- y los
-      vuelve a medir al aprobar. Si no se cumple, la herramienta se rechaza
+      consultar_senal_ont, ping_cliente y consultar_incidente_red EN ESTA
+      conversacion y que los tres hayan dado resultado favorable (senal
+      aceptable, ping exitoso, sin caida compartida) -- y los vuelve a medir
+      al aprobar. Si hay una caida en su zona, reiniciar su equipo no arregla
+      nada: deciselo y no lo reinicies. Si no se cumple, la herramienta se rechaza
       sola con el motivo -- no lo intentes "igual", sigue el protocolo
       alternativo. Es exactamente la logica del equipo electronico que a
       veces necesita reinicio PERO solo tiene sentido si ya se descarto que
@@ -6052,7 +6055,8 @@ herramientas:
     solo_lectura: false
     requiere_confirmacion: true
     # ── LO QUE EL CLIENTE DIJO, VALIDADO EN CODIGO ────────────────────────
-    # 'exige_previas' (mas abajo) exige senal aceptable y ping respondiendo.
+    # 'exige_previas' (mas abajo) exige senal aceptable, ping respondiendo y
+    # ninguna caida compartida en el PON.
     # Eso NO distingue "no tengo internet" de "esta lento": en una queja de
     # lentitud las dos condiciones se cumplen, porque el equipo ESTA sano --
     # es exactamente lo que significa "lento".
@@ -6131,10 +6135,19 @@ herramientas:
     # es el que se queja. Lo que importa es que el equipo CONTESTE: si
     # contesta, el comando llega. '0 de 3' queda afuera a proposito -- ahi no
     # hay a quien mandarle nada.
+    #
+    # Y la red, antes que la casa (30/10/2026, PRD §8.17 Ola 1). La bateria de
+    # flujos media 0/10: con la ONU en linea y sin ping, el agente reiniciaba
+    # el equipo de UNA casa sin mirar si el PON entero estaba caido -- en una
+    # caida general, treinta reinicios por una falla que no esta en ninguna
+    # casa. Va aca y no en el prompt porque el motor vuelve a medir las previas
+    # al aprobar: la caida se comprueba al proponer Y al aprobar.
+    # Guarda: tests/test_reinicio_no_en_caida_de_barrio.py
     exige_previas:
       - {herramienta: consultar_senal_ont, campo: onu_signal_1490_veredicto, valor: aceptable}
       - {herramienta: ping_cliente, campo: "ping-exitoso",
          valores: ["1 de 3", "2 de 3", "3 de 3"]}
+      - {herramienta: consultar_incidente_red, campo: es_incidente_de_red, valor: false}
     limite_por_conversacion: 1
     # Que el comando se haya mandado no dice nada: el proveedor contesta
     # "Device reboot command sent" en medio segundo. Esto es lo que se mide
@@ -7506,3 +7519,13 @@ tickets_desde_dexter:
   - {asunto: Asesoria Para Pago En Linea, area: cartera, prioridad: "2"}
   - {asunto: Actualización De Datos, area: cartera, prioridad: "2"}
   - {asunto: Pqr, area: cartera, prioridad: "4"}
+
+# --- tablero de capacidad (30/10/2026, PRD §2 y §8.17 Ola 1) ----------------
+# Que cuenta como una visita evitada: un reinicio CONFIRMADO sin visita al
+# mismo cliente en los dias siguientes. Los minutos NO estan declarados a
+# proposito: cuanto le cuesta a Rapilink una conversacion o una visita lo dice
+# Rapilink, no esta sesion. Sin ellos, el tablero muestra los minutos en null
+# con el motivo. Se cargan desde la base cuando la empresa los de.
+capacidad:
+  acciones_que_evitan_visita: [reiniciar_ont]
+  herramientas_de_visita: [agendar_visita_tecnica, agendar_visita_internet]

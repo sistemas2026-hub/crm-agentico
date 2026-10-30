@@ -26,6 +26,7 @@
     PlugZap,
     GraduationCap,
     Gauge,
+    TrendingUp,
     ClipboardCheck,
     Radar,
     Boxes,
@@ -194,7 +195,11 @@
         { href: '/configuracion-guiada', label: 'Conectar API nueva', icon: Cable, admin: true },
         // ADMIN-only: es el gasto de la empresa y su tope. Un colaborador de
         // soporte no tiene por que ver la factura.
-        { href: '/consumo', label: 'Consumo', icon: Gauge, admin: true }
+        { href: '/consumo', label: 'Consumo', icon: Gauge, admin: true },
+        // ADMIN-only: cuanto trabajo le resolvio Dexter a la empresa, con sus
+        // contrapesos (PRD §2). Es lo que se le muestra a quien decide si
+        // Dexter sirve; un colaborador no lo necesita para atender.
+        { href: '/capacidad', label: 'Capacidad', icon: TrendingUp, admin: true }
       ]
     }
   ];

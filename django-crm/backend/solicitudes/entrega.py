@@ -26,17 +26,22 @@ from django.conf import settings
 from django.core.mail import EmailMessage
 from django.utils import timezone
 
-# A donde llega hoy la solicitud. Es el mismo buzon que ya figura como
-# 'email_tecnico' en los tickets "Instalacion Nueva" de WispHub, asi que el
-# correo nuevo aterriza donde Operaciones ya mira.
-DESTINO_POR_DEFECTO = "info.rapilinksas@gmail.com"
-
-
 def _destino() -> list[str]:
+    """A donde llega la solicitud: el buzon que la empresa configura.
+
+    SIN DEFAULT (30/10/2026). Hasta ese dia caia al buzon de UNA empresa, fijo
+    en este archivo, y el correo lleva el PDF con documento, firma y GPS: con
+    dos empresas en la instalacion, las solicitudes de la segunda llegaban al
+    buzon de la primera. Sin destino, lanza; 'entregar' lo anota en
+    'fallo_integracion' y la pantalla de solicitudes lo muestra.
+    """
     crudo = (getattr(settings, "SOLICITUDES_EMAIL_DESTINO", "")
-             or os.environ.get("SOLICITUDES_EMAIL_DESTINO", "")
-             or DESTINO_POR_DEFECTO)
-    return [x.strip() for x in crudo.split(",") if x.strip()]
+             or os.environ.get("SOLICITUDES_EMAIL_DESTINO", ""))
+    destino = [x.strip() for x in crudo.split(",") if x.strip()]
+    if not destino:
+        raise RuntimeError("falta SOLICITUDES_EMAIL_DESTINO: sin buzon de la "
+                           "empresa la solicitud no se manda a ninguno")
+    return destino
 
 
 def _cuerpo(s) -> str:
@@ -112,12 +117,26 @@ def _enviar_correo(s) -> None:
     correo.send(fail_silently=False)
 
 
+def _tenant_del_motor() -> str:
+    """La empresa a la que se le escribe en WispHub. Sin ella, nada sale.
+
+    Hasta el 30/10/2026 caia a 'rapilink' si faltaba la variable: con dos
+    empresas en la misma instalacion, una solicitud de la segunda habria
+    creado, completado o cerrado un ticket en el WispHub de la primera.
+    """
+    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    if not tenant:
+        raise RuntimeError("falta MOTOR_TENANT: sin saber de que empresa es "
+                           "la solicitud no se escribe en ningun WispHub")
+    return tenant
+
+
 def _crear_ticket_wisphub(s) -> str:
     """Le pide al motor que cree el ticket. Devuelve el id, o '' si no vino."""
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    tenant = _tenant_del_motor()
     herramienta = (os.environ.get("SOLICITUDES_HERRAMIENTA_TICKET", "")
                    or "crear_ticket_instalacion")
 
@@ -186,6 +205,7 @@ def _completar_ticket(s) -> None:
     decodifica y lo manda como archivo -- ver 'argumentos_archivo' en
     nucleo/config/schema.py.
     """
+    tenant = _tenant_del_motor()   # antes de armar nada: sin empresa no sale
     import base64
     import requests
 
@@ -212,7 +232,6 @@ def _completar_ticket(s) -> None:
         nombre = f"orden-instalacion-{uuid.uuid4().hex}.pdf"
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
     herramienta = (os.environ.get("SOLICITUDES_HERRAMIENTA_COMPLETAR", "")
                    or "completar_ticket_instalacion")
 
@@ -285,10 +304,10 @@ def cerrar_ticket_wisphub(s, motivo: str) -> None:
     lo anota en 'fallo_integracion' y sigue: la cancelacion ya esta guardada y
     no se deshace porque un tercero no responda.
     """
+    tenant = _tenant_del_motor()   # antes de armar nada: sin empresa no sale
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
     herramienta = (os.environ.get("SOLICITUDES_HERRAMIENTA_CERRAR_TICKET", "")
                    or "cerrar_ticket_operativo")
 

@@ -450,7 +450,11 @@ def contexto_del_caso(case_id: str) -> dict:
         return vacio
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    if not tenant:
+        #  Sin empresa no se pide la ficha: el motor la buscaria en la que diga
+        #  la variable, y con dos empresas seria el cliente de la otra.
+        return sin_contexto("falta_motor_tenant", motor_alcanzado=False)
     cabeceras = {}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
@@ -507,7 +511,9 @@ def _conversacion_del_caso(case_id: str) -> dict:
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    if not tenant:
+        return {}
     cabeceras = {}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:

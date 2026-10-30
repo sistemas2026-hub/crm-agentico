@@ -506,7 +506,10 @@ seccion("10. las tres acciones de red conservan sus precondiciones")
 
 ESPERADO = {
     "reiniciar_ont": {
-        "previas": {"consultar_senal_ont", "ping_cliente"},
+        # consultar_incidente_red se sumo el 30/10/2026 (PRD §8.17, falla de
+        # barrio): una mas, nunca una menos. Ver
+        # tests/test_reinicio_no_en_caida_de_barrio.py.
+        "previas": {"consultar_senal_ont", "ping_cliente", "consultar_incidente_red"},
         "limite": 1, "verificacion": True},
     "activar_catv": {
         "previas": {"consultar_plan_tv", "consultar_estado_catv"},

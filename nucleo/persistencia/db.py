@@ -1119,7 +1119,14 @@ def tasa_escalamiento(tenant: str, dias: int) -> dict:
     nucleo/canales/api.py::atender_turno, que ya restringe la evaluacion a
     'orientado_a == cliente_final'), asi que toda fila que llega con
     'escalada_a_humano' es de un cliente.
+
+    Solo canales reales (30/10/2026): hasta ese dia el 'total' sumaba el
+    simulador y el asistente interno, que no son clientes, y la tasa salia
+    diluida por conversaciones de prueba. Misma regla que el tablero de
+    capacidad (nucleo/persistencia/capacidad.py).
     """
+    from nucleo.canales.canal import REALES
+
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select escalada_a_humano, motivo_escalamiento,
@@ -1128,10 +1135,11 @@ def tasa_escalamiento(tenant: str, dias: int) -> dict:
                       count(*) as n
                  from asistente.conversations
                 where organization_id = %s
+                  and canal = any(%s::text[])
                   and creado_en >= now() - (%s || ' days')::interval
                 group by escalada_a_humano, motivo_escalamiento,
                          con_siguiente_paso""",
-            (org, dias))
+            (org, sorted(REALES), dias))
         filas = [dict(f) for f in cur.fetchall()]
 
     total = sum(f["n"] for f in filas)

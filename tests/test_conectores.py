@@ -79,6 +79,9 @@ def tenant_nuevo() -> tuple[dict, TenantConfig]:
         r["puede_consultar"] = []
         r["campos_permitidos"] = {}
     # Las reglas que nombran herramientas tampoco existen en un alta nueva.
+    # 'capacidad' nombra la accion que evita una visita y las que la agendan
+    # (30/10/2026): sin herramientas, no hay que contar.
+    d.pop("capacidad", None)
     for _ in range(12):
         try:
             return d, TenantConfig(**d)

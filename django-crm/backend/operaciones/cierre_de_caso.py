@@ -251,7 +251,10 @@ def _pedirle_al_motor(propuesta_id: str, id_caso: str) -> dict:
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    if not tenant:
+        raise RuntimeError("falta MOTOR_TENANT: sin saber de que empresa es el "
+                           "caso no se le pide al motor que lo cierre")
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:

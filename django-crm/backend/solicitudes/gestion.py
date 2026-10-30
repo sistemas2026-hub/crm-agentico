@@ -62,7 +62,13 @@ def _motor(ruta: str, metodo: str = "POST", **kw):
 
 
 def _tenant() -> str:
-    return os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    #  Sin empresa no se pregunta: el motor contestaria por la que diga la
+    #  variable, y con dos empresas en la instalacion seria la otra.
+    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    if not tenant:
+        raise RuntimeError("falta MOTOR_TENANT: sin saber de que empresa es "
+                           "la solicitud no se le pregunta nada al motor")
+    return tenant
 
 
 class TecnicosView(APIView):

@@ -18,7 +18,7 @@ y cada número se puede rastrear hasta las filas que lo producen.
 | C2 | Solo cuentan los canales reales | La misma prueba siembra conversaciones de `web` y del simulador, y afirma que no mueven ningún número. Mutación: quitar el filtro `canales.REALES` → la prueba falla (pegar la salida en rojo) |
 | C3 | Una conversación con intervención humana **nunca** cuenta como resuelta sin persona | Casos: una persona escribió (`messages.origen = 'humano'`), tomó el caso, intervino sin escalada, o aprobó una acción. Los cuatro → no resuelta. Mutación: ignorar `acciones_propuestas` → falla |
 | C4 | La fecha de corte se declara | La respuesta trae `desde` ≥ la fecha en que existe `messages.origen` (16/09/2026) y lo dice; un período anterior devuelve el aviso, no un número |
-| C5 | Minutos por tipo de caso son configuración de la empresa | Campo nuevo en `TenantConfig` con validación; `py -3.13 tests/test_editor_config.py` verde. Sin minutos declarados, *minutos ahorrados* devuelve `null` con motivo, **nunca** un default |
+| C5 | Minutos por conversación y por visita son configuración de la empresa | `TenantConfig.capacidad` con validación; `py -3.13 tests/test_editor_config.py` verde. Sin minutos declarados, *minutos ahorrados* devuelve `null` con motivo, **nunca** un default. *Era "por tipo de caso": una conversación no tiene un tipo confiable, así que son dos números (30/10/2026)* |
 | C6 | La tasa de escalada existente filtra por canal | `persistencia.tasa_escalamiento` con el mismo filtro; prueba que lo afirme |
 | C7 | La cadena completa llega a la pantalla | Una prueba del `+page.server.js` de la pantalla nueva que recibe la respuesta del endpoint y afirma que las seis claves llegan con el nombre que escribe el motor (CLAUDE.md §6: `requiere_noc` y `estado_nuevo` se perdieron en esa capa) |
 | C8 | El núcleo sigue sin conocer a nadie | `py -3.13 tests/test_nucleo_sin_tenants.py` verde |
@@ -61,4 +61,5 @@ muestra la muestra y su tamaño.
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
-| 30/10/2026 | Decisión registrada (PRD §2, §8.17), datos existentes medidos | Ejecutar | — |
+| 30/10/2026 | Decisión registrada (PRD §2, §8.17), datos existentes medidos | Ejecutar | 3f624a52 |
+| 30/10/2026 | **C1–C8 en verde.** `test_tablero_capacidad_base.py` contra PostgreSQL (base efímera del ledger): todas las métricas con su número exacto; mutaciones cazadas: sin filtro de canal (C2), ignorar acciones (C3), tasa de escalada sin filtro (C6). C4 corte con aviso, C5 null sin default, C7 `capacidad-servidor.test.js` 6/6 y sin errores de tipos, C8 guarda del núcleo verde | C9 (correr en la topología real tras el deploy) y C10 (auditor-independiente y revisor-de-pii, no corrieron) | ver git log |

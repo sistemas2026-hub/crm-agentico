@@ -820,6 +820,9 @@ def test_18_el_cierre_no_llama_a_wisphub_por_ningun_lado(org_a, user_profile,
     """
     import requests
 
+    #  Sin empresa el cierre ni siquiera le habla al motor (30/10/2026); aca se
+    #  mide A DONDE sale, asi que se declara una.
+    monkeypatch.setenv("MOTOR_TENANT", "rapilink")
     urls = []
 
     def _espia(verbo):
@@ -828,6 +831,7 @@ def test_18_el_cierre_no_llama_a_wisphub_por_ningun_lado(org_a, user_profile,
 
             class R:
                 status_code = 200
+                ok = True
 
                 @staticmethod
                 def json():
@@ -844,15 +848,18 @@ def test_18_el_cierre_no_llama_a_wisphub_por_ningun_lado(org_a, user_profile,
         r = cierre_de_caso.cerrar(p, actor=user_profile)
 
     assert r["cerrado"] is True, r
-    assert len(urls) == 1, f"se esperaba UNA sola llamada saliente: {urls}"
-
-    verbo, url = urls[0]
-    assert verbo == "post", verbo
-    #  Va al motor, y a la ruta del cierre por propuesta.
-    assert f"/interno/propuesta/{p.id}/cerrar-caso" in url, url
-    #  Y a nada mas. Se comprueba contra el proveedor por nombre y por dominio.
-    for prohibido in ("wisphub", "api.wisphub", "smartolt"):
-        assert prohibido not in url.lower(), f"salio hacia {prohibido}: {url}"
+    #  Hasta el 30/10/2026 esto afirmaba UNA sola llamada saliente, y solo era
+    #  cierto porque la prueba corria sin MOTOR_TENANT: sin empresa el
+    #  Supervisor no consultaba las areas. En produccion la variable esta
+    #  puesta y salen dos, las dos al motor. Lo que la prueba protege es otra
+    #  cosa: un solo cierre, y ninguna llamada a un tercero.
+    cierres = [(v, u) for v, u in urls if f"/interno/propuesta/{p.id}/cerrar-caso" in u]
+    assert len(cierres) == 1, f"se esperaba UN solo pedido de cierre: {urls}"
+    assert cierres[0][0] == "post", cierres
+    #  Y nada sale a un proveedor, en NINGUNA de las llamadas.
+    for _verbo, url in urls:
+        for prohibido in ("wisphub", "api.wisphub", "smartolt"):
+            assert prohibido not in url.lower(), f"salio hacia {prohibido}: {url}"
 
 
 @pytest.mark.parametrize("nivel", [0, 1, 2, 3, 4])

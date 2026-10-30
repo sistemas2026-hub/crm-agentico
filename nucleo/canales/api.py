@@ -3860,6 +3860,57 @@ def reporte_escalamiento():
     return jsonify({"dias": dias, **r})
 
 
+@app.get("/reportes/capacidad")
+def reporte_capacidad():
+    """
+    El tablero de capacidad (PRD §2, §8.17 Ola 1): cuanto trabajo le resolvio
+    Dexter a la empresa en los ultimos 'dias' (default 7, tope 90), con sus
+    contrapesos. Solo agregados: ningun numero, nombre ni conversacion de un
+    cliente sale por aca.
+
+    Un periodo que empieza antes de que exista 'messages.origen' se recorta a
+    esa fecha y lo dice en 'aviso': antes de ahi no se sabe si una persona
+    escribio, y contar esas conversaciones como "sin persona" seria inventar.
+    """
+    from nucleo.observabilidad import capacidad as tablero
+    from nucleo.persistencia import capacidad as medicion
+
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        dias = int(request.args.get("dias", 7))
+    except ValueError:
+        return jsonify({"error": "'dias' debe ser un numero."}), 400
+    dias = max(1, min(dias, 90))
+
+    hasta = datetime.now(timezone.utc)
+    desde = hasta - timedelta(days=dias)
+    aviso = None
+    if desde < tablero.CORTE:
+        desde = tablero.CORTE
+        aviso = ("El periodo empieza antes del 16/09/2026, cuando los mensajes "
+                 "empezaron a registrar quien los escribio. Se cuenta desde esa fecha.")
+
+    try:
+        cap = _config_de(tenant).capacidad
+        m = medicion.medir(tenant, desde, hasta, canales=canales.REALES,
+                           acciones_que_evitan_visita=cap.acciones_que_evitan_visita,
+                           herramientas_de_visita=cap.herramientas_de_visita,
+                           ventana_recontacto_horas=cap.ventana_recontacto_horas,
+                           dias_sin_visita=cap.dias_sin_visita)
+    except Exception as e:
+        registrar("reportes", "fallo al calcular capacidad", error=e)
+        return jsonify({"error": "No se pudo calcular el tablero."}), 500
+
+    cuerpo = {"dias": dias, "desde": desde.isoformat(), "hasta": hasta.isoformat(),
+              "canales": sorted(canales.REALES),
+              **tablero.componer(m, cap.minutos_por_conversacion, cap.minutos_por_visita)}
+    if aviso:
+        cuerpo["aviso"] = aviso
+    return jsonify(cuerpo)
+
+
 @app.get("/centro-mando")
 def centro_mando():
     """

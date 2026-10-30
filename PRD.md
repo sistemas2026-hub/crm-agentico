@@ -39,7 +39,7 @@ Se vende como capacidad y no como reemplazo de personal, por tres motivos: un IS
 | **Recontacto a 72 h** | Mismo cliente que vuelve a escribir dentro de 72 h del cierre | Contrapeso: una resolución falsa sube la métrica de arriba y baja esta |
 | **Satisfacción** | Encuesta de cierre por WhatsApp | Contrapeso: cerrar rápido no es resolver |
 | **Visitas evitadas** | Reinicio remoto con `ACCION_CONFIRMADA` y sin visita agendada en los 7 días siguientes | La visita es el costo más alto de un ISP |
-| **Minutos humanos ahorrados** | Casos resueltos sin persona × minutos por tipo de caso que declara cada empresa | Traduce la métrica al idioma de quien compra |
+| **Minutos humanos ahorrados** | Conversaciones resueltas sin persona × minutos por conversación, más visitas evitadas × minutos por visita; los dos los declara cada empresa | Traduce la métrica al idioma de quien compra |
 | **Tiempo hasta resolución** | Del primer mensaje al cierre | Calidad percibida |
 
 **Regla:** un cambio que sube *resolución sin persona* mientras sube el *recontacto* o baja la *satisfacción* es una regresión, aunque el número principal mejore.
@@ -102,6 +102,7 @@ Dexter tiene **tres tipos de usuario**: el **cliente final** del ISP (por WhatsA
 | **Centro de mando** | Dirección | Estado en vivo de cada agente | `/centro-mando` |
 | **Gobierno** | Plataforma | Frontera de autorización de 8 pasos, interruptor, techo de autonomía, aprobación atada, idempotencia, listas blancas, redacción de texto libre, guardia de salida, auditoría sin datos | `nucleo/seguridad/` (§7.4, §8.6) |
 | **Consumo** | Plataforma | Tokens y costo por empresa | `/consumo` |
+| **Capacidad** | Dirección | Las seis métricas de §2 por período: resueltas sin persona con sus contrapesos (recontacto, satisfacción), visitas evitadas, minutos ahorrados, tiempo hasta resolver y casos por persona. *En código el 30/10/2026, sin desplegar* | `/capacidad`, `GET /reportes/capacidad` |
 
 **Lo que todavía no hay**, y es lo que la tesis necesita (§2): una medición del trabajo que Dexter le ahorra a cada empresa; avisos que salgan solos; una forma de que una acción gane autonomía con evidencia; y un alta de empresa que no pida un desarrollador.
 
@@ -111,7 +112,7 @@ El orden y el porqué están en §8.17. En una línea cada ola:
 
 | Ola | Qué entrega | Cómo se sabe que sirvió |
 |---|---|---|
-| **1** | Tablero de capacidad · la falla de barrio se consulta antes de reiniciar · el backend falla cerrado sin empresa | Las seis métricas de §2 visibles por empresa; la batería pasa de 0/10 en falla de barrio |
+| **1** | Tablero de capacidad · la falla de barrio se consulta antes de reiniciar · el backend falla cerrado sin empresa — **en código el 30/10/2026, sin desplegar** | Las seis métricas de §2 visibles por empresa; la batería pasa de 0/10 en falla de barrio |
 | **2** | Los avisos del catálogo salen solos, más caída masiva y visita confirmada | Baja el volumen entrante en una caída; sube la satisfacción |
 | **3** | Autonomía ganada, empezando por el reinicio remoto | Sube *resolución sin persona* sin que suba el recontacto |
 | **4** | Alta de un ISP con WispHub + SmartOLT en un día y sin código; más de un proceso del motor | Una segunda empresa en producción |
@@ -148,9 +149,9 @@ El orden y el porqué están en §8.17. En una línea cada ola:
 - **RF-15:** Toda respuesta agregada debe declarar los filtros y el periodo con que se calculó, para que el colaborador pueda detectar una interpretación errónea de su pregunta. ✅
 
 ### Hacia dónde va (§8.17)
-- **RF-16:** Cada empresa ve, por período, las seis métricas de §2, calculadas por el código sobre conversaciones de canales reales. *(Ola 1)*
-- **RF-17:** Ninguna lectura del backend sirve datos sin una empresa resuelta: sin empresa, nada. *(Ola 1)*
-- **RF-18:** Un reinicio remoto solo se propone después de comprobar en código que no hay una caída compartida. *(Ola 1)*
+- **RF-16:** Cada empresa ve, por período, las seis métricas de §2, calculadas por el código sobre conversaciones de canales reales. *(Ola 1)* ✅ en código, sin desplegar (§8.17)
+- **RF-17:** Ninguna lectura del backend sirve datos sin una empresa resuelta: sin empresa, nada. *(Ola 1)* ✅ en código, sin desplegar (§8.17)
+- **RF-18:** Un reinicio remoto solo se propone después de comprobar en código que no hay una caída compartida. *(Ola 1)* ✅ en código, sin desplegar (§8.17)
 - **RF-19:** Cada aviso del catálogo de mensajes automáticos sale solo cuando ocurre su evento, si la empresa lo encendió; se agregan caída masiva y visita confirmada. *(Ola 2)*
 - **RF-20:** Una acción gana o pierde autonomía por empresa según las cuatro condiciones de §2, y la evidencia que la sostiene se puede ver. *(Ola 3)*
 - **RF-21:** Un ISP con WispHub + SmartOLT se da de alta sin cambios de código ni deploy. *(Ola 4)*
@@ -872,9 +873,15 @@ lo diría sin cambiar nada más.
 
 **Ola 1 — medir, y cerrar lo que falla abierto**
 
-1. **Tablero de capacidad.** Las métricas de §2, por empresa, calculadas en el motor (`db.py` → endpoint → pantalla), filtradas a `canales.REALES` y con fecha de corte desde que existe `messages.origen`. Los minutos por tipo de caso son configuración de cada empresa. La tasa de escalada actual se corrige para que filtre por canal. Contrato: `SPEC/objetivos/tablero-de-capacidad.md`. *Va primero porque sin él ninguna de las demás olas puede probar que acerca la tesis, y la Ola 3 lo necesita como insumo.*
+1. **Tablero de capacidad.** Las métricas de §2, por empresa, calculadas en el motor (`db.py` → endpoint → pantalla), filtradas a `canales.REALES` y con fecha de corte desde que existe `messages.origen`. Los minutos por conversación y por visita son configuración de cada empresa (`TenantConfig.capacidad`). La tasa de escalada actual se corrige para que filtre por canal. Contrato: `SPEC/objetivos/tablero-de-capacidad.md`. *Va primero porque sin él ninguna de las demás olas puede probar que acerca la tesis, y la Ola 3 lo necesita como insumo.*
 2. **La falla de barrio se consulta antes de tocar una casa.** `reiniciar_ont` agrega `consultar_incidente_red` a sus `exige_previas`, con la condición de que no haya caída compartida: la garantía queda en código y no depende del orden del prompt (§7.4). El prompt se alinea después. Se mide con `cli/bateria_flujos.py` (hoy 0/10). *En una caída general es cuando más personas hacen falta: es el peor momento para que la IA mande a reiniciar treinta casas.*
 3. **El backend Django falla cerrado.** Se quitan los 9 respaldos `or "rapilink"` y el correo fijo: sin tenant no se sirve nada. Es un defecto de seguridad de la misma familia que `app_backend` sin tenant (ARQUITECTURA.md), no una mejora de multi-empresa.
+
+**Ola 1 hecha en código el 30/10/2026 (rama `producto/tesis-de-negocio`, sin desplegar).** Lo medido:
+
+- *Tablero*: `nucleo/persistencia/capacidad.py` (conteos en SQL) + `nucleo/observabilidad/capacidad.py` (tasas y minutos) + `GET /reportes/capacidad` + pantalla `/capacidad` (solo ADMIN). `tests/test_tablero_capacidad_base.py` contra PostgreSQL real afirma el número exacto de cada métrica, y caza tres mutaciones (sin filtro de canal real, ignorar las acciones aprobadas, la tasa de escalada vieja sin filtro). La cadena hasta la pantalla la cubre `capacidad-servidor.test.js`. Decisiones de esta sesión: "fin" de una conversación es su **último mensaje**, no el evento `cerrada` (los cierres de legado y T18 no lo dejan); cualquier acción propuesta cuenta como "con persona"; los minutos son **dos** parámetros (por conversación y por visita), no "por tipo de caso", porque una conversación no tiene un tipo confiable; **Rapilink no tiene minutos declarados** y el tablero los muestra en null hasta que la empresa los dé.
+- *Falla de barrio*: `reiniciar_ont` exige `consultar_incidente_red` con `es_incidente_de_red: false` (`tests/test_reinicio_no_en_caida_de_barrio.py`). El motor la vuelve a medir al aprobar. **Lo que falta medir:** la batería de flujos (`cli/bateria_flujos.py`), que pasa por el turno y necesita la red de producción; el humo de `cli/evaluar.py` dio 8/9, igual a su línea base, pero no tiene caso de reinicio. El prompt no se tocó: el motor le dice al modelo qué previa falta.
+- *Backend*: los 9 respaldos y el buzón fijo, con su guarda de arquitectura (`common/tests/test_motor_tenant_falla_cerrado.py`). **Antes del deploy** hay que tener `SOLICITUDES_EMAIL_DESTINO` en Dokploy (DESPLIEGUE.md, Pendientes).
 
 **Ola 2 — que la IA inicie, no solo responda**
 

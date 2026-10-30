@@ -221,7 +221,9 @@ for r in recien_creado["roles"].values():
     r["campos_permitidos"] = {}
 # Las reglas de escalamiento que NOMBRAN una herramienta tampoco existen en un
 # alta nueva; se sacan igual que en tests/test_conectores.py. Lo que se mide
-# aca es la regla de "rol sin salida", no esas.
+# aca es la regla de "rol sin salida", no esas. Lo mismo 'capacidad', que
+# nombra la accion que evita una visita (30/10/2026).
+recien_creado.pop("capacidad", None)
 import re as _re                                                   # noqa: E402
 motivo = ""
 for _ in range(12):

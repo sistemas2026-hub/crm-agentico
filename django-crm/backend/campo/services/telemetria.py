@@ -44,7 +44,7 @@ class SinServicioParaPing(Exception):
 def _motor():
     """Donde vive el motor y con que se le habla. Igual que despacho.py."""
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
     cabeceras = {}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
@@ -119,6 +119,10 @@ def pinguear_servicio(servicio: str, *, paquetes: int = PAQUETES,
     el identificador.
     """
     base, tenant, cabeceras = _motor()
+    if not tenant:
+        #  Sin empresa no se mide: el motor buscaria el equipo en la que diga
+        #  la variable. Se dice asi, no como "el equipo no responde".
+        return {"ok": False, "motivo": "falta_motor_tenant"}
     try:
         r = requests.post(
             f"{base}/interno/herramienta/ping_cliente",
@@ -294,6 +298,10 @@ def medir_senal(orden, *, timeout: int = 30) -> dict:
             "La orden no tiene el serial del equipo del cliente.")
 
     base, tenant, cabeceras = _motor()
+    if not tenant:
+        #  Sin empresa no se mide: el motor buscaria el equipo en la que diga
+        #  la variable. Se dice asi, no como "el equipo no responde".
+        return {"ok": False, "motivo": "falta_motor_tenant"}
     try:
         r = requests.post(
             f"{base}/interno/herramienta/consultar_senal_ont",

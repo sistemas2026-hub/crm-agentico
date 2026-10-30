@@ -650,6 +650,15 @@ La exportación conserva los comentarios del YAML — son notas de verificación
 
 Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se deduce del código.
 
+**ANTES del próximo deploy del backend: dos variables que dejaron de tener valor por defecto (30/10/2026, PRD §8.17 Ola 1).** El backend Django caía a la empresa de siempre cuando faltaban, y eso con una segunda empresa le sirve a una los datos de la otra. Ahora sin ellas **no sale nada**, y el síntoma no señala la causa:
+
+| Variable (servicios `backend` y `celery-*`) | Si falta |
+|---|---|
+| `MOTOR_TENANT` | Solicitudes no crea, completa ni cierra el ticket en WispHub; el ping y la medición de señal de la app dicen `falta_motor_tenant`; Despacho no trae la ficha del cliente; el cierre de caso no le pide nada al motor. El `docker-compose.prod.yml` la trae con default `rapilink` (líneas 75 y 235), así que **debería estar**: comprobarlo en Dokploy igual |
+| `SOLICITUDES_EMAIL_DESTINO` | El correo de cada solicitud nueva, con su PDF, no sale: queda en `fallo_integracion` de la solicitud. **No figura en ningún archivo del repo**: hasta hoy Rapilink recibía en un buzón fijo en el código (`info.rapilinksas@gmail.com`). Cargarla en Dokploy con ese buzón, o el que la empresa diga, **antes** de desplegar |
+
+Cómo comprobar sin leer valores: `docker exec <backend> sh -c 'test -n "$MOTOR_TENANT" && test -n "$SOLICITUDES_EMAIL_DESTINO" && echo ok'`. Lo definitivo es que las dos sean configuración **por empresa** desde la interfaz (§3.3 de CLAUDE.md, Ola 4): una variable de entorno sigue siendo una instalación por empresa.
+
 **Decisión revertida a propósito: la descripción del ticket SÍ se copia, aunque pueda traer PII (10/09/2026).** El importador la excluía, y el motivo está escrito en `importacion_io.py`: *«ese campo es texto libre de un operador y ya se sabe que trae PII embebida (PRD §7.4); lo que se guarda es la referencia para ir a buscarla»*. Ese motivo **sigue siendo cierto**. Se acepta el riesgo igual.
 
 Lo que lo cambió fue mirar la pantalla al lado de la de WispHub: el ticket decía *«Pago reconexión en factura»* y el caso en Dexter no lo tenía, así que quien atendía no sabía por qué el cliente estaba sin servicio y tenía que saltar al otro sistema para enterarse. El contexto operativo pesa más que el riesgo — y es una decisión de producto tomada con el riesgo a la vista, no un descuido.

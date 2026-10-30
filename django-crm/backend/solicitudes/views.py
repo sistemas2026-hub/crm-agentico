@@ -137,7 +137,10 @@ def _planes_de(localidad: str) -> list:
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    if not tenant:
+        #  Sin empresa no hay catalogo que mostrar: el de otra no se vende aca.
+        return []
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
