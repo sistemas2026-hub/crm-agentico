@@ -21,11 +21,14 @@
     textoDeTiempos,
     tonoDelVencimiento
   } from './dia-publicado.js';
+  import RevisionDelCierre from './RevisionDelCierre.svelte';
 
   /** @type {{ orden: any, dia: string, marca?: string }} */
   let { orden, dia, marca = '' } = $props();
 
-  let terminada = $derived(['completada_campo', 'cerrada'].includes(orden.estado));
+  //  Lo terminado se atenúa, salvo que espere que alguien lo revise
+  //  (30/10/2026): eso es justo lo que hay que mirar.
+  let terminada = $derived(['completada_campo', 'cerrada'].includes(orden.estado) && !orden.revision);
   let tono = $derived(tonoDelVencimiento(orden.vence_en, dia));
   let aviso = $derived(textoDelAviso(orden.aviso));
   //  El seguimiento (30/10/2026): cuánto lleva y si dejó de reportar.
@@ -65,6 +68,8 @@
       {tiempos}{#if seguimiento}<span class="od-seguimiento" class:od-seguimiento-vencido={orden.seguimiento?.tipo === 'vencido'}>{seguimiento}</span>{/if}
     </p>
   {/if}
+
+  <RevisionDelCierre {orden} />
 
   <footer class="od-pie">
     <span>

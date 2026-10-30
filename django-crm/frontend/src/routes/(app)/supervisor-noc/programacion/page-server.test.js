@@ -48,6 +48,95 @@ describe('Programación: guardar de dónde y qué carga cada cuadrilla', () => {
   });
 });
 
+describe('Programación: la persona confirma lo que revisó el Supervisor (30/10/2026)', () => {
+  /** @param {string} rol @param {Record<string, string | string[]>} campos */
+  const pedido = (rol, campos) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(campos)) {
+      for (const x of Array.isArray(v) ? v : [v]) f.append(k, x);
+    }
+    return /** @type {any} */ ({
+      request: { formData: async () => f },
+      cookies: { get: () => 'token' },
+      locals: { profile: { role: rol } }
+    });
+  };
+
+  it('aprobar: valida y después cierra, con la clave de la vuelta', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ ticket_isp: { estado: 'ya_cerrado' } });
+
+    const r = /** @type {any} */ (await actions.aprobar(
+      pedido('SUPERVISOR', { orden: 'o-3', vuelta: '2', veredicto: 'Se puede cerrar' })));
+
+    expect(apiRequest.mock.calls.map((c) => c[0])).toEqual([
+      '/campo/trabajos/o-3/validar/',
+      '/campo/trabajos/o-3/cerrar/'
+    ]);
+    expect(apiRequest.mock.calls[0][1].body.decision).toBe('aprobar');
+    expect(apiRequest.mock.calls[0][1].headers['Idempotency-Key']).toBe('aprobar|o-3|2');
+    expect(apiRequest.mock.calls[1][1].headers['Idempotency-Key']).toBe('cerrar|o-3|2');
+    expect(r.de).toBe('revision');
+    expect(r.hecho).toBe('Aprobada y cerrada.');
+  });
+
+  it('aprobar: si el ticket del ISP no se cerró, lo dice', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ ticket_isp: { estado: 'no_cerrado' } });
+
+    const r = /** @type {any} */ (await actions.aprobar(pedido('ADMIN', { orden: 'o-3', vuelta: '1' })));
+
+    expect(r.hecho).toContain('El ticket del ISP no se pudo cerrar');
+  });
+
+  it('si validar falla, no se cierra', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockRejectedValue({ body: { detalle: 'Validacion no permitida' } });
+
+    const r = /** @type {any} */ (await actions.aprobar(pedido('ADMIN', { orden: 'o-3', vuelta: '1' })));
+
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+    expect(r.status).toBe(400);
+    expect(r.data.error).toBe('Validacion no permitida');
+  });
+
+  it('devolver: qué rehacer y por qué; sin eso no sale', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({});
+
+    const r = /** @type {any} */ (await actions.devolver(pedido('OPERACIONES', {
+      orden: 'o-3', vuelta: '1', requisito: ['foto_ont', 'foto_caja'],
+      observacion: 'Falta la foto de la ONT.'
+    })));
+
+    expect(apiRequest.mock.calls[0][1].body).toEqual({
+      decision: 'requerir_correccion',
+      requisitos_a_corregir: ['foto_ont', 'foto_caja'],
+      observacion: 'Falta la foto de la ONT.'
+    });
+    expect(apiRequest.mock.calls[0][1].headers['Idempotency-Key']).toBe('devolver|o-3|1');
+    expect(r.hecho).toContain('Devuelta al técnico');
+
+    apiRequest.mockReset();
+    const sinQue = /** @type {any} */ (await actions.devolver(pedido('ADMIN', { orden: 'o-3', observacion: 'x' })));
+    const sinPorque = /** @type {any} */ (await actions.devolver(
+      pedido('ADMIN', { orden: 'o-3', requisito: 'foto_ont', observacion: '  ' })));
+    expect([sinQue.status, sinPorque.status]).toEqual([400, 400]);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+
+  it('quien no gestiona no aprueba ni devuelve', async () => {
+    apiRequest.mockReset();
+
+    const a = /** @type {any} */ (await actions.aprobar(pedido('USER', { orden: 'o-3' })));
+    const d = /** @type {any} */ (await actions.devolver(
+      pedido('USER', { orden: 'o-3', requisito: 'x', observacion: 'y' })));
+
+    expect([a.status, d.status]).toEqual([403, 403]);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+});
+
 const PUBLICADO = { fecha: '2026-10-28', cuadrillas: [], con_alguien_que_no_sale: [], esperan: [], cuentas: {} };
 
 /** @param {string} url @param {string} rol */

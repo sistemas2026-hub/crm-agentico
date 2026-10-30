@@ -177,6 +177,21 @@ export function textoDeNovedad(n) {
 }
 
 /**
+ * El porqué de una devolución, ya escrito (30/10/2026, revision-del-cierre.md):
+ * lo que el Supervisor encontró que no está bien o no se sabe, una línea por
+ * punto. Si todo estaba bien, vacío: quien devuelve igual tiene que decir por
+ * qué.
+ *
+ * @param {{ puntos?: { ok: boolean | null, texto: string }[] } | null | undefined} r
+ */
+export function motivosDeLaRevision(r) {
+  return (r?.puntos ?? [])
+    .filter((p) => p.ok !== true)
+    .map((p) => p.texto)
+    .join('\n');
+}
+
+/**
  * Cuándo vence el compromiso de la orden (29/10/2026), contra el día que se
  * mira: «Vence hoy», «Vence mañana», «Vence el 31/10», «Venció el 28/10». Sin
  * fecha, «Sin vencimiento»: no se inventa.

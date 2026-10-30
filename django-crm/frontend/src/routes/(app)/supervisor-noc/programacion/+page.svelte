@@ -79,6 +79,10 @@
       {:else}
         <!-- ============ EL SEGUIMIENTO DE LAS CUADRILLAS (30/10/2026) ============
              Arriba de todo: en qué está cada una, hace cuánto, y su log del día. -->
+        <!-- Lo que pasó al aprobar o devolver un cierre (30/10/2026). -->
+        {#if form?.de === 'revision'}
+          <p class="snoc-body-sm" class:snoc-error-txt={!!form?.error} role="status">{form?.hecho ?? form?.error}</p>
+        {/if}
         {#if publicado?.cuadrillas?.length}
           <section class="snoc-panel" style="gap:var(--snoc-sm);">
             <span class="snoc-label">Seguimiento de las cuadrillas</span>

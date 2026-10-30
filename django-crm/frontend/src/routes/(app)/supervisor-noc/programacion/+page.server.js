@@ -8,6 +8,7 @@ import {
   leerMaterialDelDia
 } from '$lib/server/v2/material-del-dia.js';
 import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
+import { aprobarYCerrar, devolverAlTecnico } from '$lib/server/v2/revision-del-cierre.js';
 import { cuerpoDeConfiguracion } from '$lib/supervisor/material-del-dia.js';
 
 /**
@@ -73,6 +74,50 @@ export const actions = {
       return { hecho: 'Quedó guardado de dónde y qué carga cada cuadrilla.' };
     } catch (e) {
       return fail(400, { error: mensajeDeError(e) });
+    }
+  },
+
+  //  LA REVISIÓN DEL CIERRE (30/10/2026, SPEC/objetivos/revision-del-cierre.md):
+  //  el Supervisor indica, y esto es la persona confirmándolo.
+  aprobar: async ({ request, cookies, locals }) => {
+    const rol = /** @type {any} */ (locals).profile?.role ?? null;
+    if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'revision', error: 'Esto es para quien gestiona.' });
+    const f = await request.formData();
+    const orden = String(f.get('orden') ?? '');
+    if (!orden) return fail(400, { de: 'revision', error: 'Falta la orden.' });
+    try {
+      const r = await aprobarYCerrar({ cookies }, {
+        orden,
+        vuelta: String(f.get('vuelta') ?? '1'),
+        observacion: `Aprobada en Programación. El Supervisor dijo: ${String(f.get('veredicto') ?? '')}`
+      });
+      //  El ticket del ISP puede no cerrarse sin que la aprobación deje de
+      //  ser cierta (`campo/services/cierre_en_isp.py`): se dice.
+      return { de: 'revision', hecho: r.ticketIsp?.estado === 'no_cerrado'
+        ? 'Aprobada y cerrada en Dexter. El ticket del ISP no se pudo cerrar: quedó anotado en la orden.'
+        : 'Aprobada y cerrada.' };
+    } catch (e) {
+      return fail(400, { de: 'revision', error: mensajeDeError(e, 'No se pudo aprobar.') });
+    }
+  },
+
+  devolver: async ({ request, cookies, locals }) => {
+    const rol = /** @type {any} */ (locals).profile?.role ?? null;
+    if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'revision', error: 'Esto es para quien gestiona.' });
+    const f = await request.formData();
+    const orden = String(f.get('orden') ?? '');
+    const requisitos = f.getAll('requisito').map(String).filter(Boolean);
+    const observacion = String(f.get('observacion') ?? '').trim();
+    if (!orden) return fail(400, { de: 'revision', error: 'Falta la orden.' });
+    if (!requisitos.length) return fail(400, { de: 'revision', error: 'Marcá qué tiene que rehacer.' });
+    if (!observacion) return fail(400, { de: 'revision', error: 'Decí por qué se devuelve.' });
+    try {
+      await devolverAlTecnico({ cookies }, {
+        orden, vuelta: String(f.get('vuelta') ?? '1'), requisitos, observacion
+      });
+      return { de: 'revision', hecho: 'Devuelta al técnico. Le llega el aviso con lo que tiene que rehacer.' };
+    } catch (e) {
+      return fail(400, { de: 'revision', error: mensajeDeError(e, 'No se pudo devolver.') });
     }
   }
 };
