@@ -85,30 +85,36 @@ Dexter tiene **tres tipos de usuario**: el **cliente final** del ISP (por WhatsA
 
 ---
 
-## 4. Alcance
+## 4. Qué hay hoy y hacia dónde va
 
-### 4.1 MVP — Módulo de Soporte (CONSTRUIDO ✅)
+### 4.1 Lo que hay (medido el 30/10/2026)
 
-Ya implementado y funcionando:
-- Asistente conversacional en consola.
-- Consulta de cliente **por ID de servicio** y **por cédula** (`consultar_cliente_por_cedula`).
-- Consulta de facturas y de tickets.
-- Comportamiento de "asesor" (habla del cliente en tercera persona, no lo saluda).
-- Filtro de PII: la IP, MAC y credenciales nunca llegan al modelo. Cubre las tres formas
-  de respuesta de WispHub (objeto suelto, lista y paginado `{count, results}`) y es
-  **fail-closed**: una herramienta sin lista blanca no deja pasar ningún dato.
-- Toda la configuración (clave, modo real/simulado, URL base, modelo) vive en `.env`;
-  el código no trae credenciales ni interruptores quemados. Por defecto arranca en **modo simulado**.
-- Acción sensible (`registrar_pago`) con confirmación humana obligatoria.
+| Superficie | Para quién | Qué hace | Dónde vive |
+|---|---|---|---|
+| **Atención por WhatsApp** | Cliente final | Un router deriva a especialistas: **soporte técnico** (diagnóstico de "no tengo internet" en 11 ramas con WispHub y SmartOLT, reinicio remoto, agendamiento de visita), **facturación** (estado de cuenta, comprobante de pago), **ventas** (cobertura, planes curados, solicitud). Cada especialista verifica identidad; las notas de voz se transcriben; una guardia revisa el texto antes de enviarlo; el escalamiento a persona tiene 10 motivos y el pedido explícito lo detecta el código | `nucleo/` (§8.8–§8.10c) |
+| **Asistente web** | Colaborador | Soporte, facturación, administración (consultas agregadas, informes Excel/PDF), configuración guiada de sistemas nuevos | `/asistente`, `/configuracion-guiada` |
+| **Bandeja** | Operador | El relevo IA ↔ persona: control, asignación, tomar y devolver, aprobar acciones, ventana de 24 h, plantillas, rótulos, reincidencia, carga del equipo | `/conversaciones` (§8.11, §8.16) |
+| **Tickets y casos** | Operador | CRM con importación y conciliación horaria con WispHub, área por departamento, alta de tickets en WispHub, calidad (encuesta de cierre por WhatsApp) | `/tickets` (§8.14, §8.15) |
+| **Supervisor y Despacho** | Coordinador / NOC | Detecta situaciones de red, clasifica la labor de cada ticket, arma de madrugada la jornada de cada cuadrilla por zona y labor, propone material del día por bodega y kit, revisa el cierre de cada orden y le recuerda al técnico lo vencido | `/supervisor-noc` |
+| **App de campo** | Técnico | Órdenes del día en el orden del Supervisor, trabajo sin señal, novedades de un toque, cierre con fotos, material recibido y escaneo de equipos | `apps/tecnicos-mobile` (Flutter) |
+| **Inventario** | Bodega | Bodegas, custodia por técnico, material apartado por orden, devoluciones | `/inventario` |
+| **Mensajes automáticos** | Empresa | Catálogo de 11 avisos por WhatsApp (ticket creado y cerrado, recordatorio de pago, suspensión, confirmación y rechazo de pago, promesa, bienvenida, encuesta…), cada uno con su plantilla y su interruptor. **Solo la encuesta tiene disparador**: los otros diez se configuran y no salen | `nucleo/config/mensajes_catalogo.py` |
+| **Centro de mando** | Dirección | Estado en vivo de cada agente | `/centro-mando` |
+| **Gobierno** | Plataforma | Frontera de autorización de 8 pasos, interruptor, techo de autonomía, aprobación atada, idempotencia, listas blancas, redacción de texto libre, guardia de salida, auditoría sin datos | `nucleo/seguridad/` (§7.4, §8.6) |
+| **Consumo** | Plataforma | Tokens y costo por empresa | `/consumo` |
 
-### 4.2 Visión completa — Plataforma multi-área (POR CONSTRUIR)
+**Lo que todavía no hay**, y es lo que la tesis necesita (§2): una medición del trabajo que Dexter le ahorra a cada empresa; avisos que salgan solos; una forma de que una acción gane autonomía con evidencia; y un alta de empresa que no pida un desarrollador.
 
-- **Identidad y rol:** login que identifica al colaborador y su área.
-- **Catálogo de herramientas por área:** cada área accede solo a sus herramientas.
-- **Filtros de campo por área:** la misma consulta devuelve distintos campos según el rol.
-- **Generación de informes:** consultas que agregan datos y producen un documento (texto, Excel o PDF).
-- **Interfaz:** pasar de consola a una interfaz web interna.
-- **Registro y auditoría:** log de quién consultó qué (sin registrar datos sensibles en texto plano).
+### 4.2 Hacia dónde va
+
+El orden y el porqué están en §8.17. En una línea cada ola:
+
+| Ola | Qué entrega | Cómo se sabe que sirvió |
+|---|---|---|
+| **1** | Tablero de capacidad · la falla de barrio se consulta antes de reiniciar · el backend falla cerrado sin empresa | Las seis métricas de §2 visibles por empresa; la batería pasa de 0/10 en falla de barrio |
+| **2** | Los avisos del catálogo salen solos, más caída masiva y visita confirmada | Baja el volumen entrante en una caída; sube la satisfacción |
+| **3** | Autonomía ganada, empezando por el reinicio remoto | Sube *resolución sin persona* sin que suba el recontacto |
+| **4** | Alta de un ISP con WispHub + SmartOLT en un día y sin código; más de un proceso del motor | Una segunda empresa en producción |
 
 ### 4.3 Fuera de alcance (por ahora)
 - Fine-tuning / entrenamiento del modelo.
@@ -131,15 +137,24 @@ Ya implementado y funcionando:
 - **RF-06:** Responder en español, en tercera persona sobre el cliente.
 - **RF-07:** No inventar datos; si no existe, indicarlo explícitamente.
 
-### Plataforma multi-área (por construir)
-- **RF-08:** Autenticar al colaborador e identificar su área.
-- **RF-09:** Exponer al modelo solo las herramientas permitidas para el área.
-- **RF-10:** Filtrar los campos devueltos según el área.
-- **RF-11:** Generar informes bajo demanda a partir de consultas en lenguaje natural.
-- **RF-12:** Exportar informes a formato descargable (Excel/PDF).
-- **RF-13:** Registrar auditoría de consultas por usuario.
-- **RF-14:** Responder consultas **agregadas** (conteos, totales, comparaciones por periodo o zona) mediante herramientas parametrizadas que el modelo compone y el código calcula (ver decisión §12.5).
-- **RF-15:** Toda respuesta agregada debe declarar los filtros y el periodo con que se calculó, para que el colaborador pueda detectar una interpretación errónea de su pregunta.
+### Plataforma multi-área (hecho)
+- **RF-08:** Autenticar al colaborador e identificar su área. ✅ JWT de BottleCRM (§8.1)
+- **RF-09:** Exponer al modelo solo las herramientas permitidas para el área. ✅
+- **RF-10:** Filtrar los campos devueltos según el área. ✅
+- **RF-11:** Generar informes bajo demanda a partir de consultas en lenguaje natural. ✅
+- **RF-12:** Exportar informes a formato descargable (Excel/PDF). ✅ (§8.4)
+- **RF-13:** Registrar auditoría de consultas por usuario. ✅ (§8.2)
+- **RF-14:** Responder consultas **agregadas** (conteos, totales, comparaciones por periodo o zona) mediante herramientas parametrizadas que el modelo compone y el código calcula (ver decisión §12.5). ✅
+- **RF-15:** Toda respuesta agregada debe declarar los filtros y el periodo con que se calculó, para que el colaborador pueda detectar una interpretación errónea de su pregunta. ✅
+
+### Hacia dónde va (§8.17)
+- **RF-16:** Cada empresa ve, por período, las seis métricas de §2, calculadas por el código sobre conversaciones de canales reales. *(Ola 1)*
+- **RF-17:** Ninguna lectura del backend sirve datos sin una empresa resuelta: sin empresa, nada. *(Ola 1)*
+- **RF-18:** Un reinicio remoto solo se propone después de comprobar en código que no hay una caída compartida. *(Ola 1)*
+- **RF-19:** Cada aviso del catálogo de mensajes automáticos sale solo cuando ocurre su evento, si la empresa lo encendió; se agregan caída masiva y visita confirmada. *(Ola 2)*
+- **RF-20:** Una acción gana o pierde autonomía por empresa según las cuatro condiciones de §2, y la evidencia que la sostiene se puede ver. *(Ola 3)*
+- **RF-21:** Un ISP con WispHub + SmartOLT se da de alta sin cambios de código ni deploy. *(Ola 4)*
+- **RF-22:** El motor corre en más de un proceso sin que una conversación pierda su hilo. *(Ola 4)*
 
 ---
 
@@ -148,6 +163,7 @@ Ya implementado y funcionando:
 - **RNF-01 · Privacidad:** cumplimiento con la Ley 1581 de 2012 (protección de datos personales, Colombia).
   - **Ya no hay modelo local** (agosto 2026). El diseño original dejaba Ollama on-premise como resguardo: un rol sin enrutar, o un `override` mal escrito, se quedaba en casa. Ese resguardo **dejó de existir** cuando se sacó Ollama del VPS al pasar los embeddings a la API de OpenAI — era su único consumidor y el servidor no tenía memoria de sobra. Hoy `modelo_por_defecto` es DeepSeek, así que **todo** sale a una API externa, amparado en la misma autorización de tratamiento de abajo. Un nombre de modelo mal escrito ya no se queda en casa: falla el turno (`cliente.py::resolver` lo interpreta como local y no hay local que responda).
   - **Excepción aprobada (agosto 2026): DeepSeek (`deepseek-v4-flash`) para todos los roles**, incluidos los que llevan PII (`soporte`, `facturacion`, `cliente_final`). Base legal: la autorización de tratamiento que firma el cliente al contratar **cubre transferencia internacional de datos** (Ley 1581, art. 26 — la transferencia a países sin nivel adecuado de protección es lícita con autorización expresa e inequívoca del titular). Confirmado sobre el texto vigente de Rapilink; los ~7.272 clientes activos ya lo firmaron.
+  - **Transcripción de voz con OpenAI (`gpt-4o-transcribe`, activa desde el 30/09/2026)**: el audio del cliente sale a OpenAI. **Decidido por el usuario el 30/10/2026**: la autorización de tratamiento que el cliente firma al contratar cubre este uso, con la misma base que DeepSeek. Queda una comprobación de texto, no de decisión: que la autorización hable de proveedores tecnológicos en general y no nombre solo a uno. Para cada empresa nueva, su propia autorización tiene que cubrir a los dos proveedores antes de encender la transcripción.
   - Motivación medida, no solo de costo: el modelo local tarda 42.6 s por turno (~180 s si estaba descargado de memoria); DeepSeek, 4.7-12 s — hasta 17× más rápido en la misma tarea real (`cli/prueba_velocidad.py`). A ~$0.24 por cada 1.000 consultas, resuelve directamente la tensión de RNF-04 con el técnico en campo.
   - **La persistencia se reparte** (decisión de agosto 2026, al adoptar Supabase hospedado para la arquitectura multi-tenant). El criterio es uno solo: *sale a la nube lo que no identifica a una persona*.
 
@@ -167,9 +183,10 @@ Ya implementado y funcionando:
   - ⚠️ **La región del proyecto Supabase se define una sola vez y no se puede cambiar sin migrar.** Elegirla es un paso previo a crear el proyecto, no posterior.
   - ⚠️ **Validación legal ahora obligatoria antes de producción**, no opcional: la adopción de infraestructura hospedada cambia el análisis que motivó este requisito.
 - **RNF-02 · Seguridad en capas:** las reglas duras (filtrado de PII, confirmación de acciones sensibles) se aplican en **código**, no solo en el prompt. El prompt guía el comportamiento; el código garantiza los límites no negociables.
-- **RNF-03 · Costo:** volumen bajo (~300 consultas/día). El modelo local no tiene costo por token; el `override` a DeepSeek (agosto 2026) agrega ~$0.24 por cada 1.000 consultas — a este volumen, unos pocos dólares al mes.
-- **RNF-04 · Rendimiento:** originalmente se priorizó calidad sobre latencia, aceptando los 42.6 s/turno de `qwen3:30b-a3b`. La tensión con el técnico en campo (§14 del diseño multi-tenant) queda **resuelta por DeepSeek** (RNF-01): 4.7-12 s por turno con calidad de texto equivalente, medido sobre la misma tarea de producción. Desde agosto 2026 DeepSeek es el **default**, no un `override`: ya no hay modelo local al que caer.
-- **RNF-05 · Mantenibilidad:** herramientas, filtros y prompts parametrizados por área, para replicar el patrón sin reescribir el motor.
+- **RNF-03 · Costo:** DeepSeek cuesta ~$0.24 por cada 1.000 consultas (agosto 2026); el consumo real por empresa se ve en `/consumo`. El costo que importa para la tesis no es el del modelo sino el de cada caso que termina en una persona o en una visita: por eso la métrica norte (§2) es de capacidad, no de tokens.
+- **RNF-04 · Rendimiento:** 4.7–12 s por turno con DeepSeek (RNF-01), medido sobre la tarea real. El techo de concurrencia hoy es de un proceso con 8 hilos para todas las empresas juntas (§8.17, Ola 4); un segundo proveedor de respaldo ante una caída de DeepSeek espera a que su autorización de tratamiento esté resuelta.
+- **RNF-05 · Mantenibilidad:** herramientas, filtros y prompts son configuración por empresa (`tenants/` como semilla, `asistente.tenant_config` como fuente de verdad); el núcleo no conoce a ninguna empresa y una guarda lo comprueba (ARQUITECTURA.md).
+- **RNF-06 · Multi-empresa, fallando cerrado:** sin una empresa resuelta no se sirve ningún dato, en el motor (medido: 0 filas) y en el backend (Ola 1 de §8.17).
 
 ---
 
@@ -177,14 +194,20 @@ Ya implementado y funcionando:
 
 ### 7.1 Stack
 
-| Componente | Tecnología |
-|-----------|-----------|
-| Modelo (motor) | **DeepSeek** (`deepseek-v4-flash`) vía API. Hasta agosto 2026 fue **Qwen3 30B-A3B** (MoE, Q4_K_M) vía **Ollama** local — ver RNF-01 |
-| Lenguaje | Python 3.13 |
-| Cliente del modelo | librería `openai` (contrato compatible; también `anthropic`). `ollama` queda solo para `cli/banco_pruebas.py` y `cli/prueba_velocidad.py`, que comparan modelos contra el Ollama de la máquina de quien los corre |
-| Llamadas HTTP | `requests` |
-| Configuración y credenciales | `python-dotenv` (archivo `.env`) |
-| API de datos | WispHub REST API (JSON, auth por API Key) |
+| Capa | Tecnología |
+|---|---|
+| Modelo de lenguaje | **DeepSeek** (`deepseek-v4-flash`) vía API, para todos los roles (RNF-01). Cliente: librería `openai`, contrato compatible |
+| Embeddings y transcripción | OpenAI (`text-embedding-3-large`, `gpt-4o-transcribe`) |
+| Motor | Python 3.13 · Flask + gunicorn (`nucleo/`) |
+| Plataforma | BottleCRM vendorizado: Django + DRF + Celery (`django-crm/backend`) y SvelteKit (`django-crm/frontend`) |
+| App de campo | Flutter, con operación sin señal (`apps/tecnicos-mobile`) |
+| Base | PostgreSQL 17 (Supabase autoalojado, solo Postgres), migraciones por ledger propio (`supabase/`) |
+| Sistemas del ISP | WispHub (gestión, tickets, facturas), SmartOLT (red de fibra), WhatsApp Cloud API (Meta) |
+| Despliegue | Un VPS con Dokploy, autodeploy al pushear la rama de despliegue (§9, DESPLIEGUE.md) |
+
+#### Historia — el modelo local (julio–agosto 2026)
+
+Hasta agosto el motor corría un modelo local con Ollama. Se retiró por velocidad (42.6 s por turno contra 4.7–12 s, RNF-01) y por memoria del servidor. Lo que sigue queda porque sus lecciones aplican a **cualquier** cambio de modelo.
 
 **Motor elegido: `qwen3:30b-a3b-q4_K_M`.** Es un modelo **MoE** (mezcla de expertos): 30B de parámetros totales pero solo **~3B activos por token**. Esa es la razón de la elección y no el tamaño: ocupa memoria como un 30B pero **calcula como un 3B**, que es lo único que lo hace viable sin GPU dedicada. Un denso equivalente daría ~2-3 tok/s en el equipo actual — inservible.
 
@@ -211,7 +234,7 @@ Configurable por `.env`: `MODELO_SLM` (decide) y `MODELO_REDACCION` (redacta).
 
 *(Nota: la cifra histórica de ~25 s por turno se midió antes; las 51.8 s de agosto salen de una corrida con el modelo de 18 GB cargado en memoria. Las comparaciones entre modelos son válidas —misma corrida, mismas condiciones— pero el absoluto conviene remedirlo en frío.)*
 
-### 7.1.1 Equipo de desarrollo y por qué MoE
+### 7.1.1 Historia — el equipo de desarrollo y por qué MoE
 
 | | |
 |---|---|
@@ -229,42 +252,45 @@ La VRAM es el límite: el panel de Windows reporta "20 GB totales", pero son 4 G
 
 Este equipo sirve para **construir y evaluar**, no para producción: es un portátil (hace throttling en cargas sostenidas como el informe de materiales) y no aguanta clientes concurrentes. La máquina de producción se decide **con los datos de `banco_pruebas.py`**, no con estimaciones.
 
-### 7.2 Componentes y flujo
+### 7.2 Componentes y flujo de un turno
 
 ```
-Colaborador (lenguaje natural)
+Cliente (WhatsApp, /canales/whatsapp/<empresa>)   ·   Colaborador (web, sesión del CRM)
         │
         ▼
-[ 1. Identidad y área ]  ──► define herramientas y filtros permitidos
+[ 1. Canal ]  ──► empresa por la URL o por la sesión; nota de voz → texto; guardar el mensaje primero
         │
         ▼
-[ 2. Motor SLM (Qwen3 + Ollama) ]  ──► decide qué herramienta llamar y con qué argumentos
+[ 2. Turno ]  ──► ¿la conversación la tiene una persona? entonces la IA no responde (relevo, §8.11)
         │
         ▼
-[ 3. Capa de validación ]  ──► valida los argumentos (el modelo propone, el código dispone)
+[ 3. Rol ]  ──► router → especialista; cada rol trae su prompt, su catálogo y sus listas blancas
         │
         ▼
-[ 4. Confirmación humana ]  ──► solo para acciones sensibles (pagos)
+[ 4. Bucle de herramientas ]  ──► el modelo propone llamada y argumentos, con tope de vueltas
         │
         ▼
-[ 5. Ejecución de herramienta ]  ──► llama a la API de WispHub (o simulado)
+[ 5. Frontera ]  ──► empresa → interruptor → techo → autorización → aprobación atada →
+        │            auditoría → permiso → idempotencia → último metro (CLAUDE.md §5)
+        ▼
+[ 6. Herramienta ]  ──► WispHub / SmartOLT / CRM; veredictos calculados en código
         │
         ▼
-[ 6. Filtro de PII ]  ──► descarta campos sensibles según el área
+[ 7. Listas blancas + redacción ]  ──► qué campos llegan al modelo, y sin PII en el texto libre
         │
         ▼
-[ 7. Motor SLM redacta ]  ──► respuesta final en español, tercera persona
+[ 8. Redacción y guardia de salida ]  ──► el modelo redacta; el código revisa el texto
         │
         ▼
-Colaborador (respuesta / informe)
+[ 9. Escalamiento y seguimiento ]  ──► ¿hace falta una persona? ¿una visita? ¿una verificación?
+        │
+        ▼
+Respuesta entregada (aceptado ≠ entregado ≠ leído)
 ```
 
-### 7.3 Patrón de tool calling (dos llamadas al modelo)
+### 7.3 Patrón de tool calling
 
-1. **Primera llamada:** se envía el mensaje del usuario + la lista de herramientas. El modelo responde con `tool_calls` (qué herramienta y qué argumentos) o con texto directo.
-2. El código **valida**, **confirma** (si es sensible), **ejecuta** contra la API y **filtra** el resultado.
-3. El resultado filtrado se agrega al historial con rol `tool`.
-4. **Segunda llamada:** el modelo redacta la respuesta final usando el dato ya en mano.
+El modelo propone; el código valida, ejecuta y filtra; el resultado vuelve al historial con rol `tool`, y el bucle sigue hasta que el modelo responde con texto o llega al tope de vueltas. *Esta sección describía dos llamadas fijas, del prototipo de consola; el bucle reemplazó ese diseño (§12.3, punto 2).*
 
 ### 7.4 Seguridad en dos capas (crítico)
 
@@ -293,31 +319,9 @@ Se decidió **mantener `descripcion`**: es el contenido del ticket y Soporte no 
 
 Configurado hoy en `consultar_ticket` (roles `soporte` y `administracion`). Al agregar un campo nuevo a una lista blanca, preguntarse si es texto libre — si lo es, agregarlo también a `campos_texto_libre` de esa herramienta. Guarda: `tests/test_redaccion.py`.
 
-### 7.5 Parametrización por área (guía para extender)
+### 7.5 Extender: una herramienta, un rol, una empresa
 
-El patrón para escalar de un área a varias:
-
-```python
-# El SYSTEM se construye según el área del colaborador
-def construir_system(area): ...
-
-# Cada área ve solo sus herramientas
-HERRAMIENTAS_POR_AREA = {
-    "soporte":     [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket],
-    "facturacion": [consultar_facturas, registrar_pago],
-    "tecnica":     [consultar_datos_red],
-    # ...
-}
-
-# Cada área tiene su propia lista blanca de campos
-CAMPOS_POR_AREA = {
-    "soporte":  ["id_servicio", "usuario_rb", "estado", "plan_internet"],
-    "tecnica":  ["id_servicio", "ip", "mac_cpe", "router", "zona"],  # técnica SÍ ve red
-    # ...
-}
-```
-
-El motor (validación, tool calling, filtrado, confirmación) **no cambia**: solo recibe distintas herramientas y filtros según el área. Lo construido para Soporte es la plantilla.
+Todo se extiende por configuración del tenant, no por código: una herramienta se declara en el catálogo (`herramientas`, con sus filtros verificados y su lista blanca por rol), un rol en `roles` (prompt, catálogo, campos permitidos), y una empresa es una fila más en `asistente.tenant_config`. Lo que el núcleo interpreta vive en `nucleo/config/schema.py`. *Esta sección mostraba los diccionarios de Python del prototipo (`HERRAMIENTAS_POR_AREA`, `CAMPOS_POR_AREA`); ese patrón se convirtió en la configuración de hoy.* El procedimiento y sus guardas están en CLAUDE.md §3 y §6.
 
 ### 7.6 Notas de integración con WispHub
 
@@ -373,7 +377,9 @@ SmartOLT es donde el ISP administra las ONUs autorizadas en la OLT de fibra — 
 
 ---
 
-## 8. Roadmap por fases
+## 8. Roadmap y decisiones
+
+**Las fases 0–6 del plan original están cumplidas** (tabla de abajo, que queda como historia). **Lo que sigue son las cuatro olas de §8.17**, resumidas en §4.2. Las subsecciones §8.1–§8.17 registran, en orden de fecha, cada pieza construida y cada decisión con su evidencia.
 
 | Fase | Entregable | Estado |
 |------|-----------|--------|
@@ -383,7 +389,7 @@ SmartOLT es donde el ISP administra las ONUs autorizadas en la OLT de fibra — 
 | **3** | Replicar patrón a Facturación y Técnica | ✅ Catálogo definido y verificado — Técnica ahora incluye SmartOLT (lectura de red + reinicio de ONT, ver §7.7), no solo WispHub |
 | **4** | Generación de informes + exportación (Excel/PDF) | ✅ Excel y PDF (ver §8.4) |
 | **5** | Interfaz web interna (reemplaza la consola) | ✅ En gran parte hecho — ver §8.1 |
-| **6** | Auditoría/logs y despliegue en servidor on-premise | Auditoría ✅ (§8.2) · despliegue: pasos manuales pendientes en DESPLIEGUE.md → `## Pendientes` |
+| **6** | Auditoría/logs y despliegue | ✅ Auditoría (§8.2) · en producción desde agosto 2026 en un VPS con Dokploy (§9), no on-premise |
 
 ---
 
@@ -551,7 +557,7 @@ Verificado con datos de ejemplo en memoria (sin tocar el archivo versionado, mie
 
 ---
 
-### 8.9 TR-069 — integrado y funcionando, pero PENDIENTE de habilitación masiva (agosto 2026)
+### 8.10b TR-069 — integrado y funcionando, pero PENDIENTE de habilitación masiva (agosto 2026)
 
 SmartOLT expone `GET /api/onu/get_onu_router_hosts/{sn}`, que devuelve los equipos conectados al router del cliente: nombre (`HostName`), si están conectados ahora (`Active`), y si entraron por WiFi (`802.11`) o por cable (`Ethernet`). Responde en 2-3 segundos, no es el endpoint pesado. Es lo único que deja ver **del lado de adentro de la casa** — hasta ahí el diagnóstico llega a la ONT y después hay que preguntar.
 
@@ -569,7 +575,7 @@ Cuando la habilitación masiva esté hecha, lo que falta es solo **volver a apoy
 
 ---
 
-### 8.10 `no_internet` — cerrado en código, con una rama que solo se confirma en una caída real (agosto 2026)
+### 8.10c `no_internet` — cerrado en código, con una rama que solo se confirma en una caída real (agosto 2026)
 
 El caso quedó con **once ramas** y cada una sabe dónde termina. Cuatro se resuelven sin humano y sin visita (suspensión por mora → facturación; falla en un solo aparato; solo WiFi; equipo sano en todos los aparatos → reinicio remoto). Tres agendan visita solas (fibra cortada confirmada; sin energía con corriente confirmada y sin recuperarse; ping sin respuesta con la ONU en línea, reinicio hecho y sin MAC). Cuatro terminan en una persona a propósito, porque mandar un técnico no las resolvería.
 
@@ -854,13 +860,13 @@ lo diría sin cambiar nada más.
 | Lo resuelto sin persona, el recontacto, las visitas evitadas y las aprobaciones **se pueden calcular con datos que ya se guardan**; nadie los junta | `conversations.control`/`cerrada_por_tipo`, `relevo_eventos`, `messages.origen` (desde 16/09), `verificaciones_accion`, `acciones_propuestas.estado` |
 | `reiniciar_ont` exige aprobación humana en **cada** caso | `irreversible: true`, `aprobacion_humana: true` en `tenants/rapilink.config.yaml` (M06-A, 21/09) |
 | Ninguna herramienta declara `nivel_autonomia`; nada conecta la tasa de aprobación con el nivel | `techo.py`; `indicadores.py` calcula `tasa_aceptacion` sin consumidor |
-| Dexter no le escribe primero a ningún cliente: el envío de plantillas existe y nadie lo llama | `POST /avisos/whatsapp/<tenant>` sin llamador fuera de tests; `plantillas: {}` en el YAML (la base puede tener más: INFERIDO) |
+| Dexter casi no le escribe primero a ningún cliente: hay un **catálogo de 11 avisos** configurables con su plantilla e interruptor, pero **solo la encuesta tiene disparador** | `nucleo/config/mensajes_catalogo.py::EVENTOS`; `mensajes_automaticos.enviar` solo lo llama `encuesta.py`; `POST /avisos/whatsapp/<tenant>` sin llamador fuera de tests |
 | La falla de barrio se diagnostica como una casa: 0/10 | Con la ONU en línea, el prompt reinicia sin consultar `consultar_incidente_red` (`SPEC/DEXTER_ESTADO_ACTUAL.md`, validación de producción) |
 | El frontend ya es multi-empresa; **el backend Django no**: 9 lecturas de `MOTOR_TENANT` con respaldo `or "rapilink"` (fallan ABIERTO) y un correo de Rapilink fijo | `solicitudes/entrega.py:120,215,291` · `gestion.py:65` · `views.py:140` · `campo/services/despacho.py:453,510` · `telemetria.py:47` · `operaciones/cierre_de_caso.py:254` · `entrega.py:32` |
 | El reloj descubre las empresas leyendo `tenants/*.config.yaml`: dar de alta una exige commit y deploy | `nucleo/reloj.py` |
 | La config de Rapilink tiene 7.299 líneas; ~60-70 % es contenido propio de la empresa (prompts, escalamiento, catálogos) | INFERIDO por secciones; los conectores compartidos ya existen (`conectores/wisphub.yaml`, `smartolt.yaml`) |
 | Un solo proceso con el historial en memoria; un solo proveedor de modelo sin respaldo | `--workers 1 --threads 8` (`docker-compose.prod.yml`), `api.py::_sesiones`; `cliente.py::chat()` |
-| La transcripción de voz manda el audio del cliente a OpenAI y **no hay registro de que la autorización de tratamiento lo cubra** | `nucleo/canales/transcripcion.py` (30/09/2026); CLAUDE.md §5 exige resolverlo antes de activar un tercero |
+| La transcripción de voz manda el audio del cliente a OpenAI y no había registro de que la autorización de tratamiento lo cubriera | `nucleo/canales/transcripcion.py` (30/09/2026). **Resuelto por el usuario el 30/10/2026** (RNF-01) |
 
 **Lo que se decidió**, en el orden en que se construye. Cada ola se mide con la métrica de §2 antes de pasar a la siguiente.
 
@@ -872,7 +878,7 @@ lo diría sin cambiar nada más.
 
 **Ola 2 — que la IA inicie, no solo responda**
 
-4. **Avisos proactivos por WhatsApp**, en este orden: (a) **caída masiva** a los clientes del PON afectado —la detección ya existe en `operaciones/deteccion.py` y `correlacion.py`, falta el aviso—; (b) **seguimiento posterior a la resolución** ("¿quedó funcionando?"), que además alimenta el recontacto; (c) **visita confirmada** y técnico en camino; (d) **recordatorio de pago** antes del corte. Todo respeta la baja (Ley 1581) que ya aplica `/avisos/whatsapp`. *Un aviso de caída evita cientos de mensajes entrantes; es la reducción de volumen más grande disponible.* **Bloqueo operativo:** plantillas UTILITY aprobadas por Meta para cada empresa; Rapilink tiene una sola, de marketing y con otra marca (§8.12).
+4. **Avisos proactivos por WhatsApp.** El catálogo, las plantillas y los interruptores ya existen (28/10/2026): lo que falta es **conectar el disparador** de cada aviso a su evento, y sumar dos eventos al catálogo. En este orden: (a) **caída masiva** a los clientes del PON afectado —evento nuevo; la detección ya existe en `operaciones/deteccion.py` y `correlacion.py`—; (b) **ticket cerrado** como seguimiento ("¿quedó funcionando?"), que además alimenta el recontacto; (c) **visita confirmada** —evento nuevo— y **ticket creado**; (d) **recordatorio de pago** y **suspensión**, que son de disparo diario contra WispHub. Todo respeta la baja (Ley 1581) y el modo prueba por números que ya tiene el catálogo. *Un aviso de caída evita cientos de mensajes entrantes; es la reducción de volumen más grande disponible.* **Bloqueo operativo:** plantillas UTILITY aprobadas por Meta para cada empresa (se crean desde Dexter desde octubre; la aprobación la da Meta y tarda días).
 
 **Ola 3 — la autonomía ganada (§2)**
 
@@ -893,7 +899,7 @@ lo diría sin cambiar nada más.
 
 **Riesgos que esta decisión deja escritos:**
 
-- **Transcripción con OpenAI sin base legal registrada.** Hay que confirmar con quien lleva lo legal si la autorización de tratamiento de Rapilink cubre a OpenAI como encargado del audio; si no la cubre, apagarla hasta que lo haga. No es una decisión técnica y no la toma esta sesión.
+- **Transcripción con OpenAI.** El usuario decidió el 30/10/2026 que la autorización que firma el cliente la cubre (RNF-01). Para cada empresa nueva, su autorización tiene que cubrir a los proveedores de modelo y de transcripción antes de encenderlos.
 - **El régimen de protección de usuarios de telecomunicaciones** probablemente exige que el usuario pueda llegar a una persona (INFERIDO, no verificado contra la norma). El diseño ya lo cumple —`frases_pide_humano` lo detecta en código— y la tesis no lo toca.
 
 **Lo que la reabre:** que el tablero de la Ola 1 muestre que la resolución sin persona no sube con las olas 2 y 3 (la tesis sería falsa para este producto), o que una empresa cliente pida explícitamente lo contrario de la autonomía ganada.
@@ -902,9 +908,9 @@ lo diría sin cambiar nada más.
 
 ## 9. Despliegue
 
-- **Desarrollo:** laptop actual (RTX 3050, 4 GB VRAM, 32 GB RAM). Suficiente para desarrollar y probar con modelos de 3–4B.
-- **Producción:** servidor dedicado / on-premise (por privacidad de datos de clientes y disponibilidad para varios colaboradores). La laptop **no** es el entorno de producción.
-- **Recomendación de modelo en servidor:** GPU de 16–24 GB para correr con holgura un modelo principal de 8–14B si alguna área lo requiere, manteniendo 4B para tareas ligeras.
+Un VPS gestionado con **Dokploy**: el motor, el CRM (backend, Celery, frontend) y un Supabase autoalojado del que se usa solo Postgres. **Pushear la rama de despliegue publica a producción** (autodeploy). El procedimiento, las variables, el webhook de WhatsApp y el diagnóstico de fallos viven en [DESPLIEGUE.md](DESPLIEGUE.md); las reglas de quién despliega y cómo se verifica, en CLAUDE.md §6–§8.
+
+*Esta sección recomendaba un servidor on-premise con GPU para un modelo local. Dejó de aplicar en agosto, cuando el modelo pasó a DeepSeek (RNF-01).*
 
 ---
 
@@ -912,33 +918,38 @@ lo diría sin cambiar nada más.
 
 | Riesgo | Mitigación |
 |--------|-----------|
-| Fuga de datos de clientes | SLM local + filtro de PII en código + `.env` fuera de la nube |
-| Pago ejecutado por error del modelo | Confirmación humana obligatoria en código |
-| El modelo inventa datos | Prompt "no inventar" + siempre consultar herramienta; validación |
-| Modelo inducido a desviarse del prompt | Límites duros en código, no solo en prompt |
-| Incumplimiento normativo (Ley 1581) | Validación con área legal antes de escalar; auditoría |
-| Crecer a todas las áreas a la vez | Escalar por fases: consolidar un área antes de replicar |
+| Fuga de datos de clientes hacia el modelo | Listas blancas fail-closed + redacción del texto libre + guardia de salida, en código (§7.4) |
+| Una empresa ve datos de otra | `app_backend` + empresa fijada en cada transacción: sin empresa, 0 filas. El backend Django todavía no falla cerrado (Ola 1, §8.17) |
+| Una acción irreversible sale por error del modelo | Frontera de 8 pasos; las irreversibles solo por `frontera.critica()` con aprobación atada (§8.6) |
+| **La autonomía crece más rápido que la evidencia** | Las cuatro condiciones de §2: efecto verificable, previas en código, aprobaciones medidas, degradación automática. Subir lo decide una persona |
+| **Se sube la resolución sin persona cerrando casos sin resolverlos** | Contrapesos obligatorios en el tablero: recontacto a 72 h y satisfacción (§2) |
+| El modelo inventa datos | Siempre consultar herramienta; veredictos calculados en código; casos dorados sobre la traza |
 | El modelo calcula mal un dato agregado | No calcula: compone la consulta y Python hace la cuenta (§12.5) |
 | El modelo interpreta mal la pregunta y da un número exacto sobre el filtro equivocado | La respuesta declara siempre filtros y periodo usados (RF-15) |
-| Consulta agregada que desborda el contexto del modelo | Tope duro de filas; se envía resumen + top-N, nunca el dataset (§12.5) |
+| Incumplimiento normativo (Ley 1581) | Autorización de tratamiento que firma el cliente, que cubre a los proveedores de modelo y transcripción (RNF-01); baja respetada en todo aviso proactivo |
+| El cliente no puede llegar a una persona | El pedido explícito lo detecta el código (`frases_pide_humano`), no el modelo |
+| Caída de DeepSeek | Hoy sin respaldo (D6). Un segundo proveedor espera su autorización de tratamiento (RNF-04) |
+| Un deploy publica con una guarda en rojo | CI sin Postgres y sin puerta del lado del servidor (D1, D2); va en paralelo a las olas (§8.17) |
 
 ---
 
 ## 11. Notas para el asistente de código (IDE)
 
-- El proyecto **no entrena** modelos; integra un SLM pre-entrenado vía tool calling. No sugerir fine-tuning salvo que se identifique una necesidad concreta que el prompting/RAG no resuelva.
-- Respetar la **arquitectura de dos capas de seguridad**: nunca mover el filtrado de PII ni la confirmación de acciones sensibles a solo el prompt.
-- Al agregar herramientas nuevas, replicar el patrón completo: definición → validación → ejecución (simulada + real) → filtro de campos. **Obligatorio** registrar su entrada en `CAMPOS_PERMITIDOS`: sin ella el filtro descarta el resultado completo (fail-closed) y la herramienta no devolverá nada.
-- Mantener la ruta simulada y la real devolviendo la **misma forma** de dato; si divergen, lo que funciona en pruebas falla en producción.
-- Mantener credenciales y conmutadores de entorno solo en `.env`, nunca en el código.
-- **Nunca pedirle al modelo que calcule.** Conteos, sumas, promedios y comparaciones se resuelven en Python; el modelo solo compone los parámetros de la consulta y redacta el resultado (§12.5). Si una implementación propuesta depende de que el modelo sume, está mal planteada.
-- El código base de referencia es el módulo de Soporte (`soporte_wisphub.py`).
+Las reglas de trabajo viven en **CLAUDE.md**, que manda sobre este documento. Las tres que más se olvidan:
+
+- **Nunca pedirle al modelo que calcule.** Conteos, sumas, promedios y comparaciones se resuelven en Python; el modelo compone los parámetros y redacta (§12.5).
+- **Toda herramienta nueva necesita su lista blanca por rol**: sin ella devuelve nada (fail-closed). Si un campo es texto libre, va también a `campos_texto_libre`.
+- **Quitar una aprobación humana exige las cuatro condiciones de §2**, con su evidencia medida en el tablero de capacidad. Nunca "porque el modelo ya lo hace bien".
+
+*Esta sección hablaba del prototipo `soporte_wisphub.py`, de `CAMPOS_PERMITIDOS` y de una ruta simulada: son de julio de 2026 y ya no describen el motor.*
 
 ---
 
-## 12. Del asistente al cerebro — impacto sobre lo construido
+## 12. Del asistente al cerebro — historia (julio 2026) y la decisión que sigue vigente
 
-Análisis del código actual (`soporte_wisphub.py`) frente al norte de §2. **Nada hay que tirar.** El motor sobrevive; lo que cambia son firmas y dos supuestos estructurales.
+*§12.1–§12.4 son el análisis de julio de 2026 sobre el prototipo `soporte_wisphub.py`, y quedan como historia: los cambios que pedían ya están hechos (áreas, bucle de herramientas, sesión por usuario, aprobación en dos pasos, registro sin PII). **§12.5 sigue vigente** y es una regla del motor.*
+
+Análisis del código de entonces (`soporte_wisphub.py`) frente al norte de aquel momento. **Nada hay que tirar.** El motor sobrevive; lo que cambia son firmas y dos supuestos estructurales.
 
 ### 12.1 Sobrevive sin tocar
 
