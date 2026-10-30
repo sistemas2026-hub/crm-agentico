@@ -2813,7 +2813,7 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         #  la revision mira. Sin la tarea delegada solo dice cuantas cerraria
         #  (la sombra).
         ("cierre de lo revisado",
-         lambda: _cerrar_lo_revisado(org, ahora)),
+         lambda: _cerrar_lo_revisado(org)),
     ):
         try:
             resumen.update(fase())
@@ -2872,11 +2872,12 @@ def _publicar_el_reparto(org, ahora) -> dict:
     return publicacion_del_reparto.publicar_el_reparto(org, ahora)
 
 
-def _cerrar_lo_revisado(org, ahora) -> dict:
+def _cerrar_lo_revisado(org) -> dict:
     """La fase de `campo.cierre_por_el_supervisor`, importada recien al correr,
-    como las otras."""
+    como las otras. Con la hora de AHORA y no la del arranque del ciclo: las
+    fases de antes pueden tardar minutos (auditoria de frontera, 30/10/2026)."""
     from campo import cierre_por_el_supervisor
-    return cierre_por_el_supervisor.cerrar_lo_revisado(org, ahora=ahora)
+    return cierre_por_el_supervisor.cerrar_lo_revisado(org)
 
 
 def _cargar_el_material(org, ahora) -> dict:

@@ -310,12 +310,81 @@ def test_h2_la_ruta_humana_no_se_pide_sin_una_persona(abierto, orden):
     post.assert_not_called()
 
 
-def test_la_fase_corre_en_el_ciclo_despues_de_la_medicion():
-    """Es una fase del ciclo, despues de «medicion despues del arreglo»: se
-    lee del codigo del ciclo, que es donde se decide el orden."""
-    import inspect
-
+def test_la_fase_corre_en_el_ciclo_despues_de_la_medicion(org_a, monkeypatch):
+    """Se CORRE el ciclo y se mira en que orden se llamaron las dos fases: no
+    alcanza con que el codigo las nombre (auditoria, 30/10/2026)."""
     from operaciones import supervisor
 
-    codigo = inspect.getsource(supervisor.correr_ciclo)
-    assert codigo.index('"medicion despues del arreglo"') < codigo.index('"cierre de lo revisado"')
+    llamadas = []
+    monkeypatch.setattr(supervisor, "_verificar_los_arreglos",
+                        lambda org, desatendido=False: llamadas.append("medicion") or {})
+    monkeypatch.setattr(supervisor, "_cerrar_lo_revisado",
+                        lambda org: llamadas.append("cierre") or {})
+
+    supervisor.correr_ciclo(org_a)
+
+    assert llamadas == ["medicion", "cierre"]
+
+
+def test_m2_una_falla_nunca_medida_sigue_esperando_pasadas_las_48_horas(
+        abierto, orden, monkeypatch):
+    """La ventana de la medicion es de 48 h; la de «no se sabe» no tiene
+    limite: una falla sin medicion concluyente no se cierra sola nunca."""
+    from operaciones import paso_a_despacho as pad
+    from operaciones.models import PropuestaSupervisor
+
+    monkeypatch.undo()
+    monkeypatch.setattr("operaciones.autonomia._interruptor_de", lambda org: (True, ""))
+    monkeypatch.setenv("MOTOR_TENANT", "tenant-de-prueba")
+    OrdenTrabajo.objects.filter(pk=orden.pk).update(
+        origen_sistema="crm", origen_ref="caso-falla",
+        completada_campo_en=timezone.now() - dt.timedelta(days=5))
+    p = PropuestaSupervisor.objects.create(
+        org=abierto, origen_id="caso-falla", estado=PropuestaSupervisor.ACEPTADA,
+        evidencia=[{"fuente": "lectura_del_ticket", "texto": "sin internet"}])
+    monkeypatch.setattr(pad, "propuestas_que_llevan_a_despacho",
+                        lambda org: PropuestaSupervisor.objects.filter(pk=p.pk))
+    monkeypatch.setattr(pad, "_ultima_lectura_con_grupo",
+                        lambda prop: {"grupo": pad.FALLA_DE_SERVICIO})
+
+    assert RC.pendientes_de_medir(abierto) == {str(orden.id)}
+    with mock.patch("requests.post") as post:
+        assert _fase(abierto)["cerraria"] == 0
+    post.assert_not_called()
+
+
+def test_l2_la_alerta_de_divergencia_se_ve_en_el_log(abierto, orden):
+    import zoneinfo
+
+    from campo import tiempos_del_dia as TD
+
+    bogota = zoneinfo.ZoneInfo("America/Bogota")
+    EventoTrabajo.objects.create(org=abierto, orden=orden, tipo=CS.EVENTO_DIVERGENCIA, datos={})
+    log = TD.log_del_dia([orden], fecha=timezone.now().astimezone(bogota).date(),
+                         zona=bogota, tiempos={})
+    alertas = [e["texto"] for e in log if e["de"] == "alerta"]
+    assert any("cerró el ticket de OT #3 y la orden cambió" in t for t in alertas), log
+
+
+def test_l3_sin_saber_que_espera_medicion_la_tarjeta_no_dice_se_puede_cerrar(
+        abierto, orden, user_profile, monkeypatch):
+    import zoneinfo
+
+    from campo import dia_publicado as D
+    from campo.cuadrillas import (Cuadrilla, IntegranteDeJornada,
+                                  JornadaDeCuadrilla, PersonaDeCampo)
+
+    monkeypatch.setattr(RC, "pendientes_de_medir", lambda org, ahora=None: None)
+    abierto.timezone = "America/Bogota"
+    abierto.save(update_fields=["timezone"])
+    hoy = timezone.now().astimezone(zoneinfo.ZoneInfo("America/Bogota")).date()
+    c = Cuadrilla.objects.create(org=abierto, nombre="Cuadrilla #5")
+    j = JornadaDeCuadrilla.objects.create(org=abierto, cuadrilla=c, fecha=hoy,
+                                          labor=JornadaDeCuadrilla.CORRECTIVO)
+    persona = PersonaDeCampo.objects.create(org=abierto, profile=user_profile, nombre="T")
+    IntegranteDeJornada.objects.create(org=abierto, jornada=j, persona=persona, rol="tecnico")
+
+    r = D.del_dia(abierto, hoy)["cuadrillas"][0]["ordenes"][0]["revision"]
+
+    assert r["veredicto"] == RC.REVISAR
+    assert any(p["clave"] == "medicion" and p["ok"] is None for p in r["puntos"])

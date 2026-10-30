@@ -63,16 +63,39 @@ def aplica(orden) -> bool:
                                             OrdenTrabajo.REQUIERE_REVISION))
 
 
-def pendientes_de_medir(org, ahora=None) -> set | None:
-    """Los ids de las ordenes que esperan la medicion despues del arreglo
-    (`operaciones/verificacion_de_arreglos.candidatas`), o None si no se pudo
-    saber. None no es «ninguna»: quien cierra solo no cierra nada con None."""
-    from django.utils import timezone
+#: No se pudo saber que ordenes necesitan la medicion: toda medicion que falta
+#: es «no se sabe». Distinto de no haberlo preguntado (None).
+NO_SE_SABE = "no_se_sabe"
 
-    from operaciones.verificacion_de_arreglos import candidatas
+
+def pendientes_de_medir(org, ahora=None) -> set | None:
+    """Los ids de las ordenes terminadas sin validar que NECESITAN la medicion
+    despues del arreglo: las de una FALLA DE SERVICIO (el mismo criterio que
+    `operaciones/verificacion_de_arreglos.candidatas`), SIN su ventana de 48 h
+    ni su «ya no se reintenta» (auditoria de frontera, 30/10/2026: pasada la
+    ventana, una falla nunca medida volvia a contar como «no aplica»). None si
+    no se pudo saber, y entonces quien cierra solo no cierra nada."""
+    from campo.models import OrdenTrabajo
+    from operaciones import paso_a_despacho as pad
 
     try:
-        return {str(orden_id) for _p, _c, orden_id in candidatas(org, ahora or timezone.now())}
+        por_caso = {str(caso): str(orden_id) for orden_id, caso in (
+            OrdenTrabajo.objects.filter(
+                org=org, origen_sistema="crm",
+                estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO,
+                estado_validacion__in=(OrdenTrabajo.PENDIENTE,
+                                       OrdenTrabajo.REQUIERE_REVISION))
+            .values_list("id", "origen_ref"))}
+        if not por_caso:
+            return set()
+        salida = set()
+        for p in pad.propuestas_que_llevan_a_despacho(org).filter(
+                origen_id__in=list(por_caso)):
+            lectura = pad._ultima_lectura_con_grupo(p) or {}
+            if (lectura.get("grupo") == pad.FALLA_DE_SERVICIO
+                    and lectura.get("accion_autorizada") != pad.SI):
+                salida.add(por_caso[str(p.origen_id)])
+        return salida
     except Exception:                                            # noqa: BLE001
         return None
 
@@ -185,6 +208,10 @@ def _medicion(orden, pendientes=None):
          if isinstance(p, dict) and p.get("fuente") == FUENTE
          and p.get("orden") == str(orden.id)), None)
     if pieza is None:
+        if pendientes == NO_SE_SABE:
+            return _punto("medicion", None,
+                          "No se pudo saber si esta orden espera la medición "
+                          "después del arreglo.")
         return esperando if pendientes and str(orden.id) in pendientes else None
     rango = pieza.get("quedo_en_rango")
     if rango is True:

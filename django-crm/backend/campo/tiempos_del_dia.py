@@ -214,6 +214,12 @@ def log_del_dia(ordenes, *, fecha, zona, tiempos, novedades=(), material=None,
         elif ev.tipo == "cerrada_por_el_supervisor":
             entradas.append((ev.created_at, f"El Supervisor aprobó y cerró OT #{n}",
                              "supervisor"))
+        elif ev.tipo == "ticket_cerrado_con_la_orden_cambiada":
+            #  La alerta de `cierre_por_el_supervisor`: el ticket del ISP quedo
+            #  cerrado y la orden cambio en el medio. Alguien tiene que verla.
+            entradas.append((ev.created_at, f"El Supervisor cerró el ticket de OT #{n} "
+                                            f"y la orden cambió en el medio: revisalo "
+                                            f"en el sistema del ISP", "alerta"))
         elif ev.tipo == "bloqueo_detuvo_el_trabajo":
             entradas.append((ev.created_at, f"OT #{n} quedó detenida por un bloqueo", "alerta"))
         elif ev.tipo == "bloqueo_libero_el_trabajo":

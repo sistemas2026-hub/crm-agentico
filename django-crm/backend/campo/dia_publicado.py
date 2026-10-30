@@ -368,7 +368,10 @@ def del_dia(org, fecha) -> dict:
             #  Las que esperan la medicion, UNA vez por pantalla y solo si hay
             #  algo que revisar.
             if not pendientes:
-                pendientes.append(RC.pendientes_de_medir(org, ahora))
+                medir = RC.pendientes_de_medir(org, ahora)
+                #  Sin poder saberlo, la tarjeta no dice «Se puede cerrar» de
+                #  una que quiza espera la medicion.
+                pendientes.append(RC.NO_SE_SABE if medir is None else medir)
             r = RC.revisar(o, pendientes=pendientes[0])
             if r is not None:
                 #  Si el Supervisor la quiso cerrar solo y el motor no lo
