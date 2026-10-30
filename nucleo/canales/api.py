@@ -5646,12 +5646,14 @@ def conversaciones():
         # Como se lee cada motivo, etiqueta y caso: uno solo para la empresa,
         # igual que el plazo (Conversaciones.rotulos).
         rotulos = dict(cfg_cola.conversaciones.rotulos)
+        areas_cola = {a.nombre: a.etiqueta for a in cfg_cola.areas}
     except Exception:
         # No poder leer la config no puede tumbar la cola entera: sin plazo,
         # la Bandeja funciona igual, sólo que sin el reloj -- y sin rótulos,
         # con las claves como venían.
         sla = 0
         rotulos = {}
+        areas_cola = {}
 
     # La salud del canal viaja con la cola por lo mismo que el plazo: es una
     # sola para la empresa. Son los tres numeros crudos -- el veredicto lo
@@ -5662,6 +5664,9 @@ def conversaciones():
                     "agrupada": por_numero,
                     "sla_toma_minutos": sla,
                     "rotulos": rotulos,
+                    # Las areas de la empresa, para decir «Escalada a Soporte
+                    # Técnico» con la etiqueta y filtrar por area (T22).
+                    "areas": areas_cola,
                     "canal_whatsapp": canal_whatsapp})
 
 
@@ -7506,6 +7511,7 @@ def conversaciones_responder_humano(id_conversacion, ticket_del_caso: str | None
             transiciones.marcar_pendiente_interno(
                 tenant, id_conversacion, nota=cuerpo.get("pendiente_interno"),
                 operador_id=autor_id, operador_nombre=autor,
+                hasta=_hora_iso(cuerpo.get("pendiente_interno_hasta")),
                 clave=f"pendiente:{clave}" if clave else None)
         except Exception as e:
             registrar("conversaciones", "no se pudo marcar el pendiente interno", error=e)
@@ -10854,6 +10860,102 @@ def conversaciones_reasignar(id_conversacion):
         return conflicto
     return jsonify({"reasignada": True, "aplicada": r.aplicada, "relevo_version": r.version,
                     "asignada_a": (r.datos or {}).get("nuevo_nombre") if r.aplicada else None,
+                    "reintento": r.motivo == "reintento"})
+
+
+def _hora_iso(crudo):
+    """
+    Una hora ISO que manda la pantalla (la del «en espera hasta», C22), como
+    datetime con zona, o None. Sin zona no se adivina: se toma como UTC, que
+    es como la manda el navegador (toISOString). Lo que no se entiende es
+    None -- un pendiente sin hora, como antes --, nunca un error que tumbe la
+    respuesta ya guardada.
+    """
+    if not isinstance(crudo, str) or not crudo.strip():
+        return None
+    try:
+        hora = datetime.fromisoformat(crudo.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return hora if hora.tzinfo else hora.replace(tzinfo=timezone.utc)
+
+
+@app.post("/conversaciones/<id_conversacion>/escalar-area")
+def conversaciones_escalar_a_area(id_conversacion):
+    """
+    T22 (contrato v3.3, C21, 30/10/2026): quien la tiene -- o nadie -- la pasa a
+    un AREA de la empresa, con lo que valido y por que no la resolvio. Lo
+    puede hacer cualquier operador; pasarla a una persona concreta sigue
+    siendo /reasignar, de ADMIN.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, area, motivo, nota,
+             clave_operacion?}
+
+    La nota queda ademas como NOTA INTERNA del hilo: quien la recibe la lee
+    en la conversacion, sin tener que buscarla en otro lado.
+
+      200  escalada (o reintento de la misma operacion)
+      400  area que no es de la empresa, o sin motivo o sin nota
+      404  no existe
+      409  de otra persona, bajo control de la IA, cerrada o de legado
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    area = (cuerpo.get("area") or "").strip()
+    motivo = " ".join((cuerpo.get("motivo") or "").split())
+    nota = (cuerpo.get("nota") or "").strip()
+    try:
+        areas = {a.nombre: a.etiqueta for a in _config_de(tenant).areas}
+    except Exception as e:
+        registrar("conversaciones", "sin config al escalar a un area", error=e)
+        return jsonify({"error": "No se pudo leer las areas de la empresa."}), 500
+    if area not in areas:
+        return jsonify({"error": "Esa area no es de esta empresa.", "codigo": "area_invalida"}), 400
+    if not motivo or not nota:
+        return jsonify({"error": "Para escalar hace falta el motivo y la nota de lo que se valido.",
+                        "codigo": "faltan_datos"}), 400
+    if len(motivo) > transiciones.MAX_MOTIVO_AREA or len(nota) > transiciones.MAX_NOTA_AREA:
+        return jsonify({"error": f"El motivo va hasta {transiciones.MAX_MOTIVO_AREA} caracteres "
+                                 f"y la nota hasta {transiciones.MAX_NOTA_AREA}.",
+                        "codigo": "demasiado_largo"}), 400
+    clave = (cuerpo.get("clave_operacion") or "").strip() or None
+    try:
+        r = transiciones.escalar_a_area(
+            tenant, id_conversacion, area=area, motivo=motivo, nota=nota,
+            areas_validas=areas, operador_id=autor_id, operador_nombre=autor, clave=clave)
+    except Exception as e:
+        registrar("conversaciones", "fallo al escalar a un area", error=e)
+        return jsonify({"error": "No se pudo guardar."}), 500
+    if r.motivo == "no_existe":
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if r.motivo == "legado":
+        return jsonify({"error": "Esta conversacion es anterior al relevo: no se puede escalar "
+                                 "hasta adoptarla.", "codigo": "legado_sin_relevo"}), 409
+    if r.motivo == "no_es_suya":
+        return jsonify({"error": "Esta conversacion la tiene otra persona: pasarla es Reasignar, "
+                                 "de un administrador.", "codigo": "no_es_suya",
+                        "asignada_a": (r.datos or {}).get("asignada_a_nombre")}), 409
+    conflicto = _conflicto_de_asignacion(r)
+    if conflicto:
+        return conflicto
+    # La nota en el hilo, solo la primera vez: un reintento no la repite. Si
+    # falla, la escalada ya quedo y la nota esta en su columna; queda en el log.
+    if r.aplicada:
+        try:
+            persistencia.agregar_nota_interna(
+                tenant, id_conversacion,
+                f"Escalada a {areas[area]} — {motivo}\n{nota}",
+                autor, autor_usuario_id=autor_id)
+        except Exception as e:
+            registrar("conversaciones", "no se pudo dejar la nota de la escalada", error=e)
+    return jsonify({"escalada": True, "aplicada": r.aplicada, "area": area,
+                    "area_etiqueta": areas[area], "relevo_version": r.version,
                     "reintento": r.motivo == "reintento"})
 
 

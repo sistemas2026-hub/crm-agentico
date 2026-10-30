@@ -18,8 +18,10 @@ export async function POST({ request, params, locals, fetch }) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const { mensaje, clave_idempotencia, devolver_al_asistente = false, pendiente_interno = null } =
-    await request.json();
+  const {
+    mensaje, clave_idempotencia, devolver_al_asistente = false,
+    pendiente_interno = null, pendiente_interno_hasta = null
+  } = await request.json();
   if (!mensaje) {
     return json({ error: 'Falta el mensaje' }, { status: 400 });
   }
@@ -63,6 +65,13 @@ export async function POST({ request, params, locals, fetch }) {
         pendiente_interno:
           typeof pendiente_interno === 'string' && pendiente_interno.trim()
             ? pendiente_interno.trim().slice(0, 200)
+            : null,
+        // Hasta cuándo se espera (C22). Solo una fecha válida: lo demás es
+        // «sin hora», que es como era antes.
+        pendiente_interno_hasta:
+          typeof pendiente_interno_hasta === 'string' &&
+          !Number.isNaN(Date.parse(pendiente_interno_hasta))
+            ? new Date(pendiente_interno_hasta).toISOString()
             : null
       })
     });

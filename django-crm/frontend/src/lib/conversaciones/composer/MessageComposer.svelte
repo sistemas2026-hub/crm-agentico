@@ -53,6 +53,9 @@
     // «Queda en espera» (29/10/2026, opción de T5): la marca y qué se espera.
     quedaEnEspera = $bindable(false),
     notaEspera = $bindable(''),
+    // Hasta cuándo (C22): '' sin hora, '1h', '4h', 'manana'. La página lo
+    // convierte en una hora al enviar (lib/conversaciones/espera.js).
+    esperaHasta = $bindable(''),
     modo = $bindable('responder'),
     campoTexto = $bindable(),
     adjuntarAbierto = $bindable(false),
@@ -610,6 +613,14 @@
               placeholder="¿Qué se espera? Ej: que el cliente reinicie el equipo"
               aria-label="Qué se espera"
             />
+            <!-- Pasada la hora, la conversación vuelve sola al primer lugar
+                 de la cola (contrato v3.3, C22). -->
+            <select class="espera-hasta" bind:value={esperaHasta} aria-label="Hasta cuándo">
+              <option value="">Sin hora</option>
+              <option value="1h">Avisar en 1 h</option>
+              <option value="4h">Avisar en 4 h</option>
+              <option value="manana">Mañana 8:00</option>
+            </select>
           {/if}
         </div>
       {/if}
@@ -1282,6 +1293,15 @@
   .espera-activa .espera-marca {
     color: var(--bandeja-aviso);
     font-weight: 600;
+  }
+  .espera-hasta {
+    flex: none;
+    padding: 2px 4px;
+    border: 1px solid var(--bandeja-aviso-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-superficie);
+    font: inherit;
+    color: var(--bandeja-texto);
   }
   .espera-nota {
     flex: 1;

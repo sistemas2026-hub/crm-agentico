@@ -698,6 +698,10 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                   c.relevo_version, c.control, c.control_motivo,
                   c.asignada_a_usuario_id, c.asignada_a_nombre, c.asignada_en,
                   c.pendiente_interno_desde, c.estado_escalada,
+                  -- Contrato v3.3 (30/10/2026): la hora de la espera (C22) y
+                  -- el area a la que se escalo (T22). Sin la nota: la cola no
+                  -- la muestra.
+                  c.pendiente_interno_hasta, c.area_destino, c.area_destino_en,
                   -- La ultima vez que le respondio UNA PERSONA. Con esto se
                   -- sabe si el mensaje del cliente es posterior, que es la
                   -- diferencia entre "alguien espera respuesta" y "ya le
@@ -885,6 +889,10 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       -- que se espera y desde cuando. La nota es de quien
                       -- atiende, no del cliente.
                       pendiente_interno_desde, pendiente_interno_nota,
+                      pendiente_interno_hasta,
+                      -- T22: a que area se escalo y con que nota, para quien
+                      -- la recibe.
+                      area_destino, area_destino_nota, area_destino_en,
                       -- Lo que el modelo ya habia escrito al escalar y hasta
                       -- ahora solo viajaba a la descripcion del ticket. Es lo
                       -- que arma el resumen de arriba en el detalle: que

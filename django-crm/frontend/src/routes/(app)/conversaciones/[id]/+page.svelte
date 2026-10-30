@@ -12,6 +12,7 @@
   import { cargarDesenlaces, cuerpoDeCierre } from '$lib/conversaciones/desenlaces.js';
   import { incorporarMensaje } from '$lib/conversaciones/eco_local.js';
   import { rotuloDe } from '$lib/conversaciones/rotulos.js';
+  import { horaDeEspera } from '$lib/conversaciones/espera.js';
   import MessageComposer from '$lib/conversaciones/composer/MessageComposer.svelte';
   import CasePanel from '$lib/conversaciones/context/CasePanel.svelte';
   import ActivityPanel from '$lib/conversaciones/context/ActivityPanel.svelte';
@@ -369,6 +370,48 @@
      quita, como dice el contrato. */
   let quedaEnEspera = $state(false);
   let notaEspera = $state('');
+  let esperaHasta = $state('');
+
+  /* ESCALAR A UN ÁREA (T22, contrato v3.3, 30/10/2026). Cualquier operador
+     con la conversación suya o sin dueño; el motor valida el área contra las
+     de la empresa y deja la nota también como nota interna del hilo. */
+  let escalandoArea = $state(false);
+  let errorEscalarArea = $state('');
+  async function escalarArea(/** @type {{ area: string, motivo: string, nota: string }} */ e) {
+    if (escalandoArea) return false;
+    escalandoArea = true;
+    errorEscalarArea = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/escalar-area`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...e, clave_operacion: crypto.randomUUID() })
+      });
+      const datos = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        errorEscalarArea = datos.error || 'No se pudo escalar.';
+        return false;
+      }
+      conversacion = {
+        ...conversacion,
+        area_destino: datos.area,
+        area_destino_nota: e.nota,
+        area_destino_en: new Date().toISOString(),
+        asignada_a_usuario_id: null,
+        asignada_a_nombre: null,
+        tomada_por: null
+      };
+      invalidate('app:conversaciones');
+      await refrescarRelevo();
+      await sondearMensajesNuevos();
+      return true;
+    } catch {
+      errorEscalarArea = 'No se pudo contactar al servidor.';
+      return false;
+    } finally {
+      escalandoArea = false;
+    }
+  }
 
   /* EN PANTALLA ANCHA LA COLUMNA TAMBIÉN SE RECOGE (29/10/2026). Hasta hoy
      estaba siempre fija por encima de 1240px, y en una conversación donde no
@@ -1637,7 +1680,9 @@
             devolver_al_asistente: devolviendo,
             // Sin marcar = null = cierra la espera que hubiera (contrato T5).
             pendiente_interno:
-              !devolviendo && quedaEnEspera ? notaEspera.trim() || 'En espera' : null
+              !devolviendo && quedaEnEspera ? notaEspera.trim() || 'En espera' : null,
+            pendiente_interno_hasta:
+              !devolviendo && quedaEnEspera ? horaDeEspera(esperaHasta) : null
           })
         });
         const datos = await resp.json();
@@ -1647,8 +1692,10 @@
           // envió con la respuesta y el motor la abrió o la cerró (T5).
           conversacion.pendiente_interno_desde = quedaEnEspera ? new Date().toISOString() : null;
           conversacion.pendiente_interno_nota = quedaEnEspera ? notaEspera.trim() || 'En espera' : null;
+          conversacion.pendiente_interno_hasta = quedaEnEspera ? horaDeEspera(esperaHasta) : null;
           quedaEnEspera = false;
           notaEspera = '';
+          esperaHasta = '';
         }
         if (!resp.ok && chatCerrado && datos?.codigo === 'hay_conversacion_abierta') {
           // No se guardó ni se envió nada: la burbuja se va y el texto vuelve.
@@ -1758,6 +1805,8 @@
     {conversacion}
     {caso}
     rotulos={data.rotulos ?? {}}
+    areas={data.areas ?? {}}
+    {escalandoArea} {errorEscalarArea} onEscalarArea={escalarArea}
     operadores={data.operadores ?? []}
     {iaEnPausa} {escalada} {atendida} {esMia} {asignadaA} {esAdmin} {gobernada}
     {marcandoAtendida} {errorAtender} onAtender={marcarAtendida}
@@ -1848,7 +1897,7 @@
       {interviniendo} {errorIntervenir}
       {adjunto} {grabando} {grabPausada} {segundos} {limites}
       {ventanaAbierta} {ventanaRestante} {ventanaPorCerrarse}
-      bind:quedaEnEspera bind:notaEspera
+      bind:quedaEnEspera bind:notaEspera bind:esperaHasta
       {plantillas} {cargandoPlantillas} {errorPlantillas}
       {enviandoPlantilla} {plantillaCompleta}
       {vistaPreviaPlantilla} {hayPlantillaDeServicio}

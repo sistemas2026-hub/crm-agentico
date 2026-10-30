@@ -1,6 +1,6 @@
 # Contrato del relevo IA ↔ humano
 
-**Versión:** 3.2 (21/10/2026): v3.1 + la bandeja se lee por chat (§2, §4.5, C19) y escribirle a un chat cerrado abre una conversación nueva (T21, X26, I22, C20). v3.1 (18/09/2026): v3.0 + B3.5 (D18): la cola se proyecta en el backend por bandas explícitas, con `esperando_desde` y el motivo en palabras (§4.10, C18). v3.0: v2.9 + D27 corregido (la hora del evento se toma después del lock) y D28 registrado para B4 (la asignación del ticket del CRM puede divergir; Dexter manda). v2.9: B3.4 (D4 cerrado: toma atómica, soltar solo el dueño, reasignación ADMIN auditada; C16, C17) y D27 (el orden de los eventos es la versión). v2.8: la sincronización de una escalada comprometida se autoriza por la escalada, no por la versión exacta (C15), e inventario vivo de efectos (§4.8). v2.7: D25 (ningún efecto que escribe empieza después de un cambio de control; inventario de efectos) y `descartado` terminal. v2.6: D24 (revalidación del control al volver del modelo y antes del POST; punto de no retorno) y replay idempotente solo para el mismo actor y operación. v2.5: B3.3b (compuerta durable del modelo, T8 Intervenir) y G1/G9 en verde. **Estado: CERRADO como arquitectura** después de dos rondas de auditoría. Autoriza preparar la implementación por fases (§15) en `feature/bandeja-relevo`, **sin push a producción**. Cada fase vuelve a auditoría antes de integrarse.
+**Versión:** 3.3 (30/10/2026): v3.2 + escalar a un área entre pares (T22, C21) y el vencimiento del «en espera» (C22). v3.2 (21/10/2026): v3.1 + la bandeja se lee por chat (§2, §4.5, C19) y escribirle a un chat cerrado abre una conversación nueva (T21, X26, I22, C20). v3.1 (18/09/2026): v3.0 + B3.5 (D18): la cola se proyecta en el backend por bandas explícitas, con `esperando_desde` y el motivo en palabras (§4.10, C18). v3.0: v2.9 + D27 corregido (la hora del evento se toma después del lock) y D28 registrado para B4 (la asignación del ticket del CRM puede divergir; Dexter manda). v2.9: B3.4 (D4 cerrado: toma atómica, soltar solo el dueño, reasignación ADMIN auditada; C16, C17) y D27 (el orden de los eventos es la versión). v2.8: la sincronización de una escalada comprometida se autoriza por la escalada, no por la versión exacta (C15), e inventario vivo de efectos (§4.8). v2.7: D25 (ningún efecto que escribe empieza después de un cambio de control; inventario de efectos) y `descartado` terminal. v2.6: D24 (revalidación del control al volver del modelo y antes del POST; punto de no retorno) y replay idempotente solo para el mismo actor y operación. v2.5: B3.3b (compuerta durable del modelo, T8 Intervenir) y G1/G9 en verde. **Estado: CERRADO como arquitectura** después de dos rondas de auditoría. Autoriza preparar la implementación por fases (§15) en `feature/bandeja-relevo`, **sin push a producción**. Cada fase vuelve a auditoría antes de integrarse.
 **Commit base:** `92ebe78` (`origin/fix/integracion-wisphub`, verificado con `git fetch` el 16/09/2026).
 **Alcance:** la bandeja de conversaciones (PRD §8.11) y lo que el motor hace con una conversación mientras la atiende la IA, una persona o nadie.
 
@@ -11,6 +11,13 @@
 - **[AUDITORÍA]**: decisión tomada o corregida en la auditoría de Dexter.
 - **[ABIERTA]**: sin decidir (en la v2.1 no queda ninguna de arquitectura, §14.3).
 - **[PRODUCCIÓN]**: restricción o medición del área de producción y despliegue (§16.1b).
+
+### Cambios desde la versión 3.2 (escalar a un área y el vencimiento de la espera, 30/10/2026)
+
+| # | Decisión | Dónde |
+|---|---|---|
+| C21 | **Un operador escala a un ÁREA, no a una persona** (T22) [DECISIÓN 30/10/2026, del usuario]. T4 decía *«habilitarlo entre pares por tenant queda para cuando una empresa lo pida»*: la pidió. Pregunta del usuario ese día: *«si a un usuario le escalaron la conversación, hizo sus validaciones y no solucionó el problema sino que tiene que escalarlo?»*. Medido: solo existía T3 (soltar, sin motivo ni destino) y T4 (solo `ADMIN`). T22 la deja sin dueño (E1) marcada para un área de `TenantConfig.areas`, con motivo y nota obligatorios; pasarla a una PERSONA concreta sigue siendo T4, de `ADMIN`. Ficha: `SPEC/objetivos/conversaciones-que-se-atienden-solas.md`. | §3.1, §3.3, T22, §4.10 |
+| C22 | **El «en espera» puede vencer** [DECISIÓN 30/10/2026]. Al abrir el pendiente interno (opción de T5) se puede fijar `pendiente_interno_hasta`. Pasada esa hora la conversación sube a la banda 1 con el motivo «La espera venció»: vuelve sola al primer lugar de quien la tiene, sin cambiar control ni asignación. Sin hora, el pendiente es el de siempre (banda 4). | §3.1, §4.10 |
 
 ### Cambios desde la versión 3.1 (bandeja por chat, 21/10/2026)
 
@@ -162,7 +169,9 @@ Los defectos D1–D16 (§13) se implementan **contra este modelo**, no como arre
 | **`control`** | No existe. Sale de `escalada_a_humano && necesita_atencion_humana` (`api.py:626`) **más** `_sesiones[...]["escalada"]` en memoria, que puede divergir (D9, D10) | **Nuevo.** `ia` o `humano`, not null, default `ia`. **Única fuente para decidir si la IA responde.** |
 | **`control_motivo`** | — | **Nuevo.** `escalada` o `intervencion`. Not null si `control = 'humano'`. |
 | **`asignada_a_usuario_id`**, **`asignada_a_nombre`**, `asignada_en` | `tomada_por` (texto: nombre o email), `tomada_en` [VERIFICADO] | **Nuevos.** `tomada_por` pasa a legado (§11). |
-| **`pendiente_interno_desde`**, `pendiente_interno_nota` | — | **Nuevos.** |
+| **`pendiente_interno_desde`**, `pendiente_interno_nota` | — | **Nuevos.** Los escribe la opción de T5 (`transiciones.marcar_pendiente_interno`, desde el 29/10/2026; hasta ese día nada los escribía). |
+| **`pendiente_interno_hasta`** | — | **Nuevo** (C22), nullable: hasta cuándo se espera. Vencido, la fila sube a la banda 1. Se borra junto con el pendiente. |
+| **`area_destino`**, `area_destino_nota`, `area_destino_en` | — | **Nuevos** (T22, C21): a qué área se escaló, con qué nota y cuándo. Se borran al cerrar o con otro T22. |
 | **`aviso_relevo`** | — | **Nuevo**, nullable: un aviso para el operador que no cambia el control. Hoy su único valor es `caso_externo_cerrado` (T11). Se limpia cuando el operador decide. |
 | **`relevo_version`** | — | **Nuevo.** Entero que sube con cada transición. Concurrencia optimista (§9). |
 | `caso_id`, `ticket_operativo` | [VERIFICADO] | Mismo significado. Pueden estar nulos con una sincronización pendiente (§3.6). |
@@ -196,7 +205,7 @@ Correspondencia obligatoria para filas nuevas:
 
 **Tipos:**
 - **Control:** `escalada`, `intervencion`, `devolucion_solicitada`, `devuelta_a_ia`, `devolucion_fallida`, `caso_externo_cerrado`.
-- **Asignación y trabajo:** `tomada`, `soltada`, `reasignada`, `pendiente_interno_abierto`, `pendiente_interno_cerrado`, `evaluacion_revisada`.
+- **Asignación y trabajo:** `tomada`, `soltada`, `reasignada`, `escalada_a_area` (T22), `pendiente_interno_abierto`, `pendiente_interno_cerrado`, `evaluacion_revisada`.
 - **Acciones:** `accion_propuesta_duplicada`, `accion_aprobada`, `accion_rechazada`, `accion_vencida`, `accion_cancelada`, `accion_desconocida`.
 - **Cierre:** `cerrada`.
 
@@ -336,6 +345,7 @@ Sin esto, una guarda que leyera solo `control` bloquearía a los operadores en l
 | Banda | Situación | `necesita_accion_de` | `esperando_desde` |
 |---|---|---|---|
 | 1 | El cliente escribió después de la última respuesta de una persona | `humano` | ese mensaje del cliente |
+| 1 | El pendiente interno **venció** (`pendiente_interno_hasta` pasado, C22) | `humano` | el vencimiento |
 | 2 | En manos de personas y **sin asignar** (escalada o intervención) | `humano` | la escalada |
 | 3 | `estado_escalada = NO_DETERMINADO` sin evento `evaluacion_revisada` (T19) | `humano` | la escalada |
 | 3 | **Sin una acción de resolución registrada** (`sin_gestion`, regla 3b de §4.2): la IA la dejó sin derivar, sin escalar, sin caso ni ticket, y el cliente no volvió en `sin_gestion_horas` [GUARDA ANTI-LIMBO, 26/09/2026] | `humano` | el último mensaje del asistente |
@@ -412,6 +422,7 @@ Cada transición es **un UPDATE condicionado + su evento (+ sus sincronizaciones
 | **T19** | E0/E1/E2 → igual | Revisar evaluación `NO_DETERMINADO` (operador) [AUDITORÍA] | `estado_escalada = 'NO_DETERMINADO'` sin revisión | Evento `evaluacion_revisada` {decision: `no_requiere_persona` \| `requiere_persona`}. `requiere_persona` con control `ia` equivale a T8 en la misma transacción. **También resuelven la revisión:** T7, T8 y T17. **No la resuelven:** T2 y T3. | Nada. |
 | **T20** | — | Reconciliador (reloj) | — | (a) Reintenta sincronizaciones `pendiente`. (b) Completa el paso 4 de T6 cuando el paso 3 guardó la aceptación; marca el mensaje `desconocido` + `devolucion_fallida` si no quedó `wamid` guardado pasados N min (§9.5). Reintenta o marca `desconocida` las sincronizaciones según la clase de error (§9.6). (c) `ejecutando` viejas → `desconocida` + evento. (d) `pendiente` vencidas → `vencida` + evento. (e) Observa casos CRM cerrados de conversaciones con `control = humano` (T11). **Nunca reejecuta una acción ni reenvía un mensaje por su cuenta.** | Nada. |
 | **T21** | E3 (ancla) → **conversación nueva** en E2; el ancla sigue en E3 | Escribirle a un chat cerrado (operador) [DECISIÓN 21/10/2026, C20] | Ancla `cerrada` y de un canal real (`canales.REALES`; en el simulador, 409 `conversacion_cerrada` como antes); el chat sin ninguna `abierta` (si la tiene → 409 con su id: se escribe ahí); `clave_idempotencia` obligatoria; texto libre solo dentro de la ventana de 24 h **del número** —último mensaje `rol = 'user'` de cualquiera de sus conversaciones—, fuera de ella solo plantilla; una plantilla no sale a un número dado de baja; sin adjuntos ni «responder y devolver» en este paso | **Una transacción**, serializada por chat con un lock consultivo: conversación nueva con el mismo `(canal, usuario_externo)`, `control = humano`, `control_motivo = intervencion`, asignada a quien escribe, sin caso, ticket, identidad ni `datos_sesion` de la anterior; evento `intervencion` {version, tomada, `continua_de`}; mensaje `origen = humano` + autor + clave (como T5). El ancla no se toca: ni estado, ni `cerrada_por_tipo`, ni desenlace, ni `actualizado_en`, ni evento. **Después:** entrega según §9.5. | El mensaje o la plantilla, si la entrega se acepta. |
+| **T22** | E1/E2 → E1 | Escalar a un área (operador) [DECISIÓN 30/10/2026, C21] | Abierta, `control_efectivo = 'humano'`, gobernada; asignada a mí **o sin asignar** (si es de otro → 409 `no_es_suya`: pasarla de otro es T4); `area` existe en `TenantConfig.areas` de la empresa; `motivo` y `nota` obligatorios (motivo ≤ 200, nota ≤ 1000) | **Una transacción:** asignación = ninguna, `area_destino` = área, `area_destino_nota` = nota, `area_destino_en` = now(), `tomada_por` legado = null; evento `escalada_a_area` {version, area, motivo, anterior_nombre}; la nota NO viaja en el evento (vive en la columna y en una nota interna del hilo). El control no cambia: sigue en manos de personas. `area_destino` se conserva al tomarla (T2) —es el contexto de quien la recibe— y se borra al cerrar (T15–T18) o con un T22 nuevo, que lo pisa. | Nada. |
 
 **Sobre T18** [VERIFICADO]: hoy el cierre por inactividad no mira la escalada (`db.py:2338-2345`, `api.py:739-750`). Con control humano, el mensaje del cliente sigue en el mismo hilo.
 

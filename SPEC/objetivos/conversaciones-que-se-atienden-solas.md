@@ -71,6 +71,37 @@ después empieza de cero si no quedó una nota.
   y «Pasar todas a…» que es T4 una por una con motivo. La lista del equipo se
   pide al abrir (`/api/bandeja/operadores`, solo ADMIN), no cada 8 s.
 
+## Fase B — lo construido (30/10/2026)
+
+Contrato del relevo **v3.3** escrito ANTES del código (C21, C22, T22, §3.1,
+§3.3, §4.10).
+
+- **1 · Escalar a un área (T22).** `transiciones.escalar_a_area`: la deja sin
+  dueño (E1) marcada para un área de `TenantConfig.areas`, con motivo y nota
+  obligatorios; la nota va además como nota interna del hilo, y no viaja en
+  el evento. La de otra persona da 409 «eso es Reasignar». Cualquier
+  operador; se conserva el área al tomarla, se borra al cerrar o al
+  devolver a la IA. En pantalla: «Escalar a un área» en el bloque del relevo
+  (FUERA del bloque de Tomar/Soltar: el caso típico es una conversación ya
+  atendida), «→ Soporte Técnico» en la fila, y «Mi área» en la barra para
+  quien pertenece a un área.
+- **3 · El recordatorio de la espera (C22).** `pendiente_interno_hasta`:
+  «Avisar en 1 h / 4 h / mañana 8:00» al marcar la espera. Vencida, la fila
+  sube a la banda 1 con «La espera venció». Una hora pasada no se acepta.
+- **Migración** `supabase/202610301500_escalar_a_area_y_vencimiento_de_espera.sql`:
+  cuatro columnas nullable y el tipo `escalada_a_area` en el CHECK.
+
+**ORDEN DE DEPLOY, al revés que la Fase A:** el código nuevo LEE columnas que
+solo existen después de la migración. Primero `cli/migrar_asistente.py
+--aplicar` con el dueño de la base (aplica también las dos que ya estaban
+pendientes, 202610281600 y 202610290900, que son de otra sesión), y recién
+después el push.
+
+Guardas: `tests/test_relevo_pendiente_interno_base.py` (14, Postgres real con
+la base construida por el ledger), `tests/test_escalar_area_api.py`,
+`tests/test_cola_bandeja.py` (bandas nuevas), `escalar_area_render.test.js`,
+`escalar-area/escalar.test.js`, `espera.test.js`, `humano/espera.test.js`.
+
 ## Fuera de alcance, y por qué
 
 - Que la IA cierre o escale sola un caso ya tomado por una persona: es

@@ -138,6 +138,10 @@ ESQUEMAS: dict[str, frozenset[str]] = {
     # evento: es texto libre de quien atiende y puede traer datos del
     # cliente; vive solo en 'pendiente_interno_nota'.
     "pendiente_interno_abierto": frozenset({"version"}),
+    # T22 (contrato v3.3, C21). 'motivo' es el texto corto del operador, como
+    # en 'reasignada'; la NOTA larga no viaja: vive en 'area_destino_nota' y
+    # en la nota interna del hilo.
+    "escalada_a_area": frozenset({"version", "area", "motivo", "anterior_nombre"}),
     "pendiente_interno_cerrado": frozenset({"version"}),
 }
 DATOS_VERSION = 1
@@ -591,7 +595,7 @@ MAX_NOTA_PENDIENTE = 200
 
 def marcar_pendiente_interno(tenant: str, conversation_id: str, *, nota: str | None,
                              operador_id: str, operador_nombre: str,
-                             clave: str | None = None) -> Resultado:
+                             hasta=None, clave: str | None = None) -> Resultado:
     """
     La opcion de T5 (contrato §6): al responder, quien atiende marca que el
     caso QUEDA EN ESPERA de algo interno o del cliente ("esperando que
@@ -603,6 +607,10 @@ def marcar_pendiente_interno(tenant: str, conversation_id: str, *, nota: str | N
     Solo con la conversacion abierta y en manos de personas: con la IA
     atendiendo no hay a quien dejarle un pendiente. Legado (relevo_version 0)
     no se toca.
+
+    'hasta' (C22, 30/10/2026): hasta cuando se espera, o None. Vencido, la
+    proyeccion sube la fila a la banda 1. Una hora pasada no se acepta: seria
+    un pendiente que nace vencido.
     """
     nombre, usuario = db.validar_autor(operador_nombre, operador_id)
     texto = " ".join((nota or "").split())[:MAX_NOTA_PENDIENTE] or None
@@ -619,15 +627,69 @@ def marcar_pendiente_interno(tenant: str, conversation_id: str, *, nota: str | N
                 return Resultado(False, True, f["relevo_version"], None, "sin_pendiente")
             version = _subir_version(
                 cur, org, conversation_id,
-                "pendiente_interno_desde = null, pendiente_interno_nota = null", ())
+                "pendiente_interno_desde = null, pendiente_interno_nota = null, "
+                "pendiente_interno_hasta = null", ())
         else:
             version = _subir_version(
                 cur, org, conversation_id,
-                "pendiente_interno_desde = now(), pendiente_interno_nota = %s", (texto,))
+                "pendiente_interno_desde = now(), pendiente_interno_nota = %s, "
+                "pendiente_interno_hasta = case when %s::timestamptz > now() "
+                "then %s::timestamptz end", (texto, hasta, hasta))
         ev = _evento(cur, org, conversation_id, tipo, "operador", usuario, nombre,
                      {"version": version}, clave)
         return Resultado(True, True, version, ev)
     return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo=tipo, actor_id=usuario)
+
+
+MAX_MOTIVO_AREA = 200
+MAX_NOTA_AREA = 1000
+
+
+def escalar_a_area(tenant: str, conversation_id: str, *, area: str, motivo: str, nota: str,
+                   areas_validas, operador_id: str, operador_nombre: str,
+                   clave: str | None = None) -> Resultado:
+    """
+    T22 (contrato v3.3, C21, 30/10/2026): quien la tiene -- o nadie -- la pasa a
+    un AREA con lo que valido y por que no la resolvio. Queda sin dueño (E1) y
+    marcada para esa area; el control sigue en manos de personas.
+
+    Pasarla a una PERSONA concreta no es esto: es reasignar() (T4), de ADMIN.
+    Por eso una asignada a OTRO da 'no_es_suya'. 'areas_validas' son los
+    nombres de TenantConfig.areas: el area la elige el operador, pero la lista
+    es de la empresa.
+    """
+    nombre, usuario = db.validar_autor(operador_nombre, operador_id)
+    area = (area or "").strip()
+    motivo = " ".join((motivo or "").split())
+    nota = (nota or "").strip()
+    if area not in set(areas_validas or ()):
+        raise ValueError(f"'{area}' no es un area de esta empresa")
+    if not motivo or not nota:
+        raise ValueError("escalar a un area exige motivo y nota")
+    if len(motivo) > MAX_MOTIVO_AREA or len(nota) > MAX_NOTA_AREA:
+        raise ValueError(f"motivo hasta {MAX_MOTIVO_AREA} caracteres y nota hasta {MAX_NOTA_AREA}")
+
+    def cuerpo(cur, org, f):
+        if f["relevo_version"] == 0:
+            return Resultado(False, False, 0, None, "legado")
+        impide = _es_de_personas(f)
+        if impide:
+            return impide
+        if f["asignada_a_usuario_id"] is not None and str(f["asignada_a_usuario_id"]) != usuario:
+            return Resultado(False, True, f["relevo_version"], None, "no_es_suya",
+                             datos={"asignada_a_nombre": f["asignada_a_nombre"]})
+        version = _subir_version(
+            cur, org, conversation_id,
+            "asignada_a_usuario_id = null, asignada_a_nombre = null, asignada_en = null, "
+            "tomada_por = null, tomada_en = null, "
+            "area_destino = %s, area_destino_nota = %s, area_destino_en = now()",
+            (area, nota))
+        datos = {"version": version, "area": area, "motivo": motivo,
+                 "anterior_nombre": f["asignada_a_nombre"]}
+        ev = _evento(cur, org, conversation_id, "escalada_a_area", "operador", usuario, nombre,
+                     datos, clave)
+        return Resultado(True, True, version, ev, datos=datos)
+    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="escalada_a_area", actor_id=usuario)
 
 
 def reasignar(tenant: str, conversation_id: str, *, admin_id: str, admin_nombre: str,
@@ -1031,8 +1093,11 @@ def cerrar(tenant: str, conversation_id: str, *, por: str,
         efectivo = ("ia_cliente" if por == "cliente" and not f["atendida_manual"]
                     else por)
 
+        # El area a la que se escalo se borra al cerrar (contrato T22): en
+        # una cerrada ya no espera a nadie.
         sets = ["estado = 'cerrada'", "actualizado_en = now()",
-                "cerrada_por_tipo = %s"]
+                "cerrada_por_tipo = %s", "area_destino = null",
+                "area_destino_nota = null", "area_destino_en = null"]
         params: list = [efectivo]
         if por == "operador":
             # Hecho historico: alguien actuo. No decide la cola (§3.1).
@@ -1255,7 +1320,8 @@ def devolver_a_ia(tenant: str, conversation_id: str, *, operador_id: str, operad
             cur, org, conversation_id,
             legado_sql + ", control = 'ia', control_motivo = null, asignada_a_usuario_id = null, "
             "asignada_a_nombre = null, asignada_en = null, pendiente_interno_desde = null, "
-            "pendiente_interno_nota = null, aviso_relevo = null", ())
+            "pendiente_interno_nota = null, pendiente_interno_hasta = null, aviso_relevo = null, "
+            "area_destino = null, area_destino_nota = null, area_destino_en = null", ())
         datos = {"version": version}
         ev = _evento(cur, org, conversation_id, "devuelta_a_ia", "operador", usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)

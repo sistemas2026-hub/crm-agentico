@@ -37,8 +37,32 @@
     motivoReasignar = $bindable(''),
     guardandoReasignar = false, errorReasignar = '', onReasignar,
     // Cómo se lee cada motivo en esta empresa (lib/conversaciones/rotulos.js).
-    rotulos = {}
+    rotulos = {},
+    // ESCALAR A UN ÁREA (T22): las áreas de la empresa {clave: etiqueta} y la
+    // acción, que vive en la página.
+    areas = {},
+    escalandoArea = false, errorEscalarArea = '', onEscalarArea = undefined
   } = $props();
+
+  /* Lo puede hacer cualquier operador con la conversación SUYA o SIN dueño;
+     la de otra persona se pasa con Reasignar, que es de administrador. */
+  const puedeEscalar = $derived(
+    escalada && gobernada && conversacion.estado !== 'cerrada' && (esMia || !asignadaA) &&
+      Object.keys(areas).length > 0
+  );
+  let escalando = $state(false);
+  let areaElegida = $state('');
+  let motivoArea = $state('');
+  let notaArea = $state('');
+  async function enviarEscalada() {
+    const ok = await onEscalarArea?.({ area: areaElegida, motivo: motivoArea, nota: notaArea });
+    if (ok) {
+      escalando = false;
+      areaElegida = '';
+      motivoArea = '';
+      notaArea = '';
+    }
+  }
 
   const motivoLabel = (/** @type {string} */ m) => rotuloDe(m, rotulos);
 
@@ -101,7 +125,15 @@
          Se quita respondiendo sin marcar «Queda en espera». -->
     {#if conversacion.pendiente_interno_desde && conversacion.estado !== 'cerrada'}
       <span class="aviso-espera" title="Se quita al responder sin marcar «Queda en espera»">
-        En espera: {conversacion.pendiente_interno_nota || 'sin detalle'}
+        En espera: {conversacion.pendiente_interno_nota || 'sin detalle'}{#if conversacion.pendiente_interno_hasta}
+          · hasta {new Date(conversacion.pendiente_interno_hasta).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}{/if}
+      </span>
+    {/if}
+    <!-- ESCALADA A UN ÁREA (T22): a cuál, y la nota de lo que se validó para
+         quien la recibe. -->
+    {#if conversacion.area_destino && conversacion.estado !== 'cerrada'}
+      <span class="aviso-area" title={conversacion.area_destino_nota || ''}>
+        Escalada a {areas[conversacion.area_destino] || conversacion.area_destino}
       </span>
     {/if}
     <!-- Tomar el caso, y soltarlo. Son el mismo boton porque son el mismo
@@ -160,6 +192,21 @@
            al lado; sin él, este hueco hace lo mismo. -->
       <span class="aviso-empuje" aria-hidden="true"></span>
     {/if}
+    <!-- ESCALAR A UN ÁREA va FUERA del bloque de Tomar/Soltar a propósito:
+         el caso típico es el de alguien que ya respondió, validó y no pudo
+         resolver -- o sea una conversación «atendida», que ese bloque no
+         dibuja. -->
+    {#if puedeEscalar}
+      <button
+        type="button"
+        class="v2-btn v2-btn-sm v2-btn-quiet"
+        title="Pasarla a otra área con lo que validaste: queda sin dueño y marcada para esa área"
+        onclick={() => (escalando = !escalando)}
+        aria-expanded={escalando}
+      >
+        Escalar a un área
+      </button>
+    {/if}
     <!-- Cerrar el caso. Va junto a "Atender" porque es la otra mitad del
          mismo momento -- se toma un caso y despues se termina-- pero en
          tono secundario: "Atender" es lo que se hace al entrar, esto es lo
@@ -205,6 +252,40 @@
     {#if errorAtender}<span class="aviso-conflicto">{errorAtender}</span>{/if}
     {#if errorResolver}<span class="aviso-mal">{errorResolver}</span>{/if}
   </p>
+  {#if escalando && puedeEscalar}
+    <form class="reasignar" onsubmit={(e) => { e.preventDefault(); enviarEscalada(); }}>
+      <label>
+        <span>A qué área</span>
+        <select class="v2-input" bind:value={areaElegida} required>
+          <option value="">Elegí un área…</option>
+          {#each Object.entries(areas) as [clave, etiqueta] (clave)}
+            <option value={clave}>{etiqueta}</option>
+          {/each}
+        </select>
+      </label>
+      <label>
+        <span>Por qué no la resolviste</span>
+        <input class="v2-input" bind:value={motivoArea} maxlength="200" required
+          placeholder="Ej: la ONT no levanta después de reiniciar" />
+      </label>
+      <label>
+        <span>Qué validaste y qué falta</span>
+        <textarea class="v2-input" bind:value={notaArea} maxlength="1000" rows="3" required
+          placeholder="Lo que quien la reciba necesita para no empezar de cero"></textarea>
+        <span class="ayuda-campo">Queda como nota interna en la conversación</span>
+      </label>
+      <div class="reasignar-acciones">
+        <button type="submit" class="v2-btn v2-btn-sm v2-btn-ink"
+          disabled={escalandoArea || !areaElegida || !motivoArea.trim() || !notaArea.trim()}>
+          {escalandoArea ? 'Escalando…' : 'Escalar'}
+        </button>
+        <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet" onclick={() => (escalando = false)}>
+          Cancelar
+        </button>
+        {#if errorEscalarArea}<span class="aviso-conflicto">{errorEscalarArea}</span>{/if}
+      </div>
+    </form>
+  {/if}
   {#if reasignando && esAdmin && gobernada}
     <form class="reasignar" onsubmit={(e) => { e.preventDefault(); onReasignar?.(); }}>
       <label>
@@ -420,6 +501,16 @@
      el, en vez de que el motivo desaparezca para que quepan. */
   .aviso-motivo {
     color: var(--bandeja-texto-2);
+  }
+
+  .aviso-area {
+    padding: 1px 7px;
+    border: 1px solid var(--bandeja-humano-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-humano-fondo);
+    color: var(--bandeja-humano);
+    font-size: 11.5px;
+    font-weight: 600;
   }
 
   .aviso-espera {

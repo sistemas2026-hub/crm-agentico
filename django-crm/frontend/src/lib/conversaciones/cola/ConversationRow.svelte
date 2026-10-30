@@ -65,6 +65,9 @@
     /** Segundos que le quedan a la ventana de 24 h de esta fila, o null. Lo
         calcula el layout con la hora en que leyó la cola (ventana.js). */
     ventanaDe = () => null,
+    /** Las áreas de la empresa {clave: etiqueta}, para decir a cuál se
+        escaló (T22). */
+    areas = {},
     /** El plazo de toma del tenant, en minutos. 0 = la empresa no definió
         objetivo y no se dibuja cuenta regresiva. */
     slaToma = 0
@@ -99,6 +102,8 @@
    */
   const BANDAS = {
     cliente_espera: { texto: 'Cliente respondió', clase: 'b-cliente' },
+    // C22: la espera que se fijó ya pasó. Misma banda, mismo tono.
+    espera_vencida: { texto: 'La espera venció', clase: 'b-cliente' },
     sin_asignar: { texto: 'Sin asignar', clase: 'b-sin-asignar' },
     revisar_evaluacion: { texto: 'Falta revisar', clase: 'b-revisar' },
     // No dice "el cliente abandono": no se sabe por que no volvio. Dice lo que
@@ -194,6 +199,11 @@
       <!-- LA VENTANA DE 24 H, solo cuando queda poco y le toca a una persona
            (29/10/2026). Pasada, ya no se le puede escribir texto libre: hay
            que usar una plantilla, y eso tiene que verse antes de abrirla. -->
+      {#if c.area_destino}
+        <span class="plazo area-destino" title="Escalada a un área: la puede tomar alguien de ahí">
+          → {areas[c.area_destino] || c.area_destino}
+        </span>
+      {/if}
       {#if ventanaUrge(c, ventanaDe(c))}
         <span
           class="plazo plazo-cerca ventana"
@@ -521,6 +531,12 @@
     font-size: 10.5px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+  }
+
+  .area-destino {
+    color: var(--bandeja-humano);
+    background: var(--bandeja-humano-fondo);
+    border-color: var(--bandeja-humano-borde);
   }
 
   .plazo-cerca {

@@ -35,6 +35,7 @@
     tramoEspera,
     motivoLabel,
     ventanaDe = () => null,
+    areas = {},
     /** El plazo de toma del tenant, en minutos. Se propaga tal cual: la
         lista no lo interpreta. */
     slaToma = 0
@@ -50,7 +51,7 @@
     <QueueEmptyState variante="sin-coincidencias" {busqueda} />
   {:else}
     {#each visibles as c (c.id)}
-      <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} {ventanaDe} {slaToma} />
+      <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} {ventanaDe} {areas} {slaToma} />
     {/each}
   {/if}
 </div>

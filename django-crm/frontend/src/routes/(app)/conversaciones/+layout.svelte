@@ -142,6 +142,17 @@
   const esAdmin = $derived(data.yo?.rol === 'ADMIN');
   let verCarga = $state(false);
   let filtroOperador = $state(/** @type {string|null} */ (null));
+  /* «Mi área» (T22, 30/10/2026): lo que se escaló al área de quien mira.
+     El área se pide UNA vez al montar (/api/bandeja/mi-area) y no en el load,
+     que se repite cada 8 s: resolverla exige la lista del equipo. */
+  let soloMiArea = $state(false);
+  let miArea = $state(/** @type {string|null} */ (null));
+  $effect(() => {
+    fetch('/api/bandeja/mi-area')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => (miArea = d?.area || null))
+      .catch(() => (miArea = null));
+  });
   /** Ver ORDENES y ORDEN_POR_PESTANA. Arranca con el de 'Por atender', que es
       la pestaña con la que abre la bandeja. */
   let orden = $state('recomendado');
@@ -160,6 +171,15 @@
   });
 
   let pendientes = $derived(base.filter(pendiente).length);
+
+  /* Cuántas abiertas se escalaron al área de quien mira (T22). */
+  const cuantasMiArea = $derived(
+    miArea
+      ? base.filter((/** @type {any} */ c) =>
+          [c, ...(c.abiertas || [])].some(
+            (/** @type {any} */ x) => x.area_destino === miArea && x.estado !== 'cerrada')).length
+      : 0
+  );
 
   /* INDICADORES DE LA BARRA DE CONSOLA.
      La referencia pone arriba el estado del sistema: SLA de entrada, espera
@@ -360,6 +380,11 @@
     else if (filtro === 'resueltas') lista = lista.filter(resuelta);
 
     if (soloEscaladas) lista = lista.filter((/** @type {any} */ c) => c.escalada_a_humano);
+    // «Mi área» (T22): lo escalado al área de quien mira.
+    if (soloMiArea && miArea) {
+      lista = lista.filter((/** @type {any} */ c) =>
+        [c, ...(c.abiertas || [])].some((/** @type {any} */ x) => x.area_destino === miArea));
+    }
     // La cola de UNA persona, desde el panel de carga (29/10/2026). Mira
     // también las otras abiertas del chat: la suya puede no ser la fila.
     if (filtroOperador) {
@@ -502,6 +527,13 @@
       <span class="consola-punto"></span>{canal.etiqueta}
     </span>
 
+    {#if miArea}
+      <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet consola-equipo"
+        aria-pressed={soloMiArea} onclick={() => (soloMiArea = !soloMiArea)}
+        title="Lo que se escaló a tu área">
+        Mi área <b class="v2-num">{cuantasMiArea}</b>
+      </button>
+    {/if}
     {#if esAdmin}
       <!-- La carga del equipo (29/10/2026). Solo ADMIN: reasignar es suyo. -->
       <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet consola-equipo"
@@ -542,6 +574,7 @@
     <ConversationList
       {visibles} {conversaciones} error={data.error} {busqueda}
       {abierta} {ahora} {tramoEspera} {motivoLabel} {ventanaDe} {slaToma}
+      areas={data.areas ?? {}}
     />
   </aside>
 

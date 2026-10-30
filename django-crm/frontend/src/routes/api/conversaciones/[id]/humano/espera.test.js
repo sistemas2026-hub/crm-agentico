@@ -44,3 +44,15 @@ describe('POST /api/conversaciones/[id]/humano', () => {
     expect(b.pendiente_interno).toHaveLength(200);
   });
 });
+
+describe('la hora de la espera (C22)', () => {
+  it('una fecha válida viaja en ISO', async () => {
+    const b = await enviado({ mensaje: 'hola', pendiente_interno: 'x',
+      pendiente_interno_hasta: '2026-10-31T13:00:00.000Z' });
+    expect(b.pendiente_interno_hasta).toBe('2026-10-31T13:00:00.000Z');
+  });
+  it('lo que no es una fecha es «sin hora»', async () => {
+    const b = await enviado({ mensaje: 'hola', pendiente_interno: 'x', pendiente_interno_hasta: 'mañana' });
+    expect(b.pendiente_interno_hasta).toBeNull();
+  });
+});

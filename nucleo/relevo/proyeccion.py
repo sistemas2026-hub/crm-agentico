@@ -59,6 +59,9 @@ HUMANO, IA, INTERNO, NADIE, REVISION = "humano", "ia", "interno", "nadie", "revi
 
 # (banda, nombre corto). La banda es para ordenar; el nombre, para explicar.
 CLIENTE_ESPERA = (1, "cliente_espera")
+# Comparte la banda 1 (contrato v3.3, C22): la espera que fijo quien la
+# atiende ya paso, y la conversacion vuelve sola al primer lugar.
+ESPERA_VENCIDA = (1, "espera_vencida")
 SIN_ASIGNAR = (2, "sin_asignar")
 REVISAR_EVALUACION = (3, "revisar_evaluacion")
 # Comparte el numero 3 --"una persona tiene que revisar algo"-- con nombre
@@ -179,7 +182,20 @@ def proyectar(fila, *, rol_de_entrada: str | None = None,
                           f"Cliente respondió — espera a {asignada}" if asignada
                           else "Cliente respondió — sin asignar",
                           fila.get("ultimo_mensaje_cliente"))
+        # C22: el «en espera» tenia hora y ya paso. Va con lo de banda 1: hay
+        # algo que hacer ahora, aunque el cliente no haya escrito.
+        hasta = _hora(fila.get("pendiente_interno_hasta"))
+        if fila.get("pendiente_interno_desde") and hasta and hasta <= (ahora or datetime.now(timezone.utc)):
+            return salida(HUMANO, ESPERA_VENCIDA,
+                          f"La espera venció — vuelve a {asignada}" if asignada
+                          else "La espera venció — sin asignar",
+                          hasta)
         if not asignada:
+            # T22 (C21): escalada a un area. El nombre del area lo pone la
+            # pantalla con la etiqueta de la empresa; aca va la clave.
+            if fila.get("area_destino"):
+                return salida(HUMANO, SIN_ASIGNAR, "Escalada a un área, sin asignar",
+                              fila.get("area_destino_en") or fila.get("escalada_en"))
             motivo = ("Intervenida, sin asignar" if fila.get("control_motivo") == "intervencion"
                       else "Escalada, sin asignar")
             return salida(HUMANO, SIN_ASIGNAR, motivo,
@@ -188,7 +204,7 @@ def proyectar(fila, *, rol_de_entrada: str | None = None,
             return salida(HUMANO, REVISAR_EVALUACION, "Falta revisar la evaluación",
                           fila.get("escalada_en") or fila.get("actualizado_en"))
         if fila.get("pendiente_interno_desde"):
-            return salida(INTERNO, INTERNO_PENDIENTE, "Pendiente interno",
+            return salida(INTERNO, INTERNO_PENDIENTE, "En espera",
                           fila.get("pendiente_interno_desde"))
         return salida(HUMANO, EN_CURSO, f"En atención: {asignada}",
                       fila.get("asignada_en") or fila.get("escalada_en"))
